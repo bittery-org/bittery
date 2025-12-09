@@ -10,9 +10,9 @@ import {
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import { toast } from "sonner";
+import { getAuthToken } from "./lib/crypto";
 import { routeTree } from "./routeTree.gen";
 import { TRPCProvider } from "./utils/trpc";
-import { getAuthToken } from "./lib/crypto";
 
 export const queryClient = new QueryClient({
 	queryCache: new QueryCache({
@@ -40,9 +40,11 @@ const trpcClient = createTRPCClient<AppRouter>({
 					credentials: "include",
 					headers: {
 						// @ts-expect-error need to fix types upstream
-						"Authorization": getAuthToken() ? `Bearer ${getAuthToken()}` : undefined,
+						Authorization: getAuthToken()
+							? `Bearer ${getAuthToken()}`
+							: undefined,
 						...options?.headers,
-					}
+					},
 				});
 			},
 		}),

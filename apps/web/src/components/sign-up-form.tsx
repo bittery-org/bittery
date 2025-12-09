@@ -111,11 +111,7 @@ export default function SignUpForm({
 
 				// 8. Store secret key and encrypted session for quick unlock
 				storeSecretKey(secretKey);
-				await storeSessionData(
-					masterUnlockKey,
-					value.email,
-					result.userId,
-				);
+				await storeSessionData(masterUnlockKey, value.email, result.userId);
 
 				const timeUntil = getTimeUntilExpiry();
 				const daysUntil = timeUntil
@@ -165,42 +161,52 @@ Generated: ${new Date().toLocaleString()}
 	};
 
 	return (
-		<div className="mx-auto mt-16 w-full max-w-2xl space-y-8 p-6">
-			<div className="text-center">
-				<h1 className="font-semibold text-3xl tracking-tight">Create Account</h1>
-				<p className="mt-2 text-muted-foreground text-sm">Get started with secure password management</p>
+		<div className="w-full space-y-4">
+			<div className="flex flex-col space-y-2 text-center">
+				<h1 className="font-semibold text-xl tracking-tight">
+					Create an account
+				</h1>
+				<p className="text-muted-foreground text-sm">
+					Get started with secure password management
+				</p>
 			</div>
 
 			{!hasAcknowledged ? (
-				<Card className="space-y-6 p-6">
+				<Card className="space-y-4 border-0 bg-transparent p-6 shadow-none sm:border sm:bg-card sm:shadow-sm">
 					<div className="space-y-2">
-						<h2 className="font-semibold text-xl tracking-tight">Your Secret Key</h2>
+						<h2 className="font-medium text-base">Save your Secret Key</h2>
 						<p className="text-muted-foreground text-sm leading-relaxed">
-							This Secret Key is required to access your account. Store it
-							safely - you cannot recover your account without it.
+							This key is required to access your account. We cannot recover it
+							for you.
 						</p>
 					</div>
 
-					<div className="space-y-3">
-						<div className="flex items-center gap-2">
-							<div className="flex-1 rounded-lg border-2 bg-muted/50 p-4 font-mono text-base tracking-wide">
+					<div className="space-y-4">
+						<div className="relative rounded-xl border bg-muted/30 p-4">
+							<div className="absolute top-3 right-3">
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className="h-8 w-8 text-muted-foreground hover:text-foreground"
+									onClick={() => setShowSecretKey(!showSecretKey)}
+								>
+									{showSecretKey ? <EyeOff size={16} /> : <Eye size={16} />}
+								</Button>
+							</div>
+							<div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
+								Your Secret Key
+							</div>
+							<div className="break-all pr-8 font-mono text-sm tracking-wide">
 								{showSecretKey ? secretKey : "••••••-••••••-•••••-•••••-•••••"}
 							</div>
-							<Button
-								type="button"
-								variant="outline"
-								size="icon"
-								onClick={() => setShowSecretKey(!showSecretKey)}
-							>
-								{showSecretKey ? <EyeOff size={18} /> : <Eye size={18} />}
-							</Button>
 						</div>
 
-						<div className="flex gap-2">
+						<div className="grid grid-cols-2 gap-3">
 							<Button
 								type="button"
 								variant="outline"
-								className="flex-1"
+								className="w-full"
 								onClick={copySecretKey}
 							>
 								<Copy size={16} className="mr-2" />
@@ -209,7 +215,7 @@ Generated: ${new Date().toLocaleString()}
 							<Button
 								type="button"
 								variant="outline"
-								className="flex-1"
+								className="w-full"
 								onClick={downloadEmergencyKit}
 							>
 								<Download size={16} className="mr-2" />
@@ -218,34 +224,42 @@ Generated: ${new Date().toLocaleString()}
 						</div>
 					</div>
 
-					<div className="space-y-3 rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-900 dark:bg-yellow-950/30">
-						<p className="font-semibold text-sm text-yellow-900 dark:text-yellow-100">⚠️ Important Security Notice</p>
-						<ul className="list-inside list-disc space-y-1.5 text-sm text-yellow-700 dark:text-yellow-300">
-							<li>Save your Secret Key before continuing</li>
-							<li>Store it in a safe place (password manager, safe, etc.)</li>
-							<li>Never share it with anyone</li>
-							<li>There is no account recovery without it</li>
-						</ul>
+					<div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
+						<div className="flex gap-3">
+							<div className="text-amber-600 dark:text-amber-400">⚠️</div>
+							<div className="space-y-1">
+								<p className="font-medium text-amber-900 text-sm dark:text-amber-100">
+									There is no account recovery
+								</p>
+								<p className="text-amber-700 text-xs leading-relaxed dark:text-amber-300">
+									If you lose this Secret Key, you will lose access to your
+									vault forever. Please save it in a safe place.
+								</p>
+							</div>
+						</div>
 					</div>
 
-					<Button
-						type="button"
-						className="w-full"
-						onClick={() => setHasAcknowledged(true)}
-					>
-						I've Saved My Secret Key, Continue
-					</Button>
+					<div className="space-y-3">
+						<Button
+							type="button"
+							className="w-full"
+							onClick={() => setHasAcknowledged(true)}
+						>
+							I have saved my Secret Key
+						</Button>
 
-					<button
-						type="button"
-						onClick={onSwitchToSignIn}
-						className="w-full text-muted-foreground text-sm hover:text-foreground"
-					>
-						Already have an account? Sign in
-					</button>
+						<Button
+							type="button"
+							variant="ghost"
+							onClick={onSwitchToSignIn}
+							className="w-full"
+						>
+							Already have an account? Sign in
+						</Button>
+					</div>
 				</Card>
 			) : (
-				<Card className="p-6">
+				<Card className="border-0 bg-transparent p-8 shadow-none sm:border sm:bg-card sm:shadow-sm">
 					<form
 						onSubmit={(e) => {
 							e.preventDefault();
@@ -258,14 +272,16 @@ Generated: ${new Date().toLocaleString()}
 							<form.Field name="name">
 								{(field) => (
 									<div className="space-y-2">
-										<Label htmlFor={field.name}>Name</Label>
+										<Label htmlFor={field.name}>Full Name</Label>
 										<Input
 											id={field.name}
 											name={field.name}
+											placeholder="John Doe"
 											value={field.state.value}
 											onBlur={field.handleBlur}
 											onChange={(e) => field.handleChange(e.target.value)}
 											required
+											className="h-10"
 										/>
 									</div>
 								)}
@@ -281,10 +297,12 @@ Generated: ${new Date().toLocaleString()}
 											id={field.name}
 											name={field.name}
 											type="email"
+											placeholder="name@example.com"
 											value={field.state.value}
 											onBlur={field.handleBlur}
 											onChange={(e) => field.handleChange(e.target.value)}
 											required
+											className="h-10"
 										/>
 									</div>
 								)}
@@ -295,8 +313,8 @@ Generated: ${new Date().toLocaleString()}
 							<form.Field name="password">
 								{(field) => (
 									<div className="space-y-2">
-										<Label htmlFor={field.name}>Account Password</Label>
-										<div className="flex gap-2">
+										<Label htmlFor={field.name}>Master Password</Label>
+										<div className="relative">
 											<Input
 												id={field.name}
 												name={field.name}
@@ -305,47 +323,50 @@ Generated: ${new Date().toLocaleString()}
 												onBlur={field.handleBlur}
 												onChange={(e) => field.handleChange(e.target.value)}
 												required
-												className="flex-1"
+												className="h-10 pr-10"
 											/>
 											<Button
 												type="button"
-												variant="outline"
+												variant="ghost"
 												size="icon"
+												className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
 												onClick={() => setShowPassword(!showPassword)}
 											>
 												{showPassword ? (
-													<EyeOff size={18} />
+													<EyeOff size={16} />
 												) : (
-													<Eye size={18} />
+													<Eye size={16} />
 												)}
 											</Button>
 										</div>
-										<p className="text-muted-foreground text-xs">
-											Minimum 8 characters. This encrypts your vault along with
-											your Secret Key.
+										<p className="text-[0.8rem] text-muted-foreground">
+											Must be at least 8 characters long.
 										</p>
 									</div>
 								)}
 							</form.Field>
 						</div>
 
-						<Button
-							type="submit"
-							className="w-full"
-							disabled={signupMutation.isPending}
-						>
-							{signupMutation.isPending
-								? "Creating Account..."
-								: "Create Account"}
-						</Button>
+						<div className="pt-2">
+							<Button
+								type="submit"
+								className="h-10 w-full"
+								disabled={signupMutation.isPending}
+							>
+								{signupMutation.isPending
+									? "Creating Account..."
+									: "Create Account"}
+							</Button>
+						</div>
 
-						<button
+						<Button
 							type="button"
+							variant="link"
 							onClick={() => setHasAcknowledged(false)}
-							className="w-full text-muted-foreground text-sm hover:text-foreground"
+							className="w-full text-muted-foreground"
 						>
 							← Back to Secret Key
-						</button>
+						</Button>
 					</form>
 				</Card>
 			)}

@@ -2,6 +2,7 @@
  * Authentication tRPC Router
  * Handles signup, login with SRP, session management
  */
+/** biome-ignore-all lint/style/noNonNullAssertion: we need that here */
 
 import {
 	createUser,
@@ -9,13 +10,14 @@ import {
 	deleteSession,
 	finishLogin,
 	getUserByEmail,
+	getUserById,
 	startLogin,
 } from "@bittery/auth";
 import { db, vault, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { publicProcedure, router } from "../index";
+import { protectedProcedure, publicProcedure, router } from "../index";
 
 export const authRouter = router({
 	/**
@@ -224,6 +226,30 @@ export const authRouter = router({
 				secretKeyHint: user?.secretKeyHint || null,
 			};
 		}),
+
+	/**
+	 * Get current user data
+	 */
+	me: protectedProcedure.query(async ({ ctx }) => {
+		const user = await getUserById(ctx.session.userId);
+
+		if (!user) {
+			throw new TRPCError({
+				code: "NOT_FOUND",
+				message: "User not found",
+			});
+		}
+
+		return {
+			id: user.id,
+			email: user.email,
+			name: user.name,
+			secretKeyHint: user.secretKeyHint,
+			publicKey: user.publicKey,
+			encryptedPrivateKey: user.encryptedPrivateKey,
+			createdAt: user.createdAt,
+		};
+	}),
 
 	/**
 	 * Logout from current session

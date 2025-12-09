@@ -9,10 +9,10 @@ import {
 	canQuickUnlock as canQuickUnlockServer,
 	clearAllStoredData as clearAllStoredDataServer,
 	clearSession as clearSessionServer,
-	decryptStoredMasterUnlockKey as decryptStoredMasterUnlockKeyServer,
-	decryptVaultKey as decryptVaultKeyServer,
 	type DerivedKeys,
 	decrypt as decryptServer,
+	decryptStoredMasterUnlockKey as decryptStoredMasterUnlockKeyServer,
+	decryptVaultKey as decryptVaultKeyServer,
 	deriveKeys as deriveKeysServer,
 	type EncryptedData,
 	encrypt as encryptServer,
@@ -43,8 +43,8 @@ import {
 	storeSessionData as storeSessionDataServer,
 	storeVaultKeys as storeVaultKeysServer,
 	tryRestoreSession as tryRestoreSessionServer,
-	validateSecretKey as validateSecretKeyServer,
 	type VaultKeyData,
+	validateSecretKey as validateSecretKeyServer,
 } from "@bittery/crypto";
 
 // Re-export all functions from @bittery/crypto

@@ -40,6 +40,21 @@ export default function SignInForm({
 	const [isQuickUnlock, setIsQuickUnlock] = useState(false);
 	const [sessionExpired, setSessionExpired] = useState(false);
 
+	const form = useForm({
+		defaultValues: {
+			email: "",
+			password: "",
+			secretKey: "",
+		},
+		onSubmit: async ({ value }) => {
+			if (!validateSecretKey(value.secretKey)) {
+				toast.error("Invalid Secret Key format");
+				return;
+			}
+			await loginMutation.mutateAsync(value);
+		},
+	});
+
 	// Check if quick unlock is available on mount
 	useEffect(() => {
 		if (hasStoredSecretKey()) {
@@ -64,7 +79,7 @@ export default function SignInForm({
 				}
 			}
 		}
-	}, []);
+	}, [form.setFieldValue]);
 
 	const loginMutation = useMutation({
 		mutationFn: async (values: {
@@ -122,7 +137,9 @@ export default function SignInForm({
 			);
 
 			const timeUntil = getTimeUntilExpiry();
-			const daysUntil = timeUntil ? Math.floor(timeUntil / (1000 * 60 * 60 * 24)) : 0;
+			const daysUntil = timeUntil
+				? Math.floor(timeUntil / (1000 * 60 * 60 * 24))
+				: 0;
 
 			toast.success(
 				`Signed in successfully! Quick unlock available for ${daysUntil} days.`,
@@ -131,21 +148,6 @@ export default function SignInForm({
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Failed to sign in");
-		},
-	});
-
-	const form = useForm({
-		defaultValues: {
-			email: "",
-			password: "",
-			secretKey: "",
-		},
-		onSubmit: async ({ value }) => {
-			if (!validateSecretKey(value.secretKey)) {
-				toast.error("Invalid Secret Key format");
-				return;
-			}
-			await loginMutation.mutateAsync(value);
 		},
 	});
 
@@ -170,34 +172,49 @@ export default function SignInForm({
 	};
 
 	return (
-		<div className="mx-auto mt-16 w-full max-w-md space-y-8 p-6">
-			<div className="text-center">
-				<h1 className="font-semibold text-3xl tracking-tight">
-					{isQuickUnlock ? "Quick Unlock" : "Welcome Back"}
+		<div className="w-full space-y-4">
+			<div className="flex flex-col space-y-2 text-center">
+				<h1 className="font-semibold text-xl tracking-tight">
+					{isQuickUnlock ? "Welcome back" : "Sign in to your account"}
 				</h1>
-				<p className="mt-2 text-muted-foreground text-sm">
-					{isQuickUnlock ? "Enter your password to continue" : "Sign in to your account"}
+				<p className="text-muted-foreground text-sm">
+					{isQuickUnlock
+						? "Enter your password to unlock your vault"
+						: "Enter your details below to access your vault"}
 				</p>
 			</div>
 
-			<Card className="p-6">
+			<Card className="border-0 bg-transparent p-8 shadow-none sm:border sm:bg-card sm:shadow-sm">
 				{isQuickUnlock && (
 					<div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950/30">
-						<p className="font-medium text-blue-900 text-sm dark:text-blue-100">🔓 Quick Unlock Available</p>
-						<p className="mt-1 text-blue-700 text-sm dark:text-blue-300">
-							Enter your password to unlock your vault. Secret Key is stored
-							securely on this device.
-						</p>
+						<div className="flex gap-3">
+							<div className="text-xl">🔓</div>
+							<div>
+								<p className="font-medium text-blue-900 text-sm dark:text-blue-100">
+									Quick Unlock Available
+								</p>
+								<p className="mt-1 text-blue-700 text-xs dark:text-blue-300">
+									Your Secret Key is securely stored on this device.
+								</p>
+							</div>
+						</div>
 					</div>
 				)}
 
 				{sessionExpired && (
 					<div className="mb-6 rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-900 dark:bg-yellow-950/30">
-						<p className="font-medium text-sm text-yellow-900 dark:text-yellow-100">⏱️ Session Expired</p>
-						<p className="mt-1 text-sm text-yellow-700 dark:text-yellow-300">
-							Your 14-day quick unlock period has ended. Please enter your
-							Secret Key to sign in.
-						</p>
+						<div className="flex gap-3">
+							<div className="text-xl">⏱️</div>
+							<div>
+								<p className="font-medium text-sm text-yellow-900 dark:text-yellow-100">
+									Session Expired
+								</p>
+								<p className="mt-1 text-xs text-yellow-700 dark:text-yellow-300">
+									Your 14-day quick unlock period has ended. Please enter your
+									Secret Key to sign in.
+								</p>
+							</div>
+						</div>
 					</div>
 				)}
 
@@ -218,6 +235,7 @@ export default function SignInForm({
 										id={field.name}
 										name={field.name}
 										type="email"
+										placeholder="name@example.com"
 										value={field.state.value}
 										onBlur={(e) => {
 											field.handleBlur();
@@ -226,6 +244,7 @@ export default function SignInForm({
 										onChange={(e) => field.handleChange(e.target.value)}
 										required
 										disabled={isQuickUnlock}
+										className="h-10"
 									/>
 								</div>
 							)}
@@ -233,11 +252,8 @@ export default function SignInForm({
 					</div>
 
 					{secretKeyHint && !isQuickUnlock && (
-						<div className="rounded-lg border bg-muted/50 p-3">
-							<p className="text-muted-foreground text-xs">
-								Secret Key hint
-							</p>
-							<p className="mt-1 font-mono text-sm">{secretKeyHint}</p>
+						<div className="rounded-md bg-muted px-3 py-2 text-muted-foreground text-xs">
+							<span className="font-medium">Hint:</span> {secretKeyHint}
 						</div>
 					)}
 
@@ -247,7 +263,7 @@ export default function SignInForm({
 								{(field) => (
 									<div className="space-y-2">
 										<Label htmlFor={field.name}>Secret Key</Label>
-										<div className="flex gap-2">
+										<div className="relative">
 											<Input
 												id={field.name}
 												name={field.name}
@@ -257,18 +273,19 @@ export default function SignInForm({
 												onChange={(e) => field.handleChange(e.target.value)}
 												placeholder="A3-XXXXXX-XXXXXX-XXXXX-XXXXX-XXXXX"
 												required
-												className="flex-1 font-mono"
+												className="h-10 pr-10 font-mono"
 											/>
 											<Button
 												type="button"
-												variant="outline"
+												variant="ghost"
 												size="icon"
+												className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
 												onClick={() => setShowSecretKey(!showSecretKey)}
 											>
 												{showSecretKey ? (
-													<EyeOff size={18} />
+													<EyeOff size={16} />
 												) : (
-													<Eye size={18} />
+													<Eye size={16} />
 												)}
 											</Button>
 										</div>
@@ -282,8 +299,10 @@ export default function SignInForm({
 						<form.Field name="password">
 							{(field) => (
 								<div className="space-y-2">
-									<Label htmlFor={field.name}>Account Password</Label>
-									<div className="flex gap-2">
+									<div className="flex items-center justify-between">
+										<Label htmlFor={field.name}>Password</Label>
+									</div>
+									<div className="relative">
 										<Input
 											id={field.name}
 											name={field.name}
@@ -292,15 +311,16 @@ export default function SignInForm({
 											onBlur={field.handleBlur}
 											onChange={(e) => field.handleChange(e.target.value)}
 											required
-											className="flex-1"
+											className="h-10 pr-10"
 										/>
 										<Button
 											type="button"
-											variant="outline"
+											variant="ghost"
 											size="icon"
+											className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
 											onClick={() => setShowPassword(!showPassword)}
 										>
-											{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+											{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
 										</Button>
 									</div>
 								</div>
@@ -310,38 +330,42 @@ export default function SignInForm({
 
 					<Button
 						type="submit"
-						className="w-full"
+						className="h-10 w-full font-medium"
 						disabled={loginMutation.isPending}
 					>
 						{loginMutation.isPending
 							? "Signing In..."
 							: isQuickUnlock
-								? "Unlock"
+								? "Unlock Vault"
 								: "Sign In"}
 					</Button>
 
 					{isQuickUnlock && (
-						<button
+						<Button
 							type="button"
+							variant="link"
 							onClick={() => {
 								setIsQuickUnlock(false);
 								form.setFieldValue("email", "");
 								form.setFieldValue("secretKey", "");
 							}}
-							className="w-full text-muted-foreground text-sm hover:text-foreground"
+							className="w-full text-muted-foreground"
 						>
-							Sign in with different account
-						</button>
+							Sign in with a different account
+						</Button>
 					)}
 
 					{!isQuickUnlock && (
-						<button
-							type="button"
-							onClick={onSwitchToSignUp}
-							className="w-full text-muted-foreground text-sm hover:text-foreground"
-						>
-							Don't have an account? Sign up
-						</button>
+						<div className="mt-4 text-center text-muted-foreground text-sm">
+							Don&apos;t have an account?{" "}
+							<button
+								type="button"
+								onClick={onSwitchToSignUp}
+								className="font-medium text-primary underline-offset-4 hover:underline"
+							>
+								Sign up
+							</button>
+						</div>
 					)}
 				</form>
 			</Card>
