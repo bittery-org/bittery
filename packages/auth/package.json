@@ -1,25 +1,28 @@
 {
-  "name": "@bittery/auth",
-  "exports": {
-    ".": {
-      "default": "./src/index.ts"
-    },
-    "./*": {
-      "default": "./src/*.ts"
-    }
-  },
-  "type": "module",
-  "scripts": {},
-  "devDependencies": {
-    "@bittery/config": "workspace:*"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
-  "dependencies": {
-    "better-auth": "catalog:",
-    "dotenv": "catalog:",
-    "zod": "catalog:",
-    "@bittery/db": "workspace:*"
-  }
+	"name": "@bittery/auth",
+	"exports": {
+		".": {
+			"default": "./src/index.ts"
+		},
+		"./*": {
+			"default": "./src/*.ts"
+		}
+	},
+	"type": "module",
+	"scripts": {},
+	"devDependencies": {
+		"@bittery/config": "workspace:*"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	},
+	"dependencies": {
+		"@bittery/db": "workspace:*",
+		"@bittery/crypto": "workspace:*",
+		"dotenv": "catalog:",
+		"zod": "catalog:",
+		"drizzle-orm": "catalog:",
+		"jose": "^5.0.0",
+		"nanoid": "^5.0.0"
+	}
 }

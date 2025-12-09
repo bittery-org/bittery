@@ -1,14 +1,20 @@
+import { verifySession } from "@bittery/auth";
 import type { Context as HonoContext } from "hono";
-import { auth } from "@bittery/auth";
 
 export type CreateContextOptions = {
 	context: HonoContext;
 };
 
 export async function createContext({ context }: CreateContextOptions) {
-	const session = await auth.api.getSession({
-		headers: context.req.raw.headers,
-	});
+	// Extract JWT token from Authorization header
+	const authHeader = context.req.header("Authorization");
+	const token = authHeader?.replace("Bearer ", "");
+
+	let session = null;
+	if (token) {
+		session = await verifySession(token);
+	}
+
 	return {
 		session,
 	};

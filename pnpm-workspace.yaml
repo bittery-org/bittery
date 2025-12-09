@@ -7,4 +7,5 @@ catalog:
   better-auth: ^1.4.5
   dotenv: ^17.2.2
   zod: ^4.1.13
+  drizzle-orm: "^0.45.0"
   "@trpc/client": ^11.5.0

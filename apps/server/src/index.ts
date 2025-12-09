@@ -1,8 +1,7 @@
 import "dotenv/config";
-import { trpcServer } from "@hono/trpc-server";
 import { createContext } from "@bittery/api/context";
 import { appRouter } from "@bittery/api/routers/index";
-import { auth } from "@bittery/auth";
+import { trpcServer } from "@hono/trpc-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
@@ -19,8 +18,6 @@ app.use(
 		credentials: true,
 	}),
 );
-
-app.on(["POST", "GET"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 
 app.use(
 	"/trpc/*",

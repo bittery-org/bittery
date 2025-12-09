@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
 import { useTRPC } from "@/utils/trpc";
 
 export const Route = createFileRoute("/")({
@@ -27,24 +27,24 @@ function HomeComponent() {
 	const healthCheck = useQuery(trpc.healthCheck.queryOptions());
 
 	return (
-		<div className="container mx-auto max-w-3xl px-4 py-2">
-			<pre className="overflow-x-auto font-mono text-sm">{TITLE_TEXT}</pre>
+		<div className="container mx-auto max-w-4xl space-y-8 px-6 py-12">
+			<pre className="overflow-x-auto rounded-lg bg-muted/50 p-6 font-mono text-sm">{TITLE_TEXT}</pre>
 			<div className="grid gap-6">
-				<section className="rounded-lg border p-4">
-					<h2 className="mb-2 font-medium">API Status</h2>
-					<div className="flex items-center gap-2">
+				<div className="rounded-xl border bg-card p-6 text-card-foreground shadow-sm">
+					<h2 className="mb-4 font-semibold text-lg">API Status</h2>
+					<div className="flex items-center gap-3">
 						<div
-							className={`h-2 w-2 rounded-full ${healthCheck.data ? "bg-green-500" : "bg-red-500"}`}
+							className={`h-3 w-3 rounded-full ${healthCheck.data ? "bg-green-500 animate-pulse" : "bg-red-500"}`}
 						/>
-						<span className="text-muted-foreground text-sm">
+						<span className="text-sm">
 							{healthCheck.isLoading
 								? "Checking..."
 								: healthCheck.data
-									? "Connected"
+									? "Connected to server"
 									: "Disconnected"}
 						</span>
 					</div>
-				</section>
+				</div>
 			</div>
 		</div>
 	);

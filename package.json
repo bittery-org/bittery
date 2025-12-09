@@ -1,36 +1,36 @@
 {
-  "name": "bittery",
-  "private": true,
-  "type": "module",
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
-  "scripts": {
-    "check": "biome check --write .",
-    "dev": "turbo dev",
-    "build": "turbo build",
-    "check-types": "turbo check-types",
-    "dev:native": "turbo -F native dev",
-    "dev:web": "turbo -F web dev",
-    "dev:server": "turbo -F server dev",
-    "db:push": "turbo -F @bittery/db db:push",
-    "db:studio": "turbo -F @bittery/db db:studio",
-    "db:generate": "turbo -F @bittery/db db:generate",
-    "db:migrate": "turbo -F @bittery/db db:migrate",
-    "db:start": "turbo -F @bittery/db db:start",
-    "db:watch": "turbo -F @bittery/db db:watch",
-    "db:stop": "turbo -F @bittery/db db:stop",
-    "db:down": "turbo -F @bittery/db db:down"
-  },
-  "dependencies": {
-    "dotenv": "^17.2.2",
-    "zod": "^4.1.13"
-  },
-  "devDependencies": {
-    "turbo": "^2.5.4",
-    "@biomejs/biome": "^2.2.0",
-    "@types/bun": "^1.2.6"
-  },
-  "packageManager": "pnpm@10.18.3"
+	"name": "bittery",
+	"private": true,
+	"type": "module",
+	"workspaces": [
+		"apps/*",
+		"packages/*"
+	],
+	"scripts": {
+		"check": "biome check --write .",
+		"dev": "turbo dev",
+		"build": "turbo build",
+		"check-types": "turbo check-types",
+		"dev:native": "turbo -F native dev",
+		"dev:web": "turbo -F web dev",
+		"dev:server": "turbo -F server dev",
+		"db:push": "turbo -F @bittery/db db:push",
+		"db:studio": "turbo -F @bittery/db db:studio",
+		"db:generate": "turbo -F @bittery/db db:generate",
+		"db:migrate": "turbo -F @bittery/db db:migrate",
+		"db:start": "turbo -F @bittery/db db:start",
+		"db:watch": "turbo -F @bittery/db db:watch",
+		"db:stop": "turbo -F @bittery/db db:stop",
+		"db:down": "turbo -F @bittery/db db:down"
+	},
+	"dependencies": {
+		"dotenv": "^17.2.2",
+		"zod": "^4.1.13"
+	},
+	"devDependencies": {
+		"turbo": "^2.5.4",
+		"@biomejs/biome": "^2.2.0",
+		"@types/bun": "^1.2.6"
+	},
+	"packageManager": "pnpm@10.18.3"
 }

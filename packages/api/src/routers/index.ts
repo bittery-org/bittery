@@ -1,4 +1,6 @@
 import { protectedProcedure, publicProcedure, router } from "../index";
+import { authRouter } from "./auth";
+import { vaultRouter } from "./vault";
 
 export const appRouter = router({
 	healthCheck: publicProcedure.query(() => {
@@ -7,8 +9,10 @@ export const appRouter = router({
 	privateData: protectedProcedure.query(({ ctx }) => {
 		return {
 			message: "This is private",
-			user: ctx.session.user,
+			user: ctx.session,
 		};
 	}),
+	auth: authRouter,
+	vault: vaultRouter,
 });
 export type AppRouter = typeof appRouter;

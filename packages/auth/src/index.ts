@@ -1,23 +1,249 @@
-import { betterAuth } from "better-auth";
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { db } from "@bittery/db";
-import * as schema from "@bittery/db/schema/auth";
+/**
+ * Custom Zero-Knowledge Authentication
+ * Uses SRP-6a for secure authentication without server knowing password
+ */
 
-export const auth = betterAuth({
-	database: drizzleAdapter(db, {
-		provider: "pg",
+import {
+	generateSRPChallenge,
+	type SRPServerChallenge,
+	verifySRPProof,
+} from "@bittery/crypto";
+import { db, session, user } from "@bittery/db";
+import { and, eq, gt } from "drizzle-orm";
+import { jwtVerify, SignJWT } from "jose";
+import { nanoid } from "nanoid";
 
-		schema: schema,
-	}),
-	trustedOrigins: [process.env.CORS_ORIGIN || ""],
-	emailAndPassword: {
-		enabled: true,
-	},
-	advanced: {
-		defaultCookieAttributes: {
-			sameSite: "none",
-			secure: true,
-			httpOnly: true,
+const JWT_SECRET = new TextEncoder().encode(
+	process.env.JWT_SECRET || "bittery-secret-change-in-production",
+);
+const JWT_ISSUER = "bittery";
+const JWT_AUDIENCE = "bittery-users";
+const SESSION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+export interface SessionPayload {
+	userId: string;
+	email: string;
+	sessionId: string;
+}
+
+/**
+ * Create a new user (called during signup)
+ */
+export async function createUser(data: {
+	email: string;
+	name: string;
+	secretKeyHint: string;
+	srpSalt: string;
+	srpVerifier: string;
+	publicKey: string;
+	encryptedPrivateKey: string;
+}) {
+	const userId = nanoid();
+
+	await db.insert(user).values({
+		id: userId,
+		email: data.email.toLowerCase(),
+		name: data.name,
+		emailVerified: false,
+		secretKeyHint: data.secretKeyHint,
+		srpSalt: data.srpSalt,
+		srpVerifier: data.srpVerifier,
+		publicKey: data.publicKey,
+		encryptedPrivateKey: data.encryptedPrivateKey,
+	});
+
+	return userId;
+}
+
+/**
+ * Start SRP login - generate server challenge
+ */
+export async function startLogin(email: string): Promise<{
+	userId: string;
+	challenge: SRPServerChallenge;
+	serverSecret: string;
+}> {
+	const [existingUser] = await db
+		.select()
+		.from(user)
+		.where(eq(user.email, email.toLowerCase()))
+		.limit(1);
+
+	if (!existingUser) {
+		throw new Error("User not found");
+	}
+
+	const { serverPublicKey, serverSecret } = await generateSRPChallenge(
+		existingUser.srpVerifier,
+		existingUser.srpSalt,
+		existingUser.email,
+	);
+
+	return {
+		userId: existingUser.id,
+		challenge: {
+			salt: existingUser.srpSalt,
+			serverPublicKey,
 		},
-	},
-});
+		serverSecret,
+	};
+}
+
+/**
+ * Finish SRP login - verify proof and create session
+ */
+export async function finishLogin(
+	userId: string,
+	serverSecret: string,
+	clientPublicKey: string,
+	clientProof: string,
+): Promise<{
+	success: boolean;
+	token?: string;
+	sessionId?: string;
+	user?: {
+		id: string;
+		email: string;
+		name: string;
+		secretKeyHint: string;
+		publicKey: string;
+		encryptedPrivateKey: string;
+	};
+}> {
+	const { valid, sessionKey } = await verifySRPProof(
+		serverSecret,
+		clientPublicKey,
+		clientProof,
+	);
+
+	if (!valid) {
+		return { success: false };
+	}
+
+	// Get user data
+	const [existingUser] = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+
+	if (!existingUser) {
+		return { success: false };
+	}
+
+	// Create session
+	const sessionId = nanoid();
+	const expiresAt = new Date(Date.now() + SESSION_DURATION);
+
+	await db.insert(session).values({
+		id: sessionId,
+		userId: existingUser.id,
+		token: sessionKey || nanoid(),
+		expiresAt,
+	});
+
+	// Generate JWT
+	// @ts-expect-error -- jose types
+	const token = await new SignJWT({
+		userId: existingUser.id,
+		email: existingUser.email,
+		sessionId,
+	} as SessionPayload)
+		.setProtectedHeader({ alg: "HS256" })
+		.setIssuedAt()
+		.setIssuer(JWT_ISSUER)
+		.setAudience(JWT_AUDIENCE)
+		.setExpirationTime("30d")
+		.sign(JWT_SECRET);
+
+	return {
+		success: true,
+		token,
+		sessionId,
+		user: {
+			id: existingUser.id,
+			email: existingUser.email,
+			name: existingUser.name,
+			secretKeyHint: existingUser.secretKeyHint || "",
+			publicKey: existingUser.publicKey,
+			encryptedPrivateKey: existingUser.encryptedPrivateKey,
+		},
+	};
+}
+
+/**
+ * Verify JWT token and get session
+ */
+export async function verifySession(
+	token: string,
+): Promise<SessionPayload | null> {
+	try {
+		const { payload } = await jwtVerify(token, JWT_SECRET, {
+			issuer: JWT_ISSUER,
+			audience: JWT_AUDIENCE,
+		});
+
+		const sessionPayload = payload as unknown as SessionPayload;
+
+		// Check if session still exists and is valid
+		const [existingSession] = await db
+			.select()
+			.from(session)
+			.where(
+				and(
+					eq(session.id, sessionPayload.sessionId),
+					eq(session.userId, sessionPayload.userId),
+					gt(session.expiresAt, new Date()),
+				),
+			)
+			.limit(1);
+
+		if (!existingSession) {
+			return null;
+		}
+
+		return sessionPayload;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Get user by email
+ */
+export async function getUserByEmail(email: string) {
+	const [existingUser] = await db
+		.select()
+		.from(user)
+		.where(eq(user.email, email.toLowerCase()))
+		.limit(1);
+
+	return existingUser || null;
+}
+
+/**
+ * Get user by ID
+ */
+export async function getUserById(userId: string) {
+	const [existingUser] = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+
+	return existingUser || null;
+}
+
+/**
+ * Delete session (logout)
+ */
+export async function deleteSession(sessionId: string) {
+	await db.delete(session).where(eq(session.id, sessionId));
+}
+
+/**
+ * Delete all user sessions (logout from all devices)
+ */
+export async function deleteAllUserSessions(userId: string) {
+	await db.delete(session).where(eq(session.userId, userId));
+}

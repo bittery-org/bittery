@@ -1,0 +1,23 @@
+{
+	"name": "@bittery/crypto",
+	"exports": {
+		".": {
+			"default": "./src/index.ts"
+		},
+		"./*": {
+			"default": "./src/*.ts"
+		}
+	},
+	"type": "module",
+	"scripts": {},
+	"devDependencies": {
+		"@bittery/config": "workspace:*"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	},
+	"dependencies": {
+		"@noble/hashes": "^1.5.0",
+		"tssrp6a": "^3.0.0"
+	}
+}
