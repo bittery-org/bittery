@@ -1,0 +1,9 @@
+{
+  "name": "com.bittery.desktop",
+  "description": "Bittery Desktop Native Messaging Host",
+  "path": "/Applications/Bittery.app/Contents/MacOS/bittery-native-host",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://EXTENSION_ID_PLACEHOLDER/"
+  ]
+}

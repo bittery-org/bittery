@@ -141,6 +141,17 @@ function RouteComponent() {
     }
   };
 
+  const handleLock = async () => {
+    try {
+      await tauriStorage.clearSession();
+      navigate({ to: "/unlock" });
+      toast.success("Locked successfully");
+    } catch (error) {
+      console.error("Lock error:", error);
+      toast.error("Failed to lock");
+    }
+  };
+
   const handleLogout = async () => {
     try {
       await tauriStorage.clearAllStoredData();
@@ -191,6 +202,10 @@ function RouteComponent() {
             <DropdownMenuItem onClick={handleLogout}>
               <LogOut className="mr-2 h-4 w-4" />
               Logout
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleLock}>
+              <LogOut className="mr-2 h-4 w-4" />
+              Lock
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

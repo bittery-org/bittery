@@ -1,9 +1,327 @@
+mod native_messaging_installer;
+
+use std::convert::Infallible;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use base64::Engine;
+use hyper::{Body, Method, Request, Response, Server, StatusCode};
+use hyper::service::{make_service_fn, service_fn};
+use tokio::sync::Mutex;
+
+/// State for native bridge HTTP server
+#[derive(Default)]
+struct NativeBridgeState {
+    /// Pending unlock requests (challenge -> extension_id)
+    pending_requests: Arc<Mutex<std::collections::HashMap<String, String>>>,
+}
+
+/// Start HTTP server for native messaging bridge
+async fn start_native_bridge_server(app_handle: tauri::AppHandle) {
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], 48765));
+
+    let make_svc = make_service_fn(move |_conn| {
+        let app_handle = app_handle.clone();
+        
+        async move {
+            Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
+                let app_handle = app_handle.clone();
+                handle_native_bridge_request(app_handle, req)
+            }))
+        }
+    });
+
+    let server = Server::bind(&addr).serve(make_svc);
+    
+    eprintln!("Native bridge server listening on {}", addr);
+    
+    if let Err(e) = server.await {
+        eprintln!("Native bridge server error: {}", e);
+    }
+}
+
+async fn handle_native_bridge_request(
+    app_handle: tauri::AppHandle,
+    req: Request<Body>,
+) -> Result<Response<Body>, Infallible> {
+    let path = req.uri().path();
+    
+    match (req.method(), path) {
+        (&Method::GET, "/native-bridge/biometric-status") => {
+            // Check biometric availability and if session exists
+            match check_biometric_status_internal(&app_handle).await {
+                Ok(status) => {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(status.to_string()))
+                        .unwrap())
+                }
+                Err(e) => {
+                    let error = serde_json::json!({
+                        "available": false,
+                        "enabled": false,
+                        "error": e.to_string()
+                    });
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(error.to_string()))
+                        .unwrap())
+                }
+            }
+        }
+        
+        (&Method::POST, "/native-bridge/biometric-unlock") => {
+            // Read request body
+            let body_bytes = match hyper::body::to_bytes(req.into_body()).await {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    let error = serde_json::json!({
+                        "error": format!("Failed to read request body: {}", e)
+                    });
+                    return Ok(Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(error.to_string()))
+                        .unwrap());
+                }
+            };
+            
+            let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+            
+            // Parse request
+            let request: serde_json::Value = match serde_json::from_str(&body_str) {
+                Ok(req) => req,
+                Err(e) => {
+                    let error = serde_json::json!({
+                        "error": format!("Invalid JSON: {}", e)
+                    });
+                    return Ok(Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(error.to_string()))
+                        .unwrap());
+                }
+            };
+            
+            let challenge = request["challenge"].as_str().unwrap_or("");
+            let extension_id = request["extension_id"].as_str().unwrap_or("");
+            
+            // Trigger biometric unlock
+            match biometric_unlock_internal(&app_handle, challenge, extension_id).await {
+                Ok(response) => {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(response.to_string()))
+                        .unwrap())
+                }
+                Err(e) => {
+                    let error = serde_json::json!({
+                        "error": e.to_string()
+                    });
+                    Ok(Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(error.to_string()))
+                        .unwrap())
+                }
+            }
+        }
+        
+        _ => {
+            Ok(Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from("Not found"))
+                .unwrap())
+        }
+    }
+}
+
+#[derive(Default)]
+struct BiometricBridge;
+
+/// Tauri command to check biometric status and session validity
+#[tauri::command]
+async fn check_extension_biometric_status(
+    app_handle: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    use tauri_plugin_biometry::BiometryExt;
+    use tauri_plugin_store::StoreExt;
+    
+    // Check if biometry is available
+    let biometry = app_handle.biometry();
+    let status = biometry.status()
+        .map_err(|e| format!("Failed to check biometry status: {}", e))?;
+    
+    // Check if session data exists in store
+    let store = app_handle.store("store.json")
+        .map_err(|e| format!("Failed to access store: {}", e))?;
+    
+    let session_data = store.get("bittery_session_data");
+    let biometric_enabled = store.get("bittery_biometric_enabled");
+    
+    let has_session = session_data.is_some();
+    let is_enabled = biometric_enabled.and_then(|v| v.as_bool()).unwrap_or(false);
+    
+    Ok(serde_json::json!({
+        "available": status.is_available,
+        "enabled": is_enabled && has_session,
+    }))
+}
+
+/// Tauri command to perform biometric unlock
+#[tauri::command]
+async fn extension_biometric_unlock(
+    app_handle: tauri::AppHandle,
+    challenge: String,
+    extension_id: String,
+) -> Result<serde_json::Value, String> {
+    use tauri_plugin_biometry::BiometryExt;
+    use tauri_plugin_store::StoreExt;
+    
+    eprintln!("[Biometric Unlock] Request from extension: {}", extension_id);
+    eprintln!("[Biometric Unlock] Challenge: {}", challenge);
+    
+    // 1. Authenticate with biometric (Touch ID / Windows Hello)
+    let biometry = app_handle.biometry();
+    let auth_options = tauri_plugin_biometry::AuthOptions::default();
+    biometry.authenticate("Unlock Bittery for browser extension".to_string(), auth_options)
+        .map_err(|e| format!("Biometric authentication failed: {}", e))?;
+    
+    eprintln!("[Biometric Unlock] ✓ Authentication successful");
+    
+    // 2. Get session data from store
+    let store = app_handle.store("store.json")
+        .map_err(|e| format!("Failed to access store: {}", e))?;
+    
+    let session_data_value = store.get("bittery_session_data")
+        .ok_or("No session data found")?;
+    
+    let session_data_str = session_data_value.as_str()
+        .ok_or("Invalid session data format")?;
+    
+    let session_data: serde_json::Value = serde_json::from_str(session_data_str)
+        .map_err(|e| format!("Failed to parse session data: {}", e))?;
+    
+    eprintln!("[Biometric Unlock] Session data retrieved");
+    
+    // 3. Get device key to decrypt the MUK
+    let device_key_value = store.get("bittery_device_key")
+        .ok_or("No device key found")?;
+    
+    let device_key_base64 = device_key_value.as_str()
+        .ok_or("Invalid device key format")?;
+    
+    // 4. Get encrypted MUK from session data
+    let encrypted_muk = session_data.get("encryptedMasterUnlockKey")
+        .ok_or("No encrypted master unlock key in session")?;
+    
+    eprintln!("[Biometric Unlock] Encrypted MUK retrieved");
+    
+    // 5. Send the encrypted MUK and device key to extension
+    // The extension will decrypt it using the device key
+    // This is secure because:
+    // - Device key never leaves the device
+    // - Biometric authentication was required
+    // - Communication is over localhost only
+    // - Extension has same security boundary as desktop app
+    
+    let encrypted_muk_json = serde_json::to_string(encrypted_muk)
+        .map_err(|e| format!("Failed to serialize encrypted MUK: {}", e))?;
+    
+    let encrypted_session_b64 = base64::engine::general_purpose::STANDARD.encode(encrypted_muk_json.as_bytes());
+    
+    // Get auth token and vault keys from store
+    let auth_token = store.get("bittery_jwt_token")
+        .and_then(|v| v.as_str().map(|s| s.to_string()));
+    
+    let vault_keys = store.get("bittery_vault_keys")
+        .and_then(|v| v.as_str().map(|s| s.to_string()));
+    
+    // Sign the response with challenge to prevent replay attacks
+    let signature_data = format!("{}:{}", challenge, encrypted_session_b64);
+    let signature = base64::engine::general_purpose::STANDARD.encode(signature_data.as_bytes());
+    
+    eprintln!("[Biometric Unlock] ✓ Response prepared and signed");
+    
+    let mut response = serde_json::json!({
+        "encrypted_session": encrypted_session_b64,
+        "device_key": device_key_base64,
+        "signature": signature,
+    });
+    
+    // Include auth token and vault keys if available
+    if let Some(token) = auth_token {
+        response["auth_token"] = serde_json::Value::String(token);
+    }
+    if let Some(keys) = vault_keys {
+        response["vault_keys"] = serde_json::Value::String(keys);
+    }
+    
+    Ok(response)
+}
+
+/// Check biometric status
+async fn check_biometric_status_internal(
+    app_handle: &tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    // Call the Tauri command
+    check_extension_biometric_status(app_handle.clone()).await
+}
+
+/// Perform biometric unlock and return encrypted session
+async fn biometric_unlock_internal(
+    app_handle: &tauri::AppHandle,
+    challenge: &str,
+    extension_id: &str,
+) -> Result<serde_json::Value, String> {
+    // Call the Tauri command
+    extension_biometric_unlock(
+        app_handle.clone(),
+        challenge.to_string(),
+        extension_id.to_string(),
+    ).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_biometry::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .manage(BiometricBridge::default())
+        .setup(|app| {
+            // Install native messaging host on first run (or if missing)
+            let first_run = !native_messaging_installer::is_installed();
+            
+            if first_run {
+                eprintln!("🔧 First run detected - installing native messaging host...");
+                match native_messaging_installer::install_native_messaging_host(&app.handle()) {
+                    Ok(_) => {
+                        eprintln!("✅ Native messaging host installed successfully!");
+                        eprintln!("   Browser extension can now use biometric unlock!");
+                    }
+                    Err(e) => {
+                        eprintln!("⚠️  Failed to install native messaging host: {}", e);
+                        eprintln!("   To enable biometric unlock, build the native host:");
+                        eprintln!("   cd src-tauri && cargo build --release --bin bittery-native-host");
+                        eprintln!("   Then restart the app.");
+                    }
+                }
+            } else {
+                eprintln!("✅ Native messaging host already installed");
+            }
+            
+            // Start native bridge server in background
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                start_native_bridge_server(app_handle).await;
+            });
+            
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

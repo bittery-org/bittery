@@ -6,7 +6,9 @@
 	"scripts": {
 		"dev": "tauri dev",
 		"dev:vite": "vite",
-		"build": "tsc && vite build",
+		"prebuild": "cd src-tauri && cargo build --release --bin bittery-native-host",
+		"build": "tsc && vite build && tauri build",
+		"build:prod": "BITTERY_EXTENSION_ID=$(grep BITTERY_EXTENSION_ID .env.production | cut -d '=' -f2) pnpm build",
 		"preview": "vite preview",
 		"tauri": "tauri"
 	},

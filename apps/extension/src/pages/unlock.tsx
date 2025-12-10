@@ -9,6 +9,8 @@ export function UnlockPage() {
 	const navigate = useNavigate();
 	const [showPassword, setShowPassword] = useState(false);
 	const [_email, setEmail] = useState("");
+	const [biometricAvailable, setBiometricAvailable] = useState(false);
+	const [checkingBiometric, setCheckingBiometric] = useState(true);
 
 	useEffect(() => {
 		// Get stored session data for display
@@ -18,6 +20,20 @@ export function UnlockPage() {
 				if (response.sessionData) {
 					setEmail(response.sessionData.email);
 				}
+			});
+
+		// Check if native biometric is available
+		chrome.runtime
+			.sendMessage({ type: "CHECK_NATIVE_BIOMETRIC" })
+			.then((response) => {
+				setBiometricAvailable(
+					response.available && response.enabled && response.appRunning,
+				);
+				setCheckingBiometric(false);
+			})
+			.catch(() => {
+				setBiometricAvailable(false);
+				setCheckingBiometric(false);
 			});
 	}, []);
 
@@ -53,6 +69,28 @@ export function UnlockPage() {
 		},
 	});
 
+	const biometricUnlockMutation = useMutation({
+		mutationFn: async () => {
+			// Send to background worker for native biometric unlock
+			const response = await chrome.runtime.sendMessage({
+				type: "NATIVE_BIOMETRIC_UNLOCK",
+			});
+
+			if (!response.success) {
+				throw new Error(response.error || "Biometric unlock failed");
+			}
+
+			return response;
+		},
+		onSuccess: () => {
+			toast.success("Unlocked with biometric!");
+			navigate({ to: "/vault" });
+		},
+		onError: (error: Error) => {
+			toast.error(error.message || "Biometric unlock failed");
+		},
+	});
+
 	const handleFullLogin = () => {
 		navigate({ to: "/login" });
 	};
@@ -80,6 +118,33 @@ export function UnlockPage() {
 							</div>
 						</div>
 					</div>
+
+					{/* Biometric unlock button */}
+					{biometricAvailable && !checkingBiometric && (
+						<div className="space-y-2">
+							<Button
+								type="button"
+								onClick={() => biometricUnlockMutation.mutate()}
+								className="h-12 w-full font-medium"
+								variant="outline"
+								disabled={biometricUnlockMutation.isPending}
+							>
+								{biometricUnlockMutation.isPending ? (
+									"Authenticating..."
+								) : (
+									<>
+										<LockIcon className="mr-2 size-4" />
+										Unlock with Desktop Biometric
+									</>
+								)}
+							</Button>
+							<div className="flex items-center gap-2">
+								<div className="h-px flex-1 bg-border" />
+								<span className="text-muted-foreground text-xs">OR</span>
+								<div className="h-px flex-1 bg-border" />
+							</div>
+						</div>
+					)}
 
 					<form
 						onSubmit={(e) => {

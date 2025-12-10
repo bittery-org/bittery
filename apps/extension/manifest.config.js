@@ -11,6 +11,7 @@ export default defineManifest({
 		"scripting",
 		"clipboardWrite",
 		"alarms",
+		"nativeMessaging",
 	],
 	host_permissions: ["<all_urls>"],
 	action: {
