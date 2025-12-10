@@ -8,9 +8,11 @@ import {
 	generateSRPRegistration,
 	getSecretKeyHint,
 	getTimeUntilExpiry,
+	storeAuthToken,
 	storeMasterUnlockKey,
 	storeSecretKey,
 	storeSessionData,
+	storeVaultKeys,
 } from "@bittery/shared/crypto";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
@@ -42,9 +44,13 @@ export default function SignUpForm({
 		mutationFn: async (input: any) => {
 			return await trpcClient.auth.signup.mutate(input);
 		},
-		onSuccess: (_data) => {
+		onSuccess: (data) => {
+			// Store auth token and vault keys
+			storeAuthToken(data.token);
+			storeVaultKeys(data.vaultKeys);
+			
 			toast.success("Account created successfully!");
-			navigate({ to: "/dashboard" });
+			navigate({ to: "/home" });
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Failed to create account");

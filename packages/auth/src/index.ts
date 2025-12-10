@@ -245,6 +245,63 @@ export async function getUserById(userId: string) {
 }
 
 /**
+ * Create a user session and return JWT token
+ * Used after signup or when creating a session without SRP
+ */
+export async function createUserSession(userId: string) {
+	const [existingUser] = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+
+	if (!existingUser) {
+		throw new Error("User not found");
+	}
+
+	// Create session
+	const sessionId = nanoid();
+	const expiresAt = new Date(Date.now() + SESSION_DURATION);
+
+	// Generate a random session key for non-SRP sessions
+	const sessionKey = nanoid(32);
+
+	await db.insert(session).values({
+		id: sessionId,
+		userId: existingUser.id,
+		token: sessionKey,
+		expiresAt,
+	});
+
+	// Generate JWT
+	// @ts-expect-error -- jose types
+	const token = await new SignJWT({
+		userId: existingUser.id,
+		email: existingUser.email,
+		sessionId,
+	} as SessionPayload)
+		.setProtectedHeader({ alg: "HS256" })
+		.setIssuedAt()
+		.setIssuer(JWT_ISSUER)
+		.setAudience(JWT_AUDIENCE)
+		.setExpirationTime("30d")
+		.sign(JWT_SECRET);
+
+	return {
+		token,
+		sessionId,
+		user: {
+			id: existingUser.id,
+			email: existingUser.email,
+			name: existingUser.name,
+			secretKeyHint: existingUser.secretKeyHint || "",
+			publicKey: existingUser.publicKey,
+			encryptedPrivateKey: existingUser.encryptedPrivateKey,
+		},
+	};
+}
+
+/**
  * Delete session (logout)
  */
 export async function deleteSession(sessionId: string) {

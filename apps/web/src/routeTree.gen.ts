@@ -9,145 +9,64 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as VaultRouteRouteImport } from './routes/vault/route'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as VaultIndexRouteImport } from './routes/vault/index'
 import { Route as AuthLoginRouteImport } from './routes/_auth/login'
-import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
-import { Route as VaultIdRouteRouteImport } from './routes/vault/$id/route'
-import { Route as VaultIdIndexRouteImport } from './routes/vault/$id/index'
-import { Route as VaultIdItemIdIndexRouteImport } from './routes/vault/$id/$itemId/index'
+import { Route as AppHomeRouteImport } from './routes/_app/home'
 
-const VaultRouteRoute = VaultRouteRouteImport.update({
-  id: '/vault',
-  path: '/vault',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
-} as any)
-const VaultIndexRoute = VaultIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => VaultRouteRoute,
 } as any)
 const AuthLoginRoute = AuthLoginRouteImport.update({
   id: '/_auth/login',
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppDashboardRoute = AppDashboardRouteImport.update({
-  id: '/_app/dashboard',
-  path: '/dashboard',
+const AppHomeRoute = AppHomeRouteImport.update({
+  id: '/_app/home',
+  path: '/home',
   getParentRoute: () => rootRouteImport,
-} as any)
-const VaultIdRouteRoute = VaultIdRouteRouteImport.update({
-  id: '/$id',
-  path: '/$id',
-  getParentRoute: () => VaultRouteRoute,
-} as any)
-const VaultIdIndexRoute = VaultIdIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => VaultIdRouteRoute,
-} as any)
-const VaultIdItemIdIndexRoute = VaultIdItemIdIndexRouteImport.update({
-  id: '/$itemId/',
-  path: '/$itemId/',
-  getParentRoute: () => VaultIdRouteRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/vault': typeof VaultRouteRouteWithChildren
-  '/vault/$id': typeof VaultIdRouteRouteWithChildren
-  '/dashboard': typeof AppDashboardRoute
+  '/home': typeof AppHomeRoute
   '/login': typeof AuthLoginRoute
-  '/vault/': typeof VaultIndexRoute
-  '/vault/$id/': typeof VaultIdIndexRoute
-  '/vault/$id/$itemId': typeof VaultIdItemIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/dashboard': typeof AppDashboardRoute
+  '/home': typeof AppHomeRoute
   '/login': typeof AuthLoginRoute
-  '/vault': typeof VaultIndexRoute
-  '/vault/$id': typeof VaultIdIndexRoute
-  '/vault/$id/$itemId': typeof VaultIdItemIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/vault': typeof VaultRouteRouteWithChildren
-  '/vault/$id': typeof VaultIdRouteRouteWithChildren
-  '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/home': typeof AppHomeRoute
   '/_auth/login': typeof AuthLoginRoute
-  '/vault/': typeof VaultIndexRoute
-  '/vault/$id/': typeof VaultIdIndexRoute
-  '/vault/$id/$itemId/': typeof VaultIdItemIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/vault'
-    | '/vault/$id'
-    | '/dashboard'
-    | '/login'
-    | '/vault/'
-    | '/vault/$id/'
-    | '/vault/$id/$itemId'
+  fullPaths: '/' | '/home' | '/login'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/dashboard'
-    | '/login'
-    | '/vault'
-    | '/vault/$id'
-    | '/vault/$id/$itemId'
-  id:
-    | '__root__'
-    | '/'
-    | '/vault'
-    | '/vault/$id'
-    | '/_app/dashboard'
-    | '/_auth/login'
-    | '/vault/'
-    | '/vault/$id/'
-    | '/vault/$id/$itemId/'
+  to: '/' | '/home' | '/login'
+  id: '__root__' | '/' | '/_app/home' | '/_auth/login'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  VaultRouteRoute: typeof VaultRouteRouteWithChildren
-  AppDashboardRoute: typeof AppDashboardRoute
+  AppHomeRoute: typeof AppHomeRoute
   AuthLoginRoute: typeof AuthLoginRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/vault': {
-      id: '/vault'
-      path: '/vault'
-      fullPath: '/vault'
-      preLoaderRoute: typeof VaultRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/vault/': {
-      id: '/vault/'
-      path: '/'
-      fullPath: '/vault/'
-      preLoaderRoute: typeof VaultIndexRouteImport
-      parentRoute: typeof VaultRouteRoute
     }
     '/_auth/login': {
       id: '/_auth/login'
@@ -156,69 +75,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthLoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_app/dashboard': {
-      id: '/_app/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof AppDashboardRouteImport
+    '/_app/home': {
+      id: '/_app/home'
+      path: '/home'
+      fullPath: '/home'
+      preLoaderRoute: typeof AppHomeRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/vault/$id': {
-      id: '/vault/$id'
-      path: '/$id'
-      fullPath: '/vault/$id'
-      preLoaderRoute: typeof VaultIdRouteRouteImport
-      parentRoute: typeof VaultRouteRoute
-    }
-    '/vault/$id/': {
-      id: '/vault/$id/'
-      path: '/'
-      fullPath: '/vault/$id/'
-      preLoaderRoute: typeof VaultIdIndexRouteImport
-      parentRoute: typeof VaultIdRouteRoute
-    }
-    '/vault/$id/$itemId/': {
-      id: '/vault/$id/$itemId/'
-      path: '/$itemId'
-      fullPath: '/vault/$id/$itemId'
-      preLoaderRoute: typeof VaultIdItemIdIndexRouteImport
-      parentRoute: typeof VaultIdRouteRoute
     }
   }
 }
 
-interface VaultIdRouteRouteChildren {
-  VaultIdIndexRoute: typeof VaultIdIndexRoute
-  VaultIdItemIdIndexRoute: typeof VaultIdItemIdIndexRoute
-}
-
-const VaultIdRouteRouteChildren: VaultIdRouteRouteChildren = {
-  VaultIdIndexRoute: VaultIdIndexRoute,
-  VaultIdItemIdIndexRoute: VaultIdItemIdIndexRoute,
-}
-
-const VaultIdRouteRouteWithChildren = VaultIdRouteRoute._addFileChildren(
-  VaultIdRouteRouteChildren,
-)
-
-interface VaultRouteRouteChildren {
-  VaultIdRouteRoute: typeof VaultIdRouteRouteWithChildren
-  VaultIndexRoute: typeof VaultIndexRoute
-}
-
-const VaultRouteRouteChildren: VaultRouteRouteChildren = {
-  VaultIdRouteRoute: VaultIdRouteRouteWithChildren,
-  VaultIndexRoute: VaultIndexRoute,
-}
-
-const VaultRouteRouteWithChildren = VaultRouteRoute._addFileChildren(
-  VaultRouteRouteChildren,
-)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  VaultRouteRoute: VaultRouteRouteWithChildren,
-  AppDashboardRoute: AppDashboardRoute,
+  AppHomeRoute: AppHomeRoute,
   AuthLoginRoute: AuthLoginRoute,
 }
 export const routeTree = rootRouteImport

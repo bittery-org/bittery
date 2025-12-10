@@ -6,6 +6,7 @@
 
 import {
 	createUser,
+	createUserSession,
 	deleteAllUserSessions,
 	deleteSession,
 	finishLogin,
@@ -75,9 +76,30 @@ export const authRouter = router({
 				role: "owner",
 			});
 
+			// Create session and generate token
+			const sessionData = await createUserSession(userId);
+
+			// Get vault keys
+			const vaultKeys = await db.query.vaultKey.findMany({
+				where: (vaultKey, { eq }) => eq(vaultKey.userId, userId),
+				with: {
+					vault: true,
+				},
+			});
+
 			return {
 				success: true,
 				userId,
+				token: sessionData.token,
+				sessionId: sessionData.sessionId,
+				user: sessionData.user,
+				vaultKeys: vaultKeys.map((vk) => ({
+					vaultId: vk.vaultId,
+					vaultName: vk.vault.name,
+					vaultType: vk.vault.type,
+					encryptedVaultKey: vk.encryptedVaultKey,
+					role: vk.role,
+				})),
 			};
 		}),
 
