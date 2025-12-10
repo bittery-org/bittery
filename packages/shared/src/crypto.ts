@@ -127,61 +127,93 @@ export async function decrypt(
 	return decryptServer(encryptedData, key);
 }
 
+export interface PasswordOptions {
+	length?: number;
+	lowercase?: boolean;
+	uppercase?: boolean;
+	numbers?: boolean;
+	symbols?: boolean;
+}
+
 /**
  * Generate a secure random password
  */
-export function generatePassword(length = 20): string {
-	const lowercase = "abcdefghijklmnopqrstuvwxyz";
-	const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-	const numbers = "0123456789";
-	const symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?";
-	const allChars = lowercase + uppercase + numbers + symbols;
+export function generatePassword(options: PasswordOptions = {}): string {
+	const {
+		length = 20,
+		lowercase = true,
+		uppercase = true,
+		numbers = true,
+		symbols = true,
+	} = options;
 
-	const randomValues = new Uint8Array(length);
-	crypto.getRandomValues(randomValues);
+	const lowercaseChars = "abcdefghijklmnopqrstuvwxyz";
+	const uppercaseChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+	const numberChars = "0123456789";
+	const symbolChars = "!@#$%^&*()_+-=[]{}|;:,.<>?";
 
-	// Ensure at least one of each character type
-	let password = "";
-	const val0 = randomValues[0];
-	const val1 = randomValues[1];
-	const val2 = randomValues[2];
-	const val3 = randomValues[3];
-	if (
-		val0 !== undefined &&
-		val1 !== undefined &&
-		val2 !== undefined &&
-		val3 !== undefined
-	) {
-		password += lowercase[val0 % lowercase.length];
-		password += uppercase[val1 % uppercase.length];
-		password += numbers[val2 % numbers.length];
-		password += symbols[val3 % symbols.length];
+	let allChars = "";
+	const requiredChars: string[] = [];
+	const charSets: string[] = [];
+
+	if (lowercase) {
+		allChars += lowercaseChars;
+		charSets.push(lowercaseChars);
+	}
+	if (uppercase) {
+		allChars += uppercaseChars;
+		charSets.push(uppercaseChars);
+	}
+	if (numbers) {
+		allChars += numberChars;
+		charSets.push(numberChars);
+	}
+	if (symbols) {
+		allChars += symbolChars;
+		charSets.push(symbolChars);
 	}
 
-	// Fill the rest randomly
-	for (let i = 4; i < length; i++) {
+	// Need at least one character set
+	if (allChars.length === 0) {
+		allChars = lowercaseChars + uppercaseChars + numberChars + symbolChars;
+		charSets.push(lowercaseChars, uppercaseChars, numberChars, symbolChars);
+	}
+
+	const randomValues = new Uint8Array(length + charSets.length);
+	crypto.getRandomValues(randomValues);
+
+	// Ensure at least one character from each enabled character set
+	for (let i = 0; i < charSets.length; i++) {
+		const charSet = charSets[i];
+		const val = randomValues[i];
+		if (charSet && val !== undefined) {
+			requiredChars.push(charSet[val % charSet.length] ?? "");
+		}
+	}
+
+	// Fill the rest randomly from all allowed characters
+	for (let i = requiredChars.length; i < length; i++) {
 		const val = randomValues[i];
 		if (val !== undefined) {
-			password += allChars[val % allChars.length];
+			requiredChars.push(allChars[val % allChars.length] ?? "");
 		}
 	}
 
 	// Shuffle the password
-	const passwordArray = password.split("");
-	for (let i = passwordArray.length - 1; i > 0; i--) {
-		const val = randomValues[i];
+	for (let i = requiredChars.length - 1; i > 0; i--) {
+		const val = randomValues[charSets.length + i];
 		if (val !== undefined) {
 			const j = val % (i + 1);
-			const temp = passwordArray[i];
-			const tempJ = passwordArray[j];
+			const temp = requiredChars[i];
+			const tempJ = requiredChars[j];
 			if (temp !== undefined && tempJ !== undefined) {
-				passwordArray[i] = tempJ;
-				passwordArray[j] = temp;
+				requiredChars[i] = tempJ;
+				requiredChars[j] = temp;
 			}
 		}
 	}
 
-	return passwordArray.join("");
+	return requiredChars.join("");
 }
 
 /**

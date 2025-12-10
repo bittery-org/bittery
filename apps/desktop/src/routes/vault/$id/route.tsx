@@ -52,7 +52,7 @@ function RouteComponent() {
 
 	return (
 		<>
-			<div className="flex w-96 flex-col border-r bg-background">
+			<div className="flex w-78 flex-col border-r bg-background">
 				<div className="flex-1 overflow-y-auto">
 					{items.length === 0 ? (
 						<div className="flex h-full flex-col items-center justify-center p-8 text-center">

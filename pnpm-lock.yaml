@@ -527,6 +527,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@bittery/shared':
+        specifier: workspace:*
+        version: link:../shared
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1

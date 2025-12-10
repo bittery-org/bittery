@@ -7,6 +7,7 @@ export * from "./components/dialog";
 export * from "./components/dropdown-menu";
 export * from "./components/input";
 export * from "./components/label";
+export * from "./components/password-generator";
 export * from "./components/popover";
 export * from "./components/skeleton";
 export * from "./components/sonner";

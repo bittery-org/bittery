@@ -103,7 +103,7 @@ export function Favicon({
 	return (
 		<div
 			className={cn(
-				"flex flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border",
+				"flex shrink-0 items-center justify-center overflow-hidden rounded-lg border",
 				sizeClasses[size],
 				imageError || !faviconUrl ? avatarColor : "bg-muted/50",
 				className,
