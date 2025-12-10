@@ -7,26 +7,25 @@ import {
   useNavigate,
   useParams,
 } from "@tanstack/react-router";
-import { KeyRound, LogOut, PlusIcon, ShieldCheck } from "lucide-react";
+import { LogOut, PlusIcon, ShieldCheck } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
 import {
+  Avatar,
+  AvatarFallback,
+  Button,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  toast,
+} from "@bittery/ui";
 import { ItemForm } from "@/components/vault/item-form";
 import { SearchCombobox } from "@/components/vault/search-combobox";
 import {
@@ -35,8 +34,8 @@ import {
   getDecryptedVaultKey,
   getVaultKeys,
   isAuthenticated,
-} from "@/lib/crypto";
-import { useTRPC, useTRPCClient } from "@/utils/trpc";
+} from "@bittery/shared/crypto";
+import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 
 export const Route = createFileRoute("/vault")({
   component: RouteComponent,

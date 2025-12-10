@@ -6,7 +6,7 @@ import {
 	useParams,
 } from "@tanstack/react-router";
 import { Favicon } from "@/components/vault/favicon";
-import { useTRPC } from "@/utils/trpc";
+import { useTRPC } from "@bittery/shared/trpc";
 
 export const Route = createFileRoute("/vault/$id")({
 	component: RouteComponent,

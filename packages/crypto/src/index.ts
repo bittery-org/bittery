@@ -8,4 +8,8 @@ export * from "./key-derivation";
 export * from "./rsa";
 export * from "./secret-key";
 export * from "./session-storage";
-export * from "./srp";
+export * from "./srp-client";
+export * from "./srp-server";
+
+// Chrome extension storage adapter
+export * as chromeStorage from "./storage-chrome";

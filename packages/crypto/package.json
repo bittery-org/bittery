@@ -11,13 +11,14 @@
 	"type": "module",
 	"scripts": {},
 	"devDependencies": {
-		"@bittery/config": "workspace:*"
+		"@bittery/config": "workspace:*",
+		"@types/chrome": "^0.0.281"
 	},
 	"peerDependencies": {
 		"typescript": "^5"
 	},
 	"dependencies": {
 		"@noble/hashes": "^1.5.0",
-		"tssrp6a": "^3.0.0"
+		"js-srp6a": "^1.0.2"
 	}
 }

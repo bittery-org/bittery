@@ -9,8 +9,9 @@ import {
 } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import type { TRPCOptionsProxy } from "@trpc/tanstack-react-query";
-import { Toaster } from "@/components/ui/sonner";
+import { Toaster } from "@bittery/ui";
 import appCss from "../index.css?url";
+
 export interface RouterAppContext {
 	trpc: TRPCOptionsProxy<AppRouter>;
 	queryClient: QueryClient;

@@ -4,9 +4,9 @@
  */
 
 import {
-	generateSRPChallenge,
+	generateServerEphemeral,
+	deriveServerSession,
 	type SRPServerChallenge,
-	verifySRPProof,
 } from "@bittery/crypto";
 import { db, session, user } from "@bittery/db";
 import { and, eq, gt } from "drizzle-orm";
@@ -57,11 +57,15 @@ export async function createUser(data: {
 
 /**
  * Start SRP login - generate server challenge
+ * Step 2 of SRP flow: Server receives client's public ephemeral and responds with its own
  */
-export async function startLogin(email: string): Promise<{
+export async function startLogin(
+	email: string,
+	clientPublicKey: string,
+): Promise<{
 	userId: string;
 	challenge: SRPServerChallenge;
-	serverSecret: string;
+	serverEphemeralSecret: string;
 }> {
 	const [existingUser] = await db
 		.select()
@@ -73,34 +77,35 @@ export async function startLogin(email: string): Promise<{
 		throw new Error("User not found");
 	}
 
-	const { serverPublicKey, serverSecret } = await generateSRPChallenge(
+	// Generate server ephemeral key pair
+	const serverEphemeral = await generateServerEphemeral(
 		existingUser.srpVerifier,
-		existingUser.srpSalt,
-		existingUser.email,
 	);
 
 	return {
 		userId: existingUser.id,
 		challenge: {
 			salt: existingUser.srpSalt,
-			serverPublicKey,
+			serverPublicKey: serverEphemeral.publicKey,
 		},
-		serverSecret,
+		serverEphemeralSecret: serverEphemeral.secret,
 	};
 }
 
 /**
  * Finish SRP login - verify proof and create session
+ * Step 4 of SRP flow: Server verifies client's proof and derives session key
  */
 export async function finishLogin(
 	userId: string,
-	serverSecret: string,
+	serverEphemeralSecret: string,
 	clientPublicKey: string,
 	clientProof: string,
 ): Promise<{
 	success: boolean;
 	token?: string;
 	sessionId?: string;
+	serverProof?: string;
 	user?: {
 		id: string;
 		email: string;
@@ -110,16 +115,6 @@ export async function finishLogin(
 		encryptedPrivateKey: string;
 	};
 }> {
-	const { valid, sessionKey } = await verifySRPProof(
-		serverSecret,
-		clientPublicKey,
-		clientProof,
-	);
-
-	if (!valid) {
-		return { success: false };
-	}
-
 	// Get user data
 	const [existingUser] = await db
 		.select()
@@ -131,20 +126,30 @@ export async function finishLogin(
 		return { success: false };
 	}
 
-	// Create session
-	const sessionId = nanoid();
-	const expiresAt = new Date(Date.now() + SESSION_DURATION);
+	try {
+		// Derive server session and verify client proof
+		const serverSession = await deriveServerSession(
+			serverEphemeralSecret,
+			clientPublicKey,
+			existingUser.srpSalt,
+			existingUser.srpVerifier,
+			clientProof,
+		);
 
-	await db.insert(session).values({
-		id: sessionId,
-		userId: existingUser.id,
-		token: sessionKey || nanoid(),
-		expiresAt,
-	});
+		// Create session
+		const sessionId = nanoid();
+		const expiresAt = new Date(Date.now() + SESSION_DURATION);
 
-	// Generate JWT
-	// @ts-expect-error -- jose types
-	const token = await new SignJWT({
+		await db.insert(session).values({
+			id: sessionId,
+			userId: existingUser.id,
+			token: serverSession.key,
+			expiresAt,
+		});
+
+		// Generate JWT
+		// @ts-expect-error -- jose types
+		const token = await new SignJWT({
 		userId: existingUser.id,
 		email: existingUser.email,
 		sessionId,
@@ -156,19 +161,24 @@ export async function finishLogin(
 		.setExpirationTime("30d")
 		.sign(JWT_SECRET);
 
-	return {
-		success: true,
-		token,
-		sessionId,
-		user: {
-			id: existingUser.id,
-			email: existingUser.email,
-			name: existingUser.name,
-			secretKeyHint: existingUser.secretKeyHint || "",
-			publicKey: existingUser.publicKey,
-			encryptedPrivateKey: existingUser.encryptedPrivateKey,
-		},
-	};
+		return {
+			success: true,
+			token,
+			sessionId,
+			serverProof: serverSession.proof,
+			user: {
+				id: existingUser.id,
+				email: existingUser.email,
+				name: existingUser.name,
+				secretKeyHint: existingUser.secretKeyHint || "",
+				publicKey: existingUser.publicKey,
+				encryptedPrivateKey: existingUser.encryptedPrivateKey,
+			},
+		};
+	} catch (error) {
+		console.error("SRP verification failed:", error);
+		return { success: false };
+	}
 }
 
 /**

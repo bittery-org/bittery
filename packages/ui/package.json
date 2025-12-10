@@ -1,0 +1,33 @@
+{
+	"name": "@bittery/ui",
+	"version": "0.1.0",
+	"type": "module",
+	"main": "./src/index.ts",
+	"types": "./src/index.ts",
+	"exports": {
+		".": "./src/index.ts",
+		"./components/*": "./src/components/*.tsx"
+	},
+	"dependencies": {
+		"class-variance-authority": "^0.7.1",
+		"clsx": "^2.1.1",
+		"cmdk": "^1.1.1",
+		"lucide-react": "^0.525.0",
+		"next-themes": "^0.4.6",
+		"radix-ui": "^1.4.2",
+		"react": "19.1.2",
+		"react-dom": "19.1.2",
+		"sonner": "^2.0.3",
+		"tailwind-merge": "^3.3.1"
+	},
+	"devDependencies": {
+		"@bittery/config": "workspace:*",
+		"@types/react": "~19.1.10",
+		"@types/react-dom": "^19.0.4",
+		"typescript": "^5.7.2"
+	},
+	"peerDependencies": {
+		"react": "^18.0.0 || ^19.0.0",
+		"react-dom": "^18.0.0 || ^19.0.0"
+	}
+}

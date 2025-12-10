@@ -6,6 +6,7 @@
 		"sourceMap": true,
 		"outDir": "dist",
 		"composite": true,
+		"types": ["chrome"],
 		"lib": ["ESNext", "DOM"]
 	}
 }
