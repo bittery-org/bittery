@@ -17,6 +17,19 @@
 			"cache": false,
 			"persistent": true
 		},
+		"tauri": {
+			"cache": false
+		},
+		"tauri:dev": {
+			"cache": false,
+			"persistent": true,
+			"dependsOn": ["^build"]
+		},
+		"tauri:build": {
+			"cache": false,
+			"dependsOn": ["^build"],
+			"outputs": ["src-tauri/target/**"]
+		},
 		"db:push": {
 			"cache": false,
 			"persistent": true
