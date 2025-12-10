@@ -1,7 +1,7 @@
-import { FileText, Globe } from "lucide-react";
-import { useState } from "react";
 import { getDomainFromUrl, getFaviconUrl } from "@bittery/shared/favicon";
 import { cn } from "@bittery/ui";
+import { FileText, Globe } from "lucide-react";
+import { useState } from "react";
 
 interface FaviconProps {
 	url?: string;

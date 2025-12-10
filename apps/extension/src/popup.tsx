@@ -1,12 +1,16 @@
 import "./index.css";
+import type { AppRouter } from "@bittery/api/routers/index";
+import { TRPCProvider } from "@bittery/shared/trpc";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+	createMemoryHistory,
+	createRouter,
+	RouterProvider,
+} from "@tanstack/react-router";
+import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree";
-import { TRPCProvider } from "@bittery/shared/trpc";
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
-import type { AppRouter } from "@bittery/api/routers/index";
 
 // Create TanStack Query client
 const queryClient = new QueryClient({
@@ -69,6 +73,6 @@ if (root) {
 	ReactDOM.createRoot(root).render(
 		<React.StrictMode>
 			<Popup />
-		</React.StrictMode>
+		</React.StrictMode>,
 	);
 }

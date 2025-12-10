@@ -13,14 +13,11 @@ import {
 	decrypt as decryptServer,
 	decryptStoredMasterUnlockKey as decryptStoredMasterUnlockKeyServer,
 	decryptVaultKey as decryptVaultKeyServer,
+	deriveClientSession,
 	deriveKeys as deriveKeysServer,
 	type EncryptedData,
 	encrypt as encryptServer,
-	deriveClientSession,
 	generateClientEphemeral,
-	verifyServerSession,
-	type SRPClientSession,
-	type SRPClientEphemeral,
 	generateEncryptionKey,
 	generateRSAKeyPair,
 	generateSecretKey as generateSecretKeyServer,
@@ -38,6 +35,8 @@ import {
 	isSessionValid as isSessionValidServer,
 	rsaDecrypt,
 	rsaEncrypt,
+	type SRPClientEphemeral,
+	type SRPClientSession,
 	type SRPServerChallenge,
 	storeAuthToken as storeAuthTokenServer,
 	storeMasterUnlockKey as storeMasterUnlockKeyServer,
@@ -47,6 +46,7 @@ import {
 	tryRestoreSession as tryRestoreSessionServer,
 	type VaultKeyData,
 	validateSecretKey as validateSecretKeyServer,
+	verifyServerSession,
 } from "@bittery/crypto";
 
 // Re-export all functions from @bittery/crypto
@@ -146,7 +146,12 @@ export function generatePassword(length = 20): string {
 	const val1 = randomValues[1];
 	const val2 = randomValues[2];
 	const val3 = randomValues[3];
-	if (val0 !== undefined && val1 !== undefined && val2 !== undefined && val3 !== undefined) {
+	if (
+		val0 !== undefined &&
+		val1 !== undefined &&
+		val2 !== undefined &&
+		val3 !== undefined
+	) {
 		password += lowercase[val0 % lowercase.length];
 		password += uppercase[val1 % uppercase.length];
 		password += numbers[val2 % numbers.length];

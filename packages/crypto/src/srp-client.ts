@@ -8,23 +8,23 @@ import { createSRPClient } from "js-srp6a";
 const client = createSRPClient("SHA-256", 4096);
 
 export interface SRPRegistration {
-  salt: string;
-  verifier: string;
+	salt: string;
+	verifier: string;
 }
 
 export interface SRPClientEphemeral {
-  publicKey: string;
-  secret: string;
+	publicKey: string;
+	secret: string;
 }
 
 export interface SRPServerChallenge {
-  salt: string;
-  serverPublicKey: string;
+	salt: string;
+	serverPublicKey: string;
 }
 
 export interface SRPClientSession {
-  key: string;
-  proof: string;
+	key: string;
+	proof: string;
 }
 
 /**
@@ -32,13 +32,13 @@ export interface SRPClientSession {
  * Used during signup to create credentials for the server to store
  */
 export async function generateSRPRegistration(
-  password: string
+	password: string,
 ): Promise<SRPRegistration> {
-  const salt = client.generateSalt();
-  const privateKey = await client.deriveSafePrivateKey(salt, password);
-  const verifier = client.deriveVerifier(privateKey);
+	const salt = client.generateSalt();
+	const privateKey = await client.deriveSafePrivateKey(salt, password);
+	const verifier = client.deriveVerifier(privateKey);
 
-  return { salt, verifier };
+	return { salt, verifier };
 }
 
 /**
@@ -46,12 +46,12 @@ export async function generateSRPRegistration(
  * Step 1 of login - generates a random ephemeral key pair
  */
 export function generateClientEphemeral(): SRPClientEphemeral {
-  const ephemeral = client.generateEphemeral();
+	const ephemeral = client.generateEphemeral();
 
-  return {
-    publicKey: ephemeral.public,
-    secret: ephemeral.secret,
-  };
+	return {
+		publicKey: ephemeral.public,
+		secret: ephemeral.secret,
+	};
 }
 
 /**
@@ -59,27 +59,27 @@ export function generateClientEphemeral(): SRPClientEphemeral {
  * Step 3 of login - derives session key and generates proof for server
  */
 export async function deriveClientSession(
-  clientEphemeralSecret: string,
-  serverChallenge: SRPServerChallenge,
-  password: string
+	clientEphemeralSecret: string,
+	serverChallenge: SRPServerChallenge,
+	password: string,
 ): Promise<SRPClientSession> {
-  const privateKey = await client.deriveSafePrivateKey(
-    serverChallenge.salt,
-    password
-  );
+	const privateKey = await client.deriveSafePrivateKey(
+		serverChallenge.salt,
+		password,
+	);
 
-  const session = await client.deriveSession(
-    clientEphemeralSecret,
-    serverChallenge.serverPublicKey,
-    serverChallenge.salt,
-    "", // Empty string when using deriveSafePrivateKey
-    privateKey
-  );
+	const session = await client.deriveSession(
+		clientEphemeralSecret,
+		serverChallenge.serverPublicKey,
+		serverChallenge.salt,
+		"", // Empty string when using deriveSafePrivateKey
+		privateKey,
+	);
 
-  return {
-    key: session.key,
-    proof: session.proof,
-  };
+	return {
+		key: session.key,
+		proof: session.proof,
+	};
 }
 
 /**
@@ -87,13 +87,13 @@ export async function deriveClientSession(
  * Step 5 of login - verifies that server has the correct session key
  */
 export async function verifyServerSession(
-  clientPublicEphemeral: string,
-  clientSession: SRPClientSession,
-  serverSessionProof: string
+	clientPublicEphemeral: string,
+	clientSession: SRPClientSession,
+	serverSessionProof: string,
 ): Promise<void> {
-  await client.verifySession(
-    clientPublicEphemeral,
-    clientSession,
-    serverSessionProof
-  );
+	await client.verifySession(
+		clientPublicEphemeral,
+		clientSession,
+		serverSessionProof,
+	);
 }

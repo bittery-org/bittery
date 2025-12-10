@@ -1,8 +1,8 @@
 import "./index.css";
+import { Card } from "@bittery/ui";
+import { Lock } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { Lock } from "lucide-react";
-import { Card } from "@bittery/ui";
 import { Favicon } from "@/components/favicon";
 
 interface AutofillItem {
@@ -17,7 +17,9 @@ interface AutofillItem {
 function AutofillIframe() {
 	const [items, setItems] = useState<AutofillItem[]>([]);
 	const [selectedIndex, setSelectedIndex] = useState(0);
-	const [fieldType, setFieldType] = useState<"username" | "email" | "password">("username");
+	const [_fieldType, setFieldType] = useState<
+		"username" | "email" | "password"
+	>("username");
 	const [needsUnlock, setNeedsUnlock] = useState(false);
 
 	useEffect(() => {
@@ -35,9 +37,9 @@ function AutofillIframe() {
 		};
 
 		window.addEventListener("message", handleMessage);
-		
+
 		window.parent.postMessage({ type: "IFRAME_READY" }, "*");
-		
+
 		return () => window.removeEventListener("message", handleMessage);
 	}, []);
 
@@ -64,7 +66,7 @@ function AutofillIframe() {
 
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [items, selectedIndex]);
+	}, [items, selectedIndex, handleSelect]);
 
 	const handleSelect = (item: AutofillItem) => {
 		// Send selection to parent
@@ -84,7 +86,7 @@ function AutofillIframe() {
 					<Lock size={14} className="text-primary" />
 					<span className="font-medium">Unlock Required</span>
 				</div>
-				<p className="text-muted-foreground text-xs mt-1.5">
+				<p className="mt-1.5 text-muted-foreground text-xs">
 					Click the Bittery icon to unlock and use autofill
 				</p>
 			</Card>
@@ -124,10 +126,12 @@ function AutofillIframe() {
 								category="login"
 								size="sm"
 							/>
-							<div className="flex-1 min-w-0">
-								<p className="truncate font-medium text-sm">{item.title || item.name}</p>
+							<div className="min-w-0 flex-1">
+								<p className="truncate font-medium text-sm">
+									{item.title || item.name}
+								</p>
 								{item.username && (
-									<p className="truncate text-muted-foreground text-xs mt-0.5">
+									<p className="mt-0.5 truncate text-muted-foreground text-xs">
 										{item.username}
 									</p>
 								)}
@@ -138,7 +142,7 @@ function AutofillIframe() {
 			</div>
 
 			<div className="mt-0.5 border-t px-2.5 py-1.5">
-				<p className="text-center text-muted-foreground text-[10px]">
+				<p className="text-center text-[10px] text-muted-foreground">
 					↑↓ to navigate • Enter to select • Esc to close
 				</p>
 			</div>
@@ -151,6 +155,6 @@ if (root) {
 	ReactDOM.createRoot(root).render(
 		<React.StrictMode>
 			<AutofillIframe />
-		</React.StrictMode>
+		</React.StrictMode>,
 	);
 }

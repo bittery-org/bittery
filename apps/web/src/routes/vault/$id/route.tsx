@@ -1,3 +1,4 @@
+import { useTRPC } from "@bittery/shared/trpc";
 import { useQuery } from "@tanstack/react-query";
 import {
 	createFileRoute,
@@ -6,7 +7,6 @@ import {
 	useParams,
 } from "@tanstack/react-router";
 import { Favicon } from "@/components/vault/favicon";
-import { useTRPC } from "@bittery/shared/trpc";
 
 export const Route = createFileRoute("/vault/$id")({
 	component: RouteComponent,

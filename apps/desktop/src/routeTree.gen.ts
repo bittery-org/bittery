@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as UnlockRouteImport } from './routes/unlock'
 import { Route as LoginRouteImport } from './routes/login'
-import { Route as BackupRouteImport } from './routes/_backup'
 import { Route as VaultRouteRouteImport } from './routes/vault/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as VaultIndexRouteImport } from './routes/vault/index'
@@ -27,10 +26,6 @@ const UnlockRoute = UnlockRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const BackupRoute = BackupRouteImport.update({
-  id: '/_backup',
   getParentRoute: () => rootRouteImport,
 } as any)
 const VaultRouteRoute = VaultRouteRouteImport.update({
@@ -86,7 +81,6 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/vault': typeof VaultRouteRouteWithChildren
-  '/_backup': typeof BackupRoute
   '/login': typeof LoginRoute
   '/unlock': typeof UnlockRoute
   '/vault/$id': typeof VaultIdRouteRouteWithChildren
@@ -117,7 +111,6 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/vault'
-    | '/_backup'
     | '/login'
     | '/unlock'
     | '/vault/$id'
@@ -129,7 +122,6 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   VaultRouteRoute: typeof VaultRouteRouteWithChildren
-  BackupRoute: typeof BackupRoute
   LoginRoute: typeof LoginRoute
   UnlockRoute: typeof UnlockRoute
 }
@@ -148,13 +140,6 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_backup': {
-      id: '/_backup'
-      path: ''
-      fullPath: ''
-      preLoaderRoute: typeof BackupRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/vault': {
@@ -233,7 +218,6 @@ const VaultRouteRouteWithChildren = VaultRouteRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   VaultRouteRoute: VaultRouteRouteWithChildren,
-  BackupRoute: BackupRoute,
   LoginRoute: LoginRoute,
   UnlockRoute: UnlockRoute,
 }

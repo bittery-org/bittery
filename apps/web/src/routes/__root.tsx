@@ -1,4 +1,5 @@
 import type { AppRouter } from "@bittery/api/routers/index";
+import { Toaster } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import {
@@ -9,7 +10,6 @@ import {
 } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import type { TRPCOptionsProxy } from "@trpc/tanstack-react-query";
-import { Toaster } from "@bittery/ui";
 import appCss from "../index.css?url";
 
 export interface RouterAppContext {

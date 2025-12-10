@@ -1,10 +1,11 @@
 /** biome-ignore-all lint/suspicious/noArrayIndexKey: Using array index as key is acceptable here because the list order is stable and items do not get reordered */
+
+import { generatePassword } from "@bittery/shared/crypto";
+import { Button, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useState } from "react";
-import { toast, Button, Input, Label } from "@bittery/ui";
-import { generatePassword } from "@bittery/shared/crypto";
 
 export interface CustomField {
 	id: string;

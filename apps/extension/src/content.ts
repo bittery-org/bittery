@@ -19,7 +19,7 @@ let currentFocusedField: CredentialField | null = null;
 // Detect password fields
 function detectPasswordFields() {
 	const inputs = document.querySelectorAll<HTMLInputElement>(
-		'input[type="password"], input[type="email"], input[type="text"][autocomplete*="username"], input[type="text"][autocomplete*="email"]'
+		'input[type="password"], input[type="email"], input[type="text"][autocomplete*="username"], input[type="text"][autocomplete*="email"]',
 	);
 
 	inputs.forEach((input) => {
@@ -42,7 +42,7 @@ function detectPasswordFields() {
 		// Disable browser's native autofill
 		input.setAttribute("autocomplete", "off");
 		input.setAttribute("data-form-type", "other");
-		
+
 		// Also disable on the parent form if it exists
 		const form = input.closest("form");
 		if (form && !form.hasAttribute("data-bittery-processed")) {
@@ -62,7 +62,7 @@ async function handleFieldFocus(field: CredentialField) {
 	if (currentFocusedField && currentFocusedField !== field) {
 		hideAutofillOverlay(currentFocusedField);
 	}
-	
+
 	currentFocusedField = field;
 
 	// Check auth status before showing autofill
@@ -105,7 +105,6 @@ function handleFieldBlur(field: CredentialField) {
 
 // Show autofill overlay
 function showAutofillOverlay(field: CredentialField, items: any[]) {
-
 	// Remove existing overlay
 	if (field.overlay) {
 		field.overlay.remove();
@@ -117,7 +116,8 @@ function showAutofillOverlay(field: CredentialField, items: any[]) {
 	shadowHost.style.zIndex = "2147483647"; // Max z-index
 	shadowHost.style.opacity = "0";
 	shadowHost.style.transform = "translateY(-8px)";
-	shadowHost.style.transition = "opacity 0.15s ease-out, transform 0.15s ease-out";
+	shadowHost.style.transition =
+		"opacity 0.15s ease-out, transform 0.15s ease-out";
 	document.body.appendChild(shadowHost);
 
 	// Attach shadow DOM
@@ -148,13 +148,13 @@ function showAutofillOverlay(field: CredentialField, items: any[]) {
 	}, 10);
 
 	// Wait for iframe to signal it's ready
-	const messageHandler = (event: MessageEvent) => {		
+	const messageHandler = (event: MessageEvent) => {
 		if (event.data.type === "IFRAME_READY") {
 			if (field.readyTimeout) {
 				clearTimeout(field.readyTimeout);
 				field.readyTimeout = undefined;
 			}
-			
+
 			// Send items to iframe
 			iframe.contentWindow?.postMessage(
 				{
@@ -168,10 +168,10 @@ function showAutofillOverlay(field: CredentialField, items: any[]) {
 			handleAutofillSelect(field, event.data.item);
 		}
 	};
-	
+
 	field.messageHandler = messageHandler;
 	window.addEventListener("message", messageHandler);
-	
+
 	// Fallback: send items after a delay if ready signal not received
 	field.readyTimeout = setTimeout(() => {
 		console.log("Timeout waiting for iframe ready, sending items anyway");
@@ -240,12 +240,12 @@ async function handleAutofillSelect(field: CredentialField, item: any) {
 
 	// Try to find and fill related fields
 	const form = field.input.closest("form") || document;
-	
+
 	if (field.type === "password") {
 		// Find username field when password is filled
 		// First, check our detected fields
 		let usernameField: HTMLInputElement | undefined;
-		
+
 		for (const [input, detectedField] of detectedFields) {
 			if (
 				input !== field.input &&
@@ -256,12 +256,13 @@ async function handleAutofillSelect(field: CredentialField, item: any) {
 				if (fieldForm === (field.input.closest("form") || null)) {
 					usernameField = input;
 					break;
-				} else if (!usernameField) {
+				}
+				if (!usernameField) {
 					usernameField = input;
 				}
 			}
 		}
-		
+
 		// Fallback: search for username fields in the form
 		if (!usernameField) {
 			usernameField = Array.from(
@@ -314,7 +315,8 @@ function showUnlockPrompt(field: CredentialField) {
 	shadowHost.style.zIndex = "2147483647"; // Max z-index
 	shadowHost.style.opacity = "0";
 	shadowHost.style.transform = "translateY(-8px)";
-	shadowHost.style.transition = "opacity 0.15s ease-out, transform 0.15s ease-out";
+	shadowHost.style.transition =
+		"opacity 0.15s ease-out, transform 0.15s ease-out";
 	document.body.appendChild(shadowHost);
 
 	// Attach shadow DOM
@@ -351,7 +353,7 @@ function showUnlockPrompt(field: CredentialField) {
 				clearTimeout(field.readyTimeout);
 				field.readyTimeout = undefined;
 			}
-			
+
 			// Send unlock needed message to iframe
 			iframe.contentWindow?.postMessage(
 				{
@@ -361,10 +363,10 @@ function showUnlockPrompt(field: CredentialField) {
 			);
 		}
 	};
-	
+
 	field.messageHandler = messageHandler;
 	window.addEventListener("message", messageHandler);
-	
+
 	// Fallback: send message after a delay if ready signal not received
 	field.readyTimeout = setTimeout(() => {
 		iframe.contentWindow?.postMessage(

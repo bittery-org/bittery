@@ -4,8 +4,8 @@
  */
 
 import {
-	generateServerEphemeral,
 	deriveServerSession,
+	generateServerEphemeral,
 	type SRPServerChallenge,
 } from "@bittery/crypto";
 import { db, session, user } from "@bittery/db";
@@ -61,7 +61,7 @@ export async function createUser(data: {
  */
 export async function startLogin(
 	email: string,
-	clientPublicKey: string,
+	_clientPublicKey: string,
 ): Promise<{
 	userId: string;
 	challenge: SRPServerChallenge;
@@ -150,16 +150,16 @@ export async function finishLogin(
 		// Generate JWT
 		// @ts-expect-error -- jose types
 		const token = await new SignJWT({
-		userId: existingUser.id,
-		email: existingUser.email,
-		sessionId,
-	} as SessionPayload)
-		.setProtectedHeader({ alg: "HS256" })
-		.setIssuedAt()
-		.setIssuer(JWT_ISSUER)
-		.setAudience(JWT_AUDIENCE)
-		.setExpirationTime("30d")
-		.sign(JWT_SECRET);
+			userId: existingUser.id,
+			email: existingUser.email,
+			sessionId,
+		} as SessionPayload)
+			.setProtectedHeader({ alg: "HS256" })
+			.setIssuedAt()
+			.setIssuer(JWT_ISSUER)
+			.setAudience(JWT_AUDIENCE)
+			.setExpirationTime("30d")
+			.sign(JWT_SECRET);
 
 		return {
 			success: true,

@@ -1,9 +1,10 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: Thats fine here */
+
+import { copyToClipboard } from "@bittery/shared/crypto";
+import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { Copy, ExternalLink, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 import { Favicon } from "@/components/vault/favicon";
-import { copyToClipboard } from "@bittery/shared/crypto";
-import { toast, Button, Card, Input, Label } from "@bittery/ui";
 
 export interface CustomField {
 	id: string;

@@ -1,29 +1,29 @@
 {
-  "name": "@bittery/crypto",
-  "exports": {
-    ".": {
-      "default": "./src/index.ts"
-    },
-    "./*": {
-      "default": "./src/*.ts"
-    },
-    "./storage-tauri": {
-      "default": "./src/storage-tauri.ts"
-    }
-  },
-  "type": "module",
-  "scripts": {},
-  "devDependencies": {
-    "@bittery/config": "workspace:*",
-    "@types/chrome": "^0.0.281"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
-  "dependencies": {
-    "@choochmeque/tauri-plugin-biometry-api": "^0.2.5",
-    "@noble/hashes": "^1.5.0",
-    "@tauri-apps/plugin-store": "^2.4.1",
-    "js-srp6a": "^1.0.2"
-  }
+	"name": "@bittery/crypto",
+	"exports": {
+		".": {
+			"default": "./src/index.ts"
+		},
+		"./*": {
+			"default": "./src/*.ts"
+		},
+		"./storage-tauri": {
+			"default": "./src/storage-tauri.ts"
+		}
+	},
+	"type": "module",
+	"scripts": {},
+	"devDependencies": {
+		"@bittery/config": "workspace:*",
+		"@types/chrome": "^0.0.281"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	},
+	"dependencies": {
+		"@choochmeque/tauri-plugin-biometry-api": "^0.2.5",
+		"@noble/hashes": "^1.5.0",
+		"@tauri-apps/plugin-store": "^2.4.1",
+		"js-srp6a": "^1.0.2"
+	}
 }

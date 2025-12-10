@@ -1,7 +1,7 @@
+import { getVaultKeys } from "@bittery/shared/crypto";
 import { createFileRoute } from "@tanstack/react-router";
 import { Lock } from "lucide-react";
 import { useEffect, useState } from "react";
-import { getVaultKeys } from "@bittery/shared/crypto";
 
 export const Route = createFileRoute("/vault/")({
 	component: VaultComponent,

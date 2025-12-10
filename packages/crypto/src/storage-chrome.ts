@@ -39,7 +39,7 @@ export interface VaultKeyData {
 async function getDeviceKey(): Promise<Uint8Array> {
 	const result = await chrome.storage.local.get(DEVICE_KEY_STORAGE);
 	const stored = result[DEVICE_KEY_STORAGE];
-	
+
 	if (stored) {
 		return base64ToArrayBuffer(stored);
 	}
@@ -110,7 +110,7 @@ export async function storeSessionData(
 export async function getStoredSessionData(): Promise<StoredSessionData | null> {
 	const result = await chrome.storage.local.get(SESSION_DATA_STORAGE);
 	const stored = result[SESSION_DATA_STORAGE];
-	
+
 	if (!stored) return null;
 
 	try {
@@ -211,18 +211,21 @@ export async function getAuthToken(): Promise<string | null> {
  * Store encrypted vault keys in chrome.storage.session
  */
 export async function storeVaultKeys(vaultKeys: VaultKeyData[]): Promise<void> {
-	console.log('[storage-chrome] Storing vault keys:', vaultKeys.length, 'keys');
+	console.log("[storage-chrome] Storing vault keys:", vaultKeys.length, "keys");
 	try {
 		await chrome.storage.session.set({
 			[VAULT_KEYS_KEY]: JSON.stringify(vaultKeys),
 		});
-		console.log('[storage-chrome] Vault keys stored successfully');
-		
+		console.log("[storage-chrome] Vault keys stored successfully");
+
 		// Verify the write
 		const verification = await chrome.storage.session.get(VAULT_KEYS_KEY);
-		console.log('[storage-chrome] Verification - vault keys exist:', !!verification[VAULT_KEYS_KEY]);
+		console.log(
+			"[storage-chrome] Verification - vault keys exist:",
+			!!verification[VAULT_KEYS_KEY],
+		);
 	} catch (error) {
-		console.error('[storage-chrome] Failed to store vault keys:', error);
+		console.error("[storage-chrome] Failed to store vault keys:", error);
 		throw error;
 	}
 }
@@ -231,10 +234,14 @@ export async function storeVaultKeys(vaultKeys: VaultKeyData[]): Promise<void> {
  * Get encrypted vault keys from chrome.storage.session
  */
 export async function getVaultKeys(): Promise<VaultKeyData[] | null> {
-	console.log('[storage-chrome] Getting vault keys from session storage');
+	console.log("[storage-chrome] Getting vault keys from session storage");
 	const result = await chrome.storage.session.get(VAULT_KEYS_KEY);
 	const stored = result[VAULT_KEYS_KEY];
-	console.log('[storage-chrome] Vault keys found:', !!stored, stored ? `(${JSON.parse(stored).length} keys)` : '(none)');
+	console.log(
+		"[storage-chrome] Vault keys found:",
+		!!stored,
+		stored ? `(${JSON.parse(stored).length} keys)` : "(none)",
+	);
 	return stored ? JSON.parse(stored) : null;
 }
 

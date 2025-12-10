@@ -1,12 +1,9 @@
+import { Button, Card, Label, Skeleton } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft, Copy, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Button } from "@bittery/ui";
-import { Card } from "@bittery/ui";
-import { Label } from "@bittery/ui";
-import { Skeleton } from "@bittery/ui";
 
 export function ItemDetailPage() {
 	const navigate = useNavigate();
@@ -31,7 +28,7 @@ export function ItemDetailPage() {
 
 	if (isLoading) {
 		return (
-			<div className="p-4 space-y-4">
+			<div className="space-y-4 p-4">
 				<Skeleton className="h-8 w-32" />
 				<Skeleton className="h-64 w-full" />
 			</div>

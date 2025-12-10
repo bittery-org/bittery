@@ -1,26 +1,24 @@
+import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff, LockIcon } from "lucide-react";
-import { useState, useEffect } from "react";
-import { toast } from "@bittery/ui";
-import { Button } from "@bittery/ui";
-import { Card } from "@bittery/ui";
-import { Input } from "@bittery/ui";
-import { Label } from "@bittery/ui";
+import { useEffect, useState } from "react";
 
 export function UnlockPage() {
 	const navigate = useNavigate();
 	const [showPassword, setShowPassword] = useState(false);
-	const [email, setEmail] = useState("");
+	const [_email, setEmail] = useState("");
 
 	useEffect(() => {
 		// Get stored session data for display
-		chrome.runtime.sendMessage({ type: "GET_SESSION_DATA" }).then((response) => {
-			if (response.sessionData) {
-				setEmail(response.sessionData.email);
-			}
-		});
+		chrome.runtime
+			.sendMessage({ type: "GET_SESSION_DATA" })
+			.then((response) => {
+				if (response.sessionData) {
+					setEmail(response.sessionData.email);
+				}
+			});
 	}, []);
 
 	const form = useForm({
@@ -113,10 +111,14 @@ export function UnlockPage() {
 												type="button"
 												variant="ghost"
 												size="icon"
-												className="absolute top-1/2 right-0 size-10 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+												className="-translate-y-1/2 absolute top-1/2 right-0 size-10 text-muted-foreground hover:text-foreground"
 												onClick={() => setShowPassword(!showPassword)}
 											>
-												{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+												{showPassword ? (
+													<EyeOff size={16} />
+												) : (
+													<Eye size={16} />
+												)}
 											</Button>
 										</div>
 									</div>
