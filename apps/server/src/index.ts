@@ -9,8 +9,9 @@ import { logger } from "hono/logger";
 const app = new Hono();
 
 app.use(logger());
+
 app.use(
-	"/*",
+	"*",
 	cors({
 		origin: process.env.CORS_ORIGIN?.split(",") || "",
 		allowMethods: ["GET", "POST", "OPTIONS"],
