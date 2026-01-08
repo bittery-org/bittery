@@ -10,6 +10,7 @@ import {
   decrypt,
   deriveClientSession,
   deriveKeys,
+  encrypt,
   generateClientEphemeral,
   verifyServerSession,
 } from "@bittery/crypto";
@@ -610,6 +611,432 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
           sendResponse({ items: filtered });
 
+          break;
+        }
+
+        case "GET_WRITABLE_VAULTS": {
+          // Update activity timestamp
+          updateActivity();
+
+          // Fetch all vaults
+          const vaults = await trpcClient.vault.list.query();
+
+          // Filter out read-only vaults (only return vaults user can write to)
+          const writableVaults = vaults.filter(
+            (vault) => vault.role !== "read-only"
+          );
+
+          sendResponse({
+            success: true,
+            vaults: writableVaults.map((v) => ({
+              id: v.id,
+              name: v.name,
+              type: v.type,
+              role: v.role,
+            })),
+          });
+          break;
+        }
+
+        case "CHECK_EXISTING_CREDENTIALS": {
+          // Update activity timestamp
+          updateActivity();
+
+          const { url, username } = message.payload;
+
+          if (!url) {
+            sendResponse({
+              success: false,
+              error: "URL is required",
+            });
+            break;
+          }
+
+          // Extract hostname from URL
+          let hostname: string;
+          try {
+            const urlObj = new URL(
+              url.startsWith("http") ? url : `https://${url}`
+            );
+            hostname = urlObj.hostname;
+          } catch {
+            sendResponse({
+              success: false,
+              error: "Invalid URL",
+            });
+            break;
+          }
+
+          // Get vault keys and decrypt items (same pattern as GET_AUTOFILL_ITEMS)
+          const vaultKeys = await chromeStorage.getVaultKeys();
+
+          if (!vaultKeys || vaultKeys.length === 0) {
+            sendResponse({
+              success: true,
+              existingCredentials: [],
+              hasDuplicates: false,
+            });
+            break;
+          }
+
+          const vaults = await trpcClient.vault.list.query();
+
+          const decryptedVaultKeys: Record<string, Uint8Array> = {};
+
+          await Promise.all(
+            vaultKeys.map(async (vk) => {
+              decryptedVaultKeys[vk.vaultId] =
+                await chromeStorage.decryptVaultKey(vk.encryptedVaultKey);
+            })
+          );
+
+          const allVaultItems = await Promise.all(
+            vaults.map(async (vault) => {
+              try {
+                const decryptedItems = await Promise.all(
+                  vault.items.map(async (item) => {
+                    try {
+                      const vaultKey = decryptedVaultKeys[vault.id];
+                      if (!vaultKey) throw new Error("Vault key not found");
+
+                      const decrypted = await decrypt(
+                        {
+                          algorithm: item.encryptionAlgorithm,
+                          iv: item.encryptionIv,
+                          ciphertext: item.encryptedData,
+                        },
+                        vaultKey!
+                      );
+
+                      const data = JSON.parse(decrypted);
+                      return { ...item, ...data };
+                    } catch (error) {
+                      console.error("Failed to decrypt item:", item.id, error);
+                      return null;
+                    }
+                  })
+                );
+
+                return decryptedItems.filter((item) => item !== null);
+              } catch (_error) {
+                console.log(_error);
+                return [];
+              }
+            })
+          );
+
+          // Flatten the array of arrays
+          const items = allVaultItems.flat();
+
+          // Filter by hostname (same logic as GET_AUTOFILL_ITEMS)
+          const matchingItems = items.filter((item) => {
+            if (!item?.overview.url) return false;
+            try {
+              const itemUrl = new URL(
+                item.overview.url.startsWith("http")
+                  ? item.overview.url
+                  : `https://${item.overview.url}`
+              );
+
+              const itemHostname = itemUrl.hostname;
+
+              // Exact match
+              if (itemHostname === hostname) return true;
+
+              // Check if one is a subdomain of the other
+              if (
+                itemHostname.endsWith(`.${hostname}`) ||
+                hostname.endsWith(`.${itemHostname}`)
+              ) {
+                return true;
+              }
+
+              // Extract base domain (remove subdomains)
+              const getBaseDomain = (host: string) => {
+                const parts = host.split(".");
+                if (parts.length <= 2) return host;
+                return parts.slice(-2).join(".");
+              };
+
+              const itemBaseDomain = getBaseDomain(itemHostname);
+              const hostnameBaseDomain = getBaseDomain(hostname);
+
+              return itemBaseDomain === hostnameBaseDomain;
+            } catch {
+              return false;
+            }
+          });
+
+          // If username is provided, filter further to find exact username matches
+          let exactMatches = matchingItems;
+          if (username) {
+            exactMatches = matchingItems.filter(
+              (item) =>
+                item.username?.toLowerCase() === username.toLowerCase()
+            );
+          }
+
+          sendResponse({
+            success: true,
+            existingCredentials: exactMatches.map((item) => ({
+              id: item.id,
+              vaultId: item.vaultId,
+              username: item.username || "",
+              url: item.overview.url || "",
+            })),
+            hasDuplicates: exactMatches.length > 0,
+          });
+
+          break;
+        }
+
+        case "SAVE_NEW_CREDENTIAL": {
+          // Update activity timestamp
+          updateActivity();
+
+          const { vaultId, username, password, url } = message.payload;
+
+          // Validate inputs
+          if (!vaultId || !username || !password || !url) {
+            sendResponse({
+              success: false,
+              error: "Missing required fields",
+              errorType: "validation",
+            });
+            break;
+          }
+
+          // Check if extension is still unlocked
+          if (!isUnlocked()) {
+            sendResponse({
+              success: false,
+              error: "Extension is locked. Please unlock and try again.",
+              errorType: "locked",
+            });
+            break;
+          }
+
+          // Get vault key for the selected vault
+          const vaultKeys = await chromeStorage.getVaultKeys();
+          if (!vaultKeys || vaultKeys.length === 0) {
+            sendResponse({
+              success: false,
+              error: "No vault keys available. Please re-authenticate.",
+              errorType: "vault_key",
+            });
+            break;
+          }
+
+          const vaultKeyData = vaultKeys.find((vk) => vk.vaultId === vaultId);
+          if (!vaultKeyData) {
+            sendResponse({
+              success: false,
+              error: "Vault key not found. Please select a different vault.",
+              errorType: "vault_key",
+            });
+            break;
+          }
+
+          try {
+            // Decrypt vault key
+            const vaultKey = await chromeStorage.decryptVaultKey(
+              vaultKeyData.encryptedVaultKey
+            );
+
+            // Prepare credential data to encrypt
+            const credentialData = {
+              username,
+              password,
+              overview: {
+                url,
+              },
+            };
+
+            // Encrypt credential data with vault key
+            const encryptedData = await encrypt(
+              JSON.stringify(credentialData),
+              vaultKey
+            );
+
+            // Extract hostname from URL for title
+            let hostname = url;
+            try {
+              const urlObj = new URL(
+                url.startsWith("http") ? url : `https://${url}`
+              );
+              hostname = urlObj.hostname;
+            } catch {
+              // Use URL as-is if parsing fails
+            }
+
+            // Create item via tRPC
+            const result = await trpcClient.vault.createItem.mutate({
+              vaultId,
+              category: "login",
+              overview: {
+                title: hostname,
+                url,
+                username,
+              },
+              encryptedData: encryptedData.ciphertext,
+              encryptionIv: encryptedData.iv,
+              encryptionAlgorithm: encryptedData.algorithm,
+            });
+
+            sendResponse({ success: true, itemId: result.itemId });
+          } catch (error: any) {
+            console.error("Error saving credential:", error);
+
+            // Determine error type and message
+            let errorMessage = "Failed to save credentials. Please try again.";
+            let errorType = "unknown";
+
+            if (error.message?.includes("network") || error.message?.includes("fetch")) {
+              errorMessage = "Network error. Check your connection and try again.";
+              errorType = "network";
+            } else if (error.message?.includes("decrypt") || error.message?.includes("encryption")) {
+              errorMessage = "Encryption error. Please unlock and try again.";
+              errorType = "encryption";
+            } else if (error.message?.includes("unauthorized") || error.message?.includes("auth")) {
+              errorMessage = "Authentication error. Please re-authenticate.";
+              errorType = "auth";
+            } else if (error.message?.includes("permission") || error.message?.includes("access")) {
+              errorMessage = "Permission denied. You may not have write access to this vault.";
+              errorType = "permission";
+            }
+
+            sendResponse({
+              success: false,
+              error: errorMessage,
+              errorType,
+            });
+          }
+          break;
+        }
+
+        case "UPDATE_EXISTING_CREDENTIAL": {
+          // Update activity timestamp
+          updateActivity();
+
+          const { itemId, vaultId, username, password, url } = message.payload;
+
+          // Validate inputs
+          if (!itemId || !vaultId || !username || !password || !url) {
+            sendResponse({
+              success: false,
+              error: "Missing required fields",
+              errorType: "validation",
+            });
+            break;
+          }
+
+          // Check if extension is still unlocked
+          if (!isUnlocked()) {
+            sendResponse({
+              success: false,
+              error: "Extension is locked. Please unlock and try again.",
+              errorType: "locked",
+            });
+            break;
+          }
+
+          // Get vault key for the selected vault
+          const vaultKeys = await chromeStorage.getVaultKeys();
+          if (!vaultKeys || vaultKeys.length === 0) {
+            sendResponse({
+              success: false,
+              error: "No vault keys available. Please re-authenticate.",
+              errorType: "vault_key",
+            });
+            break;
+          }
+
+          const vaultKeyData = vaultKeys.find((vk) => vk.vaultId === vaultId);
+          if (!vaultKeyData) {
+            sendResponse({
+              success: false,
+              error: "Vault key not found. Please select a different vault.",
+              errorType: "vault_key",
+            });
+            break;
+          }
+
+          try {
+            // Decrypt vault key
+            const vaultKey = await chromeStorage.decryptVaultKey(
+              vaultKeyData.encryptedVaultKey
+            );
+
+            // Prepare credential data to encrypt
+            const credentialData = {
+              username,
+              password,
+              overview: {
+                url,
+              },
+            };
+
+            // Encrypt credential data with vault key
+            const encryptedData = await encrypt(
+              JSON.stringify(credentialData),
+              vaultKey
+            );
+
+            // Extract hostname from URL for title
+            let hostname = url;
+            try {
+              const urlObj = new URL(
+                url.startsWith("http") ? url : `https://${url}`
+              );
+              hostname = urlObj.hostname;
+            } catch {
+              // Use URL as-is if parsing fails
+            }
+
+            // Update item via tRPC
+            await trpcClient.vault.updateItem.mutate({
+              itemId,
+              overview: {
+                title: hostname,
+                url,
+                username,
+              },
+              encryptedData: encryptedData.ciphertext,
+              encryptionIv: encryptedData.iv,
+              encryptionAlgorithm: encryptedData.algorithm,
+            });
+
+            sendResponse({ success: true });
+          } catch (error: any) {
+            console.error("Error updating credential:", error);
+
+            // Determine error type and message
+            let errorMessage = "Failed to update credentials. Please try again.";
+            let errorType = "unknown";
+
+            if (error.message?.includes("network") || error.message?.includes("fetch")) {
+              errorMessage = "Network error. Check your connection and try again.";
+              errorType = "network";
+            } else if (error.message?.includes("decrypt") || error.message?.includes("encryption")) {
+              errorMessage = "Encryption error. Please unlock and try again.";
+              errorType = "encryption";
+            } else if (error.message?.includes("unauthorized") || error.message?.includes("auth")) {
+              errorMessage = "Authentication error. Please re-authenticate.";
+              errorType = "auth";
+            } else if (error.message?.includes("permission") || error.message?.includes("access")) {
+              errorMessage = "Permission denied. You may not have write access to this vault.";
+              errorType = "permission";
+            } else if (error.message?.includes("not found")) {
+              errorMessage = "Credential not found. It may have been deleted.";
+              errorType = "not_found";
+            }
+
+            sendResponse({
+              success: false,
+              error: errorMessage,
+              errorType,
+            });
+          }
           break;
         }
 

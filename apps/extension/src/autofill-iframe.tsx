@@ -43,6 +43,17 @@ function AutofillIframe() {
 		return () => window.removeEventListener("message", handleMessage);
 	}, []);
 
+	const handleSelect = (item: AutofillItem) => {
+		// Send selection to parent
+		window.parent.postMessage(
+			{
+				type: "AUTOFILL_SELECT",
+				item,
+			},
+			"*",
+		);
+	};
+
 	useEffect(() => {
 		// Keyboard navigation
 		const handleKeyDown = (event: KeyboardEvent) => {
@@ -66,18 +77,7 @@ function AutofillIframe() {
 
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [items, selectedIndex, handleSelect]);
-
-	const handleSelect = (item: AutofillItem) => {
-		// Send selection to parent
-		window.parent.postMessage(
-			{
-				type: "AUTOFILL_SELECT",
-				item,
-			},
-			"*",
-		);
-	};
+	}, [items, selectedIndex]);
 
 	if (needsUnlock) {
 		return (

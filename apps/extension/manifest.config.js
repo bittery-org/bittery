@@ -43,7 +43,7 @@ export default defineManifest({
 	},
 	web_accessible_resources: [
 		{
-			resources: ["autofill-iframe.html"],
+			resources: ["autofill-iframe.html", "save-prompt-iframe.html"],
 			matches: ["<all_urls>"],
 		},
 	],
