@@ -6,6 +6,7 @@ import {
 	Dialog,
 	DialogContent,
 	DialogDescription,
+	DialogFooter,
 	DialogHeader,
 	DialogTitle,
 	DropdownMenu,
@@ -16,7 +17,7 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
 	Copy as CopyIcon,
 	Edit,
@@ -56,11 +57,13 @@ function VaultItemComponent() {
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
 	const queryClient = useQueryClient();
+	const navigate = useNavigate();
 
 	const { itemId } = Route.useParams();
 
 	const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+	const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 	const [decryptedItemData, setDecryptedItemData] =
 		useState<DecryptedItemData | null>(null);
 	const selectedVaultId = Route.useParams().id;
@@ -166,6 +169,24 @@ function VaultItemComponent() {
 		},
 	});
 
+	// Delete item mutation (soft delete)
+	const deleteItemMutation = useMutation({
+		mutationFn: async () => {
+			if (!itemId) throw new Error("No item selected");
+			return await trpcClient.vault.deleteItem.mutate({ itemId });
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: [["vault", "listItems"]] });
+			setIsDeleteDialogOpen(false);
+			toast.success("Item moved to trash");
+			// Navigate back to vault
+			navigate({ to: "/vault/$id", params: { id: selectedVaultId } });
+		},
+		onError: (error) => {
+			toast.error(`Failed to delete item: ${error.message}`);
+		},
+	});
+
 	const getDecryptedItem = useCallback(async () => {
 		if (!rawItem) return;
 
@@ -207,11 +228,15 @@ function VaultItemComponent() {
 	};
 
 	const handleDelete = () => {
-		toast.error("Delete functionality not yet implemented");
+		setIsDeleteDialogOpen(true);
 	};
 
 	const handleDuplicate = () => {
 		toast.info("Duplicate functionality not yet implemented");
+	};
+
+	const confirmDelete = () => {
+		deleteItemMutation.mutate();
 	};
 
 	if (!decryptedItemData) {
@@ -321,6 +346,31 @@ function VaultItemComponent() {
 							submitLabel="Update"
 						/>
 					)}
+				</DialogContent>
+			</Dialog>
+
+			{/* Delete Confirmation Dialog */}
+			<Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>Move to Trash?</DialogTitle>
+						<DialogDescription>
+							This item will be moved to trash. You can restore it later or
+							delete it permanently from the trash.
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+							Cancel
+						</Button>
+						<Button
+							variant="destructive"
+							onClick={confirmDelete}
+							disabled={deleteItemMutation.isPending}
+						>
+							Move to Trash
+						</Button>
+					</DialogFooter>
 				</DialogContent>
 			</Dialog>
 		</>

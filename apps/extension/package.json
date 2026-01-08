@@ -14,9 +14,9 @@
 		"@bittery/crypto": "workspace:*",
 		"@bittery/shared": "workspace:*",
 		"@bittery/ui": "workspace:*",
+		"@tanstack/react-form": "^1.23.5",
 		"@tanstack/react-query": "^5.85.5",
 		"@tanstack/react-router": "^1.132.31",
-		"@tanstack/react-form": "^1.23.5",
 		"@trpc/client": "catalog:",
 		"@trpc/tanstack-react-query": "^11.5.0",
 		"lucide-react": "^0.525.0",
@@ -28,11 +28,13 @@
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
 		"@crxjs/vite-plugin": "^2.3.0",
+		"@playwright/test": "^1.57.0",
 		"@tailwindcss/vite": "^4.1.8",
 		"@types/chrome": "^0.0.281",
 		"@types/react": "~19.1.10",
 		"@types/react-dom": "^19.0.4",
 		"@vitejs/plugin-react": "^5.0.4",
+		"playwright": "^1.57.0",
 		"typescript": "^5.7.2",
 		"vite": "^7.0.2"
 	}

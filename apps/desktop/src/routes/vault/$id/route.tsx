@@ -6,6 +6,7 @@ import {
 	Outlet,
 	useParams,
 } from "@tanstack/react-router";
+import { Archive } from "lucide-react";
 import { Favicon } from "../../../components/vault/favicon";
 
 export const Route = createFileRoute("/vault/$id")({
@@ -95,6 +96,16 @@ function RouteComponent() {
 								))}
 						</div>
 					)}
+				</div>
+				<div className="border-t p-2">
+					<Link
+						to="/vault/$id/trash"
+						params={{ id: id }}
+						className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors hover:bg-muted/30"
+					>
+						<Archive className="size-4 text-muted-foreground" />
+						<span className="text-sm">Trash</span>
+					</Link>
 				</div>
 			</div>
 

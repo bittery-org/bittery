@@ -1,6 +1,6 @@
 import { db } from "@bittery/db";
 import { item, vault, vaultKey } from "@bittery/db/schema/vault";
-import { eq } from "drizzle-orm";
+import { eq, isNotNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, router } from "../index";
@@ -353,5 +353,130 @@ export const vaultRouter = router({
 				vaults: matchingVaults,
 				items: matchingItems.slice(0, 10), // Limit to 10 items
 			};
+		}),
+
+	/**
+	 * List deleted items (trash) in a vault
+	 */
+	listDeletedItems: protectedProcedure
+		.input(
+			z.object({
+				vaultId: z.string(),
+			}),
+		)
+		.query(async ({ input, ctx }) => {
+			// Check user has access to this vault
+			const userVaultKey = await db.query.vaultKey.findFirst({
+				where: (vaultKey, { and, eq }) =>
+					and(
+						eq(vaultKey.vaultId, input.vaultId),
+						eq(vaultKey.userId, ctx.session.userId),
+					),
+			});
+
+			if (!userVaultKey) {
+				throw new Error("Access denied to this vault");
+			}
+
+			// Get deleted items
+			const deletedItems = await db.query.item.findMany({
+				where: (item, { and, eq, isNotNull }) =>
+					and(eq(item.vaultId, input.vaultId), isNotNull(item.deletedAt)),
+				orderBy: (item, { desc }) => [desc(item.deletedAt)],
+			});
+
+			return deletedItems;
+		}),
+
+	/**
+	 * Restore a deleted item from trash
+	 */
+	restoreItem: protectedProcedure
+		.input(
+			z.object({
+				itemId: z.string(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			// Get the item first
+			const existingItem = await db.query.item.findFirst({
+				where: (item, { eq }) => eq(item.id, input.itemId),
+			});
+
+			if (!existingItem) {
+				throw new Error("Item not found");
+			}
+
+			// Verify item is actually deleted
+			if (!existingItem.deletedAt) {
+				throw new Error("Item is not deleted");
+			}
+
+			// Check user has access to this vault
+			const userVaultKey = await db.query.vaultKey.findFirst({
+				where: (vaultKey, { and, eq }) =>
+					and(
+						eq(vaultKey.vaultId, existingItem.vaultId),
+						eq(vaultKey.userId, ctx.session.userId),
+					),
+			});
+
+			if (!userVaultKey || userVaultKey.role === "read-only") {
+				throw new Error("Access denied");
+			}
+
+			// Restore the item
+			await db
+				.update(item)
+				.set({
+					deletedAt: null,
+					updatedAt: new Date(),
+				})
+				.where(eq(item.id, input.itemId));
+
+			return { success: true };
+		}),
+
+	/**
+	 * Permanently delete an item from trash
+	 */
+	permanentlyDeleteItem: protectedProcedure
+		.input(
+			z.object({
+				itemId: z.string(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			// Get the item first
+			const existingItem = await db.query.item.findFirst({
+				where: (item, { eq }) => eq(item.id, input.itemId),
+			});
+
+			if (!existingItem) {
+				throw new Error("Item not found");
+			}
+
+			// Safety check: only allow if item is deleted
+			if (!existingItem.deletedAt) {
+				throw new Error("Can only permanently delete items in trash");
+			}
+
+			// Check user has access to this vault
+			const userVaultKey = await db.query.vaultKey.findFirst({
+				where: (vaultKey, { and, eq }) =>
+					and(
+						eq(vaultKey.vaultId, existingItem.vaultId),
+						eq(vaultKey.userId, ctx.session.userId),
+					),
+			});
+
+			if (!userVaultKey || userVaultKey.role === "read-only") {
+				throw new Error("Access denied");
+			}
+
+			// Permanently delete from database
+			await db.delete(item).where(eq(item.id, input.itemId));
+
+			return { success: true };
 		}),
 });
