@@ -37,6 +37,7 @@
 	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
+		"@playwright/test": "^1.57.0",
 		"@tanstack/router-plugin": "^1.140.0",
 		"@tauri-apps/cli": "^2",
 		"@types/react": "^19.1.8",

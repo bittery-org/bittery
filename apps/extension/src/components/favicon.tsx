@@ -57,7 +57,7 @@ function getAvatarColor(title: string): string {
 		"bg-rose-100",
 	];
 
-	if(!title) return "bg-gray-500";
+	if (!title) return "bg-gray-500";
 
 	let hash = 0;
 	for (let i = 0; i < title.length; i++) {

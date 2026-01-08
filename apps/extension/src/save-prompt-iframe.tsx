@@ -1,6 +1,6 @@
 import "./index.css";
 import { Button } from "@bittery/ui";
-import { CheckCircle2, Key, Lock, XCircle, Loader2 } from "lucide-react";
+import { CheckCircle2, Key, Loader2, Lock, XCircle } from "lucide-react";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { Favicon } from "@/components/favicon";
@@ -62,7 +62,7 @@ function SavePromptIframe() {
 
 	useLayoutEffect(() => {
 		updateHeight();
-		
+
 		const observer = new ResizeObserver(() => {
 			updateHeight();
 		});
@@ -121,7 +121,11 @@ function SavePromptIframe() {
 		setState("saving");
 		setErrorMessage("");
 
-		if (isUpdating && data.existingCredentials && data.existingCredentials.length > 0) {
+		if (
+			isUpdating &&
+			data.existingCredentials &&
+			data.existingCredentials.length > 0
+		) {
 			// Update existing credential
 			const existingCred = data.existingCredentials[0]; // Use the first match
 			if (existingCred) {
@@ -179,7 +183,10 @@ function SavePromptIframe() {
 
 	// Use a common wrapper for all states
 	const Wrapper = ({ children }: { children: React.ReactNode }) => (
-		<div ref={containerRef} className="w-full bg-background p-4 text-foreground">
+		<div
+			ref={containerRef}
+			className="w-full bg-background p-4 text-foreground"
+		>
 			{children}
 		</div>
 	);
@@ -214,7 +221,9 @@ function SavePromptIframe() {
 							{isUpdating ? "Credentials updated!" : "Credentials saved!"}
 						</p>
 						<p className="mt-0.5 text-muted-foreground text-xs">
-							{isUpdating ? `Updated in ${selectedVault?.name}` : `Saved to ${selectedVault?.name}`}
+							{isUpdating
+								? `Updated in ${selectedVault?.name}`
+								: `Saved to ${selectedVault?.name}`}
 						</p>
 					</div>
 				</div>
@@ -284,7 +293,8 @@ function SavePromptIframe() {
 							</p>
 						)}
 						<p className="mt-2 text-muted-foreground text-xs">
-							💡 Ask your vault owner for write permissions, or create a new personal vault.
+							💡 Ask your vault owner for write permissions, or create a new
+							personal vault.
 						</p>
 					</div>
 				</div>
@@ -365,7 +375,7 @@ function SavePromptIframe() {
 
 					{isDropdownOpen && (
 						<div className="absolute top-full z-50 mt-1 w-full rounded-md border bg-popover shadow-md">
-						<div className="max-h-[150px] overflow-y-auto p-1">
+							<div className="max-h-[150px] overflow-y-auto p-1">
 								{writableVaults.map((vault) => (
 									<button
 										key={vault.id}

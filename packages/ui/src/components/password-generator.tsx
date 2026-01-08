@@ -120,10 +120,10 @@ export function PasswordGenerator({
 			<PopoverContent className="w-80" align="start" side="left">
 				<div className="space-y-4">
 					<div className="space-y-2">
-						<Label className="text-base font-semibold">
+						<Label className="font-semibold text-base">
 							Password Generator
 						</Label>
-						<p className="text-xs text-muted-foreground">
+						<p className="text-muted-foreground text-xs">
 							Generate a secure password with custom settings
 						</p>
 					</div>
@@ -179,7 +179,7 @@ export function PasswordGenerator({
 					<div className="space-y-2">
 						<div className="flex items-center justify-between">
 							<Label>Length</Label>
-							<span className="text-sm font-medium">{options.length}</span>
+							<span className="font-medium text-sm">{options.length}</span>
 						</div>
 						<input
 							type="range"
@@ -193,7 +193,7 @@ export function PasswordGenerator({
 							onTouchEnd={handleGenerate}
 							className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-200 accent-primary"
 						/>
-						<div className="flex justify-between text-xs text-muted-foreground">
+						<div className="flex justify-between text-muted-foreground text-xs">
 							<span>8</span>
 							<span>64</span>
 						</div>

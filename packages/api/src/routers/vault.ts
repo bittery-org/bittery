@@ -1,6 +1,6 @@
 import { db } from "@bittery/db";
 import { item, vault, vaultKey } from "@bittery/db/schema/vault";
-import { eq, isNotNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, router } from "../index";
@@ -229,6 +229,51 @@ export const vaultRouter = router({
 					...(input.overview && { overview: input.overview }),
 					...(input.encryptedData && { encryptedData: input.encryptedData }),
 					...(input.encryptionIv && { encryptionIv: input.encryptionIv }),
+					updatedAt: new Date(),
+				})
+				.where(eq(item.id, input.itemId));
+
+			return { success: true };
+		}),
+
+	/**
+	 * Toggle favorite status of an item
+	 */
+	toggleFavorite: protectedProcedure
+		.input(
+			z.object({
+				itemId: z.string(),
+				favorite: z.boolean(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			// Get the item first
+			const existingItem = await db.query.item.findFirst({
+				where: (item, { eq }) => eq(item.id, input.itemId),
+			});
+
+			if (!existingItem) {
+				throw new Error("Item not found");
+			}
+
+			// Check user has access to this vault
+			const userVaultKey = await db.query.vaultKey.findFirst({
+				where: (vaultKey, { and, eq }) =>
+					and(
+						eq(vaultKey.vaultId, existingItem.vaultId),
+						eq(vaultKey.userId, ctx.session.userId),
+					),
+			});
+
+			if (!userVaultKey || userVaultKey.role === "read-only") {
+				throw new Error("Access denied");
+			}
+
+			// Update favorite status
+			await db
+				.update(item)
+				.set({
+					favorite: input.favorite,
 					updatedAt: new Date(),
 				})
 				.where(eq(item.id, input.itemId));

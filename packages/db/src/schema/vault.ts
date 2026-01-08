@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
 import {
+	boolean,
 	index,
 	jsonb,
 	pgEnum,
@@ -74,6 +75,7 @@ export const item = pgTable(
 			.notNull()
 			.references(() => vault.id, { onDelete: "cascade" }),
 		category: itemCategoryEnum("category").notNull().default("login"),
+		favorite: boolean("favorite").notNull().default(false),
 		// Overview: unencrypted metadata for fast listing/searching
 		// { title: string, url?: string, username?: string }
 		overview: jsonb("overview").notNull(),

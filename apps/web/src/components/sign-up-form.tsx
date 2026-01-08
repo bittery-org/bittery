@@ -48,7 +48,7 @@ export default function SignUpForm({
 			// Store auth token and vault keys
 			storeAuthToken(data.token);
 			storeVaultKeys(data.vaultKeys);
-			
+
 			toast.success("Account created successfully!");
 			navigate({ to: "/home" });
 		},

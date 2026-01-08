@@ -66,7 +66,9 @@ function TrashComponent() {
 			return await trpcClient.vault.restoreItem.mutate({ itemId });
 		},
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: [["vault", "listDeletedItems"]] });
+			queryClient.invalidateQueries({
+				queryKey: [["vault", "listDeletedItems"]],
+			});
 			queryClient.invalidateQueries({ queryKey: [["vault", "listItems"]] });
 			toast.success("Item restored successfully");
 		},
@@ -81,7 +83,9 @@ function TrashComponent() {
 			return await trpcClient.vault.permanentlyDeleteItem.mutate({ itemId });
 		},
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: [["vault", "listDeletedItems"]] });
+			queryClient.invalidateQueries({
+				queryKey: [["vault", "listDeletedItems"]],
+			});
 			setItemToDelete(null);
 			toast.success("Item permanently deleted");
 		},
@@ -203,18 +207,15 @@ function TrashComponent() {
 					<DialogHeader>
 						<DialogTitle>Permanently Delete Item?</DialogTitle>
 						<DialogDescription>
-							This action cannot be undone. This will permanently delete the item
-							from the database.
+							This action cannot be undone. This will permanently delete the
+							item from the database.
 						</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>
 						<Button variant="outline" onClick={() => setItemToDelete(null)}>
 							Cancel
 						</Button>
-						<Button
-							variant="destructive"
-							onClick={confirmPermanentDelete}
-						>
+						<Button variant="destructive" onClick={confirmPermanentDelete}>
 							Delete Forever
 						</Button>
 					</DialogFooter>

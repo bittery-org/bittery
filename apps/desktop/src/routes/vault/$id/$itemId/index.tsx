@@ -187,6 +187,24 @@ function VaultItemComponent() {
 		},
 	});
 
+	// Toggle favorite mutation
+	const toggleFavoriteMutation = useMutation({
+		mutationFn: async (favorite: boolean) => {
+			if (!itemId) throw new Error("No item selected");
+			return await trpcClient.vault.toggleFavorite.mutate({ itemId, favorite });
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: [["vault", "listItems"]] });
+			queryClient.invalidateQueries({ queryKey: [["vault", "getItem"]] });
+			toast.success(
+				rawItem?.favorite ? "Removed from favorites" : "Added to favorites",
+			);
+		},
+		onError: (error) => {
+			toast.error(`Failed to update favorite: ${error.message}`);
+		},
+	});
+
 	const getDecryptedItem = useCallback(async () => {
 		if (!rawItem) return;
 
@@ -296,6 +314,10 @@ function VaultItemComponent() {
 							rawItem?.category === "secure-note" ? "secure-note" : "login"
 						}
 						data={decryptedItemData}
+						favorite={rawItem?.favorite || false}
+						onToggleFavorite={() =>
+							toggleFavoriteMutation.mutate(!rawItem?.favorite)
+						}
 					/>
 				</div>
 			</div>
@@ -360,7 +382,10 @@ function VaultItemComponent() {
 						</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>
-						<Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+						<Button
+							variant="outline"
+							onClick={() => setIsDeleteDialogOpen(false)}
+						>
 							Cancel
 						</Button>
 						<Button

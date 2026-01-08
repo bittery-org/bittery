@@ -2,7 +2,7 @@
 
 import { copyToClipboard } from "@bittery/shared/crypto";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
-import { Copy, ExternalLink, Eye, EyeOff } from "lucide-react";
+import { Copy, ExternalLink, Eye, EyeOff, Star } from "lucide-react";
 import { useState } from "react";
 import { Favicon } from "./favicon";
 
@@ -31,15 +31,19 @@ interface SecureNoteData {
 interface ItemDetailProps {
 	category: "login" | "secure-note";
 	data: LoginData | SecureNoteData;
+	favorite?: boolean;
 	onEdit?: () => void;
 	onDelete?: () => void;
+	onToggleFavorite?: () => void;
 }
 
 export default function ItemDetail({
 	category,
 	data,
+	favorite = false,
 	onEdit,
 	onDelete,
+	onToggleFavorite,
 }: ItemDetailProps) {
 	const [showPassword, setShowPassword] = useState(false);
 	const [visibleCustomFields, setVisibleCustomFields] = useState<Set<string>>(
@@ -106,6 +110,22 @@ export default function ItemDetail({
 							</Button>
 						)}
 					</div>
+					{onToggleFavorite && (
+						<Button
+							size="sm"
+							variant="outline"
+							onClick={onToggleFavorite}
+							className={
+								favorite ? "text-yellow-500 hover:text-yellow-600" : ""
+							}
+						>
+							<Star
+								className="size-4"
+								fill={favorite ? "currentColor" : "none"}
+							/>
+							{favorite ? "Remove from Favorites" : "Add to Favorites"}
+						</Button>
+					)}
 				</div>
 
 				<div className="space-y-4">
@@ -304,6 +324,20 @@ export default function ItemDetail({
 						</Button>
 					)}
 				</div>
+				{onToggleFavorite && (
+					<Button
+						size="sm"
+						variant="outline"
+						onClick={onToggleFavorite}
+						className={favorite ? "text-yellow-500 hover:text-yellow-600" : ""}
+					>
+						<Star
+							className="size-4"
+							fill={favorite ? "currentColor" : "none"}
+						/>
+						{favorite ? "Remove from Favorites" : "Add to Favorites"}
+					</Button>
+				)}
 			</div>
 
 			<Card>

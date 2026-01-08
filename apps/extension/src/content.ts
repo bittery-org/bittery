@@ -91,9 +91,9 @@ function attachFormSubmitListeners(form: HTMLFormElement) {
 	);
 
 	// Listen for submit button clicks (in case form.submit() is called via JS)
-	const submitButtons = form.querySelectorAll<HTMLButtonElement | HTMLInputElement>(
-		'button[type="submit"], input[type="submit"], button:not([type])',
-	);
+	const submitButtons = form.querySelectorAll<
+		HTMLButtonElement | HTMLInputElement
+	>('button[type="submit"], input[type="submit"], button:not([type])');
 
 	submitButtons.forEach((button) => {
 		button.addEventListener("click", () => {
@@ -135,7 +135,9 @@ interface CapturedCredentials {
 	passwordField?: HTMLInputElement;
 }
 
-function captureCredentials(form?: HTMLFormElement): CapturedCredentials | null {
+function captureCredentials(
+	form?: HTMLFormElement,
+): CapturedCredentials | null {
 	// Determine the scope to search for fields
 	const searchScope = form || document;
 
@@ -158,15 +160,16 @@ function captureCredentials(form?: HTMLFormElement): CapturedCredentials | null 
 	// Fallback: search for password fields in the scope
 	if (!passwordField) {
 		const passwordFields = Array.from(
-			searchScope.querySelectorAll<HTMLInputElement>('input[type="password"]')
-		).filter(input => input.value); // Only consider fields with values
+			searchScope.querySelectorAll<HTMLInputElement>('input[type="password"]'),
+		).filter((input) => input.value); // Only consider fields with values
 
 		if (passwordFields.length > 0) {
 			// Prefer visible fields
-			passwordField = passwordFields.find(field => {
-				const rect = field.getBoundingClientRect();
-				return rect.width > 0 && rect.height > 0;
-			}) || passwordFields[0];
+			passwordField =
+				passwordFields.find((field) => {
+					const rect = field.getBoundingClientRect();
+					return rect.width > 0 && rect.height > 0;
+				}) || passwordFields[0];
 
 			passwordValue = passwordField?.value || "";
 		}
@@ -198,9 +201,9 @@ function captureCredentials(form?: HTMLFormElement): CapturedCredentials | null 
 	if (!usernameField) {
 		const candidateFields = Array.from(
 			searchScope.querySelectorAll<HTMLInputElement>(
-				'input[type="text"], input[type="email"], input[type="tel"], input[name*="user"], input[name*="email"], input[name*="login"], input[id*="user"], input[id*="email"], input[id*="login"]'
-			)
-		).filter(input => {
+				'input[type="text"], input[type="email"], input[type="tel"], input[name*="user"], input[name*="email"], input[name*="login"], input[id*="user"], input[id*="email"], input[id*="login"]',
+			),
+		).filter((input) => {
 			// Exclude password fields and empty fields
 			if (input.type === "password" || !input.value) return false;
 
@@ -231,10 +234,11 @@ function captureCredentials(form?: HTMLFormElement): CapturedCredentials | null 
 
 		if (candidateFields.length > 0) {
 			// Prefer visible fields
-			usernameField = candidateFields.find(field => {
-				const rect = field.getBoundingClientRect();
-				return rect.width > 0 && rect.height > 0;
-			}) || candidateFields[0];
+			usernameField =
+				candidateFields.find((field) => {
+					const rect = field.getBoundingClientRect();
+					return rect.width > 0 && rect.height > 0;
+				}) || candidateFields[0];
 
 			usernameValue = usernameField?.value || "";
 		}
@@ -264,7 +268,9 @@ function captureCredentials(form?: HTMLFormElement): CapturedCredentials | null 
 }
 
 // Check if credentials should be saved
-async function shouldSaveCredentials(credentials: CapturedCredentials): Promise<{ shouldSave: boolean; reason?: string }> {
+async function shouldSaveCredentials(
+	credentials: CapturedCredentials,
+): Promise<{ shouldSave: boolean; reason?: string }> {
 	// Validate that credentials have required fields
 	if (!credentials.username || !credentials.password) {
 		return {
@@ -335,7 +341,9 @@ async function handleFormSubmit(_event: Event | null, form: HTMLFormElement) {
 		const { shouldSave, reason } = await shouldSaveCredentials(credentials);
 
 		if (shouldSave) {
-			console.log("Credentials are valid and extension is unlocked - ready to show save prompt");
+			console.log(
+				"Credentials are valid and extension is unlocked - ready to show save prompt",
+			);
 			// Show save prompt to user
 			showSavePrompt(credentials);
 		} else {
@@ -357,7 +365,7 @@ XMLHttpRequest.prototype.open = function (
 	url: string | URL,
 	async?: boolean,
 	username?: string | null,
-	password?: string | null
+	password?: string | null,
 ) {
 	// Store request info on the XHR instance
 	interface XHRWithRequestInfo extends XMLHttpRequest {
@@ -367,16 +375,28 @@ XMLHttpRequest.prototype.open = function (
 		method: method.toUpperCase(),
 		url: url.toString(),
 	};
-	return originalXHROpen.call(this, method, url, async ?? true, username ?? null, password ?? null);
+	return originalXHROpen.call(
+		this,
+		method,
+		url,
+		async ?? true,
+		username ?? null,
+		password ?? null,
+	);
 };
 
-XMLHttpRequest.prototype.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
+XMLHttpRequest.prototype.send = function (
+	body?: Document | XMLHttpRequestBodyInit | null,
+) {
 	interface XHRWithRequestInfo extends XMLHttpRequest {
 		_bitteryRequestInfo?: { method: string; url: string };
 	}
 	const requestInfo = (this as XHRWithRequestInfo)._bitteryRequestInfo;
 
-	if (requestInfo && (requestInfo.method === "POST" || requestInfo.method === "PUT")) {
+	if (
+		requestInfo &&
+		(requestInfo.method === "POST" || requestInfo.method === "PUT")
+	) {
 		// Check if this looks like a login request
 		if (isLikelyLoginRequest(requestInfo.url, body)) {
 			const requestId = `xhr_${Date.now()}_${Math.random()}`;
@@ -406,8 +426,16 @@ XMLHttpRequest.prototype.send = function (body?: Document | XMLHttpRequestBodyIn
 
 // Intercept fetch API
 const originalFetch = window.fetch;
-window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-	const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+window.fetch = function (
+	input: RequestInfo | URL,
+	init?: RequestInit,
+): Promise<Response> {
+	const url =
+		typeof input === "string"
+			? input
+			: input instanceof URL
+				? input.toString()
+				: input.url;
 	const method = init?.method?.toUpperCase() || "GET";
 
 	if (method === "POST" || method === "PUT") {
@@ -427,14 +455,17 @@ window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<
 			});
 
 			// Call original fetch and handle response
-			return originalFetch.apply(this, [input, init]).then((response) => {
-				handleAjaxResponse(requestId, response.status, form);
-				return response;
-			}).catch((error) => {
-				// Clean up on error
-				pendingAjaxRequests.delete(requestId);
-				throw error;
-			});
+			return originalFetch
+				.apply(this, [input, init])
+				.then((response) => {
+					handleAjaxResponse(requestId, response.status, form);
+					return response;
+				})
+				.catch((error) => {
+					// Clean up on error
+					pendingAjaxRequests.delete(requestId);
+					throw error;
+				});
 		}
 	}
 
@@ -442,7 +473,10 @@ window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<
 };
 
 // Check if a request looks like a login/authentication request
-function isLikelyLoginRequest(url: string, body: Document | XMLHttpRequestBodyInit | BodyInit | null | undefined): boolean {
+function isLikelyLoginRequest(
+	url: string,
+	body: Document | XMLHttpRequestBodyInit | BodyInit | null | undefined,
+): boolean {
 	const urlLower = url.toLowerCase();
 
 	// Check URL for common login/auth patterns
@@ -457,7 +491,9 @@ function isLikelyLoginRequest(url: string, body: Document | XMLHttpRequestBodyIn
 		"user",
 	];
 
-	const hasLoginUrl = loginUrlPatterns.some((pattern) => urlLower.includes(pattern));
+	const hasLoginUrl = loginUrlPatterns.some((pattern) =>
+		urlLower.includes(pattern),
+	);
 
 	// Check if body contains password-like fields
 	let hasPasswordField = false;
@@ -469,7 +505,10 @@ function isLikelyLoginRequest(url: string, body: Document | XMLHttpRequestBodyIn
 			} else if (body instanceof FormData) {
 				// Check FormData keys
 				for (const key of (body as FormData).keys()) {
-					if (key.toLowerCase().includes("password") || key.toLowerCase().includes("pass")) {
+					if (
+						key.toLowerCase().includes("password") ||
+						key.toLowerCase().includes("pass")
+					) {
 						hasPasswordField = true;
 						break;
 					}
@@ -481,7 +520,8 @@ function isLikelyLoginRequest(url: string, body: Document | XMLHttpRequestBodyIn
 			}
 
 			if (!hasPasswordField && bodyStr) {
-				hasPasswordField = bodyStr.includes("password") || bodyStr.includes("passwd");
+				hasPasswordField =
+					bodyStr.includes("password") || bodyStr.includes("passwd");
 			}
 		} catch {
 			// Ignore errors parsing body
@@ -511,7 +551,11 @@ function trackFormInteraction(form: HTMLFormElement) {
 }
 
 // Handle AJAX response
-function handleAjaxResponse(requestId: string, statusCode: number, form?: HTMLFormElement | null) {
+function handleAjaxResponse(
+	requestId: string,
+	statusCode: number,
+	form?: HTMLFormElement | null,
+) {
 	const request = pendingAjaxRequests.get(requestId);
 	if (!request) return;
 
@@ -525,7 +569,9 @@ function handleAjaxResponse(requestId: string, statusCode: number, form?: HTMLFo
 		} else {
 			// If no form is associated, try to find password fields on the page
 			// This will be useful for custom login implementations
-			console.log("AJAX login detected but no form associated - credentials may have been submitted");
+			console.log(
+				"AJAX login detected but no form associated - credentials may have been submitted",
+			);
 			handleAjaxLoginWithoutForm(request);
 		}
 	}
@@ -560,7 +606,9 @@ async function handleAjaxLoginWithoutForm(_request: PendingRequest) {
 		const { shouldSave, reason } = await shouldSaveCredentials(credentials);
 
 		if (shouldSave) {
-			console.log("Credentials are valid and extension is unlocked - ready to show save prompt");
+			console.log(
+				"Credentials are valid and extension is unlocked - ready to show save prompt",
+			);
 			// Show save prompt to user
 			showSavePrompt(credentials);
 		} else {
@@ -645,7 +693,8 @@ async function showSavePrompt(credentials: CapturedCredentials) {
 	shadowHost.style.width = "360px";
 	shadowHost.style.opacity = "0";
 	shadowHost.style.transform = "translateY(-8px)";
-	shadowHost.style.transition = "opacity 0.2s ease-out, transform 0.2s ease-out";
+	shadowHost.style.transition =
+		"opacity 0.2s ease-out, transform 0.2s ease-out";
 	document.body.appendChild(shadowHost);
 
 	// Attach shadow DOM
@@ -739,7 +788,7 @@ function hideSavePrompt() {
 // Handle save credential request
 async function handleSaveCredential(
 	data: { vaultId: string; username: string; password: string; url: string },
-	iframe: HTMLIFrameElement
+	iframe: HTMLIFrameElement,
 ) {
 	try {
 		// Send save request to background script
@@ -777,7 +826,10 @@ async function handleSaveCredential(
 			{
 				type: "SAVE_RESULT",
 				success: false,
-				error: error instanceof Error ? error.message : "An unexpected error occurred. Please try again.",
+				error:
+					error instanceof Error
+						? error.message
+						: "An unexpected error occurred. Please try again.",
 				errorType: "exception",
 			},
 			"*",
@@ -787,8 +839,14 @@ async function handleSaveCredential(
 
 // Handle update credential request
 async function handleUpdateCredential(
-	data: { itemId: string; vaultId: string; username: string; password: string; url: string },
-	iframe: HTMLIFrameElement
+	data: {
+		itemId: string;
+		vaultId: string;
+		username: string;
+		password: string;
+		url: string;
+	},
+	iframe: HTMLIFrameElement,
 ) {
 	try {
 		// Send update request to background script
@@ -827,7 +885,10 @@ async function handleUpdateCredential(
 			{
 				type: "SAVE_RESULT",
 				success: false,
-				error: error instanceof Error ? error.message : "An unexpected error occurred. Please try again.",
+				error:
+					error instanceof Error
+						? error.message
+						: "An unexpected error occurred. Please try again.",
 				errorType: "exception",
 			},
 			"*",
@@ -1008,7 +1069,10 @@ function handleKeyboardNavigation(event: KeyboardEvent) {
 }
 
 // Handle autofill selection
-async function handleAutofillSelect(field: CredentialField, item: AutofillItem) {
+async function handleAutofillSelect(
+	field: CredentialField,
+	item: AutofillItem,
+) {
 	// Update autofill timestamp
 	await chrome.runtime.sendMessage({
 		type: "UPDATE_AUTOFILL_TIMESTAMP",
