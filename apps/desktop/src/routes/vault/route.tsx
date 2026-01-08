@@ -1,5 +1,5 @@
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
-import { encrypt } from "@bittery/shared/crypto";
+import { encrypt, generateEncryptionKey } from "@bittery/shared/crypto";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
   Avatar,
@@ -16,6 +16,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  Input,
+  Label,
   toast,
 } from "@bittery/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -83,6 +85,11 @@ function RouteComponent() {
     "login" | "secure-note"
   >("login");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [isNewVaultDialogOpen, setIsNewVaultDialogOpen] = useState(false);
+  const [vaultName, setVaultName] = useState("");
+  const [vaultType, setVaultType] = useState<"personal" | "team">("personal");
+  const [isCreatingVault, setIsCreatingVault] = useState(false);
 
   const handleCreateItem = async (data: DecryptedItemData) => {
     if (!params.id) {
@@ -163,6 +170,75 @@ function RouteComponent() {
     }
   };
 
+  const handleCreateVault = async () => {
+    if (!vaultName.trim()) {
+      toast.error("Vault name is required");
+      return;
+    }
+
+    if (vaultName.trim().length < 2) {
+      toast.error("Vault name must be at least 2 characters");
+      return;
+    }
+
+    setIsCreatingVault(true);
+    try {
+      // Generate a new encryption key for this vault
+      const vaultKey = generateEncryptionKey();
+
+      // Get the Master Unlock Key to encrypt the vault key
+      const masterUnlockKey = await tauriStorage.getMasterUnlockKey();
+      if (!masterUnlockKey) {
+        throw new Error("Master Unlock Key not found");
+      }
+
+      // Encrypt the vault key with the Master Unlock Key
+      const encryptedVaultKeyData = await encrypt(
+        btoa(String.fromCharCode(...vaultKey)),
+        masterUnlockKey
+      );
+
+      // Create the vault via API
+      const result = await trpcClient.vault.create.mutate({
+        name: vaultName.trim(),
+        type: vaultType,
+        encryptedVaultKey: JSON.stringify(encryptedVaultKeyData),
+      });
+
+      // Refresh vault keys in local storage
+      const vaultKeys = await trpcClient.vault.list.query();
+      await tauriStorage.storeVaultKeys(
+        vaultKeys.map((v) => ({
+          vaultId: v.id,
+          vaultName: v.name,
+          vaultType: v.type,
+          encryptedVaultKey: v.encryptedVaultKey,
+          role: v.role,
+        }))
+      );
+
+      // Invalidate vault-keys query to refresh the UI
+      queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
+
+      // Close dialog and reset form
+      setIsNewVaultDialogOpen(false);
+      setVaultName("");
+      setVaultType("personal");
+
+      toast.success("Vault created successfully");
+
+      // Navigate to the new vault
+      navigate({ to: "/vault/$id", params: { id: result.vaultId } });
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to create vault";
+      toast.error(errorMessage);
+      console.error("Vault creation error:", error);
+    } finally {
+      setIsCreatingVault(false);
+    }
+  };
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       {/* Top Header */}
@@ -232,6 +308,17 @@ function RouteComponent() {
               </Link>
             ))}
           </div>
+          <div className="border-t p-2">
+            <Button
+              onClick={() => setIsNewVaultDialogOpen(true)}
+              variant="outline"
+              className="w-full"
+              size="sm"
+            >
+              <PlusIcon className="mr-2 h-4 w-4" />
+              New Vault
+            </Button>
+          </div>
         </div>
 
         <div className="flex h-full flex-1 flex-col">
@@ -295,6 +382,78 @@ function RouteComponent() {
               submitLabel="Create"
               isSubmitting={isSubmitting}
             />
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* New Vault Dialog */}
+      <Dialog open={isNewVaultDialogOpen} onOpenChange={setIsNewVaultDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create New Vault</DialogTitle>
+            <DialogDescription>
+              Create a new vault to organize your passwords and secure notes.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="vault-name">Vault Name *</Label>
+              <Input
+                id="vault-name"
+                placeholder="My Vault"
+                value={vaultName}
+                onChange={(e) => setVaultName(e.target.value)}
+                disabled={isCreatingVault}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !isCreatingVault) {
+                    handleCreateVault();
+                  }
+                }}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Vault Type</Label>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant={vaultType === "personal" ? "default" : "outline"}
+                  onClick={() => setVaultType("personal")}
+                  disabled={isCreatingVault}
+                  className="flex-1"
+                >
+                  Personal
+                </Button>
+                <Button
+                  type="button"
+                  variant={vaultType === "team" ? "default" : "outline"}
+                  onClick={() => setVaultType("team")}
+                  disabled={isCreatingVault}
+                  className="flex-1"
+                >
+                  Team
+                </Button>
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              onClick={handleCreateVault}
+              disabled={isCreatingVault}
+              className="flex-1"
+            >
+              {isCreatingVault ? "Creating..." : "Create Vault"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsNewVaultDialogOpen(false);
+                setVaultName("");
+                setVaultType("personal");
+              }}
+              disabled={isCreatingVault}
+            >
+              Cancel
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
