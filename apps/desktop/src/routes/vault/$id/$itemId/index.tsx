@@ -21,7 +21,6 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
 	Copy as CopyIcon,
 	Edit,
-	FolderOpen,
 	MoreVertical,
 	Share2,
 	Trash2,
@@ -30,6 +29,7 @@ import { useCallback, useEffect, useState } from "react";
 import Loader from "../../../../components/loader";
 import ItemDetail from "../../../../components/vault/item-detail";
 import { ItemForm } from "../../../../components/vault/item-form";
+import { VaultAvatar } from "../../../../components/vault/vault-avatar";
 
 export const Route = createFileRoute("/vault/$id/$itemId/")({
 	component: VaultItemComponent,
@@ -267,7 +267,12 @@ function VaultItemComponent() {
 				{/* Top bar */}
 				<div className="flex items-center justify-between border-b bg-background px-8 py-2">
 					<div className="flex items-center gap-2 text-muted-foreground text-sm">
-						<FolderOpen className="size-4" />
+						<VaultAvatar
+							name={currentVault?.vaultName || "Vault"}
+							icon={currentVault?.vaultIcon}
+							imageUrl={currentVault?.vaultImageUrl}
+							size="sm"
+						/>
 						<span>{currentVault?.vaultName || "Unknown Vault"}</span>
 					</div>
 					<div className="flex items-center gap-2">

@@ -15,6 +15,7 @@ import {
 	startLogin,
 } from "@bittery/auth";
 import { db, team, teamMember, vault, vaultKey } from "@bittery/db";
+import { getStoragePublicUrl } from "@bittery/storage";
 import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -65,6 +66,7 @@ export const authRouter = router({
 				id: vaultId,
 				name: "Personal",
 				type: "personal",
+				icon: "lock",
 				createdById: userId,
 			});
 
@@ -115,6 +117,10 @@ export const authRouter = router({
 					vaultId: vk.vaultId,
 					vaultName: vk.vault.name,
 					vaultType: vk.vault.type,
+					vaultIcon: vk.vault.icon,
+					vaultImageUrl: vk.vault.imageKey
+						? getStoragePublicUrl(vk.vault.imageKey)
+						: null,
 					encryptedVaultKey: vk.encryptedVaultKey,
 					role: vk.role,
 				})),
@@ -211,6 +217,10 @@ export const authRouter = router({
 					vaultId: vk.vaultId,
 					vaultName: vk.vault.name,
 					vaultType: vk.vault.type,
+					vaultIcon: vk.vault.icon,
+					vaultImageUrl: vk.vault.imageKey
+						? getStoragePublicUrl(vk.vault.imageKey)
+						: null,
 					encryptedVaultKey: vk.encryptedVaultKey,
 					role: vk.role,
 				})),
@@ -275,6 +285,10 @@ export const authRouter = router({
 					vaultId: vk.vaultId,
 					vaultName: vk.vault.name,
 					vaultType: vk.vault.type,
+					vaultIcon: vk.vault.icon,
+					vaultImageUrl: vk.vault.imageKey
+						? getStoragePublicUrl(vk.vault.imageKey)
+						: null,
 					encryptedVaultKey: vk.encryptedVaultKey,
 					role: vk.role,
 				})),

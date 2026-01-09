@@ -26,6 +26,7 @@
 		"@bittery/auth": "workspace:*",
 		"@bittery/db": "workspace:*",
 		"@bittery/crypto": "workspace:*",
+		"@bittery/storage": "workspace:*",
 		"nanoid": "^5.0.0"
 	}
 }

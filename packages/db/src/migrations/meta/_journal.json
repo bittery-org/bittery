@@ -8,6 +8,13 @@
 			"when": 1767911319839,
 			"tag": "0000_burly_scourge",
 			"breakpoints": true
+		},
+		{
+			"idx": 1,
+			"version": "7",
+			"when": 1767911325000,
+			"tag": "0001_vault_media",
+			"breakpoints": true
 		}
 	]
 }

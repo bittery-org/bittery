@@ -28,6 +28,8 @@ export interface VaultKeyData {
 	vaultId: string;
 	vaultName: string;
 	vaultType: "personal" | "team";
+	vaultIcon?: string | null;
+	vaultImageUrl?: string | null;
 	encryptedVaultKey: string;
 	role: "owner" | "admin" | "member" | "read-only";
 }

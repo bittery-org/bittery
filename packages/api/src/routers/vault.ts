@@ -1,5 +1,10 @@
 import { db } from "@bittery/db";
 import { item, vault, vaultKey } from "@bittery/db/schema/vault";
+import {
+	createPresignedUpload,
+	createVaultImageKey,
+	getStoragePublicUrl,
+} from "@bittery/storage";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -25,11 +30,57 @@ export const vaultRouter = router({
 			id: vk.vault.id,
 			name: vk.vault.name,
 			type: vk.vault.type,
+			icon: vk.vault.icon,
+			imageUrl: vk.vault.imageKey
+				? getStoragePublicUrl(vk.vault.imageKey)
+				: null,
 			role: vk.role,
 			items: vk.vault.items,
 			encryptedVaultKey: vk.encryptedVaultKey,
 		}));
 	}),
+
+	/**
+	 * Create a presigned upload URL for vault images
+	 */
+	createImageUpload: protectedProcedure
+		.input(
+			z.object({
+				vaultId: z.string().optional(),
+				fileName: z.string().min(1),
+				contentType: z.string().min(1),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			if (!input.contentType.startsWith("image/")) {
+				throw new Error("Only image uploads are allowed");
+			}
+
+			if (input.vaultId) {
+				const userVaultKey = await db.query.vaultKey.findFirst({
+					where: (vaultKey, { and, eq }) =>
+						and(
+							eq(vaultKey.vaultId, input.vaultId),
+							eq(vaultKey.userId, ctx.session.userId),
+						),
+				});
+
+				if (!userVaultKey || !["owner", "admin"].includes(userVaultKey.role)) {
+					throw new Error("Access denied");
+				}
+			}
+
+			const key = createVaultImageKey({
+				userId: ctx.session.userId,
+				vaultId: input.vaultId,
+				fileName: input.fileName,
+			});
+
+			return createPresignedUpload({
+				key,
+				contentType: input.contentType,
+			});
+		}),
 
 	/**
 	 * Create a new vault
@@ -40,6 +91,8 @@ export const vaultRouter = router({
 				name: z.string().min(1),
 				type: z.enum(["personal", "team"]),
 				encryptedVaultKey: z.string(),
+				icon: z.string().min(1).optional(),
+				imageKey: z.string().min(1).optional(),
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
@@ -50,6 +103,8 @@ export const vaultRouter = router({
 				id: vaultId,
 				name: input.name,
 				type: input.type,
+				...(input.icon && { icon: input.icon }),
+				...(input.imageKey && { imageKey: input.imageKey }),
 				createdById: ctx.session.userId,
 			});
 
@@ -63,6 +118,56 @@ export const vaultRouter = router({
 			});
 
 			return { vaultId };
+		}),
+
+	/**
+	 * Update vault metadata (icon/image)
+	 */
+	update: protectedProcedure
+		.input(
+			z.object({
+				vaultId: z.string(),
+				icon: z.string().nullable().optional(),
+				imageKey: z.string().nullable().optional(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			const userVaultKey = await db.query.vaultKey.findFirst({
+				where: (vaultKey, { and, eq }) =>
+					and(
+						eq(vaultKey.vaultId, input.vaultId),
+						eq(vaultKey.userId, ctx.session.userId),
+					),
+			});
+
+			if (!userVaultKey || !["owner", "admin"].includes(userVaultKey.role)) {
+				throw new Error("Access denied");
+			}
+
+			await db
+				.update(vault)
+				.set({
+					...(input.icon !== undefined && { icon: input.icon }),
+					...(input.imageKey !== undefined && { imageKey: input.imageKey }),
+					updatedAt: new Date(),
+				})
+				.where(eq(vault.id, input.vaultId));
+
+			const updatedVault = await db.query.vault.findFirst({
+				where: (vault, { eq }) => eq(vault.id, input.vaultId),
+			});
+
+			if (!updatedVault) {
+				throw new Error("Vault not found");
+			}
+
+			return {
+				id: updatedVault.id,
+				icon: updatedVault.icon,
+				imageUrl: updatedVault.imageKey
+					? getStoragePublicUrl(updatedVault.imageKey)
+					: null,
+			};
 		}),
 
 	/**
@@ -352,6 +457,10 @@ export const vaultRouter = router({
 					id: vk.vault.id,
 					name: vk.vault.name,
 					type: vk.vault.type,
+					icon: vk.vault.icon,
+					imageUrl: vk.vault.imageKey
+						? getStoragePublicUrl(vk.vault.imageKey)
+						: null,
 				}));
 
 			// Get all items from accessible vaults

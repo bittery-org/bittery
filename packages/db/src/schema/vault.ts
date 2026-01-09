@@ -31,6 +31,8 @@ export const vault = pgTable("vault", {
 	id: text("id").primaryKey(),
 	name: text("name").notNull(),
 	type: vaultTypeEnum("type").notNull().default("personal"),
+	icon: text("icon"),
+	imageKey: text("image_key"),
 	createdById: text("created_by_id")
 		.notNull()
 		.references(() => user.id, { onDelete: "cascade" }),

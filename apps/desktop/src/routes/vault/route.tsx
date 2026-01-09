@@ -1,6 +1,6 @@
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { encrypt, generateEncryptionKey } from "@bittery/shared/crypto";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
 	Dialog,
@@ -21,11 +21,15 @@ import {
 	useNavigate,
 	useParams,
 } from "@tanstack/react-router";
-import { PlusIcon, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { PlusIcon } from "lucide-react";
+import { useEffect, useState } from "react";
 import { AccountSwitcher } from "../../components/account-switcher";
 import { ItemForm } from "../../components/vault/item-form";
 import { SearchCombobox } from "../../components/vault/search-combobox";
+import {
+	VaultAvatar,
+	vaultIconOptions,
+} from "../../components/vault/vault-avatar";
 
 export const Route = createFileRoute("/vault")({
 	component: RouteComponent,
@@ -74,7 +78,6 @@ function RouteComponent() {
 	const navigate = useNavigate();
 	const trpcClient = useTRPCClient();
 	const queryClient = useQueryClient();
-	const trpc = useTRPC();
 
 	const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
 	const [selectedCategory, setSelectedCategory] = useState<
@@ -86,6 +89,25 @@ function RouteComponent() {
 	const [vaultName, setVaultName] = useState("");
 	const [vaultType, setVaultType] = useState<"personal" | "team">("personal");
 	const [isCreatingVault, setIsCreatingVault] = useState(false);
+	const [vaultIcon, setVaultIcon] = useState("lock");
+	const [vaultImageFile, setVaultImageFile] = useState<File | null>(null);
+	const [vaultImagePreview, setVaultImagePreview] = useState<string | null>(null);
+
+	useEffect(() => {
+		return () => {
+			if (vaultImagePreview) {
+				URL.revokeObjectURL(vaultImagePreview);
+			}
+		};
+	}, [vaultImagePreview]);
+
+	const resetVaultForm = () => {
+		setVaultName("");
+		setVaultType("personal");
+		setVaultIcon("lock");
+		setVaultImageFile(null);
+		setVaultImagePreview(null);
+	};
 
 	const handleCreateItem = async (data: DecryptedItemData, vaultId: string) => {
 		if (!vaultId) {
@@ -145,10 +167,10 @@ function RouteComponent() {
 	};
 
 	const handleCreateVault = async () => {
-		if (!vaultName.trim()) {
-			toast.error("Vault name is required");
-			return;
-		}
+	if (!vaultName.trim()) {
+		toast.error("Vault name is required");
+		return;
+	}
 
 		if (vaultName.trim().length < 2) {
 			toast.error("Vault name must be at least 2 characters");
@@ -157,8 +179,35 @@ function RouteComponent() {
 
 		setIsCreatingVault(true);
 		try {
-			// Generate a new encryption key for this vault
-			const vaultKey = generateEncryptionKey();
+		let imageKey: string | undefined;
+
+		if (vaultImageFile) {
+			if (!vaultImageFile.type.startsWith("image/")) {
+				throw new Error("Vault image must be an image file");
+			}
+
+			const upload = await trpcClient.vault.createImageUpload.mutate({
+				fileName: vaultImageFile.name,
+				contentType: vaultImageFile.type,
+			});
+
+			const uploadResponse = await fetch(upload.uploadUrl, {
+				method: "PUT",
+				headers: {
+					"Content-Type": vaultImageFile.type,
+				},
+				body: vaultImageFile,
+			});
+
+			if (!uploadResponse.ok) {
+				throw new Error("Failed to upload vault image");
+			}
+
+			imageKey = upload.key;
+		}
+
+		// Generate a new encryption key for this vault
+		const vaultKey = generateEncryptionKey();
 
 			// Get the Master Unlock Key to encrypt the vault key
 			const masterUnlockKey = await tauriStorage.getMasterUnlockKey();
@@ -173,11 +222,13 @@ function RouteComponent() {
 			);
 
 			// Create the vault via API
-			const result = await trpcClient.vault.create.mutate({
-				name: vaultName.trim(),
-				type: vaultType,
-				encryptedVaultKey: JSON.stringify(encryptedVaultKeyData),
-			});
+		const result = await trpcClient.vault.create.mutate({
+			name: vaultName.trim(),
+			type: vaultType,
+			encryptedVaultKey: JSON.stringify(encryptedVaultKeyData),
+			icon: vaultIcon,
+			...(imageKey && { imageKey }),
+		});
 
 			// Refresh vault keys in local storage
 			const vaultKeys = await trpcClient.vault.list.query();
@@ -186,6 +237,8 @@ function RouteComponent() {
 					vaultId: v.id,
 					vaultName: v.name,
 					vaultType: v.type,
+					vaultIcon: v.icon,
+					vaultImageUrl: v.imageUrl,
 					encryptedVaultKey: v.encryptedVaultKey,
 					role: v.role,
 				})),
@@ -196,8 +249,7 @@ function RouteComponent() {
 
 			// Close dialog and reset form
 			setIsNewVaultDialogOpen(false);
-			setVaultName("");
-			setVaultType("personal");
+			resetVaultForm();
 
 			toast.success("Vault created successfully");
 
@@ -255,7 +307,15 @@ function RouteComponent() {
 										: "hover:bg-muted/30"
 								}`}
 							>
-								<div className="truncate">{vault.vaultName}</div>
+								<div className="flex min-w-0 items-center gap-2">
+									<VaultAvatar
+										name={vault.vaultName}
+										icon={vault.vaultIcon}
+										imageUrl={vault.vaultImageUrl}
+										size="sm"
+									/>
+									<div className="truncate">{vault.vaultName}</div>
+								</div>
 							</Link>
 						))}
 					</div>
@@ -334,7 +394,12 @@ function RouteComponent() {
 			{/* New Vault Dialog */}
 			<Dialog
 				open={isNewVaultDialogOpen}
-				onOpenChange={setIsNewVaultDialogOpen}
+				onOpenChange={(open) => {
+					setIsNewVaultDialogOpen(open);
+					if (!open) {
+						resetVaultForm();
+					}
+				}}
 			>
 				<DialogContent className="sm:max-w-md">
 					<DialogHeader>
@@ -382,6 +447,90 @@ function RouteComponent() {
 								</Button>
 							</div>
 						</div>
+						<div className="space-y-2">
+							<Label>Appearance</Label>
+							<div className="flex items-start gap-4">
+								<VaultAvatar
+									name={vaultName || "Vault"}
+									icon={vaultIcon}
+									imageUrl={vaultImagePreview}
+									size="lg"
+								/>
+								<div className="flex flex-1 flex-col gap-3">
+									<div className="grid grid-cols-4 gap-2">
+										{vaultIconOptions.map((option) => (
+											<Button
+												key={option.value}
+												type="button"
+												variant={
+													vaultIcon === option.value ? "default" : "outline"
+												}
+												onClick={() => setVaultIcon(option.value)}
+												disabled={isCreatingVault}
+												size="sm"
+												className="h-9 px-0"
+												aria-label={option.label}
+											>
+												<option.Icon className="size-4" />
+											</Button>
+										))}
+									</div>
+									<div className="flex flex-col gap-2">
+										<Input
+											id="vault-image"
+											type="file"
+											accept="image/*"
+											disabled={isCreatingVault}
+											onChange={(event) => {
+												const file = event.target.files?.[0] || null;
+												if (!file) {
+													setVaultImageFile(null);
+													setVaultImagePreview(null);
+													return;
+												}
+
+												if (!file.type.startsWith("image/")) {
+													toast.error("Please select an image file");
+													event.currentTarget.value = "";
+													setVaultImageFile(null);
+													setVaultImagePreview(null);
+													return;
+												}
+
+												if (file.size > 2 * 1024 * 1024) {
+													toast.error("Image must be smaller than 2MB");
+													event.currentTarget.value = "";
+													setVaultImageFile(null);
+													setVaultImagePreview(null);
+													return;
+												}
+
+												setVaultImageFile(file);
+												setVaultImagePreview(URL.createObjectURL(file));
+											}}
+										/>
+										{vaultImagePreview && (
+											<Button
+												type="button"
+												variant="ghost"
+												size="sm"
+												onClick={() => {
+													setVaultImageFile(null);
+													setVaultImagePreview(null);
+												}}
+												disabled={isCreatingVault}
+												className="h-8 justify-start px-2 text-muted-foreground"
+											>
+												Remove custom image
+											</Button>
+										)}
+										<p className="text-muted-foreground text-xs">
+											Optional. PNG, JPG, or WebP up to 2MB.
+										</p>
+									</div>
+								</div>
+							</div>
+						</div>
 					</div>
 					<div className="flex gap-2">
 						<Button
@@ -395,8 +544,7 @@ function RouteComponent() {
 							variant="outline"
 							onClick={() => {
 								setIsNewVaultDialogOpen(false);
-								setVaultName("");
-								setVaultType("personal");
+								resetVaultForm();
 							}}
 							disabled={isCreatingVault}
 						>
