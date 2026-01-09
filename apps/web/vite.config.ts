@@ -5,14 +5,19 @@ import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
-	plugins: [
-		tsconfigPaths(),
-		tailwindcss(),
-		tanstackStart({
-			spa: {
-				enabled: true,
-			},
-		}),
-		viteReact(),
-	],
+  plugins: [
+    tsconfigPaths(),
+    tailwindcss(),
+    tanstackStart({
+      spa: {
+        enabled: true,
+        prerender: {
+          outputPath: "/index.html",
+          crawlLinks: true,
+          retryCount: 3,
+        },
+      },
+    }),
+    viteReact(),
+  ],
 });
