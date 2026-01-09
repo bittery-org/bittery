@@ -45,7 +45,7 @@ const trpcClient = createTRPCClient<AppRouter>({
 			url: `${fallbackServerUrl}/trpc`,
 			fetch(url, options) {
 				const serverUrl = getServerUrl() ?? fallbackServerUrl;
-				const resolvedUrl = buildTrpcUrl(serverUrl, url);
+				const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
 				return fetch(resolvedUrl, {
 					...options,
 					credentials: "include",

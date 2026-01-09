@@ -1,5 +1,6 @@
 import { protectedProcedure, publicProcedure, router } from "../index";
 import { authRouter } from "./auth";
+import { teamRouter } from "./team";
 import { vaultRouter } from "./vault";
 
 export const appRouter = router({
@@ -13,6 +14,7 @@ export const appRouter = router({
 		};
 	}),
 	auth: authRouter,
+	team: teamRouter,
 	vault: vaultRouter,
 });
 export type AppRouter = typeof appRouter;

@@ -9,10 +9,19 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthLoginRouteImport } from './routes/_auth/login'
 import { Route as AppHomeRouteImport } from './routes/_app/home'
+import { Route as AppVaultsIndexRouteImport } from './routes/_app/vaults/index'
+import { Route as AppTeamsIndexRouteImport } from './routes/_app/teams/index'
+import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
+import { Route as AppTeamsTeamIdIndexRouteImport } from './routes/_app/teams/$teamId/index'
 
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -24,43 +33,106 @@ const AuthLoginRoute = AuthLoginRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppHomeRoute = AppHomeRouteImport.update({
-  id: '/_app/home',
+  id: '/home',
   path: '/home',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
+} as any)
+const AppVaultsIndexRoute = AppVaultsIndexRouteImport.update({
+  id: '/vaults/',
+  path: '/vaults/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTeamsIndexRoute = AppTeamsIndexRouteImport.update({
+  id: '/teams/',
+  path: '/teams/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
+  id: '/settings/',
+  path: '/settings/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTeamsTeamIdIndexRoute = AppTeamsTeamIdIndexRouteImport.update({
+  id: '/teams/$teamId/',
+  path: '/teams/$teamId/',
+  getParentRoute: () => AppRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/home': typeof AppHomeRoute
   '/login': typeof AuthLoginRoute
+  '/settings': typeof AppSettingsIndexRoute
+  '/teams': typeof AppTeamsIndexRoute
+  '/vaults': typeof AppVaultsIndexRoute
+  '/teams/$teamId': typeof AppTeamsTeamIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/home': typeof AppHomeRoute
   '/login': typeof AuthLoginRoute
+  '/settings': typeof AppSettingsIndexRoute
+  '/teams': typeof AppTeamsIndexRoute
+  '/vaults': typeof AppVaultsIndexRoute
+  '/teams/$teamId': typeof AppTeamsTeamIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_app': typeof AppRouteWithChildren
   '/_app/home': typeof AppHomeRoute
   '/_auth/login': typeof AuthLoginRoute
+  '/_app/settings/': typeof AppSettingsIndexRoute
+  '/_app/teams/': typeof AppTeamsIndexRoute
+  '/_app/vaults/': typeof AppVaultsIndexRoute
+  '/_app/teams/$teamId/': typeof AppTeamsTeamIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/home' | '/login'
+  fullPaths:
+    | '/'
+    | '/home'
+    | '/login'
+    | '/settings'
+    | '/teams'
+    | '/vaults'
+    | '/teams/$teamId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/home' | '/login'
-  id: '__root__' | '/' | '/_app/home' | '/_auth/login'
+  to:
+    | '/'
+    | '/home'
+    | '/login'
+    | '/settings'
+    | '/teams'
+    | '/vaults'
+    | '/teams/$teamId'
+  id:
+    | '__root__'
+    | '/'
+    | '/_app'
+    | '/_app/home'
+    | '/_auth/login'
+    | '/_app/settings/'
+    | '/_app/teams/'
+    | '/_app/vaults/'
+    | '/_app/teams/$teamId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AppHomeRoute: typeof AppHomeRoute
+  AppRoute: typeof AppRouteWithChildren
   AuthLoginRoute: typeof AuthLoginRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: ''
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -80,14 +152,60 @@ declare module '@tanstack/react-router' {
       path: '/home'
       fullPath: '/home'
       preLoaderRoute: typeof AppHomeRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/vaults/': {
+      id: '/_app/vaults/'
+      path: '/vaults'
+      fullPath: '/vaults'
+      preLoaderRoute: typeof AppVaultsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/teams/': {
+      id: '/_app/teams/'
+      path: '/teams'
+      fullPath: '/teams'
+      preLoaderRoute: typeof AppTeamsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings/': {
+      id: '/_app/settings/'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/teams/$teamId/': {
+      id: '/_app/teams/$teamId/'
+      path: '/teams/$teamId'
+      fullPath: '/teams/$teamId'
+      preLoaderRoute: typeof AppTeamsTeamIdIndexRouteImport
+      parentRoute: typeof AppRoute
     }
   }
 }
 
+interface AppRouteChildren {
+  AppHomeRoute: typeof AppHomeRoute
+  AppSettingsIndexRoute: typeof AppSettingsIndexRoute
+  AppTeamsIndexRoute: typeof AppTeamsIndexRoute
+  AppVaultsIndexRoute: typeof AppVaultsIndexRoute
+  AppTeamsTeamIdIndexRoute: typeof AppTeamsTeamIdIndexRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppHomeRoute: AppHomeRoute,
+  AppSettingsIndexRoute: AppSettingsIndexRoute,
+  AppTeamsIndexRoute: AppTeamsIndexRoute,
+  AppVaultsIndexRoute: AppVaultsIndexRoute,
+  AppTeamsTeamIdIndexRoute: AppTeamsTeamIdIndexRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AppHomeRoute: AppHomeRoute,
+  AppRoute: AppRouteWithChildren,
   AuthLoginRoute: AuthLoginRoute,
 }
 export const routeTree = rootRouteImport

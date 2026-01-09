@@ -1,15 +1,32 @@
-import { isAuthenticated } from "@bittery/shared/crypto";
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { useTRPC } from "@bittery/shared/trpc";
+import { useQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
+import { DownloadCard } from "@/components/dashboard/download-card";
+import { PendingInvitations } from "@/components/dashboard/pending-invitations";
+import { StatsCards } from "@/components/dashboard/stats-cards";
 
 export const Route = createFileRoute("/_app/home")({
 	component: RouteComponent,
-	beforeLoad: () => {
-		if (!isAuthenticated()) {
-			throw redirect({ to: "/login" });
-		}
-	},
 });
 
 function RouteComponent() {
-	return <h1>Home</h1>;
+	const trpc = useTRPC();
+	const userQuery = useQuery(trpc.auth.me.queryOptions());
+
+	return (
+		<div className="space-y-6">
+			<div>
+				<h1 className="text-3xl font-bold tracking-tight">
+					Welcome back{userQuery.data?.name ? `, ${userQuery.data.name}` : ""}
+				</h1>
+				<p className="text-muted-foreground">
+					Manage your teams, vaults, and settings from here.
+				</p>
+			</div>
+
+			<PendingInvitations />
+			<StatsCards />
+			<DownloadCard />
+		</div>
+	);
 }

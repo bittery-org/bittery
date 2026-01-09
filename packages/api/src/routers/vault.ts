@@ -5,7 +5,8 @@ import {
 	createVaultImageKey,
 	getStoragePublicUrl,
 } from "@bittery/storage";
-import { eq } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
+import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, router } from "../index";
@@ -633,4 +634,240 @@ export const vaultRouter = router({
 
 			return { success: true };
 		}),
+
+	/**
+	 * Get dashboard stats for current user
+	 */
+	stats: protectedProcedure.query(async ({ ctx }) => {
+		// Get team count
+		const teamMemberships = await db.query.teamMember.findMany({
+			where: (tm, { eq }) => eq(tm.userId, ctx.session.userId),
+		});
+
+		// Get vault count
+		const userVaults = await db.query.vaultKey.findMany({
+			where: (vk, { eq }) => eq(vk.userId, ctx.session.userId),
+		});
+
+		// Get item count (across all accessible vaults)
+		const vaultIds = userVaults.map((vk) => vk.vaultId);
+		let itemCount = 0;
+
+		if (vaultIds.length > 0) {
+			const items = await db.query.item.findMany({
+				where: (item, { and, isNull, inArray }) =>
+					and(inArray(item.vaultId, vaultIds), isNull(item.deletedAt)),
+			});
+			itemCount = items.length;
+		}
+
+		return {
+			teamCount: teamMemberships.length,
+			vaultCount: userVaults.length,
+			itemCount,
+		};
+	}),
+
+	/**
+	 * Vault member management
+	 */
+	members: router({
+		/**
+		 * List vault members
+		 */
+		list: protectedProcedure
+			.input(z.object({ vaultId: z.string() }))
+			.query(async ({ ctx, input }) => {
+				// Check user has access to this vault
+				const userVaultKey = await db.query.vaultKey.findFirst({
+					where: (vk, { and, eq }) =>
+						and(
+							eq(vk.vaultId, input.vaultId),
+							eq(vk.userId, ctx.session.userId),
+						),
+				});
+
+				if (!userVaultKey) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Access denied to this vault",
+					});
+				}
+
+				const members = await db.query.vaultKey.findMany({
+					where: (vk, { eq }) => eq(vk.vaultId, input.vaultId),
+					with: {
+						user: true,
+					},
+				});
+
+				return members.map((m) => ({
+					userId: m.user.id,
+					name: m.user.name,
+					email: m.user.email,
+					role: m.role,
+				}));
+			}),
+
+		/**
+		 * Update vault member role (owner/admin only)
+		 */
+		updateRole: protectedProcedure
+			.input(
+				z.object({
+					vaultId: z.string(),
+					userId: z.string(),
+					role: z.enum(["admin", "member", "read-only"]),
+				}),
+			)
+			.mutation(async ({ ctx, input }) => {
+				// Check user has admin/owner access
+				const userVaultKey = await db.query.vaultKey.findFirst({
+					where: (vk, { and, eq }) =>
+						and(
+							eq(vk.vaultId, input.vaultId),
+							eq(vk.userId, ctx.session.userId),
+						),
+				});
+
+				if (
+					!userVaultKey ||
+					!["owner", "admin"].includes(userVaultKey.role)
+				) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Only vault owner or admin can change roles",
+					});
+				}
+
+				// Can't change your own role
+				if (input.userId === ctx.session.userId) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "Cannot change your own role",
+					});
+				}
+
+				// Get target member
+				const targetVaultKey = await db.query.vaultKey.findFirst({
+					where: (vk, { and, eq }) =>
+						and(eq(vk.vaultId, input.vaultId), eq(vk.userId, input.userId)),
+				});
+
+				if (!targetVaultKey) {
+					throw new TRPCError({
+						code: "NOT_FOUND",
+						message: "Member not found",
+					});
+				}
+
+				// Cannot change owner's role
+				if (targetVaultKey.role === "owner") {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Cannot change vault owner's role",
+					});
+				}
+
+				// Admin can't change other admins
+				if (
+					userVaultKey.role === "admin" &&
+					targetVaultKey.role === "admin"
+				) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Admins cannot change other admins",
+					});
+				}
+
+				await db
+					.update(vaultKey)
+					.set({ role: input.role })
+					.where(
+						and(
+							eq(vaultKey.vaultId, input.vaultId),
+							eq(vaultKey.userId, input.userId),
+						),
+					);
+
+				return { success: true };
+			}),
+
+		/**
+		 * Remove vault member (owner/admin only)
+		 */
+		remove: protectedProcedure
+			.input(z.object({ vaultId: z.string(), userId: z.string() }))
+			.mutation(async ({ ctx, input }) => {
+				// Check user has admin/owner access
+				const userVaultKey = await db.query.vaultKey.findFirst({
+					where: (vk, { and, eq }) =>
+						and(
+							eq(vk.vaultId, input.vaultId),
+							eq(vk.userId, ctx.session.userId),
+						),
+				});
+
+				if (
+					!userVaultKey ||
+					!["owner", "admin"].includes(userVaultKey.role)
+				) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Only vault owner or admin can remove members",
+					});
+				}
+
+				// Can't remove yourself
+				if (input.userId === ctx.session.userId) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "Cannot remove yourself",
+					});
+				}
+
+				// Get target member
+				const targetVaultKey = await db.query.vaultKey.findFirst({
+					where: (vk, { and, eq }) =>
+						and(eq(vk.vaultId, input.vaultId), eq(vk.userId, input.userId)),
+				});
+
+				if (!targetVaultKey) {
+					throw new TRPCError({
+						code: "NOT_FOUND",
+						message: "Member not found",
+					});
+				}
+
+				// Cannot remove owner
+				if (targetVaultKey.role === "owner") {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Cannot remove vault owner",
+					});
+				}
+
+				// Admin can't remove other admins
+				if (
+					userVaultKey.role === "admin" &&
+					targetVaultKey.role === "admin"
+				) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Admins cannot remove other admins",
+					});
+				}
+
+				await db
+					.delete(vaultKey)
+					.where(
+						and(
+							eq(vaultKey.vaultId, input.vaultId),
+							eq(vaultKey.userId, input.userId),
+						),
+					);
+
+				return { success: true };
+			}),
+	}),
 });
