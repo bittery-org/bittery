@@ -87,8 +87,8 @@ function RouteComponent() {
 	const [vaultType, setVaultType] = useState<"personal" | "team">("personal");
 	const [isCreatingVault, setIsCreatingVault] = useState(false);
 
-	const handleCreateItem = async (data: DecryptedItemData) => {
-		if (!params.id) {
+	const handleCreateItem = async (data: DecryptedItemData, vaultId: string) => {
+		if (!vaultId) {
 			toast.error("No vault selected");
 			return;
 		}
@@ -96,7 +96,7 @@ function RouteComponent() {
 		setIsSubmitting(true);
 		try {
 			// Get vault key for encryption
-			const vaultKey = await tauriStorage.getDecryptedVaultKey(params.id);
+			const vaultKey = await tauriStorage.getDecryptedVaultKey(vaultId);
 
 			if (!vaultKey) {
 				throw new Error("No vault key found");
@@ -113,7 +113,7 @@ function RouteComponent() {
 			};
 
 			const createdItem = await trpcClient.vault.createItem.mutate({
-				vaultId: params.id,
+				vaultId: vaultId,
 				category: selectedCategory,
 				overview,
 				encryptedData: encryptedData.ciphertext,
@@ -130,7 +130,7 @@ function RouteComponent() {
 			// Navigate to the newly created item
 			navigate({
 				to: "/vault/$id/$itemId",
-				params: { id: params.id, itemId: createdItem.id },
+				params: { id: vaultId, itemId: createdItem.id },
 			});
 
 			toast.success("Item created successfully");
@@ -143,7 +143,6 @@ function RouteComponent() {
 			setIsSubmitting(false);
 		}
 	};
-
 
 	const handleCreateVault = async () => {
 		if (!vaultName.trim()) {
@@ -217,14 +216,26 @@ function RouteComponent() {
 	return (
 		<div className="flex h-screen flex-col overflow-hidden">
 			{/* Top Header */}
-			<header className="flex items-center justify-between border-b px-4 py-2">
-				<div className="flex items-center gap-2">
+			<header className="flex items-center space-x-2 border-b px-2 py-2">
+				{/* <div className="flex items-center gap-2">
 					<div className="flex size-6 items-center justify-center rounded-sm bg-primary text-primary-foreground">
 						<ShieldCheck className="size-4" />
 					</div>
 					<span className="font-bold text-xl tracking-tight">Bittery</span>
-				</div>
+				</div> */}
 				<AccountSwitcher />
+				<div className="flex flex-1 items-center space-x-6 pl-2">
+					<div className="flex-1">
+						<SearchCombobox />
+					</div>
+					<Button
+						onClick={() => setIsNewItemDialogOpen(true)}
+						disabled={!vaultKeys?.length}
+					>
+						<PlusIcon />
+						New Item
+					</Button>
+				</div>
 			</header>
 
 			{/* Main Content Area */}
@@ -262,20 +273,6 @@ function RouteComponent() {
 				</div>
 
 				<div className="flex h-full flex-1 flex-col">
-					<header>
-						<div className="flex items-center space-x-3 border-b px-2 py-2.5">
-							<div className="flex-1">
-								<SearchCombobox />
-							</div>
-							<Button
-								onClick={() => setIsNewItemDialogOpen(true)}
-								disabled={!params.id}
-							>
-								<PlusIcon />
-								New Item
-							</Button>
-						</div>
-					</header>
 					<div className="flex flex-1 overflow-hidden">
 						<Outlet />
 					</div>
@@ -321,6 +318,14 @@ function RouteComponent() {
 							onCancel={() => setIsNewItemDialogOpen(false)}
 							submitLabel="Create"
 							isSubmitting={isSubmitting}
+							vaults={
+								vaultKeys?.map((v) => ({
+									id: v.vaultId,
+									name: v.vaultName,
+									type: v.vaultType as "personal" | "team",
+								})) || []
+							}
+							selectedVaultId={params.id}
 						/>
 					</div>
 				</DialogContent>

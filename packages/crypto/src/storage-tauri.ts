@@ -59,6 +59,7 @@ export interface AccountMetadata {
 	email: string;
 	userId: string;
 	name: string;
+	teamName?: string;
 	secretKeyHint: string;
 	addedAt: number;
 	lastActiveAt: number;
@@ -117,7 +118,7 @@ async function getDeviceKey(): Promise<Uint8Array> {
  */
 export async function getActiveAccountEmail(): Promise<string | null> {
 	const store = await getStore();
-	return await store.get<string>(ACTIVE_ACCOUNT_KEY) ?? null;
+	return (await store.get<string>(ACTIVE_ACCOUNT_KEY)) ?? null;
 }
 
 /**
@@ -130,7 +131,9 @@ export async function setActiveAccount(email: string): Promise<void> {
 
 	// Update lastActiveAt for this account
 	const accountsList = await getAccountsList();
-	const account = accountsList.accounts.find(a => a.email.toLowerCase() === email.toLowerCase());
+	const account = accountsList.accounts.find(
+		(a) => a.email.toLowerCase() === email.toLowerCase(),
+	);
 	if (account) {
 		account.lastActiveAt = Date.now();
 		await store.set(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
@@ -157,13 +160,15 @@ export async function getAccountsList(): Promise<AccountsList> {
 /**
  * Add a new account to the accounts list
  */
-export async function addAccountToList(metadata: AccountMetadata): Promise<void> {
+export async function addAccountToList(
+	metadata: AccountMetadata,
+): Promise<void> {
 	const store = await getStore();
 	const accountsList = await getAccountsList();
 
 	// Check if account already exists (by email)
 	const existingIndex = accountsList.accounts.findIndex(
-		a => a.email.toLowerCase() === metadata.email.toLowerCase()
+		(a) => a.email.toLowerCase() === metadata.email.toLowerCase(),
 	);
 
 	if (existingIndex >= 0) {
@@ -186,7 +191,7 @@ export async function removeAccountFromList(email: string): Promise<void> {
 	const accountsList = await getAccountsList();
 
 	accountsList.accounts = accountsList.accounts.filter(
-		a => a.email.toLowerCase() !== email.toLowerCase()
+		(a) => a.email.toLowerCase() !== email.toLowerCase(),
 	);
 
 	await store.set(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
@@ -196,11 +201,15 @@ export async function removeAccountFromList(email: string): Promise<void> {
 /**
  * Get metadata for a specific account
  */
-export async function getAccountMetadata(email: string): Promise<AccountMetadata | null> {
+export async function getAccountMetadata(
+	email: string,
+): Promise<AccountMetadata | null> {
 	const accountsList = await getAccountsList();
-	return accountsList.accounts.find(
-		a => a.email.toLowerCase() === email.toLowerCase()
-	) ?? null;
+	return (
+		accountsList.accounts.find(
+			(a) => a.email.toLowerCase() === email.toLowerCase(),
+		) ?? null
+	);
 }
 
 /**
@@ -319,7 +328,10 @@ export async function authenticateWithBiometric(
 /**
  * Store Secret Key in Tauri secure storage (plaintext - safe because useless without password)
  */
-export async function storeSecretKey(secretKey: string, email?: string): Promise<void> {
+export async function storeSecretKey(
+	secretKey: string,
+	email?: string,
+): Promise<void> {
 	const resolvedEmail = await resolveEmail(email);
 	if (!resolvedEmail) throw new Error("No account specified");
 
@@ -332,7 +344,9 @@ export async function storeSecretKey(secretKey: string, email?: string): Promise
 /**
  * Get stored Secret Key
  */
-export async function getStoredSecretKey(email?: string): Promise<string | undefined> {
+export async function getStoredSecretKey(
+	email?: string,
+): Promise<string | undefined> {
 	const resolvedEmail = await resolveEmail(email);
 	if (!resolvedEmail) return undefined;
 
@@ -386,7 +400,9 @@ export async function storeSessionData(
 /**
  * Get stored session data and check if it's still valid
  */
-export async function getStoredSessionData(email?: string): Promise<StoredSessionData | null> {
+export async function getStoredSessionData(
+	email?: string,
+): Promise<StoredSessionData | null> {
 	try {
 		const resolvedEmail = await resolveEmail(email);
 		if (!resolvedEmail) return null;
@@ -418,7 +434,9 @@ export async function isSessionValid(email?: string): Promise<boolean> {
 /**
  * Get time until session expires (in milliseconds)
  */
-export async function getTimeUntilExpiry(email?: string): Promise<number | null> {
+export async function getTimeUntilExpiry(
+	email?: string,
+): Promise<number | null> {
 	const sessionData = await getStoredSessionData(email);
 	if (!sessionData) return null;
 
@@ -430,7 +448,9 @@ export async function getTimeUntilExpiry(email?: string): Promise<number | null>
 /**
  * Check if biometric authentication is required based on grace period
  */
-export async function isBiometricAuthRequired(email?: string): Promise<boolean> {
+export async function isBiometricAuthRequired(
+	email?: string,
+): Promise<boolean> {
 	const resolvedEmail = await resolveEmail(email);
 	if (!resolvedEmail) return false;
 
@@ -469,8 +489,10 @@ export async function decryptStoredMasterUnlockKey(
 	if (!skipBiometric && sessionData.biometricEnabled) {
 		const authRequired = await isBiometricAuthRequired(resolvedEmail);
 		if (authRequired) {
-			const authenticated =
-				await authenticateWithBiometric("Unlock your vault", resolvedEmail);
+			const authenticated = await authenticateWithBiometric(
+				"Unlock your vault",
+				resolvedEmail,
+			);
 			if (!authenticated) {
 				return null;
 			}
@@ -560,7 +582,10 @@ export async function canBiometricUnlock(email?: string): Promise<boolean> {
 /**
  * Store JWT token in memory (session storage)
  */
-export async function storeAuthToken(token: string, email?: string): Promise<void> {
+export async function storeAuthToken(
+	token: string,
+	email?: string,
+): Promise<void> {
 	const resolvedEmail = await resolveEmail(email);
 	if (!resolvedEmail) throw new Error("No account specified");
 
@@ -602,7 +627,10 @@ export async function getAuthToken(email?: string): Promise<string | null> {
 /**
  * Store encrypted vault keys in memory
  */
-export async function storeVaultKeys(vaultKeys: VaultKeyData[], email?: string): Promise<void> {
+export async function storeVaultKeys(
+	vaultKeys: VaultKeyData[],
+	email?: string,
+): Promise<void> {
 	const resolvedEmail = await resolveEmail(email);
 	if (!resolvedEmail) throw new Error("No account specified");
 
@@ -623,7 +651,9 @@ export async function storeVaultKeys(vaultKeys: VaultKeyData[], email?: string):
 /**
  * Get encrypted vault keys
  */
-export async function getVaultKeys(email?: string): Promise<VaultKeyData[] | null> {
+export async function getVaultKeys(
+	email?: string,
+): Promise<VaultKeyData[] | null> {
 	const resolvedEmail = await resolveEmail(email);
 	if (!resolvedEmail) return null;
 
@@ -646,7 +676,10 @@ export async function getVaultKeys(email?: string): Promise<VaultKeyData[] | nul
 /**
  * Store Master Unlock Key in memory cache
  */
-export async function storeMasterUnlockKey(key: Uint8Array, email?: string): Promise<void> {
+export async function storeMasterUnlockKey(
+	key: Uint8Array,
+	email?: string,
+): Promise<void> {
 	const resolvedEmail = await resolveEmail(email);
 	if (!resolvedEmail) throw new Error("No account specified");
 
@@ -658,7 +691,9 @@ export async function storeMasterUnlockKey(key: Uint8Array, email?: string): Pro
  * Get Master Unlock Key from memory cache
  * If not in memory but session is valid, restore from encrypted storage
  */
-export async function getMasterUnlockKey(email?: string): Promise<Uint8Array | null> {
+export async function getMasterUnlockKey(
+	email?: string,
+): Promise<Uint8Array | null> {
 	const resolvedEmail = await resolveEmail(email);
 	if (!resolvedEmail) return null;
 
@@ -753,7 +788,10 @@ export async function tryRestoreSession(
 		return false;
 	}
 
-	const masterUnlockKey = await decryptStoredMasterUnlockKey(skipBiometric, resolvedEmail);
+	const masterUnlockKey = await decryptStoredMasterUnlockKey(
+		skipBiometric,
+		resolvedEmail,
+	);
 
 	if (!masterUnlockKey) {
 		return false;
@@ -776,7 +814,10 @@ export async function unlockWithBiometric(email?: string): Promise<boolean> {
 			return false;
 		}
 
-		const masterUnlockKey = await decryptStoredMasterUnlockKey(false, resolvedEmail);
+		const masterUnlockKey = await decryptStoredMasterUnlockKey(
+			false,
+			resolvedEmail,
+		);
 		if (!masterUnlockKey) {
 			return false;
 		}
@@ -807,7 +848,9 @@ export async function migrateToMultiAccount(): Promise<void> {
 	}
 
 	// Check if there's legacy data to migrate
-	const legacySessionData = await store.get<string>(LEGACY_SESSION_DATA_STORAGE);
+	const legacySessionData = await store.get<string>(
+		LEGACY_SESSION_DATA_STORAGE,
+	);
 	if (!legacySessionData) {
 		// No legacy data, mark migration as complete
 		await store.set(MIGRATION_COMPLETED_KEY, true);
@@ -825,8 +868,12 @@ export async function migrateToMultiAccount(): Promise<void> {
 		const legacySecretKey = await store.get<string>(LEGACY_SECRET_KEY_STORAGE);
 		const legacyJwtToken = await store.get<string>(LEGACY_JWT_TOKEN_KEY);
 		const legacyVaultKeys = await store.get<string>(LEGACY_VAULT_KEYS_KEY);
-		const legacyBiometricEnabled = await store.get<boolean>(LEGACY_BIOMETRIC_ENABLED_KEY);
-		const legacyLastBiometricAuth = await store.get<number>(LEGACY_LAST_BIOMETRIC_AUTH_KEY);
+		const legacyBiometricEnabled = await store.get<boolean>(
+			LEGACY_BIOMETRIC_ENABLED_KEY,
+		);
+		const legacyLastBiometricAuth = await store.get<number>(
+			LEGACY_LAST_BIOMETRIC_AUTH_KEY,
+		);
 
 		// Store in new namespaced format
 		if (legacySecretKey) {
@@ -840,10 +887,16 @@ export async function migrateToMultiAccount(): Promise<void> {
 			await store.set(getAccountKey(email, "vault_keys"), legacyVaultKeys);
 		}
 		if (legacyBiometricEnabled !== undefined) {
-			await store.set(getAccountKey(email, "biometric_enabled"), legacyBiometricEnabled);
+			await store.set(
+				getAccountKey(email, "biometric_enabled"),
+				legacyBiometricEnabled,
+			);
 		}
 		if (legacyLastBiometricAuth !== undefined) {
-			await store.set(getAccountKey(email, "last_biometric_auth"), legacyLastBiometricAuth);
+			await store.set(
+				getAccountKey(email, "last_biometric_auth"),
+				legacyLastBiometricAuth,
+			);
 		}
 
 		// Create account metadata

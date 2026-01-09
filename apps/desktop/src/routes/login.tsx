@@ -5,8 +5,8 @@ import {
 	validateSecretKey,
 	verifyServerSession,
 } from "@bittery/crypto";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
+import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -23,7 +23,8 @@ export const Route = createFileRoute("/login")({
 	component: LoginPage,
 	validateSearch: (search: Record<string, unknown>): LoginSearchParams => {
 		return {
-			addingAccount: search.addingAccount === true || search.addingAccount === "true",
+			addingAccount:
+				search.addingAccount === true || search.addingAccount === "true",
 		};
 	},
 });
@@ -119,7 +120,10 @@ export function LoginPage() {
 
 			// Store auth data (email is used to namespace storage)
 			await tauriStorage.storeAuthToken(finishResult.token, normalizedEmail);
-			await tauriStorage.storeVaultKeys(finishResult.vaultKeys, normalizedEmail);
+			await tauriStorage.storeVaultKeys(
+				finishResult.vaultKeys,
+				normalizedEmail,
+			);
 			await tauriStorage.storeSecretKey(secretKey, normalizedEmail);
 			await tauriStorage.storeSessionData(
 				masterUnlockKey,
@@ -134,6 +138,7 @@ export function LoginPage() {
 				email: normalizedEmail,
 				userId: finishResult.user.id,
 				name: finishResult.user.name || normalizedEmail.split("@")[0],
+				teamName: finishResult.user.teamName,
 				secretKeyHint,
 				addedAt: Date.now(),
 				lastActiveAt: Date.now(),
@@ -149,7 +154,9 @@ export function LoginPage() {
 			// Refresh account context
 			await refreshAccounts();
 
-			toast.success(addingAccount ? "Account added successfully" : "Login successful");
+			toast.success(
+				addingAccount ? "Account added successfully" : "Login successful",
+			);
 			navigate({ to: "/vault" });
 		} catch (error) {
 			console.error("Login error:", error);
@@ -168,7 +175,7 @@ export function LoginPage() {
 						variant="ghost"
 						size="sm"
 						onClick={handleBackToVault}
-						className="mb-4 -ml-2 gap-1"
+						className="-ml-2 mb-4 gap-1"
 					>
 						<ArrowLeft className="h-4 w-4" />
 						Back to Vault

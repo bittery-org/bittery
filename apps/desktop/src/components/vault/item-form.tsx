@@ -1,8 +1,18 @@
 /** biome-ignore-all lint/suspicious/noArrayIndexKey: Using array index as key is acceptable here because the list order is stable and items do not get reordered */
 
-import { Button, Input, Label, PasswordGenerator, toast } from "@bittery/ui";
+import {
+	Button,
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+	Input,
+	Label,
+	PasswordGenerator,
+	toast,
+} from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
-import { Plus, Trash2, X } from "lucide-react";
+import { ChevronDown, Plus, Trash2, X } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useState } from "react";
 
@@ -28,13 +38,24 @@ interface SecureNoteFormData {
 	note: string;
 }
 
+export interface VaultOption {
+	id: string;
+	name: string;
+	type: "personal" | "team";
+}
+
 interface ItemFormProps {
 	category: "login" | "secure-note";
 	initialData?: Partial<LoginFormData | SecureNoteFormData>;
-	onSubmit: (data: LoginFormData | SecureNoteFormData) => Promise<void> | void;
+	onSubmit: (
+		data: LoginFormData | SecureNoteFormData,
+		vaultId: string,
+	) => Promise<void> | void;
 	onCancel: () => void;
 	submitLabel?: string;
 	isSubmitting?: boolean;
+	vaults?: VaultOption[];
+	selectedVaultId?: string;
 }
 
 export function ItemForm(props: ItemFormProps) {
@@ -50,6 +71,8 @@ function LoginForm({
 	onCancel,
 	submitLabel = "Save",
 	isSubmitting = false,
+	vaults = [],
+	selectedVaultId,
 }: Omit<ItemFormProps, "category">) {
 	const initialLoginData = initialData as Partial<LoginFormData>;
 
@@ -59,6 +82,11 @@ function LoginForm({
 	const [customFields, setCustomFields] = useState<CustomField[]>(
 		initialLoginData?.customFields || [],
 	);
+	const [currentVaultId, setCurrentVaultId] = useState<string>(
+		selectedVaultId || vaults[0]?.id || "",
+	);
+
+	const selectedVault = vaults.find((v) => v.id === currentVaultId);
 
 	const form = useForm({
 		defaultValues: {
@@ -75,7 +103,7 @@ function LoginForm({
 					urls: additionalUrls.length > 0 ? additionalUrls : undefined,
 					customFields: customFields.length > 0 ? customFields : undefined,
 				};
-				await onSubmit(submitData);
+				await onSubmit(submitData, currentVaultId);
 				toast.success("Item saved successfully");
 			} catch (error) {
 				const errorMessage =
@@ -328,18 +356,41 @@ function LoginForm({
 				</div>
 			</div>
 
-			<div className="mt-4 flex gap-2 border-t bg-background pt-4">
-				<Button type="submit" className="flex-1" disabled={isSubmitting}>
-					{isSubmitting ? "Saving..." : submitLabel}
-				</Button>
-				<Button
-					type="button"
-					variant="outline"
-					onClick={onCancel}
-					disabled={isSubmitting}
-				>
-					Cancel
-				</Button>
+			{/* Footer with Vault Selector */}
+			<div className="mt-4 flex items-center justify-between gap-3 border-t bg-background pt-4">
+				{vaults.length > 0 && (
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button type="button" variant="outline" size="sm">
+								{selectedVault?.name || "Select vault"}
+								<ChevronDown className="ml-2 size-4" />
+							</Button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="start">
+							{vaults.map((vault) => (
+								<DropdownMenuItem
+									key={vault.id}
+									onClick={() => setCurrentVaultId(vault.id)}
+								>
+									{vault.name}
+								</DropdownMenuItem>
+							))}
+						</DropdownMenuContent>
+					</DropdownMenu>
+				)}
+				<div className="flex flex-1 justify-end gap-2">
+					<Button
+						type="button"
+						variant="outline"
+						onClick={onCancel}
+						disabled={isSubmitting}
+					>
+						Cancel
+					</Button>
+					<Button type="submit" disabled={isSubmitting}>
+						{isSubmitting ? "Saving..." : submitLabel}
+					</Button>
+				</div>
 			</div>
 		</form>
 	);
@@ -351,7 +402,15 @@ function SecureNoteForm({
 	onCancel,
 	submitLabel = "Save",
 	isSubmitting = false,
+	vaults = [],
+	selectedVaultId,
 }: Omit<ItemFormProps, "category">) {
+	const [currentVaultId, setCurrentVaultId] = useState<string>(
+		selectedVaultId || vaults[0]?.id || "",
+	);
+
+	const selectedVault = vaults.find((v) => v.id === currentVaultId);
+
 	const form = useForm({
 		defaultValues: {
 			title: (initialData as Partial<SecureNoteFormData>)?.title || "",
@@ -359,7 +418,7 @@ function SecureNoteForm({
 		},
 		onSubmit: async ({ value }) => {
 			try {
-				await onSubmit(value);
+				await onSubmit(value, currentVaultId);
 				toast.success("Note saved successfully");
 			} catch (error) {
 				const errorMessage =
@@ -419,18 +478,41 @@ function SecureNoteForm({
 				</div>
 			</div>
 
-			<div className="mt-4 flex gap-2 border-t bg-background pt-4">
-				<Button type="submit" className="flex-1" disabled={isSubmitting}>
-					{isSubmitting ? "Saving..." : submitLabel}
-				</Button>
-				<Button
-					type="button"
-					variant="outline"
-					onClick={onCancel}
-					disabled={isSubmitting}
-				>
-					Cancel
-				</Button>
+			{/* Footer with Vault Selector */}
+			<div className="mt-4 flex items-center justify-between gap-3 border-t bg-background pt-4">
+				{vaults.length > 0 && (
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button type="button" variant="outline" size="sm">
+								{selectedVault?.name || "Select vault"}
+								<ChevronDown className="ml-2 size-4" />
+							</Button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="start">
+							{vaults.map((vault) => (
+								<DropdownMenuItem
+									key={vault.id}
+									onClick={() => setCurrentVaultId(vault.id)}
+								>
+									{vault.name}
+								</DropdownMenuItem>
+							))}
+						</DropdownMenuContent>
+					</DropdownMenu>
+				)}
+				<div className="flex flex-1 justify-end gap-2">
+					<Button
+						type="button"
+						variant="outline"
+						onClick={onCancel}
+						disabled={isSubmitting}
+					>
+						Cancel
+					</Button>
+					<Button type="submit" disabled={isSubmitting}>
+						{isSubmitting ? "Saving..." : submitLabel}
+					</Button>
+				</div>
 			</div>
 		</form>
 	);

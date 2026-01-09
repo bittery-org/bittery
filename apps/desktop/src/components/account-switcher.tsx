@@ -4,13 +4,12 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
-	DropdownMenuLabel,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 	toast,
 } from "@bittery/ui";
 import { useNavigate } from "@tanstack/react-router";
-import { Check, ChevronDown, Lock, LogOut, Plus, User } from "lucide-react";
+import { Check, ChevronDown, LogOut, Plus } from "lucide-react";
 import { useState } from "react";
 import { useAccount } from "../contexts/account-context";
 import { AccountAvatar } from "./account-avatar";
@@ -134,20 +133,20 @@ export function AccountSwitcher() {
 						disabled={isSwitching}
 					>
 						<AccountAvatar account={activeAccount} size="sm" />
-						<span className="max-w-32 truncate text-sm">
-							{activeAccount.name || activeAccount.email}
-						</span>
+						<div className="flex flex-col items-start overflow-hidden">
+							<span className="max-w-32 truncate font-medium text-sm">
+								{activeAccount.teamName ||
+									activeAccount.name ||
+									activeAccount.email.split("@")[0]}
+							</span>
+						</div>
 						<ChevronDown className="h-4 w-4 opacity-50" />
 					</Button>
 				</DropdownMenuTrigger>
-				<DropdownMenuContent align="end" className="w-72">
-					<DropdownMenuLabel>Accounts</DropdownMenuLabel>
-					<DropdownMenuSeparator />
-
+				<DropdownMenuContent align="start" className="w-72">
 					{allAccounts.map((account) => {
 						const isActive =
-							account.email.toLowerCase() ===
-							activeAccount.email.toLowerCase();
+							account.email.toLowerCase() === activeAccount.email.toLowerCase();
 
 						return (
 							<DropdownMenuItem
@@ -158,7 +157,9 @@ export function AccountSwitcher() {
 								<AccountAvatar account={account} size="sm" />
 								<div className="flex flex-1 flex-col overflow-hidden">
 									<span className="truncate font-medium">
-										{account.name || account.email.split("@")[0]}
+										{account.teamName ||
+											account.name ||
+											account.email.split("@")[0]}
 									</span>
 									<span className="truncate text-muted-foreground text-xs">
 										{account.email}
@@ -178,22 +179,22 @@ export function AccountSwitcher() {
 
 					<DropdownMenuSeparator />
 
-					<DropdownMenuItem
+					{/* <DropdownMenuItem
 						onClick={() => handleLockAccount(activeAccount.email)}
 						className="gap-2"
 					>
 						<Lock className="h-4 w-4" />
 						Lock Current Account
-					</DropdownMenuItem>
+					</DropdownMenuItem> */}
 
-					{allAccounts.length > 1 && (
+					{/* {allAccounts.length > 1 && (
 						<DropdownMenuItem onClick={handleLockAll} className="gap-2">
 							<Lock className="h-4 w-4" />
 							Lock All Accounts
 						</DropdownMenuItem>
 					)}
 
-					<DropdownMenuSeparator />
+					<DropdownMenuSeparator /> */}
 
 					<DropdownMenuItem
 						onClick={() => setAccountToRemove(activeAccount.email)}

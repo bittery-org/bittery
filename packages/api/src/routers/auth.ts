@@ -14,7 +14,7 @@ import {
 	getUserById,
 	startLogin,
 } from "@bittery/auth";
-import { db, vault, vaultKey } from "@bittery/db";
+import { db, team, teamMember, vault, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -29,6 +29,7 @@ export const authRouter = router({
 			z.object({
 				email: z.string().email(),
 				name: z.string().min(2),
+				organizationName: z.string().min(1),
 				secretKeyHint: z.string(),
 				srpSalt: z.string(),
 				srpVerifier: z.string(),
@@ -74,6 +75,23 @@ export const authRouter = router({
 				userId,
 				encryptedVaultKey: input.encryptedVaultKey,
 				role: "owner",
+			});
+
+			// Create team for the user
+			const teamId = nanoid();
+			await db.insert(team).values({
+				id: teamId,
+				name: input.organizationName,
+				ownerId: userId,
+			});
+
+			// Add user as team owner
+			await db.insert(teamMember).values({
+				id: nanoid(),
+				teamId,
+				userId,
+				role: "owner",
+				joinedAt: new Date(),
 			});
 
 			// Create session and generate token
@@ -173,11 +191,22 @@ export const authRouter = router({
 				},
 			});
 
+			// Get user's team membership (first team they belong to)
+			const userTeamMembership = await db.query.teamMember.findFirst({
+				where: (teamMember, { eq }) => eq(teamMember.userId, result.user!.id),
+				with: {
+					team: true,
+				},
+			});
+
 			return {
 				token: result.token!,
 				sessionId: result.sessionId!,
 				serverProof: result.serverProof!, // For client to verify server
-				user: result.user,
+				user: {
+					...result.user,
+					teamName: userTeamMembership?.team.name,
+				},
 				vaultKeys: vaultKeys.map((vk) => ({
 					vaultId: vk.vaultId,
 					vaultName: vk.vault.name,
@@ -227,10 +256,21 @@ export const authRouter = router({
 				},
 			});
 
+			// Get user's team membership (first team they belong to)
+			const userTeamMembership = await db.query.teamMember.findFirst({
+				where: (teamMember, { eq }) => eq(teamMember.userId, result.user!.id),
+				with: {
+					team: true,
+				},
+			});
+
 			return {
 				token: result.token!,
 				sessionId: result.sessionId!,
-				user: result.user,
+				user: {
+					...result.user,
+					teamName: userTeamMembership?.team.name,
+				},
 				vaultKeys: vaultKeys.map((vk) => ({
 					vaultId: vk.vaultId,
 					vaultName: vk.vault.name,

@@ -4,16 +4,16 @@ import {
 	generateClientEphemeral,
 	verifyServerSession,
 } from "@bittery/crypto";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
+import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ChevronDown, Fingerprint, Lock } from "lucide-react";
 import { useState } from "react";
-import { useAccount } from "../contexts/account-context";
 import { AccountAvatar } from "../components/account-avatar";
+import { useAccount } from "../contexts/account-context";
 
 interface UnlockSearchParams {
 	email?: string;
@@ -32,7 +32,8 @@ export function UnlockPage() {
 	const trpcClient = useTRPCClient();
 	const navigate = useNavigate();
 	const { email: emailParam } = Route.useSearch();
-	const { allAccounts, activeAccount, switchAccount, refreshAccounts } = useAccount();
+	const { allAccounts, activeAccount, switchAccount, refreshAccounts } =
+		useAccount();
 	const [password, setPassword] = useState("");
 	const [loading, setLoading] = useState(false);
 	const [showAccountPicker, setShowAccountPicker] = useState(false);
@@ -40,7 +41,7 @@ export function UnlockPage() {
 	// Determine which account to unlock
 	const targetEmail = emailParam || activeAccount?.email;
 	const targetAccount = allAccounts.find(
-		(a) => a.email.toLowerCase() === targetEmail?.toLowerCase()
+		(a) => a.email.toLowerCase() === targetEmail?.toLowerCase(),
 	);
 
 	const { data: sessionState } = useQuery({
@@ -175,6 +176,16 @@ export function UnlockPage() {
 			);
 			await tauriStorage.storeMasterUnlockKey(masterUnlockKey, targetEmail);
 
+			// Update account metadata with latest team name from server
+			if (targetAccount) {
+				const updatedMetadata: AccountMetadata = {
+					...targetAccount,
+					teamName: finishResult.user.teamName,
+					lastActiveAt: Date.now(),
+				};
+				await tauriStorage.addAccountToList(updatedMetadata);
+			}
+
 			// Set as active account
 			await tauriStorage.setActiveAccount(targetEmail);
 			await refreshAccounts();
@@ -223,7 +234,7 @@ export function UnlockPage() {
 									</button>
 
 									{showAccountPicker && (
-										<div className="absolute left-1/2 z-10 mt-2 w-64 -translate-x-1/2 rounded-lg border bg-white py-1 shadow-lg">
+										<div className="-translate-x-1/2 absolute left-1/2 z-10 mt-2 w-64 rounded-lg border bg-white py-1 shadow-lg">
 											{allAccounts.map((account) => (
 												<button
 													key={account.email}
@@ -233,10 +244,12 @@ export function UnlockPage() {
 												>
 													<AccountAvatar account={account} size="sm" />
 													<div className="text-left">
-														<div className="text-sm font-medium">
-															{account.name || account.email.split("@")[0]}
+														<div className="font-medium text-sm">
+															{account.teamName ||
+																account.name ||
+																account.email.split("@")[0]}
 														</div>
-														<div className="text-xs text-gray-500">
+														<div className="text-gray-500 text-xs">
 															{account.email}
 														</div>
 													</div>
@@ -290,7 +303,9 @@ export function UnlockPage() {
 				<div className="mt-4 text-center">
 					<button
 						type="button"
-						onClick={() => navigate({ to: "/login", search: { addingAccount: true } })}
+						onClick={() =>
+							navigate({ to: "/login", search: { addingAccount: true } })
+						}
 						className="text-gray-600 text-sm hover:text-gray-900"
 					>
 						Sign in with different account

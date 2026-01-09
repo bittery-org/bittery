@@ -22,7 +22,10 @@ export function RemoveAccountDialog({
 	if (!email) return null;
 
 	return (
-		<Dialog open={!!email} onOpenChange={(open: boolean) => !open && onCancel()}>
+		<Dialog
+			open={!!email}
+			onOpenChange={(open: boolean) => !open && onCancel()}
+		>
 			<DialogContent showCloseButton={false}>
 				<DialogHeader>
 					<DialogTitle>Remove Account</DialogTitle>
@@ -36,10 +39,7 @@ export function RemoveAccountDialog({
 					<Button variant="outline" onClick={onCancel}>
 						Cancel
 					</Button>
-					<Button
-						onClick={() => onConfirm(email)}
-						variant="destructive"
-					>
+					<Button onClick={() => onConfirm(email)} variant="destructive">
 						Remove Account
 					</Button>
 				</DialogFooter>

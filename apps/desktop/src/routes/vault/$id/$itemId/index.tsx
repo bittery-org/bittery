@@ -340,6 +340,7 @@ function VaultItemComponent() {
 						}}
 						onCancel={() => setIsNewItemDialogOpen(false)}
 						isSubmitting={createItemMutation.isPending}
+						selectedVaultId={selectedVaultId}
 					/>
 				</DialogContent>
 			</Dialog>
@@ -366,6 +367,7 @@ function VaultItemComponent() {
 							onCancel={() => setIsEditDialogOpen(false)}
 							isSubmitting={updateItemMutation.isPending}
 							submitLabel="Update"
+							selectedVaultId={selectedVaultId}
 						/>
 					)}
 				</DialogContent>

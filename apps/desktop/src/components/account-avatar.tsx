@@ -1,6 +1,5 @@
 import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
-import { Avatar, AvatarFallback } from "@bittery/ui";
-import { cn } from "@bittery/ui";
+import { Avatar, AvatarFallback, cn } from "@bittery/ui";
 
 interface AccountAvatarProps {
 	account: AccountMetadata | null;
@@ -19,16 +18,23 @@ export function AccountAvatar({
 		lg: "h-10 w-10 text-base",
 	};
 
-	const initials = account?.name
-		? account.name
+	const initials = account?.teamName
+		? account.teamName
 				.split(" ")
 				.map((n) => n[0])
 				.join("")
 				.toUpperCase()
 				.slice(0, 2)
-		: account?.email
-			? account.email.substring(0, 2).toUpperCase()
-			: "?";
+		: account?.name
+			? account.name
+					.split(" ")
+					.map((n) => n[0])
+					.join("")
+					.toUpperCase()
+					.slice(0, 2)
+			: account?.email
+				? account.email.substring(0, 2).toUpperCase()
+				: "?";
 
 	return (
 		<Avatar className={cn(sizeClasses[size], className)}>

@@ -62,6 +62,7 @@ export default function SignUpForm({
 			email: "",
 			password: "",
 			name: "",
+			organizationName: "",
 		},
 		onSubmit: async ({ value }) => {
 			if (!hasAcknowledged) {
@@ -100,6 +101,7 @@ export default function SignUpForm({
 				const result = await signupMutation.mutateAsync({
 					email: value.email,
 					name: value.name,
+					organizationName: value.organizationName,
 					secretKeyHint: getSecretKeyHint(secretKey),
 					srpSalt: salt,
 					srpVerifier: verifier,
@@ -279,6 +281,26 @@ Generated: ${new Date().toLocaleString()}
 											id={field.name}
 											name={field.name}
 											placeholder="John Doe"
+											value={field.state.value}
+											onBlur={field.handleBlur}
+											onChange={(e) => field.handleChange(e.target.value)}
+											required
+											className="h-10"
+										/>
+									</div>
+								)}
+							</form.Field>
+						</div>
+
+						<div>
+							<form.Field name="organizationName">
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name}>Organization Name</Label>
+										<Input
+											id={field.name}
+											name={field.name}
+											placeholder="Acme Inc."
 											value={field.state.value}
 											onBlur={field.handleBlur}
 											onChange={(e) => field.handleChange(e.target.value)}
