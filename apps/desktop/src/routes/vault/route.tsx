@@ -2,20 +2,12 @@ import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { encrypt, generateEncryptionKey } from "@bittery/shared/crypto";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
-	Avatar,
-	AvatarFallback,
 	Button,
 	Dialog,
 	DialogContent,
 	DialogDescription,
 	DialogHeader,
 	DialogTitle,
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
 	Input,
 	Label,
 	toast,
@@ -29,27 +21,33 @@ import {
 	useNavigate,
 	useParams,
 } from "@tanstack/react-router";
-import { LogOut, PlusIcon, ShieldCheck } from "lucide-react";
+import { PlusIcon, ShieldCheck } from "lucide-react";
 import { useState } from "react";
+import { AccountSwitcher } from "../../components/account-switcher";
 import { ItemForm } from "../../components/vault/item-form";
 import { SearchCombobox } from "../../components/vault/search-combobox";
 
 export const Route = createFileRoute("/vault")({
 	component: RouteComponent,
 	beforeLoad: async () => {
-		// Check if user has stored credentials
-		const hasSecretKey = await tauriStorage.hasStoredSecretKey();
-		const sessionValid = await tauriStorage.isSessionValid();
-
-		if (!hasSecretKey || !sessionValid) {
-			await tauriStorage.clearAllStoredData();
+		// Get active account
+		const activeEmail = await tauriStorage.getActiveAccountEmail();
+		if (!activeEmail) {
 			throw redirect({ to: "/login" });
 		}
 
-		const restored = await tauriStorage.tryRestoreSession(true);
+		// Check if user has stored credentials for active account
+		const hasSecretKey = await tauriStorage.hasStoredSecretKey(activeEmail);
+		const sessionValid = await tauriStorage.isSessionValid(activeEmail);
+
+		if (!hasSecretKey || !sessionValid) {
+			throw redirect({ to: "/unlock", search: { email: activeEmail } });
+		}
+
+		const restored = await tauriStorage.tryRestoreSession(true, activeEmail);
 
 		if (!restored) {
-			throw redirect({ to: "/unlock" });
+			throw redirect({ to: "/unlock", search: { email: activeEmail } });
 		}
 	},
 });
@@ -77,8 +75,6 @@ function RouteComponent() {
 	const trpcClient = useTRPCClient();
 	const queryClient = useQueryClient();
 	const trpc = useTRPC();
-
-	const { data: user } = useQuery(trpc.auth.me.queryOptions());
 
 	const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
 	const [selectedCategory, setSelectedCategory] = useState<
@@ -148,27 +144,6 @@ function RouteComponent() {
 		}
 	};
 
-	const handleLock = async () => {
-		try {
-			await tauriStorage.clearSession();
-			navigate({ to: "/unlock" });
-			toast.success("Locked successfully");
-		} catch (error) {
-			console.error("Lock error:", error);
-			toast.error("Failed to lock");
-		}
-	};
-
-	const handleLogout = async () => {
-		try {
-			await tauriStorage.clearAllStoredData();
-			navigate({ to: "/login" });
-			toast.success("Logged out successfully");
-		} catch (error) {
-			console.error("Logout error:", error);
-			toast.error("Failed to logout");
-		}
-	};
 
 	const handleCreateVault = async () => {
 		if (!vaultName.trim()) {
@@ -249,42 +224,7 @@ function RouteComponent() {
 					</div>
 					<span className="font-bold text-xl tracking-tight">Bittery</span>
 				</div>
-				<DropdownMenu>
-					<DropdownMenuTrigger asChild>
-						<Button variant="ghost" size="sm">
-							<Avatar>
-								<AvatarFallback>
-									{user?.name
-										?.split(" ")
-										.map((n) => n[0])
-										.join("")
-										.toUpperCase()
-										.slice(0, 2) || "U"}
-								</AvatarFallback>
-							</Avatar>
-							<span className="text-sm">{user?.name || "User"}</span>
-						</Button>
-					</DropdownMenuTrigger>
-					<DropdownMenuContent align="end">
-						<DropdownMenuLabel>
-							<div className="flex flex-col">
-								<span className="font-medium">{user?.name || "User"}</span>
-								<span className="text-muted-foreground text-xs">
-									{user?.email}
-								</span>
-							</div>
-						</DropdownMenuLabel>
-						<DropdownMenuSeparator />
-						<DropdownMenuItem onClick={handleLogout}>
-							<LogOut className="mr-2 h-4 w-4" />
-							Logout
-						</DropdownMenuItem>
-						<DropdownMenuItem onClick={handleLock}>
-							<LogOut className="mr-2 h-4 w-4" />
-							Lock
-						</DropdownMenuItem>
-					</DropdownMenuContent>
-				</DropdownMenu>
+				<AccountSwitcher />
 			</header>
 
 			{/* Main Content Area */}

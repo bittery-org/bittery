@@ -5,28 +5,51 @@ import {
 	verifyServerSession,
 } from "@bittery/crypto";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Fingerprint, Lock } from "lucide-react";
+import { ChevronDown, Fingerprint, Lock } from "lucide-react";
 import { useState } from "react";
+import { useAccount } from "../contexts/account-context";
+import { AccountAvatar } from "../components/account-avatar";
+
+interface UnlockSearchParams {
+	email?: string;
+}
 
 export const Route = createFileRoute("/unlock")({
 	component: UnlockPage,
+	validateSearch: (search: Record<string, unknown>): UnlockSearchParams => {
+		return {
+			email: typeof search.email === "string" ? search.email : undefined,
+		};
+	},
 });
 
 export function UnlockPage() {
 	const trpcClient = useTRPCClient();
 	const navigate = useNavigate();
+	const { email: emailParam } = Route.useSearch();
+	const { allAccounts, activeAccount, switchAccount, refreshAccounts } = useAccount();
 	const [password, setPassword] = useState("");
 	const [loading, setLoading] = useState(false);
+	const [showAccountPicker, setShowAccountPicker] = useState(false);
+
+	// Determine which account to unlock
+	const targetEmail = emailParam || activeAccount?.email;
+	const targetAccount = allAccounts.find(
+		(a) => a.email.toLowerCase() === targetEmail?.toLowerCase()
+	);
 
 	const { data: sessionState } = useQuery({
-		queryKey: ["biometry-status"],
+		queryKey: ["biometry-status", targetEmail],
 		queryFn: async () => {
+			if (!targetEmail) return null;
+
 			const available = await tauriStorage.isBiometricAvailable();
-			const storedData = await tauriStorage.getStoredSessionData();
+			const storedData = await tauriStorage.getStoredSessionData(targetEmail);
 
 			return {
 				available,
@@ -34,23 +57,29 @@ export function UnlockPage() {
 				data: storedData,
 			};
 		},
+		enabled: !!targetEmail,
 	});
 
 	const handleBiometricUnlock = async () => {
+		if (!targetEmail) return;
+
 		setLoading(true);
 		try {
-			const success = await tauriStorage.unlockWithBiometric();
+			const success = await tauriStorage.unlockWithBiometric(targetEmail);
 			if (success) {
 				// Restore auth token and vault keys
-				const token = await tauriStorage.getAuthToken();
-				const vaultKeys = await tauriStorage.getVaultKeys();
+				const token = await tauriStorage.getAuthToken(targetEmail);
+				const vaultKeys = await tauriStorage.getVaultKeys(targetEmail);
 
 				if (token && vaultKeys) {
+					// Set as active account
+					await tauriStorage.setActiveAccount(targetEmail);
+					await refreshAccounts();
 					toast.success("Unlocked with biometric");
 					navigate({ to: "/vault" });
 				} else {
 					toast.error("Session data missing, please log in again");
-					await tauriStorage.clearAllStoredData();
+					await tauriStorage.clearAllStoredData(targetEmail);
 					navigate({ to: "/login" });
 				}
 			} else {
@@ -66,20 +95,22 @@ export function UnlockPage() {
 
 	const handlePasswordUnlock = async (e: React.FormEvent) => {
 		e.preventDefault();
+		if (!targetEmail) return;
+
 		setLoading(true);
 
 		try {
-			const secretKey = await tauriStorage.getStoredSecretKey();
+			const secretKey = await tauriStorage.getStoredSecretKey(targetEmail);
 			if (!secretKey) {
 				toast.error("Secret key not found. Please log in again.");
-				await tauriStorage.clearAllStoredData();
+				await tauriStorage.clearAllStoredData(targetEmail);
 				navigate({ to: "/login" });
 				return;
 			}
 
 			if (!sessionState?.data) {
 				toast.error("Session data not found. Please log in again.");
-				await tauriStorage.clearAllStoredData();
+				await tauriStorage.clearAllStoredData(targetEmail);
 				navigate({ to: "/login" });
 				return;
 			}
@@ -88,7 +119,7 @@ export function UnlockPage() {
 			const { authKey, masterUnlockKey } = await deriveKeys(
 				password,
 				secretKey,
-				sessionState.data.email,
+				targetEmail,
 			);
 
 			// Convert authKey to password string for SRP
@@ -99,7 +130,7 @@ export function UnlockPage() {
 
 			// 3. Send client public key to server and get challenge
 			const startResult = await trpcClient.auth.startLogin.mutate({
-				email: sessionState.data.email,
+				email: targetEmail,
 				clientPublicKey: clientEphemeral.publicKey,
 			});
 
@@ -135,14 +166,18 @@ export function UnlockPage() {
 			);
 
 			// Update session with fresh data
-			await tauriStorage.storeAuthToken(finishResult.token);
-			await tauriStorage.storeVaultKeys(finishResult.vaultKeys);
+			await tauriStorage.storeAuthToken(finishResult.token, targetEmail);
+			await tauriStorage.storeVaultKeys(finishResult.vaultKeys, targetEmail);
 			await tauriStorage.storeSessionData(
 				masterUnlockKey,
-				sessionState.data.email,
+				targetEmail,
 				finishResult.user.id,
 			);
-			tauriStorage.storeMasterUnlockKey(masterUnlockKey);
+			await tauriStorage.storeMasterUnlockKey(masterUnlockKey, targetEmail);
+
+			// Set as active account
+			await tauriStorage.setActiveAccount(targetEmail);
+			await refreshAccounts();
 
 			toast.success("Vault unlocked");
 			navigate({ to: "/vault" });
@@ -154,14 +189,66 @@ export function UnlockPage() {
 		}
 	};
 
+	const handleSwitchAccount = async (email: string) => {
+		setShowAccountPicker(false);
+		navigate({ to: "/unlock", search: { email } });
+	};
+
+	// If no accounts, redirect to login
+	if (allAccounts.length === 0) {
+		navigate({ to: "/login" });
+		return null;
+	}
+
 	return (
 		<div className="flex h-full items-center justify-center bg-gray-50 p-4">
 			<Card className="w-full max-w-md p-6">
 				<div className="mb-6 text-center">
 					<Lock className="mx-auto h-12 w-12 text-gray-400" />
 					<h1 className="mt-4 font-bold text-2xl">Unlock Bittery</h1>
-					{sessionState?.data && (
-						<p className="text-gray-600 text-sm">{sessionState.data.email}</p>
+
+					{/* Account selector */}
+					{targetAccount && (
+						<div className="mt-4">
+							{allAccounts.length > 1 ? (
+								<div className="relative">
+									<button
+										type="button"
+										onClick={() => setShowAccountPicker(!showAccountPicker)}
+										className="mx-auto flex items-center gap-2 rounded-lg border px-3 py-2 hover:bg-gray-50"
+									>
+										<AccountAvatar account={targetAccount} size="sm" />
+										<span className="text-sm">{targetAccount.email}</span>
+										<ChevronDown className="h-4 w-4 text-gray-400" />
+									</button>
+
+									{showAccountPicker && (
+										<div className="absolute left-1/2 z-10 mt-2 w-64 -translate-x-1/2 rounded-lg border bg-white py-1 shadow-lg">
+											{allAccounts.map((account) => (
+												<button
+													key={account.email}
+													type="button"
+													onClick={() => handleSwitchAccount(account.email)}
+													className="flex w-full items-center gap-3 px-4 py-2 hover:bg-gray-50"
+												>
+													<AccountAvatar account={account} size="sm" />
+													<div className="text-left">
+														<div className="text-sm font-medium">
+															{account.name || account.email.split("@")[0]}
+														</div>
+														<div className="text-xs text-gray-500">
+															{account.email}
+														</div>
+													</div>
+												</button>
+											))}
+										</div>
+									)}
+								</div>
+							) : (
+								<p className="text-gray-600 text-sm">{targetAccount.email}</p>
+							)}
+						</div>
 					)}
 				</div>
 
@@ -203,10 +290,7 @@ export function UnlockPage() {
 				<div className="mt-4 text-center">
 					<button
 						type="button"
-						onClick={async () => {
-							await tauriStorage.clearAllStoredData();
-							navigate({ to: "/login" });
-						}}
+						onClick={() => navigate({ to: "/login", search: { addingAccount: true } })}
 						className="text-gray-600 text-sm hover:text-gray-900"
 					>
 						Sign in with different account

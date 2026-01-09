@@ -6,20 +6,33 @@ import {
 	verifyServerSession,
 } from "@bittery/crypto";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Fingerprint } from "lucide-react";
+import { ArrowLeft, Fingerprint } from "lucide-react";
 import { useState } from "react";
+import { useAccount } from "../contexts/account-context";
+
+interface LoginSearchParams {
+	addingAccount?: boolean;
+}
 
 export const Route = createFileRoute("/login")({
 	component: LoginPage,
+	validateSearch: (search: Record<string, unknown>): LoginSearchParams => {
+		return {
+			addingAccount: search.addingAccount === true || search.addingAccount === "true",
+		};
+	},
 });
 
 export function LoginPage() {
 	const trpcClient = useTRPCClient();
 	const navigate = useNavigate();
+	const { addingAccount } = Route.useSearch();
+	const { refreshAccounts } = useAccount();
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [secretKey, setSecretKey] = useState("");
@@ -32,6 +45,10 @@ export function LoginPage() {
 			return await tauriStorage.isBiometricAvailable();
 		},
 	});
+
+	const handleBackToVault = () => {
+		navigate({ to: "/vault" });
+	};
 
 	const handleLogin = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -93,23 +110,46 @@ export function LoginPage() {
 				finishResult.serverProof,
 			);
 
+			const normalizedEmail = email.toLowerCase();
+
 			// Enable biometric if requested
 			if (enableBiometric && biometricAvailable) {
-				await tauriStorage.enableBiometric();
+				await tauriStorage.enableBiometric(normalizedEmail);
 			}
 
-			// Store auth data
-			await tauriStorage.storeAuthToken(finishResult.token);
-			await tauriStorage.storeVaultKeys(finishResult.vaultKeys);
-			await tauriStorage.storeSecretKey(secretKey);
+			// Store auth data (email is used to namespace storage)
+			await tauriStorage.storeAuthToken(finishResult.token, normalizedEmail);
+			await tauriStorage.storeVaultKeys(finishResult.vaultKeys, normalizedEmail);
+			await tauriStorage.storeSecretKey(secretKey, normalizedEmail);
 			await tauriStorage.storeSessionData(
 				masterUnlockKey,
-				email,
+				normalizedEmail,
 				finishResult.user.id,
 			);
-			tauriStorage.storeMasterUnlockKey(masterUnlockKey);
+			await tauriStorage.storeMasterUnlockKey(masterUnlockKey, normalizedEmail);
 
-			toast.success("Login successful");
+			// Create account metadata
+			const secretKeyHint = `${secretKey.substring(0, 5)}...`;
+			const accountMetadata: AccountMetadata = {
+				email: normalizedEmail,
+				userId: finishResult.user.id,
+				name: finishResult.user.name || normalizedEmail.split("@")[0],
+				secretKeyHint,
+				addedAt: Date.now(),
+				lastActiveAt: Date.now(),
+				biometricEnabled: enableBiometric && !!biometricAvailable,
+			};
+
+			// Add to accounts list
+			await tauriStorage.addAccountToList(accountMetadata);
+
+			// Set as active account
+			await tauriStorage.setActiveAccount(normalizedEmail);
+
+			// Refresh account context
+			await refreshAccounts();
+
+			toast.success(addingAccount ? "Account added successfully" : "Login successful");
 			navigate({ to: "/vault" });
 		} catch (error) {
 			console.error("Login error:", error);
@@ -122,9 +162,28 @@ export function LoginPage() {
 	return (
 		<div className="flex h-full items-center justify-center bg-gray-50 p-4">
 			<Card className="w-full max-w-md p-6">
+				{addingAccount && (
+					<Button
+						type="button"
+						variant="ghost"
+						size="sm"
+						onClick={handleBackToVault}
+						className="mb-4 -ml-2 gap-1"
+					>
+						<ArrowLeft className="h-4 w-4" />
+						Back to Vault
+					</Button>
+				)}
+
 				<div className="mb-6 text-center">
-					<h1 className="font-bold text-2xl">Bittery</h1>
-					<p className="text-gray-600 text-sm">Password Manager</p>
+					<h1 className="font-bold text-2xl">
+						{addingAccount ? "Add Account" : "Bittery"}
+					</h1>
+					<p className="text-gray-600 text-sm">
+						{addingAccount
+							? "Sign in to add another account"
+							: "Password Manager"}
+					</p>
 				</div>
 
 				<form onSubmit={handleLogin} className="space-y-4">

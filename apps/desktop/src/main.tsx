@@ -13,6 +13,7 @@ import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { AccountProvider } from "./contexts/account-context";
 
 // Import the generated route tree
 import { routeTree } from "./routeTree.gen";
@@ -72,12 +73,25 @@ declare module "@tanstack/react-router" {
 	}
 }
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-	<React.StrictMode>
-		<QueryClientProvider client={queryClient}>
-			<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-				<RouterProvider router={router} />
-			</TRPCProvider>
-		</QueryClientProvider>
-	</React.StrictMode>,
-);
+// Run migration before rendering
+async function initializeApp() {
+	try {
+		await tauriStorage.migrateToMultiAccount();
+	} catch (error) {
+		console.error("[main] Migration failed:", error);
+	}
+
+	ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+		<React.StrictMode>
+			<QueryClientProvider client={queryClient}>
+				<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+					<AccountProvider>
+						<RouterProvider router={router} />
+					</AccountProvider>
+				</TRPCProvider>
+			</QueryClientProvider>
+		</React.StrictMode>,
+	);
+}
+
+initializeApp();
