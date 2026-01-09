@@ -6,7 +6,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-interface StorageConfig {
+export interface StorageConfig {
 	endpoint: string;
 	region: string;
 	bucket: string;
@@ -14,7 +14,7 @@ interface StorageConfig {
 	secretAccessKey: string;
 }
 
-interface PresignedUploadResult {
+export interface PresignedUploadResult {
 	key: string;
 	uploadUrl: string;
 	publicUrl: string | null;

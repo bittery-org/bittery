@@ -1,9 +1,10 @@
+/** biome-ignore-all lint/style/noNonNullAssertion: Its fine */
 import { db } from "@bittery/db";
 import { item, vault, vaultKey } from "@bittery/db/schema/vault";
 import {
 	createPresignedUpload,
 	createVaultImageKey,
-	getStoragePublicUrl,
+	getStoragePublicUrl
 } from "@bittery/storage";
 import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
@@ -61,7 +62,7 @@ export const vaultRouter = router({
 				const userVaultKey = await db.query.vaultKey.findFirst({
 					where: (vaultKey, { and, eq }) =>
 						and(
-							eq(vaultKey.vaultId, input.vaultId),
+							eq(vaultKey.vaultId, input.vaultId!),
 							eq(vaultKey.userId, ctx.session.userId),
 						),
 				});
