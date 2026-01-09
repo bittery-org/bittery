@@ -9,7 +9,7 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useNavigate } from "@tanstack/react-router";
-import { Check, ChevronDown, LogOut, Plus } from "lucide-react";
+import { Check, ChevronDown, Lock, LogOut, Plus } from "lucide-react";
 import { useState } from "react";
 import { useAccount } from "../contexts/account-context";
 import { AccountAvatar } from "./account-avatar";
@@ -179,22 +179,22 @@ export function AccountSwitcher() {
 
 					<DropdownMenuSeparator />
 
-					{/* <DropdownMenuItem
+					<DropdownMenuItem
 						onClick={() => handleLockAccount(activeAccount.email)}
 						className="gap-2"
 					>
 						<Lock className="h-4 w-4" />
 						Lock Current Account
-					</DropdownMenuItem> */}
+					</DropdownMenuItem>
 
-					{/* {allAccounts.length > 1 && (
+					{allAccounts.length > 1 && (
 						<DropdownMenuItem onClick={handleLockAll} className="gap-2">
 							<Lock className="h-4 w-4" />
 							Lock All Accounts
 						</DropdownMenuItem>
 					)}
 
-					<DropdownMenuSeparator /> */}
+					<DropdownMenuSeparator />
 
 					<DropdownMenuItem
 						onClick={() => setAccountToRemove(activeAccount.email)}

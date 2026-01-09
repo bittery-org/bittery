@@ -629,11 +629,58 @@ let activeSavePrompt: {
 	messageHandler: (event: MessageEvent) => void;
 } | null = null;
 
+type SavePromptOptions = {
+	persist?: boolean;
+};
+
+function persistPendingSavePrompt(credentials: CapturedCredentials) {
+	chrome.runtime
+		.sendMessage({
+			type: "SET_PENDING_SAVE_PROMPT",
+			payload: {
+				username: credentials.username,
+				password: credentials.password,
+				url: credentials.url,
+				hostname: credentials.hostname,
+			},
+		})
+		.catch((error) => {
+			console.warn("Failed to persist save prompt:", error);
+		});
+}
+
+function clearPendingSavePrompt() {
+	chrome.runtime.sendMessage({ type: "CLEAR_PENDING_SAVE_PROMPT" }).catch((error) => {
+		console.warn("Failed to clear save prompt:", error);
+	});
+}
+
+async function restorePendingSavePrompt() {
+	try {
+		const response = await chrome.runtime.sendMessage({
+			type: "GET_PENDING_SAVE_PROMPT",
+		});
+
+		if (response?.data) {
+			await showSavePrompt(response.data, { persist: false });
+		}
+	} catch (error) {
+		console.warn("Failed to restore save prompt:", error);
+	}
+}
+
 // Show save prompt overlay
-async function showSavePrompt(credentials: CapturedCredentials) {
+async function showSavePrompt(
+	credentials: CapturedCredentials,
+	options?: SavePromptOptions,
+) {
 	// Remove any existing save prompt
 	if (activeSavePrompt) {
 		hideSavePrompt();
+	}
+
+	if (options?.persist !== false) {
+		persistPendingSavePrompt(credentials);
 	}
 
 	// Check for existing credentials before showing the prompt
@@ -770,6 +817,8 @@ async function showSavePrompt(credentials: CapturedCredentials) {
 // Hide save prompt
 function hideSavePrompt() {
 	if (activeSavePrompt) {
+		clearPendingSavePrompt();
+
 		// Fade out
 		activeSavePrompt.shadowHost.style.opacity = "0";
 		activeSavePrompt.shadowHost.style.transform = "translateY(-8px)";
@@ -1300,9 +1349,13 @@ function showReauthPrompt(field: CredentialField) {
 
 // Run detection on load and on DOM changes
 if (document.readyState === "loading") {
-	document.addEventListener("DOMContentLoaded", detectPasswordFields);
+	document.addEventListener("DOMContentLoaded", () => {
+		detectPasswordFields();
+		restorePendingSavePrompt();
+	});
 } else {
 	detectPasswordFields();
+	restorePendingSavePrompt();
 }
 
 // Watch for dynamic content

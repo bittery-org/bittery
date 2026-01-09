@@ -26,6 +26,8 @@ export function UnlockPage() {
 		chrome.runtime
 			.sendMessage({ type: "CHECK_NATIVE_BIOMETRIC" })
 			.then((response) => {
+				console.log(response);
+				
 				setBiometricAvailable(
 					response.available && response.enabled && response.appRunning,
 				);

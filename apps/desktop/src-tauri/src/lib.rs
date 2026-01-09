@@ -7,12 +7,38 @@ use base64::Engine;
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use hyper::service::{make_service_fn, service_fn};
 use tokio::sync::Mutex;
+use tauri::Runtime;
+use tauri_plugin_store::Store;
 
 /// State for native bridge HTTP server
 #[derive(Default)]
 struct NativeBridgeState {
     /// Pending unlock requests (challenge -> extension_id)
     pending_requests: Arc<Mutex<std::collections::HashMap<String, String>>>,
+}
+
+const ACTIVE_ACCOUNT_KEY: &str = "bittery_active_account";
+const LEGACY_SESSION_DATA_KEY: &str = "bittery_session_data";
+const LEGACY_BIOMETRIC_ENABLED_KEY: &str = "bittery_biometric_enabled";
+const LEGACY_JWT_TOKEN_KEY: &str = "bittery_jwt_token";
+const LEGACY_VAULT_KEYS_KEY: &str = "bittery_vault_keys";
+
+fn sanitize_email_for_key(email: &str) -> String {
+    email
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+fn account_key(email: &str, suffix: &str) -> String {
+    format!("bittery_account_{}_{}", sanitize_email_for_key(email), suffix)
+}
+
+fn get_active_account_email<R: Runtime>(store: &Store<R>) -> Option<String> {
+    store
+        .get(ACTIVE_ACCOUNT_KEY)
+        .and_then(|value| value.as_str().map(|s| s.to_lowercase()))
 }
 
 /// Start HTTP server for native messaging bridge
@@ -159,8 +185,25 @@ async fn check_extension_biometric_status(
     let store = app_handle.store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
     
-    let session_data = store.get("bittery_session_data");
-    let biometric_enabled = store.get("bittery_biometric_enabled");
+    let active_email = get_active_account_email(&store);
+    let (session_key, biometric_key) = if let Some(email) = &active_email {
+        (
+            account_key(email, "session_data"),
+            account_key(email, "biometric_enabled"),
+        )
+    } else {
+        (
+            LEGACY_SESSION_DATA_KEY.to_string(),
+            LEGACY_BIOMETRIC_ENABLED_KEY.to_string(),
+        )
+    };
+
+    let mut session_data = store.get(&session_key);
+    let mut biometric_enabled = store.get(&biometric_key);
+    if session_data.is_none() && active_email.is_some() {
+        session_data = store.get(LEGACY_SESSION_DATA_KEY);
+        biometric_enabled = store.get(LEGACY_BIOMETRIC_ENABLED_KEY);
+    }
     
     let has_session = session_data.is_some();
     let is_enabled = biometric_enabled.and_then(|v| v.as_bool()).unwrap_or(false);
@@ -196,8 +239,26 @@ async fn extension_biometric_unlock(
     let store = app_handle.store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
     
-    let session_data_value = store.get("bittery_session_data")
-        .ok_or("No session data found")?;
+    let active_email = get_active_account_email(&store);
+    let (session_key, jwt_key, vault_key) = if let Some(email) = &active_email {
+        (
+            account_key(email, "session_data"),
+            account_key(email, "jwt_token"),
+            account_key(email, "vault_keys"),
+        )
+    } else {
+        (
+            LEGACY_SESSION_DATA_KEY.to_string(),
+            LEGACY_JWT_TOKEN_KEY.to_string(),
+            LEGACY_VAULT_KEYS_KEY.to_string(),
+        )
+    };
+
+    let mut session_data_value = store.get(&session_key);
+    if session_data_value.is_none() && active_email.is_some() {
+        session_data_value = store.get(LEGACY_SESSION_DATA_KEY);
+    }
+    let session_data_value = session_data_value.ok_or("No session data found")?;
     
     let session_data_str = session_data_value.as_str()
         .ok_or("Invalid session data format")?;
@@ -234,11 +295,24 @@ async fn extension_biometric_unlock(
     let encrypted_session_b64 = base64::engine::general_purpose::STANDARD.encode(encrypted_muk_json.as_bytes());
     
     // Get auth token and vault keys from store
-    let auth_token = store.get("bittery_jwt_token")
+    let mut auth_token = store
+        .get(&jwt_key)
         .and_then(|v| v.as_str().map(|s| s.to_string()));
-    
-    let vault_keys = store.get("bittery_vault_keys")
+    let mut vault_keys = store
+        .get(&vault_key)
         .and_then(|v| v.as_str().map(|s| s.to_string()));
+    if active_email.is_some() {
+        if auth_token.is_none() {
+            auth_token = store
+                .get(LEGACY_JWT_TOKEN_KEY)
+                .and_then(|v| v.as_str().map(|s| s.to_string()));
+        }
+        if vault_keys.is_none() {
+            vault_keys = store
+                .get(LEGACY_VAULT_KEYS_KEY)
+                .and_then(|v| v.as_str().map(|s| s.to_string()));
+        }
+    }
     
     // Sign the response with challenge to prevent replay attacks
     let signature_data = format!("{}:{}", challenge, encrypted_session_b64);
