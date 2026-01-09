@@ -1,5 +1,6 @@
 import "./styles.css";
 import type { AppRouter } from "@bittery/api/routers/index";
+import { buildTrpcUrl, normalizeServerUrl } from "@bittery/crypto";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { TRPCProvider } from "@bittery/shared/trpc";
 import { toast } from "@bittery/ui";
@@ -34,13 +35,19 @@ const queryClient = new QueryClient({
 	defaultOptions: { queries: { staleTime: 60 * 1000 } },
 });
 
+const fallbackServerUrl =
+	normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
+	"http://localhost:3000";
+
 const trpcClient = createTRPCClient<AppRouter>({
 	links: [
 		httpBatchLink({
-			url: `${import.meta.env.VITE_SERVER_URL || "http://localhost:3000"}/trpc`,
+			url: `${fallbackServerUrl}/trpc`,
 			async fetch(url, options) {
+				const serverUrl = (await tauriStorage.getServerUrl()) ?? fallbackServerUrl;
+				const resolvedUrl = buildTrpcUrl(serverUrl, url);
 				const token = await tauriStorage.getAuthToken();
-				return fetch(url, {
+				return fetch(resolvedUrl, {
 					...options,
 					credentials: "include",
 					headers: {

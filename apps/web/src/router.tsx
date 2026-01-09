@@ -2,7 +2,12 @@ import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import Loader from "./components/loader";
 import "./index.css";
 import type { AppRouter } from "@bittery/api/routers/index";
-import { getAuthToken } from "@bittery/shared/crypto";
+import {
+	buildTrpcUrl,
+	getAuthToken,
+	getServerUrl,
+	normalizeServerUrl,
+} from "@bittery/shared/crypto";
 import { TRPCProvider } from "@bittery/shared/trpc";
 import { toast } from "@bittery/ui";
 import {
@@ -30,12 +35,18 @@ export const queryClient = new QueryClient({
 	defaultOptions: { queries: { staleTime: 60 * 1000 } },
 });
 
+const fallbackServerUrl =
+	normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
+	(typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
+
 const trpcClient = createTRPCClient<AppRouter>({
 	links: [
 		httpBatchLink({
-			url: `${import.meta.env.VITE_SERVER_URL}/trpc`,
+			url: `${fallbackServerUrl}/trpc`,
 			fetch(url, options) {
-				return fetch(url, {
+				const serverUrl = getServerUrl() ?? fallbackServerUrl;
+				const resolvedUrl = buildTrpcUrl(serverUrl, url);
+				return fetch(resolvedUrl, {
 					...options,
 					credentials: "include",
 					headers: {

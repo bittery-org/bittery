@@ -10,6 +10,7 @@ export * from "./secret-key";
 export * from "./session-storage";
 export * from "./srp-client";
 export * from "./srp-server";
+export * from "./server-url";
 
 // Chrome extension storage adapter
 export * as chromeStorage from "./storage-chrome";

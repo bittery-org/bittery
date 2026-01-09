@@ -24,6 +24,7 @@ const DEVICE_KEY_STORAGE = "bittery_device_key";
 const ACTIVE_ACCOUNT_KEY = "bittery_active_account";
 const ACCOUNTS_LIST_KEY = "bittery_accounts_list";
 const MIGRATION_COMPLETED_KEY = "bittery_migration_v2_completed";
+const SERVER_URL_STORAGE = "bittery_server_url";
 
 // Helper to generate namespaced keys for each account
 function getAccountKey(email: string, suffix: string): string {
@@ -90,6 +91,27 @@ async function getStore(): Promise<Store> {
 		storeInstance = await Store.load("store.json");
 	}
 	return storeInstance;
+}
+
+// ============================================================================
+// Server URL Functions
+// ============================================================================
+
+export async function storeServerUrl(serverUrl: string): Promise<void> {
+	const store = await getStore();
+	await store.set(SERVER_URL_STORAGE, serverUrl);
+	await store.save();
+}
+
+export async function getServerUrl(): Promise<string | null> {
+	const store = await getStore();
+	return (await store.get<string>(SERVER_URL_STORAGE)) ?? null;
+}
+
+export async function clearServerUrl(): Promise<void> {
+	const store = await getStore();
+	await store.delete(SERVER_URL_STORAGE);
+	await store.save();
 }
 
 /**

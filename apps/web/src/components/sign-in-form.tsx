@@ -7,8 +7,11 @@ import {
 	getTimeUntilExpiry,
 	hasStoredSecretKey,
 	isSessionValid,
+	getServerUrl,
+	normalizeServerUrl,
 	storeAuthToken,
 	storeMasterUnlockKey,
+	storeServerUrl,
 	storeSecretKey,
 	storeSessionData,
 	storeVaultKeys,
@@ -30,12 +33,29 @@ export default function SignInForm({
 }) {
 	const navigate = useNavigate();
 	const trpcClient = useTRPCClient();
+	const defaultServerUrl = import.meta.env.VITE_SERVER_URL ?? "";
 	const [_email, setEmail] = useState("");
+	const [serverUrl, setServerUrl] = useState(
+		() => getServerUrl() ?? defaultServerUrl,
+	);
 	const [secretKeyHint, setSecretKeyHint] = useState<string | null>(null);
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
 	const [isQuickUnlock, setIsQuickUnlock] = useState(false);
 	const [sessionExpired, setSessionExpired] = useState(false);
+
+	const persistServerUrl = () => {
+		const normalized = normalizeServerUrl(serverUrl);
+		if (!normalized) {
+			toast.error("Invalid server URL");
+			return null;
+		}
+		storeServerUrl(normalized);
+		if (normalized !== serverUrl) {
+			setServerUrl(normalized);
+		}
+		return normalized;
+	};
 
 	const form = useForm({
 		defaultValues: {
@@ -44,6 +64,9 @@ export default function SignInForm({
 			secretKey: "",
 		},
 		onSubmit: async ({ value }) => {
+			if (!persistServerUrl()) {
+				return;
+			}
 			if (!validateSecretKey(value.secretKey)) {
 				toast.error("Invalid Secret Key format");
 				return;
@@ -176,6 +199,9 @@ export default function SignInForm({
 
 	const handleEmailBlur = (email: string) => {
 		if (email?.includes("@")) {
+			if (!persistServerUrl()) {
+				return;
+			}
 			setEmail(email);
 			checkEmailMutation.mutate({ email });
 		}
@@ -220,6 +246,26 @@ export default function SignInForm({
 					}}
 					className="space-y-4"
 				>
+					<div>
+						<div className="space-y-2">
+							<Label htmlFor="serverUrl">Server URL</Label>
+							<Input
+								id="serverUrl"
+								name="serverUrl"
+								type="url"
+								placeholder="https://your-server.com"
+								value={serverUrl}
+								onBlur={persistServerUrl}
+								onChange={(e) => setServerUrl(e.target.value)}
+								required
+								className="h-10"
+							/>
+							<p className="text-muted-foreground text-xs">
+								Use your self-hosted Bittery server URL.
+							</p>
+						</div>
+					</div>
+
 					<div>
 						<form.Field name="email">
 							{(field) => (

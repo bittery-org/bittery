@@ -6,12 +6,14 @@
 
 import type { AppRouter } from "@bittery/api/routers/index";
 import {
+	buildTrpcUrl,
 	chromeStorage,
 	decrypt,
 	deriveClientSession,
 	deriveKeys,
 	encrypt,
 	generateClientEphemeral,
+	normalizeServerUrl,
 	verifyServerSession,
 } from "@bittery/crypto";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
@@ -29,6 +31,8 @@ const AUTO_LOCK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 const AUTOFILL_REAUTH_WINDOW_MS = 5 * 60 * 1000; // 5 minutes (separate for autofill security)
 const KEEPALIVE_INTERVAL_MS = 20 * 1000; // 20 seconds (well before 30s service worker timeout)
 const AUTO_LOCK_ALARM_NAME = "autoLockAlarm";
+const fallbackServerUrl =
+	normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";
 
 // Keepalive mechanism to prevent service worker from shutting down
 let keepaliveInterval: NodeJS.Timeout | null = null;
@@ -37,12 +41,18 @@ let keepaliveInterval: NodeJS.Timeout | null = null;
 const trpcClient = createTRPCClient<AppRouter>({
 	links: [
 		httpBatchLink({
-			url: "http://localhost:3000/trpc", // TODO: Make configurable
+			url: `${fallbackServerUrl}/trpc`,
 			async headers() {
 				const token = await chromeStorage.getAuthToken();
 				return {
 					authorization: token ? `Bearer ${token}` : "",
 				};
+			},
+			async fetch(url, options) {
+				const storedServerUrl = await chromeStorage.getServerUrl();
+				const serverUrl = storedServerUrl ?? fallbackServerUrl;
+				const resolvedUrl = buildTrpcUrl(serverUrl, url);
+				return fetch(resolvedUrl, options);
 			},
 		}),
 	],

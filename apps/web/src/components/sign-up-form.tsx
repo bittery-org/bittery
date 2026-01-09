@@ -6,10 +6,13 @@ import {
 	generateRSAKeyPair,
 	generateSecretKey,
 	generateSRPRegistration,
+	getServerUrl,
 	getSecretKeyHint,
 	getTimeUntilExpiry,
+	normalizeServerUrl,
 	storeAuthToken,
 	storeMasterUnlockKey,
+	storeServerUrl,
 	storeSecretKey,
 	storeSessionData,
 	storeVaultKeys,
@@ -29,10 +32,14 @@ export default function SignUpForm({
 }) {
 	const navigate = useNavigate();
 	const trpcClient = useTRPCClient();
+	const defaultServerUrl = import.meta.env.VITE_SERVER_URL ?? "";
 	const [secretKey, setSecretKey] = useState<string>("");
 	const [showSecretKey, setShowSecretKey] = useState(true);
 	const [hasAcknowledged, setHasAcknowledged] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
+	const [serverUrl, setServerUrl] = useState(
+		() => getServerUrl() ?? defaultServerUrl,
+	);
 
 	// Generate Secret Key on mount
 	useEffect(() => {
@@ -65,6 +72,16 @@ export default function SignUpForm({
 			organizationName: "",
 		},
 		onSubmit: async ({ value }) => {
+			const normalizedServerUrl = normalizeServerUrl(serverUrl);
+			if (!normalizedServerUrl) {
+				toast.error("Invalid server URL");
+				return;
+			}
+			storeServerUrl(normalizedServerUrl);
+			if (normalizedServerUrl !== serverUrl) {
+				setServerUrl(normalizedServerUrl);
+			}
+
 			if (!hasAcknowledged) {
 				toast.error("Please save your Secret Key before continuing");
 				return;
@@ -272,6 +289,36 @@ Generated: ${new Date().toLocaleString()}
 						}}
 						className="space-y-4"
 					>
+						<div>
+							<div className="space-y-2">
+								<Label htmlFor="serverUrl">Server URL</Label>
+								<Input
+									id="serverUrl"
+									name="serverUrl"
+									type="url"
+									placeholder="https://your-server.com"
+									value={serverUrl}
+									onBlur={() => {
+										const normalized = normalizeServerUrl(serverUrl);
+										if (!normalized) {
+											toast.error("Invalid server URL");
+											return;
+										}
+										storeServerUrl(normalized);
+										if (normalized !== serverUrl) {
+											setServerUrl(normalized);
+										}
+									}}
+									onChange={(e) => setServerUrl(e.target.value)}
+									required
+									className="h-10"
+								/>
+								<p className="text-muted-foreground text-xs">
+									Use your self-hosted Bittery server URL.
+								</p>
+							</div>
+						</div>
+
 						<div>
 							<form.Field name="name">
 								{(field) => (

@@ -1,5 +1,6 @@
 import "./index.css";
 import type { AppRouter } from "@bittery/api/routers/index";
+import { buildTrpcUrl, chromeStorage, normalizeServerUrl } from "@bittery/crypto";
 import { TRPCProvider } from "@bittery/shared/trpc";
 import { Toaster } from "@bittery/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -22,11 +23,14 @@ const queryClient = new QueryClient({
 	},
 });
 
+const fallbackServerUrl =
+	normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";
+
 // Create tRPC client that communicates via background worker
 const trpcClient = createTRPCClient<AppRouter>({
 	links: [
 		httpBatchLink({
-			url: "http://localhost:3000/trpc", // TODO: Make configurable
+			url: `${fallbackServerUrl}/trpc`,
 			async headers() {
 				// Get auth token from chrome.storage via background
 				const response = await chrome.runtime.sendMessage({
@@ -35,6 +39,12 @@ const trpcClient = createTRPCClient<AppRouter>({
 				return {
 					authorization: response.token ? `Bearer ${response.token}` : "",
 				};
+			},
+			async fetch(url, options) {
+				const storedServerUrl = await chromeStorage.getServerUrl();
+				const serverUrl = storedServerUrl ?? fallbackServerUrl;
+				const resolvedUrl = buildTrpcUrl(serverUrl, url);
+				return fetch(resolvedUrl, options);
 			},
 		}),
 	],

@@ -2,6 +2,7 @@ import {
 	deriveClientSession,
 	deriveKeys,
 	generateClientEphemeral,
+	normalizeServerUrl,
 	validateSecretKey,
 	verifyServerSession,
 } from "@bittery/crypto";
@@ -12,7 +13,7 @@ import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Fingerprint } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAccount } from "../contexts/account-context";
 
 interface LoginSearchParams {
@@ -34,6 +35,10 @@ export function LoginPage() {
 	const navigate = useNavigate();
 	const { addingAccount } = Route.useSearch();
 	const { refreshAccounts } = useAccount();
+	const fallbackServerUrl =
+		normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
+		"http://localhost:3000";
+	const [serverUrl, setServerUrl] = useState(fallbackServerUrl);
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [secretKey, setSecretKey] = useState("");
@@ -47,6 +52,17 @@ export function LoginPage() {
 		},
 	});
 
+	useEffect(() => {
+		let active = true;
+		tauriStorage.getServerUrl().then((stored) => {
+			if (!active || !stored) return;
+			setServerUrl(stored);
+		});
+		return () => {
+			active = false;
+		};
+	}, []);
+
 	const handleBackToVault = () => {
 		navigate({ to: "/vault" });
 	};
@@ -57,6 +73,16 @@ export function LoginPage() {
 		if (!validateSecretKey(secretKey)) {
 			toast.error("Invalid Secret Key format");
 			return;
+		}
+
+		const normalizedServerUrl = normalizeServerUrl(serverUrl);
+		if (!normalizedServerUrl) {
+			toast.error("Invalid server URL");
+			return;
+		}
+		await tauriStorage.storeServerUrl(normalizedServerUrl);
+		if (normalizedServerUrl !== serverUrl) {
+			setServerUrl(normalizedServerUrl);
 		}
 
 		setLoading(true);
@@ -194,6 +220,32 @@ export function LoginPage() {
 				</div>
 
 				<form onSubmit={handleLogin} className="space-y-4">
+					<div>
+						<Label htmlFor="serverUrl">Server URL</Label>
+						<Input
+							id="serverUrl"
+							type="url"
+							value={serverUrl}
+							onChange={(e) => setServerUrl(e.target.value)}
+							onBlur={() => {
+								const normalized = normalizeServerUrl(serverUrl);
+								if (!normalized) {
+									toast.error("Invalid server URL");
+									return;
+								}
+								tauriStorage.storeServerUrl(normalized);
+								if (normalized !== serverUrl) {
+									setServerUrl(normalized);
+								}
+							}}
+							required
+							placeholder="https://your-server.com"
+						/>
+						<p className="mt-1 text-gray-500 text-xs">
+							Use your self-hosted Bittery server URL.
+						</p>
+					</div>
+
 					<div>
 						<Label htmlFor="email">Email</Label>
 						<Input

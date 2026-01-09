@@ -6,8 +6,10 @@
 import {
 	arrayBufferToBase64,
 	base64ToArrayBuffer,
+	buildTrpcUrl,
 	canQuickUnlock as canQuickUnlockServer,
 	clearAllStoredData as clearAllStoredDataServer,
+	clearServerUrl as clearServerUrlServer,
 	clearSession as clearSessionServer,
 	type DerivedKeys,
 	decrypt as decryptServer,
@@ -22,6 +24,7 @@ import {
 	generateRSAKeyPair,
 	generateSecretKey as generateSecretKeyServer,
 	generateSRPRegistration,
+	getServerUrl as getServerUrlServer,
 	getAuthToken as getAuthTokenServer,
 	getDecryptedVaultKey as getDecryptedVaultKeyServer,
 	getMasterUnlockKey as getMasterUnlockKeyServer,
@@ -40,6 +43,7 @@ import {
 	type SRPServerChallenge,
 	storeAuthToken as storeAuthTokenServer,
 	storeMasterUnlockKey as storeMasterUnlockKeyServer,
+	storeServerUrl as storeServerUrlServer,
 	storeSecretKey as storeSecretKeyServer,
 	storeSessionData as storeSessionDataServer,
 	storeVaultKeys as storeVaultKeysServer,
@@ -47,6 +51,7 @@ import {
 	type VaultKeyData,
 	validateSecretKey as validateSecretKeyServer,
 	verifyServerSession,
+	normalizeServerUrl,
 } from "@bittery/crypto";
 
 // Re-export all functions from @bittery/crypto
@@ -67,6 +72,9 @@ export {
 	storeSecretKeyServer as storeSecretKey,
 	getStoredSecretKeyServer as getStoredSecretKey,
 	hasStoredSecretKeyServer as hasStoredSecretKey,
+	storeServerUrlServer as storeServerUrl,
+	getServerUrlServer as getServerUrl,
+	clearServerUrlServer as clearServerUrl,
 	storeSessionDataServer as storeSessionData,
 	getStoredSessionDataServer as getStoredSessionData,
 	isSessionValidServer as isSessionValid,
@@ -85,6 +93,8 @@ export {
 	clearSessionServer as clearSession,
 	isAuthenticatedServer as isAuthenticated,
 	tryRestoreSessionServer as tryRestoreSession,
+	normalizeServerUrl,
+	buildTrpcUrl,
 };
 
 export type {

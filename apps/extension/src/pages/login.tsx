@@ -1,14 +1,42 @@
+import { chromeStorage, normalizeServerUrl } from "@bittery/crypto";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export function LoginPage() {
 	const navigate = useNavigate();
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
+	const fallbackServerUrl =
+		normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";
+	const [serverUrl, setServerUrl] = useState(fallbackServerUrl);
+
+	useEffect(() => {
+		let active = true;
+		chromeStorage.getServerUrl().then((stored) => {
+			if (!active || !stored) return;
+			setServerUrl(stored);
+		});
+		return () => {
+			active = false;
+		};
+	}, []);
+
+	const persistServerUrl = async () => {
+		const normalized = normalizeServerUrl(serverUrl);
+		if (!normalized) {
+			toast.error("Invalid server URL");
+			return null;
+		}
+		await chromeStorage.storeServerUrl(normalized);
+		if (normalized !== serverUrl) {
+			setServerUrl(normalized);
+		}
+		return normalized;
+	};
 
 	const form = useForm({
 		defaultValues: {
@@ -17,6 +45,10 @@ export function LoginPage() {
 			secretKey: "",
 		},
 		onSubmit: async ({ value }) => {
+			const persisted = await persistServerUrl();
+			if (!persisted) {
+				return;
+			}
 			await loginMutation.mutateAsync(value);
 		},
 	});
@@ -68,6 +100,25 @@ export function LoginPage() {
 						}}
 						className="space-y-4"
 					>
+						<div className="space-y-2">
+							<Label htmlFor="serverUrl">Server URL</Label>
+							<Input
+								id="serverUrl"
+								name="serverUrl"
+								type="url"
+								placeholder="https://your-server.com"
+								value={serverUrl}
+								onChange={(e) => setServerUrl(e.target.value)}
+								onBlur={() => {
+									persistServerUrl();
+								}}
+								required
+							/>
+							<p className="text-muted-foreground text-xs">
+								Use your self-hosted Bittery server URL.
+							</p>
+						</div>
+
 						<form.Field name="email">
 							{(field) => (
 								<div className="space-y-2">

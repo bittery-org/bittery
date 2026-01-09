@@ -12,6 +12,7 @@ const SESSION_DATA_STORAGE = "bittery_session_data";
 const DEVICE_KEY_STORAGE = "bittery_device_key";
 const JWT_TOKEN_KEY = "bittery_jwt_token";
 const VAULT_KEYS_KEY = "bittery_vault_keys";
+const SERVER_URL_STORAGE = "bittery_server_url";
 
 // Default session expiry: 14 days (in milliseconds)
 export const DEFAULT_SESSION_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000;
@@ -75,6 +76,28 @@ export async function getStoredSecretKey(): Promise<string | null> {
 export async function hasStoredSecretKey(): Promise<boolean> {
 	const secretKey = await getStoredSecretKey();
 	return secretKey !== null;
+}
+
+/**
+ * Store API server URL in chrome.storage.local
+ */
+export async function storeServerUrl(serverUrl: string): Promise<void> {
+	await chrome.storage.local.set({ [SERVER_URL_STORAGE]: serverUrl });
+}
+
+/**
+ * Get stored API server URL
+ */
+export async function getServerUrl(): Promise<string | null> {
+	const result = await chrome.storage.local.get(SERVER_URL_STORAGE);
+	return result[SERVER_URL_STORAGE] || null;
+}
+
+/**
+ * Clear stored API server URL
+ */
+export async function clearServerUrl(): Promise<void> {
+	await chrome.storage.local.remove(SERVER_URL_STORAGE);
 }
 
 /**

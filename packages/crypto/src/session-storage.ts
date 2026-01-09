@@ -13,6 +13,7 @@ const SESSION_DATA_STORAGE = "bittery_session_data";
 const DEVICE_KEY_STORAGE = "bittery_device_key";
 const JWT_TOKEN_KEY = "bittery_jwt_token";
 const VAULT_KEYS_KEY = "bittery_vault_keys";
+const SERVER_URL_STORAGE = "bittery_server_url";
 
 // Default session expiry: 14 days (in milliseconds)
 export const DEFAULT_SESSION_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000;
@@ -77,6 +78,34 @@ export function getStoredSecretKey(): string | null {
  */
 export function hasStoredSecretKey(): boolean {
 	return getStoredSecretKey() !== null;
+}
+
+/**
+ * Store API server URL in localStorage
+ */
+export function storeServerUrl(serverUrl: string): void {
+	if (typeof window !== "undefined") {
+		localStorage.setItem(SERVER_URL_STORAGE, serverUrl);
+	}
+}
+
+/**
+ * Get stored API server URL
+ */
+export function getServerUrl(): string | null {
+	if (typeof window !== "undefined") {
+		return localStorage.getItem(SERVER_URL_STORAGE);
+	}
+	return null;
+}
+
+/**
+ * Clear stored API server URL
+ */
+export function clearServerUrl(): void {
+	if (typeof window !== "undefined") {
+		localStorage.removeItem(SERVER_URL_STORAGE);
+	}
 }
 
 /**
