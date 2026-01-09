@@ -34,7 +34,7 @@ const osInfo = {
 };
 
 // Replace with your actual GitHub org/repo
-const GITHUB_REPO = "bittery-app/bittery";
+const GITHUB_REPO = "bittery-org/bittery";
 const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
 
 export function DownloadCard() {

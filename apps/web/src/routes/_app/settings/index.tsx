@@ -18,7 +18,7 @@ export const Route = createFileRoute("/_app/settings/")({
 });
 
 // Replace with your actual GitHub repo
-const GITHUB_REPO = "bittery-app/bittery";
+const GITHUB_REPO = "bittery-org/bittery";
 
 function SettingsPage() {
 	const trpc = useTRPC();
