@@ -2,7 +2,7 @@ import { createRootRoute, Outlet } from "@tanstack/react-router";
 
 export const Route = createRootRoute({
 	component: () => (
-		<div className="min-h-[400px] w-[375px]">
+		<div className="h-[520px] w-[620px] overflow-hidden bg-background">
 			<Outlet />
 		</div>
 	),

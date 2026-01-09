@@ -1276,6 +1276,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 					break;
 				}
 
+				case "OPEN_DESKTOP_APP": {
+					try {
+						const response = await sendNativeMessage({
+							type: "OPEN_DESKTOP_APP",
+						});
+
+						const responseData = response as any;
+						if (responseData?.type === "OPEN_DESKTOP_APP_RESULT") {
+							sendResponse({
+								success: Boolean(responseData.success),
+								error: responseData.error,
+							});
+						} else if (responseData?.type === "ERROR") {
+							sendResponse({
+								success: false,
+								error: responseData.message || "Failed to open desktop app",
+							});
+						} else {
+							sendResponse({ success: true });
+						}
+					} catch (error) {
+						sendResponse({
+							success: false,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+					break;
+				}
+
 				default:
 					sendResponse({ success: false, error: "Unknown message type" });
 			}

@@ -50,7 +50,7 @@ export function LoginPage() {
 
 	return (
 		<div className="flex min-h-[400px] items-center justify-center p-4">
-			<div className="w-full space-y-4">
+			<div className="w-full max-w-sm space-y-4">
 				<div className="flex flex-col space-y-2 text-center">
 					<h1 className="font-semibold text-xl tracking-tight">
 						Sign in to your account

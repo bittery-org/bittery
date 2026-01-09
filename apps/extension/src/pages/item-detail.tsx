@@ -1,16 +1,15 @@
-import { Button, Card, Label, Skeleton } from "@bittery/ui";
-import { useQuery } from "@tanstack/react-query";
+import { Button, Skeleton } from "@bittery/ui";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, Copy, Eye, EyeOff } from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
+import { ArrowLeft } from "lucide-react";
+import { ItemDetailPanel, type VaultItem } from "@/components/item-detail-panel";
 
 export function ItemDetailPage() {
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
 	const { itemId } = useParams({ from: "/item/$itemId" });
-	const [showPassword, setShowPassword] = useState(false);
 
-	const { data: item, isLoading } = useQuery({
+	const { data: item, isLoading } = useQuery<VaultItem | null>({
 		queryKey: ["vault-item", itemId],
 		queryFn: async () => {
 			const response = await chrome.runtime.sendMessage({
@@ -21,9 +20,17 @@ export function ItemDetailPage() {
 		},
 	});
 
-	const copyToClipboard = async (text: string, label: string) => {
-		await navigator.clipboard.writeText(text);
-		toast.success(`${label} copied to clipboard`);
+	const handleToggleFavorite = async (
+		targetItemId: string,
+		currentFavorite: boolean,
+	) => {
+		await chrome.runtime.sendMessage({
+			type: "TOGGLE_FAVORITE",
+			itemId: targetItemId,
+			favorite: !currentFavorite,
+		});
+		queryClient.invalidateQueries({ queryKey: ["vault-items"] });
+		queryClient.invalidateQueries({ queryKey: ["vault-item", targetItemId] });
 	};
 
 	if (isLoading) {
@@ -37,15 +44,15 @@ export function ItemDetailPage() {
 
 	if (!item) {
 		return (
-			<div className="flex h-[400px] items-center justify-center p-4">
+			<div className="flex h-full items-center justify-center p-4">
 				<p className="text-muted-foreground text-sm">Item not found</p>
 			</div>
 		);
 	}
 
 	return (
-		<div className="flex h-[400px] flex-col">
-			<div className="border-b bg-background p-4">
+		<div className="flex h-full flex-col">
+			<div className="border-b bg-background px-4 py-3">
 				<div className="flex items-center gap-2">
 					<Button
 						size="icon"
@@ -54,82 +61,17 @@ export function ItemDetailPage() {
 					>
 						<ArrowLeft size={18} />
 					</Button>
-					<h1 className="font-semibold text-lg">{item.name}</h1>
+					<div>
+						<div className="font-semibold text-lg">Item details</div>
+						<div className="text-muted-foreground text-xs">
+							View and copy saved credentials
+						</div>
+					</div>
 				</div>
 			</div>
 
-			<div className="flex-1 overflow-y-auto p-4">
-				<Card className="space-y-4 p-4">
-					{item.username && (
-						<div className="space-y-2">
-							<Label>Username</Label>
-							<div className="flex gap-2">
-								<div className="flex-1 rounded-md border bg-muted px-3 py-2 text-sm">
-									{item.username}
-								</div>
-								<Button
-									size="icon"
-									variant="outline"
-									onClick={() => copyToClipboard(item.username, "Username")}
-								>
-									<Copy size={16} />
-								</Button>
-							</div>
-						</div>
-					)}
-
-					{item.password && (
-						<div className="space-y-2">
-							<Label>Password</Label>
-							<div className="flex gap-2">
-								<div className="flex-1 rounded-md border bg-muted px-3 py-2 font-mono text-sm">
-									{showPassword ? item.password : "••••••••"}
-								</div>
-								<Button
-									size="icon"
-									variant="outline"
-									onClick={() => setShowPassword(!showPassword)}
-								>
-									{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-								</Button>
-								<Button
-									size="icon"
-									variant="outline"
-									onClick={() => copyToClipboard(item.password, "Password")}
-								>
-									<Copy size={16} />
-								</Button>
-							</div>
-						</div>
-					)}
-
-					{item.websiteUrl && (
-						<div className="space-y-2">
-							<Label>Website</Label>
-							<div className="flex gap-2">
-								<div className="flex-1 truncate rounded-md border bg-muted px-3 py-2 text-sm">
-									{item.websiteUrl}
-								</div>
-								<Button
-									size="icon"
-									variant="outline"
-									onClick={() => copyToClipboard(item.websiteUrl, "URL")}
-								>
-									<Copy size={16} />
-								</Button>
-							</div>
-						</div>
-					)}
-
-					{item.notes && (
-						<div className="space-y-2">
-							<Label>Notes</Label>
-							<div className="rounded-md border bg-muted px-3 py-2 text-sm">
-								{item.notes}
-							</div>
-						</div>
-					)}
-				</Card>
+			<div className="flex-1 overflow-y-auto p-5">
+				<ItemDetailPanel item={item} onToggleFavorite={handleToggleFavorite} />
 			</div>
 		</div>
 	);

@@ -11,6 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
+use std::process::Command;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -26,6 +27,9 @@ enum NativeMessage {
         challenge: String,
         extension_id: String,
     },
+
+    #[serde(rename = "OPEN_DESKTOP_APP")]
+    OpenDesktopApp,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -55,6 +59,13 @@ enum NativeResponse {
     #[serde(rename = "BIOMETRIC_UNLOCK_FAILED")]
     BiometricUnlockFailed { 
         error: String,
+    },
+
+    #[serde(rename = "OPEN_DESKTOP_APP_RESULT")]
+    OpenDesktopAppResult {
+        success: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
     
     #[serde(rename = "ERROR")]
@@ -128,6 +139,125 @@ async fn communicate_with_tauri(message: &NativeMessage) -> NativeResponse {
                 },
             }
         }
+
+        NativeMessage::OpenDesktopApp => {
+            match open_desktop_app() {
+                Ok(()) => NativeResponse::OpenDesktopAppResult {
+                    success: true,
+                    error: None,
+                },
+                Err(error) => NativeResponse::OpenDesktopAppResult {
+                    success: false,
+                    error: Some(error),
+                },
+            }
+        }
+    }
+}
+
+fn try_command_status(command: &str, args: &[&str]) -> bool {
+    Command::new(command)
+        .args(args)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn try_command_spawn(command: &str, args: &[&str]) -> bool {
+    Command::new(command).args(args).spawn().is_ok()
+}
+
+async fn open_desktop_app_async() -> Result<(), String> {
+    // Try HTTP request first (if app is already running)
+    match try_http_open_app().await {
+        Ok(_) => {
+            eprintln!("App opened via HTTP request");
+            return Ok(());
+        }
+        Err(e) => {
+            eprintln!("HTTP request failed: {}, trying system commands...", e);
+        }
+    }
+    
+    // Fall back to system commands
+    open_desktop_app_system()
+}
+
+fn open_desktop_app() -> Result<(), String> {
+    // This is a blocking wrapper for the async function
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(open_desktop_app_async())
+    })
+}
+
+async fn try_http_open_app() -> Result<(), Box<dyn std::error::Error>> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()?;
+    
+    let response = client
+        .post("http://localhost:48765/native-bridge/open-app")
+        .send()
+        .await?;
+    
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("HTTP request failed with status: {}", response.status()).into())
+    }
+}
+
+fn open_desktop_app_system() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        if try_command_status("open", &["-b", "com.bittery.desktop"]) {
+            return Ok(());
+        }
+
+        if try_command_status("open", &["-a", "bittery"]) {
+            return Ok(());
+        }
+
+        if try_command_status("open", &["-a", "Bittery"]) {
+            return Ok(());
+        }
+
+        return Err("Unable to open Bittery via macOS open".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if try_command_status("cmd", &["/C", "start", "", "bittery"]) {
+            return Ok(());
+        }
+
+        if try_command_status("cmd", &["/C", "start", "", "Bittery"]) {
+            return Ok(());
+        }
+
+        return Err("Unable to open Bittery via Windows start".to_string());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if try_command_spawn("bittery", &[]) {
+            return Ok(());
+        }
+
+        if try_command_status("gtk-launch", &["com.bittery.desktop"]) {
+            return Ok(());
+        }
+
+        if try_command_status("xdg-open", &["bittery"]) {
+            return Ok(());
+        }
+
+        return Err("Unable to open Bittery. Ensure the app is installed.".to_string());
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        Err("Unsupported platform".to_string())
     }
 }
 

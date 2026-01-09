@@ -1,6 +1,7 @@
 import "./index.css";
 import type { AppRouter } from "@bittery/api/routers/index";
 import { TRPCProvider } from "@bittery/shared/trpc";
+import { Toaster } from "@bittery/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
 	createMemoryHistory,
@@ -63,6 +64,7 @@ function Popup() {
 		<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
 			<QueryClientProvider client={queryClient}>
 				<RouterProvider router={router} />
+				<Toaster />
 			</QueryClientProvider>
 		</TRPCProvider>
 	);

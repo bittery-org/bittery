@@ -156,6 +156,33 @@ async fn handle_native_bridge_request(
             }
         }
         
+        (&Method::POST, "/native-bridge/open-app") => {
+            // Bring app to foreground or show window
+            match open_app_internal(&app_handle) {
+                Ok(_) => {
+                    let response = serde_json::json!({
+                        "success": true
+                    });
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(response.to_string()))
+                        .unwrap())
+                }
+                Err(e) => {
+                    let error = serde_json::json!({
+                        "success": false,
+                        "error": e.to_string()
+                    });
+                    Ok(Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(error.to_string()))
+                        .unwrap())
+                }
+            }
+        }
+        
         _ => {
             Ok(Response::builder()
                 .status(StatusCode::NOT_FOUND)
@@ -357,6 +384,31 @@ async fn biometric_unlock_internal(
         challenge.to_string(),
         extension_id.to_string(),
     ).await
+}
+
+/// Bring the app window to foreground
+fn open_app_internal(app_handle: &tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    
+    // Get the main window - try both "main" and the first available window
+    let window = app_handle
+        .get_webview_window("main")
+        .or_else(|| app_handle.webview_windows().values().next().cloned())
+        .ok_or("No window found")?;
+    
+    // Show the window if hidden
+    window.show()
+        .map_err(|e| format!("Failed to show window: {}", e))?;
+    
+    // Unminimize if minimized
+    window.unminimize()
+        .map_err(|e| format!("Failed to unminimize window: {}", e))?;
+    
+    // Bring to front
+    window.set_focus()
+        .map_err(|e| format!("Failed to focus window: {}", e))?;
+    
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
