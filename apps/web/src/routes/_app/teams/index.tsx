@@ -17,7 +17,7 @@ function TeamsPage() {
 		<div className="space-y-6">
 			<div className="flex items-center justify-between">
 				<div>
-					<h1 className="text-3xl font-bold tracking-tight">Teams</h1>
+					<h1 className="font-bold text-3xl tracking-tight">Teams</h1>
 					<p className="text-muted-foreground">
 						Manage your teams and collaborate with others.
 					</p>
@@ -33,8 +33,8 @@ function TeamsPage() {
 				</div>
 			) : teamsQuery.data?.length === 0 ? (
 				<div className="rounded-lg border border-dashed p-8 text-center">
-					<h3 className="text-lg font-medium">No teams yet</h3>
-					<p className="mt-1 text-sm text-muted-foreground">
+					<h3 className="font-medium text-lg">No teams yet</h3>
+					<p className="mt-1 text-muted-foreground text-sm">
 						Create a team to start collaborating with others.
 					</p>
 				</div>

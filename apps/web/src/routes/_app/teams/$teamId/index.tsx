@@ -13,7 +13,7 @@ import {
 	TabsContent,
 	TabsList,
 	TabsTrigger,
-	toast
+	toast,
 } from "@bittery/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -35,8 +35,12 @@ function TeamDetailPage() {
 	const [teamName, setTeamName] = useState("");
 
 	const teamQuery = useQuery(trpc.team.get.queryOptions({ teamId }));
-	const membersQuery = useQuery(trpc.team.members.list.queryOptions({ teamId }));
-	const invitationsQuery = useQuery(trpc.team.invitations.list.queryOptions({ teamId }));
+	const membersQuery = useQuery(
+		trpc.team.members.list.queryOptions({ teamId }),
+	);
+	const invitationsQuery = useQuery(
+		trpc.team.invitations.list.queryOptions({ teamId }),
+	);
 
 	const updateMutation = useMutation({
 		...trpc.team.update.mutationOptions(),
@@ -74,7 +78,7 @@ function TeamDetailPage() {
 
 	if (!team) {
 		return (
-			<div className="text-center py-8">
+			<div className="py-8 text-center">
 				<p className="text-muted-foreground">Team not found</p>
 				<Link to="/teams" className="text-primary hover:underline">
 					Back to teams
@@ -92,7 +96,7 @@ function TeamDetailPage() {
 					</Button>
 				</Link>
 				<div className="flex-1">
-					<h1 className="text-3xl font-bold tracking-tight">{team.name}</h1>
+					<h1 className="font-bold text-3xl tracking-tight">{team.name}</h1>
 					<p className="text-muted-foreground">
 						{team.memberCount} member{team.memberCount !== 1 ? "s" : ""} ·
 						Created by {team.ownerName}
@@ -111,7 +115,7 @@ function TeamDetailPage() {
 						<Mail className="mr-2 h-4 w-4" />
 						Invitations
 						{invitationsQuery.data?.length ? (
-							<span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+							<span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-primary-foreground text-xs">
 								{invitationsQuery.data.length}
 							</span>
 						) : null}
@@ -173,9 +177,7 @@ function TeamDetailPage() {
 						<Card>
 							<CardHeader>
 								<CardTitle>Team Settings</CardTitle>
-								<CardDescription>
-									Manage your team's settings.
-								</CardDescription>
+								<CardDescription>Manage your team's settings.</CardDescription>
 							</CardHeader>
 							<CardContent className="space-y-4">
 								<div className="grid gap-2">
@@ -187,17 +189,27 @@ function TeamDetailPage() {
 												value={teamName}
 												onChange={(e) => setTeamName(e.target.value)}
 											/>
-											<Button onClick={handleSave} disabled={updateMutation.isPending}>
+											<Button
+												onClick={handleSave}
+												disabled={updateMutation.isPending}
+											>
 												Save
 											</Button>
-											<Button variant="outline" onClick={() => setIsEditing(false)}>
+											<Button
+												variant="outline"
+												onClick={() => setIsEditing(false)}
+											>
 												Cancel
 											</Button>
 										</div>
 									) : (
 										<div className="flex items-center gap-2">
 											<span className="text-lg">{team.name}</span>
-											<Button variant="outline" size="sm" onClick={handleStartEdit}>
+											<Button
+												variant="outline"
+												size="sm"
+												onClick={handleStartEdit}
+											>
 												Edit
 											</Button>
 										</div>

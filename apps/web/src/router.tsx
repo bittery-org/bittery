@@ -37,7 +37,9 @@ export const queryClient = new QueryClient({
 
 const fallbackServerUrl =
 	normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
-	(typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
+	(typeof window !== "undefined"
+		? window.location.origin
+		: "http://localhost:3000");
 
 const trpcClient = createTRPCClient<AppRouter>({
 	links: [

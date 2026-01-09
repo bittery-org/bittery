@@ -30,7 +30,7 @@ app.get("/cdn/*", async (c) => {
 	let signedUrl: string;
 	try {
 		signedUrl = await createPresignedDownload({ key });
-	} catch (error) {
+	} catch (_error) {
 		return c.text("Storage not configured", 500);
 	}
 

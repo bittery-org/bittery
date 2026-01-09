@@ -32,8 +32,7 @@ export function UnlockPage() {
 	const trpcClient = useTRPCClient();
 	const navigate = useNavigate();
 	const { email: emailParam } = Route.useSearch();
-	const { allAccounts, activeAccount, switchAccount, refreshAccounts } =
-		useAccount();
+	const { allAccounts, activeAccount, refreshAccounts } = useAccount();
 	const [password, setPassword] = useState("");
 	const [loading, setLoading] = useState(false);
 	const [showAccountPicker, setShowAccountPicker] = useState(false);

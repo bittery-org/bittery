@@ -50,7 +50,8 @@ export function buildTrpcUrl(baseUrl: string, requestUrl: string): string {
 	}
 
 	const base = new URL(normalizedBase);
-	const basePath = base.pathname === "/" ? "" : base.pathname.replace(/\/$/, "");
+	const basePath =
+		base.pathname === "/" ? "" : base.pathname.replace(/\/$/, "");
 	const requestPath = request.pathname.startsWith("/")
 		? request.pathname
 		: `/${request.pathname}`;

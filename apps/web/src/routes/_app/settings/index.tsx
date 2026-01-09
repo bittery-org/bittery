@@ -27,7 +27,7 @@ function SettingsPage() {
 	return (
 		<div className="space-y-6">
 			<div>
-				<h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+				<h1 className="font-bold text-3xl tracking-tight">Settings</h1>
 				<p className="text-muted-foreground">
 					Manage your account and application settings.
 				</p>
@@ -39,9 +39,7 @@ function SettingsPage() {
 						<User className="h-5 w-5" />
 						Account
 					</CardTitle>
-					<CardDescription>
-						Your account information
-					</CardDescription>
+					<CardDescription>Your account information</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-4">
 					{userQuery.isLoading ? (
@@ -52,22 +50,22 @@ function SettingsPage() {
 					) : (
 						<>
 							<div className="grid gap-1">
-								<span className="text-sm font-medium">Name</span>
+								<span className="font-medium text-sm">Name</span>
 								<span className="text-muted-foreground">
 									{userQuery.data?.name}
 								</span>
 							</div>
 							<Separator />
 							<div className="grid gap-1">
-								<span className="text-sm font-medium">Email</span>
+								<span className="font-medium text-sm">Email</span>
 								<span className="text-muted-foreground">
 									{userQuery.data?.email}
 								</span>
 							</div>
 							<Separator />
 							<div className="grid gap-1">
-								<span className="text-sm font-medium">Secret Key Hint</span>
-								<code className="text-sm text-muted-foreground bg-muted px-2 py-1 rounded w-fit">
+								<span className="font-medium text-sm">Secret Key Hint</span>
+								<code className="w-fit rounded bg-muted px-2 py-1 text-muted-foreground text-sm">
 									{userQuery.data?.secretKeyHint || "N/A"}
 								</code>
 							</div>
@@ -82,12 +80,10 @@ function SettingsPage() {
 						<Github className="h-5 w-5" />
 						About Bittery
 					</CardTitle>
-					<CardDescription>
-						Open-source password manager
-					</CardDescription>
+					<CardDescription>Open-source password manager</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-4">
-					<p className="text-sm text-muted-foreground">
+					<p className="text-muted-foreground text-sm">
 						Bittery is a secure, zero-knowledge password manager that puts you
 						in control of your data. Your passwords are encrypted client-side
 						and never leave your device unencrypted.
@@ -121,12 +117,10 @@ function SettingsPage() {
 			<Card>
 				<CardHeader>
 					<CardTitle>Security</CardTitle>
-					<CardDescription>
-						Manage your security settings
-					</CardDescription>
+					<CardDescription>Manage your security settings</CardDescription>
 				</CardHeader>
 				<CardContent>
-					<p className="text-sm text-muted-foreground">
+					<p className="text-muted-foreground text-sm">
 						Security settings like password change and two-factor authentication
 						are managed in the desktop app for enhanced security.
 					</p>

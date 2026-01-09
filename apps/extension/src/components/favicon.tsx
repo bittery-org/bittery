@@ -1,5 +1,4 @@
-/** biome-ignore-all lint/style/noNonNullAssertion: <explanation> */
-
+/** biome-ignore-all lint/style/noNonNullAssertion: its okay */
 import { getDomainFromUrl, getFaviconUrl } from "@bittery/shared/favicon";
 import { cn } from "@bittery/ui";
 import { FileText, Globe } from "lucide-react";

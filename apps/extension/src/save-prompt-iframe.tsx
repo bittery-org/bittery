@@ -75,7 +75,17 @@ function SavePromptIframe() {
 		}
 
 		return () => observer.disconnect();
-	}, [updateHeight, data, state, isDropdownOpen]);
+	}, [updateHeight]);
+
+	const handleCancel = React.useCallback(() => {
+		// Send cancel message to parent
+		window.parent.postMessage(
+			{
+				type: "CANCEL_SAVE",
+			},
+			"*",
+		);
+	}, []);
 
 	useEffect(() => {
 		// Listen for save prompt data from parent
@@ -113,7 +123,7 @@ function SavePromptIframe() {
 		window.parent.postMessage({ type: "SAVE_IFRAME_READY" }, "*");
 
 		return () => window.removeEventListener("message", handleMessage);
-	}, []);
+	}, [handleCancel]);
 
 	const handleSave = () => {
 		if (!data || !selectedVaultId) return;
@@ -154,16 +164,6 @@ function SavePromptIframe() {
 				"*",
 			);
 		}
-	};
-
-	const handleCancel = () => {
-		// Send cancel message to parent
-		window.parent.postMessage(
-			{
-				type: "CANCEL_SAVE",
-			},
-			"*",
-		);
 	};
 
 	const handleRetry = () => {

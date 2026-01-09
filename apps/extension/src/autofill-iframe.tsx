@@ -1,7 +1,7 @@
 import "./index.css";
 import { Card } from "@bittery/ui";
 import { Lock } from "lucide-react";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { Favicon } from "@/components/favicon";
 
@@ -43,7 +43,7 @@ function AutofillIframe() {
 		return () => window.removeEventListener("message", handleMessage);
 	}, []);
 
-	const handleSelect = (item: AutofillItem) => {
+	const handleSelect = useCallback((item: AutofillItem) => {
 		// Send selection to parent
 		window.parent.postMessage(
 			{
@@ -52,7 +52,7 @@ function AutofillIframe() {
 			},
 			"*",
 		);
-	};
+	}, []);
 
 	useEffect(() => {
 		// Keyboard navigation
@@ -70,14 +70,16 @@ function AutofillIframe() {
 					break;
 				case "Enter":
 					event.preventDefault();
-					handleSelect(items[selectedIndex]);
+					if (items[selectedIndex]) {
+						handleSelect(items[selectedIndex]);
+					}
 					break;
 			}
 		};
 
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [items, selectedIndex]);
+	}, [items, selectedIndex, handleSelect]);
 
 	if (needsUnlock) {
 		return (

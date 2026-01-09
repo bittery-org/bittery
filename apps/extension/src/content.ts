@@ -650,9 +650,11 @@ function persistPendingSavePrompt(credentials: CapturedCredentials) {
 }
 
 function clearPendingSavePrompt() {
-	chrome.runtime.sendMessage({ type: "CLEAR_PENDING_SAVE_PROMPT" }).catch((error) => {
-		console.warn("Failed to clear save prompt:", error);
-	});
+	chrome.runtime
+		.sendMessage({ type: "CLEAR_PENDING_SAVE_PROMPT" })
+		.catch((error) => {
+			console.warn("Failed to clear save prompt:", error);
+		});
 }
 
 async function restorePendingSavePrompt() {

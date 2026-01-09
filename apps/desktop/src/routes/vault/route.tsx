@@ -91,7 +91,9 @@ function RouteComponent() {
 	const [isCreatingVault, setIsCreatingVault] = useState(false);
 	const [vaultIcon, setVaultIcon] = useState("lock");
 	const [vaultImageFile, setVaultImageFile] = useState<File | null>(null);
-	const [vaultImagePreview, setVaultImagePreview] = useState<string | null>(null);
+	const [vaultImagePreview, setVaultImagePreview] = useState<string | null>(
+		null,
+	);
 
 	useEffect(() => {
 		return () => {
@@ -167,10 +169,10 @@ function RouteComponent() {
 	};
 
 	const handleCreateVault = async () => {
-	if (!vaultName.trim()) {
-		toast.error("Vault name is required");
-		return;
-	}
+		if (!vaultName.trim()) {
+			toast.error("Vault name is required");
+			return;
+		}
 
 		if (vaultName.trim().length < 2) {
 			toast.error("Vault name must be at least 2 characters");
@@ -179,35 +181,35 @@ function RouteComponent() {
 
 		setIsCreatingVault(true);
 		try {
-		let imageKey: string | undefined;
+			let imageKey: string | undefined;
 
-		if (vaultImageFile) {
-			if (!vaultImageFile.type.startsWith("image/")) {
-				throw new Error("Vault image must be an image file");
+			if (vaultImageFile) {
+				if (!vaultImageFile.type.startsWith("image/")) {
+					throw new Error("Vault image must be an image file");
+				}
+
+				const upload = await trpcClient.vault.createImageUpload.mutate({
+					fileName: vaultImageFile.name,
+					contentType: vaultImageFile.type,
+				});
+
+				const uploadResponse = await fetch(upload.uploadUrl, {
+					method: "PUT",
+					headers: {
+						"Content-Type": vaultImageFile.type,
+					},
+					body: vaultImageFile,
+				});
+
+				if (!uploadResponse.ok) {
+					throw new Error("Failed to upload vault image");
+				}
+
+				imageKey = upload.key;
 			}
 
-			const upload = await trpcClient.vault.createImageUpload.mutate({
-				fileName: vaultImageFile.name,
-				contentType: vaultImageFile.type,
-			});
-
-			const uploadResponse = await fetch(upload.uploadUrl, {
-				method: "PUT",
-				headers: {
-					"Content-Type": vaultImageFile.type,
-				},
-				body: vaultImageFile,
-			});
-
-			if (!uploadResponse.ok) {
-				throw new Error("Failed to upload vault image");
-			}
-
-			imageKey = upload.key;
-		}
-
-		// Generate a new encryption key for this vault
-		const vaultKey = generateEncryptionKey();
+			// Generate a new encryption key for this vault
+			const vaultKey = generateEncryptionKey();
 
 			// Get the Master Unlock Key to encrypt the vault key
 			const masterUnlockKey = await tauriStorage.getMasterUnlockKey();
@@ -222,13 +224,13 @@ function RouteComponent() {
 			);
 
 			// Create the vault via API
-		const result = await trpcClient.vault.create.mutate({
-			name: vaultName.trim(),
-			type: vaultType,
-			encryptedVaultKey: JSON.stringify(encryptedVaultKeyData),
-			icon: vaultIcon,
-			...(imageKey && { imageKey }),
-		});
+			const result = await trpcClient.vault.create.mutate({
+				name: vaultName.trim(),
+				type: vaultType,
+				encryptedVaultKey: JSON.stringify(encryptedVaultKeyData),
+				icon: vaultIcon,
+				...(imageKey && { imageKey }),
+			});
 
 			// Refresh vault keys in local storage
 			const vaultKeys = await trpcClient.vault.list.query();

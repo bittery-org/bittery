@@ -35,7 +35,7 @@ interface Member {
 	name: string;
 	email: string;
 	role: "owner" | "admin" | "member";
-	joinedAt: Date | null;
+	joinedAt: string | null;
 }
 
 interface MemberListProps {
@@ -50,8 +50,11 @@ export function MemberList({ teamId, members, userRole }: MemberListProps) {
 	const canManage = userRole === "owner" || userRole === "admin";
 
 	const updateRoleMutation = useMutation({
-		mutationFn: (input: { teamId: string; userId: string; role: "admin" | "member" }) =>
-			trpcClient.team.members.updateRole.mutate(input),
+		mutationFn: (input: {
+			teamId: string;
+			userId: string;
+			role: "admin" | "member";
+		}) => trpcClient.team.members.updateRole.mutate(input),
 		onSuccess: () => {
 			toast.success("Role updated");
 			queryClient.invalidateQueries({ queryKey: ["team"] });
@@ -111,7 +114,7 @@ export function MemberList({ teamId, members, userRole }: MemberListProps) {
 								</Avatar>
 								<div>
 									<div className="font-medium">{member.name}</div>
-									<div className="text-sm text-muted-foreground">
+									<div className="text-muted-foreground text-sm">
 										{member.email}
 									</div>
 								</div>

@@ -71,7 +71,7 @@ export function PendingInvitations() {
 									<span className="font-medium">{invitation.teamName}</span>
 									<Badge variant="secondary">{invitation.role}</Badge>
 								</div>
-								<p className="text-sm text-muted-foreground">
+								<p className="text-muted-foreground text-sm">
 									Invited by {invitation.invitedBy}
 								</p>
 							</div>
@@ -93,7 +93,7 @@ export function PendingInvitations() {
 									}
 									disabled={acceptMutation.isPending}
 								>
-									<Check className="h-4 w-4 mr-1" />
+									<Check className="mr-1 h-4 w-4" />
 									Accept
 								</Button>
 							</div>

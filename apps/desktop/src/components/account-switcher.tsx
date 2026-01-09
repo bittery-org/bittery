@@ -97,7 +97,7 @@ export function AccountSwitcher() {
 		}
 	};
 
-	const handleLogout = async () => {
+	const _handleLogout = async () => {
 		if (!activeAccount) return;
 
 		try {

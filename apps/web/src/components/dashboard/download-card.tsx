@@ -1,4 +1,11 @@
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@bittery/ui";
+import {
+	Button,
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+} from "@bittery/ui";
 import { Apple, Download, Monitor } from "lucide-react";
 
 function detectOS(): "macos" | "windows" | "linux" | "unknown" {
@@ -40,7 +47,9 @@ const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
 export function DownloadCard() {
 	const os = detectOS();
 	const { name, icon: Icon, file } = osInfo[os];
-	const downloadUrl = file ? `${RELEASES_URL}/latest/download/${file}` : RELEASES_URL;
+	const downloadUrl = file
+		? `${RELEASES_URL}/latest/download/${file}`
+		: RELEASES_URL;
 
 	return (
 		<Card>
@@ -54,9 +63,9 @@ export function DownloadCard() {
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
-				<p className="text-sm text-muted-foreground">
-					The desktop app provides the best experience for managing your passwords
-					with biometric unlock, auto-fill, and offline access.
+				<p className="text-muted-foreground text-sm">
+					The desktop app provides the best experience for managing your
+					passwords with biometric unlock, auto-fill, and offline access.
 				</p>
 				<div className="flex flex-wrap gap-2">
 					<Button asChild>

@@ -105,7 +105,7 @@ export function VaultAvatar({
 
 	useEffect(() => {
 		setImageError(false);
-	}, [imageUrl]);
+	}, []);
 
 	const sizeClasses = {
 		sm: "h-8 w-8 text-xs",

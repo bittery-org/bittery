@@ -1,6 +1,10 @@
 import "./index.css";
 import type { AppRouter } from "@bittery/api/routers/index";
-import { buildTrpcUrl, chromeStorage, normalizeServerUrl } from "@bittery/crypto";
+import {
+	buildTrpcUrl,
+	chromeStorage,
+	normalizeServerUrl,
+} from "@bittery/crypto";
 import { TRPCProvider } from "@bittery/shared/trpc";
 import { Toaster } from "@bittery/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";

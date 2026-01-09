@@ -33,8 +33,11 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 	const queryClient = useQueryClient();
 
 	const inviteMutation = useMutation({
-		mutationFn: (input: { teamId: string; email: string; role: "admin" | "member" }) =>
-			trpcClient.team.invitations.send.mutate(input),
+		mutationFn: (input: {
+			teamId: string;
+			email: string;
+			role: "admin" | "member";
+		}) => trpcClient.team.invitations.send.mutate(input),
 		onSuccess: () => {
 			toast.success("Invitation sent");
 			queryClient.invalidateQueries({ queryKey: ["team"] });
@@ -83,7 +86,10 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 						</div>
 						<div className="grid gap-2">
 							<Label htmlFor="role">Role</Label>
-							<Select value={role} onValueChange={(v: "admin" | "member") => setRole(v)}>
+							<Select
+								value={role}
+								onValueChange={(v: "admin" | "member") => setRole(v)}
+							>
 								<SelectTrigger>
 									<SelectValue />
 								</SelectTrigger>
@@ -92,7 +98,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 									<SelectItem value="admin">Admin</SelectItem>
 								</SelectContent>
 							</Select>
-							<p className="text-xs text-muted-foreground">
+							<p className="text-muted-foreground text-xs">
 								Admins can invite members and manage team settings.
 							</p>
 						</div>

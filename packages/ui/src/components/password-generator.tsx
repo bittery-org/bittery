@@ -1,6 +1,6 @@
 import { generatePassword, type PasswordOptions } from "@bittery/shared/crypto";
 import { Check, Copy, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "./button";
 import { Input } from "./input";
 import { Label } from "./label";
@@ -30,13 +30,13 @@ export function PasswordGenerator({
 		symbols: defaultOptions?.symbols ?? true,
 	});
 
-	const handleGenerate = () => {
+	const handleGenerate = useCallback(() => {
 		const newPassword = generatePassword(options);
 		setPassword(newPassword);
 		if (onPasswordGenerated) {
 			onPasswordGenerated(newPassword);
 		}
-	};
+	}, [options, onPasswordGenerated]);
 
 	const handleCopy = async () => {
 		if (password) {
@@ -97,7 +97,7 @@ export function PasswordGenerator({
 		if (isOpen && !password) {
 			handleGenerate();
 		}
-	}, [isOpen]);
+	}, [isOpen, handleGenerate, password]);
 
 	// At least one option must be enabled
 	const canToggleOption =
@@ -187,7 +187,7 @@ export function PasswordGenerator({
 							max="64"
 							value={options.length}
 							onChange={(e) =>
-								updateOption("length", Number.parseInt(e.target.value))
+								updateOption("length", Number.parseInt(e.target.value, 10))
 							}
 							onMouseUp={handleGenerate}
 							onTouchEnd={handleGenerate}

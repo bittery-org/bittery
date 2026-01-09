@@ -2,7 +2,10 @@ import { Button, Skeleton } from "@bittery/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
-import { ItemDetailPanel, type VaultItem } from "@/components/item-detail-panel";
+import {
+	ItemDetailPanel,
+	type VaultItem,
+} from "@/components/item-detail-panel";
 
 export function ItemDetailPage() {
 	const navigate = useNavigate();

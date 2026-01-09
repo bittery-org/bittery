@@ -730,10 +730,7 @@ export const vaultRouter = router({
 						),
 				});
 
-				if (
-					!userVaultKey ||
-					!["owner", "admin"].includes(userVaultKey.role)
-				) {
+				if (!userVaultKey || !["owner", "admin"].includes(userVaultKey.role)) {
 					throw new TRPCError({
 						code: "FORBIDDEN",
 						message: "Only vault owner or admin can change roles",
@@ -770,10 +767,7 @@ export const vaultRouter = router({
 				}
 
 				// Admin can't change other admins
-				if (
-					userVaultKey.role === "admin" &&
-					targetVaultKey.role === "admin"
-				) {
+				if (userVaultKey.role === "admin" && targetVaultKey.role === "admin") {
 					throw new TRPCError({
 						code: "FORBIDDEN",
 						message: "Admins cannot change other admins",
@@ -808,10 +802,7 @@ export const vaultRouter = router({
 						),
 				});
 
-				if (
-					!userVaultKey ||
-					!["owner", "admin"].includes(userVaultKey.role)
-				) {
+				if (!userVaultKey || !["owner", "admin"].includes(userVaultKey.role)) {
 					throw new TRPCError({
 						code: "FORBIDDEN",
 						message: "Only vault owner or admin can remove members",
@@ -848,10 +839,7 @@ export const vaultRouter = router({
 				}
 
 				// Admin can't remove other admins
-				if (
-					userVaultKey.role === "admin" &&
-					targetVaultKey.role === "admin"
-				) {
+				if (userVaultKey.role === "admin" && targetVaultKey.role === "admin") {
 					throw new TRPCError({
 						code: "FORBIDDEN",
 						message: "Admins cannot remove other admins",

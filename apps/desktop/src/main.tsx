@@ -44,7 +44,8 @@ const trpcClient = createTRPCClient<AppRouter>({
 		httpBatchLink({
 			url: `${fallbackServerUrl}/trpc`,
 			async fetch(url, options) {
-				const serverUrl = (await tauriStorage.getServerUrl()) ?? fallbackServerUrl;
+				const serverUrl =
+					(await tauriStorage.getServerUrl()) ?? fallbackServerUrl;
 				const resolvedUrl = buildTrpcUrl(serverUrl, url);
 				const token = await tauriStorage.getAuthToken();
 				return fetch(resolvedUrl, {

@@ -1,5 +1,5 @@
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
-import { Copy, ExternalLink, Eye, EyeOff, Star } from "lucide-react";
+import { Copy, ExternalLink, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 import { Favicon } from "./favicon";
 
@@ -37,7 +37,9 @@ export const getItemUsername = (item: VaultItem) =>
 export const getItemNotes = (item: VaultItem) => item.notes || item.note || "";
 
 export const getItemCategory = (item: VaultItem) =>
-	item.category === "secure-note" || Boolean(item.note) ? "secure-note" : "login";
+	item.category === "secure-note" || Boolean(item.note)
+		? "secure-note"
+		: "login";
 
 const normalizeUrl = (url: string) =>
 	url.includes("://") ? url : `https://${url}`;
@@ -46,9 +48,7 @@ interface ItemDetailPanelProps {
 	item: VaultItem;
 }
 
-export function ItemDetailPanel({
-	item,
-}: ItemDetailPanelProps) {
+export function ItemDetailPanel({ item }: ItemDetailPanelProps) {
 	const [showPassword, setShowPassword] = useState(false);
 	const category = getItemCategory(item);
 	const title = getItemTitle(item);
@@ -94,7 +94,7 @@ export function ItemDetailPanel({
 			{isSecureNote ? (
 				<div className="space-y-2">
 					<Label>Note</Label>
-					<Card className="p-4 text-sm leading-relaxed whitespace-pre-wrap">
+					<Card className="whitespace-pre-wrap p-4 text-sm leading-relaxed">
 						{notes || "No notes added yet."}
 					</Card>
 				</div>
@@ -170,7 +170,7 @@ export function ItemDetailPanel({
 					{notes && (
 						<div className="space-y-2">
 							<Label>Notes</Label>
-							<Card className="p-4 text-sm leading-relaxed whitespace-pre-wrap">
+							<Card className="whitespace-pre-wrap p-4 text-sm leading-relaxed">
 								{notes}
 							</Card>
 						</div>

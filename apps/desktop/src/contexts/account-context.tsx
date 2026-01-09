@@ -1,7 +1,6 @@
 import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
 import {
 	createContext,
 	type ReactNode,

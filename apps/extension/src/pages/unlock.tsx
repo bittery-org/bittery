@@ -27,7 +27,7 @@ export function UnlockPage() {
 			.sendMessage({ type: "CHECK_NATIVE_BIOMETRIC" })
 			.then((response) => {
 				console.log(response);
-				
+
 				setBiometricAvailable(
 					response.available && response.enabled && response.appRunning,
 				);

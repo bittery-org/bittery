@@ -14,7 +14,6 @@ import {
 	Sheet,
 	SheetContent,
 	SheetTrigger,
-	toast
 } from "@bittery/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
@@ -48,7 +47,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 						key={item.path}
 						to={item.path}
 						onClick={onNavigate}
-						className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+						className={`flex items-center gap-3 rounded-lg px-3 py-2 font-medium text-sm transition-colors ${
 							isActive
 								? "bg-primary text-primary-foreground"
 								: "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -92,8 +91,8 @@ function UserNav() {
 						<AvatarFallback className="text-xs">{initials}</AvatarFallback>
 					</Avatar>
 					<div className="flex flex-col items-start text-left">
-						<span className="text-sm font-medium">{user?.name || "User"}</span>
-						<span className="text-xs text-muted-foreground truncate max-w-[140px]">
+						<span className="font-medium text-sm">{user?.name || "User"}</span>
+						<span className="max-w-[140px] truncate text-muted-foreground text-xs">
 							{user?.email || ""}
 						</span>
 					</div>
@@ -109,7 +108,7 @@ function UserNav() {
 				<DropdownMenuSeparator />
 				<DropdownMenuItem
 					onClick={handleLogout}
-					className="text-destructive cursor-pointer"
+					className="cursor-pointer text-destructive"
 				>
 					<LogOut className="mr-2 h-4 w-4" />
 					Log out

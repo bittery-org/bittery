@@ -19,8 +19,8 @@ interface Invitation {
 	role: string;
 	status: string;
 	invitedBy: string;
-	createdAt: Date;
-	expiresAt: Date;
+	createdAt: string;
+	expiresAt: string;
 }
 
 interface PendingInvitationsListProps {
@@ -92,7 +92,7 @@ export function PendingInvitationsList({
 							{invitation.invitedBy}
 						</TableCell>
 						<TableCell>
-							{isExpired(invitation.expiresAt) ? (
+							{isExpired(new Date(invitation.expiresAt)) ? (
 								<Badge variant="destructive">Expired</Badge>
 							) : (
 								<Badge variant="outline">Pending</Badge>
