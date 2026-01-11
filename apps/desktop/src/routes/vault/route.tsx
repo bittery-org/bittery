@@ -2,12 +2,25 @@ import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { encrypt, generateEncryptionKey } from "@bittery/shared/crypto";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
 	Button,
 	Dialog,
 	DialogContent,
 	DialogDescription,
 	DialogHeader,
 	DialogTitle,
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
 	Input,
 	Label,
 	toast,
@@ -21,7 +34,7 @@ import {
 	useNavigate,
 	useParams,
 } from "@tanstack/react-router";
-import { PlusIcon } from "lucide-react";
+import { MoreHorizontal, Pencil, PlusIcon, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AccountSwitcher } from "../../components/account-switcher";
 import { ItemForm } from "../../components/vault/item-form";
@@ -94,6 +107,23 @@ function RouteComponent() {
 	const [vaultImagePreview, setVaultImagePreview] = useState<string | null>(
 		null,
 	);
+
+	// Edit vault state
+	const [isEditVaultDialogOpen, setIsEditVaultDialogOpen] = useState(false);
+	const [editingVault, setEditingVault] = useState<{
+		id: string;
+		name: string;
+	} | null>(null);
+	const [editVaultName, setEditVaultName] = useState("");
+	const [isUpdatingVault, setIsUpdatingVault] = useState(false);
+
+	// Delete vault state
+	const [isDeleteVaultDialogOpen, setIsDeleteVaultDialogOpen] = useState(false);
+	const [deletingVault, setDeletingVault] = useState<{
+		id: string;
+		name: string;
+	} | null>(null);
+	const [isDeletingVault, setIsDeletingVault] = useState(false);
 
 	useEffect(() => {
 		return () => {
@@ -267,6 +297,112 @@ function RouteComponent() {
 		}
 	};
 
+	const handleOpenEditVault = (vault: { id: string; name: string }) => {
+		setEditingVault(vault);
+		setEditVaultName(vault.name);
+		setIsEditVaultDialogOpen(true);
+	};
+
+	const handleUpdateVault = async () => {
+		if (!editingVault) return;
+
+		if (!editVaultName.trim()) {
+			toast.error("Vault name is required");
+			return;
+		}
+
+		if (editVaultName.trim().length < 2) {
+			toast.error("Vault name must be at least 2 characters");
+			return;
+		}
+
+		setIsUpdatingVault(true);
+		try {
+			await trpcClient.vault.update.mutate({
+				vaultId: editingVault.id,
+				name: editVaultName.trim(),
+			});
+
+			// Refresh vault keys in local storage
+			const vaultList = await trpcClient.vault.list.query();
+			await tauriStorage.storeVaultKeys(
+				vaultList.map((v) => ({
+					vaultId: v.id,
+					vaultName: v.name,
+					vaultType: v.type,
+					vaultIcon: v.icon,
+					vaultImageUrl: v.imageUrl,
+					encryptedVaultKey: v.encryptedVaultKey,
+					role: v.role,
+				})),
+			);
+
+			// Invalidate vault-keys query to refresh the UI
+			queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
+
+			setIsEditVaultDialogOpen(false);
+			setEditingVault(null);
+			setEditVaultName("");
+
+			toast.success("Vault renamed successfully");
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : "Failed to rename vault";
+			toast.error(errorMessage);
+		} finally {
+			setIsUpdatingVault(false);
+		}
+	};
+
+	const handleOpenDeleteVault = (vault: { id: string; name: string }) => {
+		setDeletingVault(vault);
+		setIsDeleteVaultDialogOpen(true);
+	};
+
+	const handleDeleteVault = async () => {
+		if (!deletingVault) return;
+
+		setIsDeletingVault(true);
+		try {
+			await trpcClient.vault.delete.mutate({
+				vaultId: deletingVault.id,
+			});
+
+			// Refresh vault keys in local storage
+			const vaultList = await trpcClient.vault.list.query();
+			await tauriStorage.storeVaultKeys(
+				vaultList.map((v) => ({
+					vaultId: v.id,
+					vaultName: v.name,
+					vaultType: v.type,
+					vaultIcon: v.icon,
+					vaultImageUrl: v.imageUrl,
+					encryptedVaultKey: v.encryptedVaultKey,
+					role: v.role,
+				})),
+			);
+
+			// Invalidate vault-keys query to refresh the UI
+			queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
+
+			setIsDeleteVaultDialogOpen(false);
+			setDeletingVault(null);
+
+			// Navigate to vault root if we were viewing the deleted vault
+			if (params.id === deletingVault.id) {
+				navigate({ to: "/vault" });
+			}
+
+			toast.success("Vault deleted successfully");
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : "Failed to delete vault";
+			toast.error(errorMessage);
+		} finally {
+			setIsDeletingVault(false);
+		}
+	};
+
 	return (
 		<div className="flex h-screen flex-col overflow-hidden">
 			{/* Top Header */}
@@ -298,27 +434,70 @@ function RouteComponent() {
 				<div className="flex w-48 flex-col border-r bg-background">
 					<div className="flex flex-1 flex-col overflow-y-auto p-2">
 						{vaultKeys?.map((vault) => (
-							<Link
-								to="/vault/$id"
-								params={{ id: vault.vaultId }}
-								type="button"
+							<div
 								key={vault.vaultId}
-								className={`mb-1 w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${
+								className={`group relative mb-1 w-full rounded-md text-left text-sm transition-colors ${
 									params.id === vault.vaultId
 										? "bg-muted/60"
 										: "hover:bg-muted/30"
 								}`}
 							>
-								<div className="flex min-w-0 items-center gap-2">
-									<VaultAvatar
-										name={vault.vaultName}
-										icon={vault.vaultIcon}
-										imageUrl={vault.vaultImageUrl}
-										size="sm"
-									/>
-									<div className="truncate">{vault.vaultName}</div>
-								</div>
-							</Link>
+								<Link
+									to="/vault/$id"
+									params={{ id: vault.vaultId }}
+									className="block px-3 py-2"
+								>
+									<div className="flex min-w-0 items-center gap-2">
+										<VaultAvatar
+											name={vault.vaultName}
+											icon={vault.vaultIcon}
+											imageUrl={vault.vaultImageUrl}
+											size="sm"
+										/>
+										<div className="truncate">{vault.vaultName}</div>
+									</div>
+								</Link>
+								{vault.role === "owner" && (
+									<DropdownMenu>
+										<DropdownMenuTrigger asChild>
+											<Button
+												variant="ghost"
+												size="sm"
+												className="-translate-y-1/2 absolute top-1/2 right-1 h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
+												onClick={(e) => e.stopPropagation()}
+											>
+												<MoreHorizontal className="h-4 w-4" />
+											</Button>
+										</DropdownMenuTrigger>
+										<DropdownMenuContent align="end">
+											<DropdownMenuItem
+												onClick={() =>
+													handleOpenEditVault({
+														id: vault.vaultId,
+														name: vault.vaultName,
+													})
+												}
+											>
+												<Pencil className="mr-2 h-4 w-4" />
+												Rename
+											</DropdownMenuItem>
+											<DropdownMenuSeparator />
+											<DropdownMenuItem
+												variant="destructive"
+												onClick={() =>
+													handleOpenDeleteVault({
+														id: vault.vaultId,
+														name: vault.vaultName,
+													})
+												}
+											>
+												<Trash2 className="mr-2 h-4 w-4" />
+												Delete
+											</DropdownMenuItem>
+										</DropdownMenuContent>
+									</DropdownMenu>
+								)}
+							</div>
 						))}
 					</div>
 					<div className="border-t p-2">
@@ -555,6 +734,98 @@ function RouteComponent() {
 					</div>
 				</DialogContent>
 			</Dialog>
+
+			{/* Edit Vault Dialog */}
+			<Dialog
+				open={isEditVaultDialogOpen}
+				onOpenChange={(open) => {
+					setIsEditVaultDialogOpen(open);
+					if (!open) {
+						setEditingVault(null);
+						setEditVaultName("");
+					}
+				}}
+			>
+				<DialogContent className="sm:max-w-md">
+					<DialogHeader>
+						<DialogTitle>Rename Vault</DialogTitle>
+						<DialogDescription>
+							Enter a new name for this vault.
+						</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-4 py-4">
+						<div className="space-y-2">
+							<Label htmlFor="edit-vault-name">Vault Name</Label>
+							<Input
+								id="edit-vault-name"
+								placeholder="My Vault"
+								value={editVaultName}
+								onChange={(e) => setEditVaultName(e.target.value)}
+								disabled={isUpdatingVault}
+								onKeyDown={(e) => {
+									if (e.key === "Enter" && !isUpdatingVault) {
+										handleUpdateVault();
+									}
+								}}
+							/>
+						</div>
+					</div>
+					<div className="flex gap-2">
+						<Button
+							onClick={handleUpdateVault}
+							disabled={isUpdatingVault}
+							className="flex-1"
+						>
+							{isUpdatingVault ? "Saving..." : "Save"}
+						</Button>
+						<Button
+							variant="outline"
+							onClick={() => {
+								setIsEditVaultDialogOpen(false);
+								setEditingVault(null);
+								setEditVaultName("");
+							}}
+							disabled={isUpdatingVault}
+						>
+							Cancel
+						</Button>
+					</div>
+				</DialogContent>
+			</Dialog>
+
+			{/* Delete Vault Confirmation Dialog */}
+			<AlertDialog
+				open={isDeleteVaultDialogOpen}
+				onOpenChange={(open) => {
+					setIsDeleteVaultDialogOpen(open);
+					if (!open) {
+						setDeletingVault(null);
+					}
+				}}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete Vault</AlertDialogTitle>
+						<AlertDialogDescription>
+							Are you sure you want to delete "{deletingVault?.name}"? This will
+							permanently delete the vault and all its items. This action cannot
+							be undone.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={isDeletingVault}>
+							Cancel
+						</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={handleDeleteVault}
+							disabled={isDeletingVault}
+							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+						>
+							{isDeletingVault ? "Deleting..." : "Delete"}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</div>
 	);
 }

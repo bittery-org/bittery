@@ -4,7 +4,7 @@ import { item, vault, vaultKey } from "@bittery/db/schema/vault";
 import {
 	createPresignedUpload,
 	createVaultImageKey,
-	getStoragePublicUrl
+	getStoragePublicUrl,
 } from "@bittery/storage";
 import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
@@ -21,10 +21,7 @@ export const vaultRouter = router({
 		.query(async ({ ctx, input }) => {
 			const userVaultKey = await db.query.vaultKey.findFirst({
 				where: (vk, { and, eq }) =>
-					and(
-						eq(vk.vaultId, input.vaultId),
-						eq(vk.userId, ctx.session.userId),
-					),
+					and(eq(vk.vaultId, input.vaultId), eq(vk.userId, ctx.session.userId)),
 				with: {
 					vault: {
 						with: {
@@ -173,12 +170,13 @@ export const vaultRouter = router({
 		}),
 
 	/**
-	 * Update vault metadata (icon/image)
+	 * Update vault metadata (name/icon/image)
 	 */
 	update: protectedProcedure
 		.input(
 			z.object({
 				vaultId: z.string(),
+				name: z.string().min(1).optional(),
 				icon: z.string().nullable().optional(),
 				imageKey: z.string().nullable().optional(),
 			}),
@@ -199,6 +197,7 @@ export const vaultRouter = router({
 			await db
 				.update(vault)
 				.set({
+					...(input.name !== undefined && { name: input.name }),
 					...(input.icon !== undefined && { icon: input.icon }),
 					...(input.imageKey !== undefined && { imageKey: input.imageKey }),
 					updatedAt: new Date(),
@@ -215,11 +214,42 @@ export const vaultRouter = router({
 
 			return {
 				id: updatedVault.id,
+				name: updatedVault.name,
 				icon: updatedVault.icon,
 				imageUrl: updatedVault.imageKey
 					? getStoragePublicUrl(updatedVault.imageKey)
 					: null,
 			};
+		}),
+
+	/**
+	 * Delete a vault (owner only)
+	 */
+	delete: protectedProcedure
+		.input(z.object({ vaultId: z.string() }))
+		.mutation(async ({ input, ctx }) => {
+			const userVaultKey = await db.query.vaultKey.findFirst({
+				where: (vk, { and, eq }) =>
+					and(eq(vk.vaultId, input.vaultId), eq(vk.userId, ctx.session.userId)),
+			});
+
+			if (!userVaultKey || userVaultKey.role !== "owner") {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "Only the vault owner can delete the vault",
+				});
+			}
+
+			// Delete all items in the vault
+			await db.delete(item).where(eq(item.vaultId, input.vaultId));
+
+			// Delete all vault keys (member access)
+			await db.delete(vaultKey).where(eq(vaultKey.vaultId, input.vaultId));
+
+			// Delete the vault itself
+			await db.delete(vault).where(eq(vault.id, input.vaultId));
+
+			return { success: true };
 		}),
 
 	/**

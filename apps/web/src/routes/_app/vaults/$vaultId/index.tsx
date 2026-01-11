@@ -66,7 +66,9 @@ function VaultDetailPage() {
 				<div className="flex-1">
 					<div className="flex items-center gap-3">
 						<h1 className="font-bold text-3xl tracking-tight">{vault.name}</h1>
-						<Badge variant={vault.userRole === "owner" ? "default" : "secondary"}>
+						<Badge
+							variant={vault.userRole === "owner" ? "default" : "secondary"}
+						>
 							{vault.userRole}
 						</Badge>
 					</div>
@@ -131,12 +133,12 @@ function VaultDetailPage() {
 														<Lock className="h-5 w-5 text-muted-foreground" />
 													)}
 												</div>
-												<div className="flex-1 min-w-0">
-													<div className="font-medium truncate">
+												<div className="min-w-0 flex-1">
+													<div className="truncate font-medium">
 														{overview.title}
 													</div>
 													{overview.username && (
-														<div className="text-muted-foreground text-sm truncate">
+														<div className="truncate text-muted-foreground text-sm">
 															{overview.username}
 														</div>
 													)}
