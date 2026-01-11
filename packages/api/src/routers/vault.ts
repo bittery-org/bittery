@@ -14,6 +14,56 @@ import { protectedProcedure, router } from "../index";
 
 export const vaultRouter = router({
 	/**
+	 * Get a single vault by ID
+	 */
+	get: protectedProcedure
+		.input(z.object({ vaultId: z.string() }))
+		.query(async ({ ctx, input }) => {
+			const userVaultKey = await db.query.vaultKey.findFirst({
+				where: (vk, { and, eq }) =>
+					and(
+						eq(vk.vaultId, input.vaultId),
+						eq(vk.userId, ctx.session.userId),
+					),
+				with: {
+					vault: {
+						with: {
+							items: {
+								where: (item, { isNull }) => isNull(item.deletedAt),
+							},
+						},
+					},
+				},
+			});
+
+			if (!userVaultKey) {
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "Vault not found or access denied",
+				});
+			}
+
+			// Get member count
+			const members = await db.query.vaultKey.findMany({
+				where: (vk, { eq }) => eq(vk.vaultId, input.vaultId),
+			});
+
+			return {
+				id: userVaultKey.vault.id,
+				name: userVaultKey.vault.name,
+				type: userVaultKey.vault.type,
+				icon: userVaultKey.vault.icon,
+				imageUrl: userVaultKey.vault.imageKey
+					? getStoragePublicUrl(userVaultKey.vault.imageKey)
+					: null,
+				userRole: userVaultKey.role,
+				itemCount: userVaultKey.vault.items.length,
+				memberCount: members.length,
+				createdAt: userVaultKey.vault.createdAt,
+			};
+		}),
+
+	/**
 	 * List all vaults for the current user
 	 */
 	list: protectedProcedure.query(async ({ ctx }) => {
