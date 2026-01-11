@@ -16,6 +16,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Key, Lock, Users } from "lucide-react";
+import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { VaultMemberList } from "@/components/vaults/vault-member-list";
 
 export const Route = createFileRoute("/_app/vaults/$vaultId/")({
@@ -158,12 +159,19 @@ function VaultDetailPage() {
 				<TabsContent value="members" className="mt-4">
 					<Card>
 						<CardHeader>
-							<CardTitle>Vault Members</CardTitle>
-							<CardDescription>
-								{canManage
-									? "Manage who has access to this vault and their permissions."
-									: "People who have access to this vault."}
-							</CardDescription>
+							<div className="flex items-start justify-between">
+								<div>
+									<CardTitle>Vault Members</CardTitle>
+									<CardDescription>
+										{canManage
+											? "Manage who has access to this vault and their permissions."
+											: "People who have access to this vault."}
+									</CardDescription>
+								</div>
+								{canManage && vault.type === "team" && (
+									<AddMemberDialog vaultId={vaultId} />
+								)}
+							</div>
 						</CardHeader>
 						<CardContent>
 							{membersQuery.isLoading ? (

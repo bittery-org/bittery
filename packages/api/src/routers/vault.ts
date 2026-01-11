@@ -938,5 +938,109 @@ export const vaultRouter = router({
 
 				return { success: true };
 			}),
+
+		/**
+		 * Look up a user by email to get their public key for vault sharing
+		 */
+		lookupUser: protectedProcedure
+			.input(z.object({ email: z.string().email() }))
+			.query(async ({ ctx, input }) => {
+				// Don't allow looking up yourself
+				const currentUser = await db.query.user.findFirst({
+					where: (u, { eq }) => eq(u.id, ctx.session.userId),
+				});
+
+				if (currentUser?.email.toLowerCase() === input.email.toLowerCase()) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "Cannot add yourself as a member",
+					});
+				}
+
+				const foundUser = await db.query.user.findFirst({
+					where: (u, { eq }) => eq(u.email, input.email.toLowerCase()),
+				});
+
+				if (!foundUser) {
+					throw new TRPCError({
+						code: "NOT_FOUND",
+						message: "User not found",
+					});
+				}
+
+				return {
+					id: foundUser.id,
+					name: foundUser.name,
+					email: foundUser.email,
+					publicKey: foundUser.publicKey,
+				};
+			}),
+
+		/**
+		 * Add a new member to a vault (owner/admin only)
+		 * The encryptedVaultKey must be encrypted with the new member's RSA public key
+		 */
+		add: protectedProcedure
+			.input(
+				z.object({
+					vaultId: z.string(),
+					userId: z.string(),
+					role: z.enum(["admin", "member", "read-only"]),
+					encryptedVaultKey: z.string(),
+				}),
+			)
+			.mutation(async ({ ctx, input }) => {
+				// Check user has admin/owner access
+				const userVaultKey = await db.query.vaultKey.findFirst({
+					where: (vk, { and, eq }) =>
+						and(
+							eq(vk.vaultId, input.vaultId),
+							eq(vk.userId, ctx.session.userId),
+						),
+				});
+
+				if (!userVaultKey || !["owner", "admin"].includes(userVaultKey.role)) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Only vault owner or admin can add members",
+					});
+				}
+
+				// Check if target user exists
+				const targetUser = await db.query.user.findFirst({
+					where: (u, { eq }) => eq(u.id, input.userId),
+				});
+
+				if (!targetUser) {
+					throw new TRPCError({
+						code: "NOT_FOUND",
+						message: "User not found",
+					});
+				}
+
+				// Check if user is already a member
+				const existingMember = await db.query.vaultKey.findFirst({
+					where: (vk, { and, eq }) =>
+						and(eq(vk.vaultId, input.vaultId), eq(vk.userId, input.userId)),
+				});
+
+				if (existingMember) {
+					throw new TRPCError({
+						code: "CONFLICT",
+						message: "User is already a member of this vault",
+					});
+				}
+
+				// Add the new member
+				await db.insert(vaultKey).values({
+					id: nanoid(),
+					vaultId: input.vaultId,
+					userId: input.userId,
+					encryptedVaultKey: input.encryptedVaultKey,
+					role: input.role,
+				});
+
+				return { success: true };
+			}),
 	}),
 });

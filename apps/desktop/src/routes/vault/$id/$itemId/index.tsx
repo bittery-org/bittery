@@ -23,6 +23,7 @@ import {
 	Edit,
 	MoreVertical,
 	Share2,
+	Star,
 	Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -299,6 +300,19 @@ function VaultItemComponent() {
 									<CopyIcon className="mr-2 size-4" />
 									Duplicate
 								</DropdownMenuItem>
+								<DropdownMenuItem
+									onClick={() =>
+										toggleFavoriteMutation.mutate(!rawItem?.favorite)
+									}
+								>
+									<Star
+										className="mr-2 size-4"
+										fill={rawItem?.favorite ? "currentColor" : "none"}
+									/>
+									{rawItem?.favorite
+										? "Remove from Favorites"
+										: "Add to Favorites"}
+								</DropdownMenuItem>
 								<DropdownMenuSeparator />
 								<DropdownMenuItem
 									onClick={handleDelete}
@@ -319,10 +333,6 @@ function VaultItemComponent() {
 							rawItem?.category === "secure-note" ? "secure-note" : "login"
 						}
 						data={decryptedItemData}
-						favorite={rawItem?.favorite || false}
-						onToggleFavorite={() =>
-							toggleFavoriteMutation.mutate(!rawItem?.favorite)
-						}
 					/>
 				</div>
 			</div>

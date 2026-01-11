@@ -2,7 +2,7 @@
 
 import { copyToClipboard } from "@bittery/shared/crypto";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
-import { Copy, ExternalLink, Eye, EyeOff, Star } from "lucide-react";
+import { Copy, ExternalLink, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 import { Favicon } from "./favicon";
 
@@ -31,19 +31,15 @@ interface SecureNoteData {
 interface ItemDetailProps {
 	category: "login" | "secure-note";
 	data: LoginData | SecureNoteData;
-	favorite?: boolean;
 	onEdit?: () => void;
 	onDelete?: () => void;
-	onToggleFavorite?: () => void;
 }
 
 export default function ItemDetail({
 	category,
 	data,
-	favorite = false,
 	onEdit,
 	onDelete,
-	onToggleFavorite,
 }: ItemDetailProps) {
 	const [showPassword, setShowPassword] = useState(false);
 	const [visibleCustomFields, setVisibleCustomFields] = useState<Set<string>>(
@@ -92,38 +88,20 @@ export default function ItemDetail({
 					</div>
 				</div>
 
-				<div className="flex items-start justify-between gap-4">
-					<div className="flex gap-2">
-						{onEdit && (
-							<Button size="sm" variant="outline" onClick={onEdit}>
-								Edit
-							</Button>
-						)}
-						{onDelete && (
-							<Button
-								size="sm"
-								variant="ghost"
-								className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-								onClick={onDelete}
-							>
-								Delete
-							</Button>
-						)}
-					</div>
-					{onToggleFavorite && (
+				<div className="flex gap-2">
+					{onEdit && (
+						<Button size="sm" variant="outline" onClick={onEdit}>
+							Edit
+						</Button>
+					)}
+					{onDelete && (
 						<Button
 							size="sm"
-							variant="outline"
-							onClick={onToggleFavorite}
-							className={
-								favorite ? "text-yellow-500 hover:text-yellow-600" : ""
-							}
+							variant="ghost"
+							className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+							onClick={onDelete}
 						>
-							<Star
-								className="size-4"
-								fill={favorite ? "currentColor" : "none"}
-							/>
-							{favorite ? "Remove from Favorites" : "Add to Favorites"}
+							Delete
 						</Button>
 					)}
 				</div>
@@ -306,36 +284,20 @@ export default function ItemDetail({
 				</div>
 			</div>
 
-			<div className="flex items-start justify-between gap-4">
-				<div className="flex gap-2">
-					{onEdit && (
-						<Button size="sm" variant="outline" onClick={onEdit}>
-							Edit
-						</Button>
-					)}
-					{onDelete && (
-						<Button
-							size="sm"
-							variant="ghost"
-							className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-							onClick={onDelete}
-						>
-							Delete
-						</Button>
-					)}
-				</div>
-				{onToggleFavorite && (
+			<div className="flex gap-2">
+				{onEdit && (
+					<Button size="sm" variant="outline" onClick={onEdit}>
+						Edit
+					</Button>
+				)}
+				{onDelete && (
 					<Button
 						size="sm"
-						variant="outline"
-						onClick={onToggleFavorite}
-						className={favorite ? "text-yellow-500 hover:text-yellow-600" : ""}
+						variant="ghost"
+						className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+						onClick={onDelete}
 					>
-						<Star
-							className="size-4"
-							fill={favorite ? "currentColor" : "none"}
-						/>
-						{favorite ? "Remove from Favorites" : "Add to Favorites"}
+						Delete
 					</Button>
 				)}
 			</div>
