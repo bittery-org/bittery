@@ -25,7 +25,7 @@ interface CreateItemDialogProps {
 	onOpenChange: (open: boolean) => void;
 	vaults: VaultOption[];
 	selectedVaultId?: string;
-	onCreateItem: (data: DecryptedItemData, vaultId: string) => Promise<void>;
+	onCreateItem: (data: DecryptedItemData, vaultId: string, category: CategoryType) => Promise<void>;
 }
 
 type CategoryType = "login" | "secure-note" | "credit-card" | "identity";
@@ -92,7 +92,7 @@ export function CreateItemDialog({
 
 		setIsSubmitting(true);
 		try {
-			await onCreateItem(data, vaultId);
+			await onCreateItem(data, vaultId, selectedCategory);
 			handleReset();
 		} finally {
 			setIsSubmitting(false);

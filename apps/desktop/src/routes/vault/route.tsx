@@ -544,18 +544,7 @@ function RouteComponent() {
 					})) || []
 				}
 				selectedVaultId={params.id}
-				onCreateItem={(data, vaultId) => {
-					// We need to determine the category from the data shape
-					let category: "login" | "secure-note" | "credit-card";
-					if ("note" in data) {
-						category = "secure-note";
-					} else if ("username" in data || "password" in data) {
-						category = "login";
-					} else {
-						category = "credit-card";
-					}
-					return handleCreateItem(data, vaultId, category);
-				}}
+				onCreateItem={(data, vaultId, category) => handleCreateItem(data, vaultId, category)}
 			/>
 
 			{/* New Vault Dialog */}

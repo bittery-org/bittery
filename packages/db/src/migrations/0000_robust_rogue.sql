@@ -1,6 +1,6 @@
 CREATE TYPE "public"."invitation_status" AS ENUM('pending', 'accepted', 'declined', 'expired');--> statement-breakpoint
 CREATE TYPE "public"."team_role" AS ENUM('owner', 'admin', 'member');--> statement-breakpoint
-CREATE TYPE "public"."item_category" AS ENUM('login', 'secure-note');--> statement-breakpoint
+CREATE TYPE "public"."item_category" AS ENUM('login', 'secure-note', 'credit-card', 'identity');--> statement-breakpoint
 CREATE TYPE "public"."vault_role" AS ENUM('owner', 'admin', 'member', 'read-only');--> statement-breakpoint
 CREATE TYPE "public"."vault_type" AS ENUM('personal', 'team');--> statement-breakpoint
 CREATE TABLE "session" (
@@ -89,6 +89,8 @@ CREATE TABLE "vault" (
 	"id" text PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
 	"type" "vault_type" DEFAULT 'personal' NOT NULL,
+	"icon" text,
+	"image_key" text,
 	"created_by_id" text NOT NULL,
 	"team_id" text,
 	"created_at" timestamp DEFAULT now() NOT NULL,
