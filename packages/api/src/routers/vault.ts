@@ -324,11 +324,13 @@ export const vaultRouter = router({
 		.input(
 			z.object({
 				vaultId: z.string(),
-				category: z.enum(["login", "secure-note"]),
+				category: z.enum(["login", "secure-note", "credit-card", "identity"]),
 				overview: z.object({
 					title: z.string(),
 					url: z.string().optional(),
 					username: z.string().optional(),
+					cardBrand: z.string().optional(),
+					maskedCardNumber: z.string().optional(),
 				}),
 				encryptedData: z.string(),
 				encryptionIv: z.string(),
@@ -381,6 +383,8 @@ export const vaultRouter = router({
 						title: z.string(),
 						url: z.string().optional(),
 						username: z.string().optional(),
+						cardBrand: z.string().optional(),
+						maskedCardNumber: z.string().optional(),
 					})
 					.optional(),
 				encryptedData: z.string().optional(),

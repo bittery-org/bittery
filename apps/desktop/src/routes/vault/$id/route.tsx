@@ -18,12 +18,14 @@ interface ItemOverview {
 	title: string;
 	url?: string;
 	username?: string;
+	cardBrand?: string;
+	maskedCardNumber?: string;
 }
 
 interface Item {
 	id: string;
 	vaultId: string;
-	category: "login" | "secure-note";
+	category: "login" | "secure-note" | "credit-card" | "identity";
 	favorite: boolean;
 	overview: ItemOverview;
 	encryptedData: string;
@@ -130,6 +132,7 @@ function RouteComponent() {
 														url={item.overview.url}
 														title={item.overview.title}
 														category={item.category}
+														cardBrand={item.overview.cardBrand}
 														size="sm"
 													/>
 													<div className="min-w-0 flex-1">
@@ -139,6 +142,11 @@ function RouteComponent() {
 														{item.overview.username && (
 															<div className="mt-0.5 truncate text-muted-foreground text-xs">
 																{item.overview.username}
+															</div>
+														)}
+														{item.overview.maskedCardNumber && (
+															<div className="mt-0.5 truncate text-muted-foreground text-xs">
+																{item.overview.maskedCardNumber}
 															</div>
 														)}
 													</div>
@@ -174,6 +182,7 @@ function RouteComponent() {
 												url={item.overview.url}
 												title={item.overview.title}
 												category={item.category}
+												cardBrand={item.overview.cardBrand}
 												size="sm"
 											/>
 											<div className="min-w-0 flex-1">
@@ -183,6 +192,11 @@ function RouteComponent() {
 												{item.overview.username && (
 													<div className="mt-0.5 truncate text-muted-foreground text-xs">
 														{item.overview.username}
+													</div>
+												)}
+												{item.overview.maskedCardNumber && (
+													<div className="mt-0.5 truncate text-muted-foreground text-xs">
+														{item.overview.maskedCardNumber}
 													</div>
 												)}
 											</div>

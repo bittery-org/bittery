@@ -1,4 +1,5 @@
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { detectCardBrand, maskCardNumber } from "@bittery/shared/credit-card";
 import { copyToClipboard, decrypt, encrypt } from "@bittery/shared/crypto";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
@@ -52,6 +53,12 @@ interface DecryptedItemData {
 	notes?: string;
 	note?: string;
 	customFields?: CustomField[];
+	// Credit card fields
+	cardholderName?: string;
+	cardNumber?: string;
+	cvv?: string;
+	expiryDate?: string;
+	billingAddress?: string;
 }
 
 function VaultItemComponent() {
@@ -69,7 +76,7 @@ function VaultItemComponent() {
 		useState<DecryptedItemData | null>(null);
 	const selectedVaultId = Route.useParams().id;
 	const [newItemCategory, _setNewItemCategory] = useState<
-		"login" | "secure-note"
+		"login" | "secure-note" | "credit-card"
 	>("login");
 
 	const { data: currentVault } = useQuery({
@@ -91,7 +98,7 @@ function VaultItemComponent() {
 	// Create item mutation
 	const createItemMutation = useMutation({
 		mutationFn: async (input: {
-			category: "login" | "secure-note";
+			category: "login" | "secure-note" | "credit-card";
 			data: DecryptedItemData;
 		}) => {
 			if (!selectedVaultId) throw new Error("No vault selected");
@@ -104,12 +111,26 @@ function VaultItemComponent() {
 			// Encrypt the item data
 			const encryptedData = await encrypt(JSON.stringify(input.data), vaultKey);
 
-			// Create overview
-			const overview = {
+			// Create overview based on category
+			const overview: {
+				title: string;
+				url?: string;
+				username?: string;
+				cardBrand?: string;
+				maskedCardNumber?: string;
+			} = {
 				title: input.data.title || "Untitled",
-				...(input.data.url && { url: input.data.url }),
-				...(input.data.username && { username: input.data.username }),
 			};
+
+			if (input.category === "login") {
+				if (input.data.url) overview.url = input.data.url;
+				if (input.data.username) overview.username = input.data.username;
+			} else if (input.category === "credit-card") {
+				if (input.data.cardNumber) {
+					overview.cardBrand = detectCardBrand(input.data.cardNumber);
+					overview.maskedCardNumber = maskCardNumber(input.data.cardNumber);
+				}
+			}
 
 			return await trpcClient.vault.createItem.mutate({
 				vaultId: selectedVaultId,
@@ -144,12 +165,26 @@ function VaultItemComponent() {
 			// Encrypt the item data
 			const encryptedData = await encrypt(JSON.stringify(input.data), vaultKey);
 
-			// Create overview
-			const overview = {
+			// Create overview based on category
+			const overview: {
+				title: string;
+				url?: string;
+				username?: string;
+				cardBrand?: string;
+				maskedCardNumber?: string;
+			} = {
 				title: input.data.title || "Untitled",
-				...(input.data.url && { url: input.data.url }),
-				...(input.data.username && { username: input.data.username }),
 			};
+
+			if (rawItem.category === "login") {
+				if (input.data.url) overview.url = input.data.url;
+				if (input.data.username) overview.username = input.data.username;
+			} else if (rawItem.category === "credit-card") {
+				if (input.data.cardNumber) {
+					overview.cardBrand = detectCardBrand(input.data.cardNumber);
+					overview.maskedCardNumber = maskCardNumber(input.data.cardNumber);
+				}
+			}
 
 			return await trpcClient.vault.updateItem.mutate({
 				itemId,
@@ -367,13 +402,21 @@ function VaultItemComponent() {
 						<DialogTitle>Edit Item</DialogTitle>
 						<DialogDescription>
 							Update your{" "}
-							{rawItem?.category === "secure-note" ? "secure note" : "login"}
+							{rawItem?.category === "secure-note"
+								? "secure note"
+								: rawItem?.category === "credit-card"
+									? "credit card"
+									: "login"}
 						</DialogDescription>
 					</DialogHeader>
 					{decryptedItemData && (
 						<ItemForm
 							category={
-								rawItem?.category === "secure-note" ? "secure-note" : "login"
+								rawItem?.category === "secure-note"
+									? "secure-note"
+									: rawItem?.category === "credit-card"
+										? "credit-card"
+										: "login"
 							}
 							initialData={decryptedItemData}
 							onSubmit={(data) => {

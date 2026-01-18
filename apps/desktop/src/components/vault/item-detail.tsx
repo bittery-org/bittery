@@ -1,5 +1,11 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: Thats fine here */
 
+import {
+	detectCardBrand,
+	formatExpiryDate,
+	getCardBrandDisplayName,
+	maskCardNumber,
+} from "@bittery/shared/credit-card";
 import { copyToClipboard } from "@bittery/shared/crypto";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { Copy, ExternalLink, Eye, EyeOff } from "lucide-react";
@@ -28,9 +34,19 @@ interface SecureNoteData {
 	note: string;
 }
 
+interface CreditCardData {
+	title: string;
+	cardholderName: string;
+	cardNumber: string;
+	cvv: string;
+	expiryDate: string;
+	billingAddress?: string;
+	notes?: string;
+}
+
 interface ItemDetailProps {
-	category: "login" | "secure-note";
-	data: LoginData | SecureNoteData;
+	category: "login" | "secure-note" | "credit-card";
+	data: LoginData | SecureNoteData | CreditCardData;
 	onEdit?: () => void;
 	onDelete?: () => void;
 }
@@ -42,6 +58,8 @@ export default function ItemDetail({
 	onDelete,
 }: ItemDetailProps) {
 	const [showPassword, setShowPassword] = useState(false);
+	const [showCardNumber, setShowCardNumber] = useState(false);
+	const [showCVV, setShowCVV] = useState(false);
 	const [visibleCustomFields, setVisibleCustomFields] = useState<Set<string>>(
 		new Set(),
 	);
@@ -62,6 +80,169 @@ export default function ItemDetail({
 			return next;
 		});
 	};
+
+	if (category === "credit-card") {
+		const cardData = data as CreditCardData;
+		const cardBrand = detectCardBrand(cardData.cardNumber);
+		const formattedExpiry = formatExpiryDate(cardData.expiryDate);
+		const maskedCardNumber = maskCardNumber(cardData.cardNumber);
+
+		return (
+			<div className="space-y-4">
+				{/* Header with credit card icon */}
+				<div className="flex items-center gap-4">
+					<Favicon
+						title={cardData.title}
+						category="credit-card"
+						cardBrand={cardBrand}
+						size="lg"
+					/>
+					<div className="min-w-0 flex-1">
+						<h2 className="truncate font-semibold text-2xl tracking-tight">
+							{cardData.title}
+						</h2>
+						<p className="mt-1 text-muted-foreground text-sm">
+							{getCardBrandDisplayName(cardBrand)} • {maskedCardNumber}
+						</p>
+					</div>
+				</div>
+
+				<div className="flex gap-2">
+					{onEdit && (
+						<Button size="sm" variant="outline" onClick={onEdit}>
+							Edit
+						</Button>
+					)}
+					{onDelete && (
+						<Button
+							size="sm"
+							variant="ghost"
+							className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+							onClick={onDelete}
+						>
+							Delete
+						</Button>
+					)}
+				</div>
+
+				<div className="space-y-4">
+					<div className="space-y-2">
+						<Label>Cardholder Name</Label>
+						<div className="flex gap-2">
+							<Input
+								value={cardData.cardholderName}
+								readOnly
+								className="flex-1"
+							/>
+							<Button
+								size="icon"
+								variant="outline"
+								onClick={() =>
+									handleCopy(cardData.cardholderName, "Cardholder name")
+								}
+							>
+								<Copy size={16} />
+							</Button>
+						</div>
+					</div>
+
+					<div className="space-y-2">
+						<Label>Card Number</Label>
+						<div className="flex gap-2">
+							<Input
+								type={showCardNumber ? "text" : "password"}
+								value={cardData.cardNumber}
+								readOnly
+								className="flex-1 font-mono"
+							/>
+							<Button
+								size="icon"
+								variant="outline"
+								onClick={() => setShowCardNumber(!showCardNumber)}
+							>
+								{showCardNumber ? <EyeOff size={16} /> : <Eye size={16} />}
+							</Button>
+							<Button
+								size="icon"
+								variant="outline"
+								onClick={() => handleCopy(cardData.cardNumber, "Card number")}
+							>
+								<Copy size={16} />
+							</Button>
+						</div>
+					</div>
+
+					<div className="grid grid-cols-2 gap-4">
+						<div className="space-y-2">
+							<Label>Expiry Date</Label>
+							<div className="flex gap-2">
+								<Input
+									value={formattedExpiry}
+									readOnly
+									className="flex-1 font-mono"
+								/>
+								<Button
+									size="icon"
+									variant="outline"
+									onClick={() => handleCopy(formattedExpiry, "Expiry date")}
+								>
+									<Copy size={16} />
+								</Button>
+							</div>
+						</div>
+
+						<div className="space-y-2">
+							<Label>CVV</Label>
+							<div className="flex gap-2">
+								<Input
+									type={showCVV ? "text" : "password"}
+									value={cardData.cvv}
+									readOnly
+									className="flex-1 font-mono"
+								/>
+								<Button
+									size="icon"
+									variant="outline"
+									onClick={() => setShowCVV(!showCVV)}
+								>
+									{showCVV ? <EyeOff size={16} /> : <Eye size={16} />}
+								</Button>
+								<Button
+									size="icon"
+									variant="outline"
+									onClick={() => handleCopy(cardData.cvv, "CVV")}
+								>
+									<Copy size={16} />
+								</Button>
+							</div>
+						</div>
+					</div>
+
+					{cardData.billingAddress && (
+						<div className="space-y-2">
+							<Label className="font-medium text-sm">Billing Address</Label>
+							<Card>
+								<div className="whitespace-pre-wrap px-4 py-1 text-sm">
+									{cardData.billingAddress}
+								</div>
+							</Card>
+						</div>
+					)}
+
+					{cardData.notes && (
+						<div className="space-y-2">
+							<Label className="font-medium text-sm">Notes</Label>
+							<Card>
+								<div className="whitespace-pre-wrap px-4 py-1 text-sm">
+									{cardData.notes}
+								</div>
+							</Card>
+						</div>
+					)}
+				</div>
+			</div>
+		);
+	}
 
 	if (category === "login") {
 		const loginData = data as LoginData;

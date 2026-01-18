@@ -15,6 +15,13 @@
 			"when": 1767911325000,
 			"tag": "0001_vault_media",
 			"breakpoints": true
+		},
+		{
+			"idx": 2,
+			"version": "7",
+			"when": 1737204000000,
+			"tag": "0002_add_credit_card_category",
+			"breakpoints": true
 		}
 	]
 }

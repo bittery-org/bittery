@@ -25,6 +25,8 @@ export const vaultRoleEnum = pgEnum("vault_role", [
 export const itemCategoryEnum = pgEnum("item_category", [
 	"login",
 	"secure-note",
+	"credit-card",
+	"identity",
 ]);
 
 export const vault = pgTable("vault", {

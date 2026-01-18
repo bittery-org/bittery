@@ -1,12 +1,13 @@
 import { getDomainFromUrl, getFaviconUrl } from "@bittery/shared/favicon";
 import { cn } from "@bittery/ui";
-import { FileText, Globe } from "lucide-react";
+import { CreditCard, FileText, Globe } from "lucide-react";
 import { useState } from "react";
 
 interface FaviconProps {
 	url?: string;
 	title: string;
-	category?: "login" | "secure-note";
+	category?: "login" | "secure-note" | "credit-card" | "identity";
+	cardBrand?: string;
 	size?: "sm" | "md" | "lg";
 	className?: string;
 }
@@ -67,6 +68,7 @@ export function Favicon({
 	url,
 	title,
 	category = "login",
+	cardBrand,
 	size = "md",
 	className,
 }: FaviconProps) {
@@ -104,12 +106,32 @@ export function Favicon({
 		lg: "w-8 h-8",
 	};
 
+	// Card brand colors
+	const cardBrandColors: Record<string, string> = {
+		visa: "bg-blue-600",
+		mastercard: "bg-red-600",
+		amex: "bg-blue-500",
+		discover: "bg-orange-600",
+		diners: "bg-sky-600",
+		jcb: "bg-green-600",
+		unionpay: "bg-red-700",
+		unknown: "bg-gray-600",
+	};
+
+	const cardColor = cardBrand
+		? cardBrandColors[cardBrand] || cardBrandColors.unknown
+		: cardBrandColors.unknown;
+
 	return (
 		<div
 			className={cn(
 				"flex shrink-0 items-center justify-center overflow-hidden rounded-lg border",
 				sizeClasses[size],
-				imageError || !faviconUrl ? avatarColor : "bg-muted/50",
+				category === "credit-card"
+					? cardColor
+					: imageError || !faviconUrl
+						? avatarColor
+						: "bg-muted/50",
 				className,
 			)}
 		>
@@ -124,6 +146,8 @@ export function Favicon({
 				<span className="select-none font-semibold text-white">{initials}</span>
 			) : category === "login" ? (
 				<Globe className="text-muted-foreground" size={iconSizes[size]} />
+			) : category === "credit-card" ? (
+				<CreditCard className="text-white" size={iconSizes[size]} />
 			) : (
 				<FileText className="text-muted-foreground" size={iconSizes[size]} />
 			)}

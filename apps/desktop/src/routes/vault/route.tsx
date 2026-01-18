@@ -37,7 +37,7 @@ import {
 import { MoreHorizontal, Pencil, PlusIcon, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AccountSwitcher } from "../../components/account-switcher";
-import { ItemForm } from "../../components/vault/item-form";
+import { CreateItemDialog } from "../../components/vault/create-item-dialog";
 import { SearchCombobox } from "../../components/vault/search-combobox";
 import {
 	VaultAvatar,
@@ -93,10 +93,6 @@ function RouteComponent() {
 	const queryClient = useQueryClient();
 
 	const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
-	const [selectedCategory, setSelectedCategory] = useState<
-		"login" | "secure-note"
-	>("login");
-	const [isSubmitting, setIsSubmitting] = useState(false);
 
 	const [isNewVaultDialogOpen, setIsNewVaultDialogOpen] = useState(false);
 	const [vaultName, setVaultName] = useState("");
@@ -141,13 +137,11 @@ function RouteComponent() {
 		setVaultImagePreview(null);
 	};
 
-	const handleCreateItem = async (data: DecryptedItemData, vaultId: string) => {
-		if (!vaultId) {
-			toast.error("No vault selected");
-			return;
-		}
-
-		setIsSubmitting(true);
+	const handleCreateItem = async (
+		data: DecryptedItemData,
+		vaultId: string,
+		category: "login" | "secure-note" | "credit-card",
+	) => {
 		try {
 			// Get vault key for encryption
 			const vaultKey = await tauriStorage.getDecryptedVaultKey(vaultId);
@@ -168,7 +162,7 @@ function RouteComponent() {
 
 			const createdItem = await trpcClient.vault.createItem.mutate({
 				vaultId: vaultId,
-				category: selectedCategory,
+				category: category,
 				overview,
 				encryptedData: encryptedData.ciphertext,
 				encryptionIv: encryptedData.iv,
@@ -193,8 +187,6 @@ function RouteComponent() {
 				error instanceof Error ? error.message : "Failed to create item";
 			toast.error(errorMessage);
 			throw error;
-		} finally {
-			setIsSubmitting(false);
 		}
 	};
 
@@ -521,56 +513,30 @@ function RouteComponent() {
 			</div>
 
 			{/* New Item Dialog */}
-			<Dialog open={isNewItemDialogOpen} onOpenChange={setIsNewItemDialogOpen}>
-				<DialogContent className="flex max-h-[98svh] max-w-2xl flex-col overflow-hidden p-0">
-					<DialogHeader className="px-6 py-6">
-						<DialogTitle>Create New Item</DialogTitle>
-						<DialogDescription className="sr-only">
-							Choose a category and fill in the details for your new item.
-						</DialogDescription>
-					</DialogHeader>
-					<div className="flex flex-1 flex-col overflow-hidden px-6 pb-6">
-						{/* Category Selection */}
-						<div className="mb-4 flex flex-shrink-0 gap-2">
-							<Button
-								type="button"
-								variant={selectedCategory === "login" ? "default" : "outline"}
-								onClick={() => setSelectedCategory("login")}
-								className="flex-1"
-							>
-								Login
-							</Button>
-							<Button
-								type="button"
-								variant={
-									selectedCategory === "secure-note" ? "default" : "outline"
-								}
-								onClick={() => setSelectedCategory("secure-note")}
-								className="flex-1"
-							>
-								Secure Note
-							</Button>
-						</div>
-
-						{/* Item Form */}
-						<ItemForm
-							category={selectedCategory}
-							onSubmit={handleCreateItem}
-							onCancel={() => setIsNewItemDialogOpen(false)}
-							submitLabel="Create"
-							isSubmitting={isSubmitting}
-							vaults={
-								vaultKeys?.map((v) => ({
-									id: v.vaultId,
-									name: v.vaultName,
-									type: v.vaultType as "personal" | "team",
-								})) || []
-							}
-							selectedVaultId={params.id}
-						/>
-					</div>
-				</DialogContent>
-			</Dialog>
+			<CreateItemDialog
+				open={isNewItemDialogOpen}
+				onOpenChange={setIsNewItemDialogOpen}
+				vaults={
+					vaultKeys?.map((v) => ({
+						id: v.vaultId,
+						name: v.vaultName,
+						type: v.vaultType as "personal" | "team",
+					})) || []
+				}
+				selectedVaultId={params.id}
+				onCreateItem={(data, vaultId) => {
+					// We need to determine the category from the data shape
+					let category: "login" | "secure-note" | "credit-card";
+					if ("note" in data) {
+						category = "secure-note";
+					} else if ("username" in data || "password" in data) {
+						category = "login";
+					} else {
+						category = "credit-card";
+					}
+					return handleCreateItem(data, vaultId, category);
+				}}
+			/>
 
 			{/* New Vault Dialog */}
 			<Dialog
