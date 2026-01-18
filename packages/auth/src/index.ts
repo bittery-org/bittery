@@ -8,7 +8,7 @@ import {
 	generateServerEphemeral,
 	type SRPServerChallenge,
 } from "@bittery/crypto";
-import { db, session, user } from "@bittery/db";
+import { db, session, user, vaultKey } from "@bittery/db";
 import { and, eq, gt } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
 import { nanoid } from "nanoid";
@@ -313,4 +313,96 @@ export async function deleteSession(sessionId: string) {
  */
 export async function deleteAllUserSessions(userId: string) {
 	await db.delete(session).where(eq(session.userId, userId));
+}
+
+/**
+ * Update user email
+ */
+export async function updateUserEmail(userId: string, newEmail: string) {
+	await db
+		.update(user)
+		.set({ email: newEmail.toLowerCase() })
+		.where(eq(user.id, userId));
+}
+
+/**
+ * Update user password (SRP credentials), re-encrypted private key, and vault keys
+ */
+export async function updateUserPassword(
+	userId: string,
+	data: {
+		srpSalt: string;
+		srpVerifier: string;
+		encryptedPrivateKey: string;
+		encryptedVaultKeys: Array<{
+			vaultId: string;
+			encryptedVaultKey: string;
+		}>;
+	},
+) {
+	// Update user credentials
+	await db
+		.update(user)
+		.set({
+			srpSalt: data.srpSalt,
+			srpVerifier: data.srpVerifier,
+			encryptedPrivateKey: data.encryptedPrivateKey,
+		})
+		.where(eq(user.id, userId));
+
+	// Update all vault keys with new encryption
+	for (const vk of data.encryptedVaultKeys) {
+		await db
+			.update(vaultKey)
+			.set({ encryptedVaultKey: vk.encryptedVaultKey })
+			.where(
+				and(eq(vaultKey.vaultId, vk.vaultId), eq(vaultKey.userId, userId)),
+			);
+	}
+}
+
+/**
+ * Update user secret key (regenerate) with new SRP credentials, re-encrypted data, and vault keys
+ */
+export async function updateUserSecretKey(
+	userId: string,
+	data: {
+		secretKeyHint: string;
+		srpSalt: string;
+		srpVerifier: string;
+		encryptedPrivateKey: string;
+		encryptedVaultKeys: Array<{
+			vaultId: string;
+			encryptedVaultKey: string;
+		}>;
+	},
+) {
+	// Update user credentials
+	await db
+		.update(user)
+		.set({
+			secretKeyHint: data.secretKeyHint,
+			srpSalt: data.srpSalt,
+			srpVerifier: data.srpVerifier,
+			encryptedPrivateKey: data.encryptedPrivateKey,
+		})
+		.where(eq(user.id, userId));
+
+	// Update all vault keys with new encryption
+	for (const vk of data.encryptedVaultKeys) {
+		await db
+			.update(vaultKey)
+			.set({ encryptedVaultKey: vk.encryptedVaultKey })
+			.where(
+				and(eq(vaultKey.vaultId, vk.vaultId), eq(vaultKey.userId, userId)),
+			);
+	}
+}
+
+/**
+ * Delete user account and all associated data
+ * Note: Cascading deletes will handle sessions, vault keys, etc.
+ */
+export async function deleteUserAccount(userId: string) {
+	await db.delete(user).where(eq(user.id, userId));
 }

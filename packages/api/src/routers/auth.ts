@@ -9,10 +9,14 @@ import {
 	createUserSession,
 	deleteAllUserSessions,
 	deleteSession,
+	deleteUserAccount,
 	finishLogin,
 	getUserByEmail,
 	getUserById,
 	startLogin,
+	updateUserEmail,
+	updateUserPassword,
+	updateUserSecretKey,
 } from "@bittery/auth";
 import { db, team, teamMember, vault, vaultKey } from "@bittery/db";
 import { getStoragePublicUrl } from "@bittery/storage";
@@ -361,6 +365,132 @@ export const authRouter = router({
 		)
 		.mutation(async ({ input }) => {
 			await deleteAllUserSessions(input.userId);
+			return { success: true };
+		}),
+
+	/**
+	 * Update user email
+	 */
+	updateEmail: protectedProcedure
+		.input(
+			z.object({
+				newEmail: z.string().email(),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			// Check if email already exists
+			const existingUser = await getUserByEmail(input.newEmail);
+			if (existingUser && existingUser.id !== ctx.session.userId) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Email already in use",
+				});
+			}
+
+			await updateUserEmail(ctx.session.userId, input.newEmail);
+
+			// Logout all sessions to force re-login with new email
+			await deleteAllUserSessions(ctx.session.userId);
+
+			return { success: true };
+		}),
+
+	/**
+	 * Change password with re-encrypted private key and vault keys
+	 * Client must re-derive keys with new password and re-encrypt the private key and all vault keys
+	 */
+	changePassword: protectedProcedure
+		.input(
+			z.object({
+				srpSalt: z.string(),
+				srpVerifier: z.string(),
+				encryptedPrivateKey: z.string(),
+				encryptedVaultKeys: z.array(
+					z.object({
+						vaultId: z.string(),
+						encryptedVaultKey: z.string(),
+					}),
+				),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			await updateUserPassword(ctx.session.userId, {
+				srpSalt: input.srpSalt,
+				srpVerifier: input.srpVerifier,
+				encryptedPrivateKey: input.encryptedPrivateKey,
+				encryptedVaultKeys: input.encryptedVaultKeys,
+			});
+
+			// Logout all sessions to force re-login with new password
+			await deleteAllUserSessions(ctx.session.userId);
+
+			return { success: true };
+		}),
+
+	/**
+	 * Regenerate secret key with re-encrypted data and vault keys
+	 * Client must generate new secret key, re-derive keys, and re-encrypt the private key and all vault keys
+	 */
+	regenerateSecretKey: protectedProcedure
+		.input(
+			z.object({
+				secretKeyHint: z.string(),
+				srpSalt: z.string(),
+				srpVerifier: z.string(),
+				encryptedPrivateKey: z.string(),
+				encryptedVaultKeys: z.array(
+					z.object({
+						vaultId: z.string(),
+						encryptedVaultKey: z.string(),
+					}),
+				),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			await updateUserSecretKey(ctx.session.userId, {
+				secretKeyHint: input.secretKeyHint,
+				srpSalt: input.srpSalt,
+				srpVerifier: input.srpVerifier,
+				encryptedPrivateKey: input.encryptedPrivateKey,
+				encryptedVaultKeys: input.encryptedVaultKeys,
+			});
+
+			// Logout all sessions to force re-login with new secret key
+			await deleteAllUserSessions(ctx.session.userId);
+
+			return { success: true };
+		}),
+
+	/**
+	 * Delete user account and all associated data
+	 */
+	deleteAccount: protectedProcedure
+		.input(
+			z.object({
+				confirmEmail: z.string().email(),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			// Get user to verify email
+			const user = await getUserById(ctx.session.userId);
+			if (!user) {
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "User not found",
+				});
+			}
+
+			// Verify email matches for confirmation
+			if (user.email.toLowerCase() !== input.confirmEmail.toLowerCase()) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Email does not match",
+				});
+			}
+
+			// Delete user account (cascading deletes will handle related data)
+			await deleteUserAccount(ctx.session.userId);
+
 			return { success: true };
 		}),
 });

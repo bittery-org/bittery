@@ -1,6 +1,9 @@
+import { ChangeEmailDialog } from "@/components/settings/change-email-dialog";
+import { ChangePasswordDialog } from "@/components/settings/change-password-dialog";
+import { DeleteAccountDialog } from "@/components/settings/delete-account-dialog";
+import { RegenerateSecretKeyDialog } from "@/components/settings/regenerate-secret-key-dialog";
 import { useTRPC } from "@bittery/shared/trpc";
 import {
-	Button,
 	Card,
 	CardContent,
 	CardDescription,
@@ -11,7 +14,8 @@ import {
 } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { ExternalLink, Github, User } from "lucide-react";
+import { ExternalLink, Github, Key, Shield, Trash2, User } from "lucide-react";
+import { Button } from "@bittery/ui";
 
 export const Route = createFileRoute("/_app/settings/")({
 	component: SettingsPage,
@@ -56,11 +60,16 @@ function SettingsPage() {
 								</span>
 							</div>
 							<Separator />
-							<div className="grid gap-1">
-								<span className="font-medium text-sm">Email</span>
-								<span className="text-muted-foreground">
-									{userQuery.data?.email}
-								</span>
+							<div className="flex items-center justify-between">
+								<div className="grid gap-1">
+									<span className="font-medium text-sm">Email</span>
+									<span className="text-muted-foreground">
+										{userQuery.data?.email}
+									</span>
+								</div>
+								{userQuery.data?.email && (
+									<ChangeEmailDialog currentEmail={userQuery.data.email} />
+								)}
 							</div>
 							<Separator />
 							<div className="grid gap-1">
@@ -71,6 +80,50 @@ function SettingsPage() {
 							</div>
 						</>
 					)}
+				</CardContent>
+			</Card>
+
+			<Card>
+				<CardHeader>
+					<CardTitle className="flex items-center gap-2">
+						<Shield className="h-5 w-5" />
+						Security
+					</CardTitle>
+					<CardDescription>Manage your security settings</CardDescription>
+				</CardHeader>
+				<CardContent className="space-y-6">
+					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+						<div className="space-y-1">
+							<div className="flex items-center gap-2">
+								<Key className="h-4 w-4 text-muted-foreground" />
+								<span className="font-medium text-sm">Master Password</span>
+							</div>
+							<p className="text-muted-foreground text-sm">
+								Change your master password. Your private key will be
+								re-encrypted.
+							</p>
+						</div>
+						{userQuery.data?.email && (
+							<ChangePasswordDialog userEmail={userQuery.data.email} />
+						)}
+					</div>
+
+					<Separator />
+
+					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+						<div className="space-y-1">
+							<div className="flex items-center gap-2">
+								<Key className="h-4 w-4 text-muted-foreground" />
+								<span className="font-medium text-sm">Secret Key</span>
+							</div>
+							<p className="text-muted-foreground text-sm">
+								Generate a new secret key. Your old key will no longer work.
+							</p>
+						</div>
+						{userQuery.data?.email && (
+							<RegenerateSecretKeyDialog userEmail={userQuery.data.email} />
+						)}
+					</div>
 				</CardContent>
 			</Card>
 
@@ -114,16 +167,29 @@ function SettingsPage() {
 				</CardContent>
 			</Card>
 
-			<Card>
+			<Card className="border-destructive/50">
 				<CardHeader>
-					<CardTitle>Security</CardTitle>
-					<CardDescription>Manage your security settings</CardDescription>
+					<CardTitle className="flex items-center gap-2 text-destructive">
+						<Trash2 className="h-5 w-5" />
+						Danger Zone
+					</CardTitle>
+					<CardDescription>
+						Irreversible actions that affect your account
+					</CardDescription>
 				</CardHeader>
 				<CardContent>
-					<p className="text-muted-foreground text-sm">
-						Security settings like password change and two-factor authentication
-						are managed in the desktop app for enhanced security.
-					</p>
+					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+						<div className="space-y-1">
+							<span className="font-medium text-sm">Delete Account</span>
+							<p className="text-muted-foreground text-sm">
+								Permanently delete your account and all associated data. This
+								action cannot be undone.
+							</p>
+						</div>
+						{userQuery.data?.email && (
+							<DeleteAccountDialog userEmail={userQuery.data.email} />
+						)}
+					</div>
 				</CardContent>
 			</Card>
 		</div>

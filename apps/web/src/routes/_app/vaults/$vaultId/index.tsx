@@ -1,4 +1,4 @@
-import { decrypt, getMasterUnlockKey } from "@bittery/crypto";
+import { decrypt, getDecryptedVaultKey } from "@bittery/shared/crypto";
 import { useTRPC } from "@bittery/shared/trpc";
 import {
 	Badge,
@@ -56,40 +56,14 @@ function VaultDetailPage() {
 		}
 
 		const decryptItems = async () => {
-			const masterUnlockKey = getMasterUnlockKey();
-			if (!masterUnlockKey) {
-				console.error("Master unlock key not available");
+			// Get decrypted vault key using the shared crypto utilities
+			// This handles: getting vault keys from sessionStorage, finding the right key,
+			// getting the master unlock key, and decrypting the vault key
+			const vaultKeyBytes = await getDecryptedVaultKey(vaultId);
+			if (!vaultKeyBytes) {
+				console.error("Failed to decrypt vault key for vault:", vaultId);
 				return;
 			}
-
-			// Get vault keys from localStorage (web app stores them there)
-			const vaultKeysJson = localStorage.getItem("vaultKeys");
-			if (!vaultKeysJson) {
-				console.error("Vault keys not found");
-				return;
-			}
-
-			const vaultKeys = JSON.parse(vaultKeysJson);
-			const vaultKeyData = vaultKeys.find((vk: any) => vk.vaultId === vaultId);
-			if (!vaultKeyData) {
-				console.error("Vault key not found for vault:", vaultId);
-				return;
-			}
-
-			// Decrypt the vault key
-			const vaultKeyDecrypted = await decrypt(
-				{
-					algorithm: vaultKeyData.algorithm,
-					iv: vaultKeyData.iv,
-					ciphertext: vaultKeyData.encryptedVaultKey,
-				},
-				masterUnlockKey,
-			);
-
-			// Convert base64 vault key to Uint8Array
-			const vaultKeyBytes = Uint8Array.from(atob(vaultKeyDecrypted), (c) =>
-				c.charCodeAt(0),
-			);
 
 			const decrypted: DecryptedItem[] = [];
 

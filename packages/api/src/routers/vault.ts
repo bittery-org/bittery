@@ -86,6 +86,7 @@ export const vaultRouter = router({
 			role: vk.role,
 			items: vk.vault.items,
 			encryptedVaultKey: vk.encryptedVaultKey,
+			createdById: vk.vault.createdById,
 		}));
 	}),
 
