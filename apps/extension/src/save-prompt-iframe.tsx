@@ -129,6 +129,12 @@ function SavePromptIframe() {
 	const handleSave = () => {
 		if (!data || !selectedVaultId) return;
 
+		// Prevent double-clicks
+		if (state === "saving") {
+			console.log("Save already in progress, ignoring duplicate request");
+			return;
+		}
+
 		setState("saving");
 		setErrorMessage("");
 

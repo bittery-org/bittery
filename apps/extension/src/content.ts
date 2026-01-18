@@ -21,6 +21,10 @@ let currentFocusedField: CredentialField | null = null;
 // Track forms to avoid duplicate listeners
 const processedForms = new WeakSet<HTMLFormElement>();
 
+// Track recent form submissions to prevent duplicates (debounce)
+const recentFormSubmissions = new WeakMap<HTMLFormElement, number>();
+const FORM_SUBMISSION_DEBOUNCE_MS = 500; // 500ms debounce window
+
 // Track pending AJAX requests for form submission detection
 interface PendingRequest {
 	url: string;
@@ -326,6 +330,18 @@ async function shouldSaveCredentials(
 
 // Handle form submission
 async function handleFormSubmit(_event: Event | null, form: HTMLFormElement) {
+	// Check if we recently processed this form (debounce to prevent duplicates)
+	const now = Date.now();
+	const lastSubmission = recentFormSubmissions.get(form);
+
+	if (lastSubmission && now - lastSubmission < FORM_SUBMISSION_DEBOUNCE_MS) {
+		console.log("Form submission debounced - recently processed this form");
+		return;
+	}
+
+	// Mark this form as recently submitted
+	recentFormSubmissions.set(form, now);
+
 	console.log("Form submission detected:", form);
 
 	// Capture credentials from the form
