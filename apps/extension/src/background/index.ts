@@ -1,0 +1,197 @@
+/**
+ * Background Service Worker - Main Entry Point
+ * Routes messages to appropriate handlers and manages lifecycle
+ */
+
+import {
+	handleCanQuickUnlock,
+	handleCheckAuth,
+	handleGetAuthToken,
+	handleGetSessionData,
+	handleLock,
+	handleLogin,
+	handleLogout,
+	handleQuickUnlock,
+} from "./auth-handlers";
+import {
+	handleCheckAutofillAuth,
+	handleGetAutofillItems,
+	handleUpdateAutofillTimestamp,
+} from "./autofill-handlers";
+import {
+	handleCheckExistingCredentials,
+	handleSaveNewCredential,
+	handleUpdateExistingCredential,
+} from "./credential-handlers";
+import {
+	handleCheckNativeBiometric,
+	handleNativeBiometricUnlock,
+	handleOpenDesktopApp,
+} from "./native-messaging";
+import { handleAutoLockAlarm } from "./session-manager";
+import {
+	handleGetVaultItem,
+	handleGetVaultItems,
+	handleGetWritableVaults,
+} from "./vault-handlers";
+
+console.log("Bittery background service worker loaded");
+
+// Message handler
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+	console.log("Background received message:", message.type);
+
+	// Handle async operations
+	(async () => {
+		try {
+			switch (message.type) {
+				// Authentication
+				case "LOGIN": {
+					const result = await handleLogin(message.payload);
+					sendResponse(result);
+					break;
+				}
+
+				case "QUICK_UNLOCK": {
+					const result = await handleQuickUnlock(message.payload);
+					sendResponse(result);
+					break;
+				}
+
+				case "CHECK_AUTH": {
+					const result = await handleCheckAuth();
+					sendResponse(result);
+					break;
+				}
+
+				case "CAN_QUICK_UNLOCK": {
+					const result = await handleCanQuickUnlock();
+					sendResponse(result);
+					break;
+				}
+
+				case "GET_AUTH_TOKEN": {
+					const result = await handleGetAuthToken();
+					sendResponse(result);
+					break;
+				}
+
+				case "GET_SESSION_DATA": {
+					const result = await handleGetSessionData();
+					sendResponse(result);
+					break;
+				}
+
+				case "LOGOUT": {
+					const result = await handleLogout();
+					sendResponse(result);
+					break;
+				}
+
+				case "LOCK": {
+					const result = await handleLock();
+					sendResponse(result);
+					break;
+				}
+
+				// Vault operations
+				case "GET_VAULT_ITEMS": {
+					const result = await handleGetVaultItems();
+					sendResponse(result);
+					break;
+				}
+
+				case "GET_VAULT_ITEM": {
+					const result = await handleGetVaultItem(message.payload);
+					sendResponse(result);
+					break;
+				}
+
+				case "GET_WRITABLE_VAULTS": {
+					const result = await handleGetWritableVaults();
+					sendResponse(result);
+					break;
+				}
+
+				// Credential management
+				case "CHECK_EXISTING_CREDENTIALS": {
+					const result = await handleCheckExistingCredentials(message.payload);
+					sendResponse(result);
+					break;
+				}
+
+				case "SAVE_NEW_CREDENTIAL": {
+					const result = await handleSaveNewCredential(message.payload);
+					sendResponse(result);
+					break;
+				}
+
+				case "UPDATE_EXISTING_CREDENTIAL": {
+					const result = await handleUpdateExistingCredential(message.payload);
+					sendResponse(result);
+					break;
+				}
+
+				// Autofill
+				case "CHECK_AUTOFILL_AUTH": {
+					const result = await handleCheckAutofillAuth();
+					sendResponse(result);
+					break;
+				}
+
+				case "UPDATE_AUTOFILL_TIMESTAMP": {
+					const result = await handleUpdateAutofillTimestamp();
+					sendResponse(result);
+					break;
+				}
+
+				case "GET_AUTOFILL_ITEMS": {
+					const result = await handleGetAutofillItems(message.payload);
+					sendResponse(result);
+					break;
+				}
+
+				// Native messaging (biometric unlock)
+				case "CHECK_NATIVE_BIOMETRIC": {
+					const result = await handleCheckNativeBiometric();
+					sendResponse(result);
+					break;
+				}
+
+				case "NATIVE_BIOMETRIC_UNLOCK": {
+					const result = await handleNativeBiometricUnlock();
+					sendResponse(result);
+					break;
+				}
+
+				case "OPEN_DESKTOP_APP": {
+					const result = await handleOpenDesktopApp();
+					sendResponse(result);
+					break;
+				}
+
+				default:
+					sendResponse({ success: false, error: "Unknown message type" });
+			}
+		} catch (error) {
+			console.error("Background error:", error);
+			sendResponse({ success: false, error: String(error) });
+		}
+	})();
+
+	return true; // Keep channel open for async response
+});
+
+// Handle Chrome Alarms for auto-lock
+chrome.alarms.onAlarm.addListener((alarm) => {
+	handleAutoLockAlarm(alarm);
+});
+
+// Keep service worker alive
+chrome.runtime.onStartup.addListener(() => {
+	console.log("Extension started");
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+	console.log("Extension installed");
+});
