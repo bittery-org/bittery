@@ -20,4 +20,5 @@ export * from "./components/skeleton";
 export * from "./components/sonner";
 export * from "./components/table";
 export * from "./components/tabs";
+export * from "./components/vault-icon";
 export * from "./lib/utils";

@@ -1,22 +1,30 @@
-import { Button, Card, Input, Label, toast } from "@bittery/ui";
+import {
+	Button,
+	Card,
+	Input,
+	Label,
+	toast,
+	VaultIcon,
+	type VaultIconState,
+} from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Eye, EyeOff, LockIcon } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 export function UnlockPage() {
 	const navigate = useNavigate();
 	const [showPassword, setShowPassword] = useState(false);
 	const [_email, setEmail] = useState("");
-	const [biometricAvailable, setBiometricAvailable] = useState(false);
-	const [checkingBiometric, setCheckingBiometric] = useState(true);
 	const [biometricAttempted, setBiometricAttempted] = useState(false);
+	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
 	const hasAttemptedBiometric = useRef(false);
 
 	// Define mutations first before they're used in useEffect
 	const unlockMutation = useMutation({
 		mutationFn: async (values: { password: string }) => {
+			setVaultState("unlocking");
 			// Send to background worker for quick unlock
 			const response = await chrome.runtime.sendMessage({
 				type: "QUICK_UNLOCK",
@@ -30,16 +38,22 @@ export function UnlockPage() {
 			return response;
 		},
 		onSuccess: () => {
+			setVaultState("unlocked");
 			toast.success("Unlocked successfully!");
-			navigate({ to: "/vault" });
+			// Delay navigation to show unlock animation
+			setTimeout(() => {
+				navigate({ to: "/vault" });
+			}, 600);
 		},
 		onError: (error: Error) => {
+			setVaultState("locked");
 			toast.error(error.message || "Failed to unlock");
 		},
 	});
 
 	const biometricUnlockMutation = useMutation({
 		mutationFn: async () => {
+			setVaultState("unlocking");
 			// Send to background worker for native biometric unlock
 			const response = await chrome.runtime.sendMessage({
 				type: "NATIVE_BIOMETRIC_UNLOCK",
@@ -52,10 +66,15 @@ export function UnlockPage() {
 			return response;
 		},
 		onSuccess: () => {
+			setVaultState("unlocked");
 			toast.success("Unlocked with biometric!");
-			navigate({ to: "/vault" });
+			// Delay navigation to show unlock animation
+			setTimeout(() => {
+				navigate({ to: "/vault" });
+			}, 600);
 		},
 		onError: (error: Error) => {
+			setVaultState("locked");
 			toast.error(error.message || "Biometric unlock failed");
 		},
 	});
@@ -82,8 +101,6 @@ export function UnlockPage() {
 
 				const available =
 					response.available && response.enabled && response.appRunning;
-				setBiometricAvailable(available);
-				setCheckingBiometric(false);
 
 				// Automatically trigger biometric unlock if available (only once)
 				if (available && !hasAttemptedBiometric.current) {
@@ -97,8 +114,6 @@ export function UnlockPage() {
 			})
 			.catch((error) => {
 				console.error("Failed to check biometric:", error);
-				setBiometricAvailable(false);
-				setCheckingBiometric(false);
 			});
 	}, [biometricUnlockMutation]);
 
@@ -118,33 +133,26 @@ export function UnlockPage() {
 	return (
 		<div className="flex min-h-[400px] items-center justify-center p-4">
 			<div className="w-full max-w-sm space-y-4">
-				<div className="flex flex-col space-y-2 text-center">
-					<h1 className="font-semibold text-xl tracking-tight">Welcome back</h1>
-					<p className="text-muted-foreground text-sm">
-						{biometricUnlockMutation.isPending
-							? "Authenticating with biometric..."
-							: "Enter your password to unlock your vault"}
-					</p>
+				<div className="flex flex-col items-center space-y-3 text-center">
+					<div style={{ width: 120, height: 120 }}>
+						<VaultIcon state={vaultState} size={120} />
+					</div>
+					<div>
+						<h1 className="font-semibold text-xl tracking-tight">Welcome back</h1>
+						<p className="mt-1 text-muted-foreground text-sm">
+							{vaultState === "unlocking"
+								? "Unlocking your vault..."
+								: "Enter your password to unlock"}
+						</p>
+					</div>
 				</div>
 
-				<Card className="border-0 bg-transparent p-8 shadow-none sm:border sm:bg-card sm:shadow-sm">
-					{!biometricUnlockMutation.isPending && (
-						<div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
-							<div className="flex items-center gap-3">
-								<div>
-									<LockIcon className="text-blue-900 dark:text-blue-100" />
-								</div>
-								<div>
-									<p className="font-medium text-blue-900 text-sm dark:text-blue-100">
-										Quick Unlock Available
-									</p>
-									{biometricAttempted && (
-										<p className="text-blue-800 text-xs dark:text-blue-200">
-											Or use password below
-										</p>
-									)}
-								</div>
-							</div>
+				<Card className="border-0 bg-transparent p-6 shadow-none sm:border sm:bg-card sm:shadow-sm">
+					{biometricAttempted && !biometricUnlockMutation.isPending && (
+						<div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
+							<p className="text-center text-blue-800 text-sm dark:text-blue-200">
+								Or use your password below
+							</p>
 						</div>
 					)}
 

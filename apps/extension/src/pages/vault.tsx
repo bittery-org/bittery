@@ -6,9 +6,59 @@ import { useEffect, useMemo, useState } from "react";
 import { Favicon } from "@/components/favicon";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
 
+function getBaseDomain(host: string): string {
+	const parts = host.split(".");
+	if (parts.length <= 2) return host;
+	return parts.slice(-2).join(".");
+}
+
+function hostnameMatches(
+	itemUrl: string | undefined,
+	targetHostname: string,
+): boolean {
+	if (!itemUrl) return false;
+
+	try {
+		const itemUrlObj = new URL(
+			itemUrl.startsWith("http") ? itemUrl : `https://${itemUrl}`,
+		);
+		const itemHostname = itemUrlObj.hostname;
+
+		if (itemHostname === targetHostname) return true;
+
+		if (
+			itemHostname.endsWith(`.${targetHostname}`) ||
+			targetHostname.endsWith(`.${itemHostname}`)
+		) {
+			return true;
+		}
+
+		const itemBaseDomain = getBaseDomain(itemHostname);
+		const hostnameBaseDomain = getBaseDomain(targetHostname);
+
+		return itemBaseDomain === hostnameBaseDomain;
+	} catch {
+		return false;
+	}
+}
+
 export function VaultPage() {
 	const [searchQuery, setSearchQuery] = useState("");
 	const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+	const [currentHostname, setCurrentHostname] = useState<string | null>(null);
+
+	useEffect(() => {
+		chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+			const url = tabs[0]?.url;
+			if (url) {
+				try {
+					setCurrentHostname(new URL(url).hostname);
+				} catch {
+					setCurrentHostname(null);
+				}
+			}
+		});
+	}, []);
 
 	const { data: items = [], isLoading } = useQuery<DecryptedItem[]>({
 		queryKey: ["vault-items"],
@@ -56,14 +106,27 @@ export function VaultPage() {
 		});
 	}, [items, normalizedQuery]);
 
-	// Sort items by favorite status
+	// Sort items by relevance (matching URL), then favorite status, then alphabetically
 	const sortedItems = useMemo(() => {
 		return [...filteredItems].sort((a, b) => {
+			const aMatches = currentHostname
+				? hostnameMatches(a.url, currentHostname)
+				: false;
+			const bMatches = currentHostname
+				? hostnameMatches(b.url, currentHostname)
+				: false;
+
+			// Matching items first
+			if (aMatches && !bMatches) return -1;
+			if (!aMatches && bMatches) return 1;
+
+			// Then favorites
 			if (a.favorite && !b.favorite) return -1;
 			if (!a.favorite && b.favorite) return 1;
+
 			return a.title.localeCompare(b.title);
 		});
-	}, [filteredItems]);
+	}, [filteredItems, currentHostname]);
 
 	useEffect(() => {
 		if (sortedItems.length === 0) {

@@ -7,10 +7,18 @@ import {
 import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";
-import { Button, Card, Input, Label, toast } from "@bittery/ui";
+import {
+	Button,
+	Card,
+	Input,
+	Label,
+	toast,
+	VaultIcon,
+	type VaultIconState,
+} from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ChevronDown, Fingerprint, Lock } from "lucide-react";
+import { ChevronDown, Fingerprint } from "lucide-react";
 import { useState } from "react";
 import { AccountAvatar } from "../components/account-avatar";
 import { useAccount } from "../contexts/account-context";
@@ -36,6 +44,7 @@ export function UnlockPage() {
 	const [password, setPassword] = useState("");
 	const [loading, setLoading] = useState(false);
 	const [showAccountPicker, setShowAccountPicker] = useState(false);
+	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
 
 	// Determine which account to unlock
 	const targetEmail = emailParam || activeAccount?.email;
@@ -64,6 +73,7 @@ export function UnlockPage() {
 		if (!targetEmail) return;
 
 		setLoading(true);
+		setVaultState("unlocking");
 		try {
 			const success = await tauriStorage.unlockWithBiometric(targetEmail);
 			if (success) {
@@ -75,18 +85,25 @@ export function UnlockPage() {
 					// Set as active account
 					await tauriStorage.setActiveAccount(targetEmail);
 					await refreshAccounts();
+					setVaultState("unlocked");
 					toast.success("Unlocked with biometric");
-					navigate({ to: "/vault" });
+					// Delay navigation to show unlock animation
+					setTimeout(() => {
+						navigate({ to: "/vault" });
+					}, 600);
 				} else {
+					setVaultState("locked");
 					toast.error("Session data missing, please log in again");
 					await tauriStorage.clearAllStoredData(targetEmail);
 					navigate({ to: "/login" });
 				}
 			} else {
+				setVaultState("locked");
 				toast.error("Biometric authentication failed");
 			}
 		} catch (error) {
 			console.error("Biometric unlock error:", error);
+			setVaultState("locked");
 			toast.error("Biometric unlock failed");
 		} finally {
 			setLoading(false);
@@ -98,6 +115,7 @@ export function UnlockPage() {
 		if (!targetEmail) return;
 
 		setLoading(true);
+		setVaultState("unlocking");
 
 		try {
 			const secretKey = await tauriStorage.getStoredSecretKey(targetEmail);
@@ -189,10 +207,15 @@ export function UnlockPage() {
 			await tauriStorage.setActiveAccount(targetEmail);
 			await refreshAccounts();
 
+			setVaultState("unlocked");
 			toast.success("Vault unlocked");
-			navigate({ to: "/vault" });
+			// Delay navigation to show unlock animation
+			setTimeout(() => {
+				navigate({ to: "/vault" });
+			}, 600);
 		} catch (error) {
 			console.error("Unlock error:", error);
+			setVaultState("locked");
 			toast.error(error instanceof Error ? error.message : "Unlock failed");
 		} finally {
 			setLoading(false);
@@ -212,10 +235,10 @@ export function UnlockPage() {
 
 	return (
 		<div className="flex h-full items-center justify-center bg-gray-50 p-4">
-			<Card className="w-full max-w-md p-6">
-				<div className="mb-6 text-center">
-					<Lock className="mx-auto h-12 w-12 text-gray-400" />
-					<h1 className="mt-4 font-bold text-2xl">Unlock Bittery</h1>
+			<Card className="w-full max-w-md p-8">
+				<div className="mb-8 text-center">
+					<VaultIcon state={vaultState} className="mx-auto" size={140} />
+					<h1 className="mt-6 font-bold text-2xl">Unlock Bittery</h1>
 
 					{/* Account selector */}
 					{targetAccount && (
