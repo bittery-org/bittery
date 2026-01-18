@@ -27,10 +27,11 @@ function extractHostname(url: string): string {
 export async function handleCheckExistingCredentials(payload: {
 	url: string;
 	username?: string;
+	password?: string;
 }): Promise<MessageResponse> {
 	updateActivity();
 
-	const { url, username } = payload;
+	const { url, username, password } = payload;
 
 	if (!url) {
 		return {
@@ -66,6 +67,20 @@ export async function handleCheckExistingCredentials(payload: {
 		);
 	}
 
+	// Check if credentials have actually changed
+	let hasChanges = true; // Default to true (show prompt)
+	if (exactMatches.length > 0 && username && password) {
+		// Check if any of the exact matches have the same password
+		const exactPasswordMatch = exactMatches.some(
+			(item) =>
+				item.username?.toLowerCase() === username.toLowerCase() &&
+				item.password === password,
+		);
+
+		// If we found an exact match (same username AND password), there are no changes
+		hasChanges = !exactPasswordMatch;
+	}
+
 	return {
 		success: true,
 		existingCredentials: exactMatches.map((item) => ({
@@ -75,6 +90,7 @@ export async function handleCheckExistingCredentials(payload: {
 			url: item.url || "",
 		})),
 		hasDuplicates: exactMatches.length > 0,
+		hasChanges, // New field to indicate if credentials actually changed
 	};
 }
 

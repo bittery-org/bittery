@@ -6,7 +6,6 @@
 import { chromeStorage } from "@bittery/crypto";
 import { AUTOFILL_REAUTH_WINDOW_MS } from "./constants";
 import { getLastActivityTimestamp, isUnlocked, updateActivity } from "./session-manager";
-import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
 import { decryptVaultItems, hostnameMatches } from "./vault-utils";
 

@@ -696,22 +696,33 @@ async function showSavePrompt(
 	}
 	let existingCredentials: ExistingCredential[] = [];
 	let hasDuplicates = false;
+	let hasChanges = true; // Default to true (show prompt if check fails)
 	try {
 		const duplicateCheckResponse = await chrome.runtime.sendMessage({
 			type: "CHECK_EXISTING_CREDENTIALS",
 			payload: {
 				url: credentials.url,
 				username: credentials.username,
+				password: credentials.password, // Pass password to check for changes
 			},
 		});
 
 		if (duplicateCheckResponse.success) {
 			existingCredentials = duplicateCheckResponse.existingCredentials || [];
 			hasDuplicates = duplicateCheckResponse.hasDuplicates || false;
+			hasChanges = duplicateCheckResponse.hasChanges ?? true; // Use ?? to handle undefined
 		}
 	} catch (error) {
 		console.error("Error checking for existing credentials:", error);
 		// Continue with empty array - if check fails, we'll treat as no duplicates
+	}
+
+	// Only show the prompt if credentials are new or have changed (like 1Password)
+	if (!hasChanges) {
+		console.log(
+			"Credentials unchanged - skipping save prompt (matches existing credential)",
+		);
+		return;
 	}
 
 	// Get writable vaults from background script
@@ -773,6 +784,14 @@ async function showSavePrompt(
 
 	// Set up message handler
 	const messageHandler = (event: MessageEvent) => {
+		// Ignore messages not from our iframe
+		if (!event.data?.type) return;
+
+		// Log all messages for debugging (only save-related and resize messages)
+		if (event.data.type.includes("SAVE") || event.data.type === "RESIZE_IFRAME") {
+			console.log("Content script received message:", event.data.type);
+		}
+
 		if (event.data.type === "SAVE_IFRAME_READY") {
 			// Send credentials, vaults, and duplicate info to iframe
 			iframe.contentWindow?.postMessage(
@@ -798,6 +817,7 @@ async function showSavePrompt(
 		} else if (event.data.type === "UPDATE_EXISTING_CREDENTIAL") {
 			handleUpdateCredential(event.data, iframe);
 		} else if (event.data.type === "CANCEL_SAVE") {
+			console.log("Content script: Hiding save prompt due to CANCEL_SAVE");
 			hideSavePrompt();
 		}
 	};
@@ -820,22 +840,34 @@ async function showSavePrompt(
 
 // Hide save prompt
 function hideSavePrompt() {
-	if (activeSavePrompt) {
-		clearPendingSavePrompt();
-
-		// Fade out
-		activeSavePrompt.shadowHost.style.opacity = "0";
-		activeSavePrompt.shadowHost.style.transform = "translateY(-8px)";
-
-		// Remove after animation
-		setTimeout(() => {
-			if (activeSavePrompt) {
-				activeSavePrompt.shadowHost.remove();
-				window.removeEventListener("message", activeSavePrompt.messageHandler);
-				activeSavePrompt = null;
-			}
-		}, 200);
+	if (!activeSavePrompt) {
+		console.log("Content script: hideSavePrompt called but no active prompt");
+		return;
 	}
+
+	console.log("Content script: Hiding save prompt");
+	clearPendingSavePrompt();
+
+	// Store reference to current prompt before clearing
+	const promptToRemove = activeSavePrompt;
+
+	// Clear the active prompt reference immediately to prevent duplicate closes
+	activeSavePrompt = null;
+
+	// Fade out
+	promptToRemove.shadowHost.style.opacity = "0";
+	promptToRemove.shadowHost.style.transform = "translateY(-8px)";
+
+	// Remove after animation
+	setTimeout(() => {
+		try {
+			promptToRemove.shadowHost.remove();
+			window.removeEventListener("message", promptToRemove.messageHandler);
+			console.log("Content script: Save prompt removed successfully");
+		} catch (error) {
+			console.error("Error removing save prompt:", error);
+		}
+	}, 200);
 }
 
 // Handle save credential request
