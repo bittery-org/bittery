@@ -1,18 +1,15 @@
+import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Skeleton } from "@bittery/ui";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
-import {
-	ItemDetailPanel,
-	type VaultItem,
-} from "@/components/item-detail-panel";
+import { ItemDetailPanel } from "@/components/item-detail-panel";
 
 export function ItemDetailPage() {
 	const navigate = useNavigate();
-	const queryClient = useQueryClient();
 	const { itemId } = useParams({ from: "/item/$itemId" });
 
-	const { data: item, isLoading } = useQuery<VaultItem | null>({
+	const { data: item, isLoading } = useQuery<DecryptedItem | null>({
 		queryKey: ["vault-item", itemId],
 		queryFn: async () => {
 			const response = await chrome.runtime.sendMessage({
@@ -22,19 +19,6 @@ export function ItemDetailPage() {
 			return response.item;
 		},
 	});
-
-	const handleToggleFavorite = async (
-		targetItemId: string,
-		currentFavorite: boolean,
-	) => {
-		await chrome.runtime.sendMessage({
-			type: "TOGGLE_FAVORITE",
-			itemId: targetItemId,
-			favorite: !currentFavorite,
-		});
-		queryClient.invalidateQueries({ queryKey: ["vault-items"] });
-		queryClient.invalidateQueries({ queryKey: ["vault-item", targetItemId] });
-	};
 
 	if (isLoading) {
 		return (
@@ -74,7 +58,7 @@ export function ItemDetailPage() {
 			</div>
 
 			<div className="flex-1 overflow-y-auto p-5">
-				<ItemDetailPanel item={item} onToggleFavorite={handleToggleFavorite} />
+				<ItemDetailPanel item={item} />
 			</div>
 		</div>
 	);

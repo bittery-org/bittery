@@ -476,19 +476,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 					break;
 				}
 
-				case "TOGGLE_FAVORITE": {
-					// Update activity timestamp
-					updateActivity();
-
-					const { itemId, favorite } = message.payload;
-
-					// Toggle favorite via tRPC
-					await trpcClient.vault.toggleFavorite.mutate({ itemId, favorite });
-
-					sendResponse({ success: true });
-					break;
-				}
-
 				case "CHECK_AUTOFILL_AUTH": {
 					// Check if extension is unlocked and if user needs to re-auth for autofill
 					const unlocked = isUnlocked();
@@ -589,16 +576,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 					// Flatten the array of arrays
 					const items = allVaultItems.flat();
 
-					console.log(items);
-
 					// Filter by hostname
 					const filtered = items.filter((item) => {
-						if (!item?.overview.url) return false;
+						if (!item?.url) return false;
 						try {
 							const itemUrl = new URL(
-								item.overview.url.startsWith("http")
-									? item.overview.url
-									: `https://${item.overview.url}`,
+								item.url.startsWith("http")
+									? item.url
+									: `https://${item.url}`,
 							);
 
 							const itemHostname = itemUrl.hostname;
@@ -753,12 +738,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 					// Filter by hostname (same logic as GET_AUTOFILL_ITEMS)
 					const matchingItems = items.filter((item) => {
-						if (!item?.overview.url) return false;
+						if (!item?.url) return false;
 						try {
 							const itemUrl = new URL(
-								item.overview.url.startsWith("http")
-									? item.overview.url
-									: `https://${item.overview.url}`,
+								item.url.startsWith("http")
+									? item.url
+									: `https://${item.url}`,
 							);
 
 							const itemHostname = itemUrl.hostname;
@@ -804,7 +789,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 							id: item.id,
 							vaultId: item.vaultId,
 							username: item.username || "",
-							url: item.overview.url || "",
+							url: item.url || "",
 						})),
 						hasDuplicates: exactMatches.length > 0,
 					});
@@ -865,21 +850,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 							vaultKeyData.encryptedVaultKey,
 						);
 
-						// Prepare credential data to encrypt
-						const credentialData = {
-							username,
-							password,
-							overview: {
-								url,
-							},
-						};
-
-						// Encrypt credential data with vault key
-						const encryptedData = await encrypt(
-							JSON.stringify(credentialData),
-							vaultKey,
-						);
-
 						// Extract hostname from URL for title
 						let hostname = url;
 						try {
@@ -891,15 +861,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 							// Use URL as-is if parsing fails
 						}
 
+						// Prepare credential data to encrypt (all data goes in encryptedData)
+						const credentialData = {
+							title: hostname,
+							url,
+							username,
+							password,
+						};
+
+						// Encrypt credential data with vault key
+						const encryptedData = await encrypt(
+							JSON.stringify(credentialData),
+							vaultKey,
+						);
+
 						// Create item via tRPC
 						const result = await trpcClient.vault.createItem.mutate({
 							vaultId,
 							category: "login",
-							overview: {
-								title: hostname,
-								url,
-								username,
-							},
 							encryptedData: encryptedData.ciphertext,
 							encryptionIv: encryptedData.iv,
 							encryptionAlgorithm: encryptedData.algorithm,
@@ -1003,21 +982,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 							vaultKeyData.encryptedVaultKey,
 						);
 
-						// Prepare credential data to encrypt
-						const credentialData = {
-							username,
-							password,
-							overview: {
-								url,
-							},
-						};
-
-						// Encrypt credential data with vault key
-						const encryptedData = await encrypt(
-							JSON.stringify(credentialData),
-							vaultKey,
-						);
-
 						// Extract hostname from URL for title
 						let hostname = url;
 						try {
@@ -1029,14 +993,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 							// Use URL as-is if parsing fails
 						}
 
+						// Prepare credential data to encrypt (all data goes in encryptedData)
+						const credentialData = {
+							title: hostname,
+							url,
+							username,
+							password,
+						};
+
+						// Encrypt credential data with vault key
+						const encryptedData = await encrypt(
+							JSON.stringify(credentialData),
+							vaultKey,
+						);
+
 						// Update item via tRPC
 						await trpcClient.vault.updateItem.mutate({
 							itemId,
-							overview: {
-								title: hostname,
-								url,
-								username,
-							},
 							encryptedData: encryptedData.ciphertext,
 							encryptionIv: encryptedData.iv,
 							encryptionAlgorithm: encryptedData.algorithm,

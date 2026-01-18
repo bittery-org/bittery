@@ -1,13 +1,14 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: its okay */
+import type { ItemCategory } from "@bittery/shared/types";
 import { getDomainFromUrl, getFaviconUrl } from "@bittery/shared/favicon";
 import { cn } from "@bittery/ui";
-import { FileText, Globe } from "lucide-react";
+import { CreditCard, FileText, Globe, User } from "lucide-react";
 import { useState } from "react";
 
 interface FaviconProps {
 	url?: string;
 	title: string;
-	category?: "login" | "secure-note";
+	category?: ItemCategory;
 	size?: "sm" | "md" | "lg";
 	className?: string;
 }
@@ -107,6 +108,37 @@ export function Favicon({
 		lg: "w-8 h-8",
 	};
 
+	// Render icon based on category
+	const renderIcon = () => {
+		if (category === "login") {
+			if (faviconUrl && !imageError) {
+				return (
+					<img
+						src={faviconUrl}
+						alt=""
+						className={imageSizes[size]}
+						onError={() => setImageError(true)}
+					/>
+				);
+			}
+			if (url) {
+				return <span className="select-none font-semibold text-white">{initials}</span>;
+			}
+			return <Globe className="text-muted-foreground" size={iconSizes[size]} />;
+		}
+
+		if (category === "credit-card") {
+			return <CreditCard className="text-muted-foreground" size={iconSizes[size]} />;
+		}
+
+		if (category === "identity") {
+			return <User className="text-muted-foreground" size={iconSizes[size]} />;
+		}
+
+		// secure-note or default
+		return <FileText className="text-muted-foreground" size={iconSizes[size]} />;
+	};
+
 	return (
 		<div
 			className={cn(
@@ -116,20 +148,7 @@ export function Favicon({
 				className,
 			)}
 		>
-			{category === "login" && faviconUrl && !imageError ? (
-				<img
-					src={faviconUrl}
-					alt=""
-					className={imageSizes[size]}
-					onError={() => setImageError(true)}
-				/>
-			) : category === "login" && url ? (
-				<span className="select-none font-semibold text-white">{initials}</span>
-			) : category === "login" ? (
-				<Globe className="text-muted-foreground" size={iconSizes[size]} />
-			) : (
-				<FileText className="text-muted-foreground" size={iconSizes[size]} />
-			)}
+			{renderIcon()}
 		</div>
 	);
 }

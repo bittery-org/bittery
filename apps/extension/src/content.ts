@@ -3,6 +3,8 @@
  * Detects password fields and injects autofill UI via shadow DOM
  */
 
+import type { DecryptedItem } from "@bittery/shared/types";
+
 console.log("Bittery content script loaded");
 
 interface CredentialField {
@@ -997,16 +999,7 @@ function handleFieldBlur(field: CredentialField) {
 }
 
 // Show autofill overlay
-interface AutofillItem {
-	id: string;
-	name: string;
-	title: string;
-	username?: string;
-	password?: string;
-	websiteUrl?: string;
-}
-
-function showAutofillOverlay(field: CredentialField, items: AutofillItem[]) {
+function showAutofillOverlay(field: CredentialField, items: DecryptedItem[]) {
 	// Remove existing overlay
 	if (field.overlay) {
 		field.overlay.remove();
@@ -1122,7 +1115,7 @@ function handleKeyboardNavigation(event: KeyboardEvent) {
 // Handle autofill selection
 async function handleAutofillSelect(
 	field: CredentialField,
-	item: AutofillItem,
+	item: DecryptedItem,
 ) {
 	// Update autofill timestamp
 	await chrome.runtime.sendMessage({

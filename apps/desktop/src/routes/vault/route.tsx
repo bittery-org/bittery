@@ -107,32 +107,9 @@ function RouteComponent() {
       // Encrypt the item data
       const encryptedData = await encrypt(JSON.stringify(data), vaultKey);
 
-      // Create overview
-      const overview: {
-        title: string;
-        url?: string;
-        username?: string;
-        fullName?: string;
-        email?: string;
-      } = {
-        title: data.title || "Untitled",
-      };
-
-      if (category === "login") {
-        if (data.url) overview.url = data.url;
-        if (data.username) overview.username = data.username;
-      } else if (category === "identity") {
-        const fullName = [data.firstName, data.middleName, data.lastName]
-          .filter(Boolean)
-          .join(" ");
-        if (fullName) overview.fullName = fullName;
-        if (data.email) overview.email = data.email;
-      }
-
       const createdItem = await trpcClient.vault.createItem.mutate({
         vaultId: vaultId,
         category: category,
-        overview,
         encryptedData: encryptedData.ciphertext,
         encryptionIv: encryptedData.iv,
         encryptionAlgorithm: encryptedData.algorithm,

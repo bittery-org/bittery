@@ -1,25 +1,16 @@
+import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Input, Skeleton, toast } from "@bittery/ui";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, Search, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Favicon } from "@/components/favicon";
-import {
-	getItemCategory,
-	getItemTitle,
-	getItemUrl,
-	getItemUsername,
-	ItemDetailPanel,
-	type VaultItem,
-} from "@/components/item-detail-panel";
-
-const _DESKTOP_APP_URL = "http://localhost:3002";
+import { ItemDetailPanel } from "@/components/item-detail-panel";
 
 export function VaultPage() {
-	const _queryClient = useQueryClient();
 	const [searchQuery, setSearchQuery] = useState("");
 	const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 
-	const { data: items = [], isLoading } = useQuery<VaultItem[]>({
+	const { data: items = [], isLoading } = useQuery<DecryptedItem[]>({
 		queryKey: ["vault-items"],
 		queryFn: async () => {
 			const response = await chrome.runtime.sendMessage({
@@ -53,9 +44,9 @@ export function VaultPage() {
 		if (!normalizedQuery) return items;
 		return items.filter((item) => {
 			const fields = [
-				getItemTitle(item),
-				getItemUsername(item),
-				getItemUrl(item),
+				item.title,
+				item.username,
+				item.url,
 				item.notes,
 				item.note,
 			].filter(Boolean) as string[];
@@ -70,7 +61,7 @@ export function VaultPage() {
 		return [...filteredItems].sort((a, b) => {
 			if (a.favorite && !b.favorite) return -1;
 			if (!a.favorite && b.favorite) return 1;
-			return getItemTitle(a).localeCompare(getItemTitle(b));
+			return a.title.localeCompare(b.title);
 		});
 	}, [filteredItems]);
 
@@ -170,9 +161,9 @@ export function VaultPage() {
 											Favorites
 										</div>
 										{favoriteItems.map((item) => {
-											const title = getItemTitle(item);
+											const title = item.title;
 											const subtitle =
-												getItemUsername(item) || getItemUrl(item);
+												item.username || item.url;
 											return (
 												<button
 													key={item.id}
@@ -186,9 +177,9 @@ export function VaultPage() {
 												>
 													<div className="flex min-w-0 items-center gap-3">
 														<Favicon
-															url={getItemUrl(item)}
+															url={item.url}
 															title={title}
-															category={getItemCategory(item)}
+															category={item.category}
 															size="sm"
 														/>
 														<div className="min-w-0 flex-1">
@@ -211,8 +202,8 @@ export function VaultPage() {
 									</>
 								)}
 								{regularItems.map((item) => {
-									const title = getItemTitle(item);
-									const subtitle = getItemUsername(item) || getItemUrl(item);
+									const title = item.title;
+									const subtitle = item.username || item.url;
 									return (
 										<button
 											key={item.id}
@@ -226,9 +217,9 @@ export function VaultPage() {
 										>
 											<div className="flex min-w-0 items-center gap-3">
 												<Favicon
-													url={getItemUrl(item)}
+													url={item.url}
 													title={title}
-													category={getItemCategory(item)}
+													category={item.category}
 													size="sm"
 												/>
 												<div className="min-w-0 flex-1">

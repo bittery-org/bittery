@@ -7,7 +7,7 @@ import {
 	getStoragePublicUrl,
 } from "@bittery/storage";
 import { TRPCError } from "@trpc/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, router } from "../index";
@@ -285,6 +285,61 @@ export const vaultRouter = router({
 			return items;
 		}),
 
+	/**
+	 * List all items from all accessible vaults
+	 * Returns items with vault metadata and encrypted vault keys
+	 */
+	listAllItems: protectedProcedure.query(async ({ ctx }) => {
+		// Get all vaults the user has access to
+		const userVaults = await db.query.vaultKey.findMany({
+			where: (vaultKey, { eq }) => eq(vaultKey.userId, ctx.session.userId),
+			with: {
+				vault: true,
+			},
+		});
+
+		if (userVaults.length === 0) {
+			return [];
+		}
+
+		// Get all vault IDs
+		const vaultIds = userVaults.map((vk) => vk.vaultId);
+
+		// Get all items from all vaults (exclude soft-deleted)
+		const allItems = await db.query.item.findMany({
+			where: (item, { and }) =>
+				and(inArray(item.vaultId, vaultIds), isNull(item.deletedAt)),
+			orderBy: (item, { desc }) => [desc(item.updatedAt)],
+		});
+
+		// Build a map of vault metadata for quick lookup
+		const vaultMap = new Map(
+			userVaults.map((vk) => [
+				vk.vaultId,
+				{
+					id: vk.vault.id,
+					name: vk.vault.name,
+					type: vk.vault.type,
+					icon: vk.vault.icon,
+					imageUrl: vk.vault.imageKey
+						? getStoragePublicUrl(vk.vault.imageKey)
+						: null,
+					encryptedVaultKey: vk.encryptedVaultKey,
+					role: vk.role,
+				},
+			]),
+		);
+
+		// Return items with vault metadata
+		return allItems.map((item) => {
+			const vaultMeta = vaultMap.get(item.vaultId)!;
+			return {
+				...item,
+				vault: vaultMeta,
+			};
+		});
+	}),
+
 	getItem: protectedProcedure
 		.input(
 			z.object({
@@ -372,7 +427,12 @@ export const vaultRouter = router({
 				vaultId: z.string(),
 				items: z.array(
 					z.object({
-						category: z.enum(["login", "secure-note", "credit-card", "identity"]),
+						category: z.enum([
+							"login",
+							"secure-note",
+							"credit-card",
+							"identity",
+						]),
 						favorite: z.boolean().optional(),
 						encryptedData: z.string(),
 						encryptionIv: z.string(),

@@ -1,21 +1,13 @@
 import "./index.css";
+import type { DecryptedItem } from "@bittery/shared/types";
 import { Card } from "@bittery/ui";
 import { Lock } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { Favicon } from "@/components/favicon";
 
-interface AutofillItem {
-	id: string;
-	name: string;
-	title: string;
-	username?: string;
-	password?: string;
-	websiteUrl?: string;
-}
-
 function AutofillIframe() {
-	const [items, setItems] = useState<AutofillItem[]>([]);
+	const [items, setItems] = useState<DecryptedItem[]>([]);
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const [_fieldType, setFieldType] = useState<
 		"username" | "email" | "password"
@@ -43,7 +35,7 @@ function AutofillIframe() {
 		return () => window.removeEventListener("message", handleMessage);
 	}, []);
 
-	const handleSelect = useCallback((item: AutofillItem) => {
+	const handleSelect = useCallback((item: DecryptedItem) => {
 		// Send selection to parent
 		window.parent.postMessage(
 			{
@@ -123,14 +115,14 @@ function AutofillIframe() {
 					>
 						<div className="flex items-center gap-2.5">
 							<Favicon
-								url={item.websiteUrl}
-								title={item.title || item.name}
-								category="login"
+								url={item.url}
+								title={item.title}
+								category={item.category}
 								size="sm"
 							/>
 							<div className="min-w-0 flex-1">
 								<p className="truncate font-medium text-sm">
-									{item.title || item.name}
+									{item.title}
 								</p>
 								{item.username && (
 									<p className="mt-0.5 truncate text-muted-foreground text-xs">

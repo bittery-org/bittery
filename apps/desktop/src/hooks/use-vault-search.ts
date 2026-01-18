@@ -1,5 +1,7 @@
-import type { ItemCategory } from "@bittery/shared/types";
+import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { decrypt } from "@bittery/shared/crypto";
 import { useTRPC } from "@bittery/shared/trpc";
+import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useDecryptedItems } from "./use-decrypted-items";
@@ -31,36 +33,81 @@ interface SearchResult {
 export function useVaultSearch(query: string): SearchResult {
 	const trpc = useTRPC();
 
-	// Get all vaults the user has access to
+	// Get all vaults for vault name search
 	const { data: vaults = [] } = useQuery({
 		...trpc.vault.list.queryOptions(),
 	});
 
-	// Get decrypted items from all vaults
-	// Note: We'll need to get items from all vaults, not just one
-	// For now, let's create a combined result from individual vault queries
-	const allDecryptedItems = useMemo(() => {
-		const items: Array<{
-			id: string;
-			vaultId: string;
-			vaultName: string;
-			category: ItemCategory;
-			title: string;
-			url?: string;
-			username?: string;
-			notes?: string;
-			note?: string;
-		}> = [];
+	// Fetch all items from all vaults in a single request
+	const { data: allRawItems = [] } = useQuery({
+		...trpc.vault.listAllItems.queryOptions(),
+	});
 
-		// This is a simplified approach - in production you'd want to
-		// optimize this by having a hook that gets all items at once
-		for (const vault of vaults) {
-			// We can't use the hook here directly, but we'll access the query cache
-			// In practice, you'd want to prefetch these or use a different pattern
-		}
+	// Decrypt all items
+	const { data: allDecryptedItems = [] } = useQuery({
+		queryKey: ["all-decrypted-items"],
+		queryFn: async (): Promise<
+			Array<
+				DecryptedItem & {
+					vaultName: string;
+				}
+			>
+		> => {
+			if (allRawItems.length === 0) return [];
 
-		return items;
-	}, [vaults]);
+			// Decrypt all items in parallel
+			const decrypted = await Promise.all(
+				allRawItems.map(async (item) => {
+					try {
+						// Get vault key for decryption
+						const vaultKey = await tauriStorage.decryptVaultKey(
+							item.vault.encryptedVaultKey,
+						);
+
+						// Decrypt item data
+						const decryptedData = await decrypt(
+							{
+								ciphertext: item.encryptedData,
+								iv: item.encryptionIv,
+								algorithm: item.encryptionAlgorithm,
+							},
+							vaultKey,
+						);
+
+						const parsedData = JSON.parse(decryptedData);
+
+						return {
+							id: item.id,
+							vaultId: item.vaultId,
+							vaultName: item.vault.name,
+							category: item.category,
+							favorite: item.favorite,
+							createdAt: item.createdAt,
+							updatedAt: item.updatedAt,
+							...parsedData,
+						} as DecryptedItem & { vaultName: string };
+					} catch (error) {
+						console.error(`Failed to decrypt item ${item.id}:`, error);
+						return {
+							id: item.id,
+							vaultId: item.vaultId,
+							vaultName: item.vault.name,
+							category: item.category,
+							favorite: item.favorite,
+							createdAt: item.createdAt,
+							updatedAt: item.updatedAt,
+							title: "[Decryption Failed]",
+						} as DecryptedItem & { vaultName: string };
+					}
+				}),
+			);
+
+			return decrypted;
+		},
+		enabled: allRawItems.length > 0,
+		staleTime: 5 * 60 * 1000,
+		gcTime: 10 * 60 * 1000,
+	});
 
 	return useMemo(() => {
 		if (!query || query.trim() === "") {
@@ -81,17 +128,38 @@ export function useVaultSearch(query: string): SearchResult {
 				imageUrl: v.imageUrl,
 			}));
 
-		// For a production implementation, you'd need to:
-		// 1. Fetch all items from all vaults
-		// 2. Decrypt them (using a modified version of useDecryptedItems that works for all vaults)
-		// 3. Filter through decrypted data
+		// Search through decrypted items
+		const matchingItems = allDecryptedItems
+			.filter((item) => {
+				const searchable = [
+					item.title,
+					item.url,
+					item.username,
+					item.notes,
+					item.note,
+					item.email,
+				]
+					.filter(Boolean)
+					.join(" ")
+					.toLowerCase();
 
-		// Placeholder for now - the actual implementation would search through allDecryptedItems
-		const matchingItems: typeof allDecryptedItems = [];
+				return searchable.includes(lowerQuery);
+			})
+			.slice(0, 10)
+			.map((item) => ({
+				id: item.id,
+				vaultId: item.vaultId,
+				vaultName: item.vaultName,
+				category: item.category,
+				title: item.title,
+				url: item.url,
+				username: item.username,
+				notes: item.notes || item.note,
+			}));
 
 		return {
 			vaults: matchingVaults,
-			items: matchingItems.slice(0, 10), // Limit to 10 items
+			items: matchingItems,
 		};
 	}, [query, vaults, allDecryptedItems]);
 }
