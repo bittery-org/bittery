@@ -35,26 +35,26 @@ function getInitials(title: string): string {
  */
 function getAvatarColor(title: string): string {
 	const colors = [
-		"bg-red-500",
-		"bg-orange-500",
-		"bg-amber-500",
-		"bg-yellow-500",
-		"bg-lime-500",
-		"bg-green-500",
-		"bg-emerald-500",
-		"bg-teal-500",
-		"bg-cyan-500",
-		"bg-sky-500",
-		"bg-blue-500",
-		"bg-indigo-500",
-		"bg-violet-500",
-		"bg-purple-500",
-		"bg-fuchsia-500",
-		"bg-pink-500",
-		"bg-rose-500",
+		"bg-red-100",
+		"bg-orange-100",
+		"bg-amber-100",
+		"bg-yellow-100",
+		"bg-lime-100",
+		"bg-green-100",
+		"bg-emerald-100",
+		"bg-teal-100",
+		"bg-cyan-100",
+		"bg-sky-100",
+		"bg-blue-100",
+		"bg-indigo-100",
+		"bg-violet-100",
+		"bg-purple-100",
+		"bg-fuchsia-100",
+		"bg-pink-100",
+		"bg-rose-100",
 	];
 
-	if (!title) return "bg-gray-500";
+	if (!title) return "bg-gray-100";
 
 	let hash = 0;
 	for (let i = 0; i < title.length; i++) {

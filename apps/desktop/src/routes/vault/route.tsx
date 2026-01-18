@@ -189,8 +189,14 @@ function RouteComponent() {
 				encryptionAlgorithm: encryptedData.algorithm,
 			});
 
+			// Prefetch the item to avoid race condition
+			await queryClient.prefetchQuery({
+				queryKey: [["vault", "getItem"], { input: { itemId: createdItem.itemId }, type: "query" }],
+				queryFn: () => trpcClient.vault.getItem.query({ itemId: createdItem.itemId }),
+			});
+
 			// Invalidate queries to refresh the list
-			queryClient.invalidateQueries({ queryKey: [["vault", "listItems"]] });
+			await queryClient.invalidateQueries({ queryKey: [["vault", "listItems"]] });
 
 			// Close dialog
 			setIsNewItemDialogOpen(false);
@@ -198,7 +204,7 @@ function RouteComponent() {
 			// Navigate to the newly created item
 			navigate({
 				to: "/vault/$id/$itemId",
-				params: { id: vaultId, itemId: createdItem.id },
+				params: { id: vaultId, itemId: createdItem.itemId },
 			});
 
 			toast.success("Item created successfully");
