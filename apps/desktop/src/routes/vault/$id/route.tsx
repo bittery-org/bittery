@@ -50,7 +50,8 @@ function RouteComponent() {
 				],
 			});
 			queryClient.invalidateQueries({ queryKey: ["decrypted-items", id] });
-			queryClient.invalidateQueries({ queryKey: [["vault", "getItem"]] });
+			queryClient.invalidateQueries({ queryKey: [["vault", "getItem", itemId]] });
+			queryClient.invalidateQueries({ queryKey: [["decrypted-item", itemId]] });
 		},
 	});
 

@@ -139,6 +139,7 @@ function VaultItemComponent() {
 										toggleFavorite.mutate({
 											itemId: rawItem.id,
 											favorite: !rawItem.favorite,
+											vaultId: rawItem.vaultId,
 										});
 									}}
 									disabled={toggleFavorite.isPending}
