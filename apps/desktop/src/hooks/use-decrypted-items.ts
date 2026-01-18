@@ -12,17 +12,18 @@ export function useDecryptedItems(vaultId: string) {
 	const trpc = useTRPC();
 
 	// Fetch raw encrypted items from API
-	const { data: rawItems = [], isLoading: isLoadingRaw } = useQuery({
+	const { data: rawItems = [], isLoading: isLoadingRaw, dataUpdatedAt } = useQuery({
 		...trpc.vault.listItems.queryOptions({ vaultId }),
 	});
 
 	// Decrypt items and cache the result
+	// Use dataUpdatedAt in the key so decrypted items refetch when raw items change
 	const {
 		data: decryptedItems = [],
 		isLoading: isDecrypting,
 		error,
 	} = useQuery({
-		queryKey: ["decrypted-items", vaultId],
+		queryKey: ["decrypted-items", vaultId, dataUpdatedAt],
 		queryFn: async (): Promise<DecryptedItem[]> => {
 			if (rawItems.length === 0) return [];
 

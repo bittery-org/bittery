@@ -43,15 +43,20 @@ function RouteComponent() {
 			return trpcClient.vault.toggleFavorite.mutate(params);
 		},
 		onSuccess: () => {
+			// Invalidate listItems - the decrypted-items query will automatically
+			// refetch because its key includes a fingerprint of the raw items
 			queryClient.invalidateQueries({
-				queryKey: [
-					["vault", "listItems"],
-					{ input: { vaultId: id }, type: "query" },
-				],
+				queryKey: [["vault", "listItems"]],
 			});
-			queryClient.invalidateQueries({ queryKey: ["decrypted-items", id] });
-			queryClient.invalidateQueries({ queryKey: [["vault", "getItem", itemId]] });
-			queryClient.invalidateQueries({ queryKey: [["decrypted-item", itemId]] });
+			// Invalidate single item queries if viewing an item
+			if (itemId) {
+				queryClient.invalidateQueries({
+					queryKey: [["vault", "getItem"]],
+				});
+				queryClient.invalidateQueries({
+					queryKey: ["decrypted-item", itemId],
+				});
+			}
 		},
 	});
 
