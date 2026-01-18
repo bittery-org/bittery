@@ -1,3 +1,4 @@
+import type { ItemCategory } from "@bittery/shared/types";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -28,7 +29,7 @@ interface ItemOverview {
 interface DeletedItem {
 	id: string;
 	vaultId: string;
-	category: "login" | "secure-note" | "credit-card" | "identity";
+	category: ItemCategory;
 	overview: ItemOverview;
 	encryptedData: string;
 	encryptionIv: string;

@@ -325,13 +325,6 @@ export const vaultRouter = router({
 			z.object({
 				vaultId: z.string(),
 				category: z.enum(["login", "secure-note", "credit-card", "identity"]),
-				overview: z.object({
-					title: z.string(),
-					url: z.string().optional(),
-					username: z.string().optional(),
-					cardBrand: z.string().optional(),
-					maskedCardNumber: z.string().optional(),
-				}),
 				encryptedData: z.string(),
 				encryptionIv: z.string(),
 				encryptionAlgorithm: z.string().default("AES-GCM"),
@@ -362,7 +355,6 @@ export const vaultRouter = router({
 				id: itemId,
 				vaultId: input.vaultId,
 				category: input.category,
-				overview: input.overview,
 				encryptedData: input.encryptedData,
 				encryptionIv: input.encryptionIv,
 				encryptionAlgorithm: input.encryptionAlgorithm,
@@ -382,13 +374,6 @@ export const vaultRouter = router({
 					z.object({
 						category: z.enum(["login", "secure-note", "credit-card", "identity"]),
 						favorite: z.boolean().optional(),
-						overview: z.object({
-							title: z.string(),
-							url: z.string().optional(),
-							username: z.string().optional(),
-							cardBrand: z.string().optional(),
-							maskedCardNumber: z.string().optional(),
-						}),
 						encryptedData: z.string(),
 						encryptionIv: z.string(),
 						encryptionAlgorithm: z.string().default("AES-GCM"),
@@ -432,7 +417,6 @@ export const vaultRouter = router({
 					vaultId: input.vaultId,
 					category: itemData.category,
 					favorite: itemData.favorite ?? false,
-					overview: itemData.overview,
 					encryptedData: itemData.encryptedData,
 					encryptionIv: itemData.encryptionIv,
 					encryptionAlgorithm: itemData.encryptionAlgorithm,
@@ -456,15 +440,6 @@ export const vaultRouter = router({
 		.input(
 			z.object({
 				itemId: z.string(),
-				overview: z
-					.object({
-						title: z.string(),
-						url: z.string().optional(),
-						username: z.string().optional(),
-						cardBrand: z.string().optional(),
-						maskedCardNumber: z.string().optional(),
-					})
-					.optional(),
 				encryptedData: z.string().optional(),
 				encryptionIv: z.string().optional(),
 			}),
@@ -495,7 +470,6 @@ export const vaultRouter = router({
 			await db
 				.update(item)
 				.set({
-					...(input.overview && { overview: input.overview }),
 					...(input.encryptedData && { encryptedData: input.encryptedData }),
 					...(input.encryptionIv && { encryptionIv: input.encryptionIv }),
 					updatedAt: new Date(),
@@ -588,89 +562,6 @@ export const vaultRouter = router({
 				.where(eq(item.id, input.itemId));
 
 			return { success: true };
-		}),
-
-	/**
-	 * Search across all vaults and items the user has access to
-	 */
-	search: protectedProcedure
-		.input(
-			z.object({
-				query: z.string(),
-			}),
-		)
-		.query(async ({ input, ctx }) => {
-			if (!input.query || input.query.trim() === "") {
-				return { vaults: [], items: [] };
-			}
-
-			const searchLower = input.query.toLowerCase();
-
-			// Get all vaults user has access to
-			const userVaults = await db.query.vaultKey.findMany({
-				where: (vaultKey, { eq }) => eq(vaultKey.userId, ctx.session.userId),
-				with: {
-					vault: true,
-				},
-			});
-
-			// Filter vaults by name
-			const matchingVaults = userVaults
-				.filter((vk) => vk.vault.name.toLowerCase().includes(searchLower))
-				.map((vk) => ({
-					id: vk.vault.id,
-					name: vk.vault.name,
-					type: vk.vault.type,
-					icon: vk.vault.icon,
-					imageUrl: vk.vault.imageKey
-						? getStoragePublicUrl(vk.vault.imageKey)
-						: null,
-				}));
-
-			// Get all items from accessible vaults
-			const vaultIds = userVaults.map((vk) => vk.vault.id);
-
-			const allItems = await db.query.item.findMany({
-				where: (item, { and, isNull, inArray }) =>
-					and(inArray(item.vaultId, vaultIds), isNull(item.deletedAt)),
-			});
-
-			// Filter items by title, username, or URL
-			const matchingItems = allItems
-				.filter((item) => {
-					const overview = item.overview as {
-						title?: string;
-						url?: string;
-						username?: string;
-					};
-					const titleMatch = overview.title
-						?.toLowerCase()
-						.includes(searchLower);
-					const urlMatch = overview.url?.toLowerCase().includes(searchLower);
-					const usernameMatch = overview.username
-						?.toLowerCase()
-						.includes(searchLower);
-					return titleMatch || urlMatch || usernameMatch;
-				})
-				.map((item) => {
-					const vault = userVaults.find((vk) => vk.vault.id === item.vaultId);
-					return {
-						id: item.id,
-						vaultId: item.vaultId,
-						vaultName: vault?.vault.name || "",
-						category: item.category,
-						overview: item.overview as {
-							title: string;
-							url?: string;
-							username?: string;
-						},
-					};
-				});
-
-			return {
-				vaults: matchingVaults,
-				items: matchingItems.slice(0, 10), // Limit to 10 items
-			};
 		}),
 
 	/**

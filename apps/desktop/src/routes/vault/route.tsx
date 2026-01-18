@@ -1,6 +1,7 @@
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { encrypt } from "@bittery/shared/crypto";
 import { useTRPCClient } from "@bittery/shared/trpc";
+import type { ItemCategory } from "@bittery/shared/types";
 import { toast } from "@bittery/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -93,7 +94,7 @@ function RouteComponent() {
   const handleCreateItem = async (
     data: DecryptedItemData,
     vaultId: string,
-    category: "login" | "secure-note" | "credit-card" | "identity",
+    category: ItemCategory,
   ) => {
     try {
       // Get vault key for encryption

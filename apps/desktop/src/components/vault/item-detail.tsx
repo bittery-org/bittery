@@ -17,6 +17,7 @@ import {
 	type PhoneNumber,
 	maskSSN,
 } from "@bittery/shared/identity";
+import type { ItemCategory } from "@bittery/shared/types";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { Copy, ExternalLink, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
@@ -70,7 +71,7 @@ interface IdentityData {
 }
 
 interface ItemDetailProps {
-	category: "login" | "secure-note" | "credit-card" | "identity";
+	category: ItemCategory;
 	data: LoginData | SecureNoteData | CreditCardData | IdentityData;
 	onEdit?: () => void;
 	onDelete?: () => void;

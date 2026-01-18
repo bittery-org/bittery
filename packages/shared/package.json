@@ -10,7 +10,8 @@
 		"./crypto": "./src/crypto.ts",
 		"./favicon": "./src/favicon.ts",
 		"./identity": "./src/identity.ts",
-		"./trpc": "./src/trpc.ts"
+		"./trpc": "./src/trpc.ts",
+		"./types": "./src/types.ts"
 	},
 	"dependencies": {
 		"@bittery/api": "workspace:*",

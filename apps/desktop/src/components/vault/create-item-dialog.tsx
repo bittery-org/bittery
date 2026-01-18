@@ -1,3 +1,4 @@
+import type { ItemCategory } from "@bittery/shared/types";
 import {
 	Dialog,
 	DialogContent,
@@ -25,10 +26,8 @@ interface CreateItemDialogProps {
 	onOpenChange: (open: boolean) => void;
 	vaults: VaultOption[];
 	selectedVaultId?: string;
-	onCreateItem: (data: DecryptedItemData, vaultId: string, category: CategoryType) => Promise<void>;
+	onCreateItem: (data: DecryptedItemData, vaultId: string, category: ItemCategory) => Promise<void>;
 }
-
-type CategoryType = "login" | "secure-note" | "credit-card" | "identity";
 
 const categories = [
 	{
@@ -66,7 +65,7 @@ export function CreateItemDialog({
 }: CreateItemDialogProps) {
 	const [step, setStep] = useState<1 | 2>(1);
 	const [selectedCategory, setSelectedCategory] =
-		useState<CategoryType>("login");
+		useState<ItemCategory>("login");
 	const [isSubmitting, setIsSubmitting] = useState(false);
 
 	const handleReset = () => {
@@ -75,7 +74,7 @@ export function CreateItemDialog({
 		setIsSubmitting(false);
 	};
 
-	const handleCategorySelect = (category: CategoryType) => {
+	const handleCategorySelect = (category: ItemCategory) => {
 		setSelectedCategory(category);
 		setStep(2);
 	};

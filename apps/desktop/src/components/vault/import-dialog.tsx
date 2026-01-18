@@ -129,7 +129,6 @@ export function ImportDialog({
         encryptedItems.push({
           category: item.category,
           favorite: item.favorite,
-          overview: item.overview, // Keep overview for search/display
           encryptedData: encryptedData.ciphertext,
           encryptionIv: encryptedData.iv,
           encryptionAlgorithm: encryptedData.algorithm,

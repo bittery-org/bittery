@@ -1,4 +1,3 @@
-import { useTRPC } from "@bittery/shared/trpc";
 import {
 	Button,
 	Command,
@@ -11,27 +10,21 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@bittery/ui";
-import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { FileText, FolderClosed, Key, Search } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useVaultSearch } from "../../hooks/use-vault-search";
 
 export function SearchCombobox() {
 	const [open, setOpen] = useState(false);
 	const [search, setSearch] = useState("");
 	const navigate = useNavigate();
-	const trpc = useTRPC();
 
-	// Use the new search endpoint
-	const { data: searchResults } = useQuery({
-		...trpc.vault.search.queryOptions({
-			query: search,
-		}),
-		enabled: search.length > 0,
-	});
+	// Use client-side search through decrypted items
+	const searchResults = useVaultSearch(search);
 
-	const filteredVaults = searchResults?.vaults || [];
-	const filteredItems = searchResults?.items || [];
+	const filteredVaults = searchResults.vaults;
+	const filteredItems = searchResults.items;
 
 	// Handle keyboard shortcut (Cmd/Ctrl + K)
 	useEffect(() => {
@@ -118,10 +111,10 @@ export function SearchCombobox() {
 											<FileText className="mr-2 size-4" />
 										)}
 										<div className="flex flex-col">
-											<span>{item.overview.title}</span>
-											{item.overview.username && (
+											<span>{item.title}</span>
+											{item.username && (
 												<span className="text-muted-foreground text-xs">
-													{item.overview.username}
+													{item.username}
 												</span>
 											)}
 											<span className="text-muted-foreground text-xs">

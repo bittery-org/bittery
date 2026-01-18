@@ -1,3 +1,4 @@
+import type { ItemCategory } from "@bittery/shared/types";
 import { CreditCardForm, type CreditCardFormData } from "./item-categories/credit-card-form";
 import { IdentityForm, type IdentityFormData } from "./item-categories/identity-form";
 import { LoginForm, type LoginFormData } from "./item-categories/login-form";
@@ -8,7 +9,7 @@ export type { CreditCardFormData, IdentityFormData, LoginFormData, SecureNoteFor
 export type { CustomField, VaultOption } from "./types";
 
 interface ItemFormProps {
-  category: "login" | "secure-note" | "credit-card" | "identity";
+  category: ItemCategory;
   initialData?: Partial<
     LoginFormData | SecureNoteFormData | CreditCardFormData | IdentityFormData
   >;

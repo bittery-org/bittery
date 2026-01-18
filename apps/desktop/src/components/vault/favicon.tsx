@@ -1,4 +1,5 @@
 import { getDomainFromUrl, getFaviconUrl } from "@bittery/shared/favicon";
+import type { ItemCategory } from "@bittery/shared/types";
 import { cn } from "@bittery/ui";
 import { CreditCard, FileText, Globe, User } from "lucide-react";
 import { useState } from "react";
@@ -6,7 +7,7 @@ import { useState } from "react";
 interface FaviconProps {
 	url?: string;
 	title: string;
-	category?: "login" | "secure-note" | "credit-card" | "identity";
+	category?: ItemCategory;
 	cardBrand?: string;
 	size?: "sm" | "md" | "lg";
 	className?: string;

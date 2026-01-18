@@ -1,3 +1,4 @@
+import type { ItemCategory } from "@bittery/shared/types";
 import Papa from "papaparse";
 
 /**
@@ -14,7 +15,7 @@ export interface CustomField {
  * Represents a parsed item ready to be imported into Bittery
  */
 export interface ParsedImportItem {
-	category: "login" | "secure-note" | "credit-card" | "identity";
+	category: ItemCategory;
 	favorite?: boolean;
 	overview: {
 		title: string;
@@ -340,7 +341,7 @@ function parse1PasswordRow(
  */
 function mapCategoryFrom1Password(
 	type: string,
-): "login" | "secure-note" | "credit-card" | "identity" {
+): ItemCategory {
 	const lowerType = type.toLowerCase();
 
 	if (

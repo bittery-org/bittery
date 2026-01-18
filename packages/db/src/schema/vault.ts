@@ -2,7 +2,6 @@ import { relations } from "drizzle-orm";
 import {
 	boolean,
 	index,
-	jsonb,
 	pgEnum,
 	pgTable,
 	text,
@@ -80,11 +79,7 @@ export const item = pgTable(
 			.references(() => vault.id, { onDelete: "cascade" }),
 		category: itemCategoryEnum("category").notNull().default("login"),
 		favorite: boolean("favorite").notNull().default(false),
-		// Overview: unencrypted metadata for fast listing/searching
-		// { title: string, url?: string, username?: string }
-		overview: jsonb("overview").notNull(),
-		// Encrypted sensitive data
-		// { password?: string, notes?: string, customFields?: object }
+		// Encrypted sensitive data (includes title, url, username, password, notes, customFields, etc.)
 		encryptedData: text("encrypted_data").notNull(),
 		// IV and algorithm info
 		encryptionIv: text("encryption_iv").notNull(),
