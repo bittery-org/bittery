@@ -372,6 +372,84 @@ export const vaultRouter = router({
 		}),
 
 	/**
+	 * Bulk import items into a vault
+	 */
+	bulkImportItems: protectedProcedure
+		.input(
+			z.object({
+				vaultId: z.string(),
+				items: z.array(
+					z.object({
+						category: z.enum(["login", "secure-note", "credit-card", "identity"]),
+						favorite: z.boolean().optional(),
+						overview: z.object({
+							title: z.string(),
+							url: z.string().optional(),
+							username: z.string().optional(),
+							cardBrand: z.string().optional(),
+							maskedCardNumber: z.string().optional(),
+						}),
+						encryptedData: z.string(),
+						encryptionIv: z.string(),
+						encryptionAlgorithm: z.string().default("AES-GCM"),
+					}),
+				),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			// Check user has access to this vault
+			const userVaultKey = await db.query.vaultKey.findFirst({
+				where: (vaultKey, { and, eq }) =>
+					and(
+						eq(vaultKey.vaultId, input.vaultId),
+						eq(vaultKey.userId, ctx.session.userId),
+					),
+			});
+
+			if (!userVaultKey) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "Access denied to this vault",
+				});
+			}
+
+			// Check user has write permissions (read-only can't create)
+			if (userVaultKey.role === "read-only") {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "Read-only access cannot create items",
+				});
+			}
+
+			// Process items in batches to avoid overwhelming the database
+			const batchSize = 50;
+			const importedIds: string[] = [];
+
+			for (let i = 0; i < input.items.length; i += batchSize) {
+				const batch = input.items.slice(i, i + batchSize);
+				const itemsToInsert = batch.map((itemData) => ({
+					id: nanoid(),
+					vaultId: input.vaultId,
+					category: itemData.category,
+					favorite: itemData.favorite ?? false,
+					overview: itemData.overview,
+					encryptedData: itemData.encryptedData,
+					encryptionIv: itemData.encryptionIv,
+					encryptionAlgorithm: itemData.encryptionAlgorithm,
+				}));
+
+				await db.insert(item).values(itemsToInsert);
+				importedIds.push(...itemsToInsert.map((i) => i.id));
+			}
+
+			return {
+				success: true,
+				importedCount: importedIds.length,
+				itemIds: importedIds,
+			};
+		}),
+
+	/**
 	 * Update an item
 	 */
 	updateItem: protectedProcedure

@@ -15,6 +15,7 @@ import { CreateItemDialog } from "../../components/vault/create-item-dialog";
 import { CreateVaultDialog } from "../../components/vault/create-vault-dialog";
 import { DeleteVaultDialog } from "../../components/vault/delete-vault-dialog";
 import { EditVaultDialog } from "../../components/vault/edit-vault-dialog";
+import { ImportDialog } from "../../components/vault/import-dialog";
 import { useVaultOperations } from "../../components/vault/use-vault-operations";
 import { VaultHeader } from "../../components/vault/vault-header";
 import { VaultSidebar } from "../../components/vault/vault-sidebar";
@@ -86,6 +87,8 @@ function RouteComponent() {
     id: string;
     name: string;
   } | null>(null);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [importingVaultId, setImportingVaultId] = useState<string | null>(null);
 
   const handleCreateItem = async (
     data: DecryptedItemData,
@@ -177,6 +180,11 @@ function RouteComponent() {
     setDeletingVault(null);
   };
 
+  const handleOpenImportDialog = (vaultId: string) => {
+    setImportingVaultId(vaultId);
+    setIsImportDialogOpen(true);
+  };
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <VaultHeader
@@ -191,6 +199,7 @@ function RouteComponent() {
           onNewVault={() => setIsNewVaultDialogOpen(true)}
           onEditVault={handleOpenEditVault}
           onDeleteVault={handleOpenDeleteVault}
+          onImportItems={handleOpenImportDialog}
         />
 
         <div className="flex h-full flex-1 flex-col">
@@ -247,6 +256,19 @@ function RouteComponent() {
         vault={deletingVault}
         onConfirm={handleDeleteVault}
       />
+
+      {importingVaultId && (
+        <ImportDialog
+          vaultId={importingVaultId}
+          open={isImportDialogOpen}
+          onOpenChange={(open) => {
+            setIsImportDialogOpen(open);
+            if (!open) {
+              setImportingVaultId(null);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

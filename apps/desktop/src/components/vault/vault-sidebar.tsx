@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger,
 } from "@bittery/ui";
 import { Link } from "@tanstack/react-router";
-import { MoreHorizontal, Pencil, PlusIcon, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, PlusIcon, Trash2, FileUp } from "lucide-react";
 import { VaultAvatar } from "./vault-avatar";
 
 interface VaultInfo {
@@ -25,6 +25,7 @@ interface VaultSidebarProps {
   onNewVault: () => void;
   onEditVault: (vault: { id: string; name: string }) => void;
   onDeleteVault: (vault: { id: string; name: string }) => void;
+  onImportItems?: (vaultId: string) => void;
 }
 
 export function VaultSidebar({
@@ -33,6 +34,7 @@ export function VaultSidebar({
   onNewVault,
   onEditVault,
   onDeleteVault,
+  onImportItems,
 }: VaultSidebarProps) {
   return (
     <div className="flex w-48 flex-col border-r bg-background">
@@ -85,6 +87,14 @@ export function VaultSidebar({
                     <Pencil className="mr-2 h-4 w-4" />
                     Rename
                   </DropdownMenuItem>
+                  {onImportItems && (
+                    <DropdownMenuItem
+                      onClick={() => onImportItems(vault.vaultId)}
+                    >
+                      <FileUp className="mr-2 h-4 w-4" />
+                      Import Items
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     variant="destructive"
