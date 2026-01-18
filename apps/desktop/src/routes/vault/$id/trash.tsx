@@ -28,7 +28,7 @@ interface ItemOverview {
 interface DeletedItem {
 	id: string;
 	vaultId: string;
-	category: "login" | "secure-note";
+	category: "login" | "secure-note" | "credit-card" | "identity";
 	overview: ItemOverview;
 	encryptedData: string;
 	encryptionIv: string;
