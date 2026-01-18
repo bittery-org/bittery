@@ -76,6 +76,11 @@ interface DecryptedItemData {
 	password?: string;
 	notes?: string;
 	note?: string;
+	// Identity fields
+	firstName?: string;
+	middleName?: string;
+	lastName?: string;
+	email?: string;
 }
 
 function RouteComponent() {
@@ -140,7 +145,7 @@ function RouteComponent() {
 	const handleCreateItem = async (
 		data: DecryptedItemData,
 		vaultId: string,
-		category: "login" | "secure-note" | "credit-card",
+		category: "login" | "secure-note" | "credit-card" | "identity",
 	) => {
 		try {
 			// Get vault key for encryption
@@ -154,11 +159,26 @@ function RouteComponent() {
 			const encryptedData = await encrypt(JSON.stringify(data), vaultKey);
 
 			// Create overview
-			const overview = {
+			const overview: {
+				title: string;
+				url?: string;
+				username?: string;
+				fullName?: string;
+				email?: string;
+			} = {
 				title: data.title || "Untitled",
-				...(data.url && { url: data.url }),
-				...(data.username && { username: data.username }),
 			};
+
+			if (category === "login") {
+				if (data.url) overview.url = data.url;
+				if (data.username) overview.username = data.username;
+			} else if (category === "identity") {
+				const fullName = [data.firstName, data.middleName, data.lastName]
+					.filter(Boolean)
+					.join(" ");
+				if (fullName) overview.fullName = fullName;
+				if (data.email) overview.email = data.email;
+			}
 
 			const createdItem = await trpcClient.vault.createItem.mutate({
 				vaultId: vaultId,

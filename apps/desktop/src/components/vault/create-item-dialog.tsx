@@ -1,5 +1,4 @@
 import {
-	Button,
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -7,7 +6,7 @@ import {
 	DialogTitle,
 	toast,
 } from "@bittery/ui";
-import { CreditCard, FileText, KeyRound } from "lucide-react";
+import { CreditCard, FileText, KeyRound, User } from "lucide-react";
 import { useState } from "react";
 import type { VaultOption } from "./item-form";
 import { ItemForm } from "./item-form";
@@ -29,7 +28,7 @@ interface CreateItemDialogProps {
 	onCreateItem: (data: DecryptedItemData, vaultId: string) => Promise<void>;
 }
 
-type CategoryType = "login" | "secure-note" | "credit-card";
+type CategoryType = "login" | "secure-note" | "credit-card" | "identity";
 
 const categories = [
 	{
@@ -49,6 +48,12 @@ const categories = [
 		title: "Credit Card",
 		description: "Save payment details",
 		icon: CreditCard,
+	},
+	{
+		type: "identity" as const,
+		title: "Identity",
+		description: "Store personal information",
+		icon: User,
 	},
 ];
 
@@ -89,8 +94,6 @@ export function CreateItemDialog({
 		try {
 			await onCreateItem(data, vaultId);
 			handleReset();
-		} catch (error) {
-			// Error handling is done in the parent component
 		} finally {
 			setIsSubmitting(false);
 		}

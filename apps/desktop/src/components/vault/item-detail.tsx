@@ -7,6 +7,16 @@ import {
 	maskCardNumber,
 } from "@bittery/shared/credit-card";
 import { copyToClipboard } from "@bittery/shared/crypto";
+import {
+	type Address,
+	formatAddress,
+	formatPhoneNumber,
+	formatSSN,
+	maskDriversLicense,
+	maskPassportNumber,
+	type PhoneNumber,
+	maskSSN,
+} from "@bittery/shared/identity";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { Copy, ExternalLink, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
@@ -44,9 +54,24 @@ interface CreditCardData {
 	notes?: string;
 }
 
+interface IdentityData {
+	title: string;
+	firstName?: string;
+	middleName?: string;
+	lastName?: string;
+	email?: string;
+	addresses?: Address[];
+	phoneNumbers?: PhoneNumber[];
+	ssn?: string;
+	passportNumber?: string;
+	driversLicense?: string;
+	dateOfBirth?: string;
+	notes?: string;
+}
+
 interface ItemDetailProps {
-	category: "login" | "secure-note" | "credit-card";
-	data: LoginData | SecureNoteData | CreditCardData;
+	category: "login" | "secure-note" | "credit-card" | "identity";
+	data: LoginData | SecureNoteData | CreditCardData | IdentityData;
 	onEdit?: () => void;
 	onDelete?: () => void;
 }
@@ -60,6 +85,9 @@ export default function ItemDetail({
 	const [showPassword, setShowPassword] = useState(false);
 	const [showCardNumber, setShowCardNumber] = useState(false);
 	const [showCVV, setShowCVV] = useState(false);
+	const [showSSN, setShowSSN] = useState(false);
+	const [showPassport, setShowPassport] = useState(false);
+	const [showDriversLicense, setShowDriversLicense] = useState(false);
 	const [visibleCustomFields, setVisibleCustomFields] = useState<Set<string>>(
 		new Set(),
 	);
@@ -442,6 +470,359 @@ export default function ItemDetail({
 									</div>
 								</div>
 							))}
+						</div>
+					)}
+				</div>
+			</div>
+		);
+	}
+
+	if (category === "identity") {
+		const identityData = data as IdentityData;
+		const fullName = [
+			identityData.firstName,
+			identityData.middleName,
+			identityData.lastName,
+		]
+			.filter(Boolean)
+			.join(" ");
+
+		return (
+			<div className="space-y-4">
+				{/* Header */}
+				<div className="flex items-center gap-4">
+					<Favicon title={identityData.title} category="identity" size="lg" />
+					<div className="min-w-0 flex-1">
+						<h2 className="truncate font-semibold text-2xl tracking-tight">
+							{identityData.title}
+						</h2>
+						{fullName && (
+							<p className="mt-1 text-muted-foreground text-sm">{fullName}</p>
+						)}
+					</div>
+				</div>
+
+				<div className="flex gap-2">
+					{onEdit && (
+						<Button size="sm" variant="outline" onClick={onEdit}>
+							Edit
+						</Button>
+					)}
+					{onDelete && (
+						<Button
+							size="sm"
+							variant="ghost"
+							className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+							onClick={onDelete}
+						>
+							Delete
+						</Button>
+					)}
+				</div>
+
+				<div className="space-y-4">
+					{/* Personal Information */}
+					{(identityData.firstName ||
+						identityData.lastName ||
+						identityData.email ||
+						identityData.dateOfBirth) && (
+						<div className="space-y-4 rounded-lg border p-4">
+							<h3 className="font-medium text-sm">Personal Information</h3>
+
+							{identityData.firstName && (
+								<div className="space-y-2">
+									<Label>First Name</Label>
+									<div className="flex gap-2">
+										<Input
+											value={identityData.firstName}
+											readOnly
+											className="flex-1"
+										/>
+										<Button
+											size="icon"
+											variant="outline"
+											onClick={() =>
+												handleCopy(identityData.firstName!, "First name")
+											}
+										>
+											<Copy size={16} />
+										</Button>
+									</div>
+								</div>
+							)}
+
+							{identityData.middleName && (
+								<div className="space-y-2">
+									<Label>Middle Name</Label>
+									<div className="flex gap-2">
+										<Input
+											value={identityData.middleName}
+											readOnly
+											className="flex-1"
+										/>
+										<Button
+											size="icon"
+											variant="outline"
+											onClick={() =>
+												handleCopy(identityData.middleName!, "Middle name")
+											}
+										>
+											<Copy size={16} />
+										</Button>
+									</div>
+								</div>
+							)}
+
+							{identityData.lastName && (
+								<div className="space-y-2">
+									<Label>Last Name</Label>
+									<div className="flex gap-2">
+										<Input
+											value={identityData.lastName}
+											readOnly
+											className="flex-1"
+										/>
+										<Button
+											size="icon"
+											variant="outline"
+											onClick={() =>
+												handleCopy(identityData.lastName!, "Last name")
+											}
+										>
+											<Copy size={16} />
+										</Button>
+									</div>
+								</div>
+							)}
+
+							{identityData.email && (
+								<div className="space-y-2">
+									<Label>Email</Label>
+									<div className="flex gap-2">
+										<Input
+											value={identityData.email}
+											readOnly
+											className="flex-1"
+										/>
+										<Button
+											size="icon"
+											variant="outline"
+											onClick={() => handleCopy(identityData.email!, "Email")}
+										>
+											<Copy size={16} />
+										</Button>
+									</div>
+								</div>
+							)}
+
+							{identityData.dateOfBirth && (
+								<div className="space-y-2">
+									<Label>Date of Birth</Label>
+									<div className="flex gap-2">
+										<Input
+											value={identityData.dateOfBirth}
+											readOnly
+											className="flex-1"
+										/>
+										<Button
+											size="icon"
+											variant="outline"
+											onClick={() =>
+												handleCopy(identityData.dateOfBirth!, "Date of birth")
+											}
+										>
+											<Copy size={16} />
+										</Button>
+									</div>
+								</div>
+							)}
+						</div>
+					)}
+
+					{/* Phone Numbers */}
+					{identityData.phoneNumbers && identityData.phoneNumbers.length > 0 && (
+						<div className="space-y-2">
+							<Label>Phone Numbers</Label>
+							{identityData.phoneNumbers.map((phone) => (
+								<div key={phone.id} className="space-y-1">
+									<Label className="text-muted-foreground text-xs">
+										{phone.label}
+									</Label>
+									<div className="flex gap-2">
+										<Input
+											value={formatPhoneNumber(phone.number)}
+											readOnly
+											className="flex-1"
+										/>
+										<Button
+											size="icon"
+											variant="outline"
+											onClick={() =>
+												handleCopy(phone.number, `${phone.label} phone`)
+											}
+										>
+											<Copy size={16} />
+										</Button>
+									</div>
+								</div>
+							))}
+						</div>
+					)}
+
+					{/* Addresses */}
+					{identityData.addresses && identityData.addresses.length > 0 && (
+						<div className="space-y-2">
+							<Label>Addresses</Label>
+							{identityData.addresses.map((address) => (
+								<div key={address.id} className="space-y-2">
+									<Card>
+										<div className="px-4 py-3">
+											<div className="text-sm">{formatAddress(address)}</div>
+										</div>
+									</Card>
+									<Button
+										size="sm"
+										variant="outline"
+										onClick={() =>
+											handleCopy(formatAddress(address), "Address")
+										}
+										className="w-full"
+									>
+										<Copy size={16} className="mr-2" />
+										Copy Address
+									</Button>
+								</div>
+							))}
+						</div>
+					)}
+
+					{/* Government IDs */}
+					{(identityData.ssn ||
+						identityData.passportNumber ||
+						identityData.driversLicense) && (
+						<div className="space-y-4 rounded-lg border p-4">
+							<h3 className="font-medium text-sm">Government IDs</h3>
+
+							{identityData.ssn && (
+								<div className="space-y-2">
+									<Label>Social Security Number</Label>
+									<div className="flex gap-2">
+										<Input
+											type={showSSN ? "text" : "password"}
+											value={
+												showSSN ? formatSSN(identityData.ssn) : maskSSN(identityData.ssn)
+											}
+											readOnly
+											className="flex-1 font-mono"
+										/>
+										<Button
+											size="icon"
+											variant="outline"
+											onClick={() => setShowSSN(!showSSN)}
+										>
+											{showSSN ? <EyeOff size={16} /> : <Eye size={16} />}
+										</Button>
+										<Button
+											size="icon"
+											variant="outline"
+											onClick={() => handleCopy(identityData.ssn!, "SSN")}
+										>
+											<Copy size={16} />
+										</Button>
+									</div>
+								</div>
+							)}
+
+							{identityData.passportNumber && (
+								<div className="space-y-2">
+									<Label>Passport Number</Label>
+									<div className="flex gap-2">
+										<Input
+											type={showPassport ? "text" : "password"}
+											value={
+												showPassport
+													? identityData.passportNumber
+													: maskPassportNumber(identityData.passportNumber)
+											}
+											readOnly
+											className="flex-1 font-mono"
+										/>
+										<Button
+											size="icon"
+											variant="outline"
+											onClick={() => setShowPassport(!showPassport)}
+										>
+											{showPassport ? <EyeOff size={16} /> : <Eye size={16} />}
+										</Button>
+										<Button
+											size="icon"
+											variant="outline"
+											onClick={() =>
+												handleCopy(
+													identityData.passportNumber!,
+													"Passport number",
+												)
+											}
+										>
+											<Copy size={16} />
+										</Button>
+									</div>
+								</div>
+							)}
+
+							{identityData.driversLicense && (
+								<div className="space-y-2">
+									<Label>Driver's License</Label>
+									<div className="flex gap-2">
+										<Input
+											type={showDriversLicense ? "text" : "password"}
+											value={
+												showDriversLicense
+													? identityData.driversLicense
+													: maskDriversLicense(identityData.driversLicense)
+											}
+											readOnly
+											className="flex-1 font-mono"
+										/>
+										<Button
+											size="icon"
+											variant="outline"
+											onClick={() =>
+												setShowDriversLicense(!showDriversLicense)
+											}
+										>
+											{showDriversLicense ? (
+												<EyeOff size={16} />
+											) : (
+												<Eye size={16} />
+											)}
+										</Button>
+										<Button
+											size="icon"
+											variant="outline"
+											onClick={() =>
+												handleCopy(
+													identityData.driversLicense!,
+													"Driver's license",
+												)
+											}
+										>
+											<Copy size={16} />
+										</Button>
+									</div>
+								</div>
+							)}
+						</div>
+					)}
+
+					{identityData.notes && (
+						<div className="space-y-2">
+							<Label className="font-medium text-sm">Notes</Label>
+							<Card>
+								<div className="whitespace-pre-wrap px-4 py-1 text-sm">
+									{identityData.notes}
+								</div>
+							</Card>
 						</div>
 					)}
 				</div>

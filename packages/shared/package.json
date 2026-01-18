@@ -9,6 +9,7 @@
 		"./credit-card": "./src/credit-card.ts",
 		"./crypto": "./src/crypto.ts",
 		"./favicon": "./src/favicon.ts",
+		"./identity": "./src/identity.ts",
 		"./trpc": "./src/trpc.ts"
 	},
 	"dependencies": {

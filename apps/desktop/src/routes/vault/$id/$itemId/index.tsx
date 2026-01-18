@@ -1,6 +1,7 @@
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { detectCardBrand, maskCardNumber } from "@bittery/shared/credit-card";
 import { copyToClipboard, decrypt, encrypt } from "@bittery/shared/crypto";
+import type { Address, PhoneNumber } from "@bittery/shared/identity";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -59,6 +60,17 @@ interface DecryptedItemData {
 	cvv?: string;
 	expiryDate?: string;
 	billingAddress?: string;
+	// Identity fields
+	firstName?: string;
+	middleName?: string;
+	lastName?: string;
+	email?: string;
+	addresses?: Address[];
+	phoneNumbers?: PhoneNumber[];
+	ssn?: string;
+	passportNumber?: string;
+	driversLicense?: string;
+	dateOfBirth?: string;
 }
 
 function VaultItemComponent() {
@@ -76,7 +88,7 @@ function VaultItemComponent() {
 		useState<DecryptedItemData | null>(null);
 	const selectedVaultId = Route.useParams().id;
 	const [newItemCategory, _setNewItemCategory] = useState<
-		"login" | "secure-note" | "credit-card"
+		"login" | "secure-note" | "credit-card" | "identity"
 	>("login");
 
 	const { data: currentVault } = useQuery({
@@ -98,7 +110,7 @@ function VaultItemComponent() {
 	// Create item mutation
 	const createItemMutation = useMutation({
 		mutationFn: async (input: {
-			category: "login" | "secure-note" | "credit-card";
+			category: "login" | "secure-note" | "credit-card" | "identity";
 			data: DecryptedItemData;
 		}) => {
 			if (!selectedVaultId) throw new Error("No vault selected");
@@ -118,6 +130,8 @@ function VaultItemComponent() {
 				username?: string;
 				cardBrand?: string;
 				maskedCardNumber?: string;
+				fullName?: string;
+				email?: string;
 			} = {
 				title: input.data.title || "Untitled",
 			};
@@ -130,6 +144,10 @@ function VaultItemComponent() {
 					overview.cardBrand = detectCardBrand(input.data.cardNumber);
 					overview.maskedCardNumber = maskCardNumber(input.data.cardNumber);
 				}
+			} else if (input.category === "identity") {
+				const fullName = [input.data.firstName, input.data.middleName, input.data.lastName].filter(Boolean).join(" ");
+				if (fullName) overview.fullName = fullName;
+				if (input.data.email) overview.email = input.data.email;
 			}
 
 			return await trpcClient.vault.createItem.mutate({
@@ -172,6 +190,8 @@ function VaultItemComponent() {
 				username?: string;
 				cardBrand?: string;
 				maskedCardNumber?: string;
+				fullName?: string;
+				email?: string;
 			} = {
 				title: input.data.title || "Untitled",
 			};
@@ -184,6 +204,10 @@ function VaultItemComponent() {
 					overview.cardBrand = detectCardBrand(input.data.cardNumber);
 					overview.maskedCardNumber = maskCardNumber(input.data.cardNumber);
 				}
+			} else if (rawItem.category === "identity") {
+				const fullName = [input.data.firstName, input.data.middleName, input.data.lastName].filter(Boolean).join(" ");
+				if (fullName) overview.fullName = fullName;
+				if (input.data.email) overview.email = input.data.email;
 			}
 
 			return await trpcClient.vault.updateItem.mutate({
@@ -365,7 +389,9 @@ function VaultItemComponent() {
 				<div className="flex-1 overflow-y-auto px-8 py-3">
 					<ItemDetail
 						category={
-							rawItem?.category === "secure-note" ? "secure-note" : "login"
+							rawItem?.category === "secure-note" ? "secure-note" :
+							rawItem?.category === "credit-card" ? "credit-card" :
+							rawItem?.category === "identity" ? "identity" : "login"
 						}
 						data={decryptedItemData}
 					/>
@@ -406,16 +432,20 @@ function VaultItemComponent() {
 								? "secure note"
 								: rawItem?.category === "credit-card"
 									? "credit card"
+								: rawItem?.category === "identity"
+									? "identity"
 									: "login"}
-						</DialogDescription>
-					</DialogHeader>
-					{decryptedItemData && (
-						<ItemForm
-							category={
-								rawItem?.category === "secure-note"
-									? "secure-note"
-									: rawItem?.category === "credit-card"
-										? "credit-card"
+					</DialogDescription>
+				</DialogHeader>
+				{decryptedItemData && (
+					<ItemForm
+						category={
+							rawItem?.category === "secure-note"
+								? "secure-note"
+								: rawItem?.category === "credit-card"
+									? "credit-card"
+									: rawItem?.category === "identity"
+										? "identity"
 										: "login"
 							}
 							initialData={decryptedItemData}

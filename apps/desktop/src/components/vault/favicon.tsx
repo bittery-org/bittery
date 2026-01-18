@@ -1,6 +1,6 @@
 import { getDomainFromUrl, getFaviconUrl } from "@bittery/shared/favicon";
 import { cn } from "@bittery/ui";
-import { CreditCard, FileText, Globe } from "lucide-react";
+import { CreditCard, FileText, Globe, User } from "lucide-react";
 import { useState } from "react";
 
 interface FaviconProps {
@@ -148,6 +148,8 @@ export function Favicon({
 				<Globe className="text-muted-foreground" size={iconSizes[size]} />
 			) : category === "credit-card" ? (
 				<CreditCard className="text-white" size={iconSizes[size]} />
+			) : category === "identity" ? (
+				<User className="text-muted-foreground" size={iconSizes[size]} />
 			) : (
 				<FileText className="text-muted-foreground" size={iconSizes[size]} />
 			)}
