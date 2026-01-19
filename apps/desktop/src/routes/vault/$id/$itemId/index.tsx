@@ -1,5 +1,5 @@
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
-import { copyToClipboard } from "@bittery/shared/password";
+import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	Button,
 	Dialog,
@@ -13,7 +13,6 @@ import {
 	DropdownMenuItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
-	toast,
 } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -29,6 +28,7 @@ import { useState } from "react";
 import Loader from "../../../../components/loader";
 import ItemDetail from "../../../../components/vault/item-detail";
 import { ItemForm } from "../../../../components/vault/item-form";
+import { ShareItemDialog } from "../../../../components/vault/share-item-dialog";
 import { useVaultItemOperations } from "../../../../components/vault/use-vault-item-operations";
 import { VaultAvatar } from "../../../../components/vault/vault-avatar";
 import { useDecryptedItem } from "../../../../hooks/use-decrypted-item";
@@ -42,6 +42,7 @@ function VaultItemComponent() {
 
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
 
 	// Use the new hooks
 	const { rawItem, decryptedData, isLoading } = useDecryptedItem(itemId);
@@ -57,15 +58,8 @@ function VaultItemComponent() {
 		},
 	});
 
-	const handleShare = async () => {
-		if (decryptedData?.title) {
-			let shareText = `${decryptedData.title}`;
-			if ("url" in decryptedData && decryptedData.url) {
-				shareText += `\n${decryptedData.url}`;
-			}
-			await copyToClipboard(shareText, 0);
-			toast.success("Item details copied to clipboard");
-		}
+	const handleShare = () => {
+		setIsShareDialogOpen(true);
 	};
 
 	const handleDelete = () => {
@@ -247,6 +241,25 @@ function VaultItemComponent() {
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
+
+			{/* Share Item Dialog */}
+			{rawItem && decryptedData && (
+				<ShareItemDialog
+					open={isShareDialogOpen}
+					onOpenChange={setIsShareDialogOpen}
+					item={
+						{
+							id: rawItem.id,
+							vaultId: rawItem.vaultId,
+							category: rawItem.category,
+							favorite: rawItem.favorite,
+							createdAt: rawItem.createdAt,
+							updatedAt: rawItem.updatedAt,
+							...decryptedData,
+						} as DecryptedItem
+					}
+				/>
+			)}
 		</>
 	);
 }
