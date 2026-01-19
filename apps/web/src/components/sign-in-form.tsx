@@ -9,6 +9,7 @@ import {
 	hasStoredSecretKey,
 	isSessionValid,
 	storeAuthToken,
+	storeEncryptedPrivateKey,
 	storeMasterUnlockKey,
 	storeSecretKey,
 	storeServerUrl,
@@ -164,6 +165,11 @@ export default function SignInForm({
 			storeAuthToken(finishResult.token);
 			storeVaultKeys(finishResult.vaultKeys);
 			storeMasterUnlockKey(masterUnlockKey);
+
+			// Store encrypted private key for RSA decryption of shared vault keys
+			if (finishResult.user.encryptedPrivateKey) {
+				storeEncryptedPrivateKey(finishResult.user.encryptedPrivateKey);
+			}
 
 			// Store secret key and encrypted session for quick unlock
 			storeSecretKey(variables.secretKey);

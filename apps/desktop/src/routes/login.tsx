@@ -150,6 +150,13 @@ export function LoginPage() {
 				finishResult.vaultKeys,
 				normalizedEmail,
 			);
+			// Store encrypted private key for RSA decryption of shared vault keys
+			if (finishResult.user.encryptedPrivateKey) {
+				await tauriStorage.storeEncryptedPrivateKey(
+					finishResult.user.encryptedPrivateKey,
+					normalizedEmail,
+				);
+			}
 			await tauriStorage.storeSecretKey(secretKey, normalizedEmail);
 			await tauriStorage.storeSessionData(
 				masterUnlockKey,

@@ -186,6 +186,13 @@ export function UnlockPage() {
 			// Update session with fresh data
 			await tauriStorage.storeAuthToken(finishResult.token, targetEmail);
 			await tauriStorage.storeVaultKeys(finishResult.vaultKeys, targetEmail);
+			// Store encrypted private key for RSA decryption of shared vault keys
+			if (finishResult.user.encryptedPrivateKey) {
+				await tauriStorage.storeEncryptedPrivateKey(
+					finishResult.user.encryptedPrivateKey,
+					targetEmail,
+				);
+			}
 			await tauriStorage.storeSessionData(
 				masterUnlockKey,
 				targetEmail,

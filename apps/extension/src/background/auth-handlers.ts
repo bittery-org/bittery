@@ -76,6 +76,12 @@ export async function handleLogin(payload: {
 	// Store session data
 	await chromeStorage.storeAuthToken(finishResult.token);
 	await chromeStorage.storeVaultKeys(finishResult.vaultKeys);
+	// Store encrypted private key for RSA decryption of shared vault keys
+	if (finishResult.user.encryptedPrivateKey) {
+		await chromeStorage.storeEncryptedPrivateKey(
+			finishResult.user.encryptedPrivateKey,
+		);
+	}
 	chromeStorage.storeMasterUnlockKey(muk);
 	setMasterUnlockKey(muk);
 
@@ -152,6 +158,12 @@ export async function handleQuickUnlock(payload: {
 	// Store session data and vault keys
 	await chromeStorage.storeAuthToken(finishResult.token);
 	await chromeStorage.storeVaultKeys(finishResult.vaultKeys);
+	// Store encrypted private key for RSA decryption of shared vault keys
+	if (finishResult.user.encryptedPrivateKey) {
+		await chromeStorage.storeEncryptedPrivateKey(
+			finishResult.user.encryptedPrivateKey,
+		);
+	}
 	chromeStorage.storeMasterUnlockKey(muk);
 	setMasterUnlockKey(muk);
 

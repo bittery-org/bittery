@@ -13,6 +13,7 @@ import {
 	getServerUrl,
 	getTimeUntilExpiry,
 	storeAuthToken,
+	storeEncryptedPrivateKey,
 	storeMasterUnlockKey,
 	storeSecretKey,
 	storeServerUrl,
@@ -159,7 +160,10 @@ export default function SignUpForm({
 				// 7. Store Master Unlock Key in memory
 				storeMasterUnlockKey(masterUnlockKey);
 
-				// 8. Store secret key and encrypted session for quick unlock
+				// 8. Store encrypted private key for RSA decryption of shared vault keys
+				storeEncryptedPrivateKey(JSON.stringify(encryptedPrivateKey));
+
+				// 9. Store secret key and encrypted session for quick unlock
 				storeSecretKey(secretKey);
 				await storeSessionData(masterUnlockKey, email, result.userId);
 

@@ -10,6 +10,7 @@ import {
 import { Store } from "@tauri-apps/plugin-store";
 import { decrypt, type EncryptedData, encrypt } from "./encryption";
 import { arrayBufferToBase64, base64ToArrayBuffer } from "./key-derivation";
+import { rsaDecrypt } from "./rsa";
 
 // Legacy storage keys (single-account format - used for migration detection)
 const LEGACY_SECRET_KEY_STORAGE = "bittery_secret_key";
@@ -698,6 +699,37 @@ export async function getVaultKeys(
 }
 
 /**
+ * Store encrypted private key
+ * This is needed to decrypt vault keys that were shared via RSA encryption
+ */
+export async function storeEncryptedPrivateKey(
+	encryptedPrivateKey: string,
+	email?: string,
+): Promise<void> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) throw new Error("No account specified");
+
+	const store = await getStore();
+	const key = getAccountKey(resolvedEmail, "encrypted_private_key");
+	await store.set(key, encryptedPrivateKey);
+	await store.save();
+}
+
+/**
+ * Get encrypted private key
+ */
+export async function getEncryptedPrivateKey(
+	email?: string,
+): Promise<string | null> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) return null;
+
+	const store = await getStore();
+	const key = getAccountKey(resolvedEmail, "encrypted_private_key");
+	return (await store.get<string>(key)) ?? null;
+}
+
+/**
  * Store Master Unlock Key in memory cache
  */
 export async function storeMasterUnlockKey(
@@ -740,7 +772,26 @@ export async function getMasterUnlockKey(
 }
 
 /**
- * Decrypt a vault key using the Master Unlock Key
+ * Check if an encrypted vault key is AES-GCM encrypted (JSON format) or RSA encrypted (plain base64)
+ */
+function isAesEncryptedVaultKey(encryptedVaultKey: string): boolean {
+	try {
+		const parsed = JSON.parse(encryptedVaultKey);
+		return (
+			parsed &&
+			typeof parsed.ciphertext === "string" &&
+			typeof parsed.iv === "string"
+		);
+	} catch {
+		// Not valid JSON, so it's RSA encrypted (plain base64)
+		return false;
+	}
+}
+
+/**
+ * Decrypt a vault key
+ * - For owner vaults: decrypted with AES-GCM using Master Unlock Key
+ * - For shared vaults: decrypted with RSA using the user's private key
  */
 export async function decryptVaultKey(
 	encryptedVaultKey: string,
@@ -751,13 +802,37 @@ export async function decryptVaultKey(
 		throw new Error("Master Unlock Key not available. Please log in again.");
 	}
 
-	const encryptedData: EncryptedData = JSON.parse(encryptedVaultKey);
+	if (isAesEncryptedVaultKey(encryptedVaultKey)) {
+		// AES-GCM encrypted (owner's vault key)
+		const encryptedData: EncryptedData = JSON.parse(encryptedVaultKey);
+		const mukBase64 = arrayBufferToBase64(masterUnlockKey);
+		const decryptedBase64 = await decrypt(
+			encryptedData,
+			base64ToArrayBuffer(mukBase64),
+		);
+		return base64ToArrayBuffer(decryptedBase64);
+	}
+
+	// RSA encrypted (shared vault key)
+	// First, decrypt the user's private key
+	const encryptedPrivateKey = await getEncryptedPrivateKey(email);
+	if (!encryptedPrivateKey) {
+		throw new Error(
+			"Encrypted private key not available. Please log in again.",
+		);
+	}
+
+	// The private key is encrypted with AES-GCM using Master Unlock Key
+	const privateKeyEncryptedData: EncryptedData = JSON.parse(encryptedPrivateKey);
 	const mukBase64 = arrayBufferToBase64(masterUnlockKey);
-	const decryptedBase64 = await decrypt(
-		encryptedData,
+	const privateKeyPEM = await decrypt(
+		privateKeyEncryptedData,
 		base64ToArrayBuffer(mukBase64),
 	);
-	return base64ToArrayBuffer(decryptedBase64);
+
+	// Use the decrypted private key to RSA-decrypt the vault key
+	const vaultKeyBase64 = await rsaDecrypt(encryptedVaultKey, privateKeyPEM);
+	return base64ToArrayBuffer(vaultKeyBase64);
 }
 
 /**
