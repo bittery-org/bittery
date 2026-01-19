@@ -46,11 +46,11 @@ async function getDeviceKey(): Promise<Uint8Array> {
 	const stored = result[DEVICE_KEY_STORAGE];
 
 	if (stored) {
-		return base64ToArrayBuffer(stored);
+		return base64ToArrayBuffer(stored as string) as Uint8Array;
 	}
 
 	// Generate new device key
-	const deviceKey = crypto.getRandomValues(new Uint8Array(32));
+	const deviceKey = crypto.getRandomValues(new Uint8Array(32)) as Uint8Array;
 	await chrome.storage.local.set({
 		[DEVICE_KEY_STORAGE]: arrayBufferToBase64(deviceKey),
 	});
@@ -69,7 +69,7 @@ export async function storeSecretKey(secretKey: string): Promise<void> {
  */
 export async function getStoredSecretKey(): Promise<string | null> {
 	const result = await chrome.storage.local.get(SECRET_KEY_STORAGE);
-	return result[SECRET_KEY_STORAGE] || null;
+	return (result[SECRET_KEY_STORAGE] as string | undefined) || null;
 }
 
 /**
@@ -92,7 +92,7 @@ export async function storeServerUrl(serverUrl: string): Promise<void> {
  */
 export async function getServerUrl(): Promise<string | null> {
 	const result = await chrome.storage.local.get(SERVER_URL_STORAGE);
-	return result[SERVER_URL_STORAGE] || null;
+	return (result[SERVER_URL_STORAGE] as string | undefined) || null;
 }
 
 /**
@@ -141,7 +141,7 @@ export async function getStoredSessionData(): Promise<StoredSessionData | null> 
 	if (!stored) return null;
 
 	try {
-		const sessionData: StoredSessionData = JSON.parse(stored);
+		const sessionData: StoredSessionData = JSON.parse(stored as string);
 		return sessionData;
 	} catch {
 		return null;
@@ -184,7 +184,7 @@ export async function decryptStoredMasterUnlockKey(): Promise<Uint8Array | null>
 			sessionData.encryptedMasterUnlockKey,
 			deviceKey,
 		);
-		return base64ToArrayBuffer(mukBase64);
+		return base64ToArrayBuffer(mukBase64) as Uint8Array;
 	} catch {
 		return null;
 	}
@@ -231,7 +231,7 @@ export async function storeAuthToken(token: string): Promise<void> {
  */
 export async function getAuthToken(): Promise<string | null> {
 	const result = await chrome.storage.session.get(JWT_TOKEN_KEY);
-	return result[JWT_TOKEN_KEY] || null;
+	return (result[JWT_TOKEN_KEY] as string | undefined) || null;
 }
 
 /**
@@ -267,9 +267,9 @@ export async function getVaultKeys(): Promise<VaultKeyData[] | null> {
 	console.log(
 		"[storage-chrome] Vault keys found:",
 		!!stored,
-		stored ? `(${JSON.parse(stored).length} keys)` : "(none)",
+		stored ? `(${JSON.parse(stored as string).length} keys)` : "(none)",
 	);
-	return stored ? JSON.parse(stored) : null;
+	return stored ? JSON.parse(stored as string) : null;
 }
 
 /**
@@ -319,9 +319,9 @@ export async function decryptVaultKey(
 	const mukBase64 = arrayBufferToBase64(masterUnlockKey);
 	const decryptedBase64 = await decrypt(
 		encryptedData,
-		base64ToArrayBuffer(mukBase64),
+		base64ToArrayBuffer(mukBase64) as Uint8Array,
 	);
-	return base64ToArrayBuffer(decryptedBase64);
+	return base64ToArrayBuffer(decryptedBase64) as Uint8Array;
 }
 
 /**

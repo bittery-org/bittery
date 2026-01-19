@@ -67,7 +67,7 @@ export async function rsaEncrypt(
 
 	const publicKey = await crypto.subtle.importKey(
 		"spki",
-		publicKeyBuffer,
+		publicKeyBuffer as Uint8Array<ArrayBuffer>,
 		{
 			name: RSA_ALGORITHM,
 			hash: HASH_ALGORITHM,
@@ -103,7 +103,7 @@ export async function rsaDecrypt(
 
 	const privateKey = await crypto.subtle.importKey(
 		"pkcs8",
-		privateKeyBuffer,
+		privateKeyBuffer as Uint8Array<ArrayBuffer>,
 		{
 			name: RSA_ALGORITHM,
 			hash: HASH_ALGORITHM,
@@ -117,7 +117,7 @@ export async function rsaDecrypt(
 	const plaintextBuffer = await crypto.subtle.decrypt(
 		{ name: RSA_ALGORITHM },
 		privateKey,
-		ciphertextBytes,
+		ciphertextBytes as Uint8Array<ArrayBuffer>,
 	);
 
 	return new TextDecoder().decode(plaintextBuffer);

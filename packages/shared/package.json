@@ -23,8 +23,8 @@
 	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
-		"@types/react": "~19.1.10",
-		"react": "19.1.2",
+		"@types/react": "catalog:",
+		"react": "catalog:",
 		"typescript": "^5.7.2"
 	},
 	"peerDependencies": {

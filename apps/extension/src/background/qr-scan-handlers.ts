@@ -30,6 +30,7 @@ export async function handleCaptureTabScreenshot(): Promise<MessageResponse> {
 		}
 
 		// Capture the visible area of the tab
+		// @ts-expect-error - Chrome types may not include captureVisibleTab
 		const dataUrl = await chrome.tabs.captureVisibleTab(undefined, {
 			format: "png",
 		});

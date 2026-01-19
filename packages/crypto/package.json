@@ -16,7 +16,7 @@
 	"scripts": {},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
-		"@types/chrome": "^0.0.281"
+		"@types/chrome": "^0.1.34"
 	},
 	"peerDependencies": {
 		"typescript": "^5"

@@ -23,7 +23,7 @@ export async function encrypt(
 	// Import key
 	const cryptoKey = await crypto.subtle.importKey(
 		"raw",
-		key,
+		key as Uint8Array<ArrayBuffer>,
 		{ name: ALGORITHM, length: KEY_LENGTH },
 		false,
 		["encrypt"],
@@ -60,7 +60,7 @@ export async function decrypt(
 	// Import key
 	const cryptoKey = await crypto.subtle.importKey(
 		"raw",
-		key,
+		key as Uint8Array<ArrayBuffer>,
 		{ name: ALGORITHM, length: KEY_LENGTH },
 		false,
 		["decrypt"],
@@ -72,9 +72,9 @@ export async function decrypt(
 
 	// Decrypt
 	const plaintextBuffer = await crypto.subtle.decrypt(
-		{ name: ALGORITHM, iv },
+		{ name: ALGORITHM, iv: iv as Uint8Array<ArrayBuffer> },
 		cryptoKey,
-		ciphertext,
+		ciphertext as Uint8Array<ArrayBuffer>,
 	);
 
 	return new TextDecoder().decode(plaintextBuffer);

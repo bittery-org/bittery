@@ -44,7 +44,7 @@ const trpcClient = createTRPCClient<AppRouter>({
 			async fetch(url, options) {
 				const storedServerUrl = await chromeStorage.getServerUrl();
 				const serverUrl = storedServerUrl ?? fallbackServerUrl;
-				const resolvedUrl = buildTrpcUrl(serverUrl, url);
+				const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
 				return fetch(resolvedUrl, options);
 			},
 		}),
