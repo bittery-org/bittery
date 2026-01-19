@@ -1,4 +1,5 @@
 import { useTRPC } from "@bittery/shared/trpc";
+import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	Badge,
 	Button,
@@ -7,6 +8,9 @@ import {
 	CardDescription,
 	CardHeader,
 	CardTitle,
+	ScrollArea,
+	Sheet,
+	SheetContent,
 	Skeleton,
 	Tabs,
 	TabsContent,
@@ -16,9 +20,11 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Key, Users } from "lucide-react";
+import { useState } from "react";
 import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { VaultMemberList } from "@/components/vaults/vault-member-list";
 import { ItemList } from "@/components/vault/item-list";
+import ItemDetail from "@/components/vault/item-detail";
 import { useDecryptedItems } from "@/hooks/use-decrypted-items";
 
 export const Route = createFileRoute("/_app/vaults/$vaultId/")({
@@ -28,6 +34,8 @@ export const Route = createFileRoute("/_app/vaults/$vaultId/")({
 function VaultDetailPage() {
 	const { vaultId } = Route.useParams();
 	const trpc = useTRPC();
+
+	const [selectedItem, setSelectedItem] = useState<DecryptedItem | null>(null);
 
 	const vaultQuery = useQuery(trpc.vault.get.queryOptions({ vaultId }));
 	const membersQuery = useQuery(
@@ -40,6 +48,14 @@ function VaultDetailPage() {
 
 	const vault = vaultQuery.data;
 	const canManage = vault?.userRole === "owner" || vault?.userRole === "admin";
+
+	const handleItemSelect = (item: DecryptedItem) => {
+		setSelectedItem(item);
+	};
+
+	const handleCloseSheet = () => {
+		setSelectedItem(null);
+	};
 
 	if (vaultQuery.isLoading) {
 		return (
@@ -108,8 +124,7 @@ function VaultDetailPage() {
 						<CardHeader>
 							<CardTitle>Vault Items</CardTitle>
 							<CardDescription>
-								Items stored in this vault. Use the desktop app to view and edit
-								item details.
+								Click on an item to view its details.
 							</CardDescription>
 						</CardHeader>
 						<CardContent>
@@ -117,6 +132,8 @@ function VaultDetailPage() {
 								items={decryptedItems}
 								isLoading={isLoadingItems}
 								vaultId={vaultId}
+								onItemSelect={handleItemSelect}
+								selectedItemId={selectedItem?.id}
 							/>
 						</CardContent>
 					</Card>
@@ -165,6 +182,20 @@ function VaultDetailPage() {
 					)}
 				</TabsContent>
 			</Tabs>
+
+			{/* Item Detail Sheet */}
+			<Sheet open={!!selectedItem} onOpenChange={(open) => !open && handleCloseSheet()}>
+				<SheetContent className="w-full sm:max-w-lg">
+					<ScrollArea className="h-full pr-4">
+						{selectedItem && (
+							<ItemDetail
+								category={selectedItem.category}
+								data={selectedItem}
+							/>
+						)}
+					</ScrollArea>
+				</SheetContent>
+			</Sheet>
 		</div>
 	);
 }
