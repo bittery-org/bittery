@@ -1,9 +1,4 @@
-export interface CustomField {
-	id: string;
-	label: string;
-	value: string;
-	type: "text" | "password" | "email" | "url";
-}
+export type { CustomField } from "@bittery/shared/types";
 
 export interface VaultOption {
 	id: string;

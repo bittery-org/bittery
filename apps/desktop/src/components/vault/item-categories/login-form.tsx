@@ -68,9 +68,7 @@ export function LoginForm({
 	vaults = [],
 	selectedVaultId,
 }: LoginFormProps) {
-
 	console.log(initialData);
-	
 
 	const [additionalUrls, setAdditionalUrls] = useState<string[]>(
 		initialData?.urls || [],
@@ -146,7 +144,7 @@ export function LoginForm({
 					totpDigits: showTotpSection && totpSecret ? totpDigits : undefined,
 					totpPeriod: showTotpSection && totpSecret ? totpPeriod : undefined,
 				};
-					
+
 				await onSubmit(submitData, currentVaultId);
 				toast.success("Item saved successfully");
 			} catch (error) {

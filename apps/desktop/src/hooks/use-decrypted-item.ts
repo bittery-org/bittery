@@ -16,7 +16,7 @@ export function useDecryptedItem(itemId: string) {
 		data: rawItem,
 		isLoading: isLoadingRaw,
 		error: rawError,
-		dataUpdatedAt
+		dataUpdatedAt,
 	} = useQuery({
 		...trpc.vault.getItem.queryOptions({ itemId }),
 		enabled: !!itemId,

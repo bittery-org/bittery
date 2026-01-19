@@ -88,3 +88,71 @@ export interface DecryptedItem extends DecryptedItemData {
 	createdAt: string;
 	updatedAt: string;
 }
+
+/**
+ * Category-specific display data types for read-only item views
+ */
+
+export interface LoginDisplayData {
+	title: string;
+	url?: string;
+	urls?: string[];
+	username?: string;
+	password?: string;
+	notes?: string;
+	customFields?: CustomField[];
+	totpSecret?: string;
+	totpIssuer?: string;
+	totpAccountName?: string;
+	totpAlgorithm?: TotpAlgorithm;
+	totpDigits?: TotpDigits;
+	totpPeriod?: number;
+}
+
+export interface SecureNoteDisplayData {
+	title: string;
+	note: string;
+}
+
+export interface CreditCardDisplayData {
+	title: string;
+	cardholderName: string;
+	cardNumber: string;
+	cvv: string;
+	expiryDate: string;
+	billingAddress?: string;
+	notes?: string;
+}
+
+export interface IdentityDisplayData {
+	title: string;
+	firstName?: string;
+	middleName?: string;
+	lastName?: string;
+	email?: string;
+	addresses?: Address[];
+	phoneNumbers?: PhoneNumber[];
+	ssn?: string;
+	passportNumber?: string;
+	driversLicense?: string;
+	dateOfBirth?: string;
+	notes?: string;
+}
+
+export interface TotpDisplayData {
+	title: string;
+	totpSecret: string;
+	totpIssuer?: string;
+	totpAccountName?: string;
+	totpAlgorithm?: TotpAlgorithm;
+	totpDigits?: TotpDigits;
+	totpPeriod?: number;
+	notes?: string;
+}
+
+export type ItemDetailDisplayData =
+	| LoginDisplayData
+	| SecureNoteDisplayData
+	| CreditCardDisplayData
+	| IdentityDisplayData
+	| TotpDisplayData;
