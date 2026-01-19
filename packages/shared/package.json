@@ -10,6 +10,7 @@
 		"./crypto": "./src/crypto.ts",
 		"./favicon": "./src/favicon.ts",
 		"./identity": "./src/identity.ts",
+		"./totp": "./src/totp.ts",
 		"./trpc": "./src/trpc.ts",
 		"./types": "./src/types.ts"
 	},

@@ -3,18 +3,19 @@ import { CreditCardForm, type CreditCardFormData } from "./item-categories/credi
 import { IdentityForm, type IdentityFormData } from "./item-categories/identity-form";
 import { LoginForm, type LoginFormData } from "./item-categories/login-form";
 import { SecureNoteForm, type SecureNoteFormData } from "./item-categories/secure-note-form";
+import { TotpForm, type TotpFormData } from "./item-categories/totp-form";
 import type { VaultOption } from "./types";
 
-export type { CreditCardFormData, IdentityFormData, LoginFormData, SecureNoteFormData };
+export type { CreditCardFormData, IdentityFormData, LoginFormData, SecureNoteFormData, TotpFormData };
 export type { CustomField, VaultOption } from "./types";
 
 interface ItemFormProps {
   category: ItemCategory;
   initialData?: Partial<
-    LoginFormData | SecureNoteFormData | CreditCardFormData | IdentityFormData
+    LoginFormData | SecureNoteFormData | CreditCardFormData | IdentityFormData | TotpFormData
   >;
   onSubmit: (
-    data: LoginFormData | SecureNoteFormData | CreditCardFormData | IdentityFormData,
+    data: LoginFormData | SecureNoteFormData | CreditCardFormData | IdentityFormData | TotpFormData,
     vaultId: string,
   ) => Promise<void> | void;
   onCancel: () => void;
@@ -55,6 +56,19 @@ export function ItemForm(props: ItemFormProps) {
     return (
       <IdentityForm
         initialData={props.initialData as Partial<IdentityFormData>}
+        onSubmit={props.onSubmit}
+        onCancel={props.onCancel}
+        submitLabel={props.submitLabel}
+        isSubmitting={props.isSubmitting}
+        vaults={props.vaults}
+        selectedVaultId={props.selectedVaultId}
+      />
+    );
+  }
+  if (props.category === "totp") {
+    return (
+      <TotpForm
+        initialData={props.initialData as Partial<TotpFormData>}
         onSubmit={props.onSubmit}
         onCancel={props.onCancel}
         submitLabel={props.submitLabel}

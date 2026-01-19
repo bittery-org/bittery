@@ -8,7 +8,17 @@ import type { Address, PhoneNumber } from "./identity";
  * Item categories for vault items
  * Matches the itemCategoryEnum in the database schema
  */
-export type ItemCategory = "login" | "secure-note" | "credit-card" | "identity";
+export type ItemCategory = "login" | "secure-note" | "credit-card" | "identity" | "totp";
+
+/**
+ * TOTP algorithm options (RFC 6238)
+ */
+export type TotpAlgorithm = "SHA1" | "SHA256" | "SHA512";
+
+/**
+ * TOTP digits options (typically 6 or 8)
+ */
+export type TotpDigits = 6 | 7 | 8;
 
 /**
  * Custom field definition for vault items
@@ -50,6 +60,14 @@ export interface DecryptedItemData {
 	passportNumber?: string;
 	driversLicense?: string;
 	dateOfBirth?: string;
+	// TOTP fields
+	totpSecret?: string;
+	totpIssuer?: string;
+	totpAccountName?: string;
+	totpAlgorithm?: TotpAlgorithm;
+	totpDigits?: TotpDigits;
+	totpPeriod?: number;
+	linkedItemId?: string; // Optional link to a login item
 }
 
 /**

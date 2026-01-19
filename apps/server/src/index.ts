@@ -55,6 +55,9 @@ app.use(
 	"/trpc/*",
 	trpcServer({
 		router: appRouter,
+		onError: (err) => {
+			console.error("TRPC Error:", err);
+		},
 		createContext: (_opts, context) => {
 			return createContext({ context });
 		},

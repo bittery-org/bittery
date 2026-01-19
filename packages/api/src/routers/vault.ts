@@ -380,7 +380,7 @@ export const vaultRouter = router({
 		.input(
 			z.object({
 				vaultId: z.string(),
-				category: z.enum(["login", "secure-note", "credit-card", "identity"]),
+				category: z.enum(["login", "secure-note", "credit-card", "identity", "totp"]),
 				encryptedData: z.string(),
 				encryptionIv: z.string(),
 				encryptionAlgorithm: z.string().default("AES-GCM"),
@@ -433,6 +433,7 @@ export const vaultRouter = router({
 							"secure-note",
 							"credit-card",
 							"identity",
+							"totp",
 						]),
 						favorite: z.boolean().optional(),
 						encryptedData: z.string(),

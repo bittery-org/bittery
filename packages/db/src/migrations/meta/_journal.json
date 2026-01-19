@@ -15,6 +15,13 @@
       "when": 1768762111483,
       "tag": "0001_foamy_bucky",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1768811547191,
+      "tag": "0002_unknown_pestilence",
+      "breakpoints": true
     }
   ]
 }

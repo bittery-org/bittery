@@ -26,6 +26,7 @@ export const itemCategoryEnum = pgEnum("item_category", [
 	"secure-note",
 	"credit-card",
 	"identity",
+	"totp",
 ]);
 
 export const vault = pgTable("vault", {

@@ -7,7 +7,7 @@ import {
 	DialogTitle,
 	toast,
 } from "@bittery/ui";
-import { CreditCard, FileText, KeyRound, User } from "lucide-react";
+import { CreditCard, FileText, KeyRound, Smartphone, User } from "lucide-react";
 import { useState } from "react";
 import type { VaultOption } from "./item-form";
 import { ItemForm } from "./item-form";
@@ -19,6 +19,13 @@ interface DecryptedItemData {
 	password?: string;
 	notes?: string;
 	note?: string;
+	// TOTP fields
+	totpSecret?: string;
+	totpIssuer?: string;
+	totpAccountName?: string;
+	totpAlgorithm?: string;
+	totpDigits?: number;
+	totpPeriod?: number;
 }
 
 interface CreateItemDialogProps {
@@ -35,6 +42,12 @@ const categories = [
 		title: "Login",
 		description: "Save website credentials",
 		icon: KeyRound,
+	},
+	{
+		type: "totp" as const,
+		title: "Authenticator (TOTP)",
+		description: "Store 2FA authentication codes",
+		icon: Smartphone,
 	},
 	{
 		type: "secure-note" as const,

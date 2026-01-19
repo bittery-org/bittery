@@ -1,3 +1,4 @@
+import type { ItemCategory } from "@bittery/shared/types";
 import {
 	Button,
 	Command,
@@ -11,9 +12,25 @@ import {
 	PopoverTrigger,
 } from "@bittery/ui";
 import { useNavigate } from "@tanstack/react-router";
-import { FileText, FolderClosed, Key, Search } from "lucide-react";
+import { CreditCard, FileText, FolderClosed, Key, Search, Smartphone, User } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useVaultSearch } from "../../hooks/use-vault-search";
+
+const getCategoryIcon = (category: ItemCategory) => {
+	switch (category) {
+		case "login":
+			return Key;
+		case "totp":
+			return Smartphone;
+		case "credit-card":
+			return CreditCard;
+		case "identity":
+			return User;
+		case "secure-note":
+		default:
+			return FileText;
+	}
+};
 
 export function SearchCombobox() {
 	const [open, setOpen] = useState(false);
@@ -98,31 +115,30 @@ export function SearchCombobox() {
 
 						{filteredItems.length > 0 && (
 							<CommandGroup heading="Items">
-								{filteredItems.map((item) => (
-									<CommandItem
-										key={item.id}
-										value={item.id}
-										onSelect={() => handleSelectItem(item.vaultId, item.id)}
-										className="cursor-pointer"
-									>
-										{item.category === "login" ? (
-											<Key className="mr-2 size-4" />
-										) : (
-											<FileText className="mr-2 size-4" />
-										)}
-										<div className="flex flex-col">
-											<span>{item.title}</span>
-											{item.username && (
+								{filteredItems.map((item) => {
+									const CategoryIcon = getCategoryIcon(item.category);
+									return (
+										<CommandItem
+											key={item.id}
+											value={item.id}
+											onSelect={() => handleSelectItem(item.vaultId, item.id)}
+											className="cursor-pointer"
+										>
+											<CategoryIcon className="mr-2 size-4" />
+											<div className="flex flex-col">
+												<span>{item.title}</span>
+												{item.username && (
+													<span className="text-muted-foreground text-xs">
+														{item.username}
+													</span>
+												)}
 												<span className="text-muted-foreground text-xs">
-													{item.username}
+													in {item.vaultName}
 												</span>
-											)}
-											<span className="text-muted-foreground text-xs">
-												in {item.vaultName}
-											</span>
-										</div>
-									</CommandItem>
-								))}
+											</div>
+										</CommandItem>
+									);
+								})}
 							</CommandGroup>
 						)}
 					</CommandList>
