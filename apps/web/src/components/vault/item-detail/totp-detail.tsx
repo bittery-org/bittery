@@ -8,7 +8,7 @@ import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { Copy, Eye, EyeOff } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { ShareItemDialog } from "@/components/sharing";
+import { ShareHistoryDialog, ShareItemDialog } from "@/components/sharing";
 import { Favicon } from "../favicon";
 import {
 	type CategoryDetailProps,
@@ -96,6 +96,7 @@ export function TotpDetail({
 					</Button>
 				)}
 				{item && <ShareItemDialog item={item} />}
+				{item && <ShareHistoryDialog itemId={item.id} />}
 				{onDelete && (
 					<Button
 						size="sm"

@@ -10,7 +10,7 @@ import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Card, Input, Label } from "@bittery/ui";
 import { Copy, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
-import { ShareItemDialog } from "@/components/sharing";
+import { ShareHistoryDialog, ShareItemDialog } from "@/components/sharing";
 import { Favicon } from "../favicon";
 import {
 	type CategoryDetailProps,
@@ -61,6 +61,7 @@ export function CreditCardDetail({
 					</Button>
 				)}
 				{item && <ShareItemDialog item={item} />}
+				{item && <ShareHistoryDialog itemId={item.id} />}
 				{onDelete && (
 					<Button
 						size="sm"

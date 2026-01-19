@@ -1,6 +1,6 @@
 import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Card } from "@bittery/ui";
-import { ShareItemDialog } from "@/components/sharing";
+import { ShareHistoryDialog, ShareItemDialog } from "@/components/sharing";
 import { Favicon } from "../favicon";
 import type { CategoryDetailProps, SecureNoteDisplayData } from "./shared";
 
@@ -33,6 +33,7 @@ export function SecureNoteDetail({
 					</Button>
 				)}
 				{item && <ShareItemDialog item={item} />}
+				{item && <ShareHistoryDialog itemId={item.id} />}
 				{onDelete && (
 					<Button
 						size="sm"

@@ -12,6 +12,7 @@ import {
 	Button,
 	Card,
 	CardContent,
+	cn,
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -160,7 +161,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 				{links.map((link) => (
 					<Card
 						key={link.id}
-						className={link.status !== "active" ? "opacity-60" : ""}
+						className={cn("py-0", link.status !== "active" ? "opacity-60" : "")}
 					>
 						<CardContent className="p-4">
 							<div className="flex items-start justify-between">

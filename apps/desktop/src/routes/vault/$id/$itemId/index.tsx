@@ -19,6 +19,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
 	Copy as CopyIcon,
 	Edit,
+	History,
 	MoreVertical,
 	Share2,
 	Star,
@@ -28,6 +29,7 @@ import { useState } from "react";
 import Loader from "../../../../components/loader";
 import ItemDetail from "../../../../components/vault/item-detail";
 import { ItemForm } from "../../../../components/vault/item-form";
+import { ShareHistoryDialog } from "../../../../components/vault/share-history-dialog";
 import { ShareItemDialog } from "../../../../components/vault/share-item-dialog";
 import { useVaultItemOperations } from "../../../../components/vault/use-vault-item-operations";
 import { VaultAvatar } from "../../../../components/vault/vault-avatar";
@@ -43,6 +45,7 @@ function VaultItemComponent() {
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+	const [isShareHistoryOpen, setIsShareHistoryOpen] = useState(false);
 
 	// Use the new hooks
 	const { rawItem, decryptedData, isLoading } = useDecryptedItem(itemId);
@@ -145,6 +148,10 @@ function VaultItemComponent() {
 									{rawItem?.favorite
 										? "Remove from Favorites"
 										: "Add to Favorites"}
+								</DropdownMenuItem>
+								<DropdownMenuItem onClick={() => setIsShareHistoryOpen(true)}>
+									<History className="mr-2 size-4" />
+									Share History
 								</DropdownMenuItem>
 								<DropdownMenuSeparator />
 								<DropdownMenuItem
@@ -258,6 +265,15 @@ function VaultItemComponent() {
 							...decryptedData,
 						} as DecryptedItem
 					}
+				/>
+			)}
+
+			{/* Share History Dialog */}
+			{rawItem && (
+				<ShareHistoryDialog
+					itemId={rawItem.id}
+					open={isShareHistoryOpen}
+					onOpenChange={setIsShareHistoryOpen}
 				/>
 			)}
 		</>
