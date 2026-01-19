@@ -111,11 +111,11 @@ function SpeedometerGauge({
 			>
 				<defs>
 					<linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="0%">
-						<stop offset="0%" stopColor="#22c55e" />
-						<stop offset="35%" stopColor="#84cc16" />
-						<stop offset="55%" stopColor="#eab308" />
-						<stop offset="75%" stopColor="#f97316" />
-						<stop offset="100%" stopColor="#ef4444" />
+						<stop offset="0%" stopColor="#ef4444" />
+						<stop offset="25%" stopColor="#f97316" />
+						<stop offset="45%" stopColor="#eab308" />
+						<stop offset="65%" stopColor="#84cc16" />
+						<stop offset="100%" stopColor="#22c55e" />
 					</linearGradient>
 				</defs>
 				{/* Background arc */}
