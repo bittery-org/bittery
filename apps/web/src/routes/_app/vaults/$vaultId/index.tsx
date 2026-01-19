@@ -1,4 +1,3 @@
-import { decrypt, getDecryptedVaultKey } from "@bittery/shared/crypto";
 import { useTRPC } from "@bittery/shared/trpc";
 import {
 	Badge,
@@ -16,22 +15,15 @@ import {
 } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, Key, Lock, Users } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ArrowLeft, Key, Users } from "lucide-react";
 import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { VaultMemberList } from "@/components/vaults/vault-member-list";
+import { ItemList } from "@/components/vault/item-list";
+import { useDecryptedItems } from "@/hooks/use-decrypted-items";
 
 export const Route = createFileRoute("/_app/vaults/$vaultId/")({
 	component: VaultDetailPage,
 });
-
-interface DecryptedItem {
-	id: string;
-	category: string;
-	title: string;
-	url?: string;
-	username?: string;
-}
 
 function VaultDetailPage() {
 	const { vaultId } = Route.useParams();
@@ -41,69 +33,13 @@ function VaultDetailPage() {
 	const membersQuery = useQuery(
 		trpc.vault.members.list.queryOptions({ vaultId }),
 	);
-	const itemsQuery = useQuery(trpc.vault.listItems.queryOptions({ vaultId }));
 
-	const [decryptedItems, setDecryptedItems] = useState<DecryptedItem[]>([]);
+	// Use the new decrypted items hook
+	const { items: decryptedItems, isLoading: isLoadingItems } =
+		useDecryptedItems(vaultId);
 
 	const vault = vaultQuery.data;
 	const canManage = vault?.userRole === "owner" || vault?.userRole === "admin";
-
-	// Decrypt items when they change
-	useEffect(() => {
-		if (!itemsQuery.data || itemsQuery.data.length === 0) {
-			setDecryptedItems([]);
-			return;
-		}
-
-		const decryptItems = async () => {
-			// Get decrypted vault key using the shared crypto utilities
-			// This handles: getting vault keys from sessionStorage, finding the right key,
-			// getting the master unlock key, and decrypting the vault key
-			const vaultKeyBytes = await getDecryptedVaultKey(vaultId);
-			if (!vaultKeyBytes) {
-				console.error("Failed to decrypt vault key for vault:", vaultId);
-				return;
-			}
-
-			const decrypted: DecryptedItem[] = [];
-
-			for (const item of itemsQuery.data) {
-				try {
-					const decryptedData = await decrypt(
-						{
-							algorithm: item.encryptionAlgorithm,
-							iv: item.encryptionIv,
-							ciphertext: item.encryptedData,
-						},
-						vaultKeyBytes,
-					);
-
-					const data = JSON.parse(decryptedData);
-
-					decrypted.push({
-						id: item.id,
-						category: item.category,
-						title: data.title || "Untitled",
-						url: data.url,
-						username: data.username,
-					});
-				} catch (error) {
-					console.error("Failed to decrypt item:", item.id, error);
-					decrypted.push({
-						id: item.id,
-						category: item.category,
-						title: "Unable to decrypt",
-						url: undefined,
-						username: undefined,
-					});
-				}
-			}
-
-			setDecryptedItems(decrypted);
-		};
-
-		decryptItems();
-	}, [itemsQuery.data, vaultId]);
 
 	if (vaultQuery.isLoading) {
 		return (
@@ -177,41 +113,11 @@ function VaultDetailPage() {
 							</CardDescription>
 						</CardHeader>
 						<CardContent>
-							{itemsQuery.isLoading ? (
-								<Skeleton className="h-32" />
-							) : decryptedItems.length === 0 ? (
-								<p className="py-4 text-center text-muted-foreground">
-									No items in this vault yet.
-								</p>
-							) : (
-								<div className="space-y-2">
-									{decryptedItems.map((item) => (
-										<div
-											key={item.id}
-											className="flex items-center gap-3 rounded-lg border p-3"
-										>
-											<div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
-												{item.category === "login" ? (
-													<Key className="h-5 w-5 text-muted-foreground" />
-												) : (
-													<Lock className="h-5 w-5 text-muted-foreground" />
-												)}
-											</div>
-											<div className="min-w-0 flex-1">
-												<div className="truncate font-medium">{item.title}</div>
-												{item.username && (
-													<div className="truncate text-muted-foreground text-sm">
-														{item.username}
-													</div>
-												)}
-											</div>
-											<Badge variant="outline" className="capitalize">
-												{item.category.replace("-", " ")}
-											</Badge>
-										</div>
-									))}
-								</div>
-							)}
+							<ItemList
+								items={decryptedItems}
+								isLoading={isLoadingItems}
+								vaultId={vaultId}
+							/>
 						</CardContent>
 					</Card>
 				</TabsContent>
