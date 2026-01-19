@@ -1,12 +1,19 @@
+import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Card } from "@bittery/ui";
+import { ShareItemDialog } from "@/components/sharing";
 import { Favicon } from "../favicon";
 import type { CategoryDetailProps, SecureNoteDisplayData } from "./shared";
+
+interface SecureNoteDetailProps extends CategoryDetailProps<SecureNoteDisplayData> {
+	item?: DecryptedItem;
+}
 
 export function SecureNoteDetail({
 	data,
 	onEdit,
 	onDelete,
-}: CategoryDetailProps<SecureNoteDisplayData>) {
+	item,
+}: SecureNoteDetailProps) {
 	return (
 		<div className="space-y-4">
 			<div className="flex items-center gap-4">
@@ -25,6 +32,7 @@ export function SecureNoteDetail({
 						Edit
 					</Button>
 				)}
+				{item && <ShareItemDialog item={item} />}
 				{onDelete && (
 					<Button
 						size="sm"

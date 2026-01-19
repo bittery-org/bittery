@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ShareTokenRouteImport } from './routes/share.$token'
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
 import { Route as AuthLoginRouteImport } from './routes/_auth/login'
 import { Route as AppSecurityRouteImport } from './routes/_app/security'
@@ -28,6 +29,11 @@ const AppRoute = AppRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ShareTokenRoute = ShareTokenRouteImport.update({
+  id: '/share/$token',
+  path: '/share/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InviteTokenRoute = InviteTokenRouteImport.update({
@@ -82,6 +88,7 @@ export interface FileRoutesByFullPath {
   '/security': typeof AppSecurityRoute
   '/login': typeof AuthLoginRoute
   '/invite/$token': typeof InviteTokenRoute
+  '/share/$token': typeof ShareTokenRoute
   '/settings': typeof AppSettingsIndexRoute
   '/teams': typeof AppTeamsIndexRoute
   '/vaults': typeof AppVaultsIndexRoute
@@ -94,6 +101,7 @@ export interface FileRoutesByTo {
   '/security': typeof AppSecurityRoute
   '/login': typeof AuthLoginRoute
   '/invite/$token': typeof InviteTokenRoute
+  '/share/$token': typeof ShareTokenRoute
   '/settings': typeof AppSettingsIndexRoute
   '/teams': typeof AppTeamsIndexRoute
   '/vaults': typeof AppVaultsIndexRoute
@@ -108,6 +116,7 @@ export interface FileRoutesById {
   '/_app/security': typeof AppSecurityRoute
   '/_auth/login': typeof AuthLoginRoute
   '/invite/$token': typeof InviteTokenRoute
+  '/share/$token': typeof ShareTokenRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/teams/': typeof AppTeamsIndexRoute
   '/_app/vaults/': typeof AppVaultsIndexRoute
@@ -122,6 +131,7 @@ export interface FileRouteTypes {
     | '/security'
     | '/login'
     | '/invite/$token'
+    | '/share/$token'
     | '/settings'
     | '/teams'
     | '/vaults'
@@ -134,6 +144,7 @@ export interface FileRouteTypes {
     | '/security'
     | '/login'
     | '/invite/$token'
+    | '/share/$token'
     | '/settings'
     | '/teams'
     | '/vaults'
@@ -147,6 +158,7 @@ export interface FileRouteTypes {
     | '/_app/security'
     | '/_auth/login'
     | '/invite/$token'
+    | '/share/$token'
     | '/_app/settings/'
     | '/_app/teams/'
     | '/_app/vaults/'
@@ -159,6 +171,7 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   AuthLoginRoute: typeof AuthLoginRoute
   InviteTokenRoute: typeof InviteTokenRoute
+  ShareTokenRoute: typeof ShareTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -175,6 +188,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/share/$token': {
+      id: '/share/$token'
+      path: '/share/$token'
+      fullPath: '/share/$token'
+      preLoaderRoute: typeof ShareTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/invite/$token': {
@@ -270,6 +290,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   AuthLoginRoute: AuthLoginRoute,
   InviteTokenRoute: InviteTokenRoute,
+  ShareTokenRoute: ShareTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

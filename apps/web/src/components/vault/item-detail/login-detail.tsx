@@ -1,8 +1,10 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: Thats fine here */
 
+import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Card, Input, Label } from "@bittery/ui";
 import { Copy, ExternalLink, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
+import { ShareItemDialog } from "@/components/sharing";
 import { Favicon } from "../favicon";
 import { InlineTotpDisplay } from "./inline-totp-display";
 import {
@@ -11,11 +13,16 @@ import {
 	type LoginDisplayData,
 } from "./shared";
 
+interface LoginDetailProps extends CategoryDetailProps<LoginDisplayData> {
+	item?: DecryptedItem;
+}
+
 export function LoginDetail({
 	data,
 	onEdit,
 	onDelete,
-}: CategoryDetailProps<LoginDisplayData>) {
+	item,
+}: LoginDetailProps) {
 	const [showPassword, setShowPassword] = useState(false);
 	const [visibleCustomFields, setVisibleCustomFields] = useState<Set<string>>(
 		new Set(),
@@ -55,6 +62,7 @@ export function LoginDetail({
 						Edit
 					</Button>
 				)}
+				{item && <ShareItemDialog item={item} />}
 				{onDelete && (
 					<Button
 						size="sm"

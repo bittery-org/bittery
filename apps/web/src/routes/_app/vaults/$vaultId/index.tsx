@@ -197,6 +197,7 @@ function VaultDetailPage() {
 							<ItemDetail
 								category={selectedItem.category}
 								data={selectedItem}
+								item={selectedItem}
 							/>
 						)}
 					</ScrollArea>

@@ -6,9 +6,11 @@ import {
 	getCardBrandDisplayName,
 	maskCardNumber,
 } from "@bittery/shared/credit-card";
+import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Card, Input, Label } from "@bittery/ui";
 import { Copy, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
+import { ShareItemDialog } from "@/components/sharing";
 import { Favicon } from "../favicon";
 import {
 	type CategoryDetailProps,
@@ -16,11 +18,16 @@ import {
 	handleCopy,
 } from "./shared";
 
+interface CreditCardDetailProps extends CategoryDetailProps<CreditCardDisplayData> {
+	item?: DecryptedItem;
+}
+
 export function CreditCardDetail({
 	data,
 	onEdit,
 	onDelete,
-}: CategoryDetailProps<CreditCardDisplayData>) {
+	item,
+}: CreditCardDetailProps) {
 	const [showCardNumber, setShowCardNumber] = useState(false);
 	const [showCVV, setShowCVV] = useState(false);
 
@@ -53,6 +60,7 @@ export function CreditCardDetail({
 						Edit
 					</Button>
 				)}
+				{item && <ShareItemDialog item={item} />}
 				{onDelete && (
 					<Button
 						size="sm"

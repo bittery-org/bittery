@@ -4,9 +4,11 @@ import {
 	generateTotp,
 	type TotpResult,
 } from "@bittery/shared/totp";
+import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { Copy, Eye, EyeOff } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { ShareItemDialog } from "@/components/sharing";
 import { Favicon } from "../favicon";
 import {
 	type CategoryDetailProps,
@@ -14,11 +16,16 @@ import {
 	type TotpDisplayData,
 } from "./shared";
 
+interface TotpDetailProps extends CategoryDetailProps<TotpDisplayData> {
+	item?: DecryptedItem;
+}
+
 export function TotpDetail({
 	data,
 	onEdit,
 	onDelete,
-}: CategoryDetailProps<TotpDisplayData>) {
+	item,
+}: TotpDetailProps) {
 	const [totpResult, setTotpResult] = useState<TotpResult | null>(null);
 	const [showSecret, setShowSecret] = useState(false);
 
@@ -88,6 +95,7 @@ export function TotpDetail({
 						Edit
 					</Button>
 				)}
+				{item && <ShareItemDialog item={item} />}
 				{onDelete && (
 					<Button
 						size="sm"

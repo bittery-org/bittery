@@ -1,5 +1,6 @@
 import type {
 	CreditCardDisplayData,
+	DecryptedItem,
 	IdentityDisplayData,
 	LoginDisplayData,
 	SecureNoteDisplayData,
@@ -21,18 +22,24 @@ export type {
 };
 export type { CustomField, ItemDetailData, ItemDetailProps } from "./shared";
 
+interface ItemDetailComponentProps extends ItemDetailProps {
+	item?: DecryptedItem;
+}
+
 export default function ItemDetail({
 	category,
 	data,
 	onEdit,
 	onDelete,
-}: ItemDetailProps) {
+	item,
+}: ItemDetailComponentProps) {
 	if (category === "login") {
 		return (
 			<LoginDetail
 				data={data as LoginDisplayData}
 				onEdit={onEdit}
 				onDelete={onDelete}
+				item={item}
 			/>
 		);
 	}
@@ -42,6 +49,7 @@ export default function ItemDetail({
 				data={data as CreditCardDisplayData}
 				onEdit={onEdit}
 				onDelete={onDelete}
+				item={item}
 			/>
 		);
 	}
@@ -51,6 +59,7 @@ export default function ItemDetail({
 				data={data as IdentityDisplayData}
 				onEdit={onEdit}
 				onDelete={onDelete}
+				item={item}
 			/>
 		);
 	}
@@ -60,6 +69,7 @@ export default function ItemDetail({
 				data={data as TotpDisplayData}
 				onEdit={onEdit}
 				onDelete={onDelete}
+				item={item}
 			/>
 		);
 	}
@@ -68,6 +78,7 @@ export default function ItemDetail({
 			data={data as SecureNoteDisplayData}
 			onEdit={onEdit}
 			onDelete={onDelete}
+			item={item}
 		/>
 	);
 }

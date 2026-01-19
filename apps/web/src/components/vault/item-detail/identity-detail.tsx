@@ -8,9 +8,11 @@ import {
 	maskPassportNumber,
 	maskSSN,
 } from "@bittery/shared/identity";
+import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Card, Input, Label } from "@bittery/ui";
 import { Copy, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
+import { ShareItemDialog } from "@/components/sharing";
 import { Favicon } from "../favicon";
 import {
 	type CategoryDetailProps,
@@ -18,11 +20,16 @@ import {
 	type IdentityDisplayData,
 } from "./shared";
 
+interface IdentityDetailProps extends CategoryDetailProps<IdentityDisplayData> {
+	item?: DecryptedItem;
+}
+
 export function IdentityDetail({
 	data,
 	onEdit,
 	onDelete,
-}: CategoryDetailProps<IdentityDisplayData>) {
+	item,
+}: IdentityDetailProps) {
 	const [showSSN, setShowSSN] = useState(false);
 	const [showPassport, setShowPassport] = useState(false);
 	const [showDriversLicense, setShowDriversLicense] = useState(false);
@@ -51,6 +58,7 @@ export function IdentityDetail({
 						Edit
 					</Button>
 				)}
+				{item && <ShareItemDialog item={item} />}
 				{onDelete && (
 					<Button
 						size="sm"
