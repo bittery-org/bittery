@@ -1,8 +1,8 @@
 import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Input, Skeleton, toast } from "@bittery/ui";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, ShieldCheck } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Favicon } from "@/components/favicon";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
 
@@ -43,6 +43,7 @@ function hostnameMatches(
 }
 
 export function VaultPage() {
+	const queryClient = useQueryClient();
 	const [searchQuery, setSearchQuery] = useState("");
 	const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 	const [currentHostname, setCurrentHostname] = useState<string | null>(null);
@@ -149,6 +150,10 @@ export function VaultPage() {
 	const favoriteItems = sortedItems.filter((item) => item.favorite);
 	const regularItems = sortedItems.filter((item) => !item.favorite);
 	const selectedItem = sortedItems.find((item) => item.id === selectedItemId);
+
+	const handleItemUpdated = useCallback(() => {
+		queryClient.invalidateQueries({ queryKey: ["vault-items"] });
+	}, [queryClient]);
 
 	return (
 		<div className="flex h-full flex-col">
@@ -312,7 +317,7 @@ export function VaultPage() {
 								<Skeleton className="h-40 w-full" />
 							</div>
 						) : selectedItem ? (
-							<ItemDetailPanel item={selectedItem} />
+							<ItemDetailPanel item={selectedItem} onItemUpdated={handleItemUpdated} />
 						) : (
 							<div className="flex h-full flex-col items-center justify-center gap-3 text-center">
 								<div className="font-semibold">Select an item</div>

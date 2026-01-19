@@ -23,8 +23,9 @@ export function ItemDetailPage() {
 	});
 
 	const handleItemUpdated = useCallback(() => {
-		// Invalidate the query to refresh the item data
+		// Invalidate both the single item query and the items list
 		queryClient.invalidateQueries({ queryKey: ["vault-item", itemId] });
+		queryClient.invalidateQueries({ queryKey: ["vault-items"] });
 	}, [queryClient, itemId]);
 
 	if (isLoading) {
