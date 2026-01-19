@@ -14,6 +14,7 @@
 		"@bittery/crypto": "workspace:*",
 		"@bittery/shared": "workspace:*",
 		"@bittery/ui": "workspace:*",
+		"zxcvbn": "^4.4.2",
 		"@tailwindcss/vite": "^4.1.8",
 		"@tanstack/react-form": "^1.23.5",
 		"@tanstack/react-query": "^5.85.5",
@@ -36,6 +37,7 @@
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
 		"@playwright/test": "^1.57.0",
+		"@types/zxcvbn": "^4.4.5",
 		"@tanstack/react-query-devtools": "^5.85.5",
 		"@tanstack/react-router-devtools": "^1.132.31",
 		"@testing-library/dom": "^10.4.0",

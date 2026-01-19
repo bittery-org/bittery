@@ -19,6 +19,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
 	Home,
+	KeyRound,
 	Lock,
 	LogOut,
 	Menu,
@@ -29,6 +30,7 @@ import {
 
 const navItems = [
 	{ path: "/home", icon: Home, label: "Dashboard" },
+	{ path: "/security", icon: ShieldCheck, label: "Security" },
 	{ path: "/teams", icon: Users, label: "Teams" },
 	{ path: "/vaults", icon: Lock, label: "Vaults" },
 	{ path: "/settings", icon: Settings, label: "Settings" },
@@ -123,7 +125,7 @@ export function Sidebar() {
 		<aside className="hidden w-64 flex-col border-r bg-background lg:flex">
 			<div className="flex h-14 items-center gap-2 border-b px-4">
 				<div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-					<ShieldCheck className="h-4 w-4" />
+					<KeyRound className="h-4 w-4" />
 				</div>
 				<span className="font-bold text-lg">Bittery</span>
 			</div>
@@ -150,7 +152,7 @@ export function MobileNav() {
 			<SheetContent side="left" className="w-64 p-0">
 				<div className="flex h-14 items-center gap-2 border-b px-4">
 					<div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-						<ShieldCheck className="h-4 w-4" />
+						<KeyRound className="h-4 w-4" />
 					</div>
 					<span className="font-bold text-lg">Bittery</span>
 				</div>

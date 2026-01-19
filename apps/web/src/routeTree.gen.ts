@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthLoginRouteImport } from './routes/_auth/login'
+import { Route as AppSecurityRouteImport } from './routes/_app/security'
 import { Route as AppHomeRouteImport } from './routes/_app/home'
 import { Route as AppVaultsIndexRouteImport } from './routes/_app/vaults/index'
 import { Route as AppTeamsIndexRouteImport } from './routes/_app/teams/index'
@@ -32,6 +33,11 @@ const AuthLoginRoute = AuthLoginRouteImport.update({
   id: '/_auth/login',
   path: '/login',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppSecurityRoute = AppSecurityRouteImport.update({
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppHomeRoute = AppHomeRouteImport.update({
   id: '/home',
@@ -67,6 +73,7 @@ const AppTeamsTeamIdIndexRoute = AppTeamsTeamIdIndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/home': typeof AppHomeRoute
+  '/security': typeof AppSecurityRoute
   '/login': typeof AuthLoginRoute
   '/settings': typeof AppSettingsIndexRoute
   '/teams': typeof AppTeamsIndexRoute
@@ -77,6 +84,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/home': typeof AppHomeRoute
+  '/security': typeof AppSecurityRoute
   '/login': typeof AuthLoginRoute
   '/settings': typeof AppSettingsIndexRoute
   '/teams': typeof AppTeamsIndexRoute
@@ -89,6 +97,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_app': typeof AppRouteWithChildren
   '/_app/home': typeof AppHomeRoute
+  '/_app/security': typeof AppSecurityRoute
   '/_auth/login': typeof AuthLoginRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/teams/': typeof AppTeamsIndexRoute
@@ -101,6 +110,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/home'
+    | '/security'
     | '/login'
     | '/settings'
     | '/teams'
@@ -111,6 +121,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/home'
+    | '/security'
     | '/login'
     | '/settings'
     | '/teams'
@@ -122,6 +133,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_app'
     | '/_app/home'
+    | '/_app/security'
     | '/_auth/login'
     | '/_app/settings/'
     | '/_app/teams/'
@@ -158,6 +170,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/login'
       preLoaderRoute: typeof AuthLoginRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_app/security': {
+      id: '/_app/security'
+      path: '/security'
+      fullPath: '/security'
+      preLoaderRoute: typeof AppSecurityRouteImport
+      parentRoute: typeof AppRoute
     }
     '/_app/home': {
       id: '/_app/home'
@@ -206,6 +225,7 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteChildren {
   AppHomeRoute: typeof AppHomeRoute
+  AppSecurityRoute: typeof AppSecurityRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
   AppTeamsIndexRoute: typeof AppTeamsIndexRoute
   AppVaultsIndexRoute: typeof AppVaultsIndexRoute
@@ -215,6 +235,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppHomeRoute: AppHomeRoute,
+  AppSecurityRoute: AppSecurityRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
   AppTeamsIndexRoute: AppTeamsIndexRoute,
   AppVaultsIndexRoute: AppVaultsIndexRoute,

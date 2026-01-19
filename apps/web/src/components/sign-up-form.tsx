@@ -1,7 +1,13 @@
 import { encrypt, generateEncryptionKey } from "@bittery/crypto/encryption";
-import { arrayBufferToBase64, deriveKeys } from "@bittery/crypto/key-derivation";
+import {
+	arrayBufferToBase64,
+	deriveKeys,
+} from "@bittery/crypto/key-derivation";
 import { generateRSAKeyPair } from "@bittery/crypto/rsa";
-import { generateSecretKey, getSecretKeyHint } from "@bittery/crypto/secret-key";
+import {
+	generateSecretKey,
+	getSecretKeyHint,
+} from "@bittery/crypto/secret-key";
 import { normalizeServerUrl } from "@bittery/crypto/server-url";
 import {
 	getServerUrl,

@@ -3,11 +3,11 @@
  * Uses SRP-6a for secure authentication without server knowing password
  */
 
+import type { SRPServerChallenge } from "@bittery/crypto/srp-client";
 import {
 	deriveServerSession,
 	generateServerEphemeral,
 } from "@bittery/crypto/srp-server";
-import type { SRPServerChallenge } from "@bittery/crypto/srp-client";
 import { db, session, user, vaultKey } from "@bittery/db";
 import { and, eq, gt } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
