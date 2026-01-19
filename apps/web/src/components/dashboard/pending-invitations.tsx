@@ -10,7 +10,8 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Mail, X } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
+import { Check, Clock, Mail, X } from "lucide-react";
 
 export function PendingInvitations() {
 	const trpc = useTRPC();
@@ -71,9 +72,16 @@ export function PendingInvitations() {
 									<span className="font-medium">{invitation.teamName}</span>
 									<Badge variant="secondary">{invitation.role}</Badge>
 								</div>
-								<p className="text-muted-foreground text-sm">
-									Invited by {invitation.invitedBy}
-								</p>
+								<div className="flex items-center gap-3 text-muted-foreground text-sm">
+									<span>Invited by {invitation.invitedBy}</span>
+									<span className="flex items-center gap-1">
+										<Clock className="h-3 w-3" />
+										Expires{" "}
+										{formatDistanceToNow(new Date(invitation.expiresAt), {
+											addSuffix: true,
+										})}
+									</span>
+								</div>
 							</div>
 							<div className="flex gap-2">
 								<Button

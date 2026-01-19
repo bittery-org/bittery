@@ -1,24 +1,41 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
+import { z } from "zod";
 import SignInForm from "@/components/sign-in-form";
 import SignUpForm from "@/components/sign-up-form";
 
+const searchSchema = z.object({
+	redirect: z.string().optional(),
+});
+
 export const Route = createFileRoute("/_auth/login")({
 	component: RouteComponent,
+	validateSearch: searchSchema,
 });
 
 function RouteComponent() {
+	const { redirect } = Route.useSearch();
 	const [showSignIn, setShowSignIn] = useState(true);
+
+	// Extract invitation token from redirect URL if present
+	const invitationToken = redirect?.match(/^\/invite\/(.+)$/)?.[1] || undefined;
 
 	return (
 		<div className="flex min-h-screen w-full items-center justify-center bg-muted/30 p-4 lg:p-8">
 			<div className="grid w-full max-w-6xl items-start gap-12 lg:grid-cols-2 lg:items-center">
 				<div className="order-2 mx-auto w-full max-w-md lg:order-1 lg:mr-0 lg:ml-auto">
 					{showSignIn ? (
-						<SignInForm onSwitchToSignUp={() => setShowSignIn(false)} />
+						<SignInForm
+							onSwitchToSignUp={() => setShowSignIn(false)}
+							redirectTo={redirect}
+						/>
 					) : (
-						<SignUpForm onSwitchToSignIn={() => setShowSignIn(true)} />
+						<SignUpForm
+							onSwitchToSignIn={() => setShowSignIn(true)}
+							invitationToken={invitationToken}
+							redirectTo={redirect}
+						/>
 					)}
 				</div>
 

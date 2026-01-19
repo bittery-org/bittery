@@ -34,7 +34,7 @@ export const authRouter = router({
 			z.object({
 				email: z.string().email(),
 				name: z.string().min(2),
-				organizationName: z.string().min(1),
+				organizationName: z.string().min(1).optional(), // Optional for users joining via invitation
 				secretKeyHint: z.string(),
 				srpSalt: z.string(),
 				srpVerifier: z.string(),
@@ -83,22 +83,25 @@ export const authRouter = router({
 				role: "owner",
 			});
 
-			// Create team for the user
-			const teamId = nanoid();
-			await db.insert(team).values({
-				id: teamId,
-				name: input.organizationName,
-				ownerId: userId,
-			});
+			// Only create team if organizationName is provided
+			// Users joining via invitation will join an existing team instead
+			if (input.organizationName) {
+				const teamId = nanoid();
+				await db.insert(team).values({
+					id: teamId,
+					name: input.organizationName,
+					ownerId: userId,
+				});
 
-			// Add user as team owner
-			await db.insert(teamMember).values({
-				id: nanoid(),
-				teamId,
-				userId,
-				role: "owner",
-				joinedAt: new Date(),
-			});
+				// Add user as team owner
+				await db.insert(teamMember).values({
+					id: nanoid(),
+					teamId,
+					userId,
+					role: "owner",
+					joinedAt: new Date(),
+				});
+			}
 
 			// Create session and generate token
 			const sessionData = await createUserSession(userId);

@@ -3,12 +3,12 @@
  * Handles team management, members, and invitations
  */
 
-import { db, team, teamInvitation, teamMember } from "@bittery/db";
+import { db, team, teamInvitation, teamMember, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { protectedProcedure, router } from "../index";
+import { protectedProcedure, publicProcedure, router } from "../index";
 
 /**
  * Helper to check team membership and role
@@ -174,6 +174,45 @@ export const teamRouter = router({
 
 			// Delete team (cascades to members and invitations)
 			await db.delete(team).where(eq(team.id, input.teamId));
+
+			return { success: true };
+		}),
+
+	/**
+	 * Leave team (members and admins, not owner)
+	 */
+	leave: protectedProcedure
+		.input(z.object({ teamId: z.string() }))
+		.mutation(async ({ ctx, input }) => {
+			const membership = await getTeamMembership(
+				ctx.session.userId,
+				input.teamId,
+			);
+
+			if (!membership) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "You are not a member of this team",
+				});
+			}
+
+			// Owner cannot leave, they must delete the team or transfer ownership
+			if (membership.role === "owner") {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message:
+						"Owners cannot leave their team. Please transfer ownership or delete the team.",
+				});
+			}
+
+			await db
+				.delete(teamMember)
+				.where(
+					and(
+						eq(teamMember.teamId, input.teamId),
+						eq(teamMember.userId, ctx.session.userId),
+					),
+				);
 
 			return { success: true };
 		}),
@@ -350,9 +389,85 @@ export const teamRouter = router({
 	}),
 
 	/**
+	 * Get vaults associated with a team (for encrypting vault keys during invite)
+	 */
+	vaults: protectedProcedure
+		.input(z.object({ teamId: z.string() }))
+		.query(async ({ ctx, input }) => {
+			await requireTeamRole(ctx.session.userId, input.teamId, [
+				"owner",
+				"admin",
+			]);
+
+			// Get all vaults for this team
+			const teamVaults = await db.query.vault.findMany({
+				where: (v, { eq }) => eq(v.teamId, input.teamId),
+			});
+
+			// Get the current user's vault keys for these vaults
+			const userVaultKeys = await db.query.vaultKey.findMany({
+				where: (vk, { and, eq, inArray }) =>
+					and(
+						eq(vk.userId, ctx.session.userId),
+						inArray(
+							vk.vaultId,
+							teamVaults.map((v) => v.id),
+						),
+					),
+			});
+
+			// Build a map for quick lookup
+			const keyMap = new Map(userVaultKeys.map((vk) => [vk.vaultId, vk]));
+
+			return teamVaults.map((v) => ({
+				id: v.id,
+				name: v.name,
+				// The current user's encrypted vault key (they need this to re-encrypt for the invitee)
+				encryptedVaultKey: keyMap.get(v.id)?.encryptedVaultKey || null,
+			}));
+		}),
+
+	/**
 	 * Team invitation management
 	 */
 	invitations: router({
+		/**
+		 * Get invitation details by token (public endpoint for invitation links)
+		 */
+		getByToken: publicProcedure
+			.input(z.object({ token: z.string() }))
+			.query(async ({ input }) => {
+				const invitation = await db.query.teamInvitation.findFirst({
+					where: (inv, { eq }) => eq(inv.token, input.token),
+					with: {
+						team: true,
+						invitedBy: true,
+					},
+				});
+
+				if (!invitation) {
+					throw new TRPCError({
+						code: "NOT_FOUND",
+						message: "Invitation not found",
+					});
+				}
+
+				// Check if expired
+				const isExpired = invitation.expiresAt < new Date();
+
+				return {
+					id: invitation.id,
+					email: invitation.email,
+					teamId: invitation.team.id,
+					teamName: invitation.team.name,
+					role: invitation.role,
+					status: isExpired ? "expired" : invitation.status,
+					invitedByName: invitation.invitedBy.name,
+					expiresAt: invitation.expiresAt,
+					createdAt: invitation.createdAt,
+				};
+			}),
+
 		/**
 		 * List pending invitations for a team
 		 */
@@ -386,6 +501,8 @@ export const teamRouter = router({
 
 		/**
 		 * Send invitation (owner/admin only)
+		 * If the user already exists and pendingVaultKeys is provided, it will be stored
+		 * for vault access provisioning when they accept the invitation.
 		 */
 		send: protectedProcedure
 			.input(
@@ -393,6 +510,15 @@ export const teamRouter = router({
 					teamId: z.string(),
 					email: z.string().email(),
 					role: z.enum(["admin", "member"]).default("member"),
+					// Encrypted vault keys for existing users (encrypted with their RSA public key)
+					pendingVaultKeys: z
+						.array(
+							z.object({
+								vaultId: z.string(),
+								encryptedVaultKey: z.string(),
+							}),
+						)
+						.optional(),
 				}),
 			)
 			.mutation(async ({ ctx, input }) => {
@@ -449,9 +575,18 @@ export const teamRouter = router({
 					invitedById: ctx.session.userId,
 					token,
 					expiresAt,
+					// Store pending vault keys if provided (for existing users)
+					pendingVaultKeys: input.pendingVaultKeys
+						? JSON.stringify(input.pendingVaultKeys)
+						: null,
 				});
 
-				return { invitationId, token };
+				// Return user's public key if they exist (so client can encrypt vault keys)
+				return {
+					invitationId,
+					token,
+					existingUserPublicKey: existingUser?.publicKey || null,
+				};
 			}),
 
 		/**
@@ -580,6 +715,7 @@ export const teamRouter = router({
 
 		/**
 		 * Accept invitation
+		 * Handles vault access provisioning if pendingVaultKeys were provided during invite
 		 */
 		accept: protectedProcedure
 			.input(z.object({ token: z.string() }))
@@ -644,6 +780,57 @@ export const teamRouter = router({
 					role: invitation.role,
 					joinedAt: new Date(),
 				});
+
+				// Provision vault access if pendingVaultKeys were provided during invite
+				if (invitation.pendingVaultKeys) {
+					try {
+						const pendingKeys = JSON.parse(
+							invitation.pendingVaultKeys,
+						) as Array<{
+							vaultId: string;
+							encryptedVaultKey: string;
+						}>;
+
+						// Convert invitation role to vault role
+						const vaultRole = invitation.role === "admin" ? "admin" : "member";
+
+						// Create vault key entries for each pending key
+						for (const keyData of pendingKeys) {
+							// Verify the vault belongs to this team
+							const vaultData = await db.query.vault.findFirst({
+								where: (v, { and, eq }) =>
+									and(
+										eq(v.id, keyData.vaultId),
+										eq(v.teamId, invitation.teamId),
+									),
+							});
+
+							if (vaultData) {
+								// Check if user doesn't already have access
+								const existingKey = await db.query.vaultKey.findFirst({
+									where: (vk, { and, eq }) =>
+										and(
+											eq(vk.vaultId, keyData.vaultId),
+											eq(vk.userId, ctx.session.userId),
+										),
+								});
+
+								if (!existingKey) {
+									await db.insert(vaultKey).values({
+										id: nanoid(),
+										vaultId: keyData.vaultId,
+										userId: ctx.session.userId,
+										encryptedVaultKey: keyData.encryptedVaultKey,
+										role: vaultRole,
+									});
+								}
+							}
+						}
+					} catch (e) {
+						// Log error but don't fail the invitation acceptance
+						console.error("Failed to provision vault keys:", e);
+					}
+				}
 
 				// Mark invitation as accepted
 				await db

@@ -94,7 +94,7 @@ function SpeedometerGauge({
 	const gradientId = "gauge-gradient";
 
 	// Calculate marker position on the arc (0 = left, 180 = right)
-	const angleRad = ((value / 100) * Math.PI); // 0 to PI radians
+	const angleRad = (value / 100) * Math.PI; // 0 to PI radians
 	const markerX = centerX - Math.cos(angleRad) * radius;
 	const markerY = centerY - Math.sin(angleRad) * radius;
 
@@ -147,7 +147,9 @@ function SpeedometerGauge({
 					transform: "translateX(-50%)",
 				}}
 			>
-				<span className={`font-bold text-4xl leading-none ${getScoreColor(value)}`}>
+				<span
+					className={`font-bold text-4xl leading-none ${getScoreColor(value)}`}
+				>
 					{value}
 				</span>
 				<span className="font-medium text-[10px] text-muted-foreground tracking-wider">
@@ -270,7 +272,8 @@ function StrengthDistributionBar({
 					</span>
 				</div>
 				<span>
-					<span className="font-medium text-foreground">{total}</span> passwords analyzed
+					<span className="font-medium text-foreground">{total}</span> passwords
+					analyzed
 				</span>
 			</div>
 		</div>
@@ -602,10 +605,7 @@ export function SecurityDashboard({
 		<div className="space-y-6">
 			{/* Score gauge + Password strength distribution bar */}
 			<div className="flex flex-col items-start gap-6 md:flex-row md:items-center">
-				<ScoreGaugeSection
-					score={report.securityScore}
-					isLoading={isLoading}
-				/>
+				<ScoreGaugeSection score={report.securityScore} isLoading={isLoading} />
 				<div className="w-full flex-1">
 					<StrengthDistributionBar report={report} isLoading={isLoading} />
 				</div>

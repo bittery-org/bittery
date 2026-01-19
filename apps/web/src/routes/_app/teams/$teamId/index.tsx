@@ -6,22 +6,20 @@ import {
 	CardDescription,
 	CardHeader,
 	CardTitle,
-	Input,
-	Label,
 	Skeleton,
 	Tabs,
 	TabsContent,
 	TabsList,
 	TabsTrigger,
-	toast,
 } from "@bittery/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, Mail, Settings, Users } from "lucide-react";
-import { useState } from "react";
+import { ArrowLeft, CreditCard, Mail, Settings, Users } from "lucide-react";
 import { InviteDialog } from "@/components/teams/invite-dialog";
 import { MemberList } from "@/components/teams/member-list";
 import { PendingInvitationsList } from "@/components/teams/pending-invitations-list";
+import { TeamBilling } from "@/components/teams/team-billing";
+import { TeamSettings } from "@/components/teams/team-settings";
 
 export const Route = createFileRoute("/_app/teams/$teamId/")({
 	component: TeamDetailPage,
@@ -30,9 +28,6 @@ export const Route = createFileRoute("/_app/teams/$teamId/")({
 function TeamDetailPage() {
 	const { teamId } = Route.useParams();
 	const trpc = useTRPC();
-	const queryClient = useQueryClient();
-	const [isEditing, setIsEditing] = useState(false);
-	const [teamName, setTeamName] = useState("");
 
 	const teamQuery = useQuery(trpc.team.get.queryOptions({ teamId }));
 	const membersQuery = useQuery(
@@ -42,30 +37,8 @@ function TeamDetailPage() {
 		trpc.team.invitations.list.queryOptions({ teamId }),
 	);
 
-	const updateMutation = useMutation({
-		...trpc.team.update.mutationOptions(),
-		onSuccess: () => {
-			toast.success("Team name updated");
-			queryClient.invalidateQueries({ queryKey: ["team"] });
-			setIsEditing(false);
-		},
-		onError: (error) => {
-			toast.error(error.message);
-		},
-	});
-
 	const team = teamQuery.data;
 	const canEdit = team?.userRole === "owner" || team?.userRole === "admin";
-
-	const handleStartEdit = () => {
-		setTeamName(team?.name || "");
-		setIsEditing(true);
-	};
-
-	const handleSave = () => {
-		if (!teamName.trim()) return;
-		updateMutation.mutate({ teamId, name: teamName.trim() });
-	};
 
 	if (teamQuery.isLoading) {
 		return (
@@ -120,12 +93,14 @@ function TeamDetailPage() {
 							</span>
 						) : null}
 					</TabsTrigger>
-					{canEdit && (
-						<TabsTrigger value="settings">
-							<Settings className="mr-2 h-4 w-4" />
-							Settings
-						</TabsTrigger>
-					)}
+					<TabsTrigger value="billing">
+						<CreditCard className="mr-2 h-4 w-4" />
+						Billing
+					</TabsTrigger>
+					<TabsTrigger value="settings">
+						<Settings className="mr-2 h-4 w-4" />
+						Settings
+					</TabsTrigger>
 				</TabsList>
 
 				<TabsContent value="members" className="mt-4">
@@ -172,53 +147,24 @@ function TeamDetailPage() {
 					</Card>
 				</TabsContent>
 
-				{canEdit && (
-					<TabsContent value="settings" className="mt-4">
-						<Card>
-							<CardHeader>
-								<CardTitle>Team Settings</CardTitle>
-								<CardDescription>Manage your team's settings.</CardDescription>
-							</CardHeader>
-							<CardContent className="space-y-4">
-								<div className="grid gap-2">
-									<Label htmlFor="teamName">Team Name</Label>
-									{isEditing ? (
-										<div className="flex gap-2">
-											<Input
-												id="teamName"
-												value={teamName}
-												onChange={(e) => setTeamName(e.target.value)}
-											/>
-											<Button
-												onClick={handleSave}
-												disabled={updateMutation.isPending}
-											>
-												Save
-											</Button>
-											<Button
-												variant="outline"
-												onClick={() => setIsEditing(false)}
-											>
-												Cancel
-											</Button>
-										</div>
-									) : (
-										<div className="flex items-center gap-2">
-											<span className="text-lg">{team.name}</span>
-											<Button
-												variant="outline"
-												size="sm"
-												onClick={handleStartEdit}
-											>
-												Edit
-											</Button>
-										</div>
-									)}
-								</div>
-							</CardContent>
-						</Card>
-					</TabsContent>
-				)}
+				<TabsContent value="billing" className="mt-4">
+					<TeamBilling
+						teamId={teamId}
+						teamName={team.name}
+						memberCount={team.memberCount}
+						userRole={team.userRole}
+					/>
+				</TabsContent>
+
+				<TabsContent value="settings" className="mt-4">
+					<TeamSettings
+						teamId={teamId}
+						teamName={team.name}
+						userRole={team.userRole}
+						createdAt={team.createdAt}
+						updatedAt={team.updatedAt}
+					/>
+				</TabsContent>
 			</Tabs>
 		</div>
 	);

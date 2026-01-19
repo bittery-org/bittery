@@ -20,20 +20,25 @@ import {
 	storeVaultKeys,
 } from "@bittery/crypto/session-storage";
 import { generateSRPRegistration } from "@bittery/crypto/srp-client";
-import { useTRPCClient } from "@bittery/shared/trpc";
-import { Button, Card, Input, Label, toast } from "@bittery/ui";
+import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { Badge, Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Copy, Download, Eye, EyeOff } from "lucide-react";
+import { Copy, Download, Eye, EyeOff, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export default function SignUpForm({
 	onSwitchToSignIn,
+	invitationToken,
+	redirectTo,
 }: {
 	onSwitchToSignIn: () => void;
+	invitationToken?: string;
+	redirectTo?: string;
 }) {
 	const navigate = useNavigate();
+	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
 	const defaultServerUrl = import.meta.env.VITE_SERVER_URL ?? "";
 	const [secretKey, setSecretKey] = useState<string>("");
@@ -43,6 +48,17 @@ export default function SignUpForm({
 	const [serverUrl, setServerUrl] = useState(
 		() => getServerUrl() ?? defaultServerUrl,
 	);
+
+	// Query invitation details if token is provided
+	const invitationQuery = useQuery({
+		...trpc.team.invitations.getByToken.queryOptions({
+			token: invitationToken || "",
+		}),
+		enabled: !!invitationToken,
+	});
+
+	const invitation = invitationQuery.data;
+	const isInvitationSignup = !!invitationToken && !!invitation;
 
 	// Generate Secret Key on mount
 	useEffect(() => {
@@ -60,7 +76,12 @@ export default function SignUpForm({
 			storeVaultKeys(data.vaultKeys);
 
 			toast.success("Account created successfully!");
-			navigate({ to: "/home" });
+			// Navigate to redirect URL (invitation page) if provided, otherwise go to home
+			if (redirectTo) {
+				navigate({ to: redirectTo });
+			} else {
+				navigate({ to: "/home" });
+			}
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Failed to create account");
@@ -91,11 +112,14 @@ export default function SignUpForm({
 			}
 
 			try {
+				// Use invitation email if signing up via invitation
+				const email = isInvitationSignup ? invitation.email : value.email;
+
 				// 1. Derive keys from password + secret key
 				const { authKey, masterUnlockKey } = await deriveKeys(
 					value.password,
 					secretKey,
-					value.email,
+					email,
 				);
 
 				// Convert authKey to password string for SRP
@@ -118,10 +142,12 @@ export default function SignUpForm({
 				);
 
 				// 6. Call signup mutation
+				// Don't include organizationName if signing up via invitation
+				// (the user will join the inviting team instead)
 				const result = await signupMutation.mutateAsync({
-					email: value.email,
+					email,
 					name: value.name,
-					organizationName: value.organizationName,
+					...(isInvitationSignup ? {} : { organizationName: value.organizationName }),
 					secretKeyHint: getSecretKeyHint(secretKey),
 					srpSalt: salt,
 					srpVerifier: verifier,
@@ -135,7 +161,7 @@ export default function SignUpForm({
 
 				// 8. Store secret key and encrypted session for quick unlock
 				storeSecretKey(secretKey);
-				await storeSessionData(masterUnlockKey, value.email, result.userId);
+				await storeSessionData(masterUnlockKey, email, result.userId);
 
 				const timeUntil = getTimeUntilExpiry();
 				const daysUntil = timeUntil
@@ -188,10 +214,12 @@ Generated: ${new Date().toLocaleString()}
 		<div className="w-full space-y-4">
 			<div className="flex flex-col space-y-2 text-center">
 				<h1 className="font-semibold text-xl tracking-tight">
-					Create an account
+					{isInvitationSignup ? "Accept Invitation" : "Create an account"}
 				</h1>
 				<p className="text-muted-foreground text-sm">
-					Get started with secure password management
+					{isInvitationSignup
+						? `Create an account to join ${invitation.teamName}`
+						: "Get started with secure password management"}
 				</p>
 			</div>
 
@@ -342,25 +370,48 @@ Generated: ${new Date().toLocaleString()}
 							</form.Field>
 						</div>
 
-						<div>
-							<form.Field name="organizationName">
-								{(field) => (
-									<div className="space-y-2">
-										<Label htmlFor={field.name}>Organization Name</Label>
-										<Input
-											id={field.name}
-											name={field.name}
-											placeholder="Acme Inc."
-											value={field.state.value}
-											onBlur={field.handleBlur}
-											onChange={(e) => field.handleChange(e.target.value)}
-											required
-											className="h-10"
-										/>
+						{isInvitationSignup ? (
+							<div className="rounded-lg border bg-muted/30 p-4">
+								<div className="flex items-start gap-3">
+									<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
+										<Users className="h-5 w-5 text-primary" />
 									</div>
-								)}
-							</form.Field>
-						</div>
+									<div className="space-y-1">
+										<p className="font-medium text-sm">
+											You've been invited to join{" "}
+											<span className="text-primary">{invitation.teamName}</span>
+										</p>
+										<div className="flex items-center gap-2 text-muted-foreground text-xs">
+											<span>Invited by {invitation.invitedByName}</span>
+											<span>·</span>
+											<Badge variant="secondary" className="text-xs">
+												{invitation.role}
+											</Badge>
+										</div>
+									</div>
+								</div>
+							</div>
+						) : (
+							<div>
+								<form.Field name="organizationName">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Organization Name</Label>
+											<Input
+												id={field.name}
+												name={field.name}
+												placeholder="Acme Inc."
+												value={field.state.value}
+												onBlur={field.handleBlur}
+												onChange={(e) => field.handleChange(e.target.value)}
+												required
+												className="h-10"
+											/>
+										</div>
+									)}
+								</form.Field>
+							</div>
+						)}
 
 						<div>
 							<form.Field name="email">
@@ -372,12 +423,18 @@ Generated: ${new Date().toLocaleString()}
 											name={field.name}
 											type="email"
 											placeholder="name@example.com"
-											value={field.state.value}
+											value={isInvitationSignup ? invitation.email : field.state.value}
 											onBlur={field.handleBlur}
 											onChange={(e) => field.handleChange(e.target.value)}
 											required
+											disabled={isInvitationSignup}
 											className="h-10"
 										/>
+										{isInvitationSignup && (
+											<p className="text-muted-foreground text-xs">
+												This email was used to invite you and cannot be changed.
+											</p>
+										)}
 									</div>
 								)}
 							</form.Field>

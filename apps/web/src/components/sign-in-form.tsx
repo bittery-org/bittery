@@ -30,8 +30,10 @@ import { useEffect, useState } from "react";
 
 export default function SignInForm({
 	onSwitchToSignUp,
+	redirectTo,
 }: {
 	onSwitchToSignUp: () => void;
+	redirectTo?: string;
 }) {
 	const navigate = useNavigate();
 	const trpcClient = useTRPCClient();
@@ -179,7 +181,12 @@ export default function SignInForm({
 			toast.success(
 				`Signed in successfully! Quick unlock available for ${daysUntil} days.`,
 			);
-			navigate({ to: "/home" });
+			// Navigate to redirect URL if provided, otherwise go to home
+			if (redirectTo) {
+				navigate({ to: redirectTo });
+			} else {
+				navigate({ to: "/home" });
+			}
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Failed to sign in");
