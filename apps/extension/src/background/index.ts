@@ -28,6 +28,10 @@ import {
 	handleNativeBiometricUnlock,
 	handleOpenDesktopApp,
 } from "./native-messaging";
+import {
+	handleCaptureTabScreenshot,
+	handleUpdateItemTotp,
+} from "./qr-scan-handlers";
 import { handleAutoLockAlarm } from "./session-manager";
 import {
 	handleGetVaultItem,
@@ -166,6 +170,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 				case "OPEN_DESKTOP_APP": {
 					const result = await handleOpenDesktopApp();
+					sendResponse(result);
+					break;
+				}
+
+				// QR Code scanning
+				case "CAPTURE_TAB_SCREENSHOT": {
+					const result = await handleCaptureTabScreenshot();
+					sendResponse(result);
+					break;
+				}
+
+				case "UPDATE_ITEM_TOTP": {
+					const result = await handleUpdateItemTotp(message.payload);
 					sendResponse(result);
 					break;
 				}

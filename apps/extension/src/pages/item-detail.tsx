@@ -1,12 +1,14 @@
 import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Skeleton } from "@bittery/ui";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
+import { useCallback } from "react";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
 
 export function ItemDetailPage() {
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
 	const { itemId } = useParams({ from: "/item/$itemId" });
 
 	const { data: item, isLoading } = useQuery<DecryptedItem | null>({
@@ -19,6 +21,11 @@ export function ItemDetailPage() {
 			return response.item;
 		},
 	});
+
+	const handleItemUpdated = useCallback(() => {
+		// Invalidate the query to refresh the item data
+		queryClient.invalidateQueries({ queryKey: ["vault-item", itemId] });
+	}, [queryClient, itemId]);
 
 	if (isLoading) {
 		return (
@@ -58,7 +65,7 @@ export function ItemDetailPage() {
 			</div>
 
 			<div className="flex-1 overflow-y-auto p-5">
-				<ItemDetailPanel item={item} />
+				<ItemDetailPanel item={item} onItemUpdated={handleItemUpdated} />
 			</div>
 		</div>
 	);

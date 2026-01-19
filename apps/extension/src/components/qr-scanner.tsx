@@ -1,0 +1,281 @@
+/**
+ * QR Code Scanner Component
+ * Scans the current browser tab for TOTP QR codes
+ */
+
+import type { ParsedOtpAuthUri } from "@bittery/shared/totp";
+import { parseOtpAuthUri, isValidBase32 } from "@bittery/shared/totp";
+import { Button, Card, toast } from "@bittery/ui";
+import {
+	AlertCircle,
+	Camera,
+	CheckCircle2,
+	Loader2,
+	QrCode,
+	ScanLine,
+	X,
+} from "lucide-react";
+import { useState, useCallback } from "react";
+import jsQR from "jsqr";
+
+export type ScanStatus =
+	| "idle"
+	| "scanning"
+	| "success"
+	| "error"
+	| "no-qr-found"
+	| "multiple-qr-found";
+
+export interface QRScanResult {
+	status: ScanStatus;
+	data?: ParsedOtpAuthUri;
+	rawUri?: string;
+	error?: string;
+	qrCodesFound?: number;
+}
+
+interface QRScannerProps {
+	onScanComplete: (result: QRScanResult) => void;
+	onCancel: () => void;
+}
+
+/**
+ * Captures the visible area of the current tab and scans for QR codes
+ */
+async function captureAndScanTab(): Promise<QRScanResult> {
+	return new Promise((resolve) => {
+		// Request the background script to capture the tab
+		chrome.runtime.sendMessage(
+			{ type: "CAPTURE_TAB_SCREENSHOT" },
+			async (response) => {
+				if (!response?.success || !response.dataUrl) {
+					resolve({
+						status: "error",
+						error: response?.error || "Failed to capture tab screenshot",
+					});
+					return;
+				}
+
+				try {
+					// Load the image from the data URL
+					const img = new Image();
+					img.crossOrigin = "anonymous";
+
+					await new Promise<void>((imgResolve, imgReject) => {
+						img.onload = () => imgResolve();
+						img.onerror = () =>
+							imgReject(new Error("Failed to load captured image"));
+						img.src = response.dataUrl;
+					});
+
+					// Create canvas to get image data
+					const canvas = document.createElement("canvas");
+					const ctx = canvas.getContext("2d");
+
+					if (!ctx) {
+						resolve({
+							status: "error",
+							error: "Failed to create canvas context",
+						});
+						return;
+					}
+
+					canvas.width = img.width;
+					canvas.height = img.height;
+					ctx.drawImage(img, 0, 0);
+
+					// Get image data for QR scanning
+					const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+					// Scan for QR codes using jsQR
+					const qrCode = jsQR(
+						imageData.data,
+						imageData.width,
+						imageData.height,
+					);
+
+					if (!qrCode) {
+						resolve({
+							status: "no-qr-found",
+							error: "No QR code found on the page",
+						});
+						return;
+					}
+
+					const rawData = qrCode.data;
+
+					// Validate that it's an otpauth URI
+					if (!rawData.startsWith("otpauth://")) {
+						resolve({
+							status: "error",
+							error:
+								"QR code found but it is not a valid TOTP code (expected otpauth:// format)",
+						});
+						return;
+					}
+
+					// Parse the otpauth URI
+					try {
+						const parsed = parseOtpAuthUri(rawData);
+
+						// Validate the secret is valid base32
+						if (!isValidBase32(parsed.secret)) {
+							resolve({
+								status: "error",
+								error: "QR code contains an invalid TOTP secret",
+							});
+							return;
+						}
+
+						resolve({
+							status: "success",
+							data: parsed,
+							rawUri: rawData,
+						});
+					} catch (parseError: any) {
+						resolve({
+							status: "error",
+							error: `Invalid TOTP QR code: ${parseError.message}`,
+						});
+					}
+				} catch (error: any) {
+					resolve({
+						status: "error",
+						error: `Failed to scan QR code: ${error.message}`,
+					});
+				}
+			},
+		);
+	});
+}
+
+export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
+	const [status, setStatus] = useState<ScanStatus>("idle");
+	const [errorMessage, setErrorMessage] = useState<string>("");
+	const [scanResult, setScanResult] = useState<ParsedOtpAuthUri | null>(null);
+
+	const handleScan = useCallback(async () => {
+		setStatus("scanning");
+		setErrorMessage("");
+		setScanResult(null);
+
+		try {
+			const result = await captureAndScanTab();
+
+			if (result.status === "success" && result.data) {
+				setStatus("success");
+				setScanResult(result.data);
+				onScanComplete(result);
+			} else {
+				setStatus(result.status);
+				setErrorMessage(result.error || "Unknown error occurred");
+
+				// Only call onScanComplete for success - let user retry or cancel for errors
+				if (result.status === "error") {
+					toast.error(result.error || "Failed to scan QR code");
+				}
+			}
+		} catch (error: any) {
+			setStatus("error");
+			setErrorMessage(error.message || "Failed to scan QR code");
+			toast.error("Failed to scan QR code");
+		}
+	}, [onScanComplete]);
+
+	const handleRetry = useCallback(() => {
+		setStatus("idle");
+		setErrorMessage("");
+		setScanResult(null);
+	}, []);
+
+	return (
+		<Card className="p-4">
+			<div className="flex items-center justify-between mb-4">
+				<div className="flex items-center gap-2">
+					<QrCode className="h-5 w-5 text-primary" />
+					<h3 className="font-medium text-sm">Scan TOTP QR Code</h3>
+				</div>
+				<Button
+					size="icon"
+					variant="ghost"
+					onClick={onCancel}
+					className="h-8 w-8"
+				>
+					<X className="h-4 w-4" />
+				</Button>
+			</div>
+
+			{status === "idle" && (
+				<div className="space-y-3">
+					<p className="text-muted-foreground text-xs">
+						Make sure the TOTP QR code is visible on the current page, then
+						click scan.
+					</p>
+					<Button
+						onClick={handleScan}
+						className="w-full gap-2"
+						variant="default"
+					>
+						<ScanLine className="h-4 w-4" />
+						Scan Page for QR Code
+					</Button>
+				</div>
+			)}
+
+			{status === "scanning" && (
+				<div className="flex flex-col items-center gap-3 py-4">
+					<Loader2 className="h-8 w-8 animate-spin text-primary" />
+					<p className="text-muted-foreground text-sm">
+						Scanning page for QR code...
+					</p>
+				</div>
+			)}
+
+			{status === "success" && scanResult && (
+				<div className="space-y-3">
+					<div className="flex items-center gap-2 text-green-600">
+						<CheckCircle2 className="h-5 w-5" />
+						<span className="font-medium text-sm">QR Code Found!</span>
+					</div>
+					{scanResult.issuer && (
+						<p className="text-sm">
+							<span className="text-muted-foreground">Service:</span>{" "}
+							{scanResult.issuer}
+						</p>
+					)}
+					{scanResult.accountName && (
+						<p className="text-sm">
+							<span className="text-muted-foreground">Account:</span>{" "}
+							{scanResult.accountName}
+						</p>
+					)}
+				</div>
+			)}
+
+			{(status === "error" || status === "no-qr-found") && (
+				<div className="space-y-3">
+					<div className="flex items-center gap-2 text-destructive">
+						<AlertCircle className="h-5 w-5" />
+						<span className="font-medium text-sm">
+							{status === "no-qr-found" ? "No QR Code Found" : "Scan Failed"}
+						</span>
+					</div>
+					<p className="text-muted-foreground text-xs">{errorMessage}</p>
+					<div className="flex gap-2">
+						<Button
+							onClick={handleRetry}
+							variant="outline"
+							className="flex-1 gap-2"
+						>
+							<Camera className="h-4 w-4" />
+							Try Again
+						</Button>
+						<Button onClick={onCancel} variant="ghost" className="flex-1">
+							Cancel
+						</Button>
+					</div>
+				</div>
+			)}
+		</Card>
+	);
+}
