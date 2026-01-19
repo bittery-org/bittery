@@ -6,8 +6,8 @@
 import {
 	deriveServerSession,
 	generateServerEphemeral,
-	type SRPServerChallenge,
-} from "@bittery/crypto";
+} from "@bittery/crypto/srp-server";
+import type { SRPServerChallenge } from "@bittery/crypto/srp-client";
 import { db, session, user, vaultKey } from "@bittery/db";
 import { and, eq, gt } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";

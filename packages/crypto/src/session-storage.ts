@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 /**
  * Session Storage Utilities
  * Manages persistent session data with encryption and expiry

@@ -1,5 +1,5 @@
 import type { AppRouter } from "@bittery/api/routers/index";
-import { buildTrpcUrl, normalizeServerUrl } from "@bittery/crypto";
+import { buildTrpcUrl, normalizeServerUrl } from "@bittery/crypto/server-url";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { toast } from "@bittery/ui";
 import { QueryCache, QueryClient } from "@tanstack/react-query";

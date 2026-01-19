@@ -1,5 +1,5 @@
+import { decrypt } from "@bittery/crypto/encryption";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
-import { decrypt } from "@bittery/shared/crypto";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItemData } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";

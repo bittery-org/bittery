@@ -4,11 +4,8 @@
  */
 
 import type { AppRouter } from "@bittery/api/routers/index";
-import {
-	buildTrpcUrl,
-	chromeStorage,
-	normalizeServerUrl,
-} from "@bittery/crypto";
+import { buildTrpcUrl, normalizeServerUrl } from "@bittery/crypto/server-url";
+import * as chromeStorage from "@bittery/crypto/storage-chrome";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 
 const fallbackServerUrl =

@@ -3,7 +3,8 @@
  * Handles tab screenshot capture and TOTP field updates
  */
 
-import { chromeStorage, decrypt, encrypt } from "@bittery/crypto";
+import { decrypt, encrypt } from "@bittery/crypto/encryption";
+import * as chromeStorage from "@bittery/crypto/storage-chrome";
 import { isUnlocked, updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";

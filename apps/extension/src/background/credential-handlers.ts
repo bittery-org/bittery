@@ -3,7 +3,8 @@
  * Handles saving and updating credentials (password capture)
  */
 
-import { chromeStorage, encrypt } from "@bittery/crypto";
+import { encrypt } from "@bittery/crypto/encryption";
+import * as chromeStorage from "@bittery/crypto/storage-chrome";
 import { isUnlocked, updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";

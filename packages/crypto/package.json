@@ -1,12 +1,16 @@
 {
 	"name": "@bittery/crypto",
 	"exports": {
-		".": {
-			"default": "./src/index.ts"
-		},
-		"./*": {
-			"default": "./src/*.ts"
-		}
+		"./encryption": "./src/encryption.ts",
+		"./key-derivation": "./src/key-derivation.ts",
+		"./rsa": "./src/rsa.ts",
+		"./secret-key": "./src/secret-key.ts",
+		"./server-url": "./src/server-url.ts",
+		"./session-storage": "./src/session-storage.ts",
+		"./srp-client": "./src/srp-client.ts",
+		"./srp-server": "./src/srp-server.ts",
+		"./storage-chrome": "./src/storage-chrome.ts",
+		"./storage-tauri": "./src/storage-tauri.ts"
 	},
 	"type": "module",
 	"scripts": {},

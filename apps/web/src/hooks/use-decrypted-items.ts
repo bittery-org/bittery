@@ -1,4 +1,5 @@
-import { decrypt, getDecryptedVaultKey } from "@bittery/shared/crypto";
+import { decrypt } from "@bittery/crypto/encryption";
+import { getDecryptedVaultKey } from "@bittery/crypto/session-storage";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";

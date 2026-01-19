@@ -1,8 +1,6 @@
-import {
-	arrayBufferToBase64,
-	getDecryptedVaultKey,
-	rsaEncrypt,
-} from "@bittery/shared/crypto";
+import { arrayBufferToBase64 } from "@bittery/crypto/key-derivation";
+import { rsaEncrypt } from "@bittery/crypto/rsa";
+import { getDecryptedVaultKey } from "@bittery/crypto/session-storage";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Avatar,

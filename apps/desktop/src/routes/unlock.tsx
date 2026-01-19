@@ -1,9 +1,9 @@
+import { deriveKeys } from "@bittery/crypto/key-derivation";
 import {
 	deriveClientSession,
-	deriveKeys,
 	generateClientEphemeral,
 	verifyServerSession,
-} from "@bittery/crypto";
+} from "@bittery/crypto/srp-client";
 import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";

@@ -1,23 +1,25 @@
+import { deriveKeys } from "@bittery/crypto/key-derivation";
+import { validateSecretKey } from "@bittery/crypto/secret-key";
+import { normalizeServerUrl } from "@bittery/crypto/server-url";
 import {
-	deriveClientSession,
-	deriveKeys,
-	generateClientEphemeral,
 	getServerUrl,
 	getStoredSecretKey,
 	getStoredSessionData,
 	getTimeUntilExpiry,
 	hasStoredSecretKey,
 	isSessionValid,
-	normalizeServerUrl,
 	storeAuthToken,
 	storeMasterUnlockKey,
 	storeSecretKey,
 	storeServerUrl,
 	storeSessionData,
 	storeVaultKeys,
-	validateSecretKey,
+} from "@bittery/crypto/session-storage";
+import {
+	deriveClientSession,
+	generateClientEphemeral,
 	verifyServerSession,
-} from "@bittery/shared/crypto";
+} from "@bittery/crypto/srp-client";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";

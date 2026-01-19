@@ -2,12 +2,8 @@ import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import Loader from "./components/loader";
 import "./index.css";
 import type { AppRouter } from "@bittery/api/routers/index";
-import {
-	buildTrpcUrl,
-	getAuthToken,
-	getServerUrl,
-	normalizeServerUrl,
-} from "@bittery/shared/crypto";
+import { buildTrpcUrl, normalizeServerUrl } from "@bittery/crypto/server-url";
+import { getAuthToken, getServerUrl } from "@bittery/crypto/session-storage";
 import { TRPCProvider } from "@bittery/shared/trpc";
 import { toast } from "@bittery/ui";
 import {

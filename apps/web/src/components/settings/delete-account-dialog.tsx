@@ -1,4 +1,4 @@
-import { clearAllStoredData } from "@bittery/shared/crypto";
+import { clearAllStoredData } from "@bittery/crypto/session-storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	AlertDialog,

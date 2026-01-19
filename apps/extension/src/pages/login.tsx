@@ -1,4 +1,5 @@
-import { chromeStorage, normalizeServerUrl } from "@bittery/crypto";
+import { normalizeServerUrl } from "@bittery/crypto/server-url";
+import * as chromeStorage from "@bittery/crypto/storage-chrome";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";

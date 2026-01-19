@@ -1,5 +1,5 @@
+import { encrypt, generateEncryptionKey } from "@bittery/crypto/encryption";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
-import { encrypt, generateEncryptionKey } from "@bittery/shared/crypto";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { toast } from "@bittery/ui";
 import { useQueryClient } from "@tanstack/react-query";

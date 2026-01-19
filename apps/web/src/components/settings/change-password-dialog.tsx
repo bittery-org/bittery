@@ -1,10 +1,7 @@
-import {
-	decrypt,
-	deriveKeys,
-	encrypt,
-	generateSRPRegistration,
-	getStoredSecretKey,
-} from "@bittery/shared/crypto";
+import { decrypt, encrypt } from "@bittery/crypto/encryption";
+import { deriveKeys } from "@bittery/crypto/key-derivation";
+import { getStoredSecretKey } from "@bittery/crypto/session-storage";
+import { generateSRPRegistration } from "@bittery/crypto/srp-client";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,

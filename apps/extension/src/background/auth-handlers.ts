@@ -3,13 +3,13 @@
  * Handles LOGIN, QUICK_UNLOCK, CHECK_AUTH, and related authentication messages
  */
 
+import { deriveKeys } from "@bittery/crypto/key-derivation";
 import {
-	chromeStorage,
 	deriveClientSession,
-	deriveKeys,
 	generateClientEphemeral,
 	verifyServerSession,
-} from "@bittery/crypto";
+} from "@bittery/crypto/srp-client";
+import * as chromeStorage from "@bittery/crypto/storage-chrome";
 import {
 	isUnlocked,
 	lock,

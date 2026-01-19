@@ -1,4 +1,4 @@
-import { isAuthenticated } from "@bittery/crypto";
+import { isAuthenticated } from "@bittery/crypto/session-storage";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({

@@ -3,7 +3,7 @@
  * Handles autofill-specific messages
  */
 
-import { chromeStorage } from "@bittery/crypto";
+import * as chromeStorage from "@bittery/crypto/storage-chrome";
 import { AUTOFILL_REAUTH_WINDOW_MS } from "./constants";
 import {
 	getLastActivityTimestamp,

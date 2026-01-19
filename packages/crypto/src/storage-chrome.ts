@@ -1,3 +1,5 @@
+/// <reference types="chrome" />
+/// <reference lib="dom" />
 /**
  * Chrome Extension Storage Adapter
  * Adapts session-storage.ts to use chrome.storage APIs instead of localStorage/sessionStorage

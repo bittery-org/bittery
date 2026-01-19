@@ -1,22 +1,19 @@
+import { encrypt, generateEncryptionKey } from "@bittery/crypto/encryption";
+import { arrayBufferToBase64, deriveKeys } from "@bittery/crypto/key-derivation";
+import { generateRSAKeyPair } from "@bittery/crypto/rsa";
+import { generateSecretKey, getSecretKeyHint } from "@bittery/crypto/secret-key";
+import { normalizeServerUrl } from "@bittery/crypto/server-url";
 import {
-	arrayBufferToBase64,
-	deriveKeys,
-	encrypt,
-	generateEncryptionKey,
-	generateRSAKeyPair,
-	generateSecretKey,
-	generateSRPRegistration,
-	getSecretKeyHint,
 	getServerUrl,
 	getTimeUntilExpiry,
-	normalizeServerUrl,
 	storeAuthToken,
 	storeMasterUnlockKey,
 	storeSecretKey,
 	storeServerUrl,
 	storeSessionData,
 	storeVaultKeys,
-} from "@bittery/shared/crypto";
+} from "@bittery/crypto/session-storage";
+import { generateSRPRegistration } from "@bittery/crypto/srp-client";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";

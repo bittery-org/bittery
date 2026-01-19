@@ -1,4 +1,4 @@
-import { isAuthenticated } from "@bittery/shared/crypto";
+import { isAuthenticated } from "@bittery/crypto/session-storage";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { MobileNav, Sidebar } from "@/components/layout/sidebar";
 

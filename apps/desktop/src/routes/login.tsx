@@ -1,11 +1,11 @@
+import { deriveKeys } from "@bittery/crypto/key-derivation";
+import { validateSecretKey } from "@bittery/crypto/secret-key";
+import { normalizeServerUrl } from "@bittery/crypto/server-url";
 import {
 	deriveClientSession,
-	deriveKeys,
 	generateClientEphemeral,
-	normalizeServerUrl,
-	validateSecretKey,
 	verifyServerSession,
-} from "@bittery/crypto";
+} from "@bittery/crypto/srp-client";
 import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";
