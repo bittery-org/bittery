@@ -131,7 +131,11 @@ function parse1PasswordRow(
 
 	// Check for required fields
 	const title =
-		row.title || row.name || row.item || row.label || `Imported Item ${index + 1}`;
+		row.title ||
+		row.name ||
+		row.item ||
+		row.label ||
+		`Imported Item ${index + 1}`;
 
 	if (!title || title.trim() === "") {
 		throw new Error("Missing title");
@@ -190,11 +194,7 @@ function parse1PasswordRow(
 		}
 
 		if (row.cvv || row.cvc || row["security code"]) {
-			sensitiveData.cvv = (
-				row.cvv ||
-				row.cvc ||
-				row["security code"]
-			).trim();
+			sensitiveData.cvv = (row.cvv || row.cvc || row["security code"]).trim();
 		}
 
 		if (row["card brand"] || row.brand || row.type) {
@@ -339,9 +339,7 @@ function parse1PasswordRow(
 /**
  * Map 1Password item type to Bittery category
  */
-function mapCategoryFrom1Password(
-	type: string,
-): ItemCategory {
+function mapCategoryFrom1Password(type: string): ItemCategory {
 	const lowerType = type.toLowerCase();
 
 	if (
@@ -440,7 +438,10 @@ function parse1PasswordJSONItem(
 	}
 
 	const title =
-		item.title || item.name || item.overview?.title || `Imported Item ${index + 1}`;
+		item.title ||
+		item.name ||
+		item.overview?.title ||
+		`Imported Item ${index + 1}`;
 
 	if (!title || title.trim() === "") {
 		throw new Error("Missing title");
@@ -517,8 +518,9 @@ function parse1PasswordJSONItem(
 
 	// Handle notes from multiple locations
 	if (item.notes || item.secureContents?.notesPlain) {
-		sensitiveData.notes =
-			(item.notes || item.secureContents?.notesPlain).trim();
+		sensitiveData.notes = (
+			item.notes || item.secureContents?.notesPlain
+		).trim();
 	}
 
 	return {

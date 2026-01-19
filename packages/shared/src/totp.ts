@@ -219,7 +219,7 @@ async function generateHotp(
 		(hash[offset + 3]! & 0xff);
 
 	// Step 3: Compute HOTP value
-	const otp = binary % Math.pow(10, digits);
+	const otp = binary % 10 ** digits;
 
 	// Pad with leading zeros if necessary
 	return otp.toString().padStart(digits, "0");
@@ -229,12 +229,7 @@ async function generateHotp(
  * Generate a TOTP code for the current time
  */
 export async function generateTotp(options: TotpOptions): Promise<TotpResult> {
-	const {
-		secret,
-		algorithm = "SHA1",
-		digits = 6,
-		period = 30,
-	} = options;
+	const { secret, algorithm = "SHA1", digits = 6, period = 30 } = options;
 
 	// Decode the base32 secret
 	const secretBytes = base32Decode(secret);
@@ -266,12 +261,7 @@ export async function generateTotpAt(
 	options: TotpOptions,
 	timestamp: number,
 ): Promise<string> {
-	const {
-		secret,
-		algorithm = "SHA1",
-		digits = 6,
-		period = 30,
-	} = options;
+	const { secret, algorithm = "SHA1", digits = 6, period = 30 } = options;
 
 	const secretBytes = base32Decode(secret);
 	const counter = Math.floor(timestamp / period);
@@ -288,12 +278,7 @@ export async function verifyTotp(
 	options: TotpOptions,
 	tolerance = 1,
 ): Promise<boolean> {
-	const {
-		secret,
-		algorithm = "SHA1",
-		digits = 6,
-		period = 30,
-	} = options;
+	const { secret, algorithm = "SHA1", digits = 6, period = 30 } = options;
 
 	const secretBytes = base32Decode(secret);
 	const now = Math.floor(Date.now() / 1000);
@@ -360,7 +345,11 @@ export function parseOtpAuthUri(uri: string): ParsedOtpAuthUri {
 
 	const algorithmParam = params.get("algorithm")?.toUpperCase();
 	let algorithm: TotpAlgorithm | undefined;
-	if (algorithmParam === "SHA1" || algorithmParam === "SHA256" || algorithmParam === "SHA512") {
+	if (
+		algorithmParam === "SHA1" ||
+		algorithmParam === "SHA256" ||
+		algorithmParam === "SHA512"
+	) {
 		algorithm = algorithmParam;
 	}
 

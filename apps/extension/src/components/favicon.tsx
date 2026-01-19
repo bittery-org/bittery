@@ -1,6 +1,7 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: its okay */
-import type { ItemCategory } from "@bittery/shared/types";
+
 import { getDomainFromUrl, getFaviconUrl } from "@bittery/shared/favicon";
+import type { ItemCategory } from "@bittery/shared/types";
 import { cn } from "@bittery/ui";
 import { CreditCard, FileText, Globe, User } from "lucide-react";
 import { useState } from "react";
@@ -122,13 +123,19 @@ export function Favicon({
 				);
 			}
 			if (url) {
-				return <span className="select-none font-semibold text-white">{initials}</span>;
+				return (
+					<span className="select-none font-semibold text-white">
+						{initials}
+					</span>
+				);
 			}
 			return <Globe className="text-muted-foreground" size={iconSizes[size]} />;
 		}
 
 		if (category === "credit-card") {
-			return <CreditCard className="text-muted-foreground" size={iconSizes[size]} />;
+			return (
+				<CreditCard className="text-muted-foreground" size={iconSizes[size]} />
+			);
 		}
 
 		if (category === "identity") {
@@ -136,7 +143,9 @@ export function Favicon({
 		}
 
 		// secure-note or default
-		return <FileText className="text-muted-foreground" size={iconSizes[size]} />;
+		return (
+			<FileText className="text-muted-foreground" size={iconSizes[size]} />
+		);
 	};
 
 	return (

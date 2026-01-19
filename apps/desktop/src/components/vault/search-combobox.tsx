@@ -12,7 +12,15 @@ import {
 	PopoverTrigger,
 } from "@bittery/ui";
 import { useNavigate } from "@tanstack/react-router";
-import { CreditCard, FileText, FolderClosed, Key, Search, Smartphone, User } from "lucide-react";
+import {
+	CreditCard,
+	FileText,
+	FolderClosed,
+	Key,
+	Search,
+	Smartphone,
+	User,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { useVaultSearch } from "../../hooks/use-vault-search";
 

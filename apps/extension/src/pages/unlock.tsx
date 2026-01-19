@@ -138,7 +138,9 @@ export function UnlockPage() {
 						<VaultIcon state={vaultState} size={120} />
 					</div>
 					<div>
-						<h1 className="font-semibold text-xl tracking-tight">Welcome back</h1>
+						<h1 className="font-semibold text-xl tracking-tight">
+							Welcome back
+						</h1>
 						<p className="mt-1 text-muted-foreground text-sm">
 							{vaultState === "unlocking"
 								? "Unlocking your vault..."

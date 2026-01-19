@@ -5,6 +5,7 @@ import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { toast } from "@bittery/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { trpc } from "../../lib/providers";
 
 export interface CreateItemInput {
   vaultId: string;
@@ -58,12 +59,9 @@ export function useVaultItemOperations() {
         encryptionAlgorithm: encryptedData.algorithm,
       });
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: (_data, variable) => {
       queryClient.invalidateQueries({
-        queryKey: [
-          ["vault", "listItems"],
-          ["decrypted-items", variables.vaultId],
-        ],
+        queryKey: trpc.vault.listItems.queryKey({ vaultId: variable.vaultId }),
       });
       toast.success("Item created successfully");
     },
@@ -92,11 +90,10 @@ export function useVaultItemOperations() {
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({
-        queryKey: [
-          ["vault", "listItems"],
-          ["decrypted-items", variables.vaultId],
-          ["decrypted-item", variables.itemId],
-        ],
+        queryKey: trpc.vault.listItems.queryKey({ vaultId: variables.vaultId }),
+      });
+      queryClient.invalidateQueries({
+        queryKey: trpc.vault.getItem.queryKey({ itemId: variables.itemId }),
       });
       toast.success("Item updated successfully");
     },
@@ -111,11 +108,7 @@ export function useVaultItemOperations() {
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({
-        queryKey: [
-          ["vault", "listItems"],
-          ["decrypted-items", variables.vaultId],
-		  ["decrypted-item", variables.itemId]
-        ],
+        queryKey: trpc.vault.listItems.queryKey({ vaultId: variables.vaultId }),
       });
       toast.success("Item moved to trash");
       // Navigate back to vault
@@ -135,11 +128,10 @@ export function useVaultItemOperations() {
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({
-        queryKey: [
-          ["vault", "listItems"],
-          ["vault", "getItem", variables.itemId],
-		  ["decrypted-item", variables.itemId]
-        ],
+        queryKey: trpc.vault.listItems.queryKey({ vaultId: variables.vaultId }),
+      });
+      queryClient.invalidateQueries({
+        queryKey: trpc.vault.getItem.queryKey({ itemId: variables.itemId }),
       });
       toast.success(
         variables.favorite ? "Added to favorites" : "Removed from favorites",
@@ -157,12 +149,8 @@ export function useVaultItemOperations() {
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({
-        queryKey: [
-          ["vault", "listItems"],
-          ["decrypted-items", variables.vaultId],
-        ],
+        queryKey: trpc.vault.listItems.queryKey({ vaultId: variables.vaultId }),
       });
-
       toast.success("Item duplicated successfully");
     },
     onError: (error) => {

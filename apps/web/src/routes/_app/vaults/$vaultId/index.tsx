@@ -198,9 +198,7 @@ function VaultDetailPage() {
 												)}
 											</div>
 											<div className="min-w-0 flex-1">
-												<div className="truncate font-medium">
-													{item.title}
-												</div>
+												<div className="truncate font-medium">{item.title}</div>
 												{item.username && (
 													<div className="truncate text-muted-foreground text-sm">
 														{item.username}

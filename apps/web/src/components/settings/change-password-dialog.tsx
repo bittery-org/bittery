@@ -119,7 +119,6 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 				encryptedPrivateKeyData,
 				oldMasterUnlockKey,
 			);
-			
 
 			// 3. Derive new keys from new password
 			const { authKey: newAuthKey, masterUnlockKey: newMasterUnlockKey } =
@@ -131,7 +130,10 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 				await generateSRPRegistration(authKeyString);
 
 			// 5. Re-encrypt private key with new master unlock key
-			const newEncryptedPrivateKey = await encrypt(privateKey, newMasterUnlockKey);
+			const newEncryptedPrivateKey = await encrypt(
+				privateKey,
+				newMasterUnlockKey,
+			);
 
 			// 6. Re-encrypt vault keys with new master unlock key
 			// Only re-encrypt vault keys for vaults the user created (MUK-encrypted)
@@ -269,9 +271,9 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 					</div>
 					<div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
 						<p className="text-amber-700 text-xs dark:text-amber-300">
-							<strong>Warning:</strong> Make sure you remember your new password.
-							If you forget it, you will lose access to your account and all
-							your data.
+							<strong>Warning:</strong> Make sure you remember your new
+							password. If you forget it, you will lose access to your account
+							and all your data.
 						</p>
 					</div>
 					<DialogFooter>

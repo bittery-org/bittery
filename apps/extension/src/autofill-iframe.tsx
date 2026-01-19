@@ -121,9 +121,7 @@ function AutofillIframe() {
 								size="sm"
 							/>
 							<div className="min-w-0 flex-1">
-								<p className="truncate font-medium text-sm">
-									{item.title}
-								</p>
+								<p className="truncate font-medium text-sm">{item.title}</p>
 								{item.username && (
 									<p className="mt-0.5 truncate text-muted-foreground text-xs">
 										{item.username}

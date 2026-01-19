@@ -15,8 +15,14 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
-import { ChevronDown, ChevronRight, Clipboard, Key, Settings } from "lucide-react";
-import { useState, useCallback, useEffect } from "react";
+import {
+	ChevronDown,
+	ChevronRight,
+	Clipboard,
+	Key,
+	Settings,
+} from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import type { VaultOption } from "../types";
 
 export interface TotpFormData {
@@ -96,7 +102,9 @@ export function TotpForm({
 				toast.success("Authenticator saved successfully");
 			} catch (error) {
 				const errorMessage =
-					error instanceof Error ? error.message : "Failed to save authenticator";
+					error instanceof Error
+						? error.message
+						: "Failed to save authenticator";
 				toast.error(errorMessage);
 			}
 		},
@@ -110,67 +118,74 @@ export function TotpForm({
 		}
 	}, []);
 
-	const handlePasteFromClipboard = useCallback(async (silent = false) => {
-		try {
-			const text = await navigator.clipboard.readText();
-			if (text.startsWith("otpauth://")) {
-				const parsed = parseOtpAuthUri(text);
+	const handlePasteFromClipboard = useCallback(
+		async (silent = false) => {
+			try {
+				const text = await navigator.clipboard.readText();
+				if (text.startsWith("otpauth://")) {
+					const parsed = parseOtpAuthUri(text);
 
-				if (parsed.type !== "totp") {
-					if (!silent) toast.error("Only TOTP codes are supported");
-					return false;
+					if (parsed.type !== "totp") {
+						if (!silent) toast.error("Only TOTP codes are supported");
+						return false;
+					}
+
+					form.setFieldValue(
+						"totpSecret",
+						formatSecretForDisplay(parsed.secret),
+					);
+					if (parsed.issuer) {
+						form.setFieldValue("totpIssuer", parsed.issuer);
+					}
+					if (parsed.accountName) {
+						form.setFieldValue("totpAccountName", parsed.accountName);
+					}
+
+					// Auto-generate title
+					const title =
+						parsed.issuer && parsed.accountName
+							? `${parsed.issuer} (${parsed.accountName})`
+							: parsed.issuer || parsed.accountName || "";
+					if (title) {
+						form.setFieldValue("title", title);
+					}
+
+					if (parsed.algorithm) {
+						form.setFieldValue("totpAlgorithm", parsed.algorithm);
+					}
+					if (parsed.digits) {
+						form.setFieldValue("totpDigits", parsed.digits);
+					}
+					if (parsed.period) {
+						form.setFieldValue("totpPeriod", parsed.period);
+					}
+
+					setSecretError(null);
+					setHasImported(true);
+					if (!silent) toast.success("2FA setup imported successfully!");
+					return true;
 				}
 
-				form.setFieldValue("totpSecret", formatSecretForDisplay(parsed.secret));
-				if (parsed.issuer) {
-					form.setFieldValue("totpIssuer", parsed.issuer);
-				}
-				if (parsed.accountName) {
-					form.setFieldValue("totpAccountName", parsed.accountName);
-				}
-
-				// Auto-generate title
-				const title = parsed.issuer && parsed.accountName
-					? `${parsed.issuer} (${parsed.accountName})`
-					: parsed.issuer || parsed.accountName || "";
-				if (title) {
-					form.setFieldValue("title", title);
+				if (isValidBase32(text.replace(/\s/g, ""))) {
+					// Plain secret key
+					form.setFieldValue("totpSecret", formatSecretForDisplay(text));
+					setSecretError(null);
+					setHasImported(true);
+					if (!silent) toast.success("Setup key pasted!");
+					return true;
 				}
 
-				if (parsed.algorithm) {
-					form.setFieldValue("totpAlgorithm", parsed.algorithm);
+				if (!silent) {
+					toast.error("No valid 2FA setup found in clipboard");
 				}
-				if (parsed.digits) {
-					form.setFieldValue("totpDigits", parsed.digits);
-				}
-				if (parsed.period) {
-					form.setFieldValue("totpPeriod", parsed.period);
-				}
-
-				setSecretError(null);
-				setHasImported(true);
-				if (!silent) toast.success("2FA setup imported successfully!");
-				return true;
+				return false;
+			} catch {
+				if (!silent) toast.error("Unable to read clipboard");
+				return false;
 			}
-			
-			if (isValidBase32(text.replace(/\s/g, ""))) {
-				// Plain secret key
-				form.setFieldValue("totpSecret", formatSecretForDisplay(text));
-				setSecretError(null);
-				setHasImported(true);
-				if (!silent) toast.success("Setup key pasted!");
-				return true;
-			}
-			
-			if (!silent) {
-				toast.error("No valid 2FA setup found in clipboard");
-			}
-			return false;
-		} catch {
-			if (!silent) toast.error("Unable to read clipboard");
-			return false;
-		}
-	}, [form]);
+		},
+		[form],
+	);
 
 	const handleManualEntry = () => {
 		setHasImported(true);
@@ -197,7 +212,8 @@ export function TotpForm({
 							</div>
 							<h3 className="font-semibold text-lg">Add Authenticator</h3>
 							<p className="mt-1 text-muted-foreground text-sm">
-								Copy the setup key or QR code link from your account's 2FA settings
+								Copy the setup key or QR code link from your account's 2FA
+								settings
 							</p>
 						</div>
 
@@ -389,7 +405,8 @@ export function TotpForm({
 					{showAdvanced && (
 						<div className="border-t p-4">
 							<p className="mb-4 text-muted-foreground text-xs">
-								Most services use the default settings. Only change these if your service specifies different values.
+								Most services use the default settings. Only change these if
+								your service specifies different values.
 							</p>
 							<div className="grid grid-cols-3 gap-4">
 								<div>
@@ -427,7 +444,9 @@ export function TotpForm({
 													value={field.state.value}
 													onBlur={field.handleBlur}
 													onChange={(e) =>
-														field.handleChange(Number(e.target.value) as TotpDigits)
+														field.handleChange(
+															Number(e.target.value) as TotpDigits,
+														)
 													}
 													className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 												>

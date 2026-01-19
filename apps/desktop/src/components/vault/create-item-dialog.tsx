@@ -33,20 +33,24 @@ interface CreateItemDialogProps {
 	onOpenChange: (open: boolean) => void;
 	vaults: VaultOption[];
 	selectedVaultId?: string;
-	onCreateItem: (data: DecryptedItemData, vaultId: string, category: ItemCategory) => Promise<void>;
+	onCreateItem: (
+		data: DecryptedItemData,
+		vaultId: string,
+		category: ItemCategory,
+	) => Promise<void>;
 }
 
 const categories = [
 	{
 		type: "login" as const,
 		title: "Login",
-		description: "Save website credentials",
+		description: "Save website credentials with optional 2FA",
 		icon: KeyRound,
 	},
 	{
 		type: "totp" as const,
-		title: "Authenticator (TOTP)",
-		description: "Store 2FA authentication codes",
+		title: "Standalone Authenticator",
+		description: "Store 2FA code without login credentials",
 		icon: Smartphone,
 	},
 	{
@@ -135,7 +139,9 @@ export function CreateItemDialog({
 			<DialogContent className="flex max-h-[98svh] max-w-2xl flex-col overflow-hidden p-0">
 				<DialogHeader className="px-6 py-6">
 					<DialogTitle>
-						{step === 1 ? "Create New Item" : `Create ${categories.find(c => c.type === selectedCategory)?.title}`}
+						{step === 1
+							? "Create New Item"
+							: `Create ${categories.find((c) => c.type === selectedCategory)?.title}`}
 					</DialogTitle>
 					<DialogDescription>
 						{step === 1

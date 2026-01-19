@@ -5,7 +5,11 @@
 
 import { chromeStorage } from "@bittery/crypto";
 import { AUTOFILL_REAUTH_WINDOW_MS } from "./constants";
-import { getLastActivityTimestamp, isUnlocked, updateActivity } from "./session-manager";
+import {
+	getLastActivityTimestamp,
+	isUnlocked,
+	updateActivity,
+} from "./session-manager";
 import type { MessageResponse } from "./types";
 import { decryptVaultItems, hostnameMatches } from "./vault-utils";
 

@@ -12,7 +12,11 @@ export function useDecryptedItems(vaultId: string) {
 	const trpc = useTRPC();
 
 	// Fetch raw encrypted items from API
-	const { data: rawItems = [], isLoading: isLoadingRaw, dataUpdatedAt } = useQuery({
+	const {
+		data: rawItems = [],
+		isLoading: isLoadingRaw,
+		dataUpdatedAt,
+	} = useQuery({
 		...trpc.vault.listItems.queryOptions({ vaultId }),
 	});
 

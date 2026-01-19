@@ -225,8 +225,7 @@ export function VaultPage() {
 										</div>
 										{favoriteItems.map((item) => {
 											const title = item.title;
-											const subtitle =
-												item.username || item.url;
+											const subtitle = item.username || item.url;
 											return (
 												<button
 													key={item.id}

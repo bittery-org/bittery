@@ -804,7 +804,10 @@ async function showSavePrompt(
 		if (!event.data?.type) return;
 
 		// Log all messages for debugging (only save-related and resize messages)
-		if (event.data.type.includes("SAVE") || event.data.type === "RESIZE_IFRAME") {
+		if (
+			event.data.type.includes("SAVE") ||
+			event.data.type === "RESIZE_IFRAME"
+		) {
 			console.log("Content script received message:", event.data.type);
 		}
 

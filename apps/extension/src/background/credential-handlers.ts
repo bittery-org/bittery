@@ -162,7 +162,10 @@ export async function handleSaveNewCredential(payload: {
 		};
 
 		// Encrypt credential data with vault key
-		const encryptedData = await encrypt(JSON.stringify(credentialData), vaultKey);
+		const encryptedData = await encrypt(
+			JSON.stringify(credentialData),
+			vaultKey,
+		);
 
 		// Create item via tRPC
 		const result = await trpcClient.vault.createItem.mutate({
@@ -181,7 +184,10 @@ export async function handleSaveNewCredential(payload: {
 		let errorMessage = "Failed to save credentials. Please try again.";
 		let errorType = "unknown";
 
-		if (error.message?.includes("network") || error.message?.includes("fetch")) {
+		if (
+			error.message?.includes("network") ||
+			error.message?.includes("fetch")
+		) {
 			errorMessage = "Network error. Check your connection and try again.";
 			errorType = "network";
 		} else if (
@@ -282,7 +288,10 @@ export async function handleUpdateExistingCredential(payload: {
 		};
 
 		// Encrypt credential data with vault key
-		const encryptedData = await encrypt(JSON.stringify(credentialData), vaultKey);
+		const encryptedData = await encrypt(
+			JSON.stringify(credentialData),
+			vaultKey,
+		);
 
 		// Update item via tRPC
 		await trpcClient.vault.updateItem.mutate({
@@ -299,7 +308,10 @@ export async function handleUpdateExistingCredential(payload: {
 		let errorMessage = "Failed to update credentials. Please try again.";
 		let errorType = "unknown";
 
-		if (error.message?.includes("network") || error.message?.includes("fetch")) {
+		if (
+			error.message?.includes("network") ||
+			error.message?.includes("fetch")
+		) {
 			errorMessage = "Network error. Check your connection and try again.";
 			errorType = "network";
 		} else if (

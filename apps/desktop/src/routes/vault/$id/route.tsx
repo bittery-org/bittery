@@ -8,9 +8,10 @@ import {
 	Outlet,
 	useParams,
 } from "@tanstack/react-router";
-import { Archive, Star } from "lucide-react";
+import { Archive, Smartphone, Star } from "lucide-react";
 import { Favicon } from "../../../components/vault/favicon";
 import { useDecryptedItems } from "../../../hooks/use-decrypted-items";
+import { trpc } from "../../../lib/providers";
 
 export const Route = createFileRoute("/vault/$id")({
 	component: RouteComponent,
@@ -46,15 +47,12 @@ function RouteComponent() {
 			// Invalidate listItems - the decrypted-items query will automatically
 			// refetch because its key includes a fingerprint of the raw items
 			queryClient.invalidateQueries({
-				queryKey: [["vault", "listItems"]],
+				queryKey: trpc.vault.listItems.queryKey({ vaultId: id || "" }),
 			});
 			// Invalidate single item queries if viewing an item
 			if (itemId) {
 				queryClient.invalidateQueries({
-					queryKey: [["vault", "getItem"]],
-				});
-				queryClient.invalidateQueries({
-					queryKey: ["decrypted-item", itemId],
+					queryKey: trpc.vault.getItem.queryKey({ itemId }),
 				});
 			}
 		},
@@ -126,8 +124,17 @@ function RouteComponent() {
 															size="sm"
 														/>
 														<div className="min-w-0 flex-1">
-															<div className="truncate font-medium text-sm">
-																{item.title}
+															<div className="flex items-center gap-1.5">
+																<span className="truncate font-medium text-sm">
+																	{item.title}
+																</span>
+																{/* TOTP indicator for login items */}
+																{item.category === "login" &&
+																	item.totpSecret && (
+																		<span title="Has 2FA">
+																			<Smartphone className="size-3 shrink-0 text-primary" />
+																		</span>
+																	)}
 															</div>
 															{item.username && (
 																<div className="mt-0.5 truncate text-muted-foreground text-xs">
@@ -181,8 +188,16 @@ function RouteComponent() {
 													size="sm"
 												/>
 												<div className="min-w-0 flex-1">
-													<div className="truncate font-medium text-sm">
-														{item.title}
+													<div className="flex items-center gap-1.5">
+														<span className="truncate font-medium text-sm">
+															{item.title}
+														</span>
+														{/* TOTP indicator for login items */}
+														{item.category === "login" && item.totpSecret && (
+															<span title="Has 2FA">
+																<Smartphone className="size-3 shrink-0 text-primary" />
+															</span>
+														)}
 													</div>
 													{item.username && (
 														<div className="mt-0.5 truncate text-muted-foreground text-xs">

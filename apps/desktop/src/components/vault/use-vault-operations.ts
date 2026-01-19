@@ -7,113 +7,113 @@ import { useNavigate } from "@tanstack/react-router";
 import { refreshVaultKeys } from "../../lib/vault-utils";
 
 export interface VaultFormData {
-  name: string;
-  type: "personal" | "team";
-  icon: string;
-  imageFile: File | null;
+	name: string;
+	type: "personal" | "team";
+	icon: string;
+	imageFile: File | null;
 }
 
 export function useVaultOperations() {
-  const trpcClient = useTRPCClient();
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
+	const trpcClient = useTRPCClient();
+	const queryClient = useQueryClient();
+	const navigate = useNavigate();
 
-  const createVault = async (data: VaultFormData): Promise<void> => {
-    if (!data.name.trim()) {
-      throw new Error("Vault name is required");
-    }
+	const createVault = async (data: VaultFormData): Promise<void> => {
+		if (!data.name.trim()) {
+			throw new Error("Vault name is required");
+		}
 
-    if (data.name.trim().length < 2) {
-      throw new Error("Vault name must be at least 2 characters");
-    }
+		if (data.name.trim().length < 2) {
+			throw new Error("Vault name must be at least 2 characters");
+		}
 
-    let imageKey: string | undefined;
+		let imageKey: string | undefined;
 
-    if (data.imageFile) {
-      if (!data.imageFile.type.startsWith("image/")) {
-        throw new Error("Vault image must be an image file");
-      }
+		if (data.imageFile) {
+			if (!data.imageFile.type.startsWith("image/")) {
+				throw new Error("Vault image must be an image file");
+			}
 
-      const upload = await trpcClient.vault.createImageUpload.mutate({
-        fileName: data.imageFile.name,
-        contentType: data.imageFile.type,
-      });
+			const upload = await trpcClient.vault.createImageUpload.mutate({
+				fileName: data.imageFile.name,
+				contentType: data.imageFile.type,
+			});
 
-      const uploadResponse = await fetch(upload.uploadUrl, {
-        method: "PUT",
-        headers: {
-          "Content-Type": data.imageFile.type,
-        },
-        body: data.imageFile,
-      });
+			const uploadResponse = await fetch(upload.uploadUrl, {
+				method: "PUT",
+				headers: {
+					"Content-Type": data.imageFile.type,
+				},
+				body: data.imageFile,
+			});
 
-      if (!uploadResponse.ok) {
-        throw new Error("Failed to upload vault image");
-      }
+			if (!uploadResponse.ok) {
+				throw new Error("Failed to upload vault image");
+			}
 
-      imageKey = upload.key;
-    }
+			imageKey = upload.key;
+		}
 
-    const vaultKey = generateEncryptionKey();
-    const masterUnlockKey = await tauriStorage.getMasterUnlockKey();
+		const vaultKey = generateEncryptionKey();
+		const masterUnlockKey = await tauriStorage.getMasterUnlockKey();
 
-    if (!masterUnlockKey) {
-      throw new Error("Master Unlock Key not found");
-    }
+		if (!masterUnlockKey) {
+			throw new Error("Master Unlock Key not found");
+		}
 
-    const encryptedVaultKeyData = await encrypt(
-      btoa(String.fromCharCode(...vaultKey)),
-      masterUnlockKey,
-    );
+		const encryptedVaultKeyData = await encrypt(
+			btoa(String.fromCharCode(...vaultKey)),
+			masterUnlockKey,
+		);
 
-    const result = await trpcClient.vault.create.mutate({
-      name: data.name.trim(),
-      type: data.type,
-      encryptedVaultKey: JSON.stringify(encryptedVaultKeyData),
-      icon: data.icon,
-      ...(imageKey && { imageKey }),
-    });
+		const result = await trpcClient.vault.create.mutate({
+			name: data.name.trim(),
+			type: data.type,
+			encryptedVaultKey: JSON.stringify(encryptedVaultKeyData),
+			icon: data.icon,
+			...(imageKey && { imageKey }),
+		});
 
-    await refreshVaultKeys(trpcClient);
-    queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
+		await refreshVaultKeys(trpcClient);
+		queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
 
-    navigate({ to: "/vault/$id", params: { id: result.vaultId } });
-  };
+		navigate({ to: "/vault/$id", params: { id: result.vaultId } });
+	};
 
-  const updateVault = async (vaultId: string, name: string) => {
-    if (!name.trim()) {
-      throw new Error("Vault name is required");
-    }
+	const updateVault = async (vaultId: string, name: string) => {
+		if (!name.trim()) {
+			throw new Error("Vault name is required");
+		}
 
-    if (name.trim().length < 2) {
-      throw new Error("Vault name must be at least 2 characters");
-    }
+		if (name.trim().length < 2) {
+			throw new Error("Vault name must be at least 2 characters");
+		}
 
-    await trpcClient.vault.update.mutate({
-      vaultId,
-      name: name.trim(),
-    });
+		await trpcClient.vault.update.mutate({
+			vaultId,
+			name: name.trim(),
+		});
 
-    await refreshVaultKeys(trpcClient);
-    queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
-  };
+		await refreshVaultKeys(trpcClient);
+		queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
+	};
 
-  const deleteVault = async (vaultId: string, currentVaultId?: string) => {
-    await trpcClient.vault.delete.mutate({ vaultId });
+	const deleteVault = async (vaultId: string, currentVaultId?: string) => {
+		await trpcClient.vault.delete.mutate({ vaultId });
 
-    await refreshVaultKeys(trpcClient);
-    queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
+		await refreshVaultKeys(trpcClient);
+		queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
 
-    if (currentVaultId === vaultId) {
-      navigate({ to: "/vault" });
-    }
+		if (currentVaultId === vaultId) {
+			navigate({ to: "/vault" });
+		}
 
-    toast.success("Vault deleted successfully");
-  };
+		toast.success("Vault deleted successfully");
+	};
 
-  return {
-    createVault,
-    updateVault,
-    deleteVault,
-  };
+	return {
+		createVault,
+		updateVault,
+		deleteVault,
+	};
 }

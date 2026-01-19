@@ -1,9 +1,6 @@
-import { ChangeEmailDialog } from "@/components/settings/change-email-dialog";
-import { ChangePasswordDialog } from "@/components/settings/change-password-dialog";
-import { DeleteAccountDialog } from "@/components/settings/delete-account-dialog";
-import { RegenerateSecretKeyDialog } from "@/components/settings/regenerate-secret-key-dialog";
 import { useTRPC } from "@bittery/shared/trpc";
 import {
+	Button,
 	Card,
 	CardContent,
 	CardDescription,
@@ -15,7 +12,10 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { ExternalLink, Github, Key, Shield, Trash2, User } from "lucide-react";
-import { Button } from "@bittery/ui";
+import { ChangeEmailDialog } from "@/components/settings/change-email-dialog";
+import { ChangePasswordDialog } from "@/components/settings/change-password-dialog";
+import { DeleteAccountDialog } from "@/components/settings/delete-account-dialog";
+import { RegenerateSecretKeyDialog } from "@/components/settings/regenerate-secret-key-dialog";
 
 export const Route = createFileRoute("/_app/settings/")({
 	component: SettingsPage,

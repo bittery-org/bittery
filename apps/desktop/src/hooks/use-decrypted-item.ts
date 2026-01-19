@@ -16,6 +16,7 @@ export function useDecryptedItem(itemId: string) {
 		data: rawItem,
 		isLoading: isLoadingRaw,
 		error: rawError,
+		dataUpdatedAt
 	} = useQuery({
 		...trpc.vault.getItem.queryOptions({ itemId }),
 		enabled: !!itemId,
@@ -27,7 +28,7 @@ export function useDecryptedItem(itemId: string) {
 		isLoading: isDecrypting,
 		error: decryptError,
 	} = useQuery({
-		queryKey: ["decrypted-item", itemId],
+		queryKey: ["decrypted-item", itemId, dataUpdatedAt],
 		queryFn: async (): Promise<DecryptedItemData | null> => {
 			if (!rawItem) return null;
 

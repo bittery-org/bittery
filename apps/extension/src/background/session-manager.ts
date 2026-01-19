@@ -3,7 +3,11 @@
  * Manages Master Unlock Key in memory, auto-lock timers, and keepalive mechanism
  */
 
-import { AUTO_LOCK_ALARM_NAME, AUTO_LOCK_TIMEOUT_MS, KEEPALIVE_INTERVAL_MS } from "./constants";
+import {
+	AUTO_LOCK_ALARM_NAME,
+	AUTO_LOCK_TIMEOUT_MS,
+	KEEPALIVE_INTERVAL_MS,
+} from "./constants";
 
 // In-memory state
 let masterUnlockKey: Uint8Array | null = null;

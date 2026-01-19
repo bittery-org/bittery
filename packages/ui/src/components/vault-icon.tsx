@@ -15,10 +15,7 @@ export function VaultIcon({
 }: VaultIconProps) {
 	return (
 		<div
-			className={cn(
-				"relative shrink-0",
-				className,
-			)}
+			className={cn("relative shrink-0", className)}
 			style={{
 				width: size,
 				height: size,
@@ -50,7 +47,7 @@ export function VaultIcon({
 						state === "unlocking" && "animate-spin",
 						state === "unlocked" && "rotate-180",
 					)}
-					style={{ transformOrigin: '80px 80px' }}
+					style={{ transformOrigin: "80px 80px" }}
 				>
 					{/* Outer ring segments */}
 					{[0, 60, 120, 180, 240, 300].map((rotation) => (
@@ -74,7 +71,7 @@ export function VaultIcon({
 						"transition-all duration-500",
 						state === "unlocked" && "scale-90 opacity-0",
 					)}
-					style={{ transformOrigin: '80px 80px' }}
+					style={{ transformOrigin: "80px 80px" }}
 				>
 					{/* Main door circle */}
 					<circle cx="80" cy="80" r="50" fill="#2563eb" />
@@ -107,45 +104,17 @@ export function VaultIcon({
 							state === "unlocking" && "rotate-90",
 							state === "unlocked" && "rotate-180 scale-75",
 						)}
-						style={{ transformOrigin: '80px 80px' }}
+						style={{ transformOrigin: "80px 80px" }}
 					>
 						{/* Lock handle */}
 						<circle cx="80" cy="80" r="15" fill="#1e3a8a" />
 						<circle cx="80" cy="80" r="12" fill="#3b82f6" />
 
 						{/* Handle bars */}
-						<rect
-							x="78"
-							y="50"
-							width="4"
-							height="20"
-							rx="2"
-							fill="#1e3a8a"
-						/>
-						<rect
-							x="78"
-							y="90"
-							width="4"
-							height="20"
-							rx="2"
-							fill="#1e3a8a"
-						/>
-						<rect
-							x="50"
-							y="78"
-							width="20"
-							height="4"
-							rx="2"
-							fill="#1e3a8a"
-						/>
-						<rect
-							x="90"
-							y="78"
-							width="20"
-							height="4"
-							rx="2"
-							fill="#1e3a8a"
-						/>
+						<rect x="78" y="50" width="4" height="20" rx="2" fill="#1e3a8a" />
+						<rect x="78" y="90" width="4" height="20" rx="2" fill="#1e3a8a" />
+						<rect x="50" y="78" width="20" height="4" rx="2" fill="#1e3a8a" />
+						<rect x="90" y="78" width="20" height="4" rx="2" fill="#1e3a8a" />
 					</g>
 				</g>
 
@@ -157,7 +126,7 @@ export function VaultIcon({
 							? "scale-100 opacity-100"
 							: "scale-50 opacity-0",
 					)}
-					style={{ transformOrigin: '80px 80px' }}
+					style={{ transformOrigin: "80px 80px" }}
 				>
 					<circle cx="80" cy="80" r="30" fill="#10b981" />
 					<path
@@ -172,13 +141,7 @@ export function VaultIcon({
 
 				{/* Gradients */}
 				<defs>
-					<linearGradient
-						id="vaultGradient"
-						x1="80"
-						y1="5"
-						x2="80"
-						y2="155"
-					>
+					<linearGradient id="vaultGradient" x1="80" y1="5" x2="80" y2="155">
 						<stop offset="0%" stopColor="#dbeafe" />
 						<stop offset="100%" stopColor="#bfdbfe" />
 					</linearGradient>

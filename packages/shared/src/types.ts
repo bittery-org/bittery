@@ -8,7 +8,12 @@ import type { Address, PhoneNumber } from "./identity";
  * Item categories for vault items
  * Matches the itemCategoryEnum in the database schema
  */
-export type ItemCategory = "login" | "secure-note" | "credit-card" | "identity" | "totp";
+export type ItemCategory =
+	| "login"
+	| "secure-note"
+	| "credit-card"
+	| "identity"
+	| "totp";
 
 /**
  * TOTP algorithm options (RFC 6238)

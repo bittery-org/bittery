@@ -5,39 +5,38 @@ import { createRouter, RouterProvider } from "@tanstack/react-router";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { AccountProvider } from "./contexts/account-context";
-
+import { queryClient, trpc, trpcClient } from "./lib/providers";
 // Import the generated route tree
 import { routeTree } from "./routeTree.gen";
-import { queryClient, trpc, trpcClient } from "./lib/providers";
 
 // Create a new router instance
 const router = createRouter({
-  routeTree,
-  scrollRestoration: true,
-  defaultPreloadStaleTime: 0,
-  context: { trpc, queryClient },
+	routeTree,
+	scrollRestoration: true,
+	defaultPreloadStaleTime: 0,
+	context: { trpc, queryClient },
 });
 
 // Register the router instance for type safety
 declare module "@tanstack/react-router" {
-  interface Register {
-    router: typeof router;
-  }
+	interface Register {
+		router: typeof router;
+	}
 }
 
 async function initializeApp() {
-  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-    <React.StrictMode>
-      <QueryClientProvider client={queryClient}>
-        {/* @ts-ignore */}
-        <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-          <AccountProvider>
-            <RouterProvider router={router} />
-          </AccountProvider>
-        </TRPCProvider>
-      </QueryClientProvider>
-    </React.StrictMode>,
-  );
+	ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+		<React.StrictMode>
+			<QueryClientProvider client={queryClient}>
+				{/* @ts-ignore */}
+				<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+					<AccountProvider>
+						<RouterProvider router={router} />
+					</AccountProvider>
+				</TRPCProvider>
+			</QueryClientProvider>
+		</React.StrictMode>,
+	);
 }
 
 initializeApp();

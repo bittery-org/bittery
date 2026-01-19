@@ -10,7 +10,12 @@ import {
 	generateClientEphemeral,
 	verifyServerSession,
 } from "@bittery/crypto";
-import { isUnlocked, lock, setMasterUnlockKey, updateActivity } from "./session-manager";
+import {
+	isUnlocked,
+	lock,
+	setMasterUnlockKey,
+	updateActivity,
+} from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
 

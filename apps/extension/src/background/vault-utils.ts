@@ -18,7 +18,10 @@ export function getBaseDomain(host: string): string {
 /**
  * Helper function to check if hostname matches
  */
-export function hostnameMatches(itemUrl: string, targetHostname: string): boolean {
+export function hostnameMatches(
+	itemUrl: string,
+	targetHostname: string,
+): boolean {
 	if (!itemUrl) return false;
 
 	try {

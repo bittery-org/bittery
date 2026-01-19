@@ -2,8 +2,8 @@
 
 import {
 	type Address,
-	type PhoneNumber,
 	formatSSN,
+	type PhoneNumber,
 } from "@bittery/shared/identity";
 import {
 	Button,

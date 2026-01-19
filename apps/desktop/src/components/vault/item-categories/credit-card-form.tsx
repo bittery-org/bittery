@@ -30,10 +30,7 @@ export interface CreditCardFormData {
 
 interface CreditCardFormProps {
 	initialData?: Partial<CreditCardFormData>;
-	onSubmit: (
-		data: CreditCardFormData,
-		vaultId: string,
-	) => Promise<void> | void;
+	onSubmit: (data: CreditCardFormData, vaultId: string) => Promise<void> | void;
 	onCancel: () => void;
 	submitLabel?: string;
 	isSubmitting?: boolean;

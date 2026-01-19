@@ -28,7 +28,9 @@ import { useState } from "react";
 
 export function RegenerateSecretKeyDialog({
 	userEmail,
-}: { userEmail: string }) {
+}: {
+	userEmail: string;
+}) {
 	const [open, setOpen] = useState(false);
 	const [step, setStep] = useState<"confirm" | "display">("confirm");
 	const [currentPassword, setCurrentPassword] = useState("");
@@ -169,7 +171,10 @@ export function RegenerateSecretKeyDialog({
 				await generateSRPRegistration(authKeyString);
 
 			// 5. Re-encrypt private key with new master unlock key
-			const newEncryptedPrivateKey = await encrypt(privateKey, newMasterUnlockKey);
+			const newEncryptedPrivateKey = await encrypt(
+				privateKey,
+				newMasterUnlockKey,
+			);
 
 			// 6. Re-encrypt vault keys with new master unlock key
 			// Only re-encrypt vault keys for vaults the user created (MUK-encrypted)
@@ -327,7 +332,11 @@ Generated: ${new Date().toLocaleString()}
 							>
 								Cancel
 							</Button>
-							<Button type="submit" variant="destructive" disabled={isProcessing}>
+							<Button
+								type="submit"
+								variant="destructive"
+								disabled={isProcessing}
+							>
 								{isProcessing ? "Verifying..." : "Generate New Key"}
 							</Button>
 						</DialogFooter>
