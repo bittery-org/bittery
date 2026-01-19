@@ -518,9 +518,7 @@ function parse1PasswordJSONItem(
 
 	// Handle notes from multiple locations
 	if (item.notes || item.secureContents?.notesPlain) {
-		sensitiveData.notes = (
-			item.notes || item.secureContents?.notesPlain
-		).trim();
+		sensitiveData.notes = (item.notes || item.secureContents.notesPlain).trim();
 	}
 
 	return {

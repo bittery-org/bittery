@@ -21,10 +21,10 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Key, Users } from "lucide-react";
 import { useState } from "react";
+import ItemDetail from "@/components/vault/item-detail";
+import { ItemList } from "@/components/vault/item-list";
 import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { VaultMemberList } from "@/components/vaults/vault-member-list";
-import { ItemList } from "@/components/vault/item-list";
-import ItemDetail from "@/components/vault/item-detail";
 import { useDecryptedItems } from "@/hooks/use-decrypted-items";
 
 export const Route = createFileRoute("/_app/vaults/$vaultId/")({
@@ -78,8 +78,8 @@ function VaultDetailPage() {
 	}
 
 	return (
-		<div className="space-y-6">
-			<div className="flex items-center gap-4">
+		<div className="flex h-full flex-col gap-6">
+			<div className="flex shrink-0 items-center gap-4">
 				<Link to="/vaults">
 					<Button variant="ghost" size="icon">
 						<ArrowLeft className="h-4 w-4" />
@@ -102,8 +102,8 @@ function VaultDetailPage() {
 				</div>
 			</div>
 
-			<Tabs defaultValue="items">
-				<TabsList>
+			<Tabs defaultValue="items" className="flex min-h-0 flex-1 flex-col">
+				<TabsList className="shrink-0">
 					<TabsTrigger value="items">
 						<Key className="mr-2 h-4 w-4" />
 						Items
@@ -119,15 +119,18 @@ function VaultDetailPage() {
 					</TabsTrigger>
 				</TabsList>
 
-				<TabsContent value="items" className="mt-4">
-					<Card>
-						<CardHeader>
+				<TabsContent
+					value="items"
+					className="mt-4 flex min-h-0 flex-1 flex-col"
+				>
+					<Card className="flex min-h-0 flex-1 flex-col">
+						<CardHeader className="shrink-0">
 							<CardTitle>Vault Items</CardTitle>
 							<CardDescription>
 								Click on an item to view its details.
 							</CardDescription>
 						</CardHeader>
-						<CardContent>
+						<CardContent className="flex min-h-0 flex-1 flex-col pb-6">
 							<ItemList
 								items={decryptedItems}
 								isLoading={isLoadingItems}
@@ -184,7 +187,10 @@ function VaultDetailPage() {
 			</Tabs>
 
 			{/* Item Detail Sheet */}
-			<Sheet open={!!selectedItem} onOpenChange={(open) => !open && handleCloseSheet()}>
+			<Sheet
+				open={!!selectedItem}
+				onOpenChange={(open) => !open && handleCloseSheet()}
+			>
 				<SheetContent className="w-full sm:max-w-lg">
 					<ScrollArea className="h-full pr-4">
 						{selectedItem && (

@@ -1,8 +1,12 @@
 import { generateTotp, type TotpResult } from "@bittery/shared/totp";
-import type { DecryptedItem, TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
+import type {
+	DecryptedItem,
+	TotpAlgorithm,
+	TotpDigits,
+} from "@bittery/shared/types";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
-import { Copy, ExternalLink, Eye, EyeOff, QrCode, Loader2 } from "lucide-react";
-import { useState, useCallback, useEffect } from "react";
+import { Copy, ExternalLink, Eye, EyeOff, Loader2, QrCode } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { Favicon } from "./favicon";
 import { QRScanner, type QRScanResult } from "./qr-scanner";
 
@@ -305,19 +309,17 @@ function LoginItemDetail({
 						totpPeriod={item.totpPeriod}
 					/>
 				) : showQRScanner ? (
-					<>
-						{isSaving ? (
-							<Card className="flex items-center justify-center gap-2 p-4">
-								<Loader2 className="h-5 w-5 animate-spin" />
-								<span className="text-sm">Saving TOTP...</span>
-							</Card>
-						) : (
-							<QRScanner
-								onScanComplete={handleQRScanComplete}
-								onCancel={handleCancelQRScanner}
-							/>
-						)}
-					</>
+					isSaving ? (
+						<Card className="flex items-center justify-center gap-2 p-4">
+							<Loader2 className="h-5 w-5 animate-spin" />
+							<span className="text-sm">Saving TOTP...</span>
+						</Card>
+					) : (
+						<QRScanner
+							onScanComplete={handleQRScanComplete}
+							onCancel={handleCancelQRScanner}
+						/>
+					)
 				) : (
 					<Button
 						variant="outline"

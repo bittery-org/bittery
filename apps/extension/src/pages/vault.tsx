@@ -317,7 +317,10 @@ export function VaultPage() {
 								<Skeleton className="h-40 w-full" />
 							</div>
 						) : selectedItem ? (
-							<ItemDetailPanel item={selectedItem} onItemUpdated={handleItemUpdated} />
+							<ItemDetailPanel
+								item={selectedItem}
+								onItemUpdated={handleItemUpdated}
+							/>
 						) : (
 							<div className="flex h-full flex-col items-center justify-center gap-3 text-center">
 								<div className="font-semibold">Select an item</div>

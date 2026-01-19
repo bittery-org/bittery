@@ -34,7 +34,6 @@ const getCategoryIcon = (category: ItemCategory) => {
 			return CreditCard;
 		case "identity":
 			return User;
-		case "secure-note":
 		default:
 			return FileText;
 	}

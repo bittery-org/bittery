@@ -3,6 +3,7 @@
  * Based on RFC 6238: https://tools.ietf.org/html/rfc6238
  * and RFC 4226 (HOTP): https://tools.ietf.org/html/rfc4226
  */
+/** biome-ignore-all lint/style/noNonNullAssertion: Its fine here */
 
 import type { TotpAlgorithm, TotpDigits } from "./types";
 
@@ -156,7 +157,6 @@ function getWebCryptoAlgorithm(algorithm: TotpAlgorithm): string {
 			return "SHA-256";
 		case "SHA512":
 			return "SHA-512";
-		case "SHA1":
 		default:
 			return "SHA-1";
 	}

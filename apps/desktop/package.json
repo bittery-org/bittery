@@ -4,6 +4,7 @@
 	"version": "0.1.0",
 	"type": "module",
 	"scripts": {
+		"check-types": "tsc --noEmit",
 		"dev": "tauri dev",
 		"dev:vite": "vite",
 		"prebuild": "cd src-tauri && cargo build --release --bin bittery-native-host",
@@ -43,6 +44,7 @@
 		"@tauri-apps/cli": "^2",
 		"@types/papaparse": "^5.5.2",
 		"@types/react": "^19.1.8",
+		"@types/chrome": "^0.0.281",
 		"@types/react-dom": "^19.1.6",
 		"@vitejs/plugin-react": "^4.6.0",
 		"typescript": "~5.8.3",

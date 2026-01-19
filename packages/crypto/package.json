@@ -6,9 +6,6 @@
 		},
 		"./*": {
 			"default": "./src/*.ts"
-		},
-		"./storage-tauri": {
-			"default": "./src/storage-tauri.ts"
 		}
 	},
 	"type": "module",

@@ -111,6 +111,7 @@ export function TotpForm({
 	});
 
 	// Auto-focus paste on mount if no initial data
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Only want to run on mount
 	useEffect(() => {
 		if (!initialData?.totpSecret) {
 			// Try to auto-paste from clipboard on mount

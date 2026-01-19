@@ -5,6 +5,7 @@ import {
 	Badge,
 	Button,
 	Input,
+	ScrollArea,
 	Select,
 	SelectContent,
 	SelectItem,
@@ -111,9 +112,7 @@ export function ItemList({
 		result.sort((a, b) => {
 			if (a.favorite && !b.favorite) return -1;
 			if (!a.favorite && b.favorite) return 1;
-			return (
-				new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-			);
+			return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
 		});
 
 		return result;
@@ -125,12 +124,12 @@ export function ItemList({
 
 	if (isLoading) {
 		return (
-			<div className="space-y-4">
-				<div className="flex gap-2">
+			<div className="flex min-h-0 flex-1 flex-col gap-4">
+				<div className="flex shrink-0 gap-2">
 					<Skeleton className="h-10 flex-1" />
 					<Skeleton className="h-10 w-40" />
 				</div>
-				<div className="space-y-2">
+				<div className="min-h-0 flex-1 space-y-2">
 					{[1, 2, 3, 4, 5].map((i) => (
 						<Skeleton key={i} className="h-16" />
 					))}
@@ -140,23 +139,23 @@ export function ItemList({
 	}
 
 	return (
-		<div className="flex flex-col gap-4">
-			{/* Search and Filter Bar */}
-			<div className="flex gap-2">
+		<div className="flex min-h-0 flex-1 flex-col gap-4">
+			{/* Search and Filter Bar - Fixed Header */}
+			<div className="flex shrink-0 gap-2">
 				<div className="relative flex-1">
-					<Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+					<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
 					<Input
 						type="text"
 						placeholder="Search items..."
 						value={searchQuery}
 						onChange={(e) => setSearchQuery(e.target.value)}
-						className="pl-9 pr-9"
+						className="pr-9 pl-9"
 					/>
 					{searchQuery && (
 						<button
 							type="button"
 							onClick={() => setSearchQuery("")}
-							className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+							className="-translate-y-1/2 absolute top-1/2 right-3 text-muted-foreground hover:text-foreground"
 						>
 							<X className="h-4 w-4" />
 						</button>
@@ -179,9 +178,9 @@ export function ItemList({
 				</Select>
 			</div>
 
-			{/* Results summary */}
+			{/* Results summary - Fixed */}
 			{(searchQuery || categoryFilter !== "all") && (
-				<div className="flex items-center gap-2 text-sm text-muted-foreground">
+				<div className="flex shrink-0 items-center gap-2 text-muted-foreground text-sm">
 					<span>
 						{filteredItems.length} result{filteredItems.length !== 1 ? "s" : ""}
 					</span>
@@ -201,63 +200,68 @@ export function ItemList({
 				</div>
 			)}
 
-			{/* Items List */}
+			{/* Scrollable Items List */}
 			{filteredItems.length === 0 ? (
-				<div className="flex flex-col items-center justify-center py-12 text-center">
-					<div className="rounded-full bg-muted p-4 mb-4">
+				<div className="flex min-h-0 flex-1 flex-col items-center justify-center py-12 text-center">
+					<div className="mb-4 rounded-full bg-muted p-4">
 						<Key className="h-8 w-8 text-muted-foreground" />
 					</div>
-					<h3 className="font-semibold mb-1">
+					<h3 className="mb-1 font-semibold">
 						{searchQuery || categoryFilter !== "all"
 							? "No matching items"
 							: "No items yet"}
 					</h3>
-					<p className="text-muted-foreground text-sm max-w-sm">
+					<p className="max-w-sm text-muted-foreground text-sm">
 						{searchQuery || categoryFilter !== "all"
 							? "Try adjusting your search or filters"
 							: "Create your first item in the desktop app"}
 					</p>
 				</div>
 			) : (
-				<div className="space-y-1">
-					{/* Favorites Section */}
-					{favoriteItems.length > 0 && (
-						<>
-							<div className="px-2 py-2 text-xs font-semibold uppercase text-muted-foreground">
-								Favorites ({favoriteItems.length})
-							</div>
-							{favoriteItems.map((item) => (
-								<ItemRow
-									key={item.id}
-									item={item}
-									isSelected={selectedItemId === item.id}
-									onSelect={onItemSelect}
-									onToggleFavorite={handleToggleFavorite}
-								/>
-							))}
-						</>
-					)}
-
-					{/* All Items Section */}
-					{regularItems.length > 0 && (
-						<>
-							{favoriteItems.length > 0 && (
-								<div className="px-2 py-2 text-xs font-semibold uppercase text-muted-foreground mt-4">
-									All Items ({regularItems.length})
+				<ScrollArea
+					className="min-h-0 flex-1"
+					data-testid="vault-items-scroll-area"
+				>
+					<div className="space-y-1 pr-4">
+						{/* Favorites Section */}
+						{favoriteItems.length > 0 && (
+							<>
+								<div className="px-2 py-2 font-semibold text-muted-foreground text-xs uppercase">
+									Favorites ({favoriteItems.length})
 								</div>
-							)}
-							{regularItems.map((item) => (
-								<ItemRow
-									key={item.id}
-									item={item}
-									isSelected={selectedItemId === item.id}
-									onSelect={onItemSelect}
-									onToggleFavorite={handleToggleFavorite}
-								/>
-							))}
-						</>
-					)}
-				</div>
+								{favoriteItems.map((item) => (
+									<ItemRow
+										key={item.id}
+										item={item}
+										isSelected={selectedItemId === item.id}
+										onSelect={onItemSelect}
+										onToggleFavorite={handleToggleFavorite}
+									/>
+								))}
+							</>
+						)}
+
+						{/* All Items Section */}
+						{regularItems.length > 0 && (
+							<>
+								{favoriteItems.length > 0 && (
+									<div className="mt-4 px-2 py-2 font-semibold text-muted-foreground text-xs uppercase">
+										All Items ({regularItems.length})
+									</div>
+								)}
+								{regularItems.map((item) => (
+									<ItemRow
+										key={item.id}
+										item={item}
+										isSelected={selectedItemId === item.id}
+										onSelect={onItemSelect}
+										onToggleFavorite={handleToggleFavorite}
+									/>
+								))}
+							</>
+						)}
+					</div>
+				</ScrollArea>
 			)}
 		</div>
 	);
@@ -283,7 +287,9 @@ function ItemRow({
 	const maskedCardNumber = item.cardNumber
 		? maskCardNumber(item.cardNumber)
 		: undefined;
-	const cardBrand = item.cardNumber ? detectCardBrand(item.cardNumber) : undefined;
+	const cardBrand = item.cardNumber
+		? detectCardBrand(item.cardNumber)
+		: undefined;
 
 	return (
 		<div
@@ -296,10 +302,10 @@ function ItemRow({
 			}}
 			role="button"
 			tabIndex={0}
-			className={`flex items-center gap-3 rounded-lg border p-3 transition-colors cursor-pointer ${
+			className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors ${
 				isSelected
-					? "bg-muted/60 border-primary/50"
-					: "hover:bg-muted/30 border-transparent"
+					? "border-primary/50 bg-muted/60"
+					: "border-transparent hover:bg-muted/30"
 			}`}
 		>
 			<Favicon
@@ -331,7 +337,7 @@ function ItemRow({
 				)}
 			</div>
 			<div className="flex items-center gap-2">
-				<Badge variant="outline" className="capitalize shrink-0">
+				<Badge variant="outline" className="shrink-0 capitalize">
 					{item.category.replace("-", " ")}
 				</Badge>
 				<button

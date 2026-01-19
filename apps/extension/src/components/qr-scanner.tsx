@@ -4,8 +4,9 @@
  */
 
 import type { ParsedOtpAuthUri } from "@bittery/shared/totp";
-import { parseOtpAuthUri, isValidBase32 } from "@bittery/shared/totp";
+import { isValidBase32, parseOtpAuthUri } from "@bittery/shared/totp";
 import { Button, Card, toast } from "@bittery/ui";
+import jsQR from "jsqr";
 import {
 	AlertCircle,
 	Camera,
@@ -15,8 +16,7 @@ import {
 	ScanLine,
 	X,
 } from "lucide-react";
-import { useState, useCallback } from "react";
-import jsQR from "jsqr";
+import { useCallback, useState } from "react";
 
 export type ScanStatus =
 	| "idle"
@@ -190,7 +190,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 
 	return (
 		<Card className="p-4">
-			<div className="flex items-center justify-between mb-4">
+			<div className="mb-4 flex items-center justify-between">
 				<div className="flex items-center gap-2">
 					<QrCode className="h-5 w-5 text-primary" />
 					<h3 className="font-medium text-sm">Scan TOTP QR Code</h3>

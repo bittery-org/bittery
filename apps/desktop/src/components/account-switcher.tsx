@@ -97,26 +97,26 @@ export function AccountSwitcher() {
 		}
 	};
 
-	const _handleLogout = async () => {
-		if (!activeAccount) return;
+	// const _handleLogout = async () => {
+	// 	if (!activeAccount) return;
 
-		try {
-			await tauriStorage.clearAllStoredData(activeAccount.email);
-			const accountsList = await tauriStorage.getAccountsList();
+	// 	try {
+	// 		await tauriStorage.clearAllStoredData(activeAccount.email);
+	// 		const accountsList = await tauriStorage.getAccountsList();
 
-			if (accountsList.accounts.length === 0) {
-				navigate({ to: "/login" });
-			} else {
-				// Switch to first remaining account
-				await switchAccount(accountsList.accounts[0].email);
-				navigate({ to: "/vault" });
-			}
-			toast.success("Logged out successfully");
-		} catch (error) {
-			console.error("Logout error:", error);
-			toast.error("Failed to logout");
-		}
-	};
+	// 		if (accountsList.accounts.length === 0) {
+	// 			navigate({ to: "/login" });
+	// 		} else {
+	// 			// Switch to first remaining account
+	// 			await switchAccount(accountsList.accounts[0].email);
+	// 			navigate({ to: "/vault" });
+	// 		}
+	// 		toast.success("Logged out successfully");
+	// 	} catch (error) {
+	// 		console.error("Logout error:", error);
+	// 		toast.error("Failed to logout");
+	// 	}
+	// };
 
 	if (!activeAccount) {
 		return null;

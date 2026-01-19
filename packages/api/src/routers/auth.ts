@@ -195,7 +195,8 @@ export const authRouter = router({
 
 			// Get user's vault keys
 			const vaultKeys = await db.query.vaultKey.findMany({
-				where: (vaultKey, { eq }) => eq(vaultKey.userId, result.user?.id),
+				// biome-ignore lint/suspicious/noNonNullAssertedOptionalChain: we need that here
+				where: (vaultKey, { eq }) => eq(vaultKey.userId, result.user?.id!),
 				with: {
 					vault: true,
 				},
@@ -264,7 +265,8 @@ export const authRouter = router({
 
 			// Get user's vault keys
 			const vaultKeys = await db.query.vaultKey.findMany({
-				where: (vaultKey, { eq }) => eq(vaultKey.userId, result.user?.id),
+				// biome-ignore lint/suspicious/noNonNullAssertedOptionalChain: we need that here
+				where: (vaultKey, { eq }) => eq(vaultKey.userId, result.user?.id!),
 				with: {
 					vault: true,
 				},

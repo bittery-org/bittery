@@ -1,12 +1,12 @@
 {
-	"extends": "@bittery/config/tsconfig.base.json",
-	"compilerOptions": {
-		"declaration": true,
-		"declarationMap": true,
-		"sourceMap": true,
-		"outDir": "dist",
-		"composite": true,
-		"types": ["chrome"],
-		"lib": ["ESNext", "DOM"]
-	}
+  "extends": "@bittery/config/tsconfig.base.json",
+  "compilerOptions": {
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "composite": true,
+    "types": ["chrome"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  }
 }

@@ -133,6 +133,9 @@ importers:
       '@tauri-apps/cli':
         specifier: ^2
         version: 2.9.6
+      '@types/chrome':
+        specifier: ^0.0.281
+        version: 0.0.281
       '@types/papaparse':
         specifier: ^5.5.2
         version: 5.5.2
