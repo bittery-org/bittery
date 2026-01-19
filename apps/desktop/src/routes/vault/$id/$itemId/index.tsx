@@ -1,5 +1,5 @@
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
-import { copyToClipboard } from "@bittery/shared/crypto";
+import { copyToClipboard } from "@bittery/shared/password";
 import {
 	Button,
 	Dialog,

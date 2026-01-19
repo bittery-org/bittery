@@ -59,7 +59,7 @@ const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 /**
  * Decode a base32-encoded string to Uint8Array
  */
-export function base32Decode(input: string): Uint8Array {
+export function base32Decode(input: string): Uint8Array<ArrayBuffer> {
 	// Remove spaces and convert to uppercase
 	const sanitized = input.replace(/\s/g, "").toUpperCase();
 
@@ -67,7 +67,7 @@ export function base32Decode(input: string): Uint8Array {
 	const noPadding = sanitized.replace(/=+$/, "");
 
 	if (noPadding.length === 0) {
-		return new Uint8Array(0);
+		return new Uint8Array(0) as Uint8Array<ArrayBuffer>;
 	}
 
 	// Validate characters
@@ -102,7 +102,7 @@ export function base32Decode(input: string): Uint8Array {
 /**
  * Encode a Uint8Array to base32 string
  */
-export function base32Encode(input: Uint8Array): string {
+export function base32Encode(input: Uint8Array<ArrayBuffer>): string {
 	if (input.length === 0) {
 		return "";
 	}
@@ -167,9 +167,9 @@ function getWebCryptoAlgorithm(algorithm: TotpAlgorithm): string {
  */
 async function hmac(
 	algorithm: TotpAlgorithm,
-	key: Uint8Array,
-	message: Uint8Array,
-): Promise<Uint8Array> {
+	key: Uint8Array<ArrayBuffer>,
+	message: Uint8Array<ArrayBuffer>,
+): Promise<Uint8Array<ArrayBuffer>> {
 	const cryptoKey = await crypto.subtle.importKey(
 		"raw",
 		key,
@@ -185,8 +185,8 @@ async function hmac(
 /**
  * Convert a number to an 8-byte big-endian Uint8Array
  */
-function numberToBytes(num: number): Uint8Array {
-	const bytes = new Uint8Array(8);
+function numberToBytes(num: number): Uint8Array<ArrayBuffer> {
+	const bytes = new Uint8Array(8) as Uint8Array<ArrayBuffer>;
 	let remaining = num;
 
 	for (let i = 7; i >= 0; i--) {
@@ -201,7 +201,7 @@ function numberToBytes(num: number): Uint8Array {
  * Generate HOTP code (RFC 4226)
  */
 async function generateHotp(
-	secret: Uint8Array,
+	secret: Uint8Array<ArrayBuffer>,
 	counter: number,
 	algorithm: TotpAlgorithm = "SHA1",
 	digits: TotpDigits = 6,

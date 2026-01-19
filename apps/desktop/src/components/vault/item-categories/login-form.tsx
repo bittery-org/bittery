@@ -157,7 +157,6 @@ export function LoginForm({
 
 	const handleGeneratePassword = (password: string) => {
 		form.setFieldValue("password", password);
-		toast.success("Password generated");
 	};
 
 	const addAdditionalUrl = () => {

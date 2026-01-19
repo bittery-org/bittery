@@ -1,4 +1,4 @@
-import { generatePassword, type PasswordOptions } from "@bittery/shared/crypto";
+import { generatePassword, type PasswordOptions } from "@bittery/shared/password";
 import { Check, Copy, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "./button";

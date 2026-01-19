@@ -7,7 +7,7 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./credit-card": "./src/credit-card.ts",
-		"./crypto": "./src/crypto.ts",
+		"./password": "./src/password.ts",
 		"./favicon": "./src/favicon.ts",
 		"./identity": "./src/identity.ts",
 		"./totp": "./src/totp.ts",

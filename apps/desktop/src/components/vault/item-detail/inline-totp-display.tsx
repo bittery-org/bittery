@@ -1,4 +1,4 @@
-import { copyToClipboard } from "@bittery/shared/crypto";
+import { copyToClipboard } from "@bittery/shared/password";
 import { generateTotp, type TotpResult } from "@bittery/shared/totp";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import { Button, toast } from "@bittery/ui";

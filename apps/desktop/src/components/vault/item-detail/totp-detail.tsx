@@ -1,4 +1,4 @@
-import { copyToClipboard } from "@bittery/shared/crypto";
+import { copyToClipboard } from "@bittery/shared/password";
 import {
 	formatSecretForDisplay,
 	generateTotp,
