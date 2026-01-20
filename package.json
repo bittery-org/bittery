@@ -6,6 +6,7 @@
 		"check": "biome check --write .",
 		"dev": "turbo dev",
 		"build": "turbo build",
+		"unit:test": "bun test",
 		"check-types": "turbo check-types",
 		"dev:desktop": "turbo -F desktop tauri:dev",
 		"build:desktop": "turbo -F desktop tauri:build",
