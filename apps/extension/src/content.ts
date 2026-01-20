@@ -1,9 +1,23 @@
 /**
  * Content Script
  * Detects password fields and injects autofill UI via shadow DOM
+ * Enhanced with improved form field detection for complex forms
  */
 
 import type { DecryptedItem } from "@bittery/shared/types";
+import {
+	detectCredentialFields,
+	detectCreditCardFields,
+	groupCreditCardFieldsByForm,
+	detectFieldType,
+	getAllInputs,
+	isFieldVisible,
+	detectMultiStepForm,
+	createEnhancedObserver,
+	observeShadowRoots,
+	type DetectedCreditCardForm,
+	type CreditCardFieldType,
+} from "./lib/field-detection";
 
 console.log("Bittery content script loaded");
 
@@ -13,13 +27,38 @@ interface CredentialField {
 	overlay?: HTMLElement;
 	messageHandler?: (event: MessageEvent) => void;
 	readyTimeout?: NodeJS.Timeout;
+	confidence?: number;
+	shadowRoot?: ShadowRoot;
+}
+
+interface CreditCardField {
+	input: HTMLInputElement;
+	type: CreditCardFieldType;
+	overlay?: HTMLElement;
+	messageHandler?: (event: MessageEvent) => void;
+	readyTimeout?: NodeJS.Timeout;
+	confidence?: number;
+	shadowRoot?: ShadowRoot;
+	formGroup?: DetectedCreditCardForm;
 }
 
 const detectedFields = new Map<HTMLInputElement, CredentialField>();
+const detectedCreditCardFields = new Map<HTMLInputElement, CreditCardField>();
 let currentFocusedField: CredentialField | null = null;
+let currentFocusedCreditCardField: CreditCardField | null = null;
+
+// Visual feedback styles for autofilled fields
+const AUTOFILL_HIGHLIGHT_STYLE = {
+	boxShadow: "0 0 0 2px rgba(34, 197, 94, 0.5)",
+	transition: "box-shadow 0.3s ease-out",
+};
+const AUTOFILL_SUCCESS_DURATION = 2000; // How long to show the success highlight
 
 // Track forms to avoid duplicate listeners
 const processedForms = new WeakSet<HTMLFormElement>();
+
+// Track shadow roots we've observed
+const observedShadowRoots = new WeakSet<ShadowRoot>();
 
 // Track recent form submissions to prevent duplicates (debounce)
 const recentFormSubmissions = new WeakMap<HTMLFormElement, number>();
@@ -35,8 +74,174 @@ interface PendingRequest {
 }
 const pendingAjaxRequests = new Map<string, PendingRequest>();
 
-// Detect password fields
-function detectPasswordFields() {
+// Debounce field detection to prevent excessive processing
+let detectionTimeout: NodeJS.Timeout | null = null;
+const DETECTION_DEBOUNCE_MS = 100;
+
+/**
+ * Enhanced password field detection with support for:
+ * - Shadow DOM traversal
+ * - Multi-step forms
+ * - Dynamic forms
+ * - Advanced field type identification
+ */
+function detectPasswordFields(root: Document | ShadowRoot = document) {
+	// Use enhanced detection for comprehensive field discovery
+	const enhancedFields = detectCredentialFields(root);
+
+	for (const enhancedField of enhancedFields) {
+		const input = enhancedField.element;
+
+		if (detectedFields.has(input)) continue;
+
+		// Only process credential-related fields with sufficient confidence
+		if (enhancedField.confidence < 0.1) continue;
+
+		// Filter to only username, email, and password types
+		if (!["username", "email", "password"].includes(enhancedField.type)) {
+			continue;
+		}
+
+		const field: CredentialField = {
+			input,
+			type: enhancedField.type as "username" | "email" | "password",
+			confidence: enhancedField.confidence,
+			shadowRoot: enhancedField.shadowRoot,
+		};
+		detectedFields.set(input, field);
+
+		// Disable browser's native autofill
+		input.setAttribute("autocomplete", "off");
+		input.setAttribute("data-form-type", "other");
+		input.setAttribute("data-bittery-detected", "true");
+
+		// Also disable on the parent form if it exists
+		const form = input.closest("form");
+		if (form && !form.hasAttribute("data-bittery-processed")) {
+			form.setAttribute("autocomplete", "off");
+			form.setAttribute("data-bittery-processed", "true");
+
+			// Detect multi-step form characteristics
+			const multiStepInfo = detectMultiStepForm(form);
+			if (multiStepInfo.isMultiStep) {
+				form.setAttribute("data-bittery-multistep", "true");
+				form.setAttribute(
+					"data-bittery-total-steps",
+					String(multiStepInfo.totalSteps),
+				);
+				console.log(
+					`Detected multi-step form: ${multiStepInfo.currentStep}/${multiStepInfo.totalSteps}`,
+				);
+			}
+		}
+
+		// Add focus listener
+		input.addEventListener("focus", () => handleFieldFocus(field));
+		input.addEventListener("blur", () => handleFieldBlur(field));
+
+		// Add form submission listeners
+		if (form && !processedForms.has(form)) {
+			attachFormSubmitListeners(form);
+			processedForms.add(form);
+		}
+
+		console.log(
+			`Detected ${field.type} field with confidence ${field.confidence?.toFixed(2)}:`,
+			input.name || input.id || "unnamed",
+		);
+	}
+
+	// Also scan for Shadow DOM roots and observe them
+	scanForShadowRoots(root);
+
+	// Detect credit card fields
+	detectCreditCardFieldsOnPage(root);
+}
+
+/**
+ * Enhanced credit card field detection
+ */
+function detectCreditCardFieldsOnPage(root: Document | ShadowRoot = document) {
+	const creditCardFields = detectCreditCardFields(root);
+	const formGroups = groupCreditCardFieldsByForm(creditCardFields);
+
+	for (const enhancedField of creditCardFields) {
+		const input = enhancedField.element;
+
+		if (detectedCreditCardFields.has(input)) continue;
+
+		// Only process credit card fields with sufficient confidence
+		if (enhancedField.confidence < 0.1) continue;
+
+		// Find the form group this field belongs to
+		const formGroup = formGroups.find(
+			(g) => g.form === enhancedField.form ||
+			g.cardNumberField?.element === input ||
+			g.expiryField?.element === input ||
+			g.cvvField?.element === input ||
+			g.nameField?.element === input
+		);
+
+		const field: CreditCardField = {
+			input,
+			type: enhancedField.type as CreditCardFieldType,
+			confidence: enhancedField.confidence,
+			shadowRoot: enhancedField.shadowRoot,
+			formGroup,
+		};
+		detectedCreditCardFields.set(input, field);
+
+		// Disable browser's native autofill but allow our custom autofill
+		input.setAttribute("data-bittery-cc-detected", "true");
+		input.setAttribute("data-form-type", "other");
+
+		// Add focus/blur listeners for credit card autofill
+		input.addEventListener("focus", () => handleCreditCardFieldFocus(field));
+		input.addEventListener("blur", () => handleCreditCardFieldBlur(field));
+
+		console.log(
+			`Detected credit card ${field.type} field with confidence ${field.confidence?.toFixed(2)}:`,
+			input.name || input.id || "unnamed",
+		);
+	}
+}
+
+/**
+ * Scan for existing shadow roots in the document
+ */
+function scanForShadowRoots(root: Document | ShadowRoot = document) {
+	const elements = root.querySelectorAll("*");
+	for (const element of elements) {
+		if (element.shadowRoot && !observedShadowRoots.has(element.shadowRoot)) {
+			observedShadowRoots.add(element.shadowRoot);
+			// Detect fields within shadow root
+			detectPasswordFields(element.shadowRoot);
+			// Set up observer for this shadow root
+			setupShadowRootObserver(element.shadowRoot);
+		}
+	}
+}
+
+/**
+ * Set up mutation observer for a shadow root
+ */
+function setupShadowRootObserver(shadowRoot: ShadowRoot) {
+	createEnhancedObserver(() => {
+		// Debounce detection
+		if (detectionTimeout) {
+			clearTimeout(detectionTimeout);
+		}
+		detectionTimeout = setTimeout(() => {
+			detectPasswordFields(shadowRoot);
+		}, DETECTION_DEBOUNCE_MS);
+	}, shadowRoot);
+}
+
+/**
+ * Legacy fallback detection for basic forms
+ * Used when enhanced detection doesn't find fields
+ */
+function detectPasswordFieldsLegacy() {
 	const inputs = document.querySelectorAll<HTMLInputElement>(
 		'input[type="password"], input[type="email"], input[type="text"][autocomplete*="username"], input[type="text"][autocomplete*="email"]',
 	);
@@ -152,31 +357,58 @@ function captureCredentials(
 	let passwordValue = "";
 
 	// First, check our detected fields for password fields in this form
+	// Sort by confidence if available
+	const passwordCandidates: Array<{
+		input: HTMLInputElement;
+		field: CredentialField;
+	}> = [];
+
 	for (const [input, field] of detectedFields) {
 		if (field.type === "password" && input.value) {
 			// If we have a form, ensure the field is within this form
 			if (!form || input.closest("form") === form) {
-				passwordField = input;
-				passwordValue = input.value;
-				break;
+				passwordCandidates.push({ input, field });
 			}
 		}
 	}
 
-	// Fallback: search for password fields in the scope
+	// Sort by confidence and visibility
+	if (passwordCandidates.length > 0) {
+		passwordCandidates.sort((a, b) => {
+			// Prefer visible fields
+			const aVisible = isFieldVisible(a.input);
+			const bVisible = isFieldVisible(b.input);
+			if (aVisible && !bVisible) return -1;
+			if (!aVisible && bVisible) return 1;
+			// Then by confidence
+			return (b.field.confidence || 0) - (a.field.confidence || 0);
+		});
+		const firstCandidate = passwordCandidates[0];
+		if (firstCandidate) {
+			passwordField = firstCandidate.input;
+			passwordValue = passwordField.value;
+		}
+	}
+
+	// Fallback: search for password fields in the scope (including Shadow DOM)
 	if (!passwordField) {
-		const passwordFields = Array.from(
-			searchScope.querySelectorAll<HTMLInputElement>('input[type="password"]'),
-		).filter((input) => input.value); // Only consider fields with values
+		const allInputs = getAllInputs(
+			searchScope instanceof Document ? searchScope : document,
+		);
+		const passwordFields = allInputs
+			.filter(({ input }) => input.type === "password" && input.value)
+			.filter(
+				({ input }) =>
+					!form || input.closest("form") === form || !input.closest("form"),
+			);
 
 		if (passwordFields.length > 0) {
 			// Prefer visible fields
-			passwordField =
-				passwordFields.find((field) => {
-					const rect = field.getBoundingClientRect();
-					return rect.width > 0 && rect.height > 0;
-				}) || passwordFields[0];
-
+			const visibleField = passwordFields.find(({ input }) =>
+				isFieldVisible(input),
+			);
+			const firstPasswordField = passwordFields[0];
+			passwordField = visibleField?.input || firstPasswordField?.input;
 			passwordValue = passwordField?.value || "";
 		}
 	}
@@ -192,31 +424,62 @@ function captureCredentials(
 	let usernameValue = "";
 
 	// First, check our detected fields for username/email fields in this form
+	// Sort by confidence if available
+	const usernameCandidates: Array<{
+		input: HTMLInputElement;
+		field: CredentialField;
+	}> = [];
+
 	for (const [input, field] of detectedFields) {
 		if ((field.type === "username" || field.type === "email") && input.value) {
 			// If we have a form, ensure the field is within this form
 			if (!form || input.closest("form") === form) {
-				usernameField = input;
-				usernameValue = input.value;
-				break;
+				usernameCandidates.push({ input, field });
 			}
 		}
 	}
 
-	// Fallback: search for username/email fields in the scope
+	// Sort by confidence and visibility
+	if (usernameCandidates.length > 0) {
+		usernameCandidates.sort((a, b) => {
+			// Prefer visible fields
+			const aVisible = isFieldVisible(a.input);
+			const bVisible = isFieldVisible(b.input);
+			if (aVisible && !bVisible) return -1;
+			if (!aVisible && bVisible) return 1;
+			// Then by confidence
+			return (b.field.confidence || 0) - (a.field.confidence || 0);
+		});
+		const firstUsernameCandidate = usernameCandidates[0];
+		if (firstUsernameCandidate) {
+			usernameField = firstUsernameCandidate.input;
+			usernameValue = usernameField.value;
+		}
+	}
+
+	// Fallback: search for username/email fields in the scope (including Shadow DOM)
 	if (!usernameField) {
-		const candidateFields = Array.from(
-			searchScope.querySelectorAll<HTMLInputElement>(
-				'input[type="text"], input[type="email"], input[type="tel"], input[name*="user"], input[name*="email"], input[name*="login"], input[id*="user"], input[id*="email"], input[id*="login"]',
-			),
-		).filter((input) => {
+		const allInputs = getAllInputs(
+			searchScope instanceof Document ? searchScope : document,
+		);
+
+		const candidateFields = allInputs.filter(({ input }) => {
 			// Exclude password fields and empty fields
 			if (input.type === "password" || !input.value) return false;
 
 			// If we have a form, ensure the field is within this form
-			if (form && input.closest("form") !== form) return false;
+			if (form && input.closest("form") !== form && input.closest("form"))
+				return false;
 
-			// Check if it looks like a username/email field
+			// Use enhanced field type detection
+			const { type, confidence } = detectFieldType(input);
+
+			// Check if it looks like a username/email field with sufficient confidence
+			if ((type === "username" || type === "email") && confidence >= 0.2) {
+				return true;
+			}
+
+			// Legacy check for backwards compatibility
 			const name = input.name?.toLowerCase() || "";
 			const id = input.id?.toLowerCase() || "";
 			const autocomplete = input.autocomplete?.toLowerCase() || "";
@@ -229,9 +492,13 @@ function captureCredentials(
 				name.includes("user") ||
 				name.includes("email") ||
 				name.includes("login") ||
+				name.includes("identifier") ||
+				name.includes("account") ||
 				id.includes("user") ||
 				id.includes("email") ||
 				id.includes("login") ||
+				id.includes("identifier") ||
+				id.includes("account") ||
 				placeholder.includes("user") ||
 				placeholder.includes("email") ||
 				placeholder.includes("login")
@@ -240,12 +507,11 @@ function captureCredentials(
 
 		if (candidateFields.length > 0) {
 			// Prefer visible fields
-			usernameField =
-				candidateFields.find((field) => {
-					const rect = field.getBoundingClientRect();
-					return rect.width > 0 && rect.height > 0;
-				}) || candidateFields[0];
-
+			const visibleField = candidateFields.find(({ input }) =>
+				isFieldVisible(input),
+			);
+			const firstCandidateField = candidateFields[0];
+			usernameField = visibleField?.input || firstCandidateField?.input;
 			usernameValue = usernameField?.value || "";
 		}
 	}
@@ -1049,6 +1315,426 @@ function handleFieldBlur(field: CredentialField) {
 	}, 200);
 }
 
+// ==================== Credit Card Autofill ====================
+
+// Handle credit card field focus
+async function handleCreditCardFieldFocus(field: CreditCardField) {
+	// Hide any existing overlays from other fields
+	if (currentFocusedCreditCardField && currentFocusedCreditCardField !== field) {
+		hideCreditCardAutofillOverlay(currentFocusedCreditCardField);
+	}
+	// Also hide credential overlays
+	if (currentFocusedField) {
+		hideAutofillOverlay(currentFocusedField);
+		currentFocusedField = null;
+	}
+
+	currentFocusedCreditCardField = field;
+
+	// Check auth status before showing autofill
+	const response = await chrome.runtime.sendMessage({
+		type: "CHECK_AUTOFILL_AUTH",
+	});
+
+	if (!response.authenticated) {
+		if (response.needsReauth) {
+			showCreditCardReauthPrompt(field);
+		} else {
+			// Extension is locked, needs quick unlock
+			showCreditCardUnlockPrompt(field);
+		}
+		return;
+	}
+
+	// Get available credit cards
+	const itemsResponse = await chrome.runtime.sendMessage({
+		type: "GET_AUTOFILL_CREDIT_CARDS",
+	});
+
+	if (itemsResponse.items && itemsResponse.items.length > 0) {
+		showCreditCardAutofillOverlay(field, itemsResponse.items);
+	}
+}
+
+// Handle credit card field blur
+function handleCreditCardFieldBlur(field: CreditCardField) {
+	// Delay to allow clicking on overlay
+	setTimeout(() => {
+		if (currentFocusedCreditCardField === field) {
+			hideCreditCardAutofillOverlay(field);
+			currentFocusedCreditCardField = null;
+		}
+	}, 200);
+}
+
+// Show credit card autofill overlay
+function showCreditCardAutofillOverlay(field: CreditCardField, items: DecryptedItem[]) {
+	// Remove existing overlay
+	if (field.overlay) {
+		field.overlay.remove();
+	}
+
+	// Create shadow host
+	const shadowHost = document.createElement("div");
+	shadowHost.style.position = "fixed";
+	shadowHost.style.zIndex = "2147483647"; // Max z-index
+	shadowHost.style.opacity = "0";
+	shadowHost.style.transform = "translateY(-8px)";
+	shadowHost.style.transition = "opacity 0.15s ease-out, transform 0.15s ease-out";
+	document.body.appendChild(shadowHost);
+
+	// Attach shadow DOM
+	const shadow = shadowHost.attachShadow({ mode: "open" });
+
+	// Position overlay
+	const rect = field.input.getBoundingClientRect();
+	shadowHost.style.top = `${rect.bottom + window.scrollY}px`;
+	shadowHost.style.left = `${rect.left}px`;
+	shadowHost.style.width = `${Math.max(rect.width, 300)}px`;
+
+	// Create iframe for credit card selection
+	const iframe = document.createElement("iframe");
+	iframe.style.border = "none";
+	iframe.style.width = "100%";
+	iframe.style.height = "auto";
+	iframe.style.maxHeight = "300px";
+	iframe.style.display = "block";
+	iframe.src = chrome.runtime.getURL("credit-card-autofill-iframe.html");
+
+	shadow.appendChild(iframe);
+	field.overlay = shadowHost;
+
+	// Trigger animation after a brief delay
+	setTimeout(() => {
+		shadowHost.style.opacity = "1";
+		shadowHost.style.transform = "translateY(0)";
+	}, 10);
+
+	// Wait for iframe to signal it's ready
+	const messageHandler = (event: MessageEvent) => {
+		if (event.data.type === "CC_IFRAME_READY") {
+			if (field.readyTimeout) {
+				clearTimeout(field.readyTimeout);
+				field.readyTimeout = undefined;
+			}
+
+			// Send credit card items to iframe
+			iframe.contentWindow?.postMessage(
+				{
+					type: "CREDIT_CARD_ITEMS",
+					items,
+					fieldType: field.type,
+				},
+				"*",
+			);
+		} else if (event.data.type === "CREDIT_CARD_SELECT") {
+			handleCreditCardAutofillSelect(field, event.data.item);
+		}
+	};
+
+	field.messageHandler = messageHandler;
+	window.addEventListener("message", messageHandler);
+
+	// Fallback: send items after a delay if ready signal not received
+	field.readyTimeout = setTimeout(() => {
+		console.log("Timeout waiting for credit card iframe ready, sending items anyway");
+		iframe.contentWindow?.postMessage(
+			{
+				type: "CREDIT_CARD_ITEMS",
+				items,
+				fieldType: field.type,
+			},
+			"*",
+		);
+	}, 100);
+
+	// Add keyboard navigation
+	document.addEventListener("keydown", handleCreditCardKeyboardNavigation);
+}
+
+// Hide credit card autofill overlay
+function hideCreditCardAutofillOverlay(field: CreditCardField) {
+	if (field.overlay) {
+		field.overlay.remove();
+		field.overlay = undefined;
+	}
+	if (field.messageHandler) {
+		window.removeEventListener("message", field.messageHandler);
+		field.messageHandler = undefined;
+	}
+	if (field.readyTimeout) {
+		clearTimeout(field.readyTimeout);
+		field.readyTimeout = undefined;
+	}
+	document.removeEventListener("keydown", handleCreditCardKeyboardNavigation);
+}
+
+// Handle keyboard navigation for credit card overlay
+function handleCreditCardKeyboardNavigation(event: KeyboardEvent) {
+	if (event.key === "Escape") {
+		if (currentFocusedCreditCardField) {
+			hideCreditCardAutofillOverlay(currentFocusedCreditCardField);
+			currentFocusedCreditCardField = null;
+		}
+	}
+	// Arrow keys and Enter are handled by iframe
+}
+
+// Apply visual feedback highlight to an input field
+function applyAutofillHighlight(input: HTMLInputElement) {
+	// Store original styles
+	const originalBoxShadow = input.style.boxShadow;
+	const originalTransition = input.style.transition;
+
+	// Apply highlight
+	input.style.boxShadow = AUTOFILL_HIGHLIGHT_STYLE.boxShadow;
+	input.style.transition = AUTOFILL_HIGHLIGHT_STYLE.transition;
+
+	// Mark as autofilled for potential CSS targeting
+	input.setAttribute("data-bittery-autofilled", "true");
+
+	// Remove highlight after duration
+	setTimeout(() => {
+		input.style.boxShadow = originalBoxShadow;
+		input.style.transition = originalTransition;
+		// Keep the data attribute for reference but mark as complete
+		input.setAttribute("data-bittery-autofilled", "complete");
+	}, AUTOFILL_SUCCESS_DURATION);
+}
+
+// Handle credit card autofill selection
+async function handleCreditCardAutofillSelect(
+	field: CreditCardField,
+	item: DecryptedItem,
+) {
+	// Update autofill timestamp
+	await chrome.runtime.sendMessage({
+		type: "UPDATE_AUTOFILL_TIMESTAMP",
+	});
+
+	// Get the form group to fill all related fields
+	const formGroup = field.formGroup;
+
+	// Helper function to fill a field with visual feedback
+	const fillField = (input: HTMLInputElement, value: string) => {
+		if (!value) return;
+
+		input.value = value;
+		input.dispatchEvent(new Event("input", { bubbles: true }));
+		input.dispatchEvent(new Event("change", { bubbles: true }));
+
+		// Apply visual feedback
+		applyAutofillHighlight(input);
+	};
+
+	// Fill the focused field first
+	if (field.type === "cardNumber" && item.cardNumber) {
+		fillField(field.input, item.cardNumber);
+	} else if (field.type === "cardExpiry" && item.expiryDate) {
+		fillField(field.input, item.expiryDate);
+	} else if (field.type === "cardCvv" && item.cvv) {
+		fillField(field.input, item.cvv);
+	} else if (field.type === "cardName" && item.cardholderName) {
+		fillField(field.input, item.cardholderName);
+	}
+
+	// Fill other related fields in the form group
+	if (formGroup) {
+		// Fill card number if not the current field
+		if (formGroup.cardNumberField && formGroup.cardNumberField.element !== field.input && item.cardNumber) {
+			fillField(formGroup.cardNumberField.element, item.cardNumber);
+		}
+
+		// Fill expiry if not the current field
+		if (formGroup.expiryField && formGroup.expiryField.element !== field.input && item.expiryDate) {
+			fillField(formGroup.expiryField.element, item.expiryDate);
+		}
+
+		// Fill CVV if not the current field
+		if (formGroup.cvvField && formGroup.cvvField.element !== field.input && item.cvv) {
+			fillField(formGroup.cvvField.element, item.cvv);
+		}
+
+		// Fill name if not the current field
+		if (formGroup.nameField && formGroup.nameField.element !== field.input && item.cardholderName) {
+			fillField(formGroup.nameField.element, item.cardholderName);
+		}
+	} else {
+		// Try to find related credit card fields in the same form
+		for (const [input, ccField] of detectedCreditCardFields) {
+			if (input === field.input) continue;
+
+			// Check if in same form
+			const inputForm = input.closest("form");
+			if (inputForm !== (field.input.closest("form") || null)) continue;
+
+			switch (ccField.type) {
+				case "cardNumber":
+					if (item.cardNumber) fillField(input, item.cardNumber);
+					break;
+				case "cardExpiry":
+					if (item.expiryDate) fillField(input, item.expiryDate);
+					break;
+				case "cardCvv":
+					if (item.cvv) fillField(input, item.cvv);
+					break;
+				case "cardName":
+					if (item.cardholderName) fillField(input, item.cardholderName);
+					break;
+			}
+		}
+	}
+
+	// Hide overlay
+	hideCreditCardAutofillOverlay(field);
+	currentFocusedCreditCardField = null;
+
+	console.log("Credit card autofill completed for:", item.title);
+}
+
+// Show unlock prompt for credit card fields
+function showCreditCardUnlockPrompt(field: CreditCardField) {
+	// Remove existing overlay
+	if (field.overlay) {
+		field.overlay.remove();
+	}
+
+	// Create shadow host
+	const shadowHost = document.createElement("div");
+	shadowHost.style.position = "fixed";
+	shadowHost.style.zIndex = "2147483647";
+	shadowHost.style.opacity = "0";
+	shadowHost.style.transform = "translateY(-8px)";
+	shadowHost.style.transition = "opacity 0.15s ease-out, transform 0.15s ease-out";
+	document.body.appendChild(shadowHost);
+
+	// Attach shadow DOM
+	const shadow = shadowHost.attachShadow({ mode: "open" });
+
+	// Position overlay
+	const rect = field.input.getBoundingClientRect();
+	shadowHost.style.top = `${rect.bottom + window.scrollY}px`;
+	shadowHost.style.left = `${rect.left}px`;
+	shadowHost.style.width = `${Math.max(rect.width, 300)}px`;
+
+	// Create iframe
+	const iframe = document.createElement("iframe");
+	iframe.style.border = "none";
+	iframe.style.width = "100%";
+	iframe.style.height = "auto";
+	iframe.style.maxHeight = "300px";
+	iframe.style.display = "block";
+	iframe.src = chrome.runtime.getURL("credit-card-autofill-iframe.html");
+
+	shadow.appendChild(iframe);
+	field.overlay = shadowHost;
+
+	// Trigger animation
+	setTimeout(() => {
+		shadowHost.style.opacity = "1";
+		shadowHost.style.transform = "translateY(0)";
+	}, 10);
+
+	// Wait for iframe to signal it's ready
+	const messageHandler = (event: MessageEvent) => {
+		if (event.data.type === "CC_IFRAME_READY") {
+			if (field.readyTimeout) {
+				clearTimeout(field.readyTimeout);
+				field.readyTimeout = undefined;
+			}
+
+			// Send unlock needed message
+			iframe.contentWindow?.postMessage(
+				{
+					type: "NEEDS_UNLOCK",
+				},
+				"*",
+			);
+		}
+	};
+
+	field.messageHandler = messageHandler;
+	window.addEventListener("message", messageHandler);
+
+	// Fallback
+	field.readyTimeout = setTimeout(() => {
+		iframe.contentWindow?.postMessage(
+			{
+				type: "NEEDS_UNLOCK",
+			},
+			"*",
+		);
+	}, 100);
+}
+
+// Show re-auth prompt for credit card fields
+function showCreditCardReauthPrompt(field: CreditCardField) {
+	// Create shadow host
+	const shadowHost = document.createElement("div");
+	shadowHost.style.position = "fixed";
+	shadowHost.style.zIndex = "2147483647";
+	document.body.appendChild(shadowHost);
+
+	const shadow = shadowHost.attachShadow({ mode: "open" });
+
+	// Position prompt
+	const rect = field.input.getBoundingClientRect();
+	shadowHost.style.top = `${rect.bottom + window.scrollY}px`;
+	shadowHost.style.left = `${rect.left + window.scrollX}px`;
+	shadowHost.style.width = `${Math.max(rect.width, 250)}px`;
+
+	// Create prompt UI
+	const container = document.createElement("div");
+	container.style.cssText = `
+		background: white;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+		padding: 12px;
+		font-family: system-ui, -apple-system, sans-serif;
+		font-size: 13px;
+	`;
+
+	container.innerHTML = `
+		<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+			<span style="font-size: 16px;">🔒</span>
+			<span style="font-weight: 500;">Authentication Required</span>
+		</div>
+		<p style="margin: 0 0 8px 0; color: #64748b; font-size: 12px;">
+			Please re-authenticate to use credit card autofill
+		</p>
+		<button style="
+			width: 100%;
+			padding: 6px 12px;
+			background: #3b82f6;
+			color: white;
+			border: none;
+			border-radius: 6px;
+			font-size: 12px;
+			font-weight: 500;
+			cursor: pointer;
+		">
+			Open Bittery
+		</button>
+	`;
+
+	const button = container.querySelector("button");
+	button?.addEventListener("click", () => {
+		chrome.runtime.sendMessage({ type: "OPEN_POPUP" });
+		shadowHost.remove();
+	});
+
+	shadow.appendChild(container);
+	field.overlay = shadowHost;
+
+	// Auto-hide after 5 seconds
+	setTimeout(() => {
+		shadowHost.remove();
+	}, 5000);
+}
+
+// ==================== End Credit Card Autofill ====================
+
 // Show autofill overlay
 function showAutofillOverlay(field: CredentialField, items: DecryptedItem[]) {
 	// Remove existing overlay
@@ -1158,6 +1844,10 @@ function handleKeyboardNavigation(event: KeyboardEvent) {
 		if (currentFocusedField) {
 			hideAutofillOverlay(currentFocusedField);
 			currentFocusedField = null;
+		}
+		if (currentFocusedCreditCardField) {
+			hideCreditCardAutofillOverlay(currentFocusedCreditCardField);
+			currentFocusedCreditCardField = null;
 		}
 	}
 	// Arrow keys and Enter are handled by iframe
@@ -1397,22 +2087,47 @@ function showReauthPrompt(field: CredentialField) {
 if (document.readyState === "loading") {
 	document.addEventListener("DOMContentLoaded", () => {
 		detectPasswordFields();
+		// Also run legacy detection as fallback
+		detectPasswordFieldsLegacy();
 		restorePendingSavePrompt();
+		// Set up shadow root observation for newly attached shadow roots
+		setupShadowRootWatcher();
 	});
 } else {
 	detectPasswordFields();
+	// Also run legacy detection as fallback
+	detectPasswordFieldsLegacy();
 	restorePendingSavePrompt();
+	// Set up shadow root observation for newly attached shadow roots
+	setupShadowRootWatcher();
 }
 
-// Watch for dynamic content
-const observer = new MutationObserver(() => {
-	detectPasswordFields();
-});
+// Set up watcher for dynamically attached shadow roots
+function setupShadowRootWatcher() {
+	observeShadowRoots((shadowRoot, _host) => {
+		if (!observedShadowRoots.has(shadowRoot)) {
+			observedShadowRoots.add(shadowRoot);
+			// Small delay to allow shadow DOM content to initialize
+			setTimeout(() => {
+				detectPasswordFields(shadowRoot);
+				setupShadowRootObserver(shadowRoot);
+			}, 50);
+		}
+	});
+}
 
-observer.observe(document.body, {
-	childList: true,
-	subtree: true,
-});
+// Watch for dynamic content with enhanced observer
+createEnhancedObserver(() => {
+	// Debounce detection to prevent excessive processing
+	if (detectionTimeout) {
+		clearTimeout(detectionTimeout);
+	}
+	detectionTimeout = setTimeout(() => {
+		detectPasswordFields();
+		// Run legacy detection as fallback for any fields missed
+		detectPasswordFieldsLegacy();
+	}, DETECTION_DEBOUNCE_MS);
+}, document);
 
 // Clean up on unload
 window.addEventListener("beforeunload", () => {

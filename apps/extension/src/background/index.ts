@@ -16,6 +16,7 @@ import {
 import {
 	handleCheckAutofillAuth,
 	handleGetAutofillItems,
+	handleGetAutofillCreditCards,
 	handleUpdateAutofillTimestamp,
 } from "./autofill-handlers";
 import {
@@ -196,6 +197,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 				case "GET_AUTOFILL_ITEMS": {
 					const result = await handleGetAutofillItems(message.payload);
+					sendResponse(result);
+					break;
+				}
+
+				case "GET_AUTOFILL_CREDIT_CARDS": {
+					const result = await handleGetAutofillCreditCards();
 					sendResponse(result);
 					break;
 				}

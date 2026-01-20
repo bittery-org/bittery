@@ -107,7 +107,7 @@ export function validateCardNumber(cardNumber: string): boolean {
 	let isEven = false;
 
 	for (let i = cleaned.length - 1; i >= 0; i--) {
-		let digit = Number.parseInt(cleaned[i], 10);
+		let digit = Number.parseInt(cleaned[i] ?? "0", 10);
 
 		if (isEven) {
 			digit *= 2;
@@ -194,8 +194,8 @@ export function parseExpiryDate(expiry: string): {
 		return null;
 	}
 
-	const month = Number.parseInt(match[1], 10);
-	let year = Number.parseInt(match[2], 10);
+	const month = Number.parseInt(match[1] ?? "0", 10);
+	let year = Number.parseInt(match[2] ?? "0", 10);
 
 	// Convert 2-digit year to 4-digit
 	if (year < 100) {

@@ -61,8 +61,26 @@ export async function handleGetAutofillItems(payload: {
 
 	const items = await decryptVaultItems();
 
-	// Filter by hostname
-	const filtered = items.filter((item) => hostnameMatches(item?.url, hostname));
+	// Filter by hostname and only include login items
+	const filtered = items.filter(
+		(item) => item?.category === "login" && hostnameMatches(item?.url, hostname)
+	);
 
 	return { success: true, items: filtered };
+}
+
+/**
+ * Handle GET_AUTOFILL_CREDIT_CARDS message - Get all credit card items
+ */
+export async function handleGetAutofillCreditCards(): Promise<MessageResponse> {
+	updateActivity();
+
+	const items = await decryptVaultItems();
+
+	// Filter to only credit card items
+	const creditCards = items.filter(
+		(item) => item?.category === "credit-card" && item?.cardNumber
+	);
+
+	return { success: true, items: creditCards };
 }
