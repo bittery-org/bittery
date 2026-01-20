@@ -4,9 +4,9 @@
 	"type": "module",
 	"scripts": {
 		"check": "biome check --write .",
+		"test": "turbo test",
 		"dev": "turbo dev",
 		"build": "turbo build",
-		"unit:test": "bun test",
 		"check-types": "turbo check-types",
 		"dev:desktop": "turbo -F desktop tauri:dev",
 		"build:desktop": "turbo -F desktop tauri:build",

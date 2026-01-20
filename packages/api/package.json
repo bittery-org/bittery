@@ -9,7 +9,13 @@
 		}
 	},
 	"type": "module",
-	"scripts": {},
+	"scripts": {
+		"test": "bun test --env-file ../../apps/server/.env src/__tests__",
+		"test:auth": "bun test --env-file ../../apps/server/.env src/__tests__/auth.test.ts",
+		"test:vault": "bun test --env-file ../../apps/server/.env src/__tests__/vault.test.ts",
+		"test:team": "bun test --env-file ../../apps/server/.env src/__tests__/team.test.ts",
+		"test:share": "bun test --env-file ../../apps/server/.env src/__tests__/share.test.ts"
+	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*"
 	},

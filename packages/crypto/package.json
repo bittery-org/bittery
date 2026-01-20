@@ -15,7 +15,9 @@
 		"./storage-tauri": "./src/storage-tauri.ts"
 	},
 	"type": "module",
-	"scripts": {},
+	"scripts": {
+		"test": "bun test src"
+	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
 		"@types/chrome": "^0.1.34"
