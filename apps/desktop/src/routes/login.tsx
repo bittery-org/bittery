@@ -9,10 +9,10 @@ import {
 import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";
-import { Button, Card, Input, Label, toast } from "@bittery/ui";
+import { Button, Input, Label, toast, VaultIcon } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Fingerprint } from "lucide-react";
+import { ArrowLeft, Fingerprint, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAccount } from "../contexts/account-context";
 
@@ -39,11 +39,12 @@ export function LoginPage() {
 		normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
 		"http://localhost:3000";
 	const [serverUrl, setServerUrl] = useState(fallbackServerUrl);
+	const [webAppUrl, setWebAppUrl] = useState("");
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [secretKey, setSecretKey] = useState("");
 	const [loading, setLoading] = useState(false);
-	const [enableBiometric, setEnableBiometric] = useState(false);
+	const [enableBiometric, setEnableBiometric] = useState(true);
 
 	const { data: biometricAvailable } = useQuery({
 		queryKey: ["biometry-available"],
@@ -54,7 +55,8 @@ export function LoginPage() {
 
 	useEffect(() => {
 		let active = true;
-		tauriStorage.getServerUrl().then((stored) => {
+		// Try to get server URL from legacy storage (fallback for login page)
+		tauriStorage.getLegacyServerUrl().then((stored) => {
 			if (!active || !stored) return;
 			setServerUrl(stored);
 		});
@@ -80,7 +82,6 @@ export function LoginPage() {
 			toast.error("Invalid server URL");
 			return;
 		}
-		await tauriStorage.storeServerUrl(normalizedServerUrl);
 		if (normalizedServerUrl !== serverUrl) {
 			setServerUrl(normalizedServerUrl);
 		}
@@ -165,6 +166,22 @@ export function LoginPage() {
 			);
 			await tauriStorage.storeMasterUnlockKey(masterUnlockKey, normalizedEmail);
 
+			// Store server URL per-account
+			await tauriStorage.storeServerUrl(normalizedServerUrl, normalizedEmail);
+
+			// Store web app URL if provided, otherwise clear it to use derived URL
+			if (webAppUrl.trim()) {
+				const normalizedWebAppUrl = normalizeServerUrl(webAppUrl);
+				if (normalizedWebAppUrl) {
+					await tauriStorage.storeWebAppUrl(
+						normalizedWebAppUrl,
+						normalizedEmail,
+					);
+				}
+			} else {
+				await tauriStorage.clearWebAppUrl(normalizedEmail);
+			}
+
 			// Create account metadata
 			const secretKeyHint = `${secretKey.substring(0, 5)}...`;
 			const accountMetadata: AccountMetadata = {
@@ -200,120 +217,178 @@ export function LoginPage() {
 	};
 
 	return (
-		<div className="flex h-full items-center justify-center bg-gray-50 p-4">
-			<Card className="w-full max-w-md p-6">
-				{addingAccount && (
-					<Button
-						type="button"
-						variant="ghost"
-						size="sm"
-						onClick={handleBackToVault}
-						className="-ml-2 mb-4 gap-1"
-					>
-						<ArrowLeft className="h-4 w-4" />
-						Back to Vault
-					</Button>
-				)}
-
-				<div className="mb-6 text-center">
-					<h1 className="font-bold text-2xl">
-						{addingAccount ? "Add Account" : "Bittery"}
-					</h1>
-					<p className="text-gray-600 text-sm">
-						{addingAccount
-							? "Sign in to add another account"
-							: "Password Manager"}
-					</p>
+		<div className="flex h-full w-full items-center justify-center overflow-y-auto bg-background">
+			<div className="grid h-full w-full lg:grid-cols-2">
+				{/* Left side - Branding */}
+				<div className="hidden flex-col items-center justify-center bg-sidebar p-12 lg:flex">
+					<div className="flex max-w-md flex-col items-center space-y-8 text-center">
+						<VaultIcon state="locked" size={120} />
+						<div className="space-y-4">
+							<h1 className="font-bold text-4xl text-sidebar-foreground tracking-tight">
+								Secure by design.
+								<br />
+								<span className="text-primary">Private by default.</span>
+							</h1>
+							<p className="text-lg text-sidebar-foreground/70">
+								Your passwords are encrypted client-side and never leave your
+								device unencrypted.
+							</p>
+						</div>
+						<div className="grid gap-3 pt-4">
+							{[
+								"Zero-knowledge architecture",
+								"Client-side AES-256 encryption",
+								"Secure Remote Password protocol",
+								"Cross-platform sync",
+							].map((item) => (
+								<div
+									key={item}
+									className="flex items-center gap-3 font-medium text-sidebar-foreground/80 text-sm"
+								>
+									<div className="h-1.5 w-1.5 rounded-full bg-primary" />
+									{item}
+								</div>
+							))}
+						</div>
+					</div>
 				</div>
 
-				<form onSubmit={handleLogin} className="space-y-4">
-					<div>
-						<Label htmlFor="serverUrl">Server URL</Label>
-						<Input
-							id="serverUrl"
-							type="url"
-							value={serverUrl}
-							onChange={(e) => setServerUrl(e.target.value)}
-							onBlur={() => {
-								const normalized = normalizeServerUrl(serverUrl);
-								if (!normalized) {
-									toast.error("Invalid server URL");
-									return;
-								}
-								tauriStorage.storeServerUrl(normalized);
-								if (normalized !== serverUrl) {
-									setServerUrl(normalized);
-								}
-							}}
-							required
-							placeholder="https://your-server.com"
-						/>
-						<p className="mt-1 text-gray-500 text-xs">
-							Use your self-hosted Bittery server URL.
-						</p>
-					</div>
+				{/* Right side - Form */}
+				<div className="flex flex-col items-center justify-center p-6 lg:p-12">
+					<div className="w-full max-w-md space-y-6">
+						{addingAccount && (
+							<button
+								type="button"
+								onClick={handleBackToVault}
+								className="flex items-center gap-1 text-muted-foreground text-sm hover:text-foreground"
+							>
+								<ArrowLeft className="h-3.5 w-3.5" />
+								Back to Vault
+							</button>
+						)}
 
-					<div>
-						<Label htmlFor="email">Email</Label>
-						<Input
-							id="email"
-							type="email"
-							value={email}
-							onChange={(e) => setEmail(e.target.value)}
-							required
-							placeholder="you@example.com"
-						/>
-					</div>
-
-					<div>
-						<Label htmlFor="password">Password</Label>
-						<Input
-							id="password"
-							type="password"
-							value={password}
-							onChange={(e) => setPassword(e.target.value)}
-							required
-							placeholder="••••••••"
-						/>
-					</div>
-
-					<div>
-						<Label htmlFor="secretKey">Secret Key</Label>
-						<Input
-							id="secretKey"
-							type="text"
-							value={secretKey}
-							onChange={(e) => setSecretKey(e.target.value)}
-							required
-							placeholder="A3-XXXXXX-XXXXXX-XXXXX"
-							className="font-mono"
-						/>
-						<p className="mt-1 text-gray-500 text-xs">
-							Your Secret Key was provided when you created your account
-						</p>
-					</div>
-
-					{biometricAvailable && (
-						<div className="flex items-center space-x-2">
-							<input
-								type="checkbox"
-								id="biometric"
-								checked={enableBiometric}
-								onChange={(e) => setEnableBiometric(e.target.checked)}
-								className="h-4 w-4 rounded border-gray-300"
-							/>
-							<Label htmlFor="biometric" className="flex items-center gap-2">
-								<Fingerprint className="h-4 w-4" />
-								Enable biometric unlock
-							</Label>
+						<div>
+							<h2 className="font-semibold text-xl">
+								{addingAccount ? "Add Account" : "Sign in to your vault"}
+							</h2>
+							<p className="mt-1 text-muted-foreground text-sm">
+								{addingAccount
+									? "Sign in to add another account"
+									: "Enter your credentials to access your passwords"}
+							</p>
 						</div>
-					)}
 
-					<Button type="submit" className="w-full" disabled={loading}>
-						{loading ? "Logging in..." : "Log In"}
-					</Button>
-				</form>
-			</Card>
+						<form onSubmit={handleLogin} className="space-y-5">
+							<div className="grid gap-1">
+								<Label htmlFor="serverUrl">Server URL</Label>
+								<Input
+									id="serverUrl"
+									type="url"
+									value={serverUrl}
+									onChange={(e) => setServerUrl(e.target.value)}
+									onBlur={() => {
+										const normalized = normalizeServerUrl(serverUrl);
+										if (!normalized) {
+											toast.error("Invalid server URL");
+											return;
+										}
+										if (normalized !== serverUrl) {
+											setServerUrl(normalized);
+										}
+									}}
+									required
+									placeholder="https://your-server.com"
+								/>
+								<p className="mt-1 text-muted-foreground text-xs">
+									Use your self-hosted Bittery server URL.
+								</p>
+							</div>
+
+							<div className="grid gap-1">
+								<Label htmlFor="webAppUrl">Web App URL (Optional)</Label>
+								<Input
+									id="webAppUrl"
+									type="url"
+									value={webAppUrl}
+									onChange={(e) => setWebAppUrl(e.target.value)}
+									placeholder={
+										normalizeServerUrl(serverUrl)
+											?.replace(/\/api.*$/, "")
+											.replace(/\/$/, "") || "https://app.bittery.io"
+									}
+								/>
+								<p className="mt-1 text-muted-foreground text-xs">
+									URL for shareable links. Leave empty to derive from server
+									URL.
+								</p>
+							</div>
+
+							<div className="grid gap-1">
+								<Label htmlFor="email">Email</Label>
+								<Input
+									id="email"
+									type="email"
+									value={email}
+									onChange={(e) => setEmail(e.target.value)}
+									required
+									placeholder="you@example.com"
+								/>
+							</div>
+
+							<div className="grid gap-1">
+								<Label htmlFor="password">Password</Label>
+								<Input
+									id="password"
+									type="password"
+									value={password}
+									onChange={(e) => setPassword(e.target.value)}
+									required
+									placeholder="••••••••"
+								/>
+							</div>
+
+							<div className="grid gap-1">
+								<Label htmlFor="secretKey">Secret Key</Label>
+								<Input
+									id="secretKey"
+									type="text"
+									value={secretKey}
+									onChange={(e) => setSecretKey(e.target.value)}
+									required
+									placeholder="A3-XXXXXX-XXXXXX-XXXXX"
+									className="font-mono"
+								/>
+								<p className="mt-1 text-muted-foreground text-xs">
+									Your Secret Key was provided when you created your account
+								</p>
+							</div>
+
+							{biometricAvailable && (
+								<div className="flex items-center space-x-2">
+									<input
+										type="checkbox"
+										id="biometric"
+										checked={enableBiometric}
+										onChange={(e) => setEnableBiometric(e.target.checked)}
+										className="h-4 w-4 rounded border-border"
+									/>
+									<Label
+										htmlFor="biometric"
+										className="flex items-center gap-2"
+									>
+										<Fingerprint className="h-4 w-4" />
+										Enable biometric unlock
+									</Label>
+								</div>
+							)}
+
+							<Button type="submit" className="w-full" disabled={loading}>
+								{loading ? "Logging in..." : "Log In"}
+							</Button>
+						</form>
+					</div>
+				</div>
+			</div>
 		</div>
 	);
 }

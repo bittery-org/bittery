@@ -34,12 +34,12 @@ import {
 } from "./qr-scan-handlers";
 import { handleAutoLockAlarm } from "./session-manager";
 import {
+	cleanupSync,
 	connect as connectSync,
 	disconnect as disconnectSync,
-	getStatus as getSyncStatus,
 	getClientId as getSyncClientId,
+	getStatus as getSyncStatus,
 	handleSyncReconnectAlarm,
-	cleanupSync,
 	initializeSync,
 } from "./sync-manager";
 import {

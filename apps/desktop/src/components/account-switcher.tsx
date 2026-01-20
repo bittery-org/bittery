@@ -9,10 +9,11 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useNavigate } from "@tanstack/react-router";
-import { Check, ChevronDown, Lock, LogOut, Plus } from "lucide-react";
+import { Check, ChevronDown, Lock, LogOut, Plus, Settings } from "lucide-react";
 import { useState } from "react";
 import { useAccount } from "../contexts/account-context";
 import { AccountAvatar } from "./account-avatar";
+import { AccountSettingsDialog } from "./account-settings-dialog";
 import { RemoveAccountDialog } from "./remove-account-dialog";
 
 export function AccountSwitcher() {
@@ -27,6 +28,7 @@ export function AccountSwitcher() {
 	const navigate = useNavigate();
 	const [isSwitching, setIsSwitching] = useState(false);
 	const [accountToRemove, setAccountToRemove] = useState<string | null>(null);
+	const [showSettings, setShowSettings] = useState(false);
 
 	const handleSwitchAccount = async (email: string) => {
 		if (email === activeAccount?.email) return;
@@ -177,6 +179,14 @@ export function AccountSwitcher() {
 						Add Account
 					</DropdownMenuItem>
 
+					<DropdownMenuItem
+						onClick={() => setShowSettings(true)}
+						className="gap-2"
+					>
+						<Settings className="h-4 w-4" />
+						Account Settings
+					</DropdownMenuItem>
+
 					<DropdownMenuSeparator />
 
 					<DropdownMenuItem
@@ -210,6 +220,12 @@ export function AccountSwitcher() {
 				email={accountToRemove}
 				onConfirm={handleRemoveAccount}
 				onCancel={() => setAccountToRemove(null)}
+			/>
+
+			<AccountSettingsDialog
+				open={showSettings}
+				onOpenChange={setShowSettings}
+				email={activeAccount.email}
 			/>
 		</>
 	);

@@ -16,9 +16,9 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import { AlertCircle, CheckCircle2, FileUp } from "lucide-react";
 import { useState } from "react";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 import type { ParsedImportItem } from "../../utils/import-parsers";
 import { parseImportFile } from "../../utils/import-parsers";
-import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface ImportDialogProps {
 	vaultId: string;

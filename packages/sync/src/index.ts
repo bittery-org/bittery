@@ -1,23 +1,21 @@
 // Types
-export * from "./types";
 
-// Core sync functionality
-export { SyncManager, createSyncManager } from "./sync-manager";
-export { OfflineQueue, createOfflineQueue } from "./offline-queue";
-
+export { createOfflineQueue, OfflineQueue } from "./offline-queue";
+export type {
+	InvalidationContext,
+	QueryInvalidator,
+	QueryInvalidatorOptions,
+	QueryKeyHelpers,
+} from "./query-invalidation";
 // Query invalidation helpers
 export {
 	createQueryInvalidator,
 	getQueryKeysForEvent,
 	invalidateQueriesForEvent,
 } from "./query-invalidation";
-export type {
-	QueryInvalidator,
-	QueryInvalidatorOptions,
-	QueryKeyHelpers,
-	InvalidationContext,
-} from "./query-invalidation";
-
-// React integration
-export { useSync, generateClientId, getOrCreateClientId } from "./use-sync";
+// Core sync functionality
+export { createSyncManager, SyncManager } from "./sync-manager";
+export * from "./types";
 export type { UseSyncOptions } from "./use-sync";
+// React integration
+export { generateClientId, getOrCreateClientId, useSync } from "./use-sync";

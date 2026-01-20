@@ -11,8 +11,8 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useMutation } from "@tanstack/react-query";
-import { useQueryInvalidator } from "../../providers/sync-provider";
 import { RefreshCw, X } from "lucide-react";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface Invitation {
 	id: string;

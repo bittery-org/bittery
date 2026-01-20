@@ -32,9 +32,9 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useMutation } from "@tanstack/react-query";
-import { useQueryInvalidator } from "../../providers/sync-provider";
 import { AlertTriangle, Copy, Link, Loader2, Share2, X } from "lucide-react";
 import { useState } from "react";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface ShareItemDialogProps {
 	item: DecryptedItem;

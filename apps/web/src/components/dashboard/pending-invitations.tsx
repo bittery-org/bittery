@@ -10,9 +10,9 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useQueryInvalidator } from "../../providers/sync-provider";
 import { formatDistanceToNow } from "date-fns";
 import { Check, Clock, Mail, X } from "lucide-react";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 
 export function PendingInvitations() {
 	const trpc = useTRPC();

@@ -1,7 +1,7 @@
 import type { QueryInvalidator, SyncStatus } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
-import { createContext, useContext, type ReactNode } from "react";
-import { useDesktopSync, useDesktopClientId } from "../hooks/use-desktop-sync";
+import { createContext, type ReactNode, useContext } from "react";
+import { useDesktopClientId, useDesktopSync } from "../hooks/use-desktop-sync";
 
 /**
  * Context for sync state
@@ -71,7 +71,9 @@ export function useSyncContextOptional() {
 export function useQueryInvalidator(): QueryInvalidator {
 	const context = useContext(SyncContext);
 	if (!context) {
-		throw new Error("useQueryInvalidator must be used within a DesktopSyncProvider");
+		throw new Error(
+			"useQueryInvalidator must be used within a DesktopSyncProvider",
+		);
 	}
 	return context.invalidator;
 }

@@ -594,7 +594,10 @@ export const vaultRouter = router({
 
 			// Check for version conflict
 			const currentVersion = existingItem.version || 1;
-			if (input.expectedVersion !== undefined && input.expectedVersion !== currentVersion) {
+			if (
+				input.expectedVersion !== undefined &&
+				input.expectedVersion !== currentVersion
+			) {
 				throw new TRPCError({
 					code: "CONFLICT",
 					message: "Item has been modified by another client",

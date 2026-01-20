@@ -23,7 +23,6 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useQueryInvalidator } from "../../providers/sync-provider";
 import {
 	Calendar,
 	Clock,
@@ -38,6 +37,7 @@ import {
 	Users,
 } from "lucide-react";
 import { useState } from "react";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface ShareLinksListProps {
 	itemId: string;

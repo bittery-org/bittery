@@ -118,9 +118,7 @@ export async function invalidateQueriesForEvent(
 	const keys = getQueryKeysForEvent(ctx.trpc, ctx.event);
 
 	await Promise.all(
-		keys.map((queryKey) =>
-			ctx.queryClient.invalidateQueries({ queryKey }),
-		),
+		keys.map((queryKey) => ctx.queryClient.invalidateQueries({ queryKey })),
 	);
 }
 

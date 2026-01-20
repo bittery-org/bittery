@@ -1,5 +1,4 @@
-import { db } from "@bittery/db";
-import { syncEvent } from "@bittery/db";
+import { db, syncEvent } from "@bittery/db";
 import { nanoid } from "nanoid";
 
 // Re-export types for convenience
@@ -32,7 +31,9 @@ export interface CreateSyncEventParams {
  * Create a sync event in the database
  * This is called after each mutation to record the change
  */
-export async function createSyncEvent(params: CreateSyncEventParams): Promise<string> {
+export async function createSyncEvent(
+	params: CreateSyncEventParams,
+): Promise<string> {
 	const eventId = nanoid();
 
 	await db.insert(syncEvent).values({
@@ -54,18 +55,20 @@ export async function createSyncEvent(params: CreateSyncEventParams): Promise<st
  * Broadcast helper - to be used in conjunction with SSE handler
  * This is a placeholder that will be connected to the SSE handler
  */
-let broadcastFn: ((event: {
-	id: string;
-	type: SyncEventType;
-	entityId: string;
-	entityType: SyncEntityType;
-	vaultId: string | null;
-	version: number;
-	clientId: string | null;
-	userId: string;
-	timestamp: number;
-	metadata?: Record<string, unknown>;
-}) => Promise<void>) | null = null;
+let broadcastFn:
+	| ((event: {
+			id: string;
+			type: SyncEventType;
+			entityId: string;
+			entityType: SyncEntityType;
+			vaultId: string | null;
+			version: number;
+			clientId: string | null;
+			userId: string;
+			timestamp: number;
+			metadata?: Record<string, unknown>;
+	  }) => Promise<void>)
+	| null = null;
 
 /**
  * Set the broadcast function (called by server on startup)
@@ -77,7 +80,9 @@ export function setBroadcastFunction(fn: typeof broadcastFn): void {
 /**
  * Create and broadcast a sync event
  */
-export async function emitSyncEvent(params: CreateSyncEventParams): Promise<string> {
+export async function emitSyncEvent(
+	params: CreateSyncEventParams,
+): Promise<string> {
 	const eventId = await createSyncEvent(params);
 
 	// Broadcast to connected clients if function is set

@@ -103,11 +103,8 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 	});
 
 	const handleCopyLink = async (token: string) => {
-		// Get the server URL to construct the share link
-		const serverUrl = await tauriStorage.getServerUrl();
-		const baseUrl = serverUrl
-			? serverUrl.replace(/\/api.*$/, "").replace(/\/$/, "")
-			: "https://app.bittery.io";
+		// Get the effective web app URL to construct the share link
+		const baseUrl = await tauriStorage.getEffectiveWebAppUrl();
 		const shareUrl = `${baseUrl}/share/${token}`;
 		await navigator.clipboard.writeText(shareUrl);
 		toast.success(

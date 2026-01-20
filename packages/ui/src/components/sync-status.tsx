@@ -13,14 +13,17 @@ export type SyncConnectionStatus =
 	| "error";
 
 const syncStatusVariants = cva(
-	"inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium transition-colors",
+	"inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium text-xs transition-colors",
 	{
 		variants: {
 			status: {
 				disconnected: "bg-muted text-muted-foreground",
-				connecting: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
-				connected: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-				reconnecting: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
+				connecting:
+					"bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
+				connected:
+					"bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+				reconnecting:
+					"bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
 				error: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
 			},
 		},
@@ -34,15 +37,13 @@ const syncStatusVariants = cva(
  * Status indicator dot
  */
 function StatusDot({ status }: { status: SyncConnectionStatus }) {
-	const dotClass = cn(
-		"h-1.5 w-1.5 rounded-full",
-		{
-			"bg-muted-foreground": status === "disconnected",
-			"bg-yellow-500 animate-pulse": status === "connecting" || status === "reconnecting",
-			"bg-green-500": status === "connected",
-			"bg-red-500": status === "error",
-		},
-	);
+	const dotClass = cn("h-1.5 w-1.5 rounded-full", {
+		"bg-muted-foreground": status === "disconnected",
+		"animate-pulse bg-yellow-500":
+			status === "connecting" || status === "reconnecting",
+		"bg-green-500": status === "connected",
+		"bg-red-500": status === "error",
+	});
 
 	return <span className={dotClass} />;
 }
@@ -87,10 +88,7 @@ function SyncStatusBadge({
 	...props
 }: SyncStatusBadgeProps) {
 	return (
-		<div
-			className={cn(syncStatusVariants({ status }), className)}
-			{...props}
-		>
+		<div className={cn(syncStatusVariants({ status }), className)} {...props}>
 			<StatusDot status={status} />
 			{showText && <span>{getStatusText(status)}</span>}
 			{pendingChanges > 0 && (

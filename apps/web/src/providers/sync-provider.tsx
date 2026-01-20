@@ -1,8 +1,8 @@
 import type { QueryInvalidator, SyncStatus } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, type ReactNode, useContext } from "react";
 import { useVaultKeysSync } from "../hooks/use-vault-keys-sync";
-import { useWebSync, useSyncClientId } from "../hooks/use-web-sync";
+import { useSyncClientId, useWebSync } from "../hooks/use-web-sync";
 
 /**
  * Context for sync state

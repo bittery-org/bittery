@@ -108,7 +108,9 @@ export function VaultMemberList({
 
 			const masterUnlockKey = await getMasterUnlockKey();
 			if (!masterUnlockKey) {
-				throw new Error("Master Unlock Key not available. Please log in again.");
+				throw new Error(
+					"Master Unlock Key not available. Please log in again.",
+				);
 			}
 
 			const sessionData = getStoredSessionData();

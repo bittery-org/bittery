@@ -1,5 +1,4 @@
-import { db } from "@bittery/db";
-import { syncEvent, syncEventAck, vaultKey } from "@bittery/db";
+import { db, syncEvent, syncEventAck, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, gt, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";

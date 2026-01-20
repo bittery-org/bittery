@@ -145,12 +145,8 @@ export function ShareItemDialog({
 			});
 
 			// Generate the shareable link with the key in the fragment
-			// For desktop app, we use a configurable base URL (web app URL)
-			const serverUrl = await tauriStorage.getServerUrl();
-			// Extract the base URL from the server URL (remove /api or similar suffixes)
-			const baseUrl = serverUrl
-				? serverUrl.replace(/\/api.*$/, "").replace(/\/$/, "")
-				: "https://app.bittery.io";
+			// For desktop app, we use the effective web app URL (custom or derived from server URL)
+			const baseUrl = await tauriStorage.getEffectiveWebAppUrl();
 			const shareUrl = `${baseUrl}/share/${result.token}#${shareKeyBase64}`;
 
 			return { ...result, shareUrl };

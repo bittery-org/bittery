@@ -27,8 +27,8 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useMutation } from "@tanstack/react-query";
-import { useQueryInvalidator } from "../../providers/sync-provider";
 import { Trash2 } from "lucide-react";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface Member {
 	id: string;

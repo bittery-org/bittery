@@ -1,8 +1,8 @@
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
-import { generateClientId, useSync } from "@bittery/sync";
 import type { SyncStorage } from "@bittery/sync";
-import { Store } from "@tauri-apps/plugin-store";
+import { generateClientId, useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
+import { Store } from "@tauri-apps/plugin-store";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 /**

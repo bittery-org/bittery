@@ -25,7 +25,7 @@ const DEVICE_KEY_STORAGE = "bittery_device_key";
 const ACTIVE_ACCOUNT_KEY = "bittery_active_account";
 const ACCOUNTS_LIST_KEY = "bittery_accounts_list";
 const MIGRATION_COMPLETED_KEY = "bittery_migration_v2_completed";
-const SERVER_URL_STORAGE = "bittery_server_url";
+const LEGACY_SERVER_URL_STORAGE = "bittery_server_url"; // Legacy, now account-scoped
 
 // Helper to generate namespaced keys for each account
 function getAccountKey(email: string, suffix: string): string {
@@ -95,24 +95,147 @@ async function getStore(): Promise<Store> {
 }
 
 // ============================================================================
-// Server URL Functions
+// Server URL Functions (Account-Scoped)
 // ============================================================================
 
-export async function storeServerUrl(serverUrl: string): Promise<void> {
+/**
+ * Store server URL for an account
+ * Each account can have a different server URL (for self-hosted instances)
+ */
+export async function storeServerUrl(
+	serverUrl: string,
+	email?: string,
+): Promise<void> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) throw new Error("No account specified");
+
 	const store = await getStore();
-	await store.set(SERVER_URL_STORAGE, serverUrl);
+	const key = getAccountKey(resolvedEmail, "server_url");
+	await store.set(key, serverUrl);
 	await store.save();
 }
 
-export async function getServerUrl(): Promise<string | null> {
+/**
+ * Get the server URL for an account
+ * Falls back to legacy global server URL if no account-scoped URL is set
+ */
+export async function getServerUrl(email?: string): Promise<string | null> {
 	const store = await getStore();
-	return (await store.get<string>(SERVER_URL_STORAGE)) ?? null;
+
+	// Try account-scoped URL first
+	const resolvedEmail = await resolveEmail(email);
+	if (resolvedEmail) {
+		const key = getAccountKey(resolvedEmail, "server_url");
+		const accountUrl = await store.get<string>(key);
+		if (accountUrl) return accountUrl;
+	}
+
+	// Fall back to legacy global URL
+	return (await store.get<string>(LEGACY_SERVER_URL_STORAGE)) ?? null;
 }
 
-export async function clearServerUrl(): Promise<void> {
+/**
+ * Clear server URL for an account
+ */
+export async function clearServerUrl(email?: string): Promise<void> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) return;
+
 	const store = await getStore();
-	await store.delete(SERVER_URL_STORAGE);
+	const key = getAccountKey(resolvedEmail, "server_url");
+	await store.delete(key);
 	await store.save();
+}
+
+/**
+ * Get the legacy global server URL (for migration purposes)
+ */
+export async function getLegacyServerUrl(): Promise<string | null> {
+	const store = await getStore();
+	return (await store.get<string>(LEGACY_SERVER_URL_STORAGE)) ?? null;
+}
+
+/**
+ * Clear the legacy global server URL (after migration)
+ */
+export async function clearLegacyServerUrl(): Promise<void> {
+	const store = await getStore();
+	await store.delete(LEGACY_SERVER_URL_STORAGE);
+	await store.save();
+}
+
+// ============================================================================
+// Web App URL Functions (Account-Scoped)
+// ============================================================================
+
+/**
+ * Store a custom web app URL for an account
+ * This URL is used when generating shareable links for items
+ * If not set, the web app URL will be derived from the server URL
+ */
+export async function storeWebAppUrl(
+	webAppUrl: string,
+	email?: string,
+): Promise<void> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) throw new Error("No account specified");
+
+	const store = await getStore();
+	const key = getAccountKey(resolvedEmail, "web_app_url");
+	await store.set(key, webAppUrl);
+	await store.save();
+}
+
+/**
+ * Get the custom web app URL for an account
+ * Returns null if not explicitly set
+ */
+export async function getWebAppUrl(email?: string): Promise<string | null> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) return null;
+
+	const store = await getStore();
+	const key = getAccountKey(resolvedEmail, "web_app_url");
+	return (await store.get<string>(key)) ?? null;
+}
+
+/**
+ * Clear the custom web app URL for an account
+ * After clearing, the web app URL will be derived from the server URL
+ */
+export async function clearWebAppUrl(email?: string): Promise<void> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) return;
+
+	const store = await getStore();
+	const key = getAccountKey(resolvedEmail, "web_app_url");
+	await store.delete(key);
+	await store.save();
+}
+
+/**
+ * Get the effective web app URL for generating share links
+ * Priority:
+ * 1. Custom web app URL if set
+ * 2. Derived from server URL (remove /api suffix, etc.)
+ * 3. Fallback to https://app.bittery.io
+ */
+export async function getEffectiveWebAppUrl(email?: string): Promise<string> {
+	// First, try to get custom web app URL
+	const customUrl = await getWebAppUrl(email);
+	if (customUrl) {
+		return customUrl.replace(/\/$/, "");
+	}
+
+	// Fall back to deriving from server URL (account-scoped)
+	const serverUrl = await getServerUrl(email);
+	if (serverUrl) {
+		// Remove /api or similar suffixes and trailing slash
+		return serverUrl.replace(/\/api.*$/, "").replace(/\/$/, "");
+	}
+
+	// Default fallback
+	return "https://app.bittery.io";
 }
 
 /**
@@ -563,6 +686,9 @@ export async function clearAccountData(email: string): Promise<void> {
 	await store.delete(getAccountKey(resolvedEmail, "vault_keys"));
 	await store.delete(getAccountKey(resolvedEmail, "biometric_enabled"));
 	await store.delete(getAccountKey(resolvedEmail, "last_biometric_auth"));
+	await store.delete(getAccountKey(resolvedEmail, "server_url"));
+	await store.delete(getAccountKey(resolvedEmail, "web_app_url"));
+	await store.delete(getAccountKey(resolvedEmail, "encrypted_private_key"));
 	await store.save();
 
 	// Clear in-memory cache
@@ -974,6 +1100,7 @@ export async function migrateToMultiAccount(): Promise<void> {
 		const legacyLastBiometricAuth = await store.get<number>(
 			LEGACY_LAST_BIOMETRIC_AUTH_KEY,
 		);
+		const legacyServerUrl = await store.get<string>(LEGACY_SERVER_URL_STORAGE);
 
 		// Store in new namespaced format
 		if (legacySecretKey) {
@@ -997,6 +1124,9 @@ export async function migrateToMultiAccount(): Promise<void> {
 				getAccountKey(email, "last_biometric_auth"),
 				legacyLastBiometricAuth,
 			);
+		}
+		if (legacyServerUrl) {
+			await store.set(getAccountKey(email, "server_url"), legacyServerUrl);
 		}
 
 		// Create account metadata

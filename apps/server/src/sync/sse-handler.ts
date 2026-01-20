@@ -212,7 +212,9 @@ function removeConnection(userId: string, connectionId: string): void {
  * Broadcast a sync event to all relevant users
  * Only sends to users who have access to the vault
  */
-export async function broadcastSyncEvent(event: SyncEventPayload): Promise<void> {
+export async function broadcastSyncEvent(
+	event: SyncEventPayload,
+): Promise<void> {
 	const { vaultId, clientId, userId: eventUserId } = event;
 
 	// If no vaultId, only broadcast to the user who triggered the event
@@ -262,7 +264,10 @@ export async function refreshUserVaults(userId: string): Promise<void> {
 /**
  * Get connection statistics
  */
-export function getConnectionStats(): { totalUsers: number; totalConnections: number } {
+export function getConnectionStats(): {
+	totalUsers: number;
+	totalConnections: number;
+} {
 	let totalConnections = 0;
 	for (const userConnections of connections.values()) {
 		totalConnections += userConnections.size;

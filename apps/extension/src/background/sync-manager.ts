@@ -3,8 +3,8 @@
  * MV3-compatible sync implementation using SSE with service worker constraints
  */
 
-import type { SyncEvent, ConnectionStatus } from "@bittery/sync";
 import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import type { ConnectionStatus, SyncEvent } from "@bittery/sync";
 
 /**
  * Generate a random ID (simpler than nanoid for extension context)
@@ -58,12 +58,14 @@ function setStatus(status: ConnectionStatus) {
 	if (connectionStatus !== status) {
 		connectionStatus = status;
 		// Broadcast to popup
-		chrome.runtime.sendMessage({
-			type: "SYNC_STATUS_CHANGED",
-			status,
-		}).catch(() => {
-			// Popup might not be open, ignore
-		});
+		chrome.runtime
+			.sendMessage({
+				type: "SYNC_STATUS_CHANGED",
+				status,
+			})
+			.catch(() => {
+				// Popup might not be open, ignore
+			});
 	}
 }
 
@@ -88,12 +90,14 @@ async function handleSyncEvent(event: SyncEvent) {
 	}
 
 	// Notify popup to refresh data
-	chrome.runtime.sendMessage({
-		type: "SYNC_EVENT",
-		event,
-	}).catch(() => {
-		// Popup might not be open, ignore
-	});
+	chrome.runtime
+		.sendMessage({
+			type: "SYNC_EVENT",
+			event,
+		})
+		.catch(() => {
+			// Popup might not be open, ignore
+		});
 
 	// Clear cached vault data so it refreshes
 	await chrome.storage.session.remove(["cachedVaultItems", "cachedVaults"]);
@@ -245,10 +249,7 @@ async function processEvent(eventStr: string): Promise<void> {
  * Schedule reconnection using Chrome Alarms (MV3 compatible)
  */
 function scheduleReconnect() {
-	const delay = Math.min(
-		1000 * Math.pow(2, reconnectAttempt),
-		30000
-	);
+	const delay = Math.min(1000 * 2 ** reconnectAttempt, 30000);
 	reconnectAttempt++;
 
 	// Use Chrome Alarms for reconnection (survives service worker termination)

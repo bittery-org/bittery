@@ -307,7 +307,7 @@ export class SyncManager {
 		}
 
 		const delay = Math.min(
-			this.reconnectDelay * Math.pow(2, this.reconnectAttempt),
+			this.reconnectDelay * 2 ** this.reconnectAttempt,
 			this.maxReconnectDelay,
 		);
 

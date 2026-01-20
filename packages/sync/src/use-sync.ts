@@ -1,19 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTRPC } from "@bittery/shared/trpc";
 import type { QueryClient } from "@tanstack/react-query";
-import { createOfflineQueue, OfflineQueue } from "./offline-queue";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createOfflineQueue, type OfflineQueue } from "./offline-queue";
 import {
 	createQueryInvalidator,
 	invalidateQueriesForEvent,
 	type QueryKeyHelpers,
 } from "./query-invalidation";
-import { createSyncManager, SyncManager } from "./sync-manager";
+import { createSyncManager, type SyncManager } from "./sync-manager";
 import type {
 	ConnectionStatus,
 	SyncEvent,
 	SyncStatus,
 	SyncStorage,
 } from "./types";
-import { useTRPC } from "@bittery/shared/trpc";
 
 /**
  * Options for useSync hook
@@ -33,7 +33,14 @@ export interface UseSyncOptions {
 export function useSync(options: UseSyncOptions) {
 	const trpc = useTRPC();
 
-	const { serverUrl, getAuthToken, clientId, queryClient, storage, enabled = true } = options;
+	const {
+		serverUrl,
+		getAuthToken,
+		clientId,
+		queryClient,
+		storage,
+		enabled = true,
+	} = options;
 
 	const [status, setStatus] = useState<SyncStatus>({
 		connectionStatus: "disconnected",
@@ -70,18 +77,21 @@ export function useSync(options: UseSyncOptions) {
 	/**
 	 * Handle connection status changes
 	 */
-	const handleStatusChange = useCallback((connectionStatus: ConnectionStatus) => {
-		setStatus((prev) => ({
-			...prev,
-			connectionStatus,
-			error: connectionStatus === "error" ? "Connection failed" : null,
-		}));
+	const handleStatusChange = useCallback(
+		(connectionStatus: ConnectionStatus) => {
+			setStatus((prev) => ({
+				...prev,
+				connectionStatus,
+				error: connectionStatus === "error" ? "Connection failed" : null,
+			}));
 
-		// If reconnected, process offline queue
-		if (connectionStatus === "connected" && offlineQueueRef.current) {
-			// TODO: Process offline queue with actual API calls
-		}
-	}, []);
+			// If reconnected, process offline queue
+			if (connectionStatus === "connected" && offlineQueueRef.current) {
+				// TODO: Process offline queue with actual API calls
+			}
+		},
+		[],
+	);
 
 	/**
 	 * Handle offline queue changes
@@ -206,7 +216,9 @@ export function useSync(options: UseSyncOptions) {
 		getPendingChanges,
 		invalidator,
 		isConnected: status.connectionStatus === "connected",
-		isOnline: status.connectionStatus !== "disconnected" && status.connectionStatus !== "error",
+		isOnline:
+			status.connectionStatus !== "disconnected" &&
+			status.connectionStatus !== "error",
 	};
 }
 

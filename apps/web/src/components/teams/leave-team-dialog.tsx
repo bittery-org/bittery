@@ -13,10 +13,10 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useMutation } from "@tanstack/react-query";
-import { useQueryInvalidator } from "../../providers/sync-provider";
 import { useNavigate } from "@tanstack/react-router";
 import { LogOut } from "lucide-react";
 import { useState } from "react";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface LeaveTeamDialogProps {
 	teamId: string;

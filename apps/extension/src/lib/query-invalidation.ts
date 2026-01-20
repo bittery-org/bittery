@@ -25,4 +25,6 @@ export function createExtensionInvalidator(queryClient: QueryClient) {
 	};
 }
 
-export type ExtensionInvalidator = ReturnType<typeof createExtensionInvalidator>;
+export type ExtensionInvalidator = ReturnType<
+	typeof createExtensionInvalidator
+>;

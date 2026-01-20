@@ -36,10 +36,7 @@ export class OfflineQueue {
 	private isProcessing = false;
 	private onQueueChange?: (count: number) => void;
 
-	constructor(
-		storage?: SyncStorage,
-		onQueueChange?: (count: number) => void,
-	) {
+	constructor(storage?: SyncStorage, onQueueChange?: (count: number) => void) {
 		this.storage = storage || new MemoryStorage();
 		this.onQueueChange = onQueueChange;
 	}
@@ -48,7 +45,8 @@ export class OfflineQueue {
 	 * Initialize queue from storage
 	 */
 	async init(): Promise<void> {
-		const stored = await this.storage.get<OfflineOperation[]>(QUEUE_STORAGE_KEY);
+		const stored =
+			await this.storage.get<OfflineOperation[]>(QUEUE_STORAGE_KEY);
 		if (stored) {
 			this.queue = stored;
 			this.onQueueChange?.(this.queue.length);
@@ -58,7 +56,9 @@ export class OfflineQueue {
 	/**
 	 * Add an operation to the queue
 	 */
-	async enqueue(operation: Omit<OfflineOperation, "id" | "timestamp" | "retryCount">): Promise<string> {
+	async enqueue(
+		operation: Omit<OfflineOperation, "id" | "timestamp" | "retryCount">,
+	): Promise<string> {
 		const op: OfflineOperation = {
 			...operation,
 			id: nanoid(),
@@ -181,7 +181,10 @@ export class OfflineQueue {
 	 * Check if there are any conflicting operations for an entity
 	 * (e.g., trying to update an entity that has a pending delete)
 	 */
-	hasConflict(entityId: string, operationType: "create" | "update" | "delete"): boolean {
+	hasConflict(
+		entityId: string,
+		operationType: "create" | "update" | "delete",
+	): boolean {
 		const entityOps = this.getByEntity(entityId);
 
 		for (const op of entityOps) {
@@ -203,7 +206,9 @@ export class OfflineQueue {
 	 * Merge a new operation with existing ones
 	 * (e.g., if we have create + update, just keep the latest create data)
 	 */
-	async mergeOperation(operation: Omit<OfflineOperation, "id" | "timestamp" | "retryCount">): Promise<string> {
+	async mergeOperation(
+		operation: Omit<OfflineOperation, "id" | "timestamp" | "retryCount">,
+	): Promise<string> {
 		const entityOps = this.getByEntity(operation.entityId);
 
 		// If there's an existing create and we're updating, just update the create data
