@@ -76,7 +76,7 @@ export function LoginDetail({
 							<Button
 								size="icon"
 								variant="outline"
-								onClick={() => handleCopy(data.url!, "URL")}
+								onClick={() => handleCopy(data.url, "URL")}
 							>
 								<Copy size={16} />
 							</Button>
@@ -99,7 +99,7 @@ export function LoginDetail({
 							<Button
 								size="icon"
 								variant="outline"
-								onClick={() => handleCopy(data.username!, "Username")}
+								onClick={() => handleCopy(data.username, "Username")}
 							>
 								<Copy size={16} />
 							</Button>
@@ -127,7 +127,7 @@ export function LoginDetail({
 							<Button
 								size="icon"
 								variant="outline"
-								onClick={() => handleCopy(data.password!, "Password")}
+								onClick={() => handleCopy(data.password, "Password")}
 							>
 								<Copy size={16} />
 							</Button>

@@ -15,6 +15,7 @@ import {
 	Badge,
 	Button,
 	Checkbox,
+	copyWithToast,
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -180,10 +181,11 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 		setAllowedEmails(allowedEmails.filter((e) => e !== email));
 	};
 
-	const handleCopyLink = async () => {
-		if (!generatedLink) return;
-		await navigator.clipboard.writeText(generatedLink);
-		toast.success("Link copied to clipboard!");
+	const handleCopyLink = () => {
+		copyWithToast(generatedLink, "Link", {
+			autoClearMs: 0,
+			showAutoClearMessage: false,
+		});
 	};
 
 	const handleCreateLink = () => {

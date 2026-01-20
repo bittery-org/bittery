@@ -4,7 +4,16 @@ import type {
 	TotpAlgorithm,
 	TotpDigits,
 } from "@bittery/shared/types";
-import { Button, Card, Input, Label, toast } from "@bittery/ui";
+import {
+	Button,
+	Card,
+	Input,
+	Label,
+	copyWithToast,
+	toast,
+} from "@bittery/ui";
+
+const handleCopy = copyWithToast;
 import { Copy, ExternalLink, Eye, EyeOff, Loader2, QrCode } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Favicon } from "./favicon";
@@ -14,20 +23,6 @@ const getItemNotes = (item: DecryptedItem) => item.notes || item.note || "";
 
 const normalizeUrl = (url: string) =>
 	url.includes("://") ? url : `https://${url}`;
-
-const handleCopy = async (text: string | null | undefined, label: string) => {
-	if (!text) {
-		toast.error(`No ${label.toLowerCase()} to copy`);
-		return;
-	}
-
-	try {
-		await navigator.clipboard.writeText(text);
-		toast.success(`${label} copied to clipboard`);
-	} catch {
-		toast.error("Failed to copy to clipboard");
-	}
-};
 
 const handleOpenUrl = (targetUrl: string | undefined) => {
 	if (!targetUrl) {
@@ -86,11 +81,8 @@ function InlineTotpDisplay({
 		return () => clearInterval(interval);
 	}, [generateCode]);
 
-	const handleCopyCode = async () => {
-		if (totpResult?.code) {
-			await navigator.clipboard.writeText(totpResult.code);
-			toast.success("Code copied to clipboard");
-		}
+	const handleCopyCode = () => {
+		copyWithToast(totpResult?.code, "Code", { showAutoClearMessage: false });
 	};
 
 	const progress = totpResult?.progress || 0;

@@ -13,6 +13,7 @@ import {
 	Card,
 	CardContent,
 	cn,
+	copyWithToast,
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -101,15 +102,16 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 		enabled: !!selectedLink && showAccessLogs,
 	});
 
-	const handleCopyLink = async (token: string) => {
+	const handleCopyLink = (token: string) => {
 		// Note: We cannot regenerate the full link with key since the key is not stored
 		// This just copies the base URL - users should copy the original link when created
 		const baseUrl = window.location.origin;
 		const shareUrl = `${baseUrl}/share/${token}`;
-		await navigator.clipboard.writeText(shareUrl);
-		toast.success(
-			"Link copied (note: you'll need the original link with decryption key)",
-		);
+		copyWithToast(shareUrl, "Link", {
+			autoClearMs: 0,
+			successMessage:
+				"Link copied (note: you'll need the original link with decryption key)",
+		});
 	};
 
 	const formatDate = (date: string) => {

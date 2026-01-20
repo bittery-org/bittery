@@ -1,0 +1,51 @@
+import { copyToClipboard } from "@bittery/shared/password";
+import { toast } from "./sonner";
+
+export interface CopyWithToastOptions {
+	/** Auto-clear clipboard after this many milliseconds. Default: 30000 (30s). Set to 0 to disable. */
+	autoClearMs?: number;
+	/** Show auto-clear time in success message. Default: true */
+	showAutoClearMessage?: boolean;
+	/** Custom success message. If provided, overrides default "{label} copied to clipboard" */
+	successMessage?: string;
+	/** Custom error message when text is empty. If provided, overrides default "No {label} to copy" */
+	emptyErrorMessage?: string;
+}
+
+/**
+ * Copy text to clipboard with toast notification
+ * Handles null/undefined values with error toast
+ */
+export async function copyWithToast(
+	text: string | null | undefined,
+	label: string,
+	options: CopyWithToastOptions = {},
+): Promise<boolean> {
+	const {
+		autoClearMs = 30000,
+		showAutoClearMessage = true,
+		successMessage,
+		emptyErrorMessage,
+	} = options;
+
+	if (!text) {
+		toast.error(emptyErrorMessage ?? `No ${label.toLowerCase()} to copy`);
+		return false;
+	}
+
+	try {
+		await copyToClipboard(text, autoClearMs);
+
+		const message =
+			successMessage ??
+			(showAutoClearMessage && autoClearMs > 0
+				? `${label} copied to clipboard (auto-clear in ${Math.round(autoClearMs / 1000)}s)`
+				: `${label} copied to clipboard`);
+
+		toast.success(message);
+		return true;
+	} catch {
+		toast.error("Failed to copy to clipboard");
+		return false;
+	}
+}

@@ -14,6 +14,7 @@ import {
 	Card,
 	CardContent,
 	cn,
+	copyWithToast,
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -106,10 +107,11 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 		// Get the effective web app URL to construct the share link
 		const baseUrl = await tauriStorage.getEffectiveWebAppUrl();
 		const shareUrl = `${baseUrl}/share/${token}`;
-		await navigator.clipboard.writeText(shareUrl);
-		toast.success(
-			"Link copied (note: you'll need the original link with decryption key)",
-		);
+		copyWithToast(shareUrl, "Link", {
+			autoClearMs: 0,
+			successMessage:
+				"Link copied (note: you'll need the original link with decryption key)",
+		});
 	};
 
 	const formatDate = (date: string) => {

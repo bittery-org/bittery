@@ -1,10 +1,9 @@
-import { copyToClipboard } from "@bittery/shared/password";
 import {
 	formatSecretForDisplay,
 	generateTotp,
 	type TotpResult,
 } from "@bittery/shared/totp";
-import { Button, Card, Input, Label, toast } from "@bittery/ui";
+import { Button, Card, copyWithToast, Input, Label } from "@bittery/ui";
 import { Copy, Eye, EyeOff } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Favicon } from "../favicon";
@@ -46,11 +45,8 @@ export function TotpDetail({
 		return () => clearInterval(interval);
 	}, [generateCode]);
 
-	const handleCopyCode = async () => {
-		if (totpResult?.code) {
-			await copyToClipboard(totpResult.code, 30000);
-			toast.success("Code copied to clipboard (auto-clear in 30s)");
-		}
+	const handleCopyCode = () => {
+		copyWithToast(totpResult?.code, "Code");
 	};
 
 	const progress = totpResult?.progress || 0;

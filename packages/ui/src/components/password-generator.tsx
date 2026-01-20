@@ -1,4 +1,5 @@
 import {
+	copyToClipboard,
 	generatePassword,
 	type PasswordOptions,
 } from "@bittery/shared/password";
@@ -43,7 +44,7 @@ export function PasswordGenerator({
 
 	const handleCopy = async () => {
 		if (password) {
-			await navigator.clipboard.writeText(password);
+			await copyToClipboard(password);
 			setCopied(true);
 			setTimeout(() => setCopied(false), 2000);
 		}

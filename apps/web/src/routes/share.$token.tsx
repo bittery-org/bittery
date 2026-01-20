@@ -10,6 +10,7 @@ import {
 	CardFooter,
 	CardHeader,
 	CardTitle,
+	copyWithToast,
 	Input,
 	Label,
 	toast,
@@ -471,9 +472,8 @@ function SharedItemDisplay({ item }: { item: SharedItemData }) {
 	const [showCVV, setShowCVV] = useState(false);
 	const [showSSN, setShowSSN] = useState(false);
 
-	const handleCopy = async (text: string, label: string) => {
-		await navigator.clipboard.writeText(text);
-		toast.success(`${label} copied to clipboard`);
+	const handleCopy = (text: string | undefined, label: string) => {
+		copyWithToast(text, label, { showAutoClearMessage: false });
 	};
 
 	return (
@@ -487,7 +487,7 @@ function SharedItemDisplay({ item }: { item: SharedItemData }) {
 						<Button
 							size="icon"
 							variant="outline"
-							onClick={() => handleCopy(item.url!, "URL")}
+							onClick={() => handleCopy(item.url, "URL")}
 						>
 							<Copy className="h-4 w-4" />
 						</Button>
@@ -510,7 +510,7 @@ function SharedItemDisplay({ item }: { item: SharedItemData }) {
 						<Button
 							size="icon"
 							variant="outline"
-							onClick={() => handleCopy(item.username!, "Username")}
+							onClick={() => handleCopy(item.username, "Username")}
 						>
 							<Copy className="h-4 w-4" />
 						</Button>
@@ -542,7 +542,7 @@ function SharedItemDisplay({ item }: { item: SharedItemData }) {
 						<Button
 							size="icon"
 							variant="outline"
-							onClick={() => handleCopy(item.password!, "Password")}
+							onClick={() => handleCopy(item.password, "Password")}
 						>
 							<Copy className="h-4 w-4" />
 						</Button>
@@ -562,7 +562,7 @@ function SharedItemDisplay({ item }: { item: SharedItemData }) {
 							size="icon"
 							variant="outline"
 							onClick={() =>
-								handleCopy(item.cardholderName!, "Cardholder name")
+								handleCopy(item.cardholderName, "Cardholder name")
 							}
 						>
 							<Copy className="h-4 w-4" />
@@ -595,7 +595,7 @@ function SharedItemDisplay({ item }: { item: SharedItemData }) {
 						<Button
 							size="icon"
 							variant="outline"
-							onClick={() => handleCopy(item.cardNumber!, "Card number")}
+							onClick={() => handleCopy(item.cardNumber, "Card number")}
 						>
 							<Copy className="h-4 w-4" />
 						</Button>
@@ -611,7 +611,7 @@ function SharedItemDisplay({ item }: { item: SharedItemData }) {
 						<Button
 							size="icon"
 							variant="outline"
-							onClick={() => handleCopy(item.expiryDate!, "Expiry date")}
+							onClick={() => handleCopy(item.expiryDate, "Expiry date")}
 						>
 							<Copy className="h-4 w-4" />
 						</Button>
@@ -643,7 +643,7 @@ function SharedItemDisplay({ item }: { item: SharedItemData }) {
 						<Button
 							size="icon"
 							variant="outline"
-							onClick={() => handleCopy(item.cvv!, "CVV")}
+							onClick={() => handleCopy(item.cvv, "CVV")}
 						>
 							<Copy className="h-4 w-4" />
 						</Button>
@@ -689,7 +689,7 @@ function SharedItemDisplay({ item }: { item: SharedItemData }) {
 						<Button
 							size="icon"
 							variant="outline"
-							onClick={() => handleCopy(item.email!, "Email")}
+							onClick={() => handleCopy(item.email, "Email")}
 						>
 							<Copy className="h-4 w-4" />
 						</Button>
@@ -721,7 +721,7 @@ function SharedItemDisplay({ item }: { item: SharedItemData }) {
 						<Button
 							size="icon"
 							variant="outline"
-							onClick={() => handleCopy(item.ssn!, "SSN")}
+							onClick={() => handleCopy(item.ssn, "SSN")}
 						>
 							<Copy className="h-4 w-4" />
 						</Button>
@@ -742,7 +742,7 @@ function SharedItemDisplay({ item }: { item: SharedItemData }) {
 						<Button
 							size="icon"
 							variant="outline"
-							onClick={() => handleCopy(item.totpSecret!, "TOTP Secret")}
+							onClick={() => handleCopy(item.totpSecret, "TOTP Secret")}
 						>
 							<Copy className="h-4 w-4" />
 						</Button>

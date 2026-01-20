@@ -1,4 +1,3 @@
-import { copyToClipboard } from "@bittery/shared/password";
 import type {
 	CreditCardDisplayData,
 	CustomField,
@@ -8,7 +7,7 @@ import type {
 	SecureNoteDisplayData,
 	TotpDisplayData,
 } from "@bittery/shared/types";
-import { toast } from "@bittery/ui";
+import { copyWithToast } from "@bittery/ui";
 
 export type {
 	CreditCardDisplayData,
@@ -39,7 +38,4 @@ export interface CategoryDetailProps<T> {
 	onDelete?: () => void;
 }
 
-export async function handleCopy(text: string, label: string) {
-	await copyToClipboard(text, 30000);
-	toast.success(`${label} copied to clipboard (auto-clear in 30s)`);
-}
+export { copyWithToast as handleCopy };

@@ -9,6 +9,7 @@ import { generateSRPRegistration } from "@bittery/crypto/srp-client";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
+	copyWithToast,
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -226,9 +227,8 @@ export function RegenerateSecretKeyDialog({
 		}
 	};
 
-	const copySecretKey = async () => {
-		await navigator.clipboard.writeText(newSecretKey);
-		toast.success("Secret Key copied to clipboard");
+	const copySecretKey = () => {
+		copyWithToast(newSecretKey, "Secret Key", { showAutoClearMessage: false });
 	};
 
 	const downloadEmergencyKit = () => {
