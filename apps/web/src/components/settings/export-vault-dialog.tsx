@@ -266,7 +266,7 @@ export function ExportVaultDialog({
 						<div className="grid gap-4 py-4">
 							<div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
 								<div className="flex gap-2">
-									<ShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-600 dark:text-blue-400" />
+									<ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
 									<div className="text-blue-700 text-xs dark:text-blue-300">
 										<strong>End-to-end encrypted:</strong> Your data is
 										encrypted with your password before leaving this device.
