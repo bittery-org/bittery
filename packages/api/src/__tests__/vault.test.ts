@@ -10,24 +10,23 @@
  * - Access control and role-based permissions
  */
 
-import { describe, expect, test, afterEach } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { vaultRouter } from "../routers/vault";
 import {
-	createAuthenticatedContext,
-	createPublicContext,
-	createTestUser,
-	createTestSession,
-	createTestVault,
-	createTestItem,
 	addVaultMember,
 	cleanupTestData,
-	mockSrpData,
-	mockItemData,
-	generateTestEmail,
-	getVault,
-	getItem,
-	getVaultKey,
 	countVaultItems,
+	createAuthenticatedContext,
+	createTestItem,
+	createTestSession,
+	createTestUser,
+	createTestVault,
+	generateTestEmail,
+	getItem,
+	getVault,
+	getVaultKey,
+	mockItemData,
+	mockSrpData,
 } from "./test-utils";
 
 describe("Vault Router", () => {
@@ -49,7 +48,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.list();
@@ -66,7 +65,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.list();
@@ -85,7 +84,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.list();
@@ -107,7 +106,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.get({ vaultId });
@@ -125,11 +124,11 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			await expect(caller.get({ vaultId: "nonexistent" })).rejects.toThrow(
-				"Vault not found or access denied"
+				"Vault not found or access denied",
 			);
 		});
 
@@ -144,11 +143,11 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId2);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId2, email2, sessionId)
+				createAuthenticatedContext(userId2, email2, sessionId),
 			);
 
 			await expect(caller.get({ vaultId })).rejects.toThrow(
-				"Vault not found or access denied"
+				"Vault not found or access denied",
 			);
 		});
 	});
@@ -161,7 +160,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.create({
@@ -186,7 +185,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.create({
@@ -211,7 +210,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.update({
@@ -236,11 +235,11 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(memberId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(memberId, email2, sessionId)
+				createAuthenticatedContext(memberId, email2, sessionId),
 			);
 
 			await expect(
-				caller.update({ vaultId, name: "Hacked Name" })
+				caller.update({ vaultId, name: "Hacked Name" }),
 			).rejects.toThrow("Access denied");
 		});
 
@@ -256,7 +255,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(adminId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(adminId, email2, sessionId)
+				createAuthenticatedContext(adminId, email2, sessionId),
 			);
 
 			const result = await caller.update({ vaultId, name: "Admin Updated" });
@@ -277,7 +276,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.delete({ vaultId });
@@ -300,11 +299,11 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(adminId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(adminId, email2, sessionId)
+				createAuthenticatedContext(adminId, email2, sessionId),
 			);
 
 			await expect(caller.delete({ vaultId })).rejects.toThrow(
-				"Only the vault owner can delete the vault"
+				"Only the vault owner can delete the vault",
 			);
 		});
 	});
@@ -322,7 +321,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.listItems({ vaultId });
@@ -341,11 +340,11 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(otherId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(otherId, email2, sessionId)
+				createAuthenticatedContext(otherId, email2, sessionId),
 			);
 
 			await expect(caller.listItems({ vaultId })).rejects.toThrow(
-				"Access denied to this vault"
+				"Access denied to this vault",
 			);
 		});
 	});
@@ -360,7 +359,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.createItem({
@@ -389,7 +388,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(readOnlyId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(readOnlyId, email2, sessionId)
+				createAuthenticatedContext(readOnlyId, email2, sessionId),
 			);
 
 			await expect(
@@ -398,7 +397,7 @@ describe("Vault Router", () => {
 					category: "login",
 					encryptedData: mockItemData.encryptedData,
 					encryptionIv: mockItemData.encryptionIv,
-				})
+				}),
 			).rejects.toThrow("Read-only access cannot create items");
 		});
 	});
@@ -414,7 +413,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.updateItem({
@@ -440,7 +439,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			await expect(
@@ -449,7 +448,7 @@ describe("Vault Router", () => {
 					encryptedData: "newData",
 					encryptionIv: "newIv",
 					expectedVersion: 3, // Wrong version
-				})
+				}),
 			).rejects.toThrow("Item has been modified by another client");
 		});
 	});
@@ -465,7 +464,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.deleteItem({ itemId });
@@ -488,7 +487,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.toggleFavorite({ itemId, favorite: true });
@@ -513,7 +512,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.listDeletedItems({ vaultId });
@@ -535,7 +534,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.restoreItem({ itemId });
@@ -556,11 +555,11 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			await expect(caller.restoreItem({ itemId })).rejects.toThrow(
-				"Item is not deleted"
+				"Item is not deleted",
 			);
 		});
 	});
@@ -578,7 +577,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.permanentlyDeleteItem({ itemId });
@@ -599,12 +598,12 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
-			await expect(
-				caller.permanentlyDeleteItem({ itemId })
-			).rejects.toThrow("Can only permanently delete items in trash");
+			await expect(caller.permanentlyDeleteItem({ itemId })).rejects.toThrow(
+				"Can only permanently delete items in trash",
+			);
 		});
 	});
 
@@ -618,7 +617,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.bulkImportItems({
@@ -667,7 +666,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.stats();
@@ -696,7 +695,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(ownerId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId)
+				createAuthenticatedContext(ownerId, email1, sessionId),
 			);
 
 			const result = await caller.members.list({ vaultId });
@@ -720,7 +719,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(ownerId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId)
+				createAuthenticatedContext(ownerId, email1, sessionId),
 			);
 
 			const result = await caller.members.updateRole({
@@ -744,7 +743,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(ownerId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(ownerId, email, sessionId)
+				createAuthenticatedContext(ownerId, email, sessionId),
 			);
 
 			await expect(
@@ -752,7 +751,7 @@ describe("Vault Router", () => {
 					vaultId,
 					userId: ownerId,
 					role: "admin",
-				})
+				}),
 			).rejects.toThrow("Cannot change your own role");
 		});
 
@@ -768,7 +767,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(adminId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(adminId, email2, sessionId)
+				createAuthenticatedContext(adminId, email2, sessionId),
 			);
 
 			await expect(
@@ -776,7 +775,7 @@ describe("Vault Router", () => {
 					vaultId,
 					userId: ownerId,
 					role: "member",
-				})
+				}),
 			).rejects.toThrow("Cannot change vault owner's role");
 		});
 	});
@@ -793,7 +792,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(ownerId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId)
+				createAuthenticatedContext(ownerId, email1, sessionId),
 			);
 
 			const result = await caller.members.add({
@@ -822,7 +821,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(ownerId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId)
+				createAuthenticatedContext(ownerId, email1, sessionId),
 			);
 
 			await expect(
@@ -831,7 +830,7 @@ describe("Vault Router", () => {
 					userId: memberId,
 					role: "admin",
 					encryptedVaultKey: mockSrpData.encryptedVaultKey,
-				})
+				}),
 			).rejects.toThrow("User is already a member of this vault");
 		});
 	});
@@ -849,7 +848,7 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(searcherId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(searcherId, email2, sessionId)
+				createAuthenticatedContext(searcherId, email2, sessionId),
 			);
 
 			const result = await caller.members.lookupUser({ email: email1 });
@@ -866,11 +865,11 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			await expect(caller.members.lookupUser({ email })).rejects.toThrow(
-				"Cannot add yourself as a member"
+				"Cannot add yourself as a member",
 			);
 		});
 
@@ -881,11 +880,11 @@ describe("Vault Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			await expect(
-				caller.members.lookupUser({ email: "nonexistent@example.com" })
+				caller.members.lookupUser({ email: "nonexistent@example.com" }),
 			).rejects.toThrow("User not found");
 		});
 	});

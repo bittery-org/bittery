@@ -11,11 +11,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import {
-	generateRSAKeyPair,
-	rsaDecrypt,
-	rsaEncrypt,
-} from "./rsa";
+import { generateRSAKeyPair, rsaDecrypt, rsaEncrypt } from "./rsa";
 
 describe("RSA-4096 Key Operations Module", () => {
 	describe("Key Pair Generation", () => {
@@ -201,7 +197,8 @@ describe("RSA-4096 Key Operations Module", () => {
 
 	describe("Error Handling - Invalid Keys", () => {
 		test("should fail encryption with invalid public key", async () => {
-			const invalidPublicKey = "-----BEGIN PUBLIC KEY-----\nINVALID\n-----END PUBLIC KEY-----";
+			const invalidPublicKey =
+				"-----BEGIN PUBLIC KEY-----\nINVALID\n-----END PUBLIC KEY-----";
 			const plaintext = "Test data";
 
 			let encryptionFailed = false;
@@ -220,7 +217,8 @@ describe("RSA-4096 Key Operations Module", () => {
 
 			const ciphertext = await rsaEncrypt(plaintext, keys.publicKey);
 
-			const invalidPrivateKey = "-----BEGIN PRIVATE KEY-----\nINVALID\n-----END PRIVATE KEY-----";
+			const invalidPrivateKey =
+				"-----BEGIN PRIVATE KEY-----\nINVALID\n-----END PRIVATE KEY-----";
 
 			let decryptionFailed = false;
 			try {
@@ -251,7 +249,8 @@ describe("RSA-4096 Key Operations Module", () => {
 
 		test("should fail with completely invalid key content", async () => {
 			// Test with a key that has valid headers but completely invalid content
-			const invalidKey = "-----BEGIN PUBLIC KEY-----\nTm90QVZhbGlkS2V5\n-----END PUBLIC KEY-----";
+			const invalidKey =
+				"-----BEGIN PUBLIC KEY-----\nTm90QVZhbGlkS2V5\n-----END PUBLIC KEY-----";
 
 			let encryptionFailed = false;
 			try {
@@ -297,7 +296,7 @@ describe("RSA-4096 Key Operations Module", () => {
 			const ciphertext = await rsaEncrypt(plaintext, keys.publicKey);
 
 			// Corrupt the ciphertext
-			const corrupted = ciphertext.slice(0, -4) + "XXXX";
+			const corrupted = `${ciphertext.slice(0, -4)}XXXX`;
 
 			let decryptionFailed = false;
 			try {
@@ -380,8 +379,14 @@ describe("RSA-4096 Key Operations Module", () => {
 			const vaultKey = crypto.getRandomValues(new Uint8Array(32));
 			const vaultKeyBase64 = btoa(String.fromCharCode(...vaultKey));
 
-			const encryptedVaultKey = await rsaEncrypt(vaultKeyBase64, memberKeys.publicKey);
-			const decryptedVaultKeyBase64 = await rsaDecrypt(encryptedVaultKey, memberKeys.privateKey);
+			const encryptedVaultKey = await rsaEncrypt(
+				vaultKeyBase64,
+				memberKeys.publicKey,
+			);
+			const decryptedVaultKeyBase64 = await rsaDecrypt(
+				encryptedVaultKey,
+				memberKeys.privateKey,
+			);
 
 			expect(decryptedVaultKeyBase64).toBe(vaultKeyBase64);
 		});
@@ -396,14 +401,29 @@ describe("RSA-4096 Key Operations Module", () => {
 			const vaultKeyBase64 = btoa(String.fromCharCode(...vaultKey));
 
 			// Encrypt for each member
-			const encrypted1 = await rsaEncrypt(vaultKeyBase64, member1Keys.publicKey);
-			const encrypted2 = await rsaEncrypt(vaultKeyBase64, member2Keys.publicKey);
-			const encrypted3 = await rsaEncrypt(vaultKeyBase64, member3Keys.publicKey);
+			const encrypted1 = await rsaEncrypt(
+				vaultKeyBase64,
+				member1Keys.publicKey,
+			);
+			const encrypted2 = await rsaEncrypt(
+				vaultKeyBase64,
+				member2Keys.publicKey,
+			);
+			const encrypted3 = await rsaEncrypt(
+				vaultKeyBase64,
+				member3Keys.publicKey,
+			);
 
 			// Each member should be able to decrypt
-			expect(await rsaDecrypt(encrypted1, member1Keys.privateKey)).toBe(vaultKeyBase64);
-			expect(await rsaDecrypt(encrypted2, member2Keys.privateKey)).toBe(vaultKeyBase64);
-			expect(await rsaDecrypt(encrypted3, member3Keys.privateKey)).toBe(vaultKeyBase64);
+			expect(await rsaDecrypt(encrypted1, member1Keys.privateKey)).toBe(
+				vaultKeyBase64,
+			);
+			expect(await rsaDecrypt(encrypted2, member2Keys.privateKey)).toBe(
+				vaultKeyBase64,
+			);
+			expect(await rsaDecrypt(encrypted3, member3Keys.privateKey)).toBe(
+				vaultKeyBase64,
+			);
 
 			// But they can't decrypt each other's copies
 			let crossDecryptFailed = false;
@@ -425,22 +445,37 @@ describe("RSA-4096 Key Operations Module", () => {
 			const oldVaultKeyBase64 = btoa(String.fromCharCode(...oldVaultKey));
 
 			// Removed member had access to old key
-			const removedMemberEncrypted = await rsaEncrypt(oldVaultKeyBase64, removedMemberKeys.publicKey);
+			const removedMemberEncrypted = await rsaEncrypt(
+				oldVaultKeyBase64,
+				removedMemberKeys.publicKey,
+			);
 
 			// After rotation: new vault key
 			const newVaultKey = crypto.getRandomValues(new Uint8Array(32));
 			const newVaultKeyBase64 = btoa(String.fromCharCode(...newVaultKey));
 
 			// Only remaining members get new key
-			const ownerNewKey = await rsaEncrypt(newVaultKeyBase64, ownerKeys.publicKey);
-			const memberNewKey = await rsaEncrypt(newVaultKeyBase64, memberKeys.publicKey);
+			const ownerNewKey = await rsaEncrypt(
+				newVaultKeyBase64,
+				ownerKeys.publicKey,
+			);
+			const memberNewKey = await rsaEncrypt(
+				newVaultKeyBase64,
+				memberKeys.publicKey,
+			);
 
 			// Remaining members can decrypt new key
-			expect(await rsaDecrypt(ownerNewKey, ownerKeys.privateKey)).toBe(newVaultKeyBase64);
-			expect(await rsaDecrypt(memberNewKey, memberKeys.privateKey)).toBe(newVaultKeyBase64);
+			expect(await rsaDecrypt(ownerNewKey, ownerKeys.privateKey)).toBe(
+				newVaultKeyBase64,
+			);
+			expect(await rsaDecrypt(memberNewKey, memberKeys.privateKey)).toBe(
+				newVaultKeyBase64,
+			);
 
 			// Removed member can still decrypt old key (expected)
-			expect(await rsaDecrypt(removedMemberEncrypted, removedMemberKeys.privateKey)).toBe(oldVaultKeyBase64);
+			expect(
+				await rsaDecrypt(removedMemberEncrypted, removedMemberKeys.privateKey),
+			).toBe(oldVaultKeyBase64);
 
 			// But new key is different, so old access is meaningless
 			expect(oldVaultKeyBase64).not.toBe(newVaultKeyBase64);

@@ -158,6 +158,7 @@ export function usePasswordSecurity(items: DecryptedItem[]): SecurityReport {
 		const passwordToItems = new Map<string, DecryptedItem[]>();
 
 		for (const item of loginItems) {
+			// biome-ignore lint/style/noNonNullAssertion: We know password is defined here
 			const password = item.password!;
 
 			// Get or compute analysis
@@ -174,6 +175,7 @@ export function usePasswordSecurity(items: DecryptedItem[]): SecurityReport {
 		// Identify weak passwords
 		const weakPasswords: PasswordIssue[] = [];
 		for (const item of loginItems) {
+			// biome-ignore lint/style/noNonNullAssertion: We know password is defined here
 			const analysis = analysisMap.get(item.password!);
 			if (analysis && analysis.score < WEAK_PASSWORD_THRESHOLD) {
 				weakPasswords.push({
@@ -205,6 +207,7 @@ export function usePasswordSecurity(items: DecryptedItem[]): SecurityReport {
 		for (const item of loginItems) {
 			const days = daysSince(item.updatedAt);
 			if (days > OLD_PASSWORD_THRESHOLD_DAYS) {
+				// biome-ignore lint/style/noNonNullAssertion: We know password is defined here
 				const analysis = analysisMap.get(item.password!);
 				oldPasswords.push({
 					item,

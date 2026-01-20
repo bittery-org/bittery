@@ -185,7 +185,13 @@ function ShareAccessPage() {
 		) {
 			accessPublicMutation.mutate();
 		}
-	}, [linkInfoQuery.data, shareKey]);
+	}, [
+		linkInfoQuery.data,
+		shareKey,
+		decryptedItem,
+		decryptionError,
+		accessPublicMutation,
+	]);
 
 	// Loading state
 	if (linkInfoQuery.isLoading) {

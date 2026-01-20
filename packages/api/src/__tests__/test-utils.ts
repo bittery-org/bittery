@@ -7,14 +7,7 @@
  */
 
 import { db } from "@bittery/db";
-import {
-	item,
-	vault,
-	vaultKey,
-	vaultKeyRotation,
-} from "@bittery/db/schema/vault";
 import { session, user } from "@bittery/db/schema/auth";
-import { team, teamInvitation, teamMember } from "@bittery/db/schema/team";
 import {
 	shareAccessLog,
 	shareEmailVerification,
@@ -23,6 +16,13 @@ import {
 	shareLinkRateLimit,
 } from "@bittery/db/schema/sharing";
 import { syncEvent, syncEventAck } from "@bittery/db/schema/sync";
+import { team, teamInvitation, teamMember } from "@bittery/db/schema/team";
+import {
+	item,
+	vault,
+	vaultKey,
+	vaultKeyRotation,
+} from "@bittery/db/schema/vault";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Context } from "../context";
@@ -40,7 +40,7 @@ export function generateTestUserId(): string {
  * Create a mock context for testing
  */
 export function createTestContext(
-	sessionData?: { userId: string; email: string; sessionId: string } | null
+	sessionData?: { userId: string; email: string; sessionId: string } | null,
 ): Context {
 	return {
 		session: sessionData || null,
@@ -57,7 +57,7 @@ export function createTestContext(
 export function createAuthenticatedContext(
 	userId: string,
 	email: string,
-	sessionId?: string
+	sessionId?: string,
 ): Context {
 	return createTestContext({
 		userId,
@@ -76,8 +76,7 @@ export function createPublicContext(): Context {
 // Mock SRP registration data - these are realistic but non-functional test values
 export const mockSrpData = {
 	// SRP salt (32 bytes hex encoded)
-	srpSalt:
-		"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+	srpSalt: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
 	// SRP verifier (large hex string representing g^x mod N)
 	srpVerifier:
 		"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" +
@@ -98,16 +97,14 @@ xwIDAQAB
 	encryptedPrivateKey:
 		"YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY3ODkwYWJjZGVmZ2hpamts",
 	// Encrypted vault key (base64 encoded - test data)
-	encryptedVaultKey:
-		"dGVzdC1lbmNyeXB0ZWQtdmF1bHQta2V5LWRhdGEtZm9yLXRlc3Rpbmc=",
+	encryptedVaultKey: "dGVzdC1lbmNyeXB0ZWQtdmF1bHQta2V5LWRhdGEtZm9yLXRlc3Rpbmc=",
 	// Secret key hint
 	secretKeyHint: "A3-TESTKEY",
 };
 
 // Mock item data for testing
 export const mockItemData = {
-	encryptedData:
-		"dGVzdC1lbmNyeXB0ZWQtaXRlbS1kYXRhLWZvci10ZXN0aW5nLXB1cnBvc2Vz",
+	encryptedData: "dGVzdC1lbmNyeXB0ZWQtaXRlbS1kYXRhLWZvci10ZXN0aW5nLXB1cnBvc2Vz",
 	encryptionIv: "YWJjZGVmZ2hpamts",
 	encryptionAlgorithm: "AES-GCM",
 };
@@ -123,7 +120,9 @@ export const mockShareData = {
 /**
  * Create a test user directly in the database
  */
-export async function createTestUser(overrides: Partial<typeof user.$inferInsert> = {}) {
+export async function createTestUser(
+	overrides: Partial<typeof user.$inferInsert> = {},
+) {
 	const userId = overrides.id || nanoid();
 	const email = (overrides.email || generateTestEmail()).toLowerCase();
 
@@ -148,7 +147,7 @@ export async function createTestUser(overrides: Partial<typeof user.$inferInsert
  */
 export async function createTestSession(
 	userId: string,
-	overrides: Partial<typeof session.$inferInsert> = {}
+	overrides: Partial<typeof session.$inferInsert> = {},
 ) {
 	const sessionId = overrides.id || nanoid();
 	const expiresAt =
@@ -179,7 +178,7 @@ export async function createTestSession(
 export async function createTestVault(
 	userId: string,
 	overrides: Partial<typeof vault.$inferInsert> = {},
-	vaultKeyOverrides: Partial<typeof vaultKey.$inferInsert> = {}
+	vaultKeyOverrides: Partial<typeof vaultKey.$inferInsert> = {},
 ) {
 	const vaultId = overrides.id || nanoid();
 
@@ -212,7 +211,7 @@ export async function createTestVault(
 export async function createTestItem(
 	vaultId: string,
 	userId: string,
-	overrides: Partial<typeof item.$inferInsert> = {}
+	overrides: Partial<typeof item.$inferInsert> = {},
 ) {
 	const itemId = overrides.id || nanoid();
 
@@ -238,7 +237,7 @@ export async function createTestItem(
  */
 export async function createTestTeam(
 	ownerId: string,
-	overrides: Partial<typeof team.$inferInsert> = {}
+	overrides: Partial<typeof team.$inferInsert> = {},
 ) {
 	const teamId = overrides.id || nanoid();
 
@@ -266,7 +265,7 @@ export async function createTestTeam(
 export async function addTeamMember(
 	teamId: string,
 	userId: string,
-	role: "owner" | "admin" | "member" = "member"
+	role: "owner" | "admin" | "member" = "member",
 ) {
 	const memberId = nanoid();
 
@@ -287,7 +286,7 @@ export async function addTeamMember(
 export async function addVaultMember(
 	vaultId: string,
 	userId: string,
-	role: "owner" | "admin" | "member" | "read-only" = "member"
+	role: "owner" | "admin" | "member" | "read-only" = "member",
 ) {
 	const keyId = nanoid();
 
@@ -309,7 +308,7 @@ export async function createTestInvitation(
 	teamId: string,
 	invitedById: string,
 	email: string,
-	overrides: Partial<typeof teamInvitation.$inferInsert> = {}
+	overrides: Partial<typeof teamInvitation.$inferInsert> = {},
 ) {
 	const invitationId = overrides.id || nanoid();
 	const token = overrides.token || nanoid(32);
@@ -337,7 +336,7 @@ export async function createTestInvitation(
 export async function createTestShareLink(
 	itemId: string,
 	createdById: string,
-	overrides: Partial<typeof shareLink.$inferInsert> = {}
+	overrides: Partial<typeof shareLink.$inferInsert> = {},
 ) {
 	const shareLinkId = overrides.id || nanoid();
 	const token = overrides.token || nanoid(32);
@@ -372,7 +371,7 @@ export async function createTestShareLink(
 export async function addShareLinkAllowedEmail(
 	shareLinkId: string,
 	email: string,
-	verified: boolean = false
+	verified = false,
 ) {
 	const emailId = nanoid();
 
@@ -399,7 +398,9 @@ export async function cleanupTestData(userIds: string[] = []) {
 		});
 
 		for (const link of userShareLinks) {
-			await db.delete(shareAccessLog).where(eq(shareAccessLog.shareLinkId, link.id));
+			await db
+				.delete(shareAccessLog)
+				.where(eq(shareAccessLog.shareLinkId, link.id));
 			await db
 				.delete(shareEmailVerification)
 				.where(eq(shareEmailVerification.shareLinkId, link.id));
@@ -409,7 +410,9 @@ export async function cleanupTestData(userIds: string[] = []) {
 		}
 
 		await db.delete(shareLink).where(eq(shareLink.createdById, userId));
-		await db.delete(shareLinkRateLimit).where(eq(shareLinkRateLimit.userId, userId));
+		await db
+			.delete(shareLinkRateLimit)
+			.where(eq(shareLinkRateLimit.userId, userId));
 
 		// Clean up sync events
 		await db.delete(syncEventAck).where(eq(syncEventAck.userId, userId));
@@ -423,7 +426,9 @@ export async function cleanupTestData(userIds: string[] = []) {
 		for (const v of userVaults) {
 			await db.delete(item).where(eq(item.vaultId, v.id));
 			await db.delete(vaultKey).where(eq(vaultKey.vaultId, v.id));
-			await db.delete(vaultKeyRotation).where(eq(vaultKeyRotation.vaultId, v.id));
+			await db
+				.delete(vaultKeyRotation)
+				.where(eq(vaultKeyRotation.vaultId, v.id));
 			await db.delete(syncEvent).where(eq(syncEvent.vaultId, v.id));
 		}
 
@@ -431,7 +436,9 @@ export async function cleanupTestData(userIds: string[] = []) {
 
 		// Clean up team data
 		await db.delete(teamMember).where(eq(teamMember.userId, userId));
-		await db.delete(teamInvitation).where(eq(teamInvitation.invitedById, userId));
+		await db
+			.delete(teamInvitation)
+			.where(eq(teamInvitation.invitedById, userId));
 		const userTeams = await db.query.team.findMany({
 			where: (t, { eq }) => eq(t.ownerId, userId),
 		});

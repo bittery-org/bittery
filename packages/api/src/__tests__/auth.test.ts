@@ -13,21 +13,19 @@
  * - Heartbeat
  */
 
-import { describe, expect, test, afterEach, beforeEach } from "bun:test";
-import { TRPCError } from "@trpc/server";
+import { afterEach, describe, expect, test } from "bun:test";
 import { authRouter } from "../routers/auth";
 import {
-	createTestContext,
+	cleanupTestData,
 	createAuthenticatedContext,
 	createPublicContext,
-	createTestUser,
 	createTestSession,
+	createTestUser,
 	createTestVault,
-	cleanupTestData,
-	mockSrpData,
 	generateTestEmail,
-	getUser,
 	getSession,
+	getUser,
+	mockSrpData,
 } from "./test-utils";
 
 describe("Auth Router", () => {
@@ -107,7 +105,7 @@ describe("Auth Router", () => {
 					publicKey: mockSrpData.publicKey,
 					encryptedPrivateKey: mockSrpData.encryptedPrivateKey,
 					encryptedVaultKey: mockSrpData.encryptedVaultKey,
-				})
+				}),
 			).rejects.toThrow("User with this email already exists");
 		});
 
@@ -149,7 +147,9 @@ describe("Auth Router", () => {
 
 		test("should return exists: false for non-existing email", async () => {
 			const caller = authRouter.createCaller(createPublicContext());
-			const result = await caller.checkEmail({ email: "nonexistent@example.com" });
+			const result = await caller.checkEmail({
+				email: "nonexistent@example.com",
+			});
 
 			expect(result.exists).toBe(false);
 			expect(result.secretKeyHint).toBeNull();
@@ -175,7 +175,7 @@ describe("Auth Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.me();
@@ -239,7 +239,7 @@ describe("Auth Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, oldEmail, sessionId)
+				createAuthenticatedContext(userId, oldEmail, sessionId),
 			);
 
 			const result = await caller.updateEmail({ newEmail });
@@ -259,11 +259,11 @@ describe("Auth Router", () => {
 
 			const sessionId = await createTestSession(userId1);
 			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId1, email1, sessionId)
+				createAuthenticatedContext(userId1, email1, sessionId),
 			);
 
 			await expect(caller.updateEmail({ newEmail: email2 })).rejects.toThrow(
-				"Email already in use"
+				"Email already in use",
 			);
 		});
 	});
@@ -277,20 +277,18 @@ describe("Auth Router", () => {
 			const vaultId = await createTestVault(userId);
 			const sessionId = await createTestSession(userId);
 			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const newSrpSalt = "newSalt123456789012345678901234567890123456789012345";
-			const newSrpVerifier = "newVerifier" + mockSrpData.srpVerifier.slice(11);
+			const newSrpVerifier = `newVerifier${mockSrpData.srpVerifier.slice(11)}`;
 			const newEncryptedPrivateKey = "newEncryptedPrivateKey123";
 
 			const result = await caller.changePassword({
 				srpSalt: newSrpSalt,
 				srpVerifier: newSrpVerifier,
 				encryptedPrivateKey: newEncryptedPrivateKey,
-				encryptedVaultKeys: [
-					{ vaultId, encryptedVaultKey: "newVaultKey123" },
-				],
+				encryptedVaultKeys: [{ vaultId, encryptedVaultKey: "newVaultKey123" }],
 			});
 
 			expect(result.success).toBe(true);
@@ -311,7 +309,7 @@ describe("Auth Router", () => {
 			const vaultId = await createTestVault(userId);
 			const sessionId = await createTestSession(userId);
 			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const newSecretKeyHint = "B4-NEWKEY";
@@ -322,9 +320,7 @@ describe("Auth Router", () => {
 				srpSalt: newSrpSalt,
 				srpVerifier: mockSrpData.srpVerifier,
 				encryptedPrivateKey: "newEncrypted123",
-				encryptedVaultKeys: [
-					{ vaultId, encryptedVaultKey: "newVaultKey456" },
-				],
+				encryptedVaultKeys: [{ vaultId, encryptedVaultKey: "newVaultKey456" }],
 			});
 
 			expect(result.success).toBe(true);
@@ -343,7 +339,7 @@ describe("Auth Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.deleteAccount({ confirmEmail: email });
@@ -361,11 +357,11 @@ describe("Auth Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			await expect(
-				caller.deleteAccount({ confirmEmail: "wrong@example.com" })
+				caller.deleteAccount({ confirmEmail: "wrong@example.com" }),
 			).rejects.toThrow("Email does not match");
 		});
 	});
@@ -376,11 +372,15 @@ describe("Auth Router", () => {
 			const { userId } = await createTestUser({ email });
 			testUserIds.push(userId);
 
-			const session1 = await createTestSession(userId, { deviceName: "Device 1" });
-			const session2 = await createTestSession(userId, { deviceName: "Device 2" });
+			const session1 = await createTestSession(userId, {
+				deviceName: "Device 1",
+			});
+			const session2 = await createTestSession(userId, {
+				deviceName: "Device 2",
+			});
 
 			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, session1)
+				createAuthenticatedContext(userId, email, session1),
 			);
 
 			const result = await caller.listDevices();
@@ -408,7 +408,7 @@ describe("Auth Router", () => {
 			});
 
 			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, currentSession)
+				createAuthenticatedContext(userId, email, currentSession),
 			);
 
 			const result = await caller.revokeDevice({ sessionId: otherSession });
@@ -427,11 +427,11 @@ describe("Auth Router", () => {
 			const currentSession = await createTestSession(userId);
 
 			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, currentSession)
+				createAuthenticatedContext(userId, email, currentSession),
 			);
 
 			await expect(
-				caller.revokeDevice({ sessionId: currentSession })
+				caller.revokeDevice({ sessionId: currentSession }),
 			).rejects.toThrow("Cannot revoke current session");
 		});
 	});
@@ -447,7 +447,7 @@ describe("Auth Router", () => {
 			});
 
 			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.renameDevice({
@@ -475,7 +475,7 @@ describe("Auth Router", () => {
 			await new Promise((resolve) => setTimeout(resolve, 100));
 
 			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.heartbeat();
@@ -484,7 +484,7 @@ describe("Auth Router", () => {
 
 			const updatedSession = await getSession(sessionId);
 			expect(updatedSession?.lastActiveAt.getTime()).toBeGreaterThanOrEqual(
-				originalSession?.lastActiveAt.getTime() || 0
+				originalSession?.lastActiveAt.getTime() || 0,
 			);
 		});
 	});

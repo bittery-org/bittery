@@ -291,68 +291,71 @@ function ItemRow({
 
 	return (
 		<div
-			onClick={() => onSelect?.(item)}
-			onKeyDown={(e) => {
-				if (e.key === "Enter" || e.key === " ") {
-					e.preventDefault();
-					onSelect?.(item);
-				}
-			}}
-			role="button"
-			tabIndex={0}
-			className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors ${
+			className={`relative flex items-center gap-3 rounded-lg border p-3 transition-colors ${
 				isSelected
 					? "border-primary/50 bg-muted/60"
 					: "border-transparent hover:bg-muted/30"
 			}`}
 		>
-			<Favicon
-				url={item.url}
-				title={item.title}
-				category={item.category}
-				cardBrand={cardBrand}
-				size="md"
+			{/* Invisible button overlay for main selection */}
+			<button
+				type="button"
+				onClick={() => onSelect?.(item)}
+				className="absolute inset-0 z-0 cursor-pointer rounded-lg"
+				aria-label={`Select ${item.title}`}
 			/>
-			<div className="min-w-0 flex-1">
-				<div className="flex items-center gap-2">
-					<span className="truncate font-medium">{item.title}</span>
-					{/* TOTP indicator for login items */}
-					{item.category === "login" && item.totpSecret && (
-						<span title="Has 2FA">
-							<Smartphone className="h-3 w-3 shrink-0 text-primary" />
-						</span>
+
+			{/* Content - pointer-events-none so clicks pass through to overlay */}
+			<div className="pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-3">
+				<Favicon
+					url={item.url}
+					title={item.title}
+					category={item.category}
+					cardBrand={cardBrand}
+					size="md"
+				/>
+				<div className="min-w-0 flex-1">
+					<div className="flex items-center gap-2">
+						<span className="truncate font-medium">{item.title}</span>
+						{/* TOTP indicator for login items */}
+						{item.category === "login" && item.totpSecret && (
+							<span title="Has 2FA">
+								<Smartphone className="h-3 w-3 shrink-0 text-primary" />
+							</span>
+						)}
+					</div>
+					{item.username && (
+						<div className="truncate text-muted-foreground text-sm">
+							{item.username}
+						</div>
+					)}
+					{maskedCardNumber && (
+						<div className="truncate text-muted-foreground text-sm">
+							{maskedCardNumber}
+						</div>
 					)}
 				</div>
-				{item.username && (
-					<div className="truncate text-muted-foreground text-sm">
-						{item.username}
-					</div>
-				)}
-				{maskedCardNumber && (
-					<div className="truncate text-muted-foreground text-sm">
-						{maskedCardNumber}
-					</div>
-				)}
-			</div>
-			<div className="flex items-center gap-2">
 				<Badge variant="outline" className="shrink-0 capitalize">
 					{item.category.replace("-", " ")}
 				</Badge>
-				<button
-					type="button"
-					onClick={(e) => onToggleFavorite(e, item.id, item.favorite)}
-					className={`shrink-0 transition-colors ${
-						item.favorite
-							? "text-yellow-500 hover:text-yellow-600"
-							: "text-muted-foreground hover:text-yellow-500"
-					}`}
-				>
-					<Star
-						className="h-4 w-4"
-						fill={item.favorite ? "currentColor" : "none"}
-					/>
-				</button>
 			</div>
+
+			{/* Favorite button - interactive, above the overlay */}
+			<button
+				type="button"
+				onClick={(e) => onToggleFavorite(e, item.id, item.favorite)}
+				aria-label={item.favorite ? "Remove from favorites" : "Add to favorites"}
+				className={`relative z-10 shrink-0 transition-colors ${
+					item.favorite
+						? "text-yellow-500 hover:text-yellow-600"
+						: "text-muted-foreground hover:text-yellow-500"
+				}`}
+			>
+				<Star
+					className="h-4 w-4"
+					fill={item.favorite ? "currentColor" : "none"}
+				/>
+			</button>
 		</div>
 	);
 }

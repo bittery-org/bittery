@@ -9,22 +9,20 @@
  * - Role-based permissions (owner, admin, member)
  */
 
-import { describe, expect, test, afterEach } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { teamRouter } from "../routers/team";
 import {
-	createAuthenticatedContext,
-	createPublicContext,
-	createTestUser,
-	createTestSession,
-	createTestTeam,
-	createTestInvitation,
 	addTeamMember,
 	cleanupTestData,
+	createAuthenticatedContext,
+	createPublicContext,
+	createTestInvitation,
+	createTestSession,
+	createTestTeam,
+	createTestUser,
 	generateTestEmail,
 	getTeam,
 	getTeamMember,
-	countTeamMembers,
-	getUser,
 } from "./test-utils";
 
 describe("Team Router", () => {
@@ -46,7 +44,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.list();
@@ -64,7 +62,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.list();
@@ -84,7 +82,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(memberId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(memberId, email2, sessionId)
+				createAuthenticatedContext(memberId, email2, sessionId),
 			);
 
 			const result = await caller.list();
@@ -105,7 +103,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.get({ teamId });
@@ -128,11 +126,11 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(otherId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(otherId, email2, sessionId)
+				createAuthenticatedContext(otherId, email2, sessionId),
 			);
 
 			await expect(caller.get({ teamId })).rejects.toThrow(
-				"You are not a member of this team"
+				"You are not a member of this team",
 			);
 		});
 	});
@@ -145,7 +143,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.create({ name: "New Team" });
@@ -171,7 +169,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.update({ teamId, name: "New Name" });
@@ -194,7 +192,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(adminId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(adminId, email2, sessionId)
+				createAuthenticatedContext(adminId, email2, sessionId),
 			);
 
 			const result = await caller.update({ teamId, name: "Admin Updated" });
@@ -214,11 +212,11 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(memberId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(memberId, email2, sessionId)
+				createAuthenticatedContext(memberId, email2, sessionId),
 			);
 
 			await expect(
-				caller.update({ teamId, name: "Hacked Name" })
+				caller.update({ teamId, name: "Hacked Name" }),
 			).rejects.toThrow("Insufficient permissions");
 		});
 	});
@@ -233,7 +231,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.delete({ teamId });
@@ -256,11 +254,11 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(adminId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(adminId, email2, sessionId)
+				createAuthenticatedContext(adminId, email2, sessionId),
 			);
 
 			await expect(caller.delete({ teamId })).rejects.toThrow(
-				"Insufficient permissions"
+				"Insufficient permissions",
 			);
 		});
 	});
@@ -278,7 +276,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(memberId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(memberId, email2, sessionId)
+				createAuthenticatedContext(memberId, email2, sessionId),
 			);
 
 			const result = await caller.leave({ teamId });
@@ -298,11 +296,11 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			await expect(caller.leave({ teamId })).rejects.toThrow(
-				"Owners cannot leave their team"
+				"Owners cannot leave their team",
 			);
 		});
 	});
@@ -332,7 +330,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(ownerId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId)
+				createAuthenticatedContext(ownerId, email1, sessionId),
 			);
 
 			const result = await caller.members.list({ teamId });
@@ -357,7 +355,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(ownerId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId)
+				createAuthenticatedContext(ownerId, email1, sessionId),
 			);
 
 			const result = await caller.members.updateRole({
@@ -381,7 +379,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			await expect(
@@ -389,7 +387,7 @@ describe("Team Router", () => {
 					teamId,
 					userId,
 					role: "admin",
-				})
+				}),
 			).rejects.toThrow("Cannot change your own role");
 		});
 
@@ -408,7 +406,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(admin1Id);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(admin1Id, email2, sessionId)
+				createAuthenticatedContext(admin1Id, email2, sessionId),
 			);
 
 			await expect(
@@ -416,7 +414,7 @@ describe("Team Router", () => {
 					teamId,
 					userId: admin2Id,
 					role: "member",
-				})
+				}),
 			).rejects.toThrow("Admins cannot change other admins");
 		});
 	});
@@ -434,7 +432,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(ownerId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId)
+				createAuthenticatedContext(ownerId, email1, sessionId),
 			);
 
 			const result = await caller.members.remove({
@@ -460,11 +458,11 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(adminId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(adminId, email2, sessionId)
+				createAuthenticatedContext(adminId, email2, sessionId),
 			);
 
 			await expect(
-				caller.members.remove({ teamId, userId: ownerId })
+				caller.members.remove({ teamId, userId: ownerId }),
 			).rejects.toThrow("Cannot remove team owner");
 		});
 
@@ -477,12 +475,12 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
-			await expect(
-				caller.members.remove({ teamId, userId })
-			).rejects.toThrow("Cannot remove yourself");
+			await expect(caller.members.remove({ teamId, userId })).rejects.toThrow(
+				"Cannot remove yourself",
+			);
 		});
 	});
 
@@ -496,7 +494,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const inviteeEmail = generateTestEmail();
@@ -522,7 +520,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(ownerId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId)
+				createAuthenticatedContext(ownerId, email1, sessionId),
 			);
 
 			const result = await caller.invitations.send({
@@ -546,7 +544,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(ownerId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId)
+				createAuthenticatedContext(ownerId, email1, sessionId),
 			);
 
 			await expect(
@@ -554,7 +552,7 @@ describe("Team Router", () => {
 					teamId,
 					email: email2,
 					role: "admin",
-				})
+				}),
 			).rejects.toThrow("User is already a member of this team");
 		});
 
@@ -568,7 +566,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			// First invitation
@@ -584,7 +582,7 @@ describe("Team Router", () => {
 					teamId,
 					email: inviteeEmail,
 					role: "member",
-				})
+				}),
 			).rejects.toThrow("An invitation is already pending for this email");
 		});
 	});
@@ -601,7 +599,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.invitations.list({ teamId });
@@ -621,7 +619,7 @@ describe("Team Router", () => {
 				teamId,
 				userId,
 				"invitee@example.com",
-				{ role: "admin" }
+				{ role: "admin" },
 			);
 
 			const caller = teamRouter.createCaller(createPublicContext());
@@ -645,7 +643,7 @@ describe("Team Router", () => {
 				teamId,
 				userId,
 				"invitee@example.com",
-				{ expiresAt: new Date(Date.now() - 1000) } // Expired
+				{ expiresAt: new Date(Date.now() - 1000) }, // Expired
 			);
 
 			const caller = teamRouter.createCaller(createPublicContext());
@@ -666,12 +664,12 @@ describe("Team Router", () => {
 			const { invitationId } = await createTestInvitation(
 				teamId,
 				userId,
-				"invitee@example.com"
+				"invitee@example.com",
 			);
 
 			const sessionId = await createTestSession(userId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.invitations.cancel({ invitationId });
@@ -691,12 +689,12 @@ describe("Team Router", () => {
 				teamId,
 				userId,
 				"invitee@example.com",
-				{ expiresAt: new Date(Date.now() + 1000) } // About to expire
+				{ expiresAt: new Date(Date.now() + 1000) }, // About to expire
 			);
 
 			const sessionId = await createTestSession(userId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.invitations.resend({ invitationId });
@@ -718,7 +716,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(inviteeId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(inviteeId, email2, sessionId)
+				createAuthenticatedContext(inviteeId, email2, sessionId),
 			);
 
 			const result = await caller.invitations.pending();
@@ -743,7 +741,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(inviteeId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(inviteeId, email2, sessionId)
+				createAuthenticatedContext(inviteeId, email2, sessionId),
 			);
 
 			const result = await caller.invitations.accept({ token });
@@ -769,11 +767,11 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(inviteeId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(inviteeId, email2, sessionId)
+				createAuthenticatedContext(inviteeId, email2, sessionId),
 			);
 
 			await expect(caller.invitations.accept({ token })).rejects.toThrow(
-				"Invitation has expired"
+				"Invitation has expired",
 			);
 		});
 
@@ -790,11 +788,11 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(wrongUserId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(wrongUserId, email3, sessionId)
+				createAuthenticatedContext(wrongUserId, email3, sessionId),
 			);
 
 			await expect(caller.invitations.accept({ token })).rejects.toThrow(
-				"This invitation is not for you"
+				"This invitation is not for you",
 			);
 		});
 	});
@@ -812,7 +810,7 @@ describe("Team Router", () => {
 
 			const sessionId = await createTestSession(inviteeId);
 			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(inviteeId, email2, sessionId)
+				createAuthenticatedContext(inviteeId, email2, sessionId),
 			);
 
 			const result = await caller.invitations.decline({ token });

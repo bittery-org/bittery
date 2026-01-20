@@ -140,6 +140,7 @@ function SyncStatusIcon({
 					viewBox="0 0 24 24"
 					xmlns="http://www.w3.org/2000/svg"
 				>
+					<title>Connecting</title>
 					<path
 						strokeLinecap="round"
 						strokeLinejoin="round"
@@ -161,6 +162,7 @@ function SyncStatusIcon({
 					viewBox="0 0 24 24"
 					xmlns="http://www.w3.org/2000/svg"
 				>
+					<title>Connected</title>
 					<path
 						strokeLinecap="round"
 						strokeLinejoin="round"
@@ -182,6 +184,7 @@ function SyncStatusIcon({
 					viewBox="0 0 24 24"
 					xmlns="http://www.w3.org/2000/svg"
 				>
+					<title>Sync Error</title>
 					<path
 						strokeLinecap="round"
 						strokeLinejoin="round"
@@ -203,6 +206,7 @@ function SyncStatusIcon({
 				viewBox="0 0 24 24"
 				xmlns="http://www.w3.org/2000/svg"
 			>
+				<title>Disconnected</title>
 				<path
 					strokeLinecap="round"
 					strokeLinejoin="round"

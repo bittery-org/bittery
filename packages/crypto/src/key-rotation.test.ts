@@ -98,7 +98,7 @@ describe("Shared Vault Key Encryption Feature", () => {
 		// Generate RSA key pairs for team members
 		const ownerKeys = await generateRSAKeyPair();
 		const member1Keys = await generateRSAKeyPair();
-		const member2Keys = await generateRSAKeyPair();
+		// const member2Keys = await generateRSAKeyPair();
 
 		// Generate original vault key
 		const originalVaultKey = generateEncryptionKey();
@@ -148,6 +148,7 @@ describe("Shared Vault Key Encryption Feature", () => {
 		expect(ownerKeyEntry).toBeDefined();
 
 		const ownerDecryptedKey = await rsaDecrypt(
+			// biome-ignore lint/style/noNonNullAssertion: We know this is defined here
 			ownerKeyEntry!.encryptedVaultKey,
 			ownerKeys.privateKey,
 		);
@@ -160,6 +161,7 @@ describe("Shared Vault Key Encryption Feature", () => {
 		expect(member1KeyEntry).toBeDefined();
 
 		const member1DecryptedKey = await rsaDecrypt(
+			// biome-ignore lint/style/noNonNullAssertion: We know this is defined here
 			member1KeyEntry!.encryptedVaultKey,
 			member1Keys.privateKey,
 		);

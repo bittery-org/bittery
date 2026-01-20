@@ -12,7 +12,7 @@ import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button, Input, Label, toast, VaultIcon } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Fingerprint, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Fingerprint } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAccount } from "../contexts/account-context";
 

@@ -199,9 +199,9 @@ describe("Secret Key Module", () => {
 			// Missing segment
 			expect(validateSecretKey("A3-ABCDEF-GHIJKL-MNOPQ-RSTUV")).toBe(false);
 			// Extra segment
-			expect(validateSecretKey("A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2-EXTRA")).toBe(
-				false,
-			);
+			expect(
+				validateSecretKey("A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2-EXTRA"),
+			).toBe(false);
 		});
 
 		test("should reject key with spaces", () => {
@@ -344,9 +344,9 @@ describe("Secret Key Module", () => {
 
 		test("should reject keys with unicode characters that look similar", () => {
 			// Greek Alpha looks like A but is different
-			expect(validateSecretKey("\u0391\u0033-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2")).toBe(
-				false,
-			);
+			expect(
+				validateSecretKey("\u0391\u0033-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2"),
+			).toBe(false);
 		});
 	});
 

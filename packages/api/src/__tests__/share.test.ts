@@ -10,25 +10,23 @@
  * - Expiration and one-time use links
  */
 
-import { describe, expect, test, afterEach } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { db } from "@bittery/db";
 import { shareRouter } from "../routers/share";
 import {
-	createAuthenticatedContext,
-	createPublicContext,
-	createTestUser,
-	createTestSession,
-	createTestVault,
-	createTestItem,
-	createTestShareLink,
 	addShareLinkAllowedEmail,
 	addVaultMember,
 	cleanupTestData,
-	mockShareData,
+	createAuthenticatedContext,
+	createPublicContext,
+	createTestItem,
+	createTestSession,
+	createTestShareLink,
+	createTestUser,
+	createTestVault,
 	generateTestEmail,
+	mockShareData,
 } from "./test-utils";
-import { db } from "@bittery/db";
-import { shareLink } from "@bittery/db/schema/sharing";
-import { eq } from "drizzle-orm";
 
 describe("Share Router", () => {
 	const testUserIds: string[] = [];
@@ -49,7 +47,7 @@ describe("Share Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.create({
@@ -83,7 +81,7 @@ describe("Share Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.create({
@@ -112,7 +110,7 @@ describe("Share Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			await expect(
@@ -126,9 +124,9 @@ describe("Share Router", () => {
 					encryptionIv: mockShareData.encryptionIv,
 					encryptedShareKey: mockShareData.encryptedShareKey,
 					shareKeyIv: mockShareData.shareKeyIv,
-				})
+				}),
 			).rejects.toThrow(
-				"At least one email address is required for email-restricted sharing"
+				"At least one email address is required for email-restricted sharing",
 			);
 		});
 
@@ -142,7 +140,7 @@ describe("Share Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.create({
@@ -172,7 +170,7 @@ describe("Share Router", () => {
 
 			const sessionId = await createTestSession(readOnlyId);
 			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(readOnlyId, email2, sessionId)
+				createAuthenticatedContext(readOnlyId, email2, sessionId),
 			);
 
 			await expect(
@@ -185,7 +183,7 @@ describe("Share Router", () => {
 					encryptionIv: mockShareData.encryptionIv,
 					encryptedShareKey: mockShareData.encryptedShareKey,
 					shareKeyIv: mockShareData.shareKeyIv,
-				})
+				}),
 			).rejects.toThrow("Read-only users cannot share items");
 		});
 
@@ -201,7 +199,7 @@ describe("Share Router", () => {
 
 			const sessionId = await createTestSession(otherId);
 			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(otherId, email2, sessionId)
+				createAuthenticatedContext(otherId, email2, sessionId),
 			);
 
 			await expect(
@@ -214,7 +212,7 @@ describe("Share Router", () => {
 					encryptionIv: mockShareData.encryptionIv,
 					encryptedShareKey: mockShareData.encryptedShareKey,
 					shareKeyIv: mockShareData.shareKeyIv,
-				})
+				}),
 			).rejects.toThrow("Access denied to this item");
 		});
 	});
@@ -235,7 +233,7 @@ describe("Share Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.listByItem({ itemId });
@@ -257,7 +255,7 @@ describe("Share Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.listByItem({ itemId });
@@ -281,7 +279,7 @@ describe("Share Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.get({ linkId: shareLinkId });
@@ -307,7 +305,7 @@ describe("Share Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.revoke({ linkId: shareLinkId });
@@ -335,11 +333,11 @@ describe("Share Router", () => {
 
 			const sessionId = await createTestSession(readOnlyId);
 			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(readOnlyId, email2, sessionId)
+				createAuthenticatedContext(readOnlyId, email2, sessionId),
 			);
 
 			await expect(caller.revoke({ linkId: shareLinkId })).rejects.toThrow(
-				"You do not have permission to revoke this link"
+				"You do not have permission to revoke this link",
 			);
 		});
 	});
@@ -358,7 +356,7 @@ describe("Share Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.update({
@@ -387,12 +385,12 @@ describe("Share Router", () => {
 			});
 			const emailId = await addShareLinkAllowedEmail(
 				shareLinkId,
-				"remove@example.com"
+				"remove@example.com",
 			);
 
 			const sessionId = await createTestSession(userId);
 			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.update({
@@ -556,7 +554,7 @@ describe("Share Router", () => {
 
 			// Second access should fail
 			await expect(caller.accessPublic({ token })).rejects.toThrow(
-				"This share link has been exhausted"
+				"This share link has been exhausted",
 			);
 		});
 
@@ -575,7 +573,7 @@ describe("Share Router", () => {
 			const caller = shareRouter.createCaller(createPublicContext());
 
 			await expect(caller.accessPublic({ token })).rejects.toThrow(
-				"This share link has been revoked"
+				"This share link has been revoked",
 			);
 		});
 
@@ -594,7 +592,7 @@ describe("Share Router", () => {
 			const caller = shareRouter.createCaller(createPublicContext());
 
 			await expect(caller.accessPublic({ token })).rejects.toThrow(
-				"This share link has expired"
+				"This share link has expired",
 			);
 		});
 	});
@@ -641,7 +639,7 @@ describe("Share Router", () => {
 				caller.requestEmailVerification({
 					token,
 					email: "notallowed@example.com",
-				})
+				}),
 			).rejects.toThrow("This email is not authorized to access this link");
 		});
 
@@ -664,7 +662,7 @@ describe("Share Router", () => {
 				caller.requestEmailVerification({
 					token,
 					email: "allowed@example.com",
-				})
+				}),
 			).rejects.toThrow("This share link is no longer valid");
 		});
 	});
@@ -691,7 +689,7 @@ describe("Share Router", () => {
 
 			const sessionId = await createTestSession(userId);
 			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId)
+				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.getAccessLogs({ linkId: shareLinkId });

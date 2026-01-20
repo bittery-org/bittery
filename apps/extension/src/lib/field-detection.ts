@@ -563,6 +563,7 @@ export function getAllInputs(root: Document | ShadowRoot = document): {
 			results.push(
 				...shadowInputs.map((si) => ({
 					input: si.input,
+					// biome-ignore lint/style/noNonNullAssertion: Its okay here
 					shadowRoot: si.shadowRoot || element.shadowRoot!,
 				})),
 			);

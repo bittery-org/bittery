@@ -13,8 +13,8 @@
 import { describe, expect, test } from "bun:test";
 import {
 	decryptExport,
-	encryptExport,
 	type EncryptedExport,
+	encryptExport,
 } from "./export-encryption";
 
 describe("Export Encryption Module", () => {
@@ -316,7 +316,7 @@ describe("Export Encryption Module", () => {
 			const encrypted = await encryptExport(data, password);
 			const corrupted: EncryptedExport = {
 				...encrypted,
-				ciphertext: encrypted.ciphertext.slice(0, -4) + "XXXX",
+				ciphertext: `${encrypted.ciphertext.slice(0, -4)}XXXX`,
 			};
 
 			let decryptionFailed = false;
@@ -371,7 +371,8 @@ describe("Export Encryption Module", () => {
 
 		test("should fail with truncated ciphertext", async () => {
 			const password = "TestPassword";
-			const data = "This is a longer test data string to ensure enough ciphertext";
+			const data =
+				"This is a longer test data string to ensure enough ciphertext";
 
 			const encrypted = await encryptExport(data, password);
 			const corrupted: EncryptedExport = {

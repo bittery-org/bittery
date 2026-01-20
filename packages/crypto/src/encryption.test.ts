@@ -10,8 +10,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { decrypt, encrypt, generateEncryptionKey } from "./encryption";
 import type { EncryptedData } from "./encryption";
+import { decrypt, encrypt, generateEncryptionKey } from "./encryption";
 
 describe("AES-256-GCM Encryption Module", () => {
 	describe("Key Generation", () => {
@@ -117,7 +117,8 @@ describe("AES-256-GCM Encryption Module", () => {
 
 		test("should handle unicode characters", async () => {
 			const key = generateEncryptionKey();
-			const plaintext = "Hello, World! Bonjour, Monde! Hallo, Welt! Ciao, Mondo!";
+			const plaintext =
+				"Hello, World! Bonjour, Monde! Hallo, Welt! Ciao, Mondo!";
 
 			const encrypted = await encrypt(plaintext, key);
 			const decrypted = await decrypt(encrypted, key);
@@ -137,8 +138,7 @@ describe("AES-256-GCM Encryption Module", () => {
 
 		test("should handle special characters and control chars", async () => {
 			const key = generateEncryptionKey();
-			const plaintext =
-				"Special chars: !@#$%^&*()_+-=[]{}|;':\",./<>?\n\t\r\\";
+			const plaintext = "Special chars: !@#$%^&*()_+-=[]{}|;':\",./<>?\n\t\r\\";
 
 			const encrypted = await encrypt(plaintext, key);
 			const decrypted = await decrypt(encrypted, key);
@@ -249,8 +249,7 @@ describe("AES-256-GCM Encryption Module", () => {
 			const encrypted = await encrypt(plaintext, key);
 
 			// Corrupt the ciphertext by changing a character
-			const corruptedCiphertext =
-				encrypted.ciphertext.slice(0, -4) + "XXXX";
+			const corruptedCiphertext = `${encrypted.ciphertext.slice(0, -4)}XXXX`;
 
 			const corruptedData: EncryptedData = {
 				...encrypted,
@@ -291,7 +290,8 @@ describe("AES-256-GCM Encryption Module", () => {
 
 		test("should fail decryption with truncated ciphertext", async () => {
 			const key = generateEncryptionKey();
-			const plaintext = "This is a longer secret message to ensure sufficient ciphertext";
+			const plaintext =
+				"This is a longer secret message to ensure sufficient ciphertext";
 
 			const encrypted = await encrypt(plaintext, key);
 
@@ -454,9 +454,7 @@ describe("AES-256-GCM Encryption Module", () => {
 				password: "MyS3cur3P@ssw0rd!",
 				totpSecret: "JBSWY3DPEHPK3PXP",
 				notes: "Personal email account",
-				customFields: [
-					{ name: "Recovery Email", value: "backup@example.com" },
-				],
+				customFields: [{ name: "Recovery Email", value: "backup@example.com" }],
 			};
 
 			const plaintext = JSON.stringify(loginItem);

@@ -18,10 +18,7 @@ import {
 	generateSRPRegistration,
 	verifyServerSession,
 } from "./srp-client";
-import {
-	deriveServerSession,
-	generateServerEphemeral,
-} from "./srp-server";
+import { deriveServerSession, generateServerEphemeral } from "./srp-server";
 
 describe("SRP-6a Authentication Module", () => {
 	describe("Registration (Client Side)", () => {
@@ -316,7 +313,7 @@ describe("SRP-6a Authentication Module", () => {
 			);
 
 			// Tamper with the proof
-			const tamperedProof = clientSession.proof.slice(0, -4) + "XXXX";
+			const tamperedProof = `${clientSession.proof.slice(0, -4)}XXXX`;
 
 			let authFailed = false;
 			try {
@@ -357,7 +354,7 @@ describe("SRP-6a Authentication Module", () => {
 			);
 
 			// Tamper with server proof
-			const tamperedServerProof = serverSession.proof.slice(0, -4) + "YYYY";
+			const tamperedServerProof = `${serverSession.proof.slice(0, -4)}YYYY`;
 
 			let verificationFailed = false;
 			try {

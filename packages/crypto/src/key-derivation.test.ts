@@ -196,11 +196,7 @@ describe("Key Derivation Module", () => {
 
 	describe("Edge Cases - Secret Key", () => {
 		test("should handle empty secret key", async () => {
-			const keys = await deriveKeys(
-				"TestPassword",
-				"",
-				"test@example.com",
-			);
+			const keys = await deriveKeys("TestPassword", "", "test@example.com");
 
 			expect(keys.authKey.length).toBe(32);
 			expect(keys.masterUnlockKey.length).toBe(32);
