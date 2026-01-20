@@ -11,10 +11,21 @@ import {
 } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { ExternalLink, Github, Key, Shield, Trash2, User } from "lucide-react";
+import {
+	Clock,
+	ExternalLink,
+	Github,
+	Key,
+	Monitor,
+	Shield,
+	Trash2,
+	User,
+} from "lucide-react";
+import { AutoLockSettings } from "@/components/settings/auto-lock-settings";
 import { ChangeEmailDialog } from "@/components/settings/change-email-dialog";
 import { ChangePasswordDialog } from "@/components/settings/change-password-dialog";
 import { DeleteAccountDialog } from "@/components/settings/delete-account-dialog";
+import { DeviceManagement } from "@/components/settings/device-management";
 import { RegenerateSecretKeyDialog } from "@/components/settings/regenerate-secret-key-dialog";
 
 export const Route = createFileRoute("/_app/settings/")({
@@ -124,6 +135,29 @@ function SettingsPage() {
 							<RegenerateSecretKeyDialog userEmail={userQuery.data.email} />
 						)}
 					</div>
+
+					<Separator />
+
+					<div className="flex items-center gap-2 mb-2">
+						<Clock className="h-4 w-4 text-muted-foreground" />
+						<span className="font-medium text-sm">Auto-Lock</span>
+					</div>
+					<AutoLockSettings />
+				</CardContent>
+			</Card>
+
+			<Card>
+				<CardHeader>
+					<CardTitle className="flex items-center gap-2">
+						<Monitor className="h-5 w-5" />
+						Devices
+					</CardTitle>
+					<CardDescription>
+						Manage devices that have access to your account
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<DeviceManagement />
 				</CardContent>
 			</Card>
 

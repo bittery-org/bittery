@@ -13,12 +13,17 @@ import {
 	finishLogin,
 	getUserByEmail,
 	getUserById,
+	getUserSessions,
+	renameSession,
+	revokeSession,
 	startLogin,
+	updateSessionActivity,
 	updateUserEmail,
 	updateUserPassword,
 	updateUserSecretKey,
 } from "@bittery/auth";
 import { db, team, teamMember, vault, vaultKey } from "@bittery/db";
+import { parseUserAgent } from "../utils/device";
 import { getStoragePublicUrl } from "@bittery/storage";
 import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
@@ -43,7 +48,7 @@ export const authRouter = router({
 				encryptedVaultKey: z.string(), // Encrypted default vault key
 			}),
 		)
-		.mutation(async ({ input }) => {
+		.mutation(async ({ ctx, input }) => {
 			// Check if user already exists
 			const existingUser = await getUserByEmail(input.email);
 			if (existingUser) {
@@ -103,8 +108,15 @@ export const authRouter = router({
 				});
 			}
 
-			// Create session and generate token
-			const sessionData = await createUserSession(userId);
+			// Parse device info from context
+			const deviceInfo = parseUserAgent(ctx.device.userAgent);
+
+			// Create session and generate token with device info
+			const sessionData = await createUserSession(userId, {
+				...deviceInfo,
+				userAgent: ctx.device.userAgent,
+				ipAddress: ctx.device.ipAddress,
+			});
 
 			// Get vault keys
 			const vaultKeys = await db.query.vaultKey.findMany({
@@ -181,12 +193,20 @@ export const authRouter = router({
 				clientProof: z.string(),
 			}),
 		)
-		.mutation(async ({ input }) => {
+		.mutation(async ({ ctx, input }) => {
+			// Parse device info from request context
+			const deviceInfo = parseUserAgent(ctx.device.userAgent);
+
 			const result = await finishLogin(
 				input.userId,
 				input.serverSecret,
 				input.clientPublicKey,
 				input.clientProof,
+				{
+					...deviceInfo,
+					userAgent: ctx.device.userAgent,
+					ipAddress: ctx.device.ipAddress,
+				},
 			);
 
 			if (!result.success || !result.user) {
@@ -249,12 +269,20 @@ export const authRouter = router({
 				clientProof: z.string(),
 			}),
 		)
-		.mutation(async ({ input }) => {
+		.mutation(async ({ ctx, input }) => {
+			// Parse device info from request context
+			const deviceInfo = parseUserAgent(ctx.device.userAgent);
+
 			const result = await finishLogin(
 				input.userId,
 				input.serverSecret,
 				input.clientPublicKey,
 				input.clientProof,
+				{
+					...deviceInfo,
+					userAgent: ctx.device.userAgent,
+					ipAddress: ctx.device.ipAddress,
+				},
 			);
 
 			console.log(result);
@@ -498,4 +526,64 @@ export const authRouter = router({
 
 			return { success: true };
 		}),
+
+	/**
+	 * Get all active sessions/devices for the current user
+	 */
+	listDevices: protectedProcedure.query(async ({ ctx }) => {
+		const sessions = await getUserSessions(ctx.session.userId);
+
+		// Mark current session
+		return sessions.map((s) => ({
+			...s,
+			isCurrentSession: s.id === ctx.session.sessionId,
+		}));
+	}),
+
+	/**
+	 * Revoke a specific session/device
+	 * Cannot revoke the current session
+	 */
+	revokeDevice: protectedProcedure
+		.input(
+			z.object({
+				sessionId: z.string(),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			// Prevent revoking current session
+			if (input.sessionId === ctx.session.sessionId) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Cannot revoke current session. Use logout instead.",
+				});
+			}
+
+			await revokeSession(input.sessionId, ctx.session.userId);
+			return { success: true };
+		}),
+
+	/**
+	 * Rename a device/session
+	 */
+	renameDevice: protectedProcedure
+		.input(
+			z.object({
+				sessionId: z.string(),
+				deviceName: z.string().min(1).max(100),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			await renameSession(input.sessionId, ctx.session.userId, input.deviceName);
+			return { success: true };
+		}),
+
+	/**
+	 * Update current session's last active timestamp
+	 * Called periodically by clients to track activity
+	 */
+	heartbeat: protectedProcedure.mutation(async ({ ctx }) => {
+		await updateSessionActivity(ctx.session.sessionId);
+		return { success: true };
+	}),
 });

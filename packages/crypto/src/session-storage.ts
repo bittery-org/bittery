@@ -17,9 +17,14 @@ const JWT_TOKEN_KEY = "bittery_jwt_token";
 const VAULT_KEYS_KEY = "bittery_vault_keys";
 const SERVER_URL_STORAGE = "bittery_server_url";
 const ENCRYPTED_PRIVATE_KEY_STORAGE = "bittery_encrypted_private_key";
+const AUTO_LOCK_TIMEOUT_STORAGE = "bittery_auto_lock_timeout";
 
 // Default session expiry: 14 days (in milliseconds)
 export const DEFAULT_SESSION_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000;
+
+// Default auto-lock timeout: 10 minutes (in milliseconds)
+// -1 means never auto-lock
+export const DEFAULT_AUTO_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface StoredSessionData {
 	encryptedMasterUnlockKey: EncryptedData;
@@ -393,6 +398,51 @@ export async function getDecryptedVaultKey(
 	if (!vaultKeyData) return null;
 
 	return decryptVaultKey(vaultKeyData.encryptedVaultKey);
+}
+
+/**
+ * Store auto-lock timeout preference in localStorage
+ * @param timeoutMs - Timeout in milliseconds, or -1 for never
+ */
+export function storeAutoLockTimeout(timeoutMs: number): void {
+	if (typeof window !== "undefined") {
+		localStorage.setItem(AUTO_LOCK_TIMEOUT_STORAGE, String(timeoutMs));
+	}
+}
+
+/**
+ * Get auto-lock timeout preference from localStorage
+ * Returns the stored timeout in milliseconds, or null if not set
+ */
+export function getAutoLockTimeout(): number | null {
+	if (typeof window !== "undefined") {
+		const stored = localStorage.getItem(AUTO_LOCK_TIMEOUT_STORAGE);
+		if (stored !== null) {
+			const parsed = Number.parseInt(stored, 10);
+			if (!Number.isNaN(parsed)) {
+				return parsed;
+			}
+		}
+	}
+	return null;
+}
+
+/**
+ * Get auto-lock timeout or default value
+ * Returns -1 for "never", or timeout in milliseconds
+ */
+export function getAutoLockTimeoutOrDefault(): number {
+	const stored = getAutoLockTimeout();
+	return stored ?? DEFAULT_AUTO_LOCK_TIMEOUT_MS;
+}
+
+/**
+ * Clear auto-lock timeout preference
+ */
+export function clearAutoLockTimeout(): void {
+	if (typeof window !== "undefined") {
+		localStorage.removeItem(AUTO_LOCK_TIMEOUT_STORAGE);
+	}
 }
 
 /**

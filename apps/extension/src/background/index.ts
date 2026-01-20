@@ -32,7 +32,10 @@ import {
 	handleCaptureTabScreenshot,
 	handleUpdateItemTotp,
 } from "./qr-scan-handlers";
-import { handleAutoLockAlarm } from "./session-manager";
+import {
+	handleAutoLockAlarm,
+	refreshAutoLockTimeout,
+} from "./session-manager";
 import {
 	cleanupSync,
 	connect as connectSync,
@@ -226,6 +229,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 				case "UPDATE_ITEM_TOTP": {
 					const result = await handleUpdateItemTotp(message.payload);
 					sendResponse(result);
+					break;
+				}
+
+				// Settings
+				case "SETTINGS_CHANGED": {
+					// Refresh cached auto-lock timeout when settings change
+					await refreshAutoLockTimeout();
+					sendResponse({ success: true });
 					break;
 				}
 

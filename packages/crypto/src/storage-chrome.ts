@@ -17,9 +17,14 @@ const JWT_TOKEN_KEY = "bittery_jwt_token";
 const VAULT_KEYS_KEY = "bittery_vault_keys";
 const SERVER_URL_STORAGE = "bittery_server_url";
 const ENCRYPTED_PRIVATE_KEY_STORAGE = "bittery_encrypted_private_key";
+const AUTO_LOCK_TIMEOUT_STORAGE = "bittery_auto_lock_timeout";
 
 // Default session expiry: 14 days (in milliseconds)
 export const DEFAULT_SESSION_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000;
+
+// Default auto-lock timeout: 10 minutes (in milliseconds)
+// -1 means never auto-lock
+export const DEFAULT_AUTO_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface StoredSessionData {
 	encryptedMasterUnlockKey: EncryptedData;
@@ -405,6 +410,43 @@ export async function getDecryptedVaultKey(
 	if (!vaultKeyData) return null;
 
 	return decryptVaultKey(vaultKeyData.encryptedVaultKey);
+}
+
+/**
+ * Store auto-lock timeout preference in chrome.storage.local
+ * @param timeoutMs - Timeout in milliseconds, or -1 for never
+ */
+export async function storeAutoLockTimeout(timeoutMs: number): Promise<void> {
+	await chrome.storage.local.set({ [AUTO_LOCK_TIMEOUT_STORAGE]: timeoutMs });
+}
+
+/**
+ * Get auto-lock timeout preference from chrome.storage.local
+ * Returns the stored timeout in milliseconds, or null if not set
+ */
+export async function getAutoLockTimeout(): Promise<number | null> {
+	const result = await chrome.storage.local.get(AUTO_LOCK_TIMEOUT_STORAGE);
+	const stored = result[AUTO_LOCK_TIMEOUT_STORAGE];
+	if (stored !== undefined && typeof stored === "number") {
+		return stored;
+	}
+	return null;
+}
+
+/**
+ * Get auto-lock timeout or default value
+ * Returns -1 for "never", or timeout in milliseconds
+ */
+export async function getAutoLockTimeoutOrDefault(): Promise<number> {
+	const stored = await getAutoLockTimeout();
+	return stored ?? DEFAULT_AUTO_LOCK_TIMEOUT_MS;
+}
+
+/**
+ * Clear auto-lock timeout preference
+ */
+export async function clearAutoLockTimeout(): Promise<void> {
+	await chrome.storage.local.remove(AUTO_LOCK_TIMEOUT_STORAGE);
 }
 
 /**

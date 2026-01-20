@@ -1,7 +1,8 @@
 import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Input, Skeleton, toast } from "@bittery/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, ShieldCheck } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import { Plus, Search, Settings, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Favicon } from "@/components/favicon";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
@@ -44,6 +45,7 @@ function hostnameMatches(
 }
 
 export function VaultPage() {
+	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const invalidator = useMemo(
 		() => createExtensionInvalidator(queryClient),
@@ -175,10 +177,20 @@ export function VaultPage() {
 							<div className="font-semibold text-base">All Items</div>
 						</div>
 					</div>
-					<Button size="sm" onClick={handleOpenDesktopApp}>
-						<Plus size={16} className="mr-2" />
-						New Item
-					</Button>
+					<div className="flex items-center gap-2">
+						<Button
+							size="icon"
+							variant="ghost"
+							onClick={() => navigate({ to: "/settings" })}
+							title="Settings"
+						>
+							<Settings size={18} />
+						</Button>
+						<Button size="sm" onClick={handleOpenDesktopApp}>
+							<Plus size={16} className="mr-2" />
+							New Item
+						</Button>
+					</div>
 				</div>
 			</header>
 

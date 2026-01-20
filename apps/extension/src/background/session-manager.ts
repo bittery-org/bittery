@@ -4,21 +4,40 @@
  */
 
 import {
-	AUTO_LOCK_ALARM_NAME,
-	AUTO_LOCK_TIMEOUT_MS,
-	KEEPALIVE_INTERVAL_MS,
-} from "./constants";
+	DEFAULT_AUTO_LOCK_TIMEOUT_MS,
+	getAutoLockTimeoutOrDefault,
+} from "@bittery/crypto/storage-chrome";
+import { AUTO_LOCK_ALARM_NAME, KEEPALIVE_INTERVAL_MS } from "./constants";
 
 // In-memory state
 let masterUnlockKey: Uint8Array | null = null;
 let lastActivityTimestamp = 0;
 let autoLockTimer: NodeJS.Timeout | null = null;
 let keepaliveInterval: NodeJS.Timeout | null = null;
+// Cache the timeout value to avoid async lookups in synchronous functions
+let cachedAutoLockTimeoutMs = DEFAULT_AUTO_LOCK_TIMEOUT_MS;
+
+/**
+ * Refresh the cached auto-lock timeout from storage
+ * Should be called when settings change or on startup
+ */
+export async function refreshAutoLockTimeout(): Promise<void> {
+	cachedAutoLockTimeoutMs = await getAutoLockTimeoutOrDefault();
+}
+
+/**
+ * Get the current auto-lock timeout (cached value)
+ */
+export function getAutoLockTimeoutCached(): number {
+	return cachedAutoLockTimeoutMs;
+}
 
 /**
  * Update activity timestamp and reset auto-lock timer
  */
-export function updateActivity() {
+export async function updateActivity(): Promise<void> {
+	// Refresh the timeout in case settings changed
+	await refreshAutoLockTimeout();
 	lastActivityTimestamp = Date.now();
 	resetAutoLockTimer();
 }
@@ -32,15 +51,24 @@ function resetAutoLockTimer() {
 		clearTimeout(autoLockTimer);
 	}
 
+	// If timeout is -1 (never), don't set a timer
+	if (cachedAutoLockTimeoutMs === -1) {
+		// Clear any existing Chrome alarm
+		chrome.alarms.clear(AUTO_LOCK_ALARM_NAME);
+		// Start keepalive when there's active session
+		startKeepalive();
+		return;
+	}
+
 	// Use setTimeout for in-memory timer
 	autoLockTimer = setTimeout(() => {
 		console.log("Auto-locking due to inactivity");
 		lock();
-	}, AUTO_LOCK_TIMEOUT_MS);
+	}, cachedAutoLockTimeoutMs);
 
 	// Also set Chrome Alarm as backup (survives service worker restarts)
 	chrome.alarms.create(AUTO_LOCK_ALARM_NAME, {
-		delayInMinutes: AUTO_LOCK_TIMEOUT_MS / 60000,
+		delayInMinutes: cachedAutoLockTimeoutMs / 60000,
 	});
 
 	// Start keepalive when there's active session
@@ -93,10 +121,15 @@ export function lock() {
 export function isUnlocked(): boolean {
 	if (!masterUnlockKey) return false;
 
+	// If timeout is -1 (never), always return true if MUK exists
+	if (cachedAutoLockTimeoutMs === -1) {
+		return true;
+	}
+
 	const now = Date.now();
 	const timeSinceLastActivity = now - lastActivityTimestamp;
 
-	if (timeSinceLastActivity > AUTO_LOCK_TIMEOUT_MS) {
+	if (timeSinceLastActivity > cachedAutoLockTimeoutMs) {
 		lock();
 		return false;
 	}
@@ -128,19 +161,31 @@ export function getLastActivityTimestamp(): number {
 /**
  * Handle Chrome Alarms for auto-lock
  */
-export function handleAutoLockAlarm(alarm: chrome.alarms.Alarm) {
+export async function handleAutoLockAlarm(
+	alarm: chrome.alarms.Alarm,
+): Promise<void> {
 	if (alarm.name === AUTO_LOCK_ALARM_NAME) {
 		console.log("Auto-lock alarm triggered");
+
+		// Refresh the timeout value from storage
+		await refreshAutoLockTimeout();
+
+		// If timeout is -1 (never), clear the alarm and don't lock
+		if (cachedAutoLockTimeoutMs === -1) {
+			chrome.alarms.clear(AUTO_LOCK_ALARM_NAME);
+			return;
+		}
+
 		// Check if we should still lock (in case service worker was restarted)
 		if (isUnlocked()) {
 			const now = Date.now();
 			const timeSinceLastActivity = now - lastActivityTimestamp;
 
-			if (timeSinceLastActivity >= AUTO_LOCK_TIMEOUT_MS) {
+			if (timeSinceLastActivity >= cachedAutoLockTimeoutMs) {
 				lock();
 			} else {
 				// Reschedule if there was recent activity
-				const remainingTime = AUTO_LOCK_TIMEOUT_MS - timeSinceLastActivity;
+				const remainingTime = cachedAutoLockTimeoutMs - timeSinceLastActivity;
 				chrome.alarms.create(AUTO_LOCK_ALARM_NAME, {
 					delayInMinutes: remainingTime / 60000,
 				});

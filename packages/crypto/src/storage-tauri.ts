@@ -229,6 +229,72 @@ export async function getEffectiveWebAppUrl(email?: string): Promise<string> {
 	return "https://app.bittery.io";
 }
 
+// ============================================================================
+// Auto-Lock Timeout Functions (Account-Scoped)
+// ============================================================================
+
+// Default auto-lock timeout: 10 minutes (in milliseconds)
+// -1 means never auto-lock
+export const DEFAULT_AUTO_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * Store auto-lock timeout preference for an account
+ * @param timeoutMs - Timeout in milliseconds, or -1 for never
+ * @param email - Optional email for account-scoped storage
+ */
+export async function storeAutoLockTimeout(
+	timeoutMs: number,
+	email?: string,
+): Promise<void> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) throw new Error("No account specified");
+
+	const store = await getStore();
+	const key = getAccountKey(resolvedEmail, "auto_lock_timeout");
+	await store.set(key, timeoutMs);
+	await store.save();
+}
+
+/**
+ * Get auto-lock timeout preference for an account
+ * Returns the stored timeout in milliseconds, or null if not set
+ */
+export async function getAutoLockTimeout(
+	email?: string,
+): Promise<number | null> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) return null;
+
+	const store = await getStore();
+	const key = getAccountKey(resolvedEmail, "auto_lock_timeout");
+	const stored = await store.get<number>(key);
+	return stored ?? null;
+}
+
+/**
+ * Get auto-lock timeout or default value
+ * Returns -1 for "never", or timeout in milliseconds
+ */
+export async function getAutoLockTimeoutOrDefault(
+	email?: string,
+): Promise<number> {
+	const stored = await getAutoLockTimeout(email);
+	return stored ?? DEFAULT_AUTO_LOCK_TIMEOUT_MS;
+}
+
+/**
+ * Clear auto-lock timeout preference for an account
+ */
+export async function clearAutoLockTimeout(email?: string): Promise<void> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) return;
+
+	const store = await getStore();
+	const key = getAccountKey(resolvedEmail, "auto_lock_timeout");
+	await store.delete(key);
+	await store.save();
+}
+
 /**
  * Generate or retrieve device-specific encryption key
  * This key is used to encrypt the Master Unlock Key at rest
@@ -680,6 +746,7 @@ export async function clearAccountData(email: string): Promise<void> {
 	await store.delete(getAccountKey(resolvedEmail, "server_url"));
 	await store.delete(getAccountKey(resolvedEmail, "web_app_url"));
 	await store.delete(getAccountKey(resolvedEmail, "encrypted_private_key"));
+	await store.delete(getAccountKey(resolvedEmail, "auto_lock_timeout"));
 	await store.save();
 
 	// Clear in-memory cache

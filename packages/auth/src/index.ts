@@ -13,6 +13,17 @@ import { and, eq, gt } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
 import { nanoid } from "nanoid";
 
+export interface DeviceInfo {
+	deviceName?: string;
+	platform?: string;
+	browserName?: string | null;
+	browserVersion?: string | null;
+	osName?: string | null;
+	osVersion?: string | null;
+	userAgent?: string;
+	ipAddress?: string | null;
+}
+
 const JWT_SECRET = new TextEncoder().encode(
 	process.env.JWT_SECRET || "bittery-secret-change-in-production",
 );
@@ -101,6 +112,7 @@ export async function finishLogin(
 	serverEphemeralSecret: string,
 	clientPublicKey: string,
 	clientProof: string,
+	deviceInfo?: DeviceInfo,
 ): Promise<{
 	success: boolean;
 	token?: string;
@@ -145,6 +157,16 @@ export async function finishLogin(
 			userId: existingUser.id,
 			token: serverSession.key,
 			expiresAt,
+			// Device tracking fields
+			deviceName: deviceInfo?.deviceName,
+			platform: deviceInfo?.platform,
+			browserName: deviceInfo?.browserName,
+			browserVersion: deviceInfo?.browserVersion,
+			osName: deviceInfo?.osName,
+			osVersion: deviceInfo?.osVersion,
+			userAgent: deviceInfo?.userAgent,
+			ipAddress: deviceInfo?.ipAddress,
+			lastActiveAt: new Date(),
 		});
 
 		// Generate JWT
@@ -248,7 +270,7 @@ export async function getUserById(userId: string) {
  * Create a user session and return JWT token
  * Used after signup or when creating a session without SRP
  */
-export async function createUserSession(userId: string) {
+export async function createUserSession(userId: string, deviceInfo?: DeviceInfo) {
 	const [existingUser] = await db
 		.select()
 		.from(user)
@@ -271,6 +293,16 @@ export async function createUserSession(userId: string) {
 		userId: existingUser.id,
 		token: sessionKey,
 		expiresAt,
+		// Device tracking fields
+		deviceName: deviceInfo?.deviceName,
+		platform: deviceInfo?.platform,
+		browserName: deviceInfo?.browserName,
+		browserVersion: deviceInfo?.browserVersion,
+		osName: deviceInfo?.osName,
+		osVersion: deviceInfo?.osVersion,
+		userAgent: deviceInfo?.userAgent,
+		ipAddress: deviceInfo?.ipAddress,
+		lastActiveAt: new Date(),
 	});
 
 	// Generate JWT
@@ -313,6 +345,63 @@ export async function deleteSession(sessionId: string) {
  */
 export async function deleteAllUserSessions(userId: string) {
 	await db.delete(session).where(eq(session.userId, userId));
+}
+
+/**
+ * Get all sessions for a user
+ */
+export async function getUserSessions(userId: string) {
+	const sessions = await db
+		.select()
+		.from(session)
+		.where(and(eq(session.userId, userId), gt(session.expiresAt, new Date())))
+		.orderBy(session.lastActiveAt);
+
+	return sessions.map((s) => ({
+		id: s.id,
+		deviceName: s.deviceName,
+		platform: s.platform,
+		browserName: s.browserName,
+		browserVersion: s.browserVersion,
+		osName: s.osName,
+		osVersion: s.osVersion,
+		ipAddress: s.ipAddress,
+		lastActiveAt: s.lastActiveAt,
+		createdAt: s.createdAt,
+	}));
+}
+
+/**
+ * Revoke a specific session (must belong to user)
+ */
+export async function revokeSession(sessionId: string, userId: string): Promise<void> {
+	await db
+		.delete(session)
+		.where(and(eq(session.id, sessionId), eq(session.userId, userId)));
+}
+
+/**
+ * Update session's last active timestamp
+ */
+export async function updateSessionActivity(sessionId: string) {
+	await db
+		.update(session)
+		.set({ lastActiveAt: new Date() })
+		.where(eq(session.id, sessionId));
+}
+
+/**
+ * Rename a device/session
+ */
+export async function renameSession(
+	sessionId: string,
+	userId: string,
+	deviceName: string,
+) {
+	await db
+		.update(session)
+		.set({ deviceName })
+		.where(and(eq(session.id, sessionId), eq(session.userId, userId)));
 }
 
 /**

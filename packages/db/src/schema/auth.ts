@@ -32,6 +32,15 @@ export const session = pgTable(
 			.notNull(),
 		ipAddress: text("ip_address"),
 		userAgent: text("user_agent"),
+		// Device information
+		deviceName: text("device_name"), // User-editable name or auto-generated (e.g., "Chrome on macOS")
+		platform: text("platform"), // "web" | "desktop" | "extension" | "ios" | "android"
+		browserName: text("browser_name"), // "Chrome", "Safari", "Firefox", etc.
+		browserVersion: text("browser_version"), // "120.0.0"
+		osName: text("os_name"), // "macOS", "Windows", "Linux", "iOS", "Android"
+		osVersion: text("os_version"), // "14.0", "11", etc.
+		// Activity tracking
+		lastActiveAt: timestamp("last_active_at").defaultNow().notNull(),
 		userId: text("user_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
