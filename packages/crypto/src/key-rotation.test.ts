@@ -129,10 +129,13 @@ describe("Shared Vault Key Encryption Feature", () => {
 		];
 
 		// Perform key rotation
+		const mockMasterUnlockKey = generateEncryptionKey();
 		const rotationResult = await performKeyRotation(
 			originalVaultKey,
 			remainingMembers,
 			itemsToRotate,
+			"owner-id",
+			mockMasterUnlockKey,
 		);
 
 		// Verify all remaining members got new encrypted keys
@@ -168,10 +171,14 @@ describe("Shared Vault Key Encryption Feature", () => {
 		expect(member1DecryptedKey).toBe(rotationResult.newVaultKeyBase64);
 
 		// Verify re-encrypted items can be decrypted with new key
+		const reEncryptedItem1 = rotationResult.reEncryptedItems[0];
+		expect(reEncryptedItem1).toBeDefined();
 		const decryptedItem1 = await decrypt(
 			{
-				ciphertext: rotationResult.reEncryptedItems[0].encryptedData,
-				iv: rotationResult.reEncryptedItems[0].encryptionIv,
+				// biome-ignore lint/style/noNonNullAssertion: We verified above it's defined
+				ciphertext: reEncryptedItem1!.encryptedData,
+				// biome-ignore lint/style/noNonNullAssertion: We verified above it's defined
+				iv: reEncryptedItem1!.encryptionIv,
 				algorithm: "AES-GCM",
 			},
 			rotationResult.newVaultKey,
@@ -194,19 +201,26 @@ describe("Shared Vault Key Encryption Feature", () => {
 		};
 
 		// Perform rotation
+		const mockMasterUnlockKey = generateEncryptionKey();
 		const rotationResult = await performKeyRotation(
 			originalVaultKey,
 			[{ userId: "member-id", publicKey: memberKeys.publicKey }],
 			[itemForRotation],
+			"member-id",
+			mockMasterUnlockKey,
 		);
 
 		// Try to decrypt new data with old key - should fail
+		const reEncryptedItem = rotationResult.reEncryptedItems[0];
+		expect(reEncryptedItem).toBeDefined();
 		let decryptionFailed = false;
 		try {
 			await decrypt(
 				{
-					ciphertext: rotationResult.reEncryptedItems[0].encryptedData,
-					iv: rotationResult.reEncryptedItems[0].encryptionIv,
+					// biome-ignore lint/style/noNonNullAssertion: We verified above it's defined
+					ciphertext: reEncryptedItem!.encryptedData,
+					// biome-ignore lint/style/noNonNullAssertion: We verified above it's defined
+					iv: reEncryptedItem!.encryptionIv,
 					algorithm: "AES-GCM",
 				},
 				originalVaultKey,

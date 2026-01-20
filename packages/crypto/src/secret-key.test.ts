@@ -90,11 +90,16 @@ describe("Secret Key Module", () => {
 
 			expect(segments.length).toBe(6);
 			expect(segments[0]).toBe("A3"); // Version prefix
-			expect(segments[1].length).toBe(6);
-			expect(segments[2].length).toBe(6);
-			expect(segments[3].length).toBe(5);
-			expect(segments[4].length).toBe(5);
-			expect(segments[5].length).toBe(5);
+			// biome-ignore lint/style/noNonNullAssertion: We verified segments.length is 6 above
+			expect(segments[1]!.length).toBe(6);
+			// biome-ignore lint/style/noNonNullAssertion: We verified segments.length is 6 above
+			expect(segments[2]!.length).toBe(6);
+			// biome-ignore lint/style/noNonNullAssertion: We verified segments.length is 6 above
+			expect(segments[3]!.length).toBe(5);
+			// biome-ignore lint/style/noNonNullAssertion: We verified segments.length is 6 above
+			expect(segments[4]!.length).toBe(5);
+			// biome-ignore lint/style/noNonNullAssertion: We verified segments.length is 6 above
+			expect(segments[5]!.length).toBe(5);
 		});
 
 		test("should generate cryptographically random keys with good distribution", () => {

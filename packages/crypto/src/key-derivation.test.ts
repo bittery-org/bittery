@@ -409,7 +409,7 @@ describe("Key Derivation Module", () => {
 			// Verify key can be imported for AES-GCM
 			const cryptoKey = await crypto.subtle.importKey(
 				"raw",
-				keys.masterUnlockKey,
+				new Uint8Array(keys.masterUnlockKey),
 				{ name: "AES-GCM", length: 256 },
 				false,
 				["encrypt", "decrypt"],
@@ -434,7 +434,7 @@ describe("Key Derivation Module", () => {
 
 			const cryptoKey1 = await crypto.subtle.importKey(
 				"raw",
-				keys1.masterUnlockKey,
+				new Uint8Array(keys1.masterUnlockKey),
 				{ name: "AES-GCM", length: 256 },
 				false,
 				["encrypt"],
@@ -448,7 +448,7 @@ describe("Key Derivation Module", () => {
 
 			const cryptoKey2 = await crypto.subtle.importKey(
 				"raw",
-				keys2.masterUnlockKey,
+				new Uint8Array(keys2.masterUnlockKey),
 				{ name: "AES-GCM", length: 256 },
 				false,
 				["decrypt"],

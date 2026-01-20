@@ -27,8 +27,6 @@
 	},
 	"dependencies": {
 		"dotenv": "^17.2.2",
-		"extension": "",
-		"jsqr": "",
 		"zod": "^4.1.13"
 	},
 	"devDependencies": {

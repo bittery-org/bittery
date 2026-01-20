@@ -411,7 +411,8 @@ describe("AES-256-GCM Encryption Module", () => {
 				modified[i] = ciphertextBytes.charCodeAt(i);
 			}
 			// Flip one bit in the middle
-			modified[Math.floor(modified.length / 2)] ^= 0x01;
+			// biome-ignore lint/style/noNonNullAssertion: We know the array has elements
+			modified[Math.floor(modified.length / 2)]! ^= 0x01;
 
 			const modifiedBase64 = btoa(String.fromCharCode(...modified));
 
