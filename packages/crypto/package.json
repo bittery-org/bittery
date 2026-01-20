@@ -2,6 +2,7 @@
 	"name": "@bittery/crypto",
 	"exports": {
 		"./encryption": "./src/encryption.ts",
+		"./export-encryption": "./src/export-encryption.ts",
 		"./key-derivation": "./src/key-derivation.ts",
 		"./key-rotation": "./src/key-rotation.ts",
 		"./rsa": "./src/rsa.ts",
