@@ -7,7 +7,12 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { decrypt, encrypt, generateEncryptionKey } from "./encryption";
+import {
+	decrypt,
+	type EncryptedData,
+	encrypt,
+	generateEncryptionKey,
+} from "./encryption";
 import { arrayBufferToBase64 } from "./key-derivation";
 import {
 	encryptVaultKeyForMember,
@@ -144,17 +149,18 @@ describe("Shared Vault Key Encryption Feature", () => {
 		// Verify all items were re-encrypted
 		expect(rotationResult.reEncryptedItems.length).toBe(2);
 
-		// Verify owner can decrypt the new vault key
+		// Verify owner can decrypt the new vault key (encrypted with AES-GCM using Master Unlock Key)
 		const ownerKeyEntry = rotationResult.memberEncryptedKeys.find(
 			(k) => k.userId === "owner-id",
 		);
 		expect(ownerKeyEntry).toBeDefined();
 
-		const ownerDecryptedKey = await rsaDecrypt(
+		// Owner's key is AES-GCM encrypted with Master Unlock Key, not RSA encrypted
+		const ownerEncryptedData = JSON.parse(
 			// biome-ignore lint/style/noNonNullAssertion: We know this is defined here
 			ownerKeyEntry!.encryptedVaultKey,
-			ownerKeys.privateKey,
-		);
+		) as EncryptedData;
+		const ownerDecryptedKey = await decrypt(ownerEncryptedData, mockMasterUnlockKey);
 		expect(ownerDecryptedKey).toBe(rotationResult.newVaultKeyBase64);
 
 		// Verify member1 can decrypt the new vault key
