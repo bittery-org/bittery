@@ -1,0 +1,362 @@
+import type {
+	ConnectionStatus,
+	SyncEvent,
+	SyncManagerOptions,
+	SyncStorage,
+} from "./types";
+
+/**
+ * Default in-memory storage implementation
+ */
+class MemoryStorage implements SyncStorage {
+	private data = new Map<string, unknown>();
+
+	async get<T>(key: string): Promise<T | null> {
+		return (this.data.get(key) as T) || null;
+	}
+
+	async set<T>(key: string, value: T): Promise<void> {
+		this.data.set(key, value);
+	}
+
+	async remove(key: string): Promise<void> {
+		this.data.delete(key);
+	}
+}
+
+/**
+ * SyncManager handles real-time synchronization via SSE
+ * - Establishes and maintains SSE connection
+ * - Handles reconnection with exponential backoff
+ * - Filters out events from own client
+ * - Dispatches events to listeners
+ */
+// Grace period before considering connection stale (2x server heartbeat interval + buffer)
+const STALE_CONNECTION_THRESHOLD = 35000;
+// How often to check for stale connection
+const STALE_CHECK_INTERVAL = 10000;
+
+export class SyncManager {
+	private serverUrl: string;
+	private getAuthToken: () => Promise<string | null>;
+	private clientId: string;
+	private storage: SyncStorage;
+	private onEvent?: (event: SyncEvent) => void;
+	private onStatusChange?: (status: ConnectionStatus) => void;
+
+	private abortController: AbortController | null = null;
+	private connectionStatus: ConnectionStatus = "disconnected";
+	private reconnectAttempt = 0;
+	private reconnectDelay: number;
+	private maxReconnectDelay: number;
+	private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+	private lastEventTimestamp: number | null = null;
+	private lastHeartbeatTime: number | null = null;
+	private staleCheckInterval: ReturnType<typeof setInterval> | null = null;
+
+	constructor(options: SyncManagerOptions) {
+		this.serverUrl = options.serverUrl;
+		this.getAuthToken = options.getAuthToken;
+		this.clientId = options.clientId;
+		this.storage = options.storage || new MemoryStorage();
+		this.onEvent = options.onEvent;
+		this.onStatusChange = options.onStatusChange;
+		this.reconnectDelay = options.reconnectDelay || 1000;
+		this.maxReconnectDelay = options.maxReconnectDelay || 30000;
+	}
+
+	/**
+	 * Get current connection status
+	 */
+	getStatus(): ConnectionStatus {
+		return this.connectionStatus;
+	}
+
+	/**
+	 * Get last event timestamp
+	 */
+	getLastEventTimestamp(): number | null {
+		return this.lastEventTimestamp;
+	}
+
+	/**
+	 * Get client ID
+	 */
+	getClientId(): string {
+		return this.clientId;
+	}
+
+	/**
+	 * Update connection status and notify listeners
+	 */
+	private setStatus(status: ConnectionStatus) {
+		if (this.connectionStatus !== status) {
+			this.connectionStatus = status;
+			this.onStatusChange?.(status);
+		}
+	}
+
+	/**
+	 * Start checking for stale connection
+	 */
+	private startStaleCheck(): void {
+		this.stopStaleCheck();
+		this.lastHeartbeatTime = Date.now();
+
+		this.staleCheckInterval = setInterval(() => {
+			if (
+				this.lastHeartbeatTime &&
+				Date.now() - this.lastHeartbeatTime > STALE_CONNECTION_THRESHOLD
+			) {
+				console.warn("SSE connection appears stale, reconnecting...");
+				this.disconnect();
+				this.setStatus("reconnecting");
+				this.scheduleReconnect();
+			}
+		}, STALE_CHECK_INTERVAL);
+	}
+
+	/**
+	 * Stop stale connection check
+	 */
+	private stopStaleCheck(): void {
+		if (this.staleCheckInterval) {
+			clearInterval(this.staleCheckInterval);
+			this.staleCheckInterval = null;
+		}
+	}
+
+	/**
+	 * Connect to SSE endpoint
+	 */
+	async connect(): Promise<void> {
+		if (
+			this.connectionStatus === "connected" ||
+			this.connectionStatus === "connecting"
+		) {
+			return;
+		}
+
+		this.setStatus("connecting");
+
+		try {
+			const token = await this.getAuthToken();
+			if (!token) {
+				this.setStatus("error");
+				return;
+			}
+
+			// Create abort controller for this connection
+			this.abortController = new AbortController();
+
+			const response = await fetch(`${this.serverUrl}/sync/events`, {
+				method: "GET",
+				headers: {
+					Authorization: `Bearer ${token}`,
+					Accept: "text/event-stream",
+				},
+				signal: this.abortController.signal,
+			});
+
+			if (!response.ok) {
+				throw new Error(`SSE connection failed: ${response.status}`);
+			}
+
+			if (!response.body) {
+				throw new Error("No response body");
+			}
+
+			this.setStatus("connected");
+			this.reconnectAttempt = 0;
+
+			// Start monitoring for stale connection
+			this.startStaleCheck();
+
+			// Read SSE stream
+			await this.readStream(response.body);
+		} catch (error) {
+			if ((error as Error).name === "AbortError") {
+				// Connection was intentionally aborted
+				return;
+			}
+
+			console.error("SSE connection error:", error);
+			this.setStatus("error");
+			this.scheduleReconnect();
+		}
+	}
+
+	/**
+	 * Read and parse SSE stream
+	 */
+	private async readStream(body: ReadableStream<Uint8Array>): Promise<void> {
+		const reader = body.getReader();
+		const decoder = new TextDecoder();
+		let buffer = "";
+
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+
+				if (done) {
+					// Stream closed by server
+					this.setStatus("reconnecting");
+					this.scheduleReconnect();
+					break;
+				}
+
+				buffer += decoder.decode(value, { stream: true });
+
+				// Process complete events in buffer
+				const events = buffer.split("\n\n");
+				buffer = events.pop() || ""; // Keep incomplete event in buffer
+
+				for (const eventStr of events) {
+					this.processEvent(eventStr);
+				}
+			}
+		} catch (error) {
+			if ((error as Error).name !== "AbortError") {
+				console.error("Stream read error:", error);
+				this.setStatus("reconnecting");
+				this.scheduleReconnect();
+			}
+		} finally {
+			reader.releaseLock();
+		}
+	}
+
+	/**
+	 * Process a single SSE event
+	 */
+	private processEvent(eventStr: string): void {
+		const lines = eventStr.trim().split("\n");
+		let data = "";
+		let eventType = "";
+
+		for (const line of lines) {
+			// Skip comments
+			if (line.startsWith(":")) {
+				continue;
+			}
+
+			if (line.startsWith("event: ")) {
+				eventType = line.slice(7);
+			} else if (line.startsWith("data: ")) {
+				data = line.slice(6);
+			}
+		}
+
+		if (!data) {
+			return;
+		}
+
+		try {
+			const event = JSON.parse(data);
+
+			// Update heartbeat time for any received event
+			this.lastHeartbeatTime = Date.now();
+
+			// Handle heartbeat events
+			if (eventType === "heartbeat" || event.type === "heartbeat") {
+				// Just update the heartbeat time, already done above
+				return;
+			}
+
+			// Handle connection message
+			if (event.type === "connected") {
+				console.log("SSE connected:", event);
+				return;
+			}
+
+			// Convert to SyncEvent
+			const syncEvent: SyncEvent = {
+				id: event.id,
+				type: event.type,
+				entityId: event.entityId,
+				entityType: event.entityType,
+				vaultId: event.vaultId,
+				version: event.version,
+				clientId: event.clientId,
+				userId: event.userId,
+				timestamp: event.timestamp,
+				metadata: event.metadata,
+			};
+
+			// Update last event timestamp
+			this.lastEventTimestamp = syncEvent.timestamp;
+
+			// Skip events from own client (already handled via optimistic updates)
+			if (syncEvent.metadata?.originClientId === this.clientId) {
+				return;
+			}
+
+			// Dispatch event to listeners
+			this.onEvent?.(syncEvent);
+		} catch (error) {
+			console.error("Failed to parse SSE event:", error, data);
+		}
+	}
+
+	/**
+	 * Schedule reconnection with exponential backoff
+	 */
+	private scheduleReconnect(): void {
+		if (this.reconnectTimeout) {
+			clearTimeout(this.reconnectTimeout);
+		}
+
+		const delay = Math.min(
+			this.reconnectDelay * Math.pow(2, this.reconnectAttempt),
+			this.maxReconnectDelay,
+		);
+
+		this.reconnectAttempt++;
+
+		this.reconnectTimeout = setTimeout(() => {
+			this.connect();
+		}, delay);
+	}
+
+	/**
+	 * Disconnect from SSE
+	 */
+	disconnect(): void {
+		this.stopStaleCheck();
+
+		if (this.reconnectTimeout) {
+			clearTimeout(this.reconnectTimeout);
+			this.reconnectTimeout = null;
+		}
+
+		if (this.abortController) {
+			this.abortController.abort();
+			this.abortController = null;
+		}
+
+		this.setStatus("disconnected");
+	}
+
+	/**
+	 * Store last sync timestamp for offline recovery
+	 */
+	async saveLastSyncTimestamp(): Promise<void> {
+		if (this.lastEventTimestamp) {
+			await this.storage.set("lastSyncTimestamp", this.lastEventTimestamp);
+		}
+	}
+
+	/**
+	 * Get stored last sync timestamp
+	 */
+	async getStoredLastSyncTimestamp(): Promise<number | null> {
+		return this.storage.get<number>("lastSyncTimestamp");
+	}
+}
+
+/**
+ * Create a sync manager instance
+ */
+export function createSyncManager(options: SyncManagerOptions): SyncManager {
+	return new SyncManager(options);
+}

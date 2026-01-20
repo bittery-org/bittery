@@ -22,9 +22,10 @@ import {
 	SelectValue,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { UserPlus } from "lucide-react";
 import { useState } from "react";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface AddMemberDialogProps {
 	vaultId: string;
@@ -38,7 +39,7 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 
 	// Look up user by email
 	const userQuery = useQuery({
@@ -54,9 +55,9 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 			role: "admin" | "member" | "read-only";
 			encryptedVaultKey: string;
 		}) => trpcClient.vault.members.add.mutate(input),
-		onSuccess: () => {
+		onSuccess: async () => {
 			toast.success("Member added successfully");
-			queryClient.invalidateQueries({ queryKey: ["vault"] });
+			await invalidator.invalidateVaultMembers(vaultId);
 			setOpen(false);
 			resetForm();
 		},

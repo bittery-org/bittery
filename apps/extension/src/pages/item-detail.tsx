@@ -3,13 +3,18 @@ import { Button, Skeleton } from "@bittery/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
+import { createExtensionInvalidator } from "@/lib/query-invalidation";
 
 export function ItemDetailPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const { itemId } = useParams({ from: "/item/$itemId" });
+	const invalidator = useMemo(
+		() => createExtensionInvalidator(queryClient),
+		[queryClient],
+	);
 
 	const { data: item, isLoading } = useQuery<DecryptedItem | null>({
 		queryKey: ["vault-item", itemId],
@@ -24,9 +29,8 @@ export function ItemDetailPage() {
 
 	const handleItemUpdated = useCallback(() => {
 		// Invalidate both the single item query and the items list
-		queryClient.invalidateQueries({ queryKey: ["vault-item", itemId] });
-		queryClient.invalidateQueries({ queryKey: ["vault-items"] });
-	}, [queryClient, itemId]);
+		invalidator.invalidateItem(itemId);
+	}, [invalidator, itemId]);
 
 	if (isLoading) {
 		return (

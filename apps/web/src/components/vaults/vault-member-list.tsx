@@ -34,9 +34,10 @@ import {
 	TableRow,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { Loader2, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface VaultMember {
 	userId: string;
@@ -57,7 +58,7 @@ export function VaultMemberList({
 	userRole,
 }: VaultMemberListProps) {
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 	const canManage = userRole === "owner" || userRole === "admin";
 	const [isRotating, setIsRotating] = useState(false);
 	const [rotatingUserId, setRotatingUserId] = useState<string | null>(null);
@@ -68,9 +69,9 @@ export function VaultMemberList({
 			userId: string;
 			role: "admin" | "member" | "read-only";
 		}) => trpcClient.vault.members.updateRole.mutate(input),
-		onSuccess: () => {
+		onSuccess: async () => {
 			toast.success("Role updated");
-			queryClient.invalidateQueries({ queryKey: ["vault"] });
+			await invalidator.invalidateVaultMembers(vaultId);
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);
@@ -172,7 +173,7 @@ export function VaultMemberList({
 			toast.success(
 				`Member removed and vault key rotated (${result.keyRotation?.itemsReEncrypted ?? 0} items re-encrypted)`,
 			);
-			queryClient.invalidateQueries({ queryKey: ["vault"] });
+			await invalidator.invalidateVaultMembers(vaultId);
 		} catch (error) {
 			console.error("Key rotation failed:", error);
 			toast.error(

@@ -6,6 +6,7 @@ import { trpcServer } from "@hono/trpc-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { createSyncRouter } from "./sync/sse-handler";
 
 const app = new Hono();
 
@@ -20,6 +21,10 @@ app.use(
 		credentials: true,
 	}),
 );
+
+// Mount sync router for SSE real-time events
+const syncRouter = createSyncRouter();
+app.route("/sync", syncRouter);
 
 app.get("/cdn/*", async (c) => {
 	const key = c.req.path.replace(/^\/cdn\//, "");
@@ -68,4 +73,9 @@ app.get("/", (c) => {
 	return c.text("OK");
 });
 
-export default app;
+export default {
+	port: process.env.PORT || 3000,
+	fetch: app.fetch,
+	// Increase idle timeout for SSE connections (default is 10s)
+	idleTimeout: 35, // Max value in seconds (~4 minutes)
+};

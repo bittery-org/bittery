@@ -22,9 +22,10 @@ import {
 	SelectValue,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { UserPlus } from "lucide-react";
 import { useState } from "react";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface InviteDialogProps {
 	teamId: string;
@@ -36,7 +37,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 	const [role, setRole] = useState<"admin" | "member">("member");
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 
 	// Query team vaults for key provisioning
 	const teamVaultsQuery = useQuery({
@@ -114,9 +115,9 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 
 			return result;
 		},
-		onSuccess: () => {
+		onSuccess: async () => {
 			toast.success("Invitation sent");
-			queryClient.invalidateQueries({ queryKey: ["team"] });
+			await invalidator.invalidateTeam();
 			setOpen(false);
 			setEmail("");
 			setRole("member");

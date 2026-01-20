@@ -12,7 +12,8 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 import { Plus } from "lucide-react";
 import { useState } from "react";
 
@@ -20,14 +21,14 @@ export function CreateTeamDialog() {
 	const [open, setOpen] = useState(false);
 	const [name, setName] = useState("");
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 
 	const createMutation = useMutation({
 		mutationFn: (input: { name: string }) =>
 			trpcClient.team.create.mutate(input),
-		onSuccess: () => {
+		onSuccess: async () => {
 			toast.success("Team created");
-			queryClient.invalidateQueries({ queryKey: ["team"] });
+			await invalidator.invalidateTeam();
 			setOpen(false);
 			setName("");
 		},

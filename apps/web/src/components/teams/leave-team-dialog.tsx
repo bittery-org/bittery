@@ -12,7 +12,8 @@ import {
 	Button,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 import { useNavigate } from "@tanstack/react-router";
 import { LogOut } from "lucide-react";
 import { useState } from "react";
@@ -25,14 +26,14 @@ interface LeaveTeamDialogProps {
 export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 	const [open, setOpen] = useState(false);
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
 
 	const leaveMutation = useMutation({
 		mutationFn: () => trpcClient.team.leave.mutate({ teamId }),
-		onSuccess: () => {
+		onSuccess: async () => {
 			toast.success("You have left the team");
-			queryClient.invalidateQueries({ queryKey: ["team"] });
+			await invalidator.invalidateTeam();
 			setOpen(false);
 			navigate({ to: "/teams" });
 		},

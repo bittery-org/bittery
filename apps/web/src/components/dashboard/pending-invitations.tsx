@@ -9,23 +9,23 @@ import {
 	CardTitle,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 import { formatDistanceToNow } from "date-fns";
 import { Check, Clock, Mail, X } from "lucide-react";
 
 export function PendingInvitations() {
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 	const pendingQuery = useQuery(trpc.team.invitations.pending.queryOptions());
 
 	const acceptMutation = useMutation({
 		mutationFn: (input: { token: string }) =>
 			trpcClient.team.invitations.accept.mutate(input),
-		onSuccess: (data) => {
+		onSuccess: async (data) => {
 			toast.success(`Joined ${data.teamName}`);
-			queryClient.invalidateQueries({ queryKey: ["team"] });
-			queryClient.invalidateQueries({ queryKey: ["team", "invitations"] });
+			await invalidator.invalidateTeamInvitations();
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);
@@ -35,9 +35,9 @@ export function PendingInvitations() {
 	const declineMutation = useMutation({
 		mutationFn: (input: { token: string }) =>
 			trpcClient.team.invitations.decline.mutate(input),
-		onSuccess: () => {
+		onSuccess: async () => {
 			toast.success("Invitation declined");
-			queryClient.invalidateQueries({ queryKey: ["team", "invitations"] });
+			await invalidator.invalidateTeamInvitations();
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);

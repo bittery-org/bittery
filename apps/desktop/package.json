@@ -18,6 +18,7 @@
 		"@bittery/auth": "workspace:*",
 		"@bittery/crypto": "workspace:*",
 		"@bittery/shared": "workspace:*",
+		"@bittery/sync": "workspace:*",
 		"@bittery/ui": "workspace:*",
 		"@choochmeque/tauri-plugin-biometry-api": "^0.2.0",
 		"@tailwindcss/vite": "^4.1.8",

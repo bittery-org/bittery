@@ -90,6 +90,10 @@ export const item = pgTable(
 		encryptionAlgorithm: text("encryption_algorithm")
 			.notNull()
 			.default("AES-GCM"),
+		// Version for conflict detection (increments on each update)
+		version: integer("version").notNull().default(1),
+		// User who last modified this item
+		lastModifiedBy: text("last_modified_by").references(() => user.id),
 		createdAt: timestamp("created_at").defaultNow().notNull(),
 		updatedAt: timestamp("updated_at")
 			.defaultNow()

@@ -23,7 +23,7 @@ import {
 	Skeleton,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
 	Calendar,
 	Clock,
@@ -38,6 +38,7 @@ import {
 	Users,
 } from "lucide-react";
 import { useState } from "react";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface ShareLinksListProps {
 	itemId: string;
@@ -78,15 +79,15 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 
 	const linksQuery = useQuery(trpc.share.listByItem.queryOptions({ itemId }));
 
 	const revokeMutation = useMutation({
 		mutationFn: (linkId: string) => trpcClient.share.revoke.mutate({ linkId }),
-		onSuccess: () => {
+		onSuccess: async () => {
 			toast.success("Share link revoked");
-			queryClient.invalidateQueries({ queryKey: ["share", "listByItem"] });
+			await invalidator.invalidateShare(itemId);
 			setLinkToRevoke(null);
 		},
 		onError: (error: Error) => {

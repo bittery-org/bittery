@@ -10,7 +10,8 @@ import {
 	TableRow,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 import { RefreshCw, X } from "lucide-react";
 
 interface Invitation {
@@ -34,14 +35,14 @@ export function PendingInvitationsList({
 	canManage,
 }: PendingInvitationsListProps) {
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 
 	const cancelMutation = useMutation({
 		mutationFn: (input: { invitationId: string }) =>
 			trpcClient.team.invitations.cancel.mutate(input),
-		onSuccess: () => {
+		onSuccess: async () => {
 			toast.success("Invitation cancelled");
-			queryClient.invalidateQueries({ queryKey: ["team"] });
+			await invalidator.invalidateTeam();
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);
@@ -51,9 +52,9 @@ export function PendingInvitationsList({
 	const resendMutation = useMutation({
 		mutationFn: (input: { invitationId: string }) =>
 			trpcClient.team.invitations.resend.mutate(input),
-		onSuccess: () => {
+		onSuccess: async () => {
 			toast.success("Invitation resent");
-			queryClient.invalidateQueries({ queryKey: ["team"] });
+			await invalidator.invalidateTeam();
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);

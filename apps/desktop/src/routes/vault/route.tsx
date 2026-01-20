@@ -21,6 +21,7 @@ import { useVaultOperations } from "../../components/vault/use-vault-operations"
 import { VaultHeader } from "../../components/vault/vault-header";
 import { VaultSidebar } from "../../components/vault/vault-sidebar";
 import { trpc } from "../../lib/providers";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault")({
 	component: RouteComponent,
@@ -74,6 +75,7 @@ function RouteComponent() {
 	const navigate = useNavigate();
 	const trpcClient = useTRPCClient();
 	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 	const { createVault, updateVault, deleteVault } = useVaultOperations();
 
 	const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
@@ -120,9 +122,7 @@ function RouteComponent() {
 				trpc.vault.getItem.queryOptions({ itemId: createdItem.itemId }),
 			);
 			// Invalidate queries to refresh the list
-			await queryClient.invalidateQueries(
-				trpc.vault.listItems.queryOptions({ vaultId }),
-			);
+			await invalidator.invalidateVaultList(vaultId);
 
 			// Close dialog
 			setIsNewItemDialogOpen(false);

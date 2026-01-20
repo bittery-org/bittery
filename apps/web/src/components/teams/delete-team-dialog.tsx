@@ -14,7 +14,8 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 import { useNavigate } from "@tanstack/react-router";
 import { Trash2 } from "lucide-react";
 import { useState } from "react";
@@ -28,14 +29,14 @@ export function DeleteTeamDialog({ teamId, teamName }: DeleteTeamDialogProps) {
 	const [open, setOpen] = useState(false);
 	const [confirmText, setConfirmText] = useState("");
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
 
 	const deleteMutation = useMutation({
 		mutationFn: () => trpcClient.team.delete.mutate({ teamId }),
-		onSuccess: () => {
+		onSuccess: async () => {
 			toast.success("Team deleted successfully");
-			queryClient.invalidateQueries({ queryKey: ["team"] });
+			await invalidator.invalidateTeam();
 			setOpen(false);
 			navigate({ to: "/teams" });
 		},

@@ -5,6 +5,7 @@ import { Plus, Search, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Favicon } from "@/components/favicon";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
+import { createExtensionInvalidator } from "@/lib/query-invalidation";
 
 function getBaseDomain(host: string): string {
 	const parts = host.split(".");
@@ -44,6 +45,10 @@ function hostnameMatches(
 
 export function VaultPage() {
 	const queryClient = useQueryClient();
+	const invalidator = useMemo(
+		() => createExtensionInvalidator(queryClient),
+		[queryClient],
+	);
 	const [searchQuery, setSearchQuery] = useState("");
 	const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 	const [currentHostname, setCurrentHostname] = useState<string | null>(null);
@@ -152,8 +157,8 @@ export function VaultPage() {
 	const selectedItem = sortedItems.find((item) => item.id === selectedItemId);
 
 	const handleItemUpdated = useCallback(() => {
-		queryClient.invalidateQueries({ queryKey: ["vault-items"] });
-	}, [queryClient]);
+		invalidator.invalidateVaultItems();
+	}, [invalidator]);
 
 	return (
 		<div className="flex h-full flex-col">

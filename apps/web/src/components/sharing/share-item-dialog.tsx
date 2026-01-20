@@ -31,7 +31,8 @@ import {
 	SelectValue,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 import { AlertTriangle, Copy, Link, Loader2, Share2, X } from "lucide-react";
 import { useState } from "react";
 
@@ -63,7 +64,7 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 	const [emailInput, setEmailInput] = useState("");
 
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 
 	const createShareMutation = useMutation({
 		mutationFn: async () => {
@@ -145,9 +146,9 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 
 			return { ...result, shareUrl };
 		},
-		onSuccess: (data) => {
+		onSuccess: async (data) => {
 			setGeneratedLink(data.shareUrl);
-			queryClient.invalidateQueries({ queryKey: ["share"] });
+			await invalidator.invalidateShare();
 			toast.success("Share link created successfully!");
 		},
 		onError: (error: Error) => {

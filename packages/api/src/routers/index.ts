@@ -1,6 +1,7 @@
 import { protectedProcedure, publicProcedure, router } from "../index";
 import { authRouter } from "./auth";
 import { shareRouter } from "./share";
+import { syncRouter } from "./sync";
 import { teamRouter } from "./team";
 import { vaultRouter } from "./vault";
 
@@ -18,5 +19,6 @@ export const appRouter = router({
 	team: teamRouter,
 	vault: vaultRouter,
 	share: shareRouter,
+	sync: syncRouter,
 });
 export type AppRouter = typeof appRouter;

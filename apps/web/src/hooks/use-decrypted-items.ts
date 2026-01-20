@@ -3,7 +3,6 @@ import { getDecryptedVaultKey } from "@bittery/crypto/session-storage";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
-
 /**
  * Hook to fetch and decrypt items from a vault.
  * Items are cached for 5 minutes to avoid repeated decryption.

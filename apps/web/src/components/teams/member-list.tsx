@@ -26,7 +26,8 @@ import {
 	TableRow,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 import { Trash2 } from "lucide-react";
 
 interface Member {
@@ -46,7 +47,7 @@ interface MemberListProps {
 
 export function MemberList({ teamId, members, userRole }: MemberListProps) {
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 	const canManage = userRole === "owner" || userRole === "admin";
 
 	const updateRoleMutation = useMutation({
@@ -55,9 +56,9 @@ export function MemberList({ teamId, members, userRole }: MemberListProps) {
 			userId: string;
 			role: "admin" | "member";
 		}) => trpcClient.team.members.updateRole.mutate(input),
-		onSuccess: () => {
+		onSuccess: async () => {
 			toast.success("Role updated");
-			queryClient.invalidateQueries({ queryKey: ["team"] });
+			await invalidator.invalidateTeam();
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);
@@ -67,9 +68,9 @@ export function MemberList({ teamId, members, userRole }: MemberListProps) {
 	const removeMutation = useMutation({
 		mutationFn: (input: { teamId: string; userId: string }) =>
 			trpcClient.team.members.remove.mutate(input),
-		onSuccess: () => {
+		onSuccess: async () => {
 			toast.success("Member removed");
-			queryClient.invalidateQueries({ queryKey: ["team"] });
+			await invalidator.invalidateTeam();
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);

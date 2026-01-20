@@ -12,11 +12,12 @@ import {
 	DialogTitle,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Archive, ArchiveRestore, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Favicon } from "../../../components/vault/favicon";
+import { useQueryInvalidator } from "../../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault/$id/trash")({
 	component: TrashComponent,
@@ -43,7 +44,7 @@ interface DecryptedDeletedItem extends DeletedItem {
 function TrashComponent() {
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 
 	const { id: vaultId } = Route.useParams();
 
@@ -118,11 +119,11 @@ function TrashComponent() {
 		mutationFn: async (itemId: string) => {
 			return await trpcClient.vault.restoreItem.mutate({ itemId });
 		},
-		onSuccess: () => {
-			queryClient.invalidateQueries({
-				queryKey: [["vault", "listDeletedItems"]],
-			});
-			queryClient.invalidateQueries({ queryKey: [["vault", "listItems"]] });
+		onSuccess: async () => {
+			await Promise.all([
+				invalidator.invalidateDeletedItems(vaultId),
+				invalidator.invalidateVaultList(vaultId),
+			]);
 			toast.success("Item restored successfully");
 		},
 		onError: (error) => {
@@ -135,10 +136,8 @@ function TrashComponent() {
 		mutationFn: async (itemId: string) => {
 			return await trpcClient.vault.permanentlyDeleteItem.mutate({ itemId });
 		},
-		onSuccess: () => {
-			queryClient.invalidateQueries({
-				queryKey: [["vault", "listDeletedItems"]],
-			});
+		onSuccess: async () => {
+			await invalidator.invalidateDeletedItems(vaultId);
 			setItemToDelete(null);
 			toast.success("Item permanently deleted");
 		},

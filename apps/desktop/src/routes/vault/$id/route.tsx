@@ -1,7 +1,7 @@
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button } from "@bittery/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import {
 	createFileRoute,
 	Link,
@@ -11,7 +11,7 @@ import {
 import { Archive, Smartphone, Star } from "lucide-react";
 import { Favicon } from "../../../components/vault/favicon";
 import { useDecryptedItems } from "../../../hooks/use-decrypted-items";
-import { trpc } from "../../../lib/providers";
+import { useQueryInvalidator } from "../../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault/$id")({
 	component: RouteComponent,
@@ -19,7 +19,7 @@ export const Route = createFileRoute("/vault/$id")({
 
 function RouteComponent() {
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 
 	const { id, itemId } = useParams({ strict: false });
 
@@ -43,18 +43,9 @@ function RouteComponent() {
 		mutationFn: async (params: { itemId: string; favorite: boolean }) => {
 			return trpcClient.vault.toggleFavorite.mutate(params);
 		},
-		onSuccess: () => {
-			// Invalidate listItems - the decrypted-items query will automatically
-			// refetch because its key includes a fingerprint of the raw items
-			queryClient.invalidateQueries({
-				queryKey: trpc.vault.listItems.queryKey({ vaultId: id || "" }),
-			});
-			// Invalidate single item queries if viewing an item
-			if (itemId) {
-				queryClient.invalidateQueries({
-					queryKey: trpc.vault.getItem.queryKey({ itemId }),
-				});
-			}
+		onSuccess: (_data, variables) => {
+			// Invalidate item - this includes both listItems and getItem
+			invalidator.invalidateItem(variables.itemId, id || "");
 		},
 	});
 

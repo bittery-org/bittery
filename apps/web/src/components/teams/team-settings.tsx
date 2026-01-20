@@ -11,7 +11,8 @@ import {
 	Separator,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 import { AlertTriangle, Settings } from "lucide-react";
 import { useState } from "react";
 import { DeleteTeamDialog } from "./delete-team-dialog";
@@ -35,7 +36,7 @@ export function TeamSettings({
 	const [isEditing, setIsEditing] = useState(false);
 	const [name, setName] = useState(teamName);
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 
 	const isOwner = userRole === "owner";
 	const canEdit = isOwner || userRole === "admin";
@@ -43,9 +44,9 @@ export function TeamSettings({
 	const updateMutation = useMutation({
 		mutationFn: (input: { teamId: string; name: string }) =>
 			trpcClient.team.update.mutate(input),
-		onSuccess: () => {
+		onSuccess: async () => {
 			toast.success("Team name updated");
-			queryClient.invalidateQueries({ queryKey: ["team"] });
+			await invalidator.invalidateTeam();
 			setIsEditing(false);
 		},
 		onError: (error: Error) => {

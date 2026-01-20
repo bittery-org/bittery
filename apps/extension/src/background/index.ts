@@ -34,6 +34,15 @@ import {
 } from "./qr-scan-handlers";
 import { handleAutoLockAlarm } from "./session-manager";
 import {
+	connect as connectSync,
+	disconnect as disconnectSync,
+	getStatus as getSyncStatus,
+	getClientId as getSyncClientId,
+	handleSyncReconnectAlarm,
+	cleanupSync,
+	initializeSync,
+} from "./sync-manager";
+import {
 	handleGetVaultItem,
 	handleGetVaultItems,
 	handleGetWritableVaults,
@@ -52,6 +61,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 				// Authentication
 				case "LOGIN": {
 					const result = await handleLogin(message.payload);
+					// Initialize sync after successful login
+					if (result.success) {
+						initializeSync().catch(console.error);
+					}
 					sendResponse(result);
 					break;
 				}
@@ -87,14 +100,43 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 				}
 
 				case "LOGOUT": {
+					// Cleanup sync before logout
+					await cleanupSync();
 					const result = await handleLogout();
 					sendResponse(result);
 					break;
 				}
 
 				case "LOCK": {
+					// Disconnect sync when locking
+					disconnectSync();
 					const result = await handleLock();
 					sendResponse(result);
+					break;
+				}
+
+				// Sync operations
+				case "SYNC_CONNECT": {
+					await connectSync();
+					sendResponse({ success: true });
+					break;
+				}
+
+				case "SYNC_DISCONNECT": {
+					disconnectSync();
+					sendResponse({ success: true });
+					break;
+				}
+
+				case "GET_SYNC_STATUS": {
+					const status = getSyncStatus();
+					sendResponse({ success: true, status });
+					break;
+				}
+
+				case "GET_SYNC_CLIENT_ID": {
+					const clientId = await getSyncClientId();
+					sendResponse({ success: true, clientId });
 					break;
 				}
 
@@ -199,9 +241,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 	return true; // Keep channel open for async response
 });
 
-// Handle Chrome Alarms for auto-lock
+// Handle Chrome Alarms for auto-lock and sync reconnection
 chrome.alarms.onAlarm.addListener((alarm) => {
 	handleAutoLockAlarm(alarm);
+	handleSyncReconnectAlarm(alarm);
 });
 
 // Keep service worker alive

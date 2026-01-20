@@ -16,6 +16,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, router } from "../index";
+import { emitSyncEvent } from "../sync-helper";
 
 export const vaultRouter = router({
 	/**
@@ -148,6 +149,7 @@ export const vaultRouter = router({
 				encryptedVaultKey: z.string(),
 				icon: z.string().min(1).optional(),
 				imageKey: z.string().min(1).optional(),
+				clientId: z.string().optional(), // For sync event correlation
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
@@ -172,6 +174,17 @@ export const vaultRouter = router({
 				role: "owner",
 			});
 
+			// Emit sync event
+			await emitSyncEvent({
+				eventType: "vault_created",
+				entityId: vaultId,
+				entityType: "vault",
+				vaultId,
+				userId: ctx.session.userId,
+				clientId: input.clientId,
+				version: 1,
+			});
+
 			return { vaultId };
 		}),
 
@@ -185,6 +198,7 @@ export const vaultRouter = router({
 				name: z.string().min(1).optional(),
 				icon: z.string().nullable().optional(),
 				imageKey: z.string().nullable().optional(),
+				clientId: z.string().optional(), // For sync event correlation
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
@@ -218,6 +232,17 @@ export const vaultRouter = router({
 				throw new Error("Vault not found");
 			}
 
+			// Emit sync event
+			await emitSyncEvent({
+				eventType: "vault_updated",
+				entityId: input.vaultId,
+				entityType: "vault",
+				vaultId: input.vaultId,
+				userId: ctx.session.userId,
+				clientId: input.clientId,
+				version: 1,
+			});
+
 			return {
 				id: updatedVault.id,
 				name: updatedVault.name,
@@ -232,7 +257,7 @@ export const vaultRouter = router({
 	 * Delete a vault (owner only)
 	 */
 	delete: protectedProcedure
-		.input(z.object({ vaultId: z.string() }))
+		.input(z.object({ vaultId: z.string(), clientId: z.string().optional() }))
 		.mutation(async ({ input, ctx }) => {
 			const userVaultKey = await db.query.vaultKey.findFirst({
 				where: (vk, { and, eq }) =>
@@ -245,6 +270,17 @@ export const vaultRouter = router({
 					message: "Only the vault owner can delete the vault",
 				});
 			}
+
+			// Emit sync event BEFORE deleting (so we can still broadcast to members)
+			await emitSyncEvent({
+				eventType: "vault_deleted",
+				entityId: input.vaultId,
+				entityType: "vault",
+				vaultId: input.vaultId,
+				userId: ctx.session.userId,
+				clientId: input.clientId,
+				version: 1,
+			});
 
 			// Delete all items in the vault
 			await db.delete(item).where(eq(item.vaultId, input.vaultId));
@@ -395,6 +431,7 @@ export const vaultRouter = router({
 				encryptedData: z.string(),
 				encryptionIv: z.string(),
 				encryptionAlgorithm: z.string().default("AES-GCM"),
+				clientId: z.string().optional(), // For sync event correlation
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
@@ -425,6 +462,19 @@ export const vaultRouter = router({
 				encryptedData: input.encryptedData,
 				encryptionIv: input.encryptionIv,
 				encryptionAlgorithm: input.encryptionAlgorithm,
+				version: 1,
+				lastModifiedBy: ctx.session.userId,
+			});
+
+			// Emit sync event
+			await emitSyncEvent({
+				eventType: "item_created",
+				entityId: itemId,
+				entityType: "item",
+				vaultId: input.vaultId,
+				userId: ctx.session.userId,
+				clientId: input.clientId,
+				version: 1,
 			});
 
 			return { itemId, id: input.vaultId };
@@ -515,6 +565,8 @@ export const vaultRouter = router({
 				itemId: z.string(),
 				encryptedData: z.string().optional(),
 				encryptionIv: z.string().optional(),
+				expectedVersion: z.number().optional(), // For conflict detection
+				clientId: z.string().optional(), // For sync event correlation
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
@@ -540,16 +592,44 @@ export const vaultRouter = router({
 				throw new Error("Access denied");
 			}
 
+			// Check for version conflict
+			const currentVersion = existingItem.version || 1;
+			if (input.expectedVersion !== undefined && input.expectedVersion !== currentVersion) {
+				throw new TRPCError({
+					code: "CONFLICT",
+					message: "Item has been modified by another client",
+					cause: {
+						currentVersion,
+						expectedVersion: input.expectedVersion,
+					},
+				});
+			}
+
+			const newVersion = currentVersion + 1;
+
 			await db
 				.update(item)
 				.set({
 					...(input.encryptedData && { encryptedData: input.encryptedData }),
 					...(input.encryptionIv && { encryptionIv: input.encryptionIv }),
+					version: newVersion,
+					lastModifiedBy: ctx.session.userId,
 					updatedAt: new Date(),
 				})
 				.where(eq(item.id, input.itemId));
 
-			return { success: true };
+			// Emit sync event
+			await emitSyncEvent({
+				eventType: "item_updated",
+				entityId: input.itemId,
+				entityType: "item",
+				vaultId: existingItem.vaultId,
+				userId: ctx.session.userId,
+				clientId: input.clientId,
+				version: newVersion,
+			});
+
+			return { success: true, version: newVersion };
 		}),
 
 	/**
@@ -604,6 +684,7 @@ export const vaultRouter = router({
 		.input(
 			z.object({
 				itemId: z.string(),
+				clientId: z.string().optional(), // For sync event correlation
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
@@ -629,10 +710,27 @@ export const vaultRouter = router({
 				throw new Error("Access denied");
 			}
 
+			const newVersion = (existingItem.version || 1) + 1;
+
 			await db
 				.update(item)
-				.set({ deletedAt: new Date() })
+				.set({
+					deletedAt: new Date(),
+					version: newVersion,
+					lastModifiedBy: ctx.session.userId,
+				})
 				.where(eq(item.id, input.itemId));
+
+			// Emit sync event
+			await emitSyncEvent({
+				eventType: "item_deleted",
+				entityId: input.itemId,
+				entityType: "item",
+				vaultId: existingItem.vaultId,
+				userId: ctx.session.userId,
+				clientId: input.clientId,
+				version: newVersion,
+			});
 
 			return { success: true };
 		}),
@@ -677,6 +775,7 @@ export const vaultRouter = router({
 		.input(
 			z.object({
 				itemId: z.string(),
+				clientId: z.string().optional(), // For sync event correlation
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
@@ -707,14 +806,29 @@ export const vaultRouter = router({
 				throw new Error("Access denied");
 			}
 
+			const newVersion = (existingItem.version || 1) + 1;
+
 			// Restore the item
 			await db
 				.update(item)
 				.set({
 					deletedAt: null,
+					version: newVersion,
+					lastModifiedBy: ctx.session.userId,
 					updatedAt: new Date(),
 				})
 				.where(eq(item.id, input.itemId));
+
+			// Emit sync event
+			await emitSyncEvent({
+				eventType: "item_restored",
+				entityId: input.itemId,
+				entityType: "item",
+				vaultId: existingItem.vaultId,
+				userId: ctx.session.userId,
+				clientId: input.clientId,
+				version: newVersion,
+			});
 
 			return { success: true };
 		}),
@@ -944,6 +1058,7 @@ export const vaultRouter = router({
 							}),
 						),
 					}),
+					clientId: z.string().optional(), // For sync event correlation
 				}),
 			)
 			.mutation(async ({ ctx, input }) => {
@@ -1082,6 +1197,34 @@ export const vaultRouter = router({
 						})
 						.where(eq(vaultKeyRotation.id, rotationId));
 
+					// Emit sync events for member removal and key rotation
+					await emitSyncEvent({
+						eventType: "vault_member_removed",
+						entityId: input.userId,
+						entityType: "vault_member",
+						vaultId: input.vaultId,
+						userId: ctx.session.userId,
+						clientId: input.clientId,
+						version: newKeyVersion,
+						metadata: {
+							removedUserId: input.userId,
+						},
+					});
+
+					await emitSyncEvent({
+						eventType: "vault_key_rotated",
+						entityId: input.vaultId,
+						entityType: "vault_key",
+						vaultId: input.vaultId,
+						userId: ctx.session.userId,
+						clientId: input.clientId,
+						version: newKeyVersion,
+						metadata: {
+							reason: "member_removed",
+							keyRotationId: rotationId,
+						},
+					});
+
 					return {
 						success: true,
 						keyRotation: {
@@ -1218,6 +1361,7 @@ export const vaultRouter = router({
 					userId: z.string(),
 					role: z.enum(["admin", "member", "read-only"]),
 					encryptedVaultKey: z.string(),
+					clientId: z.string().optional(), // For sync event correlation
 				}),
 			)
 			.mutation(async ({ ctx, input }) => {
@@ -1269,6 +1413,21 @@ export const vaultRouter = router({
 					userId: input.userId,
 					encryptedVaultKey: input.encryptedVaultKey,
 					role: input.role,
+				});
+
+				// Emit sync event
+				await emitSyncEvent({
+					eventType: "vault_member_added",
+					entityId: input.userId,
+					entityType: "vault_member",
+					vaultId: input.vaultId,
+					userId: ctx.session.userId,
+					clientId: input.clientId,
+					version: 1,
+					metadata: {
+						addedUserId: input.userId,
+						role: input.role,
+					},
 				});
 
 				return { success: true };

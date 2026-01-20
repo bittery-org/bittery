@@ -36,6 +36,13 @@
       "when": 1768907793164,
       "tag": "0004_parallel_callisto",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1768913170520,
+      "tag": "0005_sparkling_stingray",
+      "breakpoints": true
     }
   ]
 }

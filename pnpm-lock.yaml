@@ -78,6 +78,9 @@ importers:
       '@bittery/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@bittery/sync':
+        specifier: workspace:*
+        version: link:../../packages/sync
       '@bittery/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -181,6 +184,9 @@ importers:
       '@bittery/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@bittery/sync':
+        specifier: workspace:*
+        version: link:../../packages/sync
       '@bittery/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -312,6 +318,9 @@ importers:
       '@bittery/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@bittery/sync':
+        specifier: workspace:*
+        version: link:../../packages/sync
       '@bittery/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -594,6 +603,31 @@ importers:
       '@bittery/config':
         specifier: workspace:*
         version: link:../config
+
+  packages/sync:
+    dependencies:
+      '@bittery/shared':
+        specifier: workspace:*
+        version: link:../shared
+      nanoid:
+        specifier: ^5.1.0
+        version: 5.1.6
+    devDependencies:
+      '@bittery/config':
+        specifier: workspace:*
+        version: link:../config
+      '@tanstack/react-query':
+        specifier: ^5.85.5
+        version: 5.90.12(react@19.2.3)
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.8
+      react:
+        specifier: 'catalog:'
+        version: 19.2.3
+      typescript:
+        specifier: ^5.7.2
+        version: 5.8.3
 
   packages/ui:
     dependencies:

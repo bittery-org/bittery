@@ -2,9 +2,9 @@ import { encrypt, generateEncryptionKey } from "@bittery/crypto/encryption";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { toast } from "@bittery/ui";
-import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { refreshVaultKeys } from "../../lib/vault-utils";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 
 export interface VaultFormData {
 	name: string;
@@ -15,7 +15,7 @@ export interface VaultFormData {
 
 export function useVaultOperations() {
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
 
 	const createVault = async (data: VaultFormData): Promise<void> => {
@@ -75,7 +75,7 @@ export function useVaultOperations() {
 		});
 
 		await refreshVaultKeys(trpcClient);
-		queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
+		await invalidator.invalidateVaultKeys();
 
 		navigate({ to: "/vault/$id", params: { id: result.vaultId } });
 	};
@@ -95,14 +95,14 @@ export function useVaultOperations() {
 		});
 
 		await refreshVaultKeys(trpcClient);
-		queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
+		await invalidator.invalidateVaultKeys();
 	};
 
 	const deleteVault = async (vaultId: string, currentVaultId?: string) => {
 		await trpcClient.vault.delete.mutate({ vaultId });
 
 		await refreshVaultKeys(trpcClient);
-		queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
+		await invalidator.invalidateVaultKeys();
 
 		if (currentVaultId === vaultId) {
 			navigate({ to: "/vault" });

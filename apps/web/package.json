@@ -13,6 +13,7 @@
 		"@bittery/auth": "workspace:*",
 		"@bittery/crypto": "workspace:*",
 		"@bittery/shared": "workspace:*",
+		"@bittery/sync": "workspace:*",
 		"@bittery/ui": "workspace:*",
 		"@tailwindcss/vite": "^4.1.8",
 		"@tanstack/react-form": "^1.23.5",

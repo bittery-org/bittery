@@ -1,5 +1,5 @@
 import { detectCardBrand, maskCardNumber } from "@bittery/shared/credit-card";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import {
 	Badge,
@@ -14,9 +14,10 @@ import {
 	Skeleton,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { Key, Search, Smartphone, Star, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 import { Favicon } from "./favicon";
 
 interface ItemListProps {
@@ -45,9 +46,8 @@ export function ItemList({
 	onItemSelect,
 	selectedItemId,
 }: ItemListProps) {
-	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 
 	const [searchQuery, setSearchQuery] = useState("");
 	const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
@@ -56,12 +56,10 @@ export function ItemList({
 	const toggleFavoriteMutation = useMutation({
 		mutationFn: (params: { itemId: string; favorite: boolean }) =>
 			trpcClient.vault.toggleFavorite.mutate(params),
-		onSuccess: () => {
+		onSuccess: (_data, variables) => {
 			toast.success("Favorite updated");
-			// Invalidate listItems to refresh the items
-			queryClient.invalidateQueries({
-				queryKey: trpc.vault.listItems.queryKey({ vaultId }),
-			});
+			// Invalidate item to refresh the items
+			invalidator.invalidateItem(variables.itemId, vaultId);
 		},
 		onError: (error: Error) => {
 			toast.error(error.message || "Failed to update favorite");

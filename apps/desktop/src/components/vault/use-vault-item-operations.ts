@@ -3,9 +3,9 @@ import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { toast } from "@bittery/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { trpc } from "../../lib/providers";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 
 export interface CreateItemInput {
 	vaultId: string;
@@ -36,7 +36,7 @@ export interface ToggleFavoriteInput {
  */
 export function useVaultItemOperations() {
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
 
 	const createItem = useMutation({
@@ -60,9 +60,7 @@ export function useVaultItemOperations() {
 			});
 		},
 		onSuccess: (_data, variable) => {
-			queryClient.invalidateQueries({
-				queryKey: trpc.vault.listItems.queryKey({ vaultId: variable.vaultId }),
-			});
+			invalidator.invalidateVaultList(variable.vaultId);
 			toast.success("Item created successfully");
 		},
 		onError: (error) => {
@@ -89,12 +87,7 @@ export function useVaultItemOperations() {
 			});
 		},
 		onSuccess: (_data, variables) => {
-			queryClient.invalidateQueries({
-				queryKey: trpc.vault.listItems.queryKey({ vaultId: variables.vaultId }),
-			});
-			queryClient.invalidateQueries({
-				queryKey: trpc.vault.getItem.queryKey({ itemId: variables.itemId }),
-			});
+			invalidator.invalidateItem(variables.itemId, variables.vaultId);
 			toast.success("Item updated successfully");
 		},
 		onError: (error) => {
@@ -107,9 +100,7 @@ export function useVaultItemOperations() {
 			return await trpcClient.vault.deleteItem.mutate({ itemId: input.itemId });
 		},
 		onSuccess: (_data, variables) => {
-			queryClient.invalidateQueries({
-				queryKey: trpc.vault.listItems.queryKey({ vaultId: variables.vaultId }),
-			});
+			invalidator.invalidateVaultList(variables.vaultId);
 			toast.success("Item moved to trash");
 			// Navigate back to vault
 			navigate({ to: "/vault/$id", params: { id: variables.vaultId } });
@@ -127,12 +118,7 @@ export function useVaultItemOperations() {
 			});
 		},
 		onSuccess: (_data, variables) => {
-			queryClient.invalidateQueries({
-				queryKey: trpc.vault.listItems.queryKey({ vaultId: variables.vaultId }),
-			});
-			queryClient.invalidateQueries({
-				queryKey: trpc.vault.getItem.queryKey({ itemId: variables.itemId }),
-			});
+			invalidator.invalidateItem(variables.itemId, variables.vaultId);
 			toast.success(
 				variables.favorite ? "Added to favorites" : "Removed from favorites",
 			);
@@ -148,9 +134,7 @@ export function useVaultItemOperations() {
 			throw new Error("Duplicate functionality not yet implemented");
 		},
 		onSuccess: (_data, variables) => {
-			queryClient.invalidateQueries({
-				queryKey: trpc.vault.listItems.queryKey({ vaultId: variables.vaultId }),
-			});
+			invalidator.invalidateVaultList(variables.vaultId);
 			toast.success("Item duplicated successfully");
 		},
 		onError: (error) => {

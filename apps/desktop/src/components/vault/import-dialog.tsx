@@ -13,11 +13,12 @@ import {
 	Progress,
 } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { AlertCircle, CheckCircle2, FileUp } from "lucide-react";
 import { useState } from "react";
 import type { ParsedImportItem } from "../../utils/import-parsers";
 import { parseImportFile } from "../../utils/import-parsers";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface ImportDialogProps {
 	vaultId: string;
@@ -31,7 +32,7 @@ export function ImportDialog({
 	onOpenChange,
 }: ImportDialogProps) {
 	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
+	const invalidator = useQueryInvalidator();
 
 	const [importStatus, setImportStatus] = useState<
 		"idle" | "parsing" | "encrypting" | "uploading" | "success" | "error"
@@ -154,14 +155,9 @@ export function ImportDialog({
 
 			return result;
 		},
-		onSuccess: () => {
+		onSuccess: async () => {
 			// Invalidate queries to refresh the item list
-			queryClient.invalidateQueries({
-				queryKey: [["vault", "listItems"]],
-			});
-			queryClient.invalidateQueries({
-				queryKey: [["vault", "get"]],
-			});
+			await invalidator.invalidateVaultList(vaultId);
 
 			// Auto-close dialog after a short delay
 			setTimeout(() => {
