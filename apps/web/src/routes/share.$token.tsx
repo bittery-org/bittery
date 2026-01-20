@@ -75,7 +75,9 @@ function ShareAccessPage() {
 	const [email, setEmail] = useState("");
 	const [verificationCode, setVerificationCode] = useState("");
 	const [emailSent, setEmailSent] = useState(false);
-	const [decryptedItem, setDecryptedItem] = useState<SharedItemData | null>(null);
+	const [decryptedItem, setDecryptedItem] = useState<SharedItemData | null>(
+		null,
+	);
 	const [decryptionError, setDecryptionError] = useState<string | null>(null);
 
 	// Get the decryption key from the URL fragment
@@ -226,7 +228,10 @@ function ShareAccessPage() {
 
 	// Link not valid
 	if (!linkInfo?.valid) {
-		const reason = "reason" in (linkInfo || {}) ? (linkInfo as { reason?: string })?.reason : undefined;
+		const reason =
+			"reason" in (linkInfo || {})
+				? (linkInfo as { reason?: string })?.reason
+				: undefined;
 
 		return (
 			<div className="flex min-h-screen w-full items-center justify-center bg-muted/30 p-4">
@@ -556,7 +561,9 @@ function SharedItemDisplay({ item }: { item: SharedItemData }) {
 						<Button
 							size="icon"
 							variant="outline"
-							onClick={() => handleCopy(item.cardholderName!, "Cardholder name")}
+							onClick={() =>
+								handleCopy(item.cardholderName!, "Cardholder name")
+							}
 						>
 							<Copy className="h-4 w-4" />
 						</Button>

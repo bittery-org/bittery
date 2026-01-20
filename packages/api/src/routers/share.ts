@@ -1,12 +1,12 @@
 import { db } from "@bittery/db";
 import {
 	EXPIRATION_OPTIONS,
+	type ExpirationOption,
 	shareAccessLog,
 	shareEmailVerification,
 	shareLink,
 	shareLinkAllowedEmail,
 	shareLinkRateLimit,
-	type ExpirationOption,
 } from "@bittery/db/schema/sharing";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
@@ -266,7 +266,10 @@ export const shareRouter = router({
 			// Verify user has access
 			const userVaultKey = await db.query.vaultKey.findFirst({
 				where: (vk, { and, eq }) =>
-					and(eq(vk.vaultId, link.item.vaultId), eq(vk.userId, ctx.session.userId)),
+					and(
+						eq(vk.vaultId, link.item.vaultId),
+						eq(vk.userId, ctx.session.userId),
+					),
 			});
 
 			if (!userVaultKey) {
@@ -319,7 +322,10 @@ export const shareRouter = router({
 			// Verify user has access and appropriate permissions
 			const userVaultKey = await db.query.vaultKey.findFirst({
 				where: (vk, { and, eq }) =>
-					and(eq(vk.vaultId, link.item.vaultId), eq(vk.userId, ctx.session.userId)),
+					and(
+						eq(vk.vaultId, link.item.vaultId),
+						eq(vk.userId, ctx.session.userId),
+					),
 			});
 
 			if (!userVaultKey) {
@@ -379,12 +385,15 @@ export const shareRouter = router({
 			// Verify user has access
 			const userVaultKey = await db.query.vaultKey.findFirst({
 				where: (vk, { and, eq }) =>
-					and(eq(vk.vaultId, link.item.vaultId), eq(vk.userId, ctx.session.userId)),
+					and(
+						eq(vk.vaultId, link.item.vaultId),
+						eq(vk.userId, ctx.session.userId),
+					),
 			});
 
 			if (
 				!userVaultKey ||
-				(userVaultKey.role === "read-only") ||
+				userVaultKey.role === "read-only" ||
 				(userVaultKey.role === "member" &&
 					link.createdById !== ctx.session.userId)
 			) {
@@ -461,7 +470,10 @@ export const shareRouter = router({
 			// Verify user has access
 			const userVaultKey = await db.query.vaultKey.findFirst({
 				where: (vk, { and, eq }) =>
-					and(eq(vk.vaultId, link.item.vaultId), eq(vk.userId, ctx.session.userId)),
+					and(
+						eq(vk.vaultId, link.item.vaultId),
+						eq(vk.userId, ctx.session.userId),
+					),
 			});
 
 			if (!userVaultKey) {
@@ -632,9 +644,7 @@ export const shareRouter = router({
 
 			// TODO: Send email with verification code
 			// For now, return success (in production, use an email service)
-			console.log(
-				`[SHARE] Verification code for ${normalizedEmail}: ${code}`,
-			);
+			console.log(`[SHARE] Verification code for ${normalizedEmail}: ${code}`);
 
 			return {
 				success: true,
@@ -707,8 +717,8 @@ export const shareRouter = router({
 
 			if (!verification) {
 				// Check for brute force (increment attempts)
-				const anyVerification =
-					await db.query.shareEmailVerification.findFirst({
+				const anyVerification = await db.query.shareEmailVerification.findFirst(
+					{
 						where: (v, { and, eq, gt, isNull }) =>
 							and(
 								eq(v.shareLinkId, link.id),
@@ -716,7 +726,8 @@ export const shareRouter = router({
 								gt(v.expiresAt, now),
 								isNull(v.usedAt),
 							),
-					});
+					},
+				);
 
 				if (anyVerification) {
 					await db
@@ -917,7 +928,7 @@ async function checkRateLimit(
 	const now = new Date();
 	const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-	let rateLimit = await db.query.shareLinkRateLimit.findFirst({
+	const rateLimit = await db.query.shareLinkRateLimit.findFirst({
 		where: (rl, { eq }) => eq(rl.userId, userId),
 	});
 

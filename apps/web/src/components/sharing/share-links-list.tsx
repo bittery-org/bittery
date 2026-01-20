@@ -106,7 +106,9 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 		const baseUrl = window.location.origin;
 		const shareUrl = `${baseUrl}/share/${token}`;
 		await navigator.clipboard.writeText(shareUrl);
-		toast.success("Link copied (note: you'll need the original link with decryption key)");
+		toast.success(
+			"Link copied (note: you'll need the original link with decryption key)",
+		);
 	};
 
 	const formatDate = (date: string) => {
@@ -149,7 +151,9 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 			<Card>
 				<CardContent className="flex flex-col items-center justify-center py-8">
 					<Link className="mb-4 h-8 w-8 text-muted-foreground" />
-					<p className="text-muted-foreground text-sm">No share links created yet</p>
+					<p className="text-muted-foreground text-sm">
+						No share links created yet
+					</p>
 				</CardContent>
 			</Card>
 		);
@@ -306,7 +310,9 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 															{log.success ? "Success" : "Failed"}
 														</Badge>
 														{log.accessedByEmail && (
-															<span className="text-sm">{log.accessedByEmail}</span>
+															<span className="text-sm">
+																{log.accessedByEmail}
+															</span>
 														)}
 													</div>
 													<p className="text-muted-foreground text-xs">
@@ -331,7 +337,9 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 						) : (
 							<div className="py-8 text-center">
 								<Eye className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
-								<p className="text-muted-foreground text-sm">No access logs yet</p>
+								<p className="text-muted-foreground text-sm">
+									No access logs yet
+								</p>
 							</div>
 						)}
 					</ScrollArea>
@@ -348,14 +356,16 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 						<AlertDialogTitle>Revoke Share Link?</AlertDialogTitle>
 						<AlertDialogDescription>
 							This will immediately disable the share link. Anyone with the link
-							will no longer be able to access the shared item. This action cannot
-							be undone.
+							will no longer be able to access the shared item. This action
+							cannot be undone.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
 						<AlertDialogCancel>Cancel</AlertDialogCancel>
 						<AlertDialogAction
-							onClick={() => linkToRevoke && revokeMutation.mutate(linkToRevoke)}
+							onClick={() =>
+								linkToRevoke && revokeMutation.mutate(linkToRevoke)
+							}
 							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 						>
 							{revokeMutation.isPending ? (

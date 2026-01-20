@@ -148,7 +148,9 @@ export default function SignUpForm({
 				const result = await signupMutation.mutateAsync({
 					email,
 					name: value.name,
-					...(isInvitationSignup ? {} : { organizationName: value.organizationName }),
+					...(isInvitationSignup
+						? {}
+						: { organizationName: value.organizationName }),
 					secretKeyHint: getSecretKeyHint(secretKey),
 					srpSalt: salt,
 					srpVerifier: verifier,
@@ -383,7 +385,9 @@ Generated: ${new Date().toLocaleString()}
 									<div className="space-y-1">
 										<p className="font-medium text-sm">
 											You've been invited to join{" "}
-											<span className="text-primary">{invitation.teamName}</span>
+											<span className="text-primary">
+												{invitation.teamName}
+											</span>
 										</p>
 										<div className="flex items-center gap-2 text-muted-foreground text-xs">
 											<span>Invited by {invitation.invitedByName}</span>
@@ -427,7 +431,11 @@ Generated: ${new Date().toLocaleString()}
 											name={field.name}
 											type="email"
 											placeholder="name@example.com"
-											value={isInvitationSignup ? invitation.email : field.state.value}
+											value={
+												isInvitationSignup
+													? invitation.email
+													: field.state.value
+											}
 											onBlur={field.handleBlur}
 											onChange={(e) => field.handleChange(e.target.value)}
 											required

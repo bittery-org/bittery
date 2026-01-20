@@ -20,7 +20,7 @@ export function ShareHistoryDialog({
 }: ShareHistoryDialogProps) {
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+			<DialogContent className="flex max-h-[80vh] max-w-2xl flex-col overflow-hidden">
 				<DialogHeader>
 					<DialogTitle>Share History</DialogTitle>
 					<DialogDescription>

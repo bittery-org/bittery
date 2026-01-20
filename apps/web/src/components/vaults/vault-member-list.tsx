@@ -1,3 +1,11 @@
+import { performKeyRotation } from "@bittery/crypto/key-rotation";
+import {
+	getDecryptedVaultKey,
+	getMasterUnlockKey,
+	getStoredSessionData,
+	getVaultKeys,
+	storeVaultKeys,
+} from "@bittery/crypto/session-storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	AlertDialog,
@@ -27,7 +35,8 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Trash2 } from "lucide-react";
+import { Loader2, Trash2 } from "lucide-react";
+import { useState } from "react";
 
 interface VaultMember {
 	userId: string;
@@ -50,6 +59,8 @@ export function VaultMemberList({
 	const trpcClient = useTRPCClient();
 	const queryClient = useQueryClient();
 	const canManage = userRole === "owner" || userRole === "admin";
+	const [isRotating, setIsRotating] = useState(false);
+	const [rotatingUserId, setRotatingUserId] = useState<string | null>(null);
 
 	const updateRoleMutation = useMutation({
 		mutationFn: (input: {
@@ -66,18 +77,6 @@ export function VaultMemberList({
 		},
 	});
 
-	const removeMutation = useMutation({
-		mutationFn: (input: { vaultId: string; userId: string }) =>
-			trpcClient.vault.members.remove.mutate(input),
-		onSuccess: () => {
-			toast.success("Member removed");
-			queryClient.invalidateQueries({ queryKey: ["vault"] });
-		},
-		onError: (error: Error) => {
-			toast.error(error.message);
-		},
-	});
-
 	const handleRoleChange = (
 		userId: string,
 		newRole: "admin" | "member" | "read-only",
@@ -85,8 +84,104 @@ export function VaultMemberList({
 		updateRoleMutation.mutate({ vaultId, userId, role: newRole });
 	};
 
-	const handleRemove = (userId: string) => {
-		removeMutation.mutate({ vaultId, userId });
+	/**
+	 * Handle member removal with key rotation
+	 * This performs the following steps:
+	 * 1. Get the current decrypted vault key and Master Unlock Key
+	 * 2. Fetch rotation data (remaining members' public keys and all items)
+	 * 3. Perform key rotation (generate new key, re-encrypt items, encrypt new key for members)
+	 *    - Current user's key is encrypted with MUK (AES-GCM)
+	 *    - Other members' keys are encrypted with RSA
+	 * 4. Submit to server which updates all the encrypted data
+	 */
+	const handleRemove = async (userId: string) => {
+		setIsRotating(true);
+		setRotatingUserId(userId);
+
+		try {
+			// Step 1: Get the current decrypted vault key and Master Unlock Key
+			const currentVaultKey = await getDecryptedVaultKey(vaultId);
+			if (!currentVaultKey) {
+				throw new Error("Could not decrypt vault key. Please log in again.");
+			}
+
+			const masterUnlockKey = await getMasterUnlockKey();
+			if (!masterUnlockKey) {
+				throw new Error("Master Unlock Key not available. Please log in again.");
+			}
+
+			const sessionData = getStoredSessionData();
+			if (!sessionData) {
+				throw new Error("Session data not available. Please log in again.");
+			}
+			const currentUserId = sessionData.userId;
+
+			// Step 2: Get rotation data from server
+			const rotationData = await trpcClient.vault.members.getRotationData.query(
+				{
+					vaultId,
+					excludeUserId: userId,
+				},
+			);
+
+			// Step 3: Perform key rotation on client side
+			const rotationResult = await performKeyRotation(
+				currentVaultKey,
+				rotationData.members.map((m) => ({
+					userId: m.userId,
+					publicKey: m.publicKey,
+				})),
+				rotationData.items,
+				currentUserId,
+				masterUnlockKey,
+			);
+
+			// Step 4: Submit to server
+			const result = await trpcClient.vault.members.remove.mutate({
+				vaultId,
+				userId,
+				keyRotation: {
+					memberKeys: rotationResult.memberEncryptedKeys,
+					reEncryptedItems: rotationResult.reEncryptedItems,
+				},
+			});
+
+			// Step 5: Update local session storage with new vault key
+			// Find and update the vault key in session storage
+			const vaultKeys = getVaultKeys();
+			if (vaultKeys) {
+				const updatedVaultKeys = vaultKeys.map((vk) => {
+					if (vk.vaultId === vaultId) {
+						// Find the current user's new encrypted key from the rotation result
+						const myNewKey = rotationResult.memberEncryptedKeys.find((mk) => {
+							// We need to find our own key - get current user from members list
+							const currentMember = rotationData.members.find(
+								(m) => m.userId === mk.userId,
+							);
+							return currentMember !== undefined;
+						});
+						if (myNewKey) {
+							return { ...vk, encryptedVaultKey: myNewKey.encryptedVaultKey };
+						}
+					}
+					return vk;
+				});
+				storeVaultKeys(updatedVaultKeys);
+			}
+
+			toast.success(
+				`Member removed and vault key rotated (${result.keyRotation?.itemsReEncrypted ?? 0} items re-encrypted)`,
+			);
+			queryClient.invalidateQueries({ queryKey: ["vault"] });
+		} catch (error) {
+			console.error("Key rotation failed:", error);
+			toast.error(
+				error instanceof Error ? error.message : "Failed to remove member",
+			);
+		} finally {
+			setIsRotating(false);
+			setRotatingUserId(null);
+		}
 	};
 
 	const getInitials = (name: string) =>
@@ -178,8 +273,16 @@ export function VaultMemberList({
 									!(userRole === "admin" && member.role === "admin") && (
 										<AlertDialog>
 											<AlertDialogTrigger asChild>
-												<Button variant="ghost" size="icon">
-													<Trash2 className="h-4 w-4 text-destructive" />
+												<Button
+													variant="ghost"
+													size="icon"
+													disabled={isRotating}
+												>
+													{rotatingUserId === member.userId ? (
+														<Loader2 className="h-4 w-4 animate-spin" />
+													) : (
+														<Trash2 className="h-4 w-4 text-destructive" />
+													)}
 												</Button>
 											</AlertDialogTrigger>
 											<AlertDialogContent>
@@ -189,14 +292,30 @@ export function VaultMemberList({
 														Are you sure you want to remove {member.name} from
 														this vault? They will lose access to all items in
 														this vault.
+														<br />
+														<br />
+														<span className="text-muted-foreground text-xs">
+															Note: This will rotate the vault encryption key
+															and re-encrypt all items for security.
+														</span>
 													</AlertDialogDescription>
 												</AlertDialogHeader>
 												<AlertDialogFooter>
-													<AlertDialogCancel>Cancel</AlertDialogCancel>
+													<AlertDialogCancel disabled={isRotating}>
+														Cancel
+													</AlertDialogCancel>
 													<AlertDialogAction
 														onClick={() => handleRemove(member.userId)}
+														disabled={isRotating}
 													>
-														Remove
+														{isRotating ? (
+															<>
+																<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+																Rotating keys...
+															</>
+														) : (
+															"Remove"
+														)}
 													</AlertDialogAction>
 												</AlertDialogFooter>
 											</AlertDialogContent>

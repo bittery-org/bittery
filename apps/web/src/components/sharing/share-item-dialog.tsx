@@ -131,7 +131,8 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 				accessMode,
 				isOneTimeUse,
 				expiresIn,
-				allowedEmails: accessMode === "email-restricted" ? allowedEmails : undefined,
+				allowedEmails:
+					accessMode === "email-restricted" ? allowedEmails : undefined,
 				encryptedItemData: encryptedData.ciphertext,
 				encryptionIv: encryptedData.iv,
 				encryptedShareKey: shareKeyEncrypted.ciphertext,
@@ -209,7 +210,10 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 
 	return (
 		<>
-			<Dialog open={open} onOpenChange={(isOpen) => isOpen ? setOpen(true) : handleClose()}>
+			<Dialog
+				open={open}
+				onOpenChange={(isOpen) => (isOpen ? setOpen(true) : handleClose())}
+			>
 				<DialogTrigger asChild>
 					<Button size="sm" variant="outline">
 						<Share2 className="mr-2 h-4 w-4" />
@@ -234,7 +238,10 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 								</div>
 								<p className="mt-2 text-muted-foreground text-xs">
 									This link will expire based on your settings. Anyone with this
-									link {accessMode === "email-restricted" ? "and a verified email " : ""}
+									link{" "}
+									{accessMode === "email-restricted"
+										? "and a verified email "
+										: ""}
 									can view this item.
 								</p>
 							</div>
@@ -300,7 +307,11 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 											onChange={(e) => setEmailInput(e.target.value)}
 											onKeyDown={(e) => e.key === "Enter" && handleAddEmail()}
 										/>
-										<Button type="button" onClick={handleAddEmail} variant="secondary">
+										<Button
+											type="button"
+											onClick={handleAddEmail}
+											variant="secondary"
+										>
 											Add
 										</Button>
 									</div>
@@ -332,7 +343,9 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 								<Label>Link expires in</Label>
 								<Select
 									value={expiresIn}
-									onValueChange={(value: ExpirationOption) => setExpiresIn(value)}
+									onValueChange={(value: ExpirationOption) =>
+										setExpiresIn(value)
+									}
 								>
 									<SelectTrigger>
 										<SelectValue />
@@ -352,7 +365,9 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 								<Checkbox
 									id="one-time"
 									checked={isOneTimeUse}
-									onCheckedChange={(checked) => setIsOneTimeUse(checked === true)}
+									onCheckedChange={(checked) =>
+										setIsOneTimeUse(checked === true)
+									}
 								/>
 								<Label htmlFor="one-time" className="cursor-pointer">
 									One-time use (link becomes invalid after first access)
@@ -367,7 +382,8 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 									onClick={handleCreateLink}
 									disabled={
 										createShareMutation.isPending ||
-										(accessMode === "email-restricted" && allowedEmails.length === 0)
+										(accessMode === "email-restricted" &&
+											allowedEmails.length === 0)
 									}
 								>
 									{createShareMutation.isPending ? (
@@ -397,14 +413,19 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 							Share Sensitive Item?
 						</AlertDialogTitle>
 						<AlertDialogDescription>
-							You are about to share "{item.title}". This will create a link that
-							allows others to view this item's contents.
-							<br /><br />
+							You are about to share "{item.title}". This will create a link
+							that allows others to view this item's contents.
+							<br />
+							<br />
 							<strong>Security reminders:</strong>
 							<ul className="mt-2 list-inside list-disc">
 								<li>The link will contain encrypted data</li>
-								<li>Anyone with the link can access the item until it expires</li>
-								<li>Consider using email-restricted access for sensitive items</li>
+								<li>
+									Anyone with the link can access the item until it expires
+								</li>
+								<li>
+									Consider using email-restricted access for sensitive items
+								</li>
 							</ul>
 						</AlertDialogDescription>
 					</AlertDialogHeader>

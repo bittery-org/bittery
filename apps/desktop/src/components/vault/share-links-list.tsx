@@ -1,5 +1,5 @@
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -366,7 +366,9 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 					<AlertDialogFooter>
 						<AlertDialogCancel>Cancel</AlertDialogCancel>
 						<AlertDialogAction
-							onClick={() => linkToRevoke && revokeMutation.mutate(linkToRevoke)}
+							onClick={() =>
+								linkToRevoke && revokeMutation.mutate(linkToRevoke)
+							}
 							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 						>
 							{revokeMutation.isPending ? (

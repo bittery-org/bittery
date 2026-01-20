@@ -823,7 +823,8 @@ export async function decryptVaultKey(
 	}
 
 	// The private key is encrypted with AES-GCM using Master Unlock Key
-	const privateKeyEncryptedData: EncryptedData = JSON.parse(encryptedPrivateKey);
+	const privateKeyEncryptedData: EncryptedData =
+		JSON.parse(encryptedPrivateKey);
 	const mukBase64 = arrayBufferToBase64(masterUnlockKey);
 	const privateKeyPEM = await decrypt(
 		privateKeyEncryptedData,

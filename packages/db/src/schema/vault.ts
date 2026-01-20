@@ -2,6 +2,7 @@ import { relations } from "drizzle-orm";
 import {
 	boolean,
 	index,
+	integer,
 	pgEnum,
 	pgTable,
 	text,
@@ -39,6 +40,8 @@ export const vault = pgTable("vault", {
 		.notNull()
 		.references(() => user.id, { onDelete: "cascade" }),
 	teamId: text("team_id"), // null for personal vaults
+	// Current key version (increments with each rotation)
+	keyVersion: integer("key_version").notNull().default(1),
 	createdAt: timestamp("created_at").defaultNow().notNull(),
 	updatedAt: timestamp("updated_at")
 		.defaultNow()
@@ -119,6 +122,49 @@ export const folder = pgTable(
 	(table) => [index("folder_vaultId_idx").on(table.vaultId)],
 );
 
+// Key rotation reason enum
+export const keyRotationReasonEnum = pgEnum("key_rotation_reason", [
+	"member_removed",
+	"scheduled",
+	"security_breach",
+	"manual",
+]);
+
+// Tracks vault key rotations for audit and history
+export const vaultKeyRotation = pgTable(
+	"vault_key_rotation",
+	{
+		id: text("id").primaryKey(),
+		vaultId: text("vault_id")
+			.notNull()
+			.references(() => vault.id, { onDelete: "cascade" }),
+		// Key version number (increments with each rotation)
+		keyVersion: integer("key_version").notNull().default(1),
+		// The reason for rotation
+		reason: keyRotationReasonEnum("reason").notNull(),
+		// User who initiated the rotation
+		initiatedById: text("initiated_by_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		// If rotation was due to member removal, store the removed user's ID
+		removedUserId: text("removed_user_id"),
+		// Number of items re-encrypted during this rotation
+		itemsReEncrypted: integer("items_re_encrypted").notNull().default(0),
+		// Number of members whose keys were updated
+		membersUpdated: integer("members_updated").notNull().default(0),
+		// Status of the rotation
+		status: text("status").notNull().default("completed"), // "in_progress", "completed", "failed"
+		// Error message if rotation failed
+		errorMessage: text("error_message"),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+		completedAt: timestamp("completed_at"),
+	},
+	(table) => [
+		index("vault_key_rotation_vaultId_idx").on(table.vaultId),
+		index("vault_key_rotation_initiatedById_idx").on(table.initiatedById),
+	],
+);
+
 // Relations
 export const vaultRelations = relations(vault, ({ one, many }) => ({
 	createdBy: one(user, {
@@ -128,6 +174,7 @@ export const vaultRelations = relations(vault, ({ one, many }) => ({
 	vaultKeys: many(vaultKey),
 	items: many(item),
 	folders: many(folder),
+	keyRotations: many(vaultKeyRotation),
 }));
 
 export const vaultKeyRelations = relations(vaultKey, ({ one }) => ({
@@ -158,3 +205,17 @@ export const folderRelations = relations(folder, ({ one }) => ({
 		references: [folder.id],
 	}),
 }));
+
+export const vaultKeyRotationRelations = relations(
+	vaultKeyRotation,
+	({ one }) => ({
+		vault: one(vault, {
+			fields: [vaultKeyRotation.vaultId],
+			references: [vault.id],
+		}),
+		initiatedBy: one(user, {
+			fields: [vaultKeyRotation.initiatedById],
+			references: [user.id],
+		}),
+	}),
+);

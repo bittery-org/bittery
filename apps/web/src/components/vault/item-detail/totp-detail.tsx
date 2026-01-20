@@ -20,12 +20,7 @@ interface TotpDetailProps extends CategoryDetailProps<TotpDisplayData> {
 	item?: DecryptedItem;
 }
 
-export function TotpDetail({
-	data,
-	onEdit,
-	onDelete,
-	item,
-}: TotpDetailProps) {
+export function TotpDetail({ data, onEdit, onDelete, item }: TotpDetailProps) {
 	const [totpResult, setTotpResult] = useState<TotpResult | null>(null);
 	const [showSecret, setShowSecret] = useState(false);
 

@@ -18,7 +18,8 @@ import {
 	handleCopy,
 } from "./shared";
 
-interface CreditCardDetailProps extends CategoryDetailProps<CreditCardDisplayData> {
+interface CreditCardDetailProps
+	extends CategoryDetailProps<CreditCardDisplayData> {
 	item?: DecryptedItem;
 }
 

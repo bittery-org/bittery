@@ -290,7 +290,9 @@ export async function storeEncryptedPrivateKey(
  * Get encrypted private key from chrome.storage.session
  */
 export async function getEncryptedPrivateKey(): Promise<string | null> {
-	const result = await chrome.storage.session.get(ENCRYPTED_PRIVATE_KEY_STORAGE);
+	const result = await chrome.storage.session.get(
+		ENCRYPTED_PRIVATE_KEY_STORAGE,
+	);
 	return (result[ENCRYPTED_PRIVATE_KEY_STORAGE] as string | undefined) || null;
 }
 
@@ -377,7 +379,8 @@ export async function decryptVaultKey(
 	}
 
 	// The private key is encrypted with AES-GCM using Master Unlock Key
-	const privateKeyEncryptedData: EncryptedData = JSON.parse(encryptedPrivateKey);
+	const privateKeyEncryptedData: EncryptedData =
+		JSON.parse(encryptedPrivateKey);
 	const mukBase64 = arrayBufferToBase64(masterUnlockKey);
 	const privateKeyPEM = await decrypt(
 		privateKeyEncryptedData,

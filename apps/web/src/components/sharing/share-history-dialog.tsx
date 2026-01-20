@@ -16,7 +16,10 @@ interface ShareHistoryDialogProps {
 	trigger?: React.ReactNode;
 }
 
-export function ShareHistoryDialog({ itemId, trigger }: ShareHistoryDialogProps) {
+export function ShareHistoryDialog({
+	itemId,
+	trigger,
+}: ShareHistoryDialogProps) {
 	const [open, setOpen] = useState(false);
 
 	return (
@@ -29,7 +32,7 @@ export function ShareHistoryDialog({ itemId, trigger }: ShareHistoryDialogProps)
 					</Button>
 				)}
 			</DialogTrigger>
-			<DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+			<DialogContent className="flex max-h-[80vh] max-w-2xl flex-col overflow-hidden">
 				<DialogHeader>
 					<DialogTitle>Share History</DialogTitle>
 					<DialogDescription>

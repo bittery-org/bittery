@@ -1,6 +1,11 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: Its fine */
 import { db } from "@bittery/db";
-import { item, vault, vaultKey } from "@bittery/db/schema/vault";
+import {
+	item,
+	vault,
+	vaultKey,
+	vaultKeyRotation,
+} from "@bittery/db/schema/vault";
 import {
 	createPresignedUpload,
 	createVaultImageKey,
@@ -911,9 +916,36 @@ export const vaultRouter = router({
 
 		/**
 		 * Remove vault member (owner/admin only)
+		 * When removing a member, the client must provide re-encrypted data:
+		 * - New encrypted vault keys for all remaining members (using their RSA public keys)
+		 * - Re-encrypted items (using the new vault key)
+		 * This ensures the removed member can no longer decrypt vault contents.
 		 */
 		remove: protectedProcedure
-			.input(z.object({ vaultId: z.string(), userId: z.string() }))
+			.input(
+				z.object({
+					vaultId: z.string(),
+					userId: z.string(),
+					// Key rotation data - required to securely revoke access
+					keyRotation: z.object({
+						// New encrypted vault keys for remaining members
+						memberKeys: z.array(
+							z.object({
+								userId: z.string(),
+								encryptedVaultKey: z.string(),
+							}),
+						),
+						// Re-encrypted items with new vault key
+						reEncryptedItems: z.array(
+							z.object({
+								itemId: z.string(),
+								encryptedData: z.string(),
+								encryptionIv: z.string(),
+							}),
+						),
+					}),
+				}),
+			)
 			.mutation(async ({ ctx, input }) => {
 				// Check user has admin/owner access
 				const userVaultKey = await db.query.vaultKey.findFirst({
@@ -968,16 +1000,174 @@ export const vaultRouter = router({
 					});
 				}
 
-				await db
-					.delete(vaultKey)
-					.where(
-						and(
-							eq(vaultKey.vaultId, input.vaultId),
-							eq(vaultKey.userId, input.userId),
-						),
-					);
+				// Get current vault to get key version
+				const currentVault = await db.query.vault.findFirst({
+					where: (v, { eq }) => eq(v.id, input.vaultId),
+				});
 
-				return { success: true };
+				if (!currentVault) {
+					throw new TRPCError({
+						code: "NOT_FOUND",
+						message: "Vault not found",
+					});
+				}
+
+				const newKeyVersion = currentVault.keyVersion + 1;
+				const rotationId = nanoid();
+
+				// Create key rotation record
+				await db.insert(vaultKeyRotation).values({
+					id: rotationId,
+					vaultId: input.vaultId,
+					keyVersion: newKeyVersion,
+					reason: "member_removed",
+					initiatedById: ctx.session.userId,
+					removedUserId: input.userId,
+					itemsReEncrypted: input.keyRotation.reEncryptedItems.length,
+					membersUpdated: input.keyRotation.memberKeys.length,
+					status: "in_progress",
+				});
+
+				try {
+					// Delete the removed user's vault key
+					await db
+						.delete(vaultKey)
+						.where(
+							and(
+								eq(vaultKey.vaultId, input.vaultId),
+								eq(vaultKey.userId, input.userId),
+							),
+						);
+
+					// Update vault keys for all remaining members
+					for (const memberKey of input.keyRotation.memberKeys) {
+						await db
+							.update(vaultKey)
+							.set({ encryptedVaultKey: memberKey.encryptedVaultKey })
+							.where(
+								and(
+									eq(vaultKey.vaultId, input.vaultId),
+									eq(vaultKey.userId, memberKey.userId),
+								),
+							);
+					}
+
+					// Re-encrypt all items with new vault key
+					for (const reEncryptedItem of input.keyRotation.reEncryptedItems) {
+						await db
+							.update(item)
+							.set({
+								encryptedData: reEncryptedItem.encryptedData,
+								encryptionIv: reEncryptedItem.encryptionIv,
+								updatedAt: new Date(),
+							})
+							.where(eq(item.id, reEncryptedItem.itemId));
+					}
+
+					// Update vault key version
+					await db
+						.update(vault)
+						.set({
+							keyVersion: newKeyVersion,
+							updatedAt: new Date(),
+						})
+						.where(eq(vault.id, input.vaultId));
+
+					// Mark rotation as completed
+					await db
+						.update(vaultKeyRotation)
+						.set({
+							status: "completed",
+							completedAt: new Date(),
+						})
+						.where(eq(vaultKeyRotation.id, rotationId));
+
+					return {
+						success: true,
+						keyRotation: {
+							id: rotationId,
+							newKeyVersion,
+							itemsReEncrypted: input.keyRotation.reEncryptedItems.length,
+							membersUpdated: input.keyRotation.memberKeys.length,
+						},
+					};
+				} catch (error) {
+					// Mark rotation as failed
+					await db
+						.update(vaultKeyRotation)
+						.set({
+							status: "failed",
+							errorMessage:
+								error instanceof Error ? error.message : "Unknown error",
+						})
+						.where(eq(vaultKeyRotation.id, rotationId));
+
+					throw new TRPCError({
+						code: "INTERNAL_SERVER_ERROR",
+						message: "Key rotation failed. Please try again.",
+					});
+				}
+			}),
+
+		/**
+		 * Get data needed for key rotation
+		 * Returns all remaining members' public keys and all items in the vault
+		 * Called before removing a member to prepare for key rotation
+		 */
+		getRotationData: protectedProcedure
+			.input(
+				z.object({
+					vaultId: z.string(),
+					excludeUserId: z.string(), // The user being removed
+				}),
+			)
+			.query(async ({ ctx, input }) => {
+				// Check user has admin/owner access
+				const userVaultKey = await db.query.vaultKey.findFirst({
+					where: (vk, { and, eq }) =>
+						and(
+							eq(vk.vaultId, input.vaultId),
+							eq(vk.userId, ctx.session.userId),
+						),
+				});
+
+				if (!userVaultKey || !["owner", "admin"].includes(userVaultKey.role)) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Only vault owner or admin can perform key rotation",
+					});
+				}
+
+				// Get all members except the one being removed
+				const members = await db.query.vaultKey.findMany({
+					where: (vk, { and, eq, ne }) =>
+						and(
+							eq(vk.vaultId, input.vaultId),
+							ne(vk.userId, input.excludeUserId),
+						),
+					with: {
+						user: true,
+					},
+				});
+
+				// Get all items in the vault
+				const items = await db.query.item.findMany({
+					where: (i, { eq }) => eq(i.vaultId, input.vaultId),
+				});
+
+				return {
+					members: members.map((m) => ({
+						userId: m.userId,
+						publicKey: m.user.publicKey,
+						role: m.role,
+					})),
+					items: items.map((i) => ({
+						id: i.id,
+						encryptedData: i.encryptedData,
+						encryptionIv: i.encryptionIv,
+						encryptionAlgorithm: i.encryptionAlgorithm,
+					})),
+				};
 			}),
 
 		/**

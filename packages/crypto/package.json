@@ -3,6 +3,7 @@
 	"exports": {
 		"./encryption": "./src/encryption.ts",
 		"./key-derivation": "./src/key-derivation.ts",
+		"./key-rotation": "./src/key-rotation.ts",
 		"./rsa": "./src/rsa.ts",
 		"./secret-key": "./src/secret-key.ts",
 		"./server-url": "./src/server-url.ts",

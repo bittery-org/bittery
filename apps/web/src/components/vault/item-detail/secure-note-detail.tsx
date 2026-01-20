@@ -4,7 +4,8 @@ import { ShareHistoryDialog, ShareItemDialog } from "@/components/sharing";
 import { Favicon } from "../favicon";
 import type { CategoryDetailProps, SecureNoteDisplayData } from "./shared";
 
-interface SecureNoteDetailProps extends CategoryDetailProps<SecureNoteDisplayData> {
+interface SecureNoteDetailProps
+	extends CategoryDetailProps<SecureNoteDisplayData> {
 	item?: DecryptedItem;
 }
 

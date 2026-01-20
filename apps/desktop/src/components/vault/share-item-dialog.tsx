@@ -1,7 +1,4 @@
-import {
-	encrypt,
-	generateEncryptionKey,
-} from "@bittery/crypto/encryption";
+import { encrypt, generateEncryptionKey } from "@bittery/crypto/encryption";
 import { arrayBufferToBase64 } from "@bittery/crypto/key-derivation";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";
