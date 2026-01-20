@@ -95,7 +95,10 @@ function RenameDeviceDialog({
 			toast.error("Please enter a device name");
 			return;
 		}
-		renameMutation.mutate({ sessionId: session.id, deviceName: deviceName.trim() });
+		renameMutation.mutate({
+			sessionId: session.id,
+			deviceName: deviceName.trim(),
+		});
 	};
 
 	return (
@@ -170,7 +173,11 @@ function RevokeDeviceDialog({
 	return (
 		<AlertDialog open={open} onOpenChange={setOpen}>
 			<AlertDialogTrigger asChild>
-				<Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive">
+				<Button
+					variant="ghost"
+					size="icon"
+					className="h-8 w-8 text-destructive hover:text-destructive"
+				>
 					<LogOut className="h-4 w-4" />
 				</Button>
 			</AlertDialogTrigger>
@@ -178,10 +185,9 @@ function RevokeDeviceDialog({
 				<AlertDialogHeader>
 					<AlertDialogTitle>Revoke Device Access</AlertDialogTitle>
 					<AlertDialogDescription>
-						Are you sure you want to revoke access for{" "}
-						<strong>{title}</strong>? This will log out that device
-						immediately. The device will need to sign in again to access your
-						account.
+						Are you sure you want to revoke access for <strong>{title}</strong>?
+						This will log out that device immediately. The device will need to
+						sign in again to access your account.
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>
@@ -214,17 +220,17 @@ function DeviceCard({
 				<div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
 					{getPlatformIcon(session.platform)}
 				</div>
-				<div className="flex-1 min-w-0">
+				<div className="min-w-0 flex-1">
 					<div className="flex items-center gap-2">
-						<span className="font-medium truncate">{title}</span>
+						<span className="truncate font-medium">{title}</span>
 						{session.isCurrentSession && (
 							<Badge variant="secondary" className="text-xs">
 								This device
 							</Badge>
 						)}
 					</div>
-					<p className="text-sm text-muted-foreground truncate">{subtitle}</p>
-					<div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+					<p className="truncate text-muted-foreground text-sm">{subtitle}</p>
+					<div className="mt-1 flex items-center gap-2 text-muted-foreground text-xs">
 						<span>Last active: {formatLastActive(session.lastActiveAt)}</span>
 						{session.ipAddress && (
 							<>
@@ -279,7 +285,7 @@ export function DeviceManagement() {
 
 	if (devicesQuery.error) {
 		return (
-			<div className="text-center text-muted-foreground py-8">
+			<div className="py-8 text-center text-muted-foreground">
 				Failed to load devices. Please try again.
 			</div>
 		);
@@ -289,7 +295,7 @@ export function DeviceManagement() {
 
 	if (devices.length === 0) {
 		return (
-			<div className="text-center text-muted-foreground py-8">
+			<div className="py-8 text-center text-muted-foreground">
 				No active sessions found.
 			</div>
 		);
@@ -299,13 +305,19 @@ export function DeviceManagement() {
 	const sortedDevices = [...devices].sort((a, b) => {
 		if (a.isCurrentSession) return -1;
 		if (b.isCurrentSession) return 1;
-		return new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime();
+		return (
+			new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime()
+		);
 	});
 
 	return (
 		<div className="space-y-3">
 			{sortedDevices.map((session) => (
-				<DeviceCard key={session.id} session={session} onUpdate={handleUpdate} />
+				<DeviceCard
+					key={session.id}
+					session={session}
+					onUpdate={handleUpdate}
+				/>
 			))}
 		</div>
 	);

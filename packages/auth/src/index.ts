@@ -270,7 +270,10 @@ export async function getUserById(userId: string) {
  * Create a user session and return JWT token
  * Used after signup or when creating a session without SRP
  */
-export async function createUserSession(userId: string, deviceInfo?: DeviceInfo) {
+export async function createUserSession(
+	userId: string,
+	deviceInfo?: DeviceInfo,
+) {
 	const [existingUser] = await db
 		.select()
 		.from(user)
@@ -374,7 +377,10 @@ export async function getUserSessions(userId: string) {
 /**
  * Revoke a specific session (must belong to user)
  */
-export async function revokeSession(sessionId: string, userId: string): Promise<void> {
+export async function revokeSession(
+	sessionId: string,
+	userId: string,
+): Promise<void> {
 	await db
 		.delete(session)
 		.where(and(eq(session.id, sessionId), eq(session.userId, userId)));

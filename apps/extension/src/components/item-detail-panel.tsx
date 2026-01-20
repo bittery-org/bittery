@@ -4,16 +4,10 @@ import type {
 	TotpAlgorithm,
 	TotpDigits,
 } from "@bittery/shared/types";
-import {
-	Button,
-	Card,
-	Input,
-	Label,
-	copyWithToast,
-	toast,
-} from "@bittery/ui";
+import { Button, Card, copyWithToast, Input, Label, toast } from "@bittery/ui";
 
 const handleCopy = copyWithToast;
+
 import { Copy, ExternalLink, Eye, EyeOff, Loader2, QrCode } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Favicon } from "./favicon";

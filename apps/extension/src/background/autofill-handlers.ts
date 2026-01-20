@@ -63,7 +63,8 @@ export async function handleGetAutofillItems(payload: {
 
 	// Filter by hostname and only include login items
 	const filtered = items.filter(
-		(item) => item?.category === "login" && hostnameMatches(item?.url, hostname)
+		(item) =>
+			item?.category === "login" && hostnameMatches(item?.url, hostname),
 	);
 
 	return { success: true, items: filtered };
@@ -79,8 +80,22 @@ export async function handleGetAutofillCreditCards(): Promise<MessageResponse> {
 
 	// Filter to only credit card items
 	const creditCards = items.filter(
-		(item) => item?.category === "credit-card" && item?.cardNumber
+		(item) => item?.category === "credit-card" && item?.cardNumber,
 	);
 
 	return { success: true, items: creditCards };
+}
+
+/**
+ * Handle GET_AUTOFILL_IDENTITIES message - Get all identity items
+ */
+export async function handleGetAutofillIdentities(): Promise<MessageResponse> {
+	updateActivity();
+
+	const items = await decryptVaultItems();
+
+	// Filter to only identity items
+	const identities = items.filter((item) => item?.category === "identity");
+
+	return { success: true, items: identities };
 }

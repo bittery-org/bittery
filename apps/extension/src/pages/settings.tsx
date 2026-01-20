@@ -15,7 +15,12 @@ import {
 } from "@bittery/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Clock, LogOut, Settings as SettingsIcon } from "lucide-react";
+import {
+	ArrowLeft,
+	Clock,
+	LogOut,
+	Settings as SettingsIcon,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
 // Auto-lock timeout options (in milliseconds)

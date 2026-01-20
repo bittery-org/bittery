@@ -21,6 +21,7 @@ export default defineConfig({
 			input: {
 				popup: "popup.html",
 				autofillIframe: "autofill-iframe.html",
+				identityAutofillIframe: "identity-autofill-iframe.html",
 			},
 		},
 	},

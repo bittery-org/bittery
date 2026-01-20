@@ -1,60 +1,26 @@
 import "./index.css";
-import { detectCardBrand, maskCardNumber } from "@bittery/shared/credit-card";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { Card } from "@bittery/ui";
-import { CreditCard, Lock } from "lucide-react";
+import { Lock, User } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 
-// Card brand icons (simple SVG representations)
-const CardBrandIcon = ({ brand }: { brand: string }) => {
-	const getBrandColor = () => {
-		switch (brand) {
-			case "visa":
-				return "#1A1F71";
-			case "mastercard":
-				return "#EB001B";
-			case "amex":
-				return "#006FCF";
-			case "discover":
-				return "#FF6600";
-			default:
-				return "#6B7280";
-		}
-	};
-
-	return (
-		<div
-			className="flex h-8 w-10 items-center justify-center rounded border bg-white"
-			style={{ borderColor: getBrandColor() }}
-		>
-			<span
-				className="font-bold text-[8px] uppercase"
-				style={{ color: getBrandColor() }}
-			>
-				{brand === "unknown" ? "Card" : brand.substring(0, 4)}
-			</span>
-		</div>
-	);
-};
-
-function CreditCardAutofillIframe() {
+function IdentityAutofillIframe() {
 	const [items, setItems] = useState<DecryptedItem[]>([]);
 	const [selectedIndex, setSelectedIndex] = useState(0);
-	const [_fieldType, setFieldType] = useState<string>("cardNumber");
+	const [_fieldType, setFieldType] = useState<string>("firstName");
 	const [needsUnlock, setNeedsUnlock] = useState(false);
 
 	useEffect(() => {
 		// Listen for items from parent
 		const handleMessage = (event: MessageEvent) => {
-			if (event.data.type === "CREDIT_CARD_ITEMS") {
-				// Filter to only credit card items
-				const creditCards = (event.data.items || []).filter(
-					(item: DecryptedItem) =>
-						item.category === "credit-card" && item.cardNumber,
+			if (event.data.type === "IDENTITY_ITEMS") {
+				// Filter to only identity items
+				const identities = (event.data.items || []).filter(
+					(item: DecryptedItem) => item.category === "identity",
 				);
-				setItems(creditCards);
-				setFieldType(event.data.fieldType || "cardNumber");
+				setItems(identities);
+				setFieldType(event.data.fieldType || "firstName");
 				setSelectedIndex(0);
 				setNeedsUnlock(false);
 			} else if (event.data.type === "NEEDS_UNLOCK") {
@@ -66,7 +32,7 @@ function CreditCardAutofillIframe() {
 		window.addEventListener("message", handleMessage);
 
 		// Signal that iframe is ready
-		window.parent.postMessage({ type: "CC_IFRAME_READY" }, "*");
+		window.parent.postMessage({ type: "IDENTITY_IFRAME_READY" }, "*");
 
 		return () => window.removeEventListener("message", handleMessage);
 	}, []);
@@ -75,7 +41,7 @@ function CreditCardAutofillIframe() {
 		// Send selection to parent
 		window.parent.postMessage(
 			{
-				type: "CREDIT_CARD_SELECT",
+				type: "IDENTITY_SELECT",
 				item,
 			},
 			"*",
@@ -109,6 +75,22 @@ function CreditCardAutofillIframe() {
 		return () => window.removeEventListener("keydown", handleKeyDown);
 	}, [items, selectedIndex, handleSelect]);
 
+	// Format name display
+	const formatName = (item: DecryptedItem) => {
+		const parts = [item.firstName, item.middleName, item.lastName].filter(
+			Boolean,
+		);
+		return parts.length > 0 ? parts.join(" ") : item.title;
+	};
+
+	// Format address preview
+	const formatAddressPreview = (item: DecryptedItem) => {
+		const address = item.addresses?.[0];
+		if (!address) return null;
+		const parts = [address.city, address.state].filter(Boolean);
+		return parts.length > 0 ? parts.join(", ") : null;
+	};
+
 	if (needsUnlock) {
 		return (
 			<Card className="mt-1 p-2.5">
@@ -117,7 +99,7 @@ function CreditCardAutofillIframe() {
 					<span className="font-medium">Unlock Required</span>
 				</div>
 				<p className="mt-1.5 text-muted-foreground text-xs">
-					Click the Bittery icon to unlock and use credit card autofill
+					Click the Bittery icon to unlock and use identity autofill
 				</p>
 			</Card>
 		);
@@ -127,8 +109,8 @@ function CreditCardAutofillIframe() {
 		return (
 			<Card className="mt-1 p-2.5">
 				<div className="flex items-center gap-2 text-muted-foreground text-sm">
-					<CreditCard size={14} />
-					<span>No saved credit cards</span>
+					<User size={14} />
+					<span>No saved identities</span>
 				</div>
 			</Card>
 		);
@@ -138,12 +120,8 @@ function CreditCardAutofillIframe() {
 		<Card className="mt-1 max-h-[280px] overflow-y-auto p-0.5">
 			<div className="space-y-0.5">
 				{items.map((item, index) => {
-					const brand = item.cardNumber
-						? detectCardBrand(item.cardNumber)
-						: "unknown";
-					const maskedNumber = item.cardNumber
-						? maskCardNumber(item.cardNumber)
-						: "••••";
+					const displayName = formatName(item);
+					const addressPreview = formatAddressPreview(item);
 
 					return (
 						<button
@@ -158,22 +136,19 @@ function CreditCardAutofillIframe() {
 							onMouseEnter={() => setSelectedIndex(index)}
 						>
 							<div className="flex items-center gap-2.5">
-								<CardBrandIcon brand={brand} />
+								<div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
+									<User size={16} />
+								</div>
 								<div className="min-w-0 flex-1">
-									<p className="truncate font-medium text-sm">{item.title}</p>
-									<div className="mt-0.5 flex items-center gap-2">
-										<span className="font-mono text-muted-foreground text-xs">
-											{maskedNumber}
-										</span>
-										{item.expiryDate && (
-											<span className="text-muted-foreground text-xs">
-												Exp: {item.expiryDate}
-											</span>
-										)}
-									</div>
-									{item.cardholderName && (
+									<p className="truncate font-medium text-sm">{displayName}</p>
+									{item.email && (
 										<p className="mt-0.5 truncate text-muted-foreground text-xs">
-											{item.cardholderName}
+											{item.email}
+										</p>
+									)}
+									{addressPreview && (
+										<p className="truncate text-muted-foreground text-xs">
+											{addressPreview}
 										</p>
 									)}
 								</div>
@@ -196,7 +171,7 @@ const root = document.getElementById("root");
 if (root) {
 	ReactDOM.createRoot(root).render(
 		<React.StrictMode>
-			<CreditCardAutofillIframe />
+			<IdentityAutofillIframe />
 		</React.StrictMode>,
 	);
 }

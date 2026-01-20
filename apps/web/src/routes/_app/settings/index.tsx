@@ -140,7 +140,7 @@ function SettingsPage() {
 
 					<Separator />
 
-					<div className="flex items-center gap-2 mb-2">
+					<div className="mb-2 flex items-center gap-2">
 						<Clock className="h-4 w-4 text-muted-foreground" />
 						<span className="font-medium text-sm">Auto-Lock</span>
 					</div>
@@ -169,14 +169,14 @@ function SettingsPage() {
 						<Download className="h-5 w-5" />
 						Data Management
 					</CardTitle>
-					<CardDescription>
-						Export and backup your vault data
-					</CardDescription>
+					<CardDescription>Export and backup your vault data</CardDescription>
 				</CardHeader>
 				<CardContent>
 					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 						<div className="space-y-1">
-							<span className="font-medium text-sm">Export Encrypted Backup</span>
+							<span className="font-medium text-sm">
+								Export Encrypted Backup
+							</span>
 							<p className="text-muted-foreground text-sm">
 								Download all your vault data in an encrypted JSON file protected
 								by a password of your choice.

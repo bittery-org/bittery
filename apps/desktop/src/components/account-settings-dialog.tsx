@@ -101,10 +101,7 @@ export function AccountSettingsDialog({
 
 	// Mutation to save settings
 	const saveMutation = useMutation({
-		mutationFn: async ({
-			url,
-			timeout,
-		}: { url: string; timeout: string }) => {
+		mutationFn: async ({ url, timeout }: { url: string; timeout: string }) => {
 			// Save web app URL
 			if (url.trim()) {
 				// Normalize the URL
@@ -149,7 +146,8 @@ export function AccountSettingsDialog({
 			setWebAppUrl(webAppUrlQuery.data || "");
 			setAutoLockTimeout(
 				String(
-					autoLockTimeoutQuery.data ?? tauriStorage.DEFAULT_AUTO_LOCK_TIMEOUT_MS,
+					autoLockTimeoutQuery.data ??
+						tauriStorage.DEFAULT_AUTO_LOCK_TIMEOUT_MS,
 				),
 			);
 			setIsDirty(false);

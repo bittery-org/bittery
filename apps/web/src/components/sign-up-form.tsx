@@ -22,7 +22,15 @@ import {
 } from "@bittery/crypto/session-storage";
 import { generateSRPRegistration } from "@bittery/crypto/srp-client";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
-import { Badge, Button, Card, copyWithToast, Input, Label, toast } from "@bittery/ui";
+import {
+	Badge,
+	Button,
+	Card,
+	copyWithToast,
+	Input,
+	Label,
+	toast,
+} from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";

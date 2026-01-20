@@ -10,7 +10,25 @@
 
 export interface DetectedField {
 	element: HTMLInputElement;
-	type: "username" | "email" | "password" | "name" | "phone" | "otp" | "cardNumber" | "cardExpiry" | "cardCvv" | "cardName";
+	type:
+		| "username"
+		| "email"
+		| "password"
+		| "name"
+		| "phone"
+		| "otp"
+		| "cardNumber"
+		| "cardExpiry"
+		| "cardCvv"
+		| "cardName"
+		| "firstName"
+		| "lastName"
+		| "street"
+		| "city"
+		| "state"
+		| "postalCode"
+		| "country"
+		| "dateOfBirth";
 	confidence: number; // 0-1 confidence score
 	form?: HTMLFormElement;
 	shadowRoot?: ShadowRoot;
@@ -53,13 +71,7 @@ const FIELD_PATTERNS = {
 			/your.*name/i,
 		],
 		autocompleteValues: ["username", "user", "nickname"],
-		labelPatterns: [
-			/user/i,
-			/login/i,
-			/account/i,
-			/sign.*in/i,
-			/identifier/i,
-		],
+		labelPatterns: [/user/i, /login/i, /account/i, /sign.*in/i, /identifier/i],
 		ariaLabelPatterns: [/user/i, /login/i, /account/i, /sign.*in/i],
 	},
 	email: {
@@ -76,31 +88,22 @@ const FIELD_PATTERNS = {
 		namePatterns: [/pass/i, /pwd/i, /secret/i, /credential/i],
 		idPatterns: [/pass/i, /pwd/i, /secret/i, /credential/i],
 		placeholderPatterns: [/pass/i, /pwd/i, /secret/i],
-		autocompleteValues: [
-			"current-password",
-			"new-password",
-			"password",
-			"off",
-		],
+		autocompleteValues: ["current-password", "new-password", "password", "off"],
 		labelPatterns: [/password/i, /passwort/i, /contraseña/i, /mot.*passe/i],
-		ariaLabelPatterns: [
-			/password/i,
-			/passwort/i,
-			/contraseña/i,
-			/mot.*passe/i,
-		],
+		ariaLabelPatterns: [/password/i, /passwort/i, /contraseña/i, /mot.*passe/i],
 	},
 	otp: {
-		namePatterns: [/otp/i, /code/i, /verify/i, /token/i, /pin/i, /2fa/i, /mfa/i],
-		idPatterns: [/otp/i, /code/i, /verify/i, /token/i, /pin/i, /2fa/i, /mfa/i],
-		placeholderPatterns: [
-			/code/i,
+		namePatterns: [
 			/otp/i,
+			/code/i,
 			/verify/i,
-			/digit/i,
+			/token/i,
 			/pin/i,
 			/2fa/i,
+			/mfa/i,
 		],
+		idPatterns: [/otp/i, /code/i, /verify/i, /token/i, /pin/i, /2fa/i, /mfa/i],
+		placeholderPatterns: [/code/i, /otp/i, /verify/i, /digit/i, /pin/i, /2fa/i],
 		autocompleteValues: ["one-time-code"],
 		labelPatterns: [
 			/verification/i,
@@ -197,13 +200,7 @@ const FIELD_PATTERNS = {
 			/card.*exp/i,
 			/mm.*yy/i,
 		],
-		idPatterns: [
-			/exp/i,
-			/expir/i,
-			/valid/i,
-			/cc.*exp/i,
-			/card.*exp/i,
-		],
+		idPatterns: [/exp/i, /expir/i, /valid/i, /cc.*exp/i, /card.*exp/i],
 		placeholderPatterns: [
 			/mm\s*\/\s*yy/i,
 			/mm\/yy/i,
@@ -296,6 +293,202 @@ const FIELD_PATTERNS = {
 		],
 		ariaLabelPatterns: [/name.*on.*card/i, /cardholder/i],
 	},
+	// Identity field patterns
+	firstName: {
+		namePatterns: [
+			/^first/i,
+			/firstname/i,
+			/first.*name/i,
+			/fname/i,
+			/given.*name/i,
+			/forename/i,
+		],
+		idPatterns: [
+			/^first/i,
+			/firstname/i,
+			/first.*name/i,
+			/fname/i,
+			/given.*name/i,
+		],
+		placeholderPatterns: [/first.*name/i, /given.*name/i, /forename/i],
+		autocompleteValues: ["given-name"],
+		labelPatterns: [
+			/first.*name/i,
+			/given.*name/i,
+			/forename/i,
+			/prénom/i,
+			/vorname/i,
+			/nombre/i,
+		],
+		ariaLabelPatterns: [/first.*name/i, /given.*name/i],
+	},
+	lastName: {
+		namePatterns: [
+			/^last/i,
+			/lastname/i,
+			/last.*name/i,
+			/lname/i,
+			/surname/i,
+			/family.*name/i,
+		],
+		idPatterns: [
+			/^last/i,
+			/lastname/i,
+			/last.*name/i,
+			/lname/i,
+			/surname/i,
+			/family.*name/i,
+		],
+		placeholderPatterns: [/last.*name/i, /surname/i, /family.*name/i],
+		autocompleteValues: ["family-name"],
+		labelPatterns: [
+			/last.*name/i,
+			/surname/i,
+			/family.*name/i,
+			/nom.*famille/i,
+			/nachname/i,
+			/apellido/i,
+		],
+		ariaLabelPatterns: [/last.*name/i, /surname/i, /family.*name/i],
+	},
+	street: {
+		namePatterns: [
+			/street/i,
+			/address/i,
+			/addr/i,
+			/address.*1/i,
+			/address.*line/i,
+			/street.*addr/i,
+			/shipping.*address/i,
+			/billing.*address/i,
+		],
+		idPatterns: [
+			/street/i,
+			/address/i,
+			/addr/i,
+			/address.*1/i,
+			/address.*line/i,
+		],
+		placeholderPatterns: [
+			/street/i,
+			/address/i,
+			/123.*main/i,
+			/enter.*address/i,
+		],
+		autocompleteValues: [
+			"street-address",
+			"address-line1",
+			"address-line2",
+			"shipping street-address",
+			"billing street-address",
+		],
+		labelPatterns: [
+			/street/i,
+			/address/i,
+			/addr/i,
+			/adresse/i,
+			/dirección/i,
+			/住所/i,
+		],
+		ariaLabelPatterns: [/street/i, /address/i],
+	},
+	city: {
+		namePatterns: [/city/i, /town/i, /locality/i, /suburb/i, /municipality/i],
+		idPatterns: [/city/i, /town/i, /locality/i, /suburb/i],
+		placeholderPatterns: [/city/i, /town/i, /enter.*city/i],
+		autocompleteValues: ["address-level2", "locality"],
+		labelPatterns: [
+			/city/i,
+			/town/i,
+			/locality/i,
+			/ville/i,
+			/stadt/i,
+			/ciudad/i,
+			/市/i,
+		],
+		ariaLabelPatterns: [/city/i, /town/i, /locality/i],
+	},
+	state: {
+		namePatterns: [
+			/state/i,
+			/province/i,
+			/region/i,
+			/prefecture/i,
+			/county/i,
+			/territory/i,
+		],
+		idPatterns: [/state/i, /province/i, /region/i, /prefecture/i],
+		placeholderPatterns: [/state/i, /province/i, /region/i, /select.*state/i],
+		autocompleteValues: ["address-level1", "region"],
+		labelPatterns: [
+			/state/i,
+			/province/i,
+			/region/i,
+			/prefecture/i,
+			/county/i,
+			/état/i,
+			/bundesland/i,
+			/provincia/i,
+			/県/i,
+		],
+		ariaLabelPatterns: [/state/i, /province/i, /region/i],
+	},
+	postalCode: {
+		namePatterns: [/zip/i, /postal/i, /postcode/i, /post.*code/i, /zip.*code/i],
+		idPatterns: [/zip/i, /postal/i, /postcode/i, /post.*code/i],
+		placeholderPatterns: [/zip/i, /postal/i, /postcode/i, /\d{5}/],
+		autocompleteValues: ["postal-code"],
+		labelPatterns: [
+			/zip/i,
+			/postal.*code/i,
+			/postcode/i,
+			/post.*code/i,
+			/code.*postal/i,
+			/plz/i,
+			/código.*postal/i,
+			/郵便番号/i,
+		],
+		ariaLabelPatterns: [/zip/i, /postal/i, /postcode/i],
+		maxLengthValues: [5, 6, 7, 9, 10], // Common postal code lengths
+	},
+	country: {
+		namePatterns: [/country/i, /nation/i, /country.*code/i],
+		idPatterns: [/country/i, /nation/i],
+		placeholderPatterns: [/country/i, /select.*country/i],
+		autocompleteValues: ["country", "country-name"],
+		labelPatterns: [/country/i, /nation/i, /pays/i, /land/i, /país/i, /国/i],
+		ariaLabelPatterns: [/country/i, /nation/i],
+	},
+	dateOfBirth: {
+		typeValues: ["date"],
+		namePatterns: [
+			/dob/i,
+			/birth/i,
+			/birthday/i,
+			/date.*birth/i,
+			/bday/i,
+			/born/i,
+		],
+		idPatterns: [/dob/i, /birth/i, /birthday/i, /date.*birth/i, /bday/i],
+		placeholderPatterns: [
+			/birth/i,
+			/birthday/i,
+			/mm\/dd\/yyyy/i,
+			/dd\/mm\/yyyy/i,
+		],
+		autocompleteValues: ["bday", "birthday"],
+		labelPatterns: [
+			/date.*birth/i,
+			/birth.*date/i,
+			/birthday/i,
+			/dob/i,
+			/date.*naissance/i,
+			/geburtsdatum/i,
+			/fecha.*nacimiento/i,
+			/生年月日/i,
+		],
+		ariaLabelPatterns: [/birth/i, /birthday/i, /dob/i],
+	},
 };
 
 // Multi-step form indicators
@@ -382,7 +575,10 @@ export function getAllInputs(root: Document | ShadowRoot = document): {
 /**
  * Find associated label for an input element
  */
-function findLabel(input: HTMLInputElement, root: Document | ShadowRoot = document): string {
+function findLabel(
+	input: HTMLInputElement,
+	root: Document | ShadowRoot = document,
+): string {
 	// Check for explicit label via for attribute
 	if (input.id) {
 		const label = root.querySelector(`label[for="${input.id}"]`);
@@ -530,7 +726,11 @@ function calculateFieldTypeScore(
 	}
 
 	// Credit card field specific checks
-	if (fieldType === "cardNumber" || fieldType === "cardCvv" || fieldType === "cardExpiry") {
+	if (
+		fieldType === "cardNumber" ||
+		fieldType === "cardCvv" ||
+		fieldType === "cardExpiry"
+	) {
 		const cardPatterns = FIELD_PATTERNS[fieldType];
 
 		// Check maxlength for card fields
@@ -555,7 +755,10 @@ function calculateFieldTypeScore(
 		if (fieldType === "cardNumber") {
 			maxScore += 5;
 			// Check if field has a pattern for card numbers
-			if (input.pattern && (/\d{4}/.test(input.pattern) || /[0-9]/.test(input.pattern))) {
+			if (
+				input.pattern &&
+				(/\d{4}/.test(input.pattern) || /[0-9]/.test(input.pattern))
+			) {
 				score += 5;
 			}
 		}
@@ -657,13 +860,54 @@ export function detectFieldType(
 /**
  * Credit card field types for grouping
  */
-export type CreditCardFieldType = "cardNumber" | "cardExpiry" | "cardCvv" | "cardName";
+export type CreditCardFieldType =
+	| "cardNumber"
+	| "cardExpiry"
+	| "cardCvv"
+	| "cardName";
+
+/**
+ * Identity field types for grouping
+ */
+export type IdentityFieldType =
+	| "firstName"
+	| "lastName"
+	| "email"
+	| "phone"
+	| "street"
+	| "city"
+	| "state"
+	| "postalCode"
+	| "country"
+	| "dateOfBirth";
 
 /**
  * Check if a field type is a credit card field
  */
-export function isCreditCardFieldType(type: DetectedField["type"]): type is CreditCardFieldType {
+export function isCreditCardFieldType(
+	type: DetectedField["type"],
+): type is CreditCardFieldType {
 	return ["cardNumber", "cardExpiry", "cardCvv", "cardName"].includes(type);
+}
+
+/**
+ * Check if a field type is an identity field
+ */
+export function isIdentityFieldType(
+	type: DetectedField["type"],
+): type is IdentityFieldType {
+	return [
+		"firstName",
+		"lastName",
+		"email",
+		"phone",
+		"street",
+		"city",
+		"state",
+		"postalCode",
+		"country",
+		"dateOfBirth",
+	].includes(type);
 }
 
 /**
@@ -675,6 +919,24 @@ export interface DetectedCreditCardForm {
 	expiryField?: DetectedField;
 	cvvField?: DetectedField;
 	nameField?: DetectedField;
+	shadowRoot?: ShadowRoot;
+}
+
+/**
+ * Detected identity form with all relevant fields
+ */
+export interface DetectedIdentityForm {
+	form?: HTMLFormElement;
+	firstNameField?: DetectedField;
+	lastNameField?: DetectedField;
+	emailField?: DetectedField;
+	phoneField?: DetectedField;
+	streetField?: DetectedField;
+	cityField?: DetectedField;
+	stateField?: DetectedField;
+	postalCodeField?: DetectedField;
+	countryField?: DetectedField;
+	dateOfBirthField?: DetectedField;
 	shadowRoot?: ShadowRoot;
 }
 
@@ -715,22 +977,34 @@ export function groupCreditCardFieldsByForm(
 		// Assign field to appropriate slot based on type
 		switch (field.type) {
 			case "cardNumber":
-				if (!formGroup.cardNumberField || field.confidence > formGroup.cardNumberField.confidence) {
+				if (
+					!formGroup.cardNumberField ||
+					field.confidence > formGroup.cardNumberField.confidence
+				) {
 					formGroup.cardNumberField = field;
 				}
 				break;
 			case "cardExpiry":
-				if (!formGroup.expiryField || field.confidence > formGroup.expiryField.confidence) {
+				if (
+					!formGroup.expiryField ||
+					field.confidence > formGroup.expiryField.confidence
+				) {
 					formGroup.expiryField = field;
 				}
 				break;
 			case "cardCvv":
-				if (!formGroup.cvvField || field.confidence > formGroup.cvvField.confidence) {
+				if (
+					!formGroup.cvvField ||
+					field.confidence > formGroup.cvvField.confidence
+				) {
 					formGroup.cvvField = field;
 				}
 				break;
 			case "cardName":
-				if (!formGroup.nameField || field.confidence > formGroup.nameField.confidence) {
+				if (
+					!formGroup.nameField ||
+					field.confidence > formGroup.nameField.confidence
+				) {
 					formGroup.nameField = field;
 				}
 				break;
@@ -739,6 +1013,178 @@ export function groupCreditCardFieldsByForm(
 
 	// Return only forms that have at least a card number field
 	return Array.from(formMap.values()).filter((form) => form.cardNumberField);
+}
+
+/**
+ * Detect identity fields in the document
+ */
+export function detectIdentityFields(
+	root: Document | ShadowRoot = document,
+): DetectedField[] {
+	const allFields = detectAllFields(root);
+
+	// Filter to identity field types
+	return allFields.filter((f) => isIdentityFieldType(f.type));
+}
+
+/**
+ * Group identity fields by form
+ */
+export function groupIdentityFieldsByForm(
+	fields: DetectedField[],
+): DetectedIdentityForm[] {
+	const formMap = new Map<HTMLFormElement | null, DetectedIdentityForm>();
+
+	for (const field of fields) {
+		if (!isIdentityFieldType(field.type)) continue;
+
+		const form = field.form || null;
+		let formGroup = formMap.get(form);
+
+		if (!formGroup) {
+			formGroup = {
+				form: form || undefined,
+				shadowRoot: field.shadowRoot,
+			};
+			formMap.set(form, formGroup);
+		}
+
+		// Assign field to appropriate slot based on type
+		switch (field.type) {
+			case "firstName":
+				if (
+					!formGroup.firstNameField ||
+					field.confidence > formGroup.firstNameField.confidence
+				) {
+					formGroup.firstNameField = field;
+				}
+				break;
+			case "lastName":
+				if (
+					!formGroup.lastNameField ||
+					field.confidence > formGroup.lastNameField.confidence
+				) {
+					formGroup.lastNameField = field;
+				}
+				break;
+			case "email":
+				if (
+					!formGroup.emailField ||
+					field.confidence > formGroup.emailField.confidence
+				) {
+					formGroup.emailField = field;
+				}
+				break;
+			case "phone":
+				if (
+					!formGroup.phoneField ||
+					field.confidence > formGroup.phoneField.confidence
+				) {
+					formGroup.phoneField = field;
+				}
+				break;
+			case "street":
+				if (
+					!formGroup.streetField ||
+					field.confidence > formGroup.streetField.confidence
+				) {
+					formGroup.streetField = field;
+				}
+				break;
+			case "city":
+				if (
+					!formGroup.cityField ||
+					field.confidence > formGroup.cityField.confidence
+				) {
+					formGroup.cityField = field;
+				}
+				break;
+			case "state":
+				if (
+					!formGroup.stateField ||
+					field.confidence > formGroup.stateField.confidence
+				) {
+					formGroup.stateField = field;
+				}
+				break;
+			case "postalCode":
+				if (
+					!formGroup.postalCodeField ||
+					field.confidence > formGroup.postalCodeField.confidence
+				) {
+					formGroup.postalCodeField = field;
+				}
+				break;
+			case "country":
+				if (
+					!formGroup.countryField ||
+					field.confidence > formGroup.countryField.confidence
+				) {
+					formGroup.countryField = field;
+				}
+				break;
+			case "dateOfBirth":
+				if (
+					!formGroup.dateOfBirthField ||
+					field.confidence > formGroup.dateOfBirthField.confidence
+				) {
+					formGroup.dateOfBirthField = field;
+				}
+				break;
+		}
+	}
+
+	// Return forms that have at least one identity field (not just firstName/lastName, but also address fields)
+	return Array.from(formMap.values()).filter(
+		(form) =>
+			form.streetField ||
+			form.cityField ||
+			form.stateField ||
+			form.postalCodeField ||
+			form.countryField ||
+			(form.firstNameField && form.lastNameField),
+	);
+}
+
+/**
+ * Check if a form looks like an address/identity form
+ */
+export function isLikelyAddressForm(form: HTMLFormElement): boolean {
+	const identityFields = detectIdentityFields(document);
+	const fieldsInForm = identityFields.filter((f) => f.form === form);
+
+	// Must have address fields or name fields
+	const hasAddressFields = fieldsInForm.some(
+		(f) => f.type === "street" || f.type === "city" || f.type === "postalCode",
+	);
+	const hasNameFields = fieldsInForm.some(
+		(f) => f.type === "firstName" || f.type === "lastName",
+	);
+
+	if (!hasAddressFields && !hasNameFields) return false;
+
+	// Check form attributes for address indicators
+	const formAction = form.action?.toLowerCase() || "";
+	const formClass = form.className?.toLowerCase() || "";
+	const formId = form.id?.toLowerCase() || "";
+
+	const addressPatterns = [
+		/address/i,
+		/shipping/i,
+		/billing/i,
+		/delivery/i,
+		/checkout/i,
+		/registration/i,
+		/signup/i,
+		/profile/i,
+		/contact/i,
+	];
+
+	const hasAddressIndicator = addressPatterns.some(
+		(p) => p.test(formAction) || p.test(formClass) || p.test(formId),
+	);
+
+	return hasAddressFields || hasNameFields || hasAddressIndicator;
 }
 
 /**
@@ -861,10 +1307,15 @@ export function detectMultiStepForm(form: HTMLFormElement): {
 	if (form.dataset.step || form.dataset.steps || form.dataset.currentStep) {
 		result.isMultiStep = true;
 		const totalSteps =
-			parseInt(form.dataset.steps || form.dataset.totalSteps || "0", 10) ||
-			result.totalSteps;
+			Number.parseInt(
+				form.dataset.steps || form.dataset.totalSteps || "0",
+				10,
+			) || result.totalSteps;
 		const currentStep =
-			parseInt(form.dataset.step || form.dataset.currentStep || "1", 10) || 1;
+			Number.parseInt(
+				form.dataset.step || form.dataset.currentStep || "1",
+				10,
+			) || 1;
 		result.totalSteps = Math.max(result.totalSteps, totalSteps);
 		result.currentStep = currentStep;
 	}
@@ -901,10 +1352,7 @@ export function isFieldVisible(input: HTMLInputElement): boolean {
 	let parent = input.parentElement;
 	while (parent) {
 		const parentStyle = window.getComputedStyle(parent);
-		if (
-			parentStyle.display === "none" ||
-			parentStyle.visibility === "hidden"
-		) {
+		if (parentStyle.display === "none" || parentStyle.visibility === "hidden") {
 			return false;
 		}
 		parent = parent.parentElement;
@@ -1010,9 +1458,7 @@ export function groupFieldsByForm(
 /**
  * Find the best username/email and password pair in a form
  */
-export function findCredentialPair(
-	fields: DetectedField[],
-): {
+export function findCredentialPair(fields: DetectedField[]): {
 	usernameField?: DetectedField;
 	passwordField?: DetectedField;
 } {

@@ -22,7 +22,10 @@ export interface ExportedItem {
 	id: string;
 	category: ItemCategory;
 	favorite: boolean;
-	data: Omit<DecryptedItem, "id" | "vaultId" | "category" | "favorite" | "createdAt" | "updatedAt">;
+	data: Omit<
+		DecryptedItem,
+		"id" | "vaultId" | "category" | "favorite" | "createdAt" | "updatedAt"
+	>;
 	createdAt: string;
 	updatedAt: string;
 }

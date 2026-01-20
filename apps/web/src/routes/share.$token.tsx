@@ -561,9 +561,7 @@ function SharedItemDisplay({ item }: { item: SharedItemData }) {
 						<Button
 							size="icon"
 							variant="outline"
-							onClick={() =>
-								handleCopy(item.cardholderName, "Cardholder name")
-							}
+							onClick={() => handleCopy(item.cardholderName, "Cardholder name")}
 						>
 							<Copy className="h-4 w-4" />
 						</Button>

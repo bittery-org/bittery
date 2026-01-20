@@ -15,8 +15,9 @@ import {
 } from "./auth-handlers";
 import {
 	handleCheckAutofillAuth,
-	handleGetAutofillItems,
 	handleGetAutofillCreditCards,
+	handleGetAutofillIdentities,
+	handleGetAutofillItems,
 	handleUpdateAutofillTimestamp,
 } from "./autofill-handlers";
 import {
@@ -33,10 +34,7 @@ import {
 	handleCaptureTabScreenshot,
 	handleUpdateItemTotp,
 } from "./qr-scan-handlers";
-import {
-	handleAutoLockAlarm,
-	refreshAutoLockTimeout,
-} from "./session-manager";
+import { handleAutoLockAlarm, refreshAutoLockTimeout } from "./session-manager";
 import {
 	cleanupSync,
 	connect as connectSync,
@@ -203,6 +201,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 				case "GET_AUTOFILL_CREDIT_CARDS": {
 					const result = await handleGetAutofillCreditCards();
+					sendResponse(result);
+					break;
+				}
+
+				case "GET_AUTOFILL_IDENTITIES": {
+					const result = await handleGetAutofillIdentities();
 					sendResponse(result);
 					break;
 				}

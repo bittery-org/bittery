@@ -43,7 +43,12 @@ export default defineManifest({
 	},
 	web_accessible_resources: [
 		{
-			resources: ["autofill-iframe.html", "save-prompt-iframe.html", "credit-card-autofill-iframe.html"],
+			resources: [
+				"autofill-iframe.html",
+				"save-prompt-iframe.html",
+				"credit-card-autofill-iframe.html",
+				"identity-autofill-iframe.html",
+			],
 			matches: ["<all_urls>"],
 		},
 	],

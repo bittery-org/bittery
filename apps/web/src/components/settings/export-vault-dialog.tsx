@@ -1,13 +1,13 @@
-import { encryptExport } from "@bittery/crypto/export-encryption";
 import { decrypt } from "@bittery/crypto/encryption";
+import { encryptExport } from "@bittery/crypto/export-encryption";
 import { getDecryptedVaultKey } from "@bittery/crypto/session-storage";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import type {
 	EncryptedVaultExport,
 	ExportedItem,
 	ExportedVault,
 	VaultExportPayload,
 } from "@bittery/shared/export-types";
+import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
 	Dialog,
@@ -91,7 +91,9 @@ export function ExportVaultDialog({
 				setProgress(Math.round(((i + 0.3) / vaults.length) * 80));
 
 				// Get items for this vault using tRPC client directly
-				const items = await trpcClient.vault.listItems.query({ vaultId: vault.id });
+				const items = await trpcClient.vault.listItems.query({
+					vaultId: vault.id,
+				});
 
 				if (!items || items.length === 0) {
 					exportedVaults.push({
@@ -104,7 +106,9 @@ export function ExportVaultDialog({
 					continue;
 				}
 
-				setProgressText(`Decrypting ${items.length} items from ${vault.name}...`);
+				setProgressText(
+					`Decrypting ${items.length} items from ${vault.name}...`,
+				);
 				setProgress(Math.round(((i + 0.6) / vaults.length) * 80));
 
 				// Get vault key for decryption
@@ -172,7 +176,10 @@ export function ExportVaultDialog({
 			};
 
 			// Encrypt the payload
-			const encryptedData = await encryptExport(JSON.stringify(payload), password);
+			const encryptedData = await encryptExport(
+				JSON.stringify(payload),
+				password,
+			);
 
 			// Create the final export format
 			const exportFile: EncryptedVaultExport = {
@@ -246,7 +253,7 @@ export function ExportVaultDialog({
 					</DialogHeader>
 
 					{isExporting ? (
-						<div className="py-6 space-y-4">
+						<div className="space-y-4 py-6">
 							<div className="space-y-2">
 								<div className="flex justify-between text-sm">
 									<span className="text-muted-foreground">{progressText}</span>
@@ -259,7 +266,7 @@ export function ExportVaultDialog({
 						<div className="grid gap-4 py-4">
 							<div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
 								<div className="flex gap-2">
-									<ShieldCheck className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+									<ShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-600 dark:text-blue-400" />
 									<div className="text-blue-700 text-xs dark:text-blue-300">
 										<strong>End-to-end encrypted:</strong> Your data is
 										encrypted with your password before leaving this device.

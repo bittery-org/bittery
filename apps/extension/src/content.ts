@@ -6,20 +6,148 @@
 
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
+	type CreditCardFieldType,
+	createEnhancedObserver,
+	type DetectedCreditCardForm,
+	type DetectedIdentityForm,
 	detectCredentialFields,
 	detectCreditCardFields,
-	groupCreditCardFieldsByForm,
 	detectFieldType,
-	getAllInputs,
-	isFieldVisible,
+	detectIdentityFields,
 	detectMultiStepForm,
-	createEnhancedObserver,
+	getAllInputs,
+	groupCreditCardFieldsByForm,
+	groupIdentityFieldsByForm,
+	type IdentityFieldType,
+	isFieldVisible,
 	observeShadowRoots,
-	type DetectedCreditCardForm,
-	type CreditCardFieldType,
 } from "./lib/field-detection";
 
 console.log("Bittery content script loaded");
+
+// Track if we've already injected autofill blocker styles
+let autofillBlockerStylesInjected = false;
+
+/**
+ * Inject CSS to hide Chrome's autofill dropdown suggestions
+ */
+function injectAutofillBlockerStyles() {
+	if (autofillBlockerStylesInjected) return;
+	autofillBlockerStylesInjected = true;
+
+	const style = document.createElement("style");
+	style.textContent = `
+		/* Hide Chrome autofill suggestion popups */
+		input:-webkit-autofill,
+		input:-webkit-autofill:hover,
+		input:-webkit-autofill:focus,
+		input:-webkit-autofill:active {
+			-webkit-box-shadow: 0 0 0 30px white inset !important;
+			box-shadow: 0 0 0 30px white inset !important;
+		}
+
+		/* Target Bittery-detected fields specifically */
+		input[data-bittery-detected="true"]::-webkit-contacts-auto-fill-button,
+		input[data-bittery-detected="true"]::-webkit-credentials-auto-fill-button {
+			visibility: hidden;
+			display: none !important;
+			pointer-events: none;
+			height: 0;
+			width: 0;
+			margin: 0;
+		}
+	`;
+	document.head.appendChild(style);
+}
+
+/**
+ * Aggressively disable Chrome's autofill for a specific input
+ */
+function disableChromeAutofill(
+	input: HTMLInputElement,
+	fieldType: "username" | "email" | "password",
+) {
+	// Strategy 1: Set autocomplete to a value Chrome respects
+	// For password fields, "new-password" tells Chrome not to autofill existing passwords
+	// For other fields, use a random unique value that Chrome won't recognize
+	if (fieldType === "password") {
+		input.setAttribute("autocomplete", "new-password");
+	} else {
+		// Random autocomplete value that Chrome won't recognize
+		input.setAttribute(
+			"autocomplete",
+			`bittery-${Math.random().toString(36).slice(2)}`,
+		);
+	}
+
+	// Strategy 2: Set data attributes that some browsers respect
+	input.setAttribute("data-form-type", "other");
+	input.setAttribute("data-lpignore", "true"); // LastPass ignore
+	input.setAttribute("data-1p-ignore", "true"); // 1Password ignore
+
+	// Strategy 3: Remove name temporarily and restore it
+	// This can trick Chrome's autofill detection
+	const originalName = input.name;
+	if (originalName) {
+		input.removeAttribute("name");
+		// Restore after a brief delay so the form still works
+		setTimeout(() => {
+			input.name = originalName;
+		}, 100);
+	}
+}
+
+/**
+ * Aggressively disable Chrome's autofill for credit card fields
+ */
+function disableChromeAutofillForCreditCard(input: HTMLInputElement) {
+	// Use random autocomplete value to prevent Chrome's credit card autofill
+	input.setAttribute(
+		"autocomplete",
+		`bittery-cc-${Math.random().toString(36).slice(2)}`,
+	);
+	input.setAttribute("data-form-type", "other");
+	input.setAttribute("data-lpignore", "true");
+	input.setAttribute("data-1p-ignore", "true");
+
+	// Inject styles if not already done
+	injectAutofillBlockerStyles();
+
+	// Remove name temporarily
+	const originalName = input.name;
+	if (originalName) {
+		input.removeAttribute("name");
+		setTimeout(() => {
+			input.name = originalName;
+		}, 100);
+	}
+}
+
+/**
+ * Aggressively disable Chrome's autofill for identity/address fields
+ */
+function disableChromeAutofillForIdentity(input: HTMLInputElement) {
+	// Use random autocomplete value to prevent Chrome's address autofill
+	input.setAttribute(
+		"autocomplete",
+		`bittery-addr-${Math.random().toString(36).slice(2)}`,
+	);
+	input.setAttribute("data-form-type", "other");
+	input.setAttribute("data-lpignore", "true");
+	input.setAttribute("data-1p-ignore", "true");
+
+	// Inject styles if not already done
+	injectAutofillBlockerStyles();
+
+	// Remove name temporarily
+	const originalName = input.name;
+	if (originalName) {
+		input.removeAttribute("name");
+		setTimeout(() => {
+			input.name = originalName;
+		}, 100);
+	}
+}
 
 interface CredentialField {
 	input: HTMLInputElement;
@@ -42,10 +170,23 @@ interface CreditCardField {
 	formGroup?: DetectedCreditCardForm;
 }
 
+interface IdentityField {
+	input: HTMLInputElement;
+	type: IdentityFieldType;
+	overlay?: HTMLElement;
+	messageHandler?: (event: MessageEvent) => void;
+	readyTimeout?: NodeJS.Timeout;
+	confidence?: number;
+	shadowRoot?: ShadowRoot;
+	formGroup?: DetectedIdentityForm;
+}
+
 const detectedFields = new Map<HTMLInputElement, CredentialField>();
 const detectedCreditCardFields = new Map<HTMLInputElement, CreditCardField>();
+const detectedIdentityFields = new Map<HTMLInputElement, IdentityField>();
 let currentFocusedField: CredentialField | null = null;
 let currentFocusedCreditCardField: CreditCardField | null = null;
+let currentFocusedIdentityField: IdentityField | null = null;
 
 // Visual feedback styles for autofilled fields
 const AUTOFILL_HIGHLIGHT_STYLE = {
@@ -110,16 +251,20 @@ function detectPasswordFields(root: Document | ShadowRoot = document) {
 		};
 		detectedFields.set(input, field);
 
-		// Disable browser's native autofill
-		input.setAttribute("autocomplete", "off");
-		input.setAttribute("data-form-type", "other");
+		// Aggressively disable browser's native autofill
+		// Chrome often ignores autocomplete="off", so we use multiple strategies
+		disableChromeAutofill(input, field.type);
 		input.setAttribute("data-bittery-detected", "true");
 
 		// Also disable on the parent form if it exists
 		const form = input.closest("form");
 		if (form && !form.hasAttribute("data-bittery-processed")) {
 			form.setAttribute("autocomplete", "off");
+			form.setAttribute("data-lpignore", "true"); // LastPass ignore
 			form.setAttribute("data-bittery-processed", "true");
+
+			// Add CSS to hide Chrome's autofill dropdown UI
+			injectAutofillBlockerStyles();
 
 			// Detect multi-step form characteristics
 			const multiStepInfo = detectMultiStepForm(form);
@@ -156,6 +301,9 @@ function detectPasswordFields(root: Document | ShadowRoot = document) {
 
 	// Detect credit card fields
 	detectCreditCardFieldsOnPage(root);
+
+	// Detect identity/address fields
+	detectIdentityFieldsOnPage(root);
 }
 
 /**
@@ -175,11 +323,12 @@ function detectCreditCardFieldsOnPage(root: Document | ShadowRoot = document) {
 
 		// Find the form group this field belongs to
 		const formGroup = formGroups.find(
-			(g) => g.form === enhancedField.form ||
-			g.cardNumberField?.element === input ||
-			g.expiryField?.element === input ||
-			g.cvvField?.element === input ||
-			g.nameField?.element === input
+			(g) =>
+				g.form === enhancedField.form ||
+				g.cardNumberField?.element === input ||
+				g.expiryField?.element === input ||
+				g.cvvField?.element === input ||
+				g.nameField?.element === input,
 		);
 
 		const field: CreditCardField = {
@@ -191,9 +340,9 @@ function detectCreditCardFieldsOnPage(root: Document | ShadowRoot = document) {
 		};
 		detectedCreditCardFields.set(input, field);
 
-		// Disable browser's native autofill but allow our custom autofill
+		// Aggressively disable browser's native credit card autofill
+		disableChromeAutofillForCreditCard(input);
 		input.setAttribute("data-bittery-cc-detected", "true");
-		input.setAttribute("data-form-type", "other");
 
 		// Add focus/blur listeners for credit card autofill
 		input.addEventListener("focus", () => handleCreditCardFieldFocus(field));
@@ -201,6 +350,61 @@ function detectCreditCardFieldsOnPage(root: Document | ShadowRoot = document) {
 
 		console.log(
 			`Detected credit card ${field.type} field with confidence ${field.confidence?.toFixed(2)}:`,
+			input.name || input.id || "unnamed",
+		);
+	}
+}
+
+/**
+ * Enhanced identity field detection
+ */
+function detectIdentityFieldsOnPage(root: Document | ShadowRoot = document) {
+	const identityFields = detectIdentityFields(root);
+	const formGroups = groupIdentityFieldsByForm(identityFields);
+
+	for (const enhancedField of identityFields) {
+		const input = enhancedField.element;
+
+		if (detectedIdentityFields.has(input)) continue;
+
+		// Only process identity fields with sufficient confidence
+		if (enhancedField.confidence < 0.1) continue;
+
+		// Find the form group this field belongs to
+		const formGroup = formGroups.find(
+			(g) =>
+				g.form === enhancedField.form ||
+				g.firstNameField?.element === input ||
+				g.lastNameField?.element === input ||
+				g.emailField?.element === input ||
+				g.phoneField?.element === input ||
+				g.streetField?.element === input ||
+				g.cityField?.element === input ||
+				g.stateField?.element === input ||
+				g.postalCodeField?.element === input ||
+				g.countryField?.element === input ||
+				g.dateOfBirthField?.element === input,
+		);
+
+		const field: IdentityField = {
+			input,
+			type: enhancedField.type as IdentityFieldType,
+			confidence: enhancedField.confidence,
+			shadowRoot: enhancedField.shadowRoot,
+			formGroup,
+		};
+		detectedIdentityFields.set(input, field);
+
+		// Aggressively disable browser's native address/identity autofill
+		disableChromeAutofillForIdentity(input);
+		input.setAttribute("data-bittery-identity-detected", "true");
+
+		// Add focus/blur listeners for identity autofill
+		input.addEventListener("focus", () => handleIdentityFieldFocus(field));
+		input.addEventListener("blur", () => handleIdentityFieldBlur(field));
+
+		console.log(
+			`Detected identity ${field.type} field with confidence ${field.confidence?.toFixed(2)}:`,
 			input.name || input.id || "unnamed",
 		);
 	}
@@ -1320,7 +1524,10 @@ function handleFieldBlur(field: CredentialField) {
 // Handle credit card field focus
 async function handleCreditCardFieldFocus(field: CreditCardField) {
 	// Hide any existing overlays from other fields
-	if (currentFocusedCreditCardField && currentFocusedCreditCardField !== field) {
+	if (
+		currentFocusedCreditCardField &&
+		currentFocusedCreditCardField !== field
+	) {
 		hideCreditCardAutofillOverlay(currentFocusedCreditCardField);
 	}
 	// Also hide credential overlays
@@ -1368,7 +1575,10 @@ function handleCreditCardFieldBlur(field: CreditCardField) {
 }
 
 // Show credit card autofill overlay
-function showCreditCardAutofillOverlay(field: CreditCardField, items: DecryptedItem[]) {
+function showCreditCardAutofillOverlay(
+	field: CreditCardField,
+	items: DecryptedItem[],
+) {
 	// Remove existing overlay
 	if (field.overlay) {
 		field.overlay.remove();
@@ -1380,7 +1590,8 @@ function showCreditCardAutofillOverlay(field: CreditCardField, items: DecryptedI
 	shadowHost.style.zIndex = "2147483647"; // Max z-index
 	shadowHost.style.opacity = "0";
 	shadowHost.style.transform = "translateY(-8px)";
-	shadowHost.style.transition = "opacity 0.15s ease-out, transform 0.15s ease-out";
+	shadowHost.style.transition =
+		"opacity 0.15s ease-out, transform 0.15s ease-out";
 	document.body.appendChild(shadowHost);
 
 	// Attach shadow DOM
@@ -1437,7 +1648,9 @@ function showCreditCardAutofillOverlay(field: CreditCardField, items: DecryptedI
 
 	// Fallback: send items after a delay if ready signal not received
 	field.readyTimeout = setTimeout(() => {
-		console.log("Timeout waiting for credit card iframe ready, sending items anyway");
+		console.log(
+			"Timeout waiting for credit card iframe ready, sending items anyway",
+		);
 		iframe.contentWindow?.postMessage(
 			{
 				type: "CREDIT_CARD_ITEMS",
@@ -1541,22 +1754,38 @@ async function handleCreditCardAutofillSelect(
 	// Fill other related fields in the form group
 	if (formGroup) {
 		// Fill card number if not the current field
-		if (formGroup.cardNumberField && formGroup.cardNumberField.element !== field.input && item.cardNumber) {
+		if (
+			formGroup.cardNumberField &&
+			formGroup.cardNumberField.element !== field.input &&
+			item.cardNumber
+		) {
 			fillField(formGroup.cardNumberField.element, item.cardNumber);
 		}
 
 		// Fill expiry if not the current field
-		if (formGroup.expiryField && formGroup.expiryField.element !== field.input && item.expiryDate) {
+		if (
+			formGroup.expiryField &&
+			formGroup.expiryField.element !== field.input &&
+			item.expiryDate
+		) {
 			fillField(formGroup.expiryField.element, item.expiryDate);
 		}
 
 		// Fill CVV if not the current field
-		if (formGroup.cvvField && formGroup.cvvField.element !== field.input && item.cvv) {
+		if (
+			formGroup.cvvField &&
+			formGroup.cvvField.element !== field.input &&
+			item.cvv
+		) {
 			fillField(formGroup.cvvField.element, item.cvv);
 		}
 
 		// Fill name if not the current field
-		if (formGroup.nameField && formGroup.nameField.element !== field.input && item.cardholderName) {
+		if (
+			formGroup.nameField &&
+			formGroup.nameField.element !== field.input &&
+			item.cardholderName
+		) {
 			fillField(formGroup.nameField.element, item.cardholderName);
 		}
 	} else {
@@ -1605,7 +1834,8 @@ function showCreditCardUnlockPrompt(field: CreditCardField) {
 	shadowHost.style.zIndex = "2147483647";
 	shadowHost.style.opacity = "0";
 	shadowHost.style.transform = "translateY(-8px)";
-	shadowHost.style.transition = "opacity 0.15s ease-out, transform 0.15s ease-out";
+	shadowHost.style.transition =
+		"opacity 0.15s ease-out, transform 0.15s ease-out";
 	document.body.appendChild(shadowHost);
 
 	// Attach shadow DOM
@@ -1734,6 +1964,526 @@ function showCreditCardReauthPrompt(field: CreditCardField) {
 }
 
 // ==================== End Credit Card Autofill ====================
+
+// ==================== Identity Autofill ====================
+
+// Handle identity field focus
+async function handleIdentityFieldFocus(field: IdentityField) {
+	// Hide any existing overlays from other fields
+	if (currentFocusedIdentityField && currentFocusedIdentityField !== field) {
+		hideIdentityAutofillOverlay(currentFocusedIdentityField);
+	}
+	// Also hide credential overlays
+	if (currentFocusedField) {
+		hideAutofillOverlay(currentFocusedField);
+		currentFocusedField = null;
+	}
+	// Also hide credit card overlays
+	if (currentFocusedCreditCardField) {
+		hideCreditCardAutofillOverlay(currentFocusedCreditCardField);
+		currentFocusedCreditCardField = null;
+	}
+
+	currentFocusedIdentityField = field;
+
+	// Check auth status before showing autofill
+	const response = await chrome.runtime.sendMessage({
+		type: "CHECK_AUTOFILL_AUTH",
+	});
+
+	if (!response.authenticated) {
+		if (response.needsReauth) {
+			showIdentityReauthPrompt(field);
+		} else {
+			// Extension is locked, needs quick unlock
+			showIdentityUnlockPrompt(field);
+		}
+		return;
+	}
+
+	// Get available identity items
+	const itemsResponse = await chrome.runtime.sendMessage({
+		type: "GET_AUTOFILL_IDENTITIES",
+	});
+
+	if (itemsResponse.items && itemsResponse.items.length > 0) {
+		showIdentityAutofillOverlay(field, itemsResponse.items);
+	}
+}
+
+// Handle identity field blur
+function handleIdentityFieldBlur(field: IdentityField) {
+	// Delay to allow clicking on overlay
+	setTimeout(() => {
+		if (currentFocusedIdentityField === field) {
+			hideIdentityAutofillOverlay(field);
+			currentFocusedIdentityField = null;
+		}
+	}, 200);
+}
+
+// Show identity autofill overlay
+function showIdentityAutofillOverlay(
+	field: IdentityField,
+	items: DecryptedItem[],
+) {
+	// Remove existing overlay
+	if (field.overlay) {
+		field.overlay.remove();
+	}
+
+	// Create shadow host
+	const shadowHost = document.createElement("div");
+	shadowHost.style.position = "fixed";
+	shadowHost.style.zIndex = "2147483647"; // Max z-index
+	shadowHost.style.opacity = "0";
+	shadowHost.style.transform = "translateY(-8px)";
+	shadowHost.style.transition =
+		"opacity 0.15s ease-out, transform 0.15s ease-out";
+	document.body.appendChild(shadowHost);
+
+	// Attach shadow DOM
+	const shadow = shadowHost.attachShadow({ mode: "open" });
+
+	// Position overlay
+	const rect = field.input.getBoundingClientRect();
+	shadowHost.style.top = `${rect.bottom + window.scrollY}px`;
+	shadowHost.style.left = `${rect.left}px`;
+	shadowHost.style.width = `${Math.max(rect.width, 300)}px`;
+
+	// Create iframe for identity selection
+	const iframe = document.createElement("iframe");
+	iframe.style.border = "none";
+	iframe.style.width = "100%";
+	iframe.style.height = "auto";
+	iframe.style.maxHeight = "300px";
+	iframe.style.display = "block";
+	iframe.src = chrome.runtime.getURL("identity-autofill-iframe.html");
+
+	shadow.appendChild(iframe);
+	field.overlay = shadowHost;
+
+	// Trigger animation after a brief delay
+	setTimeout(() => {
+		shadowHost.style.opacity = "1";
+		shadowHost.style.transform = "translateY(0)";
+	}, 10);
+
+	// Wait for iframe to signal it's ready
+	const messageHandler = (event: MessageEvent) => {
+		if (event.data.type === "IDENTITY_IFRAME_READY") {
+			if (field.readyTimeout) {
+				clearTimeout(field.readyTimeout);
+				field.readyTimeout = undefined;
+			}
+
+			// Send identity items to iframe
+			iframe.contentWindow?.postMessage(
+				{
+					type: "IDENTITY_ITEMS",
+					items,
+					fieldType: field.type,
+				},
+				"*",
+			);
+		} else if (event.data.type === "IDENTITY_SELECT") {
+			handleIdentityAutofillSelect(field, event.data.item);
+		}
+	};
+
+	field.messageHandler = messageHandler;
+	window.addEventListener("message", messageHandler);
+
+	// Fallback: send items after a delay if ready signal not received
+	field.readyTimeout = setTimeout(() => {
+		console.log(
+			"Timeout waiting for identity iframe ready, sending items anyway",
+		);
+		iframe.contentWindow?.postMessage(
+			{
+				type: "IDENTITY_ITEMS",
+				items,
+				fieldType: field.type,
+			},
+			"*",
+		);
+	}, 100);
+
+	// Add keyboard navigation
+	document.addEventListener("keydown", handleIdentityKeyboardNavigation);
+}
+
+// Hide identity autofill overlay
+function hideIdentityAutofillOverlay(field: IdentityField) {
+	if (field.overlay) {
+		field.overlay.remove();
+		field.overlay = undefined;
+	}
+	if (field.messageHandler) {
+		window.removeEventListener("message", field.messageHandler);
+		field.messageHandler = undefined;
+	}
+	if (field.readyTimeout) {
+		clearTimeout(field.readyTimeout);
+		field.readyTimeout = undefined;
+	}
+	document.removeEventListener("keydown", handleIdentityKeyboardNavigation);
+}
+
+// Handle keyboard navigation for identity overlay
+function handleIdentityKeyboardNavigation(event: KeyboardEvent) {
+	if (event.key === "Escape") {
+		if (currentFocusedIdentityField) {
+			hideIdentityAutofillOverlay(currentFocusedIdentityField);
+			currentFocusedIdentityField = null;
+		}
+	}
+	// Arrow keys and Enter are handled by iframe
+}
+
+// Handle identity autofill selection
+async function handleIdentityAutofillSelect(
+	field: IdentityField,
+	item: DecryptedItem,
+) {
+	// Update autofill timestamp
+	await chrome.runtime.sendMessage({
+		type: "UPDATE_AUTOFILL_TIMESTAMP",
+	});
+
+	// Get the form group to fill all related fields
+	const formGroup = field.formGroup;
+
+	// Helper function to fill a field with visual feedback
+	const fillField = (input: HTMLInputElement, value: string) => {
+		if (!value) return;
+
+		input.value = value;
+		input.dispatchEvent(new Event("input", { bubbles: true }));
+		input.dispatchEvent(new Event("change", { bubbles: true }));
+
+		// Apply visual feedback
+		applyAutofillHighlight(input);
+	};
+
+	// Get first address if available
+	const address = item.addresses?.[0];
+	// Get first phone number if available
+	const phoneNumber = item.phoneNumbers?.[0];
+
+	// Fill the focused field first based on its type
+	switch (field.type) {
+		case "firstName":
+			if (item.firstName) fillField(field.input, item.firstName);
+			break;
+		case "lastName":
+			if (item.lastName) fillField(field.input, item.lastName);
+			break;
+		case "email":
+			if (item.email) fillField(field.input, item.email);
+			break;
+		case "phone":
+			if (phoneNumber?.number) fillField(field.input, phoneNumber.number);
+			break;
+		case "street":
+			if (address?.street) fillField(field.input, address.street);
+			break;
+		case "city":
+			if (address?.city) fillField(field.input, address.city);
+			break;
+		case "state":
+			if (address?.state) fillField(field.input, address.state);
+			break;
+		case "postalCode":
+			if (address?.zip) fillField(field.input, address.zip);
+			break;
+		case "country":
+			if (address?.country) fillField(field.input, address.country);
+			break;
+		case "dateOfBirth":
+			if (item.dateOfBirth) fillField(field.input, item.dateOfBirth);
+			break;
+	}
+
+	// Fill other related fields in the form group
+	if (formGroup) {
+		// Fill first name if not the current field
+		if (
+			formGroup.firstNameField &&
+			formGroup.firstNameField.element !== field.input &&
+			item.firstName
+		) {
+			fillField(formGroup.firstNameField.element, item.firstName);
+		}
+
+		// Fill last name if not the current field
+		if (
+			formGroup.lastNameField &&
+			formGroup.lastNameField.element !== field.input &&
+			item.lastName
+		) {
+			fillField(formGroup.lastNameField.element, item.lastName);
+		}
+
+		// Fill email if not the current field
+		if (
+			formGroup.emailField &&
+			formGroup.emailField.element !== field.input &&
+			item.email
+		) {
+			fillField(formGroup.emailField.element, item.email);
+		}
+
+		// Fill phone if not the current field
+		if (
+			formGroup.phoneField &&
+			formGroup.phoneField.element !== field.input &&
+			phoneNumber?.number
+		) {
+			fillField(formGroup.phoneField.element, phoneNumber.number);
+		}
+
+		// Fill address fields
+		if (address) {
+			if (
+				formGroup.streetField &&
+				formGroup.streetField.element !== field.input &&
+				address.street
+			) {
+				fillField(formGroup.streetField.element, address.street);
+			}
+			if (
+				formGroup.cityField &&
+				formGroup.cityField.element !== field.input &&
+				address.city
+			) {
+				fillField(formGroup.cityField.element, address.city);
+			}
+			if (
+				formGroup.stateField &&
+				formGroup.stateField.element !== field.input &&
+				address.state
+			) {
+				fillField(formGroup.stateField.element, address.state);
+			}
+			if (
+				formGroup.postalCodeField &&
+				formGroup.postalCodeField.element !== field.input &&
+				address.zip
+			) {
+				fillField(formGroup.postalCodeField.element, address.zip);
+			}
+			if (
+				formGroup.countryField &&
+				formGroup.countryField.element !== field.input &&
+				address.country
+			) {
+				fillField(formGroup.countryField.element, address.country);
+			}
+		}
+
+		// Fill date of birth if not the current field
+		if (
+			formGroup.dateOfBirthField &&
+			formGroup.dateOfBirthField.element !== field.input &&
+			item.dateOfBirth
+		) {
+			fillField(formGroup.dateOfBirthField.element, item.dateOfBirth);
+		}
+	} else {
+		// Try to find related identity fields in the same form
+		for (const [input, identityField] of detectedIdentityFields) {
+			if (input === field.input) continue;
+
+			// Check if in same form
+			const inputForm = input.closest("form");
+			if (inputForm !== (field.input.closest("form") || null)) continue;
+
+			switch (identityField.type) {
+				case "firstName":
+					if (item.firstName) fillField(input, item.firstName);
+					break;
+				case "lastName":
+					if (item.lastName) fillField(input, item.lastName);
+					break;
+				case "email":
+					if (item.email) fillField(input, item.email);
+					break;
+				case "phone":
+					if (phoneNumber?.number) fillField(input, phoneNumber.number);
+					break;
+				case "street":
+					if (address?.street) fillField(input, address.street);
+					break;
+				case "city":
+					if (address?.city) fillField(input, address.city);
+					break;
+				case "state":
+					if (address?.state) fillField(input, address.state);
+					break;
+				case "postalCode":
+					if (address?.zip) fillField(input, address.zip);
+					break;
+				case "country":
+					if (address?.country) fillField(input, address.country);
+					break;
+				case "dateOfBirth":
+					if (item.dateOfBirth) fillField(input, item.dateOfBirth);
+					break;
+			}
+		}
+	}
+
+	// Hide overlay
+	hideIdentityAutofillOverlay(field);
+	currentFocusedIdentityField = null;
+
+	console.log("Identity autofill completed for:", item.title);
+}
+
+// Show unlock prompt for identity fields
+function showIdentityUnlockPrompt(field: IdentityField) {
+	// Remove existing overlay
+	if (field.overlay) {
+		field.overlay.remove();
+	}
+
+	// Create shadow host
+	const shadowHost = document.createElement("div");
+	shadowHost.style.position = "fixed";
+	shadowHost.style.zIndex = "2147483647";
+	shadowHost.style.opacity = "0";
+	shadowHost.style.transform = "translateY(-8px)";
+	shadowHost.style.transition =
+		"opacity 0.15s ease-out, transform 0.15s ease-out";
+	document.body.appendChild(shadowHost);
+
+	// Attach shadow DOM
+	const shadow = shadowHost.attachShadow({ mode: "open" });
+
+	// Position overlay
+	const rect = field.input.getBoundingClientRect();
+	shadowHost.style.top = `${rect.bottom + window.scrollY}px`;
+	shadowHost.style.left = `${rect.left}px`;
+	shadowHost.style.width = `${Math.max(rect.width, 300)}px`;
+
+	// Create iframe
+	const iframe = document.createElement("iframe");
+	iframe.style.border = "none";
+	iframe.style.width = "100%";
+	iframe.style.height = "auto";
+	iframe.style.maxHeight = "300px";
+	iframe.style.display = "block";
+	iframe.src = chrome.runtime.getURL("identity-autofill-iframe.html");
+
+	shadow.appendChild(iframe);
+	field.overlay = shadowHost;
+
+	// Trigger animation
+	setTimeout(() => {
+		shadowHost.style.opacity = "1";
+		shadowHost.style.transform = "translateY(0)";
+	}, 10);
+
+	// Wait for iframe to signal it's ready
+	const messageHandler = (event: MessageEvent) => {
+		if (event.data.type === "IDENTITY_IFRAME_READY") {
+			if (field.readyTimeout) {
+				clearTimeout(field.readyTimeout);
+				field.readyTimeout = undefined;
+			}
+
+			// Send unlock needed message
+			iframe.contentWindow?.postMessage(
+				{
+					type: "NEEDS_UNLOCK",
+				},
+				"*",
+			);
+		}
+	};
+
+	field.messageHandler = messageHandler;
+	window.addEventListener("message", messageHandler);
+
+	// Fallback
+	field.readyTimeout = setTimeout(() => {
+		iframe.contentWindow?.postMessage(
+			{
+				type: "NEEDS_UNLOCK",
+			},
+			"*",
+		);
+	}, 100);
+}
+
+// Show re-auth prompt for identity fields
+function showIdentityReauthPrompt(field: IdentityField) {
+	// Create shadow host
+	const shadowHost = document.createElement("div");
+	shadowHost.style.position = "fixed";
+	shadowHost.style.zIndex = "2147483647";
+	document.body.appendChild(shadowHost);
+
+	const shadow = shadowHost.attachShadow({ mode: "open" });
+
+	// Position prompt
+	const rect = field.input.getBoundingClientRect();
+	shadowHost.style.top = `${rect.bottom + window.scrollY}px`;
+	shadowHost.style.left = `${rect.left + window.scrollX}px`;
+	shadowHost.style.width = `${Math.max(rect.width, 250)}px`;
+
+	// Create prompt UI
+	const container = document.createElement("div");
+	container.style.cssText = `
+		background: white;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+		padding: 12px;
+		font-family: system-ui, -apple-system, sans-serif;
+		font-size: 13px;
+	`;
+
+	container.innerHTML = `
+		<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+			<span style="font-size: 16px;">🔒</span>
+			<span style="font-weight: 500;">Authentication Required</span>
+		</div>
+		<p style="margin: 0 0 8px 0; color: #64748b; font-size: 12px;">
+			Please re-authenticate to use identity autofill
+		</p>
+		<button style="
+			width: 100%;
+			padding: 6px 12px;
+			background: #3b82f6;
+			color: white;
+			border: none;
+			border-radius: 6px;
+			font-size: 12px;
+			font-weight: 500;
+			cursor: pointer;
+		">
+			Open Bittery
+		</button>
+	`;
+
+	const button = container.querySelector("button");
+	button?.addEventListener("click", () => {
+		chrome.runtime.sendMessage({ type: "OPEN_POPUP" });
+		shadowHost.remove();
+	});
+
+	shadow.appendChild(container);
+	field.overlay = shadowHost;
+
+	// Auto-hide after 5 seconds
+	setTimeout(() => {
+		shadowHost.remove();
+	}, 5000);
+}
+
+// ==================== End Identity Autofill ====================
 
 // Show autofill overlay
 function showAutofillOverlay(field: CredentialField, items: DecryptedItem[]) {
