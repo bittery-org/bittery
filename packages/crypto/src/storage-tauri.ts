@@ -12,19 +12,10 @@ import { decrypt, type EncryptedData, encrypt } from "./encryption";
 import { arrayBufferToBase64, base64ToArrayBuffer } from "./key-derivation";
 import { rsaDecrypt } from "./rsa";
 
-// Legacy storage keys (single-account format - used for migration detection)
-const LEGACY_SECRET_KEY_STORAGE = "bittery_secret_key";
-const LEGACY_SESSION_DATA_STORAGE = "bittery_session_data";
-const LEGACY_JWT_TOKEN_KEY = "bittery_jwt_token";
-const LEGACY_VAULT_KEYS_KEY = "bittery_vault_keys";
-const LEGACY_BIOMETRIC_ENABLED_KEY = "bittery_biometric_enabled";
-const LEGACY_LAST_BIOMETRIC_AUTH_KEY = "bittery_last_biometric_auth";
-
 // Global storage keys (shared across all accounts)
 const DEVICE_KEY_STORAGE = "bittery_device_key";
 const ACTIVE_ACCOUNT_KEY = "bittery_active_account";
 const ACCOUNTS_LIST_KEY = "bittery_accounts_list";
-const MIGRATION_COMPLETED_KEY = "bittery_migration_v2_completed";
 const LEGACY_SERVER_URL_STORAGE = "bittery_server_url"; // Legacy, now account-scoped
 
 // Helper to generate namespaced keys for each account
@@ -1053,122 +1044,6 @@ export async function unlockWithBiometric(email?: string): Promise<boolean> {
 	} catch (error) {
 		console.error("[storage-tauri] Biometric unlock failed:", error);
 		return false;
-	}
-}
-
-// ============================================================================
-// Migration Functions
-// ============================================================================
-
-/**
- * Migrate from single-account storage format to multi-account format
- * This runs on app startup and handles existing users seamlessly
- */
-export async function migrateToMultiAccount(): Promise<void> {
-	const store = await getStore();
-
-	// Check if migration already completed
-	const migrationCompleted = await store.get<boolean>(MIGRATION_COMPLETED_KEY);
-	if (migrationCompleted) {
-		return;
-	}
-
-	// Check if there's legacy data to migrate
-	const legacySessionData = await store.get<string>(
-		LEGACY_SESSION_DATA_STORAGE,
-	);
-	if (!legacySessionData) {
-		// No legacy data, mark migration as complete
-		await store.set(MIGRATION_COMPLETED_KEY, true);
-		await store.save();
-		return;
-	}
-
-	try {
-		const sessionData: StoredSessionData = JSON.parse(legacySessionData);
-		const email = sessionData.email.toLowerCase();
-
-		console.log("[storage-tauri] Migrating legacy account:", email);
-
-		// Migrate all legacy keys to namespaced format
-		const legacySecretKey = await store.get<string>(LEGACY_SECRET_KEY_STORAGE);
-		const legacyJwtToken = await store.get<string>(LEGACY_JWT_TOKEN_KEY);
-		const legacyVaultKeys = await store.get<string>(LEGACY_VAULT_KEYS_KEY);
-		const legacyBiometricEnabled = await store.get<boolean>(
-			LEGACY_BIOMETRIC_ENABLED_KEY,
-		);
-		const legacyLastBiometricAuth = await store.get<number>(
-			LEGACY_LAST_BIOMETRIC_AUTH_KEY,
-		);
-		const legacyServerUrl = await store.get<string>(LEGACY_SERVER_URL_STORAGE);
-
-		// Store in new namespaced format
-		if (legacySecretKey) {
-			await store.set(getAccountKey(email, "secret_key"), legacySecretKey);
-		}
-		await store.set(getAccountKey(email, "session_data"), legacySessionData);
-		if (legacyJwtToken) {
-			await store.set(getAccountKey(email, "jwt_token"), legacyJwtToken);
-		}
-		if (legacyVaultKeys) {
-			await store.set(getAccountKey(email, "vault_keys"), legacyVaultKeys);
-		}
-		if (legacyBiometricEnabled !== undefined) {
-			await store.set(
-				getAccountKey(email, "biometric_enabled"),
-				legacyBiometricEnabled,
-			);
-		}
-		if (legacyLastBiometricAuth !== undefined) {
-			await store.set(
-				getAccountKey(email, "last_biometric_auth"),
-				legacyLastBiometricAuth,
-			);
-		}
-		if (legacyServerUrl) {
-			await store.set(getAccountKey(email, "server_url"), legacyServerUrl);
-		}
-
-		// Create account metadata
-		const secretKeyHint = legacySecretKey
-			? `${legacySecretKey.substring(0, 5)}...`
-			: "";
-
-		const accountMetadata: AccountMetadata = {
-			email,
-			userId: sessionData.userId,
-			name: email.split("@")[0], // Use email prefix as name initially
-			secretKeyHint,
-			addedAt: sessionData.createdAt,
-			lastActiveAt: Date.now(),
-			biometricEnabled: sessionData.biometricEnabled ?? false,
-		};
-
-		// Create accounts list
-		const accountsList: AccountsList = {
-			accounts: [accountMetadata],
-		};
-		await store.set(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
-
-		// Set as active account
-		await store.set(ACTIVE_ACCOUNT_KEY, email);
-
-		// Clean up legacy keys
-		await store.delete(LEGACY_SECRET_KEY_STORAGE);
-		await store.delete(LEGACY_SESSION_DATA_STORAGE);
-		await store.delete(LEGACY_JWT_TOKEN_KEY);
-		await store.delete(LEGACY_VAULT_KEYS_KEY);
-		await store.delete(LEGACY_BIOMETRIC_ENABLED_KEY);
-		await store.delete(LEGACY_LAST_BIOMETRIC_AUTH_KEY);
-
-		// Mark migration as complete
-		await store.set(MIGRATION_COMPLETED_KEY, true);
-		await store.save();
-
-		console.log("[storage-tauri] Migration completed successfully");
-	} catch (error) {
-		console.error("[storage-tauri] Migration failed:", error);
-		// Don't mark as complete so it can be retried
 	}
 }
 
