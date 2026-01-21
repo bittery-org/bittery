@@ -110,7 +110,7 @@ export function VaultSidebar({
                 <Link
                   to="/vault/$id"
                   params={{ id: vault.vaultId }}
-                  className="block px-3 py-1.5"
+                  className="block px-3 py-2"
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <VaultAvatar
@@ -187,7 +187,7 @@ export function VaultSidebar({
                     key={tagName}
                     to="/vault/tag/$tagName"
                     params={{ tagName: encodeURIComponent(tagName) }}
-                    className={`mb-0.5 flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition-colors ${
+                    className={`mb-0.5 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
                       isActive ? "bg-muted/60" : "hover:bg-muted/30"
                     }`}
                   >

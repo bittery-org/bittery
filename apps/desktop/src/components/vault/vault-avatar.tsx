@@ -108,14 +108,14 @@ export function VaultAvatar({
 	}, []);
 
 	const sizeClasses = {
-		xs: "h-5 w-5 text-[10px]",
+		xs: "h-6 w-6 text-[12px]",
 		sm: "h-8 w-8 text-xs",
 		md: "h-10 w-10 text-sm",
 		lg: "h-12 w-12 text-base",
 	};
 
 	const iconSizes = {
-		xs: 12,
+		xs: 13,
 		sm: 16,
 		md: 20,
 		lg: 24,
