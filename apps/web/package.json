@@ -4,6 +4,15 @@
 	"type": "module",
 	"scripts": {
 		"check-types": "tsc --noEmit",
+		"test:e2e": "playwright test",
+		"test:e2e:ui": "playwright test --ui",
+		"test:e2e:headed": "playwright test --headed",
+		"test:e2e:debug": "playwright test --debug",
+		"test:e2e:signup": "playwright test signup.spec.ts",
+		"test:e2e:vault": "playwright test vault-items.spec.ts",
+		"test:e2e:sharing": "playwright test sharing.spec.ts",
+		"test:e2e:network": "playwright test network-failures.spec.ts",
+		"test:e2e:report": "playwright show-report",
 		"build": "vite build",
 		"serve": "vite preview",
 		"dev": "vite dev --port=3001"
