@@ -14,11 +14,22 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as VaultRouteRouteImport } from './routes/vault/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as VaultIndexRouteImport } from './routes/vault/index'
+import { Route as VaultTrashRouteRouteImport } from './routes/vault/trash/route'
+import { Route as VaultFavoritesRouteRouteImport } from './routes/vault/favorites/route'
+import { Route as VaultAllItemsRouteRouteImport } from './routes/vault/all-items/route'
 import { Route as VaultIdRouteRouteImport } from './routes/vault/$id/route'
+import { Route as VaultTrashIndexRouteImport } from './routes/vault/trash/index'
+import { Route as VaultFavoritesIndexRouteImport } from './routes/vault/favorites/index'
+import { Route as VaultAllItemsIndexRouteImport } from './routes/vault/all-items/index'
 import { Route as VaultIdIndexRouteImport } from './routes/vault/$id/index'
 import { Route as VaultIdTrashRouteImport } from './routes/vault/$id/trash'
+import { Route as VaultTagTagNameRouteRouteImport } from './routes/vault/tag/$tagName/route'
+import { Route as VaultTagTagNameIndexRouteImport } from './routes/vault/tag/$tagName/index'
+import { Route as VaultFavoritesItemIdIndexRouteImport } from './routes/vault/favorites/$itemId/index'
+import { Route as VaultAllItemsItemIdIndexRouteImport } from './routes/vault/all-items/$itemId/index'
 import { Route as VaultIdItemIdIndexRouteImport } from './routes/vault/$id/$itemId/index'
 import { Route as VaultIdTagTagNameRouteImport } from './routes/vault/$id/tag/$tagName'
+import { Route as VaultTagTagNameItemIdIndexRouteImport } from './routes/vault/tag/$tagName/$itemId/index'
 
 const UnlockRoute = UnlockRouteImport.update({
   id: '/unlock',
@@ -45,10 +56,40 @@ const VaultIndexRoute = VaultIndexRouteImport.update({
   path: '/',
   getParentRoute: () => VaultRouteRoute,
 } as any)
+const VaultTrashRouteRoute = VaultTrashRouteRouteImport.update({
+  id: '/trash',
+  path: '/trash',
+  getParentRoute: () => VaultRouteRoute,
+} as any)
+const VaultFavoritesRouteRoute = VaultFavoritesRouteRouteImport.update({
+  id: '/favorites',
+  path: '/favorites',
+  getParentRoute: () => VaultRouteRoute,
+} as any)
+const VaultAllItemsRouteRoute = VaultAllItemsRouteRouteImport.update({
+  id: '/all-items',
+  path: '/all-items',
+  getParentRoute: () => VaultRouteRoute,
+} as any)
 const VaultIdRouteRoute = VaultIdRouteRouteImport.update({
   id: '/$id',
   path: '/$id',
   getParentRoute: () => VaultRouteRoute,
+} as any)
+const VaultTrashIndexRoute = VaultTrashIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => VaultTrashRouteRoute,
+} as any)
+const VaultFavoritesIndexRoute = VaultFavoritesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => VaultFavoritesRouteRoute,
+} as any)
+const VaultAllItemsIndexRoute = VaultAllItemsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => VaultAllItemsRouteRoute,
 } as any)
 const VaultIdIndexRoute = VaultIdIndexRouteImport.update({
   id: '/',
@@ -60,6 +101,28 @@ const VaultIdTrashRoute = VaultIdTrashRouteImport.update({
   path: '/trash',
   getParentRoute: () => VaultIdRouteRoute,
 } as any)
+const VaultTagTagNameRouteRoute = VaultTagTagNameRouteRouteImport.update({
+  id: '/tag/$tagName',
+  path: '/tag/$tagName',
+  getParentRoute: () => VaultRouteRoute,
+} as any)
+const VaultTagTagNameIndexRoute = VaultTagTagNameIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => VaultTagTagNameRouteRoute,
+} as any)
+const VaultFavoritesItemIdIndexRoute =
+  VaultFavoritesItemIdIndexRouteImport.update({
+    id: '/$itemId/',
+    path: '/$itemId/',
+    getParentRoute: () => VaultFavoritesRouteRoute,
+  } as any)
+const VaultAllItemsItemIdIndexRoute =
+  VaultAllItemsItemIdIndexRouteImport.update({
+    id: '/$itemId/',
+    path: '/$itemId/',
+    getParentRoute: () => VaultAllItemsRouteRoute,
+  } as any)
 const VaultIdItemIdIndexRoute = VaultIdItemIdIndexRouteImport.update({
   id: '/$itemId/',
   path: '/$itemId/',
@@ -70,6 +133,12 @@ const VaultIdTagTagNameRoute = VaultIdTagTagNameRouteImport.update({
   path: '/tag/$tagName',
   getParentRoute: () => VaultIdRouteRoute,
 } as any)
+const VaultTagTagNameItemIdIndexRoute =
+  VaultTagTagNameItemIdIndexRouteImport.update({
+    id: '/$itemId/',
+    path: '/$itemId/',
+    getParentRoute: () => VaultTagTagNameRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -77,11 +146,22 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/unlock': typeof UnlockRoute
   '/vault/$id': typeof VaultIdRouteRouteWithChildren
+  '/vault/all-items': typeof VaultAllItemsRouteRouteWithChildren
+  '/vault/favorites': typeof VaultFavoritesRouteRouteWithChildren
+  '/vault/trash': typeof VaultTrashRouteRouteWithChildren
   '/vault/': typeof VaultIndexRoute
+  '/vault/tag/$tagName': typeof VaultTagTagNameRouteRouteWithChildren
   '/vault/$id/trash': typeof VaultIdTrashRoute
   '/vault/$id/': typeof VaultIdIndexRoute
+  '/vault/all-items/': typeof VaultAllItemsIndexRoute
+  '/vault/favorites/': typeof VaultFavoritesIndexRoute
+  '/vault/trash/': typeof VaultTrashIndexRoute
   '/vault/$id/tag/$tagName': typeof VaultIdTagTagNameRoute
   '/vault/$id/$itemId': typeof VaultIdItemIdIndexRoute
+  '/vault/all-items/$itemId': typeof VaultAllItemsItemIdIndexRoute
+  '/vault/favorites/$itemId': typeof VaultFavoritesItemIdIndexRoute
+  '/vault/tag/$tagName/': typeof VaultTagTagNameIndexRoute
+  '/vault/tag/$tagName/$itemId': typeof VaultTagTagNameItemIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -90,8 +170,15 @@ export interface FileRoutesByTo {
   '/vault': typeof VaultIndexRoute
   '/vault/$id/trash': typeof VaultIdTrashRoute
   '/vault/$id': typeof VaultIdIndexRoute
+  '/vault/all-items': typeof VaultAllItemsIndexRoute
+  '/vault/favorites': typeof VaultFavoritesIndexRoute
+  '/vault/trash': typeof VaultTrashIndexRoute
   '/vault/$id/tag/$tagName': typeof VaultIdTagTagNameRoute
   '/vault/$id/$itemId': typeof VaultIdItemIdIndexRoute
+  '/vault/all-items/$itemId': typeof VaultAllItemsItemIdIndexRoute
+  '/vault/favorites/$itemId': typeof VaultFavoritesItemIdIndexRoute
+  '/vault/tag/$tagName': typeof VaultTagTagNameIndexRoute
+  '/vault/tag/$tagName/$itemId': typeof VaultTagTagNameItemIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -100,11 +187,22 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/unlock': typeof UnlockRoute
   '/vault/$id': typeof VaultIdRouteRouteWithChildren
+  '/vault/all-items': typeof VaultAllItemsRouteRouteWithChildren
+  '/vault/favorites': typeof VaultFavoritesRouteRouteWithChildren
+  '/vault/trash': typeof VaultTrashRouteRouteWithChildren
   '/vault/': typeof VaultIndexRoute
+  '/vault/tag/$tagName': typeof VaultTagTagNameRouteRouteWithChildren
   '/vault/$id/trash': typeof VaultIdTrashRoute
   '/vault/$id/': typeof VaultIdIndexRoute
+  '/vault/all-items/': typeof VaultAllItemsIndexRoute
+  '/vault/favorites/': typeof VaultFavoritesIndexRoute
+  '/vault/trash/': typeof VaultTrashIndexRoute
   '/vault/$id/tag/$tagName': typeof VaultIdTagTagNameRoute
   '/vault/$id/$itemId/': typeof VaultIdItemIdIndexRoute
+  '/vault/all-items/$itemId/': typeof VaultAllItemsItemIdIndexRoute
+  '/vault/favorites/$itemId/': typeof VaultFavoritesItemIdIndexRoute
+  '/vault/tag/$tagName/': typeof VaultTagTagNameIndexRoute
+  '/vault/tag/$tagName/$itemId/': typeof VaultTagTagNameItemIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -114,11 +212,22 @@ export interface FileRouteTypes {
     | '/login'
     | '/unlock'
     | '/vault/$id'
+    | '/vault/all-items'
+    | '/vault/favorites'
+    | '/vault/trash'
     | '/vault/'
+    | '/vault/tag/$tagName'
     | '/vault/$id/trash'
     | '/vault/$id/'
+    | '/vault/all-items/'
+    | '/vault/favorites/'
+    | '/vault/trash/'
     | '/vault/$id/tag/$tagName'
     | '/vault/$id/$itemId'
+    | '/vault/all-items/$itemId'
+    | '/vault/favorites/$itemId'
+    | '/vault/tag/$tagName/'
+    | '/vault/tag/$tagName/$itemId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -127,8 +236,15 @@ export interface FileRouteTypes {
     | '/vault'
     | '/vault/$id/trash'
     | '/vault/$id'
+    | '/vault/all-items'
+    | '/vault/favorites'
+    | '/vault/trash'
     | '/vault/$id/tag/$tagName'
     | '/vault/$id/$itemId'
+    | '/vault/all-items/$itemId'
+    | '/vault/favorites/$itemId'
+    | '/vault/tag/$tagName'
+    | '/vault/tag/$tagName/$itemId'
   id:
     | '__root__'
     | '/'
@@ -136,11 +252,22 @@ export interface FileRouteTypes {
     | '/login'
     | '/unlock'
     | '/vault/$id'
+    | '/vault/all-items'
+    | '/vault/favorites'
+    | '/vault/trash'
     | '/vault/'
+    | '/vault/tag/$tagName'
     | '/vault/$id/trash'
     | '/vault/$id/'
+    | '/vault/all-items/'
+    | '/vault/favorites/'
+    | '/vault/trash/'
     | '/vault/$id/tag/$tagName'
     | '/vault/$id/$itemId/'
+    | '/vault/all-items/$itemId/'
+    | '/vault/favorites/$itemId/'
+    | '/vault/tag/$tagName/'
+    | '/vault/tag/$tagName/$itemId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -187,12 +314,54 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VaultIndexRouteImport
       parentRoute: typeof VaultRouteRoute
     }
+    '/vault/trash': {
+      id: '/vault/trash'
+      path: '/trash'
+      fullPath: '/vault/trash'
+      preLoaderRoute: typeof VaultTrashRouteRouteImport
+      parentRoute: typeof VaultRouteRoute
+    }
+    '/vault/favorites': {
+      id: '/vault/favorites'
+      path: '/favorites'
+      fullPath: '/vault/favorites'
+      preLoaderRoute: typeof VaultFavoritesRouteRouteImport
+      parentRoute: typeof VaultRouteRoute
+    }
+    '/vault/all-items': {
+      id: '/vault/all-items'
+      path: '/all-items'
+      fullPath: '/vault/all-items'
+      preLoaderRoute: typeof VaultAllItemsRouteRouteImport
+      parentRoute: typeof VaultRouteRoute
+    }
     '/vault/$id': {
       id: '/vault/$id'
       path: '/$id'
       fullPath: '/vault/$id'
       preLoaderRoute: typeof VaultIdRouteRouteImport
       parentRoute: typeof VaultRouteRoute
+    }
+    '/vault/trash/': {
+      id: '/vault/trash/'
+      path: '/'
+      fullPath: '/vault/trash/'
+      preLoaderRoute: typeof VaultTrashIndexRouteImport
+      parentRoute: typeof VaultTrashRouteRoute
+    }
+    '/vault/favorites/': {
+      id: '/vault/favorites/'
+      path: '/'
+      fullPath: '/vault/favorites/'
+      preLoaderRoute: typeof VaultFavoritesIndexRouteImport
+      parentRoute: typeof VaultFavoritesRouteRoute
+    }
+    '/vault/all-items/': {
+      id: '/vault/all-items/'
+      path: '/'
+      fullPath: '/vault/all-items/'
+      preLoaderRoute: typeof VaultAllItemsIndexRouteImport
+      parentRoute: typeof VaultAllItemsRouteRoute
     }
     '/vault/$id/': {
       id: '/vault/$id/'
@@ -208,6 +377,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VaultIdTrashRouteImport
       parentRoute: typeof VaultIdRouteRoute
     }
+    '/vault/tag/$tagName': {
+      id: '/vault/tag/$tagName'
+      path: '/tag/$tagName'
+      fullPath: '/vault/tag/$tagName'
+      preLoaderRoute: typeof VaultTagTagNameRouteRouteImport
+      parentRoute: typeof VaultRouteRoute
+    }
+    '/vault/tag/$tagName/': {
+      id: '/vault/tag/$tagName/'
+      path: '/'
+      fullPath: '/vault/tag/$tagName/'
+      preLoaderRoute: typeof VaultTagTagNameIndexRouteImport
+      parentRoute: typeof VaultTagTagNameRouteRoute
+    }
+    '/vault/favorites/$itemId/': {
+      id: '/vault/favorites/$itemId/'
+      path: '/$itemId'
+      fullPath: '/vault/favorites/$itemId'
+      preLoaderRoute: typeof VaultFavoritesItemIdIndexRouteImport
+      parentRoute: typeof VaultFavoritesRouteRoute
+    }
+    '/vault/all-items/$itemId/': {
+      id: '/vault/all-items/$itemId/'
+      path: '/$itemId'
+      fullPath: '/vault/all-items/$itemId'
+      preLoaderRoute: typeof VaultAllItemsItemIdIndexRouteImport
+      parentRoute: typeof VaultAllItemsRouteRoute
+    }
     '/vault/$id/$itemId/': {
       id: '/vault/$id/$itemId/'
       path: '/$itemId'
@@ -221,6 +418,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/vault/$id/tag/$tagName'
       preLoaderRoute: typeof VaultIdTagTagNameRouteImport
       parentRoute: typeof VaultIdRouteRoute
+    }
+    '/vault/tag/$tagName/$itemId/': {
+      id: '/vault/tag/$tagName/$itemId/'
+      path: '/$itemId'
+      fullPath: '/vault/tag/$tagName/$itemId'
+      preLoaderRoute: typeof VaultTagTagNameItemIdIndexRouteImport
+      parentRoute: typeof VaultTagTagNameRouteRoute
     }
   }
 }
@@ -243,14 +447,73 @@ const VaultIdRouteRouteWithChildren = VaultIdRouteRoute._addFileChildren(
   VaultIdRouteRouteChildren,
 )
 
+interface VaultAllItemsRouteRouteChildren {
+  VaultAllItemsIndexRoute: typeof VaultAllItemsIndexRoute
+  VaultAllItemsItemIdIndexRoute: typeof VaultAllItemsItemIdIndexRoute
+}
+
+const VaultAllItemsRouteRouteChildren: VaultAllItemsRouteRouteChildren = {
+  VaultAllItemsIndexRoute: VaultAllItemsIndexRoute,
+  VaultAllItemsItemIdIndexRoute: VaultAllItemsItemIdIndexRoute,
+}
+
+const VaultAllItemsRouteRouteWithChildren =
+  VaultAllItemsRouteRoute._addFileChildren(VaultAllItemsRouteRouteChildren)
+
+interface VaultFavoritesRouteRouteChildren {
+  VaultFavoritesIndexRoute: typeof VaultFavoritesIndexRoute
+  VaultFavoritesItemIdIndexRoute: typeof VaultFavoritesItemIdIndexRoute
+}
+
+const VaultFavoritesRouteRouteChildren: VaultFavoritesRouteRouteChildren = {
+  VaultFavoritesIndexRoute: VaultFavoritesIndexRoute,
+  VaultFavoritesItemIdIndexRoute: VaultFavoritesItemIdIndexRoute,
+}
+
+const VaultFavoritesRouteRouteWithChildren =
+  VaultFavoritesRouteRoute._addFileChildren(VaultFavoritesRouteRouteChildren)
+
+interface VaultTrashRouteRouteChildren {
+  VaultTrashIndexRoute: typeof VaultTrashIndexRoute
+}
+
+const VaultTrashRouteRouteChildren: VaultTrashRouteRouteChildren = {
+  VaultTrashIndexRoute: VaultTrashIndexRoute,
+}
+
+const VaultTrashRouteRouteWithChildren = VaultTrashRouteRoute._addFileChildren(
+  VaultTrashRouteRouteChildren,
+)
+
+interface VaultTagTagNameRouteRouteChildren {
+  VaultTagTagNameIndexRoute: typeof VaultTagTagNameIndexRoute
+  VaultTagTagNameItemIdIndexRoute: typeof VaultTagTagNameItemIdIndexRoute
+}
+
+const VaultTagTagNameRouteRouteChildren: VaultTagTagNameRouteRouteChildren = {
+  VaultTagTagNameIndexRoute: VaultTagTagNameIndexRoute,
+  VaultTagTagNameItemIdIndexRoute: VaultTagTagNameItemIdIndexRoute,
+}
+
+const VaultTagTagNameRouteRouteWithChildren =
+  VaultTagTagNameRouteRoute._addFileChildren(VaultTagTagNameRouteRouteChildren)
+
 interface VaultRouteRouteChildren {
   VaultIdRouteRoute: typeof VaultIdRouteRouteWithChildren
+  VaultAllItemsRouteRoute: typeof VaultAllItemsRouteRouteWithChildren
+  VaultFavoritesRouteRoute: typeof VaultFavoritesRouteRouteWithChildren
+  VaultTrashRouteRoute: typeof VaultTrashRouteRouteWithChildren
   VaultIndexRoute: typeof VaultIndexRoute
+  VaultTagTagNameRouteRoute: typeof VaultTagTagNameRouteRouteWithChildren
 }
 
 const VaultRouteRouteChildren: VaultRouteRouteChildren = {
   VaultIdRouteRoute: VaultIdRouteRouteWithChildren,
+  VaultAllItemsRouteRoute: VaultAllItemsRouteRouteWithChildren,
+  VaultFavoritesRouteRoute: VaultFavoritesRouteRouteWithChildren,
+  VaultTrashRouteRoute: VaultTrashRouteRouteWithChildren,
   VaultIndexRoute: VaultIndexRoute,
+  VaultTagTagNameRouteRoute: VaultTagTagNameRouteRouteWithChildren,
 }
 
 const VaultRouteRouteWithChildren = VaultRouteRoute._addFileChildren(

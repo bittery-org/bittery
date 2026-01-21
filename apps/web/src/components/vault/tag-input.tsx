@@ -71,9 +71,7 @@ export function TagInput({
 
 	const showCreateOption =
 		searchValue.trim() &&
-		!availableTags.some(
-			(t) => t.toLowerCase() === searchValue.toLowerCase(),
-		);
+		!availableTags.some((t) => t.toLowerCase() === searchValue.toLowerCase());
 
 	return (
 		<div className="space-y-2">

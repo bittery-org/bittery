@@ -9,8 +9,16 @@
  * - Error handling
  */
 
-import { test, expect, generateTestUser, BitteryPage } from "../fixtures/test-fixtures";
-import { createNetworkSimulator, waitForLoginPageReady } from "../fixtures/network-helpers";
+import {
+	createNetworkSimulator,
+	waitForLoginPageReady,
+} from "../fixtures/network-helpers";
+import {
+	BitteryPage,
+	expect,
+	generateTestUser,
+	test,
+} from "../fixtures/test-fixtures";
 
 test.describe("User Signup Flow", () => {
 	test.beforeEach(async ({ page }) => {
@@ -30,17 +38,25 @@ test.describe("User Signup Flow", () => {
 		}
 
 		// Should show the secret key screen
-		await expect(page.getByRole('heading', { name: 'Save your Secret Key' })).toBeVisible();
-		await expect(page.getByText('Your Secret Key', { exact: true })).toBeVisible();
+		await expect(
+			page.getByRole("heading", { name: "Save your Secret Key" }),
+		).toBeVisible();
+		await expect(
+			page.getByText("Your Secret Key", { exact: true }),
+		).toBeVisible();
 
 		// Secret key should be displayed in the correct format (A3-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX)
 		const secretKeyElement = page.locator(".font-mono.text-sm.tracking-wide");
 		await expect(secretKeyElement).toBeVisible();
 		const secretKey = await secretKeyElement.textContent();
-		expect(secretKey).toMatch(/A3-[A-Z0-9]{6}-[A-Z0-9]{6}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}/);
+		expect(secretKey).toMatch(
+			/A3-[A-Z0-9]{6}-[A-Z0-9]{6}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}/,
+		);
 
 		// Warning about no recovery should be visible
-		await expect(page.locator("text=There is no account recovery")).toBeVisible();
+		await expect(
+			page.locator("text=There is no account recovery"),
+		).toBeVisible();
 
 		// Copy and Download buttons should be present
 		await expect(page.locator('button:has-text("Copy")')).toBeVisible();
@@ -51,7 +67,9 @@ test.describe("User Signup Flow", () => {
 		await expect(page.locator("#email")).not.toBeVisible();
 	});
 
-	test("should show signup form after acknowledging secret key", async ({ page }) => {
+	test("should show signup form after acknowledging secret key", async ({
+		page,
+	}) => {
 		// Switch to signup mode
 		const signUpLink = page.locator('button:has-text("Sign up")');
 		if (await signUpLink.isVisible()) {
@@ -67,7 +85,9 @@ test.describe("User Signup Flow", () => {
 		await expect(page.locator("#organizationName")).toBeVisible();
 		await expect(page.locator("#email")).toBeVisible();
 		await expect(page.locator("#password")).toBeVisible();
-		await expect(page.locator('button:has-text("Create Account")')).toBeVisible();
+		await expect(
+			page.locator('button:has-text("Create Account")'),
+		).toBeVisible();
 	});
 
 	test("should allow going back to secret key view", async ({ page }) => {
@@ -87,7 +107,10 @@ test.describe("User Signup Flow", () => {
 		await expect(page.locator("text=Save your Secret Key")).toBeVisible();
 	});
 
-	test("should successfully create a new account", async ({ page, testUser }) => {
+	test("should successfully create a new account", async ({
+		page,
+		testUser,
+	}) => {
 		const bitteryPage = new BitteryPage(page);
 
 		// Complete the signup flow
@@ -97,7 +120,9 @@ test.describe("User Signup Flow", () => {
 		await expect(page).toHaveURL(/.*\/home/);
 
 		// Verify the secret key was captured
-		expect(secretKey).toMatch(/A3-[A-Z0-9]{6}-[A-Z0-9]{6}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}/);
+		expect(secretKey).toMatch(
+			/A3-[A-Z0-9]{6}-[A-Z0-9]{6}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}/,
+		);
 	});
 
 	test("should show error for duplicate email", async ({ page, testUser }) => {
@@ -119,14 +144,19 @@ test.describe("User Signup Flow", () => {
 		await signUpLink.click();
 
 		// Wait for secret key screen and acknowledge it
-		await page.locator('button:has-text("I have saved my Secret Key")').waitFor({ state: "visible", timeout: 10000 });
+		await page
+			.locator('button:has-text("I have saved my Secret Key")')
+			.waitFor({ state: "visible", timeout: 10000 });
 		await page.click('button:has-text("I have saved my Secret Key")');
 
 		await bitteryPage.fillSignupForm(testUser);
 		await bitteryPage.submitSignup();
 
 		// Should show error toast
-		const toast = page.locator('[data-sonner-toast]').filter({ hasText: /already exists|duplicate|taken/i }).first();
+		const toast = page
+			.locator("[data-sonner-toast]")
+			.filter({ hasText: /already exists|duplicate|taken/i })
+			.first();
 		await expect(toast).toBeVisible({ timeout: 10000 });
 	});
 
@@ -145,7 +175,9 @@ test.describe("User Signup Flow", () => {
 
 		// Browser validation should prevent submission
 		// Check that we're still on the signup form
-		await expect(page.locator('button:has-text("Create Account")')).toBeVisible();
+		await expect(
+			page.locator('button:has-text("Create Account")'),
+		).toBeVisible();
 	});
 
 	test("should copy secret key to clipboard", async ({ page, context }) => {
@@ -166,7 +198,9 @@ test.describe("User Signup Flow", () => {
 		await page.click('button:has-text("Copy")');
 
 		// Verify clipboard content (may need to check toast instead due to permissions)
-		const toast = page.locator('[data-sonner-toast]').filter({ hasText: /copied/i });
+		const toast = page
+			.locator("[data-sonner-toast]")
+			.filter({ hasText: /copied/i });
 		await expect(toast).toBeVisible({ timeout: 5000 });
 	});
 
@@ -188,7 +222,9 @@ test.describe("User Signup Flow", () => {
 		expect(download.suggestedFilename()).toBe("bittery-emergency-kit.txt");
 
 		// Verify toast
-		const toast = page.locator('[data-sonner-toast]').filter({ hasText: /downloaded/i });
+		const toast = page
+			.locator("[data-sonner-toast]")
+			.filter({ hasText: /downloaded/i });
 		await expect(toast).toBeVisible({ timeout: 5000 });
 	});
 
@@ -218,7 +254,9 @@ test.describe("User Signup Flow", () => {
 		await expect(passwordInput).toHaveAttribute("type", "password");
 	});
 
-	test("should toggle secret key visibility on initial screen", async ({ page }) => {
+	test("should toggle secret key visibility on initial screen", async ({
+		page,
+	}) => {
 		// Switch to signup mode
 		const signUpLink = page.locator('button:has-text("Sign up")');
 		if (await signUpLink.isVisible()) {
@@ -232,7 +270,9 @@ test.describe("User Signup Flow", () => {
 		expect(initialValue).not.toContain("••••••");
 
 		// Click the eye button to hide
-		await page.click('[class*="absolute"][class*="top-3"][class*="right-3"] button');
+		await page.click(
+			'[class*="absolute"][class*="top-3"][class*="right-3"] button',
+		);
 
 		// Secret key should now be masked
 		const maskedValue = await secretKeyDisplay.textContent();
@@ -241,11 +281,15 @@ test.describe("User Signup Flow", () => {
 
 	test("should switch between sign in and sign up forms", async ({ page }) => {
 		// Should start on sign in
-		await expect(page.getByRole('heading', { name: 'Sign in to your account' })).toBeVisible();
+		await expect(
+			page.getByRole("heading", { name: "Sign in to your account" }),
+		).toBeVisible();
 
 		// Switch to sign up
 		await page.click('button:has-text("Sign up")');
-		await expect(page.getByRole('heading', { name: 'Create an account' })).toBeVisible();
+		await expect(
+			page.getByRole("heading", { name: "Create an account" }),
+		).toBeVisible();
 
 		// Acknowledge secret key
 		await page.click('button:has-text("I have saved my Secret Key")');
@@ -255,12 +299,17 @@ test.describe("User Signup Flow", () => {
 
 		// Now switch back to sign in
 		await page.click('button:has-text("Already have an account? Sign in")');
-		await expect(page.getByRole('heading', { name: 'Sign in to your account' })).toBeVisible();
+		await expect(
+			page.getByRole("heading", { name: "Sign in to your account" }),
+		).toBeVisible();
 	});
 });
 
 test.describe("Signup with Network Failures", () => {
-	test("should handle network failure during signup gracefully", async ({ page, testUser }) => {
+	test("should handle network failure during signup gracefully", async ({
+		page,
+		testUser,
+	}) => {
 		const networkSimulator = createNetworkSimulator(page);
 		const bitteryPage = new BitteryPage(page);
 
@@ -271,7 +320,9 @@ test.describe("Signup with Network Failures", () => {
 		await page.click('button:has-text("Sign up")');
 
 		// Wait for and acknowledge secret key
-		await page.locator('button:has-text("I have saved my Secret Key")').waitFor({ state: "visible", timeout: 10000 });
+		await page
+			.locator('button:has-text("I have saved my Secret Key")')
+			.waitFor({ state: "visible", timeout: 10000 });
 		await page.click('button:has-text("I have saved my Secret Key")');
 
 		// Fill the form
@@ -285,13 +336,20 @@ test.describe("Signup with Network Failures", () => {
 
 		// When offline, requests hang - the form should show loading state or error
 		// Either a toast appears OR the form stays in loading state (both are valid handling)
-		const toast = page.locator('[data-sonner-toast]').filter({ hasText: /failed|error|network|offline/i }).first();
-		const loadingButton = page.locator('button:has-text("Creating Account...")');
+		const toast = page
+			.locator("[data-sonner-toast]")
+			.filter({ hasText: /failed|error|network|offline/i })
+			.first();
+		const loadingButton = page.locator(
+			'button:has-text("Creating Account...")',
+		);
 
 		// Wait a bit for either toast or loading state
 		await Promise.race([
 			toast.waitFor({ state: "visible", timeout: 5000 }).catch(() => {}),
-			loadingButton.waitFor({ state: "visible", timeout: 5000 }).catch(() => {})
+			loadingButton
+				.waitFor({ state: "visible", timeout: 5000 })
+				.catch(() => {}),
 		]);
 
 		// Should NOT have navigated away - still on signup form
@@ -301,7 +359,10 @@ test.describe("Signup with Network Failures", () => {
 		await networkSimulator.goOnline();
 	});
 
-	test("should handle slow network during signup", async ({ page, testUser }) => {
+	test("should handle slow network during signup", async ({
+		page,
+		testUser,
+	}) => {
 		const networkSimulator = createNetworkSimulator(page);
 		const bitteryPage = new BitteryPage(page);
 
@@ -312,7 +373,9 @@ test.describe("Signup with Network Failures", () => {
 		await page.click('button:has-text("Sign up")');
 
 		// Wait for and acknowledge secret key
-		await page.locator('button:has-text("I have saved my Secret Key")').waitFor({ state: "visible", timeout: 10000 });
+		await page
+			.locator('button:has-text("I have saved my Secret Key")')
+			.waitFor({ state: "visible", timeout: 10000 });
 		await page.click('button:has-text("I have saved my Secret Key")');
 
 		// Fill the form
@@ -325,7 +388,9 @@ test.describe("Signup with Network Failures", () => {
 		await bitteryPage.submitSignup();
 
 		// Button should show loading state
-		await expect(page.locator('button:has-text("Creating Account...")')).toBeVisible();
+		await expect(
+			page.locator('button:has-text("Creating Account...")'),
+		).toBeVisible();
 
 		// Wait for completion (with extended timeout due to slow network)
 		await expect(page).toHaveURL(/.*\/home/, { timeout: 60000 });
@@ -345,24 +410,34 @@ test.describe("Signup with Network Failures", () => {
 		await page.click('button:has-text("Sign up")');
 
 		// Wait for and acknowledge secret key
-		await page.locator('button:has-text("I have saved my Secret Key")').waitFor({ state: "visible", timeout: 10000 });
+		await page
+			.locator('button:has-text("I have saved my Secret Key")')
+			.waitFor({ state: "visible", timeout: 10000 });
 		await page.click('button:has-text("I have saved my Secret Key")');
 
 		// Fill the form
 		await bitteryPage.fillSignupForm(testUser);
 
 		// Simulate API error
-		await networkSimulator.simulateTrpcFailure("auth.signup", "INTERNAL_SERVER_ERROR");
+		await networkSimulator.simulateTrpcFailure(
+			"auth.signup",
+			"INTERNAL_SERVER_ERROR",
+		);
 
 		// Try to submit
 		await bitteryPage.submitSignup();
 
 		// Should show error toast (various possible error messages depending on how tRPC handles the simulated error)
-		const toast = page.locator('[data-sonner-toast]').filter({ hasText: /failed|error|internal|server|network|request/i }).first();
+		const toast = page
+			.locator("[data-sonner-toast]")
+			.filter({ hasText: /failed|error|internal|server|network|request/i })
+			.first();
 		await expect(toast).toBeVisible({ timeout: 10000 });
 
 		// Should still be on signup form (not navigated away due to error)
-		await expect(page.locator('button:has-text("Create Account")')).toBeVisible();
+		await expect(
+			page.locator('button:has-text("Create Account")'),
+		).toBeVisible();
 
 		// Cleanup
 		await networkSimulator.clearInterceptions();

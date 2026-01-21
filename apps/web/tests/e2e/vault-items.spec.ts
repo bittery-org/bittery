@@ -12,8 +12,17 @@
  * The web app is primarily for viewing and sharing items.
  */
 
-import { test, expect, generateTestUser, BitteryPage } from "../fixtures/test-fixtures";
-import { createNetworkSimulator, waitForVaultsPageReady, waitForVaultDetailReady } from "../fixtures/network-helpers";
+import {
+	createNetworkSimulator,
+	waitForVaultDetailReady,
+	waitForVaultsPageReady,
+} from "../fixtures/network-helpers";
+import {
+	BitteryPage,
+	expect,
+	generateTestUser,
+	test,
+} from "../fixtures/test-fixtures";
 
 test.describe("Vault List", () => {
 	let secretKey: string;
@@ -35,7 +44,11 @@ test.describe("Vault List", () => {
 		// Login before each test
 		const bitteryPage = new BitteryPage(page);
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 	});
 
 	test("should display vaults page after login", async ({ page }) => {
@@ -43,7 +56,9 @@ test.describe("Vault List", () => {
 		await waitForVaultsPageReady(page);
 
 		// Should show vaults page header
-		await expect(page.locator("h1:has-text('Vaults'), h2:has-text('Vaults')")).toBeVisible({
+		await expect(
+			page.locator("h1:has-text('Vaults'), h2:has-text('Vaults')"),
+		).toBeVisible({
 			timeout: 10000,
 		});
 	});
@@ -58,7 +73,9 @@ test.describe("Vault List", () => {
 		await expect(vaultLink).toBeVisible({ timeout: 10000 });
 	});
 
-	test("should navigate to vault detail when clicking a vault", async ({ page }) => {
+	test("should navigate to vault detail when clicking a vault", async ({
+		page,
+	}) => {
 		await page.goto("/vaults");
 		await waitForVaultsPageReady(page);
 
@@ -97,7 +114,11 @@ test.describe("Vault Items View", () => {
 	test.beforeEach(async ({ page }) => {
 		const bitteryPage = new BitteryPage(page);
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 	});
 
 	test("should show empty state when vault has no items", async ({ page }) => {
@@ -112,7 +133,7 @@ test.describe("Vault Items View", () => {
 			await waitForVaultDetailReady(page);
 
 			// Should show empty state or items list
-			const emptyState = page.getByRole('heading', { name: 'No items yet' });
+			const emptyState = page.getByRole("heading", { name: "No items yet" });
 			const itemsList = page.locator('[data-testid="vault-items-scroll-area"]');
 
 			// Either we see empty state or items list
@@ -151,14 +172,18 @@ test.describe("Vault Items View", () => {
 			await waitForVaultDetailReady(page);
 
 			// Category filter should be present
-			const categoryFilter = page.locator('[role="combobox"]').filter({ hasText: /Category|All/i });
+			const categoryFilter = page
+				.locator('[role="combobox"]')
+				.filter({ hasText: /Category|All/i });
 			await expect(categoryFilter).toBeVisible({ timeout: 10000 });
 
 			// Click to open dropdown
 			await categoryFilter.click();
 
 			// Should show category options in the dropdown
-			await expect(page.locator('[role="option"]:has-text("Logins")')).toBeVisible();
+			await expect(
+				page.locator('[role="option"]:has-text("Logins")'),
+			).toBeVisible();
 		}
 	});
 
@@ -173,10 +198,14 @@ test.describe("Vault Items View", () => {
 			await waitForVaultDetailReady(page);
 
 			// Should have Items tab
-			await expect(page.locator('[role="tab"]:has-text("Items")')).toBeVisible({ timeout: 10000 });
+			await expect(page.locator('[role="tab"]:has-text("Items")')).toBeVisible({
+				timeout: 10000,
+			});
 
 			// Should have Members tab
-			await expect(page.locator('[role="tab"]:has-text("Members")')).toBeVisible();
+			await expect(
+				page.locator('[role="tab"]:has-text("Members")'),
+			).toBeVisible();
 		}
 	});
 
@@ -195,7 +224,9 @@ test.describe("Vault Items View", () => {
 			await membersTab.click();
 
 			// Should show vault members section
-			await expect(page.locator("text=Vault Members")).toBeVisible({ timeout: 10000 });
+			await expect(page.locator("text=Vault Members")).toBeVisible({
+				timeout: 10000,
+			});
 		}
 	});
 });
@@ -218,7 +249,11 @@ test.describe("Vault Item Search and Filter", () => {
 	test.beforeEach(async ({ page }) => {
 		const bitteryPage = new BitteryPage(page);
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 	});
 
 	test("should filter items by search query", async ({ page }) => {
@@ -236,7 +271,9 @@ test.describe("Vault Item Search and Filter", () => {
 
 			// Either shows "No matching items" or filtered results - wait for filter to apply
 			const noResults = page.locator("text=No matching items");
-			const hasEmptyState = await noResults.isVisible({ timeout: 3000 }).catch(() => false);
+			const hasEmptyState = await noResults
+				.isVisible({ timeout: 3000 })
+				.catch(() => false);
 
 			if (hasEmptyState) {
 				await expect(noResults).toBeVisible();
@@ -258,7 +295,9 @@ test.describe("Vault Item Search and Filter", () => {
 			await searchInput.fill("test-search");
 
 			// Clear button should appear
-			const clearButton = page.locator('button:near(:text("Search"))').filter({ has: page.locator('svg') });
+			const clearButton = page
+				.locator('button:near(:text("Search"))')
+				.filter({ has: page.locator("svg") });
 
 			if (await clearButton.isVisible({ timeout: 2000 })) {
 				await clearButton.click();
@@ -308,10 +347,16 @@ test.describe("Vault Item Detail Sheet", () => {
 	test.beforeEach(async ({ page }) => {
 		const bitteryPage = new BitteryPage(page);
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 	});
 
-	test("should open item detail sheet when clicking an item", async ({ page }) => {
+	test("should open item detail sheet when clicking an item", async ({
+		page,
+	}) => {
 		await page.goto("/vaults");
 		await waitForVaultsPageReady(page);
 
@@ -322,15 +367,20 @@ test.describe("Vault Item Detail Sheet", () => {
 			await waitForVaultDetailReady(page);
 
 			// Find an item in the list
-			const itemRow = page.locator('[class*="rounded-lg"][class*="border"]').filter({
-				has: page.locator('.font-medium'),
-			}).first();
+			const itemRow = page
+				.locator('[class*="rounded-lg"][class*="border"]')
+				.filter({
+					has: page.locator(".font-medium"),
+				})
+				.first();
 
 			if (await itemRow.isVisible({ timeout: 5000 })) {
 				await itemRow.click();
 
 				// Sheet should open
-				const sheet = page.locator('[role="dialog"]').or(page.locator('[data-state="open"]'));
+				const sheet = page
+					.locator('[role="dialog"]')
+					.or(page.locator('[data-state="open"]'));
 				await expect(sheet).toBeVisible({ timeout: 5000 });
 			}
 		}
@@ -360,13 +410,21 @@ test.describe("Network Resilience - Vault Operations", () => {
 
 		const bitteryPage = new BitteryPage(page);
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 
 		await page.goto("/vaults");
 
 		// Should show loading skeleton
-		const skeleton = page.locator('[class*="skeleton"], [class*="animate-pulse"]');
-		const hasLoading = await skeleton.isVisible({ timeout: 2000 }).catch(() => false);
+		const skeleton = page.locator(
+			'[class*="skeleton"], [class*="animate-pulse"]',
+		);
+		const hasLoading = await skeleton
+			.isVisible({ timeout: 2000 })
+			.catch(() => false);
 
 		// Either shows loading or content (fast enough to skip loading)
 		expect(true).toBeTruthy();
@@ -379,7 +437,11 @@ test.describe("Network Resilience - Vault Operations", () => {
 
 		const bitteryPage = new BitteryPage(page);
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 
 		await page.goto("/vaults");
 		await waitForVaultsPageReady(page);
@@ -400,7 +462,11 @@ test.describe("Network Resilience - Vault Operations", () => {
 
 		const bitteryPage = new BitteryPage(page);
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 
 		// Simulate intermittent connectivity
 		await networkSimulator.simulateIntermittentConnectivity(0.3);

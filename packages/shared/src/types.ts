@@ -163,4 +163,3 @@ export type ItemDetailDisplayData =
 	| CreditCardDisplayData
 	| IdentityDisplayData
 	| TotpDisplayData;
-

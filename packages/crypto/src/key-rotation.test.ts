@@ -160,7 +160,10 @@ describe("Shared Vault Key Encryption Feature", () => {
 			// biome-ignore lint/style/noNonNullAssertion: We know this is defined here
 			ownerKeyEntry!.encryptedVaultKey,
 		) as EncryptedData;
-		const ownerDecryptedKey = await decrypt(ownerEncryptedData, mockMasterUnlockKey);
+		const ownerDecryptedKey = await decrypt(
+			ownerEncryptedData,
+			mockMasterUnlockKey,
+		);
 		expect(ownerDecryptedKey).toBe(rotationResult.newVaultKeyBase64);
 
 		// Verify member1 can decrypt the new vault key

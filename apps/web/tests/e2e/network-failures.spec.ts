@@ -10,8 +10,18 @@
  * - DNS failures
  */
 
-import { test, expect, generateTestUser, BitteryPage } from "../fixtures/test-fixtures";
-import { createNetworkSimulator, waitForLoginPageReady, waitForVaultsPageReady, waitForPageReady } from "../fixtures/network-helpers";
+import {
+	createNetworkSimulator,
+	waitForLoginPageReady,
+	waitForPageReady,
+	waitForVaultsPageReady,
+} from "../fixtures/network-helpers";
+import {
+	BitteryPage,
+	expect,
+	generateTestUser,
+	test,
+} from "../fixtures/test-fixtures";
 
 test.describe("Complete Network Outage", () => {
 	let secretKey: string;
@@ -54,13 +64,17 @@ test.describe("Complete Network Outage", () => {
 
 		// When offline, requests hang - the form should show loading state or error
 		// Either a toast appears OR the form stays in loading state (both are valid handling)
-		const toast = page.locator('[data-sonner-toast]').filter({ hasText: /network|offline|failed|error/i });
+		const toast = page
+			.locator("[data-sonner-toast]")
+			.filter({ hasText: /network|offline|failed|error/i });
 		const loadingButton = page.locator('button:has-text("Signing In...")');
 
 		// Wait a bit for either toast or loading state
 		await Promise.race([
 			toast.waitFor({ state: "visible", timeout: 5000 }).catch(() => {}),
-			loadingButton.waitFor({ state: "visible", timeout: 5000 }).catch(() => {})
+			loadingButton
+				.waitFor({ state: "visible", timeout: 5000 })
+				.catch(() => {}),
 		]);
 
 		// Should NOT have navigated away - still on login page
@@ -75,7 +89,11 @@ test.describe("Complete Network Outage", () => {
 
 		// Login first
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 
 		// Navigate to vaults
 		await page.goto("/vaults");
@@ -100,7 +118,11 @@ test.describe("Complete Network Outage", () => {
 		const bitteryPage = new BitteryPage(page);
 
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 
 		await page.goto("/vaults");
 		await waitForVaultsPageReady(page);
@@ -143,7 +165,11 @@ test.describe("Slow Network Conditions", () => {
 		await networkSimulator.simulateSlowNetwork(3000);
 
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 
 		await page.goto("/vaults");
 
@@ -153,7 +179,9 @@ test.describe("Slow Network Conditions", () => {
 			.or(page.locator('[class*="animate-pulse"]'))
 			.or(page.locator('[class*="animate-spin"]'));
 
-		const hasLoading = await loadingIndicator.isVisible({ timeout: 2000 }).catch(() => false);
+		const hasLoading = await loadingIndicator
+			.isVisible({ timeout: 2000 })
+			.catch(() => false);
 
 		// Eventually the page should load
 		await waitForVaultsPageReady(page);
@@ -184,7 +212,11 @@ test.describe("Slow Network Conditions", () => {
 		const bitteryPage = new BitteryPage(page);
 
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 
 		// Slow down vault API calls
 		await networkSimulator.simulateSlowNetwork(4000);
@@ -216,12 +248,18 @@ test.describe("Intermittent Connectivity", () => {
 		await context.close();
 	});
 
-	test("should handle intermittent failures during page load", async ({ page }) => {
+	test("should handle intermittent failures during page load", async ({
+		page,
+	}) => {
 		const networkSimulator = createNetworkSimulator(page);
 		const bitteryPage = new BitteryPage(page);
 
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 
 		// 30% failure rate
 		await networkSimulator.simulateIntermittentConnectivity(0.3);
@@ -242,7 +280,11 @@ test.describe("Intermittent Connectivity", () => {
 		const bitteryPage = new BitteryPage(page);
 
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 
 		// Track API requests
 		const requests = await networkSimulator.trackApiRequests();
@@ -282,18 +324,30 @@ test.describe("API Error Responses", () => {
 		const bitteryPage = new BitteryPage(page);
 
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 
 		// Simulate 500 error on vault list
-		await networkSimulator.simulateTrpcFailure("vault.list", "INTERNAL_SERVER_ERROR");
+		await networkSimulator.simulateTrpcFailure(
+			"vault.list",
+			"INTERNAL_SERVER_ERROR",
+		);
 
 		await page.goto("/vaults");
 
 		// Wait for error state to appear
-		const errorIndicator = page.locator("text=error").or(page.locator("text=failed")).or(page.locator('[class*="error"]'));
-		await errorIndicator.waitFor({ state: "visible", timeout: 10000 }).catch(() => {
-			// Page might handle error differently
-		});
+		const errorIndicator = page
+			.locator("text=error")
+			.or(page.locator("text=failed"))
+			.or(page.locator('[class*="error"]'));
+		await errorIndicator
+			.waitFor({ state: "visible", timeout: 10000 })
+			.catch(() => {
+				// Page might handle error differently
+			});
 
 		// Should show error state or fallback UI
 		// The exact behavior depends on error handling implementation
@@ -306,10 +360,17 @@ test.describe("API Error Responses", () => {
 		const bitteryPage = new BitteryPage(page);
 
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 
 		// Simulate service unavailable
-		await networkSimulator.simulateTrpcFailure("vault.list", "SERVICE_UNAVAILABLE");
+		await networkSimulator.simulateTrpcFailure(
+			"vault.list",
+			"SERVICE_UNAVAILABLE",
+		);
 
 		await page.goto("/vaults");
 
@@ -324,7 +385,11 @@ test.describe("API Error Responses", () => {
 		const bitteryPage = new BitteryPage(page);
 
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 
 		// Simulate rate limiting
 		await networkSimulator.simulateTrpcFailure("vault.list", "RATE_LIMITED");
@@ -344,7 +409,11 @@ test.describe("API Error Responses", () => {
 		const bitteryPage = new BitteryPage(page);
 
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 
 		// Simulate unauthorized (session expired)
 		await networkSimulator.simulateTrpcFailure("vault.list", "UNAUTHORIZED");
@@ -358,7 +427,11 @@ test.describe("API Error Responses", () => {
 
 		// Should redirect to login or show session expired message
 		const isOnLogin = page.url().includes("/login");
-		const hasAuthError = await page.locator("text=unauthorized").or(page.locator("text=sign in")).isVisible({ timeout: 2000 }).catch(() => false);
+		const hasAuthError = await page
+			.locator("text=unauthorized")
+			.or(page.locator("text=sign in"))
+			.isVisible({ timeout: 2000 })
+			.catch(() => false);
 
 		// Either redirected to login or showing auth error
 		expect(isOnLogin || hasAuthError || true).toBeTruthy();
@@ -387,7 +460,11 @@ test.describe("Connection Timeouts", () => {
 		const bitteryPage = new BitteryPage(page);
 
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 
 		// Simulate timeout
 		await networkSimulator.simulateTimeout("**/trpc/vault.list*", 60000);
@@ -395,10 +472,15 @@ test.describe("Connection Timeouts", () => {
 		await page.goto("/vaults");
 
 		// Wait for page to show loading state or timeout message
-		const loadingOrError = page.locator('[class*="animate-spin"]').or(page.locator("text=Loading")).or(page.locator("text=timeout"));
-		await loadingOrError.waitFor({ state: "visible", timeout: 15000 }).catch(() => {
-			// Might not show these specific states
-		});
+		const loadingOrError = page
+			.locator('[class*="animate-spin"]')
+			.or(page.locator("text=Loading"))
+			.or(page.locator("text=timeout"));
+		await loadingOrError
+			.waitFor({ state: "visible", timeout: 15000 })
+			.catch(() => {
+				// Might not show these specific states
+			});
 
 		// Page should show loading state or timeout message
 
@@ -426,7 +508,11 @@ test.describe("Connection Reset", () => {
 		const bitteryPage = new BitteryPage(page);
 
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 
 		// Simulate connection reset
 		await networkSimulator.simulateConnectionReset("**/trpc/vault.list*");
@@ -443,7 +529,9 @@ test.describe("Connection Reset", () => {
 });
 
 test.describe("Authentication Under Network Stress", () => {
-	test("should complete signup under poor network conditions", async ({ page }) => {
+	test("should complete signup under poor network conditions", async ({
+		page,
+	}) => {
 		const networkSimulator = createNetworkSimulator(page);
 		const bitteryPage = new BitteryPage(page);
 
@@ -459,7 +547,9 @@ test.describe("Authentication Under Network Stress", () => {
 		await networkSimulator.clearInterceptions();
 	});
 
-	test("should complete login under poor network conditions", async ({ page }) => {
+	test("should complete login under poor network conditions", async ({
+		page,
+	}) => {
 		const networkSimulator = createNetworkSimulator(page);
 		const bitteryPage = new BitteryPage(page);
 
@@ -526,7 +616,9 @@ test.describe("Data Integrity Under Network Issues", () => {
 
 		// Form data should be preserved
 		await expect(page.locator("#name")).toHaveValue("Test User");
-		await expect(page.locator("#email")).toHaveValue("preserve-test@example.com");
+		await expect(page.locator("#email")).toHaveValue(
+			"preserve-test@example.com",
+		);
 
 		await networkSimulator.goOnline();
 	});

@@ -14,17 +14,40 @@ import type { Page, Route } from "@playwright/test";
  * Network condition presets
  */
 export const NetworkConditions = {
-	OFFLINE: { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 },
-	SLOW_3G: { offline: false, latency: 400, downloadThroughput: 500 * 1024 / 8, uploadThroughput: 500 * 1024 / 8 },
-	FAST_3G: { offline: false, latency: 100, downloadThroughput: 1.6 * 1024 * 1024 / 8, uploadThroughput: 750 * 1024 / 8 },
-	SLOW_WIFI: { offline: false, latency: 50, downloadThroughput: 2 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8 },
+	OFFLINE: {
+		offline: true,
+		latency: 0,
+		downloadThroughput: 0,
+		uploadThroughput: 0,
+	},
+	SLOW_3G: {
+		offline: false,
+		latency: 400,
+		downloadThroughput: (500 * 1024) / 8,
+		uploadThroughput: (500 * 1024) / 8,
+	},
+	FAST_3G: {
+		offline: false,
+		latency: 100,
+		downloadThroughput: (1.6 * 1024 * 1024) / 8,
+		uploadThroughput: (750 * 1024) / 8,
+	},
+	SLOW_WIFI: {
+		offline: false,
+		latency: 50,
+		downloadThroughput: (2 * 1024 * 1024) / 8,
+		uploadThroughput: (1 * 1024 * 1024) / 8,
+	},
 };
 
 /**
  * API error responses for testing error handling
  */
 export const ApiErrors = {
-	INTERNAL_SERVER_ERROR: { status: 500, body: { error: "Internal Server Error" } },
+	INTERNAL_SERVER_ERROR: {
+		status: 500,
+		body: { error: "Internal Server Error" },
+	},
 	UNAUTHORIZED: { status: 401, body: { error: "Unauthorized" } },
 	FORBIDDEN: { status: 403, body: { error: "Forbidden" } },
 	NOT_FOUND: { status: 404, body: { error: "Not Found" } },
@@ -58,7 +81,7 @@ export class NetworkSimulator {
 	/**
 	 * Simulate slow network by adding delay to all API requests
 	 */
-	async simulateSlowNetwork(delayMs: number = 2000) {
+	async simulateSlowNetwork(delayMs = 2000) {
 		const routePattern = "**/trpc/**";
 		this.interceptedRoutes.add(routePattern);
 
@@ -71,7 +94,7 @@ export class NetworkSimulator {
 	/**
 	 * Simulate intermittent connectivity - randomly fail requests
 	 */
-	async simulateIntermittentConnectivity(failureRate: number = 0.3) {
+	async simulateIntermittentConnectivity(failureRate = 0.3) {
 		const routePattern = "**/trpc/**";
 		this.interceptedRoutes.add(routePattern);
 
@@ -89,7 +112,7 @@ export class NetworkSimulator {
 	 */
 	async simulateApiFailure(
 		endpointPattern: string,
-		error: keyof typeof ApiErrors = "INTERNAL_SERVER_ERROR"
+		error: keyof typeof ApiErrors = "INTERNAL_SERVER_ERROR",
 	) {
 		this.interceptedRoutes.add(endpointPattern);
 
@@ -108,7 +131,7 @@ export class NetworkSimulator {
 	 */
 	async simulateTrpcFailure(
 		procedureName: string,
-		error: keyof typeof ApiErrors = "INTERNAL_SERVER_ERROR"
+		error: keyof typeof ApiErrors = "INTERNAL_SERVER_ERROR",
 	) {
 		const routePattern = `**/trpc/${procedureName}*`;
 		this.interceptedRoutes.add(routePattern);
@@ -131,7 +154,7 @@ export class NetworkSimulator {
 	/**
 	 * Simulate network timeout
 	 */
-	async simulateTimeout(endpointPattern: string, timeoutMs: number = 30000) {
+	async simulateTimeout(endpointPattern: string, timeoutMs = 30000) {
 		this.interceptedRoutes.add(endpointPattern);
 
 		await this.page.route(endpointPattern, async (route) => {
@@ -146,7 +169,7 @@ export class NetworkSimulator {
 	 */
 	async interceptApiResponse(
 		endpointPattern: string,
-		modifier: (response: any) => any
+		modifier: (response: any) => any,
 	) {
 		this.interceptedRoutes.add(endpointPattern);
 
@@ -164,7 +187,9 @@ export class NetworkSimulator {
 	/**
 	 * Track all API requests for assertion
 	 */
-	async trackApiRequests(): Promise<{ method: string; url: string; body?: any }[]> {
+	async trackApiRequests(): Promise<
+		{ method: string; url: string; body?: any }[]
+	> {
 		const requests: { method: string; url: string; body?: any }[] = [];
 
 		this.page.on("request", (request) => {
@@ -172,7 +197,9 @@ export class NetworkSimulator {
 				requests.push({
 					method: request.method(),
 					url: request.url(),
-					body: request.postData() ? JSON.parse(request.postData()!) : undefined,
+					body: request.postData()
+						? JSON.parse(request.postData()!)
+						: undefined,
 				});
 			}
 		});
@@ -183,10 +210,10 @@ export class NetworkSimulator {
 	/**
 	 * Wait for specific API call
 	 */
-	async waitForApiCall(procedureName: string, timeout: number = 10000): Promise<void> {
+	async waitForApiCall(procedureName: string, timeout = 10000): Promise<void> {
 		await this.page.waitForResponse(
 			(response) => response.url().includes(`/trpc/${procedureName}`),
-			{ timeout }
+			{ timeout },
 		);
 	}
 
@@ -204,7 +231,7 @@ export class NetworkSimulator {
 	/**
 	 * Simulate DNS failure
 	 */
-	async simulateDnsFailure(hostPattern: string = "*") {
+	async simulateDnsFailure(hostPattern = "*") {
 		this.interceptedRoutes.add(hostPattern);
 
 		await this.page.route(hostPattern, async (route) => {
@@ -234,7 +261,10 @@ export function createNetworkSimulator(page: Page): NetworkSimulator {
 /**
  * Helper to wait for network idle state
  */
-export async function waitForNetworkIdle(page: Page, timeout: number = 5000): Promise<void> {
+export async function waitForNetworkIdle(
+	page: Page,
+	timeout = 5000,
+): Promise<void> {
 	await page.waitForLoadState("networkidle", { timeout });
 }
 
@@ -243,29 +273,46 @@ export async function waitForNetworkIdle(page: Page, timeout: number = 5000): Pr
  * This function exists for backward compatibility but should be replaced
  * with more reliable DOM-based waiting strategies.
  */
-export async function waitForNetworkIdleExceptSSE(page: Page, _timeout: number = 30000): Promise<void> {
+export async function waitForNetworkIdleExceptSSE(
+	page: Page,
+	_timeout = 30000,
+): Promise<void> {
 	await page.waitForLoadState("load");
 	// Wait for React hydration by checking for interactive elements
-	await page.waitForFunction(() => {
-		return document.readyState === "complete" && !document.querySelector('[data-loading="true"]');
-	}, { timeout: _timeout });
+	await page.waitForFunction(
+		() => {
+			return (
+				document.readyState === "complete" &&
+				!document.querySelector('[data-loading="true"]')
+			);
+		},
+		{ timeout: _timeout },
+	);
 }
 
 /**
  * Wait for page to be ready by checking for common loading indicators.
  * This is a more reliable approach than fixed timeouts.
  */
-export async function waitForPageReady(page: Page, options: {
-	timeout?: number;
-	/** Selector that indicates loading is complete (e.g., main content) */
-	readySelector?: string;
-	/** Selectors that indicate loading is in progress */
-	loadingSelectors?: string[];
-} = {}): Promise<void> {
+export async function waitForPageReady(
+	page: Page,
+	options: {
+		timeout?: number;
+		/** Selector that indicates loading is complete (e.g., main content) */
+		readySelector?: string;
+		/** Selectors that indicate loading is in progress */
+		loadingSelectors?: string[];
+	} = {},
+): Promise<void> {
 	const {
 		timeout = 30000,
 		readySelector,
-		loadingSelectors = ['[data-loading="true"]', '[class*="skeleton"]', '[class*="animate-pulse"]', '[aria-busy="true"]']
+		loadingSelectors = [
+			'[data-loading="true"]',
+			'[class*="skeleton"]',
+			'[class*="animate-pulse"]',
+			'[aria-busy="true"]',
+		],
 	} = options;
 
 	await page.waitForLoadState("domcontentloaded");
@@ -289,61 +336,84 @@ export async function waitForPageReady(page: Page, options: {
 /**
  * Wait for login page to be ready
  */
-export async function waitForLoginPageReady(page: Page, timeout = 10000): Promise<void> {
+export async function waitForLoginPageReady(
+	page: Page,
+	timeout = 10000,
+): Promise<void> {
 	await page.waitForLoadState("domcontentloaded");
 	// Wait for the email input to be visible (always present on login page)
-	await page.locator('#email').waitFor({
+	await page.locator("#email").waitFor({
 		state: "visible",
-		timeout
+		timeout,
 	});
 }
 
 /**
  * Wait for signup form to be ready (after acknowledging secret key)
  */
-export async function waitForSignupFormReady(page: Page, timeout = 10000): Promise<void> {
-	await page.locator('#name').waitFor({ state: "visible", timeout });
+export async function waitForSignupFormReady(
+	page: Page,
+	timeout = 10000,
+): Promise<void> {
+	await page.locator("#name").waitFor({ state: "visible", timeout });
 }
 
 /**
  * Wait for secret key screen to be ready
  */
-export async function waitForSecretKeyScreenReady(page: Page, timeout = 10000): Promise<void> {
+export async function waitForSecretKeyScreenReady(
+	page: Page,
+	timeout = 10000,
+): Promise<void> {
 	// Use the heading which is unique on the page
-	await page.getByRole('heading', { name: 'Save your Secret Key' }).waitFor({
+	await page.getByRole("heading", { name: "Save your Secret Key" }).waitFor({
 		state: "visible",
-		timeout
+		timeout,
 	});
 }
 
 /**
  * Wait for vaults page to be ready
  */
-export async function waitForVaultsPageReady(page: Page, timeout = 15000): Promise<void> {
+export async function waitForVaultsPageReady(
+	page: Page,
+	timeout = 15000,
+): Promise<void> {
 	await page.waitForLoadState("domcontentloaded");
 	// Wait for either the vaults header or a vault link to appear
-	await page.locator('h1:has-text("Vaults"), h2:has-text("Vaults"), a[href*="/vaults/"]').first().waitFor({
-		state: "visible",
-		timeout
-	});
+	await page
+		.locator(
+			'h1:has-text("Vaults"), h2:has-text("Vaults"), a[href*="/vaults/"]',
+		)
+		.first()
+		.waitFor({
+			state: "visible",
+			timeout,
+		});
 }
 
 /**
  * Wait for vault detail page to be ready
  */
-export async function waitForVaultDetailReady(page: Page, timeout = 15000): Promise<void> {
+export async function waitForVaultDetailReady(
+	page: Page,
+	timeout = 15000,
+): Promise<void> {
 	await page.waitForLoadState("domcontentloaded");
 	// Wait for the Items tab to appear (always present on vault detail)
-	await page.getByRole('tab', { name: 'Items' }).waitFor({
+	await page.getByRole("tab", { name: "Items" }).waitFor({
 		state: "visible",
-		timeout
+		timeout,
 	});
 }
 
 /**
  * Wait for home page to be ready after login/signup
  */
-export async function waitForHomePageReady(page: Page, timeout = 15000): Promise<void> {
+export async function waitForHomePageReady(
+	page: Page,
+	timeout = 15000,
+): Promise<void> {
 	await page.waitForURL("**/home", { timeout });
 	await page.waitForLoadState("domcontentloaded");
 }
@@ -351,9 +421,13 @@ export async function waitForHomePageReady(page: Page, timeout = 15000): Promise
 /**
  * Wait for a toast notification to appear
  */
-export async function waitForToast(page: Page, textPattern: RegExp | string, timeout = 10000): Promise<void> {
-	const toast = page.locator('[data-sonner-toast]').filter({
-		hasText: typeof textPattern === 'string' ? textPattern : textPattern
+export async function waitForToast(
+	page: Page,
+	textPattern: RegExp | string,
+	timeout = 10000,
+): Promise<void> {
+	const toast = page.locator("[data-sonner-toast]").filter({
+		hasText: typeof textPattern === "string" ? textPattern : textPattern,
 	});
 	await toast.waitFor({ state: "visible", timeout });
 }
@@ -361,34 +435,43 @@ export async function waitForToast(page: Page, textPattern: RegExp | string, tim
 /**
  * Wait for a dialog/modal to be visible
  */
-export async function waitForDialog(page: Page, timeout = 10000): Promise<void> {
+export async function waitForDialog(
+	page: Page,
+	timeout = 10000,
+): Promise<void> {
 	await page.locator('[role="dialog"]').waitFor({ state: "visible", timeout });
 }
 
 /**
  * Wait for a dialog/modal to close
  */
-export async function waitForDialogClosed(page: Page, timeout = 10000): Promise<void> {
+export async function waitForDialogClosed(
+	page: Page,
+	timeout = 10000,
+): Promise<void> {
 	await page.locator('[role="dialog"]').waitFor({ state: "hidden", timeout });
 }
 
 /**
  * Wait for share page to load (either shows content or error)
  */
-export async function waitForSharePageReady(page: Page, timeout = 15000): Promise<void> {
+export async function waitForSharePageReady(
+	page: Page,
+	timeout = 15000,
+): Promise<void> {
 	await page.waitForLoadState("domcontentloaded");
 	// Wait for either the share content, loading, or error state
-	await page.locator('text=Share Link Not Found').or(
-		page.locator('text=Link Not Available')
-	).or(
-		page.locator('text=Loading shared item')
-	).or(
-		page.locator('[class*="animate-spin"]')
-	).or(
-		page.locator('button:has-text("Go Home")')
-	).first().waitFor({ state: "visible", timeout }).catch(() => {
-		// If none of the expected elements appear, that's fine - page may have loaded successfully
-	});
+	await page
+		.locator("text=Share Link Not Found")
+		.or(page.locator("text=Link Not Available"))
+		.or(page.locator("text=Loading shared item"))
+		.or(page.locator('[class*="animate-spin"]'))
+		.or(page.locator('button:has-text("Go Home")'))
+		.first()
+		.waitFor({ state: "visible", timeout })
+		.catch(() => {
+			// If none of the expected elements appear, that's fine - page may have loaded successfully
+		});
 }
 
 /**
@@ -396,7 +479,9 @@ export async function waitForSharePageReady(page: Page, timeout = 15000): Promis
  */
 export async function hasPendingRequests(page: Page): Promise<boolean> {
 	// This is a workaround since Playwright doesn't expose pending request count directly
-	const navigationPromise = page.waitForLoadState("networkidle", { timeout: 100 });
+	const navigationPromise = page.waitForLoadState("networkidle", {
+		timeout: 100,
+	});
 	try {
 		await navigationPromise;
 		return false;

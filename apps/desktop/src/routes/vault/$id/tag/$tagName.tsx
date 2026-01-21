@@ -27,8 +27,8 @@ function TagRouteComponent() {
 	const { items: decryptedItems, isLoading } = useDecryptedItems(vaultId || "");
 
 	// Filter items by tag
-	const filteredItems = decryptedItems.filter(
-		(item) => item.tags?.includes(decodedTagName),
+	const filteredItems = decryptedItems.filter((item) =>
+		item.tags?.includes(decodedTagName),
 	);
 
 	// Mutation to toggle favorite
@@ -71,7 +71,9 @@ function TagRouteComponent() {
 				<Button
 					variant="ghost"
 					size="icon"
-					onClick={() => navigate({ to: "/vault/$id", params: { id: vaultId } })}
+					onClick={() =>
+						navigate({ to: "/vault/$id", params: { id: vaultId } })
+					}
 				>
 					<ArrowLeft className="size-4" />
 				</Button>
@@ -87,7 +89,8 @@ function TagRouteComponent() {
 				<div>
 					<h2 className="font-semibold text-lg">{decodedTagName}</h2>
 					<p className="text-muted-foreground text-sm">
-						{filteredItems.length} {filteredItems.length === 1 ? "item" : "items"}
+						{filteredItems.length}{" "}
+						{filteredItems.length === 1 ? "item" : "items"}
 					</p>
 				</div>
 			</div>
@@ -102,7 +105,9 @@ function TagRouteComponent() {
 						>
 							<Tag size={48} style={{ color: tagColor }} />
 						</div>
-						<h3 className="mb-2 font-semibold text-lg">No items with this tag</h3>
+						<h3 className="mb-2 font-semibold text-lg">
+							No items with this tag
+						</h3>
 						<p className="text-muted-foreground text-sm">
 							Items tagged with "{decodedTagName}" will appear here
 						</p>

@@ -12,6 +12,10 @@ import {
 	Sheet,
 	SheetContent,
 	Skeleton,
+	Tabs,
+	TabsContent,
+	TabsList,
+	TabsTrigger,
 } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -23,7 +27,6 @@ import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { VaultMemberList } from "@/components/vaults/vault-member-list";
 import { useDecryptedItems } from "@/hooks/use-decrypted-items";
 import { useAvailableTags } from "@/hooks/use-vault-tags";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@bittery/ui";
 
 export const Route = createFileRoute("/_app/vaults/$vaultId/")({
 	component: VaultDetailPage,

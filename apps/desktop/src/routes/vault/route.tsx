@@ -20,6 +20,7 @@ import { ImportDialog } from "../../components/vault/import-dialog";
 import { useVaultOperations } from "../../components/vault/use-vault-operations";
 import { VaultHeader } from "../../components/vault/vault-header";
 import { VaultSidebar } from "../../components/vault/vault-sidebar";
+import { useCrossVaultTags } from "../../hooks/use-cross-vault-tags";
 import { trpc } from "../../lib/providers";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
@@ -70,6 +71,9 @@ function RouteComponent() {
 			return keys;
 		},
 	});
+
+	// Get cross-vault tags for sidebar
+	const { tags: crossVaultTags } = useCrossVaultTags();
 
 	const params = useParams({ strict: false });
 	const navigate = useNavigate();
@@ -177,6 +181,7 @@ function RouteComponent() {
 			<div className="flex flex-1 overflow-hidden">
 				<VaultSidebar
 					vaults={vaultKeys || []}
+					tags={crossVaultTags}
 					currentVaultId={params.id}
 					onNewVault={() => setIsNewVaultDialogOpen(true)}
 					onEditVault={handleOpenEditVault}

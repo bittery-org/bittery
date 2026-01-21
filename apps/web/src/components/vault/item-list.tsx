@@ -18,8 +18,8 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { Key, Search, Smartphone, Star, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useQueryInvalidator } from "../../providers/sync-provider";
 import { useAvailableTags } from "../../hooks/use-vault-tags";
+import { useQueryInvalidator } from "../../providers/sync-provider";
 import { Favicon } from "./favicon";
 import { TagBadge } from "./tag-badge";
 import { TagFilter } from "./tag-filter";

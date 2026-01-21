@@ -31,7 +31,12 @@ export async function seedTestVaultItem(
 		password?: string;
 		notes?: string;
 	},
-	category: "login" | "secure-note" | "credit-card" | "identity" | "totp" = "login"
+	category:
+		| "login"
+		| "secure-note"
+		| "credit-card"
+		| "identity"
+		| "totp" = "login",
 ): Promise<string | null> {
 	// This would need to be called through the tRPC client
 	// For E2E tests, we'll create items through the UI flow if possible
@@ -55,7 +60,7 @@ export async function seedTestVaultItem(
 				return null;
 			}
 		},
-		{ vaultId, itemData, category }
+		{ vaultId, itemData, category },
 	);
 
 	return result;
@@ -99,7 +104,7 @@ export async function getUserVaults(page: Page): Promise<VaultInfo[]> {
 
 			if (nameEl && hrefEl) {
 				const href = hrefEl.getAttribute("href") || "";
-				const idMatch = href.match(/\/vaults\/([^\/]+)/);
+				const idMatch = href.match(/\/vaults\/([^/]+)/);
 
 				vaultList.push({
 					id: idMatch ? idMatch[1] : "",
@@ -123,7 +128,7 @@ export async function getUserVaults(page: Page): Promise<VaultInfo[]> {
 export async function waitForApiResponse(
 	page: Page,
 	urlPattern: string | RegExp,
-	timeout = 10000
+	timeout = 10000,
 ): Promise<any> {
 	const response = await page.waitForResponse(
 		(resp) => {
@@ -133,7 +138,7 @@ export async function waitForApiResponse(
 			}
 			return urlPattern.test(url);
 		},
-		{ timeout }
+		{ timeout },
 	);
 
 	try {
@@ -150,7 +155,7 @@ export async function mockApiEndpoint(
 	page: Page,
 	urlPattern: string,
 	response: object,
-	statusCode = 200
+	statusCode = 200,
 ): Promise<void> {
 	await page.route(urlPattern, async (route) => {
 		await route.fulfill({
@@ -164,7 +169,10 @@ export async function mockApiEndpoint(
 /**
  * Clear API mocks
  */
-export async function clearApiMocks(page: Page, urlPattern: string): Promise<void> {
+export async function clearApiMocks(
+	page: Page,
+	urlPattern: string,
+): Promise<void> {
 	await page.unroute(urlPattern);
 }
 

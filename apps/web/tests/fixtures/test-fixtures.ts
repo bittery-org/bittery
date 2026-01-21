@@ -5,9 +5,13 @@
  * It provides utilities for authentication, database cleanup, and test isolation.
  */
 
-import { test as base, type Page, type BrowserContext } from "@playwright/test";
+import { type BrowserContext, test as base, type Page } from "@playwright/test";
 import { nanoid } from "nanoid";
-import { waitForLoginPageReady, waitForVaultsPageReady, waitForHomePageReady } from "./network-helpers";
+import {
+	waitForHomePageReady,
+	waitForLoginPageReady,
+	waitForVaultsPageReady,
+} from "./network-helpers";
 
 /**
  * Test user credentials interface
@@ -133,7 +137,9 @@ export class BitteryPage {
 	 * Wait for toast message
 	 */
 	async waitForToast(text: string, timeout = 10000) {
-		const toast = this.page.locator('[data-sonner-toast]').filter({ hasText: text });
+		const toast = this.page
+			.locator("[data-sonner-toast]")
+			.filter({ hasText: text });
 		await toast.waitFor({ state: "visible", timeout });
 		return toast;
 	}
@@ -142,10 +148,12 @@ export class BitteryPage {
 	 * Dismiss all toasts
 	 */
 	async dismissToasts() {
-		const toasts = this.page.locator('[data-sonner-toast]');
+		const toasts = this.page.locator("[data-sonner-toast]");
 		const count = await toasts.count();
 		for (let i = 0; i < count; i++) {
-			const closeButton = toasts.nth(i).locator('button[aria-label="Close toast"]');
+			const closeButton = toasts
+				.nth(i)
+				.locator('button[aria-label="Close toast"]');
 			if (await closeButton.isVisible()) {
 				await closeButton.click();
 			}
@@ -157,12 +165,14 @@ export class BitteryPage {
 	 */
 	async acknowledgeSecretKey(): Promise<string> {
 		// Wait for the secret key to be generated and displayed
-		await this.page.waitForSelector('text=Your Secret Key', { timeout: 10000 });
+		await this.page.waitForSelector("text=Your Secret Key", { timeout: 10000 });
 
 		// Get the secret key
-		const secretKeyElement = this.page.locator('.font-mono.text-sm.tracking-wide');
+		const secretKeyElement = this.page.locator(
+			".font-mono.text-sm.tracking-wide",
+		);
 		await secretKeyElement.waitFor({ state: "visible" });
-		const secretKey = await secretKeyElement.textContent() || "";
+		const secretKey = (await secretKeyElement.textContent()) || "";
 
 		// Click the acknowledge button
 		await this.page.click('button:has-text("I have saved my Secret Key")');
@@ -175,17 +185,17 @@ export class BitteryPage {
 	 */
 	async fillSignupForm(user: Omit<TestUser, "secretKey">) {
 		// Fill server URL if it's empty or default
-		const serverUrlInput = this.page.locator('#serverUrl');
+		const serverUrlInput = this.page.locator("#serverUrl");
 		const currentValue = await serverUrlInput.inputValue();
 		if (!currentValue || currentValue === "https://your-server.com") {
 			await serverUrlInput.fill("http://localhost:3000");
 		}
 
 		// Fill the form fields
-		await this.page.fill('#name', user.name);
-		await this.page.fill('#organizationName', user.organizationName);
-		await this.page.fill('#email', user.email);
-		await this.page.fill('#password', user.password);
+		await this.page.fill("#name", user.name);
+		await this.page.fill("#organizationName", user.organizationName);
+		await this.page.fill("#email", user.email);
+		await this.page.fill("#password", user.password);
 	}
 
 	/**
@@ -227,18 +237,18 @@ export class BitteryPage {
 		await this.goToLogin();
 
 		// Fill server URL
-		const serverUrlInput = this.page.locator('#serverUrl');
+		const serverUrlInput = this.page.locator("#serverUrl");
 		await serverUrlInput.fill("http://localhost:3000");
 
 		// Fill login credentials
-		await this.page.fill('#email', email);
+		await this.page.fill("#email", email);
 
 		// Wait for secret key input to be ready (it may be dynamically shown)
-		const secretKeyInput = this.page.locator('#secretKey');
+		const secretKeyInput = this.page.locator("#secretKey");
 		await secretKeyInput.waitFor({ state: "visible", timeout: 10000 });
 
 		await secretKeyInput.fill(secretKey);
-		await this.page.fill('#password', password);
+		await this.page.fill("#password", password);
 
 		// Submit
 		await this.page.click('button:has-text("Sign In")');

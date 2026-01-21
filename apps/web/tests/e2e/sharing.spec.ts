@@ -9,8 +9,19 @@
  * - Email verification flow for restricted links
  */
 
-import { test, expect, generateTestUser, BitteryPage } from "../fixtures/test-fixtures";
-import { createNetworkSimulator, waitForSharePageReady, waitForVaultsPageReady, waitForVaultDetailReady, waitForDialog } from "../fixtures/network-helpers";
+import {
+	createNetworkSimulator,
+	waitForDialog,
+	waitForSharePageReady,
+	waitForVaultDetailReady,
+	waitForVaultsPageReady,
+} from "../fixtures/network-helpers";
+import {
+	BitteryPage,
+	expect,
+	generateTestUser,
+	test,
+} from "../fixtures/test-fixtures";
 
 test.describe("Share Access Page", () => {
 	test("should show error for invalid share token", async ({ page }) => {
@@ -20,16 +31,19 @@ test.describe("Share Access Page", () => {
 
 		// Should show error state - either "Share Link Not Found" (query error) or "Link Not Available" (invalid link)
 		// Use text locators combined with .or() for reliable matching
-		const errorTitle = page.locator('text=Share Link Not Found')
-			.or(page.locator('text=Link Not Available'))
-			.or(page.locator('text=Link Expired'));
+		const errorTitle = page
+			.locator("text=Share Link Not Found")
+			.or(page.locator("text=Link Not Available"))
+			.or(page.locator("text=Link Expired"));
 		await expect(errorTitle.first()).toBeVisible({ timeout: 10000 });
 
 		// Should have a "Go Home" button
-		await expect(page.getByRole('button', { name: 'Go Home' })).toBeVisible();
+		await expect(page.getByRole("button", { name: "Go Home" })).toBeVisible();
 	});
 
-	test("should display loading state while fetching share info", async ({ page }) => {
+	test("should display loading state while fetching share info", async ({
+		page,
+	}) => {
 		const networkSimulator = createNetworkSimulator(page);
 
 		// Slow down network to see loading state
@@ -38,8 +52,12 @@ test.describe("Share Access Page", () => {
 		await page.goto("/share/test-token-123");
 
 		// Should show loading indicator
-		const loadingIndicator = page.locator("text=Loading shared item").or(page.locator('[class*="animate-spin"]'));
-		const isLoading = await loadingIndicator.isVisible({ timeout: 2000 }).catch(() => false);
+		const loadingIndicator = page
+			.locator("text=Loading shared item")
+			.or(page.locator('[class*="animate-spin"]'));
+		const isLoading = await loadingIndicator
+			.isVisible({ timeout: 2000 })
+			.catch(() => false);
 
 		// Either shows loading or error (if token is invalid)
 		expect(true).toBeTruthy();
@@ -56,9 +74,11 @@ test.describe("Share Access Page", () => {
 		await waitForSharePageReady(page);
 
 		// Should show some error state (expired, not found, etc.)
-		const errorState = page.locator("text=Expired").or(
-			page.locator("text=Not Found").or(page.locator("text=Not Available"))
-		);
+		const errorState = page
+			.locator("text=Expired")
+			.or(
+				page.locator("text=Not Found").or(page.locator("text=Not Available")),
+			);
 
 		// Wait for error state to appear
 		await errorState.waitFor({ state: "visible", timeout: 10000 }).catch(() => {
@@ -70,7 +90,9 @@ test.describe("Share Access Page", () => {
 		await page.goto("/share/nonexistent-token");
 		await waitForSharePageReady(page);
 
-		const goHomeButton = page.locator('button:has-text("Go Home")').or(page.locator('a:has-text("Go Home")'));
+		const goHomeButton = page
+			.locator('button:has-text("Go Home")')
+			.or(page.locator('a:has-text("Go Home")'));
 
 		if (await goHomeButton.isVisible({ timeout: 5000 })) {
 			await goHomeButton.click();
@@ -99,7 +121,11 @@ test.describe("Share Dialog - Authenticated User", () => {
 	test.beforeEach(async ({ page }) => {
 		const bitteryPage = new BitteryPage(page);
 		testUser.secretKey = secretKey;
-		await bitteryPage.login(testUser.email, testUser.password, testUser.secretKey);
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
 	});
 
 	test("should find share button in item detail view", async ({ page }) => {
@@ -129,7 +155,9 @@ test.describe("Share Dialog - Authenticated User", () => {
 
 				// Look for share button
 				const shareButton = page.locator('button:has-text("Share")');
-				const hasShareButton = await shareButton.isVisible({ timeout: 5000 }).catch(() => false);
+				const hasShareButton = await shareButton
+					.isVisible({ timeout: 5000 })
+					.catch(() => false);
 
 				// Share button may or may not be present depending on item
 				expect(true).toBeTruthy();
@@ -137,7 +165,9 @@ test.describe("Share Dialog - Authenticated User", () => {
 		}
 	});
 
-	test("should display share dialog configuration options", async ({ page }) => {
+	test("should display share dialog configuration options", async ({
+		page,
+	}) => {
 		await page.goto("/vaults");
 		await waitForVaultsPageReady(page);
 
@@ -180,7 +210,9 @@ test.describe("Share Dialog - Authenticated User", () => {
 		}
 	});
 
-	test("should allow selecting email-restricted access mode", async ({ page }) => {
+	test("should allow selecting email-restricted access mode", async ({
+		page,
+	}) => {
 		await page.goto("/vaults");
 		await waitForVaultsPageReady(page);
 
@@ -217,13 +249,17 @@ test.describe("Share Dialog - Authenticated User", () => {
 						.click();
 
 					// Should show email input field
-					await expect(page.locator("text=Allowed email addresses")).toBeVisible({ timeout: 5000 });
+					await expect(
+						page.locator("text=Allowed email addresses"),
+					).toBeVisible({ timeout: 5000 });
 				}
 			}
 		}
 	});
 
-	test("should allow adding email addresses for restricted sharing", async ({ page }) => {
+	test("should allow adding email addresses for restricted sharing", async ({
+		page,
+	}) => {
 		await page.goto("/vaults");
 		await waitForVaultsPageReady(page);
 
@@ -258,14 +294,18 @@ test.describe("Share Dialog - Authenticated User", () => {
 						.click();
 
 					// Add an email
-					const emailInput = page.locator('input[type="email"]').or(page.locator('input[placeholder*="email"]'));
+					const emailInput = page
+						.locator('input[type="email"]')
+						.or(page.locator('input[placeholder*="email"]'));
 					await emailInput.fill("test@example.com");
 
 					const addButton = page.locator('button:has-text("Add")');
 					await addButton.click();
 
 					// Email should be added as a badge
-					await expect(page.locator('text=test@example.com')).toBeVisible({ timeout: 5000 });
+					await expect(page.locator("text=test@example.com")).toBeVisible({
+						timeout: 5000,
+					});
 				}
 			}
 		}
@@ -306,14 +346,18 @@ test.describe("Share Dialog - Authenticated User", () => {
 						.click();
 
 					// Try to add invalid email
-					const emailInput = page.locator('input[type="email"]').or(page.locator('input[placeholder*="email"]'));
+					const emailInput = page
+						.locator('input[type="email"]')
+						.or(page.locator('input[placeholder*="email"]'));
 					await emailInput.fill("invalid-email");
 
 					const addButton = page.locator('button:has-text("Add")');
 					await addButton.click();
 
 					// Should show error toast
-					const toast = page.locator('[data-sonner-toast]').filter({ hasText: /invalid|valid email/i });
+					const toast = page
+						.locator("[data-sonner-toast]")
+						.filter({ hasText: /invalid|valid email/i });
 					await expect(toast).toBeVisible({ timeout: 5000 });
 				}
 			}
@@ -347,14 +391,21 @@ test.describe("Share Dialog - Authenticated User", () => {
 					await shareButton.click();
 
 					// Find and click one-time use checkbox
-					const oneTimeCheckbox = page.locator('#one-time').or(page.locator('[data-state]').filter({ hasText: /one-time/i }));
+					const oneTimeCheckbox = page
+						.locator("#one-time")
+						.or(page.locator("[data-state]").filter({ hasText: /one-time/i }));
 					await oneTimeCheckbox.click();
 
 					// Checkbox should be checked
-					await expect(oneTimeCheckbox).toHaveAttribute("data-state", "checked").catch(() => {
-						// Alternative: check aria-checked
-						return expect(oneTimeCheckbox).toHaveAttribute("aria-checked", "true");
-					});
+					await expect(oneTimeCheckbox)
+						.toHaveAttribute("data-state", "checked")
+						.catch(() => {
+							// Alternative: check aria-checked
+							return expect(oneTimeCheckbox).toHaveAttribute(
+								"aria-checked",
+								"true",
+							);
+						});
 				}
 			}
 		}
@@ -362,7 +413,9 @@ test.describe("Share Dialog - Authenticated User", () => {
 });
 
 test.describe("Email Verification Flow", () => {
-	test("should display email verification form for restricted links", async ({ page }) => {
+	test("should display email verification form for restricted links", async ({
+		page,
+	}) => {
 		// This would require a pre-created restricted share link
 		// We're testing the UI components exist and function correctly
 
@@ -371,7 +424,9 @@ test.describe("Email Verification Flow", () => {
 		expect(true).toBeTruthy();
 	});
 
-	test("should show verification code input after email submission", async ({ page }) => {
+	test("should show verification code input after email submission", async ({
+		page,
+	}) => {
 		// This test would require a real email-restricted share link
 		// For now, we verify the component structure exists
 
@@ -391,11 +446,16 @@ test.describe("Email Verification Flow", () => {
 });
 
 test.describe("Share Link Network Resilience", () => {
-	test("should handle network failure when loading share page", async ({ page }) => {
+	test("should handle network failure when loading share page", async ({
+		page,
+	}) => {
 		const networkSimulator = createNetworkSimulator(page);
 
 		// Simulate network failure
-		await networkSimulator.simulateTrpcFailure("share.getPublicInfo", "INTERNAL_SERVER_ERROR");
+		await networkSimulator.simulateTrpcFailure(
+			"share.getPublicInfo",
+			"INTERNAL_SERVER_ERROR",
+		);
 
 		await page.goto("/share/test-token");
 
@@ -424,7 +484,9 @@ test.describe("Share Link Network Resilience", () => {
 		await page.goto("/share/test-token");
 
 		// Should show loading state
-		const loadingState = page.locator('[class*="animate-spin"]').or(page.locator("text=Loading"));
+		const loadingState = page
+			.locator('[class*="animate-spin"]')
+			.or(page.locator("text=Loading"));
 
 		// Wait for page to settle (either loading or content/error)
 		await page.waitForLoadState("domcontentloaded");

@@ -12,7 +12,7 @@ import {
 	getStoragePublicUrl,
 } from "@bittery/storage";
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, router } from "../index";
@@ -374,6 +374,61 @@ export const vaultRouter = router({
 
 		// Return items with vault metadata
 		return allItems.map((item) => {
+			const vaultMeta = vaultMap.get(item.vaultId)!;
+			return {
+				...item,
+				vault: vaultMeta,
+			};
+		});
+	}),
+
+	/**
+	 * List all deleted items from all accessible vaults (cross-vault trash)
+	 * Returns items with vault metadata and encrypted vault keys
+	 */
+	listAllDeletedItems: protectedProcedure.query(async ({ ctx }) => {
+		// Get all vaults the user has access to
+		const userVaults = await db.query.vaultKey.findMany({
+			where: (vaultKey, { eq }) => eq(vaultKey.userId, ctx.session.userId),
+			with: {
+				vault: true,
+			},
+		});
+
+		if (userVaults.length === 0) {
+			return [];
+		}
+
+		// Get all vault IDs
+		const vaultIds = userVaults.map((vk) => vk.vaultId);
+
+		// Get all deleted items from all vaults
+		const allDeletedItems = await db.query.item.findMany({
+			where: (item, { and }) =>
+				and(inArray(item.vaultId, vaultIds), isNotNull(item.deletedAt)),
+			orderBy: (item, { desc }) => [desc(item.deletedAt)],
+		});
+
+		// Build a map of vault metadata for quick lookup
+		const vaultMap = new Map(
+			userVaults.map((vk) => [
+				vk.vaultId,
+				{
+					id: vk.vault.id,
+					name: vk.vault.name,
+					type: vk.vault.type,
+					icon: vk.vault.icon,
+					imageUrl: vk.vault.imageKey
+						? getStoragePublicUrl(vk.vault.imageKey)
+						: null,
+					encryptedVaultKey: vk.encryptedVaultKey,
+					role: vk.role,
+				},
+			]),
+		);
+
+		// Return items with vault metadata
+		return allDeletedItems.map((item) => {
 			const vaultMeta = vaultMap.get(item.vaultId)!;
 			return {
 				...item,
