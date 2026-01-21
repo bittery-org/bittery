@@ -26,6 +26,10 @@ export default function ItemDetail({
 	data,
 	onEdit,
 	onDelete,
+	onTagsChange,
+	onTagClick,
+	availableTags,
+	isUpdatingTags,
 }: ItemDetailProps) {
 	if (category === "login") {
 		return (
@@ -33,6 +37,10 @@ export default function ItemDetail({
 				data={data as LoginDisplayData}
 				onEdit={onEdit}
 				onDelete={onDelete}
+				onTagsChange={onTagsChange}
+				onTagClick={onTagClick}
+				availableTags={availableTags}
+				isUpdatingTags={isUpdatingTags}
 			/>
 		);
 	}
@@ -42,6 +50,10 @@ export default function ItemDetail({
 				data={data as CreditCardDisplayData}
 				onEdit={onEdit}
 				onDelete={onDelete}
+				onTagsChange={onTagsChange}
+				onTagClick={onTagClick}
+				availableTags={availableTags}
+				isUpdatingTags={isUpdatingTags}
 			/>
 		);
 	}
@@ -51,6 +63,10 @@ export default function ItemDetail({
 				data={data as IdentityDisplayData}
 				onEdit={onEdit}
 				onDelete={onDelete}
+				onTagsChange={onTagsChange}
+				onTagClick={onTagClick}
+				availableTags={availableTags}
+				isUpdatingTags={isUpdatingTags}
 			/>
 		);
 	}
@@ -60,6 +76,10 @@ export default function ItemDetail({
 				data={data as TotpDisplayData}
 				onEdit={onEdit}
 				onDelete={onDelete}
+				onTagsChange={onTagsChange}
+				onTagClick={onTagClick}
+				availableTags={availableTags}
+				isUpdatingTags={isUpdatingTags}
 			/>
 		);
 	}
@@ -68,6 +88,10 @@ export default function ItemDetail({
 			data={data as SecureNoteDisplayData}
 			onEdit={onEdit}
 			onDelete={onDelete}
+			onTagsChange={onTagsChange}
+			onTagClick={onTagClick}
+			availableTags={availableTags}
+			isUpdatingTags={isUpdatingTags}
 		/>
 	);
 }

@@ -34,6 +34,7 @@ export interface IdentityFormData {
 	driversLicense?: string;
 	dateOfBirth?: string;
 	notes: string;
+	tags?: string[];
 }
 
 interface IdentityFormProps {
@@ -82,10 +83,12 @@ export function IdentityForm({
 		},
 		onSubmit: async ({ value }) => {
 			try {
-				const submitData = {
+				const submitData: IdentityFormData = {
 					...value,
 					addresses: addresses.length > 0 ? addresses : undefined,
 					phoneNumbers: phoneNumbers.length > 0 ? phoneNumbers : undefined,
+					// Preserve existing tags from initialData (tags are edited in detail view)
+					tags: initialData?.tags,
 				};
 				await onSubmit(submitData, currentVaultId);
 				toast.success("Identity saved successfully");

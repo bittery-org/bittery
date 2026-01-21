@@ -26,6 +26,7 @@ export interface CreditCardFormData {
 	expiryDate: string;
 	billingAddress: string;
 	notes: string;
+	tags?: string[];
 }
 
 interface CreditCardFormProps {
@@ -66,7 +67,12 @@ export function CreditCardForm({
 		},
 		onSubmit: async ({ value }) => {
 			try {
-				await onSubmit(value, currentVaultId);
+				const submitData: CreditCardFormData = {
+					...value,
+					// Preserve existing tags from initialData (tags are edited in detail view)
+					tags: initialData?.tags,
+				};
+				await onSubmit(submitData, currentVaultId);
 				toast.success("Credit card saved successfully");
 			} catch (error) {
 				const errorMessage =

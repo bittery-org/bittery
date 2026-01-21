@@ -18,6 +18,7 @@ import { Route as VaultIdRouteRouteImport } from './routes/vault/$id/route'
 import { Route as VaultIdIndexRouteImport } from './routes/vault/$id/index'
 import { Route as VaultIdTrashRouteImport } from './routes/vault/$id/trash'
 import { Route as VaultIdItemIdIndexRouteImport } from './routes/vault/$id/$itemId/index'
+import { Route as VaultIdTagTagNameRouteImport } from './routes/vault/$id/tag/$tagName'
 
 const UnlockRoute = UnlockRouteImport.update({
   id: '/unlock',
@@ -64,6 +65,11 @@ const VaultIdItemIdIndexRoute = VaultIdItemIdIndexRouteImport.update({
   path: '/$itemId/',
   getParentRoute: () => VaultIdRouteRoute,
 } as any)
+const VaultIdTagTagNameRoute = VaultIdTagTagNameRouteImport.update({
+  id: '/tag/$tagName',
+  path: '/tag/$tagName',
+  getParentRoute: () => VaultIdRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -74,6 +80,7 @@ export interface FileRoutesByFullPath {
   '/vault/': typeof VaultIndexRoute
   '/vault/$id/trash': typeof VaultIdTrashRoute
   '/vault/$id/': typeof VaultIdIndexRoute
+  '/vault/$id/tag/$tagName': typeof VaultIdTagTagNameRoute
   '/vault/$id/$itemId': typeof VaultIdItemIdIndexRoute
 }
 export interface FileRoutesByTo {
@@ -83,6 +90,7 @@ export interface FileRoutesByTo {
   '/vault': typeof VaultIndexRoute
   '/vault/$id/trash': typeof VaultIdTrashRoute
   '/vault/$id': typeof VaultIdIndexRoute
+  '/vault/$id/tag/$tagName': typeof VaultIdTagTagNameRoute
   '/vault/$id/$itemId': typeof VaultIdItemIdIndexRoute
 }
 export interface FileRoutesById {
@@ -95,6 +103,7 @@ export interface FileRoutesById {
   '/vault/': typeof VaultIndexRoute
   '/vault/$id/trash': typeof VaultIdTrashRoute
   '/vault/$id/': typeof VaultIdIndexRoute
+  '/vault/$id/tag/$tagName': typeof VaultIdTagTagNameRoute
   '/vault/$id/$itemId/': typeof VaultIdItemIdIndexRoute
 }
 export interface FileRouteTypes {
@@ -108,6 +117,7 @@ export interface FileRouteTypes {
     | '/vault/'
     | '/vault/$id/trash'
     | '/vault/$id/'
+    | '/vault/$id/tag/$tagName'
     | '/vault/$id/$itemId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -117,6 +127,7 @@ export interface FileRouteTypes {
     | '/vault'
     | '/vault/$id/trash'
     | '/vault/$id'
+    | '/vault/$id/tag/$tagName'
     | '/vault/$id/$itemId'
   id:
     | '__root__'
@@ -128,6 +139,7 @@ export interface FileRouteTypes {
     | '/vault/'
     | '/vault/$id/trash'
     | '/vault/$id/'
+    | '/vault/$id/tag/$tagName'
     | '/vault/$id/$itemId/'
   fileRoutesById: FileRoutesById
 }
@@ -203,18 +215,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VaultIdItemIdIndexRouteImport
       parentRoute: typeof VaultIdRouteRoute
     }
+    '/vault/$id/tag/$tagName': {
+      id: '/vault/$id/tag/$tagName'
+      path: '/tag/$tagName'
+      fullPath: '/vault/$id/tag/$tagName'
+      preLoaderRoute: typeof VaultIdTagTagNameRouteImport
+      parentRoute: typeof VaultIdRouteRoute
+    }
   }
 }
 
 interface VaultIdRouteRouteChildren {
   VaultIdTrashRoute: typeof VaultIdTrashRoute
   VaultIdIndexRoute: typeof VaultIdIndexRoute
+  VaultIdTagTagNameRoute: typeof VaultIdTagTagNameRoute
   VaultIdItemIdIndexRoute: typeof VaultIdItemIdIndexRoute
 }
 
 const VaultIdRouteRouteChildren: VaultIdRouteRouteChildren = {
   VaultIdTrashRoute: VaultIdTrashRoute,
   VaultIdIndexRoute: VaultIdIndexRoute,
+  VaultIdTagTagNameRoute: VaultIdTagTagNameRoute,
   VaultIdItemIdIndexRoute: VaultIdItemIdIndexRoute,
 }
 

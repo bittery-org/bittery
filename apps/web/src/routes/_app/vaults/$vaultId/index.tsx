@@ -12,10 +12,6 @@ import {
 	Sheet,
 	SheetContent,
 	Skeleton,
-	Tabs,
-	TabsContent,
-	TabsList,
-	TabsTrigger,
 } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -26,6 +22,8 @@ import { ItemList } from "@/components/vault/item-list";
 import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { VaultMemberList } from "@/components/vaults/vault-member-list";
 import { useDecryptedItems } from "@/hooks/use-decrypted-items";
+import { useAvailableTags } from "@/hooks/use-vault-tags";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@bittery/ui";
 
 export const Route = createFileRoute("/_app/vaults/$vaultId/")({
 	component: VaultDetailPage,
@@ -46,8 +44,12 @@ function VaultDetailPage() {
 	const { items: decryptedItems, isLoading: isLoadingItems } =
 		useDecryptedItems(vaultId);
 
+	// Get available tags from decrypted items
+	const availableTags = useAvailableTags(decryptedItems);
+
 	const vault = vaultQuery.data;
 	const canManage = vault?.userRole === "owner" || vault?.userRole === "admin";
+	const canEdit = vault?.userRole !== "read-only";
 
 	const handleItemSelect = (item: DecryptedItem) => {
 		setSelectedItem(item);
@@ -125,10 +127,14 @@ function VaultDetailPage() {
 				>
 					<Card className="flex min-h-0 flex-1 flex-col">
 						<CardHeader className="shrink-0">
-							<CardTitle>Vault Items</CardTitle>
-							<CardDescription>
-								Click on an item to view its details.
-							</CardDescription>
+							<div className="flex items-start justify-between">
+								<div>
+									<CardTitle>Vault Items</CardTitle>
+									<CardDescription>
+										Click on an item to view its details.
+									</CardDescription>
+								</div>
+							</div>
 						</CardHeader>
 						<CardContent className="flex min-h-0 flex-1 flex-col pb-6">
 							<ItemList
@@ -198,6 +204,9 @@ function VaultDetailPage() {
 								category={selectedItem.category}
 								data={selectedItem}
 								item={selectedItem}
+								vaultId={vaultId}
+								availableTags={availableTags}
+								canEdit={canEdit}
 							/>
 						)}
 					</ScrollArea>

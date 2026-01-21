@@ -16,6 +16,7 @@ import type { VaultOption } from "../types";
 export interface SecureNoteFormData {
 	title: string;
 	note: string;
+	tags?: string[];
 }
 
 interface SecureNoteFormProps {
@@ -50,7 +51,12 @@ export function SecureNoteForm({
 		},
 		onSubmit: async ({ value }) => {
 			try {
-				await onSubmit(value, currentVaultId);
+				const submitData: SecureNoteFormData = {
+					...value,
+					// Preserve existing tags from initialData (tags are edited in detail view)
+					tags: initialData?.tags,
+				};
+				await onSubmit(submitData, currentVaultId);
 				toast.success("Note saved successfully");
 			} catch (error) {
 				const errorMessage =

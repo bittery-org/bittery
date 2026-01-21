@@ -30,6 +30,9 @@ export interface ItemDetailProps {
 	data: ItemDetailData;
 	onEdit?: () => void;
 	onDelete?: () => void;
+	vaultId?: string;
+	availableTags?: string[];
+	canEdit?: boolean;
 }
 
 export interface CategoryDetailProps<T> {

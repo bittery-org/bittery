@@ -48,6 +48,8 @@ export interface DecryptedItemData {
 	notes?: string;
 	note?: string;
 	customFields?: CustomField[];
+	// Tags - stored as part of encrypted data
+	tags?: string[];
 	// Credit card fields
 	cardholderName?: string;
 	cardNumber?: string;
@@ -101,6 +103,7 @@ export interface LoginDisplayData {
 	password?: string;
 	notes?: string;
 	customFields?: CustomField[];
+	tags?: string[];
 	totpSecret?: string;
 	totpIssuer?: string;
 	totpAccountName?: string;
@@ -112,6 +115,7 @@ export interface LoginDisplayData {
 export interface SecureNoteDisplayData {
 	title: string;
 	note: string;
+	tags?: string[];
 }
 
 export interface CreditCardDisplayData {
@@ -122,6 +126,7 @@ export interface CreditCardDisplayData {
 	expiryDate: string;
 	billingAddress?: string;
 	notes?: string;
+	tags?: string[];
 }
 
 export interface IdentityDisplayData {
@@ -137,6 +142,7 @@ export interface IdentityDisplayData {
 	driversLicense?: string;
 	dateOfBirth?: string;
 	notes?: string;
+	tags?: string[];
 }
 
 export interface TotpDisplayData {
@@ -148,6 +154,7 @@ export interface TotpDisplayData {
 	totpDigits?: TotpDigits;
 	totpPeriod?: number;
 	notes?: string;
+	tags?: string[];
 }
 
 export type ItemDetailDisplayData =
@@ -156,3 +163,4 @@ export type ItemDetailDisplayData =
 	| CreditCardDisplayData
 	| IdentityDisplayData
 	| TotpDisplayData;
+

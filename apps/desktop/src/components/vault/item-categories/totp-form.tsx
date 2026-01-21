@@ -34,6 +34,7 @@ export interface TotpFormData {
 	totpDigits: TotpDigits;
 	totpPeriod: number;
 	notes?: string;
+	tags?: string[];
 }
 
 interface TotpFormProps {
@@ -97,6 +98,8 @@ export function TotpForm({
 					totpDigits: value.totpDigits,
 					totpPeriod: value.totpPeriod,
 					notes: value.notes || undefined,
+					// Preserve existing tags from initialData (tags are edited in detail view)
+					tags: initialData?.tags,
 				};
 				await onSubmit(submitData, currentVaultId);
 				toast.success("Authenticator saved successfully");

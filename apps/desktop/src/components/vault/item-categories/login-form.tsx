@@ -40,6 +40,7 @@ export interface LoginFormData {
 	password: string;
 	notes: string;
 	customFields?: CustomField[];
+	tags?: string[];
 	// TOTP fields - native to login items
 	totpSecret?: string;
 	totpIssuer?: string;
@@ -68,8 +69,6 @@ export function LoginForm({
 	vaults = [],
 	selectedVaultId,
 }: LoginFormProps) {
-	console.log(initialData);
-
 	const [additionalUrls, setAdditionalUrls] = useState<string[]>(
 		initialData?.urls || [],
 	);
@@ -131,6 +130,8 @@ export function LoginForm({
 					...value,
 					urls: additionalUrls.length > 0 ? additionalUrls : undefined,
 					customFields: customFields.length > 0 ? customFields : undefined,
+					// Preserve existing tags from initialData (tags are edited in detail view)
+					tags: initialData?.tags,
 					// Include TOTP fields if configured
 					totpSecret:
 						showTotpSection && totpSecret

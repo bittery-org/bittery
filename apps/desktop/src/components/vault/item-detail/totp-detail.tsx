@@ -7,6 +7,7 @@ import { Button, Card, copyWithToast, Input, Label } from "@bittery/ui";
 import { Copy, Eye, EyeOff } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Favicon } from "../favicon";
+import { TagInput } from "../tag-input";
 import {
 	type CategoryDetailProps,
 	handleCopy,
@@ -17,6 +18,10 @@ export function TotpDetail({
 	data,
 	onEdit,
 	onDelete,
+	onTagsChange,
+	onTagClick,
+	availableTags = [],
+	isUpdatingTags,
 }: CategoryDetailProps<TotpDisplayData>) {
 	const [totpResult, setTotpResult] = useState<TotpResult | null>(null);
 	const [showSecret, setShowSecret] = useState(false);
@@ -95,6 +100,20 @@ export function TotpDetail({
 					</Button>
 				)}
 			</div>
+
+			{/* Tags */}
+			{onTagsChange && (
+				<div className="space-y-2">
+					<Label>Tags</Label>
+					<TagInput
+						tags={data.tags || []}
+						availableTags={availableTags}
+						onChange={onTagsChange}
+						onTagClick={onTagClick}
+						disabled={isUpdatingTags}
+					/>
+				</div>
+			)}
 
 			<Card>
 				<div className="flex items-center justify-between p-6">

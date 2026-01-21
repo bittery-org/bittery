@@ -8,8 +8,10 @@ import {
 	Outlet,
 	useParams,
 } from "@tanstack/react-router";
-import { Archive, Smartphone, Star } from "lucide-react";
+import { Archive, Smartphone, Star, Tag } from "lucide-react";
 import { Favicon } from "../../../components/vault/favicon";
+import { getTagColorFromName } from "../../../components/vault/tag-badge";
+import { useAvailableTags } from "../../../hooks/use-available-tags";
 import { useDecryptedItems } from "../../../hooks/use-decrypted-items";
 import { useQueryInvalidator } from "../../../providers/sync-provider";
 
@@ -37,6 +39,9 @@ function RouteComponent() {
 	// Split into favorites and regular items
 	const favoriteItems = items.filter((item) => item.favorite);
 	const regularItems = items.filter((item) => !item.favorite);
+
+	// Get available tags from all items
+	const availableTags = useAvailableTags(decryptedItems);
 
 	// Mutation to toggle favorite
 	const toggleFavoriteMutation = useMutation({
@@ -214,6 +219,36 @@ function RouteComponent() {
 										</Link>
 									);
 								})}
+
+							{/* Tags Section */}
+							{availableTags.length > 0 && (
+								<>
+									<div className="mt-4 mb-2 px-3 font-semibold text-muted-foreground text-xs uppercase">
+										Tags
+									</div>
+									{id &&
+										availableTags.map((tagName) => {
+											const color = getTagColorFromName(tagName);
+											return (
+												<Link
+													key={tagName}
+													to="/vault/$id/tag/$tagName"
+													params={{
+														id: id,
+														tagName: encodeURIComponent(tagName),
+													}}
+													className="mb-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-muted/30"
+												>
+													<Tag
+														className="size-3.5 shrink-0"
+														style={{ color }}
+													/>
+													<span className="truncate">{tagName}</span>
+												</Link>
+											);
+										})}
+								</>
+							)}
 						</div>
 					)}
 				</div>

@@ -1,11 +1,16 @@
-import { Button, Card } from "@bittery/ui";
+import { Button, Card, Label } from "@bittery/ui";
 import { Favicon } from "../favicon";
+import { TagInput } from "../tag-input";
 import type { CategoryDetailProps, SecureNoteDisplayData } from "./shared";
 
 export function SecureNoteDetail({
 	data,
 	onEdit,
 	onDelete,
+	onTagsChange,
+	onTagClick,
+	availableTags = [],
+	isUpdatingTags,
 }: CategoryDetailProps<SecureNoteDisplayData>) {
 	return (
 		<div className="space-y-4">
@@ -36,6 +41,20 @@ export function SecureNoteDetail({
 					</Button>
 				)}
 			</div>
+
+			{/* Tags */}
+			{onTagsChange && (
+				<div className="space-y-2">
+					<Label>Tags</Label>
+					<TagInput
+						tags={data.tags || []}
+						availableTags={availableTags}
+						onChange={onTagsChange}
+						onTagClick={onTagClick}
+						disabled={isUpdatingTags}
+					/>
+				</div>
+			)}
 
 			<Card>
 				<div className="whitespace-pre-wrap p-6 leading-relaxed">

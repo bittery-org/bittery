@@ -17,6 +17,7 @@ export interface UpdateItemInput {
 	itemId: string;
 	vaultId: string;
 	data: DecryptedItemData;
+	skipToast?: boolean;
 }
 
 export interface DeleteItemInput {
@@ -88,7 +89,9 @@ export function useVaultItemOperations() {
 		},
 		onSuccess: (_data, variables) => {
 			invalidator.invalidateItem(variables.itemId, variables.vaultId);
-			toast.success("Item updated successfully");
+			if (!variables.skipToast) {
+				toast.success("Item updated successfully");
+			}
 		},
 		onError: (error) => {
 			toast.error(`Failed to update item: ${error.message}`);

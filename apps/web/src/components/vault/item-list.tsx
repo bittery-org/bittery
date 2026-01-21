@@ -4,6 +4,7 @@ import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import {
 	Badge,
 	Button,
+	Checkbox,
 	Input,
 	ScrollArea,
 	Select,
@@ -18,7 +19,10 @@ import { useMutation } from "@tanstack/react-query";
 import { Key, Search, Smartphone, Star, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useQueryInvalidator } from "../../providers/sync-provider";
+import { useAvailableTags } from "../../hooks/use-vault-tags";
 import { Favicon } from "./favicon";
+import { TagBadge } from "./tag-badge";
+import { TagFilter } from "./tag-filter";
 
 interface ItemListProps {
 	items: DecryptedItem[];
@@ -26,6 +30,9 @@ interface ItemListProps {
 	vaultId: string;
 	onItemSelect?: (item: DecryptedItem) => void;
 	selectedItemId?: string;
+	selectionMode?: boolean;
+	selectedItemIds?: string[];
+	onSelectionChange?: (selectedIds: string[]) => void;
 }
 
 type CategoryFilter = "all" | ItemCategory;
@@ -45,12 +52,19 @@ export function ItemList({
 	vaultId,
 	onItemSelect,
 	selectedItemId,
+	selectionMode = false,
+	selectedItemIds = [],
+	onSelectionChange,
 }: ItemListProps) {
 	const trpcClient = useTRPCClient();
 	const invalidator = useQueryInvalidator();
 
 	const [searchQuery, setSearchQuery] = useState("");
 	const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
+	const [selectedTags, setSelectedTags] = useState<string[]>([]);
+
+	// Get available tags from decrypted items
+	const availableTags = useAvailableTags(items);
 
 	// Mutation to toggle favorite
 	const toggleFavoriteMutation = useMutation({
@@ -88,6 +102,13 @@ export function ItemList({
 			result = result.filter((item) => item.category === categoryFilter);
 		}
 
+		// Apply tag filter
+		if (selectedTags.length > 0) {
+			result = result.filter((item) =>
+				item.tags?.some((tag) => selectedTags.includes(tag)),
+			);
+		}
+
 		// Apply search filter
 		if (searchQuery.trim()) {
 			const query = searchQuery.toLowerCase();
@@ -114,7 +135,7 @@ export function ItemList({
 		});
 
 		return result;
-	}, [items, categoryFilter, searchQuery]);
+	}, [items, categoryFilter, searchQuery, selectedTags]);
 
 	// Split into favorites and regular items
 	const favoriteItems = filteredItems.filter((item) => item.favorite);
@@ -136,65 +157,119 @@ export function ItemList({
 		);
 	}
 
+	// Handle selection toggle
+	const handleToggleSelection = (itemId: string) => {
+		if (!onSelectionChange) return;
+		if (selectedItemIds.includes(itemId)) {
+			onSelectionChange(selectedItemIds.filter((id) => id !== itemId));
+		} else {
+			onSelectionChange([...selectedItemIds, itemId]);
+		}
+	};
+
+	// Handle select all in filtered view
+	const handleSelectAll = () => {
+		if (!onSelectionChange) return;
+		const allFilteredIds = filteredItems.map((item) => item.id);
+		if (selectedItemIds.length === allFilteredIds.length) {
+			onSelectionChange([]);
+		} else {
+			onSelectionChange(allFilteredIds);
+		}
+	};
+
+	const hasActiveFilters =
+		searchQuery || categoryFilter !== "all" || selectedTags.length > 0;
+
 	return (
 		<div className="flex min-h-0 flex-1 flex-col gap-4">
 			{/* Search and Filter Bar - Fixed Header */}
-			<div className="flex shrink-0 gap-2">
-				<div className="relative flex-1">
-					<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
-					<Input
-						type="text"
-						placeholder="Search items..."
-						value={searchQuery}
-						onChange={(e) => setSearchQuery(e.target.value)}
-						className="pr-9 pl-9"
-					/>
-					{searchQuery && (
-						<button
-							type="button"
-							onClick={() => setSearchQuery("")}
-							className="-translate-y-1/2 absolute top-1/2 right-3 text-muted-foreground hover:text-foreground"
-						>
-							<X className="h-4 w-4" />
-						</button>
-					)}
+			<div className="flex shrink-0 flex-col gap-2">
+				<div className="flex gap-2">
+					<div className="relative flex-1">
+						<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
+						<Input
+							type="text"
+							placeholder="Search items..."
+							value={searchQuery}
+							onChange={(e) => setSearchQuery(e.target.value)}
+							className="pr-9 pl-9"
+						/>
+						{searchQuery && (
+							<button
+								type="button"
+								onClick={() => setSearchQuery("")}
+								className="-translate-y-1/2 absolute top-1/2 right-3 text-muted-foreground hover:text-foreground"
+							>
+								<X className="h-4 w-4" />
+							</button>
+						)}
+					</div>
+					<Select
+						value={categoryFilter}
+						onValueChange={(value: CategoryFilter) => setCategoryFilter(value)}
+					>
+						<SelectTrigger className="w-40">
+							<SelectValue placeholder="Category" />
+						</SelectTrigger>
+						<SelectContent>
+							{CATEGORY_OPTIONS.map((option) => (
+								<SelectItem key={option.value} value={option.value}>
+									{option.label}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
 				</div>
-				<Select
-					value={categoryFilter}
-					onValueChange={(value: CategoryFilter) => setCategoryFilter(value)}
-				>
-					<SelectTrigger className="w-40">
-						<SelectValue placeholder="Category" />
-					</SelectTrigger>
-					<SelectContent>
-						{CATEGORY_OPTIONS.map((option) => (
-							<SelectItem key={option.value} value={option.value}>
-								{option.label}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
+
+				{/* Tag filter */}
+				{availableTags.length > 0 && (
+					<div className="flex items-center gap-2">
+						<TagFilter
+							tags={availableTags}
+							selectedTags={selectedTags}
+							onSelectionChange={setSelectedTags}
+						/>
+					</div>
+				)}
 			</div>
 
 			{/* Results summary - Fixed */}
-			{(searchQuery || categoryFilter !== "all") && (
+			{hasActiveFilters && (
 				<div className="flex shrink-0 items-center gap-2 text-muted-foreground text-sm">
 					<span>
 						{filteredItems.length} result{filteredItems.length !== 1 ? "s" : ""}
 					</span>
-					{(searchQuery || categoryFilter !== "all") && (
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={() => {
-								setSearchQuery("");
-								setCategoryFilter("all");
-							}}
-							className="h-6 px-2 text-xs"
-						>
-							Clear filters
-						</Button>
-					)}
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={() => {
+							setSearchQuery("");
+							setCategoryFilter("all");
+							setSelectedTags([]);
+						}}
+						className="h-6 px-2 text-xs"
+					>
+						Clear filters
+					</Button>
+				</div>
+			)}
+
+			{/* Selection mode header */}
+			{selectionMode && filteredItems.length > 0 && (
+				<div className="flex shrink-0 items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+					<Checkbox
+						checked={
+							selectedItemIds.length === filteredItems.length &&
+							filteredItems.length > 0
+						}
+						onCheckedChange={handleSelectAll}
+					/>
+					<span className="text-sm">
+						{selectedItemIds.length > 0
+							? `${selectedItemIds.length} selected`
+							: "Select all"}
+					</span>
 				</div>
 			)}
 
@@ -205,12 +280,10 @@ export function ItemList({
 						<Key className="h-8 w-8 text-muted-foreground" />
 					</div>
 					<h3 className="mb-1 font-semibold">
-						{searchQuery || categoryFilter !== "all"
-							? "No matching items"
-							: "No items yet"}
+						{hasActiveFilters ? "No matching items" : "No items yet"}
 					</h3>
 					<p className="max-w-sm text-muted-foreground text-sm">
-						{searchQuery || categoryFilter !== "all"
+						{hasActiveFilters
 							? "Try adjusting your search or filters"
 							: "Create your first item in the desktop app"}
 					</p>
@@ -234,6 +307,9 @@ export function ItemList({
 										isSelected={selectedItemId === item.id}
 										onSelect={onItemSelect}
 										onToggleFavorite={handleToggleFavorite}
+										selectionMode={selectionMode}
+										isChecked={selectedItemIds.includes(item.id)}
+										onToggleCheck={() => handleToggleSelection(item.id)}
 									/>
 								))}
 							</>
@@ -254,6 +330,9 @@ export function ItemList({
 										isSelected={selectedItemId === item.id}
 										onSelect={onItemSelect}
 										onToggleFavorite={handleToggleFavorite}
+										selectionMode={selectionMode}
+										isChecked={selectedItemIds.includes(item.id)}
+										onToggleCheck={() => handleToggleSelection(item.id)}
 									/>
 								))}
 							</>
@@ -274,6 +353,9 @@ interface ItemRowProps {
 		itemId: string,
 		currentFavorite: boolean,
 	) => void;
+	selectionMode?: boolean;
+	isChecked?: boolean;
+	onToggleCheck?: () => void;
 }
 
 function ItemRow({
@@ -281,6 +363,9 @@ function ItemRow({
 	isSelected,
 	onSelect,
 	onToggleFavorite,
+	selectionMode = false,
+	isChecked = false,
+	onToggleCheck,
 }: ItemRowProps) {
 	const maskedCardNumber = item.cardNumber
 		? maskCardNumber(item.cardNumber)
@@ -294,13 +379,26 @@ function ItemRow({
 			className={`relative flex items-center gap-3 rounded-lg border p-3 transition-colors ${
 				isSelected
 					? "border-primary/50 bg-muted/60"
-					: "border-transparent hover:bg-muted/30"
+					: isChecked
+						? "border-primary/30 bg-primary/5"
+						: "border-transparent hover:bg-muted/30"
 			}`}
 		>
+			{/* Selection checkbox in selection mode */}
+			{selectionMode && (
+				<div className="relative z-10">
+					<Checkbox
+						checked={isChecked}
+						onCheckedChange={onToggleCheck}
+						onClick={(e) => e.stopPropagation()}
+					/>
+				</div>
+			)}
+
 			{/* Invisible button overlay for main selection */}
 			<button
 				type="button"
-				onClick={() => onSelect?.(item)}
+				onClick={() => (selectionMode ? onToggleCheck?.() : onSelect?.(item))}
 				className="absolute inset-0 z-0 cursor-pointer rounded-lg"
 				aria-label={`Select ${item.title}`}
 			/>
@@ -334,6 +432,19 @@ function ItemRow({
 							{maskedCardNumber}
 						</div>
 					)}
+					{/* Display tags */}
+					{item.tags && item.tags.length > 0 && (
+						<div className="mt-1 flex flex-wrap gap-1">
+							{item.tags.slice(0, 3).map((tag) => (
+								<TagBadge key={tag} name={tag} size="sm" />
+							))}
+							{item.tags.length > 3 && (
+								<span className="text-muted-foreground text-xs">
+									+{item.tags.length - 3} more
+								</span>
+							)}
+						</div>
+					)}
 				</div>
 				<Badge variant="outline" className="shrink-0 capitalize">
 					{item.category.replace("-", " ")}
@@ -341,21 +452,25 @@ function ItemRow({
 			</div>
 
 			{/* Favorite button - interactive, above the overlay */}
-			<button
-				type="button"
-				onClick={(e) => onToggleFavorite(e, item.id, item.favorite)}
-				aria-label={item.favorite ? "Remove from favorites" : "Add to favorites"}
-				className={`relative z-10 shrink-0 transition-colors ${
-					item.favorite
-						? "text-yellow-500 hover:text-yellow-600"
-						: "text-muted-foreground hover:text-yellow-500"
-				}`}
-			>
-				<Star
-					className="h-4 w-4"
-					fill={item.favorite ? "currentColor" : "none"}
-				/>
-			</button>
+			{!selectionMode && (
+				<button
+					type="button"
+					onClick={(e) => onToggleFavorite(e, item.id, item.favorite)}
+					aria-label={
+						item.favorite ? "Remove from favorites" : "Add to favorites"
+					}
+					className={`relative z-10 shrink-0 transition-colors ${
+						item.favorite
+							? "text-yellow-500 hover:text-yellow-600"
+							: "text-muted-foreground hover:text-yellow-500"
+					}`}
+				>
+					<Star
+						className="h-4 w-4"
+						fill={item.favorite ? "currentColor" : "none"}
+					/>
+				</button>
+			)}
 		</div>
 	);
 }

@@ -30,12 +30,20 @@ export interface ItemDetailProps {
 	data: ItemDetailData;
 	onEdit?: () => void;
 	onDelete?: () => void;
+	onTagsChange?: (tags: string[]) => void;
+	onTagClick?: (tagName: string) => void;
+	availableTags?: string[];
+	isUpdatingTags?: boolean;
 }
 
 export interface CategoryDetailProps<T> {
 	data: T;
 	onEdit?: () => void;
 	onDelete?: () => void;
+	onTagsChange?: (tags: string[]) => void;
+	onTagClick?: (tagName: string) => void;
+	availableTags?: string[];
+	isUpdatingTags?: boolean;
 }
 
 export { copyWithToast as handleCopy };

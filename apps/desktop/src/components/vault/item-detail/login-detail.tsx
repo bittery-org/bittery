@@ -4,6 +4,7 @@ import { Button, Card, Input, Label } from "@bittery/ui";
 import { Copy, ExternalLink, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 import { Favicon } from "../favicon";
+import { TagInput } from "../tag-input";
 import { InlineTotpDisplay } from "./inline-totp-display";
 import {
 	type CategoryDetailProps,
@@ -15,6 +16,10 @@ export function LoginDetail({
 	data,
 	onEdit,
 	onDelete,
+	onTagsChange,
+	onTagClick,
+	availableTags = [],
+	isUpdatingTags,
 }: CategoryDetailProps<LoginDisplayData>) {
 	const [showPassword, setShowPassword] = useState(false);
 	const [visibleCustomFields, setVisibleCustomFields] = useState<Set<string>>(
@@ -66,6 +71,20 @@ export function LoginDetail({
 					</Button>
 				)}
 			</div>
+
+			{/* Tags */}
+			{onTagsChange && (
+				<div className="space-y-2">
+					<Label>Tags</Label>
+					<TagInput
+						tags={data.tags || []}
+						availableTags={availableTags}
+						onChange={onTagsChange}
+						onTagClick={onTagClick}
+						disabled={isUpdatingTags}
+					/>
+				</div>
+			)}
 
 			<div className="space-y-4">
 				{data.url && (

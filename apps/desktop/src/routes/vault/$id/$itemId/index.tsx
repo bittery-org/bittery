@@ -1,5 +1,5 @@
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
 import {
 	Button,
 	Dialog,
@@ -15,7 +15,7 @@ import {
 	DropdownMenuTrigger,
 } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
 	Copy as CopyIcon,
 	Edit,
@@ -25,7 +25,7 @@ import {
 	Star,
 	Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import Loader from "../../../../components/loader";
 import ItemDetail from "../../../../components/vault/item-detail";
 import { ItemForm } from "../../../../components/vault/item-form";
@@ -33,7 +33,9 @@ import { ShareHistoryDialog } from "../../../../components/vault/share-history-d
 import { ShareItemDialog } from "../../../../components/vault/share-item-dialog";
 import { useVaultItemOperations } from "../../../../components/vault/use-vault-item-operations";
 import { VaultAvatar } from "../../../../components/vault/vault-avatar";
+import { useAvailableTags } from "../../../../hooks/use-available-tags";
 import { useDecryptedItem } from "../../../../hooks/use-decrypted-item";
+import { useDecryptedItems } from "../../../../hooks/use-decrypted-items";
 
 export const Route = createFileRoute("/vault/$id/$itemId/")({
 	component: VaultItemComponent,
@@ -41,6 +43,7 @@ export const Route = createFileRoute("/vault/$id/$itemId/")({
 
 function VaultItemComponent() {
 	const { itemId, id: selectedVaultId } = Route.useParams();
+	const navigate = useNavigate();
 
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -51,6 +54,54 @@ function VaultItemComponent() {
 	const { rawItem, decryptedData, isLoading } = useDecryptedItem(itemId);
 	const { updateItem, deleteItem, toggleFavorite, duplicateItem } =
 		useVaultItemOperations();
+
+	// Get all items in vault for available tags
+	const { items: allVaultItems } = useDecryptedItems(selectedVaultId);
+	const availableTags = useAvailableTags(allVaultItems);
+
+	// Track separate tag update state to avoid toast on regular updates
+	const [isUpdatingTags, setIsUpdatingTags] = useState(false);
+
+	// Handle tag changes - update item with new tags
+	const handleTagsChange = useCallback(
+		(newTags: string[]) => {
+			if (!rawItem || !decryptedData) return;
+
+			setIsUpdatingTags(true);
+
+			// Create updated data with new tags
+			const updatedData: DecryptedItemData = {
+				...decryptedData,
+				tags: newTags.length > 0 ? newTags : undefined,
+			};
+
+			updateItem.mutate(
+				{
+					itemId: rawItem.id,
+					vaultId: rawItem.vaultId,
+					data: updatedData,
+					skipToast: true,
+				},
+				{
+					onSettled: () => {
+						setIsUpdatingTags(false);
+					},
+				},
+			);
+		},
+		[rawItem, decryptedData, updateItem],
+	);
+
+	// Handle tag click - navigate to tag view
+	const handleTagClick = useCallback(
+		(tagName: string) => {
+			navigate({
+				to: "/vault/$id/tag/$tagName",
+				params: { id: selectedVaultId, tagName: encodeURIComponent(tagName) },
+			});
+		},
+		[navigate, selectedVaultId],
+	);
 
 	const { data: currentVault } = useQuery({
 		queryKey: ["vault-keys", selectedVaultId],
@@ -171,14 +222,18 @@ function VaultItemComponent() {
 					<ItemDetail
 						category={rawItem?.category ?? "login"}
 						data={decryptedData}
+						onTagsChange={handleTagsChange}
+						onTagClick={handleTagClick}
+						availableTags={availableTags}
+						isUpdatingTags={isUpdatingTags}
 					/>
 				</div>
 			</div>
 
 			{/* Edit Item Dialog */}
 			<Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-				<DialogContent className="max-w-2xl">
-					<DialogHeader>
+				<DialogContent className="flex max-h-[85vh] max-w-2xl flex-col">
+					<DialogHeader className="shrink-0">
 						<DialogTitle>Edit Item</DialogTitle>
 						<DialogDescription>
 							Update your{" "}
