@@ -1,0 +1,353 @@
+import { deriveKeys } from "@bittery/crypto/key-derivation";
+import { validateSecretKey } from "@bittery/crypto/secret-key";
+import { normalizeServerUrl } from "@bittery/crypto/server-url";
+import {
+	deriveClientSession,
+	generateClientEphemeral,
+	verifyServerSession,
+} from "@bittery/crypto/srp-client";
+import type { AccountMetadata } from "@bittery/crypto/storage-react-native";
+import { useRouter } from "expo-router";
+import { Eye, EyeOff, Fingerprint, Lock, Mail, Server } from "lucide-react-native";
+import { useState, useEffect } from "react";
+import {
+	Alert,
+	KeyboardAvoidingView,
+	Platform,
+	ScrollView,
+	Switch,
+	Text,
+	TextInput,
+	TouchableOpacity,
+	View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { useAccount } from "../../src/contexts/account-context";
+import { useTRPCClient, useServerUrl } from "../../src/lib/trpc";
+import * as storage from "../../src/services/storage";
+
+const DEFAULT_SERVER_URL =
+	process.env.EXPO_PUBLIC_SERVER_URL || "http://localhost:3000";
+
+export default function LoginScreen() {
+	const router = useRouter();
+	const trpcClient = useTRPCClient();
+	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
+	const { refreshAccounts } = useAccount();
+
+	const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
+	const [email, setEmail] = useState("");
+	const [password, setPassword] = useState("");
+	const [secretKey, setSecretKey] = useState("");
+	const [showPassword, setShowPassword] = useState(false);
+	const [loading, setLoading] = useState(false);
+	const [enableBiometric, setEnableBiometric] = useState(true);
+	const [biometricAvailable, setBiometricAvailable] = useState(false);
+	const [biometricType, setBiometricType] = useState<string | null>(null);
+
+	useEffect(() => {
+		async function checkBiometric() {
+			const available = await storage.isBiometricAvailable();
+			setBiometricAvailable(available);
+			if (available) {
+				const type = await storage.getBiometricType();
+				setBiometricType(type);
+			}
+		}
+		checkBiometric();
+	}, []);
+
+	const handleLogin = async () => {
+		if (!email.trim() || !password.trim() || !secretKey.trim()) {
+			Alert.alert("Error", "Please fill in all fields");
+			return;
+		}
+
+		if (!validateSecretKey(secretKey)) {
+			Alert.alert("Error", "Invalid Secret Key format");
+			return;
+		}
+
+		const normalizedServerUrl = normalizeServerUrl(serverUrl);
+		if (!normalizedServerUrl) {
+			Alert.alert("Error", "Invalid server URL");
+			return;
+		}
+
+		setLoading(true);
+
+		try {
+			// Update global server URL
+			setGlobalServerUrl(normalizedServerUrl);
+
+			// 1. Derive keys from password + secret key
+			const { authKey, masterUnlockKey } = await deriveKeys(
+				password,
+				secretKey,
+				email,
+			);
+
+			// Convert authKey to password string for SRP
+			const srpPassword = new TextDecoder().decode(authKey);
+
+			// 2. Generate client ephemeral key pair
+			const clientEphemeral = generateClientEphemeral();
+
+			// 3. Send client public key to server and get challenge
+			const startResult = await trpcClient.auth.startLogin.mutate({
+				email,
+				clientPublicKey: clientEphemeral.publicKey,
+			});
+
+			// 4. Derive session and compute proof
+			const clientSession = await deriveClientSession(
+				clientEphemeral.secret,
+				{
+					salt: startResult.salt,
+					serverPublicKey: startResult.serverPublicKey,
+				},
+				srpPassword,
+			);
+
+			// 5. Send proof to server and get session
+			const finishResult = await trpcClient.auth.finishLogin.mutate({
+				userId: startResult.userId,
+				serverSecret: startResult.serverSecret,
+				clientPublicKey: clientEphemeral.publicKey,
+				clientProof: clientSession.proof,
+			});
+
+			if (!finishResult.serverProof) {
+				Alert.alert("Error", "Login failed - invalid server proof");
+				return;
+			}
+
+			// 6. Verify server's proof (completes mutual authentication)
+			await verifyServerSession(
+				clientEphemeral.publicKey,
+				clientSession,
+				finishResult.serverProof,
+			);
+
+			const normalizedEmail = email.toLowerCase();
+
+			// Enable biometric if requested
+			if (enableBiometric && biometricAvailable) {
+				await storage.enableBiometric(normalizedEmail);
+			}
+
+			// Store auth data
+			await storage.storeAuthToken(finishResult.token, normalizedEmail);
+			await storage.storeVaultKeys(finishResult.vaultKeys, normalizedEmail);
+
+			// Store encrypted private key for RSA decryption
+			if (finishResult.user.encryptedPrivateKey) {
+				await storage.storeEncryptedPrivateKey(
+					finishResult.user.encryptedPrivateKey,
+					normalizedEmail,
+				);
+			}
+
+			await storage.storeSecretKey(secretKey, normalizedEmail);
+			await storage.storeSessionData(
+				masterUnlockKey,
+				normalizedEmail,
+				finishResult.user.id,
+			);
+			await storage.storeMasterUnlockKey(masterUnlockKey, normalizedEmail);
+			await storage.storeServerUrl(normalizedServerUrl, normalizedEmail);
+
+			// Create account metadata
+			const secretKeyHint = `${secretKey.substring(0, 5)}...`;
+			const accountMetadata: AccountMetadata = {
+				email: normalizedEmail,
+				userId: finishResult.user.id,
+				name: finishResult.user.name || normalizedEmail.split("@")[0],
+				teamName: finishResult.user.teamName,
+				secretKeyHint,
+				addedAt: Date.now(),
+				lastActiveAt: Date.now(),
+				biometricEnabled: enableBiometric && biometricAvailable,
+			};
+
+			// Add to accounts list and set as active
+			await storage.addAccountToList(accountMetadata);
+			await storage.setActiveAccount(normalizedEmail);
+
+			// Refresh account context
+			await refreshAccounts();
+
+			// Navigate to vault
+			router.replace("/(vault)");
+		} catch (error) {
+			console.error("Login error:", error);
+			Alert.alert(
+				"Error",
+				error instanceof Error ? error.message : "Login failed",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<SafeAreaView className="flex-1 bg-background">
+			<KeyboardAvoidingView
+				behavior={Platform.OS === "ios" ? "padding" : "height"}
+				className="flex-1"
+			>
+				<ScrollView
+					className="flex-1"
+					contentContainerStyle={{ flexGrow: 1 }}
+					keyboardShouldPersistTaps="handled"
+				>
+					<View className="flex-1 justify-center px-6 py-8">
+						{/* Header */}
+						<View className="mb-8 items-center">
+							<View className="mb-4 h-20 w-20 items-center justify-center rounded-2xl bg-primary">
+								<Lock size={40} color="#fff" />
+							</View>
+							<Text className="text-2xl font-bold text-foreground">
+								Sign in to Bittery
+							</Text>
+							<Text className="mt-2 text-center text-muted-foreground">
+								Enter your credentials to access your vault
+							</Text>
+						</View>
+
+						{/* Form */}
+						<View className="space-y-4">
+							{/* Server URL */}
+							<View>
+								<Text className="mb-2 text-sm font-medium text-foreground">
+									Server URL
+								</Text>
+								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
+									<Server size={20} color="#6b7280" />
+									<TextInput
+										className="ml-3 flex-1 py-3 text-foreground"
+										placeholder="https://your-server.com"
+										value={serverUrl}
+										onChangeText={setServerUrl}
+										autoCapitalize="none"
+										autoCorrect={false}
+										keyboardType="url"
+									/>
+								</View>
+								<Text className="mt-1 text-xs text-muted-foreground">
+									Use your self-hosted Bittery server URL
+								</Text>
+							</View>
+
+							{/* Email */}
+							<View>
+								<Text className="mb-2 text-sm font-medium text-foreground">
+									Email
+								</Text>
+								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
+									<Mail size={20} color="#6b7280" />
+									<TextInput
+										className="ml-3 flex-1 py-3 text-foreground"
+										placeholder="you@example.com"
+										value={email}
+										onChangeText={setEmail}
+										autoCapitalize="none"
+										autoCorrect={false}
+										keyboardType="email-address"
+										textContentType="emailAddress"
+									/>
+								</View>
+							</View>
+
+							{/* Password */}
+							<View>
+								<Text className="mb-2 text-sm font-medium text-foreground">
+									Password
+								</Text>
+								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
+									<Lock size={20} color="#6b7280" />
+									<TextInput
+										className="ml-3 flex-1 py-3 text-foreground"
+										placeholder="Enter your password"
+										value={password}
+										onChangeText={setPassword}
+										secureTextEntry={!showPassword}
+										textContentType="password"
+									/>
+									<TouchableOpacity
+										onPress={() => setShowPassword(!showPassword)}
+									>
+										{showPassword ? (
+											<EyeOff size={20} color="#6b7280" />
+										) : (
+											<Eye size={20} color="#6b7280" />
+										)}
+									</TouchableOpacity>
+								</View>
+							</View>
+
+							{/* Secret Key */}
+							<View>
+								<Text className="mb-2 text-sm font-medium text-foreground">
+									Secret Key
+								</Text>
+								<TextInput
+									className="rounded-lg border border-input bg-background px-4 py-3 font-mono text-foreground"
+									placeholder="A3-XXXXXX-XXXXXX-XXXXX"
+									value={secretKey}
+									onChangeText={setSecretKey}
+									autoCapitalize="characters"
+									autoCorrect={false}
+								/>
+								<Text className="mt-1 text-xs text-muted-foreground">
+									Your Secret Key was provided when you created your account
+								</Text>
+							</View>
+
+							{/* Biometric Toggle */}
+							{biometricAvailable && (
+								<View className="flex-row items-center justify-between rounded-lg border border-input bg-background px-4 py-3">
+									<View className="flex-row items-center">
+										<Fingerprint size={20} color="#6b7280" />
+										<Text className="ml-3 text-foreground">
+											Enable {biometricType || "biometric"} unlock
+										</Text>
+									</View>
+									<Switch
+										value={enableBiometric}
+										onValueChange={setEnableBiometric}
+									/>
+								</View>
+							)}
+
+							{/* Login Button */}
+							<TouchableOpacity
+								onPress={handleLogin}
+								disabled={loading}
+								className={`mt-4 rounded-lg py-4 ${
+									loading ? "bg-primary/50" : "bg-primary"
+								}`}
+							>
+								<Text className="text-center font-semibold text-primary-foreground">
+									{loading ? "Signing in..." : "Sign In"}
+								</Text>
+							</TouchableOpacity>
+
+							{/* Sign Up Link */}
+							<TouchableOpacity
+								onPress={() => router.push("/(auth)/signup")}
+								className="mt-4"
+							>
+								<Text className="text-center text-muted-foreground">
+									Don't have an account?{" "}
+									<Text className="font-semibold text-primary">Sign up</Text>
+								</Text>
+							</TouchableOpacity>
+						</View>
+					</View>
+				</ScrollView>
+			</KeyboardAvoidingView>
+		</SafeAreaView>
+	);
+}

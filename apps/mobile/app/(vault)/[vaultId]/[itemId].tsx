@@ -1,0 +1,399 @@
+import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
+import * as Clipboard from "expo-clipboard";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import {
+	ArrowLeft,
+	Copy,
+	CreditCard,
+	Edit,
+	Eye,
+	EyeOff,
+	FileText,
+	Key,
+	Star,
+	Timer,
+	Trash2,
+	User,
+	Globe,
+	Mail,
+} from "lucide-react-native";
+import { useEffect, useState } from "react";
+import {
+	ActivityIndicator,
+	Alert,
+	ScrollView,
+	Text,
+	TouchableOpacity,
+	View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { useDecryptedItems } from "../../../src/hooks/use-decrypted-items";
+
+const categoryIcons: Record<ItemCategory, typeof Key> = {
+	login: Key,
+	"credit-card": CreditCard,
+	identity: User,
+	"secure-note": FileText,
+	totp: Timer,
+};
+
+const categoryLabels: Record<ItemCategory, string> = {
+	login: "Login",
+	"credit-card": "Credit Card",
+	identity: "Identity",
+	"secure-note": "Secure Note",
+	totp: "TOTP",
+};
+
+export default function ItemDetailScreen() {
+	const router = useRouter();
+	const { vaultId, itemId } = useLocalSearchParams<{
+		vaultId: string;
+		itemId: string;
+	}>();
+
+	const { items, isLoading } = useDecryptedItems(vaultId);
+	const [showPassword, setShowPassword] = useState(false);
+	const [showCardNumber, setShowCardNumber] = useState(false);
+	const [showCvv, setShowCvv] = useState(false);
+	const [showSsn, setShowSsn] = useState(false);
+
+	const item = items.find((i) => i.id === itemId);
+
+	const handleCopy = async (value: string, label: string) => {
+		await Clipboard.setStringAsync(value);
+		Alert.alert("Copied", `${label} copied to clipboard`);
+	};
+
+	const maskValue = (value: string, visibleChars = 4) => {
+		if (value.length <= visibleChars) return "•".repeat(value.length);
+		return "•".repeat(value.length - visibleChars) + value.slice(-visibleChars);
+	};
+
+	const formatCardNumber = (number: string) => {
+		return number.replace(/(\d{4})/g, "$1 ").trim();
+	};
+
+	if (isLoading) {
+		return (
+			<SafeAreaView className="flex-1 items-center justify-center bg-background">
+				<ActivityIndicator size="large" color="#000" />
+			</SafeAreaView>
+		);
+	}
+
+	if (!item) {
+		return (
+			<SafeAreaView className="flex-1 items-center justify-center bg-background">
+				<Text className="text-foreground">Item not found</Text>
+				<TouchableOpacity
+					onPress={() => router.back()}
+					className="mt-4 rounded-lg bg-primary px-4 py-2"
+				>
+					<Text className="text-primary-foreground">Go Back</Text>
+				</TouchableOpacity>
+			</SafeAreaView>
+		);
+	}
+
+	const Icon = categoryIcons[item.category];
+
+	const renderFieldRow = (
+		label: string,
+		value: string | undefined,
+		options?: {
+			masked?: boolean;
+			showState?: boolean;
+			setShowState?: (show: boolean) => void;
+			icon?: typeof Key;
+		},
+	) => {
+		if (!value) return null;
+
+		const displayValue = options?.masked && !options?.showState ? maskValue(value) : value;
+
+		return (
+			<View className="border-b border-border py-4">
+				<Text className="mb-1 text-sm text-muted-foreground">{label}</Text>
+				<View className="flex-row items-center">
+					{options?.icon && (
+						<options.icon size={16} color="#6b7280" className="mr-2" />
+					)}
+					<Text className="flex-1 text-foreground" selectable>
+						{displayValue}
+					</Text>
+					{options?.masked && options?.setShowState && (
+						<TouchableOpacity
+							onPress={() => options.setShowState(!options.showState)}
+							className="mr-2 p-2"
+						>
+							{options.showState ? (
+								<EyeOff size={18} color="#6b7280" />
+							) : (
+								<Eye size={18} color="#6b7280" />
+							)}
+						</TouchableOpacity>
+					)}
+					<TouchableOpacity
+						onPress={() => handleCopy(value, label)}
+						className="p-2"
+					>
+						<Copy size={18} color="#6b7280" />
+					</TouchableOpacity>
+				</View>
+			</View>
+		);
+	};
+
+	const renderLoginFields = () => (
+		<>
+			{renderFieldRow("Username", item.username, { icon: User })}
+			{renderFieldRow("Password", item.password, {
+				masked: true,
+				showState: showPassword,
+				setShowState: setShowPassword,
+				icon: Key,
+			})}
+			{renderFieldRow("Website", item.url, { icon: Globe })}
+			{item.urls &&
+				item.urls.length > 1 &&
+				item.urls.slice(1).map((url, index) => (
+					<View key={url} className="border-b border-border py-4">
+						<Text className="mb-1 text-sm text-muted-foreground">
+							Website {index + 2}
+						</Text>
+						<View className="flex-row items-center">
+							<Globe size={16} color="#6b7280" className="mr-2" />
+							<Text className="flex-1 text-foreground" selectable>
+								{url}
+							</Text>
+							<TouchableOpacity
+								onPress={() => handleCopy(url, "URL")}
+								className="p-2"
+							>
+								<Copy size={18} color="#6b7280" />
+							</TouchableOpacity>
+						</View>
+					</View>
+				))}
+		</>
+	);
+
+	const renderCreditCardFields = () => (
+		<>
+			{renderFieldRow("Cardholder Name", item.cardholderName)}
+			{item.cardNumber && (
+				<View className="border-b border-border py-4">
+					<Text className="mb-1 text-sm text-muted-foreground">Card Number</Text>
+					<View className="flex-row items-center">
+						<CreditCard size={16} color="#6b7280" className="mr-2" />
+						<Text className="flex-1 font-mono text-foreground" selectable>
+							{showCardNumber
+								? formatCardNumber(item.cardNumber)
+								: maskValue(item.cardNumber, 4)}
+						</Text>
+						<TouchableOpacity
+							onPress={() => setShowCardNumber(!showCardNumber)}
+							className="mr-2 p-2"
+						>
+							{showCardNumber ? (
+								<EyeOff size={18} color="#6b7280" />
+							) : (
+								<Eye size={18} color="#6b7280" />
+							)}
+						</TouchableOpacity>
+						<TouchableOpacity
+							onPress={() => handleCopy(item.cardNumber!, "Card Number")}
+							className="p-2"
+						>
+							<Copy size={18} color="#6b7280" />
+						</TouchableOpacity>
+					</View>
+				</View>
+			)}
+			{renderFieldRow("Expiry Date", item.expiryDate)}
+			{renderFieldRow("CVV", item.cvv, {
+				masked: true,
+				showState: showCvv,
+				setShowState: setShowCvv,
+			})}
+			{renderFieldRow("Billing Address", item.billingAddress)}
+		</>
+	);
+
+	const renderIdentityFields = () => (
+		<>
+			{(item.firstName || item.lastName) && (
+				<View className="border-b border-border py-4">
+					<Text className="mb-1 text-sm text-muted-foreground">Name</Text>
+					<Text className="text-foreground" selectable>
+						{[item.firstName, item.middleName, item.lastName]
+							.filter(Boolean)
+							.join(" ")}
+					</Text>
+				</View>
+			)}
+			{renderFieldRow("Email", item.email, { icon: Mail })}
+			{renderFieldRow("Date of Birth", item.dateOfBirth)}
+			{renderFieldRow("SSN", item.ssn, {
+				masked: true,
+				showState: showSsn,
+				setShowState: setShowSsn,
+			})}
+			{renderFieldRow("Passport Number", item.passportNumber)}
+			{renderFieldRow("Driver's License", item.driversLicense)}
+			{item.addresses &&
+				item.addresses.map((address, index) => (
+					<View key={index} className="border-b border-border py-4">
+						<Text className="mb-1 text-sm text-muted-foreground">
+							{address.label || `Address ${index + 1}`}
+						</Text>
+						<Text className="text-foreground" selectable>
+							{[
+								address.street1,
+								address.street2,
+								address.city,
+								address.state,
+								address.zip,
+								address.country,
+							]
+								.filter(Boolean)
+								.join(", ")}
+						</Text>
+					</View>
+				))}
+			{item.phoneNumbers &&
+				item.phoneNumbers.map((phone, index) => (
+					<View key={index} className="border-b border-border py-4">
+						<Text className="mb-1 text-sm text-muted-foreground">
+							{phone.label || `Phone ${index + 1}`}
+						</Text>
+						<View className="flex-row items-center">
+							<Text className="flex-1 text-foreground" selectable>
+								{phone.number}
+							</Text>
+							<TouchableOpacity
+								onPress={() => handleCopy(phone.number, "Phone")}
+								className="p-2"
+							>
+								<Copy size={18} color="#6b7280" />
+							</TouchableOpacity>
+						</View>
+					</View>
+				))}
+		</>
+	);
+
+	const renderSecureNoteFields = () => (
+		<View className="py-4">
+			<Text className="mb-2 text-sm text-muted-foreground">Note</Text>
+			<Text className="text-foreground" selectable>
+				{item.note || item.notes}
+			</Text>
+		</View>
+	);
+
+	const renderTotpFields = () => (
+		<>
+			{renderFieldRow("Secret", item.totpSecret, { masked: true })}
+			{renderFieldRow("Issuer", item.totpIssuer)}
+			{renderFieldRow("Account", item.totpAccountName)}
+		</>
+	);
+
+	return (
+		<SafeAreaView className="flex-1 bg-background">
+			{/* Header */}
+			<View className="flex-row items-center border-b border-border px-4 py-4">
+				<TouchableOpacity
+					onPress={() => router.back()}
+					className="mr-3 rounded-full bg-secondary p-2"
+				>
+					<ArrowLeft size={20} color="#6b7280" />
+				</TouchableOpacity>
+				<View className="mr-3 h-10 w-10 items-center justify-center rounded-lg bg-secondary">
+					<Icon size={20} color="#6b7280" />
+				</View>
+				<View className="flex-1">
+					<View className="flex-row items-center">
+						<Text className="font-semibold text-foreground">{item.title}</Text>
+						{item.favorite && (
+							<Star size={14} color="#eab308" fill="#eab308" className="ml-2" />
+						)}
+					</View>
+					<Text className="text-sm text-muted-foreground">
+						{categoryLabels[item.category]}
+					</Text>
+				</View>
+			</View>
+
+			<ScrollView className="flex-1 px-4">
+				{/* Category-specific fields */}
+				{item.category === "login" && renderLoginFields()}
+				{item.category === "credit-card" && renderCreditCardFields()}
+				{item.category === "identity" && renderIdentityFields()}
+				{item.category === "secure-note" && renderSecureNoteFields()}
+				{item.category === "totp" && renderTotpFields()}
+
+				{/* Notes (for non-secure-note items) */}
+				{item.category !== "secure-note" && (item.notes || item.note) && (
+					<View className="border-b border-border py-4">
+						<Text className="mb-2 text-sm text-muted-foreground">Notes</Text>
+						<Text className="text-foreground" selectable>
+							{item.notes || item.note}
+						</Text>
+					</View>
+				)}
+
+				{/* Tags */}
+				{item.tags && item.tags.length > 0 && (
+					<View className="py-4">
+						<Text className="mb-2 text-sm text-muted-foreground">Tags</Text>
+						<View className="flex-row flex-wrap">
+							{item.tags.map((tag) => (
+								<View
+									key={tag}
+									className="mb-2 mr-2 rounded-full bg-secondary px-3 py-1"
+								>
+									<Text className="text-sm text-foreground">{tag}</Text>
+								</View>
+							))}
+						</View>
+					</View>
+				)}
+
+				{/* Custom Fields */}
+				{item.customFields &&
+					item.customFields.map((field) => (
+						<View key={field.id} className="border-b border-border py-4">
+							<Text className="mb-1 text-sm text-muted-foreground">
+								{field.label}
+							</Text>
+							<View className="flex-row items-center">
+								<Text className="flex-1 text-foreground" selectable>
+									{field.type === "password" ? maskValue(field.value) : field.value}
+								</Text>
+								<TouchableOpacity
+									onPress={() => handleCopy(field.value, field.label)}
+									className="p-2"
+								>
+									<Copy size={18} color="#6b7280" />
+								</TouchableOpacity>
+							</View>
+						</View>
+					))}
+
+				{/* Metadata */}
+				<View className="py-4">
+					<Text className="text-xs text-muted-foreground">
+						Created: {new Date(item.createdAt).toLocaleString()}
+					</Text>
+					<Text className="text-xs text-muted-foreground">
+						Updated: {new Date(item.updatedAt).toLocaleString()}
+					</Text>
+				</View>
+			</ScrollView>
+		</SafeAreaView>
+	);
+}

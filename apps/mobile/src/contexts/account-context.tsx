@@ -1,0 +1,118 @@
+import type { AccountMetadata } from "@bittery/crypto/storage-react-native";
+import {
+	createContext,
+	useCallback,
+	useContext,
+	useEffect,
+	useState,
+	type ReactNode,
+} from "react";
+
+import * as storage from "@/services/storage";
+
+interface AccountContextValue {
+	allAccounts: AccountMetadata[];
+	activeAccount: AccountMetadata | null;
+	isLoading: boolean;
+	refreshAccounts: () => Promise<void>;
+	switchAccount: (email: string) => Promise<void>;
+	removeAccount: (email: string) => Promise<void>;
+}
+
+const AccountContext = createContext<AccountContextValue>({
+	allAccounts: [],
+	activeAccount: null,
+	isLoading: true,
+	refreshAccounts: async () => {},
+	switchAccount: async () => {},
+	removeAccount: async () => {},
+});
+
+export function useAccount() {
+	return useContext(AccountContext);
+}
+
+interface AccountProviderProps {
+	children: ReactNode;
+}
+
+export function AccountProvider({ children }: AccountProviderProps) {
+	const [allAccounts, setAllAccounts] = useState<AccountMetadata[]>([]);
+	const [activeAccount, setActiveAccount] = useState<AccountMetadata | null>(
+		null,
+	);
+	const [isLoading, setIsLoading] = useState(true);
+
+	const refreshAccounts = useCallback(async () => {
+		try {
+			const accountsList = await storage.getAccountsList();
+			setAllAccounts(accountsList.accounts);
+
+			const activeEmail = await storage.getActiveAccountEmail();
+			if (activeEmail) {
+				const active = accountsList.accounts.find(
+					(a) => a.email.toLowerCase() === activeEmail.toLowerCase(),
+				);
+				setActiveAccount(active || null);
+			} else if (accountsList.accounts.length > 0) {
+				// Set the first account as active if none is set
+				const firstAccount = accountsList.accounts[0];
+				await storage.setActiveAccount(firstAccount.email);
+				setActiveAccount(firstAccount);
+			} else {
+				setActiveAccount(null);
+			}
+		} catch (error) {
+			console.error("Error loading accounts:", error);
+		} finally {
+			setIsLoading(false);
+		}
+	}, []);
+
+	const switchAccount = useCallback(
+		async (email: string) => {
+			await storage.setActiveAccount(email);
+			await refreshAccounts();
+		},
+		[refreshAccounts],
+	);
+
+	const removeAccount = useCallback(
+		async (email: string) => {
+			await storage.clearAccountData(email);
+
+			// If removing the active account, switch to another one
+			if (activeAccount?.email.toLowerCase() === email.toLowerCase()) {
+				const remainingAccounts = allAccounts.filter(
+					(a) => a.email.toLowerCase() !== email.toLowerCase(),
+				);
+				if (remainingAccounts.length > 0) {
+					await storage.setActiveAccount(remainingAccounts[0].email);
+				}
+			}
+
+			await refreshAccounts();
+		},
+		[activeAccount, allAccounts, refreshAccounts],
+	);
+
+	// Load accounts on mount
+	useEffect(() => {
+		refreshAccounts();
+	}, [refreshAccounts]);
+
+	return (
+		<AccountContext.Provider
+			value={{
+				allAccounts,
+				activeAccount,
+				isLoading,
+				refreshAccounts,
+				switchAccount,
+				removeAccount,
+			}}
+		>
+			{children}
+		</AccountContext.Provider>
+	);
+}

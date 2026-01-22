@@ -1,0 +1,66 @@
+{
+	"expo": {
+		"name": "Bittery",
+		"slug": "bittery",
+		"version": "0.1.0",
+		"orientation": "portrait",
+		"icon": "./assets/icon.png",
+		"scheme": "bittery",
+		"userInterfaceStyle": "automatic",
+		"newArchEnabled": true,
+		"splash": {
+			"image": "./assets/splash-icon.png",
+			"resizeMode": "contain",
+			"backgroundColor": "#ffffff"
+		},
+		"ios": {
+			"supportsTablet": true,
+			"bundleIdentifier": "io.bittery.app",
+			"infoPlist": {
+				"NSFaceIDUsageDescription": "Bittery uses Face ID to securely unlock your vault"
+			},
+			"associatedDomains": ["applinks:app.bittery.io", "webcredentials:app.bittery.io"]
+		},
+		"android": {
+			"adaptiveIcon": {
+				"foregroundImage": "./assets/adaptive-icon.png",
+				"backgroundColor": "#ffffff"
+			},
+			"package": "io.bittery.app",
+			"permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT"]
+		},
+		"web": {
+			"bundler": "metro",
+			"output": "static",
+			"favicon": "./assets/favicon.png"
+		},
+		"plugins": [
+			"expo-router",
+			"expo-secure-store",
+			"expo-local-authentication",
+			[
+				"expo-sqlite",
+				{
+					"enableFTS": true
+				}
+			]
+		],
+		"experiments": {
+			"typedRoutes": true
+		},
+		"extra": {
+			"router": {
+				"origin": false
+			},
+			"eas": {
+				"projectId": "your-project-id"
+			}
+		},
+		"updates": {
+			"url": "https://u.expo.dev/your-project-id"
+		},
+		"runtimeVersion": {
+			"policy": "appVersion"
+		}
+	}
+}

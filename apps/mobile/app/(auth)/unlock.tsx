@@ -1,0 +1,446 @@
+import { deriveKeys } from "@bittery/crypto/key-derivation";
+import {
+	deriveClientSession,
+	generateClientEphemeral,
+	verifyServerSession,
+} from "@bittery/crypto/srp-client";
+import type { AccountMetadata } from "@bittery/crypto/storage-react-native";
+import { useRouter } from "expo-router";
+import {
+	ChevronDown,
+	Eye,
+	EyeOff,
+	Fingerprint,
+	Lock,
+	UserPlus,
+} from "lucide-react-native";
+import { useEffect, useState } from "react";
+import {
+	Alert,
+	KeyboardAvoidingView,
+	Modal,
+	Platform,
+	ScrollView,
+	Text,
+	TextInput,
+	TouchableOpacity,
+	View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { useAccount } from "../../src/contexts/account-context";
+import { useTRPCClient, useServerUrl } from "../../src/lib/trpc";
+import * as storage from "../../src/services/storage";
+
+export default function UnlockScreen() {
+	const router = useRouter();
+	const trpcClient = useTRPCClient();
+	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
+	const { allAccounts, activeAccount, refreshAccounts } = useAccount();
+
+	const [password, setPassword] = useState("");
+	const [showPassword, setShowPassword] = useState(false);
+	const [loading, setLoading] = useState(false);
+	const [showAccountPicker, setShowAccountPicker] = useState(false);
+	const [targetAccount, setTargetAccount] = useState<AccountMetadata | null>(
+		null,
+	);
+	const [biometricState, setBiometricState] = useState<{
+		available: boolean;
+		enabled: boolean;
+		type: string | null;
+	}>({ available: false, enabled: false, type: null });
+
+	useEffect(() => {
+		if (activeAccount) {
+			setTargetAccount(activeAccount);
+			loadBiometricState(activeAccount.email);
+		}
+	}, [activeAccount]);
+
+	const loadBiometricState = async (email: string) => {
+		const available = await storage.isBiometricAvailable();
+		const enabled = await storage.isBiometricEnabled(email);
+		const type = available ? await storage.getBiometricType() : null;
+		setBiometricState({ available, enabled, type });
+	};
+
+	const handleBiometricUnlock = async () => {
+		if (!targetAccount) return;
+
+		setLoading(true);
+		try {
+			const success = await storage.unlockWithBiometric(targetAccount.email);
+
+			if (success) {
+				// Restore auth token and vault keys
+				const token = await storage.getAuthToken(targetAccount.email);
+				const vaultKeys = await storage.getVaultKeys(targetAccount.email);
+
+				if (token && vaultKeys) {
+					// Load server URL for this account
+					const serverUrl = await storage.getServerUrl(targetAccount.email);
+					if (serverUrl) {
+						setGlobalServerUrl(serverUrl);
+					}
+
+					// Set as active account
+					await storage.setActiveAccount(targetAccount.email);
+					await refreshAccounts();
+
+					router.replace("/(vault)");
+				} else {
+					Alert.alert(
+						"Session Expired",
+						"Please log in again with your credentials.",
+					);
+					await storage.clearAllStoredData(targetAccount.email);
+					router.replace("/(auth)/login");
+				}
+			} else {
+				Alert.alert("Error", "Biometric authentication failed");
+			}
+		} catch (error) {
+			console.error("Biometric unlock error:", error);
+			Alert.alert("Error", "Biometric unlock failed");
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	const handlePasswordUnlock = async () => {
+		if (!targetAccount || !password.trim()) {
+			Alert.alert("Error", "Please enter your password");
+			return;
+		}
+
+		setLoading(true);
+
+		try {
+			const secretKey = await storage.getStoredSecretKey(targetAccount.email);
+			if (!secretKey) {
+				Alert.alert("Error", "Secret key not found. Please log in again.");
+				await storage.clearAllStoredData(targetAccount.email);
+				router.replace("/(auth)/login");
+				return;
+			}
+
+			const sessionData = await storage.getStoredSessionData(
+				targetAccount.email,
+			);
+			if (!sessionData) {
+				Alert.alert("Error", "Session data not found. Please log in again.");
+				await storage.clearAllStoredData(targetAccount.email);
+				router.replace("/(auth)/login");
+				return;
+			}
+
+			// Load server URL for this account
+			const serverUrl = await storage.getServerUrl(targetAccount.email);
+			if (serverUrl) {
+				setGlobalServerUrl(serverUrl);
+			}
+
+			// 1. Derive keys from password + secret key
+			const { authKey, masterUnlockKey } = await deriveKeys(
+				password,
+				secretKey,
+				targetAccount.email,
+			);
+
+			// Convert authKey to password string for SRP
+			const srpPassword = new TextDecoder().decode(authKey);
+
+			// 2. Generate client ephemeral key pair
+			const clientEphemeral = generateClientEphemeral();
+
+			// 3. Send client public key to server and get challenge
+			const startResult = await trpcClient.auth.startLogin.mutate({
+				email: targetAccount.email,
+				clientPublicKey: clientEphemeral.publicKey,
+			});
+
+			// 4. Derive session and compute proof
+			const clientSession = await deriveClientSession(
+				clientEphemeral.secret,
+				{
+					salt: startResult.salt,
+					serverPublicKey: startResult.serverPublicKey,
+				},
+				srpPassword,
+			);
+
+			// 5. Send proof to server and get session
+			const finishResult = await trpcClient.auth.finishLogin.mutate({
+				userId: startResult.userId,
+				serverSecret: startResult.serverSecret,
+				clientPublicKey: clientEphemeral.publicKey,
+				clientProof: clientSession.proof,
+			});
+
+			if (!finishResult.serverProof) {
+				Alert.alert("Error", "Unlock failed - invalid credentials");
+				return;
+			}
+
+			// 6. Verify server's proof
+			await verifyServerSession(
+				clientEphemeral.publicKey,
+				clientSession,
+				finishResult.serverProof,
+			);
+
+			// Update session with fresh data
+			await storage.storeAuthToken(finishResult.token, targetAccount.email);
+			await storage.storeVaultKeys(
+				finishResult.vaultKeys,
+				targetAccount.email,
+			);
+
+			if (finishResult.user.encryptedPrivateKey) {
+				await storage.storeEncryptedPrivateKey(
+					finishResult.user.encryptedPrivateKey,
+					targetAccount.email,
+				);
+			}
+
+			await storage.storeSessionData(
+				masterUnlockKey,
+				targetAccount.email,
+				finishResult.user.id,
+			);
+			await storage.storeMasterUnlockKey(
+				masterUnlockKey,
+				targetAccount.email,
+			);
+
+			// Update account metadata
+			const updatedMetadata: AccountMetadata = {
+				...targetAccount,
+				teamName: finishResult.user.teamName,
+				lastActiveAt: Date.now(),
+			};
+			await storage.addAccountToList(updatedMetadata);
+
+			// Set as active account
+			await storage.setActiveAccount(targetAccount.email);
+			await refreshAccounts();
+
+			router.replace("/(vault)");
+		} catch (error) {
+			console.error("Unlock error:", error);
+			Alert.alert(
+				"Error",
+				error instanceof Error ? error.message : "Unlock failed",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	const handleSwitchAccount = async (account: AccountMetadata) => {
+		setShowAccountPicker(false);
+		setTargetAccount(account);
+		setPassword("");
+		await loadBiometricState(account.email);
+	};
+
+	// If no accounts, redirect to login
+	if (allAccounts.length === 0) {
+		router.replace("/(auth)/login");
+		return null;
+	}
+
+	return (
+		<SafeAreaView className="flex-1 bg-background">
+			<KeyboardAvoidingView
+				behavior={Platform.OS === "ios" ? "padding" : "height"}
+				className="flex-1"
+			>
+				<ScrollView
+					className="flex-1"
+					contentContainerStyle={{ flexGrow: 1 }}
+					keyboardShouldPersistTaps="handled"
+				>
+					<View className="flex-1 justify-center px-6 py-8">
+						{/* Header */}
+						<View className="mb-8 items-center">
+							<View className="mb-4 h-20 w-20 items-center justify-center rounded-2xl bg-primary">
+								<Lock size={40} color="#fff" />
+							</View>
+							<Text className="text-2xl font-bold text-foreground">
+								Unlock Bittery
+							</Text>
+						</View>
+
+						{/* Account Selector */}
+						{targetAccount && (
+							<View className="mb-6">
+								{allAccounts.length > 1 ? (
+									<TouchableOpacity
+										onPress={() => setShowAccountPicker(true)}
+										className="flex-row items-center justify-center rounded-lg border border-input bg-background px-4 py-3"
+									>
+										<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-primary">
+											<Text className="font-semibold text-primary-foreground">
+												{targetAccount.name.charAt(0).toUpperCase()}
+											</Text>
+										</View>
+										<View className="flex-1">
+											<Text className="font-medium text-foreground">
+												{targetAccount.teamName ||
+													targetAccount.name ||
+													targetAccount.email.split("@")[0]}
+											</Text>
+											<Text className="text-sm text-muted-foreground">
+												{targetAccount.email}
+											</Text>
+										</View>
+										<ChevronDown size={20} color="#6b7280" />
+									</TouchableOpacity>
+								) : (
+									<View className="items-center">
+										<View className="mb-2 h-12 w-12 items-center justify-center rounded-full bg-primary">
+											<Text className="text-lg font-semibold text-primary-foreground">
+												{targetAccount.name.charAt(0).toUpperCase()}
+											</Text>
+										</View>
+										<Text className="font-medium text-foreground">
+											{targetAccount.email}
+										</Text>
+									</View>
+								)}
+							</View>
+						)}
+
+						{/* Biometric Unlock */}
+						{biometricState.available && biometricState.enabled && (
+							<View className="mb-4">
+								<TouchableOpacity
+									onPress={handleBiometricUnlock}
+									disabled={loading}
+									className={`flex-row items-center justify-center rounded-lg border border-input py-4 ${
+										loading ? "opacity-50" : ""
+									}`}
+								>
+									<Fingerprint size={24} color="#6b7280" />
+									<Text className="ml-3 font-medium text-foreground">
+										{loading
+											? "Authenticating..."
+											: `Unlock with ${biometricState.type || "Biometric"}`}
+									</Text>
+								</TouchableOpacity>
+								<View className="my-4 flex-row items-center">
+									<View className="flex-1 h-px bg-border" />
+									<Text className="mx-4 text-muted-foreground">or</Text>
+									<View className="flex-1 h-px bg-border" />
+								</View>
+							</View>
+						)}
+
+						{/* Password Form */}
+						<View className="space-y-4">
+							<View>
+								<Text className="mb-2 text-sm font-medium text-foreground">
+									Password
+								</Text>
+								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
+									<Lock size={20} color="#6b7280" />
+									<TextInput
+										className="ml-3 flex-1 py-3 text-foreground"
+										placeholder="Enter your password"
+										value={password}
+										onChangeText={setPassword}
+										secureTextEntry={!showPassword}
+										textContentType="password"
+										autoFocus
+									/>
+									<TouchableOpacity
+										onPress={() => setShowPassword(!showPassword)}
+									>
+										{showPassword ? (
+											<EyeOff size={20} color="#6b7280" />
+										) : (
+											<Eye size={20} color="#6b7280" />
+										)}
+									</TouchableOpacity>
+								</View>
+							</View>
+
+							<TouchableOpacity
+								onPress={handlePasswordUnlock}
+								disabled={loading}
+								className={`rounded-lg py-4 ${
+									loading ? "bg-primary/50" : "bg-primary"
+								}`}
+							>
+								<Text className="text-center font-semibold text-primary-foreground">
+									{loading ? "Unlocking..." : "Unlock"}
+								</Text>
+							</TouchableOpacity>
+
+							<TouchableOpacity
+								onPress={() => router.push("/(auth)/login")}
+								className="mt-4 flex-row items-center justify-center"
+							>
+								<UserPlus size={16} color="#6b7280" />
+								<Text className="ml-2 text-muted-foreground">
+									Sign in with different account
+								</Text>
+							</TouchableOpacity>
+						</View>
+					</View>
+				</ScrollView>
+			</KeyboardAvoidingView>
+
+			{/* Account Picker Modal */}
+			<Modal
+				visible={showAccountPicker}
+				transparent
+				animationType="slide"
+				onRequestClose={() => setShowAccountPicker(false)}
+			>
+				<TouchableOpacity
+					activeOpacity={1}
+					onPress={() => setShowAccountPicker(false)}
+					className="flex-1 justify-end bg-black/50"
+				>
+					<View className="rounded-t-3xl bg-background pb-8">
+						<View className="items-center py-4">
+							<View className="h-1 w-12 rounded-full bg-border" />
+						</View>
+						<Text className="mb-4 px-6 text-lg font-semibold text-foreground">
+							Select Account
+						</Text>
+						{allAccounts.map((account) => (
+							<TouchableOpacity
+								key={account.email}
+								onPress={() => handleSwitchAccount(account)}
+								className="flex-row items-center px-6 py-3"
+							>
+								<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-primary">
+									<Text className="font-semibold text-primary-foreground">
+										{account.name.charAt(0).toUpperCase()}
+									</Text>
+								</View>
+								<View className="flex-1">
+									<Text className="font-medium text-foreground">
+										{account.teamName ||
+											account.name ||
+											account.email.split("@")[0]}
+									</Text>
+									<Text className="text-sm text-muted-foreground">
+										{account.email}
+									</Text>
+								</View>
+								{account.email === targetAccount?.email && (
+									<View className="h-2 w-2 rounded-full bg-primary" />
+								)}
+							</TouchableOpacity>
+						))}
+					</View>
+				</TouchableOpacity>
+			</Modal>
+		</SafeAreaView>
+	);
+}

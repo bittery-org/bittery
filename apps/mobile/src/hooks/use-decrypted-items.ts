@@ -1,0 +1,92 @@
+import { decrypt } from "@bittery/crypto/encryption";
+import type { DecryptedItem } from "@bittery/shared/types";
+import { useQuery } from "@tanstack/react-query";
+
+import { useTRPC } from "../lib/trpc";
+import * as storage from "../services/storage";
+
+/**
+ * Hook to fetch and decrypt items from a vault.
+ * Items are cached for 5 minutes to avoid repeated decryption.
+ */
+export function useDecryptedItems(vaultId: string) {
+	const trpc = useTRPC();
+
+	// Fetch raw encrypted items from API
+	const {
+		data: rawItems = [],
+		isLoading: isLoadingRaw,
+		dataUpdatedAt,
+		refetch,
+	} = useQuery(trpc.vault.listItems.queryOptions({ vaultId }));
+
+	// Decrypt items and cache the result
+	const {
+		data: decryptedItems = [],
+		isLoading: isDecrypting,
+		error,
+	} = useQuery({
+		queryKey: ["decrypted-items", vaultId, dataUpdatedAt],
+		queryFn: async (): Promise<DecryptedItem[]> => {
+			if (rawItems.length === 0) return [];
+
+			// Get vault key for decryption
+			const vaultKey = await storage.getDecryptedVaultKey(vaultId);
+			if (!vaultKey) {
+				throw new Error("No vault key found for decryption");
+			}
+
+			// Decrypt all items in parallel
+			const decrypted = await Promise.all(
+				rawItems.map(async (item) => {
+					try {
+						const decryptedData = await decrypt(
+							{
+								ciphertext: item.encryptedData,
+								iv: item.encryptionIv,
+								algorithm: item.encryptionAlgorithm,
+							},
+							vaultKey,
+						);
+
+						const parsedData = JSON.parse(decryptedData);
+
+						return {
+							id: item.id,
+							vaultId: item.vaultId,
+							category: item.category,
+							favorite: item.favorite,
+							createdAt: item.createdAt,
+							updatedAt: item.updatedAt,
+							...parsedData,
+						} as DecryptedItem;
+					} catch (error) {
+						console.error(`Failed to decrypt item ${item.id}:`, error);
+						// Return a placeholder for failed items
+						return {
+							id: item.id,
+							vaultId: item.vaultId,
+							category: item.category,
+							favorite: item.favorite,
+							createdAt: item.createdAt,
+							updatedAt: item.updatedAt,
+							title: "[Decryption Failed]",
+						} as DecryptedItem;
+					}
+				}),
+			);
+
+			return decrypted;
+		},
+		enabled: rawItems.length > 0,
+		staleTime: 5 * 60 * 1000, // 5 minutes
+		gcTime: 10 * 60 * 1000, // 10 minutes
+	});
+
+	return {
+		items: decryptedItems,
+		isLoading: isLoadingRaw || isDecrypting,
+		error,
+		refetch,
+	};
+}
