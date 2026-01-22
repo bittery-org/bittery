@@ -28,8 +28,9 @@ export default function TabsLayout() {
 					headerStyle: {
 						backgroundColor: "#fff",
 						shadowColor: "transparent",
-						borderBottomWidth: 1,
+						borderBottomWidth: 0,
 						borderBottomColor: "#e5e7eb",
+						height: 110
 					},
 					headerTitleStyle: {
 						fontWeight: "600",

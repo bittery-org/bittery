@@ -22,6 +22,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { TotpDisplay } from "../../../src/components/totp-display";
 import { useDecryptedItems } from "../../../src/hooks/use-decrypted-items";
 
 const categoryIcons: Record<ItemCategory, typeof Key> = {
@@ -118,6 +119,7 @@ export default function VaultItemsScreen() {
 
 	const renderItem = ({ item }: { item: DecryptedItem }) => {
 		const Icon = categoryIcons[item.category];
+		const hasTotpSecret = Boolean(item.totpSecret);
 
 		return (
 			<TouchableOpacity
@@ -134,15 +136,28 @@ export default function VaultItemsScreen() {
 							<Star size={14} color="#eab308" fill="#eab308" className="ml-2" />
 						)}
 					</View>
-					{item.username && (
+					{/* Show username/url for non-TOTP items or TOTP items without a secret */}
+					{!hasTotpSecret && item.username && (
 						<Text className="text-muted-foreground text-sm" numberOfLines={1}>
 							{item.username}
 						</Text>
 					)}
-					{item.url && (
+					{!hasTotpSecret && item.url && (
 						<Text className="text-muted-foreground text-sm" numberOfLines={1}>
 							{item.url}
 						</Text>
+					)}
+					{/* Show inline TOTP for items with TOTP secret */}
+					{hasTotpSecret && (
+						<View className="mt-1">
+							<TotpDisplay
+								totpSecret={item.totpSecret!}
+								totpAlgorithm={item.totpAlgorithm}
+								totpDigits={item.totpDigits}
+								totpPeriod={item.totpPeriod}
+								inline
+							/>
+						</View>
 					)}
 				</View>
 			</TouchableOpacity>

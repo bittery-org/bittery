@@ -1122,3 +1122,36 @@ export async function unlockWithBiometric(email?: string): Promise<boolean> {
 export function lockAllAccounts(): void {
 	accountCaches.clear();
 }
+
+// ============================================================================
+// Generic Storage Functions (for offline cache)
+// ============================================================================
+
+/**
+ * Generic key-value storage - set item
+ * Note: For offline cache data that doesn't need account scoping
+ */
+export async function setOfflineCacheItem(
+	key: string,
+	value: string,
+): Promise<void> {
+	await setItem(key, value);
+}
+
+/**
+ * Generic key-value storage - get item
+ * Note: For offline cache data that doesn't need account scoping
+ */
+export async function getOfflineCacheItem(
+	key: string,
+): Promise<string | null> {
+	return getItem(key);
+}
+
+/**
+ * Generic key-value storage - delete item
+ * Note: For offline cache data that doesn't need account scoping
+ */
+export async function deleteOfflineCacheItem(key: string): Promise<void> {
+	await deleteItem(key);
+}

@@ -17,7 +17,8 @@
 			"supportsTablet": true,
 			"bundleIdentifier": "io.bittery.app",
 			"infoPlist": {
-				"NSFaceIDUsageDescription": "Bittery uses Face ID to securely unlock your vault"
+				"NSFaceIDUsageDescription": "Bittery uses Face ID to securely unlock your vault",
+				"NSCameraUsageDescription": "Bittery needs camera access to scan TOTP QR codes"
 			},
 			"associatedDomains": [
 				"applinks:app.bittery.io",
@@ -35,7 +36,7 @@
 				"backgroundColor": "#ffffff"
 			},
 			"package": "io.bittery.app",
-			"permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT"]
+			"permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT", "CAMERA"]
 		},
 		"web": {
 			"bundler": "metro",
@@ -51,6 +52,12 @@
 				"expo-sqlite",
 				{
 					"enableFTS": true
+				}
+			],
+			[
+				"expo-camera",
+				{
+					"cameraPermission": "Allow Bittery to access your camera to scan TOTP QR codes"
 				}
 			]
 		],

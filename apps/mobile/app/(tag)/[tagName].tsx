@@ -125,6 +125,16 @@ export default function TagFilterScreen() {
 			vault={item.vault}
 			showVaultBadge
 			onPress={() => handleItemPress(item)}
+			// Pass TOTP data for inline display
+			totpSecret={item.totpSecret}
+			totpAlgorithm={item.totpAlgorithm}
+			totpDigits={item.totpDigits}
+			totpPeriod={item.totpPeriod}
+			// Show inline TOTP for TOTP items or login items with TOTP secret
+			showInlineTotp={
+				(item.category === "totp" || item.category === "login") &&
+				Boolean(item.totpSecret)
+			}
 		/>
 	);
 

@@ -1,4 +1,8 @@
-import type { ItemCategory } from "@bittery/shared/types";
+import type {
+	ItemCategory,
+	TotpAlgorithm,
+	TotpDigits,
+} from "@bittery/shared/types";
 import {
 	CreditCard,
 	FileText,
@@ -9,6 +13,7 @@ import {
 } from "lucide-react-native";
 import { Text, TouchableOpacity, View } from "react-native";
 
+import { TotpDisplay } from "./totp-display";
 import { VaultBadge } from "./vault-badge";
 
 const categoryIcons: Record<ItemCategory, typeof Key> = {
@@ -34,6 +39,13 @@ interface ItemListItemProps {
 	showVaultBadge?: boolean;
 	onPress: () => void;
 	rightContent?: React.ReactNode;
+	/** TOTP fields for showing live codes in list */
+	totpSecret?: string;
+	totpAlgorithm?: TotpAlgorithm;
+	totpDigits?: TotpDigits;
+	totpPeriod?: number;
+	/** Whether to show inline TOTP code (for TOTP category items or login items with TOTP) */
+	showInlineTotp?: boolean;
 }
 
 export function ItemListItem({
@@ -47,11 +59,21 @@ export function ItemListItem({
 	showVaultBadge = false,
 	onPress,
 	rightContent,
+	totpSecret,
+	totpAlgorithm,
+	totpDigits,
+	totpPeriod,
+	showInlineTotp = false,
 }: ItemListItemProps) {
 	const Icon = categoryIcons[category];
 
+	// Show TOTP if item has TOTP secret and showInlineTotp is enabled
+	const shouldShowTotp = showInlineTotp && totpSecret;
+
 	// Get subtitle based on category
 	const getSubtitle = () => {
+		// If showing inline TOTP, don't show subtitle text for TOTP items
+		if (shouldShowTotp && category === "totp") return null;
 		if (category === "login" && username) return username;
 		if (category === "login" && url) return url;
 		if (category === "credit-card") return "Credit Card";
@@ -96,6 +118,18 @@ export function ItemListItem({
 					<Text className="text-muted-foreground text-sm" numberOfLines={1}>
 						{subtitle}
 					</Text>
+				)}
+				{/* Inline TOTP display for TOTP items or login items with TOTP */}
+				{shouldShowTotp && (
+					<View className="mt-1">
+						<TotpDisplay
+							totpSecret={totpSecret}
+							totpAlgorithm={totpAlgorithm}
+							totpDigits={totpDigits}
+							totpPeriod={totpPeriod}
+							inline
+						/>
+					</View>
 				)}
 				{showVaultBadge && vault && (
 					<View className="mt-1 self-start">

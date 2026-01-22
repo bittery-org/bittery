@@ -1,23 +1,38 @@
 import { encrypt } from "@bittery/crypto/encryption";
+import {
+	type CardBrand,
+	detectCardBrand,
+	formatCardNumber,
+	getCardBrandDisplayName,
+} from "@bittery/shared/credit-card";
 import type { Address, PhoneNumber } from "@bittery/shared/identity";
+import {
+	isValidBase32,
+	parseOtpAuthUri,
+	type ParsedOtpAuthUri,
+} from "@bittery/shared/totp";
 import type {
 	CustomField,
 	ItemCategory,
 	TotpAlgorithm,
 	TotpDigits,
 } from "@bittery/shared/types";
+import * as Clipboard from "expo-clipboard";
 import * as Crypto from "expo-crypto";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
 	ArrowLeft,
+	Camera,
 	ChevronDown,
 	ChevronRight,
+	ClipboardPaste,
 	CreditCard,
 	Eye,
 	EyeOff,
 	FileText,
 	Key,
 	Plus,
+	Sparkles,
 	Timer,
 	Trash2,
 	User,
@@ -35,6 +50,9 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { PasswordGenerator } from "../../../../src/components/password-generator";
+import { QrCodeScanner } from "../../../../src/components/qr-code-scanner";
+import { TotpDisplay } from "../../../../src/components/totp-display";
 
 import { useDecryptedItems } from "../../../../src/hooks/use-decrypted-items";
 import { useTRPCClient } from "../../../../src/lib/trpc";
@@ -70,6 +88,7 @@ export default function EditItemScreen() {
 	const [saving, setSaving] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
 	const [showCvv, setShowCvv] = useState(false);
+	const [showPasswordGenerator, setShowPasswordGenerator] = useState(false);
 
 	// Common fields
 	const [title, setTitle] = useState("");
@@ -93,6 +112,7 @@ export default function EditItemScreen() {
 	const [totpPeriod, setTotpPeriod] = useState(30);
 	const [showTotpSection, setShowTotpSection] = useState(false);
 	const [showTotpAdvanced, setShowTotpAdvanced] = useState(false);
+	const [showQrScanner, setShowQrScanner] = useState(false);
 
 	// Credit card fields
 	const [cardholderName, setCardholderName] = useState("");
@@ -100,6 +120,9 @@ export default function EditItemScreen() {
 	const [expiryDate, setExpiryDate] = useState("");
 	const [cvv, setCvv] = useState("");
 	const [billingAddress, setBillingAddress] = useState("");
+	const [detectedCardBrand, setDetectedCardBrand] = useState<CardBrand | "">(
+		"",
+	);
 
 	// Identity fields
 	const [firstName, setFirstName] = useState("");
@@ -145,10 +168,15 @@ export default function EditItemScreen() {
 			// Credit card fields
 			if (item.category === "credit-card") {
 				setCardholderName(item.cardholderName || "");
-				setCardNumber(item.cardNumber || "");
+				const cardNum = item.cardNumber || "";
+				setCardNumber(cardNum);
 				setExpiryDate(item.expiryDate || "");
 				setCvv(item.cvv || "");
 				setBillingAddress(item.billingAddress || "");
+				// Detect card brand for existing card number
+				if (cardNum.length >= 4) {
+					setDetectedCardBrand(detectCardBrand(cardNum));
+				}
 			}
 
 			// Identity fields
@@ -405,6 +433,28 @@ export default function EditItemScreen() {
 		setExpiryDate(cleaned);
 	};
 
+	// Card number change handler with brand detection and formatting
+	const handleCardNumberChange = (value: string) => {
+		// Remove all non-digits
+		const cleaned = value.replace(/\D/g, "");
+
+		// Detect brand when we have at least 4 digits
+		if (cleaned.length >= 4) {
+			const brand = detectCardBrand(cleaned);
+			setDetectedCardBrand(brand);
+		} else {
+			setDetectedCardBrand("");
+		}
+
+		setCardNumber(cleaned);
+	};
+
+	// CVV change handler - only allow digits
+	const handleCvvChange = (value: string) => {
+		const cleaned = value.replace(/\D/g, "");
+		setCvv(cleaned);
+	};
+
 	// Render loading state
 	if (isLoading) {
 		return (
@@ -452,20 +502,28 @@ export default function EditItemScreen() {
 				<Text className="mb-2 font-medium text-foreground text-sm">
 					Password
 				</Text>
-				<View className="flex-row items-center rounded-lg border border-input bg-background px-4">
-					<TextInput
-						className="flex-1 py-3 text-foreground"
-						placeholder="Enter password"
-						value={password}
-						onChangeText={setPassword}
-						secureTextEntry={!showPassword}
-					/>
-					<TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-						{showPassword ? (
-							<EyeOff size={20} color="#6b7280" />
-						) : (
-							<Eye size={20} color="#6b7280" />
-						)}
+				<View className="flex-row items-center gap-2">
+					<View className="flex-1 flex-row items-center rounded-lg border border-input bg-background px-4">
+						<TextInput
+							className="flex-1 py-3 text-foreground"
+							placeholder="Enter password"
+							value={password}
+							onChangeText={setPassword}
+							secureTextEntry={!showPassword}
+						/>
+						<TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+							{showPassword ? (
+								<EyeOff size={20} color="#6b7280" />
+							) : (
+								<Eye size={20} color="#6b7280" />
+							)}
+						</TouchableOpacity>
+					</View>
+					<TouchableOpacity
+						onPress={() => setShowPasswordGenerator(true)}
+						className="rounded-lg bg-primary p-3"
+					>
+						<Sparkles size={20} color="#fff" />
 					</TouchableOpacity>
 				</View>
 			</View>
@@ -540,6 +598,25 @@ export default function EditItemScreen() {
 				</View>
 				{showTotpSection && (
 					<View className="rounded-lg border border-border p-4">
+						{/* Quick Import Buttons */}
+						<View className="mb-4 flex-row gap-2">
+							<TouchableOpacity
+								onPress={() => setShowQrScanner(true)}
+								className="flex-1 flex-row items-center justify-center rounded-lg border border-primary bg-primary/10 py-2"
+							>
+								<Camera size={16} color="#6366f1" />
+								<Text className="ml-2 font-medium text-primary text-sm">Scan QR</Text>
+							</TouchableOpacity>
+							<TouchableOpacity
+								onPress={handlePasteTotp}
+								className="flex-1 flex-row items-center justify-center rounded-lg border border-border bg-secondary py-2"
+							>
+								<ClipboardPaste size={16} color="#6b7280" />
+								<Text className="ml-2 font-medium text-foreground text-sm">Paste</Text>
+							</TouchableOpacity>
+						</View>
+
+						{/* Secret Key Input */}
 						<View className="mb-4">
 							<Text className="mb-2 font-medium text-foreground text-sm">
 								Secret Key *
@@ -552,7 +629,30 @@ export default function EditItemScreen() {
 								autoCapitalize="characters"
 								autoCorrect={false}
 							/>
+							{totpSecret && !isValidBase32(totpSecret) && (
+								<Text className="mt-1 text-destructive text-xs">
+									Invalid base32 format. Please check the secret key.
+								</Text>
+							)}
 						</View>
+
+						{/* Live Preview */}
+						{totpSecret && isValidBase32(totpSecret) && (
+							<View className="mb-4">
+								<Text className="mb-2 font-medium text-foreground text-sm">
+									Preview
+								</Text>
+								<TotpDisplay
+									totpSecret={totpSecret}
+									totpAlgorithm={totpAlgorithm}
+									totpDigits={totpDigits}
+									totpPeriod={totpPeriod}
+									compact
+								/>
+							</View>
+						)}
+
+						{/* Issuer & Account */}
 						<View className="mb-4 flex-row gap-2">
 							<View className="flex-1">
 								<Text className="mb-2 font-medium text-foreground text-sm">
@@ -687,15 +787,23 @@ export default function EditItemScreen() {
 				/>
 			</View>
 			<View className="mb-4">
-				<Text className="mb-2 font-medium text-foreground text-sm">
-					Card Number
-				</Text>
+				<View className="mb-2 flex-row items-center justify-between">
+					<Text className="font-medium text-foreground text-sm">
+						Card Number
+					</Text>
+					{detectedCardBrand && detectedCardBrand !== "unknown" && (
+						<Text className="text-muted-foreground text-xs">
+							{getCardBrandDisplayName(detectedCardBrand)}
+						</Text>
+					)}
+				</View>
 				<TextInput
 					className="rounded-lg border border-input bg-background px-4 py-3 font-mono text-foreground"
 					placeholder="1234 5678 9012 3456"
-					value={cardNumber}
-					onChangeText={setCardNumber}
+					value={formatCardNumber(cardNumber, detectedCardBrand || undefined)}
+					onChangeText={handleCardNumberChange}
 					keyboardType="numeric"
+					maxLength={23}
 				/>
 			</View>
 			<View className="mb-4 flex-row">
@@ -704,7 +812,7 @@ export default function EditItemScreen() {
 						Expiry
 					</Text>
 					<TextInput
-						className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
+						className="rounded-lg border border-input bg-background px-4 py-3 font-mono text-foreground"
 						placeholder="MM/YY"
 						value={expiryDate}
 						onChangeText={handleExpiryChange}
@@ -719,10 +827,10 @@ export default function EditItemScreen() {
 							className="flex-1 py-3 font-mono text-foreground"
 							placeholder="123"
 							value={cvv}
-							onChangeText={setCvv}
+							onChangeText={handleCvvChange}
 							keyboardType="numeric"
 							secureTextEntry={!showCvv}
-							maxLength={4}
+							maxLength={detectedCardBrand === "amex" ? 4 : 3}
 						/>
 						<TouchableOpacity onPress={() => setShowCvv(!showCvv)}>
 							{showCvv ? (
@@ -1015,8 +1123,77 @@ export default function EditItemScreen() {
 		</View>
 	);
 
+	// Handle QR code scan result for TOTP
+	const handleTotpQrScanSuccess = (data: ParsedOtpAuthUri) => {
+		setTotpSecret(data.secret);
+		if (data.issuer) setTotpIssuer(data.issuer);
+		if (data.accountName) setTotpAccountName(data.accountName);
+		if (data.algorithm) setTotpAlgorithm(data.algorithm);
+		if (data.digits) setTotpDigits(data.digits);
+		if (data.period) setTotpPeriod(data.period);
+		Alert.alert("Success", "TOTP data imported from QR code");
+	};
+
+	// Handle paste from clipboard for TOTP
+	const handlePasteTotp = async () => {
+		try {
+			const text = await Clipboard.getStringAsync();
+			if (!text) {
+				Alert.alert("Empty Clipboard", "No text found in clipboard");
+				return;
+			}
+
+			// Check if it's an otpauth:// URI
+			if (text.startsWith("otpauth://")) {
+				try {
+					const parsed = parseOtpAuthUri(text);
+					if (isValidBase32(parsed.secret)) {
+						handleTotpQrScanSuccess(parsed);
+						return;
+					}
+				} catch {
+					// Not a valid URI, try as raw secret
+				}
+			}
+
+			// Try as raw base32 secret
+			const cleanedSecret = text.replace(/\s/g, "").toUpperCase();
+			if (isValidBase32(cleanedSecret)) {
+				setTotpSecret(cleanedSecret);
+				Alert.alert("Success", "Secret key pasted from clipboard");
+			} else {
+				Alert.alert(
+					"Invalid Format",
+					"The clipboard content is not a valid TOTP secret or otpauth:// URI",
+				);
+			}
+		} catch (error) {
+			console.error("Error pasting from clipboard:", error);
+			Alert.alert("Error", "Failed to read from clipboard");
+		}
+	};
+
 	const renderTotpFields = () => (
 		<>
+			{/* Quick Import Buttons */}
+			<View className="mb-4 flex-row gap-2">
+				<TouchableOpacity
+					onPress={() => setShowQrScanner(true)}
+					className="flex-1 flex-row items-center justify-center rounded-lg border border-primary bg-primary/10 py-3"
+				>
+					<Camera size={18} color="#6366f1" />
+					<Text className="ml-2 font-medium text-primary">Scan QR Code</Text>
+				</TouchableOpacity>
+				<TouchableOpacity
+					onPress={handlePasteTotp}
+					className="flex-1 flex-row items-center justify-center rounded-lg border border-border bg-secondary py-3"
+				>
+					<ClipboardPaste size={18} color="#6b7280" />
+					<Text className="ml-2 font-medium text-foreground">Paste</Text>
+				</TouchableOpacity>
+			</View>
+
+			{/* Secret Key Input */}
 			<View className="mb-4">
 				<Text className="mb-2 font-medium text-foreground text-sm">
 					Secret Key *
@@ -1029,28 +1206,53 @@ export default function EditItemScreen() {
 					autoCapitalize="characters"
 					autoCorrect={false}
 				/>
+				{totpSecret && !isValidBase32(totpSecret) && (
+					<Text className="mt-1 text-destructive text-xs">
+						Invalid base32 format. Please check the secret key.
+					</Text>
+				)}
 			</View>
-			<View className="mb-4">
-				<Text className="mb-2 font-medium text-foreground text-sm">
-					Issuer (optional)
-				</Text>
-				<TextInput
-					className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
-					placeholder="e.g., Google, GitHub"
-					value={totpIssuer}
-					onChangeText={setTotpIssuer}
-				/>
-			</View>
-			<View className="mb-4">
-				<Text className="mb-2 font-medium text-foreground text-sm">
-					Account Name (optional)
-				</Text>
-				<TextInput
-					className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
-					placeholder="your@email.com"
-					value={totpAccountName}
-					onChangeText={setTotpAccountName}
-				/>
+
+			{/* Live Preview */}
+			{totpSecret && isValidBase32(totpSecret) && (
+				<View className="mb-4">
+					<Text className="mb-2 font-medium text-foreground text-sm">
+						Preview
+					</Text>
+					<TotpDisplay
+						totpSecret={totpSecret}
+						totpAlgorithm={totpAlgorithm}
+						totpDigits={totpDigits}
+						totpPeriod={totpPeriod}
+						compact
+					/>
+				</View>
+			)}
+
+			{/* Issuer & Account */}
+			<View className="mb-4 flex-row gap-2">
+				<View className="flex-1">
+					<Text className="mb-2 font-medium text-foreground text-sm">
+						Service
+					</Text>
+					<TextInput
+						className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
+						placeholder="Google, GitHub..."
+						value={totpIssuer}
+						onChangeText={setTotpIssuer}
+					/>
+				</View>
+				<View className="flex-1">
+					<Text className="mb-2 font-medium text-foreground text-sm">
+						Account
+					</Text>
+					<TextInput
+						className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
+						placeholder="your@email.com"
+						value={totpAccountName}
+						onChangeText={setTotpAccountName}
+					/>
+				</View>
 			</View>
 
 			{/* Advanced TOTP Settings */}
@@ -1234,6 +1436,19 @@ export default function EditItemScreen() {
 
 	return (
 		<SafeAreaView className="flex-1 bg-background">
+			<PasswordGenerator
+				visible={showPasswordGenerator}
+				onClose={() => setShowPasswordGenerator(false)}
+				onPasswordGenerated={(generatedPassword) => {
+					setPassword(generatedPassword);
+					setShowPasswordGenerator(false);
+				}}
+			/>
+			<QrCodeScanner
+				visible={showQrScanner}
+				onClose={() => setShowQrScanner(false)}
+				onScanSuccess={handleTotpQrScanSuccess}
+			/>
 			<KeyboardAvoidingView
 				behavior={Platform.OS === "ios" ? "padding" : "height"}
 				className="flex-1"

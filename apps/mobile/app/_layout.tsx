@@ -12,7 +12,9 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AccountProvider } from "../src/contexts/account-context";
+import { OfflineVaultProvider } from "../src/contexts/offline-vault-context";
 import { TRPCProvider } from "../src/lib/trpc";
+import { OfflineModeBanner } from "../src/components/sync-status-indicator";
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -40,20 +42,23 @@ export default function RootLayout() {
 			<SafeAreaProvider>
 				<TRPCProvider>
 					<AccountProvider>
-						<Stack
-							screenOptions={{
-								headerShown: false,
-								contentStyle: { backgroundColor: "#ffffff" },
-							}}
-						>
-							<Stack.Screen name="index" />
-							<Stack.Screen name="(auth)" options={{ headerShown: false }} />
-							<Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-							<Stack.Screen name="(vault)" options={{ headerShown: false }} />
-							<Stack.Screen name="(tag)" options={{ headerShown: false }} />
-							<Stack.Screen name="settings" options={{ headerShown: false }} />
-						</Stack>
-						<StatusBar style="auto" />
+						<OfflineVaultProvider>
+							<OfflineModeBanner />
+							<Stack
+								screenOptions={{
+									headerShown: false,
+									contentStyle: { backgroundColor: "#ffffff" },
+								}}
+							>
+								<Stack.Screen name="index" />
+								<Stack.Screen name="(auth)" options={{ headerShown: false }} />
+								<Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+								<Stack.Screen name="(vault)" options={{ headerShown: false }} />
+								<Stack.Screen name="(tag)" options={{ headerShown: false }} />
+								<Stack.Screen name="settings" options={{ headerShown: false }} />
+							</Stack>
+							<StatusBar style="auto" />
+						</OfflineVaultProvider>
 					</AccountProvider>
 				</TRPCProvider>
 			</SafeAreaProvider>

@@ -1,3 +1,8 @@
+import {
+	detectCardBrand,
+	formatCardNumber as formatCardNumberUtil,
+	getCardBrandDisplayName,
+} from "@bittery/shared/credit-card";
 import type { ItemCategory } from "@bittery/shared/types";
 import * as Clipboard from "expo-clipboard";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -27,6 +32,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { TotpDisplay } from "../../../src/components/totp-display";
 import { useDecryptedItems } from "../../../src/hooks/use-decrypted-items";
 
 const categoryIcons: Record<ItemCategory, typeof Key> = {
@@ -57,6 +63,7 @@ export default function ItemDetailScreen() {
 	const [showCardNumber, setShowCardNumber] = useState(false);
 	const [showCvv, setShowCvv] = useState(false);
 	const [showSsn, setShowSsn] = useState(false);
+	const [showTotpSecret, setShowTotpSecret] = useState(false);
 
 	const item = items.find((i) => i.id === itemId);
 
@@ -71,7 +78,8 @@ export default function ItemDetailScreen() {
 	};
 
 	const formatCardNumber = (number: string) => {
-		return number.replace(/(\d{4})/g, "$1 ").trim();
+		const brand = detectCardBrand(number);
+		return formatCardNumberUtil(number, brand);
 	};
 
 	if (isLoading) {
@@ -116,16 +124,14 @@ export default function ItemDetailScreen() {
 		return (
 			<View className="border-border border-b py-4">
 				<Text className="mb-1 text-muted-foreground text-sm">{label}</Text>
-				<View className="flex-row items-center">
-					{options?.icon && (
-						<options.icon size={16} color="#6b7280" className="mr-2" />
-					)}
+				<View className="flex-row items-center gap-2.5">
+					{options?.icon && <options.icon size={16} color="#6b7280" />}
 					<Text className="flex-1 text-foreground" selectable>
 						{displayValue}
 					</Text>
 					{options?.masked && options?.setShowState && (
 						<TouchableOpacity
-							onPress={() => options.setShowState(!options.showState)}
+							onPress={() => options.setShowState?.(!options.showState)}
 							className="mr-2 p-2"
 						>
 							{options.showState ? (
@@ -177,52 +183,80 @@ export default function ItemDetailScreen() {
 						</View>
 					</View>
 				))}
+			{/* TOTP Section for Login Items */}
+			{item.totpSecret && (
+				<View className="border-border border-b py-4">
+					<Text className="mb-2 text-muted-foreground text-sm">
+						Two-Factor Code
+					</Text>
+					<TotpDisplay
+						totpSecret={item.totpSecret}
+						totpAlgorithm={item.totpAlgorithm}
+						totpDigits={item.totpDigits}
+						totpPeriod={item.totpPeriod}
+						label={item.totpIssuer || "One-time password"}
+					/>
+				</View>
+			)}
 		</>
 	);
 
-	const renderCreditCardFields = () => (
-		<>
-			{renderFieldRow("Cardholder Name", item.cardholderName)}
-			{item.cardNumber && (
-				<View className="border-border border-b py-4">
-					<Text className="mb-1 text-muted-foreground text-sm">
-						Card Number
-					</Text>
-					<View className="flex-row items-center">
-						<CreditCard size={16} color="#6b7280" className="mr-2" />
-						<Text className="flex-1 font-mono text-foreground" selectable>
-							{showCardNumber
-								? formatCardNumber(item.cardNumber)
-								: maskValue(item.cardNumber, 4)}
-						</Text>
-						<TouchableOpacity
-							onPress={() => setShowCardNumber(!showCardNumber)}
-							className="mr-2 p-2"
-						>
-							{showCardNumber ? (
-								<EyeOff size={18} color="#6b7280" />
-							) : (
-								<Eye size={18} color="#6b7280" />
+	const renderCreditCardFields = () => {
+		const cardBrand = item.cardNumber ? detectCardBrand(item.cardNumber) : null;
+		const brandDisplayName =
+			cardBrand && cardBrand !== "unknown"
+				? getCardBrandDisplayName(cardBrand)
+				: null;
+
+		return (
+			<>
+				{renderFieldRow("Cardholder Name", item.cardholderName)}
+				{item.cardNumber && (
+					<View className="border-border border-b py-4">
+						<View className="mb-1 flex-row items-center justify-between">
+							<Text className="text-muted-foreground text-sm">Card Number</Text>
+							{brandDisplayName && (
+								<Text className="text-muted-foreground text-xs">
+									{brandDisplayName}
+								</Text>
 							)}
-						</TouchableOpacity>
-						<TouchableOpacity
-							onPress={() => handleCopy(item.cardNumber ?? "", "Card Number")}
-							className="p-2"
-						>
-							<Copy size={18} color="#6b7280" />
-						</TouchableOpacity>
+						</View>
+						<View className="flex-row items-center">
+							<CreditCard size={16} color="#6b7280" className="mr-2" />
+							<Text className="flex-1 font-mono text-foreground" selectable>
+								{showCardNumber
+									? formatCardNumber(item.cardNumber)
+									: maskValue(item.cardNumber, 4)}
+							</Text>
+							<TouchableOpacity
+								onPress={() => setShowCardNumber(!showCardNumber)}
+								className="mr-2 p-2"
+							>
+								{showCardNumber ? (
+									<EyeOff size={18} color="#6b7280" />
+								) : (
+									<Eye size={18} color="#6b7280" />
+								)}
+							</TouchableOpacity>
+							<TouchableOpacity
+								onPress={() => handleCopy(item.cardNumber ?? "", "Card Number")}
+								className="p-2"
+							>
+								<Copy size={18} color="#6b7280" />
+							</TouchableOpacity>
+						</View>
 					</View>
-				</View>
-			)}
-			{renderFieldRow("Expiry Date", item.expiryDate)}
-			{renderFieldRow("CVV", item.cvv, {
-				masked: true,
-				showState: showCvv,
-				setShowState: setShowCvv,
-			})}
-			{renderFieldRow("Billing Address", item.billingAddress)}
-		</>
-	);
+				)}
+				{renderFieldRow("Expiry Date", item.expiryDate)}
+				{renderFieldRow("CVV", item.cvv, {
+					masked: true,
+					showState: showCvv,
+					setShowState: setShowCvv,
+				})}
+				{renderFieldRow("Billing Address", item.billingAddress)}
+			</>
+		);
+	};
 
 	const renderIdentityFields = () => (
 		<>
@@ -249,12 +283,11 @@ export default function ItemDetailScreen() {
 				// biome-ignore lint/suspicious/noArrayIndexKey: addresses don't have unique IDs
 				<View key={`address-${index}`} className="border-border border-b py-4">
 					<Text className="mb-1 text-muted-foreground text-sm">
-						{address.label || `Address ${index + 1}`}
+						{address.city} {address.country}
 					</Text>
 					<Text className="text-foreground" selectable>
 						{[
-							address.street1,
-							address.street2,
+							address.street,
 							address.city,
 							address.state,
 							address.zip,
@@ -298,9 +331,46 @@ export default function ItemDetailScreen() {
 
 	const renderTotpFields = () => (
 		<>
-			{renderFieldRow("Secret", item.totpSecret, { masked: true })}
+			{/* Live TOTP Code Display */}
+			{item.totpSecret && (
+				<View className="border-border border-b py-4">
+					<Text className="mb-2 text-muted-foreground text-sm">
+						Current Code
+					</Text>
+					<TotpDisplay
+						totpSecret={item.totpSecret}
+						totpAlgorithm={item.totpAlgorithm}
+						totpDigits={item.totpDigits}
+						totpPeriod={item.totpPeriod}
+					/>
+				</View>
+			)}
+			{renderFieldRow("Secret", item.totpSecret, {
+				masked: true,
+				showState: showTotpSecret,
+				setShowState: setShowTotpSecret,
+			})}
 			{renderFieldRow("Issuer", item.totpIssuer)}
 			{renderFieldRow("Account", item.totpAccountName)}
+			{/* Show TOTP settings if non-default */}
+			{(item.totpAlgorithm && item.totpAlgorithm !== "SHA1") && (
+				<View className="border-border border-b py-4">
+					<Text className="mb-1 text-muted-foreground text-sm">Algorithm</Text>
+					<Text className="text-foreground">{item.totpAlgorithm}</Text>
+				</View>
+			)}
+			{(item.totpDigits && item.totpDigits !== 6) && (
+				<View className="border-border border-b py-4">
+					<Text className="mb-1 text-muted-foreground text-sm">Digits</Text>
+					<Text className="text-foreground">{item.totpDigits}</Text>
+				</View>
+			)}
+			{(item.totpPeriod && item.totpPeriod !== 30) && (
+				<View className="border-border border-b py-4">
+					<Text className="mb-1 text-muted-foreground text-sm">Period</Text>
+					<Text className="text-foreground">{item.totpPeriod} seconds</Text>
+				</View>
+			)}
 		</>
 	);
 
