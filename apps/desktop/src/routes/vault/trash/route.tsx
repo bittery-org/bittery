@@ -77,13 +77,21 @@ function TrashComponent() {
 		},
 	});
 
-	const handleRestore = (e: React.MouseEvent, itemId: string, vaultId: string) => {
+	const handleRestore = (
+		e: React.MouseEvent,
+		itemId: string,
+		vaultId: string,
+	) => {
 		e.preventDefault();
 		e.stopPropagation();
 		restoreItemMutation.mutate({ itemId, vaultId });
 	};
 
-	const handlePermanentDelete = (e: React.MouseEvent, itemId: string, vaultId: string) => {
+	const handlePermanentDelete = (
+		e: React.MouseEvent,
+		itemId: string,
+		vaultId: string,
+	) => {
 		e.preventDefault();
 		e.stopPropagation();
 		setItemToDelete({ id: itemId, vaultId });
@@ -175,7 +183,9 @@ function TrashComponent() {
 													variant="ghost"
 													size="sm"
 													className="h-7 w-7 p-0"
-													onClick={(e) => handleRestore(e, item.id, item.vaultId)}
+													onClick={(e) =>
+														handleRestore(e, item.id, item.vaultId)
+													}
 													disabled={restoreItemMutation.isPending}
 													title="Restore"
 												>
@@ -185,7 +195,9 @@ function TrashComponent() {
 													variant="ghost"
 													size="sm"
 													className="h-7 w-7 p-0"
-													onClick={(e) => handlePermanentDelete(e, item.id, item.vaultId)}
+													onClick={(e) =>
+														handlePermanentDelete(e, item.id, item.vaultId)
+													}
 													disabled={permanentlyDeleteItemMutation.isPending}
 													title="Delete forever"
 												>

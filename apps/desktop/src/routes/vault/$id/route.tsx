@@ -93,6 +93,7 @@ function RouteComponent() {
 												}
 												linkTo="/vault/$id/$itemId"
 												linkParams={{ id, itemId: item.id }}
+												vaultId={id}
 											/>
 										))}
 									<div className="mt-4 mb-2 px-3 font-semibold text-muted-foreground text-xs uppercase">
@@ -111,6 +112,7 @@ function RouteComponent() {
 										}
 										linkTo="/vault/$id/$itemId"
 										linkParams={{ id, itemId: item.id }}
+										vaultId={id}
 									/>
 								))}
 						</div>

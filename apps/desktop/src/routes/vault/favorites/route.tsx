@@ -98,6 +98,7 @@ function RouteComponent() {
 									linkTo="/vault/favorites/$itemId"
 									linkParams={{ itemId: item.id }}
 									showVaultBadge
+									vaultId={item.vaultId}
 								/>
 							))}
 						</div>

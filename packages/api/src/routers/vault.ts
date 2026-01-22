@@ -903,6 +903,120 @@ export const vaultRouter = router({
 		}),
 
 	/**
+	 * Move an item from one vault to another
+	 * The client must re-encrypt the item data with the target vault's key
+	 */
+	moveItem: protectedProcedure
+		.input(
+			z.object({
+				itemId: z.string(),
+				sourceVaultId: z.string(),
+				targetVaultId: z.string(),
+				encryptedData: z.string(), // Re-encrypted with target vault key
+				encryptionIv: z.string(),
+				clientId: z.string().optional(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			// Verify the item exists and is in the source vault
+			const existingItem = await db.query.item.findFirst({
+				where: (item, { eq }) => eq(item.id, input.itemId),
+			});
+
+			if (!existingItem) {
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "Item not found",
+				});
+			}
+
+			if (existingItem.vaultId !== input.sourceVaultId) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Item does not belong to the source vault",
+				});
+			}
+
+			// Cannot move items that are in trash
+			if (existingItem.deletedAt) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Cannot move items that are in trash. Restore first.",
+				});
+			}
+
+			// Verify user has READ access to source vault
+			const sourceVaultKey = await db.query.vaultKey.findFirst({
+				where: (vk, { and, eq }) =>
+					and(
+						eq(vk.vaultId, input.sourceVaultId),
+						eq(vk.userId, ctx.session.userId),
+					),
+			});
+
+			if (!sourceVaultKey) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "No access to source vault",
+				});
+			}
+
+			// Verify user has WRITE access to target vault
+			const targetVaultKey = await db.query.vaultKey.findFirst({
+				where: (vk, { and, eq }) =>
+					and(
+						eq(vk.vaultId, input.targetVaultId),
+						eq(vk.userId, ctx.session.userId),
+					),
+			});
+
+			if (!targetVaultKey) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "No access to target vault",
+				});
+			}
+
+			if (targetVaultKey.role === "read-only") {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "Cannot move items to a read-only vault",
+				});
+			}
+
+			const newVersion = (existingItem.version || 1) + 1;
+
+			// Move the item: update vaultId and encrypted data
+			await db
+				.update(item)
+				.set({
+					vaultId: input.targetVaultId,
+					encryptedData: input.encryptedData,
+					encryptionIv: input.encryptionIv,
+					version: newVersion,
+					lastModifiedBy: ctx.session.userId,
+					updatedAt: new Date(),
+				})
+				.where(eq(item.id, input.itemId));
+
+			// Emit sync event with source vault in metadata
+			await emitSyncEvent({
+				eventType: "item_moved",
+				entityId: input.itemId,
+				entityType: "item",
+				vaultId: input.targetVaultId,
+				userId: ctx.session.userId,
+				clientId: input.clientId,
+				version: newVersion,
+				metadata: {
+					sourceVaultId: input.sourceVaultId,
+				},
+			});
+
+			return { success: true, version: newVersion };
+		}),
+
+	/**
 	 * Permanently delete an item from trash
 	 */
 	permanentlyDeleteItem: protectedProcedure

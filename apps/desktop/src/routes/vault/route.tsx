@@ -22,6 +22,7 @@ import { VaultHeader } from "../../components/vault/vault-header";
 import { VaultSidebar } from "../../components/vault/vault-sidebar";
 import { useCrossVaultTags } from "../../hooks/use-cross-vault-tags";
 import { trpc } from "../../lib/providers";
+import { VaultDndProvider } from "../../providers/dnd-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault")({
@@ -172,90 +173,92 @@ function RouteComponent() {
 	};
 
 	return (
-		<div className="flex h-screen flex-col overflow-hidden">
-			<VaultHeader
-				hasVaults={!!vaultKeys?.length}
-				onNewItemClick={() => setIsNewItemDialogOpen(true)}
-			/>
-
-			<div className="flex flex-1 overflow-hidden">
-				<VaultSidebar
-					vaults={vaultKeys || []}
-					tags={crossVaultTags}
-					currentVaultId={params.id}
-					onNewVault={() => setIsNewVaultDialogOpen(true)}
-					onEditVault={handleOpenEditVault}
-					onDeleteVault={handleOpenDeleteVault}
-					onImportItems={handleOpenImportDialog}
+		<VaultDndProvider>
+			<div className="flex h-screen flex-col overflow-hidden">
+				<VaultHeader
+					hasVaults={!!vaultKeys?.length}
+					onNewItemClick={() => setIsNewItemDialogOpen(true)}
 				/>
 
-				<div className="flex h-full flex-1 flex-col">
-					<div className="flex flex-1 overflow-hidden">
-						<Outlet />
+				<div className="flex flex-1 overflow-hidden">
+					<VaultSidebar
+						vaults={vaultKeys || []}
+						tags={crossVaultTags}
+						currentVaultId={params.id}
+						onNewVault={() => setIsNewVaultDialogOpen(true)}
+						onEditVault={handleOpenEditVault}
+						onDeleteVault={handleOpenDeleteVault}
+						onImportItems={handleOpenImportDialog}
+					/>
+
+					<div className="flex h-full flex-1 flex-col">
+						<div className="flex flex-1 overflow-hidden">
+							<Outlet />
+						</div>
 					</div>
 				</div>
-			</div>
 
-			{/* New Item Dialog */}
-			<CreateItemDialog
-				open={isNewItemDialogOpen}
-				onOpenChange={setIsNewItemDialogOpen}
-				vaults={
-					vaultKeys?.map((v) => ({
-						id: v.vaultId,
-						name: v.vaultName,
-						type: v.vaultType as "personal" | "team",
-					})) || []
-				}
-				selectedVaultId={params.id}
-				onCreateItem={(data, vaultId, category) =>
-					handleCreateItem(data, vaultId, category)
-				}
-			/>
-
-			<CreateVaultDialog
-				open={isNewVaultDialogOpen}
-				onOpenChange={setIsNewVaultDialogOpen}
-				onSubmit={createVault}
-			/>
-
-			<EditVaultDialog
-				key={editingVault?.id || "edit-vault-dialog"}
-				open={isEditVaultDialogOpen}
-				onOpenChange={(open) => {
-					setIsEditVaultDialogOpen(open);
-					if (!open) {
-						setEditingVault(null);
+				{/* New Item Dialog */}
+				<CreateItemDialog
+					open={isNewItemDialogOpen}
+					onOpenChange={setIsNewItemDialogOpen}
+					vaults={
+						vaultKeys?.map((v) => ({
+							id: v.vaultId,
+							name: v.vaultName,
+							type: v.vaultType as "personal" | "team",
+						})) || []
 					}
-				}}
-				vault={editingVault}
-				onSubmit={handleUpdateVault}
-			/>
-
-			<DeleteVaultDialog
-				open={isDeleteVaultDialogOpen}
-				onOpenChange={(open) => {
-					setIsDeleteVaultDialogOpen(open);
-					if (!open) {
-						setDeletingVault(null);
+					selectedVaultId={params.id}
+					onCreateItem={(data, vaultId, category) =>
+						handleCreateItem(data, vaultId, category)
 					}
-				}}
-				vault={deletingVault}
-				onConfirm={handleDeleteVault}
-			/>
+				/>
 
-			{importingVaultId && (
-				<ImportDialog
-					vaultId={importingVaultId}
-					open={isImportDialogOpen}
+				<CreateVaultDialog
+					open={isNewVaultDialogOpen}
+					onOpenChange={setIsNewVaultDialogOpen}
+					onSubmit={createVault}
+				/>
+
+				<EditVaultDialog
+					key={editingVault?.id || "edit-vault-dialog"}
+					open={isEditVaultDialogOpen}
 					onOpenChange={(open) => {
-						setIsImportDialogOpen(open);
+						setIsEditVaultDialogOpen(open);
 						if (!open) {
-							setImportingVaultId(null);
+							setEditingVault(null);
 						}
 					}}
+					vault={editingVault}
+					onSubmit={handleUpdateVault}
 				/>
-			)}
-		</div>
+
+				<DeleteVaultDialog
+					open={isDeleteVaultDialogOpen}
+					onOpenChange={(open) => {
+						setIsDeleteVaultDialogOpen(open);
+						if (!open) {
+							setDeletingVault(null);
+						}
+					}}
+					vault={deletingVault}
+					onConfirm={handleDeleteVault}
+				/>
+
+				{importingVaultId && (
+					<ImportDialog
+						vaultId={importingVaultId}
+						open={isImportDialogOpen}
+						onOpenChange={(open) => {
+							setIsImportDialogOpen(open);
+							if (!open) {
+								setImportingVaultId(null);
+							}
+						}}
+					/>
+				)}
+			</div>
+		</VaultDndProvider>
 	);
 }

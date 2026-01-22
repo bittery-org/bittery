@@ -64,6 +64,13 @@
 			"when": 1769017149452,
 			"tag": "0008_graceful_reavers",
 			"breakpoints": true
+		},
+		{
+			"idx": 9,
+			"version": "7",
+			"when": 1769040934582,
+			"tag": "0009_silky_black_crow",
+			"breakpoints": true
 		}
 	]
 }

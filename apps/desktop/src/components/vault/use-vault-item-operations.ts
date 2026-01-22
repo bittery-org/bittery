@@ -25,6 +25,13 @@ export interface DeleteItemInput {
 	vaultId: string;
 }
 
+export interface MoveItemInput {
+	itemId: string;
+	sourceVaultId: string;
+	targetVaultId: string;
+	decryptedData: DecryptedItemData;
+}
+
 export interface ToggleFavoriteInput {
 	itemId: string;
 	vaultId: string;
@@ -145,11 +152,54 @@ export function useVaultItemOperations() {
 		},
 	});
 
+	const moveItem = useMutation({
+		mutationFn: async (input: MoveItemInput) => {
+			// Get target vault key for re-encryption
+			const targetVaultKey = await tauriStorage.getDecryptedVaultKey(
+				input.targetVaultId,
+			);
+
+			if (!targetVaultKey) {
+				throw new Error("Cannot access target vault key. Try unlocking again.");
+			}
+
+			// Re-encrypt with target vault key
+			const encryptedData = await encrypt(
+				JSON.stringify(input.decryptedData),
+				targetVaultKey,
+			);
+
+			// Call API to move the item
+			return await trpcClient.vault.moveItem.mutate({
+				itemId: input.itemId,
+				sourceVaultId: input.sourceVaultId,
+				targetVaultId: input.targetVaultId,
+				encryptedData: encryptedData.ciphertext,
+				encryptionIv: encryptedData.iv,
+			});
+		},
+		onSuccess: (_data, variables) => {
+			// Invalidate both source and target vault lists
+			invalidator.invalidateItem(variables.itemId, variables.targetVaultId);
+			invalidator.invalidateVaultList(variables.sourceVaultId);
+			toast.success("Item moved successfully");
+			// Navigate to the item in the target vault
+			navigate({
+				to: "/vault/$id/$itemId",
+				params: { id: variables.targetVaultId, itemId: variables.itemId },
+			});
+		},
+		onError: (error) => {
+			toast.error(`Failed to move item: ${error.message}`);
+		},
+	});
+
 	return {
 		createItem,
 		updateItem,
 		deleteItem,
 		toggleFavorite,
 		duplicateItem,
+		moveItem,
 	};
 }

@@ -129,6 +129,7 @@ function CrossVaultTagRouteComponent() {
 										itemId: item.id,
 									}}
 									showVaultBadge
+									vaultId={item.vaultId}
 								/>
 							))}
 						</div>

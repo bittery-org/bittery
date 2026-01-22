@@ -16,6 +16,7 @@ export const syncEventTypeEnum = pgEnum("sync_event_type", [
 	"item_updated",
 	"item_deleted",
 	"item_restored",
+	"item_moved",
 	"vault_created",
 	"vault_updated",
 	"vault_deleted",
