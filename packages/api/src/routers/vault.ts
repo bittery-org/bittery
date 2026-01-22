@@ -732,6 +732,17 @@ export const vaultRouter = router({
 				})
 				.where(eq(item.id, input.itemId));
 
+			await emitSyncEvent({
+				eventType: "item_updated",
+				entityId: input.itemId,
+				entityType: "item",
+				vaultId: existingItem.vaultId,
+				userId: ctx.session.userId,
+				clientId: null,
+				// TODO: Check if this is correct
+				version: existingItem.version,
+			});
+
 			return { success: true };
 		}),
 
