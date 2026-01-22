@@ -3,7 +3,7 @@
  * Provides offline vault functionality across the mobile app
  */
 
-import NetInfo, { type NetInfoState } from "@react-native-community/netinfo";
+import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	type CachedItem,
 	type CachedVault,
@@ -12,25 +12,25 @@ import {
 	type SyncConflict,
 	useOfflineVault,
 } from "@bittery/sync";
-import type { DecryptedItem } from "@bittery/shared/types";
-import React, {
+import NetInfo, { type NetInfoState } from "@react-native-community/netinfo";
+import {
 	createContext,
+	type ReactNode,
 	useCallback,
 	useContext,
 	useEffect,
 	useState,
-	type ReactNode,
 } from "react";
 import {
+	deleteOfflineCacheItem,
 	getOfflineCacheItem,
 	setOfflineCacheItem,
-	deleteOfflineCacheItem,
 } from "../services/storage";
 
 /**
  * Sync storage adapter for React Native using secure storage
  */
-const createReactNativeSyncStorage = () => {
+const _createReactNativeSyncStorage = () => {
 	const STORAGE_PREFIX = "bittery_offline_";
 
 	return {
@@ -101,10 +101,7 @@ export interface OfflineVaultContextValue {
 	deleteItemOffline: (vaultId: string, itemId: string) => Promise<void>;
 
 	// Sync operations
-	cacheVaultData: (
-		vault: CachedVault,
-		items: CachedItem[],
-	) => Promise<void>;
+	cacheVaultData: (vault: CachedVault, items: CachedItem[]) => Promise<void>;
 	getPendingOperations: () => Promise<PendingItemOperation[]>;
 	syncPendingChanges: () => Promise<void>;
 	forceSync: () => Promise<void>;

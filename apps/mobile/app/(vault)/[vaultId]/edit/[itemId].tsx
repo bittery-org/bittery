@@ -8,8 +8,8 @@ import {
 import type { Address, PhoneNumber } from "@bittery/shared/identity";
 import {
 	isValidBase32,
-	parseOtpAuthUri,
 	type ParsedOtpAuthUri,
+	parseOtpAuthUri,
 } from "@bittery/shared/totp";
 import type {
 	CustomField,
@@ -557,8 +557,8 @@ export default function EditItemScreen() {
 					</TouchableOpacity>
 				</View>
 				{additionalUrls.map((additionalUrl, index) => (
-					// biome-ignore lint/suspicious/noArrayIndexKey: URLs don't have unique IDs
 					<View
+						// biome-ignore lint/suspicious/noArrayIndexKey: URLs don't have unique IDs
 						key={`url-${index}`}
 						className="mb-2 flex-row items-center gap-2"
 					>
@@ -605,14 +605,18 @@ export default function EditItemScreen() {
 								className="flex-1 flex-row items-center justify-center rounded-lg border border-primary bg-primary/10 py-2"
 							>
 								<Camera size={16} color="#6366f1" />
-								<Text className="ml-2 font-medium text-primary text-sm">Scan QR</Text>
+								<Text className="ml-2 font-medium text-primary text-sm">
+									Scan QR
+								</Text>
 							</TouchableOpacity>
 							<TouchableOpacity
 								onPress={handlePasteTotp}
 								className="flex-1 flex-row items-center justify-center rounded-lg border border-border bg-secondary py-2"
 							>
 								<ClipboardPaste size={16} color="#6b7280" />
-								<Text className="ml-2 font-medium text-foreground text-sm">Paste</Text>
+								<Text className="ml-2 font-medium text-foreground text-sm">
+									Paste
+								</Text>
 							</TouchableOpacity>
 						</View>
 

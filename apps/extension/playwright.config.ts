@@ -1,5 +1,5 @@
+import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
-import path from "path";
 
 /**
  * Playwright E2E Test Configuration for Bittery Extension

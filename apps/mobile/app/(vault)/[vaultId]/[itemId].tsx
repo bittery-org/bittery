@@ -353,19 +353,19 @@ export default function ItemDetailScreen() {
 			{renderFieldRow("Issuer", item.totpIssuer)}
 			{renderFieldRow("Account", item.totpAccountName)}
 			{/* Show TOTP settings if non-default */}
-			{(item.totpAlgorithm && item.totpAlgorithm !== "SHA1") && (
+			{item.totpAlgorithm && item.totpAlgorithm !== "SHA1" && (
 				<View className="border-border border-b py-4">
 					<Text className="mb-1 text-muted-foreground text-sm">Algorithm</Text>
 					<Text className="text-foreground">{item.totpAlgorithm}</Text>
 				</View>
 			)}
-			{(item.totpDigits && item.totpDigits !== 6) && (
+			{item.totpDigits && item.totpDigits !== 6 && (
 				<View className="border-border border-b py-4">
 					<Text className="mb-1 text-muted-foreground text-sm">Digits</Text>
 					<Text className="text-foreground">{item.totpDigits}</Text>
 				</View>
 			)}
-			{(item.totpPeriod && item.totpPeriod !== 30) && (
+			{item.totpPeriod && item.totpPeriod !== 30 && (
 				<View className="border-border border-b py-4">
 					<Text className="mb-1 text-muted-foreground text-sm">Period</Text>
 					<Text className="text-foreground">{item.totpPeriod} seconds</Text>

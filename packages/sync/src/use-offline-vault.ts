@@ -5,9 +5,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-	createOfflineCacheManager,
 	type CachedItem,
 	type CachedVault,
+	createOfflineCacheManager,
 	type OfflineCacheManager,
 	type PendingItemOperation,
 	type SyncConflict,
@@ -54,7 +54,10 @@ export interface UseOfflineVaultReturn {
 	// Cache operations
 	getCachedVaults: () => Promise<CachedVault[]>;
 	getCachedItems: (vaultId: string) => Promise<CachedItem[]>;
-	getCachedItem: (vaultId: string, itemId: string) => Promise<CachedItem | null>;
+	getCachedItem: (
+		vaultId: string,
+		itemId: string,
+	) => Promise<CachedItem | null>;
 
 	// Offline operations
 	createOfflineItem: (
@@ -212,7 +215,19 @@ export function useOfflineVault(
 		// React Native has navigator but not window.addEventListener
 		// Use globalThis to access window in a cross-platform way
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const win = typeof globalThis !== "undefined" ? (globalThis as any).window as { addEventListener: (type: string, listener: () => void) => void; removeEventListener: (type: string, listener: () => void) => void; navigator: { onLine: boolean } } | undefined : undefined;
+		const win =
+			typeof globalThis !== "undefined"
+				? ((globalThis as any).window as
+						| {
+								addEventListener: (type: string, listener: () => void) => void;
+								removeEventListener: (
+									type: string,
+									listener: () => void,
+								) => void;
+								navigator: { onLine: boolean };
+						  }
+						| undefined)
+				: undefined;
 
 		const isBrowser =
 			typeof win !== "undefined" &&
@@ -407,7 +422,10 @@ export function useOfflineVault(
 	 * Resolve conflict by keeping server changes
 	 */
 	const resolveConflictKeepServer = useCallback(
-		async (conflict: SyncConflict, serverDecryptedData: string): Promise<void> => {
+		async (
+			conflict: SyncConflict,
+			serverDecryptedData: string,
+		): Promise<void> => {
 			if (!cacheManagerRef.current) {
 				throw new Error("Offline cache not initialized");
 			}

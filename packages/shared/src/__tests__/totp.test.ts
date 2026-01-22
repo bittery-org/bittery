@@ -397,8 +397,7 @@ describe("TOTP Module", () => {
 			expect(result.progress).toBeLessThanOrEqual(100);
 
 			// Remaining seconds should correspond to progress
-			const expectedProgress =
-				((30 - result.remainingSeconds) / 30) * 100;
+			const expectedProgress = ((30 - result.remainingSeconds) / 30) * 100;
 			expect(Math.abs(result.progress - expectedProgress)).toBeLessThan(1);
 		});
 
@@ -427,11 +426,31 @@ describe("TOTP Module", () => {
 
 		test("should support various authenticator configurations", async () => {
 			const configurations = [
-				{ secret: "JBSWY3DPEHPK3PXP", algorithm: "SHA1" as const, digits: 6 as const },
-				{ secret: "JBSWY3DPEHPK3PXP", algorithm: "SHA256" as const, digits: 6 as const },
-				{ secret: "JBSWY3DPEHPK3PXP", algorithm: "SHA512" as const, digits: 6 as const },
-				{ secret: "JBSWY3DPEHPK3PXP", algorithm: "SHA1" as const, digits: 7 as const },
-				{ secret: "JBSWY3DPEHPK3PXP", algorithm: "SHA1" as const, digits: 8 as const },
+				{
+					secret: "JBSWY3DPEHPK3PXP",
+					algorithm: "SHA1" as const,
+					digits: 6 as const,
+				},
+				{
+					secret: "JBSWY3DPEHPK3PXP",
+					algorithm: "SHA256" as const,
+					digits: 6 as const,
+				},
+				{
+					secret: "JBSWY3DPEHPK3PXP",
+					algorithm: "SHA512" as const,
+					digits: 6 as const,
+				},
+				{
+					secret: "JBSWY3DPEHPK3PXP",
+					algorithm: "SHA1" as const,
+					digits: 7 as const,
+				},
+				{
+					secret: "JBSWY3DPEHPK3PXP",
+					algorithm: "SHA1" as const,
+					digits: 8 as const,
+				},
 			];
 
 			for (const config of configurations) {

@@ -4,7 +4,15 @@
  */
 
 import type { SyncConflict } from "@bittery/sync";
-import React, { useState } from "react";
+import {
+	AlertTriangle,
+	ArrowRight,
+	Cloud,
+	Phone,
+	Trash2,
+	X,
+} from "lucide-react-native";
+import { useState } from "react";
 import {
 	ActivityIndicator,
 	Modal,
@@ -13,16 +21,6 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
-import {
-	AlertTriangle,
-	ArrowLeft,
-	ArrowRight,
-	Check,
-	Cloud,
-	Phone,
-	Trash2,
-	X,
-} from "lucide-react-native";
 
 interface ConflictResolutionModalProps {
 	visible: boolean;
@@ -223,7 +221,7 @@ export function ConflictResolutionModal({
 							</Text>
 
 							<View className="mb-3 flex-row items-start">
-								<View className="mr-3 mt-1 h-2 w-2 rounded-full bg-blue-500" />
+								<View className="mt-1 mr-3 h-2 w-2 rounded-full bg-blue-500" />
 								<Text className="flex-1 text-muted-foreground text-sm">
 									<Text className="font-semibold text-foreground">
 										Keep Local:
@@ -235,7 +233,7 @@ export function ConflictResolutionModal({
 							</View>
 
 							<View className="flex-row items-start">
-								<View className="mr-3 mt-1 h-2 w-2 rounded-full bg-green-500" />
+								<View className="mt-1 mr-3 h-2 w-2 rounded-full bg-green-500" />
 								<Text className="flex-1 text-muted-foreground text-sm">
 									<Text className="font-semibold text-foreground">
 										Keep Server:
@@ -254,7 +252,9 @@ export function ConflictResolutionModal({
 							onPress={handleKeepLocal}
 							disabled={resolving !== null}
 							className={`flex-1 flex-row items-center justify-center rounded-lg border-2 border-blue-500 py-3 ${
-								resolving === "local" ? "bg-blue-500" : "bg-blue-50 dark:bg-blue-900/30"
+								resolving === "local"
+									? "bg-blue-500"
+									: "bg-blue-50 dark:bg-blue-900/30"
 							}`}
 						>
 							{resolving === "local" ? (
@@ -338,9 +338,7 @@ export function ConflictListItem({
 			<View className="flex-1">
 				<Text className="font-semibold text-foreground">{itemTitle}</Text>
 				<Text className="text-red-600 text-sm dark:text-red-400">
-					{isDeleteConflict
-						? "Deleted on server"
-						: "Modified on both devices"}
+					{isDeleteConflict ? "Deleted on server" : "Modified on both devices"}
 				</Text>
 			</View>
 

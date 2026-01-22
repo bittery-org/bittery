@@ -1,11 +1,11 @@
 import {
 	isValidBase32,
-	parseOtpAuthUri,
 	type ParsedOtpAuthUri,
+	parseOtpAuthUri,
 } from "@bittery/shared/totp";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { Camera, X, Flashlight, FlashlightOff } from "lucide-react-native";
-import { useState, useCallback } from "react";
+import { Camera, Flashlight, FlashlightOff, X } from "lucide-react-native";
+import { useCallback, useState } from "react";
 import {
 	Alert,
 	Modal,
@@ -256,10 +256,10 @@ export function QrCodeScanner({
 						{/* Scanning frame */}
 						<View className="relative h-64 w-64">
 							{/* Corner decorations */}
-							<View className="absolute top-0 left-0 h-8 w-8 border-white border-l-4 border-t-4 rounded-tl-lg" />
-							<View className="absolute top-0 right-0 h-8 w-8 border-white border-r-4 border-t-4 rounded-tr-lg" />
-							<View className="absolute bottom-0 left-0 h-8 w-8 border-white border-b-4 border-l-4 rounded-bl-lg" />
-							<View className="absolute right-0 bottom-0 h-8 w-8 border-white border-r-4 border-b-4 rounded-br-lg" />
+							<View className="absolute top-0 left-0 h-8 w-8 rounded-tl-lg border-white border-t-4 border-l-4" />
+							<View className="absolute top-0 right-0 h-8 w-8 rounded-tr-lg border-white border-t-4 border-r-4" />
+							<View className="absolute bottom-0 left-0 h-8 w-8 rounded-bl-lg border-white border-b-4 border-l-4" />
+							<View className="absolute right-0 bottom-0 h-8 w-8 rounded-br-lg border-white border-r-4 border-b-4" />
 						</View>
 					</View>
 

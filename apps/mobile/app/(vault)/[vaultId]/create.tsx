@@ -7,8 +7,8 @@ import {
 } from "@bittery/shared/credit-card";
 import {
 	isValidBase32,
-	parseOtpAuthUri,
 	type ParsedOtpAuthUri,
+	parseOtpAuthUri,
 } from "@bittery/shared/totp";
 import type {
 	ItemCategory,

@@ -106,7 +106,7 @@ export function TotpDisplay({
 		} else {
 			pulseAnim.setValue(1);
 		}
-	}, [totpResult?.remainingSeconds, pulseAnim]);
+	}, [totpResult, pulseAnim]);
 
 	useEffect(() => {
 		generateCode();
@@ -297,7 +297,7 @@ export function TotpDisplay({
 				{/* Code display with fade animation */}
 				<View className="flex-col">
 					<Animated.Text
-						className={`font-bold font-mono tracking-widest text-foreground ${compact ? "text-lg" : "text-2xl"}`}
+						className={`font-bold font-mono text-foreground tracking-widest ${compact ? "text-lg" : "text-2xl"}`}
 						style={{ opacity: fadeAnim }}
 					>
 						{formatCode(totpResult?.code || "")}
@@ -316,10 +316,7 @@ export function TotpDisplay({
 				accessibilityLabel="Copy code to clipboard"
 				accessibilityRole="button"
 			>
-				<Copy
-					size={compact ? 16 : 18}
-					color={copied ? "#22c55e" : "#6b7280"}
-				/>
+				<Copy size={compact ? 16 : 18} color={copied ? "#22c55e" : "#6b7280"} />
 			</TouchableOpacity>
 		</View>
 	);

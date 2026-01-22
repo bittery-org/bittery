@@ -10,11 +10,10 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-
+import { OfflineModeBanner } from "../src/components/sync-status-indicator";
 import { AccountProvider } from "../src/contexts/account-context";
 import { OfflineVaultProvider } from "../src/contexts/offline-vault-context";
 import { TRPCProvider } from "../src/lib/trpc";
-import { OfflineModeBanner } from "../src/components/sync-status-indicator";
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -55,7 +54,10 @@ export default function RootLayout() {
 								<Stack.Screen name="(tabs)" options={{ headerShown: false }} />
 								<Stack.Screen name="(vault)" options={{ headerShown: false }} />
 								<Stack.Screen name="(tag)" options={{ headerShown: false }} />
-								<Stack.Screen name="settings" options={{ headerShown: false }} />
+								<Stack.Screen
+									name="settings"
+									options={{ headerShown: false }}
+								/>
 							</Stack>
 							<StatusBar style="auto" />
 						</OfflineVaultProvider>

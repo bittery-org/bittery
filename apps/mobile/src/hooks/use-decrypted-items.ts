@@ -15,7 +15,9 @@ import * as storage from "../services/storage";
 export function useDecryptedItems(vaultId: string) {
 	const trpc = useTRPC();
 	const [isOfflineMode, setIsOfflineMode] = useState(false);
-	const [offlineCachedItems, setOfflineCachedItems] = useState<DecryptedItem[]>([]);
+	const [offlineCachedItems, setOfflineCachedItems] = useState<DecryptedItem[]>(
+		[],
+	);
 
 	// Get offline context - always available since provider wraps all routes
 	const { isOnline, getCachedItems } = useOfflineVaultContext();
@@ -139,11 +141,11 @@ export function useDecryptedItems(vaultId: string) {
 
 	// Determine which items to return
 	const items = isOfflineMode ? offlineCachedItems : decryptedItems;
-	const error = isOfflineMode ? null : (decryptError || fetchError);
+	const error = isOfflineMode ? null : decryptError || fetchError;
 
 	return {
 		items,
-		isLoading: isOfflineMode ? false : (isLoadingRaw || isDecrypting),
+		isLoading: isOfflineMode ? false : isLoadingRaw || isDecrypting,
 		error,
 		refetch,
 		isOffline: isOfflineMode,

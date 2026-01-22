@@ -3,14 +3,6 @@
  * Displays current sync status including offline mode, pending changes, and conflicts
  */
 
-import React, { useCallback, useState } from "react";
-import {
-	ActivityIndicator,
-	Modal,
-	Text,
-	TouchableOpacity,
-	View,
-} from "react-native";
 import {
 	AlertCircle,
 	AlertTriangle,
@@ -23,6 +15,14 @@ import {
 	WifiOff,
 	X,
 } from "lucide-react-native";
+import { useCallback, useState } from "react";
+import {
+	ActivityIndicator,
+	Modal,
+	Text,
+	TouchableOpacity,
+	View,
+} from "react-native";
 import { useOfflineVaultContext } from "../contexts/offline-vault-context";
 
 /**
@@ -90,7 +90,7 @@ export function SyncStatusInline() {
 			{!isOnline ? (
 				<>
 					<WifiOff size={16} color="#eab308" />
-					<Text className="ml-2 text-yellow-600 text-sm">
+					<Text className="ml-2 text-sm text-yellow-600">
 						Offline Mode - Changes will sync when connected
 					</Text>
 				</>
@@ -332,9 +332,9 @@ export function SyncStatusModal({ visible, onClose }: SyncStatusModalProps) {
 					{!isOnline && (
 						<View className="mt-4 flex-row items-center rounded-lg bg-yellow-100 p-3 dark:bg-yellow-900">
 							<CloudOff size={20} color="#ca8a04" />
-							<Text className="ml-2 flex-1 text-yellow-700 text-sm dark:text-yellow-300">
-								You're offline. Changes will be saved locally and synced when you
-								reconnect.
+							<Text className="ml-2 flex-1 text-sm text-yellow-700 dark:text-yellow-300">
+								You're offline. Changes will be saved locally and synced when
+								you reconnect.
 							</Text>
 						</View>
 					)}
@@ -400,7 +400,7 @@ export function OfflineModeBanner() {
 	return (
 		<View className="flex-row items-center bg-yellow-500 px-4 py-2">
 			<WifiOff size={16} color="#fff" />
-			<Text className="ml-2 flex-1 font-medium text-white text-sm">
+			<Text className="ml-2 flex-1 font-medium text-sm text-white">
 				Offline Mode
 			</Text>
 			{status.pendingChangesCount > 0 && (

@@ -30,7 +30,7 @@ export default function TabsLayout() {
 						shadowColor: "transparent",
 						borderBottomWidth: 0,
 						borderBottomColor: "#e5e7eb",
-						height: 110
+						height: 110,
 					},
 					headerTitleStyle: {
 						fontWeight: "600",

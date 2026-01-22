@@ -151,7 +151,7 @@ export default function VaultItemsScreen() {
 					{hasTotpSecret && (
 						<View className="mt-1">
 							<TotpDisplay
-								totpSecret={item.totpSecret!}
+								totpSecret={item.totpSecret as string}
 								totpAlgorithm={item.totpAlgorithm}
 								totpDigits={item.totpDigits}
 								totpPeriod={item.totpPeriod}

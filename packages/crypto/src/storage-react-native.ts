@@ -1142,9 +1142,7 @@ export async function setOfflineCacheItem(
  * Generic key-value storage - get item
  * Note: For offline cache data that doesn't need account scoping
  */
-export async function getOfflineCacheItem(
-	key: string,
-): Promise<string | null> {
+export async function getOfflineCacheItem(key: string): Promise<string | null> {
 	return getItem(key);
 }
 

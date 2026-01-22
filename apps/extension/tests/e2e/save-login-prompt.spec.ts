@@ -12,8 +12,7 @@
  * - Database must be running
  */
 
-import { test, expect, type BrowserContext, type Page } from "@playwright/test";
-import path from "path";
+import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 
 // Test user credentials
 const TEST_USER = {
@@ -34,7 +33,9 @@ const TEST_LOGIN = {
  */
 async function getExtensionId(context: BrowserContext): Promise<string> {
 	// Service worker is ready
-	const background = context.serviceWorkers()[0] || (await context.waitForEvent("serviceworker"));
+	const background =
+		context.serviceWorkers()[0] ||
+		(await context.waitForEvent("serviceworker"));
 	const extensionId = background.url().split("/")[2];
 	return extensionId;
 }
@@ -47,18 +48,30 @@ async function setupAuthenticatedContext(context: BrowserContext, page: Page) {
 	await page.goto("http://localhost:3001");
 
 	// Check if already logged in by looking for vault elements
-	const isLoggedIn = await page.locator('[data-testid="vault-list"], [data-testid="vault-grid"]').isVisible().catch(() => false);
+	const isLoggedIn = await page
+		.locator('[data-testid="vault-list"], [data-testid="vault-grid"]')
+		.isVisible()
+		.catch(() => false);
 
 	if (!isLoggedIn) {
 		// Sign up or login
-		const signupButton = page.locator('a[href="/signup"], button:has-text("Sign up")').first();
-		const loginButton = page.locator('a[href="/login"], button:has-text("Login"), button:has-text("Log in")').first();
+		const signupButton = page
+			.locator('a[href="/signup"], button:has-text("Sign up")')
+			.first();
+		const loginButton = page
+			.locator(
+				'a[href="/login"], button:has-text("Login"), button:has-text("Log in")',
+			)
+			.first();
 
 		if (await signupButton.isVisible().catch(() => false)) {
 			// Go to signup
 			await signupButton.click();
 			await page.fill('input[type="email"]', TEST_USER.email);
-			await page.fill('input[name="password"], input[type="password"]', TEST_USER.password);
+			await page.fill(
+				'input[name="password"], input[type="password"]',
+				TEST_USER.password,
+			);
 			await page.click('button[type="submit"]');
 			await page.waitForURL("**/vault**", { timeout: 30000 });
 		} else if (await loginButton.isVisible().catch(() => false)) {
@@ -80,7 +93,10 @@ async function setupAuthenticatedContext(context: BrowserContext, page: Page) {
 	await popupPage.goto(`chrome-extension://${extensionId}/popup.html`);
 
 	// Check if locked
-	const isLocked = await popupPage.locator('input[type="password"], button:has-text("Unlock")').isVisible().catch(() => false);
+	const isLocked = await popupPage
+		.locator('input[type="password"], button:has-text("Unlock")')
+		.isVisible()
+		.catch(() => false);
 
 	if (isLocked) {
 		await popupPage.fill('input[type="password"]', TEST_USER.masterPassword);
@@ -96,14 +112,22 @@ async function setupAuthenticatedContext(context: BrowserContext, page: Page) {
  */
 async function ensureTestVaults(page: Page) {
 	// Check if we have at least 2 vaults (for multi-vault testing)
-	const vaultElements = await page.locator('[data-testid="vault-item"], [data-vault-id]').count().catch(() => 0);
+	const vaultElements = await page
+		.locator('[data-testid="vault-item"], [data-vault-id]')
+		.count()
+		.catch(() => 0);
 
 	if (vaultElements < 2) {
 		// Create additional test vault
-		const createButton = page.locator('button:has-text("Create"), button:has-text("New Vault")').first();
+		const createButton = page
+			.locator('button:has-text("Create"), button:has-text("New Vault")')
+			.first();
 		if (await createButton.isVisible().catch(() => false)) {
 			await createButton.click();
-			await page.fill('input[name="name"], input[placeholder*="vault"]', "Test Vault 2");
+			await page.fill(
+				'input[name="name"], input[placeholder*="vault"]',
+				"Test Vault 2",
+			);
 			await page.click('button[type="submit"]');
 			await page.waitForTimeout(2000);
 		}
@@ -140,17 +164,18 @@ async function createTestLoginPage(page: Page) {
  * Helper: Fill and submit login form
  */
 async function submitLoginForm(page: Page, username: string, password: string) {
-	await page.fill('#username', username);
-	await page.fill('#password', password);
+	await page.fill("#username", username);
+	await page.fill("#password", password);
 
 	// Intercept form submission to prevent actual navigation
 	await page.evaluate(() => {
-		const form = document.querySelector('#loginForm') as HTMLFormElement;
+		const form = document.querySelector("#loginForm") as HTMLFormElement;
 		if (form) {
-			form.addEventListener('submit', (e) => {
+			form.addEventListener("submit", (e) => {
 				e.preventDefault();
 				// Simulate successful login response
-				document.body.innerHTML += '<div id="login-success">Login successful!</div>';
+				document.body.innerHTML +=
+					'<div id="login-success">Login successful!</div>';
 			});
 		}
 	});
@@ -163,7 +188,9 @@ async function submitLoginForm(page: Page, username: string, password: string) {
  */
 async function waitForSavePrompt(page: Page, timeout = 10000) {
 	// The save prompt is injected as an iframe with shadow DOM
-	await page.waitForSelector('iframe[src*="save-prompt-iframe.html"]', { timeout });
+	await page.waitForSelector('iframe[src*="save-prompt-iframe.html"]', {
+		timeout,
+	});
 }
 
 /**
@@ -183,7 +210,9 @@ async function lockExtension(context: BrowserContext) {
 	await popupPage.goto(`chrome-extension://${extensionId}/popup.html`);
 
 	// Click lock button if available
-	const lockButton = popupPage.locator('button:has-text("Lock"), button[aria-label="Lock"]').first();
+	const lockButton = popupPage
+		.locator('button:has-text("Lock"), button[aria-label="Lock"]')
+		.first();
 	if (await lockButton.isVisible().catch(() => false)) {
 		await lockButton.click();
 	}
@@ -201,7 +230,6 @@ test.describe("Save Login Prompt - Extension Feature", () => {
 
 	test.beforeAll(async ({ browser }) => {
 		// Create context with extension loaded
-		const pathToExtension = path.resolve(__dirname, "../../dist");
 		context = await browser.newContext({
 			permissions: ["clipboard-read", "clipboard-write"],
 		});
@@ -233,10 +261,12 @@ test.describe("Save Login Prompt - Extension Feature", () => {
 		const savePrompt = await getSavePromptFrame(page);
 
 		// Verify save prompt appears
-		await expect(savePrompt.locator('text=Save password?')).toBeVisible();
+		await expect(savePrompt.locator("text=Save password?")).toBeVisible();
 
 		// Select vault and save
-		const vaultDropdown = savePrompt.locator('button:has-text("Select vault")').first();
+		const vaultDropdown = savePrompt
+			.locator('button:has-text("Select vault")')
+			.first();
 		if (await vaultDropdown.isVisible().catch(() => false)) {
 			await vaultDropdown.click();
 			await savePrompt.locator('button:has-text("Personal")').first().click();
@@ -245,7 +275,9 @@ test.describe("Save Login Prompt - Extension Feature", () => {
 		await savePrompt.locator('button:has-text("Save")').first().click();
 
 		// Wait for success message
-		await expect(savePrompt.locator('text=Credentials saved!')).toBeVisible({ timeout: 15000 });
+		await expect(savePrompt.locator("text=Credentials saved!")).toBeVisible({
+			timeout: 15000,
+		});
 
 		// Wait for prompt to auto-close
 		await page.waitForTimeout(3000);
@@ -256,13 +288,16 @@ test.describe("Save Login Prompt - Extension Feature", () => {
 
 		// Since credentials are identical, no prompt should appear
 		// (hasChanges check should prevent prompt)
-		const promptVisible = await page.locator('iframe[src*="save-prompt-iframe.html"]').isVisible({ timeout: 3000 }).catch(() => false);
+		const promptVisible = await page
+			.locator('iframe[src*="save-prompt-iframe.html"]')
+			.isVisible({ timeout: 3000 })
+			.catch(() => false);
 
 		// If credentials haven't changed, no prompt should appear
 		expect(promptVisible).toBe(false);
 
 		// Third submission - different password should trigger update option
-		const newPassword = TEST_LOGIN.password + "Updated";
+		const newPassword = `${TEST_LOGIN.password}Updated`;
 		await createTestLoginPage(page);
 		await submitLoginForm(page, TEST_LOGIN.username, newPassword);
 
@@ -272,18 +307,28 @@ test.describe("Save Login Prompt - Extension Feature", () => {
 		const updatePrompt = await getSavePromptFrame(page);
 
 		// Verify duplicate detection message
-		await expect(updatePrompt.locator('text=Update or save password?')).toBeVisible();
-		await expect(updatePrompt.locator('text=Credentials for this site already exist')).toBeVisible();
+		await expect(
+			updatePrompt.locator("text=Update or save password?"),
+		).toBeVisible();
+		await expect(
+			updatePrompt.locator("text=Credentials for this site already exist"),
+		).toBeVisible();
 
 		// Verify both update and save new buttons are available
-		await expect(updatePrompt.locator('button:has-text("Update existing")')).toBeVisible();
-		await expect(updatePrompt.locator('button:has-text("Save new")')).toBeVisible();
+		await expect(
+			updatePrompt.locator('button:has-text("Update existing")'),
+		).toBeVisible();
+		await expect(
+			updatePrompt.locator('button:has-text("Save new")'),
+		).toBeVisible();
 
 		// Test update flow
 		await updatePrompt.locator('button:has-text("Update existing")').click();
 
 		// Wait for success
-		await expect(updatePrompt.locator('text=Credentials updated!')).toBeVisible({ timeout: 15000 });
+		await expect(updatePrompt.locator("text=Credentials updated!")).toBeVisible(
+			{ timeout: 15000 },
+		);
 	});
 
 	// =========================================================================
@@ -303,11 +348,16 @@ test.describe("Save Login Prompt - Extension Feature", () => {
 		const savePrompt = await getSavePromptFrame(page);
 
 		// Open vault dropdown
-		const vaultSelector = savePrompt.locator('button').filter({ hasText: /Select vault|Personal|Test Vault/ }).first();
+		const vaultSelector = savePrompt
+			.locator("button")
+			.filter({ hasText: /Select vault|Personal|Test Vault/ })
+			.first();
 		await vaultSelector.click();
 
 		// Verify multiple vaults are shown
-		const vaultOptions = savePrompt.locator('[role="option"], button:has-text("Personal"), button:has-text("Test")');
+		const vaultOptions = savePrompt.locator(
+			'[role="option"], button:has-text("Personal"), button:has-text("Test")',
+		);
 		const vaultCount = await vaultOptions.count();
 
 		// Should have at least 1 vault option (we ensured 2 in setup, but one might be read-only)
@@ -324,7 +374,9 @@ test.describe("Save Login Prompt - Extension Feature", () => {
 		await savePrompt.locator('button:has-text("Save")').first().click();
 
 		// Wait for success
-		await expect(savePrompt.locator('text=Credentials saved!')).toBeVisible({ timeout: 15000 });
+		await expect(savePrompt.locator("text=Credentials saved!")).toBeVisible({
+			timeout: 15000,
+		});
 	});
 
 	// =========================================================================
@@ -345,7 +397,8 @@ test.describe("Save Login Prompt - Extension Feature", () => {
 		await submitLoginForm(page, lockedUsername, "LockedTest123");
 
 		// Save prompt should NOT appear when locked
-		const promptAppeared = await page.locator('iframe[src*="save-prompt-iframe.html"]')
+		const promptAppeared = await page
+			.locator('iframe[src*="save-prompt-iframe.html"]')
 			.isVisible({ timeout: 5000 })
 			.catch(() => false);
 
@@ -379,7 +432,9 @@ test.describe("Save Login Prompt - Extension Feature", () => {
 		await savePrompt.locator('button:has-text("Save")').first().click();
 
 		// Wait for success
-		await expect(savePrompt.locator('text=Credentials saved!')).toBeVisible({ timeout: 15000 });
+		await expect(savePrompt.locator("text=Credentials saved!")).toBeVisible({
+			timeout: 15000,
+		});
 
 		// Check extension storage - password should be encrypted
 		const extensionId = await getExtensionId(context);
@@ -407,9 +462,16 @@ test.describe("Save Login Prompt - Extension Feature", () => {
 	test("Should detect various form submission methods", async () => {
 		// Test 1: Traditional form submit
 		await createTestLoginPage(page);
-		await submitLoginForm(page, `traditional-${Date.now()}@example.com`, "Test123");
+		await submitLoginForm(
+			page,
+			`traditional-${Date.now()}@example.com`,
+			"Test123",
+		);
 
-		const prompt1 = await page.locator('iframe[src*="save-prompt-iframe.html"]').isVisible({ timeout: 5000 }).catch(() => false);
+		const prompt1 = await page
+			.locator('iframe[src*="save-prompt-iframe.html"]')
+			.isVisible({ timeout: 5000 })
+			.catch(() => false);
 		expect(prompt1).toBe(true);
 
 		// Cancel prompt
@@ -419,11 +481,14 @@ test.describe("Save Login Prompt - Extension Feature", () => {
 
 		// Test 2: Enter key submission
 		await createTestLoginPage(page);
-		await page.fill('#username', `enterkey-${Date.now()}@example.com`);
-		await page.fill('#password', "Test123");
-		await page.press('#password', 'Enter');
+		await page.fill("#username", `enterkey-${Date.now()}@example.com`);
+		await page.fill("#password", "Test123");
+		await page.press("#password", "Enter");
 
-		const prompt2 = await page.locator('iframe[src*="save-prompt-iframe.html"]').isVisible({ timeout: 5000 }).catch(() => false);
+		const prompt2 = await page
+			.locator('iframe[src*="save-prompt-iframe.html"]')
+			.isVisible({ timeout: 5000 })
+			.catch(() => false);
 		expect(prompt2).toBe(true);
 	});
 
@@ -432,7 +497,11 @@ test.describe("Save Login Prompt - Extension Feature", () => {
 	// =========================================================================
 	test("Should properly cancel save prompt", async () => {
 		await createTestLoginPage(page);
-		await submitLoginForm(page, `cancel-test-${Date.now()}@example.com`, "CancelTest123");
+		await submitLoginForm(
+			page,
+			`cancel-test-${Date.now()}@example.com`,
+			"CancelTest123",
+		);
 
 		// Wait for save prompt
 		await waitForSavePrompt(page);
@@ -443,7 +512,8 @@ test.describe("Save Login Prompt - Extension Feature", () => {
 		await savePrompt.locator('button:has-text("Cancel")').click();
 
 		// Prompt should disappear
-		const promptVisible = await page.locator('iframe[src*="save-prompt-iframe.html"]')
+		const promptVisible = await page
+			.locator('iframe[src*="save-prompt-iframe.html"]')
 			.isVisible({ timeout: 2000 })
 			.catch(() => false);
 
