@@ -13,12 +13,7 @@ import {
 	createNetworkSimulator,
 	waitForLoginPageReady,
 } from "../fixtures/network-helpers";
-import {
-	BitteryPage,
-	expect,
-	generateTestUser,
-	test,
-} from "../fixtures/test-fixtures";
+import { BitteryPage, expect, test } from "../fixtures/test-fixtures";
 
 test.describe("User Signup Flow", () => {
 	test.beforeEach(async ({ page }) => {
@@ -192,7 +187,7 @@ test.describe("User Signup Flow", () => {
 
 		// Get the displayed secret key
 		const secretKeyElement = page.locator(".font-mono.text-sm.tracking-wide");
-		const displayedKey = await secretKeyElement.textContent();
+		const _displayedKey = await secretKeyElement.textContent();
 
 		// Click copy button
 		await page.click('button:has-text("Copy")');

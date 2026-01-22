@@ -8,9 +8,7 @@ import {
 	EyeOff,
 	FileText,
 	Key,
-	Plus,
 	Timer,
-	Trash2,
 	User,
 } from "lucide-react-native";
 import { useState } from "react";
@@ -89,7 +87,10 @@ export default function CreateItemScreen() {
 			// Get vault key for encryption
 			const vaultKey = await storage.getDecryptedVaultKey(vaultId);
 			if (!vaultKey) {
-				Alert.alert("Error", "Unable to access vault key. Please try logging in again.");
+				Alert.alert(
+					"Error",
+					"Unable to access vault key. Please try logging in again.",
+				);
 				return;
 			}
 
@@ -180,7 +181,7 @@ export default function CreateItemScreen() {
 	const renderLoginFields = () => (
 		<>
 			<View className="mb-4">
-				<Text className="mb-2 text-sm font-medium text-foreground">
+				<Text className="mb-2 font-medium text-foreground text-sm">
 					Username
 				</Text>
 				<TextInput
@@ -193,7 +194,7 @@ export default function CreateItemScreen() {
 				/>
 			</View>
 			<View className="mb-4">
-				<Text className="mb-2 text-sm font-medium text-foreground">
+				<Text className="mb-2 font-medium text-foreground text-sm">
 					Password
 				</Text>
 				<View className="flex-row items-center rounded-lg border border-input bg-background px-4">
@@ -214,7 +215,7 @@ export default function CreateItemScreen() {
 				</View>
 			</View>
 			<View className="mb-4">
-				<Text className="mb-2 text-sm font-medium text-foreground">
+				<Text className="mb-2 font-medium text-foreground text-sm">
 					Website URL
 				</Text>
 				<TextInput
@@ -233,7 +234,7 @@ export default function CreateItemScreen() {
 	const renderCreditCardFields = () => (
 		<>
 			<View className="mb-4">
-				<Text className="mb-2 text-sm font-medium text-foreground">
+				<Text className="mb-2 font-medium text-foreground text-sm">
 					Cardholder Name
 				</Text>
 				<TextInput
@@ -245,7 +246,7 @@ export default function CreateItemScreen() {
 				/>
 			</View>
 			<View className="mb-4">
-				<Text className="mb-2 text-sm font-medium text-foreground">
+				<Text className="mb-2 font-medium text-foreground text-sm">
 					Card Number
 				</Text>
 				<TextInput
@@ -258,7 +259,7 @@ export default function CreateItemScreen() {
 			</View>
 			<View className="mb-4 flex-row">
 				<View className="mr-2 flex-1">
-					<Text className="mb-2 text-sm font-medium text-foreground">
+					<Text className="mb-2 font-medium text-foreground text-sm">
 						Expiry
 					</Text>
 					<TextInput
@@ -270,7 +271,7 @@ export default function CreateItemScreen() {
 					/>
 				</View>
 				<View className="flex-1">
-					<Text className="mb-2 text-sm font-medium text-foreground">CVV</Text>
+					<Text className="mb-2 font-medium text-foreground text-sm">CVV</Text>
 					<TextInput
 						className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
 						placeholder="123"
@@ -288,7 +289,7 @@ export default function CreateItemScreen() {
 		<>
 			<View className="mb-4 flex-row">
 				<View className="mr-2 flex-1">
-					<Text className="mb-2 text-sm font-medium text-foreground">
+					<Text className="mb-2 font-medium text-foreground text-sm">
 						First Name
 					</Text>
 					<TextInput
@@ -300,7 +301,7 @@ export default function CreateItemScreen() {
 					/>
 				</View>
 				<View className="flex-1">
-					<Text className="mb-2 text-sm font-medium text-foreground">
+					<Text className="mb-2 font-medium text-foreground text-sm">
 						Last Name
 					</Text>
 					<TextInput
@@ -313,7 +314,7 @@ export default function CreateItemScreen() {
 				</View>
 			</View>
 			<View className="mb-4">
-				<Text className="mb-2 text-sm font-medium text-foreground">Email</Text>
+				<Text className="mb-2 font-medium text-foreground text-sm">Email</Text>
 				<TextInput
 					className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
 					placeholder="email@example.com"
@@ -328,7 +329,7 @@ export default function CreateItemScreen() {
 
 	const renderSecureNoteFields = () => (
 		<View className="mb-4">
-			<Text className="mb-2 text-sm font-medium text-foreground">Note</Text>
+			<Text className="mb-2 font-medium text-foreground text-sm">Note</Text>
 			<TextInput
 				className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
 				placeholder="Enter your secure note..."
@@ -345,7 +346,7 @@ export default function CreateItemScreen() {
 	const renderTotpFields = () => (
 		<>
 			<View className="mb-4">
-				<Text className="mb-2 text-sm font-medium text-foreground">
+				<Text className="mb-2 font-medium text-foreground text-sm">
 					Secret Key
 				</Text>
 				<TextInput
@@ -358,7 +359,7 @@ export default function CreateItemScreen() {
 				/>
 			</View>
 			<View className="mb-4">
-				<Text className="mb-2 text-sm font-medium text-foreground">
+				<Text className="mb-2 font-medium text-foreground text-sm">
 					Issuer (optional)
 				</Text>
 				<TextInput
@@ -378,14 +379,14 @@ export default function CreateItemScreen() {
 				className="flex-1"
 			>
 				{/* Header */}
-				<View className="flex-row items-center border-b border-border px-4 py-4">
+				<View className="flex-row items-center border-border border-b px-4 py-4">
 					<TouchableOpacity
 						onPress={() => router.back()}
 						className="mr-3 rounded-full bg-secondary p-2"
 					>
 						<ArrowLeft size={20} color="#6b7280" />
 					</TouchableOpacity>
-					<Text className="flex-1 text-xl font-bold text-foreground">
+					<Text className="flex-1 font-bold text-foreground text-xl">
 						New Item
 					</Text>
 					<TouchableOpacity
@@ -401,13 +402,10 @@ export default function CreateItemScreen() {
 					</TouchableOpacity>
 				</View>
 
-				<ScrollView
-					className="flex-1 px-4"
-					keyboardShouldPersistTaps="handled"
-				>
+				<ScrollView className="flex-1 px-4" keyboardShouldPersistTaps="handled">
 					{/* Category Selector */}
 					<View className="my-4">
-						<Text className="mb-2 text-sm font-medium text-foreground">
+						<Text className="mb-2 font-medium text-foreground text-sm">
 							Category
 						</Text>
 						<ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -422,10 +420,7 @@ export default function CreateItemScreen() {
 											isSelected ? "bg-primary" : "bg-secondary"
 										}`}
 									>
-										<Icon
-											size={18}
-											color={isSelected ? "#fff" : "#6b7280"}
-										/>
+										<Icon size={18} color={isSelected ? "#fff" : "#6b7280"} />
 										<Text
 											className={`ml-2 font-medium ${
 												isSelected
@@ -443,7 +438,7 @@ export default function CreateItemScreen() {
 
 					{/* Title */}
 					<View className="mb-4">
-						<Text className="mb-2 text-sm font-medium text-foreground">
+						<Text className="mb-2 font-medium text-foreground text-sm">
 							Title *
 						</Text>
 						<TextInput
@@ -464,7 +459,7 @@ export default function CreateItemScreen() {
 					{/* Notes (for non-secure-note items) */}
 					{category !== "secure-note" && (
 						<View className="mb-4">
-							<Text className="mb-2 text-sm font-medium text-foreground">
+							<Text className="mb-2 font-medium text-foreground text-sm">
 								Notes (optional)
 							</Text>
 							<TextInput

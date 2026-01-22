@@ -29,7 +29,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAccount } from "../../src/contexts/account-context";
-import { useTRPCClient, useServerUrl } from "../../src/lib/trpc";
+import { useServerUrl, useTRPCClient } from "../../src/lib/trpc";
 import * as storage from "../../src/services/storage";
 
 export default function UnlockScreen() {
@@ -56,7 +56,7 @@ export default function UnlockScreen() {
 			setTargetAccount(activeAccount);
 			loadBiometricState(activeAccount.email);
 		}
-	}, [activeAccount]);
+	}, [activeAccount, loadBiometricState]);
 
 	const loadBiometricState = async (email: string) => {
 		const available = await storage.isBiometricAvailable();
@@ -192,10 +192,7 @@ export default function UnlockScreen() {
 
 			// Update session with fresh data
 			await storage.storeAuthToken(finishResult.token, targetAccount.email);
-			await storage.storeVaultKeys(
-				finishResult.vaultKeys,
-				targetAccount.email,
-			);
+			await storage.storeVaultKeys(finishResult.vaultKeys, targetAccount.email);
 
 			if (finishResult.user.encryptedPrivateKey) {
 				await storage.storeEncryptedPrivateKey(
@@ -209,10 +206,7 @@ export default function UnlockScreen() {
 				targetAccount.email,
 				finishResult.user.id,
 			);
-			await storage.storeMasterUnlockKey(
-				masterUnlockKey,
-				targetAccount.email,
-			);
+			await storage.storeMasterUnlockKey(masterUnlockKey, targetAccount.email);
 
 			// Update account metadata
 			const updatedMetadata: AccountMetadata = {
@@ -268,7 +262,7 @@ export default function UnlockScreen() {
 							<View className="mb-4 h-20 w-20 items-center justify-center rounded-2xl bg-primary">
 								<Lock size={40} color="#fff" />
 							</View>
-							<Text className="text-2xl font-bold text-foreground">
+							<Text className="font-bold text-2xl text-foreground">
 								Unlock Bittery
 							</Text>
 						</View>
@@ -292,7 +286,7 @@ export default function UnlockScreen() {
 													targetAccount.name ||
 													targetAccount.email.split("@")[0]}
 											</Text>
-											<Text className="text-sm text-muted-foreground">
+											<Text className="text-muted-foreground text-sm">
 												{targetAccount.email}
 											</Text>
 										</View>
@@ -301,7 +295,7 @@ export default function UnlockScreen() {
 								) : (
 									<View className="items-center">
 										<View className="mb-2 h-12 w-12 items-center justify-center rounded-full bg-primary">
-											<Text className="text-lg font-semibold text-primary-foreground">
+											<Text className="font-semibold text-lg text-primary-foreground">
 												{targetAccount.name.charAt(0).toUpperCase()}
 											</Text>
 										</View>
@@ -331,9 +325,9 @@ export default function UnlockScreen() {
 									</Text>
 								</TouchableOpacity>
 								<View className="my-4 flex-row items-center">
-									<View className="flex-1 h-px bg-border" />
+									<View className="h-px flex-1 bg-border" />
 									<Text className="mx-4 text-muted-foreground">or</Text>
-									<View className="flex-1 h-px bg-border" />
+									<View className="h-px flex-1 bg-border" />
 								</View>
 							</View>
 						)}
@@ -341,7 +335,7 @@ export default function UnlockScreen() {
 						{/* Password Form */}
 						<View className="space-y-4">
 							<View>
-								<Text className="mb-2 text-sm font-medium text-foreground">
+								<Text className="mb-2 font-medium text-foreground text-sm">
 									Password
 								</Text>
 								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
@@ -409,7 +403,7 @@ export default function UnlockScreen() {
 						<View className="items-center py-4">
 							<View className="h-1 w-12 rounded-full bg-border" />
 						</View>
-						<Text className="mb-4 px-6 text-lg font-semibold text-foreground">
+						<Text className="mb-4 px-6 font-semibold text-foreground text-lg">
 							Select Account
 						</Text>
 						{allAccounts.map((account) => (
@@ -429,7 +423,7 @@ export default function UnlockScreen() {
 											account.name ||
 											account.email.split("@")[0]}
 									</Text>
-									<Text className="text-sm text-muted-foreground">
+									<Text className="text-muted-foreground text-sm">
 										{account.email}
 									</Text>
 								</View>

@@ -50,6 +50,6 @@
 		"@noble/ciphers": "^2.1.1",
 		"@noble/hashes": "^1.5.0",
 		"@tauri-apps/plugin-store": "^2.4.1",
-		"js-srp6a": "^1.0.2"
+		"@bittery/srp6a": "^1.0.1"
 	}
 }

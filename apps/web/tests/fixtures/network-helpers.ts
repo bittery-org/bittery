@@ -8,7 +8,7 @@
  * - API error responses
  */
 
-import type { Page, Route } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 /**
  * Network condition presets

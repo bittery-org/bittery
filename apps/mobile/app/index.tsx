@@ -56,6 +56,6 @@ export default function Index() {
 		return <Redirect href="/(auth)/unlock" />;
 	}
 
-	// Has valid session - go to vault
-	return <Redirect href="/(vault)" />;
+	// Has valid session - go to tabs
+	return <Redirect href="/(tabs)" />;
 }

@@ -55,7 +55,7 @@ test.describe("Share Access Page", () => {
 		const loadingIndicator = page
 			.locator("text=Loading shared item")
 			.or(page.locator('[class*="animate-spin"]'));
-		const isLoading = await loadingIndicator
+		const _isLoading = await loadingIndicator
 			.isVisible({ timeout: 2000 })
 			.catch(() => false);
 
@@ -155,7 +155,7 @@ test.describe("Share Dialog - Authenticated User", () => {
 
 				// Look for share button
 				const shareButton = page.locator('button:has-text("Share")');
-				const hasShareButton = await shareButton
+				const _hasShareButton = await shareButton
 					.isVisible({ timeout: 5000 })
 					.catch(() => false);
 
@@ -484,7 +484,7 @@ test.describe("Share Link Network Resilience", () => {
 		await page.goto("/share/test-token");
 
 		// Should show loading state
-		const loadingState = page
+		const _loadingState = page
 			.locator('[class*="animate-spin"]')
 			.or(page.locator("text=Loading"));
 
@@ -530,7 +530,7 @@ test.describe("Share Link Security", () => {
 		await waitForSharePageReady(page);
 
 		// Look for security indicators (lock icon, "encrypted" text)
-		const securityIndicator = page
+		const _securityIndicator = page
 			.locator("text=encrypted")
 			.or(page.locator("text=End-to-end"))
 			.or(page.locator('[class*="lock"]'));

@@ -3,7 +3,7 @@
  * For zero-knowledge authentication - CLIENT SIDE ONLY
  */
 
-import { createSRPClient } from "js-srp6a";
+import { createSRPClient } from "@bittery/srp6a";
 
 const client = createSRPClient("SHA-256", 4096);
 

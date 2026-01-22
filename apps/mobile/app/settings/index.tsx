@@ -7,7 +7,6 @@ import {
 	Lock,
 	LogOut,
 	Server,
-	Shield,
 	Trash2,
 	User,
 } from "lucide-react-native";
@@ -42,12 +41,14 @@ export default function SettingsScreen() {
 	const [biometricAvailable, setBiometricAvailable] = useState(false);
 	const [biometricEnabled, setBiometricEnabled] = useState(false);
 	const [biometricType, setBiometricType] = useState<string | null>(null);
-	const [autoLockTimeout, setAutoLockTimeout] = useState<number>(10 * 60 * 1000);
+	const [autoLockTimeout, setAutoLockTimeout] = useState<number>(
+		10 * 60 * 1000,
+	);
 	const [serverUrl, setServerUrl] = useState<string | null>(null);
 
 	useEffect(() => {
 		loadSettings();
-	}, [activeAccount]);
+	}, [loadSettings]);
 
 	const loadSettings = async () => {
 		if (!activeAccount) return;
@@ -181,7 +182,7 @@ export default function SettingsScreen() {
 		<TouchableOpacity
 			onPress={onPress}
 			disabled={!onPress && !rightElement}
-			className="flex-row items-center border-b border-border px-4 py-4"
+			className="flex-row items-center border-border border-b px-4 py-4"
 		>
 			<View
 				className={`mr-4 h-10 w-10 items-center justify-center rounded-lg ${
@@ -199,7 +200,7 @@ export default function SettingsScreen() {
 					{label}
 				</Text>
 				{value && (
-					<Text className="text-sm text-muted-foreground">{value}</Text>
+					<Text className="text-muted-foreground text-sm">{value}</Text>
 				)}
 			</View>
 			{rightElement || (onPress && <ChevronRight size={20} color="#9ca3af" />)}
@@ -209,20 +210,20 @@ export default function SettingsScreen() {
 	return (
 		<SafeAreaView className="flex-1 bg-background">
 			{/* Header */}
-			<View className="flex-row items-center border-b border-border px-4 py-4">
+			<View className="flex-row items-center border-border border-b px-4 py-4">
 				<TouchableOpacity
 					onPress={() => router.back()}
 					className="mr-3 rounded-full bg-secondary p-2"
 				>
 					<ArrowLeft size={20} color="#6b7280" />
 				</TouchableOpacity>
-				<Text className="text-xl font-bold text-foreground">Settings</Text>
+				<Text className="font-bold text-foreground text-xl">Settings</Text>
 			</View>
 
 			<ScrollView className="flex-1">
 				{/* Account Section */}
 				<View className="mb-6">
-					<Text className="px-4 py-3 text-sm font-semibold text-muted-foreground uppercase">
+					<Text className="px-4 py-3 font-semibold text-muted-foreground text-sm uppercase">
 						Account
 					</Text>
 					<SettingRow
@@ -239,16 +240,14 @@ export default function SettingsScreen() {
 
 				{/* Security Section */}
 				<View className="mb-6">
-					<Text className="px-4 py-3 text-sm font-semibold text-muted-foreground uppercase">
+					<Text className="px-4 py-3 font-semibold text-muted-foreground text-sm uppercase">
 						Security
 					</Text>
 					{biometricAvailable && (
 						<SettingRow
 							icon={Fingerprint}
 							label={`${biometricType || "Biometric"} Unlock`}
-							value={
-								biometricEnabled ? "Enabled" : "Disabled"
-							}
+							value={biometricEnabled ? "Enabled" : "Disabled"}
 							rightElement={
 								<Switch
 									value={biometricEnabled}
@@ -263,17 +262,13 @@ export default function SettingsScreen() {
 						value={getAutoLockLabel(autoLockTimeout)}
 						onPress={handleAutoLockChange}
 					/>
-					<SettingRow
-						icon={Lock}
-						label="Lock Vault"
-						onPress={handleLock}
-					/>
+					<SettingRow icon={Lock} label="Lock Vault" onPress={handleLock} />
 				</View>
 
 				{/* Multiple Accounts */}
 				{allAccounts.length > 1 && (
 					<View className="mb-6">
-						<Text className="px-4 py-3 text-sm font-semibold text-muted-foreground uppercase">
+						<Text className="px-4 py-3 font-semibold text-muted-foreground text-sm uppercase">
 							Other Accounts
 						</Text>
 						{allAccounts
@@ -300,7 +295,7 @@ export default function SettingsScreen() {
 
 				{/* Danger Zone */}
 				<View className="mb-6">
-					<Text className="px-4 py-3 text-sm font-semibold text-muted-foreground uppercase">
+					<Text className="px-4 py-3 font-semibold text-muted-foreground text-sm uppercase">
 						Danger Zone
 					</Text>
 					<SettingRow
@@ -314,8 +309,8 @@ export default function SettingsScreen() {
 
 				{/* App Info */}
 				<View className="items-center py-8">
-					<Text className="text-sm text-muted-foreground">Bittery Mobile</Text>
-					<Text className="text-xs text-muted-foreground">Version 0.1.0</Text>
+					<Text className="text-muted-foreground text-sm">Bittery Mobile</Text>
+					<Text className="text-muted-foreground text-xs">Version 0.1.0</Text>
 				</View>
 			</ScrollView>
 		</SafeAreaView>

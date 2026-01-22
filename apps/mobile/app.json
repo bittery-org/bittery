@@ -19,8 +19,16 @@
 			"infoPlist": {
 				"NSFaceIDUsageDescription": "Bittery uses Face ID to securely unlock your vault"
 			},
-			"associatedDomains": ["applinks:app.bittery.io", "webcredentials:app.bittery.io"]
+			"associatedDomains": [
+				"applinks:app.bittery.io",
+				"webcredentials:app.bittery.io"
+			]
 		},
+		"_associatedDomains_backup": [
+			"applinks:app.bittery.io",
+			"webcredentials:app.bittery.io"
+		],
+		"_associatedDomains_note": "Move back to ios.associatedDomains when you have a paid Apple Developer account",
 		"android": {
 			"adaptiveIcon": {
 				"foregroundImage": "./assets/adaptive-icon.png",
@@ -37,6 +45,7 @@
 		"plugins": [
 			"expo-router",
 			"expo-secure-store",
+			"react-native-quick-crypto",
 			"expo-local-authentication",
 			[
 				"expo-sqlite",

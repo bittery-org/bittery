@@ -13,7 +13,6 @@ import {
 } from "lucide-react-native";
 import { useState } from "react";
 import {
-	ActivityIndicator,
 	FlatList,
 	RefreshControl,
 	Text,
@@ -24,7 +23,6 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useDecryptedItems } from "../../../src/hooks/use-decrypted-items";
-import * as storage from "../../../src/services/storage";
 
 const categoryIcons: Record<ItemCategory, typeof Key> = {
 	login: Key,
@@ -46,8 +44,9 @@ export default function VaultItemsScreen() {
 	const router = useRouter();
 	const { vaultId } = useLocalSearchParams<{ vaultId: string }>();
 	const [searchQuery, setSearchQuery] = useState("");
-	const [selectedCategory, setSelectedCategory] =
-		useState<ItemCategory | null>(null);
+	const [selectedCategory, setSelectedCategory] = useState<ItemCategory | null>(
+		null,
+	);
 	const [refreshing, setRefreshing] = useState(false);
 
 	const { items, isLoading, error, refetch } = useDecryptedItems(vaultId);
@@ -99,13 +98,11 @@ export default function VaultItemsScreen() {
 						key={category || "all"}
 						onPress={() => setSelectedCategory(category)}
 						className={`mr-2 rounded-full px-4 py-2 ${
-							selectedCategory === category
-								? "bg-primary"
-								: "bg-secondary"
+							selectedCategory === category ? "bg-primary" : "bg-secondary"
 						}`}
 					>
 						<Text
-							className={`text-sm font-medium ${
+							className={`font-medium text-sm ${
 								selectedCategory === category
 									? "text-primary-foreground"
 									: "text-foreground"
@@ -125,7 +122,7 @@ export default function VaultItemsScreen() {
 		return (
 			<TouchableOpacity
 				onPress={() => router.push(`/(vault)/${vaultId}/${item.id}`)}
-				className="flex-row items-center border-b border-border px-4 py-4"
+				className="flex-row items-center border-border border-b px-4 py-4"
 			>
 				<View className="mr-4 h-10 w-10 items-center justify-center rounded-lg bg-secondary">
 					<Icon size={20} color="#6b7280" />
@@ -138,12 +135,12 @@ export default function VaultItemsScreen() {
 						)}
 					</View>
 					{item.username && (
-						<Text className="text-sm text-muted-foreground" numberOfLines={1}>
+						<Text className="text-muted-foreground text-sm" numberOfLines={1}>
 							{item.username}
 						</Text>
 					)}
 					{item.url && (
-						<Text className="text-sm text-muted-foreground" numberOfLines={1}>
+						<Text className="text-muted-foreground text-sm" numberOfLines={1}>
 							{item.url}
 						</Text>
 					)}
@@ -152,11 +149,55 @@ export default function VaultItemsScreen() {
 		);
 	};
 
+	const renderSkeletonItem = (index: number) => (
+		<View
+			key={index}
+			className="flex-row items-center border-border border-b px-4 py-4"
+		>
+			<View className="mr-4 h-10 w-10 animate-pulse rounded-lg bg-secondary" />
+			<View className="flex-1">
+				<View className="h-4 w-32 animate-pulse rounded bg-secondary" />
+				<View className="mt-2 h-3 w-24 animate-pulse rounded bg-secondary" />
+			</View>
+		</View>
+	);
+
 	if (isLoading) {
 		return (
-			<SafeAreaView className="flex-1 items-center justify-center bg-background">
-				<ActivityIndicator size="large" color="#000" />
-				<Text className="mt-4 text-muted-foreground">Decrypting items...</Text>
+			<SafeAreaView className="flex-1 bg-background">
+				{/* Header */}
+				<View className="border-border border-b px-4 py-4">
+					<View className="flex-row items-center">
+						<View className="mr-3 rounded-full bg-secondary p-2">
+							<ArrowLeft size={20} color="#6b7280" />
+						</View>
+						<Text className="flex-1 font-bold text-foreground text-xl">
+							Items
+						</Text>
+						<View className="rounded-full bg-secondary p-2">
+							<Plus size={20} color="#6b7280" />
+						</View>
+					</View>
+
+					{/* Search skeleton */}
+					<View className="mt-4 flex-row items-center rounded-lg bg-secondary px-3 py-2">
+						<Search size={18} color="#6b7280" />
+						<View className="ml-2 h-5 flex-1 rounded bg-muted" />
+					</View>
+				</View>
+
+				{/* Category filter skeleton */}
+				<View className="flex-row px-4 py-2">
+					{[1, 2, 3, 4].map((i) => (
+						<View
+							key={i}
+							className="mr-2 h-8 w-16 animate-pulse rounded-full bg-secondary"
+						/>
+					))}
+				</View>
+
+				{/* Skeleton items */}
+				{[1, 2, 3, 4, 5, 6].map(renderSkeletonItem)}
 			</SafeAreaView>
 		);
 	}
@@ -178,7 +219,7 @@ export default function VaultItemsScreen() {
 	return (
 		<SafeAreaView className="flex-1 bg-background">
 			{/* Header */}
-			<View className="border-b border-border px-4 py-4">
+			<View className="border-border border-b px-4 py-4">
 				<View className="flex-row items-center">
 					<TouchableOpacity
 						onPress={() => router.back()}
@@ -186,7 +227,7 @@ export default function VaultItemsScreen() {
 					>
 						<ArrowLeft size={20} color="#6b7280" />
 					</TouchableOpacity>
-					<Text className="flex-1 text-xl font-bold text-foreground">
+					<Text className="flex-1 font-bold text-foreground text-xl">
 						Items
 					</Text>
 					<TouchableOpacity
@@ -224,7 +265,7 @@ export default function VaultItemsScreen() {
 				ListEmptyComponent={
 					<View className="flex-1 items-center justify-center p-8">
 						<Key size={48} color="#9ca3af" />
-						<Text className="mt-4 text-center text-lg font-semibold text-foreground">
+						<Text className="mt-4 text-center font-semibold text-foreground text-lg">
 							{searchQuery || selectedCategory
 								? "No items found"
 								: "No items yet"}

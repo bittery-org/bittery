@@ -8,15 +8,14 @@
  * - expo-local-authentication for biometric auth
  */
 
+import * as Crypto from "expo-crypto";
+import * as LocalAuthentication from "expo-local-authentication";
+// Static imports for React Native - these are bundled by Metro at build time
+import * as SecureStore from "expo-secure-store";
+import * as SQLite from "expo-sqlite";
 import { decrypt, type EncryptedData, encrypt } from "./encryption";
 import { arrayBufferToBase64, base64ToArrayBuffer } from "./key-derivation";
 import { rsaDecrypt } from "./rsa";
-
-// Static imports for React Native - these are bundled by Metro at build time
-import * as SecureStore from "expo-secure-store";
-import * as LocalAuthentication from "expo-local-authentication";
-import * as SQLite from "expo-sqlite";
-import * as Crypto from "expo-crypto";
 
 // Global storage keys (shared across all accounts)
 const DEVICE_KEY_STORAGE = "bittery_device_key";
@@ -474,18 +473,13 @@ export async function isBiometricAvailable(): Promise<boolean> {
  */
 export async function getBiometricType(): Promise<string | null> {
 	try {
-		const types =
-			await LocalAuthentication.supportedAuthenticationTypesAsync();
+		const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
 		if (
-			types.includes(
-				LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION,
-			)
+			types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)
 		) {
 			return "Face ID";
 		}
-		if (
-			types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT)
-		) {
+		if (types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT)) {
 			return "Touch ID";
 		}
 		if (types.includes(LocalAuthentication.AuthenticationType.IRIS)) {

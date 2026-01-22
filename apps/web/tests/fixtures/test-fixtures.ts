@@ -5,7 +5,7 @@
  * It provides utilities for authentication, database cleanup, and test isolation.
  */
 
-import { type BrowserContext, test as base, type Page } from "@playwright/test";
+import { test as base, type Page } from "@playwright/test";
 import { nanoid } from "nanoid";
 import {
 	waitForHomePageReady,

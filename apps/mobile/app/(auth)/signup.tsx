@@ -1,5 +1,6 @@
-import { generateSecretKey, validateSecretKey } from "@bittery/crypto/secret-key";
+import { generateSecretKey } from "@bittery/crypto/secret-key";
 import { normalizeServerUrl } from "@bittery/crypto/server-url";
+import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import {
 	ArrowLeft,
@@ -12,7 +13,7 @@ import {
 	Server,
 	User,
 } from "lucide-react-native";
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
 	Alert,
 	KeyboardAvoidingView,
@@ -24,7 +25,6 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import * as Clipboard from "expo-clipboard";
 
 const DEFAULT_SERVER_URL =
 	process.env.EXPO_PUBLIC_SERVER_URL || "http://localhost:3000";
@@ -103,10 +103,7 @@ export default function SignupScreen() {
 	if (step === "secret-key") {
 		return (
 			<SafeAreaView className="flex-1 bg-background">
-				<ScrollView
-					className="flex-1"
-					contentContainerStyle={{ flexGrow: 1 }}
-				>
+				<ScrollView className="flex-1" contentContainerStyle={{ flexGrow: 1 }}>
 					<View className="flex-1 px-6 py-8">
 						{/* Back Button */}
 						<TouchableOpacity
@@ -122,7 +119,7 @@ export default function SignupScreen() {
 							<View className="mb-4 h-20 w-20 items-center justify-center rounded-2xl bg-amber-500">
 								<Key size={40} color="#fff" />
 							</View>
-							<Text className="text-2xl font-bold text-foreground">
+							<Text className="font-bold text-2xl text-foreground">
 								Your Secret Key
 							</Text>
 							<Text className="mt-2 text-center text-muted-foreground">
@@ -137,19 +134,19 @@ export default function SignupScreen() {
 								Important!
 							</Text>
 							<Text className="text-amber-700">
-								• Your Secret Key cannot be recovered if lost{"\n"}
-								• Write it down or save it in a secure location{"\n"}
-								• You'll need both your password AND this key to log in{"\n"}
-								• Never share your Secret Key with anyone
+								• Your Secret Key cannot be recovered if lost{"\n"}• Write it
+								down or save it in a secure location{"\n"}• You'll need both
+								your password AND this key to log in{"\n"}• Never share your
+								Secret Key with anyone
 							</Text>
 						</View>
 
 						{/* Secret Key Display */}
 						<View className="mb-6">
-							<Text className="mb-2 text-sm font-medium text-foreground">
+							<Text className="mb-2 font-medium text-foreground text-sm">
 								Your Secret Key
 							</Text>
-							<View className="rounded-lg border-2 border-dashed border-primary bg-primary/5 p-4">
+							<View className="rounded-lg border-2 border-primary border-dashed bg-primary/5 p-4">
 								<Text
 									className="text-center font-mono text-lg text-primary"
 									selectable
@@ -233,7 +230,7 @@ export default function SignupScreen() {
 							<View className="mb-4 h-20 w-20 items-center justify-center rounded-2xl bg-primary">
 								<Lock size={40} color="#fff" />
 							</View>
-							<Text className="text-2xl font-bold text-foreground">
+							<Text className="font-bold text-2xl text-foreground">
 								Create Account
 							</Text>
 							<Text className="mt-2 text-center text-muted-foreground">
@@ -245,7 +242,7 @@ export default function SignupScreen() {
 						<View className="space-y-4">
 							{/* Server URL */}
 							<View>
-								<Text className="mb-2 text-sm font-medium text-foreground">
+								<Text className="mb-2 font-medium text-foreground text-sm">
 									Server URL
 								</Text>
 								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
@@ -264,7 +261,7 @@ export default function SignupScreen() {
 
 							{/* Name */}
 							<View>
-								<Text className="mb-2 text-sm font-medium text-foreground">
+								<Text className="mb-2 font-medium text-foreground text-sm">
 									Name
 								</Text>
 								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
@@ -282,7 +279,7 @@ export default function SignupScreen() {
 
 							{/* Email */}
 							<View>
-								<Text className="mb-2 text-sm font-medium text-foreground">
+								<Text className="mb-2 font-medium text-foreground text-sm">
 									Email
 								</Text>
 								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
@@ -302,7 +299,7 @@ export default function SignupScreen() {
 
 							{/* Password */}
 							<View>
-								<Text className="mb-2 text-sm font-medium text-foreground">
+								<Text className="mb-2 font-medium text-foreground text-sm">
 									Password
 								</Text>
 								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
@@ -325,14 +322,14 @@ export default function SignupScreen() {
 										)}
 									</TouchableOpacity>
 								</View>
-								<Text className="mt-1 text-xs text-muted-foreground">
+								<Text className="mt-1 text-muted-foreground text-xs">
 									Minimum 8 characters
 								</Text>
 							</View>
 
 							{/* Confirm Password */}
 							<View>
-								<Text className="mb-2 text-sm font-medium text-foreground">
+								<Text className="mb-2 font-medium text-foreground text-sm">
 									Confirm Password
 								</Text>
 								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">

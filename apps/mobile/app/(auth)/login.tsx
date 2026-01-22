@@ -8,8 +8,15 @@ import {
 } from "@bittery/crypto/srp-client";
 import type { AccountMetadata } from "@bittery/crypto/storage-react-native";
 import { useRouter } from "expo-router";
-import { Eye, EyeOff, Fingerprint, Lock, Mail, Server } from "lucide-react-native";
-import { useState, useEffect } from "react";
+import {
+	Eye,
+	EyeOff,
+	Fingerprint,
+	Lock,
+	Mail,
+	Server,
+} from "lucide-react-native";
+import { useEffect, useState } from "react";
 import {
 	Alert,
 	KeyboardAvoidingView,
@@ -24,7 +31,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAccount } from "../../src/contexts/account-context";
-import { useTRPCClient, useServerUrl } from "../../src/lib/trpc";
+import { useServerUrl, useTRPCClient } from "../../src/lib/trpc";
 import * as storage from "../../src/services/storage";
 
 const DEFAULT_SERVER_URL =
@@ -208,7 +215,7 @@ export default function LoginScreen() {
 							<View className="mb-4 h-20 w-20 items-center justify-center rounded-2xl bg-primary">
 								<Lock size={40} color="#fff" />
 							</View>
-							<Text className="text-2xl font-bold text-foreground">
+							<Text className="font-bold text-2xl text-foreground">
 								Sign in to Bittery
 							</Text>
 							<Text className="mt-2 text-center text-muted-foreground">
@@ -220,7 +227,7 @@ export default function LoginScreen() {
 						<View className="space-y-4">
 							{/* Server URL */}
 							<View>
-								<Text className="mb-2 text-sm font-medium text-foreground">
+								<Text className="mb-2 font-medium text-foreground text-sm">
 									Server URL
 								</Text>
 								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
@@ -235,14 +242,14 @@ export default function LoginScreen() {
 										keyboardType="url"
 									/>
 								</View>
-								<Text className="mt-1 text-xs text-muted-foreground">
+								<Text className="mt-1 text-muted-foreground text-xs">
 									Use your self-hosted Bittery server URL
 								</Text>
 							</View>
 
 							{/* Email */}
 							<View>
-								<Text className="mb-2 text-sm font-medium text-foreground">
+								<Text className="mb-2 font-medium text-foreground text-sm">
 									Email
 								</Text>
 								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
@@ -262,7 +269,7 @@ export default function LoginScreen() {
 
 							{/* Password */}
 							<View>
-								<Text className="mb-2 text-sm font-medium text-foreground">
+								<Text className="mb-2 font-medium text-foreground text-sm">
 									Password
 								</Text>
 								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
@@ -289,7 +296,7 @@ export default function LoginScreen() {
 
 							{/* Secret Key */}
 							<View>
-								<Text className="mb-2 text-sm font-medium text-foreground">
+								<Text className="mb-2 font-medium text-foreground text-sm">
 									Secret Key
 								</Text>
 								<TextInput
@@ -300,7 +307,7 @@ export default function LoginScreen() {
 									autoCapitalize="characters"
 									autoCorrect={false}
 								/>
-								<Text className="mt-1 text-xs text-muted-foreground">
+								<Text className="mt-1 text-muted-foreground text-xs">
 									Your Secret Key was provided when you created your account
 								</Text>
 							</View>

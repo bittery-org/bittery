@@ -1,23 +1,21 @@
-import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
+import type { ItemCategory } from "@bittery/shared/types";
 import * as Clipboard from "expo-clipboard";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
 	ArrowLeft,
 	Copy,
 	CreditCard,
-	Edit,
 	Eye,
 	EyeOff,
 	FileText,
+	Globe,
 	Key,
+	Mail,
 	Star,
 	Timer,
-	Trash2,
 	User,
-	Globe,
-	Mail,
 } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
 	ActivityIndicator,
 	Alert,
@@ -111,11 +109,12 @@ export default function ItemDetailScreen() {
 	) => {
 		if (!value) return null;
 
-		const displayValue = options?.masked && !options?.showState ? maskValue(value) : value;
+		const displayValue =
+			options?.masked && !options?.showState ? maskValue(value) : value;
 
 		return (
-			<View className="border-b border-border py-4">
-				<Text className="mb-1 text-sm text-muted-foreground">{label}</Text>
+			<View className="border-border border-b py-4">
+				<Text className="mb-1 text-muted-foreground text-sm">{label}</Text>
 				<View className="flex-row items-center">
 					{options?.icon && (
 						<options.icon size={16} color="#6b7280" className="mr-2" />
@@ -159,8 +158,8 @@ export default function ItemDetailScreen() {
 			{item.urls &&
 				item.urls.length > 1 &&
 				item.urls.slice(1).map((url, index) => (
-					<View key={url} className="border-b border-border py-4">
-						<Text className="mb-1 text-sm text-muted-foreground">
+					<View key={url} className="border-border border-b py-4">
+						<Text className="mb-1 text-muted-foreground text-sm">
 							Website {index + 2}
 						</Text>
 						<View className="flex-row items-center">
@@ -184,8 +183,10 @@ export default function ItemDetailScreen() {
 		<>
 			{renderFieldRow("Cardholder Name", item.cardholderName)}
 			{item.cardNumber && (
-				<View className="border-b border-border py-4">
-					<Text className="mb-1 text-sm text-muted-foreground">Card Number</Text>
+				<View className="border-border border-b py-4">
+					<Text className="mb-1 text-muted-foreground text-sm">
+						Card Number
+					</Text>
 					<View className="flex-row items-center">
 						<CreditCard size={16} color="#6b7280" className="mr-2" />
 						<Text className="flex-1 font-mono text-foreground" selectable>
@@ -225,8 +226,8 @@ export default function ItemDetailScreen() {
 	const renderIdentityFields = () => (
 		<>
 			{(item.firstName || item.lastName) && (
-				<View className="border-b border-border py-4">
-					<Text className="mb-1 text-sm text-muted-foreground">Name</Text>
+				<View className="border-border border-b py-4">
+					<Text className="mb-1 text-muted-foreground text-sm">Name</Text>
 					<Text className="text-foreground" selectable>
 						{[item.firstName, item.middleName, item.lastName]
 							.filter(Boolean)
@@ -243,51 +244,49 @@ export default function ItemDetailScreen() {
 			})}
 			{renderFieldRow("Passport Number", item.passportNumber)}
 			{renderFieldRow("Driver's License", item.driversLicense)}
-			{item.addresses &&
-				item.addresses.map((address, index) => (
-					<View key={index} className="border-b border-border py-4">
-						<Text className="mb-1 text-sm text-muted-foreground">
-							{address.label || `Address ${index + 1}`}
+			{item.addresses?.map((address, index) => (
+				<View key={index} className="border-border border-b py-4">
+					<Text className="mb-1 text-muted-foreground text-sm">
+						{address.label || `Address ${index + 1}`}
+					</Text>
+					<Text className="text-foreground" selectable>
+						{[
+							address.street1,
+							address.street2,
+							address.city,
+							address.state,
+							address.zip,
+							address.country,
+						]
+							.filter(Boolean)
+							.join(", ")}
+					</Text>
+				</View>
+			))}
+			{item.phoneNumbers?.map((phone, index) => (
+				<View key={index} className="border-border border-b py-4">
+					<Text className="mb-1 text-muted-foreground text-sm">
+						{phone.label || `Phone ${index + 1}`}
+					</Text>
+					<View className="flex-row items-center">
+						<Text className="flex-1 text-foreground" selectable>
+							{phone.number}
 						</Text>
-						<Text className="text-foreground" selectable>
-							{[
-								address.street1,
-								address.street2,
-								address.city,
-								address.state,
-								address.zip,
-								address.country,
-							]
-								.filter(Boolean)
-								.join(", ")}
-						</Text>
+						<TouchableOpacity
+							onPress={() => handleCopy(phone.number, "Phone")}
+							className="p-2"
+						>
+							<Copy size={18} color="#6b7280" />
+						</TouchableOpacity>
 					</View>
-				))}
-			{item.phoneNumbers &&
-				item.phoneNumbers.map((phone, index) => (
-					<View key={index} className="border-b border-border py-4">
-						<Text className="mb-1 text-sm text-muted-foreground">
-							{phone.label || `Phone ${index + 1}`}
-						</Text>
-						<View className="flex-row items-center">
-							<Text className="flex-1 text-foreground" selectable>
-								{phone.number}
-							</Text>
-							<TouchableOpacity
-								onPress={() => handleCopy(phone.number, "Phone")}
-								className="p-2"
-							>
-								<Copy size={18} color="#6b7280" />
-							</TouchableOpacity>
-						</View>
-					</View>
-				))}
+				</View>
+			))}
 		</>
 	);
 
 	const renderSecureNoteFields = () => (
 		<View className="py-4">
-			<Text className="mb-2 text-sm text-muted-foreground">Note</Text>
+			<Text className="mb-2 text-muted-foreground text-sm">Note</Text>
 			<Text className="text-foreground" selectable>
 				{item.note || item.notes}
 			</Text>
@@ -305,7 +304,7 @@ export default function ItemDetailScreen() {
 	return (
 		<SafeAreaView className="flex-1 bg-background">
 			{/* Header */}
-			<View className="flex-row items-center border-b border-border px-4 py-4">
+			<View className="flex-row items-center border-border border-b px-4 py-4">
 				<TouchableOpacity
 					onPress={() => router.back()}
 					className="mr-3 rounded-full bg-secondary p-2"
@@ -322,7 +321,7 @@ export default function ItemDetailScreen() {
 							<Star size={14} color="#eab308" fill="#eab308" className="ml-2" />
 						)}
 					</View>
-					<Text className="text-sm text-muted-foreground">
+					<Text className="text-muted-foreground text-sm">
 						{categoryLabels[item.category]}
 					</Text>
 				</View>
@@ -338,8 +337,8 @@ export default function ItemDetailScreen() {
 
 				{/* Notes (for non-secure-note items) */}
 				{item.category !== "secure-note" && (item.notes || item.note) && (
-					<View className="border-b border-border py-4">
-						<Text className="mb-2 text-sm text-muted-foreground">Notes</Text>
+					<View className="border-border border-b py-4">
+						<Text className="mb-2 text-muted-foreground text-sm">Notes</Text>
 						<Text className="text-foreground" selectable>
 							{item.notes || item.note}
 						</Text>
@@ -349,14 +348,14 @@ export default function ItemDetailScreen() {
 				{/* Tags */}
 				{item.tags && item.tags.length > 0 && (
 					<View className="py-4">
-						<Text className="mb-2 text-sm text-muted-foreground">Tags</Text>
+						<Text className="mb-2 text-muted-foreground text-sm">Tags</Text>
 						<View className="flex-row flex-wrap">
 							{item.tags.map((tag) => (
 								<View
 									key={tag}
-									className="mb-2 mr-2 rounded-full bg-secondary px-3 py-1"
+									className="mr-2 mb-2 rounded-full bg-secondary px-3 py-1"
 								>
-									<Text className="text-sm text-foreground">{tag}</Text>
+									<Text className="text-foreground text-sm">{tag}</Text>
 								</View>
 							))}
 						</View>
@@ -364,32 +363,33 @@ export default function ItemDetailScreen() {
 				)}
 
 				{/* Custom Fields */}
-				{item.customFields &&
-					item.customFields.map((field) => (
-						<View key={field.id} className="border-b border-border py-4">
-							<Text className="mb-1 text-sm text-muted-foreground">
-								{field.label}
+				{item.customFields?.map((field) => (
+					<View key={field.id} className="border-border border-b py-4">
+						<Text className="mb-1 text-muted-foreground text-sm">
+							{field.label}
+						</Text>
+						<View className="flex-row items-center">
+							<Text className="flex-1 text-foreground" selectable>
+								{field.type === "password"
+									? maskValue(field.value)
+									: field.value}
 							</Text>
-							<View className="flex-row items-center">
-								<Text className="flex-1 text-foreground" selectable>
-									{field.type === "password" ? maskValue(field.value) : field.value}
-								</Text>
-								<TouchableOpacity
-									onPress={() => handleCopy(field.value, field.label)}
-									className="p-2"
-								>
-									<Copy size={18} color="#6b7280" />
-								</TouchableOpacity>
-							</View>
+							<TouchableOpacity
+								onPress={() => handleCopy(field.value, field.label)}
+								className="p-2"
+							>
+								<Copy size={18} color="#6b7280" />
+							</TouchableOpacity>
 						</View>
-					))}
+					</View>
+				))}
 
 				{/* Metadata */}
 				<View className="py-4">
-					<Text className="text-xs text-muted-foreground">
+					<Text className="text-muted-foreground text-xs">
 						Created: {new Date(item.createdAt).toLocaleString()}
 					</Text>
-					<Text className="text-xs text-muted-foreground">
+					<Text className="text-muted-foreground text-xs">
 						Updated: {new Date(item.updatedAt).toLocaleString()}
 					</Text>
 				</View>

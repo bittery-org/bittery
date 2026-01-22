@@ -3,7 +3,7 @@
  * For zero-knowledge authentication - SERVER SIDE ONLY
  */
 
-import { createSRPServer } from "js-srp6a";
+import { createSRPServer } from "@bittery/srp6a";
 
 // Using SHA-256 and 4096-bit prime group for maximum security
 const serverClient = createSRPServer("SHA-256", 4096);
