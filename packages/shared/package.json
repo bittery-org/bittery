@@ -26,7 +26,7 @@
 		"@bittery/crypto": "workspace:*",
 		"@tanstack/react-query": "^5.85.5",
 		"@trpc/client": "catalog:",
-		"@trpc/tanstack-react-query": "^11.5.0"
+		"@trpc/tanstack-react-query": "catalog:"
 	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",

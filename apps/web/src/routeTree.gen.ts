@@ -89,11 +89,11 @@ export interface FileRoutesByFullPath {
   '/login': typeof AuthLoginRoute
   '/invite/$token': typeof InviteTokenRoute
   '/share/$token': typeof ShareTokenRoute
-  '/settings': typeof AppSettingsIndexRoute
-  '/teams': typeof AppTeamsIndexRoute
-  '/vaults': typeof AppVaultsIndexRoute
-  '/teams/$teamId': typeof AppTeamsTeamIdIndexRoute
-  '/vaults/$vaultId': typeof AppVaultsVaultIdIndexRoute
+  '/settings/': typeof AppSettingsIndexRoute
+  '/teams/': typeof AppTeamsIndexRoute
+  '/vaults/': typeof AppVaultsIndexRoute
+  '/teams/$teamId/': typeof AppTeamsTeamIdIndexRoute
+  '/vaults/$vaultId/': typeof AppVaultsVaultIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -132,11 +132,11 @@ export interface FileRouteTypes {
     | '/login'
     | '/invite/$token'
     | '/share/$token'
-    | '/settings'
-    | '/teams'
-    | '/vaults'
-    | '/teams/$teamId'
-    | '/vaults/$vaultId'
+    | '/settings/'
+    | '/teams/'
+    | '/vaults/'
+    | '/teams/$teamId/'
+    | '/vaults/$vaultId/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -179,7 +179,7 @@ declare module '@tanstack/react-router' {
     '/_app': {
       id: '/_app'
       path: ''
-      fullPath: ''
+      fullPath: '/'
       preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
@@ -228,35 +228,35 @@ declare module '@tanstack/react-router' {
     '/_app/vaults/': {
       id: '/_app/vaults/'
       path: '/vaults'
-      fullPath: '/vaults'
+      fullPath: '/vaults/'
       preLoaderRoute: typeof AppVaultsIndexRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/teams/': {
       id: '/_app/teams/'
       path: '/teams'
-      fullPath: '/teams'
+      fullPath: '/teams/'
       preLoaderRoute: typeof AppTeamsIndexRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings/': {
       id: '/_app/settings/'
       path: '/settings'
-      fullPath: '/settings'
+      fullPath: '/settings/'
       preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/vaults/$vaultId/': {
       id: '/_app/vaults/$vaultId/'
       path: '/vaults/$vaultId'
-      fullPath: '/vaults/$vaultId'
+      fullPath: '/vaults/$vaultId/'
       preLoaderRoute: typeof AppVaultsVaultIdIndexRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/teams/$teamId/': {
       id: '/_app/teams/$teamId/'
       path: '/teams/$teamId'
-      fullPath: '/teams/$teamId'
+      fullPath: '/teams/$teamId/'
       preLoaderRoute: typeof AppTeamsTeamIdIndexRouteImport
       parentRoute: typeof AppRoute
     }

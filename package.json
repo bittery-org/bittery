@@ -2,6 +2,12 @@
 	"name": "bittery",
 	"private": true,
 	"type": "module",
+	"pnpm": {
+		"overrides": {
+			"react": "19.1.0",
+			"react-dom": "19.1.0"
+		}
+	},
 	"scripts": {
 		"check": "biome check --write .",
 		"test": "turbo test",

@@ -24,6 +24,7 @@
 		"@bittery/config": "workspace:*",
 		"@tanstack/react-query": "^5.85.5",
 		"@types/react": "catalog:",
+		"react": "catalog:",
 		"typescript": "^5.7.2"
 	},
 	"peerDependencies": {

@@ -157,11 +157,11 @@ export interface FileRoutesByFullPath {
   '/vault/favorites/': typeof VaultFavoritesIndexRoute
   '/vault/trash/': typeof VaultTrashIndexRoute
   '/vault/$id/tag/$tagName': typeof VaultIdTagTagNameRoute
-  '/vault/$id/$itemId': typeof VaultIdItemIdIndexRoute
-  '/vault/all-items/$itemId': typeof VaultAllItemsItemIdIndexRoute
-  '/vault/favorites/$itemId': typeof VaultFavoritesItemIdIndexRoute
+  '/vault/$id/$itemId/': typeof VaultIdItemIdIndexRoute
+  '/vault/all-items/$itemId/': typeof VaultAllItemsItemIdIndexRoute
+  '/vault/favorites/$itemId/': typeof VaultFavoritesItemIdIndexRoute
   '/vault/tag/$tagName/': typeof VaultTagTagNameIndexRoute
-  '/vault/tag/$tagName/$itemId': typeof VaultTagTagNameItemIdIndexRoute
+  '/vault/tag/$tagName/$itemId/': typeof VaultTagTagNameItemIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -223,11 +223,11 @@ export interface FileRouteTypes {
     | '/vault/favorites/'
     | '/vault/trash/'
     | '/vault/$id/tag/$tagName'
-    | '/vault/$id/$itemId'
-    | '/vault/all-items/$itemId'
-    | '/vault/favorites/$itemId'
+    | '/vault/$id/$itemId/'
+    | '/vault/all-items/$itemId/'
+    | '/vault/favorites/$itemId/'
     | '/vault/tag/$tagName/'
-    | '/vault/tag/$tagName/$itemId'
+    | '/vault/tag/$tagName/$itemId/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -394,21 +394,21 @@ declare module '@tanstack/react-router' {
     '/vault/favorites/$itemId/': {
       id: '/vault/favorites/$itemId/'
       path: '/$itemId'
-      fullPath: '/vault/favorites/$itemId'
+      fullPath: '/vault/favorites/$itemId/'
       preLoaderRoute: typeof VaultFavoritesItemIdIndexRouteImport
       parentRoute: typeof VaultFavoritesRouteRoute
     }
     '/vault/all-items/$itemId/': {
       id: '/vault/all-items/$itemId/'
       path: '/$itemId'
-      fullPath: '/vault/all-items/$itemId'
+      fullPath: '/vault/all-items/$itemId/'
       preLoaderRoute: typeof VaultAllItemsItemIdIndexRouteImport
       parentRoute: typeof VaultAllItemsRouteRoute
     }
     '/vault/$id/$itemId/': {
       id: '/vault/$id/$itemId/'
       path: '/$itemId'
-      fullPath: '/vault/$id/$itemId'
+      fullPath: '/vault/$id/$itemId/'
       preLoaderRoute: typeof VaultIdItemIdIndexRouteImport
       parentRoute: typeof VaultIdRouteRoute
     }
@@ -422,7 +422,7 @@ declare module '@tanstack/react-router' {
     '/vault/tag/$tagName/$itemId/': {
       id: '/vault/tag/$tagName/$itemId/'
       path: '/$itemId'
-      fullPath: '/vault/tag/$tagName/$itemId'
+      fullPath: '/vault/tag/$tagName/$itemId/'
       preLoaderRoute: typeof VaultTagTagNameItemIdIndexRouteImport
       parentRoute: typeof VaultTagTagNameRouteRoute
     }

@@ -33,7 +33,7 @@
 		"@tanstack/router-plugin": "^1.132.31",
 		"@trpc/client": "catalog:",
 		"@trpc/server": "catalog:",
-		"@trpc/tanstack-react-query": "^11.5.0",
+		"@trpc/tanstack-react-query": "catalog:",
 		"date-fns": "^4.1.0",
 		"lucide-react": "^0.525.0",
 		"nanoid": "^5.0.0",
