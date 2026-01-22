@@ -294,7 +294,7 @@ export const test = base.extend<{
 		const bitteryPage = new BitteryPage(page);
 		await use(bitteryPage);
 	},
-	testUser: async ({}, use) => {
+	testUser: async (_fixtures, use) => {
 		const user = generateTestUser();
 		await use(user);
 	},

@@ -271,7 +271,7 @@ export function AccountAvatarButton({ onPress }: AccountAvatarButtonProps) {
 	return (
 		<TouchableOpacity
 			onPress={onPress}
-			className="h-8 w-8 items-center justify-center rounded-full bg-primary"
+			className="size-9 items-center justify-center rounded-full bg-primary"
 			activeOpacity={0.7}
 		>
 			<Text className="font-semibold text-primary-foreground text-xs">

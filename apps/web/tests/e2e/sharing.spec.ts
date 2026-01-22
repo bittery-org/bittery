@@ -414,7 +414,7 @@ test.describe("Share Dialog - Authenticated User", () => {
 
 test.describe("Email Verification Flow", () => {
 	test("should display email verification form for restricted links", async ({
-		page,
+		page: _page,
 	}) => {
 		// This would require a pre-created restricted share link
 		// We're testing the UI components exist and function correctly

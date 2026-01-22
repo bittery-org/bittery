@@ -43,7 +43,7 @@ export async function seedTestVaultItem(
 	// or use direct API calls with the auth token
 
 	const result = await page.evaluate(
-		async ({ vaultId, itemData, category }) => {
+		async ({ vaultId: _vaultId, itemData: _itemData, category: _category }) => {
 			// Access the tRPC client from the window if available
 			const trpcClient = (window as any).__TRPC_CLIENT__;
 			if (!trpcClient) {

@@ -22,15 +22,10 @@ export default function RootLayout() {
 
 	useEffect(() => {
 		async function prepare() {
-			try {
-				// Add any initialization logic here
-				// e.g., load fonts, check auth state, etc.
-			} catch (e) {
-				console.warn(e);
-			} finally {
-				setAppIsReady(true);
-				await SplashScreen.hideAsync();
-			}
+			// Add any initialization logic here
+			// e.g., load fonts, check auth state, etc.
+			setAppIsReady(true);
+			await SplashScreen.hideAsync();
 		}
 
 		prepare();

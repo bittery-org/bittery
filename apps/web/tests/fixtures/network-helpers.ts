@@ -194,12 +194,11 @@ export class NetworkSimulator {
 
 		this.page.on("request", (request) => {
 			if (request.url().includes("/trpc/")) {
+				const postData = request.postData();
 				requests.push({
 					method: request.method(),
 					url: request.url(),
-					body: request.postData()
-						? JSON.parse(request.postData()!)
-						: undefined,
+					body: postData ? JSON.parse(postData) : undefined,
 				});
 			}
 		});

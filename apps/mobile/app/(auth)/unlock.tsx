@@ -14,7 +14,7 @@ import {
 	Lock,
 	UserPlus,
 } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
 	Alert,
 	KeyboardAvoidingView,
@@ -51,19 +51,19 @@ export default function UnlockScreen() {
 		type: string | null;
 	}>({ available: false, enabled: false, type: null });
 
+	const loadBiometricState = useCallback(async (email: string) => {
+		const available = await storage.isBiometricAvailable();
+		const enabled = await storage.isBiometricEnabled(email);
+		const type = available ? await storage.getBiometricType() : null;
+		setBiometricState({ available, enabled, type });
+	}, []);
+
 	useEffect(() => {
 		if (activeAccount) {
 			setTargetAccount(activeAccount);
 			loadBiometricState(activeAccount.email);
 		}
 	}, [activeAccount, loadBiometricState]);
-
-	const loadBiometricState = async (email: string) => {
-		const available = await storage.isBiometricAvailable();
-		const enabled = await storage.isBiometricEnabled(email);
-		const type = available ? await storage.getBiometricType() : null;
-		setBiometricState({ available, enabled, type });
-	};
 
 	const handleBiometricUnlock = async () => {
 		if (!targetAccount) return;

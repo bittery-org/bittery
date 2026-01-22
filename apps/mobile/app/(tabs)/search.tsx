@@ -2,7 +2,7 @@ import type { ItemCategory } from "@bittery/shared/types";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { Clock, Search as SearchIcon, X } from "lucide-react-native";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	FlatList,
 	ScrollView,
@@ -50,7 +50,18 @@ export default function SearchScreen() {
 	const [recentSearches, setRecentSearches] = useState<string[]>([]);
 	const [debouncedQuery, setDebouncedQuery] = useState("");
 
-	const { items, isLoading } = useAllDecryptedItems();
+	const { items } = useAllDecryptedItems();
+
+	const loadRecentSearches = useCallback(async () => {
+		try {
+			const stored = await SecureStore.getItemAsync(RECENT_SEARCHES_KEY);
+			if (stored) {
+				setRecentSearches(JSON.parse(stored));
+			}
+		} catch (error) {
+			console.error("Failed to load recent searches:", error);
+		}
+	}, []);
 
 	// Load recent searches on mount
 	useEffect(() => {
@@ -72,17 +83,6 @@ export default function SearchScreen() {
 		}, 100);
 		return () => clearTimeout(timer);
 	}, []);
-
-	const loadRecentSearches = async () => {
-		try {
-			const stored = await SecureStore.getItemAsync(RECENT_SEARCHES_KEY);
-			if (stored) {
-				setRecentSearches(JSON.parse(stored));
-			}
-		} catch (error) {
-			console.error("Failed to load recent searches:", error);
-		}
-	};
 
 	const saveRecentSearch = async (query: string) => {
 		if (!query.trim()) return;

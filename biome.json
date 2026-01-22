@@ -24,7 +24,8 @@
 			"!**/.alchemy",
 			"!**/.svelte-kit",
 			"!**/wrangler.jsonc",
-			"!**/.source"
+			"!**/.source",
+			"!**/playwright-report"
 		]
 	},
 	"formatter": {
@@ -40,7 +41,8 @@
 				"useExhaustiveDependencies": "info"
 			},
 			"suspicious": {
-				"noExplicitAny": "off"
+				"noExplicitAny": "off",
+				"noUnknownAtRules": "off"
 			},
 			"nursery": {
 				"useSortedClasses": {

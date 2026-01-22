@@ -10,7 +10,7 @@ import {
 	Trash2,
 	User,
 } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
 	Alert,
 	ScrollView,
@@ -46,11 +46,7 @@ export default function SettingsScreen() {
 	);
 	const [serverUrl, setServerUrl] = useState<string | null>(null);
 
-	useEffect(() => {
-		loadSettings();
-	}, [loadSettings]);
-
-	const loadSettings = async () => {
+	const loadSettings = useCallback(async () => {
 		if (!activeAccount) return;
 
 		const available = await storage.isBiometricAvailable();
@@ -71,7 +67,11 @@ export default function SettingsScreen() {
 
 		const url = await storage.getServerUrl(activeAccount.email);
 		setServerUrl(url);
-	};
+	}, [activeAccount]);
+
+	useEffect(() => {
+		loadSettings();
+	}, [loadSettings]);
 
 	const handleBiometricToggle = async (value: boolean) => {
 		if (!activeAccount) return;

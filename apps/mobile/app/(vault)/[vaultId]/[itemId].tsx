@@ -205,7 +205,7 @@ export default function ItemDetailScreen() {
 							)}
 						</TouchableOpacity>
 						<TouchableOpacity
-							onPress={() => handleCopy(item.cardNumber!, "Card Number")}
+							onPress={() => handleCopy(item.cardNumber ?? "", "Card Number")}
 							className="p-2"
 						>
 							<Copy size={18} color="#6b7280" />
@@ -245,7 +245,8 @@ export default function ItemDetailScreen() {
 			{renderFieldRow("Passport Number", item.passportNumber)}
 			{renderFieldRow("Driver's License", item.driversLicense)}
 			{item.addresses?.map((address, index) => (
-				<View key={index} className="border-border border-b py-4">
+				// biome-ignore lint/suspicious/noArrayIndexKey: addresses don't have unique IDs
+				<View key={`address-${index}`} className="border-border border-b py-4">
 					<Text className="mb-1 text-muted-foreground text-sm">
 						{address.label || `Address ${index + 1}`}
 					</Text>
@@ -264,7 +265,8 @@ export default function ItemDetailScreen() {
 				</View>
 			))}
 			{item.phoneNumbers?.map((phone, index) => (
-				<View key={index} className="border-border border-b py-4">
+				// biome-ignore lint/suspicious/noArrayIndexKey: phone numbers don't have unique IDs
+				<View key={`phone-${index}`} className="border-border border-b py-4">
 					<Text className="mb-1 text-muted-foreground text-sm">
 						{phone.label || `Phone ${index + 1}`}
 					</Text>

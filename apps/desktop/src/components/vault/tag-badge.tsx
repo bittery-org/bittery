@@ -40,21 +40,21 @@ export function TagBadge({
 }: TagBadgeProps) {
 	const color = getTagColorFromName(name);
 
-	return (
-		<span
-			className={cn(
-				"inline-flex items-center gap-1 rounded-full border font-medium transition-colors",
-				size === "sm" ? "px-2 py-0.5 text-xs" : "px-2.5 py-1 text-sm",
-				onClick && "cursor-pointer hover:opacity-80",
-				className,
-			)}
-			style={{
-				backgroundColor: `${color}20`,
-				borderColor: `${color}40`,
-				color: color,
-			}}
-			onClick={onClick}
-		>
+	const baseClassName = cn(
+		"inline-flex items-center gap-1 rounded-full border font-medium transition-colors",
+		size === "sm" ? "px-2 py-0.5 text-xs" : "px-2.5 py-1 text-sm",
+		onClick && "cursor-pointer hover:opacity-80",
+		className,
+	);
+
+	const baseStyle = {
+		backgroundColor: `${color}20`,
+		borderColor: `${color}40`,
+		color: color,
+	};
+
+	const content = (
+		<>
 			{name}
 			{onRemove && (
 				<button
@@ -68,6 +68,25 @@ export function TagBadge({
 					<X className={cn(size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5")} />
 				</button>
 			)}
+		</>
+	);
+
+	if (onClick) {
+		return (
+			<button
+				type="button"
+				className={baseClassName}
+				style={baseStyle}
+				onClick={onClick}
+			>
+				{content}
+			</button>
+		);
+	}
+
+	return (
+		<span className={baseClassName} style={baseStyle}>
+			{content}
 		</span>
 	);
 }

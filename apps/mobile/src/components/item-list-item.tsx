@@ -37,7 +37,7 @@ interface ItemListItemProps {
 }
 
 export function ItemListItem({
-	id,
+	id: _id,
 	title,
 	category,
 	favorite,
@@ -98,7 +98,7 @@ export function ItemListItem({
 					</Text>
 				)}
 				{showVaultBadge && vault && (
-					<View className="mt-1">
+					<View className="mt-1 self-start">
 						<VaultBadge name={vault.name} type={vault.type} />
 					</View>
 				)}

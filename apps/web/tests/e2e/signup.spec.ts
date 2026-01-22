@@ -24,7 +24,7 @@ test.describe("User Signup Flow", () => {
 
 	test("should display secret key and require acknowledgment before showing signup form", async ({
 		page,
-		bitteryPage,
+		bitteryPage: _bitteryPage,
 	}) => {
 		// Switch to signup mode
 		const signUpLink = page.locator('button:has-text("Sign up")');

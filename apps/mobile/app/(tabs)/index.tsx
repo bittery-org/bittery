@@ -193,7 +193,9 @@ export default function AllItemsScreen() {
 				title: "Favorites",
 				count: favorites.length,
 			});
-			favorites.forEach((item) => sections.push({ type: "item", item }));
+			for (const item of favorites) {
+				sections.push({ type: "item", item });
+			}
 		}
 
 		if (regularItems.length > 0) {
@@ -202,7 +204,9 @@ export default function AllItemsScreen() {
 				title: "All Items",
 				count: regularItems.length,
 			});
-			regularItems.forEach((item) => sections.push({ type: "item", item }));
+			for (const item of regularItems) {
+				sections.push({ type: "item", item });
+			}
 		}
 
 		return (
