@@ -4,7 +4,7 @@
 	"version": "0.1.0",
 	"main": "expo-router/entry",
 	"scripts": {
-		"dev:start": "expo prebuild && expo run:ios",
+		"dev": "expo prebuild && expo run:ios",
 		"dev:clear": "expo start --clear",
 		"android": "expo run:android",
 		"ios": "expo run:ios",

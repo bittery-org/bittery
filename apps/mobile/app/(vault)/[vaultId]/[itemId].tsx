@@ -5,6 +5,7 @@ import {
 	ArrowLeft,
 	Copy,
 	CreditCard,
+	Edit,
 	Eye,
 	EyeOff,
 	FileText,
@@ -327,6 +328,17 @@ export default function ItemDetailScreen() {
 						{categoryLabels[item.category]}
 					</Text>
 				</View>
+				<TouchableOpacity
+					onPress={() => router.push(`/(vault)/${vaultId}/edit/${itemId}`)}
+					className="rounded-lg bg-primary px-4 py-2"
+				>
+					<View className="flex-row items-center">
+						<Edit size={16} color="#fff" />
+						<Text className="ml-2 font-medium text-primary-foreground">
+							Edit
+						</Text>
+					</View>
+				</TouchableOpacity>
 			</View>
 
 			<ScrollView className="flex-1 px-4">
