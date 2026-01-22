@@ -33,7 +33,7 @@ This project uses PostgreSQL with Drizzle ORM.
 
 3. Apply the schema to your database:
 ```bash
-pnpm run db:push
+pnpm run db:migrate
 ```
 
 
@@ -72,6 +72,6 @@ bittery/
 - `pnpm run dev:web`: Start only the web application
 - `pnpm run dev:server`: Start only the server
 - `pnpm run check-types`: Check TypeScript types across all apps
-- `pnpm run db:push`: Push schema changes to database
+- `pnpm run db:migrate`: Apply migrations to database
 - `pnpm run db:studio`: Open database studio UI
 - `pnpm run check`: Run Biome formatting and linting

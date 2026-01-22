@@ -19,8 +19,8 @@ Bittery is a zero-knowledge password manager with multi-platform support (web, d
 ### Setup
 ```bash
 pnpm install                    # Install dependencies
-pnpm run db:start              # Start PostgreSQL in Docker
-pnpm run db:push               # Apply schema to database
+pnpm run db:generate              # Start PostgreSQL in Docker
+pnpm run db:migrate               # Apply migrations to database
 ```
 
 ### Development
@@ -342,7 +342,7 @@ BITTERY_STORAGE_* (for S3 storage)
 **Database migration:**
 1. Modify schema in `packages/db/src/schema/`
 2. Run `pnpm run db:generate` to create migration
-3. Run `pnpm run db:push` to apply (dev) or `pnpm run db:migrate` (prod)
+3. Run `pnpm run db:migrate` to apply
 
 **Add UI component:**
 1. Create in `packages/ui/src/components/`
