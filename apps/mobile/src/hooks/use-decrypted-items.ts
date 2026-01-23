@@ -12,7 +12,7 @@ import * as storage from "../services/storage";
  * Supports offline mode with encrypted local caching.
  * Items are cached for 5 minutes to avoid repeated decryption.
  */
-export function useDecryptedItems(vaultId: string) {
+export function useDecryptedItems(vaultId: string | undefined) {
 	const trpc = useTRPC();
 	const [isOfflineMode, setIsOfflineMode] = useState(false);
 	const [offlineCachedItems, setOfflineCachedItems] = useState<DecryptedItem[]>(
@@ -24,6 +24,7 @@ export function useDecryptedItems(vaultId: string) {
 
 	// Check if we should use offline mode
 	useEffect(() => {
+		if (!vaultId) return;
 		if (!isOnline) {
 			setIsOfflineMode(true);
 			// Load cached items
@@ -61,7 +62,7 @@ export function useDecryptedItems(vaultId: string) {
 		}
 	}, [vaultId, isOnline, getCachedItems]);
 
-	// Fetch raw encrypted items from API (disabled when offline)
+	// Fetch raw encrypted items from API (disabled when offline or no vaultId)
 	const {
 		data: rawItems = [],
 		isLoading: isLoadingRaw,
@@ -69,8 +70,8 @@ export function useDecryptedItems(vaultId: string) {
 		refetch,
 		error: fetchError,
 	} = useQuery({
-		...trpc.vault.listItems.queryOptions({ vaultId }),
-		enabled: !isOfflineMode, // Don't fetch when offline
+		...trpc.vault.listItems.queryOptions({ vaultId: vaultId ?? "" }),
+		enabled: Boolean(vaultId) && !isOfflineMode, // Don't fetch when offline or no vaultId
 		retry: isOfflineMode ? 0 : 3, // Don't retry when offline
 	});
 
@@ -143,9 +144,16 @@ export function useDecryptedItems(vaultId: string) {
 	const items = isOfflineMode ? offlineCachedItems : decryptedItems;
 	const error = isOfflineMode ? null : decryptError || fetchError;
 
+	// We're loading if:
+	// 1. Raw items are still loading, OR
+	// 2. We have raw items but no decrypted items yet (decryption in progress or just starting)
+	const isDecryptionPending =
+		rawItems.length > 0 && decryptedItems.length === 0 && !decryptError;
+	const isLoadingState = isLoadingRaw || isDecrypting || isDecryptionPending;
+
 	return {
 		items,
-		isLoading: isOfflineMode ? false : isLoadingRaw || isDecrypting,
+		isLoading: isOfflineMode ? false : isLoadingState,
 		error,
 		refetch,
 		isOffline: isOfflineMode,

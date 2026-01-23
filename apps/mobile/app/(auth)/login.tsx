@@ -52,11 +52,23 @@ export default function LoginScreen() {
 	const [enableBiometric, setEnableBiometric] = useState(true);
 	const [biometricAvailable, setBiometricAvailable] = useState(false);
 	const [biometricType, setBiometricType] = useState<string | null>(null);
+	const [biometricDetails, setBiometricDetails] = useState<{
+		hasHardware: boolean;
+		isEnrolled: boolean;
+	}>({ hasHardware: false, isEnrolled: false });
 
 	useEffect(() => {
 		async function checkBiometric() {
-			const available = await storage.isBiometricAvailable();
+			const details = await storage.getBiometricAvailabilityDetails();
+			setBiometricDetails({
+				hasHardware: details.hasHardware,
+				isEnrolled: details.isEnrolled,
+			});
+
+			// Biometric is only "available" if hardware exists AND biometrics are enrolled
+			const available = details.hasHardware && details.isEnrolled;
 			setBiometricAvailable(available);
+
 			if (available) {
 				const type = await storage.getBiometricType();
 				setBiometricType(type);
@@ -315,16 +327,39 @@ export default function LoginScreen() {
 							{/* Biometric Toggle */}
 							{biometricAvailable && (
 								<View className="flex-row items-center justify-between rounded-lg border border-input bg-background px-4 py-3">
-									<View className="flex-row items-center">
+									<View className="flex-row items-center flex-1 mr-3">
 										<Fingerprint size={20} color="#6b7280" />
-										<Text className="ml-3 text-foreground">
-											Enable {biometricType || "biometric"} unlock
-										</Text>
+										<View className="ml-3 flex-1">
+											<Text className="text-foreground">
+												Enable {biometricType || "biometric"} unlock
+											</Text>
+											<Text className="text-muted-foreground text-xs">
+												Quickly unlock with {biometricType || "biometrics"}
+											</Text>
+										</View>
 									</View>
 									<Switch
 										value={enableBiometric}
 										onValueChange={setEnableBiometric}
 									/>
+								</View>
+							)}
+
+							{/* Show message if device has hardware but no biometrics enrolled */}
+							{biometricDetails.hasHardware && !biometricDetails.isEnrolled && (
+								<View className="rounded-lg bg-amber-50 p-4">
+									<View className="flex-row items-start">
+										<Fingerprint size={20} color="#f59e0b" />
+										<View className="ml-3 flex-1">
+											<Text className="font-medium text-amber-800">
+												Biometric Not Set Up
+											</Text>
+											<Text className="text-amber-700 text-sm">
+												Set up {biometricType || "Face ID/Touch ID"} in your
+												device settings to enable quick unlock.
+											</Text>
+										</View>
+									</View>
 								</View>
 							)}
 

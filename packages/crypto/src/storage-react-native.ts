@@ -35,6 +35,12 @@ export const DEFAULT_SESSION_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000;
 // Biometric authentication grace period: 10 minutes (in milliseconds)
 export const BIOMETRIC_GRACE_PERIOD_MS = 10 * 60 * 1000;
 
+// Periodic master password re-entry: 30 days (in milliseconds)
+export const MASTER_PASSWORD_REENTRY_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
+
+// App background lock timeout: Uses the auto-lock timeout setting
+// After this time in background, biometric re-auth is required
+
 export interface StoredSessionData {
 	encryptedMasterUnlockKey: EncryptedData;
 	email: string;
@@ -42,6 +48,25 @@ export interface StoredSessionData {
 	expiresAt: number; // timestamp
 	createdAt: number; // timestamp
 	biometricEnabled?: boolean;
+	lastMasterPasswordEntry?: number; // timestamp of last master password authentication
+}
+
+// Error types for biometric authentication
+export type BiometricErrorType =
+	| "not_available" // Device doesn't have biometric hardware
+	| "not_enrolled" // No biometrics enrolled on device
+	| "not_enabled" // User hasn't enabled biometric for this account
+	| "authentication_failed" // Biometric didn't match
+	| "user_cancelled" // User cancelled the prompt
+	| "lockout" // Too many failed attempts
+	| "master_password_required" // Periodic re-entry required
+	| "session_expired" // Session has expired
+	| "unknown"; // Unknown error
+
+export interface BiometricAuthResult {
+	success: boolean;
+	error?: BiometricErrorType;
+	message?: string;
 }
 
 export interface VaultKeyData {
@@ -626,6 +651,7 @@ export async function storeSessionData(
 		expiresAt: now + expiryMs,
 		createdAt: now,
 		biometricEnabled,
+		lastMasterPasswordEntry: now, // Record initial master password entry
 	};
 
 	const key = getAccountKey(resolvedEmail, "session_data");
@@ -706,6 +732,282 @@ export async function isBiometricAuthRequired(
 }
 
 /**
+ * Check if master password re-entry is required (periodic security measure)
+ * Returns true if more than 30 days have passed since last master password entry
+ */
+export async function isMasterPasswordReentryRequired(
+	email?: string,
+): Promise<boolean> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) return false;
+
+	const sessionData = await getStoredSessionData(resolvedEmail);
+	if (!sessionData) return true; // No session, require password
+
+	// If no lastMasterPasswordEntry recorded, check createdAt
+	const lastPasswordEntry =
+		sessionData.lastMasterPasswordEntry || sessionData.createdAt;
+	const timeSinceLastEntry = Date.now() - lastPasswordEntry;
+
+	return timeSinceLastEntry > MASTER_PASSWORD_REENTRY_PERIOD_MS;
+}
+
+/**
+ * Update the last master password entry timestamp
+ */
+export async function updateLastMasterPasswordEntry(
+	email?: string,
+): Promise<void> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) throw new Error("No account specified");
+
+	const sessionData = await getStoredSessionData(resolvedEmail);
+	if (!sessionData) return;
+
+	sessionData.lastMasterPasswordEntry = Date.now();
+
+	const key = getAccountKey(resolvedEmail, "session_data");
+	await setItem(key, JSON.stringify(sessionData));
+}
+
+/**
+ * Store the timestamp when app went to background
+ */
+export async function storeBackgroundTimestamp(email?: string): Promise<void> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) return;
+
+	const key = getAccountKey(resolvedEmail, "background_timestamp");
+	await setItem(key, Date.now().toString());
+}
+
+/**
+ * Get the timestamp when app went to background
+ */
+export async function getBackgroundTimestamp(
+	email?: string,
+): Promise<number | null> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) return null;
+
+	const key = getAccountKey(resolvedEmail, "background_timestamp");
+	const timestamp = await getItem(key);
+	return timestamp ? Number.parseInt(timestamp, 10) : null;
+}
+
+/**
+ * Clear the background timestamp
+ */
+export async function clearBackgroundTimestamp(email?: string): Promise<void> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) return;
+
+	const key = getAccountKey(resolvedEmail, "background_timestamp");
+	await deleteItem(key);
+}
+
+/**
+ * Check if app should require re-authentication after returning from background
+ */
+export async function shouldRequireAuthAfterBackground(
+	email?: string,
+): Promise<boolean> {
+	const resolvedEmail = await resolveEmail(email);
+	if (!resolvedEmail) return false;
+
+	const backgroundTimestamp = await getBackgroundTimestamp(resolvedEmail);
+	if (!backgroundTimestamp) return false;
+
+	const autoLockTimeout = await getAutoLockTimeoutOrDefault(resolvedEmail);
+
+	// If auto-lock is set to "Never" (-1), don't require re-auth
+	if (autoLockTimeout === -1) return false;
+
+	const timeSinceBackground = Date.now() - backgroundTimestamp;
+	return timeSinceBackground > autoLockTimeout;
+}
+
+/**
+ * Get detailed biometric availability status
+ */
+export async function getBiometricAvailabilityDetails(): Promise<{
+	hasHardware: boolean;
+	isEnrolled: boolean;
+	availableTypes: string[];
+}> {
+	try {
+		const hasHardware = await LocalAuthentication.hasHardwareAsync();
+		const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+		const types =
+			await LocalAuthentication.supportedAuthenticationTypesAsync();
+
+		const availableTypes: string[] = [];
+		if (
+			types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)
+		) {
+			availableTypes.push("Face ID");
+		}
+		if (types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT)) {
+			availableTypes.push("Touch ID");
+		}
+		if (types.includes(LocalAuthentication.AuthenticationType.IRIS)) {
+			availableTypes.push("Iris");
+		}
+
+		return { hasHardware, isEnrolled, availableTypes };
+	} catch {
+		return { hasHardware: false, isEnrolled: false, availableTypes: [] };
+	}
+}
+
+/**
+ * Enhanced biometric authentication with detailed error handling
+ */
+export async function authenticateWithBiometricEnhanced(
+	reason = "Unlock Bittery",
+	email?: string,
+): Promise<BiometricAuthResult> {
+	try {
+		const resolvedEmail = await resolveEmail(email);
+		if (!resolvedEmail) {
+			return {
+				success: false,
+				error: "unknown",
+				message: "No account specified",
+			};
+		}
+
+		// Check hardware availability
+		const hasHardware = await LocalAuthentication.hasHardwareAsync();
+		if (!hasHardware) {
+			return {
+				success: false,
+				error: "not_available",
+				message: "This device does not support biometric authentication",
+			};
+		}
+
+		// Check if biometrics are enrolled
+		const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+		if (!isEnrolled) {
+			return {
+				success: false,
+				error: "not_enrolled",
+				message:
+					"No biometrics enrolled. Please set up Face ID or Touch ID in your device settings",
+			};
+		}
+
+		// Check if biometric is enabled for this account
+		const isEnabled = await isBiometricEnabled(resolvedEmail);
+		if (!isEnabled) {
+			return {
+				success: false,
+				error: "not_enabled",
+				message: "Biometric authentication is not enabled for this account",
+			};
+		}
+
+		// Check if master password re-entry is required
+		if (await isMasterPasswordReentryRequired(resolvedEmail)) {
+			return {
+				success: false,
+				error: "master_password_required",
+				message:
+					"For your security, please enter your master password. This is required periodically.",
+			};
+		}
+
+		// Check if session is valid
+		if (!(await isSessionValid(resolvedEmail))) {
+			return {
+				success: false,
+				error: "session_expired",
+				message: "Your session has expired. Please log in again",
+			};
+		}
+
+		const result = await LocalAuthentication.authenticateAsync({
+			promptMessage: reason,
+			cancelLabel: "Cancel",
+			disableDeviceFallback: false,
+			fallbackLabel: "Use Password",
+		});
+
+		if (result.success) {
+			// Update last biometric auth timestamp
+			const key = getAccountKey(resolvedEmail, "last_biometric_auth");
+			await setItem(key, Date.now().toString());
+
+			// Clear background timestamp on successful auth
+			await clearBackgroundTimestamp(resolvedEmail);
+
+			return { success: true };
+		}
+
+		// Handle specific error cases
+		if (result.error === "user_cancel") {
+			return {
+				success: false,
+				error: "user_cancelled",
+				message: "Authentication was cancelled",
+			};
+		}
+
+		if (result.error === "lockout") {
+			return {
+				success: false,
+				error: "lockout",
+				message:
+					"Too many failed attempts. Please use your password to unlock",
+			};
+		}
+
+		return {
+			success: false,
+			error: "authentication_failed",
+			message: "Biometric authentication failed. Please try again",
+		};
+	} catch (error) {
+		console.error(
+			"[storage-react-native] Enhanced biometric authentication failed:",
+			error,
+		);
+		return {
+			success: false,
+			error: "unknown",
+			message: "An unexpected error occurred during authentication",
+		};
+	}
+}
+
+/**
+ * Get a user-friendly message for a biometric error
+ */
+export function getBiometricErrorMessage(error: BiometricErrorType): string {
+	switch (error) {
+		case "not_available":
+			return "This device does not support biometric authentication.";
+		case "not_enrolled":
+			return "No biometrics are set up on this device. Please configure Face ID or Touch ID in your device settings.";
+		case "not_enabled":
+			return "Biometric unlock is not enabled for this account. You can enable it in Settings.";
+		case "authentication_failed":
+			return "Biometric authentication failed. Please try again or use your password.";
+		case "user_cancelled":
+			return "Authentication was cancelled.";
+		case "lockout":
+			return "Too many failed attempts. Please use your master password to unlock.";
+		case "master_password_required":
+			return "For security, please enter your master password. This is required every 30 days.";
+		case "session_expired":
+			return "Your session has expired. Please log in with your credentials.";
+		default:
+			return "An error occurred during authentication. Please try again.";
+	}
+}
+
+/**
  * Decrypt Master Unlock Key from stored session
  */
 export async function decryptStoredMasterUnlockKey(
@@ -772,6 +1074,7 @@ export async function clearAccountData(email: string): Promise<void> {
 	await deleteItem(getAccountKey(resolvedEmail, "web_app_url"));
 	await deleteItem(getAccountKey(resolvedEmail, "encrypted_private_key"));
 	await deleteItem(getAccountKey(resolvedEmail, "auto_lock_timeout"));
+	await deleteItem(getAccountKey(resolvedEmail, "background_timestamp"));
 
 	// Clear in-memory cache
 	clearAccountCache(resolvedEmail);

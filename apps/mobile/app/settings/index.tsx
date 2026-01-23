@@ -1,11 +1,14 @@
 import { useRouter } from "expo-router";
 import {
+	AlertCircle,
 	ArrowLeft,
 	ChevronRight,
 	Clock,
 	Fingerprint,
+	Info,
 	Lock,
 	LogOut,
+	ScanFace,
 	Server,
 	Trash2,
 	User,
@@ -41,15 +44,27 @@ export default function SettingsScreen() {
 	const [biometricAvailable, setBiometricAvailable] = useState(false);
 	const [biometricEnabled, setBiometricEnabled] = useState(false);
 	const [biometricType, setBiometricType] = useState<string | null>(null);
+	const [biometricDetails, setBiometricDetails] = useState<{
+		hasHardware: boolean;
+		isEnrolled: boolean;
+	}>({ hasHardware: false, isEnrolled: false });
 	const [autoLockTimeout, setAutoLockTimeout] = useState<number>(
 		10 * 60 * 1000,
 	);
 	const [serverUrl, setServerUrl] = useState<string | null>(null);
+	const [masterPasswordDaysRemaining, setMasterPasswordDaysRemaining] =
+		useState<number | null>(null);
 
 	const loadSettings = useCallback(async () => {
 		if (!activeAccount) return;
 
-		const available = await storage.isBiometricAvailable();
+		const details = await storage.getBiometricAvailabilityDetails();
+		setBiometricDetails({
+			hasHardware: details.hasHardware,
+			isEnrolled: details.isEnrolled,
+		});
+
+		const available = details.hasHardware && details.isEnrolled;
 		setBiometricAvailable(available);
 
 		if (available) {
@@ -67,6 +82,19 @@ export default function SettingsScreen() {
 
 		const url = await storage.getServerUrl(activeAccount.email);
 		setServerUrl(url);
+
+		// Calculate days until master password re-entry is required
+		const sessionData = await storage.getStoredSessionData(activeAccount.email);
+		if (sessionData) {
+			const lastEntry =
+				sessionData.lastMasterPasswordEntry || sessionData.createdAt;
+			const nextRequired =
+				lastEntry + storage.MASTER_PASSWORD_REENTRY_PERIOD_MS;
+			const daysRemaining = Math.ceil(
+				(nextRequired - Date.now()) / (24 * 60 * 60 * 1000),
+			);
+			setMasterPasswordDaysRemaining(Math.max(0, daysRemaining));
+		}
 	}, [activeAccount]);
 
 	useEffect(() => {
@@ -245,7 +273,7 @@ export default function SettingsScreen() {
 					</Text>
 					{biometricAvailable && (
 						<SettingRow
-							icon={Fingerprint}
+							icon={biometricType === "Face ID" ? ScanFace : Fingerprint}
 							label={`${biometricType || "Biometric"} Unlock`}
 							value={biometricEnabled ? "Enabled" : "Disabled"}
 							rightElement={
@@ -256,13 +284,92 @@ export default function SettingsScreen() {
 							}
 						/>
 					)}
+
+					{/* Show notice if device doesn't support biometrics */}
+					{!biometricDetails.hasHardware && (
+						<View className="border-border border-b px-4 py-4">
+							<View className="flex-row items-start rounded-lg bg-secondary p-3">
+								<Info size={18} color="#6b7280" />
+								<View className="ml-3 flex-1">
+									<Text className="font-medium text-foreground text-sm">
+										Biometric Not Available
+									</Text>
+									<Text className="text-muted-foreground text-xs">
+										This device does not support biometric authentication. Your
+										vault is secured with your master password.
+									</Text>
+								</View>
+							</View>
+						</View>
+					)}
+
+					{/* Show notice if hardware exists but no biometrics enrolled */}
+					{biometricDetails.hasHardware && !biometricDetails.isEnrolled && (
+						<View className="border-border border-b px-4 py-4">
+							<View className="flex-row items-start rounded-lg bg-amber-50 p-3">
+								<AlertCircle size={18} color="#f59e0b" />
+								<View className="ml-3 flex-1">
+									<Text className="font-medium text-amber-800 text-sm">
+										Set Up Biometric
+									</Text>
+									<Text className="text-amber-700 text-xs">
+										Enable Face ID or Touch ID in your device settings to use
+										biometric unlock.
+									</Text>
+								</View>
+							</View>
+						</View>
+					)}
+
 					<SettingRow
 						icon={Clock}
 						label="Auto-Lock"
 						value={getAutoLockLabel(autoLockTimeout)}
 						onPress={handleAutoLockChange}
 					/>
+
+					{/* Master password re-entry info */}
+					{biometricEnabled && masterPasswordDaysRemaining !== null && (
+						<View className="border-border border-b px-4 py-4">
+							<View className="flex-row items-start rounded-lg bg-blue-50 p-3">
+								<Lock size={18} color="#3b82f6" />
+								<View className="ml-3 flex-1">
+									<Text className="font-medium text-blue-800 text-sm">
+										Password Check
+									</Text>
+									<Text className="text-blue-700 text-xs">
+										{masterPasswordDaysRemaining > 0
+											? `Master password required in ${masterPasswordDaysRemaining} days for security verification.`
+											: "Master password required on next unlock for security verification."}
+									</Text>
+								</View>
+							</View>
+						</View>
+					)}
+
 					<SettingRow icon={Lock} label="Lock Vault" onPress={handleLock} />
+				</View>
+
+				{/* Accessibility Section */}
+				<View className="mb-6">
+					<Text className="px-4 py-3 font-semibold text-muted-foreground text-sm uppercase">
+						Accessibility
+					</Text>
+					<View className="border-border border-b px-4 py-4">
+						<View className="flex-row items-start rounded-lg bg-secondary p-3">
+							<Info size={18} color="#6b7280" />
+							<View className="ml-3 flex-1">
+								<Text className="font-medium text-foreground text-sm">
+									Alternative Access
+								</Text>
+								<Text className="text-muted-foreground text-xs">
+									If you cannot use biometric authentication, you can always
+									unlock your vault using your master password. The password
+									option is available on the unlock screen.
+								</Text>
+							</View>
+						</View>
+					</View>
 				</View>
 
 				{/* Multiple Accounts */}

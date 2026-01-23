@@ -7,11 +7,14 @@ import {
 import type { AccountMetadata } from "@bittery/crypto/storage-react-native";
 import { useRouter } from "expo-router";
 import {
+	AlertCircle,
 	ChevronDown,
 	Eye,
 	EyeOff,
 	Fingerprint,
+	KeyRound,
 	Lock,
+	ScanFace,
 	UserPlus,
 } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
@@ -49,13 +52,16 @@ export default function UnlockScreen() {
 		available: boolean;
 		enabled: boolean;
 		type: string | null;
-	}>({ available: false, enabled: false, type: null });
+		requiresMasterPassword: boolean;
+	}>({ available: false, enabled: false, type: null, requiresMasterPassword: false });
+	const [biometricError, setBiometricError] = useState<string | null>(null);
 
 	const loadBiometricState = useCallback(async (email: string) => {
 		const available = await storage.isBiometricAvailable();
 		const enabled = await storage.isBiometricEnabled(email);
 		const type = available ? await storage.getBiometricType() : null;
-		setBiometricState({ available, enabled, type });
+		const requiresMasterPassword = await storage.isMasterPasswordReentryRequired(email);
+		setBiometricState({ available, enabled, type, requiresMasterPassword });
 	}, []);
 
 	useEffect(() => {
@@ -68,16 +74,43 @@ export default function UnlockScreen() {
 	const handleBiometricUnlock = async () => {
 		if (!targetAccount) return;
 
-		setLoading(true);
-		try {
-			const success = await storage.unlockWithBiometric(targetAccount.email);
+		// Check if master password is required first
+		if (biometricState.requiresMasterPassword) {
+			setBiometricError(
+				"For your security, please enter your master password. This is required every 30 days.",
+			);
+			return;
+		}
 
-			if (success) {
+		setLoading(true);
+		setBiometricError(null);
+
+		try {
+			// Use enhanced biometric auth for better error handling
+			const result = await storage.authenticateWithBiometricEnhanced(
+				"Unlock Bittery",
+				targetAccount.email,
+			);
+
+			if (result.success) {
 				// Restore auth token and vault keys
 				const token = await storage.getAuthToken(targetAccount.email);
 				const vaultKeys = await storage.getVaultKeys(targetAccount.email);
 
 				if (token && vaultKeys) {
+					// Decrypt and store master unlock key
+					const masterUnlockKey = await storage.decryptStoredMasterUnlockKey(
+						true, // Skip biometric since we just authenticated
+						targetAccount.email,
+					);
+
+					if (masterUnlockKey) {
+						await storage.storeMasterUnlockKey(
+							masterUnlockKey,
+							targetAccount.email,
+						);
+					}
+
 					// Load server URL for this account
 					const serverUrl = await storage.getServerUrl(targetAccount.email);
 					if (serverUrl) {
@@ -98,11 +131,24 @@ export default function UnlockScreen() {
 					router.replace("/(auth)/login");
 				}
 			} else {
-				Alert.alert("Error", "Biometric authentication failed");
+				// Show specific error message
+				const errorMessage = result.message || storage.getBiometricErrorMessage(result.error || "unknown");
+
+				if (result.error === "master_password_required") {
+					setBiometricError(errorMessage);
+					// Update state to reflect this
+					setBiometricState((prev) => ({ ...prev, requiresMasterPassword: true }));
+				} else if (result.error === "lockout") {
+					setBiometricError(errorMessage);
+				} else if (result.error === "user_cancelled") {
+					// User cancelled, don't show error
+				} else {
+					setBiometricError(errorMessage);
+				}
 			}
 		} catch (error) {
 			console.error("Biometric unlock error:", error);
-			Alert.alert("Error", "Biometric unlock failed");
+			setBiometricError("An unexpected error occurred. Please try again or use your password.");
 		} finally {
 			setLoading(false);
 		}
@@ -115,6 +161,7 @@ export default function UnlockScreen() {
 		}
 
 		setLoading(true);
+		setBiometricError(null);
 
 		try {
 			const secretKey = await storage.getStoredSecretKey(targetAccount.email);
@@ -207,6 +254,9 @@ export default function UnlockScreen() {
 				finishResult.user.id,
 			);
 			await storage.storeMasterUnlockKey(masterUnlockKey, targetAccount.email);
+
+			// Update last master password entry timestamp (for 30-day re-entry requirement)
+			await storage.updateLastMasterPasswordEntry(targetAccount.email);
 
 			// Update account metadata
 			const updatedMetadata: AccountMetadata = {
@@ -307,33 +357,65 @@ export default function UnlockScreen() {
 							</View>
 						)}
 
-						{/* Biometric Unlock */}
-						{biometricState.available && biometricState.enabled && (
-							<View className="mb-4">
-								<TouchableOpacity
-									onPress={handleBiometricUnlock}
-									disabled={loading}
-									className={`flex-row items-center justify-center rounded-lg border border-input py-4 ${
-										loading ? "opacity-50" : ""
-									}`}
-								>
-									<Fingerprint size={24} color="#6b7280" />
-									<Text className="ml-3 font-medium text-foreground">
-										{loading
-											? "Authenticating..."
-											: `Unlock with ${biometricState.type || "Biometric"}`}
+						{/* Master Password Required Notice */}
+						{biometricState.requiresMasterPassword && (
+							<View className="mb-4 flex-row items-start rounded-lg bg-amber-50 p-4">
+								<KeyRound size={20} color="#f59e0b" />
+								<View className="ml-3 flex-1">
+									<Text className="font-medium text-amber-800">
+										Password Required
 									</Text>
-								</TouchableOpacity>
-								<View className="my-4 flex-row items-center">
-									<View className="h-px flex-1 bg-border" />
-									<Text className="mx-4 text-muted-foreground">or</Text>
-									<View className="h-px flex-1 bg-border" />
+									<Text className="text-amber-700 text-sm">
+										For your security, please enter your master password. This is
+										required every 30 days.
+									</Text>
 								</View>
 							</View>
 						)}
 
+						{/* Biometric Error Message */}
+						{biometricError && !biometricState.requiresMasterPassword && (
+							<View className="mb-4 flex-row items-start rounded-lg bg-red-50 p-4">
+								<AlertCircle size={20} color="#ef4444" />
+								<Text className="ml-3 flex-1 text-red-700 text-sm">
+									{biometricError}
+								</Text>
+							</View>
+						)}
+
+						{/* Biometric Unlock */}
+						{biometricState.available &&
+							biometricState.enabled &&
+							!biometricState.requiresMasterPassword && (
+								<View className="mb-4">
+									<TouchableOpacity
+										onPress={handleBiometricUnlock}
+										disabled={loading}
+										className={`flex-row items-center justify-center rounded-lg border border-input py-4 ${
+											loading ? "opacity-50" : ""
+										}`}
+									>
+										{biometricState.type === "Face ID" ? (
+											<ScanFace size={24} color="#6b7280" />
+										) : (
+											<Fingerprint size={24} color="#6b7280" />
+										)}
+										<Text className="ml-3 font-medium text-foreground">
+											{loading
+												? "Authenticating..."
+												: `Unlock with ${biometricState.type || "Biometric"}`}
+										</Text>
+									</TouchableOpacity>
+									<View className="my-4 flex-row items-center">
+										<View className="h-px flex-1 bg-border" />
+										<Text className="mx-4 text-muted-foreground">or</Text>
+										<View className="h-px flex-1 bg-border" />
+									</View>
+								</View>
+							)}
+
 						{/* Password Form */}
-						<View className="space-y-4">
+						<View className="flex gap-5">
 							<View>
 								<Text className="mb-2 font-medium text-foreground text-sm">
 									Password

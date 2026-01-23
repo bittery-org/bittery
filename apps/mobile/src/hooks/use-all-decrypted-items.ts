@@ -122,9 +122,16 @@ export function useAllDecryptedItems() {
 		gcTime: 10 * 60 * 1000, // 10 minutes
 	});
 
+	// We're loading if:
+	// 1. Raw items are still loading, OR
+	// 2. We have raw items but no decrypted items yet (decryption in progress or just starting)
+	const isDecryptionPending =
+		rawItems.length > 0 && decryptedItems.length === 0 && !error;
+	const isLoadingState = isLoadingRaw || isDecrypting || isDecryptionPending;
+
 	return {
 		items: decryptedItems,
-		isLoading: isLoadingRaw || isDecrypting,
+		isLoading: isLoadingState,
 		error,
 		refetch,
 	};

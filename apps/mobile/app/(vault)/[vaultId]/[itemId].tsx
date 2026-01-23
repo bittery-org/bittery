@@ -58,7 +58,7 @@ export default function ItemDetailScreen() {
 		itemId: string;
 	}>();
 
-	const { items, isLoading } = useDecryptedItems(vaultId);
+	const { items, isLoading, error } = useDecryptedItems(vaultId);
 	const [showPassword, setShowPassword] = useState(false);
 	const [showCardNumber, setShowCardNumber] = useState(false);
 	const [showCvv, setShowCvv] = useState(false);
@@ -86,6 +86,23 @@ export default function ItemDetailScreen() {
 		return (
 			<SafeAreaView className="flex-1 items-center justify-center bg-background">
 				<ActivityIndicator size="large" color="#000" />
+			</SafeAreaView>
+		);
+	}
+
+	if (error) {
+		return (
+			<SafeAreaView className="flex-1 items-center justify-center bg-background">
+				<Text className="text-destructive">Error loading item</Text>
+				<Text className="mt-2 px-4 text-center text-muted-foreground text-sm">
+					{error instanceof Error ? error.message : "Unknown error"}
+				</Text>
+				<TouchableOpacity
+					onPress={() => router.back()}
+					className="mt-4 rounded-lg bg-primary px-4 py-2"
+				>
+					<Text className="text-primary-foreground">Go Back</Text>
+				</TouchableOpacity>
 			</SafeAreaView>
 		);
 	}

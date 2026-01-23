@@ -1,7 +1,7 @@
 import type { ItemCategory } from "@bittery/shared/types";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { Tag } from "lucide-react-native";
-import { useMemo, useState } from "react";
+import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import { ArrowLeft, Tag } from "lucide-react-native";
+import { useLayoutEffect, useMemo, useState } from "react";
 import {
 	ActivityIndicator,
 	FlatList,
@@ -13,12 +13,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { ItemListItem } from "../../src/components/item-list-item";
-import { TagChip } from "../../src/components/tag-chip";
+import { ItemListItem } from "../../../src/components/item-list-item";
+import { TagChip } from "../../../src/components/tag-chip";
 import {
 	type CrossVaultDecryptedItem,
 	useAllDecryptedItems,
-} from "../../src/hooks/use-all-decrypted-items";
+} from "../../../src/hooks/use-all-decrypted-items";
 
 const categoryLabels: Record<ItemCategory | "all", string> = {
 	all: "All",
@@ -40,8 +40,16 @@ const categories: (ItemCategory | "all")[] = [
 
 export default function TagFilterScreen() {
 	const router = useRouter();
+	const navigation = useNavigation();
 	const { tagName } = useLocalSearchParams<{ tagName: string }>();
-	const decodedTagName = decodeURIComponent(tagName);
+	const decodedTagName = decodeURIComponent(tagName || "");
+
+	// Set the header title dynamically
+	useLayoutEffect(() => {
+		navigation.setOptions({
+			title: decodedTagName || "Tag",
+		});
+	}, [navigation, decodedTagName]);
 
 	const [selectedCategory, setSelectedCategory] = useState<
 		ItemCategory | "all"
@@ -81,7 +89,7 @@ export default function TagFilterScreen() {
 	};
 
 	const handleItemPress = (item: CrossVaultDecryptedItem) => {
-		router.push(`/(vault)/${item.vaultId}/${item.id}`);
+		router.push(`/${item.vaultId}/${item.id}`);
 	};
 
 	const renderCategoryFilter = () => (
@@ -170,6 +178,12 @@ export default function TagFilterScreen() {
 		<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
 			{/* Tag header */}
 			<View className="flex-row items-center border-border border-b px-4 py-3">
+				<TouchableOpacity
+					onPress={() => router.back()}
+					className="mr-3 rounded-full bg-secondary p-2"
+				>
+					<ArrowLeft size={20} color="#6b7280" />
+				</TouchableOpacity>
 				<TagChip name={decodedTagName} selected />
 				<Text className="ml-2 text-muted-foreground">
 					{filteredItems.length} item{filteredItems.length !== 1 ? "s" : ""}

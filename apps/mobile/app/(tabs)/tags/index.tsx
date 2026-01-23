@@ -10,8 +10,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { TagChip } from "../../src/components/tag-chip";
-import { useCrossVaultTags } from "../../src/hooks/use-cross-vault-tags";
+import { TagChip } from "../../../src/components/tag-chip";
+import { useCrossVaultTags } from "../../../src/hooks/use-cross-vault-tags";
 
 export default function TagsScreen() {
 	const router = useRouter();
@@ -27,7 +27,7 @@ export default function TagsScreen() {
 	}, [tags, searchQuery]);
 
 	const handleTagPress = (tagName: string) => {
-		router.push(`/(tag)/${encodeURIComponent(tagName)}`);
+		router.push(`/tags/${encodeURIComponent(tagName)}`);
 	};
 
 	if (isLoading) {
