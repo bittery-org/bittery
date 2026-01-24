@@ -1,3 +1,5 @@
+import { arrayBufferToBase64 } from "@bittery/crypto/key-derivation";
+import * as storage from "@bittery/crypto/storage-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 
@@ -159,7 +161,45 @@ export function useCredentialProviderSync(
 	}, [items]);
 
 	/**
-	 * Perform the sync operation
+	 * Ensure the MUK is set in the native VaultStateManager.
+	 * This enables on-demand decryption in the credential provider service.
+	 */
+	const ensureNativeMukSet = useCallback(async () => {
+		if (Platform.OS !== "android" || !isAvailable) return;
+
+		try {
+			// Check if already set
+			if (CredentialProvider.isVaultUnlocked()) {
+				console.log("[CredentialProviderSync] Native MUK already set");
+				return;
+			}
+
+			// Get MUK from React Native storage
+			const muk = await storage.getMasterUnlockKey();
+			if (muk) {
+				const mukBase64 = arrayBufferToBase64(muk);
+				CredentialProvider.setMasterUnlockKey(mukBase64);
+				console.log("[CredentialProviderSync] Native MUK set from RN storage");
+			}
+		} catch (err) {
+			console.warn("[CredentialProviderSync] Failed to set native MUK:", err);
+		}
+	}, [isAvailable]);
+
+	/**
+	 * Perform the sync operation.
+	 *
+	 * This syncs decrypted credentials to the credential provider storage.
+	 * The native side re-encrypts passwords with BiometricKeyManager.
+	 *
+	 * TODO: Future optimization - Unified Storage:
+	 * Instead of syncing decrypted credentials, sync encrypted server data
+	 * directly to ItemEntity/VaultKeyEntity. This eliminates double-encryption
+	 * and allows the credential provider to decrypt on-demand using the MUK.
+	 * This would require:
+	 * 1. Access to raw encrypted server responses
+	 * 2. New native sync function for ItemEntity/VaultKeyEntity
+	 * 3. Domain/username extraction happens here (denormalization)
 	 */
 	const sync = useCallback(async (): Promise<{
 		synced: number;
@@ -190,6 +230,9 @@ export function useCredentialProviderSync(
 		setError(null);
 
 		try {
+			// Ensure MUK is available in native for unified storage decryption
+			await ensureNativeMukSet();
+
 			const credentials = extractCredentials();
 			console.log("[CredentialProviderSync] Credentials to sync:", {
 				count: credentials.length,
@@ -221,7 +264,7 @@ export function useCredentialProviderSync(
 		} finally {
 			setIsSyncing(false);
 		}
-	}, [isAvailable, isBiometricAvailable, extractCredentials]);
+	}, [isAvailable, isBiometricAvailable, extractCredentials, ensureNativeMukSet]);
 
 	/**
 	 * Calculate a hash of items to detect changes

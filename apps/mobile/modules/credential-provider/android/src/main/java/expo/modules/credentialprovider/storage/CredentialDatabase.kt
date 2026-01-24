@@ -6,15 +6,38 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 /**
- * Room database for storing encrypted credentials.
+ * Room database for storing vault data and credentials.
+ *
+ * Version History:
+ * - v1: Original CredentialEntity with double-encryption
+ * - v2: Unified storage with AuthDataEntity, VaultKeyEntity, ItemEntity, ItemDomainEntity
+ *       Stores encrypted server data directly, decryption on-demand with MUK
+ *
+ * The database uses destructive migration because all data can be re-synced from the server.
+ * The MUK is the only critical piece, and it's managed separately in VaultStateManager.
  */
 @Database(
-    entities = [CredentialEntity::class],
-    version = 1,
+    entities = [
+        // Legacy entity (kept for migration, will be removed in future)
+        CredentialEntity::class,
+        // New unified storage entities
+        AuthDataEntity::class,
+        VaultKeyEntity::class,
+        ItemEntity::class,
+        ItemDomainEntity::class
+    ],
+    version = 2,
     exportSchema = false
 )
 abstract class CredentialDatabase : RoomDatabase() {
+    // Legacy DAO (kept for migration/backwards compatibility)
     abstract fun credentialDao(): CredentialDao
+
+    // New unified storage DAOs
+    abstract fun authDataDao(): AuthDataDao
+    abstract fun vaultKeyDao(): VaultKeyDao
+    abstract fun itemDao(): ItemDao
+    abstract fun itemDomainDao(): ItemDomainDao
 
     companion object {
         private const val DATABASE_NAME = "bittery_credentials.db"
@@ -34,8 +57,21 @@ abstract class CredentialDatabase : RoomDatabase() {
                 CredentialDatabase::class.java,
                 DATABASE_NAME
             )
+                // Use destructive migration since all data can be re-synced from server
+                // The MUK and session data are stored separately in VaultStateManager
                 .fallbackToDestructiveMigration()
                 .build()
+        }
+
+        /**
+         * Clear the database instance.
+         * Useful for testing or when resetting the app.
+         */
+        fun clearInstance() {
+            synchronized(this) {
+                INSTANCE?.close()
+                INSTANCE = null
+            }
         }
     }
 }

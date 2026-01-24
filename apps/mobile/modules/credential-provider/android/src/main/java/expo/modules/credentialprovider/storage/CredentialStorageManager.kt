@@ -11,6 +11,29 @@ import javax.crypto.Cipher
 /**
  * High-level manager for credential storage operations.
  * Handles encryption/decryption and database operations.
+ *
+ * LEGACY STORAGE (DEPRECATED):
+ * This class manages the legacy credential storage where passwords are
+ * encrypted with BiometricKeyManager (a separate Android Keystore key).
+ * This results in "double encryption" - passwords are encrypted on the server
+ * with the vault key, then encrypted again here with the biometric key.
+ *
+ * NEW UNIFIED STORAGE:
+ * The new architecture stores server-encrypted data directly in ItemEntity
+ * and uses VaultStateManager + MUK for on-demand decryption. This eliminates
+ * double encryption and allows the credential provider to work with the same
+ * encrypted data as the main app.
+ *
+ * The BitteryCredentialProviderService and GetCredentialsActivity support both
+ * storage types for backward compatibility:
+ * - Legacy: CredentialEntity (this class)
+ * - Unified: ItemEntity + VaultKeyEntity + VaultDecryptor
+ *
+ * Migration: Data can be migrated by simply re-syncing from the server after
+ * the user unlocks with their password. The legacy data will be preserved until
+ * explicitly cleared.
+ *
+ * @deprecated Use ItemEntity + VaultDecryptor for new credential storage.
  */
 class CredentialStorageManager(private val context: Context) {
     private val database: CredentialDatabase by lazy {

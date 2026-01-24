@@ -17,7 +17,11 @@ import androidx.credentials.provider.ProviderCreateCredentialRequest
 import androidx.credentials.provider.ProviderGetCredentialRequest
 import androidx.fragment.app.FragmentActivity
 import expo.modules.credentialprovider.crypto.BiometricKeyManager
+import expo.modules.credentialprovider.crypto.MukEscrowManager
+import expo.modules.credentialprovider.crypto.VaultDecryptor
 import expo.modules.credentialprovider.service.BitteryCredentialProviderService
+import expo.modules.credentialprovider.state.VaultStateManager
+import expo.modules.credentialprovider.storage.CredentialDatabase
 import expo.modules.credentialprovider.storage.CredentialStorageManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,27 +41,42 @@ class GetCredentialsActivity : FragmentActivity() {
 
     private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private lateinit var storageManager: CredentialStorageManager
+    private lateinit var database: CredentialDatabase
+    private lateinit var mukEscrowManager: MukEscrowManager
     private lateinit var biometricPrompt: BiometricPrompt
     private lateinit var promptInfo: BiometricPrompt.PromptInfo
 
-    private var credentialId: String? = null
+    private var credentialId: String? = null  // Legacy storage
+    private var itemId: String? = null        // Unified storage
     private var requestType: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         storageManager = CredentialStorageManager(applicationContext)
+        database = CredentialDatabase.getInstance(applicationContext)
+        mukEscrowManager = MukEscrowManager(applicationContext)
 
         credentialId = intent.getStringExtra(BitteryCredentialProviderService.EXTRA_CREDENTIAL_ID)
+        itemId = intent.getStringExtra(BitteryCredentialProviderService.EXTRA_ITEM_ID)
         requestType = intent.getStringExtra(BitteryCredentialProviderService.EXTRA_REQUEST_TYPE)
 
-        Log.d(TAG, "Activity started - requestType: $requestType, credentialId: $credentialId")
+        Log.d(TAG, "Activity started - requestType: $requestType, credentialId: $credentialId, itemId: $itemId")
+        Log.d(TAG, "VaultStateManager.isUnlocked: ${VaultStateManager.isUnlocked()}")
 
         setupBiometricPrompt()
 
         when (requestType) {
-            BitteryCredentialProviderService.REQUEST_TYPE_GET -> handleGetCredential()
+            BitteryCredentialProviderService.REQUEST_TYPE_GET -> {
+                // Check which storage type we're using
+                if (itemId != null) {
+                    handleGetItemCredential()
+                } else {
+                    handleGetCredential()
+                }
+            }
             BitteryCredentialProviderService.REQUEST_TYPE_CREATE -> handleCreateCredential()
+            BitteryCredentialProviderService.REQUEST_TYPE_UNLOCK -> handleUnlock()
             else -> {
                 Log.e(TAG, "Unknown request type: $requestType")
                 finishWithError("Unknown request type")
@@ -107,6 +126,9 @@ class GetCredentialsActivity : FragmentActivity() {
             .build()
     }
 
+    /**
+     * Handle legacy credential retrieval (uses BiometricKeyManager encryption).
+     */
     private fun handleGetCredential() {
         val credId = credentialId
         if (credId == null) {
@@ -136,6 +158,202 @@ class GetCredentialsActivity : FragmentActivity() {
             } catch (e: Exception) {
                 Log.e(TAG, "Error preparing credential retrieval", e)
                 finishWithError("Failed to prepare authentication: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Handle unified storage credential retrieval (uses VaultStateManager MUK).
+     * The item is decrypted using the MUK from VaultStateManager.
+     */
+    private fun handleGetItemCredential() {
+        val iId = itemId
+        if (iId == null) {
+            finishWithError("No item ID provided")
+            return
+        }
+
+        activityScope.launch {
+            try {
+                // Check if MUK is available
+                val muk = VaultStateManager.getMasterUnlockKey()
+                if (muk == null) {
+                    Log.w(TAG, "MUK not available, need to unlock first")
+                    // MUK expired or not set - need to re-authenticate
+                    // Try biometric escrow first
+                    if (mukEscrowManager.hasValidEscrow()) {
+                        handleUnlockWithEscrow(iId)
+                    } else {
+                        // Need full unlock via main app
+                        finishWithError("Vault locked - please unlock Bittery first")
+                    }
+                    return@launch
+                }
+
+                // MUK is available, complete the credential retrieval
+                completeGetItemCredential(iId, muk)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error preparing item credential retrieval", e)
+                finishWithError("Failed to prepare authentication: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Try to unlock using escrowed MUK.
+     */
+    private fun handleUnlockWithEscrow(pendingItemId: String?) {
+        activityScope.launch {
+            try {
+                val cipher = mukEscrowManager.getDecryptCipher()
+
+                withContext(Dispatchers.Main) {
+                    val escrowPromptInfo = BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("Unlock Bittery")
+                        .setSubtitle("Authenticate to access your passwords")
+                        .setAllowedAuthenticators(
+                            BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                            BiometricManager.Authenticators.DEVICE_CREDENTIAL
+                        )
+                        .build()
+
+                    val escrowCallback = object : BiometricPrompt.AuthenticationCallback() {
+                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                            result.cryptoObject?.cipher?.let { authenticatedCipher ->
+                                activityScope.launch {
+                                    try {
+                                        val muk = mukEscrowManager.retrieveEscrowedMuk(authenticatedCipher)
+                                        VaultStateManager.setMasterUnlockKey(muk)
+                                        Log.d(TAG, "Successfully retrieved escrowed MUK")
+
+                                        // If we have a pending item, complete the retrieval
+                                        if (pendingItemId != null) {
+                                            completeGetItemCredential(pendingItemId, muk)
+                                        } else {
+                                            // Just unlock was requested
+                                            setResult(Activity.RESULT_OK)
+                                            finish()
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e(TAG, "Failed to retrieve escrowed MUK", e)
+                                        finishWithError("Failed to unlock: ${e.message}")
+                                    }
+                                }
+                            } ?: finishWithError("No cipher after authentication")
+                        }
+
+                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                            finishWithError("Authentication error: $errString")
+                        }
+
+                        override fun onAuthenticationFailed() {
+                            // Let user retry
+                        }
+                    }
+
+                    BiometricPrompt(this@GetCredentialsActivity, ContextCompat.getMainExecutor(this@GetCredentialsActivity), escrowCallback)
+                        .authenticate(escrowPromptInfo, BiometricPrompt.CryptoObject(cipher))
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error preparing escrow unlock", e)
+                finishWithError("Failed to prepare unlock: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Handle unlock request (no specific credential, just unlock the vault).
+     */
+    private fun handleUnlock() {
+        // Check 30-day master password requirement
+        if (mukEscrowManager.isMasterPasswordReentryRequired()) {
+            Log.d(TAG, "30-day master password re-entry required")
+            // TODO: Launch React Native app to /autofill-unlock route with password required flag
+            finishWithError("Password required. Please open Bittery and enter your master password.")
+            return
+        }
+
+        // Check if we can use escrowed MUK
+        if (mukEscrowManager.canUseBiometricUnlock()) {
+            handleUnlockWithEscrow(null)
+        } else {
+            // Need to launch main app for full unlock
+            // TODO: Launch React Native app to /autofill-unlock route
+            Log.w(TAG, "No valid escrow, need full password unlock")
+            finishWithError("Please open Bittery to unlock")
+        }
+    }
+
+    /**
+     * Complete item credential retrieval using the provided MUK.
+     */
+    private fun completeGetItemCredential(itemId: String, muk: ByteArray) {
+        activityScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    // Get the item from database
+                    val item = database.itemDao().getById(itemId)
+                    if (item == null) {
+                        withContext(Dispatchers.Main) {
+                            finishWithError("Item not found")
+                        }
+                        return@withContext
+                    }
+
+                    // Get the vault key for this item
+                    val vaultKey = database.vaultKeyDao().getByVaultId(item.vaultId)
+                    if (vaultKey == null) {
+                        withContext(Dispatchers.Main) {
+                            finishWithError("Vault key not found")
+                        }
+                        return@withContext
+                    }
+
+                    // Decrypt the vault key using MUK
+                    val decryptedVaultKey = VaultDecryptor.decryptVaultKeyWithMuk(vaultKey, muk)
+
+                    // Decrypt the item to get the password
+                    val decryptedItem = VaultDecryptor.decryptLoginItem(item, decryptedVaultKey)
+                    val password = decryptedItem.password
+
+                    if (password == null) {
+                        withContext(Dispatchers.Main) {
+                            finishWithError("No password found in item")
+                        }
+                        return@withContext
+                    }
+
+                    // Update last used timestamp
+                    database.itemDao().updateLastUsed(itemId, System.currentTimeMillis())
+
+                    Log.d(TAG, "Successfully decrypted item credential for ${decryptedItem.username}")
+
+                    // Create the password credential response
+                    val passwordCredential = PasswordCredential(
+                        id = decryptedItem.username ?: item.username ?: "",
+                        password = password
+                    )
+
+                    withContext(Dispatchers.Main) {
+                        // Get the original request to build proper response
+                        val getRequest = PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
+                        if (getRequest != null) {
+                            val response = GetCredentialResponse(passwordCredential)
+                            val resultIntent = Intent()
+                            PendingIntentHandler.setGetCredentialResponse(resultIntent, response)
+                            setResult(Activity.RESULT_OK, resultIntent)
+                        } else {
+                            Log.w(TAG, "No provider request found, using legacy response")
+                            setResult(Activity.RESULT_OK)
+                        }
+                        finish()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error completing item credential retrieval", e)
+                withContext(Dispatchers.Main) {
+                    finishWithError("Failed to retrieve credential: ${e.message}")
+                }
             }
         }
     }

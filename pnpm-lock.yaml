@@ -270,6 +270,9 @@ importers:
       '@bittery/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@bittery/srp6a':
+        specifier: ^1.0.1
+        version: 1.0.1(react-native-get-random-values@1.11.0(react-native@0.81.5(@babel/core@7.28.6)(@types/react@19.1.17)(react@19.1.0)))
       '@bittery/sync':
         specifier: workspace:*
         version: link:../../packages/sync

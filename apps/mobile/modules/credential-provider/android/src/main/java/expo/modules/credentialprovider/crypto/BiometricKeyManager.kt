@@ -14,7 +14,20 @@ import javax.crypto.spec.GCMParameterSpec
 
 /**
  * Manages AES-256 key in Android Keystore that requires biometric authentication.
- * Used to encrypt/decrypt credentials stored in the credential provider database.
+ *
+ * USAGE:
+ * This class is now primarily used for legacy credential storage (CredentialStorageManager)
+ * and is being phased out in favor of:
+ * - MukEscrowManager for biometric MUK escrow (enables biometric unlock)
+ * - VaultDecryptor for on-demand credential decryption using MUK
+ *
+ * The key here is used with time-bound authentication (10 minutes) for the legacy
+ * sync flow where passwords are re-encrypted after decryption from server.
+ *
+ * For new code, use MukEscrowManager instead, which uses per-operation authentication
+ * and properly integrates with the unified storage architecture.
+ *
+ * @see MukEscrowManager for the new biometric-protected key management
  */
 class BiometricKeyManager(private val context: Context) {
     companion object {

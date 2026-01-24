@@ -1,11 +1,59 @@
-const { withAndroidManifest } = require("expo/config-plugins");
+const { withAndroidManifest, withDangerousMod } = require("expo/config-plugins");
+const fs = require("fs");
+const path = require("path");
 
 /**
- * Config plugin that adds the Credential Provider service to the Android manifest.
- * This is needed for the app to appear in Android's credential provider settings.
+ * Config plugin that adds the Credential Provider service to the Android manifest
+ * and copies required XML resources.
  */
 const withCredentialProvider = (config) => {
-  return withAndroidManifest(config, async (config) => {
+  // First, copy the XML resource file
+  config = withDangerousMod(config, [
+    "android",
+    async (config) => {
+      const projectRoot = config.modRequest.projectRoot;
+      const androidResPath = path.join(
+        projectRoot,
+        "android",
+        "app",
+        "src",
+        "main",
+        "res"
+      );
+
+      // Ensure xml directory exists
+      const xmlDir = path.join(androidResPath, "xml");
+      if (!fs.existsSync(xmlDir)) {
+        fs.mkdirSync(xmlDir, { recursive: true });
+      }
+
+      // Copy credential_provider.xml from module to app
+      const sourceXml = path.join(
+        projectRoot,
+        "modules",
+        "credential-provider",
+        "android",
+        "src",
+        "main",
+        "res",
+        "xml",
+        "credential_provider.xml"
+      );
+      const destXml = path.join(xmlDir, "credential_provider.xml");
+
+      if (fs.existsSync(sourceXml)) {
+        fs.copyFileSync(sourceXml, destXml);
+        console.log("withCredentialProvider: Copied credential_provider.xml to app resources");
+      } else {
+        console.warn("withCredentialProvider: Source XML not found at", sourceXml);
+      }
+
+      return config;
+    },
+  ]);
+
+  // Then, modify the Android manifest
+  config = withAndroidManifest(config, async (config) => {
     // Ensure tools namespace is declared
     if (!config.modResults.manifest.$["xmlns:tools"]) {
       config.modResults.manifest.$["xmlns:tools"] = "http://schemas.android.com/tools";
@@ -94,6 +142,8 @@ const withCredentialProvider = (config) => {
 
     return config;
   });
+
+  return config;
 };
 
 module.exports = withCredentialProvider;

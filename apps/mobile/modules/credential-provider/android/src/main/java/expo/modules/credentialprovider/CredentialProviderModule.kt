@@ -13,7 +13,10 @@ import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.credentialprovider.crypto.BiometricKeyManager
+import expo.modules.credentialprovider.crypto.MukEscrowManager
+import expo.modules.credentialprovider.state.VaultStateManager
 import expo.modules.credentialprovider.storage.CredentialStorageManager
+import expo.modules.credentialprovider.storage.CredentialDatabase
 import expo.modules.credentialprovider.storage.CredentialEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,13 +39,338 @@ class CredentialProviderModule : Module() {
         CredentialStorageManager(context)
     }
 
+    private val mukEscrowManager: MukEscrowManager by lazy {
+        MukEscrowManager(context)
+    }
+
+    private val database: CredentialDatabase by lazy {
+        CredentialDatabase.getInstance(context)
+    }
+
     private val currentActivity: FragmentActivity?
         get() = appContext.currentActivity as? FragmentActivity
 
     override fun definition() = ModuleDefinition {
         Name("CredentialProvider")
 
-        Events("onCredentialSaved", "onCredentialDeleted", "onSyncComplete")
+        Events("onCredentialSaved", "onCredentialDeleted", "onSyncComplete", "onVaultLocked", "onVaultUnlocked")
+
+        // ============================================
+        // Vault State Management (VaultStateManager)
+        // ============================================
+
+        /**
+         * Set the Master Unlock Key from React Native after successful login/unlock.
+         * This makes the MUK available to the CredentialProviderService for decryption.
+         *
+         * @param mukBase64 Base64-encoded Master Unlock Key (32 bytes = 44 chars)
+         */
+        Function("setMasterUnlockKey") { mukBase64: String ->
+            try {
+                VaultStateManager.setMasterUnlockKeyFromBase64(mukBase64)
+                Log.d(TAG, "setMasterUnlockKey: MUK set successfully")
+                sendEvent("onVaultUnlocked", mapOf("success" to true))
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "setMasterUnlockKey: Failed to set MUK", e)
+                false
+            }
+        }
+
+        /**
+         * Clear the Master Unlock Key (on logout or auto-lock).
+         */
+        Function("clearMasterUnlockKey") {
+            VaultStateManager.clearMasterUnlockKey()
+            Log.d(TAG, "clearMasterUnlockKey: MUK cleared")
+            sendEvent("onVaultLocked", mapOf("success" to true))
+            true
+        }
+
+        /**
+         * Check if the vault is currently unlocked (MUK available).
+         */
+        Function("isVaultUnlocked") {
+            val unlocked = VaultStateManager.isUnlocked()
+            Log.d(TAG, "isVaultUnlocked: $unlocked")
+            unlocked
+        }
+
+        /**
+         * Get the MUK as Base64 string (for debugging/verification only).
+         * WARNING: Only use in development builds.
+         */
+        Function("getMasterUnlockKeyBase64") {
+            VaultStateManager.getMasterUnlockKeyBase64()
+        }
+
+        // ============================================
+        // MUK Escrow Management (MukEscrowManager)
+        // ============================================
+
+        /**
+         * Escrow the MUK with biometric protection after password unlock.
+         * This enables future biometric-only unlocks without re-entering password.
+         *
+         * @param email The account email this escrow is for
+         * @param timeoutMs Optional escrow timeout in milliseconds (default 10 min)
+         */
+        AsyncFunction("escrowMukWithBiometric") { params: Map<String, Any>, promise: Promise ->
+            val activity = currentActivity
+            if (activity == null) {
+                promise.reject("NO_ACTIVITY", "No activity available", null)
+                return@AsyncFunction
+            }
+
+            val email = params["email"] as? String ?: ""
+            val timeoutMs = (params["timeoutMs"] as? Number)?.toLong()
+                ?: MukEscrowManager.DEFAULT_ESCROW_TIMEOUT_MS
+
+            if (email.isEmpty()) {
+                promise.reject("INVALID_PARAMS", "email is required", null)
+                return@AsyncFunction
+            }
+
+            val muk = VaultStateManager.getMasterUnlockKey()
+            if (muk == null) {
+                promise.reject("VAULT_LOCKED", "Vault is not unlocked", null)
+                return@AsyncFunction
+            }
+
+            // Generate escrow key if needed
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                mukEscrowManager.generateKey()
+            }
+
+            // Function to perform escrow after auth
+            fun performEscrow(cipher: javax.crypto.Cipher) {
+                moduleScope.launch {
+                    try {
+                        mukEscrowManager.escrowMuk(muk, cipher, email, timeoutMs)
+                        Log.d(TAG, "escrowMukWithBiometric: MUK escrowed successfully for $email")
+                        promise.resolve(true)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "escrowMukWithBiometric: Failed to escrow MUK", e)
+                        promise.reject("ESCROW_FAILED", "Failed to escrow MUK: ${e.message}", e)
+                    }
+                }
+            }
+
+            activity.runOnUiThread {
+                try {
+                    val cipher = mukEscrowManager.getEncryptCipher()
+                    val executor = ContextCompat.getMainExecutor(context)
+
+                    val biometricPrompt = BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
+                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                            result.cryptoObject?.cipher?.let { performEscrow(it) }
+                                ?: promise.reject("AUTH_ERROR", "No cipher after authentication", null)
+                        }
+
+                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                            promise.reject("AUTH_ERROR", errString.toString(), null)
+                        }
+
+                        override fun onAuthenticationFailed() {
+                            // Let user retry
+                        }
+                    })
+
+                    val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("Enable Quick Unlock")
+                        .setSubtitle("Authenticate to enable biometric unlock")
+                        .setAllowedAuthenticators(
+                            BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                            BiometricManager.Authenticators.DEVICE_CREDENTIAL
+                        )
+                        .build()
+
+                    biometricPrompt.authenticate(
+                        promptInfo,
+                        BiometricPrompt.CryptoObject(cipher)
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to show biometric prompt for escrow", e)
+                    promise.reject("PROMPT_FAILED", "Failed to show authentication prompt: ${e.message}", e)
+                }
+            }
+        }
+
+        /**
+         * Retrieve the escrowed MUK using biometric authentication.
+         * This unlocks the vault without requiring password entry.
+         */
+        AsyncFunction("retrieveEscrowedMuk") { promise: Promise ->
+            val activity = currentActivity
+            if (activity == null) {
+                promise.reject("NO_ACTIVITY", "No activity available", null)
+                return@AsyncFunction
+            }
+
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                promise.reject("UNSUPPORTED", "MUK escrow requires Android 6.0 or higher", null)
+                return@AsyncFunction
+            }
+
+            if (!mukEscrowManager.hasValidEscrow()) {
+                promise.reject("NO_ESCROW", "No valid MUK escrow available", null)
+                return@AsyncFunction
+            }
+
+            // Function to perform retrieval after auth
+            fun performRetrieval(cipher: javax.crypto.Cipher) {
+                moduleScope.launch {
+                    try {
+                        val muk = mukEscrowManager.retrieveEscrowedMuk(cipher)
+                        VaultStateManager.setMasterUnlockKey(muk)
+                        Log.d(TAG, "retrieveEscrowedMuk: MUK retrieved and set successfully")
+                        sendEvent("onVaultUnlocked", mapOf("success" to true))
+                        promise.resolve(true)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "retrieveEscrowedMuk: Failed to retrieve MUK", e)
+                        promise.reject("RETRIEVE_FAILED", "Failed to retrieve MUK: ${e.message}", e)
+                    }
+                }
+            }
+
+            activity.runOnUiThread {
+                try {
+                    val cipher = mukEscrowManager.getDecryptCipher()
+                    val executor = ContextCompat.getMainExecutor(context)
+
+                    val biometricPrompt = BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
+                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                            result.cryptoObject?.cipher?.let { performRetrieval(it) }
+                                ?: promise.reject("AUTH_ERROR", "No cipher after authentication", null)
+                        }
+
+                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                            promise.reject("AUTH_ERROR", errString.toString(), null)
+                        }
+
+                        override fun onAuthenticationFailed() {
+                            // Let user retry
+                        }
+                    })
+
+                    val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("Unlock Bittery")
+                        .setSubtitle("Authenticate to access your passwords")
+                        .setAllowedAuthenticators(
+                            BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                            BiometricManager.Authenticators.DEVICE_CREDENTIAL
+                        )
+                        .build()
+
+                    biometricPrompt.authenticate(
+                        promptInfo,
+                        BiometricPrompt.CryptoObject(cipher)
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to show biometric prompt for retrieval", e)
+                    promise.reject("PROMPT_FAILED", "Failed to show authentication prompt: ${e.message}", e)
+                }
+            }
+        }
+
+        /**
+         * Check if there is a valid (non-expired) MUK escrow.
+         */
+        Function("hasValidEscrow") {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                false
+            } else {
+                val hasEscrow = mukEscrowManager.hasValidEscrow()
+                Log.d(TAG, "hasValidEscrow: $hasEscrow")
+                hasEscrow
+            }
+        }
+
+        /**
+         * Check if there is a valid escrow for a specific email.
+         */
+        Function("hasValidEscrowForEmail") { email: String ->
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                false
+            } else {
+                mukEscrowManager.hasValidEscrowForEmail(email)
+            }
+        }
+
+        // ============================================
+        // 30-Day Master Password Re-entry
+        // ============================================
+
+        /**
+         * Check if master password re-entry is required (> 30 days since last entry).
+         */
+        Function("isMasterPasswordReentryRequired") {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                true  // Always require password on old devices
+            } else {
+                mukEscrowManager.isMasterPasswordReentryRequired()
+            }
+        }
+
+        /**
+         * Check if biometric unlock can be used (combines escrow validity and 30-day check).
+         */
+        Function("canUseBiometricUnlock") {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                false
+            } else {
+                mukEscrowManager.canUseBiometricUnlock()
+            }
+        }
+
+        /**
+         * Update the last master password entry timestamp.
+         * Call this after successful password-based unlock.
+         */
+        Function("updateLastMasterPasswordEntry") {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                mukEscrowManager.updateLastMasterPasswordEntry()
+                Log.d(TAG, "updateLastMasterPasswordEntry: timestamp updated")
+            }
+            true
+        }
+
+        /**
+         * Get the timestamp of the last master password entry.
+         */
+        Function("getLastMasterPasswordEntry") {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                0L
+            } else {
+                mukEscrowManager.getLastMasterPasswordEntry()
+            }
+        }
+
+        /**
+         * Get remaining escrow time in milliseconds.
+         */
+        Function("getEscrowRemainingTime") {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                0L
+            } else {
+                mukEscrowManager.getEscrowRemainingTime()
+            }
+        }
+
+        /**
+         * Clear the MUK escrow (on logout or when password required).
+         */
+        Function("clearEscrow") {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                mukEscrowManager.clearEscrow()
+            }
+            Log.d(TAG, "clearEscrow: Escrow cleared")
+            true
+        }
+
+        // ============================================
+        // Credential Provider API Availability
+        // ============================================
 
         /**
          * Check if the Credential Manager API is available on this device.

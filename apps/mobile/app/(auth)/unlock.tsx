@@ -1,4 +1,4 @@
-import { deriveKeys } from "@bittery/crypto/key-derivation";
+import { deriveKeys, arrayBufferToBase64 } from "@bittery/crypto/key-derivation";
 import {
 	deriveClientSession,
 	generateClientEphemeral,
@@ -6,6 +6,7 @@ import {
 } from "@bittery/crypto/srp-client";
 import type { AccountMetadata } from "@bittery/crypto/storage-react-native";
 import { useRouter } from "expo-router";
+import CredentialProvider from "../../modules/credential-provider";
 import {
 	AlertCircle,
 	ChevronDown,
@@ -109,6 +110,12 @@ export default function UnlockScreen() {
 							masterUnlockKey,
 							targetAccount.email,
 						);
+
+						// Set MUK in native CredentialProvider for autofill decryption
+						if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
+							const mukBase64 = arrayBufferToBase64(masterUnlockKey);
+							CredentialProvider.setMasterUnlockKey(mukBase64);
+						}
 					}
 
 					// Load server URL for this account
@@ -257,6 +264,27 @@ export default function UnlockScreen() {
 
 			// Update last master password entry timestamp (for 30-day re-entry requirement)
 			await storage.updateLastMasterPasswordEntry(targetAccount.email);
+
+			// Set MUK in native CredentialProvider for autofill decryption
+			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
+				const mukBase64 = arrayBufferToBase64(masterUnlockKey);
+				CredentialProvider.setMasterUnlockKey(mukBase64);
+
+				// Update 30-day master password entry timestamp in native
+				CredentialProvider.updateLastMasterPasswordEntry();
+
+				// Escrow MUK with biometric for future quick unlocks
+				if (biometricState.available && biometricState.enabled) {
+					try {
+						await CredentialProvider.escrowMukWithBiometric({
+							email: targetAccount.email,
+						});
+					} catch (escrowError) {
+						// Escrow is optional, don't fail the unlock
+						console.warn("Failed to escrow MUK with biometric:", escrowError);
+					}
+				}
+			}
 
 			// Update account metadata
 			const updatedMetadata: AccountMetadata = {

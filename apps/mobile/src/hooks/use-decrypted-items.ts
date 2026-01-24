@@ -22,6 +22,46 @@ export function useDecryptedItems(vaultId: string | undefined) {
 	// Get offline context - always available since provider wraps all routes
 	const { isOnline, getCachedItems } = useOfflineVaultContext();
 
+	// Track whether MUK is available in memory (without triggering biometric)
+	// This prevents the query from running before auth is complete
+	const [isMukReady, setIsMukReady] = useState(false);
+
+	// Check MUK availability on mount and when items might need decryption
+	// We use a polling approach to detect when MUK becomes available after biometric auth
+	useEffect(() => {
+		let mounted = true;
+
+		async function checkMukAvailability() {
+			try {
+				// Check if MUK is in memory cache
+				// This avoids triggering a biometric prompt from within the query
+				const muk = await storage.getMasterUnlockKey();
+				if (mounted) {
+					setIsMukReady(muk !== null);
+				}
+			} catch {
+				if (mounted) {
+					setIsMukReady(false);
+				}
+			}
+		}
+
+		// Check immediately
+		checkMukAvailability();
+
+		// Poll periodically while MUK is not ready (will detect when BiometricAuthModal succeeds)
+		const interval = setInterval(() => {
+			if (!isMukReady) {
+				checkMukAvailability();
+			}
+		}, 500);
+
+		return () => {
+			mounted = false;
+			clearInterval(interval);
+		};
+	}, [isMukReady]);
+
 	// Check if we should use offline mode
 	useEffect(() => {
 		if (!vaultId) return;
@@ -83,7 +123,7 @@ export function useDecryptedItems(vaultId: string | undefined) {
 	} = useQuery({
 		queryKey: ["decrypted-items", vaultId, dataUpdatedAt],
 		queryFn: async (): Promise<DecryptedItem[]> => {
-			if (rawItems.length === 0) return [];
+			if (rawItems.length === 0 || !vaultId) return [];
 
 			// Get vault key for decryption
 			const vaultKey = await storage.getDecryptedVaultKey(vaultId);
@@ -135,7 +175,12 @@ export function useDecryptedItems(vaultId: string | undefined) {
 
 			return decrypted;
 		},
-		enabled: rawItems.length > 0 && !isOfflineMode,
+		// Only run decryption when:
+		// 1. We have items to decrypt
+		// 2. Not in offline mode
+		// 3. MUK is available in memory (user is authenticated)
+		// This prevents race conditions with the app-level biometric auth
+		enabled: rawItems.length > 0 && !isOfflineMode && isMukReady,
 		staleTime: 5 * 60 * 1000, // 5 minutes
 		gcTime: 10 * 60 * 1000, // 10 minutes
 	});
@@ -146,10 +191,12 @@ export function useDecryptedItems(vaultId: string | undefined) {
 
 	// We're loading if:
 	// 1. Raw items are still loading, OR
-	// 2. We have raw items but no decrypted items yet (decryption in progress or just starting)
+	// 2. MUK is not ready yet (waiting for authentication), OR
+	// 3. We have raw items but no decrypted items yet (decryption in progress or just starting)
 	const isDecryptionPending =
 		rawItems.length > 0 && decryptedItems.length === 0 && !decryptError;
-	const isLoadingState = isLoadingRaw || isDecrypting || isDecryptionPending;
+	const isWaitingForAuth = rawItems.length > 0 && !isMukReady && !isOfflineMode;
+	const isLoadingState = isLoadingRaw || isDecrypting || isDecryptionPending || isWaitingForAuth;
 
 	return {
 		items,

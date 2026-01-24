@@ -14,8 +14,10 @@ import {
 	useState,
 	type ReactNode,
 } from "react";
-import { AppState, type AppStateStatus } from "react-native";
+import { AppState, type AppStateStatus, Platform } from "react-native";
 
+import { arrayBufferToBase64 } from "@bittery/crypto/key-derivation";
+import CredentialProvider from "../../modules/credential-provider";
 import * as storage from "../services/storage";
 import { useAccount } from "./account-context";
 
@@ -146,6 +148,27 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 		setLastAuthResult(result);
 
 		if (result.success) {
+			// Restore MUK to memory after successful biometric auth
+			// This ensures decryption queries can run immediately without polling
+			try {
+				const muk = await storage.decryptStoredMasterUnlockKey(
+					true, // Skip biometric since we just authenticated
+					activeAccount.email,
+				);
+				if (muk) {
+					// Store in React Native memory cache
+					await storage.storeMasterUnlockKey(muk, activeAccount.email);
+
+					// Also set in native CredentialProvider for autofill decryption
+					if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
+						const mukBase64 = arrayBufferToBase64(muk);
+						CredentialProvider.setMasterUnlockKey(mukBase64);
+					}
+				}
+			} catch (error) {
+				console.error("Failed to restore MUK after biometric auth:", error);
+			}
+
 			setRequiresReauth(false);
 			setShowAuthModal(false);
 			setRequiresMasterPassword(false);

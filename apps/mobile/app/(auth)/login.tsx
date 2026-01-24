@@ -78,48 +78,72 @@ export default function LoginScreen() {
 	}, []);
 
 	const handleLogin = async () => {
+		console.log("[LOGIN] handleLogin called");
+		const startTime = performance.now();
+
 		if (!email.trim() || !password.trim() || !secretKey.trim()) {
 			Alert.alert("Error", "Please fill in all fields");
 			return;
 		}
+		console.log("[LOGIN] Fields validated:", performance.now() - startTime, "ms");
 
 		if (!validateSecretKey(secretKey)) {
 			Alert.alert("Error", "Invalid Secret Key format");
 			return;
 		}
+		console.log("[LOGIN] Secret key validated:", performance.now() - startTime, "ms");
 
 		const normalizedServerUrl = normalizeServerUrl(serverUrl);
 		if (!normalizedServerUrl) {
 			Alert.alert("Error", "Invalid server URL");
 			return;
 		}
+		console.log("[LOGIN] Server URL normalized:", performance.now() - startTime, "ms");
 
+		console.log("[LOGIN] About to setLoading(true):", performance.now() - startTime, "ms");
 		setLoading(true);
+		console.log("[LOGIN] setLoading(true) called:", performance.now() - startTime, "ms");
+
+		// Allow UI to re-render and show loading state before heavy crypto work
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		console.log("[LOGIN] UI render delay completed:", performance.now() - startTime, "ms");
 
 		try {
 			// Update global server URL
 			setGlobalServerUrl(normalizedServerUrl);
+			console.log("[LOGIN] Global server URL set:", performance.now() - startTime, "ms");
 
 			// 1. Derive keys from password + secret key
+			console.log("[LOGIN] Starting deriveKeys...");
+			const deriveKeysStart = performance.now();
 			const { authKey, masterUnlockKey } = await deriveKeys(
 				password,
 				secretKey,
 				email,
 			);
+			console.log("[LOGIN] deriveKeys completed:", performance.now() - startTime, "ms (took", performance.now() - deriveKeysStart, "ms)");
 
 			// Convert authKey to password string for SRP
 			const srpPassword = new TextDecoder().decode(authKey);
 
 			// 2. Generate client ephemeral key pair
+			console.log("[LOGIN] Generating client ephemeral...");
+			const ephemeralStart = performance.now();
 			const clientEphemeral = generateClientEphemeral();
+			console.log("[LOGIN] Client ephemeral generated:", performance.now() - startTime, "ms (took", performance.now() - ephemeralStart, "ms)");
 
 			// 3. Send client public key to server and get challenge
+			console.log("[LOGIN] Starting startLogin mutation...");
+			const startLoginStart = performance.now();
 			const startResult = await trpcClient.auth.startLogin.mutate({
 				email,
 				clientPublicKey: clientEphemeral.publicKey,
 			});
+			console.log("[LOGIN] startLogin completed:", performance.now() - startTime, "ms (took", performance.now() - startLoginStart, "ms)");
 
 			// 4. Derive session and compute proof
+			console.log("[LOGIN] Deriving client session...");
+			const sessionStart = performance.now();
 			const clientSession = await deriveClientSession(
 				clientEphemeral.secret,
 				{
@@ -128,14 +152,18 @@ export default function LoginScreen() {
 				},
 				srpPassword,
 			);
+			console.log("[LOGIN] Client session derived:", performance.now() - startTime, "ms (took", performance.now() - sessionStart, "ms)");
 
 			// 5. Send proof to server and get session
+			console.log("[LOGIN] Starting finishLogin mutation...");
+			const finishLoginStart = performance.now();
 			const finishResult = await trpcClient.auth.finishLogin.mutate({
 				userId: startResult.userId,
 				serverSecret: startResult.serverSecret,
 				clientPublicKey: clientEphemeral.publicKey,
 				clientProof: clientSession.proof,
 			});
+			console.log("[LOGIN] finishLogin completed:", performance.now() - startTime, "ms (took", performance.now() - finishLoginStart, "ms)");
 
 			if (!finishResult.serverProof) {
 				Alert.alert("Error", "Login failed - invalid server proof");
@@ -143,22 +171,32 @@ export default function LoginScreen() {
 			}
 
 			// 6. Verify server's proof (completes mutual authentication)
+			console.log("[LOGIN] Verifying server session...");
+			const verifyStart = performance.now();
 			await verifyServerSession(
 				clientEphemeral.publicKey,
 				clientSession,
 				finishResult.serverProof,
 			);
+			console.log("[LOGIN] Server session verified:", performance.now() - startTime, "ms (took", performance.now() - verifyStart, "ms)");
 
 			const normalizedEmail = email.toLowerCase();
 
 			// Enable biometric if requested
 			if (enableBiometric && biometricAvailable) {
+				console.log("[LOGIN] Enabling biometric...");
+				const biometricStart = performance.now();
 				await storage.enableBiometric(normalizedEmail);
+				console.log("[LOGIN] Biometric enabled:", performance.now() - startTime, "ms (took", performance.now() - biometricStart, "ms)");
 			}
 
 			// Store auth data
+			console.log("[LOGIN] Storing auth data...");
+			const storeStart = performance.now();
 			await storage.storeAuthToken(finishResult.token, normalizedEmail);
+			console.log("[LOGIN] Auth token stored:", performance.now() - startTime, "ms");
 			await storage.storeVaultKeys(finishResult.vaultKeys, normalizedEmail);
+			console.log("[LOGIN] Vault keys stored:", performance.now() - startTime, "ms");
 
 			// Store encrypted private key for RSA decryption
 			if (finishResult.user.encryptedPrivateKey) {
@@ -166,18 +204,24 @@ export default function LoginScreen() {
 					finishResult.user.encryptedPrivateKey,
 					normalizedEmail,
 				);
+				console.log("[LOGIN] Encrypted private key stored:", performance.now() - startTime, "ms");
 			}
 
 			await storage.storeSecretKey(secretKey, normalizedEmail);
+			console.log("[LOGIN] Secret key stored:", performance.now() - startTime, "ms");
 			await storage.storeSessionData(
 				masterUnlockKey,
 				normalizedEmail,
 				finishResult.user.id,
 			);
+			console.log("[LOGIN] Session data stored:", performance.now() - startTime, "ms");
 			await storage.storeMasterUnlockKey(masterUnlockKey, normalizedEmail);
+			console.log("[LOGIN] Master unlock key stored:", performance.now() - startTime, "ms");
 			await storage.storeServerUrl(normalizedServerUrl, normalizedEmail);
+			console.log("[LOGIN] Server URL stored:", performance.now() - startTime, "ms (total store time:", performance.now() - storeStart, "ms)");
 
 			// Create account metadata
+			console.log("[LOGIN] Creating account metadata...");
 			const secretKeyHint = `${secretKey.substring(0, 5)}...`;
 			const accountMetadata: AccountMetadata = {
 				email: normalizedEmail,
@@ -191,21 +235,31 @@ export default function LoginScreen() {
 			};
 
 			// Add to accounts list and set as active
+			console.log("[LOGIN] Adding account to list...");
+			const accountListStart = performance.now();
 			await storage.addAccountToList(accountMetadata);
+			console.log("[LOGIN] Account added to list:", performance.now() - startTime, "ms (took", performance.now() - accountListStart, "ms)");
 			await storage.setActiveAccount(normalizedEmail);
+			console.log("[LOGIN] Active account set:", performance.now() - startTime, "ms");
 
 			// Refresh account context
+			console.log("[LOGIN] Refreshing accounts...");
+			const refreshStart = performance.now();
 			await refreshAccounts();
+			console.log("[LOGIN] Accounts refreshed:", performance.now() - startTime, "ms (took", performance.now() - refreshStart, "ms)");
 
 			// Navigate to vault
+			console.log("[LOGIN] Navigating to vault... Total time:", performance.now() - startTime, "ms");
 			router.replace("/(vault)");
 		} catch (error) {
-			console.error("Login error:", error);
+			console.error("[LOGIN] Login error:", error);
+			console.error("[LOGIN] Error occurred at:", performance.now() - startTime, "ms");
 			Alert.alert(
 				"Error",
 				error instanceof Error ? error.message : "Login failed",
 			);
 		} finally {
+			console.log("[LOGIN] Finally block - setLoading(false)");
 			setLoading(false);
 		}
 	};

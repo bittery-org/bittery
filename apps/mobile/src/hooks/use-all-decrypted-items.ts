@@ -1,6 +1,7 @@
 import { decrypt } from "@bittery/crypto/encryption";
 import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 
 import { useTRPC } from "../lib/trpc";
 import * as storage from "../services/storage";
@@ -24,6 +25,46 @@ export interface CrossVaultDecryptedItem extends DecryptedItem {
  */
 export function useAllDecryptedItems() {
 	const trpc = useTRPC();
+
+	// Track whether MUK is available in memory (without triggering biometric)
+	// This prevents the query from running before auth is complete
+	const [isMukReady, setIsMukReady] = useState(false);
+
+	// Check MUK availability on mount and when items might need decryption
+	// We use a polling approach to detect when MUK becomes available after biometric auth
+	useEffect(() => {
+		let mounted = true;
+
+		async function checkMukAvailability() {
+			try {
+				// Check if MUK is in memory cache by trying to get it with skipBiometric=true
+				// This avoids triggering a biometric prompt from within the query
+				const muk = await storage.getMasterUnlockKey();
+				if (mounted) {
+					setIsMukReady(muk !== null);
+				}
+			} catch {
+				if (mounted) {
+					setIsMukReady(false);
+				}
+			}
+		}
+
+		// Check immediately
+		checkMukAvailability();
+
+		// Poll periodically while MUK is not ready (will detect when BiometricAuthModal succeeds)
+		const interval = setInterval(() => {
+			if (!isMukReady) {
+				checkMukAvailability();
+			}
+		}, 500);
+
+		return () => {
+			mounted = false;
+			clearInterval(interval);
+		};
+	}, [isMukReady]);
 
 	// Fetch raw encrypted items from API (all vaults)
 	const {
@@ -117,17 +158,23 @@ export function useAllDecryptedItems() {
 
 			return decrypted;
 		},
-		enabled: rawItems.length > 0,
+		// Only run decryption when:
+		// 1. We have items to decrypt
+		// 2. MUK is available in memory (user is authenticated)
+		// This prevents race conditions with the app-level biometric auth
+		enabled: rawItems.length > 0 && isMukReady,
 		staleTime: 5 * 60 * 1000, // 5 minutes
 		gcTime: 10 * 60 * 1000, // 10 minutes
 	});
 
 	// We're loading if:
 	// 1. Raw items are still loading, OR
-	// 2. We have raw items but no decrypted items yet (decryption in progress or just starting)
+	// 2. MUK is not ready yet (waiting for authentication), OR
+	// 3. We have raw items but no decrypted items yet (decryption in progress or just starting)
 	const isDecryptionPending =
 		rawItems.length > 0 && decryptedItems.length === 0 && !error;
-	const isLoadingState = isLoadingRaw || isDecrypting || isDecryptionPending;
+	const isWaitingForAuth = rawItems.length > 0 && !isMukReady;
+	const isLoadingState = isLoadingRaw || isDecrypting || isDecryptionPending || isWaitingForAuth;
 
 	return {
 		items: decryptedItems,

@@ -7,6 +7,16 @@ import androidx.room.PrimaryKey
 /**
  * Entity representing a stored credential in the credential provider database.
  * Passwords are encrypted with an Android Keystore key that requires biometric authentication.
+ *
+ * DEPRECATED: This entity uses the legacy double-encryption approach where passwords
+ * are re-encrypted with BiometricKeyManager after being decrypted from server data.
+ *
+ * Use ItemEntity for new credential storage, which stores server-encrypted data directly
+ * and decrypts on-demand using the Master Unlock Key from VaultStateManager.
+ *
+ * This entity is kept for backward compatibility with existing credentials.
+ *
+ * @see ItemEntity for the new unified storage approach
  */
 @Entity(
     tableName = "credentials",

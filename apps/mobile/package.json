@@ -19,6 +19,7 @@
 		"@bittery/api": "workspace:*",
 		"@bittery/crypto": "workspace:*",
 		"@bittery/shared": "workspace:*",
+		"@bittery/srp6a": "^1.0.1",
 		"@bittery/sync": "workspace:*",
 		"@craftzdog/react-native-buffer": "^6.1.1",
 		"@expo/metro-runtime": "^6.1.2",

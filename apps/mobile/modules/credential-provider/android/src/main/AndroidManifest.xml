@@ -6,7 +6,21 @@
     <uses-permission android:name="android.permission.USE_FINGERPRINT" />
 
     <application>
-        <!-- Credential Provider Service (API 34+) -->
+        <!--
+            Credential Provider Service (API 34+)
+
+            CRITICAL: Do NOT add android:process attribute to this service!
+
+            The BitteryCredentialProviderService shares VaultStateManager with the main app
+            to access the Master Unlock Key (MUK) for decrypting credentials. Adding a
+            separate process would create an isolated VaultStateManager singleton that
+            cannot access the MUK set by the React Native layer.
+
+            The service intentionally runs in the main app process to enable:
+            1. Shared VaultStateManager for MUK access
+            2. Shared MukEscrowManager for biometric unlock
+            3. Shared Room database access
+        -->
         <service
             android:name=".service.BitteryCredentialProviderService"
             android:enabled="true"

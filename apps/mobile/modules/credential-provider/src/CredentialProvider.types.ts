@@ -53,6 +53,16 @@ export interface SyncResult {
 }
 
 /**
+ * Parameters for escrowing the MUK with biometric protection
+ */
+export interface EscrowMukParams {
+  /** The account email this escrow is for */
+  email: string;
+  /** Optional escrow timeout in milliseconds (default 10 minutes) */
+  timeoutMs?: number;
+}
+
+/**
  * Events emitted by the Credential Provider module
  */
 export interface CredentialProviderModuleEvents {
@@ -62,4 +72,9 @@ export interface CredentialProviderModuleEvents {
   onCredentialDeleted: (params: { id: string }) => void;
   /** Fired when a sync operation completes */
   onSyncComplete: (params: SyncResult) => void;
+  /** Fired when the vault is unlocked */
+  onVaultUnlocked: (params: { success: boolean }) => void;
+  /** Fired when the vault is locked */
+  onVaultLocked: (params: { success: boolean }) => void;
+  [key:string]: any
 }
