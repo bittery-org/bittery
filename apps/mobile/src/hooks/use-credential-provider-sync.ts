@@ -101,10 +101,6 @@ export function useCredentialProviderSync(
 	 */
 	const extractCredentials = useCallback((): SaveCredentialParams[] => {
 		const loginItems = items.filter((item) => item.category === "login");
-		console.log("[CredentialProviderSync] extractCredentials:", {
-			totalItems: items.length,
-			loginItems: loginItems.length,
-		});
 
 		const credentials: SaveCredentialParams[] = [];
 
@@ -113,18 +109,8 @@ export function useCredentialProviderSync(
 			const primaryUrl = item.url || item.urls?.[0];
 			const domain = extractDomain(primaryUrl);
 
-			console.log("[CredentialProviderSync] Processing item:", {
-				id: item.id,
-				title: item.title,
-				url: primaryUrl,
-				domain,
-				hasUsername: !!item.username,
-				hasPassword: !!item.password,
-			});
-
 			// Skip items without valid domain or credentials
 			if (!domain || !item.username || !item.password) {
-				console.log("[CredentialProviderSync] Skipping item - missing data");
 				continue;
 			}
 
@@ -234,14 +220,6 @@ export function useCredentialProviderSync(
 			await ensureNativeMukSet();
 
 			const credentials = extractCredentials();
-			console.log("[CredentialProviderSync] Credentials to sync:", {
-				count: credentials.length,
-				credentials: credentials.map(c => ({
-					domain: c.domain,
-					username: c.username,
-					itemId: c.itemId,
-				})),
-			});
 
 			if (credentials.length === 0) {
 				console.log("[CredentialProviderSync] No credentials to sync");

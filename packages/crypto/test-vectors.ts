@@ -11,7 +11,7 @@
  *   apps/mobile/modules/credential-provider/android/src/test/java/.../CryptoTestVectors.kt
  */
 
-import { deriveKeys, arrayBufferToBase64, base64ToArrayBuffer } from "./src/key-derivation";
+import { deriveKeys, arrayBufferToBase64 } from "./src/key-derivation";
 import { encrypt, decrypt } from "./src/encryption";
 
 // Test inputs (must match values in CryptoTestVectors.kt)
@@ -119,7 +119,7 @@ async function main() {
   console.log("");
 
   try {
-    const { authKey, masterUnlockKey } = await generateKeyDerivationVectors();
+    const { masterUnlockKey } = await generateKeyDerivationVectors();
     await generateAesGcmVectors(masterUnlockKey);
     await generateVaultDecryptionVectors(masterUnlockKey);
 

@@ -1,0 +1,8 @@
+{
+  "name": "react-native-srp6a",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "types": "index.ts",
+  "description": "Native SRP-6a implementation for React Native",
+  "license": "MIT"
+}

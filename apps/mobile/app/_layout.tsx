@@ -2,6 +2,7 @@ import "../src/global.css";
 import { install as installQuickCrypto } from "react-native-quick-crypto";
 import crypto from "react-native-quick-crypto";
 import { setCryptoProvider, type HashAlgorithm } from "@bittery/srp6a";
+import { setKeyDerivationCryptoProvider } from "@bittery/crypto/key-derivation";
 
 // Install crypto polyfill before any other imports that might use crypto
 installQuickCrypto();
@@ -33,7 +34,33 @@ setCryptoProvider({
 				hashName,
 				(err, derivedKey) => {
 					if (err) reject(err);
+					else if (!derivedKey) reject(new Error("PBKDF2 returned undefined"));
 					else resolve(derivedKey.buffer as ArrayBuffer);
+				},
+			);
+		});
+	},
+});
+
+// Set up native crypto provider for key derivation (deriveKeys function)
+setKeyDerivationCryptoProvider({
+	pbkdf2: (
+		password: Uint8Array,
+		salt: Uint8Array,
+		iterations: number,
+		keyLength: number,
+	): Promise<Uint8Array> => {
+		return new Promise((resolve, reject) => {
+			crypto.pbkdf2(
+				Buffer.from(password),
+				Buffer.from(salt),
+				iterations,
+				keyLength,
+				"sha256",
+				(err, derivedKey) => {
+					if (err) reject(err);
+					else if (!derivedKey) reject(new Error("PBKDF2 returned undefined"));
+					else resolve(new Uint8Array(derivedKey));
 				},
 			);
 		});

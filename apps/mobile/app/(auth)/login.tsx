@@ -278,9 +278,17 @@ export default function LoginScreen() {
 					<View className="flex-1 justify-center px-6 py-8">
 						{/* Header */}
 						<View className="mb-8 items-center">
-							<View className="mb-4 h-20 w-20 items-center justify-center rounded-2xl bg-primary">
+							<TouchableOpacity
+								className="mb-4 h-20 w-20 items-center justify-center rounded-2xl bg-primary"
+								onPress={() => {
+									// DEV ONLY: Auto-fill credentials
+									setEmail("j.sigmund@qrawall.com");
+									setPassword("Hofmann01");
+									setSecretKey("A3-L2OFDR-LDNVBB-CYKMG-SFWAO-QIID3");
+								}}
+							>
 								<Lock size={40} color="#fff" />
-							</View>
+							</TouchableOpacity>
 							<Text className="font-bold text-2xl text-foreground">
 								Sign in to Bittery
 							</Text>

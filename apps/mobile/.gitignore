@@ -44,8 +44,8 @@ coverage/
 *.log
 ios
 android
-!modules/credential-provider/ios
-!modules/credential-provider/android
+!modules/**/ios
+!modules/**/android
 
 # Expo module build artifacts
 modules/**/android/.gradle/
