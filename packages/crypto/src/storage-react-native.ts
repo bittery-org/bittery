@@ -105,27 +105,49 @@ interface AccountCache {
 const accountCaches: Map<string, AccountCache> = new Map();
 
 // SQLite database instance
-let db: Awaited<ReturnType<typeof SQLite.openDatabaseAsync>> | null = null;
+type SQLiteDatabase = Awaited<ReturnType<typeof SQLite.openDatabaseAsync>>;
+let db: SQLiteDatabase | null = null;
+let dbInitPromise: Promise<SQLiteDatabase | null> | null = null;
 
 async function getDatabase() {
-	if (!db) {
-		db = await SQLite.openDatabaseAsync("bittery.db");
-		// Initialize tables
-		await db.execAsync(`
-			CREATE TABLE IF NOT EXISTS kv_store (
-				key TEXT PRIMARY KEY,
-				value TEXT NOT NULL
-			);
-			CREATE TABLE IF NOT EXISTS offline_queue (
-				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				operation TEXT NOT NULL,
-				payload TEXT NOT NULL,
-				created_at INTEGER NOT NULL,
-				retry_count INTEGER DEFAULT 0
-			);
-		`);
+	// Return existing database if available
+	if (db) {
+		return db;
 	}
-	return db;
+
+	// If initialization is in progress, wait for it
+	if (dbInitPromise) {
+		return dbInitPromise;
+	}
+
+	// Start initialization
+	dbInitPromise = (async () => {
+		try {
+			const database = await SQLite.openDatabaseAsync("bittery.db");
+			// Initialize tables
+			await database.execAsync(`
+				CREATE TABLE IF NOT EXISTS kv_store (
+					key TEXT PRIMARY KEY,
+					value TEXT NOT NULL
+				);
+				CREATE TABLE IF NOT EXISTS offline_queue (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					operation TEXT NOT NULL,
+					payload TEXT NOT NULL,
+					created_at INTEGER NOT NULL,
+					retry_count INTEGER DEFAULT 0
+				);
+			`);
+			db = database;
+			return db;
+		} catch (error) {
+			console.error("[storage-react-native] Failed to initialize SQLite database:", error);
+			dbInitPromise = null; // Allow retry on next call
+			return null;
+		}
+	})();
+
+	return dbInitPromise;
 }
 
 // SecureStore has a 2KB limit, so we use SQLite for larger data
@@ -135,17 +157,40 @@ async function setItem(key: string, value: string): Promise<void> {
 		try {
 			await SecureStore.setItemAsync(key, value);
 			return;
-		} catch {
+		} catch (secureStoreError) {
 			// Fall back to SQLite if SecureStore fails
+			console.warn(
+				"[storage-react-native] SecureStore setItem failed, falling back to SQLite:",
+				secureStoreError,
+			);
 		}
 	}
 	// Use SQLite for larger data or as fallback
-	const database = await getDatabase();
-	if (database) {
-		await database.runAsync(
-			"INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)",
-			[key, value],
-		);
+	try {
+		const database = await getDatabase();
+		if (database) {
+			await database.runAsync(
+				"INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)",
+				[key, value],
+			);
+		}
+	} catch (sqliteError) {
+		console.error("[storage-react-native] SQLite setItem failed:", sqliteError);
+		// Last resort: try SecureStore even for larger data (may truncate)
+		if (value.length >= 2000) {
+			try {
+				await SecureStore.setItemAsync(key, value);
+			} catch (fallbackError) {
+				console.error(
+					"[storage-react-native] All storage methods failed for key:",
+					key,
+					fallbackError,
+				);
+				throw new Error(`Failed to store item: ${key}`);
+			}
+		} else {
+			throw sqliteError;
+		}
 	}
 }
 
@@ -154,17 +199,25 @@ async function getItem(key: string): Promise<string | null> {
 	try {
 		const value = await SecureStore.getItemAsync(key);
 		if (value !== null) return value;
-	} catch {
+	} catch (secureStoreError) {
 		// Fall back to SQLite
+		console.warn(
+			"[storage-react-native] SecureStore getItem failed, trying SQLite:",
+			secureStoreError,
+		);
 	}
 	// Try SQLite
-	const database = await getDatabase();
-	if (database) {
-		const result = await database.getFirstAsync<{ value: string }>(
-			"SELECT value FROM kv_store WHERE key = ?",
-			[key],
-		);
-		return result?.value ?? null;
+	try {
+		const database = await getDatabase();
+		if (database) {
+			const result = await database.getFirstAsync<{ value: string }>(
+				"SELECT value FROM kv_store WHERE key = ?",
+				[key],
+			);
+			return result?.value ?? null;
+		}
+	} catch (sqliteError) {
+		console.error("[storage-react-native] SQLite getItem failed:", sqliteError);
 	}
 	return null;
 }
@@ -177,9 +230,16 @@ async function deleteItem(key: string): Promise<void> {
 		// Ignore errors
 	}
 	// Delete from SQLite
-	const database = await getDatabase();
-	if (database) {
-		await database.runAsync("DELETE FROM kv_store WHERE key = ?", [key]);
+	try {
+		const database = await getDatabase();
+		if (database) {
+			await database.runAsync("DELETE FROM kv_store WHERE key = ?", [key]);
+		}
+	} catch (sqliteError) {
+		console.warn(
+			"[storage-react-native] SQLite deleteItem failed:",
+			sqliteError,
+		);
 	}
 }
 
@@ -1190,6 +1250,7 @@ export async function getVaultKeys(
 
 	// Check account cache first
 	const cache = getAccountCache(resolvedEmail);
+	
 	if (cache.vaultKeys) {
 		return cache.vaultKeys;
 	}

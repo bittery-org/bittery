@@ -1,15 +1,24 @@
 import { Tabs } from "expo-router";
 import { Home, Search, Shield, Tag } from "lucide-react-native";
 import { useState } from "react";
-import { View } from "react-native";
+import { Platform, View } from "react-native";
 
 import {
 	AccountAvatarButton,
 	AccountSwitcher,
 } from "../../src/components/account-switcher";
+import { useCredentialProviderSync } from "../../src/hooks/use-credential-provider-sync";
 
 export default function TabsLayout() {
 	const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
+
+	// Sync vault credentials to Android Credential Manager for autofill
+	// This runs silently in the background when vault items change
+	useCredentialProviderSync({
+		enabled: Platform.OS === "android",
+		autoSync: true,
+		debounceMs: 3000, // Wait 3s after changes before syncing
+	});
 
 	return (
 		<>

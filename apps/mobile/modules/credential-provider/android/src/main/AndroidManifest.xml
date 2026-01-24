@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
+
+    <application>
+        <!-- Credential Provider Service (API 34+) -->
+        <service
+            android:name=".service.BitteryCredentialProviderService"
+            android:enabled="true"
+            android:exported="true"
+            android:label="Bittery"
+            android:icon="@mipmap/ic_launcher"
+            android:permission="android.permission.BIND_CREDENTIAL_PROVIDER_SERVICE"
+            tools:targetApi="upside_down_cake">
+            <intent-filter>
+                <action android:name="android.service.credentials.CredentialProviderService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.credentials.provider"
+                android:resource="@xml/credential_provider" />
+        </service>
+
+        <!-- Activity for credential selection with biometric authentication -->
+        <activity
+            android:name=".activity.GetCredentialsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Bittery.CredentialProvider"
+            android:excludeFromRecents="true"
+            android:noHistory="true" />
+    </application>
+
+</manifest>

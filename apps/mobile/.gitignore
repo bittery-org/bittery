@@ -44,3 +44,13 @@ coverage/
 *.log
 ios
 android
+!modules/credential-provider/ios
+!modules/credential-provider/android
+
+# Expo module build artifacts
+modules/**/android/.gradle/
+modules/**/android/build/
+modules/**/android/local.properties
+modules/**/ios/build/
+modules/**/ios/Pods/
+modules/**/.cxx/

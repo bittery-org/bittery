@@ -75,6 +75,7 @@ app.get("/", (c) => {
 
 export default {
 	port: process.env.PORT || 3000,
+	hostname: process.env.HOST || "0.0.0.0", // Allow connections from other devices on the network
 	fetch: app.fetch,
 	// Increase idle timeout for SSE connections (default is 10s)
 	idleTimeout: 35, // Max value in seconds (~4 minutes)

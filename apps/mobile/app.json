@@ -36,7 +36,8 @@
 				"backgroundColor": "#ffffff"
 			},
 			"package": "io.bittery.app",
-			"permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT", "CAMERA"]
+			"permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT", "CAMERA"],
+			"usesCleartextTraffic": true
 		},
 		"web": {
 			"bundler": "metro",
@@ -44,6 +45,7 @@
 			"favicon": "./assets/favicon.png"
 		},
 		"plugins": [
+			"./plugins/with-android-local-properties",
 			"expo-router",
 			"expo-secure-store",
 			"react-native-quick-crypto",
@@ -59,7 +61,8 @@
 				{
 					"cameraPermission": "Allow Bittery to access your camera to scan TOTP QR codes"
 				}
-			]
+			],
+			"./modules/credential-provider/app.plugin.js"
 		],
 		"experiments": {
 			"typedRoutes": true
