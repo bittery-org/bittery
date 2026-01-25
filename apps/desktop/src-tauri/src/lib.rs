@@ -1,3 +1,4 @@
+mod crypto_commands;
 mod native_messaging_installer;
 
 use std::convert::Infallible;
@@ -418,6 +419,25 @@ pub fn run() {
         .plugin(tauri_plugin_biometry::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(BiometricBridge::default())
+        .invoke_handler(tauri::generate_handler![
+            // Crypto commands
+            crypto_commands::crypto_derive_keys,
+            crypto_commands::crypto_encrypt,
+            crypto_commands::crypto_decrypt,
+            crypto_commands::crypto_generate_encryption_key,
+            crypto_commands::crypto_generate_rsa_key_pair,
+            crypto_commands::crypto_rsa_encrypt,
+            crypto_commands::crypto_rsa_decrypt,
+            crypto_commands::crypto_generate_secret_key,
+            crypto_commands::crypto_validate_secret_key,
+            crypto_commands::crypto_get_secret_key_hint,
+            crypto_commands::crypto_srp_generate_salt,
+            crypto_commands::crypto_srp_derive_safe_private_key,
+            crypto_commands::crypto_srp_derive_verifier,
+            crypto_commands::crypto_srp_generate_ephemeral,
+            crypto_commands::crypto_srp_derive_session,
+            crypto_commands::crypto_srp_verify_session,
+        ])
         .setup(|app| {
             // Install native messaging host on first run (or if missing)
             let first_run = !native_messaging_installer::is_installed();

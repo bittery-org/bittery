@@ -1,11 +1,11 @@
-import { deriveKeys } from "@bittery/crypto/key-derivation";
-import { validateSecretKey } from "@bittery/crypto/secret-key";
 import { normalizeServerUrl } from "@bittery/crypto/server-url";
 import {
+	deriveKeys,
+	validateSecretKey,
 	deriveClientSession,
 	generateClientEphemeral,
 	verifyServerSession,
-} from "@bittery/crypto/srp-client";
+} from "../lib/tauri-crypto";
 import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";
@@ -72,7 +72,7 @@ export function LoginPage() {
 	const handleLogin = async (e: React.FormEvent) => {
 		e.preventDefault();
 
-		if (!validateSecretKey(secretKey)) {
+		if (!(await validateSecretKey(secretKey))) {
 			toast.error("Invalid Secret Key format");
 			return;
 		}
@@ -100,7 +100,7 @@ export function LoginPage() {
 			const srpPassword = new TextDecoder().decode(authKey);
 
 			// 2. Generate client ephemeral key pair
-			const clientEphemeral = generateClientEphemeral();
+			const clientEphemeral = await generateClientEphemeral();
 
 			// 3. Send client public key to server and get challenge
 			const startResult = await trpcClient.auth.startLogin.mutate({

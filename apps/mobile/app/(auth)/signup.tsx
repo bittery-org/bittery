@@ -1,4 +1,3 @@
-import { generateSecretKey } from "@bittery/crypto/secret-key";
 import { normalizeServerUrl } from "@bittery/crypto/server-url";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
@@ -25,6 +24,7 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { generateSecretKey } from "../../src/lib/crypto";
 
 const DEFAULT_SERVER_URL =
 	process.env.EXPO_PUBLIC_SERVER_URL || "http://localhost:3000";

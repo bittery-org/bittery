@@ -3,8 +3,8 @@
  * Handles vault and vault item operations
  */
 
-import { decrypt } from "@bittery/crypto/encryption";
 import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import { decrypt } from "../lib/wasm-crypto";
 import { updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";

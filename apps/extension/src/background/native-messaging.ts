@@ -3,8 +3,8 @@
  * Handles communication with the desktop app for biometric unlock
  */
 
-import { decrypt } from "@bittery/crypto/encryption";
 import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import { decrypt } from "../lib/wasm-crypto";
 import { NATIVE_HOST_NAME } from "./constants";
 import { setMasterUnlockKey, updateActivity } from "./session-manager";
 import type { MessageResponse } from "./types";

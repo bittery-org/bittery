@@ -1,6 +1,9 @@
-import { encrypt, generateEncryptionKey } from "@bittery/crypto/encryption";
-import { arrayBufferToBase64 } from "@bittery/crypto/key-derivation";
 import { getDecryptedVaultKey } from "@bittery/crypto/session-storage";
+import {
+	arrayBufferToBase64,
+	encrypt,
+	generateEncryptionKey,
+} from "@/lib/wasm-crypto";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
@@ -76,7 +79,7 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 			}
 
 			// Generate a new share-specific encryption key
-			const shareKey = generateEncryptionKey();
+			const shareKey = await generateEncryptionKey();
 
 			// Prepare item data for sharing (sanitized, no metadata)
 			const itemDataToShare = {

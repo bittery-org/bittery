@@ -1,5 +1,5 @@
-import { decrypt } from "@bittery/crypto/encryption";
 import { getDecryptedVaultKey } from "@bittery/crypto/session-storage";
+import { decrypt } from "@/lib/wasm-crypto";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { useQueries, useQuery } from "@tanstack/react-query";

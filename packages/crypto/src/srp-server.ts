@@ -1,12 +1,14 @@
 /**
  * SRP-6a Server Implementation
  * For zero-knowledge authentication - SERVER SIDE ONLY
+ *
+ * Uses native Rust implementation via NAPI for optimal performance.
  */
 
-import { createSRPServer } from "@bittery/srp6a";
-
-// Using SHA-256 and 4096-bit prime group for maximum security
-const serverClient = createSRPServer("SHA-256", 4096);
+import {
+	deriveServerSession as nativeDeriveServerSession,
+	generateServerEphemeral as nativeGenerateServerEphemeral,
+} from "@bittery/crypto-napi";
 
 export interface SRPServerEphemeral {
 	publicKey: string;
@@ -25,7 +27,7 @@ export interface SRPServerSession {
 export async function generateServerEphemeral(
 	verifier: string,
 ): Promise<SRPServerEphemeral> {
-	const ephemeral = await serverClient.generateEphemeral(verifier);
+	const ephemeral = nativeGenerateServerEphemeral(verifier);
 
 	return {
 		publicKey: ephemeral.public,
@@ -45,11 +47,10 @@ export async function deriveServerSession(
 	verifier: string,
 	clientProof: string,
 ): Promise<SRPServerSession> {
-	const session = await serverClient.deriveSession(
+	const session = nativeDeriveServerSession(
 		serverEphemeralSecret,
 		clientPublicEphemeral,
 		salt,
-		"", // Empty string when using deriveSafePrivateKey
 		verifier,
 		clientProof,
 	);

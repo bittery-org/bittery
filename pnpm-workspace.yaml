@@ -1,6 +1,8 @@
 packages:
   - apps/*
   - packages/*
+  - packages/bittery-crypto/pkg
+  - packages/bittery-crypto/crates/bittery-crypto-napi
 
 catalog:
   '@trpc/client': ^11.5.0

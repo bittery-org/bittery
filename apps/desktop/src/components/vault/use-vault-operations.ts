@@ -1,4 +1,4 @@
-import { encrypt, generateEncryptionKey } from "@bittery/crypto/encryption";
+import { encrypt, generateEncryptionKey } from "../../lib/tauri-crypto";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { toast } from "@bittery/ui";
@@ -54,7 +54,7 @@ export function useVaultOperations() {
 			imageKey = upload.key;
 		}
 
-		const vaultKey = generateEncryptionKey();
+		const vaultKey = await generateEncryptionKey();
 		const masterUnlockKey = await tauriStorage.getMasterUnlockKey();
 
 		if (!masterUnlockKey) {

@@ -1,0 +1,333 @@
+/**
+ * Tauri Crypto - Native Rust cryptographic operations via Tauri
+ *
+ * Provides the same interface as @bittery/crypto for drop-in replacement
+ * in the desktop app, but uses native Rust crypto via Tauri commands.
+ */
+
+import { invoke } from "@tauri-apps/api/core";
+
+// ============================================================================
+// Types (matching @bittery/crypto interfaces)
+// ============================================================================
+
+export interface DerivedKeys {
+	authKey: Uint8Array;
+	masterUnlockKey: Uint8Array;
+}
+
+export interface EncryptedData {
+	ciphertext: string;
+	iv: string;
+	algorithm: string;
+}
+
+export interface RsaKeyPair {
+	publicKey: string;
+	privateKey: string;
+}
+
+export interface SRPClientEphemeral {
+	publicKey: string;
+	secret: string;
+}
+
+export interface SRPServerChallenge {
+	salt: string;
+	serverPublicKey: string;
+}
+
+export interface SRPClientSession {
+	key: string;
+	proof: string;
+}
+
+export interface SRPRegistration {
+	salt: string;
+	verifier: string;
+}
+
+// ============================================================================
+// Internal response types (from Rust)
+// ============================================================================
+
+interface DerivedKeysResponse {
+	auth_key: string;
+	master_unlock_key: string;
+}
+
+interface EncryptResponse {
+	ciphertext: string;
+	iv: string;
+	algorithm: string;
+}
+
+interface RsaKeyPairResponse {
+	public_key: string;
+	private_key: string;
+}
+
+interface EphemeralResponse {
+	public: string;
+	secret: string;
+}
+
+interface SessionResponse {
+	key: string;
+	proof: string;
+}
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
+function base64ToUint8Array(base64: string): Uint8Array {
+	const binaryString = atob(base64);
+	const bytes = new Uint8Array(binaryString.length);
+	for (let i = 0; i < binaryString.length; i++) {
+		bytes[i] = binaryString.charCodeAt(i);
+	}
+	return bytes;
+}
+
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+	const binaryString = String.fromCharCode(...bytes);
+	return btoa(binaryString);
+}
+
+/**
+ * Convert an ArrayBuffer or Uint8Array to base64 string
+ * Exported for use in share-item-dialog and other places
+ */
+export function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
+	const bytes =
+		buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+	return uint8ArrayToBase64(bytes);
+}
+
+// ============================================================================
+// Key Derivation (matching @bittery/crypto/key-derivation)
+// ============================================================================
+
+/**
+ * Derive authentication and master unlock keys from password + secret key
+ */
+export async function deriveKeys(
+	accountPassword: string,
+	secretKey: string,
+	email: string,
+): Promise<DerivedKeys> {
+	const response = await invoke<DerivedKeysResponse>("crypto_derive_keys", {
+		password: accountPassword,
+		secretKey,
+		email,
+	});
+
+	return {
+		authKey: base64ToUint8Array(response.auth_key),
+		masterUnlockKey: base64ToUint8Array(response.master_unlock_key),
+	};
+}
+
+// ============================================================================
+// AES-256-GCM Encryption (matching @bittery/crypto/encryption)
+// ============================================================================
+
+/**
+ * Encrypt plaintext using AES-256-GCM
+ */
+export async function encrypt(
+	plaintext: string,
+	key: Uint8Array,
+): Promise<EncryptedData> {
+	const keyBase64 = uint8ArrayToBase64(key);
+	const response = await invoke<EncryptResponse>("crypto_encrypt", {
+		plaintext,
+		keyBase64,
+	});
+
+	return {
+		ciphertext: response.ciphertext,
+		iv: response.iv,
+		algorithm: response.algorithm,
+	};
+}
+
+/**
+ * Decrypt ciphertext using AES-256-GCM
+ */
+export async function decrypt(
+	data: EncryptedData,
+	key: Uint8Array,
+): Promise<string> {
+	const keyBase64 = uint8ArrayToBase64(key);
+	return await invoke<string>("crypto_decrypt", {
+		ciphertext: data.ciphertext,
+		iv: data.iv,
+		keyBase64,
+	});
+}
+
+/**
+ * Generate a random 256-bit encryption key
+ */
+export async function generateEncryptionKey(): Promise<Uint8Array> {
+	const keyBase64 = await invoke<string>("crypto_generate_encryption_key");
+	return base64ToUint8Array(keyBase64);
+}
+
+// ============================================================================
+// RSA-4096 (matching @bittery/crypto/rsa)
+// ============================================================================
+
+/**
+ * Generate an RSA-4096 key pair
+ */
+export async function generateRsaKeyPair(): Promise<RsaKeyPair> {
+	const response = await invoke<RsaKeyPairResponse>(
+		"crypto_generate_rsa_key_pair",
+	);
+	return {
+		publicKey: response.public_key,
+		privateKey: response.private_key,
+	};
+}
+
+/**
+ * Encrypt data with RSA-OAEP using a public key
+ */
+export async function rsaEncrypt(
+	plaintext: string,
+	publicKeyPem: string,
+): Promise<string> {
+	return await invoke<string>("crypto_rsa_encrypt", {
+		plaintext,
+		publicKeyPem,
+	});
+}
+
+/**
+ * Decrypt data with RSA-OAEP using a private key
+ */
+export async function rsaDecrypt(
+	ciphertext: string,
+	privateKeyPem: string,
+): Promise<string> {
+	return await invoke<string>("crypto_rsa_decrypt", {
+		ciphertext,
+		privateKeyPem,
+	});
+}
+
+// ============================================================================
+// Secret Key (matching @bittery/crypto/secret-key)
+// ============================================================================
+
+/**
+ * Generate a new secret key in A3-XXXXXX format
+ */
+export async function generateSecretKey(): Promise<string> {
+	return await invoke<string>("crypto_generate_secret_key");
+}
+
+/**
+ * Validate secret key format
+ */
+export async function validateSecretKey(secretKey: string): Promise<boolean> {
+	return await invoke<boolean>("crypto_validate_secret_key", { secretKey });
+}
+
+/**
+ * Get the hint (first 5 characters) from a secret key
+ */
+export async function getSecretKeyHint(secretKey: string): Promise<string> {
+	return await invoke<string>("crypto_get_secret_key_hint", { secretKey });
+}
+
+// ============================================================================
+// SRP-6a Client (matching @bittery/crypto/srp-client)
+// ============================================================================
+
+/**
+ * Generate salt and verifier for registration
+ */
+export async function generateSRPRegistration(
+	password: string,
+): Promise<SRPRegistration> {
+	const salt = await invoke<string>("crypto_srp_generate_salt");
+	const privateKey = await invoke<string>(
+		"crypto_srp_derive_safe_private_key",
+		{
+			salt,
+			password,
+			iterations: null as unknown as number | undefined,
+		},
+	);
+	const verifier = await invoke<string>("crypto_srp_derive_verifier", {
+		privateKey,
+	});
+
+	return { salt, verifier };
+}
+
+/**
+ * Generate client ephemeral key pair
+ */
+export async function generateClientEphemeral(): Promise<SRPClientEphemeral> {
+	const response = await invoke<EphemeralResponse>(
+		"crypto_srp_generate_ephemeral",
+	);
+	return {
+		publicKey: response.public,
+		secret: response.secret,
+	};
+}
+
+/**
+ * Derive client session and proof
+ */
+export async function deriveClientSession(
+	clientEphemeralSecret: string,
+	serverChallenge: SRPServerChallenge,
+	password: string,
+): Promise<SRPClientSession> {
+	// First derive the safe private key from the salt and password
+	const privateKey = await invoke<string>(
+		"crypto_srp_derive_safe_private_key",
+		{
+			salt: serverChallenge.salt,
+			password,
+			iterations: null as unknown as number | undefined,
+		},
+	);
+
+	// Then derive the session
+	const response = await invoke<SessionResponse>("crypto_srp_derive_session", {
+		clientSecretEphemeral: clientEphemeralSecret,
+		serverPublicEphemeral: serverChallenge.serverPublicKey,
+		salt: serverChallenge.salt,
+		username: "", // Empty string when using deriveSafePrivateKey
+		privateKey,
+	});
+
+	return {
+		key: response.key,
+		proof: response.proof,
+	};
+}
+
+/**
+ * Verify server session proof
+ */
+export async function verifyServerSession(
+	clientPublicEphemeral: string,
+	clientSession: SRPClientSession,
+	serverSessionProof: string,
+): Promise<void> {
+	await invoke<void>("crypto_srp_verify_session", {
+		clientPublicEphemeral,
+		sessionKey: clientSession.key,
+		sessionProof: clientSession.proof,
+		serverSessionProof,
+	});
+}

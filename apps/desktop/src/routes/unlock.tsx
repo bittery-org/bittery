@@ -1,9 +1,9 @@
-import { deriveKeys } from "@bittery/crypto/key-derivation";
 import {
+	deriveKeys,
 	deriveClientSession,
 	generateClientEphemeral,
 	verifyServerSession,
-} from "@bittery/crypto/srp-client";
+} from "../lib/tauri-crypto";
 import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";
@@ -144,7 +144,7 @@ export function UnlockPage() {
 			const srpPassword = new TextDecoder().decode(authKey);
 
 			// 2. Generate client ephemeral key pair
-			const clientEphemeral = generateClientEphemeral();
+			const clientEphemeral = await generateClientEphemeral();
 
 			// 3. Send client public key to server and get challenge
 			const startResult = await trpcClient.auth.startLogin.mutate({

@@ -3,8 +3,8 @@
  * Shared utility functions for vault operations
  */
 
-import { decrypt } from "@bittery/crypto/encryption";
 import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import { decrypt } from "../lib/wasm-crypto";
 import { trpcClient } from "./trpc-client";
 
 /**

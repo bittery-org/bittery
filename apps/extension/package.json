@@ -17,6 +17,7 @@
 		"@bittery/api": "workspace:*",
 		"@bittery/auth": "workspace:*",
 		"@bittery/crypto": "workspace:*",
+		"@bittery/crypto-wasm": "workspace:*",
 		"@bittery/shared": "workspace:*",
 		"@bittery/sync": "workspace:*",
 		"@bittery/ui": "workspace:*",

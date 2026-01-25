@@ -1,5 +1,4 @@
-import { decrypt } from "@bittery/crypto/encryption";
-import { base64ToArrayBuffer } from "@bittery/crypto/key-derivation";
+import { base64ToArrayBuffer, decrypt } from "@/lib/wasm-crypto";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import type { ItemCategory } from "@bittery/shared/types";
 import {

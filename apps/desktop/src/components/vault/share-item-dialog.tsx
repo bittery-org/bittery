@@ -1,5 +1,8 @@
-import { encrypt, generateEncryptionKey } from "@bittery/crypto/encryption";
-import { arrayBufferToBase64 } from "@bittery/crypto/key-derivation";
+import {
+	arrayBufferToBase64,
+	encrypt,
+	generateEncryptionKey,
+} from "../../lib/tauri-crypto";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
@@ -80,7 +83,7 @@ export function ShareItemDialog({
 			}
 
 			// Generate a new share-specific encryption key
-			const shareKey = generateEncryptionKey();
+			const shareKey = await generateEncryptionKey();
 
 			// Prepare item data for sharing (sanitized, no metadata)
 			const itemDataToShare = {

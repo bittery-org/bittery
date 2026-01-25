@@ -1,13 +1,3 @@
-import { encrypt, generateEncryptionKey } from "@bittery/crypto/encryption";
-import {
-	arrayBufferToBase64,
-	deriveKeys,
-} from "@bittery/crypto/key-derivation";
-import { generateRSAKeyPair } from "@bittery/crypto/rsa";
-import {
-	generateSecretKey,
-	getSecretKeyHint,
-} from "@bittery/crypto/secret-key";
 import { normalizeServerUrl } from "@bittery/crypto/server-url";
 import {
 	getServerUrl,
@@ -20,7 +10,16 @@ import {
 	storeSessionData,
 	storeVaultKeys,
 } from "@bittery/crypto/session-storage";
-import { generateSRPRegistration } from "@bittery/crypto/srp-client";
+import {
+	arrayBufferToBase64,
+	deriveKeys,
+	encrypt,
+	generateEncryptionKey,
+	generateRSAKeyPair,
+	generateSecretKeyAsync,
+	generateSRPRegistration,
+	getSecretKeyHint,
+} from "@/lib/wasm-crypto";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Badge,
@@ -69,10 +68,9 @@ export default function SignUpForm({
 	const invitation = invitationQuery.data;
 	const isInvitationSignup = !!invitationToken && !!invitation;
 
-	// Generate Secret Key on mount
+	// Generate Secret Key on mount (WASM auto-initializes)
 	useEffect(() => {
-		const key = generateSecretKey();
-		setSecretKey(key);
+		generateSecretKeyAsync().then(setSecretKey);
 	}, []);
 
 	const signupMutation = useMutation({
@@ -144,13 +142,16 @@ export default function SignUpForm({
 				const encryptedPrivateKey = await encrypt(privateKey, masterUnlockKey);
 
 				// 5. Generate vault key and encrypt it
-				const vaultKey = generateEncryptionKey();
+				const vaultKey = await generateEncryptionKey();
 				const encryptedVaultKey = await encrypt(
 					arrayBufferToBase64(vaultKey),
 					masterUnlockKey,
 				);
 
-				// 6. Call signup mutation
+				// 6. Get secret key hint
+				const secretKeyHintValue = getSecretKeyHint(secretKey);
+
+				// 7. Call signup mutation
 				// Don't include organizationName if signing up via invitation
 				// (the user will join the inviting team instead)
 				const result = await signupMutation.mutateAsync({
@@ -159,7 +160,7 @@ export default function SignUpForm({
 					...(isInvitationSignup
 						? {}
 						: { organizationName: value.organizationName }),
-					secretKeyHint: getSecretKeyHint(secretKey),
+					secretKeyHint: secretKeyHintValue,
 					srpSalt: salt,
 					srpVerifier: verifier,
 					publicKey,

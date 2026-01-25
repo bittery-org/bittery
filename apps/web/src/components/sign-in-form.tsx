@@ -1,5 +1,3 @@
-import { deriveKeys } from "@bittery/crypto/key-derivation";
-import { validateSecretKey } from "@bittery/crypto/secret-key";
 import { normalizeServerUrl } from "@bittery/crypto/server-url";
 import {
 	getServerUrl,
@@ -18,9 +16,11 @@ import {
 } from "@bittery/crypto/session-storage";
 import {
 	deriveClientSession,
-	generateClientEphemeral,
+	deriveKeys,
+	generateClientEphemeralAsync as generateClientEphemeral,
+	validateSecretKeyAsync as validateSecretKey,
 	verifyServerSession,
-} from "@bittery/crypto/srp-client";
+} from "@/lib/wasm-crypto";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
@@ -72,7 +72,7 @@ export default function SignInForm({
 			if (!persistServerUrl()) {
 				return;
 			}
-			if (!validateSecretKey(value.secretKey)) {
+			if (!(await validateSecretKey(value.secretKey))) {
 				toast.error("Invalid Secret Key format");
 				return;
 			}
@@ -125,7 +125,7 @@ export default function SignInForm({
 			const password = new TextDecoder().decode(authKey);
 
 			// 2. Generate client ephemeral key pair
-			const clientEphemeral = generateClientEphemeral();
+			const clientEphemeral = await generateClientEphemeral();
 
 			// 3. Send client public key to server and get challenge
 			const startResult = await trpcClient.auth.startLogin.mutate({

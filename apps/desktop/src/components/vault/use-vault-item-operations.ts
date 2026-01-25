@@ -1,4 +1,4 @@
-import { encrypt } from "@bittery/crypto/encryption";
+import { encrypt } from "../../lib/tauri-crypto";
 import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";

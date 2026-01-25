@@ -1,11 +1,12 @@
-import { decrypt, encrypt } from "@bittery/crypto/encryption";
-import { deriveKeys } from "@bittery/crypto/key-derivation";
-import {
-	generateSecretKey,
-	getSecretKeyHint,
-} from "@bittery/crypto/secret-key";
 import { getStoredSecretKey } from "@bittery/crypto/session-storage";
-import { generateSRPRegistration } from "@bittery/crypto/srp-client";
+import {
+	decrypt,
+	deriveKeys,
+	encrypt,
+	generateSecretKey,
+	generateSRPRegistration,
+	getSecretKeyHint,
+} from "@/lib/wasm-crypto";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,

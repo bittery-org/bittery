@@ -1,8 +1,8 @@
-import { rsaEncrypt } from "@bittery/crypto/rsa";
 import {
 	decryptVaultKey,
 	getMasterUnlockKey,
 } from "@bittery/crypto/session-storage";
+import { rsaEncrypt } from "@/lib/wasm-crypto";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,

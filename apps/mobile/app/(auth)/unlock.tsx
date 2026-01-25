@@ -1,12 +1,5 @@
-import { deriveKeys, arrayBufferToBase64 } from "@bittery/crypto/key-derivation";
-import {
-	deriveClientSession,
-	generateClientEphemeral,
-	verifyServerSession,
-} from "@bittery/crypto/srp-client";
 import type { AccountMetadata } from "@bittery/crypto/storage-react-native";
 import { useRouter } from "expo-router";
-import CredentialProvider from "../../modules/credential-provider";
 import {
 	AlertCircle,
 	ChevronDown,
@@ -31,8 +24,15 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
+import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
+import {
+	arrayBufferToBase64,
+	deriveClientSession,
+	deriveKeys,
+	generateClientEphemeral,
+	verifyServerSession,
+} from "../../src/lib/crypto";
 import { useServerUrl, useTRPCClient } from "../../src/lib/trpc";
 import * as storage from "../../src/services/storage";
 
@@ -54,14 +54,20 @@ export default function UnlockScreen() {
 		enabled: boolean;
 		type: string | null;
 		requiresMasterPassword: boolean;
-	}>({ available: false, enabled: false, type: null, requiresMasterPassword: false });
+	}>({
+		available: false,
+		enabled: false,
+		type: null,
+		requiresMasterPassword: false,
+	});
 	const [biometricError, setBiometricError] = useState<string | null>(null);
 
 	const loadBiometricState = useCallback(async (email: string) => {
 		const available = await storage.isBiometricAvailable();
 		const enabled = await storage.isBiometricEnabled(email);
 		const type = available ? await storage.getBiometricType() : null;
-		const requiresMasterPassword = await storage.isMasterPasswordReentryRequired(email);
+		const requiresMasterPassword =
+			await storage.isMasterPasswordReentryRequired(email);
 		setBiometricState({ available, enabled, type, requiresMasterPassword });
 	}, []);
 
@@ -139,12 +145,17 @@ export default function UnlockScreen() {
 				}
 			} else {
 				// Show specific error message
-				const errorMessage = result.message || storage.getBiometricErrorMessage(result.error || "unknown");
+				const errorMessage =
+					result.message ||
+					storage.getBiometricErrorMessage(result.error || "unknown");
 
 				if (result.error === "master_password_required") {
 					setBiometricError(errorMessage);
 					// Update state to reflect this
-					setBiometricState((prev) => ({ ...prev, requiresMasterPassword: true }));
+					setBiometricState((prev) => ({
+						...prev,
+						requiresMasterPassword: true,
+					}));
 				} else if (result.error === "lockout") {
 					setBiometricError(errorMessage);
 				} else if (result.error === "user_cancelled") {
@@ -155,7 +166,9 @@ export default function UnlockScreen() {
 			}
 		} catch (error) {
 			console.error("Biometric unlock error:", error);
-			setBiometricError("An unexpected error occurred. Please try again or use your password.");
+			setBiometricError(
+				"An unexpected error occurred. Please try again or use your password.",
+			);
 		} finally {
 			setLoading(false);
 		}
@@ -394,8 +407,8 @@ export default function UnlockScreen() {
 										Password Required
 									</Text>
 									<Text className="text-amber-700 text-sm">
-										For your security, please enter your master password. This is
-										required every 30 days.
+										For your security, please enter your master password. This
+										is required every 30 days.
 									</Text>
 								</View>
 							</View>

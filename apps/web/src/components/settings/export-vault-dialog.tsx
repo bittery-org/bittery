@@ -1,6 +1,6 @@
-import { decrypt } from "@bittery/crypto/encryption";
 import { encryptExport } from "@bittery/crypto/export-encryption";
 import { getDecryptedVaultKey } from "@bittery/crypto/session-storage";
+import { decrypt } from "@/lib/wasm-crypto";
 import type {
 	EncryptedVaultExport,
 	ExportedItem,

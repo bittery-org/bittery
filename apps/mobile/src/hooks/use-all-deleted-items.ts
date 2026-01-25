@@ -1,4 +1,4 @@
-import { decrypt } from "@bittery/crypto/encryption";
+import { decrypt } from "../lib/crypto";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 

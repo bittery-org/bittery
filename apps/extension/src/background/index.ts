@@ -3,6 +3,7 @@
  * Routes messages to appropriate handlers and manages lifecycle
  */
 
+import { initWasmCrypto } from "../lib/wasm-crypto";
 import {
 	handleCanQuickUnlock,
 	handleCheckAuth,
@@ -13,6 +14,11 @@ import {
 	handleLogout,
 	handleQuickUnlock,
 } from "./auth-handlers";
+
+// Initialize WASM crypto on service worker load
+initWasmCrypto().catch((error) => {
+	console.error("[Background] Failed to initialize WASM crypto:", error);
+});
 import {
 	handleCheckAutofillAuth,
 	handleGetAutofillCreditCards,

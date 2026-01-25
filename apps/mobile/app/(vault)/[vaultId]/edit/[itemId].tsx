@@ -1,4 +1,4 @@
-import { encrypt } from "@bittery/crypto/encryption";
+import { encrypt } from "../../../../src/lib/crypto";
 import {
 	type CardBrand,
 	detectCardBrand,

@@ -13,7 +13,8 @@
 		"./srp-server": "./src/srp-server.ts",
 		"./storage-chrome": "./src/storage-chrome.ts",
 		"./storage-tauri": "./src/storage-tauri.ts",
-		"./storage-react-native": "./src/storage-react-native.ts"
+		"./storage-react-native": "./src/storage-react-native.ts",
+		"./wasm": "./src/wasm.ts"
 	},
 	"type": "module",
 	"scripts": {
@@ -50,6 +51,8 @@
 		"@noble/ciphers": "^2.1.1",
 		"@noble/hashes": "^1.5.0",
 		"@tauri-apps/plugin-store": "^2.4.1",
-		"@bittery/srp6a": "^1.0.1"
+		"@bittery/srp6a": "^1.0.1",
+		"@bittery/crypto-wasm": "workspace:*",
+		"@bittery/crypto-napi": "workspace:*"
 	}
 }

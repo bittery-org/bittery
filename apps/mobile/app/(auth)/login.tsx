@@ -1,11 +1,4 @@
-import { deriveKeys } from "@bittery/crypto/key-derivation";
-import { validateSecretKey } from "@bittery/crypto/secret-key";
 import { normalizeServerUrl } from "@bittery/crypto/server-url";
-import {
-	deriveClientSession,
-	generateClientEphemeral,
-	verifyServerSession,
-} from "@bittery/crypto/srp-client";
 import type { AccountMetadata } from "@bittery/crypto/storage-react-native";
 import { useRouter } from "expo-router";
 import {
@@ -29,8 +22,14 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
 import { useAccount } from "../../src/contexts/account-context";
+import {
+	deriveClientSession,
+	deriveKeys,
+	generateClientEphemeral,
+	validateSecretKey,
+	verifyServerSession,
+} from "../../src/lib/crypto";
 import { useServerUrl, useTRPCClient } from "../../src/lib/trpc";
 import * as storage from "../../src/services/storage";
 
@@ -85,33 +84,61 @@ export default function LoginScreen() {
 			Alert.alert("Error", "Please fill in all fields");
 			return;
 		}
-		console.log("[LOGIN] Fields validated:", performance.now() - startTime, "ms");
+		console.log(
+			"[LOGIN] Fields validated:",
+			performance.now() - startTime,
+			"ms",
+		);
 
 		if (!validateSecretKey(secretKey)) {
 			Alert.alert("Error", "Invalid Secret Key format");
 			return;
 		}
-		console.log("[LOGIN] Secret key validated:", performance.now() - startTime, "ms");
+		console.log(
+			"[LOGIN] Secret key validated:",
+			performance.now() - startTime,
+			"ms",
+		);
 
 		const normalizedServerUrl = normalizeServerUrl(serverUrl);
 		if (!normalizedServerUrl) {
 			Alert.alert("Error", "Invalid server URL");
 			return;
 		}
-		console.log("[LOGIN] Server URL normalized:", performance.now() - startTime, "ms");
+		console.log(
+			"[LOGIN] Server URL normalized:",
+			performance.now() - startTime,
+			"ms",
+		);
 
-		console.log("[LOGIN] About to setLoading(true):", performance.now() - startTime, "ms");
+		console.log(
+			"[LOGIN] About to setLoading(true):",
+			performance.now() - startTime,
+			"ms",
+		);
 		setLoading(true);
-		console.log("[LOGIN] setLoading(true) called:", performance.now() - startTime, "ms");
+		console.log(
+			"[LOGIN] setLoading(true) called:",
+			performance.now() - startTime,
+			"ms",
+		);
 
 		// Allow UI to re-render and show loading state before heavy crypto work
 		await new Promise((resolve) => setTimeout(resolve, 50));
-		console.log("[LOGIN] UI render delay completed:", performance.now() - startTime, "ms");
+		console.log(
+			"[LOGIN] UI render delay completed:",
+			performance.now() - startTime,
+			"ms",
+		);
 
 		try {
 			// Update global server URL
 			setGlobalServerUrl(normalizedServerUrl);
-			console.log("[LOGIN] Global server URL set:", performance.now() - startTime, "ms");
+			console.log(
+				"[LOGIN] Global server URL set:",
+				performance.now() - startTime,
+				"ms",
+			);
 
 			// 1. Derive keys from password + secret key
 			console.log("[LOGIN] Starting deriveKeys...");
@@ -121,7 +148,13 @@ export default function LoginScreen() {
 				secretKey,
 				email,
 			);
-			console.log("[LOGIN] deriveKeys completed:", performance.now() - startTime, "ms (took", performance.now() - deriveKeysStart, "ms)");
+			console.log(
+				"[LOGIN] deriveKeys completed:",
+				performance.now() - startTime,
+				"ms (took",
+				performance.now() - deriveKeysStart,
+				"ms)",
+			);
 
 			// Convert authKey to password string for SRP
 			const srpPassword = new TextDecoder().decode(authKey);
@@ -130,7 +163,13 @@ export default function LoginScreen() {
 			console.log("[LOGIN] Generating client ephemeral...");
 			const ephemeralStart = performance.now();
 			const clientEphemeral = generateClientEphemeral();
-			console.log("[LOGIN] Client ephemeral generated:", performance.now() - startTime, "ms (took", performance.now() - ephemeralStart, "ms)");
+			console.log(
+				"[LOGIN] Client ephemeral generated:",
+				performance.now() - startTime,
+				"ms (took",
+				performance.now() - ephemeralStart,
+				"ms)",
+			);
 
 			// 3. Send client public key to server and get challenge
 			console.log("[LOGIN] Starting startLogin mutation...");
@@ -139,7 +178,13 @@ export default function LoginScreen() {
 				email,
 				clientPublicKey: clientEphemeral.publicKey,
 			});
-			console.log("[LOGIN] startLogin completed:", performance.now() - startTime, "ms (took", performance.now() - startLoginStart, "ms)");
+			console.log(
+				"[LOGIN] startLogin completed:",
+				performance.now() - startTime,
+				"ms (took",
+				performance.now() - startLoginStart,
+				"ms)",
+			);
 
 			// 4. Derive session and compute proof
 			console.log("[LOGIN] Deriving client session...");
@@ -152,7 +197,13 @@ export default function LoginScreen() {
 				},
 				srpPassword,
 			);
-			console.log("[LOGIN] Client session derived:", performance.now() - startTime, "ms (took", performance.now() - sessionStart, "ms)");
+			console.log(
+				"[LOGIN] Client session derived:",
+				performance.now() - startTime,
+				"ms (took",
+				performance.now() - sessionStart,
+				"ms)",
+			);
 
 			// 5. Send proof to server and get session
 			console.log("[LOGIN] Starting finishLogin mutation...");
@@ -163,7 +214,13 @@ export default function LoginScreen() {
 				clientPublicKey: clientEphemeral.publicKey,
 				clientProof: clientSession.proof,
 			});
-			console.log("[LOGIN] finishLogin completed:", performance.now() - startTime, "ms (took", performance.now() - finishLoginStart, "ms)");
+			console.log(
+				"[LOGIN] finishLogin completed:",
+				performance.now() - startTime,
+				"ms (took",
+				performance.now() - finishLoginStart,
+				"ms)",
+			);
 
 			if (!finishResult.serverProof) {
 				Alert.alert("Error", "Login failed - invalid server proof");
@@ -178,7 +235,13 @@ export default function LoginScreen() {
 				clientSession,
 				finishResult.serverProof,
 			);
-			console.log("[LOGIN] Server session verified:", performance.now() - startTime, "ms (took", performance.now() - verifyStart, "ms)");
+			console.log(
+				"[LOGIN] Server session verified:",
+				performance.now() - startTime,
+				"ms (took",
+				performance.now() - verifyStart,
+				"ms)",
+			);
 
 			const normalizedEmail = email.toLowerCase();
 
@@ -187,16 +250,30 @@ export default function LoginScreen() {
 				console.log("[LOGIN] Enabling biometric...");
 				const biometricStart = performance.now();
 				await storage.enableBiometric(normalizedEmail);
-				console.log("[LOGIN] Biometric enabled:", performance.now() - startTime, "ms (took", performance.now() - biometricStart, "ms)");
+				console.log(
+					"[LOGIN] Biometric enabled:",
+					performance.now() - startTime,
+					"ms (took",
+					performance.now() - biometricStart,
+					"ms)",
+				);
 			}
 
 			// Store auth data
 			console.log("[LOGIN] Storing auth data...");
 			const storeStart = performance.now();
 			await storage.storeAuthToken(finishResult.token, normalizedEmail);
-			console.log("[LOGIN] Auth token stored:", performance.now() - startTime, "ms");
+			console.log(
+				"[LOGIN] Auth token stored:",
+				performance.now() - startTime,
+				"ms",
+			);
 			await storage.storeVaultKeys(finishResult.vaultKeys, normalizedEmail);
-			console.log("[LOGIN] Vault keys stored:", performance.now() - startTime, "ms");
+			console.log(
+				"[LOGIN] Vault keys stored:",
+				performance.now() - startTime,
+				"ms",
+			);
 
 			// Store encrypted private key for RSA decryption
 			if (finishResult.user.encryptedPrivateKey) {
@@ -204,21 +281,43 @@ export default function LoginScreen() {
 					finishResult.user.encryptedPrivateKey,
 					normalizedEmail,
 				);
-				console.log("[LOGIN] Encrypted private key stored:", performance.now() - startTime, "ms");
+				console.log(
+					"[LOGIN] Encrypted private key stored:",
+					performance.now() - startTime,
+					"ms",
+				);
 			}
 
 			await storage.storeSecretKey(secretKey, normalizedEmail);
-			console.log("[LOGIN] Secret key stored:", performance.now() - startTime, "ms");
+			console.log(
+				"[LOGIN] Secret key stored:",
+				performance.now() - startTime,
+				"ms",
+			);
 			await storage.storeSessionData(
 				masterUnlockKey,
 				normalizedEmail,
 				finishResult.user.id,
 			);
-			console.log("[LOGIN] Session data stored:", performance.now() - startTime, "ms");
+			console.log(
+				"[LOGIN] Session data stored:",
+				performance.now() - startTime,
+				"ms",
+			);
 			await storage.storeMasterUnlockKey(masterUnlockKey, normalizedEmail);
-			console.log("[LOGIN] Master unlock key stored:", performance.now() - startTime, "ms");
+			console.log(
+				"[LOGIN] Master unlock key stored:",
+				performance.now() - startTime,
+				"ms",
+			);
 			await storage.storeServerUrl(normalizedServerUrl, normalizedEmail);
-			console.log("[LOGIN] Server URL stored:", performance.now() - startTime, "ms (total store time:", performance.now() - storeStart, "ms)");
+			console.log(
+				"[LOGIN] Server URL stored:",
+				performance.now() - startTime,
+				"ms (total store time:",
+				performance.now() - storeStart,
+				"ms)",
+			);
 
 			// Create account metadata
 			console.log("[LOGIN] Creating account metadata...");
@@ -238,22 +337,46 @@ export default function LoginScreen() {
 			console.log("[LOGIN] Adding account to list...");
 			const accountListStart = performance.now();
 			await storage.addAccountToList(accountMetadata);
-			console.log("[LOGIN] Account added to list:", performance.now() - startTime, "ms (took", performance.now() - accountListStart, "ms)");
+			console.log(
+				"[LOGIN] Account added to list:",
+				performance.now() - startTime,
+				"ms (took",
+				performance.now() - accountListStart,
+				"ms)",
+			);
 			await storage.setActiveAccount(normalizedEmail);
-			console.log("[LOGIN] Active account set:", performance.now() - startTime, "ms");
+			console.log(
+				"[LOGIN] Active account set:",
+				performance.now() - startTime,
+				"ms",
+			);
 
 			// Refresh account context
 			console.log("[LOGIN] Refreshing accounts...");
 			const refreshStart = performance.now();
 			await refreshAccounts();
-			console.log("[LOGIN] Accounts refreshed:", performance.now() - startTime, "ms (took", performance.now() - refreshStart, "ms)");
+			console.log(
+				"[LOGIN] Accounts refreshed:",
+				performance.now() - startTime,
+				"ms (took",
+				performance.now() - refreshStart,
+				"ms)",
+			);
 
 			// Navigate to vault
-			console.log("[LOGIN] Navigating to vault... Total time:", performance.now() - startTime, "ms");
+			console.log(
+				"[LOGIN] Navigating to vault... Total time:",
+				performance.now() - startTime,
+				"ms",
+			);
 			router.replace("/(vault)");
 		} catch (error) {
 			console.error("[LOGIN] Login error:", error);
-			console.error("[LOGIN] Error occurred at:", performance.now() - startTime, "ms");
+			console.error(
+				"[LOGIN] Error occurred at:",
+				performance.now() - startTime,
+				"ms",
+			);
 			Alert.alert(
 				"Error",
 				error instanceof Error ? error.message : "Login failed",
@@ -389,7 +512,7 @@ export default function LoginScreen() {
 							{/* Biometric Toggle */}
 							{biometricAvailable && (
 								<View className="flex-row items-center justify-between rounded-lg border border-input bg-background px-4 py-3">
-									<View className="flex-row items-center flex-1 mr-3">
+									<View className="mr-3 flex-1 flex-row items-center">
 										<Fingerprint size={20} color="#6b7280" />
 										<View className="ml-3 flex-1">
 											<Text className="text-foreground">

@@ -1,0 +1,314 @@
+/**
+ * WASM Crypto - Rust-based cryptographic operations via WebAssembly
+ *
+ * Provides the same interface as @bittery/crypto for drop-in replacement
+ * in the browser extension, using native Rust crypto compiled to WASM.
+ *
+ * Note: In Manifest V3 service workers, WASM needs to be initialized
+ * on each wake from idle, so we use auto-init pattern.
+ */
+
+import init, {
+	decrypt as wasmDecrypt,
+	deriveKeys as wasmDeriveKeys,
+	encrypt as wasmEncrypt,
+	generateEncryptionKey as wasmGenerateEncryptionKey,
+	JsEncryptedData,
+	JsSrpClient,
+	type JsSession,
+} from "@bittery/crypto-wasm";
+
+// ============================================================================
+// Types (matching @bittery/crypto interfaces)
+// ============================================================================
+
+export interface DerivedKeys {
+	authKey: Uint8Array;
+	masterUnlockKey: Uint8Array;
+}
+
+export interface EncryptedData {
+	ciphertext: string;
+	iv: string;
+	algorithm: string;
+}
+
+export interface SRPClientEphemeral {
+	publicKey: string;
+	secret: string;
+}
+
+export interface SRPServerChallenge {
+	salt: string;
+	serverPublicKey: string;
+}
+
+export interface SRPClientSession {
+	key: string;
+	proof: string;
+}
+
+// ============================================================================
+// WASM Initialization
+// ============================================================================
+
+let initialized = false;
+let initPromise: Promise<void> | null = null;
+
+/**
+ * Initialize the WASM crypto module.
+ * Must be called before using any crypto functions.
+ * Safe to call multiple times - will only initialize once.
+ */
+export async function initWasmCrypto(): Promise<void> {
+	if (initialized) return;
+	if (initPromise) return initPromise;
+
+	initPromise = (async () => {
+		await init();
+		initialized = true;
+		console.log("[WASM Crypto] Initialized successfully");
+	})();
+
+	return initPromise;
+}
+
+/**
+ * Check if WASM crypto is initialized
+ */
+export function isWasmInitialized(): boolean {
+	return initialized;
+}
+
+/**
+ * Ensure WASM is initialized, throw if not
+ */
+function ensureInitialized(): void {
+	if (!initialized) {
+		throw new Error(
+			"WASM crypto not initialized. Call initWasmCrypto() first.",
+		);
+	}
+}
+
+/**
+ * Auto-initialize WASM if needed
+ */
+async function autoInit(): Promise<void> {
+	if (!initialized) {
+		await initWasmCrypto();
+	}
+}
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
+function base64ToUint8Array(base64: string): Uint8Array {
+	const binaryString = atob(base64);
+	const bytes = new Uint8Array(binaryString.length);
+	for (let i = 0; i < binaryString.length; i++) {
+		bytes[i] = binaryString.charCodeAt(i);
+	}
+	return bytes;
+}
+
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+	const binaryString = String.fromCharCode(...bytes);
+	return btoa(binaryString);
+}
+
+/**
+ * Convert an ArrayBuffer or Uint8Array to base64 string
+ */
+export function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
+	const bytes =
+		buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+	return uint8ArrayToBase64(bytes);
+}
+
+/**
+ * Convert base64 to Uint8Array
+ */
+export function base64ToArrayBuffer(base64: string): Uint8Array {
+	return base64ToUint8Array(base64);
+}
+
+// ============================================================================
+// Key Derivation (matching @bittery/crypto/key-derivation)
+// ============================================================================
+
+/**
+ * Derive authentication and master unlock keys from password + secret key
+ */
+export async function deriveKeys(
+	accountPassword: string,
+	secretKey: string,
+	email: string,
+): Promise<DerivedKeys> {
+	await autoInit();
+
+	const result = wasmDeriveKeys(accountPassword, secretKey, email);
+
+	return {
+		authKey: base64ToUint8Array(result.auth_key),
+		masterUnlockKey: base64ToUint8Array(result.master_unlock_key),
+	};
+}
+
+// ============================================================================
+// AES-256-GCM Encryption (matching @bittery/crypto/encryption)
+// ============================================================================
+
+/**
+ * Encrypt plaintext using AES-256-GCM
+ */
+export async function encrypt(
+	plaintext: string,
+	key: Uint8Array,
+): Promise<EncryptedData> {
+	await autoInit();
+
+	const keyBase64 = uint8ArrayToBase64(key);
+	const result = wasmEncrypt(plaintext, keyBase64);
+
+	return {
+		ciphertext: result.ciphertext,
+		iv: result.iv,
+		algorithm: result.algorithm,
+	};
+}
+
+/**
+ * Decrypt ciphertext using AES-256-GCM
+ */
+export async function decrypt(
+	data: EncryptedData,
+	key: Uint8Array,
+): Promise<string> {
+	await autoInit();
+
+	const keyBase64 = uint8ArrayToBase64(key);
+
+	// Create a proper JsEncryptedData WASM instance for decryption
+	const wasmData = new JsEncryptedData(
+		data.ciphertext,
+		data.iv,
+		data.algorithm,
+	);
+
+	return wasmDecrypt(wasmData, keyBase64);
+}
+
+/**
+ * Generate a random 256-bit encryption key
+ */
+export async function generateEncryptionKey(): Promise<Uint8Array> {
+	await autoInit();
+
+	const keyBase64 = wasmGenerateEncryptionKey();
+	return base64ToUint8Array(keyBase64);
+}
+
+// ============================================================================
+// SRP-6a Client (matching @bittery/crypto/srp-client)
+// ============================================================================
+
+// Cached SRP client instance (reuse for better performance)
+let srpClient: JsSrpClient | null = null;
+
+// Cache for JsSession objects (needed because verifySession requires the actual WASM object)
+// Keyed by session proof string
+const sessionCache = new Map<string, JsSession>();
+
+function getSrpClient(): JsSrpClient {
+	ensureInitialized();
+	if (!srpClient) {
+		srpClient = new JsSrpClient("SHA-256", 4096);
+	}
+	return srpClient;
+}
+
+/**
+ * Generate client ephemeral key pair
+ */
+export function generateClientEphemeral(): SRPClientEphemeral {
+	const client = getSrpClient();
+	const ephemeral = client.generateEphemeral();
+
+	return {
+		publicKey: ephemeral.public,
+		secret: ephemeral.secret,
+	};
+}
+
+/**
+ * Generate client ephemeral key pair (async version for compatibility)
+ */
+export async function generateClientEphemeralAsync(): Promise<SRPClientEphemeral> {
+	await autoInit();
+	return generateClientEphemeral();
+}
+
+/**
+ * Derive client session and proof
+ */
+export async function deriveClientSession(
+	clientEphemeralSecret: string,
+	serverChallenge: SRPServerChallenge,
+	password: string,
+): Promise<SRPClientSession> {
+	await autoInit();
+
+	const client = getSrpClient();
+
+	// First derive the safe private key from the salt and password
+	const privateKey = client.deriveSafePrivateKey(
+		serverChallenge.salt,
+		password,
+	);
+
+	// Then derive the session
+	const session = client.deriveSession(
+		clientEphemeralSecret,
+		serverChallenge.serverPublicKey,
+		serverChallenge.salt,
+		"", // Empty string when using deriveSafePrivateKey
+		privateKey,
+	);
+
+	// Cache the actual JsSession object for later verification
+	// (verifySession requires the WASM object, not a plain JS object)
+	sessionCache.set(session.proof, session);
+
+	return {
+		key: session.key,
+		proof: session.proof,
+	};
+}
+
+/**
+ * Verify server session proof
+ */
+export async function verifyServerSession(
+	clientPublicEphemeral: string,
+	clientSession: SRPClientSession,
+	serverSessionProof: string,
+): Promise<void> {
+	await autoInit();
+
+	const client = getSrpClient();
+
+	// Retrieve the cached JsSession object (required by WASM verifySession)
+	const cachedSession = sessionCache.get(clientSession.proof);
+	if (!cachedSession) {
+		throw new Error(
+			"Session not found in cache. deriveClientSession must be called first.",
+		);
+	}
+
+	client.verifySession(clientPublicEphemeral, cachedSession, serverSessionProof);
+
+	// Clean up the cached session after successful verification
+	sessionCache.delete(clientSession.proof);
+}
