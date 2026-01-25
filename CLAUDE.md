@@ -59,6 +59,13 @@ pnpm run build:desktop         # Build Tauri desktop app
 pnpm run build:extension       # Build Chrome extension
 ```
 
+### Mobile Native Crypto (requires Rust toolchain)
+```bash
+cd packages/crypto-nitro
+./scripts/build-android.sh     # Build Android .so files (requires Android NDK)
+./scripts/build-ios.sh         # Build iOS xcframework (requires Xcode)
+```
+
 ## Architecture Overview
 
 ### Monorepo Structure
@@ -69,11 +76,14 @@ bittery/
 │   ├── server/           # Hono + tRPC API server (Bun runtime)
 │   ├── web/              # React web app (TanStack Router + Query)
 │   ├── desktop/          # Tauri desktop app
-│   └── extension/        # Chrome/Firefox browser extension
+│   ├── extension/        # Chrome/Firefox browser extension
+│   └── mobile/           # React Native app (Expo)
 ├── packages/
 │   ├── api/              # tRPC router definitions (auth, vault, team)
 │   ├── auth/             # SRP-6a authentication logic
-│   ├── crypto/           # Encryption, key derivation, RSA utilities
+│   ├── bittery-crypto/   # Rust crypto core (WASM, NAPI, FFI builds)
+│   ├── crypto/           # TypeScript types + platform storage adapters
+│   ├── crypto-nitro/     # Expo module for React Native (wraps Rust FFI)
 │   ├── db/               # Drizzle ORM schema + migrations
 │   ├── storage/          # S3 storage integration
 │   ├── shared/           # Shared utilities and tRPC client helpers
@@ -204,18 +214,29 @@ RSA-4096 Keys (per user):
 - User decrypts vault key with their RSA private key
 - No plaintext vault keys ever reach the server
 
-### Crypto Package (`packages/crypto`)
+### Crypto Architecture
 
-Key modules:
-- `encryption.ts` - AES-256-GCM encryption/decryption using Web Crypto API
-- `key-derivation.ts` - PBKDF2 + HKDF for Master Unlock Key derivation
-- `secret-key.ts` - Generate/validate 1Password-style Secret Keys (A3-XXXXXX format)
-- `rsa.ts` - RSA-4096 key pair generation and encryption
-- `srp-client.ts` - Client-side SRP-6a implementation
-- `srp-server.ts` - Server-side SRP-6a verification
+All crypto operations use a unified Rust core (`packages/bittery-crypto/`) compiled to platform-specific bindings:
+
+| Platform | Binding | Wrapper Location |
+|----------|---------|------------------|
+| Web | WASM | `apps/web/src/lib/wasm-crypto.ts` |
+| Server | NAPI | `@bittery/crypto-napi` (used by `packages/crypto/src/srp-server.ts`) |
+| Desktop | Tauri commands | `apps/desktop/src/lib/tauri-crypto.ts` |
+| Extension | WASM | `apps/extension/src/lib/wasm-crypto.ts` |
+| Mobile | Expo module | `apps/mobile/src/lib/crypto/` (wraps `@bittery/crypto-nitro`) |
+
+**`packages/crypto/`** - TypeScript types and platform-specific storage adapters:
 - `session-storage.ts` - Multi-tiered session storage (localStorage + sessionStorage)
 - `storage-chrome.ts` - Chrome extension storage adapter
 - `storage-tauri.ts` - Tauri secure storage adapter
+- `storage-react-native.ts` - React Native storage adapter
+
+**`packages/bittery-crypto/`** - Rust workspace with crates:
+- `bittery-crypto-core` - Core crypto primitives (key derivation, AES-GCM, RSA, SRP-6a)
+- `bittery-crypto-wasm` - WASM bindings via wasm-bindgen
+- `bittery-crypto-napi` - NAPI bindings for Bun/Node server
+- `bittery-crypto-ffi` - C FFI + JNI for React Native
 
 **Important: Master Unlock Key is kept in memory only during active session. Never persisted unencrypted.**
 
@@ -256,23 +277,26 @@ Key components:
 
 **Desktop App** (`apps/desktop`):
 - Built with Tauri 2 (Rust backend, React frontend)
+- Crypto via Tauri commands in `src-tauri/src/crypto_commands.rs` (calls `bittery-crypto-core` directly)
 - Biometric unlock via Tauri plugins (Touch ID/Face ID)
 - Native messaging host for extension-to-desktop communication
-- Rust code in `src-tauri/` handles native features
 
 **Browser Extension** (`apps/extension`):
 - Chrome Manifest V3 extension
+- Crypto via WASM loaded in service worker (`src/lib/wasm-crypto.ts`)
 - Background service worker manages Master Unlock Key in memory
 - Auto-lock with configurable timeout (10 min default)
-- Autofill overlay with hostname filtering
-- Content script injects autofill UI
 - Native messaging bridge to desktop app for biometric unlock
 
 **Web App** (`apps/web`):
-- TanStack Router for routing with type-safe navigation
-- TanStack Query for server state management
+- TanStack Router + TanStack Query
+- Crypto via WASM (`src/lib/wasm-crypto.ts`), initialized in router
 - Sign-up/sign-in flows complete with emergency kit download
-- Main vault UI is minimal/placeholder (desktop/extension are primary)
+
+**Mobile App** (`apps/mobile`):
+- React Native with Expo
+- Crypto via `@bittery/crypto-nitro` Expo module (Rust FFI)
+- Credential Provider module (`modules/credential-provider/`) for Android autofill, uses same native crypto
 
 ### Development Guidelines
 
@@ -298,9 +322,10 @@ Key components:
 - Radix UI for accessible primitives
 
 **Cross-Platform:**
-- Store crypto operations in `packages/crypto` for code reuse
-- Platform-specific storage adapters in `storage-chrome.ts` / `storage-tauri.ts`
-- Use conditional imports for platform-specific features
+- All crypto uses Rust core (`packages/bittery-crypto/`) with platform-specific bindings
+- Each app has its own crypto wrapper (see Crypto Architecture section)
+- Platform-specific storage adapters in `packages/crypto/src/storage-*.ts`
+- Never import crypto primitives from `@bittery/crypto` directly - use app-specific wrappers
 
 **Item Types:**
 - Supported categories: `login`, `secure-note`, `credit-card`, `identity`
