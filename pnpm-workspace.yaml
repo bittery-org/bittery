@@ -1,8 +1,9 @@
 packages:
   - apps/*
   - packages/*
-  - packages/bittery-crypto/pkg
-  - packages/bittery-crypto/crates/bittery-crypto-napi
+  - packages/crypto/wasm
+  - packages/crypto/napi
+  - packages/crypto/expo-module
 
 catalog:
   '@trpc/client': ^11.5.0

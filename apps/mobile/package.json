@@ -17,7 +17,6 @@
 	},
 	"dependencies": {
 		"@bittery/api": "workspace:*",
-		"@bittery/crypto": "workspace:*",
 		"@bittery/storage": "workspace:*",
 		"@bittery/crypto-nitro": "workspace:*",
 		"@bittery/shared": "workspace:*",

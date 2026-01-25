@@ -1,0 +1,22 @@
+[package]
+name = "bittery-crypto-napi"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "NAPI bindings for Bittery crypto (Node.js/Bun server)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+bittery-crypto-core = { path = "../core/crates/bittery-crypto-core" }
+napi = { version = "2", default-features = false, features = ["napi4"] }
+napi-derive = "2"
+base64 = "0.22"
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true
+opt-level = 3

@@ -31,7 +31,6 @@
 		"drizzle-orm": "catalog:",
 		"@bittery/auth": "workspace:*",
 		"@bittery/db": "workspace:*",
-		"@bittery/crypto": "workspace:*",
 		"@aws-sdk/client-s3": "^3.888.0",
 		"@aws-sdk/s3-request-presigner": "^3.888.0",
 		"nanoid": "^5.0.0"

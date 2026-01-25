@@ -61,7 +61,7 @@ pnpm run build:extension       # Build Chrome extension
 
 ### Mobile Native Crypto (requires Rust toolchain)
 ```bash
-cd packages/crypto-nitro
+cd packages/crypto/expo-module
 ./scripts/build-android.sh     # Build Android .so files (requires Android NDK)
 ./scripts/build-ios.sh         # Build iOS xcframework (requires Xcode)
 ```
@@ -81,9 +81,11 @@ bittery/
 ├── packages/
 │   ├── api/              # tRPC router definitions (auth, vault, team)
 │   ├── auth/             # SRP-6a authentication logic
-│   ├── bittery-crypto/   # Rust crypto core (WASM, NAPI, FFI builds)
-│   ├── crypto/           # TypeScript types + platform storage adapters
-│   ├── crypto-nitro/     # Expo module for React Native (wraps Rust FFI)
+│   ├── crypto/           # Unified crypto package
+│   │   ├── core/         # Rust workspace (WASM, FFI builds)
+│   │   ├── wasm/         # Built WASM package (@bittery/crypto-wasm)
+│   │   ├── napi/         # Standalone NAPI package (@bittery/crypto-napi)
+│   │   └── expo-module/  # Expo module for React Native (@bittery/crypto-nitro)
 │   ├── db/               # Drizzle ORM schema + migrations
 │   ├── storage/          # S3 storage integration
 │   ├── shared/           # Shared utilities and tRPC client helpers
@@ -216,7 +218,7 @@ RSA-4096 Keys (per user):
 
 ### Crypto Architecture
 
-All crypto operations use a unified Rust core (`packages/bittery-crypto/`) compiled to platform-specific bindings:
+All crypto operations use a unified Rust core (`packages/crypto/core/`) compiled to platform-specific bindings:
 
 | Platform | Binding | Wrapper Location |
 |----------|---------|------------------|
@@ -232,11 +234,13 @@ All crypto operations use a unified Rust core (`packages/bittery-crypto/`) compi
 - `storage-tauri.ts` - Tauri secure storage adapter
 - `storage-react-native.ts` - React Native storage adapter
 
-**`packages/bittery-crypto/`** - Rust workspace with crates:
+**`packages/crypto/core/`** - Rust workspace with crates:
 - `bittery-crypto-core` - Core crypto primitives (key derivation, AES-GCM, RSA, SRP-6a)
-- `bittery-crypto-wasm` - WASM bindings via wasm-bindgen
-- `bittery-crypto-napi` - NAPI bindings for Bun/Node server
+- `bittery-crypto-wasm` - WASM bindings via wasm-bindgen (builds to `packages/crypto/wasm/`)
 - `bittery-crypto-ffi` - C FFI + JNI for React Native
+
+**`packages/crypto/napi/`** - Standalone NAPI package:
+- NAPI bindings for Bun/Node server (depends on core via path)
 
 **Important: Master Unlock Key is kept in memory only during active session. Never persisted unencrypted.**
 
