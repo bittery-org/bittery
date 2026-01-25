@@ -18,9 +18,11 @@
 	"dependencies": {
 		"@bittery/api": "workspace:*",
 		"@bittery/crypto": "workspace:*",
+		"@bittery/storage": "workspace:*",
 		"@bittery/crypto-nitro": "workspace:*",
 		"@bittery/shared": "workspace:*",
 		"@bittery/sync": "workspace:*",
+		"@bittery/types": "workspace:*",
 		"@craftzdog/react-native-buffer": "^6.1.1",
 		"@expo/metro-runtime": "^6.1.2",
 		"@react-native-community/netinfo": "^11.4.1",

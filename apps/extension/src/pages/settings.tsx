@@ -1,8 +1,4 @@
-import {
-	DEFAULT_AUTO_LOCK_TIMEOUT_MS,
-	getAutoLockTimeoutOrDefault,
-	storeAutoLockTimeout,
-} from "@bittery/crypto/storage-chrome";
+import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "../lib/storage";
 import {
 	Button,
 	Label,
@@ -46,7 +42,7 @@ export function SettingsPage() {
 	const autoLockTimeoutQuery = useQuery({
 		queryKey: ["autoLockTimeout"],
 		queryFn: async () => {
-			const timeout = await getAutoLockTimeoutOrDefault();
+			const timeout = await storage.getAutoLockTimeoutOrDefault();
 			return timeout;
 		},
 	});
@@ -60,7 +56,7 @@ export function SettingsPage() {
 
 	const handleAutoLockTimeoutChange = async (value: string) => {
 		const timeoutMs = Number.parseInt(value, 10);
-		await storeAutoLockTimeout(timeoutMs);
+		await storage.storeAutoLockTimeout(timeoutMs);
 		setAutoLockTimeout(value);
 		queryClient.invalidateQueries({ queryKey: ["autoLockTimeout"] });
 		toast.success("Auto-lock timeout updated");

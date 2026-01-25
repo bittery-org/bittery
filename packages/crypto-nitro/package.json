@@ -25,7 +25,11 @@
     "react": "*",
     "react-native": "*"
   },
+  "dependencies": {
+    "@bittery/types": "workspace:*"
+  },
   "devDependencies": {
-    "expo-modules-core": "~3.0.29"
+    "expo-modules-core": "~3.0.29",
+    "@bittery/config": "workspace:*"
   }
 }

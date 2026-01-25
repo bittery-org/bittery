@@ -3,10 +3,6 @@
  * Displayed when biometric re-authentication is required
  */
 
-import type {
-	BiometricAuthResult,
-	BiometricErrorType,
-} from "@bittery/crypto/storage-react-native";
 import { useRouter } from "expo-router";
 import {
 	AlertCircle,
@@ -25,7 +21,11 @@ import {
 	View,
 } from "react-native";
 
-import * as storage from "../services/storage";
+import {
+	storage,
+	type BiometricAuthResult,
+	type BiometricErrorType,
+} from "../services/storage";
 import { useBiometricAuth } from "../contexts/biometric-auth-context";
 
 interface BiometricAuthModalProps {

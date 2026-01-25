@@ -1,5 +1,5 @@
 import { encrypt } from "../../lib/tauri-crypto";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { storage } from "@/lib/storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -102,7 +102,7 @@ export function ImportDialog({
 
 			// Get vault key for encryption
 			setImportStatus("encrypting");
-			const vaultKey = await tauriStorage.getDecryptedVaultKey(vaultId);
+			const vaultKey = await storage.getDecryptedVaultKey(vaultId);
 			if (!vaultKey) {
 				throw new Error("Failed to get vault key for encryption");
 			}

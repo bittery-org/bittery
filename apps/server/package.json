@@ -17,7 +17,6 @@
 		"zod": "catalog:",
 		"drizzle-orm": "catalog:",
 		"@bittery/api": "workspace:*",
-		"@bittery/storage": "workspace:*",
 		"@bittery/auth": "workspace:*",
 		"@bittery/db": "workspace:*"
 	},

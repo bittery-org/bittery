@@ -8,7 +8,6 @@
 import {
 	createSRPClient,
 	createSRPServer,
-	type EncryptedData,
 	type HashAlgorithm,
 	decrypt as nativeDecrypt,
 	deriveKeys as nativeDeriveKeys,
@@ -21,18 +20,30 @@ import {
 	rsaEncrypt as nativeRsaEncrypt,
 	validateSecretKey as nativeValidateSecretKey,
 	type PrimeGroup,
-	type RsaKeyPair,
 } from "@bittery/crypto-nitro";
+import type {
+	DerivedKeys,
+	EncryptedData,
+	RsaKeyPair,
+	SRPClientEphemeral,
+	SRPClientSession,
+	SRPRegistration,
+	SRPServerChallenge,
+} from "@bittery/types";
 
-// DerivedKeys interface matching @bittery/crypto/key-derivation
-// Uses Uint8Array for compatibility with existing code
-export interface DerivedKeys {
-	authKey: Uint8Array;
-	masterUnlockKey: Uint8Array;
-}
+// Re-export types from @bittery/types
+export type {
+	DerivedKeys,
+	EncryptedData,
+	RsaKeyPair,
+	SRPClientEphemeral,
+	SRPClientSession,
+	SRPRegistration,
+	SRPServerChallenge,
+};
 
-// Re-export types
-export type { EncryptedData, RsaKeyPair, HashAlgorithm, PrimeGroup };
+// Re-export crypto-nitro specific types
+export type { HashAlgorithm, PrimeGroup };
 
 // ============================================================================
 // Key Derivation
@@ -49,13 +60,8 @@ export async function deriveKeys(
 	secretKey: string,
 	email: string,
 ): Promise<DerivedKeys> {
-	const result = await nativeDeriveKeys(password, secretKey, email);
-
-	// Convert base64 strings to Uint8Array for compatibility
-	return {
-		authKey: base64ToArrayBuffer(result.authKey),
-		masterUnlockKey: base64ToArrayBuffer(result.masterUnlockKey),
-	};
+	// Native module already returns Uint8Array values
+	return nativeDeriveKeys(password, secretKey, email);
 }
 
 // ============================================================================
@@ -229,28 +235,8 @@ export function createBitterySRPServer() {
 
 // ============================================================================
 // SRP-6a Helper Functions
-// These match the interface from @bittery/crypto/srp-client.ts
+// These match the interface from @bittery/types
 // ============================================================================
-
-export interface SRPRegistration {
-	salt: string;
-	verifier: string;
-}
-
-export interface SRPClientEphemeral {
-	publicKey: string;
-	secret: string;
-}
-
-export interface SRPServerChallenge {
-	salt: string;
-	serverPublicKey: string;
-}
-
-export interface SRPClientSession {
-	key: string;
-	proof: string;
-}
 
 // Singleton client instance (reused for all SRP operations)
 let _srpClient: ReturnType<typeof createSRPClient> | null = null;

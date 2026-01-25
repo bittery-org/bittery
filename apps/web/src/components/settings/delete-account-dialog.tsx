@@ -1,4 +1,4 @@
-import { clearAllStoredData } from "@bittery/crypto/session-storage";
+import { storage } from "@/lib/storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	AlertDialog,
@@ -29,8 +29,8 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 	const deleteAccountMutation = useMutation({
 		mutationFn: (input: { confirmEmail: string }) =>
 			trpcClient.auth.deleteAccount.mutate(input),
-		onSuccess: () => {
-			clearAllStoredData();
+		onSuccess: async () => {
+			await storage.clearAllStoredData();
 			toast.success("Account deleted successfully");
 			navigate({ to: "/" });
 		},

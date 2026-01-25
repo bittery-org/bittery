@@ -1,4 +1,4 @@
-import { normalizeServerUrl } from "@bittery/crypto/server-url";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import {

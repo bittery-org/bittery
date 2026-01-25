@@ -1,5 +1,4 @@
-import { normalizeServerUrl } from "@bittery/crypto/server-url";
-import type { AccountMetadata } from "@bittery/crypto/storage-react-native";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { useRouter } from "expo-router";
 import {
 	Eye,
@@ -31,7 +30,7 @@ import {
 	verifyServerSession,
 } from "../../src/lib/crypto";
 import { useServerUrl, useTRPCClient } from "../../src/lib/trpc";
-import * as storage from "../../src/services/storage";
+import { storage, type AccountMetadata } from "../../src/services/storage";
 
 const DEFAULT_SERVER_URL =
 	process.env.EXPO_PUBLIC_SERVER_URL || "http://localhost:3000";

@@ -19,6 +19,8 @@
 		"./identity": "./src/identity.ts",
 		"./totp": "./src/totp.ts",
 		"./trpc": "./src/trpc.ts",
+		"./crypto": "./src/crypto.ts",
+		"./server-url": "./src/server-url.ts",
 		"./types": "./src/types.ts"
 	},
 	"dependencies": {

@@ -3,7 +3,6 @@
  * Handles app state changes and biometric re-authentication when returning from background
  */
 
-import type { BiometricAuthResult } from "@bittery/crypto/storage-react-native";
 import { useRouter } from "expo-router";
 import {
 	createContext,
@@ -16,9 +15,9 @@ import {
 } from "react";
 import { AppState, type AppStateStatus, Platform } from "react-native";
 
-import { arrayBufferToBase64 } from "@bittery/crypto/key-derivation";
+import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import CredentialProvider from "../../modules/credential-provider";
-import * as storage from "../services/storage";
+import { storage, type BiometricAuthResult } from "../services/storage";
 import { useAccount } from "./account-context";
 
 interface BiometricAuthContextValue {
@@ -151,9 +150,9 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 			// Restore MUK to memory after successful biometric auth
 			// This ensures decryption queries can run immediately without polling
 			try {
-				const muk = await storage.decryptStoredMasterUnlockKey(
-					true, // Skip biometric since we just authenticated
+				const muk = await storage.decryptStoredMasterUnlockKeyPublic(
 					activeAccount.email,
+					true, // Skip biometric since we just authenticated
 				);
 				if (muk) {
 					// Store in React Native memory cache
@@ -191,7 +190,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 		}
 
 		// Check biometric auth requirement
-		const biometricRequired = await storage.isBiometricAuthRequired(
+		const biometricRequired = await storage.isBiometricAuthRequiredPublic(
 			activeAccount.email,
 		);
 

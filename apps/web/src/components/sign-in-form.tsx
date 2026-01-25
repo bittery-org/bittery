@@ -1,19 +1,6 @@
-import { normalizeServerUrl } from "@bittery/crypto/server-url";
-import {
-	getServerUrl,
-	getStoredSecretKey,
-	getStoredSessionData,
-	getTimeUntilExpiry,
-	hasStoredSecretKey,
-	isSessionValid,
-	storeAuthToken,
-	storeEncryptedPrivateKey,
-	storeMasterUnlockKey,
-	storeSecretKey,
-	storeServerUrl,
-	storeSessionData,
-	storeVaultKeys,
-} from "@bittery/crypto/session-storage";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
+import { storage } from "@/lib/storage";
+import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import {
 	deriveClientSession,
 	deriveKeys,
@@ -40,22 +27,27 @@ export default function SignInForm({
 	const trpcClient = useTRPCClient();
 	const defaultServerUrl = import.meta.env.VITE_SERVER_URL ?? "";
 	const [_email, setEmail] = useState("");
-	const [serverUrl, setServerUrl] = useState(
-		() => getServerUrl() ?? defaultServerUrl,
-	);
+	const [serverUrl, setServerUrl] = useState(defaultServerUrl);
 	const [secretKeyHint, setSecretKeyHint] = useState<string | null>(null);
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
 	const [isQuickUnlock, setIsQuickUnlock] = useState(false);
 	const [sessionExpired, setSessionExpired] = useState(false);
 
-	const persistServerUrl = () => {
+	// Load server URL on mount
+	useEffect(() => {
+		storage.getServerUrl().then((url) => {
+			if (url) setServerUrl(url);
+		});
+	}, []);
+
+	const persistServerUrl = async () => {
 		const normalized = normalizeServerUrl(serverUrl);
 		if (!normalized) {
 			toast.error("Invalid server URL");
 			return null;
 		}
-		storeServerUrl(normalized);
+		await storage.storeServerUrl(normalized);
 		if (normalized !== serverUrl) {
 			setServerUrl(normalized);
 		}
@@ -69,7 +61,7 @@ export default function SignInForm({
 			secretKey: "",
 		},
 		onSubmit: async ({ value }) => {
-			if (!persistServerUrl()) {
+			if (!(await persistServerUrl())) {
 				return;
 			}
 			if (!(await validateSecretKey(value.secretKey))) {
@@ -82,30 +74,27 @@ export default function SignInForm({
 
 	// Check if quick unlock is available on mount
 	useEffect(() => {
-		if (hasStoredSecretKey()) {
-			const storedSecretKey = getStoredSecretKey();
-			const sessionData = getStoredSessionData();
+		const checkQuickUnlock = async () => {
+			const storedSecretKey = await storage.getStoredSecretKey();
+			if (!storedSecretKey) return;
 
-			if (storedSecretKey && sessionData) {
-				// Check if session is still valid
-				if (isSessionValid()) {
+			const sessionValid = await storage.isSessionValid();
+			const email = await storage.getActiveAccountEmail();
+
+			if (storedSecretKey && email) {
+				if (sessionValid) {
 					setIsQuickUnlock(true);
-					setEmail(sessionData.email);
-					form.setFieldValue("email", sessionData.email);
+					setEmail(email);
+					form.setFieldValue("email", email);
 					form.setFieldValue("secretKey", storedSecretKey);
 				} else {
 					// Session expired, show message
 					setSessionExpired(true);
-					const timeExpired = Date.now() - sessionData.expiresAt;
-					const daysExpired = Math.floor(timeExpired / (1000 * 60 * 60 * 24));
-					toast.info(
-						`Session expired ${
-							daysExpired > 0 ? `${daysExpired} days ago` : "recently"
-						}. Please sign in again.`,
-					);
+					toast.info("Session expired. Please sign in again.");
 				}
 			}
-		}
+		};
+		checkQuickUnlock();
 	}, [form.setFieldValue]);
 
 	const loginMutation = useMutation({
@@ -162,27 +151,24 @@ export default function SignInForm({
 		},
 		onSuccess: async ({ finishResult, masterUnlockKey }, variables) => {
 			// Store session data
-			storeAuthToken(finishResult.token);
-			storeVaultKeys(finishResult.vaultKeys);
-			storeMasterUnlockKey(masterUnlockKey);
+			await storage.storeAuthToken(finishResult.token);
+			await storage.storeVaultKeys(finishResult.vaultKeys);
+			await storage.setMasterUnlockKey(masterUnlockKey);
 
 			// Store encrypted private key for RSA decryption of shared vault keys
 			if (finishResult.user.encryptedPrivateKey) {
-				storeEncryptedPrivateKey(finishResult.user.encryptedPrivateKey);
+				await storage.storeEncryptedPrivateKey(finishResult.user.encryptedPrivateKey);
 			}
 
 			// Store secret key and encrypted session for quick unlock
-			storeSecretKey(variables.secretKey);
-			await storeSessionData(
+			await storage.storeSecretKey(variables.secretKey);
+			await storage.storeSessionData(
 				masterUnlockKey,
 				variables.email,
 				finishResult.user.id,
 			);
 
-			const timeUntil = getTimeUntilExpiry();
-			const daysUntil = timeUntil
-				? Math.floor(timeUntil / (1000 * 60 * 60 * 24))
-				: 0;
+			const daysUntil = Math.floor(DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24));
 
 			toast.success(
 				`Signed in successfully! Quick unlock available for ${daysUntil} days.`,
@@ -212,9 +198,9 @@ export default function SignInForm({
 		},
 	});
 
-	const handleEmailBlur = (email: string) => {
+	const handleEmailBlur = async (email: string) => {
 		if (email?.includes("@")) {
-			if (!persistServerUrl()) {
+			if (!(await persistServerUrl())) {
 				return;
 			}
 			setEmail(email);
@@ -270,7 +256,7 @@ export default function SignInForm({
 								type="url"
 								placeholder="https://your-server.com"
 								value={serverUrl}
-								onBlur={persistServerUrl}
+								onBlur={() => persistServerUrl()}
 								onChange={(e) => setServerUrl(e.target.value)}
 								required
 								className="h-10"

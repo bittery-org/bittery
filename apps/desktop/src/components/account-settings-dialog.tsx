@@ -1,5 +1,5 @@
-import { normalizeServerUrl } from "@bittery/crypto/server-url";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
+import { storage, DEFAULT_AUTO_LOCK_TIMEOUT_MS } from "@/lib/storage";
 import {
 	Button,
 	Dialog,
@@ -48,7 +48,7 @@ export function AccountSettingsDialog({
 	const queryClient = useQueryClient();
 	const [webAppUrl, setWebAppUrl] = useState("");
 	const [autoLockTimeout, setAutoLockTimeout] = useState(
-		String(tauriStorage.DEFAULT_AUTO_LOCK_TIMEOUT_MS),
+		String(DEFAULT_AUTO_LOCK_TIMEOUT_MS),
 	);
 	const [isDirty, setIsDirty] = useState(false);
 
@@ -56,7 +56,7 @@ export function AccountSettingsDialog({
 	const autoLockTimeoutQuery = useQuery({
 		queryKey: ["autoLockTimeout", email],
 		queryFn: async () => {
-			const timeout = await tauriStorage.getAutoLockTimeoutOrDefault(email);
+			const timeout = await storage.getAutoLockTimeoutOrDefault(email);
 			return timeout;
 		},
 		enabled: open,
@@ -66,7 +66,7 @@ export function AccountSettingsDialog({
 	const webAppUrlQuery = useQuery({
 		queryKey: ["webAppUrl", email],
 		queryFn: async () => {
-			const url = await tauriStorage.getWebAppUrl(email);
+			const url = await storage.getWebAppUrl(email);
 			return url;
 		},
 		enabled: open,
@@ -76,7 +76,7 @@ export function AccountSettingsDialog({
 	const serverUrlQuery = useQuery({
 		queryKey: ["serverUrl"],
 		queryFn: async () => {
-			return await tauriStorage.getServerUrl();
+			return await storage.getServerUrl();
 		},
 		enabled: open,
 	});
@@ -109,15 +109,15 @@ export function AccountSettingsDialog({
 				if (!normalized) {
 					throw new Error("Invalid URL format");
 				}
-				await tauriStorage.storeWebAppUrl(normalized, email);
+				await storage.storeWebAppUrl(normalized, email);
 			} else {
 				// Clear the custom URL to use derived URL
-				await tauriStorage.clearWebAppUrl(email);
+				await storage.clearWebAppUrl(email);
 			}
 
 			// Save auto-lock timeout
 			const timeoutMs = Number.parseInt(timeout, 10);
-			await tauriStorage.storeAutoLockTimeout(timeoutMs, email);
+			await storage.storeAutoLockTimeout(timeoutMs, email);
 		},
 		onSuccess: () => {
 			toast.success("Settings saved successfully");
@@ -147,7 +147,7 @@ export function AccountSettingsDialog({
 			setAutoLockTimeout(
 				String(
 					autoLockTimeoutQuery.data ??
-						tauriStorage.DEFAULT_AUTO_LOCK_TIMEOUT_MS,
+						DEFAULT_AUTO_LOCK_TIMEOUT_MS,
 				),
 			);
 			setIsDirty(false);

@@ -1,4 +1,4 @@
-import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
+import type { AccountMetadata } from "@/lib/storage";
 import { Avatar, AvatarFallback, cn } from "@bittery/ui";
 
 interface AccountAvatarProps {

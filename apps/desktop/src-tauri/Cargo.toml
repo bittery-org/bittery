@@ -39,6 +39,20 @@ base64 = "0.22"
 # Native crypto
 bittery-crypto-core = { path = "../../../packages/bittery-crypto/crates/bittery-crypto-core" }
 
+# OS keychain access (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+# Platform-specific features must be enabled for actual keychain storage
+[target.'cfg(target_os = "macos")'.dependencies.keyring]
+version = "3"
+features = ["apple-native"]
+
+[target.'cfg(target_os = "windows")'.dependencies.keyring]
+version = "3"
+features = ["windows-native"]
+
+[target.'cfg(target_os = "linux")'.dependencies.keyring]
+version = "3"
+features = ["linux-native"]
+
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
 

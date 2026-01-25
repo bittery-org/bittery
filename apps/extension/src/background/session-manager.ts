@@ -3,10 +3,7 @@
  * Manages Master Unlock Key in memory, auto-lock timers, and keepalive mechanism
  */
 
-import {
-	DEFAULT_AUTO_LOCK_TIMEOUT_MS,
-	getAutoLockTimeoutOrDefault,
-} from "@bittery/crypto/storage-chrome";
+import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "../lib/storage";
 import { AUTO_LOCK_ALARM_NAME, KEEPALIVE_INTERVAL_MS } from "./constants";
 
 // In-memory state
@@ -22,7 +19,7 @@ let cachedAutoLockTimeoutMs = DEFAULT_AUTO_LOCK_TIMEOUT_MS;
  * Should be called when settings change or on startup
  */
 export async function refreshAutoLockTimeout(): Promise<void> {
-	cachedAutoLockTimeoutMs = await getAutoLockTimeoutOrDefault();
+	cachedAutoLockTimeoutMs = await storage.getAutoLockTimeoutOrDefault();
 }
 
 /**

@@ -1,4 +1,3 @@
-import type { AccountMetadata } from "@bittery/crypto/storage-react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { Check, Lock, Plus, Settings, Trash2, X } from "lucide-react-native";
@@ -13,7 +12,7 @@ import {
 } from "react-native";
 
 import { useAccount } from "../contexts/account-context";
-import * as storage from "../services/storage";
+import { storage, type AccountMetadata } from "../services/storage";
 
 interface AccountSwitcherProps {
 	visible: boolean;

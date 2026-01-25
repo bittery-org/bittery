@@ -1,7 +1,4 @@
-import {
-	storeVaultKeys,
-	type VaultKeyData,
-} from "@bittery/crypto/session-storage";
+import { storage, type VaultKeyData } from "@/lib/storage";
 import { useTRPC } from "@bittery/shared/trpc";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
@@ -39,6 +36,6 @@ export function useVaultKeysSync() {
 		}));
 
 		// Update sessionStorage with the latest vault keys
-		storeVaultKeys(vaultKeys);
+		storage.storeVaultKeys(vaultKeys);
 	}, [vaults]);
 }

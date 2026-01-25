@@ -1,5 +1,5 @@
-import { arrayBufferToBase64 } from "@bittery/crypto/key-derivation";
-import * as storage from "@bittery/crypto/storage-react-native";
+import { arrayBufferToBase64 } from "@bittery/shared/crypto";
+import { storage } from "@/services/storage";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 

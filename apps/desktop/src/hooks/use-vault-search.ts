@@ -1,5 +1,5 @@
 import { decrypt } from "../lib/tauri-crypto";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { storage } from "@/lib/storage";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
@@ -60,7 +60,7 @@ export function useVaultSearch(query: string): SearchResult {
 				allRawItems.map(async (item) => {
 					try {
 						// Get vault key for decryption
-						const vaultKey = await tauriStorage.decryptVaultKey(
+						const vaultKey = await storage.decryptVaultKey(
 							item.vault.encryptedVaultKey,
 						);
 

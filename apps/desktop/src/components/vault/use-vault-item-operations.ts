@@ -1,5 +1,5 @@
 import { encrypt } from "../../lib/tauri-crypto";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { storage } from "@/lib/storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { toast } from "@bittery/ui";
@@ -50,7 +50,7 @@ export function useVaultItemOperations() {
 	const createItem = useMutation({
 		mutationFn: async (input: CreateItemInput) => {
 			// Get vault key for encryption
-			const vaultKey = await tauriStorage.getDecryptedVaultKey(input.vaultId);
+			const vaultKey = await storage.getDecryptedVaultKey(input.vaultId);
 
 			if (!vaultKey) {
 				throw new Error("No vault key found");
@@ -79,7 +79,7 @@ export function useVaultItemOperations() {
 	const updateItem = useMutation({
 		mutationFn: async (input: UpdateItemInput) => {
 			// Get vault key for encryption
-			const vaultKey = await tauriStorage.getDecryptedVaultKey(input.vaultId);
+			const vaultKey = await storage.getDecryptedVaultKey(input.vaultId);
 
 			if (!vaultKey) {
 				throw new Error("No vault key found");
@@ -155,7 +155,7 @@ export function useVaultItemOperations() {
 	const moveItem = useMutation({
 		mutationFn: async (input: MoveItemInput) => {
 			// Get target vault key for re-encryption
-			const targetVaultKey = await tauriStorage.getDecryptedVaultKey(
+			const targetVaultKey = await storage.getDecryptedVaultKey(
 				input.targetVaultId,
 			);
 

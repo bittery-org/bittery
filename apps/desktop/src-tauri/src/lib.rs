@@ -1,4 +1,5 @@
 mod crypto_commands;
+mod keychain;
 mod native_messaging_installer;
 
 use std::convert::Infallible;
@@ -437,6 +438,16 @@ pub fn run() {
             crypto_commands::crypto_srp_generate_ephemeral,
             crypto_commands::crypto_srp_derive_session,
             crypto_commands::crypto_srp_verify_session,
+            // Key rotation commands
+            crypto_commands::crypto_encrypt_vault_key_for_member,
+            crypto_commands::crypto_encrypt_vault_key_with_muk,
+            crypto_commands::crypto_re_encrypt_item,
+            crypto_commands::crypto_perform_key_rotation,
+            crypto_commands::crypto_validate_rotation_data,
+            // Keychain commands (OS secure storage)
+            keychain::keychain_set,
+            keychain::keychain_get,
+            keychain::keychain_delete,
         ])
         .setup(|app| {
             // Install native messaging host on first run (or if missing)

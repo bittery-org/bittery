@@ -3,7 +3,7 @@
  * Shared utility functions for vault operations
  */
 
-import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import { storage } from "../lib/storage";
 import { decrypt } from "../lib/wasm-crypto";
 import { trpcClient } from "./trpc-client";
 
@@ -56,7 +56,7 @@ export function hostnameMatches(
  * Helper function to decrypt all vault items
  */
 export async function decryptVaultItems() {
-	const vaultKeys = await chromeStorage.getVaultKeys();
+	const vaultKeys = await storage.getVaultKeys();
 
 	if (!vaultKeys || vaultKeys.length === 0) {
 		return [];
@@ -68,7 +68,7 @@ export async function decryptVaultItems() {
 
 	await Promise.all(
 		vaultKeys.map(async (vk) => {
-			decryptedVaultKeys[vk.vaultId] = await chromeStorage.decryptVaultKey(
+			decryptedVaultKeys[vk.vaultId] = await storage.decryptVaultKey(
 				vk.encryptedVaultKey,
 			);
 		}),

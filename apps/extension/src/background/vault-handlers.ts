@@ -3,7 +3,7 @@
  * Handles vault and vault item operations
  */
 
-import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import { storage } from "../lib/storage";
 import { decrypt } from "../lib/wasm-crypto";
 import { updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
@@ -13,7 +13,7 @@ import type { MessageResponse } from "./types";
  * Helper function to decrypt all vault items
  */
 async function decryptVaultItems() {
-	const vaultKeys = await chromeStorage.getVaultKeys();
+	const vaultKeys = await storage.getVaultKeys();
 
 	if (!vaultKeys || vaultKeys.length === 0) {
 		return [];
@@ -25,7 +25,7 @@ async function decryptVaultItems() {
 
 	await Promise.all(
 		vaultKeys.map(async (vk) => {
-			decryptedVaultKeys[vk.vaultId] = await chromeStorage.decryptVaultKey(
+			decryptedVaultKeys[vk.vaultId] = await storage.decryptVaultKey(
 				vk.encryptedVaultKey,
 			);
 		}),
@@ -95,7 +95,7 @@ export async function handleGetVaultItem(payload: {
 	const { itemId } = payload;
 
 	// Get vault keys
-	const vaultKeys = await chromeStorage.getVaultKeys();
+	const vaultKeys = await storage.getVaultKeys();
 	if (!vaultKeys || vaultKeys.length === 0) {
 		return { success: true, item: null };
 	}
@@ -114,7 +114,7 @@ export async function handleGetVaultItem(payload: {
 	}
 
 	// Decrypt item
-	const vaultKey = await chromeStorage.decryptVaultKey(
+	const vaultKey = await storage.decryptVaultKey(
 		vaultKeyData.encryptedVaultKey,
 	);
 

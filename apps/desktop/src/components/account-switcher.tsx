@@ -1,4 +1,4 @@
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { storage } from "@/lib/storage";
 import {
 	Button,
 	DropdownMenu,
@@ -38,7 +38,7 @@ export function AccountSwitcher() {
 			await switchAccount(email);
 
 			// Check if session is valid for the switched account
-			const sessionValid = await tauriStorage.isSessionValid(email);
+			const sessionValid = await storage.isSessionValid(email);
 			if (!sessionValid) {
 				navigate({ to: "/unlock", search: { email } });
 			} else {
@@ -85,8 +85,8 @@ export function AccountSwitcher() {
 			await removeAccount(email);
 
 			// Check if there are any accounts left
-			const accountsList = await tauriStorage.getAccountsList();
-			if (accountsList.accounts.length === 0) {
+			const accountsList = await storage.getAccountsList();
+			if (accountsList.length === 0) {
 				navigate({ to: "/login" });
 			}
 
@@ -103,8 +103,8 @@ export function AccountSwitcher() {
 	// 	if (!activeAccount) return;
 
 	// 	try {
-	// 		await tauriStorage.clearAllStoredData(activeAccount.email);
-	// 		const accountsList = await tauriStorage.getAccountsList();
+	// 		await storage.clearAllStoredData(activeAccount.email);
+	// 		const accountsList = await storage.getAccountsList();
 
 	// 		if (accountsList.accounts.length === 0) {
 	// 			navigate({ to: "/login" });

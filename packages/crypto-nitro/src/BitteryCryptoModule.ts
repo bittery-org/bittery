@@ -18,6 +18,18 @@ const NativeModule = requireNativeModule("BitteryCrypto");
 // ============================================================================
 
 /**
+ * Convert base64 string to Uint8Array
+ */
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/**
  * Derive authentication and master unlock keys from password, secret key, and email.
  * Uses PBKDF2 (100k iterations) + HKDF for key splitting.
  */
@@ -27,10 +39,12 @@ export async function deriveKeys(
   email: string
 ): Promise<DerivedKeys> {
   try {
+    // Native module returns base64-encoded strings
     const result = await NativeModule.deriveKeys(password, secretKey, email);
+    // Convert to Uint8Array to match DerivedKeys interface
     return {
-      authKey: result.authKey,
-      masterUnlockKey: result.masterUnlockKey,
+      authKey: base64ToUint8Array(result.authKey),
+      masterUnlockKey: base64ToUint8Array(result.masterUnlockKey),
     };
   } catch (error) {
     throw new CryptoError(
@@ -389,4 +403,140 @@ export function createSRPServer(
       NativeModule.srpServerFree(serverId);
     },
   };
+}
+
+// ============================================================================
+// Key Rotation
+// ============================================================================
+
+export interface MemberKeyData {
+  userId: string;
+  publicKey: string;
+}
+
+export interface ItemData {
+  id: string;
+  encryptedData: string;
+  encryptionIv: string;
+  encryptionAlgorithm: string;
+}
+
+export interface ReEncryptedItem {
+  itemId: string;
+  encryptedData: string;
+  encryptionIv: string;
+}
+
+export interface MemberEncryptedKey {
+  userId: string;
+  encryptedVaultKey: string;
+}
+
+export interface KeyRotationResult {
+  newVaultKeyBase64: string;
+  memberEncryptedKeys: MemberEncryptedKey[];
+  reEncryptedItems: ReEncryptedItem[];
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * Perform a complete key rotation.
+ * @param oldVaultKeyBase64 - Current vault key (base64)
+ * @param members - Members to encrypt the new key for
+ * @param items - Items to re-encrypt
+ * @param currentUserId - Current user's ID (for MUK encryption)
+ * @param masterUnlockKeyBase64 - Current user's MUK (base64)
+ */
+export async function performKeyRotation(
+  oldVaultKeyBase64: string,
+  members: MemberKeyData[],
+  items: ItemData[],
+  currentUserId: string,
+  masterUnlockKeyBase64: string
+): Promise<KeyRotationResult> {
+  try {
+    const membersJson = JSON.stringify(
+      members.map((m) => ({
+        user_id: m.userId,
+        public_key: m.publicKey,
+      }))
+    );
+    const itemsJson = JSON.stringify(
+      items.map((i) => ({
+        id: i.id,
+        encrypted_data: i.encryptedData,
+        encryption_iv: i.encryptionIv,
+        encryption_algorithm: i.encryptionAlgorithm,
+      }))
+    );
+
+    const result = await NativeModule.performKeyRotation(
+      oldVaultKeyBase64,
+      membersJson,
+      itemsJson,
+      currentUserId,
+      masterUnlockKeyBase64
+    );
+
+    const memberEncryptedKeys = JSON.parse(result.memberEncryptedKeysJson) as Array<{
+      user_id: string;
+      encrypted_vault_key: string;
+    }>;
+    const reEncryptedItems = JSON.parse(result.reEncryptedItemsJson) as Array<{
+      item_id: string;
+      encrypted_data: string;
+      encryption_iv: string;
+    }>;
+
+    return {
+      newVaultKeyBase64: result.newVaultKeyBase64,
+      memberEncryptedKeys: memberEncryptedKeys.map((m) => ({
+        userId: m.user_id,
+        encryptedVaultKey: m.encrypted_vault_key,
+      })),
+      reEncryptedItems: reEncryptedItems.map((i) => ({
+        itemId: i.item_id,
+        encryptedData: i.encrypted_data,
+        encryptionIv: i.encryption_iv,
+      })),
+    };
+  } catch (error) {
+    throw new CryptoError(
+      ErrorCode.EncryptionFailed,
+      `Key rotation failed: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+/**
+ * Validate that rotation can be performed.
+ */
+export async function validateRotationData(
+  members: MemberKeyData[]
+): Promise<ValidationResult> {
+  try {
+    const membersJson = JSON.stringify(
+      members.map((m) => ({
+        user_id: m.userId,
+        public_key: m.publicKey,
+      }))
+    );
+
+    const result = await NativeModule.validateRotationData(membersJson);
+    const errors = JSON.parse(result.errorsJson) as string[];
+
+    return {
+      valid: result.valid === 1,
+      errors,
+    };
+  } catch (error) {
+    throw new CryptoError(
+      ErrorCode.EncryptionFailed,
+      `Validation failed: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 }

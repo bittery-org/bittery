@@ -1,4 +1,4 @@
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { storage } from "@/lib/storage";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	AlertDialog,
@@ -105,7 +105,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 
 	const handleCopyLink = async (token: string) => {
 		// Get the effective web app URL to construct the share link
-		const baseUrl = await tauriStorage.getEffectiveWebAppUrl();
+		const baseUrl = await storage.getEffectiveWebAppUrl();
 		const shareUrl = `${baseUrl}/share/${token}`;
 		copyWithToast(shareUrl, "Link", {
 			autoClearMs: 0,

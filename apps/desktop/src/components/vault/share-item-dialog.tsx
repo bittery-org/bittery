@@ -3,7 +3,7 @@ import {
 	encrypt,
 	generateEncryptionKey,
 } from "../../lib/tauri-crypto";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { storage } from "@/lib/storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
@@ -77,7 +77,7 @@ export function ShareItemDialog({
 	const createShareMutation = useMutation({
 		mutationFn: async () => {
 			// Get the vault key to decrypt item data (using Tauri storage API)
-			const vaultKey = await tauriStorage.getDecryptedVaultKey(item.vaultId);
+			const vaultKey = await storage.getDecryptedVaultKey(item.vaultId);
 			if (!vaultKey) {
 				throw new Error("Could not decrypt vault key. Please log in again.");
 			}
@@ -150,7 +150,7 @@ export function ShareItemDialog({
 
 			// Generate the shareable link with the key in the fragment
 			// For desktop app, we use the effective web app URL (custom or derived from server URL)
-			const baseUrl = await tauriStorage.getEffectiveWebAppUrl();
+			const baseUrl = await storage.getEffectiveWebAppUrl();
 			const shareUrl = `${baseUrl}/share/${result.token}#${shareKeyBase64}`;
 
 			return { ...result, shareUrl };

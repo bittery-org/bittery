@@ -1,4 +1,4 @@
-import { getStoredSecretKey } from "@bittery/crypto/session-storage";
+import { storage } from "@/lib/storage";
 import {
 	decrypt,
 	deriveKeys,
@@ -82,7 +82,7 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			return;
 		}
 
-		const secretKey = getStoredSecretKey();
+		const secretKey = await storage.getStoredSecretKey();
 		if (!secretKey) {
 			toast.error(
 				"Secret key not found. Please log out and log in again with your full credentials.",

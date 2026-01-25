@@ -4,8 +4,8 @@
  */
 
 import type { AppRouter } from "@bittery/api/routers/index";
-import { buildTrpcUrl, normalizeServerUrl } from "@bittery/crypto/server-url";
-import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import { buildTrpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
+import { storage } from "../lib/storage";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 
 const fallbackServerUrl =
@@ -17,13 +17,13 @@ export const trpcClient = createTRPCClient<AppRouter>({
 		httpBatchLink({
 			url: `${fallbackServerUrl}/trpc`,
 			async headers() {
-				const token = await chromeStorage.getAuthToken();
+				const token = await storage.getAuthToken();
 				return {
 					authorization: token ? `Bearer ${token}` : "",
 				};
 			},
 			async fetch(url, options) {
-				const storedServerUrl = await chromeStorage.getServerUrl();
+				const storedServerUrl = await storage.getServerUrl();
 				const serverUrl = storedServerUrl ?? fallbackServerUrl;
 				const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
 				return fetch(resolvedUrl.toString(), options);

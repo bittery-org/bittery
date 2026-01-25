@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { createContext } from "@bittery/api/context";
 import { appRouter } from "@bittery/api/routers/index";
-import { createPresignedDownload } from "@bittery/storage";
+import { createPresignedDownload } from "@bittery/api/storage/s3";
 import { trpcServer } from "@hono/trpc-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";

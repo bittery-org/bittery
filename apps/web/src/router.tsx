@@ -1,7 +1,7 @@
 import type { AppRouter } from "@bittery/api/routers/index";
-import { buildTrpcUrl, normalizeServerUrl } from "@bittery/crypto/server-url";
-import { getAuthToken, getServerUrl } from "@bittery/crypto/session-storage";
+import { buildTrpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
 import { TRPCProvider } from "@bittery/shared/trpc";
+import { storage } from "./lib/storage";
 import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import Loader from "./components/loader";
@@ -47,17 +47,16 @@ const trpcClient = createTRPCClient<AppRouter>({
 	links: [
 		httpBatchLink({
 			url: `${fallbackServerUrl}/trpc`,
-			fetch(url, options) {
-				const serverUrl = getServerUrl() ?? fallbackServerUrl;
+			async fetch(url, options) {
+				const serverUrl = (await storage.getServerUrl()) ?? fallbackServerUrl;
 				const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
+				const authToken = await storage.getAuthToken();
 				return fetch(resolvedUrl, {
 					...options,
 					credentials: "include",
 					headers: {
 						// @ts-expect-error need to fix types upstream
-						Authorization: getAuthToken()
-							? `Bearer ${getAuthToken()}`
-							: undefined,
+						Authorization: authToken ? `Bearer ${authToken}` : undefined,
 						...options?.headers,
 					},
 				});

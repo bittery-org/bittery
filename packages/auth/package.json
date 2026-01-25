@@ -20,7 +20,8 @@
 	},
 	"dependencies": {
 		"@bittery/db": "workspace:*",
-		"@bittery/crypto": "workspace:*",
+		"@bittery/crypto-napi": "workspace:*",
+		"@bittery/types": "workspace:*",
 		"dotenv": "catalog:",
 		"zod": "catalog:",
 		"drizzle-orm": "catalog:",

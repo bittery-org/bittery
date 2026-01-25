@@ -1,10 +1,10 @@
-import { isAuthenticated } from "@bittery/crypto/session-storage";
+import { storage } from "@/lib/storage";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({
 	component: IndexComponent,
-	beforeLoad: () => {
-		if (!isAuthenticated()) {
+	beforeLoad: async () => {
+		if (!(await storage.isAuthenticated())) {
 			throw redirect({ to: "/login" });
 		}
 

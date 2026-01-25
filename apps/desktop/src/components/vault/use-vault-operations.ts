@@ -1,5 +1,5 @@
 import { encrypt, generateEncryptionKey } from "../../lib/tauri-crypto";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { storage } from "@/lib/storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { toast } from "@bittery/ui";
 import { useNavigate } from "@tanstack/react-router";
@@ -55,7 +55,7 @@ export function useVaultOperations() {
 		}
 
 		const vaultKey = await generateEncryptionKey();
-		const masterUnlockKey = await tauriStorage.getMasterUnlockKey();
+		const masterUnlockKey = await storage.getMasterUnlockKey();
 
 		if (!masterUnlockKey) {
 			throw new Error("Master Unlock Key not found");

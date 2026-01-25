@@ -1,4 +1,4 @@
-import { getDecryptedVaultKey } from "@bittery/crypto/session-storage";
+import { storage } from "@/lib/storage";
 import { decrypt } from "@/lib/wasm-crypto";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
@@ -31,7 +31,7 @@ export function useDecryptedItems(vaultId: string) {
 			if (rawItems.length === 0) return [];
 
 			// Get vault key for decryption using web storage
-			const vaultKey = await getDecryptedVaultKey(vaultId);
+			const vaultKey = await storage.getDecryptedVaultKey(vaultId);
 			if (!vaultKey) {
 				throw new Error("No vault key found for decryption");
 			}

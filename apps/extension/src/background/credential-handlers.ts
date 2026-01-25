@@ -3,7 +3,7 @@
  * Handles saving and updating credentials (password capture)
  */
 
-import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import { storage } from "../lib/storage";
 import { encrypt } from "../lib/wasm-crypto";
 import { isUnlocked, updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
@@ -127,7 +127,7 @@ export async function handleSaveNewCredential(payload: {
 	}
 
 	// Get vault key for the selected vault
-	const vaultKeys = await chromeStorage.getVaultKeys();
+	const vaultKeys = await storage.getVaultKeys();
 	if (!vaultKeys || vaultKeys.length === 0) {
 		return {
 			success: false,
@@ -147,7 +147,7 @@ export async function handleSaveNewCredential(payload: {
 
 	try {
 		// Decrypt vault key
-		const vaultKey = await chromeStorage.decryptVaultKey(
+		const vaultKey = await storage.decryptVaultKey(
 			vaultKeyData.encryptedVaultKey,
 		);
 
@@ -253,7 +253,7 @@ export async function handleUpdateExistingCredential(payload: {
 	}
 
 	// Get vault key for the selected vault
-	const vaultKeys = await chromeStorage.getVaultKeys();
+	const vaultKeys = await storage.getVaultKeys();
 	if (!vaultKeys || vaultKeys.length === 0) {
 		return {
 			success: false,
@@ -273,7 +273,7 @@ export async function handleUpdateExistingCredential(payload: {
 
 	try {
 		// Decrypt vault key
-		const vaultKey = await chromeStorage.decryptVaultKey(
+		const vaultKey = await storage.decryptVaultKey(
 			vaultKeyData.encryptedVaultKey,
 		);
 

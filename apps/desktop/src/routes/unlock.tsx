@@ -4,8 +4,7 @@ import {
 	generateClientEphemeral,
 	verifyServerSession,
 } from "../lib/tauri-crypto";
-import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { storage, type AccountMetadata } from "@/lib/storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -57,8 +56,8 @@ export function UnlockPage() {
 		queryFn: async () => {
 			if (!targetEmail) return null;
 
-			const available = await tauriStorage.isBiometricAvailable();
-			const storedData = await tauriStorage.getStoredSessionData(targetEmail);
+			const available = await storage.isBiometricAvailable();
+			const storedData = await storage.getStoredSessionData(targetEmail);
 
 			return {
 				available,
@@ -75,15 +74,15 @@ export function UnlockPage() {
 		setLoading(true);
 		setVaultState("unlocking");
 		try {
-			const success = await tauriStorage.unlockWithBiometric(targetEmail);
+			const success = await storage.unlockWithBiometric(targetEmail);
 			if (success) {
 				// Restore auth token and vault keys
-				const token = await tauriStorage.getAuthToken(targetEmail);
-				const vaultKeys = await tauriStorage.getVaultKeys(targetEmail);
+				const token = await storage.getAuthToken(targetEmail);
+				const vaultKeys = await storage.getVaultKeys(targetEmail);
 
 				if (token && vaultKeys) {
 					// Set as active account
-					await tauriStorage.setActiveAccount(targetEmail);
+					await storage.setActiveAccount(targetEmail);
 					await refreshAccounts();
 					setVaultState("unlocked");
 					toast.success("Unlocked with biometric");
@@ -94,7 +93,7 @@ export function UnlockPage() {
 				} else {
 					setVaultState("locked");
 					toast.error("Session data missing, please log in again");
-					await tauriStorage.clearAllStoredData(targetEmail);
+					await storage.clearAllStoredData(targetEmail);
 					navigate({ to: "/login" });
 				}
 			} else {
@@ -118,17 +117,17 @@ export function UnlockPage() {
 		setVaultState("unlocking");
 
 		try {
-			const secretKey = await tauriStorage.getStoredSecretKey(targetEmail);
+			const secretKey = await storage.getStoredSecretKey(targetEmail);
 			if (!secretKey) {
 				toast.error("Secret key not found. Please log in again.");
-				await tauriStorage.clearAllStoredData(targetEmail);
+				await storage.clearAllStoredData(targetEmail);
 				navigate({ to: "/login" });
 				return;
 			}
 
 			if (!sessionState?.data) {
 				toast.error("Session data not found. Please log in again.");
-				await tauriStorage.clearAllStoredData(targetEmail);
+				await storage.clearAllStoredData(targetEmail);
 				navigate({ to: "/login" });
 				return;
 			}
@@ -184,21 +183,21 @@ export function UnlockPage() {
 			);
 
 			// Update session with fresh data
-			await tauriStorage.storeAuthToken(finishResult.token, targetEmail);
-			await tauriStorage.storeVaultKeys(finishResult.vaultKeys, targetEmail);
+			await storage.storeAuthToken(finishResult.token, targetEmail);
+			await storage.storeVaultKeys(finishResult.vaultKeys, targetEmail);
 			// Store encrypted private key for RSA decryption of shared vault keys
 			if (finishResult.user.encryptedPrivateKey) {
-				await tauriStorage.storeEncryptedPrivateKey(
+				await storage.storeEncryptedPrivateKey(
 					finishResult.user.encryptedPrivateKey,
 					targetEmail,
 				);
 			}
-			await tauriStorage.storeSessionData(
+			await storage.storeSessionData(
 				masterUnlockKey,
 				targetEmail,
 				finishResult.user.id,
 			);
-			await tauriStorage.storeMasterUnlockKey(masterUnlockKey, targetEmail);
+			await storage.storeMasterUnlockKey(masterUnlockKey, targetEmail);
 
 			// Update account metadata with latest team name from server
 			if (targetAccount) {
@@ -207,11 +206,11 @@ export function UnlockPage() {
 					teamName: finishResult.user.teamName,
 					lastActiveAt: Date.now(),
 				};
-				await tauriStorage.addAccountToList(updatedMetadata);
+				await storage.addAccountToList(updatedMetadata);
 			}
 
 			// Set as active account
-			await tauriStorage.setActiveAccount(targetEmail);
+			await storage.setActiveAccount(targetEmail);
 			await refreshAccounts();
 
 			setVaultState("unlocked");

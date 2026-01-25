@@ -1,5 +1,5 @@
 import { encrypt } from "../../lib/tauri-crypto";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { storage } from "@/lib/storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import type { ItemCategory } from "@bittery/shared/types";
 import { toast } from "@bittery/ui";
@@ -29,20 +29,20 @@ export const Route = createFileRoute("/vault")({
 	component: RouteComponent,
 	beforeLoad: async () => {
 		// Get active account
-		const activeEmail = await tauriStorage.getActiveAccountEmail();
+		const activeEmail = await storage.getActiveAccountEmail();
 		if (!activeEmail) {
 			throw redirect({ to: "/login" });
 		}
 
 		// Check if user has stored credentials for active account
-		const hasSecretKey = await tauriStorage.hasStoredSecretKey(activeEmail);
-		const sessionValid = await tauriStorage.isSessionValid(activeEmail);
+		const hasSecretKey = await storage.hasStoredSecretKey(activeEmail);
+		const sessionValid = await storage.isSessionValid(activeEmail);
 
 		if (!hasSecretKey || !sessionValid) {
 			throw redirect({ to: "/unlock", search: { email: activeEmail } });
 		}
 
-		const restored = await tauriStorage.tryRestoreSession(true, activeEmail);
+		const restored = await storage.tryRestoreSession(true, activeEmail);
 
 		if (!restored) {
 			throw redirect({ to: "/unlock", search: { email: activeEmail } });
@@ -68,7 +68,7 @@ function RouteComponent() {
 	const { data: vaultKeys } = useQuery({
 		queryKey: ["vault-keys"],
 		queryFn: async () => {
-			const keys = await tauriStorage.getVaultKeys();
+			const keys = await storage.getVaultKeys();
 			return keys;
 		},
 	});
@@ -105,7 +105,7 @@ function RouteComponent() {
 	) => {
 		try {
 			// Get vault key for encryption
-			const vaultKey = await tauriStorage.getDecryptedVaultKey(vaultId);
+			const vaultKey = await storage.getDecryptedVaultKey(vaultId);
 
 			if (!vaultKey) {
 				throw new Error("No vault key found");

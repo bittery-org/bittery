@@ -1,5 +1,5 @@
-import { normalizeServerUrl } from "@bittery/crypto/server-url";
-import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
+import { storage } from "../lib/storage";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
@@ -17,7 +17,7 @@ export function LoginPage() {
 
 	useEffect(() => {
 		let active = true;
-		chromeStorage.getServerUrl().then((stored) => {
+		storage.getServerUrl().then((stored) => {
 			if (!active || !stored) return;
 			setServerUrl(stored);
 		});
@@ -32,7 +32,7 @@ export function LoginPage() {
 			toast.error("Invalid server URL");
 			return null;
 		}
-		await chromeStorage.storeServerUrl(normalized);
+		await storage.storeServerUrl(normalized);
 		if (normalized !== serverUrl) {
 			setServerUrl(normalized);
 		}

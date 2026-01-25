@@ -6,46 +6,26 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import type {
+	DerivedKeys,
+	EncryptedData,
+	RsaKeyPair,
+	SRPClientEphemeral,
+	SRPClientSession,
+	SRPRegistration,
+	SRPServerChallenge,
+} from "@bittery/types";
 
-// ============================================================================
-// Types (matching @bittery/crypto interfaces)
-// ============================================================================
-
-export interface DerivedKeys {
-	authKey: Uint8Array;
-	masterUnlockKey: Uint8Array;
-}
-
-export interface EncryptedData {
-	ciphertext: string;
-	iv: string;
-	algorithm: string;
-}
-
-export interface RsaKeyPair {
-	publicKey: string;
-	privateKey: string;
-}
-
-export interface SRPClientEphemeral {
-	publicKey: string;
-	secret: string;
-}
-
-export interface SRPServerChallenge {
-	salt: string;
-	serverPublicKey: string;
-}
-
-export interface SRPClientSession {
-	key: string;
-	proof: string;
-}
-
-export interface SRPRegistration {
-	salt: string;
-	verifier: string;
-}
+// Re-export types for consumers
+export type {
+	DerivedKeys,
+	EncryptedData,
+	RsaKeyPair,
+	SRPClientEphemeral,
+	SRPClientSession,
+	SRPRegistration,
+	SRPServerChallenge,
+};
 
 // ============================================================================
 // Internal response types (from Rust)
@@ -330,4 +310,130 @@ export async function verifyServerSession(
 		sessionProof: clientSession.proof,
 		serverSessionProof,
 	});
+}
+
+// ============================================================================
+// Key Rotation (for vault member removal)
+// ============================================================================
+
+export interface MemberKeyData {
+	userId: string;
+	publicKey: string;
+}
+
+export interface ItemData {
+	id: string;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+}
+
+export interface ReEncryptedItem {
+	itemId: string;
+	encryptedData: string;
+	encryptionIv: string;
+}
+
+export interface MemberEncryptedKey {
+	userId: string;
+	encryptedVaultKey: string;
+}
+
+export interface KeyRotationResult {
+	newVaultKey: Uint8Array;
+	newVaultKeyBase64: string;
+	memberEncryptedKeys: MemberEncryptedKey[];
+	reEncryptedItems: ReEncryptedItem[];
+}
+
+export interface ValidationResult {
+	valid: boolean;
+	errors: string[];
+}
+
+interface KeyRotationResponse {
+	new_vault_key_base64: string;
+	member_encrypted_keys: Array<{
+		user_id: string;
+		encrypted_vault_key: string;
+	}>;
+	re_encrypted_items: Array<{
+		item_id: string;
+		encrypted_data: string;
+		encryption_iv: string;
+	}>;
+}
+
+interface ValidationResponse {
+	valid: boolean;
+	errors: string[];
+}
+
+/**
+ * Perform a complete key rotation
+ */
+export async function performKeyRotation(
+	oldVaultKey: Uint8Array,
+	members: MemberKeyData[],
+	items: ItemData[],
+	currentUserId: string,
+	masterUnlockKey: Uint8Array,
+): Promise<KeyRotationResult> {
+	const oldKeyBase64 = uint8ArrayToBase64(oldVaultKey);
+	const mukBase64 = uint8ArrayToBase64(masterUnlockKey);
+
+	const response = await invoke<KeyRotationResponse>(
+		"crypto_perform_key_rotation",
+		{
+			oldVaultKeyBase64: oldKeyBase64,
+			members: members.map((m) => ({
+				user_id: m.userId,
+				public_key: m.publicKey,
+			})),
+			items: items.map((i) => ({
+				id: i.id,
+				encrypted_data: i.encryptedData,
+				encryption_iv: i.encryptionIv,
+				encryption_algorithm: i.encryptionAlgorithm,
+			})),
+			currentUserId,
+			masterUnlockKeyBase64: mukBase64,
+		},
+	);
+
+	return {
+		newVaultKey: base64ToUint8Array(response.new_vault_key_base64),
+		newVaultKeyBase64: response.new_vault_key_base64,
+		memberEncryptedKeys: response.member_encrypted_keys.map((m) => ({
+			userId: m.user_id,
+			encryptedVaultKey: m.encrypted_vault_key,
+		})),
+		reEncryptedItems: response.re_encrypted_items.map((i) => ({
+			itemId: i.item_id,
+			encryptedData: i.encrypted_data,
+			encryptionIv: i.encryption_iv,
+		})),
+	};
+}
+
+/**
+ * Validate that rotation can be performed
+ */
+export async function validateRotationData(
+	members: MemberKeyData[],
+): Promise<ValidationResult> {
+	const response = await invoke<ValidationResponse>(
+		"crypto_validate_rotation_data",
+		{
+			members: members.map((m) => ({
+				user_id: m.userId,
+				public_key: m.publicKey,
+			})),
+		},
+	);
+
+	return {
+		valid: response.valid,
+		errors: response.errors,
+	};
 }

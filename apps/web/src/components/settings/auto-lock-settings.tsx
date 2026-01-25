@@ -1,8 +1,5 @@
-import {
-	DEFAULT_AUTO_LOCK_TIMEOUT_MS,
-	getAutoLockTimeoutOrDefault,
-	storeAutoLockTimeout,
-} from "@bittery/crypto/session-storage";
+import { storage } from "@/lib/storage";
+import { DEFAULT_AUTO_LOCK_TIMEOUT_MS } from "@bittery/storage";
 import {
 	Label,
 	Select,
@@ -34,17 +31,17 @@ export function AutoLockSettings() {
 
 	// Load current setting on mount
 	useEffect(() => {
-		const loadTimeout = () => {
-			const timeout = getAutoLockTimeoutOrDefault();
+		const loadTimeout = async () => {
+			const timeout = await storage.getAutoLockTimeoutOrDefault();
 			setSelectedTimeout(String(timeout));
 			setIsLoading(false);
 		};
 		loadTimeout();
 	}, []);
 
-	const handleTimeoutChange = (value: string) => {
+	const handleTimeoutChange = async (value: string) => {
 		const timeoutMs = Number.parseInt(value, 10);
-		storeAutoLockTimeout(timeoutMs);
+		await storage.storeAutoLockTimeout(timeoutMs);
 		setSelectedTimeout(value);
 		toast.success("Auto-lock timeout updated");
 	};

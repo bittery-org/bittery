@@ -13,40 +13,27 @@ import init, {
 	deriveKeys as wasmDeriveKeys,
 	encrypt as wasmEncrypt,
 	generateEncryptionKey as wasmGenerateEncryptionKey,
+	rsaDecrypt as wasmRsaDecrypt,
 	JsEncryptedData,
 	JsSrpClient,
 	type JsSession,
 } from "@bittery/crypto-wasm";
+import type {
+	DerivedKeys,
+	EncryptedData,
+	SRPClientEphemeral,
+	SRPClientSession,
+	SRPServerChallenge,
+} from "@bittery/types";
 
-// ============================================================================
-// Types (matching @bittery/crypto interfaces)
-// ============================================================================
-
-export interface DerivedKeys {
-	authKey: Uint8Array;
-	masterUnlockKey: Uint8Array;
-}
-
-export interface EncryptedData {
-	ciphertext: string;
-	iv: string;
-	algorithm: string;
-}
-
-export interface SRPClientEphemeral {
-	publicKey: string;
-	secret: string;
-}
-
-export interface SRPServerChallenge {
-	salt: string;
-	serverPublicKey: string;
-}
-
-export interface SRPClientSession {
-	key: string;
-	proof: string;
-}
+// Re-export types for consumers
+export type {
+	DerivedKeys,
+	EncryptedData,
+	SRPClientEphemeral,
+	SRPClientSession,
+	SRPServerChallenge,
+};
 
 // ============================================================================
 // WASM Initialization
@@ -208,6 +195,21 @@ export async function generateEncryptionKey(): Promise<Uint8Array> {
 
 	const keyBase64 = wasmGenerateEncryptionKey();
 	return base64ToUint8Array(keyBase64);
+}
+
+// ============================================================================
+// RSA-4096 (matching @bittery/crypto/rsa)
+// ============================================================================
+
+/**
+ * Decrypt data with RSA-OAEP using a private key
+ */
+export async function rsaDecrypt(
+	ciphertext: string,
+	privateKeyPem: string,
+): Promise<string> {
+	await autoInit();
+	return wasmRsaDecrypt(ciphertext, privateKeyPem);
 }
 
 // ============================================================================

@@ -73,9 +73,15 @@ importers:
       '@bittery/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@bittery/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       '@bittery/sync':
         specifier: workspace:*
         version: link:../../packages/sync
+      '@bittery/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       '@bittery/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -188,9 +194,15 @@ importers:
       '@bittery/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@bittery/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       '@bittery/sync':
         specifier: workspace:*
         version: link:../../packages/sync
+      '@bittery/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       '@bittery/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -276,9 +288,15 @@ importers:
       '@bittery/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@bittery/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       '@bittery/sync':
         specifier: workspace:*
         version: link:../../packages/sync
+      '@bittery/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       '@craftzdog/react-native-buffer':
         specifier: ^6.1.1
         version: 6.1.1(react-native@0.81.5(@babel/core@7.28.6)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
@@ -415,9 +433,6 @@ importers:
       '@bittery/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@bittery/storage':
-        specifier: workspace:*
-        version: link:../../packages/storage
       '@hono/trpc-server':
         specifier: ^0.4.0
         version: 0.4.2(@trpc/server@11.8.1(typescript@5.9.3))(hono@4.11.5)
@@ -467,9 +482,15 @@ importers:
       '@bittery/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@bittery/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       '@bittery/sync':
         specifier: workspace:*
         version: link:../../packages/sync
+      '@bittery/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       '@bittery/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -579,6 +600,12 @@ importers:
 
   packages/api:
     dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.888.0
+        version: 3.972.0
+      '@aws-sdk/s3-request-presigner':
+        specifier: ^3.888.0
+        version: 3.972.0
       '@bittery/auth':
         specifier: workspace:*
         version: link:../auth
@@ -588,9 +615,6 @@ importers:
       '@bittery/db':
         specifier: workspace:*
         version: link:../db
-      '@bittery/storage':
-        specifier: workspace:*
-        version: link:../storage
       '@trpc/client':
         specifier: 'catalog:'
         version: 11.8.1(@trpc/server@11.8.1(typescript@5.9.3))(typescript@5.9.3)
@@ -622,12 +646,15 @@ importers:
 
   packages/auth:
     dependencies:
-      '@bittery/crypto':
+      '@bittery/crypto-napi':
         specifier: workspace:*
-        version: link:../crypto
+        version: link:../bittery-crypto/crates/bittery-crypto-napi
       '@bittery/db':
         specifier: workspace:*
         version: link:../db
+      '@bittery/types':
+        specifier: workspace:*
+        version: link:../types
       dotenv:
         specifier: 'catalog:'
         version: 17.2.3
@@ -669,27 +696,12 @@ importers:
       '@bittery/crypto-wasm':
         specifier: workspace:*
         version: link:../bittery-crypto/pkg
-      '@choochmeque/tauri-plugin-biometry-api':
-        specifier: ^0.2.5
-        version: 0.2.6
+      '@bittery/types':
+        specifier: workspace:*
+        version: link:../types
       '@noble/hashes':
         specifier: ^1.5.0
         version: 1.8.0
-      '@tauri-apps/plugin-store':
-        specifier: ^2.4.1
-        version: 2.4.2
-      expo-crypto:
-        specifier: ^15.0.0
-        version: 15.0.8(expo@54.0.32)
-      expo-local-authentication:
-        specifier: ^17.0.0
-        version: 17.0.8(expo@54.0.32)
-      expo-secure-store:
-        specifier: ^15.0.0
-        version: 15.0.8(expo@54.0.32)
-      expo-sqlite:
-        specifier: ^16.0.0
-        version: 16.0.10(expo@54.0.32)(react-native@0.81.5(@babel/core@7.28.6)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
       typescript:
         specifier: ^5
         version: 5.9.3
@@ -697,12 +709,12 @@ importers:
       '@bittery/config':
         specifier: workspace:*
         version: link:../config
-      '@types/chrome':
-        specifier: ^0.1.34
-        version: 0.1.36
 
   packages/crypto-nitro:
     dependencies:
+      '@bittery/types':
+        specifier: workspace:*
+        version: link:../types
       expo:
         specifier: '*'
         version: 54.0.32(@babel/core@7.28.6)(@expo/metro-runtime@6.1.2)(expo-router@6.0.22)(react-native@0.81.5(@babel/core@7.28.6)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
@@ -713,6 +725,9 @@ importers:
         specifier: '*'
         version: 0.81.5(@babel/core@7.28.6)(@types/react@19.1.17)(react@19.1.0)
     devDependencies:
+      '@bittery/config':
+        specifier: workspace:*
+        version: link:../config
       expo-modules-core:
         specifier: ~3.0.29
         version: 3.0.29(react-native@0.81.5(@babel/core@7.28.6)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
@@ -778,12 +793,30 @@ importers:
 
   packages/storage:
     dependencies:
-      '@aws-sdk/client-s3':
-        specifier: ^3.888.0
-        version: 3.972.0
-      '@aws-sdk/s3-request-presigner':
-        specifier: ^3.888.0
-        version: 3.972.0
+      '@bittery/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@bittery/types':
+        specifier: workspace:*
+        version: link:../types
+      '@choochmeque/tauri-plugin-biometry-api':
+        specifier: ^0.2.0
+        version: 0.2.6
+      '@tauri-apps/plugin-store':
+        specifier: ^2.0.0
+        version: 2.4.2
+      expo-crypto:
+        specifier: ^15.0.0
+        version: 15.0.8(expo@54.0.32)
+      expo-local-authentication:
+        specifier: ^17.0.0
+        version: 17.0.8(expo@54.0.32)
+      expo-secure-store:
+        specifier: ^15.0.0
+        version: 15.0.8(expo@54.0.32)
+      expo-sqlite:
+        specifier: ^16.0.0
+        version: 16.0.10(expo@54.0.32)(react-native@0.81.5(@babel/core@7.28.6)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
       typescript:
         specifier: ^5
         version: 5.9.3
@@ -791,6 +824,12 @@ importers:
       '@bittery/config':
         specifier: workspace:*
         version: link:../config
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.9.1
+      '@types/chrome':
+        specifier: ^0.1.34
+        version: 0.1.36
 
   packages/sync:
     dependencies:
@@ -813,6 +852,15 @@ importers:
       react:
         specifier: 19.1.0
         version: 19.1.0
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
+  packages/types:
+    devDependencies:
+      '@bittery/config':
+        specifier: workspace:*
+        version: link:../config
       typescript:
         specifier: ^5.7.2
         version: 5.9.3

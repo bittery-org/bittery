@@ -3,7 +3,7 @@
  * MV3-compatible sync implementation using SSE with service worker constraints
  */
 
-import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import { storage } from "../lib/storage";
 import type { ConnectionStatus, SyncEvent } from "@bittery/sync";
 
 /**
@@ -114,8 +114,8 @@ export async function connect(): Promise<void> {
 	setStatus("connecting");
 
 	try {
-		const serverUrl = await chromeStorage.getServerUrl();
-		const token = await chromeStorage.getAuthToken();
+		const serverUrl = await storage.getServerUrl();
+		const token = await storage.getAuthToken();
 
 		if (!serverUrl || !token) {
 			setStatus("disconnected");

@@ -1,4 +1,3 @@
-import type { AccountMetadata } from "@bittery/crypto/storage-react-native";
 import { useRouter } from "expo-router";
 import {
 	AlertCircle,
@@ -34,7 +33,7 @@ import {
 	verifyServerSession,
 } from "../../src/lib/crypto";
 import { useServerUrl, useTRPCClient } from "../../src/lib/trpc";
-import * as storage from "../../src/services/storage";
+import { storage, type AccountMetadata } from "../../src/services/storage";
 
 export default function UnlockScreen() {
 	const router = useRouter();

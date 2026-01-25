@@ -3,7 +3,7 @@
  * Handles communication with the desktop app for biometric unlock
  */
 
-import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import { storage } from "../lib/storage";
 import { decrypt } from "../lib/wasm-crypto";
 import { NATIVE_HOST_NAME } from "./constants";
 import { setMasterUnlockKey, updateActivity } from "./session-manager";
@@ -99,9 +99,9 @@ export async function handleCheckNativeBiometric(): Promise<MessageResponse> {
 export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 	console.log("[NATIVE_BIOMETRIC_UNLOCK] Starting biometric unlock request");
 	try {
-		// Get stored session data to verify we have the user's email
-		const sessionData = await chromeStorage.getStoredSessionData();
-		if (!sessionData) {
+		// Verify we have a valid session before proceeding
+		const sessionValid = await storage.isSessionValid();
+		if (!sessionValid) {
 			throw new Error("No session data found. Please log in again.");
 		}
 
@@ -168,7 +168,7 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 
 			// Store the MUK in memory
 			setMasterUnlockKey(muk);
-			chromeStorage.storeMasterUnlockKey(muk);
+			await storage.setMasterUnlockKey(muk);
 
 			// Get auth token and vault keys from response (desktop app provides them) or storage
 			let token: string;
@@ -176,9 +176,9 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 
 			if (responseData.auth_token) {
 				token = responseData.auth_token;
-				await chromeStorage.storeAuthToken(token);
+				await storage.storeAuthToken(token);
 			} else {
-				const storedToken = await chromeStorage.getAuthToken();
+				const storedToken = await storage.getAuthToken();
 				if (!storedToken) {
 					throw new Error("Missing auth token in response and storage");
 				}
@@ -187,9 +187,9 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 
 			if (responseData.vault_keys) {
 				vaultKeys = JSON.parse(responseData.vault_keys);
-				await chromeStorage.storeVaultKeys(vaultKeys);
+				await storage.storeVaultKeys(vaultKeys);
 			} else {
-				const storedVaultKeys = await chromeStorage.getVaultKeys();
+				const storedVaultKeys = await storage.getVaultKeys();
 				if (!storedVaultKeys || storedVaultKeys.length === 0) {
 					throw new Error("Missing vault keys in response and storage");
 				}

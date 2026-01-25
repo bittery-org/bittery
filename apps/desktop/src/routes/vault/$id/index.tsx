@@ -1,4 +1,4 @@
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { storage } from "@/lib/storage";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { VaultAvatar } from "../../../components/vault/vault-avatar";
@@ -13,7 +13,7 @@ function VaultComponent() {
 	const { data: currentVault } = useQuery({
 		queryKey: ["vault-keys", id],
 		queryFn: async () => {
-			const keys = await tauriStorage.getVaultKeys();
+			const keys = await storage.getVaultKeys();
 			if (!keys) return null;
 			return keys.find((vault) => vault.vaultId === id) ?? null;
 		},

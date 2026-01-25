@@ -18,48 +18,30 @@ import init, {
 	rsaDecrypt as wasmRsaDecrypt,
 	rsaEncrypt as wasmRsaEncrypt,
 	validateSecretKey as wasmValidateSecretKey,
+	performKeyRotation as wasmPerformKeyRotation,
+	validateRotationData as wasmValidateRotationData,
 	type JsSession,
 } from "@bittery/crypto-wasm";
+import type {
+	DerivedKeys,
+	EncryptedData,
+	RsaKeyPair,
+	SRPClientEphemeral,
+	SRPClientSession,
+	SRPRegistration,
+	SRPServerChallenge,
+} from "@bittery/types";
 
-// ============================================================================
-// Types (matching @bittery/crypto interfaces)
-// ============================================================================
-
-export interface DerivedKeys {
-	authKey: Uint8Array;
-	masterUnlockKey: Uint8Array;
-}
-
-export interface EncryptedData {
-	ciphertext: string;
-	iv: string;
-	algorithm: string;
-}
-
-export interface RsaKeyPair {
-	publicKey: string;
-	privateKey: string;
-}
-
-export interface SRPClientEphemeral {
-	publicKey: string;
-	secret: string;
-}
-
-export interface SRPServerChallenge {
-	salt: string;
-	serverPublicKey: string;
-}
-
-export interface SRPClientSession {
-	key: string;
-	proof: string;
-}
-
-export interface SRPRegistration {
-	salt: string;
-	verifier: string;
-}
+// Re-export types for consumers
+export type {
+	DerivedKeys,
+	EncryptedData,
+	RsaKeyPair,
+	SRPClientEphemeral,
+	SRPClientSession,
+	SRPRegistration,
+	SRPServerChallenge,
+};
 
 // ============================================================================
 // WASM Initialization
@@ -443,4 +425,135 @@ export async function verifyServerSession(
 
 	// Clean up the cached session after successful verification
 	sessionCache.delete(clientSession.proof);
+}
+
+// ============================================================================
+// Key Rotation (for vault member removal)
+// ============================================================================
+
+export interface MemberKeyData {
+	userId: string;
+	publicKey: string;
+}
+
+export interface ItemData {
+	id: string;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+}
+
+export interface ReEncryptedItem {
+	itemId: string;
+	encryptedData: string;
+	encryptionIv: string;
+}
+
+export interface MemberEncryptedKey {
+	userId: string;
+	encryptedVaultKey: string;
+}
+
+export interface KeyRotationResult {
+	newVaultKey: Uint8Array;
+	newVaultKeyBase64: string;
+	memberEncryptedKeys: MemberEncryptedKey[];
+	reEncryptedItems: ReEncryptedItem[];
+}
+
+export interface ValidationResult {
+	valid: boolean;
+	errors: string[];
+}
+
+/**
+ * Perform a complete key rotation
+ * 1. Generate a new vault key
+ * 2. Encrypt the new key for each remaining member
+ * 3. Re-encrypt all items with the new key
+ */
+export async function performKeyRotation(
+	oldVaultKey: Uint8Array,
+	members: MemberKeyData[],
+	items: ItemData[],
+	currentUserId: string,
+	masterUnlockKey: Uint8Array,
+): Promise<KeyRotationResult> {
+	await autoInit();
+
+	const oldKeyBase64 = uint8ArrayToBase64(oldVaultKey);
+	const mukBase64 = uint8ArrayToBase64(masterUnlockKey);
+
+	// Convert to JSON for WASM
+	const membersJson = JSON.stringify(
+		members.map((m) => ({
+			user_id: m.userId,
+			public_key: m.publicKey,
+		})),
+	);
+	const itemsJson = JSON.stringify(
+		items.map((i) => ({
+			id: i.id,
+			encrypted_data: i.encryptedData,
+			encryption_iv: i.encryptionIv,
+			encryption_algorithm: i.encryptionAlgorithm,
+		})),
+	);
+
+	const result = wasmPerformKeyRotation(
+		oldKeyBase64,
+		membersJson,
+		itemsJson,
+		currentUserId,
+		mukBase64,
+	);
+
+	// Parse the results from WASM
+	const memberEncryptedKeys = result.getMemberEncryptedKeys() as Array<{
+		user_id: string;
+		encrypted_vault_key: string;
+	}>;
+	const reEncryptedItems = result.getReEncryptedItems() as Array<{
+		item_id: string;
+		encrypted_data: string;
+		encryption_iv: string;
+	}>;
+
+	return {
+		newVaultKey: base64ToUint8Array(result.new_vault_key_base64),
+		newVaultKeyBase64: result.new_vault_key_base64,
+		memberEncryptedKeys: memberEncryptedKeys.map((m) => ({
+			userId: m.user_id,
+			encryptedVaultKey: m.encrypted_vault_key,
+		})),
+		reEncryptedItems: reEncryptedItems.map((i) => ({
+			itemId: i.item_id,
+			encryptedData: i.encrypted_data,
+			encryptionIv: i.encryption_iv,
+		})),
+	};
+}
+
+/**
+ * Validate that rotation can be performed
+ */
+export async function validateRotationData(
+	members: MemberKeyData[],
+): Promise<ValidationResult> {
+	await autoInit();
+
+	const membersJson = JSON.stringify(
+		members.map((m) => ({
+			user_id: m.userId,
+			public_key: m.publicKey,
+		})),
+	);
+
+	const result = wasmValidateRotationData(membersJson);
+	const errors = result.getErrors() as string[];
+
+	return {
+		valid: result.valid,
+		errors,
+	};
 }

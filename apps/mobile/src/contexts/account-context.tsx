@@ -1,4 +1,3 @@
-import type { AccountMetadata } from "@bittery/crypto/storage-react-native";
 import {
 	createContext,
 	type ReactNode,
@@ -8,7 +7,7 @@ import {
 	useState,
 } from "react";
 
-import * as storage from "@/services/storage";
+import { storage, type AccountMetadata } from "@/services/storage";
 
 interface AccountContextValue {
 	allAccounts: AccountMetadata[];
@@ -46,17 +45,17 @@ export function AccountProvider({ children }: AccountProviderProps) {
 	const refreshAccounts = useCallback(async () => {
 		try {
 			const accountsList = await storage.getAccountsList();
-			setAllAccounts(accountsList.accounts);
+			setAllAccounts(accountsList);
 
 			const activeEmail = await storage.getActiveAccountEmail();
 			if (activeEmail) {
-				const active = accountsList.accounts.find(
+				const active = accountsList.find(
 					(a) => a.email.toLowerCase() === activeEmail.toLowerCase(),
 				);
 				setActiveAccount(active || null);
-			} else if (accountsList.accounts.length > 0) {
+			} else if (accountsList.length > 0) {
 				// Set the first account as active if none is set
-				const firstAccount = accountsList.accounts[0];
+				const firstAccount = accountsList[0];
 				await storage.setActiveAccount(firstAccount.email);
 				setActiveAccount(firstAccount);
 			} else {

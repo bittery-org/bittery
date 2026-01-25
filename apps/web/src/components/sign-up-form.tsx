@@ -1,15 +1,6 @@
-import { normalizeServerUrl } from "@bittery/crypto/server-url";
-import {
-	getServerUrl,
-	getTimeUntilExpiry,
-	storeAuthToken,
-	storeEncryptedPrivateKey,
-	storeMasterUnlockKey,
-	storeSecretKey,
-	storeServerUrl,
-	storeSessionData,
-	storeVaultKeys,
-} from "@bittery/crypto/session-storage";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
+import { storage } from "@/lib/storage";
+import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import {
 	arrayBufferToBase64,
 	deriveKeys,
@@ -53,9 +44,14 @@ export default function SignUpForm({
 	const [showSecretKey, setShowSecretKey] = useState(true);
 	const [hasAcknowledged, setHasAcknowledged] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
-	const [serverUrl, setServerUrl] = useState(
-		() => getServerUrl() ?? defaultServerUrl,
-	);
+	const [serverUrl, setServerUrl] = useState(defaultServerUrl);
+
+	// Load server URL on mount
+	useEffect(() => {
+		storage.getServerUrl().then((url) => {
+			if (url) setServerUrl(url);
+		});
+	}, []);
 
 	// Query invitation details if token is provided
 	const invitationQuery = useQuery({
@@ -77,10 +73,10 @@ export default function SignUpForm({
 		mutationFn: async (input: any) => {
 			return await trpcClient.auth.signup.mutate(input);
 		},
-		onSuccess: (data) => {
+		onSuccess: async (data) => {
 			// Store auth token and vault keys
-			storeAuthToken(data.token);
-			storeVaultKeys(data.vaultKeys);
+			await storage.storeAuthToken(data.token);
+			await storage.storeVaultKeys(data.vaultKeys);
 
 			toast.success("Account created successfully!");
 			// Navigate to redirect URL (invitation page) if provided, otherwise go to home
@@ -108,7 +104,7 @@ export default function SignUpForm({
 				toast.error("Invalid server URL");
 				return;
 			}
-			storeServerUrl(normalizedServerUrl);
+			await storage.storeServerUrl(normalizedServerUrl);
 			if (normalizedServerUrl !== serverUrl) {
 				setServerUrl(normalizedServerUrl);
 			}
@@ -169,19 +165,16 @@ export default function SignUpForm({
 				});
 
 				// 7. Store Master Unlock Key in memory
-				storeMasterUnlockKey(masterUnlockKey);
+				await storage.setMasterUnlockKey(masterUnlockKey);
 
 				// 8. Store encrypted private key for RSA decryption of shared vault keys
-				storeEncryptedPrivateKey(JSON.stringify(encryptedPrivateKey));
+				await storage.storeEncryptedPrivateKey(JSON.stringify(encryptedPrivateKey));
 
 				// 9. Store secret key and encrypted session for quick unlock
-				storeSecretKey(secretKey);
-				await storeSessionData(masterUnlockKey, email, result.userId);
+				await storage.storeSecretKey(secretKey);
+				await storage.storeSessionData(masterUnlockKey, email, result.userId);
 
-				const timeUntil = getTimeUntilExpiry();
-				const daysUntil = timeUntil
-					? Math.floor(timeUntil / (1000 * 60 * 60 * 24))
-					: 0;
+				const daysUntil = Math.floor(DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24));
 
 				toast.success(
 					`Account created! Quick unlock available for ${daysUntil} days.`,
@@ -343,13 +336,13 @@ Generated: ${new Date().toLocaleString()}
 									type="url"
 									placeholder="https://your-server.com"
 									value={serverUrl}
-									onBlur={() => {
+									onBlur={async () => {
 										const normalized = normalizeServerUrl(serverUrl);
 										if (!normalized) {
 											toast.error("Invalid server URL");
 											return;
 										}
-										storeServerUrl(normalized);
+										await storage.storeServerUrl(normalized);
 										if (normalized !== serverUrl) {
 											setServerUrl(normalized);
 										}

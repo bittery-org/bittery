@@ -1,5 +1,5 @@
 import { decrypt } from "../lib/tauri-crypto";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { storage } from "@/lib/storage";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
@@ -47,7 +47,7 @@ export function useAllDeletedItems() {
 				if (cached) {
 					return cached;
 				}
-				const vaultKey = await tauriStorage.getDecryptedVaultKey(vaultId);
+				const vaultKey = await storage.getDecryptedVaultKey(vaultId);
 				if (!vaultKey) {
 					throw new Error(`No vault key found for vault ${vaultId}`);
 				}

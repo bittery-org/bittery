@@ -3,7 +3,7 @@
  * Handles tab screenshot capture and TOTP field updates
  */
 
-import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import { storage } from "../lib/storage";
 import { decrypt, encrypt } from "../lib/wasm-crypto";
 import { isUnlocked, updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
@@ -131,7 +131,7 @@ export async function handleUpdateItemTotp(payload: {
 		}
 
 		// Get vault key for the item's vault
-		const vaultKeys = await chromeStorage.getVaultKeys();
+		const vaultKeys = await storage.getVaultKeys();
 		if (!vaultKeys || vaultKeys.length === 0) {
 			return {
 				success: false,
@@ -150,7 +150,7 @@ export async function handleUpdateItemTotp(payload: {
 		}
 
 		// Decrypt vault key
-		const vaultKey = await chromeStorage.decryptVaultKey(
+		const vaultKey = await storage.decryptVaultKey(
 			vaultKeyData.encryptedVaultKey,
 		);
 

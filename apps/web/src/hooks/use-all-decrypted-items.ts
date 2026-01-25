@@ -1,4 +1,4 @@
-import { getDecryptedVaultKey } from "@bittery/crypto/session-storage";
+import { storage } from "@/lib/storage";
 import { decrypt } from "@/lib/wasm-crypto";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
@@ -41,7 +41,7 @@ export function useAllDecryptedItems() {
 
 				try {
 					// Get vault key for decryption
-					const vaultKey = await getDecryptedVaultKey(vaultId);
+					const vaultKey = await storage.getDecryptedVaultKey(vaultId);
 					if (!vaultKey) continue;
 
 					// Decrypt items for this vault

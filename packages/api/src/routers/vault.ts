@@ -10,7 +10,7 @@ import {
 	createPresignedUpload,
 	createVaultImageKey,
 	getStoragePublicUrl,
-} from "@bittery/storage";
+} from "../storage/s3";
 import { TRPCError } from "@trpc/server";
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";

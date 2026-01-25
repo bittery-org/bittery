@@ -1,4 +1,4 @@
-import { getStoredSecretKey } from "@bittery/crypto/session-storage";
+import { storage } from "@/lib/storage";
 import {
 	decrypt,
 	deriveKeys,
@@ -78,7 +78,7 @@ export function RegenerateSecretKeyDialog({
 			return;
 		}
 
-		const oldSecretKey = getStoredSecretKey();
+		const oldSecretKey = await storage.getStoredSecretKey();
 		if (!oldSecretKey) {
 			toast.error(
 				"Secret key not found. Please log out and log in again with your full credentials.",
@@ -127,7 +127,7 @@ export function RegenerateSecretKeyDialog({
 			return;
 		}
 
-		const oldSecretKey = getStoredSecretKey();
+		const oldSecretKey = await storage.getStoredSecretKey();
 		if (!oldSecretKey) {
 			toast.error("Secret key not found");
 			return;

@@ -3,7 +3,7 @@
  * Handles LOGIN, QUICK_UNLOCK, CHECK_AUTH, and related authentication messages
  */
 
-import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import { storage } from "../lib/storage";
 import {
 	deriveClientSession,
 	deriveKeys,
@@ -74,20 +74,20 @@ export async function handleLogin(payload: {
 	);
 
 	// Store session data
-	await chromeStorage.storeAuthToken(finishResult.token);
-	await chromeStorage.storeVaultKeys(finishResult.vaultKeys);
+	await storage.storeAuthToken(finishResult.token);
+	await storage.storeVaultKeys(finishResult.vaultKeys);
 	// Store encrypted private key for RSA decryption of shared vault keys
 	if (finishResult.user.encryptedPrivateKey) {
-		await chromeStorage.storeEncryptedPrivateKey(
+		await storage.storeEncryptedPrivateKey(
 			finishResult.user.encryptedPrivateKey,
 		);
 	}
-	chromeStorage.storeMasterUnlockKey(muk);
+	await storage.setMasterUnlockKey(muk);
 	setMasterUnlockKey(muk);
 
 	// Store secret key and encrypted session for quick unlock
-	await chromeStorage.storeSecretKey(secretKey);
-	await chromeStorage.storeSessionData(muk, email, finishResult.user.id);
+	await storage.storeSecretKey(secretKey);
+	await storage.storeSessionData(muk, email, finishResult.user.id);
 
 	// Start activity tracking
 	updateActivity();
@@ -103,11 +103,11 @@ export async function handleQuickUnlock(payload: {
 }): Promise<MessageResponse> {
 	const { password } = payload;
 
-	// Get stored secret key and session data
-	const secretKey = await chromeStorage.getStoredSecretKey();
-	const sessionData = await chromeStorage.getStoredSessionData();
+	// Get stored secret key and session email
+	const secretKey = await storage.getStoredSecretKey();
+	const email = await storage.getActiveAccountEmail();
 
-	if (!secretKey || !sessionData) {
+	if (!secretKey || !email) {
 		throw new Error("Quick unlock not available");
 	}
 
@@ -115,7 +115,7 @@ export async function handleQuickUnlock(payload: {
 	const { authKey, masterUnlockKey: muk } = await deriveKeys(
 		password,
 		secretKey,
-		sessionData.email,
+		email,
 	);
 
 	// Convert authKey to password string for SRP
@@ -126,7 +126,7 @@ export async function handleQuickUnlock(payload: {
 
 	// Send client public key to server and get challenge
 	const startResult = await trpcClient.auth.startLogin.mutate({
-		email: sessionData.email,
+		email,
 		clientPublicKey: clientEphemeral.publicKey,
 	});
 
@@ -156,15 +156,15 @@ export async function handleQuickUnlock(payload: {
 	);
 
 	// Store session data and vault keys
-	await chromeStorage.storeAuthToken(finishResult.token);
-	await chromeStorage.storeVaultKeys(finishResult.vaultKeys);
+	await storage.storeAuthToken(finishResult.token);
+	await storage.storeVaultKeys(finishResult.vaultKeys);
 	// Store encrypted private key for RSA decryption of shared vault keys
 	if (finishResult.user.encryptedPrivateKey) {
-		await chromeStorage.storeEncryptedPrivateKey(
+		await storage.storeEncryptedPrivateKey(
 			finishResult.user.encryptedPrivateKey,
 		);
 	}
-	chromeStorage.storeMasterUnlockKey(muk);
+	await storage.setMasterUnlockKey(muk);
 	setMasterUnlockKey(muk);
 
 	// Start activity tracking
@@ -178,7 +178,7 @@ export async function handleQuickUnlock(payload: {
  */
 export async function handleCheckAuth(): Promise<MessageResponse> {
 	// Check if we have a valid session and MUK is still in memory
-	const authenticated = await chromeStorage.isAuthenticated();
+	const authenticated = await storage.isAuthenticated();
 	const unlocked = isUnlocked();
 
 	if (authenticated) {
@@ -192,7 +192,7 @@ export async function handleCheckAuth(): Promise<MessageResponse> {
  * Handle CAN_QUICK_UNLOCK message - Check if quick unlock is available
  */
 export async function handleCanQuickUnlock(): Promise<MessageResponse> {
-	const canQuickUnlock = await chromeStorage.canQuickUnlock();
+	const canQuickUnlock = await storage.canQuickUnlock();
 	return { success: true, canQuickUnlock };
 }
 
@@ -200,7 +200,7 @@ export async function handleCanQuickUnlock(): Promise<MessageResponse> {
  * Handle GET_AUTH_TOKEN message - Get the auth token
  */
 export async function handleGetAuthToken(): Promise<MessageResponse> {
-	const token = await chromeStorage.getAuthToken();
+	const token = await storage.getAuthToken();
 	return { success: true, token };
 }
 
@@ -208,15 +208,20 @@ export async function handleGetAuthToken(): Promise<MessageResponse> {
  * Handle GET_SESSION_DATA message - Get stored session data
  */
 export async function handleGetSessionData(): Promise<MessageResponse> {
-	const sessionData = await chromeStorage.getStoredSessionData();
-	return { success: true, sessionData };
+	const email = await storage.getActiveAccountEmail();
+	const userId = await storage.getActiveAccountUserId();
+	const sessionValid = await storage.isSessionValid();
+	return {
+		success: true,
+		sessionData: email && userId ? { email, userId, isValid: sessionValid } : null,
+	};
 }
 
 /**
  * Handle LOGOUT message - Clear session and lock
  */
 export async function handleLogout(): Promise<MessageResponse> {
-	await chromeStorage.clearSession();
+	await storage.clearSession();
 	lock();
 	return { success: true };
 }

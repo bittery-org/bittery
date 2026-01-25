@@ -1,4 +1,4 @@
-import { clearAllStoredData } from "@bittery/crypto/session-storage";
+import { storage } from "@/lib/storage";
 import { useTRPC } from "@bittery/shared/trpc";
 import {
 	Avatar,
@@ -79,8 +79,8 @@ function UserNav() {
 				.slice(0, 2)
 		: "??";
 
-	const handleLogout = () => {
-		clearAllStoredData();
+	const handleLogout = async () => {
+		await storage.clearAllStoredData();
 		queryClient.clear();
 		navigate({ to: "/login" });
 	};

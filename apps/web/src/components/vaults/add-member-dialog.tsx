@@ -1,4 +1,4 @@
-import { getDecryptedVaultKey } from "@bittery/crypto/session-storage";
+import { storage } from "@/lib/storage";
 import { arrayBufferToBase64, rsaEncrypt } from "@/lib/wasm-crypto";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
@@ -81,7 +81,7 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 
 		try {
 			// 1. Get the decrypted vault key
-			const vaultKey = await getDecryptedVaultKey(vaultId);
+			const vaultKey = await storage.getDecryptedVaultKey(vaultId);
 			if (!vaultKey) {
 				toast.error("Could not decrypt vault key. Please log in again.");
 				return;

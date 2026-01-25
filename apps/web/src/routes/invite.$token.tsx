@@ -1,4 +1,4 @@
-import { isAuthenticated } from "@bittery/crypto/session-storage";
+import { storage } from "@/lib/storage";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -12,6 +12,7 @@ import {
 } from "@bittery/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import {
 	AlertCircle,
 	Check,
@@ -31,7 +32,11 @@ function InvitationPage() {
 	const navigate = useNavigate();
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
-	const authenticated = isAuthenticated();
+	const [authenticated, setAuthenticated] = useState(false);
+
+	useEffect(() => {
+		storage.isAuthenticated().then(setAuthenticated);
+	}, []);
 
 	// Get invitation details
 	const invitationQuery = useQuery(

@@ -1,5 +1,4 @@
-import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { storage, type AccountMetadata } from "@/lib/storage";
 import { useQueryClient } from "@tanstack/react-query";
 import {
 	createContext,
@@ -35,19 +34,19 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 	// Load accounts on mount
 	const refreshAccounts = useCallback(async () => {
 		try {
-			const accountsList = await tauriStorage.getAccountsList();
-			setAllAccounts(accountsList.accounts);
+			const accountsList = await storage.getAccountsList();
+			setAllAccounts(accountsList);
 
-			const activeEmail = await tauriStorage.getActiveAccountEmail();
+			const activeEmail = await storage.getActiveAccountEmail();
 			if (activeEmail) {
-				const active = accountsList.accounts.find(
+				const active = accountsList.find(
 					(a) => a.email.toLowerCase() === activeEmail.toLowerCase(),
 				);
 				setActiveAccount(active ?? null);
-			} else if (accountsList.accounts.length > 0) {
+			} else if (accountsList.length > 0) {
 				// No active account set, use first one
-				const firstAccount = accountsList.accounts[0];
-				await tauriStorage.setActiveAccount(firstAccount.email);
+				const firstAccount = accountsList[0];
+				await storage.setActiveAccount(firstAccount.email);
 				setActiveAccount(firstAccount);
 			} else {
 				setActiveAccount(null);
@@ -73,15 +72,15 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 			}
 
 			// Check if target account session is valid
-			const sessionValid = await tauriStorage.isSessionValid(email);
+			const sessionValid = await storage.isSessionValid(email);
 
 			// Clear current account's in-memory cache
 			if (activeAccount) {
-				await tauriStorage.clearSession(activeAccount.email);
+				await storage.clearSession(activeAccount.email);
 			}
 
 			// Set new active account
-			await tauriStorage.setActiveAccount(email);
+			await storage.setActiveAccount(email);
 			setActiveAccount(targetAccount);
 
 			// Invalidate all React Query queries to refetch with new account
@@ -95,7 +94,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 			}
 
 			// Try to restore session for new account
-			const restored = await tauriStorage.tryRestoreSession(true, email);
+			const restored = await storage.tryRestoreSession(true, email);
 			if (!restored) {
 				// Session restore failed, will be handled by route guards
 				return;
@@ -106,7 +105,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 
 	const addAccount = useCallback(
 		async (account: AccountMetadata) => {
-			await tauriStorage.addAccountToList(account);
+			await storage.addAccountToList(account);
 			await refreshAccounts();
 		},
 		[refreshAccounts],
@@ -118,16 +117,16 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 				activeAccount?.email.toLowerCase() === email.toLowerCase();
 
 			// Clear all data for this account
-			await tauriStorage.clearAccountData(email);
+			await storage.clearAccountData(email);
 
 			// Refresh accounts list
 			await refreshAccounts();
 
 			// If we removed the active account, switch to another if available
 			if (isActive) {
-				const accountsList = await tauriStorage.getAccountsList();
-				if (accountsList.accounts.length > 0) {
-					await switchAccount(accountsList.accounts[0].email);
+				const accountsList = await storage.getAccountsList();
+				if (accountsList.length > 0) {
+					await switchAccount(accountsList[0].email);
 				} else {
 					setActiveAccount(null);
 				}
@@ -139,7 +138,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 	const lockAccount = useCallback(
 		async (email: string) => {
 			// Clear in-memory crypto materials for this account
-			await tauriStorage.clearSession(email);
+			await storage.clearSession(email);
 
 			// If locking active account, will need to re-authenticate
 			if (activeAccount?.email.toLowerCase() === email.toLowerCase()) {
@@ -151,8 +150,8 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 	);
 
 	const lockAllAccounts = useCallback(async () => {
-		// Clear all in-memory caches
-		tauriStorage.lockAllAccounts();
+		// Clear all in-memory caches and biometric auth timestamps
+		await storage.lockAllAccounts();
 
 		// Cancel and clear all queries
 		await queryClient.cancelQueries();

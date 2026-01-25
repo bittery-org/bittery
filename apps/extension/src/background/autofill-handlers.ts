@@ -3,7 +3,7 @@
  * Handles autofill-specific messages
  */
 
-import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import { storage } from "../lib/storage";
 import { AUTOFILL_REAUTH_WINDOW_MS } from "./constants";
 import {
 	getLastActivityTimestamp,
@@ -37,7 +37,7 @@ export async function handleCheckAutofillAuth(): Promise<MessageResponse> {
 		};
 	}
 
-	const authenticated = await chromeStorage.isAuthenticated();
+	const authenticated = await storage.isAuthenticated();
 	return { success: true, authenticated, unlocked: true, needsReauth: false };
 }
 

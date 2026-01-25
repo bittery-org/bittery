@@ -1,4 +1,4 @@
-import { getDecryptedVaultKey } from "@bittery/crypto/session-storage";
+import { storage } from "@/lib/storage";
 import {
 	arrayBufferToBase64,
 	encrypt,
@@ -73,7 +73,7 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 	const createShareMutation = useMutation({
 		mutationFn: async () => {
 			// Get the vault key to decrypt item data
-			const vaultKey = await getDecryptedVaultKey(item.vaultId);
+			const vaultKey = await storage.getDecryptedVaultKey(item.vaultId);
 			if (!vaultKey) {
 				throw new Error("Could not decrypt vault key. Please log in again.");
 			}

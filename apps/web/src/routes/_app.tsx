@@ -1,11 +1,11 @@
-import { isAuthenticated } from "@bittery/crypto/session-storage";
+import { storage } from "@/lib/storage";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { MobileNav, Sidebar } from "@/components/layout/sidebar";
 
 export const Route = createFileRoute("/_app")({
 	component: AppLayout,
-	beforeLoad: () => {
-		if (!isAuthenticated()) {
+	beforeLoad: async () => {
+		if (!(await storage.isAuthenticated())) {
 			throw redirect({ to: "/login" });
 		}
 	},

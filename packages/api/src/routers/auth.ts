@@ -23,7 +23,7 @@ import {
 	updateUserSecretKey,
 } from "@bittery/auth";
 import { db, team, teamMember, vault, vaultKey } from "@bittery/db";
-import { getStoragePublicUrl } from "@bittery/storage";
+import { getStoragePublicUrl } from "../storage/s3";
 import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
 import { z } from "zod";

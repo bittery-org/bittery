@@ -1,4 +1,4 @@
-import { normalizeServerUrl } from "@bittery/crypto/server-url";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
 import {
 	deriveKeys,
 	validateSecretKey,
@@ -6,8 +6,7 @@ import {
 	generateClientEphemeral,
 	verifyServerSession,
 } from "../lib/tauri-crypto";
-import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
+import { storage, type AccountMetadata } from "@/lib/storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button, Input, Label, toast, VaultIcon } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -49,14 +48,14 @@ export function LoginPage() {
 	const { data: biometricAvailable } = useQuery({
 		queryKey: ["biometry-available"],
 		queryFn: async () => {
-			return await tauriStorage.isBiometricAvailable();
+			return await storage.isBiometricAvailable();
 		},
 	});
 
 	useEffect(() => {
 		let active = true;
 		// Try to get server URL from legacy storage (fallback for login page)
-		tauriStorage.getLegacyServerUrl().then((stored) => {
+		storage.getLegacyServerUrl().then((stored) => {
 			if (!active || !stored) return;
 			setServerUrl(stored);
 		});
@@ -142,44 +141,44 @@ export function LoginPage() {
 
 			// Enable biometric if requested
 			if (enableBiometric && biometricAvailable) {
-				await tauriStorage.enableBiometric(normalizedEmail);
+				await storage.enableBiometric(normalizedEmail);
 			}
 
 			// Store auth data (email is used to namespace storage)
-			await tauriStorage.storeAuthToken(finishResult.token, normalizedEmail);
-			await tauriStorage.storeVaultKeys(
+			await storage.storeAuthToken(finishResult.token, normalizedEmail);
+			await storage.storeVaultKeys(
 				finishResult.vaultKeys,
 				normalizedEmail,
 			);
 			// Store encrypted private key for RSA decryption of shared vault keys
 			if (finishResult.user.encryptedPrivateKey) {
-				await tauriStorage.storeEncryptedPrivateKey(
+				await storage.storeEncryptedPrivateKey(
 					finishResult.user.encryptedPrivateKey,
 					normalizedEmail,
 				);
 			}
-			await tauriStorage.storeSecretKey(secretKey, normalizedEmail);
-			await tauriStorage.storeSessionData(
+			await storage.storeSecretKey(secretKey, normalizedEmail);
+			await storage.storeSessionData(
 				masterUnlockKey,
 				normalizedEmail,
 				finishResult.user.id,
 			);
-			await tauriStorage.storeMasterUnlockKey(masterUnlockKey, normalizedEmail);
+			await storage.storeMasterUnlockKey(masterUnlockKey, normalizedEmail);
 
 			// Store server URL per-account
-			await tauriStorage.storeServerUrl(normalizedServerUrl, normalizedEmail);
+			await storage.storeServerUrl(normalizedServerUrl, normalizedEmail);
 
 			// Store web app URL if provided, otherwise clear it to use derived URL
 			if (webAppUrl.trim()) {
 				const normalizedWebAppUrl = normalizeServerUrl(webAppUrl);
 				if (normalizedWebAppUrl) {
-					await tauriStorage.storeWebAppUrl(
+					await storage.storeWebAppUrl(
 						normalizedWebAppUrl,
 						normalizedEmail,
 					);
 				}
 			} else {
-				await tauriStorage.clearWebAppUrl(normalizedEmail);
+				await storage.clearWebAppUrl(normalizedEmail);
 			}
 
 			// Create account metadata
@@ -196,10 +195,10 @@ export function LoginPage() {
 			};
 
 			// Add to accounts list
-			await tauriStorage.addAccountToList(accountMetadata);
+			await storage.addAccountToList(accountMetadata);
 
 			// Set as active account
-			await tauriStorage.setActiveAccount(normalizedEmail);
+			await storage.setActiveAccount(normalizedEmail);
 
 			// Refresh account context
 			await refreshAccounts();

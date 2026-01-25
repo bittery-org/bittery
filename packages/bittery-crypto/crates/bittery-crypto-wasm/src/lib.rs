@@ -7,9 +7,11 @@ use bittery_crypto_core::{
     generate_secret_key, get_secret_key_hint, rsa_decrypt, rsa_encrypt,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient, SrpServer},
     validate_secret_key, EncryptedData,
+    key_rotation::{self, ItemData, MemberKeyData},
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsValue;
 
 // Initialize panic hook for better error messages
 #[wasm_bindgen(start)]
@@ -380,6 +382,198 @@ fn parse_prime_group(group: u32) -> Result<PrimeGroup, JsError> {
         8192 => Ok(PrimeGroup::G8192),
         _ => Err(JsError::new(&format!("Unknown prime group: {}", group))),
     }
+}
+
+// ============================================================================
+// Key Rotation
+// ============================================================================
+
+#[wasm_bindgen]
+#[derive(Serialize, Deserialize)]
+pub struct JsItemData {
+    #[wasm_bindgen(getter_with_clone)]
+    pub id: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub encrypted_data: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub encryption_iv: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub encryption_algorithm: String,
+}
+
+#[wasm_bindgen]
+impl JsItemData {
+    #[wasm_bindgen(constructor)]
+    pub fn new(id: String, encrypted_data: String, encryption_iv: String, encryption_algorithm: String) -> JsItemData {
+        JsItemData { id, encrypted_data, encryption_iv, encryption_algorithm }
+    }
+}
+
+#[wasm_bindgen]
+#[derive(Serialize, Deserialize)]
+pub struct JsMemberKeyData {
+    #[wasm_bindgen(getter_with_clone)]
+    pub user_id: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub public_key: String,
+}
+
+#[wasm_bindgen]
+impl JsMemberKeyData {
+    #[wasm_bindgen(constructor)]
+    pub fn new(user_id: String, public_key: String) -> JsMemberKeyData {
+        JsMemberKeyData { user_id, public_key }
+    }
+}
+
+#[wasm_bindgen]
+#[derive(Serialize, Deserialize)]
+pub struct JsReEncryptedItem {
+    #[wasm_bindgen(getter_with_clone)]
+    pub item_id: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub encrypted_data: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub encryption_iv: String,
+}
+
+#[wasm_bindgen]
+#[derive(Serialize, Deserialize)]
+pub struct JsMemberEncryptedKey {
+    #[wasm_bindgen(getter_with_clone)]
+    pub user_id: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub encrypted_vault_key: String,
+}
+
+#[wasm_bindgen]
+pub struct JsKeyRotationResult {
+    #[wasm_bindgen(getter_with_clone)]
+    pub new_vault_key_base64: String,
+    // These are accessed via methods, not direct field access
+    member_encrypted_keys: Vec<JsMemberEncryptedKey>,
+    re_encrypted_items: Vec<JsReEncryptedItem>,
+}
+
+#[wasm_bindgen]
+impl JsKeyRotationResult {
+    #[wasm_bindgen(js_name = getMemberEncryptedKeys)]
+    pub fn get_member_encrypted_keys(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.member_encrypted_keys).unwrap_or(JsValue::NULL)
+    }
+
+    #[wasm_bindgen(js_name = getReEncryptedItems)]
+    pub fn get_re_encrypted_items(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.re_encrypted_items).unwrap_or(JsValue::NULL)
+    }
+}
+
+#[wasm_bindgen]
+pub struct JsValidationResult {
+    pub valid: bool,
+    // Accessed via method
+    errors: Vec<String>,
+}
+
+#[wasm_bindgen]
+impl JsValidationResult {
+    #[wasm_bindgen(js_name = getErrors)]
+    pub fn get_errors(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.errors).unwrap_or(JsValue::NULL)
+    }
+}
+
+/// Encrypt a vault key with a member's RSA public key
+#[wasm_bindgen(js_name = encryptVaultKeyForMember)]
+pub fn js_encrypt_vault_key_for_member(vault_key_base64: &str, member_public_key: &str) -> Result<String, JsError> {
+    let vault_key = base64_decode(vault_key_base64)?;
+    key_rotation::encrypt_vault_key_for_member(&vault_key, member_public_key)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Encrypt a vault key with AES-GCM using Master Unlock Key
+#[wasm_bindgen(js_name = encryptVaultKeyWithMUK)]
+pub fn js_encrypt_vault_key_with_muk(vault_key_base64: &str, master_unlock_key_base64: &str) -> Result<String, JsError> {
+    let vault_key = base64_decode(vault_key_base64)?;
+    let muk = base64_decode(master_unlock_key_base64)?;
+    key_rotation::encrypt_vault_key_with_muk(&vault_key, &muk)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Re-encrypt an item with a new vault key
+#[wasm_bindgen(js_name = reEncryptItem)]
+pub fn js_re_encrypt_item(
+    item: JsItemData,
+    old_vault_key_base64: &str,
+    new_vault_key_base64: &str,
+) -> Result<JsReEncryptedItem, JsError> {
+    let old_key = base64_decode(old_vault_key_base64)?;
+    let new_key = base64_decode(new_vault_key_base64)?;
+
+    let item_data = ItemData {
+        id: item.id,
+        encrypted_data: item.encrypted_data,
+        encryption_iv: item.encryption_iv,
+        encryption_algorithm: item.encryption_algorithm,
+    };
+
+    let result = key_rotation::re_encrypt_item(&item_data, &old_key, &new_key)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    Ok(JsReEncryptedItem {
+        item_id: result.item_id,
+        encrypted_data: result.encrypted_data,
+        encryption_iv: result.encryption_iv,
+    })
+}
+
+/// Perform a complete key rotation
+#[wasm_bindgen(js_name = performKeyRotation)]
+pub fn js_perform_key_rotation(
+    old_vault_key_base64: &str,
+    members_json: &str,
+    items_json: &str,
+    current_user_id: &str,
+    master_unlock_key_base64: &str,
+) -> Result<JsKeyRotationResult, JsError> {
+    let old_key = base64_decode(old_vault_key_base64)?;
+    let muk = base64_decode(master_unlock_key_base64)?;
+
+    // Parse JSON arrays
+    let members: Vec<MemberKeyData> = serde_json::from_str(members_json)
+        .map_err(|e| JsError::new(&format!("Invalid members JSON: {}", e)))?;
+    let items: Vec<ItemData> = serde_json::from_str(items_json)
+        .map_err(|e| JsError::new(&format!("Invalid items JSON: {}", e)))?;
+
+    let result = key_rotation::perform_key_rotation(&old_key, &members, &items, current_user_id, &muk)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    Ok(JsKeyRotationResult {
+        new_vault_key_base64: result.new_vault_key_base64,
+        member_encrypted_keys: result.member_encrypted_keys.into_iter().map(|m| JsMemberEncryptedKey {
+            user_id: m.user_id,
+            encrypted_vault_key: m.encrypted_vault_key,
+        }).collect(),
+        re_encrypted_items: result.re_encrypted_items.into_iter().map(|i| JsReEncryptedItem {
+            item_id: i.item_id,
+            encrypted_data: i.encrypted_data,
+            encryption_iv: i.encryption_iv,
+        }).collect(),
+    })
+}
+
+/// Validate rotation data
+#[wasm_bindgen(js_name = validateRotationData)]
+pub fn js_validate_rotation_data(members_json: &str) -> Result<JsValidationResult, JsError> {
+    let members: Vec<MemberKeyData> = serde_json::from_str(members_json)
+        .map_err(|e| JsError::new(&format!("Invalid members JSON: {}", e)))?;
+
+    let result = key_rotation::validate_rotation_data(&members);
+
+    Ok(JsValidationResult {
+        valid: result.valid,
+        errors: result.errors,
+    })
 }
 
 #[cfg(test)]

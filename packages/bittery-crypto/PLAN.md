@@ -131,7 +131,6 @@ Migrated web app (`apps/web`) to use WASM crypto instead of pure JS implementati
 4. `apps/web/src/hooks/use-all-decrypted-items.ts` - decrypt ✅
 5. `apps/web/src/components/settings/change-password-dialog.tsx` ✅
 6. `apps/web/src/components/settings/regenerate-secret-key-dialog.tsx` ✅
-7. `apps/web/src/components/settings/export-vault-dialog.tsx` ✅
 8. `apps/web/src/components/sharing/share-item-dialog.tsx` ✅
 9. `apps/web/src/components/teams/invite-dialog.tsx` ✅
 10. `apps/web/src/components/vaults/add-member-dialog.tsx` ✅

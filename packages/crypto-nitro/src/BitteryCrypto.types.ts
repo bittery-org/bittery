@@ -1,7 +1,19 @@
+// Re-export shared types from @bittery/types
+export type {
+  DerivedKeys,
+  EncryptedData,
+  RsaKeyPair,
+  SRPClientEphemeral,
+  SRPClientSession,
+  SRPRegistration,
+  SRPServerChallenge,
+} from "@bittery/types";
+
 /**
- * Result from key derivation
+ * Result from key derivation (native module returns base64 strings)
+ * Note: This differs from @bittery/types DerivedKeys which uses Uint8Array
  */
-export interface DerivedKeys {
+export interface NativeDerivedKeys {
   /** Base64-encoded authentication key for SRP */
   authKey: string;
   /** Base64-encoded master unlock key for vault encryption */
@@ -9,29 +21,7 @@ export interface DerivedKeys {
 }
 
 /**
- * Encrypted data with IV and algorithm
- */
-export interface EncryptedData {
-  /** Base64-encoded ciphertext */
-  ciphertext: string;
-  /** Base64-encoded initialization vector */
-  iv: string;
-  /** Encryption algorithm (always "AES-GCM") */
-  algorithm: string;
-}
-
-/**
- * RSA key pair
- */
-export interface RsaKeyPair {
-  /** PEM-encoded public key (SPKI format) */
-  publicKey: string;
-  /** PEM-encoded private key (PKCS8 format) */
-  privateKey: string;
-}
-
-/**
- * SRP ephemeral key pair
+ * SRP ephemeral key pair (internal native format)
  */
 export interface Ephemeral {
   /** Hex-encoded public ephemeral value */
@@ -41,7 +31,7 @@ export interface Ephemeral {
 }
 
 /**
- * SRP session data
+ * SRP session data (internal native format)
  */
 export interface Session {
   /** Hex-encoded session key */
