@@ -48,7 +48,6 @@
 			"./plugins/with-android-local-properties",
 			"expo-router",
 			"expo-secure-store",
-			"react-native-quick-crypto",
 			"expo-local-authentication",
 			[
 				"expo-sqlite",

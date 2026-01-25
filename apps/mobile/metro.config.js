@@ -18,29 +18,11 @@ config.resolver.nodeModulesPaths = [
 	path.resolve(monorepoRoot, "node_modules"),
 ];
 
-config.resolver.resolveRequest = (context, moduleName, platform) => {
-	if (moduleName === "crypto") {
-		// when importing crypto, resolve to react-native-quick-crypto
-		return context.resolveRequest(
-			context,
-			"react-native-quick-crypto",
-			platform,
-		);
-	}
-
-	// otherwise chain to the standard Metro resolver.
-	return context.resolveRequest(context, moduleName, platform);
-};
-
 // 3. Resolve workspace packages
 config.resolver.extraNodeModules = {
 	"@bittery/api": path.resolve(monorepoRoot, "packages/api"),
 	"@bittery/crypto": path.resolve(monorepoRoot, "packages/crypto"),
 	"@bittery/shared": path.resolve(monorepoRoot, "packages/shared"),
-	// Use native SRP-6a module for 30-40x faster performance
-	// The native module provides the same API as @bittery/srp6a but uses
-	// native BigInteger operations instead of JavaScript jsbn
-	"@bittery/srp6a": path.resolve(projectRoot, "modules/srp6a"),
 };
 
 module.exports = withNativeWind(config, { input: "./src/global.css" });
