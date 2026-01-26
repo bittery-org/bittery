@@ -1,4 +1,4 @@
-import { useDecryptedItems, useToggleFavorite } from "@bittery/hooks";
+import { useToggleFavorite, useVaultItems } from "@bittery/hooks";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
 import { ItemListRow } from "../../../components/vault/item-list-row";
 
@@ -10,7 +10,8 @@ function RouteComponent() {
 	const { id, itemId } = useParams({ strict: false });
 
 	// Fetch and decrypt items for the selected vault
-	const { items: decryptedItems, isLoading } = useDecryptedItems(id || "");
+	// useVaultItems automatically handles single-account vs all-accounts mode
+	const { items: decryptedItems, isLoading } = useVaultItems(id || "");
 
 	// Sort items by favorite status
 	const items = [...decryptedItems].sort((a, b) => {

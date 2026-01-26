@@ -6,10 +6,12 @@
  */
 
 import { useTRPCClient } from "@bittery/shared/trpc";
+import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import { useMutation } from "@tanstack/react-query";
 import {
 	usePlatform,
 	useQueryInvalidator,
+	usePlatformStorage,
 } from "../../context/platform-context";
 import { refreshVaultKeys } from "../../utils/vault-utils";
 
@@ -41,6 +43,12 @@ export interface CreateVaultInput {
 	 * @deprecated Prefer using imageFile - the hook handles upload automatically
 	 */
 	imageKey?: string;
+	/**
+	 * Account email for multi-account mode (optional).
+	 * Required when creating a vault in "All Accounts" mode in desktop app.
+	 * If not provided, uses the current/default account.
+	 */
+	accountEmail?: string;
 }
 
 /**
@@ -60,6 +68,7 @@ export interface CreateVaultResult {
  * - Creating the vault via API
  * - Refreshing local vault keys cache
  * - Invalidating relevant queries
+ * - Multi-account mode (automatically uses correct account's client and Master Unlock Key)
  *
  * Does NOT handle:
  * - Toast notifications (app responsibility)
@@ -76,6 +85,7 @@ export interface CreateVaultResult {
  *       type: "personal",
  *       icon: "shield",
  *       imageFile: selectedFile, // optional - hook handles upload
+ *       accountEmail: "user@example.com", // optional - for multi-account mode
  *     });
  *     toast.success("Vault created");
  *     navigate({ to: "/vault/$id", params: { id: result.vaultId } });
@@ -86,8 +96,9 @@ export interface CreateVaultResult {
  * ```
  */
 export function useCreateVault() {
-	const trpcClient = useTRPCClient();
-	const { storage, crypto } = usePlatform();
+	const defaultClient = useTRPCClient();
+	const storage = usePlatformStorage();
+	const { crypto } = usePlatform();
 	const invalidator = useQueryInvalidator();
 
 	return useMutation({
@@ -100,6 +111,19 @@ export function useCreateVault() {
 
 			if (trimmedName.length < 2) {
 				throw new Error("Vault name must be at least 2 characters");
+			}
+
+			// Get the correct tRPC client for this account
+			let client = defaultClient;
+			if (input.accountEmail) {
+				const authToken = await storage.getAuthToken(input.accountEmail);
+				const serverUrl = await storage.getServerUrl(input.accountEmail);
+				if (authToken) {
+					client = createAccountTrpcClient(
+						authToken,
+						serverUrl || "http://localhost:3000",
+					);
+				}
 			}
 
 			// Determine the image key to use
@@ -118,7 +142,7 @@ export function useCreateVault() {
 				}
 
 				// Get presigned upload URL
-				const upload = await trpcClient.vault.createImageUpload.mutate({
+				const upload = await client.vault.createImageUpload.mutate({
 					fileName,
 					contentType,
 				});
@@ -142,8 +166,10 @@ export function useCreateVault() {
 			// Generate a new vault encryption key
 			const vaultKey = await crypto.generateEncryptionKey();
 
-			// Get the user's Master Unlock Key
-			const masterUnlockKey = await storage.getMasterUnlockKey();
+			// Get the user's Master Unlock Key (with account email if in multi-account mode)
+			const masterUnlockKey = await storage.getMasterUnlockKey(
+				input.accountEmail,
+			);
 			if (!masterUnlockKey) {
 				throw new Error("Master Unlock Key not found. Please sign in again.");
 			}
@@ -156,7 +182,7 @@ export function useCreateVault() {
 			);
 
 			// Create the vault
-			const result = await trpcClient.vault.create.mutate({
+			const result = await client.vault.create.mutate({
 				name: trimmedName,
 				type: input.type,
 				encryptedVaultKey: JSON.stringify(encryptedVaultKeyData),
@@ -166,9 +192,22 @@ export function useCreateVault() {
 
 			return { vaultId: result.vaultId };
 		},
-		onSuccess: async () => {
+		onSuccess: async (_data, variables) => {
+			// Get the correct tRPC client for this account
+			let client = defaultClient;
+			if (variables.accountEmail) {
+				const authToken = await storage.getAuthToken(variables.accountEmail);
+				const serverUrl = await storage.getServerUrl(variables.accountEmail);
+				if (authToken) {
+					client = createAccountTrpcClient(
+						authToken,
+						serverUrl || "http://localhost:3000",
+					);
+				}
+			}
+
 			// Refresh local vault keys cache
-			await refreshVaultKeys(trpcClient, storage);
+			await refreshVaultKeys(client, storage);
 			// Invalidate vault-related queries
 			await invalidator.invalidateVaultKeys();
 		},

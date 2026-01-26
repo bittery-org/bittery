@@ -3,11 +3,18 @@
  *
  * Toggles the favorite status of a vault item.
  * Returns a React Query mutation - apps handle success/error UI.
+ * Automatically handles multi-account mode.
  */
 
 import { useTRPCClient } from "@bittery/shared/trpc";
+import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import { useMutation } from "@tanstack/react-query";
-import { useQueryInvalidator } from "../../context/platform-context";
+import {
+	useQueryInvalidator,
+	usePlatformStorage,
+} from "../../context/platform-context";
+import { useItems } from "../use-items";
+import { findAccountEmailForItem } from "../../utils/account-helper";
 
 /**
  * Input for toggling favorite status
@@ -27,6 +34,7 @@ export interface ToggleFavoriteInput {
  * Handles:
  * - Updating favorite status via API
  * - Invalidating relevant queries
+ * - Multi-account mode (automatically uses correct account's client)
  *
  * Does NOT handle:
  * - Toast notifications (app responsibility)
@@ -50,12 +58,30 @@ export interface ToggleFavoriteInput {
  * ```
  */
 export function useToggleFavorite() {
-	const trpcClient = useTRPCClient();
+	const { items } = useItems();
+	const defaultClient = useTRPCClient();
+	const storage = usePlatformStorage();
 	const invalidator = useQueryInvalidator();
 
 	return useMutation({
 		mutationFn: async (input: ToggleFavoriteInput): Promise<void> => {
-			await trpcClient.vault.toggleFavorite.mutate({
+			// Find which account this item belongs to (if in "All Accounts" mode)
+			const accountEmail = findAccountEmailForItem(input.itemId, items);
+
+			// Get the correct tRPC client for this account
+			let client = defaultClient;
+			if (accountEmail) {
+				const authToken = await storage.getAuthToken(accountEmail);
+				const serverUrl = await storage.getServerUrl(accountEmail);
+				if (authToken) {
+					client = createAccountTrpcClient(
+						authToken,
+						serverUrl || "http://localhost:3000",
+					);
+				}
+			}
+
+			await client.vault.toggleFavorite.mutate({
 				itemId: input.itemId,
 				favorite: input.favorite,
 			});

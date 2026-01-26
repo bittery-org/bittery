@@ -774,6 +774,9 @@ importers:
       '@bittery/api':
         specifier: workspace:*
         version: link:../api
+      '@bittery/storage':
+        specifier: workspace:*
+        version: link:../storage
       '@tanstack/react-query':
         specifier: ^5.85.5
         version: 5.90.19(react@19.1.0)

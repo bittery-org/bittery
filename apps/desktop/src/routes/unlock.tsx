@@ -1,7 +1,6 @@
 import {
 	useAccountSwitcher,
-	useBiometricUnlock,
-	useQuickUnlock,
+	useQuickUnlockAll,
 	useSessionState,
 } from "@bittery/hooks";
 import {
@@ -15,10 +14,9 @@ import {
 } from "@bittery/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ChevronDown, Fingerprint, KeyRound } from "lucide-react";
+import { Fingerprint, KeyRound } from "lucide-react";
 import { useState } from "react";
-import { type AccountMetadata, storage } from "@/lib/storage";
-import { AccountAvatar } from "../components/account-avatar";
+import { storage } from "@/lib/storage";
 
 interface UnlockSearchParams {
 	email?: string;
@@ -35,132 +33,177 @@ export const Route = createFileRoute("/unlock")({
 
 export function UnlockPage() {
 	const navigate = useNavigate();
-	const { email: emailParam } = Route.useSearch();
-	const { accounts, activeEmail } = useAccountSwitcher();
+	const { accounts } = useAccountSwitcher();
 	const queryClient = useQueryClient();
 	const [password, setPassword] = useState("");
-	const [showAccountPicker, setShowAccountPicker] = useState(false);
 	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
 
 	const allAccounts = accounts.data ?? [];
-	const activeAccount = allAccounts.find(
-		(a) => a.email === activeEmail.data,
+
+	// Get session state for first account (to check biometric availability)
+	const { data: sessionState } = useSessionState(
+		allAccounts.length > 0 ? allAccounts[0].email : undefined,
 	);
 
-	// Determine which account to unlock
-	const targetEmail = emailParam || activeAccount?.email;
-	const targetAccount = allAccounts.find(
-		(a) => a.email.toLowerCase() === targetEmail?.toLowerCase(),
-	);
-
-	// Get session state for the target account
-	const { data: sessionState } = useSessionState(targetEmail);
-
-	// Biometric unlock hook
-	const biometricUnlock = useBiometricUnlock({
-		onSuccess: async () => {
-			if (targetEmail) {
-				// Restore auth token and vault keys
-				const token = await storage.getAuthToken(targetEmail);
-				const vaultKeys = await storage.getVaultKeys(targetEmail);
-
-				if (token && vaultKeys) {
-					// Set as active account
-					await storage.setActiveAccount(targetEmail);
-					await queryClient.invalidateQueries({ queryKey: ["accounts"] });
-					setVaultState("unlocked");
-					toast.success("Unlocked with biometric");
-					// Delay navigation to show unlock animation
-					setTimeout(() => {
-						navigate({ to: "/vault" });
-					}, 600);
-				} else {
-					setVaultState("locked");
-					toast.error("Session data missing, please log in again");
-					await storage.clearAllStoredData(targetEmail);
-					navigate({ to: "/login" });
-				}
-			}
-		},
-		onError: (error) => {
-			console.error("Biometric unlock error:", error);
-			setVaultState("locked");
-			toast.error(error.message || "Biometric unlock failed");
-		},
-	});
-
-	// Quick unlock (password) hook
-	const quickUnlock = useQuickUnlock({
+	// Unlock all accounts at once with password
+	const quickUnlockAll = useQuickUnlockAll({
 		onSuccess: async (result) => {
-			// Update account metadata with latest team name from server
-			if (targetAccount) {
-				const updatedMetadata: AccountMetadata = {
-					...targetAccount,
-					teamName: result.user.teamName,
-					lastActiveAt: Date.now(),
-				};
-				await storage.addAccountToList(updatedMetadata);
-			}
-
-			// Refresh accounts queries
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
+			// Set active account to "all" mode if multiple accounts
+			if (allAccounts.length > 1) {
+				await storage.setActiveAccount("all");
+			} else if (allAccounts.length === 1) {
+				await storage.setActiveAccount(allAccounts[0].email);
+			}
+
 			setVaultState("unlocked");
-			toast.success("Vault unlocked");
-			// Delay navigation to show unlock animation
+
+			if (result.failed.length === 0) {
+				if (allAccounts.length === 1) {
+					toast.success("Vault unlocked");
+				} else {
+					toast.success(`All ${result.unlocked.length} accounts unlocked`);
+				}
+			} else {
+				toast.warning(
+					`Unlocked ${result.unlocked.length} of ${allAccounts.length} accounts`,
+				);
+			}
+
+			setTimeout(() => {
+				navigate({ to: "/vault" });
+			}, 600);
+		},
+		onPartialSuccess: async (result) => {
+			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+
+			if (allAccounts.length > 1) {
+				await storage.setActiveAccount("all");
+			}
+
+			setVaultState("unlocked");
+			toast.warning(
+				`Unlocked ${result.unlocked.length} of ${allAccounts.length} accounts`,
+			);
+
 			setTimeout(() => {
 				navigate({ to: "/vault" });
 			}, 600);
 		},
 		onError: (error) => {
-			console.error("Unlock error:", error);
+			console.error("Unlock all error:", error);
 			setVaultState("locked");
-			toast.error(error instanceof Error ? error.message : "Unlock failed");
+			toast.error(error.message || "Failed to unlock accounts");
 		},
 	});
 
-	const handleBiometricUnlock = async () => {
-		if (!targetEmail) return;
-
+	// Biometric unlock all accounts with ONE prompt
+	const handleBiometricUnlockAll = async () => {
 		setVaultState("unlocking");
-		biometricUnlock.mutate({ email: targetEmail });
+
+		try {
+			// Use biometric authentication ONCE with the first account that supports it
+			let biometricSuccess = false;
+			let authenticatedWithAccount: string | null = null;
+
+			// Find first account that supports biometric
+			for (const account of allAccounts) {
+				const canBio = await storage.canBiometricUnlock?.(account.email);
+				if (canBio) {
+					// Attempt biometric unlock for this account
+					// This shows the biometric prompt ONCE
+					const success = await storage.unlockWithBiometric?.(account.email);
+					if (success) {
+						biometricSuccess = true;
+						authenticatedWithAccount = account.email;
+						break;
+					}
+				}
+			}
+
+			if (!biometricSuccess) {
+				throw new Error("Biometric authentication failed");
+			}
+
+			// Now that biometric succeeded, unlock remaining accounts
+			const unlocked: string[] = [authenticatedWithAccount!];
+			const failed: Array<{ email: string; error: string }> = [];
+
+			// Try to unlock other accounts
+			for (const account of allAccounts) {
+				if (account.email === authenticatedWithAccount) continue;
+
+				try {
+					// For other accounts, just restore their sessions if available
+					const restored = await storage.tryRestoreSession(true, account.email);
+					if (restored) {
+						unlocked.push(account.email);
+					} else {
+						// Can't restore without password
+						failed.push({
+							email: account.email,
+							error: "Requires password",
+						});
+					}
+				} catch (error) {
+					failed.push({
+						email: account.email,
+						error: error instanceof Error ? error.message : "Unknown error",
+					});
+				}
+			}
+
+			// Set active mode
+			if (allAccounts.length > 1) {
+				await storage.setActiveAccount("all");
+			} else {
+				await storage.setActiveAccount(allAccounts[0].email);
+			}
+
+			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+			setVaultState("unlocked");
+
+			if (failed.length === 0) {
+				if (allAccounts.length === 1) {
+					toast.success("Unlocked with biometric");
+				} else {
+					toast.success(`All ${unlocked.length} accounts unlocked`);
+				}
+			} else {
+				toast.warning(
+					`Unlocked ${unlocked.length} of ${allAccounts.length} accounts`,
+				);
+			}
+
+			setTimeout(() => {
+				navigate({ to: "/vault" });
+			}, 600);
+		} catch (error) {
+			console.error("Biometric unlock error:", error);
+			setVaultState("locked");
+			toast.error(
+				error instanceof Error ? error.message : "Biometric unlock failed",
+			);
+		}
 	};
 
 	const handlePasswordUnlock = async (e: React.FormEvent) => {
 		e.preventDefault();
-		if (!targetEmail) return;
-
 		setVaultState("unlocking");
 
-		// Check for stored secret key
-		const secretKey = await storage.getStoredSecretKey(targetEmail);
-		if (!secretKey) {
-			setVaultState("locked");
-			toast.error("Secret key not found. Please log in again.");
-			await storage.clearAllStoredData(targetEmail);
-			navigate({ to: "/login" });
-			return;
-		}
-
-		// Check for session data
-		if (!sessionState?.isValid && !sessionState?.canQuickUnlock) {
-			setVaultState("locked");
-			toast.error("Session data not found. Please log in again.");
-			await storage.clearAllStoredData(targetEmail);
-			navigate({ to: "/login" });
-			return;
-		}
-
-		quickUnlock.mutate({
-			email: targetEmail,
-			password,
-		});
+		// Unlock all accounts with the same password
+		quickUnlockAll.mutate({ password });
 	};
 
-	const handleSwitchAccount = async (email: string) => {
-		setShowAccountPicker(false);
-		navigate({ to: "/unlock", search: { email } });
-	};
+	// Show loading state while accounts are being fetched
+	if (accounts.isLoading) {
+		return (
+			<div className="flex h-full items-center justify-center">
+				<div className="text-gray-600">Loading...</div>
+			</div>
+		);
+	}
 
 	// If no accounts, redirect to login
 	if (allAccounts.length === 0) {
@@ -168,7 +211,7 @@ export function UnlockPage() {
 		return null;
 	}
 
-	const loading = biometricUnlock.isPending || quickUnlock.isPending;
+	const loading = quickUnlockAll.isPending;
 	const requiresPasswordReentry =
 		sessionState?.requiresPasswordReentry ?? false;
 	const canUseBiometric =
@@ -181,51 +224,16 @@ export function UnlockPage() {
 					<VaultIcon state={vaultState} className="mx-auto" size={140} />
 					<h1 className="mt-6 font-bold text-2xl">Unlock Bittery</h1>
 
-					{/* Account selector */}
-					{targetAccount && (
-						<div className="mt-4">
-							{allAccounts.length > 1 ? (
-								<div className="relative">
-									<button
-										type="button"
-										onClick={() => setShowAccountPicker(!showAccountPicker)}
-										className="mx-auto flex items-center gap-2 rounded-lg border px-3 py-2 hover:bg-gray-50"
-									>
-										<AccountAvatar account={targetAccount} size="sm" />
-										<span className="text-sm">{targetAccount.email}</span>
-										<ChevronDown className="h-4 w-4 text-gray-400" />
-									</button>
-
-									{showAccountPicker && (
-										<div className="absolute left-1/2 z-10 mt-2 w-64 -translate-x-1/2 rounded-lg border bg-white py-1 shadow-lg">
-											{allAccounts.map((account) => (
-												<button
-													key={account.email}
-													type="button"
-													onClick={() => handleSwitchAccount(account.email)}
-													className="flex w-full items-center gap-3 px-4 py-2 hover:bg-gray-50"
-												>
-													<AccountAvatar account={account} size="sm" />
-													<div className="text-left">
-														<div className="font-medium text-sm">
-															{account.teamName ||
-																account.name ||
-																account.email.split("@")[0]}
-														</div>
-														<div className="text-gray-500 text-xs">
-															{account.email}
-														</div>
-													</div>
-												</button>
-											))}
-										</div>
-									)}
-								</div>
-							) : (
-								<p className="text-gray-600 text-sm">{targetAccount.email}</p>
-							)}
-						</div>
-					)}
+					{/* Show account info */}
+					<div className="mt-4">
+						{allAccounts.length === 1 ? (
+							<p className="text-gray-600 text-sm">{allAccounts[0].email}</p>
+						) : (
+							<p className="text-gray-600 text-sm">
+								{allAccounts.length} accounts
+							</p>
+						)}
+					</div>
 				</div>
 
 				{/* Master Password Required Notice */}
@@ -242,17 +250,22 @@ export function UnlockPage() {
 					</div>
 				)}
 
+				{/* Biometric unlock button */}
 				{canUseBiometric && (
 					<div className="mb-4">
 						<Button
 							type="button"
-							onClick={handleBiometricUnlock}
+							onClick={handleBiometricUnlockAll}
 							className="w-full"
 							variant="outline"
 							disabled={loading}
 						>
 							<Fingerprint className="mr-2 h-4 w-4" />
-							{loading ? "Authenticating..." : "Unlock with Biometric"}
+							{loading
+								? "Authenticating..."
+								: allAccounts.length === 1
+									? "Unlock with Biometric"
+									: `Unlock All with Biometric`}
 						</Button>
 						<div className="my-4 text-center text-gray-500 text-sm">or</div>
 					</div>
@@ -273,7 +286,11 @@ export function UnlockPage() {
 					</div>
 
 					<Button type="submit" className="w-full" disabled={loading}>
-						{loading ? "Unlocking..." : "Unlock"}
+						{loading
+							? "Unlocking..."
+							: allAccounts.length === 1
+								? "Unlock"
+								: `Unlock All (${allAccounts.length})`}
 					</Button>
 				</form>
 

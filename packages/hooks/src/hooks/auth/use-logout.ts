@@ -6,6 +6,10 @@
 
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
+	clearAccountTrpcClient,
+	clearTrpcClientCache,
+} from "@bittery/shared/trpc-client-factory";
+import {
 	type UseMutationResult,
 	useMutation,
 	useQueryClient,
@@ -110,6 +114,19 @@ export function useLogout(
 
 			// Clear local session data
 			await clearSession(storage, email, clearSecretKey);
+
+			// Clear tRPC client cache
+			// If email is provided, clear only that account's client
+			// Otherwise, clear all clients (full logout)
+			if (email) {
+				const authToken = await storage.getAuthToken(email);
+				const serverUrl = await storage.getServerUrl(email);
+				if (authToken && serverUrl) {
+					clearAccountTrpcClient(authToken, serverUrl);
+				}
+			} else {
+				clearTrpcClientCache();
+			}
 		},
 		onSuccess: async () => {
 			// Clear all cached queries

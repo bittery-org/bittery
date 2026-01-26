@@ -1,4 +1,4 @@
-import { useDecryptedItems, useToggleFavorite } from "@bittery/hooks";
+import { useToggleFavorite, useVaultItems } from "@bittery/hooks";
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import { Button } from "@bittery/ui";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
@@ -19,7 +19,8 @@ function TagRouteComponent() {
 	const tagColor = getTagColorFromName(decodedTagName);
 
 	// Fetch and decrypt items for the selected vault
-	const { items: decryptedItems, isLoading } = useDecryptedItems(vaultId || "");
+	// useVaultItems automatically handles single-account vs all-accounts mode
+	const { items: decryptedItems, isLoading } = useVaultItems(vaultId || "");
 
 	// Filter items by tag
 	const filteredItems = decryptedItems.filter((item) =>

@@ -2,7 +2,6 @@ import { useTRPC } from "@bittery/shared/trpc";
 import { Skeleton } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { CreateTeamDialog } from "@/components/teams/create-team-dialog";
 import { TeamCard } from "@/components/teams/team-card";
 
 export const Route = createFileRoute("/_app/teams/")({
@@ -22,7 +21,6 @@ function TeamsPage() {
 						Manage your team and collaborate with others.
 					</p>
 				</div>
-				<CreateTeamDialog />
 			</div>
 
 			{teamsQuery.isLoading ? (

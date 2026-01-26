@@ -1,4 +1,4 @@
-import { useAllDecryptedItems, useToggleFavorite } from "@bittery/hooks";
+import { useItems, useToggleFavorite } from "@bittery/hooks";
 import { Badge, Button } from "@bittery/ui";
 import {
 	createFileRoute,
@@ -23,8 +23,8 @@ function CrossVaultTagRouteComponent() {
 	const decodedTagName = decodeURIComponent(tagName);
 	const tagColor = getTagColorFromName(decodedTagName);
 
-	// Fetch and decrypt all items
-	const { items: allItems, isLoading } = useAllDecryptedItems();
+	// Unified hook - automatically handles single-account vs "All Accounts" mode
+	const { items: allItems, isLoading, isAllAccountsMode } = useItems();
 
 	// Filter items by tag
 	const filteredItems = allItems.filter((item) =>
@@ -119,6 +119,12 @@ function CrossVaultTagRouteComponent() {
 									}}
 									showVaultBadge
 									vaultId={item.vaultId}
+									showAccountBadge={isAllAccountsMode}
+									accountEmail={
+										isAllAccountsMode && "account" in item
+											? (item as any).account?.email
+											: undefined
+									}
 								/>
 							))}
 						</div>

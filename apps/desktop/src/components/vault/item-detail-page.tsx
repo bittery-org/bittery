@@ -1,7 +1,7 @@
 import {
 	useCreateItem,
-	useDecryptedItem,
 	useDeleteItem,
+	useItem,
 	useToggleFavorite,
 	useUpdateItem,
 } from "@bittery/hooks";
@@ -65,7 +65,8 @@ export function ItemDetailPage({
 	const [isUpdatingTags, setIsUpdatingTags] = useState(false);
 
 	const navigate = useNavigate();
-	const { rawItem, decryptedData, isLoading } = useDecryptedItem(itemId);
+	// Unified hook - automatically handles account detection
+	const { rawItem, decryptedData, isLoading } = useItem(itemId);
 
 	// Shared hooks for item operations
 	const updateItem = useUpdateItem();

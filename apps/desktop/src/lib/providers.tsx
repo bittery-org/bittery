@@ -33,14 +33,28 @@ const trpcClient = createTRPCClient<AppRouter>({
 			async fetch(url, options) {
 				const serverUrl = (await storage.getServerUrl()) ?? fallbackServerUrl;
 				const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
-				const token = await storage.getAuthToken();
+
+				// Check if we're in "All Accounts" mode
+				const activeEmail = await storage.getActiveAccountEmail();
+
+				// Only get auth token if we have a real account (not "all" mode)
+				const token = activeEmail && activeEmail !== "all"
+					? await storage.getAuthToken()
+					: null;
+
+				const headers: Record<string, string> = {
+					...(options?.headers as Record<string, string>),
+				};
+
+				// Only set Authorization header if we have a valid token
+				if (token) {
+					headers.Authorization = `Bearer ${token}`;
+				}
+
 				return fetch(resolvedUrl, {
 					...options,
 					credentials: "include",
-					headers: {
-						Authorization: token ? `Bearer ${token}` : undefined,
-						...options?.headers,
-					} as HeadersInit,
+					headers,
 				});
 			},
 		}),

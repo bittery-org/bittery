@@ -52,6 +52,9 @@ export function getQueryKeysForEvent(
 			keys.push(trpc.vault.listAllItems.queryKey());
 			if (vaultId) {
 				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
+				// Invalidate useVaultItems queries for this vault
+				keys.push(["vault-items-raw", vaultId]);
+				keys.push(["decrypted-items", vaultId]);
 			}
 			break;
 
@@ -59,6 +62,9 @@ export function getQueryKeysForEvent(
 			keys.push(trpc.vault.listAllItems.queryKey());
 			if (vaultId) {
 				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
+				// Invalidate useVaultItems queries for this vault
+				keys.push(["vault-items-raw", vaultId]);
+				keys.push(["decrypted-items", vaultId]);
 			}
 			keys.push(trpc.vault.getItem.queryKey({ itemId: entityId }));
 			break;
@@ -69,6 +75,9 @@ export function getQueryKeysForEvent(
 			if (vaultId) {
 				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
 				keys.push(trpc.vault.listDeletedItems.queryKey({ vaultId }));
+				// Invalidate useVaultItems queries for this vault
+				keys.push(["vault-items-raw", vaultId]);
+				keys.push(["decrypted-items", vaultId]);
 			}
 			break;
 
@@ -78,6 +87,9 @@ export function getQueryKeysForEvent(
 			if (vaultId) {
 				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
 				keys.push(trpc.vault.listDeletedItems.queryKey({ vaultId }));
+				// Invalidate useVaultItems queries for this vault
+				keys.push(["vault-items-raw", vaultId]);
+				keys.push(["decrypted-items", vaultId]);
 			}
 			break;
 
@@ -87,14 +99,17 @@ export function getQueryKeysForEvent(
 			// Target vault (vaultId is the target)
 			if (vaultId) {
 				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
+				// Invalidate useVaultItems queries for target vault
+				keys.push(["vault-items-raw", vaultId]);
+				keys.push(["decrypted-items", vaultId]);
 			}
 			// Source vault from metadata
 			if (event.metadata?.sourceVaultId) {
-				keys.push(
-					trpc.vault.listItems.queryKey({
-						vaultId: event.metadata.sourceVaultId as string,
-					}),
-				);
+				const sourceVaultId = event.metadata.sourceVaultId as string;
+				keys.push(trpc.vault.listItems.queryKey({ vaultId: sourceVaultId }));
+				// Invalidate useVaultItems queries for source vault
+				keys.push(["vault-items-raw", sourceVaultId]);
+				keys.push(["decrypted-items", sourceVaultId]);
 			}
 			break;
 
@@ -196,6 +211,13 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 				queryClient.invalidateQueries({
 					queryKey: trpc.vault.listAllItems.queryKey(),
 				}),
+				// Invalidate useVaultItems queries for this vault
+				queryClient.invalidateQueries({
+					queryKey: ["vault-items-raw", vaultId],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["decrypted-items", vaultId],
+				}),
 			]);
 		},
 
@@ -204,9 +226,18 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 */
 		invalidateVaultList: async (vaultId: string): Promise<void> => {
 			const { queryClient, trpc } = options;
-			await queryClient.invalidateQueries({
-				queryKey: trpc.vault.listItems.queryKey({ vaultId }),
-			});
+			await Promise.all([
+				queryClient.invalidateQueries({
+					queryKey: trpc.vault.listItems.queryKey({ vaultId }),
+				}),
+				// Invalidate useVaultItems queries for this vault
+				queryClient.invalidateQueries({
+					queryKey: ["vault-items-raw", vaultId],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["decrypted-items", vaultId],
+				}),
+			]);
 		},
 
 		/**
@@ -271,6 +302,65 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 			await queryClient.invalidateQueries({
 				queryKey: trpc.vault.members.list.queryKey({ vaultId }),
 			});
+		},
+
+		/**
+		 * Invalidate all account-related data
+		 * Use this when switching accounts to clear all cached data from the previous account
+		 */
+		invalidateAllAccountData: async (): Promise<void> => {
+			const { queryClient, trpc } = options;
+
+			// Remove tRPC API queries entirely to prevent automatic refetch attempts
+			// This is important when switching to "All Accounts" mode where there's no auth token
+			queryClient.removeQueries({
+				queryKey: trpc.vault.list.queryKey(),
+			});
+			queryClient.removeQueries({
+				queryKey: trpc.vault.listAllItems.queryKey(),
+			});
+			queryClient.removeQueries({
+				queryKey: trpc.vault.listAllDeletedItems.queryKey(),
+			});
+
+			// Invalidate (not remove) local storage queries - these should refetch from storage
+			await Promise.all([
+				// Invalidate vault keys
+				queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
+
+				// Invalidate account-related queries
+				queryClient.invalidateQueries({ queryKey: ["accounts", "unlocked"] }),
+				queryClient.invalidateQueries({ queryKey: ["accounts", "metadata"] }),
+				queryClient.invalidateQueries({ queryKey: ["accounts", "active"] }),
+
+				// Invalidate decrypted items caches
+				queryClient.invalidateQueries({
+					queryKey: ["all-accounts-items"],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["all-decrypted-items"],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["all-deleted-items"],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["decrypted-items"],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["decrypted-item"],
+				}),
+
+				// Invalidate useVaultItems queries
+				queryClient.invalidateQueries({
+					queryKey: ["vault-items-raw"],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["vault-owner"],
+				}),
+
+				// Invalidate team queries
+				queryClient.invalidateQueries({ queryKey: ["team"] }),
+			]);
 		},
 	};
 }

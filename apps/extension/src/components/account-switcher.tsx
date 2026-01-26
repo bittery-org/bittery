@@ -3,6 +3,9 @@ import { useAccountSwitcher } from "@bittery/hooks";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "@bittery/ui";
 import { storage } from "@/lib/storage";
+import { useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
+import { createExtensionInvalidator } from "@/lib/query-invalidation";
 
 /**
  * Extension-specific account switcher wrapper
@@ -17,6 +20,11 @@ export function ExtensionAccountSwitcher() {
 		lockAllAccounts,
 	} = useAccountSwitcher();
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
+	const invalidator = useMemo(
+		() => createExtensionInvalidator(queryClient),
+		[queryClient],
+	);
 
 	const accountsData = accounts.data ?? [];
 	const unlockedEmailsList = unlockedEmails.data ?? [];
@@ -33,6 +41,8 @@ export function ExtensionAccountSwitcher() {
 				// Redirect to unlock screen with the account email
 				navigate({ to: "/unlock", search: { email } });
 			} else {
+				// Invalidate all account-related data to clear cache from previous account
+				await invalidator.invalidateAllAccountData();
 				// Reload vault items for the new account
 				navigate({ to: "/vault" });
 			}
@@ -58,6 +68,26 @@ export function ExtensionAccountSwitcher() {
 		}
 	};
 
+	const handleAllAccountsSelect = async () => {
+		// Check if we have any unlocked accounts
+		if (unlockedEmailsList.length === 0) {
+			toast.error(
+				"No accounts are unlocked. Please unlock at least one account.",
+			);
+			return;
+		}
+
+		try {
+			await switchAccount.mutateAsync("all");
+			// Invalidate all account-related data to refresh multi-account view
+			await invalidator.invalidateAllAccountData();
+			navigate({ to: "/vault" });
+		} catch (error) {
+			console.error("Failed to switch to All Accounts mode:", error);
+			toast.error("Failed to switch to All Accounts mode");
+		}
+	};
+
 	return (
 		<AccountSwitcher
 			accounts={accountsData}
@@ -66,6 +96,8 @@ export function ExtensionAccountSwitcher() {
 			onAccountSelect={handleSwitchAccount}
 			onAddAccount={handleAddAccount}
 			onLockAll={handleLockAll}
+			showAllAccountsOption={true}
+			onAllAccountsSelect={handleAllAccountsSelect}
 			isLoading={accounts.isLoading || switchAccount.isPending}
 		/>
 	);

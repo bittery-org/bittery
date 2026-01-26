@@ -65,7 +65,9 @@ describe("Auth Router", () => {
 			expect(result.user.teamName).toBe("Test Org");
 			expect(result.user.teamType).toBe("organization");
 			expect(result.vaultKeys).toHaveLength(1);
+			// @ts-expect-error This is fine
 			expect(result.vaultKeys[0].vaultName).toBe("Personal");
+			// @ts-expect-error This is fine
 			expect(result.vaultKeys[0].role).toBe("owner");
 		});
 

@@ -13,13 +13,26 @@ export const Route = createFileRoute("/")({
 
 		// Get active account
 		let activeEmail = await storage.getActiveAccountEmail();
+		
 		if (!activeEmail) {
 			// Has accounts but none active, set first as active
 			await storage.setActiveAccount(accountsList[0].email);
 			activeEmail = accountsList[0].email;
 		}
 
-		// Check if active account has valid session
+		// Handle "All Accounts" mode specially
+		if (activeEmail === "all") {
+			// Check if we have any unlocked accounts
+			const unlockedAccounts = await storage.getUnlockedAccounts?.();
+			if (unlockedAccounts && unlockedAccounts.length > 0) {
+				// At least one account is unlocked, go to vault
+				throw redirect({ to: "/vault" });
+			}
+			// No unlocked accounts, redirect to unlock
+			throw redirect({ to: "/unlock" });
+		}
+
+		// Single account mode: check if active account has valid session
 		const sessionValid = await storage.isSessionValid(activeEmail);
 
 		if (sessionValid) {

@@ -10,16 +10,34 @@ import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
 
 /**
- * Helper function to decrypt all vault items
+ * Helper function to decrypt vault items for a specific account
  */
-async function decryptVaultItems() {
-	const vaultKeys = await storage.getVaultKeys();
+async function decryptVaultItemsForAccount(
+	email: string,
+	accountMeta?: { email: string; userId: string; name: string },
+) {
+	const vaultKeys = await storage.getVaultKeys(email);
 
 	if (!vaultKeys || vaultKeys.length === 0) {
 		return [];
 	}
 
-	const vaults = await trpcClient.vault.list.query();
+	// Get auth token for this account
+	const authToken = await storage.getAuthToken(email);
+	if (!authToken) {
+		console.warn(`[vault-handlers] No auth token for ${email}`);
+		return [];
+	}
+
+	// Create account-specific tRPC client
+	const { createAccountTrpcClient } = await import(
+		"@bittery/shared/trpc-client-factory"
+	);
+	const serverUrl = (await storage.getServerUrl(email)) || "http://localhost:3000";
+	const accountClient = createAccountTrpcClient(authToken, serverUrl);
+
+	// Fetch vaults for this account
+	const vaults = await accountClient.vault.list.query();
 
 	const decryptedVaultKeys: Record<string, Uint8Array> = {};
 
@@ -27,6 +45,7 @@ async function decryptVaultItems() {
 		vaultKeys.map(async (vk) => {
 			decryptedVaultKeys[vk.vaultId] = await storage.decryptVaultKey(
 				vk.encryptedVaultKey,
+				email,
 			);
 		}),
 	);
@@ -50,7 +69,24 @@ async function decryptVaultItems() {
 							);
 
 							const data = JSON.parse(decrypted);
-							return { ...item, ...data };
+							const decryptedItem = { ...item, ...data };
+
+							// Add account metadata if provided (for "All Accounts" mode)
+							if (accountMeta) {
+								return {
+									...decryptedItem,
+									account: accountMeta,
+									vault: {
+										id: vault.id,
+										name: vault.name,
+										type: vault.type,
+										icon: vault.icon,
+										imageUrl: vault.imageUrl,
+									},
+								};
+							}
+
+							return decryptedItem;
 						} catch (error) {
 							console.error("Failed to decrypt item:", item.id, error);
 							return null;
@@ -68,6 +104,56 @@ async function decryptVaultItems() {
 
 	// Flatten the array of arrays
 	return allVaultItems.flat();
+}
+
+/**
+ * Helper function to decrypt all vault items (single account or multi-account)
+ */
+async function decryptVaultItems() {
+	const activeEmail = await storage.getActiveAccountEmail();
+
+	// If active account is "all", fetch from all unlocked accounts
+	if (activeEmail === "all") {
+		const unlockedEmails = await storage.getUnlockedAccounts?.();
+
+		if (!unlockedEmails || unlockedEmails.length === 0) {
+			return [];
+		}
+
+		// Fetch items from all unlocked accounts
+		const allAccountItems = await Promise.all(
+			unlockedEmails.map(async (email) => {
+				try {
+					// Get account metadata
+					const accountMeta = await storage.getAccountMetadata?.(email);
+					if (!accountMeta) {
+						console.warn(
+							`[vault-handlers] No metadata found for ${email}`,
+						);
+						return [];
+					}
+
+					return decryptVaultItemsForAccount(email, accountMeta);
+				} catch (error) {
+					console.error(
+						`[vault-handlers] Failed to fetch items for ${email}:`,
+						error,
+					);
+					return [];
+				}
+			}),
+		);
+
+		// Flatten and return
+		return allAccountItems.flat();
+	}
+
+	// Single account mode - use active account
+	if (!activeEmail) {
+		return [];
+	}
+
+	return decryptVaultItemsForAccount(activeEmail);
 }
 
 /**

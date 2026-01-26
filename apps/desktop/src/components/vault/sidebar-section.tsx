@@ -53,7 +53,7 @@ export function SidebarSection({
 						className={`size-3 transition-transform ${isOpen ? "rotate-90" : ""}`}
 					/>
 					{icon && <span className="mr-0.5">{icon}</span>}
-					<span>{title}</span>
+					<span className="inline-block max-w-32 truncate">{title}</span>
 				</CollapsibleTrigger>
 				{onAdd && (
 					<Button

@@ -1,47 +1,51 @@
 /**
- * useAllDecryptedItems Hook
+ * useAllDecryptedDeletedItems Hook
  *
- * Fetches and decrypts all items from all accessible vaults.
+ * Fetches and decrypts all deleted items from all accessible vaults (single account).
+ * Used for cross-vault trash view.
  * Items are cached for 5 minutes to avoid repeated decryption.
- * Uses the efficient listAllItems endpoint (single query vs N queries).
  */
 
 import { useTRPC } from "@bittery/shared/trpc";
-import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
+import type { ItemCategory } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
-import { usePlatform } from "../context/platform-context";
+import { usePlatform } from "../../context/platform-context";
+import type { CrossVaultDecryptedItem } from "./use-all-decrypted-items";
 
 /**
- * Decrypted item with vault metadata for cross-vault views
+ * Deleted item with deletion timestamp
  */
-export interface CrossVaultDecryptedItem extends DecryptedItem {
-	vault: {
-		id: string;
-		name: string;
-		type: string;
-		icon: string | null;
-		imageUrl: string | null;
-	};
+export interface CrossVaultDeletedItem extends CrossVaultDecryptedItem {
+	deletedAt: string;
+}
+
+export interface UseAllDecryptedDeletedItemsOptions {
+	/** Whether to enable the query */
+	enabled?: boolean;
 }
 
 /**
- * Hook to fetch and decrypt all items from all accessible vaults.
- * Items are cached for 5 minutes to avoid repeated decryption.
+ * Hook to fetch and decrypt all deleted items from all accessible vaults (single account).
+ * Used for cross-vault trash view.
  *
- * @returns Object containing all decrypted items, loading state, and error
+ * @param options - Query options
+ * @returns Object containing all deleted decrypted items, loading state, and error
  */
-export function useAllDecryptedItems() {
+export function useAllDecryptedDeletedItems(
+	options: UseAllDecryptedDeletedItemsOptions = {},
+) {
 	const trpc = useTRPC();
 	const { storage, itemDecrypt } = usePlatform();
 
-	// Fetch raw encrypted items from API (all vaults in one query)
+	// Fetch raw encrypted deleted items from API (all vaults)
 	const {
 		data: rawItems = [],
 		isLoading: isLoadingRaw,
 		dataUpdatedAt,
 		refetch: refetchRaw,
 	} = useQuery({
-		...trpc.vault.listAllItems.queryOptions(),
+		...trpc.vault.listAllDeletedItems.queryOptions(),
+		enabled: options.enabled !== false,
 	});
 
 	// Decrypt items and cache the result
@@ -50,8 +54,8 @@ export function useAllDecryptedItems() {
 		isLoading: isDecrypting,
 		error,
 	} = useQuery({
-		queryKey: ["all-decrypted-items", dataUpdatedAt],
-		queryFn: async (): Promise<CrossVaultDecryptedItem[]> => {
+		queryKey: ["all-deleted-items", dataUpdatedAt],
+		queryFn: async (): Promise<CrossVaultDeletedItem[]> => {
 			if (rawItems.length === 0) return [];
 
 			// Cache decrypted vault keys to avoid repeated decryption
@@ -95,6 +99,7 @@ export function useAllDecryptedItems() {
 							favorite: rawItem.favorite,
 							createdAt: rawItem.createdAt,
 							updatedAt: rawItem.updatedAt,
+							deletedAt: rawItem.deletedAt ?? "",
 							...parsedData,
 							vault: {
 								id: rawItem.vault.id,
@@ -103,7 +108,7 @@ export function useAllDecryptedItems() {
 								icon: rawItem.vault.icon,
 								imageUrl: rawItem.vault.imageUrl,
 							},
-						} as CrossVaultDecryptedItem;
+						} as CrossVaultDeletedItem;
 					} catch (error) {
 						console.error(`Failed to decrypt item ${rawItem.id}:`, error);
 						return {
@@ -113,6 +118,7 @@ export function useAllDecryptedItems() {
 							favorite: rawItem.favorite,
 							createdAt: rawItem.createdAt,
 							updatedAt: rawItem.updatedAt,
+							deletedAt: rawItem.deletedAt ?? "",
 							title: "[Decryption Failed]",
 							vault: {
 								id: rawItem.vault.id,
@@ -121,14 +127,14 @@ export function useAllDecryptedItems() {
 								icon: rawItem.vault.icon,
 								imageUrl: rawItem.vault.imageUrl,
 							},
-						} as CrossVaultDecryptedItem;
+						} as CrossVaultDeletedItem;
 					}
 				}),
 			);
 
 			return decrypted;
 		},
-		enabled: rawItems.length > 0,
+		enabled: options.enabled !== false && rawItems.length > 0,
 		staleTime: 5 * 60 * 1000, // 5 minutes
 		gcTime: 10 * 60 * 1000, // 10 minutes
 	});

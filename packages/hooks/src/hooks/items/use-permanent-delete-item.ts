@@ -3,11 +3,18 @@
  *
  * Permanently deletes a vault item from trash.
  * Returns a React Query mutation - apps handle success/error UI.
+ * Automatically handles multi-account mode.
  */
 
 import { useTRPCClient } from "@bittery/shared/trpc";
+import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import { useMutation } from "@tanstack/react-query";
-import { useQueryInvalidator } from "../../context/platform-context";
+import {
+	useQueryInvalidator,
+	usePlatformStorage,
+} from "../../context/platform-context";
+import { useAllDeletedItems } from "../use-all-deleted-items";
+import { findAccountEmailForItem } from "../../utils/account-helper";
 
 /**
  * Input for permanently deleting an item
@@ -27,6 +34,7 @@ export interface PermanentDeleteItemInput {
  * Handles:
  * - Permanently deleting the item via API
  * - Invalidating deleted items queries
+ * - Multi-account mode (automatically uses correct account's client)
  *
  * Does NOT handle:
  * - Toast notifications (app responsibility)
@@ -51,12 +59,30 @@ export interface PermanentDeleteItemInput {
  * ```
  */
 export function usePermanentDeleteItem() {
-	const trpcClient = useTRPCClient();
+	const { items: deletedItems } = useAllDeletedItems();
+	const defaultClient = useTRPCClient();
+	const storage = usePlatformStorage();
 	const invalidator = useQueryInvalidator();
 
 	return useMutation({
 		mutationFn: async (input: PermanentDeleteItemInput): Promise<void> => {
-			await trpcClient.vault.permanentlyDeleteItem.mutate({
+			// Find which account this item belongs to (if in "All Accounts" mode)
+			const accountEmail = findAccountEmailForItem(input.itemId, deletedItems);
+
+			// Get the correct tRPC client for this account
+			let client = defaultClient;
+			if (accountEmail) {
+				const authToken = await storage.getAuthToken(accountEmail);
+				const serverUrl = await storage.getServerUrl(accountEmail);
+				if (authToken) {
+					client = createAccountTrpcClient(
+						authToken,
+						serverUrl || "http://localhost:3000",
+					);
+				}
+			}
+
+			await client.vault.permanentlyDeleteItem.mutate({
 				itemId: input.itemId,
 			});
 		},

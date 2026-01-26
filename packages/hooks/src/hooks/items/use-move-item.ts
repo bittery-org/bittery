@@ -3,15 +3,20 @@
  *
  * Moves a vault item to a different vault with re-encryption.
  * Returns a React Query mutation - apps handle success/error UI.
+ * Automatically handles multi-account mode.
  */
 
 import { useTRPCClient } from "@bittery/shared/trpc";
+import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import type { DecryptedItemData } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";
 import {
 	usePlatform,
 	useQueryInvalidator,
+	usePlatformStorage,
 } from "../../context/platform-context";
+import { useItems } from "../use-items";
+import { findAccountEmailForItem } from "../../utils/account-helper";
 
 /**
  * Input for moving an item to another vault
@@ -37,6 +42,7 @@ export interface MoveItemInput {
  * - Re-encrypting item data with target vault key
  * - Moving the item via API
  * - Invalidating relevant queries (both source and target vaults)
+ * - Multi-account mode (automatically uses correct account's client and vault key)
  *
  * Does NOT handle:
  * - Toast notifications (app responsibility)
@@ -64,15 +70,21 @@ export interface MoveItemInput {
  * ```
  */
 export function useMoveItem() {
-	const trpcClient = useTRPCClient();
-	const { storage, crypto } = usePlatform();
+	const { items } = useItems();
+	const defaultClient = useTRPCClient();
+	const storage = usePlatformStorage();
+	const { crypto } = usePlatform();
 	const invalidator = useQueryInvalidator();
 
 	return useMutation({
 		mutationFn: async (input: MoveItemInput): Promise<void> => {
-			// Get target vault key for re-encryption
+			// Find which account this item belongs to (if in "All Accounts" mode)
+			const accountEmail = findAccountEmailForItem(input.itemId, items);
+
+			// Get target vault key for re-encryption (with account email if in multi-account mode)
 			const targetVaultKey = await storage.getDecryptedVaultKey(
 				input.targetVaultId,
+				accountEmail,
 			);
 			if (!targetVaultKey) {
 				throw new Error(
@@ -86,8 +98,21 @@ export function useMoveItem() {
 				targetVaultKey,
 			);
 
+			// Get the correct tRPC client for this account
+			let client = defaultClient;
+			if (accountEmail) {
+				const authToken = await storage.getAuthToken(accountEmail);
+				const serverUrl = await storage.getServerUrl(accountEmail);
+				if (authToken) {
+					client = createAccountTrpcClient(
+						authToken,
+						serverUrl || "http://localhost:3000",
+					);
+				}
+			}
+
 			// Move the item
-			await trpcClient.vault.moveItem.mutate({
+			await client.vault.moveItem.mutate({
 				itemId: input.itemId,
 				sourceVaultId: input.sourceVaultId,
 				targetVaultId: input.targetVaultId,

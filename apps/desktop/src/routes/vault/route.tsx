@@ -1,4 +1,4 @@
-import {
+ import {
 	type CreateVaultInput,
 	useCreateItem,
 	useCreateVault,
@@ -37,6 +37,19 @@ export const Route = createFileRoute("/vault")({
 			throw redirect({ to: "/login" });
 		}
 
+		// Handle "All Accounts" mode specially
+		if (activeEmail === "all") {
+			// Check if we have any unlocked accounts
+			const unlockedAccounts = await storage.getUnlockedAccounts?.();
+			if (!unlockedAccounts || unlockedAccounts.length === 0) {
+				// No unlocked accounts, redirect to unlock
+				throw redirect({ to: "/unlock" });
+			}
+			// At least one account is unlocked, allow access
+			return;
+		}
+
+		// Single account mode: validate session for specific account
 		// Check if user has stored credentials for active account
 		const hasSecretKey = await storage.getStoredSecretKey(activeEmail);
 		const sessionValid = await storage.isSessionValid(activeEmail);
@@ -54,12 +67,50 @@ export const Route = createFileRoute("/vault")({
 });
 
 function RouteComponent() {
+	// Check if we're in "All Accounts" mode
+	const { data: activeEmail } = useQuery({
+		queryKey: ["accounts", "active"],
+		queryFn: () => storage.getActiveAccountEmail(),
+	});
+
+	// Fetch vault keys for either single account or all unlocked accounts
 	const { data: vaultKeys } = useQuery({
-		queryKey: ["vault-keys"],
+		queryKey: ["vault-keys", activeEmail],
 		queryFn: async () => {
-			const keys = await storage.getVaultKeys();
-			return keys;
+			if (!activeEmail) return null;
+
+			// Single account mode
+			if (activeEmail !== "all") {
+				const keys = await storage.getVaultKeys();
+				return keys;
+			}
+
+			// All accounts mode - get vault keys for each unlocked account
+			const unlockedAccounts = await storage.getUnlockedAccounts?.();
+			if (!unlockedAccounts || unlockedAccounts.length === 0) {
+				return null;
+			}
+
+			// Fetch vault keys and account metadata for each unlocked account
+			const allVaultKeys = [];
+			for (const email of unlockedAccounts) {
+				const keys = await storage.getVaultKeys(email);
+				const accountMetadata = await storage.getAccountMetadata?.(email);
+				if (keys && keys.length > 0) {
+					// Add account info to each vault key
+					for (const key of keys) {
+						allVaultKeys.push({
+							...key,
+							accountEmail: email,
+							accountName: accountMetadata?.name || email.split("@")[0],
+							accountTeamName: accountMetadata?.teamName,
+						});
+					}
+				}
+			}
+			return allVaultKeys;
 		},
+		enabled: !!activeEmail,
 	});
 
 	// Get cross-vault tags for sidebar

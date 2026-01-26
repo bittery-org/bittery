@@ -22,6 +22,23 @@ export function createExtensionInvalidator(queryClient: QueryClient) {
 		invalidateVaultItems: async (): Promise<void> => {
 			await queryClient.invalidateQueries({ queryKey: ["vault-items"] });
 		},
+
+		/**
+		 * Invalidate all account-related data
+		 * Use this when switching accounts to clear all cached data from the previous account
+		 */
+		invalidateAllAccountData: async (): Promise<void> => {
+			await Promise.all([
+				// Invalidate vault items
+				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
+				queryClient.invalidateQueries({ queryKey: ["vault-item"] }),
+
+				// Invalidate account-related queries
+				queryClient.invalidateQueries({ queryKey: ["accounts", "unlocked"] }),
+				queryClient.invalidateQueries({ queryKey: ["accounts", "metadata"] }),
+				queryClient.invalidateQueries({ queryKey: ["accounts", "active"] }),
+			]);
+		},
 	};
 }
 

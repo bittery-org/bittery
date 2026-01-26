@@ -1,5 +1,5 @@
 import type { DecryptedItem } from "@bittery/shared/types";
-import { Button, Input, Skeleton, toast } from "@bittery/ui";
+import { Badge, Button, Input, Skeleton, toast } from "@bittery/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Plus, Search, Settings } from "lucide-react";
@@ -8,6 +8,22 @@ import { Favicon } from "@/components/favicon";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
 import { ExtensionAccountSwitcher } from "@/components/account-switcher";
+import { storage } from "@/lib/storage";
+
+type MultiAccountItem = DecryptedItem & {
+	account?: {
+		email: string;
+		userId: string;
+		name: string;
+	};
+	vault?: {
+		id: string;
+		name: string;
+		type: string;
+		icon: string | null;
+		imageUrl: string | null;
+	};
+};
 
 function getBaseDomain(host: string): string {
 	const parts = host.split(".");
@@ -55,6 +71,15 @@ export function VaultPage() {
 	const [searchQuery, setSearchQuery] = useState("");
 	const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 	const [currentHostname, setCurrentHostname] = useState<string | null>(null);
+
+	// Check if we're in "All Accounts" mode
+	const { data: activeEmail } = useQuery({
+		queryKey: ["accounts", "active"],
+		queryFn: () => storage.getActiveAccountEmail(),
+		staleTime: 5 * 1000,
+	});
+
+	const isAllAccountsMode = activeEmail === "all";
 
 	useEffect(() => {
 		chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -266,6 +291,16 @@ export function VaultPage() {
 																	{subtitle}
 																</div>
 															)}
+															{isAllAccountsMode && (item as MultiAccountItem).account && (
+																<div className="mt-0.5 flex items-center gap-1">
+																	<Badge
+																		variant="secondary"
+																		className="text-[10px] px-1.5 py-0"
+																	>
+																		{(item as MultiAccountItem).account?.email}
+																	</Badge>
+																</div>
+															)}
 														</div>
 													</div>
 												</button>
@@ -304,6 +339,16 @@ export function VaultPage() {
 													{subtitle && (
 														<div className="mt-0.5 truncate text-muted-foreground text-xs">
 															{subtitle}
+														</div>
+													)}
+													{isAllAccountsMode && (item as MultiAccountItem).account && (
+														<div className="mt-0.5 flex items-center gap-1">
+															<Badge
+																variant="secondary"
+																className="text-[10px] px-1.5 py-0"
+															>
+																{(item as MultiAccountItem).account?.email}
+															</Badge>
 														</div>
 													)}
 												</div>

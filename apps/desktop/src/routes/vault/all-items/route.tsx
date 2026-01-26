@@ -1,4 +1,4 @@
-import { useAllDecryptedItems, useToggleFavorite } from "@bittery/hooks";
+import { useItems, useToggleFavorite } from "@bittery/hooks";
 import { Badge } from "@bittery/ui";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
 import { LayoutGrid } from "lucide-react";
@@ -11,7 +11,8 @@ export const Route = createFileRoute("/vault/all-items")({
 function RouteComponent() {
 	const { itemId } = useParams({ strict: false });
 
-	const { items, isLoading } = useAllDecryptedItems();
+	// Unified hook - automatically handles single-account vs "All Accounts" mode
+	const { items, isLoading, isAllAccountsMode } = useItems();
 
 	// Sort items: favorites first, then by updatedAt
 	const sortedItems = [...items].sort((a, b) => {
@@ -93,6 +94,12 @@ function RouteComponent() {
 											linkParams={{ itemId: item.id }}
 											showVaultBadge
 											vaultId={item.vaultId}
+											showAccountBadge={isAllAccountsMode}
+											accountEmail={
+												isAllAccountsMode && "account" in item
+													? (item as any).account?.email
+													: undefined
+											}
 										/>
 									))}
 									<div className="mt-4 mb-2 px-3 font-semibold text-muted-foreground text-xs uppercase">
@@ -112,6 +119,12 @@ function RouteComponent() {
 									linkParams={{ itemId: item.id }}
 									showVaultBadge
 									vaultId={item.vaultId}
+									showAccountBadge={isAllAccountsMode}
+									accountEmail={
+										isAllAccountsMode && "account" in item
+											? (item as any).account?.email
+											: undefined
+									}
 								/>
 							))}
 						</div>

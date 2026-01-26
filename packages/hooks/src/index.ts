@@ -129,13 +129,25 @@ export {
 	type MultiAccountItem,
 	type UseAllAccountsItemsOptions,
 	useAllAccountsItems,
-} from "./hooks/use-all-accounts-items";
+} from "./hooks/internal/use-all-accounts-items";
 export {
 	type CrossVaultDecryptedItem,
+	type UseAllDecryptedItemsOptions,
 	useAllDecryptedItems,
-} from "./hooks/use-all-decrypted-items";
+} from "./hooks/internal/use-all-decrypted-items";
 export {
 	type CrossVaultDeletedItem,
+	type UseAllDecryptedDeletedItemsOptions,
+	useAllDecryptedDeletedItems,
+} from "./hooks/internal/use-all-decrypted-deleted-items";
+export {
+	type MultiAccountDeletedItem,
+	type UseAllAccountsDeletedItemsOptions,
+	useAllAccountsDeletedItems,
+} from "./hooks/internal/use-all-accounts-deleted-items";
+export {
+	type UnifiedDeletedItem,
+	type UseAllDeletedItemsOptions,
 	useAllDeletedItems,
 } from "./hooks/use-all-deleted-items";
 export {
@@ -143,9 +155,13 @@ export {
 	useAvailableTags,
 } from "./hooks/use-available-tags";
 export { useCrossVaultTags } from "./hooks/use-cross-vault-tags";
-export { useDecryptedItem } from "./hooks/use-decrypted-item";
+export { useDecryptedItem } from "./hooks/internal/use-decrypted-item";
 // Data Hooks (read operations)
-export { useDecryptedItems } from "./hooks/use-decrypted-items";
+export { useDecryptedItems } from "./hooks/internal/use-decrypted-items";
+// Unified Data Hooks (automatically handle single-account vs "All Accounts" mode)
+export { useItems, type UnifiedItem, type UseItemsOptions } from "./hooks/use-items";
+export { useItem, type UseItemResult } from "./hooks/use-item";
+export { useVaultItems, type UseVaultItemsOptions } from "./hooks/internal/use-vault-items";
 export {
 	analyzePassword,
 	usePasswordSecurity,
@@ -186,3 +202,7 @@ export type {
 } from "./types";
 // Utilities
 export { refreshVaultKeys } from "./utils/vault-utils";
+export {
+	findAccountEmailForItem,
+	getItemAccountEmail,
+} from "./utils/account-helper";

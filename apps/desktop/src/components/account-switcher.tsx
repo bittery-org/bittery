@@ -1,21 +1,22 @@
+/**
+ * Desktop Account Switcher
+ * Wrapper around the shared AccountSwitcher component with desktop-specific logic
+ */
+
 import {
-	Badge,
+	AccountSwitcher as SharedAccountSwitcher,
 	Button,
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
 	toast,
 } from "@bittery/ui";
 import { useAccountSwitcher } from "@bittery/hooks";
 import { useNavigate } from "@tanstack/react-router";
-import { Check, ChevronDown, Lock, LogOut, Plus, Settings } from "lucide-react";
+import { ChevronDown, Users } from "lucide-react";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
 import { AccountAvatar } from "./account-avatar";
 import { AccountSettingsDialog } from "./account-settings-dialog";
 import { RemoveAccountDialog } from "./remove-account-dialog";
+import { useQueryInvalidator } from "@/providers/sync-provider";
 
 export function AccountSwitcher() {
 	const {
@@ -26,17 +27,19 @@ export function AccountSwitcher() {
 		removeAccount,
 		lockAllAccounts,
 	} = useAccountSwitcher();
+	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
 	const [accountToRemove, setAccountToRemove] = useState<string | null>(null);
 	const [showSettings, setShowSettings] = useState(false);
 
 	const accountsData = accounts.data ?? [];
 	const unlockedEmailsList = unlockedEmails.data ?? [];
+	const isAllAccountsMode = activeEmail.data === "all";
 	const activeAccount = accountsData.find(
 		(a) => a.email === activeEmail.data,
 	);
 
-	const handleSwitchAccount = async (email: string) => {
+	const handleAccountSelect = async (email: string) => {
 		if (email === activeEmail.data) return;
 
 		try {
@@ -47,11 +50,33 @@ export function AccountSwitcher() {
 			if (!sessionValid) {
 				navigate({ to: "/unlock", search: { email } });
 			} else {
+				// Invalidate all account-related data to clear cache from previous account
+				await invalidator.invalidateAllAccountData();
 				navigate({ to: "/vault" });
 			}
 		} catch (error) {
 			console.error("Failed to switch account:", error);
 			toast.error("Failed to switch account");
+		}
+	};
+
+	const handleAllAccountsSelect = async () => {
+		// Check if we have any unlocked accounts
+		if (unlockedEmailsList.length === 0) {
+			toast.error(
+				"No accounts are unlocked. Please unlock at least one account.",
+			);
+			return;
+		}
+
+		try {
+			await switchAccount.mutateAsync("all");
+			// Invalidate all account-related data to refresh multi-account view
+			await invalidator.invalidateAllAccountData();
+			navigate({ to: "/vault" });
+		} catch (error) {
+			console.error("Failed to switch to All Accounts mode:", error);
+			toast.error("Failed to switch to All Accounts mode");
 		}
 	};
 
@@ -68,6 +93,14 @@ export function AccountSwitcher() {
 			console.error("Failed to lock all accounts:", error);
 			toast.error("Failed to lock accounts");
 		}
+	};
+
+	const handleAccountSettings = (email: string) => {
+		setShowSettings(true);
+	};
+
+	const handleRemoveAccountClick = (email: string) => {
+		setAccountToRemove(email);
 	};
 
 	const handleRemoveAccount = async (email: string) => {
@@ -89,105 +122,63 @@ export function AccountSwitcher() {
 		}
 	};
 
-	if (!activeAccount) {
-		return null;
-	}
+	// Custom trigger for desktop
+	const trigger = (
+		<Button
+			variant="ghost"
+			size="sm"
+			className="gap-2"
+			disabled={switchAccount.isPending}
+		>
+			{isAllAccountsMode ? (
+				<>
+					<div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10">
+						<Users className="h-4 w-4 text-primary" />
+					</div>
+					<div className="flex flex-col items-start overflow-hidden">
+						<span className="max-w-32 truncate font-medium text-sm">
+							All Accounts
+						</span>
+						<span className="text-muted-foreground text-xs">
+							{unlockedEmailsList.length} unlocked
+						</span>
+					</div>
+				</>
+			) : activeAccount ? (
+				<>
+					<AccountAvatar account={activeAccount} size="sm" />
+					<div className="flex flex-col items-start overflow-hidden">
+						<span className="max-w-32 truncate font-medium text-sm">
+							{activeAccount.teamName ||
+								activeAccount.name ||
+								activeAccount.email.split("@")[0]}
+						</span>
+					</div>
+				</>
+			) : null}
+			<ChevronDown className="h-4 w-4 opacity-50" />
+		</Button>
+	);
 
 	return (
 		<>
-			<DropdownMenu>
-				<DropdownMenuTrigger asChild>
-					<Button
-						variant="ghost"
-						size="sm"
-						className="gap-2"
-						disabled={switchAccount.isPending}
-					>
-						<AccountAvatar account={activeAccount} size="sm" />
-						<div className="flex flex-col items-start overflow-hidden">
-							<span className="max-w-32 truncate font-medium text-sm">
-								{activeAccount.teamName ||
-									activeAccount.name ||
-									activeAccount.email.split("@")[0]}
-							</span>
-						</div>
-						<ChevronDown className="h-4 w-4 opacity-50" />
-					</Button>
-				</DropdownMenuTrigger>
-				<DropdownMenuContent align="start" className="w-72">
-					{/* Account List */}
-					{accountsData.map((account) => {
-						const isActive = account.email === activeEmail.data;
-						const isUnlocked = unlockedEmailsList.includes(account.email);
-
-						return (
-							<DropdownMenuItem
-								key={account.email}
-								onClick={() => handleSwitchAccount(account.email)}
-								className="flex items-center gap-3 py-2"
-							>
-								<AccountAvatar account={account} size="sm" />
-								<div className="flex flex-1 flex-col overflow-hidden">
-									<div className="flex items-center gap-1.5">
-										<span className="truncate font-medium">
-											{account.teamName ||
-												account.name ||
-												account.email.split("@")[0]}
-										</span>
-										{isActive && <Check className="h-4 w-4 text-primary" />}
-									</div>
-									<span className="truncate text-muted-foreground text-xs">
-										{account.email}
-									</span>
-								</div>
-								{isUnlocked && (
-									<Badge variant="secondary" className="shrink-0 text-xs">
-										Unlocked
-									</Badge>
-								)}
-							</DropdownMenuItem>
-						);
-					})}
-
-					<DropdownMenuSeparator />
-
-					{/* Add Account */}
-					<DropdownMenuItem onClick={handleAddAccount} className="gap-2">
-						<Plus className="h-4 w-4" />
-						Add Account
-					</DropdownMenuItem>
-
-					{/* Account Settings */}
-					<DropdownMenuItem
-						onClick={() => setShowSettings(true)}
-						className="gap-2"
-					>
-						<Settings className="h-4 w-4" />
-						Account Settings
-					</DropdownMenuItem>
-
-					<DropdownMenuSeparator />
-
-					{/* Lock All Accounts */}
-					{accountsData.length > 0 && unlockedEmailsList.length > 0 && (
-						<DropdownMenuItem onClick={handleLockAll} className="gap-2">
-							<Lock className="h-4 w-4" />
-							Lock All Accounts
-						</DropdownMenuItem>
-					)}
-
-					<DropdownMenuSeparator />
-
-					{/* Remove Current Account */}
-					<DropdownMenuItem
-						onClick={() => setAccountToRemove(activeAccount.email)}
-						className="gap-2 text-destructive focus:text-destructive"
-					>
-						<LogOut className="h-4 w-4" />
-						Remove Account
-					</DropdownMenuItem>
-				</DropdownMenuContent>
-			</DropdownMenu>
+			<SharedAccountSwitcher
+				accounts={accountsData}
+				activeEmail={activeEmail.data ?? null}
+				unlockedEmails={unlockedEmailsList}
+				isLoading={switchAccount.isPending}
+				onAccountSelect={handleAccountSelect}
+				onAddAccount={handleAddAccount}
+				onLockAll={handleLockAll}
+				showAllAccountsOption={true}
+				onAllAccountsSelect={handleAllAccountsSelect}
+				showAccountSettings={true}
+				onAccountSettings={handleAccountSettings}
+				showRemoveAccount={true}
+				onRemoveAccount={handleRemoveAccountClick}
+				trigger={trigger}
+				align="start"
+			/>
 
 			<RemoveAccountDialog
 				email={accountToRemove}
@@ -195,11 +186,13 @@ export function AccountSwitcher() {
 				onCancel={() => setAccountToRemove(null)}
 			/>
 
-			<AccountSettingsDialog
-				open={showSettings}
-				onOpenChange={setShowSettings}
-				email={activeAccount.email}
-			/>
+			{activeAccount && (
+				<AccountSettingsDialog
+					open={showSettings}
+					onOpenChange={setShowSettings}
+					email={activeAccount.email}
+				/>
+			)}
 		</>
 	);
 }

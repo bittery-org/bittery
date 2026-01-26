@@ -1,4 +1,4 @@
-import { useAvailableTags, useDecryptedItems } from "@bittery/hooks";
+import { useAvailableTags, useVaultItems } from "@bittery/hooks";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
@@ -14,7 +14,8 @@ function VaultItemComponent() {
 	const navigate = useNavigate();
 
 	// Get all items in vault for available tags
-	const { items: allVaultItems } = useDecryptedItems(selectedVaultId);
+	// useVaultItems automatically handles single-account vs all-accounts mode
+	const { items: allVaultItems } = useVaultItems(selectedVaultId);
 	const availableTags = useAvailableTags(allVaultItems);
 
 	// Get vault info from storage

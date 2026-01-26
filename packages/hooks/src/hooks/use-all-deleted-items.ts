@@ -1,139 +1,80 @@
 /**
- * useAllDeletedItems Hook
+ * useAllDeletedItems Hook - Unified Deleted Items Fetching
  *
- * Fetches and decrypts all deleted items from all accessible vaults.
- * Used for cross-vault trash view.
- * Items are cached for 5 minutes to avoid repeated decryption.
+ * Automatically detects whether we're in single-account or "All Accounts" mode
+ * and fetches deleted items accordingly. Components don't need to care about the mode.
+ *
+ * This replaces the pattern of manually checking mode and conditionally fetching.
+ *
+ * Usage:
+ * ```tsx
+ * const { items, isLoading } = useAllDeletedItems();
+ * ```
  */
 
-import { useTRPC } from "@bittery/shared/trpc";
-import type { ItemCategory } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
-import { usePlatform } from "../context/platform-context";
-import type { CrossVaultDecryptedItem } from "./use-all-decrypted-items";
+import { usePlatformStorage } from "../context/platform-context";
+import {
+	useAllDecryptedDeletedItems,
+	type CrossVaultDeletedItem,
+} from "./internal/use-all-decrypted-deleted-items";
+import {
+	useAllAccountsDeletedItems,
+	type MultiAccountDeletedItem,
+} from "./internal/use-all-accounts-deleted-items";
 
-/**
- * Deleted item with deletion timestamp
- */
-export interface CrossVaultDeletedItem extends CrossVaultDecryptedItem {
-	deletedAt: string;
+export type UnifiedDeletedItem = CrossVaultDeletedItem | MultiAccountDeletedItem;
+
+export interface UseAllDeletedItemsOptions {
+	enabled?: boolean;
 }
 
 /**
- * Hook to fetch and decrypt all deleted items from all accessible vaults.
- * Used for cross-vault trash view.
+ * Hook to fetch all deleted items across vaults.
+ * Automatically handles single-account vs "All Accounts" mode.
  *
- * @returns Object containing all deleted decrypted items, loading state, and error
+ * @param options - Query options
+ * @returns Deleted items, loading state, error, and refetch function
+ *
+ * @example
+ * ```tsx
+ * const { items, isLoading } = useAllDeletedItems();
+ *
+ * items.map(item => (
+ *   <DeletedItemCard key={item.id} item={item} />
+ * ))
+ * ```
  */
-export function useAllDeletedItems() {
-	const trpc = useTRPC();
-	const { storage, itemDecrypt } = usePlatform();
+export function useAllDeletedItems(options: UseAllDeletedItemsOptions = {}) {
+	const storage = usePlatformStorage();
 
-	// Fetch raw encrypted deleted items from API (all vaults)
-	const {
-		data: rawItems = [],
-		isLoading: isLoadingRaw,
-		dataUpdatedAt,
-		refetch: refetchRaw,
-	} = useQuery({
-		...trpc.vault.listAllDeletedItems.queryOptions(),
+	// Detect current mode
+	const { data: activeEmail } = useQuery({
+		queryKey: ["accounts", "active"],
+		queryFn: () => storage.getActiveAccountEmail(),
+		staleTime: 5 * 1000,
+		enabled: storage.supportsMultiAccount && options.enabled !== false,
 	});
 
-	// Decrypt items and cache the result
-	const {
-		data: decryptedItems = [],
-		isLoading: isDecrypting,
-		error,
-	} = useQuery({
-		queryKey: ["all-deleted-items", dataUpdatedAt],
-		queryFn: async (): Promise<CrossVaultDeletedItem[]> => {
-			if (rawItems.length === 0) return [];
+	const isAllAccountsMode = activeEmail === "all";
 
-			// Cache decrypted vault keys to avoid repeated decryption
-			const vaultKeyCache = new Map<string, Uint8Array>();
-
-			// Helper to get or decrypt vault key
-			const getVaultKey = async (vaultId: string): Promise<Uint8Array> => {
-				const cached = vaultKeyCache.get(vaultId);
-				if (cached) {
-					return cached;
-				}
-				const vaultKey = await storage.getDecryptedVaultKey(vaultId);
-				if (!vaultKey) {
-					throw new Error(`No vault key found for vault ${vaultId}`);
-				}
-				vaultKeyCache.set(vaultId, vaultKey);
-				return vaultKey;
-			};
-
-			// Decrypt all items in parallel
-			const decrypted = await Promise.all(
-				rawItems.map(async (rawItem) => {
-					try {
-						const vaultKey = await getVaultKey(rawItem.vaultId);
-
-						const decryptedData = await itemDecrypt.decrypt(
-							{
-								ciphertext: rawItem.encryptedData,
-								iv: rawItem.encryptionIv,
-								algorithm: rawItem.encryptionAlgorithm,
-							},
-							vaultKey,
-						);
-
-						const parsedData = JSON.parse(decryptedData);
-
-						return {
-							id: rawItem.id,
-							vaultId: rawItem.vaultId,
-							category: rawItem.category as ItemCategory,
-							favorite: rawItem.favorite,
-							createdAt: rawItem.createdAt,
-							updatedAt: rawItem.updatedAt,
-							deletedAt: rawItem.deletedAt ?? "",
-							...parsedData,
-							vault: {
-								id: rawItem.vault.id,
-								name: rawItem.vault.name,
-								type: rawItem.vault.type,
-								icon: rawItem.vault.icon,
-								imageUrl: rawItem.vault.imageUrl,
-							},
-						} as CrossVaultDeletedItem;
-					} catch (error) {
-						console.error(`Failed to decrypt item ${rawItem.id}:`, error);
-						return {
-							id: rawItem.id,
-							vaultId: rawItem.vaultId,
-							category: rawItem.category as ItemCategory,
-							favorite: rawItem.favorite,
-							createdAt: rawItem.createdAt,
-							updatedAt: rawItem.updatedAt,
-							deletedAt: rawItem.deletedAt ?? "",
-							title: "[Decryption Failed]",
-							vault: {
-								id: rawItem.vault.id,
-								name: rawItem.vault.name,
-								type: rawItem.vault.type,
-								icon: rawItem.vault.icon,
-								imageUrl: rawItem.vault.imageUrl,
-							},
-						} as CrossVaultDeletedItem;
-					}
-				}),
-			);
-
-			return decrypted;
-		},
-		enabled: rawItems.length > 0,
-		staleTime: 5 * 60 * 1000, // 5 minutes
-		gcTime: 10 * 60 * 1000, // 10 minutes
+	// Fetch data based on mode
+	const singleAccountData = useAllDecryptedDeletedItems({
+		enabled: options.enabled !== false && !isAllAccountsMode,
 	});
+
+	const multiAccountData = useAllAccountsDeletedItems({
+		enabled: options.enabled !== false && isAllAccountsMode,
+	});
+
+	// Return unified interface
+	const result = isAllAccountsMode ? multiAccountData : singleAccountData;
 
 	return {
-		items: decryptedItems,
-		isLoading: isLoadingRaw || isDecrypting,
-		error,
-		refetch: refetchRaw,
+		items: result.items as UnifiedDeletedItem[],
+		isLoading: result.isLoading,
+		error: result.error,
+		refetch: result.refetch,
+		isAllAccountsMode,
 	};
 }

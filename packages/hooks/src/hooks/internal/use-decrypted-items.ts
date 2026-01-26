@@ -8,7 +8,7 @@
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
-import { usePlatform } from "../context/platform-context";
+import { usePlatform } from "../../context/platform-context";
 
 /**
  * Hook to fetch and decrypt items from a vault.

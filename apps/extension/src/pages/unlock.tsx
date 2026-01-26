@@ -8,8 +8,8 @@ import {
 	type VaultIconState,
 } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { storage } from "../lib/storage";
@@ -17,39 +17,25 @@ import { storage } from "../lib/storage";
 export function UnlockPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
-	const { email: emailParam } = useSearch({ from: "/unlock" });
 	const [showPassword, setShowPassword] = useState(false);
-	const [targetEmail, setTargetEmail] = useState<string | null>(null);
 	const [biometricAttempted, setBiometricAttempted] = useState(false);
 	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
 	const hasAttemptedBiometric = useRef(false);
 
-	// Determine which account to unlock
-	useEffect(() => {
-		const determineTarget = async () => {
-			if (emailParam) {
-				setTargetEmail(emailParam);
-				return;
-			}
+	// Get all accounts
+	const { data: accounts = [] } = useQuery({
+		queryKey: ["accounts", "list"],
+		queryFn: () => storage.getAccountsList(),
+	});
 
-			// Fall back to active account
-			const activeEmail = await storage.getActiveAccountEmail();
-			if (activeEmail) {
-				setTargetEmail(activeEmail);
-			}
-		};
-
-		determineTarget();
-	}, [emailParam]);
-
-	// Define mutations first before they're used in useEffect
+	// Unlock all accounts with password
 	const unlockMutation = useMutation({
 		mutationFn: async (values: { password: string }) => {
 			setVaultState("unlocking");
-			// Send to background worker for quick unlock with target email
+			// Send to background worker to unlock all accounts
 			const response = await chrome.runtime.sendMessage({
-				type: "QUICK_UNLOCK",
-				payload: { password: values.password, email: targetEmail },
+				type: "QUICK_UNLOCK_ALL",
+				payload: { password: values.password },
 			});
 
 			if (!response.success) {
@@ -58,12 +44,23 @@ export function UnlockPage() {
 
 			return response;
 		},
-		onSuccess: async () => {
+		onSuccess: async (response) => {
 			// Refresh accounts queries
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
 			setVaultState("unlocked");
-			toast.success("Unlocked successfully!");
+
+			const { unlocked = [], failed = [] } = response.result || {};
+			if (failed.length === 0) {
+				if (accounts.length === 1) {
+					toast.success("Vault unlocked");
+				} else {
+					toast.success(`All ${unlocked.length} accounts unlocked`);
+				}
+			} else {
+				toast.warning(`Unlocked ${unlocked.length} of ${accounts.length} accounts`);
+			}
+
 			// Delay navigation to show unlock animation
 			setTimeout(() => {
 				navigate({ to: "/vault" });
@@ -75,13 +72,13 @@ export function UnlockPage() {
 		},
 	});
 
+	// Biometric unlock all accounts
 	const biometricUnlockMutation = useMutation({
 		mutationFn: async () => {
 			setVaultState("unlocking");
-			// Send to background worker for native biometric unlock with target email
+			// Send to background worker for native biometric unlock
 			const response = await chrome.runtime.sendMessage({
-				type: "NATIVE_BIOMETRIC_UNLOCK",
-				payload: { email: targetEmail },
+				type: "NATIVE_BIOMETRIC_UNLOCK_ALL",
 			});
 
 			if (!response.success) {
@@ -90,12 +87,23 @@ export function UnlockPage() {
 
 			return response;
 		},
-		onSuccess: async () => {
+		onSuccess: async (response) => {
 			// Refresh accounts queries
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
 			setVaultState("unlocked");
-			toast.success("Unlocked with biometric!");
+
+			const { unlocked = [], failed = [] } = response.result || {};
+			if (failed.length === 0) {
+				if (accounts.length === 1) {
+					toast.success("Unlocked with biometric");
+				} else {
+					toast.success(`All ${unlocked.length} accounts unlocked`);
+				}
+			} else {
+				toast.warning(`Unlocked ${unlocked.length} of ${accounts.length} accounts`);
+			}
+
 			// Delay navigation to show unlock animation
 			setTimeout(() => {
 				navigate({ to: "/vault" });
@@ -109,7 +117,7 @@ export function UnlockPage() {
 
 	// Initialize biometric check
 	useEffect(() => {
-		if (!targetEmail) return;
+		if (accounts.length === 0) return;
 
 		// Check if native biometric is available
 		chrome.runtime
@@ -133,7 +141,7 @@ export function UnlockPage() {
 			.catch((error) => {
 				console.error("Failed to check biometric:", error);
 			});
-	}, [targetEmail]);
+	}, [accounts.length]);
 
 	const form = useForm({
 		defaultValues: {
@@ -148,6 +156,19 @@ export function UnlockPage() {
 		navigate({ to: "/login" });
 	};
 
+	if (accounts.length === 0) {
+		return (
+			<div className="flex min-h-[400px] items-center justify-center p-4">
+				<div className="text-center">
+					<p className="text-gray-600">No accounts found</p>
+					<Button onClick={handleFullLogin} className="mt-4">
+						Sign In
+					</Button>
+				</div>
+			</div>
+		);
+	}
+
 	return (
 		<div className="flex min-h-[400px] items-center justify-center p-4">
 			<div className="w-full max-w-sm space-y-4">
@@ -159,8 +180,12 @@ export function UnlockPage() {
 						<h1 className="font-semibold text-xl tracking-tight">
 							Welcome back
 						</h1>
-						{targetEmail && (
-							<p className="mt-1 font-medium text-sm">{targetEmail}</p>
+						{accounts.length === 1 ? (
+							<p className="mt-1 font-medium text-sm">{accounts[0].email}</p>
+						) : (
+							<p className="mt-1 text-muted-foreground text-sm">
+								{accounts.length} accounts
+							</p>
 						)}
 						<p className="mt-1 text-muted-foreground text-sm">
 							{vaultState === "unlocking"
@@ -229,7 +254,11 @@ export function UnlockPage() {
 							className="h-10 w-full font-medium"
 							disabled={unlockMutation.isPending}
 						>
-							{unlockMutation.isPending ? "Unlocking..." : "Unlock Vault"}
+							{unlockMutation.isPending
+								? "Unlocking..."
+								: accounts.length === 1
+									? "Unlock Vault"
+									: `Unlock All (${accounts.length})`}
 						</Button>
 
 						<Button

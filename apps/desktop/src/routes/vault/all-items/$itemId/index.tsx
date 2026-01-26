@@ -1,4 +1,4 @@
-import { useAllDecryptedItems, useAvailableTags } from "@bittery/hooks";
+import { useAvailableTags, useItems } from "@bittery/hooks";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 import { ItemDetailPage } from "../../../../components/vault/item-detail-page";
@@ -11,12 +11,13 @@ function AllItemsItemComponent() {
 	const { itemId } = Route.useParams();
 	const navigate = useNavigate();
 
-	// Get all items for available tags and vault info
-	const { items: allItems } = useAllDecryptedItems();
+	// Unified hook - automatically handles single-account vs "All Accounts" mode
+	const { items: allItems } = useItems();
 	const availableTags = useAvailableTags(allItems);
 
 	// Get vault info from the item
-	const currentVault = allItems.find((i) => i.id === itemId)?.vault;
+	const currentItem = allItems.find((i) => i.id === itemId);
+	const currentVault = currentItem?.vault;
 
 	// Handle tag click - navigate to cross-vault tag view
 	const handleTagClick = useCallback(

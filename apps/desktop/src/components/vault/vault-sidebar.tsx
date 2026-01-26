@@ -34,6 +34,9 @@ interface VaultInfo {
 	vaultIcon?: string | null;
 	vaultImageUrl?: string | null;
 	role: string;
+	accountEmail?: string;
+	accountName?: string;
+	accountTeamName?: string;
 }
 
 interface VaultSidebarProps {
@@ -188,6 +191,54 @@ export function VaultSidebar({
 		? decodeURIComponent(pathname.split("/vault/tag/")[1]?.split("/")[0] || "")
 		: null;
 
+	// Check if we're in multi-account mode (vaults have accountEmail)
+	const isMultiAccountMode = vaults.length > 0 && vaults[0].accountEmail;
+
+	// Group vaults by account if in multi-account mode
+	const vaultsByAccount = isMultiAccountMode
+		? vaults.reduce(
+				(acc, vault) => {
+					const email = vault.accountEmail!;
+					if (!acc[email]) {
+						acc[email] = {
+							accountEmail: email,
+							accountName: vault.accountName || email.split("@")[0],
+							accountTeamName: vault.accountTeamName,
+							vaults: [],
+						};
+					}
+					acc[email].vaults.push(vault);
+					return acc;
+				},
+				{} as Record<
+					string,
+					{
+						accountEmail: string;
+						accountName: string;
+						accountTeamName?: string;
+						vaults: VaultInfo[];
+					}
+				>,
+			)
+		: null;
+
+	const renderVaultEntry = (vault: VaultInfo) => (
+		<DroppableVaultEntry
+			key={vault.vaultId}
+			vault={vault}
+			isActive={
+				currentVaultId === vault.vaultId &&
+				!isAllItemsActive &&
+				!isFavoritesActive &&
+				!isTrashActive &&
+				!isTagActive
+			}
+			onEditVault={onEditVault}
+			onDeleteVault={onDeleteVault}
+			onImportItems={onImportItems}
+		/>
+	);
+
 	return (
 		<div className="flex w-48 flex-col border-r bg-background">
 			<div className="flex flex-1 flex-col overflow-y-auto p-2">
@@ -215,29 +266,29 @@ export function VaultSidebar({
 
 				{/* Vaults Section */}
 				<div className="mt-2">
-					<SidebarSection
-						title="Vaults"
-						storageKey="vaults"
-						defaultOpen={true}
-						onAdd={onNewVault}
-					>
-						{vaults.map((vault) => (
-							<DroppableVaultEntry
-								key={vault.vaultId}
-								vault={vault}
-								isActive={
-									currentVaultId === vault.vaultId &&
-									!isAllItemsActive &&
-									!isFavoritesActive &&
-									!isTrashActive &&
-									!isTagActive
-								}
-								onEditVault={onEditVault}
-								onDeleteVault={onDeleteVault}
-								onImportItems={onImportItems}
-							/>
-						))}
-					</SidebarSection>
+					{isMultiAccountMode && vaultsByAccount ? (
+						// Multi-account mode: Group vaults by account
+						Object.values(vaultsByAccount).map((accountGroup) => (
+							<SidebarSection
+								key={accountGroup.accountEmail}
+								title={accountGroup.accountTeamName || accountGroup.accountName}
+								storageKey={`account-${accountGroup.accountEmail}`}
+								defaultOpen={true}
+							>
+								{accountGroup.vaults.map(renderVaultEntry)}
+							</SidebarSection>
+						))
+					) : (
+						// Single account mode: Show vaults in one section
+						<SidebarSection
+							title="Vaults"
+							storageKey="vaults"
+							defaultOpen={true}
+							onAdd={onNewVault}
+						>
+							{vaults.map(renderVaultEntry)}
+						</SidebarSection>
+					)}
 				</div>
 
 				{/* Tags Section */}

@@ -14,12 +14,17 @@ interface VaultInfo {
 }
 
 interface ItemListRowProps {
-	item: DecryptedItem & { vault?: VaultInfo };
+	item: DecryptedItem & {
+		vault?: VaultInfo;
+		account?: { email: string; userId: string; name: string };
+	};
 	isSelected: boolean;
 	onToggleFavorite: (e: React.MouseEvent) => void;
 	linkTo: string;
 	linkParams: Record<string, string>;
 	showVaultBadge?: boolean;
+	showAccountBadge?: boolean;
+	accountEmail?: string;
 	vaultId: string;
 }
 
@@ -30,6 +35,8 @@ export function ItemListRow({
 	linkTo,
 	linkParams,
 	showVaultBadge = false,
+	showAccountBadge = false,
+	accountEmail,
 	vaultId,
 }: ItemListRowProps) {
 	const navigate = useNavigate();
@@ -106,6 +113,13 @@ export function ItemListRow({
 								size="xs"
 							/>
 							<span className="truncate">{item.vault.name}</span>
+						</div>
+					)}
+					{showAccountBadge && (accountEmail || item.account) && (
+						<div className="mt-0.5 flex items-center gap-1 text-muted-foreground/70 text-xs">
+							<span className="truncate">
+								{accountEmail || item.account?.email}
+							</span>
 						</div>
 					)}
 				</div>
