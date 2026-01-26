@@ -1,4 +1,5 @@
 import {
+	Badge,
 	Button,
 	DropdownMenu,
 	DropdownMenuContent,
@@ -7,35 +8,39 @@ import {
 	DropdownMenuTrigger,
 	toast,
 } from "@bittery/ui";
+import { useAccountSwitcher } from "@bittery/hooks";
 import { useNavigate } from "@tanstack/react-router";
 import { Check, ChevronDown, Lock, LogOut, Plus, Settings } from "lucide-react";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
-import { useAccount } from "../contexts/account-context";
 import { AccountAvatar } from "./account-avatar";
 import { AccountSettingsDialog } from "./account-settings-dialog";
 import { RemoveAccountDialog } from "./remove-account-dialog";
 
 export function AccountSwitcher() {
 	const {
-		activeAccount,
-		allAccounts,
+		accounts,
+		activeEmail,
+		unlockedEmails,
 		switchAccount,
 		removeAccount,
-		lockAccount,
 		lockAllAccounts,
-	} = useAccount();
+	} = useAccountSwitcher();
 	const navigate = useNavigate();
-	const [isSwitching, setIsSwitching] = useState(false);
 	const [accountToRemove, setAccountToRemove] = useState<string | null>(null);
 	const [showSettings, setShowSettings] = useState(false);
 
-	const handleSwitchAccount = async (email: string) => {
-		if (email === activeAccount?.email) return;
+	const accountsData = accounts.data ?? [];
+	const unlockedEmailsList = unlockedEmails.data ?? [];
+	const activeAccount = accountsData.find(
+		(a) => a.email === activeEmail.data,
+	);
 
-		setIsSwitching(true);
+	const handleSwitchAccount = async (email: string) => {
+		if (email === activeEmail.data) return;
+
 		try {
-			await switchAccount(email);
+			await switchAccount.mutateAsync(email);
 
 			// Check if session is valid for the switched account
 			const sessionValid = await storage.isSessionValid(email);
@@ -47,8 +52,6 @@ export function AccountSwitcher() {
 		} catch (error) {
 			console.error("Failed to switch account:", error);
 			toast.error("Failed to switch account");
-		} finally {
-			setIsSwitching(false);
 		}
 	};
 
@@ -56,22 +59,9 @@ export function AccountSwitcher() {
 		navigate({ to: "/login", search: { addingAccount: true } });
 	};
 
-	const handleLockAccount = async (email: string) => {
-		try {
-			await lockAccount(email);
-			if (email === activeAccount?.email) {
-				navigate({ to: "/unlock", search: { email } });
-			}
-			toast.success("Account locked");
-		} catch (error) {
-			console.error("Failed to lock account:", error);
-			toast.error("Failed to lock account");
-		}
-	};
-
 	const handleLockAll = async () => {
 		try {
-			await lockAllAccounts();
+			await lockAllAccounts.mutateAsync();
 			navigate({ to: "/unlock" });
 			toast.success("All accounts locked");
 		} catch (error) {
@@ -82,7 +72,7 @@ export function AccountSwitcher() {
 
 	const handleRemoveAccount = async (email: string) => {
 		try {
-			await removeAccount(email);
+			await removeAccount.mutateAsync(email);
 
 			// Check if there are any accounts left
 			const accountsList = await storage.getAccountsList();
@@ -99,27 +89,6 @@ export function AccountSwitcher() {
 		}
 	};
 
-	// const _handleLogout = async () => {
-	// 	if (!activeAccount) return;
-
-	// 	try {
-	// 		await storage.clearAllStoredData(activeAccount.email);
-	// 		const accountsList = await storage.getAccountsList();
-
-	// 		if (accountsList.accounts.length === 0) {
-	// 			navigate({ to: "/login" });
-	// 		} else {
-	// 			// Switch to first remaining account
-	// 			await switchAccount(accountsList.accounts[0].email);
-	// 			navigate({ to: "/vault" });
-	// 		}
-	// 		toast.success("Logged out successfully");
-	// 	} catch (error) {
-	// 		console.error("Logout error:", error);
-	// 		toast.error("Failed to logout");
-	// 	}
-	// };
-
 	if (!activeAccount) {
 		return null;
 	}
@@ -132,7 +101,7 @@ export function AccountSwitcher() {
 						variant="ghost"
 						size="sm"
 						className="gap-2"
-						disabled={isSwitching}
+						disabled={switchAccount.isPending}
 					>
 						<AccountAvatar account={activeAccount} size="sm" />
 						<div className="flex flex-col items-start overflow-hidden">
@@ -146,9 +115,10 @@ export function AccountSwitcher() {
 					</Button>
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="start" className="w-72">
-					{allAccounts.map((account) => {
-						const isActive =
-							account.email.toLowerCase() === activeAccount.email.toLowerCase();
+					{/* Account List */}
+					{accountsData.map((account) => {
+						const isActive = account.email === activeEmail.data;
+						const isUnlocked = unlockedEmailsList.includes(account.email);
 
 						return (
 							<DropdownMenuItem
@@ -158,27 +128,36 @@ export function AccountSwitcher() {
 							>
 								<AccountAvatar account={account} size="sm" />
 								<div className="flex flex-1 flex-col overflow-hidden">
-									<span className="truncate font-medium">
-										{account.teamName ||
-											account.name ||
-											account.email.split("@")[0]}
-									</span>
+									<div className="flex items-center gap-1.5">
+										<span className="truncate font-medium">
+											{account.teamName ||
+												account.name ||
+												account.email.split("@")[0]}
+										</span>
+										{isActive && <Check className="h-4 w-4 text-primary" />}
+									</div>
 									<span className="truncate text-muted-foreground text-xs">
 										{account.email}
 									</span>
 								</div>
-								{isActive && <Check className="h-4 w-4 text-primary" />}
+								{isUnlocked && (
+									<Badge variant="secondary" className="shrink-0 text-xs">
+										Unlocked
+									</Badge>
+								)}
 							</DropdownMenuItem>
 						);
 					})}
 
 					<DropdownMenuSeparator />
 
+					{/* Add Account */}
 					<DropdownMenuItem onClick={handleAddAccount} className="gap-2">
 						<Plus className="h-4 w-4" />
 						Add Account
 					</DropdownMenuItem>
 
+					{/* Account Settings */}
 					<DropdownMenuItem
 						onClick={() => setShowSettings(true)}
 						className="gap-2"
@@ -189,15 +168,8 @@ export function AccountSwitcher() {
 
 					<DropdownMenuSeparator />
 
-					<DropdownMenuItem
-						onClick={() => handleLockAccount(activeAccount.email)}
-						className="gap-2"
-					>
-						<Lock className="h-4 w-4" />
-						Lock Current Account
-					</DropdownMenuItem>
-
-					{allAccounts.length > 1 && (
+					{/* Lock All Accounts */}
+					{accountsData.length > 0 && unlockedEmailsList.length > 0 && (
 						<DropdownMenuItem onClick={handleLockAll} className="gap-2">
 							<Lock className="h-4 w-4" />
 							Lock All Accounts
@@ -206,6 +178,7 @@ export function AccountSwitcher() {
 
 					<DropdownMenuSeparator />
 
+					{/* Remove Current Account */}
 					<DropdownMenuItem
 						onClick={() => setAccountToRemove(activeAccount.email)}
 						className="gap-2 text-destructive focus:text-destructive"

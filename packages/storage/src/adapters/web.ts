@@ -416,6 +416,17 @@ export class WebStorageAdapter implements IStorageAdapter {
 		};
 	}
 
+	/**
+	 * Get list of unlocked account emails
+	 * Web only supports single account, so returns array with current account if unlocked
+	 */
+	async getUnlockedAccounts(): Promise<string[]> {
+		if (!masterUnlockKeyCache) return [];
+
+		const sessionData = await this.getStoredSessionData();
+		return sessionData ? [sessionData.email] : [];
+	}
+
 	// ============================================================================
 	// Extended Biometric (stubs for web - not supported)
 	// ============================================================================

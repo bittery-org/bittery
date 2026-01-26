@@ -595,6 +595,16 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		);
 	}
 
+	async getUnlockedAccounts(): Promise<string[]> {
+		const unlockedEmails: string[] = [];
+		for (const [email, cache] of accountCaches.entries()) {
+			if (cache.masterUnlockKey) {
+				unlockedEmails.push(email);
+			}
+		}
+		return unlockedEmails;
+	}
+
 	// ============================================================================
 	// Extended Biometric (stubs - not supported on Chrome extension)
 	// ============================================================================

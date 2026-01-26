@@ -1,14 +1,16 @@
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { Button, Card, Input, Label, toast, VaultIcon } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
-import { useMutation } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
-import { Eye, EyeOff } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useSearch } from "@tanstack/react-router";
+import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { useEffect, useState } from "react";
 import { storage } from "../lib/storage";
 
 export function LoginPage() {
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
+	const { addingAccount } = useSearch({ from: "/login" });
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
 	const fallbackServerUrl =
@@ -72,8 +74,13 @@ export function LoginPage() {
 
 			return response;
 		},
-		onSuccess: () => {
-			toast.success("Signed in successfully!");
+		onSuccess: async () => {
+			// Refresh accounts queries to pick up the new account
+			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+
+			toast.success(
+				addingAccount ? "Account added successfully" : "Signed in successfully!",
+			);
 			navigate({ to: "/vault" });
 		},
 		onError: (error: Error) => {
@@ -81,17 +88,31 @@ export function LoginPage() {
 		},
 	});
 
+	const handleBackToVault = () => {
+		navigate({ to: "/vault" });
+	};
+
 	return (
 		<div className="h-full overflow-y-auto">
 			<div className="flex min-h-full justify-center p-4">
 				<div className="my-auto w-full max-w-sm space-y-6">
+					{addingAccount && (
+						<Button
+							variant="ghost"
+							onClick={handleBackToVault}
+							className="absolute top-4 left-4"
+						>
+							<ArrowLeft className="mr-2 size-4" />
+							Back
+						</Button>
+					)}
 					<div className="flex flex-col items-center space-y-3 text-center">
 						<div style={{ width: 80, height: 80 }}>
 							<VaultIcon state="locked" size={80} />
 						</div>
 						<div>
 							<h1 className="font-semibold text-xl tracking-tight">
-								Sign in to Bittery
+								{addingAccount ? "Add Another Account" : "Sign in to Bittery"}
 							</h1>
 							<p className="mt-1 text-muted-foreground text-sm">
 								Enter your credentials to access your vault

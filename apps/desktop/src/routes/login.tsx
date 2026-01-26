@@ -1,12 +1,11 @@
 import { useLogin } from "@bittery/hooks";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { Button, Input, Label, toast, VaultIcon } from "@bittery/ui";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Fingerprint } from "lucide-react";
 import { useEffect, useState } from "react";
 import { type AccountMetadata, storage } from "@/lib/storage";
-import { useAccount } from "../contexts/account-context";
 
 interface LoginSearchParams {
 	addingAccount?: boolean;
@@ -25,7 +24,7 @@ export const Route = createFileRoute("/login")({
 export function LoginPage() {
 	const navigate = useNavigate();
 	const { addingAccount } = Route.useSearch();
-	const { refreshAccounts } = useAccount();
+	const queryClient = useQueryClient();
 	const fallbackServerUrl =
 		normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
 		"http://localhost:3000";
@@ -97,8 +96,8 @@ export function LoginPage() {
 			// Add to accounts list
 			await storage.addAccountToList(accountMetadata);
 
-			// Refresh account context
-			await refreshAccounts();
+			// Refresh accounts queries
+			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
 			toast.success(
 				addingAccount ? "Account added successfully" : "Login successful",

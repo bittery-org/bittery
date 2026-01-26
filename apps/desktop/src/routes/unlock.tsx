@@ -1,4 +1,5 @@
 import {
+	useAccountSwitcher,
 	useBiometricUnlock,
 	useQuickUnlock,
 	useSessionState,
@@ -12,12 +13,12 @@ import {
 	VaultIcon,
 	type VaultIconState,
 } from "@bittery/ui";
+import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ChevronDown, Fingerprint, KeyRound } from "lucide-react";
 import { useState } from "react";
 import { type AccountMetadata, storage } from "@/lib/storage";
 import { AccountAvatar } from "../components/account-avatar";
-import { useAccount } from "../contexts/account-context";
 
 interface UnlockSearchParams {
 	email?: string;
@@ -35,10 +36,16 @@ export const Route = createFileRoute("/unlock")({
 export function UnlockPage() {
 	const navigate = useNavigate();
 	const { email: emailParam } = Route.useSearch();
-	const { allAccounts, activeAccount, refreshAccounts } = useAccount();
+	const { accounts, activeEmail } = useAccountSwitcher();
+	const queryClient = useQueryClient();
 	const [password, setPassword] = useState("");
 	const [showAccountPicker, setShowAccountPicker] = useState(false);
 	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
+
+	const allAccounts = accounts.data ?? [];
+	const activeAccount = allAccounts.find(
+		(a) => a.email === activeEmail.data,
+	);
 
 	// Determine which account to unlock
 	const targetEmail = emailParam || activeAccount?.email;
@@ -60,7 +67,7 @@ export function UnlockPage() {
 				if (token && vaultKeys) {
 					// Set as active account
 					await storage.setActiveAccount(targetEmail);
-					await refreshAccounts();
+					await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 					setVaultState("unlocked");
 					toast.success("Unlocked with biometric");
 					// Delay navigation to show unlock animation
@@ -95,8 +102,8 @@ export function UnlockPage() {
 				await storage.addAccountToList(updatedMetadata);
 			}
 
-			// Refresh account context
-			await refreshAccounts();
+			// Refresh accounts queries
+			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
 			setVaultState("unlocked");
 			toast.success("Vault unlocked");

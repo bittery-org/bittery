@@ -77,19 +77,26 @@ export {
 	type BiometricUnlockResult,
 	type LoginInput,
 	type LogoutInput,
+	type QuickUnlockAllInput,
+	type QuickUnlockAllResult,
 	type QuickUnlockInput,
+	type UseAccountSwitcherOptions,
+	type UseAccountSwitcherResult,
 	type UseBiometricUnlockOptions,
 	type UseCheckEmailOptions,
 	type UseLoginOptions,
 	type UseLogoutOptions,
+	type UseQuickUnlockAllOptions,
 	type UseQuickUnlockOptions,
 	type UseSessionStateOptions,
+	useAccountSwitcher,
 	useBiometricUnlock,
 	useCheckEmail,
 	useLock,
 	useLogin,
 	useLogout,
 	useQuickUnlock,
+	useQuickUnlockAll,
 	useSessionState,
 } from "./hooks/auth";
 // Item Mutation Hooks (write operations)
@@ -118,6 +125,11 @@ export {
 	type ShareExpirationOption,
 	useCreateShare,
 } from "./hooks/share";
+export {
+	type MultiAccountItem,
+	type UseAllAccountsItemsOptions,
+	useAllAccountsItems,
+} from "./hooks/use-all-accounts-items";
 export {
 	type CrossVaultDecryptedItem,
 	useAllDecryptedItems,

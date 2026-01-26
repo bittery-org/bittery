@@ -8,27 +8,48 @@ import {
 	type VaultIconState,
 } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
-import { useMutation } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Eye, EyeOff } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { storage } from "../lib/storage";
 
 export function UnlockPage() {
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
+	const { email: emailParam } = useSearch({ from: "/unlock" });
 	const [showPassword, setShowPassword] = useState(false);
-	const [_email, setEmail] = useState("");
+	const [targetEmail, setTargetEmail] = useState<string | null>(null);
 	const [biometricAttempted, setBiometricAttempted] = useState(false);
 	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
 	const hasAttemptedBiometric = useRef(false);
+
+	// Determine which account to unlock
+	useEffect(() => {
+		const determineTarget = async () => {
+			if (emailParam) {
+				setTargetEmail(emailParam);
+				return;
+			}
+
+			// Fall back to active account
+			const activeEmail = await storage.getActiveAccountEmail();
+			if (activeEmail) {
+				setTargetEmail(activeEmail);
+			}
+		};
+
+		determineTarget();
+	}, [emailParam]);
 
 	// Define mutations first before they're used in useEffect
 	const unlockMutation = useMutation({
 		mutationFn: async (values: { password: string }) => {
 			setVaultState("unlocking");
-			// Send to background worker for quick unlock
+			// Send to background worker for quick unlock with target email
 			const response = await chrome.runtime.sendMessage({
 				type: "QUICK_UNLOCK",
-				payload: { password: values.password },
+				payload: { password: values.password, email: targetEmail },
 			});
 
 			if (!response.success) {
@@ -37,7 +58,10 @@ export function UnlockPage() {
 
 			return response;
 		},
-		onSuccess: () => {
+		onSuccess: async () => {
+			// Refresh accounts queries
+			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+
 			setVaultState("unlocked");
 			toast.success("Unlocked successfully!");
 			// Delay navigation to show unlock animation
@@ -54,9 +78,10 @@ export function UnlockPage() {
 	const biometricUnlockMutation = useMutation({
 		mutationFn: async () => {
 			setVaultState("unlocking");
-			// Send to background worker for native biometric unlock
+			// Send to background worker for native biometric unlock with target email
 			const response = await chrome.runtime.sendMessage({
 				type: "NATIVE_BIOMETRIC_UNLOCK",
+				payload: { email: targetEmail },
 			});
 
 			if (!response.success) {
@@ -65,7 +90,10 @@ export function UnlockPage() {
 
 			return response;
 		},
-		onSuccess: () => {
+		onSuccess: async () => {
+			// Refresh accounts queries
+			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+
 			setVaultState("unlocked");
 			toast.success("Unlocked with biometric!");
 			// Delay navigation to show unlock animation
@@ -81,17 +109,7 @@ export function UnlockPage() {
 
 	// Initialize biometric check
 	useEffect(() => {
-		// Get stored session data for display
-		chrome.runtime
-			.sendMessage({ type: "GET_SESSION_DATA" })
-			.then((response) => {
-				if (response.sessionData) {
-					setEmail(response.sessionData.email);
-				}
-			})
-			.catch((error) => {
-				console.error("Failed to get session data:", error);
-			});
+		if (!targetEmail) return;
 
 		// Check if native biometric is available
 		chrome.runtime
@@ -115,7 +133,7 @@ export function UnlockPage() {
 			.catch((error) => {
 				console.error("Failed to check biometric:", error);
 			});
-	}, [biometricUnlockMutation]);
+	}, [targetEmail]);
 
 	const form = useForm({
 		defaultValues: {
@@ -141,6 +159,9 @@ export function UnlockPage() {
 						<h1 className="font-semibold text-xl tracking-tight">
 							Welcome back
 						</h1>
+						{targetEmail && (
+							<p className="mt-1 font-medium text-sm">{targetEmail}</p>
+						)}
 						<p className="mt-1 text-muted-foreground text-sm">
 							{vaultState === "unlocking"
 								? "Unlocking your vault..."

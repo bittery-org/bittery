@@ -38,7 +38,7 @@ describe("Auth Router", () => {
 	});
 
 	describe("signup", () => {
-		test("should create new user with valid data", async () => {
+		test("should create new user with organization", async () => {
 			const email = generateTestEmail();
 			const caller = authRouter.createCaller(createPublicContext());
 
@@ -62,6 +62,8 @@ describe("Auth Router", () => {
 			expect(result.sessionId).toBeDefined();
 			expect(result.user).toBeDefined();
 			expect(result.user.email).toBe(email.toLowerCase());
+			expect(result.user.teamName).toBe("Test Org");
+			expect(result.user.teamType).toBe("organization");
 			expect(result.vaultKeys).toHaveLength(1);
 			expect(result.vaultKeys[0].vaultName).toBe("Personal");
 			expect(result.vaultKeys[0].role).toBe("owner");

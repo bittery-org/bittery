@@ -77,7 +77,9 @@ test.describe("User Signup Flow", () => {
 		// Now the form should be visible
 		await expect(page.locator("#serverUrl")).toBeVisible();
 		await expect(page.locator("#name")).toBeVisible();
-		await expect(page.locator("#organizationName")).toBeVisible();
+		// Account type selector should be visible
+		await expect(page.locator('text=Account Type')).toBeVisible();
+		await expect(page.locator('button:has-text("Personal")')).toBeVisible();
 		await expect(page.locator("#email")).toBeVisible();
 		await expect(page.locator("#password")).toBeVisible();
 		await expect(

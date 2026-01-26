@@ -6,6 +6,12 @@
  * for state management and caching.
  */
 
+// Account switcher hook (multi-account management)
+export {
+	type UseAccountSwitcherOptions,
+	type UseAccountSwitcherResult,
+	useAccountSwitcher,
+} from "./use-account-switcher";
 // Biometric unlock hook (Touch ID / Face ID)
 export {
 	type BiometricUnlockError,
@@ -38,6 +44,13 @@ export {
 	type UseQuickUnlockOptions,
 	useQuickUnlock,
 } from "./use-quick-unlock";
+// Quick unlock all hook (unlock all accounts with single password)
+export {
+	type QuickUnlockAllInput,
+	type QuickUnlockAllResult,
+	type UseQuickUnlockAllOptions,
+	useQuickUnlockAll,
+} from "./use-quick-unlock-all";
 // Session state hook
 export {
 	type UseSessionStateOptions,

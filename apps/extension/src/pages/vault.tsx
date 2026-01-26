@@ -2,11 +2,12 @@ import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Input, Skeleton, toast } from "@bittery/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Plus, Search, Settings, ShieldCheck } from "lucide-react";
+import { Plus, Search, Settings } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Favicon } from "@/components/favicon";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
+import { ExtensionAccountSwitcher } from "@/components/account-switcher";
 
 function getBaseDomain(host: string): string {
 	const parts = host.split(".");
@@ -166,17 +167,7 @@ export function VaultPage() {
 		<div className="flex h-full flex-col">
 			<header className="border-b bg-background px-4 py-3">
 				<div className="flex items-center justify-between gap-3">
-					<div className="flex items-center gap-3">
-						<div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-							<ShieldCheck className="size-4" />
-						</div>
-						<div>
-							<div className="text-muted-foreground text-xs uppercase tracking-wide">
-								Vault
-							</div>
-							<div className="font-semibold text-base">All Items</div>
-						</div>
-					</div>
+					<ExtensionAccountSwitcher />
 					<div className="flex items-center gap-2">
 						<Button
 							size="icon"

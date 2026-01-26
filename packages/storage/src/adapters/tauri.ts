@@ -1266,6 +1266,19 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	}
 
 	/**
+	 * Get list of unlocked account emails (accounts with MUK currently in memory)
+	 */
+	async getUnlockedAccounts(): Promise<string[]> {
+		const unlockedEmails: string[] = [];
+		for (const [email, cache] of accountCaches.entries()) {
+			if (cache.masterUnlockKey) {
+				unlockedEmails.push(email);
+			}
+		}
+		return unlockedEmails;
+	}
+
+	/**
 	 * Get time until session expires (in milliseconds)
 	 */
 	async getTimeUntilExpiry(email?: string): Promise<number | null> {

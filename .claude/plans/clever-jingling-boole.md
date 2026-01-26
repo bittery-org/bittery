@@ -362,7 +362,7 @@ Since there are no live users with multiple teams, the backfill is simple:
 ```typescript
 // Multi-account data stored in localStorage/SecureStore/chrome.storage
 interface MultiAccountSessionStorage {
-  activeAccount: string | "all" | null;
+  activeAccount: string | "all" | null; // email address OR "all" for multi-account view
   accounts: Record<string, AccountSessionData>;
   globalSettings: { lastActiveAt: number };
 }
@@ -384,20 +384,23 @@ interface AccountSessionData {
 type MasterUnlockKeyCache = Map<string, Uint8Array>;
 ```
 
+**Active Account Behavior:**
+- When `activeAccount` is an email: All operations (search, item display, autofill) use ONLY that account
+- When `activeAccount` is `"all"`: Operations fetch from ALL unlocked accounts and merge results
+- Account switcher UI includes individual accounts + "All Accounts" option
+
 **Implementation:**
 1. Desktop/Extension/Mobile adapters implement multi-account methods
 2. Web adapter keeps single-account structure (`supportsMultiAccount = false`)
 3. MUK cache lives in memory only, cleared on lock
 4. Account switching updates `activeAccount` field
-5. "All Accounts" mode sets `activeAccount = "all"`, loads all MUKs
+5. Setting `activeAccount = "all"` enables cross-account search/display
 
-### Phase 4: UI Components & Hooks
+### Phase 4: UI Components & Hooks (Basic Account Switching)
 
 **Critical Files:**
 - `packages/ui/src/components/account-switcher.tsx` (NEW)
 - `packages/hooks/src/auth/use-account-switcher.ts` (NEW)
-- `packages/hooks/src/vault/use-all-accounts-items.ts` (NEW)
-- `apps/web/src/routes/all-accounts.tsx` (NEW - All Accounts view)
 - Platform headers:
   - `apps/web/src/components/layout/header.tsx`
   - `apps/desktop/src/components/layout/sidebar.tsx`
@@ -423,49 +426,28 @@ type MasterUnlockKeyCache = Map<string, Uint8Array>;
    }
    ```
 
-2. **`useAllAccountsItems()`:**
-   ```typescript
-   export function useAllAccountsItems() {
-     return useQuery(['all-accounts-items'], async () => {
-       const unlockedEmails = await storage.getUnlockedAccounts();
-
-       // Load items from each account
-       const allItems = [];
-       for (const email of unlockedEmails) {
-         const vaultKeys = await storage.getVaultKeys(email);
-         // Decrypt vault keys with account's MUK
-         // Fetch items from API with account's JWT
-         // Decrypt items and add to allItems
-       }
-
-       return allItems; // Unified list with source account
-     });
-   }
-   ```
-
 **UI Components:**
 
 1. **Account Switcher Dropdown:**
    - Shows all added accounts
    - Displays active account badge
-   - "All Accounts" option
+   - **"All Accounts" option** - sets `activeAccount = "all"`
    - "Add Account" button → navigates to login
    - "Lock All" button → clears all MUKs
 
-2. **All Accounts View:**
-   - Route: `/all-accounts/vaults`
-   - Shows unified item list from all unlocked accounts
-   - Each item displays: title, username, URL, **source account**
-   - Search across all accounts
-   - Filter by vault/account
-   - Click item → shows detail with edit/copy actions
+**Search Behavior:**
+- When a specific account is active: Search only in that account's items
+- When "All Accounts" is selected: Search across all unlocked accounts
 
-### Phase 5: Crypto & Multi-Account Key Management
+### Phase 5: Multi-Account Data Fetching & All Accounts View
 
 **Critical Files:**
-- `packages/storage/src/adapter.ts` (add MUK cache methods to interface)
-- `packages/storage/src/adapters/*.ts` (implement MUK cache per adapter)
+- `packages/shared/src/trpc-client-factory.ts` (NEW - per-account tRPC client)
+- `packages/hooks/src/hooks/use-all-accounts-items.ts` (COMPLETE)
 - `packages/hooks/src/auth/use-quick-unlock-all.ts` (NEW)
+- `packages/ui/src/components/all-accounts-view.tsx` (NEW)
+- `apps/desktop/src/routes/all-accounts.tsx` (NEW - All Accounts route)
+- `apps/extension/src/popup/all-accounts.tsx` (NEW)
 - Platform crypto wrappers (update to pass email parameter):
   - `apps/web/src/lib/wasm-crypto.ts`
   - `apps/desktop/src/lib/tauri-crypto.ts`
@@ -474,39 +456,195 @@ type MasterUnlockKeyCache = Map<string, Uint8Array>;
 
 **Implementation:**
 
-1. **MUK Cache (in-memory only, per storage adapter):**
-   Each storage adapter (Tauri, Chrome, React Native) maintains its own in-memory MUK cache:
+**CRITICAL INSIGHT: tRPC Multi-Account Strategy**
+
+The tRPC API uses `ctx.session.userId` from the JWT to determine which user's data to return. This means we **cannot** use a single tRPC client for all accounts.
+
+**Problem with Current Implementation:**
+- In `apps/desktop/src/lib/providers.tsx` (and similar files), the tRPC client calls `storage.getAuthToken()` without an email parameter
+- This always returns the **active account's** token
+- All API calls go through this single client, limiting us to one account's data
+
+**Solution:**
+1. Keep the default tRPC client for single-account operations (active account only)
+2. Create a **per-account tRPC client factory** that accepts a JWT token as parameter
+3. For "All Accounts" operations, create separate tRPC clients for each unlocked account
+4. Make parallel API calls with each account's client
+5. Decrypt items with each account's MUK
+
+This approach allows us to:
+- Maintain backward compatibility with single-account flows
+- Add multi-account support without breaking existing code
+- Fetch data from multiple accounts concurrently
+
+**1. Per-Account tRPC Client Factory:**
+
+**Important:** We keep TWO types of tRPC clients:
+- **Default client** (in `providers.tsx`) - Uses active account's token, for normal single-account operations
+- **Per-account clients** (created on-demand) - Use specific account tokens, for multi-account operations
+
    ```typescript
-   // In each adapter class (e.g., TauriStorageAdapter)
-   export class TauriStorageAdapter implements IStorageAdapter {
-     private mukCache: Map<string, Uint8Array> = new Map();
+   // packages/shared/src/trpc-client-factory.ts
 
-     async getMasterUnlockKey(email?: string): Promise<Uint8Array | null> {
-       const activeEmail = email || await this.getActiveAccountEmail();
-       if (!activeEmail || activeEmail === 'all') return null;
-       return this.mukCache.get(activeEmail) || null;
-     }
+   /**
+    * Create a tRPC client for a specific account.
+    * This is needed for multi-account operations since the API uses
+    * the JWT token to determine which user's data to return.
+    *
+    * NOTE: This is separate from the default tRPC client in providers.tsx,
+    * which always uses the active account's token. Use this factory when
+    * you need to fetch data from a specific account that may not be active.
+    */
+   export function createAccountTrpcClient(authToken: string, serverUrl: string) {
+     return createTRPCClient<AppRouter>({
+       links: [
+         httpBatchLink({
+           url: buildTrpcUrl(serverUrl, '/trpc'),
+           headers: {
+             Authorization: `Bearer ${authToken}`,
+           },
+           fetch: (url, options) => {
+             return fetch(url, {
+               ...options,
+               credentials: 'include',
+             });
+           },
+         }),
+       ],
+     });
+   }
 
-     async setMasterUnlockKey(key: Uint8Array, email: string): Promise<void> {
-       this.mukCache.set(email, key);
-     }
+   /**
+    * Create tRPC clients for all unlocked accounts.
+    * Returns a map of email → tRPC client.
+    */
+   export async function createAllAccountTrpcClients(
+     storage: IStorageAdapter
+   ): Promise<Map<string, ReturnType<typeof createAccountTrpcClient>>> {
+     const unlockedEmails = await storage.getUnlockedAccounts();
+     const clients = new Map();
 
-     async clearMasterUnlockKey(email?: string): Promise<void> {
-       if (email) {
-         this.mukCache.delete(email);
-       } else {
-         this.mukCache.clear(); // Lock all
+     for (const email of unlockedEmails) {
+       const authToken = await storage.getAuthToken(email);
+       const serverUrl = await storage.getServerUrl(email) || DEFAULT_SERVER_URL;
+
+       if (authToken) {
+         clients.set(email, createAccountTrpcClient(authToken, serverUrl));
        }
      }
 
-     async getUnlockedAccounts(): Promise<string[]> {
-       return Array.from(this.mukCache.keys());
-     }
+     return clients;
    }
    ```
 
-2. **Quick Unlock All Accounts:**
+**2. Complete `useAllAccountsItems()` Hook:**
    ```typescript
+   // packages/hooks/src/hooks/use-all-accounts-items.ts
+
+   export function useAllAccountsItems(options: UseAllAccountsItemsOptions = {}) {
+     const storage = usePlatformStorage();
+     const crypto = usePlatformCrypto();
+
+     return useQuery({
+       queryKey: ['all-accounts-items'],
+       queryFn: async (): Promise<MultiAccountItem[]> => {
+         // 1. Get all unlocked accounts
+         const unlockedEmails = await storage.getUnlockedAccounts();
+         if (!unlockedEmails || unlockedEmails.length === 0) return [];
+
+         // 2. For each account, fetch items with that account's JWT
+         const allAccountItems = await Promise.all(
+           unlockedEmails.map(async (email) => {
+             try {
+               // Get account's JWT token
+               const authToken = await storage.getAuthToken(email);
+               if (!authToken) return [];
+
+               // Get account metadata
+               const metadata = await storage.getAccountMetadata(email);
+               if (!metadata) return [];
+
+               // Get server URL
+               const serverUrl = await storage.getServerUrl(email) || DEFAULT_SERVER_URL;
+
+               // Create account-specific tRPC client
+               const accountClient = createAccountTrpcClient(authToken, serverUrl);
+
+               // Fetch all items for this account
+               const rawItems = await accountClient.vault.listAllItems.query();
+
+               // Decrypt items with this account's MUK
+               const decryptedItems = await Promise.all(
+                 rawItems.map(async (rawItem) => {
+                   try {
+                     // Get decrypted vault key for this vault + account
+                     const vaultKey = await storage.getDecryptedVaultKey(
+                       rawItem.vaultId,
+                       email
+                     );
+                     if (!vaultKey) throw new Error('No vault key');
+
+                     // Decrypt item data
+                     const decryptedData = await crypto.decrypt(
+                       {
+                         ciphertext: rawItem.encryptedData,
+                         iv: rawItem.encryptionIv,
+                         algorithm: rawItem.encryptionAlgorithm,
+                       },
+                       vaultKey
+                     );
+
+                     const parsedData = JSON.parse(decryptedData);
+
+                     return {
+                       id: rawItem.id,
+                       vaultId: rawItem.vaultId,
+                       category: rawItem.category,
+                       favorite: rawItem.favorite,
+                       createdAt: rawItem.createdAt,
+                       updatedAt: rawItem.updatedAt,
+                       ...parsedData,
+                       vault: {
+                         id: rawItem.vault.id,
+                         name: rawItem.vault.name,
+                         type: rawItem.vault.type,
+                         icon: rawItem.vault.icon,
+                         imageUrl: rawItem.vault.imageUrl,
+                       },
+                       account: {
+                         email: metadata.email,
+                         userId: metadata.userId,
+                         name: metadata.name,
+                       },
+                     } as MultiAccountItem;
+                   } catch (error) {
+                     console.error(`Failed to decrypt item ${rawItem.id}:`, error);
+                     return null;
+                   }
+                 })
+               );
+
+               return decryptedItems.filter((item): item is MultiAccountItem => item !== null);
+             } catch (error) {
+               console.error(`Failed to fetch items for ${email}:`, error);
+               return [];
+             }
+           })
+         );
+
+         // 3. Flatten and merge all items
+         return allAccountItems.flat();
+       },
+       enabled: options.enabled !== false,
+       staleTime: 5 * 60 * 1000, // 5 minutes
+     });
+   }
+   ```
+
+**3. Quick Unlock All Accounts:**
+   ```typescript
+   // packages/hooks/src/auth/use-quick-unlock-all.ts
+
    async function quickUnlockAllAccounts(password: string) {
      const accounts = await storage.getAccountsList();
 
@@ -521,15 +659,13 @@ type MasterUnlockKeyCache = Map<string, Uint8Array>;
        );
 
        // Store in memory cache
-       mukCache.set(account.email, masterUnlockKey);
+       await storage.setMasterUnlockKey(masterUnlockKey, account.email);
 
-       // Decrypt vault keys for this account
-       for (const vaultKey of account.vaultKeys) {
-         const decrypted = await decryptVaultKey(
-           vaultKey.encryptedVaultKey,
-           masterUnlockKey
-         );
-         // Store decrypted key (in memory)
+       // Decrypt and cache vault keys for this account
+       const vaultKeys = await storage.getVaultKeys(account.email);
+       for (const vaultKey of vaultKeys || []) {
+         // Decrypt vault key with MUK (will be cached in storage adapter)
+         await storage.getDecryptedVaultKey(vaultKey.vaultId, account.email);
        }
      }
 
@@ -538,18 +674,114 @@ type MasterUnlockKeyCache = Map<string, Uint8Array>;
    }
    ```
 
-3. **Account-Specific Crypto Operations:**
+**4. Context-Aware Item Display:**
+   ```typescript
+   // Main vault view component (desktop/extension/mobile)
+
+   export function VaultView() {
+     const activeAccount = useActiveAccount();
+     const storage = usePlatformStorage();
+
+     // Conditional hook based on active account
+     const singleAccountItems = useDecryptedItems({
+       enabled: activeAccount !== 'all',
+     });
+
+     const allAccountsItems = useAllAccountsItems({
+       enabled: activeAccount === 'all',
+     });
+
+     const items = activeAccount === 'all'
+       ? allAccountsItems.items
+       : singleAccountItems.items;
+
+     const showAccountBadges = activeAccount === 'all';
+
+     return (
+       <div>
+         <h1>
+           {activeAccount === 'all'
+             ? `All Accounts (${allAccountsItems.unlockedAccounts.length})`
+             : 'Vaults'}
+         </h1>
+
+         {/* Search behavior changes based on context */}
+         <SearchBar
+           placeholder={
+             activeAccount === 'all'
+               ? 'Search across all accounts...'
+               : 'Search...'
+           }
+         />
+
+         {/* Item list with conditional account badges */}
+         {items.map(item => (
+           <ItemCard
+             key={`${item.account?.email || activeAccount}-${item.id}`}
+             item={item}
+             showAccountBadge={showAccountBadges}
+             accountEmail={item.account?.email}
+             vaultName={item.vault.name}
+           />
+         ))}
+       </div>
+     );
+   }
+   ```
+
+**5. Extension Autofill - Context-Aware Search:**
+   ```typescript
+   // apps/extension/src/background/autofill.ts
+
+   async function getAutofillSuggestions(url: string) {
+     const activeAccount = await storage.getActiveAccountEmail();
+
+     let items: MultiAccountItem[];
+
+     if (activeAccount === 'all') {
+       // "All Accounts" selected - search across all unlocked accounts
+       const { items: allItems } = await useAllAccountsItems();
+       items = allItems;
+     } else if (activeAccount) {
+       // Specific account selected - search only that account
+       const { items: accountItems } = await useDecryptedItems();
+       items = accountItems.map(item => ({
+         ...item,
+         account: {
+           email: activeAccount,
+           userId: await storage.getActiveAccountUserId(),
+           name: (await storage.getAccountMetadata(activeAccount))?.name || '',
+         },
+       }));
+     } else {
+       // No account active
+       return [];
+     }
+
+     // Filter items matching the current URL
+     const matches = items.filter(item =>
+       item.category === 'login' &&
+       matchesUrl(item.url, url)
+     );
+
+     // Show account badge only when in "All Accounts" mode
+     const showAccountBadge = activeAccount === 'all';
+
+     return matches.map(item => ({
+       ...item,
+       displayText: showAccountBadge
+         ? `${item.title} (${item.account.email})`
+         : item.title,
+     }));
+   }
+   ```
+
+**6. Account-Specific Crypto Operations:**
    - All crypto operations now accept optional `email` parameter
    - If no email provided, use active account
    - Vault key decryption: `decryptVaultKey(encrypted, email)`
    - Item decryption: `decryptItem(item, vaultId, email)`
    - RSA operations: `decryptWithPrivateKey(data, email)`
-
-4. **Extension Background Service Worker:**
-   - MUK cache lives in service worker memory
-   - Autofill queries active account's items first
-   - If no match, check other unlocked accounts
-   - Prompt user: "Found login for {site} in {account}, switch?"
 
 ### Phase 6: Platform-Specific Integration
 
@@ -568,7 +800,11 @@ type MasterUnlockKeyCache = Map<string, Uint8Array>;
 - Implement multi-account in Chrome storage adapter
 - Add account switcher to popup header
 - Background service worker: MUK cache in memory
-- Autofill: Use active account, prompt if match in other account
+- **Context-aware autofill:**
+  - When specific account is active: Search only that account's items
+  - When "All Accounts" is selected: Search all unlocked accounts (show email badges)
+  - Display format when in "All Accounts" mode: "{title} ({account.email})"
+  - When user selects item, use that account's credentials
 
 **Mobile (`apps/mobile`):**
 - Implement multi-account in React Native storage adapter
@@ -607,19 +843,20 @@ Execute phases in this specific order to avoid breaking changes:
 6. Keep web adapter unchanged (single account)
 7. Test storage operations on each platform
 
-**Week 4: Auth Hooks & Crypto**
+**Week 4: Auth Hooks & Basic UI**
 1. Create `useAccountSwitcher()` hook
-2. Create `useQuickUnlockAll()` hook
-3. Implement MUK cache (in-memory Map)
-4. Update crypto wrappers to accept email parameter
-5. Test multi-account unlock flow
+2. Create account switcher component (without "All Accounts" option)
+3. Integrate account switcher into platform headers
+4. Test basic account switching UX
 
-**Week 5: UI Components**
-1. Create account switcher component
-2. Create All Accounts view route
-3. Create `useAllAccountsItems()` hook
-4. Integrate account switcher into platform headers
-5. Test account switching UX
+**Week 5: Multi-Account Data & All Accounts View**
+1. Create `createAccountTrpcClient()` factory in `packages/shared`
+2. Complete `useAllAccountsItems()` hook with per-account tRPC clients
+3. Create `useQuickUnlockAll()` hook
+4. Create All Accounts view route for desktop/extension
+5. Update extension autofill to use all unlocked accounts
+6. Update crypto wrappers to accept email parameter
+7. Test multi-account item fetching and decryption
 
 **Week 6: Platform Integration**
 1. Desktop: Sidebar integration, biometric unlock
@@ -707,21 +944,39 @@ Execute phases in this specific order to avoid breaking changes:
 - [ ] Lock all → Verify all MUKs cleared
 - [ ] Quick unlock all → Verify all accounts unlocked
 
-### 4. Desktop/Mobile Multi-Account
+### 4. Desktop/Mobile Multi-Account & Context-Aware Search
 - [ ] Add 2 accounts to desktop app
 - [ ] Unlock all with biometric
-- [ ] Switch accounts in sidebar
-- [ ] Test "All Accounts" view
+- [ ] With Account A active, search for item - verify ONLY Account A items appear
+- [ ] Switch to Account B in sidebar, verify vault data changes
+- [ ] Search for same item, verify ONLY Account B items appear
+- [ ] Switch to "All Accounts" in sidebar
+- [ ] Verify items from both accounts appear with account badges
+- [ ] Search for item, verify results from BOTH accounts appear
+- [ ] Lock Account A, verify "All Accounts" view updates (only shows Account B)
 - [ ] Lock all and re-unlock
 
-### 5. Extension Autofill
-- [ ] Add 2 accounts with different login items
-- [ ] Visit website matching account A's login
-- [ ] Verify autofill suggests account A's credentials
-- [ ] Switch to account B, verify no suggestions
-- [ ] Test "All Accounts" mode offers both
+### 5. Extension Autofill (Context-Aware)
+- [ ] Add 2 accounts with different login items for same website
+- [ ] Set active account to Account A
+- [ ] Visit website, verify autofill shows ONLY Account A's items (no email badge)
+- [ ] Switch to "All Accounts" in account switcher
+- [ ] Visit website, verify autofill shows items from BOTH accounts WITH email badges
+- [ ] Select item from Account A, verify it fills correctly
+- [ ] Select item from Account B, verify it fills correctly
+- [ ] Switch back to Account B
+- [ ] Visit website, verify autofill shows ONLY Account B's items (no email badge)
 
-### 6. Team Invitations
+### 6. Multi-Account tRPC & Data Fetching
+- [ ] Add 2 accounts with different items
+- [ ] Call `useAllAccountsItems()` hook
+- [ ] Verify hook creates separate tRPC clients for each account
+- [ ] Verify API calls are made with correct JWT tokens (check network tab)
+- [ ] Verify items from both accounts are decrypted correctly
+- [ ] Verify items have correct account metadata attached
+- [ ] Test with one account having API error, verify other account still works
+
+### 7. Team Invitations
 - [ ] User A (org owner) invites user B via email
 - [ ] User B accepts → Verify new account created with teamId = org team
 - [ ] User B logs in → Verify they see org team's vaults

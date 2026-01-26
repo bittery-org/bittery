@@ -306,6 +306,12 @@ export interface IStorageAdapter {
 	 */
 	getAccountMetadata?(email: string): Promise<AccountMetadata | null>;
 
+	/**
+	 * Get list of unlocked account emails (accounts with MUK currently in memory).
+	 * Used for multi-account operations and "All Accounts" view.
+	 */
+	getUnlockedAccounts?(): Promise<string[]>;
+
 	// ============================================================================
 	// Extended Biometric (optional, check supportsBiometric first)
 	// ============================================================================

@@ -40,6 +40,7 @@ export const authRouter = router({
 			z.object({
 				email: z.string().email(),
 				name: z.string().min(2),
+				organizationName: z.string().optional(),
 				secretKeyHint: z.string(),
 				srpSalt: z.string(),
 				srpVerifier: z.string(),
@@ -58,17 +59,13 @@ export const authRouter = router({
 				});
 			}
 
-			// Create personal team first
-			const teamId = nanoid();
-			await db.insert(team).values({
-				id: teamId,
-				name: `${input.name}'s Team`,
-				ownerId: "temp", // Temporary, will be updated
-				type: "personal",
-				memberLimit: 1,
-			});
+			// Determine team type and name based on organizationName
+			const isOrganization = !!input.organizationName;
+			const teamType = isOrganization ? "organization" : "personal";
+			const teamName = input.organizationName || `${input.name}'s Team`;
+			const memberLimit = isOrganization ? null : 1;
 
-			// Create user with teamId
+			// Create user first (without team)
 			const userId = await createUser({
 				email: input.email,
 				name: input.name,
@@ -79,8 +76,15 @@ export const authRouter = router({
 				encryptedPrivateKey: input.encryptedPrivateKey,
 			});
 
-			// Update team ownerId with actual userId
-			await db.update(team).set({ ownerId: userId }).where(eq(team.id, teamId));
+			// Create team with actual userId as owner
+			const teamId = nanoid();
+			await db.insert(team).values({
+				id: teamId,
+				name: teamName,
+				ownerId: userId,
+				type: teamType,
+				memberLimit,
+			});
 
 			// Link user to team
 			await db

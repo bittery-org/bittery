@@ -899,6 +899,19 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	/**
+	 * Get list of unlocked account emails (accounts with MUK currently in memory)
+	 */
+	async getUnlockedAccounts(): Promise<string[]> {
+		const unlockedEmails: string[] = [];
+		for (const [email, cache] of accountCaches.entries()) {
+			if (cache.masterUnlockKey) {
+				unlockedEmails.push(email);
+			}
+		}
+		return unlockedEmails;
+	}
+
+	/**
 	 * Check if master password re-entry is required (periodic security measure)
 	 */
 	async isMasterPasswordReentryRequired(email?: string): Promise<boolean> {

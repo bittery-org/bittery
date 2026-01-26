@@ -60,7 +60,7 @@ export function TeamBilling({
 			recommended: true,
 		},
 		{
-			name: "Business",
+			name: "Organization",
 			price: 15,
 			features: [
 				"Unlimited team members",

@@ -1,3 +1,4 @@
+export * from "./components/account-switcher";
 export * from "./components/alert-dialog";
 export * from "./components/avatar";
 export * from "./components/badge";

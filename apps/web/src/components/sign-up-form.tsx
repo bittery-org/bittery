@@ -45,6 +45,7 @@ export default function SignUpForm({
 	const [hasAcknowledged, setHasAcknowledged] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
 	const [serverUrl, setServerUrl] = useState(defaultServerUrl);
+	const [isEncrypting, setIsEncrypting] = useState(false);
 
 	// Load server URL on mount
 	useEffect(() => {
@@ -96,6 +97,7 @@ export default function SignUpForm({
 			email: "",
 			password: "",
 			name: "",
+			accountType: "personal" as "personal" | "organization",
 			organizationName: "",
 		},
 		onSubmit: async ({ value }) => {
@@ -114,6 +116,7 @@ export default function SignUpForm({
 				return;
 			}
 
+			setIsEncrypting(true);
 			try {
 				// Use invitation email if signing up via invitation
 				const email = isInvitationSignup ? invitation.email : value.email;
@@ -148,14 +151,12 @@ export default function SignUpForm({
 				const secretKeyHintValue = getSecretKeyHint(secretKey);
 
 				// 7. Call signup mutation
-				// Don't include organizationName if signing up via invitation
-				// (the user will join the inviting team instead)
 				const result = await signupMutation.mutateAsync({
 					email,
 					name: value.name,
-					...(isInvitationSignup
-						? {}
-						: { organizationName: value.organizationName }),
+					...(value.accountType === "organization" && value.organizationName
+						? { organizationName: value.organizationName }
+						: {}),
 					secretKeyHint: secretKeyHintValue,
 					srpSalt: salt,
 					srpVerifier: verifier,
@@ -186,6 +187,8 @@ export default function SignUpForm({
 			} catch (error: any) {
 				console.error("Signup error:", error);
 				toast.error(error.message || "Failed to create account");
+			} finally {
+				setIsEncrypting(false);
 			}
 		},
 	});
@@ -405,24 +408,75 @@ Generated: ${new Date().toLocaleString()}
 								</div>
 							</div>
 						) : (
-							<div>
-								<form.Field name="organizationName">
+							<div className="space-y-4">
+								<form.Field name="accountType">
 									{(field) => (
-										<div className="space-y-2">
-											<Label htmlFor={field.name}>Organization Name</Label>
-											<Input
-												id={field.name}
-												name={field.name}
-												placeholder="Acme Inc."
-												value={field.state.value}
-												onBlur={field.handleBlur}
-												onChange={(e) => field.handleChange(e.target.value)}
-												required
-												className="h-10"
-											/>
+										<div className="space-y-3">
+											<Label>Account Type</Label>
+											<div className="grid grid-cols-2 gap-3">
+												<Button
+													type="button"
+													variant={
+														field.state.value === "personal"
+															? "default"
+															: "outline"
+													}
+													className="h-auto flex-col items-start gap-1 p-4"
+													onClick={() => field.handleChange("personal")}
+												>
+													<span className="font-medium">Personal</span>
+													<span className="text-left text-muted-foreground text-xs font-normal">
+														For individual use
+													</span>
+												</Button>
+												<Button
+													type="button"
+													variant={
+														field.state.value === "organization"
+															? "default"
+															: "outline"
+													}
+													className="h-auto flex-col items-start gap-1 p-4"
+													onClick={() => field.handleChange("organization")}
+												>
+													<span className="font-medium">Organization</span>
+													<span className="text-left text-muted-foreground text-xs font-normal">
+														For teams and companies
+													</span>
+												</Button>
+											</div>
 										</div>
 									)}
 								</form.Field>
+
+								<form.Subscribe
+									selector={(state) => state.values.accountType}
+								>
+									{(accountType) =>
+										accountType === "organization" ? (
+											<form.Field name="organizationName">
+												{(field) => (
+													<div className="space-y-2">
+														<Label htmlFor={field.name}>Organization Name</Label>
+														<Input
+															id={field.name}
+															name={field.name}
+															placeholder="Acme Inc."
+															value={field.state.value}
+															onBlur={field.handleBlur}
+															onChange={(e) => field.handleChange(e.target.value)}
+															required
+															className="h-10"
+														/>
+														<p className="text-[0.8rem] text-muted-foreground">
+															This will be the name of your team workspace
+														</p>
+													</div>
+												)}
+											</form.Field>
+										) : null
+									}
+								</form.Subscribe>
 							</div>
 						)}
 
@@ -499,11 +553,13 @@ Generated: ${new Date().toLocaleString()}
 							<Button
 								type="submit"
 								className="h-10 w-full"
-								disabled={signupMutation.isPending}
+								disabled={isEncrypting || signupMutation.isPending}
 							>
-								{signupMutation.isPending
-									? "Creating Account..."
-									: "Create Account"}
+								{isEncrypting
+									? "Encrypting..."
+									: signupMutation.isPending
+										? "Creating Account..."
+										: "Create Account"}
 							</Button>
 						</div>
 
