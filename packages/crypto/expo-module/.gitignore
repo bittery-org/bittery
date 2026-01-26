@@ -1,0 +1,5 @@
+# Android native libraries (built by build-android.sh)
+android/src/main/jniLibs/
+
+# iOS framework (built by build-ios.sh)
+ios/BitteryCrypto.xcframework/

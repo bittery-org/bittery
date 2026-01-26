@@ -5,9 +5,9 @@
 
 #![cfg(target_os = "android")]
 
-use jni::objects::{JClass, JObject, JString, JValue};
-use jni::sys::{jboolean, jint, jlong, JNI_TRUE, JNI_FALSE};
-use jni::JNIEnv;
+use ::jni::objects::{JClass, JObject, JString, JValue};
+use ::jni::sys::{jboolean, jint, jlong, JNI_TRUE, JNI_FALSE};
+use ::jni::JNIEnv;
 
 use crate::*;
 
