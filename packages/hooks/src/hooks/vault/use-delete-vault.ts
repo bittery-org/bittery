@@ -7,7 +7,10 @@
 
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { useMutation } from "@tanstack/react-query";
-import { usePlatform, useQueryInvalidator } from "../../context/platform-context";
+import {
+	usePlatform,
+	useQueryInvalidator,
+} from "../../context/platform-context";
 import { refreshVaultKeys } from "../../utils/vault-utils";
 
 /**

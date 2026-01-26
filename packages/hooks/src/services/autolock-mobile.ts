@@ -28,7 +28,12 @@ interface MobileStorageAdapter extends IStorageAdapter {
  * App state type matching React Native's AppStateStatus
  * Defined inline to avoid requiring react-native types
  */
-type AppStateStatus = "active" | "background" | "inactive" | "unknown" | "extension";
+type AppStateStatus =
+	| "active"
+	| "background"
+	| "inactive"
+	| "unknown"
+	| "extension";
 
 /**
  * Minimal AppState interface for type safety

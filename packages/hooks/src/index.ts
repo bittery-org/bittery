@@ -39,96 +39,93 @@
 
 // Context
 export {
+	type PlatformContextValue,
 	PlatformProvider,
+	type PlatformProviderProps,
 	usePlatform,
-	usePlatformStorage,
+	usePlatformAutolock,
 	usePlatformCrypto,
 	usePlatformItemDecrypt,
-	usePlatformAutolock,
+	usePlatformStorage,
 	usePlatformSync,
 	useQueryInvalidator,
-	type PlatformContextValue,
-	type PlatformProviderProps,
 } from "./context/platform-context";
-
-// Data Hooks (read operations)
-export { useDecryptedItems } from "./hooks/use-decrypted-items";
-export { useDecryptedItem } from "./hooks/use-decrypted-item";
-export {
-	useAllDecryptedItems,
-	type CrossVaultDecryptedItem,
-} from "./hooks/use-all-decrypted-items";
-export {
-	useAllDeletedItems,
-	type CrossVaultDeletedItem,
-} from "./hooks/use-all-deleted-items";
-export { useCrossVaultTags } from "./hooks/use-cross-vault-tags";
-export { useAvailableTags, filterItemsByTags } from "./hooks/use-available-tags";
-export {
-	useVaultSearch,
-	useSingleVaultSearch,
-	type SearchResult,
-	type SingleVaultSearchResult,
-} from "./hooks/use-vault-search";
-export {
-	usePasswordSecurity,
-	analyzePassword,
-} from "./hooks/use-password-security";
-
-// Vault Mutation Hooks (write operations)
-export {
-	useCreateVault,
-	useUpdateVault,
-	useDeleteVault,
-	type CreateVaultInput,
-	type CreateVaultResult,
-	type UpdateVaultInput,
-	type DeleteVaultInput,
-} from "./hooks/vault";
-
 // Item Mutation Hooks (write operations)
 export {
-	useCreateItem,
-	useUpdateItem,
-	useDeleteItem,
-	useToggleFavorite,
-	useMoveItem,
-	useRestoreItem,
-	usePermanentDeleteItem,
 	type CreateItemInput,
 	type CreateItemResult,
-	type UpdateItemInput,
 	type DeleteItemInput,
-	type ToggleFavoriteInput,
 	type MoveItemInput,
-	type RestoreItemInput,
 	type PermanentDeleteItemInput,
+	type RestoreItemInput,
+	type ToggleFavoriteInput,
+	type UpdateItemInput,
+	useCreateItem,
+	useDeleteItem,
+	useMoveItem,
+	usePermanentDeleteItem,
+	useRestoreItem,
+	useToggleFavorite,
+	useUpdateItem,
 } from "./hooks/items";
-
 // Share Mutation Hooks (write operations)
 export {
-	useCreateShare,
 	type CreateShareInput,
 	type CreateShareResult,
-	type ShareExpirationOption,
 	type ShareAccessMode,
+	type ShareExpirationOption,
+	useCreateShare,
 } from "./hooks/share";
-
-// Utilities
-export { refreshVaultKeys } from "./utils/vault-utils";
+export {
+	type CrossVaultDecryptedItem,
+	useAllDecryptedItems,
+} from "./hooks/use-all-decrypted-items";
+export {
+	type CrossVaultDeletedItem,
+	useAllDeletedItems,
+} from "./hooks/use-all-deleted-items";
+export {
+	filterItemsByTags,
+	useAvailableTags,
+} from "./hooks/use-available-tags";
+export { useCrossVaultTags } from "./hooks/use-cross-vault-tags";
+export { useDecryptedItem } from "./hooks/use-decrypted-item";
+// Data Hooks (read operations)
+export { useDecryptedItems } from "./hooks/use-decrypted-items";
+export {
+	analyzePassword,
+	usePasswordSecurity,
+} from "./hooks/use-password-security";
+export {
+	type SearchResult,
+	type SingleVaultSearchResult,
+	useSingleVaultSearch,
+	useVaultSearch,
+} from "./hooks/use-vault-search";
+// Vault Mutation Hooks (write operations)
+export {
+	type CreateVaultInput,
+	type CreateVaultResult,
+	type DeleteVaultInput,
+	type UpdateVaultInput,
+	useCreateVault,
+	useDeleteVault,
+	useUpdateVault,
+} from "./hooks/vault";
+// Services (platform-specific autolock implementations)
+export {
+	createMobileAutolockService,
+	createWebAutolockService,
+	type MobileAutolockOptions,
+} from "./services";
 
 // Types
 export type {
+	IAutolockService,
 	ICrypto,
+	IItemDecrypt,
 	IQueryInvalidator,
 	ISyncContext,
-	IItemDecrypt,
-	IAutolockService,
 } from "./types";
-
-// Services (platform-specific autolock implementations)
-export {
-	createWebAutolockService,
-	createMobileAutolockService,
-	type MobileAutolockOptions,
-} from "./services";
+// Utilities
+export { refreshVaultKeys } from "./utils/vault-utils";

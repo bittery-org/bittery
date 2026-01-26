@@ -1,13 +1,10 @@
+import { useDecryptedItems, useToggleFavorite } from "@bittery/hooks";
 import { maskCardNumber } from "@bittery/shared/credit-card";
-import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button } from "@bittery/ui";
-import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Smartphone, Star, Tag } from "lucide-react";
 import { Favicon } from "../../../../components/vault/favicon";
 import { getTagColorFromName } from "../../../../components/vault/tag-badge";
-import { useDecryptedItems } from "@bittery/hooks";
-import { useQueryInvalidator } from "../../../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault/$id/tag/$tagName")({
 	component: TagRouteComponent,
@@ -16,8 +13,6 @@ export const Route = createFileRoute("/vault/$id/tag/$tagName")({
 function TagRouteComponent() {
 	const { id: vaultId, tagName } = Route.useParams();
 	const navigate = useNavigate();
-	const trpcClient = useTRPCClient();
-	const invalidator = useQueryInvalidator();
 
 	// Decode the tag name from URL
 	const decodedTagName = decodeURIComponent(tagName);
@@ -32,14 +27,7 @@ function TagRouteComponent() {
 	);
 
 	// Mutation to toggle favorite
-	const toggleFavoriteMutation = useMutation({
-		mutationFn: async (params: { itemId: string; favorite: boolean }) => {
-			return trpcClient.vault.toggleFavorite.mutate(params);
-		},
-		onSuccess: (_data, variables) => {
-			invalidator.invalidateItem(variables.itemId, vaultId || "");
-		},
-	});
+	const toggleFavorite = useToggleFavorite();
 
 	const handleToggleFavorite = (
 		e: React.MouseEvent,
@@ -48,8 +36,9 @@ function TagRouteComponent() {
 	) => {
 		e.preventDefault();
 		e.stopPropagation();
-		toggleFavoriteMutation.mutate({
+		toggleFavorite.mutate({
 			itemId,
+			vaultId: vaultId || "",
 			favorite: !currentFavorite,
 		});
 	};

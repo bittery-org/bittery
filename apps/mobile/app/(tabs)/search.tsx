@@ -1,3 +1,7 @@
+import {
+	type CrossVaultDecryptedItem,
+	useAllDecryptedItems,
+} from "@bittery/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
@@ -12,11 +16,6 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-import {
-	type CrossVaultDecryptedItem,
-	useAllDecryptedItems,
-} from "@bittery/hooks";
 import { ItemListItem } from "../../src/components/item-list-item";
 
 const RECENT_SEARCHES_KEY = "bittery_recent_searches";

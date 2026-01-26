@@ -44,7 +44,9 @@ interface DesktopPlatformProviderProps {
  * Note: Desktop doesn't use the autolock service from @bittery/hooks
  * as it has its own Tauri-based implementation.
  */
-export function DesktopPlatformProvider({ children }: DesktopPlatformProviderProps) {
+export function DesktopPlatformProvider({
+	children,
+}: DesktopPlatformProviderProps) {
 	const syncContext = useSyncContext();
 
 	// Map sync context to ISyncContext interface

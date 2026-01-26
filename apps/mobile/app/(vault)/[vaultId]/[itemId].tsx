@@ -1,3 +1,4 @@
+import { useDecryptedItems } from "@bittery/hooks";
 import {
 	detectCardBrand,
 	formatCardNumber as formatCardNumberUtil,
@@ -31,8 +32,6 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-import { useDecryptedItems } from "@bittery/hooks";
 import { TotpDisplay } from "../../../src/components/totp-display";
 
 const categoryIcons: Record<ItemCategory, typeof Key> = {

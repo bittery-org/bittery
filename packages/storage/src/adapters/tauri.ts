@@ -1120,6 +1120,6 @@ export class TauriStorageAdapter implements IStorageAdapter {
  */
 export function createTauriStorageAdapter(
 	crypto: CryptoProvider,
-): IStorageAdapter {
+): TauriStorageAdapter {
 	return new TauriStorageAdapter(crypto);
 }

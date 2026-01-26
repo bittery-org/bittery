@@ -1,3 +1,4 @@
+import { useVaultSearch } from "@bittery/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import {
 	Button,
@@ -22,7 +23,6 @@ import {
 	User,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useVaultSearch } from "@bittery/hooks";
 
 const getCategoryIcon = (category: ItemCategory) => {
 	switch (category) {

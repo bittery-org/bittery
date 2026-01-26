@@ -1,4 +1,9 @@
-import { useQueryClient } from "@tanstack/react-query";
+import {
+	type CrossVaultDeletedItem,
+	useAllDeletedItems,
+	usePermanentDeleteItem,
+	useRestoreItem,
+} from "@bittery/hooks";
 import { ArchiveRestore, Trash2 } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import {
@@ -12,13 +17,7 @@ import {
 } from "react-native";
 import { Swipeable } from "react-native-gesture-handler";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-import {
-	type CrossVaultDeletedItem,
-	useAllDeletedItems,
-} from "@bittery/hooks";
 import { ItemListItem } from "../../src/components/item-list-item";
-import { useTRPCClient } from "../../src/lib/trpc";
 
 function formatDeletedAt(dateString: string): string {
 	const date = new Date(dateString);
@@ -35,12 +34,14 @@ function formatDeletedAt(dateString: string): string {
 }
 
 export default function TrashScreen() {
-	const queryClient = useQueryClient();
-	const trpcClient = useTRPCClient();
 	const [refreshing, setRefreshing] = useState(false);
 	const [actionInProgress, setActionInProgress] = useState<string | null>(null);
 
 	const { items, isLoading, error, refetch } = useAllDeletedItems();
+
+	// Shared hooks for item operations
+	const restoreItem = useRestoreItem();
+	const permanentDeleteItem = usePermanentDeleteItem();
 
 	// Sort by deletion date (most recent first)
 	const sortedItems = useMemo(() => {
@@ -63,14 +64,7 @@ export default function TrashScreen() {
 	const handleRestore = async (item: CrossVaultDeletedItem) => {
 		setActionInProgress(item.id);
 		try {
-			await trpcClient.vault.restoreItem.mutate({ itemId: item.id });
-			// Invalidate queries
-			await queryClient.invalidateQueries({
-				queryKey: [["vault", "listAllDeletedItems"]],
-			});
-			await queryClient.invalidateQueries({
-				queryKey: [["vault", "listAllItems"]],
-			});
+			await restoreItem.mutateAsync({ itemId: item.id, vaultId: item.vaultId });
 			await refetch();
 		} catch (error) {
 			console.error("Failed to restore item:", error);
@@ -92,12 +86,9 @@ export default function TrashScreen() {
 					onPress: async () => {
 						setActionInProgress(item.id);
 						try {
-							await trpcClient.vault.permanentlyDeleteItem.mutate({
+							await permanentDeleteItem.mutateAsync({
 								itemId: item.id,
-							});
-							// Invalidate queries
-							await queryClient.invalidateQueries({
-								queryKey: [["vault", "listAllDeletedItems"]],
+								vaultId: item.vaultId,
 							});
 							await refetch();
 						} catch (error) {

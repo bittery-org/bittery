@@ -1,3 +1,4 @@
+import { useDecryptedItems } from "@bittery/hooks";
 import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
@@ -21,8 +22,6 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-import { useDecryptedItems } from "@bittery/hooks";
 import { TotpDisplay } from "../../../src/components/totp-display";
 
 const categoryIcons: Record<ItemCategory, typeof Key> = {

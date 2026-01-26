@@ -1,6 +1,5 @@
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useAllDecryptedItems, useToggleFavorite } from "@bittery/hooks";
 import { Badge, Button } from "@bittery/ui";
-import { useMutation } from "@tanstack/react-query";
 import {
 	createFileRoute,
 	Outlet,
@@ -10,8 +9,6 @@ import {
 import { ArrowLeft, Tag } from "lucide-react";
 import { ItemListRow } from "../../../../components/vault/item-list-row";
 import { getTagColorFromName } from "../../../../components/vault/tag-badge";
-import { useAllDecryptedItems } from "@bittery/hooks";
-import { useQueryInvalidator } from "../../../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault/tag/$tagName")({
 	component: CrossVaultTagRouteComponent,
@@ -21,8 +18,6 @@ function CrossVaultTagRouteComponent() {
 	const { tagName } = Route.useParams();
 	const { itemId } = useParams({ strict: false });
 	const navigate = useNavigate();
-	const trpcClient = useTRPCClient();
-	const invalidator = useQueryInvalidator();
 
 	// Decode the tag name from URL
 	const decodedTagName = decodeURIComponent(tagName);
@@ -44,17 +39,7 @@ function CrossVaultTagRouteComponent() {
 	});
 
 	// Mutation to toggle favorite
-	const toggleFavoriteMutation = useMutation({
-		mutationFn: async (params: { itemId: string; favorite: boolean }) => {
-			return trpcClient.vault.toggleFavorite.mutate(params);
-		},
-		onSuccess: (_data, variables) => {
-			const item = allItems.find((i) => i.id === variables.itemId);
-			if (item) {
-				invalidator.invalidateItem(variables.itemId, item.vaultId);
-			}
-		},
-	});
+	const toggleFavorite = useToggleFavorite();
 
 	const handleToggleFavorite = (
 		e: React.MouseEvent,
@@ -63,10 +48,14 @@ function CrossVaultTagRouteComponent() {
 	) => {
 		e.preventDefault();
 		e.stopPropagation();
-		toggleFavoriteMutation.mutate({
-			itemId: id,
-			favorite: !currentFavorite,
-		});
+		const item = allItems.find((i) => i.id === id);
+		if (item) {
+			toggleFavorite.mutate({
+				itemId: id,
+				vaultId: item.vaultId,
+				favorite: !currentFavorite,
+			});
+		}
 	};
 
 	if (isLoading) {

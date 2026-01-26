@@ -1,3 +1,8 @@
+import {
+	type ShareAccessMode,
+	type ShareExpirationOption,
+	useCreateShare,
+} from "@bittery/hooks";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	AlertDialog,
@@ -30,11 +35,6 @@ import {
 } from "@bittery/ui";
 import { AlertTriangle, Copy, Link, Loader2, Share2, X } from "lucide-react";
 import { useState } from "react";
-import {
-	useCreateShare,
-	type ShareAccessMode,
-	type ShareExpirationOption,
-} from "@bittery/hooks";
 
 interface ShareItemDialogProps {
 	item: DecryptedItem;
@@ -70,7 +70,8 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 				accessMode,
 				expiresIn,
 				isOneTimeUse,
-				allowedEmails: accessMode === "email-restricted" ? allowedEmails : undefined,
+				allowedEmails:
+					accessMode === "email-restricted" ? allowedEmails : undefined,
 			});
 
 			// Build the share URL with web app origin
@@ -80,7 +81,8 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 			setGeneratedLink(shareUrl);
 			toast.success("Share link created successfully!");
 		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : "Failed to create share link";
+			const errorMessage =
+				error instanceof Error ? error.message : "Failed to create share link";
 			toast.error(errorMessage);
 		}
 	};
@@ -200,7 +202,9 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 								<Label>Who can access</Label>
 								<Select
 									value={accessMode}
-									onValueChange={(value: ShareAccessMode) => setAccessMode(value)}
+									onValueChange={(value: ShareAccessMode) =>
+										setAccessMode(value)
+									}
 								>
 									<SelectTrigger>
 										<SelectValue />

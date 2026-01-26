@@ -8,8 +8,8 @@
  * - Desktop: Custom implementation using Tauri-specific APIs
  */
 
-export { createWebAutolockService } from "./autolock-web";
 export {
 	createMobileAutolockService,
 	type MobileAutolockOptions,
 } from "./autolock-mobile";
+export { createWebAutolockService } from "./autolock-web";

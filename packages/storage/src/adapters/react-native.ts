@@ -1177,6 +1177,6 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
  */
 export function createReactNativeStorageAdapter(
 	crypto: CryptoProvider,
-): IStorageAdapter {
+): ReactNativeStorageAdapter {
 	return new ReactNativeStorageAdapter(crypto);
 }

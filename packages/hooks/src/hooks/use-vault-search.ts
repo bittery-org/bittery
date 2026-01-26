@@ -9,7 +9,10 @@ import { useTRPC } from "@bittery/shared/trpc";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { useAllDecryptedItems, type CrossVaultDecryptedItem } from "./use-all-decrypted-items";
+import {
+	type CrossVaultDecryptedItem,
+	useAllDecryptedItems,
+} from "./use-all-decrypted-items";
 import { useDecryptedItems } from "./use-decrypted-items";
 
 /**

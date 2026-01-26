@@ -6,11 +6,9 @@
  */
 
 export {
-	useCreateVault,
 	type CreateVaultInput,
 	type CreateVaultResult,
+	useCreateVault,
 } from "./use-create-vault";
-
-export { useUpdateVault, type UpdateVaultInput } from "./use-update-vault";
-
-export { useDeleteVault, type DeleteVaultInput } from "./use-delete-vault";
+export { type DeleteVaultInput, useDeleteVault } from "./use-delete-vault";
+export { type UpdateVaultInput, useUpdateVault } from "./use-update-vault";

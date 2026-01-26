@@ -43,7 +43,9 @@ export default function TagsScreen() {
 	const filteredTags = useMemo(() => {
 		if (!searchQuery.trim()) return tagsWithCounts;
 		const query = searchQuery.toLowerCase();
-		return tagsWithCounts.filter((tag) => tag.name.toLowerCase().includes(query));
+		return tagsWithCounts.filter((tag) =>
+			tag.name.toLowerCase().includes(query),
+		);
 	}, [tagsWithCounts, searchQuery]);
 
 	const handleTagPress = (tagName: string) => {

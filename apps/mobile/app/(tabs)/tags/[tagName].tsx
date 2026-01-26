@@ -1,3 +1,7 @@
+import {
+	type CrossVaultDecryptedItem,
+	useAllDecryptedItems,
+} from "@bittery/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { ArrowLeft, Tag } from "lucide-react-native";
@@ -12,11 +16,6 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-import {
-	type CrossVaultDecryptedItem,
-	useAllDecryptedItems,
-} from "@bittery/hooks";
 import { ItemListItem } from "../../../src/components/item-list-item";
 import { TagChip } from "../../../src/components/tag-chip";
 

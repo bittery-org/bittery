@@ -1,18 +1,12 @@
-import { useTRPCClient } from "@bittery/shared/trpc";
-import { useMutation } from "@tanstack/react-query";
+import { useDecryptedItems, useToggleFavorite } from "@bittery/hooks";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
 import { ItemListRow } from "../../../components/vault/item-list-row";
-import { useDecryptedItems } from "@bittery/hooks";
-import { useQueryInvalidator } from "../../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault/$id")({
 	component: RouteComponent,
 });
 
 function RouteComponent() {
-	const trpcClient = useTRPCClient();
-	const invalidator = useQueryInvalidator();
-
 	const { id, itemId } = useParams({ strict: false });
 
 	// Fetch and decrypt items for the selected vault
@@ -31,15 +25,7 @@ function RouteComponent() {
 	const regularItems = items.filter((item) => !item.favorite);
 
 	// Mutation to toggle favorite
-	const toggleFavoriteMutation = useMutation({
-		mutationFn: async (params: { itemId: string; favorite: boolean }) => {
-			return trpcClient.vault.toggleFavorite.mutate(params);
-		},
-		onSuccess: (_data, variables) => {
-			// Invalidate item - this includes both listItems and getItem
-			invalidator.invalidateItem(variables.itemId, id || "");
-		},
-	});
+	const toggleFavorite = useToggleFavorite();
 
 	const handleToggleFavorite = (
 		e: React.MouseEvent,
@@ -48,8 +34,9 @@ function RouteComponent() {
 	) => {
 		e.preventDefault();
 		e.stopPropagation();
-		toggleFavoriteMutation.mutate({
+		toggleFavorite.mutate({
 			itemId: itemIdToToggle,
+			vaultId: id || "",
 			favorite: !currentFavorite,
 		});
 	};

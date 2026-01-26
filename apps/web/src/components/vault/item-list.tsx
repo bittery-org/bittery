@@ -1,5 +1,5 @@
+import { useAvailableTags, useToggleFavorite } from "@bittery/hooks";
 import { detectCardBrand, maskCardNumber } from "@bittery/shared/credit-card";
-import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import {
 	Badge,
@@ -15,11 +15,8 @@ import {
 	Skeleton,
 	toast,
 } from "@bittery/ui";
-import { useAvailableTags } from "@bittery/hooks";
-import { useMutation } from "@tanstack/react-query";
 import { Key, Search, Smartphone, Star, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useQueryInvalidator } from "../../providers/sync-provider";
 import { Favicon } from "./favicon";
 import { TagBadge } from "./tag-badge";
 import { TagFilter } from "./tag-filter";
@@ -56,9 +53,6 @@ export function ItemList({
 	selectedItemIds = [],
 	onSelectionChange,
 }: ItemListProps) {
-	const trpcClient = useTRPCClient();
-	const invalidator = useQueryInvalidator();
-
 	const [searchQuery, setSearchQuery] = useState("");
 	const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
 	const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -67,30 +61,27 @@ export function ItemList({
 	const availableTags = useAvailableTags(items);
 
 	// Mutation to toggle favorite
-	const toggleFavoriteMutation = useMutation({
-		mutationFn: (params: { itemId: string; favorite: boolean }) =>
-			trpcClient.vault.toggleFavorite.mutate(params),
-		onSuccess: (_data, variables) => {
-			toast.success("Favorite updated");
-			// Invalidate item to refresh the items
-			invalidator.invalidateItem(variables.itemId, vaultId);
-		},
-		onError: (error: Error) => {
-			toast.error(error.message || "Failed to update favorite");
-		},
-	});
+	const toggleFavorite = useToggleFavorite();
 
-	const handleToggleFavorite = (
+	const handleToggleFavorite = async (
 		e: React.MouseEvent,
 		itemId: string,
 		currentFavorite: boolean,
 	) => {
 		e.preventDefault();
 		e.stopPropagation();
-		toggleFavoriteMutation.mutate({
-			itemId,
-			favorite: !currentFavorite,
-		});
+		try {
+			await toggleFavorite.mutateAsync({
+				itemId,
+				vaultId,
+				favorite: !currentFavorite,
+			});
+			toast.success("Favorite updated");
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : "Failed to update favorite";
+			toast.error(errorMessage);
+		}
 	};
 
 	// Filter and search items

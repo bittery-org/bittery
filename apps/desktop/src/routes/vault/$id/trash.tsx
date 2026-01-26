@@ -1,4 +1,5 @@
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { usePermanentDeleteItem, useRestoreItem } from "@bittery/hooks";
+import { useTRPC } from "@bittery/shared/trpc";
 import type { ItemCategory } from "@bittery/shared/types";
 import {
 	Button,
@@ -10,14 +11,13 @@ import {
 	DialogTitle,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Archive, ArchiveRestore, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { storage } from "@/lib/storage";
 import { Favicon } from "../../../components/vault/favicon";
 import { decrypt } from "../../../lib/tauri-crypto";
-import { useQueryInvalidator } from "../../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault/$id/trash")({
 	component: TrashComponent,
@@ -43,8 +43,6 @@ interface DecryptedDeletedItem extends DeletedItem {
 
 function TrashComponent() {
 	const trpc = useTRPC();
-	const trpcClient = useTRPCClient();
-	const invalidator = useQueryInvalidator();
 
 	const { id: vaultId } = Route.useParams();
 
@@ -52,6 +50,10 @@ function TrashComponent() {
 	const [decryptedItems, setDecryptedItems] = useState<DecryptedDeletedItem[]>(
 		[],
 	);
+
+	// Shared hooks for item operations
+	const restoreItem = useRestoreItem();
+	const permanentDeleteItem = usePermanentDeleteItem();
 
 	// Fetch deleted items
 	const { data: rawItems = [] } = useQuery({
@@ -114,50 +116,36 @@ function TrashComponent() {
 		decryptItems();
 	}, [rawItems, vaultId]);
 
-	// Restore item mutation
-	const restoreItemMutation = useMutation({
-		mutationFn: async (itemId: string) => {
-			return await trpcClient.vault.restoreItem.mutate({ itemId });
-		},
-		onSuccess: async () => {
-			await Promise.all([
-				invalidator.invalidateDeletedItems(vaultId),
-				invalidator.invalidateVaultList(vaultId),
-			]);
+	const handleRestore = async (itemId: string) => {
+		try {
+			await restoreItem.mutateAsync({ itemId, vaultId });
 			toast.success("Item restored successfully");
-		},
-		onError: (error) => {
-			toast.error(`Failed to restore item: ${error.message}`);
-		},
-	});
-
-	// Permanently delete item mutation
-	const permanentlyDeleteItemMutation = useMutation({
-		mutationFn: async (itemId: string) => {
-			return await trpcClient.vault.permanentlyDeleteItem.mutate({ itemId });
-		},
-		onSuccess: async () => {
-			await invalidator.invalidateDeletedItems(vaultId);
-			setItemToDelete(null);
-			toast.success("Item permanently deleted");
-		},
-		onError: (error) => {
-			toast.error(`Failed to delete item: ${error.message}`);
-			setItemToDelete(null);
-		},
-	});
-
-	const handleRestore = (itemId: string) => {
-		restoreItemMutation.mutate(itemId);
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : "Failed to restore item";
+			toast.error(errorMessage);
+		}
 	};
 
 	const handlePermanentDelete = (itemId: string) => {
 		setItemToDelete(itemId);
 	};
 
-	const confirmPermanentDelete = () => {
+	const confirmPermanentDelete = async () => {
 		if (itemToDelete) {
-			permanentlyDeleteItemMutation.mutate(itemToDelete);
+			try {
+				await permanentDeleteItem.mutateAsync({
+					itemId: itemToDelete,
+					vaultId,
+				});
+				setItemToDelete(null);
+				toast.success("Item permanently deleted");
+			} catch (error) {
+				const errorMessage =
+					error instanceof Error ? error.message : "Failed to delete item";
+				toast.error(errorMessage);
+				setItemToDelete(null);
+			}
 		}
 	};
 
@@ -229,7 +217,7 @@ function TrashComponent() {
 										variant="outline"
 										size="sm"
 										onClick={() => handleRestore(item.id)}
-										disabled={restoreItemMutation.isPending}
+										disabled={restoreItem.isPending}
 									>
 										<ArchiveRestore className="mr-2 size-4" />
 										Restore
@@ -238,7 +226,7 @@ function TrashComponent() {
 										variant="destructive"
 										size="sm"
 										onClick={() => handlePermanentDelete(item.id)}
-										disabled={permanentlyDeleteItemMutation.isPending}
+										disabled={permanentDeleteItem.isPending}
 									>
 										<Trash2 className="mr-2 size-4" />
 										Delete Forever

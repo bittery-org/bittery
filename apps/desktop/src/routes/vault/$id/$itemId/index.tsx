@@ -1,9 +1,9 @@
+import { useAvailableTags, useDecryptedItems } from "@bittery/hooks";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 import { storage } from "@/lib/storage";
 import { ItemDetailPage } from "../../../../components/vault/item-detail-page";
-import { useAvailableTags, useDecryptedItems } from "@bittery/hooks";
 
 export const Route = createFileRoute("/vault/$id/$itemId/")({
 	component: VaultItemComponent,

@@ -193,7 +193,10 @@ export function createWebAutolockService(
 				for (const event of ACTIVITY_EVENTS) {
 					window.removeEventListener(event, handleActivity);
 				}
-				document.removeEventListener("visibilitychange", handleVisibilityChange);
+				document.removeEventListener(
+					"visibilitychange",
+					handleVisibilityChange,
+				);
 			}
 
 			// Clear callbacks

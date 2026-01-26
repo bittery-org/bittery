@@ -57,7 +57,9 @@ interface MobilePlatformProviderProps {
  * Note: Mobile doesn't have real-time sync yet, so we create a simple
  * query invalidator using React Query's useQueryClient.
  */
-export function MobilePlatformProvider({ children }: MobilePlatformProviderProps) {
+export function MobilePlatformProvider({
+	children,
+}: MobilePlatformProviderProps) {
 	const queryClient = useQueryClient();
 	const trpc = useTRPC();
 

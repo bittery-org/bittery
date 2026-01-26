@@ -8,7 +8,10 @@
 import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";
-import { usePlatform, useQueryInvalidator } from "../../context/platform-context";
+import {
+	usePlatform,
+	useQueryInvalidator,
+} from "../../context/platform-context";
 
 /**
  * Expiration options for share links

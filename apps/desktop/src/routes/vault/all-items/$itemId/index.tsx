@@ -1,7 +1,7 @@
+import { useAllDecryptedItems, useAvailableTags } from "@bittery/hooks";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 import { ItemDetailPage } from "../../../../components/vault/item-detail-page";
-import { useAllDecryptedItems, useAvailableTags } from "@bittery/hooks";
 
 export const Route = createFileRoute("/vault/all-items/$itemId/")({
 	component: AllItemsItemComponent,
