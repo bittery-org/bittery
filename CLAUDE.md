@@ -87,7 +87,8 @@ bittery/
 │   │   ├── napi/         # Standalone NAPI package (@bittery/crypto-napi)
 │   │   └── expo-module/  # Expo module for React Native (@bittery/crypto-nitro)
 │   ├── db/               # Drizzle ORM schema + migrations
-│   ├── storage/          # S3 storage integration
+│   ├── storage/          # Storage Adapters for the different platforms
+│   ├── hooks/            # Core React hooks for repeated logic like decryption, sign in etc.
 │   ├── shared/           # Shared utilities and tRPC client helpers
 │   ├── ui/               # Shared UI components (Radix UI + shadcn/ui)
 │   └── config/           # Shared TypeScript configuration

@@ -85,143 +85,151 @@ export function LoginPage() {
 		<div className="h-full overflow-y-auto">
 			<div className="flex min-h-full justify-center p-4">
 				<div className="my-auto w-full max-w-sm space-y-6">
-				<div className="flex flex-col items-center space-y-3 text-center">
-					<div style={{ width: 80, height: 80 }}>
-						<VaultIcon state="locked" size={80} />
-					</div>
-					<div>
-						<h1 className="font-semibold text-xl tracking-tight">
-							Sign in to Bittery
-						</h1>
-						<p className="mt-1 text-muted-foreground text-sm">
-							Enter your credentials to access your vault
-						</p>
-					</div>
-				</div>
-
-				<Card className="border-0 bg-transparent p-6 shadow-none sm:border sm:bg-card sm:shadow-sm">
-					<form
-						onSubmit={(e) => {
-							e.preventDefault();
-							form.handleSubmit();
-						}}
-						className="space-y-4"
-					>
-						<div className="space-y-2">
-							<Label htmlFor="serverUrl" className="text-sm font-medium">
-								Server URL
-							</Label>
-							<Input
-								id="serverUrl"
-								name="serverUrl"
-								type="url"
-								placeholder="https://your-server.com"
-								value={serverUrl}
-								onChange={(e) => setServerUrl(e.target.value)}
-								onBlur={() => {
-									persistServerUrl();
-								}}
-								required
-								className="h-10"
-							/>
-							<p className="text-muted-foreground text-xs">
-								Your self-hosted Bittery server URL
+					<div className="flex flex-col items-center space-y-3 text-center">
+						<div style={{ width: 80, height: 80 }}>
+							<VaultIcon state="locked" size={80} />
+						</div>
+						<div>
+							<h1 className="font-semibold text-xl tracking-tight">
+								Sign in to Bittery
+							</h1>
+							<p className="mt-1 text-muted-foreground text-sm">
+								Enter your credentials to access your vault
 							</p>
 						</div>
+					</div>
 
-						<form.Field name="email">
-							{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor={field.name} className="text-sm font-medium">
-										Email
-									</Label>
-									<Input
-										id={field.name}
-										name={field.name}
-										type="email"
-										placeholder="name@example.com"
-										value={field.state.value}
-										onChange={(e) => field.handleChange(e.target.value)}
-										required
-										className="h-10"
-									/>
-								</div>
-							)}
-						</form.Field>
-
-						<form.Field name="password">
-							{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor={field.name} className="text-sm font-medium">
-										Password
-									</Label>
-									<div className="relative">
-										<Input
-											id={field.name}
-											name={field.name}
-											type={showPassword ? "text" : "password"}
-											placeholder="••••••••"
-											value={field.state.value}
-											onChange={(e) => field.handleChange(e.target.value)}
-											required
-											className="h-10 pr-10"
-										/>
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon"
-											className="absolute top-1/2 right-0 size-10 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-											onClick={() => setShowPassword(!showPassword)}
-										>
-											{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-										</Button>
-									</div>
-								</div>
-							)}
-						</form.Field>
-
-						<form.Field name="secretKey">
-							{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor={field.name} className="text-sm font-medium">
-										Secret Key
-									</Label>
-									<div className="relative">
-										<Input
-											id={field.name}
-											name={field.name}
-											type={showSecretKey ? "text" : "password"}
-											placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
-											value={field.state.value}
-											onChange={(e) => field.handleChange(e.target.value)}
-											required
-											className="h-10 pr-10"
-										/>
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon"
-											className="absolute top-1/2 right-0 size-10 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-											onClick={() => setShowSecretKey(!showSecretKey)}
-										>
-											{showSecretKey ? <EyeOff size={16} /> : <Eye size={16} />}
-										</Button>
-									</div>
-								</div>
-							)}
-						</form.Field>
-
-						<Button
-							type="submit"
-							className="h-10 w-full font-medium"
-							disabled={loginMutation.isPending}
+					<Card className="border-0 bg-transparent p-6 shadow-none sm:border sm:bg-card sm:shadow-sm">
+						<form
+							onSubmit={(e) => {
+								e.preventDefault();
+								form.handleSubmit();
+							}}
+							className="space-y-4"
 						>
-							{loginMutation.isPending ? "Signing in..." : "Sign in"}
-						</Button>
-					</form>
-				</Card>
+							<div className="space-y-2">
+								<Label htmlFor="serverUrl" className="font-medium text-sm">
+									Server URL
+								</Label>
+								<Input
+									id="serverUrl"
+									name="serverUrl"
+									type="url"
+									placeholder="https://your-server.com"
+									value={serverUrl}
+									onChange={(e) => setServerUrl(e.target.value)}
+									onBlur={() => {
+										persistServerUrl();
+									}}
+									required
+									className="h-10"
+								/>
+								<p className="text-muted-foreground text-xs">
+									Your self-hosted Bittery server URL
+								</p>
+							</div>
+
+							<form.Field name="email">
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name} className="font-medium text-sm">
+											Email
+										</Label>
+										<Input
+											id={field.name}
+											name={field.name}
+											type="email"
+											placeholder="name@example.com"
+											value={field.state.value}
+											onChange={(e) => field.handleChange(e.target.value)}
+											required
+											className="h-10"
+										/>
+									</div>
+								)}
+							</form.Field>
+
+							<form.Field name="password">
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name} className="font-medium text-sm">
+											Password
+										</Label>
+										<div className="relative">
+											<Input
+												id={field.name}
+												name={field.name}
+												type={showPassword ? "text" : "password"}
+												placeholder="••••••••"
+												value={field.state.value}
+												onChange={(e) => field.handleChange(e.target.value)}
+												required
+												className="h-10 pr-10"
+											/>
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon"
+												className="absolute top-1/2 right-0 size-10 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+												onClick={() => setShowPassword(!showPassword)}
+											>
+												{showPassword ? (
+													<EyeOff size={16} />
+												) : (
+													<Eye size={16} />
+												)}
+											</Button>
+										</div>
+									</div>
+								)}
+							</form.Field>
+
+							<form.Field name="secretKey">
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name} className="font-medium text-sm">
+											Secret Key
+										</Label>
+										<div className="relative">
+											<Input
+												id={field.name}
+												name={field.name}
+												type={showSecretKey ? "text" : "password"}
+												placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+												value={field.state.value}
+												onChange={(e) => field.handleChange(e.target.value)}
+												required
+												className="h-10 pr-10"
+											/>
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon"
+												className="absolute top-1/2 right-0 size-10 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+												onClick={() => setShowSecretKey(!showSecretKey)}
+											>
+												{showSecretKey ? (
+													<EyeOff size={16} />
+												) : (
+													<Eye size={16} />
+												)}
+											</Button>
+										</div>
+									</div>
+								)}
+							</form.Field>
+
+							<Button
+								type="submit"
+								className="h-10 w-full font-medium"
+								disabled={loginMutation.isPending}
+							>
+								{loginMutation.isPending ? "Signing in..." : "Sign in"}
+							</Button>
+						</form>
+					</Card>
+				</div>
 			</div>
-		</div>
 		</div>
 	);
 }

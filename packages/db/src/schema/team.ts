@@ -1,18 +1,15 @@
 import { relations } from "drizzle-orm";
-import { index, pgEnum, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import {
+	boolean,
+	index,
+	integer,
+	pgTable,
+	text,
+	timestamp,
+} from "drizzle-orm/pg-core";
 import { user } from "./auth";
+import { invitationStatusEnum, teamRoleEnum, teamTypeEnum } from "./enums";
 import { vault } from "./vault";
-
-// Team member roles
-export const teamRoleEnum = pgEnum("team_role", ["owner", "admin", "member"]);
-
-// Invitation status
-export const invitationStatusEnum = pgEnum("invitation_status", [
-	"pending",
-	"accepted",
-	"declined",
-	"expired",
-]);
 
 export const team = pgTable("team", {
 	id: text("id").primaryKey(),
@@ -20,6 +17,8 @@ export const team = pgTable("team", {
 	ownerId: text("owner_id")
 		.notNull()
 		.references(() => user.id, { onDelete: "cascade" }),
+	type: teamTypeEnum("type").default("personal").notNull(),
+	memberLimit: integer("member_limit"), // NULL = unlimited
 	createdAt: timestamp("created_at").defaultNow().notNull(),
 	updatedAt: timestamp("updated_at")
 		.defaultNow()
@@ -40,6 +39,7 @@ export const teamMember = pgTable(
 		role: teamRoleEnum("role").notNull().default("member"),
 		invitedAt: timestamp("invited_at").defaultNow().notNull(),
 		joinedAt: timestamp("joined_at"),
+		deprecated: boolean("deprecated").default(false).notNull(), // Mark for deprecation
 	},
 	(table) => [
 		index("team_member_teamId_idx").on(table.teamId),
@@ -81,7 +81,8 @@ export const teamRelations = relations(team, ({ one, many }) => ({
 		fields: [team.ownerId],
 		references: [user.id],
 	}),
-	members: many(teamMember),
+	users: many(user), // One-to-many: team has many users
+	members: many(teamMember), // Deprecated: many-to-many relationship
 	invitations: many(teamInvitation),
 	vaults: many(vault),
 }));

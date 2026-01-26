@@ -1,24 +1,33 @@
 import { relations } from "drizzle-orm";
 import { boolean, index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { teamRoleEnum } from "./enums";
+import { team } from "./team";
 
-export const user = pgTable("user", {
-	id: text("id").primaryKey(),
-	name: text("name").notNull(),
-	email: text("email").notNull().unique(),
-	emailVerified: boolean("email_verified").default(false).notNull(),
-	// Zero-knowledge authentication fields
-	secretKeyHint: text("secret_key_hint"), // First segment of Secret Key (A3-XXXXXX)
-	srpSalt: text("srp_salt").notNull(),
-	srpVerifier: text("srp_verifier").notNull(),
-	// RSA keys for vault sharing
-	publicKey: text("public_key").notNull(), // RSA public key (PEM)
-	encryptedPrivateKey: text("encrypted_private_key").notNull(), // RSA private key encrypted with Master Unlock Key
-	createdAt: timestamp("created_at").defaultNow().notNull(),
-	updatedAt: timestamp("updated_at")
-		.defaultNow()
-		.$onUpdate(() => /* @__PURE__ */ new Date())
-		.notNull(),
-});
+export const user = pgTable(
+	"user",
+	{
+		id: text("id").primaryKey(),
+		name: text("name").notNull(),
+		email: text("email").notNull().unique(),
+		emailVerified: boolean("email_verified").default(false).notNull(),
+		// Zero-knowledge authentication fields
+		secretKeyHint: text("secret_key_hint"), // First segment of Secret Key (A3-XXXXXX)
+		srpSalt: text("srp_salt").notNull(),
+		srpVerifier: text("srp_verifier").notNull(),
+		// RSA keys for vault sharing
+		publicKey: text("public_key").notNull(), // RSA public key (PEM)
+		encryptedPrivateKey: text("encrypted_private_key").notNull(), // RSA private key encrypted with Master Unlock Key
+		// Team membership (one-to-one relationship)
+		teamId: text("team_id"),
+		role: teamRoleEnum("role").default("owner").notNull(),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+		updatedAt: timestamp("updated_at")
+			.defaultNow()
+			.$onUpdate(() => /* @__PURE__ */ new Date())
+			.notNull(),
+	},
+	(table) => [index("user_team_id_idx").on(table.teamId)],
+);
 
 export const session = pgTable(
 	"session",
@@ -48,8 +57,12 @@ export const session = pgTable(
 	(table) => [index("session_userId_idx").on(table.userId)],
 );
 
-export const userRelations = relations(user, ({ many }) => ({
+export const userRelations = relations(user, ({ one, many }) => ({
 	sessions: many(session),
+	team: one(team, {
+		fields: [user.teamId],
+		references: [team.id],
+	}),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({

@@ -1,5 +1,5 @@
+import { useCheckEmail, useLogin, useSessionState } from "@bittery/hooks";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
-import { useLogin, useCheckEmail, useSessionState } from "@bittery/hooks";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
@@ -57,7 +57,9 @@ export default function SignInForm({
 	});
 
 	// Determine if quick unlock is available
-	const isQuickUnlock = Boolean(sessionState?.canQuickUnlock && sessionState?.email);
+	const isQuickUnlock = Boolean(
+		sessionState?.canQuickUnlock && sessionState?.email,
+	);
 
 	// Handle session expiration detection
 	useEffect(() => {
@@ -213,7 +215,8 @@ export default function SignInForm({
 
 					{emailCheck?.exists && emailCheck.secretKeyHint && !isQuickUnlock && (
 						<div className="rounded-md bg-muted px-3 py-2 text-muted-foreground text-xs">
-							<span className="font-medium">Hint:</span> {emailCheck.secretKeyHint}
+							<span className="font-medium">Hint:</span>{" "}
+							{emailCheck.secretKeyHint}
 						</div>
 					)}
 

@@ -1,8 +1,8 @@
 import {
 	useBiometricUnlock,
+	usePlatformStorage,
 	useQuickUnlock,
 	useSessionState,
-	usePlatformStorage,
 } from "@bittery/hooks";
 import { useRouter } from "expo-router";
 import {
@@ -166,8 +166,11 @@ export default function UnlockScreen() {
 				CredentialProvider.updateLastMasterPasswordEntry();
 
 				// Escrow MUK with biometric for future quick unlocks
-				const biometricAvailable = await platformStorage.isBiometricAvailable?.();
-				const biometricEnabled = await platformStorage.isBiometricEnabled?.(targetAccount.email);
+				const biometricAvailable =
+					await platformStorage.isBiometricAvailable?.();
+				const biometricEnabled = await platformStorage.isBiometricEnabled?.(
+					targetAccount.email,
+				);
 				if (biometricAvailable && biometricEnabled) {
 					try {
 						await CredentialProvider.escrowMukWithBiometric({
@@ -251,8 +254,10 @@ export default function UnlockScreen() {
 	}
 
 	const loading = biometricUnlock.isPending || quickUnlock.isPending;
-	const requiresPasswordReentry = sessionState?.requiresPasswordReentry ?? false;
-	const canUseBiometric = sessionState?.canBiometricUnlock && !requiresPasswordReentry;
+	const requiresPasswordReentry =
+		sessionState?.requiresPasswordReentry ?? false;
+	const canUseBiometric =
+		sessionState?.canBiometricUnlock && !requiresPasswordReentry;
 
 	return (
 		<SafeAreaView className="flex-1 bg-background">

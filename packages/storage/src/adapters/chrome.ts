@@ -375,7 +375,9 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	// Extended Session Management (unified interface)
 	// ============================================================================
 
-	async getStoredSessionData(_email?: string): Promise<StoredSessionData | null> {
+	async getStoredSessionData(
+		_email?: string,
+	): Promise<StoredSessionData | null> {
 		const result = await chrome.storage.local.get(SESSION_DATA_STORAGE);
 		const stored = result[SESSION_DATA_STORAGE];
 
@@ -438,7 +440,8 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		return {
 			success: false,
 			error: "not_available",
-			message: "Biometric authentication is not available in browser extensions",
+			message:
+				"Biometric authentication is not available in browser extensions",
 		};
 	}
 

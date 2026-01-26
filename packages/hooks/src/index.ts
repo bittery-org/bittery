@@ -37,6 +37,26 @@
  * ```
  */
 
+// Auth Utilities (for extension service worker - non-React usage)
+export {
+	type CheckEmailResult,
+	checkEmailExists,
+	clearSession,
+	getSessionState,
+	type IAuthTRPCClient,
+	type LoginResult,
+	type LoginUserData,
+	performSRPLogin,
+	performSRPUnlock,
+	type SessionState,
+	type SRPLoginDeps,
+	type SRPLoginInput,
+	type SRPUnlockDeps,
+	type SRPUnlockInput,
+	storeLoginSession,
+	storeUnlockSession,
+	type UnlockResult,
+} from "./auth";
 // Context
 export {
 	type PlatformContextValue,
@@ -50,6 +70,28 @@ export {
 	usePlatformSync,
 	useQueryInvalidator,
 } from "./context/platform-context";
+// Auth Hooks (React Query wrappers for login/unlock)
+export {
+	type BiometricUnlockError,
+	type BiometricUnlockInput,
+	type BiometricUnlockResult,
+	type LoginInput,
+	type LogoutInput,
+	type QuickUnlockInput,
+	type UseBiometricUnlockOptions,
+	type UseCheckEmailOptions,
+	type UseLoginOptions,
+	type UseLogoutOptions,
+	type UseQuickUnlockOptions,
+	type UseSessionStateOptions,
+	useBiometricUnlock,
+	useCheckEmail,
+	useLock,
+	useLogin,
+	useLogout,
+	useQuickUnlock,
+	useSessionState,
+} from "./hooks/auth";
 // Item Mutation Hooks (write operations)
 export {
 	type CreateItemInput,
@@ -112,36 +154,12 @@ export {
 	useDeleteVault,
 	useUpdateVault,
 } from "./hooks/vault";
-
-// Auth Hooks (React Query wrappers for login/unlock)
-export {
-	type BiometricUnlockError,
-	type BiometricUnlockInput,
-	type BiometricUnlockResult,
-	type LoginInput,
-	type LogoutInput,
-	type QuickUnlockInput,
-	type UseBiometricUnlockOptions,
-	type UseCheckEmailOptions,
-	type UseLoginOptions,
-	type UseLogoutOptions,
-	type UseQuickUnlockOptions,
-	type UseSessionStateOptions,
-	useBiometricUnlock,
-	useCheckEmail,
-	useLock,
-	useLogin,
-	useLogout,
-	useQuickUnlock,
-	useSessionState,
-} from "./hooks/auth";
 // Services (platform-specific autolock implementations)
 export {
 	createMobileAutolockService,
 	createWebAutolockService,
 	type MobileAutolockOptions,
 } from "./services";
-
 // Types
 export type {
 	DerivedKeys,
@@ -156,24 +174,3 @@ export type {
 } from "./types";
 // Utilities
 export { refreshVaultKeys } from "./utils/vault-utils";
-
-// Auth Utilities (for extension service worker - non-React usage)
-export {
-	checkEmailExists,
-	clearSession,
-	getSessionState,
-	performSRPLogin,
-	performSRPUnlock,
-	storeLoginSession,
-	storeUnlockSession,
-	type CheckEmailResult,
-	type IAuthTRPCClient,
-	type LoginResult,
-	type LoginUserData,
-	type SessionState,
-	type SRPLoginDeps,
-	type SRPLoginInput,
-	type SRPUnlockDeps,
-	type SRPUnlockInput,
-	type UnlockResult,
-} from "./auth";

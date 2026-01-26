@@ -6,45 +6,40 @@
  * for state management and caching.
  */
 
-// Login hook
-export {
-	useLogin,
-	type UseLoginOptions,
-	type LoginInput,
-} from "./use-login";
-
-// Quick unlock hook (password unlock with stored secret key)
-export {
-	useQuickUnlock,
-	type UseQuickUnlockOptions,
-	type QuickUnlockInput,
-} from "./use-quick-unlock";
-
 // Biometric unlock hook (Touch ID / Face ID)
 export {
-	useBiometricUnlock,
-	type UseBiometricUnlockOptions,
-	type BiometricUnlockInput,
 	type BiometricUnlockError,
+	type BiometricUnlockInput,
 	type BiometricUnlockResult,
+	type UseBiometricUnlockOptions,
+	useBiometricUnlock,
 } from "./use-biometric-unlock";
-
 // Check email hook
 export {
-	useCheckEmail,
 	type UseCheckEmailOptions,
+	useCheckEmail,
 } from "./use-check-email";
-
-// Session state hook
+// Login hook
 export {
-	useSessionState,
-	type UseSessionStateOptions,
-} from "./use-session-state";
-
+	type LoginInput,
+	type UseLoginOptions,
+	useLogin,
+} from "./use-login";
 // Logout hook
 export {
-	useLogout,
-	useLock,
-	type UseLogoutOptions,
 	type LogoutInput,
+	type UseLogoutOptions,
+	useLock,
+	useLogout,
 } from "./use-logout";
+// Quick unlock hook (password unlock with stored secret key)
+export {
+	type QuickUnlockInput,
+	type UseQuickUnlockOptions,
+	useQuickUnlock,
+} from "./use-quick-unlock";
+// Session state hook
+export {
+	type UseSessionStateOptions,
+	useSessionState,
+} from "./use-session-state";

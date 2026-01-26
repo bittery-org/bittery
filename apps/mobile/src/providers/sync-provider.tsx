@@ -1,10 +1,7 @@
 import type { QueryInvalidator, SyncStatus } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext } from "react";
-import {
-	useMobileClientId,
-	useMobileSync,
-} from "../hooks/use-mobile-sync";
+import { useMobileClientId, useMobileSync } from "../hooks/use-mobile-sync";
 
 /**
  * Context for sync state

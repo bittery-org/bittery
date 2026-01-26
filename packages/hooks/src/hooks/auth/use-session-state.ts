@@ -5,9 +5,9 @@
  * Useful for determining which unlock method to show.
  */
 
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { usePlatformStorage } from "../../context/platform-context";
+import { type UseQueryResult, useQuery } from "@tanstack/react-query";
 import { getSessionState, type SessionState } from "../../auth";
+import { usePlatformStorage } from "../../context/platform-context";
 
 /**
  * Options for useSessionState hook

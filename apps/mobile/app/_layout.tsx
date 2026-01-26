@@ -12,8 +12,8 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { BiometricAuthModal } from "../src/components/biometric-auth-modal";
 import { AccountProvider } from "../src/contexts/account-context";
 import {
-  BiometricAuthProvider,
-  useBiometricAuth,
+	BiometricAuthProvider,
+	useBiometricAuth,
 } from "../src/contexts/biometric-auth-context";
 import { TRPCProvider } from "../src/lib/trpc";
 import { MobilePlatformProvider } from "../src/providers/platform-provider";
@@ -23,62 +23,62 @@ SplashScreen.preventAutoHideAsync();
 
 // Inner component that has access to BiometricAuthContext
 function AppContent() {
-  const { showAuthModal, dismissAuthRequirement } = useBiometricAuth();
+	const { showAuthModal, dismissAuthRequirement } = useBiometricAuth();
 
-  return (
-    <>
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: "#ffffff" },
-        }}
-      >
-        <Stack.Screen name="index" />
-        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="(vault)" options={{ headerShown: false }} />
-        <Stack.Screen name="settings" options={{ headerShown: false }} />
-      </Stack>
-      <BiometricAuthModal
-        visible={showAuthModal}
-        onSuccess={dismissAuthRequirement}
-      />
-      <StatusBar style="auto" />
-    </>
-  );
+	return (
+		<>
+			<Stack
+				screenOptions={{
+					headerShown: false,
+					contentStyle: { backgroundColor: "#ffffff" },
+				}}
+			>
+				<Stack.Screen name="index" />
+				<Stack.Screen name="(auth)" options={{ headerShown: false }} />
+				<Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+				<Stack.Screen name="(vault)" options={{ headerShown: false }} />
+				<Stack.Screen name="settings" options={{ headerShown: false }} />
+			</Stack>
+			<BiometricAuthModal
+				visible={showAuthModal}
+				onSuccess={dismissAuthRequirement}
+			/>
+			<StatusBar style="auto" />
+		</>
+	);
 }
 
 export default function RootLayout() {
-  const [appIsReady, setAppIsReady] = useState(false);
+	const [appIsReady, setAppIsReady] = useState(false);
 
-  useEffect(() => {
-    async function prepare() {
-      // Add any initialization logic here
-      // e.g., load fonts, check auth state, etc.
-      setAppIsReady(true);
-      await SplashScreen.hideAsync();
-    }
+	useEffect(() => {
+		async function prepare() {
+			// Add any initialization logic here
+			// e.g., load fonts, check auth state, etc.
+			setAppIsReady(true);
+			await SplashScreen.hideAsync();
+		}
 
-    prepare();
-  }, []);
+		prepare();
+	}, []);
 
-  if (!appIsReady) {
-    return null;
-  }
+	if (!appIsReady) {
+		return null;
+	}
 
-  return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <TRPCProvider>
-          <MobilePlatformProvider>
-            <AccountProvider>
-              <BiometricAuthProvider>
-                <AppContent />
-              </BiometricAuthProvider>
-            </AccountProvider>
-          </MobilePlatformProvider>
-        </TRPCProvider>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
-  );
+	return (
+		<GestureHandlerRootView style={{ flex: 1 }}>
+			<SafeAreaProvider>
+				<TRPCProvider>
+					<MobilePlatformProvider>
+						<AccountProvider>
+							<BiometricAuthProvider>
+								<AppContent />
+							</BiometricAuthProvider>
+						</AccountProvider>
+					</MobilePlatformProvider>
+				</TRPCProvider>
+			</SafeAreaProvider>
+		</GestureHandlerRootView>
+	);
 }

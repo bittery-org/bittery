@@ -84,9 +84,7 @@ export interface ICrypto {
 	/**
 	 * Generate client ephemeral key pair for SRP handshake.
 	 */
-	generateClientEphemeral():
-		| SRPClientEphemeral
-		| Promise<SRPClientEphemeral>;
+	generateClientEphemeral(): SRPClientEphemeral | Promise<SRPClientEphemeral>;
 
 	/**
 	 * Derive client session from ephemeral secret and server challenge.

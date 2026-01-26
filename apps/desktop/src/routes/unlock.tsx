@@ -1,6 +1,6 @@
 import {
-	useQuickUnlock,
 	useBiometricUnlock,
+	useQuickUnlock,
 	useSessionState,
 } from "@bittery/hooks";
 import {
@@ -162,8 +162,10 @@ export function UnlockPage() {
 	}
 
 	const loading = biometricUnlock.isPending || quickUnlock.isPending;
-	const requiresPasswordReentry = sessionState?.requiresPasswordReentry ?? false;
-	const canUseBiometric = sessionState?.canBiometricUnlock && !requiresPasswordReentry;
+	const requiresPasswordReentry =
+		sessionState?.requiresPasswordReentry ?? false;
+	const canUseBiometric =
+		sessionState?.canBiometricUnlock && !requiresPasswordReentry;
 
 	return (
 		<div className="flex h-full items-center justify-center bg-gray-50 p-4">
@@ -221,8 +223,8 @@ export function UnlockPage() {
 
 				{/* Master Password Required Notice */}
 				{requiresPasswordReentry && (
-					<div className="mb-4 flex items-start gap-3 rounded-lg bg-amber-50 p-4 border border-amber-200">
-						<KeyRound className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+					<div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+						<KeyRound className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600" />
 						<div>
 							<p className="font-medium text-amber-800">Password Required</p>
 							<p className="text-amber-700 text-sm">

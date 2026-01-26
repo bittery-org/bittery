@@ -4,10 +4,14 @@
  * React hook for logging out and clearing session data.
  */
 
-import { useMutation, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { useTRPCClient } from "@bittery/shared/trpc";
-import { usePlatformStorage } from "../../context/platform-context";
+import {
+	type UseMutationResult,
+	useMutation,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { clearSession } from "../../auth";
+import { usePlatformStorage } from "../../context/platform-context";
 
 /**
  * Options for useLogout hook
@@ -89,7 +93,11 @@ export function useLogout(
 					// Only call server if we have a session ID
 					// The session might be stored in sessionStorage which we can't access here
 					// so we just skip server notification if we don't have the ID
-					if (sessionData && "sessionId" in sessionData && sessionData.sessionId) {
+					if (
+						sessionData &&
+						"sessionId" in sessionData &&
+						sessionData.sessionId
+					) {
 						await trpcClient.auth.logout.mutate({
 							sessionId: sessionData.sessionId as string,
 						});

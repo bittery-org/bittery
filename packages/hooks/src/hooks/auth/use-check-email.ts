@@ -5,8 +5,8 @@
  * Returns the secret key hint if the account exists.
  */
 
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useTRPCClient } from "@bittery/shared/trpc";
+import { type UseQueryResult, useQuery } from "@tanstack/react-query";
 import type { CheckEmailResult } from "../../auth";
 
 /**

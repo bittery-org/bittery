@@ -7,7 +7,7 @@
 
 import type { IStorageAdapter } from "@bittery/storage";
 import type { ICrypto } from "../types";
-import type { IAuthTRPCClient, UnlockResult, SRPUnlockInput } from "./types";
+import type { IAuthTRPCClient, SRPUnlockInput, UnlockResult } from "./types";
 
 /**
  * Dependencies required for SRP unlock

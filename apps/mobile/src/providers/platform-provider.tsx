@@ -15,6 +15,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
+import { useMobileSync } from "../hooks/use-mobile-sync";
 import {
 	base64ToArrayBuffer,
 	decrypt,
@@ -26,7 +27,6 @@ import {
 	validateSecretKey,
 	verifyServerSession,
 } from "../lib/crypto/native-crypto";
-import { useMobileSync } from "../hooks/use-mobile-sync";
 import { storage } from "../services/storage";
 
 /**

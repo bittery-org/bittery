@@ -1,5 +1,5 @@
-import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { useLogin } from "@bittery/hooks";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { Button, Input, Label, toast, VaultIcon } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -297,7 +297,11 @@ export function LoginPage() {
 								</div>
 							)}
 
-							<Button type="submit" className="w-full" disabled={loginMutation.isPending}>
+							<Button
+								type="submit"
+								className="w-full"
+								disabled={loginMutation.isPending}
+							>
 								{loginMutation.isPending ? "Logging in..." : "Log In"}
 							</Button>
 						</form>

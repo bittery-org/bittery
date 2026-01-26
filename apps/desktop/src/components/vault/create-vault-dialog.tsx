@@ -1,3 +1,4 @@
+import type { CreateVaultInput } from "@bittery/hooks";
 import {
 	Button,
 	Dialog,
@@ -9,7 +10,6 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
-import type { CreateVaultInput } from "@bittery/hooks";
 import { useForm } from "@tanstack/react-form";
 import { useEffect, useState } from "react";
 import { VaultAvatar, vaultIconOptions } from "./vault-avatar";

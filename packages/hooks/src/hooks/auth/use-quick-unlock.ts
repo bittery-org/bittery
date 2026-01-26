@@ -5,15 +5,18 @@
  * Wraps the core performSRPUnlock utility with React Query mutation.
  */
 
-import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 import { useTRPCClient } from "@bittery/shared/trpc";
-import { usePlatformCrypto, usePlatformStorage } from "../../context/platform-context";
+import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import {
 	performSRPUnlock,
+	type SRPUnlockInput,
 	storeUnlockSession,
 	type UnlockResult,
-	type SRPUnlockInput,
 } from "../../auth";
+import {
+	usePlatformCrypto,
+	usePlatformStorage,
+} from "../../context/platform-context";
 
 /**
  * Options for useQuickUnlock hook
@@ -23,7 +26,10 @@ export interface UseQuickUnlockOptions {
 	 * Callback when unlock succeeds.
 	 * Use this for navigation, showing success messages, etc.
 	 */
-	onSuccess?: (result: UnlockResult, input: SRPUnlockInput) => void | Promise<void>;
+	onSuccess?: (
+		result: UnlockResult,
+		input: SRPUnlockInput,
+	) => void | Promise<void>;
 
 	/**
 	 * Callback when unlock fails.

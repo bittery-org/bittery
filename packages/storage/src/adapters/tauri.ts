@@ -868,7 +868,8 @@ export class TauriStorageAdapter implements IStorageAdapter {
 				return {
 					success: false,
 					error: "master_password_required",
-					message: "For security, please enter your master password. This is required every 30 days.",
+					message:
+						"For security, please enter your master password. This is required every 30 days.",
 				};
 			}
 
@@ -887,10 +888,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			// Try to determine error type from error message
 			const errorMessage =
 				error instanceof Error ? error.message : "Unknown error";
-			if (
-				errorMessage.includes("cancel") ||
-				errorMessage.includes("Cancel")
-			) {
+			if (errorMessage.includes("cancel") || errorMessage.includes("Cancel")) {
 				return {
 					success: false,
 					error: "user_cancelled",
@@ -921,7 +919,8 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		if (!sessionData.biometricEnabled) return false;
 
 		// Check if lastMasterPasswordEntry exists, fall back to createdAt
-		const lastEntry = sessionData.lastMasterPasswordEntry ?? sessionData.createdAt;
+		const lastEntry =
+			sessionData.lastMasterPasswordEntry ?? sessionData.createdAt;
 		const timeSinceLastEntry = Date.now() - lastEntry;
 
 		return timeSinceLastEntry > MASTER_PASSWORD_REENTRY_PERIOD_MS;
@@ -953,7 +952,10 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	): Promise<Uint8Array | null> {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) return null;
-		return this.decryptStoredMasterUnlockKeyInternal(resolvedEmail, skipBiometric);
+		return this.decryptStoredMasterUnlockKeyInternal(
+			resolvedEmail,
+			skipBiometric,
+		);
 	}
 
 	private async decryptStoredMasterUnlockKeyInternal(

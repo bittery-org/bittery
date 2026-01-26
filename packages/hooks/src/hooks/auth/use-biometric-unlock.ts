@@ -5,8 +5,8 @@
  * Desktop and mobile only - web/extension don't support biometric.
  */
 
-import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 import type { BiometricAuthResult } from "@bittery/storage";
+import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
 
 /**
@@ -90,7 +90,11 @@ export interface BiometricUnlockResult {
  */
 export function useBiometricUnlock(
 	options: UseBiometricUnlockOptions = {},
-): UseMutationResult<BiometricUnlockResult, BiometricUnlockError, BiometricUnlockInput> {
+): UseMutationResult<
+	BiometricUnlockResult,
+	BiometricUnlockError,
+	BiometricUnlockInput
+> {
 	const storage = usePlatformStorage();
 
 	return useMutation({
@@ -106,21 +110,25 @@ export function useBiometricUnlock(
 			// Check if master password re-entry is required (30-day security policy)
 			// This check happens before biometric auth for better UX
 			if (storage.isMasterPasswordReentryRequired) {
-				const requiresReentry = await storage.isMasterPasswordReentryRequired(input.email);
+				const requiresReentry = await storage.isMasterPasswordReentryRequired(
+					input.email,
+				);
 				if (requiresReentry) {
 					throw {
 						type: "master_password_required",
-						message: "For security, please enter your master password. This is required every 30 days.",
+						message:
+							"For security, please enter your master password. This is required every 30 days.",
 					} as BiometricUnlockError;
 				}
 			}
 
 			// Use enhanced biometric auth if available for better error handling
 			if (storage.authenticateWithBiometricEnhanced) {
-				const result: BiometricAuthResult = await storage.authenticateWithBiometricEnhanced(
-					options.promptMessage ?? "Unlock Bittery",
-					input.email,
-				);
+				const result: BiometricAuthResult =
+					await storage.authenticateWithBiometricEnhanced(
+						options.promptMessage ?? "Unlock Bittery",
+						input.email,
+					);
 
 				if (!result.success) {
 					throw {

@@ -102,7 +102,15 @@ export async function clearSession(
  * @returns Whether the email exists and the secret key hint
  */
 export async function checkEmailExists(
-	trpcClient: { auth: { checkEmail: { query(input: { email: string }): Promise<{ exists: boolean; secretKeyHint?: string | null }> } } },
+	trpcClient: {
+		auth: {
+			checkEmail: {
+				query(input: {
+					email: string;
+				}): Promise<{ exists: boolean; secretKeyHint?: string | null }>;
+			};
+		};
+	},
 	email: string,
 ): Promise<{ exists: boolean; secretKeyHint?: string | null }> {
 	return trpcClient.auth.checkEmail.query({ email });

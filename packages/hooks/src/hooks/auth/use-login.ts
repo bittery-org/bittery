@@ -5,15 +5,18 @@
  * Wraps the core performSRPLogin utility with React Query mutation.
  */
 
-import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 import { useTRPCClient } from "@bittery/shared/trpc";
-import { usePlatformCrypto, usePlatformStorage } from "../../context/platform-context";
+import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import {
-	performSRPLogin,
-	storeLoginSession,
 	type LoginResult,
+	performSRPLogin,
 	type SRPLoginInput,
+	storeLoginSession,
 } from "../../auth";
+import {
+	usePlatformCrypto,
+	usePlatformStorage,
+} from "../../context/platform-context";
 
 /**
  * Options for useLogin hook
@@ -23,7 +26,10 @@ export interface UseLoginOptions {
 	 * Callback when login succeeds.
 	 * Use this for navigation, showing success messages, etc.
 	 */
-	onSuccess?: (result: LoginResult, input: SRPLoginInput) => void | Promise<void>;
+	onSuccess?: (
+		result: LoginResult,
+		input: SRPLoginInput,
+	) => void | Promise<void>;
 
 	/**
 	 * Callback when login fails.
@@ -86,7 +92,11 @@ export function useLogin(
 			// Enable biometric if requested and supported
 			const shouldEnableBiometric =
 				input.enableBiometric ?? options.enableBiometric;
-			if (shouldEnableBiometric && storage.supportsBiometric && storage.enableBiometric) {
+			if (
+				shouldEnableBiometric &&
+				storage.supportsBiometric &&
+				storage.enableBiometric
+			) {
 				await storage.enableBiometric(input.email);
 			}
 

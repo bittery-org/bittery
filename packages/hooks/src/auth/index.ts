@@ -9,35 +9,33 @@
  * which wrap these utilities with React Query for state management.
  */
 
+// Session state utilities
+export {
+	checkEmailExists,
+	clearSession,
+	getSessionState,
+} from "./session-utils";
 // Core SRP login
 export {
 	performSRPLogin,
-	storeLoginSession,
 	type SRPLoginDeps,
+	storeLoginSession,
 } from "./srp-login";
-
 // Core SRP unlock (password unlock with stored secret key)
 export {
 	performSRPUnlock,
-	storeUnlockSession,
 	type SRPUnlockDeps,
+	storeUnlockSession,
 } from "./srp-unlock";
-
-// Session state utilities
-export {
-	getSessionState,
-	clearSession,
-	checkEmailExists,
-} from "./session-utils";
 
 // Types
 export type {
+	CheckEmailResult,
+	IAuthTRPCClient,
+	LoginResult,
+	LoginUserData,
+	SessionState,
 	SRPLoginInput,
 	SRPUnlockInput,
-	LoginResult,
 	UnlockResult,
-	LoginUserData,
-	CheckEmailResult,
-	SessionState,
-	IAuthTRPCClient,
 } from "./types";
