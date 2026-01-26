@@ -33,7 +33,11 @@ import {
 	verifyServerSession,
 } from "../../src/lib/crypto";
 import { useServerUrl, useTRPCClient } from "../../src/lib/trpc";
-import { type AccountMetadata, storage } from "../../src/services/storage";
+import {
+	type AccountMetadata,
+	getBiometricErrorMessage,
+	storage,
+} from "../../src/services/storage";
 
 export default function UnlockScreen() {
 	const router = useRouter();
@@ -105,9 +109,9 @@ export default function UnlockScreen() {
 
 				if (token && vaultKeys) {
 					// Decrypt and store master unlock key
-					const masterUnlockKey = await storage.decryptStoredMasterUnlockKey(
-						true, // Skip biometric since we just authenticated
+					const masterUnlockKey = await storage.decryptStoredMasterUnlockKeyPublic(
 						targetAccount.email,
+						true, // Skip biometric since we just authenticated
 					);
 
 					if (masterUnlockKey) {
@@ -145,8 +149,7 @@ export default function UnlockScreen() {
 			} else {
 				// Show specific error message
 				const errorMessage =
-					result.message ||
-					storage.getBiometricErrorMessage(result.error || "unknown");
+					result.message || getBiometricErrorMessage(result.error || "unknown");
 
 				if (result.error === "master_password_required") {
 					setBiometricError(errorMessage);

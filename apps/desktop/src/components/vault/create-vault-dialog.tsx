@@ -9,15 +9,15 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
+import type { CreateVaultInput } from "@bittery/hooks";
 import { useForm } from "@tanstack/react-form";
 import { useEffect, useState } from "react";
-import type { VaultFormData } from "./use-vault-operations";
 import { VaultAvatar, vaultIconOptions } from "./vault-avatar";
 
 interface CreateVaultDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	onSubmit: (data: VaultFormData) => Promise<void>;
+	onSubmit: (data: CreateVaultInput) => Promise<void>;
 }
 
 export function CreateVaultDialog({
@@ -26,7 +26,7 @@ export function CreateVaultDialog({
 	onSubmit,
 }: CreateVaultDialogProps) {
 	const [icon, setIcon] = useState("lock");
-	const [imageFile, setImageFile] = useState<File | null>(null);
+	const [imageFile, setImageFile] = useState<File | undefined>(undefined);
 	const [imagePreview, setImagePreview] = useState<string | null>(null);
 
 	const form = useForm({
@@ -64,14 +64,14 @@ export function CreateVaultDialog({
 	const resetForm = () => {
 		form.reset();
 		setIcon("lock");
-		setImageFile(null);
+		setImageFile(undefined);
 		setImagePreview(null);
 	};
 
 	const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-		const file = event.target.files?.[0] || null;
+		const file = event.target.files?.[0] || undefined;
 		if (!file) {
-			setImageFile(null);
+			setImageFile(undefined);
 			setImagePreview(null);
 			return;
 		}
@@ -79,7 +79,7 @@ export function CreateVaultDialog({
 		if (!file.type.startsWith("image/")) {
 			toast.error("Please select an image file");
 			event.currentTarget.value = "";
-			setImageFile(null);
+			setImageFile(undefined);
 			setImagePreview(null);
 			return;
 		}
@@ -87,7 +87,7 @@ export function CreateVaultDialog({
 		if (file.size > 2 * 1024 * 1024) {
 			toast.error("Image must be smaller than 2MB");
 			event.currentTarget.value = "";
-			setImageFile(null);
+			setImageFile(undefined);
 			setImagePreview(null);
 			return;
 		}
@@ -214,7 +214,7 @@ export function CreateVaultDialog({
 												variant="ghost"
 												size="sm"
 												onClick={() => {
-													setImageFile(null);
+													setImageFile(undefined);
 													setImagePreview(null);
 												}}
 												disabled={form.state.isSubmitting}

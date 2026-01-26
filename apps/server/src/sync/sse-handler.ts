@@ -12,6 +12,7 @@ export interface SyncEventPayload {
 		| "item_created"
 		| "item_updated"
 		| "item_deleted"
+		| "item_moved"
 		| "item_restored"
 		| "vault_created"
 		| "vault_updated"

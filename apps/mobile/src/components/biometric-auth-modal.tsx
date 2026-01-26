@@ -24,6 +24,7 @@ import { useBiometricAuth } from "../contexts/biometric-auth-context";
 import {
 	type BiometricAuthResult,
 	type BiometricErrorType,
+	getBiometricErrorMessage,
 	storage,
 } from "../services/storage";
 
@@ -161,7 +162,7 @@ export function BiometricAuthModal({
 		if (lastAuthResult && !lastAuthResult.success) {
 			const errorMessage =
 				lastAuthResult.message ||
-				storage.getBiometricErrorMessage(lastAuthResult.error || "unknown");
+				getBiometricErrorMessage(lastAuthResult.error || "unknown");
 
 			return (
 				<>

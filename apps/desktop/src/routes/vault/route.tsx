@@ -1,4 +1,5 @@
 import {
+	type CreateVaultInput,
 	useCreateItem,
 	useCreateVault,
 	useCrossVaultTags,
@@ -90,20 +91,10 @@ function RouteComponent() {
 	const [importingVaultId, setImportingVaultId] = useState<string | null>(null);
 
 	// Vault operation handlers
-	const handleCreateVault = async (data: {
-		name: string;
-		type: "personal" | "team";
-		icon: string;
-		imageFile: File | null;
-	}) => {
+	const handleCreateVault = async (data: CreateVaultInput) => {
 		try {
 			// Hook handles image upload internally if imageFile is provided
-			const result = await createVaultMutation.mutateAsync({
-				name: data.name,
-				type: data.type,
-				icon: data.icon,
-				imageFile: data.imageFile ?? undefined,
-			});
+			const result = await createVaultMutation.mutateAsync(data);
 
 			toast.success("Vault created successfully");
 			navigate({ to: "/vault/$id", params: { id: result.vaultId } });
