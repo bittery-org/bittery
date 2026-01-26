@@ -1,6 +1,6 @@
-import { storage } from "@/lib/storage";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { storage } from "@/lib/storage";
 import { VaultAvatar } from "../../../components/vault/vault-avatar";
 
 export const Route = createFileRoute("/vault/$id/")({

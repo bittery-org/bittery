@@ -1,4 +1,3 @@
-import { base64ToArrayBuffer, decrypt } from "@/lib/wasm-crypto";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import type { ItemCategory } from "@bittery/shared/types";
 import {
@@ -32,6 +31,7 @@ import {
 	X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { base64ToArrayBuffer, decrypt } from "@/lib/wasm-crypto";
 
 export const Route = createFileRoute("/share/$token")({
 	component: ShareAccessPage,

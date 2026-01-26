@@ -125,7 +125,7 @@ export function TotpDetail({
 					>
 						<div className="relative flex size-12 items-center justify-center">
 							<svg
-								className="-rotate-90 size-12"
+								className="size-12 -rotate-90"
 								viewBox="0 0 40 40"
 								aria-hidden="true"
 							>

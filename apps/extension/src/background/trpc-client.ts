@@ -5,8 +5,8 @@
 
 import type { AppRouter } from "@bittery/api/routers/index";
 import { buildTrpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
-import { storage } from "../lib/storage";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
+import { storage } from "../lib/storage";
 
 const fallbackServerUrl =
 	normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";

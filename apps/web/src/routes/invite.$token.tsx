@@ -1,4 +1,3 @@
-import { storage } from "@/lib/storage";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -12,7 +11,6 @@ import {
 } from "@bittery/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 import {
 	AlertCircle,
 	Check,
@@ -22,6 +20,8 @@ import {
 	Users,
 	X,
 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { storage } from "@/lib/storage";
 
 export const Route = createFileRoute("/invite/$token")({
 	component: InvitationPage,

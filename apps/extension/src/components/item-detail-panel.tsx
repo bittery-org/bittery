@@ -100,7 +100,7 @@ function InlineTotpDisplay({
 			>
 				<div className="relative flex size-9 items-center justify-center">
 					<svg
-						className="-rotate-90 size-9"
+						className="size-9 -rotate-90"
 						viewBox="0 0 32 32"
 						aria-hidden="true"
 					>

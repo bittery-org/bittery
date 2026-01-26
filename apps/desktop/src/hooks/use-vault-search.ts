@@ -1,9 +1,9 @@
-import { decrypt } from "../lib/tauri-crypto";
-import { storage } from "@/lib/storage";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { storage } from "@/lib/storage";
+import { decrypt } from "../lib/tauri-crypto";
 import { useDecryptedItems } from "./use-decrypted-items";
 
 interface SearchResult {

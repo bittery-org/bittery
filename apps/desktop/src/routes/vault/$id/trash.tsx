@@ -1,5 +1,3 @@
-import { decrypt } from "../../../lib/tauri-crypto";
-import { storage } from "@/lib/storage";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import type { ItemCategory } from "@bittery/shared/types";
 import {
@@ -16,7 +14,9 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Archive, ArchiveRestore, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { storage } from "@/lib/storage";
 import { Favicon } from "../../../components/vault/favicon";
+import { decrypt } from "../../../lib/tauri-crypto";
 import { useQueryInvalidator } from "../../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault/$id/trash")({

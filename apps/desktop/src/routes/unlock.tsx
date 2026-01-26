@@ -1,10 +1,3 @@
-import {
-	deriveKeys,
-	deriveClientSession,
-	generateClientEphemeral,
-	verifyServerSession,
-} from "../lib/tauri-crypto";
-import { storage, type AccountMetadata } from "@/lib/storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -19,8 +12,15 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ChevronDown, Fingerprint } from "lucide-react";
 import { useState } from "react";
+import { type AccountMetadata, storage } from "@/lib/storage";
 import { AccountAvatar } from "../components/account-avatar";
 import { useAccount } from "../contexts/account-context";
+import {
+	deriveClientSession,
+	deriveKeys,
+	generateClientEphemeral,
+	verifyServerSession,
+} from "../lib/tauri-crypto";
 
 interface UnlockSearchParams {
 	email?: string;
@@ -262,7 +262,7 @@ export function UnlockPage() {
 									</button>
 
 									{showAccountPicker && (
-										<div className="-translate-x-1/2 absolute left-1/2 z-10 mt-2 w-64 rounded-lg border bg-white py-1 shadow-lg">
+										<div className="absolute left-1/2 z-10 mt-2 w-64 -translate-x-1/2 rounded-lg border bg-white py-1 shadow-lg">
 											{allAccounts.map((account) => (
 												<button
 													key={account.email}

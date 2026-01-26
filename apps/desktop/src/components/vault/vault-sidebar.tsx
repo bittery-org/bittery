@@ -123,7 +123,7 @@ function DroppableVaultEntry({
 						<Button
 							variant="ghost"
 							size="sm"
-							className="-translate-y-1/2 absolute top-1/2 right-1 h-5 w-5 p-0 opacity-0 group-hover:opacity-100"
+							className="absolute top-1/2 right-1 h-5 w-5 -translate-y-1/2 p-0 opacity-0 group-hover:opacity-100"
 							onClick={(e) => e.stopPropagation()}
 						>
 							<MoreHorizontal className="h-3.5 w-3.5" />

@@ -1,5 +1,3 @@
-import { storage } from "@/lib/storage";
-import { arrayBufferToBase64, rsaEncrypt } from "@/lib/wasm-crypto";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Avatar,
@@ -24,6 +22,8 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { UserPlus } from "lucide-react";
 import { useState } from "react";
+import { storage } from "@/lib/storage";
+import { arrayBufferToBase64, rsaEncrypt } from "@/lib/wasm-crypto";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface AddMemberDialogProps {

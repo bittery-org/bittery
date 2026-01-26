@@ -1,9 +1,9 @@
 {
-  "platforms": ["apple", "android"],
-  "apple": {
-    "modules": ["BitteryCryptoModule"]
-  },
-  "android": {
-    "modules": ["expo.modules.bitterycrypto.BitteryCryptoModule"]
-  }
+	"platforms": ["apple", "android"],
+	"apple": {
+		"modules": ["BitteryCryptoModule"]
+	},
+	"android": {
+		"modules": ["expo.modules.bitterycrypto.BitteryCryptoModule"]
+	}
 }

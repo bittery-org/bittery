@@ -1,5 +1,5 @@
-import { storage } from "@/lib/storage";
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import { storage } from "@/lib/storage";
 
 export const Route = createFileRoute("/")({
 	component: IndexComponent,

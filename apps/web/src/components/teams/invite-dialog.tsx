@@ -1,5 +1,3 @@
-import { storage } from "@/lib/storage";
-import { rsaEncrypt } from "@/lib/wasm-crypto";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -22,6 +20,8 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { UserPlus } from "lucide-react";
 import { useState } from "react";
+import { storage } from "@/lib/storage";
+import { rsaEncrypt } from "@/lib/wasm-crypto";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface InviteDialogProps {
@@ -71,7 +71,9 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 					if (vault.encryptedVaultKey) {
 						try {
 							// Decrypt vault key with our MUK
-							const vaultKey = await storage.decryptVaultKey(vault.encryptedVaultKey);
+							const vaultKey = await storage.decryptVaultKey(
+								vault.encryptedVaultKey,
+							);
 
 							// Convert vault key to base64 string for RSA encryption
 							const vaultKeyBase64 = btoa(

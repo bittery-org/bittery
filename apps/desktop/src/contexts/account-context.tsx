@@ -1,4 +1,3 @@
-import { storage, type AccountMetadata } from "@/lib/storage";
 import { useQueryClient } from "@tanstack/react-query";
 import {
 	createContext,
@@ -8,6 +7,7 @@ import {
 	useEffect,
 	useState,
 } from "react";
+import { type AccountMetadata, storage } from "@/lib/storage";
 
 interface AccountContextValue {
 	activeAccount: AccountMetadata | null;

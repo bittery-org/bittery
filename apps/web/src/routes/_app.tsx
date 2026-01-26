@@ -1,6 +1,6 @@
-import { storage } from "@/lib/storage";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { MobileNav, Sidebar } from "@/components/layout/sidebar";
+import { storage } from "@/lib/storage";
 
 export const Route = createFileRoute("/_app")({
 	component: AppLayout,

@@ -20,13 +20,12 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
-
+import { useBiometricAuth } from "../contexts/biometric-auth-context";
 import {
-	storage,
 	type BiometricAuthResult,
 	type BiometricErrorType,
+	storage,
 } from "../services/storage";
-import { useBiometricAuth } from "../contexts/biometric-auth-context";
 
 interface BiometricAuthModalProps {
 	visible: boolean;

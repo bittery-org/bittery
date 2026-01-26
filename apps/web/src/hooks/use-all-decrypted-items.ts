@@ -1,8 +1,8 @@
-import { storage } from "@/lib/storage";
-import { decrypt } from "@/lib/wasm-crypto";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { useQueries, useQuery } from "@tanstack/react-query";
+import { storage } from "@/lib/storage";
+import { decrypt } from "@/lib/wasm-crypto";
 
 /**
  * Hook to fetch and decrypt items from ALL vaults for security analysis.

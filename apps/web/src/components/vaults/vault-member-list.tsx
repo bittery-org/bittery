@@ -1,5 +1,3 @@
-import { performKeyRotation } from "@/lib/wasm-crypto";
-import { storage } from "@/lib/storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	AlertDialog,
@@ -31,6 +29,8 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { storage } from "@/lib/storage";
+import { performKeyRotation } from "@/lib/wasm-crypto";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface VaultMember {

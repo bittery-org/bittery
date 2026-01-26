@@ -1,4 +1,3 @@
-import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "../lib/storage";
 import {
 	Button,
 	Label,
@@ -18,6 +17,7 @@ import {
 	Settings as SettingsIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "../lib/storage";
 
 // Auto-lock timeout options (in milliseconds)
 // -1 means never auto-lock

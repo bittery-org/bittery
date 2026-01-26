@@ -1,5 +1,3 @@
-import { encrypt } from "../../lib/tauri-crypto";
-import { storage } from "@/lib/storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import type { ItemCategory } from "@bittery/shared/types";
 import { toast } from "@bittery/ui";
@@ -12,6 +10,7 @@ import {
 	useParams,
 } from "@tanstack/react-router";
 import { useState } from "react";
+import { storage } from "@/lib/storage";
 import { CreateItemDialog } from "../../components/vault/create-item-dialog";
 import { CreateVaultDialog } from "../../components/vault/create-vault-dialog";
 import { DeleteVaultDialog } from "../../components/vault/delete-vault-dialog";
@@ -22,6 +21,7 @@ import { VaultHeader } from "../../components/vault/vault-header";
 import { VaultSidebar } from "../../components/vault/vault-sidebar";
 import { useCrossVaultTags } from "../../hooks/use-cross-vault-tags";
 import { trpc } from "../../lib/providers";
+import { encrypt } from "../../lib/tauri-crypto";
 import { VaultDndProvider } from "../../providers/dnd-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 

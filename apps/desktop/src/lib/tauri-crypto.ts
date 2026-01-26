@@ -5,7 +5,6 @@
  * in the desktop app, but uses native Rust crypto via Tauri commands.
  */
 
-import { invoke } from "@tauri-apps/api/core";
 import type {
 	DerivedKeys,
 	EncryptedData,
@@ -15,6 +14,7 @@ import type {
 	SRPRegistration,
 	SRPServerChallenge,
 } from "@bittery/types";
+import { invoke } from "@tauri-apps/api/core";
 
 // Re-export types for consumers
 export type {
@@ -80,8 +80,7 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
  * Exported for use in share-item-dialog and other places
  */
 export function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
-	const bytes =
-		buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+	const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
 	return uint8ArrayToBase64(bytes);
 }
 

@@ -1,33 +1,33 @@
 // Types
 export type {
-  DerivedKeys,
-  EncryptedData,
-  RsaKeyPair,
-  Ephemeral,
-  Session,
-  HashAlgorithm,
-  PrimeGroup,
+	DerivedKeys,
+	EncryptedData,
+	Ephemeral,
+	HashAlgorithm,
+	PrimeGroup,
+	RsaKeyPair,
+	Session,
 } from "./BitteryCrypto.types";
 
-export { ErrorCode, CryptoError } from "./BitteryCrypto.types";
+export { CryptoError, ErrorCode } from "./BitteryCrypto.types";
 
 // Module functions
 export {
-  // Key Derivation
-  deriveKeys,
-  // AES-256-GCM
-  encrypt,
-  decrypt,
-  generateEncryptionKey,
-  // RSA-4096
-  generateRsaKeyPair,
-  rsaEncrypt,
-  rsaDecrypt,
-  // Secret Key
-  generateSecretKey,
-  validateSecretKey,
-  getSecretKeyHint,
-  // SRP-6a
-  createSRPClient,
-  createSRPServer,
+	// SRP-6a
+	createSRPClient,
+	createSRPServer,
+	decrypt,
+	// Key Derivation
+	deriveKeys,
+	// AES-256-GCM
+	encrypt,
+	generateEncryptionKey,
+	// RSA-4096
+	generateRsaKeyPair,
+	// Secret Key
+	generateSecretKey,
+	getSecretKeyHint,
+	rsaDecrypt,
+	rsaEncrypt,
+	validateSecretKey,
 } from "./BitteryCryptoModule";

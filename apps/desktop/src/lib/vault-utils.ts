@@ -1,5 +1,5 @@
-import { storage } from "@/lib/storage";
 import type { useTRPCClient } from "@bittery/shared/trpc";
+import { storage } from "@/lib/storage";
 
 export async function refreshVaultKeys(
 	trpcClient: ReturnType<typeof useTRPCClient>,

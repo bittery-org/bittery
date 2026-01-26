@@ -4,7 +4,7 @@
  */
 
 import { createWebStorageAdapter } from "@bittery/storage/adapters/web";
-import { encrypt, decrypt, rsaDecrypt } from "./wasm-crypto";
+import { decrypt, encrypt, rsaDecrypt } from "./wasm-crypto";
 
 // Create crypto provider from WASM crypto wrapper
 const cryptoProvider = { encrypt, decrypt, rsaDecrypt };
@@ -13,4 +13,8 @@ const cryptoProvider = { encrypt, decrypt, rsaDecrypt };
 export const storage = createWebStorageAdapter(cryptoProvider);
 
 // Re-export types for convenience
-export type { VaultKeyData, AccountMetadata, StoredSessionData } from "@bittery/storage";
+export type {
+	AccountMetadata,
+	StoredSessionData,
+	VaultKeyData,
+} from "@bittery/storage";

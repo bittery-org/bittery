@@ -1,8 +1,8 @@
-import { decrypt } from "../lib/tauri-crypto";
-import { storage } from "@/lib/storage";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItemData } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
+import { storage } from "@/lib/storage";
+import { decrypt } from "../lib/tauri-crypto";
 
 /**
  * Hook to fetch and decrypt a single vault item.
@@ -34,9 +34,7 @@ export function useDecryptedItem(itemId: string) {
 
 			try {
 				// Get vault key for decryption
-				const vaultKey = await storage.getDecryptedVaultKey(
-					rawItem.vaultId,
-				);
+				const vaultKey = await storage.getDecryptedVaultKey(rawItem.vaultId);
 
 				if (!vaultKey) {
 					throw new Error("No vault key found for decryption");

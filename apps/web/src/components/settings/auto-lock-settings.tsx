@@ -1,4 +1,3 @@
-import { storage } from "@/lib/storage";
 import { DEFAULT_AUTO_LOCK_TIMEOUT_MS } from "@bittery/storage";
 import {
 	Label,
@@ -10,6 +9,7 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useEffect, useState } from "react";
+import { storage } from "@/lib/storage";
 
 // Auto-lock timeout options (in milliseconds)
 // -1 means never auto-lock

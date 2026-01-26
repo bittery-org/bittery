@@ -1,16 +1,17 @@
 import type { AppRouter } from "@bittery/api/routers/index";
 import { buildTrpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
 import { TRPCProvider } from "@bittery/shared/trpc";
-import { storage } from "./lib/storage";
 import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import Loader from "./components/loader";
+import { storage } from "./lib/storage";
 import "./index.css";
 import { initWasmCrypto } from "./lib/wasm-crypto";
 
 // Initialize WASM crypto module at app startup
 // This runs once and is safe to call multiple times
 initWasmCrypto();
+
 import {
 	QueryCache,
 	QueryClient,

@@ -5,13 +5,16 @@
 /// <reference types="chrome" />
 /// <reference lib="dom" />
 
-import type { EncryptedData } from "@bittery/types";
-import { arrayBufferToBase64, base64ToArrayBuffer } from "@bittery/shared/crypto";
-import type { CryptoProvider } from "../crypto-provider";
-import type { IStorageAdapter } from "../adapter";
 import {
-	DEFAULT_SESSION_EXPIRY_MS,
+	arrayBufferToBase64,
+	base64ToArrayBuffer,
+} from "@bittery/shared/crypto";
+import type { EncryptedData } from "@bittery/types";
+import type { IStorageAdapter } from "../adapter";
+import type { CryptoProvider } from "../crypto-provider";
+import {
 	type AccountMetadata,
+	DEFAULT_SESSION_EXPIRY_MS,
 	type StoredSessionData,
 	type VaultKeyData,
 } from "../types";
@@ -134,7 +137,10 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		});
 	}
 
-	async tryRestoreSession(_skipBiometric?: boolean, _email?: string): Promise<boolean> {
+	async tryRestoreSession(
+		_skipBiometric?: boolean,
+		_email?: string,
+	): Promise<boolean> {
 		if (!(await this.isSessionValid())) {
 			return false;
 		}
@@ -184,8 +190,15 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		return (result[JWT_TOKEN_KEY] as string | undefined) || null;
 	}
 
-	async storeVaultKeys(vaultKeys: VaultKeyData[], _email?: string): Promise<void> {
-		console.log("[storage-chrome] Storing vault keys:", vaultKeys.length, "keys");
+	async storeVaultKeys(
+		vaultKeys: VaultKeyData[],
+		_email?: string,
+	): Promise<void> {
+		console.log(
+			"[storage-chrome] Storing vault keys:",
+			vaultKeys.length,
+			"keys",
+		);
 		try {
 			await chrome.storage.session.set({
 				[VAULT_KEYS_KEY]: JSON.stringify(vaultKeys),
@@ -209,7 +222,10 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		return stored ? JSON.parse(stored as string) : null;
 	}
 
-	async getDecryptedVaultKey(vaultId: string, _email?: string): Promise<Uint8Array | null> {
+	async getDecryptedVaultKey(
+		vaultId: string,
+		_email?: string,
+	): Promise<Uint8Array | null> {
 		const vaultKeys = await this.getVaultKeys();
 		if (!vaultKeys) return null;
 
@@ -219,15 +235,22 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		return this.decryptVaultKey(vaultKeyData.encryptedVaultKey);
 	}
 
-	async storeEncryptedPrivateKey(encryptedPrivateKey: string, _email?: string): Promise<void> {
+	async storeEncryptedPrivateKey(
+		encryptedPrivateKey: string,
+		_email?: string,
+	): Promise<void> {
 		await chrome.storage.session.set({
 			[ENCRYPTED_PRIVATE_KEY_STORAGE]: encryptedPrivateKey,
 		});
 	}
 
 	async getEncryptedPrivateKey(_email?: string): Promise<string | null> {
-		const result = await chrome.storage.session.get(ENCRYPTED_PRIVATE_KEY_STORAGE);
-		return (result[ENCRYPTED_PRIVATE_KEY_STORAGE] as string | undefined) || null;
+		const result = await chrome.storage.session.get(
+			ENCRYPTED_PRIVATE_KEY_STORAGE,
+		);
+		return (
+			(result[ENCRYPTED_PRIVATE_KEY_STORAGE] as string | undefined) || null
+		);
 	}
 
 	// ============================================================================
@@ -277,7 +300,10 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	// Settings
 	// ============================================================================
 
-	async storeAutoLockTimeout(timeoutMs: number, _email?: string): Promise<void> {
+	async storeAutoLockTimeout(
+		timeoutMs: number,
+		_email?: string,
+	): Promise<void> {
 		await chrome.storage.local.set({ [AUTO_LOCK_TIMEOUT_STORAGE]: timeoutMs });
 	}
 
@@ -381,7 +407,10 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		}
 	}
 
-	async decryptVaultKey(encryptedVaultKey: string, _email?: string): Promise<Uint8Array> {
+	async decryptVaultKey(
+		encryptedVaultKey: string,
+		_email?: string,
+	): Promise<Uint8Array> {
 		const muk = await this.getMasterUnlockKey();
 		if (!muk) {
 			throw new Error("Master Unlock Key not available. Please log in again.");
@@ -401,11 +430,14 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		// RSA encrypted (shared vault key)
 		const encryptedPrivateKey = await this.getEncryptedPrivateKey();
 		if (!encryptedPrivateKey) {
-			throw new Error("Encrypted private key not available. Please log in again.");
+			throw new Error(
+				"Encrypted private key not available. Please log in again.",
+			);
 		}
 
 		// Decrypt private key with MUK
-		const privateKeyEncryptedData: EncryptedData = JSON.parse(encryptedPrivateKey);
+		const privateKeyEncryptedData: EncryptedData =
+			JSON.parse(encryptedPrivateKey);
 		const mukBase64 = arrayBufferToBase64(muk);
 		const privateKeyPEM = await this.crypto.decrypt(
 			privateKeyEncryptedData,
@@ -413,7 +445,10 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		);
 
 		// Use RSA to decrypt vault key
-		const vaultKeyBase64 = await this.crypto.rsaDecrypt(encryptedVaultKey, privateKeyPEM);
+		const vaultKeyBase64 = await this.crypto.rsaDecrypt(
+			encryptedVaultKey,
+			privateKeyPEM,
+		);
 		return base64ToArrayBuffer(vaultKeyBase64) as Uint8Array;
 	}
 }
@@ -422,6 +457,8 @@ export class ChromeStorageAdapter implements IStorageAdapter {
  * Create a new Chrome Storage Adapter instance
  * @param crypto - CryptoProvider implementation for encryption operations
  */
-export function createChromeStorageAdapter(crypto: CryptoProvider): IStorageAdapter {
+export function createChromeStorageAdapter(
+	crypto: CryptoProvider,
+): IStorageAdapter {
 	return new ChromeStorageAdapter(crypto);
 }

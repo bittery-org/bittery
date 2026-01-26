@@ -12,7 +12,7 @@ import {
 } from "react-native";
 
 import { useAccount } from "../contexts/account-context";
-import { storage, type AccountMetadata } from "../services/storage";
+import { type AccountMetadata, storage } from "../services/storage";
 
 interface AccountSwitcherProps {
 	visible: boolean;

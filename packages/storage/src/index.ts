@@ -11,11 +11,9 @@
  * cross-platform storage operations.
  */
 
-// Types
-export * from "./types";
-
 // Adapter interface
 export type { IStorageAdapter } from "./adapter";
-
 // Crypto provider interface
 export type { CryptoProvider } from "./crypto-provider";
+// Types
+export * from "./types";

@@ -1,7 +1,7 @@
-import { storage } from "@/lib/storage";
 import { getOrCreateClientId, useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { storage } from "@/lib/storage";
 
 /**
  * Get or create a unique client ID for this browser session

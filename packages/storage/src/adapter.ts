@@ -118,13 +118,19 @@ export interface IStorageAdapter {
 	 * Get decrypted vault key for a specific vault.
 	 * Requires MUK to be available in memory.
 	 */
-	getDecryptedVaultKey(vaultId: string, email?: string): Promise<Uint8Array | null>;
+	getDecryptedVaultKey(
+		vaultId: string,
+		email?: string,
+	): Promise<Uint8Array | null>;
 
 	/**
 	 * Decrypt a vault key string (AES-GCM or RSA encrypted).
 	 * Requires MUK to be available in memory.
 	 */
-	decryptVaultKey(encryptedVaultKey: string, email?: string): Promise<Uint8Array>;
+	decryptVaultKey(
+		encryptedVaultKey: string,
+		email?: string,
+	): Promise<Uint8Array>;
 
 	/**
 	 * Store encrypted private key (for RSA operations / vault sharing).

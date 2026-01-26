@@ -1,4 +1,3 @@
-import { storage } from "@/lib/storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	AlertDialog,
@@ -18,6 +17,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Trash2 } from "lucide-react";
 import { useState } from "react";
+import { storage } from "@/lib/storage";
 
 export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 	const [open, setOpen] = useState(false);

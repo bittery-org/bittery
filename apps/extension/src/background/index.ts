@@ -19,6 +19,7 @@ import {
 initWasmCrypto().catch((error) => {
 	console.error("[Background] Failed to initialize WASM crypto:", error);
 });
+
 import {
 	handleCheckAutofillAuth,
 	handleGetAutofillCreditCards,

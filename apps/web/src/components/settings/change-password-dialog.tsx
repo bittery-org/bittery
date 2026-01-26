@@ -1,10 +1,3 @@
-import { storage } from "@/lib/storage";
-import {
-	decrypt,
-	deriveKeys,
-	encrypt,
-	generateSRPRegistration,
-} from "@/lib/wasm-crypto";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -23,6 +16,13 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff, Key } from "lucide-react";
 import { useState } from "react";
+import { storage } from "@/lib/storage";
+import {
+	decrypt,
+	deriveKeys,
+	encrypt,
+	generateSRPRegistration,
+} from "@/lib/wasm-crypto";
 
 export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 	const [open, setOpen] = useState(false);

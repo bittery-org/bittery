@@ -7,15 +7,18 @@
  * Linux Secret Service) for enhanced protection.
  */
 
-import type { Store } from "@tauri-apps/plugin-store";
-import type { EncryptedData } from "@bittery/types";
-import { arrayBufferToBase64, base64ToArrayBuffer } from "@bittery/shared/crypto";
-import type { CryptoProvider } from "../crypto-provider";
-import type { IStorageAdapter } from "../adapter";
 import {
+	arrayBufferToBase64,
+	base64ToArrayBuffer,
+} from "@bittery/shared/crypto";
+import type { EncryptedData } from "@bittery/types";
+import type { Store } from "@tauri-apps/plugin-store";
+import type { IStorageAdapter } from "../adapter";
+import type { CryptoProvider } from "../crypto-provider";
+import {
+	type AccountMetadata,
 	BIOMETRIC_GRACE_PERIOD_MS,
 	DEFAULT_SESSION_EXPIRY_MS,
-	type AccountMetadata,
 	type StoredSessionData,
 	type VaultKeyData,
 } from "../types";
@@ -84,7 +87,9 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	readonly supportsBiometric = true;
 
 	private store: Store | null = null;
-	private biometryModule: typeof import("@choochmeque/tauri-plugin-biometry-api") | null = null;
+	private biometryModule:
+		| typeof import("@choochmeque/tauri-plugin-biometry-api")
+		| null = null;
 	private storeModule: typeof import("@tauri-apps/plugin-store") | null = null;
 	private invoke: TauriInvoke | null = null;
 
@@ -109,7 +114,9 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		}
 
 		try {
-			this.biometryModule = await import("@choochmeque/tauri-plugin-biometry-api");
+			this.biometryModule = await import(
+				"@choochmeque/tauri-plugin-biometry-api"
+			);
 		} catch (error) {
 			console.warn("[storage-tauri] Biometry module not available:", error);
 		}
@@ -123,7 +130,9 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 	private async getStore(): Promise<Store> {
 		if (!this.store) {
-			throw new Error("TauriStorageAdapter not initialized. Call initialize() first.");
+			throw new Error(
+				"TauriStorageAdapter not initialized. Call initialize() first.",
+			);
 		}
 		return this.store;
 	}
@@ -149,33 +158,48 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 	private async getDeviceKey(): Promise<Uint8Array> {
 		if (!this.invoke) {
-			throw new Error("TauriStorageAdapter not initialized. Call initialize() first.");
+			throw new Error(
+				"TauriStorageAdapter not initialized. Call initialize() first.",
+			);
 		}
 
 		const store = await this.getStore();
 
 		// Try to get device key from OS keychain first
 		try {
-			const keychainValue = await this.invoke("keychain_get", { key: DEVICE_KEY_KEYCHAIN_KEY });
+			const keychainValue = await this.invoke("keychain_get", {
+				key: DEVICE_KEY_KEYCHAIN_KEY,
+			});
 			if (keychainValue) {
 				console.log("[storage-tauri] Device key retrieved from OS keychain");
 				return base64ToArrayBuffer(keychainValue);
 			}
 		} catch (error) {
-			console.warn("[storage-tauri] Failed to read device key from keychain:", error);
+			console.warn(
+				"[storage-tauri] Failed to read device key from keychain:",
+				error,
+			);
 		}
 
 		// Fallback: Check if device key exists in Tauri Store (backup/legacy)
 		const storedKey = await store.get<string>(DEVICE_KEY_STORAGE_LEGACY);
 
 		if (storedKey) {
-			console.log("[storage-tauri] Device key retrieved from Tauri Store backup");
+			console.log(
+				"[storage-tauri] Device key retrieved from Tauri Store backup",
+			);
 			// Try to sync back to keychain for next time
 			try {
-				await this.invoke("keychain_set", { key: DEVICE_KEY_KEYCHAIN_KEY, value: storedKey });
+				await this.invoke("keychain_set", {
+					key: DEVICE_KEY_KEYCHAIN_KEY,
+					value: storedKey,
+				});
 				console.log("[storage-tauri] Device key synced to OS keychain");
 			} catch (error) {
-				console.warn("[storage-tauri] Failed to sync device key to keychain:", error);
+				console.warn(
+					"[storage-tauri] Failed to sync device key to keychain:",
+					error,
+				);
 			}
 			return base64ToArrayBuffer(storedKey);
 		}
@@ -190,11 +214,17 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		// This ensures we can always retrieve the key even if keychain has issues
 		let keychainSuccess = false;
 		try {
-			await this.invoke("keychain_set", { key: DEVICE_KEY_KEYCHAIN_KEY, value: deviceKeyBase64 });
+			await this.invoke("keychain_set", {
+				key: DEVICE_KEY_KEYCHAIN_KEY,
+				value: deviceKeyBase64,
+			});
 			keychainSuccess = true;
 			console.log("[storage-tauri] New device key stored in OS keychain");
 		} catch (error) {
-			console.error("[storage-tauri] Failed to store device key in keychain:", error);
+			console.error(
+				"[storage-tauri] Failed to store device key in keychain:",
+				error,
+			);
 		}
 
 		// Always store in Tauri Store as backup
@@ -203,7 +233,9 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		console.log("[storage-tauri] New device key stored in Tauri Store backup");
 
 		if (!keychainSuccess) {
-			console.warn("[storage-tauri] Device key only stored in Tauri Store (keychain failed)");
+			console.warn(
+				"[storage-tauri] Device key only stored in Tauri Store (keychain failed)",
+			);
 		}
 
 		return deviceKey;
@@ -224,7 +256,10 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 		// Try to restore from persistent storage if session is still valid
 		if (await this.isSessionValid(resolvedEmail)) {
-			const restored = await this.decryptStoredMasterUnlockKey(resolvedEmail, false);
+			const restored = await this.decryptStoredMasterUnlockKey(
+				resolvedEmail,
+				false,
+			);
 			if (restored) {
 				cache.masterUnlockKey = restored;
 				return restored;
@@ -265,7 +300,8 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		const mukBase64 = arrayBufferToBase64(masterUnlockKey);
 		const encryptedMUK = await this.crypto.encrypt(mukBase64, deviceKey);
 
-		const biometricEnabled = await this.isBiometricEnabled?.(resolvedEmail) ?? false;
+		const biometricEnabled =
+			(await this.isBiometricEnabled?.(resolvedEmail)) ?? false;
 
 		const sessionData: StoredSessionData = {
 			encryptedMasterUnlockKey: encryptedMUK,
@@ -281,7 +317,10 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		await store.save();
 	}
 
-	async tryRestoreSession(skipBiometric = false, email?: string): Promise<boolean> {
+	async tryRestoreSession(
+		skipBiometric = false,
+		email?: string,
+	): Promise<boolean> {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) return false;
 
@@ -297,7 +336,10 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		}
 
 		// Otherwise, try to decrypt from persistent storage
-		const masterUnlockKey = await this.decryptStoredMasterUnlockKey(resolvedEmail, skipBiometric);
+		const masterUnlockKey = await this.decryptStoredMasterUnlockKey(
+			resolvedEmail,
+			skipBiometric,
+		);
 		if (!masterUnlockKey) {
 			return false;
 		}
@@ -374,11 +416,18 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		return token ?? null;
 	}
 
-	async storeVaultKeys(vaultKeys: VaultKeyData[], email?: string): Promise<void> {
+	async storeVaultKeys(
+		vaultKeys: VaultKeyData[],
+		email?: string,
+	): Promise<void> {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) throw new Error("No account specified");
 
-		console.log("[storage-tauri] Storing vault keys:", vaultKeys.length, "keys");
+		console.log(
+			"[storage-tauri] Storing vault keys:",
+			vaultKeys.length,
+			"keys",
+		);
 
 		const cache = this.getAccountCache(resolvedEmail);
 		cache.vaultKeys = vaultKeys;
@@ -407,7 +456,10 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		return cache.vaultKeys;
 	}
 
-	async getDecryptedVaultKey(vaultId: string, email?: string): Promise<Uint8Array | null> {
+	async getDecryptedVaultKey(
+		vaultId: string,
+		email?: string,
+	): Promise<Uint8Array | null> {
 		const vaultKeys = await this.getVaultKeys(email);
 		if (!vaultKeys) return null;
 
@@ -417,7 +469,10 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		return this.decryptVaultKey(vaultKeyData.encryptedVaultKey, email);
 	}
 
-	async storeEncryptedPrivateKey(encryptedPrivateKey: string, email?: string): Promise<void> {
+	async storeEncryptedPrivateKey(
+		encryptedPrivateKey: string,
+		email?: string,
+	): Promise<void> {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) throw new Error("No account specified");
 
@@ -680,7 +735,10 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		await store.save();
 	}
 
-	async authenticateWithBiometric(reason = "Unlock Bittery", email?: string): Promise<boolean> {
+	async authenticateWithBiometric(
+		reason = "Unlock Bittery",
+		email?: string,
+	): Promise<boolean> {
 		if (!this.biometryModule) return false;
 
 		try {
@@ -745,9 +803,15 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		if (!skipBiometric && sessionData.biometricEnabled) {
 			const authRequired = await this.isBiometricAuthRequired(email);
 			if (authRequired) {
-				const authenticated = await this.authenticateWithBiometric("Unlock your vault", email);
+				const authenticated = await this.authenticateWithBiometric(
+					"Unlock your vault",
+					email,
+				);
 				if (!authenticated) {
-					console.log("[storage-tauri] Biometric authentication failed for:", email);
+					console.log(
+						"[storage-tauri] Biometric authentication failed for:",
+						email,
+					);
 					return null;
 				}
 			}
@@ -755,8 +819,13 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 		try {
 			const deviceKey = await this.getDeviceKey();
-			const mukBase64 = await this.crypto.decrypt(sessionData.encryptedMasterUnlockKey, deviceKey);
-			console.log("[storage-tauri] Successfully decrypted MUK from session data");
+			const mukBase64 = await this.crypto.decrypt(
+				sessionData.encryptedMasterUnlockKey,
+				deviceKey,
+			);
+			console.log(
+				"[storage-tauri] Successfully decrypted MUK from session data",
+			);
 			return base64ToArrayBuffer(mukBase64);
 		} catch (error) {
 			console.error("[storage-tauri] Failed to decrypt MUK:", error);
@@ -764,7 +833,10 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		}
 	}
 
-	async decryptVaultKey(encryptedVaultKey: string, email?: string): Promise<Uint8Array> {
+	async decryptVaultKey(
+		encryptedVaultKey: string,
+		email?: string,
+	): Promise<Uint8Array> {
 		const muk = await this.getMasterUnlockKey(email);
 		if (!muk) {
 			throw new Error("Master Unlock Key not available. Please log in again.");
@@ -783,17 +855,23 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		// RSA encrypted (shared vault key)
 		const encryptedPrivateKey = await this.getEncryptedPrivateKey(email);
 		if (!encryptedPrivateKey) {
-			throw new Error("Encrypted private key not available. Please log in again.");
+			throw new Error(
+				"Encrypted private key not available. Please log in again.",
+			);
 		}
 
-		const privateKeyEncryptedData: EncryptedData = JSON.parse(encryptedPrivateKey);
+		const privateKeyEncryptedData: EncryptedData =
+			JSON.parse(encryptedPrivateKey);
 		const mukBase64 = arrayBufferToBase64(muk);
 		const privateKeyPEM = await this.crypto.decrypt(
 			privateKeyEncryptedData,
 			base64ToArrayBuffer(mukBase64),
 		);
 
-		const vaultKeyBase64 = await this.crypto.rsaDecrypt(encryptedVaultKey, privateKeyPEM);
+		const vaultKeyBase64 = await this.crypto.rsaDecrypt(
+			encryptedVaultKey,
+			privateKeyPEM,
+		);
 		return base64ToArrayBuffer(vaultKeyBase64);
 	}
 
@@ -902,7 +980,9 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	/**
 	 * Get stored session data (public method for desktop)
 	 */
-	async getStoredSessionData(email?: string): Promise<StoredSessionData | null> {
+	async getStoredSessionData(
+		email?: string,
+	): Promise<StoredSessionData | null> {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) return null;
 
@@ -930,7 +1010,10 @@ export class TauriStorageAdapter implements IStorageAdapter {
 				return false;
 			}
 
-			const masterUnlockKey = await this.decryptStoredMasterUnlockKey(resolvedEmail, false);
+			const masterUnlockKey = await this.decryptStoredMasterUnlockKey(
+				resolvedEmail,
+				false,
+			);
 			if (!masterUnlockKey) {
 				return false;
 			}
@@ -986,9 +1069,8 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	async getAccountMetadata(email: string): Promise<AccountMetadata | null> {
 		const accountsList = await this.getAccountsList();
 		return (
-			accountsList.find(
-				(a) => a.email.toLowerCase() === email.toLowerCase(),
-			) ?? null
+			accountsList.find((a) => a.email.toLowerCase() === email.toLowerCase()) ??
+			null
 		);
 	}
 
@@ -1036,6 +1118,8 @@ export class TauriStorageAdapter implements IStorageAdapter {
  * Create a new Tauri Storage Adapter instance
  * @param crypto - CryptoProvider implementation for encryption operations
  */
-export function createTauriStorageAdapter(crypto: CryptoProvider): IStorageAdapter {
+export function createTauriStorageAdapter(
+	crypto: CryptoProvider,
+): IStorageAdapter {
 	return new TauriStorageAdapter(crypto);
 }

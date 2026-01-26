@@ -1,9 +1,9 @@
-import { storage } from "@/lib/storage";
 import type { SyncStorage } from "@bittery/sync";
 import { generateClientId, useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { Store } from "@tauri-apps/plugin-store";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { storage } from "@/lib/storage";
 
 /**
  * Storage key for client ID

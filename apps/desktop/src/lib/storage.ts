@@ -4,7 +4,7 @@
  */
 
 import { createTauriStorageAdapter } from "@bittery/storage/adapters/tauri";
-import { encrypt, decrypt, rsaDecrypt } from "./tauri-crypto";
+import { decrypt, encrypt, rsaDecrypt } from "./tauri-crypto";
 
 // Create crypto provider from Tauri crypto wrapper
 const cryptoProvider = { encrypt, decrypt, rsaDecrypt };
@@ -28,13 +28,13 @@ export async function initializeStorage(): Promise<void> {
 
 // Re-export types and constants for convenience
 export type {
-	VaultKeyData,
 	AccountMetadata,
 	StoredSessionData,
+	VaultKeyData,
 } from "@bittery/storage";
 
 export {
+	BIOMETRIC_GRACE_PERIOD_MS,
 	DEFAULT_AUTO_LOCK_TIMEOUT_MS,
 	DEFAULT_SESSION_EXPIRY_MS,
-	BIOMETRIC_GRACE_PERIOD_MS,
 } from "@bittery/storage";

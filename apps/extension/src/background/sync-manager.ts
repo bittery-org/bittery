@@ -3,8 +3,8 @@
  * MV3-compatible sync implementation using SSE with service worker constraints
  */
 
-import { storage } from "../lib/storage";
 import type { ConnectionStatus, SyncEvent } from "@bittery/sync";
+import { storage } from "../lib/storage";
 
 /**
  * Generate a random ID (simpler than nanoid for extension context)

@@ -1,5 +1,4 @@
 import { normalizeServerUrl } from "@bittery/shared/server-url";
-import { storage, DEFAULT_AUTO_LOCK_TIMEOUT_MS } from "@/lib/storage";
 import {
 	Button,
 	Dialog,
@@ -21,6 +20,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "@/lib/storage";
 
 // Auto-lock timeout options (in milliseconds)
 // -1 means never auto-lock
@@ -145,10 +145,7 @@ export function AccountSettingsDialog({
 			// Reset to original values
 			setWebAppUrl(webAppUrlQuery.data || "");
 			setAutoLockTimeout(
-				String(
-					autoLockTimeoutQuery.data ??
-						DEFAULT_AUTO_LOCK_TIMEOUT_MS,
-				),
+				String(autoLockTimeoutQuery.data ?? DEFAULT_AUTO_LOCK_TIMEOUT_MS),
 			);
 			setIsDirty(false);
 		}

@@ -1,4 +1,3 @@
-import { storage } from "@/lib/storage";
 import { useTRPC } from "@bittery/shared/trpc";
 import {
 	Avatar,
@@ -27,6 +26,7 @@ import {
 	ShieldCheck,
 	Users,
 } from "lucide-react";
+import { storage } from "@/lib/storage";
 
 const navItems = [
 	{ path: "/home", icon: Home, label: "Dashboard" },

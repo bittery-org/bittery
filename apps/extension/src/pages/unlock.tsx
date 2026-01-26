@@ -188,7 +188,7 @@ export function UnlockPage() {
 												type="button"
 												variant="ghost"
 												size="icon"
-												className="-translate-y-1/2 absolute top-1/2 right-0 size-10 text-muted-foreground hover:text-foreground"
+												className="absolute top-1/2 right-0 size-10 -translate-y-1/2 text-muted-foreground hover:text-foreground"
 												onClick={() => setShowPassword(!showPassword)}
 											>
 												{showPassword ? (

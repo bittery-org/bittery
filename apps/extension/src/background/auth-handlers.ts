@@ -213,7 +213,8 @@ export async function handleGetSessionData(): Promise<MessageResponse> {
 	const sessionValid = await storage.isSessionValid();
 	return {
 		success: true,
-		sessionData: email && userId ? { email, userId, isValid: sessionValid } : null,
+		sessionData:
+			email && userId ? { email, userId, isValid: sessionValid } : null,
 	};
 }
 

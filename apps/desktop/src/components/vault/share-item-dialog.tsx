@@ -1,9 +1,3 @@
-import {
-	arrayBufferToBase64,
-	encrypt,
-	generateEncryptionKey,
-} from "../../lib/tauri-crypto";
-import { storage } from "@/lib/storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
@@ -37,6 +31,12 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { AlertTriangle, Copy, Link, Loader2, X } from "lucide-react";
 import { useState } from "react";
+import { storage } from "@/lib/storage";
+import {
+	arrayBufferToBase64,
+	encrypt,
+	generateEncryptionKey,
+} from "../../lib/tauri-crypto";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface ShareItemDialogProps {

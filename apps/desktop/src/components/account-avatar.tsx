@@ -1,5 +1,5 @@
-import type { AccountMetadata } from "@/lib/storage";
 import { Avatar, AvatarFallback, cn } from "@bittery/ui";
+import type { AccountMetadata } from "@/lib/storage";
 
 interface AccountAvatarProps {
 	account: AccountMetadata | null;

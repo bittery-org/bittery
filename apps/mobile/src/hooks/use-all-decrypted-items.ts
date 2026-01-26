@@ -1,7 +1,7 @@
-import { decrypt } from "../lib/crypto";
 import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { decrypt } from "../lib/crypto";
 
 import { useTRPC } from "../lib/trpc";
 import * as storage from "../services/storage";
@@ -174,7 +174,8 @@ export function useAllDecryptedItems() {
 	const isDecryptionPending =
 		rawItems.length > 0 && decryptedItems.length === 0 && !error;
 	const isWaitingForAuth = rawItems.length > 0 && !isMukReady;
-	const isLoadingState = isLoadingRaw || isDecrypting || isDecryptionPending || isWaitingForAuth;
+	const isLoadingState =
+		isLoadingRaw || isDecrypting || isDecryptionPending || isWaitingForAuth;
 
 	return {
 		items: decryptedItems,

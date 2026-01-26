@@ -42,8 +42,7 @@ export default defineManifest({
 		128: "icons/icon-128.png",
 	},
 	content_security_policy: {
-		extension_pages:
-			"script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+		extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
 	},
 	web_accessible_resources: [
 		{

@@ -6,16 +6,16 @@ import {
 	vaultKey,
 	vaultKeyRotation,
 } from "@bittery/db/schema/vault";
-import {
-	createPresignedUpload,
-	createVaultImageKey,
-	getStoragePublicUrl,
-} from "../storage/s3";
 import { TRPCError } from "@trpc/server";
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, router } from "../index";
+import {
+	createPresignedUpload,
+	createVaultImageKey,
+	getStoragePublicUrl,
+} from "../storage/s3";
 import { emitSyncEvent } from "../sync-helper";
 
 export const vaultRouter = router({

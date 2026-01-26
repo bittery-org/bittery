@@ -1,19 +1,19 @@
 import { normalizeServerUrl } from "@bittery/shared/server-url";
-import {
-	deriveKeys,
-	validateSecretKey,
-	deriveClientSession,
-	generateClientEphemeral,
-	verifyServerSession,
-} from "../lib/tauri-crypto";
-import { storage, type AccountMetadata } from "@/lib/storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button, Input, Label, toast, VaultIcon } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Fingerprint } from "lucide-react";
 import { useEffect, useState } from "react";
+import { type AccountMetadata, storage } from "@/lib/storage";
 import { useAccount } from "../contexts/account-context";
+import {
+	deriveClientSession,
+	deriveKeys,
+	generateClientEphemeral,
+	validateSecretKey,
+	verifyServerSession,
+} from "../lib/tauri-crypto";
 
 interface LoginSearchParams {
 	addingAccount?: boolean;
@@ -146,10 +146,7 @@ export function LoginPage() {
 
 			// Store auth data (email is used to namespace storage)
 			await storage.storeAuthToken(finishResult.token, normalizedEmail);
-			await storage.storeVaultKeys(
-				finishResult.vaultKeys,
-				normalizedEmail,
-			);
+			await storage.storeVaultKeys(finishResult.vaultKeys, normalizedEmail);
 			// Store encrypted private key for RSA decryption of shared vault keys
 			if (finishResult.user.encryptedPrivateKey) {
 				await storage.storeEncryptedPrivateKey(
@@ -172,10 +169,7 @@ export function LoginPage() {
 			if (webAppUrl.trim()) {
 				const normalizedWebAppUrl = normalizeServerUrl(webAppUrl);
 				if (normalizedWebAppUrl) {
-					await storage.storeWebAppUrl(
-						normalizedWebAppUrl,
-						normalizedEmail,
-					);
+					await storage.storeWebAppUrl(normalizedWebAppUrl, normalizedEmail);
 				}
 			} else {
 				await storage.clearWebAppUrl(normalizedEmail);

@@ -1,4 +1,3 @@
-import { storage } from "@/lib/storage";
 import {
 	Button,
 	DropdownMenu,
@@ -11,6 +10,7 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import { Check, ChevronDown, Lock, LogOut, Plus, Settings } from "lucide-react";
 import { useState } from "react";
+import { storage } from "@/lib/storage";
 import { useAccount } from "../contexts/account-context";
 import { AccountAvatar } from "./account-avatar";
 import { AccountSettingsDialog } from "./account-settings-dialog";

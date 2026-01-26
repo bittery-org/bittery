@@ -33,7 +33,7 @@ import {
 	verifyServerSession,
 } from "../../src/lib/crypto";
 import { useServerUrl, useTRPCClient } from "../../src/lib/trpc";
-import { storage, type AccountMetadata } from "../../src/services/storage";
+import { type AccountMetadata, storage } from "../../src/services/storage";
 
 export default function UnlockScreen() {
 	const router = useRouter();

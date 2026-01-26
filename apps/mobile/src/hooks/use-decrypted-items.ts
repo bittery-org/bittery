@@ -1,9 +1,8 @@
-import { decrypt } from "../lib/crypto";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-
 import { useOfflineVaultContext } from "../contexts/offline-vault-context";
+import { decrypt } from "../lib/crypto";
 import { useTRPC } from "../lib/trpc";
 import * as storage from "../services/storage";
 
@@ -196,7 +195,8 @@ export function useDecryptedItems(vaultId: string | undefined) {
 	const isDecryptionPending =
 		rawItems.length > 0 && decryptedItems.length === 0 && !decryptError;
 	const isWaitingForAuth = rawItems.length > 0 && !isMukReady && !isOfflineMode;
-	const isLoadingState = isLoadingRaw || isDecrypting || isDecryptionPending || isWaitingForAuth;
+	const isLoadingState =
+		isLoadingRaw || isDecrypting || isDecryptionPending || isWaitingForAuth;
 
 	return {
 		items,

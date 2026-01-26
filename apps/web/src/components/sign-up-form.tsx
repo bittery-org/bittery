@@ -1,17 +1,6 @@
 import { normalizeServerUrl } from "@bittery/shared/server-url";
-import { storage } from "@/lib/storage";
-import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
-import {
-	arrayBufferToBase64,
-	deriveKeys,
-	encrypt,
-	generateEncryptionKey,
-	generateRSAKeyPair,
-	generateSecretKeyAsync,
-	generateSRPRegistration,
-	getSecretKeyHint,
-} from "@/lib/wasm-crypto";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import {
 	Badge,
 	Button,
@@ -26,6 +15,17 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Copy, Download, Eye, EyeOff, Users } from "lucide-react";
 import { useEffect, useState } from "react";
+import { storage } from "@/lib/storage";
+import {
+	arrayBufferToBase64,
+	deriveKeys,
+	encrypt,
+	generateEncryptionKey,
+	generateRSAKeyPair,
+	generateSecretKeyAsync,
+	generateSRPRegistration,
+	getSecretKeyHint,
+} from "@/lib/wasm-crypto";
 
 export default function SignUpForm({
 	onSwitchToSignIn,
@@ -168,13 +168,17 @@ export default function SignUpForm({
 				await storage.setMasterUnlockKey(masterUnlockKey);
 
 				// 8. Store encrypted private key for RSA decryption of shared vault keys
-				await storage.storeEncryptedPrivateKey(JSON.stringify(encryptedPrivateKey));
+				await storage.storeEncryptedPrivateKey(
+					JSON.stringify(encryptedPrivateKey),
+				);
 
 				// 9. Store secret key and encrypted session for quick unlock
 				await storage.storeSecretKey(secretKey);
 				await storage.storeSessionData(masterUnlockKey, email, result.userId);
 
-				const daysUntil = Math.floor(DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24));
+				const daysUntil = Math.floor(
+					DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24),
+				);
 
 				toast.success(
 					`Account created! Quick unlock available for ${daysUntil} days.`,

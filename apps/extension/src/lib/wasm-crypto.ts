@@ -9,14 +9,14 @@
  */
 
 import init, {
+	JsEncryptedData,
+	type JsSession,
+	JsSrpClient,
 	decrypt as wasmDecrypt,
 	deriveKeys as wasmDeriveKeys,
 	encrypt as wasmEncrypt,
 	generateEncryptionKey as wasmGenerateEncryptionKey,
 	rsaDecrypt as wasmRsaDecrypt,
-	JsEncryptedData,
-	JsSrpClient,
-	type JsSession,
 } from "@bittery/crypto-wasm";
 import type {
 	DerivedKeys,
@@ -109,8 +109,7 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
  * Convert an ArrayBuffer or Uint8Array to base64 string
  */
 export function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
-	const bytes =
-		buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+	const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
 	return uint8ArrayToBase64(bytes);
 }
 
@@ -309,7 +308,11 @@ export async function verifyServerSession(
 		);
 	}
 
-	client.verifySession(clientPublicEphemeral, cachedSession, serverSessionProof);
+	client.verifySession(
+		clientPublicEphemeral,
+		cachedSession,
+		serverSessionProof,
+	);
 
 	// Clean up the cached session after successful verification
 	sessionCache.delete(clientSession.proof);

@@ -3,20 +3,23 @@
  * Uses expo-secure-store and expo-sqlite for storage, expo-local-authentication for biometrics
  */
 
+import {
+	arrayBufferToBase64,
+	base64ToArrayBuffer,
+} from "@bittery/shared/crypto";
+import type { EncryptedData } from "@bittery/types";
+import type * as CryptoType from "expo-crypto";
+import type * as LocalAuthenticationType from "expo-local-authentication";
 import type * as SecureStoreType from "expo-secure-store";
 import type * as SQLiteType from "expo-sqlite";
-import type * as LocalAuthenticationType from "expo-local-authentication";
-import type * as CryptoType from "expo-crypto";
-import type { EncryptedData } from "@bittery/types";
-import { arrayBufferToBase64, base64ToArrayBuffer } from "@bittery/shared/crypto";
-import type { CryptoProvider } from "../crypto-provider";
 import type { IStorageAdapter } from "../adapter";
+import type { CryptoProvider } from "../crypto-provider";
 import {
+	type AccountMetadata,
 	BIOMETRIC_GRACE_PERIOD_MS,
+	type BiometricAuthResult,
 	DEFAULT_SESSION_EXPIRY_MS,
 	MASTER_PASSWORD_REENTRY_PERIOD_MS,
-	type AccountMetadata,
-	type BiometricAuthResult,
 	type StoredSessionData,
 	type VaultKeyData,
 } from "../types";
@@ -74,7 +77,8 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	private SQLite: typeof SQLiteType | null = null;
 	private LocalAuthentication: typeof LocalAuthenticationType | null = null;
 	private ExpoCrypto: typeof CryptoType | null = null;
-	private db: Awaited<ReturnType<typeof SQLiteType.openDatabaseAsync>> | null = null;
+	private db: Awaited<ReturnType<typeof SQLiteType.openDatabaseAsync>> | null =
+		null;
 
 	constructor(private crypto: CryptoProvider) {}
 
@@ -207,7 +211,10 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 		// Try to restore from persistent storage if session is still valid
 		if (await this.isSessionValid(resolvedEmail)) {
-			const restored = await this.decryptStoredMasterUnlockKeyInternal(resolvedEmail, false);
+			const restored = await this.decryptStoredMasterUnlockKeyInternal(
+				resolvedEmail,
+				false,
+			);
 			if (restored) {
 				cache.masterUnlockKey = restored;
 				return restored;
@@ -247,7 +254,8 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		const mukBase64 = arrayBufferToBase64(masterUnlockKey);
 		const encryptedMUK = await this.crypto.encrypt(mukBase64, deviceKey);
 
-		const biometricEnabled = await this.isBiometricEnabled?.(resolvedEmail) ?? false;
+		const biometricEnabled =
+			(await this.isBiometricEnabled?.(resolvedEmail)) ?? false;
 
 		const sessionData: StoredSessionData = {
 			encryptedMasterUnlockKey: encryptedMUK,
@@ -263,7 +271,10 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		await this.setItem(key, JSON.stringify(sessionData));
 	}
 
-	async tryRestoreSession(skipBiometric = false, email?: string): Promise<boolean> {
+	async tryRestoreSession(
+		skipBiometric = false,
+		email?: string,
+	): Promise<boolean> {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) return false;
 
@@ -279,7 +290,10 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		}
 
 		// Otherwise, try to decrypt from persistent storage
-		const masterUnlockKey = await this.decryptStoredMasterUnlockKeyInternal(resolvedEmail, skipBiometric);
+		const masterUnlockKey = await this.decryptStoredMasterUnlockKeyInternal(
+			resolvedEmail,
+			skipBiometric,
+		);
 		if (!masterUnlockKey) {
 			return false;
 		}
@@ -347,11 +361,18 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		return token;
 	}
 
-	async storeVaultKeys(vaultKeys: VaultKeyData[], email?: string): Promise<void> {
+	async storeVaultKeys(
+		vaultKeys: VaultKeyData[],
+		email?: string,
+	): Promise<void> {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) throw new Error("No account specified");
 
-		console.log("[storage-react-native] Storing vault keys:", vaultKeys.length, "keys");
+		console.log(
+			"[storage-react-native] Storing vault keys:",
+			vaultKeys.length,
+			"keys",
+		);
 
 		const cache = this.getAccountCache(resolvedEmail);
 		cache.vaultKeys = vaultKeys;
@@ -377,7 +398,10 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		return cache.vaultKeys;
 	}
 
-	async getDecryptedVaultKey(vaultId: string, email?: string): Promise<Uint8Array | null> {
+	async getDecryptedVaultKey(
+		vaultId: string,
+		email?: string,
+	): Promise<Uint8Array | null> {
 		const vaultKeys = await this.getVaultKeys(email);
 		if (!vaultKeys) return null;
 
@@ -387,7 +411,10 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		return this.decryptVaultKey(vaultKeyData.encryptedVaultKey, email);
 	}
 
-	async storeEncryptedPrivateKey(encryptedPrivateKey: string, email?: string): Promise<void> {
+	async storeEncryptedPrivateKey(
+		encryptedPrivateKey: string,
+		email?: string,
+	): Promise<void> {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) throw new Error("No account specified");
 
@@ -477,7 +504,9 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		await this.deleteItem(getAccountKey(resolvedEmail, "biometric_enabled"));
 		await this.deleteItem(getAccountKey(resolvedEmail, "last_biometric_auth"));
 		await this.deleteItem(getAccountKey(resolvedEmail, "server_url"));
-		await this.deleteItem(getAccountKey(resolvedEmail, "encrypted_private_key"));
+		await this.deleteItem(
+			getAccountKey(resolvedEmail, "encrypted_private_key"),
+		);
 		await this.deleteItem(getAccountKey(resolvedEmail, "auto_lock_timeout"));
 		await this.deleteItem(getAccountKey(resolvedEmail, "background_timestamp"));
 
@@ -613,7 +642,10 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		await this.setItem(key, "false");
 	}
 
-	async authenticateWithBiometric(reason = "Unlock Bittery", email?: string): Promise<boolean> {
+	async authenticateWithBiometric(
+		reason = "Unlock Bittery",
+		email?: string,
+	): Promise<boolean> {
 		if (!this.LocalAuthentication) return false;
 
 		try {
@@ -636,7 +668,10 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 			return false;
 		} catch (error) {
-			console.error("[storage-react-native] Biometric authentication failed:", error);
+			console.error(
+				"[storage-react-native] Biometric authentication failed:",
+				error,
+			);
 			return false;
 		}
 	}
@@ -652,7 +687,9 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	// Private Helpers
 	// ============================================================================
 
-	private async getStoredSessionData(email: string): Promise<StoredSessionData | null> {
+	private async getStoredSessionData(
+		email: string,
+	): Promise<StoredSessionData | null> {
 		try {
 			const key = getAccountKey(email, "session_data");
 			const stored = await this.getItem(key);
@@ -664,7 +701,9 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		}
 	}
 
-	private async isBiometricAuthRequiredInternal(email: string): Promise<boolean> {
+	private async isBiometricAuthRequiredInternal(
+		email: string,
+	): Promise<boolean> {
 		const sessionData = await this.getStoredSessionData(email);
 		if (!sessionData || !sessionData.biometricEnabled) {
 			return false;
@@ -682,11 +721,14 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		return timeSinceLastAuth > BIOMETRIC_GRACE_PERIOD_MS;
 	}
 
-	private async isMasterPasswordReentryRequiredInternal(email: string): Promise<boolean> {
+	private async isMasterPasswordReentryRequiredInternal(
+		email: string,
+	): Promise<boolean> {
 		const sessionData = await this.getStoredSessionData(email);
 		if (!sessionData) return true;
 
-		const lastPasswordEntry = sessionData.lastMasterPasswordEntry || sessionData.createdAt;
+		const lastPasswordEntry =
+			sessionData.lastMasterPasswordEntry || sessionData.createdAt;
 		const timeSinceLastEntry = Date.now() - lastPasswordEntry;
 		return timeSinceLastEntry > MASTER_PASSWORD_REENTRY_PERIOD_MS;
 	}
@@ -707,7 +749,10 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		if (!skipBiometric && sessionData.biometricEnabled) {
 			const authRequired = await this.isBiometricAuthRequiredInternal(email);
 			if (authRequired) {
-				const authenticated = await this.authenticateWithBiometric("Unlock your vault", email);
+				const authenticated = await this.authenticateWithBiometric(
+					"Unlock your vault",
+					email,
+				);
 				if (!authenticated) {
 					return null;
 				}
@@ -716,14 +761,20 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 		try {
 			const deviceKey = await this.getDeviceKey();
-			const mukBase64 = await this.crypto.decrypt(sessionData.encryptedMasterUnlockKey, deviceKey);
+			const mukBase64 = await this.crypto.decrypt(
+				sessionData.encryptedMasterUnlockKey,
+				deviceKey,
+			);
 			return base64ToArrayBuffer(mukBase64);
 		} catch {
 			return null;
 		}
 	}
 
-	async decryptVaultKey(encryptedVaultKey: string, email?: string): Promise<Uint8Array> {
+	async decryptVaultKey(
+		encryptedVaultKey: string,
+		email?: string,
+	): Promise<Uint8Array> {
 		const muk = await this.getMasterUnlockKey(email);
 		if (!muk) {
 			throw new Error("Master Unlock Key not available. Please log in again.");
@@ -742,17 +793,23 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		// RSA encrypted (shared vault key)
 		const encryptedPrivateKey = await this.getEncryptedPrivateKey(email);
 		if (!encryptedPrivateKey) {
-			throw new Error("Encrypted private key not available. Please log in again.");
+			throw new Error(
+				"Encrypted private key not available. Please log in again.",
+			);
 		}
 
-		const privateKeyEncryptedData: EncryptedData = JSON.parse(encryptedPrivateKey);
+		const privateKeyEncryptedData: EncryptedData =
+			JSON.parse(encryptedPrivateKey);
 		const mukBase64 = arrayBufferToBase64(muk);
 		const privateKeyPEM = await this.crypto.decrypt(
 			privateKeyEncryptedData,
 			base64ToArrayBuffer(mukBase64),
 		);
 
-		const vaultKeyBase64 = await this.crypto.rsaDecrypt(encryptedVaultKey, privateKeyPEM);
+		const vaultKeyBase64 = await this.crypto.rsaDecrypt(
+			encryptedVaultKey,
+			privateKeyPEM,
+		);
 		return base64ToArrayBuffer(vaultKeyBase64);
 	}
 
@@ -763,7 +820,10 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	/**
 	 * Get detailed biometric availability information
 	 */
-	async getBiometricAvailabilityDetails(): Promise<{ hasHardware: boolean; isEnrolled: boolean }> {
+	async getBiometricAvailabilityDetails(): Promise<{
+		hasHardware: boolean;
+		isEnrolled: boolean;
+	}> {
 		if (!this.LocalAuthentication) {
 			return { hasHardware: false, isEnrolled: false };
 		}
@@ -782,11 +842,18 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	async getBiometricType(): Promise<string | null> {
 		if (!this.LocalAuthentication) return null;
 		try {
-			const types = await this.LocalAuthentication.supportedAuthenticationTypesAsync();
-			if (types.includes(this.LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)) {
+			const types =
+				await this.LocalAuthentication.supportedAuthenticationTypesAsync();
+			if (
+				types.includes(
+					this.LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION,
+				)
+			) {
 				return "Face ID";
 			}
-			if (types.includes(this.LocalAuthentication.AuthenticationType.FINGERPRINT)) {
+			if (
+				types.includes(this.LocalAuthentication.AuthenticationType.FINGERPRINT)
+			) {
 				return "Touch ID";
 			}
 			return null;
@@ -823,9 +890,8 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	async getAccountMetadata(email: string): Promise<AccountMetadata | null> {
 		const accountsList = await this.getAccountsList();
 		return (
-			accountsList.find(
-				(a) => a.email.toLowerCase() === email.toLowerCase(),
-			) ?? null
+			accountsList.find((a) => a.email.toLowerCase() === email.toLowerCase()) ??
+			null
 		);
 	}
 
@@ -839,7 +905,8 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		const sessionData = await this.getStoredSessionData(resolvedEmail);
 		if (!sessionData) return true;
 
-		const lastPasswordEntry = sessionData.lastMasterPasswordEntry || sessionData.createdAt;
+		const lastPasswordEntry =
+			sessionData.lastMasterPasswordEntry || sessionData.createdAt;
 		const timeSinceLastEntry = Date.now() - lastPasswordEntry;
 		return timeSinceLastEntry > MASTER_PASSWORD_REENTRY_PERIOD_MS;
 	}
@@ -856,7 +923,10 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 				return false;
 			}
 
-			const masterUnlockKey = await this.decryptStoredMasterUnlockKeyInternal(resolvedEmail, false);
+			const masterUnlockKey = await this.decryptStoredMasterUnlockKeyInternal(
+				resolvedEmail,
+				false,
+			);
 			if (!masterUnlockKey) {
 				return false;
 			}
@@ -932,10 +1002,12 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) return false;
 
-		const backgroundTimestamp = await this.getBackgroundTimestamp(resolvedEmail);
+		const backgroundTimestamp =
+			await this.getBackgroundTimestamp(resolvedEmail);
 		if (!backgroundTimestamp) return false;
 
-		const autoLockTimeout = await this.getAutoLockTimeoutOrDefault(resolvedEmail);
+		const autoLockTimeout =
+			await this.getAutoLockTimeoutOrDefault(resolvedEmail);
 
 		// If auto-lock is set to "Never" (-1), don't require re-auth
 		if (autoLockTimeout === -1) return false;
@@ -962,7 +1034,10 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	): Promise<Uint8Array | null> {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) return null;
-		return this.decryptStoredMasterUnlockKeyInternal(resolvedEmail, skipBiometric);
+		return this.decryptStoredMasterUnlockKeyInternal(
+			resolvedEmail,
+			skipBiometric,
+		);
 	}
 
 	/**
@@ -1006,7 +1081,8 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 				return {
 					success: false,
 					error: "not_enrolled",
-					message: "No biometrics enrolled. Please set up Face ID or Touch ID in your device settings",
+					message:
+						"No biometrics enrolled. Please set up Face ID or Touch ID in your device settings",
 				};
 			}
 
@@ -1025,7 +1101,8 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 				return {
 					success: false,
 					error: "master_password_required",
-					message: "For your security, please enter your master password. This is required periodically.",
+					message:
+						"For your security, please enter your master password. This is required periodically.",
 				};
 			}
 
@@ -1069,7 +1146,8 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 				return {
 					success: false,
 					error: "lockout",
-					message: "Too many failed attempts. Please use your password to unlock",
+					message:
+						"Too many failed attempts. Please use your password to unlock",
 				};
 			}
 
@@ -1079,11 +1157,15 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 				message: "Biometric authentication failed. Please try again",
 			};
 		} catch (error) {
-			console.error("[storage-react-native] Biometric authentication error:", error);
+			console.error(
+				"[storage-react-native] Biometric authentication error:",
+				error,
+			);
 			return {
 				success: false,
 				error: "unknown",
-				message: error instanceof Error ? error.message : "Unknown error occurred",
+				message:
+					error instanceof Error ? error.message : "Unknown error occurred",
 			};
 		}
 	}
@@ -1093,6 +1175,8 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
  * Create a new React Native Storage Adapter instance
  * @param crypto - CryptoProvider implementation for encryption operations
  */
-export function createReactNativeStorageAdapter(crypto: CryptoProvider): IStorageAdapter {
+export function createReactNativeStorageAdapter(
+	crypto: CryptoProvider,
+): IStorageAdapter {
 	return new ReactNativeStorageAdapter(crypto);
 }

@@ -7,7 +7,7 @@ import {
 	useState,
 } from "react";
 
-import { storage, type AccountMetadata } from "@/services/storage";
+import { type AccountMetadata, storage } from "@/services/storage";
 
 interface AccountContextValue {
 	allAccounts: AccountMetadata[];

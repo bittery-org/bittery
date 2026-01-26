@@ -1,7 +1,6 @@
 import "./index.css";
 import type { AppRouter } from "@bittery/api/routers/index";
 import { buildTrpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
-import { storage } from "./lib/storage";
 import { TRPCProvider } from "@bittery/shared/trpc";
 import { Toaster } from "@bittery/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -13,6 +12,7 @@ import {
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { storage } from "./lib/storage";
 import { routeTree } from "./routeTree";
 
 // Create TanStack Query client

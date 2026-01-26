@@ -1,10 +1,9 @@
 import { arrayBufferToBase64 } from "@bittery/shared/crypto";
-import { storage } from "@/services/storage";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
-
-import CredentialProvider from "../../modules/credential-provider";
+import { storage } from "@/services/storage";
 import type { SaveCredentialParams } from "../../modules/credential-provider";
+import CredentialProvider from "../../modules/credential-provider";
 import { useAllDecryptedItems } from "./use-all-decrypted-items";
 
 /**
@@ -136,7 +135,8 @@ export function useCredentialProviderSync(
 							domain: additionalDomain,
 							username: item.username,
 							password: item.password,
-							displayName: item.title || `${item.username} @ ${additionalDomain}`,
+							displayName:
+								item.title || `${item.username} @ ${additionalDomain}`,
 						});
 					}
 				}
@@ -198,7 +198,9 @@ export function useCredentialProviderSync(
 		});
 
 		if (!isAvailable || Platform.OS !== "android") {
-			console.log("[CredentialProviderSync] Sync skipped: not available or not Android");
+			console.log(
+				"[CredentialProviderSync] Sync skipped: not available or not Android",
+			);
 			return null;
 		}
 
@@ -208,7 +210,9 @@ export function useCredentialProviderSync(
 				"Authentication not available. Please set up a PIN, pattern, password, or biometric on your device to use autofill.",
 			);
 			setError(authError);
-			console.warn("[CredentialProviderSync] Sync skipped: no authentication method available");
+			console.warn(
+				"[CredentialProviderSync] Sync skipped: no authentication method available",
+			);
 			return null;
 		}
 
@@ -227,7 +231,9 @@ export function useCredentialProviderSync(
 				return { synced: 0, deleted: 0 };
 			}
 
-			console.log("[CredentialProviderSync] Calling CredentialProvider.syncCredentials...");
+			console.log(
+				"[CredentialProviderSync] Calling CredentialProvider.syncCredentials...",
+			);
 			const result = await CredentialProvider.syncCredentials(credentials);
 			console.log("[CredentialProviderSync] Sync result:", result);
 
@@ -242,7 +248,12 @@ export function useCredentialProviderSync(
 		} finally {
 			setIsSyncing(false);
 		}
-	}, [isAvailable, isBiometricAvailable, extractCredentials, ensureNativeMukSet]);
+	}, [
+		isAvailable,
+		isBiometricAvailable,
+		extractCredentials,
+		ensureNativeMukSet,
+	]);
 
 	/**
 	 * Calculate a hash of items to detect changes
@@ -281,7 +292,9 @@ export function useCredentialProviderSync(
 			isLoadingItems ||
 			Platform.OS !== "android"
 		) {
-			console.log("[CredentialProviderSync] Auto-sync skipped due to conditions");
+			console.log(
+				"[CredentialProviderSync] Auto-sync skipped due to conditions",
+			);
 			return;
 		}
 
@@ -289,7 +302,9 @@ export function useCredentialProviderSync(
 
 		// Skip if items haven't changed
 		if (currentHash === lastItemsHashRef.current) {
-			console.log("[CredentialProviderSync] Items haven't changed, skipping sync");
+			console.log(
+				"[CredentialProviderSync] Items haven't changed, skipping sync",
+			);
 			return;
 		}
 
@@ -303,7 +318,9 @@ export function useCredentialProviderSync(
 
 		// Set debounced sync
 		debounceTimerRef.current = setTimeout(() => {
-			console.log("[CredentialProviderSync] Debounce timer fired, starting sync");
+			console.log(
+				"[CredentialProviderSync] Debounce timer fired, starting sync",
+			);
 			sync();
 		}, debounceMs);
 

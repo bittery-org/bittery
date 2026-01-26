@@ -1,7 +1,7 @@
-import { storage, type VaultKeyData } from "@/lib/storage";
 import { useTRPC } from "@bittery/shared/trpc";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
+import { storage, type VaultKeyData } from "@/lib/storage";
 
 /**
  * Hook that keeps sessionStorage vault keys in sync with the vault.list API data.

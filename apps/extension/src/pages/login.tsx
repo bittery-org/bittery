@@ -1,11 +1,11 @@
 import { normalizeServerUrl } from "@bittery/shared/server-url";
-import { storage } from "../lib/storage";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff } from "lucide-react";
 import { useEffect, useState } from "react";
+import { storage } from "../lib/storage";
 
 export function LoginPage() {
 	const navigate = useNavigate();

@@ -30,7 +30,7 @@ import {
 	verifyServerSession,
 } from "../../src/lib/crypto";
 import { useServerUrl, useTRPCClient } from "../../src/lib/trpc";
-import { storage, type AccountMetadata } from "../../src/services/storage";
+import { type AccountMetadata, storage } from "../../src/services/storage";
 
 const DEFAULT_SERVER_URL =
 	process.env.EXPO_PUBLIC_SERVER_URL || "http://localhost:3000";

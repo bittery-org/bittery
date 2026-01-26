@@ -20,15 +20,15 @@ export {
 	decrypt,
 	decryptData,
 	decryptRaw,
-	encrypt,
-	encryptWithBase64Key,
-	generateEncryptionKey,
 	// SRP-6a helper functions (matching @bittery/crypto/srp-client interface)
 	deriveClientSession,
 	// Key derivation
 	deriveKeys,
 	type EncryptedData,
+	encrypt,
+	encryptWithBase64Key,
 	generateClientEphemeral,
+	generateEncryptionKey,
 	// RSA-4096
 	generateRsaKeyPair,
 	// Secret key

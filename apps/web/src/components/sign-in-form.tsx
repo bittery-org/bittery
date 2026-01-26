@@ -1,6 +1,13 @@
 import { normalizeServerUrl } from "@bittery/shared/server-url";
-import { storage } from "@/lib/storage";
+import { useTRPCClient } from "@bittery/shared/trpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
+import { Button, Card, Input, Label, toast } from "@bittery/ui";
+import { useForm } from "@tanstack/react-form";
+import { useMutation } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
+import { Eye, EyeOff } from "lucide-react";
+import { useEffect, useState } from "react";
+import { storage } from "@/lib/storage";
 import {
 	deriveClientSession,
 	deriveKeys,
@@ -8,13 +15,6 @@ import {
 	validateSecretKeyAsync as validateSecretKey,
 	verifyServerSession,
 } from "@/lib/wasm-crypto";
-import { useTRPCClient } from "@bittery/shared/trpc";
-import { Button, Card, Input, Label, toast } from "@bittery/ui";
-import { useForm } from "@tanstack/react-form";
-import { useMutation } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
-import { Eye, EyeOff } from "lucide-react";
-import { useEffect, useState } from "react";
 
 export default function SignInForm({
 	onSwitchToSignUp,
@@ -157,7 +157,9 @@ export default function SignInForm({
 
 			// Store encrypted private key for RSA decryption of shared vault keys
 			if (finishResult.user.encryptedPrivateKey) {
-				await storage.storeEncryptedPrivateKey(finishResult.user.encryptedPrivateKey);
+				await storage.storeEncryptedPrivateKey(
+					finishResult.user.encryptedPrivateKey,
+				);
 			}
 
 			// Store secret key and encrypted session for quick unlock
@@ -168,7 +170,9 @@ export default function SignInForm({
 				finishResult.user.id,
 			);
 
-			const daysUntil = Math.floor(DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24));
+			const daysUntil = Math.floor(
+				DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24),
+			);
 
 			toast.success(
 				`Signed in successfully! Quick unlock available for ${daysUntil} days.`,

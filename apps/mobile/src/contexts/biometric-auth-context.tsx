@@ -3,21 +3,20 @@
  * Handles app state changes and biometric re-authentication when returning from background
  */
 
+import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import { useRouter } from "expo-router";
 import {
 	createContext,
+	type ReactNode,
 	useCallback,
 	useContext,
 	useEffect,
 	useRef,
 	useState,
-	type ReactNode,
 } from "react";
 import { AppState, type AppStateStatus, Platform } from "react-native";
-
-import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import CredentialProvider from "../../modules/credential-provider";
-import { storage, type BiometricAuthResult } from "../services/storage";
+import { type BiometricAuthResult, storage } from "../services/storage";
 import { useAccount } from "./account-context";
 
 interface BiometricAuthContextValue {
@@ -87,7 +86,9 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 					if (biometricEnabled && canUseBiometric) {
 						// Check if master password re-entry is required
 						const masterPasswordRequired =
-							await storage.isMasterPasswordReentryRequired(activeAccount.email);
+							await storage.isMasterPasswordReentryRequired(
+								activeAccount.email,
+							);
 
 						if (masterPasswordRequired) {
 							setRequiresMasterPassword(true);
@@ -128,55 +129,56 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 	}, [handleAppStateChange]);
 
 	// Trigger biometric authentication
-	const triggerBiometricAuth = useCallback(async (): Promise<BiometricAuthResult> => {
-		if (!activeAccount) {
-			const result: BiometricAuthResult = {
-				success: false,
-				error: "unknown",
-				message: "No active account",
-			};
-			setLastAuthResult(result);
-			return result;
-		}
-
-		const result = await storage.authenticateWithBiometricEnhanced(
-			"Unlock Bittery",
-			activeAccount.email,
-		);
-
-		setLastAuthResult(result);
-
-		if (result.success) {
-			// Restore MUK to memory after successful biometric auth
-			// This ensures decryption queries can run immediately without polling
-			try {
-				const muk = await storage.decryptStoredMasterUnlockKeyPublic(
-					activeAccount.email,
-					true, // Skip biometric since we just authenticated
-				);
-				if (muk) {
-					// Store in React Native memory cache
-					await storage.storeMasterUnlockKey(muk, activeAccount.email);
-
-					// Also set in native CredentialProvider for autofill decryption
-					if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-						const mukBase64 = arrayBufferToBase64(muk);
-						CredentialProvider.setMasterUnlockKey(mukBase64);
-					}
-				}
-			} catch (error) {
-				console.error("Failed to restore MUK after biometric auth:", error);
+	const triggerBiometricAuth =
+		useCallback(async (): Promise<BiometricAuthResult> => {
+			if (!activeAccount) {
+				const result: BiometricAuthResult = {
+					success: false,
+					error: "unknown",
+					message: "No active account",
+				};
+				setLastAuthResult(result);
+				return result;
 			}
 
-			setRequiresReauth(false);
-			setShowAuthModal(false);
-			setRequiresMasterPassword(false);
-		} else if (result.error === "master_password_required") {
-			setRequiresMasterPassword(true);
-		}
+			const result = await storage.authenticateWithBiometricEnhanced(
+				"Unlock Bittery",
+				activeAccount.email,
+			);
 
-		return result;
-	}, [activeAccount]);
+			setLastAuthResult(result);
+
+			if (result.success) {
+				// Restore MUK to memory after successful biometric auth
+				// This ensures decryption queries can run immediately without polling
+				try {
+					const muk = await storage.decryptStoredMasterUnlockKeyPublic(
+						activeAccount.email,
+						true, // Skip biometric since we just authenticated
+					);
+					if (muk) {
+						// Store in React Native memory cache
+						await storage.storeMasterUnlockKey(muk, activeAccount.email);
+
+						// Also set in native CredentialProvider for autofill decryption
+						if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
+							const mukBase64 = arrayBufferToBase64(muk);
+							CredentialProvider.setMasterUnlockKey(mukBase64);
+						}
+					}
+				} catch (error) {
+					console.error("Failed to restore MUK after biometric auth:", error);
+				}
+
+				setRequiresReauth(false);
+				setShowAuthModal(false);
+				setRequiresMasterPassword(false);
+			} else if (result.error === "master_password_required") {
+				setRequiresMasterPassword(true);
+			}
+
+			return result;
+		}, [activeAccount]);
 
 	// Check if re-auth is needed
 	const checkAndRequireAuth = useCallback(async (): Promise<boolean> => {

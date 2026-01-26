@@ -1,8 +1,8 @@
-import { encrypt, generateEncryptionKey } from "../../lib/tauri-crypto";
-import { storage } from "@/lib/storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { toast } from "@bittery/ui";
 import { useNavigate } from "@tanstack/react-router";
+import { storage } from "@/lib/storage";
+import { encrypt, generateEncryptionKey } from "../../lib/tauri-crypto";
 import { refreshVaultKeys } from "../../lib/vault-utils";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 

@@ -6,6 +6,9 @@
  */
 
 import init, {
+	JsEncryptedData,
+	type JsSession,
+	JsSrpClient,
 	decrypt as wasmDecrypt,
 	deriveKeys as wasmDeriveKeys,
 	encrypt as wasmEncrypt,
@@ -13,14 +16,11 @@ import init, {
 	generateRSAKeyPair as wasmGenerateRSAKeyPair,
 	generateSecretKey as wasmGenerateSecretKey,
 	getSecretKeyHint as wasmGetSecretKeyHint,
-	JsEncryptedData,
-	JsSrpClient,
+	performKeyRotation as wasmPerformKeyRotation,
 	rsaDecrypt as wasmRsaDecrypt,
 	rsaEncrypt as wasmRsaEncrypt,
-	validateSecretKey as wasmValidateSecretKey,
-	performKeyRotation as wasmPerformKeyRotation,
 	validateRotationData as wasmValidateRotationData,
-	type JsSession,
+	validateSecretKey as wasmValidateSecretKey,
 } from "@bittery/crypto-wasm";
 import type {
 	DerivedKeys,
@@ -127,8 +127,7 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
  * Exported for use in share dialogs and other places
  */
 export function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
-	const bytes =
-		buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+	const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
 	return uint8ArrayToBase64(bytes);
 }
 
@@ -303,7 +302,9 @@ export function getSecretKeyHint(secretKey: string): string {
 /**
  * Get the hint (first segment) from a secret key (async version for compatibility)
  */
-export async function getSecretKeyHintAsync(secretKey: string): Promise<string> {
+export async function getSecretKeyHintAsync(
+	secretKey: string,
+): Promise<string> {
 	await autoInit();
 	return wasmGetSecretKeyHint(secretKey);
 }
@@ -421,7 +422,11 @@ export async function verifyServerSession(
 		);
 	}
 
-	client.verifySession(clientPublicEphemeral, cachedSession, serverSessionProof);
+	client.verifySession(
+		clientPublicEphemeral,
+		cachedSession,
+		serverSessionProof,
+	);
 
 	// Clean up the cached session after successful verification
 	sessionCache.delete(clientSession.proof);
