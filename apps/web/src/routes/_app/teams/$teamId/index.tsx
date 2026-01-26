@@ -115,11 +115,7 @@ function TeamDetailPage() {
 							{membersQuery.isLoading ? (
 								<Skeleton className="h-32" />
 							) : (
-								<MemberList
-									teamId={teamId}
-									members={membersQuery.data || []}
-									userRole={team.userRole}
-								/>
+								<MemberList members={membersQuery.data || []} />
 							)}
 						</CardContent>
 					</Card>

@@ -1,37 +1,16 @@
-import { useTRPCClient } from "@bittery/shared/trpc";
 import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-	AlertDialogTrigger,
 	Avatar,
 	AvatarFallback,
 	Badge,
-	Button,
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
 	Table,
 	TableBody,
 	TableCell,
 	TableHead,
 	TableHeader,
 	TableRow,
-	toast,
 } from "@bittery/ui";
-import { useMutation } from "@tanstack/react-query";
-import { Trash2 } from "lucide-react";
-import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface Member {
-	id: string;
 	userId: string;
 	name: string;
 	email: string;
@@ -40,50 +19,10 @@ interface Member {
 }
 
 interface MemberListProps {
-	teamId: string;
 	members: Member[];
-	userRole: string;
 }
 
-export function MemberList({ teamId, members, userRole }: MemberListProps) {
-	const trpcClient = useTRPCClient();
-	const invalidator = useQueryInvalidator();
-	const canManage = userRole === "owner" || userRole === "admin";
-
-	const updateRoleMutation = useMutation({
-		mutationFn: (input: {
-			teamId: string;
-			userId: string;
-			role: "admin" | "member";
-		}) => trpcClient.team.members.updateRole.mutate(input),
-		onSuccess: async () => {
-			toast.success("Role updated");
-			await invalidator.invalidateTeam();
-		},
-		onError: (error: Error) => {
-			toast.error(error.message);
-		},
-	});
-
-	const removeMutation = useMutation({
-		mutationFn: (input: { teamId: string; userId: string }) =>
-			trpcClient.team.members.remove.mutate(input),
-		onSuccess: async () => {
-			toast.success("Member removed");
-			await invalidator.invalidateTeam();
-		},
-		onError: (error: Error) => {
-			toast.error(error.message);
-		},
-	});
-
-	const handleRoleChange = (userId: string, newRole: "admin" | "member") => {
-		updateRoleMutation.mutate({ teamId, userId, role: newRole });
-	};
-
-	const handleRemove = (userId: string) => {
-		removeMutation.mutate({ teamId, userId });
-	};
+export function MemberList({ members }: MemberListProps) {
 
 	const getInitials = (name: string) =>
 		name
@@ -100,12 +39,11 @@ export function MemberList({ teamId, members, userRole }: MemberListProps) {
 					<TableHead>Member</TableHead>
 					<TableHead>Role</TableHead>
 					<TableHead>Joined</TableHead>
-					{canManage && <TableHead className="w-[100px]">Actions</TableHead>}
 				</TableRow>
 			</TableHeader>
 			<TableBody>
 				{members.map((member) => (
-					<TableRow key={member.id}>
+					<TableRow key={member.userId}>
 						<TableCell>
 							<div className="flex items-center gap-3">
 								<Avatar className="h-8 w-8">
@@ -122,69 +60,17 @@ export function MemberList({ teamId, members, userRole }: MemberListProps) {
 							</div>
 						</TableCell>
 						<TableCell>
-							{canManage && member.role !== "owner" ? (
-								<Select
-									value={member.role}
-									onValueChange={(value: "admin" | "member") =>
-										handleRoleChange(member.userId, value)
-									}
-									disabled={
-										updateRoleMutation.isPending ||
-										(userRole === "admin" && member.role === "admin")
-									}
-								>
-									<SelectTrigger className="w-[100px]">
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="admin">Admin</SelectItem>
-										<SelectItem value="member">Member</SelectItem>
-									</SelectContent>
-								</Select>
-							) : (
-								<Badge
-									variant={member.role === "owner" ? "default" : "secondary"}
-								>
-									{member.role}
-								</Badge>
-							)}
+							<Badge
+								variant={member.role === "owner" ? "default" : "secondary"}
+							>
+								{member.role}
+							</Badge>
 						</TableCell>
 						<TableCell className="text-muted-foreground">
 							{member.joinedAt
 								? new Date(member.joinedAt).toLocaleDateString()
 								: "—"}
 						</TableCell>
-						{canManage && (
-							<TableCell>
-								{member.role !== "owner" &&
-									!(userRole === "admin" && member.role === "admin") && (
-										<AlertDialog>
-											<AlertDialogTrigger asChild>
-												<Button variant="ghost" size="icon">
-													<Trash2 className="h-4 w-4 text-destructive" />
-												</Button>
-											</AlertDialogTrigger>
-											<AlertDialogContent>
-												<AlertDialogHeader>
-													<AlertDialogTitle>Remove Member</AlertDialogTitle>
-													<AlertDialogDescription>
-														Are you sure you want to remove {member.name} from
-														this team? They will lose access to all team vaults.
-													</AlertDialogDescription>
-												</AlertDialogHeader>
-												<AlertDialogFooter>
-													<AlertDialogCancel>Cancel</AlertDialogCancel>
-													<AlertDialogAction
-														onClick={() => handleRemove(member.userId)}
-													>
-														Remove
-													</AlertDialogAction>
-												</AlertDialogFooter>
-											</AlertDialogContent>
-										</AlertDialog>
-									)}
-							</TableCell>
-						)}
 					</TableRow>
 				))}
 			</TableBody>

@@ -19,7 +19,7 @@ function TeamsPage() {
 				<div>
 					<h1 className="font-bold text-3xl tracking-tight">Teams</h1>
 					<p className="text-muted-foreground">
-						Manage your teams and collaborate with others.
+						Manage your team and collaborate with others.
 					</p>
 				</div>
 				<CreateTeamDialog />
@@ -27,28 +27,24 @@ function TeamsPage() {
 
 			{teamsQuery.isLoading ? (
 				<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-					{[1, 2, 3].map((i) => (
-						<Skeleton key={i} className="h-32" />
-					))}
+					<Skeleton className="h-32" />
 				</div>
-			) : teamsQuery.data?.length === 0 ? (
+			) : !teamsQuery.data ? (
 				<div className="rounded-lg border border-dashed p-8 text-center">
-					<h3 className="font-medium text-lg">No teams yet</h3>
+					<h3 className="font-medium text-lg">No team yet</h3>
 					<p className="mt-1 text-muted-foreground text-sm">
-						Create a team to start collaborating with others.
+						You don't have a team. This should not happen.
 					</p>
 				</div>
 			) : (
 				<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-					{teamsQuery.data?.map((team) => (
-						<TeamCard
-							key={team.id}
-							id={team.id}
-							name={team.name}
-							role={team.role}
-							memberCount={team.memberCount}
-						/>
-					))}
+					<TeamCard
+						key={teamsQuery.data.id}
+						id={teamsQuery.data.id}
+						name={teamsQuery.data.name}
+						role={teamsQuery.data.role}
+						memberCount={teamsQuery.data.memberCount}
+					/>
 				</div>
 			)}
 		</div>
