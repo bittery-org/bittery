@@ -1,4 +1,8 @@
-import { useTRPCClient } from "@bittery/shared/trpc";
+import {
+	useQuickUnlock,
+	useBiometricUnlock,
+	useSessionState,
+} from "@bittery/hooks";
 import {
 	Button,
 	Card,
@@ -8,19 +12,12 @@ import {
 	VaultIcon,
 	type VaultIconState,
 } from "@bittery/ui";
-import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ChevronDown, Fingerprint } from "lucide-react";
+import { ChevronDown, Fingerprint, KeyRound } from "lucide-react";
 import { useState } from "react";
 import { type AccountMetadata, storage } from "@/lib/storage";
 import { AccountAvatar } from "../components/account-avatar";
 import { useAccount } from "../contexts/account-context";
-import {
-	deriveClientSession,
-	deriveKeys,
-	generateClientEphemeral,
-	verifyServerSession,
-} from "../lib/tauri-crypto";
 
 interface UnlockSearchParams {
 	email?: string;
@@ -36,12 +33,10 @@ export const Route = createFileRoute("/unlock")({
 });
 
 export function UnlockPage() {
-	const trpcClient = useTRPCClient();
 	const navigate = useNavigate();
 	const { email: emailParam } = Route.useSearch();
 	const { allAccounts, activeAccount, refreshAccounts } = useAccount();
 	const [password, setPassword] = useState("");
-	const [loading, setLoading] = useState(false);
 	const [showAccountPicker, setShowAccountPicker] = useState(false);
 	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
 
@@ -51,31 +46,13 @@ export function UnlockPage() {
 		(a) => a.email.toLowerCase() === targetEmail?.toLowerCase(),
 	);
 
-	const { data: sessionState } = useQuery({
-		queryKey: ["biometry-status", targetEmail],
-		queryFn: async () => {
-			if (!targetEmail) return null;
+	// Get session state for the target account
+	const { data: sessionState } = useSessionState(targetEmail);
 
-			const available = await storage.isBiometricAvailable();
-			const storedData = await storage.getStoredSessionData(targetEmail);
-
-			return {
-				available,
-				enabled: storedData?.biometricEnabled ?? false,
-				data: storedData,
-			};
-		},
-		enabled: !!targetEmail,
-	});
-
-	const handleBiometricUnlock = async () => {
-		if (!targetEmail) return;
-
-		setLoading(true);
-		setVaultState("unlocking");
-		try {
-			const success = await storage.unlockWithBiometric(targetEmail);
-			if (success) {
+	// Biometric unlock hook
+	const biometricUnlock = useBiometricUnlock({
+		onSuccess: async () => {
+			if (targetEmail) {
 				// Restore auth token and vault keys
 				const token = await storage.getAuthToken(targetEmail);
 				const vaultKeys = await storage.getVaultKeys(targetEmail);
@@ -96,121 +73,29 @@ export function UnlockPage() {
 					await storage.clearAllStoredData(targetEmail);
 					navigate({ to: "/login" });
 				}
-			} else {
-				setVaultState("locked");
-				toast.error("Biometric authentication failed");
 			}
-		} catch (error) {
+		},
+		onError: (error) => {
 			console.error("Biometric unlock error:", error);
 			setVaultState("locked");
-			toast.error("Biometric unlock failed");
-		} finally {
-			setLoading(false);
-		}
-	};
+			toast.error(error.message || "Biometric unlock failed");
+		},
+	});
 
-	const handlePasswordUnlock = async (e: React.FormEvent) => {
-		e.preventDefault();
-		if (!targetEmail) return;
-
-		setLoading(true);
-		setVaultState("unlocking");
-
-		try {
-			const secretKey = await storage.getStoredSecretKey(targetEmail);
-			if (!secretKey) {
-				toast.error("Secret key not found. Please log in again.");
-				await storage.clearAllStoredData(targetEmail);
-				navigate({ to: "/login" });
-				return;
-			}
-
-			if (!sessionState?.data) {
-				toast.error("Session data not found. Please log in again.");
-				await storage.clearAllStoredData(targetEmail);
-				navigate({ to: "/login" });
-				return;
-			}
-
-			// 1. Derive keys from password + secret key
-			const { authKey, masterUnlockKey } = await deriveKeys(
-				password,
-				secretKey,
-				targetEmail,
-			);
-
-			// Convert authKey to password string for SRP
-			const srpPassword = new TextDecoder().decode(authKey);
-
-			// 2. Generate client ephemeral key pair
-			const clientEphemeral = await generateClientEphemeral();
-
-			// 3. Send client public key to server and get challenge
-			const startResult = await trpcClient.auth.startLogin.mutate({
-				email: targetEmail,
-				clientPublicKey: clientEphemeral.publicKey,
-			});
-
-			// 4. Derive session and compute proof
-			const clientSession = await deriveClientSession(
-				clientEphemeral.secret,
-				{
-					salt: startResult.salt,
-					serverPublicKey: startResult.serverPublicKey,
-				},
-				srpPassword,
-			);
-
-			// 5. Send proof to server and get session
-			const finishResult = await trpcClient.auth.finishLogin.mutate({
-				userId: startResult.userId,
-				serverSecret: startResult.serverSecret,
-				clientPublicKey: clientEphemeral.publicKey,
-				clientProof: clientSession.proof,
-			});
-
-			if (!finishResult.serverProof) {
-				toast.error("Unlock failed");
-				setLoading(false);
-				return;
-			}
-
-			// 6. Verify server's proof (completes mutual authentication)
-			await verifyServerSession(
-				clientEphemeral.publicKey,
-				clientSession,
-				finishResult.serverProof,
-			);
-
-			// Update session with fresh data
-			await storage.storeAuthToken(finishResult.token, targetEmail);
-			await storage.storeVaultKeys(finishResult.vaultKeys, targetEmail);
-			// Store encrypted private key for RSA decryption of shared vault keys
-			if (finishResult.user.encryptedPrivateKey) {
-				await storage.storeEncryptedPrivateKey(
-					finishResult.user.encryptedPrivateKey,
-					targetEmail,
-				);
-			}
-			await storage.storeSessionData(
-				masterUnlockKey,
-				targetEmail,
-				finishResult.user.id,
-			);
-			await storage.storeMasterUnlockKey(masterUnlockKey, targetEmail);
-
+	// Quick unlock (password) hook
+	const quickUnlock = useQuickUnlock({
+		onSuccess: async (result) => {
 			// Update account metadata with latest team name from server
 			if (targetAccount) {
 				const updatedMetadata: AccountMetadata = {
 					...targetAccount,
-					teamName: finishResult.user.teamName,
+					teamName: result.user.teamName,
 					lastActiveAt: Date.now(),
 				};
 				await storage.addAccountToList(updatedMetadata);
 			}
 
-			// Set as active account
-			await storage.setActiveAccount(targetEmail);
+			// Refresh account context
 			await refreshAccounts();
 
 			setVaultState("unlocked");
@@ -219,13 +104,50 @@ export function UnlockPage() {
 			setTimeout(() => {
 				navigate({ to: "/vault" });
 			}, 600);
-		} catch (error) {
+		},
+		onError: (error) => {
 			console.error("Unlock error:", error);
 			setVaultState("locked");
 			toast.error(error instanceof Error ? error.message : "Unlock failed");
-		} finally {
-			setLoading(false);
+		},
+	});
+
+	const handleBiometricUnlock = async () => {
+		if (!targetEmail) return;
+
+		setVaultState("unlocking");
+		biometricUnlock.mutate({ email: targetEmail });
+	};
+
+	const handlePasswordUnlock = async (e: React.FormEvent) => {
+		e.preventDefault();
+		if (!targetEmail) return;
+
+		setVaultState("unlocking");
+
+		// Check for stored secret key
+		const secretKey = await storage.getStoredSecretKey(targetEmail);
+		if (!secretKey) {
+			setVaultState("locked");
+			toast.error("Secret key not found. Please log in again.");
+			await storage.clearAllStoredData(targetEmail);
+			navigate({ to: "/login" });
+			return;
 		}
+
+		// Check for session data
+		if (!sessionState?.isValid && !sessionState?.canQuickUnlock) {
+			setVaultState("locked");
+			toast.error("Session data not found. Please log in again.");
+			await storage.clearAllStoredData(targetEmail);
+			navigate({ to: "/login" });
+			return;
+		}
+
+		quickUnlock.mutate({
+			email: targetEmail,
+			password,
+		});
 	};
 
 	const handleSwitchAccount = async (email: string) => {
@@ -238,6 +160,10 @@ export function UnlockPage() {
 		navigate({ to: "/login" });
 		return null;
 	}
+
+	const loading = biometricUnlock.isPending || quickUnlock.isPending;
+	const requiresPasswordReentry = sessionState?.requiresPasswordReentry ?? false;
+	const canUseBiometric = sessionState?.canBiometricUnlock && !requiresPasswordReentry;
 
 	return (
 		<div className="flex h-full items-center justify-center bg-gray-50 p-4">
@@ -293,7 +219,21 @@ export function UnlockPage() {
 					)}
 				</div>
 
-				{sessionState?.available && sessionState?.enabled && (
+				{/* Master Password Required Notice */}
+				{requiresPasswordReentry && (
+					<div className="mb-4 flex items-start gap-3 rounded-lg bg-amber-50 p-4 border border-amber-200">
+						<KeyRound className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+						<div>
+							<p className="font-medium text-amber-800">Password Required</p>
+							<p className="text-amber-700 text-sm">
+								For your security, please enter your master password. This is
+								required every 30 days.
+							</p>
+						</div>
+					</div>
+				)}
+
+				{canUseBiometric && (
 					<div className="mb-4">
 						<Button
 							type="button"

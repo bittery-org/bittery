@@ -20,12 +20,19 @@ import { useSyncContext } from "./sync-provider";
 
 /**
  * Crypto adapter that satisfies ICrypto interface
- * Tauri crypto module already exports decrypt, encrypt, generateEncryptionKey
+ * Tauri crypto module exports all required methods for encryption and SRP authentication
  */
 const crypto: ICrypto = {
+	// Core encryption methods
 	decrypt: tauriCrypto.decrypt,
 	encrypt: tauriCrypto.encrypt,
 	generateEncryptionKey: tauriCrypto.generateEncryptionKey,
+	// SRP authentication methods
+	deriveKeys: tauriCrypto.deriveKeys,
+	generateClientEphemeral: tauriCrypto.generateClientEphemeral,
+	deriveClientSession: tauriCrypto.deriveClientSession,
+	verifyServerSession: tauriCrypto.verifyServerSession,
+	validateSecretKey: tauriCrypto.validateSecretKey,
 };
 
 /**

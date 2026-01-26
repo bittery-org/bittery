@@ -3,7 +3,13 @@
  * Common interface for all platform-specific storage implementations
  */
 
-import type { AccountMetadata, Platform, VaultKeyData } from "./types";
+import type {
+	AccountMetadata,
+	BiometricAuthResult,
+	Platform,
+	StoredSessionData,
+	VaultKeyData,
+} from "./types";
 
 /**
  * IStorageAdapter defines the contract for platform-specific storage implementations.
@@ -273,4 +279,90 @@ export interface IStorageAdapter {
 	 * Requires: biometric hardware + enabled by user + valid session
 	 */
 	canBiometricUnlock?(email?: string): Promise<boolean>;
+
+	// ============================================================================
+	// Extended Session Management (unified interface for all platforms)
+	// ============================================================================
+
+	/**
+	 * Get stored session data (for checking expiry, biometric status, etc.)
+	 * Returns session metadata without decrypting the Master Unlock Key.
+	 */
+	getStoredSessionData?(email?: string): Promise<StoredSessionData | null>;
+
+	/**
+	 * Check if secret key is stored for an account.
+	 */
+	hasStoredSecretKey?(email?: string): Promise<boolean>;
+
+	/**
+	 * Lock all accounts (clear MUK from memory, require re-auth).
+	 * Clears all in-memory caches and biometric auth timestamps.
+	 */
+	lockAllAccounts?(): Promise<void>;
+
+	/**
+	 * Get metadata for a specific account.
+	 */
+	getAccountMetadata?(email: string): Promise<AccountMetadata | null>;
+
+	// ============================================================================
+	// Extended Biometric (optional, check supportsBiometric first)
+	// ============================================================================
+
+	/**
+	 * Get detailed biometric availability info.
+	 * Returns whether hardware exists and whether biometrics are enrolled.
+	 */
+	getBiometricAvailabilityDetails?(): Promise<{
+		hasHardware: boolean;
+		isEnrolled: boolean;
+	}>;
+
+	/**
+	 * Get biometric type available on device.
+	 * @returns "Face ID" | "Touch ID" | "Fingerprint" | null
+	 */
+	getBiometricType?(): Promise<string | null>;
+
+	/**
+	 * Unlock with biometric (authenticates + restores MUK to memory).
+	 * Combines biometric authentication with MUK restoration in one operation.
+	 */
+	unlockWithBiometric?(email?: string): Promise<boolean>;
+
+	/**
+	 * Enhanced biometric auth with detailed error handling.
+	 * Returns structured result with specific error types for UI handling.
+	 */
+	authenticateWithBiometricEnhanced?(
+		reason?: string,
+		email?: string,
+	): Promise<BiometricAuthResult>;
+
+	// ============================================================================
+	// Mobile-Specific (optional, check platform first)
+	// ============================================================================
+
+	/**
+	 * Check if master password re-entry is required (30-day security policy).
+	 * Mobile-specific security feature.
+	 */
+	isMasterPasswordReentryRequired?(email?: string): Promise<boolean>;
+
+	/**
+	 * Update last master password entry timestamp.
+	 * Called after user successfully authenticates with password.
+	 */
+	updateLastMasterPasswordEntry?(email?: string): Promise<void>;
+
+	/**
+	 * Decrypt stored MUK (public wrapper for unlock flows).
+	 * Returns decrypted Master Unlock Key or null if unavailable.
+	 * @param skipBiometric - If true, skip biometric prompt even if enabled
+	 */
+	decryptStoredMasterUnlockKey?(
+		email?: string,
+		skipBiometric?: boolean,
+	): Promise<Uint8Array | null>;
 }

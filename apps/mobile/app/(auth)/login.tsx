@@ -1,4 +1,5 @@
 import { normalizeServerUrl } from "@bittery/shared/server-url";
+import { useLogin } from "@bittery/hooks";
 import { useRouter } from "expo-router";
 import {
 	Eye,
@@ -22,14 +23,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAccount } from "../../src/contexts/account-context";
-import {
-	deriveClientSession,
-	deriveKeys,
-	generateClientEphemeral,
-	validateSecretKey,
-	verifyServerSession,
-} from "../../src/lib/crypto";
-import { useServerUrl, useTRPCClient } from "../../src/lib/trpc";
+import { useServerUrl } from "../../src/lib/trpc";
 import { type AccountMetadata, storage } from "../../src/services/storage";
 
 const DEFAULT_SERVER_URL =
@@ -37,7 +31,6 @@ const DEFAULT_SERVER_URL =
 
 export default function LoginScreen() {
 	const router = useRouter();
-	const trpcClient = useTRPCClient();
 	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
 	const { refreshAccounts } = useAccount();
 
@@ -46,7 +39,6 @@ export default function LoginScreen() {
 	const [password, setPassword] = useState("");
 	const [secretKey, setSecretKey] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
-	const [loading, setLoading] = useState(false);
 	const [enableBiometric, setEnableBiometric] = useState(true);
 	const [biometricAvailable, setBiometricAvailable] = useState(false);
 	const [biometricType, setBiometricType] = useState<string | null>(null);
@@ -75,14 +67,51 @@ export default function LoginScreen() {
 		checkBiometric();
 	}, []);
 
+	// Use the shared login hook
+	const loginMutation = useLogin({
+		enableBiometric: enableBiometric && biometricAvailable,
+		onSuccess: async (result, input) => {
+			const normalizedEmail = input.email.toLowerCase();
+			const normalizedServerUrl = normalizeServerUrl(serverUrl);
+
+			// Store server URL per-account (mobile-specific)
+			if (normalizedServerUrl) {
+				await storage.storeServerUrl(normalizedServerUrl, normalizedEmail);
+			}
+
+			// Create account metadata (mobile-specific multi-account support)
+			const secretKeyHint = `${input.secretKey.substring(0, 5)}...`;
+			const accountMetadata: AccountMetadata = {
+				email: normalizedEmail,
+				userId: result.user.id,
+				name: result.user.name || normalizedEmail.split("@")[0],
+				teamName: result.user.teamName,
+				secretKeyHint,
+				addedAt: Date.now(),
+				lastActiveAt: Date.now(),
+				biometricEnabled: enableBiometric && biometricAvailable,
+			};
+
+			// Add to accounts list
+			await storage.addAccountToList(accountMetadata);
+
+			// Refresh account context
+			await refreshAccounts();
+
+			// Navigate to vault
+			router.replace("/(vault)");
+		},
+		onError: (error) => {
+			Alert.alert(
+				"Error",
+				error instanceof Error ? error.message : "Login failed",
+			);
+		},
+	});
+
 	const handleLogin = async () => {
 		if (!email.trim() || !password.trim() || !secretKey.trim()) {
 			Alert.alert("Error", "Please fill in all fields");
-			return;
-		}
-
-		if (!validateSecretKey(secretKey)) {
-			Alert.alert("Error", "Invalid Secret Key format");
 			return;
 		}
 
@@ -92,122 +121,18 @@ export default function LoginScreen() {
 			return;
 		}
 
-		setLoading(true);
+		// Update global server URL
+		setGlobalServerUrl(normalizedServerUrl);
 
 		// Allow UI to re-render and show loading state before heavy crypto work
 		await new Promise((resolve) => setTimeout(resolve, 50));
 
-		try {
-			// Update global server URL
-			setGlobalServerUrl(normalizedServerUrl);
-
-			// 1. Derive keys from password + secret key
-			const { authKey, masterUnlockKey } = await deriveKeys(
-				password,
-				secretKey,
-				email,
-			);
-
-			// Convert authKey to password string for SRP
-			const srpPassword = new TextDecoder().decode(authKey);
-
-			// 2. Generate client ephemeral key pair
-			const clientEphemeral = generateClientEphemeral();
-
-			// 3. Send client public key to server and get challenge
-			const startResult = await trpcClient.auth.startLogin.mutate({
-				email,
-				clientPublicKey: clientEphemeral.publicKey,
-			});
-
-			// 4. Derive session and compute proof
-			const clientSession = await deriveClientSession(
-				clientEphemeral.secret,
-				{
-					salt: startResult.salt,
-					serverPublicKey: startResult.serverPublicKey,
-				},
-				srpPassword,
-			);
-
-			// 5. Send proof to server and get session
-			const finishResult = await trpcClient.auth.finishLogin.mutate({
-				userId: startResult.userId,
-				serverSecret: startResult.serverSecret,
-				clientPublicKey: clientEphemeral.publicKey,
-				clientProof: clientSession.proof,
-			});
-
-			if (!finishResult.serverProof) {
-				Alert.alert("Error", "Login failed - invalid server proof");
-				return;
-			}
-
-			// 6. Verify server's proof (completes mutual authentication)
-			await verifyServerSession(
-				clientEphemeral.publicKey,
-				clientSession,
-				finishResult.serverProof,
-			);
-
-			const normalizedEmail = email.toLowerCase();
-
-			// Enable biometric if requested
-			if (enableBiometric && biometricAvailable) {
-				await storage.enableBiometric(normalizedEmail);
-			}
-
-			// Store auth data
-			await storage.storeAuthToken(finishResult.token, normalizedEmail);
-			await storage.storeVaultKeys(finishResult.vaultKeys, normalizedEmail);
-
-			// Store encrypted private key for RSA decryption
-			if (finishResult.user.encryptedPrivateKey) {
-				await storage.storeEncryptedPrivateKey(
-					finishResult.user.encryptedPrivateKey,
-					normalizedEmail,
-				);
-			}
-
-			await storage.storeSecretKey(secretKey, normalizedEmail);
-			await storage.storeSessionData(
-				masterUnlockKey,
-				normalizedEmail,
-				finishResult.user.id,
-			);
-			await storage.storeMasterUnlockKey(masterUnlockKey, normalizedEmail);
-			await storage.storeServerUrl(normalizedServerUrl, normalizedEmail);
-
-			// Create account metadata
-			const secretKeyHint = `${secretKey.substring(0, 5)}...`;
-			const accountMetadata: AccountMetadata = {
-				email: normalizedEmail,
-				userId: finishResult.user.id,
-				name: finishResult.user.name || normalizedEmail.split("@")[0],
-				teamName: finishResult.user.teamName,
-				secretKeyHint,
-				addedAt: Date.now(),
-				lastActiveAt: Date.now(),
-				biometricEnabled: enableBiometric && biometricAvailable,
-			};
-
-			// Add to accounts list and set as active
-			await storage.addAccountToList(accountMetadata);
-			await storage.setActiveAccount(normalizedEmail);
-
-			// Refresh account context
-			await refreshAccounts();
-
-			// Navigate to vault
-			router.replace("/(vault)");
-		} catch (error) {
-			Alert.alert(
-				"Error",
-				error instanceof Error ? error.message : "Login failed",
-			);
-		} finally {
-			setLoading(false);
-		}
+		await loginMutation.mutateAsync({
+			email,
+			password,
+			secretKey,
+			enableBiometric: enableBiometric && biometricAvailable,
+		});
 	};
 
 	return (
@@ -374,13 +299,13 @@ export default function LoginScreen() {
 							{/* Login Button */}
 							<TouchableOpacity
 								onPress={handleLogin}
-								disabled={loading}
+								disabled={loginMutation.isPending}
 								className={`mt-4 rounded-lg py-4 ${
-									loading ? "bg-primary/50" : "bg-primary"
+									loginMutation.isPending ? "bg-primary/50" : "bg-primary"
 								}`}
 							>
 								<Text className="text-center font-semibold text-primary-foreground">
-									{loading ? "Signing in..." : "Sign In"}
+									{loginMutation.isPending ? "Signing in..." : "Sign In"}
 								</Text>
 							</TouchableOpacity>
 

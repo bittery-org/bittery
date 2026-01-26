@@ -5,7 +5,14 @@ import { defineConfig } from "vite";
 import manifest from "./manifest.config.js";
 
 export default defineConfig({
-	plugins: [react(), tailwindcss(), crx({ manifest })],
+	plugins: [
+		react({
+			// Exclude service worker from React Refresh (no window/DOM APIs available)
+			exclude: [/src\/background\//],
+		}),
+		tailwindcss(),
+		crx({ manifest }),
+	],
 	resolve: {
 		alias: {
 			"@": "/src",

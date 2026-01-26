@@ -1,15 +1,18 @@
 /**
  * Authentication Handlers
  * Handles LOGIN, QUICK_UNLOCK, CHECK_AUTH, and related authentication messages
+ *
+ * Uses shared auth utilities from @bittery/hooks for SRP login/unlock logic.
  */
 
-import { storage } from "../lib/storage";
 import {
-	deriveClientSession,
-	deriveKeys,
-	generateClientEphemeral,
-	verifyServerSession,
-} from "../lib/wasm-crypto";
+	performSRPLogin,
+	performSRPUnlock,
+	storeLoginSession,
+	storeUnlockSession,
+} from "@bittery/hooks/auth";
+import { cryptoAdapter } from "../lib/crypto-adapter";
+import { storage } from "../lib/storage";
 import {
 	isUnlocked,
 	lock,
@@ -29,65 +32,17 @@ export async function handleLogin(payload: {
 }): Promise<MessageResponse> {
 	const { email, password, secretKey } = payload;
 
-	// 1. Derive keys from password + secret key
-	const { authKey, masterUnlockKey: muk } = await deriveKeys(
-		password,
-		secretKey,
-		email,
+	// Perform SRP login using shared utility
+	const result = await performSRPLogin(
+		{ email, password, secretKey },
+		{ crypto: cryptoAdapter, trpcClient, storage },
 	);
 
-	// Convert authKey to password string for SRP
-	const srpPassword = new TextDecoder().decode(authKey);
+	// Store session data using shared utility
+	await storeLoginSession(result, secretKey, storage, email);
 
-	// 2. Generate client ephemeral key pair
-	const clientEphemeral = generateClientEphemeral();
-
-	// 3. Send client public key to server and get challenge
-	const startResult = await trpcClient.auth.startLogin.mutate({
-		email,
-		clientPublicKey: clientEphemeral.publicKey,
-	});
-
-	// 4. Derive session and compute proof
-	const clientSession = await deriveClientSession(
-		clientEphemeral.secret,
-		{
-			salt: startResult.salt,
-			serverPublicKey: startResult.serverPublicKey,
-		},
-		srpPassword,
-	);
-
-	// 5. Send proof to server and get session
-	const finishResult = await trpcClient.auth.finishLogin.mutate({
-		userId: startResult.userId,
-		serverSecret: startResult.serverSecret,
-		clientPublicKey: clientEphemeral.publicKey,
-		clientProof: clientSession.proof,
-	});
-
-	// 6. Verify server's proof (completes mutual authentication)
-	await verifyServerSession(
-		clientEphemeral.publicKey,
-		clientSession,
-		finishResult.serverProof,
-	);
-
-	// Store session data
-	await storage.storeAuthToken(finishResult.token);
-	await storage.storeVaultKeys(finishResult.vaultKeys);
-	// Store encrypted private key for RSA decryption of shared vault keys
-	if (finishResult.user.encryptedPrivateKey) {
-		await storage.storeEncryptedPrivateKey(
-			finishResult.user.encryptedPrivateKey,
-		);
-	}
-	await storage.setMasterUnlockKey(muk);
-	setMasterUnlockKey(muk);
-
-	// Store secret key and encrypted session for quick unlock
-	await storage.storeSecretKey(secretKey);
-	await storage.storeSessionData(muk, email, finishResult.user.id);
+	// Set MUK in extension's in-memory session manager (for auto-lock)
+	setMasterUnlockKey(result.masterUnlockKey);
 
 	// Start activity tracking
 	updateActivity();
@@ -103,69 +58,24 @@ export async function handleQuickUnlock(payload: {
 }): Promise<MessageResponse> {
 	const { password } = payload;
 
-	// Get stored secret key and session email
-	const secretKey = await storage.getStoredSecretKey();
+	// Get stored email for multi-account support
 	const email = await storage.getActiveAccountEmail();
 
-	if (!secretKey || !email) {
-		throw new Error("Quick unlock not available");
+	if (!email) {
+		throw new Error("Quick unlock not available - no active account");
 	}
 
-	// Derive keys and unlock
-	const { authKey, masterUnlockKey: muk } = await deriveKeys(
-		password,
-		secretKey,
-		email,
+	// Perform SRP unlock using shared utility (retrieves stored secret key internally)
+	const result = await performSRPUnlock(
+		{ email, password },
+		{ crypto: cryptoAdapter, trpcClient, storage },
 	);
 
-	// Convert authKey to password string for SRP
-	const srpPassword = new TextDecoder().decode(authKey);
+	// Store session data using shared utility
+	await storeUnlockSession(result, storage, email);
 
-	// Generate client ephemeral key pair
-	const clientEphemeral = generateClientEphemeral();
-
-	// Send client public key to server and get challenge
-	const startResult = await trpcClient.auth.startLogin.mutate({
-		email,
-		clientPublicKey: clientEphemeral.publicKey,
-	});
-
-	// Derive session and compute proof
-	const clientSession = await deriveClientSession(
-		clientEphemeral.secret,
-		{
-			salt: startResult.salt,
-			serverPublicKey: startResult.serverPublicKey,
-		},
-		srpPassword,
-	);
-
-	// Send proof to server and get vault keys
-	const finishResult = await trpcClient.auth.finishLogin.mutate({
-		userId: startResult.userId,
-		serverSecret: startResult.serverSecret,
-		clientPublicKey: clientEphemeral.publicKey,
-		clientProof: clientSession.proof,
-	});
-
-	// Verify server's proof
-	await verifyServerSession(
-		clientEphemeral.publicKey,
-		clientSession,
-		finishResult.serverProof,
-	);
-
-	// Store session data and vault keys
-	await storage.storeAuthToken(finishResult.token);
-	await storage.storeVaultKeys(finishResult.vaultKeys);
-	// Store encrypted private key for RSA decryption of shared vault keys
-	if (finishResult.user.encryptedPrivateKey) {
-		await storage.storeEncryptedPrivateKey(
-			finishResult.user.encryptedPrivateKey,
-		);
-	}
-	await storage.setMasterUnlockKey(muk);
-	setMasterUnlockKey(muk);
+	// Set MUK in extension's in-memory session manager (for auto-lock)
+	setMasterUnlockKey(result.masterUnlockKey);
 
 	// Start activity tracking
 	updateActivity();

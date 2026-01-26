@@ -13,6 +13,7 @@ import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
 import {
   type AccountMetadata,
+  type BiometricAuthResult,
   DEFAULT_SESSION_EXPIRY_MS,
   type StoredSessionData,
   type VaultKeyData,
@@ -91,7 +92,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 
     // Try to restore from persistent storage if session is still valid
     if (await this.isSessionValid()) {
-      const restored = await this.decryptStoredMasterUnlockKey();
+      const restored = await this.decryptStoredMasterUnlockKeyInternal();
       if (restored) {
         masterUnlockKeyCache = restored;
         return restored;
@@ -149,7 +150,7 @@ export class WebStorageAdapter implements IStorageAdapter {
     }
 
     // Otherwise, try to decrypt from persistent storage
-    const masterUnlockKey = await this.decryptStoredMasterUnlockKey();
+    const masterUnlockKey = await this.decryptStoredMasterUnlockKeyInternal();
     if (!masterUnlockKey) {
       return false;
     }
@@ -159,7 +160,7 @@ export class WebStorageAdapter implements IStorageAdapter {
   }
 
   async isSessionValid(_email?: string): Promise<boolean> {
-    const sessionData = this.getStoredSessionData();
+    const sessionData = await this.getStoredSessionData();
     if (!sessionData) return false;
 
     const now = Date.now();
@@ -250,12 +251,12 @@ export class WebStorageAdapter implements IStorageAdapter {
   // ============================================================================
 
   async getActiveAccountEmail(): Promise<string | null> {
-    const sessionData = this.getStoredSessionData();
+    const sessionData = await this.getStoredSessionData();
     return sessionData?.email ?? null;
   }
 
   async getActiveAccountUserId(): Promise<string | null> {
-    const sessionData = this.getStoredSessionData();
+    const sessionData = await this.getStoredSessionData();
     return sessionData?.userId ?? null;
   }
 
@@ -265,7 +266,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 
   async getAccountsList(): Promise<AccountMetadata[]> {
     // Web only supports single account
-    const sessionData = this.getStoredSessionData();
+    const sessionData = await this.getStoredSessionData();
     if (!sessionData) return [];
 
     return [
@@ -370,7 +371,7 @@ export class WebStorageAdapter implements IStorageAdapter {
     await this.clearSession();
   }
 
-  getStoredSessionData(): StoredSessionData | null {
+  async getStoredSessionData(_email?: string): Promise<StoredSessionData | null> {
     if (typeof window === "undefined") return null;
 
     const stored = localStorage.getItem(SESSION_DATA_STORAGE);
@@ -384,16 +385,87 @@ export class WebStorageAdapter implements IStorageAdapter {
   }
 
   // ============================================================================
-  // Private Helpers
+  // Extended Session Management (unified interface)
   // ============================================================================
 
-  private clearStoredSession(): void {
-    if (typeof window === "undefined") return;
-    localStorage.removeItem(SESSION_DATA_STORAGE);
+  async hasStoredSecretKey(_email?: string): Promise<boolean> {
+    const secretKey = await this.getStoredSecretKey();
+    return secretKey != null;
   }
 
-  private async decryptStoredMasterUnlockKey(): Promise<Uint8Array | null> {
-    const sessionData = this.getStoredSessionData();
+  async lockAllAccounts(): Promise<void> {
+    // Web only has single account, just clear the cache
+    masterUnlockKeyCache = null;
+  }
+
+  async getAccountMetadata(_email: string): Promise<AccountMetadata | null> {
+    // Web doesn't support multi-account metadata, return basic info from session
+    const sessionData = await this.getStoredSessionData();
+    if (!sessionData) return null;
+
+    return {
+      email: sessionData.email,
+      userId: sessionData.userId,
+      name: "",
+      secretKeyHint: "",
+      addedAt: sessionData.createdAt,
+      lastActiveAt: Date.now(),
+      biometricEnabled: false,
+    };
+  }
+
+  // ============================================================================
+  // Extended Biometric (stubs for web - not supported)
+  // ============================================================================
+
+  async getBiometricAvailabilityDetails(): Promise<{
+    hasHardware: boolean;
+    isEnrolled: boolean;
+  }> {
+    return { hasHardware: false, isEnrolled: false };
+  }
+
+  async getBiometricType(): Promise<string | null> {
+    return null;
+  }
+
+  async unlockWithBiometric(_email?: string): Promise<boolean> {
+    return false;
+  }
+
+  async authenticateWithBiometricEnhanced(
+    _reason?: string,
+    _email?: string,
+  ): Promise<BiometricAuthResult> {
+    return {
+      success: false,
+      error: "not_available",
+      message: "Biometric authentication is not available on web",
+    };
+  }
+
+  // ============================================================================
+  // Mobile-Specific (stubs for web - not applicable)
+  // ============================================================================
+
+  async isMasterPasswordReentryRequired(_email?: string): Promise<boolean> {
+    // Web doesn't enforce 30-day re-entry
+    return false;
+  }
+
+  async updateLastMasterPasswordEntry(_email?: string): Promise<void> {
+    // No-op for web
+  }
+
+  async decryptStoredMasterUnlockKey(
+    _email?: string,
+    _skipBiometric?: boolean,
+  ): Promise<Uint8Array | null> {
+    return this.decryptStoredMasterUnlockKeyInternal();
+  }
+
+  private async decryptStoredMasterUnlockKeyInternal(): Promise<Uint8Array | null> {
+    const sessionData = await this.getStoredSessionData();
     if (!sessionData) return null;
 
     try {
@@ -406,6 +478,15 @@ export class WebStorageAdapter implements IStorageAdapter {
     } catch {
       return null;
     }
+  }
+
+  // ============================================================================
+  // Private Helpers
+  // ============================================================================
+
+  private clearStoredSession(): void {
+    if (typeof window === "undefined") return;
+    localStorage.removeItem(SESSION_DATA_STORAGE);
   }
 
   async decryptVaultKey(

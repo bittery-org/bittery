@@ -23,12 +23,19 @@ import { useSyncContext } from "./sync-provider";
 
 /**
  * Crypto adapter that satisfies ICrypto interface
- * WASM crypto module already exports decrypt, encrypt, generateEncryptionKey
+ * WASM crypto module exports all required methods for encryption and SRP authentication
  */
 const crypto: ICrypto = {
+	// Core encryption methods
 	decrypt: wasmCrypto.decrypt,
 	encrypt: wasmCrypto.encrypt,
 	generateEncryptionKey: wasmCrypto.generateEncryptionKey,
+	// SRP authentication methods
+	deriveKeys: wasmCrypto.deriveKeys,
+	generateClientEphemeral: wasmCrypto.generateClientEphemeralAsync,
+	deriveClientSession: wasmCrypto.deriveClientSession,
+	verifyServerSession: wasmCrypto.verifyServerSession,
+	validateSecretKey: wasmCrypto.validateSecretKeyAsync,
 };
 
 /**

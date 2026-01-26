@@ -14,6 +14,7 @@ import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
 import {
 	type AccountMetadata,
+	type BiometricAuthResult,
 	DEFAULT_SESSION_EXPIRY_MS,
 	type StoredSessionData,
 	type VaultKeyData,
@@ -93,7 +94,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 
 		// Try to restore from persistent storage if session is still valid
 		if (await this.isSessionValid()) {
-			const restored = await this.decryptStoredMasterUnlockKey();
+			const restored = await this.decryptStoredMasterUnlockKeyInternal();
 			if (restored) {
 				masterUnlockKeyCache = restored;
 				return restored;
@@ -151,7 +152,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		}
 
 		// Otherwise, try to decrypt from persistent storage
-		const masterUnlockKey = await this.decryptStoredMasterUnlockKey();
+		const masterUnlockKey = await this.decryptStoredMasterUnlockKeyInternal();
 		if (!masterUnlockKey) {
 			return false;
 		}
@@ -371,10 +372,10 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	}
 
 	// ============================================================================
-	// Private Helpers
+	// Extended Session Management (unified interface)
 	// ============================================================================
 
-	private async getStoredSessionData(): Promise<StoredSessionData | null> {
+	async getStoredSessionData(_email?: string): Promise<StoredSessionData | null> {
 		const result = await chrome.storage.local.get(SESSION_DATA_STORAGE);
 		const stored = result[SESSION_DATA_STORAGE];
 
@@ -387,11 +388,88 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		}
 	}
 
+	async hasStoredSecretKey(_email?: string): Promise<boolean> {
+		const secretKey = await this.getStoredSecretKey();
+		return secretKey != null;
+	}
+
+	async lockAllAccounts(): Promise<void> {
+		masterUnlockKeyCache = null;
+	}
+
+	async getAccountMetadata(_email: string): Promise<AccountMetadata | null> {
+		const sessionData = await this.getStoredSessionData();
+		if (!sessionData) return null;
+
+		return {
+			email: sessionData.email,
+			userId: sessionData.userId,
+			name: "",
+			secretKeyHint: "",
+			addedAt: sessionData.createdAt,
+			lastActiveAt: Date.now(),
+			biometricEnabled: false,
+		};
+	}
+
+	// ============================================================================
+	// Extended Biometric (stubs - not supported on Chrome extension)
+	// ============================================================================
+
+	async getBiometricAvailabilityDetails(): Promise<{
+		hasHardware: boolean;
+		isEnrolled: boolean;
+	}> {
+		return { hasHardware: false, isEnrolled: false };
+	}
+
+	async getBiometricType(): Promise<string | null> {
+		return null;
+	}
+
+	async unlockWithBiometric(_email?: string): Promise<boolean> {
+		return false;
+	}
+
+	async authenticateWithBiometricEnhanced(
+		_reason?: string,
+		_email?: string,
+	): Promise<BiometricAuthResult> {
+		return {
+			success: false,
+			error: "not_available",
+			message: "Biometric authentication is not available in browser extensions",
+		};
+	}
+
+	// ============================================================================
+	// Mobile-Specific (stubs - not applicable for Chrome extension)
+	// ============================================================================
+
+	async isMasterPasswordReentryRequired(_email?: string): Promise<boolean> {
+		return false;
+	}
+
+	async updateLastMasterPasswordEntry(_email?: string): Promise<void> {
+		// No-op
+	}
+
+	async decryptStoredMasterUnlockKey(
+		_email?: string,
+		_skipBiometric?: boolean,
+	): Promise<Uint8Array | null> {
+		return this.decryptStoredMasterUnlockKeyInternal();
+	}
+
+	// ============================================================================
+	// Private Helpers
+	// ============================================================================
+
 	private async clearStoredSession(): Promise<void> {
 		await chrome.storage.local.remove(SESSION_DATA_STORAGE);
 	}
 
-	private async decryptStoredMasterUnlockKey(): Promise<Uint8Array | null> {
+	private async decryptStoredMasterUnlockKeyInternal(): Promise<Uint8Array | null> {
 		const sessionData = await this.getStoredSessionData();
 		if (!sessionData) return null;
 

@@ -683,9 +683,12 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
     return available && enabled && sessionValid;
   }
 
-  async getStoredSessionData(email: string): Promise<StoredSessionData | null> {
+  async getStoredSessionData(email?: string): Promise<StoredSessionData | null> {
+    const resolvedEmail = await this.resolveEmail(email);
+    if (!resolvedEmail) return null;
+
     try {
-      const key = getAccountKey(email, "session_data");
+      const key = getAccountKey(resolvedEmail, "session_data");
       const stored = await this.getItem(key);
 
       if (!stored) return null;
@@ -1024,9 +1027,9 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
   }
 
   /**
-   * Decrypt stored master unlock key (public wrapper)
+   * Decrypt stored master unlock key (interface method)
    */
-  async decryptStoredMasterUnlockKeyPublic(
+  async decryptStoredMasterUnlockKey(
     email?: string,
     skipBiometric = false,
   ): Promise<Uint8Array | null> {
@@ -1036,6 +1039,16 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
       resolvedEmail,
       skipBiometric,
     );
+  }
+
+  /**
+   * @deprecated Use decryptStoredMasterUnlockKey instead
+   */
+  async decryptStoredMasterUnlockKeyPublic(
+    email?: string,
+    skipBiometric = false,
+  ): Promise<Uint8Array | null> {
+    return this.decryptStoredMasterUnlockKey(email, skipBiometric);
   }
 
   /**

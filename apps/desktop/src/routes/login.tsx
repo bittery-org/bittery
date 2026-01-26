@@ -1,5 +1,5 @@
 import { normalizeServerUrl } from "@bittery/shared/server-url";
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useLogin } from "@bittery/hooks";
 import { Button, Input, Label, toast, VaultIcon } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -7,13 +7,6 @@ import { ArrowLeft, Fingerprint } from "lucide-react";
 import { useEffect, useState } from "react";
 import { type AccountMetadata, storage } from "@/lib/storage";
 import { useAccount } from "../contexts/account-context";
-import {
-	deriveClientSession,
-	deriveKeys,
-	generateClientEphemeral,
-	validateSecretKey,
-	verifyServerSession,
-} from "../lib/tauri-crypto";
 
 interface LoginSearchParams {
 	addingAccount?: boolean;
@@ -30,7 +23,6 @@ export const Route = createFileRoute("/login")({
 });
 
 export function LoginPage() {
-	const trpcClient = useTRPCClient();
 	const navigate = useNavigate();
 	const { addingAccount } = Route.useSearch();
 	const { refreshAccounts } = useAccount();
@@ -42,7 +34,6 @@ export function LoginPage() {
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [secretKey, setSecretKey] = useState("");
-	const [loading, setLoading] = useState(false);
 	const [enableBiometric, setEnableBiometric] = useState(true);
 
 	const { data: biometricAvailable } = useQuery({
@@ -68,13 +59,60 @@ export function LoginPage() {
 		navigate({ to: "/vault" });
 	};
 
+	// Use the shared login hook
+	const loginMutation = useLogin({
+		enableBiometric: enableBiometric && !!biometricAvailable,
+		onSuccess: async (result, input) => {
+			const normalizedEmail = input.email.toLowerCase();
+			const normalizedServerUrl = normalizeServerUrl(serverUrl);
+
+			// Store server URL per-account (desktop-specific)
+			if (normalizedServerUrl) {
+				await storage.storeServerUrl(normalizedServerUrl, normalizedEmail);
+			}
+
+			// Store web app URL if provided, otherwise clear it to use derived URL (desktop-specific)
+			if (webAppUrl.trim()) {
+				const normalizedWebAppUrl = normalizeServerUrl(webAppUrl);
+				if (normalizedWebAppUrl) {
+					await storage.storeWebAppUrl(normalizedWebAppUrl, normalizedEmail);
+				}
+			} else {
+				await storage.clearWebAppUrl(normalizedEmail);
+			}
+
+			// Create account metadata (desktop-specific multi-account support)
+			const secretKeyHint = `${input.secretKey.substring(0, 5)}...`;
+			const accountMetadata: AccountMetadata = {
+				email: normalizedEmail,
+				userId: result.user.id,
+				name: result.user.name || normalizedEmail.split("@")[0],
+				teamName: result.user.teamName,
+				secretKeyHint,
+				addedAt: Date.now(),
+				lastActiveAt: Date.now(),
+				biometricEnabled: enableBiometric && !!biometricAvailable,
+			};
+
+			// Add to accounts list
+			await storage.addAccountToList(accountMetadata);
+
+			// Refresh account context
+			await refreshAccounts();
+
+			toast.success(
+				addingAccount ? "Account added successfully" : "Login successful",
+			);
+			navigate({ to: "/vault" });
+		},
+		onError: (error) => {
+			console.error("Login error:", error);
+			toast.error(error instanceof Error ? error.message : "Login failed");
+		},
+	});
+
 	const handleLogin = async (e: React.FormEvent) => {
 		e.preventDefault();
-
-		if (!(await validateSecretKey(secretKey))) {
-			toast.error("Invalid Secret Key format");
-			return;
-		}
 
 		const normalizedServerUrl = normalizeServerUrl(serverUrl);
 		if (!normalizedServerUrl) {
@@ -85,128 +123,12 @@ export function LoginPage() {
 			setServerUrl(normalizedServerUrl);
 		}
 
-		setLoading(true);
-
-		try {
-			// 1. Derive keys from password + secret key
-			const { authKey, masterUnlockKey } = await deriveKeys(
-				password,
-				secretKey,
-				email,
-			);
-
-			// Convert authKey to password string for SRP
-			const srpPassword = new TextDecoder().decode(authKey);
-
-			// 2. Generate client ephemeral key pair
-			const clientEphemeral = await generateClientEphemeral();
-
-			// 3. Send client public key to server and get challenge
-			const startResult = await trpcClient.auth.startLogin.mutate({
-				email,
-				clientPublicKey: clientEphemeral.publicKey,
-			});
-
-			// 4. Derive session and compute proof
-			const clientSession = await deriveClientSession(
-				clientEphemeral.secret,
-				{
-					salt: startResult.salt,
-					serverPublicKey: startResult.serverPublicKey,
-				},
-				srpPassword,
-			);
-
-			// 5. Send proof to server and get session
-			const finishResult = await trpcClient.auth.finishLogin.mutate({
-				userId: startResult.userId,
-				serverSecret: startResult.serverSecret,
-				clientPublicKey: clientEphemeral.publicKey,
-				clientProof: clientSession.proof,
-			});
-
-			if (!finishResult.serverProof) {
-				toast.error("Login failed");
-				return;
-			}
-
-			// 6. Verify server's proof (completes mutual authentication)
-			await verifyServerSession(
-				clientEphemeral.publicKey,
-				clientSession,
-				finishResult.serverProof,
-			);
-
-			const normalizedEmail = email.toLowerCase();
-
-			// Enable biometric if requested
-			if (enableBiometric && biometricAvailable) {
-				await storage.enableBiometric(normalizedEmail);
-			}
-
-			// Store auth data (email is used to namespace storage)
-			await storage.storeAuthToken(finishResult.token, normalizedEmail);
-			await storage.storeVaultKeys(finishResult.vaultKeys, normalizedEmail);
-			// Store encrypted private key for RSA decryption of shared vault keys
-			if (finishResult.user.encryptedPrivateKey) {
-				await storage.storeEncryptedPrivateKey(
-					finishResult.user.encryptedPrivateKey,
-					normalizedEmail,
-				);
-			}
-			await storage.storeSecretKey(secretKey, normalizedEmail);
-			await storage.storeSessionData(
-				masterUnlockKey,
-				normalizedEmail,
-				finishResult.user.id,
-			);
-			await storage.storeMasterUnlockKey(masterUnlockKey, normalizedEmail);
-
-			// Store server URL per-account
-			await storage.storeServerUrl(normalizedServerUrl, normalizedEmail);
-
-			// Store web app URL if provided, otherwise clear it to use derived URL
-			if (webAppUrl.trim()) {
-				const normalizedWebAppUrl = normalizeServerUrl(webAppUrl);
-				if (normalizedWebAppUrl) {
-					await storage.storeWebAppUrl(normalizedWebAppUrl, normalizedEmail);
-				}
-			} else {
-				await storage.clearWebAppUrl(normalizedEmail);
-			}
-
-			// Create account metadata
-			const secretKeyHint = `${secretKey.substring(0, 5)}...`;
-			const accountMetadata: AccountMetadata = {
-				email: normalizedEmail,
-				userId: finishResult.user.id,
-				name: finishResult.user.name || normalizedEmail.split("@")[0],
-				teamName: finishResult.user.teamName,
-				secretKeyHint,
-				addedAt: Date.now(),
-				lastActiveAt: Date.now(),
-				biometricEnabled: enableBiometric && !!biometricAvailable,
-			};
-
-			// Add to accounts list
-			await storage.addAccountToList(accountMetadata);
-
-			// Set as active account
-			await storage.setActiveAccount(normalizedEmail);
-
-			// Refresh account context
-			await refreshAccounts();
-
-			toast.success(
-				addingAccount ? "Account added successfully" : "Login successful",
-			);
-			navigate({ to: "/vault" });
-		} catch (error) {
-			console.error("Login error:", error);
-			toast.error(error instanceof Error ? error.message : "Login failed");
-		} finally {
-			setLoading(false);
-		}
+		await loginMutation.mutateAsync({
+			email,
+			password,
+			secretKey,
+			enableBiometric: enableBiometric && !!biometricAvailable,
+		});
 	};
 
 	return (
@@ -375,8 +297,8 @@ export function LoginPage() {
 								</div>
 							)}
 
-							<Button type="submit" className="w-full" disabled={loading}>
-								{loading ? "Logging in..." : "Log In"}
+							<Button type="submit" className="w-full" disabled={loginMutation.isPending}>
+								{loginMutation.isPending ? "Logging in..." : "Log In"}
 							</Button>
 						</form>
 					</div>

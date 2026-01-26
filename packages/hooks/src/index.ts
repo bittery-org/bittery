@@ -112,6 +112,29 @@ export {
 	useDeleteVault,
 	useUpdateVault,
 } from "./hooks/vault";
+
+// Auth Hooks (React Query wrappers for login/unlock)
+export {
+	type BiometricUnlockError,
+	type BiometricUnlockInput,
+	type BiometricUnlockResult,
+	type LoginInput,
+	type LogoutInput,
+	type QuickUnlockInput,
+	type UseBiometricUnlockOptions,
+	type UseCheckEmailOptions,
+	type UseLoginOptions,
+	type UseLogoutOptions,
+	type UseQuickUnlockOptions,
+	type UseSessionStateOptions,
+	useBiometricUnlock,
+	useCheckEmail,
+	useLock,
+	useLogin,
+	useLogout,
+	useQuickUnlock,
+	useSessionState,
+} from "./hooks/auth";
 // Services (platform-specific autolock implementations)
 export {
 	createMobileAutolockService,
@@ -121,11 +144,36 @@ export {
 
 // Types
 export type {
+	DerivedKeys,
 	IAutolockService,
 	ICrypto,
 	IItemDecrypt,
 	IQueryInvalidator,
 	ISyncContext,
+	SRPClientEphemeral,
+	SRPClientSession,
+	SRPServerChallenge,
 } from "./types";
 // Utilities
 export { refreshVaultKeys } from "./utils/vault-utils";
+
+// Auth Utilities (for extension service worker - non-React usage)
+export {
+	checkEmailExists,
+	clearSession,
+	getSessionState,
+	performSRPLogin,
+	performSRPUnlock,
+	storeLoginSession,
+	storeUnlockSession,
+	type CheckEmailResult,
+	type IAuthTRPCClient,
+	type LoginResult,
+	type LoginUserData,
+	type SessionState,
+	type SRPLoginDeps,
+	type SRPLoginInput,
+	type SRPUnlockDeps,
+	type SRPUnlockInput,
+	type UnlockResult,
+} from "./auth";

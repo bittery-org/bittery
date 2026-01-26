@@ -1,3 +1,9 @@
+import {
+	useBiometricUnlock,
+	useQuickUnlock,
+	useSessionState,
+	usePlatformStorage,
+} from "@bittery/hooks";
 import { useRouter } from "expo-router";
 import {
 	AlertCircle,
@@ -25,14 +31,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
-import {
-	arrayBufferToBase64,
-	deriveClientSession,
-	deriveKeys,
-	generateClientEphemeral,
-	verifyServerSession,
-} from "../../src/lib/crypto";
-import { useServerUrl, useTRPCClient } from "../../src/lib/trpc";
+import { arrayBufferToBase64 } from "../../src/lib/crypto";
+import { useServerUrl } from "../../src/lib/trpc";
 import {
 	type AccountMetadata,
 	getBiometricErrorMessage,
@@ -41,168 +41,115 @@ import {
 
 export default function UnlockScreen() {
 	const router = useRouter();
-	const trpcClient = useTRPCClient();
+	const platformStorage = usePlatformStorage();
 	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
 	const { allAccounts, activeAccount, refreshAccounts } = useAccount();
 
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
-	const [loading, setLoading] = useState(false);
 	const [showAccountPicker, setShowAccountPicker] = useState(false);
 	const [targetAccount, setTargetAccount] = useState<AccountMetadata | null>(
 		null,
 	);
-	const [biometricState, setBiometricState] = useState<{
-		available: boolean;
-		enabled: boolean;
-		type: string | null;
-		requiresMasterPassword: boolean;
-	}>({
-		available: false,
-		enabled: false,
-		type: null,
-		requiresMasterPassword: false,
-	});
+	const [biometricType, setBiometricType] = useState<string | null>(null);
 	const [biometricError, setBiometricError] = useState<string | null>(null);
 
-	const loadBiometricState = useCallback(async (email: string) => {
-		const available = await storage.isBiometricAvailable();
-		const enabled = await storage.isBiometricEnabled(email);
-		const type = available ? await storage.getBiometricType() : null;
-		const requiresMasterPassword =
-			await storage.isMasterPasswordReentryRequired(email);
-		setBiometricState({ available, enabled, type, requiresMasterPassword });
-	}, []);
+	// Get session state for the target account
+	const { data: sessionState, refetch: refetchSessionState } = useSessionState(
+		targetAccount?.email,
+		{ enabled: !!targetAccount },
+	);
+
+	// Load biometric type on mount
+	const loadBiometricType = useCallback(async () => {
+		const type = await platformStorage.getBiometricType?.();
+		setBiometricType(type ?? null);
+	}, [platformStorage]);
 
 	useEffect(() => {
 		if (activeAccount) {
 			setTargetAccount(activeAccount);
-			loadBiometricState(activeAccount.email);
 		}
-	}, [activeAccount, loadBiometricState]);
+	}, [activeAccount]);
 
-	const handleBiometricUnlock = async () => {
-		if (!targetAccount) return;
-
-		// Check if master password is required first
-		if (biometricState.requiresMasterPassword) {
-			setBiometricError(
-				"For your security, please enter your master password. This is required every 30 days.",
-			);
-			return;
+	useEffect(() => {
+		if (targetAccount) {
+			loadBiometricType();
 		}
+	}, [targetAccount, loadBiometricType]);
 
-		setLoading(true);
-		setBiometricError(null);
+	// Biometric unlock hook
+	const biometricUnlock = useBiometricUnlock({
+		onSuccess: async () => {
+			if (!targetAccount) return;
 
-		try {
-			// Use enhanced biometric auth for better error handling
-			const result = await storage.authenticateWithBiometricEnhanced(
-				"Unlock Bittery",
-				targetAccount.email,
-			);
+			// Restore auth token and vault keys
+			const token = await storage.getAuthToken(targetAccount.email);
+			const vaultKeys = await storage.getVaultKeys(targetAccount.email);
 
-			if (result.success) {
-				// Restore auth token and vault keys
-				const token = await storage.getAuthToken(targetAccount.email);
-				const vaultKeys = await storage.getVaultKeys(targetAccount.email);
+			if (token && vaultKeys) {
+				// Decrypt and store master unlock key
+				const masterUnlockKey = await storage.decryptStoredMasterUnlockKey(
+					targetAccount.email,
+					true, // Skip biometric since we just authenticated
+				);
 
-				if (token && vaultKeys) {
-					// Decrypt and store master unlock key
-					const masterUnlockKey = await storage.decryptStoredMasterUnlockKeyPublic(
+				if (masterUnlockKey) {
+					await storage.storeMasterUnlockKey(
+						masterUnlockKey,
 						targetAccount.email,
-						true, // Skip biometric since we just authenticated
 					);
 
-					if (masterUnlockKey) {
-						await storage.storeMasterUnlockKey(
-							masterUnlockKey,
-							targetAccount.email,
-						);
-
-						// Set MUK in native CredentialProvider for autofill decryption
-						if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-							const mukBase64 = arrayBufferToBase64(masterUnlockKey);
-							CredentialProvider.setMasterUnlockKey(mukBase64);
-						}
+					// Set MUK in native CredentialProvider for autofill decryption
+					if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
+						const mukBase64 = arrayBufferToBase64(masterUnlockKey);
+						CredentialProvider.setMasterUnlockKey(mukBase64);
 					}
-
-					// Load server URL for this account
-					const serverUrl = await storage.getServerUrl(targetAccount.email);
-					if (serverUrl) {
-						setGlobalServerUrl(serverUrl);
-					}
-
-					// Set as active account
-					await storage.setActiveAccount(targetAccount.email);
-					await refreshAccounts();
-
-					router.replace("/(vault)");
-				} else {
-					Alert.alert(
-						"Session Expired",
-						"Please log in again with your credentials.",
-					);
-					await storage.clearAllStoredData(targetAccount.email);
-					router.replace("/(auth)/login");
 				}
+
+				// Load server URL for this account
+				const serverUrl = await storage.getServerUrl(targetAccount.email);
+				if (serverUrl) {
+					setGlobalServerUrl(serverUrl);
+				}
+
+				// Set as active account
+				await storage.setActiveAccount(targetAccount.email);
+				await refreshAccounts();
+
+				router.replace("/(vault)");
 			} else {
-				// Show specific error message
-				const errorMessage =
-					result.message || getBiometricErrorMessage(result.error || "unknown");
-
-				if (result.error === "master_password_required") {
-					setBiometricError(errorMessage);
-					// Update state to reflect this
-					setBiometricState((prev) => ({
-						...prev,
-						requiresMasterPassword: true,
-					}));
-				} else if (result.error === "lockout") {
-					setBiometricError(errorMessage);
-				} else if (result.error === "user_cancelled") {
-					// User cancelled, don't show error
-				} else {
-					setBiometricError(errorMessage);
-				}
-			}
-		} catch (error) {
-			console.error("Biometric unlock error:", error);
-			setBiometricError(
-				"An unexpected error occurred. Please try again or use your password.",
-			);
-		} finally {
-			setLoading(false);
-		}
-	};
-
-	const handlePasswordUnlock = async () => {
-		if (!targetAccount || !password.trim()) {
-			Alert.alert("Error", "Please enter your password");
-			return;
-		}
-
-		setLoading(true);
-		setBiometricError(null);
-
-		try {
-			const secretKey = await storage.getStoredSecretKey(targetAccount.email);
-			if (!secretKey) {
-				Alert.alert("Error", "Secret key not found. Please log in again.");
+				Alert.alert(
+					"Session Expired",
+					"Please log in again with your credentials.",
+				);
 				await storage.clearAllStoredData(targetAccount.email);
 				router.replace("/(auth)/login");
-				return;
 			}
+		},
+		onError: (error) => {
+			// Show specific error message
+			const errorMessage =
+				error.message || getBiometricErrorMessage(error.type || "unknown");
 
-			const sessionData = await storage.getStoredSessionData(
-				targetAccount.email,
-			);
-			if (!sessionData) {
-				Alert.alert("Error", "Session data not found. Please log in again.");
-				await storage.clearAllStoredData(targetAccount.email);
-				router.replace("/(auth)/login");
-				return;
+			if (error.type === "master_password_required") {
+				setBiometricError(errorMessage);
+				// Refetch session state to update requiresPasswordReentry
+				refetchSessionState();
+			} else if (error.type === "lockout") {
+				setBiometricError(errorMessage);
+			} else if (error.type === "user_cancelled") {
+				// User cancelled, don't show error
+			} else {
+				setBiometricError(errorMessage);
 			}
+		},
+	});
+
+	// Quick unlock (password) hook
+	const quickUnlock = useQuickUnlock({
+		onSuccess: async (result) => {
+			if (!targetAccount) return;
 
 			// Load server URL for this account
 			const serverUrl = await storage.getServerUrl(targetAccount.email);
@@ -210,86 +157,18 @@ export default function UnlockScreen() {
 				setGlobalServerUrl(serverUrl);
 			}
 
-			// 1. Derive keys from password + secret key
-			const { authKey, masterUnlockKey } = await deriveKeys(
-				password,
-				secretKey,
-				targetAccount.email,
-			);
-
-			// Convert authKey to password string for SRP
-			const srpPassword = new TextDecoder().decode(authKey);
-
-			// 2. Generate client ephemeral key pair
-			const clientEphemeral = generateClientEphemeral();
-
-			// 3. Send client public key to server and get challenge
-			const startResult = await trpcClient.auth.startLogin.mutate({
-				email: targetAccount.email,
-				clientPublicKey: clientEphemeral.publicKey,
-			});
-
-			// 4. Derive session and compute proof
-			const clientSession = await deriveClientSession(
-				clientEphemeral.secret,
-				{
-					salt: startResult.salt,
-					serverPublicKey: startResult.serverPublicKey,
-				},
-				srpPassword,
-			);
-
-			// 5. Send proof to server and get session
-			const finishResult = await trpcClient.auth.finishLogin.mutate({
-				userId: startResult.userId,
-				serverSecret: startResult.serverSecret,
-				clientPublicKey: clientEphemeral.publicKey,
-				clientProof: clientSession.proof,
-			});
-
-			if (!finishResult.serverProof) {
-				Alert.alert("Error", "Unlock failed - invalid credentials");
-				return;
-			}
-
-			// 6. Verify server's proof
-			await verifyServerSession(
-				clientEphemeral.publicKey,
-				clientSession,
-				finishResult.serverProof,
-			);
-
-			// Update session with fresh data
-			await storage.storeAuthToken(finishResult.token, targetAccount.email);
-			await storage.storeVaultKeys(finishResult.vaultKeys, targetAccount.email);
-
-			if (finishResult.user.encryptedPrivateKey) {
-				await storage.storeEncryptedPrivateKey(
-					finishResult.user.encryptedPrivateKey,
-					targetAccount.email,
-				);
-			}
-
-			await storage.storeSessionData(
-				masterUnlockKey,
-				targetAccount.email,
-				finishResult.user.id,
-			);
-			await storage.storeMasterUnlockKey(masterUnlockKey, targetAccount.email);
-
-			// Update last master password entry timestamp (for 30-day re-entry requirement)
-			await storage.updateLastMasterPasswordEntry(targetAccount.email);
-
 			// Set MUK in native CredentialProvider for autofill decryption
 			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-				const mukBase64 = arrayBufferToBase64(masterUnlockKey);
+				const mukBase64 = arrayBufferToBase64(result.masterUnlockKey);
 				CredentialProvider.setMasterUnlockKey(mukBase64);
 
 				// Update 30-day master password entry timestamp in native
 				CredentialProvider.updateLastMasterPasswordEntry();
 
 				// Escrow MUK with biometric for future quick unlocks
-				if (biometricState.available && biometricState.enabled) {
+				const biometricAvailable = await platformStorage.isBiometricAvailable?.();
+				const biometricEnabled = await platformStorage.isBiometricEnabled?.(targetAccount.email);
+				if (biometricAvailable && biometricEnabled) {
 					try {
 						await CredentialProvider.escrowMukWithBiometric({
 							email: targetAccount.email,
@@ -304,32 +183,65 @@ export default function UnlockScreen() {
 			// Update account metadata
 			const updatedMetadata: AccountMetadata = {
 				...targetAccount,
-				teamName: finishResult.user.teamName,
+				teamName: result.user.teamName,
 				lastActiveAt: Date.now(),
 			};
 			await storage.addAccountToList(updatedMetadata);
 
-			// Set as active account
-			await storage.setActiveAccount(targetAccount.email);
+			// Refresh account context
 			await refreshAccounts();
 
 			router.replace("/(vault)");
-		} catch (error) {
+		},
+		onError: (error) => {
 			console.error("Unlock error:", error);
 			Alert.alert(
 				"Error",
 				error instanceof Error ? error.message : "Unlock failed",
 			);
-		} finally {
-			setLoading(false);
+		},
+	});
+
+	const handleBiometricUnlock = async () => {
+		if (!targetAccount) return;
+
+		// Check if master password is required first (UI-level check for immediate feedback)
+		if (sessionState?.requiresPasswordReentry) {
+			setBiometricError(
+				"For your security, please enter your master password. This is required every 30 days.",
+			);
+			return;
 		}
+
+		setBiometricError(null);
+		biometricUnlock.mutate({ email: targetAccount.email });
+	};
+
+	const handlePasswordUnlock = async () => {
+		if (!targetAccount || !password.trim()) {
+			Alert.alert("Error", "Please enter your password");
+			return;
+		}
+
+		setBiometricError(null);
+
+		// Load server URL for this account before making the request
+		const serverUrl = await storage.getServerUrl(targetAccount.email);
+		if (serverUrl) {
+			setGlobalServerUrl(serverUrl);
+		}
+
+		quickUnlock.mutate({
+			email: targetAccount.email,
+			password,
+		});
 	};
 
 	const handleSwitchAccount = async (account: AccountMetadata) => {
 		setShowAccountPicker(false);
 		setTargetAccount(account);
 		setPassword("");
-		await loadBiometricState(account.email);
+		setBiometricError(null);
 	};
 
 	// If no accounts, redirect to login
@@ -337,6 +249,10 @@ export default function UnlockScreen() {
 		router.replace("/(auth)/login");
 		return null;
 	}
+
+	const loading = biometricUnlock.isPending || quickUnlock.isPending;
+	const requiresPasswordReentry = sessionState?.requiresPasswordReentry ?? false;
+	const canUseBiometric = sessionState?.canBiometricUnlock && !requiresPasswordReentry;
 
 	return (
 		<SafeAreaView className="flex-1 bg-background">
@@ -401,7 +317,7 @@ export default function UnlockScreen() {
 						)}
 
 						{/* Master Password Required Notice */}
-						{biometricState.requiresMasterPassword && (
+						{requiresPasswordReentry && (
 							<View className="mb-4 flex-row items-start rounded-lg bg-amber-50 p-4">
 								<KeyRound size={20} color="#f59e0b" />
 								<View className="ml-3 flex-1">
@@ -417,7 +333,7 @@ export default function UnlockScreen() {
 						)}
 
 						{/* Biometric Error Message */}
-						{biometricError && !biometricState.requiresMasterPassword && (
+						{biometricError && !requiresPasswordReentry && (
 							<View className="mb-4 flex-row items-start rounded-lg bg-red-50 p-4">
 								<AlertCircle size={20} color="#ef4444" />
 								<Text className="ml-3 flex-1 text-red-700 text-sm">
@@ -427,35 +343,33 @@ export default function UnlockScreen() {
 						)}
 
 						{/* Biometric Unlock */}
-						{biometricState.available &&
-							biometricState.enabled &&
-							!biometricState.requiresMasterPassword && (
-								<View className="mb-4">
-									<TouchableOpacity
-										onPress={handleBiometricUnlock}
-										disabled={loading}
-										className={`flex-row items-center justify-center rounded-lg border border-input py-4 ${
-											loading ? "opacity-50" : ""
-										}`}
-									>
-										{biometricState.type === "Face ID" ? (
-											<ScanFace size={24} color="#6b7280" />
-										) : (
-											<Fingerprint size={24} color="#6b7280" />
-										)}
-										<Text className="ml-3 font-medium text-foreground">
-											{loading
-												? "Authenticating..."
-												: `Unlock with ${biometricState.type || "Biometric"}`}
-										</Text>
-									</TouchableOpacity>
-									<View className="my-4 flex-row items-center">
-										<View className="h-px flex-1 bg-border" />
-										<Text className="mx-4 text-muted-foreground">or</Text>
-										<View className="h-px flex-1 bg-border" />
-									</View>
+						{canUseBiometric && (
+							<View className="mb-4">
+								<TouchableOpacity
+									onPress={handleBiometricUnlock}
+									disabled={loading}
+									className={`flex-row items-center justify-center rounded-lg border border-input py-4 ${
+										loading ? "opacity-50" : ""
+									}`}
+								>
+									{biometricType === "Face ID" ? (
+										<ScanFace size={24} color="#6b7280" />
+									) : (
+										<Fingerprint size={24} color="#6b7280" />
+									)}
+									<Text className="ml-3 font-medium text-foreground">
+										{loading
+											? "Authenticating..."
+											: `Unlock with ${biometricType || "Biometric"}`}
+									</Text>
+								</TouchableOpacity>
+								<View className="my-4 flex-row items-center">
+									<View className="h-px flex-1 bg-border" />
+									<Text className="mx-4 text-muted-foreground">or</Text>
+									<View className="h-px flex-1 bg-border" />
 								</View>
-							)}
+							</View>
+						)}
 
 						{/* Password Form */}
 						<View className="flex gap-5">

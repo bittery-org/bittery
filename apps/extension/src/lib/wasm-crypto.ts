@@ -17,6 +17,7 @@ import init, {
 	encrypt as wasmEncrypt,
 	generateEncryptionKey as wasmGenerateEncryptionKey,
 	rsaDecrypt as wasmRsaDecrypt,
+	validateSecretKey as wasmValidateSecretKey,
 } from "@bittery/crypto-wasm";
 import type {
 	DerivedKeys,
@@ -316,4 +317,26 @@ export async function verifyServerSession(
 
 	// Clean up the cached session after successful verification
 	sessionCache.delete(clientSession.proof);
+}
+
+// ============================================================================
+// Secret Key Validation
+// ============================================================================
+
+/**
+ * Validate secret key format (A3-XXXXXX-... format)
+ */
+export function validateSecretKey(secretKey: string): boolean {
+	ensureInitialized();
+	return wasmValidateSecretKey(secretKey);
+}
+
+/**
+ * Validate secret key format (async version for compatibility)
+ */
+export async function validateSecretKeyAsync(
+	secretKey: string,
+): Promise<boolean> {
+	await autoInit();
+	return wasmValidateSecretKey(secretKey);
 }

@@ -19,6 +19,7 @@ import {
 	type AccountMetadata,
 	BIOMETRIC_GRACE_PERIOD_MS,
 	DEFAULT_SESSION_EXPIRY_MS,
+	MASTER_PASSWORD_REENTRY_PERIOD_MS,
 	type StoredSessionData,
 	type VaultKeyData,
 } from "../types";
@@ -310,6 +311,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			expiresAt: now + expiryMs,
 			createdAt: now,
 			biometricEnabled,
+			lastMasterPasswordEntry: now, // Track when user last entered master password
 		};
 
 		const key = getAccountKey(resolvedEmail, "session_data");
@@ -705,6 +707,36 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		}
 	}
 
+	async getBiometricAvailabilityDetails(): Promise<{
+		hasHardware: boolean;
+		isEnrolled: boolean;
+	}> {
+		if (!this.biometryModule) {
+			return { hasHardware: false, isEnrolled: false };
+		}
+		try {
+			const status = await this.biometryModule.checkStatus();
+			return {
+				hasHardware: status.isAvailable,
+				isEnrolled: status.isAvailable, // Tauri plugin combines these
+			};
+		} catch {
+			return { hasHardware: false, isEnrolled: false };
+		}
+	}
+
+	async getBiometricType(): Promise<string | null> {
+		if (!this.biometryModule) return null;
+		try {
+			const status = await this.biometryModule.checkStatus();
+			if (!status.isAvailable) return null;
+			// Tauri biometry plugin returns biometry type in status
+			return status.biometryType ? String(status.biometryType) : "Biometric";
+		} catch {
+			return null;
+		}
+	}
+
 	async isBiometricEnabled(email?: string): Promise<boolean> {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) return false;
@@ -767,29 +799,164 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		return available && enabled && sessionValid;
 	}
 
-	// ============================================================================
-	// Private Helpers
-	// ============================================================================
+	async authenticateWithBiometricEnhanced(
+		reason = "Unlock Bittery",
+		email?: string,
+	): Promise<{
+		success: boolean;
+		error?:
+			| "not_available"
+			| "not_enrolled"
+			| "not_enabled"
+			| "authentication_failed"
+			| "user_cancelled"
+			| "lockout"
+			| "session_expired"
+			| "master_password_required"
+			| "unknown";
+		message?: string;
+	}> {
+		try {
+			const resolvedEmail = await this.resolveEmail(email);
+			if (!resolvedEmail) {
+				return {
+					success: false,
+					error: "unknown",
+					message: "No account specified",
+				};
+			}
 
-	private async isBiometricAuthRequired(email: string): Promise<boolean> {
-		const sessionData = await this.getStoredSessionData(email);
-		if (!sessionData || !sessionData.biometricEnabled) {
-			return false;
+			// Check hardware availability
+			if (!this.biometryModule) {
+				return {
+					success: false,
+					error: "not_available",
+					message: "Biometric authentication not available",
+				};
+			}
+
+			const status = await this.biometryModule.checkStatus();
+			if (!status.isAvailable) {
+				return {
+					success: false,
+					error: "not_available",
+					message: "This device does not support biometric authentication",
+				};
+			}
+
+			// Check if biometric is enabled for this account
+			const isEnabled = await this.isBiometricEnabled(resolvedEmail);
+			if (!isEnabled) {
+				return {
+					success: false,
+					error: "not_enabled",
+					message: "Biometric authentication is not enabled for this account",
+				};
+			}
+
+			// Check if session is valid
+			if (!(await this.isSessionValid(resolvedEmail))) {
+				return {
+					success: false,
+					error: "session_expired",
+					message: "Your session has expired. Please log in again",
+				};
+			}
+
+			// Check if master password re-entry is required (30-day policy)
+			if (await this.isMasterPasswordReentryRequired(resolvedEmail)) {
+				return {
+					success: false,
+					error: "master_password_required",
+					message: "For security, please enter your master password. This is required every 30 days.",
+				};
+			}
+
+			await this.biometryModule.authenticate(reason);
+
+			// Update last biometric auth timestamp
+			const store = await this.getStore();
+			const key = getAccountKey(resolvedEmail, "last_biometric_auth");
+			await store.set(key, Date.now());
+			await store.save();
+
+			return { success: true };
+		} catch (error) {
+			console.error("[storage-tauri] Biometric authentication error:", error);
+
+			// Try to determine error type from error message
+			const errorMessage =
+				error instanceof Error ? error.message : "Unknown error";
+			if (
+				errorMessage.includes("cancel") ||
+				errorMessage.includes("Cancel")
+			) {
+				return {
+					success: false,
+					error: "user_cancelled",
+					message: "Authentication was cancelled",
+				};
+			}
+
+			return {
+				success: false,
+				error: "authentication_failed",
+				message: "Biometric authentication failed. Please try again",
+			};
 		}
-
-		const store = await this.getStore();
-		const key = getAccountKey(email, "last_biometric_auth");
-		const lastAuth = await store.get<number>(key);
-
-		if (!lastAuth) {
-			return true;
-		}
-
-		const timeSinceLastAuth = Date.now() - lastAuth;
-		return timeSinceLastAuth > BIOMETRIC_GRACE_PERIOD_MS;
 	}
 
-	private async decryptStoredMasterUnlockKey(
+	// ============================================================================
+	// Master Password Re-entry (shared security feature for biometric platforms)
+	// ============================================================================
+
+	async isMasterPasswordReentryRequired(email?: string): Promise<boolean> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return false;
+
+		const sessionData = await this.getStoredSessionData(resolvedEmail);
+		if (!sessionData) return false;
+
+		// If biometric is not enabled, no re-entry requirement
+		if (!sessionData.biometricEnabled) return false;
+
+		// Check if lastMasterPasswordEntry exists, fall back to createdAt
+		const lastEntry = sessionData.lastMasterPasswordEntry ?? sessionData.createdAt;
+		const timeSinceLastEntry = Date.now() - lastEntry;
+
+		return timeSinceLastEntry > MASTER_PASSWORD_REENTRY_PERIOD_MS;
+	}
+
+	async updateLastMasterPasswordEntry(email?: string): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return;
+
+		const sessionData = await this.getStoredSessionData(resolvedEmail);
+		if (!sessionData) return;
+
+		// Update the timestamp
+		sessionData.lastMasterPasswordEntry = Date.now();
+
+		// Persist the updated session data
+		const store = await this.getStore();
+		const key = getAccountKey(resolvedEmail, "session_data");
+		await store.set(key, JSON.stringify(sessionData));
+		await store.save();
+	}
+
+	/**
+	 * Public wrapper for decrypting stored MUK
+	 */
+	async decryptStoredMasterUnlockKey(
+		email?: string,
+		skipBiometric = false,
+	): Promise<Uint8Array | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+		return this.decryptStoredMasterUnlockKeyInternal(resolvedEmail, skipBiometric);
+	}
+
+	private async decryptStoredMasterUnlockKeyInternal(
 		email: string,
 		skipBiometric = false,
 	): Promise<Uint8Array | null> {
@@ -831,6 +998,28 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			console.error("[storage-tauri] Failed to decrypt MUK:", error);
 			return null;
 		}
+	}
+
+	// ============================================================================
+	// Private Helpers
+	// ============================================================================
+
+	private async isBiometricAuthRequired(email: string): Promise<boolean> {
+		const sessionData = await this.getStoredSessionData(email);
+		if (!sessionData || !sessionData.biometricEnabled) {
+			return false;
+		}
+
+		const store = await this.getStore();
+		const key = getAccountKey(email, "last_biometric_auth");
+		const lastAuth = await store.get<number>(key);
+
+		if (!lastAuth) {
+			return true;
+		}
+
+		const timeSinceLastAuth = Date.now() - lastAuth;
+		return timeSinceLastAuth > BIOMETRIC_GRACE_PERIOD_MS;
 	}
 
 	async decryptVaultKey(

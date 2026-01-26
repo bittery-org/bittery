@@ -188,6 +188,9 @@ importers:
       '@bittery/crypto-wasm':
         specifier: workspace:*
         version: link:../../packages/crypto/wasm
+      '@bittery/hooks':
+        specifier: workspace:*
+        version: link:../../packages/hooks
       '@bittery/shared':
         specifier: workspace:*
         version: link:../../packages/shared

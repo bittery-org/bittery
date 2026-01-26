@@ -18,8 +18,13 @@ import { useMemo } from "react";
 import {
 	base64ToArrayBuffer,
 	decrypt,
+	deriveClientSession,
+	deriveKeys,
 	encrypt,
+	generateClientEphemeral,
 	generateEncryptionKey as nativeGenerateEncryptionKey,
+	validateSecretKey,
+	verifyServerSession,
 } from "../lib/crypto/native-crypto";
 import { useMobileSync } from "../hooks/use-mobile-sync";
 import { storage } from "../services/storage";
@@ -29,6 +34,7 @@ import { storage } from "../services/storage";
  * Native crypto module has slightly different signatures that we adapt here
  */
 const crypto: ICrypto = {
+	// Core encryption methods
 	decrypt,
 	encrypt,
 	// Native generateEncryptionKey returns base64 string, so we need to convert
@@ -36,6 +42,12 @@ const crypto: ICrypto = {
 		const keyBase64 = nativeGenerateEncryptionKey();
 		return base64ToArrayBuffer(keyBase64);
 	},
+	// SRP authentication methods
+	deriveKeys,
+	generateClientEphemeral,
+	deriveClientSession,
+	verifyServerSession,
+	validateSecretKey,
 };
 
 /**

@@ -16,7 +16,8 @@
 		"./services/autolock-mobile": "./src/services/autolock-mobile.ts",
 		"./hooks/vault": "./src/hooks/vault/index.ts",
 		"./hooks/items": "./src/hooks/items/index.ts",
-		"./utils": "./src/utils/index.ts"
+		"./utils": "./src/utils/index.ts",
+		"./auth": "./src/auth/index.ts"
 	},
 	"dependencies": {
 		"@bittery/shared": "workspace:*",
