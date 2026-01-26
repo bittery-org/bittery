@@ -1,4 +1,4 @@
-import type { ItemCategory } from "@bittery/shared/types";
+import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import {
 	Dialog,
 	DialogContent,
@@ -11,22 +11,6 @@ import { CreditCard, FileText, KeyRound, Smartphone, User } from "lucide-react";
 import { useState } from "react";
 import type { VaultOption } from "./item-form";
 import { ItemForm } from "./item-form";
-
-interface DecryptedItemData {
-	title: string;
-	url?: string;
-	username?: string;
-	password?: string;
-	notes?: string;
-	note?: string;
-	// TOTP fields
-	totpSecret?: string;
-	totpIssuer?: string;
-	totpAccountName?: string;
-	totpAlgorithm?: string;
-	totpDigits?: number;
-	totpPeriod?: number;
-}
 
 interface CreateItemDialogProps {
 	open: boolean;

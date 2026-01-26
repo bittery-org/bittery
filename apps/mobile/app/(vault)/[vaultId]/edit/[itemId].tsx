@@ -12,6 +12,7 @@ import {
 } from "@bittery/shared/totp";
 import type {
 	CustomField,
+	DecryptedItemData,
 	ItemCategory,
 	TotpAlgorithm,
 	TotpDigits,
@@ -49,13 +50,10 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useDecryptedItems } from "@bittery/hooks";
+import { useDecryptedItems, useUpdateItem } from "@bittery/hooks";
 import { PasswordGenerator } from "../../../../src/components/password-generator";
 import { QrCodeScanner } from "../../../../src/components/qr-code-scanner";
 import { TotpDisplay } from "../../../../src/components/totp-display";
-import { encrypt } from "../../../../src/lib/crypto";
-import { useTRPCClient } from "../../../../src/lib/trpc";
-import * as storage from "../../../../src/services/storage";
 
 // Helper function to generate unique IDs
 const generateId = () => Crypto.randomUUID();
@@ -78,9 +76,9 @@ export default function EditItemScreen() {
 		vaultId: string;
 		itemId: string;
 	}>();
-	const trpcClient = useTRPCClient();
+	const updateItem = useUpdateItem();
 
-	const { items, isLoading, refetch } = useDecryptedItems(vaultId);
+	const { items, isLoading } = useDecryptedItems(vaultId);
 	const item = items.find((i) => i.id === itemId);
 
 	const [initialized, setInitialized] = useState(false);
@@ -221,17 +219,8 @@ export default function EditItemScreen() {
 		setSaving(true);
 
 		try {
-			const vaultKey = await storage.getDecryptedVaultKey(vaultId);
-			if (!vaultKey) {
-				Alert.alert(
-					"Error",
-					"Unable to access vault key. Please try logging in again.",
-				);
-				return;
-			}
-
 			// Build the data object based on category
-			let itemData: Record<string, unknown> = {
+			let itemData: DecryptedItemData = {
 				title,
 				notes: notes || undefined,
 				tags: tags.length > 0 ? tags : undefined,
@@ -302,18 +291,12 @@ export default function EditItemScreen() {
 					break;
 			}
 
-			// Encrypt the data
-			const encryptedData = await encrypt(JSON.stringify(itemData), vaultKey);
-
-			// Update the item via API
-			await trpcClient.vault.updateItem.mutate({
+			// Update the item using shared hook (handles encryption internally)
+			await updateItem.mutateAsync({
 				itemId,
-				encryptedData: encryptedData.ciphertext,
-				encryptionIv: encryptedData.iv,
+				vaultId,
+				data: itemData,
 			});
-
-			// Refetch the items to update the cache
-			await refetch();
 
 			Alert.alert("Success", "Item updated successfully", [
 				{

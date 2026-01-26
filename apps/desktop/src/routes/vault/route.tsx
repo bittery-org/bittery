@@ -1,4 +1,3 @@
-import { useTRPCClient } from "@bittery/shared/trpc";
 import type { ItemCategory } from "@bittery/shared/types";
 import { toast } from "@bittery/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -16,14 +15,18 @@ import { CreateVaultDialog } from "../../components/vault/create-vault-dialog";
 import { DeleteVaultDialog } from "../../components/vault/delete-vault-dialog";
 import { EditVaultDialog } from "../../components/vault/edit-vault-dialog";
 import { ImportDialog } from "../../components/vault/import-dialog";
-import { useVaultOperations } from "../../components/vault/use-vault-operations";
 import { VaultHeader } from "../../components/vault/vault-header";
 import { VaultSidebar } from "../../components/vault/vault-sidebar";
-import { useCrossVaultTags } from "@bittery/hooks";
+import type { DecryptedItemData } from "@bittery/shared/types";
+import {
+	useCrossVaultTags,
+	useCreateVault,
+	useUpdateVault,
+	useDeleteVault,
+	useCreateItem,
+} from "@bittery/hooks";
 import { trpc } from "../../lib/providers";
-import { encrypt } from "../../lib/tauri-crypto";
 import { VaultDndProvider } from "../../providers/dnd-provider";
-import { useQueryInvalidator } from "../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault")({
 	component: RouteComponent,
@@ -35,7 +38,7 @@ export const Route = createFileRoute("/vault")({
 		}
 
 		// Check if user has stored credentials for active account
-		const hasSecretKey = await storage.hasStoredSecretKey(activeEmail);
+		const hasSecretKey = await storage.getStoredSecretKey(activeEmail);
 		const sessionValid = await storage.isSessionValid(activeEmail);
 
 		if (!hasSecretKey || !sessionValid) {
@@ -49,20 +52,6 @@ export const Route = createFileRoute("/vault")({
 		}
 	},
 });
-
-interface DecryptedItemData {
-	title: string;
-	url?: string;
-	username?: string;
-	password?: string;
-	notes?: string;
-	note?: string;
-	// Identity fields
-	firstName?: string;
-	middleName?: string;
-	lastName?: string;
-	email?: string;
-}
 
 function RouteComponent() {
 	const { data: vaultKeys } = useQuery({
@@ -78,10 +67,13 @@ function RouteComponent() {
 
 	const params = useParams({ strict: false });
 	const navigate = useNavigate();
-	const trpcClient = useTRPCClient();
 	const queryClient = useQueryClient();
-	const invalidator = useQueryInvalidator();
-	const { createVault, updateVault, deleteVault } = useVaultOperations();
+
+	// Shared hooks for vault and item operations
+	const createVaultMutation = useCreateVault();
+	const updateVaultMutation = useUpdateVault();
+	const deleteVaultMutation = useDeleteVault();
+	const createItemMutation = useCreateItem();
 
 	const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
 	const [isNewVaultDialogOpen, setIsNewVaultDialogOpen] = useState(false);
@@ -98,50 +90,27 @@ function RouteComponent() {
 	const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
 	const [importingVaultId, setImportingVaultId] = useState<string | null>(null);
 
-	const handleCreateItem = async (
-		data: DecryptedItemData,
-		vaultId: string,
-		category: ItemCategory,
-	) => {
+	// Vault operation handlers
+	const handleCreateVault = async (data: {
+		name: string;
+		type: "personal" | "team";
+		icon: string;
+		imageFile: File | null;
+	}) => {
 		try {
-			// Get vault key for encryption
-			const vaultKey = await storage.getDecryptedVaultKey(vaultId);
-
-			if (!vaultKey) {
-				throw new Error("No vault key found");
-			}
-
-			// Encrypt the item data
-			const encryptedData = await encrypt(JSON.stringify(data), vaultKey);
-
-			const createdItem = await trpcClient.vault.createItem.mutate({
-				vaultId: vaultId,
-				category: category,
-				encryptedData: encryptedData.ciphertext,
-				encryptionIv: encryptedData.iv,
-				encryptionAlgorithm: encryptedData.algorithm,
+			// Hook handles image upload internally if imageFile is provided
+			const result = await createVaultMutation.mutateAsync({
+				name: data.name,
+				type: data.type,
+				icon: data.icon,
+				imageFile: data.imageFile ?? undefined,
 			});
 
-			// Prefetch the item to avoid race condition
-			await queryClient.prefetchQuery(
-				trpc.vault.getItem.queryOptions({ itemId: createdItem.itemId }),
-			);
-			// Invalidate queries to refresh the list
-			await invalidator.invalidateVaultList(vaultId);
-
-			// Close dialog
-			setIsNewItemDialogOpen(false);
-
-			// Navigate to the newly created item
-			navigate({
-				to: "/vault/$id/$itemId",
-				params: { id: vaultId, itemId: createdItem.itemId },
-			});
-
-			toast.success("Item created successfully");
+			toast.success("Vault created successfully");
+			navigate({ to: "/vault/$id", params: { id: result.vaultId } });
 		} catch (error) {
 			const errorMessage =
-				error instanceof Error ? error.message : "Failed to create item";
+				error instanceof Error ? error.message : "Failed to create vault";
 			toast.error(errorMessage);
 			throw error;
 		}
@@ -153,8 +122,15 @@ function RouteComponent() {
 	};
 
 	const handleUpdateVault = async (vaultId: string, name: string) => {
-		await updateVault(vaultId, name);
-		setEditingVault(null);
+		try {
+			await updateVaultMutation.mutateAsync({ vaultId, name });
+			setEditingVault(null);
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : "Failed to update vault";
+			toast.error(errorMessage);
+			throw error;
+		}
 	};
 
 	const handleOpenDeleteVault = (vault: { id: string; name: string }) => {
@@ -163,8 +139,57 @@ function RouteComponent() {
 	};
 
 	const handleDeleteVault = async (vaultId: string) => {
-		await deleteVault(vaultId, params.id);
-		setDeletingVault(null);
+		try {
+			await deleteVaultMutation.mutateAsync({ vaultId });
+			setDeletingVault(null);
+
+			if (params.id === vaultId) {
+				navigate({ to: "/vault" });
+			}
+
+			toast.success("Vault deleted successfully");
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : "Failed to delete vault";
+			toast.error(errorMessage);
+			throw error;
+		}
+	};
+
+	// Item operation handlers
+	const handleCreateItem = async (
+		data: DecryptedItemData,
+		vaultId: string,
+		category: ItemCategory,
+	) => {
+		try {
+			const result = await createItemMutation.mutateAsync({
+				vaultId,
+				category,
+				data,
+			});
+
+			// Prefetch the item to avoid race condition
+			await queryClient.prefetchQuery(
+				trpc.vault.getItem.queryOptions({ itemId: result.itemId }),
+			);
+
+			// Close dialog
+			setIsNewItemDialogOpen(false);
+
+			// Navigate to the newly created item
+			navigate({
+				to: "/vault/$id/$itemId",
+				params: { id: vaultId, itemId: result.itemId },
+			});
+
+			toast.success("Item created successfully");
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : "Failed to create item";
+			toast.error(errorMessage);
+			throw error;
+		}
 	};
 
 	const handleOpenImportDialog = (vaultId: string) => {
@@ -218,7 +243,7 @@ function RouteComponent() {
 				<CreateVaultDialog
 					open={isNewVaultDialogOpen}
 					onOpenChange={setIsNewVaultDialogOpen}
-					onSubmit={createVault}
+					onSubmit={handleCreateVault}
 				/>
 
 				<EditVaultDialog

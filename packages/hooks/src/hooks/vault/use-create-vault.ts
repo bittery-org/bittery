@@ -1,7 +1,7 @@
 /**
  * useCreateVault Hook
  *
- * Creates a new vault with encryption.
+ * Creates a new vault with encryption and optional image upload.
  * Returns a React Query mutation - apps handle success/error UI.
  */
 
@@ -9,6 +9,11 @@ import { useTRPCClient } from "@bittery/shared/trpc";
 import { useMutation } from "@tanstack/react-query";
 import { usePlatform, useQueryInvalidator } from "../../context/platform-context";
 import { refreshVaultKeys } from "../../utils/vault-utils";
+
+/**
+ * Image file input - supports File (browser) or Blob
+ */
+export type ImageFileInput = File | (Blob & { name?: string });
 
 /**
  * Input for creating a new vault
@@ -20,7 +25,18 @@ export interface CreateVaultInput {
 	type: "personal" | "team";
 	/** Vault icon identifier */
 	icon: string;
-	/** S3 image key if custom image was uploaded */
+	/**
+	 * Custom image file for the vault (optional).
+	 * If provided, the hook will upload it to S3 and use the returned key.
+	 * Accepts File (browser) or Blob with optional name.
+	 */
+	imageFile?: ImageFileInput;
+	/**
+	 * S3 image key if custom image was already uploaded (optional).
+	 * Use this if you've already uploaded the image yourself.
+	 * If both imageFile and imageKey are provided, imageKey takes precedence.
+	 * @deprecated Prefer using imageFile - the hook handles upload automatically
+	 */
 	imageKey?: string;
 }
 
@@ -35,6 +51,7 @@ export interface CreateVaultResult {
  * Hook for creating a new vault.
  *
  * Handles:
+ * - Image upload to S3 (if imageFile provided)
  * - Generating a new vault encryption key
  * - Encrypting the vault key with the user's Master Unlock Key
  * - Creating the vault via API
@@ -44,7 +61,6 @@ export interface CreateVaultResult {
  * Does NOT handle:
  * - Toast notifications (app responsibility)
  * - Navigation (app responsibility)
- * - Image upload (should be done before calling this hook)
  *
  * @example
  * ```tsx
@@ -52,7 +68,12 @@ export interface CreateVaultResult {
  *
  * const handleSubmit = async (data) => {
  *   try {
- *     const result = await createVault.mutateAsync(data);
+ *     const result = await createVault.mutateAsync({
+ *       name: "My Vault",
+ *       type: "personal",
+ *       icon: "shield",
+ *       imageFile: selectedFile, // optional - hook handles upload
+ *     });
  *     toast.success("Vault created");
  *     navigate({ to: "/vault/$id", params: { id: result.vaultId } });
  *   } catch (error) {
@@ -78,6 +99,43 @@ export function useCreateVault() {
 				throw new Error("Vault name must be at least 2 characters");
 			}
 
+			// Determine the image key to use
+			let imageKey = input.imageKey;
+
+			// If imageFile is provided and no imageKey, upload the image
+			if (input.imageFile && !imageKey) {
+				const file = input.imageFile;
+				const contentType = file.type;
+				// File has name property, Blob might have it added
+				const fileName = "name" in file && file.name ? file.name : "image";
+
+				// Validate it's an image
+				if (!contentType.startsWith("image/")) {
+					throw new Error("Vault image must be an image file");
+				}
+
+				// Get presigned upload URL
+				const upload = await trpcClient.vault.createImageUpload.mutate({
+					fileName,
+					contentType,
+				});
+
+				// Upload the file
+				const uploadResponse = await fetch(upload.uploadUrl, {
+					method: "PUT",
+					headers: {
+						"Content-Type": contentType,
+					},
+					body: file,
+				});
+
+				if (!uploadResponse.ok) {
+					throw new Error("Failed to upload vault image");
+				}
+
+				imageKey = upload.key;
+			}
+
 			// Generate a new vault encryption key
 			const vaultKey = await crypto.generateEncryptionKey();
 
@@ -100,7 +158,7 @@ export function useCreateVault() {
 				type: input.type,
 				encryptedVaultKey: JSON.stringify(encryptedVaultKeyData),
 				icon: input.icon,
-				...(input.imageKey && { imageKey: input.imageKey }),
+				...(imageKey && { imageKey }),
 			});
 
 			return { vaultId: result.vaultId };

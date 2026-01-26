@@ -1,4 +1,3 @@
-import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	AlertDialog,
@@ -28,16 +27,14 @@ import {
 	SelectValue,
 	toast,
 } from "@bittery/ui";
-import { useMutation } from "@tanstack/react-query";
 import { AlertTriangle, Copy, Link, Loader2, X } from "lucide-react";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
 import {
-	arrayBufferToBase64,
-	encrypt,
-	generateEncryptionKey,
-} from "../../lib/tauri-crypto";
-import { useQueryInvalidator } from "../../providers/sync-provider";
+	useCreateShare,
+	type ShareAccessMode,
+	type ShareExpirationOption,
+} from "@bittery/hooks";
 
 interface ShareItemDialogProps {
 	open: boolean;
@@ -45,10 +42,7 @@ interface ShareItemDialogProps {
 	item: DecryptedItem;
 }
 
-type ExpirationOption = "1hour" | "1day" | "7days" | "14days" | "30days";
-type AccessMode = "anyone" | "email-restricted";
-
-const EXPIRATION_LABELS: Record<ExpirationOption, string> = {
+const EXPIRATION_LABELS: Record<ShareExpirationOption, string> = {
 	"1hour": "1 hour",
 	"1day": "1 day",
 	"7days": "7 days",
@@ -65,105 +59,36 @@ export function ShareItemDialog({
 	const [generatedLink, setGeneratedLink] = useState<string | null>(null);
 
 	// Form state
-	const [accessMode, setAccessMode] = useState<AccessMode>("anyone");
-	const [expiresIn, setExpiresIn] = useState<ExpirationOption>("7days");
+	const [accessMode, setAccessMode] = useState<ShareAccessMode>("anyone");
+	const [expiresIn, setExpiresIn] = useState<ShareExpirationOption>("7days");
 	const [isOneTimeUse, setIsOneTimeUse] = useState(false);
 	const [allowedEmails, setAllowedEmails] = useState<string[]>([]);
 	const [emailInput, setEmailInput] = useState("");
 
-	const trpcClient = useTRPCClient();
-	const invalidator = useQueryInvalidator();
+	// Use shared hook for share creation
+	const createShare = useCreateShare();
 
-	const createShareMutation = useMutation({
-		mutationFn: async () => {
-			// Get the vault key to decrypt item data (using Tauri storage API)
-			const vaultKey = await storage.getDecryptedVaultKey(item.vaultId);
-			if (!vaultKey) {
-				throw new Error("Could not decrypt vault key. Please log in again.");
-			}
-
-			// Generate a new share-specific encryption key
-			const shareKey = await generateEncryptionKey();
-
-			// Prepare item data for sharing (sanitized, no metadata)
-			const itemDataToShare = {
-				title: item.title,
-				category: item.category,
-				url: item.url,
-				urls: item.urls,
-				username: item.username,
-				password: item.password,
-				notes: item.notes,
-				note: item.note,
-				customFields: item.customFields,
-				// Credit card fields
-				cardholderName: item.cardholderName,
-				cardNumber: item.cardNumber,
-				cvv: item.cvv,
-				expiryDate: item.expiryDate,
-				billingAddress: item.billingAddress,
-				// Identity fields
-				firstName: item.firstName,
-				middleName: item.middleName,
-				lastName: item.lastName,
-				email: item.email,
-				addresses: item.addresses,
-				phoneNumbers: item.phoneNumbers,
-				ssn: item.ssn,
-				passportNumber: item.passportNumber,
-				driversLicense: item.driversLicense,
-				dateOfBirth: item.dateOfBirth,
-				// TOTP fields
-				totpSecret: item.totpSecret,
-				totpIssuer: item.totpIssuer,
-				totpAccountName: item.totpAccountName,
-				totpAlgorithm: item.totpAlgorithm,
-				totpDigits: item.totpDigits,
-				totpPeriod: item.totpPeriod,
-			};
-
-			// Encrypt item data with the share key
-			const encryptedData = await encrypt(
-				JSON.stringify(itemDataToShare),
-				shareKey,
-			);
-
-			// Encode the share key as base64 for the URL
-			const shareKeyBase64 = arrayBufferToBase64(shareKey);
-
-			// Encrypt the share key for storage (we'll use a simple encoding for now)
-			// In production, you might want to use a server-side key
-			const shareKeyEncrypted = await encrypt(shareKeyBase64, shareKey);
-
-			const result = await trpcClient.share.create.mutate({
-				itemId: item.id,
+	const handleCreateShare = async () => {
+		try {
+			const result = await createShare.mutateAsync({
+				item,
 				accessMode,
-				isOneTimeUse,
 				expiresIn,
-				allowedEmails:
-					accessMode === "email-restricted" ? allowedEmails : undefined,
-				encryptedItemData: encryptedData.ciphertext,
-				encryptionIv: encryptedData.iv,
-				encryptedShareKey: shareKeyEncrypted.ciphertext,
-				shareKeyIv: shareKeyEncrypted.iv,
+				isOneTimeUse,
+				allowedEmails: accessMode === "email-restricted" ? allowedEmails : undefined,
 			});
 
-			// Generate the shareable link with the key in the fragment
-			// For desktop app, we use the effective web app URL (custom or derived from server URL)
+			// Build the share URL with desktop app's effective web URL
 			const baseUrl = await storage.getEffectiveWebAppUrl();
-			const shareUrl = `${baseUrl}/share/${result.token}#${shareKeyBase64}`;
+			const shareUrl = `${baseUrl}/share/${result.token}#${result.shareKeyBase64}`;
 
-			return { ...result, shareUrl };
-		},
-		onSuccess: async (data) => {
-			setGeneratedLink(data.shareUrl);
-			await invalidator.invalidateShare();
+			setGeneratedLink(shareUrl);
 			toast.success("Share link created successfully!");
-		},
-		onError: (error: Error) => {
-			toast.error(error.message);
-		},
-	});
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : "Failed to create share link";
+			toast.error(errorMessage);
+		}
+	};
 
 	const handleAddEmail = () => {
 		const email = emailInput.trim().toLowerCase();
@@ -203,7 +128,7 @@ export function ShareItemDialog({
 
 	const handleConfirmCreate = () => {
 		setShowConfirmation(false);
-		createShareMutation.mutate();
+		handleCreateShare();
 	};
 
 	const handleClose = () => {
@@ -274,7 +199,7 @@ export function ShareItemDialog({
 								<Label>Who can access</Label>
 								<Select
 									value={accessMode}
-									onValueChange={(value: AccessMode) => setAccessMode(value)}
+									onValueChange={(value: ShareAccessMode) => setAccessMode(value)}
 								>
 									<SelectTrigger>
 										<SelectValue />
@@ -348,7 +273,7 @@ export function ShareItemDialog({
 								<Label>Link expires in</Label>
 								<Select
 									value={expiresIn}
-									onValueChange={(value: ExpirationOption) =>
+									onValueChange={(value: ShareExpirationOption) =>
 										setExpiresIn(value)
 									}
 								>
@@ -386,12 +311,12 @@ export function ShareItemDialog({
 								<Button
 									onClick={handleCreateLink}
 									disabled={
-										createShareMutation.isPending ||
+										createShare.isPending ||
 										(accessMode === "email-restricted" &&
 											allowedEmails.length === 0)
 									}
 								>
-									{createShareMutation.isPending ? (
+									{createShare.isPending ? (
 										<>
 											<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 											Creating...

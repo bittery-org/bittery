@@ -105,6 +105,15 @@ export {
 	type PermanentDeleteItemInput,
 } from "./hooks/items";
 
+// Share Mutation Hooks (write operations)
+export {
+	useCreateShare,
+	type CreateShareInput,
+	type CreateShareResult,
+	type ShareExpirationOption,
+	type ShareAccessMode,
+} from "./hooks/share";
+
 // Utilities
 export { refreshVaultKeys } from "./utils/vault-utils";
 

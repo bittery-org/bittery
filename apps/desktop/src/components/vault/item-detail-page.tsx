@@ -12,6 +12,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
+	toast,
 } from "@bittery/ui";
 import {
 	Copy as CopyIcon,
@@ -23,13 +24,19 @@ import {
 	Trash2,
 } from "lucide-react";
 import { useCallback, useState } from "react";
-import { useDecryptedItem } from "@bittery/hooks";
+import { useNavigate } from "@tanstack/react-router";
+import {
+	useDecryptedItem,
+	useUpdateItem,
+	useDeleteItem,
+	useToggleFavorite,
+	useCreateItem,
+} from "@bittery/hooks";
 import Loader from "../loader";
 import ItemDetail from "./item-detail";
 import { ItemForm } from "./item-form";
 import { ShareHistoryDialog } from "./share-history-dialog";
 import { ShareItemDialog } from "./share-item-dialog";
-import { useVaultItemOperations } from "./use-vault-item-operations";
 import { VaultAvatar } from "./vault-avatar";
 
 interface VaultInfo {
@@ -57,9 +64,14 @@ export function ItemDetailPage({
 	const [isShareHistoryOpen, setIsShareHistoryOpen] = useState(false);
 	const [isUpdatingTags, setIsUpdatingTags] = useState(false);
 
+	const navigate = useNavigate();
 	const { rawItem, decryptedData, isLoading } = useDecryptedItem(itemId);
-	const { updateItem, deleteItem, toggleFavorite, duplicateItem } =
-		useVaultItemOperations();
+
+	// Shared hooks for item operations
+	const updateItem = useUpdateItem();
+	const deleteItem = useDeleteItem();
+	const toggleFavorite = useToggleFavorite();
+	const createItem = useCreateItem();
 
 	const handleTagsChange = useCallback(
 		(newTags: string[]) => {
@@ -77,12 +89,12 @@ export function ItemDetailPage({
 					itemId: rawItem.id,
 					vaultId: rawItem.vaultId,
 					data: updatedData,
-					skipToast: true,
 				},
 				{
 					onSettled: () => {
 						setIsUpdatingTags(false);
 					},
+					// Don't show toast for tag updates (silent update)
 				},
 			);
 		},
@@ -97,20 +109,54 @@ export function ItemDetailPage({
 		setIsDeleteDialogOpen(true);
 	};
 
-	const handleDuplicate = () => {
-		if (!rawItem) return;
-		duplicateItem.mutate({
-			itemId: rawItem.id,
-			vaultId: rawItem.vaultId,
-		});
+	const handleDuplicate = async () => {
+		if (!rawItem || !decryptedData) return;
+
+		try {
+			// Create a duplicate with "Copy of" prefix
+			const duplicatedData: DecryptedItemData = {
+				...decryptedData,
+				title: `Copy of ${decryptedData.title || "Item"}`,
+			};
+
+			const result = await createItem.mutateAsync({
+				vaultId: rawItem.vaultId,
+				category: rawItem.category,
+				data: duplicatedData,
+			});
+
+			toast.success("Item duplicated successfully");
+
+			// Navigate to the duplicated item
+			navigate({
+				to: "/vault/$id/$itemId",
+				params: { id: rawItem.vaultId, itemId: result.itemId },
+			});
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : "Failed to duplicate item";
+			toast.error(errorMessage);
+		}
 	};
 
-	const confirmDelete = () => {
+	const confirmDelete = async () => {
 		if (!rawItem) return;
-		deleteItem.mutate({
-			itemId: rawItem.id,
-			vaultId: rawItem.vaultId,
-		});
+
+		try {
+			await deleteItem.mutateAsync({
+				itemId: rawItem.id,
+				vaultId: rawItem.vaultId,
+			});
+
+			toast.success("Item moved to trash");
+
+			// Navigate back to vault
+			navigate({ to: "/vault/$id", params: { id: rawItem.vaultId } });
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : "Failed to delete item";
+			toast.error(errorMessage);
+		}
 	};
 
 	const getCategoryDisplayName = (category: string) => {
@@ -168,19 +214,32 @@ export function ItemDetailPage({
 							<DropdownMenuContent align="end">
 								<DropdownMenuItem
 									onClick={handleDuplicate}
-									disabled={duplicateItem.isPending}
+									disabled={createItem.isPending}
 								>
 									<CopyIcon className="mr-2 size-4" />
 									Duplicate
 								</DropdownMenuItem>
 								<DropdownMenuItem
-									onClick={() => {
+									onClick={async () => {
 										if (!rawItem) return;
-										toggleFavorite.mutate({
-											itemId: rawItem.id,
-											favorite: !rawItem.favorite,
-											vaultId: rawItem.vaultId,
-										});
+										try {
+											await toggleFavorite.mutateAsync({
+												itemId: rawItem.id,
+												vaultId: rawItem.vaultId,
+												favorite: !rawItem.favorite,
+											});
+											toast.success(
+												!rawItem.favorite
+													? "Added to favorites"
+													: "Removed from favorites",
+											);
+										} catch (error) {
+											const errorMessage =
+												error instanceof Error
+													? error.message
+													: "Failed to update favorite";
+											toast.error(errorMessage);
+										}
 									}}
 									disabled={toggleFavorite.isPending}
 								>
@@ -235,19 +294,22 @@ export function ItemDetailPage({
 						<ItemForm
 							category={rawItem.category}
 							initialData={decryptedData}
-							onSubmit={(data) => {
-								updateItem.mutate(
-									{
+							onSubmit={async (data) => {
+								try {
+									await updateItem.mutateAsync({
 										itemId: rawItem.id,
 										vaultId: rawItem.vaultId,
 										data,
-									},
-									{
-										onSuccess: () => {
-											setIsEditDialogOpen(false);
-										},
-									},
-								);
+									});
+									toast.success("Item updated successfully");
+									setIsEditDialogOpen(false);
+								} catch (error) {
+									const errorMessage =
+										error instanceof Error
+											? error.message
+											: "Failed to update item";
+									toast.error(errorMessage);
+								}
 							}}
 							onCancel={() => setIsEditDialogOpen(false)}
 							isSubmitting={updateItem.isPending}

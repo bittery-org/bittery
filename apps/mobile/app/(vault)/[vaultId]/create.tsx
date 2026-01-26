@@ -10,6 +10,7 @@ import {
 	parseOtpAuthUri,
 } from "@bittery/shared/totp";
 import type {
+	DecryptedItemData,
 	ItemCategory,
 	TotpAlgorithm,
 	TotpDigits,
@@ -43,13 +44,10 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useCreateItem } from "@bittery/hooks";
 import { PasswordGenerator } from "../../../src/components/password-generator";
 import { QrCodeScanner } from "../../../src/components/qr-code-scanner";
 import { TotpDisplay } from "../../../src/components/totp-display";
-import { encrypt } from "../../../src/lib/crypto";
-
-import { useTRPCClient } from "../../../src/lib/trpc";
-import * as storage from "../../../src/services/storage";
 
 const categoryOptions: {
 	value: ItemCategory;
@@ -66,7 +64,7 @@ const categoryOptions: {
 export default function CreateItemScreen() {
 	const router = useRouter();
 	const { vaultId } = useLocalSearchParams<{ vaultId: string }>();
-	const trpcClient = useTRPCClient();
+	const createItem = useCreateItem();
 
 	const [category, setCategory] = useState<ItemCategory>("login");
 	const [title, setTitle] = useState("");
@@ -120,18 +118,8 @@ export default function CreateItemScreen() {
 		setSaving(true);
 
 		try {
-			// Get vault key for encryption
-			const vaultKey = await storage.getDecryptedVaultKey(vaultId);
-			if (!vaultKey) {
-				Alert.alert(
-					"Error",
-					"Unable to access vault key. Please try logging in again.",
-				);
-				return;
-			}
-
 			// Build the data object based on category
-			let itemData: Record<string, unknown> = { title };
+			let itemData: DecryptedItemData = { title };
 
 			switch (category) {
 				case "login":
@@ -185,16 +173,11 @@ export default function CreateItemScreen() {
 				itemData.notes = notes;
 			}
 
-			// Encrypt the data
-			const encryptedData = await encrypt(JSON.stringify(itemData), vaultKey);
-
-			// Create the item via API
-			await trpcClient.vault.createItem.mutate({
+			// Create the item using shared hook (handles encryption internally)
+			await createItem.mutateAsync({
 				vaultId,
 				category,
-				encryptedData: encryptedData.ciphertext,
-				encryptionIv: encryptedData.iv,
-				encryptionAlgorithm: encryptedData.algorithm,
+				data: itemData,
 			});
 
 			Alert.alert("Success", "Item created successfully", [
