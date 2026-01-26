@@ -16,17 +16,11 @@
  * # Errors
  * Returns error if client proof is invalid
  */
-export declare function deriveServerSession(
-	serverSecretEphemeral: string,
-	clientPublicEphemeral: string,
-	salt: string,
-	verifier: string,
-	clientSessionProof: string,
-): Session;
+export declare function deriveServerSession(serverSecretEphemeral: string, clientPublicEphemeral: string, salt: string, verifier: string, clientSessionProof: string): Session
 
 export interface Ephemeral {
-	public: string;
-	secret: string;
+  public: string
+  secret: string
 }
 
 /**
@@ -38,9 +32,9 @@ export interface Ephemeral {
  * # Returns
  * Server ephemeral containing public key (sent to client) and secret (kept server-side)
  */
-export declare function generateServerEphemeral(verifier: string): Ephemeral;
+export declare function generateServerEphemeral(verifier: string): Ephemeral
 
 export interface Session {
-	key: string;
-	proof: string;
+  key: string
+  proof: string
 }
