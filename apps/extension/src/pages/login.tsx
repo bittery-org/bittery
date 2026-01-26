@@ -1,5 +1,5 @@
 import { normalizeServerUrl } from "@bittery/shared/server-url";
-import { Button, Card, Input, Label, toast } from "@bittery/ui";
+import { Button, Card, Input, Label, toast, VaultIcon } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -82,18 +82,24 @@ export function LoginPage() {
 	});
 
 	return (
-		<div className="flex min-h-[400px] items-center justify-center p-4">
-			<div className="w-full max-w-sm space-y-4">
-				<div className="flex flex-col space-y-2 text-center">
-					<h1 className="font-semibold text-xl tracking-tight">
-						Sign in to your account
-					</h1>
-					<p className="text-muted-foreground text-sm">
-						Enter your details below to access your vault
-					</p>
+		<div className="h-full overflow-y-auto">
+			<div className="flex min-h-full justify-center p-4">
+				<div className="my-auto w-full max-w-sm space-y-6">
+				<div className="flex flex-col items-center space-y-3 text-center">
+					<div style={{ width: 80, height: 80 }}>
+						<VaultIcon state="locked" size={80} />
+					</div>
+					<div>
+						<h1 className="font-semibold text-xl tracking-tight">
+							Sign in to Bittery
+						</h1>
+						<p className="mt-1 text-muted-foreground text-sm">
+							Enter your credentials to access your vault
+						</p>
+					</div>
 				</div>
 
-				<Card className="border-0 bg-transparent p-8 shadow-none sm:border sm:bg-card sm:shadow-sm">
+				<Card className="border-0 bg-transparent p-6 shadow-none sm:border sm:bg-card sm:shadow-sm">
 					<form
 						onSubmit={(e) => {
 							e.preventDefault();
@@ -102,7 +108,9 @@ export function LoginPage() {
 						className="space-y-4"
 					>
 						<div className="space-y-2">
-							<Label htmlFor="serverUrl">Server URL</Label>
+							<Label htmlFor="serverUrl" className="text-sm font-medium">
+								Server URL
+							</Label>
 							<Input
 								id="serverUrl"
 								name="serverUrl"
@@ -114,16 +122,19 @@ export function LoginPage() {
 									persistServerUrl();
 								}}
 								required
+								className="h-10"
 							/>
 							<p className="text-muted-foreground text-xs">
-								Use your self-hosted Bittery server URL.
+								Your self-hosted Bittery server URL
 							</p>
 						</div>
 
 						<form.Field name="email">
 							{(field) => (
 								<div className="space-y-2">
-									<Label htmlFor={field.name}>Email</Label>
+									<Label htmlFor={field.name} className="text-sm font-medium">
+										Email
+									</Label>
 									<Input
 										id={field.name}
 										name={field.name}
@@ -132,6 +143,7 @@ export function LoginPage() {
 										value={field.state.value}
 										onChange={(e) => field.handleChange(e.target.value)}
 										required
+										className="h-10"
 									/>
 								</div>
 							)}
@@ -140,7 +152,9 @@ export function LoginPage() {
 						<form.Field name="password">
 							{(field) => (
 								<div className="space-y-2">
-									<Label htmlFor={field.name}>Password</Label>
+									<Label htmlFor={field.name} className="text-sm font-medium">
+										Password
+									</Label>
 									<div className="relative">
 										<Input
 											id={field.name}
@@ -150,12 +164,13 @@ export function LoginPage() {
 											value={field.state.value}
 											onChange={(e) => field.handleChange(e.target.value)}
 											required
+											className="h-10 pr-10"
 										/>
 										<Button
 											type="button"
 											variant="ghost"
 											size="icon"
-											className="absolute top-0 right-0 h-full"
+											className="absolute top-1/2 right-0 size-10 -translate-y-1/2 text-muted-foreground hover:text-foreground"
 											onClick={() => setShowPassword(!showPassword)}
 										>
 											{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -168,7 +183,9 @@ export function LoginPage() {
 						<form.Field name="secretKey">
 							{(field) => (
 								<div className="space-y-2">
-									<Label htmlFor={field.name}>Secret Key</Label>
+									<Label htmlFor={field.name} className="text-sm font-medium">
+										Secret Key
+									</Label>
 									<div className="relative">
 										<Input
 											id={field.name}
@@ -178,12 +195,13 @@ export function LoginPage() {
 											value={field.state.value}
 											onChange={(e) => field.handleChange(e.target.value)}
 											required
+											className="h-10 pr-10"
 										/>
 										<Button
 											type="button"
 											variant="ghost"
 											size="icon"
-											className="absolute top-0 right-0 h-full"
+											className="absolute top-1/2 right-0 size-10 -translate-y-1/2 text-muted-foreground hover:text-foreground"
 											onClick={() => setShowSecretKey(!showSecretKey)}
 										>
 											{showSecretKey ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -195,7 +213,7 @@ export function LoginPage() {
 
 						<Button
 							type="submit"
-							className="w-full"
+							className="h-10 w-full font-medium"
 							disabled={loginMutation.isPending}
 						>
 							{loginMutation.isPending ? "Signing in..." : "Sign in"}
@@ -203,6 +221,7 @@ export function LoginPage() {
 					</form>
 				</Card>
 			</div>
+		</div>
 		</div>
 	);
 }
