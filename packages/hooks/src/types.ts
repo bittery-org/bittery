@@ -8,7 +8,107 @@
 import type { EncryptedData } from "@bittery/types";
 
 /**
+ * Crypto interface for platform-specific encryption operations.
+ * All platforms (WASM, Tauri, FFI) export these exact functions
+ * with identical signatures - apps just pass their crypto module directly.
+ */
+export interface ICrypto {
+	/**
+	 * Decrypt data using AES-256-GCM.
+	 * @param encryptedData - The encrypted data object (ciphertext, iv, algorithm)
+	 * @param key - The decryption key (256-bit)
+	 * @returns Decrypted plaintext string
+	 */
+	decrypt(encryptedData: EncryptedData, key: Uint8Array): Promise<string>;
+
+	/**
+	 * Encrypt data using AES-256-GCM.
+	 * @param plaintext - The string to encrypt
+	 * @param key - The encryption key (256-bit)
+	 * @returns Encrypted data object with ciphertext, iv, and algorithm
+	 */
+	encrypt(plaintext: string, key: Uint8Array): Promise<EncryptedData>;
+
+	/**
+	 * Generate a random 256-bit encryption key.
+	 * @returns A new random key as Uint8Array
+	 */
+	generateEncryptionKey(): Promise<Uint8Array>;
+}
+
+/**
+ * Query invalidator interface for cache invalidation after mutations.
+ * Matches the return type of createQueryInvalidator() from @bittery/sync.
+ */
+export interface IQueryInvalidator {
+	/**
+	 * Invalidate item-related queries.
+	 * @param itemId - The item that was modified
+	 * @param vaultId - The vault containing the item
+	 */
+	invalidateItem(itemId: string, vaultId: string): Promise<void>;
+
+	/**
+	 * Invalidate vault list (items in vault) queries.
+	 * @param vaultId - The vault to invalidate
+	 */
+	invalidateVaultList(vaultId: string): Promise<void>;
+
+	/**
+	 * Invalidate vault keys cache.
+	 */
+	invalidateVaultKeys(): Promise<void>;
+
+	/**
+	 * Invalidate deleted items list queries.
+	 * @param vaultId - The vault to invalidate
+	 */
+	invalidateDeletedItems(vaultId: string): Promise<void>;
+
+	/**
+	 * Invalidate team-related queries.
+	 */
+	invalidateTeam(): Promise<void>;
+
+	/**
+	 * Invalidate team invitations queries.
+	 */
+	invalidateTeamInvitations(): Promise<void>;
+
+	/**
+	 * Invalidate share-related queries.
+	 * @param itemId - Optional item ID for specific share invalidation
+	 */
+	invalidateShare(itemId?: string): Promise<void>;
+
+	/**
+	 * Invalidate vault member queries.
+	 * @param vaultId - The vault to invalidate members for
+	 */
+	invalidateVaultMembers(vaultId: string): Promise<void>;
+}
+
+/**
+ * Sync context - subset of sync state needed by shared hooks.
+ * Wraps each platform's sync provider to provide query invalidation.
+ */
+export interface ISyncContext {
+	/** Unique client identifier for this device/session */
+	clientId: string;
+
+	/** Whether the WebSocket is currently connected */
+	isConnected: boolean;
+
+	/** Whether the device has network connectivity */
+	isOnline: boolean;
+
+	/** Query invalidator for cache management */
+	invalidator: IQueryInvalidator;
+}
+
+/**
  * Item decryption interface.
+ * @deprecated Use ICrypto instead. This interface will be removed in a future version.
  * Each platform implements this using its crypto backend (WASM, Tauri, FFI).
  */
 export interface IItemDecrypt {

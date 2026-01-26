@@ -36,13 +36,13 @@ async function initializeApp() {
 			<QueryClientProvider client={queryClient}>
 				{/* @ts-ignore */}
 				<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-					<DesktopPlatformProvider>
-						<DesktopSyncProvider queryClient={queryClient}>
+					<DesktopSyncProvider queryClient={queryClient}>
+						<DesktopPlatformProvider>
 							<AccountProvider>
 								<RouterProvider router={router} />
 							</AccountProvider>
-						</DesktopSyncProvider>
-					</DesktopPlatformProvider>
+						</DesktopPlatformProvider>
+					</DesktopSyncProvider>
 				</TRPCProvider>
 			</QueryClientProvider>
 		</React.StrictMode>,

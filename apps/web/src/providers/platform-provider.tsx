@@ -3,28 +3,32 @@
  *
  * Configures the PlatformProvider for the web app with:
  * - Web storage adapter (injected with WASM crypto)
- * - WASM-based item decryption
+ * - WASM crypto module (decrypt, encrypt, generateEncryptionKey)
+ * - Sync context from SyncProvider
  * - Web autolock service
  */
 
 import {
 	createWebAutolockService,
 	type IAutolockService,
-	type IItemDecrypt,
+	type ICrypto,
+	type ISyncContext,
 	PlatformProvider,
 } from "@bittery/hooks";
-import type { EncryptedData } from "@bittery/types";
 import type { ReactNode } from "react";
+import { useMemo } from "react";
 import { storage } from "@/lib/storage";
-import { decrypt } from "@/lib/wasm-crypto";
+import * as wasmCrypto from "@/lib/wasm-crypto";
+import { useSyncContext } from "./sync-provider";
 
 /**
- * Item decrypt implementation using WASM crypto
+ * Crypto adapter that satisfies ICrypto interface
+ * WASM crypto module already exports decrypt, encrypt, generateEncryptionKey
  */
-const itemDecrypt: IItemDecrypt = {
-	async decrypt(encryptedData: EncryptedData, vaultKey: Uint8Array): Promise<string> {
-		return decrypt(encryptedData, vaultKey);
-	},
+const crypto: ICrypto = {
+	decrypt: wasmCrypto.decrypt,
+	encrypt: wasmCrypto.encrypt,
+	generateEncryptionKey: wasmCrypto.generateEncryptionKey,
 };
 
 /**
@@ -49,15 +53,34 @@ interface WebPlatformProviderProps {
 /**
  * Web-specific PlatformProvider wrapper
  *
- * Provides storage, itemDecrypt, and autolock services to the shared hooks.
+ * Provides storage, crypto, sync, and autolock services to the shared hooks.
+ * Must be rendered inside SyncProvider to access sync context.
  */
 export function WebPlatformProvider({ children }: WebPlatformProviderProps) {
 	const autolock = getAutolockService();
+	const syncContext = useSyncContext();
+
+	// Map sync context to ISyncContext interface
+	const sync: ISyncContext = useMemo(
+		() => ({
+			clientId: syncContext.clientId,
+			isConnected: syncContext.isConnected,
+			isOnline: syncContext.isOnline,
+			invalidator: syncContext.invalidator,
+		}),
+		[
+			syncContext.clientId,
+			syncContext.isConnected,
+			syncContext.isOnline,
+			syncContext.invalidator,
+		],
+	);
 
 	return (
 		<PlatformProvider
 			storage={storage}
-			itemDecrypt={itemDecrypt}
+			crypto={crypto}
+			sync={sync}
 			autolock={autolock}
 		>
 			{children}

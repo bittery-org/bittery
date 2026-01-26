@@ -853,9 +853,9 @@ export function usePasswordSecurity(items: DecryptedItem[]): SecurityReport {
 - No UI side effects in shared hooks (apps control toast/navigation)
 - Simplified crypto integration (pass module directly, no wrapping)
 
-### Phase 8: Extract Vault Operations Hooks (PLANNED)
+### Phase 8: Extract Vault Operations Hooks (COMPLETED)
 
-**Status**: PLANNED
+**Status**: COMPLETED
 
 **Goal**: Extract `useVaultOperations` and `useVaultItemOperations` from desktop to the shared `@bittery/hooks` package. These hooks handle vault/item CRUD with encryption and query invalidation.
 
@@ -1587,8 +1587,40 @@ try {
 
 Hooks using `usePlatformItemDecrypt()` should migrate to `usePlatformCrypto().decrypt()`.
 
-**Estimated impact:**
-- 10 new hook files (3 vault + 7 item operations)
-- ~300 lines of code deduplicated
-- Better composability and tree-shaking
-- Platform-agnostic mutations with app-controlled UI
+**Actual implementation:**
+
+Files created:
+- `packages/hooks/src/types.ts` - Added `ICrypto`, `IQueryInvalidator`, `ISyncContext` interfaces; deprecated `IItemDecrypt`
+- `packages/hooks/src/context/platform-context.tsx` - Added `crypto` and `sync` props, `usePlatformCrypto()`, `usePlatformSync()`, `useQueryInvalidator()` hooks
+- `packages/hooks/src/utils/vault-utils.ts` - `refreshVaultKeys()` function
+- `packages/hooks/src/utils/index.ts` - Utils barrel export
+- `packages/hooks/src/hooks/vault/use-create-vault.ts`
+- `packages/hooks/src/hooks/vault/use-update-vault.ts`
+- `packages/hooks/src/hooks/vault/use-delete-vault.ts`
+- `packages/hooks/src/hooks/vault/index.ts`
+- `packages/hooks/src/hooks/items/use-create-item.ts`
+- `packages/hooks/src/hooks/items/use-update-item.ts`
+- `packages/hooks/src/hooks/items/use-delete-item.ts`
+- `packages/hooks/src/hooks/items/use-toggle-favorite.ts`
+- `packages/hooks/src/hooks/items/use-move-item.ts`
+- `packages/hooks/src/hooks/items/use-restore-item.ts`
+- `packages/hooks/src/hooks/items/use-permanent-delete-item.ts`
+- `packages/hooks/src/hooks/items/index.ts`
+
+Files updated:
+- `packages/hooks/src/index.ts` - Export new hooks, types, and utilities
+- `packages/hooks/package.json` - Added export paths for hooks/vault, hooks/items, utils
+- `apps/desktop/src/providers/platform-provider.tsx` - Pass crypto module and sync context
+- `apps/desktop/src/main.tsx` - Swapped provider nesting order (SyncProvider now wraps PlatformProvider)
+- `apps/web/src/providers/platform-provider.tsx` - Pass crypto module and sync context
+- `apps/web/src/router.tsx` - Swapped provider nesting order (SyncProvider now wraps PlatformProvider)
+- `apps/mobile/src/providers/platform-provider.tsx` - Pass crypto module and create simple invalidator
+
+**Note:** The original desktop files `use-vault-operations.ts` and `use-vault-item-operations.ts` were NOT deleted as they are still used by components until those components are migrated to use the new shared hooks. Apps can gradually migrate to the new hooks.
+
+**Impact:**
+- 16 new files in packages/hooks/
+- Single-function hooks are more composable and tree-shakeable
+- Apps retain full control over UI (toasts, navigation) while hooks handle crypto, API calls, and cache invalidation
+- Platform providers now pass crypto module directly (no manual wrapping)
+- Backward compatibility maintained with deprecated `itemDecrypt` prop

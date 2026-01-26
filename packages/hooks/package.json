@@ -13,7 +13,10 @@
 		"./context": "./src/context/platform-context.tsx",
 		"./services": "./src/services/index.ts",
 		"./services/autolock-web": "./src/services/autolock-web.ts",
-		"./services/autolock-mobile": "./src/services/autolock-mobile.ts"
+		"./services/autolock-mobile": "./src/services/autolock-mobile.ts",
+		"./hooks/vault": "./src/hooks/vault/index.ts",
+		"./hooks/items": "./src/hooks/items/index.ts",
+		"./utils": "./src/utils/index.ts"
 	},
 	"dependencies": {
 		"@bittery/shared": "workspace:*",

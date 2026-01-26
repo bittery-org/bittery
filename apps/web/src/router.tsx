@@ -83,9 +83,9 @@ export const getRouter = () => {
 		Wrap: ({ children }) => (
 			<QueryClientProvider client={queryClient}>
 				<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-					<WebPlatformProvider>
-						<SyncProvider queryClient={queryClient}>{children}</SyncProvider>
-					</WebPlatformProvider>
+					<SyncProvider queryClient={queryClient}>
+						<WebPlatformProvider>{children}</WebPlatformProvider>
+					</SyncProvider>
 				</TRPCProvider>
 			</QueryClientProvider>
 		),

@@ -9,17 +9,31 @@
  * 2. Use the shared hooks anywhere in your component tree
  *
  * ```tsx
- * import { PlatformProvider, useDecryptedItems, useAllDecryptedItems } from "@bittery/hooks";
+ * import { PlatformProvider, useDecryptedItems, useCreateItem } from "@bittery/hooks";
+ * import * as crypto from "@/lib/wasm-crypto";
  * import { storage } from "@/lib/storage";
- * import { itemDecrypt } from "@/lib/crypto";
+ * import { useSyncContext } from "@/providers/sync-provider";
  *
  * // In app root
- * <PlatformProvider storage={storage} itemDecrypt={itemDecrypt}>
- *   <App />
- * </PlatformProvider>
+ * function AppPlatformProvider({ children }) {
+ *   const syncContext = useSyncContext();
+ *   const sync = {
+ *     clientId: syncContext.clientId,
+ *     isConnected: syncContext.isConnected,
+ *     isOnline: syncContext.isOnline,
+ *     invalidator: syncContext.invalidator,
+ *   };
+ *
+ *   return (
+ *     <PlatformProvider storage={storage} crypto={crypto} sync={sync}>
+ *       {children}
+ *     </PlatformProvider>
+ *   );
+ * }
  *
  * // In components
  * const { items, isLoading } = useDecryptedItems(vaultId);
+ * const createItem = useCreateItem();
  * ```
  */
 
@@ -28,13 +42,16 @@ export {
 	PlatformProvider,
 	usePlatform,
 	usePlatformStorage,
+	usePlatformCrypto,
 	usePlatformItemDecrypt,
 	usePlatformAutolock,
+	usePlatformSync,
+	useQueryInvalidator,
 	type PlatformContextValue,
 	type PlatformProviderProps,
 } from "./context/platform-context";
 
-// Hooks
+// Data Hooks (read operations)
 export { useDecryptedItems } from "./hooks/use-decrypted-items";
 export { useDecryptedItem } from "./hooks/use-decrypted-item";
 export {
@@ -58,8 +75,47 @@ export {
 	analyzePassword,
 } from "./hooks/use-password-security";
 
+// Vault Mutation Hooks (write operations)
+export {
+	useCreateVault,
+	useUpdateVault,
+	useDeleteVault,
+	type CreateVaultInput,
+	type CreateVaultResult,
+	type UpdateVaultInput,
+	type DeleteVaultInput,
+} from "./hooks/vault";
+
+// Item Mutation Hooks (write operations)
+export {
+	useCreateItem,
+	useUpdateItem,
+	useDeleteItem,
+	useToggleFavorite,
+	useMoveItem,
+	useRestoreItem,
+	usePermanentDeleteItem,
+	type CreateItemInput,
+	type CreateItemResult,
+	type UpdateItemInput,
+	type DeleteItemInput,
+	type ToggleFavoriteInput,
+	type MoveItemInput,
+	type RestoreItemInput,
+	type PermanentDeleteItemInput,
+} from "./hooks/items";
+
+// Utilities
+export { refreshVaultKeys } from "./utils/vault-utils";
+
 // Types
-export type { IItemDecrypt, IAutolockService } from "./types";
+export type {
+	ICrypto,
+	IQueryInvalidator,
+	ISyncContext,
+	IItemDecrypt,
+	IAutolockService,
+} from "./types";
 
 // Services (platform-specific autolock implementations)
 export {
