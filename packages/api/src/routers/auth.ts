@@ -22,14 +22,7 @@ import {
 	updateUserPassword,
 	updateUserSecretKey,
 } from "@bittery/auth";
-import {
-	db,
-	team,
-	teamInvitation,
-	user,
-	vault,
-	vaultKey,
-} from "@bittery/db";
+import { db, team, teamInvitation, user, vault, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -90,7 +83,10 @@ export const authRouter = router({
 			await db.update(team).set({ ownerId: userId }).where(eq(team.id, teamId));
 
 			// Link user to team
-			await db.update(user).set({ teamId, role: "owner" }).where(eq(user.id, userId));
+			await db
+				.update(user)
+				.set({ teamId, role: "owner" })
+				.where(eq(user.id, userId));
 
 			// Create default "Personal" vault
 			const vaultId = nanoid();
@@ -180,10 +176,7 @@ export const authRouter = router({
 			// 1. Validate invitation
 			const invitation = await db.query.teamInvitation.findFirst({
 				where: (inv, { and, eq }) =>
-					and(
-						eq(inv.token, input.token),
-						eq(inv.status, "pending"),
-					),
+					and(eq(inv.token, input.token), eq(inv.status, "pending")),
 				with: { team: true },
 			});
 

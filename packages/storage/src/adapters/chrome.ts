@@ -20,18 +20,30 @@ import {
 	type VaultKeyData,
 } from "../types";
 
-// Storage keys
-const SECRET_KEY_STORAGE = "bittery_secret_key";
-const SESSION_DATA_STORAGE = "bittery_session_data";
+// Global storage keys (shared across all accounts)
 const DEVICE_KEY_STORAGE = "bittery_device_key";
-const JWT_TOKEN_KEY = "bittery_jwt_token";
-const VAULT_KEYS_KEY = "bittery_vault_keys";
-const SERVER_URL_STORAGE = "bittery_server_url";
-const ENCRYPTED_PRIVATE_KEY_STORAGE = "bittery_encrypted_private_key";
-const AUTO_LOCK_TIMEOUT_STORAGE = "bittery_auto_lock_timeout";
+const ACTIVE_ACCOUNT_KEY = "bittery_active_account";
+const ACCOUNTS_LIST_KEY = "bittery_accounts_list";
 
-// In-memory cache for Master Unlock Key
-let masterUnlockKeyCache: Uint8Array | null = null;
+// Helper to generate namespaced keys for each account
+function getAccountKey(email: string, suffix: string): string {
+	const sanitized = email.toLowerCase().replace(/[^a-z0-9]/g, "_");
+	return `bittery_account_${sanitized}_${suffix}`;
+}
+
+interface AccountsList {
+	accounts: AccountMetadata[];
+}
+
+// Per-account cache structure
+interface AccountCache {
+	authToken: string | null;
+	vaultKeys: VaultKeyData[] | null;
+	masterUnlockKey: Uint8Array | null;
+}
+
+// In-memory caches - keyed by email
+const accountCaches: Map<string, AccountCache> = new Map();
 
 /**
  * Generate or retrieve device-specific encryption key
@@ -73,7 +85,7 @@ function isAesEncryptedVaultKey(encryptedVaultKey: string): boolean {
  */
 export class ChromeStorageAdapter implements IStorageAdapter {
 	readonly platform = "extension" as const;
-	readonly supportsMultiAccount = false;
+	readonly supportsMultiAccount = true;
 	readonly supportsBiometric = false;
 
 	constructor(private crypto: CryptoProvider) {}
@@ -82,21 +94,44 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		// No initialization needed for chrome.storage
 	}
 
+	private async resolveEmail(email?: string): Promise<string | null> {
+		if (email) return email.toLowerCase();
+		return this.getActiveAccountEmail();
+	}
+
+	private getAccountCache(email: string): AccountCache {
+		const key = email.toLowerCase();
+		let cache = accountCaches.get(key);
+		if (!cache) {
+			cache = { authToken: null, vaultKeys: null, masterUnlockKey: null };
+			accountCaches.set(key, cache);
+		}
+		return cache;
+	}
+
+	private clearAccountCache(email: string): void {
+		accountCaches.delete(email.toLowerCase());
+	}
+
 	// ============================================================================
 	// Session Management
 	// ============================================================================
 
-	async getMasterUnlockKey(_email?: string): Promise<Uint8Array | null> {
-		// Return from memory cache if available
-		if (masterUnlockKeyCache) {
-			return masterUnlockKeyCache;
+	async getMasterUnlockKey(email?: string): Promise<Uint8Array | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+
+		const cache = this.getAccountCache(resolvedEmail);
+		if (cache.masterUnlockKey) {
+			return cache.masterUnlockKey;
 		}
 
 		// Try to restore from persistent storage if session is still valid
-		if (await this.isSessionValid()) {
-			const restored = await this.decryptStoredMasterUnlockKeyInternal();
+		if (await this.isSessionValid(resolvedEmail)) {
+			const restored =
+				await this.decryptStoredMasterUnlockKeyInternal(resolvedEmail);
 			if (restored) {
-				masterUnlockKeyCache = restored;
+				cache.masterUnlockKey = restored;
 				return restored;
 			}
 		}
@@ -104,12 +139,20 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		return null;
 	}
 
-	async setMasterUnlockKey(key: Uint8Array, _email?: string): Promise<void> {
-		masterUnlockKeyCache = key;
+	async setMasterUnlockKey(key: Uint8Array, email?: string): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) throw new Error("No account specified");
+
+		const cache = this.getAccountCache(resolvedEmail);
+		cache.masterUnlockKey = key;
 	}
 
-	async clearMasterUnlockKey(_email?: string): Promise<void> {
-		masterUnlockKeyCache = null;
+	async clearMasterUnlockKey(email?: string): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return;
+
+		const cache = this.getAccountCache(resolvedEmail);
+		cache.masterUnlockKey = null;
 	}
 
 	async storeSessionData(
@@ -118,6 +161,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		userId: string,
 		expiryMs: number = DEFAULT_SESSION_EXPIRY_MS,
 	): Promise<void> {
+		const resolvedEmail = email.toLowerCase();
 		const deviceKey = await getDeviceKey();
 		const now = Date.now();
 
@@ -127,42 +171,52 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 
 		const sessionData: StoredSessionData = {
 			encryptedMasterUnlockKey: encryptedMUK,
-			email,
+			email: resolvedEmail,
 			userId,
 			expiresAt: now + expiryMs,
 			createdAt: now,
 		};
 
+		const key = getAccountKey(resolvedEmail, "session_data");
 		await chrome.storage.local.set({
-			[SESSION_DATA_STORAGE]: JSON.stringify(sessionData),
+			[key]: JSON.stringify(sessionData),
 		});
 	}
 
 	async tryRestoreSession(
 		_skipBiometric?: boolean,
-		_email?: string,
+		email?: string,
 	): Promise<boolean> {
-		if (!(await this.isSessionValid())) {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return false;
+
+		if (!(await this.isSessionValid(resolvedEmail))) {
 			return false;
 		}
 
 		// First check if MUK is already in memory cache (e.g., after login)
-		if (masterUnlockKeyCache) {
+		const cache = this.getAccountCache(resolvedEmail);
+		if (cache.masterUnlockKey) {
+			console.log("[storage-chrome] Session restored from memory cache");
 			return true;
 		}
 
 		// Otherwise, try to decrypt from persistent storage
-		const masterUnlockKey = await this.decryptStoredMasterUnlockKeyInternal();
+		const masterUnlockKey =
+			await this.decryptStoredMasterUnlockKeyInternal(resolvedEmail);
 		if (!masterUnlockKey) {
 			return false;
 		}
 
-		masterUnlockKeyCache = masterUnlockKey;
+		await this.setMasterUnlockKey(masterUnlockKey, resolvedEmail);
 		return true;
 	}
 
-	async isSessionValid(_email?: string): Promise<boolean> {
-		const sessionData = await this.getStoredSessionData();
+	async isSessionValid(email?: string): Promise<boolean> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return false;
+
+		const sessionData = await this.getStoredSessionData(resolvedEmail);
 		if (!sessionData) return false;
 
 		const now = Date.now();
@@ -173,36 +227,75 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	// Credentials
 	// ============================================================================
 
-	async storeSecretKey(secretKey: string, _email?: string): Promise<void> {
-		await chrome.storage.local.set({ [SECRET_KEY_STORAGE]: secretKey });
+	async storeSecretKey(secretKey: string, email?: string): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) throw new Error("No account specified");
+
+		const key = getAccountKey(resolvedEmail, "secret_key");
+		await chrome.storage.local.set({ [key]: secretKey });
 	}
 
-	async getStoredSecretKey(_email?: string): Promise<string | null> {
-		const result = await chrome.storage.local.get(SECRET_KEY_STORAGE);
-		return (result[SECRET_KEY_STORAGE] as string | undefined) || null;
+	async getStoredSecretKey(email?: string): Promise<string | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+
+		const key = getAccountKey(resolvedEmail, "secret_key");
+		const result = await chrome.storage.local.get(key);
+		return (result[key] as string | undefined) || null;
 	}
 
-	async storeAuthToken(token: string, _email?: string): Promise<void> {
-		await chrome.storage.session.set({ [JWT_TOKEN_KEY]: token });
+	async storeAuthToken(token: string, email?: string): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) throw new Error("No account specified");
+
+		const cache = this.getAccountCache(resolvedEmail);
+		cache.authToken = token;
+
+		// Also persist to disk for session restoration
+		const key = getAccountKey(resolvedEmail, "jwt_token");
+		await chrome.storage.session.set({ [key]: token });
 	}
 
-	async getAuthToken(_email?: string): Promise<string | null> {
-		const result = await chrome.storage.session.get(JWT_TOKEN_KEY);
-		return (result[JWT_TOKEN_KEY] as string | undefined) || null;
+	async getAuthToken(email?: string): Promise<string | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+
+		const cache = this.getAccountCache(resolvedEmail);
+		if (cache.authToken) {
+			return cache.authToken;
+		}
+
+		// Try to restore from disk
+		const key = getAccountKey(resolvedEmail, "jwt_token");
+		const result = await chrome.storage.session.get(key);
+		const token = (result[key] as string | undefined) || null;
+		if (token) {
+			cache.authToken = token;
+		}
+
+		return token;
 	}
 
 	async storeVaultKeys(
 		vaultKeys: VaultKeyData[],
-		_email?: string,
+		email?: string,
 	): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) throw new Error("No account specified");
+
 		console.log(
 			"[storage-chrome] Storing vault keys:",
 			vaultKeys.length,
 			"keys",
 		);
+
+		const cache = this.getAccountCache(resolvedEmail);
+		cache.vaultKeys = vaultKeys;
+
+		const key = getAccountKey(resolvedEmail, "vault_keys");
 		try {
 			await chrome.storage.session.set({
-				[VAULT_KEYS_KEY]: JSON.stringify(vaultKeys),
+				[key]: JSON.stringify(vaultKeys),
 			});
 			console.log("[storage-chrome] Vault keys stored successfully");
 		} catch (error) {
@@ -211,125 +304,216 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		}
 	}
 
-	async getVaultKeys(_email?: string): Promise<VaultKeyData[] | null> {
+	async getVaultKeys(email?: string): Promise<VaultKeyData[] | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+
+		const cache = this.getAccountCache(resolvedEmail);
+		if (cache.vaultKeys) {
+			return cache.vaultKeys;
+		}
+
 		console.log("[storage-chrome] Getting vault keys from session storage");
-		const result = await chrome.storage.session.get(VAULT_KEYS_KEY);
-		const stored = result[VAULT_KEYS_KEY];
+		const key = getAccountKey(resolvedEmail, "vault_keys");
+		const result = await chrome.storage.session.get(key);
+		const stored = result[key];
 		console.log(
 			"[storage-chrome] Vault keys found:",
 			!!stored,
 			stored ? `(${JSON.parse(stored as string).length} keys)` : "(none)",
 		);
-		return stored ? JSON.parse(stored as string) : null;
+
+		if (stored) {
+			cache.vaultKeys = JSON.parse(stored as string);
+		}
+
+		return cache.vaultKeys;
 	}
 
 	async getDecryptedVaultKey(
 		vaultId: string,
-		_email?: string,
+		email?: string,
 	): Promise<Uint8Array | null> {
-		const vaultKeys = await this.getVaultKeys();
+		const vaultKeys = await this.getVaultKeys(email);
 		if (!vaultKeys) return null;
 
 		const vaultKeyData = vaultKeys.find((vk) => vk.vaultId === vaultId);
 		if (!vaultKeyData) return null;
 
-		return this.decryptVaultKey(vaultKeyData.encryptedVaultKey);
+		return this.decryptVaultKey(vaultKeyData.encryptedVaultKey, email);
 	}
 
 	async storeEncryptedPrivateKey(
 		encryptedPrivateKey: string,
-		_email?: string,
+		email?: string,
 	): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) throw new Error("No account specified");
+
+		const key = getAccountKey(resolvedEmail, "encrypted_private_key");
 		await chrome.storage.session.set({
-			[ENCRYPTED_PRIVATE_KEY_STORAGE]: encryptedPrivateKey,
+			[key]: encryptedPrivateKey,
 		});
 	}
 
-	async getEncryptedPrivateKey(_email?: string): Promise<string | null> {
-		const result = await chrome.storage.session.get(
-			ENCRYPTED_PRIVATE_KEY_STORAGE,
-		);
-		return (
-			(result[ENCRYPTED_PRIVATE_KEY_STORAGE] as string | undefined) || null
-		);
+	async getEncryptedPrivateKey(email?: string): Promise<string | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+
+		const key = getAccountKey(resolvedEmail, "encrypted_private_key");
+		const result = await chrome.storage.session.get(key);
+		return (result[key] as string | undefined) || null;
 	}
 
 	// ============================================================================
-	// Multi-Account (not supported on extension)
+	// Multi-Account
 	// ============================================================================
 
 	async getActiveAccountEmail(): Promise<string | null> {
-		const sessionData = await this.getStoredSessionData();
-		return sessionData?.email ?? null;
+		const result = await chrome.storage.local.get(ACTIVE_ACCOUNT_KEY);
+		return (result[ACTIVE_ACCOUNT_KEY] as string | undefined) || null;
 	}
 
 	async getActiveAccountUserId(): Promise<string | null> {
-		const sessionData = await this.getStoredSessionData();
+		const email = await this.getActiveAccountEmail();
+		if (!email) return null;
+
+		const sessionData = await this.getStoredSessionData(email);
 		return sessionData?.userId ?? null;
 	}
 
-	async setActiveAccount(_email: string): Promise<void> {
-		// Extension doesn't support multi-account
+	async setActiveAccount(email: string): Promise<void> {
+		const normalizedEmail = email.toLowerCase();
+		await chrome.storage.local.set({ [ACTIVE_ACCOUNT_KEY]: normalizedEmail });
+
+		// Update lastActiveAt for this account
+		const accountsList = await this.getAccountsListInternal();
+		const account = accountsList.accounts.find(
+			(a) => a.email.toLowerCase() === email.toLowerCase(),
+		);
+		if (account) {
+			account.lastActiveAt = Date.now();
+			await chrome.storage.local.set({
+				[ACCOUNTS_LIST_KEY]: JSON.stringify(accountsList),
+			});
+		}
 	}
 
 	async getAccountsList(): Promise<AccountMetadata[]> {
-		const sessionData = await this.getStoredSessionData();
-		if (!sessionData) return [];
+		const accountsList = await this.getAccountsListInternal();
+		return accountsList.accounts;
+	}
 
-		return [
-			{
-				email: sessionData.email,
-				userId: sessionData.userId,
-				name: "",
-				secretKeyHint: "",
-				addedAt: sessionData.createdAt,
-				lastActiveAt: Date.now(),
-				biometricEnabled: false,
-			},
+	private async getAccountsListInternal(): Promise<AccountsList> {
+		const result = await chrome.storage.local.get(ACCOUNTS_LIST_KEY);
+		const stored = result[ACCOUNTS_LIST_KEY];
+		if (!stored) {
+			return { accounts: [] };
+		}
+		try {
+			return JSON.parse(stored as string) as AccountsList;
+		} catch {
+			return { accounts: [] };
+		}
+	}
+
+	async addAccount(metadata: AccountMetadata): Promise<void> {
+		const accountsList = await this.getAccountsListInternal();
+
+		const existingIndex = accountsList.accounts.findIndex(
+			(a) => a.email.toLowerCase() === metadata.email.toLowerCase(),
+		);
+
+		if (existingIndex >= 0) {
+			accountsList.accounts[existingIndex] = metadata;
+		} else {
+			accountsList.accounts.push(metadata);
+		}
+
+		await chrome.storage.local.set({
+			[ACCOUNTS_LIST_KEY]: JSON.stringify(accountsList),
+		});
+	}
+
+	async removeAccount(email: string): Promise<void> {
+		const resolvedEmail = email.toLowerCase();
+
+		// Delete all namespaced keys for this account
+		const keysToRemove = [
+			getAccountKey(resolvedEmail, "secret_key"),
+			getAccountKey(resolvedEmail, "session_data"),
+			getAccountKey(resolvedEmail, "jwt_token"),
+			getAccountKey(resolvedEmail, "vault_keys"),
+			getAccountKey(resolvedEmail, "server_url"),
+			getAccountKey(resolvedEmail, "encrypted_private_key"),
+			getAccountKey(resolvedEmail, "auto_lock_timeout"),
 		];
-	}
 
-	async addAccount(_metadata: AccountMetadata): Promise<void> {
-		// Extension doesn't support multi-account
-	}
+		await chrome.storage.local.remove(keysToRemove);
+		await chrome.storage.session.remove([
+			getAccountKey(resolvedEmail, "jwt_token"),
+			getAccountKey(resolvedEmail, "vault_keys"),
+			getAccountKey(resolvedEmail, "encrypted_private_key"),
+		]);
 
-	async removeAccount(_email: string): Promise<void> {
-		await this.clearAllStoredData();
+		this.clearAccountCache(resolvedEmail);
+
+		// Remove from accounts list
+		const accountsList = await this.getAccountsListInternal();
+		accountsList.accounts = accountsList.accounts.filter(
+			(a) => a.email.toLowerCase() !== resolvedEmail,
+		);
+		await chrome.storage.local.set({
+			[ACCOUNTS_LIST_KEY]: JSON.stringify(accountsList),
+		});
 	}
 
 	// ============================================================================
 	// Settings
 	// ============================================================================
 
-	async storeAutoLockTimeout(
-		timeoutMs: number,
-		_email?: string,
-	): Promise<void> {
-		await chrome.storage.local.set({ [AUTO_LOCK_TIMEOUT_STORAGE]: timeoutMs });
+	async storeAutoLockTimeout(timeoutMs: number, email?: string): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) throw new Error("No account specified");
+
+		const key = getAccountKey(resolvedEmail, "auto_lock_timeout");
+		await chrome.storage.local.set({ [key]: timeoutMs });
 	}
 
-	async getAutoLockTimeout(_email?: string): Promise<number | null> {
-		const result = await chrome.storage.local.get(AUTO_LOCK_TIMEOUT_STORAGE);
-		const stored = result[AUTO_LOCK_TIMEOUT_STORAGE];
+	async getAutoLockTimeout(email?: string): Promise<number | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+
+		const key = getAccountKey(resolvedEmail, "auto_lock_timeout");
+		const result = await chrome.storage.local.get(key);
+		const stored = result[key];
 		if (stored !== undefined && typeof stored === "number") {
 			return stored;
 		}
 		return null;
 	}
 
-	async getAutoLockTimeoutOrDefault(_email?: string): Promise<number> {
-		const timeout = await this.getAutoLockTimeout();
+	async getAutoLockTimeoutOrDefault(email?: string): Promise<number> {
+		const timeout = await this.getAutoLockTimeout(email);
 		// Default: 10 minutes
 		return timeout ?? 10 * 60 * 1000;
 	}
 
-	async storeServerUrl(serverUrl: string, _email?: string): Promise<void> {
-		await chrome.storage.local.set({ [SERVER_URL_STORAGE]: serverUrl });
+	async storeServerUrl(serverUrl: string, email?: string): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) throw new Error("No account specified");
+
+		const key = getAccountKey(resolvedEmail, "server_url");
+		await chrome.storage.local.set({ [key]: serverUrl });
 	}
 
-	async getServerUrl(_email?: string): Promise<string | null> {
-		const result = await chrome.storage.local.get(SERVER_URL_STORAGE);
-		return (result[SERVER_URL_STORAGE] as string | undefined) || null;
+	async getServerUrl(email?: string): Promise<string | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+
+		const key = getAccountKey(resolvedEmail, "server_url");
+		const result = await chrome.storage.local.get(key);
+		return (result[key] as string | undefined) || null;
 	}
 
 	// ============================================================================
@@ -351,24 +535,25 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	// Clear
 	// ============================================================================
 
-	async clearSession(_email?: string): Promise<void> {
+	async clearSession(email?: string): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return;
+
+		this.clearAccountCache(resolvedEmail);
+
+		// Clear session storage keys
 		await chrome.storage.session.remove([
-			JWT_TOKEN_KEY,
-			VAULT_KEYS_KEY,
-			ENCRYPTED_PRIVATE_KEY_STORAGE,
+			getAccountKey(resolvedEmail, "jwt_token"),
+			getAccountKey(resolvedEmail, "vault_keys"),
+			getAccountKey(resolvedEmail, "encrypted_private_key"),
 		]);
-		masterUnlockKeyCache = null;
-		await this.clearStoredSession();
 	}
 
-	async clearAllStoredData(_email?: string): Promise<void> {
-		await chrome.storage.local.remove([
-			SECRET_KEY_STORAGE,
-			SESSION_DATA_STORAGE,
-			DEVICE_KEY_STORAGE,
-		]);
-		await chrome.storage.session.clear();
-		masterUnlockKeyCache = null;
+	async clearAllStoredData(email?: string): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (resolvedEmail) {
+			await this.removeAccount(resolvedEmail);
+		}
 	}
 
 	// ============================================================================
@@ -376,42 +561,38 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	// ============================================================================
 
 	async getStoredSessionData(
-		_email?: string,
+		email?: string,
 	): Promise<StoredSessionData | null> {
-		const result = await chrome.storage.local.get(SESSION_DATA_STORAGE);
-		const stored = result[SESSION_DATA_STORAGE];
-
-		if (!stored) return null;
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
 
 		try {
+			const key = getAccountKey(resolvedEmail, "session_data");
+			const result = await chrome.storage.local.get(key);
+			const stored = result[key];
+
+			if (!stored) return null;
 			return JSON.parse(stored as string) as StoredSessionData;
 		} catch {
 			return null;
 		}
 	}
 
-	async hasStoredSecretKey(_email?: string): Promise<boolean> {
-		const secretKey = await this.getStoredSecretKey();
+	async hasStoredSecretKey(email?: string): Promise<boolean> {
+		const secretKey = await this.getStoredSecretKey(email);
 		return secretKey != null;
 	}
 
 	async lockAllAccounts(): Promise<void> {
-		masterUnlockKeyCache = null;
+		accountCaches.clear();
 	}
 
-	async getAccountMetadata(_email: string): Promise<AccountMetadata | null> {
-		const sessionData = await this.getStoredSessionData();
-		if (!sessionData) return null;
-
-		return {
-			email: sessionData.email,
-			userId: sessionData.userId,
-			name: "",
-			secretKeyHint: "",
-			addedAt: sessionData.createdAt,
-			lastActiveAt: Date.now(),
-			biometricEnabled: false,
-		};
+	async getAccountMetadata(email: string): Promise<AccountMetadata | null> {
+		const accountsList = await this.getAccountsList();
+		return (
+			accountsList.find((a) => a.email.toLowerCase() === email.toLowerCase()) ??
+			null
+		);
 	}
 
 	// ============================================================================
@@ -458,22 +639,22 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	}
 
 	async decryptStoredMasterUnlockKey(
-		_email?: string,
+		email?: string,
 		_skipBiometric?: boolean,
 	): Promise<Uint8Array | null> {
-		return this.decryptStoredMasterUnlockKeyInternal();
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+		return this.decryptStoredMasterUnlockKeyInternal(resolvedEmail);
 	}
 
 	// ============================================================================
 	// Private Helpers
 	// ============================================================================
 
-	private async clearStoredSession(): Promise<void> {
-		await chrome.storage.local.remove(SESSION_DATA_STORAGE);
-	}
-
-	private async decryptStoredMasterUnlockKeyInternal(): Promise<Uint8Array | null> {
-		const sessionData = await this.getStoredSessionData();
+	private async decryptStoredMasterUnlockKeyInternal(
+		email: string,
+	): Promise<Uint8Array | null> {
+		const sessionData = await this.getStoredSessionData(email);
 		if (!sessionData) return null;
 
 		try {

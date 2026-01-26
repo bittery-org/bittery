@@ -23,7 +23,6 @@ interface MemberListProps {
 }
 
 export function MemberList({ members }: MemberListProps) {
-
 	const getInitials = (name: string) =>
 		name
 			.split(" ")

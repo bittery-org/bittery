@@ -95,11 +95,17 @@ export const teamRouter = router({
 	 * @deprecated Teams are auto-created on signup
 	 */
 	create: protectedProcedure
-		.input(z.object({ name: z.string().min(1), type: z.enum(["family", "organization"]).optional() }))
+		.input(
+			z.object({
+				name: z.string().min(1),
+				type: z.enum(["family", "organization"]).optional(),
+			}),
+		)
 		.mutation(async () => {
 			throw new TRPCError({
 				code: "BAD_REQUEST",
-				message: "Teams are automatically created on signup. Contact support to upgrade your team type.",
+				message:
+					"Teams are automatically created on signup. Contact support to upgrade your team type.",
 			});
 		}),
 
@@ -164,7 +170,8 @@ export const teamRouter = router({
 			if (userData.team?.type === "personal") {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
-					message: "Personal teams cannot be deleted. To close your account, use Account Settings.",
+					message:
+						"Personal teams cannot be deleted. To close your account, use Account Settings.",
 				});
 			}
 
@@ -183,7 +190,8 @@ export const teamRouter = router({
 		.mutation(async () => {
 			throw new TRPCError({
 				code: "BAD_REQUEST",
-				message: "You cannot leave your team. Each user belongs to exactly one team.",
+				message:
+					"You cannot leave your team. Each user belongs to exactly one team.",
 			});
 		}),
 
@@ -399,7 +407,11 @@ export const teamRouter = router({
 				}
 
 				// Check team capacity (family teams have limits)
-				if (userData.team && userData.team.type === "family" && userData.team.memberLimit) {
+				if (
+					userData.team &&
+					userData.team.type === "family" &&
+					userData.team.memberLimit
+				) {
 					const currentMembers = await db.query.user.findMany({
 						where: (user, { eq }) => eq(user.teamId, input.teamId),
 					});
