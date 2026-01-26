@@ -19,7 +19,7 @@ import { ImportDialog } from "../../components/vault/import-dialog";
 import { useVaultOperations } from "../../components/vault/use-vault-operations";
 import { VaultHeader } from "../../components/vault/vault-header";
 import { VaultSidebar } from "../../components/vault/vault-sidebar";
-import { useCrossVaultTags } from "../../hooks/use-cross-vault-tags";
+import { useCrossVaultTags } from "@bittery/hooks";
 import { trpc } from "../../lib/providers";
 import { encrypt } from "../../lib/tauri-crypto";
 import { VaultDndProvider } from "../../providers/dnd-provider";

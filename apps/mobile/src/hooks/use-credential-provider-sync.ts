@@ -1,10 +1,10 @@
+import { useAllDecryptedItems } from "@bittery/hooks";
 import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 import { storage } from "@/services/storage";
 import type { SaveCredentialParams } from "../../modules/credential-provider";
 import CredentialProvider from "../../modules/credential-provider";
-import { useAllDecryptedItems } from "./use-all-decrypted-items";
 
 /**
  * Extracts the domain from a URL string

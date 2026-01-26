@@ -1,8 +1,15 @@
+/**
+ * useAllDecryptedItems Hook
+ *
+ * Fetches and decrypts all items from all accessible vaults.
+ * Items are cached for 5 minutes to avoid repeated decryption.
+ * Uses the efficient listAllItems endpoint (single query vs N queries).
+ */
+
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
-import { storage } from "@/lib/storage";
-import { decrypt } from "../lib/tauri-crypto";
+import { usePlatform } from "../context/platform-context";
 
 /**
  * Decrypted item with vault metadata for cross-vault views
@@ -20,15 +27,19 @@ export interface CrossVaultDecryptedItem extends DecryptedItem {
 /**
  * Hook to fetch and decrypt all items from all accessible vaults.
  * Items are cached for 5 minutes to avoid repeated decryption.
+ *
+ * @returns Object containing all decrypted items, loading state, and error
  */
 export function useAllDecryptedItems() {
 	const trpc = useTRPC();
+	const { storage, itemDecrypt } = usePlatform();
 
-	// Fetch raw encrypted items from API (all vaults)
+	// Fetch raw encrypted items from API (all vaults in one query)
 	const {
 		data: rawItems = [],
 		isLoading: isLoadingRaw,
 		dataUpdatedAt,
+		refetch: refetchRaw,
 	} = useQuery({
 		...trpc.vault.listAllItems.queryOptions(),
 	});
@@ -66,7 +77,7 @@ export function useAllDecryptedItems() {
 					try {
 						const vaultKey = await getVaultKey(rawItem.vaultId);
 
-						const decryptedData = await decrypt(
+						const decryptedData = await itemDecrypt.decrypt(
 							{
 								ciphertext: rawItem.encryptedData,
 								iv: rawItem.encryptionIv,
@@ -118,13 +129,14 @@ export function useAllDecryptedItems() {
 			return decrypted;
 		},
 		enabled: rawItems.length > 0,
-		staleTime: 5 * 60 * 1000,
-		gcTime: 10 * 60 * 1000,
+		staleTime: 5 * 60 * 1000, // 5 minutes
+		gcTime: 10 * 60 * 1000, // 10 minutes
 	});
 
 	return {
 		items: decryptedItems,
 		isLoading: isLoadingRaw || isDecrypting,
 		error,
+		refetch: refetchRaw,
 	};
 }

@@ -1,3 +1,4 @@
+import { useAvailableTags, useDecryptedItems } from "@bittery/hooks";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
@@ -25,8 +26,6 @@ import ItemDetail from "@/components/vault/item-detail";
 import { ItemList } from "@/components/vault/item-list";
 import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { VaultMemberList } from "@/components/vaults/vault-member-list";
-import { useDecryptedItems } from "@/hooks/use-decrypted-items";
-import { useAvailableTags } from "@/hooks/use-vault-tags";
 
 export const Route = createFileRoute("/_app/vaults/$vaultId/")({
 	component: VaultDetailPage,

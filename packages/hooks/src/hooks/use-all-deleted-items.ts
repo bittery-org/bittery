@@ -1,8 +1,15 @@
+/**
+ * useAllDeletedItems Hook
+ *
+ * Fetches and decrypts all deleted items from all accessible vaults.
+ * Used for cross-vault trash view.
+ * Items are cached for 5 minutes to avoid repeated decryption.
+ */
+
 import { useTRPC } from "@bittery/shared/trpc";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
-import { storage } from "@/lib/storage";
-import { decrypt } from "../lib/tauri-crypto";
+import { usePlatform } from "../context/platform-context";
 import type { CrossVaultDecryptedItem } from "./use-all-decrypted-items";
 
 /**
@@ -15,15 +22,19 @@ export interface CrossVaultDeletedItem extends CrossVaultDecryptedItem {
 /**
  * Hook to fetch and decrypt all deleted items from all accessible vaults.
  * Used for cross-vault trash view.
+ *
+ * @returns Object containing all deleted decrypted items, loading state, and error
  */
 export function useAllDeletedItems() {
 	const trpc = useTRPC();
+	const { storage, itemDecrypt } = usePlatform();
 
 	// Fetch raw encrypted deleted items from API (all vaults)
 	const {
 		data: rawItems = [],
 		isLoading: isLoadingRaw,
 		dataUpdatedAt,
+		refetch: refetchRaw,
 	} = useQuery({
 		...trpc.vault.listAllDeletedItems.queryOptions(),
 	});
@@ -61,7 +72,7 @@ export function useAllDeletedItems() {
 					try {
 						const vaultKey = await getVaultKey(rawItem.vaultId);
 
-						const decryptedData = await decrypt(
+						const decryptedData = await itemDecrypt.decrypt(
 							{
 								ciphertext: rawItem.encryptedData,
 								iv: rawItem.encryptionIv,
@@ -115,13 +126,14 @@ export function useAllDeletedItems() {
 			return decrypted;
 		},
 		enabled: rawItems.length > 0,
-		staleTime: 5 * 60 * 1000,
-		gcTime: 10 * 60 * 1000,
+		staleTime: 5 * 60 * 1000, // 5 minutes
+		gcTime: 10 * 60 * 1000, // 10 minutes
 	});
 
 	return {
 		items: decryptedItems,
 		isLoading: isLoadingRaw || isDecrypting,
 		error,
+		refetch: refetchRaw,
 	};
 }

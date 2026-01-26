@@ -1,8 +1,17 @@
+/**
+ * useAvailableTags Hook and filterItemsByTags Utility
+ *
+ * Utilities for extracting unique tags from items and filtering items by tags.
+ */
+
 import type { DecryptedItem } from "@bittery/shared/types";
 import { useMemo } from "react";
 
 /**
- * Extract all unique tags from decrypted items
+ * Extract all unique tags from decrypted items.
+ *
+ * @param items - Array of decrypted items to extract tags from
+ * @returns Sorted array of unique tag strings
  */
 export function useAvailableTags(items: DecryptedItem[]): string[] {
 	return useMemo(() => {
@@ -19,8 +28,12 @@ export function useAvailableTags(items: DecryptedItem[]): string[] {
 }
 
 /**
- * Filter items by selected tags
- * Returns items that have at least one of the selected tags
+ * Filter items by selected tags.
+ * Returns items that have at least one of the selected tags.
+ *
+ * @param items - Array of decrypted items to filter
+ * @param selectedTags - Array of tag strings to filter by
+ * @returns Filtered array of items that have at least one of the selected tags
  */
 export function filterItemsByTags(
 	items: DecryptedItem[],

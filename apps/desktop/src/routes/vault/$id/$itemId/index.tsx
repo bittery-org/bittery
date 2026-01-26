@@ -3,8 +3,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 import { storage } from "@/lib/storage";
 import { ItemDetailPage } from "../../../../components/vault/item-detail-page";
-import { useAvailableTags } from "../../../../hooks/use-available-tags";
-import { useDecryptedItems } from "../../../../hooks/use-decrypted-items";
+import { useAvailableTags, useDecryptedItems } from "@bittery/hooks";
 
 export const Route = createFileRoute("/vault/$id/$itemId/")({
 	component: VaultItemComponent,

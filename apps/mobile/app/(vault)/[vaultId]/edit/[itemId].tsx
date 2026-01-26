@@ -49,10 +49,10 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useDecryptedItems } from "@bittery/hooks";
 import { PasswordGenerator } from "../../../../src/components/password-generator";
 import { QrCodeScanner } from "../../../../src/components/qr-code-scanner";
 import { TotpDisplay } from "../../../../src/components/totp-display";
-import { useDecryptedItems } from "../../../../src/hooks/use-decrypted-items";
 import { encrypt } from "../../../../src/lib/crypto";
 import { useTRPCClient } from "../../../../src/lib/trpc";
 import * as storage from "../../../../src/services/storage";

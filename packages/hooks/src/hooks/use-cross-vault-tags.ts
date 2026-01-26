@@ -1,30 +1,32 @@
+/**
+ * useCrossVaultTags Hook
+ *
+ * Extracts all unique tags from all items across all vaults.
+ * Returns sorted array of tag names.
+ */
+
 import { useMemo } from "react";
 import { useAllDecryptedItems } from "./use-all-decrypted-items";
 
-export interface TagInfo {
-	name: string;
-	count: number;
-}
-
 /**
  * Hook to extract all unique tags from all items across all vaults.
- * Returns sorted array of tag names with their item counts.
+ * Returns sorted array of tag names.
+ *
+ * @returns Object containing tags array, loading state, and error
  */
 export function useCrossVaultTags() {
 	const { items, isLoading, error } = useAllDecryptedItems();
 
-	const tags = useMemo((): TagInfo[] => {
-		const tagCounts = new Map<string, number>();
+	const tags = useMemo(() => {
+		const tagSet = new Set<string>();
 		for (const item of items) {
 			if (item.tags) {
 				for (const tag of item.tags) {
-					tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
+					tagSet.add(tag);
 				}
 			}
 		}
-		return Array.from(tagCounts.entries())
-			.map(([name, count]) => ({ name, count }))
-			.sort((a, b) => a.name.localeCompare(b.name));
+		return Array.from(tagSet).sort();
 	}, [items]);
 
 	return {

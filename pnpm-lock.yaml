@@ -67,6 +67,9 @@ importers:
       '@bittery/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@bittery/hooks':
+        specifier: workspace:*
+        version: link:../../packages/hooks
       '@bittery/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -276,6 +279,9 @@ importers:
       '@bittery/crypto-nitro':
         specifier: workspace:*
         version: link:../../packages/crypto/expo-module
+      '@bittery/hooks':
+        specifier: workspace:*
+        version: link:../../packages/hooks
       '@bittery/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -467,6 +473,9 @@ importers:
       '@bittery/crypto-wasm':
         specifier: workspace:*
         version: link:../../packages/crypto/wasm
+      '@bittery/hooks':
+        specifier: workspace:*
+        version: link:../../packages/hooks
       '@bittery/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -722,6 +731,40 @@ importers:
       drizzle-kit:
         specifier: ^0.31.8
         version: 0.31.8
+
+  packages/hooks:
+    dependencies:
+      '@bittery/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@bittery/storage':
+        specifier: workspace:*
+        version: link:../storage
+      '@bittery/types':
+        specifier: workspace:*
+        version: link:../types
+      '@tanstack/react-query':
+        specifier: ^5.85.5
+        version: 5.90.19(react@19.1.0)
+      react:
+        specifier: 19.1.0
+        version: 19.1.0
+      zxcvbn:
+        specifier: ^4.4.2
+        version: 4.4.2
+    devDependencies:
+      '@bittery/config':
+        specifier: workspace:*
+        version: link:../config
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.1.17
+      '@types/zxcvbn':
+        specifier: ^4.4.5
+        version: 4.4.5
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
 
   packages/shared:
     dependencies:

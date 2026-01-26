@@ -16,6 +16,7 @@
 	"dependencies": {
 		"@bittery/api": "workspace:*",
 		"@bittery/auth": "workspace:*",
+		"@bittery/hooks": "workspace:*",
 		"@bittery/storage": "workspace:*",
 		"@bittery/shared": "workspace:*",
 		"@bittery/sync": "workspace:*",

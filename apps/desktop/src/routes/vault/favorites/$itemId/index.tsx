@@ -1,8 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 import { ItemDetailPage } from "../../../../components/vault/item-detail-page";
-import { useAllDecryptedItems } from "../../../../hooks/use-all-decrypted-items";
-import { useAvailableTags } from "../../../../hooks/use-available-tags";
+import { useAllDecryptedItems, useAvailableTags } from "@bittery/hooks";
 
 export const Route = createFileRoute("/vault/favorites/$itemId/")({
 	component: FavoritesItemComponent,

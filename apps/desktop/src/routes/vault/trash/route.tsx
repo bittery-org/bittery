@@ -17,7 +17,7 @@ import { Archive, ArchiveRestore, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Favicon } from "../../../components/vault/favicon";
 import { VaultAvatar } from "../../../components/vault/vault-avatar";
-import { useAllDeletedItems } from "../../../hooks/use-all-deleted-items";
+import { useAllDeletedItems } from "@bittery/hooks";
 import { useQueryInvalidator } from "../../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault/trash")({

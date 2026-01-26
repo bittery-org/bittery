@@ -19,6 +19,7 @@ import {
 } from "@tanstack/react-query";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
+import { WebPlatformProvider } from "./providers/platform-provider";
 import { SyncProvider } from "./providers/sync-provider";
 import { routeTree } from "./routeTree.gen";
 
@@ -82,7 +83,9 @@ export const getRouter = () => {
 		Wrap: ({ children }) => (
 			<QueryClientProvider client={queryClient}>
 				<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-					<SyncProvider queryClient={queryClient}>{children}</SyncProvider>
+					<WebPlatformProvider>
+						<SyncProvider queryClient={queryClient}>{children}</SyncProvider>
+					</WebPlatformProvider>
 				</TRPCProvider>
 			</QueryClientProvider>
 		),

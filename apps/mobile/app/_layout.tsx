@@ -18,6 +18,7 @@ import {
 } from "../src/contexts/biometric-auth-context";
 import { OfflineVaultProvider } from "../src/contexts/offline-vault-context";
 import { TRPCProvider } from "../src/lib/trpc";
+import { MobilePlatformProvider } from "../src/providers/platform-provider";
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -72,13 +73,15 @@ export default function RootLayout() {
 		<GestureHandlerRootView style={{ flex: 1 }}>
 			<SafeAreaProvider>
 				<TRPCProvider>
-					<AccountProvider>
-						<OfflineVaultProvider>
-							<BiometricAuthProvider>
-								<AppContent />
-							</BiometricAuthProvider>
-						</OfflineVaultProvider>
-					</AccountProvider>
+					<MobilePlatformProvider>
+						<AccountProvider>
+							<OfflineVaultProvider>
+								<BiometricAuthProvider>
+									<AppContent />
+								</BiometricAuthProvider>
+							</OfflineVaultProvider>
+						</AccountProvider>
+					</MobilePlatformProvider>
 				</TRPCProvider>
 			</SafeAreaProvider>
 		</GestureHandlerRootView>

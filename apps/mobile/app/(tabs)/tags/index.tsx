@@ -1,3 +1,4 @@
+import { useAllDecryptedItems } from "@bittery/hooks";
 import { useRouter } from "expo-router";
 import { Search, Tag } from "lucide-react-native";
 import { useMemo, useState } from "react";
@@ -11,20 +12,39 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { TagChip } from "../../../src/components/tag-chip";
-import { useCrossVaultTags } from "../../../src/hooks/use-cross-vault-tags";
+
+interface TagWithCount {
+	name: string;
+	count: number;
+}
 
 export default function TagsScreen() {
 	const router = useRouter();
 	const [searchQuery, setSearchQuery] = useState("");
 
-	const { tags, isLoading, error } = useCrossVaultTags();
+	const { items, isLoading, error } = useAllDecryptedItems();
+
+	// Extract tags with counts from items
+	const tagsWithCounts = useMemo((): TagWithCount[] => {
+		const tagCounts = new Map<string, number>();
+		for (const item of items) {
+			if (item.tags) {
+				for (const tag of item.tags) {
+					tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
+				}
+			}
+		}
+		return Array.from(tagCounts.entries())
+			.map(([name, count]) => ({ name, count }))
+			.sort((a, b) => a.name.localeCompare(b.name));
+	}, [items]);
 
 	// Filter tags based on search
 	const filteredTags = useMemo(() => {
-		if (!searchQuery.trim()) return tags;
+		if (!searchQuery.trim()) return tagsWithCounts;
 		const query = searchQuery.toLowerCase();
-		return tags.filter((tag) => tag.name.toLowerCase().includes(query));
-	}, [tags, searchQuery]);
+		return tagsWithCounts.filter((tag) => tag.name.toLowerCase().includes(query));
+	}, [tagsWithCounts, searchQuery]);
 
 	const handleTagPress = (tagName: string) => {
 		router.push(`/tags/${encodeURIComponent(tagName)}`);

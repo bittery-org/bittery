@@ -13,12 +13,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { ItemListItem } from "../../src/components/item-list-item";
-import { VaultPicker } from "../../src/components/vault-picker";
 import {
 	type CrossVaultDecryptedItem,
 	useAllDecryptedItems,
-} from "../../src/hooks/use-all-decrypted-items";
+} from "@bittery/hooks";
+import { ItemListItem } from "../../src/components/item-list-item";
+import { VaultPicker } from "../../src/components/vault-picker";
 
 const categoryLabels: Record<ItemCategory | "all", string> = {
 	all: "All",

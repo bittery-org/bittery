@@ -1,12 +1,21 @@
+/**
+ * useVaultSearch Hook
+ *
+ * Client-side search across all vaults and items.
+ * Performs zero-knowledge search through decrypted item data.
+ */
+
 import { useTRPC } from "@bittery/shared/trpc";
-import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
+import type { ItemCategory } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { storage } from "@/lib/storage";
-import { decrypt } from "../lib/tauri-crypto";
+import { useAllDecryptedItems, type CrossVaultDecryptedItem } from "./use-all-decrypted-items";
 import { useDecryptedItems } from "./use-decrypted-items";
 
-interface SearchResult {
+/**
+ * Search result type for vault search
+ */
+export interface SearchResult {
 	vaults: Array<{
 		id: string;
 		name: string;
@@ -27,8 +36,44 @@ interface SearchResult {
 }
 
 /**
+ * Search result type for single vault search
+ */
+export interface SingleVaultSearchResult {
+	items: Array<{
+		id: string;
+		vaultId: string;
+		vaultName: string;
+		category: ItemCategory;
+		title: string;
+		url?: string;
+		username?: string;
+		notes?: string;
+	}>;
+}
+
+/**
+ * Helper function to create searchable string from item
+ */
+function getSearchableText(item: CrossVaultDecryptedItem): string {
+	return [
+		item.title,
+		item.url,
+		item.username,
+		item.notes,
+		item.note,
+		item.email,
+	]
+		.filter(Boolean)
+		.join(" ")
+		.toLowerCase();
+}
+
+/**
  * Hook to perform client-side search across all vaults and items.
  * Searches through decrypted item data for true zero-knowledge search.
+ *
+ * @param query - Search query string
+ * @returns Search results containing matching vaults and items
  */
 export function useVaultSearch(query: string): SearchResult {
 	const trpc = useTRPC();
@@ -38,76 +83,8 @@ export function useVaultSearch(query: string): SearchResult {
 		...trpc.vault.list.queryOptions(),
 	});
 
-	// Fetch all items from all vaults in a single request
-	const { data: allRawItems = [] } = useQuery({
-		...trpc.vault.listAllItems.queryOptions(),
-	});
-
-	// Decrypt all items
-	const { data: allDecryptedItems = [] } = useQuery({
-		queryKey: ["all-decrypted-items"],
-		queryFn: async (): Promise<
-			Array<
-				DecryptedItem & {
-					vaultName: string;
-				}
-			>
-		> => {
-			if (allRawItems.length === 0) return [];
-
-			// Decrypt all items in parallel
-			const decrypted = await Promise.all(
-				allRawItems.map(async (item) => {
-					try {
-						// Get vault key for decryption
-						const vaultKey = await storage.decryptVaultKey(
-							item.vault.encryptedVaultKey,
-						);
-
-						// Decrypt item data
-						const decryptedData = await decrypt(
-							{
-								ciphertext: item.encryptedData,
-								iv: item.encryptionIv,
-								algorithm: item.encryptionAlgorithm,
-							},
-							vaultKey,
-						);
-
-						const parsedData = JSON.parse(decryptedData);
-
-						return {
-							id: item.id,
-							vaultId: item.vaultId,
-							vaultName: item.vault.name,
-							category: item.category,
-							favorite: item.favorite,
-							createdAt: item.createdAt,
-							updatedAt: item.updatedAt,
-							...parsedData,
-						} as DecryptedItem & { vaultName: string };
-					} catch (error) {
-						console.error(`Failed to decrypt item ${item.id}:`, error);
-						return {
-							id: item.id,
-							vaultId: item.vaultId,
-							vaultName: item.vault.name,
-							category: item.category,
-							favorite: item.favorite,
-							createdAt: item.createdAt,
-							updatedAt: item.updatedAt,
-							title: "[Decryption Failed]",
-						} as DecryptedItem & { vaultName: string };
-					}
-				}),
-			);
-
-			return decrypted;
-		},
-		enabled: allRawItems.length > 0,
-		staleTime: 5 * 60 * 1000,
-		gcTime: 10 * 60 * 1000,
-	});
+	// Get all decrypted items using the shared hook
+	const { items: allDecryptedItems } = useAllDecryptedItems();
 
 	return useMemo(() => {
 		if (!query || query.trim() === "") {
@@ -130,26 +107,12 @@ export function useVaultSearch(query: string): SearchResult {
 
 		// Search through decrypted items
 		const matchingItems = allDecryptedItems
-			.filter((item) => {
-				const searchable = [
-					item.title,
-					item.url,
-					item.username,
-					item.notes,
-					item.note,
-					item.email,
-				]
-					.filter(Boolean)
-					.join(" ")
-					.toLowerCase();
-
-				return searchable.includes(lowerQuery);
-			})
+			.filter((item) => getSearchableText(item).includes(lowerQuery))
 			.slice(0, 10)
 			.map((item) => ({
 				id: item.id,
 				vaultId: item.vaultId,
-				vaultName: item.vaultName,
+				vaultName: item.vault.name,
 				category: item.category,
 				title: item.title,
 				url: item.url,
@@ -167,8 +130,15 @@ export function useVaultSearch(query: string): SearchResult {
 /**
  * Simplified search hook that only searches within a single vault.
  * Use this for vault-specific search.
+ *
+ * @param vaultId - The ID of the vault to search in
+ * @param query - Search query string
+ * @returns Search results containing matching items
  */
-export function useSingleVaultSearch(vaultId: string, query: string) {
+export function useSingleVaultSearch(
+	vaultId: string,
+	query: string,
+): SingleVaultSearchResult {
 	const trpc = useTRPC();
 
 	// Get vault info
@@ -178,7 +148,7 @@ export function useSingleVaultSearch(vaultId: string, query: string) {
 
 	const currentVault = vaults.find((v) => v.id === vaultId);
 
-	// Get decrypted items
+	// Get decrypted items for this vault
 	const { items: decryptedItems } = useDecryptedItems(vaultId);
 
 	return useMemo(() => {

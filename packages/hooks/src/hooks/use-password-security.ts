@@ -1,3 +1,10 @@
+/**
+ * usePasswordSecurity Hook
+ *
+ * Analyzes password security across all items - detects weak, reused, and old passwords.
+ * Uses zxcvbn for password strength analysis.
+ */
+
 import {
 	daysSince,
 	OLD_PASSWORD_THRESHOLD_DAYS,
@@ -14,6 +21,9 @@ import zxcvbn from "zxcvbn";
 
 /**
  * Analyze a single password using zxcvbn
+ *
+ * @param password - The password to analyze
+ * @returns Password analysis including strength, score, crack time, and feedback
  */
 export function analyzePassword(password: string): PasswordAnalysis {
 	const result = zxcvbn(password);
@@ -132,7 +142,10 @@ function calculateSecurityScore(
 }
 
 /**
- * Hook to analyze password security across all provided items
+ * Hook to analyze password security across all provided items.
+ *
+ * @param items - Array of decrypted items to analyze
+ * @returns Security report including weak, reused, old passwords, score, and recommendations
  */
 export function usePasswordSecurity(items: DecryptedItem[]): SecurityReport {
 	return useMemo(() => {

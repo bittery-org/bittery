@@ -22,7 +22,7 @@ import {
 	User,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useVaultSearch } from "../../hooks/use-vault-search";
+import { useVaultSearch } from "@bittery/hooks";
 
 const getCategoryIcon = (category: ItemCategory) => {
 	switch (category) {

@@ -7,6 +7,7 @@ import ReactDOM from "react-dom/client";
 import { AccountProvider } from "./contexts/account-context";
 import { queryClient, trpc, trpcClient } from "./lib/providers";
 import { initializeStorage } from "./lib/storage";
+import { DesktopPlatformProvider } from "./providers/platform-provider";
 import { DesktopSyncProvider } from "./providers/sync-provider";
 // Import the generated route tree
 import { routeTree } from "./routeTree.gen";
@@ -35,11 +36,13 @@ async function initializeApp() {
 			<QueryClientProvider client={queryClient}>
 				{/* @ts-ignore */}
 				<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-					<DesktopSyncProvider queryClient={queryClient}>
-						<AccountProvider>
-							<RouterProvider router={router} />
-						</AccountProvider>
-					</DesktopSyncProvider>
+					<DesktopPlatformProvider>
+						<DesktopSyncProvider queryClient={queryClient}>
+							<AccountProvider>
+								<RouterProvider router={router} />
+							</AccountProvider>
+						</DesktopSyncProvider>
+					</DesktopPlatformProvider>
 				</TRPCProvider>
 			</QueryClientProvider>
 		</React.StrictMode>,

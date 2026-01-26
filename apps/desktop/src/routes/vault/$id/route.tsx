@@ -2,7 +2,7 @@ import { useTRPCClient } from "@bittery/shared/trpc";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
 import { ItemListRow } from "../../../components/vault/item-list-row";
-import { useDecryptedItems } from "../../../hooks/use-decrypted-items";
+import { useDecryptedItems } from "@bittery/hooks";
 import { useQueryInvalidator } from "../../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault/$id")({

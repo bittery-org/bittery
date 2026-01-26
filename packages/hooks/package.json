@@ -1,0 +1,34 @@
+{
+	"name": "@bittery/hooks",
+	"version": "0.1.0",
+	"type": "module",
+	"main": "./src/index.ts",
+	"types": "./src/index.ts",
+	"scripts": {
+		"check-types": "tsc --noEmit"
+	},
+	"exports": {
+		".": "./src/index.ts",
+		"./types": "./src/types.ts",
+		"./context": "./src/context/platform-context.tsx",
+		"./services": "./src/services/index.ts",
+		"./services/autolock-web": "./src/services/autolock-web.ts",
+		"./services/autolock-mobile": "./src/services/autolock-mobile.ts"
+	},
+	"dependencies": {
+		"@bittery/shared": "workspace:*",
+		"@bittery/storage": "workspace:*",
+		"@bittery/types": "workspace:*",
+		"@tanstack/react-query": "^5.85.5",
+		"zxcvbn": "^4.4.2"
+	},
+	"devDependencies": {
+		"@bittery/config": "workspace:*",
+		"@types/react": "catalog:",
+		"@types/zxcvbn": "^4.4.5",
+		"typescript": "^5.7.2"
+	},
+	"peerDependencies": {
+		"react": "^18.0.0 || ^19.0.0"
+	}
+}

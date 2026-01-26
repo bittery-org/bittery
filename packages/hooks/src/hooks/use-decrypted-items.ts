@@ -1,20 +1,32 @@
+/**
+ * useDecryptedItems Hook
+ *
+ * Fetches and decrypts items from a specific vault.
+ * Items are cached for 5 minutes to avoid repeated decryption.
+ */
+
 import { useTRPC } from "@bittery/shared/trpc";
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
-import { storage } from "@/lib/storage";
-import { decrypt } from "@/lib/wasm-crypto";
+import { usePlatform } from "../context/platform-context";
+
 /**
  * Hook to fetch and decrypt items from a vault.
  * Items are cached for 5 minutes to avoid repeated decryption.
+ *
+ * @param vaultId - The ID of the vault to fetch items from
+ * @returns Object containing decrypted items, loading state, and error
  */
 export function useDecryptedItems(vaultId: string) {
 	const trpc = useTRPC();
+	const { storage, itemDecrypt } = usePlatform();
 
 	// Fetch raw encrypted items from API
 	const {
 		data: rawItems = [],
 		isLoading: isLoadingRaw,
 		dataUpdatedAt,
+		refetch: refetchRaw,
 	} = useQuery({
 		...trpc.vault.listItems.queryOptions({ vaultId }),
 	});
@@ -30,7 +42,7 @@ export function useDecryptedItems(vaultId: string) {
 		queryFn: async (): Promise<DecryptedItem[]> => {
 			if (rawItems.length === 0) return [];
 
-			// Get vault key for decryption using web storage
+			// Get vault key for decryption
 			const vaultKey = await storage.getDecryptedVaultKey(vaultId);
 			if (!vaultKey) {
 				throw new Error("No vault key found for decryption");
@@ -40,7 +52,7 @@ export function useDecryptedItems(vaultId: string) {
 			const decrypted = await Promise.all(
 				rawItems.map(async (item) => {
 					try {
-						const decryptedData = await decrypt(
+						const decryptedData = await itemDecrypt.decrypt(
 							{
 								ciphertext: item.encryptedData,
 								iv: item.encryptionIv,
@@ -54,7 +66,7 @@ export function useDecryptedItems(vaultId: string) {
 						return {
 							id: item.id,
 							vaultId: item.vaultId,
-							category: item.category,
+							category: item.category as ItemCategory,
 							favorite: item.favorite,
 							createdAt: item.createdAt,
 							updatedAt: item.updatedAt,
@@ -66,7 +78,7 @@ export function useDecryptedItems(vaultId: string) {
 						return {
 							id: item.id,
 							vaultId: item.vaultId,
-							category: item.category,
+							category: item.category as ItemCategory,
 							favorite: item.favorite,
 							createdAt: item.createdAt,
 							updatedAt: item.updatedAt,
@@ -87,5 +99,6 @@ export function useDecryptedItems(vaultId: string) {
 		items: decryptedItems,
 		isLoading: isLoadingRaw || isDecrypting,
 		error,
+		refetch: refetchRaw,
 	};
 }

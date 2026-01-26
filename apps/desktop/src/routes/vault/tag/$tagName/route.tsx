@@ -10,7 +10,7 @@ import {
 import { ArrowLeft, Tag } from "lucide-react";
 import { ItemListRow } from "../../../../components/vault/item-list-row";
 import { getTagColorFromName } from "../../../../components/vault/tag-badge";
-import { useAllDecryptedItems } from "../../../../hooks/use-all-decrypted-items";
+import { useAllDecryptedItems } from "@bittery/hooks";
 import { useQueryInvalidator } from "../../../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault/tag/$tagName")({

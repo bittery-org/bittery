@@ -6,7 +6,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Smartphone, Star, Tag } from "lucide-react";
 import { Favicon } from "../../../../components/vault/favicon";
 import { getTagColorFromName } from "../../../../components/vault/tag-badge";
-import { useDecryptedItems } from "../../../../hooks/use-decrypted-items";
+import { useDecryptedItems } from "@bittery/hooks";
 import { useQueryInvalidator } from "../../../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault/$id/tag/$tagName")({

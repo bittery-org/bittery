@@ -1,15 +1,25 @@
+/**
+ * useDecryptedItem Hook
+ *
+ * Fetches and decrypts a single vault item by ID.
+ * The decrypted item is cached to avoid repeated decryption.
+ */
+
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItemData } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
-import { storage } from "@/lib/storage";
-import { decrypt } from "../lib/tauri-crypto";
+import { usePlatform } from "../context/platform-context";
 
 /**
  * Hook to fetch and decrypt a single vault item.
- * The decrypted item is cached to avoid repeated decryption.
+ * The decrypted item is cached for 5 minutes to avoid repeated decryption.
+ *
+ * @param itemId - The ID of the item to fetch and decrypt
+ * @returns Object containing raw item, decrypted data, loading state, and error
  */
 export function useDecryptedItem(itemId: string) {
 	const trpc = useTRPC();
+	const { storage, itemDecrypt } = usePlatform();
 
 	// Fetch raw encrypted item from API
 	const {
@@ -17,12 +27,14 @@ export function useDecryptedItem(itemId: string) {
 		isLoading: isLoadingRaw,
 		error: rawError,
 		dataUpdatedAt,
+		refetch: refetchRaw,
 	} = useQuery({
 		...trpc.vault.getItem.queryOptions({ itemId }),
 		enabled: !!itemId,
 	});
 
 	// Decrypt item and cache the result
+	// Use dataUpdatedAt in the key so decrypted item refetches when raw item changes
 	const {
 		data: decryptedData,
 		isLoading: isDecrypting,
@@ -40,7 +52,7 @@ export function useDecryptedItem(itemId: string) {
 					throw new Error("No vault key found for decryption");
 				}
 
-				const decryptedJson = await decrypt(
+				const decryptedJson = await itemDecrypt.decrypt(
 					{
 						ciphertext: rawItem.encryptedData,
 						iv: rawItem.encryptionIv,
@@ -65,5 +77,6 @@ export function useDecryptedItem(itemId: string) {
 		decryptedData,
 		isLoading: isLoadingRaw || isDecrypting,
 		error: rawError || decryptError,
+		refetch: refetchRaw,
 	};
 }

@@ -13,11 +13,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { ItemListItem } from "../../src/components/item-list-item";
 import {
 	type CrossVaultDecryptedItem,
 	useAllDecryptedItems,
-} from "../../src/hooks/use-all-decrypted-items";
+} from "@bittery/hooks";
+import { ItemListItem } from "../../src/components/item-list-item";
 
 const RECENT_SEARCHES_KEY = "bittery_recent_searches";
 const MAX_RECENT_SEARCHES = 10;

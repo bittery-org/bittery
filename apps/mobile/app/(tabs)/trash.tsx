@@ -13,11 +13,11 @@ import {
 import { Swipeable } from "react-native-gesture-handler";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { ItemListItem } from "../../src/components/item-list-item";
 import {
 	type CrossVaultDeletedItem,
 	useAllDeletedItems,
-} from "../../src/hooks/use-all-deleted-items";
+} from "@bittery/hooks";
+import { ItemListItem } from "../../src/components/item-list-item";
 import { useTRPCClient } from "../../src/lib/trpc";
 
 function formatDeletedAt(dateString: string): string {
@@ -40,8 +40,7 @@ export default function TrashScreen() {
 	const [refreshing, setRefreshing] = useState(false);
 	const [actionInProgress, setActionInProgress] = useState<string | null>(null);
 
-	const { items, isLoading, error, refetch, invalidateAllItems } =
-		useAllDeletedItems();
+	const { items, isLoading, error, refetch } = useAllDeletedItems();
 
 	// Sort by deletion date (most recent first)
 	const sortedItems = useMemo(() => {
@@ -69,7 +68,9 @@ export default function TrashScreen() {
 			await queryClient.invalidateQueries({
 				queryKey: [["vault", "listAllDeletedItems"]],
 			});
-			invalidateAllItems();
+			await queryClient.invalidateQueries({
+				queryKey: [["vault", "listAllItems"]],
+			});
 			await refetch();
 		} catch (error) {
 			console.error("Failed to restore item:", error);

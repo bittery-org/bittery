@@ -4,7 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
 import { Star } from "lucide-react";
 import { ItemListRow } from "../../../components/vault/item-list-row";
-import { useAllDecryptedItems } from "../../../hooks/use-all-decrypted-items";
+import { useAllDecryptedItems } from "@bittery/hooks";
 import { useQueryInvalidator } from "../../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault/favorites")({

@@ -23,7 +23,7 @@ import {
 	Trash2,
 } from "lucide-react";
 import { useCallback, useState } from "react";
-import { useDecryptedItem } from "../../hooks/use-decrypted-item";
+import { useDecryptedItem } from "@bittery/hooks";
 import Loader from "../loader";
 import ItemDetail from "./item-detail";
 import { ItemForm } from "./item-form";

@@ -1,15 +1,29 @@
+import { useAllDecryptedItems, usePasswordSecurity } from "@bittery/hooks";
 import { createFileRoute } from "@tanstack/react-router";
+import { useMemo } from "react";
 import { SecurityDashboard } from "@/components/dashboard/security-dashboard";
-import { useAllDecryptedItems } from "@/hooks/use-all-decrypted-items";
-import { usePasswordSecurity } from "@/hooks/use-password-security";
 
 export const Route = createFileRoute("/_app/security")({
 	component: SecurityPage,
 });
 
 function SecurityPage() {
-	const { items, vaults, isLoading } = useAllDecryptedItems();
+	const { items, isLoading } = useAllDecryptedItems();
 	const report = usePasswordSecurity(items);
+
+	// Extract unique vaults from items for the security dashboard
+	const vaults = useMemo(() => {
+		const vaultMap = new Map<string, { id: string; name: string }>();
+		for (const item of items) {
+			if (item.vault && !vaultMap.has(item.vault.id)) {
+				vaultMap.set(item.vault.id, {
+					id: item.vault.id,
+					name: item.vault.name,
+				});
+			}
+		}
+		return Array.from(vaultMap.values());
+	}, [items]);
 
 	return (
 		<div className="space-y-6">

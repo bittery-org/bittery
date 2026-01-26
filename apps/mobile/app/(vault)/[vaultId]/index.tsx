@@ -22,8 +22,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { useDecryptedItems } from "@bittery/hooks";
 import { TotpDisplay } from "../../../src/components/totp-display";
-import { useDecryptedItems } from "../../../src/hooks/use-decrypted-items";
 
 const categoryIcons: Record<ItemCategory, typeof Key> = {
 	login: Key,
