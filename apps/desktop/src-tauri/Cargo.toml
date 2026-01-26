@@ -37,7 +37,7 @@ dirs = "5.0"
 base64 = "0.22"
 
 # Native crypto
-bittery-crypto-core = { path = "../../../packages/bittery-crypto/crates/bittery-crypto-core" }
+bittery-crypto-core = { path = "../../../packages/crypto/core/crates/bittery-crypto-core" }
 
 # OS keychain access (macOS Keychain, Windows Credential Manager, Linux Secret Service)
 # Platform-specific features must be enabled for actual keychain storage
