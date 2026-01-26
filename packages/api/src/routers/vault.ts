@@ -1063,9 +1063,10 @@ export const vaultRouter = router({
 	 * Get dashboard stats for current user
 	 */
 	stats: protectedProcedure.query(async ({ ctx }) => {
-		// Get team count
-		const teamMemberships = await db.query.teamMember.findMany({
-			where: (tm, { eq }) => eq(tm.userId, ctx.session.userId),
+		// Get user's team
+		const userData = await db.query.user.findFirst({
+			where: (user, { eq }) => eq(user.id, ctx.session.userId),
+			with: { team: true },
 		});
 
 		// Get vault count
@@ -1086,7 +1087,7 @@ export const vaultRouter = router({
 		}
 
 		return {
-			teamCount: teamMemberships.length,
+			teamCount: userData?.team ? 1 : 0,
 			vaultCount: userVaults.length,
 			itemCount,
 		};
