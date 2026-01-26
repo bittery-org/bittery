@@ -10,12 +10,12 @@ crate-type = ["cdylib"]
 
 [dependencies]
 bittery-crypto-core = { path = "../core/crates/bittery-crypto-core" }
-napi = { version = "2", default-features = false, features = ["napi4"] }
-napi-derive = "2"
+napi = { version = "3", default-features = false, features = ["napi8"] }
+napi-derive = "3"
 base64 = "0.22"
 
 [build-dependencies]
-napi-build = "2"
+napi-build = "2.3"
 
 [profile.release]
 lto = true
