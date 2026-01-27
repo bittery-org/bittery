@@ -100,6 +100,7 @@ function RouteComponent() {
 	} | null>(null);
 	const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
 	const [importingVaultId, setImportingVaultId] = useState<string | null>(null);
+	const [importingVaultAccountEmail, setImportingVaultAccountEmail] = useState<string | undefined>(undefined);
 	const [availableAccounts, setAvailableAccounts] = useState<AccountOption[]>([]);
 
 	// Load available accounts for multi-account mode
@@ -260,7 +261,12 @@ function RouteComponent() {
 	};
 
 	const handleOpenImportDialog = (vaultId: string) => {
+		// Find the vault to get its account email
+		const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
+		const accountEmail = vault && "accountEmail" in vault ? vault.accountEmail : undefined;
+
 		setImportingVaultId(vaultId);
+		setImportingVaultAccountEmail(accountEmail);
 		setIsImportDialogOpen(true);
 	};
 
@@ -345,11 +351,13 @@ function RouteComponent() {
 				{importingVaultId && (
 					<ImportDialog
 						vaultId={importingVaultId}
+						accountEmail={importingVaultAccountEmail}
 						open={isImportDialogOpen}
 						onOpenChange={(open) => {
 							setIsImportDialogOpen(open);
 							if (!open) {
 								setImportingVaultId(null);
+								setImportingVaultAccountEmail(undefined);
 							}
 						}}
 					/>

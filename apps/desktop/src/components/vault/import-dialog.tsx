@@ -1,3 +1,4 @@
+import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -24,14 +25,16 @@ interface ImportDialogProps {
 	vaultId: string;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
+	accountEmail?: string;
 }
 
 export function ImportDialog({
 	vaultId,
 	open,
 	onOpenChange,
+	accountEmail,
 }: ImportDialogProps) {
-	const trpcClient = useTRPCClient();
+	const defaultClient = useTRPCClient();
 	const invalidator = useQueryInvalidator();
 
 	const [importStatus, setImportStatus] = useState<
@@ -102,7 +105,10 @@ export function ImportDialog({
 
 			// Get vault key for encryption
 			setImportStatus("encrypting");
-			const vaultKey = await storage.getDecryptedVaultKey(vaultId);
+			const vaultKey = await storage.getDecryptedVaultKey(
+				vaultId,
+				accountEmail,
+			);
 			if (!vaultKey) {
 				throw new Error("Failed to get vault key for encryption");
 			}
@@ -144,8 +150,21 @@ export function ImportDialog({
 			setProgress(70);
 			setImportStatus("uploading");
 
+			// Get the correct tRPC client for this account
+			let client = defaultClient;
+			if (accountEmail) {
+				const authToken = await storage.getAuthToken(accountEmail);
+				const serverUrl = await storage.getServerUrl(accountEmail);
+				if (authToken) {
+					client = createAccountTrpcClient(
+						authToken,
+						serverUrl || "http://localhost:3000",
+					);
+				}
+			}
+
 			// Bulk import via tRPC
-			const result = await trpcClient.vault.bulkImportItems.mutate({
+			const result = await client.vault.bulkImportItems.mutate({
 				vaultId,
 				items: encryptedItems,
 			});
