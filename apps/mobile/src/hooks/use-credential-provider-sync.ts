@@ -338,6 +338,7 @@ export function useCredentialProviderSync(
 		calculateItemsHash,
 		sync,
 		debounceMs,
+		items.length,
 	]);
 
 	return {

@@ -79,7 +79,9 @@ export function LoginPage() {
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
 			toast.success(
-				addingAccount ? "Account added successfully" : "Signed in successfully!",
+				addingAccount
+					? "Account added successfully"
+					: "Signed in successfully!",
 			);
 			navigate({ to: "/vault" });
 		},

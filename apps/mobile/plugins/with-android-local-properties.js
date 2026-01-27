@@ -1,6 +1,6 @@
 const { withDangerousMod } = require("expo/config-plugins");
-const fs = require("fs");
-const path = require("path");
+const fs = require("node:fs");
+const path = require("node:path");
 
 /**
  * Expo config plugin that creates android/local.properties with the SDK path.

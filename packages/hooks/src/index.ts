@@ -99,6 +99,33 @@ export {
 	useQuickUnlockAll,
 	useSessionState,
 } from "./hooks/auth";
+export {
+	type MultiAccountDeletedItem,
+	type UseAllAccountsDeletedItemsOptions,
+	useAllAccountsDeletedItems,
+} from "./hooks/internal/use-all-accounts-deleted-items";
+export {
+	type MultiAccountItem,
+	type UseAllAccountsItemsOptions,
+	useAllAccountsItems,
+} from "./hooks/internal/use-all-accounts-items";
+export {
+	type CrossVaultDeletedItem,
+	type UseAllDecryptedDeletedItemsOptions,
+	useAllDecryptedDeletedItems,
+} from "./hooks/internal/use-all-decrypted-deleted-items";
+export {
+	type CrossVaultDecryptedItem,
+	type UseAllDecryptedItemsOptions,
+	useAllDecryptedItems,
+} from "./hooks/internal/use-all-decrypted-items";
+export { useDecryptedItem } from "./hooks/internal/use-decrypted-item";
+// Data Hooks (read operations)
+export { useDecryptedItems } from "./hooks/internal/use-decrypted-items";
+export {
+	type UseVaultItemsOptions,
+	useVaultItems,
+} from "./hooks/internal/use-vault-items";
 // Item Mutation Hooks (write operations)
 export {
 	type CreateItemInput,
@@ -126,26 +153,6 @@ export {
 	useCreateShare,
 } from "./hooks/share";
 export {
-	type MultiAccountItem,
-	type UseAllAccountsItemsOptions,
-	useAllAccountsItems,
-} from "./hooks/internal/use-all-accounts-items";
-export {
-	type CrossVaultDecryptedItem,
-	type UseAllDecryptedItemsOptions,
-	useAllDecryptedItems,
-} from "./hooks/internal/use-all-decrypted-items";
-export {
-	type CrossVaultDeletedItem,
-	type UseAllDecryptedDeletedItemsOptions,
-	useAllDecryptedDeletedItems,
-} from "./hooks/internal/use-all-decrypted-deleted-items";
-export {
-	type MultiAccountDeletedItem,
-	type UseAllAccountsDeletedItemsOptions,
-	useAllAccountsDeletedItems,
-} from "./hooks/internal/use-all-accounts-deleted-items";
-export {
 	type UnifiedDeletedItem,
 	type UseAllDeletedItemsOptions,
 	useAllDeletedItems,
@@ -155,13 +162,13 @@ export {
 	useAvailableTags,
 } from "./hooks/use-available-tags";
 export { useCrossVaultTags } from "./hooks/use-cross-vault-tags";
-export { useDecryptedItem } from "./hooks/internal/use-decrypted-item";
-// Data Hooks (read operations)
-export { useDecryptedItems } from "./hooks/internal/use-decrypted-items";
+export { type UseItemResult, useItem } from "./hooks/use-item";
 // Unified Data Hooks (automatically handle single-account vs "All Accounts" mode)
-export { useItems, type UnifiedItem, type UseItemsOptions } from "./hooks/use-items";
-export { useItem, type UseItemResult } from "./hooks/use-item";
-export { useVaultItems, type UseVaultItemsOptions } from "./hooks/internal/use-vault-items";
+export {
+	type UnifiedItem,
+	type UseItemsOptions,
+	useItems,
+} from "./hooks/use-items";
 export {
 	analyzePassword,
 	usePasswordSecurity,
@@ -200,9 +207,9 @@ export type {
 	SRPClientSession,
 	SRPServerChallenge,
 } from "./types";
-// Utilities
-export { refreshVaultKeys } from "./utils/vault-utils";
 export {
 	findAccountEmailForItem,
 	getItemAccountEmail,
 } from "./utils/account-helper";
+// Utilities
+export { refreshVaultKeys } from "./utils/vault-utils";

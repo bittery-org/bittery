@@ -12,11 +12,11 @@ import type { DecryptedItemData } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";
 import {
 	usePlatform,
-	useQueryInvalidator,
 	usePlatformStorage,
+	useQueryInvalidator,
 } from "../../context/platform-context";
-import { useItems } from "../use-items";
 import { findAccountEmailForItem } from "../../utils/account-helper";
+import { useItems } from "../use-items";
 
 /**
  * Input for updating an item

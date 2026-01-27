@@ -3,20 +3,20 @@
  * Wrapper around the shared AccountSwitcher component with desktop-specific logic
  */
 
+import { useAccountSwitcher } from "@bittery/hooks";
 import {
-	AccountSwitcher as SharedAccountSwitcher,
 	Button,
+	AccountSwitcher as SharedAccountSwitcher,
 	toast,
 } from "@bittery/ui";
-import { useAccountSwitcher } from "@bittery/hooks";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, Users } from "lucide-react";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
+import { useQueryInvalidator } from "@/providers/sync-provider";
 import { AccountAvatar } from "./account-avatar";
 import { AccountSettingsDialog } from "./account-settings-dialog";
 import { RemoveAccountDialog } from "./remove-account-dialog";
-import { useQueryInvalidator } from "@/providers/sync-provider";
 
 export function AccountSwitcher() {
 	const {
@@ -35,9 +35,7 @@ export function AccountSwitcher() {
 	const accountsData = accounts.data ?? [];
 	const unlockedEmailsList = unlockedEmails.data ?? [];
 	const isAllAccountsMode = activeEmail.data === "all";
-	const activeAccount = accountsData.find(
-		(a) => a.email === activeEmail.data,
-	);
+	const activeAccount = accountsData.find((a) => a.email === activeEmail.data);
 
 	const handleAccountSelect = async (email: string) => {
 		if (email === activeEmail.data) return;
@@ -95,7 +93,7 @@ export function AccountSwitcher() {
 		}
 	};
 
-	const handleAccountSettings = (email: string) => {
+	const handleAccountSettings = (_email: string) => {
 		setShowSettings(true);
 	};
 

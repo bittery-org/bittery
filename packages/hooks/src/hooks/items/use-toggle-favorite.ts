@@ -10,11 +10,11 @@ import { useTRPCClient } from "@bittery/shared/trpc";
 import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import { useMutation } from "@tanstack/react-query";
 import {
-	useQueryInvalidator,
 	usePlatformStorage,
+	useQueryInvalidator,
 } from "../../context/platform-context";
-import { useItems } from "../use-items";
 import { findAccountEmailForItem } from "../../utils/account-helper";
+import { useItems } from "../use-items";
 
 /**
  * Input for toggling favorite status

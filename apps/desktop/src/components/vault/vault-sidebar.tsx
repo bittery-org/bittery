@@ -198,7 +198,8 @@ export function VaultSidebar({
 	const vaultsByAccount = isMultiAccountMode
 		? vaults.reduce(
 				(acc, vault) => {
-					const email = vault.accountEmail!;
+					const email = vault.accountEmail;
+					if (!email) return acc;
 					if (!acc[email]) {
 						acc[email] = {
 							accountEmail: email,

@@ -4,10 +4,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Plus, Search, Settings } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ExtensionAccountSwitcher } from "@/components/account-switcher";
 import { Favicon } from "@/components/favicon";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
-import { ExtensionAccountSwitcher } from "@/components/account-switcher";
 import { storage } from "@/lib/storage";
 
 type MultiAccountItem = DecryptedItem & {
@@ -291,16 +291,20 @@ export function VaultPage() {
 																	{subtitle}
 																</div>
 															)}
-															{isAllAccountsMode && (item as MultiAccountItem).account && (
-																<div className="mt-0.5 flex items-center gap-1">
-																	<Badge
-																		variant="secondary"
-																		className="text-[10px] px-1.5 py-0"
-																	>
-																		{(item as MultiAccountItem).account?.email}
-																	</Badge>
-																</div>
-															)}
+															{isAllAccountsMode &&
+																(item as MultiAccountItem).account && (
+																	<div className="mt-0.5 flex items-center gap-1">
+																		<Badge
+																			variant="secondary"
+																			className="px-1.5 py-0 text-[10px]"
+																		>
+																			{
+																				(item as MultiAccountItem).account
+																					?.email
+																			}
+																		</Badge>
+																	</div>
+																)}
 														</div>
 													</div>
 												</button>
@@ -341,16 +345,17 @@ export function VaultPage() {
 															{subtitle}
 														</div>
 													)}
-													{isAllAccountsMode && (item as MultiAccountItem).account && (
-														<div className="mt-0.5 flex items-center gap-1">
-															<Badge
-																variant="secondary"
-																className="text-[10px] px-1.5 py-0"
-															>
-																{(item as MultiAccountItem).account?.email}
-															</Badge>
-														</div>
-													)}
+													{isAllAccountsMode &&
+														(item as MultiAccountItem).account && (
+															<div className="mt-0.5 flex items-center gap-1">
+																<Badge
+																	variant="secondary"
+																	className="px-1.5 py-0 text-[10px]"
+																>
+																	{(item as MultiAccountItem).account?.email}
+																</Badge>
+															</div>
+														)}
 												</div>
 											</div>
 										</button>

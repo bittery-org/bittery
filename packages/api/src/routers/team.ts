@@ -29,7 +29,7 @@ export const teamRouter = router({
 
 		// Get member count
 		const members = await db.query.user.findMany({
-			where: (user, { eq }) => eq(user.teamId, userData.teamId!),
+			where: (user, { eq }) => eq(user.teamId, userData.teamId as string),
 		});
 
 		return {

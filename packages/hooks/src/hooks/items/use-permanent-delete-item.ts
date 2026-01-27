@@ -10,11 +10,11 @@ import { useTRPCClient } from "@bittery/shared/trpc";
 import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import { useMutation } from "@tanstack/react-query";
 import {
-	useQueryInvalidator,
 	usePlatformStorage,
+	useQueryInvalidator,
 } from "../../context/platform-context";
-import { useAllDeletedItems } from "../use-all-deleted-items";
 import { findAccountEmailForItem } from "../../utils/account-helper";
+import { useAllDeletedItems } from "../use-all-deleted-items";
 
 /**
  * Input for permanently deleting an item

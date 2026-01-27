@@ -32,7 +32,10 @@ const DEFAULT_SERVER_URL =
  * Cache for tRPC clients to avoid creating new instances on every call.
  * Key format: `${serverUrl}:${authToken}`
  */
-const clientCache = new Map<string, ReturnType<typeof createTRPCClient<AppRouter>>>();
+const clientCache = new Map<
+	string,
+	ReturnType<typeof createTRPCClient<AppRouter>>
+>();
 
 /**
  * Generate cache key for tRPC client.
@@ -63,8 +66,9 @@ export function createAccountTrpcClient(authToken: string, serverUrl: string) {
 	const cacheKey = getCacheKey(authToken, normalizedUrl);
 
 	// Return cached client if exists
-	if (clientCache.has(cacheKey)) {
-		return clientCache.get(cacheKey)!;
+	const cachedClient = clientCache.get(cacheKey);
+	if (cachedClient) {
+		return cachedClient;
 	}
 
 	// Create new client
@@ -145,8 +149,7 @@ export async function createAllAccountTrpcClients(
 			continue;
 		}
 
-		const serverUrl =
-			(await storage.getServerUrl(email)) ?? DEFAULT_SERVER_URL;
+		const serverUrl = (await storage.getServerUrl(email)) ?? DEFAULT_SERVER_URL;
 		const client = createAccountTrpcClient(authToken, serverUrl);
 
 		clients.set(email, client);

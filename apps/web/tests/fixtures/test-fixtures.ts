@@ -183,7 +183,10 @@ export class BitteryPage {
 	/**
 	 * Fill signup form fields (step 2: after acknowledging secret key)
 	 */
-	async fillSignupForm(user: Omit<TestUser, "secretKey">, accountType: 'personal' | 'organization' = 'organization') {
+	async fillSignupForm(
+		user: Omit<TestUser, "secretKey">,
+		accountType: "personal" | "organization" = "organization",
+	) {
 		// Fill server URL if it's empty or default
 		const serverUrlInput = this.page.locator("#serverUrl");
 		const currentValue = await serverUrlInput.inputValue();
@@ -195,10 +198,12 @@ export class BitteryPage {
 		await this.page.fill("#name", user.name);
 
 		// Select account type
-		if (accountType === 'organization') {
+		if (accountType === "organization") {
 			await this.page.click('button:has-text("Organization")');
 			// Wait for organization name field to appear
-			await this.page.waitForSelector("#organizationName", { state: 'visible' });
+			await this.page.waitForSelector("#organizationName", {
+				state: "visible",
+			});
 			await this.page.fill("#organizationName", user.organizationName);
 		} else {
 			await this.page.click('button:has-text("Personal")');

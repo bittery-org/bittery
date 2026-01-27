@@ -20,8 +20,14 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { usePlatformStorage } from "../context/platform-context";
-import { useAllDecryptedItems, type CrossVaultDecryptedItem } from "./internal/use-all-decrypted-items";
-import { useAllAccountsItems, type MultiAccountItem } from "./internal/use-all-accounts-items";
+import {
+	type MultiAccountItem,
+	useAllAccountsItems,
+} from "./internal/use-all-accounts-items";
+import {
+	type CrossVaultDecryptedItem,
+	useAllDecryptedItems,
+} from "./internal/use-all-decrypted-items";
 
 export type UnifiedItem = CrossVaultDecryptedItem | MultiAccountItem;
 

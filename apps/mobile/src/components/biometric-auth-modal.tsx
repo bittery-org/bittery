@@ -12,7 +12,7 @@ import {
 	RefreshCw,
 	ScanFace,
 } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
 	ActivityIndicator,
 	Modal,
@@ -22,7 +22,6 @@ import {
 } from "react-native";
 import { useBiometricAuth } from "../contexts/biometric-auth-context";
 import {
-	type BiometricAuthResult,
 	type BiometricErrorType,
 	getBiometricErrorMessage,
 	storage,
@@ -62,14 +61,7 @@ export function BiometricAuthModal({
 		}
 	}, [visible]);
 
-	// Auto-trigger biometric on modal show
-	useEffect(() => {
-		if (visible && !isAuthenticating && !lastAuthResult) {
-			handleAuthenticate();
-		}
-	}, [visible]);
-
-	const handleAuthenticate = async () => {
+	const handleAuthenticate = useCallback(async () => {
 		setIsAuthenticating(true);
 		try {
 			const result = await triggerBiometricAuth();
@@ -79,7 +71,14 @@ export function BiometricAuthModal({
 		} finally {
 			setIsAuthenticating(false);
 		}
-	};
+	}, [triggerBiometricAuth, onSuccess]);
+
+	// Auto-trigger biometric on modal show
+	useEffect(() => {
+		if (visible && !isAuthenticating && !lastAuthResult) {
+			handleAuthenticate();
+		}
+	}, [visible, handleAuthenticate, isAuthenticating, lastAuthResult]);
 
 	const handleRetry = async () => {
 		setRetryCount((prev) => prev + 1);

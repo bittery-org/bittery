@@ -33,7 +33,8 @@ async function decryptVaultItemsForAccount(
 	const { createAccountTrpcClient } = await import(
 		"@bittery/shared/trpc-client-factory"
 	);
-	const serverUrl = (await storage.getServerUrl(email)) || "http://localhost:3000";
+	const serverUrl =
+		(await storage.getServerUrl(email)) || "http://localhost:3000";
 	const accountClient = createAccountTrpcClient(authToken, serverUrl);
 
 	// Fetch vaults for this account
@@ -127,9 +128,7 @@ async function decryptVaultItems() {
 					// Get account metadata
 					const accountMeta = await storage.getAccountMetadata?.(email);
 					if (!accountMeta) {
-						console.warn(
-							`[vault-handlers] No metadata found for ${email}`,
-						);
+						console.warn(`[vault-handlers] No metadata found for ${email}`);
 						return [];
 					}
 

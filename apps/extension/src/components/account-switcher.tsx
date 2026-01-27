@@ -1,11 +1,10 @@
-import { AccountSwitcher } from "@bittery/ui";
 import { useAccountSwitcher } from "@bittery/hooks";
-import { useNavigate } from "@tanstack/react-router";
-import { toast } from "@bittery/ui";
-import { storage } from "@/lib/storage";
+import { AccountSwitcher, toast } from "@bittery/ui";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
+import { storage } from "@/lib/storage";
 
 /**
  * Extension-specific account switcher wrapper

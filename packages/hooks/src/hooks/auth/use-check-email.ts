@@ -44,7 +44,7 @@ export function useCheckEmail(
 	const trpcClient = useTRPCClient();
 
 	// Only enable if email is provided and looks valid
-	const hasValidEmail = Boolean(email && email.includes("@"));
+	const hasValidEmail = Boolean(email?.includes("@"));
 	const enabled = options.enabled !== false && hasValidEmail;
 
 	return useQuery({

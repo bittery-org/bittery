@@ -38,9 +38,10 @@ const trpcClient = createTRPCClient<AppRouter>({
 				const activeEmail = await storage.getActiveAccountEmail();
 
 				// Only get auth token if we have a real account (not "all" mode)
-				const token = activeEmail && activeEmail !== "all"
-					? await storage.getAuthToken()
-					: null;
+				const token =
+					activeEmail && activeEmail !== "all"
+						? await storage.getAuthToken()
+						: null;
 
 				const headers: Record<string, string> = {
 					...(options?.headers as Record<string, string>),

@@ -10,6 +10,7 @@
  * 3. Merge items with source account metadata
  */
 
+import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import type { AccountMetadata } from "@bittery/storage/types";
 import { useQuery } from "@tanstack/react-query";
@@ -17,7 +18,6 @@ import {
 	usePlatformCrypto,
 	usePlatformStorage,
 } from "../../context/platform-context";
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import type { RawEncryptedItemWithVault } from "../../types";
 
 /**
@@ -137,9 +137,7 @@ export function useAllAccountsItems(options: UseAllAccountsItemsOptions = {}) {
 						// Get account's JWT token
 						const authToken = await storage.getAuthToken(email);
 						if (!authToken) {
-							console.warn(
-								`[useAllAccountsItems] No auth token for ${email}`,
-							);
+							console.warn(`[useAllAccountsItems] No auth token for ${email}`);
 							return [];
 						}
 
@@ -155,14 +153,12 @@ export function useAllAccountsItems(options: UseAllAccountsItemsOptions = {}) {
 						// Get server URL
 						const serverUrl = await storage.getServerUrl(email);
 
-						
 						const accountClient = createAccountTrpcClient(
 							authToken,
 							serverUrl || "http://localhost:3000",
 						);
 
 						console.log(authToken);
-						
 
 						// Fetch all items for this account
 						const rawItems = await accountClient.vault.listAllItems.query();
@@ -266,8 +262,7 @@ export function useAllAccountsItems(options: UseAllAccountsItemsOptions = {}) {
 	return {
 		items,
 		unlockedAccounts: accountMetadata,
-		isLoading:
-			isLoadingUnlocked || isLoadingMetadata || isLoadingItems,
+		isLoading: isLoadingUnlocked || isLoadingMetadata || isLoadingItems,
 		error,
 		refetch,
 	};

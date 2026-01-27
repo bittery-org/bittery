@@ -15,15 +15,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { usePlatformStorage } from "../context/platform-context";
 import {
-	useAllDecryptedDeletedItems,
-	type CrossVaultDeletedItem,
-} from "./internal/use-all-decrypted-deleted-items";
-import {
-	useAllAccountsDeletedItems,
 	type MultiAccountDeletedItem,
+	useAllAccountsDeletedItems,
 } from "./internal/use-all-accounts-deleted-items";
+import {
+	type CrossVaultDeletedItem,
+	useAllDecryptedDeletedItems,
+} from "./internal/use-all-decrypted-deleted-items";
 
-export type UnifiedDeletedItem = CrossVaultDeletedItem | MultiAccountDeletedItem;
+export type UnifiedDeletedItem =
+	| CrossVaultDeletedItem
+	| MultiAccountDeletedItem;
 
 export interface UseAllDeletedItemsOptions {
 	enabled?: boolean;

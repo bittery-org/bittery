@@ -2,8 +2,8 @@ const {
 	withAndroidManifest,
 	withDangerousMod,
 } = require("expo/config-plugins");
-const fs = require("fs");
-const path = require("path");
+const fs = require("node:fs");
+const path = require("node:path");
 
 /**
  * Config plugin that adds the Credential Provider service to the Android manifest
@@ -11,7 +11,7 @@ const path = require("path");
  */
 const withCredentialProvider = (config) => {
 	// First, copy the XML resource file
-	config = withDangerousMod(config, [
+	let modifiedConfig = withDangerousMod(config, [
 		"android",
 		async (config) => {
 			const projectRoot = config.modRequest.projectRoot;
@@ -61,7 +61,7 @@ const withCredentialProvider = (config) => {
 	]);
 
 	// Then, modify the Android manifest
-	config = withAndroidManifest(config, async (config) => {
+	modifiedConfig = withAndroidManifest(modifiedConfig, async (config) => {
 		// Ensure tools namespace is declared
 		if (!config.modResults.manifest.$["xmlns:tools"]) {
 			config.modResults.manifest.$["xmlns:tools"] =
@@ -152,7 +152,7 @@ const withCredentialProvider = (config) => {
 		return config;
 	});
 
-	return config;
+	return modifiedConfig;
 };
 
 module.exports = withCredentialProvider;

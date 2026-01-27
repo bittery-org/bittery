@@ -18,13 +18,11 @@ import {
 	LogOutIcon,
 	PlusIcon,
 	SettingsIcon,
-	UserIcon,
 	UsersIcon,
 } from "lucide-react";
 import type React from "react";
 import { cn } from "../lib/utils.js";
 import { Avatar, AvatarFallback } from "./avatar.js";
-import { Badge } from "./badge.js";
 import { Button } from "./button.js";
 import {
 	DropdownMenu,
@@ -206,7 +204,7 @@ export function AccountSwitcher({
 									)}
 								</div>
 								{account.teamName && (
-									<span className="truncate text-muted-foreground text-[10px]">
+									<span className="truncate text-[10px] text-muted-foreground">
 										{account.teamName}
 									</span>
 								)}

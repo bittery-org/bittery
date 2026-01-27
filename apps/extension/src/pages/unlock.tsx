@@ -58,7 +58,9 @@ export function UnlockPage() {
 					toast.success(`All ${unlocked.length} accounts unlocked`);
 				}
 			} else {
-				toast.warning(`Unlocked ${unlocked.length} of ${accounts.length} accounts`);
+				toast.warning(
+					`Unlocked ${unlocked.length} of ${accounts.length} accounts`,
+				);
 			}
 
 			// Delay navigation to show unlock animation
@@ -101,7 +103,9 @@ export function UnlockPage() {
 					toast.success(`All ${unlocked.length} accounts unlocked`);
 				}
 			} else {
-				toast.warning(`Unlocked ${unlocked.length} of ${accounts.length} accounts`);
+				toast.warning(
+					`Unlocked ${unlocked.length} of ${accounts.length} accounts`,
+				);
 			}
 
 			// Delay navigation to show unlock animation
@@ -141,7 +145,7 @@ export function UnlockPage() {
 			.catch((error) => {
 				console.error("Failed to check biometric:", error);
 			});
-	}, [accounts.length]);
+	}, [accounts.length, biometricUnlockMutation.mutate]);
 
 	const form = useForm({
 		defaultValues: {
@@ -181,7 +185,7 @@ export function UnlockPage() {
 							Welcome back
 						</h1>
 						{accounts.length === 1 ? (
-							<p className="mt-1 font-medium text-sm">{accounts[0].email}</p>
+							<p className="mt-1 font-medium text-sm">{accounts[0]?.email}</p>
 						) : (
 							<p className="mt-1 text-muted-foreground text-sm">
 								{accounts.length} accounts

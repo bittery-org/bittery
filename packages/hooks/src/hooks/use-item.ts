@@ -12,11 +12,11 @@ import { useDecryptedItem } from "./internal/use-decrypted-item";
 import { useItems } from "./use-items";
 
 export interface UseItemResult {
-  rawItem: any;
-  decryptedData: DecryptedItemData | null | undefined;
-  isLoading: boolean;
-  error: Error | null;
-  refetch: () => void;
+	rawItem: any;
+	decryptedData: DecryptedItemData | null | undefined;
+	isLoading: boolean;
+	error: Error | null;
+	refetch: () => void;
 }
 
 /**
@@ -35,18 +35,18 @@ export interface UseItemResult {
  * ```
  */
 export function useItem(itemId: string): UseItemResult {
-  // Get all items to find which account this item belongs to
-  const { items, isAllAccountsMode } = useItems();
+	// Get all items to find which account this item belongs to
+	const { items, isAllAccountsMode } = useItems();
 
-  // Find the item to get its account email (if in "All Accounts" mode)
-  const itemFromList = items.find((i) => i.id === itemId);
-  const accountEmail =
-    isAllAccountsMode && itemFromList && "account" in itemFromList
-      ? (itemFromList as any).account?.email
-      : undefined;
+	// Find the item to get its account email (if in "All Accounts" mode)
+	const itemFromList = items.find((i) => i.id === itemId);
+	const accountEmail =
+		isAllAccountsMode && itemFromList && "account" in itemFromList
+			? (itemFromList as any).account?.email
+			: undefined;
 
-  // Fetch the full item with the correct account credentials
-  const result = useDecryptedItem(itemId, { accountEmail });
+	// Fetch the full item with the correct account credentials
+	const result = useDecryptedItem(itemId, { accountEmail });
 
-  return result as UseItemResult;
+	return result as UseItemResult;
 }

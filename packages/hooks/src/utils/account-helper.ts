@@ -6,8 +6,8 @@
  * by finding the correct account for each item.
  */
 
-import type { UnifiedItem } from "../hooks/use-items";
 import type { UnifiedDeletedItem } from "../hooks/use-all-deleted-items";
+import type { UnifiedItem } from "../hooks/use-items";
 
 /**
  * Extracts the account email from an item if it has account metadata.

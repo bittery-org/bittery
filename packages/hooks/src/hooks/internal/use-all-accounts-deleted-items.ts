@@ -5,6 +5,7 @@
  * This hook manages switching between accounts to fetch their data and merges results.
  */
 
+import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import type { ItemCategory } from "@bittery/shared/types";
 import type { AccountMetadata } from "@bittery/storage/types";
 import { useQuery } from "@tanstack/react-query";
@@ -12,7 +13,6 @@ import {
 	usePlatformCrypto,
 	usePlatformStorage,
 } from "../../context/platform-context";
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import type { RawEncryptedItemWithVault } from "../../types";
 import type { CrossVaultDeletedItem } from "./use-all-decrypted-deleted-items";
 
@@ -137,7 +137,8 @@ export function useAllAccountsDeletedItems(
 						);
 
 						// Fetch all deleted items for this account
-						const rawItems = await accountClient.vault.listAllDeletedItems.query();
+						const rawItems =
+							await accountClient.vault.listAllDeletedItems.query();
 
 						// Cache decrypted vault keys for this account
 						const vaultKeyCache = new Map<string, Uint8Array>();

@@ -425,7 +425,7 @@ Generated: ${new Date().toLocaleString()}
 													onClick={() => field.handleChange("personal")}
 												>
 													<span className="font-medium">Personal</span>
-													<span className="text-left text-muted-foreground text-xs font-normal">
+													<span className="text-left font-normal text-muted-foreground text-xs">
 														For individual use
 													</span>
 												</Button>
@@ -440,7 +440,7 @@ Generated: ${new Date().toLocaleString()}
 													onClick={() => field.handleChange("organization")}
 												>
 													<span className="font-medium">Organization</span>
-													<span className="text-left text-muted-foreground text-xs font-normal">
+													<span className="text-left font-normal text-muted-foreground text-xs">
 														For teams and companies
 													</span>
 												</Button>
@@ -449,22 +449,24 @@ Generated: ${new Date().toLocaleString()}
 									)}
 								</form.Field>
 
-								<form.Subscribe
-									selector={(state) => state.values.accountType}
-								>
+								<form.Subscribe selector={(state) => state.values.accountType}>
 									{(accountType) =>
 										accountType === "organization" ? (
 											<form.Field name="organizationName">
 												{(field) => (
 													<div className="space-y-2">
-														<Label htmlFor={field.name}>Organization Name</Label>
+														<Label htmlFor={field.name}>
+															Organization Name
+														</Label>
 														<Input
 															id={field.name}
 															name={field.name}
 															placeholder="Acme Inc."
 															value={field.state.value}
 															onBlur={field.handleBlur}
-															onChange={(e) => field.handleChange(e.target.value)}
+															onChange={(e) =>
+																field.handleChange(e.target.value)
+															}
 															required
 															className="h-10"
 														/>

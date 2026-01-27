@@ -13,7 +13,7 @@ export const Route = createFileRoute("/")({
 
 		// Get active account
 		let activeEmail = await storage.getActiveAccountEmail();
-		
+
 		if (!activeEmail) {
 			// Has accounts but none active, set first as active
 			await storage.setActiveAccount(accountsList[0].email);

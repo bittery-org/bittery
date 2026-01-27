@@ -127,7 +127,12 @@ export function UnlockPage() {
 			}
 
 			// Now that biometric succeeded, unlock remaining accounts
-			const unlocked: string[] = [authenticatedWithAccount!];
+			if (!authenticatedWithAccount) {
+				throw new Error(
+					"Biometric authentication failed - no account authenticated",
+				);
+			}
+			const unlocked: string[] = [authenticatedWithAccount];
 			const failed: Array<{ email: string; error: string }> = [];
 
 			// Try to unlock other accounts
@@ -219,7 +224,7 @@ export function UnlockPage() {
 
 	return (
 		<div className="flex h-full items-center justify-center bg-gray-50 p-4">
-			<Card className="w-full max-w-md p-8">
+			<Card className="w-full max-w-md p-8 gap-0">
 				<div className="mb-8 text-center">
 					<VaultIcon state={vaultState} className="mx-auto" size={140} />
 					<h1 className="mt-6 font-bold text-2xl">Unlock Bittery</h1>
@@ -239,7 +244,7 @@ export function UnlockPage() {
 				{/* Master Password Required Notice */}
 				{requiresPasswordReentry && (
 					<div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
-						<KeyRound className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600" />
+						<KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
 						<div>
 							<p className="font-medium text-amber-800">Password Required</p>
 							<p className="text-amber-700 text-sm">
@@ -265,14 +270,14 @@ export function UnlockPage() {
 								? "Authenticating..."
 								: allAccounts.length === 1
 									? "Unlock with Biometric"
-									: `Unlock All with Biometric`}
+									: "Unlock All with Biometric"}
 						</Button>
-						<div className="my-4 text-center text-gray-500 text-sm">or</div>
+						<div className="mt-4 text-center text-gray-500 text-sm">or</div>
 					</div>
 				)}
 
 				<form onSubmit={handlePasswordUnlock} className="space-y-4">
-					<div>
+					<div className="grid gap-2">
 						<Label htmlFor="password">Password</Label>
 						<Input
 							id="password"

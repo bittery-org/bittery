@@ -10,8 +10,8 @@ import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import { useMutation } from "@tanstack/react-query";
 import {
 	usePlatform,
-	useQueryInvalidator,
 	usePlatformStorage,
+	useQueryInvalidator,
 } from "../../context/platform-context";
 import { refreshVaultKeys } from "../../utils/vault-utils";
 
