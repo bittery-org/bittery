@@ -4,32 +4,16 @@
  * Automatically detects whether we're in single-account or "All Accounts" mode
  * and fetches items accordingly. Components don't need to care about the mode.
  *
- * This replaces the pattern of:
- * ```
- * const isAllAccountsMode = activeEmail.data === "all";
- * const singleAccountData = useAllDecryptedItems({ enabled: !isAllAccountsMode });
- * const multiAccountData = useAllAccountsItems({ enabled: isAllAccountsMode });
- * const { items } = isAllAccountsMode ? multiAccountData : singleAccountData;
- * ```
- *
- * With simply:
- * ```
- * const { items } = useItems();
- * ```
+ * Uses the unified internal implementation that handles both modes with a single
+ * code path, eliminating the need for conditional hook calls and complex mode detection.
  */
 
-import { useQuery } from "@tanstack/react-query";
-import { usePlatformStorage } from "../context/platform-context";
 import {
 	type MultiAccountItem,
-	useAllAccountsItems,
-} from "./internal/use-all-accounts-items";
-import {
-	type CrossVaultDecryptedItem,
-	useAllDecryptedItems,
-} from "./internal/use-all-decrypted-items";
+	useItemsUnified,
+} from "./internal/use-items-unified";
 
-export type UnifiedItem = CrossVaultDecryptedItem | MultiAccountItem;
+export type UnifiedItem = MultiAccountItem;
 
 export interface UseItemsOptions {
 	enabled?: boolean;
@@ -52,35 +36,5 @@ export interface UseItemsOptions {
  * ```
  */
 export function useItems(options: UseItemsOptions = {}) {
-	const storage = usePlatformStorage();
-
-	// Detect current mode
-	const { data: activeEmail } = useQuery({
-		queryKey: ["accounts", "active"],
-		queryFn: () => storage.getActiveAccountEmail(),
-		staleTime: 5 * 1000,
-		enabled: storage.supportsMultiAccount && options.enabled !== false,
-	});
-
-	const isAllAccountsMode = activeEmail === "all";
-
-	// Fetch data based on mode
-	const singleAccountData = useAllDecryptedItems({
-		enabled: options.enabled !== false && !isAllAccountsMode,
-	});
-
-	const multiAccountData = useAllAccountsItems({
-		enabled: options.enabled !== false && isAllAccountsMode,
-	});
-
-	// Return unified interface
-	const result = isAllAccountsMode ? multiAccountData : singleAccountData;
-
-	return {
-		items: result.items as UnifiedItem[],
-		isLoading: result.isLoading,
-		error: result.error,
-		refetch: result.refetch,
-		isAllAccountsMode,
-	};
+	return useItemsUnified(options);
 }

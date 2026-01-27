@@ -5,6 +5,7 @@
 
 import type {
 	AccountMetadata,
+	ActiveAccount,
 	BiometricAuthResult,
 	Platform,
 	StoredSessionData,
@@ -153,21 +154,25 @@ export interface IStorageAdapter {
 	// ============================================================================
 
 	/**
-	 * Get the currently active account email.
-	 * Returns null if no account is active.
+	 * Get the currently active account configuration.
+	 * Returns:
+	 * - { type: "single", email: string } - A specific account is active
+	 * - { type: "all" } - All unlocked accounts are active (multi-account mode)
+	 * - null - No account is active (logged out)
 	 */
-	getActiveAccountEmail(): Promise<string | null>;
+	getActiveAccount(): Promise<ActiveAccount>;
 
 	/**
 	 * Get the currently active account user ID.
-	 * Returns null if no account is active.
+	 * Returns null if no account is active or if in "all accounts" mode.
 	 */
 	getActiveAccountUserId(): Promise<string | null>;
 
 	/**
 	 * Set the active account.
+	 * @param account - Account configuration to set as active
 	 */
-	setActiveAccount(email: string): Promise<void>;
+	setActiveAccount(account: ActiveAccount): Promise<void>;
 
 	/**
 	 * Get list of all accounts.

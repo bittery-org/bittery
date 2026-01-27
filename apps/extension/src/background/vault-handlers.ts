@@ -111,10 +111,10 @@ async function decryptVaultItemsForAccount(
  * Helper function to decrypt all vault items (single account or multi-account)
  */
 async function decryptVaultItems() {
-	const activeEmail = await storage.getActiveAccountEmail();
+	const activeAccount = await storage.getActiveAccount();
 
 	// If active account is "all", fetch from all unlocked accounts
-	if (activeEmail === "all") {
+	if (activeAccount?.type === "all") {
 		const unlockedEmails = await storage.getUnlockedAccounts?.();
 
 		if (!unlockedEmails || unlockedEmails.length === 0) {
@@ -148,11 +148,11 @@ async function decryptVaultItems() {
 	}
 
 	// Single account mode - use active account
-	if (!activeEmail) {
+	if (!activeAccount || activeAccount.type !== "single") {
 		return [];
 	}
 
-	return decryptVaultItemsForAccount(activeEmail);
+	return decryptVaultItemsForAccount(activeAccount.email);
 }
 
 /**

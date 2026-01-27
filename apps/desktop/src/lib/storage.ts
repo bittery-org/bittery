@@ -29,6 +29,7 @@ export async function initializeStorage(): Promise<void> {
 // Re-export types and constants for convenience
 export type {
 	AccountMetadata,
+	ActiveAccount,
 	StoredSessionData,
 	VaultKeyData,
 } from "@bittery/storage";

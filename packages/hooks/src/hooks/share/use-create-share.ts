@@ -9,19 +9,24 @@ import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";
 import {
-	usePlatform,
-	useQueryInvalidator,
+  usePlatform,
+  useQueryInvalidator,
 } from "../../context/platform-context";
+import {
+  findAccountEmailForItem,
+  getTRPCClientForAccount,
+} from "../../utils/account-helper";
+import { useItems } from "../use-items";
 
 /**
  * Expiration options for share links
  */
 export type ShareExpirationOption =
-	| "1hour"
-	| "1day"
-	| "7days"
-	| "14days"
-	| "30days";
+  | "1hour"
+  | "1day"
+  | "7days"
+  | "14days"
+  | "30days";
 
 /**
  * Access mode for share links
@@ -32,35 +37,35 @@ export type ShareAccessMode = "anyone" | "email-restricted";
  * Input for creating a share link
  */
 export interface CreateShareInput {
-	/** The decrypted item to share */
-	item: DecryptedItem;
-	/** Who can access the share link */
-	accessMode: ShareAccessMode;
-	/** When the link expires */
-	expiresIn: ShareExpirationOption;
-	/** Whether the link can only be used once */
-	isOneTimeUse: boolean;
-	/** Email addresses allowed to access (for email-restricted mode) */
-	allowedEmails?: string[];
+  /** The decrypted item to share */
+  item: DecryptedItem;
+  /** Who can access the share link */
+  accessMode: ShareAccessMode;
+  /** When the link expires */
+  expiresIn: ShareExpirationOption;
+  /** Whether the link can only be used once */
+  isOneTimeUse: boolean;
+  /** Email addresses allowed to access (for email-restricted mode) */
+  allowedEmails?: string[];
 }
 
 /**
  * Result from share creation
  */
 export interface CreateShareResult {
-	/** The share token from the API */
-	token: string;
-	/** The share key encoded as base64 (for URL fragment) */
-	shareKeyBase64: string;
-	/** When the share expires (ISO string) */
-	expiresAt: string;
+  /** The share token from the API */
+  token: string;
+  /** The share key encoded as base64 (for URL fragment) */
+  shareKeyBase64: string;
+  /** When the share expires (ISO string) */
+  expiresAt: string;
 }
 
 /**
  * Helper to convert Uint8Array to base64
  */
 function arrayBufferToBase64(buffer: Uint8Array): string {
-	return btoa(String.fromCharCode(...buffer));
+  return btoa(String.fromCharCode(...buffer));
 }
 
 /**
@@ -104,95 +109,108 @@ function arrayBufferToBase64(buffer: Uint8Array): string {
  * ```
  */
 export function useCreateShare() {
-	const trpcClient = useTRPCClient();
-	const { storage, crypto } = usePlatform();
-	const invalidator = useQueryInvalidator();
+  const defaultClient = useTRPCClient();
+  const { items } = useItems();
+  const { storage, crypto } = usePlatform();
+  const invalidator = useQueryInvalidator();
 
-	return useMutation({
-		mutationFn: async (input: CreateShareInput): Promise<CreateShareResult> => {
-			const { item, accessMode, expiresIn, isOneTimeUse, allowedEmails } =
-				input;
+  return useMutation({
+    mutationFn: async (input: CreateShareInput): Promise<CreateShareResult> => {
+      const { item, accessMode, expiresIn, isOneTimeUse, allowedEmails } =
+        input;
 
-			// Verify we have access to the vault
-			const vaultKey = await storage.getDecryptedVaultKey(item.vaultId);
-			if (!vaultKey) {
-				throw new Error("Could not decrypt vault key. Please log in again.");
-			}
+      const accountEmail = findAccountEmailForItem(input.item.id, items);
 
-			// Generate a new share-specific encryption key
-			const shareKey = await crypto.generateEncryptionKey();
+      // Verify we have access to the vault
+      const vaultKey = await storage.getDecryptedVaultKey(
+        item.vaultId,
+        accountEmail,
+      );
 
-			// Prepare item data for sharing (sanitized, no metadata like id, vaultId, etc.)
-			const itemDataToShare = {
-				title: item.title,
-				category: item.category,
-				url: item.url,
-				urls: item.urls,
-				username: item.username,
-				password: item.password,
-				notes: item.notes,
-				note: item.note,
-				customFields: item.customFields,
-				// Credit card fields
-				cardholderName: item.cardholderName,
-				cardNumber: item.cardNumber,
-				cvv: item.cvv,
-				expiryDate: item.expiryDate,
-				billingAddress: item.billingAddress,
-				// Identity fields
-				firstName: item.firstName,
-				middleName: item.middleName,
-				lastName: item.lastName,
-				email: item.email,
-				addresses: item.addresses,
-				phoneNumbers: item.phoneNumbers,
-				ssn: item.ssn,
-				passportNumber: item.passportNumber,
-				driversLicense: item.driversLicense,
-				dateOfBirth: item.dateOfBirth,
-				// TOTP fields
-				totpSecret: item.totpSecret,
-				totpIssuer: item.totpIssuer,
-				totpAccountName: item.totpAccountName,
-				totpAlgorithm: item.totpAlgorithm,
-				totpDigits: item.totpDigits,
-				totpPeriod: item.totpPeriod,
-			};
+      if (!vaultKey) {
+        throw new Error("Could not decrypt vault key. Please log in again.");
+      }
 
-			// Encrypt item data with the share key
-			const encryptedData = await crypto.encrypt(
-				JSON.stringify(itemDataToShare),
-				shareKey,
-			);
+      const client = await getTRPCClientForAccount(
+        storage,
+        defaultClient,
+        accountEmail,
+      );
 
-			// Encode the share key as base64 for the URL
-			const shareKeyBase64 = arrayBufferToBase64(shareKey);
+      // Generate a new share-specific encryption key
+      const shareKey = await crypto.generateEncryptionKey();
 
-			// Encrypt the share key for storage
-			const shareKeyEncrypted = await crypto.encrypt(shareKeyBase64, shareKey);
+      // Prepare item data for sharing (sanitized, no metadata like id, vaultId, etc.)
+      const itemDataToShare = {
+        title: item.title,
+        category: item.category,
+        url: item.url,
+        urls: item.urls,
+        username: item.username,
+        password: item.password,
+        notes: item.notes,
+        note: item.note,
+        customFields: item.customFields,
+        // Credit card fields
+        cardholderName: item.cardholderName,
+        cardNumber: item.cardNumber,
+        cvv: item.cvv,
+        expiryDate: item.expiryDate,
+        billingAddress: item.billingAddress,
+        // Identity fields
+        firstName: item.firstName,
+        middleName: item.middleName,
+        lastName: item.lastName,
+        email: item.email,
+        addresses: item.addresses,
+        phoneNumbers: item.phoneNumbers,
+        ssn: item.ssn,
+        passportNumber: item.passportNumber,
+        driversLicense: item.driversLicense,
+        dateOfBirth: item.dateOfBirth,
+        // TOTP fields
+        totpSecret: item.totpSecret,
+        totpIssuer: item.totpIssuer,
+        totpAccountName: item.totpAccountName,
+        totpAlgorithm: item.totpAlgorithm,
+        totpDigits: item.totpDigits,
+        totpPeriod: item.totpPeriod,
+      };
 
-			// Create the share via API
-			const result = await trpcClient.share.create.mutate({
-				itemId: item.id,
-				accessMode,
-				isOneTimeUse,
-				expiresIn,
-				allowedEmails:
-					accessMode === "email-restricted" ? allowedEmails : undefined,
-				encryptedItemData: encryptedData.ciphertext,
-				encryptionIv: encryptedData.iv,
-				encryptedShareKey: shareKeyEncrypted.ciphertext,
-				shareKeyIv: shareKeyEncrypted.iv,
-			});
+      // Encrypt item data with the share key
+      const encryptedData = await crypto.encrypt(
+        JSON.stringify(itemDataToShare),
+        shareKey,
+      );
 
-			return {
-				token: result.token,
-				shareKeyBase64,
-				expiresAt: result.expiresAt,
-			};
-		},
-		onSuccess: async () => {
-			await invalidator.invalidateShare();
-		},
-	});
+      // Encode the share key as base64 for the URL
+      const shareKeyBase64 = arrayBufferToBase64(shareKey);
+
+      // Encrypt the share key for storage
+      const shareKeyEncrypted = await crypto.encrypt(shareKeyBase64, shareKey);
+
+      // Create the share via API
+      const result = await client.share.create.mutate({
+        itemId: item.id,
+        accessMode,
+        isOneTimeUse,
+        expiresIn,
+        allowedEmails:
+          accessMode === "email-restricted" ? allowedEmails : undefined,
+        encryptedItemData: encryptedData.ciphertext,
+        encryptionIv: encryptedData.iv,
+        encryptedShareKey: shareKeyEncrypted.ciphertext,
+        shareKeyIv: shareKeyEncrypted.iv,
+      });
+
+      return {
+        token: result.token,
+        shareKeyBase64,
+        expiresAt: result.expiresAt,
+      };
+    },
+    onSuccess: async () => {
+      await invalidator.invalidateShare();
+    },
+  });
 }

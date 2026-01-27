@@ -7,25 +7,24 @@
  */
 
 import { useTRPCClient } from "@bittery/shared/trpc";
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import { useMutation } from "@tanstack/react-query";
 import {
-	usePlatformStorage,
-	useQueryInvalidator,
+  usePlatformStorage,
+  useQueryInvalidator,
 } from "../../context/platform-context";
-import { findAccountEmailForItem } from "../../utils/account-helper";
+import { findAccountEmailForItem, getTRPCClientForAccount } from "../../utils/account-helper";
 import { useItems } from "../use-items";
 
 /**
  * Input for toggling favorite status
  */
 export interface ToggleFavoriteInput {
-	/** ID of the item to toggle */
-	itemId: string;
-	/** ID of the vault containing the item */
-	vaultId: string;
-	/** New favorite status */
-	favorite: boolean;
+  /** ID of the item to toggle */
+  itemId: string;
+  /** ID of the vault containing the item */
+  vaultId: string;
+  /** New favorite status */
+  favorite: boolean;
 }
 
 /**
@@ -58,36 +57,26 @@ export interface ToggleFavoriteInput {
  * ```
  */
 export function useToggleFavorite() {
-	const { items } = useItems();
-	const defaultClient = useTRPCClient();
-	const storage = usePlatformStorage();
-	const invalidator = useQueryInvalidator();
+  const { items } = useItems();
+  const defaultClient = useTRPCClient();
+  const storage = usePlatformStorage();
+  const invalidator = useQueryInvalidator();
 
-	return useMutation({
-		mutationFn: async (input: ToggleFavoriteInput): Promise<void> => {
-			// Find which account this item belongs to (if in "All Accounts" mode)
-			const accountEmail = findAccountEmailForItem(input.itemId, items);
+  return useMutation({
+    mutationFn: async (input: ToggleFavoriteInput): Promise<void> => {
+      const client = await getTRPCClientForAccount(
+        storage,
+        defaultClient,
+        findAccountEmailForItem(input.itemId, items),
+      );
 
-			// Get the correct tRPC client for this account
-			let client = defaultClient;
-			if (accountEmail) {
-				const authToken = await storage.getAuthToken(accountEmail);
-				const serverUrl = await storage.getServerUrl(accountEmail);
-				if (authToken) {
-					client = createAccountTrpcClient(
-						authToken,
-						serverUrl || "http://localhost:3000",
-					);
-				}
-			}
-
-			await client.vault.toggleFavorite.mutate({
-				itemId: input.itemId,
-				favorite: input.favorite,
-			});
-		},
-		onSuccess: async (_data, variables) => {
-			await invalidator.invalidateItem(variables.itemId, variables.vaultId);
-		},
-	});
+      await client.vault.toggleFavorite.mutate({
+        itemId: input.itemId,
+        favorite: input.favorite,
+      });
+    },
+    onSuccess: async (_data, variables) => {
+      await invalidator.invalidateItem(variables.itemId, variables.vaultId);
+    },
+  });
 }

@@ -37,16 +37,16 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 			const accountsList = await storage.getAccountsList();
 			setAllAccounts(accountsList);
 
-			const activeEmail = await storage.getActiveAccountEmail();
-			if (activeEmail) {
+			const activeAccount = await storage.getActiveAccount();
+			if (activeAccount?.type === "single") {
 				const active = accountsList.find(
-					(a) => a.email.toLowerCase() === activeEmail.toLowerCase(),
+					(a) => a.email.toLowerCase() === activeAccount.email.toLowerCase(),
 				);
 				setActiveAccount(active ?? null);
 			} else if (accountsList.length > 0) {
 				// No active account set, use first one
 				const firstAccount = accountsList[0];
-				await storage.setActiveAccount(firstAccount.email);
+				await storage.setActiveAccount({ type: "single", email: firstAccount.email });
 				setActiveAccount(firstAccount);
 			} else {
 				setActiveAccount(null);
@@ -80,7 +80,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 			}
 
 			// Set new active account
-			await storage.setActiveAccount(email);
+			await storage.setActiveAccount({ type: "single", email });
 			setActiveAccount(targetAccount);
 
 			// Invalidate all React Query queries to refetch with new account

@@ -13,7 +13,7 @@ import { storage } from "@/lib/storage";
 export function ExtensionAccountSwitcher() {
 	const {
 		accounts,
-		activeEmail,
+		activeAccount: activeAccountQuery,
 		unlockedEmails,
 		switchAccount,
 		lockAllAccounts,
@@ -27,12 +27,16 @@ export function ExtensionAccountSwitcher() {
 
 	const accountsData = accounts.data ?? [];
 	const unlockedEmailsList = unlockedEmails.data ?? [];
+	const activeAccountEmail =
+		activeAccountQuery.data?.type === "single"
+			? activeAccountQuery.data.email
+			: null;
 
 	const handleSwitchAccount = async (email: string) => {
-		if (email === activeEmail.data) return;
+		if (email === activeAccountEmail) return;
 
 		try {
-			await switchAccount.mutateAsync(email);
+			await switchAccount.mutateAsync({ type: "single", email });
 
 			// Check if session is valid for the switched account
 			const sessionValid = await storage.isSessionValid(email);
@@ -77,7 +81,7 @@ export function ExtensionAccountSwitcher() {
 		}
 
 		try {
-			await switchAccount.mutateAsync("all");
+			await switchAccount.mutateAsync({ type: "all" });
 			// Invalidate all account-related data to refresh multi-account view
 			await invalidator.invalidateAllAccountData();
 			navigate({ to: "/vault" });
@@ -90,7 +94,7 @@ export function ExtensionAccountSwitcher() {
 	return (
 		<AccountSwitcher
 			accounts={accountsData}
-			activeEmail={activeEmail.data ?? null}
+			activeEmail={activeAccountEmail}
 			unlockedEmails={unlockedEmailsList}
 			onAccountSelect={handleSwitchAccount}
 			onAddAccount={handleAddAccount}

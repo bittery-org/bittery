@@ -1,4 +1,4 @@
-import { useDecryptedItems, useUpdateItem } from "@bittery/hooks";
+import { useVaultItems, useUpdateItem } from "@bittery/hooks";
 import {
 	type CardBrand,
 	detectCardBrand,
@@ -78,7 +78,7 @@ export default function EditItemScreen() {
 	}>();
 	const updateItem = useUpdateItem();
 
-	const { items, isLoading } = useDecryptedItems(vaultId);
+	const { items, isLoading } = useVaultItems(vaultId);
 	const item = items.find((i) => i.id === itemId);
 
 	const [initialized, setInitialized] = useState(false);

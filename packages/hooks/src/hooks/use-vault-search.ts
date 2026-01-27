@@ -7,10 +7,9 @@
  */
 
 import type { ItemCategory } from "@bittery/shared/types";
-import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { usePlatformStorage } from "../context/platform-context";
-import type { MultiAccountItem } from "./internal/use-all-accounts-items";
+import type { MultiAccountItem } from "./internal/use-items-unified";
+import { useVaultInfo } from "./internal/use-vault-info";
 import { useVaultItems } from "./internal/use-vault-items";
 import { useItems } from "./use-items";
 
@@ -136,16 +135,8 @@ export function useSingleVaultSearch(
 	vaultId: string,
 	query: string,
 ): SingleVaultSearchResult {
-	const storage = usePlatformStorage();
-
-	// Get vault info from local storage instead of API to avoid auth issues
-	const { data: vaultKeys = [] } = useQuery({
-		queryKey: ["vault-keys"],
-		queryFn: () => storage.getVaultKeys(),
-		staleTime: 30 * 1000,
-	});
-
-	const currentVault = vaultKeys?.find((v) => v.vaultId === vaultId);
+	// Get vault info - automatically handles single-account vs all-accounts mode
+	const { vaultInfo: currentVault } = useVaultInfo(vaultId);
 
 	// Get decrypted items for this vault
 	// useVaultItems automatically handles single-account vs all-accounts mode

@@ -9,7 +9,7 @@
  * 2. Use the shared hooks anywhere in your component tree
  *
  * ```tsx
- * import { PlatformProvider, useDecryptedItems, useCreateItem } from "@bittery/hooks";
+ * import { PlatformProvider, useVaultItems, useCreateItem } from "@bittery/hooks";
  * import * as crypto from "@/lib/wasm-crypto";
  * import { storage } from "@/lib/storage";
  * import { useSyncContext } from "@/providers/sync-provider";
@@ -32,7 +32,7 @@
  * }
  *
  * // In components
- * const { items, isLoading } = useDecryptedItems(vaultId);
+ * const { items, isLoading } = useVaultItems(vaultId);
  * const createItem = useCreateItem();
  * ```
  */
@@ -99,33 +99,34 @@ export {
 	useQuickUnlockAll,
 	useSessionState,
 } from "./hooks/auth";
-export {
-	type MultiAccountDeletedItem,
-	type UseAllAccountsDeletedItemsOptions,
-	useAllAccountsDeletedItems,
-} from "./hooks/internal/use-all-accounts-deleted-items";
-export {
-	type MultiAccountItem,
-	type UseAllAccountsItemsOptions,
-	useAllAccountsItems,
-} from "./hooks/internal/use-all-accounts-items";
-export {
-	type CrossVaultDeletedItem,
-	type UseAllDecryptedDeletedItemsOptions,
-	useAllDecryptedDeletedItems,
-} from "./hooks/internal/use-all-decrypted-deleted-items";
-export {
-	type CrossVaultDecryptedItem,
-	type UseAllDecryptedItemsOptions,
-	useAllDecryptedItems,
-} from "./hooks/internal/use-all-decrypted-items";
 export { useDecryptedItem } from "./hooks/internal/use-decrypted-item";
 // Data Hooks (read operations)
-export { useDecryptedItems } from "./hooks/internal/use-decrypted-items";
+export {
+	type AccountInfo,
+	type UseAccountsInfoOptions,
+	useAccountsInfo,
+} from "./hooks/internal/use-accounts-info";
+export {
+	useItemsUnified,
+	type UseItemsUnifiedOptions,
+} from "./hooks/internal/use-items-unified";
+export {
+	useDeletedItemsUnified,
+	type UseDeletedItemsUnifiedOptions,
+} from "./hooks/internal/use-deleted-items-unified";
 export {
 	type UseVaultItemsOptions,
 	useVaultItems,
 } from "./hooks/internal/use-vault-items";
+export {
+	type UseVaultInfoOptions,
+	useVaultInfo,
+} from "./hooks/internal/use-vault-info";
+export {
+	type UseAllVaultKeysOptions,
+	type VaultKeyWithAccount,
+	useAllVaultKeys,
+} from "./hooks/internal/use-all-vault-keys";
 // Item Mutation Hooks (write operations)
 export {
 	type CreateItemInput,
@@ -207,6 +208,7 @@ export type {
 	SRPClientSession,
 	SRPServerChallenge,
 } from "./types";
+export type { ActiveAccount } from "@bittery/storage/types";
 export {
 	findAccountEmailForItem,
 	getItemAccountEmail,

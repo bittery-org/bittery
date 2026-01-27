@@ -1,7 +1,4 @@
-import {
-	type CrossVaultDecryptedItem,
-	useAllDecryptedItems,
-} from "@bittery/hooks";
+import { type UnifiedItem, useItems } from "@bittery/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { ArrowLeft, Tag } from "lucide-react-native";
@@ -55,7 +52,7 @@ export default function TagFilterScreen() {
 	>("all");
 	const [refreshing, setRefreshing] = useState(false);
 
-	const { items, isLoading, error, refetch } = useAllDecryptedItems();
+	const { items, isLoading, error, refetch } = useItems();
 
 	// Filter items by tag and category
 	const filteredItems = useMemo(() => {
@@ -87,7 +84,7 @@ export default function TagFilterScreen() {
 		}
 	};
 
-	const handleItemPress = (item: CrossVaultDecryptedItem) => {
+	const handleItemPress = (item: UnifiedItem) => {
 		router.push(`/${item.vaultId}/${item.id}`);
 	};
 
@@ -121,7 +118,7 @@ export default function TagFilterScreen() {
 		</View>
 	);
 
-	const renderItem = ({ item }: { item: CrossVaultDecryptedItem }) => (
+	const renderItem = ({ item }: { item: UnifiedItem }) => (
 		<ItemListItem
 			id={item.id}
 			title={item.title || "[Untitled]"}

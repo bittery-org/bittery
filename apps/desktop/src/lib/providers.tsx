@@ -35,11 +35,11 @@ const trpcClient = createTRPCClient<AppRouter>({
 				const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
 
 				// Check if we're in "All Accounts" mode
-				const activeEmail = await storage.getActiveAccountEmail();
+				const activeAccount = await storage.getActiveAccount();
 
 				// Only get auth token if we have a real account (not "all" mode)
 				const token =
-					activeEmail && activeEmail !== "all"
+					activeAccount?.type === "single"
 						? await storage.getAuthToken()
 						: null;
 

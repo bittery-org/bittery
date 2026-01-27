@@ -8,26 +8,50 @@ import {
 	DialogTitle,
 	Input,
 	Label,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
 	toast,
 } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useEffect, useState } from "react";
 import { VaultAvatar, vaultIconOptions } from "./vault-avatar";
 
+export interface AccountOption {
+	email: string;
+	name?: string;
+	teamName?: string;
+}
+
 interface CreateVaultDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onSubmit: (data: CreateVaultInput) => Promise<void>;
+	/** Optional list of accounts for multi-account mode. If provided, user must select account. */
+	accounts?: AccountOption[];
 }
 
 export function CreateVaultDialog({
 	open,
 	onOpenChange,
 	onSubmit,
+	accounts,
 }: CreateVaultDialogProps) {
 	const [icon, setIcon] = useState("lock");
 	const [imageFile, setImageFile] = useState<File | undefined>(undefined);
 	const [imagePreview, setImagePreview] = useState<string | null>(null);
+	const [selectedAccountEmail, setSelectedAccountEmail] = useState<
+		string | undefined
+	>(accounts?.[0]?.email);
+
+	// Update selected account when accounts list changes
+	useEffect(() => {
+		if (accounts && accounts.length > 0 && !selectedAccountEmail) {
+			setSelectedAccountEmail(accounts[0].email);
+		}
+	}, [accounts, selectedAccountEmail]);
 
 	const form = useForm({
 		defaultValues: {
@@ -41,6 +65,7 @@ export function CreateVaultDialog({
 					type: value.type,
 					icon,
 					imageFile,
+					accountEmail: accounts ? selectedAccountEmail : undefined,
 				});
 				resetForm();
 				onOpenChange(false);
@@ -66,6 +91,7 @@ export function CreateVaultDialog({
 		setIcon("lock");
 		setImageFile(undefined);
 		setImagePreview(null);
+		setSelectedAccountEmail(accounts?.[0]?.email);
 	};
 
 	const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -120,6 +146,35 @@ export function CreateVaultDialog({
 					}}
 				>
 					<div className="space-y-4 py-4">
+						{accounts && accounts.length > 0 && (
+							<div className="space-y-2">
+								<Label htmlFor="account">Account *</Label>
+								<Select
+									value={selectedAccountEmail}
+									onValueChange={setSelectedAccountEmail}
+									disabled={form.state.isSubmitting}
+								>
+									<SelectTrigger id="account">
+										<SelectValue placeholder="Select account" />
+									</SelectTrigger>
+									<SelectContent>
+										{accounts.map((account) => (
+											<SelectItem key={account.email} value={account.email}>
+												<div className="flex flex-col">
+													<span className="font-medium">
+														{account.teamName || account.name || account.email}
+													</span>
+													<span className="text-muted-foreground text-xs">
+														{account.email}
+													</span>
+												</div>
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+						)}
+
 						<form.Field name="name">
 							{(field) => (
 								<div className="space-y-2">

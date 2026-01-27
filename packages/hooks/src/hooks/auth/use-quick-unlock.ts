@@ -83,7 +83,7 @@ export function useQuickUnlock(
 
 			// For multi-account platforms, set this as the active account
 			if (storage.supportsMultiAccount) {
-				await storage.setActiveAccount(input.email);
+				await storage.setActiveAccount({ type: "single", email: input.email });
 			}
 
 			return result;

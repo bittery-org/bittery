@@ -1,4 +1,4 @@
-import { useAllDecryptedItems, usePasswordSecurity } from "@bittery/hooks";
+import { useItems, usePasswordSecurity } from "@bittery/hooks";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { SecurityDashboard } from "@/components/dashboard/security-dashboard";
@@ -8,7 +8,7 @@ export const Route = createFileRoute("/_app/security")({
 });
 
 function SecurityPage() {
-	const { items, isLoading } = useAllDecryptedItems();
+	const { items, isLoading } = useItems();
 	const report = usePasswordSecurity(items);
 
 	// Extract unique vaults from items for the security dashboard

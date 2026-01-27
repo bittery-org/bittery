@@ -1,4 +1,4 @@
-import { useDecryptedItems } from "@bittery/hooks";
+import { useVaultItems } from "@bittery/hooks";
 import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
@@ -49,7 +49,7 @@ export default function VaultItemsScreen() {
 	);
 	const [refreshing, setRefreshing] = useState(false);
 
-	const { items, isLoading, error, refetch } = useDecryptedItems(vaultId);
+	const { items, isLoading, error, refetch } = useVaultItems(vaultId);
 
 	// Filter items based on search and category
 	const filteredItems = items.filter((item) => {

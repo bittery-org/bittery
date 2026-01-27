@@ -9,7 +9,7 @@
  * - Get list of unlocked accounts (with MUKs in memory)
  */
 
-import type { AccountMetadata } from "@bittery/storage/types";
+import type { AccountMetadata, ActiveAccount } from "@bittery/storage/types";
 import {
 	type UseMutationResult,
 	type UseQueryResult,
@@ -36,14 +36,14 @@ export interface UseAccountSwitcherResult {
 	/** List of all added accounts */
 	accounts: UseQueryResult<AccountMetadata[], Error>;
 
-	/** Currently active account email */
-	activeEmail: UseQueryResult<string | null, Error>;
+	/** Currently active account configuration */
+	activeAccount: UseQueryResult<ActiveAccount, Error>;
 
 	/** List of unlocked account emails (with MUKs in memory) */
 	unlockedEmails: UseQueryResult<string[], Error>;
 
 	/** Mutation to switch to a different account */
-	switchAccount: UseMutationResult<void, Error, string, unknown>;
+	switchAccount: UseMutationResult<void, Error, ActiveAccount, unknown>;
 
 	/** Mutation to remove an account from this device */
 	removeAccount: UseMutationResult<void, Error, string, unknown>;
@@ -60,16 +60,16 @@ export interface UseAccountSwitcherResult {
  *
  * @example
  * ```tsx
- * const { accounts, activeEmail, unlockedEmails, switchAccount, removeAccount } = useAccountSwitcher();
+ * const { accounts, activeAccount, unlockedEmails, switchAccount, removeAccount } = useAccountSwitcher();
  *
  * // Display account list
  * accounts.data?.map(account => (
  *   <AccountItem
  *     key={account.email}
  *     account={account}
- *     isActive={account.email === activeEmail.data}
+ *     isActive={activeAccount.data?.type === "single" && activeAccount.data.email === account.email}
  *     isUnlocked={unlockedEmails.data?.includes(account.email)}
- *     onSwitch={() => switchAccount.mutate(account.email)}
+ *     onSwitch={() => switchAccount.mutate({ type: "single", email: account.email })}
  *     onRemove={() => removeAccount.mutate(account.email)}
  *   />
  * ))
@@ -91,11 +91,11 @@ export function useAccountSwitcher(
 		staleTime: 30 * 1000, // Cache for 30 seconds
 	});
 
-	// Query: Get active account email
-	const activeEmail = useQuery({
+	// Query: Get active account configuration
+	const activeAccount = useQuery({
 		queryKey: ["accounts", "active"],
 		queryFn: async () => {
-			return storage.getActiveAccountEmail();
+			return storage.getActiveAccount();
 		},
 		enabled: options.enabled !== false,
 		staleTime: 10 * 1000, // Cache for 10 seconds
@@ -118,8 +118,8 @@ export function useAccountSwitcher(
 
 	// Mutation: Switch to a different account
 	const switchAccount = useMutation({
-		mutationFn: async (email: string) => {
-			await storage.setActiveAccount(email);
+		mutationFn: async (account: ActiveAccount) => {
+			await storage.setActiveAccount(account);
 		},
 		onSuccess: () => {
 			// Invalidate all account-related queries
@@ -161,7 +161,7 @@ export function useAccountSwitcher(
 
 	return {
 		accounts,
-		activeEmail,
+		activeAccount,
 		unlockedEmails,
 		switchAccount,
 		removeAccount,

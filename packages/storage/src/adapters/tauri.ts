@@ -17,6 +17,7 @@ import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
 import {
 	type AccountMetadata,
+	type ActiveAccount,
 	BIOMETRIC_GRACE_PERIOD_MS,
 	DEFAULT_SESSION_EXPIRY_MS,
 	MASTER_PASSWORD_REENTRY_PERIOD_MS,
@@ -51,8 +52,8 @@ interface AccountCache {
 // In-memory caches - keyed by email
 const accountCaches: Map<string, AccountCache> = new Map();
 
-// Cache for active account email to avoid repeated IPC calls
-let cachedActiveAccountEmail: string | null = null;
+// Cache for active account to avoid repeated IPC calls
+let cachedActiveAccount: ActiveAccount | undefined;
 
 /**
  * Check if an encrypted vault key is AES-GCM encrypted (JSON format) or RSA encrypted (plain base64)
@@ -122,10 +123,16 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			console.warn("[storage-tauri] Biometry module not available:", error);
 		}
 
-		// Pre-load active account email into cache to avoid repeated IPC calls
+		// Pre-load active account into cache to avoid repeated IPC calls
 		if (this.store) {
-			const email = await this.store.get<string>(ACTIVE_ACCOUNT_KEY);
-			cachedActiveAccountEmail = email ?? null;
+			const stored = await this.store.get<string>(ACTIVE_ACCOUNT_KEY);
+			if (!stored) {
+				cachedActiveAccount = null;
+			} else if (stored === "all") {
+				cachedActiveAccount = { type: "all" };
+			} else {
+				cachedActiveAccount = { type: "single", email: stored };
+			}
 		}
 	}
 
@@ -140,7 +147,10 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 	private async resolveEmail(email?: string): Promise<string | null> {
 		if (email) return email.toLowerCase();
-		return this.getActiveAccountEmail();
+
+		const account = await this.getActiveAccount();
+		if (!account || account.type === "all") return null;
+		return account.email;
 	}
 
 	private getAccountCache(email: string): AccountCache {
@@ -497,44 +507,65 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	// Multi-Account
 	// ============================================================================
 
-	async getActiveAccountEmail(): Promise<string | null> {
+	async getActiveAccount(): Promise<ActiveAccount> {
 		// Return cached value if available to avoid repeated IPC calls
-		if (cachedActiveAccountEmail !== null) {
-			return cachedActiveAccountEmail;
+		if (cachedActiveAccount !== undefined) {
+			return cachedActiveAccount;
 		}
 
 		const store = await this.getStore();
-		const email = (await store.get<string>(ACTIVE_ACCOUNT_KEY)) ?? null;
-		cachedActiveAccountEmail = email;
-		return email;
+		const stored = await store.get<string>(ACTIVE_ACCOUNT_KEY);
+
+		let account: ActiveAccount;
+		if (!stored) {
+			account = null;
+		} else if (stored === "all") {
+			account = { type: "all" };
+		} else {
+			account = { type: "single", email: stored };
+		}
+
+		cachedActiveAccount = account;
+		return account;
 	}
 
 	async getActiveAccountUserId(): Promise<string | null> {
-		const email = await this.getActiveAccountEmail();
-		if (!email) return null;
+		const account = await this.getActiveAccount();
+		if (!account || account.type === "all") return null;
 
-		const sessionData = await this.getStoredSessionData(email);
+		const sessionData = await this.getStoredSessionData(account.email);
 		return sessionData?.userId ?? null;
 	}
 
-	async setActiveAccount(email: string): Promise<void> {
-		const normalizedEmail = email.toLowerCase();
+	async setActiveAccount(account: ActiveAccount): Promise<void> {
 		const store = await this.getStore();
-		await store.set(ACTIVE_ACCOUNT_KEY, normalizedEmail);
+		const normalizedValue = !account
+			? null
+			: account.type === "all"
+			? "all"
+			: account.email.toLowerCase();
+
+		if (normalizedValue) {
+			await store.set(ACTIVE_ACCOUNT_KEY, normalizedValue);
+		} else {
+			await store.delete(ACTIVE_ACCOUNT_KEY);
+		}
 		await store.save();
 
 		// Update the cache
-		cachedActiveAccountEmail = normalizedEmail;
+		cachedActiveAccount = account;
 
-		// Update lastActiveAt for this account
-		const accountsList = await this.getAccountsListInternal();
-		const account = accountsList.accounts.find(
-			(a) => a.email.toLowerCase() === email.toLowerCase(),
-		);
-		if (account) {
-			account.lastActiveAt = Date.now();
-			await store.set(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
-			await store.save();
+		// Update lastActiveAt if single account
+		if (account?.type === "single") {
+			const accountsList = await this.getAccountsListInternal();
+			const accountMeta = accountsList.accounts.find(
+				(a) => a.email.toLowerCase() === account.email.toLowerCase(),
+			);
+			if (accountMeta) {
+				accountMeta.lastActiveAt = Date.now();
+				await store.set(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
+				await store.save();
+			}
 		}
 	}
 
@@ -579,8 +610,9 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		const store = await this.getStore();
 
 		// Clear the active account cache if removing the active account
-		if (cachedActiveAccountEmail === resolvedEmail) {
-			cachedActiveAccountEmail = null;
+		const currentAccount = await this.getActiveAccount();
+		if (currentAccount?.type === "single" && currentAccount.email === resolvedEmail) {
+			cachedActiveAccount = null;
 		}
 
 		// Delete all namespaced keys for this account

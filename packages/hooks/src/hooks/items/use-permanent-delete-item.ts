@@ -7,23 +7,25 @@
  */
 
 import { useTRPCClient } from "@bittery/shared/trpc";
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import { useMutation } from "@tanstack/react-query";
 import {
-	usePlatformStorage,
-	useQueryInvalidator,
+  usePlatformStorage,
+  useQueryInvalidator,
 } from "../../context/platform-context";
-import { findAccountEmailForItem } from "../../utils/account-helper";
+import {
+  findAccountEmailForItem,
+  getTRPCClientForAccount,
+} from "../../utils/account-helper";
 import { useAllDeletedItems } from "../use-all-deleted-items";
 
 /**
  * Input for permanently deleting an item
  */
 export interface PermanentDeleteItemInput {
-	/** ID of the item to permanently delete */
-	itemId: string;
-	/** ID of the vault containing the item */
-	vaultId: string;
+  /** ID of the item to permanently delete */
+  itemId: string;
+  /** ID of the vault containing the item */
+  vaultId: string;
 }
 
 /**
@@ -59,35 +61,25 @@ export interface PermanentDeleteItemInput {
  * ```
  */
 export function usePermanentDeleteItem() {
-	const { items: deletedItems } = useAllDeletedItems();
-	const defaultClient = useTRPCClient();
-	const storage = usePlatformStorage();
-	const invalidator = useQueryInvalidator();
+  const { items: deletedItems } = useAllDeletedItems();
+  const defaultClient = useTRPCClient();
+  const storage = usePlatformStorage();
+  const invalidator = useQueryInvalidator();
 
-	return useMutation({
-		mutationFn: async (input: PermanentDeleteItemInput): Promise<void> => {
-			// Find which account this item belongs to (if in "All Accounts" mode)
-			const accountEmail = findAccountEmailForItem(input.itemId, deletedItems);
+  return useMutation({
+    mutationFn: async (input: PermanentDeleteItemInput): Promise<void> => {
+      const client = await getTRPCClientForAccount(
+        storage,
+        defaultClient,
+        findAccountEmailForItem(input.itemId, deletedItems),
+      );
 
-			// Get the correct tRPC client for this account
-			let client = defaultClient;
-			if (accountEmail) {
-				const authToken = await storage.getAuthToken(accountEmail);
-				const serverUrl = await storage.getServerUrl(accountEmail);
-				if (authToken) {
-					client = createAccountTrpcClient(
-						authToken,
-						serverUrl || "http://localhost:3000",
-					);
-				}
-			}
-
-			await client.vault.permanentlyDeleteItem.mutate({
-				itemId: input.itemId,
-			});
-		},
-		onSuccess: async (_data, variables) => {
-			await invalidator.invalidateDeletedItems(variables.vaultId);
-		},
-	});
+      await client.vault.permanentlyDeleteItem.mutate({
+        itemId: input.itemId,
+      });
+    },
+    onSuccess: async (_data, variables) => {
+      await invalidator.invalidateDeletedItems(variables.vaultId);
+    },
+  });
 }

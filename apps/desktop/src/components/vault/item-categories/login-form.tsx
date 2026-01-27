@@ -635,7 +635,18 @@ export function LoginForm({
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
 							<Button type="button" variant="outline" size="sm">
-								{selectedVault?.name || "Select vault"}
+								{selectedVault ? (
+									<>
+										{(selectedVault.accountTeamName || selectedVault.accountName) && (
+											<span className="text-muted-foreground">
+												{selectedVault.accountTeamName || selectedVault.accountName} /{" "}
+											</span>
+										)}
+										{selectedVault.name}
+									</>
+								) : (
+									"Select vault"
+								)}
 								<ChevronDown className="ml-2 size-4" />
 							</Button>
 						</DropdownMenuTrigger>
@@ -645,7 +656,16 @@ export function LoginForm({
 									key={vault.id}
 									onClick={() => setCurrentVaultId(vault.id)}
 								>
-									{vault.name}
+									<div className="flex flex-col">
+										<div>
+											{(vault.accountTeamName || vault.accountName) && (
+												<span className="text-muted-foreground text-xs">
+													{vault.accountTeamName || vault.accountName} /{" "}
+												</span>
+											)}
+											<span>{vault.name}</span>
+										</div>
+									</div>
 								</DropdownMenuItem>
 							))}
 						</DropdownMenuContent>

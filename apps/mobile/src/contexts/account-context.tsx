@@ -47,16 +47,16 @@ export function AccountProvider({ children }: AccountProviderProps) {
 			const accountsList = await storage.getAccountsList();
 			setAllAccounts(accountsList);
 
-			const activeEmail = await storage.getActiveAccountEmail();
-			if (activeEmail) {
+			const activeAccount = await storage.getActiveAccount();
+			if (activeAccount?.type === "single") {
 				const active = accountsList.find(
-					(a) => a.email.toLowerCase() === activeEmail.toLowerCase(),
+					(a) => a.email.toLowerCase() === activeAccount.email.toLowerCase(),
 				);
 				setActiveAccount(active || null);
 			} else if (accountsList.length > 0) {
 				// Set the first account as active if none is set
 				const firstAccount = accountsList[0];
-				await storage.setActiveAccount(firstAccount.email);
+				await storage.setActiveAccount({ type: "single", email: firstAccount.email });
 				setActiveAccount(firstAccount);
 			} else {
 				setActiveAccount(null);
@@ -70,7 +70,7 @@ export function AccountProvider({ children }: AccountProviderProps) {
 
 	const switchAccount = useCallback(
 		async (email: string) => {
-			await storage.setActiveAccount(email);
+			await storage.setActiveAccount({ type: "single", email });
 			await refreshAccounts();
 		},
 		[refreshAccounts],
@@ -86,7 +86,7 @@ export function AccountProvider({ children }: AccountProviderProps) {
 					(a) => a.email.toLowerCase() !== email.toLowerCase(),
 				);
 				if (remainingAccounts.length > 0) {
-					await storage.setActiveAccount(remainingAccounts[0].email);
+					await storage.setActiveAccount({ type: "single", email: remainingAccounts[0].email });
 				}
 			}
 

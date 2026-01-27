@@ -328,21 +328,17 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 				// Invalidate vault keys
 				queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
 
-				// Invalidate account-related queries
-				queryClient.invalidateQueries({ queryKey: ["accounts", "unlocked"] }),
-				queryClient.invalidateQueries({ queryKey: ["accounts", "metadata"] }),
+				// NEW: Account-related queries using new structure
 				queryClient.invalidateQueries({ queryKey: ["accounts", "active"] }),
+				queryClient.invalidateQueries({ queryKey: ["accounts", "info"] }),
 
-				// Invalidate decrypted items caches
+				// NEW: Unified items queries (replaces old keys)
+				queryClient.invalidateQueries({ queryKey: ["items-unified"] }),
 				queryClient.invalidateQueries({
-					queryKey: ["all-accounts-items"],
+					queryKey: ["deleted-items-unified"],
 				}),
-				queryClient.invalidateQueries({
-					queryKey: ["all-decrypted-items"],
-				}),
-				queryClient.invalidateQueries({
-					queryKey: ["all-deleted-items"],
-				}),
+
+				// Keep existing decrypted item caches
 				queryClient.invalidateQueries({
 					queryKey: ["decrypted-items"],
 				}),
@@ -350,7 +346,7 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 					queryKey: ["decrypted-item"],
 				}),
 
-				// Invalidate useVaultItems queries
+				// Keep vault-specific queries
 				queryClient.invalidateQueries({
 					queryKey: ["vault-items-raw"],
 				}),
@@ -358,9 +354,17 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 					queryKey: ["vault-owner"],
 				}),
 
-				// Invalidate team queries
+				// Team queries
 				queryClient.invalidateQueries({ queryKey: ["team"] }),
 			]);
+
+			// OLD KEYS REMOVED (no longer used):
+			// - ["accounts", "unlocked"] -> replaced by ["accounts", "info"]
+			// - ["accounts", "metadata"] -> replaced by ["accounts", "info"]
+			// - ["all-accounts-items"] -> replaced by ["items-unified"]
+			// - ["all-decrypted-items"] -> replaced by ["items-unified"]
+			// - ["all-deleted-items"] -> replaced by ["deleted-items-unified"]
+			// - ["all-accounts-deleted-items"] -> replaced by ["deleted-items-unified"]
 		},
 	};
 }

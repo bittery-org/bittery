@@ -38,14 +38,14 @@ export function useDecryptedItem(
 	const { accountEmail } = options;
 
 	// Check if we're in "All Accounts" mode
-	const { data: activeEmail } = useQuery({
+	const { data: activeAccount } = useQuery({
 		queryKey: ["accounts", "active"],
-		queryFn: () => storage.getActiveAccountEmail(),
+		queryFn: () => storage.getActiveAccount(),
 		staleTime: 5 * 1000,
 		enabled: storage.supportsMultiAccount && !accountEmail,
 	});
 
-	const isAllAccountsMode = activeEmail === "all";
+	const isAllAccountsMode = activeAccount?.type === "all";
 
 	// Fetch raw encrypted item from API
 	// Strategy:

@@ -1,7 +1,4 @@
-import {
-	type CrossVaultDecryptedItem,
-	useAllDecryptedItems,
-} from "@bittery/hooks";
+import { type UnifiedItem, useItems } from "@bittery/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
@@ -49,7 +46,7 @@ export default function SearchScreen() {
 	const [recentSearches, setRecentSearches] = useState<string[]>([]);
 	const [debouncedQuery, setDebouncedQuery] = useState("");
 
-	const { items } = useAllDecryptedItems();
+	const { items } = useItems();
 
 	const loadRecentSearches = useCallback(async () => {
 		try {
@@ -155,7 +152,7 @@ export default function SearchScreen() {
 		});
 	}, [items, debouncedQuery, selectedCategory]);
 
-	const handleItemPress = (item: CrossVaultDecryptedItem) => {
+	const handleItemPress = (item: UnifiedItem) => {
 		saveRecentSearch(searchQuery);
 		router.push(`/(vault)/${item.vaultId}/${item.id}`);
 	};
@@ -195,7 +192,7 @@ export default function SearchScreen() {
 		</View>
 	);
 
-	const renderItem = ({ item }: { item: CrossVaultDecryptedItem }) => (
+	const renderItem = ({ item }: { item: UnifiedItem }) => (
 		<ItemListItem
 			id={item.id}
 			title={item.title || "[Untitled]"}

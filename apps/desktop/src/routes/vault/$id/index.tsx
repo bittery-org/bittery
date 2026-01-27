@@ -1,6 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useVaultInfo } from "@bittery/hooks";
 import { createFileRoute } from "@tanstack/react-router";
-import { storage } from "@/lib/storage";
 import { VaultAvatar } from "../../../components/vault/vault-avatar";
 
 export const Route = createFileRoute("/vault/$id/")({
@@ -10,14 +9,7 @@ export const Route = createFileRoute("/vault/$id/")({
 function VaultComponent() {
 	const { id } = Route.useParams();
 
-	const { data: currentVault } = useQuery({
-		queryKey: ["vault-keys", id],
-		queryFn: async () => {
-			const keys = await storage.getVaultKeys();
-			if (!keys) return null;
-			return keys.find((vault) => vault.vaultId === id) ?? null;
-		},
-	});
+	const { vaultInfo: currentVault } = useVaultInfo(id);
 
 	return (
 		<div className="flex flex-1 items-center justify-center p-8 text-center">

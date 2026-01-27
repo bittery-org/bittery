@@ -16,6 +16,7 @@ import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
 import {
 	type AccountMetadata,
+	type ActiveAccount,
 	BIOMETRIC_GRACE_PERIOD_MS,
 	type BiometricAuthResult,
 	DEFAULT_SESSION_EXPIRY_MS,
@@ -163,7 +164,10 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 	private async resolveEmail(email?: string): Promise<string | null> {
 		if (email) return email.toLowerCase();
-		return this.getActiveAccountEmail();
+
+		const account = await this.getActiveAccount();
+		if (!account || account.type === "all") return null;
+		return account.email;
 	}
 
 	private getAccountCache(email: string): AccountCache {
@@ -434,29 +438,44 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	// Multi-Account
 	// ============================================================================
 
-	async getActiveAccountEmail(): Promise<string | null> {
-		return this.getItem(ACTIVE_ACCOUNT_KEY);
+	async getActiveAccount(): Promise<ActiveAccount> {
+		const stored = await this.getItem(ACTIVE_ACCOUNT_KEY);
+		if (!stored) return null;
+		if (stored === "all") return { type: "all" };
+		return { type: "single", email: stored };
 	}
 
 	async getActiveAccountUserId(): Promise<string | null> {
-		const email = await this.getActiveAccountEmail();
-		if (!email) return null;
+		const account = await this.getActiveAccount();
+		if (!account || account.type === "all") return null;
 
-		const sessionData = await this.getStoredSessionData(email);
+		const sessionData = await this.getStoredSessionData(account.email);
 		return sessionData?.userId ?? null;
 	}
 
-	async setActiveAccount(email: string): Promise<void> {
-		await this.setItem(ACTIVE_ACCOUNT_KEY, email.toLowerCase());
+	async setActiveAccount(account: ActiveAccount): Promise<void> {
+		const normalizedValue = !account
+			? null
+			: account.type === "all"
+			? "all"
+			: account.email.toLowerCase();
 
-		// Update lastActiveAt for this account
-		const accountsList = await this.getAccountsListInternal();
-		const account = accountsList.accounts.find(
-			(a) => a.email.toLowerCase() === email.toLowerCase(),
-		);
-		if (account) {
-			account.lastActiveAt = Date.now();
-			await this.setItem(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
+		if (normalizedValue) {
+			await this.setItem(ACTIVE_ACCOUNT_KEY, normalizedValue);
+		} else {
+			await this.deleteItem(ACTIVE_ACCOUNT_KEY);
+		}
+
+		// Update lastActiveAt if single account
+		if (account?.type === "single") {
+			const accountsList = await this.getAccountsListInternal();
+			const accountMeta = accountsList.accounts.find(
+				(a) => a.email.toLowerCase() === account.email.toLowerCase(),
+			);
+			if (accountMeta) {
+				accountMeta.lastActiveAt = Date.now();
+				await this.setItem(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
+			}
 		}
 	}
 

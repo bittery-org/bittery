@@ -8,10 +8,11 @@
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { useMutation } from "@tanstack/react-query";
 import {
-	usePlatform,
+	usePlatformStorage,
 	useQueryInvalidator,
 } from "../../context/platform-context";
 import { refreshVaultKeys } from "../../utils/vault-utils";
+import { getTRPCClientForAccount } from "../../utils/account-helper";
 
 /**
  * Input for deleting a vault
@@ -19,6 +20,7 @@ import { refreshVaultKeys } from "../../utils/vault-utils";
 export interface DeleteVaultInput {
 	/** ID of the vault to delete */
 	vaultId: string;
+	accountEmail?: string;
 }
 
 /**
@@ -52,17 +54,29 @@ export interface DeleteVaultInput {
  * ```
  */
 export function useDeleteVault() {
-	const trpcClient = useTRPCClient();
-	const { storage } = usePlatform();
+	const defaultClient = useTRPCClient();
+	const storage = usePlatformStorage();
 	const invalidator = useQueryInvalidator();
 
 	return useMutation({
 		mutationFn: async (input: DeleteVaultInput): Promise<void> => {
-			await trpcClient.vault.delete.mutate({ vaultId: input.vaultId });
+			const client = await getTRPCClientForAccount(
+				storage,
+				defaultClient,
+				input.accountEmail,
+			);
+
+			await client.vault.delete.mutate({ vaultId: input.vaultId });
 		},
-		onSuccess: async () => {
+		onSuccess: async (_data, variables) => {
+			const client = await getTRPCClientForAccount(
+				storage,
+				defaultClient,
+				variables.accountEmail,
+			);
+
 			// Refresh local vault keys cache
-			await refreshVaultKeys(trpcClient, storage);
+			await refreshVaultKeys(client, storage);
 			// Invalidate vault-related queries
 			await invalidator.invalidateVaultKeys();
 		},

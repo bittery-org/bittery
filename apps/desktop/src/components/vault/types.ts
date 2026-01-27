@@ -4,4 +4,7 @@ export interface VaultOption {
 	id: string;
 	name: string;
 	type: "personal" | "team";
+	accountEmail?: string;
+	accountName?: string;
+	accountTeamName?: string;
 }

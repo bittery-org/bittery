@@ -114,7 +114,10 @@ export default function UnlockScreen() {
 				}
 
 				// Set as active account
-				await storage.setActiveAccount(targetAccount.email);
+				await storage.setActiveAccount({
+					type: "single",
+					email: targetAccount.email,
+				});
 				await refreshAccounts();
 
 				router.replace("/(vault)");

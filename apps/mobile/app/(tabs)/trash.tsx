@@ -1,5 +1,5 @@
 import {
-	type CrossVaultDeletedItem,
+	type UnifiedDeletedItem,
 	useAllDeletedItems,
 	usePermanentDeleteItem,
 	useRestoreItem,
@@ -61,7 +61,7 @@ export default function TrashScreen() {
 		}
 	};
 
-	const handleRestore = async (item: CrossVaultDeletedItem) => {
+	const handleRestore = async (item: UnifiedDeletedItem) => {
 		setActionInProgress(item.id);
 		try {
 			await restoreItem.mutateAsync({ itemId: item.id, vaultId: item.vaultId });
@@ -74,7 +74,7 @@ export default function TrashScreen() {
 		}
 	};
 
-	const handlePermanentDelete = (item: CrossVaultDeletedItem) => {
+	const handlePermanentDelete = (item: UnifiedDeletedItem) => {
 		Alert.alert(
 			"Permanently Delete",
 			`Are you sure you want to permanently delete "${item.title}"? This cannot be undone.`,
@@ -103,7 +103,7 @@ export default function TrashScreen() {
 		);
 	};
 
-	const renderRightActions = (item: CrossVaultDeletedItem) => (
+	const renderRightActions = (item: UnifiedDeletedItem) => (
 		<TouchableOpacity
 			onPress={() => handlePermanentDelete(item)}
 			className="items-center justify-center bg-destructive px-6"
@@ -120,7 +120,7 @@ export default function TrashScreen() {
 		</TouchableOpacity>
 	);
 
-	const renderLeftActions = (item: CrossVaultDeletedItem) => (
+	const renderLeftActions = (item: UnifiedDeletedItem) => (
 		<TouchableOpacity
 			onPress={() => handleRestore(item)}
 			className="items-center justify-center bg-green-500 px-6"
@@ -137,7 +137,7 @@ export default function TrashScreen() {
 		</TouchableOpacity>
 	);
 
-	const renderItem = ({ item }: { item: CrossVaultDeletedItem }) => (
+	const renderItem = ({ item }: { item: UnifiedDeletedItem }) => (
 		<Swipeable
 			renderRightActions={() => renderRightActions(item)}
 			renderLeftActions={() => renderLeftActions(item)}
@@ -157,7 +157,11 @@ export default function TrashScreen() {
 					onPress={() => {}}
 					rightContent={
 						<Text className="text-muted-foreground text-xs">
-							{formatDeletedAt(item.deletedAt)}
+							{formatDeletedAt(
+								typeof item.deletedAt === "string"
+									? item.deletedAt
+									: item.deletedAt?.toISOString() || "",
+							)}
 						</Text>
 					}
 				/>

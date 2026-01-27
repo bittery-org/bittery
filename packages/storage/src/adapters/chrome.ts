@@ -14,6 +14,7 @@ import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
 import {
 	type AccountMetadata,
+	type ActiveAccount,
 	type BiometricAuthResult,
 	DEFAULT_SESSION_EXPIRY_MS,
 	type StoredSessionData,
@@ -44,6 +45,9 @@ interface AccountCache {
 
 // In-memory caches - keyed by email
 const accountCaches: Map<string, AccountCache> = new Map();
+
+// Cache for active account to avoid repeated storage reads
+let cachedActiveAccount: ActiveAccount | undefined;
 
 /**
  * Generate or retrieve device-specific encryption key
@@ -96,7 +100,10 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 
 	private async resolveEmail(email?: string): Promise<string | null> {
 		if (email) return email.toLowerCase();
-		return this.getActiveAccountEmail();
+
+		const account = await this.getActiveAccount();
+		if (!account || account.type === "all") return null;
+		return account.email;
 	}
 
 	private getAccountCache(email: string): AccountCache {
@@ -369,33 +376,64 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	// Multi-Account
 	// ============================================================================
 
-	async getActiveAccountEmail(): Promise<string | null> {
+	async getActiveAccount(): Promise<ActiveAccount> {
+		// Return cached value if available
+		if (cachedActiveAccount !== undefined) {
+			return cachedActiveAccount;
+		}
+
 		const result = await chrome.storage.local.get(ACTIVE_ACCOUNT_KEY);
-		return (result[ACTIVE_ACCOUNT_KEY] as string | undefined) || null;
+		const stored = result[ACTIVE_ACCOUNT_KEY];
+
+		let account: ActiveAccount;
+		if (!stored) {
+			account = null;
+		} else if (stored === "all") {
+			account = { type: "all" };
+		} else {
+			account = { type: "single", email: stored as string };
+		}
+
+		cachedActiveAccount = account;
+		return account;
 	}
 
 	async getActiveAccountUserId(): Promise<string | null> {
-		const email = await this.getActiveAccountEmail();
-		if (!email) return null;
+		const account = await this.getActiveAccount();
+		if (!account || account.type === "all") return null;
 
-		const sessionData = await this.getStoredSessionData(email);
+		const sessionData = await this.getStoredSessionData(account.email);
 		return sessionData?.userId ?? null;
 	}
 
-	async setActiveAccount(email: string): Promise<void> {
-		const normalizedEmail = email.toLowerCase();
-		await chrome.storage.local.set({ [ACTIVE_ACCOUNT_KEY]: normalizedEmail });
+	async setActiveAccount(account: ActiveAccount): Promise<void> {
+		const normalizedValue = !account
+			? null
+			: account.type === "all"
+			? "all"
+			: account.email.toLowerCase();
 
-		// Update lastActiveAt for this account
-		const accountsList = await this.getAccountsListInternal();
-		const account = accountsList.accounts.find(
-			(a) => a.email.toLowerCase() === email.toLowerCase(),
-		);
-		if (account) {
-			account.lastActiveAt = Date.now();
-			await chrome.storage.local.set({
-				[ACCOUNTS_LIST_KEY]: JSON.stringify(accountsList),
-			});
+		if (normalizedValue) {
+			await chrome.storage.local.set({ [ACTIVE_ACCOUNT_KEY]: normalizedValue });
+		} else {
+			await chrome.storage.local.remove(ACTIVE_ACCOUNT_KEY);
+		}
+
+		// Update cached value
+		cachedActiveAccount = account;
+
+		// Update lastActiveAt if single account
+		if (account?.type === "single") {
+			const accountsList = await this.getAccountsListInternal();
+			const accountMeta = accountsList.accounts.find(
+				(a) => a.email.toLowerCase() === account.email.toLowerCase(),
+			);
+			if (accountMeta) {
+				accountMeta.lastActiveAt = Date.now();
+				await chrome.storage.local.set({
+					[ACCOUNTS_LIST_KEY]: JSON.stringify(accountsList),
+				});
+			}
 		}
 	}
 

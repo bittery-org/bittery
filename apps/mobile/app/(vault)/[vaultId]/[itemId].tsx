@@ -1,4 +1,4 @@
-import { useDecryptedItems } from "@bittery/hooks";
+import { useVaultItems } from "@bittery/hooks";
 import {
 	detectCardBrand,
 	formatCardNumber as formatCardNumberUtil,
@@ -57,7 +57,7 @@ export default function ItemDetailScreen() {
 		itemId: string;
 	}>();
 
-	const { items, isLoading, error } = useDecryptedItems(vaultId);
+	const { items, isLoading, error } = useVaultItems(vaultId);
 	const [showPassword, setShowPassword] = useState(false);
 	const [showCardNumber, setShowCardNumber] = useState(false);
 	const [showCvv, setShowCvv] = useState(false);

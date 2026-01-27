@@ -15,6 +15,7 @@ export const storage = createChromeStorageAdapter(cryptoProvider);
 // Re-export types and constants for convenience
 export type {
 	AccountMetadata,
+	ActiveAccount,
 	StoredSessionData,
 	VaultKeyData,
 } from "@bittery/storage";

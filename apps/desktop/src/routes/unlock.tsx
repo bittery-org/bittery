@@ -52,9 +52,9 @@ export function UnlockPage() {
 
 			// Set active account to "all" mode if multiple accounts
 			if (allAccounts.length > 1) {
-				await storage.setActiveAccount("all");
+				await storage.setActiveAccount({ type: "all" });
 			} else if (allAccounts.length === 1) {
-				await storage.setActiveAccount(allAccounts[0].email);
+				await storage.setActiveAccount({ type: "single", email: allAccounts[0].email });
 			}
 
 			setVaultState("unlocked");
@@ -79,7 +79,7 @@ export function UnlockPage() {
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
 			if (allAccounts.length > 1) {
-				await storage.setActiveAccount("all");
+				await storage.setActiveAccount({ type: "all" });
 			}
 
 			setVaultState("unlocked");
@@ -161,9 +161,12 @@ export function UnlockPage() {
 
 			// Set active mode
 			if (allAccounts.length > 1) {
-				await storage.setActiveAccount("all");
+				await storage.setActiveAccount({ type: "all" });
 			} else {
-				await storage.setActiveAccount(allAccounts[0].email);
+				await storage.setActiveAccount({
+					type: "single",
+					email: allAccounts[0].email,
+				});
 			}
 
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });

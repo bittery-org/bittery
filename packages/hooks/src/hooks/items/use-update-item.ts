@@ -7,27 +7,29 @@
  */
 
 import { useTRPCClient } from "@bittery/shared/trpc";
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import type { DecryptedItemData } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";
 import {
-	usePlatform,
-	usePlatformStorage,
-	useQueryInvalidator,
+  usePlatform,
+  usePlatformStorage,
+  useQueryInvalidator,
 } from "../../context/platform-context";
-import { findAccountEmailForItem } from "../../utils/account-helper";
+import {
+  findAccountEmailForItem,
+  getTRPCClientForAccount,
+} from "../../utils/account-helper";
 import { useItems } from "../use-items";
 
 /**
  * Input for updating an item
  */
 export interface UpdateItemInput {
-	/** ID of the item to update */
-	itemId: string;
-	/** ID of the vault containing the item */
-	vaultId: string;
-	/** Updated decrypted item data */
-	data: DecryptedItemData;
+  /** ID of the item to update */
+  itemId: string;
+  /** ID of the vault containing the item */
+  vaultId: string;
+  /** Updated decrypted item data */
+  data: DecryptedItemData;
 }
 
 /**
@@ -61,54 +63,48 @@ export interface UpdateItemInput {
  * ```
  */
 export function useUpdateItem() {
-	const { items } = useItems();
-	const defaultClient = useTRPCClient();
-	const storage = usePlatformStorage();
-	const { crypto } = usePlatform();
-	const invalidator = useQueryInvalidator();
+  const { items } = useItems();
+  const defaultClient = useTRPCClient();
+  const storage = usePlatformStorage();
+  const { crypto } = usePlatform();
+  const invalidator = useQueryInvalidator();
 
-	return useMutation({
-		mutationFn: async (input: UpdateItemInput): Promise<void> => {
-			// Find which account this item belongs to (if in "All Accounts" mode)
-			const accountEmail = findAccountEmailForItem(input.itemId, items);
+  return useMutation({
+    mutationFn: async (input: UpdateItemInput): Promise<void> => {
+      // Find which account this item belongs to (if in "All Accounts" mode)
+      const accountEmail = findAccountEmailForItem(input.itemId, items);
 
-			// Get the vault key for encryption (with account email if in multi-account mode)
-			const vaultKey = await storage.getDecryptedVaultKey(
-				input.vaultId,
-				accountEmail,
-			);
-			if (!vaultKey) {
-				throw new Error("No vault key found. Please sign in again.");
-			}
+      // Get the vault key for encryption (with account email if in multi-account mode)
+      const vaultKey = await storage.getDecryptedVaultKey(
+        input.vaultId,
+        accountEmail,
+      );
 
-			// Encrypt the updated item data
-			const encryptedData = await crypto.encrypt(
-				JSON.stringify(input.data),
-				vaultKey,
-			);
+      if (!vaultKey) {
+        throw new Error("No vault key found. Please sign in again.");
+      }
 
-			// Get the correct tRPC client for this account
-			let client = defaultClient;
-			if (accountEmail) {
-				const authToken = await storage.getAuthToken(accountEmail);
-				const serverUrl = await storage.getServerUrl(accountEmail);
-				if (authToken) {
-					client = createAccountTrpcClient(
-						authToken,
-						serverUrl || "http://localhost:3000",
-					);
-				}
-			}
+      // Encrypt the updated item data
+      const encryptedData = await crypto.encrypt(
+        JSON.stringify(input.data),
+        vaultKey,
+      );
 
-			// Update the item
-			await client.vault.updateItem.mutate({
-				itemId: input.itemId,
-				encryptedData: encryptedData.ciphertext,
-				encryptionIv: encryptedData.iv,
-			});
-		},
-		onSuccess: async (_data, variables) => {
-			await invalidator.invalidateItem(variables.itemId, variables.vaultId);
-		},
-	});
+      const client = await getTRPCClientForAccount(
+        storage,
+        defaultClient,
+        accountEmail,
+      );
+
+      // Update the item
+      await client.vault.updateItem.mutate({
+        itemId: input.itemId,
+        encryptedData: encryptedData.ciphertext,
+        encryptionIv: encryptedData.iv,
+      });
+    },
+    onSuccess: async (_data, variables) => {
+      await invalidator.invalidateItem(variables.itemId, variables.vaultId);
+    },
+  });
 }

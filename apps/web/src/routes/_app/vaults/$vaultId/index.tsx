@@ -1,4 +1,4 @@
-import { useAvailableTags, useDecryptedItems } from "@bittery/hooks";
+import { useAvailableTags, useVaultItems } from "@bittery/hooks";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
@@ -42,9 +42,9 @@ function VaultDetailPage() {
 		trpc.vault.members.list.queryOptions({ vaultId }),
 	);
 
-	// Use the new decrypted items hook
+	// Use vault items hook
 	const { items: decryptedItems, isLoading: isLoadingItems } =
-		useDecryptedItems(vaultId);
+		useVaultItems(vaultId);
 
 	// Get available tags from decrypted items
 	const availableTags = useAvailableTags(decryptedItems);

@@ -1,8 +1,6 @@
-import { useAvailableTags, useVaultItems } from "@bittery/hooks";
-import { useQuery } from "@tanstack/react-query";
+import { useAvailableTags, useVaultInfo, useVaultItems } from "@bittery/hooks";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
-import { storage } from "@/lib/storage";
 import { ItemDetailPage } from "../../../../components/vault/item-detail-page";
 
 export const Route = createFileRoute("/vault/$id/$itemId/")({
@@ -19,14 +17,10 @@ function VaultItemComponent() {
 	const availableTags = useAvailableTags(allVaultItems);
 
 	// Get vault info from storage
-	const { data: currentVault } = useQuery({
-		queryKey: ["vault-keys", selectedVaultId],
-		queryFn: async () => {
-			const keys = await storage.getVaultKeys();
-			if (!keys) return null;
-			return keys.find((v) => v.vaultId === selectedVaultId);
-		},
-	});
+	const { vaultInfo: currentVault } = useVaultInfo(selectedVaultId);
+
+	console.log(currentVault);
+	
 
 	// Handle tag click - navigate to per-vault tag view
 	const handleTagClick = useCallback(

@@ -1,4 +1,4 @@
-import { useAllDecryptedItems } from "@bittery/hooks";
+import { useItems } from "@bittery/hooks";
 import { useRouter } from "expo-router";
 import { Search, Tag } from "lucide-react-native";
 import { useMemo, useState } from "react";
@@ -22,7 +22,7 @@ export default function TagsScreen() {
 	const router = useRouter();
 	const [searchQuery, setSearchQuery] = useState("");
 
-	const { items, isLoading, error } = useAllDecryptedItems();
+	const { items, isLoading, error } = useItems();
 
 	// Extract tags with counts from items
 	const tagsWithCounts = useMemo((): TagWithCount[] => {

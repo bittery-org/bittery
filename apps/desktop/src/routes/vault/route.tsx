@@ -1,5 +1,6 @@
 import {
 	type CreateVaultInput,
+	useAllVaultKeys,
 	useCreateItem,
 	useCreateVault,
 	useCrossVaultTags,
@@ -8,7 +9,7 @@ import {
 } from "@bittery/hooks";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { toast } from "@bittery/ui";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
 	createFileRoute,
 	Outlet,
@@ -16,8 +17,9 @@ import {
 	useNavigate,
 	useParams,
 } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { storage } from "@/lib/storage";
+import type { AccountOption } from "../../components/vault/create-vault-dialog";
 import { CreateItemDialog } from "../../components/vault/create-item-dialog";
 import { CreateVaultDialog } from "../../components/vault/create-vault-dialog";
 import { DeleteVaultDialog } from "../../components/vault/delete-vault-dialog";
@@ -32,13 +34,13 @@ export const Route = createFileRoute("/vault")({
 	component: RouteComponent,
 	beforeLoad: async () => {
 		// Get active account
-		const activeEmail = await storage.getActiveAccountEmail();
-		if (!activeEmail) {
+		const activeAccount = await storage.getActiveAccount();
+		if (!activeAccount) {
 			throw redirect({ to: "/login" });
 		}
 
 		// Handle "All Accounts" mode specially
-		if (activeEmail === "all") {
+		if (activeAccount.type === "all") {
 			// Check if we have any unlocked accounts
 			const unlockedAccounts = await storage.getUnlockedAccounts?.();
 			if (!unlockedAccounts || unlockedAccounts.length === 0) {
@@ -51,67 +53,25 @@ export const Route = createFileRoute("/vault")({
 
 		// Single account mode: validate session for specific account
 		// Check if user has stored credentials for active account
-		const hasSecretKey = await storage.getStoredSecretKey(activeEmail);
-		const sessionValid = await storage.isSessionValid(activeEmail);
+		const hasSecretKey = await storage.getStoredSecretKey(activeAccount.email);
+		const sessionValid = await storage.isSessionValid(activeAccount.email);
 
 		if (!hasSecretKey || !sessionValid) {
-			throw redirect({ to: "/unlock", search: { email: activeEmail } });
+			throw redirect({ to: "/unlock", search: { email: activeAccount.email } });
 		}
 
-		const restored = await storage.tryRestoreSession(true, activeEmail);
+		const restored = await storage.tryRestoreSession(true, activeAccount.email);
 
 		if (!restored) {
-			throw redirect({ to: "/unlock", search: { email: activeEmail } });
+			throw redirect({ to: "/unlock", search: { email: activeAccount.email } });
 		}
 	},
 });
 
 function RouteComponent() {
-	// Check if we're in "All Accounts" mode
-	const { data: activeEmail } = useQuery({
-		queryKey: ["accounts", "active"],
-		queryFn: () => storage.getActiveAccountEmail(),
-	});
-
-	// Fetch vault keys for either single account or all unlocked accounts
-	const { data: vaultKeys } = useQuery({
-		queryKey: ["vault-keys", activeEmail],
-		queryFn: async () => {
-			if (!activeEmail) return null;
-
-			// Single account mode
-			if (activeEmail !== "all") {
-				const keys = await storage.getVaultKeys();
-				return keys;
-			}
-
-			// All accounts mode - get vault keys for each unlocked account
-			const unlockedAccounts = await storage.getUnlockedAccounts?.();
-			if (!unlockedAccounts || unlockedAccounts.length === 0) {
-				return null;
-			}
-
-			// Fetch vault keys and account metadata for each unlocked account
-			const allVaultKeys = [];
-			for (const email of unlockedAccounts) {
-				const keys = await storage.getVaultKeys(email);
-				const accountMetadata = await storage.getAccountMetadata?.(email);
-				if (keys && keys.length > 0) {
-					// Add account info to each vault key
-					for (const key of keys) {
-						allVaultKeys.push({
-							...key,
-							accountEmail: email,
-							accountName: accountMetadata?.name || email.split("@")[0],
-							accountTeamName: accountMetadata?.teamName,
-						});
-					}
-				}
-			}
-			return allVaultKeys;
-		},
-		enabled: !!activeEmail,
-	});
+	// Fetch all vault keys with account metadata
+	// Automatically handles single-account vs "All Accounts" mode
+	const { vaultKeys, isAllAccountsMode } = useAllVaultKeys();
 
 	// Get cross-vault tags for sidebar
 	const { tags: crossVaultTags } = useCrossVaultTags();
@@ -140,12 +100,58 @@ function RouteComponent() {
 	} | null>(null);
 	const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
 	const [importingVaultId, setImportingVaultId] = useState<string | null>(null);
+	const [availableAccounts, setAvailableAccounts] = useState<AccountOption[]>([]);
+
+	// Load available accounts for multi-account mode
+	useEffect(() => {
+		const loadAccounts = async () => {
+			if (isAllAccountsMode) {
+				const emails = await storage.getUnlockedAccounts?.();
+				if (emails && emails.length > 0) {
+					// Fetch metadata for each account
+					const accounts = await Promise.all(
+						emails.map(async (email) => {
+							const metadata = await storage.getAccountMetadata?.(email);
+							return {
+								email,
+								name: metadata?.name,
+								teamName: metadata?.teamName,
+							};
+						}),
+					);
+					setAvailableAccounts(accounts);
+				}
+			}
+		};
+		loadAccounts();
+	}, [isAllAccountsMode]);
 
 	// Vault operation handlers
 	const handleCreateVault = async (data: CreateVaultInput) => {
 		try {
+			// Determine accountEmail for new vault
+			let accountEmail = data.accountEmail;
+
+			// If no account email provided and we're not in all-accounts mode,
+			// get the active account email
+			if (!accountEmail && !isAllAccountsMode) {
+				const activeAccount = await storage.getActiveAccount();
+				if (activeAccount?.type === "single") {
+					accountEmail = activeAccount.email;
+				}
+			}
+
+			// If in all-accounts mode and no account selected, require selection
+			if (isAllAccountsMode && !accountEmail) {
+				toast.error("Please select an account for the new vault");
+				throw new Error("Account selection required");
+			}
+
 			// Hook handles image upload internally if imageFile is provided
-			const result = await createVaultMutation.mutateAsync(data);
+			const result = await createVaultMutation.mutateAsync({
+				...data,
+				accountEmail,
+			});
 
 			toast.success("Vault created successfully");
 			navigate({ to: "/vault/$id", params: { id: result.vaultId } });
@@ -164,7 +170,15 @@ function RouteComponent() {
 
 	const handleUpdateVault = async (vaultId: string, name: string) => {
 		try {
-			await updateVaultMutation.mutateAsync({ vaultId, name });
+			// Find the vault to get its account email
+			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
+			const accountEmail = vault && "accountEmail" in vault ? vault.accountEmail : undefined;
+
+			await updateVaultMutation.mutateAsync({
+				vaultId,
+				name,
+				accountEmail,
+			});
 			setEditingVault(null);
 		} catch (error) {
 			const errorMessage =
@@ -181,7 +195,14 @@ function RouteComponent() {
 
 	const handleDeleteVault = async (vaultId: string) => {
 		try {
-			await deleteVaultMutation.mutateAsync({ vaultId });
+			// Find the vault to get its account email
+			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
+			const accountEmail = vault && "accountEmail" in vault ? vault.accountEmail : undefined;
+
+			await deleteVaultMutation.mutateAsync({
+				vaultId,
+				accountEmail,
+			});
 			setDeletingVault(null);
 
 			if (params.id === vaultId) {
@@ -204,10 +225,15 @@ function RouteComponent() {
 		category: ItemCategory,
 	) => {
 		try {
+			// Find the vault to get its account email
+			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
+			const accountEmail = vault && "accountEmail" in vault ? vault.accountEmail : undefined;
+
 			const result = await createItemMutation.mutateAsync({
 				vaultId,
 				category,
 				data,
+				accountEmail,
 			});
 
 			// Prefetch the item to avoid race condition
@@ -273,6 +299,9 @@ function RouteComponent() {
 							id: v.vaultId,
 							name: v.vaultName,
 							type: v.vaultType as "personal" | "team",
+							accountEmail: "accountEmail" in v ? v.accountEmail : undefined,
+							accountName: "accountName" in v ? v.accountName : undefined,
+							accountTeamName: "accountTeamName" in v ? v.accountTeamName : undefined,
 						})) || []
 					}
 					selectedVaultId={params.id}
@@ -285,6 +314,7 @@ function RouteComponent() {
 					open={isNewVaultDialogOpen}
 					onOpenChange={setIsNewVaultDialogOpen}
 					onSubmit={handleCreateVault}
+					accounts={isAllAccountsMode ? availableAccounts : undefined}
 				/>
 
 				<EditVaultDialog

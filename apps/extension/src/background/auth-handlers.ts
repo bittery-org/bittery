@@ -59,11 +59,13 @@ export async function handleQuickUnlock(payload: {
 	const { password } = payload;
 
 	// Get stored email for multi-account support
-	const email = await storage.getActiveAccountEmail();
+	const activeAccount = await storage.getActiveAccount();
 
-	if (!email) {
+	if (!activeAccount || activeAccount.type !== "single") {
 		throw new Error("Quick unlock not available - no active account");
 	}
+
+	const email = activeAccount.email;
 
 	// Perform SRP unlock using shared utility (retrieves stored secret key internally)
 	const result = await performSRPUnlock(
@@ -118,9 +120,12 @@ export async function handleGetAuthToken(): Promise<MessageResponse> {
  * Handle GET_SESSION_DATA message - Get stored session data
  */
 export async function handleGetSessionData(): Promise<MessageResponse> {
-	const email = await storage.getActiveAccountEmail();
+	const activeAccount = await storage.getActiveAccount();
 	const userId = await storage.getActiveAccountUserId();
 	const sessionValid = await storage.isSessionValid();
+
+	const email = activeAccount?.type === "single" ? activeAccount.email : null;
+
 	return {
 		success: true,
 		sessionData:

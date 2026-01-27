@@ -73,13 +73,13 @@ export function VaultPage() {
 	const [currentHostname, setCurrentHostname] = useState<string | null>(null);
 
 	// Check if we're in "All Accounts" mode
-	const { data: activeEmail } = useQuery({
+	const { data: activeAccount } = useQuery({
 		queryKey: ["accounts", "active"],
-		queryFn: () => storage.getActiveAccountEmail(),
+		queryFn: () => storage.getActiveAccount(),
 		staleTime: 5 * 1000,
 	});
 
-	const isAllAccountsMode = activeEmail === "all";
+	const isAllAccountsMode = activeAccount?.type === "all";
 
 	useEffect(() => {
 		chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {

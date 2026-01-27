@@ -25,7 +25,12 @@ export async function getSessionState(
 	email?: string,
 ): Promise<SessionState> {
 	// Get active account email if not provided
-	const resolvedEmail = email ?? (await storage.getActiveAccountEmail());
+	let resolvedEmail = email;
+	if (!resolvedEmail) {
+		const activeAccount = await storage.getActiveAccount();
+		resolvedEmail =
+			activeAccount?.type === "single" ? activeAccount.email : undefined;
+	}
 
 	// Check session validity
 	const isValid = await storage.isSessionValid(resolvedEmail ?? undefined);
@@ -69,7 +74,7 @@ export async function getSessionState(
 		canQuickUnlock,
 		canBiometricUnlock,
 		requiresPasswordReentry,
-		email: resolvedEmail,
+		email: resolvedEmail ?? null,
 		userId,
 		expiresAt,
 	};

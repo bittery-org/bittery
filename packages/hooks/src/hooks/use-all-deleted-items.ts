@@ -4,28 +4,16 @@
  * Automatically detects whether we're in single-account or "All Accounts" mode
  * and fetches deleted items accordingly. Components don't need to care about the mode.
  *
- * This replaces the pattern of manually checking mode and conditionally fetching.
- *
- * Usage:
- * ```tsx
- * const { items, isLoading } = useAllDeletedItems();
- * ```
+ * Uses the unified internal implementation that handles both modes with a single
+ * code path, eliminating the need for conditional hook calls and complex mode detection.
  */
 
-import { useQuery } from "@tanstack/react-query";
-import { usePlatformStorage } from "../context/platform-context";
 import {
 	type MultiAccountDeletedItem,
-	useAllAccountsDeletedItems,
-} from "./internal/use-all-accounts-deleted-items";
-import {
-	type CrossVaultDeletedItem,
-	useAllDecryptedDeletedItems,
-} from "./internal/use-all-decrypted-deleted-items";
+	useDeletedItemsUnified,
+} from "./internal/use-deleted-items-unified";
 
-export type UnifiedDeletedItem =
-	| CrossVaultDeletedItem
-	| MultiAccountDeletedItem;
+export type UnifiedDeletedItem = MultiAccountDeletedItem;
 
 export interface UseAllDeletedItemsOptions {
 	enabled?: boolean;
@@ -48,35 +36,5 @@ export interface UseAllDeletedItemsOptions {
  * ```
  */
 export function useAllDeletedItems(options: UseAllDeletedItemsOptions = {}) {
-	const storage = usePlatformStorage();
-
-	// Detect current mode
-	const { data: activeEmail } = useQuery({
-		queryKey: ["accounts", "active"],
-		queryFn: () => storage.getActiveAccountEmail(),
-		staleTime: 5 * 1000,
-		enabled: storage.supportsMultiAccount && options.enabled !== false,
-	});
-
-	const isAllAccountsMode = activeEmail === "all";
-
-	// Fetch data based on mode
-	const singleAccountData = useAllDecryptedDeletedItems({
-		enabled: options.enabled !== false && !isAllAccountsMode,
-	});
-
-	const multiAccountData = useAllAccountsDeletedItems({
-		enabled: options.enabled !== false && isAllAccountsMode,
-	});
-
-	// Return unified interface
-	const result = isAllAccountsMode ? multiAccountData : singleAccountData;
-
-	return {
-		items: result.items as UnifiedDeletedItem[],
-		isLoading: result.isLoading,
-		error: result.error,
-		refetch: result.refetch,
-		isAllAccountsMode,
-	};
+	return useDeletedItemsUnified(options);
 }

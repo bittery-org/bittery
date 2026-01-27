@@ -1,4 +1,4 @@
-import { useAllDecryptedItems } from "@bittery/hooks";
+import { useItems } from "@bittery/hooks";
 import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
@@ -57,7 +57,7 @@ export function useCredentialProviderSync(
 ) {
 	const { autoSync = true, debounceMs = 2000, enabled = true } = options;
 
-	const { items, isLoading: isLoadingItems } = useAllDecryptedItems();
+	const { items, isLoading: isLoadingItems } = useItems();
 
 	const [isSyncing, setIsSyncing] = useState(false);
 	const [lastSyncResult, setLastSyncResult] = useState<{

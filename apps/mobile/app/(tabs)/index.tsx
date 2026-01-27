@@ -1,7 +1,4 @@
-import {
-	type CrossVaultDecryptedItem,
-	useAllDecryptedItems,
-} from "@bittery/hooks";
+import { type UnifiedItem, useItems } from "@bittery/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { Tabs, useRouter } from "expo-router";
 import { Key, Plus, Search, Star } from "lucide-react-native";
@@ -46,7 +43,7 @@ export default function AllItemsScreen() {
 	const [refreshing, setRefreshing] = useState(false);
 	const [showVaultPicker, setShowVaultPicker] = useState(false);
 
-	const { items, isLoading, error, refetch } = useAllDecryptedItems();
+	const { items, isLoading, error, refetch } = useItems();
 
 	const handleVaultSelect = (vaultId: string) => {
 		router.push(`/(vault)/${vaultId}/create`);
@@ -98,7 +95,7 @@ export default function AllItemsScreen() {
 		}
 	};
 
-	const handleItemPress = (item: CrossVaultDecryptedItem) => {
+	const handleItemPress = (item: UnifiedItem) => {
 		router.push(`/(vault)/${item.vaultId}/${item.id}`);
 	};
 
@@ -132,7 +129,7 @@ export default function AllItemsScreen() {
 		</View>
 	);
 
-	const renderItem = ({ item }: { item: CrossVaultDecryptedItem }) => (
+	const renderItem = ({ item }: { item: UnifiedItem }) => (
 		<ItemListItem
 			id={item.id}
 			title={item.title || "[Untitled]"}
@@ -193,7 +190,7 @@ export default function AllItemsScreen() {
 		// Combine sections into a single data array
 		const sections: Array<
 			| { type: "header"; title: string; count: number }
-			| { type: "item"; item: CrossVaultDecryptedItem }
+			| { type: "item"; item: UnifiedItem }
 		> = [];
 
 		if (favorites.length > 0) {

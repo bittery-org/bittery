@@ -13,6 +13,7 @@ import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
 import {
 	type AccountMetadata,
+	type ActiveAccount,
 	type BiometricAuthResult,
 	DEFAULT_SESSION_EXPIRY_MS,
 	type StoredSessionData,
@@ -250,9 +251,10 @@ export class WebStorageAdapter implements IStorageAdapter {
 	// Multi-Account (not supported on web)
 	// ============================================================================
 
-	async getActiveAccountEmail(): Promise<string | null> {
+	async getActiveAccount(): Promise<ActiveAccount> {
 		const sessionData = await this.getStoredSessionData();
-		return sessionData?.email ?? null;
+		if (!sessionData?.email) return null;
+		return { type: "single", email: sessionData.email };
 	}
 
 	async getActiveAccountUserId(): Promise<string | null> {
@@ -260,7 +262,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 		return sessionData?.userId ?? null;
 	}
 
-	async setActiveAccount(_email: string): Promise<void> {
+	async setActiveAccount(_account: ActiveAccount): Promise<void> {
 		// Web doesn't support multi-account
 	}
 
