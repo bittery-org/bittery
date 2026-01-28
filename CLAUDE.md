@@ -95,10 +95,12 @@ bittery/
 ```
 
 **Dependencies between packages:**
-- `api` depends on: `auth`, `db`, `crypto`, `storage`
-- `auth` depends on: `db`, `crypto`
-- `web`, `desktop`, `extension` depend on: `api`, `auth`, `crypto`, `ui`, `shared`
-- `server` depends on: `api`, `auth`, `db`, `storage`
+- `api` depends on: `auth`, `db`
+- `auth` depends on: `db`, `crypto-napi`
+- `hooks` depends on: `storage`, `shared`
+- `storage` depends on: `shared` (client-side only)
+- `web`, `desktop`, `extension`, `mobile` depend on: `api`, `hooks`, `storage`, `ui`, `shared`
+- `server` depends on: `api`, `auth`, `db`
 
 ### tRPC API Organization
 
@@ -224,16 +226,10 @@ All crypto operations use a unified Rust core (`packages/crypto/core/`) compiled
 | Platform | Binding | Wrapper Location |
 |----------|---------|------------------|
 | Web | WASM | `apps/web/src/lib/wasm-crypto.ts` |
-| Server | NAPI | `@bittery/crypto-napi` (used by `packages/crypto/src/srp-server.ts`) |
+| Server | NAPI | `@bittery/crypto-napi` (used by `packages/auth/`) |
 | Desktop | Tauri commands | `apps/desktop/src/lib/tauri-crypto.ts` |
 | Extension | WASM | `apps/extension/src/lib/wasm-crypto.ts` |
 | Mobile | Expo module | `apps/mobile/src/lib/crypto/` (wraps `@bittery/crypto-nitro`) |
-
-**`packages/crypto/`** - TypeScript types and platform-specific storage adapters:
-- `session-storage.ts` - Multi-tiered session storage (localStorage + sessionStorage)
-- `storage-chrome.ts` - Chrome extension storage adapter
-- `storage-tauri.ts` - Tauri secure storage adapter
-- `storage-react-native.ts` - React Native storage adapter
 
 **`packages/crypto/core/`** - Rust workspace with crates:
 - `bittery-crypto-core` - Core crypto primitives (key derivation, AES-GCM, RSA, SRP-6a)
@@ -245,9 +241,126 @@ All crypto operations use a unified Rust core (`packages/crypto/core/`) compiled
 
 **Important: Master Unlock Key is kept in memory only during active session. Never persisted unencrypted.**
 
-### Storage Integration (`packages/storage`)
+### Client Storage (`packages/storage`)
 
-S3-compatible storage (AWS S3, R2, MinIO):
+Platform-specific storage adapters for secure client-side data persistence. All apps use these adapters for session management, vault keys, and settings.
+
+**`packages/storage/src/`** - Storage adapter interfaces and implementations:
+- `adapter.ts` - `IStorageAdapter` interface defining the contract
+- `types.ts` - Shared types (`VaultKeyData`, `StoredSessionData`, `AccountMetadata`, `ActiveAccount`)
+- `crypto-provider.ts` - Interface for injecting platform crypto into storage adapters
+
+**`packages/storage/src/adapters/`** - Platform implementations:
+- `web.ts` - Web storage adapter (localStorage + sessionStorage)
+- `chrome.ts` - Chrome extension storage adapter (chrome.storage.local + chrome.storage.session)
+- `tauri.ts` - Desktop storage adapter (Tauri Store + OS Keychain for biometric)
+- `react-native.ts` - Mobile storage adapter (SecureStore + SQLite)
+
+**Key Features:**
+- Multi-account support (desktop/mobile only): Store multiple account sessions simultaneously
+- Biometric authentication (desktop/mobile only): Secure Master Unlock Key with device biometrics
+- Device-specific encryption: Master Unlock Key encrypted with device key before persistence
+- Session management: JWT tokens, encrypted sessions (14-day expiry), vault keys, secret keys
+- Auto-lock support: Configurable timeout with Master Unlock Key cleared from memory
+
+**Storage Hierarchy:**
+```
+Session Storage (in-memory + encrypted persistence):
+  ├─ Master Unlock Key (memory only while unlocked)
+  ├─ JWT Token (sessionStorage or chrome.storage.session)
+  ├─ Encrypted Session Data (localStorage or chrome.storage.local)
+  │   └─ Contains: Encrypted Master Unlock Key (with device key)
+  ├─ Secret Key (plaintext in localStorage - only useful with password)
+  ├─ Vault Keys (encrypted with Master Unlock Key)
+  └─ Account Metadata (for multi-account: email, userId, lastActiveAt, biometricEnabled)
+```
+
+**Multi-Account Support:**
+- Desktop and mobile support switching between multiple logged-in accounts
+- Active account tracked via `ActiveAccount` type: `{type: "single", email}` or `{type: "all"}` or `null`
+- Each account has independent session data, vault keys, and biometric settings
+- Web and extension are single-account only (simpler UX)
+
+### React Hooks (`packages/hooks`)
+
+Shared React hooks for authentication, vault management, and item operations. Platform-agnostic - works across web, desktop, extension, and mobile by injecting platform-specific dependencies via `PlatformProvider`.
+
+**`packages/hooks/src/`** - Hook organization:
+- `context/platform-context.tsx` - `PlatformProvider` for injecting storage, crypto, sync dependencies
+- `auth/` - Non-React authentication utilities (SRP login/unlock logic)
+- `hooks/auth/` - React hooks for authentication (`useLogin`, `useQuickUnlock`, `useBiometricUnlock`, etc.)
+- `hooks/vault/` - React hooks for vault operations (`useCreateVault`, `useUpdateVault`, `useDeleteVault`)
+- `hooks/items/` - React hooks for item operations (`useCreateItem`, `useUpdateItem`, `useDeleteItem`, etc.)
+- `hooks/internal/` - Internal hooks for vault key decryption and item decryption
+- `services/` - Platform services (autolock implementations for web/mobile)
+- `types.ts` - Shared types and interfaces
+
+**Key Hooks:**
+
+*Authentication:*
+- `useLogin(options)` - Full SRP login flow with secret key
+- `useQuickUnlock(options)` - Fast unlock with stored secret key
+- `useBiometricUnlock(options)` - Biometric authentication (Touch ID/Face ID)
+- `useLogout()` / `useLock()` - Session termination
+- `useSessionState()` - Current session state (locked, unlocked, authenticated)
+- `useAccountSwitcher()` - Multi-account management (desktop/mobile)
+
+*Vault Operations:*
+- `useCreateVault()` - Create new personal or team vault
+- `useUpdateVault()` - Update vault metadata
+- `useDeleteVault()` - Soft delete vault
+
+*Item Operations:*
+- `useCreateItem()` - Create encrypted vault item
+- `useUpdateItem()` - Update encrypted item
+- `useDeleteItem()` - Soft delete item (moves to trash)
+- `usePermanentDeleteItem()` - Permanently delete from trash
+- `useRestoreItem()` - Restore from trash
+- `useMoveItem()` - Move item between vaults
+- `useToggleFavorite()` - Toggle favorite status
+
+*Unified Data Access:*
+- `useItem(itemId)` - Fetch and decrypt single item (searches across all vaults)
+- `useItems()` - Fetch and decrypt items from active vault(s)
+- `useVaultItems(vaultId)` - Fetch items from specific vault
+- `useVaultSearch(query)` - Search items across vaults
+
+**PlatformProvider Pattern:**
+Each app wraps its root with `PlatformProvider`, injecting platform-specific implementations:
+
+```tsx
+import { PlatformProvider } from "@bittery/hooks";
+import * as crypto from "@/lib/wasm-crypto"; // or tauri-crypto, etc.
+import { storage } from "@/lib/storage"; // platform storage adapter
+import { useSyncContext } from "@/providers/sync-provider";
+
+function App() {
+  const syncContext = useSyncContext();
+  return (
+    <PlatformProvider
+      storage={storage}
+      crypto={crypto}
+      sync={syncContext}
+      autolock={autolockService}
+    >
+      {children}
+    </PlatformProvider>
+  );
+}
+```
+
+**Authentication Utilities (Non-React):**
+`packages/hooks/src/auth/` provides core authentication logic that can be used outside React (e.g., extension service worker):
+- `performSRPLogin(input, deps)` - Execute SRP login flow
+- `performSRPUnlock(input, deps)` - Execute quick unlock flow
+- `storeLoginSession(result, storage, email?)` - Persist session after login
+- `storeUnlockSession(result, storage, email?)` - Persist session after unlock
+- `getSessionState(storage, email?)` - Check current session state
+- `clearSession(storage, email?)` - Clear session data
+
+### Cloud Storage Integration
+
+S3-compatible storage (AWS S3, R2, MinIO) for vault attachments and images:
 - Presigned upload URLs (5 min expiry) via `vault.createImageUpload`
 - Presigned download URLs (5 min expiry)
 - Key naming: `vaults/{userId}/{vaultId}/{uuid}-{filename}`
@@ -327,10 +440,11 @@ Key components:
 - Radix UI for accessible primitives
 
 **Cross-Platform:**
-- All crypto uses Rust core (`packages/bittery-crypto/`) with platform-specific bindings
+- All crypto uses Rust core (`packages/crypto/core/`) with platform-specific bindings
 - Each app has its own crypto wrapper (see Crypto Architecture section)
-- Platform-specific storage adapters in `packages/crypto/src/storage-*.ts`
-- Never import crypto primitives from `@bittery/crypto` directly - use app-specific wrappers
+- Platform-specific storage adapters in `packages/storage/src/adapters/`
+- All apps use `@bittery/hooks` for shared logic, injecting platform dependencies via `PlatformProvider`
+- Never import crypto primitives directly - use app-specific wrappers
 
 **Item Types:**
 - Supported categories: `login`, `secure-note`, `credit-card`, `identity`

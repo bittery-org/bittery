@@ -7,6 +7,7 @@ import { storage } from "../lib/storage";
 import { decrypt } from "../lib/wasm-crypto";
 import { updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
+import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import type { MessageResponse } from "./types";
 
 /**
@@ -29,10 +30,6 @@ async function decryptVaultItemsForAccount(
 		return [];
 	}
 
-	// Create account-specific tRPC client
-	const { createAccountTrpcClient } = await import(
-		"@bittery/shared/trpc-client-factory"
-	);
 	const serverUrl =
 		(await storage.getServerUrl(email)) || "http://localhost:3000";
 	const accountClient = createAccountTrpcClient(authToken, serverUrl);

@@ -7,7 +7,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ExtensionAccountSwitcher } from "@/components/account-switcher";
 import { Favicon } from "@/components/favicon";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
-import { createExtensionInvalidator } from "@/lib/query-invalidation";
 import { storage } from "@/lib/storage";
 
 type MultiAccountItem = DecryptedItem & {
@@ -64,10 +63,6 @@ function hostnameMatches(
 export function VaultPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
-	const invalidator = useMemo(
-		() => createExtensionInvalidator(queryClient),
-		[queryClient],
-	);
 	const [searchQuery, setSearchQuery] = useState("");
 	const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 	const [currentHostname, setCurrentHostname] = useState<string | null>(null);
@@ -185,8 +180,10 @@ export function VaultPage() {
 	const selectedItem = sortedItems.find((item) => item.id === selectedItemId);
 
 	const handleItemUpdated = useCallback(() => {
-		invalidator.invalidateVaultItems();
-	}, [invalidator]);
+		// Invalidate all vault items queries
+		queryClient.invalidateQueries({ queryKey: ["vault-items"] });
+		queryClient.invalidateQueries({ queryKey: ["items-unified"] });
+	}, [queryClient]);
 
 	return (
 		<div className="flex h-full flex-col">

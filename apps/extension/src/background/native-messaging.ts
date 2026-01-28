@@ -99,10 +99,10 @@ export async function handleCheckNativeBiometric(): Promise<MessageResponse> {
 export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 	console.log("[NATIVE_BIOMETRIC_UNLOCK] Starting biometric unlock request");
 	try {
-		// Verify we have a valid session before proceeding
-		const sessionValid = await storage.isSessionValid();
-		if (!sessionValid) {
-			throw new Error("No session data found. Please log in again.");
+		// Verify we have an active account
+		const activeAccount = await storage.getActiveAccount();
+		if (!activeAccount || activeAccount.type !== "single") {
+			throw new Error("No active account. Please log in again.");
 		}
 
 		const challenge = crypto.randomUUID();
@@ -249,6 +249,131 @@ export async function handleOpenDesktopApp(): Promise<MessageResponse> {
 		}
 		return { success: true };
 	} catch (error) {
+		return {
+			success: false,
+			error: error instanceof Error ? error.message : String(error),
+		};
+	}
+}
+
+/**
+ * Biometric unlock all accounts
+ * Strategy: Use ONE biometric prompt for first account, then restore others from storage
+ * This matches desktop app's UX (desktop/src/routes/unlock.tsx:102-197)
+ */
+export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse> {
+	console.log(
+		"[NATIVE_BIOMETRIC_UNLOCK_ALL] Starting biometric unlock for all accounts",
+	);
+
+	try {
+		const accounts = await storage.getAccountsList();
+
+		if (accounts.length === 0) {
+			throw new Error("No accounts found");
+		}
+
+		// Strategy: Use ONE biometric prompt for first account, then restore others from storage
+		// This matches desktop app's UX (see desktop/src/routes/unlock.tsx:102-197)
+
+		const unlocked: string[] = [];
+		const failed: string[] = [];
+
+		// Step 1: Unlock first account with biometric (triggers ONE prompt)
+		// Let the single-account handler validate the session - don't check here
+		let biometricSuccess = false;
+		let authenticatedEmail: string | null = null;
+
+		for (const account of accounts) {
+			let previousActive = null;
+			// Try biometric unlock for this account
+			try {
+				// Temporarily set as active account for native messaging
+				previousActive = await storage.getActiveAccount();
+				await storage.setActiveAccount({ type: "single", email: account.email });
+
+				// Call existing single-account handler (which uses native messaging)
+				// It will validate the session internally
+				const result = await handleNativeBiometricUnlock();
+
+				if (result.success) {
+					biometricSuccess = true;
+					authenticatedEmail = account.email;
+					unlocked.push(account.email);
+
+					// Restore previous active account
+					if (previousActive) {
+						await storage.setActiveAccount(previousActive);
+					}
+					break;
+				}
+
+				// Restore previous active account if unlock wasn't successful
+				if (previousActive) {
+					await storage.setActiveAccount(previousActive);
+				}
+			} catch (error) {
+				console.error(
+					`[NATIVE_BIOMETRIC_UNLOCK_ALL] Biometric failed for ${account.email}:`,
+					error,
+				);
+				// Restore active account on error
+				if (previousActive) {
+					await storage.setActiveAccount(previousActive);
+				}
+				// Continue to try next account
+			}
+		}
+
+		if (!biometricSuccess || !authenticatedEmail) {
+			throw new Error("Biometric authentication failed for all accounts");
+		}
+
+		// Step 2: Restore remaining accounts from encrypted storage (no additional prompts)
+		for (const account of accounts) {
+			if (account.email === authenticatedEmail) continue;
+
+			try {
+				// Try to restore this account's session from encrypted storage
+				// Pass skipBiometric=true to avoid triggering additional prompts
+				const restored = await storage.tryRestoreSession(true, account.email);
+
+				if (restored) {
+					unlocked.push(account.email);
+				} else {
+					failed.push(account.email);
+				}
+			} catch (error) {
+				console.error(
+					`[NATIVE_BIOMETRIC_UNLOCK_ALL] Failed to restore ${account.email}:`,
+					error,
+				);
+				failed.push(account.email);
+			}
+		}
+
+		// Set active mode based on accounts count
+		if (accounts.length > 1) {
+			await storage.setActiveAccount({ type: "all" });
+		} else {
+			await storage.setActiveAccount({ type: "single", email: unlocked[0] });
+		}
+
+		// Set MUK for first unlocked account in session manager
+		const activeMuk = await storage.getMasterUnlockKey(unlocked[0]);
+		if (activeMuk) {
+			setMasterUnlockKey(activeMuk);
+		}
+
+		updateActivity();
+
+		return {
+			success: true,
+			result: { unlocked, failed },
+			message: "Biometric unlock completed",
+		};
+	} catch (error) {
+		console.error("[NATIVE_BIOMETRIC_UNLOCK_ALL] Error:", error);
 		return {
 			success: false,
 			error: error instanceof Error ? error.message : String(error),

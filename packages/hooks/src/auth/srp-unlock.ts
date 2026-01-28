@@ -141,6 +141,19 @@ export async function storeUnlockSession(
 	// Store MUK in memory
 	await storage.setMasterUnlockKey(result.masterUnlockKey, resolvedEmail);
 
+	// Ensure active account is set (for multi-account support)
+	if (storage.supportsMultiAccount && storage.setActiveAccount) {
+		const currentActive = await storage.getActiveAccount();
+		// Only set if not already active to avoid unnecessary writes
+		if (
+			!currentActive ||
+			currentActive.type !== "single" ||
+			currentActive.email.toLowerCase() !== resolvedEmail.toLowerCase()
+		) {
+			await storage.setActiveAccount({ type: "single", email: resolvedEmail });
+		}
+	}
+
 	// Update last master password entry timestamp if the method exists
 	if (storage.updateLastMasterPasswordEntry) {
 		await storage.updateLastMasterPasswordEntry(resolvedEmail);

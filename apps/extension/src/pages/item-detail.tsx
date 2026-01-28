@@ -29,8 +29,10 @@ export function ItemDetailPage() {
 
 	const handleItemUpdated = useCallback(() => {
 		// Invalidate both the single item query and the items list
-		invalidator.invalidateItem(itemId);
-	}, [invalidator, itemId]);
+		// Note: We pass empty vaultId since we don't have it readily available
+		// The invalidator will still properly invalidate all relevant queries
+		invalidator.invalidateItem(itemId, item?.vaultId ?? "");
+	}, [invalidator, itemId, item?.vaultId]);
 
 	if (isLoading) {
 		return (

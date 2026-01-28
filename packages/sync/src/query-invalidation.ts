@@ -50,67 +50,87 @@ export function getQueryKeysForEvent(
 	switch (type) {
 		case "item_created":
 			keys.push(trpc.vault.listAllItems.queryKey());
+			// Invalidate unified items queries (for "All Objects" view)
+			keys.push(["items-unified"]);
 			if (vaultId) {
 				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
-				// Invalidate useVaultItems queries for this vault
-				keys.push(["vault-items-raw", vaultId]);
-				keys.push(["decrypted-items", vaultId]);
+				// Invalidate useVaultItems queries for this vault (prefix match)
+				keys.push(["vault-items", vaultId]);
 			}
+			// Invalidate all decrypted items (prefix match)
+			keys.push(["decrypted-item"]);
 			break;
 
 		case "item_updated":
 			keys.push(trpc.vault.listAllItems.queryKey());
+			// Invalidate unified items queries
+			keys.push(["items-unified"]);
 			if (vaultId) {
 				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
-				// Invalidate useVaultItems queries for this vault
-				keys.push(["vault-items-raw", vaultId]);
-				keys.push(["decrypted-items", vaultId]);
+				// Invalidate useVaultItems queries for this vault (prefix match)
+				keys.push(["vault-items", vaultId]);
 			}
 			keys.push(trpc.vault.getItem.queryKey({ itemId: entityId }));
+			// Invalidate single item queries (prefix match)
+			keys.push(["vault-item", entityId]);
+			// Invalidate all decrypted items (prefix match)
+			keys.push(["decrypted-item"]);
 			break;
 
 		case "item_deleted":
 			keys.push(trpc.vault.listAllItems.queryKey());
 			keys.push(trpc.vault.listAllDeletedItems.queryKey());
+			// Invalidate unified queries
+			keys.push(["items-unified"]);
+			keys.push(["deleted-items-unified"]);
 			if (vaultId) {
 				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
 				keys.push(trpc.vault.listDeletedItems.queryKey({ vaultId }));
-				// Invalidate useVaultItems queries for this vault
-				keys.push(["vault-items-raw", vaultId]);
-				keys.push(["decrypted-items", vaultId]);
+				// Invalidate useVaultItems queries for this vault (prefix match)
+				keys.push(["vault-items", vaultId]);
 			}
+			// Invalidate all decrypted items (prefix match)
+			keys.push(["decrypted-item"]);
 			break;
 
 		case "item_restored":
 			keys.push(trpc.vault.listAllItems.queryKey());
 			keys.push(trpc.vault.listAllDeletedItems.queryKey());
+			// Invalidate unified queries
+			keys.push(["items-unified"]);
+			keys.push(["deleted-items-unified"]);
 			if (vaultId) {
 				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
 				keys.push(trpc.vault.listDeletedItems.queryKey({ vaultId }));
-				// Invalidate useVaultItems queries for this vault
-				keys.push(["vault-items-raw", vaultId]);
-				keys.push(["decrypted-items", vaultId]);
+				// Invalidate useVaultItems queries for this vault (prefix match)
+				keys.push(["vault-items", vaultId]);
 			}
+			// Invalidate all decrypted items (prefix match)
+			keys.push(["decrypted-item"]);
 			break;
 
 		case "item_moved":
 			keys.push(trpc.vault.listAllItems.queryKey());
 			keys.push(trpc.vault.getItem.queryKey({ itemId: entityId }));
+			// Invalidate unified items queries
+			keys.push(["items-unified"]);
+			// Invalidate single item queries (prefix match)
+			keys.push(["vault-item", entityId]);
 			// Target vault (vaultId is the target)
 			if (vaultId) {
 				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
-				// Invalidate useVaultItems queries for target vault
-				keys.push(["vault-items-raw", vaultId]);
-				keys.push(["decrypted-items", vaultId]);
+				// Invalidate useVaultItems queries for target vault (prefix match)
+				keys.push(["vault-items", vaultId]);
 			}
 			// Source vault from metadata
 			if (event.metadata?.sourceVaultId) {
 				const sourceVaultId = event.metadata.sourceVaultId as string;
 				keys.push(trpc.vault.listItems.queryKey({ vaultId: sourceVaultId }));
-				// Invalidate useVaultItems queries for source vault
-				keys.push(["vault-items-raw", sourceVaultId]);
-				keys.push(["decrypted-items", sourceVaultId]);
+				// Invalidate useVaultItems queries for source vault (prefix match)
+				keys.push(["vault-items", sourceVaultId]);
 			}
+			// Invalidate all decrypted items (prefix match)
+			keys.push(["decrypted-item"]);
 			break;
 
 		case "vault_created":
@@ -211,12 +231,27 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 				queryClient.invalidateQueries({
 					queryKey: trpc.vault.listAllItems.queryKey(),
 				}),
-				// Invalidate useVaultItems queries for this vault
+				// Invalidate unified items queries (used by useItems hook)
 				queryClient.invalidateQueries({
-					queryKey: ["vault-items-raw", vaultId],
+					queryKey: ["items-unified"],
+				}),
+				// Invalidate useVaultItems queries for this vault (prefix match)
+				queryClient.invalidateQueries({
+					queryKey: ["vault-items", vaultId],
+				}),
+				// Invalidate single item queries (prefix match for both account and non-account versions)
+				queryClient.invalidateQueries({
+					queryKey: ["vault-item", itemId],
 				}),
 				queryClient.invalidateQueries({
-					queryKey: ["decrypted-items", vaultId],
+					queryKey: ["vault-item-account", itemId],
+				}),
+				// Invalidate decrypted item queries (prefix match)
+				queryClient.invalidateQueries({
+					queryKey: ["decrypted-item", itemId],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["decrypted-item-account", itemId],
 				}),
 			]);
 		},
@@ -230,12 +265,17 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 				queryClient.invalidateQueries({
 					queryKey: trpc.vault.listItems.queryKey({ vaultId }),
 				}),
-				// Invalidate useVaultItems queries for this vault
+				// Invalidate "All Objects" tRPC query
 				queryClient.invalidateQueries({
-					queryKey: ["vault-items-raw", vaultId],
+					queryKey: trpc.vault.listAllItems.queryKey(),
 				}),
+				// Invalidate unified items queries (used by useItems hook)
 				queryClient.invalidateQueries({
-					queryKey: ["decrypted-items", vaultId],
+					queryKey: ["items-unified"],
+				}),
+				// Invalidate useVaultItems queries for this vault (prefix match)
+				queryClient.invalidateQueries({
+					queryKey: ["vault-items", vaultId],
 				}),
 			]);
 		},
@@ -245,12 +285,18 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 */
 		invalidateDeletedItems: async (vaultId: string): Promise<void> => {
 			const { queryClient, trpc } = options;
-			await queryClient.invalidateQueries({
-				queryKey: trpc.vault.listDeletedItems.queryKey({ vaultId }),
-			});
-			await queryClient.invalidateQueries({
-				queryKey: trpc.vault.listAllDeletedItems.queryKey(),
-			});
+			await Promise.all([
+				queryClient.invalidateQueries({
+					queryKey: trpc.vault.listDeletedItems.queryKey({ vaultId }),
+				}),
+				queryClient.invalidateQueries({
+					queryKey: trpc.vault.listAllDeletedItems.queryKey(),
+				}),
+				// Invalidate unified deleted items queries (used by useAllDeletedItems hook)
+				queryClient.invalidateQueries({
+					queryKey: ["deleted-items-unified"],
+				}),
+			]);
 		},
 
 		/**

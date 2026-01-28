@@ -142,6 +142,8 @@ export function ItemDetailPage({
 
 	const confirmDelete = async () => {
 		if (!rawItem) return;
+		console.log(rawItem);
+		
 
 		try {
 			await deleteItem.mutateAsync({

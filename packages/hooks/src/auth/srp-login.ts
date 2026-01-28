@@ -148,4 +148,20 @@ export async function storeLoginSession(
 
 	// Store MUK in memory
 	await storage.setMasterUnlockKey(result.masterUnlockKey, resolvedEmail);
+
+	// Add account to accounts list (for multi-account support)
+	if (storage.supportsMultiAccount && storage.addAccount) {
+		await storage.addAccount({
+			email: resolvedEmail,
+			userId: result.user.id,
+			name: result.user.name || resolvedEmail.split("@")[0] || "User",
+			addedAt: Date.now(),
+			lastActiveAt: Date.now(),
+			secretKeyHint: `${secretKey.slice(0, 4)}••••`,
+			biometricEnabled: storage.isBiometricEnabled ? await storage.isBiometricEnabled(resolvedEmail) : false,
+		});
+
+		// Set as active account
+		await storage.setActiveAccount({ type: "single", email: resolvedEmail });
+	}
 }

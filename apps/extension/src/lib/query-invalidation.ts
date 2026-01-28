@@ -1,47 +1,84 @@
+import type { IQueryInvalidator } from "@bittery/hooks";
 import type { QueryClient } from "@tanstack/react-query";
 
 /**
- * Simple query invalidation utilities for the extension
- * This mirrors the sync package's invalidator API for consistency
+ * Query invalidation utilities for the extension
+ * Implements IQueryInvalidator interface for compatibility with shared hooks
  */
-export function createExtensionInvalidator(queryClient: QueryClient) {
+export function createExtensionInvalidator(
+	queryClient: QueryClient,
+): IQueryInvalidator {
 	return {
 		/**
 		 * Invalidate a specific vault item and the items list
 		 */
-		invalidateItem: async (itemId: string): Promise<void> => {
+		invalidateItem: async (_itemId: string, _vaultId: string): Promise<void> => {
 			await Promise.all([
-				queryClient.invalidateQueries({ queryKey: ["vault-item", itemId] }),
-				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
-			]);
-		},
-
-		/**
-		 * Invalidate the vault items list
-		 */
-		invalidateVaultItems: async (): Promise<void> => {
-			await queryClient.invalidateQueries({ queryKey: ["vault-items"] });
-		},
-
-		/**
-		 * Invalidate all account-related data
-		 * Use this when switching accounts to clear all cached data from the previous account
-		 */
-		invalidateAllAccountData: async (): Promise<void> => {
-			await Promise.all([
-				// Invalidate vault items
-				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
 				queryClient.invalidateQueries({ queryKey: ["vault-item"] }),
-
-				// Invalidate account-related queries
-				queryClient.invalidateQueries({ queryKey: ["accounts", "unlocked"] }),
-				queryClient.invalidateQueries({ queryKey: ["accounts", "metadata"] }),
-				queryClient.invalidateQueries({ queryKey: ["accounts", "active"] }),
+				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
+				queryClient.invalidateQueries({ queryKey: ["items-unified"] }),
 			]);
+		},
+
+		/**
+		 * Invalidate vault list (items in vault) queries
+		 */
+		invalidateVaultList: async (_vaultId: string): Promise<void> => {
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
+				queryClient.invalidateQueries({ queryKey: ["items-unified"] }),
+			]);
+		},
+
+		/**
+		 * Invalidate vault keys cache
+		 */
+		invalidateVaultKeys: async (): Promise<void> => {
+			await queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
+		},
+
+		/**
+		 * Invalidate deleted items list queries
+		 */
+		invalidateDeletedItems: async (_vaultId: string): Promise<void> => {
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: ["deleted-items"] }),
+				queryClient.invalidateQueries({ queryKey: ["deleted-items-unified"] }),
+			]);
+		},
+
+		/**
+		 * Invalidate team-related queries
+		 */
+		invalidateTeam: async (): Promise<void> => {
+			await queryClient.invalidateQueries({ queryKey: ["team"] });
+		},
+
+		/**
+		 * Invalidate team invitations queries
+		 */
+		invalidateTeamInvitations: async (): Promise<void> => {
+			await queryClient.invalidateQueries({ queryKey: ["team-invitations"] });
+		},
+
+		/**
+		 * Invalidate share-related queries
+		 */
+		invalidateShare: async (itemId?: string): Promise<void> => {
+			if (itemId) {
+				await queryClient.invalidateQueries({ queryKey: ["share", itemId] });
+			} else {
+				await queryClient.invalidateQueries({ queryKey: ["share"] });
+			}
+		},
+
+		/**
+		 * Invalidate vault member queries
+		 */
+		invalidateVaultMembers: async (vaultId: string): Promise<void> => {
+			await queryClient.invalidateQueries({
+				queryKey: ["vault-members", vaultId],
+			});
 		},
 	};
 }
-
-export type ExtensionInvalidator = ReturnType<
-	typeof createExtensionInvalidator
->;

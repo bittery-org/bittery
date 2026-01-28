@@ -28,13 +28,13 @@ export function LoginPage() {
 		};
 	}, []);
 
-	const persistServerUrl = async () => {
+	const persistServerUrl = async (email?: string) => {
 		const normalized = normalizeServerUrl(serverUrl);
 		if (!normalized) {
 			toast.error("Invalid server URL");
 			return null;
 		}
-		await storage.storeServerUrl(normalized);
+		await storage.storeServerUrl(normalized, email);
 		if (normalized !== serverUrl) {
 			setServerUrl(normalized);
 		}
@@ -48,7 +48,7 @@ export function LoginPage() {
 			secretKey: "",
 		},
 		onSubmit: async ({ value }) => {
-			const persisted = await persistServerUrl();
+			const persisted = await persistServerUrl(value.email);
 			if (!persisted) {
 				return;
 			}
@@ -141,9 +141,6 @@ export function LoginPage() {
 									placeholder="https://your-server.com"
 									value={serverUrl}
 									onChange={(e) => setServerUrl(e.target.value)}
-									onBlur={() => {
-										persistServerUrl();
-									}}
 									required
 									className="h-10"
 								/>

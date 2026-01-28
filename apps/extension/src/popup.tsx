@@ -13,6 +13,8 @@ import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { storage } from "./lib/storage";
+import { ExtensionPlatformProvider } from "./providers/platform-provider";
+import { ExtensionSyncProvider } from "./providers/sync-provider";
 import { routeTree } from "./routeTree";
 
 // Create TanStack Query client
@@ -74,8 +76,12 @@ function Popup() {
 	return (
 		<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
 			<QueryClientProvider client={queryClient}>
-				<RouterProvider router={router} />
-				<Toaster />
+				<ExtensionSyncProvider queryClient={queryClient}>
+					<ExtensionPlatformProvider>
+						<RouterProvider router={router} />
+						<Toaster />
+					</ExtensionPlatformProvider>
+				</ExtensionSyncProvider>
 			</QueryClientProvider>
 		</TRPCProvider>
 	);

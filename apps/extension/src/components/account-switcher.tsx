@@ -44,8 +44,12 @@ export function ExtensionAccountSwitcher() {
 				// Redirect to unlock screen with the account email
 				navigate({ to: "/unlock", search: { email } });
 			} else {
-				// Invalidate all account-related data to clear cache from previous account
-				await invalidator.invalidateAllAccountData();
+				// Invalidate account-related data to clear cache from previous account
+				await Promise.all([
+					invalidator.invalidateVaultKeys(),
+					queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
+					queryClient.invalidateQueries({ queryKey: ["items-unified"] }),
+				]);
 				// Reload vault items for the new account
 				navigate({ to: "/vault" });
 			}
@@ -82,8 +86,12 @@ export function ExtensionAccountSwitcher() {
 
 		try {
 			await switchAccount.mutateAsync({ type: "all" });
-			// Invalidate all account-related data to refresh multi-account view
-			await invalidator.invalidateAllAccountData();
+			// Invalidate account-related data to refresh multi-account view
+			await Promise.all([
+				invalidator.invalidateVaultKeys(),
+				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
+				queryClient.invalidateQueries({ queryKey: ["items-unified"] }),
+			]);
 			navigate({ to: "/vault" });
 		} catch (error) {
 			console.error("Failed to switch to All Accounts mode:", error);

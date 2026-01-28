@@ -215,31 +215,64 @@ async fn check_extension_biometric_status(
         .map_err(|e| format!("Failed to access store: {}", e))?;
     
     let active_email = get_active_account_email(&store);
-    let (session_key, biometric_key) = if let Some(email) = &active_email {
-        (
-            account_key(email, "session_data"),
-            account_key(email, "biometric_enabled"),
-        )
+
+    // If active account is "all", check if ANY account has a valid session
+    let has_session = if active_email.as_deref() == Some("all") {
+        // Get accounts list and check if any has a session
+        if let Some(accounts_value) = store.get("bittery_accounts_list") {
+            if let Some(accounts_str) = accounts_value.as_str() {
+                if let Ok(accounts_json) = serde_json::from_str::<serde_json::Value>(accounts_str) {
+                    if let Some(accounts_array) = accounts_json.get("accounts").and_then(|a| a.as_array()) {
+                        // Check if any account has session data
+                        accounts_array.iter().any(|account| {
+                            if let Some(email) = account.get("email").and_then(|e| e.as_str()) {
+                                let session_key = account_key(email, "session_data");
+                                store.get(&session_key).is_some()
+                            } else {
+                                false
+                            }
+                        })
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     } else {
-        (
-            LEGACY_SESSION_DATA_KEY.to_string(),
-            LEGACY_BIOMETRIC_ENABLED_KEY.to_string(),
-        )
+        // Single account mode - check specific account or legacy
+        let (session_key, biometric_key) = if let Some(email) = &active_email {
+            (
+                account_key(email, "session_data"),
+                account_key(email, "biometric_enabled"),
+            )
+        } else {
+            (
+                LEGACY_SESSION_DATA_KEY.to_string(),
+                LEGACY_BIOMETRIC_ENABLED_KEY.to_string(),
+            )
+        };
+
+        let mut session_data = store.get(&session_key);
+        let mut biometric_enabled = store.get(&biometric_key);
+        if session_data.is_none() && active_email.is_some() {
+            session_data = store.get(LEGACY_SESSION_DATA_KEY);
+            biometric_enabled = store.get(LEGACY_BIOMETRIC_ENABLED_KEY);
+        }
+
+        // Check biometric_enabled flag for single account
+        let is_enabled = biometric_enabled.and_then(|v| v.as_bool()).unwrap_or(true);
+        session_data.is_some() && is_enabled
     };
 
-    let mut session_data = store.get(&session_key);
-    let mut biometric_enabled = store.get(&biometric_key);
-    if session_data.is_none() && active_email.is_some() {
-        session_data = store.get(LEGACY_SESSION_DATA_KEY);
-        biometric_enabled = store.get(LEGACY_BIOMETRIC_ENABLED_KEY);
-    }
-    
-    let has_session = session_data.is_some();
-    let is_enabled = biometric_enabled.and_then(|v| v.as_bool()).unwrap_or(false);
-    
     Ok(serde_json::json!({
         "available": status.is_available,
-        "enabled": is_enabled && has_session,
+        "enabled": has_session,
     }))
 }
 

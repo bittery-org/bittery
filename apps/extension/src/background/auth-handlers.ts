@@ -149,3 +149,76 @@ export async function handleLock(): Promise<MessageResponse> {
 	lock();
 	return { success: true };
 }
+
+/**
+ * Handle QUICK_UNLOCK_ALL message - Unlock all accounts with password
+ */
+export async function handleQuickUnlockAll(payload: {
+	password: string;
+}): Promise<MessageResponse> {
+	const { password } = payload;
+
+	// Get list of all accounts
+	const accounts = await storage.getAccountsList();
+
+	if (accounts.length === 0) {
+		throw new Error("No accounts found");
+	}
+
+	const unlocked: string[] = [];
+	const failed: string[] = [];
+
+	// Attempt to unlock each account
+	for (const account of accounts) {
+		try {
+			// Check if account has stored secret key
+			const hasSecretKey = await storage.hasStoredSecretKey(account.email);
+			if (!hasSecretKey) {
+				console.log(
+					`[QUICK_UNLOCK_ALL] Skipping ${account.email} - no stored secret key`,
+				);
+				failed.push(account.email);
+				continue;
+			}
+
+			// Perform SRP unlock for this account
+			const result = await performSRPUnlock(
+				{ email: account.email, password },
+				{ crypto: cryptoAdapter, trpcClient, storage },
+			);
+
+			// Store unlock session data
+			await storeUnlockSession(result, storage, account.email);
+
+			unlocked.push(account.email);
+		} catch (error) {
+			console.error(`[QUICK_UNLOCK_ALL] Failed to unlock ${account.email}:`, error);
+			failed.push(account.email);
+		}
+	}
+
+	// If no accounts unlocked, fail
+	if (unlocked.length === 0) {
+		throw new Error("Failed to unlock any accounts");
+	}
+
+	// Set active account mode
+	if (accounts.length > 1) {
+		await storage.setActiveAccount({ type: "all" });
+	} else {
+		await storage.setActiveAccount({ type: "single", email: unlocked[0] });
+	}
+
+	// Set MUK for first unlocked account in session manager
+	const activeMuk = await storage.getMasterUnlockKey(unlocked[0]);
+	if (activeMuk) {
+		setMasterUnlockKey(activeMuk);
+	}
+
+	updateActivity();
+
+	return {
+		success: true,
+		result: { unlocked, failed },
+	};
+}

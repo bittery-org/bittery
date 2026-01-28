@@ -102,6 +102,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		if (email) return email.toLowerCase();
 
 		const account = await this.getActiveAccount();
+
 		if (!account || account.type === "all") return null;
 		return account.email;
 	}
@@ -444,6 +445,8 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 
 	private async getAccountsListInternal(): Promise<AccountsList> {
 		const result = await chrome.storage.local.get(ACCOUNTS_LIST_KEY);
+		console.log(result);
+		
 		const stored = result[ACCOUNTS_LIST_KEY];
 		if (!stored) {
 			return { accounts: [] };

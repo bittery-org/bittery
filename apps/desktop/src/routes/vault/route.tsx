@@ -9,7 +9,6 @@ import {
 } from "@bittery/hooks";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { toast } from "@bittery/ui";
-import { useQueryClient } from "@tanstack/react-query";
 import {
 	createFileRoute,
 	Outlet,
@@ -27,7 +26,6 @@ import { EditVaultDialog } from "../../components/vault/edit-vault-dialog";
 import { ImportDialog } from "../../components/vault/import-dialog";
 import { VaultHeader } from "../../components/vault/vault-header";
 import { VaultSidebar } from "../../components/vault/vault-sidebar";
-import { trpc } from "../../lib/providers";
 import { VaultDndProvider } from "../../providers/dnd-provider";
 
 export const Route = createFileRoute("/vault")({
@@ -78,7 +76,6 @@ function RouteComponent() {
 
 	const params = useParams({ strict: false });
 	const navigate = useNavigate();
-	const queryClient = useQueryClient();
 
 	// Shared hooks for vault and item operations
 	const createVaultMutation = useCreateVault();
@@ -236,11 +233,6 @@ function RouteComponent() {
 				data,
 				accountEmail,
 			});
-
-			// Prefetch the item to avoid race condition
-			await queryClient.prefetchQuery(
-				trpc.vault.getItem.queryOptions({ itemId: result.itemId }),
-			);
 
 			// Close dialog
 			setIsNewItemDialogOpen(false);
