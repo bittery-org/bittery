@@ -159,7 +159,9 @@ export async function storeLoginSession(
 			addedAt: Date.now(),
 			lastActiveAt: Date.now(),
 			secretKeyHint: `${secretKey.slice(0, 4)}••••`,
-			biometricEnabled: storage.isBiometricEnabled ? await storage.isBiometricEnabled(resolvedEmail) : false,
+			biometricEnabled: storage.isBiometricEnabled
+				? await storage.isBiometricEnabled(resolvedEmail)
+				: false,
 		});
 
 		// Set as active account

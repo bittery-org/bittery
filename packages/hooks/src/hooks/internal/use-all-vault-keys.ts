@@ -50,8 +50,11 @@ export function useAllVaultKeys(options: UseAllVaultKeysOptions = {}) {
 	const storage = usePlatformStorage();
 
 	// Get all account info using utility hook
-	const { accountsInfo, isLoading: isLoadingAccounts, isAllAccountsMode } =
-		useAccountsInfo({ enabled: options.enabled });
+	const {
+		accountsInfo,
+		isLoading: isLoadingAccounts,
+		isAllAccountsMode,
+	} = useAccountsInfo({ enabled: options.enabled });
 
 	// Fetch vault keys from all accounts IN PARALLEL
 	const {

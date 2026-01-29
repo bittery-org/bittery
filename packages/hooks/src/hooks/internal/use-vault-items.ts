@@ -7,7 +7,10 @@
 
 import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
-import { usePlatformCrypto, usePlatformStorage } from "../../context/platform-context";
+import {
+	usePlatformCrypto,
+	usePlatformStorage,
+} from "../../context/platform-context";
 import type { RawEncryptedItem } from "../../types";
 import { useAccountsInfo } from "./use-accounts-info";
 
@@ -40,8 +43,11 @@ export function useVaultItems(
 	const crypto = usePlatformCrypto();
 
 	// Get account info (handles both single and multi-account mode)
-	const { accountsInfo, isLoading: isLoadingAccounts, isAllAccountsMode } =
-		useAccountsInfo({ enabled: options.enabled });
+	const {
+		accountsInfo,
+		isLoading: isLoadingAccounts,
+		isAllAccountsMode,
+	} = useAccountsInfo({ enabled: options.enabled });
 
 	// Fetch and decrypt items from the vault
 	const {
@@ -69,7 +75,8 @@ export function useVaultItems(
 			}
 
 			// Fetch raw items using the owner account's tRPC client
-			const rawItems: RawEncryptedItem[] = await ownerAccount.trpcClient.vault.listItems.query({ vaultId });
+			const rawItems: RawEncryptedItem[] =
+				await ownerAccount.trpcClient.vault.listItems.query({ vaultId });
 
 			if (rawItems.length === 0) return [];
 
@@ -108,7 +115,10 @@ export function useVaultItems(
 							...parsedData,
 						} as DecryptedItem;
 					} catch (error) {
-						console.error(`[useVaultItems] Failed to decrypt item ${item.id}:`, error);
+						console.error(
+							`[useVaultItems] Failed to decrypt item ${item.id}:`,
+							error,
+						);
 						// Return a placeholder for failed items
 						return {
 							id: item.id,

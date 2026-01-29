@@ -128,7 +128,10 @@ async function ensureActiveAccountSet(): Promise<void> {
 
 		if (accounts.length === 1) {
 			// Single account - set it as active
-			await storage.setActiveAccount({ type: "single", email: accounts[0].email });
+			await storage.setActiveAccount({
+				type: "single",
+				email: accounts[0].email,
+			});
 			console.log(`[Auth] Set ${accounts[0].email} as active account`);
 		} else {
 			// Multiple accounts - check if any are unlocked
@@ -140,12 +143,20 @@ async function ensureActiveAccountSet(): Promise<void> {
 				console.log("[Auth] Set active account to 'all' mode");
 			} else if (unlockedEmails.length === 1) {
 				// One unlocked - use that one
-				await storage.setActiveAccount({ type: "single", email: unlockedEmails[0] });
+				await storage.setActiveAccount({
+					type: "single",
+					email: unlockedEmails[0],
+				});
 				console.log(`[Auth] Set ${unlockedEmails[0]} as active account`);
 			} else {
 				// None unlocked - default to first account
-				await storage.setActiveAccount({ type: "single", email: accounts[0].email });
-				console.log(`[Auth] Set ${accounts[0].email} as active account (none unlocked)`);
+				await storage.setActiveAccount({
+					type: "single",
+					email: accounts[0].email,
+				});
+				console.log(
+					`[Auth] Set ${accounts[0].email} as active account (none unlocked)`,
+				);
 			}
 		}
 	} catch (error) {
@@ -173,7 +184,10 @@ async function tryRestoreAllSessions(): Promise<void> {
 					console.log(`[Auth] Restored session for ${account.email}`);
 				}
 			} catch (error) {
-				console.error(`[Auth] Failed to restore session for ${account.email}:`, error);
+				console.error(
+					`[Auth] Failed to restore session for ${account.email}:`,
+					error,
+				);
 			}
 		}
 
@@ -186,7 +200,9 @@ async function tryRestoreAllSessions(): Promise<void> {
 			const muk = await storage.getMasterUnlockKey(restoredEmails[0]);
 			if (muk) {
 				setMasterUnlockKey(muk);
-				console.log(`[Auth] Restored ${restoredEmails.length} account(s), set session manager MUK`);
+				console.log(
+					`[Auth] Restored ${restoredEmails.length} account(s), set session manager MUK`,
+				);
 			}
 		}
 	} catch (error) {
@@ -288,7 +304,10 @@ export async function handleQuickUnlockAll(payload: {
 
 			unlocked.push(account.email);
 		} catch (error) {
-			console.error(`[QUICK_UNLOCK_ALL] Failed to unlock ${account.email}:`, error);
+			console.error(
+				`[QUICK_UNLOCK_ALL] Failed to unlock ${account.email}:`,
+				error,
+			);
 			failed.push(account.email);
 		}
 	}

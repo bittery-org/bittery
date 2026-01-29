@@ -46,7 +46,10 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 			} else if (accountsList.length > 0) {
 				// No active account set, use first one
 				const firstAccount = accountsList[0];
-				await storage.setActiveAccount({ type: "single", email: firstAccount.email });
+				await storage.setActiveAccount({
+					type: "single",
+					email: firstAccount.email,
+				});
 				setActiveAccount(firstAccount);
 			} else {
 				setActiveAccount(null);

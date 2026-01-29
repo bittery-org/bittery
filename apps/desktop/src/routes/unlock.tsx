@@ -55,7 +55,10 @@ export function UnlockPage() {
 			if (allAccounts.length > 1) {
 				await storage.setActiveAccount({ type: "all" });
 			} else if (allAccounts.length === 1) {
-				await storage.setActiveAccount({ type: "single", email: allAccounts[0].email });
+				await storage.setActiveAccount({
+					type: "single",
+					email: allAccounts[0].email,
+				});
 			}
 
 			setVaultState("unlocked");
@@ -247,7 +250,7 @@ export function UnlockPage() {
 
 	return (
 		<div className="flex h-full items-center justify-center bg-gray-50 p-4">
-			<Card className="w-full max-w-md p-8 gap-0">
+			<Card className="w-full max-w-md gap-0 p-8">
 				<div className="mb-8 text-center">
 					<VaultIcon state={vaultState} className="mx-auto" size={140} />
 					<h1 className="mt-6 font-bold text-2xl">Unlock Bittery</h1>

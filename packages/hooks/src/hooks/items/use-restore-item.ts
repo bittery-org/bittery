@@ -9,20 +9,23 @@
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { useMutation } from "@tanstack/react-query";
 import {
-  usePlatformStorage,
-  useQueryInvalidator,
+	usePlatformStorage,
+	useQueryInvalidator,
 } from "../../context/platform-context";
-import { findAccountEmailForItem, getTRPCClientForAccount } from "../../utils/account-helper";
+import {
+	findAccountEmailForItem,
+	getTRPCClientForAccount,
+} from "../../utils/account-helper";
 import { useAllDeletedItems } from "../use-all-deleted-items";
 
 /**
  * Input for restoring an item from trash
  */
 export interface RestoreItemInput {
-  /** ID of the item to restore */
-  itemId: string;
-  /** ID of the vault containing the item */
-  vaultId: string;
+	/** ID of the item to restore */
+	itemId: string;
+	/** ID of the vault containing the item */
+	vaultId: string;
 }
 
 /**
@@ -51,24 +54,24 @@ export interface RestoreItemInput {
  * ```
  */
 export function useRestoreItem() {
-  const { items: deletedItems } = useAllDeletedItems();
-  const defaultClient = useTRPCClient();
-  const storage = usePlatformStorage();
-  const invalidator = useQueryInvalidator();
+	const { items: deletedItems } = useAllDeletedItems();
+	const defaultClient = useTRPCClient();
+	const storage = usePlatformStorage();
+	const invalidator = useQueryInvalidator();
 
-  return useMutation({
-    mutationFn: async (input: RestoreItemInput): Promise<void> => {
-      const client = await getTRPCClientForAccount(
-        storage,
-        defaultClient,
-        findAccountEmailForItem(input.itemId, deletedItems),
-      );
+	return useMutation({
+		mutationFn: async (input: RestoreItemInput): Promise<void> => {
+			const client = await getTRPCClientForAccount(
+				storage,
+				defaultClient,
+				findAccountEmailForItem(input.itemId, deletedItems),
+			);
 
-      await client.vault.restoreItem.mutate({ itemId: input.itemId });
-    },
-    onSuccess: async (_data, variables) => {
-      await invalidator.invalidateVaultList(variables.vaultId);
-      await invalidator.invalidateDeletedItems(variables.vaultId);
-    },
-  });
+			await client.vault.restoreItem.mutate({ itemId: input.itemId });
+		},
+		onSuccess: async (_data, variables) => {
+			await invalidator.invalidateVaultList(variables.vaultId);
+			await invalidator.invalidateDeletedItems(variables.vaultId);
+		},
+	});
 }

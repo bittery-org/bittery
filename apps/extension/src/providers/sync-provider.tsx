@@ -3,11 +3,11 @@ import type { ConnectionStatus, SyncEvent } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import {
 	createContext,
+	type ReactNode,
 	useCallback,
 	useContext,
 	useEffect,
 	useState,
-	type ReactNode,
 } from "react";
 import { createExtensionInvalidator } from "../lib/query-invalidation";
 

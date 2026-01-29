@@ -152,10 +152,8 @@ export function createMobileAutolockService(
 			// Using globalThis check and dynamic require to avoid bundler issues
 			try {
 				// Check if we're in a React Native environment
-				// biome-ignore lint/suspicious/noExplicitAny: Dynamic require for RN compatibility
 				const requireFn = (globalThis as any).require;
 				if (typeof requireFn === "function") {
-					// biome-ignore lint/suspicious/noExplicitAny: Dynamic require for RN compatibility
 					const reactNative = requireFn("react-native") as any;
 					const AppState = reactNative?.AppState as AppStateModule | undefined;
 					if (AppState) {

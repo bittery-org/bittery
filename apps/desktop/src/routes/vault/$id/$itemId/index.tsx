@@ -20,7 +20,6 @@ function VaultItemComponent() {
 	const { vaultInfo: currentVault } = useVaultInfo(selectedVaultId);
 
 	console.log(currentVault);
-	
 
 	// Handle tag click - navigate to per-vault tag view
 	const handleTagClick = useCallback(

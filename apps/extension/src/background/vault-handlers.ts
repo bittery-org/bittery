@@ -3,11 +3,11 @@
  * Handles vault and vault item operations
  */
 
+import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import { storage } from "../lib/storage";
 import { decrypt } from "../lib/wasm-crypto";
 import { updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import type { MessageResponse } from "./types";
 
 /**
@@ -19,7 +19,10 @@ async function decryptVaultItemsForAccount(
 ) {
 	console.log(`[vault-handlers] decryptVaultItemsForAccount - email: ${email}`);
 	const vaultKeys = await storage.getVaultKeys(email);
-	console.log(`[vault-handlers] Vault keys for ${email}:`, vaultKeys?.length || 0);
+	console.log(
+		`[vault-handlers] Vault keys for ${email}:`,
+		vaultKeys?.length || 0,
+	);
 
 	if (!vaultKeys || vaultKeys.length === 0) {
 		console.warn(`[vault-handlers] No vault keys for ${email}`);
@@ -38,7 +41,9 @@ async function decryptVaultItemsForAccount(
 	const accountClient = createAccountTrpcClient(authToken, serverUrl);
 
 	// Fetch vaults for this account
-	console.log(`[vault-handlers] Fetching vaults for ${email} from ${serverUrl}...`);
+	console.log(
+		`[vault-handlers] Fetching vaults for ${email} from ${serverUrl}...`,
+	);
 	const vaults = await accountClient.vault.list.query();
 	console.log(`[vault-handlers] Got ${vaults.length} vaults for ${email}`);
 
@@ -114,12 +119,18 @@ async function decryptVaultItemsForAccount(
  */
 async function decryptVaultItems() {
 	const activeAccount = await storage.getActiveAccount();
-	console.log("[vault-handlers] decryptVaultItems - active account:", activeAccount);
+	console.log(
+		"[vault-handlers] decryptVaultItems - active account:",
+		activeAccount,
+	);
 
 	// If active account is "all", fetch from all unlocked accounts
 	if (activeAccount?.type === "all") {
 		const unlockedEmails = await storage.getUnlockedAccounts?.();
-		console.log("[vault-handlers] Unlocked emails for 'all' mode:", unlockedEmails);
+		console.log(
+			"[vault-handlers] Unlocked emails for 'all' mode:",
+			unlockedEmails,
+		);
 
 		if (!unlockedEmails || unlockedEmails.length === 0) {
 			console.log("[vault-handlers] No unlocked accounts found");
@@ -139,7 +150,9 @@ async function decryptVaultItems() {
 					}
 
 					const items = await decryptVaultItemsForAccount(email, accountMeta);
-					console.log(`[vault-handlers] Got ${items.length} items for ${email}`);
+					console.log(
+						`[vault-handlers] Got ${items.length} items for ${email}`,
+					);
 					return items;
 				} catch (error) {
 					console.error(
@@ -153,7 +166,9 @@ async function decryptVaultItems() {
 
 		// Flatten and return
 		const flattened = allAccountItems.flat();
-		console.log(`[vault-handlers] Total items from all accounts: ${flattened.length}`);
+		console.log(
+			`[vault-handlers] Total items from all accounts: ${flattened.length}`,
+		);
 		return flattened;
 	}
 

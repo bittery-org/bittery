@@ -457,8 +457,8 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		const normalizedValue = !account
 			? null
 			: account.type === "all"
-			? "all"
-			: account.email.toLowerCase();
+				? "all"
+				: account.email.toLowerCase();
 
 		if (normalizedValue) {
 			await this.setItem(ACTIVE_ACCOUNT_KEY, normalizedValue);

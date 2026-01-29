@@ -1,4 +1,4 @@
-import { useVaultItems, useUpdateItem } from "@bittery/hooks";
+import { useUpdateItem, useVaultItems } from "@bittery/hooks";
 import {
 	type CardBrand,
 	detectCardBrand,
@@ -540,7 +540,6 @@ export default function EditItemScreen() {
 				</View>
 				{additionalUrls.map((additionalUrl, index) => (
 					<View
-						// biome-ignore lint/suspicious/noArrayIndexKey: URLs don't have unique IDs
 						key={`url-${index}`}
 						className="mb-2 flex-row items-center gap-2"
 					>

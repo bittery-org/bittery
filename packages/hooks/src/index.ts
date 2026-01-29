@@ -37,6 +37,7 @@
  * ```
  */
 
+export type { ActiveAccount } from "@bittery/storage/types";
 // Auth Utilities (for extension service worker - non-React usage)
 export {
 	type CheckEmailResult,
@@ -99,7 +100,6 @@ export {
 	useQuickUnlockAll,
 	useSessionState,
 } from "./hooks/auth";
-export { useDecryptedItem } from "./hooks/internal/use-decrypted-item";
 // Data Hooks (read operations)
 export {
 	type AccountInfo,
@@ -107,26 +107,27 @@ export {
 	useAccountsInfo,
 } from "./hooks/internal/use-accounts-info";
 export {
-	useItemsUnified,
-	type UseItemsUnifiedOptions,
-} from "./hooks/internal/use-items-unified";
+	type UseAllVaultKeysOptions,
+	useAllVaultKeys,
+	type VaultKeyWithAccount,
+} from "./hooks/internal/use-all-vault-keys";
+export { useDecryptedItem } from "./hooks/internal/use-decrypted-item";
 export {
-	useDeletedItemsUnified,
 	type UseDeletedItemsUnifiedOptions,
+	useDeletedItemsUnified,
 } from "./hooks/internal/use-deleted-items-unified";
 export {
-	type UseVaultItemsOptions,
-	useVaultItems,
-} from "./hooks/internal/use-vault-items";
+	type UseItemsUnifiedOptions,
+	useItemsUnified,
+} from "./hooks/internal/use-items-unified";
 export {
 	type UseVaultInfoOptions,
 	useVaultInfo,
 } from "./hooks/internal/use-vault-info";
 export {
-	type UseAllVaultKeysOptions,
-	type VaultKeyWithAccount,
-	useAllVaultKeys,
-} from "./hooks/internal/use-all-vault-keys";
+	type UseVaultItemsOptions,
+	useVaultItems,
+} from "./hooks/internal/use-vault-items";
 // Item Mutation Hooks (write operations)
 export {
 	type CreateItemInput,
@@ -208,7 +209,6 @@ export type {
 	SRPClientSession,
 	SRPServerChallenge,
 } from "./types";
-export type { ActiveAccount } from "@bittery/storage/types";
 export {
 	findAccountEmailForItem,
 	getItemAccountEmail,

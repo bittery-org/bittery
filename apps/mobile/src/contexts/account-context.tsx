@@ -56,7 +56,10 @@ export function AccountProvider({ children }: AccountProviderProps) {
 			} else if (accountsList.length > 0) {
 				// Set the first account as active if none is set
 				const firstAccount = accountsList[0];
-				await storage.setActiveAccount({ type: "single", email: firstAccount.email });
+				await storage.setActiveAccount({
+					type: "single",
+					email: firstAccount.email,
+				});
 				setActiveAccount(firstAccount);
 			} else {
 				setActiveAccount(null);
@@ -86,7 +89,10 @@ export function AccountProvider({ children }: AccountProviderProps) {
 					(a) => a.email.toLowerCase() !== email.toLowerCase(),
 				);
 				if (remainingAccounts.length > 0) {
-					await storage.setActiveAccount({ type: "single", email: remainingAccounts[0].email });
+					await storage.setActiveAccount({
+						type: "single",
+						email: remainingAccounts[0].email,
+					});
 				}
 			}
 

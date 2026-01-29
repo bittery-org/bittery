@@ -11,8 +11,8 @@ import {
 	usePlatformStorage,
 	useQueryInvalidator,
 } from "../../context/platform-context";
-import { refreshVaultKeys } from "../../utils/vault-utils";
 import { getTRPCClientForAccount } from "../../utils/account-helper";
+import { refreshVaultKeys } from "../../utils/vault-utils";
 
 /**
  * Input for deleting a vault

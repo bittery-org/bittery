@@ -9,8 +9,8 @@ import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";
 import {
-  usePlatform,
-  useQueryInvalidator,
+	usePlatform,
+	useQueryInvalidator,
 } from "../../context/platform-context";
 import { getTRPCClientForAccount } from "../../utils/account-helper";
 
@@ -18,20 +18,20 @@ import { getTRPCClientForAccount } from "../../utils/account-helper";
  * Input for creating a new item
  */
 export interface CreateItemInput {
-  /** ID of the vault to create the item in */
-  vaultId: string;
-  /** Category of the item */
-  category: ItemCategory;
-  /** Decrypted item data to encrypt and store */
-  data: DecryptedItemData;
-  accountEmail?: string;
+	/** ID of the vault to create the item in */
+	vaultId: string;
+	/** Category of the item */
+	category: ItemCategory;
+	/** Decrypted item data to encrypt and store */
+	data: DecryptedItemData;
+	accountEmail?: string;
 }
 
 /**
  * Result from item creation
  */
 export interface CreateItemResult {
-  itemId: string;
+	itemId: string;
 }
 
 /**
@@ -66,47 +66,47 @@ export interface CreateItemResult {
  * ```
  */
 export function useCreateItem() {
-  const defaultClient = useTRPCClient();
-  const { storage, crypto } = usePlatform();
-  const invalidator = useQueryInvalidator();
+	const defaultClient = useTRPCClient();
+	const { storage, crypto } = usePlatform();
+	const invalidator = useQueryInvalidator();
 
-  return useMutation({
-    mutationFn: async (input: CreateItemInput): Promise<CreateItemResult> => {
-      // Get the vault key for encryption
-      const vaultKey = await storage.getDecryptedVaultKey(
-        input.vaultId,
-        input.accountEmail,
-      );
+	return useMutation({
+		mutationFn: async (input: CreateItemInput): Promise<CreateItemResult> => {
+			// Get the vault key for encryption
+			const vaultKey = await storage.getDecryptedVaultKey(
+				input.vaultId,
+				input.accountEmail,
+			);
 
-      if (!vaultKey) {
-        throw new Error("No vault key found. Please sign in again.");
-      }
+			if (!vaultKey) {
+				throw new Error("No vault key found. Please sign in again.");
+			}
 
-      const client = await getTRPCClientForAccount(
-        storage,
-        defaultClient,
-        input.accountEmail,
-      );
+			const client = await getTRPCClientForAccount(
+				storage,
+				defaultClient,
+				input.accountEmail,
+			);
 
-      // Encrypt the item data
-      const encryptedData = await crypto.encrypt(
-        JSON.stringify(input.data),
-        vaultKey,
-      );
+			// Encrypt the item data
+			const encryptedData = await crypto.encrypt(
+				JSON.stringify(input.data),
+				vaultKey,
+			);
 
-      // Create the item
-      const result = await client.vault.createItem.mutate({
-        vaultId: input.vaultId,
-        category: input.category,
-        encryptedData: encryptedData.ciphertext,
-        encryptionIv: encryptedData.iv,
-        encryptionAlgorithm: encryptedData.algorithm,
-      });
+			// Create the item
+			const result = await client.vault.createItem.mutate({
+				vaultId: input.vaultId,
+				category: input.category,
+				encryptedData: encryptedData.ciphertext,
+				encryptionIv: encryptedData.iv,
+				encryptionAlgorithm: encryptedData.algorithm,
+			});
 
-      return { itemId: result.id };
-    },
-    onSuccess: async (_data, variables) => {
-      await invalidator.invalidateVaultList(variables.vaultId);
-    },
-  });
+			return { itemId: result.id };
+		},
+		onSuccess: async (_data, variables) => {
+			await invalidator.invalidateVaultList(variables.vaultId);
+		},
+	});
 }

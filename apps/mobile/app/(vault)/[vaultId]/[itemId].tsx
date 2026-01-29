@@ -296,7 +296,6 @@ export default function ItemDetailScreen() {
 			{renderFieldRow("Passport Number", item.passportNumber)}
 			{renderFieldRow("Driver's License", item.driversLicense)}
 			{item.addresses?.map((address, index) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: addresses don't have unique IDs
 				<View key={`address-${index}`} className="border-border border-b py-4">
 					<Text className="mb-1 text-muted-foreground text-sm">
 						{address.city} {address.country}
@@ -315,7 +314,6 @@ export default function ItemDetailScreen() {
 				</View>
 			))}
 			{item.phoneNumbers?.map((phone, index) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: phone numbers don't have unique IDs
 				<View key={`phone-${index}`} className="border-border border-b py-4">
 					<Text className="mb-1 text-muted-foreground text-sm">
 						{phone.label || `Phone ${index + 1}`}

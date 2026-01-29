@@ -295,10 +295,7 @@ export function VaultPage() {
 																			variant="secondary"
 																			className="px-1.5 py-0 text-[10px]"
 																		>
-																			{
-																				(item as MultiAccountItem).account
-																					?.name
-																			}
+																			{(item as MultiAccountItem).account?.name}
 																		</Badge>
 																	</div>
 																)}

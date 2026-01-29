@@ -9,12 +9,12 @@
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { useMutation } from "@tanstack/react-query";
 import {
-  usePlatformStorage,
-  useQueryInvalidator,
+	usePlatformStorage,
+	useQueryInvalidator,
 } from "../../context/platform-context";
 import {
-  findAccountEmailForItem,
-  getTRPCClientForAccount,
+	findAccountEmailForItem,
+	getTRPCClientForAccount,
 } from "../../utils/account-helper";
 import { useItems } from "../use-items";
 
@@ -22,10 +22,10 @@ import { useItems } from "../use-items";
  * Input for deleting an item
  */
 export interface DeleteItemInput {
-  /** ID of the item to delete */
-  itemId: string;
-  /** ID of the vault containing the item */
-  vaultId: string;
+	/** ID of the item to delete */
+	itemId: string;
+	/** ID of the vault containing the item */
+	vaultId: string;
 }
 
 /**
@@ -59,25 +59,25 @@ export interface DeleteItemInput {
  * ```
  */
 export function useDeleteItem() {
-  const { items } = useItems();
-  const defaultClient = useTRPCClient();
-  const storage = usePlatformStorage();
-  const invalidator = useQueryInvalidator();
+	const { items } = useItems();
+	const defaultClient = useTRPCClient();
+	const storage = usePlatformStorage();
+	const invalidator = useQueryInvalidator();
 
-  return useMutation({
-    mutationFn: async (input: DeleteItemInput): Promise<void> => {
-      // Find which account this item belongs to (if in "All Accounts" mode)
-      const client = await getTRPCClientForAccount(
-        storage,
-        defaultClient,
-        findAccountEmailForItem(input.itemId, items),
-      );
+	return useMutation({
+		mutationFn: async (input: DeleteItemInput): Promise<void> => {
+			// Find which account this item belongs to (if in "All Accounts" mode)
+			const client = await getTRPCClientForAccount(
+				storage,
+				defaultClient,
+				findAccountEmailForItem(input.itemId, items),
+			);
 
-      await client.vault.deleteItem.mutate({ itemId: input.itemId });
-    },
-    onSuccess: async (_data, variables) => {
-      await invalidator.invalidateVaultList(variables.vaultId);
-      await invalidator.invalidateDeletedItems(variables.vaultId);
-    },
-  });
+			await client.vault.deleteItem.mutate({ itemId: input.itemId });
+		},
+		onSuccess: async (_data, variables) => {
+			await invalidator.invalidateVaultList(variables.vaultId);
+			await invalidator.invalidateDeletedItems(variables.vaultId);
+		},
+	});
 }

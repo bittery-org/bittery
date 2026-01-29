@@ -12,7 +12,10 @@ export function createExtensionInvalidator(
 		/**
 		 * Invalidate a specific vault item and the items list
 		 */
-		invalidateItem: async (_itemId: string, _vaultId: string): Promise<void> => {
+		invalidateItem: async (
+			_itemId: string,
+			_vaultId: string,
+		): Promise<void> => {
 			await Promise.all([
 				queryClient.invalidateQueries({ queryKey: ["vault-item"] }),
 				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),

@@ -542,8 +542,8 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		const normalizedValue = !account
 			? null
 			: account.type === "all"
-			? "all"
-			: account.email.toLowerCase();
+				? "all"
+				: account.email.toLowerCase();
 
 		if (normalizedValue) {
 			await store.set(ACTIVE_ACCOUNT_KEY, normalizedValue);
@@ -611,7 +611,10 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 		// Clear the active account cache if removing the active account
 		const currentAccount = await this.getActiveAccount();
-		if (currentAccount?.type === "single" && currentAccount.email === resolvedEmail) {
+		if (
+			currentAccount?.type === "single" &&
+			currentAccount.email === resolvedEmail
+		) {
 			cachedActiveAccount = null;
 		}
 

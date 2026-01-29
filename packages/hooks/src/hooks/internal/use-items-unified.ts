@@ -72,8 +72,11 @@ export function useItemsUnified(options: UseItemsUnifiedOptions = {}) {
 	const crypto = usePlatformCrypto();
 
 	// Get all account info using utility hook
-	const { accountsInfo, isLoading: isLoadingAccounts, isAllAccountsMode } =
-		useAccountsInfo({ enabled: options.enabled });
+	const {
+		accountsInfo,
+		isLoading: isLoadingAccounts,
+		isAllAccountsMode,
+	} = useAccountsInfo({ enabled: options.enabled });
 
 	// Fetch and decrypt items from all accounts IN PARALLEL
 	const {
@@ -91,7 +94,8 @@ export function useItemsUnified(options: UseItemsUnifiedOptions = {}) {
 				accountsInfo.map(async (account) => {
 					try {
 						// Fetch raw items using the account's tRPC client
-						const rawItems = await account.trpcClient.vault.listAllItems.query();
+						const rawItems =
+							await account.trpcClient.vault.listAllItems.query();
 
 						// Decrypt items with vault keys cached per account
 						const vaultKeyCache = new Map<string, Uint8Array>();
@@ -151,7 +155,7 @@ export function useItemsUnified(options: UseItemsUnifiedOptions = {}) {
 														userId: account.userId,
 														name: account.name,
 													},
-											  }
+												}
 											: {}),
 									} as MultiAccountItem;
 								} catch (error) {

@@ -245,14 +245,18 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		// Both are required for a fully functional session
 		const authToken = await this.getAuthToken(resolvedEmail);
 		if (!authToken) {
-			console.error(`[storage-chrome] Cannot restore session for ${resolvedEmail}: auth token not found in storage`);
+			console.error(
+				`[storage-chrome] Cannot restore session for ${resolvedEmail}: auth token not found in storage`,
+			);
 			return false;
 		}
 		cache.authToken = authToken;
 
 		const vaultKeys = await this.getVaultKeys(resolvedEmail);
 		if (!vaultKeys || vaultKeys.length === 0) {
-			console.error(`[storage-chrome] Cannot restore session for ${resolvedEmail}: vault keys not found in storage`);
+			console.error(
+				`[storage-chrome] Cannot restore session for ${resolvedEmail}: vault keys not found in storage`,
+			);
 			return false;
 		}
 		cache.vaultKeys = vaultKeys;
@@ -452,8 +456,8 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		const normalizedValue = !account
 			? null
 			: account.type === "all"
-			? "all"
-			: account.email.toLowerCase();
+				? "all"
+				: account.email.toLowerCase();
 
 		if (normalizedValue) {
 			await chrome.storage.local.set({ [ACTIVE_ACCOUNT_KEY]: normalizedValue });
@@ -487,7 +491,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	private async getAccountsListInternal(): Promise<AccountsList> {
 		const result = await chrome.storage.local.get(ACCOUNTS_LIST_KEY);
 		console.log(result);
-		
+
 		const stored = result[ACCOUNTS_LIST_KEY];
 		if (!stored) {
 			return { accounts: [] };
@@ -647,7 +651,8 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 
 		// Check if any account has secret key + valid session OR biometric enabled
 		for (const account of accounts) {
-			const hasSecretKey = (await this.getStoredSecretKey(account.email)) !== null;
+			const hasSecretKey =
+				(await this.getStoredSecretKey(account.email)) !== null;
 			const sessionValid = await this.isSessionValid(account.email);
 			const hasBiometric = account.biometricEnabled ?? false;
 
@@ -729,7 +734,10 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	}
 
 	async getUnlockedAccounts(): Promise<string[]> {
-		console.log("[storage-chrome] getUnlockedAccounts - accountCaches size:", accountCaches.size);
+		console.log(
+			"[storage-chrome] getUnlockedAccounts - accountCaches size:",
+			accountCaches.size,
+		);
 
 		// If cache is empty (e.g., after service worker restart), try to restore from storage
 		const accounts = await this.getAccountsList();
@@ -895,10 +903,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	 * Update the biometric enabled status for an account.
 	 * This syncs the local status with the desktop app's biometric setting.
 	 */
-	async updateBiometricEnabled(
-		email: string,
-		enabled: boolean,
-	): Promise<void> {
+	async updateBiometricEnabled(email: string, enabled: boolean): Promise<void> {
 		const accountsList = await this.getAccountsListInternal();
 		const account = accountsList.accounts.find(
 			(a) => a.email.toLowerCase() === email.toLowerCase(),

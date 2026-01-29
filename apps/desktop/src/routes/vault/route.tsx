@@ -18,8 +18,8 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { storage } from "@/lib/storage";
-import type { AccountOption } from "../../components/vault/create-vault-dialog";
 import { CreateItemDialog } from "../../components/vault/create-item-dialog";
+import type { AccountOption } from "../../components/vault/create-vault-dialog";
 import { CreateVaultDialog } from "../../components/vault/create-vault-dialog";
 import { DeleteVaultDialog } from "../../components/vault/delete-vault-dialog";
 import { EditVaultDialog } from "../../components/vault/edit-vault-dialog";
@@ -97,8 +97,12 @@ function RouteComponent() {
 	} | null>(null);
 	const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
 	const [importingVaultId, setImportingVaultId] = useState<string | null>(null);
-	const [importingVaultAccountEmail, setImportingVaultAccountEmail] = useState<string | undefined>(undefined);
-	const [availableAccounts, setAvailableAccounts] = useState<AccountOption[]>([]);
+	const [importingVaultAccountEmail, setImportingVaultAccountEmail] = useState<
+		string | undefined
+	>(undefined);
+	const [availableAccounts, setAvailableAccounts] = useState<AccountOption[]>(
+		[],
+	);
 
 	// Load available accounts for multi-account mode
 	useEffect(() => {
@@ -170,7 +174,8 @@ function RouteComponent() {
 		try {
 			// Find the vault to get its account email
 			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
-			const accountEmail = vault && "accountEmail" in vault ? vault.accountEmail : undefined;
+			const accountEmail =
+				vault && "accountEmail" in vault ? vault.accountEmail : undefined;
 
 			await updateVaultMutation.mutateAsync({
 				vaultId,
@@ -195,7 +200,8 @@ function RouteComponent() {
 		try {
 			// Find the vault to get its account email
 			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
-			const accountEmail = vault && "accountEmail" in vault ? vault.accountEmail : undefined;
+			const accountEmail =
+				vault && "accountEmail" in vault ? vault.accountEmail : undefined;
 
 			await deleteVaultMutation.mutateAsync({
 				vaultId,
@@ -225,7 +231,8 @@ function RouteComponent() {
 		try {
 			// Find the vault to get its account email
 			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
-			const accountEmail = vault && "accountEmail" in vault ? vault.accountEmail : undefined;
+			const accountEmail =
+				vault && "accountEmail" in vault ? vault.accountEmail : undefined;
 
 			const result = await createItemMutation.mutateAsync({
 				vaultId,
@@ -255,7 +262,8 @@ function RouteComponent() {
 	const handleOpenImportDialog = (vaultId: string) => {
 		// Find the vault to get its account email
 		const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
-		const accountEmail = vault && "accountEmail" in vault ? vault.accountEmail : undefined;
+		const accountEmail =
+			vault && "accountEmail" in vault ? vault.accountEmail : undefined;
 
 		setImportingVaultId(vaultId);
 		setImportingVaultAccountEmail(accountEmail);
@@ -299,7 +307,8 @@ function RouteComponent() {
 							type: v.vaultType as "personal" | "team",
 							accountEmail: "accountEmail" in v ? v.accountEmail : undefined,
 							accountName: "accountName" in v ? v.accountName : undefined,
-							accountTeamName: "accountTeamName" in v ? v.accountTeamName : undefined,
+							accountTeamName:
+								"accountTeamName" in v ? v.accountTeamName : undefined,
 						})) || []
 					}
 					selectedVaultId={params.id}

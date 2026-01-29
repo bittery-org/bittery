@@ -6,10 +6,10 @@
  * by finding the correct account for each item.
  */
 
+import { createAccountTrpcClient, type useTRPCClient } from "@bittery/shared";
 import type { IStorageAdapter } from "@bittery/storage";
 import type { UnifiedDeletedItem } from "../hooks/use-all-deleted-items";
 import type { UnifiedItem } from "../hooks/use-items";
-import { createAccountTrpcClient, type useTRPCClient } from "@bittery/shared";
 
 /**
  * Extracts the account email from an item if it has account metadata.
@@ -19,10 +19,10 @@ import { createAccountTrpcClient, type useTRPCClient } from "@bittery/shared";
  * @returns Account email or undefined
  */
 export function getItemAccountEmail(
-  item: UnifiedItem | UnifiedDeletedItem | undefined,
+	item: UnifiedItem | UnifiedDeletedItem | undefined,
 ): string | undefined {
-  if (!item) return undefined;
-  return "account" in item ? (item as any).account?.email : undefined;
+	if (!item) return undefined;
+	return "account" in item ? (item as any).account?.email : undefined;
 }
 
 /**
@@ -34,31 +34,31 @@ export function getItemAccountEmail(
  * @returns Account email or undefined if not found or in single-account mode
  */
 export function findAccountEmailForItem(
-  itemId: string,
-  items: (UnifiedItem | UnifiedDeletedItem)[],
+	itemId: string,
+	items: (UnifiedItem | UnifiedDeletedItem)[],
 ): string | undefined {
-  const item = items.find((i) => i.id === itemId);
-  return getItemAccountEmail(item);
+	const item = items.find((i) => i.id === itemId);
+	return getItemAccountEmail(item);
 }
 
 export async function getTRPCClientForAccount(
-  storage: IStorageAdapter,
-  defaultClient: ReturnType<typeof useTRPCClient>,
-  accountEmail?: string,
+	storage: IStorageAdapter,
+	defaultClient: ReturnType<typeof useTRPCClient>,
+	accountEmail?: string,
 ) {
-  let client = defaultClient;
+	let client = defaultClient;
 
-  if (accountEmail) {
-    const authToken = await storage.getAuthToken(accountEmail);
-    const serverUrl = await storage.getServerUrl(accountEmail);
+	if (accountEmail) {
+		const authToken = await storage.getAuthToken(accountEmail);
+		const serverUrl = await storage.getServerUrl(accountEmail);
 
-    if (authToken) {
-      client = createAccountTrpcClient(
-        authToken,
-        serverUrl || "http://localhost:3000",
-      );
-    }
-  }
+		if (authToken) {
+			client = createAccountTrpcClient(
+				authToken,
+				serverUrl || "http://localhost:3000",
+			);
+		}
+	}
 
-  return client;
+	return client;
 }

@@ -8,21 +8,21 @@
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { useMutation } from "@tanstack/react-query";
 import {
-  usePlatform,
-  useQueryInvalidator,
+	usePlatform,
+	useQueryInvalidator,
 } from "../../context/platform-context";
-import { refreshVaultKeys } from "../../utils/vault-utils";
 import { getTRPCClientForAccount } from "../../utils/account-helper";
+import { refreshVaultKeys } from "../../utils/vault-utils";
 
 /**
  * Input for updating a vault
  */
 export interface UpdateVaultInput {
-  /** ID of the vault to update */
-  vaultId: string;
-  /** New vault name (will be trimmed) */
-  name: string;
-  accountEmail?: string;
+	/** ID of the vault to update */
+	vaultId: string;
+	/** New vault name (will be trimmed) */
+	name: string;
+	accountEmail?: string;
 }
 
 /**
@@ -52,44 +52,44 @@ export interface UpdateVaultInput {
  * ```
  */
 export function useUpdateVault() {
-  const defaultClient = useTRPCClient();
-  const { storage } = usePlatform();
-  const invalidator = useQueryInvalidator();
+	const defaultClient = useTRPCClient();
+	const { storage } = usePlatform();
+	const invalidator = useQueryInvalidator();
 
-  return useMutation({
-    mutationFn: async (input: UpdateVaultInput): Promise<void> => {
-      const client = await getTRPCClientForAccount(
-        storage,
-        defaultClient,
-        input.accountEmail,
-      );
+	return useMutation({
+		mutationFn: async (input: UpdateVaultInput): Promise<void> => {
+			const client = await getTRPCClientForAccount(
+				storage,
+				defaultClient,
+				input.accountEmail,
+			);
 
-      const trimmedName = input.name.trim();
+			const trimmedName = input.name.trim();
 
-      if (!trimmedName) {
-        throw new Error("Vault name is required");
-      }
+			if (!trimmedName) {
+				throw new Error("Vault name is required");
+			}
 
-      if (trimmedName.length < 2) {
-        throw new Error("Vault name must be at least 2 characters");
-      }
+			if (trimmedName.length < 2) {
+				throw new Error("Vault name must be at least 2 characters");
+			}
 
-      await client.vault.update.mutate({
-        vaultId: input.vaultId,
-        name: trimmedName,
-      });
-    },
-    onSuccess: async (_data, variables) => {
-      const client = await getTRPCClientForAccount(
-        storage,
-        defaultClient,
-        variables.accountEmail,
-      );
+			await client.vault.update.mutate({
+				vaultId: input.vaultId,
+				name: trimmedName,
+			});
+		},
+		onSuccess: async (_data, variables) => {
+			const client = await getTRPCClientForAccount(
+				storage,
+				defaultClient,
+				variables.accountEmail,
+			);
 
-      // Refresh local vault keys cache (name may have changed)
-      await refreshVaultKeys(client, storage);
-      // Invalidate vault-related queries
-      await invalidator.invalidateVaultKeys();
-    },
-  });
+			// Refresh local vault keys cache (name may have changed)
+			await refreshVaultKeys(client, storage);
+			// Invalidate vault-related queries
+			await invalidator.invalidateVaultKeys();
+		},
+	});
 }

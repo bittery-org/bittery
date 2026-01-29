@@ -108,7 +108,10 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 		const challenge = crypto.randomUUID();
 		console.log("[NATIVE_BIOMETRIC_UNLOCK] Generated challenge:", challenge);
 		console.log("[NATIVE_BIOMETRIC_UNLOCK] Extension ID:", chrome.runtime.id);
-		console.log("[NATIVE_BIOMETRIC_UNLOCK] Account email:", activeAccount.email);
+		console.log(
+			"[NATIVE_BIOMETRIC_UNLOCK] Account email:",
+			activeAccount.email,
+		);
 
 		const response = await sendNativeMessage({
 			type: "BIOMETRIC_UNLOCK_REQUEST",
@@ -133,8 +136,14 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 			}
 
 			// Sync biometric enabled status: if unlock succeeded, biometric must be enabled on desktop
-			if (activeAccount.type === "single" && "updateBiometricEnabled" in storage) {
-				await (storage as any).updateBiometricEnabled(activeAccount.email, true);
+			if (
+				activeAccount.type === "single" &&
+				"updateBiometricEnabled" in storage
+			) {
+				await (storage as any).updateBiometricEnabled(
+					activeAccount.email,
+					true,
+				);
 				console.log(
 					`[NATIVE_BIOMETRIC_UNLOCK] Synced biometric status for ${activeAccount.email}`,
 				);
@@ -312,18 +321,32 @@ export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse>
 		});
 
 		console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Received response:", response);
-		console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Response type:", (response as any)?.type);
+		console.log(
+			"[NATIVE_BIOMETRIC_UNLOCK_ALL] Response type:",
+			(response as any)?.type,
+		);
 
 		const responseData = response as any;
 		if (responseData?.type === "BIOMETRIC_UNLOCK_ALL_FAILED") {
-			console.error("[NATIVE_BIOMETRIC_UNLOCK_ALL] Unlock failed:", responseData.error);
+			console.error(
+				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Unlock failed:",
+				responseData.error,
+			);
 			throw new Error(responseData.error || "Biometric unlock failed");
 		}
 
 		if (responseData?.type !== "BIOMETRIC_UNLOCK_ALL_SUCCESS") {
-			console.error("[NATIVE_BIOMETRIC_UNLOCK_ALL] Unexpected response type:", responseData?.type);
-			console.error("[NATIVE_BIOMETRIC_UNLOCK_ALL] Full response:", JSON.stringify(responseData, null, 2));
-			throw new Error(`Invalid response type from desktop app: ${responseData?.type || "undefined"}`);
+			console.error(
+				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Unexpected response type:",
+				responseData?.type,
+			);
+			console.error(
+				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Full response:",
+				JSON.stringify(responseData, null, 2),
+			);
+			throw new Error(
+				`Invalid response type from desktop app: ${responseData?.type || "undefined"}`,
+			);
 		}
 
 		// Verify the response contains the expected data
@@ -332,10 +355,21 @@ export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse>
 			!responseData.signature ||
 			!responseData.accounts
 		) {
-			console.error("[NATIVE_BIOMETRIC_UNLOCK_ALL] Missing required fields in response");
-			console.error("[NATIVE_BIOMETRIC_UNLOCK_ALL] Has device_key:", !!responseData.device_key);
-			console.error("[NATIVE_BIOMETRIC_UNLOCK_ALL] Has signature:", !!responseData.signature);
-			console.error("[NATIVE_BIOMETRIC_UNLOCK_ALL] Has accounts:", !!responseData.accounts);
+			console.error(
+				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Missing required fields in response",
+			);
+			console.error(
+				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Has device_key:",
+				!!responseData.device_key,
+			);
+			console.error(
+				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Has signature:",
+				!!responseData.signature,
+			);
+			console.error(
+				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Has accounts:",
+				!!responseData.accounts,
+			);
 			throw new Error("Invalid response structure from desktop app");
 		}
 
@@ -444,7 +478,10 @@ export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse>
 			await storage.setActiveAccount({ type: "all" });
 			console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Set active account to 'all'");
 		} else {
-			await storage.setActiveAccount({ type: "single", email: firstUnlockedEmail });
+			await storage.setActiveAccount({
+				type: "single",
+				email: firstUnlockedEmail,
+			});
 			console.log(
 				`[NATIVE_BIOMETRIC_UNLOCK_ALL] Set active account to '${firstUnlockedEmail}'`,
 			);

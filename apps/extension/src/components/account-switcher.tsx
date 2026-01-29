@@ -1,11 +1,11 @@
 import { useAccountSwitcher } from "@bittery/hooks";
+import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import { AccountSwitcher, toast } from "@bittery/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
 import { storage } from "@/lib/storage";
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 
 /**
  * Extension-specific account switcher wrapper
@@ -49,7 +49,8 @@ export function ExtensionAccountSwitcher() {
 
 					// Fetch user data from server
 					const serverUrl =
-						(await storage.getServerUrl(account.email)) || "http://localhost:3000";
+						(await storage.getServerUrl(account.email)) ||
+						"http://localhost:3000";
 					const client = createAccountTrpcClient(authToken, serverUrl);
 
 					const userData = await client.auth.me.query();

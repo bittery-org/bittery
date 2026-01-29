@@ -3,8 +3,8 @@
  * Handles both single account and "All Accounts" mode.
  */
 
-import { useQuery } from "@tanstack/react-query";
 import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
+import { useQuery } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
 
 /**

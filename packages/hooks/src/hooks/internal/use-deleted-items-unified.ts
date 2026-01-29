@@ -84,8 +84,11 @@ export function useDeletedItemsUnified(
 	const crypto = usePlatformCrypto();
 
 	// Get all account info using utility hook
-	const { accountsInfo, isLoading: isLoadingAccounts, isAllAccountsMode } =
-		useAccountsInfo({ enabled: options.enabled });
+	const {
+		accountsInfo,
+		isLoading: isLoadingAccounts,
+		isAllAccountsMode,
+	} = useAccountsInfo({ enabled: options.enabled });
 
 	// Fetch and decrypt deleted items from all accounts IN PARALLEL
 	const {
@@ -168,7 +171,7 @@ export function useDeletedItemsUnified(
 														userId: account.userId,
 														name: account.name,
 													},
-											  }
+												}
 											: {}),
 									} as MultiAccountDeletedItem;
 								} catch (error) {

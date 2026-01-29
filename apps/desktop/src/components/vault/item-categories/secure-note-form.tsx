@@ -124,9 +124,12 @@ export function SecureNoteForm({
 							<Button type="button" variant="outline" size="sm">
 								{selectedVault ? (
 									<>
-										{(selectedVault.accountTeamName || selectedVault.accountName) && (
+										{(selectedVault.accountTeamName ||
+											selectedVault.accountName) && (
 											<span className="text-muted-foreground">
-												{selectedVault.accountTeamName || selectedVault.accountName} /{" "}
+												{selectedVault.accountTeamName ||
+													selectedVault.accountName}{" "}
+												/{" "}
 											</span>
 										)}
 										{selectedVault.name}

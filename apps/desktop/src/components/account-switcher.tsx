@@ -39,7 +39,9 @@ export function AccountSwitcher() {
 		activeAccountQuery.data?.type === "single"
 			? activeAccountQuery.data.email
 			: null;
-	const activeAccount = accountsData.find((a) => a.email === activeAccountEmail);
+	const activeAccount = accountsData.find(
+		(a) => a.email === activeAccountEmail,
+	);
 
 	const handleAccountSelect = async (email: string) => {
 		if (email === activeAccountEmail) return;

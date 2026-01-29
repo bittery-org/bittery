@@ -16,7 +16,10 @@ export const Route = createFileRoute("/")({
 
 		if (!activeAccount) {
 			// Has accounts but none active, set first as active
-			await storage.setActiveAccount({ type: "single", email: accountsList[0].email });
+			await storage.setActiveAccount({
+				type: "single",
+				email: accountsList[0].email,
+			});
 			activeAccount = { type: "single", email: accountsList[0].email };
 		}
 
@@ -37,7 +40,10 @@ export const Route = createFileRoute("/")({
 
 		if (sessionValid) {
 			// Try to restore session
-			const restored = await storage.tryRestoreSession(true, activeAccount.email);
+			const restored = await storage.tryRestoreSession(
+				true,
+				activeAccount.email,
+			);
 			if (restored) {
 				throw redirect({ to: "/vault" });
 			}
