@@ -1,3 +1,4 @@
+import type { IAutolockService } from "@bittery/hooks/types";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Router } from "@tanstack/react-router";
 import {
@@ -11,7 +12,6 @@ import {
 } from "react";
 import { type AccountMetadata, storage } from "@/lib/storage";
 import { createDesktopAutolockService } from "@/services/autolock-service";
-import type { IAutolockService } from "@bittery/hooks/types";
 
 interface AccountContextValue {
 	activeAccount: AccountMetadata | null;
@@ -204,16 +204,23 @@ export function AccountProvider({
 			try {
 				const { listen } = await import("@tauri-apps/api/event");
 				unlisten = await listen("trigger-biometric-unlock", () => {
-					console.log("[AccountContext] Received trigger-biometric-unlock event from extension");
+					console.log(
+						"[AccountContext] Received trigger-biometric-unlock event from extension",
+					);
 					// Navigate to unlock page with auto-trigger flag
 					if (router) {
 						router.navigate({ to: "/unlock", search: { autoTrigger: true } });
 					} else {
-						console.error("[AccountContext] Router not available for navigation");
+						console.error(
+							"[AccountContext] Router not available for navigation",
+						);
 					}
 				});
 			} catch (error) {
-				console.error("[AccountContext] Failed to setup trigger-biometric-unlock listener:", error);
+				console.error(
+					"[AccountContext] Failed to setup trigger-biometric-unlock listener:",
+					error,
+				);
 			}
 		};
 

@@ -5,8 +5,8 @@
 
 import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import { storage } from "../lib/storage";
-import { desktopClient } from "./desktop-client";
 import { decrypt } from "../lib/wasm-crypto";
+import { desktopClient } from "./desktop-client";
 import { trpcClient } from "./trpc-client";
 
 /**
@@ -61,21 +61,28 @@ async function decryptVaultItemsForAccountViaDesktop(
 	email: string,
 	accountMeta?: { email: string; userId: string; name: string },
 ) {
-	console.log(`[vault-utils] decryptVaultItemsForAccountViaDesktop - email: ${email}`);
+	console.log(
+		`[vault-utils] decryptVaultItemsForAccountViaDesktop - email: ${email}`,
+	);
 
 	// Fetch vaults from API (using desktop's auth token)
 	const authToken = await desktopClient.getAuthToken(email);
 	if (!authToken) {
-		console.warn(`[vault-utils] No auth token available from desktop for ${email}`);
+		console.warn(
+			`[vault-utils] No auth token available from desktop for ${email}`,
+		);
 		return [];
 	}
 
 	// Create account-specific tRPC client
-	const serverUrl = (await storage.getServerUrl(email)) || "http://localhost:3000";
+	const serverUrl =
+		(await storage.getServerUrl(email)) || "http://localhost:3000";
 	const accountClient = createAccountTrpcClient(authToken, serverUrl);
 
 	// Fetch vaults for this account
-	console.log(`[vault-utils] Fetching vaults for ${email} from ${serverUrl}...`);
+	console.log(
+		`[vault-utils] Fetching vaults for ${email} from ${serverUrl}...`,
+	);
 	const vaults = await accountClient.vault.list.query();
 	console.log(`[vault-utils] Got ${vaults.length} vaults for ${email}`);
 
@@ -115,7 +122,9 @@ async function decryptVaultItemsForAccountViaDesktop(
 	}
 
 	// Bulk decrypt via desktop
-	console.log(`[vault-utils] Decrypting ${allItems.length} items via desktop for ${email}`);
+	console.log(
+		`[vault-utils] Decrypting ${allItems.length} items via desktop for ${email}`,
+	);
 	const decryptedItems = await desktopClient.decryptItems(
 		email,
 		allItems.map((item) => ({
@@ -161,7 +170,10 @@ async function decryptVaultItemsForAccountViaDesktop(
 export async function decryptVaultItemsViaDesktop() {
 	// Get active account
 	const activeAccount = await storage.getActiveAccount();
-	console.log("[vault-utils] decryptVaultItemsViaDesktop - active account:", activeAccount);
+	console.log(
+		"[vault-utils] decryptVaultItemsViaDesktop - active account:",
+		activeAccount,
+	);
 
 	// If active account is "all", fetch from all unlocked accounts
 	if (activeAccount?.type === "all") {
@@ -172,25 +184,39 @@ export async function decryptVaultItemsViaDesktop() {
 			return [];
 		}
 
-		console.log(`[vault-utils] Fetching items for ${sessionData.accounts.length} accounts via desktop`);
+		console.log(
+			`[vault-utils] Fetching items for ${sessionData.accounts.length} accounts via desktop`,
+		);
 
 		// Fetch items from all unlocked accounts
 		const allAccountItems = await Promise.all(
 			sessionData.accounts.map(async (account) => {
 				try {
-					console.log(`[vault-utils] Fetching items for ${account.email} via desktop...`);
+					console.log(
+						`[vault-utils] Fetching items for ${account.email} via desktop...`,
+					);
 					// Get account metadata
 					const accountMeta = await storage.getAccountMetadata?.(account.email);
 					if (!accountMeta) {
-						console.warn(`[vault-utils] No metadata found for ${account.email}`);
+						console.warn(
+							`[vault-utils] No metadata found for ${account.email}`,
+						);
 						return [];
 					}
 
-					const items = await decryptVaultItemsForAccountViaDesktop(account.email, accountMeta);
-					console.log(`[vault-utils] Got ${items.length} items for ${account.email}`);
+					const items = await decryptVaultItemsForAccountViaDesktop(
+						account.email,
+						accountMeta,
+					);
+					console.log(
+						`[vault-utils] Got ${items.length} items for ${account.email}`,
+					);
 					return items;
 				} catch (error) {
-					console.error(`[vault-utils] Failed to fetch items for ${account.email}:`, error);
+					console.error(
+						`[vault-utils] Failed to fetch items for ${account.email}:`,
+						error,
+					);
 					return [];
 				}
 			}),
@@ -198,7 +224,9 @@ export async function decryptVaultItemsViaDesktop() {
 
 		// Flatten and return
 		const flattened = allAccountItems.flat();
-		console.log(`[vault-utils] Total items from all accounts: ${flattened.length}`);
+		console.log(
+			`[vault-utils] Total items from all accounts: ${flattened.length}`,
+		);
 		return flattened;
 	}
 

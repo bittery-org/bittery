@@ -126,7 +126,10 @@ export function createDesktopAutolockService(
 				});
 				unlistenFns.push(unlistenBlur);
 			} catch (error) {
-				console.error("[Desktop Autolock] Failed to set up Tauri listeners:", error);
+				console.error(
+					"[Desktop Autolock] Failed to set up Tauri listeners:",
+					error,
+				);
 			}
 
 			// Start interval timer (check every second)

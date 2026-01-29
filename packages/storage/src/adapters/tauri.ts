@@ -1275,7 +1275,10 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	private async updateLockStateMarker(): Promise<void> {
 		const unlockedEmails = await this.getUnlockedAccounts();
 		const store = await this.getStore();
-		await store.set("bittery_unlocked_accounts", JSON.stringify(unlockedEmails));
+		await store.set(
+			"bittery_unlocked_accounts",
+			JSON.stringify(unlockedEmails),
+		);
 		await store.save();
 	}
 

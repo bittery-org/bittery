@@ -49,7 +49,7 @@ export function ExtensionAccountSwitcher() {
 	// Merge local unlocked emails with desktop unlocked accounts
 	const desktopUnlockedEmails =
 		desktopStatus.data?.success && desktopStatus.data?.available
-			? desktopStatus.data?.unlockedAccounts ?? []
+			? (desktopStatus.data?.unlockedAccounts ?? [])
 			: [];
 
 	// Combine and deduplicate

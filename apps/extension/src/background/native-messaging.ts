@@ -322,7 +322,11 @@ export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse>
 		);
 
 		// If desktop is available AND unlocked, we can use desktop mode directly
-		if (desktopAvailable && !desktopLocked && desktopUnlockedAccounts.length > 0) {
+		if (
+			desktopAvailable &&
+			!desktopLocked &&
+			desktopUnlockedAccounts.length > 0
+		) {
 			console.log(
 				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop is already unlocked, using desktop mode",
 			);
@@ -358,7 +362,9 @@ export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse>
 				);
 
 				if (!response.ok) {
-					throw new Error(`Desktop unlock trigger failed: ${response.statusText}`);
+					throw new Error(
+						`Desktop unlock trigger failed: ${response.statusText}`,
+					);
 				}
 
 				console.log(
@@ -366,14 +372,19 @@ export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse>
 				);
 
 				// Don't return success - throw an error to let the UI know unlock is pending
-				throw new Error("Desktop app is locked. Please unlock in the desktop app.");
+				throw new Error(
+					"Desktop app is locked. Please unlock in the desktop app.",
+				);
 			} catch (error) {
 				console.warn(
 					"[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop unlock trigger failed, falling back to native messaging:",
 					error,
 				);
 				// If we successfully triggered the desktop UI, re-throw the error
-				if (error instanceof Error && error.message.includes("Desktop app is locked")) {
+				if (
+					error instanceof Error &&
+					error.message.includes("Desktop app is locked")
+				) {
 					throw error;
 				}
 				// Otherwise fall through to native messaging fallback

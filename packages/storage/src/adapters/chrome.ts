@@ -212,17 +212,23 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			return false;
 		}
 
-		console.log(`[storage-chrome] tryRestoreSession: Starting for ${resolvedEmail}`);
+		console.log(
+			`[storage-chrome] tryRestoreSession: Starting for ${resolvedEmail}`,
+		);
 
 		if (!(await this.isSessionValid(resolvedEmail))) {
-			console.log(`[storage-chrome] tryRestoreSession: Session not valid for ${resolvedEmail}`);
+			console.log(
+				`[storage-chrome] tryRestoreSession: Session not valid for ${resolvedEmail}`,
+			);
 			return false;
 		}
 
 		// First check if MUK is already in memory cache (e.g., after login)
 		const cache = this.getAccountCache(resolvedEmail);
 		if (cache.masterUnlockKey) {
-			console.log(`[storage-chrome] tryRestoreSession: MUK already in memory for ${resolvedEmail}`);
+			console.log(
+				`[storage-chrome] tryRestoreSession: MUK already in memory for ${resolvedEmail}`,
+			);
 			// Also ensure auth token and vault keys are in cache
 			if (!cache.authToken) {
 				const authToken = await this.getAuthToken(resolvedEmail);
@@ -239,17 +245,23 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			return true;
 		}
 
-		console.log(`[storage-chrome] tryRestoreSession: Attempting to decrypt stored MUK for ${resolvedEmail}`);
+		console.log(
+			`[storage-chrome] tryRestoreSession: Attempting to decrypt stored MUK for ${resolvedEmail}`,
+		);
 
 		// Otherwise, try to decrypt from persistent storage
 		const masterUnlockKey =
 			await this.decryptStoredMasterUnlockKeyInternal(resolvedEmail);
 		if (!masterUnlockKey) {
-			console.error(`[storage-chrome] tryRestoreSession: Failed to decrypt MUK for ${resolvedEmail}`);
+			console.error(
+				`[storage-chrome] tryRestoreSession: Failed to decrypt MUK for ${resolvedEmail}`,
+			);
 			return false;
 		}
 
-		console.log(`[storage-chrome] tryRestoreSession: MUK decrypted successfully for ${resolvedEmail}`);
+		console.log(
+			`[storage-chrome] tryRestoreSession: MUK decrypted successfully for ${resolvedEmail}`,
+		);
 
 		await this.setMasterUnlockKey(masterUnlockKey, resolvedEmail);
 
@@ -273,7 +285,9 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		}
 		cache.vaultKeys = vaultKeys;
 
-		console.log(`[storage-chrome] tryRestoreSession: Successfully restored session for ${resolvedEmail}`);
+		console.log(
+			`[storage-chrome] tryRestoreSession: Successfully restored session for ${resolvedEmail}`,
+		);
 		return true;
 	}
 

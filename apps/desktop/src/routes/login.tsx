@@ -5,8 +5,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Fingerprint } from "lucide-react";
 import { useEffect, useState } from "react";
-import { type AccountMetadata, storage } from "@/lib/storage";
 import { useOptionalAccount } from "@/contexts/account-context";
+import { type AccountMetadata, storage } from "@/lib/storage";
 
 interface LoginSearchParams {
 	addingAccount?: boolean;

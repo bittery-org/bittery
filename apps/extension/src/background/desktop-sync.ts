@@ -5,12 +5,9 @@
  * for real-time lock/unlock synchronization.
  */
 
-import { desktopClient } from "./desktop-client";
 import { storage } from "../lib/storage";
-import {
-	_lockInternal,
-	setDesktopModeSentinel,
-} from "./session-manager";
+import { desktopClient } from "./desktop-client";
+import { _lockInternal, setDesktopModeSentinel } from "./session-manager";
 
 const DESKTOP_BASE_URL = "http://localhost:48765";
 const POLL_INTERVAL_MS = 5000; // Poll every 5 seconds
@@ -83,15 +80,24 @@ class DesktopSyncService {
 		const previousState = await this.loadDesktopModeState();
 		const now = Date.now();
 
-		if (previousState && (now - previousState.lastConnectedAt) < DESKTOP_MODE_RECOVERY_WINDOW_MS) {
-			console.log("[Desktop Sync] Recovering from service worker restart (desktop mode was active)");
-			console.log(`[Desktop Sync] Last connected ${Math.round((now - previousState.lastConnectedAt) / 1000)}s ago`);
+		if (
+			previousState &&
+			now - previousState.lastConnectedAt < DESKTOP_MODE_RECOVERY_WINDOW_MS
+		) {
+			console.log(
+				"[Desktop Sync] Recovering from service worker restart (desktop mode was active)",
+			);
+			console.log(
+				`[Desktop Sync] Last connected ${Math.round((now - previousState.lastConnectedAt) / 1000)}s ago`,
+			);
 
 			// Attempt to reconnect to desktop
 			const status = await this.checkDesktopStatus();
 
 			if (status?.available && !status.locked) {
-				console.log("[Desktop Sync] Desktop still available and unlocked, recovering desktop mode");
+				console.log(
+					"[Desktop Sync] Desktop still available and unlocked, recovering desktop mode",
+				);
 
 				// Set sentinel MUK to mark as "unlocked via desktop"
 				setDesktopModeSentinel();
@@ -106,12 +112,17 @@ class DesktopSyncService {
 						} else {
 							await storage.setActiveAccount({
 								type: "single",
-								email: previousState.activeAccount
+								email: previousState.activeAccount,
 							});
-							console.log(`[Desktop Sync] Restored active account: ${previousState.activeAccount}`);
+							console.log(
+								`[Desktop Sync] Restored active account: ${previousState.activeAccount}`,
+							);
 						}
 					} catch (error) {
-						console.error("[Desktop Sync] Failed to restore active account:", error);
+						console.error(
+							"[Desktop Sync] Failed to restore active account:",
+							error,
+						);
 					}
 				}
 
@@ -120,13 +131,18 @@ class DesktopSyncService {
 
 				console.log("[Desktop Sync] Desktop mode recovered successfully");
 			} else {
-				console.log("[Desktop Sync] Desktop not available or locked, cannot recover desktop mode");
+				console.log(
+					"[Desktop Sync] Desktop not available or locked, cannot recover desktop mode",
+				);
 				await this.clearDesktopModeState();
 			}
 		}
 
 		// Check desktop status immediately (fresh check if not recovering)
-		if (!previousState || (now - previousState.lastConnectedAt) >= DESKTOP_MODE_RECOVERY_WINDOW_MS) {
+		if (
+			!previousState ||
+			now - previousState.lastConnectedAt >= DESKTOP_MODE_RECOVERY_WINDOW_MS
+		) {
 			const status = await this.checkDesktopStatus();
 
 			if (status?.available) {
@@ -176,7 +192,9 @@ class DesktopSyncService {
 
 			// Get current extension accounts
 			const currentAccounts = await storage.getAccountsList();
-			const currentEmails = new Set(currentAccounts.map((a) => a.email.toLowerCase()));
+			const currentEmails = new Set(
+				currentAccounts.map((a) => a.email.toLowerCase()),
+			);
 
 			// Add any accounts from desktop that aren't in extension
 			let addedCount = 0;
@@ -194,7 +212,9 @@ class DesktopSyncService {
 						biometricEnabled: desktopAccount.biometricEnabled ?? false,
 					});
 					addedCount++;
-					console.log(`[Desktop Sync] Added account from desktop: ${desktopAccount.email}`);
+					console.log(
+						`[Desktop Sync] Added account from desktop: ${desktopAccount.email}`,
+					);
 				}
 			}
 
@@ -209,17 +229,24 @@ class DesktopSyncService {
 						type: "single",
 						email: accountsData.active_account,
 					});
-					console.log(`[Desktop Sync] Set active account: ${accountsData.active_account}`);
+					console.log(
+						`[Desktop Sync] Set active account: ${accountsData.active_account}`,
+					);
 				}
 			}
 
 			if (addedCount > 0) {
-				console.log(`[Desktop Sync] Synced ${addedCount} account(s) from desktop`);
+				console.log(
+					`[Desktop Sync] Synced ${addedCount} account(s) from desktop`,
+				);
 			} else {
 				console.log("[Desktop Sync] No new accounts to sync");
 			}
 		} catch (error) {
-			console.error("[Desktop Sync] Failed to sync accounts from desktop:", error);
+			console.error(
+				"[Desktop Sync] Failed to sync accounts from desktop:",
+				error,
+			);
 		}
 	}
 
@@ -229,10 +256,7 @@ class DesktopSyncService {
 	async checkDesktopStatus(): Promise<DesktopStatus | null> {
 		try {
 			const controller = new AbortController();
-			const timeoutId = setTimeout(
-				() => controller.abort(),
-				STATUS_TIMEOUT_MS,
-			);
+			const timeoutId = setTimeout(() => controller.abort(), STATUS_TIMEOUT_MS);
 
 			const response = await fetch(
 				`${DESKTOP_BASE_URL}/native-bridge/lock-status`,
@@ -332,14 +356,19 @@ class DesktopSyncService {
 			});
 
 			this.eventSource.addEventListener("active_account_changed", (event) => {
-				console.log("[Desktop Sync] 📨 SSE active_account_changed event received");
+				console.log(
+					"[Desktop Sync] 📨 SSE active_account_changed event received",
+				);
 				const data: ActiveAccountChangedEvent = JSON.parse(event.data);
 				this.handleActiveAccountChanged(data);
 			});
 
 			this.eventSource.onerror = (error) => {
 				console.error("[Desktop Sync] ❌ SSE error:", error);
-				console.log("[Desktop Sync] SSE readyState:", this.eventSource?.readyState);
+				console.log(
+					"[Desktop Sync] SSE readyState:",
+					this.eventSource?.readyState,
+				);
 				this.eventSource?.close();
 				this.eventSource = null;
 
@@ -416,7 +445,9 @@ class DesktopSyncService {
 
 		// In desktop mode, just set the sentinel MUK to mark extension as unlocked
 		setDesktopModeSentinel();
-		console.log("[Desktop Sync] Set desktop mode sentinel (extension unlocked)");
+		console.log(
+			"[Desktop Sync] Set desktop mode sentinel (extension unlocked)",
+		);
 
 		// Notify popup to navigate to vault immediately
 		try {
@@ -475,7 +506,9 @@ class DesktopSyncService {
 	/**
 	 * Handle active account changed event from desktop
 	 */
-	async handleActiveAccountChanged(event: ActiveAccountChangedEvent): Promise<void> {
+	async handleActiveAccountChanged(
+		event: ActiveAccountChangedEvent,
+	): Promise<void> {
 		console.log(
 			`[Desktop Sync] Active account changed in desktop to: ${event.email}`,
 		);
@@ -486,7 +519,9 @@ class DesktopSyncService {
 		// Update active account in extension storage to match desktop
 		try {
 			await storage.setActiveAccount({ type: "single", email: event.email });
-			console.log(`[Desktop Sync] Updated extension active account to: ${event.email}`);
+			console.log(
+				`[Desktop Sync] Updated extension active account to: ${event.email}`,
+			);
 		} catch (error) {
 			console.error("[Desktop Sync] Failed to update active account:", error);
 		}
@@ -599,7 +634,12 @@ class DesktopSyncService {
 			const activeAccount = await storage.getActiveAccount();
 			const state: DesktopModeState = {
 				lastConnectedAt: Date.now(),
-				activeAccount: activeAccount?.type === "single" ? activeAccount.email : (activeAccount?.type === "all" ? "all" : null),
+				activeAccount:
+					activeAccount?.type === "single"
+						? activeAccount.email
+						: activeAccount?.type === "all"
+							? "all"
+							: null,
 			};
 			await chrome.storage.local.set({ [STORAGE_KEY_DESKTOP_MODE]: state });
 			console.log("[Desktop Sync] Saved desktop mode state");
@@ -614,7 +654,9 @@ class DesktopSyncService {
 	private async loadDesktopModeState(): Promise<DesktopModeState | null> {
 		try {
 			const result = await chrome.storage.local.get(STORAGE_KEY_DESKTOP_MODE);
-			const state = result[STORAGE_KEY_DESKTOP_MODE] as DesktopModeState | undefined;
+			const state = result[STORAGE_KEY_DESKTOP_MODE] as
+				| DesktopModeState
+				| undefined;
 			if (state) {
 				console.log("[Desktop Sync] Loaded desktop mode state:", state);
 				return state;
@@ -634,7 +676,10 @@ class DesktopSyncService {
 			await chrome.storage.local.remove(STORAGE_KEY_DESKTOP_MODE);
 			console.log("[Desktop Sync] Cleared desktop mode state");
 		} catch (error) {
-			console.error("[Desktop Sync] Failed to clear desktop mode state:", error);
+			console.error(
+				"[Desktop Sync] Failed to clear desktop mode state:",
+				error,
+			);
 		}
 	}
 }

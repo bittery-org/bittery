@@ -80,7 +80,10 @@ export async function handleGetAutofillItems(payload: {
 			);
 			return { success: true, items: filtered };
 		} catch (error) {
-			console.error("[autofill] Desktop decryption failed, falling back to WASM:", error);
+			console.error(
+				"[autofill] Desktop decryption failed, falling back to WASM:",
+				error,
+			);
 			// Fall through to standalone mode
 		}
 	}

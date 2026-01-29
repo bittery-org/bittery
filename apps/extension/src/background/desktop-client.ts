@@ -319,7 +319,10 @@ class DesktopClient {
 			}
 
 			const data = await response.json();
-			console.log("[desktop-client] Fetched accounts from desktop:", data.accounts?.length ?? 0);
+			console.log(
+				"[desktop-client] Fetched accounts from desktop:",
+				data.accounts?.length ?? 0,
+			);
 			return data;
 		} catch (error) {
 			console.error("[desktop-client] Error fetching accounts:", error);

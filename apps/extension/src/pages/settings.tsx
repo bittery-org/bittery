@@ -185,7 +185,7 @@ export function SettingsPage() {
 												{formatTimeout(desktopStatus.autolockTimeoutMs)}
 											</span>
 										</p>
-										<p className="text-muted-foreground text-xs mt-1">
+										<p className="mt-1 text-muted-foreground text-xs">
 											Extension timeout is only used when desktop app is not
 											running
 										</p>
