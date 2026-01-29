@@ -5,7 +5,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Fingerprint } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useOptionalAccount } from "@/contexts/account-context";
 import { type AccountMetadata, storage } from "@/lib/storage";
 
 interface LoginSearchParams {
@@ -25,7 +24,6 @@ export const Route = createFileRoute("/login")({
 export function LoginPage() {
 	const navigate = useNavigate();
 	const { addingAccount } = Route.useSearch();
-	const accountContext = useOptionalAccount();
 	const queryClient = useQueryClient();
 	const fallbackServerUrl =
 		normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??

@@ -4,6 +4,7 @@
  */
 
 import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
+import type { DecryptedItem } from "@bittery/shared/types";
 import { storage } from "../lib/storage";
 import { decrypt } from "../lib/wasm-crypto";
 import { desktopSync } from "./desktop-sync";
@@ -192,7 +193,7 @@ export async function handleGetVaultItems(): Promise<MessageResponse> {
 	const desktopStatus = desktopSync.getLastStatus();
 	const desktopAvailable = desktopStatus?.available && !desktopStatus.locked;
 
-	let items;
+	let items: Array<DecryptedItem | null>;
 	if (desktopAvailable) {
 		console.log(
 			"[vault-handlers] Using desktop mode for decryption (desktop available)",

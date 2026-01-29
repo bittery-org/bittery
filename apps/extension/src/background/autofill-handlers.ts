@@ -3,6 +3,7 @@
  * Handles autofill-specific messages
  */
 
+import type { DecryptedItem } from "@bittery/shared/types";
 import { storage } from "../lib/storage";
 import { AUTOFILL_REAUTH_WINDOW_MS } from "./constants";
 import { desktopSync } from "./desktop-sync";
@@ -110,7 +111,7 @@ export async function handleGetAutofillCreditCards(): Promise<MessageResponse> {
 	const desktopStatus = desktopSync.getLastStatus();
 	const desktopAvailable = desktopStatus?.available && !desktopStatus.locked;
 
-	let items;
+	let items: Array<DecryptedItem | null>;
 	if (desktopAvailable) {
 		console.log("[autofill] Using desktop mode for credit card decryption");
 		try {
@@ -145,7 +146,7 @@ export async function handleGetAutofillIdentities(): Promise<MessageResponse> {
 	const desktopStatus = desktopSync.getLastStatus();
 	const desktopAvailable = desktopStatus?.available && !desktopStatus.locked;
 
-	let items;
+	let items: Array<DecryptedItem | null>;
 	if (desktopAvailable) {
 		console.log("[autofill] Using desktop mode for identity decryption");
 		try {

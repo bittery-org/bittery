@@ -189,7 +189,7 @@ test.describe("User Signup Flow", () => {
 
 		// Get the displayed secret key
 		const secretKeyElement = page.locator(".font-mono.text-sm.tracking-wide");
-		const _displayedKey = await secretKeyElement.textContent();
+		await secretKeyElement.textContent();
 
 		// Click copy button
 		await page.click('button:has-text("Copy")');

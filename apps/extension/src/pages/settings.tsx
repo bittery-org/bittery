@@ -78,7 +78,7 @@ export function SettingsPage() {
 		chrome.runtime.sendMessage(
 			{ type: "CHECK_DESKTOP_STATUS" },
 			(response: DesktopStatus) => {
-				if (response && response.available) {
+				if (response?.available) {
 					setDesktopStatus(response);
 				}
 			},

@@ -422,9 +422,7 @@ test.describe("Network Resilience - Vault Operations", () => {
 		const skeleton = page.locator(
 			'[class*="skeleton"], [class*="animate-pulse"]',
 		);
-		const _hasLoading = await skeleton
-			.isVisible({ timeout: 2000 })
-			.catch(() => false);
+		await skeleton.isVisible({ timeout: 2000 }).catch(() => false);
 
 		// Either shows loading or content (fast enough to skip loading)
 		expect(true).toBeTruthy();

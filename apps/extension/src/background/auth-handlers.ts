@@ -128,11 +128,13 @@ async function ensureActiveAccountSet(): Promise<void> {
 
 		if (accounts.length === 1) {
 			// Single account - set it as active
+			const firstAccount = accounts[0];
+			if (!firstAccount) return; // Should never happen but satisfies TS
 			await storage.setActiveAccount({
 				type: "single",
-				email: accounts[0].email,
+				email: firstAccount.email,
 			});
-			console.log(`[Auth] Set ${accounts[0].email} as active account`);
+			console.log(`[Auth] Set ${firstAccount.email} as active account`);
 		} else {
 			// Multiple accounts - check if any are unlocked
 			const unlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
@@ -143,19 +145,23 @@ async function ensureActiveAccountSet(): Promise<void> {
 				console.log("[Auth] Set active account to 'all' mode");
 			} else if (unlockedEmails.length === 1) {
 				// One unlocked - use that one
+				const unlockedEmail = unlockedEmails[0];
+				if (!unlockedEmail) return; // Should never happen but satisfies TS
 				await storage.setActiveAccount({
 					type: "single",
-					email: unlockedEmails[0],
+					email: unlockedEmail,
 				});
-				console.log(`[Auth] Set ${unlockedEmails[0]} as active account`);
+				console.log(`[Auth] Set ${unlockedEmail} as active account`);
 			} else {
 				// None unlocked - default to first account
+				const firstAccount = accounts[0];
+				if (!firstAccount) return; // Should never happen but satisfies TS
 				await storage.setActiveAccount({
 					type: "single",
-					email: accounts[0].email,
+					email: firstAccount.email,
 				});
 				console.log(
-					`[Auth] Set ${accounts[0].email} as active account (none unlocked)`,
+					`[Auth] Set ${firstAccount.email} as active account (none unlocked)`,
 				);
 			}
 		}
@@ -296,7 +302,7 @@ export async function handleQuickUnlockAll(payload: {
 	for (const account of accounts) {
 		try {
 			// Check if account has stored secret key
-			const hasSecretKey = await storage.hasStoredSecretKey(account.email);
+			const hasSecretKey = await storage.hasStoredSecretKey?.(account.email);
 			if (!hasSecretKey) {
 				console.log(
 					`[QUICK_UNLOCK_ALL] Skipping ${account.email} - no stored secret key`,
@@ -333,7 +339,9 @@ export async function handleQuickUnlockAll(payload: {
 	if (accounts.length > 1) {
 		await storage.setActiveAccount({ type: "all" });
 	} else {
-		await storage.setActiveAccount({ type: "single", email: unlocked[0] });
+		const firstUnlocked = unlocked[0];
+		if (!firstUnlocked) throw new Error("No unlocked accounts found");
+		await storage.setActiveAccount({ type: "single", email: firstUnlocked });
 	}
 
 	// Set MUK for first unlocked account in session manager

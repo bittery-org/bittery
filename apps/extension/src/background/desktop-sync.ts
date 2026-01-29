@@ -403,7 +403,7 @@ class DesktopSyncService {
 				type: "DESKTOP_LOCKED",
 				reason: event.reason,
 			});
-		} catch (error) {
+		} catch (_error) {
 			// Ignore if no listeners
 			console.log("[Desktop Sync] No UI listeners for DESKTOP_LOCKED event");
 		}
@@ -456,7 +456,7 @@ class DesktopSyncService {
 				accounts: event.accounts,
 			});
 			console.log("[Desktop Sync] Sent DESKTOP_UNLOCKED message to popup");
-		} catch (error) {
+		} catch (_error) {
 			// Ignore if no listeners
 			console.log("[Desktop Sync] No UI listeners for DESKTOP_UNLOCKED event");
 		}
