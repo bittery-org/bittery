@@ -206,6 +206,19 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		const cache = this.getAccountCache(resolvedEmail);
 		if (cache.masterUnlockKey) {
 			console.log("[storage-chrome] Session restored from memory cache");
+			// Also ensure auth token and vault keys are in cache
+			if (!cache.authToken) {
+				const authToken = await this.getAuthToken(resolvedEmail);
+				if (authToken) {
+					cache.authToken = authToken;
+				}
+			}
+			if (!cache.vaultKeys) {
+				const vaultKeys = await this.getVaultKeys(resolvedEmail);
+				if (vaultKeys) {
+					cache.vaultKeys = vaultKeys;
+				}
+			}
 			return true;
 		}
 
@@ -217,6 +230,27 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		}
 
 		await this.setMasterUnlockKey(masterUnlockKey, resolvedEmail);
+
+		// Also restore auth token and vault keys into cache
+		// Both are required for a fully functional session
+		console.log(`[storage-chrome] Restoring auth token for ${resolvedEmail}...`);
+		const authToken = await this.getAuthToken(resolvedEmail);
+		if (!authToken) {
+			console.error(`[storage-chrome] Cannot restore session for ${resolvedEmail}: auth token not found in storage. Account may need to be unlocked with biometric or password.`);
+			return false;
+		}
+		cache.authToken = authToken;
+		console.log(`[storage-chrome] Auth token restored for ${resolvedEmail}`);
+
+		console.log(`[storage-chrome] Restoring vault keys for ${resolvedEmail}...`);
+		const vaultKeys = await this.getVaultKeys(resolvedEmail);
+		if (!vaultKeys || vaultKeys.length === 0) {
+			console.error(`[storage-chrome] Cannot restore session for ${resolvedEmail}: vault keys not found in storage`);
+			return false;
+		}
+		cache.vaultKeys = vaultKeys;
+		console.log(`[storage-chrome] Vault keys restored for ${resolvedEmail}: ${vaultKeys.length} keys`);
+
 		return true;
 	}
 
@@ -568,14 +602,55 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	// ============================================================================
 
 	async isAuthenticated(_email?: string): Promise<boolean> {
-		const token = await this.getAuthToken();
-		return token !== null;
+		// If email is provided, check that specific account
+		if (_email) {
+			const token = await this.getAuthToken(_email);
+			return token !== null;
+		}
+
+		// For multi-account: check if ANY account is authenticated
+		const accounts = await this.getAccountsList();
+		if (accounts.length === 0) {
+			return false;
+		}
+
+		// Check if any account has an auth token
+		for (const account of accounts) {
+			const token = await this.getAuthToken(account.email);
+			if (token) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	async canQuickUnlock(_email?: string): Promise<boolean> {
-		const hasSecretKey = (await this.getStoredSecretKey()) !== null;
-		const sessionValid = await this.isSessionValid();
-		return hasSecretKey && sessionValid;
+		// If email is provided, check that specific account
+		if (_email) {
+			const hasSecretKey = (await this.getStoredSecretKey(_email)) !== null;
+			const sessionValid = await this.isSessionValid(_email);
+			return hasSecretKey && sessionValid;
+		}
+
+		// For multi-account: check if ANY account can quick unlock
+		const accounts = await this.getAccountsList();
+		if (accounts.length === 0) {
+			return false;
+		}
+
+		// Check if any account has secret key + valid session OR biometric enabled
+		for (const account of accounts) {
+			const hasSecretKey = (await this.getStoredSecretKey(account.email)) !== null;
+			const sessionValid = await this.isSessionValid(account.email);
+			const hasBiometric = account.biometricEnabled ?? false;
+
+			if ((hasSecretKey && sessionValid) || hasBiometric) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	// ============================================================================
@@ -648,12 +723,25 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	}
 
 	async getUnlockedAccounts(): Promise<string[]> {
+		console.log("[storage-chrome] getUnlockedAccounts - accountCaches size:", accountCaches.size);
+
+		// If cache is empty (e.g., after service worker restart), try to restore from storage
+		const accounts = await this.getAccountsList();
+
 		const unlockedEmails: string[] = [];
-		for (const [email, cache] of accountCaches.entries()) {
-			if (cache.masterUnlockKey) {
+		for (const account of accounts) {
+			const email = account.email.toLowerCase();
+
+			// Try to get MUK (will restore from storage if needed)
+			const muk = await this.getMasterUnlockKey(email);
+			console.log(`[storage-chrome] Account ${email} - has MUK:`, !!muk);
+
+			if (muk) {
 				unlockedEmails.push(email);
 			}
 		}
+
+		console.log("[storage-chrome] Unlocked accounts:", unlockedEmails);
 		return unlockedEmails;
 	}
 
@@ -735,7 +823,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		encryptedVaultKey: string,
 		_email?: string,
 	): Promise<Uint8Array> {
-		const muk = await this.getMasterUnlockKey();
+		const muk = await this.getMasterUnlockKey(_email);
 		if (!muk) {
 			throw new Error("Master Unlock Key not available. Please log in again.");
 		}

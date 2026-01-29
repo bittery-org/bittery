@@ -510,11 +510,21 @@ pub fn run() {
             keychain::keychain_delete,
         ])
         .setup(|app| {
-            // Install native messaging host on first run (or if missing)
-            let first_run = !native_messaging_installer::is_installed();
-            
-            if first_run {
+            // In development mode, always reinstall to pick up changes
+            // In production, only install if missing
+            #[cfg(debug_assertions)]
+            let should_install = true;
+
+            #[cfg(not(debug_assertions))]
+            let should_install = !native_messaging_installer::is_installed();
+
+            if should_install {
+                #[cfg(debug_assertions)]
+                eprintln!("🔧 [DEV MODE] (Re)installing native messaging host...");
+
+                #[cfg(not(debug_assertions))]
                 eprintln!("🔧 First run detected - installing native messaging host...");
+
                 match native_messaging_installer::install_native_messaging_host(&app.handle()) {
                     Ok(_) => {
                         eprintln!("✅ Native messaging host installed successfully!");

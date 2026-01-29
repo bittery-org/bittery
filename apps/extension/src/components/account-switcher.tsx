@@ -2,9 +2,10 @@ import { useAccountSwitcher } from "@bittery/hooks";
 import { AccountSwitcher, toast } from "@bittery/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
 import { storage } from "@/lib/storage";
+import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 
 /**
  * Extension-specific account switcher wrapper
@@ -30,7 +31,54 @@ export function ExtensionAccountSwitcher() {
 	const activeAccountEmail =
 		activeAccountQuery.data?.type === "single"
 			? activeAccountQuery.data.email
-			: null;
+			: activeAccountQuery.data?.type === "all"
+				? "all"
+				: null;
+
+	// Update team names for accounts that don't have them
+	useEffect(() => {
+		const updateMissingTeamNames = async () => {
+			for (const account of accountsData) {
+				// Skip if account already has team name
+				if (account.teamName) continue;
+
+				try {
+					// Get auth token for this account
+					const authToken = await storage.getAuthToken(account.email);
+					if (!authToken) continue;
+
+					// Fetch user data from server
+					const serverUrl =
+						(await storage.getServerUrl(account.email)) || "http://localhost:3000";
+					const client = createAccountTrpcClient(authToken, serverUrl);
+
+					const userData = await client.auth.me.query();
+
+					// Update account with team name
+					await storage.addAccount({
+						...account,
+						teamName: userData.teamName,
+					});
+
+					console.log(
+						`[account-switcher] Updated team name for ${account.email}: ${userData.teamName}`,
+					);
+
+					// Refresh accounts list
+					accounts.refetch();
+				} catch (error) {
+					console.error(
+						`[account-switcher] Failed to fetch team name for ${account.email}:`,
+						error,
+					);
+				}
+			}
+		};
+
+		if (accountsData.length > 0) {
+			updateMissingTeamNames();
+		}
+	}, [accountsData, accounts]);
 
 	const handleSwitchAccount = async (email: string) => {
 		if (email === activeAccountEmail) return;
@@ -49,9 +97,9 @@ export function ExtensionAccountSwitcher() {
 					invalidator.invalidateVaultKeys(),
 					queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
 					queryClient.invalidateQueries({ queryKey: ["items-unified"] }),
+					queryClient.invalidateQueries({ queryKey: ["accounts"] }),
 				]);
-				// Reload vault items for the new account
-				navigate({ to: "/vault" });
+				// Navigation will trigger refetch since query key includes active account
 			}
 		} catch (error) {
 			console.error("Failed to switch account:", error);
@@ -91,8 +139,8 @@ export function ExtensionAccountSwitcher() {
 				invalidator.invalidateVaultKeys(),
 				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
 				queryClient.invalidateQueries({ queryKey: ["items-unified"] }),
+				queryClient.invalidateQueries({ queryKey: ["accounts"] }),
 			]);
-			navigate({ to: "/vault" });
 		} catch (error) {
 			console.error("Failed to switch to All Accounts mode:", error);
 			toast.error("Failed to switch to All Accounts mode");

@@ -17,25 +17,43 @@ async function decryptVaultItemsForAccount(
 	email: string,
 	accountMeta?: { email: string; userId: string; name: string },
 ) {
+	console.log(`[vault-handlers] decryptVaultItemsForAccount - email: ${email}`);
 	const vaultKeys = await storage.getVaultKeys(email);
+	console.log(`[vault-handlers] Vault keys for ${email}:`, vaultKeys?.length || 0);
 
 	if (!vaultKeys || vaultKeys.length === 0) {
+		console.warn(`[vault-handlers] No vault keys for ${email}`);
 		return [];
 	}
 
 	// Get auth token for this account
+	console.log(`[vault-handlers] Getting auth token for ${email}...`);
 	const authToken = await storage.getAuthToken(email);
+	console.log(`[vault-handlers] Auth token for ${email}:`, authToken ? `${authToken.substring(0, 20)}...` : "null");
 	if (!authToken) {
 		console.warn(`[vault-handlers] No auth token for ${email}`);
 		return [];
 	}
 
+	console.log(`[vault-handlers] Getting server URL for ${email}...`);
 	const serverUrl =
 		(await storage.getServerUrl(email)) || "http://localhost:3000";
+	console.log(`[vault-handlers] Server URL for ${email}: ${serverUrl}`);
+
+	console.log(`[vault-handlers] Creating tRPC client for ${email}...`);
 	const accountClient = createAccountTrpcClient(authToken, serverUrl);
+	console.log(`[vault-handlers] tRPC client created for ${email}`);
 
 	// Fetch vaults for this account
-	const vaults = await accountClient.vault.list.query();
+	console.log(`[vault-handlers] Fetching vaults for ${email} from ${serverUrl}...`);
+	let vaults;
+	try {
+		vaults = await accountClient.vault.list.query();
+		console.log(`[vault-handlers] Got ${vaults.length} vaults for ${email}`, vaults.map(v => ({id: v.id, name: v.name, itemCount: v.items.length})));
+	} catch (error) {
+		console.error(`[vault-handlers] Error fetching vaults for ${email}:`, error);
+		throw error;
+	}
 
 	const decryptedVaultKeys: Record<string, Uint8Array> = {};
 
@@ -109,12 +127,15 @@ async function decryptVaultItemsForAccount(
  */
 async function decryptVaultItems() {
 	const activeAccount = await storage.getActiveAccount();
+	console.log("[vault-handlers] decryptVaultItems - active account:", activeAccount);
 
 	// If active account is "all", fetch from all unlocked accounts
 	if (activeAccount?.type === "all") {
 		const unlockedEmails = await storage.getUnlockedAccounts?.();
+		console.log("[vault-handlers] Unlocked emails for 'all' mode:", unlockedEmails);
 
 		if (!unlockedEmails || unlockedEmails.length === 0) {
+			console.log("[vault-handlers] No unlocked accounts found");
 			return [];
 		}
 
@@ -122,6 +143,7 @@ async function decryptVaultItems() {
 		const allAccountItems = await Promise.all(
 			unlockedEmails.map(async (email) => {
 				try {
+					console.log(`[vault-handlers] Fetching items for ${email}...`);
 					// Get account metadata
 					const accountMeta = await storage.getAccountMetadata?.(email);
 					if (!accountMeta) {
@@ -129,7 +151,9 @@ async function decryptVaultItems() {
 						return [];
 					}
 
-					return decryptVaultItemsForAccount(email, accountMeta);
+					const items = await decryptVaultItemsForAccount(email, accountMeta);
+					console.log(`[vault-handlers] Got ${items.length} items for ${email}`);
+					return items;
 				} catch (error) {
 					console.error(
 						`[vault-handlers] Failed to fetch items for ${email}:`,
@@ -141,7 +165,9 @@ async function decryptVaultItems() {
 		);
 
 		// Flatten and return
-		return allAccountItems.flat();
+		const flattened = allAccountItems.flat();
+		console.log(`[vault-handlers] Total items from all accounts: ${flattened.length}`);
+		return flattened;
 	}
 
 	// Single account mode - use active account

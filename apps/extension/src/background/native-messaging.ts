@@ -178,7 +178,7 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 
 			// Store the MUK in memory
 			setMasterUnlockKey(muk);
-			await storage.setMasterUnlockKey(muk);
+			await storage.setMasterUnlockKey(muk, activeAccount.email);
 
 			// Get auth token and vault keys from response (desktop app provides them) or storage
 			let token: string;
@@ -186,9 +186,9 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 
 			if (responseData.auth_token) {
 				token = responseData.auth_token;
-				await storage.storeAuthToken(token);
+				await storage.storeAuthToken(token, activeAccount.email);
 			} else {
-				const storedToken = await storage.getAuthToken();
+				const storedToken = await storage.getAuthToken(activeAccount.email);
 				if (!storedToken) {
 					throw new Error("Missing auth token in response and storage");
 				}
@@ -197,9 +197,9 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 
 			if (responseData.vault_keys) {
 				vaultKeys = JSON.parse(responseData.vault_keys);
-				await storage.storeVaultKeys(vaultKeys);
+				await storage.storeVaultKeys(vaultKeys, activeAccount.email);
 			} else {
-				const storedVaultKeys = await storage.getVaultKeys();
+				const storedVaultKeys = await storage.getVaultKeys(activeAccount.email);
 				if (!storedVaultKeys || storedVaultKeys.length === 0) {
 					throw new Error("Missing vault keys in response and storage");
 				}
@@ -293,46 +293,39 @@ export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse>
 			throw new Error("No accounts found");
 		}
 
-		// Strategy: Use ONE biometric prompt for first account, then restore others from storage
-		// This matches desktop app's UX (see desktop/src/routes/unlock.tsx:102-197)
+		// Strategy: Unlock ALL accounts with biometric to ensure each gets fresh auth token
+		// The desktop app will show ONE biometric prompt for the first account,
+		// then subsequent unlocks should be fast since biometric auth is already approved.
 		// Note: Don't filter by extension's biometricEnabled flag - it may be out of sync.
 		// Let the desktop app determine if biometric is actually available.
 
 		const unlocked: string[] = [];
 		const failed: string[] = [];
 
-		// Step 1: Try to unlock first account with biometric (triggers ONE prompt)
-		// The desktop app will validate if biometric is actually enabled
-		let biometricSuccess = false;
-		let authenticatedEmail: string | null = null;
-
+		// Try to unlock ALL accounts with biometric
+		// Each account needs its own auth token from the desktop app
 		for (const account of accounts) {
 			let previousActive = null;
-			// Try biometric unlock for this account
 			try {
 				// Temporarily set as active account for native messaging
 				previousActive = await storage.getActiveAccount();
 				await storage.setActiveAccount({ type: "single", email: account.email });
 
 				// Call existing single-account handler (which uses native messaging)
-				// It will validate the session internally
+				// This will get a fresh auth token from the desktop app for this account
 				const result = await handleNativeBiometricUnlock();
 
-				if (result.success) {
-					biometricSuccess = true;
-					authenticatedEmail = account.email;
-					unlocked.push(account.email);
-
-					// Restore previous active account
-					if (previousActive) {
-						await storage.setActiveAccount(previousActive);
-					}
-					break;
-				}
-
-				// Restore previous active account if unlock wasn't successful
+				// Restore previous active account
 				if (previousActive) {
 					await storage.setActiveAccount(previousActive);
+				}
+
+				if (result.success) {
+					unlocked.push(account.email);
+					console.log(`[NATIVE_BIOMETRIC_UNLOCK_ALL] Successfully unlocked ${account.email}`);
+				} else {
+					failed.push(account.email);
+					console.warn(`[NATIVE_BIOMETRIC_UNLOCK_ALL] Failed to unlock ${account.email}`);
 				}
 			} catch (error) {
 				console.error(
@@ -343,35 +336,13 @@ export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse>
 				if (previousActive) {
 					await storage.setActiveAccount(previousActive);
 				}
-				// Continue to try next account
-			}
-		}
-
-		if (!biometricSuccess || !authenticatedEmail) {
-			throw new Error("Biometric authentication failed for all accounts");
-		}
-
-		// Step 2: Restore remaining accounts from encrypted storage (no additional prompts)
-		for (const account of accounts) {
-			if (account.email === authenticatedEmail) continue;
-
-			try {
-				// Try to restore this account's session from encrypted storage
-				// Pass skipBiometric=true to avoid triggering additional prompts
-				const restored = await storage.tryRestoreSession(true, account.email);
-
-				if (restored) {
-					unlocked.push(account.email);
-				} else {
-					failed.push(account.email);
-				}
-			} catch (error) {
-				console.error(
-					`[NATIVE_BIOMETRIC_UNLOCK_ALL] Failed to restore ${account.email}:`,
-					error,
-				);
 				failed.push(account.email);
 			}
+		}
+
+		// Check if at least one account was unlocked
+		if (unlocked.length === 0) {
+			throw new Error("Biometric authentication failed for all accounts");
 		}
 
 		// Set active mode based on accounts count and unlocked accounts
@@ -383,10 +354,29 @@ export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse>
 
 		const firstUnlockedEmail = unlocked[0]!; // Safe because we checked length above
 
+		console.log(
+			`[NATIVE_BIOMETRIC_UNLOCK_ALL] Unlocked ${unlocked.length} accounts:`,
+			unlocked,
+		);
+		console.log(`[NATIVE_BIOMETRIC_UNLOCK_ALL] Failed ${failed.length} accounts:`, failed);
+
 		if (accounts.length > 1) {
 			await storage.setActiveAccount({ type: "all" });
+			console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Set active account to 'all'");
 		} else {
 			await storage.setActiveAccount({ type: "single", email: firstUnlockedEmail });
+			console.log(
+				`[NATIVE_BIOMETRIC_UNLOCK_ALL] Set active account to '${firstUnlockedEmail}'`,
+			);
+		}
+
+		// Verify unlocked accounts in storage
+		if (storage.getUnlockedAccounts) {
+			const unlockedAccounts = await storage.getUnlockedAccounts();
+			console.log(
+				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Verified unlocked accounts:",
+				unlockedAccounts,
+			);
 		}
 
 		// IMPORTANT: Update activity FIRST to set timestamp, otherwise isUnlocked()

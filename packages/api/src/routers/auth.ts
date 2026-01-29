@@ -530,9 +530,12 @@ export const authRouter = router({
 	 * Get current user data
 	 */
 	me: protectedProcedure.query(async ({ ctx }) => {
-		const user = await getUserById(ctx.session.userId);
+		const userData = await db.query.user.findFirst({
+			where: (user, { eq }) => eq(user.id, ctx.session.userId),
+			with: { team: true },
+		});
 
-		if (!user) {
+		if (!userData) {
 			throw new TRPCError({
 				code: "NOT_FOUND",
 				message: "User not found",
@@ -540,13 +543,17 @@ export const authRouter = router({
 		}
 
 		return {
-			id: user.id,
-			email: user.email,
-			name: user.name,
-			secretKeyHint: user.secretKeyHint,
-			publicKey: user.publicKey,
-			encryptedPrivateKey: user.encryptedPrivateKey,
-			createdAt: user.createdAt,
+			id: userData.id,
+			email: userData.email,
+			name: userData.name,
+			teamId: userData.teamId,
+			teamName: userData.team?.name,
+			teamType: userData.team?.type,
+			role: userData.role,
+			secretKeyHint: userData.secretKeyHint,
+			publicKey: userData.publicKey,
+			encryptedPrivateKey: userData.encryptedPrivateKey,
+			createdAt: userData.createdAt,
 		};
 	}),
 

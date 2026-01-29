@@ -90,7 +90,7 @@ export function VaultPage() {
 	}, []);
 
 	const { data: items = [], isLoading } = useQuery<DecryptedItem[]>({
-		queryKey: ["vault-items"],
+		queryKey: ["vault-items", activeAccount],
 		queryFn: async () => {
 			const response = await chrome.runtime.sendMessage({
 				type: "GET_VAULT_ITEMS",
@@ -297,7 +297,7 @@ export function VaultPage() {
 																		>
 																			{
 																				(item as MultiAccountItem).account
-																					?.email
+																					?.name
 																			}
 																		</Badge>
 																	</div>
@@ -349,7 +349,7 @@ export function VaultPage() {
 																	variant="secondary"
 																	className="px-1.5 py-0 text-[10px]"
 																>
-																	{(item as MultiAccountItem).account?.email}
+																	{(item as MultiAccountItem).account?.name}
 																</Badge>
 															</div>
 														)}
