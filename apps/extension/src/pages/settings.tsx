@@ -31,11 +31,30 @@ const AUTO_LOCK_OPTIONS = [
 	{ value: "-1", label: "Never" },
 ] as const;
 
+// Format timeout milliseconds to human-readable string
+function formatTimeout(ms: number): string {
+	if (ms === -1) return "Never";
+	if (ms < 60000) return `${ms / 1000} seconds`;
+	if (ms < 3600000) return `${ms / 60000} minutes`;
+	return `${ms / 3600000} hour${ms / 3600000 > 1 ? "s" : ""}`;
+}
+
+interface DesktopStatus {
+	available: boolean;
+	locked: boolean;
+	unlockedAccounts: string[];
+	timestamp: number;
+	autolockTimeoutMs: number;
+}
+
 export function SettingsPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const [autoLockTimeout, setAutoLockTimeout] = useState(
 		String(DEFAULT_AUTO_LOCK_TIMEOUT_MS),
+	);
+	const [desktopStatus, setDesktopStatus] = useState<DesktopStatus | null>(
+		null,
 	);
 
 	// Query for current auto-lock timeout
@@ -53,6 +72,18 @@ export function SettingsPage() {
 			setAutoLockTimeout(String(autoLockTimeoutQuery.data));
 		}
 	}, [autoLockTimeoutQuery.data]);
+
+	// Check desktop status on page load
+	useEffect(() => {
+		chrome.runtime.sendMessage(
+			{ type: "CHECK_DESKTOP_STATUS" },
+			(response: DesktopStatus) => {
+				if (response && response.available) {
+					setDesktopStatus(response);
+				}
+			},
+		);
+	}, []);
 
 	const handleAutoLockTimeoutChange = async (value: string) => {
 		const timeoutMs = Number.parseInt(value, 10);
@@ -111,24 +142,63 @@ export function SettingsPage() {
 					<div className="space-y-4">
 						<h2 className="font-semibold text-lg">Security</h2>
 
+						{/* Desktop Connection Status */}
+						{desktopStatus !== null && (
+							<div className="rounded-md border p-3">
+								<div className="flex items-center gap-2 text-sm">
+									<div
+										className={`size-2 rounded-full ${
+											desktopStatus.available ? "bg-green-500" : "bg-gray-400"
+										}`}
+									/>
+									<span className="text-muted-foreground">
+										{desktopStatus.available
+											? `Desktop app connected (auto-lock: ${formatTimeout(desktopStatus.autolockTimeoutMs)})`
+											: "Desktop app not running"}
+									</span>
+								</div>
+							</div>
+						)}
+
 						<div className="flex items-center justify-between rounded-lg border p-4">
-							<div className="flex items-center gap-3">
-								<div className="flex size-10 items-center justify-center rounded-lg bg-muted">
-									<Clock className="size-5 text-muted-foreground" />
+							<div className="flex flex-1 flex-col gap-3">
+								<div className="flex items-center gap-3">
+									<div className="flex size-10 items-center justify-center rounded-lg bg-muted">
+										<Clock className="size-5 text-muted-foreground" />
+									</div>
+									<div>
+										<Label className="font-medium text-sm">
+											Auto-Lock Timeout
+										</Label>
+										<p className="text-muted-foreground text-xs">
+											{desktopStatus?.available
+												? "Managed by desktop app"
+												: "Lock your vault after inactivity"}
+										</p>
+									</div>
 								</div>
-								<div>
-									<Label className="font-medium text-sm">
-										Auto-Lock Timeout
-									</Label>
-									<p className="text-muted-foreground text-xs">
-										Lock your vault after inactivity
-									</p>
-								</div>
+								{desktopStatus?.available && (
+									<div className="ml-13 rounded-md bg-muted p-3 text-sm">
+										<p className="text-muted-foreground">
+											Using desktop app timeout:{" "}
+											<span className="font-medium text-foreground">
+												{formatTimeout(desktopStatus.autolockTimeoutMs)}
+											</span>
+										</p>
+										<p className="text-muted-foreground text-xs mt-1">
+											Extension timeout is only used when desktop app is not
+											running
+										</p>
+									</div>
+								)}
 							</div>
 							<Select
 								value={autoLockTimeout}
 								onValueChange={handleAutoLockTimeoutChange}
-								disabled={autoLockTimeoutQuery.isLoading}
+								disabled={
+									autoLockTimeoutQuery.isLoading ||
+									desktopStatus?.available === true
+								}
 							>
 								<SelectTrigger className="w-[140px]">
 									<SelectValue placeholder="Select timeout" />

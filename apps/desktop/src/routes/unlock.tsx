@@ -20,6 +20,7 @@ import { storage } from "@/lib/storage";
 
 interface UnlockSearchParams {
 	email?: string;
+	autoTrigger?: boolean;
 }
 
 export const Route = createFileRoute("/unlock")({
@@ -27,6 +28,7 @@ export const Route = createFileRoute("/unlock")({
 	validateSearch: (search: Record<string, unknown>): UnlockSearchParams => {
 		return {
 			email: typeof search.email === "string" ? search.email : undefined,
+			autoTrigger: search.autoTrigger === true || search.autoTrigger === "true",
 		};
 	},
 });
@@ -38,6 +40,7 @@ export function UnlockPage() {
 	const [password, setPassword] = useState("");
 	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
 	const hasAttemptedBiometric = useRef(false);
+	const { autoTrigger } = Route.useSearch();
 
 	const allAccounts = accounts.data ?? [];
 
@@ -170,10 +173,18 @@ export function UnlockPage() {
 	const canUseBiometric =
 		sessionState?.canBiometricUnlock && !requiresPasswordReentry;
 
+	// Reset attempt flag when autoTrigger changes to true (extension triggered unlock)
+	useEffect(() => {
+		if (autoTrigger) {
+			hasAttemptedBiometric.current = false;
+		}
+	}, [autoTrigger]);
+
 	// Auto-trigger biometric unlock on mount if available
+	// OR if triggered by extension (autoTrigger=true)
 	useEffect(() => {
 		if (
-			canUseBiometric &&
+			(canUseBiometric || autoTrigger) &&
 			!hasAttemptedBiometric.current &&
 			allAccounts.length > 0
 		) {
@@ -231,7 +242,7 @@ export function UnlockPage() {
 
 			return () => clearTimeout(timeout);
 		}
-	}, [canUseBiometric, allAccounts, queryClient, navigate]);
+	}, [canUseBiometric, autoTrigger, allAccounts, queryClient, navigate]);
 
 	// Show loading state while accounts are being fetched
 	if (accounts.isLoading) {

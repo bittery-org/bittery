@@ -256,10 +256,22 @@ export async function handleLogout(): Promise<MessageResponse> {
  * Handle LOCK message - Manual lock (clears MUK but keeps vault keys)
  */
 export async function handleLock(): Promise<MessageResponse> {
-	// Lock extension (clears session manager's global MUK and all per-account MUKs)
-	await lock();
+	try {
+		// Lock extension (clears session manager's global MUK and all per-account MUKs)
+		// This will throw an error if desktop is running
+		await lock();
 
-	return { success: true };
+		return { success: true };
+	} catch (error) {
+		// Return user-friendly error when desktop is managing lock state
+		return {
+			success: false,
+			error:
+				error instanceof Error
+					? error.message
+					: "Failed to lock - desktop app is managing vault state",
+		};
+	}
 }
 
 /**

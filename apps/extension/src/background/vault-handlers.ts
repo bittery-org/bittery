@@ -9,6 +9,8 @@ import { decrypt } from "../lib/wasm-crypto";
 import { updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
+import { desktopSync } from "./desktop-sync";
+import { decryptVaultItemsViaDesktop } from "./vault-utils";
 
 /**
  * Helper function to decrypt vault items for a specific account
@@ -186,7 +188,23 @@ async function decryptVaultItems() {
 export async function handleGetVaultItems(): Promise<MessageResponse> {
 	updateActivity();
 
-	const items = await decryptVaultItems();
+	// Check if desktop is available and we should use desktop mode
+	const desktopStatus = desktopSync.getLastStatus();
+	const desktopAvailable = desktopStatus?.available && !desktopStatus.locked;
+
+	let items;
+	if (desktopAvailable) {
+		console.log("[vault-handlers] Using desktop mode for decryption (desktop available)");
+		try {
+			items = await decryptVaultItemsViaDesktop();
+		} catch (error) {
+			console.warn("[vault-handlers] Desktop decryption failed, falling back to WASM:", error);
+			items = await decryptVaultItems();
+		}
+	} else {
+		console.log("[vault-handlers] Using WASM mode for decryption (desktop not available)");
+		items = await decryptVaultItems();
+	}
 
 	return {
 		success: true,

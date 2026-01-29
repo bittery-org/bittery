@@ -286,6 +286,19 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 		const cache = this.getAccountCache(resolvedEmail);
 		cache.masterUnlockKey = key;
+
+		// Update lock state marker for Rust lock-status endpoint
+		await this.updateLockStateMarker();
+
+		// Broadcast unlock event to extension (for SSE)
+		try {
+			const { invoke } = await import("@tauri-apps/api/core");
+			const unlockedAccounts = await this.getUnlockedAccounts();
+			await invoke("broadcast_unlock_event", { accounts: unlockedAccounts });
+			console.log("[storage-tauri] Broadcast unlock event to extension");
+		} catch (error) {
+			console.error("[storage-tauri] Failed to broadcast unlock event:", error);
+		}
 	}
 
 	async clearMasterUnlockKey(email?: string): Promise<void> {
@@ -294,6 +307,9 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 		const cache = this.getAccountCache(resolvedEmail);
 		cache.masterUnlockKey = null;
+
+		// Update lock state marker for Rust lock-status endpoint
+		await this.updateLockStateMarker();
 	}
 
 	async storeSessionData(
@@ -1253,18 +1269,34 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	}
 
 	/**
+	 * Update the lock state marker in store for Rust lock-status endpoint
+	 * This marker reflects which accounts have MUKs in memory (true source of truth)
+	 */
+	private async updateLockStateMarker(): Promise<void> {
+		const unlockedEmails = await this.getUnlockedAccounts();
+		const store = await this.getStore();
+		await store.set("bittery_unlocked_accounts", JSON.stringify(unlockedEmails));
+		await store.save();
+	}
+
+	/**
 	 * Lock all accounts (clear all in-memory caches and biometric auth timestamps)
 	 */
 	async lockAllAccounts(): Promise<void> {
 		accountCaches.clear();
 
-		// Clear last biometric auth timestamp for all accounts so biometric is required on next unlock
+		// Clear last biometric auth timestamp for all accounts
+		// This forces fresh biometric authentication on next unlock
+		// Note: JWT tokens are NOT deleted - they're for server auth, not lock state
 		const store = await this.getStore();
 		const accountsList = await this.getAccountsList();
 		for (const account of accountsList) {
-			const key = getAccountKey(account.email, "last_biometric_auth");
-			await store.delete(key);
+			const biometricKey = getAccountKey(account.email, "last_biometric_auth");
+			await store.delete(biometricKey);
 		}
+
+		// Update lock state marker (for Rust lock-status endpoint)
+		await store.set("bittery_unlocked_accounts", JSON.stringify([]));
 		await store.save();
 	}
 

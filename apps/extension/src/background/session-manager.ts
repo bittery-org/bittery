@@ -15,6 +15,10 @@ let keepaliveInterval: NodeJS.Timeout | null = null;
 // Cache the timeout value to avoid async lookups in synchronous functions
 let cachedAutoLockTimeoutMs = DEFAULT_AUTO_LOCK_TIMEOUT_MS;
 
+// Sentinel MUK for desktop mode (0xDE = "Desktop")
+// When this special value is set, it indicates the extension is unlocked via desktop app
+const DESKTOP_MODE_SENTINEL = new Uint8Array(32).fill(0xde);
+
 /**
  * Refresh the cached auto-lock timeout from storage
  * Should be called when settings change or on startup
@@ -69,7 +73,7 @@ function resetAutoLockTimer() {
 	// Use setTimeout for in-memory timer
 	autoLockTimer = setTimeout(() => {
 		console.log("Auto-locking due to inactivity");
-		lock().catch((error) => {
+		_lockInternal().catch((error) => {
 			console.error("Failed to lock extension:", error);
 		});
 	}, cachedAutoLockTimeoutMs);
@@ -110,17 +114,26 @@ function stopKeepalive() {
 /**
  * Lock the extension (clear MUK from memory)
  * Clears both the session manager's global MUK and all per-account MUKs in storage
- * Note: This function can be called by desktop sync or manually
+ * Note: This function prevents independent lock when desktop is running
+ * Use _lockInternal() for internal/desktop sync lock operations
  */
 export async function lock(): Promise<void> {
-	// Check if desktop is available and prevent independent lock
-	// (Desktop sync can still call this function to lock the extension)
+	// Prevent independent lock when desktop is available
 	if (desktopSync.isDesktopAvailable()) {
-		console.warn(
-			"[Session Manager] Desktop is available - extension lock is managed by desktop",
+		throw new Error(
+			"Cannot lock independently when desktop app is running. The vault will lock automatically when the desktop app locks.",
 		);
-		// Still allow lock to proceed (e.g., when called by desktop sync)
 	}
+
+	// Perform internal lock
+	await _lockInternal();
+}
+
+/**
+ * Internal lock function - bypasses desktop check
+ * Used by desktop sync, autolock, and other internal operations
+ */
+export async function _lockInternal(): Promise<void> {
 	// Clear session manager's global MUK (sentinel value for "unlocked" state)
 	masterUnlockKey = null;
 	lastActivityTimestamp = 0;
@@ -141,11 +154,66 @@ export async function lock(): Promise<void> {
 }
 
 /**
+ * Check if we're in desktop mode (sentinel MUK is set)
+ */
+export function isDesktopMode(): boolean {
+	if (!masterUnlockKey) return false;
+
+	// Check if MUK is the sentinel value
+	if (masterUnlockKey.length !== DESKTOP_MODE_SENTINEL.length) return false;
+
+	for (let i = 0; i < DESKTOP_MODE_SENTINEL.length; i++) {
+		if (masterUnlockKey[i] !== DESKTOP_MODE_SENTINEL[i]) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+/**
+ * Set sentinel MUK to mark as "unlocked via desktop"
+ */
+export function setDesktopModeSentinel(): void {
+	masterUnlockKey = DESKTOP_MODE_SENTINEL;
+	lastActivityTimestamp = Date.now();
+	console.log("[Session Manager] Set desktop mode sentinel MUK");
+}
+
+/**
  * Check if extension is unlocked
  */
 export function isUnlocked(): boolean {
 	if (!masterUnlockKey) return false;
 
+	// In desktop mode, check if sentinel exists and desktop is available AND unlocked
+	if (isDesktopMode()) {
+		const desktopAvailable = desktopSync.isDesktopAvailable();
+		const desktopStatus = desktopSync.getLastStatus();
+		const desktopLocked = desktopStatus?.locked ?? true;
+
+		if (!desktopAvailable) {
+			// Desktop disconnected, lock extension
+			console.log("[Session Manager] Desktop disconnected, locking extension");
+			_lockInternal().catch((error) => {
+				console.error("Failed to auto-lock:", error);
+			});
+			return false;
+		}
+
+		if (desktopLocked) {
+			// Desktop is locked, extension should be locked too
+			console.log("[Session Manager] Desktop is locked, locking extension");
+			_lockInternal().catch((error) => {
+				console.error("Failed to auto-lock:", error);
+			});
+			return false;
+		}
+
+		return true;
+	}
+
+	// Standalone mode: check auto-lock timeout
 	// If timeout is -1 (never), always return true if MUK exists
 	if (cachedAutoLockTimeoutMs === -1) {
 		return true;
@@ -156,7 +224,7 @@ export function isUnlocked(): boolean {
 
 	if (timeSinceLastActivity > cachedAutoLockTimeoutMs) {
 		// Auto-lock due to timeout (fire and forget)
-		lock().catch((error) => {
+		_lockInternal().catch((error) => {
 			console.error("Failed to auto-lock:", error);
 		});
 		return false;
@@ -210,7 +278,7 @@ export async function handleAutoLockAlarm(
 			const timeSinceLastActivity = now - lastActivityTimestamp;
 
 			if (timeSinceLastActivity >= cachedAutoLockTimeoutMs) {
-				await lock();
+				await _lockInternal();
 			} else {
 				// Reschedule if there was recent activity
 				const remainingTime = cachedAutoLockTimeoutMs - timeSinceLastActivity;

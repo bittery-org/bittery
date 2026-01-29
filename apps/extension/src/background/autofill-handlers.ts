@@ -5,13 +5,18 @@
 
 import { storage } from "../lib/storage";
 import { AUTOFILL_REAUTH_WINDOW_MS } from "./constants";
+import { desktopSync } from "./desktop-sync";
 import {
 	getLastActivityTimestamp,
 	isUnlocked,
 	updateActivity,
 } from "./session-manager";
 import type { MessageResponse } from "./types";
-import { decryptVaultItems, hostnameMatches } from "./vault-utils";
+import {
+	decryptVaultItems,
+	decryptVaultItemsViaDesktop,
+	hostnameMatches,
+} from "./vault-utils";
 
 /**
  * Handle CHECK_AUTOFILL_AUTH message - Check if autofill is authenticated
@@ -59,6 +64,28 @@ export async function handleGetAutofillItems(payload: {
 
 	const { hostname } = payload;
 
+	// Check if desktop is available and we should use desktop mode
+	const desktopStatus = desktopSync.getLastStatus();
+	const desktopAvailable = desktopStatus?.available && !desktopStatus.locked;
+
+	if (desktopAvailable) {
+		console.log(
+			"[autofill] Using desktop mode for decryption (desktop available)",
+		);
+		try {
+			const items = await decryptVaultItemsViaDesktop();
+			const filtered = items.filter(
+				(item) =>
+					item?.category === "login" && hostnameMatches(item?.url, hostname),
+			);
+			return { success: true, items: filtered };
+		} catch (error) {
+			console.error("[autofill] Desktop decryption failed, falling back to WASM:", error);
+			// Fall through to standalone mode
+		}
+	}
+
+	console.log("[autofill] Using standalone mode (WASM crypto)");
 	const items = await decryptVaultItems();
 
 	// Filter by hostname and only include login items
@@ -76,7 +103,26 @@ export async function handleGetAutofillItems(payload: {
 export async function handleGetAutofillCreditCards(): Promise<MessageResponse> {
 	updateActivity();
 
-	const items = await decryptVaultItems();
+	// Check if desktop is available
+	const desktopStatus = desktopSync.getLastStatus();
+	const desktopAvailable = desktopStatus?.available && !desktopStatus.locked;
+
+	let items;
+	if (desktopAvailable) {
+		console.log("[autofill] Using desktop mode for credit card decryption");
+		try {
+			items = await decryptVaultItemsViaDesktop();
+		} catch (error) {
+			console.error(
+				"[autofill] Desktop decryption failed, falling back to WASM:",
+				error,
+			);
+			items = await decryptVaultItems();
+		}
+	} else {
+		console.log("[autofill] Using standalone mode for credit cards");
+		items = await decryptVaultItems();
+	}
 
 	// Filter to only credit card items
 	const creditCards = items.filter(
@@ -92,7 +138,26 @@ export async function handleGetAutofillCreditCards(): Promise<MessageResponse> {
 export async function handleGetAutofillIdentities(): Promise<MessageResponse> {
 	updateActivity();
 
-	const items = await decryptVaultItems();
+	// Check if desktop is available
+	const desktopStatus = desktopSync.getLastStatus();
+	const desktopAvailable = desktopStatus?.available && !desktopStatus.locked;
+
+	let items;
+	if (desktopAvailable) {
+		console.log("[autofill] Using desktop mode for identity decryption");
+		try {
+			items = await decryptVaultItemsViaDesktop();
+		} catch (error) {
+			console.error(
+				"[autofill] Desktop decryption failed, falling back to WASM:",
+				error,
+			);
+			items = await decryptVaultItems();
+		}
+	} else {
+		console.log("[autofill] Using standalone mode for identities");
+		items = await decryptVaultItems();
+	}
 
 	// Filter to only identity items
 	const identities = items.filter((item) => item?.category === "identity");

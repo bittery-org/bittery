@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { AccountProvider } from "./contexts/account-context";
 import { queryClient, trpc, trpcClient } from "./lib/providers";
 import { initializeStorage } from "./lib/storage";
 import { DesktopPlatformProvider } from "./providers/platform-provider";
@@ -35,11 +36,13 @@ async function initializeApp() {
 			<QueryClientProvider client={queryClient}>
 				{/* @ts-ignore */}
 				<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-					<DesktopSyncProvider queryClient={queryClient}>
-						<DesktopPlatformProvider>
-							<RouterProvider router={router} />
-						</DesktopPlatformProvider>
-					</DesktopSyncProvider>
+					<AccountProvider router={router}>
+						<DesktopSyncProvider queryClient={queryClient}>
+							<DesktopPlatformProvider>
+								<RouterProvider router={router} />
+							</DesktopPlatformProvider>
+						</DesktopSyncProvider>
+					</AccountProvider>
 				</TRPCProvider>
 			</QueryClientProvider>
 		</React.StrictMode>,

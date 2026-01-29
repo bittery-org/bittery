@@ -6,6 +6,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Fingerprint } from "lucide-react";
 import { useEffect, useState } from "react";
 import { type AccountMetadata, storage } from "@/lib/storage";
+import { useOptionalAccount } from "@/contexts/account-context";
 
 interface LoginSearchParams {
 	addingAccount?: boolean;
@@ -24,6 +25,7 @@ export const Route = createFileRoute("/login")({
 export function LoginPage() {
 	const navigate = useNavigate();
 	const { addingAccount } = Route.useSearch();
+	const accountContext = useOptionalAccount();
 	const queryClient = useQueryClient();
 	const fallbackServerUrl =
 		normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
@@ -95,6 +97,11 @@ export function LoginPage() {
 
 			// Add to accounts list
 			await storage.addAccountToList(accountMetadata);
+
+			// Broadcast unlock event to extension
+			if (accountContext) {
+				await accountContext.broadcastUnlockEvent([normalizedEmail]);
+			}
 
 			// Refresh accounts queries
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });

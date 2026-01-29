@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import type { Router } from "@tanstack/react-router";
 import {
 	createContext,
 	type ReactNode,
@@ -26,7 +27,13 @@ interface AccountContextValue {
 
 const AccountContext = createContext<AccountContextValue | null>(null);
 
-export function AccountProvider({ children }: { children: ReactNode }) {
+export function AccountProvider({
+	children,
+	router,
+}: {
+	children: ReactNode;
+	router: Router<any, any>;
+}) {
 	const [activeAccount, setActiveAccount] = useState<AccountMetadata | null>(
 		null,
 	);
@@ -164,7 +171,15 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 		await queryClient.cancelQueries();
 		queryClient.clear();
 
-		// TODO: Broadcast lock event to extension (Phase 2)
+		// Broadcast lock event to extension
+		try {
+			const { invoke } = await import("@tauri-apps/api/core");
+			await invoke("broadcast_lock_event", { reason: "manual" });
+			console.log("[AccountContext] Broadcast lock event to extension");
+		} catch (error) {
+			console.error("[AccountContext] Failed to broadcast lock event:", error);
+		}
+
 		console.log("[AccountContext] All accounts locked");
 	}, [queryClient]);
 
@@ -180,6 +195,36 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 			autolockService.current?.dispose();
 		};
 	}, [lockAllAccounts]);
+
+	// Listen for trigger-biometric-unlock event from extension (via desktop HTTP endpoint)
+	useEffect(() => {
+		let unlisten: (() => void) | undefined;
+
+		const setupListener = async () => {
+			try {
+				const { listen } = await import("@tauri-apps/api/event");
+				unlisten = await listen("trigger-biometric-unlock", () => {
+					console.log("[AccountContext] Received trigger-biometric-unlock event from extension");
+					// Navigate to unlock page with auto-trigger flag
+					if (router) {
+						router.navigate({ to: "/unlock", search: { autoTrigger: true } });
+					} else {
+						console.error("[AccountContext] Router not available for navigation");
+					}
+				});
+			} catch (error) {
+				console.error("[AccountContext] Failed to setup trigger-biometric-unlock listener:", error);
+			}
+		};
+
+		setupListener();
+
+		return () => {
+			if (unlisten) {
+				unlisten();
+			}
+		};
+	}, [router]);
 
 	return (
 		<AccountContext.Provider

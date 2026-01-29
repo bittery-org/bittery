@@ -6,7 +6,12 @@
 import { storage } from "../lib/storage";
 import { decrypt } from "../lib/wasm-crypto";
 import { NATIVE_HOST_NAME } from "./constants";
-import { setMasterUnlockKey, updateActivity } from "./session-manager";
+import { desktopSync } from "./desktop-sync";
+import {
+	setDesktopModeSentinel,
+	setMasterUnlockKey,
+	updateActivity,
+} from "./session-manager";
 import type { MessageResponse } from "./types";
 
 /**
@@ -287,8 +292,7 @@ export async function handleOpenDesktopApp(): Promise<MessageResponse> {
 
 /**
  * Biometric unlock all accounts
- * Strategy: Use ONE biometric prompt for first account, then restore others from storage
- * This matches desktop app's UX (desktop/src/routes/unlock.tsx:102-197)
+ * Strategy: If desktop available, unlock desktop. Otherwise unlock extension locally.
  */
 export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse> {
 	console.log(
@@ -302,18 +306,94 @@ export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse>
 			throw new Error("No accounts found");
 		}
 
+		// Check if desktop is available and unlocked
+		const desktopStatus = desktopSync.getLastStatus();
+		const desktopAvailable = desktopStatus?.available;
+		const desktopLocked = desktopStatus?.locked ?? true;
+		const desktopUnlockedAccounts = desktopStatus?.unlockedAccounts ?? [];
+
+		console.log(
+			"[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop available:",
+			desktopAvailable,
+			"locked:",
+			desktopLocked,
+			"unlocked accounts:",
+			desktopUnlockedAccounts,
+		);
+
+		// If desktop is available AND unlocked, we can use desktop mode directly
+		if (desktopAvailable && !desktopLocked && desktopUnlockedAccounts.length > 0) {
+			console.log(
+				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop is already unlocked, using desktop mode",
+			);
+
+			// Desktop is already unlocked - just set sentinel and return success
+			setDesktopModeSentinel();
+
+			return {
+				success: true,
+				result: {
+					unlocked: desktopUnlockedAccounts,
+					failed: [],
+					mode: "desktop",
+				},
+			};
+		}
+
+		// If desktop is available but locked, trigger unlock UI but DON'T return success
+		// The extension should wait for the unlock to complete via SSE events
+		if (desktopAvailable && desktopLocked) {
+			console.log(
+				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop is locked, triggering desktop unlock UI",
+			);
+			const DESKTOP_BASE_URL = "http://localhost:48765";
+
+			try {
+				const response = await fetch(
+					`${DESKTOP_BASE_URL}/native-bridge/trigger-unlock`,
+					{
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+					},
+				);
+
+				if (!response.ok) {
+					throw new Error(`Desktop unlock trigger failed: ${response.statusText}`);
+				}
+
+				console.log(
+					"[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop unlock UI triggered",
+				);
+
+				// Don't return success - throw an error to let the UI know unlock is pending
+				throw new Error("Desktop app is locked. Please unlock in the desktop app.");
+			} catch (error) {
+				console.warn(
+					"[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop unlock trigger failed, falling back to native messaging:",
+					error,
+				);
+				// If we successfully triggered the desktop UI, re-throw the error
+				if (error instanceof Error && error.message.includes("Desktop app is locked")) {
+					throw error;
+				}
+				// Otherwise fall through to native messaging fallback
+			}
+		}
+
+		// Fallback: Use native messaging (for standalone mode or if HTTP failed)
+		console.log(
+			"[NATIVE_BIOMETRIC_UNLOCK_ALL] Using native messaging unlock (standalone mode)",
+		);
+
 		// Generate challenge for replay attack protection
 		const challenge = crypto.randomUUID();
 		const extensionId = chrome.runtime.id;
 
-		console.log(
-			"[NATIVE_BIOMETRIC_UNLOCK_ALL] Sending request to desktop app for all accounts",
-		);
 		console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Challenge:", challenge);
 		console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Extension ID:", extensionId);
 
-		// Call the new biometric-unlock-all endpoint
-		// This will show ONE biometric prompt and unlock all accounts
+		// Call the native messaging endpoint
+		// This will unlock the extension locally in standalone mode
 		const response = await sendNativeMessage({
 			type: "BIOMETRIC_UNLOCK_ALL_REQUEST",
 			challenge,

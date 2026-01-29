@@ -10,7 +10,7 @@ import {
 	RouterProvider,
 } from "@tanstack/react-router";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
-import React from "react";
+import React, { useEffect } from "react";
 import ReactDOM from "react-dom/client";
 import { storage } from "./lib/storage";
 import { ExtensionPlatformProvider } from "./providers/platform-provider";
@@ -73,6 +73,36 @@ declare module "@tanstack/react-router" {
 }
 
 function Popup() {
+	// Listen for desktop lock/unlock events
+	useEffect(() => {
+		const handleMessage = (message: {
+			type: string;
+			reason?: string;
+			accounts?: string[];
+		}) => {
+			if (message.type === "DESKTOP_LOCKED") {
+				console.log(
+					"[Popup] Desktop locked, clearing cache and navigating to unlock",
+				);
+				// Clear all cached data
+				queryClient.clear();
+				// Navigate to unlock screen
+				router.navigate({ to: "/unlock" });
+			} else if (message.type === "DESKTOP_UNLOCKED") {
+				console.log(
+					"[Popup] Desktop unlocked, clearing cache and navigating to vault",
+				);
+				// Clear all cached data to fetch fresh
+				queryClient.clear();
+				// Navigate to vault screen
+				router.navigate({ to: "/vault" });
+			}
+		};
+
+		chrome.runtime.onMessage.addListener(handleMessage);
+		return () => chrome.runtime.onMessage.removeListener(handleMessage);
+	}, []);
+
 	return (
 		<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
 			<QueryClientProvider client={queryClient}>

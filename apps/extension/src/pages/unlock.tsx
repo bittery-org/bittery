@@ -28,6 +28,22 @@ export function UnlockPage() {
 		queryFn: () => storage.getAccountsList(),
 	});
 
+	// Check desktop sync status
+	const { data: desktopStatus } = useQuery({
+		queryKey: ["desktop-sync-status-unlock"],
+		queryFn: async () => {
+			try {
+				const response = await chrome.runtime.sendMessage({
+					type: "CHECK_DESKTOP_STATUS",
+				});
+				return response;
+			} catch {
+				return null;
+			}
+		},
+		refetchInterval: 3000,
+	});
+
 	// Unlock all accounts with password
 	const unlockMutation = useMutation({
 		mutationFn: async (values: { password: string }) => {
@@ -115,7 +131,15 @@ export function UnlockPage() {
 		},
 		onError: (error: Error) => {
 			setVaultState("locked");
-			toast.error(error.message || "Biometric unlock failed");
+			// Don't show error toast if desktop is locked (user will unlock in desktop)
+			if (error.message?.includes("Desktop app is locked")) {
+				console.log(
+					"[Unlock] Desktop is locked, waiting for unlock via desktop app",
+				);
+				// User can still use password below
+			} else {
+				toast.error(error.message || "Biometric unlock failed");
+			}
 		},
 	});
 
@@ -205,6 +229,18 @@ export function UnlockPage() {
 				</div>
 
 				<Card className="border-0 bg-transparent p-6 shadow-none sm:border sm:bg-card sm:shadow-sm">
+					{/* Desktop app locked banner */}
+					{desktopStatus?.success &&
+						desktopStatus?.available &&
+						desktopStatus?.locked && (
+							<div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+								<p className="text-center text-amber-800 text-sm dark:text-amber-200">
+									Desktop app is locked. Unlock in desktop app for best
+									experience, or use password below for extension-only access.
+								</p>
+							</div>
+						)}
+
 					{biometricAttempted && !biometricUnlockMutation.isPending && (
 						<div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
 							<p className="text-center text-blue-800 text-sm dark:text-blue-200">

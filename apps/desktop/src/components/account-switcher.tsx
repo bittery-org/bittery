@@ -12,6 +12,7 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, Users } from "lucide-react";
 import { useState } from "react";
+import { useAccount } from "@/contexts/account-context";
 import { storage } from "@/lib/storage";
 import { useQueryInvalidator } from "@/providers/sync-provider";
 import { AccountAvatar } from "./account-avatar";
@@ -25,8 +26,9 @@ export function AccountSwitcher() {
 		unlockedEmails,
 		switchAccount,
 		removeAccount,
-		lockAllAccounts,
 	} = useAccountSwitcher();
+	// Use AccountContext's lockAllAccounts (has broadcast) instead of hook's version
+	const { lockAllAccounts: lockAllAccountsWithBroadcast } = useAccount();
 	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
 	const [accountToRemove, setAccountToRemove] = useState<string | null>(null);
@@ -90,7 +92,8 @@ export function AccountSwitcher() {
 
 	const handleLockAll = async () => {
 		try {
-			await lockAllAccounts.mutateAsync();
+			// Use AccountContext's version which broadcasts to extension
+			await lockAllAccountsWithBroadcast();
 			navigate({ to: "/unlock" });
 			toast.success("All accounts locked");
 		} catch (error) {
