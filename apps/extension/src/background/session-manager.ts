@@ -5,6 +5,7 @@
 
 import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "../lib/storage";
 import { AUTO_LOCK_ALARM_NAME, KEEPALIVE_INTERVAL_MS } from "./constants";
+import { desktopSync } from "./desktop-sync";
 
 // In-memory state
 let masterUnlockKey: Uint8Array | null = null;
@@ -24,8 +25,16 @@ export async function refreshAutoLockTimeout(): Promise<void> {
 
 /**
  * Get the current auto-lock timeout (cached value)
+ * If desktop is available, use desktop timeout; otherwise use extension timeout
  */
 export function getAutoLockTimeoutCached(): number {
+	// Use desktop timeout when available
+	const desktopTimeout = desktopSync.getDesktopTimeout();
+	if (desktopTimeout !== null) {
+		return desktopTimeout;
+	}
+
+	// Fallback to extension timeout
 	return cachedAutoLockTimeoutMs;
 }
 
@@ -101,8 +110,17 @@ function stopKeepalive() {
 /**
  * Lock the extension (clear MUK from memory)
  * Clears both the session manager's global MUK and all per-account MUKs in storage
+ * Note: This function can be called by desktop sync or manually
  */
 export async function lock(): Promise<void> {
+	// Check if desktop is available and prevent independent lock
+	// (Desktop sync can still call this function to lock the extension)
+	if (desktopSync.isDesktopAvailable()) {
+		console.warn(
+			"[Session Manager] Desktop is available - extension lock is managed by desktop",
+		);
+		// Still allow lock to proceed (e.g., when called by desktop sync)
+	}
 	// Clear session manager's global MUK (sentinel value for "unlocked" state)
 	masterUnlockKey = null;
 	lastActivityTimestamp = 0;

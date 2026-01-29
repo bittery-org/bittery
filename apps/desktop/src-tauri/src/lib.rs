@@ -8,15 +8,43 @@ use std::sync::Arc;
 use base64::Engine;
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use hyper::service::{make_service_fn, service_fn};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, broadcast};
 use tauri::Runtime;
 use tauri_plugin_store::Store;
 
+/// Lock event types for SSE broadcasting
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+enum LockEvent {
+    Lock {
+        reason: String,
+        timestamp: i64,
+    },
+    Unlock {
+        accounts: Vec<String>,
+        timestamp: i64,
+    },
+    DesktopClose {
+        timestamp: i64,
+    },
+}
+
 /// State for native bridge HTTP server
-#[derive(Default)]
 struct NativeBridgeState {
     /// Pending unlock requests (challenge -> extension_id)
     pending_requests: Arc<Mutex<std::collections::HashMap<String, String>>>,
+    /// Broadcast channel for lock events (for SSE)
+    lock_events: broadcast::Sender<LockEvent>,
+}
+
+impl Default for NativeBridgeState {
+    fn default() -> Self {
+        let (tx, _) = broadcast::channel(100);
+        Self {
+            pending_requests: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            lock_events: tx,
+        }
+    }
 }
 
 const ACTIVE_ACCOUNT_KEY: &str = "bittery_active_account";
@@ -45,24 +73,26 @@ fn get_active_account_email<R: Runtime>(store: &Store<R>) -> Option<String> {
 
 /// Start HTTP server for native messaging bridge
 async fn start_native_bridge_server(app_handle: tauri::AppHandle) {
-
+    let state = Arc::new(NativeBridgeState::default());
     let addr = SocketAddr::from(([127, 0, 0, 1], 48765));
 
     let make_svc = make_service_fn(move |_conn| {
         let app_handle = app_handle.clone();
-        
+        let state = state.clone();
+
         async move {
             Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
                 let app_handle = app_handle.clone();
-                handle_native_bridge_request(app_handle, req)
+                let state = state.clone();
+                handle_native_bridge_request(app_handle, state, req)
             }))
         }
     });
 
     let server = Server::bind(&addr).serve(make_svc);
-    
+
     eprintln!("Native bridge server listening on {}", addr);
-    
+
     if let Err(e) = server.await {
         eprintln!("Native bridge server error: {}", e);
     }
@@ -70,11 +100,82 @@ async fn start_native_bridge_server(app_handle: tauri::AppHandle) {
 
 async fn handle_native_bridge_request(
     app_handle: tauri::AppHandle,
+    state: Arc<NativeBridgeState>,
     req: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
     let path = req.uri().path();
-    
+
     match (req.method(), path) {
+        (&Method::GET, "/native-bridge/lock-status") => {
+            // Return current lock status of all accounts
+            match get_lock_status_internal(&app_handle).await {
+                Ok(status) => {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "application/json")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(Body::from(status.to_string()))
+                        .unwrap())
+                }
+                Err(e) => {
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as i64;
+                    let error = serde_json::json!({
+                        "locked": true,
+                        "unlocked_accounts": [],
+                        "timestamp": timestamp,
+                        "autolock_timeout_ms": -1,
+                        "error": e
+                    });
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "application/json")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(Body::from(error.to_string()))
+                        .unwrap())
+                }
+            }
+        }
+
+        (&Method::GET, "/native-bridge/lock-events") => {
+            // SSE endpoint for real-time lock/unlock events
+            let mut rx = state.lock_events.subscribe();
+
+            let event_stream = async_stream::stream! {
+                // Send initial connected event
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as i64;
+                yield Ok::<_, std::io::Error>(format!("event: connected\ndata: {}\n\n", serde_json::json!({"timestamp": timestamp})));
+
+                // Stream lock events as they arrive
+                while let Ok(event) = rx.recv().await {
+                    let event_name = match &event {
+                        LockEvent::Lock { .. } => "lock",
+                        LockEvent::Unlock { .. } => "unlock",
+                        LockEvent::DesktopClose { .. } => "desktop_close",
+                    };
+                    let data = serde_json::to_string(&event).unwrap_or_default();
+                    yield Ok(format!("event: {}\ndata: {}\n\n", event_name, data));
+                }
+            };
+
+            let body = Body::wrap_stream(event_stream);
+
+            Ok(Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "text/event-stream")
+                .header("Cache-Control", "no-cache")
+                .header("Connection", "keep-alive")
+                .header("Access-Control-Allow-Origin", "*")
+                .body(body)
+                .unwrap())
+        }
+
+        (&Method::GET, "/native-bridge/biometric-status") =>
         (&Method::GET, "/native-bridge/biometric-status") => {
             // Check biometric availability and if session exists
             match check_biometric_status_internal(&app_handle).await {
@@ -661,6 +762,63 @@ async fn biometric_unlock_all_internal(
     });
 
     Ok(response)
+}
+
+/// Get current lock status of all accounts
+async fn get_lock_status_internal(
+    app_handle: &tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    use tauri_plugin_store::StoreExt;
+
+    let store = app_handle
+        .store("store.json")
+        .map_err(|e| format!("Failed to access store: {}", e))?;
+
+    // Get accounts list
+    let accounts_value = store.get("bittery_accounts_list");
+    let mut unlocked_accounts = Vec::new();
+
+    if let Some(accounts_str_value) = accounts_value {
+        if let Some(accounts_str) = accounts_str_value.as_str() {
+            if let Ok(accounts_json) = serde_json::from_str::<serde_json::Value>(accounts_str) {
+                if let Some(accounts_array) = accounts_json.get("accounts").and_then(|a| a.as_array()) {
+                    // Check each account for a valid session (has jwt token = unlocked)
+                    for account in accounts_array {
+                        if let Some(email) = account.get("email").and_then(|e| e.as_str()) {
+                            let jwt_key = account_key(email, "jwt_token");
+                            if store.get(&jwt_key).is_some() {
+                                unlocked_accounts.push(email.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Get autolock timeout from first account (they should all be the same, but use first as default)
+    let autolock_timeout_ms = if let Some(first_email) = unlocked_accounts.first() {
+        let timeout_key = account_key(first_email, "autolock_timeout");
+        store
+            .get(&timeout_key)
+            .and_then(|v| v.as_i64())
+            .unwrap_or(600000) // Default 10 minutes
+    } else {
+        600000
+    };
+
+    let locked = unlocked_accounts.is_empty();
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+
+    Ok(serde_json::json!({
+        "locked": locked,
+        "unlocked_accounts": unlocked_accounts,
+        "timestamp": timestamp,
+        "autolock_timeout_ms": autolock_timeout_ms,
+    }))
 }
 
 /// Bring the app window to foreground

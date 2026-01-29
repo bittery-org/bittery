@@ -5,9 +5,12 @@ import {
 	useCallback,
 	useContext,
 	useEffect,
+	useRef,
 	useState,
 } from "react";
 import { type AccountMetadata, storage } from "@/lib/storage";
+import { createDesktopAutolockService } from "@/services/autolock-service";
+import type { IAutolockService } from "@bittery/hooks/types";
 
 interface AccountContextValue {
 	activeAccount: AccountMetadata | null;
@@ -30,6 +33,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 	const [allAccounts, setAllAccounts] = useState<AccountMetadata[]>([]);
 	const [isLoading, setIsLoading] = useState(true);
 	const queryClient = useQueryClient();
+	const autolockService = useRef<IAutolockService | null>(null);
 
 	// Load accounts on mount
 	const refreshAccounts = useCallback(async () => {
@@ -159,7 +163,23 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 		// Cancel and clear all queries
 		await queryClient.cancelQueries();
 		queryClient.clear();
+
+		// TODO: Broadcast lock event to extension (Phase 2)
+		console.log("[AccountContext] All accounts locked");
 	}, [queryClient]);
+
+	// Initialize autolock service after lockAllAccounts is defined
+	useEffect(() => {
+		autolockService.current = createDesktopAutolockService(
+			storage,
+			lockAllAccounts,
+		);
+		autolockService.current.initialize();
+
+		return () => {
+			autolockService.current?.dispose();
+		};
+	}, [lockAllAccounts]);
 
 	return (
 		<AccountContext.Provider

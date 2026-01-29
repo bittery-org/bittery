@@ -16,16 +16,6 @@ import {
 	handleQuickUnlock,
 	handleQuickUnlockAll,
 } from "./auth-handlers";
-
-// Initialize WASM crypto and storage on service worker load
-initWasmCrypto().catch((error) => {
-	console.error("[Background] Failed to initialize WASM crypto:", error);
-});
-
-storage.initialize().catch((error) => {
-	console.error("[Background] Failed to initialize storage:", error);
-});
-
 import {
 	handleCheckAutofillAuth,
 	handleGetAutofillCreditCards,
@@ -38,6 +28,7 @@ import {
 	handleSaveNewCredential,
 	handleUpdateExistingCredential,
 } from "./credential-handlers";
+import { desktopSync } from "./desktop-sync";
 import {
 	handleCheckNativeBiometric,
 	handleNativeBiometricUnlock,
@@ -63,6 +54,20 @@ import {
 	handleGetVaultItems,
 	handleGetWritableVaults,
 } from "./vault-handlers";
+
+// Initialize WASM crypto and storage on service worker load
+initWasmCrypto().catch((error) => {
+	console.error("[Background] Failed to initialize WASM crypto:", error);
+});
+
+storage.initialize().catch((error) => {
+	console.error("[Background] Failed to initialize storage:", error);
+});
+
+// Initialize desktop sync
+desktopSync.initialize().catch((error) => {
+	console.error("[Background] Failed to initialize desktop sync:", error);
+});
 
 console.log("Bittery background service worker loaded");
 
@@ -274,6 +279,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 					// Refresh cached auto-lock timeout when settings change
 					await refreshAutoLockTimeout();
 					sendResponse({ success: true });
+					break;
+				}
+
+				// Desktop sync
+				case "CHECK_DESKTOP_STATUS": {
+					const status = desktopSync.getLastStatus();
+					sendResponse({
+						success: true,
+						available: desktopSync.isDesktopAvailable(),
+						...status,
+					});
 					break;
 				}
 
