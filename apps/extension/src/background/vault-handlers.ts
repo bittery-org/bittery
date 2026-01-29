@@ -27,33 +27,20 @@ async function decryptVaultItemsForAccount(
 	}
 
 	// Get auth token for this account
-	console.log(`[vault-handlers] Getting auth token for ${email}...`);
 	const authToken = await storage.getAuthToken(email);
-	console.log(`[vault-handlers] Auth token for ${email}:`, authToken ? `${authToken.substring(0, 20)}...` : "null");
 	if (!authToken) {
 		console.warn(`[vault-handlers] No auth token for ${email}`);
 		return [];
 	}
 
-	console.log(`[vault-handlers] Getting server URL for ${email}...`);
 	const serverUrl =
 		(await storage.getServerUrl(email)) || "http://localhost:3000";
-	console.log(`[vault-handlers] Server URL for ${email}: ${serverUrl}`);
-
-	console.log(`[vault-handlers] Creating tRPC client for ${email}...`);
 	const accountClient = createAccountTrpcClient(authToken, serverUrl);
-	console.log(`[vault-handlers] tRPC client created for ${email}`);
 
 	// Fetch vaults for this account
 	console.log(`[vault-handlers] Fetching vaults for ${email} from ${serverUrl}...`);
-	let vaults;
-	try {
-		vaults = await accountClient.vault.list.query();
-		console.log(`[vault-handlers] Got ${vaults.length} vaults for ${email}`, vaults.map(v => ({id: v.id, name: v.name, itemCount: v.items.length})));
-	} catch (error) {
-		console.error(`[vault-handlers] Error fetching vaults for ${email}:`, error);
-		throw error;
-	}
+	const vaults = await accountClient.vault.list.query();
+	console.log(`[vault-handlers] Got ${vaults.length} vaults for ${email}`);
 
 	const decryptedVaultKeys: Record<string, Uint8Array> = {};
 

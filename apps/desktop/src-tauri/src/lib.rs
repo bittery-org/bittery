@@ -161,7 +161,67 @@ async fn handle_native_bridge_request(
                 }
             }
         }
-        
+
+        (&Method::POST, "/native-bridge/biometric-unlock-all") => {
+            // Read request body
+            let body_bytes = match hyper::body::to_bytes(req.into_body()).await {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    let error = serde_json::json!({
+                        "error": format!("Failed to read request body: {}", e)
+                    });
+                    return Ok(Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(error.to_string()))
+                        .unwrap());
+                }
+            };
+
+            let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+
+            // Parse request
+            let request: serde_json::Value = match serde_json::from_str(&body_str) {
+                Ok(req) => req,
+                Err(e) => {
+                    let error = serde_json::json!({
+                        "error": format!("Invalid JSON: {}", e)
+                    });
+                    return Ok(Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(error.to_string()))
+                        .unwrap());
+                }
+            };
+
+            let challenge = request["challenge"].as_str().unwrap_or("");
+            let extension_id = request["extension_id"].as_str().unwrap_or("");
+
+            eprintln!("[HTTP Handler] Biometric unlock all - Received request");
+
+            // Trigger biometric unlock for all accounts
+            match biometric_unlock_all_internal(&app_handle, challenge, extension_id).await {
+                Ok(response) => {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(response.to_string()))
+                        .unwrap())
+                }
+                Err(e) => {
+                    let error = serde_json::json!({
+                        "error": e.to_string()
+                    });
+                    Ok(Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(error.to_string()))
+                        .unwrap())
+                }
+            }
+        }
+
         (&Method::POST, "/native-bridge/open-app") => {
             // Bring app to foreground or show window
             match open_app_internal(&app_handle) {
@@ -446,6 +506,161 @@ async fn biometric_unlock_internal(
         extension_id.to_string(),
         email.map(|e| e.to_string()),
     ).await
+}
+
+/// Perform biometric unlock for all accounts with single prompt
+async fn biometric_unlock_all_internal(
+    app_handle: &tauri::AppHandle,
+    challenge: &str,
+    extension_id: &str,
+) -> Result<serde_json::Value, String> {
+    use tauri_plugin_biometry::BiometryExt;
+    use tauri_plugin_store::StoreExt;
+
+    eprintln!("[Biometric Unlock All] Request from extension: {}", extension_id);
+    eprintln!("[Biometric Unlock All] Challenge: {}", challenge);
+
+    // 1. Authenticate with biometric ONCE (Touch ID / Windows Hello)
+    let biometry = app_handle.biometry();
+    let auth_options = tauri_plugin_biometry::AuthOptions::default();
+    biometry.authenticate("Unlock all Bittery accounts for browser extension".to_string(), auth_options)
+        .map_err(|e| format!("Biometric authentication failed: {}", e))?;
+
+    eprintln!("[Biometric Unlock All] ✓ Authentication successful");
+
+    // 2. Get accounts list from store
+    let store = app_handle.store("store.json")
+        .map_err(|e| format!("Failed to access store: {}", e))?;
+
+    let accounts_value = store.get("bittery_accounts_list")
+        .ok_or("No accounts list found")?;
+
+    let accounts_str = accounts_value.as_str()
+        .ok_or("Invalid accounts list format")?;
+
+    let accounts_json: serde_json::Value = serde_json::from_str(accounts_str)
+        .map_err(|e| format!("Failed to parse accounts list: {}", e))?;
+
+    let accounts_array = accounts_json.get("accounts")
+        .and_then(|a| a.as_array())
+        .ok_or("No accounts array found")?;
+
+    eprintln!("[Biometric Unlock All] Found {} accounts", accounts_array.len());
+
+    // 3. Get device key (shared across all accounts)
+    let device_key_value = store.get("bittery_device_key")
+        .ok_or("No device key found")?;
+
+    let device_key_base64 = device_key_value.as_str()
+        .ok_or("Invalid device key format")?;
+
+    // 4. Unlock all accounts (no additional biometric prompts)
+    let mut accounts_data = Vec::new();
+    let mut unlocked_emails = Vec::new();
+    let mut failed_emails = Vec::new();
+
+    for account in accounts_array {
+        let email = match account.get("email").and_then(|e| e.as_str()) {
+            Some(e) => e.to_lowercase(),
+            None => {
+                eprintln!("[Biometric Unlock All] Skipping account with no email");
+                continue;
+            }
+        };
+
+        eprintln!("[Biometric Unlock All] Processing account: {}", email);
+
+        // Get session data for this account
+        let session_key = account_key(&email, "session_data");
+        let jwt_key = account_key(&email, "jwt_token");
+        let vault_key = account_key(&email, "vault_keys");
+
+        let session_data_value = match store.get(&session_key) {
+            Some(v) => v,
+            None => {
+                eprintln!("[Biometric Unlock All] No session data for {}", email);
+                failed_emails.push(email);
+                continue;
+            }
+        };
+
+        let session_data_str = match session_data_value.as_str() {
+            Some(s) => s,
+            None => {
+                eprintln!("[Biometric Unlock All] Invalid session data format for {}", email);
+                failed_emails.push(email);
+                continue;
+            }
+        };
+
+        let session_data: serde_json::Value = match serde_json::from_str(session_data_str) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("[Biometric Unlock All] Failed to parse session data for {}: {}", email, e);
+                failed_emails.push(email);
+                continue;
+            }
+        };
+
+        // Get encrypted MUK from session data
+        let encrypted_muk = match session_data.get("encryptedMasterUnlockKey") {
+            Some(muk) => muk,
+            None => {
+                eprintln!("[Biometric Unlock All] No encrypted MUK for {}", email);
+                failed_emails.push(email);
+                continue;
+            }
+        };
+
+        let encrypted_muk_json = serde_json::to_string(encrypted_muk)
+            .map_err(|e| format!("Failed to serialize encrypted MUK for {}: {}", email, e))?;
+
+        let encrypted_session_b64 = base64::engine::general_purpose::STANDARD.encode(encrypted_muk_json.as_bytes());
+
+        // Get auth token and vault keys for this account
+        let auth_token = store.get(&jwt_key)
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
+        let vault_keys = store.get(&vault_key)
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
+
+        // Build account data
+        let mut account_data = serde_json::json!({
+            "email": email,
+            "encrypted_session": encrypted_session_b64,
+        });
+
+        if let Some(token) = auth_token {
+            account_data["auth_token"] = serde_json::Value::String(token);
+        }
+        if let Some(keys) = vault_keys {
+            account_data["vault_keys"] = serde_json::Value::String(keys);
+        }
+
+        accounts_data.push(account_data);
+        unlocked_emails.push(email.clone());
+        eprintln!("[Biometric Unlock All] ✓ Unlocked {}", email);
+    }
+
+    if accounts_data.is_empty() {
+        return Err("No accounts could be unlocked".to_string());
+    }
+
+    // Sign the response with challenge to prevent replay attacks
+    let signature_data = format!("{}:{}", challenge, accounts_data.len());
+    let signature = base64::engine::general_purpose::STANDARD.encode(signature_data.as_bytes());
+
+    eprintln!("[Biometric Unlock All] ✓ Unlocked {} accounts, {} failed",
+        unlocked_emails.len(), failed_emails.len());
+
+    let response = serde_json::json!({
+        "device_key": device_key_base64,
+        "signature": signature,
+        "accounts": accounts_data,
+        "unlocked": unlocked_emails,
+        "failed": failed_emails,
+    });
+
+    Ok(response)
 }
 
 /// Bring the app window to foreground

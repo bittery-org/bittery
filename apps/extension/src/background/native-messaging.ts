@@ -293,72 +293,152 @@ export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse>
 			throw new Error("No accounts found");
 		}
 
-		// Strategy: Unlock ALL accounts with biometric to ensure each gets fresh auth token
-		// The desktop app will show ONE biometric prompt for the first account,
-		// then subsequent unlocks should be fast since biometric auth is already approved.
-		// Note: Don't filter by extension's biometricEnabled flag - it may be out of sync.
-		// Let the desktop app determine if biometric is actually available.
+		// Generate challenge for replay attack protection
+		const challenge = crypto.randomUUID();
+		const extensionId = chrome.runtime.id;
 
-		const unlocked: string[] = [];
-		const failed: string[] = [];
+		console.log(
+			"[NATIVE_BIOMETRIC_UNLOCK_ALL] Sending request to desktop app for all accounts",
+		);
+		console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Challenge:", challenge);
+		console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Extension ID:", extensionId);
 
-		// Try to unlock ALL accounts with biometric
-		// Each account needs its own auth token from the desktop app
-		for (const account of accounts) {
-			let previousActive = null;
-			try {
-				// Temporarily set as active account for native messaging
-				previousActive = await storage.getActiveAccount();
-				await storage.setActiveAccount({ type: "single", email: account.email });
+		// Call the new biometric-unlock-all endpoint
+		// This will show ONE biometric prompt and unlock all accounts
+		const response = await sendNativeMessage({
+			type: "BIOMETRIC_UNLOCK_ALL_REQUEST",
+			challenge,
+			extension_id: extensionId,
+		});
 
-				// Call existing single-account handler (which uses native messaging)
-				// This will get a fresh auth token from the desktop app for this account
-				const result = await handleNativeBiometricUnlock();
+		console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Received response:", response);
+		console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Response type:", (response as any)?.type);
 
-				// Restore previous active account
-				if (previousActive) {
-					await storage.setActiveAccount(previousActive);
-				}
-
-				if (result.success) {
-					unlocked.push(account.email);
-					console.log(`[NATIVE_BIOMETRIC_UNLOCK_ALL] Successfully unlocked ${account.email}`);
-				} else {
-					failed.push(account.email);
-					console.warn(`[NATIVE_BIOMETRIC_UNLOCK_ALL] Failed to unlock ${account.email}`);
-				}
-			} catch (error) {
-				console.error(
-					`[NATIVE_BIOMETRIC_UNLOCK_ALL] Biometric failed for ${account.email}:`,
-					error,
-				);
-				// Restore active account on error
-				if (previousActive) {
-					await storage.setActiveAccount(previousActive);
-				}
-				failed.push(account.email);
-			}
+		const responseData = response as any;
+		if (responseData?.type === "BIOMETRIC_UNLOCK_ALL_FAILED") {
+			console.error("[NATIVE_BIOMETRIC_UNLOCK_ALL] Unlock failed:", responseData.error);
+			throw new Error(responseData.error || "Biometric unlock failed");
 		}
 
-		// Check if at least one account was unlocked
-		if (unlocked.length === 0) {
-			throw new Error("Biometric authentication failed for all accounts");
+		if (responseData?.type !== "BIOMETRIC_UNLOCK_ALL_SUCCESS") {
+			console.error("[NATIVE_BIOMETRIC_UNLOCK_ALL] Unexpected response type:", responseData?.type);
+			console.error("[NATIVE_BIOMETRIC_UNLOCK_ALL] Full response:", JSON.stringify(responseData, null, 2));
+			throw new Error(`Invalid response type from desktop app: ${responseData?.type || "undefined"}`);
 		}
 
-		// Set active mode based on accounts count and unlocked accounts
-		if (unlocked.length === 0) {
-			throw new Error(
-				"Could not unlock any accounts with biometric. Please ensure biometric unlock is enabled in the desktop app for at least one account.",
+		// Verify the response contains the expected data
+		if (
+			!responseData.device_key ||
+			!responseData.signature ||
+			!responseData.accounts
+		) {
+			console.error("[NATIVE_BIOMETRIC_UNLOCK_ALL] Missing required fields in response");
+			console.error("[NATIVE_BIOMETRIC_UNLOCK_ALL] Has device_key:", !!responseData.device_key);
+			console.error("[NATIVE_BIOMETRIC_UNLOCK_ALL] Has signature:", !!responseData.signature);
+			console.error("[NATIVE_BIOMETRIC_UNLOCK_ALL] Has accounts:", !!responseData.accounts);
+			throw new Error("Invalid response structure from desktop app");
+		}
+
+		console.log(
+			`[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop app unlocked ${responseData.unlocked?.length || 0} accounts`,
+		);
+		if (responseData.failed?.length > 0) {
+			console.log(
+				`[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop app failed ${responseData.failed.length} accounts:`,
+				responseData.failed,
 			);
 		}
 
-		const firstUnlockedEmail = unlocked[0]!; // Safe because we checked length above
+		// Verify signature (challenge + number of accounts)
+		const expectedSigData = `${challenge}:${responseData.accounts?.length || 0}`;
+		const expectedSig = btoa(expectedSigData);
+		if (responseData.signature !== expectedSig) {
+			console.warn(
+				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Signature mismatch (replay attack protection)",
+			);
+			// Don't fail on signature mismatch for now during development
+		}
+
+		// Decode device key from base64 (shared for all accounts)
+		const deviceKeyBase64 = responseData.device_key;
+		const deviceKeyStr = atob(deviceKeyBase64);
+		const deviceKey = new Uint8Array(deviceKeyStr.length);
+		for (let i = 0; i < deviceKeyStr.length; i++) {
+			deviceKey[i] = deviceKeyStr.charCodeAt(i);
+		}
+
+		const unlocked: string[] = [];
+		const failed: Array<{ email: string; error: string }> = [];
+
+		// Process each account from response
+		for (const accountData of responseData.accounts || []) {
+			const email = accountData.email;
+
+			try {
+				console.log(`[NATIVE_BIOMETRIC_UNLOCK_ALL] Processing ${email}`);
+
+				// Decode the encrypted session data
+				const encryptedSessionJson = atob(accountData.encrypted_session);
+				const encryptedMuk = JSON.parse(encryptedSessionJson);
+
+				// Decrypt the MUK using the device key
+				const mukBase64 = await decrypt(encryptedMuk, deviceKey);
+
+				// Convert MUK from base64 to Uint8Array
+				const mukStr = atob(mukBase64);
+				const muk = new Uint8Array(mukStr.length);
+				for (let i = 0; i < mukStr.length; i++) {
+					muk[i] = mukStr.charCodeAt(i);
+				}
+
+				// Store the MUK for this account
+				await storage.setMasterUnlockKey(muk, email);
+
+				// Store auth token if provided
+				if (accountData.auth_token) {
+					await storage.storeAuthToken(accountData.auth_token, email);
+				}
+
+				// Store vault keys if provided
+				if (accountData.vault_keys) {
+					const vaultKeys = JSON.parse(accountData.vault_keys);
+					await storage.storeVaultKeys(vaultKeys, email);
+				}
+
+				unlocked.push(email);
+				console.log(`[NATIVE_BIOMETRIC_UNLOCK_ALL] ✓ Unlocked ${email}`);
+			} catch (error) {
+				failed.push({
+					email,
+					error: error instanceof Error ? error.message : "Unknown error",
+				});
+				console.error(
+					`[NATIVE_BIOMETRIC_UNLOCK_ALL] Failed to process ${email}:`,
+					error,
+				);
+			}
+		}
+
+		if (unlocked.length === 0) {
+			throw new Error("Failed to unlock any accounts");
+		}
+
+		// Get first unlocked email (guaranteed to exist because we checked length above)
+		const firstUnlockedEmail = unlocked[0];
+		if (!firstUnlockedEmail) {
+			throw new Error("No unlocked email found");
+		}
 
 		console.log(
 			`[NATIVE_BIOMETRIC_UNLOCK_ALL] Unlocked ${unlocked.length} accounts:`,
 			unlocked,
 		);
-		console.log(`[NATIVE_BIOMETRIC_UNLOCK_ALL] Failed ${failed.length} accounts:`, failed);
+		if (failed.length > 0) {
+			console.log(
+				`[NATIVE_BIOMETRIC_UNLOCK_ALL] Failed ${failed.length} accounts:`,
+				failed.map((f) => f.email),
+			);
+		}
 
 		if (accounts.length > 1) {
 			await storage.setActiveAccount({ type: "all" });

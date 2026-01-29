@@ -95,7 +95,18 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	constructor(private crypto: CryptoProvider) {}
 
 	async initialize(): Promise<void> {
-		// No initialization needed for chrome.storage
+		// Listen for storage changes to keep cache in sync across contexts
+		chrome.storage.onChanged.addListener((changes, areaName) => {
+			if (areaName !== "local") return;
+
+			// Clear active account cache if it changed
+			if (ACTIVE_ACCOUNT_KEY in changes) {
+				console.log(
+					"[storage-chrome] Active account changed in storage, clearing cache",
+				);
+				cachedActiveAccount = undefined;
+			}
+		});
 	}
 
 	private async resolveEmail(email?: string): Promise<string | null> {
@@ -205,7 +216,6 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		// First check if MUK is already in memory cache (e.g., after login)
 		const cache = this.getAccountCache(resolvedEmail);
 		if (cache.masterUnlockKey) {
-			console.log("[storage-chrome] Session restored from memory cache");
 			// Also ensure auth token and vault keys are in cache
 			if (!cache.authToken) {
 				const authToken = await this.getAuthToken(resolvedEmail);
@@ -233,23 +243,19 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 
 		// Also restore auth token and vault keys into cache
 		// Both are required for a fully functional session
-		console.log(`[storage-chrome] Restoring auth token for ${resolvedEmail}...`);
 		const authToken = await this.getAuthToken(resolvedEmail);
 		if (!authToken) {
-			console.error(`[storage-chrome] Cannot restore session for ${resolvedEmail}: auth token not found in storage. Account may need to be unlocked with biometric or password.`);
+			console.error(`[storage-chrome] Cannot restore session for ${resolvedEmail}: auth token not found in storage`);
 			return false;
 		}
 		cache.authToken = authToken;
-		console.log(`[storage-chrome] Auth token restored for ${resolvedEmail}`);
 
-		console.log(`[storage-chrome] Restoring vault keys for ${resolvedEmail}...`);
 		const vaultKeys = await this.getVaultKeys(resolvedEmail);
 		if (!vaultKeys || vaultKeys.length === 0) {
 			console.error(`[storage-chrome] Cannot restore session for ${resolvedEmail}: vault keys not found in storage`);
 			return false;
 		}
 		cache.vaultKeys = vaultKeys;
-		console.log(`[storage-chrome] Vault keys restored for ${resolvedEmail}: ${vaultKeys.length} keys`);
 
 		return true;
 	}

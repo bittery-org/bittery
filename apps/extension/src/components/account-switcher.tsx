@@ -99,7 +99,6 @@ export function ExtensionAccountSwitcher() {
 					queryClient.invalidateQueries({ queryKey: ["items-unified"] }),
 					queryClient.invalidateQueries({ queryKey: ["accounts"] }),
 				]);
-				// Navigation will trigger refetch since query key includes active account
 			}
 		} catch (error) {
 			console.error("Failed to switch account:", error);

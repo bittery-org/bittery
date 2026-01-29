@@ -1266,6 +1266,91 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	}
 
 	/**
+	 * Unlock all accounts with biometric authentication
+	 * Shows ONE biometric prompt and unlocks all accounts that support biometric
+	 * Returns { unlocked: string[], failed: Array<{email: string, error: string}> }
+	 */
+	async unlockAllAccountsWithBiometric(): Promise<{
+		unlocked: string[];
+		failed: Array<{ email: string; error: string }>;
+	}> {
+		const accountsList = await this.getAccountsList();
+		const unlocked: string[] = [];
+		const failed: Array<{ email: string; error: string }> = [];
+
+		if (accountsList.length === 0) {
+			return { unlocked, failed };
+		}
+
+		// Find first account that supports biometric
+		let firstAccountEmail: string | null = null;
+		for (const account of accountsList) {
+			if (await this.canBiometricUnlock(account.email)) {
+				firstAccountEmail = account.email;
+				break;
+			}
+		}
+
+		if (!firstAccountEmail) {
+			// No account supports biometric
+			for (const account of accountsList) {
+				failed.push({
+					email: account.email,
+					error: "Biometric authentication not available",
+				});
+			}
+			return { unlocked, failed };
+		}
+
+		// FORCE biometric authentication (ignore grace period)
+		// This ensures we ALWAYS show the prompt when explicitly unlocking
+		const authenticated = await this.authenticateWithBiometric(
+			"Unlock all accounts",
+			firstAccountEmail,
+		);
+
+		if (!authenticated) {
+			// Biometric authentication failed or was cancelled
+			for (const account of accountsList) {
+				failed.push({
+					email: account.email,
+					error: "Biometric authentication failed or cancelled",
+				});
+			}
+			return { unlocked, failed };
+		}
+
+		// Now unlock ALL accounts WITHOUT additional biometric prompts
+		// Since we just authenticated, all accounts within the grace period can be unlocked
+		for (const account of accountsList) {
+			try {
+				// Decrypt MUK using device key (biometric was already authenticated)
+				const masterUnlockKey = await this.decryptStoredMasterUnlockKey(
+					account.email,
+					true, // skipBiometric = true (we already authenticated above)
+				);
+
+				if (masterUnlockKey) {
+					await this.setMasterUnlockKey(masterUnlockKey, account.email);
+					unlocked.push(account.email);
+				} else {
+					failed.push({
+						email: account.email,
+						error: "Could not decrypt session data",
+					});
+				}
+			} catch (error) {
+				failed.push({
+					email: account.email,
+					error: error instanceof Error ? error.message : "Unknown error",
+				});
+			}
+		}
+
+		return { unlocked, failed };
+	}
+
+	/**
 	 * Check if Secret Key is stored
 	 */
 	async hasStoredSecretKey(email?: string): Promise<boolean> {

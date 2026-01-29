@@ -343,6 +343,17 @@ export interface IStorageAdapter {
 	unlockWithBiometric?(email?: string): Promise<boolean>;
 
 	/**
+	 * Unlock all accounts with biometric authentication.
+	 * Shows ONE biometric prompt and unlocks all accounts that support biometric.
+	 * Returns lists of successfully unlocked and failed accounts.
+	 * Desktop/Mobile only - returns undefined for web/extension.
+	 */
+	unlockAllAccountsWithBiometric?(): Promise<{
+		unlocked: string[];
+		failed: Array<{ email: string; error: string }>;
+	}>;
+
+	/**
 	 * Enhanced biometric auth with detailed error handling.
 	 * Returns structured result with specific error types for UI handling.
 	 */

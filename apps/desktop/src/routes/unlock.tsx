@@ -15,7 +15,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Fingerprint, KeyRound } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { storage } from "@/lib/storage";
 
 interface UnlockSearchParams {
@@ -37,6 +37,7 @@ export function UnlockPage() {
 	const queryClient = useQueryClient();
 	const [password, setPassword] = useState("");
 	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
+	const hasAttemptedBiometric = useRef(false);
 
 	const allAccounts = accounts.data ?? [];
 
@@ -103,60 +104,16 @@ export function UnlockPage() {
 		setVaultState("unlocking");
 
 		try {
-			// Use biometric authentication ONCE with the first account that supports it
-			let biometricSuccess = false;
-			let authenticatedWithAccount: string | null = null;
-
-			// Find first account that supports biometric
-			for (const account of allAccounts) {
-				const canBio = await storage.canBiometricUnlock?.(account.email);
-				if (canBio) {
-					// Attempt biometric unlock for this account
-					// This shows the biometric prompt ONCE
-					const success = await storage.unlockWithBiometric?.(account.email);
-					if (success) {
-						biometricSuccess = true;
-						authenticatedWithAccount = account.email;
-						break;
-					}
-				}
+			// Use the unified biometric unlock method that shows ONE prompt for all accounts
+			if (!storage.unlockAllAccountsWithBiometric) {
+				throw new Error("Biometric unlock not supported on this platform");
 			}
 
-			if (!biometricSuccess) {
-				throw new Error("Biometric authentication failed");
-			}
+			const { unlocked, failed } =
+				await storage.unlockAllAccountsWithBiometric();
 
-			// Now that biometric succeeded, unlock remaining accounts
-			if (!authenticatedWithAccount) {
-				throw new Error(
-					"Biometric authentication failed - no account authenticated",
-				);
-			}
-			const unlocked: string[] = [authenticatedWithAccount];
-			const failed: Array<{ email: string; error: string }> = [];
-
-			// Try to unlock other accounts
-			for (const account of allAccounts) {
-				if (account.email === authenticatedWithAccount) continue;
-
-				try {
-					// For other accounts, just restore their sessions if available
-					const restored = await storage.tryRestoreSession(true, account.email);
-					if (restored) {
-						unlocked.push(account.email);
-					} else {
-						// Can't restore without password
-						failed.push({
-							email: account.email,
-							error: "Requires password",
-						});
-					}
-				} catch (error) {
-					failed.push({
-						email: account.email,
-						error: error instanceof Error ? error.message : "Unknown error",
-					});
-				}
+			if (unlocked.length === 0) {
+				throw new Error("Failed to unlock any accounts with biometric");
 			}
 
 			// Set active mode
@@ -204,6 +161,75 @@ export function UnlockPage() {
 		quickUnlockAll.mutate({ password });
 	};
 
+	const loading = quickUnlockAll.isPending;
+	const requiresPasswordReentry =
+		sessionState?.requiresPasswordReentry ?? false;
+	const canUseBiometric =
+		sessionState?.canBiometricUnlock && !requiresPasswordReentry;
+
+	// Auto-trigger biometric unlock on mount if available
+	useEffect(() => {
+		if (
+			canUseBiometric &&
+			!hasAttemptedBiometric.current &&
+			allAccounts.length > 0
+		) {
+			hasAttemptedBiometric.current = true;
+			// Small delay to ensure everything is initialized
+			const timeout = setTimeout(async () => {
+				setVaultState("unlocking");
+
+				try {
+					if (!storage.unlockAllAccountsWithBiometric) {
+						throw new Error("Biometric unlock not supported on this platform");
+					}
+
+					const { unlocked, failed } =
+						await storage.unlockAllAccountsWithBiometric();
+
+					if (unlocked.length === 0) {
+						throw new Error("Failed to unlock any accounts with biometric");
+					}
+
+					// Set active mode
+					if (allAccounts.length > 1) {
+						await storage.setActiveAccount({ type: "all" });
+					} else {
+						await storage.setActiveAccount({
+							type: "single",
+							email: allAccounts[0].email,
+						});
+					}
+
+					await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+					setVaultState("unlocked");
+
+					if (failed.length === 0) {
+						if (allAccounts.length === 1) {
+							toast.success("Unlocked with biometric");
+						} else {
+							toast.success(`All ${unlocked.length} accounts unlocked`);
+						}
+					} else {
+						toast.warning(
+							`Unlocked ${unlocked.length} of ${allAccounts.length} accounts`,
+						);
+					}
+
+					setTimeout(() => {
+						navigate({ to: "/vault" });
+					}, 600);
+				} catch (error) {
+					console.error("Biometric unlock error:", error);
+					setVaultState("locked");
+					// Don't show toast on auto-trigger failure - user can manually try
+				}
+			}, 100);
+
+			return () => clearTimeout(timeout);
+		}
+	}, [canUseBiometric, allAccounts, queryClient, navigate]);
+
 	// Show loading state while accounts are being fetched
 	if (accounts.isLoading) {
 		return (
@@ -218,12 +244,6 @@ export function UnlockPage() {
 		navigate({ to: "/login" });
 		return null;
 	}
-
-	const loading = quickUnlockAll.isPending;
-	const requiresPasswordReentry =
-		sessionState?.requiresPasswordReentry ?? false;
-	const canUseBiometric =
-		sessionState?.canBiometricUnlock && !requiresPasswordReentry;
 
 	return (
 		<div className="flex h-full items-center justify-center bg-gray-50 p-4">

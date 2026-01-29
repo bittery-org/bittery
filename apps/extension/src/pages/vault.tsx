@@ -90,7 +90,7 @@ export function VaultPage() {
 	}, []);
 
 	const { data: items = [], isLoading } = useQuery<DecryptedItem[]>({
-		queryKey: ["vault-items", activeAccount],
+		queryKey: ["vault-items"],
 		queryFn: async () => {
 			const response = await chrome.runtime.sendMessage({
 				type: "GET_VAULT_ITEMS",

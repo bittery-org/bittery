@@ -18,16 +18,22 @@ use std::process::Command;
 enum NativeMessage {
     #[serde(rename = "PING")]
     Ping,
-    
+
     #[serde(rename = "CHECK_BIOMETRIC_AVAILABLE")]
     CheckBiometricAvailable,
-    
+
     #[serde(rename = "BIOMETRIC_UNLOCK_REQUEST")]
     BiometricUnlockRequest {
         challenge: String,
         extension_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         email: Option<String>,
+    },
+
+    #[serde(rename = "BIOMETRIC_UNLOCK_ALL_REQUEST")]
+    BiometricUnlockAllRequest {
+        challenge: String,
+        extension_id: String,
     },
 
     #[serde(rename = "OPEN_DESKTOP_APP")]
@@ -59,7 +65,21 @@ enum NativeResponse {
     },
     
     #[serde(rename = "BIOMETRIC_UNLOCK_FAILED")]
-    BiometricUnlockFailed { 
+    BiometricUnlockFailed {
+        error: String,
+    },
+
+    #[serde(rename = "BIOMETRIC_UNLOCK_ALL_SUCCESS")]
+    BiometricUnlockAllSuccess {
+        device_key: String,
+        signature: String,
+        accounts: Vec<AccountUnlockData>,
+        unlocked: Vec<String>,
+        failed: Vec<String>,
+    },
+
+    #[serde(rename = "BIOMETRIC_UNLOCK_ALL_FAILED")]
+    BiometricUnlockAllFailed {
         error: String,
     },
 
@@ -72,6 +92,16 @@ enum NativeResponse {
     
     #[serde(rename = "ERROR")]
     Error { message: String },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AccountUnlockData {
+    email: String,
+    encrypted_session: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auth_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vault_keys: Option<String>,
 }
 
 /// Read a message from stdin following Chrome's native messaging protocol
@@ -142,6 +172,20 @@ async fn communicate_with_tauri(message: &NativeMessage) -> NativeResponse {
             match request_biometric_unlock(challenge, extension_id, email.as_deref()).await {
                 Ok(response) => response,
                 Err(e) => NativeResponse::BiometricUnlockFailed {
+                    error: e.to_string(),
+                },
+            }
+        }
+
+        NativeMessage::BiometricUnlockAllRequest { challenge, extension_id } => {
+            eprintln!("[Native Host] Received BiometricUnlockAllRequest:");
+            eprintln!("  challenge: {}", challenge);
+            eprintln!("  extension_id: {}", extension_id);
+
+            // Forward to Tauri app for biometric authentication of all accounts
+            match request_biometric_unlock_all(challenge, extension_id).await {
+                Ok(response) => response,
+                Err(e) => NativeResponse::BiometricUnlockAllFailed {
                     error: e.to_string(),
                 },
             }
@@ -315,10 +359,10 @@ async fn request_biometric_unlock(
         .json(&payload)
         .send()
         .await?;
-    
+
     if response.status().is_success() {
         let unlock_response: BiometricUnlockResponse = response.json().await?;
-        
+
         Ok(NativeResponse::BiometricUnlockSuccess {
             encrypted_session: unlock_response.encrypted_session,
             device_key: unlock_response.device_key,
@@ -329,6 +373,46 @@ async fn request_biometric_unlock(
     } else {
         let error_text = response.text().await?;
         Ok(NativeResponse::BiometricUnlockFailed {
+            error: error_text,
+        })
+    }
+}
+
+/// Request biometric unlock for all accounts from Tauri app
+async fn request_biometric_unlock_all(
+    challenge: &str,
+    extension_id: &str,
+) -> Result<NativeResponse, Box<dyn std::error::Error>> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30)) // Longer timeout for user interaction
+        .build()?;
+
+    let payload = serde_json::json!({
+        "challenge": challenge,
+        "extension_id": extension_id,
+    });
+
+    eprintln!("[Native Host] Sending unlock-all payload to desktop: {}", serde_json::to_string(&payload).unwrap_or_default());
+
+    let response = client
+        .post("http://localhost:48765/native-bridge/biometric-unlock-all")
+        .json(&payload)
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        let unlock_response: BiometricUnlockAllResponse = response.json().await?;
+
+        Ok(NativeResponse::BiometricUnlockAllSuccess {
+            device_key: unlock_response.device_key,
+            signature: unlock_response.signature,
+            accounts: unlock_response.accounts,
+            unlocked: unlock_response.unlocked,
+            failed: unlock_response.failed,
+        })
+    } else {
+        let error_text = response.text().await?;
+        Ok(NativeResponse::BiometricUnlockAllFailed {
             error: error_text,
         })
     }
@@ -347,6 +431,15 @@ struct BiometricUnlockResponse {
     signature: String,
     auth_token: Option<String>,
     vault_keys: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct BiometricUnlockAllResponse {
+    device_key: String,
+    signature: String,
+    accounts: Vec<AccountUnlockData>,
+    unlocked: Vec<String>,
+    failed: Vec<String>,
 }
 
 /// Main entry point for native messaging host

@@ -4,6 +4,7 @@
  */
 
 import { initWasmCrypto } from "../lib/wasm-crypto";
+import { storage } from "../lib/storage";
 import {
   handleCanQuickUnlock,
   handleCheckAuth,
@@ -16,9 +17,13 @@ import {
   handleQuickUnlockAll,
 } from "./auth-handlers";
 
-// Initialize WASM crypto on service worker load
+// Initialize WASM crypto and storage on service worker load
 initWasmCrypto().catch((error) => {
   console.error("[Background] Failed to initialize WASM crypto:", error);
+});
+
+storage.initialize().catch((error) => {
+  console.error("[Background] Failed to initialize storage:", error);
 });
 
 import {
