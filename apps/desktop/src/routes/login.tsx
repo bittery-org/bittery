@@ -98,11 +98,6 @@ export function LoginPage() {
 			// Add to accounts list
 			await storage.addAccountToList(accountMetadata);
 
-			// Broadcast unlock event to extension
-			if (accountContext) {
-				await accountContext.broadcastUnlockEvent([normalizedEmail]);
-			}
-
 			// Refresh accounts queries
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
