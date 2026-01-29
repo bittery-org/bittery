@@ -90,7 +90,7 @@ export function UnlockPage() {
 			return response;
 		},
 		onSuccess: async (response) => {
-			// Refresh accounts queries
+			// Refresh accounts queries (including unlocked status)
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
 			setVaultState("unlocked");
@@ -123,23 +123,28 @@ export function UnlockPage() {
 	useEffect(() => {
 		if (accounts.length === 0) return;
 
-		// Check if native biometric is available
+		// Check if native biometric is available from desktop app
 		chrome.runtime
 			.sendMessage({ type: "CHECK_NATIVE_BIOMETRIC" })
 			.then((response) => {
 				console.log("Biometric check response:", response);
 
-				const available =
+				const desktopAvailable =
 					response.available && response.enabled && response.appRunning;
 
-				// Automatically trigger biometric unlock if available (only once)
-				if (available && !hasAttemptedBiometric.current) {
+				// Automatically trigger biometric unlock if desktop app is available (only once)
+				// The actual biometric unlock handler will check which accounts have biometric enabled
+				if (desktopAvailable && !hasAttemptedBiometric.current) {
 					hasAttemptedBiometric.current = true;
 					setBiometricAttempted(true);
 					// Use a small delay to ensure everything is initialized
 					setTimeout(() => {
 						biometricUnlockMutation.mutate();
 					}, 100);
+				} else if (!desktopAvailable) {
+					console.log(
+						"Biometric unlock not available: desktop app not ready or biometric not enabled",
+					);
 				}
 			})
 			.catch((error) => {

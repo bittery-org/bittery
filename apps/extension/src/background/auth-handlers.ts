@@ -89,15 +89,109 @@ export async function handleQuickUnlock(payload: {
  * Handle CHECK_AUTH message - Check if extension is authenticated and unlocked
  */
 export async function handleCheckAuth(): Promise<MessageResponse> {
-	// Check if we have a valid session and MUK is still in memory
+	// Check if we have a valid session
 	const authenticated = await storage.isAuthenticated();
+
+	// Ensure an active account is set if accounts exist but none is active
+	// This handles the case where the first account is added but not set as active
+	await ensureActiveAccountSet();
+
+	// Try to restore sessions from storage if not already unlocked
+	// This handles browser restart where in-memory MUKs are cleared
+	if (authenticated && !isUnlocked()) {
+		await tryRestoreAllSessions();
+	}
+
 	const unlocked = isUnlocked();
 
-	if (authenticated) {
-		updateActivity();
+	if (authenticated && unlocked) {
+		await updateActivity();
 	}
 
 	return { success: true, authenticated, unlocked };
+}
+
+/**
+ * Ensure an active account is set if accounts exist but none is active
+ * This handles the case where the first account is added but no active account is set
+ */
+async function ensureActiveAccountSet(): Promise<void> {
+	try {
+		const accounts = await storage.getAccountsList();
+		if (accounts.length === 0) return;
+
+		const activeAccount = await storage.getActiveAccount();
+		if (activeAccount) return; // Already have an active account
+
+		// No active account but we have accounts - set the first one as active
+		console.log("[Auth] No active account set, defaulting to first account");
+
+		if (accounts.length === 1) {
+			// Single account - set it as active
+			await storage.setActiveAccount({ type: "single", email: accounts[0].email });
+			console.log(`[Auth] Set ${accounts[0].email} as active account`);
+		} else {
+			// Multiple accounts - check if any are unlocked
+			const unlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
+
+			if (unlockedEmails.length > 1) {
+				// Multiple unlocked - use "all" mode
+				await storage.setActiveAccount({ type: "all" });
+				console.log("[Auth] Set active account to 'all' mode");
+			} else if (unlockedEmails.length === 1) {
+				// One unlocked - use that one
+				await storage.setActiveAccount({ type: "single", email: unlockedEmails[0] });
+				console.log(`[Auth] Set ${unlockedEmails[0]} as active account`);
+			} else {
+				// None unlocked - default to first account
+				await storage.setActiveAccount({ type: "single", email: accounts[0].email });
+				console.log(`[Auth] Set ${accounts[0].email} as active account (none unlocked)`);
+			}
+		}
+	} catch (error) {
+		console.error("[Auth] Failed to ensure active account:", error);
+	}
+}
+
+/**
+ * Try to restore all account sessions from encrypted storage
+ * Called on startup/auth check to restore sessions after browser restart
+ */
+async function tryRestoreAllSessions(): Promise<void> {
+	try {
+		const accounts = await storage.getAccountsList();
+		if (accounts.length === 0) return;
+
+		const restoredEmails: string[] = [];
+
+		// Try to restore each account's session
+		for (const account of accounts) {
+			try {
+				const restored = await storage.tryRestoreSession(false, account.email);
+				if (restored) {
+					restoredEmails.push(account.email);
+					console.log(`[Auth] Restored session for ${account.email}`);
+				}
+			} catch (error) {
+				console.error(`[Auth] Failed to restore session for ${account.email}:`, error);
+			}
+		}
+
+		// If we restored any sessions, set the session manager's global MUK
+		// (just a sentinel value indicating "at least one account is unlocked")
+		if (restoredEmails.length > 0) {
+			// Update activity timestamp FIRST to prevent immediate auto-lock
+			await updateActivity();
+
+			const muk = await storage.getMasterUnlockKey(restoredEmails[0]);
+			if (muk) {
+				setMasterUnlockKey(muk);
+				console.log(`[Auth] Restored ${restoredEmails.length} account(s), set session manager MUK`);
+			}
+		}
+	} catch (error) {
+		console.error("[Auth] Failed to restore sessions:", error);
+	}
 }
 
 /**
@@ -146,7 +240,9 @@ export async function handleLogout(): Promise<MessageResponse> {
  * Handle LOCK message - Manual lock (clears MUK but keeps vault keys)
  */
 export async function handleLock(): Promise<MessageResponse> {
-	lock();
+	// Lock extension (clears session manager's global MUK and all per-account MUKs)
+	await lock();
+
 	return { success: true };
 }
 

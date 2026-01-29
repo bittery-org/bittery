@@ -304,22 +304,36 @@ export default function SignInForm({
 					</Button>
 
 					{isQuickUnlock && (
-						<Button
-							type="button"
-							variant="link"
-							onClick={() => {
-								// Clear form and reload to show full login
-								form.setFieldValue("email", "");
-								form.setFieldValue("secretKey", "");
-								setEmail("");
-								setSessionExpired(false);
-								// Force refresh session state
-								window.location.reload();
-							}}
-							className="w-full text-muted-foreground"
-						>
-							Sign in with a different account
-						</Button>
+						<>
+							<Button
+								type="button"
+								variant="link"
+								onClick={async () => {
+									// Clear session data from storage
+									await storage.clearSession();
+									// Clear form values
+									form.setFieldValue("email", "");
+									form.setFieldValue("secretKey", "");
+									setEmail("");
+									setSessionExpired(false);
+									// Force refresh session state
+									window.location.reload();
+								}}
+								className="w-full text-muted-foreground"
+							>
+								Sign in with a different account
+							</Button>
+							<div className="mt-2 text-center text-muted-foreground text-sm">
+								Need a different account?{" "}
+								<button
+									type="button"
+									onClick={onSwitchToSignUp}
+									className="font-medium text-primary underline-offset-4 hover:underline"
+								>
+									Create another account
+								</button>
+							</div>
+						</>
 					)}
 
 					{!isQuickUnlock && (

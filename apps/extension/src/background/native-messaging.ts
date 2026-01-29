@@ -108,11 +108,13 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 		const challenge = crypto.randomUUID();
 		console.log("[NATIVE_BIOMETRIC_UNLOCK] Generated challenge:", challenge);
 		console.log("[NATIVE_BIOMETRIC_UNLOCK] Extension ID:", chrome.runtime.id);
+		console.log("[NATIVE_BIOMETRIC_UNLOCK] Account email:", activeAccount.email);
 
 		const response = await sendNativeMessage({
 			type: "BIOMETRIC_UNLOCK_REQUEST",
 			challenge,
 			extension_id: chrome.runtime.id,
+			email: activeAccount.email,
 		});
 
 		console.log("[NATIVE_BIOMETRIC_UNLOCK] Received response:", response);
@@ -128,6 +130,14 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 				!responseData.signature
 			) {
 				throw new Error("Invalid response from desktop app");
+			}
+
+			// Sync biometric enabled status: if unlock succeeded, biometric must be enabled on desktop
+			if (activeAccount.type === "single" && "updateBiometricEnabled" in storage) {
+				await (storage as any).updateBiometricEnabled(activeAccount.email, true);
+				console.log(
+					`[NATIVE_BIOMETRIC_UNLOCK] Synced biometric status for ${activeAccount.email}`,
+				);
 			}
 
 			// Verify signature (challenge + encrypted_session)
@@ -197,7 +207,7 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 			}
 
 			// Update activity tracking
-			updateActivity();
+			await updateActivity();
 
 			return {
 				success: true,
@@ -209,7 +219,17 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 				"[NATIVE_BIOMETRIC_UNLOCK] Failed response:",
 				responseData.error,
 			);
-			throw new Error(responseData.error || "Biometric unlock failed");
+
+			// Parse error and provide helpful message
+			const errorStr = responseData.error || "Biometric unlock failed";
+			let userMessage = errorStr;
+
+			if (errorStr.includes("No session data found")) {
+				userMessage =
+					"Biometric unlock not set up for this account in the desktop app. Please open the Bittery desktop app, log in with this account, and enable biometric unlock in your account settings.";
+			}
+
+			throw new Error(userMessage);
 		}
 		console.error(
 			"[NATIVE_BIOMETRIC_UNLOCK] Unexpected response type:",
@@ -275,12 +295,14 @@ export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse>
 
 		// Strategy: Use ONE biometric prompt for first account, then restore others from storage
 		// This matches desktop app's UX (see desktop/src/routes/unlock.tsx:102-197)
+		// Note: Don't filter by extension's biometricEnabled flag - it may be out of sync.
+		// Let the desktop app determine if biometric is actually available.
 
 		const unlocked: string[] = [];
 		const failed: string[] = [];
 
-		// Step 1: Unlock first account with biometric (triggers ONE prompt)
-		// Let the single-account handler validate the session - don't check here
+		// Step 1: Try to unlock first account with biometric (triggers ONE prompt)
+		// The desktop app will validate if biometric is actually enabled
 		let biometricSuccess = false;
 		let authenticatedEmail: string | null = null;
 
@@ -352,20 +374,30 @@ export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse>
 			}
 		}
 
-		// Set active mode based on accounts count
+		// Set active mode based on accounts count and unlocked accounts
+		if (unlocked.length === 0) {
+			throw new Error(
+				"Could not unlock any accounts with biometric. Please ensure biometric unlock is enabled in the desktop app for at least one account.",
+			);
+		}
+
+		const firstUnlockedEmail = unlocked[0]!; // Safe because we checked length above
+
 		if (accounts.length > 1) {
 			await storage.setActiveAccount({ type: "all" });
 		} else {
-			await storage.setActiveAccount({ type: "single", email: unlocked[0] });
+			await storage.setActiveAccount({ type: "single", email: firstUnlockedEmail });
 		}
 
+		// IMPORTANT: Update activity FIRST to set timestamp, otherwise isUnlocked()
+		// will see lastActivityTimestamp=0 and immediately lock everything!
+		await updateActivity();
+
 		// Set MUK for first unlocked account in session manager
-		const activeMuk = await storage.getMasterUnlockKey(unlocked[0]);
+		const activeMuk = await storage.getMasterUnlockKey(firstUnlockedEmail);
 		if (activeMuk) {
 			setMasterUnlockKey(activeMuk);
 		}
-
-		updateActivity();
 
 		return {
 			success: true,

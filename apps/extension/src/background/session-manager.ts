@@ -60,7 +60,9 @@ function resetAutoLockTimer() {
 	// Use setTimeout for in-memory timer
 	autoLockTimer = setTimeout(() => {
 		console.log("Auto-locking due to inactivity");
-		lock();
+		lock().catch((error) => {
+			console.error("Failed to lock extension:", error);
+		});
 	}, cachedAutoLockTimeoutMs);
 
 	// Also set Chrome Alarm as backup (survives service worker restarts)
@@ -98,8 +100,10 @@ function stopKeepalive() {
 
 /**
  * Lock the extension (clear MUK from memory)
+ * Clears both the session manager's global MUK and all per-account MUKs in storage
  */
-export function lock() {
+export async function lock(): Promise<void> {
+	// Clear session manager's global MUK (sentinel value for "unlocked" state)
 	masterUnlockKey = null;
 	lastActivityTimestamp = 0;
 	if (autoLockTimer) {
@@ -109,7 +113,13 @@ export function lock() {
 	// Clear the Chrome alarm
 	chrome.alarms.clear(AUTO_LOCK_ALARM_NAME);
 	stopKeepalive();
-	console.log("Extension locked");
+
+	// Clear all per-account MUKs from storage adapter's in-memory cache
+	if (storage.lockAllAccounts) {
+		await storage.lockAllAccounts();
+	}
+
+	console.log("Extension locked (all accounts)");
 }
 
 /**
@@ -127,7 +137,10 @@ export function isUnlocked(): boolean {
 	const timeSinceLastActivity = now - lastActivityTimestamp;
 
 	if (timeSinceLastActivity > cachedAutoLockTimeoutMs) {
-		lock();
+		// Auto-lock due to timeout (fire and forget)
+		lock().catch((error) => {
+			console.error("Failed to auto-lock:", error);
+		});
 		return false;
 	}
 
@@ -179,7 +192,7 @@ export async function handleAutoLockAlarm(
 			const timeSinceLastActivity = now - lastActivityTimestamp;
 
 			if (timeSinceLastActivity >= cachedAutoLockTimeoutMs) {
-				lock();
+				await lock();
 			} else {
 				// Reschedule if there was recent activity
 				const remainingTime = cachedAutoLockTimeoutMs - timeSinceLastActivity;

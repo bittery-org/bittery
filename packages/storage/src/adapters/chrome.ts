@@ -302,7 +302,8 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 
 		const key = getAccountKey(resolvedEmail, "vault_keys");
 		try {
-			await chrome.storage.session.set({
+			// Store in local storage (not session) to persist across service worker restarts
+			await chrome.storage.local.set({
 				[key]: JSON.stringify(vaultKeys),
 			});
 			console.log("[storage-chrome] Vault keys stored successfully");
@@ -321,9 +322,9 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			return cache.vaultKeys;
 		}
 
-		console.log("[storage-chrome] Getting vault keys from session storage");
+		console.log("[storage-chrome] Getting vault keys from local storage");
 		const key = getAccountKey(resolvedEmail, "vault_keys");
-		const result = await chrome.storage.session.get(key);
+		const result = await chrome.storage.local.get(key);
 		const stored = result[key];
 		console.log(
 			"[storage-chrome] Vault keys found:",
@@ -491,10 +492,15 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		];
 
 		await chrome.storage.local.remove(keysToRemove);
+		// Remove JWT and encrypted private key from session storage
 		await chrome.storage.session.remove([
 			getAccountKey(resolvedEmail, "jwt_token"),
-			getAccountKey(resolvedEmail, "vault_keys"),
 			getAccountKey(resolvedEmail, "encrypted_private_key"),
+		]);
+
+		// Remove vault keys from local storage
+		await chrome.storage.local.remove([
+			getAccountKey(resolvedEmail, "vault_keys"),
 		]);
 
 		this.clearAccountCache(resolvedEmail);
@@ -583,10 +589,15 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		this.clearAccountCache(resolvedEmail);
 
 		// Clear session storage keys
+		// Remove JWT and encrypted private key from session storage
 		await chrome.storage.session.remove([
 			getAccountKey(resolvedEmail, "jwt_token"),
-			getAccountKey(resolvedEmail, "vault_keys"),
 			getAccountKey(resolvedEmail, "encrypted_private_key"),
+		]);
+
+		// Remove vault keys from local storage
+		await chrome.storage.local.remove([
+			getAccountKey(resolvedEmail, "vault_keys"),
 		]);
 	}
 
@@ -763,6 +774,48 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			privateKeyPEM,
 		);
 		return base64ToArrayBuffer(vaultKeyBase64) as Uint8Array;
+	}
+
+	// ============================================================================
+	// Biometric (extension queries desktop app for biometric support)
+	// ============================================================================
+
+	/**
+	 * Check if biometric unlock is enabled for this account.
+	 * For extensions, this checks the stored account metadata which should be
+	 * synced with the desktop app's biometric status.
+	 */
+	async isBiometricEnabled(email?: string): Promise<boolean> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return false;
+
+		const accounts = await this.getAccountsList();
+		const account = accounts.find(
+			(a) => a.email.toLowerCase() === resolvedEmail.toLowerCase(),
+		);
+
+		return account?.biometricEnabled ?? false;
+	}
+
+	/**
+	 * Update the biometric enabled status for an account.
+	 * This syncs the local status with the desktop app's biometric setting.
+	 */
+	async updateBiometricEnabled(
+		email: string,
+		enabled: boolean,
+	): Promise<void> {
+		const accountsList = await this.getAccountsListInternal();
+		const account = accountsList.accounts.find(
+			(a) => a.email.toLowerCase() === email.toLowerCase(),
+		);
+
+		if (account) {
+			account.biometricEnabled = enabled;
+			await chrome.storage.local.set({
+				[ACCOUNTS_LIST_KEY]: JSON.stringify(accountsList),
+			});
+		}
 	}
 }
 

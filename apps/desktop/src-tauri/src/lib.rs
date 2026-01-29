@@ -135,9 +135,13 @@ async fn handle_native_bridge_request(
             
             let challenge = request["challenge"].as_str().unwrap_or("");
             let extension_id = request["extension_id"].as_str().unwrap_or("");
-            
+            let email = request["email"].as_str(); // Optional email parameter
+
+            eprintln!("[HTTP Handler] Received request: {}", serde_json::to_string(&request).unwrap_or_default());
+            eprintln!("[HTTP Handler] Extracted email: {:?}", email);
+
             // Trigger biometric unlock
-            match biometric_unlock_internal(&app_handle, challenge, extension_id).await {
+            match biometric_unlock_internal(&app_handle, challenge, extension_id, email).await {
                 Ok(response) => {
                     Ok(Response::builder()
                         .status(StatusCode::OK)
@@ -282,27 +286,46 @@ async fn extension_biometric_unlock(
     app_handle: tauri::AppHandle,
     challenge: String,
     extension_id: String,
+    email: Option<String>,
 ) -> Result<serde_json::Value, String> {
     use tauri_plugin_biometry::BiometryExt;
     use tauri_plugin_store::StoreExt;
-    
+
     eprintln!("[Biometric Unlock] Request from extension: {}", extension_id);
     eprintln!("[Biometric Unlock] Challenge: {}", challenge);
-    
+    if let Some(ref e) = email {
+        eprintln!("[Biometric Unlock] Requested email: {}", e);
+    }
+
     // 1. Authenticate with biometric (Touch ID / Windows Hello)
     let biometry = app_handle.biometry();
     let auth_options = tauri_plugin_biometry::AuthOptions::default();
     biometry.authenticate("Unlock Bittery for browser extension".to_string(), auth_options)
         .map_err(|e| format!("Biometric authentication failed: {}", e))?;
-    
+
     eprintln!("[Biometric Unlock] ✓ Authentication successful");
-    
+
     // 2. Get session data from store
     let store = app_handle.store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
-    
-    let active_email = get_active_account_email(&store);
-    let (session_key, jwt_key, vault_key) = if let Some(email) = &active_email {
+
+    // Debug: List all stored accounts
+    if let Some(accounts_value) = store.get("bittery_accounts_list") {
+        if let Some(accounts_str) = accounts_value.as_str() {
+            eprintln!("[Biometric Unlock] Stored accounts: {}", accounts_str);
+        }
+    } else {
+        eprintln!("[Biometric Unlock] No accounts list found in store");
+    }
+
+    // Use provided email if available, otherwise fall back to active account
+    let target_email = email.as_ref()
+        .map(|e| e.to_lowercase())
+        .or_else(|| get_active_account_email(&store));
+
+    eprintln!("[Biometric Unlock] Target email: {:?}", target_email);
+
+    let (session_key, jwt_key, vault_key) = if let Some(email) = &target_email {
         (
             account_key(email, "session_data"),
             account_key(email, "jwt_token"),
@@ -316,8 +339,10 @@ async fn extension_biometric_unlock(
         )
     };
 
+    eprintln!("[Biometric Unlock] Looking for session key: {}", session_key);
     let mut session_data_value = store.get(&session_key);
-    if session_data_value.is_none() && active_email.is_some() {
+    eprintln!("[Biometric Unlock] Session data found: {}", session_data_value.is_some());
+    if session_data_value.is_none() && target_email.is_some() {
         session_data_value = store.get(LEGACY_SESSION_DATA_KEY);
     }
     let session_data_value = session_data_value.ok_or("No session data found")?;
@@ -363,7 +388,7 @@ async fn extension_biometric_unlock(
     let mut vault_keys = store
         .get(&vault_key)
         .and_then(|v| v.as_str().map(|s| s.to_string()));
-    if active_email.is_some() {
+    if target_email.is_some() {
         if auth_token.is_none() {
             auth_token = store
                 .get(LEGACY_JWT_TOKEN_KEY)
@@ -412,12 +437,14 @@ async fn biometric_unlock_internal(
     app_handle: &tauri::AppHandle,
     challenge: &str,
     extension_id: &str,
+    email: Option<&str>,
 ) -> Result<serde_json::Value, String> {
     // Call the Tauri command
     extension_biometric_unlock(
         app_handle.clone(),
         challenge.to_string(),
         extension_id.to_string(),
+        email.map(|e| e.to_string()),
     ).await
 }
 

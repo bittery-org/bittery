@@ -23,9 +23,11 @@ enum NativeMessage {
     CheckBiometricAvailable,
     
     #[serde(rename = "BIOMETRIC_UNLOCK_REQUEST")]
-    BiometricUnlockRequest { 
+    BiometricUnlockRequest {
         challenge: String,
         extension_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        email: Option<String>,
     },
 
     #[serde(rename = "OPEN_DESKTOP_APP")]
@@ -130,9 +132,14 @@ async fn communicate_with_tauri(message: &NativeMessage) -> NativeResponse {
             }
         }
         
-        NativeMessage::BiometricUnlockRequest { challenge, extension_id } => {
+        NativeMessage::BiometricUnlockRequest { challenge, extension_id, email } => {
+            eprintln!("[Native Host] Received BiometricUnlockRequest:");
+            eprintln!("  challenge: {}", challenge);
+            eprintln!("  extension_id: {}", extension_id);
+            eprintln!("  email: {:?}", email);
+
             // Forward to Tauri app for biometric authentication
-            match request_biometric_unlock(challenge, extension_id).await {
+            match request_biometric_unlock(challenge, extension_id, email.as_deref()).await {
                 Ok(response) => response,
                 Err(e) => NativeResponse::BiometricUnlockFailed {
                     error: e.to_string(),
@@ -286,17 +293,26 @@ async fn check_tauri_app() -> Result<NativeResponse, Box<dyn std::error::Error>>
 async fn request_biometric_unlock(
     challenge: &str,
     extension_id: &str,
+    email: Option<&str>,
 ) -> Result<NativeResponse, Box<dyn std::error::Error>> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30)) // Longer timeout for user interaction
         .build()?;
-    
+
+    let mut payload = serde_json::json!({
+        "challenge": challenge,
+        "extension_id": extension_id,
+    });
+
+    if let Some(email_str) = email {
+        payload["email"] = serde_json::json!(email_str);
+    }
+
+    eprintln!("[Native Host] Sending payload to desktop: {}", serde_json::to_string(&payload).unwrap_or_default());
+
     let response = client
         .post("http://localhost:48765/native-bridge/biometric-unlock")
-        .json(&serde_json::json!({
-            "challenge": challenge,
-            "extension_id": extension_id,
-        }))
+        .json(&payload)
         .send()
         .await?;
     
