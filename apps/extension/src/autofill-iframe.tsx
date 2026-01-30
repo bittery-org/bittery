@@ -37,7 +37,6 @@ function AutofillIframe() {
 				const query = event.data.query || "";
 				setFilterQuery(query);
 				const filtered = filterLoginItems(allItems, query);
-				console.log(filtered);
 				setFilteredItems(filtered);
 				setSelectedIndex(0);
 			}
