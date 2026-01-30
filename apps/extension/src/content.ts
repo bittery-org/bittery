@@ -155,6 +155,7 @@ interface CredentialField {
 	overlay?: HTMLElement;
 	icon?: HTMLElement;
 	messageHandler?: (event: MessageEvent) => void;
+	inputHandler?: (event: Event) => void;
 	readyTimeout?: NodeJS.Timeout;
 	confidence?: number;
 	shadowRoot?: ShadowRoot;
@@ -167,6 +168,7 @@ interface CreditCardField {
 	overlay?: HTMLElement;
 	icon?: HTMLElement;
 	messageHandler?: (event: MessageEvent) => void;
+	inputHandler?: (event: Event) => void;
 	readyTimeout?: NodeJS.Timeout;
 	confidence?: number;
 	shadowRoot?: ShadowRoot;
@@ -180,6 +182,7 @@ interface IdentityField {
 	overlay?: HTMLElement;
 	icon?: HTMLElement;
 	messageHandler?: (event: MessageEvent) => void;
+	inputHandler?: (event: Event) => void;
 	readyTimeout?: NodeJS.Timeout;
 	confidence?: number;
 	shadowRoot?: ShadowRoot;
@@ -193,6 +196,9 @@ const detectedIdentityFields = new Map<HTMLInputElement, IdentityField>();
 let currentFocusedField: CredentialField | null = null;
 let currentFocusedCreditCardField: CreditCardField | null = null;
 let currentFocusedIdentityField: IdentityField | null = null;
+
+// Track if we're currently autofilling to prevent filter triggering
+let isAutofilling = false;
 
 // Visual feedback styles for autofilled fields
 const AUTOFILL_HIGHLIGHT_STYLE = {
@@ -1697,6 +1703,30 @@ function showCreditCardAutofillOverlay(
 
 	// Add keyboard navigation
 	document.addEventListener("keydown", handleCreditCardKeyboardNavigation);
+
+	// Add input event listener for real-time filtering
+	let filterTimeout: NodeJS.Timeout;
+	const inputHandler = (event: Event) => {
+		if (isAutofilling) return;
+
+		const input = event.target as HTMLInputElement;
+		const query = input.value;
+
+		// Debounce filtering (150ms)
+		clearTimeout(filterTimeout);
+		filterTimeout = setTimeout(() => {
+			iframe.contentWindow?.postMessage(
+				{
+					type: "FILTER_CREDIT_CARDS",
+					query,
+				},
+				"*",
+			);
+		}, 150);
+	};
+
+	field.inputHandler = inputHandler;
+	field.input.addEventListener("input", inputHandler);
 }
 
 // Hide credit card autofill overlay
@@ -1708,6 +1738,10 @@ function hideCreditCardAutofillOverlay(field: CreditCardField) {
 	if (field.messageHandler) {
 		window.removeEventListener("message", field.messageHandler);
 		field.messageHandler = undefined;
+	}
+	if (field.inputHandler) {
+		field.input.removeEventListener("input", field.inputHandler);
+		field.inputHandler = undefined;
 	}
 	if (field.readyTimeout) {
 		clearTimeout(field.readyTimeout);
@@ -1758,6 +1792,9 @@ async function handleCreditCardAutofillSelect(
 	await chrome.runtime.sendMessage({
 		type: "UPDATE_AUTOFILL_TIMESTAMP",
 	});
+
+	// Set flag to prevent filtering during autofill
+	isAutofilling = true;
 
 	// Get the form group to fill all related fields
 	const formGroup = field.formGroup;
@@ -1847,6 +1884,11 @@ async function handleCreditCardAutofillSelect(
 			}
 		}
 	}
+
+	// Reset autofilling flag after a brief delay
+	setTimeout(() => {
+		isAutofilling = false;
+	}, 100);
 
 	// Hide overlay
 	hideCreditCardAutofillOverlay(field);
@@ -2160,6 +2202,30 @@ function showIdentityAutofillOverlay(
 
 	// Add keyboard navigation
 	document.addEventListener("keydown", handleIdentityKeyboardNavigation);
+
+	// Add input event listener for real-time filtering
+	let filterTimeout: NodeJS.Timeout;
+	const inputHandler = (event: Event) => {
+		if (isAutofilling) return;
+
+		const input = event.target as HTMLInputElement;
+		const query = input.value;
+
+		// Debounce filtering (150ms)
+		clearTimeout(filterTimeout);
+		filterTimeout = setTimeout(() => {
+			iframe.contentWindow?.postMessage(
+				{
+					type: "FILTER_IDENTITIES",
+					query,
+				},
+				"*",
+			);
+		}, 150);
+	};
+
+	field.inputHandler = inputHandler;
+	field.input.addEventListener("input", inputHandler);
 }
 
 // Hide identity autofill overlay
@@ -2171,6 +2237,10 @@ function hideIdentityAutofillOverlay(field: IdentityField) {
 	if (field.messageHandler) {
 		window.removeEventListener("message", field.messageHandler);
 		field.messageHandler = undefined;
+	}
+	if (field.inputHandler) {
+		field.input.removeEventListener("input", field.inputHandler);
+		field.inputHandler = undefined;
 	}
 	if (field.readyTimeout) {
 		clearTimeout(field.readyTimeout);
@@ -2199,6 +2269,9 @@ async function handleIdentityAutofillSelect(
 	await chrome.runtime.sendMessage({
 		type: "UPDATE_AUTOFILL_TIMESTAMP",
 	});
+
+	// Set flag to prevent filtering during autofill
+	isAutofilling = true;
 
 	// Get the form group to fill all related fields
 	const formGroup = field.formGroup;
@@ -2382,6 +2455,11 @@ async function handleIdentityAutofillSelect(
 			}
 		}
 	}
+
+	// Reset autofilling flag after a brief delay
+	setTimeout(() => {
+		isAutofilling = false;
+	}, 100);
 
 	// Hide overlay
 	hideIdentityAutofillOverlay(field);
@@ -2645,7 +2723,9 @@ function showFieldIcon(
 				if (["username", "email", "password"].includes(field.type)) {
 					hideAutofillOverlay(field as CredentialField);
 				} else if (
-					["cardNumber", "cardExpiry", "cardCvv", "cardName"].includes(field.type)
+					["cardNumber", "cardExpiry", "cardCvv", "cardName"].includes(
+						field.type,
+					)
 				) {
 					hideCreditCardAutofillOverlay(field as CreditCardField);
 				} else {
@@ -2658,7 +2738,9 @@ function showFieldIcon(
 				if (["username", "email", "password"].includes(field.type)) {
 					await handleFieldFocus(field as CredentialField);
 				} else if (
-					["cardNumber", "cardExpiry", "cardCvv", "cardName"].includes(field.type)
+					["cardNumber", "cardExpiry", "cardCvv", "cardName"].includes(
+						field.type,
+					)
 				) {
 					await handleCreditCardFieldFocus(field as CreditCardField);
 				} else {
@@ -2695,7 +2777,9 @@ function showFieldIcon(
 /**
  * Hide and remove the field icon
  */
-function hideFieldIcon(field: CredentialField | CreditCardField | IdentityField) {
+function hideFieldIcon(
+	field: CredentialField | CreditCardField | IdentityField,
+) {
 	if (field.icon) {
 		// Run cleanup if it exists
 		if ((field.icon as any)._cleanup) {
@@ -2792,6 +2876,30 @@ function showAutofillOverlay(field: CredentialField, items: DecryptedItem[]) {
 
 	// Add keyboard navigation
 	document.addEventListener("keydown", handleKeyboardNavigation);
+
+	// Add input event listener for real-time filtering
+	let filterTimeout: NodeJS.Timeout;
+	const inputHandler = (event: Event) => {
+		if (isAutofilling) return;
+
+		const input = event.target as HTMLInputElement;
+		const query = input.value;
+
+		// Debounce filtering (150ms)
+		clearTimeout(filterTimeout);
+		filterTimeout = setTimeout(() => {
+			iframe.contentWindow?.postMessage(
+				{
+					type: "FILTER_ITEMS",
+					query,
+				},
+				"*",
+			);
+		}, 150);
+	};
+
+	field.inputHandler = inputHandler;
+	field.input.addEventListener("input", inputHandler);
 }
 
 // Hide autofill overlay
@@ -2803,6 +2911,10 @@ function hideAutofillOverlay(field: CredentialField) {
 	if (field.messageHandler) {
 		window.removeEventListener("message", field.messageHandler);
 		field.messageHandler = undefined;
+	}
+	if (field.inputHandler) {
+		field.input.removeEventListener("input", field.inputHandler);
+		field.inputHandler = undefined;
 	}
 	if (field.readyTimeout) {
 		clearTimeout(field.readyTimeout);
@@ -2835,6 +2947,9 @@ async function handleAutofillSelect(
 	await chrome.runtime.sendMessage({
 		type: "UPDATE_AUTOFILL_TIMESTAMP",
 	});
+
+	// Set flag to prevent filtering during autofill
+	isAutofilling = true;
 
 	// Fill the field
 	if (field.type === "password" && item.password) {
@@ -2908,6 +3023,11 @@ async function handleAutofillSelect(
 			passwordField.dispatchEvent(new Event("change", { bubbles: true }));
 		}
 	}
+
+	// Reset autofilling flag after a brief delay
+	setTimeout(() => {
+		isAutofilling = false;
+	}, 100);
 
 	// Hide overlay
 	hideAutofillOverlay(field);

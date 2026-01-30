@@ -5,26 +5,13 @@ import { useNavigate } from "@tanstack/react-router";
 import { Smartphone, Star } from "lucide-react";
 import type { DragItemData } from "../../providers/dnd-provider";
 import { Favicon } from "./favicon";
-import { VaultAvatar } from "./vault-avatar";
-
-interface VaultInfo {
-	name: string;
-	icon: string | null;
-	imageUrl: string | null;
-}
 
 interface ItemListRowProps {
-	item: DecryptedItem & {
-		vault?: VaultInfo;
-		account?: { email: string; userId: string; name: string };
-	};
+	item: DecryptedItem;
 	isSelected: boolean;
 	onToggleFavorite: (e: React.MouseEvent) => void;
 	linkTo: string;
 	linkParams: Record<string, string>;
-	showVaultBadge?: boolean;
-	showAccountBadge?: boolean;
-	accountEmail?: string;
 	vaultId: string;
 }
 
@@ -34,9 +21,6 @@ export function ItemListRow({
 	onToggleFavorite,
 	linkTo,
 	linkParams,
-	showVaultBadge = false,
-	showAccountBadge = false,
-	accountEmail,
 	vaultId,
 }: ItemListRowProps) {
 	const navigate = useNavigate();
@@ -102,24 +86,6 @@ export function ItemListRow({
 					{maskedCardNumber && (
 						<div className="mt-0.5 truncate text-muted-foreground text-xs">
 							{maskedCardNumber}
-						</div>
-					)}
-					{showVaultBadge && item.vault && (
-						<div className="mt-0.5 flex items-center gap-1 text-muted-foreground/70 text-xs">
-							<VaultAvatar
-								name={item.vault.name}
-								icon={item.vault.icon}
-								imageUrl={item.vault.imageUrl}
-								size="xs"
-							/>
-							<span className="truncate">{item.vault.name}</span>
-						</div>
-					)}
-					{showAccountBadge && (accountEmail || item.account) && (
-						<div className="mt-0.5 flex items-center gap-1 text-muted-foreground/70 text-xs">
-							<span className="truncate">
-								{accountEmail || item.account?.email}
-							</span>
 						</div>
 					)}
 				</div>

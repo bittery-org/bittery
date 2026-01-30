@@ -35,7 +35,8 @@
 		"db:start": "turbo -F @bittery/db db:start",
 		"db:watch": "turbo -F @bittery/db db:watch",
 		"db:stop": "turbo -F @bittery/db db:stop",
-		"db:down": "turbo -F @bittery/db db:down"
+		"db:down": "turbo -F @bittery/db db:down",
+		"shadcn": "pnpm --filter @bittery/ui run shadcn"
 	},
 	"dependencies": {
 		"dotenv": "^17.2.2",

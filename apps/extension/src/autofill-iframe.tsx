@@ -5,9 +5,12 @@ import { Lock } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { Favicon } from "@/components/favicon";
+import { filterLoginItems } from "@/lib/item-filter";
 
 function AutofillIframe() {
-	const [items, setItems] = useState<DecryptedItem[]>([]);
+	const [allItems, setAllItems] = useState<DecryptedItem[]>([]);
+	const [filteredItems, setFilteredItems] = useState<DecryptedItem[]>([]);
+	const [filterQuery, setFilterQuery] = useState("");
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const [_fieldType, setFieldType] = useState<
 		"username" | "email" | "password"
@@ -18,13 +21,25 @@ function AutofillIframe() {
 		// Listen for items from parent
 		const handleMessage = (event: MessageEvent) => {
 			if (event.data.type === "AUTOFILL_ITEMS") {
-				setItems(event.data.items || []);
+				const items = event.data.items || [];
+				setAllItems(items);
+				setFilteredItems(items);
+				setFilterQuery("");
 				setFieldType(event.data.fieldType || "username");
 				setSelectedIndex(0);
 				setNeedsUnlock(false);
 			} else if (event.data.type === "NEEDS_UNLOCK") {
 				setNeedsUnlock(true);
-				setItems([]);
+				setAllItems([]);
+				setFilteredItems([]);
+				setFilterQuery("");
+			} else if (event.data.type === "FILTER_ITEMS") {
+				const query = event.data.query || "";
+				setFilterQuery(query);
+				const filtered = filterLoginItems(allItems, query);
+				console.log(filtered);
+				setFilteredItems(filtered);
+				setSelectedIndex(0);
 			}
 		};
 
@@ -33,7 +48,7 @@ function AutofillIframe() {
 		window.parent.postMessage({ type: "IFRAME_READY" }, "*");
 
 		return () => window.removeEventListener("message", handleMessage);
-	}, []);
+	}, [allItems]);
 
 	const handleSelect = useCallback((item: DecryptedItem) => {
 		// Send selection to parent
@@ -49,21 +64,23 @@ function AutofillIframe() {
 	useEffect(() => {
 		// Keyboard navigation
 		const handleKeyDown = (event: KeyboardEvent) => {
-			if (items.length === 0) return;
+			if (filteredItems.length === 0) return;
 
 			switch (event.key) {
 				case "ArrowDown":
 					event.preventDefault();
-					setSelectedIndex((prev) => (prev + 1) % items.length);
+					setSelectedIndex((prev) => (prev + 1) % filteredItems.length);
 					break;
 				case "ArrowUp":
 					event.preventDefault();
-					setSelectedIndex((prev) => (prev - 1 + items.length) % items.length);
+					setSelectedIndex(
+						(prev) => (prev - 1 + filteredItems.length) % filteredItems.length,
+					);
 					break;
 				case "Enter":
 					event.preventDefault();
-					if (items[selectedIndex]) {
-						handleSelect(items[selectedIndex]);
+					if (filteredItems[selectedIndex]) {
+						handleSelect(filteredItems[selectedIndex]);
 					}
 					break;
 			}
@@ -71,7 +88,7 @@ function AutofillIframe() {
 
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [items, selectedIndex, handleSelect]);
+	}, [filteredItems, selectedIndex, handleSelect]);
 
 	if (needsUnlock) {
 		return (
@@ -87,7 +104,7 @@ function AutofillIframe() {
 		);
 	}
 
-	if (items.length === 0) {
+	if (allItems.length === 0) {
 		return (
 			<Card className="mt-1 p-2.5">
 				<div className="flex items-center gap-2 text-muted-foreground text-sm">
@@ -98,10 +115,30 @@ function AutofillIframe() {
 		);
 	}
 
+	if (filteredItems.length === 0 && filterQuery) {
+		return (
+			<Card className="mt-1 p-2.5">
+				<div className="flex flex-col gap-1 text-sm">
+					<span className="font-medium">No matches for "{filterQuery}"</span>
+					<p className="text-muted-foreground text-xs">
+						{allItems.length} {allItems.length === 1 ? "login" : "logins"}{" "}
+						available
+					</p>
+				</div>
+			</Card>
+		);
+	}
+
 	return (
 		<Card className="mt-1 max-h-[280px] overflow-y-auto p-0.5">
+			{filterQuery && filteredItems.length < allItems.length && (
+				<div className="px-2.5 py-1.5 text-muted-foreground text-xs">
+					Showing {filteredItems.length} of {allItems.length}{" "}
+					{allItems.length === 1 ? "match" : "matches"}
+				</div>
+			)}
 			<div className="space-y-0.5">
-				{items.map((item, index) => (
+				{filteredItems.map((item, index) => (
 					<button
 						key={item.id}
 						type="button"
@@ -135,7 +172,7 @@ function AutofillIframe() {
 
 			<div className="mt-0.5 border-t px-2.5 py-1.5">
 				<p className="text-center text-[10px] text-muted-foreground">
-					↑↓ to navigate • Enter to select • Esc to close
+					Type to filter • ↑↓ navigate • Enter select • Esc close
 				</p>
 			</div>
 		</Card>

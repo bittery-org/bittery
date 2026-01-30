@@ -6,10 +6,16 @@
 	"types": "./src/index.ts",
 	"exports": {
 		".": "./src/index.ts",
+		"./lib/utils": "./src/lib/utils.ts",
 		"./components/*": "./src/components/*.tsx"
+	},
+	"scripts": {
+		"shadcn": "pnpm dlx shadcn@latest"
 	},
 	"dependencies": {
 		"@bittery/shared": "workspace:*",
+		"@radix-ui/react-separator": "^1.1.8",
+		"@radix-ui/react-slot": "^1.2.4",
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",
 		"cmdk": "^1.1.1",
@@ -20,11 +26,11 @@
 		"tailwind-merge": "^3.3.1"
 	},
 	"devDependencies": {
-		"react": "catalog:",
-		"react-dom": "catalog:",
 		"@bittery/config": "workspace:*",
 		"@types/react": "catalog:",
 		"@types/react-dom": "catalog:",
+		"react": "catalog:",
+		"react-dom": "catalog:",
 		"typescript": "^5.7.2"
 	},
 	"peerDependencies": {

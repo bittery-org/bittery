@@ -853,7 +853,9 @@ export function detectFieldType(
 				// Check if this input comes before the password field in DOM order
 				const formInputs = Array.from(form.querySelectorAll("input"));
 				const inputIndex = formInputs.indexOf(input);
-				const passwordIndex = formInputs.indexOf(passwordField as HTMLInputElement);
+				const passwordIndex = formInputs.indexOf(
+					passwordField as HTMLInputElement,
+				);
 
 				// Only consider it a username field if:
 				// 1. It comes before the password field
@@ -861,7 +863,7 @@ export function detectFieldType(
 				// 3. The form has login-like indicators
 				const textInputsBeforePassword = formInputs
 					.slice(0, passwordIndex)
-					.filter(i => i.type === "text" || i.type === "email");
+					.filter((i) => i.type === "text" || i.type === "email");
 
 				if (
 					inputIndex < passwordIndex &&
