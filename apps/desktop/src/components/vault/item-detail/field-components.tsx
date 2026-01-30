@@ -7,6 +7,7 @@ import {
 	InputGroupInput,
 	Label,
 } from "@bittery/ui";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Copy, ExternalLink, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 import type { CustomField } from "./shared";
@@ -132,7 +133,7 @@ export function DetailUrlField({
 						</InputGroupButton>
 						<InputGroupButton
 							size="icon-sm"
-							onClick={() => window.open(value, "_blank")}
+							onClick={() => openUrl(value)}
 						>
 							<ExternalLink className="size-4" />
 						</InputGroupButton>
