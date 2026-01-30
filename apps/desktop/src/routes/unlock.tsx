@@ -4,17 +4,21 @@ import {
 	useSessionState,
 } from "@bittery/hooks";
 import {
+	Avatar,
+	AvatarFallback,
 	Button,
 	Card,
-	Input,
-	Label,
+	InputGroup,
+	InputGroupAddon,
+	InputGroupButton,
+	InputGroupInput,
 	toast,
 	VaultIcon,
 	type VaultIconState,
 } from "@bittery/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Fingerprint, KeyRound } from "lucide-react";
+import { Eye, EyeOff, Fingerprint, KeyRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { storage } from "@/lib/storage";
 
@@ -39,6 +43,7 @@ export function UnlockPage() {
 	const queryClient = useQueryClient();
 	const [password, setPassword] = useState("");
 	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
+	const [showPassword, setShowPassword] = useState(false);
 	const hasAttemptedBiometric = useRef(false);
 	const { autoTrigger } = Route.useSearch();
 
@@ -259,95 +264,132 @@ export function UnlockPage() {
 		return null;
 	}
 
+	// Helper to get initials from email
+	const getInitials = (email: string) => {
+		const name = email.split("@")[0];
+		return name
+			.split(/[._-]/)
+			.slice(0, 2)
+			.map((part) => part[0])
+			.join("")
+			.toUpperCase();
+	};
+
+	// Generate consistent color for each account (using inline styles for reliability)
+	const getAvatarColor = (email: string) => {
+		const colors = [
+			"#3b82f6", // blue
+			"#a855f7", // purple
+			"#22c55e", // green
+			"#f97316", // orange
+			"#ec4899", // pink
+			"#6366f1", // indigo
+			"#14b8a6", // teal
+			"#ef4444", // red
+		];
+		const index =
+			email.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0) %
+			colors.length;
+		return colors[index];
+	};
+
 	return (
 		<div className="flex h-full items-center justify-center bg-gray-50 p-4">
-			<Card className="w-full max-w-md gap-0 p-8">
-				<div className="mb-8 text-center">
-					<VaultIcon state={vaultState} className="mx-auto" size={140} />
-					<h1 className="mt-6 font-bold text-2xl">Unlock Bittery</h1>
-
-					{/* Show account info */}
-					<div className="mt-4">
-						{allAccounts.length === 1 ? (
-							<p className="text-gray-600 text-sm">{allAccounts[0].email}</p>
-						) : (
-							<p className="text-gray-600 text-sm">
-								{allAccounts.length} accounts
-							</p>
-						)}
+			<div className="w-full max-w-2xl">
+				<div className="flex items-start gap-12">
+					{/* Left side - Vault Icon */}
+					<div className="flex-shrink-0">
+						<VaultIcon state={vaultState} size={180} />
 					</div>
-				</div>
 
-				{/* Master Password Required Notice */}
-				{requiresPasswordReentry && (
-					<div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
-						<KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
-						<div>
-							<p className="font-medium text-amber-800">Password Required</p>
-							<p className="text-amber-700 text-sm">
-								For your security, please enter your master password. This is
-								required every 30 days.
-							</p>
+					{/* Right side - Unlock Form */}
+					<div className="flex-1 pt-6">
+						{/* Account Avatars */}
+						<div className="mb-8 flex items-center gap-2">
+							{allAccounts.map((account) => (
+								<Avatar key={account.email} className="size-12">
+									<AvatarFallback
+										className="font-medium text-white text-sm"
+										style={{ backgroundColor: getAvatarColor(account.email) }}
+									>
+										{getInitials(account.email)}
+									</AvatarFallback>
+								</Avatar>
+							))}
 						</div>
+
+						{/* Master Password Required Notice */}
+						{requiresPasswordReentry && (
+							<div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+								<KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+								<div>
+									<p className="font-medium text-amber-800">Password Required</p>
+									<p className="text-amber-700 text-sm">
+										For your security, please enter your master password. This
+										is required every 30 days.
+									</p>
+								</div>
+							</div>
+						)}
+
+						{/* Password Input with Eye and Fingerprint */}
+						<form onSubmit={handlePasswordUnlock} className="w-80">
+							<InputGroup>
+								<InputGroupInput
+									id="password"
+									type={showPassword ? "text" : "password"}
+									value={password}
+									onChange={(e) => setPassword(e.target.value)}
+									required
+									placeholder="Enter your password"
+									autoFocus
+									disabled={loading}
+									className="pr-20 text-base"
+									onKeyDown={(e) => {
+										if (e.key === "Enter" && !loading) {
+											handlePasswordUnlock(e as unknown as React.FormEvent);
+										}
+									}}
+								/>
+								<InputGroupAddon align="inline-end">
+									<InputGroupButton
+										type="button"
+										size="icon-sm"
+										onClick={() => setShowPassword(!showPassword)}
+										disabled={loading}
+										aria-label={showPassword ? "Hide password" : "Show password"}
+									>
+										{showPassword ? (
+											<EyeOff className="h-4 w-4" />
+										) : (
+											<Eye className="h-4 w-4" />
+										)}
+									</InputGroupButton>
+									{canUseBiometric && (
+										<InputGroupButton
+											type="button"
+											size="icon-sm"
+											onClick={handleBiometricUnlockAll}
+											disabled={loading}
+											aria-label="Unlock with biometric"
+											className="text-primary hover:text-primary/80"
+										>
+											<Fingerprint className="h-5 w-5" />
+										</InputGroupButton>
+									)}
+								</InputGroupAddon>
+							</InputGroup>
+						</form>
+
+						{/* Lock message */}
+						<p className="mt-4 w-80 text-muted-foreground text-sm">
+							{allAccounts.length === 1
+								? "Bittery was locked due to inactivity."
+								: `Bittery was locked with ${allAccounts.length} accounts.`}
+						</p>
 					</div>
-				)}
-
-				{/* Biometric unlock button */}
-				{canUseBiometric && (
-					<div className="mb-4">
-						<Button
-							type="button"
-							onClick={handleBiometricUnlockAll}
-							className="w-full"
-							variant="outline"
-							disabled={loading}
-						>
-							<Fingerprint className="mr-2 h-4 w-4" />
-							{loading
-								? "Authenticating..."
-								: allAccounts.length === 1
-									? "Unlock with Biometric"
-									: "Unlock All with Biometric"}
-						</Button>
-						<div className="mt-4 text-center text-gray-500 text-sm">or</div>
-					</div>
-				)}
-
-				<form onSubmit={handlePasswordUnlock} className="space-y-4">
-					<div className="grid gap-2">
-						<Label htmlFor="password">Password</Label>
-						<Input
-							id="password"
-							type="password"
-							value={password}
-							onChange={(e) => setPassword(e.target.value)}
-							required
-							placeholder="Enter your password"
-							autoFocus
-						/>
-					</div>
-
-					<Button type="submit" className="w-full" disabled={loading}>
-						{loading
-							? "Unlocking..."
-							: allAccounts.length === 1
-								? "Unlock"
-								: `Unlock All (${allAccounts.length})`}
-					</Button>
-				</form>
-
-				<div className="mt-4 text-center">
-					<button
-						type="button"
-						onClick={() =>
-							navigate({ to: "/login", search: { addingAccount: true } })
-						}
-						className="text-gray-600 text-sm hover:text-gray-900"
-					>
-						Sign in with different account
-					</button>
 				</div>
-			</Card>
+			</div>
 		</div>
 	);
 }
