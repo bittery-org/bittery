@@ -1,10 +1,10 @@
 import { useAccountSwitcher } from "@bittery/hooks";
 import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import {
+	AccountAvatarGroup,
 	AccountSwitcher,
 	Avatar,
 	AvatarFallback,
-	AvatarGroup,
 	AvatarImage,
 	Button,
 	toast,
@@ -199,7 +199,9 @@ export function ExtensionAccountSwitcher() {
 	};
 
 	// Get active account for trigger display
-	const activeAccount = accountsData.find((a) => a.email === activeAccountEmail);
+	const activeAccount = accountsData.find(
+		(a) => a.email === activeAccountEmail,
+	);
 	const isAllAccountsMode = activeAccountEmail === "all";
 
 	// Helper to get avatar color
@@ -222,7 +224,7 @@ export function ExtensionAccountSwitcher() {
 		>
 			{isAllAccountsMode ? (
 				<>
-					<AvatarGroup
+					<AccountAvatarGroup
 						accounts={accountsData.filter((a) =>
 							unlockedEmailsList.includes(a.email),
 						)}
@@ -248,7 +250,7 @@ export function ExtensionAccountSwitcher() {
 							/>
 						)}
 						<AvatarFallback
-							className="text-xs font-medium text-white"
+							className="font-medium text-white text-xs"
 							style={{ backgroundColor: getAvatarColor(activeAccount.email) }}
 						>
 							{activeAccount.email.slice(0, 2).toUpperCase()}

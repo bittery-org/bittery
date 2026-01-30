@@ -3,8 +3,8 @@
  * Updates team avatar URLs and other account data that may change on the server
  */
 
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import { useTRPCClient } from "@bittery/shared/trpc";
+import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
 
@@ -60,7 +60,8 @@ export function useAccountMetadataSync(
 				}
 
 				// Check if team avatar URL has changed
-				const hasChanged = storedAccount.teamAvatarUrl !== userData.teamAvatarUrl;
+				const hasChanged =
+					storedAccount.teamAvatarUrl !== userData.teamAvatarUrl;
 
 				if (hasChanged) {
 					console.log(

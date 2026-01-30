@@ -154,7 +154,11 @@ export const teamRouter = router({
 				});
 			}
 
-			const updateData: { name?: string; imageKey?: string | null; updatedAt: Date } = {
+			const updateData: {
+				name?: string;
+				imageKey?: string | null;
+				updatedAt: Date;
+			} = {
 				updatedAt: new Date(),
 			};
 

@@ -131,10 +131,7 @@ export function DetailUrlField({
 						>
 							<Copy className="size-4" />
 						</InputGroupButton>
-						<InputGroupButton
-							size="icon-sm"
-							onClick={() => openUrl(value)}
-						>
+						<InputGroupButton size="icon-sm" onClick={() => openUrl(value)}>
 							<ExternalLink className="size-4" />
 						</InputGroupButton>
 					</ButtonGroup>

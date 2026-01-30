@@ -159,6 +159,8 @@ export {
 	type ShareExpirationOption,
 	useCreateShare,
 } from "./hooks/share";
+// Team Mutation Hooks (write operations)
+export { useTeamAvatar } from "./hooks/team/use-team-avatar";
 export {
 	type UnifiedDeletedItem,
 	type UseAllDeletedItemsOptions,
@@ -196,8 +198,6 @@ export {
 	useDeleteVault,
 	useUpdateVault,
 } from "./hooks/vault";
-// Team Mutation Hooks (write operations)
-export { useTeamAvatar } from "./hooks/team/use-team-avatar";
 // Services (platform-specific autolock implementations)
 export {
 	createMobileAutolockService,

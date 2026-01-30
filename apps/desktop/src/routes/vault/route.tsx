@@ -150,7 +150,7 @@ function RouteComponent() {
 			}
 		};
 		getAccountEmails();
-	}, [isAllAccountsMode]);
+	}, []);
 
 	// Sync account metadata for all accounts periodically
 	// This keeps team avatar URLs up-to-date

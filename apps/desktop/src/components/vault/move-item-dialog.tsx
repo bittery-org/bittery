@@ -1,4 +1,4 @@
-import { useMoveItem, useAllVaultKeys } from "@bittery/hooks";
+import { useAllVaultKeys, useMoveItem } from "@bittery/hooks";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	Button,
@@ -161,10 +161,12 @@ export function MoveItemDialog({
 				<div className="space-y-4 py-4">
 					{/* Current Vault */}
 					<div className="space-y-2">
-						<Label className="text-sm text-muted-foreground">From</Label>
+						<Label className="text-muted-foreground text-sm">From</Label>
 						<div className="flex items-center gap-2 rounded-md border border-input bg-muted px-3 py-2">
 							<VaultAvatar name={currentVaultName || "Vault"} size="xs" />
-							<span className="text-sm">{currentVaultName || "Current Vault"}</span>
+							<span className="text-sm">
+								{currentVaultName || "Current Vault"}
+							</span>
 						</div>
 					</div>
 
@@ -180,67 +182,72 @@ export function MoveItemDialog({
 								<Loader2 className="size-6 animate-spin text-muted-foreground" />
 							</div>
 						) : availableVaults.length === 0 ? (
-							<div className="text-center text-sm text-muted-foreground py-4">
+							<div className="py-4 text-center text-muted-foreground text-sm">
 								No other vaults available
 							</div>
 						) : (
-							<Select value={selectedVaultId} onValueChange={setSelectedVaultId}>
+							<Select
+								value={selectedVaultId}
+								onValueChange={setSelectedVaultId}
+							>
 								<SelectTrigger id="target-vault">
 									<SelectValue placeholder="Select a vault" />
 								</SelectTrigger>
 								<SelectContent>
-									{isAllAccountsMode ? (
-										// Multi-account mode: group by account
-										Object.entries(vaultsByAccount).map(([accountEmail, vaults]) => {
-											if (vaults.length === 0) return null;
+									{isAllAccountsMode
+										? // Multi-account mode: group by account
+											Object.entries(vaultsByAccount).map(
+												([accountEmail, vaults]) => {
+													if (vaults.length === 0) return null;
 
-											const accountName = vaults[0].accountName || accountEmail;
-											const isCurrentAccount = accountEmail === currentVaultAccount;
+													const accountName =
+														vaults[0].accountName || accountEmail;
+													const isCurrentAccount =
+														accountEmail === currentVaultAccount;
 
-											return (
-												<div key={accountEmail}>
-													<div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
-														{accountName}
-														{isCurrentAccount && " (current)"}
-													</div>
-													{vaults.map((vaultKey) => (
-														<SelectItem
-															key={vaultKey.vaultId}
-															value={vaultKey.vaultId}
-														>
-															<div className="flex items-center gap-2">
-																<VaultAvatar
-																	name={vaultKey.vaultName}
-																	icon={vaultKey.vaultIcon}
-																	imageUrl={vaultKey.vaultImageUrl}
-																	size="xs"
-																/>
-																<span>{vaultKey.vaultName}</span>
+													return (
+														<div key={accountEmail}>
+															<div className="px-2 py-1.5 font-semibold text-muted-foreground text-xs">
+																{accountName}
+																{isCurrentAccount && " (current)"}
 															</div>
-														</SelectItem>
-													))}
-												</div>
-											);
-										})
-									) : (
-										// Single-account mode: simple list
-										availableVaults.map((vaultKey) => (
-											<SelectItem
-												key={vaultKey.vaultId}
-												value={vaultKey.vaultId}
-											>
-												<div className="flex items-center gap-2">
-													<VaultAvatar
-														name={vaultKey.vaultName}
-														icon={vaultKey.vaultIcon}
-														imageUrl={vaultKey.vaultImageUrl}
-														size="xs"
-													/>
-													<span>{vaultKey.vaultName}</span>
-												</div>
-											</SelectItem>
-										))
-									)}
+															{vaults.map((vaultKey) => (
+																<SelectItem
+																	key={vaultKey.vaultId}
+																	value={vaultKey.vaultId}
+																>
+																	<div className="flex items-center gap-2">
+																		<VaultAvatar
+																			name={vaultKey.vaultName}
+																			icon={vaultKey.vaultIcon}
+																			imageUrl={vaultKey.vaultImageUrl}
+																			size="xs"
+																		/>
+																		<span>{vaultKey.vaultName}</span>
+																	</div>
+																</SelectItem>
+															))}
+														</div>
+													);
+												},
+											)
+										: // Single-account mode: simple list
+											availableVaults.map((vaultKey) => (
+												<SelectItem
+													key={vaultKey.vaultId}
+													value={vaultKey.vaultId}
+												>
+													<div className="flex items-center gap-2">
+														<VaultAvatar
+															name={vaultKey.vaultName}
+															icon={vaultKey.vaultIcon}
+															imageUrl={vaultKey.vaultImageUrl}
+															size="xs"
+														/>
+														<span>{vaultKey.vaultName}</span>
+													</div>
+												</SelectItem>
+											))}
 								</SelectContent>
 							</Select>
 						)}
@@ -254,7 +261,7 @@ export function MoveItemDialog({
 								{selectedVault.accountName || selectedVault.accountEmail}
 							</span>
 							{isCrossAccount && (
-								<span className="ml-2 text-xs text-amber-600 dark:text-amber-500">
+								<span className="ml-2 text-amber-600 text-xs dark:text-amber-500">
 									(different account - will transfer)
 								</span>
 							)}

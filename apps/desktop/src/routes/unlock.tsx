@@ -4,11 +4,7 @@ import {
 	useSessionState,
 } from "@bittery/hooks";
 import {
-	Avatar,
-	AvatarFallback,
-	AvatarImage,
-	Button,
-	Card,
+	AccountAvatarGroup as AvatarGroup,
 	InputGroup,
 	InputGroupAddon,
 	InputGroupButton,
@@ -265,64 +261,20 @@ export function UnlockPage() {
 		return null;
 	}
 
-	// Helper to get initials from email
-	const getInitials = (email: string) => {
-		const name = email.split("@")[0];
-		return name
-			.split(/[._-]/)
-			.slice(0, 2)
-			.map((part) => part[0])
-			.join("")
-			.toUpperCase();
-	};
-
-	// Generate consistent color for each account (using inline styles for reliability)
-	const getAvatarColor = (email: string) => {
-		const colors = [
-			"#3b82f6", // blue
-			"#a855f7", // purple
-			"#22c55e", // green
-			"#f97316", // orange
-			"#ec4899", // pink
-			"#6366f1", // indigo
-			"#14b8a6", // teal
-			"#ef4444", // red
-		];
-		const index =
-			email.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0) %
-			colors.length;
-		return colors[index];
-	};
-
 	return (
 		<div className="flex h-full items-center justify-center bg-gray-50 p-4">
 			<div className="w-full max-w-2xl">
 				<div className="flex items-start gap-12">
 					{/* Left side - Vault Icon */}
-					<div className="flex-shrink-0">
+					<div className="shrink-0">
 						<VaultIcon state={vaultState} size={180} />
 					</div>
 
 					{/* Right side - Unlock Form */}
 					<div className="flex-1 pt-6">
 						{/* Account Avatars */}
-						<div className="mb-8 flex items-center gap-2">
-							{allAccounts.map((account) => (
-								<Avatar key={account.email} className="size-12">
-									{account.teamAvatarUrl && (
-										<AvatarImage
-											src={account.teamAvatarUrl}
-											alt={account.teamName || account.name || account.email}
-										/>
-									)}
-									<AvatarFallback
-										className="font-medium text-white text-sm"
-										style={{ backgroundColor: getAvatarColor(account.email) }}
-									>
-										{getInitials(account.email)}
-									</AvatarFallback>
-								</Avatar>
-							))}
+						<div className="mb-5">
+							<AvatarGroup accounts={allAccounts} maxVisible={3} size="lg" />
 						</div>
 
 						{/* Master Password Required Notice */}
@@ -330,7 +282,9 @@ export function UnlockPage() {
 							<div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
 								<KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
 								<div>
-									<p className="font-medium text-amber-800">Password Required</p>
+									<p className="font-medium text-amber-800">
+										Password Required
+									</p>
 									<p className="text-amber-700 text-sm">
 										For your security, please enter your master password. This
 										is required every 30 days.
@@ -364,7 +318,9 @@ export function UnlockPage() {
 										size="icon-sm"
 										onClick={() => setShowPassword(!showPassword)}
 										disabled={loading}
-										aria-label={showPassword ? "Hide password" : "Show password"}
+										aria-label={
+											showPassword ? "Hide password" : "Show password"
+										}
 									>
 										{showPassword ? (
 											<EyeOff className="h-4 w-4" />

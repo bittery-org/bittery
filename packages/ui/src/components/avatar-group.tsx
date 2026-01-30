@@ -4,7 +4,13 @@
  */
 
 import { cn } from "../lib/utils";
-import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
+import {
+	Avatar,
+	AvatarFallback,
+	AvatarGroupCount,
+	AvatarGroup as AvatarGroupRaw,
+	AvatarImage,
+} from "./avatar";
 
 export interface AvatarGroupAccount {
 	email: string;
@@ -36,17 +42,7 @@ function getInitials(account: AvatarGroupAccount): string {
 		.slice(0, 2);
 }
 
-function getAvatarColor(email: string): string {
-	// Simple hash function to generate consistent colors per email
-	let hash = 0;
-	for (let i = 0; i < email.length; i++) {
-		hash = email.charCodeAt(i) + ((hash << 5) - hash);
-	}
-	const hue = hash % 360;
-	return `hsl(${hue}, 70%, 50%)`;
-}
-
-export function AvatarGroup({
+export function AccountAvatarGroup({
 	accounts,
 	maxVisible = 2,
 	size = "md",
@@ -56,43 +52,23 @@ export function AvatarGroup({
 	const overflowCount = accounts.length - maxVisible;
 
 	return (
-		<div className={cn("flex -space-x-2", className)}>
-			{visibleAccounts.map((account, index) => (
-				<Avatar
-					key={account.email}
-					className={cn(
-						sizeClasses[size],
-						"border-1 border-background ring-2 ring-background",
-					)}
-					style={{ zIndex: visibleAccounts.length - index }}
-				>
+		<AvatarGroupRaw className={className}>
+			{visibleAccounts.map((account) => (
+				<Avatar key={account.email} className={cn(sizeClasses[size])}>
 					{account.teamAvatarUrl && (
 						<AvatarImage
 							src={account.teamAvatarUrl}
 							alt={account.teamName || account.name || account.email}
 						/>
 					)}
-					<AvatarFallback
-						className="text-white font-medium"
-						style={{ backgroundColor: getAvatarColor(account.email) }}
-					>
-						{getInitials(account)}
-					</AvatarFallback>
+					<AvatarFallback>{getInitials(account)}</AvatarFallback>
 				</Avatar>
 			))}
 			{overflowCount > 0 && (
-				<Avatar
-					className={cn(
-						sizeClasses[size],
-						"border-2 border-background ring-2 ring-background",
-					)}
-					style={{ zIndex: 0 }}
-				>
-					<AvatarFallback className="bg-muted text-muted-foreground font-medium">
-						+{overflowCount}
-					</AvatarFallback>
-				</Avatar>
+				<AvatarGroupCount className={cn(sizeClasses[size])}>
+					+{overflowCount}
+				</AvatarGroupCount>
 			)}
-		</div>
+		</AvatarGroupRaw>
 	);
 }

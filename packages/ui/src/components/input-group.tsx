@@ -1,3 +1,5 @@
+/** biome-ignore-all lint/a11y/useSemanticElements: this is auto generated */
+/** biome-ignore-all lint/a11y/useKeyWithClickEvents: this is auto generated */
 import { cva, type VariantProps } from "class-variance-authority";
 import type * as React from "react";
 

@@ -5,9 +5,9 @@
 
 import { useAccountSwitcher } from "@bittery/hooks";
 import {
-	AccountSwitcher as SharedAccountSwitcher,
-	AvatarGroup,
+	AccountAvatarGroup,
 	Button,
+	AccountSwitcher as SharedAccountSwitcher,
 	toast,
 } from "@bittery/ui";
 import { useNavigate } from "@tanstack/react-router";
@@ -140,7 +140,7 @@ export function AccountSwitcher() {
 		>
 			{isAllAccountsMode ? (
 				<>
-					<AvatarGroup
+					<AccountAvatarGroup
 						accounts={accountsData.filter((a) =>
 							unlockedEmailsList.includes(a.email),
 						)}

@@ -187,7 +187,7 @@ export function ItemDetailPage({
 		<>
 			<div className="flex flex-1 flex-col">
 				{/* Top bar */}
-				<div className="flex items-center justify-between px-8 py-2 mb-3">
+				<div className="mb-3 flex items-center justify-between px-8 py-2">
 					<div className="flex items-center gap-2 text-muted-foreground text-sm">
 						<VaultAvatar
 							name={vaultInfo?.name || "Vault"}
@@ -224,9 +224,7 @@ export function ItemDetailPage({
 									<CopyIcon className="mr-2 size-4" />
 									Duplicate
 								</DropdownMenuItem>
-								<DropdownMenuItem
-									onClick={() => setIsMoveDialogOpen(true)}
-								>
+								<DropdownMenuItem onClick={() => setIsMoveDialogOpen(true)}>
 									<ArrowRightLeft className="mr-2 size-4" />
 									Move to Vault
 								</DropdownMenuItem>

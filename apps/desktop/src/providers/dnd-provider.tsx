@@ -157,7 +157,10 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 						// For cross-account transfers, use the new item ID
 						navigate({
 							to: "/vault/$id/$itemId",
-							params: { id: targetVaultId, itemId: result.newItemId || draggedItem.id },
+							params: {
+								id: targetVaultId,
+								itemId: result.newItemId || draggedItem.id,
+							},
 						});
 					} else {
 						toast.success("Item moved successfully");
