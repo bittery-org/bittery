@@ -184,13 +184,13 @@ export function ItemDetailPage({
 		<>
 			<div className="flex flex-1 flex-col">
 				{/* Top bar */}
-				<div className="flex items-center justify-between border-b bg-background px-8 py-2">
+				<div className="flex items-center justify-between px-8 py-2 mb-3">
 					<div className="flex items-center gap-2 text-muted-foreground text-sm">
 						<VaultAvatar
 							name={vaultInfo?.name || "Vault"}
 							icon={vaultInfo?.icon}
 							imageUrl={vaultInfo?.imageUrl}
-							size="sm"
+							size="xs"
 						/>
 						<span>{vaultInfo?.name || "Unknown Vault"}</span>
 					</div>
