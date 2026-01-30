@@ -192,21 +192,25 @@ class DesktopSyncService {
 
 			// Get current extension accounts
 			const currentAccounts = await storage.getAccountsList();
-			const currentEmails = new Set(
-				currentAccounts.map((a) => a.email.toLowerCase()),
-			);
 
-			// Add any accounts from desktop that aren't in extension
+			// Add or update accounts from desktop
 			let addedCount = 0;
+			let updatedCount = 0;
 			for (const desktopAccount of accountsData.accounts) {
 				const email = desktopAccount.email.toLowerCase();
-				if (!currentEmails.has(email)) {
+				const existingAccount = currentAccounts.find(
+					(a) => a.email.toLowerCase() === email,
+				);
+
+				if (!existingAccount) {
+					// Add new account
 					await storage.addAccount({
 						email: desktopAccount.email,
 						userId: desktopAccount.userId,
 						name: desktopAccount.name,
 						secretKeyHint: desktopAccount.secretKeyHint,
 						teamName: desktopAccount.teamName,
+						teamAvatarUrl: desktopAccount.teamAvatarUrl,
 						addedAt: desktopAccount.addedAt ?? Date.now(),
 						lastActiveAt: desktopAccount.lastActiveAt ?? Date.now(),
 						biometricEnabled: desktopAccount.biometricEnabled ?? false,
@@ -215,6 +219,24 @@ class DesktopSyncService {
 					console.log(
 						`[Desktop Sync] Added account from desktop: ${desktopAccount.email}`,
 					);
+				} else {
+					// Update existing account with latest data from desktop
+					// This ensures teamAvatarUrl and other fields stay in sync
+					const needsUpdate =
+						existingAccount.teamAvatarUrl !== desktopAccount.teamAvatarUrl ||
+						existingAccount.teamName !== desktopAccount.teamName;
+
+					if (needsUpdate) {
+						await storage.addAccount({
+							...existingAccount,
+							teamName: desktopAccount.teamName,
+							teamAvatarUrl: desktopAccount.teamAvatarUrl,
+						});
+						updatedCount++;
+						console.log(
+							`[Desktop Sync] Updated account metadata: ${desktopAccount.email}`,
+						);
+					}
 				}
 			}
 
@@ -235,12 +257,12 @@ class DesktopSyncService {
 				}
 			}
 
-			if (addedCount > 0) {
+			if (addedCount > 0 || updatedCount > 0) {
 				console.log(
-					`[Desktop Sync] Synced ${addedCount} account(s) from desktop`,
+					`[Desktop Sync] Synced ${addedCount} new, ${updatedCount} updated account(s) from desktop`,
 				);
 			} else {
-				console.log("[Desktop Sync] No new accounts to sync");
+				console.log("[Desktop Sync] Accounts already in sync");
 			}
 		} catch (error) {
 			console.error(

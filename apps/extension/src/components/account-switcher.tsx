@@ -1,8 +1,17 @@
 import { useAccountSwitcher } from "@bittery/hooks";
 import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
-import { AccountSwitcher, toast } from "@bittery/ui";
+import {
+	AccountSwitcher,
+	Avatar,
+	AvatarFallback,
+	AvatarGroup,
+	AvatarImage,
+	Button,
+	toast,
+} from "@bittery/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
 import { storage } from "@/lib/storage";
@@ -84,10 +93,11 @@ export function ExtensionAccountSwitcher() {
 
 					const userData = await client.auth.me.query();
 
-					// Update account with team name
+					// Update account with team name and avatar
 					await storage.addAccount({
 						...account,
 						teamName: userData.teamName,
+						teamAvatarUrl: userData.teamAvatarUrl,
 					});
 
 					console.log(
@@ -188,6 +198,75 @@ export function ExtensionAccountSwitcher() {
 		}
 	};
 
+	// Get active account for trigger display
+	const activeAccount = accountsData.find((a) => a.email === activeAccountEmail);
+	const isAllAccountsMode = activeAccountEmail === "all";
+
+	// Helper to get avatar color
+	const getAvatarColor = (email: string) => {
+		let hash = 0;
+		for (let i = 0; i < email.length; i++) {
+			hash = email.charCodeAt(i) + ((hash << 5) - hash);
+		}
+		const hue = hash % 360;
+		return `hsl(${hue}, 70%, 50%)`;
+	};
+
+	// Custom trigger with AvatarGroup support
+	const trigger = (
+		<Button
+			variant="ghost"
+			size="sm"
+			className="gap-2"
+			disabled={switchAccount.isPending}
+		>
+			{isAllAccountsMode ? (
+				<>
+					<AvatarGroup
+						accounts={accountsData.filter((a) =>
+							unlockedEmailsList.includes(a.email),
+						)}
+						maxVisible={2}
+						size="sm"
+					/>
+					<div className="flex flex-col items-start overflow-hidden">
+						<span className="max-w-32 truncate font-medium text-sm">
+							All Accounts
+						</span>
+						<span className="text-muted-foreground text-xs">
+							{unlockedEmailsList.length} unlocked
+						</span>
+					</div>
+				</>
+			) : activeAccount ? (
+				<>
+					<Avatar className="h-6 w-6">
+						{activeAccount.teamAvatarUrl && (
+							<AvatarImage
+								src={activeAccount.teamAvatarUrl}
+								alt={activeAccount.teamName || activeAccount.name}
+							/>
+						)}
+						<AvatarFallback
+							className="text-xs font-medium text-white"
+							style={{ backgroundColor: getAvatarColor(activeAccount.email) }}
+						>
+							{activeAccount.email.slice(0, 2).toUpperCase()}
+						</AvatarFallback>
+					</Avatar>
+					<div className="flex flex-col items-start overflow-hidden">
+						<span className="max-w-32 truncate font-medium text-sm">
+							{activeAccount.teamName ||
+								activeAccount.name ||
+								activeAccount.email.split("@")[0]}
+						</span>
+					</div>
+				</>
+			) : null}
+			<ChevronDown className="h-4 w-4 opacity-50" />
+		</Button>
+	);
+
 	return (
 		<AccountSwitcher
 			accounts={accountsData}
@@ -199,6 +278,7 @@ export function ExtensionAccountSwitcher() {
 			showAllAccountsOption={true}
 			onAllAccountsSelect={handleAllAccountsSelect}
 			isLoading={accounts.isLoading || switchAccount.isPending}
+			trigger={trigger}
 		/>
 	);
 }

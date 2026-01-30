@@ -294,6 +294,7 @@ class DesktopClient {
 			name: string;
 			secretKeyHint: string;
 			teamName?: string;
+			teamAvatarUrl?: string | null;
 			lastActiveAt?: number;
 			biometricEnabled?: boolean;
 			addedAt?: number;
