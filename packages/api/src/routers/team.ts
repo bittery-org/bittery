@@ -9,6 +9,19 @@ import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../index";
+import {
+	createPresignedUpload,
+	createTeamImageKey,
+	getStoragePublicUrl,
+} from "../storage/s3";
+
+/**
+ * Helper function to get image URL from imageKey
+ */
+function getTeamImageUrl(imageKey: string | null): string | null {
+	if (!imageKey) return null;
+	return getStoragePublicUrl(imageKey);
+}
 
 export const teamRouter = router({
 	/**
@@ -40,6 +53,7 @@ export const teamRouter = router({
 			role: userData.role,
 			memberCount: members.length,
 			memberLimit: userData.team.memberLimit,
+			imageUrl: getTeamImageUrl(userData.team.imageKey),
 			createdAt: userData.team.createdAt,
 		};
 	}),
@@ -85,6 +99,7 @@ export const teamRouter = router({
 				userRole: userData.role,
 				memberCount: teamData.users.length,
 				memberLimit: teamData.memberLimit,
+				imageUrl: getTeamImageUrl(teamData.imageKey),
 				createdAt: teamData.createdAt,
 				updatedAt: teamData.updatedAt,
 			};
@@ -110,10 +125,16 @@ export const teamRouter = router({
 		}),
 
 	/**
-	 * Update team name (owner/admin only)
+	 * Update team name and/or imageKey (owner/admin only)
 	 */
 	update: protectedProcedure
-		.input(z.object({ teamId: z.string(), name: z.string().min(1) }))
+		.input(
+			z.object({
+				teamId: z.string(),
+				name: z.string().min(1).optional(),
+				imageKey: z.string().nullable().optional(),
+			}),
+		)
 		.mutation(async ({ ctx, input }) => {
 			const userData = await db.query.user.findFirst({
 				where: (user, { eq }) => eq(user.id, ctx.session.userId),
@@ -133,12 +154,73 @@ export const teamRouter = router({
 				});
 			}
 
-			await db
-				.update(team)
-				.set({ name: input.name, updatedAt: new Date() })
-				.where(eq(team.id, input.teamId));
+			const updateData: { name?: string; imageKey?: string | null; updatedAt: Date } = {
+				updatedAt: new Date(),
+			};
+
+			if (input.name !== undefined) {
+				updateData.name = input.name;
+			}
+
+			if (input.imageKey !== undefined) {
+				updateData.imageKey = input.imageKey;
+			}
+
+			await db.update(team).set(updateData).where(eq(team.id, input.teamId));
 
 			return { success: true };
+		}),
+
+	/**
+	 * Create presigned upload URL for team avatar (owner/admin only)
+	 */
+	createImageUpload: protectedProcedure
+		.input(
+			z.object({
+				teamId: z.string(),
+				fileName: z.string(),
+				contentType: z.string(),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			// Validate image MIME type
+			if (!input.contentType.startsWith("image/")) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Only image files are allowed",
+				});
+			}
+
+			// Verify user has owner or admin role in their team
+			const userData = await db.query.user.findFirst({
+				where: (user, { eq }) => eq(user.id, ctx.session.userId),
+			});
+
+			if (userData?.teamId !== input.teamId) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "You are not a member of this team",
+				});
+			}
+
+			if (!["owner", "admin"].includes(userData.role)) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "Insufficient permissions",
+				});
+			}
+
+			const key = createTeamImageKey({
+				teamId: input.teamId,
+				fileName: input.fileName,
+			});
+
+			const result = await createPresignedUpload({
+				key,
+				contentType: input.contentType,
+			});
+
+			return result;
 		}),
 
 	/**

@@ -1,4 +1,4 @@
-import { Avatar, AvatarFallback, cn } from "@bittery/ui";
+import { Avatar, AvatarFallback, AvatarImage, cn } from "@bittery/ui";
 import type { AccountMetadata } from "@/lib/storage";
 
 interface AccountAvatarProps {
@@ -38,6 +38,12 @@ export function AccountAvatar({
 
 	return (
 		<Avatar className={cn(sizeClasses[size], className)}>
+			{account?.teamAvatarUrl && (
+				<AvatarImage
+					src={account.teamAvatarUrl}
+					alt={account.teamName || account.name || account.email}
+				/>
+			)}
 			<AvatarFallback className={sizeClasses[size]}>{initials}</AvatarFallback>
 		</Avatar>
 	);

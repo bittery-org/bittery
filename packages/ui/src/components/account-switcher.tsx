@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import type React from "react";
 import { cn } from "../lib/utils.js";
-import { Avatar, AvatarFallback } from "./avatar.js";
+import { Avatar, AvatarFallback, AvatarImage } from "./avatar.js";
 import { Button } from "./button.js";
 import {
 	DropdownMenu,
@@ -38,6 +38,7 @@ export interface AccountSwitcherAccount {
 	name: string;
 	userId: string;
 	teamName?: string;
+	teamAvatarUrl?: string | null;
 }
 
 export interface AccountSwitcherProps {
@@ -144,6 +145,12 @@ export function AccountSwitcher({
 			) : (
 				<>
 					<Avatar className="size-8">
+						{activeAccount?.teamAvatarUrl && (
+							<AvatarImage
+								src={activeAccount.teamAvatarUrl}
+								alt={activeAccount.teamName || activeAccount.name}
+							/>
+						)}
 						<AvatarFallback className="text-xs">
 							{activeAccount?.email.slice(0, 2).toUpperCase() ?? "?"}
 						</AvatarFallback>
@@ -189,6 +196,12 @@ export function AccountSwitcher({
 							)}
 						>
 							<Avatar className="size-5">
+								{account.teamAvatarUrl && (
+									<AvatarImage
+										src={account.teamAvatarUrl}
+										alt={account.teamName || account.name}
+									/>
+								)}
 								<AvatarFallback className="text-[10px]">
 									{account.email.slice(0, 2).toUpperCase()}
 								</AvatarFallback>

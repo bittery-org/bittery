@@ -157,6 +157,7 @@ function TeamDetailPage() {
 						teamId={teamId}
 						teamName={team.name}
 						userRole={team.userRole}
+						imageUrl={team.imageUrl}
 						createdAt={team.createdAt}
 						updatedAt={team.updatedAt}
 					/>

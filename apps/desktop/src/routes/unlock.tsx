@@ -6,6 +6,7 @@ import {
 import {
 	Avatar,
 	AvatarFallback,
+	AvatarImage,
 	Button,
 	Card,
 	InputGroup,
@@ -308,6 +309,12 @@ export function UnlockPage() {
 						<div className="mb-8 flex items-center gap-2">
 							{allAccounts.map((account) => (
 								<Avatar key={account.email} className="size-12">
+									{account.teamAvatarUrl && (
+										<AvatarImage
+											src={account.teamAvatarUrl}
+											alt={account.teamName || account.name || account.email}
+										/>
+									)}
 									<AvatarFallback
 										className="font-medium text-white text-sm"
 										style={{ backgroundColor: getAvatarColor(account.email) }}

@@ -87,6 +87,14 @@ export function createVaultImageKey(params: {
 	return `vaults/${params.userId}/${vaultSegment}/${randomUUID()}-${safeName}`;
 }
 
+export function createTeamImageKey(params: {
+	teamId: string;
+	fileName: string;
+}): string {
+	const safeName = sanitizeFileName(params.fileName);
+	return `teams/${params.teamId}/${randomUUID()}-${safeName}`;
+}
+
 export async function createPresignedUpload(params: {
 	key: string;
 	contentType: string;

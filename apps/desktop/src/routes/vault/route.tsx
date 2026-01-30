@@ -1,5 +1,6 @@
 import {
 	type CreateVaultInput,
+	useAccountMetadataSyncAll,
 	useAllVaultKeys,
 	useCreateItem,
 	useCreateVault,
@@ -127,6 +128,37 @@ function RouteComponent() {
 		};
 		loadAccounts();
 	}, [isAllAccountsMode]);
+
+	// Get all account emails for metadata sync
+	const [accountEmails, setAccountEmails] = useState<string[]>([]);
+
+	useEffect(() => {
+		const getAccountEmails = async () => {
+			const activeAccount = await storage.getActiveAccount();
+			if (!activeAccount) {
+				setAccountEmails([]);
+				return;
+			}
+
+			if (activeAccount.type === "all") {
+				// In "All Accounts" mode, sync all unlocked accounts
+				const emails = await storage.getUnlockedAccounts?.();
+				setAccountEmails(emails || []);
+			} else {
+				// Single account mode
+				setAccountEmails([activeAccount.email]);
+			}
+		};
+		getAccountEmails();
+	}, [isAllAccountsMode]);
+
+	// Sync account metadata for all accounts periodically
+	// This keeps team avatar URLs up-to-date
+	useAccountMetadataSyncAll({
+		emails: accountEmails,
+		enabled: accountEmails.length > 0,
+		refetchInterval: 60000, // Check every minute
+	});
 
 	// Vault operation handlers
 	const handleCreateVault = async (data: CreateVaultInput) => {

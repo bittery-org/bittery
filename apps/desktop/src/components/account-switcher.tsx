@@ -5,12 +5,13 @@
 
 import { useAccountSwitcher } from "@bittery/hooks";
 import {
-	Button,
 	AccountSwitcher as SharedAccountSwitcher,
+	AvatarGroup,
+	Button,
 	toast,
 } from "@bittery/ui";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDown, Users } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { useAccount } from "@/contexts/account-context";
 import { storage } from "@/lib/storage";
@@ -139,9 +140,13 @@ export function AccountSwitcher() {
 		>
 			{isAllAccountsMode ? (
 				<>
-					<div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10">
-						<Users className="h-4 w-4 text-primary" />
-					</div>
+					<AvatarGroup
+						accounts={accountsData.filter((a) =>
+							unlockedEmailsList.includes(a.email),
+						)}
+						maxVisible={2}
+						size="sm"
+					/>
 					<div className="flex flex-col items-start overflow-hidden">
 						<span className="max-w-32 truncate font-medium text-sm">
 							All Accounts

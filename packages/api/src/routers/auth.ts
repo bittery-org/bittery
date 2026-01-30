@@ -31,6 +31,14 @@ import { protectedProcedure, publicProcedure, router } from "../index";
 import { getStoragePublicUrl } from "../storage/s3";
 import { parseUserAgent } from "../utils/device";
 
+/**
+ * Helper function to get team avatar URL from imageKey
+ */
+function getTeamImageUrl(imageKey: string | null | undefined): string | null {
+	if (!imageKey) return null;
+	return getStoragePublicUrl(imageKey);
+}
+
 export const authRouter = router({
 	/**
 	 * Signup: Create new user with zero-knowledge authentication
@@ -144,6 +152,7 @@ export const authRouter = router({
 					teamId,
 					teamName: teamData?.name,
 					teamType: teamData?.type,
+					teamAvatarUrl: getTeamImageUrl(teamData?.imageKey),
 					role: "owner",
 				},
 				vaultKeys: vaultKeys.map((vk) => ({
@@ -305,6 +314,7 @@ export const authRouter = router({
 					teamId: invitation.teamId,
 					teamName: invitation.team.name,
 					teamType: invitation.team.type,
+					teamAvatarUrl: getTeamImageUrl(invitation.team.imageKey),
 					role: invitation.role,
 				},
 				vaultKeys: vaultKeys.map((vk) => ({
@@ -415,6 +425,7 @@ export const authRouter = router({
 					teamId: userData?.teamId,
 					teamName: userData?.team?.name,
 					teamType: userData?.team?.type,
+					teamAvatarUrl: getTeamImageUrl(userData?.team?.imageKey),
 					role: userData?.role,
 				},
 				vaultKeys: vaultKeys.map((vk) => ({
@@ -493,6 +504,7 @@ export const authRouter = router({
 					teamId: userData?.teamId,
 					teamName: userData?.team?.name,
 					teamType: userData?.team?.type,
+					teamAvatarUrl: getTeamImageUrl(userData?.team?.imageKey),
 					role: userData?.role,
 				},
 				vaultKeys: vaultKeys.map((vk) => ({
@@ -549,6 +561,7 @@ export const authRouter = router({
 			teamId: userData.teamId,
 			teamName: userData.team?.name,
 			teamType: userData.team?.type,
+			teamAvatarUrl: getTeamImageUrl(userData.team?.imageKey),
 			role: userData.role,
 			secretKeyHint: userData.secretKeyHint,
 			publicKey: userData.publicKey,

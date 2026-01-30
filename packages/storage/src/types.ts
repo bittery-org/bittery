@@ -38,6 +38,7 @@ export interface AccountMetadata {
 	userId: string;
 	name: string;
 	teamName?: string;
+	teamAvatarUrl?: string | null;
 	secretKeyHint: string;
 	addedAt: number;
 	lastActiveAt: number;

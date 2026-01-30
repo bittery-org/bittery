@@ -19,6 +19,7 @@ export const team = pgTable("team", {
 		.references(() => user.id, { onDelete: "cascade" }),
 	type: teamTypeEnum("type").default("personal").notNull(),
 	memberLimit: integer("member_limit"), // NULL = unlimited
+	imageKey: text("image_key"), // S3 key for team avatar
 	createdAt: timestamp("created_at").defaultNow().notNull(),
 	updatedAt: timestamp("updated_at")
 		.defaultNow()

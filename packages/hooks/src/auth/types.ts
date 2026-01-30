@@ -29,6 +29,7 @@ export interface LoginUserData {
 	email: string;
 	name?: string;
 	teamName?: string;
+	teamAvatarUrl?: string | null;
 	encryptedPrivateKey?: string;
 }
 

@@ -156,6 +156,7 @@ export async function storeLoginSession(
 			userId: result.user.id,
 			name: result.user.name || resolvedEmail.split("@")[0] || "User",
 			teamName: result.user.teamName,
+			teamAvatarUrl: result.user.teamAvatarUrl,
 			addedAt: Date.now(),
 			lastActiveAt: Date.now(),
 			secretKeyHint: `${secretKey.slice(0, 4)}••••`,

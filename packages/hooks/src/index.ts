@@ -100,6 +100,11 @@ export {
 	useQuickUnlockAll,
 	useSessionState,
 } from "./hooks/auth";
+export {
+	type UseAccountMetadataSyncOptions,
+	useAccountMetadataSync,
+	useAccountMetadataSyncAll,
+} from "./hooks/auth/use-account-metadata-sync";
 // Data Hooks (read operations)
 export {
 	type AccountInfo,
@@ -191,6 +196,8 @@ export {
 	useDeleteVault,
 	useUpdateVault,
 } from "./hooks/vault";
+// Team Mutation Hooks (write operations)
+export { useTeamAvatar } from "./hooks/team/use-team-avatar";
 // Services (platform-specific autolock implementations)
 export {
 	createMobileAutolockService,
