@@ -191,10 +191,17 @@ export function AccountProvider({
 		);
 		autolockService.current.initialize();
 
+		// Register callback to navigate to unlock when autolock triggers
+		const unsubscribe = autolockService.current.onLock(() => {
+			console.log("[AccountContext] Autolock triggered, navigating to unlock");
+			router.navigate({ to: "/unlock" });
+		});
+
 		return () => {
+			unsubscribe?.();
 			autolockService.current?.dispose();
 		};
-	}, [lockAllAccounts]);
+	}, [lockAllAccounts, router]);
 
 	// Listen for trigger-biometric-unlock event from extension (via desktop HTTP endpoint)
 	useEffect(() => {
