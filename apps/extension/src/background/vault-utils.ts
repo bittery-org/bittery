@@ -99,6 +99,9 @@ async function decryptVaultItemsForAccountViaDesktop(
 
 	for (const vault of vaults) {
 		for (const item of vault.items) {
+			// Skip deleted items (items in trash)
+			if (item.deletedAt) continue;
+
 			allItems.push({
 				id: item.id,
 				vaultId: vault.id,
@@ -265,27 +268,30 @@ export async function decryptVaultItems() {
 		vaults.map(async (vault) => {
 			try {
 				const decryptedItems = await Promise.all(
-					vault.items.map(async (item) => {
-						try {
-							const vaultKey = decryptedVaultKeys[vault.id];
-							if (!vaultKey) throw new Error("Vault key not found");
+					vault.items
+						// Skip deleted items (items in trash)
+						.filter((item) => !item.deletedAt)
+						.map(async (item) => {
+							try {
+								const vaultKey = decryptedVaultKeys[vault.id];
+								if (!vaultKey) throw new Error("Vault key not found");
 
-							const decrypted = await decrypt(
-								{
-									algorithm: item.encryptionAlgorithm,
-									iv: item.encryptionIv,
-									ciphertext: item.encryptedData,
-								},
-								vaultKey,
-							);
+								const decrypted = await decrypt(
+									{
+										algorithm: item.encryptionAlgorithm,
+										iv: item.encryptionIv,
+										ciphertext: item.encryptedData,
+									},
+									vaultKey,
+								);
 
-							const data = JSON.parse(decrypted);
-							return { ...item, ...data };
-						} catch (error) {
-							console.error("Failed to decrypt item:", item.id, error);
-							return null;
-						}
-					}),
+								const data = JSON.parse(decrypted);
+								return { ...item, ...data };
+							} catch (error) {
+								console.error("Failed to decrypt item:", item.id, error);
+								return null;
+							}
+						}),
 				);
 
 				return decryptedItems.filter((item) => item !== null);

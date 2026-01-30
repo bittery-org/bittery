@@ -23,6 +23,7 @@ import {
 } from "@bittery/ui";
 import { useNavigate } from "@tanstack/react-router";
 import {
+	ArrowRightLeft,
 	Copy as CopyIcon,
 	Edit,
 	History,
@@ -35,6 +36,7 @@ import { useCallback, useState } from "react";
 import Loader from "../loader";
 import ItemDetail from "./item-detail";
 import { ItemForm } from "./item-form";
+import { MoveItemDialog } from "./move-item-dialog";
 import { ShareHistoryDialog } from "./share-history-dialog";
 import { ShareItemDialog } from "./share-item-dialog";
 import { VaultAvatar } from "./vault-avatar";
@@ -62,6 +64,7 @@ export function ItemDetailPage({
 	const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
 	const [isShareHistoryOpen, setIsShareHistoryOpen] = useState(false);
+	const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
 	const [isUpdatingTags, setIsUpdatingTags] = useState(false);
 
 	const navigate = useNavigate();
@@ -222,6 +225,12 @@ export function ItemDetailPage({
 									Duplicate
 								</DropdownMenuItem>
 								<DropdownMenuItem
+									onClick={() => setIsMoveDialogOpen(true)}
+								>
+									<ArrowRightLeft className="mr-2 size-4" />
+									Move to Vault
+								</DropdownMenuItem>
+								<DropdownMenuItem
 									onClick={async () => {
 										if (!rawItem) return;
 										try {
@@ -375,6 +384,27 @@ export function ItemDetailPage({
 					itemId={rawItem.id}
 					open={isShareHistoryOpen}
 					onOpenChange={setIsShareHistoryOpen}
+				/>
+			)}
+
+			{/* Move Item Dialog */}
+			{rawItem && decryptedData && (
+				<MoveItemDialog
+					open={isMoveDialogOpen}
+					onOpenChange={setIsMoveDialogOpen}
+					item={
+						{
+							id: rawItem.id,
+							vaultId: rawItem.vaultId,
+							category: rawItem.category,
+							favorite: rawItem.favorite,
+							createdAt: rawItem.createdAt,
+							updatedAt: rawItem.updatedAt,
+							...decryptedData,
+						} as DecryptedItem
+					}
+					currentVaultId={rawItem.vaultId}
+					currentVaultName={vaultInfo?.name}
 				/>
 			)}
 		</>

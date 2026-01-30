@@ -76,7 +76,7 @@ export function useDeleteVault() {
 			);
 
 			// Refresh local vault keys cache
-			await refreshVaultKeys(client, storage);
+			await refreshVaultKeys(client, storage, variables.accountEmail);
 			// Invalidate vault-related queries
 			await invalidator.invalidateVaultKeys();
 		},

@@ -87,7 +87,7 @@ export function useUpdateVault() {
 			);
 
 			// Refresh local vault keys cache (name may have changed)
-			await refreshVaultKeys(client, storage);
+			await refreshVaultKeys(client, storage, variables.accountEmail);
 			// Invalidate vault-related queries
 			await invalidator.invalidateVaultKeys();
 		},

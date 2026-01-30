@@ -275,6 +275,7 @@ export function VaultSidebar({
 								title={accountGroup.accountTeamName || accountGroup.accountName}
 								storageKey={`account-${accountGroup.accountEmail}`}
 								defaultOpen={true}
+								onAdd={onNewVault}
 							>
 								{accountGroup.vaults.map(renderVaultEntry)}
 							</SidebarSection>

@@ -147,16 +147,26 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 				itemId: draggedItem.id,
 				sourceVaultId: draggedSourceVaultId,
 				targetVaultId,
+				category: draggedItem.category,
 				decryptedData,
 			},
 			{
-				onSuccess: () => {
-					toast.success("Item moved successfully");
-					// Navigate to the item in the target vault
-					navigate({
-						to: "/vault/$id/$itemId",
-						params: { id: targetVaultId, itemId: draggedItem.id },
-					});
+				onSuccess: (result) => {
+					if (result.crossAccount) {
+						toast.success("Item transferred to other account successfully");
+						// For cross-account transfers, use the new item ID
+						navigate({
+							to: "/vault/$id/$itemId",
+							params: { id: targetVaultId, itemId: result.newItemId || draggedItem.id },
+						});
+					} else {
+						toast.success("Item moved successfully");
+						// Navigate to the item in the target vault
+						navigate({
+							to: "/vault/$id/$itemId",
+							params: { id: targetVaultId, itemId: draggedItem.id },
+						});
+					}
 				},
 				onError: (error) => {
 					const errorMessage =

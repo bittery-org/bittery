@@ -196,8 +196,8 @@ export function useCreateVault() {
 				variables.accountEmail,
 			);
 
-			// Refresh local vault keys cache
-			await refreshVaultKeys(client, storage);
+			// Refresh local vault keys cache (pass account email for multi-account mode)
+			await refreshVaultKeys(client, storage, variables.accountEmail);
 			// Invalidate vault-related queries
 			await invalidator.invalidateVaultKeys();
 		},

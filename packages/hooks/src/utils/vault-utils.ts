@@ -36,10 +36,12 @@ interface TRPCVaultClient {
  *
  * @param trpcClient - The tRPC client instance
  * @param storage - The storage adapter instance
+ * @param accountEmail - Optional account email for multi-account mode
  */
 export async function refreshVaultKeys(
 	trpcClient: TRPCVaultClient,
 	storage: IStorageAdapter,
+	accountEmail?: string,
 ): Promise<void> {
 	const vaultList = await trpcClient.vault.list.query();
 	await storage.storeVaultKeys(
@@ -52,5 +54,6 @@ export async function refreshVaultKeys(
 			encryptedVaultKey: v.encryptedVaultKey,
 			role: v.role,
 		})),
+		accountEmail,
 	);
 }
