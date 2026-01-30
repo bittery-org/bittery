@@ -843,14 +843,34 @@ export function detectFieldType(
 
 	// Apply minimum confidence thresholds
 	// If no strong signals, default to username for text inputs in login forms
-	if (bestScore < 0.2 && input.type === "text") {
+	// But only if the field appears before a password field and has no exclusionary indicators
+	if (bestScore < 0.3 && input.type === "text") {
 		// Check if this is in a login context
 		const form = input.closest("form");
 		if (form) {
-			const hasPasswordField = form.querySelector('input[type="password"]');
-			if (hasPasswordField) {
-				// This is likely a username field in a login form
-				return { type: "username", confidence: 0.5 };
+			const passwordField = form.querySelector('input[type="password"]');
+			if (passwordField) {
+				// Check if this input comes before the password field in DOM order
+				const formInputs = Array.from(form.querySelectorAll("input"));
+				const inputIndex = formInputs.indexOf(input);
+				const passwordIndex = formInputs.indexOf(passwordField as HTMLInputElement);
+
+				// Only consider it a username field if:
+				// 1. It comes before the password field
+				// 2. There aren't too many other text inputs (likely not a complex form)
+				// 3. The form has login-like indicators
+				const textInputsBeforePassword = formInputs
+					.slice(0, passwordIndex)
+					.filter(i => i.type === "text" || i.type === "email");
+
+				if (
+					inputIndex < passwordIndex &&
+					textInputsBeforePassword.length <= 2 &&
+					!shouldExcludeField(input)
+				) {
+					// This is likely a username field in a login form
+					return { type: "username", confidence: 0.35 };
+				}
 			}
 		}
 	}
@@ -1363,6 +1383,113 @@ export function isFieldVisible(input: HTMLInputElement): boolean {
 }
 
 /**
+ * Check if an input should be excluded from autofill detection
+ */
+function shouldExcludeField(input: HTMLInputElement): boolean {
+	// Exclude fields with specific roles
+	const role = input.getAttribute("role");
+	if (role && ["search", "searchbox", "combobox"].includes(role)) {
+		return true;
+	}
+
+	// Exclude fields with search-related attributes
+	const type = input.type?.toLowerCase() || "text";
+	if (type === "search") {
+		return true;
+	}
+
+	// Check for search/filter/query patterns in various attributes
+	const name = input.name?.toLowerCase() || "";
+	const id = input.id?.toLowerCase() || "";
+	const placeholder = input.placeholder?.toLowerCase() || "";
+	const ariaLabel = input.getAttribute("aria-label")?.toLowerCase() || "";
+	const className = input.className?.toLowerCase() || "";
+
+	// Common search/filter/query patterns that should be excluded
+	const excludePatterns = [
+		/\bsearch\b/i,
+		/\bquery\b/i,
+		/\bfilter\b/i,
+		/\bfind\b/i,
+		/\blookup\b/i,
+		/\bq\b/i, // Common query parameter
+		/^s$/i, // Single 's' often used for search
+		/\bkeyword/i,
+		/\bchat\b/i,
+		/\bmessage\b/i,
+		/\bcomment\b/i,
+		/\breply\b/i,
+		/\bsubject\b/i,
+		/\btitle\b(?!.*card)/i, // title but not related to card
+		/\bdescription\b/i,
+		/\bnote\b/i,
+		/\bamount\b/i,
+		/\bprice\b/i,
+		/\bquantity\b/i,
+		/\bqty\b/i,
+		/\bcoupon\b/i,
+		/\bpromo.*code\b(?!.*password)/i, // promo code but not password
+		/\btracking\b/i,
+		/\burl\b/i,
+		/\blink\b/i,
+		/\btag\b/i,
+		/\bcategory\b/i,
+	];
+
+	const textToCheck = [name, id, placeholder, ariaLabel, className].join(" ");
+	if (excludePatterns.some((pattern) => pattern.test(textToCheck))) {
+		return true;
+	}
+
+	// Exclude inputs that have autocomplete="off" AND are search-like
+	const autocomplete = input.autocomplete?.toLowerCase();
+	if (
+		autocomplete === "off" &&
+		(textToCheck.includes("search") || textToCheck.includes("filter"))
+	) {
+		return true;
+	}
+
+	// Exclude inputs in search forms
+	const form = input.closest("form");
+	if (form) {
+		const formRole = form.getAttribute("role");
+		if (formRole === "search") {
+			return true;
+		}
+
+		const formAction = form.action?.toLowerCase() || "";
+		const formClass = form.className?.toLowerCase() || "";
+		const formId = form.id?.toLowerCase() || "";
+
+		if (
+			/search/i.test(formAction) ||
+			/search/i.test(formClass) ||
+			/search/i.test(formId)
+		) {
+			return true;
+		}
+	}
+
+	// Exclude contenteditable elements
+	if (input.contentEditable === "true") {
+		return true;
+	}
+
+	// Exclude read-only fields
+	if (input.readOnly) {
+		return true;
+	}
+
+	// Exclude disabled fields
+	if (input.disabled) {
+		return true;
+	}
+
+	return false;
+}
+
+/**
  * Detect all credential-related fields in the document
  */
 export function detectAllFields(
@@ -1387,10 +1514,16 @@ export function detectAllFields(
 			continue;
 		}
 
+		// Skip excluded fields (search, filter, etc.)
+		if (shouldExcludeField(input)) {
+			continue;
+		}
+
 		const { type, confidence } = detectFieldType(input, shadowRoot || document);
 
-		// Only include fields with reasonable confidence
-		if (confidence >= 0.1) {
+		// Increased minimum confidence threshold from 0.1 to 0.3 (30%)
+		// This prevents false positives on generic text fields
+		if (confidence >= 0.3) {
 			const form = input.closest("form") as HTMLFormElement | undefined;
 			fields.push({
 				element: input,

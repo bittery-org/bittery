@@ -153,32 +153,38 @@ interface CredentialField {
 	input: HTMLInputElement;
 	type: "username" | "email" | "password";
 	overlay?: HTMLElement;
+	icon?: HTMLElement;
 	messageHandler?: (event: MessageEvent) => void;
 	readyTimeout?: NodeJS.Timeout;
 	confidence?: number;
 	shadowRoot?: ShadowRoot;
+	hasItems?: boolean;
 }
 
 interface CreditCardField {
 	input: HTMLInputElement;
 	type: CreditCardFieldType;
 	overlay?: HTMLElement;
+	icon?: HTMLElement;
 	messageHandler?: (event: MessageEvent) => void;
 	readyTimeout?: NodeJS.Timeout;
 	confidence?: number;
 	shadowRoot?: ShadowRoot;
 	formGroup?: DetectedCreditCardForm;
+	hasItems?: boolean;
 }
 
 interface IdentityField {
 	input: HTMLInputElement;
 	type: IdentityFieldType;
 	overlay?: HTMLElement;
+	icon?: HTMLElement;
 	messageHandler?: (event: MessageEvent) => void;
 	readyTimeout?: NodeJS.Timeout;
 	confidence?: number;
 	shadowRoot?: ShadowRoot;
 	formGroup?: DetectedIdentityForm;
+	hasItems?: boolean;
 }
 
 const detectedFields = new Map<HTMLInputElement, CredentialField>();
@@ -1477,6 +1483,7 @@ async function handleFieldFocus(field: CredentialField) {
 	// Hide any existing overlays from other fields
 	if (currentFocusedField && currentFocusedField !== field) {
 		hideAutofillOverlay(currentFocusedField);
+		hideFieldIcon(currentFocusedField);
 	}
 
 	currentFocusedField = field;
@@ -1487,6 +1494,10 @@ async function handleFieldFocus(field: CredentialField) {
 	});
 
 	if (!response.authenticated) {
+		// Show icon even when locked (to indicate autofill is available)
+		field.hasItems = false;
+		showFieldIcon(field, false);
+
 		if (response.needsReauth) {
 			showReauthPrompt(field);
 		} else {
@@ -1503,17 +1514,26 @@ async function handleFieldFocus(field: CredentialField) {
 		payload: { hostname },
 	});
 
-	if (itemsResponse.items && itemsResponse.items.length > 0) {
+	const hasItems = itemsResponse.items && itemsResponse.items.length > 0;
+	field.hasItems = hasItems;
+
+	// Show icon if there are items
+	if (hasItems) {
+		showFieldIcon(field, true);
 		showAutofillOverlay(field, itemsResponse.items);
+	} else {
+		// Still show icon to indicate field is detected, but no items available
+		showFieldIcon(field, false);
 	}
 }
 
 // Handle field blur
 function handleFieldBlur(field: CredentialField) {
-	// Delay to allow clicking on overlay
+	// Delay to allow clicking on overlay or icon
 	setTimeout(() => {
 		if (currentFocusedField === field) {
 			hideAutofillOverlay(field);
+			hideFieldIcon(field);
 			currentFocusedField = null;
 		}
 	}, 200);
@@ -1529,10 +1549,12 @@ async function handleCreditCardFieldFocus(field: CreditCardField) {
 		currentFocusedCreditCardField !== field
 	) {
 		hideCreditCardAutofillOverlay(currentFocusedCreditCardField);
+		hideFieldIcon(currentFocusedCreditCardField);
 	}
 	// Also hide credential overlays
 	if (currentFocusedField) {
 		hideAutofillOverlay(currentFocusedField);
+		hideFieldIcon(currentFocusedField);
 		currentFocusedField = null;
 	}
 
@@ -1544,6 +1566,10 @@ async function handleCreditCardFieldFocus(field: CreditCardField) {
 	});
 
 	if (!response.authenticated) {
+		// Show icon even when locked
+		field.hasItems = false;
+		showFieldIcon(field, false);
+
 		if (response.needsReauth) {
 			showCreditCardReauthPrompt(field);
 		} else {
@@ -1558,17 +1584,25 @@ async function handleCreditCardFieldFocus(field: CreditCardField) {
 		type: "GET_AUTOFILL_CREDIT_CARDS",
 	});
 
-	if (itemsResponse.items && itemsResponse.items.length > 0) {
+	const hasItems = itemsResponse.items && itemsResponse.items.length > 0;
+	field.hasItems = hasItems;
+
+	// Show icon if there are items
+	if (hasItems) {
+		showFieldIcon(field, true);
 		showCreditCardAutofillOverlay(field, itemsResponse.items);
+	} else {
+		showFieldIcon(field, false);
 	}
 }
 
 // Handle credit card field blur
 function handleCreditCardFieldBlur(field: CreditCardField) {
-	// Delay to allow clicking on overlay
+	// Delay to allow clicking on overlay or icon
 	setTimeout(() => {
 		if (currentFocusedCreditCardField === field) {
 			hideCreditCardAutofillOverlay(field);
+			hideFieldIcon(field);
 			currentFocusedCreditCardField = null;
 		}
 	}, 200);
@@ -1972,15 +2006,18 @@ async function handleIdentityFieldFocus(field: IdentityField) {
 	// Hide any existing overlays from other fields
 	if (currentFocusedIdentityField && currentFocusedIdentityField !== field) {
 		hideIdentityAutofillOverlay(currentFocusedIdentityField);
+		hideFieldIcon(currentFocusedIdentityField);
 	}
 	// Also hide credential overlays
 	if (currentFocusedField) {
 		hideAutofillOverlay(currentFocusedField);
+		hideFieldIcon(currentFocusedField);
 		currentFocusedField = null;
 	}
 	// Also hide credit card overlays
 	if (currentFocusedCreditCardField) {
 		hideCreditCardAutofillOverlay(currentFocusedCreditCardField);
+		hideFieldIcon(currentFocusedCreditCardField);
 		currentFocusedCreditCardField = null;
 	}
 
@@ -1992,6 +2029,10 @@ async function handleIdentityFieldFocus(field: IdentityField) {
 	});
 
 	if (!response.authenticated) {
+		// Show icon even when locked
+		field.hasItems = false;
+		showFieldIcon(field, false);
+
 		if (response.needsReauth) {
 			showIdentityReauthPrompt(field);
 		} else {
@@ -2006,17 +2047,25 @@ async function handleIdentityFieldFocus(field: IdentityField) {
 		type: "GET_AUTOFILL_IDENTITIES",
 	});
 
-	if (itemsResponse.items && itemsResponse.items.length > 0) {
+	const hasItems = itemsResponse.items && itemsResponse.items.length > 0;
+	field.hasItems = hasItems;
+
+	// Show icon if there are items
+	if (hasItems) {
+		showFieldIcon(field, true);
 		showIdentityAutofillOverlay(field, itemsResponse.items);
+	} else {
+		showFieldIcon(field, false);
 	}
 }
 
 // Handle identity field blur
 function handleIdentityFieldBlur(field: IdentityField) {
-	// Delay to allow clicking on overlay
+	// Delay to allow clicking on overlay or icon
 	setTimeout(() => {
 		if (currentFocusedIdentityField === field) {
 			hideIdentityAutofillOverlay(field);
+			hideFieldIcon(field);
 			currentFocusedIdentityField = null;
 		}
 	}, 200);
@@ -2484,6 +2533,180 @@ function showIdentityReauthPrompt(field: IdentityField) {
 }
 
 // ==================== End Identity Autofill ====================
+
+// ==================== Field Icon Indicator ====================
+
+/**
+ * Create and show the autofill icon indicator inside the input field
+ */
+function showFieldIcon(
+	field: CredentialField | CreditCardField | IdentityField,
+	hasItems: boolean,
+) {
+	// Remove existing icon if any
+	if (field.icon) {
+		field.icon.remove();
+		field.icon = undefined;
+	}
+
+	// Only show icon if there are items or if unlock is needed
+	if (!hasItems && field.hasItems !== false) {
+		return;
+	}
+
+	const input = field.input;
+
+	// Create icon container in a shadow DOM to avoid page CSS interference
+	const iconHost = document.createElement("div");
+	iconHost.style.cssText = `
+		position: fixed;
+		width: 24px;
+		height: 24px;
+		z-index: 2147483646;
+		pointer-events: auto;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 4px;
+		transition: background-color 0.15s ease;
+	`;
+
+	// Position relative to the input (fixed positioning, no scroll offset needed)
+	const rect = input.getBoundingClientRect();
+	// Place icon 8px from the right edge of the input
+	iconHost.style.left = `${rect.right - 32}px`;
+	// Center vertically: top of input + half the input height - half the icon height
+	iconHost.style.top = `${rect.top + (rect.height - 24) / 2}px`;
+
+	// Create shadow DOM for icon
+	const shadow = iconHost.attachShadow({ mode: "open" });
+
+	// Add icon SVG (chevron down + key icon similar to 1Password)
+	const iconContainer = document.createElement("div");
+	iconContainer.innerHTML = `
+		<style>
+			:host {
+				all: initial;
+			}
+			.icon-wrapper {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				width: 24px;
+				height: 24px;
+				border-radius: 4px;
+				transition: background-color 0.15s ease;
+				cursor: pointer;
+			}
+			.icon-wrapper:hover {
+				background-color: rgba(0, 0, 0, 0.05);
+			}
+			.icon-svg {
+				width: 18px;
+				height: 18px;
+				color: #6b7280;
+			}
+		</style>
+		<div class="icon-wrapper">
+			<svg class="icon-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+				<!-- Chevron down -->
+				<path d="M7 10L12 15L17 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+				<!-- Key symbol in circle -->
+				<circle cx="18" cy="6" r="5" fill="white" stroke="currentColor" stroke-width="1.5"/>
+				<path d="M18 4.5V7.5M16.5 6H19.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+			</svg>
+		</div>
+	`;
+
+	shadow.appendChild(iconContainer);
+	document.body.appendChild(iconHost);
+
+	field.icon = iconHost;
+
+	// Prevent mousedown from blurring the input
+	iconHost.addEventListener("mousedown", (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+	});
+
+	// Make icon clickable to toggle autofill
+	iconHost.addEventListener("click", async (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+
+		// Keep input focused
+		input.focus();
+
+		// Toggle overlay visibility
+		if (field.overlay) {
+			// Hide overlay
+			if ("type" in field && typeof field.type === "string") {
+				if (["username", "email", "password"].includes(field.type)) {
+					hideAutofillOverlay(field as CredentialField);
+				} else if (
+					["cardNumber", "cardExpiry", "cardCvv", "cardName"].includes(field.type)
+				) {
+					hideCreditCardAutofillOverlay(field as CreditCardField);
+				} else {
+					hideIdentityAutofillOverlay(field as IdentityField);
+				}
+			}
+		} else {
+			// Show overlay by manually triggering the appropriate handler
+			if ("type" in field && typeof field.type === "string") {
+				if (["username", "email", "password"].includes(field.type)) {
+					await handleFieldFocus(field as CredentialField);
+				} else if (
+					["cardNumber", "cardExpiry", "cardCvv", "cardName"].includes(field.type)
+				) {
+					await handleCreditCardFieldFocus(field as CreditCardField);
+				} else {
+					await handleIdentityFieldFocus(field as IdentityField);
+				}
+			}
+		}
+	});
+
+	// Update icon position on scroll/resize
+	const updateIconPosition = () => {
+		if (!field.icon || !input.isConnected) {
+			return;
+		}
+		const rect = input.getBoundingClientRect();
+		iconHost.style.left = `${rect.right - 32}px`;
+		// Center vertically: top of input + half the input height - half the icon height
+		iconHost.style.top = `${rect.top + (rect.height - 24) / 2}px`;
+	};
+
+	window.addEventListener("scroll", updateIconPosition, { passive: true });
+	window.addEventListener("resize", updateIconPosition, { passive: true });
+
+	// Store cleanup function
+	const cleanup = () => {
+		window.removeEventListener("scroll", updateIconPosition);
+		window.removeEventListener("resize", updateIconPosition);
+	};
+
+	// Attach cleanup to icon element
+	(iconHost as any)._cleanup = cleanup;
+}
+
+/**
+ * Hide and remove the field icon
+ */
+function hideFieldIcon(field: CredentialField | CreditCardField | IdentityField) {
+	if (field.icon) {
+		// Run cleanup if it exists
+		if ((field.icon as any)._cleanup) {
+			(field.icon as any)._cleanup();
+		}
+		field.icon.remove();
+		field.icon = undefined;
+	}
+}
+
+// ==================== End Field Icon Indicator ====================
 
 // Show autofill overlay
 function showAutofillOverlay(field: CredentialField, items: DecryptedItem[]) {
