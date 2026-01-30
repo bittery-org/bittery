@@ -1,3 +1,4 @@
+/** biome-ignore-all lint/a11y/useSemanticElements: its fine */
 import { Separator } from "@bittery/ui/components/separator";
 import { cn } from "@bittery/ui/lib/utils";
 import { Slot } from "@radix-ui/react-slot";
