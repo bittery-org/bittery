@@ -17,6 +17,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import {
 	Alert,
+	Platform,
 	ScrollView,
 	Switch,
 	Text,
@@ -24,6 +25,7 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
 import { storage } from "../../src/services/storage";
 
@@ -146,7 +148,20 @@ export default function SettingsScreen() {
 	};
 
 	const handleLock = async () => {
+		// Clear React Native session (in-memory cache)
 		await storage.clearSession();
+
+		// IMPORTANT: Clear MUK from native VaultStateManager for autofill security
+		// Without this, autofill will still work even when app is locked!
+		if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
+			const wasUnlocked = CredentialProvider.isVaultUnlocked();
+			CredentialProvider.clearMasterUnlockKey();
+			const isNowUnlocked = CredentialProvider.isVaultUnlocked();
+			console.log(
+				`[Lock] Vault was unlocked: ${wasUnlocked}, now unlocked: ${isNowUnlocked}`,
+			);
+		}
+
 		router.replace("/(auth)/unlock");
 	};
 

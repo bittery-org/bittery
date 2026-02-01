@@ -64,6 +64,13 @@ class AutofillDatasetBuilder(
             return datasets
         }
 
+        // IMPORTANT: Don't return legacy credentials if vault is locked
+        // Legacy credentials require biometric, but we should respect the vault lock state
+        if (muk == null) {
+            Log.d(BitteryAutofillService.TAG, "Vault is locked (MUK null), not returning legacy credentials")
+            return datasets // Return empty list
+        }
+
         val legacyCredentials = if (!domain.isNullOrBlank()) {
             storageManager.getCredentialsByDomain(domain)
         } else {

@@ -75,6 +75,12 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 					await storage.shouldRequireAuthAfterBackground(activeAccount.email);
 
 				if (shouldRequireAuth) {
+					// IMPORTANT: Clear MUK from native VaultStateManager when auto-lock triggers
+					// This prevents autofill from working while app is locked
+					if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
+						CredentialProvider.clearMasterUnlockKey();
+					}
+
 					// Check if biometric is enabled for this account
 					const biometricEnabled = await storage.isBiometricEnabled(
 						activeAccount.email,
