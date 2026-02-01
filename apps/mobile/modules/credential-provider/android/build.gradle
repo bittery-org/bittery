@@ -64,6 +64,9 @@ dependencies {
   // Credential Manager
   implementation "androidx.credentials:credentials:1.6.0-rc01"
 
+  // Autofill inline suggestions
+  implementation "androidx.autofill:autofill:1.1.0"
+
   // Biometric authentication
   implementation "androidx.biometric:biometric:1.2.0-alpha05"
 

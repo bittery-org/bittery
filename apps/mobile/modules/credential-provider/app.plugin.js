@@ -62,6 +62,32 @@ const withCredentialProvider = (config) => {
 				);
 			}
 
+			// Copy autofill_service.xml from module to app
+			const sourceAutofillXml = path.join(
+				projectRoot,
+				"modules",
+				"credential-provider",
+				"android",
+				"src",
+				"main",
+				"res",
+				"xml",
+				"autofill_service.xml",
+			);
+			const destAutofillXml = path.join(xmlDir, "autofill_service.xml");
+
+			if (fs.existsSync(sourceAutofillXml)) {
+				fs.copyFileSync(sourceAutofillXml, destAutofillXml);
+				console.log(
+					"withCredentialProvider: Copied autofill_service.xml to app resources",
+				);
+			} else {
+				console.warn(
+					"withCredentialProvider: Autofill service XML not found at",
+					sourceAutofillXml,
+				);
+			}
+
 			// Copy privileged allowlist JSON from module to app
 			const sourceAllowlist = path.join(
 				projectRoot,
@@ -153,6 +179,46 @@ const withCredentialProvider = (config) => {
 			});
 		}
 
+		const existingAutofillService = mainApplication.service.find(
+			(service) =>
+				service.$?.["android:name"] ===
+				"expo.modules.credentialprovider.service.BitteryAutofillService",
+		);
+
+		if (!existingAutofillService) {
+			mainApplication.service.push({
+				$: {
+					"android:name":
+						"expo.modules.credentialprovider.service.BitteryAutofillService",
+					"android:enabled": "true",
+					"android:exported": "true",
+					"android:label": "Bittery",
+					"android:permission": "android.permission.BIND_AUTOFILL_SERVICE",
+					"tools:targetApi": "o",
+				},
+				"intent-filter": [
+					{
+						action: [
+							{
+								$: {
+									"android:name":
+										"android.service.autofill.AutofillService",
+								},
+							},
+						],
+					},
+				],
+				"meta-data": [
+					{
+						$: {
+							"android:name": "android.autofill",
+							"android:resource": "@xml/autofill_service",
+						},
+					},
+				],
+			});
+		}
+
 		// Ensure the activity array exists
 		if (!mainApplication.activity) {
 			mainApplication.activity = [];
@@ -171,6 +237,25 @@ const withCredentialProvider = (config) => {
 				$: {
 					"android:name":
 						"expo.modules.credentialprovider.activity.GetCredentialsActivity",
+					"android:exported": "false",
+					"android:theme": "@style/Theme.Bittery.CredentialProvider",
+					"android:excludeFromRecents": "true",
+					"android:noHistory": "true",
+				},
+			});
+		}
+
+		const existingAutofillAuthActivity = mainApplication.activity.find(
+			(activity) =>
+				activity.$?.["android:name"] ===
+				"expo.modules.credentialprovider.activity.AutofillAuthActivity",
+		);
+
+		if (!existingAutofillAuthActivity) {
+			mainApplication.activity.push({
+				$: {
+					"android:name":
+						"expo.modules.credentialprovider.activity.AutofillAuthActivity",
 					"android:exported": "false",
 					"android:theme": "@style/Theme.Bittery.CredentialProvider",
 					"android:excludeFromRecents": "true",

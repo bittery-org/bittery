@@ -1,0 +1,218 @@
+package expo.modules.credentialprovider.service
+
+import android.app.PendingIntent
+import android.content.Context
+import android.os.Build
+import android.util.Log
+import android.view.autofill.AutofillId
+import android.view.autofill.AutofillValue
+import android.widget.RemoteViews
+import android.widget.inline.InlinePresentationSpec
+import androidx.annotation.RequiresApi
+import androidx.autofill.inline.UiVersions
+import androidx.autofill.inline.v1.InlineSuggestionUi
+import android.service.autofill.Dataset
+import android.service.autofill.InlinePresentation
+import expo.modules.credentialprovider.crypto.VaultDecryptor
+import expo.modules.credentialprovider.storage.CredentialDatabase
+import expo.modules.credentialprovider.storage.CredentialStorageManager
+import expo.modules.credentialprovider.storage.ItemEntity
+
+@RequiresApi(Build.VERSION_CODES.O)
+class AutofillDatasetBuilder(
+    private val context: Context,
+    private val database: CredentialDatabase,
+    private val storageManager: CredentialStorageManager
+) {
+    data class FieldIds(
+        val usernameId: AutofillId?,
+        val passwordId: AutofillId?
+    ) {
+        fun hasAny(): Boolean = usernameId != null || passwordId != null
+
+        fun toArray(): Array<AutofillId> {
+            val ids = mutableListOf<AutofillId>()
+            usernameId?.let { ids.add(it) }
+            passwordId?.let { ids.add(it) }
+            return ids.toTypedArray()
+        }
+    }
+
+    suspend fun buildDatasets(
+        fieldIds: FieldIds,
+        domain: String?,
+        muk: ByteArray?,
+        inlineSpec: InlinePresentationSpec?,
+        attributionIntent: PendingIntent?
+    ): List<Dataset> {
+        val datasets = mutableListOf<Dataset>()
+        if (!fieldIds.hasAny()) return datasets
+
+        if (muk != null && !domain.isNullOrBlank()) {
+            val items = getItemsForDomain(domain)
+            Log.d(BitteryAutofillService.TAG, "Found ${items.size} items for domain: $domain")
+            for (item in items) {
+                val dataset = buildDatasetFromItem(item, muk, fieldIds, inlineSpec, attributionIntent)
+                if (dataset != null) {
+                    datasets.add(dataset)
+                    if (datasets.size >= BitteryAutofillService.MAX_DATASETS) return datasets
+                }
+            }
+        }
+
+        if (datasets.isNotEmpty()) {
+            return datasets
+        }
+
+        val legacyCredentials = if (!domain.isNullOrBlank()) {
+            storageManager.getCredentialsByDomain(domain)
+        } else {
+            storageManager.getAllCredentials()
+        }
+
+        for (credential in legacyCredentials) {
+            val dataset = buildDatasetFromLegacyCredential(
+                credential.id,
+                credential.username,
+                credential.displayName,
+                fieldIds,
+                inlineSpec,
+                attributionIntent
+            )
+            if (dataset != null) {
+                datasets.add(dataset)
+                if (datasets.size >= BitteryAutofillService.MAX_DATASETS) break
+            }
+        }
+
+        return datasets
+    }
+
+    private suspend fun getItemsForDomain(domain: String): List<ItemEntity> {
+        val parentDomain = extractParentDomain(domain)
+        val items = if (parentDomain.isNotEmpty() && parentDomain != domain) {
+            database.itemDao().getLoginItemsByDomainWithFallback(domain, parentDomain)
+        } else {
+            database.itemDao().getLoginItemsByDomain(domain)
+        }
+
+        if (items.isEmpty()) {
+            // Debug: Check what domains we have in the database
+            val allDomains = try {
+                database.itemDomainDao().getAllDomains()
+            } catch (e: Exception) {
+                emptyList()
+            }
+            Log.d(BitteryAutofillService.TAG, "No items found for domain '$domain'. Available domains: ${allDomains.take(10)}")
+        }
+
+        return items
+    }
+
+    private suspend fun buildDatasetFromItem(
+        item: ItemEntity,
+        muk: ByteArray,
+        fieldIds: FieldIds,
+        inlineSpec: InlinePresentationSpec?,
+        attributionIntent: PendingIntent?
+    ): Dataset? {
+        return try {
+            val vaultKey = database.vaultKeyDao().getByVaultId(item.vaultId) ?: return null
+            val decryptedVaultKey = VaultDecryptor.decryptVaultKeyWithMuk(vaultKey, muk)
+            val decryptedItem = VaultDecryptor.decryptLoginItem(item, decryptedVaultKey)
+            val username = decryptedItem.username ?: item.username ?: return null
+            val password = decryptedItem.password ?: return null
+            val label = item.displayTitle.ifBlank { username }
+            buildDataset(label, username, password, fieldIds, inlineSpec, attributionIntent)
+        } catch (e: Exception) {
+            Log.w(BitteryAutofillService.TAG, "Failed to decrypt item ${item.id}", e)
+            null
+        }
+    }
+
+    private suspend fun buildDatasetFromLegacyCredential(
+        credentialId: String,
+        username: String,
+        displayName: String,
+        fieldIds: FieldIds,
+        inlineSpec: InlinePresentationSpec?,
+        attributionIntent: PendingIntent?
+    ): Dataset? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
+        return try {
+            val iv = storageManager.getCredentialIv(credentialId) ?: return null
+            val cipher = storageManager.biometricKeyManager.getDecryptCipher(iv)
+            val password = storageManager.getDecryptedPassword(cipher, credentialId) ?: return null
+            val label = displayName.ifBlank { username }
+            buildDataset(label, username, password, fieldIds, inlineSpec, attributionIntent)
+        } catch (e: Exception) {
+            Log.w(BitteryAutofillService.TAG, "Failed to decrypt legacy credential $credentialId", e)
+            null
+        }
+    }
+
+    private fun buildDataset(
+        label: String,
+        username: String,
+        password: String,
+        fieldIds: FieldIds,
+        inlineSpec: InlinePresentationSpec?,
+        attributionIntent: PendingIntent?
+    ): Dataset? {
+        if (!fieldIds.hasAny()) return null
+        val presentation = RemoteViews(context.packageName, android.R.layout.simple_list_item_1).apply {
+            setTextViewText(android.R.id.text1, label)
+        }
+
+        val builder = Dataset.Builder(presentation)
+        val inlinePresentation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && inlineSpec != null && attributionIntent != null) {
+            createInlinePresentation(inlineSpec, label, attributionIntent)
+        } else {
+            null
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && inlinePresentation != null) {
+            fieldIds.usernameId?.let {
+                builder.setValue(it, AutofillValue.forText(username), presentation, inlinePresentation)
+            }
+            fieldIds.passwordId?.let {
+                builder.setValue(it, AutofillValue.forText(password), presentation, inlinePresentation)
+            }
+        } else {
+            fieldIds.usernameId?.let { builder.setValue(it, AutofillValue.forText(username)) }
+            fieldIds.passwordId?.let { builder.setValue(it, AutofillValue.forText(password)) }
+        }
+
+        return builder.build()
+    }
+
+    private fun createInlinePresentation(
+        spec: InlinePresentationSpec,
+        label: String,
+        attributionIntent: PendingIntent
+    ): InlinePresentation? {
+        val versions = UiVersions.getVersions(spec.style)
+        if (!versions.contains(UiVersions.INLINE_UI_VERSION_1)) {
+            Log.d(BitteryAutofillService.TAG, "Inline UI version not supported. Available versions: $versions")
+            return null
+        }
+
+        val slice = InlineSuggestionUi.newContentBuilder(attributionIntent)
+            .setTitle(label)
+            .setContentDescription(label)
+            .build()
+            .slice
+
+        Log.d(BitteryAutofillService.TAG, "Created inline presentation for: $label")
+        return InlinePresentation(slice, spec, false)
+    }
+
+    private fun extractParentDomain(domain: String): String {
+        val parts = domain.split(".")
+        return if (parts.size > 2) {
+            parts.drop(1).joinToString(".")
+        } else {
+            domain
+        }
+    }
+}

@@ -55,6 +55,12 @@ interface ItemDomainDao {
     suspend fun deleteAll()
 
     /**
+     * Get all unique domains (for debugging).
+     */
+    @Query("SELECT DISTINCT domain FROM item_domains ORDER BY domain ASC")
+    suspend fun getAllDomains(): List<String>
+
+    /**
      * Replace all domains for an item.
      * This is a transaction that deletes existing and inserts new.
      */

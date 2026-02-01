@@ -18,16 +18,46 @@ import expo.modules.credentialprovider.state.VaultStateManager
 import expo.modules.credentialprovider.storage.CredentialStorageManager
 import expo.modules.credentialprovider.storage.CredentialDatabase
 import expo.modules.credentialprovider.storage.CredentialEntity
+import expo.modules.credentialprovider.storage.VaultKeyEntity
+import expo.modules.credentialprovider.storage.ItemEntity
+import expo.modules.credentialprovider.storage.ItemDomainEntity
+import expo.modules.credentialprovider.storage.AuthDataEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import org.json.JSONArray
 
 class CredentialProviderModule : Module() {
     companion object {
         private const val TAG = "CredentialProviderModule"
         private const val MIN_API_LEVEL = Build.VERSION_CODES.UPSIDE_DOWN_CAKE // API 34
+
+        /**
+         * Extract domain from URL for autofill matching.
+         * Examples:
+         *   - "https://www.example.com/login" -> "example.com"
+         *   - "https://login.example.com" -> "login.example.com"
+         *   - "example.com" -> "example.com"
+         */
+        private fun extractDomain(url: String): String? {
+            if (url.isBlank()) return null
+            return try {
+                val host = if (url.startsWith("http://") || url.startsWith("https://")) {
+                    java.net.URL(url).host
+                } else {
+                    // Assume it's already a domain
+                    url
+                }
+                // Remove www. prefix
+                host.removePrefix("www.")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to extract domain from: $url", e)
+                null
+            }
+        }
     }
 
     private val moduleScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -521,6 +551,218 @@ class CredentialProviderModule : Module() {
         }
 
         /**
+         * Sync vault keys and items for the new vault-based autofill system.
+         * This syncs encrypted vault data directly from the server without requiring
+         * biometric authentication. Decryption happens on-demand using MUK.
+         *
+         * @param dataJson JSON string containing:
+         *   - userId: String
+         *   - vaultKeys: List of vault key objects
+         *   - items: List of item objects (login items only)
+         */
+        AsyncFunction("syncVaultData") { dataJson: String, promise: Promise ->
+            Log.d(TAG, "syncVaultData called")
+
+            moduleScope.launch {
+                try {
+                    // Parse JSON string
+                    val jsonObject = JSONObject(dataJson)
+                    val userId = jsonObject.optString("userId", "")
+
+                    if (userId.isBlank()) {
+                        promise.reject("INVALID_PARAMS", "userId is required", null)
+                        return@launch
+                    }
+
+                    val vaultKeysJson = jsonObject.optJSONArray("vaultKeys") ?: JSONArray()
+                    val itemsJson = jsonObject.optJSONArray("items") ?: JSONArray()
+
+                    // Convert JSONArray to List<Map<String, Any>>
+                    val vaultKeysData = (0 until vaultKeysJson.length()).map { i ->
+                        val obj = vaultKeysJson.getJSONObject(i)
+                        obj.keys().asSequence().associateWith { key -> obj.get(key) }
+                    }
+
+                    val itemsData = (0 until itemsJson.length()).map { i ->
+                        val obj = itemsJson.getJSONObject(i)
+                        obj.keys().asSequence().associateWith { key -> obj.get(key) }
+                    }
+
+                    Log.d(TAG, "syncVaultData: Syncing ${vaultKeysData.size} vault keys and ${itemsData.size} items for user $userId")
+
+                    withContext(Dispatchers.IO) {
+                        // Ensure AuthDataEntity exists for this user
+                        // If it doesn't exist, create a minimal one
+                        val existingAuthData = database.authDataDao().getByUserId(userId)
+                        if (existingAuthData == null) {
+                            Log.d(TAG, "Creating minimal AuthDataEntity for user $userId")
+                            val authData = AuthDataEntity(
+                                email = "", // Will be updated when we have the email
+                                userId = userId,
+                                secretKey = "", // Placeholder
+                                srpSalt = "",
+                                publicKey = "",
+                                encryptedPrivateKey = "",
+                                encryptedPrivateKeyIv = ""
+                            )
+                            database.authDataDao().insert(authData)
+                        }
+
+                        // Parse and insert vault keys
+                        val vaultKeys = vaultKeysData.mapNotNull { keyData ->
+                            try {
+                                VaultKeyEntity(
+                                    vaultId = keyData["vaultId"] as? String ?: return@mapNotNull null,
+                                    userId = userId,
+                                    vaultName = keyData["vaultName"] as? String ?: "",
+                                    vaultType = keyData["vaultType"] as? String ?: "personal",
+                                    encryptedKey = keyData["encryptedKey"] as? String ?: return@mapNotNull null,
+                                    encryptionIv = keyData["encryptionIv"] as? String ?: return@mapNotNull null,
+                                    encryptionAlgorithm = keyData["encryptionAlgorithm"] as? String ?: "AES-GCM",
+                                    role = keyData["role"] as? String ?: "member",
+                                    syncedAt = System.currentTimeMillis()
+                                )
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to parse vault key: ${keyData["vaultId"]}", e)
+                                null
+                            }
+                        }
+
+                        if (vaultKeys.isNotEmpty()) {
+                            database.vaultKeyDao().insertAll(vaultKeys)
+                            Log.d(TAG, "Inserted ${vaultKeys.size} vault keys")
+                        }
+
+                        // Parse and insert items
+                        val items = itemsData.mapNotNull { itemData ->
+                            try {
+                                val itemId = itemData["id"] as? String ?: return@mapNotNull null
+                                val vaultId = itemData["vaultId"] as? String ?: return@mapNotNull null
+                                val category = itemData["category"] as? String ?: return@mapNotNull null
+
+                                // Only sync login items
+                                if (category != "login") return@mapNotNull null
+
+                                @Suppress("UNCHECKED_CAST")
+                                val urls = itemData["urls"] as? List<String> ?: emptyList()
+                                val primaryDomain = urls.firstOrNull()?.let { extractDomain(it) }
+
+                                ItemEntity(
+                                    id = itemId,
+                                    vaultId = vaultId,
+                                    userId = userId,
+                                    category = category,
+                                    displayTitle = itemData["displayTitle"] as? String ?: "",
+                                    encryptedData = itemData["encryptedData"] as? String ?: return@mapNotNull null,
+                                    encryptionIv = itemData["encryptionIv"] as? String ?: return@mapNotNull null,
+                                    encryptionAlgorithm = itemData["encryptionAlgorithm"] as? String ?: "AES-GCM",
+                                    primaryDomain = primaryDomain,
+                                    username = itemData["username"] as? String,
+                                    iconUrl = itemData["iconUrl"] as? String,
+                                    lastUsedAt = (itemData["lastUsedAt"] as? Number)?.toLong() ?: 0L,
+                                    syncedAt = System.currentTimeMillis(),
+                                    createdAt = (itemData["createdAt"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+                                    updatedAt = (itemData["updatedAt"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+                                    isFavorite = itemData["isFavorite"] as? Boolean ?: false
+                                )
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to parse item: ${itemData["id"]}", e)
+                                null
+                            }
+                        }
+
+                        if (items.isNotEmpty()) {
+                            database.itemDao().insertAll(items)
+                            Log.d(TAG, "Inserted ${items.size} items")
+                        }
+
+                        // Insert domain mappings for each item
+                        var totalDomains = 0
+                        for (i in 0 until itemsJson.length()) {
+                            try {
+                                val item = itemsJson.getJSONObject(i)
+                                val itemId = item.optString("id", "")
+                                if (itemId.isEmpty()) continue
+
+                                val category = item.optString("category", "")
+                                if (category != "login") continue
+
+                                // Parse URLs array from JSON
+                                val urlsJson = item.optJSONArray("urls") ?: JSONArray()
+                                val urls = (0 until urlsJson.length()).map { i ->
+                                    urlsJson.getString(i)
+                                }
+
+                                if (urls.isEmpty()) {
+                                    Log.d(TAG, "Item $itemId has no URLs, skipping domain mapping")
+                                    continue
+                                }
+
+                                val domains = urls.mapIndexedNotNull { urlIndex, url ->
+                                    val domain = extractDomain(url) ?: return@mapIndexedNotNull null
+                                    ItemDomainEntity(
+                                        itemId = itemId,
+                                        domain = domain,
+                                        isPrimary = urlIndex == 0,
+                                        fullUrl = url
+                                    )
+                                }
+
+                                if (domains.isNotEmpty()) {
+                                    database.itemDomainDao().replaceDomainsForItem(itemId, domains)
+                                    totalDomains += domains.size
+                                    Log.d(TAG, "Inserted ${domains.size} domains for item $itemId: ${domains.map { it.domain }}")
+                                }
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to process domains for item at index $i", e)
+                            }
+                        }
+
+                        Log.d(TAG, "Inserted $totalDomains domain mappings")
+
+                        // Clean up vault keys that are no longer present
+                        val incomingVaultIds = vaultKeys.map { it.vaultId }.toSet()
+                        val existingVaultIds = database.vaultKeyDao().getVaultIdsByUserId(userId)
+                        val vaultKeysToDelete = existingVaultIds - incomingVaultIds
+
+                        var deletedVaultKeys = 0
+                        for (vaultId in vaultKeysToDelete) {
+                            database.vaultKeyDao().delete(vaultId, userId)
+                            deletedVaultKeys++
+                        }
+
+                        // Clean up items that are no longer present
+                        val incomingItemIds = items.map { it.id }.toSet()
+                        val existingItemIds = database.itemDao().getItemIdsByUserId(userId)
+                        val itemsToDelete = existingItemIds - incomingItemIds
+
+                        var deletedItems = 0
+                        for (itemId in itemsToDelete) {
+                            database.itemDao().deleteById(itemId)
+                            deletedItems++
+                        }
+
+                        Log.d(TAG, "Cleanup: Deleted $deletedVaultKeys vault keys, $deletedItems items")
+
+                        val result = mapOf(
+                            "vaultKeys" to vaultKeys.size,
+                            "items" to items.size,
+                            "domains" to totalDomains,
+                            "deletedVaultKeys" to deletedVaultKeys,
+                            "deletedItems" to deletedItems
+                        )
+
+                        Log.d(TAG, "syncVaultData complete: $result")
+                        promise.resolve(result)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "syncVaultData failed", e)
+                    promise.reject("SYNC_FAILED", "Failed to sync vault data: ${e.message}", e)
+                }
+            }
+        }
+
+        /**
          * Sync multiple credentials from the main vault.
          * This is more efficient than saving credentials one by one.
          * Uses time-bound authentication - after one biometric auth, can encrypt for 30 seconds.
@@ -792,6 +1034,23 @@ class CredentialProviderModule : Module() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to initialize key", e)
                     promise.reject("INIT_FAILED", "Failed to initialize key: ${e.message}", e)
+                }
+            }
+        }
+
+        /**
+         * Get count of vault-based items stored in the database.
+         */
+        AsyncFunction("getVaultItemCount") { promise: Promise ->
+            moduleScope.launch {
+                try {
+                    val count = withContext(Dispatchers.IO) {
+                        database.itemDao().getCount()
+                    }
+                    promise.resolve(count)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to get vault item count", e)
+                    promise.reject("COUNT_FAILED", "Failed to get vault item count: ${e.message}", e)
                 }
             }
         }

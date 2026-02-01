@@ -37,9 +37,31 @@
                 android:resource="@xml/credential_provider" />
         </service>
 
+        <service
+            android:name=".service.BitteryAutofillService"
+            android:enabled="true"
+            android:exported="true"
+            android:label="Bittery"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE"
+            tools:targetApi="o">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.autofill"
+                android:resource="@xml/autofill_service" />
+        </service>
+
         <!-- Activity for credential selection with biometric authentication -->
         <activity
             android:name=".activity.GetCredentialsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Bittery.CredentialProvider"
+            android:excludeFromRecents="true"
+            android:noHistory="true" />
+
+        <activity
+            android:name=".activity.AutofillAuthActivity"
             android:exported="false"
             android:theme="@style/Theme.Bittery.CredentialProvider"
             android:excludeFromRecents="true"

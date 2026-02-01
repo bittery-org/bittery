@@ -18,6 +18,12 @@ import { useAccountsInfo } from "./use-accounts-info";
  * Decrypted item with source account metadata (for multi-account mode)
  */
 export interface MultiAccountItem extends DecryptedItem {
+	/** Raw encrypted data for native credential provider sync */
+	_encrypted?: {
+		data: string;
+		iv: string;
+		algorithm: string;
+	};
 	vault: {
 		id: string;
 		name: string;
@@ -140,6 +146,12 @@ export function useItemsUnified(options: UseItemsUnifiedOptions = {}) {
 										createdAt: rawItem.createdAt,
 										updatedAt: rawItem.updatedAt,
 										...parsedData,
+										// Include raw encrypted data for native sync
+										_encrypted: {
+											data: rawItem.encryptedData,
+											iv: rawItem.encryptionIv,
+											algorithm: rawItem.encryptionAlgorithm,
+										},
 										vault: {
 											id: rawItem.vault.id,
 											name: rawItem.vault.name,
