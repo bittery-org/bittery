@@ -189,7 +189,8 @@ class GetCredentialsActivity : FragmentActivity() {
                         handleUnlockWithEscrow(iId)
                     } else {
                         // Need full unlock via main app
-                        finishWithError("Vault locked - please unlock Bittery first")
+                        Log.w(TAG, "No valid escrow, launching app for password unlock")
+                        launchAppForPasswordUnlock(passwordRequired = false)
                     }
                     return@launch
                 }
@@ -272,8 +273,7 @@ class GetCredentialsActivity : FragmentActivity() {
         // Check 30-day master password requirement
         if (mukEscrowManager.isMasterPasswordReentryRequired()) {
             Log.d(TAG, "30-day master password re-entry required")
-            // TODO: Launch React Native app to /autofill-unlock route with password required flag
-            finishWithError("Password required. Please open Bittery and enter your master password.")
+            launchAppForPasswordUnlock(passwordRequired = true)
             return
         }
 
@@ -282,9 +282,8 @@ class GetCredentialsActivity : FragmentActivity() {
             handleUnlockWithEscrow(null)
         } else {
             // Need to launch main app for full unlock
-            // TODO: Launch React Native app to /autofill-unlock route
             Log.w(TAG, "No valid escrow, need full password unlock")
-            finishWithError("Please open Bittery to unlock")
+            launchAppForPasswordUnlock(passwordRequired = false)
         }
     }
 
@@ -543,6 +542,45 @@ class GetCredentialsActivity : FragmentActivity() {
         } catch (e: Exception) {
             Log.w(TAG, "Failed to load allowlist JSON", e)
             "[]"
+        }
+    }
+
+    /**
+     * Launch the main Bittery app for password unlock.
+     *
+     * @param passwordRequired true if master password re-entry is required (30 days),
+     *                         false for regular unlock
+     */
+    private fun launchAppForPasswordUnlock(passwordRequired: Boolean) {
+        try {
+            // Create intent to launch the main app
+            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+            if (launchIntent == null) {
+                Log.e(TAG, "Could not get launch intent for app")
+                finishWithError("Failed to open Bittery app")
+                return
+            }
+
+            // Add flags to ensure we return to autofill after unlock
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+
+            // Add extra to indicate this is an autofill unlock request
+            launchIntent.putExtra("autofill_unlock", true)
+            launchIntent.putExtra("password_required", passwordRequired)
+
+            // Optional: Add deep link to specific unlock screen
+            // The React Native app can handle this via linking configuration
+            launchIntent.data = android.net.Uri.parse("bittery://autofill-unlock?passwordRequired=$passwordRequired")
+
+            Log.d(TAG, "Launching app for password unlock (passwordRequired=$passwordRequired)")
+            startActivity(launchIntent)
+
+            // Finish this activity - user will come back through autofill flow after unlocking
+            setResult(Activity.RESULT_CANCELED)
+            finish()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error launching app for password unlock", e)
+            finishWithError("Failed to open Bittery app: ${e.message}")
         }
     }
 

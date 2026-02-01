@@ -39,6 +39,13 @@ function AppContent() {
 				<Stack.Screen name="(tabs)" options={{ headerShown: false }} />
 				<Stack.Screen name="(vault)" options={{ headerShown: false }} />
 				<Stack.Screen name="settings" options={{ headerShown: false }} />
+				<Stack.Screen
+					name="autofill-unlock"
+					options={{
+						headerShown: false,
+						presentation: "modal",
+					}}
+				/>
 			</Stack>
 			<BiometricAuthModal
 				visible={showAuthModal}

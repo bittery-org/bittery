@@ -124,9 +124,9 @@ class BitteryCredentialProviderService : CredentialProviderService() {
                         Log.d(TAG, "Extracted domain: $domain, parent: $parentDomain")
 
                         // Only return credentials if vault is unlocked
-                        // (We show them as options, but decryption happens in GetCredentialsActivity)
+                        // Decryption happens in GetCredentialsActivity using MUK
                         if (isVaultUnlocked) {
-                            // Try new unified storage first (ItemEntity)
+                            // Query unified vault-based storage (ItemEntity)
                             val items = if (domain.isNotEmpty() && parentDomain.isNotEmpty()) {
                                 database.itemDao().getLoginItemsByDomainWithFallback(domain, parentDomain)
                             } else if (domain.isNotEmpty()) {
@@ -137,29 +137,12 @@ class BitteryCredentialProviderService : CredentialProviderService() {
                                 emptyList()
                             }
 
-                            Log.d(TAG, "Found ${items.size} items in unified storage for domain '$domain'")
+                            Log.d(TAG, "Found ${items.size} items in vault-based storage for domain '$domain'")
 
                             for (item in items) {
                                 Log.d(TAG, "Creating entry for item: ${item.username} @ ${item.primaryDomain}")
                                 val entry = createPasswordEntryFromItem(item, option)
                                 credentialEntries.add(entry)
-                            }
-
-                            // Fallback to legacy storage if no items found in unified storage
-                            if (items.isEmpty()) {
-                                val legacyCredentials = if (domain.isNotEmpty()) {
-                                    database.credentialDao().getByDomain(domain)
-                                } else {
-                                    database.credentialDao().getAll()
-                                }
-
-                                Log.d(TAG, "Found ${legacyCredentials.size} legacy credentials for domain '$domain'")
-
-                                for (credential in legacyCredentials) {
-                                    Log.d(TAG, "Creating legacy entry for: ${credential.username} @ ${credential.domain}")
-                                    val entry = createPasswordEntry(credential, option)
-                                    credentialEntries.add(entry)
-                                }
                             }
                         } else {
                             Log.d(TAG, "Vault locked - not returning credentials, only auth action")
