@@ -84,8 +84,11 @@ class BitteryAutofillService : AutofillService() {
 
         val structure = context.structure
         val fieldIds = findFieldIds(structure)
+
+        Log.d(TAG, "Field detection: username=${fieldIds.usernameId != null}, password=${fieldIds.passwordId != null}")
+
         if (!fieldIds.hasAny()) {
-            Log.d(TAG, "No autofillable fields found")
+            Log.w(TAG, "No autofillable fields found - neither username nor password detected")
             callback.onSuccess(null)
             return
         }
@@ -241,22 +244,36 @@ class BitteryAutofillService : AutofillService() {
     }
 
     private fun isUsernameField(node: AssistStructure.ViewNode, hints: List<String>): Boolean {
+        // Check autofill hints first
         if (hints.contains(View.AUTOFILL_HINT_USERNAME.lowercase()) ||
             hints.contains(View.AUTOFILL_HINT_EMAIL_ADDRESS.lowercase())
         ) {
             return true
         }
 
+        // Check HTML autofill attributes
         if (isHtmlUsernameField(node)) {
             return true
         }
 
+        // Check input type for email
+        val inputType = node.inputType
+        val isText = inputType and InputType.TYPE_CLASS_TEXT != 0
+        val variation = inputType and InputType.TYPE_MASK_VARIATION
+        if (isText && variation == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS) {
+            return true
+        }
+
+        // Check hint text and ID entry for common username/email patterns
         val hintText = node.hint?.toString()?.lowercase().orEmpty()
         val idEntry = node.idEntry?.lowercase().orEmpty()
-        return hintText.contains("email") ||
-            hintText.contains("user") ||
-            idEntry.contains("email") ||
-            idEntry.contains("user")
+
+        // Comprehensive username/email detection
+        val usernamePatterns = listOf("email", "user", "login", "account", "identifier", "username")
+
+        return usernamePatterns.any { pattern ->
+            hintText.contains(pattern) || idEntry.contains(pattern)
+        } && !isPasswordField(node, hints) // Make sure it's not a password field
     }
 
     private fun isPasswordField(node: AssistStructure.ViewNode, hints: List<String>): Boolean {
@@ -338,12 +355,30 @@ class BitteryAutofillService : AutofillService() {
         if (tag != "input") return false
         val attrs = htmlInfo.attributes ?: return false
         if (attrs.isEmpty()) return false
+
         val type = findHtmlAttribute(attrs, "type")?.lowercase()
         val autocomplete = findHtmlAttribute(attrs, "autocomplete")?.lowercase()
-        return type == "password" ||
-            type == "new-password" ||
-            type == "current-password" ||
-            (autocomplete != null && autocomplete.contains("password"))
+        val name = findHtmlAttribute(attrs, "name")?.lowercase()
+
+        // Check type attribute
+        if (type == "password" || type == "new-password" || type == "current-password") {
+            Log.d(TAG, "✓ Password field detected by type=$type")
+            return true
+        }
+
+        // Check autocomplete attribute
+        if (autocomplete != null && autocomplete.contains("password")) {
+            Log.d(TAG, "✓ Password field detected by autocomplete=$autocomplete")
+            return true
+        }
+
+        // Check name attribute as fallback
+        if (name != null && (name.contains("password") || name.contains("passwd") || name.contains("pass"))) {
+            Log.d(TAG, "✓ Password field detected by name=$name")
+            return true
+        }
+
+        return false
     }
 
     private fun isHtmlUsernameField(node: AssistStructure.ViewNode): Boolean {
@@ -352,17 +387,48 @@ class BitteryAutofillService : AutofillService() {
         if (tag != "input") return false
         val attrs = htmlInfo.attributes ?: return false
         if (attrs.isEmpty()) return false
+
         val type = findHtmlAttribute(attrs, "type")?.lowercase()
         val autocomplete = findHtmlAttribute(attrs, "autocomplete")?.lowercase()
         val name = findHtmlAttribute(attrs, "name")?.lowercase()
         val id = findHtmlAttribute(attrs, "id")?.lowercase()
-        return (type == "email" || type == "text") &&
-            (autocomplete?.contains("email") == true ||
-                autocomplete?.contains("username") == true ||
-                name?.contains("email") == true ||
-                name?.contains("user") == true ||
-                id?.contains("email") == true ||
-                id?.contains("user") == true)
+
+        // Log HTML attributes for debugging
+        Log.d(TAG, "HTML field: type=$type, autocomplete=$autocomplete, name=$name, id=$id")
+
+        // Must be email or text input
+        if (type != "email" && type != "text") {
+            return false
+        }
+
+        // Check autocomplete attribute (most reliable)
+        if (autocomplete != null) {
+            val validAutocomplete = listOf("email", "username", "webauthn")
+            if (validAutocomplete.any { autocomplete.contains(it) }) {
+                Log.d(TAG, "✓ Username field detected by autocomplete=$autocomplete")
+                return true
+            }
+        }
+
+        // Check name attribute
+        if (name != null) {
+            val validNamePatterns = listOf("email", "user", "login", "account", "identifier", "username")
+            if (validNamePatterns.any { name.contains(it) }) {
+                Log.d(TAG, "✓ Username field detected by name=$name")
+                return true
+            }
+        }
+
+        // Check id attribute
+        if (id != null) {
+            val validIdPatterns = listOf("email", "user", "login", "account", "identifier", "username")
+            if (validIdPatterns.any { id.contains(it) }) {
+                Log.d(TAG, "✓ Username field detected by id=$id")
+                return true
+            }
+        }
+
+        return false
     }
 
     private fun findHtmlAttribute(

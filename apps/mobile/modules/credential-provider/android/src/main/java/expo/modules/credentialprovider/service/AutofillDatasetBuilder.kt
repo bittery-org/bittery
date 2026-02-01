@@ -167,6 +167,9 @@ class AutofillDatasetBuilder(
         attributionIntent: PendingIntent?
     ): Dataset? {
         if (!fieldIds.hasAny()) return null
+
+        Log.d(BitteryAutofillService.TAG, "Building dataset '$label': will fill username=${fieldIds.usernameId != null}, password=${fieldIds.passwordId != null}")
+
         val presentation = RemoteViews(context.packageName, android.R.layout.simple_list_item_1).apply {
             setTextViewText(android.R.id.text1, label)
         }

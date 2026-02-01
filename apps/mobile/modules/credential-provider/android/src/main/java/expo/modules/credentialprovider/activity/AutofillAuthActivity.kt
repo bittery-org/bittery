@@ -44,6 +44,8 @@ class AutofillAuthActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        Log.d(TAG, "AutofillAuthActivity started")
+
         mukEscrowManager = MukEscrowManager(applicationContext)
         database = CredentialDatabase.getInstance(applicationContext)
         storageManager = CredentialStorageManager(applicationContext)
@@ -53,27 +55,37 @@ class AutofillAuthActivity : FragmentActivity() {
         passwordId = getParcelableExtraCompat(BitteryAutofillService.EXTRA_AUTOFILL_PASSWORD_ID, AutofillId::class.java)
         domain = intent.getStringExtra(BitteryAutofillService.EXTRA_AUTOFILL_DOMAIN)
 
+        Log.d(TAG, "Fields: username=${usernameId != null}, password=${passwordId != null}, domain=$domain")
+
         if (usernameId == null && passwordId == null) {
             finishWithError("No autofill field IDs")
             return
         }
 
-        if (VaultStateManager.isUnlocked()) {
+        val isUnlocked = VaultStateManager.isUnlocked()
+        Log.d(TAG, "Vault unlocked: $isUnlocked")
+
+        if (isUnlocked) {
+            Log.d(TAG, "Vault already unlocked - building datasets")
             buildAndFinish(VaultStateManager.getMasterUnlockKey())
             return
         }
 
+        Log.d(TAG, "Vault locked - attempting unlock")
         unlockAndContinue()
     }
 
     private fun unlockAndContinue() {
-        if (mukEscrowManager.isMasterPasswordReentryRequired()) {
-            finishWithError("Password required")
-            return
-        }
+        // Check if master password re-entry is required
+        val passwordRequired = mukEscrowManager.isMasterPasswordReentryRequired()
+        val canUseBiometric = mukEscrowManager.canUseBiometricUnlock()
 
-        if (!mukEscrowManager.canUseBiometricUnlock()) {
-            finishWithError("Please open Bittery to unlock")
+        Log.d(TAG, "Unlock check: passwordRequired=$passwordRequired, canUseBiometric=$canUseBiometric")
+
+        // If password is required OR biometric isn't available, launch the main app
+        if (passwordRequired || !canUseBiometric) {
+            Log.d(TAG, "Cannot unlock here - launching main app")
+            launchAppForUnlock(passwordRequired)
             return
         }
 
@@ -147,6 +159,28 @@ class AutofillAuthActivity : FragmentActivity() {
             setResult(Activity.RESULT_OK, resultIntent)
             finish()
         }
+    }
+
+    private fun launchAppForUnlock(passwordRequired: Boolean) {
+        Log.d(TAG, "Launching main app for unlock (passwordRequired=$passwordRequired)")
+
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+        launchIntent?.apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra("autofill_unlock", true)
+            putExtra("password_required", passwordRequired)
+            data = android.net.Uri.parse("bittery://autofill-unlock?passwordRequired=$passwordRequired")
+        }
+
+        try {
+            startActivity(launchIntent)
+            Log.d(TAG, "Successfully launched main app")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch main app", e)
+        }
+
+        setResult(Activity.RESULT_CANCELED)
+        finish()
     }
 
     private fun finishWithError(message: String) {

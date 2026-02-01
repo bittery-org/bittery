@@ -103,7 +103,16 @@ export default function AutofillUnlockScreen() {
 					// Set MUK in native CredentialProvider for autofill decryption
 					if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
 						const mukBase64 = arrayBufferToBase64(masterUnlockKey);
-						CredentialProvider.setMasterUnlockKey(mukBase64);
+						const setResult = CredentialProvider.setMasterUnlockKey(mukBase64);
+						console.log(
+							`[AutofillUnlock] Set native MUK after biometric: ${setResult}`,
+						);
+
+						// Verify it was set
+						const isUnlocked = CredentialProvider.isVaultUnlocked();
+						console.log(
+							`[AutofillUnlock] Vault unlocked after biometric: ${isUnlocked}`,
+						);
 					}
 				}
 
@@ -180,7 +189,16 @@ export default function AutofillUnlockScreen() {
 			// Set MUK in native CredentialProvider for autofill decryption
 			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
 				const mukBase64 = arrayBufferToBase64(result.masterUnlockKey);
-				CredentialProvider.setMasterUnlockKey(mukBase64);
+				const setResult = CredentialProvider.setMasterUnlockKey(mukBase64);
+				console.log(
+					`[AutofillUnlock] Set native MUK after password: ${setResult}`,
+				);
+
+				// Verify it was set
+				const isUnlocked = CredentialProvider.isVaultUnlocked();
+				console.log(
+					`[AutofillUnlock] Vault unlocked after password: ${isUnlocked}`,
+				);
 
 				// Update 30-day master password entry timestamp in native
 				CredentialProvider.updateLastMasterPasswordEntry();
