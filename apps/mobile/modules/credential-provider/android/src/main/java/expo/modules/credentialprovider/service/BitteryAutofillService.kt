@@ -105,9 +105,11 @@ class BitteryAutofillService : AutofillService() {
                 }
 
                 if (inlineRequest != null) {
-                    Log.d(TAG, "Inline suggestions requested: max=${inlineRequest.maxSuggestionCount}, specs=${inlineRequest.inlinePresentationSpecs.size}")
+                    Log.d(TAG, "✓ Inline suggestions requested: max=${inlineRequest.maxSuggestionCount}, specs=${inlineRequest.inlinePresentationSpecs.size}")
                 } else {
-                    Log.d(TAG, "Inline suggestions not requested")
+                    Log.w(TAG, "✗ Inline suggestions NOT requested by IME (keyboard). Will show dropdown instead.")
+                    Log.w(TAG, "  → This is controlled by your keyboard, not the autofill service")
+                    Log.w(TAG, "  → Check: Gboard settings → Text correction → Show suggestions")
                 }
 
                 val inlineSpec = inlineRequest?.inlinePresentationSpecs?.firstOrNull()
@@ -129,6 +131,19 @@ class BitteryAutofillService : AutofillService() {
                 if (datasets.isNotEmpty()) {
                     val responseBuilder = FillResponse.Builder()
                     datasets.forEach { responseBuilder.addDataset(it) }
+
+                    // Add "Open Bittery" action at the end of inline suggestions (only for inline)
+                    if (inlineSpec != null) {
+                        datasetBuilder.buildOpenAppDataset(
+                            fieldIds = AutofillDatasetBuilder.FieldIds(fieldIds.usernameId, fieldIds.passwordId),
+                            inlineSpec = inlineSpec,
+                            attributionIntent = attributionIntent
+                        )?.let {
+                            responseBuilder.addDataset(it)
+                            Log.d(TAG, "Added 'Open Bittery' inline dataset")
+                        }
+                    }
+
                     callback.onSuccess(responseBuilder.build())
                     return@launch
                 }

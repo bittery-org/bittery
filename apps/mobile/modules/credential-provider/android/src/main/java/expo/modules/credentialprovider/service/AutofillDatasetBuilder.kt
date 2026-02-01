@@ -173,7 +173,7 @@ class AutofillDatasetBuilder(
 
         val builder = Dataset.Builder(presentation)
         val inlinePresentation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && inlineSpec != null && attributionIntent != null) {
-            createInlinePresentation(inlineSpec, label, attributionIntent)
+            createInlinePresentation(inlineSpec, label, username, attributionIntent)
         } else {
             null
         }
@@ -196,6 +196,7 @@ class AutofillDatasetBuilder(
     private fun createInlinePresentation(
         spec: InlinePresentationSpec,
         label: String,
+        subtitle: String,
         attributionIntent: PendingIntent
     ): InlinePresentation? {
         val versions = UiVersions.getVersions(spec.style)
@@ -204,13 +205,21 @@ class AutofillDatasetBuilder(
             return null
         }
 
+        // Create app icon for the inline suggestion
+        val appIcon = android.graphics.drawable.Icon.createWithResource(
+            context,
+            context.applicationInfo.icon
+        )
+
         val slice = InlineSuggestionUi.newContentBuilder(attributionIntent)
+            .setStartIcon(appIcon)
             .setTitle(label)
-            .setContentDescription(label)
+            .setSubtitle(subtitle)
+            .setContentDescription("$label - $subtitle")
             .build()
             .slice
 
-        Log.d(BitteryAutofillService.TAG, "Created inline presentation for: $label")
+        Log.d(BitteryAutofillService.TAG, "Created inline presentation for: $label ($subtitle)")
         return InlinePresentation(slice, spec, false)
     }
 
@@ -221,5 +230,57 @@ class AutofillDatasetBuilder(
         } else {
             domain
         }
+    }
+
+    /**
+     * Creates an "Open Bittery" dataset that launches the main app
+     * This appears as the last item in the inline suggestions
+     *
+     * Note: Sets empty value to satisfy Dataset.Builder requirements
+     * When tapped, launches the app via authentication without filling fields
+     */
+    fun buildOpenAppDataset(
+        fieldIds: FieldIds,
+        inlineSpec: InlinePresentationSpec?,
+        attributionIntent: PendingIntent?
+    ): android.service.autofill.Dataset? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || inlineSpec == null || attributionIntent == null) {
+            return null
+        }
+
+        if (!fieldIds.hasAny()) {
+            return null
+        }
+
+        val presentation = RemoteViews(context.packageName, android.R.layout.simple_list_item_1).apply {
+            setTextViewText(android.R.id.text1, "Open Bittery")
+        }
+
+        val appIcon = android.graphics.drawable.Icon.createWithResource(
+            context,
+            context.applicationInfo.icon
+        )
+
+        val inlinePresentation = InlinePresentation(
+            InlineSuggestionUi.newContentBuilder(attributionIntent)
+                .setStartIcon(appIcon)
+                .setTitle("Open Bittery")
+                .setContentDescription("Open Bittery app")
+                .build()
+                .slice,
+            inlineSpec,
+            false
+        )
+
+        val builder = android.service.autofill.Dataset.Builder(presentation)
+            .setInlinePresentation(inlinePresentation)
+            .setAuthentication(attributionIntent.intentSender)
+
+        // Dataset requires at least one field to be set
+        // Set empty value for the first available field
+        val fieldId = fieldIds.usernameId ?: fieldIds.passwordId ?: return null
+        builder.setValue(fieldId, AutofillValue.forText(""))
+
+        return builder.build()
     }
 }
