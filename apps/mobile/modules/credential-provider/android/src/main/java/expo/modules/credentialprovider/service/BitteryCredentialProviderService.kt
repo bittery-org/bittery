@@ -32,6 +32,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import java.time.Instant
 
 /**
@@ -59,6 +60,10 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         CredentialDatabase.getInstance(applicationContext)
     }
 
+    private val allowlistJson: String by lazy {
+        loadAllowlistJson()
+    }
+
     /**
      * Handle password autofill requests.
      * Called when an app requests credentials.
@@ -76,13 +81,15 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         Log.d(TAG, "========================================")
         Log.d(TAG, "onBeginGetCredentialRequest called!")
         Log.d(TAG, "CallingAppInfo: ${request.callingAppInfo}")
-        val callingOrigin = try {
-            request.callingAppInfo?.getOrigin("[]")
+        val rawOrigin = try {
+            request.callingAppInfo?.getOrigin(allowlistJson)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to get origin", e)
             null
-        } ?: request.callingAppInfo?.packageName
-        Log.d(TAG, "CallingAppInfo.origin: $callingOrigin")
+        }
+        val callingOrigin = resolveCallingOrigin(rawOrigin, request.callingAppInfo?.packageName)
+        Log.d(TAG, "CallingAppInfo.origin(raw): $rawOrigin")
+        Log.d(TAG, "CallingAppInfo.origin(resolved): $callingOrigin")
         Log.d(TAG, "CallingAppInfo.packageName: ${request.callingAppInfo?.packageName}")
         Log.d(TAG, "Options count: ${request.beginGetCredentialOptions.size}")
         Log.d(TAG, "VaultStateManager.isUnlocked: ${VaultStateManager.isUnlocked()}")
@@ -107,11 +114,7 @@ class BitteryCredentialProviderService : CredentialProviderService() {
                 for (option in request.beginGetCredentialOptions) {
                     Log.d(TAG, "Processing option: ${option::class.simpleName}")
                     if (option is BeginGetPasswordOption) {
-                        val origin = try {
-                            request.callingAppInfo?.getOrigin("[]")
-                        } catch (e: Exception) {
-                            null
-                        } ?: request.callingAppInfo?.packageName ?: ""
+                        val origin = resolveCallingOrigin(rawOrigin, request.callingAppInfo?.packageName)
 
                         Log.d(TAG, "Password request for origin: $origin")
 
@@ -362,6 +365,57 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         } catch (e: Exception) {
             Log.w(TAG, "Failed to extract domain from: $origin", e)
             ""
+        }
+    }
+
+    private fun resolveCallingOrigin(originJsonOrString: String?, packageName: String?): String {
+        val origins = extractOriginList(originJsonOrString)
+        val origin = origins.firstOrNull()?.takeIf { it.isNotBlank() }
+        return origin ?: packageName.orEmpty()
+    }
+
+    private fun extractOriginList(originJsonOrString: String?): List<String> {
+        if (originJsonOrString.isNullOrBlank()) return emptyList()
+
+        val trimmed = originJsonOrString.trim()
+        if (trimmed.startsWith("[")) {
+            try {
+                val array = JSONArray(trimmed)
+                val results = ArrayList<String>(array.length())
+                for (index in 0 until array.length()) {
+                    val value = array.optString(index, "")
+                    if (value.isNotBlank()) {
+                        results.add(value)
+                    }
+                }
+                if (results.isNotEmpty()) {
+                    return results
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to parse origin JSON: $originJsonOrString", e)
+            }
+        }
+
+        return listOf(originJsonOrString)
+    }
+
+    private fun loadAllowlistJson(): String {
+        return try {
+            val resources = applicationContext.resources
+            val resId = resources.getIdentifier(
+                "credential_provider_allowlist",
+                "raw",
+                applicationContext.packageName
+            )
+            if (resId == 0) {
+                Log.w(TAG, "Allowlist resource not found")
+                "[]"
+            } else {
+                resources.openRawResource(resId).bufferedReader().use { it.readText() }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load allowlist JSON", e)
+            "[]"
         }
     }
 

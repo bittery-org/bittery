@@ -30,6 +30,12 @@ const withCredentialProvider = (config) => {
 				fs.mkdirSync(xmlDir, { recursive: true });
 			}
 
+			// Ensure raw directory exists
+			const rawDir = path.join(androidResPath, "raw");
+			if (!fs.existsSync(rawDir)) {
+				fs.mkdirSync(rawDir, { recursive: true });
+			}
+
 			// Copy credential_provider.xml from module to app
 			const sourceXml = path.join(
 				projectRoot,
@@ -53,6 +59,30 @@ const withCredentialProvider = (config) => {
 				console.warn(
 					"withCredentialProvider: Source XML not found at",
 					sourceXml,
+				);
+			}
+
+			// Copy privileged allowlist JSON from module to app
+			const sourceAllowlist = path.join(
+				projectRoot,
+				"modules",
+				"credential-provider",
+				"apps.json",
+			);
+			const destAllowlist = path.join(
+				rawDir,
+				"credential_provider_allowlist.json",
+			);
+
+			if (fs.existsSync(sourceAllowlist)) {
+				fs.copyFileSync(sourceAllowlist, destAllowlist);
+				console.log(
+					"withCredentialProvider: Copied credential_provider_allowlist.json to app resources",
+				);
+			} else {
+				console.warn(
+					"withCredentialProvider: Source allowlist not found at",
+					sourceAllowlist,
 				);
 			}
 

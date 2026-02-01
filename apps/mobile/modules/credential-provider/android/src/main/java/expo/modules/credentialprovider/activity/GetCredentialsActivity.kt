@@ -28,6 +28,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 
 /**
  * Activity for credential selection and biometric authentication.
@@ -45,6 +46,9 @@ class GetCredentialsActivity : FragmentActivity() {
     private lateinit var mukEscrowManager: MukEscrowManager
     private lateinit var biometricPrompt: BiometricPrompt
     private lateinit var promptInfo: BiometricPrompt.PromptInfo
+    private val allowlistJson: String by lazy {
+        loadAllowlistJson()
+    }
 
     private var credentialId: String? = null  // Legacy storage
     private var itemId: String? = null        // Unified storage
@@ -442,11 +446,12 @@ class GetCredentialsActivity : FragmentActivity() {
 
                 val username = callingRequest.id
                 val password = callingRequest.password
-                val origin = try {
-                    createRequest.callingAppInfo?.getOrigin("[]")
+                val rawOrigin = try {
+                    createRequest.callingAppInfo?.getOrigin(allowlistJson)
                 } catch (e: Exception) {
                     null
-                } ?: createRequest.callingAppInfo?.packageName ?: ""
+                }
+                val origin = resolveCallingOrigin(rawOrigin, createRequest.callingAppInfo?.packageName)
 
                 val domain = extractDomain(origin)
 
@@ -487,6 +492,57 @@ class GetCredentialsActivity : FragmentActivity() {
             }
         } catch (e: Exception) {
             origin
+        }
+    }
+
+    private fun resolveCallingOrigin(originJsonOrString: String?, packageName: String?): String {
+        val origins = extractOriginList(originJsonOrString)
+        val origin = origins.firstOrNull()?.takeIf { it.isNotBlank() }
+        return origin ?: packageName.orEmpty()
+    }
+
+    private fun extractOriginList(originJsonOrString: String?): List<String> {
+        if (originJsonOrString.isNullOrBlank()) return emptyList()
+
+        val trimmed = originJsonOrString.trim()
+        if (trimmed.startsWith("[")) {
+            try {
+                val array = JSONArray(trimmed)
+                val results = ArrayList<String>(array.length())
+                for (index in 0 until array.length()) {
+                    val value = array.optString(index, "")
+                    if (value.isNotBlank()) {
+                        results.add(value)
+                    }
+                }
+                if (results.isNotEmpty()) {
+                    return results
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to parse origin JSON: $originJsonOrString", e)
+            }
+        }
+
+        return listOf(originJsonOrString)
+    }
+
+    private fun loadAllowlistJson(): String {
+        return try {
+            val resources = applicationContext.resources
+            val resId = resources.getIdentifier(
+                "credential_provider_allowlist",
+                "raw",
+                applicationContext.packageName
+            )
+            if (resId == 0) {
+                Log.w(TAG, "Allowlist resource not found")
+                "[]"
+            } else {
+                resources.openRawResource(resId).bufferedReader().use { it.readText() }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load allowlist JSON", e)
+            "[]"
         }
     }
 
