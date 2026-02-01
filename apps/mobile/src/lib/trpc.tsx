@@ -1,17 +1,14 @@
 import type { AppRouter } from "@bittery/api/routers/index";
+import { buildTrpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
+import { TRPCProvider as SharedTRPCProvider } from "@bittery/shared/trpc";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
-import { createTRPCContext } from "@trpc/tanstack-react-query";
 import type { ReactNode } from "react";
 import { createContext, useContext, useEffect, useState } from "react";
 import { storage } from "@/services/storage";
 
-// Create tRPC context and hooks using the newer pattern
-export const {
-	TRPCProvider: TRPCContextProvider,
-	useTRPC,
-	useTRPCClient,
-} = createTRPCContext<AppRouter>();
+// Re-export the shared tRPC hooks for consistency
+export { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 
 // Server URL context for dynamic server URL support
 interface ServerUrlContextValue {
@@ -30,7 +27,8 @@ export function useServerUrl() {
 
 // Get the default server URL from environment or use fallback
 const DEFAULT_SERVER_URL =
-	process.env.EXPO_PUBLIC_SERVER_URL || "http://localhost:3000";
+	normalizeServerUrl(process.env.EXPO_PUBLIC_SERVER_URL) ||
+	"http://localhost:3000";
 
 interface TRPCProviderProps {
 	children: ReactNode;
@@ -77,27 +75,20 @@ export function TRPCProvider({ children }: TRPCProviderProps) {
 			links: [
 				httpBatchLink({
 					url: `${DEFAULT_SERVER_URL}/trpc`,
-					async headers() {
-						try {
-							const token = await storage.getAuthToken();
-							if (token) {
-								return {
-									Authorization: `Bearer ${token}`,
-								};
-							}
-						} catch (error) {
-							console.error("Error getting auth token:", error);
-						}
-						return {};
-					},
 					async fetch(url, options) {
 						// Use dynamic server URL if available
-						const baseUrl = serverUrl || DEFAULT_SERVER_URL;
-						const resolvedUrl = (url as string).replace(
-							`${DEFAULT_SERVER_URL}/trpc`,
-							`${baseUrl}/trpc`,
-						);
-						return fetch(resolvedUrl, options);
+						const currentServerUrl =
+							(await storage.getServerUrl()) || DEFAULT_SERVER_URL;
+						const resolvedUrl = buildTrpcUrl(currentServerUrl, url as string);
+						const authToken = await storage.getAuthToken();
+						return fetch(resolvedUrl, {
+							...options,
+							credentials: "include",
+							headers: {
+								...options?.headers,
+								Authorization: authToken ? `Bearer ${authToken}` : undefined,
+							},
+						});
 					},
 				}),
 			],
@@ -106,11 +97,11 @@ export function TRPCProvider({ children }: TRPCProviderProps) {
 
 	return (
 		<ServerUrlContext.Provider value={{ serverUrl, setServerUrl }}>
-			<TRPCContextProvider trpcClient={trpcClient} queryClient={queryClient}>
-				<QueryClientProvider client={queryClient}>
+			<QueryClientProvider client={queryClient}>
+				<SharedTRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
 					{children}
-				</QueryClientProvider>
-			</TRPCContextProvider>
+				</SharedTRPCProvider>
+			</QueryClientProvider>
 		</ServerUrlContext.Provider>
 	);
 }

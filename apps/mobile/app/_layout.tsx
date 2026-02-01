@@ -17,6 +17,7 @@ import {
 } from "../src/contexts/biometric-auth-context";
 import { TRPCProvider } from "../src/lib/trpc";
 import { MobilePlatformProvider } from "../src/providers/platform-provider";
+import { storage } from "../src/services/storage";
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -53,10 +54,15 @@ export default function RootLayout() {
 
 	useEffect(() => {
 		async function prepare() {
-			// Add any initialization logic here
-			// e.g., load fonts, check auth state, etc.
-			setAppIsReady(true);
-			await SplashScreen.hideAsync();
+			try {
+				// Initialize storage adapter (loads Expo modules)
+				await storage.initialize();
+			} catch (error) {
+				console.error("[RootLayout] Failed to initialize storage:", error);
+			} finally {
+				setAppIsReady(true);
+				await SplashScreen.hideAsync();
+			}
 		}
 
 		prepare();
