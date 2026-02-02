@@ -1,33 +1,23 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import { Check, Lock, Plus, Settings, Trash2, X } from "lucide-react-native";
+import { Avatar, BottomSheet, PressableFeedback } from "heroui-native";
+import { Check, Lock, Plus, Settings, Trash2 } from "lucide-react-native";
 import { useState } from "react";
-import {
-	Alert,
-	Modal,
-	Pressable,
-	Text,
-	TouchableOpacity,
-	View,
-} from "react-native";
+import { Alert, Text, View } from "react-native";
 
 import { useAccount } from "../contexts/account-context";
 import { type AccountMetadata, storage } from "../services/storage";
 
-interface AccountSwitcherProps {
-	visible: boolean;
-	onClose: () => void;
-}
-
-export function AccountSwitcher({ visible, onClose }: AccountSwitcherProps) {
+export function AccountSwitcher() {
 	const router = useRouter();
 	const queryClient = useQueryClient();
 	const { allAccounts, activeAccount, switchAccount } = useAccount();
 	const [switching, setSwitching] = useState(false);
+	const [isOpen, setIsOpen] = useState(false);
 
 	const handleAccountSwitch = async (account: AccountMetadata) => {
 		if (account.email === activeAccount?.email) {
-			onClose();
+			setIsOpen(false);
 			return;
 		}
 
@@ -42,7 +32,7 @@ export function AccountSwitcher({ visible, onClose }: AccountSwitcherProps) {
 			// Check if the new account has a valid session
 			const isValid = await storage.isSessionValid(account.email);
 
-			onClose();
+			setIsOpen(false);
 
 			if (isValid) {
 				// Has valid session, refresh the current view
@@ -60,17 +50,17 @@ export function AccountSwitcher({ visible, onClose }: AccountSwitcherProps) {
 	};
 
 	const handleAddAccount = () => {
-		onClose();
+		setIsOpen(false);
 		router.push("/(auth)/login");
 	};
 
 	const handleSettings = () => {
-		onClose();
+		setIsOpen(false);
 		router.push("/settings");
 	};
 
 	const handleTrash = () => {
-		onClose();
+		setIsOpen(false);
 		router.push("/(tabs)/trash");
 	};
 
@@ -85,7 +75,7 @@ export function AccountSwitcher({ visible, onClose }: AccountSwitcherProps) {
 					style: "destructive",
 					onPress: async () => {
 						await storage.clearSession();
-						onClose();
+						setIsOpen(false);
 						router.replace("/(auth)/unlock");
 					},
 				},
@@ -94,7 +84,8 @@ export function AccountSwitcher({ visible, onClose }: AccountSwitcherProps) {
 	};
 
 	// Get initials from email or name
-	const getInitials = (account: AccountMetadata) => {
+	const getInitials = (account?: AccountMetadata | null) => {
+		if (!account) return "?";
 		if (account.name) {
 			const parts = account.name.split(" ");
 			if (parts.length >= 2) {
@@ -106,33 +97,30 @@ export function AccountSwitcher({ visible, onClose }: AccountSwitcherProps) {
 	};
 
 	return (
-		<Modal
-			visible={visible}
-			transparent
-			animationType="slide"
-			onRequestClose={onClose}
-		>
-			<Pressable className="flex-1 justify-end bg-black/50" onPress={onClose}>
-				<Pressable
-					className="rounded-t-3xl bg-background pb-8"
-					onPress={(e) => e.stopPropagation()}
-				>
-					{/* Handle bar */}
+		<BottomSheet isOpen={isOpen} onOpenChange={setIsOpen}>
+			<BottomSheet.Trigger>
+				<View className="rounded-full">
+					<Avatar
+						size="sm"
+						color="accent"
+						alt={activeAccount?.name || activeAccount?.email || "Account"}
+					>
+						{activeAccount?.teamAvatarUrl && (
+							<Avatar.Image source={{ uri: activeAccount.teamAvatarUrl }} />
+						)}
+						<Avatar.Fallback>
+							<Text className="font-semibold text-xs">
+								{getInitials(activeAccount)}
+							</Text>
+						</Avatar.Fallback>
+					</Avatar>
+				</View>
+			</BottomSheet.Trigger>
+			<BottomSheet.Portal>
+				<BottomSheet.Overlay />
+				<BottomSheet.Content>
 					<View className="items-center py-3">
-						<View className="h-1 w-10 rounded-full bg-muted" />
-					</View>
-
-					{/* Header */}
-					<View className="flex-row items-center justify-between border-border border-b px-4 pb-3">
-						<Text className="font-semibold text-foreground text-lg">
-							Accounts
-						</Text>
-						<TouchableOpacity
-							onPress={onClose}
-							className="rounded-full bg-secondary p-2"
-						>
-							<X size={18} color="#6b7280" />
-						</TouchableOpacity>
+						<BottomSheet.Title>Accounts</BottomSheet.Title>
 					</View>
 
 					{/* Account list */}
@@ -142,28 +130,31 @@ export function AccountSwitcher({ visible, onClose }: AccountSwitcherProps) {
 								account.email.toLowerCase() ===
 								activeAccount?.email.toLowerCase();
 							return (
-								<TouchableOpacity
+								<PressableFeedback
 									key={account.email}
 									onPress={() => handleAccountSwitch(account)}
-									disabled={switching}
+									isDisabled={switching}
 									className={`flex-row items-center px-4 py-3 ${
 										isActive ? "bg-primary/5" : ""
 									}`}
-									activeOpacity={0.7}
 								>
-									{/* Avatar */}
-									<View
-										className={`mr-3 h-10 w-10 items-center justify-center rounded-full ${
-											isActive ? "bg-primary" : "bg-secondary"
-										}`}
-									>
-										<Text
-											className={`font-semibold ${
-												isActive ? "text-primary-foreground" : "text-foreground"
-											}`}
+									<PressableFeedback.Highlight />
+									{/* Avatar with team image support */}
+									<View className="mr-3">
+										<Avatar
+											size="md"
+											color="accent"
+											alt={account.name || account.email}
 										>
-											{getInitials(account)}
-										</Text>
+											{account.teamAvatarUrl && (
+												<Avatar.Image source={{ uri: account.teamAvatarUrl }} />
+											)}
+											<Avatar.Fallback>
+												<Text className="font-semibold text-xs">
+													{getInitials(account)}
+												</Text>
+											</Avatar.Fallback>
+										</Avatar>
 									</View>
 
 									{/* Info */}
@@ -182,100 +173,72 @@ export function AccountSwitcher({ visible, onClose }: AccountSwitcherProps) {
 										>
 											{account.email}
 										</Text>
+										{account.teamName && (
+											<Text className="text-muted-foreground text-xs">
+												{account.teamName}
+											</Text>
+										)}
 									</View>
 
 									{/* Checkmark for active */}
 									{isActive && <Check size={20} color="#22c55e" />}
-								</TouchableOpacity>
+								</PressableFeedback>
 							);
 						})}
 					</View>
 
 					{/* Actions */}
-					<View className="px-4 pt-2">
+					<View className="px-4 pt-2 pb-4">
 						{/* Add Account */}
-						<TouchableOpacity
+						<PressableFeedback
 							onPress={handleAddAccount}
-							className="flex-row items-center py-3"
-							activeOpacity={0.7}
+							className="flex-row items-center rounded-lg py-3"
 						>
+							<PressableFeedback.Highlight />
 							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-secondary">
 								<Plus size={20} color="#6b7280" />
 							</View>
 							<Text className="font-medium text-foreground">Add Account</Text>
-						</TouchableOpacity>
+						</PressableFeedback>
 
 						{/* Settings */}
-						<TouchableOpacity
+						<PressableFeedback
 							onPress={handleSettings}
-							className="flex-row items-center py-3"
-							activeOpacity={0.7}
+							className="flex-row items-center rounded-lg py-3"
 						>
+							<PressableFeedback.Highlight />
 							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-secondary">
 								<Settings size={20} color="#6b7280" />
 							</View>
 							<Text className="font-medium text-foreground">Settings</Text>
-						</TouchableOpacity>
+						</PressableFeedback>
 
 						{/* Trash */}
-						<TouchableOpacity
+						<PressableFeedback
 							onPress={handleTrash}
-							className="flex-row items-center py-3"
-							activeOpacity={0.7}
+							className="flex-row items-center rounded-lg py-3"
 						>
+							<PressableFeedback.Highlight />
 							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-secondary">
 								<Trash2 size={20} color="#6b7280" />
 							</View>
 							<Text className="font-medium text-foreground">Trash</Text>
-						</TouchableOpacity>
+						</PressableFeedback>
 
 						{/* Lock Vault */}
-						<TouchableOpacity
+						<PressableFeedback
 							onPress={handleLockVault}
-							className="flex-row items-center py-3"
-							activeOpacity={0.7}
+							className="flex-row items-center rounded-lg py-3"
 						>
+							<PressableFeedback.Highlight />
 							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-destructive/10">
 								<Lock size={20} color="#ef4444" />
 							</View>
 							<Text className="font-medium text-destructive">Lock Vault</Text>
-						</TouchableOpacity>
+						</PressableFeedback>
 					</View>
-				</Pressable>
-			</Pressable>
-		</Modal>
-	);
-}
-
-// Avatar button component for headers
-interface AccountAvatarButtonProps {
-	onPress: () => void;
-}
-
-export function AccountAvatarButton({ onPress }: AccountAvatarButtonProps) {
-	const { activeAccount } = useAccount();
-
-	const getInitials = () => {
-		if (!activeAccount) return "?";
-		if (activeAccount.name) {
-			const parts = activeAccount.name.split(" ");
-			if (parts.length >= 2) {
-				return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-			}
-			return activeAccount.name.substring(0, 2).toUpperCase();
-		}
-		return activeAccount.email.substring(0, 2).toUpperCase();
-	};
-
-	return (
-		<TouchableOpacity
-			onPress={onPress}
-			className="size-9 items-center justify-center rounded-full bg-primary"
-			activeOpacity={0.7}
-		>
-			<Text className="font-semibold text-primary-foreground text-xs">
-				{getInitials()}
-			</Text>
-		</TouchableOpacity>
+				</BottomSheet.Content>
+			</BottomSheet.Portal>
+		</BottomSheet>
 	);
 }
