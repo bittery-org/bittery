@@ -26,16 +26,27 @@ export interface CreditCardFormRef {
 	isValid: () => boolean;
 }
 
-export const CreditCardForm = forwardRef<CreditCardFormRef>((_, ref) => {
-	const [cardholderName, setCardholderName] = useState("");
-	const [cardNumber, setCardNumber] = useState("");
-	const [expiryDate, setExpiryDate] = useState("");
-	const [cvv, setCvv] = useState("");
-	const [billingAddress, setBillingAddress] = useState("");
-	const [detectedCardBrand, setDetectedCardBrand] = useState<CardBrand | "">(
-		"",
-	);
-	const [showCvv, setShowCvv] = useState(false);
+interface CreditCardFormProps {
+	initialData?: Partial<CreditCardFormData>;
+}
+
+export const CreditCardForm = forwardRef<CreditCardFormRef, CreditCardFormProps>(
+	({ initialData }, ref) => {
+		const [cardholderName, setCardholderName] = useState(
+			initialData?.cardholderName || "",
+		);
+		const [cardNumber, setCardNumber] = useState(initialData?.cardNumber || "");
+		const [expiryDate, setExpiryDate] = useState(initialData?.expiryDate || "");
+		const [cvv, setCvv] = useState(initialData?.cvv || "");
+		const [billingAddress, setBillingAddress] = useState(
+			initialData?.billingAddress || "",
+		);
+		const [detectedCardBrand, setDetectedCardBrand] = useState<CardBrand | "">(
+			initialData?.cardNumber && initialData.cardNumber.length >= 4
+				? detectCardBrand(initialData.cardNumber)
+				: "",
+		);
+		const [showCvv, setShowCvv] = useState(false);
 
 	useImperativeHandle(ref, () => ({
 		getData: () => ({
@@ -158,6 +169,7 @@ export const CreditCardForm = forwardRef<CreditCardFormRef>((_, ref) => {
 			</TextField>
 		</>
 	);
-});
+	},
+);
 
 CreditCardForm.displayName = "CreditCardForm";

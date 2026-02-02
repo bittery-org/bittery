@@ -10,8 +10,13 @@ export interface SecureNoteFormRef {
 	isValid: () => boolean;
 }
 
-export const SecureNoteForm = forwardRef<SecureNoteFormRef>((_, ref) => {
-	const [note, setNote] = useState("");
+interface SecureNoteFormProps {
+	initialData?: Partial<SecureNoteFormData>;
+}
+
+export const SecureNoteForm = forwardRef<SecureNoteFormRef, SecureNoteFormProps>(
+	({ initialData }, ref) => {
+		const [note, setNote] = useState(initialData?.note || "");
 
 	useImperativeHandle(ref, () => ({
 		getData: () => ({
@@ -34,6 +39,7 @@ export const SecureNoteForm = forwardRef<SecureNoteFormRef>((_, ref) => {
 			/>
 		</TextField>
 	);
-});
+	},
+);
 
 SecureNoteForm.displayName = "SecureNoteForm";

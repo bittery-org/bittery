@@ -21,12 +21,19 @@ export interface LoginFormRef {
 	isValid: () => boolean;
 }
 
-export const LoginForm = forwardRef<LoginFormRef>((_, ref) => {
-	const [username, setUsername] = useState("");
-	const [password, setPassword] = useState("");
-	const [url, setUrl] = useState("");
-	const [showPassword, setShowPassword] = useState(false);
-	const [showPasswordGenerator, setShowPasswordGenerator] = useState(false);
+interface LoginFormProps {
+	initialData?: Partial<LoginFormData>;
+}
+
+export const LoginForm = forwardRef<LoginFormRef, LoginFormProps>(
+	({ initialData }, ref) => {
+		const [username, setUsername] = useState(initialData?.username || "");
+		const [password, setPassword] = useState(initialData?.password || "");
+		const [url, setUrl] = useState(
+			initialData?.url || initialData?.urls?.[0] || "",
+		);
+		const [showPassword, setShowPassword] = useState(false);
+		const [showPasswordGenerator, setShowPasswordGenerator] = useState(false);
 
 	useImperativeHandle(ref, () => ({
 		getData: () => ({
@@ -105,6 +112,7 @@ export const LoginForm = forwardRef<LoginFormRef>((_, ref) => {
 			</TextField>
 		</>
 	);
-});
+	},
+);
 
 LoginForm.displayName = "LoginForm";

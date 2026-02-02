@@ -1,4 +1,4 @@
-import { useVaultItems } from "@bittery/hooks";
+import { useAllVaultKeys, useVaultItems } from "@bittery/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Button, Card, Skeleton, TextField } from "heroui-native";
@@ -11,6 +11,7 @@ import { EmptyItemsState } from "@/components/empty-items-state";
 import { ItemSectionsList } from "@/components/item-sections-list";
 import { ItemsSkeletonList } from "@/components/items-skeleton-list";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { VaultAvatar } from "@/components/vault-avatar";
 import { useFilteredItems } from "@/hooks/use-filtered-items";
 
 // Create styled icon components
@@ -29,6 +30,8 @@ export default function VaultItemsScreen() {
 	const [refreshing, setRefreshing] = useState(false);
 
 	const { items, isLoading, error, refetch } = useVaultItems(vaultId);
+	const { vaultKeys = [] } = useAllVaultKeys();
+	const currentVault = vaultKeys.find((v) => v.vaultId === vaultId);
 
 	// Filter and sort items
 	const { favorites, regularItems } = useFilteredItems({
@@ -56,7 +59,9 @@ export default function VaultItemsScreen() {
 						<Button isIconOnly variant="secondary" size="sm" className="mr-3">
 							<StyledArrowLeft size={18} className="text-muted" />
 						</Button>
-						<Card.Title className="flex-1 text-xl">Items</Card.Title>
+						<Card.Title className="flex-1 text-xl" numberOfLines={1}>
+							Loading...
+						</Card.Title>
 						<Button isIconOnly variant="secondary" size="sm">
 							<StyledPlus size={18} className="text-muted" />
 						</Button>
@@ -126,7 +131,18 @@ export default function VaultItemsScreen() {
 					>
 						<StyledArrowLeft size={18} className="text-foreground" />
 					</Button>
-					<Card.Title className="flex-1 text-xl">Items</Card.Title>
+					{currentVault && (
+						<VaultAvatar
+							name={currentVault.vaultName}
+							icon={currentVault.vaultIcon}
+							imageUrl={currentVault.vaultImageUrl}
+							size="sm"
+							className="mr-3"
+						/>
+					)}
+					<Card.Title className="flex-1 text-xl" numberOfLines={1}>
+						{currentVault?.vaultName || "Items"}
+					</Card.Title>
 					<Button
 						isIconOnly
 						variant="primary"

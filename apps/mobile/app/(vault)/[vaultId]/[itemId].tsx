@@ -69,7 +69,7 @@ export default function ItemDetailScreen() {
       variant: "accent",
       label: "Copied to clipboard",
       description: `${label} has been copied to clipboard.`,
-	  placement: 'bottom'
+      placement: "bottom",
     });
   };
 
@@ -477,7 +477,12 @@ export default function ItemDetailScreen() {
         >
           <StyledArrowLeft size={20} className="text-muted-foreground" />
         </Button>
-        <ItemIcon category={item.category} url={item.url} size="md" className="mr-3" />
+        <ItemIcon
+          category={item.category}
+          url={item.url}
+          size="md"
+          className="mr-3"
+        />
         <View className="flex-1">
           <View className="flex-row items-center">
             <Card.Title className="text-base">{item.title}</Card.Title>

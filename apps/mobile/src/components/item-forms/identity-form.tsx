@@ -13,10 +13,15 @@ export interface IdentityFormRef {
 	isValid: () => boolean;
 }
 
-export const IdentityForm = forwardRef<IdentityFormRef>((_, ref) => {
-	const [firstName, setFirstName] = useState("");
-	const [lastName, setLastName] = useState("");
-	const [email, setEmail] = useState("");
+interface IdentityFormProps {
+	initialData?: Partial<IdentityFormData>;
+}
+
+export const IdentityForm = forwardRef<IdentityFormRef, IdentityFormProps>(
+	({ initialData }, ref) => {
+		const [firstName, setFirstName] = useState(initialData?.firstName || "");
+		const [lastName, setLastName] = useState(initialData?.lastName || "");
+		const [email, setEmail] = useState(initialData?.email || "");
 
 	useImperativeHandle(ref, () => ({
 		getData: () => ({
@@ -63,6 +68,7 @@ export const IdentityForm = forwardRef<IdentityFormRef>((_, ref) => {
 			</TextField>
 		</>
 	);
-});
+	},
+);
 
 IdentityForm.displayName = "IdentityForm";

@@ -42,16 +42,25 @@ export interface TotpFormRef {
 
 interface TotpFormProps {
 	onTitleAutoFill?: (title: string) => void;
+	initialData?: Partial<TotpFormData>;
 }
 
 export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
-	({ onTitleAutoFill }, ref) => {
-		const [totpSecret, setTotpSecret] = useState("");
-		const [totpIssuer, setTotpIssuer] = useState("");
-		const [totpAccountName, setTotpAccountName] = useState("");
-		const [totpAlgorithm, setTotpAlgorithm] = useState<TotpAlgorithm>("SHA1");
-		const [totpDigits, setTotpDigits] = useState<TotpDigits>(6);
-		const [totpPeriod, setTotpPeriod] = useState(30);
+	({ onTitleAutoFill, initialData }, ref) => {
+		const [totpSecret, setTotpSecret] = useState(initialData?.totpSecret || "");
+		const [totpIssuer, setTotpIssuer] = useState(
+			initialData?.totpIssuer || "",
+		);
+		const [totpAccountName, setTotpAccountName] = useState(
+			initialData?.totpAccountName || "",
+		);
+		const [totpAlgorithm, setTotpAlgorithm] = useState<TotpAlgorithm>(
+			initialData?.totpAlgorithm || "SHA1",
+		);
+		const [totpDigits, setTotpDigits] = useState<TotpDigits>(
+			initialData?.totpDigits || 6,
+		);
+		const [totpPeriod, setTotpPeriod] = useState(initialData?.totpPeriod || 30);
 		const [showTotpAdvanced, setShowTotpAdvanced] = useState(false);
 		const [showQrScanner, setShowQrScanner] = useState(false);
 
