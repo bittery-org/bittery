@@ -1,56 +1,41 @@
 import { useAllVaultKeys, useCreateItem } from "@bittery/hooks";
-import {
-	type CardBrand,
-	detectCardBrand,
-	formatCardNumber,
-	getCardBrandDisplayName,
-} from "@bittery/shared/credit-card";
-import {
-	isValidBase32,
-	type ParsedOtpAuthUri,
-	parseOtpAuthUri,
-} from "@bittery/shared/totp";
-import type {
-	DecryptedItemData,
-	ItemCategory,
-	TotpAlgorithm,
-	TotpDigits,
-} from "@bittery/shared/types";
-import * as Clipboard from "expo-clipboard";
+import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Button, Label, Select, TextField } from "heroui-native";
 import {
 	ArrowLeft,
-	Camera,
 	ChevronDown,
-	ChevronRight,
-	ClipboardPaste,
 	CreditCard,
-	Eye,
-	EyeOff,
 	FileText,
 	Key,
-	Sparkles,
 	Timer,
 	User,
 	Vault,
 } from "lucide-react-native";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
 	Alert,
 	KeyboardAvoidingView,
 	Platform,
-	Pressable,
 	ScrollView,
 	Text,
 	View,
 } from "react-native";
 import { withUniwind } from "uniwind";
+import {
+	CreditCardForm,
+	type CreditCardFormRef,
+	IdentityForm,
+	type IdentityFormRef,
+	LoginForm,
+	type LoginFormRef,
+	SecureNoteForm,
+	type SecureNoteFormRef,
+	TotpForm,
+	type TotpFormRef,
+} from "@/components/item-forms";
 import { SafeAreaView } from "@/components/safe-area-view";
-import { PasswordGenerator } from "../../src/components/password-generator";
-import { QrCodeScanner } from "../../src/components/qr-code-scanner";
-import { TotpDisplay } from "../../src/components/totp-display";
-import { VaultAvatar } from "../../src/components/vault-avatar";
+import { VaultAvatar } from "@/components/vault-avatar";
 
 // Create styled icon components
 const StyledKey = withUniwind(Key);
@@ -58,15 +43,9 @@ const StyledCreditCard = withUniwind(CreditCard);
 const StyledUser = withUniwind(User);
 const StyledFileText = withUniwind(FileText);
 const StyledTimer = withUniwind(Timer);
-const StyledEye = withUniwind(Eye);
-const StyledEyeOff = withUniwind(EyeOff);
 const StyledArrowLeft = withUniwind(ArrowLeft);
-const StyledSparkles = withUniwind(Sparkles);
-const StyledCamera = withUniwind(Camera);
-const StyledClipboardPaste = withUniwind(ClipboardPaste);
 const StyledVault = withUniwind(Vault);
 const StyledChevronDown = withUniwind(ChevronDown);
-const StyledChevronRight = withUniwind(ChevronRight);
 
 const categoryOptions: {
 	value: ItemCategory;
@@ -95,46 +74,15 @@ export default function CreateItemScreen() {
 		{ value: ItemCategory; label: string } | undefined
 	>({ value: "login", label: "Login" });
 	const [title, setTitle] = useState("");
-	const [showPassword, setShowPassword] = useState(false);
-	const [saving, setSaving] = useState(false);
-	const [showPasswordGenerator, setShowPasswordGenerator] = useState(false);
-
-	// Login fields
-	const [username, setUsername] = useState("");
-	const [password, setPassword] = useState("");
-	const [url, setUrl] = useState("");
-
-	// Credit card fields
-	const [cardholderName, setCardholderName] = useState("");
-	const [cardNumber, setCardNumber] = useState("");
-	const [expiryDate, setExpiryDate] = useState("");
-	const [cvv, setCvv] = useState("");
-	const [billingAddress, setBillingAddress] = useState("");
-	const [detectedCardBrand, setDetectedCardBrand] = useState<CardBrand | "">(
-		"",
-	);
-	const [showCvv, setShowCvv] = useState(false);
-
-	// Identity fields
-	const [firstName, setFirstName] = useState("");
-	const [lastName, setLastName] = useState("");
-	const [email, setEmail] = useState("");
-
-	// Secure note field
-	const [note, setNote] = useState("");
-
-	// TOTP fields
-	const [totpSecret, setTotpSecret] = useState("");
-	const [totpIssuer, setTotpIssuer] = useState("");
-	const [totpAccountName, setTotpAccountName] = useState("");
-	const [totpAlgorithm, setTotpAlgorithm] = useState<TotpAlgorithm>("SHA1");
-	const [totpDigits, setTotpDigits] = useState<TotpDigits>(6);
-	const [totpPeriod, setTotpPeriod] = useState(30);
-	const [showTotpAdvanced, setShowTotpAdvanced] = useState(false);
-	const [showQrScanner, setShowQrScanner] = useState(false);
-
-	// Common fields
 	const [notes, setNotes] = useState("");
+	const [saving, setSaving] = useState(false);
+
+	// Form refs
+	const loginFormRef = useRef<LoginFormRef>(null);
+	const creditCardFormRef = useRef<CreditCardFormRef>(null);
+	const identityFormRef = useRef<IdentityFormRef>(null);
+	const secureNoteFormRef = useRef<SecureNoteFormRef>(null);
+	const totpFormRef = useRef<TotpFormRef>(null);
 
 	const handleSave = async () => {
 		if (!title.trim()) {
@@ -147,57 +95,57 @@ export default function CreateItemScreen() {
 			return;
 		}
 
+		const categoryValue = category?.value || "login";
+
+		// Validate category-specific forms
+		let isValid = true;
+		switch (categoryValue) {
+			case "login":
+				isValid = loginFormRef.current?.isValid() ?? false;
+				break;
+			case "credit-card":
+				isValid = creditCardFormRef.current?.isValid() ?? false;
+				break;
+			case "identity":
+				isValid = identityFormRef.current?.isValid() ?? false;
+				break;
+			case "secure-note":
+				isValid = secureNoteFormRef.current?.isValid() ?? false;
+				break;
+			case "totp":
+				isValid = totpFormRef.current?.isValid() ?? false;
+				if (!isValid) {
+					Alert.alert("Error", "Please enter a valid TOTP secret key");
+					return;
+				}
+				break;
+		}
+
+		if (!isValid) {
+			return;
+		}
+
 		setSaving(true);
 
 		try {
 			// Build the data object based on category
 			let itemData: DecryptedItemData = { title };
-			const categoryValue = category?.value || "login";
 
 			switch (categoryValue) {
 				case "login":
-					itemData = {
-						...itemData,
-						username,
-						password,
-						url: url || undefined,
-						urls: url ? [url] : undefined,
-					};
+					itemData = { ...itemData, ...loginFormRef.current?.getData() };
 					break;
 				case "credit-card":
-					itemData = {
-						...itemData,
-						cardholderName,
-						cardNumber,
-						expiryDate,
-						cvv,
-						billingAddress: billingAddress || undefined,
-					};
+					itemData = { ...itemData, ...creditCardFormRef.current?.getData() };
 					break;
 				case "identity":
-					itemData = {
-						...itemData,
-						firstName,
-						lastName,
-						email: email || undefined,
-					};
+					itemData = { ...itemData, ...identityFormRef.current?.getData() };
 					break;
 				case "secure-note":
-					itemData = {
-						...itemData,
-						note,
-					};
+					itemData = { ...itemData, ...secureNoteFormRef.current?.getData() };
 					break;
 				case "totp":
-					itemData = {
-						...itemData,
-						totpSecret,
-						totpIssuer: totpIssuer || undefined,
-						totpAccountName: totpAccountName || undefined,
-						totpAlgorithm,
-						totpDigits,
-						totpPeriod,
-					};
+					itemData = { ...itemData, ...totpFormRef.current?.getData() };
 					break;
 			}
 
@@ -230,441 +178,6 @@ export default function CreateItemScreen() {
 		}
 	};
 
-	const renderLoginFields = () => (
-		<>
-			<TextField className="mb-4">
-				<TextField.Label>Username</TextField.Label>
-				<TextField.Input
-					placeholder="Enter username"
-					value={username}
-					onChangeText={setUsername}
-					autoCapitalize="none"
-					autoCorrect={false}
-				/>
-			</TextField>
-
-			<TextField className="mb-4">
-				<TextField.Label>Password</TextField.Label>
-				<View className="w-full flex-row items-center gap-2">
-					<View className="flex-1 flex-row items-center">
-						<TextField.Input
-							placeholder="Enter password"
-							value={password}
-							onChangeText={setPassword}
-							secureTextEntry={!showPassword}
-							className="flex-1 pr-12"
-						/>
-						<Pressable
-							onPress={() => setShowPassword(!showPassword)}
-							className="absolute right-4"
-						>
-							{showPassword ? (
-								<StyledEyeOff size={20} className="text-muted" />
-							) : (
-								<StyledEye size={20} className="text-muted" />
-							)}
-						</Pressable>
-					</View>
-					<Button
-						isIconOnly
-						onPress={() => setShowPasswordGenerator(true)}
-						variant="primary"
-					>
-						<StyledSparkles size={20} className="text-accent-foreground" />
-					</Button>
-				</View>
-			</TextField>
-
-			<TextField className="mb-4">
-				<TextField.Label>Website URL</TextField.Label>
-				<TextField.Input
-					placeholder="https://example.com"
-					value={url}
-					onChangeText={setUrl}
-					autoCapitalize="none"
-					autoCorrect={false}
-					keyboardType="url"
-				/>
-			</TextField>
-		</>
-	);
-
-	// Card number change handler with brand detection and formatting
-	const handleCardNumberChange = (value: string) => {
-		const cleaned = value.replace(/\D/g, "");
-
-		if (cleaned.length >= 4) {
-			const brand = detectCardBrand(cleaned);
-			setDetectedCardBrand(brand);
-		} else {
-			setDetectedCardBrand("");
-		}
-
-		setCardNumber(cleaned);
-	};
-
-	// Expiry date auto-formatting
-	const handleExpiryChange = (value: string) => {
-		let cleaned = value.replace(/\D/g, "");
-		if (cleaned.length >= 2) {
-			cleaned = `${cleaned.slice(0, 2)}/${cleaned.slice(2, 4)}`;
-		}
-		setExpiryDate(cleaned);
-	};
-
-	// CVV change handler - only allow digits
-	const handleCvvChange = (value: string) => {
-		const cleaned = value.replace(/\D/g, "");
-		setCvv(cleaned);
-	};
-
-	const renderCreditCardFields = () => (
-		<>
-			<TextField className="mb-4">
-				<TextField.Label>Cardholder Name</TextField.Label>
-				<TextField.Input
-					placeholder="Name on card"
-					value={cardholderName}
-					onChangeText={setCardholderName}
-					autoCapitalize="words"
-				/>
-			</TextField>
-
-			<TextField className="mb-4">
-				<View className="mb-2 flex-row items-center justify-between">
-					<TextField.Label>Card Number</TextField.Label>
-					{detectedCardBrand && detectedCardBrand !== "unknown" && (
-						<Text className="text-muted-foreground text-xs">
-							{getCardBrandDisplayName(detectedCardBrand)}
-						</Text>
-					)}
-				</View>
-				<TextField.Input
-					placeholder="1234 5678 9012 3456"
-					value={formatCardNumber(cardNumber, detectedCardBrand || undefined)}
-					onChangeText={handleCardNumberChange}
-					keyboardType="numeric"
-					maxLength={23}
-					className="font-mono"
-				/>
-			</TextField>
-
-			<View className="mb-4 flex-row gap-2">
-				<TextField className="flex-1">
-					<TextField.Label>Expiry</TextField.Label>
-					<TextField.Input
-						placeholder="MM/YY"
-						value={expiryDate}
-						onChangeText={handleExpiryChange}
-						keyboardType="numeric"
-						maxLength={5}
-						className="font-mono"
-					/>
-				</TextField>
-
-				<TextField className="flex-1">
-					<TextField.Label>CVV</TextField.Label>
-					<View className="w-full flex-row items-center">
-						<TextField.Input
-							placeholder="123"
-							value={cvv}
-							onChangeText={handleCvvChange}
-							keyboardType="numeric"
-							secureTextEntry={!showCvv}
-							maxLength={detectedCardBrand === "amex" ? 4 : 3}
-							className="flex-1 pr-12 font-mono"
-						/>
-						<Pressable
-							onPress={() => setShowCvv(!showCvv)}
-							className="absolute right-4"
-						>
-							{showCvv ? (
-								<StyledEyeOff size={20} className="text-muted" />
-							) : (
-								<StyledEye size={20} className="text-muted" />
-							)}
-						</Pressable>
-					</View>
-				</TextField>
-			</View>
-
-			<TextField className="mb-4">
-				<TextField.Label>Billing Address</TextField.Label>
-				<TextField.Input
-					placeholder="123 Main St, City, State ZIP"
-					value={billingAddress}
-					onChangeText={setBillingAddress}
-					multiline
-					numberOfLines={2}
-					textAlignVertical="top"
-					style={{ minHeight: 60 }}
-				/>
-			</TextField>
-		</>
-	);
-
-	const renderIdentityFields = () => (
-		<>
-			<View className="mb-4 flex-row gap-2">
-				<TextField className="flex-1">
-					<TextField.Label>First Name</TextField.Label>
-					<TextField.Input
-						placeholder="First name"
-						value={firstName}
-						onChangeText={setFirstName}
-						autoCapitalize="words"
-					/>
-				</TextField>
-
-				<TextField className="flex-1">
-					<TextField.Label>Last Name</TextField.Label>
-					<TextField.Input
-						placeholder="Last name"
-						value={lastName}
-						onChangeText={setLastName}
-						autoCapitalize="words"
-					/>
-				</TextField>
-			</View>
-
-			<TextField className="mb-4">
-				<TextField.Label>Email</TextField.Label>
-				<TextField.Input
-					placeholder="email@example.com"
-					value={email}
-					onChangeText={setEmail}
-					autoCapitalize="none"
-					keyboardType="email-address"
-				/>
-			</TextField>
-		</>
-	);
-
-	const renderSecureNoteFields = () => (
-		<TextField className="mb-4">
-			<TextField.Label>Note</TextField.Label>
-			<TextField.Input
-				placeholder="Enter your secure note..."
-				value={note}
-				onChangeText={setNote}
-				multiline
-				numberOfLines={6}
-				textAlignVertical="top"
-				style={{ minHeight: 120 }}
-			/>
-		</TextField>
-	);
-
-	// Handle QR code scan result
-	const handleQrScanSuccess = (data: ParsedOtpAuthUri) => {
-		setTotpSecret(data.secret);
-		if (data.issuer) setTotpIssuer(data.issuer);
-		if (data.accountName) setTotpAccountName(data.accountName);
-		if (data.algorithm) setTotpAlgorithm(data.algorithm);
-		if (data.digits) setTotpDigits(data.digits);
-		if (data.period) setTotpPeriod(data.period);
-
-		// Auto-fill title if empty
-		if (!title && (data.issuer || data.accountName)) {
-			setTitle(data.issuer || data.accountName || "TOTP");
-		}
-
-		Alert.alert("Success", "TOTP data imported from QR code");
-	};
-
-	// Handle paste from clipboard
-	const handlePasteTotp = async () => {
-		try {
-			const text = await Clipboard.getStringAsync();
-			if (!text) {
-				Alert.alert("Empty Clipboard", "No text found in clipboard");
-				return;
-			}
-
-			// Check if it's an otpauth:// URI
-			if (text.startsWith("otpauth://")) {
-				try {
-					const parsed = parseOtpAuthUri(text);
-					if (isValidBase32(parsed.secret)) {
-						handleQrScanSuccess(parsed);
-						return;
-					}
-				} catch {
-					// Not a valid URI, try as raw secret
-				}
-			}
-
-			// Try as raw base32 secret
-			const cleanedSecret = text.replace(/\s/g, "").toUpperCase();
-			if (isValidBase32(cleanedSecret)) {
-				setTotpSecret(cleanedSecret);
-				Alert.alert("Success", "Secret key pasted from clipboard");
-			} else {
-				Alert.alert(
-					"Invalid Format",
-					"The clipboard content is not a valid TOTP secret or otpauth:// URI",
-				);
-			}
-		} catch (error) {
-			console.error("Error pasting from clipboard:", error);
-			Alert.alert("Error", "Failed to read from clipboard");
-		}
-	};
-
-	const renderTotpFields = () => (
-		<>
-			{/* Quick Import Buttons */}
-			<View className="mb-4 flex-row gap-2">
-				<Button
-					onPress={() => setShowQrScanner(true)}
-					variant="secondary"
-					className="flex-1"
-				>
-					<StyledCamera size={18} className="text-accent-soft-foreground" />
-					<Button.Label>Scan QR</Button.Label>
-				</Button>
-				<Button
-					onPress={handlePasteTotp}
-					variant="secondary"
-					className="flex-1"
-				>
-					<StyledClipboardPaste size={18} className="text-accent-soft-foreground" />
-					<Button.Label>Paste</Button.Label>
-				</Button>
-			</View>
-
-			{/* Secret Key Input */}
-			<TextField
-				className="mb-4"
-				isRequired
-				isInvalid={totpSecret && !isValidBase32(totpSecret) ? true : undefined}
-			>
-				<TextField.Label>Secret Key</TextField.Label>
-				<TextField.Input
-					placeholder="JBSWY3DPEHPK3PXP"
-					value={totpSecret}
-					onChangeText={setTotpSecret}
-					autoCapitalize="characters"
-					autoCorrect={false}
-					className="font-mono"
-				/>
-				{totpSecret && !isValidBase32(totpSecret) && (
-					<TextField.ErrorMessage>
-						Invalid base32 format. Please check the secret key.
-					</TextField.ErrorMessage>
-				)}
-			</TextField>
-
-			{/* Live Preview */}
-			{totpSecret && isValidBase32(totpSecret) && (
-				<View className="mb-4">
-					<Text className="mb-2 font-medium text-foreground text-sm">
-						Preview
-					</Text>
-					<TotpDisplay
-						totpSecret={totpSecret}
-						totpAlgorithm={totpAlgorithm}
-						totpDigits={totpDigits}
-						totpPeriod={totpPeriod}
-						compact
-					/>
-				</View>
-			)}
-
-			{/* Issuer & Account */}
-			<View className="mb-4 flex-row gap-2">
-				<TextField className="flex-1">
-					<TextField.Label>Service</TextField.Label>
-					<TextField.Input
-						placeholder="Google, GitHub..."
-						value={totpIssuer}
-						onChangeText={setTotpIssuer}
-					/>
-				</TextField>
-
-				<TextField className="flex-1">
-					<TextField.Label>Account</TextField.Label>
-					<TextField.Input
-						placeholder="your@email.com"
-						value={totpAccountName}
-						onChangeText={setTotpAccountName}
-					/>
-				</TextField>
-			</View>
-
-			{/* Advanced Settings */}
-			<Pressable
-				onPress={() => setShowTotpAdvanced(!showTotpAdvanced)}
-				className="mb-4 flex-row items-center justify-between rounded-lg border border-border p-3"
-			>
-				<Text className="font-medium text-foreground text-sm">
-					Advanced Settings
-				</Text>
-				{showTotpAdvanced ? (
-					<StyledChevronDown size={16} className="text-muted" />
-				) : (
-					<StyledChevronRight size={16} className="text-muted" />
-				)}
-			</Pressable>
-			{showTotpAdvanced && (
-				<View className="mb-4 rounded-lg bg-secondary/30 p-3">
-					<View className="mb-4 flex-row gap-2">
-						<View className="flex-1">
-							<Text className="mb-1 text-muted-foreground text-xs">Digits</Text>
-							<View className="flex-row rounded-lg border border-input bg-background">
-								{[6, 7, 8].map((d) => (
-									<Pressable
-										key={d}
-										onPress={() => setTotpDigits(d as TotpDigits)}
-										className={`flex-1 items-center py-2 ${totpDigits === d ? "bg-primary" : ""}`}
-									>
-										<Text
-											className={`text-sm ${totpDigits === d ? "text-primary-foreground" : "text-foreground"}`}
-										>
-											{d}
-										</Text>
-									</Pressable>
-								))}
-							</View>
-						</View>
-						<TextField className="flex-1">
-							<TextField.Label className="mb-1 text-muted-foreground text-xs">
-								Period (sec)
-							</TextField.Label>
-							<TextField.Input
-								value={totpPeriod.toString()}
-								onChangeText={(v: string) =>
-									setTotpPeriod(Number.parseInt(v, 10) || 30)
-								}
-								keyboardType="numeric"
-							/>
-						</TextField>
-					</View>
-					<View>
-						<Text className="mb-1 text-muted-foreground text-xs">
-							Algorithm
-						</Text>
-						<View className="flex-row rounded-lg border border-input bg-background">
-							{(["SHA1", "SHA256", "SHA512"] as TotpAlgorithm[]).map((algo) => (
-								<Pressable
-									key={algo}
-									onPress={() => setTotpAlgorithm(algo)}
-									className={`flex-1 items-center py-2 ${totpAlgorithm === algo ? "bg-primary" : ""}`}
-								>
-									<Text
-										className={`text-xs ${totpAlgorithm === algo ? "text-primary-foreground" : "text-foreground"}`}
-									>
-										{algo}
-									</Text>
-								</Pressable>
-							))}
-						</View>
-					</View>
-				</View>
-			)}
-		</>
-	);
-
 	const selectedVault = vaultKeys.find((v) => v.vaultId === selectedVaultId);
 	const selectedCategoryOption = categoryOptions.find(
 		(opt) => opt.value === category?.value,
@@ -672,19 +185,6 @@ export default function CreateItemScreen() {
 
 	return (
 		<SafeAreaView className="flex-1 bg-background">
-			<PasswordGenerator
-				visible={showPasswordGenerator}
-				onClose={() => setShowPasswordGenerator(false)}
-				onPasswordGenerated={(generatedPassword) => {
-					setPassword(generatedPassword);
-					setShowPasswordGenerator(false);
-				}}
-			/>
-			<QrCodeScanner
-				visible={showQrScanner}
-				onClose={() => setShowQrScanner(false)}
-				onScanSuccess={handleQrScanSuccess}
-			/>
 			<KeyboardAvoidingView
 				behavior={Platform.OS === "ios" ? "padding" : "height"}
 				className="flex-1"
@@ -720,7 +220,10 @@ export default function CreateItemScreen() {
 						<Select
 							value={
 								selectedVaultId
-									? { value: selectedVaultId, label: selectedVault?.vaultName || "" }
+									? {
+											value: selectedVaultId,
+											label: selectedVault?.vaultName || "",
+										}
 									: undefined
 							}
 							onValueChange={(option) => {
@@ -729,17 +232,21 @@ export default function CreateItemScreen() {
 							isDisabled={isLoadingVaults || !!vaultIdParam}
 						>
 							<Select.Trigger asChild>
-								<Button variant="secondary" size="md" className="w-full justify-start">
+								<Button
+									variant="secondary"
+									size="md"
+									className="w-full justify-start"
+								>
 									{selectedVault ? (
-									<VaultAvatar
-										name={selectedVault.vaultName}
-										icon={selectedVault.vaultIcon}
-										imageUrl={selectedVault.vaultImageUrl}
-										size="sm"
-									/>
-								) : (
-									<StyledVault size={20} className="text-muted" />
-								)}
+										<VaultAvatar
+											name={selectedVault.vaultName}
+											icon={selectedVault.vaultIcon}
+											imageUrl={selectedVault.vaultImageUrl}
+											size="sm"
+										/>
+									) : (
+										<StyledVault size={20} className="text-muted" />
+									)}
 									<Button.Label className="flex-1 text-left">
 										{selectedVault?.vaultName || "Select Vault"}
 									</Button.Label>
@@ -763,11 +270,11 @@ export default function CreateItemScreen() {
 											>
 												<View className="flex-1 flex-row items-center gap-3">
 													<VaultAvatar
-													name={vault.vaultName}
-													icon={vault.vaultIcon}
-													imageUrl={vault.vaultImageUrl}
-													size="sm"
-												/>
+														name={vault.vaultName}
+														icon={vault.vaultIcon}
+														imageUrl={vault.vaultImageUrl}
+														size="sm"
+													/>
 													<Text className="flex-1 text-base text-foreground">
 														{vault.vaultName}
 													</Text>
@@ -796,7 +303,11 @@ export default function CreateItemScreen() {
 							}}
 						>
 							<Select.Trigger asChild>
-								<Button variant="tertiary" size="md" className="w-full justify-start">
+								<Button
+									variant="tertiary"
+									size="md"
+									className="w-full justify-start"
+								>
 									{selectedCategoryOption ? (
 										<>
 											<selectedCategoryOption.icon
@@ -858,12 +369,20 @@ export default function CreateItemScreen() {
 						/>
 					</TextField>
 
-					{/* Category-specific fields */}
-					{category?.value === "login" && renderLoginFields()}
-					{category?.value === "credit-card" && renderCreditCardFields()}
-					{category?.value === "identity" && renderIdentityFields()}
-					{category?.value === "secure-note" && renderSecureNoteFields()}
-					{category?.value === "totp" && renderTotpFields()}
+					{/* Category-specific forms */}
+					{category?.value === "login" && <LoginForm ref={loginFormRef} />}
+					{category?.value === "credit-card" && (
+						<CreditCardForm ref={creditCardFormRef} />
+					)}
+					{category?.value === "identity" && (
+						<IdentityForm ref={identityFormRef} />
+					)}
+					{category?.value === "secure-note" && (
+						<SecureNoteForm ref={secureNoteFormRef} />
+					)}
+					{category?.value === "totp" && (
+						<TotpForm ref={totpFormRef} onTitleAutoFill={setTitle} />
+					)}
 
 					{/* Notes (for non-secure-note items) */}
 					{category?.value !== "secure-note" && (

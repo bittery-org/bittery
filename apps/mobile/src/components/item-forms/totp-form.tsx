@@ -1,0 +1,290 @@
+import {
+	isValidBase32,
+	type ParsedOtpAuthUri,
+	parseOtpAuthUri,
+} from "@bittery/shared/totp";
+import type {
+	TotpAlgorithm,
+	TotpDigits,
+} from "@bittery/shared/types";
+import * as Clipboard from "expo-clipboard";
+import { Button, TextField } from "heroui-native";
+import {
+	Camera,
+	ChevronDown,
+	ChevronRight,
+	ClipboardPaste,
+} from "lucide-react-native";
+import { forwardRef, useImperativeHandle, useState } from "react";
+import { Alert, Pressable, Text, View } from "react-native";
+import { withUniwind } from "uniwind";
+import { QrCodeScanner } from "../qr-code-scanner";
+import { TotpDisplay } from "../totp-display";
+
+const StyledCamera = withUniwind(Camera);
+const StyledClipboardPaste = withUniwind(ClipboardPaste);
+const StyledChevronDown = withUniwind(ChevronDown);
+const StyledChevronRight = withUniwind(ChevronRight);
+
+export interface TotpFormData {
+	totpSecret: string;
+	totpIssuer?: string;
+	totpAccountName?: string;
+	totpAlgorithm: TotpAlgorithm;
+	totpDigits: TotpDigits;
+	totpPeriod: number;
+}
+
+export interface TotpFormRef {
+	getData: () => TotpFormData;
+	isValid: () => boolean;
+}
+
+interface TotpFormProps {
+	onTitleAutoFill?: (title: string) => void;
+}
+
+export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
+	({ onTitleAutoFill }, ref) => {
+		const [totpSecret, setTotpSecret] = useState("");
+		const [totpIssuer, setTotpIssuer] = useState("");
+		const [totpAccountName, setTotpAccountName] = useState("");
+		const [totpAlgorithm, setTotpAlgorithm] = useState<TotpAlgorithm>("SHA1");
+		const [totpDigits, setTotpDigits] = useState<TotpDigits>(6);
+		const [totpPeriod, setTotpPeriod] = useState(30);
+		const [showTotpAdvanced, setShowTotpAdvanced] = useState(false);
+		const [showQrScanner, setShowQrScanner] = useState(false);
+
+		useImperativeHandle(ref, () => ({
+			getData: () => ({
+				totpSecret,
+				totpIssuer: totpIssuer || undefined,
+				totpAccountName: totpAccountName || undefined,
+				totpAlgorithm,
+				totpDigits,
+				totpPeriod,
+			}),
+			isValid: () => isValidBase32(totpSecret),
+		}));
+
+		const handleQrScanSuccess = (data: ParsedOtpAuthUri) => {
+			setTotpSecret(data.secret);
+			if (data.issuer) setTotpIssuer(data.issuer);
+			if (data.accountName) setTotpAccountName(data.accountName);
+			if (data.algorithm) setTotpAlgorithm(data.algorithm);
+			if (data.digits) setTotpDigits(data.digits);
+			if (data.period) setTotpPeriod(data.period);
+
+			// Auto-fill title if callback provided
+			if (onTitleAutoFill && (data.issuer || data.accountName)) {
+				onTitleAutoFill(data.issuer || data.accountName || "TOTP");
+			}
+
+			Alert.alert("Success", "TOTP data imported from QR code");
+		};
+
+		const handlePasteTotp = async () => {
+			try {
+				const text = await Clipboard.getStringAsync();
+				if (!text) {
+					Alert.alert("Empty Clipboard", "No text found in clipboard");
+					return;
+				}
+
+				// Check if it's an otpauth:// URI
+				if (text.startsWith("otpauth://")) {
+					try {
+						const parsed = parseOtpAuthUri(text);
+						if (isValidBase32(parsed.secret)) {
+							handleQrScanSuccess(parsed);
+							return;
+						}
+					} catch {
+						// Not a valid URI, try as raw secret
+					}
+				}
+
+				// Try as raw base32 secret
+				const cleanedSecret = text.replace(/\s/g, "").toUpperCase();
+				if (isValidBase32(cleanedSecret)) {
+					setTotpSecret(cleanedSecret);
+					Alert.alert("Success", "Secret key pasted from clipboard");
+				} else {
+					Alert.alert(
+						"Invalid Format",
+						"The clipboard content is not a valid TOTP secret or otpauth:// URI",
+					);
+				}
+			} catch (error) {
+				console.error("Error pasting from clipboard:", error);
+				Alert.alert("Error", "Failed to read from clipboard");
+			}
+		};
+
+		return (
+			<>
+				<QrCodeScanner
+					visible={showQrScanner}
+					onClose={() => setShowQrScanner(false)}
+					onScanSuccess={handleQrScanSuccess}
+				/>
+
+				{/* Quick Import Buttons */}
+				<View className="mb-4 flex-row gap-2">
+					<Button
+						onPress={() => setShowQrScanner(true)}
+						variant="secondary"
+						className="flex-1"
+					>
+						<StyledCamera size={18} className="text-accent-soft-foreground" />
+						<Button.Label>Scan QR</Button.Label>
+					</Button>
+					<Button
+						onPress={handlePasteTotp}
+						variant="secondary"
+						className="flex-1"
+					>
+						<StyledClipboardPaste size={18} className="text-accent-soft-foreground" />
+						<Button.Label>Paste</Button.Label>
+					</Button>
+				</View>
+
+				{/* Secret Key Input */}
+				<TextField
+					className="mb-4"
+					isRequired
+					isInvalid={totpSecret && !isValidBase32(totpSecret) ? true : undefined}
+				>
+					<TextField.Label>Secret Key</TextField.Label>
+					<TextField.Input
+						placeholder="JBSWY3DPEHPK3PXP"
+						value={totpSecret}
+						onChangeText={setTotpSecret}
+						autoCapitalize="characters"
+						autoCorrect={false}
+						className="font-mono"
+					/>
+					{totpSecret && !isValidBase32(totpSecret) && (
+						<TextField.ErrorMessage>
+							Invalid base32 format. Please check the secret key.
+						</TextField.ErrorMessage>
+					)}
+				</TextField>
+
+				{/* Live Preview */}
+				{totpSecret && isValidBase32(totpSecret) && (
+					<View className="mb-4">
+						<Text className="mb-2 font-medium text-foreground text-sm">
+							Preview
+						</Text>
+						<TotpDisplay
+							totpSecret={totpSecret}
+							totpAlgorithm={totpAlgorithm}
+							totpDigits={totpDigits}
+							totpPeriod={totpPeriod}
+							compact
+						/>
+					</View>
+				)}
+
+				{/* Issuer & Account */}
+				<View className="mb-4 flex-row gap-2">
+					<TextField className="flex-1">
+						<TextField.Label>Service</TextField.Label>
+						<TextField.Input
+							placeholder="Google, GitHub..."
+							value={totpIssuer}
+							onChangeText={setTotpIssuer}
+						/>
+					</TextField>
+
+					<TextField className="flex-1">
+						<TextField.Label>Account</TextField.Label>
+						<TextField.Input
+							placeholder="your@email.com"
+							value={totpAccountName}
+							onChangeText={setTotpAccountName}
+						/>
+					</TextField>
+				</View>
+
+				{/* Advanced Settings */}
+				<Pressable
+					onPress={() => setShowTotpAdvanced(!showTotpAdvanced)}
+					className="mb-4 flex-row items-center justify-between rounded-lg border border-border p-3"
+				>
+					<Text className="font-medium text-foreground text-sm">
+						Advanced Settings
+					</Text>
+					{showTotpAdvanced ? (
+						<StyledChevronDown size={16} className="text-muted" />
+					) : (
+						<StyledChevronRight size={16} className="text-muted" />
+					)}
+				</Pressable>
+				{showTotpAdvanced && (
+					<View className="mb-4 rounded-lg bg-secondary/30 p-3">
+						<View className="mb-4 flex-row gap-2">
+							<View className="flex-1">
+								<Text className="mb-1 text-muted-foreground text-xs">
+									Digits
+								</Text>
+								<View className="flex-row rounded-lg border border-input bg-background">
+									{[6, 7, 8].map((d) => (
+										<Pressable
+											key={d}
+											onPress={() => setTotpDigits(d as TotpDigits)}
+											className={`flex-1 items-center py-2 ${totpDigits === d ? "bg-primary" : ""}`}
+										>
+											<Text
+												className={`text-sm ${totpDigits === d ? "text-primary-foreground" : "text-foreground"}`}
+											>
+												{d}
+											</Text>
+										</Pressable>
+									))}
+								</View>
+							</View>
+							<TextField className="flex-1">
+								<TextField.Label className="mb-1 text-muted-foreground text-xs">
+									Period (sec)
+								</TextField.Label>
+								<TextField.Input
+									value={totpPeriod.toString()}
+									onChangeText={(v: string) =>
+										setTotpPeriod(Number.parseInt(v, 10) || 30)
+									}
+									keyboardType="numeric"
+								/>
+							</TextField>
+						</View>
+						<View>
+							<Text className="mb-1 text-muted-foreground text-xs">
+								Algorithm
+							</Text>
+							<View className="flex-row rounded-lg border border-input bg-background">
+								{(["SHA1", "SHA256", "SHA512"] as TotpAlgorithm[]).map(
+									(algo) => (
+										<Pressable
+											key={algo}
+											onPress={() => setTotpAlgorithm(algo)}
+											className={`flex-1 items-center py-2 ${totpAlgorithm === algo ? "bg-primary" : ""}`}
+										>
+											<Text
+												className={`text-xs ${totpAlgorithm === algo ? "text-primary-foreground" : "text-foreground"}`}
+											>
+												{algo}
+											</Text>
+										</Pressable>
+									),
+								)}
+							</View>
+						</View>
+					</View>
+				)}
+			</>
+		);
+	},
+);
+
+TotpForm.displayName = "TotpForm";
