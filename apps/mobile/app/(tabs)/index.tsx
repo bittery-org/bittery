@@ -11,7 +11,6 @@ import { EmptyItemsState } from "@/components/empty-items-state";
 import { ItemSectionsList } from "@/components/item-sections-list";
 import { ItemsSkeletonList } from "@/components/items-skeleton-list";
 import { SafeAreaView } from "@/components/safe-area-view";
-import { VaultPicker } from "@/components/vault-picker";
 import { useFilteredItems } from "@/hooks/use-filtered-items";
 
 // Create styled icon components
@@ -26,7 +25,6 @@ export default function AllItemsScreen() {
 		ItemCategory | "all"
 	>("all");
 	const [refreshing, setRefreshing] = useState(false);
-	const [showVaultPicker, setShowVaultPicker] = useState(false);
 
 	const { items, isLoading, error, refetch } = useItems();
 
@@ -37,8 +35,8 @@ export default function AllItemsScreen() {
 		selectedCategory,
 	});
 
-	const handleVaultSelect = (vaultId: string) => {
-		router.push(`/(vault)/${vaultId}/create`);
+	const handleCreateItem = () => {
+		router.push("/(vault)/create");
 	};
 
 	const handleRefresh = async () => {
@@ -114,7 +112,7 @@ export default function AllItemsScreen() {
 							isIconOnly
 							variant="primary"
 							size="sm"
-							onPress={() => setShowVaultPicker(true)}
+							onPress={handleCreateItem}
 							className="mr-4"
 						>
 							<StyledPlus size={18} className="text-accent-foreground" />
@@ -174,11 +172,6 @@ export default function AllItemsScreen() {
 					/>
 				)}
 			</SafeAreaView>
-			<VaultPicker
-				visible={showVaultPicker}
-				onClose={() => setShowVaultPicker(false)}
-				onSelect={handleVaultSelect}
-			/>
 		</>
 	);
 }

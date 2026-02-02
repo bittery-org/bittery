@@ -11,7 +11,7 @@ export default function VaultLayout() {
 			<Stack.Screen name="index" />
 			<Stack.Screen name="[vaultId]/index" />
 			<Stack.Screen name="[vaultId]/[itemId]" />
-			<Stack.Screen name="[vaultId]/create" />
+			<Stack.Screen name="create" />
 		</Stack>
 	);
 }

@@ -131,7 +131,7 @@ export default function VaultItemsScreen() {
 						isIconOnly
 						variant="primary"
 						size="sm"
-						onPress={() => router.push(`/(vault)/${vaultId}/create`)}
+						onPress={() => router.push(`/(vault)/create?vaultId=${vaultId}`)}
 					>
 						<StyledPlus size={18} className="text-accent-foreground" />
 					</Button>
@@ -178,7 +178,7 @@ export default function VaultItemsScreen() {
 					actionLabel={!hasFilterOrSearch ? "Add Item" : undefined}
 					onAction={
 						!hasFilterOrSearch
-							? () => router.push(`/(vault)/${vaultId}/create`)
+							? () => router.push(`/(vault)/create?vaultId=${vaultId}`)
 							: undefined
 					}
 				/>

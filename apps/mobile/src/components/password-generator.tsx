@@ -4,6 +4,7 @@ import {
 } from "@bittery/shared/password";
 import Slider from "@react-native-community/slider";
 import * as Clipboard from "expo-clipboard";
+import { getRandomValues } from "expo-crypto";
 import { Check, Copy, RefreshCw, Sparkles, X } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -85,8 +86,8 @@ function generateMemorablePassword(
 	includeNumber = true,
 ): string {
 	const words: string[] = [];
-	const randomValues = new Uint8Array(wordCount + 1);
-	crypto.getRandomValues(randomValues);
+	let randomValues = new Uint8Array(wordCount + 1);
+	randomValues = getRandomValues(randomValues);
 
 	for (let i = 0; i < wordCount; i++) {
 		const val = randomValues[i];
@@ -130,6 +131,7 @@ export function PasswordGenerator({
 		uppercase: defaultOptions?.uppercase ?? true,
 		numbers: defaultOptions?.numbers ?? true,
 		symbols: defaultOptions?.symbols ?? true,
+		generateRandomValues: getRandomValues
 	});
 
 	// Memorable password options

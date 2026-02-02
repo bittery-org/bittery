@@ -1,4 +1,4 @@
-import { useCreateItem } from "@bittery/hooks";
+import { useAllVaultKeys, useCreateItem } from "@bittery/hooks";
 import {
 	type CardBrand,
 	detectCardBrand,
@@ -18,6 +18,7 @@ import type {
 } from "@bittery/shared/types";
 import * as Clipboard from "expo-clipboard";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { Button, Label, Select, TextField } from "heroui-native";
 import {
 	ArrowLeft,
 	Camera,
@@ -32,41 +33,67 @@ import {
 	Sparkles,
 	Timer,
 	User,
+	Vault,
 } from "lucide-react-native";
 import { useState } from "react";
 import {
 	Alert,
 	KeyboardAvoidingView,
 	Platform,
+	Pressable,
 	ScrollView,
 	Text,
-	TextInput,
-	TouchableOpacity,
 	View,
 } from "react-native";
+import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
-import { PasswordGenerator } from "../../../src/components/password-generator";
-import { QrCodeScanner } from "../../../src/components/qr-code-scanner";
-import { TotpDisplay } from "../../../src/components/totp-display";
+import { PasswordGenerator } from "../../src/components/password-generator";
+import { QrCodeScanner } from "../../src/components/qr-code-scanner";
+import { TotpDisplay } from "../../src/components/totp-display";
+import { VaultAvatar } from "../../src/components/vault-avatar";
+
+// Create styled icon components
+const StyledKey = withUniwind(Key);
+const StyledCreditCard = withUniwind(CreditCard);
+const StyledUser = withUniwind(User);
+const StyledFileText = withUniwind(FileText);
+const StyledTimer = withUniwind(Timer);
+const StyledEye = withUniwind(Eye);
+const StyledEyeOff = withUniwind(EyeOff);
+const StyledArrowLeft = withUniwind(ArrowLeft);
+const StyledSparkles = withUniwind(Sparkles);
+const StyledCamera = withUniwind(Camera);
+const StyledClipboardPaste = withUniwind(ClipboardPaste);
+const StyledVault = withUniwind(Vault);
+const StyledChevronDown = withUniwind(ChevronDown);
+const StyledChevronRight = withUniwind(ChevronRight);
 
 const categoryOptions: {
 	value: ItemCategory;
 	label: string;
-	icon: typeof Key;
+	icon: typeof StyledKey;
 }[] = [
-	{ value: "login", label: "Login", icon: Key },
-	{ value: "credit-card", label: "Credit Card", icon: CreditCard },
-	{ value: "identity", label: "Identity", icon: User },
-	{ value: "secure-note", label: "Secure Note", icon: FileText },
-	{ value: "totp", label: "TOTP", icon: Timer },
+	{ value: "login", label: "Login", icon: StyledKey },
+	{ value: "credit-card", label: "Credit Card", icon: StyledCreditCard },
+	{ value: "identity", label: "Identity", icon: StyledUser },
+	{ value: "secure-note", label: "Secure Note", icon: StyledFileText },
+	{ value: "totp", label: "TOTP", icon: StyledTimer },
 ];
 
 export default function CreateItemScreen() {
 	const router = useRouter();
-	const { vaultId } = useLocalSearchParams<{ vaultId: string }>();
+	const { vaultId: vaultIdParam } = useLocalSearchParams<{ vaultId?: string }>();
 	const createItem = useCreateItem();
+	const { vaultKeys = [], isLoading: isLoadingVaults } = useAllVaultKeys();
 
-	const [category, setCategory] = useState<ItemCategory>("login");
+	// Vault selection state
+	const [selectedVaultId, setSelectedVaultId] = useState<string | undefined>(
+		vaultIdParam,
+	);
+
+	const [category, setCategory] = useState<
+		{ value: ItemCategory; label: string } | undefined
+	>({ value: "login", label: "Login" });
 	const [title, setTitle] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
 	const [saving, setSaving] = useState(false);
@@ -115,13 +142,19 @@ export default function CreateItemScreen() {
 			return;
 		}
 
+		if (!selectedVaultId) {
+			Alert.alert("Error", "Please select a vault");
+			return;
+		}
+
 		setSaving(true);
 
 		try {
 			// Build the data object based on category
 			let itemData: DecryptedItemData = { title };
+			const categoryValue = category?.value || "login";
 
-			switch (category) {
+			switch (categoryValue) {
 				case "login":
 					itemData = {
 						...itemData,
@@ -175,8 +208,8 @@ export default function CreateItemScreen() {
 
 			// Create the item using shared hook (handles encryption internally)
 			await createItem.mutateAsync({
-				vaultId,
-				category,
+				vaultId: selectedVaultId,
+				category: categoryValue,
 				data: itemData,
 			});
 
@@ -199,54 +232,52 @@ export default function CreateItemScreen() {
 
 	const renderLoginFields = () => (
 		<>
-			<View className="mb-4">
-				<Text className="mb-2 font-medium text-foreground text-sm">
-					Username
-				</Text>
-				<TextInput
-					className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
+			<TextField className="mb-4">
+				<TextField.Label>Username</TextField.Label>
+				<TextField.Input
 					placeholder="Enter username"
 					value={username}
 					onChangeText={setUsername}
 					autoCapitalize="none"
 					autoCorrect={false}
 				/>
-			</View>
-			<View className="mb-4">
-				<Text className="mb-2 font-medium text-foreground text-sm">
-					Password
-				</Text>
-				<View className="flex-row items-center gap-2">
-					<View className="flex-1 flex-row items-center rounded-lg border border-input bg-background px-4">
-						<TextInput
-							className="flex-1 py-3 text-foreground"
+			</TextField>
+
+			<TextField className="mb-4">
+				<TextField.Label>Password</TextField.Label>
+				<View className="w-full flex-row items-center gap-2">
+					<View className="flex-1 flex-row items-center">
+						<TextField.Input
 							placeholder="Enter password"
 							value={password}
 							onChangeText={setPassword}
 							secureTextEntry={!showPassword}
+							className="flex-1 pr-12"
 						/>
-						<TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+						<Pressable
+							onPress={() => setShowPassword(!showPassword)}
+							className="absolute right-4"
+						>
 							{showPassword ? (
-								<EyeOff size={20} color="#6b7280" />
+								<StyledEyeOff size={20} className="text-muted" />
 							) : (
-								<Eye size={20} color="#6b7280" />
+								<StyledEye size={20} className="text-muted" />
 							)}
-						</TouchableOpacity>
+						</Pressable>
 					</View>
-					<TouchableOpacity
+					<Button
+						isIconOnly
 						onPress={() => setShowPasswordGenerator(true)}
-						className="rounded-lg bg-primary p-3"
+						variant="primary"
 					>
-						<Sparkles size={20} color="#fff" />
-					</TouchableOpacity>
+						<StyledSparkles size={20} className="text-accent-foreground" />
+					</Button>
 				</View>
-			</View>
-			<View className="mb-4">
-				<Text className="mb-2 font-medium text-foreground text-sm">
-					Website URL
-				</Text>
-				<TextInput
-					className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
+			</TextField>
+
+			<TextField className="mb-4">
+				<TextField.Label>Website URL</TextField.Label>
+				<TextField.Input
 					placeholder="https://example.com"
 					value={url}
 					onChangeText={setUrl}
@@ -254,16 +285,14 @@ export default function CreateItemScreen() {
 					autoCorrect={false}
 					keyboardType="url"
 				/>
-			</View>
+			</TextField>
 		</>
 	);
 
 	// Card number change handler with brand detection and formatting
 	const handleCardNumberChange = (value: string) => {
-		// Remove all non-digits
 		const cleaned = value.replace(/\D/g, "");
 
-		// Detect brand when we have at least 4 digits
 		if (cleaned.length >= 4) {
 			const brand = detectCardBrand(cleaned);
 			setDetectedCardBrand(brand);
@@ -291,80 +320,77 @@ export default function CreateItemScreen() {
 
 	const renderCreditCardFields = () => (
 		<>
-			<View className="mb-4">
-				<Text className="mb-2 font-medium text-foreground text-sm">
-					Cardholder Name
-				</Text>
-				<TextInput
-					className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
+			<TextField className="mb-4">
+				<TextField.Label>Cardholder Name</TextField.Label>
+				<TextField.Input
 					placeholder="Name on card"
 					value={cardholderName}
 					onChangeText={setCardholderName}
 					autoCapitalize="words"
 				/>
-			</View>
-			<View className="mb-4">
+			</TextField>
+
+			<TextField className="mb-4">
 				<View className="mb-2 flex-row items-center justify-between">
-					<Text className="font-medium text-foreground text-sm">
-						Card Number
-					</Text>
+					<TextField.Label>Card Number</TextField.Label>
 					{detectedCardBrand && detectedCardBrand !== "unknown" && (
 						<Text className="text-muted-foreground text-xs">
 							{getCardBrandDisplayName(detectedCardBrand)}
 						</Text>
 					)}
 				</View>
-				<TextInput
-					className="rounded-lg border border-input bg-background px-4 py-3 font-mono text-foreground"
+				<TextField.Input
 					placeholder="1234 5678 9012 3456"
 					value={formatCardNumber(cardNumber, detectedCardBrand || undefined)}
 					onChangeText={handleCardNumberChange}
 					keyboardType="numeric"
 					maxLength={23}
+					className="font-mono"
 				/>
-			</View>
-			<View className="mb-4 flex-row">
-				<View className="mr-2 flex-1">
-					<Text className="mb-2 font-medium text-foreground text-sm">
-						Expiry
-					</Text>
-					<TextInput
-						className="rounded-lg border border-input bg-background px-4 py-3 font-mono text-foreground"
+			</TextField>
+
+			<View className="mb-4 flex-row gap-2">
+				<TextField className="flex-1">
+					<TextField.Label>Expiry</TextField.Label>
+					<TextField.Input
 						placeholder="MM/YY"
 						value={expiryDate}
 						onChangeText={handleExpiryChange}
 						keyboardType="numeric"
 						maxLength={5}
+						className="font-mono"
 					/>
-				</View>
-				<View className="flex-1">
-					<Text className="mb-2 font-medium text-foreground text-sm">CVV</Text>
-					<View className="flex-row items-center rounded-lg border border-input bg-background px-4">
-						<TextInput
-							className="flex-1 py-3 font-mono text-foreground"
+				</TextField>
+
+				<TextField className="flex-1">
+					<TextField.Label>CVV</TextField.Label>
+					<View className="w-full flex-row items-center">
+						<TextField.Input
 							placeholder="123"
 							value={cvv}
 							onChangeText={handleCvvChange}
 							keyboardType="numeric"
 							secureTextEntry={!showCvv}
 							maxLength={detectedCardBrand === "amex" ? 4 : 3}
+							className="flex-1 pr-12 font-mono"
 						/>
-						<TouchableOpacity onPress={() => setShowCvv(!showCvv)}>
+						<Pressable
+							onPress={() => setShowCvv(!showCvv)}
+							className="absolute right-4"
+						>
 							{showCvv ? (
-								<EyeOff size={20} color="#6b7280" />
+								<StyledEyeOff size={20} className="text-muted" />
 							) : (
-								<Eye size={20} color="#6b7280" />
+								<StyledEye size={20} className="text-muted" />
 							)}
-						</TouchableOpacity>
+						</Pressable>
 					</View>
-				</View>
+				</TextField>
 			</View>
-			<View className="mb-4">
-				<Text className="mb-2 font-medium text-foreground text-sm">
-					Billing Address
-				</Text>
-				<TextInput
-					className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
+
+			<TextField className="mb-4">
+				<TextField.Label>Billing Address</TextField.Label>
+				<TextField.Input
 					placeholder="123 Main St, City, State ZIP"
 					value={billingAddress}
 					onChangeText={setBillingAddress}
@@ -373,57 +399,51 @@ export default function CreateItemScreen() {
 					textAlignVertical="top"
 					style={{ minHeight: 60 }}
 				/>
-			</View>
+			</TextField>
 		</>
 	);
 
 	const renderIdentityFields = () => (
 		<>
-			<View className="mb-4 flex-row">
-				<View className="mr-2 flex-1">
-					<Text className="mb-2 font-medium text-foreground text-sm">
-						First Name
-					</Text>
-					<TextInput
-						className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
+			<View className="mb-4 flex-row gap-2">
+				<TextField className="flex-1">
+					<TextField.Label>First Name</TextField.Label>
+					<TextField.Input
 						placeholder="First name"
 						value={firstName}
 						onChangeText={setFirstName}
 						autoCapitalize="words"
 					/>
-				</View>
-				<View className="flex-1">
-					<Text className="mb-2 font-medium text-foreground text-sm">
-						Last Name
-					</Text>
-					<TextInput
-						className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
+				</TextField>
+
+				<TextField className="flex-1">
+					<TextField.Label>Last Name</TextField.Label>
+					<TextField.Input
 						placeholder="Last name"
 						value={lastName}
 						onChangeText={setLastName}
 						autoCapitalize="words"
 					/>
-				</View>
+				</TextField>
 			</View>
-			<View className="mb-4">
-				<Text className="mb-2 font-medium text-foreground text-sm">Email</Text>
-				<TextInput
-					className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
+
+			<TextField className="mb-4">
+				<TextField.Label>Email</TextField.Label>
+				<TextField.Input
 					placeholder="email@example.com"
 					value={email}
 					onChangeText={setEmail}
 					autoCapitalize="none"
 					keyboardType="email-address"
 				/>
-			</View>
+			</TextField>
 		</>
 	);
 
 	const renderSecureNoteFields = () => (
-		<View className="mb-4">
-			<Text className="mb-2 font-medium text-foreground text-sm">Note</Text>
-			<TextInput
-				className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
+		<TextField className="mb-4">
+			<TextField.Label>Note</TextField.Label>
+			<TextField.Input
 				placeholder="Enter your secure note..."
 				value={note}
 				onChangeText={setNote}
@@ -432,7 +452,7 @@ export default function CreateItemScreen() {
 				textAlignVertical="top"
 				style={{ minHeight: 120 }}
 			/>
-		</View>
+		</TextField>
 	);
 
 	// Handle QR code scan result
@@ -495,41 +515,45 @@ export default function CreateItemScreen() {
 		<>
 			{/* Quick Import Buttons */}
 			<View className="mb-4 flex-row gap-2">
-				<TouchableOpacity
+				<Button
 					onPress={() => setShowQrScanner(true)}
-					className="flex-1 flex-row items-center justify-center rounded-lg border border-primary bg-primary/10 py-3"
+					variant="secondary"
+					className="flex-1"
 				>
-					<Camera size={18} color="#6366f1" />
-					<Text className="ml-2 font-medium text-primary">Scan QR Code</Text>
-				</TouchableOpacity>
-				<TouchableOpacity
+					<StyledCamera size={18} className="text-accent-soft-foreground" />
+					<Button.Label>Scan QR</Button.Label>
+				</Button>
+				<Button
 					onPress={handlePasteTotp}
-					className="flex-1 flex-row items-center justify-center rounded-lg border border-border bg-secondary py-3"
+					variant="secondary"
+					className="flex-1"
 				>
-					<ClipboardPaste size={18} color="#6b7280" />
-					<Text className="ml-2 font-medium text-foreground">Paste</Text>
-				</TouchableOpacity>
+					<StyledClipboardPaste size={18} className="text-accent-soft-foreground" />
+					<Button.Label>Paste</Button.Label>
+				</Button>
 			</View>
 
 			{/* Secret Key Input */}
-			<View className="mb-4">
-				<Text className="mb-2 font-medium text-foreground text-sm">
-					Secret Key *
-				</Text>
-				<TextInput
-					className="rounded-lg border border-input bg-background px-4 py-3 font-mono text-foreground"
+			<TextField
+				className="mb-4"
+				isRequired
+				isInvalid={totpSecret && !isValidBase32(totpSecret) ? true : undefined}
+			>
+				<TextField.Label>Secret Key</TextField.Label>
+				<TextField.Input
 					placeholder="JBSWY3DPEHPK3PXP"
 					value={totpSecret}
 					onChangeText={setTotpSecret}
 					autoCapitalize="characters"
 					autoCorrect={false}
+					className="font-mono"
 				/>
 				{totpSecret && !isValidBase32(totpSecret) && (
-					<Text className="mt-1 text-destructive text-xs">
+					<TextField.ErrorMessage>
 						Invalid base32 format. Please check the secret key.
-					</Text>
+					</TextField.ErrorMessage>
 				)}
-			</View>
+			</TextField>
 
 			{/* Live Preview */}
 			{totpSecret && isValidBase32(totpSecret) && (
@@ -549,32 +573,27 @@ export default function CreateItemScreen() {
 
 			{/* Issuer & Account */}
 			<View className="mb-4 flex-row gap-2">
-				<View className="flex-1">
-					<Text className="mb-2 font-medium text-foreground text-sm">
-						Service
-					</Text>
-					<TextInput
-						className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
+				<TextField className="flex-1">
+					<TextField.Label>Service</TextField.Label>
+					<TextField.Input
 						placeholder="Google, GitHub..."
 						value={totpIssuer}
 						onChangeText={setTotpIssuer}
 					/>
-				</View>
-				<View className="flex-1">
-					<Text className="mb-2 font-medium text-foreground text-sm">
-						Account
-					</Text>
-					<TextInput
-						className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
+				</TextField>
+
+				<TextField className="flex-1">
+					<TextField.Label>Account</TextField.Label>
+					<TextField.Input
 						placeholder="your@email.com"
 						value={totpAccountName}
 						onChangeText={setTotpAccountName}
 					/>
-				</View>
+				</TextField>
 			</View>
 
 			{/* Advanced Settings */}
-			<TouchableOpacity
+			<Pressable
 				onPress={() => setShowTotpAdvanced(!showTotpAdvanced)}
 				className="mb-4 flex-row items-center justify-between rounded-lg border border-border p-3"
 			>
@@ -582,11 +601,11 @@ export default function CreateItemScreen() {
 					Advanced Settings
 				</Text>
 				{showTotpAdvanced ? (
-					<ChevronDown size={16} color="#6b7280" />
+					<StyledChevronDown size={16} className="text-muted" />
 				) : (
-					<ChevronRight size={16} color="#6b7280" />
+					<StyledChevronRight size={16} className="text-muted" />
 				)}
-			</TouchableOpacity>
+			</Pressable>
 			{showTotpAdvanced && (
 				<View className="mb-4 rounded-lg bg-secondary/30 p-3">
 					<View className="mb-4 flex-row gap-2">
@@ -594,7 +613,7 @@ export default function CreateItemScreen() {
 							<Text className="mb-1 text-muted-foreground text-xs">Digits</Text>
 							<View className="flex-row rounded-lg border border-input bg-background">
 								{[6, 7, 8].map((d) => (
-									<TouchableOpacity
+									<Pressable
 										key={d}
 										onPress={() => setTotpDigits(d as TotpDigits)}
 										className={`flex-1 items-center py-2 ${totpDigits === d ? "bg-primary" : ""}`}
@@ -604,23 +623,22 @@ export default function CreateItemScreen() {
 										>
 											{d}
 										</Text>
-									</TouchableOpacity>
+									</Pressable>
 								))}
 							</View>
 						</View>
-						<View className="flex-1">
-							<Text className="mb-1 text-muted-foreground text-xs">
+						<TextField className="flex-1">
+							<TextField.Label className="mb-1 text-muted-foreground text-xs">
 								Period (sec)
-							</Text>
-							<TextInput
-								className="rounded-lg border border-input bg-background px-4 py-2 text-foreground"
+							</TextField.Label>
+							<TextField.Input
 								value={totpPeriod.toString()}
-								onChangeText={(v) =>
+								onChangeText={(v: string) =>
 									setTotpPeriod(Number.parseInt(v, 10) || 30)
 								}
 								keyboardType="numeric"
 							/>
-						</View>
+						</TextField>
 					</View>
 					<View>
 						<Text className="mb-1 text-muted-foreground text-xs">
@@ -628,7 +646,7 @@ export default function CreateItemScreen() {
 						</Text>
 						<View className="flex-row rounded-lg border border-input bg-background">
 							{(["SHA1", "SHA256", "SHA512"] as TotpAlgorithm[]).map((algo) => (
-								<TouchableOpacity
+								<Pressable
 									key={algo}
 									onPress={() => setTotpAlgorithm(algo)}
 									className={`flex-1 items-center py-2 ${totpAlgorithm === algo ? "bg-primary" : ""}`}
@@ -638,13 +656,18 @@ export default function CreateItemScreen() {
 									>
 										{algo}
 									</Text>
-								</TouchableOpacity>
+								</Pressable>
 							))}
 						</View>
 					</View>
 				</View>
 			)}
 		</>
+	);
+
+	const selectedVault = vaultKeys.find((v) => v.vaultId === selectedVaultId);
+	const selectedCategoryOption = categoryOptions.find(
+		(opt) => opt.value === category?.value,
 	);
 
 	return (
@@ -668,90 +691,185 @@ export default function CreateItemScreen() {
 			>
 				{/* Header */}
 				<View className="flex-row items-center border-border border-b px-4 py-4">
-					<TouchableOpacity
+					<Button
+						isIconOnly
 						onPress={() => router.back()}
-						className="mr-3 rounded-full bg-secondary p-2"
+						variant="secondary"
+						size="sm"
+						className="mr-3"
 					>
-						<ArrowLeft size={20} color="#6b7280" />
-					</TouchableOpacity>
+						<StyledArrowLeft size={20} className="text-foreground" />
+					</Button>
 					<Text className="flex-1 font-bold text-foreground text-xl">
 						New Item
 					</Text>
-					<TouchableOpacity
+					<Button
 						onPress={handleSave}
-						disabled={saving}
-						className={`rounded-lg px-4 py-2 ${
-							saving ? "bg-primary/50" : "bg-primary"
-						}`}
+						isDisabled={saving}
+						variant="primary"
+						size="sm"
 					>
-						<Text className="font-medium text-primary-foreground">
-							{saving ? "Saving..." : "Save"}
-						</Text>
-					</TouchableOpacity>
+						{saving ? "Saving..." : "Save"}
+					</Button>
 				</View>
 
 				<ScrollView className="flex-1 px-4" keyboardShouldPersistTaps="handled">
+					{/* Vault Selector */}
+					<View className="my-4">
+						<Label className="mb-2">Vault</Label>
+						<Select
+							value={
+								selectedVaultId
+									? { value: selectedVaultId, label: selectedVault?.vaultName || "" }
+									: undefined
+							}
+							onValueChange={(option) => {
+								setSelectedVaultId(option?.value);
+							}}
+							isDisabled={isLoadingVaults || !!vaultIdParam}
+						>
+							<Select.Trigger asChild>
+								<Button variant="secondary" size="md" className="w-full justify-start">
+									{selectedVault ? (
+									<VaultAvatar
+										name={selectedVault.vaultName}
+										icon={selectedVault.vaultIcon}
+										imageUrl={selectedVault.vaultImageUrl}
+										size="sm"
+									/>
+								) : (
+									<StyledVault size={20} className="text-muted" />
+								)}
+									<Button.Label className="flex-1 text-left">
+										{selectedVault?.vaultName || "Select Vault"}
+									</Button.Label>
+									<StyledChevronDown size={16} className="text-muted" />
+								</Button>
+							</Select.Trigger>
+							<Select.Portal>
+								<Select.Overlay />
+								<Select.Content
+									presentation="popover"
+									width="trigger"
+									className="h-[250px] rounded-2xl"
+									placement="bottom"
+								>
+									<ScrollView>
+										{vaultKeys.map((vault) => (
+											<Select.Item
+												key={vault.vaultId}
+												value={vault.vaultId}
+												label={vault.vaultName}
+											>
+												<View className="flex-1 flex-row items-center gap-3">
+													<VaultAvatar
+													name={vault.vaultName}
+													icon={vault.vaultIcon}
+													imageUrl={vault.vaultImageUrl}
+													size="sm"
+												/>
+													<Text className="flex-1 text-base text-foreground">
+														{vault.vaultName}
+													</Text>
+												</View>
+												<Select.ItemIndicator />
+											</Select.Item>
+										))}
+									</ScrollView>
+								</Select.Content>
+							</Select.Portal>
+						</Select>
+					</View>
+
 					{/* Category Selector */}
 					<View className="my-4">
-						<Text className="mb-2 font-medium text-foreground text-sm">
-							Category
-						</Text>
-						<ScrollView horizontal showsHorizontalScrollIndicator={false}>
-							{categoryOptions.map((option) => {
-								const Icon = option.icon;
-								const isSelected = category === option.value;
-								return (
-									<TouchableOpacity
-										key={option.value}
-										onPress={() => setCategory(option.value)}
-										className={`mr-3 flex-row items-center rounded-lg px-4 py-3 ${
-											isSelected ? "bg-primary" : "bg-secondary"
-										}`}
-									>
-										<Icon size={18} color={isSelected ? "#fff" : "#6b7280"} />
-										<Text
-											className={`ml-2 font-medium ${
-												isSelected
-													? "text-primary-foreground"
-													: "text-foreground"
-											}`}
-										>
-											{option.label}
-										</Text>
-									</TouchableOpacity>
-								);
-							})}
-						</ScrollView>
+						<Label className="mb-2">Category</Label>
+						<Select
+							value={category}
+							onValueChange={(option) => {
+								if (option) {
+									setCategory({
+										value: option.value as ItemCategory,
+										label: option.label,
+									});
+								}
+							}}
+						>
+							<Select.Trigger asChild>
+								<Button variant="tertiary" size="md" className="w-full justify-start">
+									{selectedCategoryOption ? (
+										<>
+											<selectedCategoryOption.icon
+												size={20}
+												className="text-muted"
+											/>
+											<Button.Label className="flex-1 text-left">
+												{selectedCategoryOption.label}
+											</Button.Label>
+										</>
+									) : (
+										<Button.Label className="flex-1 text-left">
+											Select Category
+										</Button.Label>
+									)}
+									<StyledChevronDown size={16} className="text-muted" />
+								</Button>
+							</Select.Trigger>
+							<Select.Portal>
+								<Select.Overlay />
+								<Select.Content
+									presentation="popover"
+									width="trigger"
+									className="h-[280px] rounded-2xl"
+									placement="bottom"
+								>
+									<ScrollView>
+										{categoryOptions.map((option) => {
+											const Icon = option.icon;
+											return (
+												<Select.Item
+													key={option.value}
+													value={option.value}
+													label={option.label}
+												>
+													<View className="flex-1 flex-row items-center gap-3">
+														<Icon size={18} className="text-muted" />
+														<Text className="flex-1 text-base text-foreground">
+															{option.label}
+														</Text>
+													</View>
+													<Select.ItemIndicator />
+												</Select.Item>
+											);
+										})}
+									</ScrollView>
+								</Select.Content>
+							</Select.Portal>
+						</Select>
 					</View>
 
 					{/* Title */}
-					<View className="mb-4">
-						<Text className="mb-2 font-medium text-foreground text-sm">
-							Title *
-						</Text>
-						<TextInput
-							className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
+					<TextField className="mb-4" isRequired>
+						<TextField.Label>Title</TextField.Label>
+						<TextField.Input
 							placeholder="Enter title"
 							value={title}
 							onChangeText={setTitle}
 						/>
-					</View>
+					</TextField>
 
 					{/* Category-specific fields */}
-					{category === "login" && renderLoginFields()}
-					{category === "credit-card" && renderCreditCardFields()}
-					{category === "identity" && renderIdentityFields()}
-					{category === "secure-note" && renderSecureNoteFields()}
-					{category === "totp" && renderTotpFields()}
+					{category?.value === "login" && renderLoginFields()}
+					{category?.value === "credit-card" && renderCreditCardFields()}
+					{category?.value === "identity" && renderIdentityFields()}
+					{category?.value === "secure-note" && renderSecureNoteFields()}
+					{category?.value === "totp" && renderTotpFields()}
 
 					{/* Notes (for non-secure-note items) */}
-					{category !== "secure-note" && (
-						<View className="mb-4">
-							<Text className="mb-2 font-medium text-foreground text-sm">
-								Notes (optional)
-							</Text>
-							<TextInput
-								className="rounded-lg border border-input bg-background px-4 py-3 text-foreground"
+					{category?.value !== "secure-note" && (
+						<TextField className="mb-4">
+							<TextField.Label>Notes (optional)</TextField.Label>
+							<TextField.Input
 								placeholder="Add any additional notes..."
 								value={notes}
 								onChangeText={setNotes}
@@ -760,7 +878,7 @@ export default function CreateItemScreen() {
 								textAlignVertical="top"
 								style={{ minHeight: 80 }}
 							/>
-						</View>
+						</TextField>
 					)}
 
 					{/* Bottom padding */}
