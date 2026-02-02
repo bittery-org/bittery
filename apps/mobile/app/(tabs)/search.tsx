@@ -1,14 +1,17 @@
-import { type UnifiedItem, useItems } from "@bittery/hooks";
+import { useItems } from "@bittery/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import { Card, Chip, TextField } from "heroui-native";
+import { TextField } from "heroui-native";
 import { Clock, Search as SearchIcon, X } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Text, TouchableOpacity, View } from "react-native";
 import { withUniwind } from "uniwind";
+import { CategoryFilter } from "@/components/category-filter";
+import { EmptyItemsState } from "@/components/empty-items-state";
+import { ItemListItem } from "@/components/item-list-item";
 import { SafeAreaView } from "@/components/safe-area-view";
-import { ItemListItem } from "../../src/components/item-list-item";
+import { useFilteredItems } from "@/hooks/use-filtered-items";
 
 // Create styled icon components
 const StyledSearch = withUniwind(SearchIcon);
@@ -17,24 +20,6 @@ const StyledX = withUniwind(X);
 
 const RECENT_SEARCHES_KEY = "bittery_recent_searches";
 const MAX_RECENT_SEARCHES = 10;
-
-const categoryLabels: Record<ItemCategory | "all", string> = {
-	all: "All",
-	login: "Login",
-	"credit-card": "Card",
-	identity: "Identity",
-	"secure-note": "Note",
-	totp: "TOTP",
-};
-
-const categories: (ItemCategory | "all")[] = [
-	"all",
-	"login",
-	"credit-card",
-	"identity",
-	"secure-note",
-	"totp",
-];
 
 export default function SearchScreen() {
 	const router = useRouter();
@@ -47,6 +32,13 @@ export default function SearchScreen() {
 	const [debouncedQuery, setDebouncedQuery] = useState("");
 
 	const { items } = useItems();
+
+	// Filter items based on debounced search query
+	const { filteredItems } = useFilteredItems({
+		items,
+		searchQuery: debouncedQuery,
+		selectedCategory,
+	});
 
 	const loadRecentSearches = useCallback(async () => {
 		try {
@@ -125,34 +117,7 @@ export default function SearchScreen() {
 		}
 	};
 
-	// Filter items based on search
-	const filteredItems = useMemo(() => {
-		if (!debouncedQuery.trim()) return [];
-
-		const query = debouncedQuery.toLowerCase();
-		let filtered = items.filter(
-			(item) =>
-				item.title?.toLowerCase().includes(query) ||
-				item.username?.toLowerCase().includes(query) ||
-				item.url?.toLowerCase().includes(query) ||
-				item.notes?.toLowerCase().includes(query) ||
-				item.tags?.some((tag) => tag.toLowerCase().includes(query)),
-		);
-
-		// Apply category filter
-		if (selectedCategory !== "all") {
-			filtered = filtered.filter((item) => item.category === selectedCategory);
-		}
-
-		// Sort: favorites first, then alphabetically
-		return filtered.sort((a, b) => {
-			if (a.favorite && !b.favorite) return -1;
-			if (!a.favorite && b.favorite) return 1;
-			return (a.title || "").localeCompare(b.title || "");
-		});
-	}, [items, debouncedQuery, selectedCategory]);
-
-	const handleItemPress = (item: UnifiedItem) => {
+	const handleItemPress = (item: typeof filteredItems[number]) => {
 		saveRecentSearch(searchQuery);
 		router.push(`/(vault)/${item.vaultId}/${item.id}`);
 	};
@@ -162,71 +127,14 @@ export default function SearchScreen() {
 		setDebouncedQuery(query);
 	};
 
-	const renderCategoryFilter = () => (
-		<View className="border-border border-b px-4 py-3">
-			<FlatList
-				horizontal
-				showsHorizontalScrollIndicator={false}
-				data={categories}
-				keyExtractor={(item) => item}
-				renderItem={({ item: category }) => (
-					<View className="mr-2">
-						<Chip
-							variant={selectedCategory === category ? "primary" : "secondary"}
-							color={selectedCategory === category ? "accent" : "default"}
-							onPress={() => setSelectedCategory(category)}
-							size="md"
-						>
-							<Chip.Label>{categoryLabels[category]}</Chip.Label>
-						</Chip>
-					</View>
-				)}
-				contentContainerStyle={{ paddingVertical: 4 }}
-			/>
-		</View>
-	);
-
-	const renderItem = ({ item }: { item: UnifiedItem }) => (
-		<ItemListItem
-			id={item.id}
-			title={item.title || "[Untitled]"}
-			category={item.category}
-			favorite={item.favorite}
-			username={item.username}
-			url={item.url}
-			vault={item.vault}
-			showVaultBadge
-			onPress={() => handleItemPress(item)}
-			// Pass TOTP data for inline display
-			totpSecret={item.totpSecret}
-			totpAlgorithm={item.totpAlgorithm}
-			totpDigits={item.totpDigits}
-			totpPeriod={item.totpPeriod}
-			// Show inline TOTP for TOTP items or login items with TOTP secret
-			showInlineTotp={
-				(item.category === "totp" || item.category === "login") &&
-				Boolean(item.totpSecret)
-			}
-		/>
-	);
-
 	const renderRecentSearches = () => {
 		if (recentSearches.length === 0) {
 			return (
-				<View className="flex-1 items-center justify-center p-8">
-					<Card
-						variant="secondary"
-						className="w-full max-w-sm items-center p-8"
-					>
-						<StyledSearch size={48} className="mb-4 text-muted" />
-						<Card.Title className="mb-2 text-center text-lg">
-							Search your vault
-						</Card.Title>
-						<Card.Description className="text-center">
-							Find passwords, cards, notes, and more
-						</Card.Description>
-					</Card>
-				</View>
+				<EmptyItemsState
+					icon={<StyledSearch size={48} className="mb-4 text-muted" />}
+					title="Search your vault"
+					description="Find passwords, cards, notes, and more"
+				/>
 			);
 		}
 
@@ -265,27 +173,40 @@ export default function SearchScreen() {
 	const renderSearchResults = () => {
 		if (filteredItems.length === 0) {
 			return (
-				<View className="flex-1 items-center justify-center p-8">
-					<Card
-						variant="secondary"
-						className="w-full max-w-sm items-center p-8"
-					>
-						<StyledSearch size={48} className="mb-4 text-muted" />
-						<Card.Title className="mb-2 text-center text-lg">
-							No results found
-						</Card.Title>
-						<Card.Description className="text-center">
-							Try a different search term or filter
-						</Card.Description>
-					</Card>
-				</View>
+				<EmptyItemsState
+					icon={<StyledSearch size={48} className="mb-4 text-muted" />}
+					title="No results found"
+					description="Try a different search term or filter"
+				/>
 			);
 		}
 
 		return (
 			<FlatList
 				data={filteredItems}
-				renderItem={renderItem}
+				renderItem={({ item }) => (
+					<ItemListItem
+						id={item.id}
+						title={item.title || "[Untitled]"}
+						category={item.category}
+						favorite={item.favorite}
+						username={item.username}
+						url={item.url}
+						vault={"vault" in item ? item.vault : undefined}
+						showVaultBadge
+						onPress={() => handleItemPress(item)}
+						// Pass TOTP data for inline display
+						totpSecret={item.totpSecret}
+						totpAlgorithm={item.totpAlgorithm}
+						totpDigits={item.totpDigits}
+						totpPeriod={item.totpPeriod}
+						// Show inline TOTP for TOTP items or login items with TOTP secret
+						showInlineTotp={
+							(item.category === "totp" || item.category === "login") &&
+							Boolean(item.totpSecret)
+						}
+					/>
+				)}
 				keyExtractor={(item) => item.id}
 				ListHeaderComponent={
 					<View className="px-4 py-2">
@@ -340,7 +261,12 @@ export default function SearchScreen() {
 			</View>
 
 			{/* Category Filter (only show when searching) */}
-			{hasQuery && renderCategoryFilter()}
+			{hasQuery && (
+				<CategoryFilter
+					selectedCategory={selectedCategory}
+					onCategoryChange={setSelectedCategory}
+				/>
+			)}
 
 			{/* Content */}
 			{hasQuery ? renderSearchResults() : renderRecentSearches()}

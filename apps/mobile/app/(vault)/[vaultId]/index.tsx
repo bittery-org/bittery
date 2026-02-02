@@ -1,41 +1,23 @@
 import { useVaultItems } from "@bittery/hooks";
-import type {
-	DecryptedItem,
-	ItemCategory,
-} from "@bittery/shared/types";
+import type { ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Button, Card, Chip, Skeleton, TextField } from "heroui-native";
-import { ArrowLeft, Key, Plus, Search, Star } from "lucide-react-native";
-import { useMemo, useState } from "react";
-import { FlatList, RefreshControl, View } from "react-native";
+import { Button, Card, Skeleton, TextField } from "heroui-native";
+import { ArrowLeft, Key, Plus, Search } from "lucide-react-native";
+import { useState } from "react";
+import { View } from "react-native";
 import { withUniwind } from "uniwind";
+import { CategoryFilter } from "@/components/category-filter";
+import { EmptyItemsState } from "@/components/empty-items-state";
+import { ItemSectionsList } from "@/components/item-sections-list";
+import { ItemsSkeletonList } from "@/components/items-skeleton-list";
 import { SafeAreaView } from "@/components/safe-area-view";
-import { ItemListItem } from "../../../src/components/item-list-item";
+import { useFilteredItems } from "@/hooks/use-filtered-items";
 
 // Create styled icon components
 const StyledSearch = withUniwind(Search);
 const StyledKey = withUniwind(Key);
 const StyledPlus = withUniwind(Plus);
 const StyledArrowLeft = withUniwind(ArrowLeft);
-const StyledStar = withUniwind(Star);
-
-const categoryLabels: Record<ItemCategory | "all", string> = {
-	all: "All",
-	login: "Login",
-	"credit-card": "Card",
-	identity: "Identity",
-	"secure-note": "Note",
-	totp: "TOTP",
-};
-
-const categories: (ItemCategory | "all")[] = [
-	"all",
-	"login",
-	"credit-card",
-	"identity",
-	"secure-note",
-	"totp",
-];
 
 export default function VaultItemsScreen() {
 	const router = useRouter();
@@ -49,40 +31,11 @@ export default function VaultItemsScreen() {
 	const { items, isLoading, error, refetch } = useVaultItems(vaultId);
 
 	// Filter and sort items
-	const filteredItems = useMemo(() => {
-		let filtered = items;
-
-		// Apply search filter
-		if (searchQuery) {
-			const query = searchQuery.toLowerCase();
-			filtered = filtered.filter(
-				(item) =>
-					item.title?.toLowerCase().includes(query) ||
-					item.username?.toLowerCase().includes(query) ||
-					item.url?.toLowerCase().includes(query) ||
-					item.notes?.toLowerCase().includes(query),
-			);
-		}
-
-		// Apply category filter
-		if (selectedCategory !== "all") {
-			filtered = filtered.filter((item) => item.category === selectedCategory);
-		}
-
-		// Sort: favorites first, then alphabetically
-		return [...filtered].sort((a, b) => {
-			if (a.favorite && !b.favorite) return -1;
-			if (!a.favorite && b.favorite) return 1;
-			return (a.title || "").localeCompare(b.title || "");
-		});
-	}, [items, searchQuery, selectedCategory]);
-
-	// Separate favorites and regular items
-	const { favorites, regularItems } = useMemo(() => {
-		const favs = filteredItems.filter((item) => item.favorite);
-		const regular = filteredItems.filter((item) => !item.favorite);
-		return { favorites: favs, regularItems: regular };
-	}, [filteredItems]);
+	const { favorites, regularItems } = useFilteredItems({
+		items,
+		searchQuery,
+		selectedCategory,
+	});
 
 	const handleRefresh = async () => {
 		setRefreshing(true);
@@ -93,85 +46,6 @@ export default function VaultItemsScreen() {
 		}
 	};
 
-	const renderCategoryFilter = () => (
-		<View className="border-border border-b px-4 py-3">
-			<FlatList
-				horizontal
-				showsHorizontalScrollIndicator={false}
-				data={categories}
-				keyExtractor={(item) => item}
-				renderItem={({ item: category }) => (
-					<View className="mr-2">
-						<Chip
-							variant={selectedCategory === category ? "primary" : "secondary"}
-							color={selectedCategory === category ? "accent" : "default"}
-							onPress={() => setSelectedCategory(category)}
-							size="md"
-						>
-							<Chip.Label>{categoryLabels[category]}</Chip.Label>
-						</Chip>
-					</View>
-				)}
-				contentContainerStyle={{ paddingVertical: 4 }}
-			/>
-		</View>
-	);
-
-	const renderItem = ({
-		item,
-		isFirst,
-		isLast,
-	}: { item: DecryptedItem; isFirst: boolean; isLast: boolean }) => (
-		<ItemListItem
-			id={item.id}
-			title={item.title || "[Untitled]"}
-			category={item.category}
-			favorite={item.favorite}
-			username={item.username}
-			url={item.url}
-			onPress={() => router.push(`/(vault)/${vaultId}/${item.id}`)}
-			// Pass TOTP data for inline display
-			totpSecret={item.totpSecret}
-			totpAlgorithm={item.totpAlgorithm}
-			totpDigits={item.totpDigits}
-			totpPeriod={item.totpPeriod}
-			// Show inline TOTP for TOTP items or login items with TOTP secret
-			showInlineTotp={
-				(item.category === "totp" || item.category === "login") &&
-				Boolean(item.totpSecret)
-			}
-			// Position in section for rounded corners
-			isFirstInSection={isFirst}
-			isLastInSection={isLast}
-		/>
-	);
-
-	const renderSectionHeader = (title: string, count: number) => (
-		<View className="flex-row items-center px-4 pt-4 pb-2">
-			{title === "Favorites" && (
-				<StyledStar
-					size={14}
-					fill="#eab308"
-					className="mr-1.5 text-yellow-500"
-				/>
-			)}
-			<Card.Title className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
-				{title} ({count})
-			</Card.Title>
-		</View>
-	);
-
-	const renderSkeletonItem = (index: number) => (
-		<Card key={index} className="mx-4 mb-2">
-			<Card.Body className="flex-row items-center py-3">
-				<Skeleton className="mr-3 h-10 w-10 rounded-lg" />
-				<View className="flex-1">
-					<Skeleton className="mb-2 h-4 w-32 rounded" />
-					<Skeleton className="h-3 w-24 rounded" />
-				</View>
-			</Card.Body>
-		</Card>
-	);
 
 	if (isLoading) {
 		return (
@@ -215,9 +89,7 @@ export default function VaultItemsScreen() {
 				</View>
 
 				{/* Skeleton items */}
-				<View className="flex-1 py-2">
-					{[1, 2, 3, 4, 5, 6].map(renderSkeletonItem)}
-				</View>
+				<ItemsSkeletonList />
 			</SafeAreaView>
 		);
 	}
@@ -237,105 +109,8 @@ export default function VaultItemsScreen() {
 		);
 	}
 
-	const renderListContent = () => {
-		if (favorites.length === 0 && regularItems.length === 0) {
-			return (
-				<View className="flex-1 items-center justify-center p-8">
-					<Card
-						variant="secondary"
-						className="w-full max-w-sm items-center p-8"
-					>
-						<StyledKey size={48} className="mb-4 text-muted" />
-						<Card.Title className="mb-2 text-center text-lg">
-							{searchQuery || selectedCategory !== "all"
-								? "No items found"
-								: "No items yet"}
-						</Card.Title>
-						<Card.Description className="mb-4 text-center">
-							{searchQuery || selectedCategory !== "all"
-								? "Try a different search or filter"
-								: "Add your first password or secure item"}
-						</Card.Description>
-						{!searchQuery && selectedCategory === "all" && (
-							<Button
-								onPress={() => router.push(`/(vault)/${vaultId}/create`)}
-								variant="primary"
-							>
-								Add Item
-							</Button>
-						)}
-					</Card>
-				</View>
-			);
-		}
-
-		// Combine sections into a single data array
-		const sections: Array<
-			| { type: "header"; title: string; count: number }
-			| {
-					type: "item";
-					item: DecryptedItem;
-					isFirst: boolean;
-					isLast: boolean;
-			  }
-		> = [];
-
-		if (favorites.length > 0) {
-			sections.push({
-				type: "header",
-				title: "Favorites",
-				count: favorites.length,
-			});
-			for (let i = 0; i < favorites.length; i++) {
-				sections.push({
-					type: "item",
-					item: favorites[i],
-					isFirst: i === 0,
-					isLast: i === favorites.length - 1,
-				});
-			}
-		}
-
-		if (regularItems.length > 0) {
-			sections.push({
-				type: "header",
-				title: "All Items",
-				count: regularItems.length,
-			});
-			for (let i = 0; i < regularItems.length; i++) {
-				sections.push({
-					type: "item",
-					item: regularItems[i],
-					isFirst: i === 0,
-					isLast: i === regularItems.length - 1,
-				});
-			}
-		}
-
-		return (
-			<FlatList
-				data={sections}
-				renderItem={({ item: section }) => {
-					if (section.type === "header") {
-						return renderSectionHeader(section.title, section.count);
-					}
-					return renderItem({
-						item: section.item,
-						isFirst: section.isFirst,
-						isLast: section.isLast,
-					});
-				}}
-				keyExtractor={(item, _index) =>
-					item.type === "header" ? `header-${item.title}` : item.item.id
-				}
-				refreshControl={
-					<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-				}
-				style={{ flex: 1 }}
-				contentContainerStyle={{ paddingTop: 8, paddingBottom: 8, flexGrow: 1 }}
-			/>
-		);
-	};
+	const hasNoItems = favorites.length === 0 && regularItems.length === 0;
+	const hasFilterOrSearch = searchQuery || selectedCategory !== "all";
 
 	return (
 		<SafeAreaView className="flex-1 bg-background">
@@ -385,10 +160,37 @@ export default function VaultItemsScreen() {
 			</View>
 
 			{/* Category Filter */}
-			{renderCategoryFilter()}
+			<CategoryFilter
+				selectedCategory={selectedCategory}
+				onCategoryChange={setSelectedCategory}
+			/>
 
 			{/* Items List */}
-			<View className="flex-1">{renderListContent()}</View>
+			{hasNoItems ? (
+				<EmptyItemsState
+					icon={<StyledKey size={48} className="mb-4 text-muted" />}
+					title={hasFilterOrSearch ? "No items found" : "No items yet"}
+					description={
+						hasFilterOrSearch
+							? "Try a different search or filter"
+							: "Add your first password or secure item"
+					}
+					actionLabel={!hasFilterOrSearch ? "Add Item" : undefined}
+					onAction={
+						!hasFilterOrSearch
+							? () => router.push(`/(vault)/${vaultId}/create`)
+							: undefined
+					}
+				/>
+			) : (
+				<ItemSectionsList
+					favorites={favorites}
+					regularItems={regularItems}
+					onItemPress={(item) => router.push(`/(vault)/${vaultId}/${item.id}`)}
+					refreshing={refreshing}
+					onRefresh={handleRefresh}
+				/>
+			)}
 		</SafeAreaView>
 	);
 }
