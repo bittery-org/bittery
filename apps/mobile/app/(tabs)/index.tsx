@@ -1,20 +1,20 @@
 import { type UnifiedItem, useItems } from "@bittery/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { Tabs, useRouter } from "expo-router";
+import { Button, Card, Chip, Skeleton, TextField } from "heroui-native";
 import { Key, Plus, Search, Star } from "lucide-react-native";
 import { useMemo, useState } from "react";
-import {
-	FlatList,
-	RefreshControl,
-	ScrollView,
-	Text,
-	TextInput,
-	TouchableOpacity,
-	View,
-} from "react-native";
+import { FlatList, RefreshControl, View } from "react-native";
+import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
 import { ItemListItem } from "../../src/components/item-list-item";
 import { VaultPicker } from "../../src/components/vault-picker";
+
+// Create styled icon components
+const StyledSearch = withUniwind(Search);
+const StyledKey = withUniwind(Key);
+const StyledPlus = withUniwind(Plus);
+const StyledStar = withUniwind(Star);
 
 const categoryLabels: Record<ItemCategory | "all", string> = {
 	all: "All",
@@ -100,36 +100,34 @@ export default function AllItemsScreen() {
 	};
 
 	const renderCategoryFilter = () => (
-		<View className="border-border border-b">
-			<ScrollView
+		<View className="border-border border-b px-4 py-3">
+			<FlatList
 				horizontal
 				showsHorizontalScrollIndicator={false}
-				contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 8 }}
-			>
-				{categories.map((category) => (
-					<TouchableOpacity
-						key={category}
-						onPress={() => setSelectedCategory(category)}
-						className={`mr-2 rounded-full px-4 py-2 ${
-							selectedCategory === category ? "bg-primary" : "bg-secondary"
-						}`}
-					>
-						<Text
-							className={`font-medium text-sm ${
-								selectedCategory === category
-									? "text-primary-foreground"
-									: "text-foreground"
-							}`}
+				data={categories}
+				keyExtractor={(item) => item}
+				renderItem={({ item: category }) => (
+					<View className="mr-2">
+						<Chip
+							variant={selectedCategory === category ? "primary" : "secondary"}
+							color={selectedCategory === category ? "accent" : "default"}
+							onPress={() => setSelectedCategory(category)}
+							size="md"
 						>
-							{categoryLabels[category]}
-						</Text>
-					</TouchableOpacity>
-				))}
-			</ScrollView>
+							<Chip.Label>{categoryLabels[category]}</Chip.Label>
+						</Chip>
+					</View>
+				)}
+				contentContainerStyle={{ paddingVertical: 4 }}
+			/>
 		</View>
 	);
 
-	const renderItem = ({ item }: { item: UnifiedItem }) => (
+	const renderItem = ({
+		item,
+		isFirst,
+		isLast,
+	}: { item: UnifiedItem; isFirst: boolean; isLast: boolean }) => (
 		<ItemListItem
 			id={item.id}
 			title={item.title || "[Untitled]"}
@@ -150,21 +148,24 @@ export default function AllItemsScreen() {
 				(item.category === "totp" || item.category === "login") &&
 				Boolean(item.totpSecret)
 			}
+			// Position in section for rounded corners
+			isFirstInSection={isFirst}
+			isLastInSection={isLast}
 		/>
 	);
 
 	const renderSectionHeader = (title: string, count: number) => (
-		<View className="flex-row items-center bg-muted/30 px-4 py-2">
+		<View className="flex-row items-center px-4 pt-4 pb-2">
 			{title === "Favorites" && (
-				<Star size={14} color="#eab308" fill="#eab308" />
+				<StyledStar
+					size={14}
+					fill="#eab308"
+					className="mr-1.5 text-yellow-500"
+				/>
 			)}
-			<Text
-				className={`font-semibold text-muted-foreground text-xs uppercase tracking-wide ${
-					title === "Favorites" ? "ml-1.5" : ""
-				}`}
-			>
+			<Card.Title className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
 				{title} ({count})
-			</Text>
+			</Card.Title>
 		</View>
 	);
 
@@ -172,17 +173,22 @@ export default function AllItemsScreen() {
 		if (favorites.length === 0 && regularItems.length === 0) {
 			return (
 				<View className="flex-1 items-center justify-center p-8">
-					<Key size={48} color="#9ca3af" />
-					<Text className="mt-4 text-center font-semibold text-foreground text-lg">
-						{searchQuery || selectedCategory !== "all"
-							? "No items found"
-							: "No items yet"}
-					</Text>
-					<Text className="mt-2 text-center text-muted-foreground">
-						{searchQuery || selectedCategory !== "all"
-							? "Try a different search or filter"
-							: "Add items to your vaults to see them here"}
-					</Text>
+					<Card
+						variant="secondary"
+						className="w-full max-w-sm items-center p-8"
+					>
+						<StyledKey size={48} className="mb-4 text-muted" />
+						<Card.Title className="mb-2 text-center text-lg">
+							{searchQuery || selectedCategory !== "all"
+								? "No items found"
+								: "No items yet"}
+						</Card.Title>
+						<Card.Description className="text-center">
+							{searchQuery || selectedCategory !== "all"
+								? "Try a different search or filter"
+								: "Add items to your vaults to see them here"}
+						</Card.Description>
+					</Card>
 				</View>
 			);
 		}
@@ -190,7 +196,12 @@ export default function AllItemsScreen() {
 		// Combine sections into a single data array
 		const sections: Array<
 			| { type: "header"; title: string; count: number }
-			| { type: "item"; item: UnifiedItem }
+			| {
+					type: "item";
+					item: UnifiedItem;
+					isFirst: boolean;
+					isLast: boolean;
+			  }
 		> = [];
 
 		if (favorites.length > 0) {
@@ -199,8 +210,13 @@ export default function AllItemsScreen() {
 				title: "Favorites",
 				count: favorites.length,
 			});
-			for (const item of favorites) {
-				sections.push({ type: "item", item });
+			for (let i = 0; i < favorites.length; i++) {
+				sections.push({
+					type: "item",
+					item: favorites[i],
+					isFirst: i === 0,
+					isLast: i === favorites.length - 1,
+				});
 			}
 		}
 
@@ -210,8 +226,13 @@ export default function AllItemsScreen() {
 				title: "All Items",
 				count: regularItems.length,
 			});
-			for (const item of regularItems) {
-				sections.push({ type: "item", item });
+			for (let i = 0; i < regularItems.length; i++) {
+				sections.push({
+					type: "item",
+					item: regularItems[i],
+					isFirst: i === 0,
+					isLast: i === regularItems.length - 1,
+				});
 			}
 		}
 
@@ -222,7 +243,11 @@ export default function AllItemsScreen() {
 					if (section.type === "header") {
 						return renderSectionHeader(section.title, section.count);
 					}
-					return renderItem({ item: section.item });
+					return renderItem({
+						item: section.item,
+						isFirst: section.isFirst,
+						isLast: section.isLast,
+					});
 				}}
 				keyExtractor={(item, _index) =>
 					item.type === "header" ? `header-${item.title}` : item.item.id
@@ -230,46 +255,56 @@ export default function AllItemsScreen() {
 				refreshControl={
 					<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
 				}
+				style={{ flex: 1 }}
+				contentContainerStyle={{ paddingTop: 8, paddingBottom: 8, flexGrow: 1 }}
 			/>
 		);
 	};
 
 	const renderSkeletonItem = (index: number) => (
-		<View
-			key={index}
-			className="flex-row items-center border-border border-b px-4 py-3"
-		>
-			<View className="mr-3 h-10 w-10 animate-pulse rounded-lg bg-secondary" />
-			<View className="flex-1">
-				<View className="h-4 w-32 animate-pulse rounded bg-secondary" />
-				<View className="mt-2 h-3 w-24 animate-pulse rounded bg-secondary" />
-			</View>
-		</View>
+		<Card key={index} className="mx-4 mb-2">
+			<Card.Body className="flex-row items-center py-3">
+				<Skeleton className="mr-3 h-10 w-10 rounded-lg" />
+				<View className="flex-1">
+					<Skeleton className="mb-2 h-4 w-32 rounded" />
+					<Skeleton className="h-3 w-24 rounded" />
+				</View>
+			</Card.Body>
+		</Card>
 	);
 
 	if (isLoading) {
 		return (
-			<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
-				{/* Search */}
-				<View className="border-border border-b px-4 py-2">
-					<View className="flex-row items-center rounded-lg bg-secondary px-3 py-2">
-						<Search size={18} color="#6b7280" />
-						<View className="ml-2 h-5 flex-1 rounded bg-muted" />
-					</View>
+			<SafeAreaView className="flex-1 bg-background" edges={[]}>
+				{/* Search Skeleton */}
+				<View className="border-border border-b px-4 py-3">
+					<TextField>
+						<View className="w-full flex-row items-center">
+							<TextField.Input
+								placeholder="Search items..."
+								editable={false}
+								className="flex-1 pr-4 pl-12"
+							/>
+							<StyledSearch
+								size={18}
+								className="absolute left-3.5 text-muted"
+								pointerEvents="none"
+							/>
+						</View>
+					</TextField>
 				</View>
 
 				{/* Category filter skeleton */}
-				<View className="flex-row border-border border-b px-4 py-2">
+				<View className="flex-row gap-2 border-border border-b px-4 py-3">
 					{[1, 2, 3, 4, 5].map((i) => (
-						<View
-							key={i}
-							className="mr-2 h-8 w-16 animate-pulse rounded-full bg-secondary"
-						/>
+						<Skeleton key={i} className="h-8 w-16 rounded-full" />
 					))}
 				</View>
 
 				{/* Skeleton items */}
-				{[1, 2, 3, 4, 5, 6].map(renderSkeletonItem)}
+				<View className="flex-1 py-2">
+					{[1, 2, 3, 4, 5, 6].map(renderSkeletonItem)}
+				</View>
 			</SafeAreaView>
 		);
 	}
@@ -277,16 +312,17 @@ export default function AllItemsScreen() {
 	if (error) {
 		return (
 			<SafeAreaView
-				className="flex-1 items-center justify-center bg-background"
-				edges={["bottom"]}
+				className="flex-1 items-center justify-center bg-background p-8"
+				edges={[]}
 			>
-				<Text className="text-destructive">Error loading items</Text>
-				<TouchableOpacity
-					onPress={handleRefresh}
-					className="mt-4 rounded-lg bg-primary px-4 py-2"
-				>
-					<Text className="text-primary-foreground">Retry</Text>
-				</TouchableOpacity>
+				<Card variant="secondary" className="w-full max-w-sm items-center p-8">
+					<Card.Title className="mb-4 text-center text-destructive text-lg">
+						Error loading items
+					</Card.Title>
+					<Button onPress={handleRefresh} variant="primary">
+						Retry
+					</Button>
+				</Card>
 			</SafeAreaView>
 		);
 	}
@@ -296,35 +332,45 @@ export default function AllItemsScreen() {
 			<Tabs.Screen
 				options={{
 					headerRight: () => (
-						<TouchableOpacity
+						<Button
+							isIconOnly
+							variant="primary"
+							size="sm"
 							onPress={() => setShowVaultPicker(true)}
-							className="mr-4 rounded-full bg-primary p-2"
+							className="mr-4"
 						>
-							<Plus size={18} color="#fff" />
-						</TouchableOpacity>
+							<StyledPlus size={18} className="text-accent-foreground" />
+						</Button>
 					),
 				}}
 			/>
-			<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
+			<SafeAreaView className="flex-1 bg-background" edges={[]}>
 				{/* Search */}
-				<View className="border-border border-b px-4 py-2">
-					<View className="flex-row items-center rounded-lg bg-secondary px-3 py-2">
-						<Search size={18} color="#6b7280" />
-						<TextInput
-							className="ml-2 flex-1 text-foreground"
-							placeholder="Search items..."
-							value={searchQuery}
-							onChangeText={setSearchQuery}
-							placeholderTextColor="#9ca3af"
-						/>
-					</View>
+				<View className="border-border border-b px-4 py-3">
+					<TextField>
+						<View className="w-full flex-row items-center">
+							<TextField.Input
+								placeholder="Search items..."
+								value={searchQuery}
+								onChangeText={setSearchQuery}
+								autoCapitalize="none"
+								autoCorrect={false}
+								className="flex-1 pr-4 pl-12"
+							/>
+							<StyledSearch
+								size={18}
+								className="absolute left-3.5 text-muted"
+								pointerEvents="none"
+							/>
+						</View>
+					</TextField>
 				</View>
 
 				{/* Category Filter */}
 				{renderCategoryFilter()}
 
 				{/* Items List */}
-				{renderListContent()}
+				<View className="flex-1">{renderListContent()}</View>
 			</SafeAreaView>
 			<VaultPicker
 				visible={showVaultPicker}

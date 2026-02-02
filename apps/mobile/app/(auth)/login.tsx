@@ -15,12 +15,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Switch,
   Text,
-  TextInput,
-  TouchableOpacity,
-  View
+  View,
+  Pressable
 } from "react-native";
+import { Button, TextField, Switch, FormField } from "heroui-native";
+import { withUniwind } from "uniwind";
 import { useAccount } from "../../src/contexts/account-context";
 import { useServerUrl } from "../../src/lib/trpc";
 import { type AccountMetadata, storage } from "../../src/services/storage";
@@ -28,6 +28,14 @@ import { SafeAreaView } from "@/components/safe-area-view";
 
 const DEFAULT_SERVER_URL =
   process.env.EXPO_PUBLIC_SERVER_URL || "http://localhost:3000";
+
+// Create styled icon components
+const StyledServer = withUniwind(Server);
+const StyledMail = withUniwind(Mail);
+const StyledLock = withUniwind(Lock);
+const StyledEye = withUniwind(Eye);
+const StyledEyeOff = withUniwind(EyeOff);
+const StyledFingerprint = withUniwind(Fingerprint);
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -150,8 +158,11 @@ export default function LoginScreen() {
           <View className="flex-1 justify-center px-6 py-8">
             {/* Header */}
             <View className="mb-8 items-center">
-              <TouchableOpacity
-                className="mb-4 h-20 w-20 items-center justify-center rounded-2xl bg-primary"
+              <Button
+                isIconOnly
+                variant="primary"
+                size="lg"
+                className="mb-4 h-20 w-20 rounded-2xl"
                 onPress={() => {
                   // DEV ONLY: Auto-fill credentials
                   setEmail("j.sigmund@qrawall.com");
@@ -160,7 +171,7 @@ export default function LoginScreen() {
                 }}
               >
                 <Lock size={40} color="#fff" />
-              </TouchableOpacity>
+              </Button>
               <Text className="font-bold text-2xl text-foreground">
                 Sign in to Bittery
               </Text>
@@ -170,38 +181,36 @@ export default function LoginScreen() {
             </View>
 
             {/* Form */}
-            <View className="space-y-4">
+            <View className="gap-4">
               {/* Server URL */}
-              <View>
-                <Text className="mb-2 font-medium text-foreground text-sm">
-                  Server URL
-                </Text>
-                <View className="flex-row items-center rounded-lg border border-input bg-background px-3">
-                  <Server size={20} color="#6b7280" />
-                  <TextInput
-                    className="ml-3 flex-1 py-3 text-foreground"
+              <TextField>
+                <TextField.Label>Server URL</TextField.Label>
+                <View className="w-full flex-row items-center">
+                  <TextField.Input
                     placeholder="https://your-server.com"
                     value={serverUrl}
                     onChangeText={setServerUrl}
                     autoCapitalize="none"
                     autoCorrect={false}
                     keyboardType="url"
+                    className="flex-1 pl-12 pr-4"
+                  />
+                  <StyledServer
+                    size={20}
+                    className="absolute left-3.5 text-muted"
+                    pointerEvents="none"
                   />
                 </View>
-                <Text className="mt-1 text-muted-foreground text-xs">
+                <TextField.Description>
                   Use your self-hosted Bittery server URL
-                </Text>
-              </View>
+                </TextField.Description>
+              </TextField>
 
               {/* Email */}
-              <View>
-                <Text className="mb-2 font-medium text-foreground text-sm">
-                  Email
-                </Text>
-                <View className="flex-row items-center rounded-lg border border-input bg-background px-3">
-                  <Mail size={20} color="#6b7280" />
-                  <TextInput
-                    className="ml-3 flex-1 py-3 text-foreground"
+              <TextField>
+                <TextField.Label>Email</TextField.Label>
+                <View className="w-full flex-row items-center">
+                  <TextField.Input
                     placeholder="you@example.com"
                     value={email}
                     onChangeText={setEmail}
@@ -209,74 +218,81 @@ export default function LoginScreen() {
                     autoCorrect={false}
                     keyboardType="email-address"
                     textContentType="emailAddress"
+                    className="flex-1 pl-12 pr-4"
+                  />
+                  <StyledMail
+                    size={20}
+                    className="absolute left-3.5 text-muted"
+                    pointerEvents="none"
                   />
                 </View>
-              </View>
+              </TextField>
 
               {/* Password */}
-              <View>
-                <Text className="mb-2 font-medium text-foreground text-sm">
-                  Password
-                </Text>
-                <View className="flex-row items-center rounded-lg border border-input bg-background px-3">
-                  <Lock size={20} color="#6b7280" />
-                  <TextInput
-                    className="ml-3 flex-1 py-3 text-foreground"
+              <TextField>
+                <TextField.Label>Password</TextField.Label>
+                <View className="w-full flex-row items-center">
+                  <TextField.Input
                     placeholder="Enter your password"
                     value={password}
                     onChangeText={setPassword}
                     secureTextEntry={!showPassword}
                     textContentType="password"
+                    className="flex-1 pl-12 pr-12"
                   />
-                  <TouchableOpacity
+                  <StyledLock
+                    size={20}
+                    className="absolute left-3.5 text-muted"
+                    pointerEvents="none"
+                  />
+                  <Pressable
                     onPress={() => setShowPassword(!showPassword)}
+                    className="absolute right-4"
                   >
                     {showPassword ? (
-                      <EyeOff size={20} color="#6b7280" />
+                      <StyledEyeOff size={20} className="text-muted" />
                     ) : (
-                      <Eye size={20} color="#6b7280" />
+                      <StyledEye size={20} className="text-muted" />
                     )}
-                  </TouchableOpacity>
+                  </Pressable>
                 </View>
-              </View>
+              </TextField>
 
               {/* Secret Key */}
-              <View>
-                <Text className="mb-2 font-medium text-foreground text-sm">
-                  Secret Key
-                </Text>
-                <TextInput
-                  className="rounded-lg border border-input bg-background px-4 py-3 font-mono text-foreground"
+              <TextField>
+                <TextField.Label>Secret Key</TextField.Label>
+                <TextField.Input
                   placeholder="A3-XXXXXX-XXXXXX-XXXXX"
                   value={secretKey}
                   onChangeText={setSecretKey}
                   autoCapitalize="characters"
                   autoCorrect={false}
+                  className="font-mono"
                 />
-                <Text className="mt-1 text-muted-foreground text-xs">
+                <TextField.Description>
                   Your Secret Key was provided when you created your account
-                </Text>
-              </View>
+                </TextField.Description>
+              </TextField>
 
               {/* Biometric Toggle */}
               {biometricAvailable && (
-                <View className="flex-row items-center justify-between rounded-lg border border-input bg-background px-4 py-3">
-                  <View className="mr-3 flex-1 flex-row items-center">
-                    <Fingerprint size={20} color="#6b7280" />
-                    <View className="ml-3 flex-1">
-                      <Text className="text-foreground">
+                <FormField
+                  isSelected={enableBiometric}
+                  onSelectedChange={setEnableBiometric}
+                >
+                  <View className="flex-1 flex-row items-center gap-3">
+                    <StyledFingerprint size={20} className="text-muted" />
+                    <View className="flex-1">
+                      <FormField.Label>
                         Enable {biometricType || "biometric"} unlock
-                      </Text>
-                      <Text className="text-muted-foreground text-xs">
+                      </FormField.Label>
+                      <FormField.Description>
                         Quickly unlock with {biometricType || "biometrics"}
-                      </Text>
+                      </FormField.Description>
                     </View>
                   </View>
-                  <Switch
-                    value={enableBiometric}
-                    onValueChange={setEnableBiometric}
-                  />
-                </View>
+                  <FormField.Indicator />
+                </FormField>
               )}
 
               {/* Show message if device has hardware but no biometrics enrolled */}
@@ -298,28 +314,27 @@ export default function LoginScreen() {
               )}
 
               {/* Login Button */}
-              <TouchableOpacity
+              <Button
                 onPress={handleLogin}
-                disabled={loginMutation.isPending}
-                className={`mt-4 rounded-lg py-4 ${
-                  loginMutation.isPending ? "bg-primary/50" : "bg-primary"
-                }`}
-              >
-                <Text className="text-center font-semibold text-primary-foreground">
-                  {loginMutation.isPending ? "Signing in..." : "Sign In"}
-                </Text>
-              </TouchableOpacity>
-
-              {/* Sign Up Link */}
-              <TouchableOpacity
-                onPress={() => router.push("/(auth)/signup")}
+                isDisabled={loginMutation.isPending}
+                variant="primary"
+                size="lg"
                 className="mt-4"
               >
-                <Text className="text-center text-muted-foreground">
+                {loginMutation.isPending ? "Signing in..." : "Sign In"}
+              </Button>
+
+              {/* Sign Up Link */}
+              <Button
+                onPress={() => router.push("/(auth)/signup")}
+                variant="ghost"
+                className="mt-2"
+              >
+                <Text className="text-muted-foreground">
                   Don't have an account?{" "}
                   <Text className="font-semibold text-primary">Sign up</Text>
                 </Text>
-              </TouchableOpacity>
+              </Button>
             </View>
           </View>
         </ScrollView>

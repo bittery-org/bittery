@@ -13,6 +13,7 @@ import {
 	SafeAreaProvider,
 } from "react-native-safe-area-context";
 import { Uniwind } from "uniwind";
+import { HeroUINativeProvider } from "heroui-native";
 import { BiometricAuthModal } from "../src/components/biometric-auth-modal";
 import { AccountProvider } from "../src/contexts/account-context";
 import {
@@ -91,17 +92,19 @@ export default function RootLayout() {
 
 	return (
 		<GestureHandlerRootView style={{ flex: 1 }}>
-			<SafeAreaProvider>
-				<TRPCProvider>
-					<MobilePlatformProvider>
-						<AccountProvider>
-							<BiometricAuthProvider>
-								<AppContent />
-							</BiometricAuthProvider>
-						</AccountProvider>
-					</MobilePlatformProvider>
-				</TRPCProvider>
-			</SafeAreaProvider>
+			<HeroUINativeProvider>
+				<SafeAreaProvider>
+					<TRPCProvider>
+						<MobilePlatformProvider>
+							<AccountProvider>
+								<BiometricAuthProvider>
+									<AppContent />
+								</BiometricAuthProvider>
+							</AccountProvider>
+						</MobilePlatformProvider>
+					</TRPCProvider>
+				</SafeAreaProvider>
+			</HeroUINativeProvider>
 		</GestureHandlerRootView>
 	);
 }

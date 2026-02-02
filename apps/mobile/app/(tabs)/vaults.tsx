@@ -1,20 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import type { inferOutput } from "@trpc/tanstack-react-query";
 import { Tabs, useRouter } from "expo-router";
-import { ChevronRight, Plus, Shield, Users } from "lucide-react-native";
-import { useState } from "react";
-import {
-	ActivityIndicator,
-	Alert,
-	FlatList,
-	RefreshControl,
-	Text,
-	TouchableOpacity,
-	View,
-} from "react-native";
+import { Button, Card, Skeleton } from "heroui-native";
+import { Plus, Shield } from "lucide-react-native";
+import { useMemo, useState } from "react";
+import { Alert, FlatList, RefreshControl, View } from "react-native";
+import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { VaultListItem } from "../../src/components/vault-list-item";
 
 import { useTRPC } from "../../src/lib/trpc";
+
+// Create styled icon components
+const StyledPlus = withUniwind(Plus);
+const StyledShield = withUniwind(Shield);
 
 export default function VaultsScreen() {
 	const router = useRouter();
@@ -44,44 +43,158 @@ export default function VaultsScreen() {
 		);
 	};
 
+	const handleVaultPress = (vaultId: string) => {
+		router.push(`/(vault)/${vaultId}`);
+	};
+
+	// Separate personal and team vaults
+	const { personalVaults, teamVaults } = useMemo(() => {
+		if (!vaultKeys) return { personalVaults: [], teamVaults: [] };
+
+		const personal = vaultKeys.filter((v) => v.type === "personal");
+		const team = vaultKeys.filter((v) => v.type === "team");
+
+		return { personalVaults: personal, teamVaults: team };
+	}, [vaultKeys]);
+
 	const renderVaultItem = ({
 		item,
+		isFirst,
+		isLast,
 	}: {
 		item: inferOutput<typeof trpc.vault.list>[number];
+		isFirst: boolean;
+		isLast: boolean;
 	}) => (
-		<TouchableOpacity
-			onPress={() => router.push(`/(vault)/${item.id}`)}
-			className="flex-row items-center border-border border-b px-4 py-4"
-			activeOpacity={0.7}
-		>
-			<View
-				className={`mr-4 h-12 w-12 items-center justify-center rounded-xl ${
-					item.type === "team" ? "bg-blue-100" : "bg-primary/10"
-				}`}
-			>
-				{item.type === "team" ? (
-					<Users size={24} color="#3b82f6" />
-				) : (
-					<Shield size={24} color="#000" />
-				)}
-			</View>
-			<View className="flex-1">
-				<Text className="font-semibold text-foreground">{item.name}</Text>
-				<Text className="text-muted-foreground text-sm">
-					{item.type === "team" ? "Team vault" : "Personal vault"} • {item.role}
-				</Text>
-			</View>
-			<ChevronRight size={20} color="#9ca3af" />
-		</TouchableOpacity>
+		<VaultListItem
+			id={item.id}
+			name={item.name}
+			type={item.type}
+			role={item.role}
+			icon={item.icon}
+			imageUrl={item.imageUrl}
+			itemCount={item.items?.length}
+			onPress={() => handleVaultPress(item.id)}
+			isFirstInSection={isFirst}
+			isLastInSection={isLast}
+		/>
+	);
+
+	const renderSectionHeader = (title: string, count: number) => (
+		<View className="flex-row items-center px-4 pt-4 pb-2">
+			<Card.Title className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+				{title} ({count})
+			</Card.Title>
+		</View>
+	);
+
+	const renderListContent = () => {
+		if (!vaultKeys || vaultKeys.length === 0) {
+			return (
+				<View className="flex-1 items-center justify-center p-8">
+					<Card
+						variant="secondary"
+						className="w-full max-w-sm items-center p-8"
+					>
+						<StyledShield size={48} className="mb-4 text-muted" />
+						<Card.Title className="mb-2 text-center text-lg">
+							No vaults yet
+						</Card.Title>
+						<Card.Description className="text-center">
+							Create a vault to start storing your passwords
+						</Card.Description>
+					</Card>
+				</View>
+			);
+		}
+
+		// Combine sections into a single data array
+		const sections: Array<
+			| { type: "header"; title: string; count: number }
+			| {
+					type: "vault";
+					item: inferOutput<typeof trpc.vault.list>[number];
+					isFirst: boolean;
+					isLast: boolean;
+			  }
+		> = [];
+
+		if (personalVaults.length > 0) {
+			sections.push({
+				type: "header",
+				title: "Personal Vaults",
+				count: personalVaults.length,
+			});
+			for (let i = 0; i < personalVaults.length; i++) {
+				sections.push({
+					type: "vault",
+					item: personalVaults[i],
+					isFirst: i === 0,
+					isLast: i === personalVaults.length - 1,
+				});
+			}
+		}
+
+		if (teamVaults.length > 0) {
+			sections.push({
+				type: "header",
+				title: "Team Vaults",
+				count: teamVaults.length,
+			});
+			for (let i = 0; i < teamVaults.length; i++) {
+				sections.push({
+					type: "vault",
+					item: teamVaults[i],
+					isFirst: i === 0,
+					isLast: i === teamVaults.length - 1,
+				});
+			}
+		}
+
+		return (
+			<FlatList
+				data={sections}
+				renderItem={({ item: section }) => {
+					if (section.type === "header") {
+						return renderSectionHeader(section.title, section.count);
+					}
+					return renderVaultItem({
+						item: section.item,
+						isFirst: section.isFirst,
+						isLast: section.isLast,
+					});
+				}}
+				keyExtractor={(item, _index) =>
+					item.type === "header" ? `header-${item.title}` : item.item.id
+				}
+				refreshControl={
+					<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+				}
+				style={{ flex: 1 }}
+				contentContainerStyle={{ paddingTop: 8, paddingBottom: 8, flexGrow: 1 }}
+			/>
+		);
+	};
+
+	const renderSkeletonItem = (index: number) => (
+		<Card key={index} className="mx-4 mb-2">
+			<Card.Body className="flex-row items-center py-3">
+				<Skeleton className="mr-3 h-10 w-10 rounded-lg" />
+				<View className="flex-1">
+					<Skeleton className="mb-2 h-4 w-32 rounded" />
+					<Skeleton className="h-3 w-24 rounded" />
+				</View>
+			</Card.Body>
+		</Card>
 	);
 
 	if (isLoading) {
 		return (
-			<SafeAreaView
-				className="flex-1 items-center justify-center bg-background"
-				edges={["bottom"]}
-			>
-				<ActivityIndicator size="large" color="#000" />
+			<SafeAreaView className="flex-1 bg-background" edges={[]}>
+				{/* Skeleton items */}
+				<View className="flex-1 py-2">
+					{[1, 2, 3, 4, 5, 6].map(renderSkeletonItem)}
+				</View>
 			</SafeAreaView>
 		);
 	}
@@ -91,36 +204,21 @@ export default function VaultsScreen() {
 			<Tabs.Screen
 				options={{
 					headerRight: () => (
-						<TouchableOpacity
+						<Button
+							isIconOnly
+							variant="primary"
+							size="sm"
 							onPress={handleCreateVault}
-							className="mr-4 rounded-full bg-primary p-2"
+							className="mr-4"
 						>
-							<Plus size={18} color="#fff" />
-						</TouchableOpacity>
+							<StyledPlus size={18} className="text-accent-foreground" />
+						</Button>
 					),
 				}}
 			/>
-			<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
-				{/* Vault List */}
-				<FlatList
-					data={vaultKeys}
-					renderItem={renderVaultItem}
-					keyExtractor={(item) => item.id}
-					refreshControl={
-						<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-					}
-					ListEmptyComponent={
-						<View className="flex-1 items-center justify-center p-8">
-							<Shield size={48} color="#9ca3af" />
-							<Text className="mt-4 text-center font-semibold text-foreground text-lg">
-								No vaults
-							</Text>
-							<Text className="mt-2 text-center text-muted-foreground">
-								Create a vault to start storing your passwords
-							</Text>
-						</View>
-					}
-				/>
+			<SafeAreaView className="flex-1 bg-background" edges={[]}>
+				{/* Vaults List */}
+				<View className="flex-1">{renderListContent()}</View>
 			</SafeAreaView>
 		</>
 	);

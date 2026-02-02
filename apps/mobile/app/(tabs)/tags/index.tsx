@@ -1,21 +1,35 @@
 import { useItems } from "@bittery/hooks";
 import { useRouter } from "expo-router";
+import { Card, Chip, Skeleton, TextField } from "heroui-native";
 import { Search, Tag } from "lucide-react-native";
 import { useMemo, useState } from "react";
-import {
-	ActivityIndicator,
-	ScrollView,
-	Text,
-	TextInput,
-	View,
-} from "react-native";
+import { ScrollView, Text, View } from "react-native";
+import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
 
-import { TagChip } from "../../../src/components/tag-chip";
+// Create styled icon components
+const StyledSearch = withUniwind(Search);
+const StyledTag = withUniwind(Tag);
 
 interface TagWithCount {
 	name: string;
 	count: number;
+}
+
+// Generate a consistent color based on tag name
+function getTagColor(
+	name: string,
+): "default" | "success" | "warning" | "danger" | "accent" {
+	const colors: Array<"default" | "success" | "warning" | "danger" | "accent"> =
+		["accent", "success", "warning", "danger", "default"];
+
+	// Simple hash based on tag name
+	let hash = 0;
+	for (let i = 0; i < name.length; i++) {
+		hash = name.charCodeAt(i) + ((hash << 5) - hash);
+	}
+	const index = Math.abs(hash) % colors.length;
+	return colors[index];
 }
 
 export default function TagsScreen() {
@@ -54,11 +68,33 @@ export default function TagsScreen() {
 
 	if (isLoading) {
 		return (
-			<SafeAreaView
-				className="flex-1 items-center justify-center bg-background"
-				edges={["bottom"]}
-			>
-				<ActivityIndicator size="large" color="#000" />
+			<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
+				{/* Search Skeleton */}
+				<View className="border-border border-b px-4 py-3">
+					<TextField>
+						<View className="w-full flex-row items-center">
+							<TextField.Input
+								placeholder="Search tags..."
+								editable={false}
+								className="flex-1 pr-4 pl-12"
+							/>
+							<StyledSearch
+								size={18}
+								className="absolute left-3.5 text-muted"
+								pointerEvents="none"
+							/>
+						</View>
+					</TextField>
+				</View>
+
+				{/* Skeleton chips */}
+				<ScrollView className="flex-1" contentContainerStyle={{ padding: 16 }}>
+					<View className="flex-row flex-wrap gap-2">
+						{[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+							<Skeleton key={i} className="h-8 w-20 rounded-full" />
+						))}
+					</View>
+				</ScrollView>
 			</SafeAreaView>
 		);
 	}
@@ -66,10 +102,14 @@ export default function TagsScreen() {
 	if (error) {
 		return (
 			<SafeAreaView
-				className="flex-1 items-center justify-center bg-background"
+				className="flex-1 items-center justify-center bg-background p-8"
 				edges={["bottom"]}
 			>
-				<Text className="text-destructive">Error loading tags</Text>
+				<Card variant="secondary" className="w-full max-w-sm items-center p-8">
+					<Card.Title className="mb-4 text-center text-destructive text-lg">
+						Error loading tags
+					</Card.Title>
+				</Card>
 			</SafeAreaView>
 		);
 	}
@@ -77,44 +117,67 @@ export default function TagsScreen() {
 	return (
 		<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
 			{/* Search */}
-			<View className="border-border border-b px-4 py-2">
-				<View className="flex-row items-center rounded-lg bg-secondary px-3 py-2">
-					<Search size={18} color="#6b7280" />
-					<TextInput
-						className="ml-2 flex-1 text-foreground"
-						placeholder="Search tags..."
-						value={searchQuery}
-						onChangeText={setSearchQuery}
-						placeholderTextColor="#9ca3af"
-					/>
-				</View>
+			<View className="border-border border-b px-4 py-3">
+				<TextField>
+					<View className="w-full flex-row items-center">
+						<TextField.Input
+							placeholder="Search tags..."
+							value={searchQuery}
+							onChangeText={setSearchQuery}
+							autoCapitalize="none"
+							autoCorrect={false}
+							className="flex-1 pr-4 pl-12"
+						/>
+						<StyledSearch
+							size={18}
+							className="absolute left-3.5 text-muted"
+							pointerEvents="none"
+						/>
+					</View>
+				</TextField>
 			</View>
 
 			{/* Tags Grid */}
 			{filteredTags.length === 0 ? (
 				<View className="flex-1 items-center justify-center p-8">
-					<Tag size={48} color="#9ca3af" />
-					<Text className="mt-4 text-center font-semibold text-foreground text-lg">
-						{searchQuery ? "No tags found" : "No tags yet"}
-					</Text>
-					<Text className="mt-2 text-center text-muted-foreground">
-						{searchQuery
-							? "Try a different search term"
-							: "Add tags to your items to organize them"}
-					</Text>
+					<Card
+						variant="secondary"
+						className="w-full max-w-sm items-center p-8"
+					>
+						<StyledTag size={48} className="mb-4 text-muted" />
+						<Card.Title className="mb-2 text-center text-lg">
+							{searchQuery ? "No tags found" : "No tags yet"}
+						</Card.Title>
+						<Card.Description className="text-center">
+							{searchQuery
+								? "Try a different search term"
+								: "Add tags to your items to organize them"}
+						</Card.Description>
+					</Card>
 				</View>
 			) : (
 				<ScrollView className="flex-1" contentContainerStyle={{ padding: 16 }}>
-					<View className="flex-row flex-wrap">
-						{filteredTags.map((tag) => (
-							<View key={tag.name} className="mr-2 mb-2">
-								<TagChip
-									name={tag.name}
-									count={tag.count}
+					<View className="flex-row flex-wrap gap-2">
+						{filteredTags.map((tag) => {
+							const color = getTagColor(tag.name);
+							return (
+								<Chip
+									key={tag.name}
+									variant="secondary"
+									color={color}
 									onPress={() => handleTagPress(tag.name)}
-								/>
-							</View>
-						))}
+									size="md"
+								>
+									<StyledTag size={14} className="text-current" />
+									<Chip.Label>{tag.name}</Chip.Label>
+									<View className="ml-1.5 rounded-full bg-black/10 px-1.5">
+										<Text className="font-medium text-current text-xs">
+											{tag.count}
+										</Text>
+									</View>
+								</Chip>
+							);
+						})}
 					</View>
 				</ScrollView>
 			)}
