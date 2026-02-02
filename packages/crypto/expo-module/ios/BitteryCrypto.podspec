@@ -9,10 +9,10 @@ Pod::Spec.new do |s|
   s.description    = package['description']
   s.author         = package['author']
   s.license        = package['license']
-  s.homepage       = 'https://github.com/bittery/bittery'
+  s.homepage       = 'https://github.com/bittery-org/bittery'
   s.platforms      = { :ios => '13.4', :tvos => '13.4' }
   s.swift_version  = '5.4'
-  s.source         = { :git => 'https://github.com/bittery/bittery.git' }
+  s.source         = { :git => 'https://github.com/bittery-org/bittery.git' }
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'

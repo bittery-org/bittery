@@ -30,7 +30,7 @@ export interface TestUser {
 export function generateTestUser(): TestUser {
 	const uniqueId = nanoid(8);
 	return {
-		email: `e2e-test-${uniqueId}@test.bittery.io`,
+		email: `e2e-test-${uniqueId}@test.bittery.com`,
 		password: "TestPassword123!@#",
 		secretKey: "", // Will be captured during signup
 		name: `E2E Test User ${uniqueId}`,

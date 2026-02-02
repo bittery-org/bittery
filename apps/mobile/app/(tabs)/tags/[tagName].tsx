@@ -12,7 +12,7 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView } from "@/components/safe-area-view";
 import { ItemListItem } from "../../../src/components/item-list-item";
 import { TagChip } from "../../../src/components/tag-chip";
 

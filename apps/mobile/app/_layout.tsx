@@ -1,4 +1,4 @@
-import "../src/global.css";
+import "../global.css";
 // Native crypto is provided by @bittery/crypto-nitro Expo module
 // No polyfill setup needed - all crypto operations use native Rust code
 // See apps/mobile/src/lib/crypto/ for the unified crypto API
@@ -8,7 +8,11 @@ import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import {
+	SafeAreaListener,
+	SafeAreaProvider,
+} from "react-native-safe-area-context";
+import { Uniwind } from "uniwind";
 import { BiometricAuthModal } from "../src/components/biometric-auth-modal";
 import { AccountProvider } from "../src/contexts/account-context";
 import {
@@ -19,6 +23,8 @@ import { TRPCProvider } from "../src/lib/trpc";
 import { MobilePlatformProvider } from "../src/providers/platform-provider";
 import { storage } from "../src/services/storage";
 
+Uniwind.setTheme('system')
+
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
@@ -27,7 +33,11 @@ function AppContent() {
 	const { showAuthModal, dismissAuthRequirement } = useBiometricAuth();
 
 	return (
-		<>
+		<SafeAreaListener
+			onChange={({ insets }) => {
+				Uniwind.updateInsets(insets);
+			}}
+		>
 			<Stack
 				screenOptions={{
 					headerShown: false,
@@ -52,7 +62,7 @@ function AppContent() {
 				onSuccess={dismissAuthRequirement}
 			/>
 			<StatusBar style="auto" />
-		</>
+		</SafeAreaListener>
 	);
 }
 

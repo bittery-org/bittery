@@ -16,7 +16,7 @@ import {
 	View,
 } from "react-native";
 import { Swipeable } from "react-native-gesture-handler";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView } from "@/components/safe-area-view";
 import { ItemListItem } from "../../src/components/item-list-item";
 
 function formatDeletedAt(dateString: string): string {

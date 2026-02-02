@@ -21,7 +21,7 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView } from "@/components/safe-area-view";
 import { TotpDisplay } from "../../../src/components/totp-display";
 
 const categoryIcons: Record<ItemCategory, typeof Key> = {

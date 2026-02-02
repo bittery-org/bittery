@@ -320,7 +320,7 @@ export function TeamBilling({
 							</p>
 						</div>
 						<Button variant="outline" asChild>
-							<a href="mailto:support@bittery.io">
+							<a href="mailto:support@bittery.com">
 								Contact Support
 								<ExternalLink className="ml-2 h-4 w-4" />
 							</a>

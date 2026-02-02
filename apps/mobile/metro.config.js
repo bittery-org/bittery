@@ -1,5 +1,5 @@
 const { getDefaultConfig } = require("expo/metro-config");
-const { withNativeWind } = require("nativewind/metro");
+const { withUniwindConfig } = require("uniwind/metro");
 const path = require("node:path");
 
 // Find the project and workspace directories
@@ -25,4 +25,8 @@ config.resolver.extraNodeModules = {
 	"@bittery/shared": path.resolve(monorepoRoot, "packages/shared"),
 };
 
-module.exports = withNativeWind(config, { input: "./src/global.css" });
+module.exports = withUniwindConfig(config, {
+	cssEntryFile: "./global.css",
+	polyfills: { rem: 14 }, // Match NativeWind's default rem value
+	debug: true,
+});

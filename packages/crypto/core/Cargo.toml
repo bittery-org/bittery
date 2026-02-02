@@ -10,8 +10,8 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/bittery/bittery"
-authors = ["Bittery <team@bittery.io>"]
+repository = "https://github.com/bittery-org/bittery"
+authors = ["Bittery <team@bittery.com>"]
 
 [workspace.dependencies]
 # Crypto (RustCrypto - audited)

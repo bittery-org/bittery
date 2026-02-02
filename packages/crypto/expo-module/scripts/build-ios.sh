@@ -78,7 +78,7 @@ echo -e "${YELLOW}Creating module map...${NC}"
 for arch_dir in "$OUTPUT_DIR/BitteryCrypto.xcframework"/*/; do
     if [ -d "$arch_dir/Headers" ]; then
         cat > "$arch_dir/Headers/module.modulemap" << 'EOF'
-module BitteryCrypto {
+module BitteryCryptoFFI {
     header "bittery_crypto.h"
     export *
 }

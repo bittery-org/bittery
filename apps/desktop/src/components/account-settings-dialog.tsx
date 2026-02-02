@@ -84,7 +84,7 @@ export function AccountSettingsDialog({
 	// Derive the default web app URL from server URL
 	const derivedWebAppUrl = serverUrlQuery.data
 		? serverUrlQuery.data.replace(/\/api.*$/, "").replace(/\/$/, "")
-		: "https://app.bittery.io";
+		: "https://app.bittery.com";
 
 	// Reset form when dialog opens or data loads
 	useEffect(() => {

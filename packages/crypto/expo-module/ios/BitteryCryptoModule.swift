@@ -1,4 +1,5 @@
 import ExpoModulesCore
+import BitteryCryptoFFI
 
 public class BitteryCryptoModule: Module {
     // SRP client handles stored by ID

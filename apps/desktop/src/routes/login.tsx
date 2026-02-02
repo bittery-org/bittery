@@ -228,7 +228,7 @@ export function LoginPage() {
 									placeholder={
 										normalizeServerUrl(serverUrl)
 											?.replace(/\/api.*$/, "")
-											.replace(/\/$/, "") || "https://app.bittery.io"
+											.replace(/\/$/, "") || "https://app.bittery.com"
 									}
 								/>
 								<p className="mt-1 text-muted-foreground text-xs">

@@ -1203,7 +1203,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			return serverUrl.replace(/\/api.*$/, "").replace(/\/$/, "");
 		}
 
-		return "https://app.bittery.io";
+		return "https://app.bittery.com";
 	}
 
 	/**
