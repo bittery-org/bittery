@@ -3,44 +3,16 @@ import type {
 	TotpAlgorithm,
 	TotpDigits,
 } from "@bittery/shared/types";
-import { getFaviconUrl } from "@bittery/shared/favicon";
 import { Card, PressableFeedback } from "heroui-native";
-import {
-	CreditCard,
-	FileText,
-	Key,
-	Star,
-	Timer,
-	User,
-} from "lucide-react-native";
-import { useState } from "react";
-import { Image, View } from "react-native";
+import { Star } from "lucide-react-native";
+import { View } from "react-native";
 import { withUniwind } from "uniwind";
 
+import { ItemIcon } from "./item-icon";
 import { TotpDisplay } from "./totp-display";
 
 // Create styled icon components
-const StyledKey = withUniwind(Key);
-const StyledCreditCard = withUniwind(CreditCard);
-const StyledUser = withUniwind(User);
-const StyledFileText = withUniwind(FileText);
-const StyledTimer = withUniwind(Timer);
 const StyledStar = withUniwind(Star);
-
-const categoryIcons: Record<
-	ItemCategory,
-	| typeof StyledKey
-	| typeof StyledCreditCard
-	| typeof StyledUser
-	| typeof StyledFileText
-	| typeof StyledTimer
-> = {
-	login: StyledKey,
-	"credit-card": StyledCreditCard,
-	identity: StyledUser,
-	"secure-note": StyledFileText,
-	totp: StyledTimer,
-};
 
 interface ItemListItemProps {
 	id: string;
@@ -88,17 +60,8 @@ export function ItemListItem({
 	isFirstInSection = false,
 	isLastInSection = false,
 }: ItemListItemProps) {
-	const Icon = categoryIcons[category];
-	const [faviconError, setFaviconError] = useState(false);
-
 	// Show TOTP if item has TOTP secret and showInlineTotp is enabled
 	const shouldShowTotp = showInlineTotp && totpSecret;
-
-	// Get favicon URL for login items with a URL
-	const faviconUrl =
-		category === "login" && url && !faviconError
-			? getFaviconUrl(url, 32)
-			: null;
 
 	// Get subtitle based on category
 	const getSubtitle = () => {
@@ -135,18 +98,7 @@ export function ItemListItem({
 				<PressableFeedback.Ripple />
 				<Card.Body className="flex-row items-center pl-1.5 pr-3 py-1">
 					{/* Icon or Favicon */}
-					<View className="mr-3.5 h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-surface-secondary">
-						{faviconUrl ? (
-							<Image
-								source={{ uri: faviconUrl }}
-								className="h-full w-full"
-								resizeMode="contain"
-								onError={() => setFaviconError(true)}
-							/>
-						) : (
-							<Icon size={16} className="text-muted" />
-						)}
-					</View>
+					<ItemIcon category={category} url={url} size="sm" className="mr-3.5" />
 
 					{/* Content */}
 					<View className="min-w-0 flex-1">
