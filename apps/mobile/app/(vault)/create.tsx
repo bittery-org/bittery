@@ -35,6 +35,7 @@ import {
 	type TotpFormRef,
 } from "@/components/item-forms";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { TagInput } from "@/components/tag-input";
 import { VaultAvatar } from "@/components/vault-avatar";
 
 // Create styled icon components
@@ -75,6 +76,7 @@ export default function CreateItemScreen() {
 	>({ value: "login", label: "Login" });
 	const [title, setTitle] = useState("");
 	const [notes, setNotes] = useState("");
+	const [tags, setTags] = useState<string[]>([]);
 	const [saving, setSaving] = useState(false);
 
 	// Form refs
@@ -152,6 +154,11 @@ export default function CreateItemScreen() {
 			// Add notes if present
 			if (notes.trim()) {
 				itemData.notes = notes;
+			}
+
+			// Add tags if present
+			if (tags.length > 0) {
+				itemData.tags = tags;
 			}
 
 			// Create the item using shared hook (handles encryption internally)
@@ -383,6 +390,14 @@ export default function CreateItemScreen() {
 					{category?.value === "totp" && (
 						<TotpForm ref={totpFormRef} onTitleAutoFill={setTitle} />
 					)}
+
+					{/* Tags */}
+					<TagInput
+						tags={tags}
+						onTagsChange={setTags}
+						placeholder="Add a tag..."
+						label="Tags (optional)"
+					/>
 
 					{/* Notes (for non-secure-note items) */}
 					{category?.value !== "secure-note" && (

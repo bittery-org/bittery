@@ -39,6 +39,7 @@ import {
 } from "@/components/item-forms";
 import { ItemIcon } from "@/components/item-icon";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { TagInput } from "@/components/tag-input";
 
 // Create styled icon components
 const StyledKey = withUniwind(Key);
@@ -324,6 +325,14 @@ export default function EditItemScreen() {
 							}}
 						/>
 					)}
+
+					{/* Tags */}
+					<TagInput
+						tags={tags}
+						onTagsChange={setTags}
+						placeholder="Add a tag..."
+						label="Tags (optional)"
+					/>
 
 					{/* Notes (for non-secure-note items) */}
 					{item.category !== "secure-note" && (
