@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import type { inferOutput } from "@trpc/tanstack-react-query";
 import { Tabs, useRouter } from "expo-router";
-import { Button, Card, Skeleton } from "heroui-native";
+import { Button, Card, Skeleton, useToast } from "heroui-native";
 import { Plus, Shield } from "lucide-react-native";
 import { useMemo, useState } from "react";
-import { Alert, FlatList, RefreshControl, View } from "react-native";
+import { FlatList, RefreshControl, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
 import { VaultListItem } from "../../src/components/vault-list-item";
@@ -17,6 +17,7 @@ const StyledShield = withUniwind(Shield);
 
 export default function VaultsScreen() {
 	const router = useRouter();
+	const { toast } = useToast();
 	const [refreshing, setRefreshing] = useState(false);
 	const trpc = useTRPC();
 
@@ -37,10 +38,11 @@ export default function VaultsScreen() {
 
 	const handleCreateVault = () => {
 		// TODO: Navigate to create vault screen when implemented
-		Alert.alert(
-			"Create Vault",
-			"Vault creation is coming soon. For now, create vaults from the web app.",
-		);
+		toast.show({
+			variant: "default",
+			label: "Create Vault",
+			description: "Vault creation is coming soon. For now, create vaults from the web app.",
+		});
 	};
 
 	const handleVaultPress = (vaultId: string) => {

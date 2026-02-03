@@ -114,7 +114,7 @@ export default function ItemDetailScreen() {
   if (error) {
     return (
       <SafeAreaView className="flex-1 items-center justify-center bg-background p-8">
-        <Card variant="secondary" className="w-full max-w-sm items-center p-8">
+        <Card variant="default" className="w-full max-w-sm items-center p-8">
           <Card.Title className="mb-2 text-center text-destructive text-lg">
             Error loading item
           </Card.Title>
@@ -132,7 +132,7 @@ export default function ItemDetailScreen() {
   if (!item) {
     return (
       <SafeAreaView className="flex-1 items-center justify-center bg-background p-8">
-        <Card variant="secondary" className="w-full max-w-sm items-center p-8">
+        <Card variant="default" className="w-full max-w-sm items-center p-8">
           <Card.Title className="mb-4 text-center text-lg">
             Item not found
           </Card.Title>
@@ -241,7 +241,7 @@ export default function ItemDetailScreen() {
         ))}
       {/* TOTP Section for Login Items */}
       {item.totpSecret && (
-        <Card variant="secondary" className="mb-2">
+        <Card variant="default" className="mb-2">
           <Card.Body className="py-3">
             <Card.Description className="mb-2">
               Two-Factor Code
@@ -270,7 +270,7 @@ export default function ItemDetailScreen() {
       <>
         {renderFieldRow("Cardholder Name", item.cardholderName)}
         {item.cardNumber && (
-          <Card variant="secondary" className="mb-2">
+          <Card variant="default" className="mb-2">
             <Card.Body className="py-3">
               <View className="mb-1.5 flex-row items-center justify-between">
                 <Card.Description>Card Number</Card.Description>
@@ -331,7 +331,7 @@ export default function ItemDetailScreen() {
   const renderIdentityFields = () => (
     <>
       {(item.firstName || item.lastName) && (
-        <Card variant="secondary" className="mb-2">
+        <Card variant="default" className="mb-2">
           <Card.Body className="py-3">
             <Card.Description className="mb-1.5">Name</Card.Description>
             <Card.Title className="font-normal text-base" selectable>
@@ -397,7 +397,7 @@ export default function ItemDetailScreen() {
   );
 
   const renderSecureNoteFields = () => (
-    <Card variant="secondary" className="mb-2">
+    <Card variant="default" className="mb-2">
       <Card.Body className="py-3">
         <Card.Description className="mb-2">Note</Card.Description>
         <Card.Title className="font-normal text-base" selectable>
@@ -411,7 +411,7 @@ export default function ItemDetailScreen() {
     <>
       {/* Live TOTP Code Display */}
       {item.totpSecret && (
-        <Card variant="secondary" className="mb-2">
+        <Card variant="default" className="mb-2">
           <Card.Body className="py-3">
             <Card.Description className="mb-2">Current Code</Card.Description>
             <TotpDisplay
@@ -432,7 +432,7 @@ export default function ItemDetailScreen() {
       {renderFieldRow("Account", item.totpAccountName)}
       {/* Show TOTP settings if non-default */}
       {item.totpAlgorithm && item.totpAlgorithm !== "SHA1" && (
-        <Card variant="secondary" className="mb-2">
+        <Card variant="default" className="mb-2">
           <Card.Body className="py-3">
             <Card.Description className="mb-1.5">Algorithm</Card.Description>
             <Card.Title className="font-normal text-base">
@@ -442,7 +442,7 @@ export default function ItemDetailScreen() {
         </Card>
       )}
       {item.totpDigits && item.totpDigits !== 6 && (
-        <Card variant="secondary" className="mb-2">
+        <Card variant="default" className="mb-2">
           <Card.Body className="py-3">
             <Card.Description className="mb-1.5">Digits</Card.Description>
             <Card.Title className="font-normal text-base">
@@ -452,7 +452,7 @@ export default function ItemDetailScreen() {
         </Card>
       )}
       {item.totpPeriod && item.totpPeriod !== 30 && (
-        <Card variant="secondary" className="mb-2">
+        <Card variant="default" className="mb-2">
           <Card.Body className="py-3">
             <Card.Description className="mb-1.5">Period</Card.Description>
             <Card.Title className="font-normal text-base">
@@ -518,7 +518,7 @@ export default function ItemDetailScreen() {
 
         {/* Notes (for non-secure-note items) */}
         {item.category !== "secure-note" && (item.notes || item.note) && (
-          <Card variant="secondary" className="mb-2">
+          <Card variant="default" className="mb-2">
             <Card.Body className="py-3">
               <Card.Description className="mb-2">Notes</Card.Description>
               <Card.Title className="font-normal text-base" selectable>
@@ -530,7 +530,7 @@ export default function ItemDetailScreen() {
 
         {/* Tags */}
         {item.tags && item.tags.length > 0 && (
-          <Card variant="secondary" className="mb-2">
+          <Card variant="default" className="mb-2">
             <Card.Body className="py-3">
               <Card.Description className="mb-2">Tags</Card.Description>
               <View className="flex-row flex-wrap gap-2">

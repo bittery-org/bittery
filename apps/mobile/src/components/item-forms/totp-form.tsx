@@ -8,7 +8,7 @@ import type {
 	TotpDigits,
 } from "@bittery/shared/types";
 import * as Clipboard from "expo-clipboard";
-import { Button, TextField } from "heroui-native";
+import { Button, TextField, useToast } from "heroui-native";
 import {
 	Camera,
 	ChevronDown,
@@ -47,6 +47,7 @@ interface TotpFormProps {
 
 export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 	({ onTitleAutoFill, initialData }, ref) => {
+		const { toast } = useToast();
 		const [totpSecret, setTotpSecret] = useState(initialData?.totpSecret || "");
 		const [totpIssuer, setTotpIssuer] = useState(
 			initialData?.totpIssuer || "",
@@ -89,14 +90,20 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 				onTitleAutoFill(data.issuer || data.accountName || "TOTP");
 			}
 
-			Alert.alert("Success", "TOTP data imported from QR code");
+			toast.show({
+				variant: "success",
+				label: "TOTP data imported from QR code",
+			});
 		};
 
 		const handlePasteTotp = async () => {
 			try {
 				const text = await Clipboard.getStringAsync();
 				if (!text) {
-					Alert.alert("Empty Clipboard", "No text found in clipboard");
+					toast.show({
+						variant: "warning",
+						label: "No text found in clipboard",
+					});
 					return;
 				}
 
@@ -117,16 +124,22 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 				const cleanedSecret = text.replace(/\s/g, "").toUpperCase();
 				if (isValidBase32(cleanedSecret)) {
 					setTotpSecret(cleanedSecret);
-					Alert.alert("Success", "Secret key pasted from clipboard");
+					toast.show({
+						variant: "success",
+						label: "Secret key pasted from clipboard",
+					});
 				} else {
-					Alert.alert(
-						"Invalid Format",
-						"The clipboard content is not a valid TOTP secret or otpauth:// URI",
-					);
+					toast.show({
+						variant: "danger",
+						label: "The clipboard content is not a valid TOTP secret or otpauth:// URI",
+					});
 				}
 			} catch (error) {
 				console.error("Error pasting from clipboard:", error);
-				Alert.alert("Error", "Failed to read from clipboard");
+				toast.show({
+					variant: "danger",
+					label: "Failed to read from clipboard",
+				});
 			}
 		};
 

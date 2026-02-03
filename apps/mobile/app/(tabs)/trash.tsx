@@ -4,6 +4,7 @@ import {
 	usePermanentDeleteItem,
 	useRestoreItem,
 } from "@bittery/hooks";
+import { useToast } from "heroui-native";
 import { ArchiveRestore, Trash2 } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import {
@@ -34,6 +35,7 @@ function formatDeletedAt(dateString: string): string {
 }
 
 export default function TrashScreen() {
+	const { toast } = useToast();
 	const [refreshing, setRefreshing] = useState(false);
 	const [actionInProgress, setActionInProgress] = useState<string | null>(null);
 
@@ -66,9 +68,16 @@ export default function TrashScreen() {
 		try {
 			await restoreItem.mutateAsync({ itemId: item.id, vaultId: item.vaultId });
 			await refetch();
+			toast.show({
+				variant: "success",
+				label: "Item restored successfully",
+			});
 		} catch (error) {
 			console.error("Failed to restore item:", error);
-			Alert.alert("Error", "Failed to restore item. Please try again.");
+			toast.show({
+				variant: "danger",
+				label: "Failed to restore item. Please try again.",
+			});
 		} finally {
 			setActionInProgress(null);
 		}
@@ -91,9 +100,16 @@ export default function TrashScreen() {
 								vaultId: item.vaultId,
 							});
 							await refetch();
+							toast.show({
+								variant: "success",
+								label: "Item permanently deleted",
+							});
 						} catch (error) {
 							console.error("Failed to delete item:", error);
-							Alert.alert("Error", "Failed to delete item. Please try again.");
+							toast.show({
+								variant: "danger",
+								label: "Failed to delete item. Please try again.",
+							});
 						} finally {
 							setActionInProgress(null);
 						}

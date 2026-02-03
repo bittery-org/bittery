@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import { Avatar, BottomSheet, PressableFeedback } from "heroui-native";
+import { Avatar, BottomSheet, PressableFeedback, useToast } from "heroui-native";
 import { Check, Lock, Plus, Settings, Trash2 } from "lucide-react-native";
 import { useState } from "react";
 import { Alert, Text, View } from "react-native";
@@ -10,6 +10,7 @@ import { type AccountMetadata, storage } from "../services/storage";
 
 export function AccountSwitcher() {
 	const router = useRouter();
+	const { toast } = useToast();
 	const queryClient = useQueryClient();
 	const { allAccounts, activeAccount, switchAccount } = useAccount();
 	const [switching, setSwitching] = useState(false);
@@ -43,7 +44,10 @@ export function AccountSwitcher() {
 			}
 		} catch (error) {
 			console.error("Error switching account:", error);
-			Alert.alert("Error", "Failed to switch account. Please try again.");
+			toast.show({
+				variant: "danger",
+				label: "Failed to switch account. Please try again.",
+			});
 		} finally {
 			setSwitching(false);
 		}

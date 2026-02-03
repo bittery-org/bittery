@@ -5,7 +5,7 @@ import type {
 	ItemCategory,
 } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Button, TextField } from "heroui-native";
+import { Button, TextField, useToast } from "heroui-native";
 import {
 	ArrowLeft,
 	CreditCard,
@@ -17,7 +17,6 @@ import {
 import { useEffect, useRef, useState } from "react";
 import {
 	ActivityIndicator,
-	Alert,
 	KeyboardAvoidingView,
 	Platform,
 	ScrollView,
@@ -63,6 +62,7 @@ const categoryOptions: {
 
 export default function EditItemScreen() {
 	const router = useRouter();
+	const { toast } = useToast();
 	const { vaultId, itemId } = useLocalSearchParams<{
 		vaultId: string;
 		itemId: string;
@@ -100,7 +100,10 @@ export default function EditItemScreen() {
 	const handleSave = async () => {
 		if (!item) return;
 		if (!title.trim()) {
-			Alert.alert("Error", "Title is required");
+			toast.show({
+				variant: "danger",
+				label: "Title is required",
+			});
 			return;
 		}
 
@@ -122,7 +125,10 @@ export default function EditItemScreen() {
 			case "totp":
 				isValid = totpFormRef.current?.isValid() ?? false;
 				if (!isValid) {
-					Alert.alert("Error", "Please enter a valid TOTP secret key");
+					toast.show({
+						variant: "danger",
+						label: "Please enter a valid TOTP secret key",
+					});
 					return;
 				}
 				break;
@@ -172,18 +178,17 @@ export default function EditItemScreen() {
 				data: itemData,
 			});
 
-			Alert.alert("Success", "Item updated successfully", [
-				{
-					text: "OK",
-					onPress: () => router.back(),
-				},
-			]);
+			toast.show({
+				variant: "success",
+				label: "Item updated successfully",
+			});
+			router.back();
 		} catch (error) {
 			console.error("Error updating item:", error);
-			Alert.alert(
-				"Error",
-				error instanceof Error ? error.message : "Failed to update item",
-			);
+			toast.show({
+				variant: "danger",
+				label: error instanceof Error ? error.message : "Failed to update item",
+			});
 		} finally {
 			setSaving(false);
 		}

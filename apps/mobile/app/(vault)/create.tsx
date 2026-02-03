@@ -1,11 +1,10 @@
 import { useAllVaultKeys, useCreateItem } from "@bittery/hooks";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Button, Label, Select, TextField } from "heroui-native";
+import { Button, Label, Select, TextField, useToast } from "heroui-native";
 import { ArrowLeft, ChevronDown, Vault } from "lucide-react-native";
 import { useRef, useState } from "react";
 import {
-	Alert,
 	KeyboardAvoidingView,
 	Platform,
 	ScrollView,
@@ -40,6 +39,7 @@ const categoryOptions = allCategoryOptions.filter((opt) => opt.value !== "all");
 
 export default function CreateItemScreen() {
 	const router = useRouter();
+	const { toast } = useToast();
 	const { vaultId: vaultIdParam } = useLocalSearchParams<{ vaultId?: string }>();
 	const createItem = useCreateItem();
 	const { vaultKeys = [], isLoading: isLoadingVaults } = useAllVaultKeys();
@@ -66,12 +66,18 @@ export default function CreateItemScreen() {
 
 	const handleSave = async () => {
 		if (!title.trim()) {
-			Alert.alert("Error", "Title is required");
+			toast.show({
+				variant: "danger",
+				label: "Title is required",
+			});
 			return;
 		}
 
 		if (!selectedVaultId) {
-			Alert.alert("Error", "Please select a vault");
+			toast.show({
+				variant: "danger",
+				label: "Please select a vault",
+			});
 			return;
 		}
 
@@ -95,7 +101,10 @@ export default function CreateItemScreen() {
 			case "totp":
 				isValid = totpFormRef.current?.isValid() ?? false;
 				if (!isValid) {
-					Alert.alert("Error", "Please enter a valid TOTP secret key");
+					toast.show({
+						variant: "danger",
+						label: "Please enter a valid TOTP secret key",
+					});
 					return;
 				}
 				break;
@@ -146,18 +155,17 @@ export default function CreateItemScreen() {
 				data: itemData,
 			});
 
-			Alert.alert("Success", "Item created successfully", [
-				{
-					text: "OK",
-					onPress: () => router.back(),
-				},
-			]);
+			toast.show({
+				variant: "success",
+				label: "Item created successfully",
+			});
+			router.back();
 		} catch (error) {
 			console.error("Error creating item:", error);
-			Alert.alert(
-				"Error",
-				error instanceof Error ? error.message : "Failed to create item",
-			);
+			toast.show({
+				variant: "danger",
+				label: error instanceof Error ? error.message : "Failed to create item",
+			});
 		} finally {
 			setSaving(false);
 		}
