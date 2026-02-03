@@ -21,7 +21,7 @@ export function CategoryFilter({
 	);
 
 	return (
-		<View className="border-border border-b pt-2 pl-0.5">
+		<View className="border-border border-b pl-0.5">
 			<Select
 				value={
 					selectedOption
@@ -37,10 +37,10 @@ export function CategoryFilter({
 				<Select.Trigger asChild>
 					<Button variant="ghost" size="sm" className="self-start">
 						{selectedOption && (
-							<selectedOption.icon size={16} className="text-current" />
+							<selectedOption.icon size={16} className="text-surface-foreground" />
 						)}
 						<Button.Label>{selectedOption?.label}</Button.Label>
-						<StyledChevronDown size={16} className="text-current" />
+						<StyledChevronDown size={16} className="text-surface-foreground" />
 					</Button>
 				</Select.Trigger>
 				<Select.Portal>

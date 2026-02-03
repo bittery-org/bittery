@@ -23,7 +23,9 @@ import {
 import { TRPCProvider } from "../src/lib/trpc";
 import { MobilePlatformProvider } from "../src/providers/platform-provider";
 import { storage } from "../src/services/storage";
+import { loadThemePreference } from "../src/services/theme-storage";
 
+// Initial theme will be loaded from storage during app initialization
 Uniwind.setTheme("system");
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
@@ -77,6 +79,10 @@ export default function RootLayout() {
       try {
         // Initialize storage adapter (loads Expo modules)
         await storage.initialize();
+
+        // Load and apply saved theme preference
+        const savedTheme = await loadThemePreference();
+        Uniwind.setTheme(savedTheme);
       } catch (error) {
         console.error("[RootLayout] Failed to initialize storage:", error);
       } finally {

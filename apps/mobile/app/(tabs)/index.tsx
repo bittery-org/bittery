@@ -70,7 +70,7 @@ export default function AllItemsScreen() {
         edges={[]}
       >
         <Card variant="secondary" className="w-full max-w-sm items-center p-8">
-          <Card.Title className="mb-4 text-center text-destructive text-lg">
+          <Card.Title className="mb-4 text-center text-danger text-lg">
             Error loading items
           </Card.Title>
           <Button onPress={handleRefresh} variant="primary">
@@ -100,10 +100,12 @@ export default function AllItemsScreen() {
       />
       <SafeAreaView className="flex-1 bg-background" edges={[]}>
         {/* Category Filter */}
-        <CategoryFilter
-          selectedCategory={selectedCategory}
-          onCategoryChange={setSelectedCategory}
-        />
+        <View className="pt-2">
+          <CategoryFilter
+            selectedCategory={selectedCategory}
+            onCategoryChange={setSelectedCategory}
+          />
+        </View>
 
         {/* Items List */}
         {hasNoItems ? (

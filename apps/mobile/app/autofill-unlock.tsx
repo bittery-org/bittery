@@ -319,7 +319,7 @@ export default function AutofillUnlockScreen() {
 							<Text className="font-bold text-2xl text-foreground">
 								Unlock for Autofill
 							</Text>
-							<Text className="mt-2 text-center text-muted-foreground">
+							<Text className="mt-2 text-center text-muted">
 								{activeAccount.email}
 							</Text>
 						</View>
@@ -373,7 +373,7 @@ export default function AutofillUnlockScreen() {
 								</TouchableOpacity>
 								<View className="my-4 flex-row items-center">
 									<View className="h-px flex-1 bg-border" />
-									<Text className="mx-4 text-muted-foreground">or</Text>
+									<Text className="mx-4 text-muted">or</Text>
 									<View className="h-px flex-1 bg-border" />
 								</View>
 							</View>
@@ -430,7 +430,7 @@ export default function AutofillUnlockScreen() {
 								}}
 								className="mt-4"
 							>
-								<Text className="text-center text-muted-foreground">
+								<Text className="text-center text-muted">
 									Cancel
 								</Text>
 							</TouchableOpacity>

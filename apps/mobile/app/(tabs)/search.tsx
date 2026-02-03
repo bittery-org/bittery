@@ -141,7 +141,7 @@ export default function SearchScreen() {
 		return (
 			<View className="flex-1">
 				<View className="flex-row items-center justify-between px-4 py-3">
-					<Text className="font-semibold text-muted-foreground text-sm uppercase tracking-wide">
+					<Text className="font-semibold text-muted text-sm uppercase tracking-wide">
 						Recent Searches
 					</Text>
 					<TouchableOpacity onPress={clearRecentSearches}>
@@ -210,7 +210,7 @@ export default function SearchScreen() {
 				keyExtractor={(item) => item.id}
 				ListHeaderComponent={
 					<View className="px-4 py-2">
-						<Text className="text-muted-foreground text-sm">
+						<Text className="text-muted text-sm">
 							{filteredItems.length} result
 							{filteredItems.length !== 1 ? "s" : ""}
 						</Text>

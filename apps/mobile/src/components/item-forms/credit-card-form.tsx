@@ -101,7 +101,7 @@ export const CreditCardForm = forwardRef<CreditCardFormRef, CreditCardFormProps>
 				<View className="mb-2 flex-row items-center justify-between">
 					<TextField.Label>Card Number</TextField.Label>
 					{detectedCardBrand && detectedCardBrand !== "unknown" && (
-						<Text className="text-muted-foreground text-xs">
+						<Text className="text-muted text-xs">
 							{getCardBrandDisplayName(detectedCardBrand)}
 						</Text>
 					)}

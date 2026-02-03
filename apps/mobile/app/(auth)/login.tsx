@@ -175,7 +175,7 @@ export default function LoginScreen() {
               <Text className="font-bold text-2xl text-foreground">
                 Sign in to Bittery
               </Text>
-              <Text className="mt-2 text-center text-muted-foreground">
+              <Text className="mt-2 text-center text-muted">
                 Enter your credentials to access your vault
               </Text>
             </View>
@@ -330,7 +330,7 @@ export default function LoginScreen() {
                 variant="ghost"
                 className="mt-2"
               >
-                <Text className="text-muted-foreground">
+                <Text className="text-muted">
                   Don't have an account?{" "}
                   <Text className="font-semibold text-primary">Sign up</Text>
                 </Text>

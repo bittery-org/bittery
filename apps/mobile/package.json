@@ -26,6 +26,7 @@
 		"@craftzdog/react-native-buffer": "^6.1.1",
 		"@expo/metro-runtime": "^6.1.2",
 		"@gorhom/bottom-sheet": "^5.2.8",
+		"@react-native-async-storage/async-storage": "^2.2.0",
 		"@react-native-community/netinfo": "^11.4.1",
 		"@react-native-community/slider": "^5.0.1",
 		"@tanstack/react-query": "^5.85.5",

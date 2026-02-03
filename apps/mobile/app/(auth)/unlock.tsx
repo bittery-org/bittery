@@ -313,7 +313,7 @@ export default function UnlockScreen() {
 													targetAccount.name ||
 													targetAccount.email.split("@")[0]}
 											</Text>
-											<Text className="text-muted-foreground text-sm">
+											<Text className="text-muted text-sm">
 												{targetAccount.email}
 											</Text>
 										</View>
@@ -383,7 +383,7 @@ export default function UnlockScreen() {
 								</TouchableOpacity>
 								<View className="my-4 flex-row items-center">
 									<View className="h-px flex-1 bg-border" />
-									<Text className="mx-4 text-muted-foreground">or</Text>
+									<Text className="mx-4 text-muted">or</Text>
 									<View className="h-px flex-1 bg-border" />
 								</View>
 							</View>
@@ -435,7 +435,7 @@ export default function UnlockScreen() {
 								className="mt-4 flex-row items-center justify-center"
 							>
 								<UserPlus size={16} color="#6b7280" />
-								<Text className="ml-2 text-muted-foreground">
+								<Text className="ml-2 text-muted">
 									Sign in with different account
 								</Text>
 							</TouchableOpacity>
@@ -480,7 +480,7 @@ export default function UnlockScreen() {
 											account.name ||
 											account.email.split("@")[0]}
 									</Text>
-									<Text className="text-muted-foreground text-sm">
+									<Text className="text-muted text-sm">
 										{account.email}
 									</Text>
 								</View>

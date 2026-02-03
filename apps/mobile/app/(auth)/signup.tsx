@@ -111,7 +111,7 @@ export default function SignupScreen() {
 							className="mb-6 flex-row items-center"
 						>
 							<ArrowLeft size={20} color="#6b7280" />
-							<Text className="ml-2 text-muted-foreground">Back</Text>
+							<Text className="ml-2 text-muted">Back</Text>
 						</TouchableOpacity>
 
 						{/* Header */}
@@ -122,7 +122,7 @@ export default function SignupScreen() {
 							<Text className="font-bold text-2xl text-foreground">
 								Your Secret Key
 							</Text>
-							<Text className="mt-2 text-center text-muted-foreground">
+							<Text className="mt-2 text-center text-muted">
 								This key is required to access your account. Save it somewhere
 								safe!
 							</Text>
@@ -159,7 +159,7 @@ export default function SignupScreen() {
 								className="mt-3 flex-row items-center justify-center rounded-lg border border-input py-3"
 							>
 								<Copy size={18} color="#6b7280" />
-								<Text className="ml-2 text-muted-foreground">
+								<Text className="ml-2 text-muted">
 									Copy to Clipboard
 								</Text>
 							</TouchableOpacity>
@@ -222,7 +222,7 @@ export default function SignupScreen() {
 							className="mb-6 flex-row items-center"
 						>
 							<ArrowLeft size={20} color="#6b7280" />
-							<Text className="ml-2 text-muted-foreground">Back to Login</Text>
+							<Text className="ml-2 text-muted">Back to Login</Text>
 						</TouchableOpacity>
 
 						{/* Header */}
@@ -233,7 +233,7 @@ export default function SignupScreen() {
 							<Text className="font-bold text-2xl text-foreground">
 								Create Account
 							</Text>
-							<Text className="mt-2 text-center text-muted-foreground">
+							<Text className="mt-2 text-center text-muted">
 								Set up your secure Bittery vault
 							</Text>
 						</View>
@@ -322,7 +322,7 @@ export default function SignupScreen() {
 										)}
 									</TouchableOpacity>
 								</View>
-								<Text className="mt-1 text-muted-foreground text-xs">
+								<Text className="mt-1 text-muted text-xs">
 									Minimum 8 characters
 								</Text>
 							</View>

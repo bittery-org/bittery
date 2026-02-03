@@ -181,7 +181,7 @@ export function QrCodeScanner({
 						<Text className="mb-4 text-center font-semibold text-foreground text-lg">
 							Camera Permission Required
 						</Text>
-						<Text className="mb-6 text-center text-muted-foreground">
+						<Text className="mb-6 text-center text-muted">
 							To scan TOTP QR codes, Bittery needs access to your camera. Your
 							camera is only used for scanning and is not recorded.
 						</Text>

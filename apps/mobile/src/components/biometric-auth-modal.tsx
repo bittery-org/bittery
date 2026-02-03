@@ -123,7 +123,7 @@ export function BiometricAuthModal({
 					<Text className="mb-2 text-center font-bold text-foreground text-xl">
 						Password Required
 					</Text>
-					<Text className="mb-6 text-center text-muted-foreground">
+					<Text className="mb-6 text-center text-muted">
 						For your security, please enter your master password. This is
 						required every 30 days.
 					</Text>
@@ -149,7 +149,7 @@ export function BiometricAuthModal({
 					<Text className="mb-2 text-center font-bold text-foreground text-xl">
 						{biometricType || "Biometric"} Required
 					</Text>
-					<Text className="mb-6 text-center text-muted-foreground">
+					<Text className="mb-6 text-center text-muted">
 						Please authenticate to continue
 					</Text>
 					<ActivityIndicator size="large" color="#3b82f6" />
@@ -175,7 +175,7 @@ export function BiometricAuthModal({
 					<Text className="mb-2 text-center font-bold text-foreground text-xl">
 						Authentication Failed
 					</Text>
-					<Text className="mb-6 text-center text-muted-foreground">
+					<Text className="mb-6 text-center text-muted">
 						{errorMessage}
 					</Text>
 					<View className="w-full space-y-3">
@@ -212,7 +212,7 @@ export function BiometricAuthModal({
 				<Text className="mb-2 text-center font-bold text-foreground text-xl">
 					{biometricType || "Biometric"} Required
 				</Text>
-				<Text className="mb-6 text-center text-muted-foreground">
+				<Text className="mb-6 text-center text-muted">
 					Use {biometricType || "biometric"} to unlock your vault
 				</Text>
 				<View className="w-full space-y-3">

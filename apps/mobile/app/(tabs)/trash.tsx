@@ -226,7 +226,7 @@ export default function TrashScreen() {
 				edges={[]}
 			>
 				<Card variant="secondary" className="w-full max-w-sm items-center p-8">
-					<Card.Title className="mb-4 text-center text-destructive text-lg">
+					<Card.Title className="mb-4 text-center text-danger text-lg">
 						Error loading trash
 					</Card.Title>
 					<Button onPress={handleRefresh} variant="primary">

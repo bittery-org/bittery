@@ -9,13 +9,15 @@ import type { ItemDetailProps } from "./types";
 
 const StyledGlobe = withUniwind(Globe);
 const StyledCopy = withUniwind(Copy);
+const StyledUser = withUniwind(User);
+const StyledKey = withUniwind(Key);
 
 export function LoginFields({ item, onCopy }: ItemDetailProps) {
   const [showPassword, setShowPassword] = useState(false);
 
   return (
     <>
-      <FieldRow label="Username" value={item.username} onCopy={onCopy} options={{ icon: User }} />
+      <FieldRow label="Username" value={item.username} onCopy={onCopy} options={{ icon: StyledUser }} />
       <FieldRow
         label="Password"
         value={item.password}
@@ -24,10 +26,10 @@ export function LoginFields({ item, onCopy }: ItemDetailProps) {
           masked: true,
           showState: showPassword,
           setShowState: setShowPassword,
-          icon: Key,
+          icon: StyledKey,
         }}
       />
-      <FieldRow label="Website" value={item.url} onCopy={onCopy} options={{ icon: Globe }} />
+      <FieldRow label="Website" value={item.url} onCopy={onCopy} options={{ icon: StyledGlobe }} />
 
       {/* Additional URLs */}
       {item.urls &&
@@ -39,7 +41,7 @@ export function LoginFields({ item, onCopy }: ItemDetailProps) {
                 Website {index + 2}
               </Card.Description>
               <View className="flex-row items-center gap-2.5">
-                <StyledGlobe size={16} className="text-muted-foreground" />
+                <StyledGlobe size={16} className="text-muted" />
                 <Card.Title className="flex-1 font-normal text-base" selectable>
                   {url}
                 </Card.Title>
@@ -49,7 +51,7 @@ export function LoginFields({ item, onCopy }: ItemDetailProps) {
                   variant="ghost"
                   onPress={() => onCopy(url, "URL")}
                 >
-                  <StyledCopy size={18} className="text-muted-foreground" />
+                  <StyledCopy size={18} className="text-muted" />
                 </Button>
               </View>
             </Card.Body>

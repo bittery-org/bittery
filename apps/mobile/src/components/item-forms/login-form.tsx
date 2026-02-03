@@ -33,7 +33,6 @@ export const LoginForm = forwardRef<LoginFormRef, LoginFormProps>(
 			initialData?.url || initialData?.urls?.[0] || "",
 		);
 		const [showPassword, setShowPassword] = useState(false);
-		const [showPasswordGenerator, setShowPasswordGenerator] = useState(false);
 
 	useImperativeHandle(ref, () => ({
 		getData: () => ({
@@ -47,15 +46,6 @@ export const LoginForm = forwardRef<LoginFormRef, LoginFormProps>(
 
 	return (
 		<>
-			<PasswordGenerator
-				visible={showPasswordGenerator}
-				onClose={() => setShowPasswordGenerator(false)}
-				onPasswordGenerated={(generatedPassword) => {
-					setPassword(generatedPassword);
-					setShowPasswordGenerator(false);
-				}}
-			/>
-
 			<TextField className="mb-4">
 				<TextField.Label>Username</TextField.Label>
 				<TextField.Input
@@ -89,13 +79,18 @@ export const LoginForm = forwardRef<LoginFormRef, LoginFormProps>(
 							)}
 						</Pressable>
 					</View>
-					<Button
-						isIconOnly
-						onPress={() => setShowPasswordGenerator(true)}
-						variant="primary"
+					<PasswordGenerator
+						onPasswordGenerated={(generatedPassword) => {
+							setPassword(generatedPassword);
+						}}
 					>
-						<StyledSparkles size={20} className="text-accent-foreground" />
-					</Button>
+						<Button
+							isIconOnly
+							variant="primary"
+						>
+							<StyledSparkles size={20} className="text-accent-foreground" />
+						</Button>
+					</PasswordGenerator>
 				</View>
 			</TextField>
 

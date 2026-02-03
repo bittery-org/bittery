@@ -1,6 +1,14 @@
 import { MASTER_PASSWORD_REENTRY_PERIOD_MS } from "@bittery/storage";
 import { useRouter } from "expo-router";
 import {
+	Button,
+	Card,
+	Divider,
+	FormField,
+	Surface,
+	Switch,
+} from "heroui-native";
+import {
 	AlertCircle,
 	ArrowLeft,
 	ChevronRight,
@@ -9,25 +17,37 @@ import {
 	Info,
 	Lock,
 	LogOut,
+	Moon,
 	ScanFace,
 	Server,
+	Sun,
 	Trash2,
 	User,
 } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
-import {
-	Alert,
-	Platform,
-	ScrollView,
-	Switch,
-	Text,
-	TouchableOpacity,
-	View,
-} from "react-native";
+import { Alert, Platform, ScrollView, Text, View } from "react-native";
+import { Uniwind, useUniwind, withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
 import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
 import { storage } from "../../src/services/storage";
+import { saveThemePreference } from "../../src/services/theme-storage";
+
+// Create styled icon components
+const StyledUser = withUniwind(User);
+const StyledServer = withUniwind(Server);
+const StyledFingerprint = withUniwind(Fingerprint);
+const StyledScanFace = withUniwind(ScanFace);
+const StyledClock = withUniwind(Clock);
+const StyledLock = withUniwind(Lock);
+const StyledLogOut = withUniwind(LogOut);
+const StyledTrash2 = withUniwind(Trash2);
+const StyledChevronRight = withUniwind(ChevronRight);
+const StyledArrowLeft = withUniwind(ArrowLeft);
+const StyledInfo = withUniwind(Info);
+const StyledAlertCircle = withUniwind(AlertCircle);
+const StyledMoon = withUniwind(Moon);
+const StyledSun = withUniwind(Sun);
 
 const AUTO_LOCK_OPTIONS = [
 	{ label: "1 minute", value: 60 * 1000 },
@@ -42,6 +62,7 @@ export default function SettingsScreen() {
 	const router = useRouter();
 	const { activeAccount, allAccounts, refreshAccounts, removeAccount } =
 		useAccount();
+	const { theme } = useUniwind();
 
 	const [biometricAvailable, setBiometricAvailable] = useState(false);
 	const [biometricEnabled, setBiometricEnabled] = useState(false);
@@ -147,6 +168,12 @@ export default function SettingsScreen() {
 		return option?.label || "10 minutes";
 	};
 
+	const handleThemeToggle = async (isDark: boolean) => {
+		const newTheme = isDark ? "dark" : "light";
+		Uniwind.setTheme(newTheme);
+		await saveThemePreference(newTheme);
+	};
+
 	const handleLock = async () => {
 		// Clear React Native session (in-memory cache)
 		await storage.clearSession();
@@ -206,6 +233,7 @@ export default function SettingsScreen() {
 		);
 	};
 
+	// Reusable setting row component
 	const SettingRow = ({
 		icon: Icon,
 		label,
@@ -214,224 +242,319 @@ export default function SettingsScreen() {
 		rightElement,
 		destructive,
 	}: {
-		icon: typeof Lock;
+		icon: React.ComponentType<{ size: number; className?: string }>;
 		label: string;
 		value?: string;
 		onPress?: () => void;
 		rightElement?: React.ReactNode;
 		destructive?: boolean;
 	}) => (
-		<TouchableOpacity
+		<Button
 			onPress={onPress}
-			disabled={!onPress && !rightElement}
-			className="flex-row items-center border-border border-b px-4 py-4"
+			isDisabled={!onPress && !rightElement}
+			variant="ghost"
+			className="h-auto min-h-0 w-full justify-start gap-4 rounded-none px-4 py-4"
+			pressableFeedbackVariant="highlight"
 		>
 			<View
-				className={`mr-4 h-10 w-10 items-center justify-center rounded-lg ${
-					destructive ? "bg-destructive/10" : "bg-secondary"
+				className={`h-10 w-10 items-center justify-center rounded-lg ${
+					destructive ? "bg-danger-soft" : "bg-secondary"
 				}`}
 			>
-				<Icon size={20} color={destructive ? "#ef4444" : "#6b7280"} />
+				<Icon
+					size={20}
+					className={destructive ? "text-danger" : "text-surface-foreground"}
+				/>
 			</View>
 			<View className="flex-1">
 				<Text
 					className={`font-medium ${
-						destructive ? "text-destructive" : "text-foreground"
+						destructive ? "text-danger" : "text-foreground"
 					}`}
 				>
 					{label}
 				</Text>
 				{value && (
-					<Text className="text-muted-foreground text-sm">{value}</Text>
+					<Text className="text-surface-foreground text-sm">{value}</Text>
 				)}
 			</View>
-			{rightElement || (onPress && <ChevronRight size={20} color="#9ca3af" />)}
-		</TouchableOpacity>
+			{rightElement ||
+				(onPress && <StyledChevronRight size={20} className="text-surface-foreground" />)}
+		</Button>
 	);
 
 	return (
 		<SafeAreaView className="flex-1 bg-background">
 			{/* Header */}
-			<View className="flex-row items-center border-border border-b px-4 py-4">
-				<TouchableOpacity
-					onPress={() => router.back()}
-					className="mr-3 rounded-full bg-secondary p-2"
-				>
-					<ArrowLeft size={20} color="#6b7280" />
-				</TouchableOpacity>
-				<Text className="font-bold text-foreground text-xl">Settings</Text>
+			<View className="border-border border-b px-4 py-4">
+				<View className="flex-row items-center">
+					<Button
+						isIconOnly
+						variant="secondary"
+						size="sm"
+						onPress={() => router.back()}
+						className="mr-3"
+					>
+						<StyledArrowLeft size={18} className="text-foreground" />
+					</Button>
+					<Card.Title className="flex-1 text-xl">Settings</Card.Title>
+				</View>
 			</View>
 
 			<ScrollView className="flex-1">
 				{/* Account Section */}
-				<View className="mb-6">
-					<Text className="px-4 py-3 font-semibold text-muted-foreground text-sm uppercase">
+				<Surface variant="transparent" className="mb-6 gap-0 p-0">
+					<Text className="px-4 py-3 font-semibold text-surface-foreground text-sm uppercase">
 						Account
 					</Text>
-					<SettingRow
-						icon={User}
-						label={activeAccount?.name || "Account"}
-						value={activeAccount?.email}
-					/>
-					<SettingRow
-						icon={Server}
-						label="Server"
-						value={serverUrl || "Not set"}
-					/>
-				</View>
+					<Surface variant="secondary" className="gap-0 p-0">
+						<SettingRow
+							icon={StyledUser}
+							label={activeAccount?.name || "Account"}
+							value={activeAccount?.email}
+						/>
+						<Divider />
+						<SettingRow
+							icon={StyledServer}
+							label="Server"
+							value={serverUrl || "Not set"}
+						/>
+					</Surface>
+				</Surface>
+
+				{/* Appearance Section */}
+				<Surface variant="transparent" className="mb-6 gap-0 p-0">
+					<Text className="px-4 py-3 font-semibold text-surface-foreground text-sm uppercase">
+						Appearance
+					</Text>
+					<Surface variant="secondary" className="gap-0 p-0">
+						<FormField
+							isSelected={theme === "dark"}
+							onSelectedChange={handleThemeToggle}
+							className="px-4 py-4"
+						>
+							<View className="mr-4 h-10 w-10 items-center justify-center rounded-lg bg-secondary">
+								{theme === "dark" ? (
+									<StyledMoon size={20} className="text-surface-foreground" />
+								) : (
+									<StyledSun size={20} className="text-surface-foreground" />
+								)}
+							</View>
+							<View className="flex-1">
+								<FormField.Label>Dark Mode</FormField.Label>
+								<FormField.Description>
+									{theme === "dark" ? "Enabled" : "Disabled"}
+								</FormField.Description>
+							</View>
+							<FormField.Indicator>
+								<Switch />
+							</FormField.Indicator>
+						</FormField>
+					</Surface>
+				</Surface>
 
 				{/* Security Section */}
-				<View className="mb-6">
-					<Text className="px-4 py-3 font-semibold text-muted-foreground text-sm uppercase">
+				<Surface variant="transparent" className="mb-6 gap-0 p-0">
+					<Text className="px-4 py-3 font-semibold text-surface-foreground text-sm uppercase">
 						Security
 					</Text>
-					{biometricAvailable && (
+					<Surface variant="secondary" className="gap-0 p-0">
+						{biometricAvailable && (
+							<>
+								<FormField
+									isSelected={biometricEnabled}
+									onSelectedChange={handleBiometricToggle}
+									className="px-4 py-4"
+								>
+									<View className="mr-4 h-10 w-10 items-center justify-center rounded-lg bg-secondary">
+										{biometricType === "Face ID" ? (
+											<StyledScanFace size={20} className="text-surface-foreground" />
+										) : (
+											<StyledFingerprint size={20} className="text-surface-foreground" />
+										)}
+									</View>
+									<View className="flex-1">
+										<FormField.Label>
+											{biometricType || "Biometric"} Unlock
+										</FormField.Label>
+										<FormField.Description>
+											{biometricEnabled ? "Enabled" : "Disabled"}
+										</FormField.Description>
+									</View>
+									<FormField.Indicator>
+										<Switch />
+									</FormField.Indicator>
+								</FormField>
+								<Divider />
+							</>
+						)}
+
+						{/* Show notice if device doesn't support biometrics */}
+						{!biometricDetails.hasHardware && (
+							<>
+								<View className="px-4 py-4">
+									<Card variant="secondary" className="gap-2 p-3">
+										<View className="flex-row items-start gap-3">
+											<StyledInfo size={18} className="text-surface-foreground" />
+											<View className="flex-1">
+												<Card.Title className="text-sm">
+													Biometric Not Available
+												</Card.Title>
+												<Card.Description className="text-xs">
+													This device does not support biometric authentication.
+													Your vault is secured with your master password.
+												</Card.Description>
+											</View>
+										</View>
+									</Card>
+								</View>
+								<Divider />
+							</>
+						)}
+
+						{/* Show notice if hardware exists but no biometrics enrolled */}
+						{biometricDetails.hasHardware && !biometricDetails.isEnrolled && (
+							<>
+								<View className="px-4 py-4">
+									<Card variant="secondary" className="gap-2 bg-amber-50 p-3">
+										<View className="flex-row items-start gap-3">
+											<StyledAlertCircle size={18} className="text-amber-600" />
+											<View className="flex-1">
+												<Card.Title className="text-amber-800 text-sm">
+													Set Up Biometric
+												</Card.Title>
+												<Card.Description className="text-amber-700 text-xs">
+													Enable Face ID or Touch ID in your device settings to
+													use biometric unlock.
+												</Card.Description>
+											</View>
+										</View>
+									</Card>
+								</View>
+								<Divider />
+							</>
+						)}
+
 						<SettingRow
-							icon={biometricType === "Face ID" ? ScanFace : Fingerprint}
-							label={`${biometricType || "Biometric"} Unlock`}
-							value={biometricEnabled ? "Enabled" : "Disabled"}
-							rightElement={
-								<Switch
-									value={biometricEnabled}
-									onValueChange={handleBiometricToggle}
-								/>
-							}
+							icon={StyledClock}
+							label="Auto-Lock"
+							value={getAutoLockLabel(autoLockTimeout)}
+							onPress={handleAutoLockChange}
 						/>
-					)}
+						<Divider />
 
-					{/* Show notice if device doesn't support biometrics */}
-					{!biometricDetails.hasHardware && (
-						<View className="border-border border-b px-4 py-4">
-							<View className="flex-row items-start rounded-lg bg-secondary p-3">
-								<Info size={18} color="#6b7280" />
-								<View className="ml-3 flex-1">
-									<Text className="font-medium text-foreground text-sm">
-										Biometric Not Available
-									</Text>
-									<Text className="text-muted-foreground text-xs">
-										This device does not support biometric authentication. Your
-										vault is secured with your master password.
-									</Text>
+						{/* Master password re-entry info */}
+						{biometricEnabled && masterPasswordDaysRemaining !== null && (
+							<>
+								<View className="px-4 py-4">
+									<Card variant="quaternary" className="gap-2 p-3">
+										<View className="flex-row items-center gap-3">
+											<StyledLock size={18} className="text-surface-foreground" />
+											<View className="flex-1">
+												<Card.Title className="text-surface-foreground text-sm">
+													Password Check
+												</Card.Title>
+												<Card.Description className="text-muted text-xs">
+													{masterPasswordDaysRemaining > 0
+														? `Master password required in ${masterPasswordDaysRemaining} days for security verification.`
+														: "Master password required on next unlock for security verification."}
+												</Card.Description>
+											</View>
+										</View>
+									</Card>
 								</View>
-							</View>
-						</View>
-					)}
+								<Divider />
+							</>
+						)}
 
-					{/* Show notice if hardware exists but no biometrics enrolled */}
-					{biometricDetails.hasHardware && !biometricDetails.isEnrolled && (
-						<View className="border-border border-b px-4 py-4">
-							<View className="flex-row items-start rounded-lg bg-amber-50 p-3">
-								<AlertCircle size={18} color="#f59e0b" />
-								<View className="ml-3 flex-1">
-									<Text className="font-medium text-amber-800 text-sm">
-										Set Up Biometric
-									</Text>
-									<Text className="text-amber-700 text-xs">
-										Enable Face ID or Touch ID in your device settings to use
-										biometric unlock.
-									</Text>
-								</View>
-							</View>
-						</View>
-					)}
-
-					<SettingRow
-						icon={Clock}
-						label="Auto-Lock"
-						value={getAutoLockLabel(autoLockTimeout)}
-						onPress={handleAutoLockChange}
-					/>
-
-					{/* Master password re-entry info */}
-					{biometricEnabled && masterPasswordDaysRemaining !== null && (
-						<View className="border-border border-b px-4 py-4">
-							<View className="flex-row items-start rounded-lg bg-blue-50 p-3">
-								<Lock size={18} color="#3b82f6" />
-								<View className="ml-3 flex-1">
-									<Text className="font-medium text-blue-800 text-sm">
-										Password Check
-									</Text>
-									<Text className="text-blue-700 text-xs">
-										{masterPasswordDaysRemaining > 0
-											? `Master password required in ${masterPasswordDaysRemaining} days for security verification.`
-											: "Master password required on next unlock for security verification."}
-									</Text>
-								</View>
-							</View>
-						</View>
-					)}
-
-					<SettingRow icon={Lock} label="Lock Vault" onPress={handleLock} />
-				</View>
+						<SettingRow
+							icon={StyledLock}
+							label="Lock Vault"
+							onPress={handleLock}
+						/>
+					</Surface>
+				</Surface>
 
 				{/* Accessibility Section */}
-				<View className="mb-6">
-					<Text className="px-4 py-3 font-semibold text-muted-foreground text-sm uppercase">
+				<Surface variant="transparent" className="mb-6 gap-0 p-0">
+					<Text className="px-4 py-3 font-semibold text-surface-foreground text-sm uppercase">
 						Accessibility
 					</Text>
-					<View className="border-border border-b px-4 py-4">
-						<View className="flex-row items-start rounded-lg bg-secondary p-3">
-							<Info size={18} color="#6b7280" />
-							<View className="ml-3 flex-1">
-								<Text className="font-medium text-foreground text-sm">
-									Alternative Access
-								</Text>
-								<Text className="text-muted-foreground text-xs">
-									If you cannot use biometric authentication, you can always
-									unlock your vault using your master password. The password
-									option is available on the unlock screen.
-								</Text>
-							</View>
+					<Surface variant="secondary" className="gap-0 p-0">
+						<View className="px-4 py-4">
+							<Card variant="secondary" className="gap-2 p-3">
+								<View className="flex-row items-start gap-3">
+									<StyledInfo size={18} className="text-surface-foreground" />
+									<View className="flex-1">
+										<Card.Title className="text-sm">
+											Alternative Access
+										</Card.Title>
+										<Card.Description className="text-xs">
+											If you cannot use biometric authentication, you can always
+											unlock your vault using your master password. The password
+											option is available on the unlock screen.
+										</Card.Description>
+									</View>
+								</View>
+							</Card>
 						</View>
-					</View>
-				</View>
+					</Surface>
+				</Surface>
 
 				{/* Multiple Accounts */}
 				{allAccounts.length > 1 && (
-					<View className="mb-6">
-						<Text className="px-4 py-3 font-semibold text-muted-foreground text-sm uppercase">
+					<Surface variant="transparent" className="mb-6 gap-0 p-0">
+						<Text className="px-4 py-3 font-semibold text-surface-foreground text-sm uppercase">
 							Other Accounts
 						</Text>
-						{allAccounts
-							.filter((a) => a.email !== activeAccount?.email)
-							.map((account) => (
-								<SettingRow
-									key={account.email}
-									icon={User}
-									label={account.name || account.email.split("@")[0]}
-									value={account.email}
-									onPress={() => handleRemoveAccount(account.email)}
-									rightElement={
-										<TouchableOpacity
+						<Surface variant="secondary" className="gap-0 p-0">
+							{allAccounts
+								.filter((a) => a.email !== activeAccount?.email)
+								.map((account, index) => (
+									<View key={account.email}>
+										{index > 0 && <Divider />}
+										<SettingRow
+											icon={StyledUser}
+											label={account.name || account.email.split("@")[0]}
+											value={account.email}
 											onPress={() => handleRemoveAccount(account.email)}
-											className="p-2"
-										>
-											<Trash2 size={18} color="#ef4444" />
-										</TouchableOpacity>
-									}
-								/>
-							))}
-					</View>
+											rightElement={
+												<Button
+													isIconOnly
+													variant="ghost"
+													size="sm"
+													onPress={() => handleRemoveAccount(account.email)}
+												>
+													<StyledTrash2 size={18} className="text-danger" />
+												</Button>
+											}
+										/>
+									</View>
+								))}
+						</Surface>
+					</Surface>
 				)}
 
 				{/* Danger Zone */}
-				<View className="mb-6">
-					<Text className="px-4 py-3 font-semibold text-muted-foreground text-sm uppercase">
+				<Surface variant="transparent" className="mb-6 gap-0 p-0">
+					<Text className="px-4 py-3 font-semibold text-surface-foreground text-sm uppercase">
 						Danger Zone
 					</Text>
-					<SettingRow
-						icon={LogOut}
-						label="Sign Out"
-						value="Remove this account from device"
-						onPress={handleSignOut}
-						destructive
-					/>
-				</View>
+					<Surface variant="secondary" className="gap-0 p-0">
+						<SettingRow
+							icon={StyledLogOut}
+							label="Sign Out"
+							value="Remove this account from device"
+							onPress={handleSignOut}
+							destructive
+						/>
+					</Surface>
+				</Surface>
 
 				{/* App Info */}
-				<View className="items-center py-8">
-					<Text className="text-muted-foreground text-sm">Bittery Mobile</Text>
-					<Text className="text-muted-foreground text-xs">Version 0.1.0</Text>
+				<View className="items-center gap-1 py-8">
+					<Text className="text-surface-foreground text-sm">Bittery Mobile</Text>
+					<Text className="text-surface-foreground text-xs">Version 0.1.0</Text>
 				</View>
 			</ScrollView>
 		</SafeAreaView>

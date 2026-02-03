@@ -83,7 +83,7 @@ export function VaultPicker({ visible, onClose, onSelect }: VaultPickerProps) {
 										<Text className="font-medium text-foreground">
 											{vault.name}
 										</Text>
-										<Text className="text-muted-foreground text-sm">
+										<Text className="text-muted text-sm">
 											{vault.type === "team" ? "Team vault" : "Personal vault"}
 										</Text>
 									</View>

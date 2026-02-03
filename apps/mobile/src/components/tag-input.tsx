@@ -74,7 +74,7 @@ export function TagInput({
 								onPress={() => handleRemoveTag(tag)}
 								hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
 							>
-								<StyledX size={14} className="ml-1 text-muted-foreground" />
+								<StyledX size={14} className="ml-1 text-muted" />
 							</Pressable>
 						</Chip>
 					))}

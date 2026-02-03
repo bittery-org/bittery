@@ -253,7 +253,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 					<View className="mb-4 rounded-lg bg-secondary/30 p-3">
 						<View className="mb-4 flex-row gap-2">
 							<View className="flex-1">
-								<Text className="mb-1 text-muted-foreground text-xs">
+								<Text className="mb-1 text-muted text-xs">
 									Digits
 								</Text>
 								<View className="flex-row rounded-lg border border-input bg-background">
@@ -273,7 +273,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 								</View>
 							</View>
 							<TextField className="flex-1">
-								<TextField.Label className="mb-1 text-muted-foreground text-xs">
+								<TextField.Label className="mb-1 text-muted text-xs">
 									Period (sec)
 								</TextField.Label>
 								<TextField.Input
@@ -286,7 +286,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 							</TextField>
 						</View>
 						<View>
-							<Text className="mb-1 text-muted-foreground text-xs">
+							<Text className="mb-1 text-muted text-xs">
 								Algorithm
 							</Text>
 							<View className="flex-row rounded-lg border border-input bg-background">

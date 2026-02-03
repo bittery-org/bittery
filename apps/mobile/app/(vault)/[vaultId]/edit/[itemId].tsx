@@ -254,7 +254,7 @@ export default function EditItemScreen() {
 						>
 							{item.title || "Untitled"}
 						</Text>
-						<Text className="text-muted-foreground text-sm">
+						<Text className="text-muted text-sm">
 							{categoryLabel}
 						</Text>
 					</View>

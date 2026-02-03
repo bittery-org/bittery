@@ -53,7 +53,7 @@ export function ItemHeader({
         onPress={onBack}
         className="mr-3"
       >
-        <StyledArrowLeft size={20} className="text-muted-foreground" />
+        <StyledArrowLeft size={20} className="text-muted" />
       </Button>
 
       <ItemIcon
@@ -81,18 +81,18 @@ export function ItemHeader({
 
       <Button
         isIconOnly
-        variant="secondary"
+        variant="primary"
         size="sm"
         onPress={onEdit}
         className="mr-2"
       >
-        <StyledEdit size={18} className="text-current" />
+        <StyledEdit size={18} className="text-accent-foreground" />
       </Button>
 
       <Popover>
         <Popover.Trigger ref={popoverRef} asChild>
           <Button isIconOnly variant="ghost" size="sm">
-            <StyledMoreVertical size={18} className="text-current" />
+            <StyledMoreVertical size={18} className="text-muted" />
           </Button>
         </Popover.Trigger>
         <Popover.Portal>
@@ -104,7 +104,7 @@ export function ItemHeader({
                 popoverRef.current?.close();
                 onEdit();
               }}>
-                <StyledEdit size={18} className="text-white" />
+                <StyledEdit size={18} className="text-current" />
                 <Button.Label>Edit Item</Button.Label>
               </Button>
               <Button

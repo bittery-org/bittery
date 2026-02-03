@@ -89,7 +89,7 @@ export function ConflictResolutionModal({
 							<Text className="font-bold text-foreground text-lg">
 								Sync Conflict
 							</Text>
-							<Text className="text-muted-foreground text-sm">
+							<Text className="text-muted text-sm">
 								Choose which version to keep
 							</Text>
 						</View>
@@ -129,7 +129,7 @@ export function ConflictResolutionModal({
 								</View>
 
 								<View className="flex-row items-center justify-between">
-									<Text className="text-muted-foreground text-sm">
+									<Text className="text-muted text-sm">
 										Modified locally
 									</Text>
 									<Text className="font-medium text-foreground text-sm">
@@ -138,7 +138,7 @@ export function ConflictResolutionModal({
 								</View>
 
 								<View className="mt-2 flex-row items-center justify-between">
-									<Text className="text-muted-foreground text-sm">
+									<Text className="text-muted text-sm">
 										Local version
 									</Text>
 									<Text className="font-mono text-foreground text-sm">
@@ -151,7 +151,7 @@ export function ConflictResolutionModal({
 							<View className="my-2 flex-row items-center justify-center">
 								<View className="h-px flex-1 bg-border" />
 								<View className="mx-4 rounded-full bg-secondary px-4 py-1">
-									<Text className="font-bold text-muted-foreground text-sm">
+									<Text className="font-bold text-muted text-sm">
 										VS
 									</Text>
 								</View>
@@ -180,7 +180,7 @@ export function ConflictResolutionModal({
 
 								{isDeleteConflict ? (
 									<View className="mb-2">
-										<Text className="text-muted-foreground italic">
+										<Text className="text-muted italic">
 											This item was deleted on another device
 										</Text>
 									</View>
@@ -193,7 +193,7 @@ export function ConflictResolutionModal({
 								)}
 
 								<View className="flex-row items-center justify-between">
-									<Text className="text-muted-foreground text-sm">
+									<Text className="text-muted text-sm">
 										{isDeleteConflict ? "Deleted at" : "Modified at"}
 									</Text>
 									<Text className="font-medium text-foreground text-sm">
@@ -203,7 +203,7 @@ export function ConflictResolutionModal({
 
 								{!isDeleteConflict && (
 									<View className="mt-2 flex-row items-center justify-between">
-										<Text className="text-muted-foreground text-sm">
+										<Text className="text-muted text-sm">
 											Server version
 										</Text>
 										<Text className="font-mono text-foreground text-sm">
@@ -222,7 +222,7 @@ export function ConflictResolutionModal({
 
 							<View className="mb-3 flex-row items-start">
 								<View className="mt-1 mr-3 h-2 w-2 rounded-full bg-blue-500" />
-								<Text className="flex-1 text-muted-foreground text-sm">
+								<Text className="flex-1 text-muted text-sm">
 									<Text className="font-semibold text-foreground">
 										Keep Local:
 									</Text>{" "}
@@ -234,7 +234,7 @@ export function ConflictResolutionModal({
 
 							<View className="flex-row items-start">
 								<View className="mt-1 mr-3 h-2 w-2 rounded-full bg-green-500" />
-								<Text className="flex-1 text-muted-foreground text-sm">
+								<Text className="flex-1 text-muted text-sm">
 									<Text className="font-semibold text-foreground">
 										Keep Server:
 									</Text>{" "}

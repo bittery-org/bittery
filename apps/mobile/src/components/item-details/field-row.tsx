@@ -28,7 +28,7 @@ export function FieldRow({ label, value, onCopy, options }: FieldRowProps) {
         <Card.Description className="mb-1.5">{label}</Card.Description>
         <View className="flex-row items-center gap-2.5">
           {options?.icon && (
-            <options.icon size={16} className="text-muted-foreground" />
+            <options.icon size={16} className="text-muted" />
           )}
           <Card.Title
             className="flex-1 font-normal text-base"
@@ -47,9 +47,9 @@ export function FieldRow({ label, value, onCopy, options }: FieldRowProps) {
               onPress={() => options.setShowState?.(!options.showState)}
             >
               {options.showState ? (
-                <StyledEyeOff size={18} className="text-muted-foreground" />
+                <StyledEyeOff size={18} className="text-muted" />
               ) : (
-                <StyledEye size={18} className="text-muted-foreground" />
+                <StyledEye size={18} className="text-muted" />
               )}
             </Button>
           )}
@@ -59,7 +59,7 @@ export function FieldRow({ label, value, onCopy, options }: FieldRowProps) {
             variant="ghost"
             onPress={() => onCopy(value, label)}
           >
-            <StyledCopy size={18} className="text-muted-foreground" />
+            <StyledCopy size={18} className="text-muted" />
           </Button>
         </View>
       </Card.Body>

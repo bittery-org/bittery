@@ -43,7 +43,7 @@ export function CreditCardFields({ item, onCopy }: ItemDetailProps) {
               )}
             </View>
             <View className="flex-row items-center gap-2.5">
-              <StyledCreditCard size={16} className="text-muted-foreground" />
+              <StyledCreditCard size={16} className="text-muted" />
               <Card.Title
                 className="flex-1 font-mono font-normal text-base"
                 selectable
@@ -60,9 +60,9 @@ export function CreditCardFields({ item, onCopy }: ItemDetailProps) {
                 onPress={() => setShowCardNumber(!showCardNumber)}
               >
                 {showCardNumber ? (
-                  <StyledEyeOff size={18} className="text-muted-foreground" />
+                  <StyledEyeOff size={18} className="text-muted" />
                 ) : (
-                  <StyledEye size={18} className="text-muted-foreground" />
+                  <StyledEye size={18} className="text-muted" />
                 )}
               </Button>
               <Button
@@ -71,7 +71,7 @@ export function CreditCardFields({ item, onCopy }: ItemDetailProps) {
                 variant="ghost"
                 onPress={() => onCopy(item.cardNumber ?? "", "Card Number")}
               >
-                <StyledCopy size={18} className="text-muted-foreground" />
+                <StyledCopy size={18} className="text-muted" />
               </Button>
             </View>
           </Card.Body>

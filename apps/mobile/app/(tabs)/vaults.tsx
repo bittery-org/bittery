@@ -85,7 +85,7 @@ export default function VaultsScreen() {
 
 	const renderSectionHeader = (title: string, count: number) => (
 		<View className="flex-row items-center px-4 pt-4 pb-2">
-			<Card.Title className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+			<Card.Title className="font-semibold text-muted text-xs uppercase tracking-wide">
 				{title} ({count})
 			</Card.Title>
 		</View>

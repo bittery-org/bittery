@@ -45,7 +45,7 @@ export function CustomFields({ fields, onCopy }: CustomFieldsProps) {
                 variant="ghost"
                 onPress={() => onCopy(field.value, field.label)}
               >
-                <StyledCopy size={18} className="text-muted-foreground" />
+                <StyledCopy size={18} className="text-muted" />
               </Button>
             </View>
           </Card.Body>
