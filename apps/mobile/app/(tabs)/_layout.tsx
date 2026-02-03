@@ -108,6 +108,7 @@ export default function TabsLayout() {
 				name="trash"
 				options={{
 					href: null,
+					headerTitle: "Trash",
 				}}
 			/>
 		</Tabs>
