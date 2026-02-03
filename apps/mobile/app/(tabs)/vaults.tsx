@@ -208,7 +208,6 @@ export default function VaultsScreen() {
 							variant="primary"
 							size="sm"
 							onPress={handleCreateVault}
-							className="mr-4"
 						>
 							<StyledPlus size={18} className="text-accent-foreground" />
 						</Button>

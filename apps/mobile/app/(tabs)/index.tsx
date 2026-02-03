@@ -91,7 +91,6 @@ export default function AllItemsScreen() {
               variant="primary"
               size="sm"
               onPress={handleCreateItem}
-              className="mr-4"
             >
               <StyledPlus size={18} className="text-accent-foreground" />
             </Button>
