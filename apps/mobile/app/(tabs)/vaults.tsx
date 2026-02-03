@@ -42,6 +42,7 @@ export default function VaultsScreen() {
 			variant: "default",
 			label: "Create Vault",
 			description: "Vault creation is coming soon. For now, create vaults from the web app.",
+			placement: "bottom",
 		});
 	};
 

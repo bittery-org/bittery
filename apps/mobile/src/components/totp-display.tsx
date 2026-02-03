@@ -133,6 +133,7 @@ export function TotpDisplay({
 				toast.show({
 					variant: "success",
 					label: "Code copied to clipboard",
+					placement: "bottom",
 				});
 			}
 

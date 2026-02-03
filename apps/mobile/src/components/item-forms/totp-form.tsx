@@ -93,6 +93,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 			toast.show({
 				variant: "success",
 				label: "TOTP data imported from QR code",
+				placement: "bottom",
 			});
 		};
 
@@ -103,6 +104,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 					toast.show({
 						variant: "warning",
 						label: "No text found in clipboard",
+						placement: "bottom",
 					});
 					return;
 				}
@@ -127,11 +129,13 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 					toast.show({
 						variant: "success",
 						label: "Secret key pasted from clipboard",
+						placement: "bottom",
 					});
 				} else {
 					toast.show({
 						variant: "danger",
 						label: "The clipboard content is not a valid TOTP secret or otpauth:// URI",
+						placement: "bottom",
 					});
 				}
 			} catch (error) {
@@ -139,6 +143,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 				toast.show({
 					variant: "danger",
 					label: "Failed to read from clipboard",
+					placement: "bottom",
 				});
 			}
 		};

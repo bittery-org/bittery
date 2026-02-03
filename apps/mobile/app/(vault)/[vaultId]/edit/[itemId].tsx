@@ -103,6 +103,7 @@ export default function EditItemScreen() {
 			toast.show({
 				variant: "danger",
 				label: "Title is required",
+				placement: "bottom",
 			});
 			return;
 		}
@@ -128,6 +129,7 @@ export default function EditItemScreen() {
 					toast.show({
 						variant: "danger",
 						label: "Please enter a valid TOTP secret key",
+						placement: "bottom",
 					});
 					return;
 				}
@@ -181,6 +183,7 @@ export default function EditItemScreen() {
 			toast.show({
 				variant: "success",
 				label: "Item updated successfully",
+				placement: "bottom",
 			});
 			router.back();
 		} catch (error) {
@@ -188,6 +191,7 @@ export default function EditItemScreen() {
 			toast.show({
 				variant: "danger",
 				label: error instanceof Error ? error.message : "Failed to update item",
+				placement: "bottom",
 			});
 		} finally {
 			setSaving(false);

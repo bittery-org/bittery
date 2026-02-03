@@ -47,6 +47,7 @@ export function AccountSwitcher() {
 			toast.show({
 				variant: "danger",
 				label: "Failed to switch account. Please try again.",
+				placement: "bottom",
 			});
 		} finally {
 			setSwitching(false);

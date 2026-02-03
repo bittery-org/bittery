@@ -69,6 +69,7 @@ export default function CreateItemScreen() {
 			toast.show({
 				variant: "danger",
 				label: "Title is required",
+				placement: "bottom",
 			});
 			return;
 		}
@@ -77,6 +78,7 @@ export default function CreateItemScreen() {
 			toast.show({
 				variant: "danger",
 				label: "Please select a vault",
+				placement: "bottom",
 			});
 			return;
 		}
@@ -104,6 +106,7 @@ export default function CreateItemScreen() {
 					toast.show({
 						variant: "danger",
 						label: "Please enter a valid TOTP secret key",
+						placement: "bottom",
 					});
 					return;
 				}
@@ -158,6 +161,7 @@ export default function CreateItemScreen() {
 			toast.show({
 				variant: "success",
 				label: "Item created successfully",
+				placement: "bottom",
 			});
 			router.back();
 		} catch (error) {
@@ -165,6 +169,7 @@ export default function CreateItemScreen() {
 			toast.show({
 				variant: "danger",
 				label: error instanceof Error ? error.message : "Failed to create item",
+				placement: "bottom",
 			});
 		} finally {
 			setSaving(false);

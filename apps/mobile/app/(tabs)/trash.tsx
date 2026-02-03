@@ -71,12 +71,14 @@ export default function TrashScreen() {
 			toast.show({
 				variant: "success",
 				label: "Item restored successfully",
+				placement: "bottom",
 			});
 		} catch (error) {
 			console.error("Failed to restore item:", error);
 			toast.show({
 				variant: "danger",
 				label: "Failed to restore item. Please try again.",
+				placement: "bottom",
 			});
 		} finally {
 			setActionInProgress(null);
@@ -103,12 +105,14 @@ export default function TrashScreen() {
 							toast.show({
 								variant: "success",
 								label: "Item permanently deleted",
+								placement: "bottom",
 							});
 						} catch (error) {
 							console.error("Failed to delete item:", error);
 							toast.show({
 								variant: "danger",
 								label: "Failed to delete item. Please try again.",
+								placement: "bottom",
 							});
 						} finally {
 							setActionInProgress(null);

@@ -1,4 +1,4 @@
-import { useVaultItems } from "@bittery/hooks";
+import { useDeleteItem, useVaultItems } from "@bittery/hooks";
 import {
   detectCardBrand,
   formatCardNumber as formatCardNumberUtil,
@@ -7,7 +7,7 @@ import {
 import type { ItemCategory } from "@bittery/shared/types";
 import * as Clipboard from "expo-clipboard";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Button, Card, Chip, Skeleton, useToast } from "heroui-native";
+import { Button, Card, Chip, Popover, Skeleton, useToast } from "heroui-native";
 import {
   ArrowLeft,
   Copy,
@@ -18,15 +18,18 @@ import {
   Globe,
   Key,
   Mail,
+  MoreVertical,
   Star,
+  Trash2,
   User,
 } from "lucide-react-native";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ScrollView, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { ItemIcon } from "@/components/item-icon";
 import { SafeAreaView } from "@/components/safe-area-view";
 import { TotpDisplay } from "../../../src/components/totp-display";
+import type { PopoverTriggerRef } from "heroui-native";
 
 // Create styled icon components
 const StyledArrowLeft = withUniwind(ArrowLeft);
@@ -37,6 +40,8 @@ const StyledEyeOff = withUniwind(EyeOff);
 const StyledGlobe = withUniwind(Globe);
 const StyledStar = withUniwind(Star);
 const StyledCreditCard = withUniwind(CreditCard);
+const StyledMoreVertical = withUniwind(MoreVertical);
+const StyledTrash2 = withUniwind(Trash2);
 
 const categoryLabels: Record<ItemCategory, string> = {
   login: "Login",
@@ -54,12 +59,14 @@ export default function ItemDetailScreen() {
   }>();
 
   const { items, isLoading, error } = useVaultItems(vaultId);
+  const deleteItem = useDeleteItem();
   const [showPassword, setShowPassword] = useState(false);
   const [showCardNumber, setShowCardNumber] = useState(false);
   const [showCvv, setShowCvv] = useState(false);
   const [showSsn, setShowSsn] = useState(false);
   const [showTotpSecret, setShowTotpSecret] = useState(false);
   const { toast } = useToast();
+  const popoverRef = useRef<PopoverTriggerRef>(null);
 
   const item = items.find((i) => i.id === itemId);
 
@@ -71,6 +78,26 @@ export default function ItemDetailScreen() {
       description: `${label} has been copied to clipboard.`,
       placement: "bottom",
     });
+  };
+
+  const handleDelete = async () => {
+    try {
+      await deleteItem.mutateAsync({ itemId, vaultId });
+      toast.show({
+        variant: "accent",
+        label: "Item moved to trash",
+        description: "The item has been moved to trash.",
+        placement: "bottom",
+      });
+      router.back();
+    } catch (error) {
+      toast.show({
+        variant: "danger",
+        label: "Failed to delete item",
+        description: error instanceof Error ? error.message : "Unknown error",
+        placement: "bottom",
+      });
+    }
   };
 
   const maskValue = (value: string, visibleChars = 4) => {
@@ -499,13 +526,49 @@ export default function ItemDetailScreen() {
           </Card.Description>
         </View>
         <Button
-          variant="primary"
+          isIconOnly
+          variant="secondary"
           size="sm"
           onPress={() => router.push(`/(vault)/${vaultId}/edit/${itemId}`)}
+          className="mr-2"
         >
-          <StyledEdit size={16} className="text-accent-foreground" />
-          <Button.Label>Edit</Button.Label>
+          <StyledEdit size={18} className="text-muted-foreground" />
         </Button>
+        <Popover>
+          <Popover.Trigger ref={popoverRef} asChild>
+            <Button isIconOnly variant="ghost" size="sm">
+              <StyledMoreVertical size={18} className="text-muted-foreground" />
+            </Button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Overlay />
+            <Popover.Content presentation="bottom-sheet">
+              <View className="gap-2 px-4 pb-6 pt-2">
+                <Popover.Title className="mb-2">Item Options</Popover.Title>
+                <Button
+                  variant="primary"
+                  onPress={() => {
+                    popoverRef.current?.close();
+                    router.push(`/(vault)/${vaultId}/edit/${itemId}`);
+                  }}
+                >
+                  <StyledEdit size={18} className="text-white" />
+                  <Button.Label>Edit Item</Button.Label>
+                </Button>
+                <Button
+                  variant="danger"
+                  onPress={handleDelete}
+                  isDisabled={deleteItem.isPending}
+                >
+                  <StyledTrash2 size={18} className="text-danger-foreground" />
+                  <Button.Label>
+                    {deleteItem.isPending ? "Moving to trash..." : "Move to Trash"}
+                  </Button.Label>
+                </Button>
+              </View>
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover>
       </View>
 
       <ScrollView className="flex-1 px-4 pt-4">
