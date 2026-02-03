@@ -6,6 +6,7 @@ import {
 	useSessionState,
 } from "@bittery/hooks";
 import { useRouter } from "expo-router";
+import { Avatar, Button, Select, TextField, useToast } from "heroui-native";
 import {
 	AlertCircle,
 	ChevronDown,
@@ -16,21 +17,33 @@ import {
 	Lock,
 	ScanFace,
 	UserPlus,
+	Users,
 } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import {
 	Alert,
 	KeyboardAvoidingView,
-	Modal,
 	Platform,
+	Pressable,
 	ScrollView,
 	Text,
-	TextInput,
-	TouchableOpacity,
 	View,
 } from "react-native";
-import { useToast } from "heroui-native";
+import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
+
+// Create styled icon components
+const StyledLock = withUniwind(Lock);
+const StyledEye = withUniwind(Eye);
+const StyledEyeOff = withUniwind(EyeOff);
+const StyledFingerprint = withUniwind(Fingerprint);
+const StyledScanFace = withUniwind(ScanFace);
+const StyledKeyRound = withUniwind(KeyRound);
+const StyledAlertCircle = withUniwind(AlertCircle);
+const StyledUserPlus = withUniwind(UserPlus);
+const StyledChevronDown = withUniwind(ChevronDown);
+const StyledUsers = withUniwind(Users);
+
 import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
 import { arrayBufferToBase64 } from "../../src/lib/crypto";
@@ -56,13 +69,16 @@ export default function UnlockScreen() {
 
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
-	const [showAccountPicker, setShowAccountPicker] = useState(false);
 	const [targetAccount, setTargetAccount] = useState<AccountMetadata | null>(
 		null,
 	);
 	const [unlockMode, setUnlockMode] = useState<"single" | "all">(
 		isAllAccountsMode ? "all" : "single",
 	);
+	const [selectedAccountValue, setSelectedAccountValue] = useState<{
+		value: string;
+		label: string;
+	}>({ value: "", label: "" });
 	const [allAccountsStatus, setAllAccountsStatus] = useState<{
 		canBiometricUnlock: boolean;
 		requiresPasswordReentry: boolean;
@@ -87,28 +103,39 @@ export default function UnlockScreen() {
 		setBiometricType(type ?? null);
 	}, [platformStorage]);
 
-	const setNativeMuksForEmails = useCallback(
-		async (emails: string[]) => {
-			if (Platform.OS !== "android" || !CredentialProvider.isAvailable()) return;
+	const setNativeMuksForEmails = useCallback(async (emails: string[]) => {
+		if (Platform.OS !== "android" || !CredentialProvider.isAvailable()) return;
 
-			for (const email of emails) {
-				const muk = await storage.getMasterUnlockKey(email);
-				const sessionData = await storage.getStoredSessionData(email);
-				if (muk && sessionData?.userId) {
-					const mukBase64 = arrayBufferToBase64(muk);
-					CredentialProvider.setMasterUnlockKey(mukBase64, sessionData.userId);
-				}
+		for (const email of emails) {
+			const muk = await storage.getMasterUnlockKey(email);
+			const sessionData = await storage.getStoredSessionData(email);
+			if (muk && sessionData?.userId) {
+				const mukBase64 = arrayBufferToBase64(muk);
+				CredentialProvider.setMasterUnlockKey(mukBase64, sessionData.userId);
 			}
-		},
-		[],
-	);
+		}
+	}, []);
 
 	useEffect(() => {
 		if (activeAccount && unlockMode === "single") {
 			setTargetAccount(activeAccount);
+			setSelectedAccountValue({
+				value: activeAccount.email,
+				label:
+					activeAccount.teamName ||
+					activeAccount.name ||
+					activeAccount.email.split("@")[0],
+			});
 		}
 		if (!activeAccount && unlockMode === "single" && allAccounts.length > 0) {
 			setTargetAccount(allAccounts[0]);
+			setSelectedAccountValue({
+				value: allAccounts[0].email,
+				label:
+					allAccounts[0].teamName ||
+					allAccounts[0].name ||
+					allAccounts[0].email.split("@")[0],
+			});
 		}
 	}, [activeAccount, allAccounts, unlockMode]);
 
@@ -116,6 +143,10 @@ export default function UnlockScreen() {
 		if (activeAccountConfig?.type === "all") {
 			setUnlockMode("all");
 			setTargetAccount(null);
+			setSelectedAccountValue({
+				value: "all",
+				label: "All Accounts",
+			});
 		}
 	}, [activeAccountConfig]);
 
@@ -151,9 +182,7 @@ export default function UnlockScreen() {
 			const [biometricFlags, reentryFlags] = await Promise.all([
 				Promise.all(emails.map((email) => storage.canBiometricUnlock(email))),
 				Promise.all(
-					emails.map((email) =>
-						storage.isMasterPasswordReentryRequired(email),
-					),
+					emails.map((email) => storage.isMasterPasswordReentryRequired(email)),
 				),
 			]);
 
@@ -301,7 +330,10 @@ export default function UnlockScreen() {
 
 	const finalizeAllAccountsUnlock = useCallback(
 		async (
-			result: { unlocked: string[]; failed: Array<{ email: string; error: string }> },
+			result: {
+				unlocked: string[];
+				failed: Array<{ email: string; error: string }>;
+			},
 			showPartialToast: boolean,
 		) => {
 			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
@@ -329,7 +361,13 @@ export default function UnlockScreen() {
 
 			router.replace("/(vault)");
 		},
-		[allAccounts.length, refreshAccounts, router, setNativeMuksForEmails, toast],
+		[
+			allAccounts.length,
+			refreshAccounts,
+			router,
+			setNativeMuksForEmails,
+			toast,
+		],
 	);
 
 	const quickUnlockAll = useQuickUnlockAll({
@@ -367,10 +405,7 @@ export default function UnlockScreen() {
 					setBiometricError("Biometric authentication failed.");
 					return;
 				}
-				await finalizeAllAccountsUnlock(
-					result,
-					result.failed.length > 0,
-				);
+				await finalizeAllAccountsUnlock(result, result.failed.length > 0);
 			} catch (error) {
 				console.error("Biometric unlock all failed:", error);
 				setBiometricError("Biometric authentication failed.");
@@ -423,18 +458,35 @@ export default function UnlockScreen() {
 		});
 	};
 
-	const handleSwitchAccount = async (account: AccountMetadata) => {
-		setShowAccountPicker(false);
-		setUnlockMode("single");
-		setTargetAccount(account);
-		setPassword("");
-		setBiometricError(null);
+	// Get initials from email or name
+	const getInitials = (account?: AccountMetadata | null) => {
+		if (!account) return "?";
+		if (account.name) {
+			const parts = account.name.split(" ");
+			if (parts.length >= 2) {
+				return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+			}
+			return account.name.substring(0, 2).toUpperCase();
+		}
+		return account.email.substring(0, 2).toUpperCase();
 	};
 
-	const handleSelectAllAccounts = () => {
-		setShowAccountPicker(false);
-		setUnlockMode("all");
-		setTargetAccount(null);
+	const handleAccountChange = (
+		option: { value: string; label: string } | undefined,
+	) => {
+		if (!option) return;
+
+		setSelectedAccountValue(option);
+		if (option.value === "all") {
+			setUnlockMode("all");
+			setTargetAccount(null);
+		} else {
+			const account = allAccounts.find((acc) => acc.email === option.value);
+			if (account) {
+				setUnlockMode("single");
+				setTargetAccount(account);
+			}
+		}
 		setPassword("");
 		setBiometricError(null);
 	};
@@ -452,7 +504,7 @@ export default function UnlockScreen() {
 	const requiresPasswordReentry =
 		unlockMode === "all"
 			? allAccountsStatus.requiresPasswordReentry
-			: sessionState?.requiresPasswordReentry ?? false;
+			: (sessionState?.requiresPasswordReentry ?? false);
 	const canUseBiometric =
 		unlockMode === "all"
 			? allAccountsStatus.canBiometricUnlock &&
@@ -464,19 +516,26 @@ export default function UnlockScreen() {
 		<SafeAreaView className="flex-1 bg-background">
 			<KeyboardAvoidingView
 				behavior={Platform.OS === "ios" ? "padding" : "height"}
+				contentContainerClassName="flex-1"
 				className="flex-1"
 			>
 				<ScrollView
 					className="flex-1"
-					contentContainerStyle={{ flexGrow: 1 }}
+					contentContainerClassName="flex-1"
 					keyboardShouldPersistTaps="handled"
 				>
 					<View className="flex-1 justify-center px-6 py-8">
 						{/* Header */}
 						<View className="mb-8 items-center">
-							<View className="mb-4 h-20 w-20 items-center justify-center rounded-2xl bg-primary">
+							<Button
+								isIconOnly
+								variant="primary"
+								size="lg"
+								className="mb-4 h-20 w-20 rounded-2xl"
+								isDisabled
+							>
 								<Lock size={40} color="#fff" />
-							</View>
+							</Button>
 							<Text className="font-bold text-2xl text-foreground">
 								Unlock Bittery
 							</Text>
@@ -485,40 +544,130 @@ export default function UnlockScreen() {
 						{/* Account Selector */}
 						<View className="mb-6">
 							{allAccounts.length > 1 ? (
-								<TouchableOpacity
-									onPress={() => setShowAccountPicker(true)}
-									className="flex-row items-center justify-center rounded-lg border border-input bg-background px-4 py-3"
+								<Select
+									value={selectedAccountValue}
+									onValueChange={handleAccountChange}
 								>
-									<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-primary">
-										<Text className="font-semibold text-primary-foreground">
-											{unlockMode === "all"
-												? "All"
-												: targetAccount?.name.charAt(0).toUpperCase() || "A"}
-										</Text>
-									</View>
-									<View className="flex-1">
-										<Text className="font-medium text-foreground">
-											{unlockMode === "all"
-												? "All Accounts"
-												: targetAccount?.teamName ||
-													targetAccount?.name ||
-													targetAccount?.email.split("@")[0]}
-										</Text>
-										<Text className="text-muted text-sm">
-											{unlockMode === "all"
-												? `${allAccounts.length} accounts`
-												: targetAccount?.email}
-										</Text>
-									</View>
-									<ChevronDown size={20} color="#6b7280" />
-								</TouchableOpacity>
+									<Select.Trigger>
+										<View className="flex-row items-center justify-center gap-3 rounded-2xl bg-surface px-4 py-3">
+											{unlockMode === "all" ? (
+												<Avatar
+													size="md"
+													alt="All Accounts"
+												>
+													<Avatar.Fallback>
+														<StyledUsers size={20} className="text-muted" />
+													</Avatar.Fallback>
+												</Avatar>
+											) : (
+												<Avatar
+													size="md"
+													alt={
+														targetAccount?.name ||
+														targetAccount?.email ||
+														"Account"
+													}
+												>
+													{targetAccount?.teamAvatarUrl && (
+														<Avatar.Image
+															source={{ uri: targetAccount.teamAvatarUrl }}
+														/>
+													)}
+													<Avatar.Fallback>
+														{getInitials(targetAccount)}
+													</Avatar.Fallback>
+												</Avatar>
+											)}
+											<View className="flex-1">
+												<Text className="font-medium text-foreground">
+													{unlockMode === "all"
+														? "All Accounts"
+														: targetAccount?.teamName ||
+															targetAccount?.name ||
+															targetAccount?.email.split("@")[0]}
+												</Text>
+												<Text className="text-muted text-sm">
+													{unlockMode === "all"
+														? `${allAccounts.length} accounts`
+														: targetAccount?.email}
+												</Text>
+											</View>
+											<StyledChevronDown size={20} className="text-muted" />
+										</View>
+									</Select.Trigger>
+									<Select.Portal>
+										<Select.Overlay />
+										<Select.Content>
+											<Select.ListLabel>Select Account</Select.ListLabel>
+											{allAccounts.length > 1 && (
+												<Select.Item value="all" label="All Accounts">
+													<View className="flex-row items-center gap-3">
+														<Avatar size="md" alt="All Accounts">
+															<Avatar.Fallback>
+																<StyledUsers size={20} className="text-muted" />
+															</Avatar.Fallback>
+														</Avatar>
+														<View className="flex-1">
+															<Select.ItemLabel />
+															<Text className="text-muted text-sm">
+																{allAccounts.length} accounts
+															</Text>
+														</View>
+													</View>
+													<Select.ItemIndicator />
+												</Select.Item>
+											)}
+											{allAccounts.map((account) => (
+												<Select.Item
+													key={account.email}
+													value={account.email}
+													label={
+														account.teamName ||
+														account.name ||
+														account.email.split("@")[0]
+													}
+												>
+													<View className="flex-row items-center gap-3">
+														<Avatar size="md" alt={account.name || account.email}>
+															{account.teamAvatarUrl && (
+																<Avatar.Image
+																	source={{ uri: account.teamAvatarUrl }}
+																/>
+															)}
+															<Avatar.Fallback>
+																{getInitials(account)}
+															</Avatar.Fallback>
+														</Avatar>
+														<View className="flex-1">
+															<Select.ItemLabel />
+															<Text className="text-muted text-sm">
+																{account.email}
+															</Text>
+														</View>
+													</View>
+													<Select.ItemIndicator />
+												</Select.Item>
+											))}
+										</Select.Content>
+									</Select.Portal>
+								</Select>
 							) : (
 								targetAccount && (
 									<View className="items-center">
-										<View className="mb-2 h-12 w-12 items-center justify-center rounded-full bg-primary">
-											<Text className="font-semibold text-lg text-primary-foreground">
-												{targetAccount.name.charAt(0).toUpperCase()}
-											</Text>
+										<View className="mb-2">
+											<Avatar
+												size="lg"
+												alt={targetAccount.name || targetAccount.email}
+											>
+												{targetAccount.teamAvatarUrl && (
+													<Avatar.Image
+														source={{ uri: targetAccount.teamAvatarUrl }}
+													/>
+												)}
+												<Avatar.Fallback>
+													{getInitials(targetAccount)}
+												</Avatar.Fallback>
+											</Avatar>
 										</View>
 										<Text className="font-medium text-foreground">
 											{targetAccount.email}
@@ -531,7 +680,7 @@ export default function UnlockScreen() {
 						{/* Master Password Required Notice */}
 						{requiresPasswordReentry && (
 							<View className="mb-4 flex-row items-start rounded-lg bg-amber-50 p-4">
-								<KeyRound size={20} color="#f59e0b" />
+								<StyledKeyRound size={20} className="text-amber-600" />
 								<View className="ml-3 flex-1">
 									<Text className="font-medium text-amber-800">
 										Password Required
@@ -547,7 +696,7 @@ export default function UnlockScreen() {
 						{/* Biometric Error Message */}
 						{biometricError && !requiresPasswordReentry && (
 							<View className="mb-4 flex-row items-start rounded-lg bg-red-50 p-4">
-								<AlertCircle size={20} color="#ef4444" />
+								<StyledAlertCircle size={20} className="text-red-500" />
 								<Text className="ml-3 flex-1 text-red-700 text-sm">
 									{biometricError}
 								</Text>
@@ -557,24 +706,25 @@ export default function UnlockScreen() {
 						{/* Biometric Unlock */}
 						{canUseBiometric && (
 							<View className="mb-4">
-								<TouchableOpacity
+								<Button
 									onPress={handleBiometricUnlock}
-									disabled={loading}
-									className={`flex-row items-center justify-center rounded-lg border border-input py-4 ${
-										loading ? "opacity-50" : ""
-									}`}
+									isDisabled={loading}
+									variant="secondary"
+									size="lg"
 								>
-									{biometricType === "Face ID" ? (
-										<ScanFace size={24} color="#6b7280" />
-									) : (
-										<Fingerprint size={24} color="#6b7280" />
-									)}
-									<Text className="ml-3 font-medium text-foreground">
-										{loading
-											? "Authenticating..."
-											: `Unlock with ${biometricType || "Biometric"}`}
-									</Text>
-								</TouchableOpacity>
+									<View className="flex-row items-center">
+										{biometricType === "Face ID" ? (
+											<StyledScanFace size={24} className="text-muted" />
+										) : (
+											<StyledFingerprint size={24} className="text-muted" />
+										)}
+										<Text className="ml-3 font-medium text-foreground">
+											{loading
+												? "Authenticating..."
+												: `Unlock with ${biometricType || "Biometric"}`}
+										</Text>
+									</View>
+								</Button>
 								<View className="my-4 flex-row items-center">
 									<View className="h-px flex-1 bg-border" />
 									<Text className="mx-4 text-muted">or</Text>
@@ -584,132 +734,62 @@ export default function UnlockScreen() {
 						)}
 
 						{/* Password Form */}
-						<View className="flex gap-5">
-							<View>
-								<Text className="mb-2 font-medium text-foreground text-sm">
-									Password
-								</Text>
-								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
-									<Lock size={20} color="#6b7280" />
-									<TextInput
-										className="ml-3 flex-1 py-3 text-foreground"
+						<View className="gap-4">
+							<TextField>
+								<TextField.Label>Password</TextField.Label>
+								<View className="w-full flex-row items-center">
+									<TextField.Input
 										placeholder="Enter your password"
 										value={password}
 										onChangeText={setPassword}
 										secureTextEntry={!showPassword}
 										textContentType="password"
 										autoFocus
+										className="flex-1 pr-12 pl-12"
 									/>
-									<TouchableOpacity
+									<StyledLock
+										size={20}
+										className="absolute left-3.5 text-muted"
+										pointerEvents="none"
+									/>
+									<Pressable
 										onPress={() => setShowPassword(!showPassword)}
+										className="absolute right-4"
 									>
 										{showPassword ? (
-											<EyeOff size={20} color="#6b7280" />
+											<StyledEyeOff size={20} className="text-muted" />
 										) : (
-											<Eye size={20} color="#6b7280" />
+											<StyledEye size={20} className="text-muted" />
 										)}
-									</TouchableOpacity>
+									</Pressable>
 								</View>
-							</View>
+							</TextField>
 
-							<TouchableOpacity
+							<Button
 								onPress={handlePasswordUnlock}
-								disabled={loading}
-								className={`rounded-lg py-4 ${
-									loading ? "bg-primary/50" : "bg-primary"
-								}`}
+								isDisabled={loading}
+								variant="primary"
+								size="lg"
 							>
-								<Text className="text-center font-semibold text-primary-foreground">
-									{loading ? "Unlocking..." : "Unlock"}
-								</Text>
-							</TouchableOpacity>
+								{loading ? "Unlocking..." : "Unlock"}
+							</Button>
 
-							<TouchableOpacity
+							<Button
 								onPress={() => router.push("/(auth)/login")}
-								className="mt-4 flex-row items-center justify-center"
+								variant="ghost"
+								className="mt-2"
 							>
-								<UserPlus size={16} color="#6b7280" />
-								<Text className="ml-2 text-muted">
-									Sign in with different account
-								</Text>
-							</TouchableOpacity>
+								<View className="flex-row items-center">
+									<StyledUserPlus size={16} className="text-muted" />
+									<Text className="ml-2 text-muted">
+										Sign in with different account
+									</Text>
+								</View>
+							</Button>
 						</View>
 					</View>
 				</ScrollView>
 			</KeyboardAvoidingView>
-
-			{/* Account Picker Modal */}
-			<Modal
-				visible={showAccountPicker}
-				transparent
-				animationType="slide"
-				onRequestClose={() => setShowAccountPicker(false)}
-			>
-				<TouchableOpacity
-					activeOpacity={1}
-					onPress={() => setShowAccountPicker(false)}
-					className="flex-1 justify-end bg-black/50"
-				>
-					<View className="rounded-t-3xl bg-background pb-8">
-						<View className="items-center py-4">
-							<View className="h-1 w-12 rounded-full bg-border" />
-						</View>
-						<Text className="mb-4 px-6 font-semibold text-foreground text-lg">
-							Select Account
-						</Text>
-						{allAccounts.length > 1 && (
-							<TouchableOpacity
-								onPress={handleSelectAllAccounts}
-								className="flex-row items-center px-6 py-3"
-							>
-								<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-primary">
-									<Text className="font-semibold text-primary-foreground">
-										All
-									</Text>
-								</View>
-								<View className="flex-1">
-									<Text className="font-medium text-foreground">
-										All Accounts
-									</Text>
-									<Text className="text-muted text-sm">
-										{allAccounts.length} accounts
-									</Text>
-								</View>
-								{unlockMode === "all" && (
-									<View className="h-2 w-2 rounded-full bg-primary" />
-								)}
-							</TouchableOpacity>
-						)}
-						{allAccounts.map((account) => (
-							<TouchableOpacity
-								key={account.email}
-								onPress={() => handleSwitchAccount(account)}
-								className="flex-row items-center px-6 py-3"
-							>
-								<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-primary">
-									<Text className="font-semibold text-primary-foreground">
-										{account.name.charAt(0).toUpperCase()}
-									</Text>
-								</View>
-								<View className="flex-1">
-									<Text className="font-medium text-foreground">
-										{account.teamName ||
-											account.name ||
-											account.email.split("@")[0]}
-									</Text>
-									<Text className="text-muted text-sm">
-										{account.email}
-									</Text>
-								</View>
-								{unlockMode === "single" &&
-									account.email === targetAccount?.email && (
-									<View className="h-2 w-2 rounded-full bg-primary" />
-								)}
-							</TouchableOpacity>
-						))}
-					</View>
-				</TouchableOpacity>
-			</Modal>
 		</SafeAreaView>
 	);
 }

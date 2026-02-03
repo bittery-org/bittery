@@ -23,11 +23,22 @@ import {
 	Platform,
 	ScrollView,
 	Text,
-	TextInput,
-	TouchableOpacity,
 	View,
+	Pressable,
 } from "react-native";
+import { Button, TextField } from "heroui-native";
+import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
+
+// Create styled icon components
+const StyledLock = withUniwind(Lock);
+const StyledEye = withUniwind(Eye);
+const StyledEyeOff = withUniwind(EyeOff);
+const StyledFingerprint = withUniwind(Fingerprint);
+const StyledScanFace = withUniwind(ScanFace);
+const StyledKeyRound = withUniwind(KeyRound);
+const StyledAlertCircle = withUniwind(AlertCircle);
+const StyledShieldCheck = withUniwind(ShieldCheck);
 import CredentialProvider from "../modules/credential-provider";
 import { useAccount } from "../src/contexts/account-context";
 import { arrayBufferToBase64 } from "../src/lib/crypto";
@@ -464,19 +475,26 @@ export default function AutofillUnlockScreen() {
 		<SafeAreaView className="flex-1 bg-background">
 			<KeyboardAvoidingView
 				behavior={Platform.OS === "ios" ? "padding" : "height"}
+				contentContainerClassName="flex-1"
 				className="flex-1"
 			>
 				<ScrollView
 					className="flex-1"
-					contentContainerStyle={{ flexGrow: 1 }}
+					contentContainerClassName="flex-1"
 					keyboardShouldPersistTaps="handled"
 				>
 					<View className="flex-1 justify-center px-6 py-8">
 						{/* Header - Autofill Unlock */}
 						<View className="mb-8 items-center">
-							<View className="mb-4 h-20 w-20 items-center justify-center rounded-2xl bg-primary">
-								<ShieldCheck size={40} color="#fff" />
-							</View>
+							<Button
+								isIconOnly
+								variant="primary"
+								size="lg"
+								className="mb-4 h-20 w-20 rounded-2xl"
+								isDisabled
+							>
+								<StyledShieldCheck size={40} className="text-white" />
+							</Button>
 							<Text className="font-bold text-2xl text-foreground">
 								Unlock for Autofill
 							</Text>
@@ -490,7 +508,7 @@ export default function AutofillUnlockScreen() {
 						{/* Master Password Required Notice */}
 						{requiresPasswordReentry && (
 							<View className="mb-4 flex-row items-start rounded-lg bg-amber-50 p-4">
-								<KeyRound size={20} color="#f59e0b" />
+								<StyledKeyRound size={20} className="text-amber-600" />
 								<View className="ml-3 flex-1">
 									<Text className="font-medium text-amber-800">
 										Password Required
@@ -506,7 +524,7 @@ export default function AutofillUnlockScreen() {
 						{/* Biometric Error Message */}
 						{biometricError && !requiresPasswordReentry && (
 							<View className="mb-4 flex-row items-start rounded-lg bg-red-50 p-4">
-								<AlertCircle size={20} color="#ef4444" />
+								<StyledAlertCircle size={20} className="text-red-500" />
 								<Text className="ml-3 flex-1 text-red-700 text-sm">
 									{biometricError}
 								</Text>
@@ -516,24 +534,25 @@ export default function AutofillUnlockScreen() {
 						{/* Biometric Unlock */}
 						{canUseBiometric && (
 							<View className="mb-4">
-								<TouchableOpacity
+								<Button
 									onPress={handleBiometricUnlock}
-									disabled={loading}
-									className={`flex-row items-center justify-center rounded-lg border border-input py-4 ${
-										loading ? "opacity-50" : ""
-									}`}
+									isDisabled={loading}
+									variant="secondary"
+									size="lg"
 								>
-									{biometricType === "Face ID" ? (
-										<ScanFace size={24} color="#6b7280" />
-									) : (
-										<Fingerprint size={24} color="#6b7280" />
-									)}
-									<Text className="ml-3 font-medium text-foreground">
-										{loading
-											? "Authenticating..."
-											: `Unlock with ${biometricType || "Biometric"}`}
-									</Text>
-								</TouchableOpacity>
+									<View className="flex-row items-center">
+										{biometricType === "Face ID" ? (
+											<StyledScanFace size={24} className="text-muted" />
+										) : (
+											<StyledFingerprint size={24} className="text-muted" />
+										)}
+										<Text className="ml-3 font-medium text-foreground">
+											{loading
+												? "Authenticating..."
+												: `Unlock with ${biometricType || "Biometric"}`}
+										</Text>
+									</View>
+								</Button>
 								<View className="my-4 flex-row items-center">
 									<View className="h-px flex-1 bg-border" />
 									<Text className="mx-4 text-muted">or</Text>
@@ -543,47 +562,47 @@ export default function AutofillUnlockScreen() {
 						)}
 
 						{/* Password Form */}
-						<View className="flex gap-5">
-							<View>
-								<Text className="mb-2 font-medium text-foreground text-sm">
-									Password
-								</Text>
-								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
-									<Lock size={20} color="#6b7280" />
-									<TextInput
-										className="ml-3 flex-1 py-3 text-foreground"
+						<View className="gap-4">
+							<TextField>
+								<TextField.Label>Password</TextField.Label>
+								<View className="w-full flex-row items-center">
+									<TextField.Input
 										placeholder="Enter your password"
 										value={password}
 										onChangeText={setPassword}
 										secureTextEntry={!showPassword}
 										textContentType="password"
 										autoFocus={requiresPasswordReentry}
+										className="flex-1 pl-12 pr-12"
 									/>
-									<TouchableOpacity
+									<StyledLock
+										size={20}
+										className="absolute left-3.5 text-muted"
+										pointerEvents="none"
+									/>
+									<Pressable
 										onPress={() => setShowPassword(!showPassword)}
+										className="absolute right-4"
 									>
 										{showPassword ? (
-											<EyeOff size={20} color="#6b7280" />
+											<StyledEyeOff size={20} className="text-muted" />
 										) : (
-											<Eye size={20} color="#6b7280" />
+											<StyledEye size={20} className="text-muted" />
 										)}
-									</TouchableOpacity>
+									</Pressable>
 								</View>
-							</View>
+							</TextField>
 
-							<TouchableOpacity
+							<Button
 								onPress={handlePasswordUnlock}
-								disabled={loading}
-								className={`rounded-lg py-4 ${
-									loading ? "bg-primary/50" : "bg-primary"
-								}`}
+								isDisabled={loading}
+								variant="primary"
+								size="lg"
 							>
-								<Text className="text-center font-semibold text-primary-foreground">
-									{loading ? "Unlocking..." : "Unlock"}
-								</Text>
-							</TouchableOpacity>
+								{loading ? "Unlocking..." : "Unlock"}
+							</Button>
 
-							<TouchableOpacity
+							<Button
 								onPress={() => {
 									if (router.canGoBack()) {
 										router.back();
@@ -591,12 +610,11 @@ export default function AutofillUnlockScreen() {
 										router.replace("/(vault)");
 									}
 								}}
-								className="mt-4"
+								variant="ghost"
+								className="mt-2"
 							>
-								<Text className="text-center text-muted">
-									Cancel
-								</Text>
-							</TouchableOpacity>
+								Cancel
+							</Button>
 						</View>
 					</View>
 				</ScrollView>

@@ -44,14 +44,34 @@ export default function VaultsScreen() {
 		router.push(`/(vault)/${vaultId}`);
 	};
 
-	// Separate personal and team vaults
-	const { personalVaults, teamVaults } = useMemo(() => {
-		if (!vaultKeys) return { personalVaults: [], teamVaults: [] };
+	const { personalVaults, teamVaults, accountVaultsByTeamName } = useMemo(() => {
+		if (!vaultKeys) {
+			return {
+				personalVaults: [],
+				teamVaults: [],
+				accountVaultsByTeamName: new Map<string, VaultKeyWithAccount[]>(),
+			};
+		}
 
 		const personal = vaultKeys.filter((v) => v.vaultType === "personal");
 		const team = vaultKeys.filter((v) => v.vaultType === "team");
 
-		return { personalVaults: personal, teamVaults: team };
+		const byTeamName = new Map<string, VaultKeyWithAccount[]>();
+		for (const vault of vaultKeys) {
+			const teamName = vault.accountTeamName || "Personal";
+			const existing = byTeamName.get(teamName);
+			if (existing) {
+				existing.push(vault);
+			} else {
+				byTeamName.set(teamName, [vault]);
+			}
+		}
+
+		return {
+			personalVaults: personal,
+			teamVaults: team,
+			accountVaultsByTeamName: byTeamName,
+		};
 	}, [vaultKeys]);
 
 	const renderVaultItem = ({
@@ -71,7 +91,7 @@ export default function VaultsScreen() {
 			icon={item.vaultIcon}
 			imageUrl={item.vaultImageUrl}
 			accountLabel={
-				isAllAccountsMode ? item.accountName || item.accountEmail : undefined
+				isAllAccountsMode ? item.accountTeamName || "Personal" : undefined
 			}
 			onPress={() => handleVaultPress(item.vaultId)}
 			isFirstInSection={isFirst}
@@ -118,35 +138,53 @@ export default function VaultsScreen() {
 			  }
 		> = [];
 
-		if (personalVaults.length > 0) {
-			sections.push({
-				type: "header",
-				title: "Personal Vaults",
-				count: personalVaults.length,
-			});
-			for (let i = 0; i < personalVaults.length; i++) {
+		if (isAllAccountsMode) {
+			for (const [teamName, vaults] of accountVaultsByTeamName.entries()) {
 				sections.push({
-					type: "vault",
-					item: personalVaults[i],
-					isFirst: i === 0,
-					isLast: i === personalVaults.length - 1,
+					type: "header",
+					title: teamName,
+					count: vaults.length,
 				});
+				for (let i = 0; i < vaults.length; i++) {
+					sections.push({
+						type: "vault",
+						item: vaults[i],
+						isFirst: i === 0,
+						isLast: i === vaults.length - 1,
+					});
+				}
 			}
-		}
-
-		if (teamVaults.length > 0) {
-			sections.push({
-				type: "header",
-				title: "Team Vaults",
-				count: teamVaults.length,
-			});
-			for (let i = 0; i < teamVaults.length; i++) {
+		} else {
+			if (personalVaults.length > 0) {
 				sections.push({
-					type: "vault",
-					item: teamVaults[i],
-					isFirst: i === 0,
-					isLast: i === teamVaults.length - 1,
+					type: "header",
+					title: "Personal Vaults",
+					count: personalVaults.length,
 				});
+				for (let i = 0; i < personalVaults.length; i++) {
+					sections.push({
+						type: "vault",
+						item: personalVaults[i],
+						isFirst: i === 0,
+						isLast: i === personalVaults.length - 1,
+					});
+				}
+			}
+
+			if (teamVaults.length > 0) {
+				sections.push({
+					type: "header",
+					title: "Team Vaults",
+					count: teamVaults.length,
+				});
+				for (let i = 0; i < teamVaults.length; i++) {
+					sections.push({
+						type: "vault",
+						item: teamVaults[i],
+						isFirst: i === 0,
+						isLast: i === teamVaults.length - 1,
+					});
+				}
 			}
 		}
 

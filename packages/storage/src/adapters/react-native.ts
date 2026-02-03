@@ -84,18 +84,41 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	private ExpoCrypto: typeof CryptoType | null = null;
 	private db: Awaited<ReturnType<typeof SQLiteType.openDatabaseAsync>> | null =
 		null;
+	private initialized = false;
+	private initializePromise: Promise<void> | null = null;
 
 	constructor(private crypto: CryptoProvider) {}
 
 	async initialize(): Promise<void> {
-		// Dynamically import Expo modules
-		try {
-			this.SecureStore = await import("expo-secure-store");
-			this.SQLite = await import("expo-sqlite");
-			this.LocalAuthentication = await import("expo-local-authentication");
-			this.ExpoCrypto = await import("expo-crypto");
+		if (this.initialized) return;
+		if (this.initializePromise) return this.initializePromise;
 
-			// Initialize SQLite database
+		this.initializePromise = (async () => {
+			// Dynamically import Expo modules
+			try {
+				this.SecureStore = await import("expo-secure-store");
+				this.SQLite = await import("expo-sqlite");
+				this.LocalAuthentication = await import("expo-local-authentication");
+				this.ExpoCrypto = await import("expo-crypto");
+
+				await this.openAndInitDatabase();
+				this.initialized = true;
+			} catch (error) {
+				this.initializePromise = null;
+				console.error("[storage-react-native] Failed to initialize:", error);
+				throw error;
+			}
+		})();
+
+		return this.initializePromise;
+	}
+
+	private async openAndInitDatabase(): Promise<void> {
+		if (!this.SQLite) {
+			throw new Error("SQLite module not initialized");
+		}
+
+		const openAndInit = async () => {
 			this.db = await this.SQLite.openDatabaseAsync("bittery.db");
 			await this.db.execAsync(`
 				CREATE TABLE IF NOT EXISTS kv_store (
@@ -103,9 +126,13 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 					value TEXT NOT NULL
 				);
 			`);
-		} catch (error) {
-			console.error("[storage-react-native] Failed to initialize:", error);
-			throw error;
+		};
+
+		try {
+			await openAndInit();
+		} catch {
+			// Retry once to recover from transient native handle issues (e.g. Fast Refresh)
+			await openAndInit();
 		}
 	}
 
