@@ -58,6 +58,8 @@ export interface SyncResult {
 export interface EscrowMukParams {
 	/** The account email this escrow is for */
 	email: string;
+	/** Optional user ID for multi-account MUK storage */
+	userId?: string;
 	/** Optional escrow timeout in milliseconds (default 10 minutes) */
 	timeoutMs?: number;
 }

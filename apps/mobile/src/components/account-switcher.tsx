@@ -6,11 +6,12 @@ import {
   PressableFeedback,
   useToast,
 } from "heroui-native";
-import { Check, Lock, Plus, Settings, Trash2 } from "lucide-react-native";
+import { Check, Lock, Plus, Settings, Trash2, Users } from "lucide-react-native";
 import { useState } from "react";
-import { Alert, Text, View } from "react-native";
+import { Alert, Platform, Text, View } from "react-native";
 import { withUniwind } from "uniwind";
 
+import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../contexts/account-context";
 import { type AccountMetadata, storage } from "../services/storage";
 
@@ -19,17 +20,27 @@ const StyledPlus = withUniwind(Plus);
 const StyledSettings = withUniwind(Settings);
 const StyledTrash2 = withUniwind(Trash2);
 const StyledLock = withUniwind(Lock);
+const StyledUsers = withUniwind(Users);
 
 export function AccountSwitcher() {
   const router = useRouter();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { allAccounts, activeAccount, switchAccount } = useAccount();
+  const {
+    allAccounts,
+    activeAccount,
+    activeAccountConfig,
+    isAllAccountsMode,
+    switchAccount,
+    switchAllAccounts,
+  } = useAccount();
   const [switching, setSwitching] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
-
   const handleAccountSwitch = async (account: AccountMetadata) => {
-    if (account.email === activeAccount?.email) {
+    if (
+      activeAccountConfig?.type === "single" &&
+      account.email === activeAccount?.email
+    ) {
       setIsOpen(false);
       return;
     }
@@ -66,6 +77,44 @@ export function AccountSwitcher() {
     }
   };
 
+  const handleAllAccountsSwitch = async () => {
+    if (isAllAccountsMode) {
+      setIsOpen(false);
+      return;
+    }
+
+    setSwitching(true);
+    try {
+      queryClient.clear();
+
+      const unlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
+
+      await switchAllAccounts();
+      setIsOpen(false);
+
+      if (unlockedEmails.length === 0) {
+        toast.show({
+          variant: "warning",
+          label: "Unlock at least one account to use All Accounts.",
+          placement: "bottom",
+        });
+        router.replace("/(auth)/unlock");
+        return;
+      }
+
+      router.replace("/(tabs)");
+    } catch (error) {
+      console.error("Error switching to all accounts:", error);
+      toast.show({
+        variant: "danger",
+        label: "Failed to switch accounts. Please try again.",
+        placement: "bottom",
+      });
+    } finally {
+      setSwitching(false);
+    }
+  };
+
   const handleAddAccount = () => {
     setIsOpen(false);
     router.push("/(auth)/login");
@@ -91,7 +140,16 @@ export function AccountSwitcher() {
           text: "Lock",
           style: "destructive",
           onPress: async () => {
-            await storage.clearSession();
+            if (storage.lockAllAccounts) {
+              await storage.lockAllAccounts();
+            } else {
+              await storage.clearSession();
+            }
+
+            if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
+              CredentialProvider.clearAllMasterUnlockKeys();
+            }
+
             setIsOpen(false);
             router.replace("/(auth)/unlock");
           },
@@ -113,19 +171,29 @@ export function AccountSwitcher() {
     return account.email.substring(0, 2).toUpperCase();
   };
 
+  const showAllAccountsOption = allAccounts.length > 1;
+
   return (
     <BottomSheet isOpen={isOpen} onOpenChange={setIsOpen}>
       <BottomSheet.Trigger>
         <View className="rounded-full">
-          <Avatar
-            size="sm"
-            alt={activeAccount?.name || activeAccount?.email || "Account"}
-          >
-            {activeAccount?.teamAvatarUrl && (
-              <Avatar.Image source={{ uri: activeAccount.teamAvatarUrl }} />
-            )}
-            <Avatar.Fallback>{getInitials(activeAccount)}</Avatar.Fallback>
-          </Avatar>
+          {isAllAccountsMode ? (
+            <Avatar size="sm" alt="All Accounts">
+              <Avatar.Fallback>
+                <StyledUsers size={20} className="text-muted" />
+              </Avatar.Fallback>
+            </Avatar>
+          ) : (
+            <Avatar
+              size="sm"
+              alt={activeAccount?.name || activeAccount?.email || "Account"}
+            >
+              {activeAccount?.teamAvatarUrl && (
+                <Avatar.Image source={{ uri: activeAccount.teamAvatarUrl }} />
+              )}
+              <Avatar.Fallback>{getInitials(activeAccount)}</Avatar.Fallback>
+            </Avatar>
+          )}
         </View>
       </BottomSheet.Trigger>
       <BottomSheet.Portal>
@@ -137,10 +205,34 @@ export function AccountSwitcher() {
 
           {/* Account list */}
           <View className="border-border border-b">
+            {showAllAccountsOption && (
+              <PressableFeedback
+                onPress={handleAllAccountsSwitch}
+                isDisabled={switching}
+                className={`flex-row items-center rounded-2xl px-4 py-3 ${
+                  isAllAccountsMode ? "bg-surface-tertiary" : ""
+                }`}
+              >
+                <PressableFeedback.Highlight />
+                <View className="mr-3">
+                  <Avatar size="md" alt="All Accounts">
+                    <Avatar.Fallback>
+                      <StyledUsers size={20} className="text-muted" />
+                    </Avatar.Fallback>
+                  </Avatar>
+                </View>
+                <View className="flex-1">
+                  <Text className="font-medium text-foreground">All Accounts</Text>
+                </View>
+                {isAllAccountsMode && (
+                  <StyledCheck size={20} className="text-success" />
+                )}
+              </PressableFeedback>
+            )}
             {allAccounts.map((account) => {
               const isActive =
-                account.email.toLowerCase() ===
-                activeAccount?.email.toLowerCase();
+                activeAccountConfig?.type === "single" &&
+                account.email.toLowerCase() === activeAccount?.email.toLowerCase();
               return (
                 <PressableFeedback
                   key={account.email}

@@ -42,7 +42,11 @@ export default function CreateItemScreen() {
 	const { toast } = useToast();
 	const { vaultId: vaultIdParam } = useLocalSearchParams<{ vaultId?: string }>();
 	const createItem = useCreateItem();
-	const { vaultKeys = [], isLoading: isLoadingVaults } = useAllVaultKeys();
+	const {
+		vaultKeys = [],
+		isLoading: isLoadingVaults,
+		isAllAccountsMode,
+	} = useAllVaultKeys();
 
 	// Vault selection state
 	const [selectedVaultId, setSelectedVaultId] = useState<string | undefined>(
@@ -156,6 +160,7 @@ export default function CreateItemScreen() {
 				vaultId: selectedVaultId,
 				category: categoryValue,
 				data: itemData,
+				accountEmail: selectedVault?.accountEmail,
 			});
 
 			toast.show({
@@ -180,6 +185,14 @@ export default function CreateItemScreen() {
 	const selectedCategoryOption = categoryOptions.find(
 		(opt) => opt.value === category?.value,
 	);
+	const getVaultLabel = (vault?: (typeof vaultKeys)[number]) => {
+		if (!vault) return "";
+		if (isAllAccountsMode && vault.accountEmail) {
+			const accountLabel = vault.accountName || vault.accountEmail;
+			return `${vault.vaultName} • ${accountLabel}`;
+		}
+		return vault.vaultName;
+	};
 
 	return (
 		<SafeAreaView className="flex-1 bg-background">
@@ -220,7 +233,7 @@ export default function CreateItemScreen() {
 								selectedVaultId
 									? {
 											value: selectedVaultId,
-											label: selectedVault?.vaultName || "",
+											label: getVaultLabel(selectedVault),
 										}
 									: undefined
 							}
@@ -246,7 +259,9 @@ export default function CreateItemScreen() {
 										<StyledVault size={20} className="text-muted" />
 									)}
 									<Button.Label className="flex-1 text-left">
-										{selectedVault?.vaultName || "Select Vault"}
+										{selectedVault
+											? getVaultLabel(selectedVault)
+											: "Select Vault"}
 									</Button.Label>
 									<StyledChevronDown size={16} className="text-muted" />
 								</Button>
@@ -273,9 +288,16 @@ export default function CreateItemScreen() {
 														imageUrl={vault.vaultImageUrl}
 														size="sm"
 													/>
-													<Text className="flex-1 text-base text-foreground">
-														{vault.vaultName}
-													</Text>
+													<View className="flex-1">
+														<Text className="text-base text-foreground">
+															{vault.vaultName}
+														</Text>
+														{isAllAccountsMode && vault.accountEmail && (
+															<Text className="text-xs text-muted">
+																{vault.accountName || vault.accountEmail}
+															</Text>
+														)}
+													</View>
 												</View>
 												<Select.ItemIndicator />
 											</Select.Item>

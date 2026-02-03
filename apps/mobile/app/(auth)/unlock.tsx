@@ -2,6 +2,7 @@ import {
 	useBiometricUnlock,
 	usePlatformStorage,
 	useQuickUnlock,
+	useQuickUnlockAll,
 	useSessionState,
 } from "@bittery/hooks";
 import { useRouter } from "expo-router";
@@ -28,6 +29,7 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+import { useToast } from "heroui-native";
 import { SafeAreaView } from "@/components/safe-area-view";
 import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
@@ -41,9 +43,16 @@ import {
 
 export default function UnlockScreen() {
 	const router = useRouter();
+	const { toast } = useToast();
 	const platformStorage = usePlatformStorage();
 	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
-	const { allAccounts, activeAccount, refreshAccounts } = useAccount();
+	const {
+		allAccounts,
+		activeAccount,
+		activeAccountConfig,
+		isAllAccountsMode,
+		refreshAccounts,
+	} = useAccount();
 
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
@@ -51,13 +60,25 @@ export default function UnlockScreen() {
 	const [targetAccount, setTargetAccount] = useState<AccountMetadata | null>(
 		null,
 	);
+	const [unlockMode, setUnlockMode] = useState<"single" | "all">(
+		isAllAccountsMode ? "all" : "single",
+	);
+	const [allAccountsStatus, setAllAccountsStatus] = useState<{
+		canBiometricUnlock: boolean;
+		requiresPasswordReentry: boolean;
+		isLoading: boolean;
+	}>({
+		canBiometricUnlock: false,
+		requiresPasswordReentry: false,
+		isLoading: false,
+	});
 	const [biometricType, setBiometricType] = useState<string | null>(null);
 	const [biometricError, setBiometricError] = useState<string | null>(null);
 
 	// Get session state for the target account
 	const { data: sessionState, refetch: refetchSessionState } = useSessionState(
 		targetAccount?.email,
-		{ enabled: !!targetAccount },
+		{ enabled: unlockMode === "single" && !!targetAccount },
 	);
 
 	// Load biometric type on mount
@@ -66,17 +87,91 @@ export default function UnlockScreen() {
 		setBiometricType(type ?? null);
 	}, [platformStorage]);
 
-	useEffect(() => {
-		if (activeAccount) {
-			setTargetAccount(activeAccount);
-		}
-	}, [activeAccount]);
+	const setNativeMuksForEmails = useCallback(
+		async (emails: string[]) => {
+			if (Platform.OS !== "android" || !CredentialProvider.isAvailable()) return;
+
+			for (const email of emails) {
+				const muk = await storage.getMasterUnlockKey(email);
+				const sessionData = await storage.getStoredSessionData(email);
+				if (muk && sessionData?.userId) {
+					const mukBase64 = arrayBufferToBase64(muk);
+					CredentialProvider.setMasterUnlockKey(mukBase64, sessionData.userId);
+				}
+			}
+		},
+		[],
+	);
 
 	useEffect(() => {
-		if (targetAccount) {
+		if (activeAccount && unlockMode === "single") {
+			setTargetAccount(activeAccount);
+		}
+		if (!activeAccount && unlockMode === "single" && allAccounts.length > 0) {
+			setTargetAccount(allAccounts[0]);
+		}
+	}, [activeAccount, allAccounts, unlockMode]);
+
+	useEffect(() => {
+		if (activeAccountConfig?.type === "all") {
+			setUnlockMode("all");
+			setTargetAccount(null);
+		}
+	}, [activeAccountConfig]);
+
+	useEffect(() => {
+		if (unlockMode === "all") {
+			setPassword("");
+			setBiometricError(null);
+		}
+	}, [unlockMode]);
+
+	useEffect(() => {
+		if (unlockMode === "all" || targetAccount) {
 			loadBiometricType();
 		}
-	}, [targetAccount, loadBiometricType]);
+	}, [unlockMode, targetAccount, loadBiometricType]);
+
+	useEffect(() => {
+		if (unlockMode !== "all") return;
+		let cancelled = false;
+
+		const loadAllAccountsStatus = async () => {
+			setAllAccountsStatus((prev) => ({ ...prev, isLoading: true }));
+			const emails = allAccounts.map((account) => account.email);
+			if (emails.length === 0) {
+				setAllAccountsStatus({
+					canBiometricUnlock: false,
+					requiresPasswordReentry: false,
+					isLoading: false,
+				});
+				return;
+			}
+
+			const [biometricFlags, reentryFlags] = await Promise.all([
+				Promise.all(emails.map((email) => storage.canBiometricUnlock(email))),
+				Promise.all(
+					emails.map((email) =>
+						storage.isMasterPasswordReentryRequired(email),
+					),
+				),
+			]);
+
+			if (cancelled) return;
+
+			setAllAccountsStatus({
+				canBiometricUnlock: biometricFlags.some(Boolean),
+				requiresPasswordReentry: reentryFlags.some(Boolean),
+				isLoading: false,
+			});
+		};
+
+		loadAllAccountsStatus();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [unlockMode, allAccounts]);
 
 	// Biometric unlock hook
 	const biometricUnlock = useBiometricUnlock({
@@ -100,16 +195,7 @@ export default function UnlockScreen() {
 						targetAccount.email,
 					);
 
-					// Set MUK in native CredentialProvider for autofill decryption
-					if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-						const mukBase64 = arrayBufferToBase64(masterUnlockKey);
-						const setResult = CredentialProvider.setMasterUnlockKey(mukBase64);
-						console.log(`[Unlock] Set native MUK after biometric: ${setResult}`);
-
-						// Verify it was set
-						const isUnlocked = CredentialProvider.isVaultUnlocked();
-						console.log(`[Unlock] Vault unlocked after biometric: ${isUnlocked}`);
-					}
+					await setNativeMuksForEmails([targetAccount.email]);
 				}
 
 				// Load server URL for this account
@@ -167,13 +253,7 @@ export default function UnlockScreen() {
 
 			// Set MUK in native CredentialProvider for autofill decryption
 			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-				const mukBase64 = arrayBufferToBase64(result.masterUnlockKey);
-				const setResult = CredentialProvider.setMasterUnlockKey(mukBase64);
-				console.log(`[Unlock] Set native MUK after password: ${setResult}`);
-
-				// Verify it was set
-				const isUnlocked = CredentialProvider.isVaultUnlocked();
-				console.log(`[Unlock] Vault unlocked after password: ${isUnlocked}`);
+				await setNativeMuksForEmails([targetAccount.email]);
 
 				// Update 30-day master password entry timestamp in native
 				CredentialProvider.updateLastMasterPasswordEntry();
@@ -188,6 +268,7 @@ export default function UnlockScreen() {
 					try {
 						await CredentialProvider.escrowMukWithBiometric({
 							email: targetAccount.email,
+							userId: result.user.id,
 						});
 					} catch (escrowError) {
 						// Escrow is optional, don't fail the unlock
@@ -218,7 +299,85 @@ export default function UnlockScreen() {
 		},
 	});
 
+	const finalizeAllAccountsUnlock = useCallback(
+		async (
+			result: { unlocked: string[]; failed: Array<{ email: string; error: string }> },
+			showPartialToast: boolean,
+		) => {
+			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
+				await setNativeMuksForEmails(result.unlocked);
+			}
+
+			if (allAccounts.length > 1) {
+				await storage.setActiveAccount({ type: "all" });
+			} else if (result.unlocked.length === 1) {
+				await storage.setActiveAccount({
+					type: "single",
+					email: result.unlocked[0],
+				});
+			}
+
+			await refreshAccounts();
+
+			if (showPartialToast) {
+				toast.show({
+					variant: "warning",
+					label: `Unlocked ${result.unlocked.length} of ${allAccounts.length} accounts`,
+					placement: "bottom",
+				});
+			}
+
+			router.replace("/(vault)");
+		},
+		[allAccounts.length, refreshAccounts, router, setNativeMuksForEmails, toast],
+	);
+
+	const quickUnlockAll = useQuickUnlockAll({
+		onSuccess: async (result) => {
+			await finalizeAllAccountsUnlock(result, false);
+		},
+		onPartialSuccess: async (result) => {
+			await finalizeAllAccountsUnlock(result, true);
+		},
+		onError: (error) => {
+			console.error("Unlock all error:", error);
+			Alert.alert("Error", error.message || "Unlock failed");
+		},
+	});
+
 	const handleBiometricUnlock = async () => {
+		if (unlockMode === "all") {
+			if (allAccountsStatus.requiresPasswordReentry) {
+				setBiometricError(
+					"For your security, please enter your master password. This is required every 30 days.",
+				);
+				return;
+			}
+
+			setBiometricError(null);
+
+			if (!storage.unlockAllAccountsWithBiometric) {
+				setBiometricError("Biometric unlock is not available.");
+				return;
+			}
+
+			try {
+				const result = await storage.unlockAllAccountsWithBiometric();
+				if (result.unlocked.length === 0) {
+					setBiometricError("Biometric authentication failed.");
+					return;
+				}
+				await finalizeAllAccountsUnlock(
+					result,
+					result.failed.length > 0,
+				);
+			} catch (error) {
+				console.error("Biometric unlock all failed:", error);
+				setBiometricError("Biometric authentication failed.");
+			}
+			return;
+		}
+
 		if (!targetAccount) return;
 
 		// Check if master password is required first (UI-level check for immediate feedback)
@@ -234,6 +393,17 @@ export default function UnlockScreen() {
 	};
 
 	const handlePasswordUnlock = async () => {
+		if (unlockMode === "all") {
+			if (!password.trim()) {
+				Alert.alert("Error", "Please enter your password");
+				return;
+			}
+
+			setBiometricError(null);
+			quickUnlockAll.mutate({ password });
+			return;
+		}
+
 		if (!targetAccount || !password.trim()) {
 			Alert.alert("Error", "Please enter your password");
 			return;
@@ -255,7 +425,16 @@ export default function UnlockScreen() {
 
 	const handleSwitchAccount = async (account: AccountMetadata) => {
 		setShowAccountPicker(false);
+		setUnlockMode("single");
 		setTargetAccount(account);
+		setPassword("");
+		setBiometricError(null);
+	};
+
+	const handleSelectAllAccounts = () => {
+		setShowAccountPicker(false);
+		setUnlockMode("all");
+		setTargetAccount(null);
 		setPassword("");
 		setBiometricError(null);
 	};
@@ -266,11 +445,20 @@ export default function UnlockScreen() {
 		return null;
 	}
 
-	const loading = biometricUnlock.isPending || quickUnlock.isPending;
+	const loading =
+		biometricUnlock.isPending ||
+		quickUnlock.isPending ||
+		quickUnlockAll.isPending;
 	const requiresPasswordReentry =
-		sessionState?.requiresPasswordReentry ?? false;
+		unlockMode === "all"
+			? allAccountsStatus.requiresPasswordReentry
+			: sessionState?.requiresPasswordReentry ?? false;
 	const canUseBiometric =
-		sessionState?.canBiometricUnlock && !requiresPasswordReentry;
+		unlockMode === "all"
+			? allAccountsStatus.canBiometricUnlock &&
+				!requiresPasswordReentry &&
+				!allAccountsStatus.isLoading
+			: sessionState?.canBiometricUnlock && !requiresPasswordReentry;
 
 	return (
 		<SafeAreaView className="flex-1 bg-background">
@@ -295,31 +483,37 @@ export default function UnlockScreen() {
 						</View>
 
 						{/* Account Selector */}
-						{targetAccount && (
-							<View className="mb-6">
-								{allAccounts.length > 1 ? (
-									<TouchableOpacity
-										onPress={() => setShowAccountPicker(true)}
-										className="flex-row items-center justify-center rounded-lg border border-input bg-background px-4 py-3"
-									>
-										<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-primary">
-											<Text className="font-semibold text-primary-foreground">
-												{targetAccount.name.charAt(0).toUpperCase()}
-											</Text>
-										</View>
-										<View className="flex-1">
-											<Text className="font-medium text-foreground">
-												{targetAccount.teamName ||
-													targetAccount.name ||
-													targetAccount.email.split("@")[0]}
-											</Text>
-											<Text className="text-muted text-sm">
-												{targetAccount.email}
-											</Text>
-										</View>
-										<ChevronDown size={20} color="#6b7280" />
-									</TouchableOpacity>
-								) : (
+						<View className="mb-6">
+							{allAccounts.length > 1 ? (
+								<TouchableOpacity
+									onPress={() => setShowAccountPicker(true)}
+									className="flex-row items-center justify-center rounded-lg border border-input bg-background px-4 py-3"
+								>
+									<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-primary">
+										<Text className="font-semibold text-primary-foreground">
+											{unlockMode === "all"
+												? "All"
+												: targetAccount?.name.charAt(0).toUpperCase() || "A"}
+										</Text>
+									</View>
+									<View className="flex-1">
+										<Text className="font-medium text-foreground">
+											{unlockMode === "all"
+												? "All Accounts"
+												: targetAccount?.teamName ||
+													targetAccount?.name ||
+													targetAccount?.email.split("@")[0]}
+										</Text>
+										<Text className="text-muted text-sm">
+											{unlockMode === "all"
+												? `${allAccounts.length} accounts`
+												: targetAccount?.email}
+										</Text>
+									</View>
+									<ChevronDown size={20} color="#6b7280" />
+								</TouchableOpacity>
+							) : (
+								targetAccount && (
 									<View className="items-center">
 										<View className="mb-2 h-12 w-12 items-center justify-center rounded-full bg-primary">
 											<Text className="font-semibold text-lg text-primary-foreground">
@@ -330,9 +524,9 @@ export default function UnlockScreen() {
 											{targetAccount.email}
 										</Text>
 									</View>
-								)}
-							</View>
-						)}
+								)
+							)}
+						</View>
 
 						{/* Master Password Required Notice */}
 						{requiresPasswordReentry && (
@@ -463,6 +657,29 @@ export default function UnlockScreen() {
 						<Text className="mb-4 px-6 font-semibold text-foreground text-lg">
 							Select Account
 						</Text>
+						{allAccounts.length > 1 && (
+							<TouchableOpacity
+								onPress={handleSelectAllAccounts}
+								className="flex-row items-center px-6 py-3"
+							>
+								<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-primary">
+									<Text className="font-semibold text-primary-foreground">
+										All
+									</Text>
+								</View>
+								<View className="flex-1">
+									<Text className="font-medium text-foreground">
+										All Accounts
+									</Text>
+									<Text className="text-muted text-sm">
+										{allAccounts.length} accounts
+									</Text>
+								</View>
+								{unlockMode === "all" && (
+									<View className="h-2 w-2 rounded-full bg-primary" />
+								)}
+							</TouchableOpacity>
+						)}
 						{allAccounts.map((account) => (
 							<TouchableOpacity
 								key={account.email}
@@ -484,7 +701,8 @@ export default function UnlockScreen() {
 										{account.email}
 									</Text>
 								</View>
-								{account.email === targetAccount?.email && (
+								{unlockMode === "single" &&
+									account.email === targetAccount?.email && (
 									<View className="h-2 w-2 rounded-full bg-primary" />
 								)}
 							</TouchableOpacity>

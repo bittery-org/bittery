@@ -179,24 +179,32 @@ class GetCredentialsActivity : FragmentActivity() {
 
         activityScope.launch {
             try {
-                // Check if MUK is available
-                val muk = VaultStateManager.getMasterUnlockKey()
+                // Load item to determine user context
+                val item = withContext(Dispatchers.IO) {
+                    database.itemDao().getById(iId)
+                }
+
+                if (item == null) {
+                    finishWithError("Item not found")
+                    return@launch
+                }
+
+                val muk = VaultStateManager.getMasterUnlockKey(item.userId)
                 if (muk == null) {
-                    Log.w(TAG, "MUK not available, need to unlock first")
-                    // MUK expired or not set - need to re-authenticate
-                    // Try biometric escrow first
-                    if (mukEscrowManager.hasValidEscrow()) {
-                        handleUnlockWithEscrow(iId)
+                    Log.w(TAG, "MUK not available for user ${item.userId}, need to unlock first")
+                    val escrowUserId = mukEscrowManager.getEscrowUserId()
+                    if (mukEscrowManager.hasValidEscrow() &&
+                        (escrowUserId == null || escrowUserId == item.userId)
+                    ) {
+                        handleUnlockWithEscrow(iId, escrowUserId ?: item.userId)
                     } else {
-                        // Need full unlock via main app
-                        Log.w(TAG, "No valid escrow, launching app for password unlock")
+                        Log.w(TAG, "No valid escrow for user, launching app for password unlock")
                         launchAppForPasswordUnlock(passwordRequired = false)
                     }
                     return@launch
                 }
 
-                // MUK is available, complete the credential retrieval
-                completeGetItemCredential(iId, muk)
+                completeGetItemCredential(item, muk)
             } catch (e: Exception) {
                 Log.e(TAG, "Error preparing item credential retrieval", e)
                 finishWithError("Failed to prepare authentication: ${e.message}")
@@ -207,7 +215,7 @@ class GetCredentialsActivity : FragmentActivity() {
     /**
      * Try to unlock using escrowed MUK.
      */
-    private fun handleUnlockWithEscrow(pendingItemId: String?) {
+    private fun handleUnlockWithEscrow(pendingItemId: String?, userId: String) {
         activityScope.launch {
             try {
                 val cipher = mukEscrowManager.getDecryptCipher()
@@ -228,12 +236,19 @@ class GetCredentialsActivity : FragmentActivity() {
                                 activityScope.launch {
                                     try {
                                         val muk = mukEscrowManager.retrieveEscrowedMuk(authenticatedCipher)
-                                        VaultStateManager.setMasterUnlockKey(muk)
+                                        VaultStateManager.setMasterUnlockKey(userId, muk)
                                         Log.d(TAG, "Successfully retrieved escrowed MUK")
 
                                         // If we have a pending item, complete the retrieval
                                         if (pendingItemId != null) {
-                                            completeGetItemCredential(pendingItemId, muk)
+                                            val item = withContext(Dispatchers.IO) {
+                                                database.itemDao().getById(pendingItemId)
+                                            }
+                                            if (item != null) {
+                                                completeGetItemCredential(item, muk)
+                                            } else {
+                                                finishWithError("Item not found")
+                                            }
                                         } else {
                                             // Just unlock was requested
                                             setResult(Activity.RESULT_OK)
@@ -279,7 +294,8 @@ class GetCredentialsActivity : FragmentActivity() {
 
         // Check if we can use escrowed MUK
         if (mukEscrowManager.canUseBiometricUnlock()) {
-            handleUnlockWithEscrow(null)
+            val escrowUserId = mukEscrowManager.getEscrowUserId() ?: "default"
+            handleUnlockWithEscrow(null, escrowUserId)
         } else {
             // Need to launch main app for full unlock
             Log.w(TAG, "No valid escrow, need full password unlock")
@@ -290,21 +306,12 @@ class GetCredentialsActivity : FragmentActivity() {
     /**
      * Complete item credential retrieval using the provided MUK.
      */
-    private fun completeGetItemCredential(itemId: String, muk: ByteArray) {
+    private fun completeGetItemCredential(item: expo.modules.credentialprovider.storage.ItemEntity, muk: ByteArray) {
         activityScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    // Get the item from database
-                    val item = database.itemDao().getById(itemId)
-                    if (item == null) {
-                        withContext(Dispatchers.Main) {
-                            finishWithError("Item not found")
-                        }
-                        return@withContext
-                    }
-
                     // Get the vault key for this item
-                    val vaultKey = database.vaultKeyDao().getByVaultId(item.vaultId)
+                    val vaultKey = database.vaultKeyDao().getByVaultId(item.vaultId, item.userId)
                     if (vaultKey == null) {
                         withContext(Dispatchers.Main) {
                             finishWithError("Vault key not found")
@@ -327,7 +334,7 @@ class GetCredentialsActivity : FragmentActivity() {
                     }
 
                     // Update last used timestamp
-                    database.itemDao().updateLastUsed(itemId, System.currentTimeMillis())
+                    database.itemDao().updateLastUsed(item.id, System.currentTimeMillis())
 
                     Log.d(TAG, "Successfully decrypted item credential for ${decryptedItem.username}")
 

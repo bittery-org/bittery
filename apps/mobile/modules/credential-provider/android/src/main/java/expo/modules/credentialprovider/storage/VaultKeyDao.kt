@@ -26,8 +26,8 @@ interface VaultKeyDao {
     /**
      * Get vault key by vault ID only (for single-user scenarios).
      */
-    @Query("SELECT * FROM vault_keys WHERE vaultId = :vaultId LIMIT 1")
-    suspend fun getByVaultId(vaultId: String): VaultKeyEntity?
+    @Query("SELECT * FROM vault_keys WHERE vaultId = :vaultId AND userId = :userId LIMIT 1")
+    suspend fun getByVaultId(vaultId: String, userId: String): VaultKeyEntity?
 
     /**
      * Insert or replace vault keys.

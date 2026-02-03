@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import type { inferOutput } from "@trpc/tanstack-react-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { useAllVaultKeys, type VaultKeyWithAccount } from "@bittery/hooks";
 import { Tabs, useRouter } from "expo-router";
 import { Button, Card, Skeleton, useToast } from "heroui-native";
 import { Plus, Shield } from "lucide-react-native";
@@ -9,8 +9,6 @@ import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
 import { VaultListItem } from "../../src/components/vault-list-item";
 
-import { useTRPC } from "../../src/lib/trpc";
-
 // Create styled icon components
 const StyledPlus = withUniwind(Plus);
 const StyledShield = withUniwind(Shield);
@@ -19,18 +17,14 @@ export default function VaultsScreen() {
 	const router = useRouter();
 	const { toast } = useToast();
 	const [refreshing, setRefreshing] = useState(false);
-	const trpc = useTRPC();
+	const queryClient = useQueryClient();
 
-	const {
-		data: vaultKeys,
-		isLoading,
-		refetch,
-	} = useQuery(trpc.vault.list.queryOptions());
+	const { vaultKeys, isLoading, isAllAccountsMode } = useAllVaultKeys();
 
 	const handleRefresh = async () => {
 		setRefreshing(true);
 		try {
-			await refetch();
+			await queryClient.invalidateQueries({ queryKey: ["all-vault-keys"] });
 		} finally {
 			setRefreshing(false);
 		}
@@ -54,8 +48,8 @@ export default function VaultsScreen() {
 	const { personalVaults, teamVaults } = useMemo(() => {
 		if (!vaultKeys) return { personalVaults: [], teamVaults: [] };
 
-		const personal = vaultKeys.filter((v) => v.type === "personal");
-		const team = vaultKeys.filter((v) => v.type === "team");
+		const personal = vaultKeys.filter((v) => v.vaultType === "personal");
+		const team = vaultKeys.filter((v) => v.vaultType === "team");
 
 		return { personalVaults: personal, teamVaults: team };
 	}, [vaultKeys]);
@@ -65,19 +59,21 @@ export default function VaultsScreen() {
 		isFirst,
 		isLast,
 	}: {
-		item: inferOutput<typeof trpc.vault.list>[number];
+		item: VaultKeyWithAccount;
 		isFirst: boolean;
 		isLast: boolean;
 	}) => (
 		<VaultListItem
-			id={item.id}
-			name={item.name}
-			type={item.type}
+			id={item.vaultId}
+			name={item.vaultName}
+			type={item.vaultType}
 			role={item.role}
-			icon={item.icon}
-			imageUrl={item.imageUrl}
-			itemCount={item.items?.length}
-			onPress={() => handleVaultPress(item.id)}
+			icon={item.vaultIcon}
+			imageUrl={item.vaultImageUrl}
+			accountLabel={
+				isAllAccountsMode ? item.accountName || item.accountEmail : undefined
+			}
+			onPress={() => handleVaultPress(item.vaultId)}
 			isFirstInSection={isFirst}
 			isLastInSection={isLast}
 		/>
@@ -116,7 +112,7 @@ export default function VaultsScreen() {
 			| { type: "header"; title: string; count: number }
 			| {
 					type: "vault";
-					item: inferOutput<typeof trpc.vault.list>[number];
+					item: VaultKeyWithAccount;
 					isFirst: boolean;
 					isLast: boolean;
 			  }
@@ -168,7 +164,7 @@ export default function VaultsScreen() {
 					});
 				}}
 				keyExtractor={(item, _index) =>
-					item.type === "header" ? `header-${item.title}` : item.item.id
+					item.type === "header" ? `header-${item.title}` : item.item.vaultId
 				}
 				refreshControl={
 					<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />

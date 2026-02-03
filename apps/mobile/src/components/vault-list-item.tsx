@@ -15,6 +15,7 @@ interface VaultListItemProps {
 	icon?: string | null;
 	imageUrl?: string | null;
 	itemCount?: number;
+	accountLabel?: string;
 	onPress: () => void;
 	isFirstInSection?: boolean;
 	isLastInSection?: boolean;
@@ -28,14 +29,21 @@ export function VaultListItem({
 	icon,
 	imageUrl,
 	itemCount,
+	accountLabel,
 	onPress,
 	isFirstInSection = false,
 	isLastInSection = false,
 }: VaultListItemProps) {
 	// Get subtitle based on vault info
-	const subtitle = `${type === "team" ? "Team vault" : "Personal vault"} • ${role}${
-		itemCount !== undefined ? ` • ${itemCount} item${itemCount !== 1 ? "s" : ""}` : ""
-	}`;
+	const subtitleParts = [
+		accountLabel,
+		type === "team" ? "Team vault" : "Personal vault",
+		role,
+		itemCount !== undefined
+			? `${itemCount} item${itemCount !== 1 ? "s" : ""}`
+			: null,
+	].filter(Boolean);
+	const subtitle = subtitleParts.join(" • ");
 
 	// Determine rounded corners based on position
 	const getCardRounding = () => {

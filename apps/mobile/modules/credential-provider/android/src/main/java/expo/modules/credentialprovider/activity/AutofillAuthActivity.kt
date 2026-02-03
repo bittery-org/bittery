@@ -67,7 +67,7 @@ class AutofillAuthActivity : FragmentActivity() {
 
         if (isUnlocked) {
             Log.d(TAG, "Vault already unlocked - building datasets")
-            buildAndFinish(VaultStateManager.getMasterUnlockKey())
+            buildAndFinish(VaultStateManager.getUnlockedUserIds())
             return
         }
 
@@ -101,8 +101,13 @@ class AutofillAuthActivity : FragmentActivity() {
                 activityScope.launch {
                     try {
                         val muk = mukEscrowManager.retrieveEscrowedMuk(cipher)
-                        VaultStateManager.setMasterUnlockKey(muk)
-                        buildAndFinish(muk)
+                        val escrowUserId = mukEscrowManager.getEscrowUserId()
+                        if (escrowUserId.isNullOrBlank()) {
+                            VaultStateManager.setMasterUnlockKey(muk)
+                        } else {
+                            VaultStateManager.setMasterUnlockKey(escrowUserId, muk)
+                        }
+                        buildAndFinish(VaultStateManager.getUnlockedUserIds())
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to retrieve MUK", e)
                         finishWithError("Failed to unlock")
@@ -132,18 +137,26 @@ class AutofillAuthActivity : FragmentActivity() {
         biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
     }
 
-    private fun buildAndFinish(muk: ByteArray?) {
+    private fun buildAndFinish(unlockedUserIds: List<String>) {
         val fieldIds = AutofillDatasetBuilder.FieldIds(usernameId, passwordId)
 
         activityScope.launch {
             val datasets = withContext(Dispatchers.IO) {
-                datasetBuilder.buildDatasets(
-                    fieldIds = fieldIds,
-                    domain = domain,
-                    muk = muk,
-                    inlineSpec = null,
-                    attributionIntent = null
-                )
+                val results = mutableListOf<android.service.autofill.Dataset>()
+                for (userId in unlockedUserIds) {
+                    val muk = VaultStateManager.getMasterUnlockKey(userId) ?: continue
+                    val userDatasets = datasetBuilder.buildDatasets(
+                        fieldIds = fieldIds,
+                        domain = domain,
+                        muk = muk,
+                        inlineSpec = null,
+                        attributionIntent = null,
+                        userId = userId
+                    )
+                    results.addAll(userDatasets)
+                    if (results.size >= BitteryAutofillService.MAX_DATASETS) break
+                }
+                results
             }
 
             if (datasets.isEmpty()) {

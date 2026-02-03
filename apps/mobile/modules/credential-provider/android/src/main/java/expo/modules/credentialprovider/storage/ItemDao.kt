@@ -22,8 +22,8 @@ interface ItemDao {
     /**
      * Get all items in a vault.
      */
-    @Query("SELECT * FROM items WHERE vaultId = :vaultId ORDER BY updatedAt DESC")
-    suspend fun getByVaultId(vaultId: String): List<ItemEntity>
+    @Query("SELECT * FROM items WHERE vaultId = :vaultId AND userId = :userId ORDER BY updatedAt DESC")
+    suspend fun getByVaultId(vaultId: String, userId: String): List<ItemEntity>
 
     /**
      * Get an item by ID.
@@ -44,10 +44,10 @@ interface ItemDao {
     @Query("""
         SELECT DISTINCT i.* FROM items i
         INNER JOIN item_domains d ON i.id = d.itemId
-        WHERE d.domain = :domain AND i.category = 'login'
+        WHERE d.domain = :domain AND i.category = 'login' AND i.userId = :userId
         ORDER BY i.lastUsedAt DESC, i.displayTitle ASC
     """)
-    suspend fun getLoginItemsByDomain(domain: String): List<ItemEntity>
+    suspend fun getLoginItemsByDomain(domain: String, userId: String): List<ItemEntity>
 
     /**
      * Get login items by domain with subdomain matching.
@@ -56,13 +56,19 @@ interface ItemDao {
     @Query("""
         SELECT DISTINCT i.* FROM items i
         INNER JOIN item_domains d ON i.id = d.itemId
-        WHERE (d.domain = :domain OR d.domain = :parentDomain) AND i.category = 'login'
+        WHERE (d.domain = :domain OR d.domain = :parentDomain)
+          AND i.category = 'login'
+          AND i.userId = :userId
         ORDER BY
             CASE WHEN d.domain = :domain THEN 0 ELSE 1 END,
             i.lastUsedAt DESC,
             i.displayTitle ASC
     """)
-    suspend fun getLoginItemsByDomainWithFallback(domain: String, parentDomain: String): List<ItemEntity>
+    suspend fun getLoginItemsByDomainWithFallback(
+        domain: String,
+        parentDomain: String,
+        userId: String
+    ): List<ItemEntity>
 
     /**
      * Insert or replace an item.

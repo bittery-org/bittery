@@ -7,7 +7,8 @@ import { useBiometricAuth } from "../src/contexts/biometric-auth-context";
 import { storage } from "../src/services/storage";
 
 export default function Index() {
-	const { activeAccount, isLoading } = useAccount();
+	const { activeAccount, activeAccountConfig, allAccounts, isLoading } =
+		useAccount();
 	const { requiresReauth, showAuthModal } = useBiometricAuth();
 	const [checkingSession, setCheckingSession] = useState(true);
 	const [hasValidSession, setHasValidSession] = useState(false);
@@ -20,19 +21,37 @@ export default function Index() {
 		}
 
 		async function checkSession() {
-			if (!activeAccount) {
+			if (!activeAccountConfig) {
 				setCheckingSession(false);
 				return;
 			}
 
 			try {
-				const isValid = await storage.isSessionValid(activeAccount.email);
-				setHasValidSession(isValid);
+				if (activeAccountConfig.type === "all") {
+					const accounts = await storage.getAccountsList();
+					if (accounts.length === 0) {
+						setHasValidSession(false);
+						setMukAvailable(false);
+						return;
+					}
 
-				// If session is valid, check if MUK is available
-				if (isValid) {
-					const muk = await storage.getMasterUnlockKey(activeAccount.email);
-					setMukAvailable(muk !== null);
+					const sessionChecks = await Promise.all(
+						accounts.map((account) =>
+							storage.isSessionValid(account.email),
+						),
+					);
+					setHasValidSession(sessionChecks.some(Boolean));
+
+					const unlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
+					setMukAvailable(unlockedEmails.length > 0);
+				} else if (activeAccount) {
+					const isValid = await storage.isSessionValid(activeAccount.email);
+					setHasValidSession(isValid);
+
+					if (isValid) {
+						const muk = await storage.getMasterUnlockKey(activeAccount.email);
+						setMukAvailable(muk !== null);
+					}
 				}
 			} catch (error) {
 				console.error("Error checking session:", error);
@@ -43,17 +62,23 @@ export default function Index() {
 		}
 
 		checkSession();
-	}, [activeAccount, isLoading]);
+	}, [activeAccount, activeAccountConfig, isLoading]);
 
 	// Re-check MUK availability when biometric auth completes
 	useEffect(() => {
-		if (!requiresReauth && hasValidSession && activeAccount) {
-			// Biometric auth just completed, check if MUK is now available
-			storage
-				.getMasterUnlockKey(activeAccount.email)
-				.then((muk) => setMukAvailable(muk !== null));
+		if (!requiresReauth && hasValidSession) {
+			if (activeAccountConfig?.type === "all") {
+				storage
+					.getUnlockedAccounts?.()
+					.then((unlocked = []) => setMukAvailable(unlocked.length > 0));
+			} else if (activeAccount) {
+				// Biometric auth just completed, check if MUK is now available
+				storage
+					.getMasterUnlockKey(activeAccount.email)
+					.then((muk) => setMukAvailable(muk !== null));
+			}
 		}
-	}, [requiresReauth, hasValidSession, activeAccount]);
+	}, [requiresReauth, hasValidSession, activeAccount, activeAccountConfig]);
 
 	// Only show loading while account context is loading
 	// Once that's done, checkingSession should resolve quickly
@@ -66,13 +91,23 @@ export default function Index() {
 	}
 
 	// No accounts - go to login
-	if (!activeAccount) {
+	if (!activeAccountConfig && allAccounts.length === 0) {
 		return <Redirect href="/(auth)/login" />;
 	}
 
-	// Has account but no valid session - go to unlock
-	if (!hasValidSession) {
-		return <Redirect href="/(auth)/unlock" />;
+	if (activeAccountConfig?.type === "all") {
+		if (!hasValidSession) {
+			return <Redirect href="/(auth)/login" />;
+		}
+
+		if (!mukAvailable) {
+			return <Redirect href="/(auth)/unlock" />;
+		}
+	} else {
+		// Has account but no valid session - go to unlock
+		if (!hasValidSession) {
+			return <Redirect href="/(auth)/unlock" />;
+		}
 	}
 
 	// Wait for biometric auth to complete before navigating to tabs

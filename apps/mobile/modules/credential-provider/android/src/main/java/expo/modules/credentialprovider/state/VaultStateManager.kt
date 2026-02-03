@@ -20,22 +20,21 @@ import kotlin.concurrent.write
 object VaultStateManager {
 
     /**
-     * The Master Unlock Key (32 bytes).
-     * This is the key derived from password + secret key that can decrypt vault keys,
-     * which in turn decrypt individual vault items.
-     *
-     * @Volatile ensures visibility across threads but we use read-write lock for
-     * compound operations.
+     * Default user ID key for legacy single-account callers.
      */
-    @Volatile
-    private var masterUnlockKey: ByteArray? = null
+    private const val DEFAULT_USER_ID = "default"
 
     /**
-     * Timestamp when the MUK was last set.
-     * Used for potential timeout-based auto-clearing.
+     * Master Unlock Keys keyed by user ID.
      */
     @Volatile
-    private var mukSetTimestamp: Long = 0
+    private var masterUnlockKeys: MutableMap<String, ByteArray> = mutableMapOf()
+
+    /**
+     * Timestamp when each MUK was last set (per user).
+     */
+    @Volatile
+    private var mukSetTimestamps: MutableMap<String, Long> = mutableMapOf()
 
     /**
      * Read-write lock for thread-safe access to the MUK.
@@ -50,13 +49,18 @@ object VaultStateManager {
      * @param muk The 32-byte Master Unlock Key as ByteArray
      */
     fun setMasterUnlockKey(muk: ByteArray) {
-        lock.write {
-            // Clear previous key if any (security: zero out memory)
-            masterUnlockKey?.fill(0)
+        setMasterUnlockKey(DEFAULT_USER_ID, muk)
+    }
 
-            // Copy the key to prevent external modification
-            masterUnlockKey = muk.copyOf()
-            mukSetTimestamp = System.currentTimeMillis()
+    /**
+     * Set the Master Unlock Key for a specific user.
+     */
+    fun setMasterUnlockKey(userId: String, muk: ByteArray) {
+        lock.write {
+            val normalizedUserId = userId.ifBlank { DEFAULT_USER_ID }
+            masterUnlockKeys[normalizedUserId]?.fill(0)
+            masterUnlockKeys[normalizedUserId] = muk.copyOf()
+            mukSetTimestamps[normalizedUserId] = System.currentTimeMillis()
         }
     }
 
@@ -68,11 +72,15 @@ object VaultStateManager {
      * @throws IllegalArgumentException if the decoded key is not 32 bytes
      */
     fun setMasterUnlockKeyFromBase64(mukBase64: String) {
+        setMasterUnlockKeyFromBase64(mukBase64, DEFAULT_USER_ID)
+    }
+
+    fun setMasterUnlockKeyFromBase64(mukBase64: String, userId: String) {
         val muk = Base64.decode(mukBase64, Base64.NO_WRAP)
         if (muk.size != 32) {
             throw IllegalArgumentException("Master Unlock Key must be 32 bytes, got ${muk.size}")
         }
-        setMasterUnlockKey(muk)
+        setMasterUnlockKey(userId, muk)
     }
 
     /**
@@ -82,8 +90,13 @@ object VaultStateManager {
      * @return Copy of the MUK or null if vault is locked
      */
     fun getMasterUnlockKey(): ByteArray? {
+        return getMasterUnlockKey(DEFAULT_USER_ID)
+    }
+
+    fun getMasterUnlockKey(userId: String): ByteArray? {
         return lock.read {
-            masterUnlockKey?.copyOf()
+            val normalizedUserId = userId.ifBlank { DEFAULT_USER_ID }
+            masterUnlockKeys[normalizedUserId]?.copyOf()
         }
     }
 
@@ -94,8 +107,13 @@ object VaultStateManager {
      * @return Base64-encoded MUK or null if vault is locked
      */
     fun getMasterUnlockKeyBase64(): String? {
+        return getMasterUnlockKeyBase64(DEFAULT_USER_ID)
+    }
+
+    fun getMasterUnlockKeyBase64(userId: String): String? {
         return lock.read {
-            masterUnlockKey?.let { Base64.encodeToString(it, Base64.NO_WRAP) }
+            val normalizedUserId = userId.ifBlank { DEFAULT_USER_ID }
+            masterUnlockKeys[normalizedUserId]?.let { Base64.encodeToString(it, Base64.NO_WRAP) }
         }
     }
 
@@ -106,10 +124,25 @@ object VaultStateManager {
      * Security: Zeroes out the key memory before nullifying reference.
      */
     fun clearMasterUnlockKey() {
+        clearAllMasterUnlockKeys()
+    }
+
+    fun clearMasterUnlockKey(userId: String) {
         lock.write {
-            masterUnlockKey?.fill(0)
-            masterUnlockKey = null
-            mukSetTimestamp = 0
+            val normalizedUserId = userId.ifBlank { DEFAULT_USER_ID }
+            masterUnlockKeys[normalizedUserId]?.fill(0)
+            masterUnlockKeys.remove(normalizedUserId)
+            mukSetTimestamps.remove(normalizedUserId)
+        }
+    }
+
+    fun clearAllMasterUnlockKeys() {
+        lock.write {
+            for ((_, key) in masterUnlockKeys) {
+                key.fill(0)
+            }
+            masterUnlockKeys.clear()
+            mukSetTimestamps.clear()
         }
     }
 
@@ -120,7 +153,20 @@ object VaultStateManager {
      */
     fun isUnlocked(): Boolean {
         return lock.read {
-            masterUnlockKey != null
+            masterUnlockKeys.isNotEmpty()
+        }
+    }
+
+    fun isUnlocked(userId: String): Boolean {
+        return lock.read {
+            val normalizedUserId = userId.ifBlank { DEFAULT_USER_ID }
+            masterUnlockKeys.containsKey(normalizedUserId)
+        }
+    }
+
+    fun getUnlockedUserIds(): List<String> {
+        return lock.read {
+            masterUnlockKeys.keys.toList()
         }
     }
 
@@ -130,8 +176,13 @@ object VaultStateManager {
      * @return Timestamp in milliseconds, or 0 if never set
      */
     fun getMukSetTimestamp(): Long {
+        return getMukSetTimestamp(DEFAULT_USER_ID)
+    }
+
+    fun getMukSetTimestamp(userId: String): Long {
         return lock.read {
-            mukSetTimestamp
+            val normalizedUserId = userId.ifBlank { DEFAULT_USER_ID }
+            mukSetTimestamps[normalizedUserId] ?: 0L
         }
     }
 
@@ -143,9 +194,14 @@ object VaultStateManager {
      * @return true if MUK was set within maxAgeMs, false otherwise
      */
     fun isMukFresh(maxAgeMs: Long): Boolean {
+        return isMukFresh(DEFAULT_USER_ID, maxAgeMs)
+    }
+
+    fun isMukFresh(userId: String, maxAgeMs: Long): Boolean {
         return lock.read {
-            if (masterUnlockKey == null) return@read false
-            val age = System.currentTimeMillis() - mukSetTimestamp
+            val normalizedUserId = userId.ifBlank { DEFAULT_USER_ID }
+            val timestamp = mukSetTimestamps[normalizedUserId] ?: return@read false
+            val age = System.currentTimeMillis() - timestamp
             age < maxAgeMs
         }
     }

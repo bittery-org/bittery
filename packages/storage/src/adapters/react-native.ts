@@ -19,6 +19,7 @@ import {
 	type ActiveAccount,
 	BIOMETRIC_GRACE_PERIOD_MS,
 	type BiometricAuthResult,
+	DEFAULT_AUTO_LOCK_TIMEOUT_MS,
 	DEFAULT_SESSION_EXPIRY_MS,
 	MASTER_PASSWORD_REENTRY_PERIOD_MS,
 	type StoredSessionData,
@@ -29,6 +30,9 @@ import {
 const DEVICE_KEY_STORAGE = "bittery_device_key";
 const ACTIVE_ACCOUNT_KEY = "bittery_active_account";
 const ACCOUNTS_LIST_KEY = "bittery_accounts_list";
+const AUTO_LOCK_TIMEOUT_GLOBAL_KEY = "bittery_auto_lock_timeout_global";
+const BIOMETRIC_ENABLED_GLOBAL_KEY = "bittery_biometric_enabled_global";
+const BACKGROUND_TIMESTAMP_GLOBAL_KEY = "bittery_background_timestamp_global";
 
 // Helper to generate namespaced keys for each account
 function getAccountKey(email: string, suffix: string): string {
@@ -544,14 +548,19 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	// ============================================================================
 
 	async storeAutoLockTimeout(timeoutMs: number, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+		await this.storeGlobalAutoLockTimeout(timeoutMs);
 
-		const key = getAccountKey(resolvedEmail, "auto_lock_timeout");
-		await this.setItem(key, timeoutMs.toString());
+		const accountsList = await this.getAccountsListInternal();
+		for (const account of accountsList.accounts) {
+			const key = getAccountKey(account.email, "auto_lock_timeout");
+			await this.setItem(key, timeoutMs.toString());
+		}
 	}
 
 	async getAutoLockTimeout(email?: string): Promise<number | null> {
+		const globalValue = await this.getGlobalAutoLockTimeout();
+		if (globalValue !== null) return globalValue;
+
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) return null;
 
@@ -562,8 +571,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 	async getAutoLockTimeoutOrDefault(email?: string): Promise<number> {
 		const timeout = await this.getAutoLockTimeout(email);
-		// Default: 10 minutes
-		return timeout ?? 10 * 60 * 1000;
+		return timeout ?? DEFAULT_AUTO_LOCK_TIMEOUT_MS;
 	}
 
 	async storeServerUrl(serverUrl: string, email?: string): Promise<void> {
@@ -637,6 +645,9 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	async isBiometricEnabled(email?: string): Promise<boolean> {
+		const globalEnabled = await this.getGlobalBiometricEnabled();
+		if (globalEnabled !== null) return globalEnabled;
+
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) return false;
 
@@ -646,19 +657,21 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	async enableBiometric(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
-
-		const key = getAccountKey(resolvedEmail, "biometric_enabled");
-		await this.setItem(key, "true");
+		await this.setGlobalBiometricEnabled(true);
+		await this.updateBiometricEnabledForAllAccounts(true);
+		if (email) {
+			const key = getAccountKey(email, "biometric_enabled");
+			await this.setItem(key, "true");
+		}
 	}
 
 	async disableBiometric(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
-
-		const key = getAccountKey(resolvedEmail, "biometric_enabled");
-		await this.setItem(key, "false");
+		await this.setGlobalBiometricEnabled(false);
+		await this.updateBiometricEnabledForAllAccounts(false);
+		if (email) {
+			const key = getAccountKey(email, "biometric_enabled");
+			await this.setItem(key, "false");
+		}
 	}
 
 	async authenticateWithBiometric(
@@ -722,6 +735,61 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	// ============================================================================
 	// Private Helpers
 	// ============================================================================
+
+	private async getGlobalAutoLockTimeout(): Promise<number | null> {
+		const stored = await this.getItem(AUTO_LOCK_TIMEOUT_GLOBAL_KEY);
+		return stored ? Number.parseInt(stored, 10) : null;
+	}
+
+	private async storeGlobalAutoLockTimeout(timeoutMs: number): Promise<void> {
+		await this.setItem(AUTO_LOCK_TIMEOUT_GLOBAL_KEY, timeoutMs.toString());
+	}
+
+	private async getGlobalBiometricEnabled(): Promise<boolean | null> {
+		const stored = await this.getItem(BIOMETRIC_ENABLED_GLOBAL_KEY);
+		if (stored === null) return null;
+		return stored === "true";
+	}
+
+	private async setGlobalBiometricEnabled(enabled: boolean): Promise<void> {
+		await this.setItem(
+			BIOMETRIC_ENABLED_GLOBAL_KEY,
+			enabled ? "true" : "false",
+		);
+	}
+
+	private async updateBiometricEnabledForAllAccounts(
+		enabled: boolean,
+	): Promise<void> {
+		const accountsList = await this.getAccountsListInternal();
+		let metadataChanged = false;
+
+		for (const account of accountsList.accounts) {
+			const key = getAccountKey(account.email, "biometric_enabled");
+			await this.setItem(key, enabled ? "true" : "false");
+
+			if (account.biometricEnabled !== enabled) {
+				account.biometricEnabled = enabled;
+				metadataChanged = true;
+			}
+
+			const sessionKey = getAccountKey(account.email, "session_data");
+			const storedSession = await this.getItem(sessionKey);
+			if (storedSession) {
+				try {
+					const sessionData = JSON.parse(storedSession) as StoredSessionData;
+					sessionData.biometricEnabled = enabled;
+					await this.setItem(sessionKey, JSON.stringify(sessionData));
+				} catch {
+					// Ignore malformed session data
+				}
+			}
+		}
+
+		if (metadataChanged) {
+			await this.setItem(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
+		}
+	}
 
 	private async isBiometricAuthRequiredInternal(
 		email: string,
@@ -899,6 +967,83 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	/**
+	 * Unlock all accounts with biometric authentication
+	 * Shows ONE biometric prompt and unlocks all accounts that support biometric
+	 * Returns { unlocked: string[], failed: Array<{email: string, error: string}> }
+	 */
+	async unlockAllAccountsWithBiometric(): Promise<{
+		unlocked: string[];
+		failed: Array<{ email: string; error: string }>;
+	}> {
+		const accountsList = await this.getAccountsList();
+		const unlocked: string[] = [];
+		const failed: Array<{ email: string; error: string }> = [];
+
+		if (accountsList.length === 0) {
+			return { unlocked, failed };
+		}
+
+		// Find first account that supports biometric
+		let firstAccountEmail: string | null = null;
+		for (const account of accountsList) {
+			if (await this.canBiometricUnlock(account.email)) {
+				firstAccountEmail = account.email;
+				break;
+			}
+		}
+
+		if (!firstAccountEmail) {
+			for (const account of accountsList) {
+				failed.push({
+					email: account.email,
+					error: "Biometric authentication not available",
+				});
+			}
+			return { unlocked, failed };
+		}
+
+		const authenticated = await this.authenticateWithBiometric(
+			"Unlock all accounts",
+			firstAccountEmail,
+		);
+
+		if (!authenticated) {
+			for (const account of accountsList) {
+				failed.push({
+					email: account.email,
+					error: "Biometric authentication failed or cancelled",
+				});
+			}
+			return { unlocked, failed };
+		}
+
+		for (const account of accountsList) {
+			try {
+				const masterUnlockKey = await this.decryptStoredMasterUnlockKeyInternal(
+					account.email,
+					true,
+				);
+				if (masterUnlockKey) {
+					await this.setMasterUnlockKey(masterUnlockKey, account.email);
+					unlocked.push(account.email);
+				} else {
+					failed.push({
+						email: account.email,
+						error: "Could not decrypt session data",
+					});
+				}
+			} catch (error) {
+				failed.push({
+					email: account.email,
+					error: error instanceof Error ? error.message : "Unknown error",
+				});
+			}
+		}
+
+		return { unlocked, failed };
+	}
+
+	/**
 	 * Check if Secret Key is stored
 	 */
 	async hasStoredSecretKey(email?: string): Promise<boolean> {
@@ -1008,6 +1153,13 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	/**
+	 * Store the global timestamp when app went to background (all-accounts mode)
+	 */
+	async storeBackgroundTimestampGlobal(): Promise<void> {
+		await this.setItem(BACKGROUND_TIMESTAMP_GLOBAL_KEY, Date.now().toString());
+	}
+
+	/**
 	 * Get the timestamp when app went to background
 	 */
 	async getBackgroundTimestamp(email?: string): Promise<number | null> {
@@ -1020,6 +1172,14 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	/**
+	 * Get the global background timestamp (all-accounts mode)
+	 */
+	async getBackgroundTimestampGlobal(): Promise<number | null> {
+		const timestamp = await this.getItem(BACKGROUND_TIMESTAMP_GLOBAL_KEY);
+		return timestamp ? Number.parseInt(timestamp, 10) : null;
+	}
+
+	/**
 	 * Clear the background timestamp
 	 */
 	async clearBackgroundTimestamp(email?: string): Promise<void> {
@@ -1028,6 +1188,13 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 		const key = getAccountKey(resolvedEmail, "background_timestamp");
 		await this.deleteItem(key);
+	}
+
+	/**
+	 * Clear the global background timestamp (all-accounts mode)
+	 */
+	async clearBackgroundTimestampGlobal(): Promise<void> {
+		await this.deleteItem(BACKGROUND_TIMESTAMP_GLOBAL_KEY);
 	}
 
 	/**
@@ -1045,6 +1212,20 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 			await this.getAutoLockTimeoutOrDefault(resolvedEmail);
 
 		// If auto-lock is set to "Never" (-1), don't require re-auth
+		if (autoLockTimeout === -1) return false;
+
+		const timeSinceBackground = Date.now() - backgroundTimestamp;
+		return timeSinceBackground > autoLockTimeout;
+	}
+
+	/**
+	 * Check if app should require re-authentication after returning from background (global)
+	 */
+	async shouldRequireAuthAfterBackgroundGlobal(): Promise<boolean> {
+		const backgroundTimestamp = await this.getBackgroundTimestampGlobal();
+		if (!backgroundTimestamp) return false;
+
+		const autoLockTimeout = await this.getAutoLockTimeoutOrDefault();
 		if (autoLockTimeout === -1) return false;
 
 		const timeSinceBackground = Date.now() - backgroundTimestamp;

@@ -118,16 +118,23 @@ class BitteryAutofillService : AutofillService() {
                 val inlineSpec = inlineRequest?.inlinePresentationSpecs?.firstOrNull()
                 val attributionIntent = createAttributionIntent().also { lastAttributionIntent = it }
 
-                val muk = VaultStateManager.getMasterUnlockKey()
-                Log.d(TAG, "MUK available: ${muk != null}, Vault unlocked: ${VaultStateManager.isUnlocked()}")
+                val unlockedUserIds = VaultStateManager.getUnlockedUserIds()
+                Log.d(TAG, "Unlocked users: ${unlockedUserIds.size}, Vault unlocked: ${VaultStateManager.isUnlocked()}")
 
-                val datasets = datasetBuilder.buildDatasets(
-                    fieldIds = AutofillDatasetBuilder.FieldIds(fieldIds.usernameId, fieldIds.passwordId),
-                    domain = domain,
-                    muk = muk,
-                    inlineSpec = inlineSpec,
-                    attributionIntent = attributionIntent
-                )
+                val datasets = mutableListOf<android.service.autofill.Dataset>()
+                for (userId in unlockedUserIds) {
+                    val muk = VaultStateManager.getMasterUnlockKey(userId) ?: continue
+                    val userDatasets = datasetBuilder.buildDatasets(
+                        fieldIds = AutofillDatasetBuilder.FieldIds(fieldIds.usernameId, fieldIds.passwordId),
+                        domain = domain,
+                        muk = muk,
+                        inlineSpec = inlineSpec,
+                        attributionIntent = attributionIntent,
+                        userId = userId
+                    )
+                    datasets.addAll(userDatasets)
+                    if (datasets.size >= MAX_DATASETS) break
+                }
 
                 Log.d(TAG, "Built ${datasets.size} datasets")
 

@@ -60,8 +60,14 @@ const AUTO_LOCK_OPTIONS = [
 
 export default function SettingsScreen() {
 	const router = useRouter();
-	const { activeAccount, allAccounts, refreshAccounts, removeAccount } =
-		useAccount();
+	const {
+		activeAccount,
+		activeAccountConfig,
+		isAllAccountsMode,
+		allAccounts,
+		refreshAccounts,
+		removeAccount,
+	} = useAccount();
 	const { theme } = useUniwind();
 
 	const [biometricAvailable, setBiometricAvailable] = useState(false);
@@ -79,7 +85,9 @@ export default function SettingsScreen() {
 		useState<number | null>(null);
 
 	const loadSettings = useCallback(async () => {
-		if (!activeAccount) return;
+		if (allAccounts.length === 0) return;
+
+		const fallbackEmail = activeAccount?.email || allAccounts[0]?.email;
 
 		const details = await storage.getBiometricAvailabilityDetails();
 		setBiometricDetails({
@@ -95,51 +103,76 @@ export default function SettingsScreen() {
 			setBiometricType(type);
 		}
 
-		const enabled = await storage.isBiometricEnabled(activeAccount.email);
+		const enabled = await storage.isBiometricEnabled(fallbackEmail);
 		setBiometricEnabled(enabled);
 
-		const timeout = await storage.getAutoLockTimeoutOrDefault(
-			activeAccount.email,
-		);
+		const timeout = await storage.getAutoLockTimeoutOrDefault(fallbackEmail);
 		setAutoLockTimeout(timeout);
 
-		const url = await storage.getServerUrl(activeAccount.email);
-		setServerUrl(url);
+		if (!isAllAccountsMode && activeAccount) {
+			const url = await storage.getServerUrl(activeAccount.email);
+			setServerUrl(url);
+		} else {
+			setServerUrl(null);
+		}
 
 		// Calculate days until master password re-entry is required
-		const sessionData = await storage.getStoredSessionData(activeAccount.email);
-		if (sessionData) {
-			const lastEntry =
-				sessionData.lastMasterPasswordEntry || sessionData.createdAt;
-			const nextRequired = lastEntry + MASTER_PASSWORD_REENTRY_PERIOD_MS;
-			const daysRemaining = Math.ceil(
-				(nextRequired - Date.now()) / (24 * 60 * 60 * 1000),
+		if (isAllAccountsMode) {
+			const daysRemainingList = await Promise.all(
+				allAccounts.map(async (account) => {
+					const sessionData = await storage.getStoredSessionData(account.email);
+					if (!sessionData) return null;
+					const lastEntry =
+						sessionData.lastMasterPasswordEntry || sessionData.createdAt;
+					const nextRequired = lastEntry + MASTER_PASSWORD_REENTRY_PERIOD_MS;
+					const daysRemaining = Math.ceil(
+						(nextRequired - Date.now()) / (24 * 60 * 60 * 1000),
+					);
+					return Math.max(0, daysRemaining);
+				}),
 			);
-			setMasterPasswordDaysRemaining(Math.max(0, daysRemaining));
+			const filtered = daysRemainingList.filter(
+				(value): value is number => value !== null,
+			);
+			setMasterPasswordDaysRemaining(
+				filtered.length > 0 ? Math.min(...filtered) : null,
+			);
+		} else if (activeAccount) {
+			const sessionData = await storage.getStoredSessionData(activeAccount.email);
+			if (sessionData) {
+				const lastEntry =
+					sessionData.lastMasterPasswordEntry || sessionData.createdAt;
+				const nextRequired = lastEntry + MASTER_PASSWORD_REENTRY_PERIOD_MS;
+				const daysRemaining = Math.ceil(
+					(nextRequired - Date.now()) / (24 * 60 * 60 * 1000),
+				);
+				setMasterPasswordDaysRemaining(Math.max(0, daysRemaining));
+			}
 		}
-	}, [activeAccount]);
+	}, [activeAccount, allAccounts, isAllAccountsMode]);
 
 	useEffect(() => {
 		loadSettings();
 	}, [loadSettings]);
 
 	const handleBiometricToggle = async (value: boolean) => {
-		if (!activeAccount) return;
+		if (allAccounts.length === 0) return;
+		const fallbackEmail = activeAccount?.email || allAccounts[0]?.email;
 
 		try {
 			if (value) {
 				// Verify biometric before enabling
 				const success = await storage.authenticateWithBiometric(
 					"Verify your identity to enable biometric unlock",
-					activeAccount.email,
+					fallbackEmail,
 				);
 				if (!success) {
 					Alert.alert("Error", "Biometric authentication failed");
 					return;
 				}
-				await storage.enableBiometric(activeAccount.email);
+				await storage.enableBiometric(fallbackEmail);
 			} else {
-				await storage.disableBiometric(activeAccount.email);
+				await storage.disableBiometric(fallbackEmail);
 			}
 			setBiometricEnabled(value);
 		} catch (error) {
@@ -155,8 +188,8 @@ export default function SettingsScreen() {
 			AUTO_LOCK_OPTIONS.map((option) => ({
 				text: option.label,
 				onPress: async () => {
-					if (!activeAccount) return;
-					await storage.storeAutoLockTimeout(option.value, activeAccount.email);
+					if (allAccounts.length === 0) return;
+					await storage.storeAutoLockTimeout(option.value);
 					setAutoLockTimeout(option.value);
 				},
 			})),
@@ -174,15 +207,32 @@ export default function SettingsScreen() {
 		await saveThemePreference(newTheme);
 	};
 
+	const accountLabel = isAllAccountsMode
+		? "All Accounts"
+		: activeAccount?.name || "Account";
+	const accountValue = isAllAccountsMode
+		? `${allAccounts.length} accounts`
+		: activeAccount?.email;
+	const serverValue = isAllAccountsMode
+		? "Per account"
+		: serverUrl || "Not set";
+	const accountsForList = isAllAccountsMode
+		? allAccounts
+		: allAccounts.filter((a) => a.email !== activeAccount?.email);
+
 	const handleLock = async () => {
 		// Clear React Native session (in-memory cache)
-		await storage.clearSession();
+		if (storage.lockAllAccounts) {
+			await storage.lockAllAccounts();
+		} else {
+			await storage.clearSession();
+		}
 
 		// IMPORTANT: Clear MUK from native VaultStateManager for autofill security
 		// Without this, autofill will still work even when app is locked!
 		if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
 			const wasUnlocked = CredentialProvider.isVaultUnlocked();
-			CredentialProvider.clearMasterUnlockKey();
+			CredentialProvider.clearAllMasterUnlockKeys();
 			const isNowUnlocked = CredentialProvider.isVaultUnlocked();
 			console.log(
 				`[Lock] Vault was unlocked: ${wasUnlocked}, now unlocked: ${isNowUnlocked}`,
@@ -193,24 +243,29 @@ export default function SettingsScreen() {
 	};
 
 	const handleSignOut = async () => {
-		Alert.alert(
-			"Sign Out",
-			"This will remove your account from this device. You'll need your Secret Key to sign in again.",
-			[
-				{ text: "Cancel", style: "cancel" },
-				{
-					text: "Sign Out",
-					style: "destructive",
-					onPress: async () => {
-						if (activeAccount) {
-							await removeAccount(activeAccount.email);
+		const title = isAllAccountsMode ? "Sign Out All Accounts" : "Sign Out";
+		const description = isAllAccountsMode
+			? "This will remove all accounts from this device. You'll need your Secret Key(s) to sign in again."
+			: "This will remove your account from this device. You'll need your Secret Key to sign in again.";
+
+		Alert.alert(title, description, [
+			{ text: "Cancel", style: "cancel" },
+			{
+				text: "Sign Out",
+				style: "destructive",
+				onPress: async () => {
+					if (isAllAccountsMode) {
+						for (const account of allAccounts) {
+							await removeAccount(account.email);
 						}
-						await refreshAccounts();
-						router.replace("/(auth)/login");
-					},
+					} else if (activeAccount) {
+						await removeAccount(activeAccount.email);
+					}
+					await refreshAccounts();
+					router.replace("/(auth)/login");
 				},
-			],
-		);
+			},
+		]);
 	};
 
 	const handleRemoveAccount = (email: string) => {
@@ -310,14 +365,14 @@ export default function SettingsScreen() {
 					<Surface variant="secondary" className="gap-0 p-0">
 						<SettingRow
 							icon={StyledUser}
-							label={activeAccount?.name || "Account"}
-							value={activeAccount?.email}
+							label={accountLabel}
+							value={accountValue}
 						/>
 						<Divider />
 						<SettingRow
 							icon={StyledServer}
 							label="Server"
-							value={serverUrl || "Not set"}
+							value={serverValue}
 						/>
 					</Surface>
 				</Surface>
@@ -357,6 +412,9 @@ export default function SettingsScreen() {
 				<Surface variant="transparent" className="mb-6 gap-0 p-0">
 					<Text className="px-4 py-3 font-semibold text-surface-foreground text-sm uppercase">
 						Security
+					</Text>
+					<Text className="px-4 pb-2 text-xs text-muted">
+						Applies to all accounts on this device
 					</Text>
 					<Surface variant="secondary" className="gap-0 p-0">
 						{biometricAvailable && (
@@ -502,35 +560,33 @@ export default function SettingsScreen() {
 				</Surface>
 
 				{/* Multiple Accounts */}
-				{allAccounts.length > 1 && (
+				{accountsForList.length > 0 && (
 					<Surface variant="transparent" className="mb-6 gap-0 p-0">
 						<Text className="px-4 py-3 font-semibold text-surface-foreground text-sm uppercase">
-							Other Accounts
+							{isAllAccountsMode ? "Accounts" : "Other Accounts"}
 						</Text>
 						<Surface variant="secondary" className="gap-0 p-0">
-							{allAccounts
-								.filter((a) => a.email !== activeAccount?.email)
-								.map((account, index) => (
-									<View key={account.email}>
-										{index > 0 && <Divider />}
-										<SettingRow
-											icon={StyledUser}
-											label={account.name || account.email.split("@")[0]}
-											value={account.email}
-											onPress={() => handleRemoveAccount(account.email)}
-											rightElement={
-												<Button
-													isIconOnly
-													variant="ghost"
-													size="sm"
-													onPress={() => handleRemoveAccount(account.email)}
-												>
-													<StyledTrash2 size={18} className="text-danger" />
-												</Button>
-											}
-										/>
-									</View>
-								))}
+							{accountsForList.map((account, index) => (
+								<View key={account.email}>
+									{index > 0 && <Divider />}
+									<SettingRow
+										icon={StyledUser}
+										label={account.name || account.email.split("@")[0]}
+										value={account.email}
+										onPress={() => handleRemoveAccount(account.email)}
+										rightElement={
+											<Button
+												isIconOnly
+												variant="ghost"
+												size="sm"
+												onPress={() => handleRemoveAccount(account.email)}
+											>
+												<StyledTrash2 size={18} className="text-danger" />
+											</Button>
+										}
+									/>
+								</View>
+							))}
 						</Surface>
 					</Surface>
 				)}
@@ -543,8 +599,12 @@ export default function SettingsScreen() {
 					<Surface variant="secondary" className="gap-0 p-0">
 						<SettingRow
 							icon={StyledLogOut}
-							label="Sign Out"
-							value="Remove this account from device"
+							label={isAllAccountsMode ? "Sign Out All" : "Sign Out"}
+							value={
+								isAllAccountsMode
+									? "Remove all accounts from device"
+									: "Remove this account from device"
+							}
 							onPress={handleSignOut}
 							destructive
 						/>

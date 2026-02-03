@@ -97,7 +97,8 @@ class BitteryCredentialProviderService : CredentialProviderService() {
 
         serviceScope.launch {
             try {
-                val isVaultUnlocked = VaultStateManager.isUnlocked()
+                val unlockedUserIds = VaultStateManager.getUnlockedUserIds()
+                val isVaultUnlocked = unlockedUserIds.isNotEmpty()
                 val credentialEntries = mutableListOf<PasswordCredentialEntry>()
                 val authenticationActions = mutableListOf<AuthenticationAction>()
 
@@ -126,15 +127,16 @@ class BitteryCredentialProviderService : CredentialProviderService() {
                         // Only return credentials if vault is unlocked
                         // Decryption happens in GetCredentialsActivity using MUK
                         if (isVaultUnlocked) {
-                            // Query unified vault-based storage (ItemEntity)
-                            val items = if (domain.isNotEmpty() && parentDomain.isNotEmpty()) {
-                                database.itemDao().getLoginItemsByDomainWithFallback(domain, parentDomain)
-                            } else if (domain.isNotEmpty()) {
-                                database.itemDao().getLoginItemsByDomain(domain)
-                            } else {
-                                // Fallback: get all login items for this user
-                                // TODO: Get userId from active account
-                                emptyList()
+                            val items = mutableListOf<ItemEntity>()
+                            for (userId in unlockedUserIds) {
+                                val userItems = if (domain.isNotEmpty() && parentDomain.isNotEmpty()) {
+                                    database.itemDao().getLoginItemsByDomainWithFallback(domain, parentDomain, userId)
+                                } else if (domain.isNotEmpty()) {
+                                    database.itemDao().getLoginItemsByDomain(domain, userId)
+                                } else {
+                                    emptyList()
+                                }
+                                items.addAll(userItems)
                             }
 
                             Log.d(TAG, "Found ${items.size} items in vault-based storage for domain '$domain'")

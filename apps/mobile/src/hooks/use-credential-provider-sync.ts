@@ -1,4 +1,4 @@
-import { useItems } from "@bittery/hooks";
+import { useAccountsInfo, useItems } from "@bittery/hooks";
 import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
@@ -58,6 +58,7 @@ export function useCredentialProviderSync(
 	const { autoSync = true, debounceMs = 2000, enabled = true } = options;
 
 	const { items, isLoading: isLoadingItems } = useItems();
+	const { accountsInfo, isAllAccountsMode } = useAccountsInfo();
 
 	const [isSyncing, setIsSyncing] = useState(false);
 	const [lastSyncResult, setLastSyncResult] = useState<{
@@ -154,19 +155,19 @@ export function useCredentialProviderSync(
 		if (Platform.OS !== "android" || !isAvailable) return;
 
 		try {
-			// Check if already set
-			if (CredentialProvider.isVaultUnlocked()) {
-				console.log("[CredentialProviderSync] Native MUK already set");
-				return;
+			const unlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
+			if (unlockedEmails.length === 0) return;
+
+			for (const email of unlockedEmails) {
+				const muk = await storage.getMasterUnlockKey(email);
+				const sessionData = await storage.getStoredSessionData(email);
+				if (muk && sessionData?.userId) {
+					const mukBase64 = arrayBufferToBase64(muk);
+					CredentialProvider.setMasterUnlockKey(mukBase64, sessionData.userId);
+				}
 			}
 
-			// Get MUK from React Native storage
-			const muk = await storage.getMasterUnlockKey();
-			if (muk) {
-				const mukBase64 = arrayBufferToBase64(muk);
-				CredentialProvider.setMasterUnlockKey(mukBase64);
-				console.log("[CredentialProviderSync] Native MUK set from RN storage");
-			}
+			console.log("[CredentialProviderSync] Native MUKs set from RN storage");
 		} catch (err) {
 			console.warn("[CredentialProviderSync] Failed to set native MUK:", err);
 		}
@@ -195,126 +196,118 @@ export function useCredentialProviderSync(
 			// Ensure MUK is available in native
 			await ensureNativeMukSet();
 
-			// Get current active account
-			const activeAccount = await storage.getActiveAccount();
-			if (!activeAccount || activeAccount.type !== "single") {
-				console.warn("[CredentialProviderSync] No single active account, skipping vault sync");
-				return null;
-			}
-			const email = activeAccount.email;
-
-			// Get user ID
-			const userId = await storage.getActiveAccountUserId();
-			if (!userId) {
-				console.warn("[CredentialProviderSync] No user ID found, skipping vault sync");
+			if (accountsInfo.length === 0) {
+				console.warn("[CredentialProviderSync] No accounts available, skipping vault sync");
 				return null;
 			}
 
-			// Get vault keys from storage
-			const vaultKeys = await storage.getVaultKeys(email);
-			if (!vaultKeys || vaultKeys.length === 0) {
-				console.warn("[CredentialProviderSync] No vault keys found, skipping vault sync");
-				return null;
-			}
+			const totals = {
+				vaultKeys: 0,
+				items: 0,
+				domains: 0,
+			};
 
-			// Create a set of vault IDs we have keys for
-			const vaultIdsWithKeys = new Set(vaultKeys.map(vk => vk.vaultId));
-			console.log("[CredentialProviderSync] Vault IDs with keys:", Array.from(vaultIdsWithKeys));
+			for (const account of accountsInfo) {
+				const vaultKeys = await storage.getVaultKeys(account.email);
+				if (!vaultKeys || vaultKeys.length === 0) {
+					continue;
+				}
 
-			// Use items already fetched and decrypted by useItems()
-			// Filter to: login items only + items from vaults we have keys for
-			const loginItems = items.filter(
-				item => item.category === "login" && vaultIdsWithKeys.has(item.vaultId)
-			);
-			console.log(`[CredentialProviderSync] Processing ${loginItems.length} login items from ${vaultIdsWithKeys.size} vaults`);
-			console.log("[CredentialProviderSync] Sample item vaultId:", loginItems[0]?.vaultId, "is in keys:", vaultIdsWithKeys.has(loginItems[0]?.vaultId));
+				const vaultIdsWithKeys = new Set(vaultKeys.map((vk) => vk.vaultId));
 
-			// Prepare items data with encrypted fields and denormalized metadata
-			const itemsData = loginItems
-				.filter(item => item._encrypted) // Only items with encrypted data
-				.map(item => {
-					// Extract URLs for domain mapping
-					const urls: string[] = [];
-					if (item.url) urls.push(item.url);
-					if (item.urls && Array.isArray(item.urls)) {
-						urls.push(...item.urls);
+				const loginItems = items.filter((item) => {
+					if (item.category !== "login") return false;
+					if (!vaultIdsWithKeys.has(item.vaultId)) return false;
+					if (!isAllAccountsMode) return true;
+					return (
+						item.account?.email?.toLowerCase() ===
+						account.email.toLowerCase()
+					);
+				});
+
+				const itemsData = loginItems
+					.filter((item) => item._encrypted)
+					.map((item) => {
+						const urls: string[] = [];
+						if (item.url) urls.push(item.url);
+						if (item.urls && Array.isArray(item.urls)) {
+							urls.push(...item.urls);
+						}
+
+						const encrypted = item._encrypted as {
+							data: string;
+							iv: string;
+							algorithm: string;
+						};
+
+						return {
+							id: item.id,
+							vaultId: item.vaultId,
+							userId: account.userId,
+							category: item.category,
+							displayTitle: item.title || "",
+							encryptedData: encrypted.data,
+							encryptionIv: encrypted.iv,
+							encryptionAlgorithm: encrypted.algorithm,
+							username: item.username || item.email || null,
+							urls,
+							iconUrl: null,
+							lastUsedAt: 0,
+							createdAt: new Date(item.createdAt).getTime(),
+							updatedAt: new Date(item.updatedAt).getTime(),
+							isFavorite: item.favorite || false,
+						};
+					});
+
+				const vaultKeysData = vaultKeys.map((vaultKey) => {
+					let encryptedKey: string;
+					let encryptionIv: string;
+					let encryptionAlgorithm: string;
+
+					try {
+						const parsed = JSON.parse(vaultKey.encryptedVaultKey);
+						encryptedKey = parsed.ciphertext;
+						encryptionIv = parsed.iv;
+						encryptionAlgorithm = parsed.algorithm || "AES-GCM";
+					} catch {
+						encryptedKey = vaultKey.encryptedVaultKey;
+						encryptionIv = "";
+						encryptionAlgorithm = "AES-GCM";
 					}
 
-					// _encrypted is guaranteed to exist due to filter above
-					const encrypted = item._encrypted as { data: string; iv: string; algorithm: string };
-
 					return {
-						id: item.id,
-						vaultId: item.vaultId,
-						userId,
-						category: item.category,
-						displayTitle: item.title || "",
-						encryptedData: encrypted.data,
-						encryptionIv: encrypted.iv,
-						encryptionAlgorithm: encrypted.algorithm,
-						username: item.username || item.email || null,
-						urls,
-						iconUrl: null, // TODO: Add icon support
-						lastUsedAt: 0,
-						createdAt: new Date(item.createdAt).getTime(),
-						updatedAt: new Date(item.updatedAt).getTime(),
-						isFavorite: item.favorite || false,
+						vaultId: vaultKey.vaultId,
+						vaultName: vaultKey.vaultName,
+						vaultType: vaultKey.vaultType,
+						encryptedKey,
+						encryptionIv,
+						encryptionAlgorithm,
+						role: vaultKey.role,
 					};
 				});
 
-			// Prepare vault keys data
-			const vaultKeysData = vaultKeys.map(vaultKey => {
-				// Parse encrypted vault key (it's stored as EncryptedData JSON or just base64)
-				let encryptedKey: string;
-				let encryptionIv: string;
-				let encryptionAlgorithm: string;
-
-				try {
-					// Try parsing as EncryptedData JSON
-					const parsed = JSON.parse(vaultKey.encryptedVaultKey);
-					encryptedKey = parsed.ciphertext;
-					encryptionIv = parsed.iv;
-					encryptionAlgorithm = parsed.algorithm || "AES-GCM";
-				} catch {
-					// Assume it's just base64 ciphertext (fallback)
-					encryptedKey = vaultKey.encryptedVaultKey;
-					encryptionIv = ""; // Will need to handle this case
-					encryptionAlgorithm = "AES-GCM";
-				}
-
-				return {
-					vaultId: vaultKey.vaultId,
-					vaultName: vaultKey.vaultName,
-					vaultType: vaultKey.vaultType,
-					encryptedKey,
-					encryptionIv,
-					encryptionAlgorithm,
-					role: vaultKey.role,
+				const syncData = {
+					userId: account.userId,
+					vaultKeys: vaultKeysData,
+					items: itemsData,
 				};
-			});
 
-			console.log(`[CredentialProviderSync] Syncing ${vaultKeysData.length} vault keys, ${itemsData.length} items`);
+				const result = await CredentialProvider.syncVaultData(
+					JSON.stringify(syncData),
+				);
 
-			// Log sample data for debugging
-			console.log("[CredentialProviderSync] Sample vault key:", vaultKeysData[0]);
-			console.log("[CredentialProviderSync] Sample item:", itemsData[0]);
+				totals.vaultKeys += result?.vaultKeys ?? vaultKeysData.length;
+				totals.items += result?.items ?? itemsData.length;
+				totals.domains += result?.domains ?? 0;
+			}
 
-			// Call native sync function with JSON string
-			const syncData = {
-				userId,
-				vaultKeys: vaultKeysData,
-				items: itemsData,
-			};
-
-			const result = await CredentialProvider.syncVaultData(JSON.stringify(syncData));
-
-			console.log("[CredentialProviderSync] Vault sync result:", result);
-			return result;
+			console.log("[CredentialProviderSync] Vault sync totals:", totals);
+			return totals;
 		} catch (err) {
 			console.error("[CredentialProviderSync] Vault sync failed:", err);
 			return null;
 		}
-	}, [isAvailable, items]);
+	}, [accountsInfo, ensureNativeMukSet, isAvailable, isAllAccountsMode, items]);
 
 	/**
 	 * Perform the legacy sync operation.
@@ -362,6 +355,14 @@ export function useCredentialProviderSync(
 				console.log("[CredentialProviderSync] Vault sync complete:", vaultResult);
 			}
 
+			if (isAllAccountsMode && accountsInfo.length > 1) {
+				console.log(
+					"[CredentialProviderSync] Skipping legacy credential sync in all-accounts mode",
+				);
+				setLastSyncResult({ synced: 0, deleted: 0 });
+				return { synced: 0, deleted: 0 };
+			}
+
 			// Also sync legacy credentials for backwards compatibility
 			// (This can be removed once all autofill flows use vault-based storage)
 			const credentials = extractCredentials();
@@ -392,6 +393,8 @@ export function useCredentialProviderSync(
 	}, [
 		isAvailable,
 		isBiometricAvailable,
+		isAllAccountsMode,
+		accountsInfo.length,
 		extractCredentials,
 		syncVaultData,
 	]);
@@ -404,6 +407,7 @@ export function useCredentialProviderSync(
 		// Create a simple hash based on item IDs, usernames, passwords, and URLs
 		const hashData = loginItems.map((item) => ({
 			id: item.id,
+			account: item.account?.email,
 			username: item.username,
 			password: item.password,
 			url: item.url,

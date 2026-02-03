@@ -61,6 +61,7 @@ class MukEscrowManager(private val context: Context) {
         private const val PREF_ESCROW_TIMESTAMP = "escrow_timestamp"
         private const val PREF_ESCROW_TIMEOUT = "escrow_timeout_ms"
         private const val PREF_ESCROW_EMAIL = "escrow_email"
+        private const val PREF_ESCROW_USER_ID = "escrow_user_id"
         private const val PREF_LAST_MASTER_PASSWORD_ENTRY = "last_master_password_entry"
     }
 
@@ -176,7 +177,8 @@ class MukEscrowManager(private val context: Context) {
         muk: ByteArray,
         cipher: Cipher,
         email: String,
-        timeoutMs: Long = DEFAULT_ESCROW_TIMEOUT_MS
+        timeoutMs: Long = DEFAULT_ESCROW_TIMEOUT_MS,
+        userId: String? = null
     ) {
         require(muk.size == 32) { "MUK must be 32 bytes" }
 
@@ -189,6 +191,7 @@ class MukEscrowManager(private val context: Context) {
             .putLong(PREF_ESCROW_TIMESTAMP, System.currentTimeMillis())
             .putLong(PREF_ESCROW_TIMEOUT, timeoutMs)
             .putString(PREF_ESCROW_EMAIL, email)
+            .putString(PREF_ESCROW_USER_ID, userId)
             .apply()
     }
 
@@ -223,6 +226,7 @@ class MukEscrowManager(private val context: Context) {
             .remove(PREF_ESCROW_TIMESTAMP)
             .remove(PREF_ESCROW_TIMEOUT)
             .remove(PREF_ESCROW_EMAIL)
+            .remove(PREF_ESCROW_USER_ID)
             .apply()
     }
 
@@ -254,6 +258,10 @@ class MukEscrowManager(private val context: Context) {
      */
     fun getEscrowEmail(): String? {
         return prefs.getString(PREF_ESCROW_EMAIL, null)
+    }
+
+    fun getEscrowUserId(): String? {
+        return prefs.getString(PREF_ESCROW_USER_ID, null)
     }
 
     /**

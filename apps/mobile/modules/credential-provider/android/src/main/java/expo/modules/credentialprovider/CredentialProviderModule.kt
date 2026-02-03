@@ -95,9 +95,10 @@ class CredentialProviderModule : Module() {
          *
          * @param mukBase64 Base64-encoded Master Unlock Key (32 bytes = 44 chars)
          */
-        Function("setMasterUnlockKey") { mukBase64: String ->
+        Function("setMasterUnlockKey") { mukBase64: String, userId: String? ->
             try {
-                VaultStateManager.setMasterUnlockKeyFromBase64(mukBase64)
+                val resolvedUserId = userId?.takeIf { it.isNotBlank() } ?: "default"
+                VaultStateManager.setMasterUnlockKeyFromBase64(mukBase64, resolvedUserId)
                 Log.d(TAG, "setMasterUnlockKey: MUK set successfully")
                 sendEvent("onVaultUnlocked", mapOf("success" to true))
                 true
@@ -110,9 +111,20 @@ class CredentialProviderModule : Module() {
         /**
          * Clear the Master Unlock Key (on logout or auto-lock).
          */
-        Function("clearMasterUnlockKey") {
-            VaultStateManager.clearMasterUnlockKey()
+        Function("clearMasterUnlockKey") { userId: String? ->
+            if (userId.isNullOrBlank()) {
+                VaultStateManager.clearAllMasterUnlockKeys()
+            } else {
+                VaultStateManager.clearMasterUnlockKey(userId)
+            }
             Log.d(TAG, "clearMasterUnlockKey: MUK cleared")
+            sendEvent("onVaultLocked", mapOf("success" to true))
+            true
+        }
+
+        Function("clearAllMasterUnlockKeys") {
+            VaultStateManager.clearAllMasterUnlockKeys()
+            Log.d(TAG, "clearAllMasterUnlockKeys: MUKs cleared")
             sendEvent("onVaultLocked", mapOf("success" to true))
             true
         }
@@ -120,8 +132,12 @@ class CredentialProviderModule : Module() {
         /**
          * Check if the vault is currently unlocked (MUK available).
          */
-        Function("isVaultUnlocked") {
-            val unlocked = VaultStateManager.isUnlocked()
+        Function("isVaultUnlocked") { userId: String? ->
+            val unlocked = if (userId.isNullOrBlank()) {
+                VaultStateManager.isUnlocked()
+            } else {
+                VaultStateManager.isUnlocked(userId)
+            }
             Log.d(TAG, "isVaultUnlocked: $unlocked")
             unlocked
         }
@@ -130,8 +146,12 @@ class CredentialProviderModule : Module() {
          * Get the MUK as Base64 string (for debugging/verification only).
          * WARNING: Only use in development builds.
          */
-        Function("getMasterUnlockKeyBase64") {
-            VaultStateManager.getMasterUnlockKeyBase64()
+        Function("getMasterUnlockKeyBase64") { userId: String? ->
+            if (userId.isNullOrBlank()) {
+                VaultStateManager.getMasterUnlockKeyBase64()
+            } else {
+                VaultStateManager.getMasterUnlockKeyBase64(userId)
+            }
         }
 
         // ============================================
@@ -153,6 +173,7 @@ class CredentialProviderModule : Module() {
             }
 
             val email = params["email"] as? String ?: ""
+            val userId = params["userId"] as? String
             val timeoutMs = (params["timeoutMs"] as? Number)?.toLong()
                 ?: MukEscrowManager.DEFAULT_ESCROW_TIMEOUT_MS
 
@@ -161,7 +182,11 @@ class CredentialProviderModule : Module() {
                 return@AsyncFunction
             }
 
-            val muk = VaultStateManager.getMasterUnlockKey()
+            val muk = if (userId.isNullOrBlank()) {
+                VaultStateManager.getMasterUnlockKey()
+            } else {
+                VaultStateManager.getMasterUnlockKey(userId)
+            }
             if (muk == null) {
                 promise.reject("VAULT_LOCKED", "Vault is not unlocked", null)
                 return@AsyncFunction
@@ -176,7 +201,7 @@ class CredentialProviderModule : Module() {
             fun performEscrow(cipher: javax.crypto.Cipher) {
                 moduleScope.launch {
                     try {
-                        mukEscrowManager.escrowMuk(muk, cipher, email, timeoutMs)
+                        mukEscrowManager.escrowMuk(muk, cipher, email, timeoutMs, userId)
                         Log.d(TAG, "escrowMukWithBiometric: MUK escrowed successfully for $email")
                         promise.resolve(true)
                     } catch (e: Exception) {
@@ -252,7 +277,12 @@ class CredentialProviderModule : Module() {
                 moduleScope.launch {
                     try {
                         val muk = mukEscrowManager.retrieveEscrowedMuk(cipher)
-                        VaultStateManager.setMasterUnlockKey(muk)
+                        val escrowUserId = mukEscrowManager.getEscrowUserId()
+                        if (escrowUserId.isNullOrBlank()) {
+                            VaultStateManager.setMasterUnlockKey(muk)
+                        } else {
+                            VaultStateManager.setMasterUnlockKey(escrowUserId, muk)
+                        }
                         Log.d(TAG, "retrieveEscrowedMuk: MUK retrieved and set successfully")
                         sendEvent("onVaultUnlocked", mapOf("success" to true))
                         promise.resolve(true)

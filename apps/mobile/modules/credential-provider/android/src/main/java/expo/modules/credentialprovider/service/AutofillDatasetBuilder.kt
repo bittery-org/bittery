@@ -43,16 +43,17 @@ class AutofillDatasetBuilder(
         domain: String?,
         muk: ByteArray?,
         inlineSpec: InlinePresentationSpec?,
-        attributionIntent: PendingIntent?
+        attributionIntent: PendingIntent?,
+        userId: String
     ): List<Dataset> {
         val datasets = mutableListOf<Dataset>()
         if (!fieldIds.hasAny()) return datasets
 
         if (muk != null && !domain.isNullOrBlank()) {
-            val items = getItemsForDomain(domain)
+            val items = getItemsForDomain(domain, userId)
             Log.d(BitteryAutofillService.TAG, "Found ${items.size} items for domain: $domain")
             for (item in items) {
-                val dataset = buildDatasetFromItem(item, muk, fieldIds, inlineSpec, attributionIntent)
+                val dataset = buildDatasetFromItem(item, muk, userId, fieldIds, inlineSpec, attributionIntent)
                 if (dataset != null) {
                     datasets.add(dataset)
                     if (datasets.size >= BitteryAutofillService.MAX_DATASETS) return datasets
@@ -95,12 +96,12 @@ class AutofillDatasetBuilder(
         return datasets
     }
 
-    private suspend fun getItemsForDomain(domain: String): List<ItemEntity> {
+    private suspend fun getItemsForDomain(domain: String, userId: String): List<ItemEntity> {
         val parentDomain = extractParentDomain(domain)
         val items = if (parentDomain.isNotEmpty() && parentDomain != domain) {
-            database.itemDao().getLoginItemsByDomainWithFallback(domain, parentDomain)
+            database.itemDao().getLoginItemsByDomainWithFallback(domain, parentDomain, userId)
         } else {
-            database.itemDao().getLoginItemsByDomain(domain)
+            database.itemDao().getLoginItemsByDomain(domain, userId)
         }
 
         if (items.isEmpty()) {
@@ -119,12 +120,13 @@ class AutofillDatasetBuilder(
     private suspend fun buildDatasetFromItem(
         item: ItemEntity,
         muk: ByteArray,
+        userId: String,
         fieldIds: FieldIds,
         inlineSpec: InlinePresentationSpec?,
         attributionIntent: PendingIntent?
     ): Dataset? {
         return try {
-            val vaultKey = database.vaultKeyDao().getByVaultId(item.vaultId) ?: return null
+            val vaultKey = database.vaultKeyDao().getByVaultId(item.vaultId, userId) ?: return null
             val decryptedVaultKey = VaultDecryptor.decryptVaultKeyWithMuk(vaultKey, muk)
             val decryptedItem = VaultDecryptor.decryptLoginItem(item, decryptedVaultKey)
             val username = decryptedItem.username ?: item.username ?: return null
