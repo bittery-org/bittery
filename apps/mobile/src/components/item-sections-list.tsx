@@ -76,6 +76,7 @@ export function ItemSectionsList({
 					<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
 				) : undefined
 			}
+			keyboardShouldPersistTaps="handled"
 			style={{ flex: 1 }}
 			contentContainerStyle={{ paddingTop: 8, paddingBottom: 8, flexGrow: 1 }}
 		/>

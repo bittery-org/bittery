@@ -2,16 +2,7 @@ import { useAllVaultKeys, useCreateItem } from "@bittery/hooks";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Button, Label, Select, TextField } from "heroui-native";
-import {
-	ArrowLeft,
-	ChevronDown,
-	CreditCard,
-	FileText,
-	Key,
-	Timer,
-	User,
-	Vault,
-} from "lucide-react-native";
+import { ArrowLeft, ChevronDown, Vault } from "lucide-react-native";
 import { useRef, useState } from "react";
 import {
 	Alert,
@@ -37,28 +28,15 @@ import {
 import { SafeAreaView } from "@/components/safe-area-view";
 import { TagInput } from "@/components/tag-input";
 import { VaultAvatar } from "@/components/vault-avatar";
+import { categoryOptions as allCategoryOptions } from "@/constants/item-categories";
 
 // Create styled icon components
-const StyledKey = withUniwind(Key);
-const StyledCreditCard = withUniwind(CreditCard);
-const StyledUser = withUniwind(User);
-const StyledFileText = withUniwind(FileText);
-const StyledTimer = withUniwind(Timer);
 const StyledArrowLeft = withUniwind(ArrowLeft);
 const StyledVault = withUniwind(Vault);
 const StyledChevronDown = withUniwind(ChevronDown);
 
-const categoryOptions: {
-	value: ItemCategory;
-	label: string;
-	icon: typeof StyledKey;
-}[] = [
-	{ value: "login", label: "Login", icon: StyledKey },
-	{ value: "credit-card", label: "Credit Card", icon: StyledCreditCard },
-	{ value: "identity", label: "Identity", icon: StyledUser },
-	{ value: "secure-note", label: "Secure Note", icon: StyledFileText },
-	{ value: "totp", label: "TOTP", icon: StyledTimer },
-];
+// Filter out "all" option for item creation
+const categoryOptions = allCategoryOptions.filter((opt) => opt.value !== "all");
 
 export default function CreateItemScreen() {
 	const router = useRouter();

@@ -163,15 +163,16 @@ export default function TagsScreen() {
 							return (
 								<Chip
 									key={tag.name}
-									variant="secondary"
+									variant="soft"
 									color={color}
 									onPress={() => handleTagPress(tag.name)}
-									size="md"
+									size="lg"
+									className="pr-2"
 								>
 									<StyledTag size={14} className="text-current" />
-									<Chip.Label>{tag.name}</Chip.Label>
-									<View className="ml-1.5 rounded-full bg-black/10 px-1.5">
-										<Text className="font-medium text-current text-xs">
+									<Chip.Label className="font-medium mx-0.5">{tag.name}</Chip.Label>
+									<View className="min-w-5 items-center justify-center rounded-full bg-surface-tertiary px-1.5 my-0.5">
+										<Text className="font-semibold text-foreground/60 text-xs">
 											{tag.count}
 										</Text>
 									</View>

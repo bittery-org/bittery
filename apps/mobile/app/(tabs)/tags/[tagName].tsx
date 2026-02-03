@@ -1,35 +1,35 @@
 import { type UnifiedItem, useItems } from "@bittery/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
-import { Button, Card, Chip, Skeleton } from "heroui-native";
-import { ArrowLeft, Tag } from "lucide-react-native";
+import { Button, Card, Chip, Select, Skeleton } from "heroui-native";
+import { ArrowLeft, ChevronDown, Tag } from "lucide-react-native";
 import { useLayoutEffect, useMemo, useState } from "react";
-import { FlatList, RefreshControl, Text, View } from "react-native";
+import { FlatList, RefreshControl, ScrollView, Text, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { categoryOptions } from "@/constants/item-categories";
 import { ItemListItem } from "../../../src/components/item-list-item";
 
 // Create styled icon components
 const StyledTag = withUniwind(Tag);
 const StyledArrowLeft = withUniwind(ArrowLeft);
+const StyledChevronDown = withUniwind(ChevronDown);
 
-const categoryLabels: Record<ItemCategory | "all", string> = {
-	all: "All",
-	login: "Login",
-	"credit-card": "Card",
-	identity: "Identity",
-	"secure-note": "Note",
-	totp: "TOTP",
-};
+// Generate a consistent color based on tag name
+function getTagColor(
+	name: string,
+): "default" | "success" | "warning" | "danger" | "accent" {
+	const colors: Array<"default" | "success" | "warning" | "danger" | "accent"> =
+		["accent", "success", "warning", "danger", "default"];
 
-const categories: (ItemCategory | "all")[] = [
-	"all",
-	"login",
-	"credit-card",
-	"identity",
-	"secure-note",
-	"totp",
-];
+	// Simple hash based on tag name
+	let hash = 0;
+	for (let i = 0; i < name.length; i++) {
+		hash = name.charCodeAt(i) + ((hash << 5) - hash);
+	}
+	const index = Math.abs(hash) % colors.length;
+	return colors[index];
+}
 
 export default function TagFilterScreen() {
 	const router = useRouter();
@@ -85,27 +85,67 @@ export default function TagFilterScreen() {
 		router.push(`/${item.vaultId}/${item.id}`);
 	};
 
+	const selectedOption = categoryOptions.find(
+		(opt) => opt.value === selectedCategory,
+	);
+
 	const renderCategoryFilter = () => (
-		<View className="border-border border-b px-4 py-3">
-			<FlatList
-				horizontal
-				showsHorizontalScrollIndicator={false}
-				data={categories}
-				keyExtractor={(item) => item}
-				renderItem={({ item: category }) => (
-					<View className="mr-2">
-						<Chip
-							variant={selectedCategory === category ? "primary" : "secondary"}
-							color={selectedCategory === category ? "accent" : "default"}
-							onPress={() => setSelectedCategory(category)}
-							size="md"
-						>
-							<Chip.Label>{categoryLabels[category]}</Chip.Label>
-						</Chip>
-					</View>
-				)}
-				contentContainerStyle={{ paddingVertical: 4 }}
-			/>
+		<View className="flex-row items-center justify-between border-border border-b px-4 py-2">
+			<Text className="text-muted-foreground">
+				{filteredItems.length} item{filteredItems.length !== 1 ? "s" : ""}
+			</Text>
+			<Select
+				value={
+					selectedOption
+						? { value: selectedOption.value, label: selectedOption.label }
+						: undefined
+				}
+				onValueChange={(option) => {
+					if (option) {
+						setSelectedCategory(option.value as ItemCategory | "all");
+					}
+				}}
+			>
+				<Select.Trigger asChild>
+					<Button variant="ghost" size="sm">
+						{selectedOption && (
+							<selectedOption.icon size={16} className="text-current" />
+						)}
+						<Button.Label>{selectedOption?.label}</Button.Label>
+						<StyledChevronDown size={16} className="text-current" />
+					</Button>
+				</Select.Trigger>
+				<Select.Portal>
+					<Select.Overlay />
+					<Select.Content
+						presentation="popover"
+						placement="bottom"
+						align="end"
+						width={220}
+					>
+						<ScrollView className="max-h-72">
+							{categoryOptions.map((option) => {
+								const Icon = option.icon;
+								return (
+									<Select.Item
+										key={option.value}
+										value={option.value}
+										label={option.label}
+									>
+										<View className="flex-1 flex-row items-center gap-3">
+											<Icon size={18} className="text-muted" />
+											<Text className="flex-1 text-base text-foreground">
+												{option.label}
+											</Text>
+										</View>
+										<Select.ItemIndicator />
+									</Select.Item>
+								);
+							})}
+						</ScrollView>
+					</Select.Content>
+				</Select.Portal>
+			</Select>
 		</View>
 	);
 
@@ -143,10 +183,9 @@ export default function TagFilterScreen() {
 				</View>
 
 				{/* Category filter skeleton */}
-				<View className="flex-row gap-2 border-border border-b px-4 py-3">
-					{[1, 2, 3, 4, 5].map((i) => (
-						<Skeleton key={i} className="h-8 w-16 rounded-full" />
-					))}
+				<View className="flex-row items-center justify-between border-border border-b px-4 py-2">
+					<Skeleton className="h-4 w-20 rounded" />
+					<Skeleton className="h-9 w-20 rounded-lg" />
 				</View>
 
 				{/* Skeleton items */}
@@ -185,6 +224,8 @@ export default function TagFilterScreen() {
 		);
 	}
 
+	const tagColor = getTagColor(decodedTagName);
+
 	return (
 		<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
 			{/* Tag header */}
@@ -198,13 +239,12 @@ export default function TagFilterScreen() {
 				>
 					<StyledArrowLeft size={20} className="text-foreground" />
 				</Button>
-				<Chip variant="primary" color="accent" size="md">
-					<StyledTag size={14} className="text-current" />
-					<Chip.Label>{decodedTagName}</Chip.Label>
-				</Chip>
-				<Text className="ml-2 text-muted-foreground">
-					{filteredItems.length} item{filteredItems.length !== 1 ? "s" : ""}
-				</Text>
+				<View className="flex-row items-center">
+					<Chip variant="soft" color={tagColor} size="md" className="pr-2">
+						<StyledTag size={14} className="text-current" />
+						<Chip.Label className="font-medium mx-0.5">{decodedTagName}</Chip.Label>
+					</Chip>
+				</View>
 			</View>
 
 			{/* Category Filter */}

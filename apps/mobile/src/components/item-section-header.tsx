@@ -12,7 +12,7 @@ export interface ItemSectionHeaderProps {
 
 export function ItemSectionHeader({ title, count }: ItemSectionHeaderProps) {
 	return (
-		<View className="flex-row items-center px-4 pt-4 pb-2">
+		<View className="flex-row items-center px-4 pt-2 pb-2">
 			{title === "Favorites" && (
 				<StyledStar
 					size={14}

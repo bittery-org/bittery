@@ -23,7 +23,6 @@ const StyledArrowLeft = withUniwind(ArrowLeft);
 export default function VaultItemsScreen() {
 	const router = useRouter();
 	const { vaultId } = useLocalSearchParams<{ vaultId: string }>();
-	const [searchQuery, setSearchQuery] = useState("");
 	const [selectedCategory, setSelectedCategory] = useState<
 		ItemCategory | "all"
 	>("all");
@@ -36,7 +35,7 @@ export default function VaultItemsScreen() {
 	// Filter and sort items
 	const { favorites, regularItems } = useFilteredItems({
 		items,
-		searchQuery,
+		searchQuery: "",
 		selectedCategory,
 	});
 
@@ -115,7 +114,7 @@ export default function VaultItemsScreen() {
 	}
 
 	const hasNoItems = favorites.length === 0 && regularItems.length === 0;
-	const hasFilterOrSearch = searchQuery || selectedCategory !== "all";
+	const hasFilterOrSearch = selectedCategory !== "all";
 
 	return (
 		<SafeAreaView className="flex-1 bg-background">
@@ -151,27 +150,6 @@ export default function VaultItemsScreen() {
 					>
 						<StyledPlus size={18} className="text-accent-foreground" />
 					</Button>
-				</View>
-
-				{/* Search */}
-				<View className="mt-4">
-					<TextField>
-						<View className="w-full flex-row items-center">
-							<TextField.Input
-								placeholder="Search items..."
-								value={searchQuery}
-								onChangeText={setSearchQuery}
-								autoCapitalize="none"
-								autoCorrect={false}
-								className="flex-1 pr-4 pl-12"
-							/>
-							<StyledSearch
-								size={18}
-								className="absolute left-3.5 text-muted"
-								pointerEvents="none"
-							/>
-						</View>
-					</TextField>
 				</View>
 			</View>
 
