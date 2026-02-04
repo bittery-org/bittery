@@ -5,7 +5,7 @@ import type {
 	ItemCategory,
 } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Button, TextField, useToast } from "heroui-native";
+import { Button, Input, Label, TextField, useToast } from "heroui-native";
 import {
 	ArrowLeft,
 	CreditCard,
@@ -212,7 +212,11 @@ export default function EditItemScreen() {
 		return (
 			<SafeAreaView className="flex-1 items-center justify-center bg-background">
 				<Text className="text-foreground">Item not found</Text>
-				<Button onPress={() => router.back()} variant="primary" className="mt-4">
+				<Button
+					onPress={() => router.back()}
+					variant="primary"
+					className="mt-4"
+				>
 					Go Back
 				</Button>
 			</SafeAreaView>
@@ -220,8 +224,7 @@ export default function EditItemScreen() {
 	}
 
 	const categoryLabel =
-		categoryOptions.find((c) => c.value === item.category)?.label ||
-		"Unknown";
+		categoryOptions.find((c) => c.value === item.category)?.label || "Unknown";
 
 	return (
 		<SafeAreaView className="flex-1 bg-background">
@@ -254,9 +257,7 @@ export default function EditItemScreen() {
 						>
 							{item.title || "Untitled"}
 						</Text>
-						<Text className="text-muted text-sm">
-							{categoryLabel}
-						</Text>
+						<Text className="text-muted text-sm">{categoryLabel}</Text>
 					</View>
 					<Button
 						onPress={handleSave}
@@ -271,8 +272,8 @@ export default function EditItemScreen() {
 				<ScrollView className="flex-1 px-4" keyboardShouldPersistTaps="handled">
 					{/* Title */}
 					<TextField className="my-4" isRequired>
-						<TextField.Label>Title</TextField.Label>
-						<TextField.Input
+						<Label>Title</Label>
+						<Input
 							placeholder="Enter title"
 							value={title}
 							onChangeText={setTitle}
@@ -346,8 +347,8 @@ export default function EditItemScreen() {
 					{/* Notes (for non-secure-note items) */}
 					{item.category !== "secure-note" && (
 						<TextField className="mb-4">
-							<TextField.Label>Notes (optional)</TextField.Label>
-							<TextField.Input
+							<Label>Notes (optional)</Label>
+							<Input
 								placeholder="Add any additional notes..."
 								value={notes}
 								onChangeText={setNotes}

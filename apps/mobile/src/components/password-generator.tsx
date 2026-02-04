@@ -2,26 +2,24 @@ import {
 	generatePassword,
 	type PasswordOptions,
 } from "@bittery/shared/password";
+import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import Slider from "@react-native-community/slider";
 import * as Clipboard from "expo-clipboard";
 import { getRandomValues } from "expo-crypto";
-import { Check, Copy, RefreshCw, Sparkles } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
-import {
-	ScrollView,
-	Text,
-	View,
-} from "react-native";
 import {
 	BottomSheet,
 	Button,
-	FormField,
+	ControlField,
+	Input,
+	Label,
 	Switch,
 	TextField,
 	useToast,
 } from "heroui-native";
+import { Check, Copy, RefreshCw, Sparkles } from "lucide-react-native";
+import { useCallback, useEffect, useState } from "react";
+import { Text, View } from "react-native";
 import { withUniwind } from "uniwind";
-import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 
 // Create styled icon components
 const StyledCheck = withUniwind(Check);
@@ -144,7 +142,7 @@ export function PasswordGenerator({
 		uppercase: defaultOptions?.uppercase ?? true,
 		numbers: defaultOptions?.numbers ?? true,
 		symbols: defaultOptions?.symbols ?? true,
-		generateRandomValues: getRandomValues
+		generateRandomValues: getRandomValues,
 	});
 
 	// Memorable password options
@@ -264,9 +262,7 @@ export function PasswordGenerator({
 
 	return (
 		<BottomSheet isOpen={isOpen} onOpenChange={setIsOpen}>
-			<BottomSheet.Trigger asChild>
-				{children}
-			</BottomSheet.Trigger>
+			<BottomSheet.Trigger asChild>{children}</BottomSheet.Trigger>
 			<BottomSheet.Portal>
 				<BottomSheet.Overlay />
 				<BottomSheet.Content snapPoints={["90%"]}>
@@ -293,7 +289,9 @@ export function PasswordGenerator({
 									Random
 								</Button>
 								<Button
-									variant={passwordType === "memorable" ? "primary" : "secondary"}
+									variant={
+										passwordType === "memorable" ? "primary" : "secondary"
+									}
 									onPress={() => setPasswordType("memorable")}
 									className="flex-1"
 								>
@@ -317,18 +315,10 @@ export function PasswordGenerator({
 										{password}
 									</Text>
 								</View>
-								<Button
-									isIconOnly
-									variant="secondary"
-									onPress={handleGenerate}
-								>
+								<Button isIconOnly variant="secondary" onPress={handleGenerate}>
 									<StyledRefreshCw size={20} className="text-foreground" />
 								</Button>
-								<Button
-									isIconOnly
-									variant="secondary"
-									onPress={handleCopy}
-								>
+								<Button isIconOnly variant="secondary" onPress={handleCopy}>
 									{copied ? (
 										<StyledCheck size={20} className="text-success" />
 									) : (
@@ -370,7 +360,7 @@ export function PasswordGenerator({
 											Length
 										</Text>
 										<TextField className="w-16">
-											<TextField.Input
+											<Input
 												className="px-2 py-1 text-center"
 												value={options.length.toString()}
 												onChangeText={(text) => {
@@ -412,7 +402,7 @@ export function PasswordGenerator({
 										Include Characters
 									</Text>
 									<View className="gap-0 overflow-hidden rounded-xl border border-border">
-										<FormField
+										<ControlField
 											isSelected={options.lowercase}
 											onSelectedChange={(value) => {
 												if (canToggleOption || value) {
@@ -423,15 +413,13 @@ export function PasswordGenerator({
 											isDisabled={!canToggleOption && options.lowercase}
 											className="border-border border-b px-4 py-3"
 										>
-											<FormField.Label className="flex-1">
-												Lowercase (a-z)
-											</FormField.Label>
-											<FormField.Indicator>
+											<Label className="flex-1">Lowercase (a-z)</Label>
+											<ControlField.Indicator>
 												<Switch />
-											</FormField.Indicator>
-										</FormField>
+											</ControlField.Indicator>
+										</ControlField>
 
-										<FormField
+										<ControlField
 											isSelected={options.uppercase}
 											onSelectedChange={(value) => {
 												if (canToggleOption || value) {
@@ -442,15 +430,13 @@ export function PasswordGenerator({
 											isDisabled={!canToggleOption && options.uppercase}
 											className="border-border border-b px-4 py-3"
 										>
-											<FormField.Label className="flex-1">
-												Uppercase (A-Z)
-											</FormField.Label>
-											<FormField.Indicator>
+											<Label className="flex-1">Uppercase (A-Z)</Label>
+											<ControlField.Indicator>
 												<Switch />
-											</FormField.Indicator>
-										</FormField>
+											</ControlField.Indicator>
+										</ControlField>
 
-										<FormField
+										<ControlField
 											isSelected={options.numbers}
 											onSelectedChange={(value) => {
 												if (canToggleOption || value) {
@@ -461,15 +447,13 @@ export function PasswordGenerator({
 											isDisabled={!canToggleOption && options.numbers}
 											className="border-border border-b px-4 py-3"
 										>
-											<FormField.Label className="flex-1">
-												Numbers (0-9)
-											</FormField.Label>
-											<FormField.Indicator>
+											<Label className="flex-1">Numbers (0-9)</Label>
+											<ControlField.Indicator>
 												<Switch />
-											</FormField.Indicator>
-										</FormField>
+											</ControlField.Indicator>
+										</ControlField>
 
-										<FormField
+										<ControlField
 											isSelected={options.symbols}
 											onSelectedChange={(value) => {
 												if (canToggleOption || value) {
@@ -480,13 +464,11 @@ export function PasswordGenerator({
 											isDisabled={!canToggleOption && options.symbols}
 											className="px-4 py-3"
 										>
-											<FormField.Label className="flex-1">
-												Symbols (!@#$%...)
-											</FormField.Label>
-											<FormField.Indicator>
+											<Label className="flex-1">Symbols (!@#$%...)</Label>
+											<ControlField.Indicator>
 												<Switch />
-											</FormField.Indicator>
-										</FormField>
+											</ControlField.Indicator>
+										</ControlField>
 									</View>
 								</View>
 							</View>
@@ -514,18 +496,16 @@ export function PasswordGenerator({
 								</View>
 
 								<View className="overflow-hidden rounded-xl border border-border">
-									<FormField
+									<ControlField
 										isSelected={includeNumber}
 										onSelectedChange={setIncludeNumber}
 										className="px-4 py-3"
 									>
-										<FormField.Label className="flex-1">
-											Include number at end
-										</FormField.Label>
-										<FormField.Indicator>
+										<Label className="flex-1">Include number at end</Label>
+										<ControlField.Indicator>
 											<Switch />
-										</FormField.Indicator>
-									</FormField>
+										</ControlField.Indicator>
+									</ControlField>
 								</View>
 
 								<View className="rounded-xl bg-surface-secondary p-4">

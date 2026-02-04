@@ -1,4 +1,11 @@
-import { Button, Chip, Label, TextField } from "heroui-native";
+import {
+	Button,
+	Chip,
+	Description,
+	Input,
+	Label,
+	TextField,
+} from "heroui-native";
 import { X } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
@@ -84,7 +91,7 @@ export function TagInput({
 			{/* Tag Input Field */}
 			<View className="flex-row items-start gap-2">
 				<TextField className="flex-1">
-					<TextField.Input
+					<Input
 						placeholder={placeholder}
 						value={inputValue}
 						onChangeText={setInputValue}
@@ -95,9 +102,7 @@ export function TagInput({
 						autoCorrect={false}
 					/>
 					{tags.length >= maxTags && (
-						<TextField.Description>
-							Maximum {maxTags} tags reached
-						</TextField.Description>
+						<Description>Maximum {maxTags} tags reached</Description>
 					)}
 				</TextField>
 				<Button

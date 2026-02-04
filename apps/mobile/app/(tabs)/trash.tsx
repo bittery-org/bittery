@@ -5,7 +5,12 @@ import {
 	useRestoreItem,
 } from "@bittery/hooks";
 import { Button, Card, Skeleton, useToast } from "heroui-native";
-import { ArchiveRestore, ChevronLeft, ChevronRight, Trash2 } from "lucide-react-native";
+import {
+	ArchiveRestore,
+	ChevronLeft,
+	ChevronRight,
+	Trash2,
+} from "lucide-react-native";
 import { useMemo, useState } from "react";
 import {
 	ActivityIndicator,
@@ -240,7 +245,7 @@ export default function TrashScreen() {
 	return (
 		<SafeAreaView className="flex-1 bg-background" edges={[]}>
 			{/* Swipe hint */}
-			<View className="border-border flex-row items-center justify-center gap-8 border-b bg-surface/50 py-3">
+			<View className="flex-row items-center justify-center gap-8 border-border border-b bg-surface/50 py-3">
 				<View className="flex-row items-center gap-1.5">
 					<StyledChevronRight size={18} className="text-success" />
 					<StyledArchiveRestore size={18} className="text-success" />

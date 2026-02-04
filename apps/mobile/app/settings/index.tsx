@@ -3,8 +3,10 @@ import { useRouter } from "expo-router";
 import {
 	Button,
 	Card,
-	Divider,
-	FormField,
+	ControlField,
+	Description,
+	Label,
+	Separator,
 	Surface,
 	Switch,
 } from "heroui-native";
@@ -62,7 +64,6 @@ export default function SettingsScreen() {
 	const router = useRouter();
 	const {
 		activeAccount,
-		activeAccountConfig,
 		isAllAccountsMode,
 		allAccounts,
 		refreshAccounts,
@@ -138,7 +139,9 @@ export default function SettingsScreen() {
 				filtered.length > 0 ? Math.min(...filtered) : null,
 			);
 		} else if (activeAccount) {
-			const sessionData = await storage.getStoredSessionData(activeAccount.email);
+			const sessionData = await storage.getStoredSessionData(
+				activeAccount.email,
+			);
 			if (sessionData) {
 				const lastEntry =
 					sessionData.lastMasterPasswordEntry || sessionData.createdAt;
@@ -330,11 +333,13 @@ export default function SettingsScreen() {
 					{label}
 				</Text>
 				{value && (
-					<Text className="text-surface-foreground text-sm">{value}</Text>
+					<Text className="text-sm text-surface-foreground">{value}</Text>
 				)}
 			</View>
 			{rightElement ||
-				(onPress && <StyledChevronRight size={20} className="text-surface-foreground" />)}
+				(onPress && (
+					<StyledChevronRight size={20} className="text-surface-foreground" />
+				))}
 		</Button>
 	);
 
@@ -359,7 +364,7 @@ export default function SettingsScreen() {
 			<ScrollView className="flex-1">
 				{/* Account Section */}
 				<Surface variant="transparent" className="mb-6 gap-0 p-0">
-					<Text className="px-4 py-3 font-semibold text-surface-foreground text-sm uppercase">
+					<Text className="px-4 py-3 font-semibold text-sm text-surface-foreground uppercase">
 						Account
 					</Text>
 					<Surface variant="secondary" className="gap-0 p-0">
@@ -368,7 +373,7 @@ export default function SettingsScreen() {
 							label={accountLabel}
 							value={accountValue}
 						/>
-						<Divider />
+						<Separator />
 						<SettingRow
 							icon={StyledServer}
 							label="Server"
@@ -379,11 +384,11 @@ export default function SettingsScreen() {
 
 				{/* Appearance Section */}
 				<Surface variant="transparent" className="mb-6 gap-0 p-0">
-					<Text className="px-4 py-3 font-semibold text-surface-foreground text-sm uppercase">
+					<Text className="px-4 py-3 font-semibold text-sm text-surface-foreground uppercase">
 						Appearance
 					</Text>
 					<Surface variant="secondary" className="gap-0 p-0">
-						<FormField
+						<ControlField
 							isSelected={theme === "dark"}
 							onSelectedChange={handleThemeToggle}
 							className="px-4 py-4"
@@ -396,54 +401,58 @@ export default function SettingsScreen() {
 								)}
 							</View>
 							<View className="flex-1">
-								<FormField.Label>Dark Mode</FormField.Label>
-								<FormField.Description>
+								<Label>Dark Mode</Label>
+								<Description>
 									{theme === "dark" ? "Enabled" : "Disabled"}
-								</FormField.Description>
+								</Description>
 							</View>
-							<FormField.Indicator>
+							<ControlField.Indicator>
 								<Switch />
-							</FormField.Indicator>
-						</FormField>
+							</ControlField.Indicator>
+						</ControlField>
 					</Surface>
 				</Surface>
 
 				{/* Security Section */}
 				<Surface variant="transparent" className="mb-6 gap-0 p-0">
-					<Text className="px-4 py-3 font-semibold text-surface-foreground text-sm uppercase">
+					<Text className="px-4 py-3 font-semibold text-sm text-surface-foreground uppercase">
 						Security
 					</Text>
-					<Text className="px-4 pb-2 text-xs text-muted">
+					<Text className="px-4 pb-2 text-muted text-xs">
 						Applies to all accounts on this device
 					</Text>
 					<Surface variant="secondary" className="gap-0 p-0">
 						{biometricAvailable && (
 							<>
-								<FormField
+								<ControlField
 									isSelected={biometricEnabled}
 									onSelectedChange={handleBiometricToggle}
 									className="px-4 py-4"
 								>
 									<View className="mr-4 h-10 w-10 items-center justify-center rounded-lg bg-secondary">
 										{biometricType === "Face ID" ? (
-											<StyledScanFace size={20} className="text-surface-foreground" />
+											<StyledScanFace
+												size={20}
+												className="text-surface-foreground"
+											/>
 										) : (
-											<StyledFingerprint size={20} className="text-surface-foreground" />
+											<StyledFingerprint
+												size={20}
+												className="text-surface-foreground"
+											/>
 										)}
 									</View>
 									<View className="flex-1">
-										<FormField.Label>
-											{biometricType || "Biometric"} Unlock
-										</FormField.Label>
-										<FormField.Description>
+										<Label>{biometricType || "Biometric"} Unlock</Label>
+										<Description>
 											{biometricEnabled ? "Enabled" : "Disabled"}
-										</FormField.Description>
+										</Description>
 									</View>
-									<FormField.Indicator>
+									<ControlField.Indicator>
 										<Switch />
-									</FormField.Indicator>
-								</FormField>
-								<Divider />
+									</ControlField.Indicator>
+								</ControlField>
+								<Separator />
 							</>
 						)}
 
@@ -453,7 +462,10 @@ export default function SettingsScreen() {
 								<View className="px-4 py-4">
 									<Card variant="secondary" className="gap-2 p-3">
 										<View className="flex-row items-start gap-3">
-											<StyledInfo size={18} className="text-surface-foreground" />
+											<StyledInfo
+												size={18}
+												className="text-surface-foreground"
+											/>
 											<View className="flex-1">
 												<Card.Title className="text-sm">
 													Biometric Not Available
@@ -466,7 +478,7 @@ export default function SettingsScreen() {
 										</View>
 									</Card>
 								</View>
-								<Divider />
+								<Separator />
 							</>
 						)}
 
@@ -489,7 +501,7 @@ export default function SettingsScreen() {
 										</View>
 									</Card>
 								</View>
-								<Divider />
+								<Separator />
 							</>
 						)}
 
@@ -499,17 +511,20 @@ export default function SettingsScreen() {
 							value={getAutoLockLabel(autoLockTimeout)}
 							onPress={handleAutoLockChange}
 						/>
-						<Divider />
+						<Separator />
 
 						{/* Master password re-entry info */}
 						{biometricEnabled && masterPasswordDaysRemaining !== null && (
 							<>
 								<View className="px-4 py-4">
-									<Card variant="quaternary" className="gap-2 p-3">
+									<Card variant="tertiary" className="gap-2 p-3">
 										<View className="flex-row items-center gap-3">
-											<StyledLock size={18} className="text-surface-foreground" />
+											<StyledLock
+												size={18}
+												className="text-surface-foreground"
+											/>
 											<View className="flex-1">
-												<Card.Title className="text-surface-foreground text-sm">
+												<Card.Title className="text-sm text-surface-foreground">
 													Password Check
 												</Card.Title>
 												<Card.Description className="text-muted text-xs">
@@ -521,7 +536,7 @@ export default function SettingsScreen() {
 										</View>
 									</Card>
 								</View>
-								<Divider />
+								<Separator />
 							</>
 						)}
 
@@ -535,7 +550,7 @@ export default function SettingsScreen() {
 
 				{/* Accessibility Section */}
 				<Surface variant="transparent" className="mb-6 gap-0 p-0">
-					<Text className="px-4 py-3 font-semibold text-surface-foreground text-sm uppercase">
+					<Text className="px-4 py-3 font-semibold text-sm text-surface-foreground uppercase">
 						Accessibility
 					</Text>
 					<Surface variant="secondary" className="gap-0 p-0">
@@ -562,13 +577,13 @@ export default function SettingsScreen() {
 				{/* Multiple Accounts */}
 				{accountsForList.length > 0 && (
 					<Surface variant="transparent" className="mb-6 gap-0 p-0">
-						<Text className="px-4 py-3 font-semibold text-surface-foreground text-sm uppercase">
+						<Text className="px-4 py-3 font-semibold text-sm text-surface-foreground uppercase">
 							{isAllAccountsMode ? "Accounts" : "Other Accounts"}
 						</Text>
 						<Surface variant="secondary" className="gap-0 p-0">
 							{accountsForList.map((account, index) => (
 								<View key={account.email}>
-									{index > 0 && <Divider />}
+									{index > 0 && <Separator />}
 									<SettingRow
 										icon={StyledUser}
 										label={account.name || account.email.split("@")[0]}
@@ -593,7 +608,7 @@ export default function SettingsScreen() {
 
 				{/* Danger Zone */}
 				<Surface variant="transparent" className="mb-6 gap-0 p-0">
-					<Text className="px-4 py-3 font-semibold text-surface-foreground text-sm uppercase">
+					<Text className="px-4 py-3 font-semibold text-sm text-surface-foreground uppercase">
 						Danger Zone
 					</Text>
 					<Surface variant="secondary" className="gap-0 p-0">
@@ -613,7 +628,9 @@ export default function SettingsScreen() {
 
 				{/* App Info */}
 				<View className="items-center gap-1 py-8">
-					<Text className="text-surface-foreground text-sm">Bittery Mobile</Text>
+					<Text className="text-sm text-surface-foreground">
+						Bittery Mobile
+					</Text>
 					<Text className="text-surface-foreground text-xs">Version 0.1.0</Text>
 				</View>
 			</ScrollView>

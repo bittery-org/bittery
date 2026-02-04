@@ -4,7 +4,7 @@ import {
 	formatCardNumber,
 	getCardBrandDisplayName,
 } from "@bittery/shared/credit-card";
-import { TextField } from "heroui-native";
+import { Input, Label, TextField } from "heroui-native";
 import { Eye, EyeOff } from "lucide-react-native";
 import { forwardRef, useImperativeHandle, useState } from "react";
 import { Pressable, Text, View } from "react-native";
@@ -30,23 +30,25 @@ interface CreditCardFormProps {
 	initialData?: Partial<CreditCardFormData>;
 }
 
-export const CreditCardForm = forwardRef<CreditCardFormRef, CreditCardFormProps>(
-	({ initialData }, ref) => {
-		const [cardholderName, setCardholderName] = useState(
-			initialData?.cardholderName || "",
-		);
-		const [cardNumber, setCardNumber] = useState(initialData?.cardNumber || "");
-		const [expiryDate, setExpiryDate] = useState(initialData?.expiryDate || "");
-		const [cvv, setCvv] = useState(initialData?.cvv || "");
-		const [billingAddress, setBillingAddress] = useState(
-			initialData?.billingAddress || "",
-		);
-		const [detectedCardBrand, setDetectedCardBrand] = useState<CardBrand | "">(
-			initialData?.cardNumber && initialData.cardNumber.length >= 4
-				? detectCardBrand(initialData.cardNumber)
-				: "",
-		);
-		const [showCvv, setShowCvv] = useState(false);
+export const CreditCardForm = forwardRef<
+	CreditCardFormRef,
+	CreditCardFormProps
+>(({ initialData }, ref) => {
+	const [cardholderName, setCardholderName] = useState(
+		initialData?.cardholderName || "",
+	);
+	const [cardNumber, setCardNumber] = useState(initialData?.cardNumber || "");
+	const [expiryDate, setExpiryDate] = useState(initialData?.expiryDate || "");
+	const [cvv, setCvv] = useState(initialData?.cvv || "");
+	const [billingAddress, setBillingAddress] = useState(
+		initialData?.billingAddress || "",
+	);
+	const [detectedCardBrand, setDetectedCardBrand] = useState<CardBrand | "">(
+		initialData?.cardNumber && initialData.cardNumber.length >= 4
+			? detectCardBrand(initialData.cardNumber)
+			: "",
+	);
+	const [showCvv, setShowCvv] = useState(false);
 
 	useImperativeHandle(ref, () => ({
 		getData: () => ({
@@ -88,8 +90,8 @@ export const CreditCardForm = forwardRef<CreditCardFormRef, CreditCardFormProps>
 	return (
 		<>
 			<TextField className="mb-4">
-				<TextField.Label>Cardholder Name</TextField.Label>
-				<TextField.Input
+				<Label>Cardholder Name</Label>
+				<Input
 					placeholder="Name on card"
 					value={cardholderName}
 					onChangeText={setCardholderName}
@@ -99,14 +101,14 @@ export const CreditCardForm = forwardRef<CreditCardFormRef, CreditCardFormProps>
 
 			<TextField className="mb-4">
 				<View className="mb-2 flex-row items-center justify-between">
-					<TextField.Label>Card Number</TextField.Label>
+					<Label>Card Number</Label>
 					{detectedCardBrand && detectedCardBrand !== "unknown" && (
 						<Text className="text-muted text-xs">
 							{getCardBrandDisplayName(detectedCardBrand)}
 						</Text>
 					)}
 				</View>
-				<TextField.Input
+				<Input
 					placeholder="1234 5678 9012 3456"
 					value={formatCardNumber(cardNumber, detectedCardBrand || undefined)}
 					onChangeText={handleCardNumberChange}
@@ -118,8 +120,8 @@ export const CreditCardForm = forwardRef<CreditCardFormRef, CreditCardFormProps>
 
 			<View className="mb-4 flex-row gap-2">
 				<TextField className="flex-1">
-					<TextField.Label>Expiry</TextField.Label>
-					<TextField.Input
+					<Label>Expiry</Label>
+					<Input
 						placeholder="MM/YY"
 						value={expiryDate}
 						onChangeText={handleExpiryChange}
@@ -130,9 +132,9 @@ export const CreditCardForm = forwardRef<CreditCardFormRef, CreditCardFormProps>
 				</TextField>
 
 				<TextField className="flex-1">
-					<TextField.Label>CVV</TextField.Label>
+					<Label>CVV</Label>
 					<View className="w-full flex-row items-center">
-						<TextField.Input
+						<Input
 							placeholder="123"
 							value={cvv}
 							onChangeText={handleCvvChange}
@@ -156,8 +158,8 @@ export const CreditCardForm = forwardRef<CreditCardFormRef, CreditCardFormProps>
 			</View>
 
 			<TextField className="mb-4">
-				<TextField.Label>Billing Address</TextField.Label>
-				<TextField.Input
+				<Label>Billing Address</Label>
+				<Input
 					placeholder="123 Main St, City, State ZIP"
 					value={billingAddress}
 					onChangeText={setBillingAddress}
@@ -169,7 +171,6 @@ export const CreditCardForm = forwardRef<CreditCardFormRef, CreditCardFormProps>
 			</TextField>
 		</>
 	);
-	},
-);
+});
 
 CreditCardForm.displayName = "CreditCardForm";

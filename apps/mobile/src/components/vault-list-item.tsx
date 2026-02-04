@@ -1,4 +1,4 @@
-import { Card, PressableFeedback, Chip } from "heroui-native";
+import { Card, Chip, PressableFeedback } from "heroui-native";
 import { ChevronRight } from "lucide-react-native";
 import { View } from "react-native";
 import { withUniwind } from "uniwind";
@@ -63,10 +63,15 @@ export function VaultListItem({
 		<PressableFeedback onPress={onPress} className="mx-4 mb-1">
 			<Card className={getCardRounding()}>
 				<PressableFeedback.Ripple />
-				<Card.Body className="flex-row items-center pl-1.5 pr-3 py-1">
+				<Card.Body className="flex-row items-center py-1 pr-3 pl-1.5">
 					{/* Vault Avatar */}
 					<View className="mr-3.5">
-						<VaultAvatar name={name} icon={icon} imageUrl={imageUrl} size="sm" />
+						<VaultAvatar
+							name={name}
+							icon={icon}
+							imageUrl={imageUrl}
+							size="sm"
+						/>
 					</View>
 
 					{/* Content */}

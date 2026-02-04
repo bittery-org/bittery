@@ -1,18 +1,17 @@
-import { View, Image } from "react-native";
-import { withUniwind } from "uniwind";
+import { Card } from "heroui-native";
 import {
+	Briefcase,
+	FolderClosed,
+	Heart,
+	Key,
 	Lock,
 	Shield,
-	Users,
-	Briefcase,
-	Key,
-	FolderClosed,
 	Star,
-	Heart,
+	Users,
 } from "lucide-react-native";
-import type { LucideIcon } from "lucide-react-native";
 import { useState } from "react";
-import { Card } from "heroui-native";
+import { Image, View } from "react-native";
+import { withUniwind } from "uniwind";
 
 type VaultIconName =
 	| "lock"

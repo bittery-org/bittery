@@ -11,6 +11,8 @@
 			"**",
 			"!**/.next",
 			"!**/.expo",
+			"!**/.claude",
+			"!**/.agents",
 			"!**/.tanstack",
 			"!**/android",
 			"!**/ios",

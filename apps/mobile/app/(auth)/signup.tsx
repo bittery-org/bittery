@@ -2,6 +2,14 @@ import { normalizeServerUrl } from "@bittery/shared/server-url";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import {
+	Button,
+	ControlField,
+	Description,
+	Input,
+	Label,
+	TextField,
+} from "heroui-native";
+import {
 	ArrowLeft,
 	Copy,
 	Eye,
@@ -17,14 +25,14 @@ import {
 	Alert,
 	KeyboardAvoidingView,
 	Platform,
+	Pressable,
 	ScrollView,
 	Text,
 	View,
-	Pressable,
 } from "react-native";
-import { Button, TextField, FormField } from "heroui-native";
 import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { defaultServerUrl } from "@/constants/server-url";
 import { generateSecretKey } from "../../src/lib/crypto";
 
 // Create styled icon components
@@ -38,14 +46,11 @@ const StyledKey = withUniwind(Key);
 const StyledCopy = withUniwind(Copy);
 const StyledArrowLeft = withUniwind(ArrowLeft);
 
-const DEFAULT_SERVER_URL =
-	process.env.EXPO_PUBLIC_SERVER_URL || "http://localhost:3000";
-
 export default function SignupScreen() {
 	const router = useRouter();
 
 	const [step, setStep] = useState<"form" | "secret-key">("form");
-	const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
+	const [serverUrl, setServerUrl] = useState(defaultServerUrl);
 	const [name, setName] = useState("");
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
@@ -192,16 +197,16 @@ export default function SignupScreen() {
 						</View>
 
 						{/* Confirmation Checkbox */}
-						<FormField
+						<ControlField
 							isSelected={hasConfirmedSave}
 							onSelectedChange={setHasConfirmedSave}
 						>
-							<FormField.Label className="flex-1">
+							<Label className="flex-1">
 								I have saved my Secret Key in a secure location and understand I
 								will need it to access my account.
-							</FormField.Label>
-							<FormField.Indicator />
-						</FormField>
+							</Label>
+							<ControlField.Indicator />
+						</ControlField>
 
 						{/* Continue Button */}
 						<Button
@@ -267,16 +272,16 @@ export default function SignupScreen() {
 						<View className="gap-4">
 							{/* Server URL */}
 							<TextField>
-								<TextField.Label>Server URL</TextField.Label>
+								<Label>Server URL</Label>
 								<View className="w-full flex-row items-center">
-									<TextField.Input
+									<Input
 										placeholder="https://your-server.com"
 										value={serverUrl}
 										onChangeText={setServerUrl}
 										autoCapitalize="none"
 										autoCorrect={false}
 										keyboardType="url"
-										className="flex-1 pl-12 pr-4"
+										className="flex-1 pr-4 pl-12"
 									/>
 									<StyledServer
 										size={20}
@@ -284,22 +289,22 @@ export default function SignupScreen() {
 										pointerEvents="none"
 									/>
 								</View>
-								<TextField.Description>
+								<Description>
 									Use your self-hosted Bittery server URL
-								</TextField.Description>
+								</Description>
 							</TextField>
 
 							{/* Name */}
 							<TextField>
-								<TextField.Label>Name</TextField.Label>
+								<Label>Name</Label>
 								<View className="w-full flex-row items-center">
-									<TextField.Input
+									<Input
 										placeholder="Your name"
 										value={name}
 										onChangeText={setName}
 										autoCapitalize="words"
 										textContentType="name"
-										className="flex-1 pl-12 pr-4"
+										className="flex-1 pr-4 pl-12"
 									/>
 									<StyledUser
 										size={20}
@@ -311,9 +316,9 @@ export default function SignupScreen() {
 
 							{/* Email */}
 							<TextField>
-								<TextField.Label>Email</TextField.Label>
+								<Label>Email</Label>
 								<View className="w-full flex-row items-center">
-									<TextField.Input
+									<Input
 										placeholder="you@example.com"
 										value={email}
 										onChangeText={setEmail}
@@ -321,7 +326,7 @@ export default function SignupScreen() {
 										autoCorrect={false}
 										keyboardType="email-address"
 										textContentType="emailAddress"
-										className="flex-1 pl-12 pr-4"
+										className="flex-1 pr-4 pl-12"
 									/>
 									<StyledMail
 										size={20}
@@ -333,15 +338,15 @@ export default function SignupScreen() {
 
 							{/* Password */}
 							<TextField>
-								<TextField.Label>Password</TextField.Label>
+								<Label>Password</Label>
 								<View className="w-full flex-row items-center">
-									<TextField.Input
+									<Input
 										placeholder="Create a strong password"
 										value={password}
 										onChangeText={setPassword}
 										secureTextEntry={!showPassword}
 										textContentType="newPassword"
-										className="flex-1 pl-12 pr-12"
+										className="flex-1 pr-12 pl-12"
 									/>
 									<StyledLock
 										size={20}
@@ -359,22 +364,20 @@ export default function SignupScreen() {
 										)}
 									</Pressable>
 								</View>
-								<TextField.Description>
-									Minimum 8 characters
-								</TextField.Description>
+								<Description>Minimum 8 characters</Description>
 							</TextField>
 
 							{/* Confirm Password */}
 							<TextField>
-								<TextField.Label>Confirm Password</TextField.Label>
+								<Label>Confirm Password</Label>
 								<View className="w-full flex-row items-center">
-									<TextField.Input
+									<Input
 										placeholder="Confirm your password"
 										value={confirmPassword}
 										onChangeText={setConfirmPassword}
 										secureTextEntry={!showPassword}
 										textContentType="newPassword"
-										className="flex-1 pl-12 pr-4"
+										className="flex-1 pr-4 pl-12"
 									/>
 									<StyledLock
 										size={20}

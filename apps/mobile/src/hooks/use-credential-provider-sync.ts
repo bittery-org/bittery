@@ -197,7 +197,9 @@ export function useCredentialProviderSync(
 			await ensureNativeMukSet();
 
 			if (accountsInfo.length === 0) {
-				console.warn("[CredentialProviderSync] No accounts available, skipping vault sync");
+				console.warn(
+					"[CredentialProviderSync] No accounts available, skipping vault sync",
+				);
 				return null;
 			}
 
@@ -220,8 +222,7 @@ export function useCredentialProviderSync(
 					if (!vaultIdsWithKeys.has(item.vaultId)) return false;
 					if (!isAllAccountsMode) return true;
 					return (
-						item.account?.email?.toLowerCase() ===
-						account.email.toLowerCase()
+						item.account?.email?.toLowerCase() === account.email.toLowerCase()
 					);
 				});
 
@@ -352,7 +353,10 @@ export function useCredentialProviderSync(
 			console.log("[CredentialProviderSync] Starting vault data sync...");
 			const vaultResult = await syncVaultData();
 			if (vaultResult) {
-				console.log("[CredentialProviderSync] Vault sync complete:", vaultResult);
+				console.log(
+					"[CredentialProviderSync] Vault sync complete:",
+					vaultResult,
+				);
 			}
 
 			if (isAllAccountsMode && accountsInfo.length > 1) {

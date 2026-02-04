@@ -201,8 +201,7 @@ const withCredentialProvider = (config) => {
 						action: [
 							{
 								$: {
-									"android:name":
-										"android.service.autofill.AutofillService",
+									"android:name": "android.service.autofill.AutofillService",
 								},
 							},
 						],

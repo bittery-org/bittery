@@ -39,7 +39,9 @@ export function useFilteredItems({
 					item.url?.toLowerCase().includes(query) ||
 					item.notes?.toLowerCase().includes(query) ||
 					("tags" in item &&
-						item.tags?.some((tag: string) => tag.toLowerCase().includes(query))),
+						item.tags?.some((tag: string) =>
+							tag.toLowerCase().includes(query),
+						)),
 			);
 		}
 

@@ -1,7 +1,14 @@
 import { useAllVaultKeys, useCreateItem } from "@bittery/hooks";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Button, Label, Select, TextField, useToast } from "heroui-native";
+import {
+	Button,
+	Input,
+	Label,
+	Select,
+	TextField,
+	useToast,
+} from "heroui-native";
 import { ArrowLeft, ChevronDown, Vault } from "lucide-react-native";
 import { useRef, useState } from "react";
 import {
@@ -40,7 +47,9 @@ const categoryOptions = allCategoryOptions.filter((opt) => opt.value !== "all");
 export default function CreateItemScreen() {
 	const router = useRouter();
 	const { toast } = useToast();
-	const { vaultId: vaultIdParam } = useLocalSearchParams<{ vaultId?: string }>();
+	const { vaultId: vaultIdParam } = useLocalSearchParams<{
+		vaultId?: string;
+	}>();
 	const createItem = useCreateItem();
 	const {
 		vaultKeys = [],
@@ -293,7 +302,7 @@ export default function CreateItemScreen() {
 															{vault.vaultName}
 														</Text>
 														{isAllAccountsMode && vault.accountEmail && (
-															<Text className="text-xs text-muted">
+															<Text className="text-muted text-xs">
 																{vault.accountName || vault.accountEmail}
 															</Text>
 														)}
@@ -381,8 +390,8 @@ export default function CreateItemScreen() {
 
 					{/* Title */}
 					<TextField className="mb-4" isRequired>
-						<TextField.Label>Title</TextField.Label>
-						<TextField.Input
+						<Label>Title</Label>
+						<Input
 							placeholder="Enter title"
 							value={title}
 							onChangeText={setTitle}
@@ -415,8 +424,8 @@ export default function CreateItemScreen() {
 					{/* Notes (for non-secure-note items) */}
 					{category?.value !== "secure-note" && (
 						<TextField className="mb-4">
-							<TextField.Label>Notes (optional)</TextField.Label>
-							<TextField.Input
+							<Label>Notes (optional)</Label>
+							<Input
 								placeholder="Add any additional notes..."
 								value={notes}
 								onChangeText={setNotes}

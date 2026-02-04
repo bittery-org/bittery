@@ -1,5 +1,5 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { useAllVaultKeys, type VaultKeyWithAccount } from "@bittery/hooks";
+import { useQueryClient } from "@tanstack/react-query";
 import { Tabs, useRouter } from "expo-router";
 import { Button, Card, Skeleton, useToast } from "heroui-native";
 import { Plus, Shield } from "lucide-react-native";
@@ -35,7 +35,8 @@ export default function VaultsScreen() {
 		toast.show({
 			variant: "default",
 			label: "Create Vault",
-			description: "Vault creation is coming soon. For now, create vaults from the web app.",
+			description:
+				"Vault creation is coming soon. For now, create vaults from the web app.",
 			placement: "bottom",
 		});
 	};
@@ -44,35 +45,36 @@ export default function VaultsScreen() {
 		router.push(`/(vault)/${vaultId}`);
 	};
 
-	const { personalVaults, teamVaults, accountVaultsByTeamName } = useMemo(() => {
-		if (!vaultKeys) {
-			return {
-				personalVaults: [],
-				teamVaults: [],
-				accountVaultsByTeamName: new Map<string, VaultKeyWithAccount[]>(),
-			};
-		}
-
-		const personal = vaultKeys.filter((v) => v.vaultType === "personal");
-		const team = vaultKeys.filter((v) => v.vaultType === "team");
-
-		const byTeamName = new Map<string, VaultKeyWithAccount[]>();
-		for (const vault of vaultKeys) {
-			const teamName = vault.accountTeamName || "Personal";
-			const existing = byTeamName.get(teamName);
-			if (existing) {
-				existing.push(vault);
-			} else {
-				byTeamName.set(teamName, [vault]);
+	const { personalVaults, teamVaults, accountVaultsByTeamName } =
+		useMemo(() => {
+			if (!vaultKeys) {
+				return {
+					personalVaults: [],
+					teamVaults: [],
+					accountVaultsByTeamName: new Map<string, VaultKeyWithAccount[]>(),
+				};
 			}
-		}
 
-		return {
-			personalVaults: personal,
-			teamVaults: team,
-			accountVaultsByTeamName: byTeamName,
-		};
-	}, [vaultKeys]);
+			const personal = vaultKeys.filter((v) => v.vaultType === "personal");
+			const team = vaultKeys.filter((v) => v.vaultType === "team");
+
+			const byTeamName = new Map<string, VaultKeyWithAccount[]>();
+			for (const vault of vaultKeys) {
+				const teamName = vault.accountTeamName || "Personal";
+				const existing = byTeamName.get(teamName);
+				if (existing) {
+					existing.push(vault);
+				} else {
+					byTeamName.set(teamName, [vault]);
+				}
+			}
+
+			return {
+				personalVaults: personal,
+				teamVaults: team,
+				accountVaultsByTeamName: byTeamName,
+			};
+		}, [vaultKeys]);
 
 	const renderVaultItem = ({
 		item,

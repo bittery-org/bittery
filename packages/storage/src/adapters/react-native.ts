@@ -2,6 +2,7 @@
  * React Native Storage Adapter with Biometric Authentication
  * Uses expo-secure-store and expo-sqlite for storage, expo-local-authentication for biometrics
  */
+/** biome-ignore-all lint/style/noNonNullAssertion: Wee need that here */
 
 import {
 	arrayBufferToBase64,
@@ -119,7 +120,8 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		}
 
 		const openAndInit = async () => {
-			this.db = await this.SQLite.openDatabaseAsync("bittery.db");
+			
+			this.db = await this.SQLite!.openDatabaseAsync("bittery.db");
 			await this.db.execAsync(`
 				CREATE TABLE IF NOT EXISTS kv_store (
 					key TEXT PRIMARY KEY,
@@ -574,7 +576,10 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	// Settings
 	// ============================================================================
 
-	async storeAutoLockTimeout(timeoutMs: number, email?: string): Promise<void> {
+	async storeAutoLockTimeout(
+		timeoutMs: number,
+		_email?: string,
+	): Promise<void> {
 		await this.storeGlobalAutoLockTimeout(timeoutMs);
 
 		const accountsList = await this.getAccountsListInternal();

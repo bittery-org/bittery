@@ -6,6 +6,7 @@ import {
 	useSessionState,
 } from "@bittery/hooks";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { Button, Input, Label, TextField } from "heroui-native";
 import {
 	AlertCircle,
 	Eye,
@@ -21,12 +22,11 @@ import {
 	Alert,
 	KeyboardAvoidingView,
 	Platform,
+	Pressable,
 	ScrollView,
 	Text,
 	View,
-	Pressable,
 } from "react-native";
-import { Button, TextField } from "heroui-native";
 import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
 
@@ -39,6 +39,7 @@ const StyledScanFace = withUniwind(ScanFace);
 const StyledKeyRound = withUniwind(KeyRound);
 const StyledAlertCircle = withUniwind(AlertCircle);
 const StyledShieldCheck = withUniwind(ShieldCheck);
+
 import CredentialProvider from "../modules/credential-provider";
 import { useAccount } from "../src/contexts/account-context";
 import { arrayBufferToBase64 } from "../src/lib/crypto";
@@ -62,13 +63,8 @@ export default function AutofillUnlockScreen() {
 	}>();
 	const platformStorage = usePlatformStorage();
 	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
-	const {
-		activeAccount,
-		activeAccountConfig,
-		isAllAccountsMode,
-		allAccounts,
-		refreshAccounts,
-	} = useAccount();
+	const { activeAccount, isAllAccountsMode, allAccounts, refreshAccounts } =
+		useAccount();
 
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
@@ -99,21 +95,18 @@ export default function AutofillUnlockScreen() {
 		setBiometricType(type ?? null);
 	}, [platformStorage]);
 
-	const setNativeMuksForEmails = useCallback(
-		async (emails: string[]) => {
-			if (Platform.OS !== "android" || !CredentialProvider.isAvailable()) return;
+	const setNativeMuksForEmails = useCallback(async (emails: string[]) => {
+		if (Platform.OS !== "android" || !CredentialProvider.isAvailable()) return;
 
-			for (const email of emails) {
-				const muk = await storage.getMasterUnlockKey(email);
-				const sessionData = await storage.getStoredSessionData(email);
-				if (muk && sessionData?.userId) {
-					const mukBase64 = arrayBufferToBase64(muk);
-					CredentialProvider.setMasterUnlockKey(mukBase64, sessionData.userId);
-				}
+		for (const email of emails) {
+			const muk = await storage.getMasterUnlockKey(email);
+			const sessionData = await storage.getStoredSessionData(email);
+			if (muk && sessionData?.userId) {
+				const mukBase64 = arrayBufferToBase64(muk);
+				CredentialProvider.setMasterUnlockKey(mukBase64, sessionData.userId);
 			}
-		},
-		[],
-	);
+		}
+	}, []);
 
 	useEffect(() => {
 		if (activeAccount || isAllAccountsMode) {
@@ -140,9 +133,7 @@ export default function AutofillUnlockScreen() {
 			const [biometricFlags, reentryFlags] = await Promise.all([
 				Promise.all(emails.map((email) => storage.canBiometricUnlock(email))),
 				Promise.all(
-					emails.map((email) =>
-						storage.isMasterPasswordReentryRequired(email),
-					),
+					emails.map((email) => storage.isMasterPasswordReentryRequired(email)),
 				),
 			]);
 
@@ -316,7 +307,10 @@ export default function AutofillUnlockScreen() {
 
 	const finalizeAllAccountsUnlock = useCallback(
 		async (
-			result: { unlocked: string[]; failed: Array<{ email: string; error: string }> },
+			result: {
+				unlocked: string[];
+				failed: Array<{ email: string; error: string }>;
+			},
 			showPartialAlert: boolean,
 		) => {
 			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
@@ -564,16 +558,16 @@ export default function AutofillUnlockScreen() {
 						{/* Password Form */}
 						<View className="gap-4">
 							<TextField>
-								<TextField.Label>Password</TextField.Label>
+								<Label>Password</Label>
 								<View className="w-full flex-row items-center">
-									<TextField.Input
+									<Input
 										placeholder="Enter your password"
 										value={password}
 										onChangeText={setPassword}
 										secureTextEntry={!showPassword}
 										textContentType="password"
 										autoFocus={requiresPasswordReentry}
-										className="flex-1 pl-12 pr-12"
+										className="flex-1 pr-12 pl-12"
 									/>
 									<StyledLock
 										size={20}

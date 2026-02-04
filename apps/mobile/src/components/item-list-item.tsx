@@ -96,9 +96,14 @@ export function ItemListItem({
 		<PressableFeedback onPress={onPress} className="mx-4 mb-1">
 			<Card className={getCardRounding()}>
 				<PressableFeedback.Ripple />
-				<Card.Body className="flex-row items-center pl-1.5 pr-3 py-1">
+				<Card.Body className="flex-row items-center py-1 pr-3 pl-1.5">
 					{/* Icon or Favicon */}
-					<ItemIcon category={category} url={url} size="sm" className="mr-3.5" />
+					<ItemIcon
+						category={category}
+						url={url}
+						size="sm"
+						className="mr-3.5"
+					/>
 
 					{/* Content */}
 					<View className="min-w-0 flex-1">

@@ -175,9 +175,7 @@ export function BiometricAuthModal({
 					<Text className="mb-2 text-center font-bold text-foreground text-xl">
 						Authentication Failed
 					</Text>
-					<Text className="mb-6 text-center text-muted">
-						{errorMessage}
-					</Text>
+					<Text className="mb-6 text-center text-muted">{errorMessage}</Text>
 					<View className="w-full space-y-3">
 						{lastAuthResult.error !== "lockout" && retryCount < 3 && (
 							<TouchableOpacity

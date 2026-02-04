@@ -1,4 +1,4 @@
-import { TextField } from "heroui-native";
+import { Input, Label, TextField } from "heroui-native";
 import { forwardRef, useImperativeHandle, useState } from "react";
 
 export interface SecureNoteFormData {
@@ -14,9 +14,11 @@ interface SecureNoteFormProps {
 	initialData?: Partial<SecureNoteFormData>;
 }
 
-export const SecureNoteForm = forwardRef<SecureNoteFormRef, SecureNoteFormProps>(
-	({ initialData }, ref) => {
-		const [note, setNote] = useState(initialData?.note || "");
+export const SecureNoteForm = forwardRef<
+	SecureNoteFormRef,
+	SecureNoteFormProps
+>(({ initialData }, ref) => {
+	const [note, setNote] = useState(initialData?.note || "");
 
 	useImperativeHandle(ref, () => ({
 		getData: () => ({
@@ -27,8 +29,8 @@ export const SecureNoteForm = forwardRef<SecureNoteFormRef, SecureNoteFormProps>
 
 	return (
 		<TextField className="mb-4">
-			<TextField.Label>Note</TextField.Label>
-			<TextField.Input
+			<Label>Note</Label>
+			<Input
 				placeholder="Enter your secure note..."
 				value={note}
 				onChangeText={setNote}
@@ -39,7 +41,6 @@ export const SecureNoteForm = forwardRef<SecureNoteFormRef, SecureNoteFormProps>
 			/>
 		</TextField>
 	);
-	},
-);
+});
 
 SecureNoteForm.displayName = "SecureNoteForm";

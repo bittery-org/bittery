@@ -37,7 +37,10 @@ export function CategoryFilter({
 				<Select.Trigger asChild>
 					<Button variant="ghost" size="sm" className="self-start">
 						{selectedOption && (
-							<selectedOption.icon size={16} className="text-surface-foreground" />
+							<selectedOption.icon
+								size={16}
+								className="text-surface-foreground"
+							/>
 						)}
 						<Button.Label>{selectedOption?.label}</Button.Label>
 						<StyledChevronDown size={16} className="text-surface-foreground" />

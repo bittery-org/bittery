@@ -1,7 +1,7 @@
 import { useAllVaultKeys, useVaultItems } from "@bittery/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Button, Card, Skeleton, TextField } from "heroui-native";
+import { Button, Card, Input, Skeleton, TextField } from "heroui-native";
 import { ArrowLeft, Key, Plus, Search } from "lucide-react-native";
 import { useState } from "react";
 import { View } from "react-native";
@@ -48,7 +48,6 @@ export default function VaultItemsScreen() {
 		}
 	};
 
-
 	if (isLoading) {
 		return (
 			<SafeAreaView className="flex-1 bg-background">
@@ -70,7 +69,7 @@ export default function VaultItemsScreen() {
 					<View className="mt-4">
 						<TextField>
 							<View className="w-full flex-row items-center">
-								<TextField.Input
+								<Input
 									placeholder="Search items..."
 									editable={false}
 									className="flex-1 pr-4 pl-12"

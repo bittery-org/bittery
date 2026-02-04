@@ -6,7 +6,15 @@ import {
 	useSessionState,
 } from "@bittery/hooks";
 import { useRouter } from "expo-router";
-import { Avatar, Button, Select, TextField, useToast } from "heroui-native";
+import {
+	Avatar,
+	Button,
+	Input,
+	Label,
+	Select,
+	TextField,
+	useToast,
+} from "heroui-native";
 import {
 	AlertCircle,
 	ChevronDown,
@@ -551,10 +559,7 @@ export default function UnlockScreen() {
 									<Select.Trigger>
 										<View className="flex-row items-center justify-center gap-3 rounded-2xl bg-surface px-4 py-3">
 											{unlockMode === "all" ? (
-												<Avatar
-													size="md"
-													alt="All Accounts"
-												>
+												<Avatar size="md" alt="All Accounts">
 													<Avatar.Fallback>
 														<StyledUsers size={20} className="text-muted" />
 													</Avatar.Fallback>
@@ -597,7 +602,7 @@ export default function UnlockScreen() {
 									</Select.Trigger>
 									<Select.Portal>
 										<Select.Overlay />
-										<Select.Content>
+										<Select.Content presentation="dialog">
 											<Select.ListLabel>Select Account</Select.ListLabel>
 											{allAccounts.length > 1 && (
 												<Select.Item value="all" label="All Accounts">
@@ -628,7 +633,10 @@ export default function UnlockScreen() {
 													}
 												>
 													<View className="flex-row items-center gap-3">
-														<Avatar size="md" alt={account.name || account.email}>
+														<Avatar
+															size="md"
+															alt={account.name || account.email}
+														>
 															{account.teamAvatarUrl && (
 																<Avatar.Image
 																	source={{ uri: account.teamAvatarUrl }}
@@ -736,9 +744,9 @@ export default function UnlockScreen() {
 						{/* Password Form */}
 						<View className="gap-4">
 							<TextField>
-								<TextField.Label>Password</TextField.Label>
+								<Label>Password</Label>
 								<View className="w-full flex-row items-center">
-									<TextField.Input
+									<Input
 										placeholder="Enter your password"
 										value={password}
 										onChangeText={setPassword}

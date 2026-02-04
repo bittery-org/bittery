@@ -7,7 +7,11 @@ import {
 	useState,
 } from "react";
 
-import { type AccountMetadata, type ActiveAccount, storage } from "@/services/storage";
+import {
+	type AccountMetadata,
+	type ActiveAccount,
+	storage,
+} from "@/services/storage";
 
 interface AccountContextValue {
 	allAccounts: AccountMetadata[];
@@ -145,7 +149,10 @@ export function AccountProvider({ children }: AccountProviderProps) {
 				}
 			}
 
-			if (activeAccountConfig?.type === "all" && remainingAccounts.length === 0) {
+			if (
+				activeAccountConfig?.type === "all" &&
+				remainingAccounts.length === 0
+			) {
 				await storage.setActiveAccount(null);
 			}
 

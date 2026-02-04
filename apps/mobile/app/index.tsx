@@ -36,9 +36,7 @@ export default function Index() {
 					}
 
 					const sessionChecks = await Promise.all(
-						accounts.map((account) =>
-							storage.isSessionValid(account.email),
-						),
+						accounts.map((account) => storage.isSessionValid(account.email)),
 					);
 					setHasValidSession(sessionChecks.some(Boolean));
 
@@ -117,9 +115,7 @@ export default function Index() {
 			<View className="flex-1 items-center justify-center bg-background">
 				<ActivityIndicator size="large" color="#000" />
 				{showAuthModal && (
-					<Text className="mt-4 text-muted text-sm">
-						Authenticating...
-					</Text>
+					<Text className="mt-4 text-muted text-sm">Authenticating...</Text>
 				)}
 			</View>
 		);

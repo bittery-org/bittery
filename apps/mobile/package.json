@@ -48,7 +48,7 @@
 		"expo-sqlite": "~16.0.10",
 		"expo-status-bar": "~3.0.9",
 		"expo-updates": "~29.0.16",
-		"heroui-native": "1.0.0-beta.12",
+		"heroui-native": "1.0.0-beta.13",
 		"lucide-react-native": "^0.525.0",
 		"react": "catalog:",
 		"react-dom": "catalog:",

@@ -92,7 +92,9 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 				const shouldRequireAuth = isAllAccountsMode
 					? await storage.shouldRequireAuthAfterBackgroundGlobal?.()
 					: activeAccount
-						? await storage.shouldRequireAuthAfterBackground(activeAccount.email)
+						? await storage.shouldRequireAuthAfterBackground(
+								activeAccount.email,
+							)
 						: false;
 
 				if (shouldRequireAuth) {
@@ -112,9 +114,8 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 					const fallbackEmail = accountEmails[0];
 
 					// Check if biometric is enabled globally
-					const biometricEnabled = await storage.isBiometricEnabled(
-						fallbackEmail,
-					);
+					const biometricEnabled =
+						await storage.isBiometricEnabled(fallbackEmail);
 					const canUseBiometric = isAllAccountsMode
 						? (
 								await Promise.all(
@@ -170,7 +171,13 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 
 			appState.current = nextAppState;
 		},
-		[activeAccount, activeAccountConfig, allAccounts, isAllAccountsMode, router],
+		[
+			activeAccount,
+			activeAccountConfig,
+			allAccounts,
+			isAllAccountsMode,
+			router,
+		],
 	);
 
 	// Set up app state listener
@@ -357,7 +364,13 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 		}
 
 		return false;
-	}, [activeAccount, activeAccountConfig, allAccounts, isAllAccountsMode, router]);
+	}, [
+		activeAccount,
+		activeAccountConfig,
+		allAccounts,
+		isAllAccountsMode,
+		router,
+	]);
 
 	// Dismiss auth requirement
 	const dismissAuthRequirement = useCallback(() => {

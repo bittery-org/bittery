@@ -129,18 +129,14 @@ export function ConflictResolutionModal({
 								</View>
 
 								<View className="flex-row items-center justify-between">
-									<Text className="text-muted text-sm">
-										Modified locally
-									</Text>
+									<Text className="text-muted text-sm">Modified locally</Text>
 									<Text className="font-medium text-foreground text-sm">
 										{formatTimestamp(conflict.localItem.updatedAt)}
 									</Text>
 								</View>
 
 								<View className="mt-2 flex-row items-center justify-between">
-									<Text className="text-muted text-sm">
-										Local version
-									</Text>
+									<Text className="text-muted text-sm">Local version</Text>
 									<Text className="font-mono text-foreground text-sm">
 										v{conflict.localItem.localVersion}
 									</Text>
@@ -151,9 +147,7 @@ export function ConflictResolutionModal({
 							<View className="my-2 flex-row items-center justify-center">
 								<View className="h-px flex-1 bg-border" />
 								<View className="mx-4 rounded-full bg-secondary px-4 py-1">
-									<Text className="font-bold text-muted text-sm">
-										VS
-									</Text>
+									<Text className="font-bold text-muted text-sm">VS</Text>
 								</View>
 								<View className="h-px flex-1 bg-border" />
 							</View>
@@ -203,9 +197,7 @@ export function ConflictResolutionModal({
 
 								{!isDeleteConflict && (
 									<View className="mt-2 flex-row items-center justify-between">
-										<Text className="text-muted text-sm">
-											Server version
-										</Text>
+										<Text className="text-muted text-sm">Server version</Text>
 										<Text className="font-mono text-foreground text-sm">
 											v{conflict.serverItem.version}
 										</Text>

@@ -1,12 +1,6 @@
-import type { ItemCategory } from "@bittery/shared/types";
 import { getFaviconUrl } from "@bittery/shared/favicon";
-import {
-	CreditCard,
-	FileText,
-	Key,
-	Timer,
-	User,
-} from "lucide-react-native";
+import type { ItemCategory } from "@bittery/shared/types";
+import { CreditCard, FileText, Key, Timer, User } from "lucide-react-native";
 import { useState } from "react";
 import { Image, View } from "react-native";
 import { withUniwind } from "uniwind";

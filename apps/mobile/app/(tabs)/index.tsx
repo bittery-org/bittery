@@ -18,118 +18,118 @@ const StyledKey = withUniwind(Key);
 const StyledPlus = withUniwind(Plus);
 
 export default function AllItemsScreen() {
-  const router = useRouter();
-  const [selectedCategory, setSelectedCategory] = useState<
-    ItemCategory | "all"
-  >("all");
-  const [refreshing, setRefreshing] = useState(false);
+	const router = useRouter();
+	const [selectedCategory, setSelectedCategory] = useState<
+		ItemCategory | "all"
+	>("all");
+	const [refreshing, setRefreshing] = useState(false);
 
-  const { items, isLoading, error, refetch } = useItems();
+	const { items, isLoading, error, refetch } = useItems();
 
-  // Filter and sort items
-  const { favorites, regularItems } = useFilteredItems({
-    items,
-    searchQuery: "",
-    selectedCategory,
-  });
+	// Filter and sort items
+	const { favorites, regularItems } = useFilteredItems({
+		items,
+		searchQuery: "",
+		selectedCategory,
+	});
 
-  const handleCreateItem = () => {
-    router.push("/(vault)/create");
-  };
+	const handleCreateItem = () => {
+		router.push("/(vault)/create");
+	};
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    try {
-      await refetch();
-    } finally {
-      setRefreshing(false);
-    }
-  };
+	const handleRefresh = async () => {
+		setRefreshing(true);
+		try {
+			await refetch();
+		} finally {
+			setRefreshing(false);
+		}
+	};
 
-  const hasNoItems = favorites.length === 0 && regularItems.length === 0;
-  const hasFilter = selectedCategory !== "all";
+	const hasNoItems = favorites.length === 0 && regularItems.length === 0;
+	const hasFilter = selectedCategory !== "all";
 
-  if (isLoading) {
-    return (
-      <SafeAreaView className="flex-1 bg-background" edges={[]}>
-        {/* Category filter skeleton */}
-        <View className="border-border border-b px-3 py-2">
-          <Skeleton className="h-8 w-20 rounded-lg" />
-        </View>
+	if (isLoading) {
+		return (
+			<SafeAreaView className="flex-1 bg-background" edges={[]}>
+				{/* Category filter skeleton */}
+				<View className="border-border border-b px-3 py-2">
+					<Skeleton className="h-8 w-20 rounded-lg" />
+				</View>
 
-        {/* Skeleton items */}
-        <ItemsSkeletonList />
-      </SafeAreaView>
-    );
-  }
+				{/* Skeleton items */}
+				<ItemsSkeletonList />
+			</SafeAreaView>
+		);
+	}
 
-  if (error) {
-    return (
-      <SafeAreaView
-        className="flex-1 items-center justify-center bg-background p-8"
-        edges={[]}
-      >
-        <Card variant="secondary" className="w-full max-w-sm items-center p-8">
-          <Card.Title className="mb-4 text-center text-danger text-lg">
-            Error loading items
-          </Card.Title>
-          <Button onPress={handleRefresh} variant="primary">
-            Retry
-          </Button>
-        </Card>
-      </SafeAreaView>
-    );
-  }
+	if (error) {
+		return (
+			<SafeAreaView
+				className="flex-1 items-center justify-center bg-background p-8"
+				edges={[]}
+			>
+				<Card variant="secondary" className="w-full max-w-sm items-center p-8">
+					<Card.Title className="mb-4 text-center text-danger text-lg">
+						Error loading items
+					</Card.Title>
+					<Button onPress={handleRefresh} variant="primary">
+						Retry
+					</Button>
+				</Card>
+			</SafeAreaView>
+		);
+	}
 
-  return (
-    <>
-      <Tabs.Screen
-        options={{
-          headerRight: () => (
-            <Button
-              isIconOnly
-              variant="primary"
-              size="sm"
-              onPress={handleCreateItem}
-            >
-              <StyledPlus size={18} className="text-accent-foreground" />
-            </Button>
-          ),
-        }}
-      />
-      <SafeAreaView className="flex-1 bg-background" edges={[]}>
-        {/* Category Filter */}
-        <View className="pt-2">
-          <CategoryFilter
-            selectedCategory={selectedCategory}
-            onCategoryChange={setSelectedCategory}
-          />
-        </View>
+	return (
+		<>
+			<Tabs.Screen
+				options={{
+					headerRight: () => (
+						<Button
+							isIconOnly
+							variant="primary"
+							size="sm"
+							onPress={handleCreateItem}
+						>
+							<StyledPlus size={18} className="text-accent-foreground" />
+						</Button>
+					),
+				}}
+			/>
+			<SafeAreaView className="flex-1 bg-background" edges={[]}>
+				{/* Category Filter */}
+				<View className="pt-2">
+					<CategoryFilter
+						selectedCategory={selectedCategory}
+						onCategoryChange={setSelectedCategory}
+					/>
+				</View>
 
-        {/* Items List */}
-        {hasNoItems ? (
-          <EmptyItemsState
-            icon={<StyledKey size={48} className="mb-4 text-muted" />}
-            title={hasFilter ? "No items found" : "No items yet"}
-            description={
-              hasFilter
-                ? "Try a different filter"
-                : "Add items to your vaults to see them here"
-            }
-          />
-        ) : (
-          <ItemSectionsList
-            favorites={favorites}
-            regularItems={regularItems}
-            onItemPress={(item) =>
-              router.push(`/(vault)/${item.vaultId}/${item.id}`)
-            }
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            showVaultBadge
-          />
-        )}
-      </SafeAreaView>
-    </>
-  );
+				{/* Items List */}
+				{hasNoItems ? (
+					<EmptyItemsState
+						icon={<StyledKey size={48} className="mb-4 text-muted" />}
+						title={hasFilter ? "No items found" : "No items yet"}
+						description={
+							hasFilter
+								? "Try a different filter"
+								: "Add items to your vaults to see them here"
+						}
+					/>
+				) : (
+					<ItemSectionsList
+						favorites={favorites}
+						regularItems={regularItems}
+						onItemPress={(item) =>
+							router.push(`/(vault)/${item.vaultId}/${item.id}`)
+						}
+						refreshing={refreshing}
+						onRefresh={handleRefresh}
+						showVaultBadge
+					/>
+				)}
+			</SafeAreaView>
+		</>
+	);
 }

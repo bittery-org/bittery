@@ -3,12 +3,16 @@ import {
 	type ParsedOtpAuthUri,
 	parseOtpAuthUri,
 } from "@bittery/shared/totp";
-import type {
-	TotpAlgorithm,
-	TotpDigits,
-} from "@bittery/shared/types";
+import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import * as Clipboard from "expo-clipboard";
-import { Button, TextField, useToast } from "heroui-native";
+import {
+	Button,
+	FieldError,
+	Input,
+	Label,
+	TextField,
+	useToast,
+} from "heroui-native";
 import {
 	Camera,
 	ChevronDown,
@@ -16,7 +20,7 @@ import {
 	ClipboardPaste,
 } from "lucide-react-native";
 import { forwardRef, useImperativeHandle, useState } from "react";
-import { Alert, Pressable, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { QrCodeScanner } from "../qr-code-scanner";
 import { TotpDisplay } from "../totp-display";
@@ -49,9 +53,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 	({ onTitleAutoFill, initialData }, ref) => {
 		const { toast } = useToast();
 		const [totpSecret, setTotpSecret] = useState(initialData?.totpSecret || "");
-		const [totpIssuer, setTotpIssuer] = useState(
-			initialData?.totpIssuer || "",
-		);
+		const [totpIssuer, setTotpIssuer] = useState(initialData?.totpIssuer || "");
 		const [totpAccountName, setTotpAccountName] = useState(
 			initialData?.totpAccountName || "",
 		);
@@ -134,7 +136,8 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 				} else {
 					toast.show({
 						variant: "danger",
-						label: "The clipboard content is not a valid TOTP secret or otpauth:// URI",
+						label:
+							"The clipboard content is not a valid TOTP secret or otpauth:// URI",
 						placement: "bottom",
 					});
 				}
@@ -171,7 +174,10 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 						variant="secondary"
 						className="flex-1"
 					>
-						<StyledClipboardPaste size={18} className="text-accent-soft-foreground" />
+						<StyledClipboardPaste
+							size={18}
+							className="text-accent-soft-foreground"
+						/>
 						<Button.Label>Paste</Button.Label>
 					</Button>
 				</View>
@@ -180,10 +186,12 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 				<TextField
 					className="mb-4"
 					isRequired
-					isInvalid={totpSecret && !isValidBase32(totpSecret) ? true : undefined}
+					isInvalid={
+						totpSecret && !isValidBase32(totpSecret) ? true : undefined
+					}
 				>
-					<TextField.Label>Secret Key</TextField.Label>
-					<TextField.Input
+					<Label>Secret Key</Label>
+					<Input
 						placeholder="JBSWY3DPEHPK3PXP"
 						value={totpSecret}
 						onChangeText={setTotpSecret}
@@ -192,9 +200,9 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 						className="font-mono"
 					/>
 					{totpSecret && !isValidBase32(totpSecret) && (
-						<TextField.ErrorMessage>
+						<FieldError>
 							Invalid base32 format. Please check the secret key.
-						</TextField.ErrorMessage>
+						</FieldError>
 					)}
 				</TextField>
 
@@ -217,8 +225,8 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 				{/* Issuer & Account */}
 				<View className="mb-4 flex-row gap-2">
 					<TextField className="flex-1">
-						<TextField.Label>Service</TextField.Label>
-						<TextField.Input
+						<Label>Service</Label>
+						<Input
 							placeholder="Google, GitHub..."
 							value={totpIssuer}
 							onChangeText={setTotpIssuer}
@@ -226,8 +234,8 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 					</TextField>
 
 					<TextField className="flex-1">
-						<TextField.Label>Account</TextField.Label>
-						<TextField.Input
+						<Label>Account</Label>
+						<Input
 							placeholder="your@email.com"
 							value={totpAccountName}
 							onChangeText={setTotpAccountName}
@@ -253,9 +261,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 					<View className="mb-4 rounded-lg bg-secondary/30 p-3">
 						<View className="mb-4 flex-row gap-2">
 							<View className="flex-1">
-								<Text className="mb-1 text-muted text-xs">
-									Digits
-								</Text>
+								<Text className="mb-1 text-muted text-xs">Digits</Text>
 								<View className="flex-row rounded-lg border border-input bg-background">
 									{[6, 7, 8].map((d) => (
 										<Pressable
@@ -273,10 +279,8 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 								</View>
 							</View>
 							<TextField className="flex-1">
-								<TextField.Label className="mb-1 text-muted text-xs">
-									Period (sec)
-								</TextField.Label>
-								<TextField.Input
+								<Label className="mb-1 text-muted text-xs">Period (sec)</Label>
+								<Input
 									value={totpPeriod.toString()}
 									onChangeText={(v: string) =>
 										setTotpPeriod(Number.parseInt(v, 10) || 30)
@@ -286,9 +290,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 							</TextField>
 						</View>
 						<View>
-							<Text className="mb-1 text-muted text-xs">
-								Algorithm
-							</Text>
+							<Text className="mb-1 text-muted text-xs">Algorithm</Text>
 							<View className="flex-row rounded-lg border border-input bg-background">
 								{(["SHA1", "SHA256", "SHA512"] as TotpAlgorithm[]).map(
 									(algo) => (

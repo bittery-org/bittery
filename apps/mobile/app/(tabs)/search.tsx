@@ -2,9 +2,9 @@ import { useItems } from "@bittery/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import { TextField } from "heroui-native";
+import { Input, TextField } from "heroui-native";
 import { Clock, Search as SearchIcon, X } from "lucide-react-native";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FlatList, Text, TouchableOpacity, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { CategoryFilter } from "@/components/category-filter";
@@ -117,7 +117,7 @@ export default function SearchScreen() {
 		}
 	};
 
-	const handleItemPress = (item: typeof filteredItems[number]) => {
+	const handleItemPress = (item: (typeof filteredItems)[number]) => {
 		saveRecentSearch(searchQuery);
 		router.push(`/(vault)/${item.vaultId}/${item.id}`);
 	};
@@ -229,7 +229,7 @@ export default function SearchScreen() {
 			<View className="border-border border-b px-4 py-3">
 				<TextField>
 					<View className="w-full flex-row items-center">
-						<TextField.Input
+						<Input
 							ref={inputRef}
 							placeholder="Search items..."
 							value={searchQuery}
