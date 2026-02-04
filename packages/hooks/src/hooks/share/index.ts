@@ -6,6 +6,7 @@
  */
 
 export {
+	buildShareUrl,
 	type CreateShareInput,
 	type CreateShareResult,
 	type ShareAccessMode,

@@ -1,4 +1,5 @@
 import {
+	buildShareUrl,
 	type ShareAccessMode,
 	type ShareExpirationOption,
 	useCreateShare,
@@ -34,7 +35,6 @@ import {
 } from "@bittery/ui";
 import { AlertTriangle, Copy, Link, Loader2, X } from "lucide-react";
 import { useState } from "react";
-import { storage } from "@/lib/storage";
 
 interface ShareItemDialogProps {
 	open: boolean;
@@ -79,9 +79,8 @@ export function ShareItemDialog({
 					accessMode === "email-restricted" ? allowedEmails : undefined,
 			});
 
-			// Build the share URL with desktop app's effective web URL
-			const baseUrl = await storage.getEffectiveWebAppUrl();
-			const shareUrl = `${baseUrl}/share/${result.token}#${result.shareKeyBase64}`;
+			// Build the share URL using the server-provided base URL
+			const shareUrl = buildShareUrl(result);
 
 			setGeneratedLink(shareUrl);
 			toast.success("Share link created successfully!");

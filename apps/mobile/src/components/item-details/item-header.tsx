@@ -1,10 +1,11 @@
 import type { ItemCategory } from "@bittery/shared/types";
 import type { PopoverTriggerRef } from "heroui-native";
-import { Button, Card, Popover } from "heroui-native";
+import { Button, Card, Popover, Separator } from "heroui-native";
 import {
 	ArrowLeft,
 	Edit,
 	MoreVertical,
+	Share2,
 	Star,
 	Trash2,
 } from "lucide-react-native";
@@ -16,6 +17,7 @@ import { ItemIcon } from "../item-icon";
 
 const StyledArrowLeft = withUniwind(ArrowLeft);
 const StyledEdit = withUniwind(Edit);
+const StyledShare2 = withUniwind(Share2);
 const StyledStar = withUniwind(Star);
 const StyledMoreVertical = withUniwind(MoreVertical);
 const StyledTrash2 = withUniwind(Trash2);
@@ -31,7 +33,9 @@ interface ItemHeaderProps {
 	onBack: () => void;
 	onEdit: () => void;
 	onDelete: () => void;
+	onShare: () => void;
 	isDeleting: boolean;
+	isSharing?: boolean;
 	popoverRef: RefObject<PopoverTriggerRef | null>;
 }
 
@@ -41,7 +45,9 @@ export function ItemHeader({
 	onBack,
 	onEdit,
 	onDelete,
+	onShare,
 	isDeleting,
+	isSharing,
 	popoverRef,
 }: ItemHeaderProps) {
 	return (
@@ -89,7 +95,7 @@ export function ItemHeader({
 				<StyledEdit size={18} className="text-accent-foreground" />
 			</Button>
 
-			<Popover presentation="bottom-sheet">
+			<Popover presentation="popover">
 				<Popover.Trigger ref={popoverRef} asChild>
 					<Button isIconOnly variant="ghost" size="sm">
 						<StyledMoreVertical size={18} className="text-muted" />
@@ -97,26 +103,47 @@ export function ItemHeader({
 				</Popover.Trigger>
 				<Popover.Portal>
 					<Popover.Overlay />
-					<Popover.Content presentation="bottom-sheet">
-						<View className="gap-2 px-4 pt-2 pb-6">
-							<Popover.Title className="mb-2">Item Options</Popover.Title>
+					<Popover.Content presentation="popover" className="px-0.5 py-1">
+						<View className="gap-0 pt-0.5 pb-0.5">
+							<Popover.Title className="mb-2 hidden">
+								Actions
+							</Popover.Title>
 							<Button
-								variant="primary"
+								variant="ghost"
 								onPress={() => {
 									popoverRef.current?.close();
 									onEdit();
 								}}
+								className="justify-start text-left"
+								size="sm"
 							>
-								<StyledEdit size={18} className="text-current" />
+								<StyledEdit size={18} className="text-current mr-1.5" />
 								<Button.Label>Edit Item</Button.Label>
 							</Button>
 							<Button
-								variant="danger"
+								variant="ghost"
+								onPress={() => {
+									popoverRef.current?.close();
+									onShare();
+								}}
+								isDisabled={isSharing}
+								className="justify-start text-left"
+								size="sm"
+							>
+								<StyledShare2 size={18} className="text-current mr-1.5" />
+								<Button.Label>
+									{isSharing ? "Creating link..." : "Share Item"}
+								</Button.Label>
+							</Button>
+							<Button
+								variant="ghost"
 								onPress={onDelete}
 								isDisabled={isDeleting}
+								className="justify-start text-left"
+								size="sm"
 							>
-								<StyledTrash2 size={18} className="text-danger-foreground" />
-								<Button.Label>
+								<StyledTrash2 size={18} className="text-danger mr-1.5" />
+								<Button.Label className="text-danger">
 									{isDeleting ? "Moving to trash..." : "Move to Trash"}
 								</Button.Label>
 							</Button>

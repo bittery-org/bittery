@@ -17,6 +17,14 @@ import { protectedProcedure, publicProcedure, router } from "../index";
 // Email validation regex
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * Get the base share URL from the WEB_APP_URL environment variable
+ */
+function getBaseShareUrl(): string {
+	const webAppUrl = process.env.WEB_APP_URL || "https://app.bittery.com";
+	return `${webAppUrl.replace(/\/$/, "")}/share/`;
+}
+
 // Generate a cryptographically secure token
 function generateSecureToken(): string {
 	return nanoid(32);
@@ -161,6 +169,7 @@ export const shareRouter = router({
 				id: shareLinkId,
 				token,
 				expiresAt,
+				baseShareUrl: getBaseShareUrl(),
 			};
 		}),
 
@@ -239,7 +248,7 @@ export const shareRouter = router({
 				};
 			});
 
-			return result;
+			return { links: result, baseShareUrl: getBaseShareUrl() };
 		}),
 
 	/**

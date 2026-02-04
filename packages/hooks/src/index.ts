@@ -153,6 +153,7 @@ export {
 } from "./hooks/items";
 // Share Mutation Hooks (write operations)
 export {
+	buildShareUrl,
 	type CreateShareInput,
 	type CreateShareResult,
 	type ShareAccessMode,

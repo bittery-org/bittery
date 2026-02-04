@@ -38,7 +38,6 @@ import {
 	Users,
 } from "lucide-react";
 import { useState } from "react";
-import { storage } from "@/lib/storage";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface ShareLinksListProps {
@@ -103,10 +102,10 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 		enabled: !!selectedLink && showAccessLogs,
 	});
 
-	const handleCopyLink = async (token: string) => {
-		// Get the effective web app URL to construct the share link
-		const baseUrl = await storage.getEffectiveWebAppUrl();
-		const shareUrl = `${baseUrl}/share/${token}`;
+	const handleCopyLink = (token: string) => {
+		// Use the baseShareUrl from the API response
+		const baseShareUrl = linksQuery.data?.baseShareUrl || "";
+		const shareUrl = `${baseShareUrl}${token}`;
 		copyWithToast(shareUrl, "Link", {
 			autoClearMs: 0,
 			successMessage:
@@ -147,7 +146,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 		);
 	}
 
-	const links = linksQuery.data || [];
+	const links = linksQuery.data?.links || [];
 
 	if (links.length === 0) {
 		return (

@@ -29,7 +29,6 @@ export function LoginPage() {
 		normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
 		"http://localhost:3000";
 	const [serverUrl, setServerUrl] = useState(fallbackServerUrl);
-	const [webAppUrl, setWebAppUrl] = useState("");
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [secretKey, setSecretKey] = useState("");
@@ -68,16 +67,6 @@ export function LoginPage() {
 			// Store server URL per-account (desktop-specific)
 			if (normalizedServerUrl) {
 				await storage.storeServerUrl(normalizedServerUrl, normalizedEmail);
-			}
-
-			// Store web app URL if provided, otherwise clear it to use derived URL (desktop-specific)
-			if (webAppUrl.trim()) {
-				const normalizedWebAppUrl = normalizeServerUrl(webAppUrl);
-				if (normalizedWebAppUrl) {
-					await storage.storeWebAppUrl(normalizedWebAppUrl, normalizedEmail);
-				}
-			} else {
-				await storage.clearWebAppUrl(normalizedEmail);
 			}
 
 			// Create account metadata (desktop-specific multi-account support)
@@ -215,25 +204,6 @@ export function LoginPage() {
 								/>
 								<p className="mt-1 text-muted-foreground text-xs">
 									Use your self-hosted Bittery server URL.
-								</p>
-							</div>
-
-							<div className="grid gap-1">
-								<Label htmlFor="webAppUrl">Web App URL (Optional)</Label>
-								<Input
-									id="webAppUrl"
-									type="url"
-									value={webAppUrl}
-									onChange={(e) => setWebAppUrl(e.target.value)}
-									placeholder={
-										normalizeServerUrl(serverUrl)
-											?.replace(/\/api.*$/, "")
-											.replace(/\/$/, "") || "https://app.bittery.com"
-									}
-								/>
-								<p className="mt-1 text-muted-foreground text-xs">
-									URL for shareable links. Leave empty to derive from server
-									URL.
 								</p>
 							</div>
 

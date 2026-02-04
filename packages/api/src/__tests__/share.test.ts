@@ -238,7 +238,8 @@ describe("Share Router", () => {
 
 			const result = await caller.listByItem({ itemId });
 
-			expect(result.length).toBe(2);
+			expect(result.links.length).toBe(2);
+			expect(result.baseShareUrl).toBeDefined();
 		});
 
 		test("should mark expired links correctly", async () => {
@@ -260,7 +261,7 @@ describe("Share Router", () => {
 
 			const result = await caller.listByItem({ itemId });
 
-			expect(result[0].status).toBe("expired");
+			expect(result.links[0].status).toBe("expired");
 		});
 	});
 

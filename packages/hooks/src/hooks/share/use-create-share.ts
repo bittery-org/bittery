@@ -59,6 +59,17 @@ export interface CreateShareResult {
 	shareKeyBase64: string;
 	/** When the share expires (ISO string) */
 	expiresAt: string;
+	/** The base URL for share links from the server */
+	baseShareUrl: string;
+}
+
+/**
+ * Build the full share URL from a CreateShareResult
+ * The share key is appended as a URL fragment (never touches the server)
+ */
+export function buildShareUrl(result: CreateShareResult): string {
+	// baseShareUrl already ends with /share/
+	return `${result.baseShareUrl}${result.token}#${result.shareKeyBase64}`;
 }
 
 /**
@@ -207,6 +218,7 @@ export function useCreateShare() {
 				token: result.token,
 				shareKeyBase64,
 				expiresAt: result.expiresAt,
+				baseShareUrl: result.baseShareUrl,
 			};
 		},
 		onSuccess: async () => {

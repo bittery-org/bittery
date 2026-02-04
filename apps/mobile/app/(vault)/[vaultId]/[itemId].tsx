@@ -1,9 +1,9 @@
-import { useDeleteItem, useVaultItems } from "@bittery/hooks";
+import { useCreateShare, useDeleteItem, useVaultItems } from "@bittery/hooks";
 import * as Clipboard from "expo-clipboard";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import type { PopoverTriggerRef } from "heroui-native";
 import { useToast } from "heroui-native";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { ScrollView } from "react-native";
 import {
 	CategoryFields,
@@ -17,6 +17,7 @@ import {
 	TagsSection,
 } from "@/components/item-details";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { ShareItemSheet } from "@/components/share/share-item-sheet";
 
 export default function ItemDetailScreen() {
 	const router = useRouter();
@@ -27,8 +28,10 @@ export default function ItemDetailScreen() {
 
 	const { items, isLoading, error } = useVaultItems(vaultId);
 	const deleteItem = useDeleteItem();
+	const createShare = useCreateShare();
 	const { toast } = useToast();
 	const popoverRef = useRef<PopoverTriggerRef>(null);
+	const [shareSheetVisible, setShareSheetVisible] = useState(false);
 
 	const item = items.find((i) => i.id === itemId);
 
@@ -66,6 +69,10 @@ export default function ItemDetailScreen() {
 		router.push(`/(vault)/${vaultId}/edit/${itemId}`);
 	};
 
+	const handleShare = () => {
+		setShareSheetVisible(true);
+	};
+
 	// Loading state
 	if (isLoading) {
 		return <LoadingState />;
@@ -89,7 +96,9 @@ export default function ItemDetailScreen() {
 				onBack={() => router.back()}
 				onEdit={handleEdit}
 				onDelete={handleDelete}
+				onShare={handleShare}
 				isDeleting={deleteItem.isPending}
+				isSharing={createShare.isPending}
 				popoverRef={popoverRef}
 			/>
 
@@ -116,6 +125,13 @@ export default function ItemDetailScreen() {
 				{/* Metadata */}
 				<ItemMetadata createdAt={item.createdAt} updatedAt={item.updatedAt} />
 			</ScrollView>
+
+			{/* Share Sheet */}
+			<ShareItemSheet
+				item={item}
+				visible={shareSheetVisible}
+				onClose={() => setShareSheetVisible(false)}
+			/>
 		</SafeAreaView>
 	);
 }

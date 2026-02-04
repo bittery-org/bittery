@@ -1152,61 +1152,6 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	}
 
 	/**
-	 * Store a custom web app URL for an account
-	 */
-	async storeWebAppUrl(webAppUrl: string, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
-
-		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "web_app_url");
-		await store.set(key, webAppUrl);
-		await store.save();
-	}
-
-	/**
-	 * Get the custom web app URL for an account
-	 */
-	async getWebAppUrl(email?: string): Promise<string | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
-
-		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "web_app_url");
-		return (await store.get<string>(key)) ?? null;
-	}
-
-	/**
-	 * Clear the custom web app URL for an account
-	 */
-	async clearWebAppUrl(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
-
-		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "web_app_url");
-		await store.delete(key);
-		await store.save();
-	}
-
-	/**
-	 * Get the effective web app URL for generating share links
-	 */
-	async getEffectiveWebAppUrl(email?: string): Promise<string> {
-		const customUrl = await this.getWebAppUrl(email);
-		if (customUrl) {
-			return customUrl.replace(/\/$/, "");
-		}
-
-		const serverUrl = await this.getServerUrl(email);
-		if (serverUrl) {
-			return serverUrl.replace(/\/api.*$/, "").replace(/\/$/, "");
-		}
-
-		return "https://app.bittery.com";
-	}
-
-	/**
 	 * Clear auto-lock timeout preference for an account
 	 */
 	async clearAutoLockTimeout(email?: string): Promise<void> {
