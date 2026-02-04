@@ -52,7 +52,7 @@ export default function VaultItemsScreen() {
 		return (
 			<SafeAreaView className="flex-1 bg-background">
 				{/* Header */}
-				<View className="border-border border-b px-4 py-4">
+				<View className="px-4 py-4">
 					<View className="flex-row items-center">
 						<Button isIconOnly variant="secondary" size="sm" className="mr-3">
 							<StyledArrowLeft size={18} className="text-muted" />
@@ -85,7 +85,7 @@ export default function VaultItemsScreen() {
 				</View>
 
 				{/* Category filter skeleton */}
-				<View className="flex-row gap-2 border-border border-b px-4 py-3">
+				<View className="flex-row gap-2 px-4 py-3">
 					{[1, 2, 3, 4, 5].map((i) => (
 						<Skeleton key={i} className="h-8 w-16 rounded-full" />
 					))}
@@ -118,7 +118,7 @@ export default function VaultItemsScreen() {
 	return (
 		<SafeAreaView className="flex-1 bg-background">
 			{/* Header */}
-			<View className="border-border border-b px-4 py-4">
+			<View className="px-4 py-4">
 				<View className="flex-row items-center">
 					<Button
 						isIconOnly

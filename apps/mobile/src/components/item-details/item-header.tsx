@@ -45,7 +45,7 @@ export function ItemHeader({
 	popoverRef,
 }: ItemHeaderProps) {
 	return (
-		<View className="flex-row items-center border-border border-b px-4 py-4">
+		<View className="flex-row items-center px-4 py-4">
 			<Button
 				isIconOnly
 				size="sm"
@@ -89,7 +89,7 @@ export function ItemHeader({
 				<StyledEdit size={18} className="text-accent-foreground" />
 			</Button>
 
-			<Popover>
+			<Popover presentation="bottom-sheet">
 				<Popover.Trigger ref={popoverRef} asChild>
 					<Button isIconOnly variant="ghost" size="sm">
 						<StyledMoreVertical size={18} className="text-muted" />

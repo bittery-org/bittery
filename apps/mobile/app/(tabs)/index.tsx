@@ -53,7 +53,7 @@ export default function AllItemsScreen() {
 		return (
 			<SafeAreaView className="flex-1 bg-background" edges={[]}>
 				{/* Category filter skeleton */}
-				<View className="border-border border-b px-3 py-2">
+				<View className="px-3 py-2">
 					<Skeleton className="h-8 w-20 rounded-lg" />
 				</View>
 

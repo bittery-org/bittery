@@ -81,7 +81,7 @@ export function ConflictResolutionModal({
 			<View className="flex-1 justify-end bg-black/50">
 				<View className="max-h-[85%] rounded-t-3xl bg-background">
 					{/* Header */}
-					<View className="flex-row items-center border-border border-b px-6 py-4">
+					<View className="flex-row items-center px-6 py-4">
 						<View className="mr-3 rounded-full bg-red-100 p-2 dark:bg-red-900">
 							<AlertTriangle size={20} color="#ef4444" />
 						</View>

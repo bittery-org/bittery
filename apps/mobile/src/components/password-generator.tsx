@@ -411,7 +411,7 @@ export function PasswordGenerator({
 												}
 											}}
 											isDisabled={!canToggleOption && options.lowercase}
-											className="border-border border-b px-4 py-3"
+											className="px-4 py-3"
 										>
 											<Label className="flex-1">Lowercase (a-z)</Label>
 											<ControlField.Indicator>
@@ -428,7 +428,7 @@ export function PasswordGenerator({
 												}
 											}}
 											isDisabled={!canToggleOption && options.uppercase}
-											className="border-border border-b px-4 py-3"
+											className="px-4 py-3"
 										>
 											<Label className="flex-1">Uppercase (A-Z)</Label>
 											<ControlField.Indicator>
@@ -445,7 +445,7 @@ export function PasswordGenerator({
 												}
 											}}
 											isDisabled={!canToggleOption && options.numbers}
-											className="border-border border-b px-4 py-3"
+											className="px-4 py-3"
 										>
 											<Label className="flex-1">Numbers (0-9)</Label>
 											<ControlField.Indicator>

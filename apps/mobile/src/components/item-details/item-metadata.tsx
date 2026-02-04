@@ -7,7 +7,7 @@ interface ItemMetadataProps {
 
 export function ItemMetadata({ createdAt, updatedAt }: ItemMetadataProps) {
 	return (
-		<Card variant="transparent" className="mb-4">
+		<Card variant="default" className="mb-4">
 			<Card.Body className="py-3">
 				<Card.Description className="text-xs">
 					Created: {new Date(createdAt).toLocaleString()}

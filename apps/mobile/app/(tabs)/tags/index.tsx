@@ -54,7 +54,7 @@ export default function TagsScreen() {
 		return (
 			<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
 				{/* Search Skeleton */}
-				<View className="border-border border-b px-4 py-3">
+				<View className="px-4 py-3">
 					<TextField>
 						<View className="w-full flex-row items-center">
 							<Input
@@ -101,7 +101,7 @@ export default function TagsScreen() {
 	return (
 		<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
 			{/* Search */}
-			<View className="border-border border-b px-4 py-3">
+			<View className="px-4 py-3">
 				<TextField>
 					<View className="w-full flex-row items-center">
 						<Input

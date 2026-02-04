@@ -8,6 +8,7 @@
 		"dev:build": "expo prebuild && expo run:android --no-bundler",
 		"dev:clear": "expo start --clear",
 		"android": "expo run:android",
+		"ports": "adb reverse tcp:3000 tcp:3000",
 		"ios": "expo run:ios",
 		"build": "eas build",
 		"build:preview": "eas build --profile preview",

@@ -202,7 +202,7 @@ export default function TrashScreen() {
 		return (
 			<SafeAreaView className="flex-1 bg-background" edges={[]}>
 				{/* Info banner skeleton */}
-				<View className="border-border border-b px-4 py-3">
+				<View className="px-4 py-3">
 					<Skeleton className="h-4 w-3/4 rounded" />
 				</View>
 
@@ -245,7 +245,7 @@ export default function TrashScreen() {
 	return (
 		<SafeAreaView className="flex-1 bg-background" edges={[]}>
 			{/* Swipe hint */}
-			<View className="flex-row items-center justify-center gap-8 border-border border-b bg-surface/50 py-3">
+			<View className="flex-row items-center justify-center gap-8 bg-surface/50 py-3">
 				<View className="flex-row items-center gap-1.5">
 					<StyledChevronRight size={18} className="text-success" />
 					<StyledArchiveRestore size={18} className="text-success" />

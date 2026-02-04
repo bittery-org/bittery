@@ -96,13 +96,13 @@ export default function TagFilterScreen() {
 		return (
 			<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
 				{/* Tag header skeleton */}
-				<View className="flex-row items-center border-border border-b px-4 py-3">
+				<View className="flex-row items-center px-4 py-3">
 					<Skeleton className="mr-3 h-9 w-9 rounded-full" />
 					<Skeleton className="h-8 w-24 rounded-full" />
 				</View>
 
 				{/* Category filter skeleton */}
-				<View className="flex-row items-center justify-between border-border border-b px-4 py-2">
+				<View className="flex-row items-center justify-between px-4 py-2">
 					<Skeleton className="h-4 w-20 rounded" />
 					<Skeleton className="h-9 w-20 rounded-lg" />
 				</View>
@@ -146,7 +146,7 @@ export default function TagFilterScreen() {
 	return (
 		<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
 			{/* Tag header */}
-			<View className="flex-row items-center justify-between border-border border-b px-4 py-3">
+			<View className="flex-row items-center justify-between px-4 py-3">
 				<View className="flex-row items-center">
 					<Button
 						isIconOnly

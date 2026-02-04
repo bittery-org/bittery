@@ -211,7 +211,7 @@ export function AccountSwitcher() {
 					</View>
 
 					{/* Account list */}
-					<View className="border-border border-b">
+					<View className="pb-4">
 						{showAllAccountsOption && (
 							<PressableFeedback
 								onPress={handleAllAccountsSwitch}

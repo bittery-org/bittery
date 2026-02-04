@@ -6,7 +6,7 @@ export function LoadingState() {
 	return (
 		<SafeAreaView className="flex-1 bg-background">
 			{/* Header Skeleton */}
-			<View className="border-border border-b px-4 py-4">
+			<View className="px-4 py-4">
 				<View className="flex-row items-center">
 					<Skeleton className="mr-3 h-10 w-10 rounded-full" />
 					<Skeleton className="mr-3 h-10 w-10 rounded-lg" />
@@ -21,7 +21,7 @@ export function LoadingState() {
 			{/* Content Skeleton */}
 			<ScrollView className="flex-1 px-4">
 				{[1, 2, 3, 4, 5].map((i) => (
-					<View key={i} className="border-border border-b py-4">
+					<View key={i} className="py-4">
 						<Skeleton className="mb-2 h-3 w-20 rounded" />
 						<Skeleton className="h-4 w-full rounded" />
 					</View>

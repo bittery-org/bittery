@@ -152,7 +152,7 @@ export default function SearchScreen() {
 					<TouchableOpacity
 						key={query}
 						onPress={() => handleRecentSearchPress(query)}
-						className="flex-row items-center border-border border-b px-4 py-3"
+						className="flex-row items-center px-4 py-3"
 						activeOpacity={0.7}
 					>
 						<StyledClock size={18} className="text-muted" />
@@ -226,7 +226,7 @@ export default function SearchScreen() {
 	return (
 		<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
 			{/* Search Input */}
-			<View className="border-border border-b px-4 py-3">
+			<View className="px-4 py-3">
 				<TextField>
 					<View className="w-full flex-row items-center">
 						<Input

@@ -21,7 +21,7 @@ export function CategoryFilter({
 	);
 
 	return (
-		<View className="border-border border-b pl-0.5">
+		<View className="pl-0.5">
 			<Select
 				value={
 					selectedOption

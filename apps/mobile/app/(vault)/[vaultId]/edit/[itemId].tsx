@@ -233,7 +233,7 @@ export default function EditItemScreen() {
 				className="flex-1"
 			>
 				{/* Header */}
-				<View className="flex-row items-center border-border border-b px-4 py-4">
+				<View className="flex-row items-center px-4 py-4">
 					<Button
 						isIconOnly
 						onPress={() => router.back()}
