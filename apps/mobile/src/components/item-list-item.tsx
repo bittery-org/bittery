@@ -108,7 +108,7 @@ export function ItemListItem({
 					{/* Content */}
 					<View className="min-w-0 flex-1">
 						<View className="flex-row items-center">
-							<Card.Title className="flex-shrink text-base" numberOfLines={1}>
+							<Card.Title className="shrink text-base" numberOfLines={1}>
 								{title}
 							</Card.Title>
 							{favorite && (

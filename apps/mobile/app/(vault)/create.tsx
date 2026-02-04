@@ -280,7 +280,7 @@ export default function CreateItemScreen() {
 								<Select.Content
 									presentation="popover"
 									width="trigger"
-									className="h-[250px] rounded-2xl"
+									className="h-62.5 rounded-2xl"
 									placement="bottom"
 								>
 									<ScrollView>
@@ -360,7 +360,7 @@ export default function CreateItemScreen() {
 								<Select.Content
 									presentation="popover"
 									width="trigger"
-									className="h-[280px] rounded-2xl"
+									className="h-70 rounded-2xl"
 									placement="bottom"
 								>
 									<ScrollView>
