@@ -11,9 +11,13 @@ import {
 	Label,
 	Progress,
 } from "@bittery/ui";
+import {
+	IconCircleCheck2OutlineDuo18,
+	IconCircleWarningOutlineDuo18,
+	IconUpload3OutlineDuo18,
+} from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
-import { AlertCircle, CheckCircle2, FileUp } from "lucide-react";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
 import { encrypt } from "../../lib/tauri-crypto";
@@ -283,7 +287,7 @@ export function ImportDialog({
 												importStatus === "uploading"
 											}
 										>
-											<FileUp className="mr-2 h-4 w-4" />
+											<IconUpload3OutlineDuo18 className="h-4 w-4" />
 											<span className="max-w-xs truncate">
 												{field.state.value
 													? field.state.value.name
@@ -326,7 +330,7 @@ export function ImportDialog({
 						{/* Success Message */}
 						{importStatus === "success" && (
 							<div className="flex items-start gap-2 rounded-md border border-green-200 bg-green-50 p-3 dark:border-green-800 dark:bg-green-950">
-								<CheckCircle2 className="mt-0.5 h-4 w-4 text-green-600 dark:text-green-400" />
+								<IconCircleCheck2OutlineDuo18 className="mt-0.5 h-4 w-4 text-green-600 dark:text-green-400" />
 								<div className="text-sm">
 									<p className="font-medium text-green-900 dark:text-green-100">
 										Import successful!
@@ -343,7 +347,7 @@ export function ImportDialog({
 						{/* Error Message */}
 						{importStatus === "error" && errorMessage && (
 							<div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-950">
-								<AlertCircle className="mt-0.5 h-4 w-4 text-red-600 dark:text-red-400" />
+								<IconCircleWarningOutlineDuo18 className="mt-0.5 h-4 w-4 text-red-600 dark:text-red-400" />
 								<div className="text-sm">
 									<p className="font-medium text-red-900 dark:text-red-100">
 										Import failed
@@ -358,7 +362,7 @@ export function ImportDialog({
 						{/* Warnings */}
 						{warnings.length > 0 && importStatus !== "error" && (
 							<div className="flex items-start gap-2 rounded-md border border-yellow-200 bg-yellow-50 p-3 dark:border-yellow-800 dark:bg-yellow-950">
-								<AlertCircle className="mt-0.5 h-4 w-4 text-yellow-600 dark:text-yellow-400" />
+								<IconCircleWarningOutlineDuo18 className="mt-0.5 h-4 w-4 text-yellow-600 dark:text-yellow-400" />
 								<div className="text-sm">
 									<p className="font-medium text-yellow-900 dark:text-yellow-100">
 										Warnings ({warnings.length})

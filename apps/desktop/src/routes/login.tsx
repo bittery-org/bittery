@@ -1,9 +1,12 @@
 import { useLogin } from "@bittery/hooks";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { Button, Input, Label, toast, VaultIcon } from "@bittery/ui";
+import {
+	IconArrowLeftOutlineDuo18,
+	IconFingerprintOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Fingerprint } from "lucide-react";
 import { useEffect, useState } from "react";
 import { type AccountMetadata, storage } from "@/lib/storage";
 
@@ -165,7 +168,7 @@ export function LoginPage() {
 								onClick={handleBackToVault}
 								className="flex items-center gap-1 text-muted-foreground text-sm hover:text-foreground"
 							>
-								<ArrowLeft className="h-3.5 w-3.5" />
+								<IconArrowLeftOutlineDuo18 className="h-3.5 w-3.5" />
 								Back to Vault
 							</button>
 						)}
@@ -260,7 +263,7 @@ export function LoginPage() {
 										htmlFor="biometric"
 										className="flex items-center gap-2"
 									>
-										<Fingerprint className="h-4 w-4" />
+										<IconFingerprintOutlineDuo18 className="h-4 w-4" />
 										Enable biometric unlock
 									</Label>
 								</div>

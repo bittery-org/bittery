@@ -7,8 +7,13 @@ import {
 	InputGroupInput,
 	Label,
 } from "@bittery/ui";
+import {
+	IconCopyOutlineDuo18,
+	IconExternalLinkOutlineDuo18,
+	IconEyeOutlineDuo18,
+	IconEyeSlashOutlineDuo18,
+} from "@bittery/ui/icons";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Copy, ExternalLink, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 import type { CustomField } from "./shared";
 import { handleCopy } from "./shared";
@@ -40,7 +45,7 @@ export function DetailField({
 							size="icon-sm"
 							onClick={() => handleCopy(value, label)}
 						>
-							<Copy className="size-4" />
+							<IconCopyOutlineDuo18 className="size-4" />
 						</InputGroupButton>
 					</InputGroupAddon>
 				)}
@@ -86,16 +91,16 @@ export function DetailPasswordField({
 							onClick={() => setShowPassword(!showPassword)}
 						>
 							{showPassword ? (
-								<EyeOff className="size-4" />
+								<IconEyeSlashOutlineDuo18 className="size-4" />
 							) : (
-								<Eye className="size-4" />
+								<IconEyeOutlineDuo18 className="size-4" />
 							)}
 						</InputGroupButton>
 						<InputGroupButton
 							size="icon-sm"
 							onClick={() => handleCopy(value, label)}
 						>
-							<Copy className="size-4" />
+							<IconCopyOutlineDuo18 className="size-4" />
 						</InputGroupButton>
 					</ButtonGroup>
 				</InputGroupAddon>
@@ -129,10 +134,10 @@ export function DetailUrlField({
 							size="icon-sm"
 							onClick={() => handleCopy(value, label)}
 						>
-							<Copy className="size-4" />
+							<IconCopyOutlineDuo18 className="size-4" />
 						</InputGroupButton>
 						<InputGroupButton size="icon-sm" onClick={() => openUrl(value)}>
-							<ExternalLink className="size-4" />
+							<IconExternalLinkOutlineDuo18 className="size-4" />
 						</InputGroupButton>
 					</ButtonGroup>
 				</InputGroupAddon>

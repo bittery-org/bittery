@@ -21,17 +21,17 @@ import {
 	DropdownMenuTrigger,
 	toast,
 } from "@bittery/ui";
-import { useNavigate } from "@tanstack/react-router";
 import {
-	ArrowRightLeft,
-	Copy as CopyIcon,
-	Edit,
-	History,
-	MoreVertical,
-	Share2,
-	Star,
-	Trash2,
-} from "lucide-react";
+	IconArrowsLeftRightTrailOutlineDuo18,
+	IconCopyOutlineDuo18,
+	IconDotsOutlineDuo18,
+	IconHistoryOutlineDuo18,
+	IconPen2OutlineDuo18,
+	IconShareLeft2OutlineDuo18,
+	IconStarOutlineDuo18,
+	IconTrash2OutlineDuo18,
+} from "@bittery/ui/icons";
+import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useState } from "react";
 import Loader from "../loader";
 import { VaultInfoPopover } from "./item-categories/shared/vault-info-popover";
@@ -205,7 +205,7 @@ export function ItemDetailPage({
 					</div>
 					<div className="flex items-center gap-2">
 						<Button variant="ghost" size="sm" onClick={handleShare}>
-							<Share2 />
+							<IconShareLeft2OutlineDuo18 />
 							Share
 						</Button>
 						<Button
@@ -213,13 +213,13 @@ export function ItemDetailPage({
 							size="sm"
 							onClick={() => setIsEditDialogOpen(true)}
 						>
-							<Edit />
+							<IconPen2OutlineDuo18 />
 							Edit
 						</Button>
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>
 								<Button variant="ghost" size="icon">
-									<MoreVertical className="size-4" />
+									<IconDotsOutlineDuo18 className="size-4" />
 								</Button>
 							</DropdownMenuTrigger>
 							<DropdownMenuContent align="end">
@@ -227,11 +227,11 @@ export function ItemDetailPage({
 									onClick={handleDuplicate}
 									disabled={createItem.isPending}
 								>
-									<CopyIcon className="mr-2 size-4" />
+									<IconCopyOutlineDuo18 className="size-4" />
 									Duplicate
 								</DropdownMenuItem>
 								<DropdownMenuItem onClick={() => setIsMoveDialogOpen(true)}>
-									<ArrowRightLeft className="mr-2 size-4" />
+									<IconArrowsLeftRightTrailOutlineDuo18 className="size-4" />
 									Move to Vault
 								</DropdownMenuItem>
 								<DropdownMenuItem
@@ -258,8 +258,8 @@ export function ItemDetailPage({
 									}}
 									disabled={toggleFavorite.isPending}
 								>
-									<Star
-										className="mr-2 size-4"
+									<IconStarOutlineDuo18
+										className="size-4"
 										fill={rawItem?.favorite ? "currentColor" : "none"}
 									/>
 									{rawItem?.favorite
@@ -267,7 +267,7 @@ export function ItemDetailPage({
 										: "Add to Favorites"}
 								</DropdownMenuItem>
 								<DropdownMenuItem onClick={() => setIsShareHistoryOpen(true)}>
-									<History className="mr-2 size-4" />
+									<IconHistoryOutlineDuo18 className="size-4" />
 									Share History
 								</DropdownMenuItem>
 								<DropdownMenuSeparator />
@@ -275,7 +275,7 @@ export function ItemDetailPage({
 									onClick={handleDelete}
 									className="text-destructive focus:text-destructive"
 								>
-									<Trash2 className="mr-2 size-4" />
+									<IconTrash2OutlineDuo18 className="size-4" />
 									Delete
 								</DropdownMenuItem>
 							</DropdownMenuContent>

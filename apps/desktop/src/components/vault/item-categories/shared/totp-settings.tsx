@@ -1,6 +1,10 @@
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import { Input, Label } from "@bittery/ui";
-import { ChevronDown, ChevronRight, Settings } from "lucide-react";
+import {
+	IconGear3OutlineDuo18,
+	IconVShapedArrowDownOutlineDuo18,
+	IconVShapedArrowRightOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useState } from "react";
 
 interface TotpAdvancedSettingsProps {
@@ -32,13 +36,13 @@ export function TotpAdvancedSettings({
 				className="flex w-full items-center justify-between p-3 text-left hover:bg-muted/50"
 			>
 				<div className="flex items-center gap-2">
-					<Settings className="size-4 text-muted-foreground" />
+					<IconGear3OutlineDuo18 className="size-4 text-muted-foreground" />
 					<span className="font-medium text-sm">Advanced Settings</span>
 				</div>
 				{showAdvanced ? (
-					<ChevronDown className="size-4 text-muted-foreground" />
+					<IconVShapedArrowDownOutlineDuo18 className="size-4 text-muted-foreground" />
 				) : (
-					<ChevronRight className="size-4 text-muted-foreground" />
+					<IconVShapedArrowRightOutlineDuo18 className="size-4 text-muted-foreground" />
 				)}
 			</button>
 

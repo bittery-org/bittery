@@ -15,8 +15,12 @@ import {
 	DialogTitle,
 	toast,
 } from "@bittery/ui";
+import {
+	IconBoxArchive3OutlineDuo18,
+	IconShareLeft2OutlineDuo18,
+	IconTrash2OutlineDuo18,
+} from "@bittery/ui/icons";
 import { createFileRoute, Outlet } from "@tanstack/react-router";
-import { Archive, ArchiveRestore, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Favicon } from "../../../components/vault/favicon";
 import { VaultAvatar } from "../../../components/vault/vault-avatar";
@@ -102,7 +106,7 @@ function TrashComponent() {
 			<div className="flex w-78 flex-col border-r bg-background">
 				{/* Header */}
 				<div className="flex items-center gap-2 border-b px-4 py-3">
-					<Archive className="size-4 text-muted-foreground" />
+					<IconBoxArchive3OutlineDuo18 className="size-4 text-muted-foreground" />
 					<span className="font-medium">Trash</span>
 					<Badge variant="secondary" className="ml-auto">
 						{deletedItems.length}
@@ -173,7 +177,7 @@ function TrashComponent() {
 													disabled={restoreItem.isPending}
 													title="Restore"
 												>
-													<ArchiveRestore className="size-4 text-muted-foreground hover:text-foreground" />
+													<IconShareLeft2OutlineDuo18 className="size-4 text-muted-foreground hover:text-foreground" />
 												</Button>
 												<Button
 													variant="ghost"
@@ -185,7 +189,7 @@ function TrashComponent() {
 													disabled={permanentDeleteItem.isPending}
 													title="Delete forever"
 												>
-													<Trash2 className="size-4 text-muted-foreground hover:text-destructive" />
+													<IconTrash2OutlineDuo18 className="size-4 text-muted-foreground hover:text-destructive" />
 												</Button>
 											</div>
 										</div>

@@ -11,9 +11,13 @@ import {
 	DialogTitle,
 	toast,
 } from "@bittery/ui";
+import {
+	IconBoxArchive3OutlineDuo18,
+	IconShareLeft2OutlineDuo18,
+	IconTrash2OutlineDuo18,
+} from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Archive, ArchiveRestore, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { storage } from "@/lib/storage";
 import { Favicon } from "../../../components/vault/favicon";
@@ -164,7 +168,7 @@ function TrashComponent() {
 			{/* Header */}
 			<div className="flex items-center justify-between border-b bg-background px-8 py-4">
 				<div className="flex items-center gap-3">
-					<Archive className="size-5 text-muted-foreground" />
+					<IconBoxArchive3OutlineDuo18 className="size-5 text-muted-foreground" />
 					<div>
 						<h2 className="font-semibold text-lg">Trash</h2>
 						<p className="text-muted-foreground text-sm">
@@ -179,7 +183,10 @@ function TrashComponent() {
 				{decryptedItems.length === 0 ? (
 					<div className="flex h-full flex-col items-center justify-center text-center">
 						<div className="mb-4 inline-flex rounded-full bg-muted p-6">
-							<Archive size={48} className="text-muted-foreground" />
+							<IconBoxArchive3OutlineDuo18
+								size={48}
+								className="text-muted-foreground"
+							/>
 						</div>
 						<h3 className="mb-2 font-semibold text-lg">Trash is Empty</h3>
 						<p className="text-muted-foreground text-sm">
@@ -219,7 +226,7 @@ function TrashComponent() {
 										onClick={() => handleRestore(item.id)}
 										disabled={restoreItem.isPending}
 									>
-										<ArchiveRestore className="mr-2 size-4" />
+										<IconShareLeft2OutlineDuo18 className="size-4" />
 										Restore
 									</Button>
 									<Button
@@ -228,7 +235,7 @@ function TrashComponent() {
 										onClick={() => handlePermanentDelete(item.id)}
 										disabled={permanentDeleteItem.isPending}
 									>
-										<Trash2 className="mr-2 size-4" />
+										<IconTrash2OutlineDuo18 className="size-4" />
 										Delete Forever
 									</Button>
 								</div>

@@ -4,7 +4,7 @@ import {
 	type TotpResult,
 } from "@bittery/shared/totp";
 import { Button, Card, copyWithToast, Label } from "@bittery/ui";
-import { Copy } from "lucide-react";
+import { IconCopyOutlineDuo18 } from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
 import { Favicon } from "../favicon";
 import { TagInput } from "../tag-input";
@@ -151,7 +151,7 @@ export function TotpDetail({
 						onClick={handleCopyCode}
 						disabled={!totpResult?.code}
 					>
-						<Copy size={16} />
+						<IconCopyOutlineDuo18 size={16} />
 					</Button>
 				</div>
 			</Card>

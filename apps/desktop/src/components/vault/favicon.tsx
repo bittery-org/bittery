@@ -1,7 +1,13 @@
 import { getDomainFromUrl, getFaviconUrl } from "@bittery/shared/favicon";
 import type { ItemCategory } from "@bittery/shared/types";
 import { cn } from "@bittery/ui";
-import { CreditCard, FileText, Globe, KeyRound, User } from "lucide-react";
+import {
+	IconCreditCardLockOutlineDuo18,
+	IconEarthOutlineDuo18,
+	IconFileLockOutlineDuo18,
+	IconMobileOutlineDuo18,
+	IconUserOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useState } from "react";
 
 interface FaviconProps {
@@ -96,9 +102,9 @@ export function Favicon({
 	};
 
 	const iconSizes = {
-		sm: 16,
-		md: 20,
-		lg: 24,
+		sm: 26,
+		md: 30,
+		lg: 38,
 	};
 
 	const imageSizes = {
@@ -146,15 +152,30 @@ export function Favicon({
 			) : category === "login" && url ? (
 				<span className="select-none font-semibold text-white">{initials}</span>
 			) : category === "login" ? (
-				<Globe className="text-muted-foreground" size={iconSizes[size]} />
+				<IconEarthOutlineDuo18
+					className="text-muted-foreground"
+					size={iconSizes[size]}
+				/>
 			) : category === "credit-card" ? (
-				<CreditCard className="text-white" size={iconSizes[size]} />
+				<IconCreditCardLockOutlineDuo18
+					className="text-white"
+					size={iconSizes[size]}
+				/>
 			) : category === "identity" ? (
-				<User className="text-muted-foreground" size={iconSizes[size]} />
+				<IconUserOutlineDuo18
+					className="text-muted-foreground"
+					size={iconSizes[size]}
+				/>
 			) : category === "totp" ? (
-				<KeyRound className="text-muted-foreground" size={iconSizes[size]} />
+				<IconMobileOutlineDuo18
+					className="text-muted-foreground"
+					size={iconSizes[size]}
+				/>
 			) : (
-				<FileText className="text-muted-foreground" size={iconSizes[size]} />
+				<IconFileLockOutlineDuo18
+					className="text-muted-foreground"
+					size={iconSizes[size]}
+				/>
 			)}
 		</div>
 	);

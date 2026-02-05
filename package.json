@@ -36,7 +36,8 @@
 		"db:watch": "turbo -F @bittery/db db:watch",
 		"db:stop": "turbo -F @bittery/db db:stop",
 		"db:down": "turbo -F @bittery/db db:down",
-		"shadcn": "pnpm --filter @bittery/ui run shadcn"
+		"shadcn": "pnpm --filter @bittery/ui run shadcn",
+		"preinstall": "export $(cat .env | xargs) || true"
 	},
 	"dependencies": {
 		"dotenv": "^17.2.2",

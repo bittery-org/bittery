@@ -1,5 +1,5 @@
 import { Button } from "@bittery/ui";
-import { PlusIcon } from "lucide-react";
+import { IconPlusOutlineDuo18 } from "@bittery/ui/icons";
 import { SearchCombobox } from "./search-combobox";
 
 interface VaultHeaderProps {
@@ -17,7 +17,7 @@ export function VaultHeader({ hasVaults, onNewItemClick }: VaultHeaderProps) {
 				<SearchCombobox />
 			</div>
 			<Button onClick={onNewItemClick} disabled={!hasVaults}>
-				<PlusIcon />
+				<IconPlusOutlineDuo18 />
 				New Item
 			</Button>
 		</header>

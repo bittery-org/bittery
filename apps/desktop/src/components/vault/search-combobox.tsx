@@ -7,9 +7,12 @@ import {
 	CommandItem,
 	CommandList,
 } from "@bittery/ui";
+import {
+	IconMagnifier3OutlineDuo18,
+	IconTagOutlineDuo18,
+} from "@bittery/ui/icons";
 import { cn } from "@bittery/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
-import { Search, Tag } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Favicon } from "./favicon";
 import { getTagColorFromName } from "./tag-badge";
@@ -98,7 +101,7 @@ export function SearchCombobox() {
 		<div ref={containerRef} className="relative w-full">
 			<Command shouldFilter={false} className="overflow-visible">
 				<div className="flex h-9 w-full items-center rounded-md border border-input bg-transparent px-3 text-sm shadow-xs">
-					<Search className="mr-2 size-4 shrink-0 text-muted-foreground" />
+					<IconMagnifier3OutlineDuo18 className="mr-2 size-4 shrink-0 text-muted-foreground" />
 					<input
 						ref={inputRef}
 						value={search}
@@ -210,7 +213,7 @@ export function SearchCombobox() {
 													className="flex size-6 shrink-0 items-center justify-center rounded-md"
 													style={{ backgroundColor: `${tagColor}20` }}
 												>
-													<Tag
+													<IconTagOutlineDuo18
 														className="size-3.5"
 														style={{ color: tagColor }}
 													/>

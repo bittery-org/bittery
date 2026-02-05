@@ -6,18 +6,18 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@bittery/ui";
+import {
+	IconBoxArchive3OutlineDuo18,
+	IconDotsOutlineDuo18,
+	IconGrid2OutlineDuo18,
+	IconPen2OutlineDuo18,
+	IconStarOutlineDuo18,
+	IconTagOutlineDuo18,
+	IconTrash2OutlineDuo18,
+	IconUpload3OutlineDuo18,
+} from "@bittery/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation } from "@tanstack/react-router";
-import {
-	Archive,
-	FileUp,
-	LayoutGrid,
-	MoreHorizontal,
-	Pencil,
-	Star,
-	Tag,
-	Trash2,
-} from "lucide-react";
 import {
 	type DragItemData,
 	type DropVaultData,
@@ -140,7 +140,7 @@ function DroppableVaultEntry({
 							className="absolute top-1/2 right-1 h-5 w-5 -translate-y-1/2 p-0 opacity-0 group-hover:opacity-100"
 							onClick={(e) => e.stopPropagation()}
 						>
-							<MoreHorizontal className="h-3.5 w-3.5" />
+							<IconDotsOutlineDuo18 className="h-3.5 w-3.5" />
 						</Button>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
@@ -154,12 +154,12 @@ function DroppableVaultEntry({
 								})
 							}
 						>
-							<Pencil className="mr-2 h-4 w-4" />
+							<IconPen2OutlineDuo18 className="h-4 w-4" />
 							Edit
 						</DropdownMenuItem>
 						{onImportItems && (
 							<DropdownMenuItem onClick={() => onImportItems(vault.vaultId)}>
-								<FileUp className="mr-2 h-4 w-4" />
+								<IconUpload3OutlineDuo18 className="h-4 w-4" />
 								Import Items
 							</DropdownMenuItem>
 						)}
@@ -173,7 +173,7 @@ function DroppableVaultEntry({
 								})
 							}
 						>
-							<Trash2 className="mr-2 h-4 w-4" />
+							<IconTrash2OutlineDuo18 className="h-4 w-4" />
 							Delete
 						</DropdownMenuItem>
 					</DropdownMenuContent>
@@ -270,7 +270,7 @@ export function VaultSidebar({
 						isAllItemsActive ? "bg-primary/10" : "hover:bg-muted/30"
 					}`}
 				>
-					<LayoutGrid className="size-4 text-muted-foreground" />
+					<IconGrid2OutlineDuo18 className="size-4 text-muted-foreground" />
 					<span>All Objects</span>
 				</Link>
 
@@ -281,7 +281,10 @@ export function VaultSidebar({
 						isFavoritesActive ? "bg-primary/10" : "hover:bg-muted/30"
 					}`}
 				>
-					<Star className="size-4 text-yellow-500" fill="currentColor" />
+					<IconStarOutlineDuo18
+						className="size-4 text-yellow-500"
+						fill="currentColor"
+					/>
 					<span>Favorites</span>
 				</Link>
 
@@ -329,7 +332,10 @@ export function VaultSidebar({
 											isActive ? "bg-primary/10" : "hover:bg-muted/30"
 										}`}
 									>
-										<Tag className="size-3.5 shrink-0" style={{ color }} />
+										<IconTagOutlineDuo18
+											className="size-3.5 shrink-0"
+											style={{ color }}
+										/>
 										<span className="truncate">{tagName}</span>
 									</Link>
 								);
@@ -345,8 +351,8 @@ export function VaultSidebar({
 						isTrashActive ? "bg-primary/10" : "hover:bg-muted/30"
 					}`}
 				>
-					<Archive className="size-4 text-muted-foreground" />
-					<span>Trash</span>
+					<IconBoxArchive3OutlineDuo18 className="size-4 text-muted-foreground" />
+					<span>Archive</span>
 				</Link>
 			</div>
 		</div>

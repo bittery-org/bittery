@@ -10,8 +10,8 @@ import {
 	AccountSwitcher as SharedAccountSwitcher,
 	toast,
 } from "@bittery/ui";
+import { IconChevronDownOutlineDuo18 } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { useAccount } from "@/contexts/account-context";
 import { storage } from "@/lib/storage";
@@ -165,7 +165,7 @@ export function AccountSwitcher() {
 					</div>
 				</>
 			) : null}
-			<ChevronDown className="h-4 w-4 opacity-50" />
+			<IconChevronDownOutlineDuo18 className="h-4 w-4 opacity-50" />
 		</Button>
 	);
 

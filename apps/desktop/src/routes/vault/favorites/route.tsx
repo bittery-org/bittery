@@ -1,7 +1,7 @@
 import { useItems, useToggleFavorite } from "@bittery/hooks";
 import { Badge } from "@bittery/ui";
+import { IconStarOutlineDuo18 } from "@bittery/ui/icons";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
-import { Star } from "lucide-react";
 import { ItemListRow } from "../../../components/vault/item-list-row";
 
 export const Route = createFileRoute("/vault/favorites")({
@@ -12,7 +12,7 @@ function RouteComponent() {
 	const { itemId } = useParams({ strict: false });
 
 	// Unified hook - automatically handles single-account vs "All Accounts" mode
-	const { items: allItems, isLoading, isAllAccountsMode } = useItems();
+	const { items: allItems, isLoading } = useItems();
 
 	// Filter only favorites and sort by updatedAt
 	const favoriteItems = allItems
@@ -57,7 +57,10 @@ function RouteComponent() {
 			<div className="flex w-78 flex-col border-r bg-background">
 				{/* Header */}
 				<div className="flex items-center gap-2 border-b px-4 py-3">
-					<Star className="size-4 text-yellow-500" fill="currentColor" />
+					<IconStarOutlineDuo18
+						className="size-4 text-yellow-500"
+						fill="currentColor"
+					/>
 					<span className="font-medium">Favorites</span>
 					<Badge variant="secondary" className="ml-auto">
 						{favoriteItems.length}
@@ -68,7 +71,7 @@ function RouteComponent() {
 					{favoriteItems.length === 0 ? (
 						<div className="flex h-full flex-col items-center justify-center p-8 text-center">
 							<div className="mb-4 inline-flex rounded-full bg-muted p-4">
-								<Star className="size-8 text-muted-foreground" />
+								<IconStarOutlineDuo18 className="size-8 text-muted-foreground" />
 							</div>
 							<h3 className="mb-2 font-semibold">No favorites yet</h3>
 							<p className="text-muted-foreground text-sm">
@@ -87,14 +90,7 @@ function RouteComponent() {
 									}
 									linkTo="/vault/favorites/$itemId"
 									linkParams={{ itemId: item.id }}
-									showVaultBadge
 									vaultId={item.vaultId}
-									showAccountBadge={isAllAccountsMode}
-									accountEmail={
-										isAllAccountsMode && "account" in item
-											? (item as any).account?.email
-											: undefined
-									}
 								/>
 							))}
 						</div>

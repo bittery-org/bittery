@@ -23,20 +23,20 @@ import {
 	Skeleton,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-	Calendar,
-	Clock,
-	Copy,
-	Eye,
-	Globe,
-	Link,
-	Loader2,
-	Mail,
-	Shield,
-	Trash2,
-	Users,
-} from "lucide-react";
+	IconCalendarOutlineDuo18,
+	IconClockTimeOutlineDuo18,
+	IconCopyOutlineDuo18,
+	IconEarthOutlineDuo18,
+	IconEnvelopeOutlineDuo18,
+	IconEyeOutlineDuo18,
+	IconLinkOutlineDuo18,
+	IconLoader2OutlineDuo18,
+	IconMagicShieldOutlineDuo18,
+	IconTrash2OutlineDuo18,
+	IconUsers6OutlineDuo18,
+} from "@bittery/ui/icons";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
@@ -152,7 +152,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 		return (
 			<Card>
 				<CardContent className="flex flex-col items-center justify-center py-8">
-					<Link className="mb-4 h-8 w-8 text-muted-foreground" />
+					<IconLinkOutlineDuo18 className="mb-4 h-8 w-8 text-muted-foreground" />
 					<p className="text-muted-foreground text-sm">
 						No share links created yet
 					</p>
@@ -186,19 +186,19 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 										<Badge variant="secondary">
 											{link.accessMode === "anyone" ? (
 												<>
-													<Globe className="mr-1 h-3 w-3" />
+													<IconEarthOutlineDuo18 className="mr-1 h-3 w-3" />
 													Anyone
 												</>
 											) : (
 												<>
-													<Mail className="mr-1 h-3 w-3" />
+													<IconEnvelopeOutlineDuo18 className="mr-1 h-3 w-3" />
 													Email restricted
 												</>
 											)}
 										</Badge>
 										{link.isOneTimeUse && (
 											<Badge variant="secondary">
-												<Shield className="mr-1 h-3 w-3" />
+												<IconMagicShieldOutlineDuo18 className="mr-1 h-3 w-3" />
 												One-time
 											</Badge>
 										)}
@@ -207,19 +207,19 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 									{/* Access info */}
 									<div className="flex flex-wrap gap-4 text-muted-foreground text-xs">
 										<span className="flex items-center gap-1">
-											<Eye className="h-3 w-3" />
+											<IconEyeOutlineDuo18 className="h-3 w-3" />
 											{link.accessCount} access
 											{link.accessCount !== 1 ? "es" : ""}
 											{link.maxAccessCount && ` / ${link.maxAccessCount}`}
 										</span>
 										<span className="flex items-center gap-1">
-											<Clock className="h-3 w-3" />
+											<IconClockTimeOutlineDuo18 className="h-3 w-3" />
 											{link.status === "active"
 												? formatRelativeTime(link.expiresAt)
 												: `Expires: ${formatDate(link.expiresAt)}`}
 										</span>
 										<span className="flex items-center gap-1">
-											<Calendar className="h-3 w-3" />
+											<IconCalendarOutlineDuo18 className="h-3 w-3" />
 											Created: {formatDate(link.createdAt)}
 										</span>
 									</div>
@@ -250,7 +250,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 										onClick={() => handleCopyLink(link.token)}
 										title="Copy link"
 									>
-										<Copy className="h-4 w-4" />
+										<IconCopyOutlineDuo18 className="h-4 w-4" />
 									</Button>
 									<Button
 										size="sm"
@@ -261,7 +261,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 										}}
 										title="View access logs"
 									>
-										<Users className="h-4 w-4" />
+										<IconUsers6OutlineDuo18 className="h-4 w-4" />
 									</Button>
 									{link.status === "active" && (
 										<Button
@@ -271,7 +271,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 											className="text-destructive hover:bg-destructive/10 hover:text-destructive"
 											title="Revoke link"
 										>
-											<Trash2 className="h-4 w-4" />
+											<IconTrash2OutlineDuo18 className="h-4 w-4" />
 										</Button>
 									)}
 								</div>
@@ -338,7 +338,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 							</div>
 						) : (
 							<div className="py-8 text-center">
-								<Eye className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
+								<IconEyeOutlineDuo18 className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
 								<p className="text-muted-foreground text-sm">
 									No access logs yet
 								</p>
@@ -371,9 +371,9 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 						>
 							{revokeMutation.isPending ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+								<IconLoader2OutlineDuo18 className="h-4 w-4 animate-spin" />
 							) : (
-								<Trash2 className="mr-2 h-4 w-4" />
+								<Trash2 className="h-4 w-4" />
 							)}
 							Revoke Link
 						</AlertDialogAction>

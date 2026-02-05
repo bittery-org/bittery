@@ -1,8 +1,13 @@
 import { useToggleFavorite, useVaultItems } from "@bittery/hooks";
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import { Button } from "@bittery/ui";
+import {
+	IconArrowLeftOutlineDuo18,
+	IconMobileOutlineDuo18,
+	IconStarOutlineDuo18,
+	IconTagOutlineDuo18,
+} from "@bittery/ui/icons";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Smartphone, Star, Tag } from "lucide-react";
 import { Favicon } from "../../../../components/vault/favicon";
 import { getTagColorFromName } from "../../../../components/vault/tag-badge";
 
@@ -65,7 +70,7 @@ function TagRouteComponent() {
 						navigate({ to: "/vault/$id", params: { id: vaultId } })
 					}
 				>
-					<ArrowLeft className="size-4" />
+					<IconArrowLeftOutlineDuo18 className="size-4" />
 				</Button>
 				<div
 					className="flex size-10 items-center justify-center rounded-full"
@@ -74,7 +79,7 @@ function TagRouteComponent() {
 						color: tagColor,
 					}}
 				>
-					<Tag className="size-5" />
+					<IconTagOutlineDuo18 className="size-5" />
 				</div>
 				<div>
 					<h2 className="font-semibold text-lg">{decodedTagName}</h2>
@@ -93,7 +98,7 @@ function TagRouteComponent() {
 							className="mb-4 inline-flex rounded-full p-6"
 							style={{ backgroundColor: `${tagColor}20` }}
 						>
-							<Tag size={48} style={{ color: tagColor }} />
+							<IconTagOutlineDuo18 size={48} style={{ color: tagColor }} />
 						</div>
 						<h3 className="mb-2 font-semibold text-lg">
 							No items with this tag
@@ -128,7 +133,7 @@ function TagRouteComponent() {
 												<span className="font-medium">{item.title}</span>
 												{item.category === "login" && item.totpSecret && (
 													<span title="Has 2FA">
-														<Smartphone className="size-3.5 text-primary" />
+														<IconMobileOutlineDuo18 className="size-3.5 text-primary" />
 													</span>
 												)}
 											</div>
@@ -155,7 +160,7 @@ function TagRouteComponent() {
 												: "text-muted-foreground hover:text-yellow-500"
 										}`}
 									>
-										<Star
+										<IconStarOutlineDuo18
 											className="size-4"
 											fill={item.favorite ? "currentColor" : "none"}
 										/>

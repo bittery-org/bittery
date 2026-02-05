@@ -6,8 +6,12 @@ import {
 	type PhoneNumber,
 } from "@bittery/shared/identity";
 import { Button, Input, Label, toast } from "@bittery/ui";
+import {
+	IconPlusOutlineDuo18,
+	IconTrash2OutlineDuo18,
+	IconXmarkOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
-import { Plus, Trash2, X } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useState } from "react";
 import {
@@ -259,7 +263,7 @@ export function IdentityForm({
 						size="sm"
 						onClick={addPhoneNumber}
 					>
-						<Plus className="mr-1 size-3" />
+						<IconPlusOutlineDuo18 className="mr-1 size-3" />
 						Add Phone
 					</Button>
 				</div>
@@ -293,7 +297,7 @@ export function IdentityForm({
 								size="icon"
 								onClick={() => removePhoneNumber(phone.id)}
 							>
-								<Trash2 size={16} />
+								<IconTrash2OutlineDuo18 size={16} />
 							</Button>
 						</div>
 					</div>
@@ -310,7 +314,7 @@ export function IdentityForm({
 						size="sm"
 						onClick={addAddress}
 					>
-						<Plus className="mr-1 size-3" />
+						<IconPlusOutlineDuo18 className="mr-1 size-3" />
 						Add Address
 					</Button>
 				</div>
@@ -324,7 +328,7 @@ export function IdentityForm({
 								size="icon"
 								onClick={() => removeAddress(address.id)}
 							>
-								<X size={16} />
+								<IconXmarkOutlineDuo18 size={16} />
 							</Button>
 						</div>
 						<Input

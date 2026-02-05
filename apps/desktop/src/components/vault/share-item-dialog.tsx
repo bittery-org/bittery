@@ -33,7 +33,13 @@ import {
 	SelectValue,
 	toast,
 } from "@bittery/ui";
-import { AlertTriangle, Copy, Link, Loader2, X } from "lucide-react";
+import {
+	IconCopyOutlineDuo18,
+	IconLinkOutlineDuo18,
+	IconLoader2OutlineDuo18,
+	IconTriangleWarningOutlineDuo18,
+	IconXmarkOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useState } from "react";
 
 interface ShareItemDialogProps {
@@ -164,7 +170,7 @@ export function ShareItemDialog({
 						<div className="space-y-4">
 							<div className="rounded-lg border bg-muted/50 p-4">
 								<div className="flex items-center gap-2 text-green-600">
-									<Link className="h-4 w-4" />
+									<IconLinkOutlineDuo18 className="h-4 w-4" />
 									<span className="font-medium text-sm">Link created!</span>
 								</div>
 								<p className="mt-2 text-muted-foreground text-xs">
@@ -184,7 +190,7 @@ export function ShareItemDialog({
 									className="flex-1 font-mono text-xs"
 								/>
 								<Button onClick={handleCopyLink}>
-									<Copy className="h-4 w-4" />
+									<IconCopyOutlineDuo18 className="h-4 w-4" />
 								</Button>
 							</div>
 
@@ -262,7 +268,7 @@ export function ShareItemDialog({
 														onClick={() => handleRemoveEmail(email)}
 														className="hover:text-destructive"
 													>
-														<X className="h-3 w-3" />
+														<IconXmarkOutlineDuo18 className="h-3 w-3" />
 													</button>
 												</Badge>
 											))}
@@ -321,12 +327,12 @@ export function ShareItemDialog({
 								>
 									{createShare.isPending ? (
 										<>
-											<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+											<IconLoader2OutlineDuo18 className="h-4 w-4 animate-spin" />
 											Creating...
 										</>
 									) : (
 										<>
-											<Link className="mr-2 h-4 w-4" />
+											<IconLinkOutlineDuo18 className="h-4 w-4" />
 											Create Link
 										</>
 									)}
@@ -342,7 +348,7 @@ export function ShareItemDialog({
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle className="flex items-center gap-2">
-							<AlertTriangle className="h-5 w-5 text-amber-500" />
+							<IconTriangleWarningOutlineDuo18 className="h-5 w-5 text-amber-500" />
 							Share Sensitive Item?
 						</AlertDialogTitle>
 						<AlertDialogDescription>

@@ -5,6 +5,7 @@ import {
 } from "@bittery/hooks";
 import {
 	AccountAvatarGroup as AvatarGroup,
+	ButtonGroup,
 	InputGroup,
 	InputGroupAddon,
 	InputGroupButton,
@@ -13,9 +14,14 @@ import {
 	VaultIcon,
 	type VaultIconState,
 } from "@bittery/ui";
+import {
+	IconEyeOutlineDuo18,
+	IconEyeSlashOutlineDuo18,
+	IconFingerprintOutlineDuo18,
+	IconKeyOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Eye, EyeOff, Fingerprint, KeyRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { storage } from "@/lib/storage";
 
@@ -280,7 +286,7 @@ export function UnlockPage() {
 						{/* Master Password Required Notice */}
 						{requiresPasswordReentry && (
 							<div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
-								<KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+								<IconKeyOutlineDuo18 className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
 								<div>
 									<p className="font-medium text-amber-800">
 										Password Required
@@ -305,7 +311,7 @@ export function UnlockPage() {
 									placeholder="Enter your password"
 									autoFocus
 									disabled={loading}
-									className="pr-20 text-base"
+									className="text-base"
 									onKeyDown={(e) => {
 										if (e.key === "Enter" && !loading) {
 											handlePasswordUnlock(e as unknown as React.FormEvent);
@@ -313,33 +319,41 @@ export function UnlockPage() {
 									}}
 								/>
 								<InputGroupAddon align="inline-end">
-									<InputGroupButton
-										type="button"
-										size="icon-sm"
-										onClick={() => setShowPassword(!showPassword)}
-										disabled={loading}
-										aria-label={
-											showPassword ? "Hide password" : "Show password"
-										}
-									>
-										{showPassword ? (
-											<EyeOff className="h-4 w-4" />
-										) : (
-											<Eye className="h-4 w-4" />
-										)}
-									</InputGroupButton>
-									{canUseBiometric && (
+									<ButtonGroup>
 										<InputGroupButton
 											type="button"
 											size="icon-sm"
-											onClick={handleBiometricUnlockAll}
+											onClick={() => setShowPassword(!showPassword)}
 											disabled={loading}
-											aria-label="Unlock with biometric"
-											className="text-primary hover:text-primary/80"
+											aria-label={
+												showPassword ? "Hide password" : "Show password"
+											}
 										>
-											<Fingerprint className="h-5 w-5" />
+											{showPassword ? (
+												<IconEyeSlashOutlineDuo18
+													className="h-4 w-4"
+													strokeWidth={1}
+												/>
+											) : (
+												<IconEyeOutlineDuo18
+													className="h-4 w-4"
+													strokeWidth={1}
+												/>
+											)}
 										</InputGroupButton>
-									)}
+										{canUseBiometric && (
+											<InputGroupButton
+												type="button"
+												size="icon-sm"
+												onClick={handleBiometricUnlockAll}
+												disabled={loading}
+												aria-label="Unlock with biometric"
+												className="text-primary hover:text-primary/80"
+											>
+												<IconFingerprintOutlineDuo18 className="h-5 w-5" />
+											</InputGroupButton>
+										)}
+									</ButtonGroup>
 								</InputGroupAddon>
 							</InputGroup>
 						</form>

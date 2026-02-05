@@ -8,8 +8,11 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
+import {
+	IconImagePlusOutlineDuo18,
+	IconXmarkOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
-import { ImagePlus, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { VaultAvatar, vaultIconOptions } from "./vault-avatar";
 
@@ -154,7 +157,7 @@ export function EditVaultDialog({
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-[420px]">
+			<DialogContent className="sm:max-w-105">
 				<DialogHeader>
 					<DialogTitle>Edit Vault</DialogTitle>
 				</DialogHeader>
@@ -170,6 +173,8 @@ export function EditVaultDialog({
 					<div className="flex flex-col items-center gap-3 pt-2">
 						<form.Subscribe selector={(state) => state.values.name}>
 							{(name) => (
+								// biome-ignore lint/a11y/noStaticElementInteractions: TODO
+								// biome-ignore lint/a11y/useKeyWithClickEvents: TODO
 								<div
 									className={`relative cursor-pointer rounded-xl p-1 transition-all ${
 										isDragging
@@ -188,7 +193,7 @@ export function EditVaultDialog({
 										size="xl"
 									/>
 									<div className="absolute -right-1 -bottom-1 rounded-full bg-primary p-1.5 text-primary-foreground shadow-sm">
-										<ImagePlus className="size-3.5" />
+										<IconImagePlusOutlineDuo18 className="size-3.5" />
 									</div>
 								</div>
 							)}
@@ -212,7 +217,7 @@ export function EditVaultDialog({
 								}}
 								className="h-7 gap-1.5 text-muted-foreground text-xs"
 							>
-								<X className="size-3" />
+								<IconXmarkOutlineDuo18 className="size-3" />
 								Remove image
 							</Button>
 						) : (

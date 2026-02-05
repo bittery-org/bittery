@@ -1,7 +1,7 @@
 import { useItems, useToggleFavorite } from "@bittery/hooks";
 import { Badge } from "@bittery/ui";
+import { IconGrid2OutlineDuo18 } from "@bittery/ui/icons";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
-import { LayoutGrid } from "lucide-react";
 import { ItemListRow } from "../../../components/vault/item-list-row";
 
 export const Route = createFileRoute("/vault/all-items")({
@@ -12,7 +12,7 @@ function RouteComponent() {
 	const { itemId } = useParams({ strict: false });
 
 	// Unified hook - automatically handles single-account vs "All Accounts" mode
-	const { items, isLoading, isAllAccountsMode } = useItems();
+	const { items, isLoading } = useItems();
 
 	// Sort items: favorites first, then by updatedAt
 	const sortedItems = [...items].sort((a, b) => {
@@ -60,7 +60,7 @@ function RouteComponent() {
 			<div className="flex w-78 flex-col border-r bg-background">
 				{/* Header */}
 				<div className="flex items-center gap-2 border-b px-4 py-3">
-					<LayoutGrid className="size-4 text-muted-foreground" />
+					<IconGrid2OutlineDuo18 className="size-4 text-muted-foreground" />
 					<span className="font-medium">All Objects</span>
 					<Badge variant="secondary" className="ml-auto">
 						{items.length}

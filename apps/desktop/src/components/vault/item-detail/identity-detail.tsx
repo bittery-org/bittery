@@ -8,7 +8,7 @@ import {
 	maskSSN,
 } from "@bittery/shared/identity";
 import { Button, Card, Label } from "@bittery/ui";
-import { Copy } from "lucide-react";
+import { IconCopyOutlineDuo18 } from "@bittery/ui/icons";
 import { Favicon } from "../favicon";
 import { TagInput } from "../tag-input";
 import {
@@ -105,7 +105,7 @@ export function IdentityDetail({
 									onClick={() => handleCopy(formatAddress(address), "Address")}
 									className="w-full"
 								>
-									<Copy size={16} className="mr-2" />
+									<IconCopyOutlineDuo18 size={16} />
 									Copy Address
 								</Button>
 							</div>

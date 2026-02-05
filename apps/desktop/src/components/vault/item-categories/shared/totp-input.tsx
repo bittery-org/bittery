@@ -5,7 +5,12 @@ import {
 } from "@bittery/shared/totp";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import { Button, Input, Label, toast } from "@bittery/ui";
-import { Clipboard, Plus, Smartphone, Trash2 } from "lucide-react";
+import {
+	IconClipboardArrowInOutlineDuo18,
+	IconMobileOutlineDuo18,
+	IconPlusOutlineDuo18,
+	IconTrash2OutlineDuo18,
+} from "@bittery/ui/icons";
 import { useCallback } from "react";
 import { TotpAdvancedSettings } from "./totp-settings";
 
@@ -111,7 +116,7 @@ export function TotpInputSection({
 		<div className="space-y-2">
 			<div className="flex items-center justify-between">
 				<Label className="flex items-center gap-2">
-					<Smartphone className="size-4" />
+					<IconMobileOutlineDuo18 className="size-4" />
 					Two-Factor Authentication
 				</Label>
 				{!showSection && (
@@ -121,7 +126,7 @@ export function TotpInputSection({
 						size="sm"
 						onClick={() => onShowSectionChange(true)}
 					>
-						<Plus className="mr-1 size-3" />
+						<IconPlusOutlineDuo18 className="mr-1 size-3" />
 						Add TOTP
 					</Button>
 				)}
@@ -149,7 +154,7 @@ export function TotpInputSection({
 								onClick={() => handlePasteFromClipboard()}
 								title="Paste from clipboard"
 							>
-								<Clipboard size={16} className="mr-2" />
+								<IconClipboardArrowInOutlineDuo18 size={16} />
 								Paste
 							</Button>
 						</div>
@@ -198,7 +203,7 @@ export function TotpInputSection({
 						className="text-destructive hover:bg-destructive/10 hover:text-destructive"
 						onClick={handleRemoveTotp}
 					>
-						<Trash2 size={14} className="mr-1" />
+						<IconTrash2OutlineDuo18 size={14} className="mr-1" />
 						Remove TOTP
 					</Button>
 				</div>

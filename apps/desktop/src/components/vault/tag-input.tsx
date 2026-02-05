@@ -10,7 +10,11 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@bittery/ui";
-import { Check, Plus, Tags } from "lucide-react";
+import {
+	IconCheckOutlineDuo18,
+	IconPlusOutlineDuo18,
+	IconTagsOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useState } from "react";
 import { getTagColorFromName, TagBadge } from "./tag-badge";
 
@@ -96,7 +100,7 @@ export function TagInput({
 				<Popover open={open} onOpenChange={setOpen}>
 					<PopoverTrigger asChild>
 						<Button variant="outline" size="sm" className="h-8 gap-1">
-							<Tags className="h-3.5 w-3.5" />
+							<IconTagsOutlineDuo18 className="h-3.5 w-3.5" />
 							<span>
 								{tags.length > 0
 									? `${tags.length} tag${tags.length > 1 ? "s" : ""}`
@@ -121,7 +125,7 @@ export function TagInput({
 											onSelect={handleCreateTag}
 											className="flex items-center gap-2"
 										>
-											<Plus className="h-4 w-4" />
+											<IconPlusOutlineDuo18 className="h-4 w-4" />
 											<span>Create &quot;{searchValue.trim()}&quot;</span>
 										</CommandItem>
 									</CommandGroup>
@@ -144,7 +148,7 @@ export function TagInput({
 													/>
 													<span className="flex-1">{tag}</span>
 													{isSelected && (
-														<Check className="h-4 w-4 text-primary" />
+														<IconCheckOutlineDuo18 className="h-4 w-4 text-primary" />
 													)}
 												</CommandItem>
 											);

@@ -4,7 +4,10 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@bittery/ui";
-import { ChevronRight, Plus } from "lucide-react";
+import {
+	IconChevronRightOutlineDuo18,
+	IconPlusOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
 
 interface SidebarSectionProps {
@@ -49,7 +52,7 @@ export function SidebarSection({
 		<Collapsible open={isOpen} onOpenChange={handleOpenChange}>
 			<div className="flex items-center justify-between gap-1 px-2 py-1">
 				<CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 py-1.5 font-semibold text-muted-foreground text-xs uppercase hover:bg-muted/50">
-					<ChevronRight
+					<IconChevronRightOutlineDuo18
 						className={`size-3 shrink-0 transition-transform ${isOpen ? "rotate-90" : ""}`}
 					/>
 					{icon && <span className="mr-0.5 shrink-0">{icon}</span>}
@@ -65,7 +68,7 @@ export function SidebarSection({
 							onAdd();
 						}}
 					>
-						<Plus className="size-3" />
+						<IconPlusOutlineDuo18 className="size-3" />
 					</Button>
 				)}
 			</div>

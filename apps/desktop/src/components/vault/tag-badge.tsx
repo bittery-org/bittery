@@ -1,5 +1,5 @@
 import { cn } from "@bittery/ui";
-import { X } from "lucide-react";
+import { IconXmarkOutlineDuo18 } from "@bittery/ui/icons";
 
 interface TagBadgeProps {
 	name: string;
@@ -65,7 +65,9 @@ export function TagBadge({
 					}}
 					className="ml-0.5 rounded-full hover:bg-black/10"
 				>
-					<X className={cn(size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5")} />
+					<IconXmarkOutlineDuo18
+						className={cn(size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5")}
+					/>
 				</button>
 			)}
 		</>

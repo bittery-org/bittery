@@ -5,8 +5,11 @@ import {
 } from "@bittery/shared/totp";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import { Button, Input, Label, toast } from "@bittery/ui";
+import {
+	IconClipboardArrowInOutlineDuo18,
+	IconKeyOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
-import { Clipboard, Key } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
 	type BaseFormProps,
@@ -191,7 +194,7 @@ export function TotpForm({
 					<div className="space-y-4">
 						<div className="text-center">
 							<div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-primary/10">
-								<Key className="size-8 text-primary" />
+								<IconKeyOutlineDuo18 className="size-8 text-primary" />
 							</div>
 							<h3 className="font-semibold text-lg">Add Authenticator</h3>
 							<p className="mt-1 text-muted-foreground text-sm">
@@ -206,7 +209,7 @@ export function TotpForm({
 							className="w-full gap-2"
 							onClick={() => handlePasteFromClipboard()}
 						>
-							<Clipboard className="size-5" />
+							<IconClipboardArrowInOutlineDuo18 className="size-5" />
 							Paste from Clipboard
 						</Button>
 
@@ -307,7 +310,7 @@ export function TotpForm({
 									onClick={() => handlePasteFromClipboard()}
 									title="Paste from clipboard"
 								>
-									<Clipboard size={16} className="mr-2" />
+									<IconClipboardArrowInOutlineDuo18 size={16} />
 									Paste
 								</Button>
 							</div>

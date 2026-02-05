@@ -1,9 +1,12 @@
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { cn } from "@bittery/ui";
+import {
+	IconMobileOutlineDuo18,
+	IconStarOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useDraggable } from "@dnd-kit/core";
 import { useNavigate } from "@tanstack/react-router";
-import { Smartphone, Star } from "lucide-react";
 import type { DragItemData } from "../../providers/dnd-provider";
 import { Favicon } from "./favicon";
 
@@ -79,7 +82,7 @@ export function ItemListRow({
 						<span className="truncate font-medium text-sm">{item.title}</span>
 						{item.category === "login" && item.totpSecret && (
 							<span title="Has 2FA">
-								<Smartphone className="size-3 shrink-0 text-primary-foreground" />
+								<IconMobileOutlineDuo18 className="size-3 shrink-0 text-primary-foreground" />
 							</span>
 						)}
 					</div>
@@ -123,7 +126,7 @@ export function ItemListRow({
 								: "text-muted-foreground hover:text-yellow-500",
 					)}
 				>
-					<Star
+					<IconStarOutlineDuo18
 						className="size-4"
 						fill={item.favorite ? "currentColor" : "none"}
 					/>

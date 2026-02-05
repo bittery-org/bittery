@@ -8,7 +8,7 @@ import {
 	PopoverTrigger,
 	Separator,
 } from "@bittery/ui";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { IconChevronDownOutlineDuo18 } from "@bittery/ui/icons";
 import { VaultAvatar } from "../../vault-avatar";
 
 interface VaultInfoPopoverProps {
@@ -74,8 +74,8 @@ export function VaultInfoPopover({
 						size="xs"
 						className="shrink-0 border-none bg-transparent"
 					/>
-					<span className="shrink text-sm">{vaultName}</span>
-					<ChevronDown className="size-3.5 shrink-0 opacity-50" />
+					<span className="mr-0.5 shrink text-sm">{vaultName}</span>
+					<IconChevronDownOutlineDuo18 className="size-3.5 shrink-0 opacity-50" />
 				</Button>
 			</PopoverTrigger>
 			<PopoverContent align="start" className="w-64 p-0">

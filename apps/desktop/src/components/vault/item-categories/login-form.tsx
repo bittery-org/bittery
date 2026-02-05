@@ -14,8 +14,15 @@ import {
 	PasswordGenerator,
 	toast,
 } from "@bittery/ui";
+import {
+	IconCircleKeyOutlineDuo18,
+	IconEyeOutlineDuo18,
+	IconEyeSlashOutlineDuo18,
+	IconPlusOutlineDuo18,
+	IconTrash2OutlineDuo18,
+	IconXmarkOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
-import { Eye, EyeOff, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useState } from "react";
 import type { CustomField } from "../types";
@@ -220,7 +227,7 @@ export function LoginForm({
 											onClick={() => removeAdditionalUrl(index)}
 											aria-label="Remove website"
 										>
-											<X className="size-4" />
+											<IconXmarkOutlineDuo18 className="size-4" />
 										</InputGroupButton>
 									</InputGroupAddon>
 								</InputGroup>
@@ -232,7 +239,7 @@ export function LoginForm({
 								className="h-8 text-muted-foreground"
 								onClick={addAdditionalUrl}
 							>
-								<Plus className="mr-1 size-3" />
+								<IconPlusOutlineDuo18 className="mr-1 size-3" />
 								Add another website
 							</Button>
 						</div>
@@ -285,9 +292,9 @@ export function LoginForm({
 											}
 										>
 											{showPassword ? (
-												<EyeOff className="size-4" />
+												<IconEyeSlashOutlineDuo18 className="size-4" />
 											) : (
-												<Eye className="size-4" />
+												<IconEyeOutlineDuo18 className="size-4" />
 											)}
 										</InputGroupButton>
 										<PasswordGenerator
@@ -299,7 +306,7 @@ export function LoginForm({
 													size="icon-sm"
 													aria-label="Generate password"
 												>
-													<RefreshCw className="size-4" />
+													<IconCircleKeyOutlineDuo18 className="size-4" />
 												</InputGroupButton>
 											}
 										/>
@@ -327,7 +334,7 @@ export function LoginForm({
 						size="sm"
 						onClick={addCustomField}
 					>
-						<Plus className="mr-1 size-3" />
+						<IconPlusOutlineDuo18 className="mr-1 size-3" />
 						Add Field
 					</Button>
 				</div>
@@ -362,7 +369,7 @@ export function LoginForm({
 								size="icon"
 								onClick={() => removeCustomField(field.id)}
 							>
-								<Trash2 size={16} />
+								<IconTrash2OutlineDuo18 size={16} />
 							</Button>
 						</div>
 						<Input

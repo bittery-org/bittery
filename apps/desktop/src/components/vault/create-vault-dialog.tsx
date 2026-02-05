@@ -14,8 +14,13 @@ import {
 	SelectValue,
 	toast,
 } from "@bittery/ui";
+import {
+	IconImagePlusOutlineDuo18,
+	IconUserOutlineDuo18,
+	IconUsers6OutlineDuo18,
+	IconXmarkOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
-import { ImagePlus, User, Users, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { VaultAvatar, vaultIconOptions } from "./vault-avatar";
 
@@ -151,7 +156,7 @@ export function CreateVaultDialog({
 				if (!newOpen) resetForm();
 			}}
 		>
-			<DialogContent className="sm:max-w-[420px]">
+			<DialogContent className="sm:max-w-105">
 				<DialogHeader>
 					<DialogTitle>Create New Vault</DialogTitle>
 				</DialogHeader>
@@ -167,6 +172,8 @@ export function CreateVaultDialog({
 					<div className="flex flex-col items-center gap-3 pt-2">
 						<form.Subscribe selector={(state) => state.values.name}>
 							{(name) => (
+								// biome-ignore lint/a11y/useKeyWithClickEvents: TODO
+								// biome-ignore lint/a11y/noStaticElementInteractions: TODO
 								<div
 									className={`relative cursor-pointer rounded-xl p-1 transition-all ${
 										isDragging
@@ -185,7 +192,7 @@ export function CreateVaultDialog({
 										size="xl"
 									/>
 									<div className="absolute -right-1 -bottom-1 rounded-full bg-primary p-1.5 text-primary-foreground shadow-sm">
-										<ImagePlus className="size-3.5" />
+										<IconImagePlusOutlineDuo18 className="size-3.5" />
 									</div>
 								</div>
 							)}
@@ -210,7 +217,7 @@ export function CreateVaultDialog({
 								}}
 								className="h-7 gap-1.5 text-muted-foreground text-xs"
 							>
-								<X className="size-3" />
+								<IconXmarkOutlineDuo18 className="size-3" />
 								Remove image
 							</Button>
 						) : (
@@ -319,7 +326,7 @@ export function CreateVaultDialog({
 												: "border-border bg-background text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground"
 										}`}
 									>
-										<User className="size-4" />
+										<IconUserOutlineDuo18 className="size-4" />
 										Personal
 									</button>
 									<button
@@ -332,7 +339,7 @@ export function CreateVaultDialog({
 												: "border-border bg-background text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground"
 										}`}
 									>
-										<Users className="size-4" />
+										<IconUsers6OutlineDuo18 className="size-4" />
 										Team
 									</button>
 								</div>

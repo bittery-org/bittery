@@ -7,7 +7,13 @@ import {
 	SheetTitle,
 	toast,
 } from "@bittery/ui";
-import { CreditCard, FileText, KeyRound, Smartphone, User } from "lucide-react";
+import {
+	IconCreditCardLockOutlineDuo18,
+	IconFileLockOutlineDuo18,
+	IconIdBadge2OutlineDuo18,
+	IconKeyOutlineDuo18,
+	IconMobileOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useState } from "react";
 import type { VaultOption } from "./item-form";
 import { ItemForm } from "./item-form";
@@ -29,31 +35,31 @@ const categories = [
 		type: "login" as const,
 		title: "Login",
 		description: "Save website credentials with optional 2FA",
-		icon: KeyRound,
+		icon: IconKeyOutlineDuo18,
 	},
 	{
 		type: "totp" as const,
 		title: "Standalone Authenticator",
 		description: "Store 2FA code without login credentials",
-		icon: Smartphone,
+		icon: IconMobileOutlineDuo18,
 	},
 	{
 		type: "secure-note" as const,
 		title: "Secure Note",
 		description: "Store sensitive information",
-		icon: FileText,
+		icon: IconFileLockOutlineDuo18,
 	},
 	{
 		type: "credit-card" as const,
 		title: "Credit Card",
 		description: "Save payment details",
-		icon: CreditCard,
+		icon: IconCreditCardLockOutlineDuo18,
 	},
 	{
 		type: "identity" as const,
 		title: "Identity",
 		description: "Store personal information",
-		icon: User,
+		icon: IconIdBadge2OutlineDuo18,
 	},
 ];
 

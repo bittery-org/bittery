@@ -1,6 +1,6 @@
 import type { ItemCategory } from "@bittery/shared/types";
 import type { PopoverTriggerRef } from "heroui-native";
-import { Button, Card, Popover, Separator } from "heroui-native";
+import { Button, Card, Popover } from "heroui-native";
 import {
 	ArrowLeft,
 	Edit,

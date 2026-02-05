@@ -13,9 +13,13 @@ import {
 	Input,
 	toast,
 } from "@bittery/ui";
+import {
+	IconCheckOutlineDuo18,
+	IconLoader2OutlineDuo18,
+	IconMagnifier3OutlineDuo18,
+} from "@bittery/ui/icons";
 import { cn } from "@bittery/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
-import { Check, Loader2, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { VaultAvatar } from "./vault-avatar";
 
@@ -164,7 +168,7 @@ export function MoveItemDialog({
 				{/* Search */}
 				<div className="px-6 pb-3">
 					<div className="relative">
-						<Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+						<IconMagnifier3OutlineDuo18 className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
 						<Input
 							placeholder="Search vaults..."
 							value={searchQuery}
@@ -178,7 +182,7 @@ export function MoveItemDialog({
 				<div className="px-3 pb-3">
 					{isLoading ? (
 						<div className="flex items-center justify-center py-8">
-							<Loader2 className="size-6 animate-spin text-muted-foreground" />
+							<IconLoader2OutlineDuo18 className="size-6 animate-spin text-muted-foreground" />
 						</div>
 					) : vaultKeys.length <= 1 ? (
 						<div className="py-8 text-center text-muted-foreground text-sm">
@@ -263,7 +267,7 @@ export function MoveItemDialog({
 																	)}
 																	{isSelected && !isDisabled && (
 																		<div className="flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
-																			<Check className="size-3" />
+																			<IconCheckOutlineDuo18 className="size-3" />
 																		</div>
 																	)}
 																</button>
@@ -314,7 +318,7 @@ export function MoveItemDialog({
 												)}
 												{isSelected && !isDisabled && (
 													<div className="flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
-														<Check className="size-3" />
+														<IconCheckOutlineDuo18 className="size-3" />
 													</div>
 												)}
 											</button>
@@ -346,7 +350,7 @@ export function MoveItemDialog({
 					>
 						{moveItem.isPending ? (
 							<>
-								<Loader2 className="mr-2 size-4 animate-spin" />
+								<IconLoader2OutlineDuo18 className="size-4 animate-spin" />
 								{isCrossAccount ? "Transferring..." : "Moving..."}
 							</>
 						) : isCrossAccount ? (
