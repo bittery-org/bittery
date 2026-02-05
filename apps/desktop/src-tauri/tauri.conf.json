@@ -15,10 +15,12 @@
         "title": "bittery",
         "width": 1000,
         "height": 700,
-        "minWidth": 800,
+        "minWidth": 850,
         "minHeight": 600,
         "center": true,
-        "hiddenTitle": true
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay",
+        "acceptFirstMouse": true
       }
     ],
     "security": {

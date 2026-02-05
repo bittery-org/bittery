@@ -7,6 +7,8 @@
     "core:default",
     "opener:default",
     "biometry:default",
-    "store:default"
+    "store:default",
+    "core:window:default",
+    "core:window:allow-start-dragging"
   ]
 }

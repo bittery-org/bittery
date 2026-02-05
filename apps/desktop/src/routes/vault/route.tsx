@@ -304,27 +304,24 @@ function RouteComponent() {
 
 	return (
 		<VaultDndProvider>
-			<div className="flex h-screen flex-col overflow-hidden">
-				<VaultHeader
-					hasVaults={!!vaultKeys?.length}
-					onNewItemClick={() => setIsNewItemDialogOpen(true)}
+			<div className="flex h-screen overflow-hidden">
+				<VaultSidebar
+					vaults={vaultKeys || []}
+					tags={crossVaultTags}
+					currentVaultId={params.id}
+					onNewVault={() => setIsNewVaultDialogOpen(true)}
+					onEditVault={handleOpenEditVault}
+					onDeleteVault={handleOpenDeleteVault}
+					onImportItems={handleOpenImportDialog}
 				/>
 
-				<div className="flex flex-1 overflow-hidden">
-					<VaultSidebar
-						vaults={vaultKeys || []}
-						tags={crossVaultTags}
-						currentVaultId={params.id}
-						onNewVault={() => setIsNewVaultDialogOpen(true)}
-						onEditVault={handleOpenEditVault}
-						onDeleteVault={handleOpenDeleteVault}
-						onImportItems={handleOpenImportDialog}
+				<div className="flex h-full flex-1 flex-col overflow-hidden">
+					<VaultHeader
+						hasVaults={!!vaultKeys?.length}
+						onNewItemClick={() => setIsNewItemDialogOpen(true)}
 					/>
-
-					<div className="flex h-full flex-1 flex-col">
-						<div className="flex flex-1 overflow-hidden">
-							<Outlet />
-						</div>
+					<div className="flex flex-1 overflow-hidden">
+						<Outlet />
 					</div>
 				</div>
 
