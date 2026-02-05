@@ -17,6 +17,7 @@ export interface VaultKeyWithAccount extends VaultKeyData {
 	accountEmail?: string;
 	accountName?: string;
 	accountTeamName?: string;
+	accountTeamAvatarUrl?: string | null;
 }
 
 export interface UseAllVaultKeysOptions {
@@ -73,18 +74,14 @@ export function useAllVaultKeys(options: UseAllVaultKeysOptions = {}) {
 						const keys = await storage.getVaultKeys(account.email);
 						if (!keys || keys.length === 0) return [];
 
-						// In multi-account mode, add account metadata to each vault key
-						if (isAllAccountsMode) {
-							return keys.map((key) => ({
-								...key,
-								accountEmail: account.email,
-								accountName: account.name,
-								accountTeamName: account.teamName,
-							}));
-						}
-
-						// In single-account mode, return keys as-is
-						return keys;
+						// Add account metadata to each vault key (needed for both modes)
+						return keys.map((key) => ({
+							...key,
+							accountEmail: account.email,
+							accountName: account.name,
+							accountTeamName: account.teamName,
+							accountTeamAvatarUrl: account.teamAvatarUrl,
+						}));
 					} catch (error) {
 						console.error(
 							`[useAllVaultKeys] Failed to fetch vault keys for ${account.email}:`,

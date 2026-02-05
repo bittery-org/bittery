@@ -1,6 +1,6 @@
 import { useAvailableTags, useVaultInfo, useVaultItems } from "@bittery/hooks";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { ItemDetailPage } from "../../../../components/vault/item-detail-page";
 
 export const Route = createFileRoute("/vault/$id/$itemId/")({
@@ -16,10 +16,8 @@ function VaultItemComponent() {
 	const { items: allVaultItems } = useVaultItems(selectedVaultId);
 	const availableTags = useAvailableTags(allVaultItems);
 
-	// Get vault info from storage
+	// Get vault info from storage (now includes account metadata)
 	const { vaultInfo: currentVault } = useVaultInfo(selectedVaultId);
-
-	console.log(currentVault);
 
 	// Handle tag click - navigate to per-vault tag view
 	const handleTagClick = useCallback(
@@ -32,13 +30,21 @@ function VaultItemComponent() {
 		[navigate, selectedVaultId],
 	);
 
-	const vaultInfo = currentVault
-		? {
-				name: currentVault.vaultName,
-				icon: currentVault.vaultIcon,
-				imageUrl: currentVault.vaultImageUrl,
-			}
-		: undefined;
+	const vaultInfo = useMemo(
+		() =>
+			currentVault
+				? {
+						name: currentVault.vaultName,
+						type: currentVault.vaultType,
+						icon: currentVault.vaultIcon,
+						imageUrl: currentVault.vaultImageUrl,
+						accountName: currentVault.accountName,
+						accountTeamName: currentVault.accountTeamName,
+						accountTeamAvatarUrl: currentVault.accountTeamAvatarUrl,
+					}
+				: undefined,
+		[currentVault],
+	);
 
 	return (
 		<ItemDetailPage

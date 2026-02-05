@@ -76,9 +76,9 @@ export function Favicon({
 	const [imageError, setImageError] = useState(false);
 
 	const faviconSizeMap = {
-		sm: 32,
-		md: 32,
-		lg: 64,
+		sm: 64,
+		md: 64,
+		lg: 128,
 	} as const;
 
 	const faviconUrl =
@@ -102,9 +102,9 @@ export function Favicon({
 	};
 
 	const imageSizes = {
-		sm: "w-4 h-4",
-		md: "w-5 h-5",
-		lg: "w-8 h-8",
+		sm: "w-7.75 h-7.75",
+		md: "w-9.75 h-9.75",
+		lg: "w-10.75 h-10.75",
 	};
 
 	// Card brand colors
@@ -126,13 +126,13 @@ export function Favicon({
 	return (
 		<div
 			className={cn(
-				"flex shrink-0 items-center justify-center overflow-hidden rounded-lg border",
+				"flex shrink-0 items-center justify-center overflow-hidden rounded-xl border",
 				sizeClasses[size],
 				category === "credit-card"
 					? cardColor
 					: imageError || !faviconUrl
 						? avatarColor
-						: "bg-muted",
+						: "bg-accent",
 				className,
 			)}
 		>
@@ -140,7 +140,7 @@ export function Favicon({
 				<img
 					src={faviconUrl}
 					alt=""
-					className={imageSizes[size]}
+					className={`${imageSizes[size]} rounded-lg`}
 					onError={() => setImageError(true)}
 				/>
 			) : category === "login" && url ? (

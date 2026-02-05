@@ -38,12 +38,10 @@ export function AccountAvatar({
 
 	return (
 		<Avatar className={cn(sizeClasses[size], className)}>
-			{account?.teamAvatarUrl && (
-				<AvatarImage
-					src={account.teamAvatarUrl}
-					alt={account.teamName || account.name || account.email}
-				/>
-			)}
+			<AvatarImage
+				src={account?.teamAvatarUrl ?? undefined}
+				alt={account?.teamName || account?.name || account?.email}
+			/>
 			<AvatarFallback className={sizeClasses[size]}>{initials}</AvatarFallback>
 		</Avatar>
 	);

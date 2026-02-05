@@ -148,11 +148,8 @@ export function AccountSwitcher() {
 						size="sm"
 					/>
 					<div className="flex flex-col items-start overflow-hidden">
-						<span className="max-w-32 truncate font-medium text-sm">
+						<span className="max-w-24 truncate font-medium text-sm">
 							All Accounts
-						</span>
-						<span className="text-muted-foreground text-xs">
-							{unlockedEmailsList.length} unlocked
 						</span>
 					</div>
 				</>
@@ -160,7 +157,7 @@ export function AccountSwitcher() {
 				<>
 					<AccountAvatar account={activeAccount} size="sm" />
 					<div className="flex flex-col items-start overflow-hidden">
-						<span className="max-w-32 truncate font-medium text-sm">
+						<span className="max-w-24 truncate font-medium text-sm">
 							{activeAccount.teamName ||
 								activeAccount.name ||
 								activeAccount.email.split("@")[0]}

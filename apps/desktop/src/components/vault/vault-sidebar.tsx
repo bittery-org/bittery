@@ -102,7 +102,7 @@ function DroppableVaultEntry({
 		<div
 			ref={setNodeRef}
 			className={`group relative mb-0.5 w-full rounded-md text-left text-sm transition-colors ${
-				isActive ? "bg-muted/60" : "hover:bg-muted/30"
+				isActive ? "bg-primary/5" : "hover:bg-muted/30"
 			} ${ringStyle}`}
 		>
 			<Link
@@ -247,7 +247,7 @@ export function VaultSidebar({
 				<Link
 					to="/vault/all-items"
 					className={`mb-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-						isAllItemsActive ? "bg-muted/60" : "hover:bg-muted/30"
+						isAllItemsActive ? "bg-primary/5" : "hover:bg-muted/30"
 					}`}
 				>
 					<LayoutGrid className="size-4 text-muted-foreground" />
@@ -258,7 +258,7 @@ export function VaultSidebar({
 				<Link
 					to="/vault/favorites"
 					className={`mb-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-						isFavoritesActive ? "bg-muted/60" : "hover:bg-muted/30"
+						isFavoritesActive ? "bg-primary/5" : "hover:bg-muted/30"
 					}`}
 				>
 					<Star className="size-4 text-yellow-500" fill="currentColor" />
@@ -306,7 +306,7 @@ export function VaultSidebar({
 										to="/vault/tag/$tagName"
 										params={{ tagName: encodeURIComponent(tagName) }}
 										className={`mb-0.5 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-											isActive ? "bg-muted/60" : "hover:bg-muted/30"
+											isActive ? "bg-primary/5" : "hover:bg-muted/30"
 										}`}
 									>
 										<Tag className="size-3.5 shrink-0" style={{ color }} />

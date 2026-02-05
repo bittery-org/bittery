@@ -35,16 +35,20 @@ import {
 import { useCallback, useState } from "react";
 import Loader from "../loader";
 import ItemDetail from "./item-detail";
+import { VaultInfoPopover } from "./item-categories/shared/vault-info-popover";
 import { ItemForm } from "./item-form";
 import { MoveItemDialog } from "./move-item-dialog";
 import { ShareHistoryDialog } from "./share-history-dialog";
 import { ShareItemDialog } from "./share-item-dialog";
-import { VaultAvatar } from "./vault-avatar";
 
 interface VaultInfo {
 	name: string;
+	type?: "personal" | "team";
 	icon?: string | null;
 	imageUrl?: string | null;
+	accountName?: string;
+	accountTeamName?: string;
+	accountTeamAvatarUrl?: string | null;
 }
 
 interface ItemDetailPageProps {
@@ -187,19 +191,19 @@ export function ItemDetailPage({
 		<>
 			<div className="flex flex-1 flex-col">
 				{/* Top bar */}
-				<div className="mb-3 flex items-center justify-between px-8 py-2">
-					<div className="flex items-center gap-2 text-muted-foreground text-sm">
-						<VaultAvatar
-							name={vaultInfo?.name || "Vault"}
-							icon={vaultInfo?.icon}
-							imageUrl={vaultInfo?.imageUrl}
-							size="xs"
-						/>
-						<span>{vaultInfo?.name || "Unknown Vault"}</span>
-					</div>
+				<div className="mb-3 flex items-center justify-between px-4 lg:px-8 py-2">
+					<VaultInfoPopover
+						vaultName={vaultInfo?.name || "Unknown Vault"}
+						vaultIcon={vaultInfo?.icon}
+						vaultImageUrl={vaultInfo?.imageUrl}
+						vaultType={vaultInfo?.type}
+						accountName={vaultInfo?.accountName}
+						accountTeamName={vaultInfo?.accountTeamName}
+						accountTeamAvatarUrl={vaultInfo?.accountTeamAvatarUrl}
+					/>
 					<div className="flex items-center gap-2">
 						<Button variant="ghost" size="sm" onClick={handleShare}>
-							<Share2 className="mr-2 size-4" />
+							<Share2 />
 							Share
 						</Button>
 						<Button
@@ -207,7 +211,7 @@ export function ItemDetailPage({
 							size="sm"
 							onClick={() => setIsEditDialogOpen(true)}
 						>
-							<Edit className="mr-2 size-4" />
+							<Edit />
 							Edit
 						</Button>
 						<DropdownMenu>
@@ -278,7 +282,7 @@ export function ItemDetailPage({
 				</div>
 
 				{/* Content area */}
-				<div className="flex-1 overflow-y-auto px-8 py-3">
+				<div className="flex-1 overflow-y-auto px-4 lg:px-8 py-3">
 					<ItemDetail
 						category={rawItem?.category ?? "login"}
 						data={decryptedData}
@@ -402,7 +406,6 @@ export function ItemDetailPage({
 						} as DecryptedItem
 					}
 					currentVaultId={rawItem.vaultId}
-					currentVaultName={vaultInfo?.name}
 				/>
 			)}
 		</>

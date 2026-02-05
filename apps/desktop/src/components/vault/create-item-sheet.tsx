@@ -121,8 +121,8 @@ export function CreateItemSheet({
 			}}
 		>
 			<SheetContent className="flex flex-col overflow-hidden p-0 sm:w-[65vw] sm:max-w-4xl">
-				<SheetHeader className="px-6 py-6">
-					<SheetTitle>
+				<SheetHeader className="px-7 py-4">
+					<SheetTitle className="mb-1">
 						{step === 1
 							? "Create New Item"
 							: `Create ${categories.find((c) => c.type === selectedCategory)?.title}`}

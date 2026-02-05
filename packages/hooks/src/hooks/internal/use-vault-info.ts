@@ -10,6 +10,16 @@ import { useQuery } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
 import { useAccountsInfo } from "./use-accounts-info";
 
+/**
+ * Vault info with associated account metadata
+ */
+export interface VaultInfoWithAccount extends VaultKeyData {
+	accountEmail?: string;
+	accountName?: string;
+	accountTeamName?: string;
+	accountTeamAvatarUrl?: string | null;
+}
+
 export interface UseVaultInfoOptions {
 	enabled?: boolean;
 }
@@ -20,7 +30,7 @@ export interface UseVaultInfoOptions {
  *
  * @param vaultId - The ID of the vault to get info for
  * @param options - Query options
- * @returns Vault key data, loading state, and error
+ * @returns Vault key data with account metadata, loading state, and error
  *
  * @example
  * ```tsx
@@ -29,6 +39,7 @@ export interface UseVaultInfoOptions {
  * if (vaultInfo) {
  *   console.log('Vault name:', vaultInfo.vaultName);
  *   console.log('Role:', vaultInfo.role);
+ *   console.log('Team:', vaultInfo.accountTeamName);
  * }
  * ```
  */
@@ -50,7 +61,7 @@ export function useVaultInfo(
 		error,
 	} = useQuery({
 		queryKey: ["vault-info", vaultId, accountsInfo.map((a) => a.email).sort()],
-		queryFn: async (): Promise<VaultKeyData | null> => {
+		queryFn: async (): Promise<VaultInfoWithAccount | null> => {
 			if (!vaultId || accountsInfo.length === 0) return null;
 
 			// Search through all accounts to find which one has this vault
@@ -60,7 +71,14 @@ export function useVaultInfo(
 
 				const vaultKey = vaultKeys.find((vk) => vk.vaultId === vaultId);
 				if (vaultKey) {
-					return vaultKey;
+					// Return vault info with account metadata
+					return {
+						...vaultKey,
+						accountEmail: account.email,
+						accountName: account.name,
+						accountTeamName: account.teamName,
+						accountTeamAvatarUrl: account.teamAvatarUrl,
+					};
 				}
 			}
 

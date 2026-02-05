@@ -15,6 +15,7 @@ export interface AccountInfo {
 	userId: string;
 	name: string;
 	teamName?: string;
+	teamAvatarUrl?: string | null;
 	authToken: string;
 	serverUrl: string;
 	trpcClient: ReturnType<typeof createAccountTrpcClient>;
@@ -86,6 +87,7 @@ export function useAccountsInfo(options: UseAccountsInfoOptions = {}) {
 							userId: metadata.userId,
 							name: metadata.name,
 							teamName: metadata.teamName,
+							teamAvatarUrl: metadata.teamAvatarUrl,
 							authToken,
 							serverUrl: serverUrl || "http://localhost:3000",
 							trpcClient,

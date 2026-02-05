@@ -1,32 +1,38 @@
 import { useAllVaultKeys, useMoveItem } from "@bittery/hooks";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
+	Avatar,
+	AvatarFallback,
+	AvatarImage,
 	Button,
 	Dialog,
 	DialogContent,
-	DialogDescription,
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-	Label,
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
+	Input,
 	toast,
 } from "@bittery/ui";
+import { cn } from "@bittery/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowRight, Loader2 } from "lucide-react";
+import { Check, Loader2, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { VaultAvatar } from "./vault-avatar";
+
+function getInitials(name: string): string {
+	if (!name) return "??";
+	const parts = name.trim().split(/\s+/);
+	if (parts.length >= 2) {
+		return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+	}
+	return name.slice(0, 2).toUpperCase();
+}
 
 interface MoveItemDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	item: DecryptedItem;
 	currentVaultId: string;
-	currentVaultName?: string;
 }
 
 export function MoveItemDialog({
@@ -34,9 +40,9 @@ export function MoveItemDialog({
 	onOpenChange,
 	item,
 	currentVaultId,
-	currentVaultName,
 }: MoveItemDialogProps) {
 	const [selectedVaultId, setSelectedVaultId] = useState<string>("");
+	const [searchQuery, setSearchQuery] = useState("");
 	const { vaultKeys, isLoading, isAllAccountsMode } = useAllVaultKeys();
 	const moveItem = useMoveItem();
 	const navigate = useNavigate();
@@ -47,26 +53,27 @@ export function MoveItemDialog({
 		return currentVault?.accountEmail;
 	}, [vaultKeys, currentVaultId]);
 
-	// Get available vaults that can be selected (exclude current vault and read-only vaults)
-	// Now supports cross-account transfers in multi-account mode!
-	const availableVaults = useMemo(() => {
-		return vaultKeys.filter((vk) => {
-			// Skip current vault
-			if (vk.vaultId === currentVaultId) return false;
-			// Skip read-only vaults
-			if (vk.role === "read-only") return false;
-			return true;
-		});
-	}, [vaultKeys, currentVaultId]);
+	// Filter vaults by search query
+	const filteredVaultKeys = useMemo(() => {
+		if (!searchQuery.trim()) return vaultKeys;
+		const query = searchQuery.toLowerCase();
+		return vaultKeys.filter(
+			(vk) =>
+				vk.vaultName.toLowerCase().includes(query) ||
+				vk.accountName?.toLowerCase().includes(query) ||
+				vk.accountTeamName?.toLowerCase().includes(query),
+		);
+	}, [vaultKeys, searchQuery]);
 
 	// Group vaults by account in multi-account mode for better UX
+	// Includes all vaults (current vault will be shown as disabled)
 	const vaultsByAccount = useMemo(() => {
 		if (!isAllAccountsMode) {
-			return { single: availableVaults };
+			return { single: filteredVaultKeys };
 		}
 
-		const grouped: Record<string, typeof availableVaults> = {};
-		for (const vault of availableVaults) {
+		const grouped: Record<string, typeof filteredVaultKeys> = {};
+		for (const vault of filteredVaultKeys) {
 			const accountKey = vault.accountEmail || "unknown";
 			if (!grouped[accountKey]) {
 				grouped[accountKey] = [];
@@ -74,7 +81,7 @@ export function MoveItemDialog({
 			grouped[accountKey].push(vault);
 		}
 		return grouped;
-	}, [availableVaults, isAllAccountsMode]);
+	}, [filteredVaultKeys, isAllAccountsMode]);
 
 	// Check if selected vault is in a different account
 	const selectedVault = useMemo(() => {
@@ -140,136 +147,193 @@ export function MoveItemDialog({
 	const handleOpenChange = (newOpen: boolean) => {
 		if (!newOpen) {
 			setSelectedVaultId("");
+			setSearchQuery("");
 		}
 		onOpenChange(newOpen);
 	};
 
 	return (
 		<Dialog open={open} onOpenChange={handleOpenChange}>
-			<DialogContent className="max-w-md">
-				<DialogHeader>
-					<DialogTitle>
-						{isCrossAccount ? "Transfer Item" : "Move Item"}
+			<DialogContent className="max-w-md gap-0 p-0">
+				<DialogHeader className="p-6 pb-4">
+					<DialogTitle className="font-medium text-base">
+						Move "{item.title}" to a different vault
 					</DialogTitle>
-					<DialogDescription>
-						{isCrossAccount
-							? `Transfer "${item.title}" to a different account. A new copy will be created in the target vault and the original will be deleted.`
-							: `Move "${item.title}" to a different vault`}
-					</DialogDescription>
 				</DialogHeader>
 
-				<div className="space-y-4 py-4">
-					{/* Current Vault */}
-					<div className="space-y-2">
-						<Label className="text-muted-foreground text-sm">From</Label>
-						<div className="flex items-center gap-2 rounded-md border border-input bg-muted px-3 py-2">
-							<VaultAvatar name={currentVaultName || "Vault"} size="xs" />
-							<span className="text-sm">
-								{currentVaultName || "Current Vault"}
-							</span>
+				{/* Search */}
+				<div className="px-6 pb-3">
+					<div className="relative">
+						<Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+						<Input
+							placeholder="Search vaults..."
+							value={searchQuery}
+							onChange={(e) => setSearchQuery(e.target.value)}
+							className="pl-9"
+						/>
+					</div>
+				</div>
+
+				{/* Vault List */}
+				<div className="px-3 pb-3">
+					{isLoading ? (
+						<div className="flex items-center justify-center py-8">
+							<Loader2 className="size-6 animate-spin text-muted-foreground" />
 						</div>
-					</div>
+					) : vaultKeys.length <= 1 ? (
+						<div className="py-8 text-center text-muted-foreground text-sm">
+							No other vaults available
+						</div>
+					) : filteredVaultKeys.length === 0 ? (
+						<div className="py-8 text-center text-muted-foreground text-sm">
+							No vaults match your search
+						</div>
+					) : (
+						<div className="max-h-80 space-y-1 overflow-y-auto">
+							{isAllAccountsMode ? (
+								// Multi-account mode: group by account
+								Object.entries(vaultsByAccount).map(
+									([accountEmail, vaults]) => {
+										if (vaults.length === 0) return null;
 
-					<div className="flex justify-center">
-						<ArrowRight className="size-5 text-muted-foreground" />
-					</div>
+										const accountName =
+											vaults[0].accountTeamName ||
+											vaults[0].accountName ||
+											accountEmail;
+										const accountTeamAvatarUrl =
+											vaults[0].accountTeamAvatarUrl;
 
-					{/* Target Vault Selection */}
-					<div className="space-y-2">
-						<Label htmlFor="target-vault">To</Label>
-						{isLoading ? (
-							<div className="flex items-center justify-center py-8">
-								<Loader2 className="size-6 animate-spin text-muted-foreground" />
-							</div>
-						) : availableVaults.length === 0 ? (
-							<div className="py-4 text-center text-muted-foreground text-sm">
-								No other vaults available
-							</div>
-						) : (
-							<Select
-								value={selectedVaultId}
-								onValueChange={setSelectedVaultId}
-							>
-								<SelectTrigger id="target-vault">
-									<SelectValue placeholder="Select a vault" />
-								</SelectTrigger>
-								<SelectContent>
-									{isAllAccountsMode
-										? // Multi-account mode: group by account
-											Object.entries(vaultsByAccount).map(
-												([accountEmail, vaults]) => {
-													if (vaults.length === 0) return null;
-
-													const accountName =
-														vaults[0].accountName || accountEmail;
-													const isCurrentAccount =
-														accountEmail === currentVaultAccount;
-
-													return (
-														<div key={accountEmail}>
-															<div className="px-2 py-1.5 font-semibold text-muted-foreground text-xs">
-																{accountName}
-																{isCurrentAccount && " (current)"}
-															</div>
-															{vaults.map((vaultKey) => (
-																<SelectItem
-																	key={vaultKey.vaultId}
-																	value={vaultKey.vaultId}
-																>
-																	<div className="flex items-center gap-2">
-																		<VaultAvatar
-																			name={vaultKey.vaultName}
-																			icon={vaultKey.vaultIcon}
-																			imageUrl={vaultKey.vaultImageUrl}
-																			size="xs"
-																		/>
-																		<span>{vaultKey.vaultName}</span>
-																	</div>
-																</SelectItem>
-															))}
-														</div>
-													);
-												},
-											)
-										: // Single-account mode: simple list
-											availableVaults.map((vaultKey) => (
-												<SelectItem
-													key={vaultKey.vaultId}
-													value={vaultKey.vaultId}
-												>
-													<div className="flex items-center gap-2">
-														<VaultAvatar
-															name={vaultKey.vaultName}
-															icon={vaultKey.vaultIcon}
-															imageUrl={vaultKey.vaultImageUrl}
-															size="xs"
+										return (
+											<div key={accountEmail} className="py-1">
+												<div className="flex items-center gap-2 px-3 py-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
+													<Avatar className="size-5 text-[10px]">
+														<AvatarImage
+															src={accountTeamAvatarUrl ?? undefined}
+															alt={accountName}
 														/>
-														<span>{vaultKey.vaultName}</span>
-													</div>
-												</SelectItem>
-											))}
-								</SelectContent>
-							</Select>
-						)}
-					</div>
+														<AvatarFallback className="text-[10px]">
+															{getInitials(accountName)}
+														</AvatarFallback>
+													</Avatar>
+													<span>{accountName}</span>
+												</div>
+												<div className="ml-4 space-y-0.5">
+													{vaults.map((vaultKey) => {
+														const isCurrentVault =
+															vaultKey.vaultId === currentVaultId;
+														const isSelected =
+															vaultKey.vaultId === selectedVaultId;
+														const isDisabled =
+															isCurrentVault || vaultKey.role === "read-only";
 
-					{/* Show account info for selected vault in multi-account mode */}
-					{isAllAccountsMode && selectedVault && (
-						<div className="rounded-md bg-muted px-3 py-2 text-sm">
-							<span className="text-muted-foreground">Target account: </span>
-							<span className="font-medium">
-								{selectedVault.accountName || selectedVault.accountEmail}
-							</span>
-							{isCrossAccount && (
-								<span className="ml-2 text-amber-600 text-xs dark:text-amber-500">
-									(different account - will transfer)
-								</span>
+														return (
+															<button
+																type="button"
+																key={vaultKey.vaultId}
+																disabled={isDisabled}
+																onClick={() =>
+																	!isDisabled &&
+																	setSelectedVaultId(vaultKey.vaultId)
+																}
+																className={cn(
+																	"flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm outline-none transition-colors",
+																	isSelected &&
+																		!isDisabled &&
+																		"bg-primary/10 ring-1 ring-primary/20",
+																	!isDisabled &&
+																		!isSelected &&
+																		"hover:bg-accent",
+																	isDisabled && "cursor-not-allowed opacity-50",
+																)}
+															>
+																<VaultAvatar
+																	name={vaultKey.vaultName}
+																	icon={vaultKey.vaultIcon}
+																	imageUrl={vaultKey.vaultImageUrl}
+																	size="sm"
+																/>
+																<span className="flex-1 text-left font-medium">
+																	{vaultKey.vaultName}
+																</span>
+																{isCurrentVault && (
+																	<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
+																		Current
+																	</span>
+																)}
+																{isSelected && !isDisabled && (
+																	<div className="flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+																		<Check className="size-3" />
+																	</div>
+																)}
+															</button>
+														);
+													})}
+												</div>
+											</div>
+										);
+									},
+								)
+							) : (
+								// Single-account mode: simple list with current vault included
+								filteredVaultKeys.map((vaultKey) => {
+									const isCurrentVault = vaultKey.vaultId === currentVaultId;
+									const isSelected = vaultKey.vaultId === selectedVaultId;
+									const isDisabled =
+										isCurrentVault || vaultKey.role === "read-only";
+
+									return (
+										<button
+											type="button"
+											key={vaultKey.vaultId}
+											disabled={isDisabled}
+											onClick={() =>
+												!isDisabled && setSelectedVaultId(vaultKey.vaultId)
+											}
+											className={cn(
+												"flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm outline-none transition-colors",
+												isSelected &&
+													!isDisabled &&
+													"bg-primary/10 ring-1 ring-primary/20",
+												!isDisabled && !isSelected && "hover:bg-accent",
+												isDisabled && "cursor-not-allowed opacity-50",
+											)}
+										>
+											<VaultAvatar
+												name={vaultKey.vaultName}
+												icon={vaultKey.vaultIcon}
+												imageUrl={vaultKey.vaultImageUrl}
+												size="sm"
+											/>
+											<span className="flex-1 text-left font-medium">
+												{vaultKey.vaultName}
+											</span>
+											{isCurrentVault && (
+												<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
+													Current
+												</span>
+											)}
+											{isSelected && !isDisabled && (
+												<div className="flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+													<Check className="size-3" />
+												</div>
+											)}
+										</button>
+									);
+								})
 							)}
 						</div>
 					)}
 				</div>
 
-				<DialogFooter>
+				{/* Cross-account warning */}
+				{isCrossAccount && selectedVault && (
+					<div className="mx-6 mb-3 rounded-lg bg-amber-500/10 px-3 py-2.5 text-amber-600 text-sm dark:text-amber-500">
+						This will transfer the item to a different account. A new copy will
+						be created and the original deleted.
+					</div>
+				)}
+
+				<DialogFooter className="border-t p-4">
 					<Button
 						variant="outline"
 						onClick={() => handleOpenChange(false)}
