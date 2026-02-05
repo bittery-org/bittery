@@ -234,6 +234,7 @@ export async function createTestItem(
 
 /**
  * Create a test team
+ * Sets user.teamId and user.role (one-to-one relationship)
  */
 export async function createTestTeam(
 	ownerId: string,
@@ -245,39 +246,31 @@ export async function createTestTeam(
 		id: teamId,
 		name: overrides.name || "Test Team",
 		ownerId,
+		...(overrides.type && { type: overrides.type }),
 	});
 
-	// Add owner as team member
-	await db.insert(teamMember).values({
-		id: nanoid(),
-		teamId,
-		userId: ownerId,
-		role: "owner",
-		joinedAt: new Date(),
-	});
+	// Set user's team (one-to-one relationship)
+	await db
+		.update(user)
+		.set({ teamId, role: "owner" })
+		.where(eq(user.id, ownerId));
 
 	return teamId;
 }
 
 /**
  * Add a member to a team
+ * Sets user.teamId and user.role (one-to-one relationship)
  */
 export async function addTeamMember(
 	teamId: string,
 	userId: string,
 	role: "owner" | "admin" | "member" = "member",
 ) {
-	const memberId = nanoid();
-
-	await db.insert(teamMember).values({
-		id: memberId,
-		teamId,
-		userId,
-		role,
-		joinedAt: new Date(),
-	});
-
-	return memberId;
+	await db
+		.update(user)
+		.set({ teamId, role })
+		.where(eq(user.id, userId));
 }
 
 /**
@@ -512,13 +505,14 @@ export async function getVaultKey(vaultId: string, userId: string) {
 }
 
 /**
- * Get team member
+ * Get team member by checking user.teamId (one-to-one relationship)
  */
 export async function getTeamMember(teamId: string, userId: string) {
-	return db.query.teamMember.findFirst({
-		where: (tm, { and, eq }) =>
-			and(eq(tm.teamId, teamId), eq(tm.userId, userId)),
+	const userData = await db.query.user.findFirst({
+		where: (u, { eq }) => eq(u.id, userId),
 	});
+	if (!userData || userData.teamId !== teamId) return undefined;
+	return { role: userData.role, userId: userData.id };
 }
 
 /**
@@ -532,11 +526,11 @@ export async function countVaultItems(vaultId: string) {
 }
 
 /**
- * Count team members
+ * Count team members by checking user.teamId (one-to-one relationship)
  */
 export async function countTeamMembers(teamId: string) {
-	const members = await db.query.teamMember.findMany({
-		where: (tm, { eq }) => eq(tm.teamId, teamId),
+	const members = await db.query.user.findMany({
+		where: (u, { eq }) => eq(u.teamId, teamId),
 	});
 	return members.length;
 }

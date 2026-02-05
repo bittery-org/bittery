@@ -1,4 +1,4 @@
-import { useItems, useToggleFavorite } from "@bittery/hooks";
+import { useItems } from "@bittery/hooks";
 import { Badge } from "@bittery/ui";
 import { IconStarOutlineDuo18 } from "@bittery/ui/icons";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
@@ -21,26 +21,6 @@ function RouteComponent() {
 			(a, b) =>
 				new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
 		);
-
-	// Mutation to toggle favorite
-	const toggleFavorite = useToggleFavorite();
-
-	const handleToggleFavorite = (
-		e: React.MouseEvent,
-		id: string,
-		currentFavorite: boolean,
-	) => {
-		e.preventDefault();
-		e.stopPropagation();
-		const item = allItems.find((i) => i.id === id);
-		if (item) {
-			toggleFavorite.mutate({
-				itemId: id,
-				vaultId: item.vaultId,
-				favorite: !currentFavorite,
-			});
-		}
-	};
 
 	if (isLoading) {
 		return (
@@ -85,9 +65,6 @@ function RouteComponent() {
 									key={item.id}
 									item={item}
 									isSelected={itemId === item.id}
-									onToggleFavorite={(e) =>
-										handleToggleFavorite(e, item.id, item.favorite)
-									}
 									linkTo="/vault/favorites/$itemId"
 									linkParams={{ itemId: item.id }}
 									vaultId={item.vaultId}
