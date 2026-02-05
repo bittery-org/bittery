@@ -52,14 +52,10 @@ export function createDesktopAutolockService(
 
 		const timeoutMs = await storage.getAutoLockTimeoutOrDefault();
 
-		console.log(timeoutMs);
-
 		// -1 means never auto-lock
 		if (timeoutMs < 0) return false;
 
 		const elapsed = Date.now() - lastActivityTime;
-
-		console.log(elapsed >= timeoutMs, elapsed);
 
 		return elapsed >= timeoutMs;
 	};
@@ -67,8 +63,6 @@ export function createDesktopAutolockService(
 	// Execute lock
 	const lock = async (): Promise<void> => {
 		if (isDisposed) return;
-
-		console.log("[Desktop Autolock] Locking all accounts");
 
 		// Clear interval
 		if (intervalId !== null) {

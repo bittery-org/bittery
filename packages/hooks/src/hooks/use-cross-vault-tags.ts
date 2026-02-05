@@ -8,6 +8,7 @@
 
 import { useMemo } from "react";
 import { useItems } from "./use-items";
+import type { MultiAccountItem } from "./internal/use-items-unified";
 
 /**
  * Hook to extract all unique tags from all items across all vaults.
@@ -16,24 +17,28 @@ import { useItems } from "./use-items";
  *
  * @returns Object containing tags array, loading state, and error
  */
-export function useCrossVaultTags() {
-	const { items, isLoading, error } = useItems();
+export function useCrossVaultTags(items?: MultiAccountItem[]) {
+  const { items: fetchedItems, isLoading, error } = useItems({
+    enabled: items == null,
+  });
 
-	const tags = useMemo(() => {
-		const tagSet = new Set<string>();
-		for (const item of items) {
-			if (item.tags) {
-				for (const tag of item.tags) {
-					tagSet.add(tag);
-				}
-			}
-		}
-		return Array.from(tagSet).sort();
-	}, [items]);
+  const allItems = items ?? fetchedItems;
 
-	return {
-		tags,
-		isLoading,
-		error,
-	};
+  const tags = useMemo(() => {
+    const tagSet = new Set<string>();
+    for (const item of allItems) {
+      if (item.tags) {
+        for (const tag of item.tags) {
+          tagSet.add(tag);
+        }
+      }
+    }
+    return Array.from(tagSet).sort();
+  }, [allItems]);
+
+  return {
+    tags,
+    isLoading,
+    error,
+  };
 }

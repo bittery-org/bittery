@@ -63,7 +63,7 @@ export function ItemListRow({
 				"mb-1 w-full cursor-pointer rounded-md px-3 py-2.5 text-left transition-colors",
 				isSelected
 					? "bg-primary text-primary-foreground"
-					: "hover:bg-primary/5",
+					: "hover:bg-primary/10",
 				isDragging && "opacity-50",
 			)}
 		>
