@@ -1,15 +1,15 @@
 {
 	"expo": {
-		"name": "Bittery",
+		"name": "bittery",
 		"slug": "bittery",
 		"version": "0.1.0",
 		"orientation": "portrait",
-		"icon": "./assets/icon.png",
+		"icon": "./assets/ios-light.png",
 		"scheme": "bittery",
 		"userInterfaceStyle": "automatic",
 		"newArchEnabled": true,
 		"splash": {
-			"image": "./assets/splash-icon.png",
+			"image": "./assets/splash-icon-dark.png",
 			"resizeMode": "contain",
 			"backgroundColor": "#ffffff"
 		},
@@ -23,7 +23,12 @@
 			"associatedDomains": [
 				"applinks:app.bittery.io",
 				"webcredentials:app.bittery.io"
-			]
+			],
+			"icon": {
+				"dark": "./assets/ios-dark.png",
+				"light": "./assets/ios-light.png",
+				"tinted": "./assets/ios-tinted.png"
+			}
 		},
 		"_associatedDomains_backup": [
 			"applinks:app.bittery.io",

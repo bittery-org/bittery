@@ -19,7 +19,7 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { storage } from "@/lib/storage";
-import { CreateItemDialog } from "../../components/vault/create-item-dialog";
+import { CreateItemSheet } from "../../components/vault/create-item-sheet";
 import type { AccountOption } from "../../components/vault/create-vault-dialog";
 import { CreateVaultDialog } from "../../components/vault/create-vault-dialog";
 import { DeleteVaultDialog } from "../../components/vault/delete-vault-dialog";
@@ -328,8 +328,8 @@ function RouteComponent() {
 					</div>
 				</div>
 
-				{/* New Item Dialog */}
-				<CreateItemDialog
+				{/* New Item Sheet */}
+				<CreateItemSheet
 					open={isNewItemDialogOpen}
 					onOpenChange={setIsNewItemDialogOpen}
 					vaults={

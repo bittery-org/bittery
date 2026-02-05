@@ -120,7 +120,6 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		}
 
 		const openAndInit = async () => {
-			
 			this.db = await this.SQLite!.openDatabaseAsync("bittery.db");
 			await this.db.execAsync(`
 				CREATE TABLE IF NOT EXISTS kv_store (

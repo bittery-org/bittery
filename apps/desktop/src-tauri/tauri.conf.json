@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Bittery",
+        "title": "bittery",
         "width": 1000,
         "height": 700,
         "minWidth": 800,

@@ -86,7 +86,9 @@ export function TRPCProvider({ children }: TRPCProviderProps) {
 							credentials: "include",
 							headers: {
 								...options?.headers,
-								Authorization: (authToken ? `Bearer ${authToken}` : undefined) as any,
+								Authorization: (authToken
+									? `Bearer ${authToken}`
+									: undefined) as any,
 							},
 						});
 					},

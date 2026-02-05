@@ -132,7 +132,7 @@ export function Favicon({
 					? cardColor
 					: imageError || !faviconUrl
 						? avatarColor
-						: "bg-muted/50",
+						: "bg-muted",
 				className,
 			)}
 		>

@@ -42,8 +42,9 @@ const getDevServerUrl = (): string => {
 	return devIp ? `http://${devIp}:3000` : "https://api.bittery.com";
 };
 
-export const defaultServerUrl =
-	__DEV__ ? getDevServerUrl() : "https://api.bittery.com";
+export const defaultServerUrl = __DEV__
+	? getDevServerUrl()
+	: "https://api.bittery.com";
 
 // Log in dev for debugging
 if (__DEV__) {

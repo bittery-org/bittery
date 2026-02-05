@@ -1,10 +1,10 @@
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogHeader,
-	DialogTitle,
+	Sheet,
+	SheetContent,
+	SheetDescription,
+	SheetHeader,
+	SheetTitle,
 	toast,
 } from "@bittery/ui";
 import { CreditCard, FileText, KeyRound, Smartphone, User } from "lucide-react";
@@ -12,7 +12,7 @@ import { useState } from "react";
 import type { VaultOption } from "./item-form";
 import { ItemForm } from "./item-form";
 
-interface CreateItemDialogProps {
+interface CreateItemSheetProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	vaults: VaultOption[];
@@ -57,13 +57,13 @@ const categories = [
 	},
 ];
 
-export function CreateItemDialog({
+export function CreateItemSheet({
 	open,
 	onOpenChange,
 	vaults,
 	selectedVaultId,
 	onCreateItem,
-}: CreateItemDialogProps) {
+}: CreateItemSheetProps) {
 	const [step, setStep] = useState<1 | 2>(1);
 	const [selectedCategory, setSelectedCategory] =
 		useState<ItemCategory>("login");
@@ -110,7 +110,7 @@ export function CreateItemDialog({
 	};
 
 	return (
-		<Dialog
+		<Sheet
 			open={open}
 			onOpenChange={(newOpen) => {
 				onOpenChange(newOpen);
@@ -120,21 +120,21 @@ export function CreateItemDialog({
 				}
 			}}
 		>
-			<DialogContent className="flex max-h-[98svh] max-w-2xl flex-col overflow-hidden p-0">
-				<DialogHeader className="px-6 py-6">
-					<DialogTitle>
+			<SheetContent className="flex flex-col overflow-hidden p-0 sm:w-[65vw] sm:max-w-4xl">
+				<SheetHeader className="px-6 py-6">
+					<SheetTitle>
 						{step === 1
 							? "Create New Item"
 							: `Create ${categories.find((c) => c.type === selectedCategory)?.title}`}
-					</DialogTitle>
-					<DialogDescription>
+					</SheetTitle>
+					<SheetDescription>
 						{step === 1
 							? "Choose the type of item you want to create."
 							: "Fill in the details for your new item."}
-					</DialogDescription>
-				</DialogHeader>
+					</SheetDescription>
+				</SheetHeader>
 
-				<div className="flex flex-1 flex-col overflow-hidden px-6 pb-6">
+				<div className="flex flex-1 flex-col overflow-y-auto px-6 pb-6">
 					{step === 1 ? (
 						<div className="grid gap-3">
 							{categories.map((category) => (
@@ -168,7 +168,7 @@ export function CreateItemDialog({
 						/>
 					)}
 				</div>
-			</DialogContent>
-		</Dialog>
+			</SheetContent>
+		</Sheet>
 	);
 }

@@ -136,9 +136,7 @@ export function ShareItemSheet({
 							{EXPIRATION_OPTIONS.map((option) => (
 								<Button
 									key={option.value}
-									variant={
-										expiresIn === option.value ? "primary" : "secondary"
-									}
+									variant={expiresIn === option.value ? "primary" : "secondary"}
 									size="sm"
 									onPress={() => setExpiresIn(option.value)}
 								>
@@ -167,7 +165,7 @@ export function ShareItemSheet({
 
 					{/* Security notice */}
 					<View className="mb-4 flex-row items-start rounded-lg bg-amber-50 p-3 dark:bg-amber-950/30">
-						<StyledLink size={16} className="mr-2 mt-0.5 text-amber-600" />
+						<StyledLink size={16} className="mt-0.5 mr-2 text-amber-600" />
 						<Text className="flex-1 text-amber-800 text-xs dark:text-amber-200">
 							Anyone with this link can view the item's contents until it
 							expires. Share carefully.

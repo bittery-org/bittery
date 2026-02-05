@@ -105,9 +105,7 @@ export function ItemHeader({
 					<Popover.Overlay />
 					<Popover.Content presentation="popover" className="px-0.5 py-1">
 						<View className="gap-0 pt-0.5 pb-0.5">
-							<Popover.Title className="mb-2 hidden">
-								Actions
-							</Popover.Title>
+							<Popover.Title className="mb-2 hidden">Actions</Popover.Title>
 							<Button
 								variant="ghost"
 								onPress={() => {
@@ -117,7 +115,7 @@ export function ItemHeader({
 								className="justify-start text-left"
 								size="sm"
 							>
-								<StyledEdit size={18} className="text-current mr-1.5" />
+								<StyledEdit size={18} className="mr-1.5 text-current" />
 								<Button.Label>Edit Item</Button.Label>
 							</Button>
 							<Button
@@ -130,7 +128,7 @@ export function ItemHeader({
 								className="justify-start text-left"
 								size="sm"
 							>
-								<StyledShare2 size={18} className="text-current mr-1.5" />
+								<StyledShare2 size={18} className="mr-1.5 text-current" />
 								<Button.Label>
 									{isSharing ? "Creating link..." : "Share Item"}
 								</Button.Label>
@@ -142,7 +140,7 @@ export function ItemHeader({
 								className="justify-start text-left"
 								size="sm"
 							>
-								<StyledTrash2 size={18} className="text-danger mr-1.5" />
+								<StyledTrash2 size={18} className="mr-1.5 text-danger" />
 								<Button.Label className="text-danger">
 									{isDeleting ? "Moving to trash..." : "Move to Trash"}
 								</Button.Label>

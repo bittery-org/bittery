@@ -8,11 +8,16 @@ import {
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import {
 	Button,
+	ButtonGroup,
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 	Input,
+	InputGroup,
+	InputGroupAddon,
+	InputGroupButton,
+	InputGroupInput,
 	Label,
 	PasswordGenerator,
 	toast,
@@ -22,7 +27,10 @@ import {
 	ChevronDown,
 	ChevronRight,
 	Clipboard,
+	Eye,
+	EyeOff,
 	Plus,
+	RefreshCw,
 	Settings,
 	Smartphone,
 	Trash2,
@@ -103,6 +111,7 @@ export function LoginForm({
 	);
 	const [showTotpAdvanced, setShowTotpAdvanced] = useState(false);
 	const [totpSecretError, setTotpSecretError] = useState<string | null>(null);
+	const [showPassword, setShowPassword] = useState(false);
 
 	const selectedVault = vaults.find((v) => v.id === currentVaultId);
 
@@ -306,6 +315,38 @@ export function LoginForm({
 									onChange={(e) => field.handleChange(e.target.value)}
 									placeholder="https://example.com"
 								/>
+								{additionalUrls.map((url, index) => (
+									<InputGroup key={index}>
+										<InputGroupInput
+											type="url"
+											value={url}
+											onChange={(e) =>
+												updateAdditionalUrl(index, e.target.value)
+											}
+											placeholder="https://example.com"
+										/>
+										<InputGroupAddon align="inline-end">
+											<InputGroupButton
+												type="button"
+												size="icon-sm"
+												onClick={() => removeAdditionalUrl(index)}
+												aria-label="Remove website"
+											>
+												<X className="size-4" />
+											</InputGroupButton>
+										</InputGroupAddon>
+									</InputGroup>
+								))}
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									className="h-8 text-muted-foreground"
+									onClick={addAdditionalUrl}
+								>
+									<Plus className="mr-1 size-3" />
+									Add another website
+								</Button>
 							</div>
 						)}
 					</form.Field>
@@ -334,22 +375,49 @@ export function LoginForm({
 						{(field) => (
 							<div className="space-y-2">
 								<Label htmlFor={field.name}>Password</Label>
-								<div className="flex gap-2">
-									<Input
+								<InputGroup>
+									<InputGroupInput
 										id={field.name}
 										name={field.name}
-										type="password"
+										type={showPassword ? "text" : "password"}
 										value={field.state.value}
 										onBlur={field.handleBlur}
 										onChange={(e) => field.handleChange(e.target.value)}
 										placeholder="••••••••••"
-										className="flex-1 font-mono"
+										className="font-mono"
 									/>
-									<PasswordGenerator
-										onPasswordGenerated={handleGeneratePassword}
-										showCopyButton={false}
-									/>
-								</div>
+									<InputGroupAddon align="inline-end">
+										<ButtonGroup>
+											<InputGroupButton
+												type="button"
+												size="icon-sm"
+												onClick={() => setShowPassword(!showPassword)}
+												aria-label={
+													showPassword ? "Hide password" : "Show password"
+												}
+											>
+												{showPassword ? (
+													<EyeOff className="size-4" />
+												) : (
+													<Eye className="size-4" />
+												)}
+											</InputGroupButton>
+											<PasswordGenerator
+												onPasswordGenerated={handleGeneratePassword}
+												showCopyButton={false}
+												triggerButton={
+													<InputGroupButton
+														type="button"
+														size="icon-sm"
+														aria-label="Generate password"
+													>
+														<RefreshCw className="size-4" />
+													</InputGroupButton>
+												}
+											/>
+										</ButtonGroup>
+									</InputGroupAddon>
+								</InputGroup>
 							</div>
 						)}
 					</form.Field>
@@ -373,41 +441,6 @@ export function LoginForm({
 							</div>
 						)}
 					</form.Field>
-				</div>
-
-				{/* Additional URLs */}
-				<div className="space-y-2">
-					<div className="flex items-center justify-between">
-						<Label>Additional Websites</Label>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							onClick={addAdditionalUrl}
-						>
-							<Plus className="mr-1 size-3" />
-							Add URL
-						</Button>
-					</div>
-					{additionalUrls.map((url, index) => (
-						<div key={index} className="flex gap-2">
-							<Input
-								type="url"
-								value={url}
-								onChange={(e) => updateAdditionalUrl(index, e.target.value)}
-								placeholder="https://example.com"
-								className="flex-1"
-							/>
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon"
-								onClick={() => removeAdditionalUrl(index)}
-							>
-								<X size={16} />
-							</Button>
-						</div>
-					))}
 				</div>
 
 				{/* Custom Fields */}

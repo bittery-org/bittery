@@ -3,3 +3,13 @@
 @import "heroui-native/styles";
 
 @source "./node_modules/heroui-native/lib";
+
+@layer theme {
+	@variant light {
+		--accent: oklch(0.6011 0.1834 290.4);
+	}
+
+	@variant dark {
+		--accent: oklch(0.6011 0.1834 290.4);
+	}
+}

@@ -7,6 +7,7 @@ import {
 	Description,
 	Input,
 	Label,
+	PressableFeedback,
 	TextField,
 } from "heroui-native";
 import {
@@ -20,6 +21,7 @@ import {
 import { useEffect, useState } from "react";
 import {
 	Alert,
+	Image,
 	KeyboardAvoidingView,
 	Platform,
 	Pressable,
@@ -160,27 +162,24 @@ export default function LoginScreen() {
 					contentContainerClassName="flex-1"
 					keyboardShouldPersistTaps="handled"
 				>
-					<View className="flex-1 justify-center px-6 py-8">
+					<View className="flex-1 justify-center px-6 pt-2 pb-8">
 						{/* Header */}
-						<View className="mb-8 items-center">
-							<Button
-								isIconOnly
-								variant="primary"
-								size="lg"
-								className="mb-4 h-20 w-20 rounded-2xl"
+						<View className="mb-12 items-center">
+							<PressableFeedback
 								onPress={() => {
 									// DEV ONLY: Auto-fill credentials
-									setEmail("j.sigmund@qrawall.com");
+									setEmail("pixelmund@gmail.com");
 									setPassword("Hofmann01");
-									setSecretKey("A3-L2OFDR-LDNVBB-CYKMG-SFWAO-QIID3");
+									setSecretKey("A3-RGLEBN-NWPY7E-W6ZRA-G4VD6-TUKG5");
 								}}
 							>
-								<Lock size={40} color="#fff" />
-							</Button>
-							<Text className="font-bold text-2xl text-foreground">
-								Sign in to Bittery
-							</Text>
-							<Text className="mt-2 text-center text-muted">
+								<Image
+									source={require("../../assets/logo.png")}
+									style={{ width: 224, height: 76 }}
+									resizeMode="contain"
+								/>
+							</PressableFeedback>
+							<Text className="mt-1 text-center text-muted">
 								Enter your credentials to access your vault
 							</Text>
 						</View>
@@ -285,7 +284,7 @@ export default function LoginScreen() {
 									isSelected={enableBiometric}
 									onSelectedChange={setEnableBiometric}
 								>
-									<View className="flex-1 flex-row items-center gap-3">
+									<View className="mt-2 flex-1 flex-row items-center gap-3">
 										<StyledFingerprint size={20} className="text-muted" />
 										<View className="flex-1">
 											<Label>
