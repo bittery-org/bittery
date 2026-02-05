@@ -13,8 +13,7 @@
 		"build": "eas build",
 		"build:preview": "eas build --profile preview",
 		"build:production": "eas build --profile production",
-		"check-types": "tsc --noEmit",
-		"test": "jest"
+		"check-types": "tsc --noEmit"
 	},
 	"dependencies": {
 		"@bittery/api": "workspace:*",

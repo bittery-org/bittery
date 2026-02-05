@@ -9,7 +9,7 @@ import {
 } from "@bittery/ui";
 import {
 	IconCopyOutlineDuo18,
-	IconExternalLinkOutlineDuo18,
+	IconOpenExternalOutlineDuo18,
 	IconEyeOutlineDuo18,
 	IconEyeSlashOutlineDuo18,
 } from "@bittery/ui/icons";
@@ -137,7 +137,7 @@ export function DetailUrlField({
 							<IconCopyOutlineDuo18 className="size-4" />
 						</InputGroupButton>
 						<InputGroupButton size="icon-sm" onClick={() => openUrl(value)}>
-							<IconExternalLinkOutlineDuo18 className="size-4" />
+							<IconOpenExternalOutlineDuo18 className="size-4" />
 						</InputGroupButton>
 					</ButtonGroup>
 				</InputGroupAddon>

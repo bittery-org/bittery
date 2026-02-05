@@ -68,4 +68,5 @@ export {
 	IconVShapedArrowRightOutlineDuo18,
 	IconVShapedArrowUpOutlineDuo18,
 	IconXmarkOutlineDuo18,
+	IconOpenExternalOutlineDuo18
 } from "nucleo-ui-outline-duo-18";
