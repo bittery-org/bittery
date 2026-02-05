@@ -137,15 +137,21 @@ export function getQueryKeysForEvent(
 			keys.push(trpc.vault.list.queryKey());
 			// Also invalidate vault-keys for the new vault
 			keys.push(["vault-keys"]);
+			keys.push(["all-vault-keys"]);
 			break;
 
 		case "vault_updated":
 			keys.push(trpc.vault.get.queryKey({ vaultId: entityId }));
+			// Vault metadata (name, icon, image) may have changed
+			keys.push(trpc.vault.list.queryKey());
+			keys.push(["vault-keys"]);
+			keys.push(["all-vault-keys"]);
 			break;
 
 		case "vault_deleted":
 			keys.push(trpc.vault.list.queryKey());
 			keys.push(["vault-keys"]);
+			keys.push(["all-vault-keys"]);
 			keys.push(trpc.vault.listAllItems.queryKey());
 			break;
 
@@ -156,10 +162,12 @@ export function getQueryKeysForEvent(
 			}
 			// Vault keys may have changed
 			keys.push(["vault-keys"]);
+			keys.push(["all-vault-keys"]);
 			break;
 
 		case "vault_key_rotated":
 			keys.push(["vault-keys"]);
+			keys.push(["all-vault-keys"]);
 			if (vaultId) {
 				// Items need to be re-decrypted with new key
 				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
@@ -304,7 +312,11 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 */
 		invalidateVaultKeys: async (): Promise<void> => {
 			const { queryClient } = options;
-			await queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
+				// Also invalidate all-vault-keys (used by useAllVaultKeys hook)
+				queryClient.invalidateQueries({ queryKey: ["all-vault-keys"] }),
+			]);
 		},
 
 		/**
@@ -373,6 +385,7 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 			await Promise.all([
 				// Invalidate vault keys
 				queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
+				queryClient.invalidateQueries({ queryKey: ["all-vault-keys"] }),
 
 				// NEW: Account-related queries using new structure
 				queryClient.invalidateQueries({ queryKey: ["accounts", "active"] }),

@@ -150,13 +150,14 @@ export function SearchCombobox() {
 												<span className="shrink-0 font-medium">
 													{item.title}
 												</span>
-												{item.category === "login" && (item.username || domain) && (
-													<span className="min-w-0 truncate text-muted-foreground text-xs">
-														{[item.username, domain]
-															.filter(Boolean)
-															.join(" · ")}
-													</span>
-												)}
+												{item.category === "login" &&
+													(item.username || domain) && (
+														<span className="min-w-0 truncate text-muted-foreground text-xs">
+															{[item.username, domain]
+																.filter(Boolean)
+																.join(" · ")}
+														</span>
+													)}
 											</div>
 										</CommandItem>
 									);

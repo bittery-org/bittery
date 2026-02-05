@@ -9,7 +9,10 @@ interface VaultHeaderProps {
 
 export function VaultHeader({ hasVaults, onNewItemClick }: VaultHeaderProps) {
 	return (
-		<header className="flex items-center gap-4 border-b px-4 py-2.5" data-tauri-drag-region>
+		<header
+			className="flex items-center gap-4 border-b px-4 py-2.5"
+			data-tauri-drag-region
+		>
 			<div className="flex-1">
 				<SearchCombobox />
 			</div>

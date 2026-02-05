@@ -90,6 +90,8 @@ function RouteComponent() {
 	const [editingVault, setEditingVault] = useState<{
 		id: string;
 		name: string;
+		icon?: string | null;
+		imageUrl?: string | null;
 	} | null>(null);
 	const [isDeleteVaultDialogOpen, setIsDeleteVaultDialogOpen] = useState(false);
 	const [deletingVault, setDeletingVault] = useState<{
@@ -197,12 +199,25 @@ function RouteComponent() {
 		}
 	};
 
-	const handleOpenEditVault = (vault: { id: string; name: string }) => {
+	const handleOpenEditVault = (vault: {
+		id: string;
+		name: string;
+		icon?: string | null;
+		imageUrl?: string | null;
+	}) => {
 		setEditingVault(vault);
 		setIsEditVaultDialogOpen(true);
 	};
 
-	const handleUpdateVault = async (vaultId: string, name: string) => {
+	const handleUpdateVault = async (
+		vaultId: string,
+		data: {
+			name: string;
+			icon?: string | null;
+			imageFile?: File;
+			removeImage?: boolean;
+		},
+	) => {
 		try {
 			// Find the vault to get its account email
 			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
@@ -211,7 +226,10 @@ function RouteComponent() {
 
 			await updateVaultMutation.mutateAsync({
 				vaultId,
-				name,
+				name: data.name,
+				icon: data.icon,
+				imageFile: data.imageFile,
+				removeImage: data.removeImage,
 				accountEmail,
 			});
 			setEditingVault(null);
@@ -341,7 +359,9 @@ function RouteComponent() {
 							accountTeamName:
 								"accountTeamName" in v ? v.accountTeamName : undefined,
 							accountTeamAvatarUrl:
-								"accountTeamAvatarUrl" in v ? v.accountTeamAvatarUrl : undefined,
+								"accountTeamAvatarUrl" in v
+									? v.accountTeamAvatarUrl
+									: undefined,
 						})) || []
 					}
 					selectedVaultId={params.id}

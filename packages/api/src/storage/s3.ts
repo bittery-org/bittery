@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+	DeleteObjectCommand,
 	GetObjectCommand,
 	PutObjectCommand,
 	S3Client,
@@ -135,4 +136,19 @@ export async function createPresignedDownload(params: {
 	return getSignedUrl(s3Client, command, {
 		expiresIn: params.expiresInSeconds ?? 300,
 	});
+}
+
+/**
+ * Delete an object from S3 storage
+ */
+export async function deleteObject(key: string): Promise<void> {
+	const config = getStorageConfig();
+	const s3Client = getStorageClient();
+
+	const command = new DeleteObjectCommand({
+		Bucket: config.bucket,
+		Key: key,
+	});
+
+	await s3Client.send(command);
 }

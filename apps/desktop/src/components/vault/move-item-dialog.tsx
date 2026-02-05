@@ -190,137 +190,136 @@ export function MoveItemDialog({
 						</div>
 					) : (
 						<div className="max-h-80 space-y-1 overflow-y-auto">
-							{isAllAccountsMode ? (
-								// Multi-account mode: group by account
-								Object.entries(vaultsByAccount).map(
-									([accountEmail, vaults]) => {
-										if (vaults.length === 0) return null;
+							{isAllAccountsMode
+								? // Multi-account mode: group by account
+									Object.entries(vaultsByAccount).map(
+										([accountEmail, vaults]) => {
+											if (vaults.length === 0) return null;
 
-										const accountName =
-											vaults[0].accountTeamName ||
-											vaults[0].accountName ||
-											accountEmail;
-										const accountTeamAvatarUrl =
-											vaults[0].accountTeamAvatarUrl;
+											const accountName =
+												vaults[0].accountTeamName ||
+												vaults[0].accountName ||
+												accountEmail;
+											const accountTeamAvatarUrl =
+												vaults[0].accountTeamAvatarUrl;
+
+											return (
+												<div key={accountEmail} className="py-1">
+													<div className="flex items-center gap-2 px-3 py-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
+														<Avatar className="size-5 text-[10px]">
+															<AvatarImage
+																src={accountTeamAvatarUrl ?? undefined}
+																alt={accountName}
+															/>
+															<AvatarFallback className="text-[10px]">
+																{getInitials(accountName)}
+															</AvatarFallback>
+														</Avatar>
+														<span>{accountName}</span>
+													</div>
+													<div className="ml-4 space-y-0.5">
+														{vaults.map((vaultKey) => {
+															const isCurrentVault =
+																vaultKey.vaultId === currentVaultId;
+															const isSelected =
+																vaultKey.vaultId === selectedVaultId;
+															const isDisabled =
+																isCurrentVault || vaultKey.role === "read-only";
+
+															return (
+																<button
+																	type="button"
+																	key={vaultKey.vaultId}
+																	disabled={isDisabled}
+																	onClick={() =>
+																		!isDisabled &&
+																		setSelectedVaultId(vaultKey.vaultId)
+																	}
+																	className={cn(
+																		"flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm outline-none transition-colors",
+																		isSelected &&
+																			!isDisabled &&
+																			"bg-primary/10 ring-1 ring-primary/20",
+																		!isDisabled &&
+																			!isSelected &&
+																			"hover:bg-accent",
+																		isDisabled &&
+																			"cursor-not-allowed opacity-50",
+																	)}
+																>
+																	<VaultAvatar
+																		name={vaultKey.vaultName}
+																		icon={vaultKey.vaultIcon}
+																		imageUrl={vaultKey.vaultImageUrl}
+																		size="sm"
+																	/>
+																	<span className="flex-1 text-left font-medium">
+																		{vaultKey.vaultName}
+																	</span>
+																	{isCurrentVault && (
+																		<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
+																			Current
+																		</span>
+																	)}
+																	{isSelected && !isDisabled && (
+																		<div className="flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+																			<Check className="size-3" />
+																		</div>
+																	)}
+																</button>
+															);
+														})}
+													</div>
+												</div>
+											);
+										},
+									)
+								: // Single-account mode: simple list with current vault included
+									filteredVaultKeys.map((vaultKey) => {
+										const isCurrentVault = vaultKey.vaultId === currentVaultId;
+										const isSelected = vaultKey.vaultId === selectedVaultId;
+										const isDisabled =
+											isCurrentVault || vaultKey.role === "read-only";
 
 										return (
-											<div key={accountEmail} className="py-1">
-												<div className="flex items-center gap-2 px-3 py-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-													<Avatar className="size-5 text-[10px]">
-														<AvatarImage
-															src={accountTeamAvatarUrl ?? undefined}
-															alt={accountName}
-														/>
-														<AvatarFallback className="text-[10px]">
-															{getInitials(accountName)}
-														</AvatarFallback>
-													</Avatar>
-													<span>{accountName}</span>
-												</div>
-												<div className="ml-4 space-y-0.5">
-													{vaults.map((vaultKey) => {
-														const isCurrentVault =
-															vaultKey.vaultId === currentVaultId;
-														const isSelected =
-															vaultKey.vaultId === selectedVaultId;
-														const isDisabled =
-															isCurrentVault || vaultKey.role === "read-only";
-
-														return (
-															<button
-																type="button"
-																key={vaultKey.vaultId}
-																disabled={isDisabled}
-																onClick={() =>
-																	!isDisabled &&
-																	setSelectedVaultId(vaultKey.vaultId)
-																}
-																className={cn(
-																	"flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm outline-none transition-colors",
-																	isSelected &&
-																		!isDisabled &&
-																		"bg-primary/10 ring-1 ring-primary/20",
-																	!isDisabled &&
-																		!isSelected &&
-																		"hover:bg-accent",
-																	isDisabled && "cursor-not-allowed opacity-50",
-																)}
-															>
-																<VaultAvatar
-																	name={vaultKey.vaultName}
-																	icon={vaultKey.vaultIcon}
-																	imageUrl={vaultKey.vaultImageUrl}
-																	size="sm"
-																/>
-																<span className="flex-1 text-left font-medium">
-																	{vaultKey.vaultName}
-																</span>
-																{isCurrentVault && (
-																	<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
-																		Current
-																	</span>
-																)}
-																{isSelected && !isDisabled && (
-																	<div className="flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
-																		<Check className="size-3" />
-																	</div>
-																)}
-															</button>
-														);
-													})}
-												</div>
-											</div>
-										);
-									},
-								)
-							) : (
-								// Single-account mode: simple list with current vault included
-								filteredVaultKeys.map((vaultKey) => {
-									const isCurrentVault = vaultKey.vaultId === currentVaultId;
-									const isSelected = vaultKey.vaultId === selectedVaultId;
-									const isDisabled =
-										isCurrentVault || vaultKey.role === "read-only";
-
-									return (
-										<button
-											type="button"
-											key={vaultKey.vaultId}
-											disabled={isDisabled}
-											onClick={() =>
-												!isDisabled && setSelectedVaultId(vaultKey.vaultId)
-											}
-											className={cn(
-												"flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm outline-none transition-colors",
-												isSelected &&
-													!isDisabled &&
-													"bg-primary/10 ring-1 ring-primary/20",
-												!isDisabled && !isSelected && "hover:bg-accent",
-												isDisabled && "cursor-not-allowed opacity-50",
-											)}
-										>
-											<VaultAvatar
-												name={vaultKey.vaultName}
-												icon={vaultKey.vaultIcon}
-												imageUrl={vaultKey.vaultImageUrl}
-												size="sm"
-											/>
-											<span className="flex-1 text-left font-medium">
-												{vaultKey.vaultName}
-											</span>
-											{isCurrentVault && (
-												<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
-													Current
+											<button
+												type="button"
+												key={vaultKey.vaultId}
+												disabled={isDisabled}
+												onClick={() =>
+													!isDisabled && setSelectedVaultId(vaultKey.vaultId)
+												}
+												className={cn(
+													"flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm outline-none transition-colors",
+													isSelected &&
+														!isDisabled &&
+														"bg-primary/10 ring-1 ring-primary/20",
+													!isDisabled && !isSelected && "hover:bg-accent",
+													isDisabled && "cursor-not-allowed opacity-50",
+												)}
+											>
+												<VaultAvatar
+													name={vaultKey.vaultName}
+													icon={vaultKey.vaultIcon}
+													imageUrl={vaultKey.vaultImageUrl}
+													size="sm"
+												/>
+												<span className="flex-1 text-left font-medium">
+													{vaultKey.vaultName}
 												</span>
-											)}
-											{isSelected && !isDisabled && (
-												<div className="flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
-													<Check className="size-3" />
-												</div>
-											)}
-										</button>
-									);
-								})
-							)}
+												{isCurrentVault && (
+													<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
+														Current
+													</span>
+												)}
+												{isSelected && !isDisabled && (
+													<div className="flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+														<Check className="size-3" />
+													</div>
+												)}
+											</button>
+										);
+									})}
 						</div>
 					)}
 				</div>

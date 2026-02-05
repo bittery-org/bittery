@@ -14,6 +14,7 @@ import { protectedProcedure, router } from "../index";
 import {
 	createPresignedUpload,
 	createVaultImageKey,
+	deleteObject,
 	getStoragePublicUrl,
 } from "../storage/s3";
 import { emitSyncEvent } from "../sync-helper";
@@ -208,10 +209,30 @@ export const vaultRouter = router({
 						eq(vaultKey.vaultId, input.vaultId),
 						eq(vaultKey.userId, ctx.session.userId),
 					),
+				with: {
+					vault: true,
+				},
 			});
 
 			if (!userVaultKey || !["owner", "admin"].includes(userVaultKey.role)) {
 				throw new Error("Access denied");
+			}
+
+			// Get the old image key before updating (for cleanup)
+			const oldImageKey = userVaultKey.vault.imageKey;
+
+			// Delete old image from S3 if we're replacing or removing it
+			if (
+				input.imageKey !== undefined &&
+				oldImageKey &&
+				oldImageKey !== input.imageKey
+			) {
+				try {
+					await deleteObject(oldImageKey);
+				} catch (error) {
+					// Log but don't fail the update if deletion fails
+					console.error("Failed to delete old vault image from S3:", error);
+				}
 			}
 
 			await db
@@ -262,6 +283,9 @@ export const vaultRouter = router({
 			const userVaultKey = await db.query.vaultKey.findFirst({
 				where: (vk, { and, eq }) =>
 					and(eq(vk.vaultId, input.vaultId), eq(vk.userId, ctx.session.userId)),
+				with: {
+					vault: true,
+				},
 			});
 
 			if (!userVaultKey || userVaultKey.role !== "owner") {
@@ -270,6 +294,9 @@ export const vaultRouter = router({
 					message: "Only the vault owner can delete the vault",
 				});
 			}
+
+			// Get image key before deleting (for S3 cleanup)
+			const imageKey = userVaultKey.vault.imageKey;
 
 			// Emit sync event BEFORE deleting (so we can still broadcast to members)
 			await emitSyncEvent({
@@ -290,6 +317,16 @@ export const vaultRouter = router({
 
 			// Delete the vault itself
 			await db.delete(vault).where(eq(vault.id, input.vaultId));
+
+			// Delete vault image from S3 if it exists
+			if (imageKey) {
+				try {
+					await deleteObject(imageKey);
+				} catch (error) {
+					// Log but don't fail the delete if S3 cleanup fails
+					console.error("Failed to delete vault image from S3:", error);
+				}
+			}
 
 			return { success: true };
 		}),

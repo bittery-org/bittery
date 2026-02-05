@@ -52,7 +52,7 @@ interface VaultAvatarProps {
 	name: string;
 	icon?: string | null;
 	imageUrl?: string | null;
-	size?: "xs" | "sm" | "md" | "lg";
+	size?: "xs" | "sm" | "md" | "lg" | "xl";
 	className?: string;
 }
 
@@ -112,6 +112,7 @@ export function VaultAvatar({
 		sm: "h-8 w-8 text-xs",
 		md: "h-10 w-10 text-sm",
 		lg: "h-12 w-12 text-base",
+		xl: "h-20 w-20 text-2xl",
 	};
 
 	const iconSizes = {
@@ -119,6 +120,7 @@ export function VaultAvatar({
 		sm: 16,
 		md: 20,
 		lg: 24,
+		xl: 40,
 	};
 
 	const Icon = icon ? vaultIconMap[icon as VaultIconName] : undefined;

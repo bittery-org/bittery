@@ -34,7 +34,7 @@ export function FormWrapper({
 			}}
 			className="flex flex-1 flex-col overflow-hidden"
 		>
-			<div className="flex-1 space-y-4 overflow-y-auto py-1 px-1">
+			<div className="flex-1 space-y-4 overflow-y-auto px-1 py-1">
 				{children}
 			</div>
 

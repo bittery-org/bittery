@@ -61,7 +61,7 @@ export function VaultInfoPopover({
 									{getInitials(displayTeamName)}
 								</AvatarFallback>
 							</Avatar>
-							<span className="min-w-0 max-w-32 shrink truncate text-sm hidden lg:block">
+							<span className="hidden min-w-0 max-w-32 shrink truncate text-sm lg:block">
 								{displayTeamName}
 							</span>
 							<Separator orientation="vertical" className="mx-1" />

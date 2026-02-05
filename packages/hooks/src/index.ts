@@ -127,8 +127,8 @@ export {
 } from "./hooks/internal/use-items-unified";
 export {
 	type UseVaultInfoOptions,
-	type VaultInfoWithAccount,
 	useVaultInfo,
+	type VaultInfoWithAccount,
 } from "./hooks/internal/use-vault-info";
 export {
 	type UseVaultItemsOptions,

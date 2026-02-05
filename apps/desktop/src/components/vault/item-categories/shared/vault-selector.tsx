@@ -59,9 +59,7 @@ export function VaultSelector({
 				groups.set(accountKey, {
 					accountKey,
 					accountName:
-						vault.accountName ||
-						vault.accountEmail?.split("@")[0] ||
-						"Account",
+						vault.accountName || vault.accountEmail?.split("@")[0] || "Account",
 					accountTeamName: vault.accountTeamName,
 					accountTeamAvatarUrl: vault.accountTeamAvatarUrl,
 					vaults: [vault],
@@ -80,8 +78,7 @@ export function VaultSelector({
 				<SelectValue placeholder="Select vault">
 					{selectedVault && (
 						<div className="flex items-center gap-2">
-							{(selectedVault.accountTeamName ||
-								selectedVault.accountName) && (
+							{(selectedVault.accountTeamName || selectedVault.accountName) && (
 								<>
 									<Avatar className="h-5 w-5 text-[10px]">
 										<AvatarImage

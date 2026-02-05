@@ -21,7 +21,13 @@ export interface UpdateVaultInput {
 	/** ID of the vault to update */
 	vaultId: string;
 	/** New vault name (will be trimmed) */
-	name: string;
+	name?: string;
+	/** Icon identifier */
+	icon?: string | null;
+	/** Image file to upload (optional) */
+	imageFile?: File;
+	/** Set to true to remove the current image */
+	removeImage?: boolean;
 	accountEmail?: string;
 }
 
@@ -64,19 +70,48 @@ export function useUpdateVault() {
 				input.accountEmail,
 			);
 
-			const trimmedName = input.name.trim();
+			// Validate name if provided
+			if (input.name !== undefined) {
+				const trimmedName = input.name.trim();
 
-			if (!trimmedName) {
-				throw new Error("Vault name is required");
+				if (!trimmedName) {
+					throw new Error("Vault name is required");
+				}
+
+				if (trimmedName.length < 2) {
+					throw new Error("Vault name must be at least 2 characters");
+				}
 			}
 
-			if (trimmedName.length < 2) {
-				throw new Error("Vault name must be at least 2 characters");
+			// Handle image upload if file provided
+			let imageKey: string | null | undefined;
+			if (input.imageFile) {
+				// Get presigned upload URL
+				const upload = await client.vault.createImageUpload.mutate({
+					vaultId: input.vaultId,
+					fileName: input.imageFile.name,
+					contentType: input.imageFile.type,
+				});
+
+				// Upload the file
+				await fetch(upload.uploadUrl, {
+					method: "PUT",
+					body: input.imageFile,
+					headers: {
+						"Content-Type": input.imageFile.type,
+					},
+				});
+
+				imageKey = upload.key;
+			} else if (input.removeImage) {
+				imageKey = null;
 			}
 
 			await client.vault.update.mutate({
 				vaultId: input.vaultId,
-				name: trimmedName,
+				...(input.name !== undefined && { name: input.name.trim() }),
+				...(input.icon !== undefined && { icon: input.icon }),
+				...(imageKey !== undefined && { imageKey }),
 			});
 		},
 		onSuccess: async (_data, variables) => {
