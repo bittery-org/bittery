@@ -9,9 +9,9 @@ import {
 } from "@bittery/ui";
 import {
 	IconCopyOutlineDuo18,
-	IconOpenExternalOutlineDuo18,
 	IconEyeOutlineDuo18,
 	IconEyeSlashOutlineDuo18,
+	IconOpenExternalOutlineDuo18,
 } from "@bittery/ui/icons";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";

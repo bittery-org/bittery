@@ -9,6 +9,7 @@
  * - Rate limiting
  * - Expiration and one-time use links
  */
+/** biome-ignore-all lint/style/noNonNullAssertion: It's okay in test files */
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { db } from "@bittery/db";
@@ -172,7 +173,7 @@ describe("Share Router", () => {
 
 			const result = await caller.listByItem({ itemId });
 
-			expect(result.links[0].status).toBe("expired");
+			expect(result.links[0]?.status).toBe("expired");
 		});
 	});
 
@@ -190,8 +191,8 @@ describe("Share Router", () => {
 			expect(result.token).toBe(token);
 			expect(result.accessMode).toBe("email-restricted");
 			expect(result.allowedEmails.length).toBe(1);
-			expect(result.allowedEmails[0].email).toBe("allowed@example.com");
-			expect(result.allowedEmails[0].verified).toBe(true);
+			expect(result.allowedEmails[0]?.email).toBe("allowed@example.com");
+			expect(result.allowedEmails[0]?.verified).toBe(true);
 		});
 	});
 
@@ -470,6 +471,106 @@ describe("Share Router", () => {
 		});
 	});
 
+	describe("verifyEmailAndAccess", () => {
+		test("should return encrypted data with valid verification code", async () => {
+			const { userId } = await setup(shareRouter);
+			const { shareLinkId, token } = await setupShareLink(userId, {
+				shareLinkOverrides: { accessMode: "email-restricted" },
+			});
+			await addShareLinkAllowedEmail(shareLinkId, "allowed@example.com");
+
+			const publicCaller = shareRouter.createCaller(createPublicContext());
+
+			// Request verification code
+			await publicCaller.requestEmailVerification({
+				token,
+				email: "allowed@example.com",
+			});
+
+			// Get the code from the database
+			const verification = await db.query.shareEmailVerification.findFirst({
+				where: (v, { eq }) => eq(v.shareLinkId, shareLinkId),
+			});
+
+			expect(verification).toBeDefined();
+
+			// Verify with the code
+			const result = await publicCaller.verifyEmailAndAccess({
+				token,
+				email: "allowed@example.com",
+				code: verification!.code,
+			});
+
+			expect(result.encryptedItemData).toBeDefined();
+			expect(result.encryptedShareKey).toBeDefined();
+		});
+
+		test("should reject wrong verification code", async () => {
+			const { userId } = await setup(shareRouter);
+			const { shareLinkId, token } = await setupShareLink(userId, {
+				shareLinkOverrides: { accessMode: "email-restricted" },
+			});
+			await addShareLinkAllowedEmail(shareLinkId, "allowed@example.com");
+
+			const publicCaller = shareRouter.createCaller(createPublicContext());
+
+			// Request verification code
+			await publicCaller.requestEmailVerification({
+				token,
+				email: "allowed@example.com",
+			});
+
+			// Verify with wrong code
+			await expect(
+				publicCaller.verifyEmailAndAccess({
+					token,
+					email: "allowed@example.com",
+					code: "000000",
+				}),
+			).rejects.toThrow("Invalid or expired verification code");
+		});
+
+		test("should reject expired link", async () => {
+			const { userId } = await setup(shareRouter);
+			const { token } = await setupShareLink(userId, {
+				shareLinkOverrides: {
+					accessMode: "email-restricted",
+					expiresAt: new Date(Date.now() - 1000),
+				},
+			});
+
+			const publicCaller = shareRouter.createCaller(createPublicContext());
+
+			await expect(
+				publicCaller.verifyEmailAndAccess({
+					token,
+					email: "allowed@example.com",
+					code: "123456",
+				}),
+			).rejects.toThrow("This share link is no longer valid");
+		});
+
+		test("should reject revoked link", async () => {
+			const { userId } = await setup(shareRouter);
+			const { token } = await setupShareLink(userId, {
+				shareLinkOverrides: {
+					accessMode: "email-restricted",
+					status: "revoked",
+				},
+			});
+
+			const publicCaller = shareRouter.createCaller(createPublicContext());
+
+			await expect(
+				publicCaller.verifyEmailAndAccess({
+					token,
+					email: "allowed@example.com",
+					code: "123456",
+				}),
+			).rejects.toThrow("This share link is no longer valid");
+		});
+	});
+
 	describe("getAccessLogs", () => {
 		test("should return access logs for a share link", async () => {
 			const { caller, userId } = await setup(shareRouter);
@@ -488,8 +589,8 @@ describe("Share Router", () => {
 			const result = await caller.getAccessLogs({ linkId: shareLinkId });
 
 			expect(result.length).toBe(1);
-			expect(result[0].success).toBe(true);
-			expect(result[0].ipAddress).toBe("192.168.1.1");
+			expect(result[0]?.success).toBe(true);
+			expect(result[0]?.ipAddress).toBe("192.168.1.1");
 		});
 	});
 });

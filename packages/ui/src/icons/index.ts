@@ -44,6 +44,7 @@ export {
 	IconMobileOutlineDuo18,
 	IconMoneyDollarOutlineDuo18,
 	IconMusicOutlineDuo18,
+	IconOpenExternalOutlineDuo18,
 	IconPen2OutlineDuo18,
 	IconPiggyBankOutlineDuo18,
 	IconPlaneOutlineDuo18,
@@ -68,5 +69,4 @@ export {
 	IconVShapedArrowRightOutlineDuo18,
 	IconVShapedArrowUpOutlineDuo18,
 	IconXmarkOutlineDuo18,
-	IconOpenExternalOutlineDuo18
 } from "nucleo-ui-outline-duo-18";

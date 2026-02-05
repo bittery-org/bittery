@@ -338,9 +338,9 @@ describe("Auth Router", () => {
 		test("should not allow revoking current session", async () => {
 			const { sessionId, caller } = await setup(authRouter);
 
-			await expect(
-				caller.revokeDevice({ sessionId }),
-			).rejects.toThrow("Cannot revoke current session");
+			await expect(caller.revokeDevice({ sessionId })).rejects.toThrow(
+				"Cannot revoke current session",
+			);
 		});
 	});
 

@@ -2,8 +2,9 @@
  * Test utilities for tRPC integration tests
  * Provides helpers for creating test contexts, mock data, and database operations
  *
- * Note: Environment variables are loaded via bun's --env-file flag in the test scripts.
- * See package.json for the test command configuration.
+ * Note: Tests use a separate database (bittery_test) to avoid affecting development data.
+ * Environment variables are loaded from apps/server/.env.test via bun's --env-file flag.
+ * Run `pnpm run db:test:setup` to create and migrate the test database.
  */
 
 import { db } from "@bittery/db";
@@ -267,10 +268,7 @@ export async function addTeamMember(
 	userId: string,
 	role: "owner" | "admin" | "member" = "member",
 ) {
-	await db
-		.update(user)
-		.set({ teamId, role })
-		.where(eq(user.id, userId));
+	await db.update(user).set({ teamId, role }).where(eq(user.id, userId));
 }
 
 /**
@@ -553,12 +551,54 @@ export async function truncateAll() {
 }
 
 /**
+ * Create a test sync event directly in the database
+ */
+export async function createTestSyncEvent(
+	vaultId: string,
+	userId: string,
+	overrides: Partial<typeof syncEvent.$inferInsert> = {},
+) {
+	const eventId = overrides.id || nanoid();
+
+	await db.insert(syncEvent).values({
+		id: eventId,
+		eventType: overrides.eventType || "item_created",
+		entityId: overrides.entityId || nanoid(),
+		entityType: overrides.entityType || "item",
+		vaultId,
+		userId,
+		clientId: overrides.clientId || null,
+		version: overrides.version || 1,
+		metadata: overrides.metadata || null,
+	});
+
+	return eventId;
+}
+
+/**
+ * Get sync event from database
+ */
+export async function getSyncEvent(eventId: string) {
+	return db.query.syncEvent.findFirst({
+		where: (e, { eq }) => eq(e.id, eventId),
+	});
+}
+
+/**
+ * Get sync event acks for a user/client
+ */
+export async function getSyncEventAcks(userId: string, clientId: string) {
+	return db.query.syncEventAck.findMany({
+		where: (a, { and, eq }) =>
+			and(eq(a.userId, userId), eq(a.clientId, clientId)),
+	});
+}
+
+/**
  * Create an authenticated caller for a router in a single call.
  * Handles user creation, session creation, and caller setup.
  */
-export async function setup<
-	T extends { createCaller: (ctx: Context) => any },
->(
+export async function setup<T extends { createCaller: (ctx: Context) => any }>(
 	router: T,
 	overrides?: Partial<typeof user.$inferInsert>,
 ): Promise<{
