@@ -373,7 +373,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 							{revokeMutation.isPending ? (
 								<IconLoader2OutlineDuo18 className="h-4 w-4 animate-spin" />
 							) : (
-								<Trash2 className="h-4 w-4" />
+								<IconTrash2OutlineDuo18 className="h-4 w-4" />
 							)}
 							Revoke Link
 						</AlertDialogAction>
