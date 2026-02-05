@@ -26,7 +26,7 @@ export function PasswordGenerator({
 	const [password, setPassword] = useState("");
 	const [copied, setCopied] = useState(false);
 	const [isOpen, setIsOpen] = useState(false);
-	const [options, setOptions] = useState<Required<PasswordOptions>>({
+	const [options, setOptions] = useState<PasswordOptions>({
 		length: defaultOptions?.length ?? 20,
 		lowercase: defaultOptions?.lowercase ?? true,
 		uppercase: defaultOptions?.uppercase ?? true,
