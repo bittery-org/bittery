@@ -20,7 +20,7 @@
 		"build": "napi build --platform --release",
 		"build:debug": "napi build --platform",
 		"prepublishOnly": "napi prepublish -t npm",
-		"test": "cargo test",
+		"test": "echo 'Tests run via bittery-crypto-core crate'",
 		"universal": "napi universal",
 		"version": "napi version"
 	},

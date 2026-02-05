@@ -16,49 +16,33 @@ import { shareRouter } from "../routers/share";
 import {
 	addShareLinkAllowedEmail,
 	addVaultMember,
-	cleanupTestData,
-	createAuthenticatedContext,
 	createPublicContext,
 	createTestItem,
-	createTestSession,
 	createTestShareLink,
-	createTestUser,
 	createTestVault,
-	generateTestEmail,
 	mockShareData,
+	setup,
+	setupShareLink,
+	truncateAll,
 } from "./test-utils";
 
 describe("Share Router", () => {
-	const testUserIds: string[] = [];
-
 	afterEach(async () => {
-		await cleanupTestData(testUserIds);
-		testUserIds.length = 0;
+		await truncateAll();
 	});
 
 	describe("create", () => {
 		test("should create share link with 'anyone' access mode", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(shareRouter);
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.create({
 				itemId,
 				accessMode: "anyone",
 				isOneTimeUse: false,
 				expiresIn: "7days",
-				encryptedItemData: mockShareData.encryptedItemData,
-				encryptionIv: mockShareData.encryptionIv,
-				encryptedShareKey: mockShareData.encryptedShareKey,
-				shareKeyIv: mockShareData.shareKeyIv,
+				...mockShareData,
 			});
 
 			expect(result.id).toBeDefined();
@@ -72,17 +56,9 @@ describe("Share Router", () => {
 		});
 
 		test("should create share link with 'email-restricted' access mode", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(shareRouter);
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.create({
 				itemId,
@@ -90,10 +66,7 @@ describe("Share Router", () => {
 				isOneTimeUse: false,
 				expiresIn: "1day",
 				allowedEmails: ["allowed1@example.com", "allowed2@example.com"],
-				encryptedItemData: mockShareData.encryptedItemData,
-				encryptionIv: mockShareData.encryptionIv,
-				encryptedShareKey: mockShareData.encryptedShareKey,
-				shareKeyIv: mockShareData.shareKeyIv,
+				...mockShareData,
 			});
 
 			expect(result.id).toBeDefined();
@@ -101,17 +74,9 @@ describe("Share Router", () => {
 		});
 
 		test("should require allowed emails for email-restricted mode", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(shareRouter);
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			await expect(
 				caller.create({
@@ -120,10 +85,7 @@ describe("Share Router", () => {
 					isOneTimeUse: false,
 					expiresIn: "1day",
 					// Missing allowedEmails
-					encryptedItemData: mockShareData.encryptedItemData,
-					encryptionIv: mockShareData.encryptionIv,
-					encryptedShareKey: mockShareData.encryptedShareKey,
-					shareKeyIv: mockShareData.shareKeyIv,
+					...mockShareData,
 				}),
 			).rejects.toThrow(
 				"At least one email address is required for email-restricted sharing",
@@ -131,47 +93,27 @@ describe("Share Router", () => {
 		});
 
 		test("should create one-time use link", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(shareRouter);
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.create({
 				itemId,
 				accessMode: "anyone",
 				isOneTimeUse: true,
 				expiresIn: "1hour",
-				encryptedItemData: mockShareData.encryptedItemData,
-				encryptionIv: mockShareData.encryptionIv,
-				encryptedShareKey: mockShareData.encryptedShareKey,
-				shareKeyIv: mockShareData.shareKeyIv,
+				...mockShareData,
 			});
 
 			expect(result.id).toBeDefined();
 		});
 
 		test("should deny sharing for read-only members", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: readOnlyId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, readOnlyId);
-
+			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
+				await Promise.all([setup(shareRouter), setup(shareRouter)]);
 			const vaultId = await createTestVault(ownerId);
 			const itemId = await createTestItem(vaultId, ownerId);
 			await addVaultMember(vaultId, readOnlyId, "read-only");
-
-			const sessionId = await createTestSession(readOnlyId);
-			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(readOnlyId, email2, sessionId),
-			);
 
 			await expect(
 				caller.create({
@@ -179,28 +121,18 @@ describe("Share Router", () => {
 					accessMode: "anyone",
 					isOneTimeUse: false,
 					expiresIn: "1day",
-					encryptedItemData: mockShareData.encryptedItemData,
-					encryptionIv: mockShareData.encryptionIv,
-					encryptedShareKey: mockShareData.encryptedShareKey,
-					shareKeyIv: mockShareData.shareKeyIv,
+					...mockShareData,
 				}),
 			).rejects.toThrow("Read-only users cannot share items");
 		});
 
 		test("should deny access to non-member", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: otherId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, otherId);
-
+			const [{ userId: ownerId }, { caller }] = await Promise.all([
+				setup(shareRouter),
+				setup(shareRouter),
+			]);
 			const vaultId = await createTestVault(ownerId);
 			const itemId = await createTestItem(vaultId, ownerId);
-
-			const sessionId = await createTestSession(otherId);
-			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(otherId, email2, sessionId),
-			);
 
 			await expect(
 				caller.create({
@@ -208,10 +140,7 @@ describe("Share Router", () => {
 					accessMode: "anyone",
 					isOneTimeUse: false,
 					expiresIn: "1day",
-					encryptedItemData: mockShareData.encryptedItemData,
-					encryptionIv: mockShareData.encryptionIv,
-					encryptedShareKey: mockShareData.encryptedShareKey,
-					shareKeyIv: mockShareData.shareKeyIv,
+					...mockShareData,
 				}),
 			).rejects.toThrow("Access denied to this item");
 		});
@@ -219,22 +148,13 @@ describe("Share Router", () => {
 
 	describe("listByItem", () => {
 		test("should return all share links for an item", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(shareRouter);
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId);
-
 			await createTestShareLink(itemId, userId, { accessMode: "anyone" });
 			await createTestShareLink(itemId, userId, {
 				accessMode: "email-restricted",
 			});
-
-			const sessionId = await createTestSession(userId);
-			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.listByItem({ itemId });
 
@@ -243,21 +163,12 @@ describe("Share Router", () => {
 		});
 
 		test("should mark expired links correctly", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(shareRouter);
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId);
-
 			await createTestShareLink(itemId, userId, {
 				expiresAt: new Date(Date.now() - 1000), // Expired
 			});
-
-			const sessionId = await createTestSession(userId);
-			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.listByItem({ itemId });
 
@@ -267,21 +178,11 @@ describe("Share Router", () => {
 
 	describe("get", () => {
 		test("should return share link details", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { shareLinkId, token } = await createTestShareLink(itemId, userId, {
-				accessMode: "email-restricted",
+			const { caller, userId } = await setup(shareRouter);
+			const { shareLinkId, token } = await setupShareLink(userId, {
+				shareLinkOverrides: { accessMode: "email-restricted" },
 			});
 			await addShareLinkAllowedEmail(shareLinkId, "allowed@example.com", true);
-
-			const sessionId = await createTestSession(userId);
-			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.get({ linkId: shareLinkId });
 
@@ -296,18 +197,8 @@ describe("Share Router", () => {
 
 	describe("revoke", () => {
 		test("should revoke a share link", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { shareLinkId } = await createTestShareLink(itemId, userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
+			const { caller, userId } = await setup(shareRouter);
+			const { shareLinkId } = await setupShareLink(userId);
 
 			const result = await caller.revoke({ linkId: shareLinkId });
 
@@ -321,21 +212,10 @@ describe("Share Router", () => {
 		});
 
 		test("should deny revocation by read-only member", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: readOnlyId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, readOnlyId);
-
-			const vaultId = await createTestVault(ownerId);
-			const itemId = await createTestItem(vaultId, ownerId);
-			const { shareLinkId } = await createTestShareLink(itemId, ownerId);
+			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
+				await Promise.all([setup(shareRouter), setup(shareRouter)]);
+			const { shareLinkId, vaultId } = await setupShareLink(ownerId);
 			await addVaultMember(vaultId, readOnlyId, "read-only");
-
-			const sessionId = await createTestSession(readOnlyId);
-			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(readOnlyId, email2, sessionId),
-			);
 
 			await expect(caller.revoke({ linkId: shareLinkId })).rejects.toThrow(
 				"You do not have permission to revoke this link",
@@ -345,20 +225,10 @@ describe("Share Router", () => {
 
 	describe("update", () => {
 		test("should update one-time use setting", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { shareLinkId } = await createTestShareLink(itemId, userId, {
-				isOneTimeUse: false,
+			const { caller, userId } = await setup(shareRouter);
+			const { shareLinkId } = await setupShareLink(userId, {
+				shareLinkOverrides: { isOneTimeUse: false },
 			});
-
-			const sessionId = await createTestSession(userId);
-			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.update({
 				linkId: shareLinkId,
@@ -375,23 +245,13 @@ describe("Share Router", () => {
 		});
 
 		test("should add and remove allowed emails", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { shareLinkId } = await createTestShareLink(itemId, userId, {
-				accessMode: "email-restricted",
+			const { caller, userId } = await setup(shareRouter);
+			const { shareLinkId } = await setupShareLink(userId, {
+				shareLinkOverrides: { accessMode: "email-restricted" },
 			});
 			const emailId = await addShareLinkAllowedEmail(
 				shareLinkId,
 				"remove@example.com",
-			);
-
-			const sessionId = await createTestSession(userId);
-			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.update({
@@ -406,15 +266,9 @@ describe("Share Router", () => {
 
 	describe("getPublicInfo", () => {
 		test("should return valid share link info", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { token } = await createTestShareLink(itemId, userId, {
-				accessMode: "anyone",
-				isOneTimeUse: true,
+			const { userId } = await setup(shareRouter);
+			const { token } = await setupShareLink(userId, {
+				shareLinkOverrides: { accessMode: "anyone", isOneTimeUse: true },
 			});
 
 			const caller = shareRouter.createCaller(createPublicContext());
@@ -427,14 +281,9 @@ describe("Share Router", () => {
 		});
 
 		test("should return invalid for revoked link", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { token } = await createTestShareLink(itemId, userId, {
-				status: "revoked",
+			const { userId } = await setup(shareRouter);
+			const { token } = await setupShareLink(userId, {
+				shareLinkOverrides: { status: "revoked" },
 			});
 
 			const caller = shareRouter.createCaller(createPublicContext());
@@ -446,14 +295,9 @@ describe("Share Router", () => {
 		});
 
 		test("should return invalid for expired link", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { token } = await createTestShareLink(itemId, userId, {
-				expiresAt: new Date(Date.now() - 1000),
+			const { userId } = await setup(shareRouter);
+			const { token } = await setupShareLink(userId, {
+				shareLinkOverrides: { expiresAt: new Date(Date.now() - 1000) },
 			});
 
 			const caller = shareRouter.createCaller(createPublicContext());
@@ -465,15 +309,9 @@ describe("Share Router", () => {
 		});
 
 		test("should return invalid for exhausted link", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { token } = await createTestShareLink(itemId, userId, {
-				maxAccessCount: 1,
-				accessCount: 1,
+			const { userId } = await setup(shareRouter);
+			const { token } = await setupShareLink(userId, {
+				shareLinkOverrides: { maxAccessCount: 1, accessCount: 1 },
 			});
 
 			const caller = shareRouter.createCaller(createPublicContext());
@@ -487,14 +325,9 @@ describe("Share Router", () => {
 
 	describe("accessPublic", () => {
 		test("should return encrypted data for valid 'anyone' link", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { token } = await createTestShareLink(itemId, userId, {
-				accessMode: "anyone",
+			const { userId } = await setup(shareRouter);
+			const { token } = await setupShareLink(userId, {
+				shareLinkOverrides: { accessMode: "anyone" },
 			});
 
 			const caller = shareRouter.createCaller(createPublicContext());
@@ -508,15 +341,9 @@ describe("Share Router", () => {
 		});
 
 		test("should increment access count", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { shareLinkId, token } = await createTestShareLink(itemId, userId, {
-				accessMode: "anyone",
-				accessCount: 0,
+			const { userId } = await setup(shareRouter);
+			const { shareLinkId, token } = await setupShareLink(userId, {
+				shareLinkOverrides: { accessMode: "anyone", accessCount: 0 },
 			});
 
 			const caller = shareRouter.createCaller(createPublicContext());
@@ -530,17 +357,14 @@ describe("Share Router", () => {
 		});
 
 		test("should exhaust one-time use link after access", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { shareLinkId, token } = await createTestShareLink(itemId, userId, {
-				accessMode: "anyone",
-				isOneTimeUse: true,
-				maxAccessCount: 1,
-				accessCount: 0,
+			const { userId } = await setup(shareRouter);
+			const { shareLinkId, token } = await setupShareLink(userId, {
+				shareLinkOverrides: {
+					accessMode: "anyone",
+					isOneTimeUse: true,
+					maxAccessCount: 1,
+					accessCount: 0,
+				},
 			});
 
 			const caller = shareRouter.createCaller(createPublicContext());
@@ -560,15 +384,9 @@ describe("Share Router", () => {
 		});
 
 		test("should reject revoked link", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { token } = await createTestShareLink(itemId, userId, {
-				accessMode: "anyone",
-				status: "revoked",
+			const { userId } = await setup(shareRouter);
+			const { token } = await setupShareLink(userId, {
+				shareLinkOverrides: { accessMode: "anyone", status: "revoked" },
 			});
 
 			const caller = shareRouter.createCaller(createPublicContext());
@@ -579,15 +397,12 @@ describe("Share Router", () => {
 		});
 
 		test("should reject expired link", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { token } = await createTestShareLink(itemId, userId, {
-				accessMode: "anyone",
-				expiresAt: new Date(Date.now() - 1000),
+			const { userId } = await setup(shareRouter);
+			const { token } = await setupShareLink(userId, {
+				shareLinkOverrides: {
+					accessMode: "anyone",
+					expiresAt: new Date(Date.now() - 1000),
+				},
 			});
 
 			const caller = shareRouter.createCaller(createPublicContext());
@@ -600,14 +415,9 @@ describe("Share Router", () => {
 
 	describe("requestEmailVerification", () => {
 		test("should send verification code for allowed email", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { shareLinkId, token } = await createTestShareLink(itemId, userId, {
-				accessMode: "email-restricted",
+			const { userId } = await setup(shareRouter);
+			const { shareLinkId, token } = await setupShareLink(userId, {
+				shareLinkOverrides: { accessMode: "email-restricted" },
 			});
 			await addShareLinkAllowedEmail(shareLinkId, "allowed@example.com");
 
@@ -623,14 +433,9 @@ describe("Share Router", () => {
 		});
 
 		test("should reject email not in allowed list", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { shareLinkId, token } = await createTestShareLink(itemId, userId, {
-				accessMode: "email-restricted",
+			const { userId } = await setup(shareRouter);
+			const { shareLinkId, token } = await setupShareLink(userId, {
+				shareLinkOverrides: { accessMode: "email-restricted" },
 			});
 			await addShareLinkAllowedEmail(shareLinkId, "allowed@example.com");
 
@@ -645,15 +450,12 @@ describe("Share Router", () => {
 		});
 
 		test("should reject expired link", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { shareLinkId, token } = await createTestShareLink(itemId, userId, {
-				accessMode: "email-restricted",
-				expiresAt: new Date(Date.now() - 1000),
+			const { userId } = await setup(shareRouter);
+			const { shareLinkId, token } = await setupShareLink(userId, {
+				shareLinkOverrides: {
+					accessMode: "email-restricted",
+					expiresAt: new Date(Date.now() - 1000),
+				},
 			});
 			await addShareLinkAllowedEmail(shareLinkId, "allowed@example.com");
 
@@ -670,14 +472,9 @@ describe("Share Router", () => {
 
 	describe("getAccessLogs", () => {
 		test("should return access logs for a share link", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId);
-			const { shareLinkId, token } = await createTestShareLink(itemId, userId, {
-				accessMode: "anyone",
+			const { caller, userId } = await setup(shareRouter);
+			const { shareLinkId, token } = await setupShareLink(userId, {
+				shareLinkOverrides: { accessMode: "anyone" },
 			});
 
 			// Access the link to create a log entry
@@ -687,11 +484,6 @@ describe("Share Router", () => {
 				ipAddress: "192.168.1.1",
 				userAgent: "TestBrowser/1.0",
 			});
-
-			const sessionId = await createTestSession(userId);
-			const caller = shareRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.getAccessLogs({ linkId: shareLinkId });
 

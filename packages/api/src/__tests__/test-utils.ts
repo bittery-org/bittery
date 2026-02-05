@@ -23,7 +23,7 @@ import {
 	vaultKey,
 	vaultKeyRotation,
 } from "@bittery/db/schema/vault";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Context } from "../context";
 
@@ -533,4 +533,105 @@ export async function countTeamMembers(teamId: string) {
 		where: (u, { eq }) => eq(u.teamId, teamId),
 	});
 	return members.length;
+}
+
+/**
+ * Truncate all tables — fast cleanup for test isolation.
+ * Replaces the per-user cleanupTestData() with a single TRUNCATE CASCADE.
+ */
+export async function truncateAll() {
+	await db.execute(sql`
+		TRUNCATE TABLE
+			share_access_log, share_email_verification, share_link_allowed_email,
+			share_link_rate_limit, share_link,
+			sync_event_ack, sync_event,
+			item, vault_key, vault_key_rotation, folder, vault,
+			team_invitation, team_member, team,
+			session, "user"
+		CASCADE
+	`);
+}
+
+/**
+ * Create an authenticated caller for a router in a single call.
+ * Handles user creation, session creation, and caller setup.
+ */
+export async function setup<
+	T extends { createCaller: (ctx: Context) => any },
+>(
+	router: T,
+	overrides?: Partial<typeof user.$inferInsert>,
+): Promise<{
+	userId: string;
+	email: string;
+	sessionId: string;
+	caller: ReturnType<T["createCaller"]>;
+}> {
+	const { userId, email } = await createTestUser(overrides);
+	const sessionId = await createTestSession(userId);
+	const caller = router.createCaller(
+		createAuthenticatedContext(userId, email, sessionId),
+	);
+	return { userId, email, sessionId, caller };
+}
+
+/**
+ * Create a vault with N items in one call.
+ */
+export async function setupVaultWithItems(
+	userId: string,
+	itemCount = 1,
+	vaultOverrides?: Partial<typeof vault.$inferInsert>,
+	itemOverrides?: Partial<typeof item.$inferInsert>,
+) {
+	const vaultId = await createTestVault(userId, vaultOverrides);
+	const itemIds = await Promise.all(
+		Array.from({ length: itemCount }, () =>
+			createTestItem(vaultId, userId, itemOverrides),
+		),
+	);
+	return { vaultId, itemIds };
+}
+
+/**
+ * Create a complete share link setup: vault → item → share link.
+ */
+export async function setupShareLink(
+	userId: string,
+	opts: {
+		vaultOverrides?: Partial<typeof vault.$inferInsert>;
+		itemOverrides?: Partial<typeof item.$inferInsert>;
+		shareLinkOverrides?: Partial<typeof shareLink.$inferInsert>;
+	} = {},
+) {
+	const vaultId = await createTestVault(userId, opts.vaultOverrides);
+	const itemId = await createTestItem(vaultId, userId, opts.itemOverrides);
+	const { shareLinkId, token } = await createTestShareLink(
+		itemId,
+		userId,
+		opts.shareLinkOverrides,
+	);
+	return { vaultId, itemId, shareLinkId, token };
+}
+
+/**
+ * Create a team with the owner and additional members (creates new users for each member).
+ */
+export async function setupTeamWithMembers(
+	ownerId: string,
+	members: Array<{
+		role?: "admin" | "member";
+		overrides?: Partial<typeof user.$inferInsert>;
+	}> = [],
+	teamOverrides?: Partial<typeof team.$inferInsert>,
+) {
+	const teamId = await createTestTeam(ownerId, teamOverrides);
+	const memberResults = await Promise.all(
+		members.map(async ({ role = "member", overrides = {} }) => {
+			const { userId, email } = await createTestUser(overrides);
+			await addTeamMember(teamId, userId, role);
+			return { userId, email, role };
+		}),
+	);
+	return { teamId, members: memberResults };
 }

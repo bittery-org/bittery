@@ -16,38 +16,26 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { teamRouter } from "../routers/team";
 import {
 	addTeamMember,
-	cleanupTestData,
-	createAuthenticatedContext,
 	createPublicContext,
 	createTestInvitation,
-	createTestSession,
 	createTestTeam,
-	createTestUser,
 	generateTestEmail,
 	getTeam,
 	getTeamMember,
+	setup,
+	setupTeamWithMembers,
+	truncateAll,
 } from "./test-utils";
 
 describe("Team Router", () => {
-	const testUserIds: string[] = [];
-
 	afterEach(async () => {
-		await cleanupTestData(testUserIds);
-		testUserIds.length = 0;
+		await truncateAll();
 	});
 
 	describe("list", () => {
 		test("should return the user's team", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(teamRouter);
 			await createTestTeam(userId, { name: "My Team" });
-
-			const sessionId = await createTestSession(userId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.list();
 
@@ -57,32 +45,16 @@ describe("Team Router", () => {
 		});
 
 		test("should throw NOT_FOUND for user with no team", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
+			const { caller } = await setup(teamRouter);
 
 			await expect(caller.list()).rejects.toThrow("User has no team");
 		});
 
 		test("should return team info for a member", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: memberId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, memberId);
-
+			const [{ userId: ownerId }, { userId: memberId, caller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
 			const teamId = await createTestTeam(ownerId, { name: "Owner Team" });
 			await addTeamMember(teamId, memberId, "member");
-
-			const sessionId = await createTestSession(memberId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(memberId, email2, sessionId),
-			);
 
 			const result = await caller.list();
 
@@ -93,16 +65,10 @@ describe("Team Router", () => {
 
 	describe("get", () => {
 		test("should return team details with user role", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email, name: "Team Owner" });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(teamRouter, {
+				name: "Team Owner",
+			});
 			const teamId = await createTestTeam(userId, { name: "My Team" });
-
-			const sessionId = await createTestSession(userId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.get({ teamId });
 
@@ -114,18 +80,11 @@ describe("Team Router", () => {
 		});
 
 		test("should deny access to non-members", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: otherId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, otherId);
-
+			const [{ userId: ownerId }, { caller }] = await Promise.all([
+				setup(teamRouter),
+				setup(teamRouter),
+			]);
 			const teamId = await createTestTeam(ownerId);
-
-			const sessionId = await createTestSession(otherId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(otherId, email2, sessionId),
-			);
 
 			await expect(caller.get({ teamId })).rejects.toThrow(
 				"You are not a member of this team",
@@ -135,14 +94,7 @@ describe("Team Router", () => {
 
 	describe("create", () => {
 		test("should reject team creation (teams are auto-created on signup)", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
+			const { caller } = await setup(teamRouter);
 
 			await expect(caller.create({ name: "New Team" })).rejects.toThrow(
 				"Teams are automatically created on signup",
@@ -152,16 +104,8 @@ describe("Team Router", () => {
 
 	describe("update", () => {
 		test("should allow owner to update team name", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(teamRouter);
 			const teamId = await createTestTeam(userId, { name: "Old Name" });
-
-			const sessionId = await createTestSession(userId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.update({ teamId, name: "New Name" });
 
@@ -172,19 +116,10 @@ describe("Team Router", () => {
 		});
 
 		test("should allow admin to update team name", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: adminId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, adminId);
-
+			const [{ userId: ownerId }, { userId: adminId, caller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
 			const teamId = await createTestTeam(ownerId, { name: "Old Name" });
 			await addTeamMember(teamId, adminId, "admin");
-
-			const sessionId = await createTestSession(adminId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(adminId, email2, sessionId),
-			);
 
 			const result = await caller.update({ teamId, name: "Admin Updated" });
 
@@ -192,19 +127,10 @@ describe("Team Router", () => {
 		});
 
 		test("should deny regular member from updating team", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: memberId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, memberId);
-
+			const [{ userId: ownerId }, { userId: memberId, caller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
 			const teamId = await createTestTeam(ownerId);
 			await addTeamMember(teamId, memberId, "member");
-
-			const sessionId = await createTestSession(memberId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(memberId, email2, sessionId),
-			);
 
 			await expect(
 				caller.update({ teamId, name: "Hacked Name" }),
@@ -214,16 +140,8 @@ describe("Team Router", () => {
 
 	describe("delete", () => {
 		test("should allow owner to delete non-personal team", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(teamRouter);
 			const teamId = await createTestTeam(userId, { type: "organization" });
-
-			const sessionId = await createTestSession(userId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.delete({ teamId });
 
@@ -234,19 +152,10 @@ describe("Team Router", () => {
 		});
 
 		test("should deny non-owner from deleting team", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: adminId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, adminId);
-
+			const [{ userId: ownerId }, { userId: adminId, caller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
 			const teamId = await createTestTeam(ownerId, { type: "organization" });
 			await addTeamMember(teamId, adminId, "admin");
-
-			const sessionId = await createTestSession(adminId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(adminId, email2, sessionId),
-			);
 
 			await expect(caller.delete({ teamId })).rejects.toThrow(
 				"Only the team owner can delete the team",
@@ -254,17 +163,9 @@ describe("Team Router", () => {
 		});
 
 		test("should not allow deleting personal team", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(teamRouter);
 			// Default type is "personal"
 			const teamId = await createTestTeam(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			await expect(caller.delete({ teamId })).rejects.toThrow(
 				"Personal teams cannot be deleted",
@@ -274,16 +175,8 @@ describe("Team Router", () => {
 
 	describe("leave", () => {
 		test("should reject leaving team (not allowed in new architecture)", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(teamRouter);
 			const teamId = await createTestTeam(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			await expect(caller.leave({ teamId })).rejects.toThrow(
 				"You cannot leave your team",
@@ -293,30 +186,15 @@ describe("Team Router", () => {
 
 	describe("members.list", () => {
 		test("should return all team members", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const email3 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({
-				email: email1,
+			const { caller, userId: ownerId } = await setup(teamRouter, {
 				name: "Owner",
 			});
-			const { userId: adminId } = await createTestUser({
-				email: email2,
-				name: "Admin",
-			});
-			const { userId: memberId } = await createTestUser({
-				email: email3,
-				name: "Member",
-			});
-			testUserIds.push(ownerId, adminId, memberId);
-
-			const teamId = await createTestTeam(ownerId);
-			await addTeamMember(teamId, adminId, "admin");
-			await addTeamMember(teamId, memberId, "member");
-
-			const sessionId = await createTestSession(ownerId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId),
+			const { teamId } = await setupTeamWithMembers(
+				ownerId,
+				[
+					{ role: "admin", overrides: { name: "Admin" } },
+					{ role: "member", overrides: { name: "Member" } },
+				],
 			);
 
 			const result = await caller.members.list({ teamId });
@@ -330,18 +208,10 @@ describe("Team Router", () => {
 
 	describe("invitations.send", () => {
 		test("should create invitation for new email", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(teamRouter);
 			const teamId = await createTestTeam(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
-
 			const inviteeEmail = generateTestEmail();
+
 			const result = await caller.invitations.send({
 				teamId,
 				email: inviteeEmail,
@@ -354,22 +224,13 @@ describe("Team Router", () => {
 		});
 
 		test("should return public key for existing user", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: existingId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, existingId);
-
+			const [{ userId: ownerId, caller }, { email: existingEmail }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
 			const teamId = await createTestTeam(ownerId);
-
-			const sessionId = await createTestSession(ownerId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId),
-			);
 
 			const result = await caller.invitations.send({
 				teamId,
-				email: email2,
+				email: existingEmail,
 				role: "admin",
 			});
 
@@ -377,41 +238,24 @@ describe("Team Router", () => {
 		});
 
 		test("should reject invitation for user who already belongs to a team", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: memberId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, memberId);
-
+			const [{ userId: ownerId, caller }, { userId: memberId, email: memberEmail }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
 			const teamId = await createTestTeam(ownerId);
 			await addTeamMember(teamId, memberId, "member");
-
-			const sessionId = await createTestSession(ownerId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId),
-			);
 
 			await expect(
 				caller.invitations.send({
 					teamId,
-					email: email2,
+					email: memberEmail,
 					role: "admin",
 				}),
 			).rejects.toThrow("This user already belongs to a team");
 		});
 
 		test("should reject duplicate pending invitation", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(teamRouter);
 			const teamId = await createTestTeam(userId);
 			const inviteeEmail = generateTestEmail();
-
-			const sessionId = await createTestSession(userId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			// First invitation
 			await caller.invitations.send({
@@ -433,18 +277,10 @@ describe("Team Router", () => {
 
 	describe("invitations.list", () => {
 		test("should return pending invitations for a team", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(teamRouter);
 			const teamId = await createTestTeam(userId);
 			await createTestInvitation(teamId, userId, "invite1@example.com");
 			await createTestInvitation(teamId, userId, "invite2@example.com");
-
-			const sessionId = await createTestSession(userId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.invitations.list({ teamId });
 
@@ -454,10 +290,7 @@ describe("Team Router", () => {
 
 	describe("invitations.getByToken", () => {
 		test("should return invitation details by token (public)", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email, name: "Inviter" });
-			testUserIds.push(userId);
-
+			const { userId } = await setup(teamRouter, { name: "Inviter" });
 			const teamId = await createTestTeam(userId, { name: "Cool Team" });
 			const { token } = await createTestInvitation(
 				teamId,
@@ -478,10 +311,7 @@ describe("Team Router", () => {
 		});
 
 		test("should return expired status for expired invitation", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { userId } = await setup(teamRouter);
 			const teamId = await createTestTeam(userId);
 			const { token } = await createTestInvitation(
 				teamId,
@@ -500,20 +330,12 @@ describe("Team Router", () => {
 
 	describe("invitations.cancel", () => {
 		test("should allow inviter to cancel invitation", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(teamRouter);
 			const teamId = await createTestTeam(userId);
 			const { invitationId } = await createTestInvitation(
 				teamId,
 				userId,
 				"invitee@example.com",
-			);
-
-			const sessionId = await createTestSession(userId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.invitations.cancel({ invitationId });
@@ -524,21 +346,13 @@ describe("Team Router", () => {
 
 	describe("invitations.resend", () => {
 		test("should reset expiration date", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(teamRouter);
 			const teamId = await createTestTeam(userId);
 			const { invitationId } = await createTestInvitation(
 				teamId,
 				userId,
 				"invitee@example.com",
 				{ expiresAt: new Date(Date.now() + 1000) }, // About to expire
-			);
-
-			const sessionId = await createTestSession(userId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
 			);
 
 			const result = await caller.invitations.resend({ invitationId });
@@ -549,19 +363,12 @@ describe("Team Router", () => {
 
 	describe("invitations.pending", () => {
 		test("should return pending invitations for current user", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: inviteeId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, inviteeId);
-
+			const [{ userId: ownerId }, { email: inviteeEmail, caller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
 			const teamId = await createTestTeam(ownerId, { name: "Inviting Team" });
-			await createTestInvitation(teamId, ownerId, email2, { role: "member" });
-
-			const sessionId = await createTestSession(inviteeId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(inviteeId, email2, sessionId),
-			);
+			await createTestInvitation(teamId, ownerId, inviteeEmail, {
+				role: "member",
+			});
 
 			const result = await caller.invitations.pending();
 
@@ -572,20 +379,14 @@ describe("Team Router", () => {
 
 	describe("invitations.accept", () => {
 		test("should accept invitation and join team", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: inviteeId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, inviteeId);
-
+			const [{ userId: ownerId }, { userId: inviteeId, email: inviteeEmail, caller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
 			const teamId = await createTestTeam(ownerId, { name: "Join Me" });
-			const { token } = await createTestInvitation(teamId, ownerId, email2, {
-				role: "admin",
-			});
-
-			const sessionId = await createTestSession(inviteeId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(inviteeId, email2, sessionId),
+			const { token } = await createTestInvitation(
+				teamId,
+				ownerId,
+				inviteeEmail,
+				{ role: "admin" },
 			);
 
 			const result = await caller.invitations.accept({ token });
@@ -598,20 +399,14 @@ describe("Team Router", () => {
 		});
 
 		test("should reject expired invitation", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: inviteeId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, inviteeId);
-
+			const [{ userId: ownerId }, { email: inviteeEmail, caller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
 			const teamId = await createTestTeam(ownerId);
-			const { token } = await createTestInvitation(teamId, ownerId, email2, {
-				expiresAt: new Date(Date.now() - 1000), // Expired
-			});
-
-			const sessionId = await createTestSession(inviteeId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(inviteeId, email2, sessionId),
+			const { token } = await createTestInvitation(
+				teamId,
+				ownerId,
+				inviteeEmail,
+				{ expiresAt: new Date(Date.now() - 1000) }, // Expired
 			);
 
 			await expect(caller.invitations.accept({ token })).rejects.toThrow(
@@ -620,19 +415,15 @@ describe("Team Router", () => {
 		});
 
 		test("should reject if invitation is for different email", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const email3 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: wrongUserId } = await createTestUser({ email: email3 });
-			testUserIds.push(ownerId, wrongUserId);
-
+			const [{ userId: ownerId }, { caller }] = await Promise.all([
+				setup(teamRouter),
+				setup(teamRouter),
+			]);
 			const teamId = await createTestTeam(ownerId);
-			const { token } = await createTestInvitation(teamId, ownerId, email2);
-
-			const sessionId = await createTestSession(wrongUserId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(wrongUserId, email3, sessionId),
+			const { token } = await createTestInvitation(
+				teamId,
+				ownerId,
+				generateTestEmail(), // Different email
 			);
 
 			await expect(caller.invitations.accept({ token })).rejects.toThrow(
@@ -643,18 +434,13 @@ describe("Team Router", () => {
 
 	describe("invitations.decline", () => {
 		test("should decline invitation", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: inviteeId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, inviteeId);
-
+			const [{ userId: ownerId }, { userId: inviteeId, email: inviteeEmail, caller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
 			const teamId = await createTestTeam(ownerId);
-			const { token } = await createTestInvitation(teamId, ownerId, email2);
-
-			const sessionId = await createTestSession(inviteeId);
-			const caller = teamRouter.createCaller(
-				createAuthenticatedContext(inviteeId, email2, sessionId),
+			const { token } = await createTestInvitation(
+				teamId,
+				ownerId,
+				inviteeEmail,
 			);
 
 			const result = await caller.invitations.decline({ token });
