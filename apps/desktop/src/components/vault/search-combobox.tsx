@@ -125,6 +125,45 @@ export function SearchCombobox() {
 					<CommandList>
 						<CommandEmpty>No results found.</CommandEmpty>
 
+						{filteredItems.length > 0 && (
+							<CommandGroup heading="Items">
+								{filteredItems.map((item) => {
+									const domain = item.url
+										? getDomainFromUrl(item.url)
+										: undefined;
+									return (
+										<CommandItem
+											key={item.id}
+											value={item.id}
+											onSelect={() => handleSelectItem(item.vaultId, item.id)}
+											className="cursor-pointer py-1.5"
+										>
+											<div className="flex min-w-0 flex-1 items-center gap-2">
+												<Favicon
+													url={item.url}
+													title={item.title}
+													category={item.category}
+													cardBrand={item.cardBrand}
+													size="sm"
+													className="size-6 shrink-0 rounded-md text-[10px]"
+												/>
+												<span className="shrink-0 font-medium">
+													{item.title}
+												</span>
+												{item.category === "login" && (item.username || domain) && (
+													<span className="min-w-0 truncate text-muted-foreground text-xs">
+														{[item.username, domain]
+															.filter(Boolean)
+															.join(" · ")}
+													</span>
+												)}
+											</div>
+										</CommandItem>
+									);
+								})}
+							</CommandGroup>
+						)}
+
 						{filteredVaults.length > 0 && (
 							<CommandGroup heading="Vaults">
 								{filteredVaults.map((vault) => (
@@ -176,45 +215,6 @@ export function SearchCombobox() {
 													/>
 												</div>
 												<span className="font-medium">{tag}</span>
-											</div>
-										</CommandItem>
-									);
-								})}
-							</CommandGroup>
-						)}
-
-						{filteredItems.length > 0 && (
-							<CommandGroup heading="Items">
-								{filteredItems.map((item) => {
-									const domain = item.url
-										? getDomainFromUrl(item.url)
-										: undefined;
-									return (
-										<CommandItem
-											key={item.id}
-											value={item.id}
-											onSelect={() => handleSelectItem(item.vaultId, item.id)}
-											className="cursor-pointer py-1.5"
-										>
-											<div className="flex min-w-0 flex-1 items-center gap-2">
-												<Favicon
-													url={item.url}
-													title={item.title}
-													category={item.category}
-													cardBrand={item.cardBrand}
-													size="sm"
-													className="size-6 shrink-0 rounded-md text-[10px]"
-												/>
-												<span className="shrink-0 font-medium">
-													{item.title}
-												</span>
-												{item.category === "login" && (item.username || domain) && (
-													<span className="min-w-0 truncate text-muted-foreground text-xs">
-														{[item.username, domain]
-															.filter(Boolean)
-															.join(" · ")}
-													</span>
-												)}
 											</div>
 										</CommandItem>
 									);
