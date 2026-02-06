@@ -1,6 +1,12 @@
 import "./index.css";
 import { Button } from "@bittery/ui";
-import { CheckCircle2, Key, Loader2, Lock, XCircle } from "lucide-react";
+import {
+	IconCircleCheck2OutlineDuo18,
+	IconCircleXmarkOutlineDuo18,
+	IconKeyOutlineDuo18,
+	IconLoader2OutlineDuo18,
+	IconLockOutlineDuo18,
+} from "@bittery/ui/icons";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { Favicon } from "@/components/favicon";
@@ -205,7 +211,10 @@ function SavePromptIframe() {
 		return (
 			<Wrapper>
 				<div className="flex items-center gap-2.5">
-					<Loader2 size={20} className="shrink-0 animate-spin text-primary" />
+					<IconLoader2OutlineDuo18
+						size={20}
+						className="shrink-0 animate-spin text-primary"
+					/>
 					<div className="min-w-0 flex-1">
 						<p className="font-medium text-sm">
 							{isUpdating ? "Updating credentials..." : "Saving credentials..."}
@@ -224,7 +233,10 @@ function SavePromptIframe() {
 		return (
 			<Wrapper>
 				<div className="flex items-center gap-2.5">
-					<CheckCircle2 size={20} className="shrink-0 text-green-600" />
+					<IconCircleCheck2OutlineDuo18
+						size={20}
+						className="shrink-0 text-green-600"
+					/>
 					<div className="min-w-0 flex-1">
 						<p className="font-medium text-sm">
 							{isUpdating ? "Credentials updated!" : "Credentials saved!"}
@@ -245,7 +257,10 @@ function SavePromptIframe() {
 		return (
 			<Wrapper>
 				<div className="flex items-start gap-2.5">
-					<XCircle size={20} className="shrink-0 text-destructive" />
+					<IconCircleXmarkOutlineDuo18
+						size={20}
+						className="shrink-0 text-destructive"
+					/>
 					<div className="min-w-0 flex-1">
 						<p className="font-medium text-sm">
 							{isUpdating ? "Failed to update" : "Failed to save"}
@@ -289,7 +304,7 @@ function SavePromptIframe() {
 		return (
 			<Wrapper>
 				<div className="flex items-start gap-2.5">
-					<Lock size={20} className="shrink-0 text-amber-600" />
+					<IconLockOutlineDuo18 size={20} className="shrink-0 text-amber-600" />
 					<div className="min-w-0 flex-1">
 						<p className="font-medium text-sm">Cannot save credentials</p>
 						<p className="mt-0.5 text-muted-foreground text-xs">
@@ -352,7 +367,10 @@ function SavePromptIframe() {
 						className="flex w-full items-center justify-between gap-2 rounded-md border bg-background px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
 					>
 						<div className="flex min-w-0 items-center gap-2">
-							<Key size={14} className="shrink-0 text-muted-foreground" />
+							<IconKeyOutlineDuo18
+								size={14}
+								className="shrink-0 text-muted-foreground"
+							/>
 							<span className="truncate">
 								{selectedVault?.name || "Select vault"}
 							</span>
@@ -399,7 +417,10 @@ function SavePromptIframe() {
 												: ""
 										}`}
 									>
-										<Key size={14} className="shrink-0 text-muted-foreground" />
+										<IconKeyOutlineDuo18
+											size={14}
+											className="shrink-0 text-muted-foreground"
+										/>
 										<span className="truncate">{vault.name}</span>
 										<span className="ml-auto shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
 											{vault.type}

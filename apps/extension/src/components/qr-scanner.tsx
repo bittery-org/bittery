@@ -6,16 +6,16 @@
 import type { ParsedOtpAuthUri } from "@bittery/shared/totp";
 import { isValidBase32, parseOtpAuthUri } from "@bittery/shared/totp";
 import { Button, Card, toast } from "@bittery/ui";
-import jsQR from "jsqr";
 import {
-	AlertCircle,
-	Camera,
-	CheckCircle2,
-	Loader2,
-	QrCode,
-	ScanLine,
-	X,
-} from "lucide-react";
+	IconCameraOutlineDuo18,
+	IconCircleCheck2OutlineDuo18,
+	IconCircleWarningOutlineDuo18,
+	IconLoader2OutlineDuo18,
+	IconQrcodeOutlineDuo18,
+	IconScanOutlineDuo18,
+	IconXmarkOutlineDuo18,
+} from "@bittery/ui/icons";
+import jsQR from "jsqr";
 import { useCallback, useState } from "react";
 
 export type ScanStatus =
@@ -192,7 +192,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 		<Card className="p-4">
 			<div className="mb-4 flex items-center justify-between">
 				<div className="flex items-center gap-2">
-					<QrCode className="h-5 w-5 text-primary" />
+					<IconQrcodeOutlineDuo18 className="h-5 w-5 text-primary" />
 					<h3 className="font-medium text-sm">Scan TOTP QR Code</h3>
 				</div>
 				<Button
@@ -201,7 +201,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 					onClick={onCancel}
 					className="h-8 w-8"
 				>
-					<X className="h-4 w-4" />
+					<IconXmarkOutlineDuo18 className="h-4 w-4" />
 				</Button>
 			</div>
 
@@ -216,7 +216,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 						className="w-full gap-2"
 						variant="default"
 					>
-						<ScanLine className="h-4 w-4" />
+						<IconScanOutlineDuo18 className="h-4 w-4" />
 						Scan Page for QR Code
 					</Button>
 				</div>
@@ -224,7 +224,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 
 			{status === "scanning" && (
 				<div className="flex flex-col items-center gap-3 py-4">
-					<Loader2 className="h-8 w-8 animate-spin text-primary" />
+					<IconLoader2OutlineDuo18 className="h-8 w-8 animate-spin text-primary" />
 					<p className="text-muted-foreground text-sm">
 						Scanning page for QR code...
 					</p>
@@ -234,7 +234,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 			{status === "success" && scanResult && (
 				<div className="space-y-3">
 					<div className="flex items-center gap-2 text-green-600">
-						<CheckCircle2 className="h-5 w-5" />
+						<IconCircleCheck2OutlineDuo18 className="h-5 w-5" />
 						<span className="font-medium text-sm">QR Code Found!</span>
 					</div>
 					{scanResult.issuer && (
@@ -255,7 +255,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 			{(status === "error" || status === "no-qr-found") && (
 				<div className="space-y-3">
 					<div className="flex items-center gap-2 text-destructive">
-						<AlertCircle className="h-5 w-5" />
+						<IconCircleWarningOutlineDuo18 className="h-5 w-5" />
 						<span className="font-medium text-sm">
 							{status === "no-qr-found" ? "No QR Code Found" : "Scan Failed"}
 						</span>
@@ -267,7 +267,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 							variant="outline"
 							className="flex-1 gap-2"
 						>
-							<Camera className="h-4 w-4" />
+							<IconCameraOutlineDuo18 className="h-4 w-4" />
 							Try Again
 						</Button>
 						<Button onClick={onCancel} variant="ghost" className="flex-1">

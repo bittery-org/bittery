@@ -8,14 +8,14 @@ import {
 	SelectValue,
 	toast,
 } from "@bittery/ui";
+import {
+	IconArrowDoorOutOutlineDuo18,
+	IconArrowLeftOutlineDuo18,
+	IconClockTimeOutlineDuo18,
+	IconGear3OutlineDuo18,
+} from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import {
-	ArrowLeft,
-	Clock,
-	LogOut,
-	Settings as SettingsIcon,
-} from "lucide-react";
 import { useEffect, useState } from "react";
 import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "../lib/storage";
 
@@ -120,11 +120,11 @@ export function SettingsPage() {
 						size="icon"
 						onClick={() => navigate({ to: "/vault" })}
 					>
-						<ArrowLeft className="size-4" />
+						<IconArrowLeftOutlineDuo18 className="size-4" />
 					</Button>
 					<div className="flex items-center gap-3">
 						<div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-							<SettingsIcon className="size-4" />
+							<IconGear3OutlineDuo18 className="size-4" />
 						</div>
 						<div>
 							<div className="text-muted-foreground text-xs uppercase tracking-wide">
@@ -145,7 +145,7 @@ export function SettingsPage() {
 						<div className="flex items-center justify-between rounded-lg border p-4">
 							<div className="flex items-center gap-3">
 								<div className="flex size-10 items-center justify-center rounded-lg bg-muted">
-									<Clock className="size-5 text-muted-foreground" />
+									<IconClockTimeOutlineDuo18 className="size-5 text-muted-foreground" />
 								</div>
 								<div>
 									<Label className="font-medium text-sm">
@@ -187,7 +187,7 @@ export function SettingsPage() {
 						<div className="flex items-center justify-between rounded-lg border p-4">
 							<div className="flex items-center gap-3">
 								<div className="flex size-10 items-center justify-center rounded-lg bg-muted">
-									<LogOut className="size-5 text-muted-foreground" />
+									<IconArrowDoorOutOutlineDuo18 className="size-5 text-muted-foreground" />
 								</div>
 								<div>
 									<Label className="font-medium text-sm">Sign Out</Label>

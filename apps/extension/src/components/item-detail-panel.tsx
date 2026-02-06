@@ -20,9 +20,10 @@ import {
 	IconCopyOutlineDuo18,
 	IconEyeOutlineDuo18,
 	IconEyeSlashOutlineDuo18,
+	IconLoader2OutlineDuo18,
 	IconOpenExternalOutlineDuo18,
+	IconQrcodeOutlineDuo18,
 } from "@bittery/ui/icons";
-import { Loader2, QrCode } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Favicon } from "./favicon";
 import { QRScanner, type QRScanResult } from "./qr-scanner";
@@ -322,7 +323,7 @@ function LoginItemDetail({
 				) : showQRScanner ? (
 					isSaving ? (
 						<Card className="flex items-center justify-center gap-2 p-4">
-							<Loader2 className="h-5 w-5 animate-spin" />
+							<IconLoader2OutlineDuo18 className="h-5 w-5 animate-spin" />
 							<span className="text-sm">Saving TOTP...</span>
 						</Card>
 					) : (
@@ -337,7 +338,7 @@ function LoginItemDetail({
 						className="w-full gap-2"
 						onClick={() => setShowQRScanner(true)}
 					>
-						<QrCode size={16} />
+						<IconQrcodeOutlineDuo18 size={16} />
 						Scan QR Code to Add 2FA
 					</Button>
 				)}

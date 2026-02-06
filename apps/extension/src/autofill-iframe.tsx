@@ -1,5 +1,5 @@
 import "./index.css";
-import { Lock } from "lucide-react";
+import { IconLockOutlineDuo18 } from "@bittery/ui/icons";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import type { AutofillIframeConfig } from "@/components/autofill-iframe-base";
@@ -14,7 +14,7 @@ const config: AutofillIframeConfig = {
 	selectMessageType: "AUTOFILL_SELECT",
 	filterFn: filterLoginItems,
 	defaultFieldType: "username",
-	emptyIcon: <Lock size={14} />,
+	emptyIcon: <IconLockOutlineDuo18 size={14} />,
 	emptyText: "No saved logins for this site",
 	unlockText: "Click the Bittery icon to unlock and use autofill",
 	itemNounSingular: "login",

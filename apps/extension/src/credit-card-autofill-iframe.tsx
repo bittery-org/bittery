@@ -1,7 +1,7 @@
 import "./index.css";
 import { detectCardBrand, maskCardNumber } from "@bittery/shared/credit-card";
 import type { DecryptedItem } from "@bittery/shared/types";
-import { CreditCard } from "lucide-react";
+import { IconCreditCardLockOutlineDuo18 } from "@bittery/ui/icons";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import type { AutofillIframeConfig } from "@/components/autofill-iframe-base";
@@ -48,7 +48,7 @@ const config: AutofillIframeConfig = {
 	preprocessItems: (items: DecryptedItem[]) =>
 		items.filter((item) => item.category === "credit-card" && item.cardNumber),
 	defaultFieldType: "cardNumber",
-	emptyIcon: <CreditCard size={14} />,
+	emptyIcon: <IconCreditCardLockOutlineDuo18 size={14} />,
 	emptyText: "No saved credit cards",
 	unlockText: "Click the Bittery icon to unlock and use credit card autofill",
 	itemNounSingular: "card",

@@ -1,6 +1,6 @@
 import "./index.css";
 import type { DecryptedItem } from "@bittery/shared/types";
-import { User } from "lucide-react";
+import { IconUserOutlineDuo18 } from "@bittery/ui/icons";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import type { AutofillIframeConfig } from "@/components/autofill-iframe-base";
@@ -30,7 +30,7 @@ const config: AutofillIframeConfig = {
 	preprocessItems: (items: DecryptedItem[]) =>
 		items.filter((item) => item.category === "identity"),
 	defaultFieldType: "firstName",
-	emptyIcon: <User size={14} />,
+	emptyIcon: <IconUserOutlineDuo18 size={14} />,
 	emptyText: "No saved identities",
 	unlockText: "Click the Bittery icon to unlock and use identity autofill",
 	itemNounSingular: "identity",
@@ -42,7 +42,7 @@ const config: AutofillIframeConfig = {
 		return (
 			<div className="flex items-center gap-2.5">
 				<div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-					<User size={16} />
+					<IconUserOutlineDuo18 size={16} />
 				</div>
 				<div className="min-w-0 flex-1">
 					<p className="truncate font-medium text-sm">{displayName}</p>

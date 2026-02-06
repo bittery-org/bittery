@@ -9,9 +9,9 @@ import {
 	Button,
 	toast,
 } from "@bittery/ui";
+import { IconChevronDownOutlineDuo18 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
 import { storage } from "@/lib/storage";
@@ -265,7 +265,7 @@ export function ExtensionAccountSwitcher() {
 					</div>
 				</>
 			) : null}
-			<ChevronDown className="h-4 w-4 opacity-50" />
+			<IconChevronDownOutlineDuo18 className="h-4 w-4 opacity-50" />
 		</Button>
 	);
 

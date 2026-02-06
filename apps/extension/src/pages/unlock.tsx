@@ -7,10 +7,13 @@ import {
 	VaultIcon,
 	type VaultIconState,
 } from "@bittery/ui";
+import {
+	IconEyeOutlineDuo18,
+	IconEyeSlashOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Eye, EyeOff } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { storage } from "../lib/storage";
 
@@ -283,9 +286,9 @@ export function UnlockPage() {
 												onClick={() => setShowPassword(!showPassword)}
 											>
 												{showPassword ? (
-													<EyeOff size={16} />
+													<IconEyeSlashOutlineDuo18 size={16} />
 												) : (
-													<Eye size={16} />
+													<IconEyeOutlineDuo18 size={16} />
 												)}
 											</Button>
 										</div>

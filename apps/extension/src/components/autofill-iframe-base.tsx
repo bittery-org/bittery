@@ -1,6 +1,6 @@
 import type { DecryptedItem } from "@bittery/shared/types";
 import { Card } from "@bittery/ui";
-import { Lock } from "lucide-react";
+import { IconLockOutlineDuo18 } from "@bittery/ui/icons";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -149,7 +149,7 @@ export function AutofillIframeBase({
 		return (
 			<Card className="mt-1 p-2.5">
 				<div className="flex items-center gap-2 text-sm">
-					<Lock size={14} className="text-primary" />
+					<IconLockOutlineDuo18 size={14} className="text-primary" />
 					<span className="font-medium">Unlock Required</span>
 				</div>
 				<p className="mt-1.5 text-muted-foreground text-xs">

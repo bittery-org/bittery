@@ -311,9 +311,7 @@ export async function handleGetWritableVaults(): Promise<MessageResponse> {
 		const vaults = await trpcClient.vault.list.query();
 
 		// Filter out read-only vaults (only return vaults user can write to)
-		const writableVaults = vaults.filter(
-			(vault) => vault.role !== "read-only",
-		);
+		const writableVaults = vaults.filter((vault) => vault.role !== "read-only");
 
 		return {
 			success: true,

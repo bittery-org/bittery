@@ -2,12 +2,12 @@ import type { DecryptedItem } from "@bittery/shared/types";
 import { Badge, Button, cn, Input, Skeleton, toast } from "@bittery/ui";
 import {
 	IconGear3OutlineDuo18,
+	IconMagnifier3OutlineDuo18,
 	IconMobileOutlineDuo18,
 	IconPlusOutlineDuo18,
 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ExtensionAccountSwitcher } from "@/components/account-switcher";
 import { Favicon } from "@/components/favicon";
@@ -282,7 +282,7 @@ export function VaultPage() {
 				<aside className="flex w-[220px] shrink-0 flex-col border-r bg-muted/20">
 					<div className="border-b p-3">
 						<div className="relative">
-							<Search
+							<IconMagnifier3OutlineDuo18
 								className="absolute top-2.5 left-3 text-muted-foreground"
 								size={16}
 							/>

@@ -23,8 +23,7 @@ const fallbackServerUrl =
  */
 async function getAuthToken(): Promise<string | null> {
 	const activeAccount = await storage.getActiveAccount();
-	const email =
-		activeAccount?.type === "single" ? activeAccount.email : null;
+	const email = activeAccount?.type === "single" ? activeAccount.email : null;
 
 	// In desktop mode, try to get a fresh token from the desktop app
 	if (email && desktopSync.isDesktopAvailable()) {
