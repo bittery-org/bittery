@@ -142,55 +142,21 @@ export function SettingsPage() {
 					<div className="space-y-4">
 						<h2 className="font-semibold text-lg">Security</h2>
 
-						{/* Desktop Connection Status */}
-						{desktopStatus !== null && (
-							<div className="rounded-md border p-3">
-								<div className="flex items-center gap-2 text-sm">
-									<div
-										className={`size-2 rounded-full ${
-											desktopStatus.available ? "bg-green-500" : "bg-gray-400"
-										}`}
-									/>
-									<span className="text-muted-foreground">
-										{desktopStatus.available
-											? `Desktop app connected (auto-lock: ${formatTimeout(desktopStatus.autolockTimeoutMs)})`
-											: "Desktop app not running"}
-									</span>
-								</div>
-							</div>
-						)}
-
 						<div className="flex items-center justify-between rounded-lg border p-4">
-							<div className="flex flex-1 flex-col gap-3">
-								<div className="flex items-center gap-3">
-									<div className="flex size-10 items-center justify-center rounded-lg bg-muted">
-										<Clock className="size-5 text-muted-foreground" />
-									</div>
-									<div>
-										<Label className="font-medium text-sm">
-											Auto-Lock Timeout
-										</Label>
-										<p className="text-muted-foreground text-xs">
-											{desktopStatus?.available
-												? "Managed by desktop app"
-												: "Lock your vault after inactivity"}
-										</p>
-									</div>
+							<div className="flex items-center gap-3">
+								<div className="flex size-10 items-center justify-center rounded-lg bg-muted">
+									<Clock className="size-5 text-muted-foreground" />
 								</div>
-								{desktopStatus?.available && (
-									<div className="ml-13 rounded-md bg-muted p-3 text-sm">
-										<p className="text-muted-foreground">
-											Using desktop app timeout:{" "}
-											<span className="font-medium text-foreground">
-												{formatTimeout(desktopStatus.autolockTimeoutMs)}
-											</span>
-										</p>
-										<p className="mt-1 text-muted-foreground text-xs">
-											Extension timeout is only used when desktop app is not
-											running
-										</p>
-									</div>
-								)}
+								<div>
+									<Label className="font-medium text-sm">
+										Auto-Lock Timeout
+									</Label>
+									<p className="text-muted-foreground text-xs">
+										{desktopStatus?.available
+											? `Managed by desktop app (${formatTimeout(desktopStatus.autolockTimeoutMs)})`
+											: "Lock your vault after inactivity"}
+									</p>
+								</div>
 							</div>
 							<Select
 								value={autoLockTimeout}
@@ -226,11 +192,17 @@ export function SettingsPage() {
 								<div>
 									<Label className="font-medium text-sm">Sign Out</Label>
 									<p className="text-muted-foreground text-xs">
-										Sign out of your account on this device
+										{desktopStatus?.available
+											? "Sign out from the desktop app to sign out here"
+											: "Sign out of your account on this device"}
 									</p>
 								</div>
 							</div>
-							<Button variant="destructive" onClick={handleSignOut}>
+							<Button
+								variant="destructive"
+								onClick={handleSignOut}
+								disabled={desktopStatus?.available === true}
+							>
 								Sign Out
 							</Button>
 						</div>
