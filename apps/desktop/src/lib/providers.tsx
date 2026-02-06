@@ -30,9 +30,19 @@ function handleUnauthorizedError() {
 
 	queryClient.clear();
 
-	storage.clearSession().then(() => {
-		toast.error("Session revoked. Please sign in again.");
-		window.location.href = "/";
+	// Get active account email before clearing session so login page can prefill
+	storage.getActiveAccount().then((activeAccount) => {
+		const prefillEmail =
+			activeAccount?.type === "single" ? activeAccount.email : undefined;
+
+		storage.clearSession().then(() => {
+			toast.error("Session expired. Please sign in again.");
+			if (prefillEmail) {
+				window.location.href = `/login?prefillEmail=${encodeURIComponent(prefillEmail)}`;
+			} else {
+				window.location.href = "/";
+			}
+		});
 	});
 }
 

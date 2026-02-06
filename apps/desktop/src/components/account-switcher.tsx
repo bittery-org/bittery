@@ -18,6 +18,7 @@ import { storage } from "@/lib/storage";
 import { useQueryInvalidator } from "@/providers/sync-provider";
 import { AccountAvatar } from "./account-avatar";
 import { AccountSettingsDialog } from "./account-settings-dialog";
+import { AddAccountDialog } from "./add-account-dialog";
 import { RemoveAccountDialog } from "./remove-account-dialog";
 
 export function AccountSwitcher() {
@@ -34,6 +35,7 @@ export function AccountSwitcher() {
 	const navigate = useNavigate();
 	const [accountToRemove, setAccountToRemove] = useState<string | null>(null);
 	const [showSettings, setShowSettings] = useState(false);
+	const [showAddAccount, setShowAddAccount] = useState(false);
 
 	const accountsData = accounts.data ?? [];
 	const unlockedEmailsList = unlockedEmails.data ?? [];
@@ -88,7 +90,7 @@ export function AccountSwitcher() {
 	};
 
 	const handleAddAccount = () => {
-		navigate({ to: "/login", search: { addingAccount: true } });
+		setShowAddAccount(true);
 	};
 
 	const handleLockAll = async () => {
@@ -221,6 +223,11 @@ export function AccountSwitcher() {
 					email={activeAccount.email}
 				/>
 			)}
+
+			<AddAccountDialog
+				open={showAddAccount}
+				onOpenChange={setShowAddAccount}
+			/>
 		</>
 	);
 }
