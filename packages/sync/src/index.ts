@@ -1,4 +1,8 @@
 // Query invalidation helpers
+
+// Delta sync (platform-agnostic)
+export type { DeltaSyncClient } from "./delta-sync";
+export { performDeltaSync } from "./delta-sync";
 export type {
 	InvalidationContext,
 	QueryInvalidator,

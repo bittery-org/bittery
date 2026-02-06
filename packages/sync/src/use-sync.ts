@@ -1,7 +1,7 @@
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
-import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { performDeltaSync } from "./delta-sync";
 import {
 	createQueryInvalidator,
 	invalidateQueriesForEvent,
@@ -27,84 +27,6 @@ export interface UseSyncOptions {
 	storage?: SyncStorage;
 	enabled?: boolean;
 	itemCacheAdapter?: ItemCacheAdapter;
-}
-
-/**
- * Perform a delta fetch for a single sync event and update the local cache
- */
-async function performDeltaSync(
-	trpcClient: ReturnType<typeof useTRPCClient>,
-	cache: ItemCacheAdapter,
-	event: SyncEvent,
-): Promise<void> {
-	switch (event.type) {
-		case "item_created":
-		case "item_updated":
-		case "item_restored":
-		case "item_moved": {
-			const item = await trpcClient.vault.getItem.query({
-				itemId: event.entityId,
-			});
-			await cache.upsertCachedItem?.({
-				id: item.id,
-				vaultId: item.vaultId,
-				category: item.category,
-				favorite: item.favorite,
-				encryptedData: item.encryptedData,
-				encryptionIv: item.encryptionIv,
-				encryptionAlgorithm: item.encryptionAlgorithm,
-				version: item.version,
-				lastModifiedBy: item.lastModifiedBy,
-				createdAt: String(item.createdAt),
-				updatedAt: String(item.updatedAt),
-				deletedAt: item.deletedAt ? String(item.deletedAt) : null,
-			} as CachedEncryptedItem);
-			break;
-		}
-		case "item_deleted": {
-			try {
-				const item = await trpcClient.vault.getItem.query({
-					itemId: event.entityId,
-				});
-				await cache.upsertCachedItem?.({
-					id: item.id,
-					vaultId: item.vaultId,
-					category: item.category,
-					favorite: item.favorite,
-					encryptedData: item.encryptedData,
-					encryptionIv: item.encryptionIv,
-					encryptionAlgorithm: item.encryptionAlgorithm,
-					version: item.version,
-					lastModifiedBy: item.lastModifiedBy,
-					createdAt: String(item.createdAt),
-					updatedAt: String(item.updatedAt),
-					deletedAt: item.deletedAt ? String(item.deletedAt) : null,
-				} as CachedEncryptedItem);
-			} catch {
-				// Item might be permanently deleted, remove from cache
-				await cache.removeCachedItem?.(event.entityId);
-			}
-			break;
-		}
-		case "vault_created":
-		case "vault_updated": {
-			const vault = await trpcClient.vault.get.query({
-				vaultId: event.entityId,
-			});
-			await cache.upsertCachedVault?.({
-				id: vault.id,
-				name: vault.name,
-				type: vault.type,
-				icon: vault.icon,
-				imageUrl: vault.imageUrl,
-			} as CachedVaultMetadata);
-			break;
-		}
-		case "vault_deleted":
-			await cache.removeCachedVault?.(event.entityId);
-			break;
-		// vault_key_rotated, vault_member_added, vault_member_removed: no cache changes needed
-	}
 }
 
 /**

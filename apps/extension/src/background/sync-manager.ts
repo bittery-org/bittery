@@ -1,10 +1,14 @@
 /**
  * Extension Sync Manager
  * MV3-compatible sync implementation using SSE with service worker constraints
+ * Supports delta sync: incoming events update the local item cache before notifying the popup
  */
 
+import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import type { ConnectionStatus, SyncEvent } from "@bittery/sync";
+import { performDeltaSync } from "@bittery/sync";
 import { storage } from "../lib/storage";
+import { trpcClient } from "./trpc-client";
 
 /**
  * Generate a random ID (simpler than nanoid for extension context)
@@ -52,6 +56,32 @@ export async function getClientId(): Promise<string> {
 }
 
 /**
+ * Resolve the active account email
+ */
+async function resolveActiveEmail(): Promise<string | null> {
+	const account = await storage.getActiveAccount();
+	if (!account || account.type === "all") return null;
+	return account.email;
+}
+
+/**
+ * Create a tRPC client for a specific account email.
+ * Falls back to the default trpcClient if email is not provided.
+ */
+async function getClientForEmail(
+	email?: string | null,
+): Promise<typeof trpcClient> {
+	if (!email) return trpcClient;
+
+	const authToken = await storage.getAuthToken(email);
+	if (!authToken) return trpcClient;
+
+	const serverUrl =
+		(await storage.getServerUrl(email)) || "http://localhost:3000";
+	return createAccountTrpcClient(authToken, serverUrl);
+}
+
+/**
  * Update connection status and notify popup
  */
 function setStatus(status: ConnectionStatus) {
@@ -78,10 +108,11 @@ export function getStatus(): ConnectionStatus {
 
 /**
  * Handle incoming sync event
+ * Delta sync: fetch only the changed entity, update local cache, THEN broadcast to popup
  */
 async function handleSyncEvent(event: SyncEvent) {
-	// Store last sync timestamp
-	await chrome.storage.session.set({ [LAST_SYNC_KEY]: event.timestamp });
+	// Store last sync timestamp in local storage (survives service worker restarts)
+	await chrome.storage.local.set({ [LAST_SYNC_KEY]: event.timestamp });
 
 	// Skip events from our own client
 	const clientId = await getClientId();
@@ -89,7 +120,21 @@ async function handleSyncEvent(event: SyncEvent) {
 		return;
 	}
 
-	// Notify popup to refresh data
+	// Delta sync: update local item cache before notifying popup
+	if (storage.supportsItemCache) {
+		try {
+			const email = await resolveActiveEmail();
+			const client = await getClientForEmail(email);
+			await performDeltaSync(client, storage, event);
+		} catch (e) {
+			console.error(
+				"[sync-manager] Delta sync failed, popup will do full refetch:",
+				e,
+			);
+		}
+	}
+
+	// Notify popup to refresh data (reads from updated cache if delta sync succeeded)
 	chrome.runtime
 		.sendMessage({
 			type: "SYNC_EVENT",
@@ -98,9 +143,53 @@ async function handleSyncEvent(event: SyncEvent) {
 		.catch(() => {
 			// Popup might not be open, ignore
 		});
+}
 
-	// Clear cached vault data so it refreshes
-	await chrome.storage.session.remove(["cachedVaultItems", "cachedVaults"]);
+/**
+ * Catch up on missed events since last sync timestamp
+ */
+async function catchUpMissedEvents(): Promise<void> {
+	if (!storage.supportsItemCache) return;
+
+	try {
+		const lastTimestamp = await getLastSyncTimestamp();
+		if (!lastTimestamp) return;
+
+		const clientId = await getClientId();
+		const email = await resolveActiveEmail();
+		const client = await getClientForEmail(email);
+
+		const result = await client.sync.getEventsSince.query({
+			since: lastTimestamp,
+		});
+
+		let processed = 0;
+		for (const event of result.events) {
+			// Skip own events
+			if (event.clientId === clientId) continue;
+			await performDeltaSync(client, storage, event as SyncEvent);
+			processed++;
+		}
+
+		if (processed > 0) {
+			console.log(
+				`[sync-manager] Catch-up: processed ${processed} missed events`,
+			);
+			// Save the latest timestamp
+			const latestTimestamp =
+				result.events[result.events.length - 1]?.timestamp;
+			if (latestTimestamp) {
+				await chrome.storage.local.set({
+					[LAST_SYNC_KEY]: latestTimestamp,
+				});
+			}
+		}
+	} catch (e) {
+		console.error(
+			"[sync-manager] Catch-up failed, full refetch will happen:",
+			e,
+		);
+	}
 }
 
 /**
@@ -147,6 +236,9 @@ export async function connect(): Promise<void> {
 
 		// Clear any pending reconnect alarms
 		await chrome.alarms.clear(SYNC_ALARM_NAME);
+
+		// Catch up on missed events since last sync
+		await catchUpMissedEvents();
 
 		// Read SSE stream
 		await readStream(response.body);
@@ -291,13 +383,13 @@ export async function initializeSync() {
  */
 export async function cleanupSync() {
 	disconnect();
-	await chrome.storage.session.remove([LAST_SYNC_KEY]);
+	await chrome.storage.local.remove([LAST_SYNC_KEY]);
 }
 
 /**
  * Get last sync timestamp
  */
 export async function getLastSyncTimestamp(): Promise<number | null> {
-	const result = await chrome.storage.session.get(LAST_SYNC_KEY);
+	const result = await chrome.storage.local.get(LAST_SYNC_KEY);
 	return (result[LAST_SYNC_KEY] as number) || null;
 }

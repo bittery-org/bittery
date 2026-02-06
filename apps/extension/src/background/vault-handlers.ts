@@ -11,7 +11,10 @@ import { desktopSync } from "./desktop-sync";
 import { updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
-import { decryptVaultItemsViaDesktop } from "./vault-utils";
+import {
+	decryptVaultItemsViaDesktop,
+	getDecryptedItemsCacheFirst,
+} from "./vault-utils";
 
 /**
  * Helper function to decrypt vault items for a specific account
@@ -194,24 +197,23 @@ export async function handleGetVaultItems(): Promise<MessageResponse> {
 	const desktopAvailable = desktopStatus?.available && !desktopStatus.locked;
 
 	let items: Array<DecryptedItem | null>;
-	if (desktopAvailable) {
-		console.log(
-			"[vault-handlers] Using desktop mode for decryption (desktop available)",
+	try {
+		items = await getDecryptedItemsCacheFirst(!!desktopAvailable);
+	} catch (error) {
+		console.warn(
+			"[vault-handlers] Cache-first decryption failed, falling back:",
+			error,
 		);
-		try {
-			items = await decryptVaultItemsViaDesktop();
-		} catch (error) {
-			console.warn(
-				"[vault-handlers] Desktop decryption failed, falling back to WASM:",
-				error,
-			);
+		// Final fallback: non-cached paths
+		if (desktopAvailable) {
+			try {
+				items = await decryptVaultItemsViaDesktop();
+			} catch {
+				items = await decryptVaultItems();
+			}
+		} else {
 			items = await decryptVaultItems();
 		}
-	} else {
-		console.log(
-			"[vault-handlers] Using WASM mode for decryption (desktop not available)",
-		);
-		items = await decryptVaultItems();
 	}
 
 	return {
@@ -236,7 +238,37 @@ export async function handleGetVaultItem(payload: {
 		return { success: true, item: null };
 	}
 
-	// Get item
+	// Try to find item in cache first
+	if (storage.supportsItemCache) {
+		const cachedItems = await storage.getCachedItems?.();
+		const cachedItem = cachedItems?.find((i) => i.id === itemId);
+		if (cachedItem) {
+			const vaultKeyData = vaultKeys.find(
+				(vk) => vk.vaultId === cachedItem.vaultId,
+			);
+			if (vaultKeyData) {
+				try {
+					const vaultKey = await storage.decryptVaultKey(
+						vaultKeyData.encryptedVaultKey,
+					);
+					const decrypted = await decrypt(
+						{
+							algorithm: cachedItem.encryptionAlgorithm,
+							iv: cachedItem.encryptionIv,
+							ciphertext: cachedItem.encryptedData,
+						},
+						vaultKey,
+					);
+					const data = JSON.parse(decrypted);
+					return { success: true, item: { ...cachedItem, ...data } };
+				} catch {
+					// Decryption failed (key rotation?), fall through to server fetch
+				}
+			}
+		}
+	}
+
+	// Fallback: fetch from server
 	const item = await trpcClient.vault.getItem.query({ itemId });
 
 	if (!item) {

@@ -5,10 +5,15 @@
 
 import { storage } from "../lib/storage";
 import { encrypt } from "../lib/wasm-crypto";
+import { desktopSync } from "./desktop-sync";
 import { isUnlocked, updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
-import { decryptVaultItems, hostnameMatches } from "./vault-utils";
+import {
+	decryptVaultItems,
+	getDecryptedItemsCacheFirst,
+	hostnameMatches,
+} from "./vault-utils";
 
 /**
  * Helper function to extract hostname from URL
@@ -53,7 +58,15 @@ export async function handleCheckExistingCredentials(payload: {
 		};
 	}
 
-	const items = await decryptVaultItems();
+	const desktopStatus = desktopSync.getLastStatus();
+	const desktopAvailable = desktopStatus?.available && !desktopStatus.locked;
+
+	let items: Array<any>;
+	try {
+		items = await getDecryptedItemsCacheFirst(!!desktopAvailable);
+	} catch {
+		items = await decryptVaultItems();
+	}
 
 	// Filter by hostname
 	const matchingItems = items.filter((item) =>

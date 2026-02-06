@@ -7,6 +7,7 @@ export default defineManifest({
 	description: "Zero-knowledge password manager with secure autofill",
 	permissions: [
 		"storage",
+		"unlimitedStorage",
 		"activeTab",
 		"scripting",
 		"clipboardWrite",

@@ -131,9 +131,7 @@ export function AccountSwitcher() {
 					email: nextAccount.email,
 				});
 
-				const sessionValid = await storage.isSessionValid(
-					nextAccount.email,
-				);
+				const sessionValid = await storage.isSessionValid(nextAccount.email);
 				if (!sessionValid) {
 					navigate({ to: "/unlock", search: { email: nextAccount.email } });
 				} else {

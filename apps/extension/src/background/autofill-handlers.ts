@@ -16,6 +16,7 @@ import type { MessageResponse } from "./types";
 import {
 	decryptVaultItems,
 	decryptVaultItemsViaDesktop,
+	getDecryptedItemsCacheFirst,
 	hostnameMatches,
 } from "./vault-utils";
 
@@ -56,6 +57,28 @@ export async function handleUpdateAutofillTimestamp(): Promise<MessageResponse> 
 }
 
 /**
+ * Get all decrypted items using cache-first strategy with desktop/WASM fallback
+ */
+async function getAllDecryptedItems(): Promise<Array<DecryptedItem | null>> {
+	const desktopStatus = desktopSync.getLastStatus();
+	const desktopAvailable = desktopStatus?.available && !desktopStatus.locked;
+
+	try {
+		return await getDecryptedItemsCacheFirst(!!desktopAvailable);
+	} catch (error) {
+		console.warn("[autofill] Cache-first failed, falling back:", error);
+		if (desktopAvailable) {
+			try {
+				return await decryptVaultItemsViaDesktop();
+			} catch {
+				return await decryptVaultItems();
+			}
+		}
+		return await decryptVaultItems();
+	}
+}
+
+/**
  * Handle GET_AUTOFILL_ITEMS message - Get autofill items for a hostname
  */
 export async function handleGetAutofillItems(payload: {
@@ -64,38 +87,12 @@ export async function handleGetAutofillItems(payload: {
 	updateActivity();
 
 	const { hostname } = payload;
-
-	// Check if desktop is available and we should use desktop mode
-	const desktopStatus = desktopSync.getLastStatus();
-	const desktopAvailable = desktopStatus?.available && !desktopStatus.locked;
-
-	if (desktopAvailable) {
-		console.log(
-			"[autofill] Using desktop mode for decryption (desktop available)",
-		);
-		try {
-			const items = await decryptVaultItemsViaDesktop();
-			const filtered = items.filter(
-				(item) =>
-					item?.category === "login" && hostnameMatches(item?.url, hostname),
-			);
-			return { success: true, items: filtered };
-		} catch (error) {
-			console.error(
-				"[autofill] Desktop decryption failed, falling back to WASM:",
-				error,
-			);
-			// Fall through to standalone mode
-		}
-	}
-
-	console.log("[autofill] Using standalone mode (WASM crypto)");
-	const items = await decryptVaultItems();
+	const items = await getAllDecryptedItems();
 
 	// Filter by hostname and only include login items
 	const filtered = items.filter(
 		(item) =>
-			item?.category === "login" && hostnameMatches(item?.url, hostname),
+			item?.category === "login" && hostnameMatches(item?.url ?? "", hostname),
 	);
 
 	return { success: true, items: filtered };
@@ -107,26 +104,7 @@ export async function handleGetAutofillItems(payload: {
 export async function handleGetAutofillCreditCards(): Promise<MessageResponse> {
 	updateActivity();
 
-	// Check if desktop is available
-	const desktopStatus = desktopSync.getLastStatus();
-	const desktopAvailable = desktopStatus?.available && !desktopStatus.locked;
-
-	let items: Array<DecryptedItem | null>;
-	if (desktopAvailable) {
-		console.log("[autofill] Using desktop mode for credit card decryption");
-		try {
-			items = await decryptVaultItemsViaDesktop();
-		} catch (error) {
-			console.error(
-				"[autofill] Desktop decryption failed, falling back to WASM:",
-				error,
-			);
-			items = await decryptVaultItems();
-		}
-	} else {
-		console.log("[autofill] Using standalone mode for credit cards");
-		items = await decryptVaultItems();
-	}
+	const items = await getAllDecryptedItems();
 
 	// Filter to only credit card items
 	const creditCards = items.filter(
@@ -142,26 +120,7 @@ export async function handleGetAutofillCreditCards(): Promise<MessageResponse> {
 export async function handleGetAutofillIdentities(): Promise<MessageResponse> {
 	updateActivity();
 
-	// Check if desktop is available
-	const desktopStatus = desktopSync.getLastStatus();
-	const desktopAvailable = desktopStatus?.available && !desktopStatus.locked;
-
-	let items: Array<DecryptedItem | null>;
-	if (desktopAvailable) {
-		console.log("[autofill] Using desktop mode for identity decryption");
-		try {
-			items = await decryptVaultItemsViaDesktop();
-		} catch (error) {
-			console.error(
-				"[autofill] Desktop decryption failed, falling back to WASM:",
-				error,
-			);
-			items = await decryptVaultItems();
-		}
-	} else {
-		console.log("[autofill] Using standalone mode for identities");
-		items = await decryptVaultItems();
-	}
+	const items = await getAllDecryptedItems();
 
 	// Filter to only identity items
 	const identities = items.filter((item) => item?.category === "identity");
