@@ -156,6 +156,7 @@ interface CredentialField {
 	icon?: HTMLElement;
 	messageHandler?: (event: MessageEvent) => void;
 	inputHandler?: (event: Event) => void;
+	repositionCleanup?: () => void;
 	readyTimeout?: NodeJS.Timeout;
 	confidence?: number;
 	shadowRoot?: ShadowRoot;
@@ -169,6 +170,7 @@ interface CreditCardField {
 	icon?: HTMLElement;
 	messageHandler?: (event: MessageEvent) => void;
 	inputHandler?: (event: Event) => void;
+	repositionCleanup?: () => void;
 	readyTimeout?: NodeJS.Timeout;
 	confidence?: number;
 	shadowRoot?: ShadowRoot;
@@ -183,6 +185,7 @@ interface IdentityField {
 	icon?: HTMLElement;
 	messageHandler?: (event: MessageEvent) => void;
 	inputHandler?: (event: Event) => void;
+	repositionCleanup?: () => void;
 	readyTimeout?: NodeJS.Timeout;
 	confidence?: number;
 	shadowRoot?: ShadowRoot;
@@ -196,6 +199,9 @@ const detectedIdentityFields = new Map<HTMLInputElement, IdentityField>();
 let currentFocusedField: CredentialField | null = null;
 let currentFocusedCreditCardField: CreditCardField | null = null;
 let currentFocusedIdentityField: IdentityField | null = null;
+let currentAutofillIframe: HTMLIFrameElement | null = null;
+let currentCreditCardIframe: HTMLIFrameElement | null = null;
+let currentIdentityIframe: HTMLIFrameElement | null = null;
 
 // Track if we're currently autofilling to prevent filter triggering
 let isAutofilling = false;
@@ -330,6 +336,9 @@ function detectCreditCardFieldsOnPage(root: Document | ShadowRoot = document) {
 
 		if (detectedCreditCardFields.has(input)) continue;
 
+		// Skip fields already registered as credential fields to avoid dual focus handlers
+		if (detectedFields.has(input)) continue;
+
 		// Only process credit card fields with sufficient confidence
 		if (enhancedField.confidence < 0.1) continue;
 
@@ -378,6 +387,10 @@ function detectIdentityFieldsOnPage(root: Document | ShadowRoot = document) {
 		const input = enhancedField.element;
 
 		if (detectedIdentityFields.has(input)) continue;
+
+		// Skip fields already registered as credential or credit card fields to avoid dual focus handlers
+		if (detectedFields.has(input)) continue;
+		if (detectedCreditCardFields.has(input)) continue;
 
 		// Only process identity fields with sufficient confidence
 		if (enhancedField.confidence < 0.1) continue;
@@ -1499,6 +1512,9 @@ async function handleFieldFocus(field: CredentialField) {
 		type: "CHECK_AUTOFILL_AUTH",
 	});
 
+	// If field was blurred during async work, don't show overlay
+	if (currentFocusedField !== field) return;
+
 	if (!response.authenticated) {
 		// Show icon even when locked (to indicate autofill is available)
 		field.hasItems = false;
@@ -1519,6 +1535,9 @@ async function handleFieldFocus(field: CredentialField) {
 		type: "GET_AUTOFILL_ITEMS",
 		payload: { hostname },
 	});
+
+	// If field was blurred during async work, don't show overlay
+	if (currentFocusedField !== field) return;
 
 	const hasItems = itemsResponse.items && itemsResponse.items.length > 0;
 	field.hasItems = hasItems;
@@ -1571,6 +1590,9 @@ async function handleCreditCardFieldFocus(field: CreditCardField) {
 		type: "CHECK_AUTOFILL_AUTH",
 	});
 
+	// If field was blurred during async work, don't show overlay
+	if (currentFocusedCreditCardField !== field) return;
+
 	if (!response.authenticated) {
 		// Show icon even when locked
 		field.hasItems = false;
@@ -1589,6 +1611,9 @@ async function handleCreditCardFieldFocus(field: CreditCardField) {
 	const itemsResponse = await chrome.runtime.sendMessage({
 		type: "GET_AUTOFILL_CREDIT_CARDS",
 	});
+
+	// If field was blurred during async work, don't show overlay
+	if (currentFocusedCreditCardField !== field) return;
 
 	const hasItems = itemsResponse.items && itemsResponse.items.length > 0;
 	field.hasItems = hasItems;
@@ -1637,23 +1662,51 @@ function showCreditCardAutofillOverlay(
 	// Attach shadow DOM
 	const shadow = shadowHost.attachShadow({ mode: "open" });
 
-	// Position overlay
-	const rect = field.input.getBoundingClientRect();
-	shadowHost.style.top = `${rect.bottom + window.scrollY}px`;
-	shadowHost.style.left = `${rect.left}px`;
-	shadowHost.style.width = `${Math.max(rect.width, 300)}px`;
+	// Position overlay relative to viewport (fixed positioning)
+	const positionOverlay = () => {
+		const rect = field.input.getBoundingClientRect();
+		shadowHost.style.top = `${rect.bottom}px`;
+		shadowHost.style.left = `${rect.left}px`;
+		shadowHost.style.width = `${Math.max(rect.width, 300)}px`;
+	};
+	positionOverlay();
+
+	// Track position with rAF — handles scroll, resize, and layout shifts
+	let overlayRafId: number;
+	let lastBottom = field.input.getBoundingClientRect().bottom;
+	let lastLeft = field.input.getBoundingClientRect().left;
+	let lastWidth = field.input.getBoundingClientRect().width;
+	const trackOverlayPosition = () => {
+		if (!field.overlay || !field.input.isConnected) return;
+		const r = field.input.getBoundingClientRect();
+		if (
+			r.bottom !== lastBottom ||
+			r.left !== lastLeft ||
+			r.width !== lastWidth
+		) {
+			lastBottom = r.bottom;
+			lastLeft = r.left;
+			lastWidth = r.width;
+			positionOverlay();
+		}
+		overlayRafId = requestAnimationFrame(trackOverlayPosition);
+	};
+	overlayRafId = requestAnimationFrame(trackOverlayPosition);
+	field.repositionCleanup = () => cancelAnimationFrame(overlayRafId);
 
 	// Create iframe for credit card selection
 	const iframe = document.createElement("iframe");
 	iframe.style.border = "none";
 	iframe.style.width = "100%";
-	iframe.style.height = "auto";
-	iframe.style.maxHeight = "300px";
+	iframe.style.height = "0px";
+	iframe.style.maxHeight = "240px";
 	iframe.style.display = "block";
+	iframe.style.overflow = "hidden";
 	iframe.src = chrome.runtime.getURL("credit-card-autofill-iframe.html");
 
 	shadow.appendChild(iframe);
 	field.overlay = shadowHost;
+	currentCreditCardIframe = iframe;
 
 	// Trigger animation after a brief delay
 	setTimeout(() => {
@@ -1680,6 +1733,8 @@ function showCreditCardAutofillOverlay(
 			);
 		} else if (event.data.type === "CREDIT_CARD_SELECT") {
 			handleCreditCardAutofillSelect(field, event.data.item);
+		} else if (event.data.type === "RESIZE_IFRAME" && event.data.height > 0) {
+			iframe.style.height = `${event.data.height}px`;
 		}
 	};
 
@@ -1702,7 +1757,11 @@ function showCreditCardAutofillOverlay(
 	}, 100);
 
 	// Add keyboard navigation
-	document.addEventListener("keydown", handleCreditCardKeyboardNavigation);
+	document.addEventListener(
+		"keydown",
+		handleCreditCardKeyboardNavigation,
+		true,
+	);
 
 	// Add input event listener for real-time filtering
 	let filterTimeout: NodeJS.Timeout;
@@ -1735,6 +1794,11 @@ function hideCreditCardAutofillOverlay(field: CreditCardField) {
 		field.overlay.remove();
 		field.overlay = undefined;
 	}
+	currentCreditCardIframe = null;
+	if (field.repositionCleanup) {
+		field.repositionCleanup();
+		field.repositionCleanup = undefined;
+	}
 	if (field.messageHandler) {
 		window.removeEventListener("message", field.messageHandler);
 		field.messageHandler = undefined;
@@ -1747,7 +1811,11 @@ function hideCreditCardAutofillOverlay(field: CreditCardField) {
 		clearTimeout(field.readyTimeout);
 		field.readyTimeout = undefined;
 	}
-	document.removeEventListener("keydown", handleCreditCardKeyboardNavigation);
+	document.removeEventListener(
+		"keydown",
+		handleCreditCardKeyboardNavigation,
+		true,
+	);
 }
 
 // Handle keyboard navigation for credit card overlay
@@ -1758,7 +1826,19 @@ function handleCreditCardKeyboardNavigation(event: KeyboardEvent) {
 			currentFocusedCreditCardField = null;
 		}
 	}
-	// Arrow keys and Enter are handled by iframe
+	if (
+		event.key === "ArrowDown" ||
+		event.key === "ArrowUp" ||
+		event.key === "Enter"
+	) {
+		if (currentCreditCardIframe) {
+			event.preventDefault();
+			currentCreditCardIframe.contentWindow?.postMessage(
+				{ type: "KEYBOARD_NAV", key: event.key },
+				"*",
+			);
+		}
+	}
 }
 
 // Apply visual feedback highlight to an input field
@@ -1919,7 +1999,7 @@ function showCreditCardUnlockPrompt(field: CreditCardField) {
 
 	// Position overlay
 	const rect = field.input.getBoundingClientRect();
-	shadowHost.style.top = `${rect.bottom + window.scrollY}px`;
+	shadowHost.style.top = `${rect.bottom}px`;
 	shadowHost.style.left = `${rect.left}px`;
 	shadowHost.style.width = `${Math.max(rect.width, 300)}px`;
 
@@ -1927,9 +2007,10 @@ function showCreditCardUnlockPrompt(field: CreditCardField) {
 	const iframe = document.createElement("iframe");
 	iframe.style.border = "none";
 	iframe.style.width = "100%";
-	iframe.style.height = "auto";
-	iframe.style.maxHeight = "300px";
+	iframe.style.height = "0px";
+	iframe.style.maxHeight = "240px";
 	iframe.style.display = "block";
+	iframe.style.overflow = "hidden";
 	iframe.src = chrome.runtime.getURL("credit-card-autofill-iframe.html");
 
 	shadow.appendChild(iframe);
@@ -1956,6 +2037,8 @@ function showCreditCardUnlockPrompt(field: CreditCardField) {
 				},
 				"*",
 			);
+		} else if (event.data.type === "RESIZE_IFRAME" && event.data.height > 0) {
+			iframe.style.height = `${event.data.height}px`;
 		}
 	};
 
@@ -1985,8 +2068,8 @@ function showCreditCardReauthPrompt(field: CreditCardField) {
 
 	// Position prompt
 	const rect = field.input.getBoundingClientRect();
-	shadowHost.style.top = `${rect.bottom + window.scrollY}px`;
-	shadowHost.style.left = `${rect.left + window.scrollX}px`;
+	shadowHost.style.top = `${rect.bottom}px`;
+	shadowHost.style.left = `${rect.left}px`;
 	shadowHost.style.width = `${Math.max(rect.width, 250)}px`;
 
 	// Create prompt UI
@@ -2070,6 +2153,9 @@ async function handleIdentityFieldFocus(field: IdentityField) {
 		type: "CHECK_AUTOFILL_AUTH",
 	});
 
+	// If field was blurred during async work, don't show overlay
+	if (currentFocusedIdentityField !== field) return;
+
 	if (!response.authenticated) {
 		// Show icon even when locked
 		field.hasItems = false;
@@ -2088,6 +2174,9 @@ async function handleIdentityFieldFocus(field: IdentityField) {
 	const itemsResponse = await chrome.runtime.sendMessage({
 		type: "GET_AUTOFILL_IDENTITIES",
 	});
+
+	// If field was blurred during async work, don't show overlay
+	if (currentFocusedIdentityField !== field) return;
 
 	const hasItems = itemsResponse.items && itemsResponse.items.length > 0;
 	field.hasItems = hasItems;
@@ -2136,23 +2225,51 @@ function showIdentityAutofillOverlay(
 	// Attach shadow DOM
 	const shadow = shadowHost.attachShadow({ mode: "open" });
 
-	// Position overlay
-	const rect = field.input.getBoundingClientRect();
-	shadowHost.style.top = `${rect.bottom + window.scrollY}px`;
-	shadowHost.style.left = `${rect.left}px`;
-	shadowHost.style.width = `${Math.max(rect.width, 300)}px`;
+	// Position overlay relative to viewport (fixed positioning)
+	const positionOverlay = () => {
+		const rect = field.input.getBoundingClientRect();
+		shadowHost.style.top = `${rect.bottom}px`;
+		shadowHost.style.left = `${rect.left}px`;
+		shadowHost.style.width = `${Math.max(rect.width, 300)}px`;
+	};
+	positionOverlay();
+
+	// Track position with rAF — handles scroll, resize, and layout shifts
+	let overlayRafId: number;
+	let lastBottom = field.input.getBoundingClientRect().bottom;
+	let lastLeft = field.input.getBoundingClientRect().left;
+	let lastWidth = field.input.getBoundingClientRect().width;
+	const trackOverlayPosition = () => {
+		if (!field.overlay || !field.input.isConnected) return;
+		const r = field.input.getBoundingClientRect();
+		if (
+			r.bottom !== lastBottom ||
+			r.left !== lastLeft ||
+			r.width !== lastWidth
+		) {
+			lastBottom = r.bottom;
+			lastLeft = r.left;
+			lastWidth = r.width;
+			positionOverlay();
+		}
+		overlayRafId = requestAnimationFrame(trackOverlayPosition);
+	};
+	overlayRafId = requestAnimationFrame(trackOverlayPosition);
+	field.repositionCleanup = () => cancelAnimationFrame(overlayRafId);
 
 	// Create iframe for identity selection
 	const iframe = document.createElement("iframe");
 	iframe.style.border = "none";
 	iframe.style.width = "100%";
-	iframe.style.height = "auto";
-	iframe.style.maxHeight = "300px";
+	iframe.style.height = "0px";
+	iframe.style.maxHeight = "240px";
 	iframe.style.display = "block";
+	iframe.style.overflow = "hidden";
 	iframe.src = chrome.runtime.getURL("identity-autofill-iframe.html");
 
 	shadow.appendChild(iframe);
 	field.overlay = shadowHost;
+	currentIdentityIframe = iframe;
 
 	// Trigger animation after a brief delay
 	setTimeout(() => {
@@ -2179,6 +2296,8 @@ function showIdentityAutofillOverlay(
 			);
 		} else if (event.data.type === "IDENTITY_SELECT") {
 			handleIdentityAutofillSelect(field, event.data.item);
+		} else if (event.data.type === "RESIZE_IFRAME" && event.data.height > 0) {
+			iframe.style.height = `${event.data.height}px`;
 		}
 	};
 
@@ -2201,7 +2320,7 @@ function showIdentityAutofillOverlay(
 	}, 100);
 
 	// Add keyboard navigation
-	document.addEventListener("keydown", handleIdentityKeyboardNavigation);
+	document.addEventListener("keydown", handleIdentityKeyboardNavigation, true);
 
 	// Add input event listener for real-time filtering
 	let filterTimeout: NodeJS.Timeout;
@@ -2234,6 +2353,11 @@ function hideIdentityAutofillOverlay(field: IdentityField) {
 		field.overlay.remove();
 		field.overlay = undefined;
 	}
+	currentIdentityIframe = null;
+	if (field.repositionCleanup) {
+		field.repositionCleanup();
+		field.repositionCleanup = undefined;
+	}
 	if (field.messageHandler) {
 		window.removeEventListener("message", field.messageHandler);
 		field.messageHandler = undefined;
@@ -2246,7 +2370,11 @@ function hideIdentityAutofillOverlay(field: IdentityField) {
 		clearTimeout(field.readyTimeout);
 		field.readyTimeout = undefined;
 	}
-	document.removeEventListener("keydown", handleIdentityKeyboardNavigation);
+	document.removeEventListener(
+		"keydown",
+		handleIdentityKeyboardNavigation,
+		true,
+	);
 }
 
 // Handle keyboard navigation for identity overlay
@@ -2257,7 +2385,19 @@ function handleIdentityKeyboardNavigation(event: KeyboardEvent) {
 			currentFocusedIdentityField = null;
 		}
 	}
-	// Arrow keys and Enter are handled by iframe
+	if (
+		event.key === "ArrowDown" ||
+		event.key === "ArrowUp" ||
+		event.key === "Enter"
+	) {
+		if (currentIdentityIframe) {
+			event.preventDefault();
+			currentIdentityIframe.contentWindow?.postMessage(
+				{ type: "KEYBOARD_NAV", key: event.key },
+				"*",
+			);
+		}
+	}
 }
 
 // Handle identity autofill selection
@@ -2490,7 +2630,7 @@ function showIdentityUnlockPrompt(field: IdentityField) {
 
 	// Position overlay
 	const rect = field.input.getBoundingClientRect();
-	shadowHost.style.top = `${rect.bottom + window.scrollY}px`;
+	shadowHost.style.top = `${rect.bottom}px`;
 	shadowHost.style.left = `${rect.left}px`;
 	shadowHost.style.width = `${Math.max(rect.width, 300)}px`;
 
@@ -2498,9 +2638,10 @@ function showIdentityUnlockPrompt(field: IdentityField) {
 	const iframe = document.createElement("iframe");
 	iframe.style.border = "none";
 	iframe.style.width = "100%";
-	iframe.style.height = "auto";
-	iframe.style.maxHeight = "300px";
+	iframe.style.height = "0px";
+	iframe.style.maxHeight = "240px";
 	iframe.style.display = "block";
+	iframe.style.overflow = "hidden";
 	iframe.src = chrome.runtime.getURL("identity-autofill-iframe.html");
 
 	shadow.appendChild(iframe);
@@ -2527,6 +2668,8 @@ function showIdentityUnlockPrompt(field: IdentityField) {
 				},
 				"*",
 			);
+		} else if (event.data.type === "RESIZE_IFRAME" && event.data.height > 0) {
+			iframe.style.height = `${event.data.height}px`;
 		}
 	};
 
@@ -2556,8 +2699,8 @@ function showIdentityReauthPrompt(field: IdentityField) {
 
 	// Position prompt
 	const rect = field.input.getBoundingClientRect();
-	shadowHost.style.top = `${rect.bottom + window.scrollY}px`;
-	shadowHost.style.left = `${rect.left + window.scrollX}px`;
+	shadowHost.style.top = `${rect.bottom}px`;
+	shadowHost.style.left = `${rect.left}px`;
 	shadowHost.style.width = `${Math.max(rect.width, 250)}px`;
 
 	// Create prompt UI
@@ -2617,6 +2760,47 @@ function showIdentityReauthPrompt(field: IdentityField) {
 /**
  * Create and show the autofill icon indicator inside the input field
  */
+/**
+ * Detect if the input has sibling elements (e.g. password show/hide toggle)
+ * overlapping its right side, and return the appropriate right offset for the icon.
+ */
+function getInputRightOffset(input: HTMLInputElement): number {
+	const BASE_OFFSET = 32; // 8px gap + 24px icon width
+	const inputRect = input.getBoundingClientRect();
+	let maxOverlap = 0;
+
+	// Check computed padding-right — many sites use padding to make room for toggle buttons
+	const paddingRight =
+		Number.parseFloat(window.getComputedStyle(input).paddingRight) || 0;
+	if (paddingRight > 35) {
+		maxOverlap = Math.max(maxOverlap, paddingRight - 16);
+	}
+
+	// Check sibling elements for buttons/toggles near the right edge of the input
+	const parent = input.parentElement;
+	if (parent) {
+		for (const el of parent.children) {
+			if (el === input || !(el instanceof HTMLElement)) continue;
+			const elRect = el.getBoundingClientRect();
+			if (elRect.width === 0 || elRect.height === 0) continue;
+
+			// Check if element is positioned near the right side of the input and vertically aligned
+			const isNearRightEdge = elRect.left >= inputRect.right - 60;
+			const isVerticallyAligned =
+				elRect.top < inputRect.bottom && elRect.bottom > inputRect.top;
+
+			if (isNearRightEdge && isVerticallyAligned) {
+				const overlap = inputRect.right - elRect.left;
+				if (overlap > 0) {
+					maxOverlap = Math.max(maxOverlap, overlap + 4);
+				}
+			}
+		}
+	}
+
+	return BASE_OFFSET + maxOverlap;
+}
+
 function showFieldIcon(
 	field: CredentialField | CreditCardField | IdentityField,
 	hasItems: boolean,
@@ -2650,11 +2834,10 @@ function showFieldIcon(
 		transition: background-color 0.15s ease;
 	`;
 
-	// Position relative to the input (fixed positioning, no scroll offset needed)
+	// Position relative to the input, accounting for any toggle buttons on the right
 	const rect = input.getBoundingClientRect();
-	// Place icon 8px from the right edge of the input
-	iconHost.style.left = `${rect.right - 32}px`;
-	// Center vertically: top of input + half the input height - half the icon height
+	const rightOffset = getInputRightOffset(input);
+	iconHost.style.left = `${rect.right - rightOffset}px`;
 	iconHost.style.top = `${rect.top + (rect.height - 24) / 2}px`;
 
 	// Create shadow DOM for icon
@@ -2750,28 +2933,29 @@ function showFieldIcon(
 		}
 	});
 
-	// Update icon position on scroll/resize
-	const updateIconPosition = () => {
-		if (!field.icon || !input.isConnected) {
-			return;
+	// Track icon position with rAF — handles scroll, resize, and layout shifts
+	let rafId: number;
+	let lastTop = rect.top;
+	let lastRight = rect.right;
+	let lastHeight = rect.height;
+
+	const trackIconPosition = () => {
+		if (!field.icon || !input.isConnected) return;
+		const r = input.getBoundingClientRect();
+		if (r.top !== lastTop || r.right !== lastRight || r.height !== lastHeight) {
+			lastTop = r.top;
+			lastRight = r.right;
+			lastHeight = r.height;
+			const offset = getInputRightOffset(input);
+			iconHost.style.left = `${r.right - offset}px`;
+			iconHost.style.top = `${r.top + (r.height - 24) / 2}px`;
 		}
-		const rect = input.getBoundingClientRect();
-		iconHost.style.left = `${rect.right - 32}px`;
-		// Center vertically: top of input + half the input height - half the icon height
-		iconHost.style.top = `${rect.top + (rect.height - 24) / 2}px`;
+		rafId = requestAnimationFrame(trackIconPosition);
 	};
-
-	window.addEventListener("scroll", updateIconPosition, { passive: true });
-	window.addEventListener("resize", updateIconPosition, { passive: true });
-
-	// Store cleanup function
-	const cleanup = () => {
-		window.removeEventListener("scroll", updateIconPosition);
-		window.removeEventListener("resize", updateIconPosition);
-	};
+	rafId = requestAnimationFrame(trackIconPosition);
 
 	// Attach cleanup to icon element
-	(iconHost as any)._cleanup = cleanup;
+	(iconHost as any)._cleanup = () => cancelAnimationFrame(rafId);
 }
 
 /**
@@ -2812,23 +2996,51 @@ function showAutofillOverlay(field: CredentialField, items: DecryptedItem[]) {
 	// Attach shadow DOM
 	const shadow = shadowHost.attachShadow({ mode: "open" });
 
-	// Position overlay
-	const rect = field.input.getBoundingClientRect();
-	shadowHost.style.top = `${rect.bottom + window.scrollY}px`;
-	shadowHost.style.left = `${rect.left}px`;
-	shadowHost.style.width = `${Math.max(rect.width, 300)}px`;
+	// Position overlay relative to viewport (fixed positioning)
+	const positionOverlay = () => {
+		const rect = field.input.getBoundingClientRect();
+		shadowHost.style.top = `${rect.bottom}px`;
+		shadowHost.style.left = `${rect.left}px`;
+		shadowHost.style.width = `${Math.max(rect.width, 300)}px`;
+	};
+	positionOverlay();
+
+	// Track position with rAF — handles scroll, resize, and layout shifts
+	let overlayRafId: number;
+	let lastBottom = field.input.getBoundingClientRect().bottom;
+	let lastLeft = field.input.getBoundingClientRect().left;
+	let lastWidth = field.input.getBoundingClientRect().width;
+	const trackOverlayPosition = () => {
+		if (!field.overlay || !field.input.isConnected) return;
+		const r = field.input.getBoundingClientRect();
+		if (
+			r.bottom !== lastBottom ||
+			r.left !== lastLeft ||
+			r.width !== lastWidth
+		) {
+			lastBottom = r.bottom;
+			lastLeft = r.left;
+			lastWidth = r.width;
+			positionOverlay();
+		}
+		overlayRafId = requestAnimationFrame(trackOverlayPosition);
+	};
+	overlayRafId = requestAnimationFrame(trackOverlayPosition);
+	field.repositionCleanup = () => cancelAnimationFrame(overlayRafId);
 
 	// Create iframe
 	const iframe = document.createElement("iframe");
 	iframe.style.border = "none";
 	iframe.style.width = "100%";
-	iframe.style.height = "auto";
-	iframe.style.maxHeight = "300px";
+	iframe.style.height = "0px";
+	iframe.style.maxHeight = "240px";
 	iframe.style.display = "block";
+	iframe.style.overflow = "hidden";
 	iframe.src = chrome.runtime.getURL("autofill-iframe.html");
 
 	shadow.appendChild(iframe);
 	field.overlay = shadowHost;
+	currentAutofillIframe = iframe;
 
 	// Trigger animation after a brief delay
 	setTimeout(() => {
@@ -2855,6 +3067,8 @@ function showAutofillOverlay(field: CredentialField, items: DecryptedItem[]) {
 			);
 		} else if (event.data.type === "AUTOFILL_SELECT") {
 			handleAutofillSelect(field, event.data.item);
+		} else if (event.data.type === "RESIZE_IFRAME" && event.data.height > 0) {
+			iframe.style.height = `${event.data.height}px`;
 		}
 	};
 
@@ -2875,7 +3089,7 @@ function showAutofillOverlay(field: CredentialField, items: DecryptedItem[]) {
 	}, 100);
 
 	// Add keyboard navigation
-	document.addEventListener("keydown", handleKeyboardNavigation);
+	document.addEventListener("keydown", handleKeyboardNavigation, true);
 
 	// Add input event listener for real-time filtering
 	let filterTimeout: NodeJS.Timeout;
@@ -2908,6 +3122,11 @@ function hideAutofillOverlay(field: CredentialField) {
 		field.overlay.remove();
 		field.overlay = undefined;
 	}
+	currentAutofillIframe = null;
+	if (field.repositionCleanup) {
+		field.repositionCleanup();
+		field.repositionCleanup = undefined;
+	}
 	if (field.messageHandler) {
 		window.removeEventListener("message", field.messageHandler);
 		field.messageHandler = undefined;
@@ -2920,7 +3139,7 @@ function hideAutofillOverlay(field: CredentialField) {
 		clearTimeout(field.readyTimeout);
 		field.readyTimeout = undefined;
 	}
-	document.removeEventListener("keydown", handleKeyboardNavigation);
+	document.removeEventListener("keydown", handleKeyboardNavigation, true);
 }
 
 // Handle keyboard navigation
@@ -2935,7 +3154,19 @@ function handleKeyboardNavigation(event: KeyboardEvent) {
 			currentFocusedCreditCardField = null;
 		}
 	}
-	// Arrow keys and Enter are handled by iframe
+	if (
+		event.key === "ArrowDown" ||
+		event.key === "ArrowUp" ||
+		event.key === "Enter"
+	) {
+		if (currentAutofillIframe) {
+			event.preventDefault();
+			currentAutofillIframe.contentWindow?.postMessage(
+				{ type: "KEYBOARD_NAV", key: event.key },
+				"*",
+			);
+		}
+	}
 }
 
 // Handle autofill selection
@@ -3056,7 +3287,7 @@ function showUnlockPrompt(field: CredentialField) {
 
 	// Position overlay
 	const rect = field.input.getBoundingClientRect();
-	shadowHost.style.top = `${rect.bottom + window.scrollY}px`;
+	shadowHost.style.top = `${rect.bottom}px`;
 	shadowHost.style.left = `${rect.left}px`;
 	shadowHost.style.width = `${Math.max(rect.width, 300)}px`;
 
@@ -3064,9 +3295,10 @@ function showUnlockPrompt(field: CredentialField) {
 	const iframe = document.createElement("iframe");
 	iframe.style.border = "none";
 	iframe.style.width = "100%";
-	iframe.style.height = "auto";
-	iframe.style.maxHeight = "300px";
+	iframe.style.height = "0px";
+	iframe.style.maxHeight = "240px";
 	iframe.style.display = "block";
+	iframe.style.overflow = "hidden";
 	iframe.src = chrome.runtime.getURL("autofill-iframe.html");
 
 	shadow.appendChild(iframe);
@@ -3093,6 +3325,8 @@ function showUnlockPrompt(field: CredentialField) {
 				},
 				"*",
 			);
+		} else if (event.data.type === "RESIZE_IFRAME" && event.data.height > 0) {
+			iframe.style.height = `${event.data.height}px`;
 		}
 	};
 
@@ -3122,8 +3356,8 @@ function showReauthPrompt(field: CredentialField) {
 
 	// Position prompt
 	const rect = field.input.getBoundingClientRect();
-	shadowHost.style.top = `${rect.bottom + window.scrollY}px`;
-	shadowHost.style.left = `${rect.left + window.scrollX}px`;
+	shadowHost.style.top = `${rect.bottom}px`;
+	shadowHost.style.left = `${rect.left}px`;
 	shadowHost.style.width = `${Math.max(rect.width, 250)}px`;
 
 	// Create prompt UI
@@ -3175,6 +3409,62 @@ function showReauthPrompt(field: CredentialField) {
 		shadowHost.remove();
 	}, 5000);
 }
+
+// Close overlays when clicking outside the input, overlay, or icon
+document.addEventListener(
+	"mousedown",
+	(e) => {
+		const path = e.composedPath();
+
+		if (currentFocusedField) {
+			const isOnInput = path.includes(currentFocusedField.input);
+			const isOnOverlay =
+				currentFocusedField.overlay &&
+				path.includes(currentFocusedField.overlay);
+			const isOnIcon =
+				currentFocusedField.icon && path.includes(currentFocusedField.icon);
+
+			if (!isOnInput && !isOnOverlay && !isOnIcon) {
+				hideAutofillOverlay(currentFocusedField);
+				hideFieldIcon(currentFocusedField);
+				currentFocusedField = null;
+			}
+		}
+
+		if (currentFocusedCreditCardField) {
+			const isOnInput = path.includes(currentFocusedCreditCardField.input);
+			const isOnOverlay =
+				currentFocusedCreditCardField.overlay &&
+				path.includes(currentFocusedCreditCardField.overlay);
+			const isOnIcon =
+				currentFocusedCreditCardField.icon &&
+				path.includes(currentFocusedCreditCardField.icon);
+
+			if (!isOnInput && !isOnOverlay && !isOnIcon) {
+				hideCreditCardAutofillOverlay(currentFocusedCreditCardField);
+				hideFieldIcon(currentFocusedCreditCardField);
+				currentFocusedCreditCardField = null;
+			}
+		}
+
+		if (currentFocusedIdentityField) {
+			const isOnInput = path.includes(currentFocusedIdentityField.input);
+			const isOnOverlay =
+				currentFocusedIdentityField.overlay &&
+				path.includes(currentFocusedIdentityField.overlay);
+			const isOnIcon =
+				currentFocusedIdentityField.icon &&
+				path.includes(currentFocusedIdentityField.icon);
+
+			if (!isOnInput && !isOnOverlay && !isOnIcon) {
+				hideIdentityAutofillOverlay(currentFocusedIdentityField);
+				hideFieldIcon(currentFocusedIdentityField);
+				currentFocusedIdentityField = null;
+			}
+		}
+	},
+	true,
+);
 
 // Run detection on load and on DOM changes
 if (document.readyState === "loading") {

@@ -1,5 +1,11 @@
+import {
+	Separator,
+	SidebarInset,
+	SidebarProvider,
+	SidebarTrigger,
+} from "@bittery/ui";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
-import { MobileNav, Sidebar } from "@/components/layout/sidebar";
+import { AppSidebar } from "@/components/layout/sidebar";
 import { storage } from "@/lib/storage";
 
 export const Route = createFileRoute("/_app")({
@@ -13,17 +19,18 @@ export const Route = createFileRoute("/_app")({
 
 function AppLayout() {
 	return (
-		<div className="flex h-screen bg-background">
-			<Sidebar />
-			<div className="flex flex-1 flex-col overflow-hidden">
-				<header className="flex h-14 items-center gap-4 border-b bg-background px-4 lg:hidden">
-					<MobileNav />
-					<span className="font-bold">Bittery</span>
+		<SidebarProvider>
+			<AppSidebar />
+			<SidebarInset>
+				<header className="flex h-16 shrink-0 items-center gap-2">
+					<div className="flex items-center gap-2 px-5">
+						<SidebarTrigger className="-ml-1" />
+					</div>
 				</header>
-				<main className="flex-1 overflow-auto p-4 lg:p-6">
+				<div className="flex flex-1 flex-col gap-4 px-5 py-4 pt-0">
 					<Outlet />
-				</main>
-			</div>
-		</div>
+				</div>
+			</SidebarInset>
+		</SidebarProvider>
 	);
 }

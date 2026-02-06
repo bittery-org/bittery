@@ -2,26 +2,30 @@ import { useTRPC } from "@bittery/shared/trpc";
 import {
 	Avatar,
 	AvatarFallback,
-	Button,
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
-	ScrollArea,
-	Separator,
-	Sheet,
-	SheetContent,
-	SheetTrigger,
+	Sidebar,
+	SidebarContent,
+	SidebarFooter,
+	SidebarGroup,
+	SidebarGroupContent,
+	SidebarGroupLabel,
+	SidebarHeader,
+	SidebarMenu,
+	SidebarMenuButton,
+	SidebarMenuItem,
+	useSidebar,
 } from "@bittery/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
+	ChevronsUpDown,
 	Home,
-	KeyRound,
 	Lock,
 	LogOut,
-	Menu,
 	Settings,
 	ShieldCheck,
 	Users,
@@ -36,38 +40,11 @@ const navItems = [
 	{ path: "/settings", icon: Settings, label: "Settings" },
 ] as const;
 
-function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
-	const routerState = useRouterState();
-	const currentPath = routerState.location.pathname;
-
-	return (
-		<nav className="flex flex-col gap-1">
-			{navItems.map((item) => {
-				const isActive = currentPath.startsWith(item.path);
-				return (
-					<Link
-						key={item.path}
-						to={item.path}
-						onClick={onNavigate}
-						className={`flex items-center gap-3 rounded-lg px-3 py-2 font-medium text-sm transition-colors ${
-							isActive
-								? "bg-primary text-primary-foreground"
-								: "text-muted-foreground hover:bg-muted hover:text-foreground"
-						}`}
-					>
-						<item.icon className="h-4 w-4" />
-						{item.label}
-					</Link>
-				);
-			})}
-		</nav>
-	);
-}
-
 function UserNav() {
 	const trpc = useTRPC();
 	const queryClient = useQueryClient();
 	const navigate = useNavigate();
+	const { isMobile } = useSidebar();
 	const userQuery = useQuery(trpc.auth.me.queryOptions());
 	const user = userQuery.data;
 	const initials = user?.name
@@ -86,81 +63,102 @@ function UserNav() {
 	};
 
 	return (
-		<DropdownMenu>
-			<DropdownMenuTrigger asChild>
-				<Button variant="ghost" className="w-full justify-start gap-3 px-3">
-					<Avatar className="h-8 w-8">
-						<AvatarFallback className="text-xs">{initials}</AvatarFallback>
-					</Avatar>
-					<div className="flex flex-col items-start text-left">
-						<span className="font-medium text-sm">{user?.name || "User"}</span>
-						<span className="max-w-[140px] truncate text-muted-foreground text-xs">
-							{user?.email || ""}
-						</span>
-					</div>
-				</Button>
-			</DropdownMenuTrigger>
-			<DropdownMenuContent align="start" className="w-56">
-				<DropdownMenuItem asChild>
-					<Link to="/settings" className="cursor-pointer">
-						<Settings className="mr-2 h-4 w-4" />
-						Settings
-					</Link>
-				</DropdownMenuItem>
-				<DropdownMenuSeparator />
-				<DropdownMenuItem
-					onClick={handleLogout}
-					className="cursor-pointer text-destructive"
-				>
-					<LogOut className="mr-2 h-4 w-4" />
-					Log out
-				</DropdownMenuItem>
-			</DropdownMenuContent>
-		</DropdownMenu>
+		<SidebarMenu>
+			<SidebarMenuItem>
+				<DropdownMenu>
+					<DropdownMenuTrigger asChild>
+						<SidebarMenuButton
+							size="lg"
+							className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+						>
+							<Avatar className="h-8 w-8 rounded-lg">
+								<AvatarFallback className="rounded-lg text-xs">
+									{initials}
+								</AvatarFallback>
+							</Avatar>
+							<div className="grid flex-1 text-left text-sm leading-tight">
+								<span className="truncate font-medium">
+									{user?.name || "User"}
+								</span>
+								<span className="truncate text-muted-foreground text-xs">
+									{user?.email || ""}
+								</span>
+							</div>
+							<ChevronsUpDown className="ml-auto size-4" />
+						</SidebarMenuButton>
+					</DropdownMenuTrigger>
+					<DropdownMenuContent
+						className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
+						side={isMobile ? "bottom" : "right"}
+						align="end"
+						sideOffset={4}
+					>
+						<DropdownMenuItem asChild>
+							<Link to="/settings" className="cursor-pointer">
+								<Settings className="mr-2 h-4 w-4" />
+								Settings
+							</Link>
+						</DropdownMenuItem>
+						<DropdownMenuSeparator />
+						<DropdownMenuItem
+							onClick={handleLogout}
+							className="cursor-pointer text-destructive"
+						>
+							<LogOut className="mr-2 h-4 w-4" />
+							Log out
+						</DropdownMenuItem>
+					</DropdownMenuContent>
+				</DropdownMenu>
+			</SidebarMenuItem>
+		</SidebarMenu>
 	);
 }
 
-export function Sidebar() {
+export function AppSidebar() {
+	const routerState = useRouterState();
+	const currentPath = routerState.location.pathname;
+
 	return (
-		<aside className="hidden w-64 flex-col border-r bg-background lg:flex">
-			<div className="flex px-5 pt-4">
-				<img src="/logo.png" alt="Bittery Logo" className="h-10 w-auto" />
-			</div>
-			<ScrollArea className="flex-1 px-3 py-4">
-				<NavLinks />
-			</ScrollArea>
-			<Separator />
-			<div className="p-3">
+		<Sidebar variant="inset">
+			<SidebarHeader>
+				<SidebarMenu>
+					<SidebarMenuItem>
+						<SidebarMenuButton size="lg" asChild>
+							<Link to="/home">
+								<img src="/logo.png" alt="Bittery" className="h-10 w-auto" />
+							</Link>
+						</SidebarMenuButton>
+					</SidebarMenuItem>
+				</SidebarMenu>
+			</SidebarHeader>
+
+			<SidebarContent>
+				<SidebarGroup>
+					<SidebarGroupLabel>Navigation</SidebarGroupLabel>
+					<SidebarGroupContent>
+						<SidebarMenu>
+							{navItems.map((item) => (
+								<SidebarMenuItem key={item.path}>
+									<SidebarMenuButton
+										asChild
+										isActive={currentPath.startsWith(item.path)}
+										tooltip={item.label}
+									>
+										<Link to={item.path}>
+											<item.icon />
+											<span>{item.label}</span>
+										</Link>
+									</SidebarMenuButton>
+								</SidebarMenuItem>
+							))}
+						</SidebarMenu>
+					</SidebarGroupContent>
+				</SidebarGroup>
+			</SidebarContent>
+
+			<SidebarFooter>
 				<UserNav />
-			</div>
-		</aside>
-	);
-}
-
-export function MobileNav() {
-	return (
-		<Sheet>
-			<SheetTrigger asChild>
-				<Button variant="ghost" size="icon" className="lg:hidden">
-					<Menu className="h-5 w-5" />
-					<span className="sr-only">Toggle menu</span>
-				</Button>
-			</SheetTrigger>
-			<SheetContent side="left" className="w-64 p-0">
-				<div className="flex h-14 items-center gap-2 border-b px-4">
-					<div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-						<KeyRound className="h-4 w-4" />
-					</div>
-					<span className="font-bold text-lg">Bittery</span>
-				</div>
-				<ScrollArea className="flex-1 px-3 py-4">
-					<NavLinks />
-				</ScrollArea>
-				<Separator />
-				<div className="p-3">
-					<UserNav />
-				</div>
-			</SheetContent>
-		</Sheet>
+			</SidebarFooter>
+		</Sidebar>
 	);
 }

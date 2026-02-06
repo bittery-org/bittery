@@ -306,19 +306,26 @@ export async function handleGetVaultItem(payload: {
 export async function handleGetWritableVaults(): Promise<MessageResponse> {
 	updateActivity();
 
-	// Fetch all vaults
-	const vaults = await trpcClient.vault.list.query();
+	try {
+		// Fetch all vaults
+		const vaults = await trpcClient.vault.list.query();
 
-	// Filter out read-only vaults (only return vaults user can write to)
-	const writableVaults = vaults.filter((vault) => vault.role !== "read-only");
+		// Filter out read-only vaults (only return vaults user can write to)
+		const writableVaults = vaults.filter(
+			(vault) => vault.role !== "read-only",
+		);
 
-	return {
-		success: true,
-		vaults: writableVaults.map((v) => ({
-			id: v.id,
-			name: v.name,
-			type: v.type,
-			role: v.role,
-		})),
-	};
+		return {
+			success: true,
+			vaults: writableVaults.map((v) => ({
+				id: v.id,
+				name: v.name,
+				type: v.type,
+				role: v.role,
+			})),
+		};
+	} catch (error) {
+		console.error("[vault-handlers] GET_WRITABLE_VAULTS failed:", error);
+		return { success: false, error: String(error) };
+	}
 }
