@@ -41,10 +41,7 @@ function RouteComponent() {
 
 				<div className="order-1 mx-auto flex max-w-lg flex-col justify-start space-y-6 p-4 lg:order-2 lg:mx-0 lg:p-12">
 					<div className="mb-4 flex items-center gap-3 text-primary">
-						<div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-							<ShieldCheck className="h-6 w-6" />
-						</div>
-						<span className="font-bold text-2xl tracking-tight">Bittery</span>
+						<img src="/logo.png" alt="Bittery Logo" className="h-16 w-auto" />
 					</div>
 					<div className="space-y-4">
 						<h1 className="font-bold text-4xl tracking-tighter md:text-5xl">

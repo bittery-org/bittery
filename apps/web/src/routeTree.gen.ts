@@ -17,10 +17,9 @@ import { Route as AuthLoginRouteImport } from './routes/_auth/login'
 import { Route as AppSecurityRouteImport } from './routes/_app/security'
 import { Route as AppHomeRouteImport } from './routes/_app/home'
 import { Route as AppVaultsIndexRouteImport } from './routes/_app/vaults/index'
-import { Route as AppTeamsIndexRouteImport } from './routes/_app/teams/index'
+import { Route as AppTeamIndexRouteImport } from './routes/_app/team/index'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
 import { Route as AppVaultsVaultIdIndexRouteImport } from './routes/_app/vaults/$vaultId/index'
-import { Route as AppTeamsTeamIdIndexRouteImport } from './routes/_app/teams/$teamId/index'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -61,9 +60,9 @@ const AppVaultsIndexRoute = AppVaultsIndexRouteImport.update({
   path: '/vaults/',
   getParentRoute: () => AppRoute,
 } as any)
-const AppTeamsIndexRoute = AppTeamsIndexRouteImport.update({
-  id: '/teams/',
-  path: '/teams/',
+const AppTeamIndexRoute = AppTeamIndexRouteImport.update({
+  id: '/team/',
+  path: '/team/',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
@@ -76,11 +75,6 @@ const AppVaultsVaultIdIndexRoute = AppVaultsVaultIdIndexRouteImport.update({
   path: '/vaults/$vaultId/',
   getParentRoute: () => AppRoute,
 } as any)
-const AppTeamsTeamIdIndexRoute = AppTeamsTeamIdIndexRouteImport.update({
-  id: '/teams/$teamId/',
-  path: '/teams/$teamId/',
-  getParentRoute: () => AppRoute,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -90,9 +84,8 @@ export interface FileRoutesByFullPath {
   '/invite/$token': typeof InviteTokenRoute
   '/share/$token': typeof ShareTokenRoute
   '/settings/': typeof AppSettingsIndexRoute
-  '/teams/': typeof AppTeamsIndexRoute
+  '/team/': typeof AppTeamIndexRoute
   '/vaults/': typeof AppVaultsIndexRoute
-  '/teams/$teamId/': typeof AppTeamsTeamIdIndexRoute
   '/vaults/$vaultId/': typeof AppVaultsVaultIdIndexRoute
 }
 export interface FileRoutesByTo {
@@ -103,9 +96,8 @@ export interface FileRoutesByTo {
   '/invite/$token': typeof InviteTokenRoute
   '/share/$token': typeof ShareTokenRoute
   '/settings': typeof AppSettingsIndexRoute
-  '/teams': typeof AppTeamsIndexRoute
+  '/team': typeof AppTeamIndexRoute
   '/vaults': typeof AppVaultsIndexRoute
-  '/teams/$teamId': typeof AppTeamsTeamIdIndexRoute
   '/vaults/$vaultId': typeof AppVaultsVaultIdIndexRoute
 }
 export interface FileRoutesById {
@@ -118,9 +110,8 @@ export interface FileRoutesById {
   '/invite/$token': typeof InviteTokenRoute
   '/share/$token': typeof ShareTokenRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
-  '/_app/teams/': typeof AppTeamsIndexRoute
+  '/_app/team/': typeof AppTeamIndexRoute
   '/_app/vaults/': typeof AppVaultsIndexRoute
-  '/_app/teams/$teamId/': typeof AppTeamsTeamIdIndexRoute
   '/_app/vaults/$vaultId/': typeof AppVaultsVaultIdIndexRoute
 }
 export interface FileRouteTypes {
@@ -133,9 +124,8 @@ export interface FileRouteTypes {
     | '/invite/$token'
     | '/share/$token'
     | '/settings/'
-    | '/teams/'
+    | '/team/'
     | '/vaults/'
-    | '/teams/$teamId/'
     | '/vaults/$vaultId/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -146,9 +136,8 @@ export interface FileRouteTypes {
     | '/invite/$token'
     | '/share/$token'
     | '/settings'
-    | '/teams'
+    | '/team'
     | '/vaults'
-    | '/teams/$teamId'
     | '/vaults/$vaultId'
   id:
     | '__root__'
@@ -160,9 +149,8 @@ export interface FileRouteTypes {
     | '/invite/$token'
     | '/share/$token'
     | '/_app/settings/'
-    | '/_app/teams/'
+    | '/_app/team/'
     | '/_app/vaults/'
-    | '/_app/teams/$teamId/'
     | '/_app/vaults/$vaultId/'
   fileRoutesById: FileRoutesById
 }
@@ -232,11 +220,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppVaultsIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/teams/': {
-      id: '/_app/teams/'
-      path: '/teams'
-      fullPath: '/teams/'
-      preLoaderRoute: typeof AppTeamsIndexRouteImport
+    '/_app/team/': {
+      id: '/_app/team/'
+      path: '/team'
+      fullPath: '/team/'
+      preLoaderRoute: typeof AppTeamIndexRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings/': {
@@ -253,13 +241,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppVaultsVaultIdIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/teams/$teamId/': {
-      id: '/_app/teams/$teamId/'
-      path: '/teams/$teamId'
-      fullPath: '/teams/$teamId/'
-      preLoaderRoute: typeof AppTeamsTeamIdIndexRouteImport
-      parentRoute: typeof AppRoute
-    }
   }
 }
 
@@ -267,9 +248,8 @@ interface AppRouteChildren {
   AppHomeRoute: typeof AppHomeRoute
   AppSecurityRoute: typeof AppSecurityRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
-  AppTeamsIndexRoute: typeof AppTeamsIndexRoute
+  AppTeamIndexRoute: typeof AppTeamIndexRoute
   AppVaultsIndexRoute: typeof AppVaultsIndexRoute
-  AppTeamsTeamIdIndexRoute: typeof AppTeamsTeamIdIndexRoute
   AppVaultsVaultIdIndexRoute: typeof AppVaultsVaultIdIndexRoute
 }
 
@@ -277,9 +257,8 @@ const AppRouteChildren: AppRouteChildren = {
   AppHomeRoute: AppHomeRoute,
   AppSecurityRoute: AppSecurityRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
-  AppTeamsIndexRoute: AppTeamsIndexRoute,
+  AppTeamIndexRoute: AppTeamIndexRoute,
   AppVaultsIndexRoute: AppVaultsIndexRoute,
-  AppTeamsTeamIdIndexRoute: AppTeamsTeamIdIndexRoute,
   AppVaultsVaultIdIndexRoute: AppVaultsVaultIdIndexRoute,
 }
 

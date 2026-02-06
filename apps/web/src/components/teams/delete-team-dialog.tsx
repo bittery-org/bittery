@@ -38,7 +38,7 @@ export function DeleteTeamDialog({ teamId, teamName }: DeleteTeamDialogProps) {
 			toast.success("Team deleted successfully");
 			await invalidator.invalidateTeam();
 			setOpen(false);
-			navigate({ to: "/teams" });
+			navigate({ to: "/team" });
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);

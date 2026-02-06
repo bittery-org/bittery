@@ -1,6 +1,5 @@
 import { useTRPC } from "@bittery/shared/trpc";
 import {
-	Button,
 	Card,
 	CardContent,
 	CardDescription,
@@ -13,34 +12,40 @@ import {
 	TabsTrigger,
 } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, CreditCard, Mail, Settings, Users } from "lucide-react";
+import { createFileRoute } from "@tanstack/react-router";
+import { Mail, Settings, Users } from "lucide-react";
 import { InviteDialog } from "@/components/teams/invite-dialog";
 import { MemberList } from "@/components/teams/member-list";
 import { PendingInvitationsList } from "@/components/teams/pending-invitations-list";
-import { TeamBilling } from "@/components/teams/team-billing";
 import { TeamSettings } from "@/components/teams/team-settings";
 
-export const Route = createFileRoute("/_app/teams/$teamId/")({
-	component: TeamDetailPage,
+export const Route = createFileRoute("/_app/team/")({
+	component: TeamPage,
 });
 
-function TeamDetailPage() {
-	const { teamId } = Route.useParams();
+function TeamPage() {
 	const trpc = useTRPC();
 
-	const teamQuery = useQuery(trpc.team.get.queryOptions({ teamId }));
-	const membersQuery = useQuery(
-		trpc.team.members.list.queryOptions({ teamId }),
-	);
-	const invitationsQuery = useQuery(
-		trpc.team.invitations.list.queryOptions({ teamId }),
-	);
+	const teamListQuery = useQuery(trpc.team.list.queryOptions());
+	const teamId = teamListQuery.data?.id;
+
+	const teamQuery = useQuery({
+		...trpc.team.get.queryOptions({ teamId: teamId! }),
+		enabled: !!teamId,
+	});
+	const membersQuery = useQuery({
+		...trpc.team.members.list.queryOptions({ teamId: teamId! }),
+		enabled: !!teamId,
+	});
+	const invitationsQuery = useQuery({
+		...trpc.team.invitations.list.queryOptions({ teamId: teamId! }),
+		enabled: !!teamId,
+	});
 
 	const team = teamQuery.data;
 	const canEdit = team?.userRole === "owner" || team?.userRole === "admin";
 
-	if (teamQuery.isLoading) {
+	if (teamListQuery.isLoading || teamQuery.isLoading) {
 		return (
 			<div className="space-y-6">
 				<Skeleton className="h-8 w-48" />
@@ -52,10 +57,7 @@ function TeamDetailPage() {
 	if (!team) {
 		return (
 			<div className="py-8 text-center">
-				<p className="text-muted-foreground">Team not found</p>
-				<Link to="/teams" className="text-primary hover:underline">
-					Back to teams
-				</Link>
+				<p className="text-muted-foreground">No team found</p>
 			</div>
 		);
 	}
@@ -63,11 +65,6 @@ function TeamDetailPage() {
 	return (
 		<div className="space-y-6">
 			<div className="flex items-center gap-4">
-				<Link to="/teams">
-					<Button variant="ghost" size="icon">
-						<ArrowLeft className="h-4 w-4" />
-					</Button>
-				</Link>
 				<div className="flex-1">
 					<h1 className="font-bold text-3xl tracking-tight">{team.name}</h1>
 					<p className="text-muted-foreground">
@@ -75,7 +72,7 @@ function TeamDetailPage() {
 						Created by {team.ownerName}
 					</p>
 				</div>
-				{canEdit && <InviteDialog teamId={teamId} />}
+				{canEdit && teamId && <InviteDialog teamId={teamId} />}
 			</div>
 
 			<Tabs defaultValue="members">
@@ -92,10 +89,6 @@ function TeamDetailPage() {
 								{invitationsQuery.data.length}
 							</span>
 						) : null}
-					</TabsTrigger>
-					<TabsTrigger value="billing">
-						<CreditCard className="mr-2 h-4 w-4" />
-						Billing
 					</TabsTrigger>
 					<TabsTrigger value="settings">
 						<Settings className="mr-2 h-4 w-4" />
@@ -132,35 +125,28 @@ function TeamDetailPage() {
 						<CardContent>
 							{invitationsQuery.isLoading ? (
 								<Skeleton className="h-32" />
-							) : (
+							) : teamId ? (
 								<PendingInvitationsList
 									teamId={teamId}
 									invitations={invitationsQuery.data || []}
 									canManage={canEdit}
 								/>
-							)}
+							) : null}
 						</CardContent>
 					</Card>
 				</TabsContent>
 
-				<TabsContent value="billing" className="mt-4">
-					<TeamBilling
-						teamId={teamId}
-						teamName={team.name}
-						memberCount={team.memberCount}
-						userRole={team.userRole}
-					/>
-				</TabsContent>
-
 				<TabsContent value="settings" className="mt-4">
-					<TeamSettings
-						teamId={teamId}
-						teamName={team.name}
-						userRole={team.userRole}
-						imageUrl={team.imageUrl}
-						createdAt={team.createdAt}
-						updatedAt={team.updatedAt}
-					/>
+					{teamId && (
+						<TeamSettings
+							teamId={teamId}
+							teamName={team.name}
+							userRole={team.userRole}
+							imageUrl={team.imageUrl}
+							createdAt={team.createdAt}
+							updatedAt={team.updatedAt}
+						/>
+					)}
 				</TabsContent>
 			</Tabs>
 		</div>

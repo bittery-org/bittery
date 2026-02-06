@@ -48,7 +48,7 @@ function InvitationPage() {
 		mutationFn: () => trpcClient.team.invitations.accept.mutate({ token }),
 		onSuccess: (data) => {
 			toast.success(`Successfully joined ${data.teamName}!`);
-			navigate({ to: "/teams/$teamId", params: { teamId: data.teamId } });
+			navigate({ to: "/team" });
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);
@@ -60,7 +60,7 @@ function InvitationPage() {
 		mutationFn: () => trpcClient.team.invitations.decline.mutate({ token }),
 		onSuccess: () => {
 			toast.success("Invitation declined");
-			navigate({ to: "/teams" });
+			navigate({ to: "/team" });
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);
@@ -147,7 +147,7 @@ function InvitationPage() {
 						</CardDescription>
 					</CardHeader>
 					<CardFooter className="justify-center">
-						<Link to={authenticated ? "/teams" : "/login"}>
+						<Link to={authenticated ? "/team" : "/login"}>
 							<Button variant="outline">
 								{authenticated ? "Go to Teams" : "Go to Login"}
 							</Button>

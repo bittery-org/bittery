@@ -35,7 +35,7 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 			toast.success("You have left the team");
 			await invalidator.invalidateTeam();
 			setOpen(false);
-			navigate({ to: "/teams" });
+			navigate({ to: "/team" });
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);
