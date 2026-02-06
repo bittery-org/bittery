@@ -24,6 +24,7 @@ export interface StoredSessionData {
 	encryptedMasterUnlockKey: EncryptedData;
 	email: string;
 	userId: string;
+	sessionId?: string;
 	expiresAt: number; // timestamp
 	createdAt: number; // timestamp
 	biometricEnabled?: boolean;

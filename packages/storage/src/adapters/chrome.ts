@@ -193,6 +193,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		email: string,
 		userId: string,
 		expiryMs: number = DEFAULT_SESSION_EXPIRY_MS,
+		sessionId?: string,
 	): Promise<void> {
 		const resolvedEmail = email.toLowerCase();
 		const deviceKey = await getDeviceKey();
@@ -206,6 +207,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			encryptedMasterUnlockKey: encryptedMUK,
 			email: resolvedEmail,
 			userId,
+			sessionId,
 			expiresAt: now + expiryMs,
 			createdAt: now,
 		};

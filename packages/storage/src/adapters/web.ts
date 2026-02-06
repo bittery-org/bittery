@@ -116,6 +116,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 		email: string,
 		userId: string,
 		expiryMs: number = DEFAULT_SESSION_EXPIRY_MS,
+		sessionId?: string,
 	): Promise<void> {
 		if (typeof window === "undefined") return;
 
@@ -130,6 +131,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 			encryptedMasterUnlockKey: encryptedMUK,
 			email,
 			userId,
+			sessionId,
 			expiresAt: now + expiryMs,
 			createdAt: now,
 		};

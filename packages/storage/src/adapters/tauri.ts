@@ -331,6 +331,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		email: string,
 		userId: string,
 		expiryMs: number = DEFAULT_SESSION_EXPIRY_MS,
+		sessionId?: string,
 	): Promise<void> {
 		const resolvedEmail = email.toLowerCase();
 		const store = await this.getStore();
@@ -348,6 +349,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			encryptedMasterUnlockKey: encryptedMUK,
 			email: resolvedEmail,
 			userId,
+			sessionId,
 			expiresAt: now + expiryMs,
 			createdAt: now,
 			biometricEnabled,

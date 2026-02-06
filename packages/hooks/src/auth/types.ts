@@ -38,6 +38,7 @@ export interface LoginUserData {
  */
 export interface LoginResult {
 	token: string;
+	sessionId?: string;
 	user: LoginUserData;
 	vaultKeys: VaultKeyData[];
 	masterUnlockKey: Uint8Array;
@@ -48,6 +49,7 @@ export interface LoginResult {
  */
 export interface UnlockResult {
 	token: string;
+	sessionId?: string;
 	user: LoginUserData;
 	vaultKeys: VaultKeyData[];
 	masterUnlockKey: Uint8Array;

@@ -78,6 +78,7 @@ export interface IStorageAdapter {
 		email: string,
 		userId: string,
 		expiryMs?: number,
+		sessionId?: string,
 	): Promise<void>;
 
 	/**

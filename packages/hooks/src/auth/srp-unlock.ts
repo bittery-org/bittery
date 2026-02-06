@@ -97,6 +97,7 @@ export async function performSRPUnlock(
 
 	return {
 		token: finishResult.token,
+		sessionId: finishResult.sessionId,
 		user: finishResult.user,
 		vaultKeys: finishResult.vaultKeys,
 		masterUnlockKey,
@@ -136,6 +137,8 @@ export async function storeUnlockSession(
 		result.masterUnlockKey,
 		resolvedEmail,
 		result.user.id,
+		undefined,
+		result.sessionId,
 	);
 
 	// Store MUK in memory

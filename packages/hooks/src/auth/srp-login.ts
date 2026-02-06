@@ -97,6 +97,7 @@ export async function performSRPLogin(
 
 	return {
 		token: finishResult.token,
+		sessionId: finishResult.sessionId,
 		user: finishResult.user,
 		vaultKeys: finishResult.vaultKeys,
 		masterUnlockKey,
@@ -151,6 +152,8 @@ export async function storeLoginSession(
 		result.masterUnlockKey,
 		resolvedEmail,
 		result.user.id,
+		undefined,
+		result.sessionId,
 	);
 
 	// Store MUK in memory
