@@ -1,7 +1,7 @@
 import type { AppRouter } from "@bittery/api/routers/index";
 import { buildTrpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
 import { toast } from "@bittery/ui";
-import { QueryCache, QueryClient } from "@tanstack/react-query";
+import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import { storage } from "@/lib/storage";
@@ -10,9 +10,39 @@ const fallbackServerUrl =
 	normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
 	"http://localhost:3000";
 
+let isHandlingAuthError = false;
+
+function isUnauthorizedError(error: unknown): boolean {
+	if (
+		error &&
+		typeof error === "object" &&
+		"data" in error &&
+		(error as any).data?.code === "UNAUTHORIZED"
+	) {
+		return true;
+	}
+	return false;
+}
+
+function handleUnauthorizedError() {
+	if (isHandlingAuthError) return;
+	isHandlingAuthError = true;
+
+	queryClient.clear();
+
+	storage.clearSession().then(() => {
+		toast.error("Session revoked. Please sign in again.");
+		window.location.href = "/";
+	});
+}
+
 const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {
+			if (isUnauthorizedError(error)) {
+				handleUnauthorizedError();
+				return;
+			}
 			toast.error(error.message, {
 				action: {
 					label: "retry",
@@ -21,6 +51,13 @@ const queryClient = new QueryClient({
 					},
 				},
 			});
+		},
+	}),
+	mutationCache: new MutationCache({
+		onError: (error) => {
+			if (isUnauthorizedError(error)) {
+				handleUnauthorizedError();
+			}
 		},
 	}),
 	defaultOptions: { queries: { staleTime: 60 * 1000 } },

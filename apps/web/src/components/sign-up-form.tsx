@@ -175,7 +175,13 @@ export default function SignUpForm({
 
 				// 9. Store secret key and encrypted session for quick unlock
 				await storage.storeSecretKey(secretKey);
-				await storage.storeSessionData(masterUnlockKey, email, result.userId, undefined, result.sessionId);
+				await storage.storeSessionData(
+					masterUnlockKey,
+					email,
+					result.userId,
+					undefined,
+					result.sessionId,
+				);
 
 				const daysUntil = Math.floor(
 					DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24),

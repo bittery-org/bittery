@@ -13,6 +13,7 @@ import { initWasmCrypto } from "./lib/wasm-crypto";
 initWasmCrypto();
 
 import {
+	MutationCache,
 	QueryCache,
 	QueryClient,
 	QueryClientProvider,
@@ -23,9 +24,39 @@ import { WebPlatformProvider } from "./providers/platform-provider";
 import { SyncProvider } from "./providers/sync-provider";
 import { routeTree } from "./routeTree.gen";
 
+let isHandlingAuthError = false;
+
+function isUnauthorizedError(error: unknown): boolean {
+	if (
+		error &&
+		typeof error === "object" &&
+		"data" in error &&
+		(error as any).data?.code === "UNAUTHORIZED"
+	) {
+		return true;
+	}
+	return false;
+}
+
+function handleUnauthorizedError() {
+	if (isHandlingAuthError) return;
+	isHandlingAuthError = true;
+
+	queryClient.clear();
+
+	storage.clearSession().then(() => {
+		toast.error("Session revoked. Please sign in again.");
+		window.location.href = "/login";
+	});
+}
+
 export const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {
+			if (isUnauthorizedError(error)) {
+				handleUnauthorizedError();
+				return;
+			}
 			toast.error(error.message, {
 				action: {
 					label: "retry",
@@ -34,6 +65,13 @@ export const queryClient = new QueryClient({
 					},
 				},
 			});
+		},
+	}),
+	mutationCache: new MutationCache({
+		onError: (error) => {
+			if (isUnauthorizedError(error)) {
+				handleUnauthorizedError();
+			}
 		},
 	}),
 	defaultOptions: { queries: { staleTime: 60 * 1000 } },
