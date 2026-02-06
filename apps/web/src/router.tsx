@@ -40,12 +40,17 @@ function isUnauthorizedError(error: unknown): boolean {
 
 function handleUnauthorizedError() {
 	if (isHandlingAuthError) return;
+
+	// Don't handle unauthorized errors on public routes — avoids infinite reload loop
+	// when sync or other background queries fire without a valid token
+	if (window.location.pathname === "/login") return;
+
 	isHandlingAuthError = true;
 
 	queryClient.clear();
 
 	storage.clearSession().then(() => {
-		toast.error("Session revoked. Please sign in again.");
+		toast.error("Session expired. Please sign in again.");
 		window.location.href = "/login";
 	});
 }

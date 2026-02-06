@@ -26,6 +26,12 @@ function isUnauthorizedError(error: unknown): boolean {
 
 function handleUnauthorizedError() {
 	if (isHandlingAuthError) return;
+
+	// Don't handle unauthorized errors on public routes — avoids infinite reload loop
+	// when sync or other background queries fire without a valid token
+	const path = window.location.pathname;
+	if (path === "/login" || path === "/unlock") return;
+
 	isHandlingAuthError = true;
 
 	queryClient.clear();

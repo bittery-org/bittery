@@ -169,7 +169,7 @@ export function LoginPage() {
 				{/* Left side - Branding */}
 				<div className="relative hidden flex-col items-center justify-center overflow-hidden bg-sidebar p-12 md:flex">
 					{/* Subtle gradient accent */}
-					<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/[0.04] via-transparent to-primary/[0.02]" />
+					<div className="pointer-events-none absolute inset-0 bg-linear-to-br from-primary/4 via-transparent to-primary/2" />
 
 					<div className="relative flex max-w-sm flex-col items-center space-y-10 text-center">
 						<img
