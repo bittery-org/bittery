@@ -1,8 +1,13 @@
 import type { DecryptedItem } from "@bittery/shared/types";
-import { Badge, Button, Input, Skeleton, toast } from "@bittery/ui";
+import { Badge, Button, cn, Input, Skeleton, toast } from "@bittery/ui";
+import {
+	IconGear3OutlineDuo18,
+	IconMobileOutlineDuo18,
+	IconPlusOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Plus, Search, Settings } from "lucide-react";
+import { Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ExtensionAccountSwitcher } from "@/components/account-switcher";
 import { Favicon } from "@/components/favicon";
@@ -58,6 +63,72 @@ function hostnameMatches(
 	} catch {
 		return false;
 	}
+}
+
+function ItemListRow({
+	item,
+	isSelected,
+	isAllAccountsMode,
+	onClick,
+}: {
+	item: DecryptedItem & { account?: { name: string } };
+	isSelected: boolean;
+	isAllAccountsMode: boolean;
+	onClick: () => void;
+}) {
+	const title = item.title;
+	const subtitle = item.username || item.url;
+
+	return (
+		<button
+			className={cn(
+				"mb-1 w-full cursor-pointer rounded-md px-3 py-2.5 text-left transition-colors",
+				isSelected
+					? "bg-primary text-primary-foreground"
+					: "hover:bg-primary/10",
+			)}
+			onClick={onClick}
+			type="button"
+		>
+			<div className="flex min-w-0 items-center gap-3">
+				<Favicon
+					url={item.url}
+					title={title}
+					category={item.category}
+					size="sm"
+				/>
+				<div className="min-w-0 flex-1">
+					<div className="flex items-center gap-1.5">
+						<span className="truncate font-medium text-sm">{title}</span>
+						{item.category === "login" && item.totpSecret && (
+							<span title="Has 2FA">
+								<IconMobileOutlineDuo18 className="size-3 shrink-0" />
+							</span>
+						)}
+					</div>
+					{subtitle && (
+						<div
+							className={cn(
+								"mt-0.5 truncate text-xs",
+								isSelected
+									? "text-primary-foreground"
+									: "text-muted-foreground",
+							)}
+						>
+							{subtitle}
+						</div>
+					)}
+					{isAllAccountsMode && (item as MultiAccountItem).account && (
+						<div className="mt-0.5 flex items-center gap-1">
+							<Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+								{(item as MultiAccountItem).account?.name}
+							</Badge>
+						</div>
+					)}
+				</div>
+			</div>
+		</button>
+	);
 }
 
 export function VaultPage() {
@@ -197,10 +268,10 @@ export function VaultPage() {
 							onClick={() => navigate({ to: "/settings" })}
 							title="Settings"
 						>
-							<Settings size={18} />
+							<IconGear3OutlineDuo18 className="size-[18px]" />
 						</Button>
 						<Button size="sm" onClick={handleOpenDesktopApp}>
-							<Plus size={16} className="mr-2" />
+							<IconPlusOutlineDuo18 className="mr-2 size-4" />
 							New Item
 						</Button>
 					</div>
@@ -208,7 +279,7 @@ export function VaultPage() {
 			</header>
 
 			<div className="flex flex-1 overflow-hidden">
-				<aside className="flex w-[280px] flex-col border-r bg-muted/20">
+				<aside className="flex w-[220px] shrink-0 flex-col border-r bg-muted/20">
 					<div className="border-b p-3">
 						<div className="relative">
 							<Search
@@ -258,103 +329,29 @@ export function VaultPage() {
 										<div className="mb-2 px-2 font-semibold text-muted-foreground text-xs uppercase">
 											Favorites
 										</div>
-										{favoriteItems.map((item) => {
-											const title = item.title;
-											const subtitle = item.username || item.url;
-											return (
-												<button
-													key={item.id}
-													className={`mb-1 w-full rounded-md border border-transparent px-3 py-2.5 text-left transition-colors hover:bg-muted/40 ${
-														item.id === selectedItemId
-															? "border-border bg-muted/60"
-															: ""
-													}`}
-													onClick={() => setSelectedItemId(item.id)}
-													type="button"
-												>
-													<div className="flex min-w-0 items-center gap-3">
-														<Favicon
-															url={item.url}
-															title={title}
-															category={item.category}
-															size="sm"
-														/>
-														<div className="min-w-0 flex-1">
-															<div className="truncate font-medium text-sm">
-																{title}
-															</div>
-															{subtitle && (
-																<div className="mt-0.5 truncate text-muted-foreground text-xs">
-																	{subtitle}
-																</div>
-															)}
-															{isAllAccountsMode &&
-																(item as MultiAccountItem).account && (
-																	<div className="mt-0.5 flex items-center gap-1">
-																		<Badge
-																			variant="secondary"
-																			className="px-1.5 py-0 text-[10px]"
-																		>
-																			{(item as MultiAccountItem).account?.name}
-																		</Badge>
-																	</div>
-																)}
-														</div>
-													</div>
-												</button>
-											);
-										})}
+										{favoriteItems.map((item) => (
+											<ItemListRow
+												key={item.id}
+												item={item}
+												isSelected={item.id === selectedItemId}
+												isAllAccountsMode={isAllAccountsMode}
+												onClick={() => setSelectedItemId(item.id)}
+											/>
+										))}
 										<div className="mt-4 mb-2 px-2 font-semibold text-muted-foreground text-xs uppercase">
 											All Items
 										</div>
 									</>
 								)}
-								{regularItems.map((item) => {
-									const title = item.title;
-									const subtitle = item.username || item.url;
-									return (
-										<button
-											key={item.id}
-											className={`mb-1 w-full rounded-md border border-transparent px-3 py-2.5 text-left transition-colors hover:bg-muted/40 ${
-												item.id === selectedItemId
-													? "border-border bg-muted/60"
-													: ""
-											}`}
-											onClick={() => setSelectedItemId(item.id)}
-											type="button"
-										>
-											<div className="flex min-w-0 items-center gap-3">
-												<Favicon
-													url={item.url}
-													title={title}
-													category={item.category}
-													size="sm"
-												/>
-												<div className="min-w-0 flex-1">
-													<div className="truncate font-medium text-sm">
-														{title}
-													</div>
-													{subtitle && (
-														<div className="mt-0.5 truncate text-muted-foreground text-xs">
-															{subtitle}
-														</div>
-													)}
-													{isAllAccountsMode &&
-														(item as MultiAccountItem).account && (
-															<div className="mt-0.5 flex items-center gap-1">
-																<Badge
-																	variant="secondary"
-																	className="px-1.5 py-0 text-[10px]"
-																>
-																	{(item as MultiAccountItem).account?.name}
-																</Badge>
-															</div>
-														)}
-												</div>
-											</div>
-										</button>
-									);
-								})}
+								{regularItems.map((item) => (
+									<ItemListRow
+										key={item.id}
+										item={item}
+										isSelected={item.id === selectedItemId}
+										isAllAccountsMode={isAllAccountsMode}
+										onClick={() => setSelectedItemId(item.id)}
+									/>
+								))}
 							</div>
 						)}
 					</div>
