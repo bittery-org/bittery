@@ -2792,7 +2792,7 @@ function getInputRightOffset(input: HTMLInputElement): number {
 			if (isNearRightEdge && isVerticallyAligned) {
 				const overlap = inputRect.right - elRect.left;
 				if (overlap > 0) {
-					maxOverlap = Math.max(maxOverlap, overlap + 4);
+					maxOverlap = Math.max(maxOverlap, overlap + 2);
 				}
 			}
 		}
