@@ -60,16 +60,35 @@ export function useRestoreItem() {
 	const invalidator = useQueryInvalidator();
 
 	return useMutation({
-		mutationFn: async (input: RestoreItemInput): Promise<void> => {
+		mutationFn: async (
+			input: RestoreItemInput,
+		): Promise<{ _accountEmail: string | undefined }> => {
+			const accountEmail = findAccountEmailForItem(input.itemId, deletedItems);
 			const client = await getTRPCClientForAccount(
 				storage,
 				defaultClient,
-				findAccountEmailForItem(input.itemId, deletedItems),
+				accountEmail,
 			);
 
 			await client.vault.restoreItem.mutate({ itemId: input.itemId });
+			return { _accountEmail: accountEmail };
 		},
-		onSuccess: async (_data, variables) => {
+		onSuccess: async (data, variables) => {
+			// Update local cache - clear deletedAt to restore item
+			if (storage.supportsItemCache) {
+				const cachedItems = await storage.getCachedItems?.(data._accountEmail);
+				const existing = cachedItems?.find((i) => i.id === variables.itemId);
+				if (existing) {
+					storage.upsertCachedItem?.(
+						{
+							...existing,
+							deletedAt: null,
+							updatedAt: new Date().toISOString(),
+						},
+						data._accountEmail,
+					);
+				}
+			}
 			await invalidator.invalidateVaultList(variables.vaultId);
 			await invalidator.invalidateDeletedItems(variables.vaultId);
 		},

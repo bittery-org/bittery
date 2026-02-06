@@ -3,7 +3,6 @@
  * Allows users to resolve sync conflicts by choosing local or server version
  */
 
-import type { SyncConflict } from "@bittery/sync";
 import {
 	AlertTriangle,
 	ArrowRight,
@@ -21,6 +20,21 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+
+interface SyncConflict {
+	itemId: string;
+	vaultId: string;
+	localItem: {
+		updatedAt: string;
+		localVersion: number;
+	};
+	serverItem: {
+		version: number;
+		updatedAt: string;
+	};
+	conflictType: "update_conflict" | "delete_conflict";
+	detectedAt: number;
+}
 
 interface ConflictResolutionModalProps {
 	visible: boolean;

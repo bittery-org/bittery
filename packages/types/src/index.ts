@@ -139,3 +139,46 @@ export interface ValidationResult {
 	valid: boolean;
 	errors: string[];
 }
+
+// ============================================================================
+// Item Cache Types
+// ============================================================================
+
+/**
+ * Cached encrypted item for local-first storage
+ * Stores the encrypted form (safe at rest, requires vault key to decrypt)
+ */
+export interface CachedEncryptedItem {
+	id: string;
+	vaultId: string;
+	category: string;
+	favorite: boolean;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+	version: number;
+	lastModifiedBy: string | null;
+	createdAt: string;
+	updatedAt: string;
+	deletedAt?: string | null;
+}
+
+/**
+ * Cached vault metadata for local-first storage
+ */
+export interface CachedVaultMetadata {
+	id: string;
+	name: string;
+	type: string;
+	icon: string | null;
+	imageUrl: string | null;
+}
+
+/**
+ * Metadata about the item cache state
+ */
+export interface ItemCacheMetadata {
+	lastFullSyncAt: number;
+	itemCount: number;
+	cacheVersion: number;
+}

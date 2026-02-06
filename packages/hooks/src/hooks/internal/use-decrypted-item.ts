@@ -63,6 +63,31 @@ export function useDecryptedItem(
 			? ["vault-item-account", itemId, accountEmail]
 			: ["vault-item", itemId],
 		queryFn: async () => {
+			// Try cache-first if supported
+			if (storage.supportsItemCache) {
+				const email = accountEmail || undefined;
+				const cachedItems = await storage.getCachedItems?.(email);
+				if (cachedItems) {
+					const cached = cachedItems.find((i) => i.id === itemId);
+					if (cached) {
+						return {
+							id: cached.id,
+							vaultId: cached.vaultId,
+							category: cached.category,
+							favorite: cached.favorite,
+							encryptedData: cached.encryptedData,
+							encryptionIv: cached.encryptionIv,
+							encryptionAlgorithm: cached.encryptionAlgorithm,
+							version: cached.version,
+							lastModifiedBy: cached.lastModifiedBy,
+							createdAt: cached.createdAt,
+							updatedAt: cached.updatedAt,
+							deletedAt: cached.deletedAt,
+						};
+					}
+				}
+			}
+
 			if (accountEmail) {
 				// Use per-account client with that account's token
 				const authToken = await storage.getAuthToken(accountEmail);

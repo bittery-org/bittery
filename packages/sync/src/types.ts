@@ -97,6 +97,24 @@ export interface SyncManagerOptions {
 }
 
 /**
+ * Adapter interface for item cache operations (subset of IStorageAdapter)
+ * Used by delta sync to update local cache on incoming events
+ */
+export interface ItemCacheAdapter {
+	supportsItemCache?: boolean;
+	upsertCachedItem?(
+		item: import("@bittery/types").CachedEncryptedItem,
+		email?: string,
+	): Promise<void>;
+	removeCachedItem?(itemId: string, email?: string): Promise<void>;
+	upsertCachedVault?(
+		vault: import("@bittery/types").CachedVaultMetadata,
+		email?: string,
+	): Promise<void>;
+	removeCachedVault?(vaultId: string, email?: string): Promise<void>;
+}
+
+/**
  * Conflict information
  */
 export interface ConflictInfo {

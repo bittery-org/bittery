@@ -132,7 +132,7 @@ export function createDesktopAutolockService(
 			}
 
 			// Start interval timer (check every second)
-			intervalId = setInterval(checkTimer, 1000);
+			intervalId = setInterval(checkTimer, 5000);
 
 			console.log("[Desktop Autolock] Initialized successfully");
 		},

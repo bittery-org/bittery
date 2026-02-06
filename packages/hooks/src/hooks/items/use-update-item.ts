@@ -70,7 +70,12 @@ export function useUpdateItem() {
 	const invalidator = useQueryInvalidator();
 
 	return useMutation({
-		mutationFn: async (input: UpdateItemInput): Promise<void> => {
+		mutationFn: async (
+			input: UpdateItemInput,
+		): Promise<{
+			_encryptedData: { ciphertext: string; iv: string; algorithm: string };
+			_accountEmail: string | undefined;
+		}> => {
 			// Find which account this item belongs to (if in "All Accounts" mode)
 			const accountEmail = findAccountEmailForItem(input.itemId, items);
 
@@ -102,8 +107,28 @@ export function useUpdateItem() {
 				encryptedData: encryptedData.ciphertext,
 				encryptionIv: encryptedData.iv,
 			});
+
+			return { _encryptedData: encryptedData, _accountEmail: accountEmail };
 		},
-		onSuccess: async (_data, variables) => {
+		onSuccess: async (data, variables) => {
+			// Update local cache if supported
+			if (storage.supportsItemCache) {
+				const cachedItems = await storage.getCachedItems?.(data._accountEmail);
+				const existing = cachedItems?.find((i) => i.id === variables.itemId);
+				if (existing) {
+					storage.upsertCachedItem?.(
+						{
+							...existing,
+							encryptedData: data._encryptedData.ciphertext,
+							encryptionIv: data._encryptedData.iv,
+							encryptionAlgorithm: data._encryptedData.algorithm,
+							updatedAt: new Date().toISOString(),
+							version: existing.version + 1,
+						},
+						data._accountEmail,
+					);
+				}
+			}
 			await invalidator.invalidateItem(variables.itemId, variables.vaultId);
 		},
 	});

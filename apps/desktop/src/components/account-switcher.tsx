@@ -113,12 +113,33 @@ export function AccountSwitcher() {
 
 	const handleRemoveAccount = async (email: string) => {
 		try {
+			const wasActive =
+				activeAccountEmail?.toLowerCase() === email.toLowerCase();
+
 			await removeAccount.mutateAsync(email);
 
-			// Check if there are any accounts left
 			const accountsList = await storage.getAccountsList();
 			if (accountsList.length === 0) {
+				// No accounts left — go to login
+				await storage.setActiveAccount(null);
 				navigate({ to: "/login" });
+			} else if (wasActive) {
+				// Removed the active account — switch to another one
+				const nextAccount = accountsList[0];
+				await switchAccount.mutateAsync({
+					type: "single",
+					email: nextAccount.email,
+				});
+
+				const sessionValid = await storage.isSessionValid(
+					nextAccount.email,
+				);
+				if (!sessionValid) {
+					navigate({ to: "/unlock", search: { email: nextAccount.email } });
+				} else {
+					await invalidator.invalidateAllAccountData();
+					navigate({ to: "/vault" });
+				}
 			}
 
 			toast.success("Account removed");

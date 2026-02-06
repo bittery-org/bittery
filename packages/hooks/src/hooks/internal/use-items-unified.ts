@@ -3,9 +3,11 @@
  *
  * Handles both single account and "All Accounts" mode with a unified implementation.
  * Uses useAccountsInfo to get account data, then fetches items from all accounts in parallel.
+ * Supports local cache-first reads with server fallback for platforms with item caching.
  */
 
 import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
+import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
 import { useQuery } from "@tanstack/react-query";
 import {
 	usePlatformCrypto,
@@ -49,29 +51,60 @@ export interface UseItemsUnifiedOptions {
 }
 
 /**
+ * Build RawEncryptedItemWithVault[] from cached items + vault metadata
+ */
+function buildRawItemsFromCache(
+	cachedItems: CachedEncryptedItem[],
+	cachedVaults: CachedVaultMetadata[],
+): RawEncryptedItemWithVault[] {
+	const vaultMap = new Map<string, CachedVaultMetadata>();
+	for (const v of cachedVaults) {
+		vaultMap.set(v.id, v);
+	}
+
+	return cachedItems
+		.filter((item) => !item.deletedAt)
+		.map((item) => {
+			const vault = vaultMap.get(item.vaultId);
+			return {
+				id: item.id,
+				vaultId: item.vaultId,
+				category: item.category,
+				favorite: item.favorite,
+				encryptedData: item.encryptedData,
+				encryptionIv: item.encryptionIv,
+				encryptionAlgorithm: item.encryptionAlgorithm,
+				createdAt: item.createdAt,
+				updatedAt: item.updatedAt,
+				vault: vault
+					? {
+							id: vault.id,
+							name: vault.name,
+							type: vault.type,
+							icon: vault.icon,
+							imageUrl: vault.imageUrl,
+						}
+					: {
+							id: item.vaultId,
+							name: "Unknown",
+							type: "personal",
+							icon: null,
+							imageUrl: null,
+						},
+			} as RawEncryptedItemWithVault;
+		});
+}
+
+/**
  * Hook to fetch and decrypt items from active account(s).
  *
  * This unified implementation works for both single account and "All Accounts" mode.
  * In single account mode, fetches from one account.
  * In "All Accounts" mode, fetches from all unlocked accounts in parallel.
  *
- * @param options - Query options
- * @returns Object containing all items, loading state, and error
- *
- * @example
- * ```tsx
- * const { items, isLoading, isAllAccountsMode } = useItemsUnified();
- *
- * // Display unified item list
- * items.map(item => (
- *   <ItemCard
- *     key={item.id}
- *     item={item}
- *     accountEmail={item.account?.email}
- *     vaultName={item.vault.name}
- *   />
- * ))
- * ```
+ * Supports cache-first reads: if the storage adapter has cached items,
+ * reads from cache instead of the server. On cache miss, fetches from server
+ * and populates cache for next time.
  */
 export function useItemsUnified(options: UseItemsUnifiedOptions = {}) {
 	const storage = usePlatformStorage();
@@ -99,9 +132,61 @@ export function useItemsUnified(options: UseItemsUnifiedOptions = {}) {
 			const results = await Promise.all(
 				accountsInfo.map(async (account) => {
 					try {
-						// Fetch raw items using the account's tRPC client
-						const rawItems =
-							await account.trpcClient.vault.listAllItems.query();
+						let rawItems: RawEncryptedItemWithVault[];
+
+						// Try cache-first if supported
+						if (storage.supportsItemCache) {
+							const [cachedItems, cachedVaults] = await Promise.all([
+								storage.getCachedItems?.(account.email),
+								storage.getCachedVaults?.(account.email),
+							]);
+
+							if (cachedItems && cachedVaults && cachedItems.length > 0) {
+								// Cache hit - build raw items from cache
+								rawItems = buildRawItemsFromCache(cachedItems, cachedVaults);
+							} else {
+								// Cache miss - fetch from server
+								rawItems = await account.trpcClient.vault.listAllItems.query();
+
+								// Populate cache for next time (fire-and-forget)
+								const itemsToCache: CachedEncryptedItem[] = rawItems.map(
+									(item) => ({
+										id: item.id,
+										vaultId: item.vaultId,
+										category: item.category,
+										favorite: item.favorite,
+										encryptedData: item.encryptedData,
+										encryptionIv: item.encryptionIv,
+										encryptionAlgorithm: item.encryptionAlgorithm,
+										version: 0,
+										lastModifiedBy: null,
+										createdAt: String(item.createdAt),
+										updatedAt: String(item.updatedAt),
+										deletedAt: item.deletedAt ? String(item.deletedAt) : null,
+									}),
+								);
+								const vaultsToCache: CachedVaultMetadata[] = [];
+								const seenVaults = new Set<string>();
+								for (const item of rawItems) {
+									if (!seenVaults.has(item.vault.id)) {
+										seenVaults.add(item.vault.id);
+										vaultsToCache.push({
+											id: item.vault.id,
+											name: item.vault.name,
+											type: item.vault.type,
+											icon: item.vault.icon,
+											imageUrl: item.vault.imageUrl,
+										});
+									}
+								}
+
+								storage.setCachedItems?.(itemsToCache, account.email);
+								storage.setCachedVaults?.(vaultsToCache, account.email);
+							}
+						} else {
+							// No cache support - fetch from server directly
+							rawItems = await account.trpcClient.vault.listAllItems.query();
+						}
 
 						// Decrypt items with vault keys cached per account
 						const vaultKeyCache = new Map<string, Uint8Array>();

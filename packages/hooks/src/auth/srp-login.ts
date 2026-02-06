@@ -122,6 +122,13 @@ export async function storeLoginSession(
 ): Promise<void> {
 	const resolvedEmail = email ?? result.user.email;
 
+	// Clear any stale cached data from a previous account with the same email.
+	// This prevents old vault/item caches from leaking into a new session
+	// (e.g., after account deletion and re-creation with the same email).
+	if (storage.clearItemCache) {
+		await storage.clearItemCache(resolvedEmail);
+	}
+
 	// Store auth token
 	await storage.storeAuthToken(result.token, resolvedEmail);
 

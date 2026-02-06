@@ -65,17 +65,36 @@ export function useDeleteItem() {
 	const invalidator = useQueryInvalidator();
 
 	return useMutation({
-		mutationFn: async (input: DeleteItemInput): Promise<void> => {
+		mutationFn: async (
+			input: DeleteItemInput,
+		): Promise<{ _accountEmail: string | undefined }> => {
 			// Find which account this item belongs to (if in "All Accounts" mode)
+			const accountEmail = findAccountEmailForItem(input.itemId, items);
 			const client = await getTRPCClientForAccount(
 				storage,
 				defaultClient,
-				findAccountEmailForItem(input.itemId, items),
+				accountEmail,
 			);
 
 			await client.vault.deleteItem.mutate({ itemId: input.itemId });
+			return { _accountEmail: accountEmail };
 		},
-		onSuccess: async (_data, variables) => {
+		onSuccess: async (data, variables) => {
+			// Update local cache - mark item as deleted
+			if (storage.supportsItemCache) {
+				const cachedItems = await storage.getCachedItems?.(data._accountEmail);
+				const existing = cachedItems?.find((i) => i.id === variables.itemId);
+				if (existing) {
+					storage.upsertCachedItem?.(
+						{
+							...existing,
+							deletedAt: new Date().toISOString(),
+							updatedAt: new Date().toISOString(),
+						},
+						data._accountEmail,
+					);
+				}
+			}
 			await invalidator.invalidateVaultList(variables.vaultId);
 			await invalidator.invalidateDeletedItems(variables.vaultId);
 		},

@@ -91,7 +91,13 @@ export function useMoveItem() {
 	return useMutation({
 		mutationFn: async (
 			input: MoveItemInput,
-		): Promise<{ crossAccount: boolean; newItemId?: string }> => {
+		): Promise<{
+			crossAccount: boolean;
+			newItemId?: string;
+			_encryptedData?: { ciphertext: string; iv: string; algorithm: string };
+			_sourceAccountEmail?: string;
+			_targetAccountEmail?: string;
+		}> => {
 			// Find which account the source item belongs to
 			const sourceAccountEmail = findAccountEmailForItem(input.itemId, items);
 
@@ -197,7 +203,13 @@ export function useMoveItem() {
 					);
 				}
 
-				return { crossAccount: true, newItemId: createResult.itemId };
+				return {
+					crossAccount: true,
+					newItemId: createResult.itemId,
+					_encryptedData: encryptedData,
+					_sourceAccountEmail: sourceAccountEmail,
+					_targetAccountEmail: targetAccountEmail,
+				};
 			}
 
 			// Same-account move: Use the standard moveItem API
@@ -215,9 +227,64 @@ export function useMoveItem() {
 				encryptionIv: encryptedData.iv,
 			});
 
-			return { crossAccount: false };
+			return {
+				crossAccount: false,
+				_encryptedData: encryptedData,
+				_sourceAccountEmail: sourceAccountEmail,
+				_targetAccountEmail: targetAccountEmail,
+			};
 		},
 		onSuccess: async (data, variables) => {
+			// Update local cache
+			if (storage.supportsItemCache) {
+				if (data.crossAccount) {
+					// Cross-account: remove from source, add to target
+					storage.removeCachedItem?.(
+						variables.itemId,
+						data._sourceAccountEmail,
+					);
+					if (data.newItemId && data._encryptedData) {
+						const now = new Date().toISOString();
+						storage.upsertCachedItem?.(
+							{
+								id: data.newItemId,
+								vaultId: variables.targetVaultId,
+								category: variables.category,
+								favorite: false,
+								encryptedData: data._encryptedData.ciphertext,
+								encryptionIv: data._encryptedData.iv,
+								encryptionAlgorithm: data._encryptedData.algorithm,
+								version: 1,
+								lastModifiedBy: null,
+								createdAt: now,
+								updatedAt: now,
+								deletedAt: null,
+							},
+							data._targetAccountEmail,
+						);
+					}
+				} else if (data._encryptedData) {
+					// Same-account: update vaultId and encrypted data
+					const cachedItems = await storage.getCachedItems?.(
+						data._sourceAccountEmail,
+					);
+					const existing = cachedItems?.find((i) => i.id === variables.itemId);
+					if (existing) {
+						storage.upsertCachedItem?.(
+							{
+								...existing,
+								vaultId: variables.targetVaultId,
+								encryptedData: data._encryptedData.ciphertext,
+								encryptionIv: data._encryptedData.iv,
+								encryptionAlgorithm: data._encryptedData.algorithm,
+								updatedAt: new Date().toISOString(),
+							},
+							data._sourceAccountEmail,
+						);
+					}
+				}
+			}
+
 			// Invalidate queries for both source and target vaults
 			await invalidator.invalidateVaultList(variables.sourceVaultId);
 			await invalidator.invalidateVaultList(variables.targetVaultId);

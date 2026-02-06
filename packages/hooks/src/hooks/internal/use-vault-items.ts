@@ -74,9 +74,43 @@ export function useVaultItems(
 				throw new Error(`No account found with access to vault ${vaultId}`);
 			}
 
-			// Fetch raw items using the owner account's tRPC client
-			const rawItems: RawEncryptedItem[] =
-				await ownerAccount.trpcClient.vault.listItems.query({ vaultId });
+			let rawItems: RawEncryptedItem[];
+
+			// Try cache-first if supported
+			if (storage.supportsItemCache) {
+				const cachedItems = await storage.getCachedItems?.(ownerAccount.email);
+				if (cachedItems && cachedItems.length > 0) {
+					// Filter cached items for this vault (exclude deleted)
+					const vaultItems = cachedItems.filter(
+						(i) => i.vaultId === vaultId && !i.deletedAt,
+					);
+					if (vaultItems.length > 0) {
+						rawItems = vaultItems.map((item) => ({
+							id: item.id,
+							vaultId: item.vaultId,
+							category: item.category,
+							favorite: item.favorite,
+							encryptedData: item.encryptedData,
+							encryptionIv: item.encryptionIv,
+							encryptionAlgorithm: item.encryptionAlgorithm,
+							createdAt: item.createdAt,
+							updatedAt: item.updatedAt,
+						}));
+					} else {
+						rawItems = await ownerAccount.trpcClient.vault.listItems.query({
+							vaultId,
+						});
+					}
+				} else {
+					rawItems = await ownerAccount.trpcClient.vault.listItems.query({
+						vaultId,
+					});
+				}
+			} else {
+				rawItems = await ownerAccount.trpcClient.vault.listItems.query({
+					vaultId,
+				});
+			}
 
 			if (rawItems.length === 0) return [];
 

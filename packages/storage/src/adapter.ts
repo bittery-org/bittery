@@ -4,6 +4,11 @@
  */
 
 import type {
+	CachedEncryptedItem,
+	CachedVaultMetadata,
+	ItemCacheMetadata,
+} from "@bittery/types";
+import type {
 	AccountMetadata,
 	ActiveAccount,
 	BiometricAuthResult,
@@ -361,6 +366,56 @@ export interface IStorageAdapter {
 		reason?: string,
 		email?: string,
 	): Promise<BiometricAuthResult>;
+
+	// ============================================================================
+	// Mobile-Specific (optional, check platform first)
+	// ============================================================================
+
+	// ============================================================================
+	// Item Cache (optional, check supportsItemCache first)
+	// ============================================================================
+
+	/** Whether this adapter supports local item caching */
+	readonly supportsItemCache?: boolean;
+
+	/** Store all cached items (bulk, for initial sync) */
+	setCachedItems?(items: CachedEncryptedItem[], email?: string): Promise<void>;
+
+	/** Get all cached items */
+	getCachedItems?(email?: string): Promise<CachedEncryptedItem[] | null>;
+
+	/** Insert or update a single cached item */
+	upsertCachedItem?(item: CachedEncryptedItem, email?: string): Promise<void>;
+
+	/** Remove a single cached item */
+	removeCachedItem?(itemId: string, email?: string): Promise<void>;
+
+	/** Store all cached vault metadata (bulk) */
+	setCachedVaults?(
+		vaults: CachedVaultMetadata[],
+		email?: string,
+	): Promise<void>;
+
+	/** Get all cached vault metadata */
+	getCachedVaults?(email?: string): Promise<CachedVaultMetadata[] | null>;
+
+	/** Insert or update a single cached vault */
+	upsertCachedVault?(vault: CachedVaultMetadata, email?: string): Promise<void>;
+
+	/** Remove a cached vault and its items */
+	removeCachedVault?(vaultId: string, email?: string): Promise<void>;
+
+	/** Get item cache metadata */
+	getItemCacheMetadata?(email?: string): Promise<ItemCacheMetadata | null>;
+
+	/** Set item cache metadata */
+	setItemCacheMetadata?(
+		metadata: ItemCacheMetadata,
+		email?: string,
+	): Promise<void>;
+
+	/** Clear all item cache data */
+	clearItemCache?(email?: string): Promise<void>;
 
 	// ============================================================================
 	// Mobile-Specific (optional, check platform first)

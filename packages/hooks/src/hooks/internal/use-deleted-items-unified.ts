@@ -6,6 +6,7 @@
  */
 
 import type { ItemCategory } from "@bittery/shared/types";
+import type { CachedVaultMetadata } from "@bittery/types";
 import { useQuery } from "@tanstack/react-query";
 import {
 	usePlatformCrypto,
@@ -108,9 +109,69 @@ export function useDeletedItemsUnified(
 			const results = await Promise.all(
 				accountsInfo.map(async (account) => {
 					try {
-						// Fetch raw deleted items using the account's tRPC client
-						const rawItems =
-							await account.trpcClient.vault.listAllDeletedItems.query();
+						let rawItems: RawEncryptedItemWithVault[];
+
+						// Try cache-first if supported
+						if (storage.supportsItemCache) {
+							const [cachedItems, cachedVaults] = await Promise.all([
+								storage.getCachedItems?.(account.email),
+								storage.getCachedVaults?.(account.email),
+							]);
+
+							if (cachedItems && cachedVaults) {
+								// Filter for deleted items only
+								const deletedItems = cachedItems.filter((i) => i.deletedAt);
+								if (deletedItems.length > 0) {
+									const vaultMap = new Map<string, CachedVaultMetadata>();
+									for (const v of cachedVaults) {
+										vaultMap.set(v.id, v);
+									}
+									rawItems = deletedItems.map((item) => {
+										const vault = vaultMap.get(item.vaultId);
+										return {
+											id: item.id,
+											vaultId: item.vaultId,
+											category: item.category,
+											favorite: item.favorite,
+											encryptedData: item.encryptedData,
+											encryptionIv: item.encryptionIv,
+											encryptionAlgorithm: item.encryptionAlgorithm,
+											createdAt: item.createdAt,
+											updatedAt: item.updatedAt,
+											deletedAt: item.deletedAt,
+											vault: vault
+												? {
+														id: vault.id,
+														name: vault.name,
+														type: vault.type,
+														icon: vault.icon,
+														imageUrl: vault.imageUrl,
+													}
+												: {
+														id: item.vaultId,
+														name: "Unknown",
+														type: "personal",
+														icon: null,
+														imageUrl: null,
+													},
+										} as RawEncryptedItemWithVault;
+									});
+								} else {
+									// No deleted items in cache - try server
+									rawItems =
+										await account.trpcClient.vault.listAllDeletedItems.query();
+								}
+							} else {
+								rawItems =
+									await account.trpcClient.vault.listAllDeletedItems.query();
+							}
+						} else {
+							rawItems =
+								await account.trpcClient.vault.listAllDeletedItems.query();
+						}
+
+						// Original fetch (kept as reference for the decryption logic below)
+						// const rawItems = await account.trpcClient.vault.listAllDeletedItems.query();
 
 						// Decrypt items with vault keys cached per account
 						const vaultKeyCache = new Map<string, Uint8Array>();

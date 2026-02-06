@@ -857,9 +857,9 @@ importers:
       '@bittery/shared':
         specifier: workspace:*
         version: link:../shared
-      nanoid:
-        specifier: ^5.1.0
-        version: 5.1.6
+      '@bittery/types':
+        specifier: workspace:*
+        version: link:../types
     devDependencies:
       '@bittery/config':
         specifier: workspace:*

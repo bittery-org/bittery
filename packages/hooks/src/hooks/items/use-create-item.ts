@@ -32,6 +32,12 @@ export interface CreateItemInput {
  */
 export interface CreateItemResult {
 	itemId: string;
+	/** Encrypted data captured for cache update */
+	_encryptedData?: {
+		ciphertext: string;
+		iv: string;
+		algorithm: string;
+	};
 }
 
 /**
@@ -103,9 +109,37 @@ export function useCreateItem() {
 				encryptionAlgorithm: encryptedData.algorithm,
 			});
 
-			return { itemId: result.id };
+			return {
+				itemId: result.id,
+				_encryptedData: {
+					ciphertext: encryptedData.ciphertext,
+					iv: encryptedData.iv,
+					algorithm: encryptedData.algorithm,
+				},
+			};
 		},
-		onSuccess: async (_data, variables) => {
+		onSuccess: async (data, variables) => {
+			// Update local cache if supported
+			if (storage.supportsItemCache && data._encryptedData) {
+				const now = new Date().toISOString();
+				storage.upsertCachedItem?.(
+					{
+						id: data.itemId,
+						vaultId: variables.vaultId,
+						category: variables.category,
+						favorite: false,
+						encryptedData: data._encryptedData.ciphertext,
+						encryptionIv: data._encryptedData.iv,
+						encryptionAlgorithm: data._encryptedData.algorithm,
+						version: 1,
+						lastModifiedBy: null,
+						createdAt: now,
+						updatedAt: now,
+						deletedAt: null,
+					},
+					variables.accountEmail,
+				);
+			}
 			await invalidator.invalidateVaultList(variables.vaultId);
 		},
 	});

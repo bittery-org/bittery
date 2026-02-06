@@ -66,19 +66,38 @@ export function useToggleFavorite() {
 	const invalidator = useQueryInvalidator();
 
 	return useMutation({
-		mutationFn: async (input: ToggleFavoriteInput): Promise<void> => {
+		mutationFn: async (
+			input: ToggleFavoriteInput,
+		): Promise<{ _accountEmail: string | undefined }> => {
+			const accountEmail = findAccountEmailForItem(input.itemId, items);
 			const client = await getTRPCClientForAccount(
 				storage,
 				defaultClient,
-				findAccountEmailForItem(input.itemId, items),
+				accountEmail,
 			);
 
 			await client.vault.toggleFavorite.mutate({
 				itemId: input.itemId,
 				favorite: input.favorite,
 			});
+			return { _accountEmail: accountEmail };
 		},
-		onSuccess: async (_data, variables) => {
+		onSuccess: async (data, variables) => {
+			// Update local cache - toggle favorite
+			if (storage.supportsItemCache) {
+				const cachedItems = await storage.getCachedItems?.(data._accountEmail);
+				const existing = cachedItems?.find((i) => i.id === variables.itemId);
+				if (existing) {
+					storage.upsertCachedItem?.(
+						{
+							...existing,
+							favorite: variables.favorite,
+							updatedAt: new Date().toISOString(),
+						},
+						data._accountEmail,
+					);
+				}
+			}
 			await invalidator.invalidateItem(variables.itemId, variables.vaultId);
 		},
 	});

@@ -67,18 +67,26 @@ export function usePermanentDeleteItem() {
 	const invalidator = useQueryInvalidator();
 
 	return useMutation({
-		mutationFn: async (input: PermanentDeleteItemInput): Promise<void> => {
+		mutationFn: async (
+			input: PermanentDeleteItemInput,
+		): Promise<{ _accountEmail: string | undefined }> => {
+			const accountEmail = findAccountEmailForItem(input.itemId, deletedItems);
 			const client = await getTRPCClientForAccount(
 				storage,
 				defaultClient,
-				findAccountEmailForItem(input.itemId, deletedItems),
+				accountEmail,
 			);
 
 			await client.vault.permanentlyDeleteItem.mutate({
 				itemId: input.itemId,
 			});
+			return { _accountEmail: accountEmail };
 		},
-		onSuccess: async (_data, variables) => {
+		onSuccess: async (data, variables) => {
+			// Remove from local cache entirely
+			if (storage.supportsItemCache) {
+				storage.removeCachedItem?.(variables.itemId, data._accountEmail);
+			}
 			await invalidator.invalidateDeletedItems(variables.vaultId);
 		},
 	});
