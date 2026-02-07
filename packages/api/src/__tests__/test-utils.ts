@@ -41,7 +41,12 @@ export function generateTestUserId(): string {
  * Create a mock context for testing
  */
 export function createTestContext(
-	sessionData?: { userId: string; email: string; sessionId: string } | null,
+	sessionData?: {
+		userId: string;
+		email: string;
+		sessionId: string;
+		sessionTokenHash: string;
+	} | null,
 ): Context {
 	return {
 		session: sessionData || null,
@@ -64,6 +69,7 @@ export function createAuthenticatedContext(
 		userId,
 		email,
 		sessionId: sessionId || nanoid(),
+		sessionTokenHash: nanoid(),
 	});
 }
 
@@ -545,7 +551,7 @@ export async function truncateAll() {
 			sync_event_ack, sync_event,
 			item, vault_key, vault_key_rotation, folder, vault,
 			team_invitation, team_member, team,
-			session, "user"
+			login_rate_limit, session, "user"
 		CASCADE
 	`);
 }

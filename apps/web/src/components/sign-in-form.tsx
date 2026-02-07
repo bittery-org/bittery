@@ -122,13 +122,6 @@ export default function SignInForm({
 		}
 	};
 
-	// Show error state for non-existent accounts
-	useEffect(() => {
-		if (emailCheck && !emailCheck.exists && email) {
-			toast.error("No account found with this email");
-		}
-	}, [emailCheck, email]);
-
 	return (
 		<div className="w-full space-y-4">
 			<div className="flex flex-col space-y-2 text-center">
@@ -213,7 +206,7 @@ export default function SignInForm({
 						</form.Field>
 					</div>
 
-					{emailCheck?.exists && emailCheck.secretKeyHint && !isQuickUnlock && (
+					{emailCheck?.secretKeyHint && !isQuickUnlock && (
 						<div className="rounded-md bg-muted px-3 py-2 text-muted-foreground text-xs">
 							<span className="font-medium">Hint:</span>{" "}
 							{emailCheck.secretKeyHint}

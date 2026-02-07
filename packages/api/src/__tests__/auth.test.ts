@@ -136,24 +136,27 @@ describe("Auth Router", () => {
 			expect(result.secretKeyHint).toBe(mockSrpData.secretKeyHint);
 		});
 
-		test("should return exists: false for non-existing email", async () => {
+		test("should return deterministic fake hint for non-existing email", async () => {
 			const caller = authRouter.createCaller(createPublicContext());
 			const result = await caller.checkEmail({
 				email: "nonexistent@example.com",
 			});
 
-			expect(result.exists).toBe(false);
-			expect(result.secretKeyHint).toBeNull();
+			expect(result.exists).toBe(true);
+			expect(result.secretKeyHint).toMatch(/^A3-[A-F0-9]{8}$/);
 		});
 
-		test("should be case-insensitive", async () => {
-			const email = generateTestEmail();
-			await createTestUser({ email });
-
+		test("should return the same hint for case variants", async () => {
 			const caller = authRouter.createCaller(createPublicContext());
-			const result = await caller.checkEmail({ email: email.toUpperCase() });
+			const email = "case-test@example.com";
+			const lowerResult = await caller.checkEmail({ email });
+			const upperResult = await caller.checkEmail({
+				email: email.toUpperCase(),
+			});
 
-			expect(result.exists).toBe(true);
+			expect(lowerResult.exists).toBe(true);
+			expect(upperResult.exists).toBe(true);
+			expect(upperResult.secretKeyHint).toBe(lowerResult.secretKeyHint);
 		});
 	});
 
@@ -180,10 +183,8 @@ describe("Auth Router", () => {
 	});
 
 	describe("logout", () => {
-		test("should delete session", async () => {
-			const { sessionId } = await setup(authRouter);
-
-			const caller = authRouter.createCaller(createPublicContext());
+		test("should delete own session", async () => {
+			const { sessionId, caller } = await setup(authRouter);
 			const result = await caller.logout({ sessionId });
 
 			expect(result.success).toBe(true);
@@ -191,19 +192,36 @@ describe("Auth Router", () => {
 			const session = await getSession(sessionId);
 			expect(session).toBeUndefined();
 		});
+
+		test("should reject deleting another user's session", async () => {
+			const [{ caller }, { sessionId }] = await Promise.all([
+				setup(authRouter),
+				setup(authRouter),
+			]);
+
+			await expect(caller.logout({ sessionId })).rejects.toThrow(
+				"Session not found",
+			);
+		});
 	});
 
 	describe("logoutAll", () => {
-		test("should delete all user sessions", async () => {
-			const { userId } = await setup(authRouter);
+		test("should delete all sessions for authenticated user", async () => {
+			const { userId, caller } = await setup(authRouter);
 
 			await createTestSession(userId, { deviceName: "Device 2" });
 			await createTestSession(userId, { deviceName: "Device 3" });
 
-			const caller = authRouter.createCaller(createPublicContext());
-			const result = await caller.logoutAll({ userId });
+			const result = await caller.logoutAll();
 
 			expect(result.success).toBe(true);
+		});
+
+		test("should require authentication", async () => {
+			const caller = authRouter.createCaller(createPublicContext());
+			await expect(caller.logoutAll()).rejects.toThrow(
+				"Authentication required",
+			);
 		});
 	});
 

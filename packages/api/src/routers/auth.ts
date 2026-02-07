@@ -4,16 +4,23 @@
  */
 /** biome-ignore-all lint/style/noNonNullAssertion: we need that here */
 
+import { createHmac } from "node:crypto";
 import {
+	checkLoginRateLimit,
+	clearLoginRateLimit,
 	createUser,
 	createUserSession,
 	deleteAllUserSessions,
 	deleteSession,
 	deleteUserAccount,
 	finishLogin,
+	getSessionById,
 	getUserByEmail,
 	getUserById,
 	getUserSessions,
+	LoginRateLimitError,
+	normalizeEmail,
+	recordFailedLoginAttempt,
 	renameSession,
 	revokeSession,
 	startLogin,
@@ -39,6 +46,35 @@ function getTeamImageUrl(imageKey: string | null | undefined): string | null {
 	return getStoragePublicUrl(imageKey);
 }
 
+function mapRateLimitError(error: unknown): TRPCError {
+	if (error instanceof LoginRateLimitError) {
+		return new TRPCError({
+			code: "TOO_MANY_REQUESTS",
+			message: error.message,
+		});
+	}
+
+	throw error;
+}
+
+const hintSecret = process.env.JWT_SECRET;
+if (!hintSecret) {
+	throw new Error(
+		"FATAL: JWT_SECRET environment variable is not set. " +
+			"Email hint protection cannot be initialized.",
+	);
+}
+const emailHintSecret = hintSecret;
+
+function generateDeterministicFakeHint(email: string): string {
+	const digest = createHmac("sha256", emailHintSecret)
+		.update(normalizeEmail(email))
+		.digest("hex")
+		.toUpperCase();
+
+	return `A3-${digest.slice(0, 8)}`;
+}
+
 export const authRouter = router({
 	/**
 	 * Signup: Create new user with zero-knowledge authentication
@@ -46,7 +82,7 @@ export const authRouter = router({
 	signup: publicProcedure
 		.input(
 			z.object({
-				email: z.string().email(),
+				email: z.string().email().max(255),
 				name: z.string().min(2),
 				organizationName: z.string().optional(),
 				secretKeyHint: z.string(),
@@ -58,8 +94,10 @@ export const authRouter = router({
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
+			const normalizedEmail = normalizeEmail(input.email);
+
 			// Check if user already exists
-			const existingUser = await getUserByEmail(input.email);
+			const existingUser = await getUserByEmail(normalizedEmail);
 			if (existingUser) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
@@ -75,7 +113,7 @@ export const authRouter = router({
 
 			// Create user first (without team)
 			const userId = await createUser({
-				email: input.email,
+				email: normalizedEmail,
 				name: input.name,
 				secretKeyHint: input.secretKeyHint,
 				srpSalt: input.srpSalt,
@@ -176,7 +214,7 @@ export const authRouter = router({
 		.input(
 			z.object({
 				token: z.string(),
-				email: z.string().email(),
+				email: z.string().email().max(255),
 				name: z.string().min(2),
 				secretKeyHint: z.string(),
 				srpSalt: z.string(),
@@ -186,6 +224,8 @@ export const authRouter = router({
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
+			const normalizedEmail = normalizeEmail(input.email);
+
 			// 1. Validate invitation
 			const invitation = await db.query.teamInvitation.findFirst({
 				where: (inv, { and, eq }) =>
@@ -209,7 +249,7 @@ export const authRouter = router({
 			}
 
 			// Verify email matches invitation
-			if (invitation.email.toLowerCase() !== input.email.toLowerCase()) {
+			if (normalizeEmail(invitation.email) !== normalizedEmail) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
 					message: "Email does not match invitation",
@@ -217,7 +257,7 @@ export const authRouter = router({
 			}
 
 			// Check if user already exists
-			const existingUser = await getUserByEmail(input.email);
+			const existingUser = await getUserByEmail(normalizedEmail);
 			if (existingUser) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
@@ -241,7 +281,7 @@ export const authRouter = router({
 
 			// 2. Create user account
 			const userId = await createUser({
-				email: input.email,
+				email: normalizedEmail,
 				name: input.name,
 				secretKeyHint: input.secretKeyHint,
 				srpSalt: input.srpSalt,
@@ -338,14 +378,22 @@ export const authRouter = router({
 	startLogin: publicProcedure
 		.input(
 			z.object({
-				email: z.string().email(),
-				clientPublicKey: z.string(),
+				email: z.string().email().max(255),
+				clientPublicKey: z.string().max(2048),
 			}),
 		)
-		.mutation(async ({ input }) => {
+		.mutation(async ({ ctx, input }) => {
+			const normalizedEmail = normalizeEmail(input.email);
+
+			try {
+				await checkLoginRateLimit(normalizedEmail, ctx.device.ipAddress);
+			} catch (error) {
+				throw mapRateLimitError(error);
+			}
+
 			try {
 				const { userId, challenge, serverEphemeralSecret } = await startLogin(
-					input.email,
+					normalizedEmail,
 					input.clientPublicKey,
 				);
 
@@ -357,6 +405,12 @@ export const authRouter = router({
 				};
 			} catch (error) {
 				console.error(error);
+
+				try {
+					await recordFailedLoginAttempt(normalizedEmail, ctx.device.ipAddress);
+				} catch (rateLimitError) {
+					throw mapRateLimitError(rateLimitError);
+				}
 
 				throw new TRPCError({
 					code: "UNAUTHORIZED",
@@ -372,13 +426,24 @@ export const authRouter = router({
 	finishLogin: publicProcedure
 		.input(
 			z.object({
-				userId: z.string(),
-				serverSecret: z.string(), // Server ephemeral secret from previous step
-				clientPublicKey: z.string(),
-				clientProof: z.string(),
+				userId: z.string().max(64),
+				serverSecret: z.string().max(2048), // Server ephemeral secret from previous step
+				clientPublicKey: z.string().max(2048),
+				clientProof: z.string().max(512),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
+			const candidateUser = await getUserById(input.userId);
+			const rateLimitEmail = normalizeEmail(
+				candidateUser?.email || `${input.userId}@invalid.local`,
+			);
+
+			try {
+				await checkLoginRateLimit(rateLimitEmail, ctx.device.ipAddress);
+			} catch (error) {
+				throw mapRateLimitError(error);
+			}
+
 			// Parse device info from request context
 			const deviceInfo = parseUserAgent(ctx.device.userAgent);
 
@@ -395,11 +460,19 @@ export const authRouter = router({
 			);
 
 			if (!result.success || !result.user) {
+				try {
+					await recordFailedLoginAttempt(rateLimitEmail, ctx.device.ipAddress);
+				} catch (rateLimitError) {
+					throw mapRateLimitError(rateLimitError);
+				}
+
 				throw new TRPCError({
 					code: "UNAUTHORIZED",
 					message: "Invalid credentials",
 				});
 			}
+
+			await clearLoginRateLimit(rateLimitEmail, ctx.device.ipAddress);
 
 			// Get user's vault keys
 			const vaultKeys = await db.query.vaultKey.findMany({
@@ -449,14 +522,22 @@ export const authRouter = router({
 	quickUnlock: publicProcedure
 		.input(
 			z.object({
-				email: z.string().email(),
-				userId: z.string(),
-				serverSecret: z.string(),
-				clientPublicKey: z.string(),
-				clientProof: z.string(),
+				email: z.string().email().max(255),
+				userId: z.string().max(64),
+				serverSecret: z.string().max(2048),
+				clientPublicKey: z.string().max(2048),
+				clientProof: z.string().max(512),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
+			const normalizedEmail = normalizeEmail(input.email);
+
+			try {
+				await checkLoginRateLimit(normalizedEmail, ctx.device.ipAddress);
+			} catch (error) {
+				throw mapRateLimitError(error);
+			}
+
 			// Parse device info from request context
 			const deviceInfo = parseUserAgent(ctx.device.userAgent);
 
@@ -472,14 +553,20 @@ export const authRouter = router({
 				},
 			);
 
-			console.log(result);
-
 			if (!result.success || !result.user) {
+				try {
+					await recordFailedLoginAttempt(normalizedEmail, ctx.device.ipAddress);
+				} catch (rateLimitError) {
+					throw mapRateLimitError(rateLimitError);
+				}
+
 				throw new TRPCError({
 					code: "UNAUTHORIZED",
 					message: "Invalid credentials",
 				});
 			}
+
+			await clearLoginRateLimit(normalizedEmail, ctx.device.ipAddress);
 
 			// Get user's vault keys
 			const vaultKeys = await db.query.vaultKey.findMany({
@@ -527,14 +614,17 @@ export const authRouter = router({
 	checkEmail: publicProcedure
 		.input(
 			z.object({
-				email: z.string().email(),
+				email: z.string().email().max(255),
 			}),
 		)
 		.query(async ({ input }) => {
-			const user = await getUserByEmail(input.email);
+			const normalizedEmail = normalizeEmail(input.email);
+			const user = await getUserByEmail(normalizedEmail);
+			const fakeHint = generateDeterministicFakeHint(normalizedEmail);
+
 			return {
-				exists: !!user,
-				secretKeyHint: user?.secretKeyHint || null,
+				exists: true,
+				secretKeyHint: user?.secretKeyHint || fakeHint,
 			};
 		}),
 
@@ -573,13 +663,21 @@ export const authRouter = router({
 	/**
 	 * Logout from current session
 	 */
-	logout: publicProcedure
+	logout: protectedProcedure
 		.input(
 			z.object({
 				sessionId: z.string(),
 			}),
 		)
-		.mutation(async ({ input }) => {
+		.mutation(async ({ ctx, input }) => {
+			const targetSession = await getSessionById(input.sessionId);
+			if (!targetSession || targetSession.userId !== ctx.session.userId) {
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "Session not found",
+				});
+			}
+
 			await deleteSession(input.sessionId);
 			return { success: true };
 		}),
@@ -587,16 +685,10 @@ export const authRouter = router({
 	/**
 	 * Logout from all sessions
 	 */
-	logoutAll: publicProcedure
-		.input(
-			z.object({
-				userId: z.string(),
-			}),
-		)
-		.mutation(async ({ input }) => {
-			await deleteAllUserSessions(input.userId);
-			return { success: true };
-		}),
+	logoutAll: protectedProcedure.mutation(async ({ ctx }) => {
+		await deleteAllUserSessions(ctx.session.userId);
+		return { success: true };
+	}),
 
 	/**
 	 * Update user email
@@ -604,12 +696,14 @@ export const authRouter = router({
 	updateEmail: protectedProcedure
 		.input(
 			z.object({
-				newEmail: z.string().email(),
+				newEmail: z.string().email().max(255),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
+			const normalizedNewEmail = normalizeEmail(input.newEmail);
+
 			// Check if email already exists
-			const existingUser = await getUserByEmail(input.newEmail);
+			const existingUser = await getUserByEmail(normalizedNewEmail);
 			if (existingUser && existingUser.id !== ctx.session.userId) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
@@ -617,7 +711,7 @@ export const authRouter = router({
 				});
 			}
 
-			await updateUserEmail(ctx.session.userId, input.newEmail);
+			await updateUserEmail(ctx.session.userId, normalizedNewEmail);
 
 			// Logout all sessions to force re-login with new email
 			await deleteAllUserSessions(ctx.session.userId);
@@ -697,7 +791,7 @@ export const authRouter = router({
 	deleteAccount: protectedProcedure
 		.input(
 			z.object({
-				confirmEmail: z.string().email(),
+				confirmEmail: z.string().email().max(255),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
@@ -711,7 +805,7 @@ export const authRouter = router({
 			}
 
 			// Verify email matches for confirmation
-			if (user.email.toLowerCase() !== input.confirmEmail.toLowerCase()) {
+			if (normalizeEmail(user.email) !== normalizeEmail(input.confirmEmail)) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
 					message: "Email does not match",
