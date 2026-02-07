@@ -20,13 +20,36 @@ import {
 	createTestSession,
 	createTestUser,
 	createTestVault,
+	deriveTestSrpClientProof,
+	generateTestAuthCryptoData,
 	generateTestEmail,
+	generateTestSrpClientEphemeral,
 	getSession,
 	getUser,
-	mockSrpData,
 	setup,
 	truncateAll,
 } from "./test-utils";
+
+function toSignupCryptoInput(data: Awaited<ReturnType<typeof generateTestAuthCryptoData>>) {
+	return {
+		secretKeyHint: data.secretKeyHint,
+		srpSalt: data.srpSalt,
+		srpVerifier: data.srpVerifier,
+		publicKey: data.publicKey,
+		encryptedPrivateKey: data.encryptedPrivateKey,
+		encryptedVaultKey: data.encryptedVaultKey,
+	};
+}
+
+const authCryptoFixture = await generateTestAuthCryptoData({
+	email: "fixture-auth@example.com",
+	accountPassword: "TestPass-Fixture-1!",
+});
+
+const nextAuthCryptoFixture = await generateTestAuthCryptoData({
+	email: "fixture-auth-next@example.com",
+	accountPassword: "TestPass-Fixture-2!",
+});
 
 describe("Auth Router", () => {
 	afterEach(async () => {
@@ -36,18 +59,14 @@ describe("Auth Router", () => {
 	describe("signup", () => {
 		test("should create new user with organization", async () => {
 			const email = generateTestEmail();
+			const cryptoData = authCryptoFixture;
 			const caller = authRouter.createCaller(createPublicContext());
 
 			const result = await caller.signup({
 				email,
 				name: "Test User",
 				organizationName: "Test Org",
-				secretKeyHint: mockSrpData.secretKeyHint,
-				srpSalt: mockSrpData.srpSalt,
-				srpVerifier: mockSrpData.srpVerifier,
-				publicKey: mockSrpData.publicKey,
-				encryptedPrivateKey: mockSrpData.encryptedPrivateKey,
-				encryptedVaultKey: mockSrpData.encryptedVaultKey,
+				...toSignupCryptoInput(cryptoData),
 			});
 
 			expect(result.success).toBe(true);
@@ -66,17 +85,14 @@ describe("Auth Router", () => {
 		});
 
 		test("should create user without organization name", async () => {
+			const email = generateTestEmail();
+			const cryptoData = authCryptoFixture;
 			const caller = authRouter.createCaller(createPublicContext());
 
 			const result = await caller.signup({
-				email: generateTestEmail(),
+				email,
 				name: "Test User",
-				secretKeyHint: mockSrpData.secretKeyHint,
-				srpSalt: mockSrpData.srpSalt,
-				srpVerifier: mockSrpData.srpVerifier,
-				publicKey: mockSrpData.publicKey,
-				encryptedPrivateKey: mockSrpData.encryptedPrivateKey,
-				encryptedVaultKey: mockSrpData.encryptedVaultKey,
+				...toSignupCryptoInput(cryptoData),
 			});
 
 			expect(result.success).toBe(true);
@@ -85,7 +101,16 @@ describe("Auth Router", () => {
 
 		test("should reject duplicate email", async () => {
 			const email = generateTestEmail();
-			await createTestUser({ email });
+			const existingCryptoData = authCryptoFixture;
+			await createTestUser({
+				email,
+				secretKeyHint: existingCryptoData.secretKeyHint,
+				srpSalt: existingCryptoData.srpSalt,
+				srpVerifier: existingCryptoData.srpVerifier,
+				publicKey: existingCryptoData.publicKey,
+				encryptedPrivateKey: existingCryptoData.encryptedPrivateKey,
+			});
+			const signupCryptoData = existingCryptoData;
 
 			const caller = authRouter.createCaller(createPublicContext());
 
@@ -93,12 +118,7 @@ describe("Auth Router", () => {
 				caller.signup({
 					email,
 					name: "Test User 2",
-					secretKeyHint: mockSrpData.secretKeyHint,
-					srpSalt: mockSrpData.srpSalt,
-					srpVerifier: mockSrpData.srpVerifier,
-					publicKey: mockSrpData.publicKey,
-					encryptedPrivateKey: mockSrpData.encryptedPrivateKey,
-					encryptedVaultKey: mockSrpData.encryptedVaultKey,
+					...toSignupCryptoInput(signupCryptoData),
 				}),
 			).rejects.toThrow("User with this email already exists");
 		});
@@ -106,17 +126,13 @@ describe("Auth Router", () => {
 		test("should normalize email to lowercase", async () => {
 			const baseEmail = generateTestEmail();
 			const email = baseEmail.toUpperCase();
+			const cryptoData = authCryptoFixture;
 			const caller = authRouter.createCaller(createPublicContext());
 
 			const result = await caller.signup({
 				email,
 				name: "Test User",
-				secretKeyHint: mockSrpData.secretKeyHint,
-				srpSalt: mockSrpData.srpSalt,
-				srpVerifier: mockSrpData.srpVerifier,
-				publicKey: mockSrpData.publicKey,
-				encryptedPrivateKey: mockSrpData.encryptedPrivateKey,
-				encryptedVaultKey: mockSrpData.encryptedVaultKey,
+				...toSignupCryptoInput(cryptoData),
 			});
 
 			const user = await getUser(result.userId);
@@ -124,16 +140,95 @@ describe("Auth Router", () => {
 		});
 	});
 
+	describe("login (SRP)", () => {
+		test("should complete startLogin/finishLogin with real SRP values", async () => {
+			const email = generateTestEmail();
+			const cryptoData = authCryptoFixture;
+			const caller = authRouter.createCaller(createPublicContext());
+
+			await caller.signup({
+				email,
+				name: "Login User",
+				...toSignupCryptoInput(cryptoData),
+			});
+
+			const clientEphemeral = await generateTestSrpClientEphemeral();
+			const startResult = await caller.startLogin({
+				email,
+				clientPublicKey: clientEphemeral.clientPublicKey,
+			});
+			const { clientProof } = await deriveTestSrpClientProof({
+				clientSecret: clientEphemeral.clientSecret,
+				salt: startResult.salt,
+				serverPublicKey: startResult.serverPublicKey,
+				authPassword: cryptoData.authPassword,
+			});
+
+			const finishResult = await caller.finishLogin({
+				userId: startResult.userId,
+				serverSecret: startResult.serverSecret,
+				clientPublicKey: clientEphemeral.clientPublicKey,
+				clientProof,
+			});
+
+			expect(finishResult.token).toBeDefined();
+			expect(finishResult.sessionId).toBeDefined();
+			expect(finishResult.serverProof).toBeDefined();
+			expect(finishResult.user.email).toBe(email.toLowerCase());
+		});
+
+		test("should reject finishLogin with invalid SRP proof", async () => {
+			const email = generateTestEmail();
+			const cryptoData = authCryptoFixture;
+			const caller = authRouter.createCaller(createPublicContext());
+
+			await caller.signup({
+				email,
+				name: "Login User",
+				...toSignupCryptoInput(cryptoData),
+			});
+
+			const clientEphemeral = await generateTestSrpClientEphemeral();
+			const startResult = await caller.startLogin({
+				email,
+				clientPublicKey: clientEphemeral.clientPublicKey,
+			});
+			const { clientProof } = await deriveTestSrpClientProof({
+				clientSecret: clientEphemeral.clientSecret,
+				salt: startResult.salt,
+				serverPublicKey: startResult.serverPublicKey,
+				authPassword: `${cryptoData.authPassword}wrong`,
+			});
+
+			await expect(
+				caller.finishLogin({
+					userId: startResult.userId,
+					serverSecret: startResult.serverSecret,
+					clientPublicKey: clientEphemeral.clientPublicKey,
+					clientProof,
+				}),
+			).rejects.toThrow("Invalid credentials");
+		});
+	});
+
 	describe("checkEmail", () => {
 		test("should return exists: true for existing email", async () => {
 			const email = generateTestEmail();
-			await createTestUser({ email });
+			const cryptoData = authCryptoFixture;
+			await createTestUser({
+				email,
+				secretKeyHint: cryptoData.secretKeyHint,
+				srpSalt: cryptoData.srpSalt,
+				srpVerifier: cryptoData.srpVerifier,
+				publicKey: cryptoData.publicKey,
+				encryptedPrivateKey: cryptoData.encryptedPrivateKey,
+			});
 
 			const caller = authRouter.createCaller(createPublicContext());
 			const result = await caller.checkEmail({ email });
 
 			expect(result.exists).toBe(true);
-			expect(result.secretKeyHint).toBe(mockSrpData.secretKeyHint);
+			expect(result.secretKeyHint).toBe(cryptoData.secretKeyHint);
 		});
 
 		test("should return deterministic fake hint for non-existing email", async () => {
@@ -162,17 +257,25 @@ describe("Auth Router", () => {
 
 	describe("me", () => {
 		test("should return current user data when authenticated", async () => {
-			const { userId, email, caller } = await setup(authRouter, {
+			const seedEmail = generateTestEmail();
+			const cryptoData = authCryptoFixture;
+			const { userId, email: createdEmail, caller } = await setup(authRouter, {
 				name: "Current User",
+				email: seedEmail,
+				secretKeyHint: cryptoData.secretKeyHint,
+				srpSalt: cryptoData.srpSalt,
+				srpVerifier: cryptoData.srpVerifier,
+				publicKey: cryptoData.publicKey,
+				encryptedPrivateKey: cryptoData.encryptedPrivateKey,
 			});
 
 			const result = await caller.me();
 
 			expect(result.id).toBe(userId);
-			expect(result.email).toBe(email);
+			expect(result.email).toBe(createdEmail);
 			expect(result.name).toBe("Current User");
-			expect(result.publicKey).toBe(mockSrpData.publicKey);
-			expect(result.encryptedPrivateKey).toBe(mockSrpData.encryptedPrivateKey);
+			expect(result.publicKey).toBe(cryptoData.publicKey);
+			expect(result.encryptedPrivateKey).toBe(cryptoData.encryptedPrivateKey);
 		});
 
 		test("should throw UNAUTHORIZED for unauthenticated request", async () => {
@@ -252,50 +355,69 @@ describe("Auth Router", () => {
 
 	describe("changePassword", () => {
 		test("should update SRP credentials and encrypted private key", async () => {
-			const { userId, caller } = await setup(authRouter);
+			const currentEmail = generateTestEmail();
+			const currentCryptoData = authCryptoFixture;
+			const { userId, caller } = await setup(authRouter, {
+				email: currentEmail,
+				secretKeyHint: currentCryptoData.secretKeyHint,
+				srpSalt: currentCryptoData.srpSalt,
+				srpVerifier: currentCryptoData.srpVerifier,
+				publicKey: currentCryptoData.publicKey,
+				encryptedPrivateKey: currentCryptoData.encryptedPrivateKey,
+			});
 			const vaultId = await createTestVault(userId);
 
-			const newSrpSalt = "newSalt123456789012345678901234567890123456789012345";
-			const newSrpVerifier = `newVerifier${mockSrpData.srpVerifier.slice(11)}`;
-			const newEncryptedPrivateKey = "newEncryptedPrivateKey123";
+			const nextCryptoData = nextAuthCryptoFixture;
 
 			const result = await caller.changePassword({
-				srpSalt: newSrpSalt,
-				srpVerifier: newSrpVerifier,
-				encryptedPrivateKey: newEncryptedPrivateKey,
+				srpSalt: nextCryptoData.srpSalt,
+				srpVerifier: nextCryptoData.srpVerifier,
+				encryptedPrivateKey: nextCryptoData.encryptedPrivateKey,
 				encryptedVaultKeys: [{ vaultId, encryptedVaultKey: "newVaultKey123" }],
 			});
 
 			expect(result.success).toBe(true);
 
-			const user = await getUser(userId);
-			expect(user?.srpSalt).toBe(newSrpSalt);
-			expect(user?.srpVerifier).toBe(newSrpVerifier);
-			expect(user?.encryptedPrivateKey).toBe(newEncryptedPrivateKey);
+			const updatedUser = await getUser(userId);
+			expect(updatedUser).toBeDefined();
+			expect(updatedUser?.srpSalt).toBe(nextCryptoData.srpSalt);
+			expect(updatedUser?.srpVerifier).toBe(nextCryptoData.srpVerifier);
+			expect(updatedUser?.encryptedPrivateKey).toBe(
+				nextCryptoData.encryptedPrivateKey,
+			);
 		});
 	});
 
 	describe("regenerateSecretKey", () => {
 		test("should update secret key hint and SRP credentials", async () => {
-			const { userId, caller } = await setup(authRouter);
+			const currentEmail = generateTestEmail();
+			const currentCryptoData = authCryptoFixture;
+			const { userId, caller } = await setup(authRouter, {
+				email: currentEmail,
+				secretKeyHint: currentCryptoData.secretKeyHint,
+				srpSalt: currentCryptoData.srpSalt,
+				srpVerifier: currentCryptoData.srpVerifier,
+				publicKey: currentCryptoData.publicKey,
+				encryptedPrivateKey: currentCryptoData.encryptedPrivateKey,
+			});
 			const vaultId = await createTestVault(userId);
 
-			const newSecretKeyHint = "B4-NEWKEY";
-			const newSrpSalt = "newSalt987654321098765432109876543210987654321098";
+			const nextCryptoData = nextAuthCryptoFixture;
 
 			const result = await caller.regenerateSecretKey({
-				secretKeyHint: newSecretKeyHint,
-				srpSalt: newSrpSalt,
-				srpVerifier: mockSrpData.srpVerifier,
-				encryptedPrivateKey: "newEncrypted123",
+				secretKeyHint: nextCryptoData.secretKeyHint,
+				srpSalt: nextCryptoData.srpSalt,
+				srpVerifier: nextCryptoData.srpVerifier,
+				encryptedPrivateKey: nextCryptoData.encryptedPrivateKey,
 				encryptedVaultKeys: [{ vaultId, encryptedVaultKey: "newVaultKey456" }],
 			});
 
 			expect(result.success).toBe(true);
 
-			const user = await getUser(userId);
-			expect(user?.secretKeyHint).toBe(newSecretKeyHint);
-			expect(user?.srpSalt).toBe(newSrpSalt);
+			const updatedUser = await getUser(userId);
+			expect(updatedUser).toBeDefined();
+			expect(updatedUser?.secretKeyHint).toBe(nextCryptoData.secretKeyHint);
+			expect(updatedUser?.srpSalt).toBe(nextCryptoData.srpSalt);
 		});
 	});
 

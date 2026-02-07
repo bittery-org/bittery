@@ -8,6 +8,15 @@
  */
 
 import { db } from "@bittery/db";
+import initCryptoWasm, {
+	JsSrpClient,
+	deriveKeys as deriveKeysWasm,
+	encrypt as encryptWasm,
+	generateEncryptionKey as generateEncryptionKeyWasm,
+	generateRSAKeyPair as generateRSAKeyPairWasm,
+	generateSecretKey as generateSecretKeyWasm,
+	getSecretKeyHint as getSecretKeyHintWasm,
+} from "../../../crypto/wasm/bittery_crypto.js";
 import { session, user } from "@bittery/db/schema/auth";
 import {
 	shareAccessLog,
@@ -108,6 +117,136 @@ xwIDAQAB
 	// Secret key hint
 	secretKeyHint: "A3-TESTKEY",
 };
+
+let cryptoWasmInitPromise: Promise<void> | null = null;
+
+async function ensureCryptoWasmInitialized(): Promise<void> {
+	if (!cryptoWasmInitPromise) {
+		cryptoWasmInitPromise = initCryptoWasm().then(() => undefined);
+	}
+
+	await cryptoWasmInitPromise;
+}
+
+function toEncryptedJson(data: {
+	ciphertext: string;
+	iv: string;
+	algorithm: string;
+}): string {
+	return JSON.stringify({
+		ciphertext: data.ciphertext,
+		iv: data.iv,
+		algorithm: data.algorithm,
+	});
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+	return Uint8Array.from(Buffer.from(base64, "base64"));
+}
+
+export interface TestAuthCryptoData {
+	accountPassword: string;
+	authPassword: string;
+	secretKey: string;
+	secretKeyHint: string;
+	srpSalt: string;
+	srpVerifier: string;
+	publicKey: string;
+	encryptedPrivateKey: string;
+	encryptedVaultKey: string;
+}
+
+export async function generateTestAuthCryptoData(params: {
+	email: string;
+	accountPassword?: string;
+	secretKey?: string;
+}): Promise<TestAuthCryptoData> {
+	await ensureCryptoWasmInitialized();
+
+	const normalizedEmail = params.email.toLowerCase();
+	const accountPassword = params.accountPassword || `TestPass-${nanoid(10)}!`;
+	const secretKey = params.secretKey || generateSecretKeyWasm();
+	const secretKeyHint = getSecretKeyHintWasm(secretKey);
+
+	const derivedKeys = deriveKeysWasm(
+		accountPassword,
+		secretKey,
+		normalizedEmail,
+	);
+
+	// Signup/login uses auth key bytes interpreted as a UTF-8 string password.
+	const authPassword = new TextDecoder().decode(
+		base64ToBytes(derivedKeys.auth_key),
+	);
+
+	const srpClient = new JsSrpClient("SHA-256", 4096);
+	const srpSalt = srpClient.generateSalt();
+	const privateKey = srpClient.deriveSafePrivateKey(srpSalt, authPassword);
+	const srpVerifier = srpClient.deriveVerifier(privateKey);
+
+	const rsaKeyPair = generateRSAKeyPairWasm();
+	const encryptedPrivateKey = toEncryptedJson(
+		encryptWasm(rsaKeyPair.private_key, derivedKeys.master_unlock_key),
+	);
+	const encryptedVaultKey = toEncryptedJson(
+		encryptWasm(generateEncryptionKeyWasm(), derivedKeys.master_unlock_key),
+	);
+
+	return {
+		accountPassword,
+		authPassword,
+		secretKey,
+		secretKeyHint,
+		srpSalt,
+		srpVerifier,
+		publicKey: rsaKeyPair.public_key,
+		encryptedPrivateKey,
+		encryptedVaultKey,
+	};
+}
+
+export async function generateTestSrpClientEphemeral(): Promise<{
+	clientPublicKey: string;
+	clientSecret: string;
+}> {
+	await ensureCryptoWasmInitialized();
+
+	const srpClient = new JsSrpClient("SHA-256", 4096);
+	const ephemeral = srpClient.generateEphemeral();
+
+	return {
+		clientPublicKey: ephemeral.public,
+		clientSecret: ephemeral.secret,
+	};
+}
+
+export async function deriveTestSrpClientProof(params: {
+	clientSecret: string;
+	salt: string;
+	serverPublicKey: string;
+	authPassword: string;
+}): Promise<{
+	clientProof: string;
+}> {
+	await ensureCryptoWasmInitialized();
+
+	const srpClient = new JsSrpClient("SHA-256", 4096);
+	const privateKey = srpClient.deriveSafePrivateKey(
+		params.salt,
+		params.authPassword,
+	);
+	const session = srpClient.deriveSession(
+		params.clientSecret,
+		params.serverPublicKey,
+		params.salt,
+		"",
+		privateKey,
+	);
+
+	return {
+		clientProof: session.proof,
+	};
+}
 
 // Mock item data for testing
 export const mockItemData = {
