@@ -14,6 +14,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { db } from "@bittery/db";
 import { authRouter } from "../routers/auth";
 import {
 	createPublicContext,
@@ -318,6 +319,12 @@ describe("Auth Router", () => {
 			const result = await caller.logoutAll();
 
 			expect(result.success).toBe(true);
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "logout_all")),
+			});
+			expect(auditLogs.length).toBe(1);
 		});
 
 		test("should require authentication", async () => {
@@ -385,6 +392,12 @@ describe("Auth Router", () => {
 			expect(updatedUser?.encryptedPrivateKey).toBe(
 				nextCryptoData.encryptedPrivateKey,
 			);
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "password_changed")),
+			});
+			expect(auditLogs.length).toBe(1);
 		});
 	});
 
@@ -418,6 +431,12 @@ describe("Auth Router", () => {
 			expect(updatedUser).toBeDefined();
 			expect(updatedUser?.secretKeyHint).toBe(nextCryptoData.secretKeyHint);
 			expect(updatedUser?.srpSalt).toBe(nextCryptoData.srpSalt);
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "secret_key_regenerated")),
+			});
+			expect(auditLogs.length).toBe(1);
 		});
 	});
 
@@ -431,6 +450,12 @@ describe("Auth Router", () => {
 
 			const user = await getUser(userId);
 			expect(user).toBeUndefined();
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "account_deleted")),
+			});
+			expect(auditLogs.length).toBe(1);
 		});
 
 		test("should reject deletion with wrong email", async () => {
@@ -473,6 +498,12 @@ describe("Auth Router", () => {
 
 			const session = await getSession(otherSession);
 			expect(session).toBeUndefined();
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "device_revoked")),
+			});
+			expect(auditLogs.length).toBe(1);
 		});
 
 		test("should not allow revoking current session", async () => {

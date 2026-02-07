@@ -86,8 +86,30 @@ export const loginRateLimit = pgTable(
 	],
 );
 
+export const auditLog = pgTable(
+	"audit_log",
+	{
+		id: text("id").primaryKey(),
+		// Kept as plain text (no FK) so logs can survive account deletion.
+		userId: text("user_id").notNull(),
+		action: text("action").notNull(),
+		entityType: text("entity_type"),
+		entityId: text("entity_id"),
+		ipAddress: text("ip_address"),
+		userAgent: text("user_agent"),
+		metadata: text("metadata"),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+	},
+	(table) => [
+		index("audit_log_userId_idx").on(table.userId),
+		index("audit_log_action_idx").on(table.action),
+		index("audit_log_createdAt_idx").on(table.createdAt),
+	],
+);
+
 export const userRelations = relations(user, ({ one, many }) => ({
 	sessions: many(session),
+	auditLogs: many(auditLog),
 	team: one(team, {
 		fields: [user.teamId],
 		references: [team.id],
@@ -97,6 +119,13 @@ export const userRelations = relations(user, ({ one, many }) => ({
 export const sessionRelations = relations(session, ({ one }) => ({
 	user: one(user, {
 		fields: [session.userId],
+		references: [user.id],
+	}),
+}));
+
+export const auditLogRelations = relations(auditLog, ({ one }) => ({
+	user: one(user, {
+		fields: [auditLog.userId],
 		references: [user.id],
 	}),
 }));

@@ -36,6 +36,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../index";
 import { getStoragePublicUrl } from "../storage/s3";
+import { logAuditEvent } from "../utils/audit";
 import { parseUserAgent } from "../utils/device";
 
 /**
@@ -687,6 +688,15 @@ export const authRouter = router({
 	 */
 	logoutAll: protectedProcedure.mutation(async ({ ctx }) => {
 		await deleteAllUserSessions(ctx.session.userId);
+
+		await logAuditEvent({
+			userId: ctx.session.userId,
+			action: "logout_all",
+			device: ctx.device,
+			entityType: "session",
+			entityId: ctx.session.sessionId,
+		});
+
 		return { success: true };
 	}),
 
@@ -748,6 +758,17 @@ export const authRouter = router({
 			// Logout all sessions to force re-login with new password
 			await deleteAllUserSessions(ctx.session.userId);
 
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "password_changed",
+				device: ctx.device,
+				entityType: "user",
+				entityId: ctx.session.userId,
+				metadata: {
+					vaultKeysUpdated: input.encryptedVaultKeys.length,
+				},
+			});
+
 			return { success: true };
 		}),
 
@@ -782,6 +803,17 @@ export const authRouter = router({
 			// Logout all sessions to force re-login with new secret key
 			await deleteAllUserSessions(ctx.session.userId);
 
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "secret_key_regenerated",
+				device: ctx.device,
+				entityType: "user",
+				entityId: ctx.session.userId,
+				metadata: {
+					vaultKeysUpdated: input.encryptedVaultKeys.length,
+				},
+			});
+
 			return { success: true };
 		}),
 
@@ -811,6 +843,14 @@ export const authRouter = router({
 					message: "Email does not match",
 				});
 			}
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "account_deleted",
+				device: ctx.device,
+				entityType: "user",
+				entityId: ctx.session.userId,
+			});
 
 			// Delete user account (cascading deletes will handle related data)
 			await deleteUserAccount(ctx.session.userId);
@@ -851,6 +891,15 @@ export const authRouter = router({
 			}
 
 			await revokeSession(input.sessionId, ctx.session.userId);
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "device_revoked",
+				device: ctx.device,
+				entityType: "session",
+				entityId: input.sessionId,
+			});
+
 			return { success: true };
 		}),
 

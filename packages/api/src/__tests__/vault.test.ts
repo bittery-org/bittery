@@ -11,6 +11,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { db } from "@bittery/db";
 import { vaultRouter } from "../routers/vault";
 import {
 	addVaultMember,
@@ -186,6 +187,13 @@ describe("Vault Router", () => {
 
 			const vault = await getVault(vaultId);
 			expect(vault).toBeUndefined();
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "vault_deleted")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(vaultId);
 		});
 
 		test("should deny deletion by non-owner", async () => {
@@ -532,6 +540,13 @@ describe("Vault Router", () => {
 			const vaultKey = await getVaultKey(vaultId, newMemberId);
 			expect(vaultKey).toBeDefined();
 			expect(vaultKey?.role).toBe("member");
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, ownerId), eq(log.action, "vault_member_added")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(vaultId);
 		});
 
 		test("should reject adding existing member", async () => {
@@ -1026,6 +1041,49 @@ describe("Vault Router", () => {
 			// Verify items were re-encrypted
 			const item = await getItem(itemId);
 			expect(item?.encryptedData).toBe("re-encrypted-data");
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, ownerId), eq(log.action, "vault_member_removed")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(vaultId);
+		});
+
+		test("should rollback key rotation if an item update fails", async () => {
+			const [{ userId: ownerId, caller }, { userId: memberId }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, memberId, "member");
+			const itemId = await createTestItem(vaultId, ownerId);
+
+			await expect(
+				caller.members.remove({
+					vaultId,
+					userId: memberId,
+					keyRotation: {
+						memberKeys: [
+							{
+								userId: ownerId,
+								encryptedVaultKey: "new-encrypted-key-for-owner",
+							},
+						],
+						reEncryptedItems: [
+							{
+								itemId: "non-existent-item",
+								encryptedData: "re-encrypted-data",
+								encryptionIv: "new-iv",
+							},
+						],
+					},
+				}),
+			).rejects.toThrow("Key rotation failed. Please try again.");
+
+			const memberVaultKey = await getVaultKey(vaultId, memberId);
+			expect(memberVaultKey).toBeDefined();
+
+			const unchangedItem = await getItem(itemId);
+			expect(unchangedItem?.encryptedData).toBe(mockItemData.encryptedData);
 		});
 
 		test("should deny non-owner/admin from removing members", async () => {

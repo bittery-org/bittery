@@ -9,13 +9,15 @@ import {
 	shareLinkRateLimit,
 } from "@bittery/db/schema/sharing";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../index";
+import { logAuditEvent } from "../utils/audit";
 
 // Email validation regex
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_VERIFICATION_CODES_PER_EMAIL = 5;
 
 /**
  * Get the base share URL from the WEB_APP_URL environment variable
@@ -56,15 +58,6 @@ export const shareRouter = router({
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
-			// Check rate limit
-			const rateLimit = await checkRateLimit(ctx.session.userId);
-			if (!rateLimit.allowed) {
-				throw new TRPCError({
-					code: "TOO_MANY_REQUESTS",
-					message: `Rate limit exceeded. You can create ${rateLimit.remaining} more links today.`,
-				});
-			}
-
 			// Verify user has access to the item's vault
 			const itemRecord = await db.query.item.findFirst({
 				where: (i, { eq }) => eq(i.id, input.itemId),
@@ -122,6 +115,9 @@ export const shareRouter = router({
 				}
 			}
 
+			// Atomically enforce daily creation limit.
+			await checkAndIncrementRateLimit(ctx.session.userId);
+
 			// Calculate expiration
 			const expirationHours =
 				EXPIRATION_OPTIONS[input.expiresIn as ExpirationOption];
@@ -162,8 +158,20 @@ export const shareRouter = router({
 				);
 			}
 
-			// Increment rate limit counter
-			await incrementRateLimitCounter(ctx.session.userId);
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "share_created",
+				device: ctx.device,
+				entityType: "share_link",
+				entityId: shareLinkId,
+				metadata: {
+					itemId: input.itemId,
+					accessMode: input.accessMode,
+					isOneTimeUse: input.isOneTimeUse,
+					allowedEmailCount: input.allowedEmails?.length ?? 0,
+					expiresAt: expiresAt.toISOString(),
+				},
+			});
 
 			return {
 				id: shareLinkId,
@@ -215,9 +223,14 @@ export const shareRouter = router({
 				orderBy: (sl, { desc }) => [desc(sl.createdAt)],
 			});
 
+			const visibleLinks =
+				userVaultKey.role === "owner" || userVaultKey.role === "admin"
+					? links
+					: links.filter((link) => link.createdById === ctx.session.userId);
+
 			// Update expired links status
 			const now = new Date();
-			const result = links.map((link) => {
+			const result = visibleLinks.map((link) => {
 				let status = link.status;
 				if (status === "active" && link.expiresAt < now) {
 					status = "expired";
@@ -344,11 +357,20 @@ export const shareRouter = router({
 				});
 			}
 
-			// Only owner, admin, or the creator can revoke
+			const linkCreator = await db.query.vaultKey.findFirst({
+				where: (vk, { and, eq }) =>
+					and(
+						eq(vk.vaultId, link.item.vaultId),
+						eq(vk.userId, link.createdById),
+					),
+			});
+
+			// Admins cannot revoke links created by owners.
 			if (
 				userVaultKey.role === "read-only" ||
 				(userVaultKey.role === "member" &&
-					link.createdById !== ctx.session.userId)
+					link.createdById !== ctx.session.userId) ||
+				(userVaultKey.role === "admin" && linkCreator?.role === "owner")
 			) {
 				throw new TRPCError({
 					code: "FORBIDDEN",
@@ -360,6 +382,18 @@ export const shareRouter = router({
 				.update(shareLink)
 				.set({ status: "revoked" })
 				.where(eq(shareLink.id, input.linkId));
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "share_revoked",
+				device: ctx.device,
+				entityType: "share_link",
+				entityId: input.linkId,
+				metadata: {
+					itemId: link.itemId,
+					createdById: link.createdById,
+				},
+			});
 
 			return { success: true };
 		}),
@@ -614,6 +648,24 @@ export const shareRouter = router({
 				});
 			}
 
+			const totalCodesResult = await db
+				.select({ count: sql<number>`count(*)::int` })
+				.from(shareEmailVerification)
+				.where(
+					and(
+						eq(shareEmailVerification.shareLinkId, link.id),
+						eq(shareEmailVerification.email, normalizedEmail),
+					),
+				);
+
+			if ((totalCodesResult[0]?.count ?? 0) >= MAX_VERIFICATION_CODES_PER_EMAIL) {
+				throw new TRPCError({
+					code: "TOO_MANY_REQUESTS",
+					message:
+						"Too many verification attempts for this email. Contact the link creator.",
+				});
+			}
+
 			// Check for existing unexpired verification
 			const existingVerification =
 				await db.query.shareEmailVerification.findFirst({
@@ -651,9 +703,8 @@ export const shareRouter = router({
 				expiresAt,
 			});
 
-			// TODO: Send email with verification code
-			// For now, return success (in production, use an email service)
-			console.log(`[SHARE] Verification code for ${normalizedEmail}: ${code}`);
+			// TODO: Send via email service.
+			// await emailService.sendVerificationCode(normalizedEmail, code);
 
 			return {
 				success: true,
@@ -784,6 +835,46 @@ export const shareRouter = router({
 				});
 			}
 
+			const accessUpdate = await db
+				.update(shareLink)
+				.set({
+					accessCount: sql`${shareLink.accessCount} + 1`,
+					lastAccessedAt: now,
+					status: sql`CASE
+						WHEN ${shareLink.maxAccessCount} IS NOT NULL
+							AND ${shareLink.accessCount} + 1 >= ${shareLink.maxAccessCount}
+						THEN 'exhausted'::share_link_status
+						ELSE ${shareLink.status}
+					END`,
+				})
+				.where(
+					and(
+						eq(shareLink.id, link.id),
+						eq(shareLink.status, "active"),
+						gt(shareLink.expiresAt, now),
+						or(
+							isNull(shareLink.maxAccessCount),
+							sql`${shareLink.accessCount} < ${shareLink.maxAccessCount}`,
+						),
+					),
+				)
+				.returning({ id: shareLink.id });
+
+			if (accessUpdate.length === 0) {
+				await logAccess(link.id, {
+					email: input.email,
+					ipAddress: input.ipAddress,
+					userAgent: input.userAgent,
+					success: false,
+					failureReason: "Access limit reached",
+				});
+
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "This share link has reached its access limit",
+				});
+			}
+
 			// Mark verification as used
 			await db
 				.update(shareEmailVerification)
@@ -800,19 +891,6 @@ export const shareRouter = router({
 					.set({ verified: true, verifiedAt: now })
 					.where(eq(shareLinkAllowedEmail.id, allowedEmail.id));
 			}
-
-			// Update link access count and last accessed
-			await db
-				.update(shareLink)
-				.set({
-					accessCount: link.accessCount + 1,
-					lastAccessedAt: now,
-					...(link.maxAccessCount &&
-						link.accessCount + 1 >= link.maxAccessCount && {
-							status: "exhausted",
-						}),
-				})
-				.where(eq(shareLink.id, link.id));
 
 			// Log successful access
 			await logAccess(link.id, {
@@ -899,18 +977,44 @@ export const shareRouter = router({
 				});
 			}
 
-			// Update access count
-			await db
+			const accessUpdate = await db
 				.update(shareLink)
 				.set({
-					accessCount: link.accessCount + 1,
+					accessCount: sql`${shareLink.accessCount} + 1`,
 					lastAccessedAt: now,
-					...(link.maxAccessCount &&
-						link.accessCount + 1 >= link.maxAccessCount && {
-							status: "exhausted",
-						}),
+					status: sql`CASE
+						WHEN ${shareLink.maxAccessCount} IS NOT NULL
+							AND ${shareLink.accessCount} + 1 >= ${shareLink.maxAccessCount}
+						THEN 'exhausted'::share_link_status
+						ELSE ${shareLink.status}
+					END`,
 				})
-				.where(eq(shareLink.id, link.id));
+				.where(
+					and(
+						eq(shareLink.id, link.id),
+						eq(shareLink.status, "active"),
+						gt(shareLink.expiresAt, now),
+						or(
+							isNull(shareLink.maxAccessCount),
+							sql`${shareLink.accessCount} < ${shareLink.maxAccessCount}`,
+						),
+					),
+				)
+				.returning({ id: shareLink.id });
+
+			if (accessUpdate.length === 0) {
+				await logAccess(link.id, {
+					ipAddress: input.ipAddress,
+					userAgent: input.userAgent,
+					success: false,
+					failureReason: "Access limit reached",
+				});
+
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "This share link has reached its access limit",
+				});
+			}
 
 			// Log successful access
 			await logAccess(link.id, {
@@ -931,9 +1035,7 @@ export const shareRouter = router({
 
 // Helper functions
 
-async function checkRateLimit(
-	userId: string,
-): Promise<{ allowed: boolean; remaining: number }> {
+async function checkAndIncrementRateLimit(userId: string): Promise<void> {
 	const now = new Date();
 	const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
@@ -949,40 +1051,38 @@ async function checkRateLimit(
 			linksCreatedToday: 0,
 			lastResetAt: todayStart,
 		});
-		return { allowed: true, remaining: 50 };
 	}
 
-	// Reset if new day
-	if (rateLimit.lastResetAt < todayStart) {
-		await db
-			.update(shareLinkRateLimit)
-			.set({
-				linksCreatedToday: 0,
-				lastResetAt: todayStart,
-			})
-			.where(eq(shareLinkRateLimit.id, rateLimit.id));
-		return { allowed: true, remaining: rateLimit.dailyLimit };
-	}
+	const result = await db
+		.update(shareLinkRateLimit)
+		.set({
+			linksCreatedToday: sql`CASE
+				WHEN ${shareLinkRateLimit.lastResetAt} < ${todayStart}
+				THEN 1
+				ELSE ${shareLinkRateLimit.linksCreatedToday} + 1
+			END`,
+			lastResetAt: sql`CASE
+				WHEN ${shareLinkRateLimit.lastResetAt} < ${todayStart}
+				THEN ${todayStart}
+				ELSE ${shareLinkRateLimit.lastResetAt}
+			END`,
+		})
+		.where(
+			and(
+				eq(shareLinkRateLimit.userId, userId),
+				or(
+					sql`${shareLinkRateLimit.lastResetAt} < ${todayStart}`,
+					sql`${shareLinkRateLimit.linksCreatedToday} < ${shareLinkRateLimit.dailyLimit}`,
+				),
+			),
+		)
+		.returning({ id: shareLinkRateLimit.id });
 
-	const remaining = rateLimit.dailyLimit - rateLimit.linksCreatedToday;
-	return {
-		allowed: remaining > 0,
-		remaining: Math.max(0, remaining),
-	};
-}
-
-async function incrementRateLimitCounter(userId: string): Promise<void> {
-	const rateLimit = await db.query.shareLinkRateLimit.findFirst({
-		where: (rl, { eq }) => eq(rl.userId, userId),
-	});
-
-	if (rateLimit) {
-		await db
-			.update(shareLinkRateLimit)
-			.set({
-				linksCreatedToday: rateLimit.linksCreatedToday + 1,
-			})
-			.where(eq(shareLinkRateLimit.id, rateLimit.id));
+	if (result.length === 0) {
+		throw new TRPCError({
+			code: "TOO_MANY_REQUESTS",
+			message: "Daily share link limit reached",
+		});
 	}
 }
 

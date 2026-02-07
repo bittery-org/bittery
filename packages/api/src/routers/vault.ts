@@ -18,6 +18,7 @@ import {
 	getStoragePublicUrl,
 } from "../storage/s3";
 import { emitSyncEvent } from "../sync-helper";
+import { logAuditEvent } from "../utils/audit";
 
 export const vaultRouter = router({
 	/**
@@ -327,6 +328,18 @@ export const vaultRouter = router({
 					console.error("Failed to delete vault image from S3:", error);
 				}
 			}
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "vault_deleted",
+				device: ctx.device,
+				entityType: "vault",
+				entityId: input.vaultId,
+				metadata: {
+					vaultName: userVaultKey.vault.name,
+					vaultType: userVaultKey.vault.type,
+				},
+			});
 
 			return { success: true };
 		}),
@@ -1365,60 +1378,91 @@ export const vaultRouter = router({
 				});
 
 				try {
-					// Delete the removed user's vault key
-					await db
-						.delete(vaultKey)
-						.where(
-							and(
-								eq(vaultKey.vaultId, input.vaultId),
-								eq(vaultKey.userId, input.userId),
-							),
-						);
-
-					// Update vault keys for all remaining members
-					for (const memberKey of input.keyRotation.memberKeys) {
-						await db
-							.update(vaultKey)
-							.set({ encryptedVaultKey: memberKey.encryptedVaultKey })
+					await db.transaction(async (tx) => {
+						// Delete the removed user's vault key.
+						const removedKey = await tx
+							.delete(vaultKey)
 							.where(
 								and(
 									eq(vaultKey.vaultId, input.vaultId),
-									eq(vaultKey.userId, memberKey.userId),
+									eq(vaultKey.userId, input.userId),
 								),
-							);
-					}
+							)
+							.returning({ id: vaultKey.id });
 
-					// Re-encrypt all items with new vault key
-					for (const reEncryptedItem of input.keyRotation.reEncryptedItems) {
-						await db
-							.update(item)
+						if (removedKey.length === 0) {
+							throw new Error("Target member vault key not found");
+						}
+
+						// Update vault keys for all remaining members.
+						for (const memberKey of input.keyRotation.memberKeys) {
+							const updatedKey = await tx
+								.update(vaultKey)
+								.set({ encryptedVaultKey: memberKey.encryptedVaultKey })
+								.where(
+									and(
+										eq(vaultKey.vaultId, input.vaultId),
+										eq(vaultKey.userId, memberKey.userId),
+									),
+								)
+								.returning({ id: vaultKey.id });
+
+							if (updatedKey.length === 0) {
+								throw new Error(
+									`Member key not found for user ${memberKey.userId}`,
+								);
+							}
+						}
+
+						// Re-encrypt all items with new vault key.
+						for (const reEncryptedItem of input.keyRotation.reEncryptedItems) {
+							const updatedItem = await tx
+								.update(item)
+								.set({
+									encryptedData: reEncryptedItem.encryptedData,
+									encryptionIv: reEncryptedItem.encryptionIv,
+									updatedAt: new Date(),
+								})
+								.where(
+									and(
+										eq(item.id, reEncryptedItem.itemId),
+										eq(item.vaultId, input.vaultId),
+									),
+								)
+								.returning({ id: item.id });
+
+							if (updatedItem.length === 0) {
+								throw new Error(
+									`Item not found in vault: ${reEncryptedItem.itemId}`,
+								);
+							}
+						}
+
+						// Update vault key version.
+						const updatedVault = await tx
+							.update(vault)
 							.set({
-								encryptedData: reEncryptedItem.encryptedData,
-								encryptionIv: reEncryptedItem.encryptionIv,
+								keyVersion: newKeyVersion,
 								updatedAt: new Date(),
 							})
-							.where(eq(item.id, reEncryptedItem.itemId));
-					}
+							.where(eq(vault.id, input.vaultId))
+							.returning({ id: vault.id });
 
-					// Update vault key version
-					await db
-						.update(vault)
-						.set({
-							keyVersion: newKeyVersion,
-							updatedAt: new Date(),
-						})
-						.where(eq(vault.id, input.vaultId));
+						if (updatedVault.length === 0) {
+							throw new Error("Vault not found during key rotation");
+						}
 
-					// Mark rotation as completed
-					await db
-						.update(vaultKeyRotation)
-						.set({
-							status: "completed",
-							completedAt: new Date(),
-						})
-						.where(eq(vaultKeyRotation.id, rotationId));
+						// Mark rotation as completed.
+						await tx
+							.update(vaultKeyRotation)
+							.set({
+								status: "completed",
+								completedAt: new Date(),
+							})
+							.where(eq(vaultKeyRotation.id, rotationId));
+					});
 
-					// Emit sync events for member removal and key rotation
+					// Emit sync events for member removal and key rotation.
 					await emitSyncEvent({
 						eventType: "vault_member_removed",
 						entityId: input.userId,
@@ -1443,6 +1487,21 @@ export const vaultRouter = router({
 						metadata: {
 							reason: "member_removed",
 							keyRotationId: rotationId,
+						},
+					});
+
+					await logAuditEvent({
+						userId: ctx.session.userId,
+						action: "vault_member_removed",
+						device: ctx.device,
+						entityType: "vault",
+						entityId: input.vaultId,
+						metadata: {
+							removedUserId: input.userId,
+							keyRotationId: rotationId,
+							newKeyVersion,
+							itemsReEncrypted: input.keyRotation.reEncryptedItems.length,
+							membersUpdated: input.keyRotation.memberKeys.length,
 						},
 					});
 
@@ -1637,9 +1696,9 @@ export const vaultRouter = router({
 				});
 
 				// Emit sync event
-				await emitSyncEvent({
-					eventType: "vault_member_added",
-					entityId: input.userId,
+					await emitSyncEvent({
+						eventType: "vault_member_added",
+						entityId: input.userId,
 					entityType: "vault_member",
 					vaultId: input.vaultId,
 					userId: ctx.session.userId,
@@ -1648,10 +1707,22 @@ export const vaultRouter = router({
 					metadata: {
 						addedUserId: input.userId,
 						role: input.role,
-					},
-				});
+						},
+					});
 
-				return { success: true };
-			}),
+					await logAuditEvent({
+						userId: ctx.session.userId,
+						action: "vault_member_added",
+						device: ctx.device,
+						entityType: "vault",
+						entityId: input.vaultId,
+						metadata: {
+							addedUserId: input.userId,
+							role: input.role,
+						},
+					});
+
+					return { success: true };
+				}),
 	}),
 });

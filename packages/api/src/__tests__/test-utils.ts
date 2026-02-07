@@ -17,7 +17,7 @@ import initCryptoWasm, {
 	generateSecretKey as generateSecretKeyWasm,
 	getSecretKeyHint as getSecretKeyHintWasm,
 } from "../../../crypto/wasm/bittery_crypto.js";
-import { session, user } from "@bittery/db/schema/auth";
+import { auditLog, session, user } from "@bittery/db/schema/auth";
 import {
 	shareAccessLog,
 	shareEmailVerification,
@@ -588,6 +588,7 @@ export async function cleanupTestData(userIds: string[] = []) {
 
 		// Clean up sessions and user
 		await db.delete(session).where(eq(session.userId, userId));
+		await db.delete(auditLog).where(eq(auditLog.userId, userId));
 		await db.delete(user).where(eq(user.id, userId));
 	}
 }
@@ -690,7 +691,7 @@ export async function truncateAll() {
 			sync_event_ack, sync_event,
 			item, vault_key, vault_key_rotation, folder, vault,
 			team_invitation, team_member, team,
-			login_rate_limit, session, "user"
+			login_rate_limit, session, audit_log, "user"
 		CASCADE
 	`);
 }
