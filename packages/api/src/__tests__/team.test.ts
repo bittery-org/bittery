@@ -473,7 +473,7 @@ describe("Team Router", () => {
 		test("should include encrypted vault keys for the requesting user", async () => {
 			const { caller, userId } = await setup(teamRouter);
 			const teamId = await createTestTeam(userId);
-			// const vaultId = await createTestVault(userId, { teamId });
+			await createTestVault(userId, { teamId });
 
 			const result = await caller.vaults({ teamId });
 
