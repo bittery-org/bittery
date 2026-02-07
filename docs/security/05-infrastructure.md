@@ -3,61 +3,6 @@
 **Scope:** Architecture-wide, `packages/api/src/context.ts`
 **Findings:** 3 (all Low/Informational)
 
----
-
-## #31 — LOW: IP Header Spoofing
-
-**File:** `packages/api/src/context.ts:26-30`
-
-**Problem:** IP address is extracted from client-provided headers (`X-Forwarded-For`, `X-Real-IP`) which can be spoofed by attackers if the server is directly accessible (not behind a trusted proxy). This IP is used for session tracking, rate limiting (#8), and audit logging (#25).
-
-```typescript
-// CURRENT — trusts client-provided headers
-const ipAddress =
-    context.req.header("CF-Connecting-IP") ||
-    context.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ||
-    context.req.header("X-Real-IP") ||
-    null;
-```
-
-**Fix:** Only trust IP headers from known reverse proxies. The approach depends on the deployment:
-
-**If behind Cloudflare (recommended):**
-```typescript
-// Only trust CF-Connecting-IP (set by Cloudflare, not spoofable when using Cloudflare)
-const ipAddress = context.req.header("CF-Connecting-IP") || null;
-```
-
-**If behind a custom reverse proxy:**
-```typescript
-// Configure trusted proxy IPs
-const TRUSTED_PROXIES = new Set(
-    (process.env.TRUSTED_PROXY_IPS || "").split(",").filter(Boolean)
-);
-
-function getClientIp(context: HonoContext): string | null {
-    // If behind Cloudflare
-    const cfIp = context.req.header("CF-Connecting-IP");
-    if (cfIp) return cfIp;
-
-    // Only trust X-Forwarded-For if request came from a trusted proxy
-    // (This requires the framework/runtime to provide the direct connection IP)
-    const directIp = context.env?.remoteAddr; // Runtime-specific
-    if (directIp && TRUSTED_PROXIES.has(directIp)) {
-        const forwardedFor = context.req.header("X-Forwarded-For");
-        if (forwardedFor) {
-            return forwardedFor.split(",")[0]?.trim() || null;
-        }
-    }
-
-    return null;
-}
-```
-
-**Testing:** Test with Cloudflare enabled — verify IP is correctly extracted. Test without proxy — verify spoofed headers are not trusted.
-
----
-
 ## #34 — LOW: No Encrypted Data Versioning
 
 **File:** Architecture-wide
@@ -180,7 +125,6 @@ Generate a printable PDF containing the user's Secret Key and account recovery i
 ## Implementation Order
 
 1. **#34** (data versioning) — prerequisite for crypto-core breaking changes, implement first
-2. **#31** (IP header spoofing) — quick config change based on deployment
 3. **#37** (recovery mechanism) — large feature, plan separately
 
 ## Dependencies

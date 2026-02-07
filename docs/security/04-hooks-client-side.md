@@ -39,82 +39,6 @@ Apply the same fix to `use-vault-items.ts:152-155` and any other decryption erro
 
 ---
 
-## #19 — MEDIUM: MUK Not Cleared After Vault Operation
-
-**File:** `packages/hooks/src/vault/use-create-vault.ts:164`
-
-**Problem:** The Master Unlock Key is retrieved into a local variable but never explicitly cleared after use. While JavaScript doesn't support true memory zeroization, we can reduce the window of exposure by overwriting the variable.
-
-```typescript
-// CURRENT — MUK lives until garbage collection
-const masterUnlockKey = await storage.getMasterUnlockKey(input.accountEmail);
-if (!masterUnlockKey) {
-    throw new Error("Master Unlock Key not found. Please sign in again.");
-}
-// ... use masterUnlockKey for encryption ...
-// masterUnlockKey never cleared
-```
-
-**Fix:** Overwrite the variable after use. While not a guarantee (the JS engine may optimize this away), it's a defense-in-depth measure.
-
-```typescript
-let masterUnlockKey: Uint8Array | null = await storage.getMasterUnlockKey(
-    input.accountEmail,
-);
-if (!masterUnlockKey) {
-    throw new Error("Master Unlock Key not found. Please sign in again.");
-}
-
-try {
-    // ... use masterUnlockKey for encryption ...
-} finally {
-    // Best-effort zeroization
-    if (masterUnlockKey) {
-        masterUnlockKey.fill(0);
-        masterUnlockKey = null;
-    }
-}
-```
-
-Apply this pattern wherever MUK is retrieved for a single operation (vault creation, item creation/update, key rotation prep).
-
-**Testing:** Verify vault creation still works correctly after the change.
-
----
-
-## #20 — MEDIUM: Vault Keys Cached in Map Without Clearing
-
-**File:** `packages/hooks/src/internal/use-items-unified.ts:192`
-
-**Problem:** Decrypted vault keys are cached in a local `Map<string, Uint8Array>` during item decryption. This Map persists in the React Query cache closure for the duration of the query's lifetime, leaving decrypted key material in memory.
-
-```typescript
-// CURRENT — vault keys cached without clearing
-const vaultKeyCache = new Map<string, Uint8Array>();
-// ... populate during decryption loop ...
-// Cache never cleared
-```
-
-**Fix:** Clear the cache after use and zeroize the key bytes.
-
-```typescript
-const vaultKeyCache = new Map<string, Uint8Array>();
-
-try {
-    // ... decryption loop using vaultKeyCache ...
-} finally {
-    // Zeroize cached vault keys
-    for (const key of vaultKeyCache.values()) {
-        key.fill(0);
-    }
-    vaultKeyCache.clear();
-}
-```
-
-**Testing:** Verify items still decrypt correctly. Verify the Map is empty after the query function completes.
-
----
-
 ## #21 — MEDIUM: SRP Server Proof Verification Optional
 
 **File:** `packages/hooks/src/auth/srp-unlock.ts:88-96`
@@ -152,67 +76,6 @@ Apply the same mandatory check in:
 - Extension service worker `auth-handlers.ts` (if applicable)
 
 **Testing:** Verify login and unlock succeed with server proof present. Verify they fail if `serverProof` is removed from the response.
-
----
-
-## #22 — MEDIUM: Account Emails in React Query Keys
-
-**File:** `packages/hooks/src/internal/use-items-unified.ts:127`
-
-**Problem:** Account emails are embedded in React Query keys, making them visible in React DevTools, any query logging/analytics, and cached in memory.
-
-```typescript
-// CURRENT — emails in query keys
-queryKey: ["items-unified", accountsInfo.map((a) => a.email).sort()],
-```
-
-**Fix:** Use a hash or opaque identifier instead of raw emails.
-
-```typescript
-// Use a simple hash for query key uniqueness
-function hashForQueryKey(emails: string[]): string {
-    return emails.sort().join(",").split("").reduce(
-        (hash, char) => ((hash << 5) - hash + char.charCodeAt(0)) | 0,
-        0
-    ).toString(36);
-}
-
-queryKey: ["items-unified", hashForQueryKey(accountsInfo.map((a) => a.email))],
-```
-
-Alternatively, use account IDs instead of emails if available.
-
-**Testing:** Verify React Query caching still works correctly (queries invalidate and refetch when accounts change).
-
----
-
-## #23 — MEDIUM: Decrypted Items Cached 10 Minutes
-
-**File:** `packages/hooks/src/internal/use-decrypted-item.ts:155`
-
-**Problem:** Decrypted item data (including plaintext passwords, credit card numbers, etc.) is cached in React Query for 10 minutes after the component unmounts (`gcTime: 10 * 60 * 1000`). This leaves sensitive data in browser memory across navigation.
-
-```typescript
-// CURRENT
-staleTime: 5 * 60 * 1000, // 5 minutes
-gcTime: 10 * 60 * 1000,   // 10 minutes — too long for sensitive data
-```
-
-**Fix:** Reduce cache times significantly for decrypted data. Consider zero caching.
-
-```typescript
-staleTime: 30 * 1000,    // 30 seconds — refetch frequently
-gcTime: 60 * 1000,       // 1 minute — GC quickly after unmount
-```
-
-For the most sensitive view (single item detail with plaintext passwords), consider:
-```typescript
-gcTime: 0,  // Immediately garbage collected on unmount
-```
-
-Apply the same reduction to `use-vault-items.ts` which also has long cache times for decrypted data.
-
-**Testing:** Verify items still display correctly. Verify navigation between items doesn't feel sluggish (staleTime: 30s means cached data shows immediately, refetch happens in background).
 
 ---
 
@@ -377,10 +240,6 @@ The `failed` array with emails is already available in the `QuickUnlockAllResult
 1. **#12** (sanitize error logging) — immediate, minimal changes
 2. **#38** (remove emails from errors) — immediate, one-line fix
 3. **#21** (mandatory server proof) — requires verifying server returns proof
-4. **#23** (reduce cache times) — low risk, config change
-5. **#22** (hash query keys) — low risk, needs cache invalidation testing
-6. **#19** (clear MUK after use) — try-finally wrappers
-7. **#20** (clear vault key cache) — try-finally wrapper
-8. **#27** (account switch race) — needs careful testing
-9. **#32** (logout error handling) — UI decision needed
-10. **#33** (surface decryption failures) — requires UI changes
+4. **#27** (account switch race) — needs careful testing
+5. **#32** (logout error handling) — UI decision needed
+6. **#33** (surface decryption failures) — requires UI changes
