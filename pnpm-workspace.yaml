@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - packages/crypto/core
   - packages/crypto/wasm
   - packages/crypto/napi
   - packages/crypto/expo-module
