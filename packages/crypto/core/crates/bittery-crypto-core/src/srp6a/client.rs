@@ -5,6 +5,7 @@
 use pbkdf2::pbkdf2_hmac;
 use sha1::Sha1;
 use sha2::{Digest, Sha256, Sha384, Sha512};
+use zeroize::Zeroize;
 
 use super::bigint::SrpInt;
 use super::params::{get_params, HashAlgorithm, PrimeGroup};
@@ -45,7 +46,12 @@ impl SrpClient {
     /// Derive private key using standard SRP formula: x = H(s, H(I | ':' | p))
     ///
     /// Note: This is the traditional SRP method, less secure than PBKDF2 variant
-    pub fn derive_private_key(&self, salt: &str, username: &str, password: &str) -> String {
+    pub fn derive_private_key(
+        &self,
+        salt: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<String, CryptoError> {
         // Normalize username and password (NFKC)
         let username = username.to_owned(); // TODO: proper NFKC normalization
         let password = password.to_owned();
@@ -54,10 +60,11 @@ impl SrpClient {
         let identity_hash = self.hash_string(&format!("{}:{}", username, password));
 
         // H(s, H(I | ':' | p))
-        let s = SrpInt::from_hex(salt);
-        let x = self.hash_values(&[&s, &SrpInt::from_hex(&identity_hash)]);
+        let s = SrpInt::from_hex(salt)?;
+        let identity_hash_int = SrpInt::from_hex(&identity_hash)?;
+        let x = self.hash_values(&[&s, &identity_hash_int]);
 
-        x.to_hex()
+        Ok(x.to_hex())
     }
 
     /// Derive private key using PBKDF2 (safer method)
@@ -68,9 +75,9 @@ impl SrpClient {
         salt: &str,
         password: &str,
         iterations: Option<u32>,
-    ) -> String {
+    ) -> Result<String, CryptoError> {
         let iterations = iterations.unwrap_or_else(|| self.hash_algorithm.pbkdf2_iterations());
-        let salt_bytes = hex::decode(salt).unwrap_or_default();
+        let mut salt_bytes = hex::decode(salt)?;
         let password_bytes = password.as_bytes();
 
         let key_length = self.hash_algorithm.output_size();
@@ -91,14 +98,17 @@ impl SrpClient {
             }
         }
 
-        hex::encode(derived_key)
+        let private_key = hex::encode(&derived_key);
+        derived_key.zeroize();
+        salt_bytes.zeroize();
+        Ok(private_key)
     }
 
     /// Derive verifier from private key: v = g^x mod N
-    pub fn derive_verifier(&self, private_key: &str) -> String {
-        let x = SrpInt::from_hex(private_key);
+    pub fn derive_verifier(&self, private_key: &str) -> Result<String, CryptoError> {
+        let x = SrpInt::from_hex(private_key)?;
         let v = self.g.mod_pow(&x, &self.n);
-        v.to_hex()
+        Ok(v.to_hex())
     }
 
     /// Generate client ephemeral key pair
@@ -136,10 +146,10 @@ impl SrpClient {
         username: &str,
         private_key: &str,
     ) -> Result<Session, CryptoError> {
-        let a = SrpInt::from_hex(client_secret_ephemeral);
-        let big_b = SrpInt::from_hex(server_public_ephemeral);
-        let s = SrpInt::from_hex(salt);
-        let x = SrpInt::from_hex(private_key);
+        let a = SrpInt::from_hex(client_secret_ephemeral)?;
+        let big_b = SrpInt::from_hex(server_public_ephemeral)?;
+        let s = SrpInt::from_hex(salt)?;
+        let x = SrpInt::from_hex(private_key)?;
 
         // A = g^a mod N
         let big_a = self.g.mod_pow(&a, &self.n);
@@ -162,14 +172,8 @@ impl SrpClient {
         let g_x = self.g.mod_pow(&x, &self.n);
         let k_g_x = k.multiply(&g_x).modulo(&self.n);
 
-        // Handle potential underflow: (B - k*g^x) mod N
-        // We need to ensure we're working with positive numbers
-        let b_minus_kg_x = if big_b.value() >= k_g_x.value() {
-            big_b.subtract(&k_g_x)
-        } else {
-            // B - k*g^x + N to make it positive
-            big_b.add(&self.n).subtract(&k_g_x)
-        };
+        // (B - k*g^x) mod N
+        let b_minus_kg_x = big_b.subtract_mod(&k_g_x, &self.n);
 
         let u_x = u.multiply(&x);
         let a_plus_ux = a.add(&u_x);
@@ -183,7 +187,7 @@ impl SrpClient {
         let h_g = self.hash_values(&[&self.g]);
         let h_n_xor_h_g = h_n.xor(&h_g);
         let h_i = self.hash_string(username);
-        let h_i_int = SrpInt::from_hex(&h_i);
+        let h_i_int = SrpInt::from_hex(&h_i)?;
 
         let big_m = self.hash_values(&[&h_n_xor_h_g, &h_i_int, &s, &big_a, &big_b, &big_k]);
 
@@ -205,13 +209,13 @@ impl SrpClient {
         client_session: &Session,
         server_session_proof: &str,
     ) -> Result<(), CryptoError> {
-        let big_a = SrpInt::from_hex(client_public_ephemeral);
-        let big_m = SrpInt::from_hex(&client_session.proof);
-        let big_k = SrpInt::from_hex(&client_session.key);
+        let big_a = SrpInt::from_hex(client_public_ephemeral)?;
+        let big_m = SrpInt::from_hex(&client_session.proof)?;
+        let big_k = SrpInt::from_hex(&client_session.key)?;
 
         // Expected = H(A, M, K)
         let expected = self.hash_values(&[&big_a, &big_m, &big_k]);
-        let actual = SrpInt::from_hex(server_session_proof);
+        let actual = SrpInt::from_hex(server_session_proof)?;
 
         if !actual.equals(&expected) {
             return Err(CryptoError::InvalidSessionProof);
@@ -226,16 +230,13 @@ impl SrpClient {
         let mut combined = Vec::new();
         for value in values {
             let hex = value.to_hex();
-            let bytes = hex::decode(&hex).unwrap_or_default();
+            let bytes = hex::decode(&hex).expect("SrpInt::to_hex must produce valid hex");
             combined.extend_from_slice(&bytes);
         }
 
         let hash = self.hash_bytes(&combined);
         let hash_bytes = self.hash_algorithm.output_size();
-        SrpInt::with_length(
-            num_bigint::BigUint::from_bytes_be(&hash),
-            hash_bytes * 2,
-        )
+        SrpInt::with_length(num_bigint::BigUint::from_bytes_be(&hash), hash_bytes * 2)
     }
 
     /// Hash a string
@@ -289,11 +290,13 @@ mod tests {
     fn test_derive_verifier() {
         let client = SrpClient::new(HashAlgorithm::Sha256, PrimeGroup::G4096);
         let salt = client.generate_salt();
-        let private_key = client.derive_safe_private_key(&salt, "password123", None);
-        let verifier = client.derive_verifier(&private_key);
+        let private_key = client
+            .derive_safe_private_key(&salt, "password123", None)
+            .unwrap();
+        let verifier = client.derive_verifier(&private_key).unwrap();
 
         // Verifier should be deterministic
-        let verifier2 = client.derive_verifier(&private_key);
+        let verifier2 = client.derive_verifier(&private_key).unwrap();
         assert_eq!(verifier, verifier2);
     }
 
@@ -311,5 +314,12 @@ mod tests {
     fn test_pbkdf2_iterations() {
         assert_eq!(HashAlgorithm::Sha256.pbkdf2_iterations(), 310_000);
         assert_eq!(HashAlgorithm::Sha1.pbkdf2_iterations(), 720_000);
+    }
+
+    #[test]
+    fn test_derive_safe_private_key_invalid_salt_returns_error() {
+        let client = SrpClient::new(HashAlgorithm::Sha256, PrimeGroup::G4096);
+        let result = client.derive_safe_private_key("ZZZZ", "password123", None);
+        assert!(result.is_err());
     }
 }

@@ -4,10 +4,11 @@
 
 use bittery_crypto_core::{
     decrypt, derive_keys, encrypt, generate_encryption_key, generate_rsa_key_pair,
-    generate_secret_key, get_secret_key_hint, rsa_decrypt, rsa_encrypt,
+    generate_secret_key, get_secret_key_hint,
+    key_rotation::{self, ItemData, MemberKeyData},
+    rsa_decrypt, rsa_encrypt,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient, SrpServer},
     validate_secret_key, EncryptedData,
-    key_rotation::{self, ItemData, MemberKeyData},
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -149,8 +150,8 @@ pub fn js_generate_rsa_key_pair() -> Result<JsRsaKeyPair, JsError> {
     let key_pair = generate_rsa_key_pair().map_err(|e| JsError::new(&e.to_string()))?;
 
     Ok(JsRsaKeyPair {
-        public_key: key_pair.public_key,
-        private_key: key_pair.private_key,
+        public_key: key_pair.public_key.clone(),
+        private_key: key_pair.private_key.clone(),
     })
 }
 
@@ -223,14 +224,18 @@ impl JsSrpClient {
         salt: &str,
         password: &str,
         iterations: Option<u32>,
-    ) -> String {
-        self.client.derive_safe_private_key(salt, password, iterations)
+    ) -> Result<String, JsError> {
+        self.client
+            .derive_safe_private_key(salt, password, iterations)
+            .map_err(|e| JsError::new(&e.to_string()))
     }
 
     /// Derive verifier from private key
     #[wasm_bindgen(js_name = deriveVerifier)]
-    pub fn derive_verifier(&self, private_key: &str) -> String {
-        self.client.derive_verifier(private_key)
+    pub fn derive_verifier(&self, private_key: &str) -> Result<String, JsError> {
+        self.client
+            .derive_verifier(private_key)
+            .map_err(|e| JsError::new(&e.to_string()))
     }
 
     /// Generate client ephemeral
@@ -238,8 +243,8 @@ impl JsSrpClient {
     pub fn generate_ephemeral(&self) -> JsEphemeral {
         let ephemeral = self.client.generate_ephemeral();
         JsEphemeral {
-            public: ephemeral.public,
-            secret: ephemeral.secret,
+            public: ephemeral.public.clone(),
+            secret: ephemeral.secret.clone(),
         }
     }
 
@@ -265,8 +270,8 @@ impl JsSrpClient {
             .map_err(|e| JsError::new(&e.to_string()))?;
 
         Ok(JsSession {
-            key: session.key,
-            proof: session.proof,
+            key: session.key.clone(),
+            proof: session.proof.clone(),
         })
     }
 
@@ -309,12 +314,15 @@ impl JsSrpServer {
 
     /// Generate server ephemeral
     #[wasm_bindgen(js_name = generateEphemeral)]
-    pub fn generate_ephemeral(&self, verifier: &str) -> JsEphemeral {
-        let ephemeral = self.server.generate_ephemeral(verifier);
-        JsEphemeral {
-            public: ephemeral.public,
-            secret: ephemeral.secret,
-        }
+    pub fn generate_ephemeral(&self, verifier: &str) -> Result<JsEphemeral, JsError> {
+        let ephemeral = self
+            .server
+            .generate_ephemeral(verifier)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(JsEphemeral {
+            public: ephemeral.public.clone(),
+            secret: ephemeral.secret.clone(),
+        })
     }
 
     /// Derive session key and verify client proof
@@ -341,8 +349,8 @@ impl JsSrpServer {
             .map_err(|e| JsError::new(&e.to_string()))?;
 
         Ok(JsSession {
-            key: session.key,
-            proof: session.proof,
+            key: session.key.clone(),
+            proof: session.proof.clone(),
         })
     }
 }
@@ -358,7 +366,9 @@ fn base64_encode(data: &[u8]) -> String {
 
 fn base64_decode(data: &str) -> Result<Vec<u8>, JsError> {
     use base64::{engine::general_purpose::STANDARD, Engine};
-    STANDARD.decode(data).map_err(|e| JsError::new(&e.to_string()))
+    STANDARD
+        .decode(data)
+        .map_err(|e| JsError::new(&e.to_string()))
 }
 
 fn parse_hash_algorithm(name: &str) -> Result<HashAlgorithm, JsError> {
@@ -404,8 +414,18 @@ pub struct JsItemData {
 #[wasm_bindgen]
 impl JsItemData {
     #[wasm_bindgen(constructor)]
-    pub fn new(id: String, encrypted_data: String, encryption_iv: String, encryption_algorithm: String) -> JsItemData {
-        JsItemData { id, encrypted_data, encryption_iv, encryption_algorithm }
+    pub fn new(
+        id: String,
+        encrypted_data: String,
+        encryption_iv: String,
+        encryption_algorithm: String,
+    ) -> JsItemData {
+        JsItemData {
+            id,
+            encrypted_data,
+            encryption_iv,
+            encryption_algorithm,
+        }
     }
 }
 
@@ -422,7 +442,10 @@ pub struct JsMemberKeyData {
 impl JsMemberKeyData {
     #[wasm_bindgen(constructor)]
     pub fn new(user_id: String, public_key: String) -> JsMemberKeyData {
-        JsMemberKeyData { user_id, public_key }
+        JsMemberKeyData {
+            user_id,
+            public_key,
+        }
     }
 }
 
@@ -485,7 +508,10 @@ impl JsValidationResult {
 
 /// Encrypt a vault key with a member's RSA public key
 #[wasm_bindgen(js_name = encryptVaultKeyForMember)]
-pub fn js_encrypt_vault_key_for_member(vault_key_base64: &str, member_public_key: &str) -> Result<String, JsError> {
+pub fn js_encrypt_vault_key_for_member(
+    vault_key_base64: &str,
+    member_public_key: &str,
+) -> Result<String, JsError> {
     let vault_key = base64_decode(vault_key_base64)?;
     key_rotation::encrypt_vault_key_for_member(&vault_key, member_public_key)
         .map_err(|e| JsError::new(&e.to_string()))
@@ -493,7 +519,10 @@ pub fn js_encrypt_vault_key_for_member(vault_key_base64: &str, member_public_key
 
 /// Encrypt a vault key with AES-GCM using Master Unlock Key
 #[wasm_bindgen(js_name = encryptVaultKeyWithMUK)]
-pub fn js_encrypt_vault_key_with_muk(vault_key_base64: &str, master_unlock_key_base64: &str) -> Result<String, JsError> {
+pub fn js_encrypt_vault_key_with_muk(
+    vault_key_base64: &str,
+    master_unlock_key_base64: &str,
+) -> Result<String, JsError> {
     let vault_key = base64_decode(vault_key_base64)?;
     let muk = base64_decode(master_unlock_key_base64)?;
     key_rotation::encrypt_vault_key_with_muk(&vault_key, &muk)
@@ -545,20 +574,29 @@ pub fn js_perform_key_rotation(
     let items: Vec<ItemData> = serde_json::from_str(items_json)
         .map_err(|e| JsError::new(&format!("Invalid items JSON: {}", e)))?;
 
-    let result = key_rotation::perform_key_rotation(&old_key, &members, &items, current_user_id, &muk)
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let result =
+        key_rotation::perform_key_rotation(&old_key, &members, &items, current_user_id, &muk)
+            .map_err(|e| JsError::new(&e.to_string()))?;
 
     Ok(JsKeyRotationResult {
         new_vault_key_base64: result.new_vault_key_base64,
-        member_encrypted_keys: result.member_encrypted_keys.into_iter().map(|m| JsMemberEncryptedKey {
-            user_id: m.user_id,
-            encrypted_vault_key: m.encrypted_vault_key,
-        }).collect(),
-        re_encrypted_items: result.re_encrypted_items.into_iter().map(|i| JsReEncryptedItem {
-            item_id: i.item_id,
-            encrypted_data: i.encrypted_data,
-            encryption_iv: i.encryption_iv,
-        }).collect(),
+        member_encrypted_keys: result
+            .member_encrypted_keys
+            .into_iter()
+            .map(|m| JsMemberEncryptedKey {
+                user_id: m.user_id,
+                encrypted_vault_key: m.encrypted_vault_key,
+            })
+            .collect(),
+        re_encrypted_items: result
+            .re_encrypted_items
+            .into_iter()
+            .map(|i| JsReEncryptedItem {
+                item_id: i.item_id,
+                encrypted_data: i.encrypted_data,
+                encryption_iv: i.encryption_iv,
+            })
+            .collect(),
     })
 }
 
@@ -582,7 +620,11 @@ mod tests {
 
     #[test]
     fn test_derive_keys() {
-        let result = js_derive_keys("password", "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2", "test@example.com");
+        let result = js_derive_keys(
+            "password",
+            "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2",
+            "test@example.com",
+        );
         assert!(result.is_ok());
     }
 

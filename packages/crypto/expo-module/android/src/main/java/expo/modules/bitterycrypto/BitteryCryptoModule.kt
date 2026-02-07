@@ -208,7 +208,12 @@ class BitteryCryptoModule : Module() {
         Function("srpClientDeriveVerifier") { clientId: Long, privateKey: String ->
             val handle = srpClients[clientId]
                 ?: throw CodedException("INVALID_CLIENT", "Invalid SRP client ID", null)
-            nativeSrpClientDeriveVerifier(handle, privateKey)
+            val verifier = nativeSrpClientDeriveVerifier(handle, privateKey)
+                ?: throw CodedException("SRP_KEY_DERIVATION_FAILED", "Failed to derive verifier", null)
+            if (verifier.isBlank()) {
+                throw CodedException("SRP_KEY_DERIVATION_FAILED", "Failed to derive verifier", null)
+            }
+            verifier
         }
 
         Function("srpClientGenerateEphemeral") { clientId: Long ->
@@ -306,6 +311,10 @@ class BitteryCryptoModule : Module() {
             scope.launch {
                 try {
                     val result = nativeSrpServerGenerateEphemeral(handle, verifier)
+                    if (result.publicValue.isBlank() || result.secret.isBlank()) {
+                        promise.reject(CodedException("SRP_EPHEMERAL_FAILED", "Failed to generate ephemeral", null))
+                        return@launch
+                    }
                     promise.resolve(mapOf(
                         "public" to result.publicValue,
                         "secret" to result.secret
@@ -375,7 +384,7 @@ class BitteryCryptoModule : Module() {
     private external fun nativeSrpClientFree(handle: Long)
     private external fun nativeSrpClientGenerateSalt(handle: Long): String
     private external fun nativeSrpClientDeriveSafePrivateKey(handle: Long, salt: String, password: String, iterations: Int): String?
-    private external fun nativeSrpClientDeriveVerifier(handle: Long, privateKey: String): String
+    private external fun nativeSrpClientDeriveVerifier(handle: Long, privateKey: String): String?
     private external fun nativeSrpClientGenerateEphemeral(handle: Long): EphemeralResult
     private external fun nativeSrpClientDeriveSession(
         handle: Long,

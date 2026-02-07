@@ -5,7 +5,11 @@
 
 use num_bigint::BigUint;
 use num_traits::Zero;
-use rand::RngCore;
+use rand::{rngs::OsRng, RngCore};
+use subtle::ConstantTimeEq;
+use zeroize::Zeroize;
+
+use crate::error::CryptoError;
 
 /// SRP integer with optional hex length for padding
 #[derive(Clone, Debug)]
@@ -38,24 +42,28 @@ impl SrpInt {
     }
 
     /// Parse from hex string (with optional whitespace)
-    pub fn from_hex(hex: &str) -> Self {
-        let cleaned: String = hex
-            .chars()
-            .filter(|c| c.is_ascii_hexdigit())
-            .collect::<String>()
-            .to_lowercase();
+    pub fn from_hex(hex: &str) -> Result<Self, CryptoError> {
+        let cleaned: String = hex.chars().filter(|c| !c.is_whitespace()).collect();
+        if cleaned.is_empty() {
+            return Err(CryptoError::InvalidInput(
+                "Hex string cannot be empty".to_string(),
+            ));
+        }
+        if !cleaned.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(CryptoError::InvalidInput("Invalid hex string".to_string()));
+        }
         let hex_length = cleaned.len();
         let value = BigUint::parse_bytes(cleaned.as_bytes(), 16)
-            .unwrap_or_else(BigUint::zero);
-        Self {
+            .ok_or_else(|| CryptoError::InvalidInput("Invalid hex string".to_string()))?;
+        Ok(Self {
             value,
             hex_length: Some(hex_length),
-        }
+        })
     }
 
     /// Generate random value with specified byte length
     pub fn random(bytes: usize) -> Self {
-        let mut rng = rand::thread_rng();
+        let mut rng = OsRng;
         let mut buffer = vec![0u8; bytes];
         rng.fill_bytes(&mut buffer);
         let value = BigUint::from_bytes_be(&buffer);
@@ -66,6 +74,7 @@ impl SrpInt {
     }
 
     /// Get the underlying BigUint
+    #[allow(dead_code)]
     pub fn value(&self) -> &BigUint {
         &self.value
     }
@@ -120,16 +129,29 @@ impl SrpInt {
     }
 
     /// Subtraction
+    #[allow(dead_code)]
     pub fn subtract(&self, other: &SrpInt) -> Self {
-        // Handle underflow by working mod N in calling code
-        if self.value >= other.value {
-            Self {
-                value: &self.value - &other.value,
-                hex_length: self.hex_length,
-            }
-        } else {
-            // This shouldn't happen in correct SRP calculations
-            Self::new(BigUint::zero())
+        assert!(
+            self.value >= other.value,
+            "SrpInt::subtract underflow; use subtract_mod for modular subtraction"
+        );
+        Self {
+            value: &self.value - &other.value,
+            hex_length: self.hex_length,
+        }
+    }
+
+    /// Modular subtraction
+    pub fn subtract_mod(&self, other: &SrpInt, modulus: &SrpInt) -> Self {
+        assert!(
+            !modulus.is_zero(),
+            "SrpInt::subtract_mod modulus cannot be zero"
+        );
+        let lhs = (&self.value % &modulus.value + &modulus.value - (&other.value % &modulus.value))
+            % &modulus.value;
+        Self {
+            value: lhs,
+            hex_length: modulus.hex_length,
         }
     }
 
@@ -164,7 +186,23 @@ impl SrpInt {
 
     /// Equality check
     pub fn equals(&self, other: &SrpInt) -> bool {
-        self.value == other.value
+        let self_bytes = self.value.to_bytes_be();
+        let other_bytes = other.value.to_bytes_be();
+        let max_len = self_bytes.len().max(other_bytes.len());
+
+        if max_len == 0 {
+            return true;
+        }
+
+        let mut a = vec![0u8; max_len];
+        let mut b = vec![0u8; max_len];
+        a[max_len - self_bytes.len()..].copy_from_slice(&self_bytes);
+        b[max_len - other_bytes.len()..].copy_from_slice(&other_bytes);
+
+        let equals: bool = a.ct_eq(&b).into();
+        a.zeroize();
+        b.zeroize();
+        equals
     }
 }
 
@@ -186,19 +224,24 @@ mod tests {
 
     #[test]
     fn test_from_hex() {
-        let int = SrpInt::from_hex("0123456789abcdef");
+        let int = SrpInt::from_hex("0123456789abcdef").unwrap();
         assert_eq!(int.to_hex(), "0123456789abcdef");
     }
 
     #[test]
     fn test_from_hex_with_whitespace() {
-        let int = SrpInt::from_hex("01 23 45 67 89 ab cd ef");
+        let int = SrpInt::from_hex("01 23 45 67 89 ab cd ef").unwrap();
         assert_eq!(int.to_hex(), "0123456789abcdef");
     }
 
     #[test]
+    fn test_from_hex_invalid_returns_error() {
+        assert!(SrpInt::from_hex("ZZZZ").is_err());
+    }
+
+    #[test]
     fn test_padding() {
-        let int = SrpInt::from_hex("ff");
+        let int = SrpInt::from_hex("ff").unwrap();
         let padded = int.pad(8);
         assert_eq!(padded.to_hex(), "000000ff");
     }
@@ -223,9 +266,28 @@ mod tests {
 
     #[test]
     fn test_xor() {
-        let a = SrpInt::from_hex("ff00");
-        let b = SrpInt::from_hex("0ff0");
+        let a = SrpInt::from_hex("ff00").unwrap();
+        let b = SrpInt::from_hex("0ff0").unwrap();
         let result = a.xor(&b);
         assert_eq!(result.value(), &BigUint::from(0xf0f0u32));
+    }
+
+    #[test]
+    fn test_subtract_mod_underflow() {
+        let a = SrpInt::from(3u32);
+        let b = SrpInt::from(5u32);
+        let modulus = SrpInt::with_length(BigUint::from(7u32), 2);
+        let result = a.subtract_mod(&b, &modulus);
+        assert_eq!(result.value(), &BigUint::from(5u32));
+    }
+
+    #[test]
+    fn test_equals_for_equal_and_unequal_values() {
+        let a = SrpInt::from_hex("0abc").unwrap();
+        let b = SrpInt::from_hex("0ABC").unwrap();
+        let c = SrpInt::from_hex("0abd").unwrap();
+
+        assert!(a.equals(&b));
+        assert!(!a.equals(&c));
     }
 }

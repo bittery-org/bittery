@@ -229,12 +229,16 @@ export function createSRPClient(
 			iterations?: number,
 		): Promise<string> {
 			try {
-				return await NativeModule.srpClientDeriveSafePrivateKey(
+				const privateKey = await NativeModule.srpClientDeriveSafePrivateKey(
 					clientId,
 					salt,
 					password,
 					iterations ?? 0,
 				);
+				if (!privateKey) {
+					throw new Error("Native SRP private key derivation returned empty result");
+				}
+				return privateKey;
 			} catch (error) {
 				throw new CryptoError(
 					ErrorCode.SrpOperationFailed,
@@ -247,7 +251,14 @@ export function createSRPClient(
 		 * Derive verifier from private key.
 		 */
 		deriveVerifier(privateKey: string): string {
-			return NativeModule.srpClientDeriveVerifier(clientId, privateKey);
+			const verifier = NativeModule.srpClientDeriveVerifier(clientId, privateKey);
+			if (!verifier) {
+				throw new CryptoError(
+					ErrorCode.SrpOperationFailed,
+					"SRP verifier derivation failed: native returned empty result",
+				);
+			}
+			return verifier;
 		},
 
 		/**
@@ -255,6 +266,12 @@ export function createSRPClient(
 		 */
 		generateEphemeral(): Ephemeral {
 			const result = NativeModule.srpClientGenerateEphemeral(clientId);
+			if (!result.public || !result.secret) {
+				throw new CryptoError(
+					ErrorCode.SrpOperationFailed,
+					"SRP ephemeral generation failed: native returned empty values",
+				);
+			}
 			return {
 				public: result.public,
 				secret: result.secret,
@@ -351,6 +368,9 @@ export function createSRPServer(
 					serverId,
 					verifier,
 				);
+				if (!result.public || !result.secret) {
+					throw new Error("Native SRP ephemeral generation returned empty result");
+				}
 				return {
 					public: result.public,
 					secret: result.secret,

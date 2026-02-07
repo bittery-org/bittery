@@ -6,11 +6,12 @@
 use hkdf::Hkdf;
 use pbkdf2::pbkdf2_hmac;
 use sha2::Sha256;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::CryptoError;
 
 /// Number of PBKDF2 iterations for master key derivation
-const PBKDF2_ITERATIONS: u32 = 100_000;
+const PBKDF2_ITERATIONS: u32 = 310_000;
 
 /// Key length in bytes (256 bits)
 const KEY_LENGTH: usize = 32;
@@ -22,7 +23,7 @@ const AUTH_KEY_INFO: &[u8] = b"bittery-auth-key";
 const UNLOCK_KEY_INFO: &[u8] = b"bittery-unlock-key";
 
 /// Derived keys from password and secret key
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
 pub struct DerivedKeys {
     /// Authentication key for SRP protocol
     pub auth_key: [u8; KEY_LENGTH],
@@ -41,36 +42,58 @@ pub struct DerivedKeys {
 /// `DerivedKeys` containing auth_key and master_unlock_key
 ///
 /// # Algorithm
-/// 1. Combine: `"${password}|${secretKey}"` UTF-8
-/// 2. PBKDF2(SHA-256, 100k iterations) with email.lowercase() as salt
+/// 1. Combine with length prefixes to avoid concatenation collisions
+/// 2. PBKDF2(SHA-256, 310k iterations) with email.lowercase() as salt
 /// 3. HKDF(SHA-256) with different info strings for each key
 pub fn derive_keys(
     account_password: &str,
     secret_key: &str,
     email: &str,
 ) -> Result<DerivedKeys, CryptoError> {
-    // Combine password and secret key
-    let combined = format!("{}|{}", account_password, secret_key);
-    let combined_bytes = combined.as_bytes();
+    // Combine with length prefixes: [len(password)][password][len(secret)][secret]
+    let password_bytes = account_password.as_bytes();
+    let secret_bytes = secret_key.as_bytes();
+    let password_len = u32::try_from(password_bytes.len())
+        .map_err(|_| CryptoError::InvalidInput("Password too long".to_string()))?;
+    let secret_len = u32::try_from(secret_bytes.len())
+        .map_err(|_| CryptoError::InvalidInput("Secret key too long".to_string()))?;
+
+    let mut combined = Vec::with_capacity(8 + password_bytes.len() + secret_bytes.len());
+    combined.extend_from_slice(&password_len.to_be_bytes());
+    combined.extend_from_slice(password_bytes);
+    combined.extend_from_slice(&secret_len.to_be_bytes());
+    combined.extend_from_slice(secret_bytes);
 
     // Use lowercase email as salt for PBKDF2
-    let salt = email.to_lowercase();
-    let salt_bytes = salt.as_bytes();
+    let mut salt_bytes = email.to_lowercase().into_bytes();
 
     // Derive master key using PBKDF2
     let mut master_key = [0u8; KEY_LENGTH];
-    pbkdf2_hmac::<Sha256>(combined_bytes, salt_bytes, PBKDF2_ITERATIONS, &mut master_key);
+    pbkdf2_hmac::<Sha256>(&combined, &salt_bytes, PBKDF2_ITERATIONS, &mut master_key);
 
     // Split master key into auth key and master unlock key using HKDF
-    let hkdf = Hkdf::<Sha256>::new(Some(salt_bytes), &master_key);
+    let hkdf = Hkdf::<Sha256>::new(Some(&salt_bytes), &master_key);
 
     let mut auth_key = [0u8; KEY_LENGTH];
-    hkdf.expand(AUTH_KEY_INFO, &mut auth_key)
-        .map_err(|e| CryptoError::KeyDerivation(e.to_string()))?;
+    if let Err(e) = hkdf.expand(AUTH_KEY_INFO, &mut auth_key) {
+        master_key.zeroize();
+        combined.zeroize();
+        salt_bytes.zeroize();
+        return Err(CryptoError::KeyDerivation(e.to_string()));
+    }
 
     let mut master_unlock_key = [0u8; KEY_LENGTH];
-    hkdf.expand(UNLOCK_KEY_INFO, &mut master_unlock_key)
-        .map_err(|e| CryptoError::KeyDerivation(e.to_string()))?;
+    if let Err(e) = hkdf.expand(UNLOCK_KEY_INFO, &mut master_unlock_key) {
+        auth_key.zeroize();
+        master_key.zeroize();
+        combined.zeroize();
+        salt_bytes.zeroize();
+        return Err(CryptoError::KeyDerivation(e.to_string()));
+    }
+
+    master_key.zeroize();
+    combined.zeroize();
+    salt_bytes.zeroize();
 
     Ok(DerivedKeys {
         auth_key,
@@ -125,5 +148,15 @@ mod tests {
         let keys = derive_keys("password", "secret", "email@test.com").unwrap();
         assert_eq!(keys.auth_key.len(), 32);
         assert_eq!(keys.master_unlock_key.len(), 32);
+    }
+
+    #[test]
+    fn test_length_prefixed_inputs_prevent_pipe_collisions() {
+        let email = "test@example.com";
+        let keys1 = derive_keys("a|b", "c", email).unwrap();
+        let keys2 = derive_keys("a", "b|c", email).unwrap();
+
+        assert_ne!(keys1.auth_key, keys2.auth_key);
+        assert_ne!(keys1.master_unlock_key, keys2.master_unlock_key);
     }
 }

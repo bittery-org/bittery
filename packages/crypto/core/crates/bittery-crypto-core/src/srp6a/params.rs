@@ -106,10 +106,7 @@ pub fn get_params(group: PrimeGroup) -> SrpParams {
 
 /// Parse a hex string (with optional whitespace) to BigUint
 fn parse_hex(hex: &str) -> BigUint {
-    let cleaned: String = hex
-        .chars()
-        .filter(|c| c.is_ascii_hexdigit())
-        .collect();
+    let cleaned: String = hex.chars().filter(|c| c.is_ascii_hexdigit()).collect();
     BigUint::parse_bytes(cleaned.as_bytes(), 16).expect("Invalid hex string")
 }
 

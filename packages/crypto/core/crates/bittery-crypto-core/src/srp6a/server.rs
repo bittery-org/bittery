@@ -42,8 +42,8 @@ impl SrpServer {
     ///
     /// # Returns
     /// Server ephemeral (B, b) where B = kv + g^b mod N
-    pub fn generate_ephemeral(&self, verifier: &str) -> Ephemeral {
-        let v = SrpInt::from_hex(verifier);
+    pub fn generate_ephemeral(&self, verifier: &str) -> Result<Ephemeral, CryptoError> {
+        let v = SrpInt::from_hex(verifier)?;
         let hash_bytes = self.hash_algorithm.output_size();
         let b = SrpInt::random(hash_bytes);
 
@@ -56,10 +56,10 @@ impl SrpServer {
         let g_b = self.g.mod_pow(&b, &self.n);
         let big_b = kv.add(&g_b).modulo(&self.n);
 
-        Ephemeral {
+        Ok(Ephemeral {
             secret: b.pad(hash_bytes * 2).to_hex(),
             public: big_b.to_hex(),
-        }
+        })
     }
 
     /// Derive session key and verify client proof
@@ -83,10 +83,10 @@ impl SrpServer {
         verifier: &str,
         client_session_proof: &str,
     ) -> Result<Session, CryptoError> {
-        let b = SrpInt::from_hex(server_secret_ephemeral);
-        let big_a = SrpInt::from_hex(client_public_ephemeral);
-        let s = SrpInt::from_hex(salt);
-        let v = SrpInt::from_hex(verifier);
+        let b = SrpInt::from_hex(server_secret_ephemeral)?;
+        let big_a = SrpInt::from_hex(client_public_ephemeral)?;
+        let s = SrpInt::from_hex(salt)?;
+        let v = SrpInt::from_hex(verifier)?;
 
         // k = H(N, PAD(g))
         let padded_g = self.g.pad(self.hex_length);
@@ -120,12 +120,12 @@ impl SrpServer {
         let h_g = self.hash_values(&[&self.g]);
         let h_n_xor_h_g = h_n.xor(&h_g);
         let h_i = self.hash_string(username);
-        let h_i_int = SrpInt::from_hex(&h_i);
+        let h_i_int = SrpInt::from_hex(&h_i)?;
 
         let expected_m = self.hash_values(&[&h_n_xor_h_g, &h_i_int, &s, &big_a, &big_b, &big_k]);
 
         // Verify client proof
-        let actual_m = SrpInt::from_hex(client_session_proof);
+        let actual_m = SrpInt::from_hex(client_session_proof)?;
         if !actual_m.equals(&expected_m) {
             return Err(CryptoError::InvalidSessionProof);
         }
@@ -144,16 +144,13 @@ impl SrpServer {
         let mut combined = Vec::new();
         for value in values {
             let hex = value.to_hex();
-            let bytes = hex::decode(&hex).unwrap_or_default();
+            let bytes = hex::decode(&hex).expect("SrpInt::to_hex must produce valid hex");
             combined.extend_from_slice(&bytes);
         }
 
         let hash = self.hash_bytes(&combined);
         let hash_bytes = self.hash_algorithm.output_size();
-        SrpInt::with_length(
-            num_bigint::BigUint::from_bytes_be(&hash),
-            hash_bytes * 2,
-        )
+        SrpInt::with_length(num_bigint::BigUint::from_bytes_be(&hash), hash_bytes * 2)
     }
 
     /// Hash a string
@@ -207,14 +204,16 @@ mod tests {
 
         // Registration: Client generates salt and verifier
         let salt = client.generate_salt();
-        let private_key = client.derive_safe_private_key(&salt, password, Some(1000)); // Low iterations for testing
-        let verifier = client.derive_verifier(&private_key);
+        let private_key = client
+            .derive_safe_private_key(&salt, password, Some(1000))
+            .unwrap(); // Low iterations for testing
+        let verifier = client.derive_verifier(&private_key).unwrap();
 
         // Login Step 1: Client generates ephemeral
         let client_ephemeral = client.generate_ephemeral();
 
         // Login Step 2: Server generates ephemeral
-        let server_ephemeral = server.generate_ephemeral(&verifier);
+        let server_ephemeral = server.generate_ephemeral(&verifier).unwrap();
 
         // Login Step 3: Client derives session
         let client_session = client
@@ -266,13 +265,17 @@ mod tests {
 
         // Register with correct password
         let salt = client.generate_salt();
-        let correct_private_key = client.derive_safe_private_key(&salt, correct_password, Some(1000));
-        let verifier = client.derive_verifier(&correct_private_key);
+        let correct_private_key = client
+            .derive_safe_private_key(&salt, correct_password, Some(1000))
+            .unwrap();
+        let verifier = client.derive_verifier(&correct_private_key).unwrap();
 
         // Try to login with wrong password
-        let wrong_private_key = client.derive_safe_private_key(&salt, wrong_password, Some(1000));
+        let wrong_private_key = client
+            .derive_safe_private_key(&salt, wrong_password, Some(1000))
+            .unwrap();
         let client_ephemeral = client.generate_ephemeral();
-        let server_ephemeral = server.generate_ephemeral(&verifier);
+        let server_ephemeral = server.generate_ephemeral(&verifier).unwrap();
 
         let client_session = client
             .derive_session(
@@ -295,5 +298,12 @@ mod tests {
         );
 
         assert!(matches!(result, Err(CryptoError::InvalidSessionProof)));
+    }
+
+    #[test]
+    fn test_generate_ephemeral_invalid_verifier_returns_error() {
+        let server = SrpServer::new(HashAlgorithm::Sha256, PrimeGroup::G4096);
+        let result = server.generate_ephemeral("ZZZZ");
+        assert!(result.is_err());
     }
 }

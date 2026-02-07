@@ -7,10 +7,11 @@ mod jni;
 
 use bittery_crypto_core::{
     decrypt, derive_keys, encrypt, generate_encryption_key, generate_rsa_key_pair,
-    generate_secret_key, get_secret_key_hint, rsa_decrypt, rsa_encrypt,
+    generate_secret_key, get_secret_key_hint,
+    key_rotation::{self, ItemData, MemberKeyData},
+    rsa_decrypt, rsa_encrypt,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient, SrpServer},
     validate_secret_key, EncryptedData,
-    key_rotation::{self, ItemData, MemberKeyData},
 };
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
@@ -251,8 +252,8 @@ pub struct RsaKeyPairResult {
 pub extern "C" fn bittery_generate_rsa_key_pair() -> RsaKeyPairResult {
     match generate_rsa_key_pair() {
         Ok(key_pair) => RsaKeyPairResult {
-            public_key: string_to_c_str(key_pair.public_key),
-            private_key: string_to_c_str(key_pair.private_key),
+            public_key: string_to_c_str(key_pair.public_key.clone()),
+            private_key: string_to_c_str(key_pair.private_key.clone()),
             error: ptr::null_mut(),
         },
         Err(e) => RsaKeyPairResult {
@@ -324,7 +325,11 @@ pub extern "C" fn bittery_validate_secret_key(secret_key: *const c_char) -> i32 
         Some(s) => s,
         None => return 0,
     };
-    if validate_secret_key(&key) { 1 } else { 0 }
+    if validate_secret_key(&key) {
+        1
+    } else {
+        0
+    }
 }
 
 /// Get secret key hint
@@ -429,8 +434,15 @@ pub extern "C" fn bittery_srp_client_derive_safe_private_key(
         None => return ptr::null_mut(),
     };
 
-    let iterations_opt = if iterations > 0 { Some(iterations) } else { None };
-    string_to_c_str(client.derive_safe_private_key(&salt_str, &password_str, iterations_opt))
+    let iterations_opt = if iterations > 0 {
+        Some(iterations)
+    } else {
+        None
+    };
+    match client.derive_safe_private_key(&salt_str, &password_str, iterations_opt) {
+        Ok(private_key) => string_to_c_str(private_key),
+        Err(_) => ptr::null_mut(),
+    }
 }
 
 /// Derive verifier
@@ -449,7 +461,10 @@ pub extern "C" fn bittery_srp_client_derive_verifier(
         None => return ptr::null_mut(),
     };
 
-    string_to_c_str(client.derive_verifier(&pk))
+    match client.derive_verifier(&pk) {
+        Ok(verifier) => string_to_c_str(verifier),
+        Err(_) => ptr::null_mut(),
+    }
 }
 
 /// Ephemeral result struct
@@ -474,8 +489,8 @@ pub extern "C" fn bittery_srp_client_generate_ephemeral(
     let ephemeral = client.generate_ephemeral();
 
     EphemeralResult {
-        public: string_to_c_str(ephemeral.public),
-        secret: string_to_c_str(ephemeral.secret),
+        public: string_to_c_str(ephemeral.public.clone()),
+        secret: string_to_c_str(ephemeral.secret.clone()),
     }
 }
 
@@ -559,8 +574,8 @@ pub extern "C" fn bittery_srp_client_derive_session(
 
     match client.derive_session(&cse, &spe, &salt_str, &username_str, &pk) {
         Ok(session) => SessionResult {
-            key: string_to_c_str(session.key),
-            proof: string_to_c_str(session.proof),
+            key: string_to_c_str(session.key.clone()),
+            proof: string_to_c_str(session.proof.clone()),
             error: ptr::null_mut(),
         },
         Err(e) => SessionResult {
@@ -712,77 +727,93 @@ pub extern "C" fn bittery_re_encrypt_item(
 ) -> ReEncryptedItemResult {
     let id = match c_str_to_string(item_id) {
         Some(s) => s,
-        None => return ReEncryptedItemResult {
-            item_id: ptr::null_mut(),
-            encrypted_data: ptr::null_mut(),
-            encryption_iv: ptr::null_mut(),
-            error: string_to_c_str("Invalid item ID".to_string()),
-        },
+        None => {
+            return ReEncryptedItemResult {
+                item_id: ptr::null_mut(),
+                encrypted_data: ptr::null_mut(),
+                encryption_iv: ptr::null_mut(),
+                error: string_to_c_str("Invalid item ID".to_string()),
+            }
+        }
     };
     let enc_data = match c_str_to_string(encrypted_data) {
         Some(s) => s,
-        None => return ReEncryptedItemResult {
-            item_id: ptr::null_mut(),
-            encrypted_data: ptr::null_mut(),
-            encryption_iv: ptr::null_mut(),
-            error: string_to_c_str("Invalid encrypted data".to_string()),
-        },
+        None => {
+            return ReEncryptedItemResult {
+                item_id: ptr::null_mut(),
+                encrypted_data: ptr::null_mut(),
+                encryption_iv: ptr::null_mut(),
+                error: string_to_c_str("Invalid encrypted data".to_string()),
+            }
+        }
     };
     let enc_iv = match c_str_to_string(encryption_iv) {
         Some(s) => s,
-        None => return ReEncryptedItemResult {
-            item_id: ptr::null_mut(),
-            encrypted_data: ptr::null_mut(),
-            encryption_iv: ptr::null_mut(),
-            error: string_to_c_str("Invalid encryption IV".to_string()),
-        },
+        None => {
+            return ReEncryptedItemResult {
+                item_id: ptr::null_mut(),
+                encrypted_data: ptr::null_mut(),
+                encryption_iv: ptr::null_mut(),
+                error: string_to_c_str("Invalid encryption IV".to_string()),
+            }
+        }
     };
     let enc_algo = match c_str_to_string(encryption_algorithm) {
         Some(s) => s,
-        None => return ReEncryptedItemResult {
-            item_id: ptr::null_mut(),
-            encrypted_data: ptr::null_mut(),
-            encryption_iv: ptr::null_mut(),
-            error: string_to_c_str("Invalid encryption algorithm".to_string()),
-        },
+        None => {
+            return ReEncryptedItemResult {
+                item_id: ptr::null_mut(),
+                encrypted_data: ptr::null_mut(),
+                encryption_iv: ptr::null_mut(),
+                error: string_to_c_str("Invalid encryption algorithm".to_string()),
+            }
+        }
     };
     let old_key_str = match c_str_to_string(old_vault_key_base64) {
         Some(s) => s,
-        None => return ReEncryptedItemResult {
-            item_id: ptr::null_mut(),
-            encrypted_data: ptr::null_mut(),
-            encryption_iv: ptr::null_mut(),
-            error: string_to_c_str("Invalid old vault key".to_string()),
-        },
+        None => {
+            return ReEncryptedItemResult {
+                item_id: ptr::null_mut(),
+                encrypted_data: ptr::null_mut(),
+                encryption_iv: ptr::null_mut(),
+                error: string_to_c_str("Invalid old vault key".to_string()),
+            }
+        }
     };
     let new_key_str = match c_str_to_string(new_vault_key_base64) {
         Some(s) => s,
-        None => return ReEncryptedItemResult {
-            item_id: ptr::null_mut(),
-            encrypted_data: ptr::null_mut(),
-            encryption_iv: ptr::null_mut(),
-            error: string_to_c_str("Invalid new vault key".to_string()),
-        },
+        None => {
+            return ReEncryptedItemResult {
+                item_id: ptr::null_mut(),
+                encrypted_data: ptr::null_mut(),
+                encryption_iv: ptr::null_mut(),
+                error: string_to_c_str("Invalid new vault key".to_string()),
+            }
+        }
     };
 
     use base64::{engine::general_purpose::STANDARD, Engine};
     let old_key = match STANDARD.decode(&old_key_str) {
         Ok(k) => k,
-        Err(e) => return ReEncryptedItemResult {
-            item_id: ptr::null_mut(),
-            encrypted_data: ptr::null_mut(),
-            encryption_iv: ptr::null_mut(),
-            error: string_to_c_str(format!("Invalid old key base64: {}", e)),
-        },
+        Err(e) => {
+            return ReEncryptedItemResult {
+                item_id: ptr::null_mut(),
+                encrypted_data: ptr::null_mut(),
+                encryption_iv: ptr::null_mut(),
+                error: string_to_c_str(format!("Invalid old key base64: {}", e)),
+            }
+        }
     };
     let new_key = match STANDARD.decode(&new_key_str) {
         Ok(k) => k,
-        Err(e) => return ReEncryptedItemResult {
-            item_id: ptr::null_mut(),
-            encrypted_data: ptr::null_mut(),
-            encryption_iv: ptr::null_mut(),
-            error: string_to_c_str(format!("Invalid new key base64: {}", e)),
-        },
+        Err(e) => {
+            return ReEncryptedItemResult {
+                item_id: ptr::null_mut(),
+                encrypted_data: ptr::null_mut(),
+                encryption_iv: ptr::null_mut(),
+                error: string_to_c_str(format!("Invalid new key base64: {}", e)),
+            }
+        }
     };
 
     let item = ItemData {
@@ -820,87 +851,105 @@ pub extern "C" fn bittery_perform_key_rotation(
 ) -> KeyRotationResultFFI {
     let old_key_str = match c_str_to_string(old_vault_key_base64) {
         Some(s) => s,
-        None => return KeyRotationResultFFI {
-            new_vault_key_base64: ptr::null_mut(),
-            member_encrypted_keys_json: ptr::null_mut(),
-            re_encrypted_items_json: ptr::null_mut(),
-            error: string_to_c_str("Invalid old vault key".to_string()),
-        },
+        None => {
+            return KeyRotationResultFFI {
+                new_vault_key_base64: ptr::null_mut(),
+                member_encrypted_keys_json: ptr::null_mut(),
+                re_encrypted_items_json: ptr::null_mut(),
+                error: string_to_c_str("Invalid old vault key".to_string()),
+            }
+        }
     };
     let members_str = match c_str_to_string(members_json) {
         Some(s) => s,
-        None => return KeyRotationResultFFI {
-            new_vault_key_base64: ptr::null_mut(),
-            member_encrypted_keys_json: ptr::null_mut(),
-            re_encrypted_items_json: ptr::null_mut(),
-            error: string_to_c_str("Invalid members JSON".to_string()),
-        },
+        None => {
+            return KeyRotationResultFFI {
+                new_vault_key_base64: ptr::null_mut(),
+                member_encrypted_keys_json: ptr::null_mut(),
+                re_encrypted_items_json: ptr::null_mut(),
+                error: string_to_c_str("Invalid members JSON".to_string()),
+            }
+        }
     };
     let items_str = match c_str_to_string(items_json) {
         Some(s) => s,
-        None => return KeyRotationResultFFI {
-            new_vault_key_base64: ptr::null_mut(),
-            member_encrypted_keys_json: ptr::null_mut(),
-            re_encrypted_items_json: ptr::null_mut(),
-            error: string_to_c_str("Invalid items JSON".to_string()),
-        },
+        None => {
+            return KeyRotationResultFFI {
+                new_vault_key_base64: ptr::null_mut(),
+                member_encrypted_keys_json: ptr::null_mut(),
+                re_encrypted_items_json: ptr::null_mut(),
+                error: string_to_c_str("Invalid items JSON".to_string()),
+            }
+        }
     };
     let user_id = match c_str_to_string(current_user_id) {
         Some(s) => s,
-        None => return KeyRotationResultFFI {
-            new_vault_key_base64: ptr::null_mut(),
-            member_encrypted_keys_json: ptr::null_mut(),
-            re_encrypted_items_json: ptr::null_mut(),
-            error: string_to_c_str("Invalid current user ID".to_string()),
-        },
+        None => {
+            return KeyRotationResultFFI {
+                new_vault_key_base64: ptr::null_mut(),
+                member_encrypted_keys_json: ptr::null_mut(),
+                re_encrypted_items_json: ptr::null_mut(),
+                error: string_to_c_str("Invalid current user ID".to_string()),
+            }
+        }
     };
     let muk_str = match c_str_to_string(master_unlock_key_base64) {
         Some(s) => s,
-        None => return KeyRotationResultFFI {
-            new_vault_key_base64: ptr::null_mut(),
-            member_encrypted_keys_json: ptr::null_mut(),
-            re_encrypted_items_json: ptr::null_mut(),
-            error: string_to_c_str("Invalid master unlock key".to_string()),
-        },
+        None => {
+            return KeyRotationResultFFI {
+                new_vault_key_base64: ptr::null_mut(),
+                member_encrypted_keys_json: ptr::null_mut(),
+                re_encrypted_items_json: ptr::null_mut(),
+                error: string_to_c_str("Invalid master unlock key".to_string()),
+            }
+        }
     };
 
     use base64::{engine::general_purpose::STANDARD, Engine};
     let old_key = match STANDARD.decode(&old_key_str) {
         Ok(k) => k,
-        Err(e) => return KeyRotationResultFFI {
-            new_vault_key_base64: ptr::null_mut(),
-            member_encrypted_keys_json: ptr::null_mut(),
-            re_encrypted_items_json: ptr::null_mut(),
-            error: string_to_c_str(format!("Invalid old key base64: {}", e)),
-        },
+        Err(e) => {
+            return KeyRotationResultFFI {
+                new_vault_key_base64: ptr::null_mut(),
+                member_encrypted_keys_json: ptr::null_mut(),
+                re_encrypted_items_json: ptr::null_mut(),
+                error: string_to_c_str(format!("Invalid old key base64: {}", e)),
+            }
+        }
     };
     let muk = match STANDARD.decode(&muk_str) {
         Ok(k) => k,
-        Err(e) => return KeyRotationResultFFI {
-            new_vault_key_base64: ptr::null_mut(),
-            member_encrypted_keys_json: ptr::null_mut(),
-            re_encrypted_items_json: ptr::null_mut(),
-            error: string_to_c_str(format!("Invalid MUK base64: {}", e)),
-        },
+        Err(e) => {
+            return KeyRotationResultFFI {
+                new_vault_key_base64: ptr::null_mut(),
+                member_encrypted_keys_json: ptr::null_mut(),
+                re_encrypted_items_json: ptr::null_mut(),
+                error: string_to_c_str(format!("Invalid MUK base64: {}", e)),
+            }
+        }
     };
 
     let members: Vec<MemberKeyData> = match serde_json::from_str(&members_str) {
         Ok(m) => m,
-        Err(e) => return KeyRotationResultFFI {
-            new_vault_key_base64: ptr::null_mut(),
-            member_encrypted_keys_json: ptr::null_mut(),
-            re_encrypted_items_json: ptr::null_mut(),
-            error: string_to_c_str(format!("Invalid members JSON: {}", e)),
-        },
+        Err(e) => {
+            return KeyRotationResultFFI {
+                new_vault_key_base64: ptr::null_mut(),
+                member_encrypted_keys_json: ptr::null_mut(),
+                re_encrypted_items_json: ptr::null_mut(),
+                error: string_to_c_str(format!("Invalid members JSON: {}", e)),
+            }
+        }
     };
     let items: Vec<ItemData> = match serde_json::from_str(&items_str) {
         Ok(i) => i,
-        Err(e) => return KeyRotationResultFFI {
-            new_vault_key_base64: ptr::null_mut(),
-            member_encrypted_keys_json: ptr::null_mut(),
-            re_encrypted_items_json: ptr::null_mut(),
-            error: string_to_c_str(format!("Invalid items JSON: {}", e)),
-        },
+        Err(e) => {
+            return KeyRotationResultFFI {
+                new_vault_key_base64: ptr::null_mut(),
+                member_encrypted_keys_json: ptr::null_mut(),
+                re_encrypted_items_json: ptr::null_mut(),
+                error: string_to_c_str(format!("Invalid items JSON: {}", e)),
+            }
+        }
     };
 
     match key_rotation::perform_key_rotation(&old_key, &members, &items, &user_id, &muk) {
@@ -932,18 +981,22 @@ pub extern "C" fn bittery_validate_rotation_data(
 ) -> ValidationResultFFI {
     let members_str = match c_str_to_string(members_json) {
         Some(s) => s,
-        None => return ValidationResultFFI {
-            valid: 0,
-            errors_json: string_to_c_str("[\"Invalid members JSON\"]".to_string()),
-        },
+        None => {
+            return ValidationResultFFI {
+                valid: 0,
+                errors_json: string_to_c_str("[\"Invalid members JSON\"]".to_string()),
+            }
+        }
     };
 
     let members: Vec<MemberKeyData> = match serde_json::from_str(&members_str) {
         Ok(m) => m,
-        Err(e) => return ValidationResultFFI {
-            valid: 0,
-            errors_json: string_to_c_str(format!("[\"{}\"]", e)),
-        },
+        Err(e) => {
+            return ValidationResultFFI {
+                valid: 0,
+                errors_json: string_to_c_str(format!("[\"{}\"]", e)),
+            }
+        }
     };
 
     let result = key_rotation::validate_rotation_data(&members);
@@ -1053,11 +1106,15 @@ pub extern "C" fn bittery_srp_server_generate_ephemeral(
         }
     };
 
-    let ephemeral = server.generate_ephemeral(&v);
-
-    EphemeralResult {
-        public: string_to_c_str(ephemeral.public),
-        secret: string_to_c_str(ephemeral.secret),
+    match server.generate_ephemeral(&v) {
+        Ok(ephemeral) => EphemeralResult {
+            public: string_to_c_str(ephemeral.public.clone()),
+            secret: string_to_c_str(ephemeral.secret.clone()),
+        },
+        Err(_) => EphemeralResult {
+            public: ptr::null_mut(),
+            secret: ptr::null_mut(),
+        },
     }
 }
 
@@ -1144,8 +1201,8 @@ pub extern "C" fn bittery_srp_server_derive_session(
 
     match server.derive_session(&sse, &cpe, &salt_str, &username_str, &v, &csp) {
         Ok(session) => SessionResult {
-            key: string_to_c_str(session.key),
-            proof: string_to_c_str(session.proof),
+            key: string_to_c_str(session.key.clone()),
+            proof: string_to_c_str(session.proof.clone()),
             error: ptr::null_mut(),
         },
         Err(e) => SessionResult {

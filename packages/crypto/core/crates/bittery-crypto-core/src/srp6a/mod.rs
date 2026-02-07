@@ -11,9 +11,10 @@ mod server;
 pub use client::SrpClient;
 pub use params::{HashAlgorithm, PrimeGroup};
 pub use server::SrpServer;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Ephemeral key pair (public and secret)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
 pub struct Ephemeral {
     /// Public ephemeral value (hex-encoded)
     pub public: String,
@@ -22,7 +23,7 @@ pub struct Ephemeral {
 }
 
 /// Session containing shared key and proof
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
 pub struct Session {
     /// Shared session key (hex-encoded)
     pub key: String,

@@ -30,6 +30,8 @@ serde_json.workspace = true
 
 # Error handling
 thiserror.workspace = true
+subtle.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["rt", "macros"] }

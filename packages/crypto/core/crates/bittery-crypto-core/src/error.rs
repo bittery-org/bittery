@@ -46,6 +46,9 @@ pub enum CryptoError {
 
     #[error("UTF-8 decode error: {0}")]
     Utf8Error(String),
+
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
 }
 
 impl From<base64::DecodeError> for CryptoError {

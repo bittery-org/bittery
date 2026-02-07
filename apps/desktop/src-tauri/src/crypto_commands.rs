@@ -126,8 +126,8 @@ pub fn crypto_generate_rsa_key_pair() -> Result<RsaKeyPairResponse, String> {
         .map_err(|e| e.to_string())?;
 
     Ok(RsaKeyPairResponse {
-        public_key: key_pair.public_key,
-        private_key: key_pair.private_key,
+        public_key: key_pair.public_key.clone(),
+        private_key: key_pair.private_key.clone(),
     })
 }
 
@@ -198,14 +198,18 @@ pub fn crypto_srp_derive_safe_private_key(
     salt: String,
     password: String,
     iterations: Option<u32>,
-) -> String {
-    get_srp_client().derive_safe_private_key(&salt, &password, iterations)
+) -> Result<String, String> {
+    get_srp_client()
+        .derive_safe_private_key(&salt, &password, iterations)
+        .map_err(|e| e.to_string())
 }
 
 /// Derive the SRP verifier from the private key
 #[tauri::command]
-pub fn crypto_srp_derive_verifier(private_key: String) -> String {
-    get_srp_client().derive_verifier(&private_key)
+pub fn crypto_srp_derive_verifier(private_key: String) -> Result<String, String> {
+    get_srp_client()
+        .derive_verifier(&private_key)
+        .map_err(|e| e.to_string())
 }
 
 /// Generate client ephemeral key pair
@@ -213,8 +217,8 @@ pub fn crypto_srp_derive_verifier(private_key: String) -> String {
 pub fn crypto_srp_generate_ephemeral() -> EphemeralResponse {
     let ephemeral = get_srp_client().generate_ephemeral();
     EphemeralResponse {
-        public: ephemeral.public,
-        secret: ephemeral.secret,
+        public: ephemeral.public.clone(),
+        secret: ephemeral.secret.clone(),
     }
 }
 
@@ -236,8 +240,8 @@ pub fn crypto_srp_derive_session(
     ).map_err(|e| e.to_string())?;
 
     Ok(SessionResponse {
-        key: session.key,
-        proof: session.proof,
+        key: session.key.clone(),
+        proof: session.proof.clone(),
     })
 }
 

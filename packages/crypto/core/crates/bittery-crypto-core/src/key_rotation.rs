@@ -9,6 +9,7 @@ use crate::error::CryptoError;
 use crate::rsa::rsa_encrypt;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
 /// Item data for re-encryption
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,8 +90,10 @@ pub fn encrypt_vault_key_for_member(
     vault_key: &[u8],
     member_public_key: &str,
 ) -> Result<String, CryptoError> {
-    let vault_key_base64 = BASE64.encode(vault_key);
-    rsa_encrypt(&vault_key_base64, member_public_key)
+    let mut vault_key_base64 = BASE64.encode(vault_key);
+    let encrypted = rsa_encrypt(&vault_key_base64, member_public_key);
+    vault_key_base64.zeroize();
+    encrypted
 }
 
 /// Encrypt a vault key with AES-GCM (for the owner using Master Unlock Key)
@@ -105,8 +108,15 @@ pub fn encrypt_vault_key_with_muk(
     vault_key: &[u8],
     master_unlock_key: &[u8],
 ) -> Result<String, CryptoError> {
-    let vault_key_base64 = BASE64.encode(vault_key);
-    let encrypted = encrypt(&vault_key_base64, master_unlock_key)?;
+    let mut vault_key_base64 = BASE64.encode(vault_key);
+    let encrypted = match encrypt(&vault_key_base64, master_unlock_key) {
+        Ok(value) => value,
+        Err(e) => {
+            vault_key_base64.zeroize();
+            return Err(e);
+        }
+    };
+    vault_key_base64.zeroize();
     serde_json::to_string(&encrypted)
         .map_err(|e| CryptoError::Encryption(format!("JSON serialization failed: {}", e)))
 }
@@ -134,10 +144,17 @@ pub fn re_encrypt_item(
         algorithm: item.encryption_algorithm.clone(),
     };
 
-    let decrypted_data = decrypt(&old_encrypted_data, old_vault_key)?;
+    let mut decrypted_data = decrypt(&old_encrypted_data, old_vault_key)?;
 
     // Re-encrypt with new key
-    let new_encrypted_data = encrypt(&decrypted_data, new_vault_key)?;
+    let new_encrypted_data = match encrypt(&decrypted_data, new_vault_key) {
+        Ok(value) => value,
+        Err(e) => {
+            decrypted_data.zeroize();
+            return Err(e);
+        }
+    };
+    decrypted_data.zeroize();
 
     Ok(ReEncryptedItem {
         item_id: item.id.clone(),
@@ -171,7 +188,7 @@ pub fn perform_key_rotation(
     master_unlock_key: &[u8],
 ) -> Result<KeyRotationResult, CryptoError> {
     // 1. Generate new vault key
-    let new_vault_key = generate_new_vault_key();
+    let mut new_vault_key = generate_new_vault_key();
     let new_vault_key_base64 = BASE64.encode(&new_vault_key);
 
     // 2. Encrypt new vault key for each member
@@ -179,10 +196,22 @@ pub fn perform_key_rotation(
     for member in members {
         let encrypted_key = if member.user_id == current_user_id {
             // Current user: encrypt with AES-GCM using Master Unlock Key
-            encrypt_vault_key_with_muk(&new_vault_key, master_unlock_key)?
+            match encrypt_vault_key_with_muk(&new_vault_key, master_unlock_key) {
+                Ok(value) => value,
+                Err(e) => {
+                    new_vault_key.zeroize();
+                    return Err(e);
+                }
+            }
         } else {
             // Other members: encrypt with RSA using their public key
-            encrypt_vault_key_for_member(&new_vault_key, &member.public_key)?
+            match encrypt_vault_key_for_member(&new_vault_key, &member.public_key) {
+                Ok(value) => value,
+                Err(e) => {
+                    new_vault_key.zeroize();
+                    return Err(e);
+                }
+            }
         };
 
         member_encrypted_keys.push(MemberEncryptedKey {
@@ -194,15 +223,23 @@ pub fn perform_key_rotation(
     // 3. Re-encrypt all items with the new key
     let mut re_encrypted_items = Vec::with_capacity(items.len());
     for item in items {
-        let re_encrypted = re_encrypt_item(item, old_vault_key, &new_vault_key)?;
+        let re_encrypted = match re_encrypt_item(item, old_vault_key, &new_vault_key) {
+            Ok(value) => value,
+            Err(e) => {
+                new_vault_key.zeroize();
+                return Err(e);
+            }
+        };
         re_encrypted_items.push(re_encrypted);
     }
 
-    Ok(KeyRotationResult {
+    let result = KeyRotationResult {
         new_vault_key_base64,
         member_encrypted_keys,
         re_encrypted_items,
-    })
+    };
+    new_vault_key.zeroize();
+    Ok(result)
 }
 
 /// Validate that rotation can be performed
@@ -340,7 +377,8 @@ mod tests {
             },
         ];
 
-        let result = perform_key_rotation(&old_vault_key, &members, &items, "owner-id", &muk).unwrap();
+        let result =
+            perform_key_rotation(&old_vault_key, &members, &items, "owner-id", &muk).unwrap();
 
         // Should have encrypted keys for all members
         assert_eq!(result.member_encrypted_keys.len(), 2);
@@ -365,8 +403,11 @@ mod tests {
             .iter()
             .find(|k| k.user_id == "member-id")
             .unwrap();
-        let member_decrypted =
-            rsa_decrypt(&member_key_entry.encrypted_vault_key, &member_keys.private_key).unwrap();
+        let member_decrypted = rsa_decrypt(
+            &member_key_entry.encrypted_vault_key,
+            &member_keys.private_key,
+        )
+        .unwrap();
         assert_eq!(member_decrypted, result.new_vault_key_base64);
     }
 

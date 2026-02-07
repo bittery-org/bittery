@@ -9,10 +9,11 @@ cd "$SCRIPT_DIR/../napi"
 
 echo "Building NAPI package for current platform..."
 
-# Check if @napi-rs/cli is available
-if ! command -v napi &> /dev/null; then
-    echo "Installing @napi-rs/cli..."
-    pnpm add -D @napi-rs/cli
+# Check if @napi-rs/cli is available in local dependencies
+if ! pnpm exec napi -h &> /dev/null; then
+    echo "@napi-rs/cli is not available in local dependencies."
+    echo "Run 'pnpm install' from the repository root and retry."
+    exit 1
 fi
 
 # Build the native addon

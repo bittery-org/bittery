@@ -9,6 +9,7 @@ use rsa::{
     Oaep, RsaPrivateKey, RsaPublicKey,
 };
 use sha2::Sha256;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::CryptoError;
 
@@ -16,7 +17,7 @@ use crate::error::CryptoError;
 const RSA_KEY_SIZE: usize = 4096;
 
 /// RSA key pair in PEM format
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
 pub struct RsaKeyPair {
     /// Public key in SPKI PEM format
     pub public_key: String,
@@ -94,46 +95,16 @@ pub fn rsa_decrypt(ciphertext: &str, private_key_pem: &str) -> Result<String, Cr
     String::from_utf8(plaintext_bytes).map_err(|e| CryptoError::Utf8Error(e.to_string()))
 }
 
-/// Parse a PEM-encoded public key, handling various formats
+/// Parse a PEM-encoded public key (strict SPKI PEM only)
 fn parse_public_key_pem(pem: &str) -> Result<RsaPublicKey, CryptoError> {
-    // Try SPKI format first (standard)
-    if let Ok(key) = RsaPublicKey::from_public_key_pem(pem) {
-        return Ok(key);
-    }
-
-    // Try parsing with stripped headers (for compatibility)
-    let stripped = pem
-        .replace("-----BEGIN PUBLIC KEY-----", "")
-        .replace("-----END PUBLIC KEY-----", "")
-        .replace(['\n', '\r', ' '], "");
-
-    let der = BASE64
-        .decode(&stripped)
-        .map_err(|e| CryptoError::InvalidPem(format!("Invalid base64: {}", e)))?;
-
-    RsaPublicKey::from_public_key_der(&der)
-        .map_err(|e| CryptoError::InvalidPem(format!("Invalid public key: {}", e)))
+    RsaPublicKey::from_public_key_pem(pem)
+        .map_err(|e| CryptoError::InvalidPem(format!("Invalid public key PEM: {}", e)))
 }
 
-/// Parse a PEM-encoded private key, handling various formats
+/// Parse a PEM-encoded private key (strict PKCS8 PEM only)
 fn parse_private_key_pem(pem: &str) -> Result<RsaPrivateKey, CryptoError> {
-    // Try PKCS8 format first (standard)
-    if let Ok(key) = RsaPrivateKey::from_pkcs8_pem(pem) {
-        return Ok(key);
-    }
-
-    // Try parsing with stripped headers (for compatibility)
-    let stripped = pem
-        .replace("-----BEGIN PRIVATE KEY-----", "")
-        .replace("-----END PRIVATE KEY-----", "")
-        .replace(['\n', '\r', ' '], "");
-
-    let der = BASE64
-        .decode(&stripped)
-        .map_err(|e| CryptoError::InvalidPem(format!("Invalid base64: {}", e)))?;
-
-    RsaPrivateKey::from_pkcs8_der(&der)
-        .map_err(|e| CryptoError::InvalidPem(format!("Invalid private key: {}", e)))
+    RsaPrivateKey::from_pkcs8_pem(pem)
+        .map_err(|e| CryptoError::InvalidPem(format!("Invalid private key PEM: {}", e)))
 }
 
 #[cfg(test)]
@@ -194,5 +165,18 @@ mod tests {
         let decrypted = rsa_decrypt(&ciphertext, &key_pair.private_key).unwrap();
 
         assert_eq!(plaintext, decrypted);
+    }
+
+    #[test]
+    fn test_parse_rejects_non_pem_public_key() {
+        let key_pair = generate_rsa_key_pair().unwrap();
+        let non_pem = key_pair
+            .public_key
+            .replace("-----BEGIN PUBLIC KEY-----", "")
+            .replace("-----END PUBLIC KEY-----", "")
+            .replace(['\n', '\r'], "");
+
+        let result = rsa_encrypt("test", &non_pem);
+        assert!(result.is_err());
     }
 }

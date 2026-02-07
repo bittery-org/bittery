@@ -7,8 +7,9 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use rand::RngCore;
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
 use crate::error::CryptoError;
 
@@ -49,23 +50,32 @@ pub fn encrypt(plaintext: &str, key: &[u8]) -> Result<EncryptedData, CryptoError
     }
 
     // Create cipher
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| CryptoError::Encryption(e.to_string()))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| CryptoError::Encryption(e.to_string()))?;
 
     // Generate random IV
     let mut iv = [0u8; IV_LENGTH];
-    rand::thread_rng().fill_bytes(&mut iv);
+    let mut rng = OsRng;
+    rng.fill_bytes(&mut iv);
     let nonce = Nonce::from_slice(&iv);
 
     // Encrypt
-    let plaintext_bytes = plaintext.as_bytes();
-    let ciphertext = cipher
-        .encrypt(nonce, plaintext_bytes)
-        .map_err(|e| CryptoError::Encryption(e.to_string()))?;
+    let mut plaintext_bytes = plaintext.as_bytes().to_vec();
+    let ciphertext = match cipher.encrypt(nonce, plaintext_bytes.as_slice()) {
+        Ok(value) => value,
+        Err(e) => {
+            plaintext_bytes.zeroize();
+            iv.zeroize();
+            return Err(CryptoError::Encryption(e.to_string()));
+        }
+    };
+    let iv_base64 = BASE64.encode(iv);
+    plaintext_bytes.zeroize();
+    iv.zeroize();
 
     Ok(EncryptedData {
         ciphertext: BASE64.encode(&ciphertext),
-        iv: BASE64.encode(iv),
+        iv: iv_base64,
         algorithm: ALGORITHM.to_string(),
     })
 }
@@ -87,12 +97,12 @@ pub fn decrypt(encrypted_data: &EncryptedData, key: &[u8]) -> Result<String, Cry
     }
 
     // Create cipher
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| CryptoError::Decryption(e.to_string()))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| CryptoError::Decryption(e.to_string()))?;
 
     // Decode base64
-    let ciphertext = BASE64.decode(&encrypted_data.ciphertext)?;
-    let iv = BASE64.decode(&encrypted_data.iv)?;
+    let mut ciphertext = BASE64.decode(&encrypted_data.ciphertext)?;
+    let mut iv = BASE64.decode(&encrypted_data.iv)?;
 
     if iv.len() != IV_LENGTH {
         return Err(CryptoError::InvalidIvLength {
@@ -104,17 +114,37 @@ pub fn decrypt(encrypted_data: &EncryptedData, key: &[u8]) -> Result<String, Cry
     let nonce = Nonce::from_slice(&iv);
 
     // Decrypt
-    let plaintext_bytes = cipher
-        .decrypt(nonce, ciphertext.as_slice())
-        .map_err(|e| CryptoError::Decryption(e.to_string()))?;
+    let plaintext_bytes = match cipher.decrypt(nonce, ciphertext.as_slice()) {
+        Ok(value) => value,
+        Err(e) => {
+            ciphertext.zeroize();
+            iv.zeroize();
+            return Err(CryptoError::Decryption(e.to_string()));
+        }
+    };
 
-    String::from_utf8(plaintext_bytes).map_err(|e| CryptoError::Utf8Error(e.to_string()))
+    let plaintext = match String::from_utf8(plaintext_bytes) {
+        Ok(value) => value,
+        Err(e) => {
+            let err_msg = e.utf8_error().to_string();
+            let mut bytes = e.into_bytes();
+            bytes.zeroize();
+            ciphertext.zeroize();
+            iv.zeroize();
+            return Err(CryptoError::Utf8Error(err_msg));
+        }
+    };
+
+    ciphertext.zeroize();
+    iv.zeroize();
+    Ok(plaintext)
 }
 
 /// Generate a random 32-byte encryption key
 pub fn generate_encryption_key() -> [u8; KEY_LENGTH] {
     let mut key = [0u8; KEY_LENGTH];
-    rand::thread_rng().fill_bytes(&mut key);
+    let mut rng = OsRng;
+    rng.fill_bytes(&mut key);
     key
 }
 

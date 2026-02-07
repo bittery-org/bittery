@@ -38,14 +38,16 @@ pub struct Session {
 /// # Returns
 /// Server ephemeral containing public key (sent to client) and secret (kept server-side)
 #[napi]
-pub fn generate_server_ephemeral(verifier: String) -> Ephemeral {
+pub fn generate_server_ephemeral(verifier: String) -> Result<Ephemeral> {
     let server = SrpServer::new(HashAlgorithm::Sha256, PrimeGroup::G4096);
-    let ephemeral = server.generate_ephemeral(&verifier);
+    let ephemeral = server
+        .generate_ephemeral(&verifier)
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
-    Ephemeral {
-        public: ephemeral.public,
-        secret: ephemeral.secret,
-    }
+    Ok(Ephemeral {
+        public: ephemeral.public.clone(),
+        secret: ephemeral.secret.clone(),
+    })
 }
 
 /// Derive server session and verify client proof
@@ -86,8 +88,8 @@ pub fn derive_server_session(
         .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
     Ok(Session {
-        key: session.key,
-        proof: session.proof,
+        key: session.key.clone(),
+        proof: session.proof.clone(),
     })
 }
 
