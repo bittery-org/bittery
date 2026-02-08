@@ -4,6 +4,7 @@
  * Enhanced with improved form field detection for complex forms
  */
 
+import { generateTotp } from "@bittery/shared/totp";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	type CreditCardFieldType,
@@ -15,6 +16,7 @@ import {
 	detectFieldType,
 	detectIdentityFields,
 	detectMultiStepForm,
+	detectOTPFields,
 	getAllInputs,
 	groupCreditCardFieldsByForm,
 	groupIdentityFieldsByForm,
@@ -65,7 +67,7 @@ function injectAutofillBlockerStyles() {
  */
 function disableChromeAutofill(
 	input: HTMLInputElement,
-	fieldType: "username" | "email" | "password",
+	fieldType: "username" | "email" | "password" | "otp",
 ) {
 	// Strategy 1: Set autocomplete to a value Chrome respects
 	// For password fields, "new-password" tells Chrome not to autofill existing passwords
@@ -151,7 +153,7 @@ function disableChromeAutofillForIdentity(input: HTMLInputElement) {
 
 interface CredentialField {
 	input: HTMLInputElement;
-	type: "username" | "email" | "password";
+	type: "username" | "email" | "password" | "otp";
 	overlay?: HTMLElement;
 	icon?: HTMLElement;
 	messageHandler?: (event: MessageEvent) => void;
@@ -246,7 +248,7 @@ const DETECTION_DEBOUNCE_MS = 100;
  */
 function detectPasswordFields(root: Document | ShadowRoot = document) {
 	// Use enhanced detection for comprehensive field discovery
-	const enhancedFields = detectCredentialFields(root);
+	const enhancedFields = [...detectCredentialFields(root), ...detectOTPFields(root)];
 
 	for (const enhancedField of enhancedFields) {
 		const input = enhancedField.element;
@@ -256,14 +258,14 @@ function detectPasswordFields(root: Document | ShadowRoot = document) {
 		// Only process credential-related fields with sufficient confidence
 		if (enhancedField.confidence < 0.1) continue;
 
-		// Filter to only username, email, and password types
-		if (!["username", "email", "password"].includes(enhancedField.type)) {
+		// Filter to credential + OTP types
+		if (!["username", "email", "password", "otp"].includes(enhancedField.type)) {
 			continue;
 		}
 
 		const field: CredentialField = {
 			input,
-			type: enhancedField.type as "username" | "email" | "password",
+			type: enhancedField.type as "username" | "email" | "password" | "otp",
 			confidence: enhancedField.confidence,
 			shadowRoot: enhancedField.shadowRoot,
 		};
@@ -472,14 +474,14 @@ function setupShadowRootObserver(shadowRoot: ShadowRoot) {
  */
 function detectPasswordFieldsLegacy() {
 	const inputs = document.querySelectorAll<HTMLInputElement>(
-		'input[type="password"], input[type="email"], input[type="text"][autocomplete*="username"], input[type="text"][autocomplete*="email"]',
+		'input[type="password"], input[type="email"], input[type="text"][autocomplete*="username"], input[type="text"][autocomplete*="email"], input[autocomplete*="one-time-code"]',
 	);
 
 	inputs.forEach((input) => {
 		if (detectedFields.has(input)) return;
 
 		// Determine field type
-		let type: "username" | "email" | "password" = "username";
+		let type: "username" | "email" | "password" | "otp" = "username";
 		if (input.type === "password") {
 			type = "password";
 		} else if (
@@ -487,6 +489,8 @@ function detectPasswordFieldsLegacy() {
 			input.autocomplete?.includes("email")
 		) {
 			type = "email";
+		} else if (input.autocomplete?.includes("one-time-code")) {
+			type = "otp";
 		}
 
 		const field: CredentialField = { input, type };
@@ -1539,13 +1543,18 @@ async function handleFieldFocus(field: CredentialField) {
 	// If field was blurred during async work, don't show overlay
 	if (currentFocusedField !== field) return;
 
-	const hasItems = itemsResponse.items && itemsResponse.items.length > 0;
+	const items: DecryptedItem[] = itemsResponse.items || [];
+	const eligibleItems =
+		field.type === "otp"
+			? items.filter((item) => Boolean(item.totpSecret))
+			: items;
+	const hasItems = eligibleItems.length > 0;
 	field.hasItems = hasItems;
 
 	// Show icon if there are items
 	if (hasItems) {
 		showFieldIcon(field, true);
-		showAutofillOverlay(field, itemsResponse.items);
+		showAutofillOverlay(field, eligibleItems);
 	} else {
 		// Still show icon to indicate field is detected, but no items available
 		showFieldIcon(field, false);
@@ -1702,6 +1711,8 @@ function showCreditCardAutofillOverlay(
 	iframe.style.maxHeight = "240px";
 	iframe.style.display = "block";
 	iframe.style.overflow = "hidden";
+	iframe.style.background = "transparent";
+	iframe.setAttribute("allowtransparency", "true");
 	iframe.src = chrome.runtime.getURL("credit-card-autofill-iframe.html");
 
 	shadow.appendChild(iframe);
@@ -2011,6 +2022,8 @@ function showCreditCardUnlockPrompt(field: CreditCardField) {
 	iframe.style.maxHeight = "240px";
 	iframe.style.display = "block";
 	iframe.style.overflow = "hidden";
+	iframe.style.background = "transparent";
+	iframe.setAttribute("allowtransparency", "true");
 	iframe.src = chrome.runtime.getURL("credit-card-autofill-iframe.html");
 
 	shadow.appendChild(iframe);
@@ -2265,6 +2278,8 @@ function showIdentityAutofillOverlay(
 	iframe.style.maxHeight = "240px";
 	iframe.style.display = "block";
 	iframe.style.overflow = "hidden";
+	iframe.style.background = "transparent";
+	iframe.setAttribute("allowtransparency", "true");
 	iframe.src = chrome.runtime.getURL("identity-autofill-iframe.html");
 
 	shadow.appendChild(iframe);
@@ -2642,6 +2657,8 @@ function showIdentityUnlockPrompt(field: IdentityField) {
 	iframe.style.maxHeight = "240px";
 	iframe.style.display = "block";
 	iframe.style.overflow = "hidden";
+	iframe.style.background = "transparent";
+	iframe.setAttribute("allowtransparency", "true");
 	iframe.src = chrome.runtime.getURL("identity-autofill-iframe.html");
 
 	shadow.appendChild(iframe);
@@ -2903,7 +2920,7 @@ function showFieldIcon(
 		if (field.overlay) {
 			// Hide overlay
 			if ("type" in field && typeof field.type === "string") {
-				if (["username", "email", "password"].includes(field.type)) {
+				if (["username", "email", "password", "otp"].includes(field.type)) {
 					hideAutofillOverlay(field as CredentialField);
 				} else if (
 					["cardNumber", "cardExpiry", "cardCvv", "cardName"].includes(
@@ -2918,7 +2935,7 @@ function showFieldIcon(
 		} else {
 			// Show overlay by manually triggering the appropriate handler
 			if ("type" in field && typeof field.type === "string") {
-				if (["username", "email", "password"].includes(field.type)) {
+				if (["username", "email", "password", "otp"].includes(field.type)) {
 					await handleFieldFocus(field as CredentialField);
 				} else if (
 					["cardNumber", "cardExpiry", "cardCvv", "cardName"].includes(
@@ -3036,6 +3053,8 @@ function showAutofillOverlay(field: CredentialField, items: DecryptedItem[]) {
 	iframe.style.maxHeight = "240px";
 	iframe.style.display = "block";
 	iframe.style.overflow = "hidden";
+	iframe.style.background = "transparent";
+	iframe.setAttribute("allowtransparency", "true");
 	iframe.src = chrome.runtime.getURL("autofill-iframe.html");
 
 	shadow.appendChild(iframe);
@@ -3169,6 +3188,120 @@ function handleKeyboardNavigation(event: KeyboardEvent) {
 	}
 }
 
+function fillInputWithEvents(input: HTMLInputElement, value: string) {
+	input.value = value;
+	input.dispatchEvent(new Event("input", { bubbles: true }));
+	input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function sortInputsByDomOrder(inputs: HTMLInputElement[]): HTMLInputElement[] {
+	return [...inputs].sort((a, b) => {
+		if (a === b) return 0;
+		const position = a.compareDocumentPosition(b);
+		if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+		if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+		return 0;
+	});
+}
+
+function isPotentialOtpSegmentInput(input: HTMLInputElement): boolean {
+	if (input.maxLength !== 1) return false;
+	if (input.disabled || input.readOnly) return false;
+	if (!isFieldVisible(input)) return false;
+
+	const inputMode = input.inputMode?.toLowerCase() || "";
+	const pattern = input.pattern?.toLowerCase() || "";
+	return (
+		inputMode === "numeric" ||
+		inputMode === "tel" ||
+		pattern.includes("[0-9]") ||
+		pattern.includes("\\d")
+	);
+}
+
+function getOtpInputCandidates(referenceInput: HTMLInputElement): HTMLInputElement[] {
+	const referenceForm = referenceInput.closest("form");
+	const detectedOtpInputs = detectOTPFields(document)
+		.map((field) => field.element)
+		.filter(
+			(input) =>
+				input.isConnected &&
+				!input.disabled &&
+				!input.readOnly &&
+				isFieldVisible(input),
+		);
+
+	const fallbackScope: ParentNode = referenceForm || document;
+	const fallbackOtpSegments = Array.from(
+		fallbackScope.querySelectorAll<HTMLInputElement>("input"),
+	).filter(isPotentialOtpSegmentInput);
+
+	let candidates = Array.from(
+		new Set([...detectedOtpInputs, ...fallbackOtpSegments]),
+	);
+
+	if (referenceForm) {
+		const sameFormCandidates = candidates.filter(
+			(input) => input.closest("form") === referenceForm,
+		);
+		if (sameFormCandidates.length > 0) {
+			candidates = sameFormCandidates;
+		}
+	}
+
+	const { type: referenceType } = detectFieldType(referenceInput);
+	if (
+		(referenceType === "otp" || isPotentialOtpSegmentInput(referenceInput)) &&
+		!candidates.includes(referenceInput)
+	) {
+		candidates.push(referenceInput);
+	}
+
+	return sortInputsByDomOrder(candidates);
+}
+
+async function autofillTotpCodeForItem(
+	referenceInput: HTMLInputElement,
+	item: DecryptedItem,
+): Promise<boolean> {
+	if (!item.totpSecret) return false;
+
+	try {
+		const result = await generateTotp({
+			secret: item.totpSecret,
+			algorithm: item.totpAlgorithm,
+			digits: item.totpDigits,
+			period: item.totpPeriod,
+		});
+		const otpCode = result.code.replace(/\s+/g, "");
+		if (!otpCode) return false;
+
+		const otpInputs = getOtpInputCandidates(referenceInput);
+		if (otpInputs.length === 0) return false;
+
+		const segmentedInputs = otpInputs.filter(isPotentialOtpSegmentInput);
+		if (segmentedInputs.length >= 4 && segmentedInputs.length <= 8) {
+			segmentedInputs.forEach((input, index) => {
+				fillInputWithEvents(input, otpCode[index] ?? "");
+			});
+			return true;
+		}
+
+		const targetInput = otpInputs.includes(referenceInput)
+			? referenceInput
+			: otpInputs[0];
+		if (!targetInput) return false;
+
+		const valueToFill =
+			targetInput.maxLength === 1 ? (otpCode[0] ?? "") : otpCode;
+		fillInputWithEvents(targetInput, valueToFill);
+		return true;
+	} catch (error) {
+		console.warn("Failed to autofill TOTP code:", error);
+		return false;
+	}
+}
+
 // Handle autofill selection
 async function handleAutofillSelect(
 	field: CredentialField,
@@ -3182,77 +3315,76 @@ async function handleAutofillSelect(
 	// Set flag to prevent filtering during autofill
 	isAutofilling = true;
 
-	// Fill the field
-	if (field.type === "password" && item.password) {
-		field.input.value = item.password;
-	} else if (
-		(field.type === "username" || field.type === "email") &&
-		item.username
-	) {
-		field.input.value = item.username;
-	}
+	if (field.type === "otp") {
+		await autofillTotpCodeForItem(field.input, item);
+	} else {
+		// Fill the focused field
+		if (field.type === "password" && item.password) {
+			fillInputWithEvents(field.input, item.password);
+		} else if (
+			(field.type === "username" || field.type === "email") &&
+			item.username
+		) {
+			fillInputWithEvents(field.input, item.username);
+		}
 
-	// Trigger input event for frameworks
-	field.input.dispatchEvent(new Event("input", { bubbles: true }));
-	field.input.dispatchEvent(new Event("change", { bubbles: true }));
+		// Try to find and fill related fields
+		const form = field.input.closest("form") || document;
 
-	// Try to find and fill related fields
-	const form = field.input.closest("form") || document;
+		if (field.type === "password") {
+			// Find username field when password is filled
+			// First, check our detected fields
+			let usernameField: HTMLInputElement | undefined;
 
-	if (field.type === "password") {
-		// Find username field when password is filled
-		// First, check our detected fields
-		let usernameField: HTMLInputElement | undefined;
-
-		for (const [input, detectedField] of detectedFields) {
-			if (
-				input !== field.input &&
-				(detectedField.type === "username" || detectedField.type === "email")
-			) {
-				// Prefer fields in the same form
-				const fieldForm = input.closest("form");
-				if (fieldForm === (field.input.closest("form") || null)) {
-					usernameField = input;
-					break;
+			for (const [input, detectedField] of detectedFields) {
+				if (
+					input !== field.input &&
+					(detectedField.type === "username" || detectedField.type === "email")
+				) {
+					// Prefer fields in the same form
+					const fieldForm = input.closest("form");
+					if (fieldForm === (field.input.closest("form") || null)) {
+						usernameField = input;
+						break;
+					}
+					if (!usernameField) {
+						usernameField = input;
+					}
 				}
-				if (!usernameField) {
-					usernameField = input;
-				}
+			}
+
+			// Fallback: search for username fields in the form
+			if (!usernameField) {
+				usernameField = Array.from(
+					form.querySelectorAll<HTMLInputElement>(
+						'input[type="text"], input[type="email"]',
+					),
+				).find(
+					(input) =>
+						input !== field.input &&
+						(input.autocomplete?.includes("username") ||
+							input.autocomplete?.includes("email") ||
+							input.name?.toLowerCase().includes("username") ||
+							input.name?.toLowerCase().includes("email")),
+				);
+			}
+
+			if (usernameField && item.username) {
+				fillInputWithEvents(usernameField, item.username);
+			}
+		} else if (field.type === "username" || field.type === "email") {
+			// Find password field when username/email is filled
+			const passwordField = Array.from(
+				form.querySelectorAll<HTMLInputElement>('input[type="password"]'),
+			).find((input) => input !== field.input);
+
+			if (passwordField && item.password) {
+				fillInputWithEvents(passwordField, item.password);
 			}
 		}
 
-		// Fallback: search for username fields in the form
-		if (!usernameField) {
-			usernameField = Array.from(
-				form.querySelectorAll<HTMLInputElement>(
-					'input[type="text"], input[type="email"]',
-				),
-			).find(
-				(input) =>
-					input !== field.input &&
-					(input.autocomplete?.includes("username") ||
-						input.autocomplete?.includes("email") ||
-						input.name?.toLowerCase().includes("username") ||
-						input.name?.toLowerCase().includes("email")),
-			);
-		}
-
-		if (usernameField && item.username) {
-			usernameField.value = item.username;
-			usernameField.dispatchEvent(new Event("input", { bubbles: true }));
-			usernameField.dispatchEvent(new Event("change", { bubbles: true }));
-		}
-	} else if (field.type === "username" || field.type === "email") {
-		// Find password field when username/email is filled
-		const passwordField = Array.from(
-			form.querySelectorAll<HTMLInputElement>('input[type="password"]'),
-		).find((input) => input !== field.input);
-
-		if (passwordField && item.password) {
-			passwordField.value = item.password;
-			passwordField.dispatchEvent(new Event("input", { bubbles: true }));
-			passwordField.dispatchEvent(new Event("change", { bubbles: true }));
-		}
+		// Fill OTP field too when the selected login has TOTP configured
+		await autofillTotpCodeForItem(field.input, item);
 	}
 
 	// Reset autofilling flag after a brief delay
@@ -3299,6 +3431,8 @@ function showUnlockPrompt(field: CredentialField) {
 	iframe.style.maxHeight = "240px";
 	iframe.style.display = "block";
 	iframe.style.overflow = "hidden";
+	iframe.style.background = "transparent";
+	iframe.setAttribute("allowtransparency", "true");
 	iframe.src = chrome.runtime.getURL("autofill-iframe.html");
 
 	shadow.appendChild(iframe);

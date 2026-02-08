@@ -135,3 +135,9 @@ body {
 		@apply bg-background text-foreground;
 	}
 }
+
+/* Keep the autofill iframe document transparent so only the card is visible. */
+html.autofill-iframe-root,
+html.autofill-iframe-root body.autofill-iframe-body {
+	background: transparent !important;
+}
