@@ -133,4 +133,4 @@ BITTERY_STORAGE_CDN_URL=        # or BITTERY_STORAGE_PUBLIC_URL
 
 ## License
 
-All rights reserved.
+This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
