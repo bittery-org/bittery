@@ -2,7 +2,6 @@
 	"name": "@bittery/crypto-core",
 	"private": true,
 	"scripts": {
-		"test": "cargo test --manifest-path Cargo.toml -p bittery-crypto-core",
-		"build:web": "./build-wasm.sh"
+		"test": "cargo test --manifest-path Cargo.toml -p bittery-crypto-core"
 	}
 }

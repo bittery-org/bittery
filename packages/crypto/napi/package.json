@@ -17,7 +17,7 @@
 	},
 	"scripts": {
 		"artifacts": "napi artifacts",
-		"build": "napi build --platform --release | cat",
+		"build:release": "napi build --platform --release | cat",
 		"build:debug": "napi build --platform",
 		"prepublishOnly": "napi prepublish -t npm",
 		"test": "echo 'Tests run via bittery-crypto-core crate'",
