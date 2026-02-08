@@ -1,4 +1,4 @@
-import { useAvailableTags, useToggleFavorite } from "@bittery/hooks";
+import { useAvailableTags, useToggleFavorite } from "@bittery/core/hooks";
 import { detectCardBrand, maskCardNumber } from "@bittery/shared/credit-card";
 import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import {

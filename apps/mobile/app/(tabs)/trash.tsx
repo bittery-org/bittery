@@ -3,7 +3,7 @@ import {
 	useDeletedItems,
 	usePermanentDeleteItem,
 	useRestoreItem,
-} from "@bittery/hooks";
+} from "@bittery/core/hooks";
 import { Button, Card, Skeleton, useToast } from "heroui-native";
 import {
 	ArchiveRestore,

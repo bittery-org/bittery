@@ -1,4 +1,4 @@
-import { useItems } from "@bittery/hooks";
+import { useItems } from "@bittery/core/hooks";
 import { Badge, Button } from "@bittery/ui";
 import {
 	IconArrowLeftOutlineDuo18,

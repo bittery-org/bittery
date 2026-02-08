@@ -4,7 +4,7 @@ import {
 	useQuickUnlock,
 	useQuickUnlockAll,
 	useSessionState,
-} from "@bittery/hooks";
+} from "@bittery/core/hooks";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Button, Input, Label, TextField } from "heroui-native";
 import {

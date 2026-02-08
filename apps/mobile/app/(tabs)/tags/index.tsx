@@ -1,4 +1,4 @@
-import { useItems } from "@bittery/hooks";
+import { useItems } from "@bittery/core/hooks";
 import { useRouter } from "expo-router";
 import { Card, Chip, Input, Skeleton, TextField } from "heroui-native";
 import { Search, Tag } from "lucide-react-native";

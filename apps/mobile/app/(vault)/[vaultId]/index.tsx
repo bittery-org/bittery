@@ -1,4 +1,4 @@
-import { useAllVaultKeys, useVaultItems } from "@bittery/hooks";
+import { useAllVaultKeys, useVaultItems } from "@bittery/core/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Button, Card, Input, Skeleton, TextField } from "heroui-native";

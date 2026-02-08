@@ -5,7 +5,7 @@
  * Apps provide implementations via PlatformProvider.
  */
 
-import type { ICrypto } from "@bittery/core";
+import type { ICrypto } from "../types";
 import type { EncryptedData } from "@bittery/types";
 
 export type {
@@ -13,7 +13,7 @@ export type {
 	SRPClientEphemeral,
 	SRPClientSession,
 	SRPServerChallenge,
-} from "@bittery/core";
+} from "../types";
 export type { ICrypto };
 
 /**

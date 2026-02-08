@@ -1,4 +1,4 @@
-import { useAllVaultKeys, useMoveItem } from "@bittery/hooks";
+import { useAllVaultKeys, useMoveItem } from "@bittery/core/hooks";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	Avatar,

@@ -1,8 +1,7 @@
 /**
- * @bittery/hooks/auth
+ * @bittery/core/hooks/auth
  *
- * Backwards-compatible auth utility exports.
- * The implementation source of truth now lives in @bittery/core.
+ * Auth utility exports for hook consumers.
  */
 
 export {
@@ -25,4 +24,4 @@ export {
 	storeLoginSession,
 	storeUnlockSession,
 	type UnlockResult,
-} from "@bittery/core";
+} from "../../services/auth-service";

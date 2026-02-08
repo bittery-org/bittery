@@ -1,4 +1,4 @@
-import { useAvailableTags, useVaultItems } from "@bittery/hooks";
+import { useAvailableTags, useVaultItems } from "@bittery/core/hooks";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {

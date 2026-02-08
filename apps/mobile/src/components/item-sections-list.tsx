@@ -1,4 +1,4 @@
-import type { UnifiedItem } from "@bittery/hooks";
+import type { UnifiedItem } from "@bittery/core/hooks";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { FlatList, RefreshControl } from "react-native";
 import { buildItemSections } from "../utils/build-item-sections";

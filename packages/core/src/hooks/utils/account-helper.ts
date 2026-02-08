@@ -1,14 +1,14 @@
 /**
  * Account Helper Utilities
  *
- * Compatibility wrappers around @bittery/core account resolver helpers.
+ * Compatibility wrappers around core account resolver helpers.
  */
 
 import {
 	findAccountForItem as findAccountForItemCore,
 	getClientForAccount as getClientForAccountCore,
 	getItemAccountEmail as getItemAccountEmailCore,
-} from "@bittery/core";
+} from "../../services/account-resolver";
 import type { useTRPCClient } from "@bittery/shared";
 import type { IStorageAdapter } from "@bittery/storage";
 import type { DeletedItem } from "../hooks/use-deleted-items";

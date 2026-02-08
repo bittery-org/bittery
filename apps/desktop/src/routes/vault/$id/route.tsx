@@ -1,4 +1,4 @@
-import { useVaultItems } from "@bittery/hooks";
+import { useVaultItems } from "@bittery/core/hooks";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
 import { ItemListRow } from "../../../components/vault/item-list-row";
 

@@ -1,4 +1,4 @@
-import type { IAutolockService } from "@bittery/hooks/types";
+import type { IAutolockService } from "@bittery/core/hooks/types";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Router } from "@tanstack/react-router";
 import {

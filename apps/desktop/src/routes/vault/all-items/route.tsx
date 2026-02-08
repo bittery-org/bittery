@@ -1,4 +1,4 @@
-import { useItems } from "@bittery/hooks";
+import { useItems } from "@bittery/core/hooks";
 import { Badge } from "@bittery/ui";
 import { IconGrid2OutlineDuo18 } from "@bittery/ui/icons";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";

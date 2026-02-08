@@ -1,4 +1,4 @@
-import { usePermanentDeleteItem, useRestoreItem } from "@bittery/hooks";
+import { usePermanentDeleteItem, useRestoreItem } from "@bittery/core/hooks";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { ItemCategory } from "@bittery/shared/types";
 import {

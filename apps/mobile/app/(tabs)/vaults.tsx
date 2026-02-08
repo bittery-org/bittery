@@ -1,4 +1,4 @@
-import { useAllVaultKeys, type VaultKeyWithAccount } from "@bittery/hooks";
+import { useAllVaultKeys, type VaultKeyWithAccount } from "@bittery/core/hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import { Tabs, useRouter } from "expo-router";
 import { Button, Card, Skeleton, useToast } from "heroui-native";

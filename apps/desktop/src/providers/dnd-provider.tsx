@@ -1,4 +1,4 @@
-import { useMoveItem } from "@bittery/hooks";
+import { useMoveItem } from "@bittery/core/hooks";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
 import { toast } from "@bittery/ui";
 import {

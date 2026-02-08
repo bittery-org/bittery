@@ -1,4 +1,4 @@
-import { useVaultInfo } from "@bittery/hooks";
+import { useVaultInfo } from "@bittery/core/hooks";
 import { createFileRoute } from "@tanstack/react-router";
 import { VaultAvatar } from "../../../components/vault/vault-avatar";
 

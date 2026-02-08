@@ -8,7 +8,7 @@ import {
 	buildShareUrl as buildShareUrlCore,
 	type ShareAccessMode,
 	type ShareExpirationOption,
-} from "@bittery/core";
+} from "../../../services/share-service";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";

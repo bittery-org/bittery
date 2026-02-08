@@ -4,7 +4,7 @@ import {
 	useQuickUnlock,
 	useQuickUnlockAll,
 	useSessionState,
-} from "@bittery/hooks";
+} from "@bittery/core/hooks";
 import { useRouter } from "expo-router";
 import {
 	Avatar,

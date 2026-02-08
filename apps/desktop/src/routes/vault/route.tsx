@@ -7,7 +7,7 @@ import {
 	useCrossVaultTags,
 	useDeleteVault,
 	useUpdateVault,
-} from "@bittery/hooks";
+} from "@bittery/core/hooks";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { toast } from "@bittery/ui";
 import {

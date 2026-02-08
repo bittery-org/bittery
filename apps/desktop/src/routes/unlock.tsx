@@ -2,7 +2,7 @@ import {
 	useAccountSwitcher,
 	useQuickUnlockAll,
 	useSessionState,
-} from "@bittery/hooks";
+} from "@bittery/core/hooks";
 import {
 	AccountAvatarGroup as AvatarGroup,
 	ButtonGroup,

@@ -11,7 +11,7 @@ import {
 	type ICrypto,
 	type ISyncContext,
 	PlatformProvider,
-} from "@bittery/hooks";
+} from "@bittery/core/hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
@@ -62,7 +62,7 @@ interface MobilePlatformProviderProps {
  *
  * Provides storage, crypto, and sync services to the shared hooks.
  *
- * Note: Mobile doesn't use the autolock service from @bittery/hooks
+ * Note: Mobile doesn't use the autolock service from @bittery/core/hooks
  * as it has its own BiometricAuthContext-based implementation.
  */
 export function MobilePlatformProvider({

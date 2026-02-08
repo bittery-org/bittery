@@ -1,4 +1,4 @@
-import { useAllVaultKeys, useCreateItem } from "@bittery/hooks";
+import { useAllVaultKeys, useCreateItem } from "@bittery/core/hooks";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {

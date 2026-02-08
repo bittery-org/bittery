@@ -1,4 +1,4 @@
-import { useItems, usePasswordSecurity } from "@bittery/hooks";
+import { useItems, usePasswordSecurity } from "@bittery/core/hooks";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { SecurityDashboard } from "@/components/dashboard/security-dashboard";

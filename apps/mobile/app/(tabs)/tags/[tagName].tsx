@@ -1,4 +1,4 @@
-import { type UnifiedItem, useItems } from "@bittery/hooks";
+import { type UnifiedItem, useItems } from "@bittery/core/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { Button, Card, Chip, Skeleton } from "heroui-native";

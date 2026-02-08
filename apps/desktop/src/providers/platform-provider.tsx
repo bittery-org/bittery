@@ -11,7 +11,7 @@ import {
 	type ICrypto,
 	type ISyncContext,
 	PlatformProvider,
-} from "@bittery/hooks";
+} from "@bittery/core/hooks";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { storage } from "@/lib/storage";
@@ -48,7 +48,7 @@ interface DesktopPlatformProviderProps {
  * Provides storage, crypto, and sync services to the shared hooks.
  * Must be rendered inside DesktopSyncProvider to access sync context.
  *
- * Note: Desktop doesn't use the autolock service from @bittery/hooks
+ * Note: Desktop doesn't use the autolock service from @bittery/core/hooks
  * as it has its own Tauri-based implementation.
  */
 export function DesktopPlatformProvider({

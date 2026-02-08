@@ -18,7 +18,7 @@
 	"dependencies": {
 		"@bittery/api": "workspace:*",
 		"@bittery/crypto-nitro": "workspace:*",
-		"@bittery/hooks": "workspace:*",
+		"@bittery/core": "workspace:*",
 		"@bittery/shared": "workspace:*",
 		"@bittery/storage": "workspace:*",
 		"@bittery/sync": "workspace:*",

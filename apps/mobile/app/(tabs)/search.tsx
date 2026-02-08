@@ -1,4 +1,4 @@
-import { useItems } from "@bittery/hooks";
+import { useItems } from "@bittery/core/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";

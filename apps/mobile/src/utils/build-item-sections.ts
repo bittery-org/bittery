@@ -1,4 +1,4 @@
-import type { UnifiedItem } from "@bittery/hooks";
+import type { UnifiedItem } from "@bittery/core/hooks";
 import type { DecryptedItem } from "@bittery/shared/types";
 
 type Item = DecryptedItem | UnifiedItem;

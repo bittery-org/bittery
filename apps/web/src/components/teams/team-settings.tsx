@@ -1,4 +1,4 @@
-import { useTeamAvatar } from "@bittery/hooks";
+import { useTeamAvatar } from "@bittery/core/hooks";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Avatar,

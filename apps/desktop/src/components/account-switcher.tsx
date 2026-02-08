@@ -3,7 +3,7 @@
  * Wrapper around the shared AccountSwitcher component with desktop-specific logic
  */
 
-import { useAccountSwitcher } from "@bittery/hooks";
+import { useAccountSwitcher } from "@bittery/core/hooks";
 import {
 	AccountAvatarGroup,
 	Button,

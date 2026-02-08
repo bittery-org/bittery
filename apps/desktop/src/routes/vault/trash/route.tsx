@@ -2,7 +2,7 @@ import {
 	useDeletedItems,
 	usePermanentDeleteItem,
 	useRestoreItem,
-} from "@bittery/hooks";
+} from "@bittery/core/hooks";
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import {
 	Badge,

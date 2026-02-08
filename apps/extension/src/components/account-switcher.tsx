@@ -1,4 +1,4 @@
-import { useAccountSwitcher } from "@bittery/hooks";
+import { useAccountSwitcher } from "@bittery/core/hooks";
 import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import {
 	AccountAvatarGroup,

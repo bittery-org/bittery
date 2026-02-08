@@ -1,4 +1,4 @@
-import { useAccountsInfo, useItems } from "@bittery/hooks";
+import { useAccountsInfo, useItems } from "@bittery/core/hooks";
 import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";

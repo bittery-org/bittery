@@ -4,7 +4,7 @@ import {
 	useItem,
 	useToggleFavorite,
 	useUpdateItem,
-} from "@bittery/hooks";
+} from "@bittery/core/hooks";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
 import {
 	Button,

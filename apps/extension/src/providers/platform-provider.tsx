@@ -7,8 +7,8 @@
  * - Sync context from ExtensionSyncProvider
  */
 
-import type { ISyncContext } from "@bittery/hooks";
-import { PlatformProvider } from "@bittery/hooks";
+import type { ISyncContext } from "@bittery/core/hooks";
+import { PlatformProvider } from "@bittery/core/hooks";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { cryptoAdapter } from "@/lib/crypto-adapter";
@@ -28,7 +28,7 @@ interface ExtensionPlatformProviderProps {
  * Provides storage, crypto, and sync services to the shared hooks.
  * Must be rendered inside ExtensionSyncProvider to access sync context.
  *
- * Note: Extension doesn't use the autolock service from @bittery/hooks
+ * Note: Extension doesn't use the autolock service from @bittery/core/hooks
  * as it has its own background worker-based implementation.
  */
 export function ExtensionPlatformProvider({

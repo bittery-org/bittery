@@ -1,4 +1,4 @@
-import { useAvailableTags, useItems, useVaultInfo } from "@bittery/hooks";
+import { useAvailableTags, useItems, useVaultInfo } from "@bittery/core/hooks";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { ItemDetailPage } from "../../../../../components/vault/item-detail-page";

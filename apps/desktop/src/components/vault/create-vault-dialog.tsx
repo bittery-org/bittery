@@ -1,4 +1,4 @@
-import type { CreateVaultInput } from "@bittery/hooks";
+import type { CreateVaultInput } from "@bittery/core/hooks";
 import {
 	Button,
 	Dialog,

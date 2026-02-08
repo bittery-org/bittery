@@ -2,7 +2,7 @@ import {
 	type ShareAccessMode,
 	type ShareExpirationOption,
 	useCreateShare,
-} from "@bittery/hooks";
+} from "@bittery/core/hooks";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	AlertDialog,

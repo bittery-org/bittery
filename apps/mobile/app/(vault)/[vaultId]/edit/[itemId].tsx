@@ -1,4 +1,4 @@
-import { useUpdateItem, useVaultItems } from "@bittery/hooks";
+import { useUpdateItem, useVaultItems } from "@bittery/core/hooks";
 import type {
 	CustomField,
 	DecryptedItemData,

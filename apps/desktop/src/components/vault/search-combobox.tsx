@@ -1,4 +1,4 @@
-import { useVaultSearch } from "@bittery/hooks";
+import { useVaultSearch } from "@bittery/core/hooks";
 import { getDomainFromUrl } from "@bittery/shared/favicon";
 import {
 	Command,

@@ -7,7 +7,7 @@ import {
 	buildShareUrl,
 	type ShareExpirationOption,
 	useCreateShare,
-} from "@bittery/hooks";
+} from "@bittery/core/hooks";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, ControlField, Label, Switch, useToast } from "heroui-native";
 import { Link, Loader2, Share2, X } from "lucide-react-native";

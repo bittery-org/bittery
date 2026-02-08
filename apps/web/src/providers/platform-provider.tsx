@@ -14,7 +14,7 @@ import {
 	type ICrypto,
 	type ISyncContext,
 	PlatformProvider,
-} from "@bittery/hooks";
+} from "@bittery/core/hooks";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { storage } from "@/lib/storage";

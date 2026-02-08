@@ -1,4 +1,4 @@
-import { useToggleFavorite, useVaultItems } from "@bittery/hooks";
+import { useToggleFavorite, useVaultItems } from "@bittery/core/hooks";
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import { Button } from "@bittery/ui";
 import {

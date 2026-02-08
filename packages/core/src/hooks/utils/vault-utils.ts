@@ -1,13 +1,13 @@
 /**
  * Vault Utilities
  *
- * Compatibility wrappers around @bittery/core vault services.
+ * Compatibility wrappers around core vault services.
  */
 
 import {
 	refreshVaultKeys as refreshVaultKeysCore,
 	type TRPCVaultClient,
-} from "@bittery/core";
+} from "../../services/vault-service";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 
 /**

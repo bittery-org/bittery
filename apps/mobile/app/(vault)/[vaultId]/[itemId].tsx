@@ -1,4 +1,4 @@
-import { useCreateShare, useDeleteItem, useVaultItems } from "@bittery/hooks";
+import { useCreateShare, useDeleteItem, useVaultItems } from "@bittery/core/hooks";
 import * as Clipboard from "expo-clipboard";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import type { PopoverTriggerRef } from "heroui-native";

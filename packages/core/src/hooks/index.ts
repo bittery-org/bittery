@@ -1,5 +1,5 @@
 /**
- * @bittery/hooks
+ * @bittery/core/hooks
  *
  * Shared React hooks for Bittery applications.
  * Platform-agnostic hooks that work across web, desktop, extension, and mobile.
@@ -9,7 +9,7 @@
  * 2. Use the shared hooks anywhere in your component tree
  *
  * ```tsx
- * import { PlatformProvider, useVaultItems, useCreateItem } from "@bittery/hooks";
+ * import { PlatformProvider, useVaultItems, useCreateItem } from "@bittery/core/hooks";
  * import * as crypto from "@/lib/wasm-crypto";
  * import { storage } from "@/lib/storage";
  * import { useSyncContext } from "@/providers/sync-provider";
