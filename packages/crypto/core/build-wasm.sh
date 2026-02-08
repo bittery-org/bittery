@@ -7,6 +7,12 @@ set -e
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
+# Install wasm-pack if not available
+if ! command -v wasm-pack &> /dev/null; then
+  echo "wasm-pack not found, installing..."
+  curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+fi
+
 echo "Building WASM package..."
 wasm-pack build crates/bittery-crypto-wasm \
   --target web \

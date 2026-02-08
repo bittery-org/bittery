@@ -3,6 +3,6 @@
 	"private": true,
 	"scripts": {
 		"test": "cargo test --manifest-path Cargo.toml -p bittery-crypto-core",
-		"build": "./build-wasm.sh"
+		"build:web": "./build-wasm.sh"
 	}
 }
