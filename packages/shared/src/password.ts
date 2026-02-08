@@ -9,6 +9,7 @@ export interface PasswordOptions {
 	uppercase?: boolean;
 	numbers?: boolean;
 	symbols?: boolean;
+	generateRandomValues?: (array: Uint8Array) => Uint8Array;
 }
 
 /**
@@ -21,6 +22,7 @@ export function generatePassword(options: PasswordOptions = {}): string {
 		uppercase = true,
 		numbers = true,
 		symbols = true,
+		generateRandomValues,
 	} = options;
 
 	const lowercaseChars = "abcdefghijklmnopqrstuvwxyz";
@@ -56,7 +58,14 @@ export function generatePassword(options: PasswordOptions = {}): string {
 	}
 
 	const randomValues = new Uint8Array(length + charSets.length);
-	crypto.getRandomValues(randomValues);
+
+	if (typeof crypto !== "undefined" && !generateRandomValues) {
+		crypto.getRandomValues(randomValues);
+	} else if (generateRandomValues) {
+		generateRandomValues(randomValues);
+	} else {
+		throw new Error("No method available to generate random values");
+	}
 
 	// Ensure at least one character from each enabled character set
 	for (let i = 0; i < charSets.length; i++) {

@@ -1,15 +1,21 @@
 import { cn } from "@bittery/ui";
-import type { LucideIcon } from "lucide-react";
 import {
-	Briefcase,
-	FolderClosed,
-	Heart,
-	Key,
-	Lock,
-	Shield,
-	Star,
-	Users,
-} from "lucide-react";
+	IconCarSideOutlineDuo18,
+	IconFolderOutlineDuo18,
+	IconHeartOutlineDuo18,
+	IconKeyOutlineDuo18,
+	IconLockOutlineDuo18,
+	IconMagicShieldOutlineDuo18,
+	IconMoneyDollarOutlineDuo18,
+	IconMusicOutlineDuo18,
+	IconPiggyBankOutlineDuo18,
+	IconPlaneOutlineDuo18,
+	IconSquareTerminalOutlineDuo18,
+	IconStarSparkle2OutlineDuo18,
+	IconSuitcase3OutlineDuo18,
+	IconUsers6OutlineDuo18,
+} from "@bittery/ui/icons";
+import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 type VaultIconName =
@@ -20,39 +26,68 @@ type VaultIconName =
 	| "key"
 	| "folder"
 	| "star"
+	| "car"
+	| "piggy_bank"
+	| "money_dollar"
+	| "music"
+	| "plane"
+	| "square_terminal"
 	| "heart";
 
-const vaultIconMap: Record<VaultIconName, LucideIcon> = {
-	lock: Lock,
-	shield: Shield,
-	users: Users,
-	briefcase: Briefcase,
-	key: Key,
-	folder: FolderClosed,
-	star: Star,
-	heart: Heart,
+const vaultIconMap: Record<
+	VaultIconName,
+	LucideIcon | typeof IconLockOutlineDuo18
+> = {
+	lock: IconLockOutlineDuo18,
+	shield: IconMagicShieldOutlineDuo18,
+	users: IconUsers6OutlineDuo18,
+	briefcase: IconSuitcase3OutlineDuo18,
+	key: IconKeyOutlineDuo18,
+	folder: IconFolderOutlineDuo18,
+	star: IconStarSparkle2OutlineDuo18,
+	heart: IconHeartOutlineDuo18,
+	car: IconCarSideOutlineDuo18,
+	piggy_bank: IconPiggyBankOutlineDuo18,
+	money_dollar: IconMoneyDollarOutlineDuo18,
+	music: IconMusicOutlineDuo18,
+	plane: IconPlaneOutlineDuo18,
+	square_terminal: IconSquareTerminalOutlineDuo18,
 };
 
 export const vaultIconOptions: Array<{
 	value: VaultIconName;
 	label: string;
-	Icon: LucideIcon;
+	Icon: LucideIcon | typeof IconLockOutlineDuo18;
 }> = [
-	{ value: "lock", label: "Lock", Icon: Lock },
-	{ value: "shield", label: "Shield", Icon: Shield },
-	{ value: "users", label: "Users", Icon: Users },
-	{ value: "briefcase", label: "Briefcase", Icon: Briefcase },
-	{ value: "key", label: "Key", Icon: Key },
-	{ value: "folder", label: "Folder", Icon: FolderClosed },
-	{ value: "star", label: "Star", Icon: Star },
-	{ value: "heart", label: "Heart", Icon: Heart },
+	{ value: "lock", label: "Lock", Icon: IconLockOutlineDuo18 },
+	{ value: "shield", label: "Shield", Icon: IconMagicShieldOutlineDuo18 },
+	{ value: "users", label: "Users", Icon: IconUsers6OutlineDuo18 },
+	{ value: "briefcase", label: "Briefcase", Icon: IconSuitcase3OutlineDuo18 },
+	{ value: "key", label: "Key", Icon: IconKeyOutlineDuo18 },
+	{ value: "folder", label: "Folder", Icon: IconFolderOutlineDuo18 },
+	{ value: "star", label: "Star", Icon: IconStarSparkle2OutlineDuo18 },
+	{ value: "heart", label: "Heart", Icon: IconHeartOutlineDuo18 },
+	{ value: "car", label: "Car", Icon: IconCarSideOutlineDuo18 },
+	{ value: "piggy_bank", label: "Piggy Bank", Icon: IconPiggyBankOutlineDuo18 },
+	{
+		value: "money_dollar",
+		label: "Money Dollar",
+		Icon: IconMoneyDollarOutlineDuo18,
+	},
+	{ value: "music", label: "Music", Icon: IconMusicOutlineDuo18 },
+	{ value: "plane", label: "Plane", Icon: IconPlaneOutlineDuo18 },
+	{
+		value: "square_terminal",
+		label: "Terminal",
+		Icon: IconSquareTerminalOutlineDuo18,
+	},
 ];
 
 interface VaultAvatarProps {
 	name: string;
 	icon?: string | null;
 	imageUrl?: string | null;
-	size?: "xs" | "sm" | "md" | "lg";
+	size?: "xs" | "sm" | "md" | "lg" | "xl";
 	className?: string;
 }
 
@@ -112,13 +147,15 @@ export function VaultAvatar({
 		sm: "h-8 w-8 text-xs",
 		md: "h-10 w-10 text-sm",
 		lg: "h-12 w-12 text-base",
+		xl: "h-20 w-20 text-2xl",
 	};
 
 	const iconSizes = {
-		xs: 13,
+		xs: 14.25,
 		sm: 16,
 		md: 20,
 		lg: 24,
+		xl: 40,
 	};
 
 	const Icon = icon ? vaultIconMap[icon as VaultIconName] : undefined;

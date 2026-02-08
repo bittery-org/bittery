@@ -10,15 +10,12 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./sync-manager": "./src/sync-manager.ts",
-		"./offline-queue": "./src/offline-queue.ts",
-		"./offline-cache": "./src/offline-cache.ts",
 		"./use-sync": "./src/use-sync.ts",
-		"./use-offline-vault": "./src/use-offline-vault.ts",
 		"./types": "./src/types.ts"
 	},
 	"dependencies": {
-		"nanoid": "^5.1.0",
-		"@bittery/shared": "workspace:*"
+		"@bittery/shared": "workspace:*",
+		"@bittery/types": "workspace:*"
 	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",

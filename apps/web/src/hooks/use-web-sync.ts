@@ -1,7 +1,7 @@
-import { getAuthToken, getServerUrl } from "@bittery/crypto/session-storage";
 import { getOrCreateClientId, useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { storage } from "@/lib/storage";
 
 /**
  * Get or create a unique client ID for this browser session
@@ -10,18 +10,22 @@ function getClientId(): string {
 	if (typeof window === "undefined") {
 		return "server";
 	}
-	return getOrCreateClientId(window.sessionStorage);
+	return getOrCreateClientId(window.localStorage);
 }
 
 /**
  * Web-specific sync hook that integrates with existing auth system
  */
 export function useWebSync(queryClient: QueryClient, enabled = true) {
-	const serverUrl = getServerUrl() || "";
+	const [serverUrl, setServerUrl] = useState("");
 	const clientId = useMemo(() => getClientId(), []);
 
+	useEffect(() => {
+		storage.getServerUrl().then((url) => setServerUrl(url || ""));
+	}, []);
+
 	const getAuthTokenAsync = useCallback(async () => {
-		return getAuthToken() || null;
+		return (await storage.getAuthToken()) || null;
 	}, []);
 
 	return useSync({

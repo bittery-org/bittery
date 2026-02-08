@@ -4,26 +4,21 @@ import {
 	parseOtpAuthUri,
 } from "@bittery/shared/totp";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
+import { Button, Input, Label, toast } from "@bittery/ui";
 import {
-	Button,
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-	Input,
-	Label,
-	toast,
-} from "@bittery/ui";
+	IconClipboardArrowInOutlineDuo18,
+	IconKeyOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
-import {
-	ChevronDown,
-	ChevronRight,
-	Clipboard,
-	Key,
-	Settings,
-} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import type { VaultOption } from "../types";
+import {
+	type BaseFormProps,
+	FormWrapper,
+	NotesField,
+	TitleField,
+	TotpAdvancedSettings,
+	useFormVault,
+} from "./shared";
 
 export interface TotpFormData {
 	title: string;
@@ -37,14 +32,9 @@ export interface TotpFormData {
 	tags?: string[];
 }
 
-interface TotpFormProps {
+interface TotpFormProps extends BaseFormProps {
 	initialData?: Partial<TotpFormData>;
 	onSubmit: (data: TotpFormData, vaultId: string) => Promise<void> | void;
-	onCancel: () => void;
-	submitLabel?: string;
-	isSubmitting?: boolean;
-	vaults?: VaultOption[];
-	selectedVaultId?: string;
 }
 
 export function TotpForm({
@@ -56,14 +46,12 @@ export function TotpForm({
 	vaults = [],
 	selectedVaultId,
 }: TotpFormProps) {
-	const [currentVaultId, setCurrentVaultId] = useState<string>(
-		selectedVaultId || vaults[0]?.id || "",
+	const { currentVaultId, setCurrentVaultId } = useFormVault(
+		vaults,
+		selectedVaultId,
 	);
 	const [secretError, setSecretError] = useState<string | null>(null);
-	const [showAdvanced, setShowAdvanced] = useState(false);
 	const [hasImported, setHasImported] = useState(!!initialData?.totpSecret);
-
-	const selectedVault = vaults.find((v) => v.id === currentVaultId);
 
 	const form = useForm({
 		defaultValues: {
@@ -77,7 +65,6 @@ export function TotpForm({
 			notes: initialData?.notes || "",
 		},
 		onSubmit: async ({ value }) => {
-			// Validate secret before submission
 			if (!isValidBase32(value.totpSecret)) {
 				setSecretError("Invalid setup key. Please check the format.");
 				return;
@@ -98,7 +85,6 @@ export function TotpForm({
 					totpDigits: value.totpDigits,
 					totpPeriod: value.totpPeriod,
 					notes: value.notes || undefined,
-					// Preserve existing tags from initialData (tags are edited in detail view)
 					tags: initialData?.tags,
 				};
 				await onSubmit(submitData, currentVaultId);
@@ -112,15 +98,6 @@ export function TotpForm({
 			}
 		},
 	});
-
-	// Auto-focus paste on mount if no initial data
-	// biome-ignore lint/correctness/useExhaustiveDependencies: Only want to run on mount
-	useEffect(() => {
-		if (!initialData?.totpSecret) {
-			// Try to auto-paste from clipboard on mount
-			handlePasteFromClipboard(true);
-		}
-	}, []);
 
 	const handlePasteFromClipboard = useCallback(
 		async (silent = false) => {
@@ -145,7 +122,6 @@ export function TotpForm({
 						form.setFieldValue("totpAccountName", parsed.accountName);
 					}
 
-					// Auto-generate title
 					const title =
 						parsed.issuer && parsed.accountName
 							? `${parsed.issuer} (${parsed.accountName})`
@@ -171,7 +147,6 @@ export function TotpForm({
 				}
 
 				if (isValidBase32(text.replace(/\s/g, ""))) {
-					// Plain secret key
 					form.setFieldValue("totpSecret", formatSecretForDisplay(text));
 					setSecretError(null);
 					setHasImported(true);
@@ -190,6 +165,13 @@ export function TotpForm({
 		},
 		[form],
 	);
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Only want to run on mount
+	useEffect(() => {
+		if (!initialData?.totpSecret) {
+			handlePasteFromClipboard(true);
+		}
+	}, []);
 
 	const handleManualEntry = () => {
 		setHasImported(true);
@@ -212,7 +194,7 @@ export function TotpForm({
 					<div className="space-y-4">
 						<div className="text-center">
 							<div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-primary/10">
-								<Key className="size-8 text-primary" />
+								<IconKeyOutlineDuo18 className="size-8 text-primary" />
 							</div>
 							<h3 className="font-semibold text-lg">Add Authenticator</h3>
 							<p className="mt-1 text-muted-foreground text-sm">
@@ -221,14 +203,13 @@ export function TotpForm({
 							</p>
 						</div>
 
-						{/* Primary action - Paste */}
 						<Button
 							type="button"
 							size="lg"
 							className="w-full gap-2"
 							onClick={() => handlePasteFromClipboard()}
 						>
-							<Clipboard className="size-5" />
+							<IconClipboardArrowInOutlineDuo18 className="size-5" />
 							Paste from Clipboard
 						</Button>
 
@@ -243,7 +224,6 @@ export function TotpForm({
 							</div>
 						</div>
 
-						{/* Manual entry option */}
 						<Button
 							type="button"
 							variant="outline"
@@ -279,231 +259,101 @@ export function TotpForm({
 
 	// Form view - after import or manual entry
 	return (
-		<form
-			onSubmit={(e) => {
-				e.preventDefault();
-				form.handleSubmit();
-			}}
-			className="flex flex-1 flex-col overflow-hidden"
+		<FormWrapper
+			onSubmit={form.handleSubmit}
+			onCancel={onCancel}
+			submitLabel={submitLabel}
+			isSubmitting={isSubmitting}
+			vaults={vaults}
+			currentVaultId={currentVaultId}
+			onVaultChange={setCurrentVaultId}
 		>
-			<div className="flex-1 space-y-4 overflow-y-auto py-1 pr-2">
-				{/* Title */}
+			<div>
+				<form.Field name="title">
+					{(field) => (
+						<TitleField
+							field={field}
+							label="Name *"
+							placeholder="e.g., Google, GitHub, Amazon"
+							autoFocus={!field.state.value}
+						/>
+					)}
+				</form.Field>
+			</div>
+
+			{/* Setup Key */}
+			<div>
+				<form.Field name="totpSecret">
+					{(field) => (
+						<div className="space-y-2">
+							<Label htmlFor={field.name}>Setup Key *</Label>
+							<div className="flex gap-2">
+								<Input
+									id={field.name}
+									name={field.name}
+									value={field.state.value}
+									onBlur={() => {
+										field.handleBlur();
+										validateSecret(field.state.value);
+									}}
+									onChange={(e) => {
+										field.handleChange(e.target.value);
+										validateSecret(e.target.value);
+									}}
+									placeholder="XXXX XXXX XXXX XXXX"
+									className={`flex-1 font-mono tracking-wider ${secretError ? "border-destructive" : ""}`}
+									required
+								/>
+								<Button
+									type="button"
+									variant="outline"
+									onClick={() => handlePasteFromClipboard()}
+									title="Paste from clipboard"
+								>
+									<IconClipboardArrowInOutlineDuo18 size={16} />
+									Paste
+								</Button>
+							</div>
+							{secretError && (
+								<p className="text-destructive text-sm">{secretError}</p>
+							)}
+						</div>
+					)}
+				</form.Field>
+			</div>
+
+			{/* Account info */}
+			<div className="grid grid-cols-2 gap-4">
 				<div>
-					<form.Field name="title">
+					<form.Field name="totpIssuer">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>Name *</Label>
+								<Label htmlFor={field.name}>Service</Label>
 								<Input
 									id={field.name}
 									name={field.name}
 									value={field.state.value}
 									onBlur={field.handleBlur}
 									onChange={(e) => field.handleChange(e.target.value)}
-									placeholder="e.g., Google, GitHub, Amazon"
-									autoFocus={!field.state.value}
-									required
+									placeholder="Google, GitHub, etc."
 								/>
 							</div>
 						)}
 					</form.Field>
 				</div>
 
-				{/* Setup Key */}
 				<div>
-					<form.Field name="totpSecret">
+					<form.Field name="totpAccountName">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>Setup Key *</Label>
-								<div className="flex gap-2">
-									<Input
-										id={field.name}
-										name={field.name}
-										value={field.state.value}
-										onBlur={() => {
-											field.handleBlur();
-											validateSecret(field.state.value);
-										}}
-										onChange={(e) => {
-											field.handleChange(e.target.value);
-											validateSecret(e.target.value);
-										}}
-										placeholder="XXXX XXXX XXXX XXXX"
-										className={`flex-1 font-mono tracking-wider ${secretError ? "border-destructive" : ""}`}
-										required
-									/>
-									<Button
-										type="button"
-										variant="outline"
-										onClick={() => handlePasteFromClipboard()}
-										title="Paste from clipboard"
-									>
-										<Clipboard size={16} className="mr-2" />
-										Paste
-									</Button>
-								</div>
-								{secretError && (
-									<p className="text-destructive text-sm">{secretError}</p>
-								)}
-							</div>
-						)}
-					</form.Field>
-				</div>
-
-				{/* Account info - simplified */}
-				<div className="grid grid-cols-2 gap-4">
-					<div>
-						<form.Field name="totpIssuer">
-							{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor={field.name}>Service</Label>
-									<Input
-										id={field.name}
-										name={field.name}
-										value={field.state.value}
-										onBlur={field.handleBlur}
-										onChange={(e) => field.handleChange(e.target.value)}
-										placeholder="Google, GitHub, etc."
-									/>
-								</div>
-							)}
-						</form.Field>
-					</div>
-
-					<div>
-						<form.Field name="totpAccountName">
-							{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor={field.name}>Account</Label>
-									<Input
-										id={field.name}
-										name={field.name}
-										value={field.state.value}
-										onBlur={field.handleBlur}
-										onChange={(e) => field.handleChange(e.target.value)}
-										placeholder="your@email.com"
-									/>
-								</div>
-							)}
-						</form.Field>
-					</div>
-				</div>
-
-				{/* Advanced settings - collapsed by default */}
-				<div className="rounded-lg border">
-					<button
-						type="button"
-						onClick={() => setShowAdvanced(!showAdvanced)}
-						className="flex w-full items-center justify-between p-3 text-left hover:bg-muted/50"
-					>
-						<div className="flex items-center gap-2">
-							<Settings className="size-4 text-muted-foreground" />
-							<span className="font-medium text-sm">Advanced Settings</span>
-						</div>
-						{showAdvanced ? (
-							<ChevronDown className="size-4 text-muted-foreground" />
-						) : (
-							<ChevronRight className="size-4 text-muted-foreground" />
-						)}
-					</button>
-
-					{showAdvanced && (
-						<div className="border-t p-4">
-							<p className="mb-4 text-muted-foreground text-xs">
-								Most services use the default settings. Only change these if
-								your service specifies different values.
-							</p>
-							<div className="grid grid-cols-3 gap-4">
-								<div>
-									<form.Field name="totpAlgorithm">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>Algorithm</Label>
-												<select
-													id={field.name}
-													name={field.name}
-													value={field.state.value}
-													onBlur={field.handleBlur}
-													onChange={(e) =>
-														field.handleChange(e.target.value as TotpAlgorithm)
-													}
-													className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-												>
-													<option value="SHA1">SHA-1 (default)</option>
-													<option value="SHA256">SHA-256</option>
-													<option value="SHA512">SHA-512</option>
-												</select>
-											</div>
-										)}
-									</form.Field>
-								</div>
-
-								<div>
-									<form.Field name="totpDigits">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>Code Length</Label>
-												<select
-													id={field.name}
-													name={field.name}
-													value={field.state.value}
-													onBlur={field.handleBlur}
-													onChange={(e) =>
-														field.handleChange(
-															Number(e.target.value) as TotpDigits,
-														)
-													}
-													className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-												>
-													<option value={6}>6 digits (default)</option>
-													<option value={7}>7 digits</option>
-													<option value={8}>8 digits</option>
-												</select>
-											</div>
-										)}
-									</form.Field>
-								</div>
-
-								<div>
-									<form.Field name="totpPeriod">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>Refresh (sec)</Label>
-												<Input
-													id={field.name}
-													name={field.name}
-													type="number"
-													min={15}
-													max={120}
-													value={field.state.value}
-													onBlur={field.handleBlur}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value))
-													}
-												/>
-											</div>
-										)}
-									</form.Field>
-								</div>
-							</div>
-						</div>
-					)}
-				</div>
-
-				{/* Notes */}
-				<div>
-					<form.Field name="notes">
-						{(field) => (
-							<div className="space-y-2">
-								<Label htmlFor={field.name}>Notes</Label>
-								<textarea
+								<Label htmlFor={field.name}>Account</Label>
+								<Input
 									id={field.name}
 									name={field.name}
 									value={field.state.value}
 									onBlur={field.handleBlur}
 									onChange={(e) => field.handleChange(e.target.value)}
-									placeholder="Backup codes, recovery info, etc."
-									rows={2}
-									className="flex min-h-16 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+									placeholder="your@email.com"
 								/>
 							</div>
 						)}
@@ -511,42 +361,40 @@ export function TotpForm({
 				</div>
 			</div>
 
-			{/* Footer with Vault Selector */}
-			<div className="mt-4 flex items-center justify-between gap-3 border-t bg-background pt-4">
-				{vaults.length > 0 && (
-					<DropdownMenu>
-						<DropdownMenuTrigger asChild>
-							<Button type="button" variant="outline" size="sm">
-								{selectedVault?.name || "Select vault"}
-								<ChevronDown className="ml-2 size-4" />
-							</Button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="start">
-							{vaults.map((vault) => (
-								<DropdownMenuItem
-									key={vault.id}
-									onClick={() => setCurrentVaultId(vault.id)}
-								>
-									{vault.name}
-								</DropdownMenuItem>
-							))}
-						</DropdownMenuContent>
-					</DropdownMenu>
+			{/* Advanced settings */}
+			<form.Field name="totpAlgorithm">
+				{(algorithmField) => (
+					<form.Field name="totpDigits">
+						{(digitsField) => (
+							<form.Field name="totpPeriod">
+								{(periodField) => (
+									<TotpAdvancedSettings
+										algorithm={algorithmField.state.value}
+										digits={digitsField.state.value}
+										period={periodField.state.value}
+										onAlgorithmChange={(v) => algorithmField.handleChange(v)}
+										onDigitsChange={(v) => digitsField.handleChange(v)}
+										onPeriodChange={(v) => periodField.handleChange(v)}
+									/>
+								)}
+							</form.Field>
+						)}
+					</form.Field>
 				)}
-				<div className="flex flex-1 justify-end gap-2">
-					<Button
-						type="button"
-						variant="outline"
-						onClick={onCancel}
-						disabled={isSubmitting}
-					>
-						Cancel
-					</Button>
-					<Button type="submit" disabled={isSubmitting}>
-						{isSubmitting ? "Saving..." : submitLabel}
-					</Button>
-				</div>
+			</form.Field>
+
+			{/* Notes */}
+			<div>
+				<form.Field name="notes">
+					{(field) => (
+						<NotesField
+							field={field}
+							placeholder="Backup codes, recovery info, etc."
+							rows={2}
+						/>
+					)}
+				</form.Field>
 			</div>
-		</form>
+		</FormWrapper>
 	);
 }

@@ -1,5 +1,3 @@
-import { normalizeServerUrl } from "@bittery/crypto/server-url";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import {
 	Button,
 	Dialog,
@@ -8,19 +6,18 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-	Input,
 	Label,
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-	Separator,
 	toast,
 } from "@bittery/ui";
+import { IconLoader2OutlineDuo18 } from "@bittery/ui/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "@/lib/storage";
 
 // Auto-lock timeout options (in milliseconds)
 // -1 means never auto-lock
@@ -46,9 +43,8 @@ export function AccountSettingsDialog({
 	email,
 }: AccountSettingsDialogProps) {
 	const queryClient = useQueryClient();
-	const [webAppUrl, setWebAppUrl] = useState("");
 	const [autoLockTimeout, setAutoLockTimeout] = useState(
-		String(tauriStorage.DEFAULT_AUTO_LOCK_TIMEOUT_MS),
+		String(DEFAULT_AUTO_LOCK_TIMEOUT_MS),
 	);
 	const [isDirty, setIsDirty] = useState(false);
 
@@ -56,72 +52,31 @@ export function AccountSettingsDialog({
 	const autoLockTimeoutQuery = useQuery({
 		queryKey: ["autoLockTimeout", email],
 		queryFn: async () => {
-			const timeout = await tauriStorage.getAutoLockTimeoutOrDefault(email);
+			const timeout = await storage.getAutoLockTimeoutOrDefault(email);
 			return timeout;
 		},
 		enabled: open,
 	});
 
-	// Query for current web app URL
-	const webAppUrlQuery = useQuery({
-		queryKey: ["webAppUrl", email],
-		queryFn: async () => {
-			const url = await tauriStorage.getWebAppUrl(email);
-			return url;
-		},
-		enabled: open,
-	});
-
-	// Query for server URL (to show derived URL)
-	const serverUrlQuery = useQuery({
-		queryKey: ["serverUrl"],
-		queryFn: async () => {
-			return await tauriStorage.getServerUrl();
-		},
-		enabled: open,
-	});
-
-	// Derive the default web app URL from server URL
-	const derivedWebAppUrl = serverUrlQuery.data
-		? serverUrlQuery.data.replace(/\/api.*$/, "").replace(/\/$/, "")
-		: "https://app.bittery.io";
-
 	// Reset form when dialog opens or data loads
 	useEffect(() => {
 		if (open) {
-			if (webAppUrlQuery.data !== undefined) {
-				setWebAppUrl(webAppUrlQuery.data || "");
-			}
 			if (autoLockTimeoutQuery.data !== undefined) {
 				setAutoLockTimeout(String(autoLockTimeoutQuery.data));
 			}
 			setIsDirty(false);
 		}
-	}, [open, webAppUrlQuery.data, autoLockTimeoutQuery.data]);
+	}, [open, autoLockTimeoutQuery.data]);
 
 	// Mutation to save settings
 	const saveMutation = useMutation({
-		mutationFn: async ({ url, timeout }: { url: string; timeout: string }) => {
-			// Save web app URL
-			if (url.trim()) {
-				// Normalize the URL
-				const normalized = normalizeServerUrl(url);
-				if (!normalized) {
-					throw new Error("Invalid URL format");
-				}
-				await tauriStorage.storeWebAppUrl(normalized, email);
-			} else {
-				// Clear the custom URL to use derived URL
-				await tauriStorage.clearWebAppUrl(email);
-			}
-
+		mutationFn: async ({ timeout }: { timeout: string }) => {
 			// Save auto-lock timeout
 			const timeoutMs = Number.parseInt(timeout, 10);
-			await tauriStorage.storeAutoLockTimeout(timeoutMs, email);
+			await storage.storeAutoLockTimeout(timeoutMs, email);
 		},
 		onSuccess: () => {
 			toast.success("Settings saved successfully");
-			queryClient.invalidateQueries({ queryKey: ["webAppUrl", email] });
 			queryClient.invalidateQueries({ queryKey: ["autoLockTimeout", email] });
 			setIsDirty(false);
 			onOpenChange(false);
@@ -132,32 +87,18 @@ export function AccountSettingsDialog({
 	});
 
 	const handleSave = () => {
-		saveMutation.mutate({ url: webAppUrl, timeout: autoLockTimeout });
-	};
-
-	const handleReset = () => {
-		setWebAppUrl("");
-		setIsDirty(true);
+		saveMutation.mutate({ timeout: autoLockTimeout });
 	};
 
 	const handleClose = () => {
 		if (isDirty) {
 			// Reset to original values
-			setWebAppUrl(webAppUrlQuery.data || "");
 			setAutoLockTimeout(
-				String(
-					autoLockTimeoutQuery.data ??
-						tauriStorage.DEFAULT_AUTO_LOCK_TIMEOUT_MS,
-				),
+				String(autoLockTimeoutQuery.data ?? DEFAULT_AUTO_LOCK_TIMEOUT_MS),
 			);
 			setIsDirty(false);
 		}
 		onOpenChange(false);
-	};
-
-	const handleUrlChange = (value: string) => {
-		setWebAppUrl(value);
-		setIsDirty(true);
 	};
 
 	const handleAutoLockTimeoutChange = (value: string) => {
@@ -165,10 +106,7 @@ export function AccountSettingsDialog({
 		setIsDirty(true);
 	};
 
-	const isLoading =
-		webAppUrlQuery.isLoading ||
-		serverUrlQuery.isLoading ||
-		autoLockTimeoutQuery.isLoading;
+	const isLoading = autoLockTimeoutQuery.isLoading;
 
 	return (
 		<Dialog open={open} onOpenChange={handleClose}>
@@ -180,46 +118,10 @@ export function AccountSettingsDialog({
 
 				{isLoading ? (
 					<div className="flex items-center justify-center py-8">
-						<Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+						<IconLoader2OutlineDuo18 className="h-6 w-6 animate-spin text-muted-foreground" />
 					</div>
 				) : (
 					<div className="space-y-4">
-						<div className="space-y-2">
-							<Label htmlFor="webAppUrl">Web App URL</Label>
-							<Input
-								id="webAppUrl"
-								type="url"
-								value={webAppUrl}
-								onChange={(e) => handleUrlChange(e.target.value)}
-								placeholder={derivedWebAppUrl}
-							/>
-							<p className="text-muted-foreground text-xs">
-								The URL used for shareable links. Leave empty to use the derived
-								URL from your server URL.
-							</p>
-							{!webAppUrl && (
-								<p className="text-muted-foreground text-xs">
-									Current derived URL:{" "}
-									<code className="rounded bg-muted px-1 py-0.5">
-										{derivedWebAppUrl}
-									</code>
-								</p>
-							)}
-						</div>
-
-						{webAppUrl && (
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								onClick={handleReset}
-							>
-								Reset to Default
-							</Button>
-						)}
-
-						<Separator />
-
 						<div className="space-y-2">
 							<Label htmlFor="autoLockTimeout">Auto-Lock Timeout</Label>
 							<Select
@@ -254,7 +156,7 @@ export function AccountSettingsDialog({
 					>
 						{saveMutation.isPending ? (
 							<>
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+								<IconLoader2OutlineDuo18 className="h-4 w-4 animate-spin" />
 								Saving...
 							</>
 						) : (

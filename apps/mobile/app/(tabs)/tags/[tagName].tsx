@@ -1,42 +1,18 @@
+import { type UnifiedItem, useItems } from "@bittery/core/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import { Button, Card, Chip, Skeleton } from "heroui-native";
 import { ArrowLeft, Tag } from "lucide-react-native";
 import { useLayoutEffect, useMemo, useState } from "react";
-import {
-	ActivityIndicator,
-	FlatList,
-	RefreshControl,
-	ScrollView,
-	Text,
-	TouchableOpacity,
-	View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-
+import { FlatList, RefreshControl, View } from "react-native";
+import { withUniwind } from "uniwind";
+import { CategoryFilter } from "@/components/category-filter";
+import { SafeAreaView } from "@/components/safe-area-view";
 import { ItemListItem } from "../../../src/components/item-list-item";
-import { TagChip } from "../../../src/components/tag-chip";
-import {
-	type CrossVaultDecryptedItem,
-	useAllDecryptedItems,
-} from "../../../src/hooks/use-all-decrypted-items";
 
-const categoryLabels: Record<ItemCategory | "all", string> = {
-	all: "All",
-	login: "Login",
-	"credit-card": "Card",
-	identity: "Identity",
-	"secure-note": "Note",
-	totp: "TOTP",
-};
-
-const categories: (ItemCategory | "all")[] = [
-	"all",
-	"login",
-	"credit-card",
-	"identity",
-	"secure-note",
-	"totp",
-];
+// Create styled icon components
+const StyledTag = withUniwind(Tag);
+const StyledArrowLeft = withUniwind(ArrowLeft);
 
 export default function TagFilterScreen() {
 	const router = useRouter();
@@ -56,7 +32,7 @@ export default function TagFilterScreen() {
 	>("all");
 	const [refreshing, setRefreshing] = useState(false);
 
-	const { items, isLoading, error, refetch } = useAllDecryptedItems();
+	const { items, isLoading, error, refetch } = useItems();
 
 	// Filter items by tag and category
 	const filteredItems = useMemo(() => {
@@ -88,41 +64,11 @@ export default function TagFilterScreen() {
 		}
 	};
 
-	const handleItemPress = (item: CrossVaultDecryptedItem) => {
+	const handleItemPress = (item: UnifiedItem) => {
 		router.push(`/${item.vaultId}/${item.id}`);
 	};
 
-	const renderCategoryFilter = () => (
-		<View className="border-border border-b">
-			<ScrollView
-				horizontal
-				showsHorizontalScrollIndicator={false}
-				contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 8 }}
-			>
-				{categories.map((category) => (
-					<TouchableOpacity
-						key={category}
-						onPress={() => setSelectedCategory(category)}
-						className={`mr-2 rounded-full px-4 py-2 ${
-							selectedCategory === category ? "bg-primary" : "bg-secondary"
-						}`}
-					>
-						<Text
-							className={`font-medium text-sm ${
-								selectedCategory === category
-									? "text-primary-foreground"
-									: "text-foreground"
-							}`}
-						>
-							{categoryLabels[category]}
-						</Text>
-					</TouchableOpacity>
-				))}
-			</ScrollView>
-		</View>
-	);
-
-	const renderItem = ({ item }: { item: CrossVaultDecryptedItem }) => (
+	const renderItem = ({ item }: { item: UnifiedItem }) => (
 		<ItemListItem
 			id={item.id}
 			title={item.title || "[Untitled]"}
@@ -148,11 +94,33 @@ export default function TagFilterScreen() {
 
 	if (isLoading) {
 		return (
-			<SafeAreaView
-				className="flex-1 items-center justify-center bg-background"
-				edges={["bottom"]}
-			>
-				<ActivityIndicator size="large" color="#000" />
+			<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
+				{/* Tag header skeleton */}
+				<View className="flex-row items-center px-4 py-3">
+					<Skeleton className="mr-3 h-9 w-9 rounded-full" />
+					<Skeleton className="h-8 w-24 rounded-full" />
+				</View>
+
+				{/* Category filter skeleton */}
+				<View className="flex-row items-center justify-between px-4 py-2">
+					<Skeleton className="h-4 w-20 rounded" />
+					<Skeleton className="h-9 w-20 rounded-lg" />
+				</View>
+
+				{/* Skeleton items */}
+				<View className="flex-1 p-4">
+					{[1, 2, 3, 4, 5, 6].map((i) => (
+						<Card key={i} className="mb-2">
+							<Card.Body className="flex-row items-center py-3">
+								<Skeleton className="mr-3 h-10 w-10 rounded-lg" />
+								<View className="flex-1">
+									<Skeleton className="mb-2 h-4 w-32 rounded" />
+									<Skeleton className="h-3 w-24 rounded" />
+								</View>
+							</Card.Body>
+						</Card>
+					))}
+				</View>
 			</SafeAreaView>
 		);
 	}
@@ -160,16 +128,17 @@ export default function TagFilterScreen() {
 	if (error) {
 		return (
 			<SafeAreaView
-				className="flex-1 items-center justify-center bg-background"
+				className="flex-1 items-center justify-center bg-background p-8"
 				edges={["bottom"]}
 			>
-				<Text className="text-destructive">Error loading items</Text>
-				<TouchableOpacity
-					onPress={handleRefresh}
-					className="mt-4 rounded-lg bg-primary px-4 py-2"
-				>
-					<Text className="text-primary-foreground">Retry</Text>
-				</TouchableOpacity>
+				<Card variant="secondary" className="w-full max-w-sm items-center p-8">
+					<Card.Title className="mb-4 text-center text-danger text-lg">
+						Error loading items
+					</Card.Title>
+					<Button onPress={handleRefresh} variant="primary">
+						Retry
+					</Button>
+				</Card>
 			</SafeAreaView>
 		);
 	}
@@ -177,34 +146,49 @@ export default function TagFilterScreen() {
 	return (
 		<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
 			{/* Tag header */}
-			<View className="flex-row items-center border-border border-b px-4 py-3">
-				<TouchableOpacity
-					onPress={() => router.back()}
-					className="mr-3 rounded-full bg-secondary p-2"
-				>
-					<ArrowLeft size={20} color="#6b7280" />
-				</TouchableOpacity>
-				<TagChip name={decodedTagName} selected />
-				<Text className="ml-2 text-muted-foreground">
-					{filteredItems.length} item{filteredItems.length !== 1 ? "s" : ""}
-				</Text>
+			<View className="flex-row items-center justify-between px-4 py-3">
+				<View className="flex-row items-center">
+					<Button
+						isIconOnly
+						variant="secondary"
+						size="sm"
+						onPress={() => router.back()}
+						className="mr-3"
+					>
+						<StyledArrowLeft size={20} className="text-foreground" />
+					</Button>
+					<View className="flex-row items-center">
+						<Chip variant="soft" color="default" size="md" className="pr-2">
+							<StyledTag size={14} className="text-foreground" />
+							<Chip.Label className="mx-0.5 font-medium">
+								{decodedTagName}
+							</Chip.Label>
+						</Chip>
+					</View>
+				</View>
+				<CategoryFilter
+					selectedCategory={selectedCategory}
+					onCategoryChange={setSelectedCategory}
+				/>
 			</View>
-
-			{/* Category Filter */}
-			{renderCategoryFilter()}
 
 			{/* Items list */}
 			{filteredItems.length === 0 ? (
 				<View className="flex-1 items-center justify-center p-8">
-					<Tag size={48} color="#9ca3af" />
-					<Text className="mt-4 text-center font-semibold text-foreground text-lg">
-						No items found
-					</Text>
-					<Text className="mt-2 text-center text-muted-foreground">
-						{selectedCategory !== "all"
-							? "Try a different category filter"
-							: "No items have this tag"}
-					</Text>
+					<Card
+						variant="secondary"
+						className="w-full max-w-sm items-center p-8"
+					>
+						<StyledTag size={48} className="mb-4 text-muted" />
+						<Card.Title className="mb-2 text-center text-lg">
+							No items found
+						</Card.Title>
+						<Card.Description className="text-center">
+							{selectedCategory !== "all"
+								? "Try a different category filter"
+								: "No items have this tag"}
+						</Card.Description>
+					</Card>
 				</View>
 			) : (
 				<FlatList

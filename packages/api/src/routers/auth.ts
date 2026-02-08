@@ -4,16 +4,23 @@
  */
 /** biome-ignore-all lint/style/noNonNullAssertion: we need that here */
 
+import { createHmac } from "node:crypto";
 import {
+	checkLoginRateLimit,
+	clearLoginRateLimit,
 	createUser,
 	createUserSession,
 	deleteAllUserSessions,
 	deleteSession,
 	deleteUserAccount,
 	finishLogin,
+	getSessionById,
 	getUserByEmail,
 	getUserById,
 	getUserSessions,
+	LoginRateLimitError,
+	normalizeEmail,
+	recordFailedLoginAttempt,
 	renameSession,
 	revokeSession,
 	startLogin,
@@ -22,13 +29,52 @@ import {
 	updateUserPassword,
 	updateUserSecretKey,
 } from "@bittery/auth";
-import { db, team, teamMember, vault, vaultKey } from "@bittery/db";
-import { getStoragePublicUrl } from "@bittery/storage";
+import { db, team, teamInvitation, user, vault, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
+import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../index";
+import { getStoragePublicUrl } from "../storage/s3";
+import { logAuditEvent } from "../utils/audit";
 import { parseUserAgent } from "../utils/device";
+
+/**
+ * Helper function to get team avatar URL from imageKey
+ */
+function getTeamImageUrl(imageKey: string | null | undefined): string | null {
+	if (!imageKey) return null;
+	return getStoragePublicUrl(imageKey);
+}
+
+function mapRateLimitError(error: unknown): TRPCError {
+	if (error instanceof LoginRateLimitError) {
+		return new TRPCError({
+			code: "TOO_MANY_REQUESTS",
+			message: error.message,
+		});
+	}
+
+	throw error;
+}
+
+const hintSecret = process.env.JWT_SECRET;
+if (!hintSecret) {
+	throw new Error(
+		"FATAL: JWT_SECRET environment variable is not set. " +
+			"Email hint protection cannot be initialized.",
+	);
+}
+const emailHintSecret = hintSecret;
+
+function generateDeterministicFakeHint(email: string): string {
+	const digest = createHmac("sha256", emailHintSecret)
+		.update(normalizeEmail(email))
+		.digest("hex")
+		.toUpperCase();
+
+	return `A3-${digest.slice(0, 8)}`;
+}
 
 export const authRouter = router({
 	/**
@@ -37,9 +83,9 @@ export const authRouter = router({
 	signup: publicProcedure
 		.input(
 			z.object({
-				email: z.string().email(),
+				email: z.string().email().max(255),
 				name: z.string().min(2),
-				organizationName: z.string().min(1).optional(), // Optional for users joining via invitation
+				organizationName: z.string().optional(),
 				secretKeyHint: z.string(),
 				srpSalt: z.string(),
 				srpVerifier: z.string(),
@@ -49,8 +95,10 @@ export const authRouter = router({
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
+			const normalizedEmail = normalizeEmail(input.email);
+
 			// Check if user already exists
-			const existingUser = await getUserByEmail(input.email);
+			const existingUser = await getUserByEmail(normalizedEmail);
 			if (existingUser) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
@@ -58,9 +106,15 @@ export const authRouter = router({
 				});
 			}
 
-			// Create user
+			// Determine team type and name based on organizationName
+			const isOrganization = !!input.organizationName;
+			const teamType = isOrganization ? "organization" : "personal";
+			const teamName = input.organizationName || `${input.name}'s Team`;
+			const memberLimit = isOrganization ? null : 1;
+
+			// Create user first (without team)
 			const userId = await createUser({
-				email: input.email,
+				email: normalizedEmail,
 				name: input.name,
 				secretKeyHint: input.secretKeyHint,
 				srpSalt: input.srpSalt,
@@ -68,6 +122,22 @@ export const authRouter = router({
 				publicKey: input.publicKey,
 				encryptedPrivateKey: input.encryptedPrivateKey,
 			});
+
+			// Create team with actual userId as owner
+			const teamId = nanoid();
+			await db.insert(team).values({
+				id: teamId,
+				name: teamName,
+				ownerId: userId,
+				type: teamType,
+				memberLimit,
+			});
+
+			// Link user to team
+			await db
+				.update(user)
+				.set({ teamId, role: "owner" })
+				.where(eq(user.id, userId));
 
 			// Create default "Personal" vault
 			const vaultId = nanoid();
@@ -88,26 +158,6 @@ export const authRouter = router({
 				role: "owner",
 			});
 
-			// Only create team if organizationName is provided
-			// Users joining via invitation will join an existing team instead
-			if (input.organizationName) {
-				const teamId = nanoid();
-				await db.insert(team).values({
-					id: teamId,
-					name: input.organizationName,
-					ownerId: userId,
-				});
-
-				// Add user as team owner
-				await db.insert(teamMember).values({
-					id: nanoid(),
-					teamId,
-					userId,
-					role: "owner",
-					joinedAt: new Date(),
-				});
-			}
-
 			// Parse device info from context
 			const deviceInfo = parseUserAgent(ctx.device.userAgent);
 
@@ -126,12 +176,188 @@ export const authRouter = router({
 				},
 			});
 
+			// Get team data
+			const teamData = await db.query.team.findFirst({
+				where: (team, { eq }) => eq(team.id, teamId),
+			});
+
 			return {
 				success: true,
 				userId,
 				token: sessionData.token,
 				sessionId: sessionData.sessionId,
-				user: sessionData.user,
+				user: {
+					...sessionData.user,
+					teamId,
+					teamName: teamData?.name,
+					teamType: teamData?.type,
+					teamAvatarUrl: getTeamImageUrl(teamData?.imageKey),
+					role: "owner",
+				},
+				vaultKeys: vaultKeys.map((vk) => ({
+					vaultId: vk.vaultId,
+					vaultName: vk.vault.name,
+					vaultType: vk.vault.type,
+					vaultIcon: vk.vault.icon,
+					vaultImageUrl: vk.vault.imageKey
+						? getStoragePublicUrl(vk.vault.imageKey)
+						: null,
+					encryptedVaultKey: vk.encryptedVaultKey,
+					role: vk.role,
+				})),
+			};
+		}),
+
+	/**
+	 * Signup with invitation: Create user account and join invited team
+	 */
+	signupWithInvitation: publicProcedure
+		.input(
+			z.object({
+				token: z.string(),
+				email: z.string().email().max(255),
+				name: z.string().min(2),
+				secretKeyHint: z.string(),
+				srpSalt: z.string(),
+				srpVerifier: z.string(),
+				publicKey: z.string(),
+				encryptedPrivateKey: z.string(),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			const normalizedEmail = normalizeEmail(input.email);
+
+			// 1. Validate invitation
+			const invitation = await db.query.teamInvitation.findFirst({
+				where: (inv, { and, eq }) =>
+					and(eq(inv.token, input.token), eq(inv.status, "pending")),
+				with: { team: true },
+			});
+
+			if (!invitation) {
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "Invitation not found or already used",
+				});
+			}
+
+			// Check expiry
+			if (invitation.expiresAt < new Date()) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Invitation has expired",
+				});
+			}
+
+			// Verify email matches invitation
+			if (normalizeEmail(invitation.email) !== normalizedEmail) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Email does not match invitation",
+				});
+			}
+
+			// Check if user already exists
+			const existingUser = await getUserByEmail(normalizedEmail);
+			if (existingUser) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "User with this email already exists",
+				});
+			}
+
+			// Check team capacity (family teams have limits)
+			if (invitation.team.type === "family" && invitation.team.memberLimit) {
+				const currentMembers = await db.query.user.findMany({
+					where: (user, { eq }) => eq(user.teamId, invitation.teamId),
+				});
+
+				if (currentMembers.length >= invitation.team.memberLimit) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "Team has reached member limit",
+					});
+				}
+			}
+
+			// 2. Create user account
+			const userId = await createUser({
+				email: normalizedEmail,
+				name: input.name,
+				secretKeyHint: input.secretKeyHint,
+				srpSalt: input.srpSalt,
+				srpVerifier: input.srpVerifier,
+				publicKey: input.publicKey,
+				encryptedPrivateKey: input.encryptedPrivateKey,
+			});
+
+			// Link user to invited team
+			await db
+				.update(user)
+				.set({ teamId: invitation.teamId, role: invitation.role })
+				.where(eq(user.id, userId));
+
+			// 3. Grant vault access if pendingVaultKeys were provided
+			if (invitation.pendingVaultKeys) {
+				try {
+					const pendingKeys = JSON.parse(invitation.pendingVaultKeys) as Array<{
+						vaultId: string;
+						encryptedVaultKey: string;
+					}>;
+
+					// Convert invitation role to vault role
+					const vaultRole = invitation.role === "admin" ? "admin" : "member";
+
+					// Create vault key entries
+					for (const keyData of pendingKeys) {
+						await db.insert(vaultKey).values({
+							id: nanoid(),
+							vaultId: keyData.vaultId,
+							userId,
+							encryptedVaultKey: keyData.encryptedVaultKey,
+							role: vaultRole,
+						});
+					}
+				} catch (e) {
+					console.error("Failed to provision vault keys:", e);
+				}
+			}
+
+			// 4. Mark invitation as accepted
+			await db
+				.update(teamInvitation)
+				.set({ status: "accepted", acceptedAt: new Date() })
+				.where(eq(teamInvitation.id, invitation.id));
+
+			// Parse device info from context
+			const deviceInfo = parseUserAgent(ctx.device.userAgent);
+
+			// Create session
+			const sessionData = await createUserSession(userId, {
+				...deviceInfo,
+				userAgent: ctx.device.userAgent,
+				ipAddress: ctx.device.ipAddress,
+			});
+
+			// Get vault keys
+			const vaultKeys = await db.query.vaultKey.findMany({
+				where: (vaultKey, { eq }) => eq(vaultKey.userId, userId),
+				with: { vault: true },
+			});
+
+			return {
+				success: true,
+				userId,
+				token: sessionData.token,
+				sessionId: sessionData.sessionId,
+				user: {
+					...sessionData.user,
+					teamId: invitation.teamId,
+					teamName: invitation.team.name,
+					teamType: invitation.team.type,
+					teamAvatarUrl: getTeamImageUrl(invitation.team.imageKey),
+					role: invitation.role,
+				},
 				vaultKeys: vaultKeys.map((vk) => ({
 					vaultId: vk.vaultId,
 					vaultName: vk.vault.name,
@@ -153,14 +379,22 @@ export const authRouter = router({
 	startLogin: publicProcedure
 		.input(
 			z.object({
-				email: z.string().email(),
-				clientPublicKey: z.string(),
+				email: z.string().email().max(255),
+				clientPublicKey: z.string().max(2048),
 			}),
 		)
-		.mutation(async ({ input }) => {
+		.mutation(async ({ ctx, input }) => {
+			const normalizedEmail = normalizeEmail(input.email);
+
+			try {
+				await checkLoginRateLimit(normalizedEmail, ctx.device.ipAddress);
+			} catch (error) {
+				throw mapRateLimitError(error);
+			}
+
 			try {
 				const { userId, challenge, serverEphemeralSecret } = await startLogin(
-					input.email,
+					normalizedEmail,
 					input.clientPublicKey,
 				);
 
@@ -172,6 +406,12 @@ export const authRouter = router({
 				};
 			} catch (error) {
 				console.error(error);
+
+				try {
+					await recordFailedLoginAttempt(normalizedEmail, ctx.device.ipAddress);
+				} catch (rateLimitError) {
+					throw mapRateLimitError(rateLimitError);
+				}
 
 				throw new TRPCError({
 					code: "UNAUTHORIZED",
@@ -187,13 +427,24 @@ export const authRouter = router({
 	finishLogin: publicProcedure
 		.input(
 			z.object({
-				userId: z.string(),
-				serverSecret: z.string(), // Server ephemeral secret from previous step
-				clientPublicKey: z.string(),
-				clientProof: z.string(),
+				userId: z.string().max(64),
+				serverSecret: z.string().max(2048), // Server ephemeral secret from previous step
+				clientPublicKey: z.string().max(2048),
+				clientProof: z.string().max(512),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
+			const candidateUser = await getUserById(input.userId);
+			const rateLimitEmail = normalizeEmail(
+				candidateUser?.email || `${input.userId}@invalid.local`,
+			);
+
+			try {
+				await checkLoginRateLimit(rateLimitEmail, ctx.device.ipAddress);
+			} catch (error) {
+				throw mapRateLimitError(error);
+			}
+
 			// Parse device info from request context
 			const deviceInfo = parseUserAgent(ctx.device.userAgent);
 
@@ -210,11 +461,19 @@ export const authRouter = router({
 			);
 
 			if (!result.success || !result.user) {
+				try {
+					await recordFailedLoginAttempt(rateLimitEmail, ctx.device.ipAddress);
+				} catch (rateLimitError) {
+					throw mapRateLimitError(rateLimitError);
+				}
+
 				throw new TRPCError({
 					code: "UNAUTHORIZED",
 					message: "Invalid credentials",
 				});
 			}
+
+			await clearLoginRateLimit(rateLimitEmail, ctx.device.ipAddress);
 
 			// Get user's vault keys
 			const vaultKeys = await db.query.vaultKey.findMany({
@@ -225,12 +484,10 @@ export const authRouter = router({
 				},
 			});
 
-			// Get user's team membership (first team they belong to)
-			const userTeamMembership = await db.query.teamMember.findFirst({
-				where: (teamMember, { eq }) => eq(teamMember.userId, result.user!.id),
-				with: {
-					team: true,
-				},
+			// Get user with team (direct relation)
+			const userData = await db.query.user.findFirst({
+				where: (user, { eq }) => eq(user.id, result.user!.id),
+				with: { team: true },
 			});
 
 			return {
@@ -239,7 +496,11 @@ export const authRouter = router({
 				serverProof: result.serverProof!, // For client to verify server
 				user: {
 					...result.user,
-					teamName: userTeamMembership?.team.name,
+					teamId: userData?.teamId,
+					teamName: userData?.team?.name,
+					teamType: userData?.team?.type,
+					teamAvatarUrl: getTeamImageUrl(userData?.team?.imageKey),
+					role: userData?.role,
 				},
 				vaultKeys: vaultKeys.map((vk) => ({
 					vaultId: vk.vaultId,
@@ -262,14 +523,22 @@ export const authRouter = router({
 	quickUnlock: publicProcedure
 		.input(
 			z.object({
-				email: z.string().email(),
-				userId: z.string(),
-				serverSecret: z.string(),
-				clientPublicKey: z.string(),
-				clientProof: z.string(),
+				email: z.string().email().max(255),
+				userId: z.string().max(64),
+				serverSecret: z.string().max(2048),
+				clientPublicKey: z.string().max(2048),
+				clientProof: z.string().max(512),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
+			const normalizedEmail = normalizeEmail(input.email);
+
+			try {
+				await checkLoginRateLimit(normalizedEmail, ctx.device.ipAddress);
+			} catch (error) {
+				throw mapRateLimitError(error);
+			}
+
 			// Parse device info from request context
 			const deviceInfo = parseUserAgent(ctx.device.userAgent);
 
@@ -285,14 +554,20 @@ export const authRouter = router({
 				},
 			);
 
-			console.log(result);
-
 			if (!result.success || !result.user) {
+				try {
+					await recordFailedLoginAttempt(normalizedEmail, ctx.device.ipAddress);
+				} catch (rateLimitError) {
+					throw mapRateLimitError(rateLimitError);
+				}
+
 				throw new TRPCError({
 					code: "UNAUTHORIZED",
 					message: "Invalid credentials",
 				});
 			}
+
+			await clearLoginRateLimit(normalizedEmail, ctx.device.ipAddress);
 
 			// Get user's vault keys
 			const vaultKeys = await db.query.vaultKey.findMany({
@@ -303,12 +578,10 @@ export const authRouter = router({
 				},
 			});
 
-			// Get user's team membership (first team they belong to)
-			const userTeamMembership = await db.query.teamMember.findFirst({
-				where: (teamMember, { eq }) => eq(teamMember.userId, result.user!.id),
-				with: {
-					team: true,
-				},
+			// Get user with team (direct relation)
+			const userData = await db.query.user.findFirst({
+				where: (user, { eq }) => eq(user.id, result.user!.id),
+				with: { team: true },
 			});
 
 			return {
@@ -316,7 +589,11 @@ export const authRouter = router({
 				sessionId: result.sessionId!,
 				user: {
 					...result.user,
-					teamName: userTeamMembership?.team.name,
+					teamId: userData?.teamId,
+					teamName: userData?.team?.name,
+					teamType: userData?.team?.type,
+					teamAvatarUrl: getTeamImageUrl(userData?.team?.imageKey),
+					role: userData?.role,
 				},
 				vaultKeys: vaultKeys.map((vk) => ({
 					vaultId: vk.vaultId,
@@ -338,14 +615,17 @@ export const authRouter = router({
 	checkEmail: publicProcedure
 		.input(
 			z.object({
-				email: z.string().email(),
+				email: z.string().email().max(255),
 			}),
 		)
 		.query(async ({ input }) => {
-			const user = await getUserByEmail(input.email);
+			const normalizedEmail = normalizeEmail(input.email);
+			const user = await getUserByEmail(normalizedEmail);
+			const fakeHint = generateDeterministicFakeHint(normalizedEmail);
+
 			return {
-				exists: !!user,
-				secretKeyHint: user?.secretKeyHint || null,
+				exists: true,
+				secretKeyHint: user?.secretKeyHint || fakeHint,
 			};
 		}),
 
@@ -353,9 +633,12 @@ export const authRouter = router({
 	 * Get current user data
 	 */
 	me: protectedProcedure.query(async ({ ctx }) => {
-		const user = await getUserById(ctx.session.userId);
+		const userData = await db.query.user.findFirst({
+			where: (user, { eq }) => eq(user.id, ctx.session.userId),
+			with: { team: true },
+		});
 
-		if (!user) {
+		if (!userData) {
 			throw new TRPCError({
 				code: "NOT_FOUND",
 				message: "User not found",
@@ -363,26 +646,39 @@ export const authRouter = router({
 		}
 
 		return {
-			id: user.id,
-			email: user.email,
-			name: user.name,
-			secretKeyHint: user.secretKeyHint,
-			publicKey: user.publicKey,
-			encryptedPrivateKey: user.encryptedPrivateKey,
-			createdAt: user.createdAt,
+			id: userData.id,
+			email: userData.email,
+			name: userData.name,
+			teamId: userData.teamId,
+			teamName: userData.team?.name,
+			teamType: userData.team?.type,
+			teamAvatarUrl: getTeamImageUrl(userData.team?.imageKey),
+			role: userData.role,
+			secretKeyHint: userData.secretKeyHint,
+			publicKey: userData.publicKey,
+			encryptedPrivateKey: userData.encryptedPrivateKey,
+			createdAt: userData.createdAt,
 		};
 	}),
 
 	/**
 	 * Logout from current session
 	 */
-	logout: publicProcedure
+	logout: protectedProcedure
 		.input(
 			z.object({
 				sessionId: z.string(),
 			}),
 		)
-		.mutation(async ({ input }) => {
+		.mutation(async ({ ctx, input }) => {
+			const targetSession = await getSessionById(input.sessionId);
+			if (!targetSession || targetSession.userId !== ctx.session.userId) {
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "Session not found",
+				});
+			}
+
 			await deleteSession(input.sessionId);
 			return { success: true };
 		}),
@@ -390,16 +686,19 @@ export const authRouter = router({
 	/**
 	 * Logout from all sessions
 	 */
-	logoutAll: publicProcedure
-		.input(
-			z.object({
-				userId: z.string(),
-			}),
-		)
-		.mutation(async ({ input }) => {
-			await deleteAllUserSessions(input.userId);
-			return { success: true };
-		}),
+	logoutAll: protectedProcedure.mutation(async ({ ctx }) => {
+		await deleteAllUserSessions(ctx.session.userId);
+
+		await logAuditEvent({
+			userId: ctx.session.userId,
+			action: "logout_all",
+			device: ctx.device,
+			entityType: "session",
+			entityId: ctx.session.sessionId,
+		});
+
+		return { success: true };
+	}),
 
 	/**
 	 * Update user email
@@ -407,12 +706,14 @@ export const authRouter = router({
 	updateEmail: protectedProcedure
 		.input(
 			z.object({
-				newEmail: z.string().email(),
+				newEmail: z.string().email().max(255),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
+			const normalizedNewEmail = normalizeEmail(input.newEmail);
+
 			// Check if email already exists
-			const existingUser = await getUserByEmail(input.newEmail);
+			const existingUser = await getUserByEmail(normalizedNewEmail);
 			if (existingUser && existingUser.id !== ctx.session.userId) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
@@ -420,7 +721,7 @@ export const authRouter = router({
 				});
 			}
 
-			await updateUserEmail(ctx.session.userId, input.newEmail);
+			await updateUserEmail(ctx.session.userId, normalizedNewEmail);
 
 			// Logout all sessions to force re-login with new email
 			await deleteAllUserSessions(ctx.session.userId);
@@ -457,6 +758,17 @@ export const authRouter = router({
 			// Logout all sessions to force re-login with new password
 			await deleteAllUserSessions(ctx.session.userId);
 
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "password_changed",
+				device: ctx.device,
+				entityType: "user",
+				entityId: ctx.session.userId,
+				metadata: {
+					vaultKeysUpdated: input.encryptedVaultKeys.length,
+				},
+			});
+
 			return { success: true };
 		}),
 
@@ -491,6 +803,17 @@ export const authRouter = router({
 			// Logout all sessions to force re-login with new secret key
 			await deleteAllUserSessions(ctx.session.userId);
 
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "secret_key_regenerated",
+				device: ctx.device,
+				entityType: "user",
+				entityId: ctx.session.userId,
+				metadata: {
+					vaultKeysUpdated: input.encryptedVaultKeys.length,
+				},
+			});
+
 			return { success: true };
 		}),
 
@@ -500,7 +823,7 @@ export const authRouter = router({
 	deleteAccount: protectedProcedure
 		.input(
 			z.object({
-				confirmEmail: z.string().email(),
+				confirmEmail: z.string().email().max(255),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
@@ -514,12 +837,20 @@ export const authRouter = router({
 			}
 
 			// Verify email matches for confirmation
-			if (user.email.toLowerCase() !== input.confirmEmail.toLowerCase()) {
+			if (normalizeEmail(user.email) !== normalizeEmail(input.confirmEmail)) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
 					message: "Email does not match",
 				});
 			}
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "account_deleted",
+				device: ctx.device,
+				entityType: "user",
+				entityId: ctx.session.userId,
+			});
 
 			// Delete user account (cascading deletes will handle related data)
 			await deleteUserAccount(ctx.session.userId);
@@ -560,6 +891,15 @@ export const authRouter = router({
 			}
 
 			await revokeSession(input.sessionId, ctx.session.userId);
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "device_revoked",
+				device: ctx.device,
+				entityType: "session",
+				entityId: input.sessionId,
+			});
+
 			return { success: true };
 		}),
 

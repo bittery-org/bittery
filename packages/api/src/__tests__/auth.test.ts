@@ -14,47 +14,63 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { db } from "@bittery/db";
 import { authRouter } from "../routers/auth";
 import {
-	cleanupTestData,
-	createAuthenticatedContext,
 	createPublicContext,
 	createTestSession,
 	createTestUser,
 	createTestVault,
+	deriveTestSrpClientProof,
+	generateTestAuthCryptoData,
 	generateTestEmail,
+	generateTestSrpClientEphemeral,
 	getSession,
 	getUser,
-	mockSrpData,
+	setup,
+	truncateAll,
 } from "./test-utils";
 
-describe("Auth Router", () => {
-	const testUserIds: string[] = [];
+function toSignupCryptoInput(
+	data: Awaited<ReturnType<typeof generateTestAuthCryptoData>>,
+) {
+	return {
+		secretKeyHint: data.secretKeyHint,
+		srpSalt: data.srpSalt,
+		srpVerifier: data.srpVerifier,
+		publicKey: data.publicKey,
+		encryptedPrivateKey: data.encryptedPrivateKey,
+		encryptedVaultKey: data.encryptedVaultKey,
+	};
+}
 
+const authCryptoFixture = await generateTestAuthCryptoData({
+	email: "fixture-auth@example.com",
+	accountPassword: "TestPass-Fixture-1!",
+});
+
+const nextAuthCryptoFixture = await generateTestAuthCryptoData({
+	email: "fixture-auth-next@example.com",
+	accountPassword: "TestPass-Fixture-2!",
+});
+
+describe("Auth Router", () => {
 	afterEach(async () => {
-		// Clean up test data after each test
-		await cleanupTestData(testUserIds);
-		testUserIds.length = 0;
+		await truncateAll();
 	});
 
 	describe("signup", () => {
-		test("should create new user with valid data", async () => {
+		test("should create new user with organization", async () => {
 			const email = generateTestEmail();
+			const cryptoData = authCryptoFixture;
 			const caller = authRouter.createCaller(createPublicContext());
 
 			const result = await caller.signup({
 				email,
 				name: "Test User",
 				organizationName: "Test Org",
-				secretKeyHint: mockSrpData.secretKeyHint,
-				srpSalt: mockSrpData.srpSalt,
-				srpVerifier: mockSrpData.srpVerifier,
-				publicKey: mockSrpData.publicKey,
-				encryptedPrivateKey: mockSrpData.encryptedPrivateKey,
-				encryptedVaultKey: mockSrpData.encryptedVaultKey,
+				...toSignupCryptoInput(cryptoData),
 			});
-
-			testUserIds.push(result.userId);
 
 			expect(result.success).toBe(true);
 			expect(result.userId).toBeDefined();
@@ -62,27 +78,25 @@ describe("Auth Router", () => {
 			expect(result.sessionId).toBeDefined();
 			expect(result.user).toBeDefined();
 			expect(result.user.email).toBe(email.toLowerCase());
+			expect(result.user.teamName).toBe("Test Org");
+			expect(result.user.teamType).toBe("organization");
 			expect(result.vaultKeys).toHaveLength(1);
+			// @ts-expect-error This is fine
 			expect(result.vaultKeys[0].vaultName).toBe("Personal");
+			// @ts-expect-error This is fine
 			expect(result.vaultKeys[0].role).toBe("owner");
 		});
 
 		test("should create user without organization name", async () => {
 			const email = generateTestEmail();
+			const cryptoData = authCryptoFixture;
 			const caller = authRouter.createCaller(createPublicContext());
 
 			const result = await caller.signup({
 				email,
 				name: "Test User",
-				secretKeyHint: mockSrpData.secretKeyHint,
-				srpSalt: mockSrpData.srpSalt,
-				srpVerifier: mockSrpData.srpVerifier,
-				publicKey: mockSrpData.publicKey,
-				encryptedPrivateKey: mockSrpData.encryptedPrivateKey,
-				encryptedVaultKey: mockSrpData.encryptedVaultKey,
+				...toSignupCryptoInput(cryptoData),
 			});
-
-			testUserIds.push(result.userId);
 
 			expect(result.success).toBe(true);
 			expect(result.userId).toBeDefined();
@@ -90,8 +104,16 @@ describe("Auth Router", () => {
 
 		test("should reject duplicate email", async () => {
 			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
+			const existingCryptoData = authCryptoFixture;
+			await createTestUser({
+				email,
+				secretKeyHint: existingCryptoData.secretKeyHint,
+				srpSalt: existingCryptoData.srpSalt,
+				srpVerifier: existingCryptoData.srpVerifier,
+				publicKey: existingCryptoData.publicKey,
+				encryptedPrivateKey: existingCryptoData.encryptedPrivateKey,
+			});
+			const signupCryptoData = existingCryptoData;
 
 			const caller = authRouter.createCaller(createPublicContext());
 
@@ -99,92 +121,168 @@ describe("Auth Router", () => {
 				caller.signup({
 					email,
 					name: "Test User 2",
-					secretKeyHint: mockSrpData.secretKeyHint,
-					srpSalt: mockSrpData.srpSalt,
-					srpVerifier: mockSrpData.srpVerifier,
-					publicKey: mockSrpData.publicKey,
-					encryptedPrivateKey: mockSrpData.encryptedPrivateKey,
-					encryptedVaultKey: mockSrpData.encryptedVaultKey,
+					...toSignupCryptoInput(signupCryptoData),
 				}),
 			).rejects.toThrow("User with this email already exists");
 		});
 
 		test("should normalize email to lowercase", async () => {
 			const baseEmail = generateTestEmail();
-			const email = baseEmail.toUpperCase(); // Use generated email but uppercase
+			const email = baseEmail.toUpperCase();
+			const cryptoData = authCryptoFixture;
 			const caller = authRouter.createCaller(createPublicContext());
 
 			const result = await caller.signup({
 				email,
 				name: "Test User",
-				secretKeyHint: mockSrpData.secretKeyHint,
-				srpSalt: mockSrpData.srpSalt,
-				srpVerifier: mockSrpData.srpVerifier,
-				publicKey: mockSrpData.publicKey,
-				encryptedPrivateKey: mockSrpData.encryptedPrivateKey,
-				encryptedVaultKey: mockSrpData.encryptedVaultKey,
+				...toSignupCryptoInput(cryptoData),
 			});
 
-			testUserIds.push(result.userId);
-
 			const user = await getUser(result.userId);
-			expect(user?.email).toBe(baseEmail); // Should be stored lowercase
+			expect(user?.email).toBe(baseEmail);
+		});
+	});
+
+	describe("login (SRP)", () => {
+		test("should complete startLogin/finishLogin with real SRP values", async () => {
+			const email = generateTestEmail();
+			const cryptoData = authCryptoFixture;
+			const caller = authRouter.createCaller(createPublicContext());
+
+			await caller.signup({
+				email,
+				name: "Login User",
+				...toSignupCryptoInput(cryptoData),
+			});
+
+			const clientEphemeral = await generateTestSrpClientEphemeral();
+			const startResult = await caller.startLogin({
+				email,
+				clientPublicKey: clientEphemeral.clientPublicKey,
+			});
+			const { clientProof } = await deriveTestSrpClientProof({
+				clientSecret: clientEphemeral.clientSecret,
+				salt: startResult.salt,
+				serverPublicKey: startResult.serverPublicKey,
+				authPassword: cryptoData.authPassword,
+			});
+
+			const finishResult = await caller.finishLogin({
+				userId: startResult.userId,
+				serverSecret: startResult.serverSecret,
+				clientPublicKey: clientEphemeral.clientPublicKey,
+				clientProof,
+			});
+
+			expect(finishResult.token).toBeDefined();
+			expect(finishResult.sessionId).toBeDefined();
+			expect(finishResult.serverProof).toBeDefined();
+			expect(finishResult.user.email).toBe(email.toLowerCase());
+		});
+
+		test("should reject finishLogin with invalid SRP proof", async () => {
+			const email = generateTestEmail();
+			const cryptoData = authCryptoFixture;
+			const caller = authRouter.createCaller(createPublicContext());
+
+			await caller.signup({
+				email,
+				name: "Login User",
+				...toSignupCryptoInput(cryptoData),
+			});
+
+			const clientEphemeral = await generateTestSrpClientEphemeral();
+			const startResult = await caller.startLogin({
+				email,
+				clientPublicKey: clientEphemeral.clientPublicKey,
+			});
+			const { clientProof } = await deriveTestSrpClientProof({
+				clientSecret: clientEphemeral.clientSecret,
+				salt: startResult.salt,
+				serverPublicKey: startResult.serverPublicKey,
+				authPassword: `${cryptoData.authPassword}wrong`,
+			});
+
+			await expect(
+				caller.finishLogin({
+					userId: startResult.userId,
+					serverSecret: startResult.serverSecret,
+					clientPublicKey: clientEphemeral.clientPublicKey,
+					clientProof,
+				}),
+			).rejects.toThrow("Invalid credentials");
 		});
 	});
 
 	describe("checkEmail", () => {
 		test("should return exists: true for existing email", async () => {
 			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
+			const cryptoData = authCryptoFixture;
+			await createTestUser({
+				email,
+				secretKeyHint: cryptoData.secretKeyHint,
+				srpSalt: cryptoData.srpSalt,
+				srpVerifier: cryptoData.srpVerifier,
+				publicKey: cryptoData.publicKey,
+				encryptedPrivateKey: cryptoData.encryptedPrivateKey,
+			});
 
 			const caller = authRouter.createCaller(createPublicContext());
 			const result = await caller.checkEmail({ email });
 
 			expect(result.exists).toBe(true);
-			expect(result.secretKeyHint).toBe(mockSrpData.secretKeyHint);
+			expect(result.secretKeyHint).toBe(cryptoData.secretKeyHint);
 		});
 
-		test("should return exists: false for non-existing email", async () => {
+		test("should return deterministic fake hint for non-existing email", async () => {
 			const caller = authRouter.createCaller(createPublicContext());
 			const result = await caller.checkEmail({
 				email: "nonexistent@example.com",
 			});
 
-			expect(result.exists).toBe(false);
-			expect(result.secretKeyHint).toBeNull();
+			expect(result.exists).toBe(true);
+			expect(result.secretKeyHint).toMatch(/^A3-[A-F0-9]{8}$/);
 		});
 
-		test("should be case-insensitive", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+		test("should return the same hint for case variants", async () => {
 			const caller = authRouter.createCaller(createPublicContext());
-			const result = await caller.checkEmail({ email: email.toUpperCase() });
+			const email = "case-test@example.com";
+			const lowerResult = await caller.checkEmail({ email });
+			const upperResult = await caller.checkEmail({
+				email: email.toUpperCase(),
+			});
 
-			expect(result.exists).toBe(true);
+			expect(lowerResult.exists).toBe(true);
+			expect(upperResult.exists).toBe(true);
+			expect(upperResult.secretKeyHint).toBe(lowerResult.secretKeyHint);
 		});
 	});
 
 	describe("me", () => {
 		test("should return current user data when authenticated", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email, name: "Current User" });
-			testUserIds.push(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
+			const seedEmail = generateTestEmail();
+			const cryptoData = authCryptoFixture;
+			const {
+				userId,
+				email: createdEmail,
+				caller,
+			} = await setup(authRouter, {
+				name: "Current User",
+				email: seedEmail,
+				secretKeyHint: cryptoData.secretKeyHint,
+				srpSalt: cryptoData.srpSalt,
+				srpVerifier: cryptoData.srpVerifier,
+				publicKey: cryptoData.publicKey,
+				encryptedPrivateKey: cryptoData.encryptedPrivateKey,
+			});
 
 			const result = await caller.me();
 
 			expect(result.id).toBe(userId);
-			expect(result.email).toBe(email.toLowerCase());
+			expect(result.email).toBe(createdEmail);
 			expect(result.name).toBe("Current User");
-			expect(result.publicKey).toBe(mockSrpData.publicKey);
-			expect(result.encryptedPrivateKey).toBe(mockSrpData.encryptedPrivateKey);
+			expect(result.publicKey).toBe(cryptoData.publicKey);
+			expect(result.encryptedPrivateKey).toBe(cryptoData.encryptedPrivateKey);
 		});
 
 		test("should throw UNAUTHORIZED for unauthenticated request", async () => {
@@ -195,14 +293,8 @@ describe("Auth Router", () => {
 	});
 
 	describe("logout", () => {
-		test("should delete session", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = authRouter.createCaller(createPublicContext());
-
+		test("should delete own session", async () => {
+			const { sessionId, caller } = await setup(authRouter);
 			const result = await caller.logout({ sessionId });
 
 			expect(result.success).toBe(true);
@@ -210,37 +302,49 @@ describe("Auth Router", () => {
 			const session = await getSession(sessionId);
 			expect(session).toBeUndefined();
 		});
+
+		test("should reject deleting another user's session", async () => {
+			const [{ caller }, { sessionId }] = await Promise.all([
+				setup(authRouter),
+				setup(authRouter),
+			]);
+
+			await expect(caller.logout({ sessionId })).rejects.toThrow(
+				"Session not found",
+			);
+		});
 	});
 
 	describe("logoutAll", () => {
-		test("should delete all user sessions", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
+		test("should delete all sessions for authenticated user", async () => {
+			const { userId, caller } = await setup(authRouter);
 
-			// Create multiple sessions
-			await createTestSession(userId, { deviceName: "Device 1" });
 			await createTestSession(userId, { deviceName: "Device 2" });
 			await createTestSession(userId, { deviceName: "Device 3" });
 
-			const caller = authRouter.createCaller(createPublicContext());
-			const result = await caller.logoutAll({ userId });
+			const result = await caller.logoutAll();
 
 			expect(result.success).toBe(true);
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "logout_all")),
+			});
+			expect(auditLogs.length).toBe(1);
+		});
+
+		test("should require authentication", async () => {
+			const caller = authRouter.createCaller(createPublicContext());
+			await expect(caller.logoutAll()).rejects.toThrow(
+				"Authentication required",
+			);
 		});
 	});
 
 	describe("updateEmail", () => {
 		test("should update user email and logout all sessions", async () => {
-			const oldEmail = generateTestEmail();
+			const { userId, caller } = await setup(authRouter);
 			const newEmail = generateTestEmail();
-			const { userId } = await createTestUser({ email: oldEmail });
-			testUserIds.push(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, oldEmail, sessionId),
-			);
 
 			const result = await caller.updateEmail({ newEmail });
 
@@ -251,16 +355,10 @@ describe("Auth Router", () => {
 		});
 
 		test("should reject email already in use by another user", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: userId1 } = await createTestUser({ email: email1 });
-			const { userId: userId2 } = await createTestUser({ email: email2 });
-			testUserIds.push(userId1, userId2);
-
-			const sessionId = await createTestSession(userId1);
-			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId1, email1, sessionId),
-			);
+			const [{ caller }, { email: email2 }] = await Promise.all([
+				setup(authRouter),
+				setup(authRouter),
+			]);
 
 			await expect(caller.updateEmail({ newEmail: email2 })).rejects.toThrow(
 				"Email already in use",
@@ -270,77 +368,87 @@ describe("Auth Router", () => {
 
 	describe("changePassword", () => {
 		test("should update SRP credentials and encrypted private key", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const currentEmail = generateTestEmail();
+			const currentCryptoData = authCryptoFixture;
+			const { userId, caller } = await setup(authRouter, {
+				email: currentEmail,
+				secretKeyHint: currentCryptoData.secretKeyHint,
+				srpSalt: currentCryptoData.srpSalt,
+				srpVerifier: currentCryptoData.srpVerifier,
+				publicKey: currentCryptoData.publicKey,
+				encryptedPrivateKey: currentCryptoData.encryptedPrivateKey,
+			});
 			const vaultId = await createTestVault(userId);
-			const sessionId = await createTestSession(userId);
-			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
-			const newSrpSalt = "newSalt123456789012345678901234567890123456789012345";
-			const newSrpVerifier = `newVerifier${mockSrpData.srpVerifier.slice(11)}`;
-			const newEncryptedPrivateKey = "newEncryptedPrivateKey123";
+			const nextCryptoData = nextAuthCryptoFixture;
 
 			const result = await caller.changePassword({
-				srpSalt: newSrpSalt,
-				srpVerifier: newSrpVerifier,
-				encryptedPrivateKey: newEncryptedPrivateKey,
+				srpSalt: nextCryptoData.srpSalt,
+				srpVerifier: nextCryptoData.srpVerifier,
+				encryptedPrivateKey: nextCryptoData.encryptedPrivateKey,
 				encryptedVaultKeys: [{ vaultId, encryptedVaultKey: "newVaultKey123" }],
 			});
 
 			expect(result.success).toBe(true);
 
-			const user = await getUser(userId);
-			expect(user?.srpSalt).toBe(newSrpSalt);
-			expect(user?.srpVerifier).toBe(newSrpVerifier);
-			expect(user?.encryptedPrivateKey).toBe(newEncryptedPrivateKey);
+			const updatedUser = await getUser(userId);
+			expect(updatedUser).toBeDefined();
+			expect(updatedUser?.srpSalt).toBe(nextCryptoData.srpSalt);
+			expect(updatedUser?.srpVerifier).toBe(nextCryptoData.srpVerifier);
+			expect(updatedUser?.encryptedPrivateKey).toBe(
+				nextCryptoData.encryptedPrivateKey,
+			);
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "password_changed")),
+			});
+			expect(auditLogs.length).toBe(1);
 		});
 	});
 
 	describe("regenerateSecretKey", () => {
 		test("should update secret key hint and SRP credentials", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const currentEmail = generateTestEmail();
+			const currentCryptoData = authCryptoFixture;
+			const { userId, caller } = await setup(authRouter, {
+				email: currentEmail,
+				secretKeyHint: currentCryptoData.secretKeyHint,
+				srpSalt: currentCryptoData.srpSalt,
+				srpVerifier: currentCryptoData.srpVerifier,
+				publicKey: currentCryptoData.publicKey,
+				encryptedPrivateKey: currentCryptoData.encryptedPrivateKey,
+			});
 			const vaultId = await createTestVault(userId);
-			const sessionId = await createTestSession(userId);
-			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
-			const newSecretKeyHint = "B4-NEWKEY";
-			const newSrpSalt = "newSalt987654321098765432109876543210987654321098";
+			const nextCryptoData = nextAuthCryptoFixture;
 
 			const result = await caller.regenerateSecretKey({
-				secretKeyHint: newSecretKeyHint,
-				srpSalt: newSrpSalt,
-				srpVerifier: mockSrpData.srpVerifier,
-				encryptedPrivateKey: "newEncrypted123",
+				secretKeyHint: nextCryptoData.secretKeyHint,
+				srpSalt: nextCryptoData.srpSalt,
+				srpVerifier: nextCryptoData.srpVerifier,
+				encryptedPrivateKey: nextCryptoData.encryptedPrivateKey,
 				encryptedVaultKeys: [{ vaultId, encryptedVaultKey: "newVaultKey456" }],
 			});
 
 			expect(result.success).toBe(true);
 
-			const user = await getUser(userId);
-			expect(user?.secretKeyHint).toBe(newSecretKeyHint);
-			expect(user?.srpSalt).toBe(newSrpSalt);
+			const updatedUser = await getUser(userId);
+			expect(updatedUser).toBeDefined();
+			expect(updatedUser?.secretKeyHint).toBe(nextCryptoData.secretKeyHint);
+			expect(updatedUser?.srpSalt).toBe(nextCryptoData.srpSalt);
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "secret_key_regenerated")),
+			});
+			expect(auditLogs.length).toBe(1);
 		});
 	});
 
 	describe("deleteAccount", () => {
 		test("should delete user account with correct email confirmation", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
+			const { userId, email, caller } = await setup(authRouter);
 
 			const result = await caller.deleteAccount({ confirmEmail: email });
 
@@ -348,17 +456,16 @@ describe("Auth Router", () => {
 
 			const user = await getUser(userId);
 			expect(user).toBeUndefined();
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "account_deleted")),
+			});
+			expect(auditLogs.length).toBe(1);
 		});
 
 		test("should reject deletion with wrong email", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
+			const { caller } = await setup(authRouter);
 
 			await expect(
 				caller.deleteAccount({ confirmEmail: "wrong@example.com" }),
@@ -368,25 +475,15 @@ describe("Auth Router", () => {
 
 	describe("listDevices", () => {
 		test("should return all user sessions with current session marked", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const session1 = await createTestSession(userId, {
-				deviceName: "Device 1",
-			});
+			const { userId, sessionId, caller } = await setup(authRouter);
 			const session2 = await createTestSession(userId, {
 				deviceName: "Device 2",
 			});
 
-			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, session1),
-			);
-
 			const result = await caller.listDevices();
 
 			expect(result.length).toBeGreaterThanOrEqual(2);
-			const currentSession = result.find((s) => s.id === session1);
+			const currentSession = result.find((s) => s.id === sessionId);
 			const otherSession = result.find((s) => s.id === session2);
 
 			expect(currentSession?.isCurrentSession).toBe(true);
@@ -396,20 +493,10 @@ describe("Auth Router", () => {
 
 	describe("revokeDevice", () => {
 		test("should revoke a specific session", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const currentSession = await createTestSession(userId, {
-				deviceName: "Current",
-			});
+			const { userId, caller } = await setup(authRouter);
 			const otherSession = await createTestSession(userId, {
 				deviceName: "Other",
 			});
-
-			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, currentSession),
-			);
 
 			const result = await caller.revokeDevice({ sessionId: otherSession });
 
@@ -417,38 +504,26 @@ describe("Auth Router", () => {
 
 			const session = await getSession(otherSession);
 			expect(session).toBeUndefined();
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "device_revoked")),
+			});
+			expect(auditLogs.length).toBe(1);
 		});
 
 		test("should not allow revoking current session", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
+			const { sessionId, caller } = await setup(authRouter);
 
-			const currentSession = await createTestSession(userId);
-
-			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, currentSession),
+			await expect(caller.revokeDevice({ sessionId })).rejects.toThrow(
+				"Cannot revoke current session",
 			);
-
-			await expect(
-				caller.revokeDevice({ sessionId: currentSession }),
-			).rejects.toThrow("Cannot revoke current session");
 		});
 	});
 
 	describe("renameDevice", () => {
 		test("should rename a session device", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const sessionId = await createTestSession(userId, {
-				deviceName: "Old Name",
-			});
-
-			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
+			const { sessionId, caller } = await setup(authRouter);
 
 			const result = await caller.renameDevice({
 				sessionId,
@@ -464,19 +539,11 @@ describe("Auth Router", () => {
 
 	describe("heartbeat", () => {
 		test("should update session last active timestamp", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const sessionId = await createTestSession(userId);
+			const { sessionId, caller } = await setup(authRouter);
 			const originalSession = await getSession(sessionId);
 
 			// Wait a bit to ensure timestamp changes
 			await new Promise((resolve) => setTimeout(resolve, 100));
-
-			const caller = authRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.heartbeat();
 

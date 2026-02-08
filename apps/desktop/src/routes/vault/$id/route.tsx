@@ -1,22 +1,17 @@
-import { useTRPCClient } from "@bittery/shared/trpc";
-import { useMutation } from "@tanstack/react-query";
+import { useVaultItems } from "@bittery/core/hooks";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
 import { ItemListRow } from "../../../components/vault/item-list-row";
-import { useDecryptedItems } from "../../../hooks/use-decrypted-items";
-import { useQueryInvalidator } from "../../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault/$id")({
 	component: RouteComponent,
 });
 
 function RouteComponent() {
-	const trpcClient = useTRPCClient();
-	const invalidator = useQueryInvalidator();
-
 	const { id, itemId } = useParams({ strict: false });
 
 	// Fetch and decrypt items for the selected vault
-	const { items: decryptedItems, isLoading } = useDecryptedItems(id || "");
+	// useVaultItems automatically handles single-account vs all-accounts mode
+	const { items: decryptedItems, isLoading } = useVaultItems(id || "");
 
 	// Sort items by favorite status
 	const items = [...decryptedItems].sort((a, b) => {
@@ -29,30 +24,6 @@ function RouteComponent() {
 	// Split into favorites and regular items
 	const favoriteItems = items.filter((item) => item.favorite);
 	const regularItems = items.filter((item) => !item.favorite);
-
-	// Mutation to toggle favorite
-	const toggleFavoriteMutation = useMutation({
-		mutationFn: async (params: { itemId: string; favorite: boolean }) => {
-			return trpcClient.vault.toggleFavorite.mutate(params);
-		},
-		onSuccess: (_data, variables) => {
-			// Invalidate item - this includes both listItems and getItem
-			invalidator.invalidateItem(variables.itemId, id || "");
-		},
-	});
-
-	const handleToggleFavorite = (
-		e: React.MouseEvent,
-		itemIdToToggle: string,
-		currentFavorite: boolean,
-	) => {
-		e.preventDefault();
-		e.stopPropagation();
-		toggleFavoriteMutation.mutate({
-			itemId: itemIdToToggle,
-			favorite: !currentFavorite,
-		});
-	};
 
 	if (isLoading) {
 		return (
@@ -88,9 +59,6 @@ function RouteComponent() {
 												key={item.id}
 												item={item}
 												isSelected={itemId === item.id}
-												onToggleFavorite={(e) =>
-													handleToggleFavorite(e, item.id, item.favorite)
-												}
 												linkTo="/vault/$id/$itemId"
 												linkParams={{ id, itemId: item.id }}
 												vaultId={id}
@@ -107,9 +75,6 @@ function RouteComponent() {
 										key={item.id}
 										item={item}
 										isSelected={itemId === item.id}
-										onToggleFavorite={(e) =>
-											handleToggleFavorite(e, item.id, item.favorite)
-										}
 										linkTo="/vault/$id/$itemId"
 										linkParams={{ id, itemId: item.id }}
 										vaultId={id}

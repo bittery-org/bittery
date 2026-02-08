@@ -1,77 +1,102 @@
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
+/**
+ * Desktop Account Switcher
+ * Wrapper around the shared AccountSwitcher component with desktop-specific logic
+ */
+
+import { useAccountSwitcher } from "@bittery/core/hooks";
 import {
+	AccountAvatarGroup,
 	Button,
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
+	AccountSwitcher as SharedAccountSwitcher,
 	toast,
 } from "@bittery/ui";
+import { IconChevronDownOutlineDuo18 } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
-import { Check, ChevronDown, Lock, LogOut, Plus, Settings } from "lucide-react";
 import { useState } from "react";
-import { useAccount } from "../contexts/account-context";
+import { useAccount } from "@/contexts/account-context";
+import { storage } from "@/lib/storage";
+import { useQueryInvalidator } from "@/providers/sync-provider";
 import { AccountAvatar } from "./account-avatar";
 import { AccountSettingsDialog } from "./account-settings-dialog";
+import { AddAccountDialog } from "./add-account-dialog";
 import { RemoveAccountDialog } from "./remove-account-dialog";
 
 export function AccountSwitcher() {
 	const {
-		activeAccount,
-		allAccounts,
+		accounts,
+		activeAccount: activeAccountQuery,
+		unlockedEmails,
 		switchAccount,
 		removeAccount,
-		lockAccount,
-		lockAllAccounts,
-	} = useAccount();
+	} = useAccountSwitcher();
+	// Use AccountContext's lockAllAccounts (has broadcast) instead of hook's version
+	const { lockAllAccounts: lockAllAccountsWithBroadcast } = useAccount();
+	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
-	const [isSwitching, setIsSwitching] = useState(false);
 	const [accountToRemove, setAccountToRemove] = useState<string | null>(null);
 	const [showSettings, setShowSettings] = useState(false);
+	const [showAddAccount, setShowAddAccount] = useState(false);
 
-	const handleSwitchAccount = async (email: string) => {
-		if (email === activeAccount?.email) return;
+	const accountsData = accounts.data ?? [];
+	const unlockedEmailsList = unlockedEmails.data ?? [];
+	const isAllAccountsMode = activeAccountQuery.data?.type === "all";
+	const activeAccountEmail =
+		activeAccountQuery.data?.type === "single"
+			? activeAccountQuery.data.email
+			: null;
+	const activeAccount = accountsData.find(
+		(a) => a.email === activeAccountEmail,
+	);
 
-		setIsSwitching(true);
+	const handleAccountSelect = async (email: string) => {
+		if (email === activeAccountEmail) return;
+
 		try {
-			await switchAccount(email);
+			await switchAccount.mutateAsync({ type: "single", email });
 
 			// Check if session is valid for the switched account
-			const sessionValid = await tauriStorage.isSessionValid(email);
+			const sessionValid = await storage.isSessionValid(email);
 			if (!sessionValid) {
 				navigate({ to: "/unlock", search: { email } });
 			} else {
+				// Invalidate all account-related data to clear cache from previous account
+				await invalidator.invalidateAllAccountData();
 				navigate({ to: "/vault" });
 			}
 		} catch (error) {
 			console.error("Failed to switch account:", error);
 			toast.error("Failed to switch account");
-		} finally {
-			setIsSwitching(false);
+		}
+	};
+
+	const handleAllAccountsSelect = async () => {
+		// Check if we have any unlocked accounts
+		if (unlockedEmailsList.length === 0) {
+			toast.error(
+				"No accounts are unlocked. Please unlock at least one account.",
+			);
+			return;
+		}
+
+		try {
+			await switchAccount.mutateAsync({ type: "all" });
+			// Invalidate all account-related data to refresh multi-account view
+			await invalidator.invalidateAllAccountData();
+			navigate({ to: "/vault" });
+		} catch (error) {
+			console.error("Failed to switch to All Accounts mode:", error);
+			toast.error("Failed to switch to All Accounts mode");
 		}
 	};
 
 	const handleAddAccount = () => {
-		navigate({ to: "/login", search: { addingAccount: true } });
-	};
-
-	const handleLockAccount = async (email: string) => {
-		try {
-			await lockAccount(email);
-			if (email === activeAccount?.email) {
-				navigate({ to: "/unlock", search: { email } });
-			}
-			toast.success("Account locked");
-		} catch (error) {
-			console.error("Failed to lock account:", error);
-			toast.error("Failed to lock account");
-		}
+		setShowAddAccount(true);
 	};
 
 	const handleLockAll = async () => {
 		try {
-			await lockAllAccounts();
+			// Use AccountContext's version which broadcasts to extension
+			await lockAllAccountsWithBroadcast();
 			navigate({ to: "/unlock" });
 			toast.success("All accounts locked");
 		} catch (error) {
@@ -80,14 +105,41 @@ export function AccountSwitcher() {
 		}
 	};
 
+	const handleAccountSettings = (_email: string) => {
+		setShowSettings(true);
+	};
+
+	const handleRemoveAccountClick = (email: string) => {
+		setAccountToRemove(email);
+	};
+
 	const handleRemoveAccount = async (email: string) => {
 		try {
-			await removeAccount(email);
+			const wasActive =
+				activeAccountEmail?.toLowerCase() === email.toLowerCase();
 
-			// Check if there are any accounts left
-			const accountsList = await tauriStorage.getAccountsList();
-			if (accountsList.accounts.length === 0) {
+			await removeAccount.mutateAsync(email);
+
+			const accountsList = await storage.getAccountsList();
+			if (accountsList.length === 0) {
+				// No accounts left — go to login
+				await storage.setActiveAccount(null);
 				navigate({ to: "/login" });
+			} else if (wasActive) {
+				// Removed the active account — switch to another one
+				const nextAccount = accountsList[0];
+				await switchAccount.mutateAsync({
+					type: "single",
+					email: nextAccount.email,
+				});
+
+				const sessionValid = await storage.isSessionValid(nextAccount.email);
+				if (!sessionValid) {
+					navigate({ to: "/unlock", search: { email: nextAccount.email } });
+				} else {
+					await invalidator.invalidateAllAccountData();
+					navigate({ to: "/vault" });
+				}
 			}
 
 			toast.success("Account removed");
@@ -99,122 +151,64 @@ export function AccountSwitcher() {
 		}
 	};
 
-	// const _handleLogout = async () => {
-	// 	if (!activeAccount) return;
-
-	// 	try {
-	// 		await tauriStorage.clearAllStoredData(activeAccount.email);
-	// 		const accountsList = await tauriStorage.getAccountsList();
-
-	// 		if (accountsList.accounts.length === 0) {
-	// 			navigate({ to: "/login" });
-	// 		} else {
-	// 			// Switch to first remaining account
-	// 			await switchAccount(accountsList.accounts[0].email);
-	// 			navigate({ to: "/vault" });
-	// 		}
-	// 		toast.success("Logged out successfully");
-	// 	} catch (error) {
-	// 		console.error("Logout error:", error);
-	// 		toast.error("Failed to logout");
-	// 	}
-	// };
-
-	if (!activeAccount) {
-		return null;
-	}
+	// Custom trigger for desktop
+	const trigger = (
+		<Button
+			variant="ghost"
+			size="sm"
+			className="gap-2"
+			disabled={switchAccount.isPending}
+		>
+			{isAllAccountsMode ? (
+				<>
+					<AccountAvatarGroup
+						accounts={accountsData.filter((a) =>
+							unlockedEmailsList.includes(a.email),
+						)}
+						maxVisible={2}
+						size="sm"
+					/>
+					<div className="flex flex-col items-start overflow-hidden">
+						<span className="max-w-24 truncate font-medium text-sm">
+							All Accounts
+						</span>
+					</div>
+				</>
+			) : activeAccount ? (
+				<>
+					<AccountAvatar account={activeAccount} size="sm" />
+					<div className="flex flex-col items-start overflow-hidden">
+						<span className="max-w-24 truncate font-medium text-sm">
+							{activeAccount.teamName ||
+								activeAccount.name ||
+								activeAccount.email.split("@")[0]}
+						</span>
+					</div>
+				</>
+			) : null}
+			<IconChevronDownOutlineDuo18 className="h-4 w-4 opacity-50" />
+		</Button>
+	);
 
 	return (
 		<>
-			<DropdownMenu>
-				<DropdownMenuTrigger asChild>
-					<Button
-						variant="ghost"
-						size="sm"
-						className="gap-2"
-						disabled={isSwitching}
-					>
-						<AccountAvatar account={activeAccount} size="sm" />
-						<div className="flex flex-col items-start overflow-hidden">
-							<span className="max-w-32 truncate font-medium text-sm">
-								{activeAccount.teamName ||
-									activeAccount.name ||
-									activeAccount.email.split("@")[0]}
-							</span>
-						</div>
-						<ChevronDown className="h-4 w-4 opacity-50" />
-					</Button>
-				</DropdownMenuTrigger>
-				<DropdownMenuContent align="start" className="w-72">
-					{allAccounts.map((account) => {
-						const isActive =
-							account.email.toLowerCase() === activeAccount.email.toLowerCase();
-
-						return (
-							<DropdownMenuItem
-								key={account.email}
-								onClick={() => handleSwitchAccount(account.email)}
-								className="flex items-center gap-3 py-2"
-							>
-								<AccountAvatar account={account} size="sm" />
-								<div className="flex flex-1 flex-col overflow-hidden">
-									<span className="truncate font-medium">
-										{account.teamName ||
-											account.name ||
-											account.email.split("@")[0]}
-									</span>
-									<span className="truncate text-muted-foreground text-xs">
-										{account.email}
-									</span>
-								</div>
-								{isActive && <Check className="h-4 w-4 text-primary" />}
-							</DropdownMenuItem>
-						);
-					})}
-
-					<DropdownMenuSeparator />
-
-					<DropdownMenuItem onClick={handleAddAccount} className="gap-2">
-						<Plus className="h-4 w-4" />
-						Add Account
-					</DropdownMenuItem>
-
-					<DropdownMenuItem
-						onClick={() => setShowSettings(true)}
-						className="gap-2"
-					>
-						<Settings className="h-4 w-4" />
-						Account Settings
-					</DropdownMenuItem>
-
-					<DropdownMenuSeparator />
-
-					<DropdownMenuItem
-						onClick={() => handleLockAccount(activeAccount.email)}
-						className="gap-2"
-					>
-						<Lock className="h-4 w-4" />
-						Lock Current Account
-					</DropdownMenuItem>
-
-					{allAccounts.length > 1 && (
-						<DropdownMenuItem onClick={handleLockAll} className="gap-2">
-							<Lock className="h-4 w-4" />
-							Lock All Accounts
-						</DropdownMenuItem>
-					)}
-
-					<DropdownMenuSeparator />
-
-					<DropdownMenuItem
-						onClick={() => setAccountToRemove(activeAccount.email)}
-						className="gap-2 text-destructive focus:text-destructive"
-					>
-						<LogOut className="h-4 w-4" />
-						Remove Account
-					</DropdownMenuItem>
-				</DropdownMenuContent>
-			</DropdownMenu>
+			<SharedAccountSwitcher
+				accounts={accountsData}
+				activeEmail={activeAccountEmail}
+				unlockedEmails={unlockedEmailsList}
+				isLoading={switchAccount.isPending}
+				onAccountSelect={handleAccountSelect}
+				onAddAccount={handleAddAccount}
+				onLockAll={handleLockAll}
+				showAllAccountsOption={true}
+				onAllAccountsSelect={handleAllAccountsSelect}
+				showAccountSettings={true}
+				onAccountSettings={handleAccountSettings}
+				showRemoveAccount={true}
+				onRemoveAccount={handleRemoveAccountClick}
+				trigger={trigger}
+				align="start"
+			/>
 
 			<RemoveAccountDialog
 				email={accountToRemove}
@@ -222,10 +216,17 @@ export function AccountSwitcher() {
 				onCancel={() => setAccountToRemove(null)}
 			/>
 
-			<AccountSettingsDialog
-				open={showSettings}
-				onOpenChange={setShowSettings}
-				email={activeAccount.email}
+			{activeAccount && (
+				<AccountSettingsDialog
+					open={showSettings}
+					onOpenChange={setShowSettings}
+					email={activeAccount.email}
+				/>
+			)}
+
+			<AddAccountDialog
+				open={showAddAccount}
+				onOpenChange={setShowAddAccount}
 			/>
 		</>
 	);

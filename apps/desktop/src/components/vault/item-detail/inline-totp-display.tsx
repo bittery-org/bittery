@@ -1,7 +1,7 @@
 import { generateTotp, type TotpResult } from "@bittery/shared/totp";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import { Button, copyWithToast } from "@bittery/ui";
-import { Copy } from "lucide-react";
+import { IconCopyOutlineDuo18 } from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
 
 interface InlineTotpDisplayProps {
@@ -68,7 +68,7 @@ export function InlineTotpDisplay({
 			>
 				<div className="relative flex size-9 items-center justify-center">
 					<svg
-						className="-rotate-90 size-9"
+						className="size-9 -rotate-90"
 						viewBox="0 0 32 32"
 						aria-hidden="true"
 					>
@@ -118,7 +118,7 @@ export function InlineTotpDisplay({
 				onClick={handleCopyCode}
 				disabled={!totpResult?.code}
 			>
-				<Copy size={16} />
+				<IconCopyOutlineDuo18 size={16} />
 			</Button>
 		</div>
 	);

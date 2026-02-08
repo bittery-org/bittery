@@ -6,17 +6,25 @@ import {
 	vaultKey,
 	vaultKeyRotation,
 } from "@bittery/db/schema/vault";
-import {
-	createPresignedUpload,
-	createVaultImageKey,
-	getStoragePublicUrl,
-} from "@bittery/storage";
 import { TRPCError } from "@trpc/server";
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, router } from "../index";
-import { emitSyncEvent } from "../sync-helper";
+import {
+	createPresignedUpload,
+	createVaultImageKey,
+	deleteObject,
+	getStoragePublicUrl,
+} from "../storage/s3";
+import {
+	broadcastSyncPayload,
+	broadcastSyncPayloads,
+	createSyncEvent,
+	emitSyncEvent,
+	type SyncBroadcastPayload,
+} from "../sync-helper";
+import { logAuditEvent } from "../utils/audit";
 
 export const vaultRouter = router({
 	/**
@@ -155,35 +163,44 @@ export const vaultRouter = router({
 		.mutation(async ({ input, ctx }) => {
 			const vaultId = nanoid();
 
-			// Create vault
-			await db.insert(vault).values({
-				id: vaultId,
-				name: input.name,
-				type: input.type,
-				...(input.icon && { icon: input.icon }),
-				...(input.imageKey && { imageKey: input.imageKey }),
-				createdById: ctx.session.userId,
+			let broadcast: SyncBroadcastPayload;
+			await db.transaction(async (tx) => {
+				// Create vault
+				await tx.insert(vault).values({
+					id: vaultId,
+					name: input.name,
+					type: input.type,
+					...(input.icon && { icon: input.icon }),
+					...(input.imageKey && { imageKey: input.imageKey }),
+					createdById: ctx.session.userId,
+				});
+
+				// Store encrypted vault key for the creator
+				await tx.insert(vaultKey).values({
+					id: nanoid(),
+					vaultId,
+					userId: ctx.session.userId,
+					encryptedVaultKey: input.encryptedVaultKey,
+					role: "owner",
+				});
+
+				// Create sync event inside transaction
+				broadcast = await createSyncEvent(
+					{
+						eventType: "vault_created",
+						entityId: vaultId,
+						entityType: "vault",
+						vaultId,
+						userId: ctx.session.userId,
+						clientId: input.clientId,
+						version: 1,
+					},
+					tx,
+				);
 			});
 
-			// Store encrypted vault key for the creator
-			await db.insert(vaultKey).values({
-				id: nanoid(),
-				vaultId,
-				userId: ctx.session.userId,
-				encryptedVaultKey: input.encryptedVaultKey,
-				role: "owner",
-			});
-
-			// Emit sync event
-			await emitSyncEvent({
-				eventType: "vault_created",
-				entityId: vaultId,
-				entityType: "vault",
-				vaultId,
-				userId: ctx.session.userId,
-				clientId: input.clientId,
-				version: 1,
-			});
+			// Broadcast AFTER transaction commits
+			await broadcastSyncPayload(broadcast!);
 
 			return { vaultId };
 		}),
@@ -208,40 +225,69 @@ export const vaultRouter = router({
 						eq(vaultKey.vaultId, input.vaultId),
 						eq(vaultKey.userId, ctx.session.userId),
 					),
+				with: {
+					vault: true,
+				},
 			});
 
 			if (!userVaultKey || !["owner", "admin"].includes(userVaultKey.role)) {
 				throw new Error("Access denied");
 			}
 
-			await db
-				.update(vault)
-				.set({
-					...(input.name !== undefined && { name: input.name }),
-					...(input.icon !== undefined && { icon: input.icon }),
-					...(input.imageKey !== undefined && { imageKey: input.imageKey }),
-					updatedAt: new Date(),
-				})
-				.where(eq(vault.id, input.vaultId));
+			// Get the old image key before updating (for cleanup)
+			const oldImageKey = userVaultKey.vault.imageKey;
 
-			const updatedVault = await db.query.vault.findFirst({
-				where: (vault, { eq }) => eq(vault.id, input.vaultId),
-			});
-
-			if (!updatedVault) {
-				throw new Error("Vault not found");
+			// Delete old image from S3 if we're replacing or removing it
+			if (
+				input.imageKey !== undefined &&
+				oldImageKey &&
+				oldImageKey !== input.imageKey
+			) {
+				try {
+					await deleteObject(oldImageKey);
+				} catch (error) {
+					// Log but don't fail the update if deletion fails
+					console.error("Failed to delete old vault image from S3:", error);
+				}
 			}
 
-			// Emit sync event
-			await emitSyncEvent({
-				eventType: "vault_updated",
-				entityId: input.vaultId,
-				entityType: "vault",
-				vaultId: input.vaultId,
-				userId: ctx.session.userId,
-				clientId: input.clientId,
-				version: 1,
+			let broadcast: SyncBroadcastPayload;
+			const updatedVault = await db.transaction(async (tx) => {
+				await tx
+					.update(vault)
+					.set({
+						...(input.name !== undefined && { name: input.name }),
+						...(input.icon !== undefined && { icon: input.icon }),
+						...(input.imageKey !== undefined && { imageKey: input.imageKey }),
+						updatedAt: new Date(),
+					})
+					.where(eq(vault.id, input.vaultId));
+
+				const result = await tx.query.vault.findFirst({
+					where: (vault, { eq }) => eq(vault.id, input.vaultId),
+				});
+
+				if (!result) {
+					throw new Error("Vault not found");
+				}
+
+				broadcast = await createSyncEvent(
+					{
+						eventType: "vault_updated",
+						entityId: input.vaultId,
+						entityType: "vault",
+						vaultId: input.vaultId,
+						userId: ctx.session.userId,
+						clientId: input.clientId,
+						version: 1,
+					},
+					tx,
+				);
+
+				return result;
 			});
+
+			await broadcastSyncPayload(broadcast!);
 
 			return {
 				id: updatedVault.id,
@@ -262,6 +308,9 @@ export const vaultRouter = router({
 			const userVaultKey = await db.query.vaultKey.findFirst({
 				where: (vk, { and, eq }) =>
 					and(eq(vk.vaultId, input.vaultId), eq(vk.userId, ctx.session.userId)),
+				with: {
+					vault: true,
+				},
 			});
 
 			if (!userVaultKey || userVaultKey.role !== "owner") {
@@ -271,7 +320,11 @@ export const vaultRouter = router({
 				});
 			}
 
-			// Emit sync event BEFORE deleting (so we can still broadcast to members)
+			// Get image key before deleting (for S3 cleanup)
+			const imageKey = userVaultKey.vault.imageKey;
+
+			// Emit sync event BEFORE deleting (cascade FK on sync_event.vaultId
+			// means we must broadcast while vault still exists)
 			await emitSyncEvent({
 				eventType: "vault_deleted",
 				entityId: input.vaultId,
@@ -282,14 +335,39 @@ export const vaultRouter = router({
 				version: 1,
 			});
 
-			// Delete all items in the vault
-			await db.delete(item).where(eq(item.vaultId, input.vaultId));
+			// Wrap deletes in a transaction for atomicity
+			await db.transaction(async (tx) => {
+				// Delete all items in the vault
+				await tx.delete(item).where(eq(item.vaultId, input.vaultId));
 
-			// Delete all vault keys (member access)
-			await db.delete(vaultKey).where(eq(vaultKey.vaultId, input.vaultId));
+				// Delete all vault keys (member access)
+				await tx.delete(vaultKey).where(eq(vaultKey.vaultId, input.vaultId));
 
-			// Delete the vault itself
-			await db.delete(vault).where(eq(vault.id, input.vaultId));
+				// Delete the vault itself
+				await tx.delete(vault).where(eq(vault.id, input.vaultId));
+			});
+
+			// Delete vault image from S3 if it exists
+			if (imageKey) {
+				try {
+					await deleteObject(imageKey);
+				} catch (error) {
+					// Log but don't fail the delete if S3 cleanup fails
+					console.error("Failed to delete vault image from S3:", error);
+				}
+			}
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "vault_deleted",
+				device: ctx.device,
+				entityType: "vault",
+				entityId: input.vaultId,
+				metadata: {
+					vaultName: userVaultKey.vault.name,
+					vaultType: userVaultKey.vault.type,
+				},
+			});
 
 			return { success: true };
 		}),
@@ -510,27 +588,34 @@ export const vaultRouter = router({
 
 			const itemId = nanoid();
 
-			await db.insert(item).values({
-				id: itemId,
-				vaultId: input.vaultId,
-				category: input.category,
-				encryptedData: input.encryptedData,
-				encryptionIv: input.encryptionIv,
-				encryptionAlgorithm: input.encryptionAlgorithm,
-				version: 1,
-				lastModifiedBy: ctx.session.userId,
+			let broadcast: SyncBroadcastPayload;
+			await db.transaction(async (tx) => {
+				await tx.insert(item).values({
+					id: itemId,
+					vaultId: input.vaultId,
+					category: input.category,
+					encryptedData: input.encryptedData,
+					encryptionIv: input.encryptionIv,
+					encryptionAlgorithm: input.encryptionAlgorithm,
+					version: 1,
+					lastModifiedBy: ctx.session.userId,
+				});
+
+				broadcast = await createSyncEvent(
+					{
+						eventType: "item_created",
+						entityId: itemId,
+						entityType: "item",
+						vaultId: input.vaultId,
+						userId: ctx.session.userId,
+						clientId: input.clientId,
+						version: 1,
+					},
+					tx,
+				);
 			});
 
-			// Emit sync event
-			await emitSyncEvent({
-				eventType: "item_created",
-				entityId: itemId,
-				entityType: "item",
-				vaultId: input.vaultId,
-				userId: ctx.session.userId,
-				clientId: input.clientId,
-				version: 1,
-			});
+			await broadcastSyncPayload(broadcast!);
 
 			return { itemId, id: input.vaultId };
 		}),
@@ -665,27 +750,34 @@ export const vaultRouter = router({
 
 			const newVersion = currentVersion + 1;
 
-			await db
-				.update(item)
-				.set({
-					...(input.encryptedData && { encryptedData: input.encryptedData }),
-					...(input.encryptionIv && { encryptionIv: input.encryptionIv }),
-					version: newVersion,
-					lastModifiedBy: ctx.session.userId,
-					updatedAt: new Date(),
-				})
-				.where(eq(item.id, input.itemId));
+			let broadcast: SyncBroadcastPayload;
+			await db.transaction(async (tx) => {
+				await tx
+					.update(item)
+					.set({
+						...(input.encryptedData && { encryptedData: input.encryptedData }),
+						...(input.encryptionIv && { encryptionIv: input.encryptionIv }),
+						version: newVersion,
+						lastModifiedBy: ctx.session.userId,
+						updatedAt: new Date(),
+					})
+					.where(eq(item.id, input.itemId));
 
-			// Emit sync event
-			await emitSyncEvent({
-				eventType: "item_updated",
-				entityId: input.itemId,
-				entityType: "item",
-				vaultId: existingItem.vaultId,
-				userId: ctx.session.userId,
-				clientId: input.clientId,
-				version: newVersion,
+				broadcast = await createSyncEvent(
+					{
+						eventType: "item_updated",
+						entityId: input.itemId,
+						entityType: "item",
+						vaultId: existingItem.vaultId,
+						userId: ctx.session.userId,
+						clientId: input.clientId,
+						version: newVersion,
+					},
+					tx,
+				);
 			});
+
+			await broadcastSyncPayload(broadcast!);
 
 			return { success: true, version: newVersion };
 		}),
@@ -724,24 +816,31 @@ export const vaultRouter = router({
 			}
 
 			// Update favorite status
-			await db
-				.update(item)
-				.set({
-					favorite: input.favorite,
-					updatedAt: new Date(),
-				})
-				.where(eq(item.id, input.itemId));
+			let broadcast: SyncBroadcastPayload;
+			await db.transaction(async (tx) => {
+				await tx
+					.update(item)
+					.set({
+						favorite: input.favorite,
+						updatedAt: new Date(),
+					})
+					.where(eq(item.id, input.itemId));
 
-			await emitSyncEvent({
-				eventType: "item_updated",
-				entityId: input.itemId,
-				entityType: "item",
-				vaultId: existingItem.vaultId,
-				userId: ctx.session.userId,
-				clientId: null,
-				// TODO: Check if this is correct
-				version: existingItem.version,
+				broadcast = await createSyncEvent(
+					{
+						eventType: "item_updated",
+						entityId: input.itemId,
+						entityType: "item",
+						vaultId: existingItem.vaultId,
+						userId: ctx.session.userId,
+						clientId: null,
+						version: existingItem.version,
+					},
+					tx,
+				);
 			});
+
+			await broadcastSyncPayload(broadcast!);
 
 			return { success: true };
 		}),
@@ -781,25 +880,32 @@ export const vaultRouter = router({
 
 			const newVersion = (existingItem.version || 1) + 1;
 
-			await db
-				.update(item)
-				.set({
-					deletedAt: new Date(),
-					version: newVersion,
-					lastModifiedBy: ctx.session.userId,
-				})
-				.where(eq(item.id, input.itemId));
+			let broadcast: SyncBroadcastPayload;
+			await db.transaction(async (tx) => {
+				await tx
+					.update(item)
+					.set({
+						deletedAt: new Date(),
+						version: newVersion,
+						lastModifiedBy: ctx.session.userId,
+					})
+					.where(eq(item.id, input.itemId));
 
-			// Emit sync event
-			await emitSyncEvent({
-				eventType: "item_deleted",
-				entityId: input.itemId,
-				entityType: "item",
-				vaultId: existingItem.vaultId,
-				userId: ctx.session.userId,
-				clientId: input.clientId,
-				version: newVersion,
+				broadcast = await createSyncEvent(
+					{
+						eventType: "item_deleted",
+						entityId: input.itemId,
+						entityType: "item",
+						vaultId: existingItem.vaultId,
+						userId: ctx.session.userId,
+						clientId: input.clientId,
+						version: newVersion,
+					},
+					tx,
+				);
 			});
+
+			await broadcastSyncPayload(broadcast!);
 
 			return { success: true };
 		}),
@@ -877,27 +983,34 @@ export const vaultRouter = router({
 
 			const newVersion = (existingItem.version || 1) + 1;
 
-			// Restore the item
-			await db
-				.update(item)
-				.set({
-					deletedAt: null,
-					version: newVersion,
-					lastModifiedBy: ctx.session.userId,
-					updatedAt: new Date(),
-				})
-				.where(eq(item.id, input.itemId));
+			let broadcast: SyncBroadcastPayload;
+			await db.transaction(async (tx) => {
+				// Restore the item
+				await tx
+					.update(item)
+					.set({
+						deletedAt: null,
+						version: newVersion,
+						lastModifiedBy: ctx.session.userId,
+						updatedAt: new Date(),
+					})
+					.where(eq(item.id, input.itemId));
 
-			// Emit sync event
-			await emitSyncEvent({
-				eventType: "item_restored",
-				entityId: input.itemId,
-				entityType: "item",
-				vaultId: existingItem.vaultId,
-				userId: ctx.session.userId,
-				clientId: input.clientId,
-				version: newVersion,
+				broadcast = await createSyncEvent(
+					{
+						eventType: "item_restored",
+						entityId: input.itemId,
+						entityType: "item",
+						vaultId: existingItem.vaultId,
+						userId: ctx.session.userId,
+						clientId: input.clientId,
+						version: newVersion,
+					},
+					tx,
+				);
 			});
+
+			await broadcastSyncPayload(broadcast!);
 
 			return { success: true };
 		}),
@@ -986,32 +1099,39 @@ export const vaultRouter = router({
 
 			const newVersion = (existingItem.version || 1) + 1;
 
-			// Move the item: update vaultId and encrypted data
-			await db
-				.update(item)
-				.set({
-					vaultId: input.targetVaultId,
-					encryptedData: input.encryptedData,
-					encryptionIv: input.encryptionIv,
-					version: newVersion,
-					lastModifiedBy: ctx.session.userId,
-					updatedAt: new Date(),
-				})
-				.where(eq(item.id, input.itemId));
+			let broadcast: SyncBroadcastPayload;
+			await db.transaction(async (tx) => {
+				// Move the item: update vaultId and encrypted data
+				await tx
+					.update(item)
+					.set({
+						vaultId: input.targetVaultId,
+						encryptedData: input.encryptedData,
+						encryptionIv: input.encryptionIv,
+						version: newVersion,
+						lastModifiedBy: ctx.session.userId,
+						updatedAt: new Date(),
+					})
+					.where(eq(item.id, input.itemId));
 
-			// Emit sync event with source vault in metadata
-			await emitSyncEvent({
-				eventType: "item_moved",
-				entityId: input.itemId,
-				entityType: "item",
-				vaultId: input.targetVaultId,
-				userId: ctx.session.userId,
-				clientId: input.clientId,
-				version: newVersion,
-				metadata: {
-					sourceVaultId: input.sourceVaultId,
-				},
+				broadcast = await createSyncEvent(
+					{
+						eventType: "item_moved",
+						entityId: input.itemId,
+						entityType: "item",
+						vaultId: input.targetVaultId,
+						userId: ctx.session.userId,
+						clientId: input.clientId,
+						version: newVersion,
+						metadata: {
+							sourceVaultId: input.sourceVaultId,
+						},
+					},
+					tx,
+				);
 			});
+
+			await broadcastSyncPayload(broadcast!);
 
 			return { success: true, version: newVersion };
 		}),
@@ -1063,9 +1183,10 @@ export const vaultRouter = router({
 	 * Get dashboard stats for current user
 	 */
 	stats: protectedProcedure.query(async ({ ctx }) => {
-		// Get team count
-		const teamMemberships = await db.query.teamMember.findMany({
-			where: (tm, { eq }) => eq(tm.userId, ctx.session.userId),
+		// Get user's team
+		const userData = await db.query.user.findFirst({
+			where: (user, { eq }) => eq(user.id, ctx.session.userId),
+			with: { team: true },
 		});
 
 		// Get vault count
@@ -1086,7 +1207,7 @@ export const vaultRouter = router({
 		}
 
 		return {
-			teamCount: teamMemberships.length,
+			teamCount: userData?.team ? 1 : 0,
 			vaultCount: userVaults.length,
 			itemCount,
 		};
@@ -1327,84 +1448,144 @@ export const vaultRouter = router({
 				});
 
 				try {
-					// Delete the removed user's vault key
-					await db
-						.delete(vaultKey)
-						.where(
-							and(
-								eq(vaultKey.vaultId, input.vaultId),
-								eq(vaultKey.userId, input.userId),
-							),
-						);
-
-					// Update vault keys for all remaining members
-					for (const memberKey of input.keyRotation.memberKeys) {
-						await db
-							.update(vaultKey)
-							.set({ encryptedVaultKey: memberKey.encryptedVaultKey })
+					const broadcasts: SyncBroadcastPayload[] = [];
+					await db.transaction(async (tx) => {
+						// Delete the removed user's vault key.
+						const removedKey = await tx
+							.delete(vaultKey)
 							.where(
 								and(
 									eq(vaultKey.vaultId, input.vaultId),
-									eq(vaultKey.userId, memberKey.userId),
+									eq(vaultKey.userId, input.userId),
 								),
-							);
-					}
+							)
+							.returning({ id: vaultKey.id });
 
-					// Re-encrypt all items with new vault key
-					for (const reEncryptedItem of input.keyRotation.reEncryptedItems) {
-						await db
-							.update(item)
+						if (removedKey.length === 0) {
+							throw new Error("Target member vault key not found");
+						}
+
+						// Update vault keys for all remaining members.
+						for (const memberKey of input.keyRotation.memberKeys) {
+							const updatedKey = await tx
+								.update(vaultKey)
+								.set({ encryptedVaultKey: memberKey.encryptedVaultKey })
+								.where(
+									and(
+										eq(vaultKey.vaultId, input.vaultId),
+										eq(vaultKey.userId, memberKey.userId),
+									),
+								)
+								.returning({ id: vaultKey.id });
+
+							if (updatedKey.length === 0) {
+								throw new Error(
+									`Member key not found for user ${memberKey.userId}`,
+								);
+							}
+						}
+
+						// Re-encrypt all items with new vault key.
+						for (const reEncryptedItem of input.keyRotation.reEncryptedItems) {
+							const updatedItem = await tx
+								.update(item)
+								.set({
+									encryptedData: reEncryptedItem.encryptedData,
+									encryptionIv: reEncryptedItem.encryptionIv,
+									updatedAt: new Date(),
+								})
+								.where(
+									and(
+										eq(item.id, reEncryptedItem.itemId),
+										eq(item.vaultId, input.vaultId),
+									),
+								)
+								.returning({ id: item.id });
+
+							if (updatedItem.length === 0) {
+								throw new Error(
+									`Item not found in vault: ${reEncryptedItem.itemId}`,
+								);
+							}
+						}
+
+						// Update vault key version.
+						const updatedVault = await tx
+							.update(vault)
 							.set({
-								encryptedData: reEncryptedItem.encryptedData,
-								encryptionIv: reEncryptedItem.encryptionIv,
+								keyVersion: newKeyVersion,
 								updatedAt: new Date(),
 							})
-							.where(eq(item.id, reEncryptedItem.itemId));
-					}
+							.where(eq(vault.id, input.vaultId))
+							.returning({ id: vault.id });
 
-					// Update vault key version
-					await db
-						.update(vault)
-						.set({
-							keyVersion: newKeyVersion,
-							updatedAt: new Date(),
-						})
-						.where(eq(vault.id, input.vaultId));
+						if (updatedVault.length === 0) {
+							throw new Error("Vault not found during key rotation");
+						}
 
-					// Mark rotation as completed
-					await db
-						.update(vaultKeyRotation)
-						.set({
-							status: "completed",
-							completedAt: new Date(),
-						})
-						.where(eq(vaultKeyRotation.id, rotationId));
+						// Mark rotation as completed.
+						await tx
+							.update(vaultKeyRotation)
+							.set({
+								status: "completed",
+								completedAt: new Date(),
+							})
+							.where(eq(vaultKeyRotation.id, rotationId));
 
-					// Emit sync events for member removal and key rotation
-					await emitSyncEvent({
-						eventType: "vault_member_removed",
-						entityId: input.userId,
-						entityType: "vault_member",
-						vaultId: input.vaultId,
-						userId: ctx.session.userId,
-						clientId: input.clientId,
-						version: newKeyVersion,
-						metadata: {
-							removedUserId: input.userId,
-						},
+						// Create sync events inside the transaction for atomicity
+						broadcasts.push(
+							await createSyncEvent(
+								{
+									eventType: "vault_member_removed",
+									entityId: input.userId,
+									entityType: "vault_member",
+									vaultId: input.vaultId,
+									userId: ctx.session.userId,
+									clientId: input.clientId,
+									version: newKeyVersion,
+									metadata: {
+										removedUserId: input.userId,
+									},
+								},
+								tx,
+							),
+						);
+
+						broadcasts.push(
+							await createSyncEvent(
+								{
+									eventType: "vault_key_rotated",
+									entityId: input.vaultId,
+									entityType: "vault_key",
+									vaultId: input.vaultId,
+									userId: ctx.session.userId,
+									clientId: input.clientId,
+									version: newKeyVersion,
+									metadata: {
+										reason: "member_removed",
+										keyRotationId: rotationId,
+									},
+								},
+								tx,
+							),
+						);
 					});
 
-					await emitSyncEvent({
-						eventType: "vault_key_rotated",
-						entityId: input.vaultId,
-						entityType: "vault_key",
-						vaultId: input.vaultId,
+					// Broadcast after transaction commits
+					await broadcastSyncPayloads(broadcasts);
+
+					await logAuditEvent({
 						userId: ctx.session.userId,
-						clientId: input.clientId,
-						version: newKeyVersion,
+						action: "vault_member_removed",
+						device: ctx.device,
+						entityType: "vault",
+						entityId: input.vaultId,
 						metadata: {
-							reason: "member_removed",
+							removedUserId: input.userId,
 							keyRotationId: rotationId,
+							newKeyVersion,
+							itemsReEncrypted: input.keyRotation.reEncryptedItems.length,
+							membersUpdated: input.keyRotation.memberKeys.length,
 						},
 					});
 
@@ -1589,24 +1770,44 @@ export const vaultRouter = router({
 					});
 				}
 
-				// Add the new member
-				await db.insert(vaultKey).values({
-					id: nanoid(),
-					vaultId: input.vaultId,
-					userId: input.userId,
-					encryptedVaultKey: input.encryptedVaultKey,
-					role: input.role,
+				// Add the new member (atomic with sync event)
+				let broadcast: SyncBroadcastPayload;
+				await db.transaction(async (tx) => {
+					await tx.insert(vaultKey).values({
+						id: nanoid(),
+						vaultId: input.vaultId,
+						userId: input.userId,
+						encryptedVaultKey: input.encryptedVaultKey,
+						role: input.role,
+					});
+
+					broadcast = await createSyncEvent(
+						{
+							eventType: "vault_member_added",
+							entityId: input.userId,
+							entityType: "vault_member",
+							vaultId: input.vaultId,
+							userId: ctx.session.userId,
+							clientId: input.clientId,
+							version: 1,
+							metadata: {
+								addedUserId: input.userId,
+								role: input.role,
+							},
+						},
+						tx,
+					);
 				});
 
-				// Emit sync event
-				await emitSyncEvent({
-					eventType: "vault_member_added",
-					entityId: input.userId,
-					entityType: "vault_member",
-					vaultId: input.vaultId,
+				// Broadcast after transaction commits
+				await broadcastSyncPayload(broadcast!);
+
+				await logAuditEvent({
 					userId: ctx.session.userId,
-					clientId: input.clientId,
-					version: 1,
+					action: "vault_member_added",
+					device: ctx.device,
+					entityType: "vault",
+					entityId: input.vaultId,
 					metadata: {
 						addedUserId: input.userId,
 						role: input.role,

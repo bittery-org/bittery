@@ -1,28 +1,21 @@
 package expo.modules.credentialprovider.crypto
 
 import android.util.Base64
-import java.nio.charset.StandardCharsets
-import java.security.SecureRandom
-import javax.crypto.Cipher
-import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.SecretKeySpec
 
 /**
- * AES-256-GCM encryption/decryption matching the TypeScript implementation
- * in packages/crypto/src/encryption.ts.
+ * AES-256-GCM encryption/decryption using native Rust crypto via JNI.
  *
  * Uses:
  * - Algorithm: AES-GCM
  * - Key length: 256 bits (32 bytes)
  * - IV length: 96 bits (12 bytes) - recommended for GCM
  * - Tag length: 128 bits (16 bytes)
+ *
+ * This wraps the native Rust implementation for consistency with other platforms.
  */
 object AesGcmCrypto {
 
-    private const val ALGORITHM = "AES/GCM/NoPadding"
     private const val KEY_LENGTH_BYTES = 32 // 256 bits
-    private const val IV_LENGTH_BYTES = 12 // 96 bits - recommended for GCM
-    private const val TAG_LENGTH_BITS = 128 // 128 bits
 
     /**
      * Encrypted data structure matching TypeScript's EncryptedData interface.
@@ -39,36 +32,34 @@ object AesGcmCrypto {
     /**
      * Encrypt plaintext using AES-256-GCM.
      *
-     * Matches TypeScript: encrypt(plaintext: string, key: Uint8Array)
+     * Uses native Rust crypto for the encryption.
      *
      * @param plaintext The string to encrypt
      * @param key 32-byte encryption key
      * @return EncryptedData containing Base64-encoded ciphertext and IV
      * @throws IllegalArgumentException if key is not 32 bytes
+     * @throws RuntimeException if native crypto is not available or encryption fails
      */
     fun encrypt(plaintext: String, key: ByteArray): EncryptedData {
         require(key.size == KEY_LENGTH_BYTES) {
             "Key must be $KEY_LENGTH_BYTES bytes, got ${key.size}"
         }
 
-        // Generate random IV
-        val iv = ByteArray(IV_LENGTH_BYTES)
-        SecureRandom().nextBytes(iv)
+        if (!NativeCrypto.isAvailable) {
+            throw RuntimeException("Native crypto library not available")
+        }
 
-        // Create cipher
-        val cipher = Cipher.getInstance(ALGORITHM)
-        val keySpec = SecretKeySpec(key, "AES")
-        val gcmSpec = GCMParameterSpec(TAG_LENGTH_BITS, iv)
-        cipher.init(Cipher.ENCRYPT_MODE, keySpec, gcmSpec)
+        val keyBase64 = Base64.encodeToString(key, Base64.NO_WRAP)
+        val result = NativeCrypto.encrypt(plaintext, keyBase64)
 
-        // Encrypt
-        val plaintextBytes = plaintext.toByteArray(StandardCharsets.UTF_8)
-        val ciphertextBytes = cipher.doFinal(plaintextBytes)
+        if (!result.isSuccess || result.ciphertext == null || result.iv == null) {
+            throw RuntimeException("Encryption failed: ${result.error ?: "Unknown error"}")
+        }
 
         return EncryptedData(
-            ciphertext = Base64.encodeToString(ciphertextBytes, Base64.NO_WRAP),
-            iv = Base64.encodeToString(iv, Base64.NO_WRAP),
-            algorithm = "AES-GCM"
+            ciphertext = result.ciphertext,
+            iv = result.iv,
+            algorithm = result.algorithm ?: "AES-GCM"
         )
     }
 
@@ -84,56 +75,54 @@ object AesGcmCrypto {
             "Key must be $KEY_LENGTH_BYTES bytes, got ${key.size}"
         }
 
-        // Generate random IV
-        val iv = ByteArray(IV_LENGTH_BYTES)
-        SecureRandom().nextBytes(iv)
+        if (!NativeCrypto.isAvailable) {
+            throw RuntimeException("Native crypto library not available")
+        }
 
-        // Create cipher
-        val cipher = Cipher.getInstance(ALGORITHM)
-        val keySpec = SecretKeySpec(key, "AES")
-        val gcmSpec = GCMParameterSpec(TAG_LENGTH_BITS, iv)
-        cipher.init(Cipher.ENCRYPT_MODE, keySpec, gcmSpec)
+        // Convert bytes to Base64 string for encryption
+        val plaintextBase64 = Base64.encodeToString(plaintext, Base64.NO_WRAP)
+        val keyBase64 = Base64.encodeToString(key, Base64.NO_WRAP)
+        val result = NativeCrypto.encrypt(plaintextBase64, keyBase64)
 
-        // Encrypt
-        val ciphertextBytes = cipher.doFinal(plaintext)
+        if (!result.isSuccess || result.ciphertext == null || result.iv == null) {
+            throw RuntimeException("Encryption failed: ${result.error ?: "Unknown error"}")
+        }
 
         return EncryptedData(
-            ciphertext = Base64.encodeToString(ciphertextBytes, Base64.NO_WRAP),
-            iv = Base64.encodeToString(iv, Base64.NO_WRAP),
-            algorithm = "AES-GCM"
+            ciphertext = result.ciphertext,
+            iv = result.iv,
+            algorithm = result.algorithm ?: "AES-GCM"
         )
     }
 
     /**
      * Decrypt ciphertext using AES-256-GCM.
      *
-     * Matches TypeScript: decrypt(encryptedData: EncryptedData, key: Uint8Array)
+     * Uses native Rust crypto for the decryption.
      *
      * @param encryptedData The encrypted data containing ciphertext and IV
      * @param key 32-byte decryption key
      * @return Decrypted plaintext string
      * @throws IllegalArgumentException if key is not 32 bytes
-     * @throws javax.crypto.AEADBadTagException if authentication fails
+     * @throws RuntimeException if native crypto is not available or decryption fails
      */
     fun decrypt(encryptedData: EncryptedData, key: ByteArray): String {
         require(key.size == KEY_LENGTH_BYTES) {
             "Key must be $KEY_LENGTH_BYTES bytes, got ${key.size}"
         }
 
-        // Decode Base64
-        val ciphertext = Base64.decode(encryptedData.ciphertext, Base64.NO_WRAP)
-        val iv = Base64.decode(encryptedData.iv, Base64.NO_WRAP)
+        if (!NativeCrypto.isAvailable) {
+            throw RuntimeException("Native crypto library not available")
+        }
 
-        // Create cipher
-        val cipher = Cipher.getInstance(ALGORITHM)
-        val keySpec = SecretKeySpec(key, "AES")
-        val gcmSpec = GCMParameterSpec(TAG_LENGTH_BITS, iv)
-        cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmSpec)
+        val keyBase64 = Base64.encodeToString(key, Base64.NO_WRAP)
+        val result = NativeCrypto.decrypt(encryptedData.ciphertext, encryptedData.iv, keyBase64)
 
-        // Decrypt
-        val plaintextBytes = cipher.doFinal(ciphertext)
+        if (!result.isSuccess || result.value == null) {
+            throw RuntimeException("Decryption failed: ${result.error ?: "Unknown error"}")
+        }
 
-        return String(plaintextBytes, StandardCharsets.UTF_8)
+        return result.value
     }
 
     /**
@@ -144,22 +133,14 @@ object AesGcmCrypto {
      * @return Decrypted plaintext bytes
      */
     fun decryptToBytes(encryptedData: EncryptedData, key: ByteArray): ByteArray {
-        require(key.size == KEY_LENGTH_BYTES) {
-            "Key must be $KEY_LENGTH_BYTES bytes, got ${key.size}"
+        // Decrypt to string, then decode if it was Base64-encoded bytes
+        val decrypted = decrypt(encryptedData, key)
+        return try {
+            Base64.decode(decrypted, Base64.NO_WRAP)
+        } catch (e: IllegalArgumentException) {
+            // Not Base64, return as raw bytes
+            decrypted.toByteArray(Charsets.UTF_8)
         }
-
-        // Decode Base64
-        val ciphertext = Base64.decode(encryptedData.ciphertext, Base64.NO_WRAP)
-        val iv = Base64.decode(encryptedData.iv, Base64.NO_WRAP)
-
-        // Create cipher
-        val cipher = Cipher.getInstance(ALGORITHM)
-        val keySpec = SecretKeySpec(key, "AES")
-        val gcmSpec = GCMParameterSpec(TAG_LENGTH_BITS, iv)
-        cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmSpec)
-
-        // Decrypt
-        return cipher.doFinal(ciphertext)
     }
 
     /**
@@ -181,11 +162,14 @@ object AesGcmCrypto {
     /**
      * Generate a random 256-bit encryption key.
      *
+     * Note: Uses Java SecureRandom since the native library doesn't expose
+     * key generation for AES (only RSA key pair generation is exposed).
+     *
      * @return 32-byte random key
      */
     fun generateKey(): ByteArray {
         val key = ByteArray(KEY_LENGTH_BYTES)
-        SecureRandom().nextBytes(key)
+        java.security.SecureRandom().nextBytes(key)
         return key
     }
 }

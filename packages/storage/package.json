@@ -5,19 +5,71 @@
 		".": {
 			"default": "./src/index.ts"
 		},
-		"./*": {
-			"default": "./src/*.ts"
+		"./types": {
+			"default": "./src/types.ts"
+		},
+		"./adapter": {
+			"default": "./src/adapter.ts"
+		},
+		"./crypto-provider": {
+			"default": "./src/crypto-provider.ts"
+		},
+		"./adapters/web": {
+			"default": "./src/adapters/web.ts"
+		},
+		"./adapters/chrome": {
+			"default": "./src/adapters/chrome.ts"
+		},
+		"./adapters/tauri": {
+			"default": "./src/adapters/tauri.ts"
+		},
+		"./adapters/react-native": {
+			"default": "./src/adapters/react-native.ts"
 		}
 	},
-	"scripts": {},
+	"scripts": {
+		"check-types": "tsc --noEmit"
+	},
 	"devDependencies": {
-		"@bittery/config": "workspace:*"
+		"@bittery/config": "workspace:*",
+		"@tauri-apps/api": "^2.0.0",
+		"@types/chrome": "^0.1.34"
 	},
 	"peerDependencies": {
-		"typescript": "^5"
+		"typescript": "^5",
+		"@tauri-apps/api": "^2.0.0",
+		"@tauri-apps/plugin-store": "^2.0.0",
+		"@choochmeque/tauri-plugin-biometry-api": "^0.2.0",
+		"expo-crypto": "^15.0.0",
+		"expo-local-authentication": "^17.0.0",
+		"expo-secure-store": "^15.0.0",
+		"expo-sqlite": "^16.0.0"
+	},
+	"peerDependenciesMeta": {
+		"@tauri-apps/api": {
+			"optional": true
+		},
+		"@tauri-apps/plugin-store": {
+			"optional": true
+		},
+		"@choochmeque/tauri-plugin-biometry-api": {
+			"optional": true
+		},
+		"expo-secure-store": {
+			"optional": true
+		},
+		"expo-local-authentication": {
+			"optional": true
+		},
+		"expo-sqlite": {
+			"optional": true
+		},
+		"expo-crypto": {
+			"optional": true
+		}
 	},
 	"dependencies": {
-		"@aws-sdk/client-s3": "^3.888.0",
-		"@aws-sdk/s3-request-presigner": "^3.888.0"
+		"@bittery/shared": "workspace:*",
+		"@bittery/types": "workspace:*"
 	}
 }

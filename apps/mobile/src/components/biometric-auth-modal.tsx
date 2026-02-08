@@ -3,10 +3,6 @@
  * Displayed when biometric re-authentication is required
  */
 
-import type {
-	BiometricAuthResult,
-	BiometricErrorType,
-} from "@bittery/crypto/storage-react-native";
 import { useRouter } from "expo-router";
 import {
 	AlertCircle,
@@ -16,7 +12,7 @@ import {
 	RefreshCw,
 	ScanFace,
 } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
 	ActivityIndicator,
 	Modal,
@@ -24,9 +20,12 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
-
-import * as storage from "../services/storage";
 import { useBiometricAuth } from "../contexts/biometric-auth-context";
+import {
+	type BiometricErrorType,
+	getBiometricErrorMessage,
+	storage,
+} from "../services/storage";
 
 interface BiometricAuthModalProps {
 	visible: boolean;
@@ -62,14 +61,7 @@ export function BiometricAuthModal({
 		}
 	}, [visible]);
 
-	// Auto-trigger biometric on modal show
-	useEffect(() => {
-		if (visible && !isAuthenticating && !lastAuthResult) {
-			handleAuthenticate();
-		}
-	}, [visible]);
-
-	const handleAuthenticate = async () => {
+	const handleAuthenticate = useCallback(async () => {
 		setIsAuthenticating(true);
 		try {
 			const result = await triggerBiometricAuth();
@@ -79,7 +71,14 @@ export function BiometricAuthModal({
 		} finally {
 			setIsAuthenticating(false);
 		}
-	};
+	}, [triggerBiometricAuth, onSuccess]);
+
+	// Auto-trigger biometric on modal show
+	useEffect(() => {
+		if (visible && !isAuthenticating && !lastAuthResult) {
+			handleAuthenticate();
+		}
+	}, [visible, handleAuthenticate, isAuthenticating, lastAuthResult]);
 
 	const handleRetry = async () => {
 		setRetryCount((prev) => prev + 1);
@@ -124,7 +123,7 @@ export function BiometricAuthModal({
 					<Text className="mb-2 text-center font-bold text-foreground text-xl">
 						Password Required
 					</Text>
-					<Text className="mb-6 text-center text-muted-foreground">
+					<Text className="mb-6 text-center text-muted">
 						For your security, please enter your master password. This is
 						required every 30 days.
 					</Text>
@@ -150,7 +149,7 @@ export function BiometricAuthModal({
 					<Text className="mb-2 text-center font-bold text-foreground text-xl">
 						{biometricType || "Biometric"} Required
 					</Text>
-					<Text className="mb-6 text-center text-muted-foreground">
+					<Text className="mb-6 text-center text-muted">
 						Please authenticate to continue
 					</Text>
 					<ActivityIndicator size="large" color="#3b82f6" />
@@ -162,7 +161,7 @@ export function BiometricAuthModal({
 		if (lastAuthResult && !lastAuthResult.success) {
 			const errorMessage =
 				lastAuthResult.message ||
-				storage.getBiometricErrorMessage(lastAuthResult.error || "unknown");
+				getBiometricErrorMessage(lastAuthResult.error || "unknown");
 
 			return (
 				<>
@@ -176,9 +175,7 @@ export function BiometricAuthModal({
 					<Text className="mb-2 text-center font-bold text-foreground text-xl">
 						Authentication Failed
 					</Text>
-					<Text className="mb-6 text-center text-muted-foreground">
-						{errorMessage}
-					</Text>
+					<Text className="mb-6 text-center text-muted">{errorMessage}</Text>
 					<View className="w-full space-y-3">
 						{lastAuthResult.error !== "lockout" && retryCount < 3 && (
 							<TouchableOpacity
@@ -213,7 +210,7 @@ export function BiometricAuthModal({
 				<Text className="mb-2 text-center font-bold text-foreground text-xl">
 					{biometricType || "Biometric"} Required
 				</Text>
-				<Text className="mb-6 text-center text-muted-foreground">
+				<Text className="mb-6 text-center text-muted">
 					Use {biometricType || "biometric"} to unlock your vault
 				</Text>
 				<View className="w-full space-y-3">

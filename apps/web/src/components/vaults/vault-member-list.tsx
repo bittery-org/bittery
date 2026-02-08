@@ -1,11 +1,3 @@
-import { performKeyRotation } from "@bittery/crypto/key-rotation";
-import {
-	getDecryptedVaultKey,
-	getMasterUnlockKey,
-	getStoredSessionData,
-	getVaultKeys,
-	storeVaultKeys,
-} from "@bittery/crypto/session-storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	AlertDialog,
@@ -37,6 +29,8 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { storage } from "@/lib/storage";
+import { performKeyRotation } from "@/lib/wasm-crypto";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface VaultMember {
@@ -101,23 +95,22 @@ export function VaultMemberList({
 
 		try {
 			// Step 1: Get the current decrypted vault key and Master Unlock Key
-			const currentVaultKey = await getDecryptedVaultKey(vaultId);
+			const currentVaultKey = await storage.getDecryptedVaultKey(vaultId);
 			if (!currentVaultKey) {
 				throw new Error("Could not decrypt vault key. Please log in again.");
 			}
 
-			const masterUnlockKey = await getMasterUnlockKey();
+			const masterUnlockKey = await storage.getMasterUnlockKey();
 			if (!masterUnlockKey) {
 				throw new Error(
 					"Master Unlock Key not available. Please log in again.",
 				);
 			}
 
-			const sessionData = getStoredSessionData();
-			if (!sessionData) {
+			const currentUserId = await storage.getActiveAccountUserId();
+			if (!currentUserId) {
 				throw new Error("Session data not available. Please log in again.");
 			}
-			const currentUserId = sessionData.userId;
 
 			// Step 2: Get rotation data from server
 			const rotationData = await trpcClient.vault.members.getRotationData.query(
@@ -151,7 +144,7 @@ export function VaultMemberList({
 
 			// Step 5: Update local session storage with new vault key
 			// Find and update the vault key in session storage
-			const vaultKeys = getVaultKeys();
+			const vaultKeys = await storage.getVaultKeys();
 			if (vaultKeys) {
 				const updatedVaultKeys = vaultKeys.map((vk) => {
 					if (vk.vaultId === vaultId) {
@@ -169,7 +162,7 @@ export function VaultMemberList({
 					}
 					return vk;
 				});
-				storeVaultKeys(updatedVaultKeys);
+				await storage.storeVaultKeys(updatedVaultKeys);
 			}
 
 			toast.success(

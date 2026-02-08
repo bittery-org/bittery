@@ -54,6 +54,13 @@ export class SyncManager {
 	private lastHeartbeatTime: number | null = null;
 	private staleCheckInterval: ReturnType<typeof setInterval> | null = null;
 
+	// Event deduplication: batch events for the same entityId within a window
+	private static readonly DEDUP_WINDOW_MS = 500;
+	private pendingEvents = new Map<
+		string,
+		{ event: SyncEvent; timer: ReturnType<typeof setTimeout> }
+	>();
+
 	constructor(options: SyncManagerOptions) {
 		this.serverUrl = options.serverUrl;
 		this.getAuthToken = options.getAuthToken;
@@ -235,7 +242,13 @@ export class SyncManager {
 		let eventType = "";
 
 		for (const line of lines) {
-			// Skip comments
+			// Detect heartbeat comments and update stale-check timer
+			if (line.startsWith(": heartbeat")) {
+				this.lastHeartbeatTime = Date.now();
+				return;
+			}
+
+			// Skip other comments
 			if (line.startsWith(":")) {
 				continue;
 			}
@@ -291,11 +304,45 @@ export class SyncManager {
 				return;
 			}
 
-			// Dispatch event to listeners
-			this.onEvent?.(syncEvent);
+			// Deduplicate: if multiple events arrive for the same entity within the
+			// dedup window, only dispatch the latest one. This avoids redundant
+			// network fetches and query invalidations for rapid-fire updates.
+			this.scheduleEventDispatch(syncEvent);
 		} catch (error) {
 			console.error("Failed to parse SSE event:", error, data);
 		}
+	}
+
+	/**
+	 * Schedule an event for dispatch, deduplicating by entityId.
+	 * If another event for the same entity arrives within the window,
+	 * the previous one is replaced and only the latest is dispatched.
+	 */
+	private scheduleEventDispatch(event: SyncEvent): void {
+		const key = event.entityId;
+		const existing = this.pendingEvents.get(key);
+
+		if (existing) {
+			clearTimeout(existing.timer);
+		}
+
+		const timer = setTimeout(() => {
+			this.pendingEvents.delete(key);
+			this.onEvent?.(event);
+		}, SyncManager.DEDUP_WINDOW_MS);
+
+		this.pendingEvents.set(key, { event, timer });
+	}
+
+	/**
+	 * Flush all pending debounced events immediately (e.g. on disconnect).
+	 */
+	private flushPendingEvents(): void {
+		for (const [, { event, timer }] of this.pendingEvents) {
+			clearTimeout(timer);
+			this.onEvent?.(event);
+		}
+		this.pendingEvents.clear();
 	}
 
 	/**
@@ -323,6 +370,7 @@ export class SyncManager {
 	 */
 	disconnect(): void {
 		this.stopStaleCheck();
+		this.flushPendingEvents();
 
 		if (this.reconnectTimeout) {
 			clearTimeout(this.reconnectTimeout);

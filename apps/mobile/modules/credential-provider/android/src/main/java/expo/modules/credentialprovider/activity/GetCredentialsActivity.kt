@@ -28,6 +28,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 
 /**
  * Activity for credential selection and biometric authentication.
@@ -45,6 +46,9 @@ class GetCredentialsActivity : FragmentActivity() {
     private lateinit var mukEscrowManager: MukEscrowManager
     private lateinit var biometricPrompt: BiometricPrompt
     private lateinit var promptInfo: BiometricPrompt.PromptInfo
+    private val allowlistJson: String by lazy {
+        loadAllowlistJson()
+    }
 
     private var credentialId: String? = null  // Legacy storage
     private var itemId: String? = null        // Unified storage
@@ -175,23 +179,32 @@ class GetCredentialsActivity : FragmentActivity() {
 
         activityScope.launch {
             try {
-                // Check if MUK is available
-                val muk = VaultStateManager.getMasterUnlockKey()
+                // Load item to determine user context
+                val item = withContext(Dispatchers.IO) {
+                    database.itemDao().getById(iId)
+                }
+
+                if (item == null) {
+                    finishWithError("Item not found")
+                    return@launch
+                }
+
+                val muk = VaultStateManager.getMasterUnlockKey(item.userId)
                 if (muk == null) {
-                    Log.w(TAG, "MUK not available, need to unlock first")
-                    // MUK expired or not set - need to re-authenticate
-                    // Try biometric escrow first
-                    if (mukEscrowManager.hasValidEscrow()) {
-                        handleUnlockWithEscrow(iId)
+                    Log.w(TAG, "MUK not available for user ${item.userId}, need to unlock first")
+                    val escrowUserId = mukEscrowManager.getEscrowUserId()
+                    if (mukEscrowManager.hasValidEscrow() &&
+                        (escrowUserId == null || escrowUserId == item.userId)
+                    ) {
+                        handleUnlockWithEscrow(iId, escrowUserId ?: item.userId)
                     } else {
-                        // Need full unlock via main app
-                        finishWithError("Vault locked - please unlock Bittery first")
+                        Log.w(TAG, "No valid escrow for user, launching app for password unlock")
+                        launchAppForPasswordUnlock(passwordRequired = false)
                     }
                     return@launch
                 }
 
-                // MUK is available, complete the credential retrieval
-                completeGetItemCredential(iId, muk)
+                completeGetItemCredential(item, muk)
             } catch (e: Exception) {
                 Log.e(TAG, "Error preparing item credential retrieval", e)
                 finishWithError("Failed to prepare authentication: ${e.message}")
@@ -202,7 +215,7 @@ class GetCredentialsActivity : FragmentActivity() {
     /**
      * Try to unlock using escrowed MUK.
      */
-    private fun handleUnlockWithEscrow(pendingItemId: String?) {
+    private fun handleUnlockWithEscrow(pendingItemId: String?, userId: String) {
         activityScope.launch {
             try {
                 val cipher = mukEscrowManager.getDecryptCipher()
@@ -223,12 +236,19 @@ class GetCredentialsActivity : FragmentActivity() {
                                 activityScope.launch {
                                     try {
                                         val muk = mukEscrowManager.retrieveEscrowedMuk(authenticatedCipher)
-                                        VaultStateManager.setMasterUnlockKey(muk)
+                                        VaultStateManager.setMasterUnlockKey(userId, muk)
                                         Log.d(TAG, "Successfully retrieved escrowed MUK")
 
                                         // If we have a pending item, complete the retrieval
                                         if (pendingItemId != null) {
-                                            completeGetItemCredential(pendingItemId, muk)
+                                            val item = withContext(Dispatchers.IO) {
+                                                database.itemDao().getById(pendingItemId)
+                                            }
+                                            if (item != null) {
+                                                completeGetItemCredential(item, muk)
+                                            } else {
+                                                finishWithError("Item not found")
+                                            }
                                         } else {
                                             // Just unlock was requested
                                             setResult(Activity.RESULT_OK)
@@ -268,40 +288,30 @@ class GetCredentialsActivity : FragmentActivity() {
         // Check 30-day master password requirement
         if (mukEscrowManager.isMasterPasswordReentryRequired()) {
             Log.d(TAG, "30-day master password re-entry required")
-            // TODO: Launch React Native app to /autofill-unlock route with password required flag
-            finishWithError("Password required. Please open Bittery and enter your master password.")
+            launchAppForPasswordUnlock(passwordRequired = true)
             return
         }
 
         // Check if we can use escrowed MUK
         if (mukEscrowManager.canUseBiometricUnlock()) {
-            handleUnlockWithEscrow(null)
+            val escrowUserId = mukEscrowManager.getEscrowUserId() ?: "default"
+            handleUnlockWithEscrow(null, escrowUserId)
         } else {
             // Need to launch main app for full unlock
-            // TODO: Launch React Native app to /autofill-unlock route
             Log.w(TAG, "No valid escrow, need full password unlock")
-            finishWithError("Please open Bittery to unlock")
+            launchAppForPasswordUnlock(passwordRequired = false)
         }
     }
 
     /**
      * Complete item credential retrieval using the provided MUK.
      */
-    private fun completeGetItemCredential(itemId: String, muk: ByteArray) {
+    private fun completeGetItemCredential(item: expo.modules.credentialprovider.storage.ItemEntity, muk: ByteArray) {
         activityScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    // Get the item from database
-                    val item = database.itemDao().getById(itemId)
-                    if (item == null) {
-                        withContext(Dispatchers.Main) {
-                            finishWithError("Item not found")
-                        }
-                        return@withContext
-                    }
-
                     // Get the vault key for this item
-                    val vaultKey = database.vaultKeyDao().getByVaultId(item.vaultId)
+                    val vaultKey = database.vaultKeyDao().getByVaultId(item.vaultId, item.userId)
                     if (vaultKey == null) {
                         withContext(Dispatchers.Main) {
                             finishWithError("Vault key not found")
@@ -324,7 +334,7 @@ class GetCredentialsActivity : FragmentActivity() {
                     }
 
                     // Update last used timestamp
-                    database.itemDao().updateLastUsed(itemId, System.currentTimeMillis())
+                    database.itemDao().updateLastUsed(item.id, System.currentTimeMillis())
 
                     Log.d(TAG, "Successfully decrypted item credential for ${decryptedItem.username}")
 
@@ -442,11 +452,12 @@ class GetCredentialsActivity : FragmentActivity() {
 
                 val username = callingRequest.id
                 val password = callingRequest.password
-                val origin = try {
-                    createRequest.callingAppInfo?.getOrigin("[]")
+                val rawOrigin = try {
+                    createRequest.callingAppInfo?.getOrigin(allowlistJson)
                 } catch (e: Exception) {
                     null
-                } ?: createRequest.callingAppInfo?.packageName ?: ""
+                }
+                val origin = resolveCallingOrigin(rawOrigin, createRequest.callingAppInfo?.packageName)
 
                 val domain = extractDomain(origin)
 
@@ -487,6 +498,96 @@ class GetCredentialsActivity : FragmentActivity() {
             }
         } catch (e: Exception) {
             origin
+        }
+    }
+
+    private fun resolveCallingOrigin(originJsonOrString: String?, packageName: String?): String {
+        val origins = extractOriginList(originJsonOrString)
+        val origin = origins.firstOrNull()?.takeIf { it.isNotBlank() }
+        return origin ?: packageName.orEmpty()
+    }
+
+    private fun extractOriginList(originJsonOrString: String?): List<String> {
+        if (originJsonOrString.isNullOrBlank()) return emptyList()
+
+        val trimmed = originJsonOrString.trim()
+        if (trimmed.startsWith("[")) {
+            try {
+                val array = JSONArray(trimmed)
+                val results = ArrayList<String>(array.length())
+                for (index in 0 until array.length()) {
+                    val value = array.optString(index, "")
+                    if (value.isNotBlank()) {
+                        results.add(value)
+                    }
+                }
+                if (results.isNotEmpty()) {
+                    return results
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to parse origin JSON: $originJsonOrString", e)
+            }
+        }
+
+        return listOf(originJsonOrString)
+    }
+
+    private fun loadAllowlistJson(): String {
+        return try {
+            val resources = applicationContext.resources
+            val resId = resources.getIdentifier(
+                "credential_provider_allowlist",
+                "raw",
+                applicationContext.packageName
+            )
+            if (resId == 0) {
+                Log.w(TAG, "Allowlist resource not found")
+                "[]"
+            } else {
+                resources.openRawResource(resId).bufferedReader().use { it.readText() }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load allowlist JSON", e)
+            "[]"
+        }
+    }
+
+    /**
+     * Launch the main Bittery app for password unlock.
+     *
+     * @param passwordRequired true if master password re-entry is required (30 days),
+     *                         false for regular unlock
+     */
+    private fun launchAppForPasswordUnlock(passwordRequired: Boolean) {
+        try {
+            // Create intent to launch the main app
+            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+            if (launchIntent == null) {
+                Log.e(TAG, "Could not get launch intent for app")
+                finishWithError("Failed to open Bittery app")
+                return
+            }
+
+            // Add flags to ensure we return to autofill after unlock
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+
+            // Add extra to indicate this is an autofill unlock request
+            launchIntent.putExtra("autofill_unlock", true)
+            launchIntent.putExtra("password_required", passwordRequired)
+
+            // Optional: Add deep link to specific unlock screen
+            // The React Native app can handle this via linking configuration
+            launchIntent.data = android.net.Uri.parse("bittery://autofill-unlock?passwordRequired=$passwordRequired")
+
+            Log.d(TAG, "Launching app for password unlock (passwordRequired=$passwordRequired)")
+            startActivity(launchIntent)
+
+            // Finish this activity - user will come back through autofill flow after unlocking
+            setResult(Activity.RESULT_CANCELED)
+            finish()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error launching app for password unlock", e)
+            finishWithError("Failed to open Bittery app: ${e.message}")
         }
     }
 

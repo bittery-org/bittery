@@ -1,33 +1,62 @@
+import type { CreateVaultInput } from "@bittery/core/hooks";
 import {
 	Button,
 	Dialog,
 	DialogContent,
-	DialogDescription,
 	DialogHeader,
 	DialogTitle,
 	Input,
 	Label,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
 	toast,
 } from "@bittery/ui";
+import {
+	IconImagePlusOutlineDuo18,
+	IconUserOutlineDuo18,
+	IconUsers6OutlineDuo18,
+	IconXmarkOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
-import { useEffect, useState } from "react";
-import type { VaultFormData } from "./use-vault-operations";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { VaultAvatar, vaultIconOptions } from "./vault-avatar";
+
+export interface AccountOption {
+	email: string;
+	name?: string;
+	teamName?: string;
+}
 
 interface CreateVaultDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	onSubmit: (data: VaultFormData) => Promise<void>;
+	onSubmit: (data: CreateVaultInput) => Promise<void>;
+	accounts?: AccountOption[];
 }
 
 export function CreateVaultDialog({
 	open,
 	onOpenChange,
 	onSubmit,
+	accounts,
 }: CreateVaultDialogProps) {
 	const [icon, setIcon] = useState("lock");
-	const [imageFile, setImageFile] = useState<File | null>(null);
+	const [imageFile, setImageFile] = useState<File | undefined>(undefined);
 	const [imagePreview, setImagePreview] = useState<string | null>(null);
+	const [isDragging, setIsDragging] = useState(false);
+	const [selectedAccountEmail, setSelectedAccountEmail] = useState<
+		string | undefined
+	>(accounts?.[0]?.email);
+	const fileInputRef = useRef<HTMLInputElement>(null);
+
+	useEffect(() => {
+		if (accounts && accounts.length > 0 && !selectedAccountEmail) {
+			setSelectedAccountEmail(accounts[0].email);
+		}
+	}, [accounts, selectedAccountEmail]);
 
 	const form = useForm({
 		defaultValues: {
@@ -41,6 +70,7 @@ export function CreateVaultDialog({
 					type: value.type,
 					icon,
 					imageFile,
+					accountEmail: accounts ? selectedAccountEmail : undefined,
 				});
 				resetForm();
 				onOpenChange(false);
@@ -64,181 +94,261 @@ export function CreateVaultDialog({
 	const resetForm = () => {
 		form.reset();
 		setIcon("lock");
-		setImageFile(null);
+		setImageFile(undefined);
 		setImagePreview(null);
+		setSelectedAccountEmail(accounts?.[0]?.email);
 	};
 
-	const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-		const file = event.target.files?.[0] || null;
+	const processFile = useCallback((file: File | undefined) => {
 		if (!file) {
-			setImageFile(null);
+			setImageFile(undefined);
 			setImagePreview(null);
-			return;
+			return false;
 		}
 
 		if (!file.type.startsWith("image/")) {
 			toast.error("Please select an image file");
-			event.currentTarget.value = "";
-			setImageFile(null);
-			setImagePreview(null);
-			return;
+			return false;
 		}
 
 		if (file.size > 2 * 1024 * 1024) {
 			toast.error("Image must be smaller than 2MB");
-			event.currentTarget.value = "";
-			setImageFile(null);
-			setImagePreview(null);
-			return;
+			return false;
 		}
 
 		setImageFile(file);
 		setImagePreview(URL.createObjectURL(file));
+		return true;
+	}, []);
+
+	const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+		const file = event.target.files?.[0];
+		if (!processFile(file)) {
+			event.currentTarget.value = "";
+		}
 	};
+
+	const handleDrop = useCallback(
+		(e: React.DragEvent) => {
+			e.preventDefault();
+			setIsDragging(false);
+			const file = e.dataTransfer.files[0];
+			processFile(file);
+		},
+		[processFile],
+	);
+
+	const handleDragOver = useCallback((e: React.DragEvent) => {
+		e.preventDefault();
+		setIsDragging(true);
+	}, []);
+
+	const handleDragLeave = useCallback((e: React.DragEvent) => {
+		e.preventDefault();
+		setIsDragging(false);
+	}, []);
 
 	return (
 		<Dialog
 			open={open}
 			onOpenChange={(newOpen) => {
 				onOpenChange(newOpen);
-				if (!newOpen) {
-					resetForm();
-				}
+				if (!newOpen) resetForm();
 			}}
 		>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent className="sm:max-w-105">
 				<DialogHeader>
 					<DialogTitle>Create New Vault</DialogTitle>
-					<DialogDescription>
-						Create a new vault to organize your passwords and secure notes.
-					</DialogDescription>
 				</DialogHeader>
+
 				<form
 					onSubmit={(e) => {
 						e.preventDefault();
 						form.handleSubmit();
 					}}
+					className="space-y-5"
 				>
-					<div className="space-y-4 py-4">
-						<form.Field name="name">
-							{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor={field.name}>Vault Name *</Label>
-									<Input
-										id={field.name}
-										name={field.name}
-										placeholder="My Vault"
-										value={field.state.value}
-										onBlur={field.handleBlur}
-										onChange={(e) => field.handleChange(e.target.value)}
-										disabled={form.state.isSubmitting}
-										required
+					{/* Avatar Preview - Centered */}
+					<div className="flex flex-col items-center gap-3 pt-2">
+						<form.Subscribe selector={(state) => state.values.name}>
+							{(name) => (
+								// biome-ignore lint/a11y/useKeyWithClickEvents: TODO
+								// biome-ignore lint/a11y/noStaticElementInteractions: TODO
+								<div
+									className={`relative cursor-pointer rounded-xl p-1 transition-all ${
+										isDragging
+											? "ring-2 ring-primary ring-offset-2"
+											: "hover:ring-2 hover:ring-muted hover:ring-offset-2"
+									}`}
+									onDrop={handleDrop}
+									onDragOver={handleDragOver}
+									onDragLeave={handleDragLeave}
+									onClick={() => fileInputRef.current?.click()}
+								>
+									<VaultAvatar
+										name={name || "Vault"}
+										icon={icon}
+										imageUrl={imagePreview}
+										size="xl"
 									/>
-								</div>
-							)}
-						</form.Field>
-
-						<form.Field name="type">
-							{(field) => (
-								<div className="space-y-2">
-									<Label>Vault Type</Label>
-									<div className="flex gap-2">
-										<Button
-											type="button"
-											variant={
-												field.state.value === "personal" ? "default" : "outline"
-											}
-											onClick={() => field.handleChange("personal")}
-											disabled={form.state.isSubmitting}
-											className="flex-1"
-										>
-											Personal
-										</Button>
-										<Button
-											type="button"
-											variant={
-												field.state.value === "team" ? "default" : "outline"
-											}
-											onClick={() => field.handleChange("team")}
-											disabled={form.state.isSubmitting}
-											className="flex-1"
-										>
-											Team
-										</Button>
+									<div className="absolute -right-1 -bottom-1 rounded-full bg-primary p-1.5 text-primary-foreground shadow-sm">
+										<IconImagePlusOutlineDuo18 className="size-3.5" />
 									</div>
 								</div>
 							)}
-						</form.Field>
+						</form.Subscribe>
+						<input
+							ref={fileInputRef}
+							type="file"
+							accept="image/*"
+							className="hidden"
+							onChange={handleImageChange}
+							disabled={form.state.isSubmitting}
+						/>
+						{imagePreview ? (
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								onClick={(e) => {
+									e.stopPropagation();
+									setImageFile(undefined);
+									setImagePreview(null);
+								}}
+								className="h-7 gap-1.5 text-muted-foreground text-xs"
+							>
+								<IconXmarkOutlineDuo18 className="size-3" />
+								Remove image
+							</Button>
+						) : (
+							<p className="text-muted-foreground text-xs">
+								Click or drag to upload
+							</p>
+						)}
+					</div>
 
-						<div className="space-y-2">
-							<Label>Appearance</Label>
-							<div className="flex items-start gap-4">
-								<form.Subscribe selector={(state) => state.values.name}>
-									{(name) => (
-										<VaultAvatar
-											name={name || "Vault"}
-											icon={icon}
-											imageUrl={imagePreview}
-											size="lg"
-										/>
-									)}
-								</form.Subscribe>
-								<div className="flex flex-1 flex-col gap-3">
-									<div className="grid grid-cols-4 gap-2">
-										{vaultIconOptions.map((option) => (
-											<Button
-												key={option.value}
-												type="button"
-												variant={icon === option.value ? "default" : "outline"}
-												onClick={() => setIcon(option.value)}
-												disabled={form.state.isSubmitting}
-												size="sm"
-												className="h-9 px-0"
-												aria-label={option.label}
-											>
-												<option.Icon className="size-4" />
-											</Button>
-										))}
-									</div>
-									<div className="flex flex-col gap-2">
-										<Input
-											id="vault-image"
-											type="file"
-											accept="image/*"
-											disabled={form.state.isSubmitting}
-											onChange={handleImageChange}
-										/>
-										{imagePreview && (
-											<Button
-												type="button"
-												variant="ghost"
-												size="sm"
-												onClick={() => {
-													setImageFile(null);
-													setImagePreview(null);
-												}}
-												disabled={form.state.isSubmitting}
-												className="h-8 justify-start px-2 text-muted-foreground"
-											>
-												Remove custom image
-											</Button>
-										)}
-										<p className="text-muted-foreground text-xs">
-											Optional. PNG, JPG, or WebP up to 2MB.
-										</p>
-									</div>
-								</div>
-							</div>
+					{/* Icon Picker */}
+					<div className="space-y-2">
+						<Label className="text-muted-foreground text-xs">Icon</Label>
+						<div className="flex flex-wrap justify-center gap-1.5">
+							{vaultIconOptions.map((option) => (
+								<button
+									key={option.value}
+									type="button"
+									onClick={() => setIcon(option.value)}
+									disabled={form.state.isSubmitting}
+									className={`flex size-9 items-center justify-center rounded-lg transition-all ${
+										icon === option.value
+											? "bg-primary text-primary-foreground shadow-sm"
+											: "bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground"
+									}`}
+									aria-label={option.label}
+								>
+									<option.Icon className="size-4" />
+								</button>
+							))}
 						</div>
 					</div>
-					<div className="flex gap-2">
-						<Button
-							type="submit"
-							disabled={form.state.isSubmitting}
-							className="flex-1"
-						>
-							{form.state.isSubmitting ? "Creating..." : "Create Vault"}
-						</Button>
+
+					{/* Account Selector (multi-account mode) */}
+					{accounts && accounts.length > 0 && (
+						<div className="space-y-2">
+							<Label
+								htmlFor="account"
+								className="text-muted-foreground text-xs"
+							>
+								Account
+							</Label>
+							<Select
+								value={selectedAccountEmail}
+								onValueChange={setSelectedAccountEmail}
+								disabled={form.state.isSubmitting}
+							>
+								<SelectTrigger id="account" className="h-10">
+									<SelectValue placeholder="Select account" />
+								</SelectTrigger>
+								<SelectContent>
+									{accounts.map((account) => (
+										<SelectItem key={account.email} value={account.email}>
+											<div className="flex flex-col">
+												<span className="font-medium">
+													{account.teamName || account.name || account.email}
+												</span>
+												<span className="text-muted-foreground text-xs">
+													{account.email}
+												</span>
+											</div>
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+					)}
+
+					{/* Vault Name */}
+					<form.Field name="name">
+						{(field) => (
+							<div className="space-y-2">
+								<Label
+									htmlFor={field.name}
+									className="text-muted-foreground text-xs"
+								>
+									Name
+								</Label>
+								<Input
+									id={field.name}
+									name={field.name}
+									placeholder="Enter vault name"
+									value={field.state.value}
+									onBlur={field.handleBlur}
+									onChange={(e) => field.handleChange(e.target.value)}
+									disabled={form.state.isSubmitting}
+									className="h-10"
+									required
+								/>
+							</div>
+						)}
+					</form.Field>
+
+					{/* Vault Type */}
+					<form.Field name="type">
+						{(field) => (
+							<div className="space-y-2">
+								<Label className="text-muted-foreground text-xs">Type</Label>
+								<div className="grid grid-cols-2 gap-2">
+									<button
+										type="button"
+										onClick={() => field.handleChange("personal")}
+										disabled={form.state.isSubmitting}
+										className={`flex items-center justify-center gap-2 rounded-lg border-2 px-4 py-3 font-medium text-sm transition-all ${
+											field.state.value === "personal"
+												? "border-primary bg-primary/5 text-primary"
+												: "border-border bg-background text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground"
+										}`}
+									>
+										<IconUserOutlineDuo18 className="size-4" />
+										Personal
+									</button>
+									<button
+										type="button"
+										onClick={() => field.handleChange("team")}
+										disabled={form.state.isSubmitting}
+										className={`flex items-center justify-center gap-2 rounded-lg border-2 px-4 py-3 font-medium text-sm transition-all ${
+											field.state.value === "team"
+												? "border-primary bg-primary/5 text-primary"
+												: "border-border bg-background text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground"
+										}`}
+									>
+										<IconUsers6OutlineDuo18 className="size-4" />
+										Team
+									</button>
+								</div>
+							</div>
+						)}
+					</form.Field>
+
+					{/* Actions */}
+					<div className="flex gap-2 pt-2">
 						<Button
 							type="button"
 							variant="outline"
@@ -247,8 +357,16 @@ export function CreateVaultDialog({
 								resetForm();
 							}}
 							disabled={form.state.isSubmitting}
+							className="flex-1"
 						>
 							Cancel
+						</Button>
+						<Button
+							type="submit"
+							disabled={form.state.isSubmitting}
+							className="flex-1"
+						>
+							{form.state.isSubmitting ? "Creating..." : "Create Vault"}
 						</Button>
 					</div>
 				</form>

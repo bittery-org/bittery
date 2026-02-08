@@ -1,7 +1,14 @@
-import { generateSecretKey } from "@bittery/crypto/secret-key";
-import { normalizeServerUrl } from "@bittery/crypto/server-url";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
+import {
+	Button,
+	ControlField,
+	Description,
+	Input,
+	Label,
+	TextField,
+} from "heroui-native";
 import {
 	ArrowLeft,
 	Copy,
@@ -18,22 +25,32 @@ import {
 	Alert,
 	KeyboardAvoidingView,
 	Platform,
+	Pressable,
 	ScrollView,
 	Text,
-	TextInput,
-	TouchableOpacity,
 	View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { withUniwind } from "uniwind";
+import { SafeAreaView } from "@/components/safe-area-view";
+import { defaultServerUrl } from "@/constants/server-url";
+import { generateSecretKey } from "../../src/lib/crypto";
 
-const DEFAULT_SERVER_URL =
-	process.env.EXPO_PUBLIC_SERVER_URL || "http://localhost:3000";
+// Create styled icon components
+const StyledServer = withUniwind(Server);
+const StyledMail = withUniwind(Mail);
+const StyledLock = withUniwind(Lock);
+const StyledEye = withUniwind(Eye);
+const StyledEyeOff = withUniwind(EyeOff);
+const StyledUser = withUniwind(User);
+const StyledKey = withUniwind(Key);
+const StyledCopy = withUniwind(Copy);
+const StyledArrowLeft = withUniwind(ArrowLeft);
 
 export default function SignupScreen() {
 	const router = useRouter();
 
 	const [step, setStep] = useState<"form" | "secret-key">("form");
-	const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
+	const [serverUrl, setServerUrl] = useState(defaultServerUrl);
 	const [name, setName] = useState("");
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
@@ -103,26 +120,39 @@ export default function SignupScreen() {
 	if (step === "secret-key") {
 		return (
 			<SafeAreaView className="flex-1 bg-background">
-				<ScrollView className="flex-1" contentContainerStyle={{ flexGrow: 1 }}>
-					<View className="flex-1 px-6 py-8">
+				<ScrollView
+					className="flex-1"
+					contentContainerClassName="flex-1"
+					keyboardShouldPersistTaps="handled"
+				>
+					<View className="flex-1 justify-center px-6 py-8">
 						{/* Back Button */}
-						<TouchableOpacity
+						<Button
 							onPress={() => setStep("form")}
-							className="mb-6 flex-row items-center"
+							variant="ghost"
+							className="mb-6 self-start"
 						>
-							<ArrowLeft size={20} color="#6b7280" />
-							<Text className="ml-2 text-muted-foreground">Back</Text>
-						</TouchableOpacity>
+							<View className="flex-row items-center">
+								<StyledArrowLeft size={20} className="text-muted" />
+								<Text className="ml-2 text-muted">Back</Text>
+							</View>
+						</Button>
 
 						{/* Header */}
 						<View className="mb-8 items-center">
-							<View className="mb-4 h-20 w-20 items-center justify-center rounded-2xl bg-amber-500">
-								<Key size={40} color="#fff" />
-							</View>
+							<Button
+								isIconOnly
+								variant="primary"
+								size="lg"
+								className="mb-4 h-20 w-20 rounded-2xl bg-amber-500"
+								isDisabled
+							>
+								<StyledKey size={40} className="text-white" />
+							</Button>
 							<Text className="font-bold text-2xl text-foreground">
 								Your Secret Key
 							</Text>
-							<Text className="mt-2 text-center text-muted-foreground">
+							<Text className="mt-2 text-center text-muted">
 								This key is required to access your account. Save it somewhere
 								safe!
 							</Text>
@@ -154,50 +184,40 @@ export default function SignupScreen() {
 									{generatedSecretKey}
 								</Text>
 							</View>
-							<TouchableOpacity
+							<Button
 								onPress={handleCopySecretKey}
-								className="mt-3 flex-row items-center justify-center rounded-lg border border-input py-3"
+								variant="secondary"
+								className="mt-3"
 							>
-								<Copy size={18} color="#6b7280" />
-								<Text className="ml-2 text-muted-foreground">
-									Copy to Clipboard
-								</Text>
-							</TouchableOpacity>
+								<View className="flex-row items-center">
+									<StyledCopy size={18} className="text-muted" />
+									<Text className="ml-2 text-muted">Copy to Clipboard</Text>
+								</View>
+							</Button>
 						</View>
 
 						{/* Confirmation Checkbox */}
-						<TouchableOpacity
-							onPress={() => setHasConfirmedSave(!hasConfirmedSave)}
-							className="mb-6 flex-row items-start"
+						<ControlField
+							isSelected={hasConfirmedSave}
+							onSelectedChange={setHasConfirmedSave}
 						>
-							<View
-								className={`mr-3 h-6 w-6 items-center justify-center rounded border-2 ${
-									hasConfirmedSave
-										? "border-primary bg-primary"
-										: "border-input bg-background"
-								}`}
-							>
-								{hasConfirmedSave && (
-									<Text className="text-primary-foreground">✓</Text>
-								)}
-							</View>
-							<Text className="flex-1 text-foreground">
+							<Label className="flex-1">
 								I have saved my Secret Key in a secure location and understand I
 								will need it to access my account.
-							</Text>
-						</TouchableOpacity>
+							</Label>
+							<ControlField.Indicator />
+						</ControlField>
 
 						{/* Continue Button */}
-						<TouchableOpacity
+						<Button
 							onPress={handleContinueToLogin}
-							className={`rounded-lg py-4 ${
-								hasConfirmedSave ? "bg-primary" : "bg-primary/50"
-							}`}
+							isDisabled={!hasConfirmedSave}
+							variant="primary"
+							size="lg"
+							className="mt-6"
 						>
-							<Text className="text-center font-semibold text-primary-foreground">
-								Continue to Login
-							</Text>
-						</TouchableOpacity>
+							Continue to Login
+						</Button>
 					</View>
 				</ScrollView>
 			</SafeAreaView>
@@ -208,84 +228,97 @@ export default function SignupScreen() {
 		<SafeAreaView className="flex-1 bg-background">
 			<KeyboardAvoidingView
 				behavior={Platform.OS === "ios" ? "padding" : "height"}
+				contentContainerClassName="flex-1"
 				className="flex-1"
 			>
 				<ScrollView
 					className="flex-1"
-					contentContainerStyle={{ flexGrow: 1 }}
+					contentContainerClassName="flex-1"
 					keyboardShouldPersistTaps="handled"
 				>
-					<View className="flex-1 px-6 py-8">
+					<View className="flex-1 justify-center px-6 py-8">
 						{/* Back Button */}
-						<TouchableOpacity
+						<Button
 							onPress={() => router.back()}
-							className="mb-6 flex-row items-center"
+							variant="ghost"
+							className="mb-6 self-start"
 						>
-							<ArrowLeft size={20} color="#6b7280" />
-							<Text className="ml-2 text-muted-foreground">Back to Login</Text>
-						</TouchableOpacity>
+							<View className="flex-row items-center">
+								<StyledArrowLeft size={20} className="text-muted" />
+								<Text className="ml-2 text-muted">Back to Login</Text>
+							</View>
+						</Button>
 
 						{/* Header */}
 						<View className="mb-8 items-center">
-							<View className="mb-4 h-20 w-20 items-center justify-center rounded-2xl bg-primary">
+							<Button
+								isIconOnly
+								variant="primary"
+								size="lg"
+								className="mb-4 h-20 w-20 rounded-2xl"
+								isDisabled
+							>
 								<Lock size={40} color="#fff" />
-							</View>
+							</Button>
 							<Text className="font-bold text-2xl text-foreground">
 								Create Account
 							</Text>
-							<Text className="mt-2 text-center text-muted-foreground">
+							<Text className="mt-2 text-center text-muted">
 								Set up your secure Bittery vault
 							</Text>
 						</View>
 
 						{/* Form */}
-						<View className="space-y-4">
+						<View className="gap-4">
 							{/* Server URL */}
-							<View>
-								<Text className="mb-2 font-medium text-foreground text-sm">
-									Server URL
-								</Text>
-								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
-									<Server size={20} color="#6b7280" />
-									<TextInput
-										className="ml-3 flex-1 py-3 text-foreground"
+							<TextField>
+								<Label>Server URL</Label>
+								<View className="w-full flex-row items-center">
+									<Input
 										placeholder="https://your-server.com"
 										value={serverUrl}
 										onChangeText={setServerUrl}
 										autoCapitalize="none"
 										autoCorrect={false}
 										keyboardType="url"
+										className="flex-1 pr-4 pl-12"
+									/>
+									<StyledServer
+										size={20}
+										className="absolute left-3.5 text-muted"
+										pointerEvents="none"
 									/>
 								</View>
-							</View>
+								<Description>
+									Use your self-hosted Bittery server URL
+								</Description>
+							</TextField>
 
 							{/* Name */}
-							<View>
-								<Text className="mb-2 font-medium text-foreground text-sm">
-									Name
-								</Text>
-								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
-									<User size={20} color="#6b7280" />
-									<TextInput
-										className="ml-3 flex-1 py-3 text-foreground"
+							<TextField>
+								<Label>Name</Label>
+								<View className="w-full flex-row items-center">
+									<Input
 										placeholder="Your name"
 										value={name}
 										onChangeText={setName}
 										autoCapitalize="words"
 										textContentType="name"
+										className="flex-1 pr-4 pl-12"
+									/>
+									<StyledUser
+										size={20}
+										className="absolute left-3.5 text-muted"
+										pointerEvents="none"
 									/>
 								</View>
-							</View>
+							</TextField>
 
 							{/* Email */}
-							<View>
-								<Text className="mb-2 font-medium text-foreground text-sm">
-									Email
-								</Text>
-								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
-									<Mail size={20} color="#6b7280" />
-									<TextInput
-										className="ml-3 flex-1 py-3 text-foreground"
+							<TextField>
+								<Label>Email</Label>
+								<View className="w-full flex-row items-center">
+									<Input
 										placeholder="you@example.com"
 										value={email}
 										onChangeText={setEmail}
@@ -293,67 +326,76 @@ export default function SignupScreen() {
 										autoCorrect={false}
 										keyboardType="email-address"
 										textContentType="emailAddress"
+										className="flex-1 pr-4 pl-12"
+									/>
+									<StyledMail
+										size={20}
+										className="absolute left-3.5 text-muted"
+										pointerEvents="none"
 									/>
 								</View>
-							</View>
+							</TextField>
 
 							{/* Password */}
-							<View>
-								<Text className="mb-2 font-medium text-foreground text-sm">
-									Password
-								</Text>
-								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
-									<Lock size={20} color="#6b7280" />
-									<TextInput
-										className="ml-3 flex-1 py-3 text-foreground"
+							<TextField>
+								<Label>Password</Label>
+								<View className="w-full flex-row items-center">
+									<Input
 										placeholder="Create a strong password"
 										value={password}
 										onChangeText={setPassword}
 										secureTextEntry={!showPassword}
 										textContentType="newPassword"
+										className="flex-1 pr-12 pl-12"
 									/>
-									<TouchableOpacity
+									<StyledLock
+										size={20}
+										className="absolute left-3.5 text-muted"
+										pointerEvents="none"
+									/>
+									<Pressable
 										onPress={() => setShowPassword(!showPassword)}
+										className="absolute right-4"
 									>
 										{showPassword ? (
-											<EyeOff size={20} color="#6b7280" />
+											<StyledEyeOff size={20} className="text-muted" />
 										) : (
-											<Eye size={20} color="#6b7280" />
+											<StyledEye size={20} className="text-muted" />
 										)}
-									</TouchableOpacity>
+									</Pressable>
 								</View>
-								<Text className="mt-1 text-muted-foreground text-xs">
-									Minimum 8 characters
-								</Text>
-							</View>
+								<Description>Minimum 8 characters</Description>
+							</TextField>
 
 							{/* Confirm Password */}
-							<View>
-								<Text className="mb-2 font-medium text-foreground text-sm">
-									Confirm Password
-								</Text>
-								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
-									<Lock size={20} color="#6b7280" />
-									<TextInput
-										className="ml-3 flex-1 py-3 text-foreground"
+							<TextField>
+								<Label>Confirm Password</Label>
+								<View className="w-full flex-row items-center">
+									<Input
 										placeholder="Confirm your password"
 										value={confirmPassword}
 										onChangeText={setConfirmPassword}
 										secureTextEntry={!showPassword}
 										textContentType="newPassword"
+										className="flex-1 pr-4 pl-12"
+									/>
+									<StyledLock
+										size={20}
+										className="absolute left-3.5 text-muted"
+										pointerEvents="none"
 									/>
 								</View>
-							</View>
+							</TextField>
 
 							{/* Continue Button */}
-							<TouchableOpacity
+							<Button
 								onPress={handleContinueToSecretKey}
-								className="mt-4 rounded-lg bg-primary py-4"
+								variant="primary"
+								size="lg"
+								className="mt-4"
 							>
-								<Text className="text-center font-semibold text-primary-foreground">
-									Continue
-								</Text>
-							</TouchableOpacity>
+								Continue
+							</Button>
 						</View>
 					</View>
 				</ScrollView>

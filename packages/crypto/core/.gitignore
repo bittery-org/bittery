@@ -1,0 +1,16 @@
+# Build artifacts
+/target/
+/pkg/
+/jniLibs/
+
+# Generated headers
+/crates/bittery-crypto-ffi/include/
+
+# Editor
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

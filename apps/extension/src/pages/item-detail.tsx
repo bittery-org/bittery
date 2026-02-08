@@ -1,8 +1,8 @@
 import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Skeleton } from "@bittery/ui";
+import { IconArrowLeftOutlineDuo18 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
@@ -29,8 +29,10 @@ export function ItemDetailPage() {
 
 	const handleItemUpdated = useCallback(() => {
 		// Invalidate both the single item query and the items list
-		invalidator.invalidateItem(itemId);
-	}, [invalidator, itemId]);
+		// Note: We pass empty vaultId since we don't have it readily available
+		// The invalidator will still properly invalidate all relevant queries
+		invalidator.invalidateItem(itemId, item?.vaultId ?? "");
+	}, [invalidator, itemId, item?.vaultId]);
 
 	if (isLoading) {
 		return (
@@ -58,7 +60,7 @@ export function ItemDetailPage() {
 						variant="ghost"
 						onClick={() => navigate({ to: "/vault" })}
 					>
-						<ArrowLeft size={18} />
+						<IconArrowLeftOutlineDuo18 className="size-[18px]" />
 					</Button>
 					<div>
 						<div className="font-semibold text-lg">Item details</div>

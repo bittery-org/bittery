@@ -1,5 +1,9 @@
+import { useTeamAvatar } from "@bittery/core/hooks";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
+	Avatar,
+	AvatarFallback,
+	AvatarImage,
 	Button,
 	Card,
 	CardContent,
@@ -12,8 +16,8 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useMutation } from "@tanstack/react-query";
-import { AlertTriangle, Settings } from "lucide-react";
-import { useState } from "react";
+import { AlertTriangle, Settings, Upload, X } from "lucide-react";
+import { useRef, useState } from "react";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 import { DeleteTeamDialog } from "./delete-team-dialog";
 import { LeaveTeamDialog } from "./leave-team-dialog";
@@ -22,6 +26,7 @@ interface TeamSettingsProps {
 	teamId: string;
 	teamName: string;
 	userRole: string;
+	imageUrl?: string | null;
 	createdAt: Date | string;
 	updatedAt: Date | string;
 }
@@ -30,13 +35,17 @@ export function TeamSettings({
 	teamId,
 	teamName,
 	userRole,
+	imageUrl,
 	createdAt,
 	updatedAt,
 }: TeamSettingsProps) {
 	const [isEditing, setIsEditing] = useState(false);
 	const [name, setName] = useState(teamName);
+	const fileInputRef = useRef<HTMLInputElement>(null);
 	const trpcClient = useTRPCClient();
 	const invalidator = useQueryInvalidator();
+	const { uploadAvatar, removeAvatar, isUploading, isRemoving } =
+		useTeamAvatar();
 
 	const isOwner = userRole === "owner";
 	const canEdit = isOwner || userRole === "admin";
@@ -67,6 +76,47 @@ export function TeamSettings({
 	const handleCancel = () => {
 		setName(teamName);
 		setIsEditing(false);
+	};
+
+	const handleFileSelect = async (
+		event: React.ChangeEvent<HTMLInputElement>,
+	) => {
+		const file = event.target.files?.[0];
+		if (!file) return;
+
+		try {
+			await uploadAvatar({ teamId, file });
+			toast.success("Team avatar updated");
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to upload avatar",
+			);
+		}
+
+		// Reset input
+		if (fileInputRef.current) {
+			fileInputRef.current.value = "";
+		}
+	};
+
+	const handleRemoveAvatar = async () => {
+		try {
+			await removeAvatar({ teamId });
+			toast.success("Team avatar removed");
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to remove avatar",
+			);
+		}
+	};
+
+	const getTeamInitials = () => {
+		return teamName
+			.split(" ")
+			.map((word) => word[0])
+			.join("")
+			.toUpperCase()
+			.slice(0, 2);
 	};
 
 	return (
@@ -114,6 +164,59 @@ export function TeamSettings({
 								)}
 							</div>
 						)}
+					</div>
+
+					<Separator />
+
+					{/* Team Avatar */}
+					<div className="grid gap-4">
+						<Label>Team Avatar</Label>
+						<div className="flex items-center gap-4">
+							<Avatar className="h-16 w-16">
+								{imageUrl && <AvatarImage src={imageUrl} alt={teamName} />}
+								<AvatarFallback className="text-lg">
+									{getTeamInitials()}
+								</AvatarFallback>
+							</Avatar>
+							<div className="flex flex-col gap-2">
+								<div className="flex gap-2">
+									{canEdit && (
+										<>
+											<Button
+												variant="outline"
+												size="sm"
+												onClick={() => fileInputRef.current?.click()}
+												disabled={isUploading || isRemoving}
+											>
+												<Upload className="mr-2 h-4 w-4" />
+												{isUploading ? "Uploading..." : "Upload"}
+											</Button>
+											{imageUrl && (
+												<Button
+													variant="outline"
+													size="sm"
+													onClick={handleRemoveAvatar}
+													disabled={isUploading || isRemoving}
+												>
+													<X className="mr-2 h-4 w-4" />
+													{isRemoving ? "Removing..." : "Remove"}
+												</Button>
+											)}
+										</>
+									)}
+								</div>
+								<p className="text-muted-foreground text-xs">
+									Maximum file size: 5MB. Supported formats: PNG, JPG, GIF
+								</p>
+							</div>
+							<input
+								ref={fileInputRef}
+								type="file"
+								accept="image/*"
+								onChange={handleFileSelect}
+								className="hidden"
+							/>
+						</div>
 					</div>
 
 					<Separator />

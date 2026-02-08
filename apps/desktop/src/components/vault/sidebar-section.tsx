@@ -4,7 +4,10 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@bittery/ui";
-import { ChevronRight, Plus } from "lucide-react";
+import {
+	IconChevronRightOutlineDuo18,
+	IconPlusOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
 
 interface SidebarSectionProps {
@@ -47,25 +50,25 @@ export function SidebarSection({
 
 	return (
 		<Collapsible open={isOpen} onOpenChange={handleOpenChange}>
-			<div className="flex items-center justify-between px-2 py-1">
-				<CollapsibleTrigger className="flex flex-1 items-center gap-1 rounded px-1 py-1.5 font-semibold text-muted-foreground text-xs uppercase hover:bg-muted/50">
-					<ChevronRight
-						className={`size-3 transition-transform ${isOpen ? "rotate-90" : ""}`}
+			<div className="flex items-center justify-between gap-1 px-2 py-1">
+				<CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 py-1.5 font-semibold text-muted-foreground text-xs uppercase hover:bg-muted/50">
+					<IconChevronRightOutlineDuo18
+						className={`size-3 shrink-0 transition-transform ${isOpen ? "rotate-90" : ""}`}
 					/>
-					{icon && <span className="mr-0.5">{icon}</span>}
-					<span>{title}</span>
+					{icon && <span className="mr-0.5 shrink-0">{icon}</span>}
+					<span className="truncate">{title}</span>
 				</CollapsibleTrigger>
 				{onAdd && (
 					<Button
 						variant="ghost"
 						size="sm"
-						className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
+						className="h-5 w-5 shrink-0 p-0 text-muted-foreground hover:text-foreground"
 						onClick={(e) => {
 							e.stopPropagation();
 							onAdd();
 						}}
 					>
-						<Plus className="size-3" />
+						<IconPlusOutlineDuo18 className="size-3" />
 					</Button>
 				)}
 			</div>

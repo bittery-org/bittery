@@ -3,26 +3,16 @@ import type {
 	TotpAlgorithm,
 	TotpDigits,
 } from "@bittery/shared/types";
-import {
-	CreditCard,
-	FileText,
-	Key,
-	Star,
-	Timer,
-	User,
-} from "lucide-react-native";
-import { Text, TouchableOpacity, View } from "react-native";
+import { Card, PressableFeedback } from "heroui-native";
+import { Star } from "lucide-react-native";
+import { View } from "react-native";
+import { withUniwind } from "uniwind";
 
+import { ItemIcon } from "./item-icon";
 import { TotpDisplay } from "./totp-display";
-import { VaultBadge } from "./vault-badge";
 
-const categoryIcons: Record<ItemCategory, typeof Key> = {
-	login: Key,
-	"credit-card": CreditCard,
-	identity: User,
-	"secure-note": FileText,
-	totp: Timer,
-};
+// Create styled icon components
+const StyledStar = withUniwind(Star);
 
 interface ItemListItemProps {
 	id: string;
@@ -46,6 +36,9 @@ interface ItemListItemProps {
 	totpPeriod?: number;
 	/** Whether to show inline TOTP code (for TOTP category items or login items with TOTP) */
 	showInlineTotp?: boolean;
+	/** Position in the list for rounded corners */
+	isFirstInSection?: boolean;
+	isLastInSection?: boolean;
 }
 
 export function ItemListItem({
@@ -55,8 +48,8 @@ export function ItemListItem({
 	favorite,
 	username,
 	url,
-	vault,
-	showVaultBadge = false,
+	vault: _vault,
+	showVaultBadge: _showVaultBadge = false,
 	onPress,
 	rightContent,
 	totpSecret,
@@ -64,9 +57,9 @@ export function ItemListItem({
 	totpDigits,
 	totpPeriod,
 	showInlineTotp = false,
+	isFirstInSection = false,
+	isLastInSection = false,
 }: ItemListItemProps) {
-	const Icon = categoryIcons[category];
-
 	// Show TOTP if item has TOTP secret and showInlineTotp is enabled
 	const shouldShowTotp = showInlineTotp && totpSecret;
 
@@ -85,61 +78,70 @@ export function ItemListItem({
 
 	const subtitle = getSubtitle();
 
+	// Determine rounded corners based on position
+	const getCardRounding = () => {
+		if (isFirstInSection && isLastInSection) {
+			return "rounded-2xl"; // Single item
+		}
+		if (isFirstInSection) {
+			return "rounded-t-2xl rounded-b-md"; // First item
+		}
+		if (isLastInSection) {
+			return "rounded-t-md rounded-b-2xl"; // Last item
+		}
+		return "rounded-md"; // Middle item
+	};
+
 	return (
-		<TouchableOpacity
-			onPress={onPress}
-			className="flex-row items-center border-border border-b bg-background px-4 py-3"
-			activeOpacity={0.7}
-		>
-			{/* Icon */}
-			<View className="mr-3 h-10 w-10 items-center justify-center rounded-lg bg-secondary">
-				<Icon size={20} color="#6b7280" />
-			</View>
+		<PressableFeedback onPress={onPress} className="mx-4 mb-1">
+			<Card className={getCardRounding()}>
+				<PressableFeedback.Ripple />
+				<Card.Body className="flex-row items-center py-1 pr-3 pl-1.5">
+					{/* Icon or Favicon */}
+					<ItemIcon
+						category={category}
+						url={url}
+						size="sm"
+						className="mr-3.5"
+					/>
 
-			{/* Content */}
-			<View className="min-w-0 flex-1">
-				<View className="flex-row items-center">
-					<Text
-						className="flex-shrink font-medium text-foreground"
-						numberOfLines={1}
-					>
-						{title}
-					</Text>
-					{favorite && (
-						<Star
-							size={14}
-							color="#eab308"
-							fill="#eab308"
-							style={{ marginLeft: 6 }}
-						/>
-					)}
-				</View>
-				{subtitle && (
-					<Text className="text-muted-foreground text-sm" numberOfLines={1}>
-						{subtitle}
-					</Text>
-				)}
-				{/* Inline TOTP display for TOTP items or login items with TOTP */}
-				{shouldShowTotp && (
-					<View className="mt-1">
-						<TotpDisplay
-							totpSecret={totpSecret}
-							totpAlgorithm={totpAlgorithm}
-							totpDigits={totpDigits}
-							totpPeriod={totpPeriod}
-							inline
-						/>
+					{/* Content */}
+					<View className="min-w-0 flex-1">
+						<View className="flex-row items-center">
+							<Card.Title className="shrink text-base" numberOfLines={1}>
+								{title}
+							</Card.Title>
+							{favorite && (
+								<StyledStar
+									size={12}
+									fill="#eab308"
+									className="ml-1.5 text-yellow-500"
+								/>
+							)}
+						</View>
+						{subtitle && (
+							<Card.Description className="text-xs" numberOfLines={1}>
+								{subtitle}
+							</Card.Description>
+						)}
+						{/* Inline TOTP display for TOTP items or login items with TOTP */}
+						{shouldShowTotp && (
+							<View className="mt-0.5">
+								<TotpDisplay
+									totpSecret={totpSecret}
+									totpAlgorithm={totpAlgorithm}
+									totpDigits={totpDigits}
+									totpPeriod={totpPeriod}
+									inline
+								/>
+							</View>
+						)}
 					</View>
-				)}
-				{showVaultBadge && vault && (
-					<View className="mt-1 self-start">
-						<VaultBadge name={vault.name} type={vault.type} />
-					</View>
-				)}
-			</View>
 
-			{/* Right content (optional, e.g., for swipe actions indicator) */}
-			{rightContent && <View className="ml-2">{rightContent}</View>}
-		</TouchableOpacity>
+					{/* Right content (optional, e.g., for swipe actions indicator) */}
+					{rightContent && <View className="ml-2">{rightContent}</View>}
+				</Card.Body>
+			</Card>
+		</PressableFeedback>
 	);
 }

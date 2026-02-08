@@ -1,6 +1,7 @@
 import { Button, Card, Label } from "@bittery/ui";
 import { Favicon } from "../favicon";
 import { TagInput } from "../tag-input";
+import { DetailHeader } from "./field-components";
 import type { CategoryDetailProps, SecureNoteDisplayData } from "./shared";
 
 export function SecureNoteDetail({
@@ -14,15 +15,11 @@ export function SecureNoteDetail({
 }: CategoryDetailProps<SecureNoteDisplayData>) {
 	return (
 		<div className="space-y-4">
-			<div className="flex items-center gap-4">
-				<Favicon title={data.title} category="secure-note" size="lg" />
-				<div className="min-w-0 flex-1">
-					<h2 className="truncate font-semibold text-2xl tracking-tight">
-						{data.title}
-					</h2>
-					<p className="mt-1 text-muted-foreground text-sm">Secure Note</p>
-				</div>
-			</div>
+			<DetailHeader
+				icon={<Favicon title={data.title} category="secure-note" size="lg" />}
+				title={data.title}
+				subtitle="Secure Note"
+			/>
 
 			<div className="flex gap-2">
 				{onEdit && (
@@ -42,6 +39,12 @@ export function SecureNoteDetail({
 				)}
 			</div>
 
+			<Card>
+				<div className="whitespace-pre-wrap p-6 leading-relaxed">
+					{data.note}
+				</div>
+			</Card>
+
 			{/* Tags */}
 			{onTagsChange && (
 				<div className="space-y-2">
@@ -55,12 +58,6 @@ export function SecureNoteDetail({
 					/>
 				</div>
 			)}
-
-			<Card>
-				<div className="whitespace-pre-wrap p-6 leading-relaxed">
-					{data.note}
-				</div>
-			</Card>
 		</div>
 	);
 }

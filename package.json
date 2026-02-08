@@ -14,6 +14,11 @@
 		"dev": "turbo dev",
 		"build": "turbo build",
 		"check-types": "turbo check-types",
+		"build:crypto-wasm": "cd packages/crypto/core && ./build-wasm.sh",
+		"build:crypto-napi": "cd packages/crypto/core && ./build-napi.sh",
+		"build:crypto-android": "pnpm --filter @bittery/crypto-nitro run build:android",
+		"build:crypto-ios": "pnpm --filter @bittery/crypto-nitro run build:ios",
+		"build:crypto": "pnpm run build:crypto-wasm && pnpm run build:crypto-napi && pnpm run build:crypto-android && pnpm run build:crypto-ios",
 		"dev:desktop": "turbo -F desktop tauri:dev",
 		"build:desktop": "turbo -F desktop tauri:build",
 		"dev:web": "turbo -F web dev",
@@ -29,8 +34,11 @@
 		"db:migrate": "turbo -F @bittery/db db:migrate",
 		"db:start": "turbo -F @bittery/db db:start",
 		"db:watch": "turbo -F @bittery/db db:watch",
+		"db:test:setup": "turbo -F @bittery/db db:test:setup",
 		"db:stop": "turbo -F @bittery/db db:stop",
-		"db:down": "turbo -F @bittery/db db:down"
+		"db:down": "turbo -F @bittery/db db:down",
+		"shadcn": "pnpm --filter @bittery/ui run shadcn",
+		"preinstall": "export $(cat .env | xargs) || true"
 	},
 	"dependencies": {
 		"dotenv": "^17.2.2",

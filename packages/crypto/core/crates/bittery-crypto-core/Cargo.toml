@@ -1,0 +1,37 @@
+[package]
+name = "bittery-crypto-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core cryptographic primitives for Bittery password manager"
+
+[dependencies]
+# Crypto (RustCrypto - audited)
+aes-gcm.workspace = true
+pbkdf2.workspace = true
+hkdf.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+rsa.workspace = true
+rand.workspace = true
+
+# BigInteger for SRP
+num-bigint.workspace = true
+num-traits.workspace = true
+num-integer.workspace = true
+
+# Encoding
+base64.workspace = true
+hex.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling
+thiserror.workspace = true
+subtle.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["rt", "macros"] }

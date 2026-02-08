@@ -1,27 +1,6 @@
-import { encrypt, generateEncryptionKey } from "@bittery/crypto/encryption";
-import {
-	arrayBufferToBase64,
-	deriveKeys,
-} from "@bittery/crypto/key-derivation";
-import { generateRSAKeyPair } from "@bittery/crypto/rsa";
-import {
-	generateSecretKey,
-	getSecretKeyHint,
-} from "@bittery/crypto/secret-key";
-import { normalizeServerUrl } from "@bittery/crypto/server-url";
-import {
-	getServerUrl,
-	getTimeUntilExpiry,
-	storeAuthToken,
-	storeEncryptedPrivateKey,
-	storeMasterUnlockKey,
-	storeSecretKey,
-	storeServerUrl,
-	storeSessionData,
-	storeVaultKeys,
-} from "@bittery/crypto/session-storage";
-import { generateSRPRegistration } from "@bittery/crypto/srp-client";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import {
 	Badge,
 	Button,
@@ -36,6 +15,17 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Copy, Download, Eye, EyeOff, Users } from "lucide-react";
 import { useEffect, useState } from "react";
+import { storage } from "@/lib/storage";
+import {
+	arrayBufferToBase64,
+	deriveKeys,
+	encrypt,
+	generateEncryptionKey,
+	generateRSAKeyPair,
+	generateSecretKeyAsync,
+	generateSRPRegistration,
+	getSecretKeyHint,
+} from "@/lib/wasm-crypto";
 
 export default function SignUpForm({
 	onSwitchToSignIn,
@@ -54,9 +44,15 @@ export default function SignUpForm({
 	const [showSecretKey, setShowSecretKey] = useState(true);
 	const [hasAcknowledged, setHasAcknowledged] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
-	const [serverUrl, setServerUrl] = useState(
-		() => getServerUrl() ?? defaultServerUrl,
-	);
+	const [serverUrl, setServerUrl] = useState(defaultServerUrl);
+	const [isEncrypting, setIsEncrypting] = useState(false);
+
+	// Load server URL on mount
+	useEffect(() => {
+		storage.getServerUrl().then((url) => {
+			if (url) setServerUrl(url);
+		});
+	}, []);
 
 	// Query invitation details if token is provided
 	const invitationQuery = useQuery({
@@ -69,20 +65,19 @@ export default function SignUpForm({
 	const invitation = invitationQuery.data;
 	const isInvitationSignup = !!invitationToken && !!invitation;
 
-	// Generate Secret Key on mount
+	// Generate Secret Key on mount (WASM auto-initializes)
 	useEffect(() => {
-		const key = generateSecretKey();
-		setSecretKey(key);
+		generateSecretKeyAsync().then(setSecretKey);
 	}, []);
 
 	const signupMutation = useMutation({
 		mutationFn: async (input: any) => {
 			return await trpcClient.auth.signup.mutate(input);
 		},
-		onSuccess: (data) => {
+		onSuccess: async (data) => {
 			// Store auth token and vault keys
-			storeAuthToken(data.token);
-			storeVaultKeys(data.vaultKeys);
+			await storage.storeAuthToken(data.token);
+			await storage.storeVaultKeys(data.vaultKeys);
 
 			toast.success("Account created successfully!");
 			// Navigate to redirect URL (invitation page) if provided, otherwise go to home
@@ -102,6 +97,7 @@ export default function SignUpForm({
 			email: "",
 			password: "",
 			name: "",
+			accountType: "personal" as "personal" | "organization",
 			organizationName: "",
 		},
 		onSubmit: async ({ value }) => {
@@ -110,7 +106,7 @@ export default function SignUpForm({
 				toast.error("Invalid server URL");
 				return;
 			}
-			storeServerUrl(normalizedServerUrl);
+			await storage.storeServerUrl(normalizedServerUrl);
 			if (normalizedServerUrl !== serverUrl) {
 				setServerUrl(normalizedServerUrl);
 			}
@@ -120,6 +116,7 @@ export default function SignUpForm({
 				return;
 			}
 
+			setIsEncrypting(true);
 			try {
 				// Use invitation email if signing up via invitation
 				const email = isInvitationSignup ? invitation.email : value.email;
@@ -144,22 +141,23 @@ export default function SignUpForm({
 				const encryptedPrivateKey = await encrypt(privateKey, masterUnlockKey);
 
 				// 5. Generate vault key and encrypt it
-				const vaultKey = generateEncryptionKey();
+				const vaultKey = await generateEncryptionKey();
 				const encryptedVaultKey = await encrypt(
 					arrayBufferToBase64(vaultKey),
 					masterUnlockKey,
 				);
 
-				// 6. Call signup mutation
-				// Don't include organizationName if signing up via invitation
-				// (the user will join the inviting team instead)
+				// 6. Get secret key hint
+				const secretKeyHintValue = getSecretKeyHint(secretKey);
+
+				// 7. Call signup mutation
 				const result = await signupMutation.mutateAsync({
 					email,
 					name: value.name,
-					...(isInvitationSignup
-						? {}
-						: { organizationName: value.organizationName }),
-					secretKeyHint: getSecretKeyHint(secretKey),
+					...(value.accountType === "organization" && value.organizationName
+						? { organizationName: value.organizationName }
+						: {}),
+					secretKeyHint: secretKeyHintValue,
 					srpSalt: salt,
 					srpVerifier: verifier,
 					publicKey,
@@ -168,19 +166,26 @@ export default function SignUpForm({
 				});
 
 				// 7. Store Master Unlock Key in memory
-				storeMasterUnlockKey(masterUnlockKey);
+				await storage.setMasterUnlockKey(masterUnlockKey);
 
 				// 8. Store encrypted private key for RSA decryption of shared vault keys
-				storeEncryptedPrivateKey(JSON.stringify(encryptedPrivateKey));
+				await storage.storeEncryptedPrivateKey(
+					JSON.stringify(encryptedPrivateKey),
+				);
 
 				// 9. Store secret key and encrypted session for quick unlock
-				storeSecretKey(secretKey);
-				await storeSessionData(masterUnlockKey, email, result.userId);
+				await storage.storeSecretKey(secretKey);
+				await storage.storeSessionData(
+					masterUnlockKey,
+					email,
+					result.userId,
+					undefined,
+					result.sessionId,
+				);
 
-				const timeUntil = getTimeUntilExpiry();
-				const daysUntil = timeUntil
-					? Math.floor(timeUntil / (1000 * 60 * 60 * 24))
-					: 0;
+				const daysUntil = Math.floor(
+					DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24),
+				);
 
 				toast.success(
 					`Account created! Quick unlock available for ${daysUntil} days.`,
@@ -188,6 +193,8 @@ export default function SignUpForm({
 			} catch (error: any) {
 				console.error("Signup error:", error);
 				toast.error(error.message || "Failed to create account");
+			} finally {
+				setIsEncrypting(false);
 			}
 		},
 	});
@@ -342,13 +349,13 @@ Generated: ${new Date().toLocaleString()}
 									type="url"
 									placeholder="https://your-server.com"
 									value={serverUrl}
-									onBlur={() => {
+									onBlur={async () => {
 										const normalized = normalizeServerUrl(serverUrl);
 										if (!normalized) {
 											toast.error("Invalid server URL");
 											return;
 										}
-										storeServerUrl(normalized);
+										await storage.storeServerUrl(normalized);
 										if (normalized !== serverUrl) {
 											setServerUrl(normalized);
 										}
@@ -407,24 +414,77 @@ Generated: ${new Date().toLocaleString()}
 								</div>
 							</div>
 						) : (
-							<div>
-								<form.Field name="organizationName">
+							<div className="space-y-4">
+								<form.Field name="accountType">
 									{(field) => (
-										<div className="space-y-2">
-											<Label htmlFor={field.name}>Organization Name</Label>
-											<Input
-												id={field.name}
-												name={field.name}
-												placeholder="Acme Inc."
-												value={field.state.value}
-												onBlur={field.handleBlur}
-												onChange={(e) => field.handleChange(e.target.value)}
-												required
-												className="h-10"
-											/>
+										<div className="space-y-3">
+											<Label>Account Type</Label>
+											<div className="grid grid-cols-2 gap-3">
+												<Button
+													type="button"
+													variant={
+														field.state.value === "personal"
+															? "default"
+															: "outline"
+													}
+													className="h-auto flex-col items-start gap-1 p-4"
+													onClick={() => field.handleChange("personal")}
+												>
+													<span className="font-medium">Personal</span>
+													<span className="text-left font-normal text-muted-foreground text-xs">
+														For individual use
+													</span>
+												</Button>
+												<Button
+													type="button"
+													variant={
+														field.state.value === "organization"
+															? "default"
+															: "outline"
+													}
+													className="h-auto flex-col items-start gap-1 p-4"
+													onClick={() => field.handleChange("organization")}
+												>
+													<span className="font-medium">Organization</span>
+													<span className="text-left font-normal text-muted-foreground text-xs">
+														For teams and companies
+													</span>
+												</Button>
+											</div>
 										</div>
 									)}
 								</form.Field>
+
+								<form.Subscribe selector={(state) => state.values.accountType}>
+									{(accountType) =>
+										accountType === "organization" ? (
+											<form.Field name="organizationName">
+												{(field) => (
+													<div className="space-y-2">
+														<Label htmlFor={field.name}>
+															Organization Name
+														</Label>
+														<Input
+															id={field.name}
+															name={field.name}
+															placeholder="Acme Inc."
+															value={field.state.value}
+															onBlur={field.handleBlur}
+															onChange={(e) =>
+																field.handleChange(e.target.value)
+															}
+															required
+															className="h-10"
+														/>
+														<p className="text-[0.8rem] text-muted-foreground">
+															This will be the name of your team workspace
+														</p>
+													</div>
+												)}
+											</form.Field>
+										) : null
+									}
+								</form.Subscribe>
 							</div>
 						)}
 
@@ -501,11 +561,13 @@ Generated: ${new Date().toLocaleString()}
 							<Button
 								type="submit"
 								className="h-10 w-full"
-								disabled={signupMutation.isPending}
+								disabled={isEncrypting || signupMutation.isPending}
 							>
-								{signupMutation.isPending
-									? "Creating Account..."
-									: "Create Account"}
+								{isEncrypting
+									? "Encrypting..."
+									: signupMutation.isPending
+										? "Creating Account..."
+										: "Create Account"}
 							</Button>
 						</div>
 

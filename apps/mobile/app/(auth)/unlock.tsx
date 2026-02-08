@@ -1,12 +1,20 @@
-import { deriveKeys, arrayBufferToBase64 } from "@bittery/crypto/key-derivation";
 import {
-	deriveClientSession,
-	generateClientEphemeral,
-	verifyServerSession,
-} from "@bittery/crypto/srp-client";
-import type { AccountMetadata } from "@bittery/crypto/storage-react-native";
+	useBiometricUnlock,
+	usePlatformStorage,
+	useQuickUnlock,
+	useQuickUnlockAll,
+	useSessionState,
+} from "@bittery/core/hooks";
 import { useRouter } from "expo-router";
-import CredentialProvider from "../../modules/credential-provider";
+import {
+	Avatar,
+	Button,
+	Input,
+	Label,
+	Select,
+	TextField,
+	useToast,
+} from "heroui-native";
 import {
 	AlertCircle,
 	ChevronDown,
@@ -17,177 +25,262 @@ import {
 	Lock,
 	ScanFace,
 	UserPlus,
+	Users,
 } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import {
 	Alert,
 	KeyboardAvoidingView,
-	Modal,
 	Platform,
+	Pressable,
 	ScrollView,
 	Text,
-	TextInput,
-	TouchableOpacity,
 	View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { withUniwind } from "uniwind";
+import { SafeAreaView } from "@/components/safe-area-view";
 
+// Create styled icon components
+const StyledLock = withUniwind(Lock);
+const StyledEye = withUniwind(Eye);
+const StyledEyeOff = withUniwind(EyeOff);
+const StyledFingerprint = withUniwind(Fingerprint);
+const StyledScanFace = withUniwind(ScanFace);
+const StyledKeyRound = withUniwind(KeyRound);
+const StyledAlertCircle = withUniwind(AlertCircle);
+const StyledUserPlus = withUniwind(UserPlus);
+const StyledChevronDown = withUniwind(ChevronDown);
+const StyledUsers = withUniwind(Users);
+
+import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
-import { useServerUrl, useTRPCClient } from "../../src/lib/trpc";
-import * as storage from "../../src/services/storage";
+import { arrayBufferToBase64 } from "../../src/lib/crypto";
+import { useServerUrl } from "../../src/lib/trpc";
+import {
+	type AccountMetadata,
+	getBiometricErrorMessage,
+	storage,
+} from "../../src/services/storage";
 
 export default function UnlockScreen() {
 	const router = useRouter();
-	const trpcClient = useTRPCClient();
+	const { toast } = useToast();
+	const platformStorage = usePlatformStorage();
 	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
-	const { allAccounts, activeAccount, refreshAccounts } = useAccount();
+	const {
+		allAccounts,
+		activeAccount,
+		activeAccountConfig,
+		isAllAccountsMode,
+		refreshAccounts,
+	} = useAccount();
 
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
-	const [loading, setLoading] = useState(false);
-	const [showAccountPicker, setShowAccountPicker] = useState(false);
 	const [targetAccount, setTargetAccount] = useState<AccountMetadata | null>(
 		null,
 	);
-	const [biometricState, setBiometricState] = useState<{
-		available: boolean;
-		enabled: boolean;
-		type: string | null;
-		requiresMasterPassword: boolean;
-	}>({ available: false, enabled: false, type: null, requiresMasterPassword: false });
+	const [unlockMode, setUnlockMode] = useState<"single" | "all">(
+		isAllAccountsMode ? "all" : "single",
+	);
+	const [selectedAccountValue, setSelectedAccountValue] = useState<{
+		value: string;
+		label: string;
+	}>({ value: "", label: "" });
+	const [allAccountsStatus, setAllAccountsStatus] = useState<{
+		canBiometricUnlock: boolean;
+		requiresPasswordReentry: boolean;
+		isLoading: boolean;
+	}>({
+		canBiometricUnlock: false,
+		requiresPasswordReentry: false,
+		isLoading: false,
+	});
+	const [biometricType, setBiometricType] = useState<string | null>(null);
 	const [biometricError, setBiometricError] = useState<string | null>(null);
 
-	const loadBiometricState = useCallback(async (email: string) => {
-		const available = await storage.isBiometricAvailable();
-		const enabled = await storage.isBiometricEnabled(email);
-		const type = available ? await storage.getBiometricType() : null;
-		const requiresMasterPassword = await storage.isMasterPasswordReentryRequired(email);
-		setBiometricState({ available, enabled, type, requiresMasterPassword });
+	// Get session state for the target account
+	const { data: sessionState, refetch: refetchSessionState } = useSessionState(
+		targetAccount?.email,
+		{ enabled: unlockMode === "single" && !!targetAccount },
+	);
+
+	// Load biometric type on mount
+	const loadBiometricType = useCallback(async () => {
+		const type = await platformStorage.getBiometricType?.();
+		setBiometricType(type ?? null);
+	}, [platformStorage]);
+
+	const setNativeMuksForEmails = useCallback(async (emails: string[]) => {
+		if (Platform.OS !== "android" || !CredentialProvider.isAvailable()) return;
+
+		for (const email of emails) {
+			const muk = await storage.getMasterUnlockKey(email);
+			const sessionData = await storage.getStoredSessionData(email);
+			if (muk && sessionData?.userId) {
+				const mukBase64 = arrayBufferToBase64(muk);
+				CredentialProvider.setMasterUnlockKey(mukBase64, sessionData.userId);
+			}
+		}
 	}, []);
 
 	useEffect(() => {
-		if (activeAccount) {
+		if (activeAccount && unlockMode === "single") {
 			setTargetAccount(activeAccount);
-			loadBiometricState(activeAccount.email);
+			setSelectedAccountValue({
+				value: activeAccount.email,
+				label:
+					activeAccount.teamName ||
+					activeAccount.name ||
+					activeAccount.email.split("@")[0],
+			});
 		}
-	}, [activeAccount, loadBiometricState]);
-
-	const handleBiometricUnlock = async () => {
-		if (!targetAccount) return;
-
-		// Check if master password is required first
-		if (biometricState.requiresMasterPassword) {
-			setBiometricError(
-				"For your security, please enter your master password. This is required every 30 days.",
-			);
-			return;
+		if (!activeAccount && unlockMode === "single" && allAccounts.length > 0) {
+			setTargetAccount(allAccounts[0]);
+			setSelectedAccountValue({
+				value: allAccounts[0].email,
+				label:
+					allAccounts[0].teamName ||
+					allAccounts[0].name ||
+					allAccounts[0].email.split("@")[0],
+			});
 		}
+	}, [activeAccount, allAccounts, unlockMode]);
 
-		setLoading(true);
-		setBiometricError(null);
+	useEffect(() => {
+		if (activeAccountConfig?.type === "all") {
+			setUnlockMode("all");
+			setTargetAccount(null);
+			setSelectedAccountValue({
+				value: "all",
+				label: "All Accounts",
+			});
+		}
+	}, [activeAccountConfig]);
 
-		try {
-			// Use enhanced biometric auth for better error handling
-			const result = await storage.authenticateWithBiometricEnhanced(
-				"Unlock Bittery",
-				targetAccount.email,
-			);
+	useEffect(() => {
+		if (unlockMode === "all") {
+			setPassword("");
+			setBiometricError(null);
+		}
+	}, [unlockMode]);
 
-			if (result.success) {
-				// Restore auth token and vault keys
-				const token = await storage.getAuthToken(targetAccount.email);
-				const vaultKeys = await storage.getVaultKeys(targetAccount.email);
+	useEffect(() => {
+		if (unlockMode === "all" || targetAccount) {
+			loadBiometricType();
+		}
+	}, [unlockMode, targetAccount, loadBiometricType]);
 
-				if (token && vaultKeys) {
-					// Decrypt and store master unlock key
-					const masterUnlockKey = await storage.decryptStoredMasterUnlockKey(
-						true, // Skip biometric since we just authenticated
+	useEffect(() => {
+		if (unlockMode !== "all") return;
+		let cancelled = false;
+
+		const loadAllAccountsStatus = async () => {
+			setAllAccountsStatus((prev) => ({ ...prev, isLoading: true }));
+			const emails = allAccounts.map((account) => account.email);
+			if (emails.length === 0) {
+				setAllAccountsStatus({
+					canBiometricUnlock: false,
+					requiresPasswordReentry: false,
+					isLoading: false,
+				});
+				return;
+			}
+
+			const [biometricFlags, reentryFlags] = await Promise.all([
+				Promise.all(emails.map((email) => storage.canBiometricUnlock(email))),
+				Promise.all(
+					emails.map((email) => storage.isMasterPasswordReentryRequired(email)),
+				),
+			]);
+
+			if (cancelled) return;
+
+			setAllAccountsStatus({
+				canBiometricUnlock: biometricFlags.some(Boolean),
+				requiresPasswordReentry: reentryFlags.some(Boolean),
+				isLoading: false,
+			});
+		};
+
+		loadAllAccountsStatus();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [unlockMode, allAccounts]);
+
+	// Biometric unlock hook
+	const biometricUnlock = useBiometricUnlock({
+		onSuccess: async () => {
+			if (!targetAccount) return;
+
+			// Restore auth token and vault keys
+			const token = await storage.getAuthToken(targetAccount.email);
+			const vaultKeys = await storage.getVaultKeys(targetAccount.email);
+
+			if (token && vaultKeys) {
+				// Decrypt and store master unlock key
+				const masterUnlockKey = await storage.decryptStoredMasterUnlockKey(
+					targetAccount.email,
+					true, // Skip biometric since we just authenticated
+				);
+
+				if (masterUnlockKey) {
+					await storage.storeMasterUnlockKey(
+						masterUnlockKey,
 						targetAccount.email,
 					);
 
-					if (masterUnlockKey) {
-						await storage.storeMasterUnlockKey(
-							masterUnlockKey,
-							targetAccount.email,
-						);
-
-						// Set MUK in native CredentialProvider for autofill decryption
-						if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-							const mukBase64 = arrayBufferToBase64(masterUnlockKey);
-							CredentialProvider.setMasterUnlockKey(mukBase64);
-						}
-					}
-
-					// Load server URL for this account
-					const serverUrl = await storage.getServerUrl(targetAccount.email);
-					if (serverUrl) {
-						setGlobalServerUrl(serverUrl);
-					}
-
-					// Set as active account
-					await storage.setActiveAccount(targetAccount.email);
-					await refreshAccounts();
-
-					router.replace("/(vault)");
-				} else {
-					Alert.alert(
-						"Session Expired",
-						"Please log in again with your credentials.",
-					);
-					await storage.clearAllStoredData(targetAccount.email);
-					router.replace("/(auth)/login");
+					await setNativeMuksForEmails([targetAccount.email]);
 				}
+
+				// Load server URL for this account
+				const serverUrl = await storage.getServerUrl(targetAccount.email);
+				if (serverUrl) {
+					setGlobalServerUrl(serverUrl);
+				}
+
+				// Set as active account
+				await storage.setActiveAccount({
+					type: "single",
+					email: targetAccount.email,
+				});
+				await refreshAccounts();
+
+				router.replace("/(vault)");
 			} else {
-				// Show specific error message
-				const errorMessage = result.message || storage.getBiometricErrorMessage(result.error || "unknown");
-
-				if (result.error === "master_password_required") {
-					setBiometricError(errorMessage);
-					// Update state to reflect this
-					setBiometricState((prev) => ({ ...prev, requiresMasterPassword: true }));
-				} else if (result.error === "lockout") {
-					setBiometricError(errorMessage);
-				} else if (result.error === "user_cancelled") {
-					// User cancelled, don't show error
-				} else {
-					setBiometricError(errorMessage);
-				}
-			}
-		} catch (error) {
-			console.error("Biometric unlock error:", error);
-			setBiometricError("An unexpected error occurred. Please try again or use your password.");
-		} finally {
-			setLoading(false);
-		}
-	};
-
-	const handlePasswordUnlock = async () => {
-		if (!targetAccount || !password.trim()) {
-			Alert.alert("Error", "Please enter your password");
-			return;
-		}
-
-		setLoading(true);
-		setBiometricError(null);
-
-		try {
-			const secretKey = await storage.getStoredSecretKey(targetAccount.email);
-			if (!secretKey) {
-				Alert.alert("Error", "Secret key not found. Please log in again.");
+				Alert.alert(
+					"Session Expired",
+					"Please log in again with your credentials.",
+				);
 				await storage.clearAllStoredData(targetAccount.email);
 				router.replace("/(auth)/login");
-				return;
 			}
+		},
+		onError: (error) => {
+			// Show specific error message
+			const errorMessage =
+				error.message || getBiometricErrorMessage(error.type || "unknown");
 
-			const sessionData = await storage.getStoredSessionData(
-				targetAccount.email,
-			);
-			if (!sessionData) {
-				Alert.alert("Error", "Session data not found. Please log in again.");
-				await storage.clearAllStoredData(targetAccount.email);
-				router.replace("/(auth)/login");
-				return;
+			if (error.type === "master_password_required") {
+				setBiometricError(errorMessage);
+				// Refetch session state to update requiresPasswordReentry
+				refetchSessionState();
+			} else if (error.type === "lockout") {
+				setBiometricError(errorMessage);
+			} else if (error.type === "user_cancelled") {
+				// User cancelled, don't show error
+			} else {
+				setBiometricError(errorMessage);
 			}
+		},
+	});
+
+	// Quick unlock (password) hook
+	const quickUnlock = useQuickUnlock({
+		onSuccess: async (result) => {
+			if (!targetAccount) return;
 
 			// Load server URL for this account
 			const serverUrl = await storage.getServerUrl(targetAccount.email);
@@ -195,89 +288,24 @@ export default function UnlockScreen() {
 				setGlobalServerUrl(serverUrl);
 			}
 
-			// 1. Derive keys from password + secret key
-			const { authKey, masterUnlockKey } = await deriveKeys(
-				password,
-				secretKey,
-				targetAccount.email,
-			);
-
-			// Convert authKey to password string for SRP
-			const srpPassword = new TextDecoder().decode(authKey);
-
-			// 2. Generate client ephemeral key pair
-			const clientEphemeral = generateClientEphemeral();
-
-			// 3. Send client public key to server and get challenge
-			const startResult = await trpcClient.auth.startLogin.mutate({
-				email: targetAccount.email,
-				clientPublicKey: clientEphemeral.publicKey,
-			});
-
-			// 4. Derive session and compute proof
-			const clientSession = await deriveClientSession(
-				clientEphemeral.secret,
-				{
-					salt: startResult.salt,
-					serverPublicKey: startResult.serverPublicKey,
-				},
-				srpPassword,
-			);
-
-			// 5. Send proof to server and get session
-			const finishResult = await trpcClient.auth.finishLogin.mutate({
-				userId: startResult.userId,
-				serverSecret: startResult.serverSecret,
-				clientPublicKey: clientEphemeral.publicKey,
-				clientProof: clientSession.proof,
-			});
-
-			if (!finishResult.serverProof) {
-				Alert.alert("Error", "Unlock failed - invalid credentials");
-				return;
-			}
-
-			// 6. Verify server's proof
-			await verifyServerSession(
-				clientEphemeral.publicKey,
-				clientSession,
-				finishResult.serverProof,
-			);
-
-			// Update session with fresh data
-			await storage.storeAuthToken(finishResult.token, targetAccount.email);
-			await storage.storeVaultKeys(finishResult.vaultKeys, targetAccount.email);
-
-			if (finishResult.user.encryptedPrivateKey) {
-				await storage.storeEncryptedPrivateKey(
-					finishResult.user.encryptedPrivateKey,
-					targetAccount.email,
-				);
-			}
-
-			await storage.storeSessionData(
-				masterUnlockKey,
-				targetAccount.email,
-				finishResult.user.id,
-			);
-			await storage.storeMasterUnlockKey(masterUnlockKey, targetAccount.email);
-
-			// Update last master password entry timestamp (for 30-day re-entry requirement)
-			await storage.updateLastMasterPasswordEntry(targetAccount.email);
-
 			// Set MUK in native CredentialProvider for autofill decryption
 			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-				const mukBase64 = arrayBufferToBase64(masterUnlockKey);
-				CredentialProvider.setMasterUnlockKey(mukBase64);
+				await setNativeMuksForEmails([targetAccount.email]);
 
 				// Update 30-day master password entry timestamp in native
 				CredentialProvider.updateLastMasterPasswordEntry();
 
 				// Escrow MUK with biometric for future quick unlocks
-				if (biometricState.available && biometricState.enabled) {
+				const biometricAvailable =
+					await platformStorage.isBiometricAvailable?.();
+				const biometricEnabled = await platformStorage.isBiometricEnabled?.(
+					targetAccount.email,
+				);
+				if (biometricAvailable && biometricEnabled) {
 					try {
 						await CredentialProvider.escrowMukWithBiometric({
 							email: targetAccount.email,
+							userId: result.user.id,
 						});
 					} catch (escrowError) {
 						// Escrow is optional, don't fail the unlock
@@ -289,32 +317,186 @@ export default function UnlockScreen() {
 			// Update account metadata
 			const updatedMetadata: AccountMetadata = {
 				...targetAccount,
-				teamName: finishResult.user.teamName,
+				teamName: result.user.teamName,
 				lastActiveAt: Date.now(),
 			};
 			await storage.addAccountToList(updatedMetadata);
 
-			// Set as active account
-			await storage.setActiveAccount(targetAccount.email);
+			// Refresh account context
 			await refreshAccounts();
 
 			router.replace("/(vault)");
-		} catch (error) {
+		},
+		onError: (error) => {
 			console.error("Unlock error:", error);
 			Alert.alert(
 				"Error",
 				error instanceof Error ? error.message : "Unlock failed",
 			);
-		} finally {
-			setLoading(false);
+		},
+	});
+
+	const finalizeAllAccountsUnlock = useCallback(
+		async (
+			result: {
+				unlocked: string[];
+				failed: Array<{ email: string; error: string }>;
+			},
+			showPartialToast: boolean,
+		) => {
+			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
+				await setNativeMuksForEmails(result.unlocked);
+			}
+
+			if (allAccounts.length > 1) {
+				await storage.setActiveAccount({ type: "all" });
+			} else if (result.unlocked.length === 1) {
+				await storage.setActiveAccount({
+					type: "single",
+					email: result.unlocked[0],
+				});
+			}
+
+			await refreshAccounts();
+
+			if (showPartialToast) {
+				toast.show({
+					variant: "warning",
+					label: `Unlocked ${result.unlocked.length} of ${allAccounts.length} accounts`,
+					placement: "bottom",
+				});
+			}
+
+			router.replace("/(vault)");
+		},
+		[
+			allAccounts.length,
+			refreshAccounts,
+			router,
+			setNativeMuksForEmails,
+			toast,
+		],
+	);
+
+	const quickUnlockAll = useQuickUnlockAll({
+		onSuccess: async (result) => {
+			await finalizeAllAccountsUnlock(result, false);
+		},
+		onPartialSuccess: async (result) => {
+			await finalizeAllAccountsUnlock(result, true);
+		},
+		onError: (error) => {
+			console.error("Unlock all error:", error);
+			Alert.alert("Error", error.message || "Unlock failed");
+		},
+	});
+
+	const handleBiometricUnlock = async () => {
+		if (unlockMode === "all") {
+			if (allAccountsStatus.requiresPasswordReentry) {
+				setBiometricError(
+					"For your security, please enter your master password. This is required every 30 days.",
+				);
+				return;
+			}
+
+			setBiometricError(null);
+
+			if (!storage.unlockAllAccountsWithBiometric) {
+				setBiometricError("Biometric unlock is not available.");
+				return;
+			}
+
+			try {
+				const result = await storage.unlockAllAccountsWithBiometric();
+				if (result.unlocked.length === 0) {
+					setBiometricError("Biometric authentication failed.");
+					return;
+				}
+				await finalizeAllAccountsUnlock(result, result.failed.length > 0);
+			} catch (error) {
+				console.error("Biometric unlock all failed:", error);
+				setBiometricError("Biometric authentication failed.");
+			}
+			return;
 		}
+
+		if (!targetAccount) return;
+
+		// Check if master password is required first (UI-level check for immediate feedback)
+		if (sessionState?.requiresPasswordReentry) {
+			setBiometricError(
+				"For your security, please enter your master password. This is required every 30 days.",
+			);
+			return;
+		}
+
+		setBiometricError(null);
+		biometricUnlock.mutate({ email: targetAccount.email });
 	};
 
-	const handleSwitchAccount = async (account: AccountMetadata) => {
-		setShowAccountPicker(false);
-		setTargetAccount(account);
+	const handlePasswordUnlock = async () => {
+		if (unlockMode === "all") {
+			if (!password.trim()) {
+				Alert.alert("Error", "Please enter your password");
+				return;
+			}
+
+			setBiometricError(null);
+			quickUnlockAll.mutate({ password });
+			return;
+		}
+
+		if (!targetAccount || !password.trim()) {
+			Alert.alert("Error", "Please enter your password");
+			return;
+		}
+
+		setBiometricError(null);
+
+		// Load server URL for this account before making the request
+		const serverUrl = await storage.getServerUrl(targetAccount.email);
+		if (serverUrl) {
+			setGlobalServerUrl(serverUrl);
+		}
+
+		quickUnlock.mutate({
+			email: targetAccount.email,
+			password,
+		});
+	};
+
+	// Get initials from email or name
+	const getInitials = (account?: AccountMetadata | null) => {
+		if (!account) return "?";
+		if (account.name) {
+			const parts = account.name.split(" ");
+			if (parts.length >= 2) {
+				return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+			}
+			return account.name.substring(0, 2).toUpperCase();
+		}
+		return account.email.substring(0, 2).toUpperCase();
+	};
+
+	const handleAccountChange = (
+		option: { value: string; label: string } | undefined,
+	) => {
+		if (!option) return;
+
+		setSelectedAccountValue(option);
+		if (option.value === "all") {
+			setUnlockMode("all");
+			setTargetAccount(null);
+		} else {
+			const account = allAccounts.find((acc) => acc.email === option.value);
+			if (account) {
+				setUnlockMode("single");
+				setTargetAccount(account);
+			}
+		}
 		setPassword("");
-		await loadBiometricState(account.email);
+		setBiometricError(null);
 	};
 
 	// If no accounts, redirect to login
@@ -323,88 +505,206 @@ export default function UnlockScreen() {
 		return null;
 	}
 
+	const loading =
+		biometricUnlock.isPending ||
+		quickUnlock.isPending ||
+		quickUnlockAll.isPending;
+	const requiresPasswordReentry =
+		unlockMode === "all"
+			? allAccountsStatus.requiresPasswordReentry
+			: (sessionState?.requiresPasswordReentry ?? false);
+	const canUseBiometric =
+		unlockMode === "all"
+			? allAccountsStatus.canBiometricUnlock &&
+				!requiresPasswordReentry &&
+				!allAccountsStatus.isLoading
+			: sessionState?.canBiometricUnlock && !requiresPasswordReentry;
+
 	return (
 		<SafeAreaView className="flex-1 bg-background">
 			<KeyboardAvoidingView
 				behavior={Platform.OS === "ios" ? "padding" : "height"}
+				contentContainerClassName="flex-1"
 				className="flex-1"
 			>
 				<ScrollView
 					className="flex-1"
-					contentContainerStyle={{ flexGrow: 1 }}
+					contentContainerClassName="flex-1"
 					keyboardShouldPersistTaps="handled"
 				>
 					<View className="flex-1 justify-center px-6 py-8">
 						{/* Header */}
 						<View className="mb-8 items-center">
-							<View className="mb-4 h-20 w-20 items-center justify-center rounded-2xl bg-primary">
+							<Button
+								isIconOnly
+								variant="primary"
+								size="lg"
+								className="mb-4 h-20 w-20 rounded-2xl"
+								isDisabled
+							>
 								<Lock size={40} color="#fff" />
-							</View>
+							</Button>
 							<Text className="font-bold text-2xl text-foreground">
 								Unlock Bittery
 							</Text>
 						</View>
 
 						{/* Account Selector */}
-						{targetAccount && (
-							<View className="mb-6">
-								{allAccounts.length > 1 ? (
-									<TouchableOpacity
-										onPress={() => setShowAccountPicker(true)}
-										className="flex-row items-center justify-center rounded-lg border border-input bg-background px-4 py-3"
-									>
-										<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-primary">
-											<Text className="font-semibold text-primary-foreground">
-												{targetAccount.name.charAt(0).toUpperCase()}
-											</Text>
+						<View className="mb-6">
+							{allAccounts.length > 1 ? (
+								<Select
+									value={selectedAccountValue}
+									onValueChange={handleAccountChange}
+								>
+									<Select.Trigger>
+										<View className="flex-row items-center justify-center gap-3 rounded-2xl bg-surface px-4 py-3">
+											{unlockMode === "all" ? (
+												<Avatar size="md" alt="All Accounts">
+													<Avatar.Fallback>
+														<StyledUsers size={20} className="text-muted" />
+													</Avatar.Fallback>
+												</Avatar>
+											) : (
+												<Avatar
+													size="md"
+													alt={
+														targetAccount?.name ||
+														targetAccount?.email ||
+														"Account"
+													}
+												>
+													{targetAccount?.teamAvatarUrl && (
+														<Avatar.Image
+															source={{ uri: targetAccount.teamAvatarUrl }}
+														/>
+													)}
+													<Avatar.Fallback>
+														{getInitials(targetAccount)}
+													</Avatar.Fallback>
+												</Avatar>
+											)}
+											<View className="flex-1">
+												<Text className="font-medium text-foreground">
+													{unlockMode === "all"
+														? "All Accounts"
+														: targetAccount?.teamName ||
+															targetAccount?.name ||
+															targetAccount?.email.split("@")[0]}
+												</Text>
+												<Text className="text-muted text-sm">
+													{unlockMode === "all"
+														? `${allAccounts.length} accounts`
+														: targetAccount?.email}
+												</Text>
+											</View>
+											<StyledChevronDown size={20} className="text-muted" />
 										</View>
-										<View className="flex-1">
-											<Text className="font-medium text-foreground">
-												{targetAccount.teamName ||
-													targetAccount.name ||
-													targetAccount.email.split("@")[0]}
-											</Text>
-											<Text className="text-muted-foreground text-sm">
-												{targetAccount.email}
-											</Text>
-										</View>
-										<ChevronDown size={20} color="#6b7280" />
-									</TouchableOpacity>
-								) : (
+									</Select.Trigger>
+									<Select.Portal>
+										<Select.Overlay />
+										<Select.Content presentation="dialog">
+											<Select.ListLabel>Select Account</Select.ListLabel>
+											{allAccounts.length > 1 && (
+												<Select.Item value="all" label="All Accounts">
+													<View className="flex-row items-center gap-3">
+														<Avatar size="md" alt="All Accounts">
+															<Avatar.Fallback>
+																<StyledUsers size={20} className="text-muted" />
+															</Avatar.Fallback>
+														</Avatar>
+														<View className="flex-1">
+															<Select.ItemLabel />
+															<Text className="text-muted text-sm">
+																{allAccounts.length} accounts
+															</Text>
+														</View>
+													</View>
+													<Select.ItemIndicator />
+												</Select.Item>
+											)}
+											{allAccounts.map((account) => (
+												<Select.Item
+													key={account.email}
+													value={account.email}
+													label={
+														account.teamName ||
+														account.name ||
+														account.email.split("@")[0]
+													}
+												>
+													<View className="flex-row items-center gap-3">
+														<Avatar
+															size="md"
+															alt={account.name || account.email}
+														>
+															{account.teamAvatarUrl && (
+																<Avatar.Image
+																	source={{ uri: account.teamAvatarUrl }}
+																/>
+															)}
+															<Avatar.Fallback>
+																{getInitials(account)}
+															</Avatar.Fallback>
+														</Avatar>
+														<View className="flex-1">
+															<Select.ItemLabel />
+															<Text className="text-muted text-sm">
+																{account.email}
+															</Text>
+														</View>
+													</View>
+													<Select.ItemIndicator />
+												</Select.Item>
+											))}
+										</Select.Content>
+									</Select.Portal>
+								</Select>
+							) : (
+								targetAccount && (
 									<View className="items-center">
-										<View className="mb-2 h-12 w-12 items-center justify-center rounded-full bg-primary">
-											<Text className="font-semibold text-lg text-primary-foreground">
-												{targetAccount.name.charAt(0).toUpperCase()}
-											</Text>
+										<View className="mb-2">
+											<Avatar
+												size="lg"
+												alt={targetAccount.name || targetAccount.email}
+											>
+												{targetAccount.teamAvatarUrl && (
+													<Avatar.Image
+														source={{ uri: targetAccount.teamAvatarUrl }}
+													/>
+												)}
+												<Avatar.Fallback>
+													{getInitials(targetAccount)}
+												</Avatar.Fallback>
+											</Avatar>
 										</View>
 										<Text className="font-medium text-foreground">
 											{targetAccount.email}
 										</Text>
 									</View>
-								)}
-							</View>
-						)}
+								)
+							)}
+						</View>
 
 						{/* Master Password Required Notice */}
-						{biometricState.requiresMasterPassword && (
+						{requiresPasswordReentry && (
 							<View className="mb-4 flex-row items-start rounded-lg bg-amber-50 p-4">
-								<KeyRound size={20} color="#f59e0b" />
+								<StyledKeyRound size={20} className="text-amber-600" />
 								<View className="ml-3 flex-1">
 									<Text className="font-medium text-amber-800">
 										Password Required
 									</Text>
 									<Text className="text-amber-700 text-sm">
-										For your security, please enter your master password. This is
-										required every 30 days.
+										For your security, please enter your master password. This
+										is required every 30 days.
 									</Text>
 								</View>
 							</View>
 						)}
 
 						{/* Biometric Error Message */}
-						{biometricError && !biometricState.requiresMasterPassword && (
+						{biometricError && !requiresPasswordReentry && (
 							<View className="mb-4 flex-row items-start rounded-lg bg-red-50 p-4">
-								<AlertCircle size={20} color="#ef4444" />
+								<StyledAlertCircle size={20} className="text-red-500" />
 								<Text className="ml-3 flex-1 text-red-700 text-sm">
 									{biometricError}
 								</Text>
@@ -412,139 +712,92 @@ export default function UnlockScreen() {
 						)}
 
 						{/* Biometric Unlock */}
-						{biometricState.available &&
-							biometricState.enabled &&
-							!biometricState.requiresMasterPassword && (
-								<View className="mb-4">
-									<TouchableOpacity
-										onPress={handleBiometricUnlock}
-										disabled={loading}
-										className={`flex-row items-center justify-center rounded-lg border border-input py-4 ${
-											loading ? "opacity-50" : ""
-										}`}
-									>
-										{biometricState.type === "Face ID" ? (
-											<ScanFace size={24} color="#6b7280" />
+						{canUseBiometric && (
+							<View className="mb-4">
+								<Button
+									onPress={handleBiometricUnlock}
+									isDisabled={loading}
+									variant="secondary"
+									size="lg"
+								>
+									<View className="flex-row items-center">
+										{biometricType === "Face ID" ? (
+											<StyledScanFace size={24} className="text-muted" />
 										) : (
-											<Fingerprint size={24} color="#6b7280" />
+											<StyledFingerprint size={24} className="text-muted" />
 										)}
 										<Text className="ml-3 font-medium text-foreground">
 											{loading
 												? "Authenticating..."
-												: `Unlock with ${biometricState.type || "Biometric"}`}
+												: `Unlock with ${biometricType || "Biometric"}`}
 										</Text>
-									</TouchableOpacity>
-									<View className="my-4 flex-row items-center">
-										<View className="h-px flex-1 bg-border" />
-										<Text className="mx-4 text-muted-foreground">or</Text>
-										<View className="h-px flex-1 bg-border" />
 									</View>
+								</Button>
+								<View className="my-4 flex-row items-center">
+									<View className="h-px flex-1 bg-border" />
+									<Text className="mx-4 text-muted">or</Text>
+									<View className="h-px flex-1 bg-border" />
 								</View>
-							)}
+							</View>
+						)}
 
 						{/* Password Form */}
-						<View className="flex gap-5">
-							<View>
-								<Text className="mb-2 font-medium text-foreground text-sm">
-									Password
-								</Text>
-								<View className="flex-row items-center rounded-lg border border-input bg-background px-3">
-									<Lock size={20} color="#6b7280" />
-									<TextInput
-										className="ml-3 flex-1 py-3 text-foreground"
+						<View className="gap-4">
+							<TextField>
+								<Label>Password</Label>
+								<View className="w-full flex-row items-center">
+									<Input
 										placeholder="Enter your password"
 										value={password}
 										onChangeText={setPassword}
 										secureTextEntry={!showPassword}
 										textContentType="password"
 										autoFocus
+										className="flex-1 pr-12 pl-12"
 									/>
-									<TouchableOpacity
+									<StyledLock
+										size={20}
+										className="absolute left-3.5 text-muted"
+										pointerEvents="none"
+									/>
+									<Pressable
 										onPress={() => setShowPassword(!showPassword)}
+										className="absolute right-4"
 									>
 										{showPassword ? (
-											<EyeOff size={20} color="#6b7280" />
+											<StyledEyeOff size={20} className="text-muted" />
 										) : (
-											<Eye size={20} color="#6b7280" />
+											<StyledEye size={20} className="text-muted" />
 										)}
-									</TouchableOpacity>
+									</Pressable>
 								</View>
-							</View>
+							</TextField>
 
-							<TouchableOpacity
+							<Button
 								onPress={handlePasswordUnlock}
-								disabled={loading}
-								className={`rounded-lg py-4 ${
-									loading ? "bg-primary/50" : "bg-primary"
-								}`}
+								isDisabled={loading}
+								variant="primary"
+								size="lg"
 							>
-								<Text className="text-center font-semibold text-primary-foreground">
-									{loading ? "Unlocking..." : "Unlock"}
-								</Text>
-							</TouchableOpacity>
+								{loading ? "Unlocking..." : "Unlock"}
+							</Button>
 
-							<TouchableOpacity
+							<Button
 								onPress={() => router.push("/(auth)/login")}
-								className="mt-4 flex-row items-center justify-center"
+								variant="ghost"
+								className="mt-2"
 							>
-								<UserPlus size={16} color="#6b7280" />
-								<Text className="ml-2 text-muted-foreground">
-									Sign in with different account
-								</Text>
-							</TouchableOpacity>
+								<View className="flex-row items-center">
+									<StyledUserPlus size={16} className="text-muted" />
+									<Text className="ml-2 text-muted">
+										Sign in with different account
+									</Text>
+								</View>
+							</Button>
 						</View>
 					</View>
 				</ScrollView>
 			</KeyboardAvoidingView>
-
-			{/* Account Picker Modal */}
-			<Modal
-				visible={showAccountPicker}
-				transparent
-				animationType="slide"
-				onRequestClose={() => setShowAccountPicker(false)}
-			>
-				<TouchableOpacity
-					activeOpacity={1}
-					onPress={() => setShowAccountPicker(false)}
-					className="flex-1 justify-end bg-black/50"
-				>
-					<View className="rounded-t-3xl bg-background pb-8">
-						<View className="items-center py-4">
-							<View className="h-1 w-12 rounded-full bg-border" />
-						</View>
-						<Text className="mb-4 px-6 font-semibold text-foreground text-lg">
-							Select Account
-						</Text>
-						{allAccounts.map((account) => (
-							<TouchableOpacity
-								key={account.email}
-								onPress={() => handleSwitchAccount(account)}
-								className="flex-row items-center px-6 py-3"
-							>
-								<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-primary">
-									<Text className="font-semibold text-primary-foreground">
-										{account.name.charAt(0).toUpperCase()}
-									</Text>
-								</View>
-								<View className="flex-1">
-									<Text className="font-medium text-foreground">
-										{account.teamName ||
-											account.name ||
-											account.email.split("@")[0]}
-									</Text>
-									<Text className="text-muted-foreground text-sm">
-										{account.email}
-									</Text>
-								</View>
-								{account.email === targetAccount?.email && (
-									<View className="h-2 w-2 rounded-full bg-primary" />
-								)}
-							</TouchableOpacity>
-						))}
-					</View>
-				</TouchableOpacity>
-			</Modal>
 		</SafeAreaView>
 	);
 }

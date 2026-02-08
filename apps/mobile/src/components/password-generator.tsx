@@ -2,22 +2,33 @@ import {
 	generatePassword,
 	type PasswordOptions,
 } from "@bittery/shared/password";
+import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import Slider from "@react-native-community/slider";
 import * as Clipboard from "expo-clipboard";
-import { Check, Copy, RefreshCw, Sparkles, X } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { getRandomValues } from "expo-crypto";
 import {
-	Modal,
-	ScrollView,
-	Text,
-	TextInput,
-	TouchableOpacity,
-	View,
-} from "react-native";
+	BottomSheet,
+	Button,
+	ControlField,
+	Input,
+	Label,
+	Switch,
+	TextField,
+	useToast,
+} from "heroui-native";
+import { Check, Copy, RefreshCw, Sparkles } from "lucide-react-native";
+import { useCallback, useEffect, useState } from "react";
+import { Text, View } from "react-native";
+import { withUniwind } from "uniwind";
+
+// Create styled icon components
+const StyledCheck = withUniwind(Check);
+const StyledCopy = withUniwind(Copy);
+const StyledRefreshCw = withUniwind(RefreshCw);
+const StyledSparkles = withUniwind(Sparkles);
 
 interface PasswordGeneratorProps {
-	visible: boolean;
-	onClose: () => void;
+	children: React.ReactNode;
 	onPasswordGenerated: (password: string) => void;
 	defaultOptions?: PasswordOptions;
 }
@@ -85,8 +96,8 @@ function generateMemorablePassword(
 	includeNumber = true,
 ): string {
 	const words: string[] = [];
-	const randomValues = new Uint8Array(wordCount + 1);
-	crypto.getRandomValues(randomValues);
+	let randomValues = new Uint8Array(wordCount + 1);
+	randomValues = getRandomValues(randomValues);
 
 	for (let i = 0; i < wordCount; i++) {
 		const val = randomValues[i];
@@ -114,11 +125,12 @@ function generateMemorablePassword(
 }
 
 export function PasswordGenerator({
-	visible,
-	onClose,
+	children,
 	onPasswordGenerated,
 	defaultOptions,
 }: PasswordGeneratorProps) {
+	const { toast } = useToast();
+	const [isOpen, setIsOpen] = useState(false);
 	const [password, setPassword] = useState("");
 	const [copied, setCopied] = useState(false);
 	const [passwordType, setPasswordType] = useState<"random" | "memorable">(
@@ -130,6 +142,7 @@ export function PasswordGenerator({
 		uppercase: defaultOptions?.uppercase ?? true,
 		numbers: defaultOptions?.numbers ?? true,
 		symbols: defaultOptions?.symbols ?? true,
+		generateRandomValues: getRandomValues,
 	});
 
 	// Memorable password options
@@ -152,6 +165,12 @@ export function PasswordGenerator({
 			setCopied(true);
 			setTimeout(() => setCopied(false), 2000);
 
+			toast.show({
+				variant: "success",
+				label: "Password copied to clipboard",
+				placement: "bottom",
+			});
+
 			// Auto-clear clipboard after 30 seconds for security
 			setTimeout(async () => {
 				try {
@@ -166,7 +185,7 @@ export function PasswordGenerator({
 	const handleUse = () => {
 		if (password) {
 			onPasswordGenerated(password);
-			onClose();
+			setIsOpen(false);
 		}
 	};
 
@@ -209,28 +228,28 @@ export function PasswordGenerator({
 
 	const strength = getPasswordStrength();
 
-	// Generate initial password when modal opens
+	// Generate initial password when bottom sheet opens
 	useEffect(() => {
-		if (visible && !password) {
+		if (isOpen && !password) {
 			handleGenerate();
 		}
-	}, [visible, handleGenerate, password]);
+	}, [isOpen, handleGenerate, password]);
 
 	// Regenerate when password type or options change
 	// biome-ignore lint/correctness/useExhaustiveDependencies: Intentionally regenerate when these specific options change
 	useEffect(() => {
-		if (visible) {
+		if (isOpen) {
 			handleGenerate();
 		}
-	}, [passwordType, wordCount, includeNumber, visible, handleGenerate]);
+	}, [passwordType, wordCount, includeNumber, isOpen, handleGenerate]);
 
-	// Reset state when modal closes
+	// Reset state when bottom sheet closes
 	useEffect(() => {
-		if (!visible) {
+		if (!isOpen) {
 			setPassword("");
 			setCopied(false);
 		}
-	}, [visible]);
+	}, [isOpen]);
 
 	// At least one option must be enabled
 	const canToggleOption =
@@ -241,328 +260,282 @@ export function PasswordGenerator({
 			options.symbols,
 		].filter(Boolean).length > 1;
 
-	const renderCheckbox = (
-		label: string,
-		checked: boolean,
-		onToggle: (value: boolean) => void,
-		disabled?: boolean,
-	) => (
-		<TouchableOpacity
-			onPress={() => {
-				if (!disabled) {
-					onToggle(!checked);
-					// Regenerate after toggle
-					setTimeout(handleGenerate, 0);
-				}
-			}}
-			className="flex-row items-center justify-between py-2"
-			disabled={disabled}
-		>
-			<Text
-				className={`text-sm ${disabled ? "text-muted-foreground" : "text-foreground"}`}
-			>
-				{label}
-			</Text>
-			<View
-				className={`h-5 w-5 items-center justify-center rounded border ${
-					checked ? "border-primary bg-primary" : "border-input bg-background"
-				} ${disabled ? "opacity-50" : ""}`}
-			>
-				{checked && <Check size={14} color="#fff" />}
-			</View>
-		</TouchableOpacity>
-	);
-
 	return (
-		<Modal
-			visible={visible}
-			animationType="slide"
-			presentationStyle="pageSheet"
-			onRequestClose={onClose}
-		>
-			<View className="flex-1 bg-background">
-				{/* Header */}
-				<View className="flex-row items-center justify-between border-border border-b px-4 py-4">
-					<View className="flex-row items-center">
-						<Sparkles size={24} color="#6b7280" />
-						<Text className="ml-2 font-bold text-foreground text-xl">
+		<BottomSheet isOpen={isOpen} onOpenChange={setIsOpen}>
+			<BottomSheet.Trigger asChild>{children}</BottomSheet.Trigger>
+			<BottomSheet.Portal>
+				<BottomSheet.Overlay />
+				<BottomSheet.Content snapPoints={["90%"]}>
+					{/* Header */}
+					<View className="mb-4 flex-row items-center justify-center gap-2">
+						<StyledSparkles size={24} className="text-accent" />
+						<BottomSheet.Title className="text-xl">
 							Password Generator
-						</Text>
+						</BottomSheet.Title>
 					</View>
-					<TouchableOpacity
-						onPress={onClose}
-						className="rounded-full bg-secondary p-2"
-					>
-						<X size={20} color="#6b7280" />
-					</TouchableOpacity>
-				</View>
 
-				<ScrollView className="flex-1 px-4" keyboardShouldPersistTaps="handled">
-					{/* Password Type Selector */}
-					<View className="my-4">
-						<Text className="mb-2 font-medium text-foreground text-sm">
-							Password Type
-						</Text>
-						<View className="flex-row rounded-lg border border-input bg-background">
-							<TouchableOpacity
-								onPress={() => setPasswordType("random")}
-								className={`flex-1 items-center py-3 ${
-									passwordType === "random" ? "bg-primary" : ""
-								} rounded-l-lg`}
-							>
-								<Text
-									className={`font-medium text-sm ${
-										passwordType === "random"
-											? "text-primary-foreground"
-											: "text-foreground"
-									}`}
+					<BottomSheetScrollView className="flex-1 px-4">
+						{/* Password Type Selector */}
+						<View className="mb-4">
+							<Text className="mb-2 font-medium text-foreground text-sm">
+								Password Type
+							</Text>
+							<View className="flex-row gap-2">
+								<Button
+									variant={passwordType === "random" ? "primary" : "secondary"}
+									onPress={() => setPasswordType("random")}
+									className="flex-1"
 								>
 									Random
-								</Text>
-							</TouchableOpacity>
-							<TouchableOpacity
-								onPress={() => setPasswordType("memorable")}
-								className={`flex-1 items-center py-3 ${
-									passwordType === "memorable" ? "bg-primary" : ""
-								} rounded-r-lg`}
-							>
-								<Text
-									className={`font-medium text-sm ${
-										passwordType === "memorable"
-											? "text-primary-foreground"
-											: "text-foreground"
-									}`}
+								</Button>
+								<Button
+									variant={
+										passwordType === "memorable" ? "primary" : "secondary"
+									}
+									onPress={() => setPasswordType("memorable")}
+									className="flex-1"
 								>
 									Memorable
-								</Text>
-							</TouchableOpacity>
+								</Button>
+							</View>
 						</View>
-					</View>
 
-					{/* Generated Password Display */}
-					<View className="mb-4">
-						<Text className="mb-2 font-medium text-foreground text-sm">
-							Generated Password
-						</Text>
-						<View className="flex-row items-center gap-2">
-							<View className="flex-1 rounded-lg border border-input bg-secondary/30 px-4 py-3">
+						{/* Generated Password Display */}
+						<View className="mb-4">
+							<Text className="mb-2 font-medium text-foreground text-sm">
+								Generated Password
+							</Text>
+							<View className="flex-row items-center gap-2">
+								<View className="flex-1 rounded-xl border border-border bg-surface-secondary px-4 py-3">
+									<Text
+										className="font-mono text-foreground text-sm"
+										selectable
+										numberOfLines={2}
+									>
+										{password}
+									</Text>
+								</View>
+								<Button isIconOnly variant="secondary" onPress={handleGenerate}>
+									<StyledRefreshCw size={20} className="text-foreground" />
+								</Button>
+								<Button isIconOnly variant="secondary" onPress={handleCopy}>
+									{copied ? (
+										<StyledCheck size={20} className="text-success" />
+									) : (
+										<StyledCopy size={20} className="text-foreground" />
+									)}
+								</Button>
+							</View>
+						</View>
+
+						{/* Password Strength Indicator */}
+						<View className="mb-4 rounded-xl border border-border bg-surface-secondary p-3">
+							<View className="flex-row items-center justify-between">
+								<Text className="text-muted text-sm">Strength</Text>
 								<Text
-									className="font-mono text-foreground text-sm"
-									selectable
-									numberOfLines={2}
+									className="font-semibold text-sm"
+									style={{ color: strength.color }}
 								>
-									{password}
+									{strength.label}
 								</Text>
 							</View>
-							<TouchableOpacity
-								onPress={handleGenerate}
-								className="rounded-lg border border-input bg-background p-3"
-							>
-								<RefreshCw size={20} color="#6b7280" />
-							</TouchableOpacity>
-							<TouchableOpacity
-								onPress={handleCopy}
-								className="rounded-lg border border-input bg-background p-3"
-							>
-								{copied ? (
-									<Check size={20} color="#22c55e" />
-								) : (
-									<Copy size={20} color="#6b7280" />
-								)}
-							</TouchableOpacity>
+							<View className="mt-2 h-2 overflow-hidden rounded-full bg-surface">
+								<View
+									className="h-full rounded-full"
+									style={{
+										width: `${strength.score}%`,
+										backgroundColor: strength.color,
+									}}
+								/>
+							</View>
 						</View>
-					</View>
 
-					{/* Password Strength Indicator */}
-					<View className="mb-4">
-						<View className="flex-row items-center justify-between">
-							<Text className="text-muted-foreground text-sm">Strength:</Text>
-							<Text
-								className="font-medium text-sm"
-								style={{ color: strength.color }}
-							>
-								{strength.label}
-							</Text>
-						</View>
-						<View className="mt-2 h-2 overflow-hidden rounded-full bg-secondary">
-							<View
-								className="h-full rounded-full"
-								style={{
-									width: `${strength.score}%`,
-									backgroundColor: strength.color,
-								}}
-							/>
-						</View>
-					</View>
-
-					{/* Random Password Options */}
-					{passwordType === "random" && (
-						<>
-							{/* Length Slider */}
-							<View className="mb-4">
-								<View className="flex-row items-center justify-between">
-									<Text className="font-medium text-foreground text-sm">
-										Length
-									</Text>
-									<View className="flex-row items-center">
-										<TextInput
-											className="w-12 rounded-lg border border-input bg-background px-2 py-1 text-center text-foreground"
-											value={options.length.toString()}
-											onChangeText={(text) => {
-												const num = Number.parseInt(text, 10);
-												if (!Number.isNaN(num) && num >= 8 && num <= 64) {
-													updateOption("length", num);
-												}
+						{/* Random Password Options */}
+						{passwordType === "random" && (
+							<View className="mb-4 gap-4">
+								{/* Length Slider */}
+								<View>
+									<View className="mb-2 flex-row items-center justify-between">
+										<Text className="font-medium text-foreground text-sm">
+											Length
+										</Text>
+										<TextField className="w-16">
+											<Input
+												className="px-2 py-1 text-center"
+												value={options.length.toString()}
+												onChangeText={(text) => {
+													const num = Number.parseInt(text, 10);
+													if (!Number.isNaN(num) && num >= 8 && num <= 64) {
+														updateOption("length", num);
+													}
+												}}
+												keyboardType="numeric"
+												selectTextOnFocus
+											/>
+										</TextField>
+									</View>
+									<View className="flex-row items-center gap-2">
+										<Text className="text-muted text-xs">8</Text>
+										<Slider
+											style={{ flex: 1, height: 40 }}
+											minimumValue={8}
+											maximumValue={64}
+											step={1}
+											value={options.length}
+											onValueChange={(value) => {
+												updateOption("length", Math.round(value));
 											}}
-											keyboardType="numeric"
-											selectTextOnFocus
+											onSlidingComplete={() => {
+												handleGenerate();
+											}}
+											minimumTrackTintColor="#6366f1"
+											maximumTrackTintColor="#e5e7eb"
+											thumbTintColor="#6366f1"
 										/>
+										<Text className="text-muted text-xs">64</Text>
 									</View>
 								</View>
-								<View className="mt-2 flex-row items-center">
-									<Text className="mr-2 text-muted-foreground text-xs">8</Text>
-									<Slider
-										style={{ flex: 1, height: 40 }}
-										minimumValue={8}
-										maximumValue={64}
-										step={1}
-										value={options.length}
-										onValueChange={(value) => {
-											updateOption("length", Math.round(value));
-										}}
-										onSlidingComplete={() => {
-											handleGenerate();
-										}}
-										minimumTrackTintColor="#6366f1"
-										maximumTrackTintColor="#e5e7eb"
-										thumbTintColor="#6366f1"
-									/>
-									<Text className="ml-2 text-muted-foreground text-xs">64</Text>
-								</View>
-							</View>
 
-							{/* Character Type Options */}
-							<View className="mb-4">
-								<Text className="mb-2 font-medium text-foreground text-sm">
-									Include Characters
-								</Text>
-								<View className="rounded-lg border border-border bg-background px-4">
-									{renderCheckbox(
-										"Lowercase (a-z)",
-										options.lowercase,
-										(value) => {
-											if (canToggleOption || value) {
-												updateOption("lowercase", value);
-											}
-										},
-										!canToggleOption && options.lowercase,
-									)}
-									{renderCheckbox(
-										"Uppercase (A-Z)",
-										options.uppercase,
-										(value) => {
-											if (canToggleOption || value) {
-												updateOption("uppercase", value);
-											}
-										},
-										!canToggleOption && options.uppercase,
-									)}
-									{renderCheckbox(
-										"Numbers (0-9)",
-										options.numbers,
-										(value) => {
-											if (canToggleOption || value) {
-												updateOption("numbers", value);
-											}
-										},
-										!canToggleOption && options.numbers,
-									)}
-									{renderCheckbox(
-										"Symbols (!@#$%...)",
-										options.symbols,
-										(value) => {
-											if (canToggleOption || value) {
-												updateOption("symbols", value);
-											}
-										},
-										!canToggleOption && options.symbols,
-									)}
-								</View>
-							</View>
-						</>
-					)}
-
-					{/* Memorable Password Options */}
-					{passwordType === "memorable" && (
-						<>
-							<View className="mb-4">
-								<Text className="mb-2 font-medium text-foreground text-sm">
-									Number of Words
-								</Text>
-								<View className="flex-row rounded-lg border border-input bg-background">
-									{[3, 4, 5, 6].map((count) => (
-										<TouchableOpacity
-											key={count}
-											onPress={() => setWordCount(count)}
-											className={`flex-1 items-center py-3 ${
-												wordCount === count ? "bg-primary" : ""
-											} ${count === 3 ? "rounded-l-lg" : ""} ${
-												count === 6 ? "rounded-r-lg" : ""
-											}`}
+								{/* Character Type Options */}
+								<View>
+									<Text className="mb-2 font-medium text-foreground text-sm">
+										Include Characters
+									</Text>
+									<View className="gap-0 overflow-hidden rounded-xl border border-border">
+										<ControlField
+											isSelected={options.lowercase}
+											onSelectedChange={(value) => {
+												if (canToggleOption || value) {
+													updateOption("lowercase", value);
+													setTimeout(handleGenerate, 0);
+												}
+											}}
+											isDisabled={!canToggleOption && options.lowercase}
+											className="px-4 py-3"
 										>
-											<Text
-												className={`font-medium text-sm ${
-													wordCount === count
-														? "text-primary-foreground"
-														: "text-foreground"
-												}`}
+											<Label className="flex-1">Lowercase (a-z)</Label>
+											<ControlField.Indicator>
+												<Switch />
+											</ControlField.Indicator>
+										</ControlField>
+
+										<ControlField
+											isSelected={options.uppercase}
+											onSelectedChange={(value) => {
+												if (canToggleOption || value) {
+													updateOption("uppercase", value);
+													setTimeout(handleGenerate, 0);
+												}
+											}}
+											isDisabled={!canToggleOption && options.uppercase}
+											className="px-4 py-3"
+										>
+											<Label className="flex-1">Uppercase (A-Z)</Label>
+											<ControlField.Indicator>
+												<Switch />
+											</ControlField.Indicator>
+										</ControlField>
+
+										<ControlField
+											isSelected={options.numbers}
+											onSelectedChange={(value) => {
+												if (canToggleOption || value) {
+													updateOption("numbers", value);
+													setTimeout(handleGenerate, 0);
+												}
+											}}
+											isDisabled={!canToggleOption && options.numbers}
+											className="px-4 py-3"
+										>
+											<Label className="flex-1">Numbers (0-9)</Label>
+											<ControlField.Indicator>
+												<Switch />
+											</ControlField.Indicator>
+										</ControlField>
+
+										<ControlField
+											isSelected={options.symbols}
+											onSelectedChange={(value) => {
+												if (canToggleOption || value) {
+													updateOption("symbols", value);
+													setTimeout(handleGenerate, 0);
+												}
+											}}
+											isDisabled={!canToggleOption && options.symbols}
+											className="px-4 py-3"
+										>
+											<Label className="flex-1">Symbols (!@#$%...)</Label>
+											<ControlField.Indicator>
+												<Switch />
+											</ControlField.Indicator>
+										</ControlField>
+									</View>
+								</View>
+							</View>
+						)}
+
+						{/* Memorable Password Options */}
+						{passwordType === "memorable" && (
+							<View className="mb-4 gap-4">
+								<View>
+									<Text className="mb-2 font-medium text-foreground text-sm">
+										Number of Words
+									</Text>
+									<View className="flex-row gap-2">
+										{[3, 4, 5, 6].map((count) => (
+											<Button
+												key={count}
+												variant={wordCount === count ? "primary" : "secondary"}
+												onPress={() => setWordCount(count)}
+												className="flex-1"
 											>
 												{count}
-											</Text>
-										</TouchableOpacity>
-									))}
+											</Button>
+										))}
+									</View>
+								</View>
+
+								<View className="overflow-hidden rounded-xl border border-border">
+									<ControlField
+										isSelected={includeNumber}
+										onSelectedChange={setIncludeNumber}
+										className="px-4 py-3"
+									>
+										<Label className="flex-1">Include number at end</Label>
+										<ControlField.Indicator>
+											<Switch />
+										</ControlField.Indicator>
+									</ControlField>
+								</View>
+
+								<View className="rounded-xl bg-surface-secondary p-4">
+									<Text className="text-muted text-sm">
+										Memorable passwords use word combinations that are easier to
+										remember while still being secure. Example:
+										"Brave-Tiger-Golden-Phoenix-42"
+									</Text>
 								</View>
 							</View>
+						)}
 
-							<View className="mb-4">
-								<View className="rounded-lg border border-border bg-background px-4">
-									{renderCheckbox(
-										"Include number at end",
-										includeNumber,
-										setIncludeNumber,
-									)}
-								</View>
-							</View>
+						{/* Bottom padding */}
+						<View className="h-4" />
+					</BottomSheetScrollView>
 
-							<View className="mb-4 rounded-lg bg-secondary/50 p-4">
-								<Text className="text-muted-foreground text-sm">
-									Memorable passwords use word combinations that are easier to
-									remember while still being secure. Example:
-									"Brave-Tiger-Golden-Phoenix-42"
-								</Text>
-							</View>
-						</>
-					)}
-
-					{/* Bottom padding */}
-					<View className="h-4" />
-				</ScrollView>
-
-				{/* Bottom Action Button */}
-				<View className="border-border border-t px-4 py-4">
-					<TouchableOpacity
-						onPress={handleUse}
-						disabled={!password}
-						className={`rounded-lg py-4 ${
-							password ? "bg-primary" : "bg-primary/50"
-						}`}
-					>
-						<Text className="text-center font-semibold text-base text-primary-foreground">
+					{/* Bottom Action Button */}
+					<View className="border-border border-t px-4 py-4">
+						<Button
+							variant="primary"
+							onPress={handleUse}
+							isDisabled={!password}
+							size="lg"
+							className="w-full"
+						>
 							Use This Password
-						</Text>
-					</TouchableOpacity>
-				</View>
-			</View>
-		</Modal>
+						</Button>
+					</View>
+				</BottomSheet.Content>
+			</BottomSheet.Portal>
+		</BottomSheet>
 	);
 }

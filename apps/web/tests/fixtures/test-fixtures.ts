@@ -30,7 +30,7 @@ export interface TestUser {
 export function generateTestUser(): TestUser {
 	const uniqueId = nanoid(8);
 	return {
-		email: `e2e-test-${uniqueId}@test.bittery.io`,
+		email: `e2e-test-${uniqueId}@test.bittery.com`,
 		password: "TestPassword123!@#",
 		secretKey: "", // Will be captured during signup
 		name: `E2E Test User ${uniqueId}`,
@@ -183,7 +183,10 @@ export class BitteryPage {
 	/**
 	 * Fill signup form fields (step 2: after acknowledging secret key)
 	 */
-	async fillSignupForm(user: Omit<TestUser, "secretKey">) {
+	async fillSignupForm(
+		user: Omit<TestUser, "secretKey">,
+		accountType: "personal" | "organization" = "organization",
+	) {
 		// Fill server URL if it's empty or default
 		const serverUrlInput = this.page.locator("#serverUrl");
 		const currentValue = await serverUrlInput.inputValue();
@@ -193,7 +196,19 @@ export class BitteryPage {
 
 		// Fill the form fields
 		await this.page.fill("#name", user.name);
-		await this.page.fill("#organizationName", user.organizationName);
+
+		// Select account type
+		if (accountType === "organization") {
+			await this.page.click('button:has-text("Organization")');
+			// Wait for organization name field to appear
+			await this.page.waitForSelector("#organizationName", {
+				state: "visible",
+			});
+			await this.page.fill("#organizationName", user.organizationName);
+		} else {
+			await this.page.click('button:has-text("Personal")');
+		}
+
 		await this.page.fill("#email", user.email);
 		await this.page.fill("#password", user.password);
 	}

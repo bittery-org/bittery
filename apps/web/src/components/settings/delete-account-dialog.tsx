@@ -1,4 +1,3 @@
-import { clearAllStoredData } from "@bittery/crypto/session-storage";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	AlertDialog,
@@ -18,6 +17,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Trash2 } from "lucide-react";
 import { useState } from "react";
+import { storage } from "@/lib/storage";
 
 export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 	const [open, setOpen] = useState(false);
@@ -29,8 +29,8 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 	const deleteAccountMutation = useMutation({
 		mutationFn: (input: { confirmEmail: string }) =>
 			trpcClient.auth.deleteAccount.mutate(input),
-		onSuccess: () => {
-			clearAllStoredData();
+		onSuccess: async () => {
+			await storage.clearAllStoredData();
 			toast.success("Account deleted successfully");
 			navigate({ to: "/" });
 		},

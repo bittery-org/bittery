@@ -11,45 +11,32 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { db } from "@bittery/db";
 import { vaultRouter } from "../routers/vault";
 import {
 	addVaultMember,
-	cleanupTestData,
 	countVaultItems,
-	createAuthenticatedContext,
 	createTestItem,
-	createTestSession,
-	createTestUser,
 	createTestVault,
-	generateTestEmail,
 	getItem,
 	getVault,
 	getVaultKey,
 	mockItemData,
 	mockSrpData,
+	setup,
+	truncateAll,
 } from "./test-utils";
 
 describe("Vault Router", () => {
-	const testUserIds: string[] = [];
-
 	afterEach(async () => {
-		await cleanupTestData(testUserIds);
-		testUserIds.length = 0;
+		await truncateAll();
 	});
 
 	describe("list", () => {
 		test("should return all vaults for the current user", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			await createTestVault(userId, { name: "Vault 1" });
 			await createTestVault(userId, { name: "Vault 2" });
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.list();
 
@@ -59,14 +46,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should return empty array for user with no vaults", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
+			const { caller } = await setup(vaultRouter);
 
 			const result = await caller.list();
 
@@ -74,40 +54,24 @@ describe("Vault Router", () => {
 		});
 
 		test("should include vault items in response", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId, { name: "Test Vault" });
 			await createTestItem(vaultId, userId);
 			await createTestItem(vaultId, userId);
 
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
-
 			const result = await caller.list();
 
-			expect(result[0].items.length).toBe(2);
+			expect(result[0]?.items.length).toBe(2);
 		});
 	});
 
 	describe("get", () => {
 		test("should return vault details with item count", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId, { name: "My Vault" });
 			await createTestItem(vaultId, userId);
 			await createTestItem(vaultId, userId);
 			await createTestItem(vaultId, userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.get({ vaultId });
 
@@ -118,14 +82,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should throw NOT_FOUND for non-existent vault", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
+			const { caller } = await setup(vaultRouter);
 
 			await expect(caller.get({ vaultId: "nonexistent" })).rejects.toThrow(
 				"Vault not found or access denied",
@@ -133,18 +90,11 @@ describe("Vault Router", () => {
 		});
 
 		test("should deny access to vault user is not member of", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: userId1 } = await createTestUser({ email: email1 });
-			const { userId: userId2 } = await createTestUser({ email: email2 });
-			testUserIds.push(userId1, userId2);
-
-			const vaultId = await createTestVault(userId1);
-
-			const sessionId = await createTestSession(userId2);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId2, email2, sessionId),
-			);
+			const [{ userId: ownerId }, { caller }] = await Promise.all([
+				setup(vaultRouter),
+				setup(vaultRouter),
+			]);
+			const vaultId = await createTestVault(ownerId);
 
 			await expect(caller.get({ vaultId })).rejects.toThrow(
 				"Vault not found or access denied",
@@ -154,14 +104,7 @@ describe("Vault Router", () => {
 
 	describe("create", () => {
 		test("should create a new vault", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
+			const { caller } = await setup(vaultRouter);
 
 			const result = await caller.create({
 				name: "New Vault",
@@ -179,14 +122,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should create vault key for creator with owner role", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
+			const { caller, userId } = await setup(vaultRouter);
 
 			const result = await caller.create({
 				name: "My Vault",
@@ -202,16 +138,8 @@ describe("Vault Router", () => {
 
 	describe("update", () => {
 		test("should update vault name and icon", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId, { name: "Old Name" });
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.update({
 				vaultId,
@@ -224,19 +152,10 @@ describe("Vault Router", () => {
 		});
 
 		test("should deny update for non-admin members", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: memberId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, memberId);
-
+			const [{ userId: ownerId }, { userId: memberId, caller }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, memberId, "member");
-
-			const sessionId = await createTestSession(memberId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(memberId, email2, sessionId),
-			);
 
 			await expect(
 				caller.update({ vaultId, name: "Hacked Name" }),
@@ -244,19 +163,10 @@ describe("Vault Router", () => {
 		});
 
 		test("should allow admin to update vault", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: adminId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, adminId);
-
+			const [{ userId: ownerId }, { userId: adminId, caller }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, adminId, "admin");
-
-			const sessionId = await createTestSession(adminId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(adminId, email2, sessionId),
-			);
 
 			const result = await caller.update({ vaultId, name: "Admin Updated" });
 
@@ -266,18 +176,10 @@ describe("Vault Router", () => {
 
 	describe("delete", () => {
 		test("should delete vault and all its items", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId);
 			await createTestItem(vaultId, userId);
 			await createTestItem(vaultId, userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.delete({ vaultId });
 
@@ -285,22 +187,20 @@ describe("Vault Router", () => {
 
 			const vault = await getVault(vaultId);
 			expect(vault).toBeUndefined();
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "vault_deleted")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(vaultId);
 		});
 
 		test("should deny deletion by non-owner", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: adminId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, adminId);
-
+			const [{ userId: ownerId }, { userId: adminId, caller }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, adminId, "admin");
-
-			const sessionId = await createTestSession(adminId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(adminId, email2, sessionId),
-			);
 
 			await expect(caller.delete({ vaultId })).rejects.toThrow(
 				"Only the vault owner can delete the vault",
@@ -310,19 +210,11 @@ describe("Vault Router", () => {
 
 	describe("listItems", () => {
 		test("should return all non-deleted items in a vault", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId);
 			await createTestItem(vaultId, userId, { category: "login" });
 			await createTestItem(vaultId, userId, { category: "secure-note" });
 			await createTestItem(vaultId, userId, { deletedAt: new Date() }); // Soft deleted
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.listItems({ vaultId });
 
@@ -330,18 +222,11 @@ describe("Vault Router", () => {
 		});
 
 		test("should deny access to non-member", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: otherId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, otherId);
-
+			const [{ userId: ownerId }, { caller }] = await Promise.all([
+				setup(vaultRouter),
+				setup(vaultRouter),
+			]);
 			const vaultId = await createTestVault(ownerId);
-
-			const sessionId = await createTestSession(otherId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(otherId, email2, sessionId),
-			);
 
 			await expect(caller.listItems({ vaultId })).rejects.toThrow(
 				"Access denied to this vault",
@@ -351,16 +236,8 @@ describe("Vault Router", () => {
 
 	describe("createItem", () => {
 		test("should create a new item in the vault", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.createItem({
 				vaultId,
@@ -377,19 +254,10 @@ describe("Vault Router", () => {
 		});
 
 		test("should deny item creation for read-only members", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: readOnlyId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, readOnlyId);
-
+			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, readOnlyId, "read-only");
-
-			const sessionId = await createTestSession(readOnlyId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(readOnlyId, email2, sessionId),
-			);
 
 			await expect(
 				caller.createItem({
@@ -404,17 +272,9 @@ describe("Vault Router", () => {
 
 	describe("updateItem", () => {
 		test("should update item data and increment version", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.updateItem({
 				itemId,
@@ -430,17 +290,9 @@ describe("Vault Router", () => {
 		});
 
 		test("should detect version conflict", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId, { version: 5 });
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			await expect(
 				caller.updateItem({
@@ -455,17 +307,9 @@ describe("Vault Router", () => {
 
 	describe("deleteItem", () => {
 		test("should soft delete an item", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.deleteItem({ itemId });
 
@@ -478,17 +322,9 @@ describe("Vault Router", () => {
 
 	describe("toggleFavorite", () => {
 		test("should toggle item favorite status", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId, { favorite: false });
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.toggleFavorite({ itemId, favorite: true });
 
@@ -501,19 +337,11 @@ describe("Vault Router", () => {
 
 	describe("listDeletedItems", () => {
 		test("should return only deleted items", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId);
 			await createTestItem(vaultId, userId); // Not deleted
 			await createTestItem(vaultId, userId, { deletedAt: new Date() });
 			await createTestItem(vaultId, userId, { deletedAt: new Date() });
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.listDeletedItems({ vaultId });
 
@@ -523,19 +351,11 @@ describe("Vault Router", () => {
 
 	describe("restoreItem", () => {
 		test("should restore a deleted item", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId, {
 				deletedAt: new Date(),
 			});
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.restoreItem({ itemId });
 
@@ -546,17 +366,9 @@ describe("Vault Router", () => {
 		});
 
 		test("should reject restoring non-deleted item", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId); // Not deleted
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			await expect(caller.restoreItem({ itemId })).rejects.toThrow(
 				"Item is not deleted",
@@ -566,19 +378,11 @@ describe("Vault Router", () => {
 
 	describe("permanentlyDeleteItem", () => {
 		test("should permanently delete a trashed item", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId, {
 				deletedAt: new Date(),
 			});
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.permanentlyDeleteItem({ itemId });
 
@@ -589,17 +393,9 @@ describe("Vault Router", () => {
 		});
 
 		test("should reject deleting non-trashed item", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId); // Not deleted
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			await expect(caller.permanentlyDeleteItem({ itemId })).rejects.toThrow(
 				"Can only permanently delete items in trash",
@@ -609,16 +405,8 @@ describe("Vault Router", () => {
 
 	describe("bulkImportItems", () => {
 		test("should import multiple items at once", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.bulkImportItems({
 				vaultId,
@@ -656,18 +444,10 @@ describe("Vault Router", () => {
 
 	describe("stats", () => {
 		test("should return correct dashboard stats", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
+			const { caller, userId } = await setup(vaultRouter);
 			const vaultId = await createTestVault(userId);
 			await createTestItem(vaultId, userId);
 			await createTestItem(vaultId, userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
 
 			const result = await caller.stats();
 
@@ -678,25 +458,13 @@ describe("Vault Router", () => {
 
 	describe("members.list", () => {
 		test("should return all vault members", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({
-				email: email1,
-				name: "Owner",
-			});
-			const { userId: memberId } = await createTestUser({
-				email: email2,
-				name: "Member",
-			});
-			testUserIds.push(ownerId, memberId);
-
+			const [{ userId: ownerId, caller }, { userId: memberId }] =
+				await Promise.all([
+					setup(vaultRouter, { name: "Owner" }),
+					setup(vaultRouter, { name: "Member" }),
+				]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, memberId, "member");
-
-			const sessionId = await createTestSession(ownerId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId),
-			);
 
 			const result = await caller.members.list({ vaultId });
 
@@ -708,19 +476,10 @@ describe("Vault Router", () => {
 
 	describe("members.updateRole", () => {
 		test("should update member role", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: memberId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, memberId);
-
+			const [{ userId: ownerId, caller }, { userId: memberId }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, memberId, "member");
-
-			const sessionId = await createTestSession(ownerId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId),
-			);
 
 			const result = await caller.members.updateRole({
 				vaultId,
@@ -735,16 +494,8 @@ describe("Vault Router", () => {
 		});
 
 		test("should not allow changing own role", async () => {
-			const email = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email });
-			testUserIds.push(ownerId);
-
+			const { userId: ownerId, caller } = await setup(vaultRouter);
 			const vaultId = await createTestVault(ownerId);
-
-			const sessionId = await createTestSession(ownerId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(ownerId, email, sessionId),
-			);
 
 			await expect(
 				caller.members.updateRole({
@@ -756,19 +507,10 @@ describe("Vault Router", () => {
 		});
 
 		test("should not allow changing owner role", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: adminId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, adminId);
-
+			const [{ userId: ownerId }, { userId: adminId, caller }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, adminId, "admin");
-
-			const sessionId = await createTestSession(adminId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(adminId, email2, sessionId),
-			);
 
 			await expect(
 				caller.members.updateRole({
@@ -782,18 +524,9 @@ describe("Vault Router", () => {
 
 	describe("members.add", () => {
 		test("should add a new member to the vault", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: newMemberId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, newMemberId);
-
+			const [{ userId: ownerId, caller }, { userId: newMemberId }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
 			const vaultId = await createTestVault(ownerId);
-
-			const sessionId = await createTestSession(ownerId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId),
-			);
 
 			const result = await caller.members.add({
 				vaultId,
@@ -807,22 +540,20 @@ describe("Vault Router", () => {
 			const vaultKey = await getVaultKey(vaultId, newMemberId);
 			expect(vaultKey).toBeDefined();
 			expect(vaultKey?.role).toBe("member");
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, ownerId), eq(log.action, "vault_member_added")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(vaultId);
 		});
 
 		test("should reject adding existing member", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: ownerId } = await createTestUser({ email: email1 });
-			const { userId: memberId } = await createTestUser({ email: email2 });
-			testUserIds.push(ownerId, memberId);
-
+			const [{ userId: ownerId, caller }, { userId: memberId }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, memberId, "member");
-
-			const sessionId = await createTestSession(ownerId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(ownerId, email1, sessionId),
-			);
 
 			await expect(
 				caller.members.add({
@@ -835,23 +566,665 @@ describe("Vault Router", () => {
 		});
 	});
 
+	describe("getItem", () => {
+		test("should return item by id", async () => {
+			const { caller, userId } = await setup(vaultRouter);
+			const vaultId = await createTestVault(userId);
+			const itemId = await createTestItem(vaultId, userId, {
+				category: "login",
+			});
+
+			const result = await caller.getItem({ itemId });
+
+			expect(result.id).toBe(itemId);
+			expect(result.category).toBe("login");
+			expect(result.vaultId).toBe(vaultId);
+		});
+
+		test("should deny access to non-member", async () => {
+			const [{ userId: ownerId }, { caller }] = await Promise.all([
+				setup(vaultRouter),
+				setup(vaultRouter),
+			]);
+			const vaultId = await createTestVault(ownerId);
+			const itemId = await createTestItem(vaultId, ownerId);
+
+			await expect(caller.getItem({ itemId })).rejects.toThrow("Access denied");
+		});
+
+		test("should throw for non-existent item", async () => {
+			const { caller } = await setup(vaultRouter);
+
+			await expect(caller.getItem({ itemId: "nonexistent" })).rejects.toThrow(
+				"Item not found",
+			);
+		});
+	});
+
+	describe("listAllItems", () => {
+		test("should return items from all accessible vaults", async () => {
+			const { caller, userId } = await setup(vaultRouter);
+			const vault1 = await createTestVault(userId, { name: "Vault 1" });
+			const vault2 = await createTestVault(userId, { name: "Vault 2" });
+			await createTestItem(vault1, userId);
+			await createTestItem(vault2, userId);
+
+			const result = await caller.listAllItems();
+
+			expect(result.length).toBe(2);
+			expect(result[0]?.vault).toBeDefined();
+			expect(result[0]?.vault.name).toBeDefined();
+		});
+
+		test("should exclude soft-deleted items", async () => {
+			const { caller, userId } = await setup(vaultRouter);
+			const vaultId = await createTestVault(userId);
+			await createTestItem(vaultId, userId);
+			await createTestItem(vaultId, userId, { deletedAt: new Date() });
+
+			const result = await caller.listAllItems();
+
+			expect(result.length).toBe(1);
+		});
+
+		test("should return empty array for user with no vaults", async () => {
+			const { caller } = await setup(vaultRouter);
+
+			const result = await caller.listAllItems();
+
+			expect(result).toEqual([]);
+		});
+	});
+
+	describe("listAllDeletedItems", () => {
+		test("should return deleted items from all vaults", async () => {
+			const { caller, userId } = await setup(vaultRouter);
+			const vault1 = await createTestVault(userId, { name: "Vault 1" });
+			const vault2 = await createTestVault(userId, { name: "Vault 2" });
+			await createTestItem(vault1, userId, { deletedAt: new Date() });
+			await createTestItem(vault2, userId, { deletedAt: new Date() });
+			await createTestItem(vault1, userId); // Not deleted
+
+			const result = await caller.listAllDeletedItems();
+
+			expect(result.length).toBe(2);
+			expect(result[0]?.vault).toBeDefined();
+		});
+
+		test("should return empty array when no deleted items", async () => {
+			const { caller, userId } = await setup(vaultRouter);
+			await createTestVault(userId);
+
+			const result = await caller.listAllDeletedItems();
+
+			expect(result).toEqual([]);
+		});
+	});
+
+	describe("moveItem", () => {
+		test("should move item between vaults", async () => {
+			const { caller, userId } = await setup(vaultRouter);
+			const sourceVault = await createTestVault(userId, { name: "Source" });
+			const targetVault = await createTestVault(userId, { name: "Target" });
+			const itemId = await createTestItem(sourceVault, userId);
+
+			const result = await caller.moveItem({
+				itemId,
+				sourceVaultId: sourceVault,
+				targetVaultId: targetVault,
+				encryptedData: "re-encrypted-data",
+				encryptionIv: "new-iv",
+			});
+
+			expect(result.success).toBe(true);
+
+			const item = await getItem(itemId);
+			expect(item?.vaultId).toBe(targetVault);
+			expect(item?.encryptedData).toBe("re-encrypted-data");
+		});
+
+		test("should reject moving non-existent item", async () => {
+			const { caller, userId } = await setup(vaultRouter);
+			const vaultId = await createTestVault(userId);
+
+			await expect(
+				caller.moveItem({
+					itemId: "nonexistent",
+					sourceVaultId: vaultId,
+					targetVaultId: vaultId,
+					encryptedData: "data",
+					encryptionIv: "iv",
+				}),
+			).rejects.toThrow("Item not found");
+		});
+
+		test("should reject if item is not in source vault", async () => {
+			const { caller, userId } = await setup(vaultRouter);
+			const vault1 = await createTestVault(userId, { name: "Vault 1" });
+			const vault2 = await createTestVault(userId, { name: "Vault 2" });
+			const itemId = await createTestItem(vault1, userId);
+
+			await expect(
+				caller.moveItem({
+					itemId,
+					sourceVaultId: vault2, // Wrong source
+					targetVaultId: vault1,
+					encryptedData: "data",
+					encryptionIv: "iv",
+				}),
+			).rejects.toThrow("Item does not belong to the source vault");
+		});
+
+		test("should reject moving deleted items", async () => {
+			const { caller, userId } = await setup(vaultRouter);
+			const sourceVault = await createTestVault(userId);
+			const targetVault = await createTestVault(userId);
+			const itemId = await createTestItem(sourceVault, userId, {
+				deletedAt: new Date(),
+			});
+
+			await expect(
+				caller.moveItem({
+					itemId,
+					sourceVaultId: sourceVault,
+					targetVaultId: targetVault,
+					encryptedData: "data",
+					encryptionIv: "iv",
+				}),
+			).rejects.toThrow("Cannot move items that are in trash");
+		});
+
+		test("should reject moving to read-only target vault", async () => {
+			const [{ userId: ownerId }, { userId: memberId, caller }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+			const sourceVault = await createTestVault(ownerId);
+			const targetVault = await createTestVault(ownerId);
+			await addVaultMember(sourceVault, memberId, "member");
+			await addVaultMember(targetVault, memberId, "read-only");
+			const itemId = await createTestItem(sourceVault, ownerId);
+
+			await expect(
+				caller.moveItem({
+					itemId,
+					sourceVaultId: sourceVault,
+					targetVaultId: targetVault,
+					encryptedData: "data",
+					encryptionIv: "iv",
+				}),
+			).rejects.toThrow("Cannot move items to a read-only vault");
+		});
+
+		test("should reject if user has no access to source vault", async () => {
+			const [{ userId: ownerId }, { userId: otherId, caller }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+			const sourceVault = await createTestVault(ownerId);
+			const targetVault = await createTestVault(otherId);
+			const itemId = await createTestItem(sourceVault, ownerId);
+
+			await expect(
+				caller.moveItem({
+					itemId,
+					sourceVaultId: sourceVault,
+					targetVaultId: targetVault,
+					encryptedData: "data",
+					encryptionIv: "iv",
+				}),
+			).rejects.toThrow("No access to source vault");
+		});
+	});
+
+	describe("updateItem - edge cases", () => {
+		test("should deny update for read-only members", async () => {
+			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, readOnlyId, "read-only");
+			const itemId = await createTestItem(vaultId, ownerId);
+
+			await expect(
+				caller.updateItem({
+					itemId,
+					encryptedData: "hacked",
+					encryptionIv: "iv",
+				}),
+			).rejects.toThrow("Access denied");
+		});
+
+		test("should throw for non-existent item", async () => {
+			const { caller } = await setup(vaultRouter);
+
+			await expect(
+				caller.updateItem({
+					itemId: "nonexistent",
+					encryptedData: "data",
+					encryptionIv: "iv",
+				}),
+			).rejects.toThrow("Item not found");
+		});
+	});
+
+	describe("deleteItem - edge cases", () => {
+		test("should deny deletion for read-only members", async () => {
+			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, readOnlyId, "read-only");
+			const itemId = await createTestItem(vaultId, ownerId);
+
+			await expect(caller.deleteItem({ itemId })).rejects.toThrow(
+				"Access denied",
+			);
+		});
+
+		test("should throw for non-existent item", async () => {
+			const { caller } = await setup(vaultRouter);
+
+			await expect(
+				caller.deleteItem({ itemId: "nonexistent" }),
+			).rejects.toThrow("Item not found");
+		});
+	});
+
+	describe("toggleFavorite - edge cases", () => {
+		test("should deny favorite toggle for read-only members", async () => {
+			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, readOnlyId, "read-only");
+			const itemId = await createTestItem(vaultId, ownerId);
+
+			await expect(
+				caller.toggleFavorite({ itemId, favorite: true }),
+			).rejects.toThrow("Access denied");
+		});
+	});
+
+	describe("bulkImportItems - edge cases", () => {
+		test("should deny import for read-only members", async () => {
+			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, readOnlyId, "read-only");
+
+			await expect(
+				caller.bulkImportItems({
+					vaultId,
+					items: [
+						{
+							category: "login",
+							encryptedData: "data",
+							encryptionIv: "iv",
+						},
+					],
+				}),
+			).rejects.toThrow("Read-only access cannot create items");
+		});
+
+		test("should deny import for non-member", async () => {
+			const [{ userId: ownerId }, { caller }] = await Promise.all([
+				setup(vaultRouter),
+				setup(vaultRouter),
+			]);
+			const vaultId = await createTestVault(ownerId);
+
+			await expect(
+				caller.bulkImportItems({
+					vaultId,
+					items: [
+						{
+							category: "login",
+							encryptedData: "data",
+							encryptionIv: "iv",
+						},
+					],
+				}),
+			).rejects.toThrow("Access denied to this vault");
+		});
+	});
+
+	describe("restoreItem - edge cases", () => {
+		test("should deny restore for read-only members", async () => {
+			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, readOnlyId, "read-only");
+			const itemId = await createTestItem(vaultId, ownerId, {
+				deletedAt: new Date(),
+			});
+
+			await expect(caller.restoreItem({ itemId })).rejects.toThrow(
+				"Access denied",
+			);
+		});
+	});
+
+	describe("permanentlyDeleteItem - edge cases", () => {
+		test("should deny permanent deletion for read-only members", async () => {
+			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, readOnlyId, "read-only");
+			const itemId = await createTestItem(vaultId, ownerId, {
+				deletedAt: new Date(),
+			});
+
+			await expect(caller.permanentlyDeleteItem({ itemId })).rejects.toThrow(
+				"Access denied",
+			);
+		});
+	});
+
+	describe("members.updateRole - edge cases", () => {
+		test("should deny admin from changing other admin's role", async () => {
+			const [
+				{ userId: ownerId },
+				{ userId: admin1Id, caller },
+				{ userId: admin2Id },
+			] = await Promise.all([
+				setup(vaultRouter),
+				setup(vaultRouter),
+				setup(vaultRouter),
+			]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, admin1Id, "admin");
+			await addVaultMember(vaultId, admin2Id, "admin");
+
+			await expect(
+				caller.members.updateRole({
+					vaultId,
+					userId: admin2Id,
+					role: "member",
+				}),
+			).rejects.toThrow("Admins cannot change other admins");
+		});
+
+		test("should deny non-owner/admin from changing roles", async () => {
+			const [
+				{ userId: ownerId },
+				{ userId: memberId, caller },
+				{ userId: targetId },
+			] = await Promise.all([
+				setup(vaultRouter),
+				setup(vaultRouter),
+				setup(vaultRouter),
+			]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, memberId, "member");
+			await addVaultMember(vaultId, targetId, "read-only");
+
+			await expect(
+				caller.members.updateRole({
+					vaultId,
+					userId: targetId,
+					role: "member",
+				}),
+			).rejects.toThrow("Only vault owner or admin can change roles");
+		});
+	});
+
+	describe("members.add - edge cases", () => {
+		test("should deny non-owner/admin from adding members", async () => {
+			const [
+				{ userId: ownerId },
+				{ userId: memberId, caller },
+				{ userId: newUserId },
+			] = await Promise.all([
+				setup(vaultRouter),
+				setup(vaultRouter),
+				setup(vaultRouter),
+			]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, memberId, "member");
+
+			await expect(
+				caller.members.add({
+					vaultId,
+					userId: newUserId,
+					role: "member",
+					encryptedVaultKey: mockSrpData.encryptedVaultKey,
+				}),
+			).rejects.toThrow("Only vault owner or admin can add members");
+		});
+
+		test("should throw NOT_FOUND for non-existent user", async () => {
+			const { caller, userId } = await setup(vaultRouter);
+			const vaultId = await createTestVault(userId);
+
+			await expect(
+				caller.members.add({
+					vaultId,
+					userId: "nonexistent-user",
+					role: "member",
+					encryptedVaultKey: mockSrpData.encryptedVaultKey,
+				}),
+			).rejects.toThrow("User not found");
+		});
+	});
+
+	describe("members.remove", () => {
+		test("should remove member with key rotation", async () => {
+			const [{ userId: ownerId, caller }, { userId: memberId }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, memberId, "member");
+			const itemId = await createTestItem(vaultId, ownerId);
+
+			const result = await caller.members.remove({
+				vaultId,
+				userId: memberId,
+				keyRotation: {
+					memberKeys: [
+						{
+							userId: ownerId,
+							encryptedVaultKey: "new-encrypted-key-for-owner",
+						},
+					],
+					reEncryptedItems: [
+						{
+							itemId,
+							encryptedData: "re-encrypted-data",
+							encryptionIv: "new-iv",
+						},
+					],
+				},
+			});
+
+			expect(result.success).toBe(true);
+			expect(result.keyRotation.newKeyVersion).toBe(2);
+			expect(result.keyRotation.itemsReEncrypted).toBe(1);
+			expect(result.keyRotation.membersUpdated).toBe(1);
+
+			// Verify member was removed
+			const vaultKey = await getVaultKey(vaultId, memberId);
+			expect(vaultKey).toBeUndefined();
+
+			// Verify items were re-encrypted
+			const item = await getItem(itemId);
+			expect(item?.encryptedData).toBe("re-encrypted-data");
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, ownerId), eq(log.action, "vault_member_removed")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(vaultId);
+		});
+
+		test("should rollback key rotation if an item update fails", async () => {
+			const [{ userId: ownerId, caller }, { userId: memberId }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, memberId, "member");
+			const itemId = await createTestItem(vaultId, ownerId);
+
+			await expect(
+				caller.members.remove({
+					vaultId,
+					userId: memberId,
+					keyRotation: {
+						memberKeys: [
+							{
+								userId: ownerId,
+								encryptedVaultKey: "new-encrypted-key-for-owner",
+							},
+						],
+						reEncryptedItems: [
+							{
+								itemId: "non-existent-item",
+								encryptedData: "re-encrypted-data",
+								encryptionIv: "new-iv",
+							},
+						],
+					},
+				}),
+			).rejects.toThrow("Key rotation failed. Please try again.");
+
+			const memberVaultKey = await getVaultKey(vaultId, memberId);
+			expect(memberVaultKey).toBeDefined();
+
+			const unchangedItem = await getItem(itemId);
+			expect(unchangedItem?.encryptedData).toBe(mockItemData.encryptedData);
+		});
+
+		test("should deny non-owner/admin from removing members", async () => {
+			const [
+				{ userId: ownerId },
+				{ userId: memberId, caller },
+				{ userId: targetId },
+			] = await Promise.all([
+				setup(vaultRouter),
+				setup(vaultRouter),
+				setup(vaultRouter),
+			]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, memberId, "member");
+			await addVaultMember(vaultId, targetId, "member");
+
+			await expect(
+				caller.members.remove({
+					vaultId,
+					userId: targetId,
+					keyRotation: {
+						memberKeys: [],
+						reEncryptedItems: [],
+					},
+				}),
+			).rejects.toThrow("Only vault owner or admin can remove members");
+		});
+
+		test("should not allow removing yourself", async () => {
+			const { caller, userId } = await setup(vaultRouter);
+			const vaultId = await createTestVault(userId);
+
+			await expect(
+				caller.members.remove({
+					vaultId,
+					userId,
+					keyRotation: {
+						memberKeys: [],
+						reEncryptedItems: [],
+					},
+				}),
+			).rejects.toThrow("Cannot remove yourself");
+		});
+
+		test("should not allow removing vault owner", async () => {
+			const [{ userId: ownerId }, { userId: adminId, caller }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, adminId, "admin");
+
+			await expect(
+				caller.members.remove({
+					vaultId,
+					userId: ownerId,
+					keyRotation: {
+						memberKeys: [],
+						reEncryptedItems: [],
+					},
+				}),
+			).rejects.toThrow("Cannot remove vault owner");
+		});
+
+		test("should not allow admin to remove other admin", async () => {
+			const [
+				{ userId: ownerId },
+				{ userId: admin1Id, caller },
+				{ userId: admin2Id },
+			] = await Promise.all([
+				setup(vaultRouter),
+				setup(vaultRouter),
+				setup(vaultRouter),
+			]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, admin1Id, "admin");
+			await addVaultMember(vaultId, admin2Id, "admin");
+
+			await expect(
+				caller.members.remove({
+					vaultId,
+					userId: admin2Id,
+					keyRotation: {
+						memberKeys: [],
+						reEncryptedItems: [],
+					},
+				}),
+			).rejects.toThrow("Admins cannot remove other admins");
+		});
+	});
+
+	describe("members.getRotationData", () => {
+		test("should return remaining members and items", async () => {
+			const [{ userId: ownerId, caller }, { userId: memberId }] =
+				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, memberId, "member");
+			await createTestItem(vaultId, ownerId);
+			await createTestItem(vaultId, ownerId);
+
+			const result = await caller.members.getRotationData({
+				vaultId,
+				excludeUserId: memberId,
+			});
+
+			expect(result.members.length).toBe(1); // Only owner remains
+			expect(result.members[0]?.userId).toBe(ownerId);
+			expect(result.members[0]?.publicKey).toBeDefined();
+			expect(result.items.length).toBe(2);
+		});
+
+		test("should deny non-owner/admin from getting rotation data", async () => {
+			const [
+				{ userId: ownerId },
+				{ userId: memberId, caller },
+				{ userId: targetId },
+			] = await Promise.all([
+				setup(vaultRouter),
+				setup(vaultRouter),
+				setup(vaultRouter),
+			]);
+			const vaultId = await createTestVault(ownerId);
+			await addVaultMember(vaultId, memberId, "member");
+			await addVaultMember(vaultId, targetId, "member");
+
+			await expect(
+				caller.members.getRotationData({
+					vaultId,
+					excludeUserId: targetId,
+				}),
+			).rejects.toThrow("Only vault owner or admin can perform key rotation");
+		});
+	});
+
 	describe("members.lookupUser", () => {
 		test("should find user by email and return public key", async () => {
-			const email1 = generateTestEmail();
-			const email2 = generateTestEmail();
-			const { userId: lookupUserId } = await createTestUser({
-				email: email1,
-				name: "Lookup User",
-			});
-			const { userId: searcherId } = await createTestUser({ email: email2 });
-			testUserIds.push(lookupUserId, searcherId);
+			const [{ userId: lookupUserId, email: lookupEmail }, { caller }] =
+				await Promise.all([
+					setup(vaultRouter, { name: "Lookup User" }),
+					setup(vaultRouter),
+				]);
 
-			const sessionId = await createTestSession(searcherId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(searcherId, email2, sessionId),
-			);
-
-			const result = await caller.members.lookupUser({ email: email1 });
+			const result = await caller.members.lookupUser({ email: lookupEmail });
 
 			expect(result.id).toBe(lookupUserId);
 			expect(result.name).toBe("Lookup User");
@@ -859,14 +1232,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should not allow looking up yourself", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
+			const { email, caller } = await setup(vaultRouter);
 
 			await expect(caller.members.lookupUser({ email })).rejects.toThrow(
 				"Cannot add yourself as a member",
@@ -874,14 +1240,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should throw NOT_FOUND for non-existent user", async () => {
-			const email = generateTestEmail();
-			const { userId } = await createTestUser({ email });
-			testUserIds.push(userId);
-
-			const sessionId = await createTestSession(userId);
-			const caller = vaultRouter.createCaller(
-				createAuthenticatedContext(userId, email, sessionId),
-			);
+			const { caller } = await setup(vaultRouter);
 
 			await expect(
 				caller.members.lookupUser({ email: "nonexistent@example.com" }),

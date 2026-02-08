@@ -3,16 +3,13 @@ import {
 	generateTotp,
 	type TotpResult,
 } from "@bittery/shared/totp";
-import { Button, Card, copyWithToast, Input, Label } from "@bittery/ui";
-import { Copy, Eye, EyeOff } from "lucide-react";
+import { Button, Card, copyWithToast, Label } from "@bittery/ui";
+import { IconCopyOutlineDuo18 } from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
 import { Favicon } from "../favicon";
 import { TagInput } from "../tag-input";
-import {
-	type CategoryDetailProps,
-	handleCopy,
-	type TotpDisplayData,
-} from "./shared";
+import { DetailHeader, DetailPasswordField } from "./field-components";
+import type { CategoryDetailProps, TotpDisplayData } from "./shared";
 
 export function TotpDetail({
 	data,
@@ -24,7 +21,6 @@ export function TotpDetail({
 	isUpdatingTags,
 }: CategoryDetailProps<TotpDisplayData>) {
 	const [totpResult, setTotpResult] = useState<TotpResult | null>(null);
-	const [showSecret, setShowSecret] = useState(false);
 
 	const generateCode = useCallback(async () => {
 		try {
@@ -65,23 +61,17 @@ export function TotpDetail({
 		return "stroke-primary";
 	};
 
+	const subtitle = [data.totpIssuer, data.totpAccountName]
+		.filter(Boolean)
+		.join(" - ");
+
 	return (
 		<div className="space-y-4">
-			<div className="flex items-center gap-4">
-				<Favicon title={data.title} category="totp" size="lg" />
-				<div className="min-w-0 flex-1">
-					<h2 className="truncate font-semibold text-2xl tracking-tight">
-						{data.title}
-					</h2>
-					{(data.totpIssuer || data.totpAccountName) && (
-						<p className="mt-1 truncate text-muted-foreground text-sm">
-							{data.totpIssuer}
-							{data.totpIssuer && data.totpAccountName && " - "}
-							{data.totpAccountName}
-						</p>
-					)}
-				</div>
-			</div>
+			<DetailHeader
+				icon={<Favicon title={data.title} category="totp" size="lg" />}
+				title={data.title}
+				subtitle={subtitle}
+			/>
 
 			<div className="flex gap-2">
 				{onEdit && (
@@ -101,20 +91,6 @@ export function TotpDetail({
 				)}
 			</div>
 
-			{/* Tags */}
-			{onTagsChange && (
-				<div className="space-y-2">
-					<Label>Tags</Label>
-					<TagInput
-						tags={data.tags || []}
-						availableTags={availableTags}
-						onChange={onTagsChange}
-						onTagClick={onTagClick}
-						disabled={isUpdatingTags}
-					/>
-				</div>
-			)}
-
 			<Card>
 				<div className="flex items-center justify-between p-6">
 					<button
@@ -125,7 +101,7 @@ export function TotpDetail({
 					>
 						<div className="relative flex size-12 items-center justify-center">
 							<svg
-								className="-rotate-90 size-12"
+								className="size-12 -rotate-90"
 								viewBox="0 0 40 40"
 								aria-hidden="true"
 							>
@@ -175,44 +151,20 @@ export function TotpDetail({
 						onClick={handleCopyCode}
 						disabled={!totpResult?.code}
 					>
-						<Copy size={16} />
+						<IconCopyOutlineDuo18 size={16} />
 					</Button>
 				</div>
 			</Card>
 
-			<div className="space-y-4">
-				<div className="space-y-2">
-					<Label>Secret Key</Label>
-					<div className="flex gap-2">
-						<Input
-							type={showSecret ? "text" : "password"}
-							value={
-								showSecret
-									? formatSecretForDisplay(data.totpSecret)
-									: "••••••••••••••••"
-							}
-							readOnly
-							className="flex-1 font-mono"
-						/>
-						<Button
-							size="icon"
-							variant="outline"
-							onClick={() => setShowSecret(!showSecret)}
-						>
-							{showSecret ? <EyeOff size={16} /> : <Eye size={16} />}
-						</Button>
-						<Button
-							size="icon"
-							variant="outline"
-							onClick={() => handleCopy(data.totpSecret, "Secret key")}
-						>
-							<Copy size={16} />
-						</Button>
-					</div>
-				</div>
+			<div className="space-y-3">
+				<DetailPasswordField
+					label="Secret Key"
+					value={data.totpSecret}
+					maskValue={formatSecretForDisplay(data.totpSecret)}
+				/>
 
 				<div className="rounded-lg border p-4">
-					<h3 className="mb-3 font-medium text-sm">Settings</h3>
+					<h3 className="mb-3 font-semibold text-sm">Settings</h3>
 					<div className="grid grid-cols-3 gap-4 text-sm">
 						<div>
 							<Label className="text-muted-foreground text-xs">Algorithm</Label>
@@ -237,6 +189,20 @@ export function TotpDetail({
 								{data.notes}
 							</div>
 						</Card>
+					</div>
+				)}
+
+				{/* Tags */}
+				{onTagsChange && (
+					<div className="space-y-2">
+						<Label>Tags</Label>
+						<TagInput
+							tags={data.tags || []}
+							availableTags={availableTags}
+							onChange={onTagsChange}
+							onTagClick={onTagClick}
+							disabled={isUpdatingTags}
+						/>
 					</div>
 				)}
 			</div>

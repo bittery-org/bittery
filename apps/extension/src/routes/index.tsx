@@ -14,7 +14,20 @@ export const Route = createRoute({
 			throw redirect({ to: "/vault" });
 		}
 
-		// Check if quick unlock is available
+		const desktopStatusResponse = await chrome.runtime.sendMessage({
+			type: "CHECK_DESKTOP_STATUS",
+		});
+		const desktopUnlocked =
+			desktopStatusResponse.success &&
+			desktopStatusResponse.available &&
+			desktopStatusResponse.locked === false &&
+			(desktopStatusResponse.unlockedAccounts?.length ?? 0) > 0;
+
+		if (desktopUnlocked) {
+			throw redirect({ to: "/vault" });
+		}
+
+		// Check if quick unlock is available (has stored session)
 		const quickUnlockResponse = await chrome.runtime.sendMessage({
 			type: "CAN_QUICK_UNLOCK",
 		});
@@ -23,6 +36,13 @@ export const Route = createRoute({
 			throw redirect({ to: "/unlock" });
 		}
 
+		if (desktopStatusResponse.success && desktopStatusResponse.available) {
+			// Desktop is available - redirect to unlock screen
+			// User can unlock via desktop (biometric or password)
+			throw redirect({ to: "/unlock" });
+		}
+
+		// No session, no desktop - show login screen
 		throw redirect({ to: "/login" });
 	},
 });

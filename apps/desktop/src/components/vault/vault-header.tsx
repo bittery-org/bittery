@@ -1,6 +1,5 @@
 import { Button } from "@bittery/ui";
-import { PlusIcon } from "lucide-react";
-import { AccountSwitcher } from "../account-switcher";
+import { IconPlusOutlineDuo18 } from "@bittery/ui/icons";
 import { SearchCombobox } from "./search-combobox";
 
 interface VaultHeaderProps {
@@ -10,17 +9,17 @@ interface VaultHeaderProps {
 
 export function VaultHeader({ hasVaults, onNewItemClick }: VaultHeaderProps) {
 	return (
-		<header className="flex items-center space-x-2 border-b px-2 py-2">
-			<AccountSwitcher />
-			<div className="flex flex-1 items-center space-x-6 pl-2">
-				<div className="flex-1">
-					<SearchCombobox />
-				</div>
-				<Button onClick={onNewItemClick} disabled={!hasVaults}>
-					<PlusIcon />
-					New Item
-				</Button>
+		<header
+			className="flex items-center gap-4 border-b px-4 py-2.5"
+			data-tauri-drag-region
+		>
+			<div className="flex-1">
+				<SearchCombobox />
 			</div>
+			<Button onClick={onNewItemClick} disabled={!hasVaults}>
+				<IconPlusOutlineDuo18 />
+				New Item
+			</Button>
 		</header>
 	);
 }

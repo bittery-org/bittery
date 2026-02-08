@@ -1,0 +1,46 @@
+{
+	"name": "@bittery/core",
+	"version": "0.1.0",
+	"type": "module",
+	"main": "./src/index.ts",
+	"types": "./src/index.ts",
+	"scripts": {
+		"check-types": "tsc --noEmit"
+	},
+	"exports": {
+		".": "./src/index.ts",
+		"./types": "./src/types.ts",
+		"./core-context": "./src/core-context.ts",
+		"./hooks": "./src/hooks/index.ts",
+		"./hooks/context": "./src/context/platform-context.tsx",
+		"./hooks/services": "./src/services/autolock.ts",
+		"./hooks/services/autolock-web": "./src/services/autolock-web.ts",
+		"./hooks/services/autolock-mobile": "./src/services/autolock-mobile.ts",
+		"./hooks/vault": "./src/hooks/vault/index.ts",
+		"./hooks/items": "./src/hooks/items/index.ts",
+		"./hooks/utils": "./src/utils/index.ts",
+		"./hooks/auth": "./src/auth/index.ts",
+		"./services/account-resolver": "./src/services/account-resolver.ts",
+		"./services/auth-service": "./src/services/auth-service.ts",
+		"./services/cache-manager": "./src/services/cache-manager.ts",
+		"./services/item-service": "./src/services/item-service.ts",
+		"./services/vault-service": "./src/services/vault-service.ts",
+		"./services/share-service": "./src/services/share-service.ts"
+	},
+	"dependencies": {
+		"@bittery/shared": "workspace:*",
+		"@bittery/storage": "workspace:*",
+		"@bittery/types": "workspace:*",
+		"@tanstack/react-query": "^5.85.5",
+		"zxcvbn": "^4.4.2"
+	},
+	"devDependencies": {
+		"@bittery/config": "workspace:*",
+		"@types/react": "catalog:",
+		"@types/zxcvbn": "^4.4.5",
+		"typescript": "^5.7.2"
+	},
+	"peerDependencies": {
+		"react": "^18.0.0 || ^19.0.0"
+	}
+}

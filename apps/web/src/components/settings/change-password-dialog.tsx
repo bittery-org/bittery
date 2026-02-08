@@ -1,7 +1,3 @@
-import { decrypt, encrypt } from "@bittery/crypto/encryption";
-import { deriveKeys } from "@bittery/crypto/key-derivation";
-import { getStoredSecretKey } from "@bittery/crypto/session-storage";
-import { generateSRPRegistration } from "@bittery/crypto/srp-client";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -20,6 +16,13 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff, Key } from "lucide-react";
 import { useState } from "react";
+import { storage } from "@/lib/storage";
+import {
+	decrypt,
+	deriveKeys,
+	encrypt,
+	generateSRPRegistration,
+} from "@/lib/wasm-crypto";
 
 export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 	const [open, setOpen] = useState(false);
@@ -79,7 +82,7 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			return;
 		}
 
-		const secretKey = getStoredSecretKey();
+		const secretKey = await storage.getStoredSecretKey();
 		if (!secretKey) {
 			toast.error(
 				"Secret key not found. Please log out and log in again with your full credentials.",

@@ -1,73 +1,33 @@
 /**
  * Vault Handlers
- * Handles vault and vault item operations
+ * Handles vault and vault item operations.
  */
 
-import { decrypt } from "@bittery/crypto/encryption";
-import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import type { DecryptedItem } from "@bittery/shared/types";
+import { storage } from "../lib/storage";
+import { core } from "./core-instance";
+import { desktopSync } from "./desktop-sync";
 import { updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
+import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
-/**
- * Helper function to decrypt all vault items
- */
-async function decryptVaultItems() {
-	const vaultKeys = await chromeStorage.getVaultKeys();
+async function getAllDecryptedItems(): Promise<Array<DecryptedItem | null>> {
+	return getDecryptedItemsForCurrentMode();
+}
 
-	if (!vaultKeys || vaultKeys.length === 0) {
-		return [];
-	}
+async function resolveItemAccountEmail(
+	itemId: string,
+): Promise<string | undefined> {
+	const activeAccount = await storage.getActiveAccount();
+	if (activeAccount?.type !== "all") return undefined;
 
-	const vaults = await trpcClient.vault.list.query();
+	const items = await getAllDecryptedItems();
+	const item = items.find((candidate) => candidate?.id === itemId) as
+		| (DecryptedItem & { account?: { email?: string } })
+		| undefined;
 
-	const decryptedVaultKeys: Record<string, Uint8Array> = {};
-
-	await Promise.all(
-		vaultKeys.map(async (vk) => {
-			decryptedVaultKeys[vk.vaultId] = await chromeStorage.decryptVaultKey(
-				vk.encryptedVaultKey,
-			);
-		}),
-	);
-
-	const allVaultItems = await Promise.all(
-		vaults.map(async (vault) => {
-			try {
-				const decryptedItems = await Promise.all(
-					vault.items.map(async (item) => {
-						try {
-							const vaultKey = decryptedVaultKeys[vault.id];
-							if (!vaultKey) throw new Error("Vault key not found");
-
-							const decrypted = await decrypt(
-								{
-									algorithm: item.encryptionAlgorithm,
-									iv: item.encryptionIv,
-									ciphertext: item.encryptedData,
-								},
-								vaultKey,
-							);
-
-							const data = JSON.parse(decrypted);
-							return { ...item, ...data };
-						} catch (error) {
-							console.error("Failed to decrypt item:", item.id, error);
-							return null;
-						}
-					}),
-				);
-
-				return decryptedItems.filter((item) => item !== null);
-			} catch (_error) {
-				console.log(_error);
-				return [];
-			}
-		}),
-	);
-
-	// Flatten the array of arrays
-	return allVaultItems.flat();
+	return item?.account?.email;
 }
 
 /**
@@ -76,8 +36,7 @@ async function decryptVaultItems() {
 export async function handleGetVaultItems(): Promise<MessageResponse> {
 	updateActivity();
 
-	const items = await decryptVaultItems();
-
+	const items = await getAllDecryptedItems();
 	return {
 		success: true,
 		items,
@@ -93,43 +52,34 @@ export async function handleGetVaultItem(payload: {
 	updateActivity();
 
 	const { itemId } = payload;
+	const desktopStatus = desktopSync.getLastStatus();
+	const useDesktopPath = !!desktopStatus?.available && !desktopStatus.locked;
 
-	// Get vault keys
-	const vaultKeys = await chromeStorage.getVaultKeys();
-	if (!vaultKeys || vaultKeys.length === 0) {
-		return { success: true, item: null };
+	if (useDesktopPath) {
+		const items = await getAllDecryptedItems();
+		const item = items.find((candidate) => candidate?.id === itemId) ?? null;
+		return { success: true, item };
 	}
 
-	// Get item
-	const item = await trpcClient.vault.getItem.query({ itemId });
+	const accountEmail = await resolveItemAccountEmail(itemId);
 
-	if (!item) {
-		return { success: true, item: null };
-	}
-
-	// Find vault key for this item
-	const vaultKeyData = vaultKeys.find((vk) => vk.vaultId === item.vaultId);
-	if (!vaultKeyData) {
-		return { success: true, item: null };
-	}
-
-	// Decrypt item
-	const vaultKey = await chromeStorage.decryptVaultKey(
-		vaultKeyData.encryptedVaultKey,
+	const result = await core.items.fetchAndDecryptItem(
+		itemId,
+		trpcClient as Parameters<typeof core.items.fetchAndDecryptItem>[1],
+		accountEmail,
 	);
 
-	const decrypted = await decrypt(
-		{
-			algorithm: item.encryptionAlgorithm,
-			iv: item.encryptionIv,
-			ciphertext: item.encryptedData,
+	if (!result.rawItem || !result.decryptedData) {
+		return { success: true, item: null };
+	}
+
+	return {
+		success: true,
+		item: {
+			...result.rawItem,
+			...result.decryptedData,
 		},
-		vaultKey,
-	);
-
-	const data = JSON.parse(decrypted);
-
-	return { success: true, item: { ...item, ...data } };
+	};
 }
 
 /**
@@ -138,19 +88,21 @@ export async function handleGetVaultItem(payload: {
 export async function handleGetWritableVaults(): Promise<MessageResponse> {
 	updateActivity();
 
-	// Fetch all vaults
-	const vaults = await trpcClient.vault.list.query();
+	try {
+		const vaults = await trpcClient.vault.list.query();
+		const writableVaults = vaults.filter((vault) => vault.role !== "read-only");
 
-	// Filter out read-only vaults (only return vaults user can write to)
-	const writableVaults = vaults.filter((vault) => vault.role !== "read-only");
-
-	return {
-		success: true,
-		vaults: writableVaults.map((v) => ({
-			id: v.id,
-			name: v.name,
-			type: v.type,
-			role: v.role,
-		})),
-	};
+		return {
+			success: true,
+			vaults: writableVaults.map((vault) => ({
+				id: vault.id,
+				name: vault.name,
+				type: vault.type,
+				role: vault.role,
+			})),
+		};
+	} catch (error) {
+		console.error("[vault-handlers] GET_WRITABLE_VAULTS failed:", error);
+		return { success: false, error: String(error) };
+	}
 }

@@ -16,9 +16,11 @@
 	"dependencies": {
 		"@bittery/api": "workspace:*",
 		"@bittery/auth": "workspace:*",
-		"@bittery/crypto": "workspace:*",
+		"@bittery/core": "workspace:*",
+		"@bittery/storage": "workspace:*",
 		"@bittery/shared": "workspace:*",
 		"@bittery/sync": "workspace:*",
+		"@bittery/types": "workspace:*",
 		"@bittery/ui": "workspace:*",
 		"@choochmeque/tauri-plugin-biometry-api": "^0.2.0",
 		"@dnd-kit/core": "^6.3.1",

@@ -1,17 +1,17 @@
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useItems } from "@bittery/core/hooks";
 import { Badge, Button } from "@bittery/ui";
-import { useMutation } from "@tanstack/react-query";
+import {
+	IconArrowLeftOutlineDuo18,
+	IconTagOutlineDuo18,
+} from "@bittery/ui/icons";
 import {
 	createFileRoute,
 	Outlet,
 	useNavigate,
 	useParams,
 } from "@tanstack/react-router";
-import { ArrowLeft, Tag } from "lucide-react";
 import { ItemListRow } from "../../../../components/vault/item-list-row";
 import { getTagColorFromName } from "../../../../components/vault/tag-badge";
-import { useAllDecryptedItems } from "../../../../hooks/use-all-decrypted-items";
-import { useQueryInvalidator } from "../../../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault/tag/$tagName")({
 	component: CrossVaultTagRouteComponent,
@@ -21,15 +21,13 @@ function CrossVaultTagRouteComponent() {
 	const { tagName } = Route.useParams();
 	const { itemId } = useParams({ strict: false });
 	const navigate = useNavigate();
-	const trpcClient = useTRPCClient();
-	const invalidator = useQueryInvalidator();
 
 	// Decode the tag name from URL
 	const decodedTagName = decodeURIComponent(tagName);
 	const tagColor = getTagColorFromName(decodedTagName);
 
-	// Fetch and decrypt all items
-	const { items: allItems, isLoading } = useAllDecryptedItems();
+	// Unified hook - automatically handles single-account vs "All Accounts" mode
+	const { items: allItems, isLoading } = useItems();
 
 	// Filter items by tag
 	const filteredItems = allItems.filter((item) =>
@@ -42,32 +40,6 @@ function CrossVaultTagRouteComponent() {
 		if (!a.favorite && b.favorite) return 1;
 		return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
 	});
-
-	// Mutation to toggle favorite
-	const toggleFavoriteMutation = useMutation({
-		mutationFn: async (params: { itemId: string; favorite: boolean }) => {
-			return trpcClient.vault.toggleFavorite.mutate(params);
-		},
-		onSuccess: (_data, variables) => {
-			const item = allItems.find((i) => i.id === variables.itemId);
-			if (item) {
-				invalidator.invalidateItem(variables.itemId, item.vaultId);
-			}
-		},
-	});
-
-	const handleToggleFavorite = (
-		e: React.MouseEvent,
-		id: string,
-		currentFavorite: boolean,
-	) => {
-		e.preventDefault();
-		e.stopPropagation();
-		toggleFavoriteMutation.mutate({
-			itemId: id,
-			favorite: !currentFavorite,
-		});
-	};
 
 	if (isLoading) {
 		return (
@@ -90,9 +62,9 @@ function CrossVaultTagRouteComponent() {
 						className="size-6"
 						onClick={() => navigate({ to: "/vault/all-items" })}
 					>
-						<ArrowLeft className="size-4" />
+						<IconArrowLeftOutlineDuo18 className="size-4" />
 					</Button>
-					<Tag className="size-4" style={{ color: tagColor }} />
+					<IconTagOutlineDuo18 className="size-4" style={{ color: tagColor }} />
 					<span className="truncate font-medium">{decodedTagName}</span>
 					<Badge variant="secondary" className="ml-auto">
 						{filteredItems.length}
@@ -106,7 +78,10 @@ function CrossVaultTagRouteComponent() {
 								className="mb-4 inline-flex rounded-full p-4"
 								style={{ backgroundColor: `${tagColor}20` }}
 							>
-								<Tag className="size-8" style={{ color: tagColor }} />
+								<IconTagOutlineDuo18
+									className="size-8"
+									style={{ color: tagColor }}
+								/>
 							</div>
 							<h3 className="mb-2 font-semibold">No items with this tag</h3>
 							<p className="text-muted-foreground text-sm">
@@ -120,15 +95,11 @@ function CrossVaultTagRouteComponent() {
 									key={item.id}
 									item={item}
 									isSelected={itemId === item.id}
-									onToggleFavorite={(e) =>
-										handleToggleFavorite(e, item.id, item.favorite)
-									}
 									linkTo="/vault/tag/$tagName/$itemId"
 									linkParams={{
 										tagName: encodeURIComponent(decodedTagName),
 										itemId: item.id,
 									}}
-									showVaultBadge
 									vaultId={item.vaultId}
 								/>
 							))}

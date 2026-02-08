@@ -40,7 +40,6 @@ test.describe("Complete Network Outage", () => {
 
 	test("should handle offline mode during login", async ({ page }) => {
 		const networkSimulator = createNetworkSimulator(page);
-		const _bitteryPage = new BitteryPage(page);
 
 		await page.goto("/login");
 		await waitForLoginPageReady(page);
@@ -179,9 +178,7 @@ test.describe("Slow Network Conditions", () => {
 			.or(page.locator('[class*="animate-pulse"]'))
 			.or(page.locator('[class*="animate-spin"]'));
 
-		const _hasLoading = await loadingIndicator
-			.isVisible({ timeout: 2000 })
-			.catch(() => false);
+		await loadingIndicator.isVisible({ timeout: 2000 }).catch(() => false);
 
 		// Eventually the page should load
 		await waitForVaultsPageReady(page);
@@ -199,7 +196,7 @@ test.describe("Slow Network Conditions", () => {
 		// Slow network during signup
 		await networkSimulator.simulateSlowNetwork(2000);
 
-		const _newSecretKey = await bitteryPage.completeSignup(newUser);
+		await bitteryPage.completeSignup(newUser);
 
 		// Should eventually succeed
 		await expect(page).toHaveURL(/.*\/home/, { timeout: 60000 });
@@ -287,7 +284,7 @@ test.describe("Intermittent Connectivity", () => {
 		);
 
 		// Track API requests
-		const _requests = await networkSimulator.trackApiRequests();
+		await networkSimulator.trackApiRequests();
 
 		// Moderate failure rate
 		await networkSimulator.simulateIntermittentConnectivity(0.4);
@@ -539,7 +536,7 @@ test.describe("Authentication Under Network Stress", () => {
 		await networkSimulator.simulateSlowNetwork(1500);
 
 		const newUser = generateTestUser();
-		const _secretKey = await bitteryPage.completeSignup(newUser);
+		await bitteryPage.completeSignup(newUser);
 
 		// Should succeed (with extended timeout in completeSignup)
 		await expect(page).toHaveURL(/.*\/home/, { timeout: 60000 });
@@ -575,7 +572,6 @@ test.describe("Authentication Under Network Stress", () => {
 });
 
 test.describe("Data Integrity Under Network Issues", () => {
-	let _secretKey: string;
 	let testUser: ReturnType<typeof generateTestUser>;
 
 	test.beforeAll(async ({ browser }) => {
@@ -584,7 +580,7 @@ test.describe("Data Integrity Under Network Issues", () => {
 		const page = await context.newPage();
 		const bitteryPage = new BitteryPage(page);
 
-		_secretKey = await bitteryPage.completeSignup(testUser);
+		await bitteryPage.completeSignup(testUser);
 
 		await context.close();
 	});

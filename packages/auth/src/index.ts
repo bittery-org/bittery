@@ -3,12 +3,13 @@
  * Uses SRP-6a for secure authentication without server knowing password
  */
 
-import type { SRPServerChallenge } from "@bittery/crypto/srp-client";
+import { createHash, randomBytes } from "node:crypto";
 import {
 	deriveServerSession,
 	generateServerEphemeral,
-} from "@bittery/crypto/srp-server";
-import { db, session, user, vaultKey } from "@bittery/db";
+} from "@bittery/crypto-napi";
+import { db, loginRateLimit, session, user, vaultKey } from "@bittery/db";
+import type { SRPServerChallenge } from "@bittery/types";
 import { and, eq, gt } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
 import { nanoid } from "nanoid";
@@ -24,17 +25,53 @@ export interface DeviceInfo {
 	ipAddress?: string | null;
 }
 
-const JWT_SECRET = new TextEncoder().encode(
-	process.env.JWT_SECRET || "bittery-secret-change-in-production",
-);
+const jwtSecretRaw = process.env.JWT_SECRET;
+if (!jwtSecretRaw) {
+	throw new Error(
+		"FATAL: JWT_SECRET environment variable is not set. " +
+			"The server cannot start without a secure JWT secret.",
+	);
+}
+if (jwtSecretRaw.length < 32) {
+	throw new Error(
+		"FATAL: JWT_SECRET must be at least 32 characters for adequate security.",
+	);
+}
+
+const JWT_SECRET = new TextEncoder().encode(jwtSecretRaw);
 const JWT_ISSUER = "bittery";
 const JWT_AUDIENCE = "bittery-users";
 const SESSION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 days
+const LOGIN_RATE_LIMIT_FREE_ATTEMPTS = 5;
+const LOGIN_RATE_LIMIT_MAX_LOCK_MINUTES = 30;
+
+export function normalizeEmail(email: string): string {
+	return email.trim().toLowerCase();
+}
+
+function hashToken(token: string): string {
+	return createHash("sha256").update(token).digest("hex");
+}
+
+function getRateLimitId(email: string, ipAddress: string | null): string {
+	const ipPart = ipAddress?.trim() || "unknown";
+	return createHash("sha256")
+		.update(`${normalizeEmail(email)}|${ipPart}`)
+		.digest("hex");
+}
+
+export class LoginRateLimitError extends Error {
+	constructor(message = "Too many login attempts. Please try again later.") {
+		super(message);
+		this.name = "LoginRateLimitError";
+	}
+}
 
 export interface SessionPayload {
 	userId: string;
 	email: string;
 	sessionId: string;
+	sessionTokenHash: string;
 }
 
 /**
@@ -53,7 +90,7 @@ export async function createUser(data: {
 
 	await db.insert(user).values({
 		id: userId,
-		email: data.email.toLowerCase(),
+		email: normalizeEmail(data.email),
 		name: data.name,
 		emailVerified: false,
 		secretKeyHint: data.secretKeyHint,
@@ -81,7 +118,7 @@ export async function startLogin(
 	const [existingUser] = await db
 		.select()
 		.from(user)
-		.where(eq(user.email, email.toLowerCase()))
+		.where(eq(user.email, normalizeEmail(email)))
 		.limit(1);
 
 	if (!existingUser) {
@@ -89,15 +126,13 @@ export async function startLogin(
 	}
 
 	// Generate server ephemeral key pair
-	const serverEphemeral = await generateServerEphemeral(
-		existingUser.srpVerifier,
-	);
+	const serverEphemeral = generateServerEphemeral(existingUser.srpVerifier);
 
 	return {
 		userId: existingUser.id,
 		challenge: {
 			salt: existingUser.srpSalt,
-			serverPublicKey: serverEphemeral.publicKey,
+			serverPublicKey: serverEphemeral.public,
 		},
 		serverEphemeralSecret: serverEphemeral.secret,
 	};
@@ -151,11 +186,12 @@ export async function finishLogin(
 		// Create session
 		const sessionId = nanoid();
 		const expiresAt = new Date(Date.now() + SESSION_DURATION);
+		const sessionTokenHash = hashToken(serverSession.key);
 
 		await db.insert(session).values({
 			id: sessionId,
 			userId: existingUser.id,
-			token: serverSession.key,
+			token: sessionTokenHash,
 			expiresAt,
 			// Device tracking fields
 			deviceName: deviceInfo?.deviceName,
@@ -175,6 +211,7 @@ export async function finishLogin(
 			userId: existingUser.id,
 			email: existingUser.email,
 			sessionId,
+			sessionTokenHash,
 		} as SessionPayload)
 			.setProtectedHeader({ alg: "HS256" })
 			.setIssuedAt()
@@ -225,6 +262,7 @@ export async function verifySession(
 				and(
 					eq(session.id, sessionPayload.sessionId),
 					eq(session.userId, sessionPayload.userId),
+					eq(session.token, sessionPayload.sessionTokenHash),
 					gt(session.expiresAt, new Date()),
 				),
 			)
@@ -247,7 +285,7 @@ export async function getUserByEmail(email: string) {
 	const [existingUser] = await db
 		.select()
 		.from(user)
-		.where(eq(user.email, email.toLowerCase()))
+		.where(eq(user.email, normalizeEmail(email)))
 		.limit(1);
 
 	return existingUser || null;
@@ -289,12 +327,13 @@ export async function createUserSession(
 	const expiresAt = new Date(Date.now() + SESSION_DURATION);
 
 	// Generate a random session key for non-SRP sessions
-	const sessionKey = nanoid(32);
+	const sessionKey = randomBytes(32).toString("base64url");
+	const sessionTokenHash = hashToken(sessionKey);
 
 	await db.insert(session).values({
 		id: sessionId,
 		userId: existingUser.id,
-		token: sessionKey,
+		token: sessionTokenHash,
 		expiresAt,
 		// Device tracking fields
 		deviceName: deviceInfo?.deviceName,
@@ -314,6 +353,7 @@ export async function createUserSession(
 		userId: existingUser.id,
 		email: existingUser.email,
 		sessionId,
+		sessionTokenHash,
 	} as SessionPayload)
 		.setProtectedHeader({ alg: "HS256" })
 		.setIssuedAt()
@@ -348,6 +388,105 @@ export async function deleteSession(sessionId: string) {
  */
 export async function deleteAllUserSessions(userId: string) {
 	await db.delete(session).where(eq(session.userId, userId));
+}
+
+/**
+ * Get session by ID
+ */
+export async function getSessionById(sessionId: string) {
+	const [existingSession] = await db
+		.select()
+		.from(session)
+		.where(eq(session.id, sessionId))
+		.limit(1);
+
+	return existingSession || null;
+}
+
+/**
+ * Check whether login attempts are currently rate-limited for an email + IP pair
+ */
+export async function checkLoginRateLimit(
+	email: string,
+	ipAddress: string | null,
+): Promise<void> {
+	const id = getRateLimitId(email, ipAddress);
+	const now = new Date();
+
+	const [existingLimit] = await db
+		.select()
+		.from(loginRateLimit)
+		.where(eq(loginRateLimit.id, id))
+		.limit(1);
+
+	if (existingLimit?.lockedUntil && existingLimit.lockedUntil > now) {
+		throw new LoginRateLimitError();
+	}
+}
+
+/**
+ * Record failed login attempt and potentially lock future attempts
+ */
+export async function recordFailedLoginAttempt(
+	email: string,
+	ipAddress: string | null,
+): Promise<void> {
+	const normalizedEmail = normalizeEmail(email);
+	const normalizedIp = ipAddress?.trim() || null;
+	const id = getRateLimitId(normalizedEmail, normalizedIp);
+	const now = new Date();
+
+	const [existingLimit] = await db
+		.select()
+		.from(loginRateLimit)
+		.where(eq(loginRateLimit.id, id))
+		.limit(1);
+
+	const attempts = (existingLimit?.attempts ?? 0) + 1;
+	let lockedUntil: Date | null = null;
+
+	if (attempts >= LOGIN_RATE_LIMIT_FREE_ATTEMPTS) {
+		const lockMinutes = Math.min(
+			LOGIN_RATE_LIMIT_MAX_LOCK_MINUTES,
+			2 ** (attempts - LOGIN_RATE_LIMIT_FREE_ATTEMPTS),
+		);
+		lockedUntil = new Date(now.getTime() + lockMinutes * 60 * 1000);
+	}
+
+	if (existingLimit) {
+		await db
+			.update(loginRateLimit)
+			.set({
+				attempts,
+				lastAttemptAt: now,
+				lockedUntil,
+			})
+			.where(eq(loginRateLimit.id, id));
+	} else {
+		await db.insert(loginRateLimit).values({
+			id,
+			email: normalizedEmail,
+			ipAddress: normalizedIp,
+			attempts,
+			lastAttemptAt: now,
+			lockedUntil,
+		});
+	}
+
+	if (lockedUntil && lockedUntil > now) {
+		throw new LoginRateLimitError();
+	}
+}
+
+/**
+ * Clear failed login attempts after a successful login
+ */
+export async function clearLoginRateLimit(
+	email: string,
+	ipAddress: string | null,
+): Promise<void> {
+	const id = getRateLimitId(email, ipAddress?.trim() || null);
+	await db.delete(loginRateLimit).where(eq(loginRateLimit.id, id));
 }
 
 /**
@@ -416,7 +555,7 @@ export async function renameSession(
 export async function updateUserEmail(userId: string, newEmail: string) {
 	await db
 		.update(user)
-		.set({ email: newEmail.toLowerCase() })
+		.set({ email: normalizeEmail(newEmail) })
 		.where(eq(user.id, userId));
 }
 

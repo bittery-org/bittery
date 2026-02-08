@@ -7,6 +7,7 @@ export default defineManifest({
 	description: "Zero-knowledge password manager with secure autofill",
 	permissions: [
 		"storage",
+		"unlimitedStorage",
 		"activeTab",
 		"scripting",
 		"clipboardWrite",
@@ -40,6 +41,9 @@ export default defineManifest({
 		32: "icons/icon-32.png",
 		48: "icons/icon-48.png",
 		128: "icons/icon-128.png",
+	},
+	content_security_policy: {
+		extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
 	},
 	web_accessible_resources: [
 		{

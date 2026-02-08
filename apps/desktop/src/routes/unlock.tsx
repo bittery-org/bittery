@@ -1,30 +1,33 @@
-import { deriveKeys } from "@bittery/crypto/key-derivation";
 import {
-	deriveClientSession,
-	generateClientEphemeral,
-	verifyServerSession,
-} from "@bittery/crypto/srp-client";
-import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
-import { useTRPCClient } from "@bittery/shared/trpc";
+	useAccountSwitcher,
+	useQuickUnlockAll,
+	useSessionState,
+} from "@bittery/core/hooks";
 import {
-	Button,
-	Card,
-	Input,
-	Label,
+	AccountAvatarGroup as AvatarGroup,
+	ButtonGroup,
+	InputGroup,
+	InputGroupAddon,
+	InputGroupButton,
+	InputGroupInput,
 	toast,
 	VaultIcon,
 	type VaultIconState,
 } from "@bittery/ui";
-import { useQuery } from "@tanstack/react-query";
+import {
+	IconEyeOutlineDuo18,
+	IconEyeSlashOutlineDuo18,
+	IconFingerprintOutlineDuo18,
+	IconKeyOutlineDuo18,
+} from "@bittery/ui/icons";
+import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ChevronDown, Fingerprint } from "lucide-react";
-import { useState } from "react";
-import { AccountAvatar } from "../components/account-avatar";
-import { useAccount } from "../contexts/account-context";
+import { useEffect, useRef, useState } from "react";
+import { storage } from "@/lib/storage";
 
 interface UnlockSearchParams {
 	email?: string;
+	autoTrigger?: boolean;
 }
 
 export const Route = createFileRoute("/unlock")({
@@ -32,207 +35,231 @@ export const Route = createFileRoute("/unlock")({
 	validateSearch: (search: Record<string, unknown>): UnlockSearchParams => {
 		return {
 			email: typeof search.email === "string" ? search.email : undefined,
+			autoTrigger: search.autoTrigger === true || search.autoTrigger === "true",
 		};
 	},
 });
 
 export function UnlockPage() {
-	const trpcClient = useTRPCClient();
 	const navigate = useNavigate();
-	const { email: emailParam } = Route.useSearch();
-	const { allAccounts, activeAccount, refreshAccounts } = useAccount();
+	const { accounts } = useAccountSwitcher();
+	const queryClient = useQueryClient();
 	const [password, setPassword] = useState("");
-	const [loading, setLoading] = useState(false);
-	const [showAccountPicker, setShowAccountPicker] = useState(false);
 	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
+	const [showPassword, setShowPassword] = useState(false);
+	const hasAttemptedBiometric = useRef(false);
+	const { autoTrigger } = Route.useSearch();
 
-	// Determine which account to unlock
-	const targetEmail = emailParam || activeAccount?.email;
-	const targetAccount = allAccounts.find(
-		(a) => a.email.toLowerCase() === targetEmail?.toLowerCase(),
+	const allAccounts = accounts.data ?? [];
+
+	// Get session state for first account (to check biometric availability)
+	const { data: sessionState } = useSessionState(
+		allAccounts.length > 0 ? allAccounts[0].email : undefined,
 	);
 
-	const { data: sessionState } = useQuery({
-		queryKey: ["biometry-status", targetEmail],
-		queryFn: async () => {
-			if (!targetEmail) return null;
+	// Unlock all accounts at once with password
+	const quickUnlockAll = useQuickUnlockAll({
+		onSuccess: async (result) => {
+			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
-			const available = await tauriStorage.isBiometricAvailable();
-			const storedData = await tauriStorage.getStoredSessionData(targetEmail);
+			// Set active account to "all" mode if multiple accounts
+			if (allAccounts.length > 1) {
+				await storage.setActiveAccount({ type: "all" });
+			} else if (allAccounts.length === 1) {
+				await storage.setActiveAccount({
+					type: "single",
+					email: allAccounts[0].email,
+				});
+			}
 
-			return {
-				available,
-				enabled: storedData?.biometricEnabled ?? false,
-				data: storedData,
-			};
-		},
-		enabled: !!targetEmail,
-	});
+			setVaultState("unlocked");
 
-	const handleBiometricUnlock = async () => {
-		if (!targetEmail) return;
-
-		setLoading(true);
-		setVaultState("unlocking");
-		try {
-			const success = await tauriStorage.unlockWithBiometric(targetEmail);
-			if (success) {
-				// Restore auth token and vault keys
-				const token = await tauriStorage.getAuthToken(targetEmail);
-				const vaultKeys = await tauriStorage.getVaultKeys(targetEmail);
-
-				if (token && vaultKeys) {
-					// Set as active account
-					await tauriStorage.setActiveAccount(targetEmail);
-					await refreshAccounts();
-					setVaultState("unlocked");
-					toast.success("Unlocked with biometric");
-					// Delay navigation to show unlock animation
-					setTimeout(() => {
-						navigate({ to: "/vault" });
-					}, 600);
+			if (result.failed.length === 0) {
+				if (allAccounts.length === 1) {
+					toast.success("Vault unlocked");
 				} else {
-					setVaultState("locked");
-					toast.error("Session data missing, please log in again");
-					await tauriStorage.clearAllStoredData(targetEmail);
-					navigate({ to: "/login" });
+					toast.success(`All ${result.unlocked.length} accounts unlocked`);
 				}
 			} else {
-				setVaultState("locked");
-				toast.error("Biometric authentication failed");
+				toast.warning(
+					`Unlocked ${result.unlocked.length} of ${allAccounts.length} accounts`,
+				);
 			}
+
+			setTimeout(() => {
+				navigate({ to: "/vault" });
+			}, 600);
+		},
+		onPartialSuccess: async (result) => {
+			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+
+			if (allAccounts.length > 1) {
+				await storage.setActiveAccount({ type: "all" });
+			}
+
+			setVaultState("unlocked");
+			toast.warning(
+				`Unlocked ${result.unlocked.length} of ${allAccounts.length} accounts`,
+			);
+
+			setTimeout(() => {
+				navigate({ to: "/vault" });
+			}, 600);
+		},
+		onError: (error) => {
+			console.error("Unlock all error:", error);
+			setVaultState("locked");
+			toast.error(error.message || "Failed to unlock accounts");
+		},
+	});
+
+	// Biometric unlock all accounts with ONE prompt
+	const handleBiometricUnlockAll = async () => {
+		setVaultState("unlocking");
+
+		try {
+			// Use the unified biometric unlock method that shows ONE prompt for all accounts
+			if (!storage.unlockAllAccountsWithBiometric) {
+				throw new Error("Biometric unlock not supported on this platform");
+			}
+
+			const { unlocked, failed } =
+				await storage.unlockAllAccountsWithBiometric();
+
+			if (unlocked.length === 0) {
+				throw new Error("Failed to unlock any accounts with biometric");
+			}
+
+			// Set active mode
+			if (allAccounts.length > 1) {
+				await storage.setActiveAccount({ type: "all" });
+			} else {
+				await storage.setActiveAccount({
+					type: "single",
+					email: allAccounts[0].email,
+				});
+			}
+
+			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+			setVaultState("unlocked");
+
+			if (failed.length === 0) {
+				if (allAccounts.length === 1) {
+					toast.success("Unlocked with biometric");
+				} else {
+					toast.success(`All ${unlocked.length} accounts unlocked`);
+				}
+			} else {
+				toast.warning(
+					`Unlocked ${unlocked.length} of ${allAccounts.length} accounts`,
+				);
+			}
+
+			setTimeout(() => {
+				navigate({ to: "/vault" });
+			}, 600);
 		} catch (error) {
 			console.error("Biometric unlock error:", error);
 			setVaultState("locked");
-			toast.error("Biometric unlock failed");
-		} finally {
-			setLoading(false);
+			toast.error(
+				error instanceof Error ? error.message : "Biometric unlock failed",
+			);
 		}
 	};
 
 	const handlePasswordUnlock = async (e: React.FormEvent) => {
 		e.preventDefault();
-		if (!targetEmail) return;
-
-		setLoading(true);
 		setVaultState("unlocking");
 
-		try {
-			const secretKey = await tauriStorage.getStoredSecretKey(targetEmail);
-			if (!secretKey) {
-				toast.error("Secret key not found. Please log in again.");
-				await tauriStorage.clearAllStoredData(targetEmail);
-				navigate({ to: "/login" });
-				return;
-			}
+		// Unlock all accounts with the same password
+		quickUnlockAll.mutate({ password });
+	};
 
-			if (!sessionState?.data) {
-				toast.error("Session data not found. Please log in again.");
-				await tauriStorage.clearAllStoredData(targetEmail);
-				navigate({ to: "/login" });
-				return;
-			}
+	const loading = quickUnlockAll.isPending;
+	const requiresPasswordReentry =
+		sessionState?.requiresPasswordReentry ?? false;
+	const canUseBiometric =
+		sessionState?.canBiometricUnlock && !requiresPasswordReentry;
 
-			// 1. Derive keys from password + secret key
-			const { authKey, masterUnlockKey } = await deriveKeys(
-				password,
-				secretKey,
-				targetEmail,
-			);
-
-			// Convert authKey to password string for SRP
-			const srpPassword = new TextDecoder().decode(authKey);
-
-			// 2. Generate client ephemeral key pair
-			const clientEphemeral = generateClientEphemeral();
-
-			// 3. Send client public key to server and get challenge
-			const startResult = await trpcClient.auth.startLogin.mutate({
-				email: targetEmail,
-				clientPublicKey: clientEphemeral.publicKey,
-			});
-
-			// 4. Derive session and compute proof
-			const clientSession = await deriveClientSession(
-				clientEphemeral.secret,
-				{
-					salt: startResult.salt,
-					serverPublicKey: startResult.serverPublicKey,
-				},
-				srpPassword,
-			);
-
-			// 5. Send proof to server and get session
-			const finishResult = await trpcClient.auth.finishLogin.mutate({
-				userId: startResult.userId,
-				serverSecret: startResult.serverSecret,
-				clientPublicKey: clientEphemeral.publicKey,
-				clientProof: clientSession.proof,
-			});
-
-			if (!finishResult.serverProof) {
-				toast.error("Unlock failed");
-				setLoading(false);
-				return;
-			}
-
-			// 6. Verify server's proof (completes mutual authentication)
-			await verifyServerSession(
-				clientEphemeral.publicKey,
-				clientSession,
-				finishResult.serverProof,
-			);
-
-			// Update session with fresh data
-			await tauriStorage.storeAuthToken(finishResult.token, targetEmail);
-			await tauriStorage.storeVaultKeys(finishResult.vaultKeys, targetEmail);
-			// Store encrypted private key for RSA decryption of shared vault keys
-			if (finishResult.user.encryptedPrivateKey) {
-				await tauriStorage.storeEncryptedPrivateKey(
-					finishResult.user.encryptedPrivateKey,
-					targetEmail,
-				);
-			}
-			await tauriStorage.storeSessionData(
-				masterUnlockKey,
-				targetEmail,
-				finishResult.user.id,
-			);
-			await tauriStorage.storeMasterUnlockKey(masterUnlockKey, targetEmail);
-
-			// Update account metadata with latest team name from server
-			if (targetAccount) {
-				const updatedMetadata: AccountMetadata = {
-					...targetAccount,
-					teamName: finishResult.user.teamName,
-					lastActiveAt: Date.now(),
-				};
-				await tauriStorage.addAccountToList(updatedMetadata);
-			}
-
-			// Set as active account
-			await tauriStorage.setActiveAccount(targetEmail);
-			await refreshAccounts();
-
-			setVaultState("unlocked");
-			toast.success("Vault unlocked");
-			// Delay navigation to show unlock animation
-			setTimeout(() => {
-				navigate({ to: "/vault" });
-			}, 600);
-		} catch (error) {
-			console.error("Unlock error:", error);
-			setVaultState("locked");
-			toast.error(error instanceof Error ? error.message : "Unlock failed");
-		} finally {
-			setLoading(false);
+	// Reset attempt flag when autoTrigger changes to true (extension triggered unlock)
+	useEffect(() => {
+		if (autoTrigger) {
+			hasAttemptedBiometric.current = false;
 		}
-	};
+	}, [autoTrigger]);
 
-	const handleSwitchAccount = async (email: string) => {
-		setShowAccountPicker(false);
-		navigate({ to: "/unlock", search: { email } });
-	};
+	// Auto-trigger biometric unlock on mount if available
+	// OR if triggered by extension (autoTrigger=true)
+	useEffect(() => {
+		if (
+			(canUseBiometric || autoTrigger) &&
+			!hasAttemptedBiometric.current &&
+			allAccounts.length > 0
+		) {
+			hasAttemptedBiometric.current = true;
+			// Small delay to ensure everything is initialized
+			const timeout = setTimeout(async () => {
+				setVaultState("unlocking");
+
+				try {
+					if (!storage.unlockAllAccountsWithBiometric) {
+						throw new Error("Biometric unlock not supported on this platform");
+					}
+
+					const { unlocked, failed } =
+						await storage.unlockAllAccountsWithBiometric();
+
+					if (unlocked.length === 0) {
+						throw new Error("Failed to unlock any accounts with biometric");
+					}
+
+					// Set active mode
+					if (allAccounts.length > 1) {
+						await storage.setActiveAccount({ type: "all" });
+					} else {
+						await storage.setActiveAccount({
+							type: "single",
+							email: allAccounts[0].email,
+						});
+					}
+
+					await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+					setVaultState("unlocked");
+
+					if (failed.length === 0) {
+						if (allAccounts.length === 1) {
+							toast.success("Unlocked with biometric");
+						} else {
+							toast.success(`All ${unlocked.length} accounts unlocked`);
+						}
+					} else {
+						toast.warning(
+							`Unlocked ${unlocked.length} of ${allAccounts.length} accounts`,
+						);
+					}
+
+					setTimeout(() => {
+						navigate({ to: "/vault" });
+					}, 600);
+				} catch (error) {
+					console.error("Biometric unlock error:", error);
+					setVaultState("locked");
+					// Don't show toast on auto-trigger failure - user can manually try
+				}
+			}, 100);
+
+			return () => clearTimeout(timeout);
+		}
+	}, [canUseBiometric, autoTrigger, allAccounts, queryClient, navigate]);
+
+	// Show loading state while accounts are being fetched
+	if (accounts.isLoading) {
+		return (
+			<div className="flex h-full items-center justify-center">
+				<div className="text-gray-600">Loading...</div>
+			</div>
+		);
+	}
 
 	// If no accounts, redirect to login
 	if (allAccounts.length === 0) {
@@ -242,105 +269,104 @@ export function UnlockPage() {
 
 	return (
 		<div className="flex h-full items-center justify-center bg-gray-50 p-4">
-			<Card className="w-full max-w-md p-8">
-				<div className="mb-8 text-center">
-					<VaultIcon state={vaultState} className="mx-auto" size={140} />
-					<h1 className="mt-6 font-bold text-2xl">Unlock Bittery</h1>
+			<div className="w-full max-w-2xl">
+				<div className="flex items-start gap-12">
+					{/* Left side - Vault Icon */}
+					<div className="shrink-0">
+						<VaultIcon state={vaultState} size={180} />
+					</div>
 
-					{/* Account selector */}
-					{targetAccount && (
-						<div className="mt-4">
-							{allAccounts.length > 1 ? (
-								<div className="relative">
-									<button
-										type="button"
-										onClick={() => setShowAccountPicker(!showAccountPicker)}
-										className="mx-auto flex items-center gap-2 rounded-lg border px-3 py-2 hover:bg-gray-50"
-									>
-										<AccountAvatar account={targetAccount} size="sm" />
-										<span className="text-sm">{targetAccount.email}</span>
-										<ChevronDown className="h-4 w-4 text-gray-400" />
-									</button>
-
-									{showAccountPicker && (
-										<div className="-translate-x-1/2 absolute left-1/2 z-10 mt-2 w-64 rounded-lg border bg-white py-1 shadow-lg">
-											{allAccounts.map((account) => (
-												<button
-													key={account.email}
-													type="button"
-													onClick={() => handleSwitchAccount(account.email)}
-													className="flex w-full items-center gap-3 px-4 py-2 hover:bg-gray-50"
-												>
-													<AccountAvatar account={account} size="sm" />
-													<div className="text-left">
-														<div className="font-medium text-sm">
-															{account.teamName ||
-																account.name ||
-																account.email.split("@")[0]}
-														</div>
-														<div className="text-gray-500 text-xs">
-															{account.email}
-														</div>
-													</div>
-												</button>
-											))}
-										</div>
-									)}
-								</div>
-							) : (
-								<p className="text-gray-600 text-sm">{targetAccount.email}</p>
-							)}
+					{/* Right side - Unlock Form */}
+					<div className="flex-1 pt-6">
+						{/* Account Avatars */}
+						<div className="mb-5">
+							<AvatarGroup accounts={allAccounts} maxVisible={3} size="lg" />
 						</div>
-					)}
-				</div>
 
-				{sessionState?.available && sessionState?.enabled && (
-					<div className="mb-4">
-						<Button
-							type="button"
-							onClick={handleBiometricUnlock}
-							className="w-full"
-							variant="outline"
-							disabled={loading}
-						>
-							<Fingerprint className="mr-2 h-4 w-4" />
-							{loading ? "Authenticating..." : "Unlock with Biometric"}
-						</Button>
-						<div className="my-4 text-center text-gray-500 text-sm">or</div>
+						{/* Master Password Required Notice */}
+						{requiresPasswordReentry && (
+							<div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+								<IconKeyOutlineDuo18 className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+								<div>
+									<p className="font-medium text-amber-800">
+										Password Required
+									</p>
+									<p className="text-amber-700 text-sm">
+										For your security, please enter your master password. This
+										is required every 30 days.
+									</p>
+								</div>
+							</div>
+						)}
+
+						{/* Password Input with Eye and Fingerprint */}
+						<form onSubmit={handlePasswordUnlock} className="w-80">
+							<InputGroup>
+								<InputGroupInput
+									id="password"
+									type={showPassword ? "text" : "password"}
+									value={password}
+									onChange={(e) => setPassword(e.target.value)}
+									required
+									placeholder="Enter your password"
+									autoFocus
+									disabled={loading}
+									className="text-base"
+									onKeyDown={(e) => {
+										if (e.key === "Enter" && !loading) {
+											handlePasswordUnlock(e as unknown as React.FormEvent);
+										}
+									}}
+								/>
+								<InputGroupAddon align="inline-end">
+									<ButtonGroup>
+										<InputGroupButton
+											type="button"
+											size="icon-sm"
+											onClick={() => setShowPassword(!showPassword)}
+											disabled={loading}
+											aria-label={
+												showPassword ? "Hide password" : "Show password"
+											}
+										>
+											{showPassword ? (
+												<IconEyeSlashOutlineDuo18
+													className="h-4 w-4"
+													strokeWidth={1}
+												/>
+											) : (
+												<IconEyeOutlineDuo18
+													className="h-4 w-4"
+													strokeWidth={1}
+												/>
+											)}
+										</InputGroupButton>
+										{canUseBiometric && (
+											<InputGroupButton
+												type="button"
+												size="icon-sm"
+												onClick={handleBiometricUnlockAll}
+												disabled={loading}
+												aria-label="Unlock with biometric"
+												className="text-primary hover:text-primary/80"
+											>
+												<IconFingerprintOutlineDuo18 className="h-5 w-5" />
+											</InputGroupButton>
+										)}
+									</ButtonGroup>
+								</InputGroupAddon>
+							</InputGroup>
+						</form>
+
+						{/* Lock message */}
+						<p className="mt-4 w-80 text-muted-foreground text-sm">
+							{allAccounts.length === 1
+								? "Bittery was locked due to inactivity."
+								: `Bittery was locked with ${allAccounts.length} accounts.`}
+						</p>
 					</div>
-				)}
-
-				<form onSubmit={handlePasswordUnlock} className="space-y-4">
-					<div>
-						<Label htmlFor="password">Password</Label>
-						<Input
-							id="password"
-							type="password"
-							value={password}
-							onChange={(e) => setPassword(e.target.value)}
-							required
-							placeholder="Enter your password"
-							autoFocus
-						/>
-					</div>
-
-					<Button type="submit" className="w-full" disabled={loading}>
-						{loading ? "Unlocking..." : "Unlock"}
-					</Button>
-				</form>
-
-				<div className="mt-4 text-center">
-					<button
-						type="button"
-						onClick={() =>
-							navigate({ to: "/login", search: { addingAccount: true } })
-						}
-						className="text-gray-600 text-sm hover:text-gray-900"
-					>
-						Sign in with different account
-					</button>
 				</div>
-			</Card>
+			</div>
 		</div>
 	);
 }

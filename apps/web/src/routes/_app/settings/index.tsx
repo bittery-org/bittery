@@ -13,7 +13,6 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
 	Clock,
-	Download,
 	ExternalLink,
 	Github,
 	Key,
@@ -27,7 +26,6 @@ import { ChangeEmailDialog } from "@/components/settings/change-email-dialog";
 import { ChangePasswordDialog } from "@/components/settings/change-password-dialog";
 import { DeleteAccountDialog } from "@/components/settings/delete-account-dialog";
 import { DeviceManagement } from "@/components/settings/device-management";
-import { ExportVaultDialog } from "@/components/settings/export-vault-dialog";
 import { RegenerateSecretKeyDialog } from "@/components/settings/regenerate-secret-key-dialog";
 
 export const Route = createFileRoute("/_app/settings/")({
@@ -160,35 +158,6 @@ function SettingsPage() {
 				</CardHeader>
 				<CardContent>
 					<DeviceManagement />
-				</CardContent>
-			</Card>
-
-			<Card>
-				<CardHeader>
-					<CardTitle className="flex items-center gap-2">
-						<Download className="h-5 w-5" />
-						Data Management
-					</CardTitle>
-					<CardDescription>Export and backup your vault data</CardDescription>
-				</CardHeader>
-				<CardContent>
-					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-						<div className="space-y-1">
-							<span className="font-medium text-sm">
-								Export Encrypted Backup
-							</span>
-							<p className="text-muted-foreground text-sm">
-								Download all your vault data in an encrypted JSON file protected
-								by a password of your choice.
-							</p>
-						</div>
-						{userQuery.data?.email && (
-							<ExportVaultDialog
-								userEmail={userQuery.data.email}
-								userName={userQuery.data.name}
-							/>
-						)}
-					</div>
 				</CardContent>
 			</Card>
 

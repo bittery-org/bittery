@@ -1,11 +1,10 @@
-import { arrayBufferToBase64 } from "@bittery/crypto/key-derivation";
-import * as storage from "@bittery/crypto/storage-react-native";
+import { useAccountsInfo, useItems } from "@bittery/core/hooks";
+import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
-
-import CredentialProvider from "../../modules/credential-provider";
+import { storage } from "@/services/storage";
 import type { SaveCredentialParams } from "../../modules/credential-provider";
-import { useAllDecryptedItems } from "./use-all-decrypted-items";
+import CredentialProvider from "../../modules/credential-provider";
 
 /**
  * Extracts the domain from a URL string
@@ -58,7 +57,8 @@ export function useCredentialProviderSync(
 ) {
 	const { autoSync = true, debounceMs = 2000, enabled = true } = options;
 
-	const { items, isLoading: isLoadingItems } = useAllDecryptedItems();
+	const { items, isLoading: isLoadingItems } = useItems();
+	const { accountsInfo, isAllAccountsMode } = useAccountsInfo();
 
 	const [isSyncing, setIsSyncing] = useState(false);
 	const [lastSyncResult, setLastSyncResult] = useState<{
@@ -136,7 +136,8 @@ export function useCredentialProviderSync(
 							domain: additionalDomain,
 							username: item.username,
 							password: item.password,
-							displayName: item.title || `${item.username} @ ${additionalDomain}`,
+							displayName:
+								item.title || `${item.username} @ ${additionalDomain}`,
 						});
 					}
 				}
@@ -154,38 +155,166 @@ export function useCredentialProviderSync(
 		if (Platform.OS !== "android" || !isAvailable) return;
 
 		try {
-			// Check if already set
-			if (CredentialProvider.isVaultUnlocked()) {
-				console.log("[CredentialProviderSync] Native MUK already set");
-				return;
+			const unlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
+			if (unlockedEmails.length === 0) return;
+
+			for (const email of unlockedEmails) {
+				const muk = await storage.getMasterUnlockKey(email);
+				const sessionData = await storage.getStoredSessionData(email);
+				if (muk && sessionData?.userId) {
+					const mukBase64 = arrayBufferToBase64(muk);
+					CredentialProvider.setMasterUnlockKey(mukBase64, sessionData.userId);
+				}
 			}
 
-			// Get MUK from React Native storage
-			const muk = await storage.getMasterUnlockKey();
-			if (muk) {
-				const mukBase64 = arrayBufferToBase64(muk);
-				CredentialProvider.setMasterUnlockKey(mukBase64);
-				console.log("[CredentialProviderSync] Native MUK set from RN storage");
-			}
+			console.log("[CredentialProviderSync] Native MUKs set from RN storage");
 		} catch (err) {
 			console.warn("[CredentialProviderSync] Failed to set native MUK:", err);
 		}
 	}, [isAvailable]);
 
 	/**
-	 * Perform the sync operation.
+	 * Sync vault data (vault keys + encrypted items) to native database.
+	 * This is the new unified storage approach that:
+	 * - Stores encrypted server data directly (no double-encryption)
+	 * - Uses MUK for on-demand decryption (no biometric auth required)
+	 * - Enables inline autofill suggestions
+	 */
+	const syncVaultData = useCallback(async (): Promise<{
+		vaultKeys: number;
+		items: number;
+		domains: number;
+	} | null> => {
+		console.log("[CredentialProviderSync] syncVaultData() called");
+
+		if (!isAvailable || Platform.OS !== "android") {
+			console.log("[CredentialProviderSync] Vault sync skipped: not available");
+			return null;
+		}
+
+		try {
+			// Ensure MUK is available in native
+			await ensureNativeMukSet();
+
+			if (accountsInfo.length === 0) {
+				console.warn(
+					"[CredentialProviderSync] No accounts available, skipping vault sync",
+				);
+				return null;
+			}
+
+			const totals = {
+				vaultKeys: 0,
+				items: 0,
+				domains: 0,
+			};
+
+			for (const account of accountsInfo) {
+				const vaultKeys = await storage.getVaultKeys(account.email);
+				if (!vaultKeys || vaultKeys.length === 0) {
+					continue;
+				}
+
+				const vaultIdsWithKeys = new Set(vaultKeys.map((vk) => vk.vaultId));
+
+				const loginItems = items.filter((item) => {
+					if (item.category !== "login") return false;
+					if (!vaultIdsWithKeys.has(item.vaultId)) return false;
+					if (!isAllAccountsMode) return true;
+					return (
+						item.account?.email?.toLowerCase() === account.email.toLowerCase()
+					);
+				});
+
+				const itemsData = loginItems
+					.filter((item) => item._encrypted)
+					.map((item) => {
+						const urls: string[] = [];
+						if (item.url) urls.push(item.url);
+						if (item.urls && Array.isArray(item.urls)) {
+							urls.push(...item.urls);
+						}
+
+						const encrypted = item._encrypted as {
+							data: string;
+							iv: string;
+							algorithm: string;
+						};
+
+						return {
+							id: item.id,
+							vaultId: item.vaultId,
+							userId: account.userId,
+							category: item.category,
+							displayTitle: item.title || "",
+							encryptedData: encrypted.data,
+							encryptionIv: encrypted.iv,
+							encryptionAlgorithm: encrypted.algorithm,
+							username: item.username || item.email || null,
+							urls,
+							iconUrl: null,
+							lastUsedAt: 0,
+							createdAt: new Date(item.createdAt).getTime(),
+							updatedAt: new Date(item.updatedAt).getTime(),
+							isFavorite: item.favorite || false,
+						};
+					});
+
+				const vaultKeysData = vaultKeys.map((vaultKey) => {
+					let encryptedKey: string;
+					let encryptionIv: string;
+					let encryptionAlgorithm: string;
+
+					try {
+						const parsed = JSON.parse(vaultKey.encryptedVaultKey);
+						encryptedKey = parsed.ciphertext;
+						encryptionIv = parsed.iv;
+						encryptionAlgorithm = parsed.algorithm || "AES-GCM";
+					} catch {
+						encryptedKey = vaultKey.encryptedVaultKey;
+						encryptionIv = "";
+						encryptionAlgorithm = "AES-GCM";
+					}
+
+					return {
+						vaultId: vaultKey.vaultId,
+						vaultName: vaultKey.vaultName,
+						vaultType: vaultKey.vaultType,
+						encryptedKey,
+						encryptionIv,
+						encryptionAlgorithm,
+						role: vaultKey.role,
+					};
+				});
+
+				const syncData = {
+					userId: account.userId,
+					vaultKeys: vaultKeysData,
+					items: itemsData,
+				};
+
+				const result = await CredentialProvider.syncVaultData(
+					JSON.stringify(syncData),
+				);
+
+				totals.vaultKeys += result?.vaultKeys ?? vaultKeysData.length;
+				totals.items += result?.items ?? itemsData.length;
+				totals.domains += result?.domains ?? 0;
+			}
+
+			console.log("[CredentialProviderSync] Vault sync totals:", totals);
+			return totals;
+		} catch (err) {
+			console.error("[CredentialProviderSync] Vault sync failed:", err);
+			return null;
+		}
+	}, [accountsInfo, ensureNativeMukSet, isAvailable, isAllAccountsMode, items]);
+
+	/**
+	 * Perform the legacy sync operation.
 	 *
 	 * This syncs decrypted credentials to the credential provider storage.
 	 * The native side re-encrypts passwords with BiometricKeyManager.
-	 *
-	 * TODO: Future optimization - Unified Storage:
-	 * Instead of syncing decrypted credentials, sync encrypted server data
-	 * directly to ItemEntity/VaultKeyEntity. This eliminates double-encryption
-	 * and allows the credential provider to decrypt on-demand using the MUK.
-	 * This would require:
-	 * 1. Access to raw encrypted server responses
-	 * 2. New native sync function for ItemEntity/VaultKeyEntity
-	 * 3. Domain/username extraction happens here (denormalization)
 	 */
 	const sync = useCallback(async (): Promise<{
 		synced: number;
@@ -198,7 +327,9 @@ export function useCredentialProviderSync(
 		});
 
 		if (!isAvailable || Platform.OS !== "android") {
-			console.log("[CredentialProviderSync] Sync skipped: not available or not Android");
+			console.log(
+				"[CredentialProviderSync] Sync skipped: not available or not Android",
+			);
 			return null;
 		}
 
@@ -208,7 +339,9 @@ export function useCredentialProviderSync(
 				"Authentication not available. Please set up a PIN, pattern, password, or biometric on your device to use autofill.",
 			);
 			setError(authError);
-			console.warn("[CredentialProviderSync] Sync skipped: no authentication method available");
+			console.warn(
+				"[CredentialProviderSync] Sync skipped: no authentication method available",
+			);
 			return null;
 		}
 
@@ -216,20 +349,39 @@ export function useCredentialProviderSync(
 		setError(null);
 
 		try {
-			// Ensure MUK is available in native for unified storage decryption
-			await ensureNativeMukSet();
+			// Sync vault data (new unified storage approach)
+			console.log("[CredentialProviderSync] Starting vault data sync...");
+			const vaultResult = await syncVaultData();
+			if (vaultResult) {
+				console.log(
+					"[CredentialProviderSync] Vault sync complete:",
+					vaultResult,
+				);
+			}
 
-			const credentials = extractCredentials();
-
-			if (credentials.length === 0) {
-				console.log("[CredentialProviderSync] No credentials to sync");
+			if (isAllAccountsMode && accountsInfo.length > 1) {
+				console.log(
+					"[CredentialProviderSync] Skipping legacy credential sync in all-accounts mode",
+				);
 				setLastSyncResult({ synced: 0, deleted: 0 });
 				return { synced: 0, deleted: 0 };
 			}
 
-			console.log("[CredentialProviderSync] Calling CredentialProvider.syncCredentials...");
+			// Also sync legacy credentials for backwards compatibility
+			// (This can be removed once all autofill flows use vault-based storage)
+			const credentials = extractCredentials();
+
+			if (credentials.length === 0) {
+				console.log("[CredentialProviderSync] No legacy credentials to sync");
+				setLastSyncResult({ synced: 0, deleted: 0 });
+				return { synced: 0, deleted: 0 };
+			}
+
+			console.log(
+				"[CredentialProviderSync] Calling CredentialProvider.syncCredentials...",
+			);
 			const result = await CredentialProvider.syncCredentials(credentials);
-			console.log("[CredentialProviderSync] Sync result:", result);
+			console.log("[CredentialProviderSync] Legacy sync result:", result);
 
 			setLastSyncResult(result);
 			return result;
@@ -242,7 +394,14 @@ export function useCredentialProviderSync(
 		} finally {
 			setIsSyncing(false);
 		}
-	}, [isAvailable, isBiometricAvailable, extractCredentials, ensureNativeMukSet]);
+	}, [
+		isAvailable,
+		isBiometricAvailable,
+		isAllAccountsMode,
+		accountsInfo.length,
+		extractCredentials,
+		syncVaultData,
+	]);
 
 	/**
 	 * Calculate a hash of items to detect changes
@@ -252,6 +411,7 @@ export function useCredentialProviderSync(
 		// Create a simple hash based on item IDs, usernames, passwords, and URLs
 		const hashData = loginItems.map((item) => ({
 			id: item.id,
+			account: item.account?.email,
 			username: item.username,
 			password: item.password,
 			url: item.url,
@@ -281,7 +441,9 @@ export function useCredentialProviderSync(
 			isLoadingItems ||
 			Platform.OS !== "android"
 		) {
-			console.log("[CredentialProviderSync] Auto-sync skipped due to conditions");
+			console.log(
+				"[CredentialProviderSync] Auto-sync skipped due to conditions",
+			);
 			return;
 		}
 
@@ -289,7 +451,9 @@ export function useCredentialProviderSync(
 
 		// Skip if items haven't changed
 		if (currentHash === lastItemsHashRef.current) {
-			console.log("[CredentialProviderSync] Items haven't changed, skipping sync");
+			console.log(
+				"[CredentialProviderSync] Items haven't changed, skipping sync",
+			);
 			return;
 		}
 
@@ -303,7 +467,9 @@ export function useCredentialProviderSync(
 
 		// Set debounced sync
 		debounceTimerRef.current = setTimeout(() => {
-			console.log("[CredentialProviderSync] Debounce timer fired, starting sync");
+			console.log(
+				"[CredentialProviderSync] Debounce timer fired, starting sync",
+			);
 			sync();
 		}, debounceMs);
 
@@ -321,6 +487,7 @@ export function useCredentialProviderSync(
 		calculateItemsHash,
 		sync,
 		debounceMs,
+		items.length,
 	]);
 
 	return {

@@ -1,6 +1,3 @@
-import { arrayBufferToBase64 } from "@bittery/crypto/key-derivation";
-import { rsaEncrypt } from "@bittery/crypto/rsa";
-import { getDecryptedVaultKey } from "@bittery/crypto/session-storage";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Avatar,
@@ -25,6 +22,8 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { UserPlus } from "lucide-react";
 import { useState } from "react";
+import { storage } from "@/lib/storage";
+import { arrayBufferToBase64, rsaEncrypt } from "@/lib/wasm-crypto";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface AddMemberDialogProps {
@@ -82,7 +81,7 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 
 		try {
 			// 1. Get the decrypted vault key
-			const vaultKey = await getDecryptedVaultKey(vaultId);
+			const vaultKey = await storage.getDecryptedVaultKey(vaultId);
 			if (!vaultKey) {
 				toast.error("Could not decrypt vault key. Please log in again.");
 				return;

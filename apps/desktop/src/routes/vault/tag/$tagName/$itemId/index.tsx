@@ -1,8 +1,7 @@
+import { useAvailableTags, useItems, useVaultInfo } from "@bittery/core/hooks";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { ItemDetailPage } from "../../../../../components/vault/item-detail-page";
-import { useAllDecryptedItems } from "../../../../../hooks/use-all-decrypted-items";
-import { useAvailableTags } from "../../../../../hooks/use-available-tags";
 
 export const Route = createFileRoute("/vault/tag/$tagName/$itemId/")({
 	component: TagItemComponent,
@@ -12,10 +11,16 @@ function TagItemComponent() {
 	const { itemId } = Route.useParams();
 	const navigate = useNavigate();
 
-	const { items: allItems } = useAllDecryptedItems();
+	// Unified hook - automatically handles single-account vs "All Accounts" mode
+	const { items: allItems } = useItems();
 	const availableTags = useAvailableTags(allItems);
 
-	const currentVault = allItems.find((i) => i.id === itemId)?.vault;
+	// Get vault ID from the item
+	const currentItem = allItems.find((i) => i.id === itemId);
+	const vaultId = currentItem?.vaultId;
+
+	// Get complete vault info including account metadata
+	const { vaultInfo: currentVault } = useVaultInfo(vaultId ?? "");
 
 	const handleTagClick = useCallback(
 		(clickedTagName: string) => {
@@ -27,10 +32,26 @@ function TagItemComponent() {
 		[navigate],
 	);
 
+	const vaultInfo = useMemo(
+		() =>
+			currentVault
+				? {
+						name: currentVault.vaultName,
+						type: currentVault.vaultType,
+						icon: currentVault.vaultIcon,
+						imageUrl: currentVault.vaultImageUrl,
+						accountName: currentVault.accountName,
+						accountTeamName: currentVault.accountTeamName,
+						accountTeamAvatarUrl: currentVault.accountTeamAvatarUrl,
+					}
+				: undefined,
+		[currentVault],
+	);
+
 	return (
 		<ItemDetailPage
 			itemId={itemId}
-			vaultInfo={currentVault}
+			vaultInfo={vaultInfo}
 			availableTags={availableTags}
 			onTagClick={handleTagClick}
 		/>

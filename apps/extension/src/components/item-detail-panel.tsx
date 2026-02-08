@@ -4,11 +4,26 @@ import type {
 	TotpAlgorithm,
 	TotpDigits,
 } from "@bittery/shared/types";
-import { Button, Card, copyWithToast, Input, Label, toast } from "@bittery/ui";
-
-const handleCopy = copyWithToast;
-
-import { Copy, ExternalLink, Eye, EyeOff, Loader2, QrCode } from "lucide-react";
+import {
+	Button,
+	ButtonGroup,
+	Card,
+	copyWithToast,
+	InputGroup,
+	InputGroupAddon,
+	InputGroupButton,
+	InputGroupInput,
+	Label,
+	toast,
+} from "@bittery/ui";
+import {
+	IconCopyOutlineDuo18,
+	IconEyeOutlineDuo18,
+	IconEyeSlashOutlineDuo18,
+	IconLoader2OutlineDuo18,
+	IconOpenExternalOutlineDuo18,
+	IconQrcodeOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
 import { Favicon } from "./favicon";
 import { QRScanner, type QRScanResult } from "./qr-scanner";
@@ -26,6 +41,8 @@ const handleOpenUrl = (targetUrl: string | undefined) => {
 
 	window.open(normalizeUrl(targetUrl), "_blank", "noopener,noreferrer");
 };
+
+const handleCopy = copyWithToast;
 
 interface ItemDetailPanelProps {
 	item: DecryptedItem;
@@ -100,7 +117,7 @@ function InlineTotpDisplay({
 			>
 				<div className="relative flex size-9 items-center justify-center">
 					<svg
-						className="-rotate-90 size-9"
+						className="size-9 -rotate-90"
 						viewBox="0 0 32 32"
 						aria-hidden="true"
 					>
@@ -150,7 +167,7 @@ function InlineTotpDisplay({
 				onClick={handleCopyCode}
 				disabled={!totpResult?.code}
 			>
-				<Copy size={16} />
+				<IconCopyOutlineDuo18 size={16} />
 			</Button>
 		</div>
 	);
@@ -216,77 +233,86 @@ function LoginItemDetail({
 	}, []);
 
 	return (
-		<div className="space-y-4">
+		<div className="space-y-3">
 			{item.url && (
 				<div className="space-y-2">
-					<Label>Website</Label>
-					<div className="flex gap-2">
-						<Input value={item.url} readOnly className="h-9 flex-1" />
-						<Button
-							size="icon"
-							variant="outline"
-							onClick={() => handleCopy(item.url, "URL")}
-						>
-							<Copy size={16} />
-						</Button>
-						<Button
-							size="icon"
-							variant="outline"
-							onClick={() => handleOpenUrl(item.url)}
-						>
-							<ExternalLink size={16} />
-						</Button>
-					</div>
+					<Label className="font-medium text-sm">Website</Label>
+					<InputGroup>
+						<InputGroupInput value={item.url} readOnly />
+						<InputGroupAddon align="inline-end">
+							<ButtonGroup>
+								<InputGroupButton
+									size="icon-sm"
+									onClick={() => handleCopy(item.url, "URL")}
+								>
+									<IconCopyOutlineDuo18 className="size-4" />
+								</InputGroupButton>
+								<InputGroupButton
+									size="icon-sm"
+									onClick={() => handleOpenUrl(item.url)}
+								>
+									<IconOpenExternalOutlineDuo18 className="size-4" />
+								</InputGroupButton>
+							</ButtonGroup>
+						</InputGroupAddon>
+					</InputGroup>
 				</div>
 			)}
 
 			{item.username && (
 				<div className="space-y-2">
-					<Label>Username</Label>
-					<div className="flex gap-2">
-						<Input value={item.username} readOnly className="h-9 flex-1" />
-						<Button
-							size="icon"
-							variant="outline"
-							onClick={() => handleCopy(item.username, "Username")}
-						>
-							<Copy size={16} />
-						</Button>
-					</div>
+					<Label className="font-medium text-sm">Username</Label>
+					<InputGroup>
+						<InputGroupInput value={item.username} readOnly />
+						<InputGroupAddon align="inline-end">
+							<InputGroupButton
+								size="icon-sm"
+								onClick={() => handleCopy(item.username, "Username")}
+							>
+								<IconCopyOutlineDuo18 className="size-4" />
+							</InputGroupButton>
+						</InputGroupAddon>
+					</InputGroup>
 				</div>
 			)}
 
 			{item.password && (
 				<div className="space-y-2">
-					<Label>Password</Label>
-					<div className="flex gap-2">
-						<Input
+					<Label className="font-medium text-sm">Password</Label>
+					<InputGroup>
+						<InputGroupInput
 							type={showPassword ? "text" : "password"}
 							value={item.password}
 							readOnly
-							className="h-9 flex-1 font-mono"
+							className="font-mono"
 						/>
-						<Button
-							size="icon"
-							variant="outline"
-							onClick={() => setShowPassword(!showPassword)}
-						>
-							{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-						</Button>
-						<Button
-							size="icon"
-							variant="outline"
-							onClick={() => handleCopy(item.password, "Password")}
-						>
-							<Copy size={16} />
-						</Button>
-					</div>
+						<InputGroupAddon align="inline-end">
+							<ButtonGroup>
+								<InputGroupButton
+									size="icon-sm"
+									onClick={() => setShowPassword(!showPassword)}
+								>
+									{showPassword ? (
+										<IconEyeSlashOutlineDuo18 className="size-4" />
+									) : (
+										<IconEyeOutlineDuo18 className="size-4" />
+									)}
+								</InputGroupButton>
+								<InputGroupButton
+									size="icon-sm"
+									onClick={() => handleCopy(item.password, "Password")}
+								>
+									<IconCopyOutlineDuo18 className="size-4" />
+								</InputGroupButton>
+							</ButtonGroup>
+						</InputGroupAddon>
+					</InputGroup>
 				</div>
 			)}
 
 			{/* TOTP Section */}
 			<div className="space-y-2">
-				<Label>Two-Factor Authentication</Label>
+				<Label className="font-medium text-sm">Two-Factor Authentication</Label>
 				{item.totpSecret ? (
 					<InlineTotpDisplay
 						totpSecret={item.totpSecret}
@@ -297,7 +323,7 @@ function LoginItemDetail({
 				) : showQRScanner ? (
 					isSaving ? (
 						<Card className="flex items-center justify-center gap-2 p-4">
-							<Loader2 className="h-5 w-5 animate-spin" />
+							<IconLoader2OutlineDuo18 className="h-5 w-5 animate-spin" />
 							<span className="text-sm">Saving TOTP...</span>
 						</Card>
 					) : (
@@ -312,7 +338,7 @@ function LoginItemDetail({
 						className="w-full gap-2"
 						onClick={() => setShowQRScanner(true)}
 					>
-						<QrCode size={16} />
+						<IconQrcodeOutlineDuo18 size={16} />
 						Scan QR Code to Add 2FA
 					</Button>
 				)}
@@ -320,9 +346,9 @@ function LoginItemDetail({
 
 			{notes && (
 				<div className="space-y-2">
-					<Label>Notes</Label>
-					<Card className="whitespace-pre-wrap p-4 text-sm leading-relaxed">
-						{notes}
+					<Label className="font-medium text-sm">Notes</Label>
+					<Card>
+						<div className="whitespace-pre-wrap px-4 py-1 text-sm">{notes}</div>
 					</Card>
 				</div>
 			)}
@@ -335,9 +361,11 @@ function SecureNoteDetail({ item }: { item: DecryptedItem }) {
 
 	return (
 		<div className="space-y-2">
-			<Label>Note</Label>
-			<Card className="whitespace-pre-wrap p-4 text-sm leading-relaxed">
-				{notes || "No notes added yet."}
+			<Label className="font-medium text-sm">Note</Label>
+			<Card>
+				<div className="whitespace-pre-wrap px-4 py-1 text-sm">
+					{notes || "No notes added yet."}
+				</div>
 			</Card>
 		</div>
 	);
@@ -347,15 +375,15 @@ function CreditCardDetail({ item }: { item: DecryptedItem }) {
 	const notes = getItemNotes(item);
 
 	return (
-		<div className="space-y-4">
+		<div className="space-y-3">
 			<div className="text-muted-foreground text-sm">
 				Credit card details coming soon
 			</div>
 			{notes && (
 				<div className="space-y-2">
-					<Label>Notes</Label>
-					<Card className="whitespace-pre-wrap p-4 text-sm leading-relaxed">
-						{notes}
+					<Label className="font-medium text-sm">Notes</Label>
+					<Card>
+						<div className="whitespace-pre-wrap px-4 py-1 text-sm">{notes}</div>
 					</Card>
 				</div>
 			)}
@@ -367,15 +395,15 @@ function IdentityDetail({ item }: { item: DecryptedItem }) {
 	const notes = getItemNotes(item);
 
 	return (
-		<div className="space-y-4">
+		<div className="space-y-3">
 			<div className="text-muted-foreground text-sm">
 				Identity details coming soon
 			</div>
 			{notes && (
 				<div className="space-y-2">
-					<Label>Notes</Label>
-					<Card className="whitespace-pre-wrap p-4 text-sm leading-relaxed">
-						{notes}
+					<Label className="font-medium text-sm">Notes</Label>
+					<Card>
+						<div className="whitespace-pre-wrap px-4 py-1 text-sm">{notes}</div>
 					</Card>
 				</div>
 			)}
@@ -387,8 +415,8 @@ export function ItemDetailPanel({ item, onItemUpdated }: ItemDetailPanelProps) {
 	const isSecureNote = item.category === "secure-note";
 
 	return (
-		<div className="space-y-5">
-			<div className="flex items-start gap-4">
+		<div className="space-y-4">
+			<div className="flex items-center gap-4">
 				<Favicon
 					url={isSecureNote ? undefined : item.url}
 					title={item.title}
@@ -396,15 +424,15 @@ export function ItemDetailPanel({ item, onItemUpdated }: ItemDetailPanelProps) {
 					size="lg"
 				/>
 				<div className="min-w-0 flex-1">
-					<h2 className="truncate font-semibold text-xl tracking-tight">
+					<h2 className="truncate font-semibold text-lg tracking-tight">
 						{item.title}
 					</h2>
 					{item.url ? (
-						<p className="mt-1 truncate text-muted-foreground text-sm">
+						<p className="mt-0.5 truncate text-muted-foreground text-xs">
 							{item.url}
 						</p>
 					) : isSecureNote ? (
-						<p className="mt-1 text-muted-foreground text-sm">Secure Note</p>
+						<p className="mt-0.5 text-muted-foreground text-xs">Secure Note</p>
 					) : null}
 				</div>
 			</div>

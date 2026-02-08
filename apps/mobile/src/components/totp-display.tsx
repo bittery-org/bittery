@@ -1,9 +1,10 @@
 import { generateTotp, type TotpResult } from "@bittery/shared/totp";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import * as Clipboard from "expo-clipboard";
+import { useToast } from "heroui-native";
 import { Copy } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Animated, Text, TouchableOpacity, View } from "react-native";
+import { Animated, Text, TouchableOpacity, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 
 interface TotpDisplayProps {
@@ -41,6 +42,7 @@ export function TotpDisplay({
 	label = "One-time password",
 	onCopy,
 }: TotpDisplayProps) {
+	const { toast } = useToast();
 	const [totpResult, setTotpResult] = useState<TotpResult | null>(null);
 	const [copied, setCopied] = useState(false);
 	const prevCodeRef = useRef<string | null>(null);
@@ -126,9 +128,13 @@ export function TotpDisplay({
 			// Call optional callback
 			onCopy?.();
 
-			// Only show alert in non-inline mode
+			// Only show toast in non-inline mode
 			if (!inline) {
-				Alert.alert("Copied", "Code copied to clipboard");
+				toast.show({
+					variant: "success",
+					label: "Code copied to clipboard",
+					placement: "bottom",
+				});
 			}
 
 			// Reset copied state after 2 seconds
@@ -302,9 +308,7 @@ export function TotpDisplay({
 					>
 						{formatCode(totpResult?.code || "")}
 					</Animated.Text>
-					{!compact && (
-						<Text className="text-muted-foreground text-xs">{label}</Text>
-					)}
+					{!compact && <Text className="text-muted text-xs">{label}</Text>}
 				</View>
 			</TouchableOpacity>
 

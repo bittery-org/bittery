@@ -1,7 +1,13 @@
 import { getDomainFromUrl, getFaviconUrl } from "@bittery/shared/favicon";
 import type { ItemCategory } from "@bittery/shared/types";
 import { cn } from "@bittery/ui";
-import { CreditCard, FileText, Globe, KeyRound, User } from "lucide-react";
+import {
+	IconCreditCardLockOutlineDuo18,
+	IconEarthOutlineDuo18,
+	IconFileLockOutlineDuo18,
+	IconMobileOutlineDuo18,
+	IconUserOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useState } from "react";
 
 interface FaviconProps {
@@ -36,26 +42,26 @@ function getInitials(title: string): string {
  */
 function getAvatarColor(title: string): string {
 	const colors = [
-		"bg-red-100",
-		"bg-orange-100",
-		"bg-amber-100",
-		"bg-yellow-100",
-		"bg-lime-100",
-		"bg-green-100",
-		"bg-emerald-100",
-		"bg-teal-100",
-		"bg-cyan-100",
-		"bg-sky-100",
-		"bg-blue-100",
-		"bg-indigo-100",
-		"bg-violet-100",
-		"bg-purple-100",
-		"bg-fuchsia-100",
-		"bg-pink-100",
-		"bg-rose-100",
+		"bg-red-50",
+		"bg-orange-50",
+		"bg-amber-50",
+		"bg-yellow-50",
+		"bg-lime-50",
+		"bg-green-50",
+		"bg-emerald-50",
+		"bg-teal-50",
+		"bg-cyan-50",
+		"bg-sky-50",
+		"bg-blue-50",
+		"bg-indigo-50",
+		"bg-violet-50",
+		"bg-purple-50",
+		"bg-fuchsia-50",
+		"bg-pink-50",
+		"bg-rose-50",
 	];
 
-	if (!title) return "bg-gray-100";
+	if (!title) return "bg-gray-50";
 
 	let hash = 0;
 	for (let i = 0; i < title.length; i++) {
@@ -76,9 +82,9 @@ export function Favicon({
 	const [imageError, setImageError] = useState(false);
 
 	const faviconSizeMap = {
-		sm: 32,
-		md: 32,
-		lg: 64,
+		sm: 64,
+		md: 64,
+		lg: 128,
 	} as const;
 
 	const faviconUrl =
@@ -96,15 +102,15 @@ export function Favicon({
 	};
 
 	const iconSizes = {
-		sm: 16,
-		md: 20,
-		lg: 24,
+		sm: 26,
+		md: 30,
+		lg: 38,
 	};
 
 	const imageSizes = {
-		sm: "w-4 h-4",
-		md: "w-5 h-5",
-		lg: "w-8 h-8",
+		sm: "w-7.75 h-7.75",
+		md: "w-9.75 h-9.75",
+		lg: "w-10.75 h-10.75",
 	};
 
 	// Card brand colors
@@ -126,13 +132,13 @@ export function Favicon({
 	return (
 		<div
 			className={cn(
-				"flex shrink-0 items-center justify-center overflow-hidden rounded-lg border",
+				"flex shrink-0 items-center justify-center overflow-hidden rounded-xl border",
 				sizeClasses[size],
 				category === "credit-card"
 					? cardColor
 					: imageError || !faviconUrl
 						? avatarColor
-						: "bg-muted/50",
+						: "bg-accent",
 				className,
 			)}
 		>
@@ -140,21 +146,36 @@ export function Favicon({
 				<img
 					src={faviconUrl}
 					alt=""
-					className={imageSizes[size]}
+					className={`${imageSizes[size]} rounded-lg object-contain`}
 					onError={() => setImageError(true)}
 				/>
 			) : category === "login" && url ? (
 				<span className="select-none font-semibold text-white">{initials}</span>
 			) : category === "login" ? (
-				<Globe className="text-muted-foreground" size={iconSizes[size]} />
+				<IconEarthOutlineDuo18
+					className="text-muted-foreground"
+					size={iconSizes[size]}
+				/>
 			) : category === "credit-card" ? (
-				<CreditCard className="text-white" size={iconSizes[size]} />
+				<IconCreditCardLockOutlineDuo18
+					className="text-white"
+					size={iconSizes[size]}
+				/>
 			) : category === "identity" ? (
-				<User className="text-muted-foreground" size={iconSizes[size]} />
+				<IconUserOutlineDuo18
+					className="text-muted-foreground"
+					size={iconSizes[size]}
+				/>
 			) : category === "totp" ? (
-				<KeyRound className="text-muted-foreground" size={iconSizes[size]} />
+				<IconMobileOutlineDuo18
+					className="text-muted-foreground"
+					size={iconSizes[size]}
+				/>
 			) : (
-				<FileText className="text-muted-foreground" size={iconSizes[size]} />
+				<IconFileLockOutlineDuo18
+					className="text-muted-foreground"
+					size={iconSizes[size]}
+				/>
 			)}
 		</div>
 	);

@@ -20,24 +20,30 @@ declare class CredentialProviderModule extends NativeModule<CredentialProviderMo
 	 * @param mukBase64 Base64-encoded Master Unlock Key (32 bytes = 44 chars)
 	 * @returns true if successful
 	 */
-	setMasterUnlockKey(mukBase64: string): boolean;
+	setMasterUnlockKey(mukBase64: string, userId?: string): boolean;
 
 	/**
 	 * Clear the Master Unlock Key (on logout or auto-lock).
 	 * @returns true if successful
 	 */
-	clearMasterUnlockKey(): boolean;
+	clearMasterUnlockKey(userId?: string): boolean;
+
+	/**
+	 * Clear all Master Unlock Keys (on logout or auto-lock in all-accounts mode).
+	 * @returns true if successful
+	 */
+	clearAllMasterUnlockKeys(): boolean;
 
 	/**
 	 * Check if the vault is currently unlocked (MUK available).
 	 */
-	isVaultUnlocked(): boolean;
+	isVaultUnlocked(userId?: string): boolean;
 
 	/**
 	 * Get the MUK as Base64 string (for debugging/verification only).
 	 * WARNING: Only use in development builds.
 	 */
-	getMasterUnlockKeyBase64(): string | null;
+	getMasterUnlockKeyBase64(userId?: string): string | null;
 
 	// ============================================
 	// MUK Escrow Management
@@ -74,6 +80,15 @@ declare class CredentialProviderModule extends NativeModule<CredentialProviderMo
 	 * Clear the MUK escrow (on logout or when password required).
 	 */
 	clearEscrow(): boolean;
+
+	/**
+	 * Sync vault keys and items for the unified vault-based autofill system.
+	 */
+	syncVaultData(dataJson: string): Promise<{
+		vaultKeys: number;
+		items: number;
+		domains: number;
+	}>;
 
 	// ============================================
 	// 30-Day Master Password Re-entry

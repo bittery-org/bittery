@@ -3,74 +3,59 @@
  * Handles team management, members, and invitations
  */
 
-import { db, team, teamInvitation, teamMember, vaultKey } from "@bittery/db";
+import { db, team, teamInvitation, user, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../index";
+import {
+	createPresignedUpload,
+	createTeamImageKey,
+	getStoragePublicUrl,
+} from "../storage/s3";
 
 /**
- * Helper to check team membership and role
+ * Helper function to get image URL from imageKey
  */
-async function getTeamMembership(userId: string, teamId: string) {
-	return db.query.teamMember.findFirst({
-		where: (tm, { and, eq }) =>
-			and(eq(tm.teamId, teamId), eq(tm.userId, userId)),
-	});
-}
-
-/**
- * Helper to require specific team roles
- */
-async function requireTeamRole(
-	userId: string,
-	teamId: string,
-	allowedRoles: ("owner" | "admin" | "member")[],
-) {
-	const membership = await getTeamMembership(userId, teamId);
-
-	if (!membership) {
-		throw new TRPCError({
-			code: "FORBIDDEN",
-			message: "You are not a member of this team",
-		});
-	}
-
-	if (!allowedRoles.includes(membership.role)) {
-		throw new TRPCError({
-			code: "FORBIDDEN",
-			message: "Insufficient permissions",
-		});
-	}
-
-	return membership;
+function getTeamImageUrl(imageKey: string | null): string | null {
+	if (!imageKey) return null;
+	return getStoragePublicUrl(imageKey);
 }
 
 export const teamRouter = router({
 	/**
-	 * List all teams the user belongs to
+	 * Get the user's team (one-to-one relationship)
 	 */
 	list: protectedProcedure.query(async ({ ctx }) => {
-		const memberships = await db.query.teamMember.findMany({
-			where: (tm, { eq }) => eq(tm.userId, ctx.session.userId),
-			with: {
-				team: {
-					with: {
-						members: true,
-					},
-				},
-			},
+		const userData = await db.query.user.findFirst({
+			where: (user, { eq }) => eq(user.id, ctx.session.userId),
+			with: { team: true },
 		});
 
-		return memberships.map((m) => ({
-			id: m.team.id,
-			name: m.team.name,
-			ownerId: m.team.ownerId,
-			role: m.role,
-			memberCount: m.team.members.length,
-			createdAt: m.team.createdAt,
-		}));
+		if (!userData || !userData.team || !userData.teamId) {
+			throw new TRPCError({
+				code: "NOT_FOUND",
+				message: "User has no team",
+			});
+		}
+
+		// Get member count
+		const members = await db.query.user.findMany({
+			where: (user, { eq }) => eq(user.teamId, userData.teamId as string),
+		});
+
+		return {
+			id: userData.team.id,
+			name: userData.team.name,
+			type: userData.team.type,
+			ownerId: userData.team.ownerId,
+			role: userData.role,
+			memberCount: members.length,
+			memberLimit: userData.team.memberLimit,
+			imageUrl: getTeamImageUrl(userData.team.imageKey),
+			createdAt: userData.team.createdAt,
+		};
 	}),
 
 	/**
@@ -79,12 +64,11 @@ export const teamRouter = router({
 	get: protectedProcedure
 		.input(z.object({ teamId: z.string() }))
 		.query(async ({ ctx, input }) => {
-			const membership = await getTeamMembership(
-				ctx.session.userId,
-				input.teamId,
-			);
+			const userData = await db.query.user.findFirst({
+				where: (user, { eq }) => eq(user.id, ctx.session.userId),
+			});
 
-			if (!membership) {
+			if (userData?.teamId !== input.teamId) {
 				throw new TRPCError({
 					code: "FORBIDDEN",
 					message: "You are not a member of this team",
@@ -95,7 +79,7 @@ export const teamRouter = router({
 				where: (t, { eq }) => eq(t.id, input.teamId),
 				with: {
 					owner: true,
-					members: true,
+					users: true,
 				},
 			});
 
@@ -109,112 +93,192 @@ export const teamRouter = router({
 			return {
 				id: teamData.id,
 				name: teamData.name,
+				type: teamData.type,
 				ownerId: teamData.ownerId,
 				ownerName: teamData.owner.name,
-				userRole: membership.role,
-				memberCount: teamData.members.length,
+				userRole: userData.role,
+				memberCount: teamData.users.length,
+				memberLimit: teamData.memberLimit,
+				imageUrl: getTeamImageUrl(teamData.imageKey),
 				createdAt: teamData.createdAt,
 				updatedAt: teamData.updatedAt,
 			};
 		}),
 
 	/**
-	 * Create a new team
+	 * Create a new team (not allowed - users get personal team on signup)
+	 * @deprecated Teams are auto-created on signup
 	 */
 	create: protectedProcedure
-		.input(z.object({ name: z.string().min(1) }))
-		.mutation(async ({ ctx, input }) => {
-			const teamId = nanoid();
-
-			// Create the team
-			await db.insert(team).values({
-				id: teamId,
-				name: input.name,
-				ownerId: ctx.session.userId,
+		.input(
+			z.object({
+				name: z.string().min(1),
+				type: z.enum(["family", "organization"]).optional(),
+			}),
+		)
+		.mutation(async () => {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message:
+					"Teams are automatically created on signup. Contact support to upgrade your team type.",
 			});
-
-			// Add creator as owner
-			await db.insert(teamMember).values({
-				id: nanoid(),
-				teamId,
-				userId: ctx.session.userId,
-				role: "owner",
-				joinedAt: new Date(),
-			});
-
-			return { teamId };
 		}),
 
 	/**
-	 * Update team name (owner/admin only)
+	 * Update team name and/or imageKey (owner/admin only)
 	 */
 	update: protectedProcedure
-		.input(z.object({ teamId: z.string(), name: z.string().min(1) }))
+		.input(
+			z.object({
+				teamId: z.string(),
+				name: z.string().min(1).optional(),
+				imageKey: z.string().nullable().optional(),
+			}),
+		)
 		.mutation(async ({ ctx, input }) => {
-			await requireTeamRole(ctx.session.userId, input.teamId, [
-				"owner",
-				"admin",
-			]);
+			const userData = await db.query.user.findFirst({
+				where: (user, { eq }) => eq(user.id, ctx.session.userId),
+			});
 
-			await db
-				.update(team)
-				.set({ name: input.name, updatedAt: new Date() })
-				.where(eq(team.id, input.teamId));
-
-			return { success: true };
-		}),
-
-	/**
-	 * Delete team (owner only)
-	 */
-	delete: protectedProcedure
-		.input(z.object({ teamId: z.string() }))
-		.mutation(async ({ ctx, input }) => {
-			await requireTeamRole(ctx.session.userId, input.teamId, ["owner"]);
-
-			// Delete team (cascades to members and invitations)
-			await db.delete(team).where(eq(team.id, input.teamId));
-
-			return { success: true };
-		}),
-
-	/**
-	 * Leave team (members and admins, not owner)
-	 */
-	leave: protectedProcedure
-		.input(z.object({ teamId: z.string() }))
-		.mutation(async ({ ctx, input }) => {
-			const membership = await getTeamMembership(
-				ctx.session.userId,
-				input.teamId,
-			);
-
-			if (!membership) {
+			if (userData?.teamId !== input.teamId) {
 				throw new TRPCError({
 					code: "FORBIDDEN",
 					message: "You are not a member of this team",
 				});
 			}
 
-			// Owner cannot leave, they must delete the team or transfer ownership
-			if (membership.role === "owner") {
+			if (!["owner", "admin"].includes(userData.role)) {
 				throw new TRPCError({
 					code: "FORBIDDEN",
-					message:
-						"Owners cannot leave their team. Please transfer ownership or delete the team.",
+					message: "Insufficient permissions",
 				});
 			}
 
-			await db
-				.delete(teamMember)
-				.where(
-					and(
-						eq(teamMember.teamId, input.teamId),
-						eq(teamMember.userId, ctx.session.userId),
-					),
-				);
+			const updateData: {
+				name?: string;
+				imageKey?: string | null;
+				updatedAt: Date;
+			} = {
+				updatedAt: new Date(),
+			};
+
+			if (input.name !== undefined) {
+				updateData.name = input.name;
+			}
+
+			if (input.imageKey !== undefined) {
+				updateData.imageKey = input.imageKey;
+			}
+
+			await db.update(team).set(updateData).where(eq(team.id, input.teamId));
 
 			return { success: true };
+		}),
+
+	/**
+	 * Create presigned upload URL for team avatar (owner/admin only)
+	 */
+	createImageUpload: protectedProcedure
+		.input(
+			z.object({
+				teamId: z.string(),
+				fileName: z.string(),
+				contentType: z.string(),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			// Validate image MIME type
+			if (!input.contentType.startsWith("image/")) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Only image files are allowed",
+				});
+			}
+
+			// Verify user has owner or admin role in their team
+			const userData = await db.query.user.findFirst({
+				where: (user, { eq }) => eq(user.id, ctx.session.userId),
+			});
+
+			if (userData?.teamId !== input.teamId) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "You are not a member of this team",
+				});
+			}
+
+			if (!["owner", "admin"].includes(userData.role)) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "Insufficient permissions",
+				});
+			}
+
+			const key = createTeamImageKey({
+				teamId: input.teamId,
+				fileName: input.fileName,
+			});
+
+			const result = await createPresignedUpload({
+				key,
+				contentType: input.contentType,
+			});
+
+			return result;
+		}),
+
+	/**
+	 * Delete team (owner only, personal teams cannot be deleted)
+	 */
+	delete: protectedProcedure
+		.input(z.object({ teamId: z.string() }))
+		.mutation(async ({ ctx, input }) => {
+			const userData = await db.query.user.findFirst({
+				where: (user, { eq }) => eq(user.id, ctx.session.userId),
+				with: { team: true },
+			});
+
+			if (userData?.teamId !== input.teamId) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "You are not a member of this team",
+				});
+			}
+
+			if (userData.role !== "owner") {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "Only the team owner can delete the team",
+				});
+			}
+
+			// Personal teams cannot be deleted
+			if (userData.team?.type === "personal") {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message:
+						"Personal teams cannot be deleted. To close your account, use Account Settings.",
+				});
+			}
+
+			// Delete team (cascades to invitations)
+			await db.delete(team).where(eq(team.id, input.teamId));
+
+			return { success: true };
+		}),
+
+	/**
+	 * Leave team (not allowed - users belong to exactly one team)
+	 * @deprecated Users cannot leave teams in the new architecture
+	 */
+	leave: protectedProcedure
+		.input(z.object({ teamId: z.string() }))
+		.mutation(async () => {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message:
+					"You cannot leave your team. Each user belongs to exactly one team.",
+			});
 		}),
 
 	/**
@@ -227,164 +291,30 @@ export const teamRouter = router({
 		list: protectedProcedure
 			.input(z.object({ teamId: z.string() }))
 			.query(async ({ ctx, input }) => {
-				await requireTeamRole(ctx.session.userId, input.teamId, [
-					"owner",
-					"admin",
-					"member",
-				]);
+				// Verify user has access to this team
+				const userData = await db.query.user.findFirst({
+					where: (user, { eq }) => eq(user.id, ctx.session.userId),
+				});
 
-				const members = await db.query.teamMember.findMany({
-					where: (tm, { eq }) => eq(tm.teamId, input.teamId),
-					with: {
-						user: true,
-					},
+				if (userData?.teamId !== input.teamId) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "You are not a member of this team",
+					});
+				}
+
+				// Get all users in this team
+				const members = await db.query.user.findMany({
+					where: (user, { eq }) => eq(user.teamId, input.teamId),
 				});
 
 				return members.map((m) => ({
-					id: m.id,
-					userId: m.user.id,
-					name: m.user.name,
-					email: m.user.email,
+					userId: m.id,
+					name: m.name,
+					email: m.email,
 					role: m.role,
-					joinedAt: m.joinedAt,
+					joinedAt: m.createdAt,
 				}));
-			}),
-
-		/**
-		 * Update member role (owner/admin only)
-		 * Admin cannot change other admins or the owner
-		 */
-		updateRole: protectedProcedure
-			.input(
-				z.object({
-					teamId: z.string(),
-					userId: z.string(),
-					role: z.enum(["admin", "member"]),
-				}),
-			)
-			.mutation(async ({ ctx, input }) => {
-				const actorMembership = await requireTeamRole(
-					ctx.session.userId,
-					input.teamId,
-					["owner", "admin"],
-				);
-
-				// Can't change your own role
-				if (input.userId === ctx.session.userId) {
-					throw new TRPCError({
-						code: "BAD_REQUEST",
-						message: "Cannot change your own role",
-					});
-				}
-
-				// Get target member
-				const targetMembership = await getTeamMembership(
-					input.userId,
-					input.teamId,
-				);
-
-				if (!targetMembership) {
-					throw new TRPCError({
-						code: "NOT_FOUND",
-						message: "Member not found",
-					});
-				}
-
-				// Cannot change owner's role
-				if (targetMembership.role === "owner") {
-					throw new TRPCError({
-						code: "FORBIDDEN",
-						message: "Cannot change owner's role",
-					});
-				}
-
-				// Admin can only change members, not other admins
-				if (
-					actorMembership.role === "admin" &&
-					targetMembership.role === "admin"
-				) {
-					throw new TRPCError({
-						code: "FORBIDDEN",
-						message: "Admins cannot change other admins",
-					});
-				}
-
-				await db
-					.update(teamMember)
-					.set({ role: input.role })
-					.where(
-						and(
-							eq(teamMember.teamId, input.teamId),
-							eq(teamMember.userId, input.userId),
-						),
-					);
-
-				return { success: true };
-			}),
-
-		/**
-		 * Remove member from team (owner/admin only)
-		 * Admin cannot remove other admins or the owner
-		 */
-		remove: protectedProcedure
-			.input(z.object({ teamId: z.string(), userId: z.string() }))
-			.mutation(async ({ ctx, input }) => {
-				const actorMembership = await requireTeamRole(
-					ctx.session.userId,
-					input.teamId,
-					["owner", "admin"],
-				);
-
-				// Can't remove yourself (use leave instead)
-				if (input.userId === ctx.session.userId) {
-					throw new TRPCError({
-						code: "BAD_REQUEST",
-						message: "Cannot remove yourself. Use leave instead.",
-					});
-				}
-
-				// Get target member
-				const targetMembership = await getTeamMembership(
-					input.userId,
-					input.teamId,
-				);
-
-				if (!targetMembership) {
-					throw new TRPCError({
-						code: "NOT_FOUND",
-						message: "Member not found",
-					});
-				}
-
-				// Cannot remove owner
-				if (targetMembership.role === "owner") {
-					throw new TRPCError({
-						code: "FORBIDDEN",
-						message: "Cannot remove team owner",
-					});
-				}
-
-				// Admin can only remove members, not other admins
-				if (
-					actorMembership.role === "admin" &&
-					targetMembership.role === "admin"
-				) {
-					throw new TRPCError({
-						code: "FORBIDDEN",
-						message: "Admins cannot remove other admins",
-					});
-				}
-
-				await db
-					.delete(teamMember)
-					.where(
-						and(
-							eq(teamMember.teamId, input.teamId),
-							eq(teamMember.userId, input.userId),
-						),
-					);
-
-				return { success: true };
 			}),
 	}),
 
@@ -394,10 +324,24 @@ export const teamRouter = router({
 	vaults: protectedProcedure
 		.input(z.object({ teamId: z.string() }))
 		.query(async ({ ctx, input }) => {
-			await requireTeamRole(ctx.session.userId, input.teamId, [
-				"owner",
-				"admin",
-			]);
+			// Verify user has access to this team
+			const userData = await db.query.user.findFirst({
+				where: (user, { eq }) => eq(user.id, ctx.session.userId),
+			});
+
+			if (userData?.teamId !== input.teamId) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "You are not a member of this team",
+				});
+			}
+
+			if (!["owner", "admin"].includes(userData.role)) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "Insufficient permissions",
+				});
+			}
 
 			// Get all vaults for this team
 			const teamVaults = await db.query.vault.findMany({
@@ -474,11 +418,17 @@ export const teamRouter = router({
 		list: protectedProcedure
 			.input(z.object({ teamId: z.string() }))
 			.query(async ({ ctx, input }) => {
-				await requireTeamRole(ctx.session.userId, input.teamId, [
-					"owner",
-					"admin",
-					"member",
-				]);
+				// Verify user has access to this team
+				const userData = await db.query.user.findFirst({
+					where: (user, { eq }) => eq(user.id, ctx.session.userId),
+				});
+
+				if (userData?.teamId !== input.teamId) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "You are not a member of this team",
+					});
+				}
 
 				const invitations = await db.query.teamInvitation.findMany({
 					where: (inv, { and, eq }) =>
@@ -522,10 +472,50 @@ export const teamRouter = router({
 				}),
 			)
 			.mutation(async ({ ctx, input }) => {
-				await requireTeamRole(ctx.session.userId, input.teamId, [
-					"owner",
-					"admin",
-				]);
+				// Verify user has owner or admin role in their team
+				const userData = await db.query.user.findFirst({
+					where: (user, { eq }) => eq(user.id, ctx.session.userId),
+					with: { team: true },
+				});
+
+				if (userData?.teamId !== input.teamId) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "You are not a member of this team",
+					});
+				}
+
+				if (!["owner", "admin"].includes(userData.role)) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Insufficient permissions",
+					});
+				}
+
+				// Check team capacity (family teams have limits)
+				if (
+					userData.team &&
+					userData.team.type === "family" &&
+					userData.team.memberLimit
+				) {
+					const currentMembers = await db.query.user.findMany({
+						where: (user, { eq }) => eq(user.teamId, input.teamId),
+					});
+
+					const pendingInvitations = await db.query.teamInvitation.findMany({
+						where: (inv, { and, eq }) =>
+							and(eq(inv.teamId, input.teamId), eq(inv.status, "pending")),
+					});
+
+					const totalCount = currentMembers.length + pendingInvitations.length;
+
+					if (totalCount >= userData.team.memberLimit) {
+						throw new TRPCError({
+							code: "BAD_REQUEST",
+							message: "Team has reached member limit",
+						});
+					}
+				}
 
 				// Check if user is already a member
 				const existingUser = await db.query.user.findFirst({
@@ -533,14 +523,11 @@ export const teamRouter = router({
 				});
 
 				if (existingUser) {
-					const existingMembership = await getTeamMembership(
-						existingUser.id,
-						input.teamId,
-					);
-					if (existingMembership) {
+					// Check if they already have a team (cannot join multiple teams)
+					if (existingUser.teamId) {
 						throw new TRPCError({
 							code: "BAD_REQUEST",
-							message: "User is already a member of this team",
+							message: "This user already belongs to a team",
 						});
 					}
 				}
@@ -607,13 +594,14 @@ export const teamRouter = router({
 				}
 
 				// Must be owner, admin, or the person who sent it
-				const membership = await getTeamMembership(
-					ctx.session.userId,
-					invitation.teamId,
-				);
+				const userData = await db.query.user.findFirst({
+					where: (user, { eq }) => eq(user.id, ctx.session.userId),
+				});
+
 				const isInviter = invitation.invitedById === ctx.session.userId;
 				const isAdminOrOwner =
-					membership?.role === "owner" || membership?.role === "admin";
+					userData?.teamId === invitation.teamId &&
+					(userData?.role === "owner" || userData?.role === "admin");
 
 				if (!isInviter && !isAdminOrOwner) {
 					throw new TRPCError({
@@ -647,13 +635,14 @@ export const teamRouter = router({
 				}
 
 				// Must be owner, admin, or the person who sent it
-				const membership = await getTeamMembership(
-					ctx.session.userId,
-					invitation.teamId,
-				);
+				const userData = await db.query.user.findFirst({
+					where: (user, { eq }) => eq(user.id, ctx.session.userId),
+				});
+
 				const isInviter = invitation.invitedById === ctx.session.userId;
 				const isAdminOrOwner =
-					membership?.role === "owner" || membership?.role === "admin";
+					userData?.teamId === invitation.teamId &&
+					(userData?.role === "owner" || userData?.role === "admin");
 
 				if (!isInviter && !isAdminOrOwner) {
 					throw new TRPCError({
@@ -760,26 +749,19 @@ export const teamRouter = router({
 					});
 				}
 
-				// Check not already a member
-				const existingMembership = await getTeamMembership(
-					ctx.session.userId,
-					invitation.teamId,
-				);
-				if (existingMembership) {
+				// Check user doesn't already have a team
+				if (userData.teamId) {
 					throw new TRPCError({
 						code: "BAD_REQUEST",
-						message: "You are already a member of this team",
+						message: "You already belong to a team",
 					});
 				}
 
-				// Create team membership
-				await db.insert(teamMember).values({
-					id: nanoid(),
-					teamId: invitation.teamId,
-					userId: ctx.session.userId,
-					role: invitation.role,
-					joinedAt: new Date(),
-				});
+				// Link user to team
+				await db
+					.update(user)
+					.set({ teamId: invitation.teamId, role: invitation.role })
+					.where(eq(user.id, ctx.session.userId));
 
 				// Provision vault access if pendingVaultKeys were provided during invite
 				if (invitation.pendingVaultKeys) {

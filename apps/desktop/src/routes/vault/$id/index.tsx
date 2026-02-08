@@ -1,5 +1,4 @@
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
-import { useQuery } from "@tanstack/react-query";
+import { useVaultInfo } from "@bittery/core/hooks";
 import { createFileRoute } from "@tanstack/react-router";
 import { VaultAvatar } from "../../../components/vault/vault-avatar";
 
@@ -10,14 +9,7 @@ export const Route = createFileRoute("/vault/$id/")({
 function VaultComponent() {
 	const { id } = Route.useParams();
 
-	const { data: currentVault } = useQuery({
-		queryKey: ["vault-keys", id],
-		queryFn: async () => {
-			const keys = await tauriStorage.getVaultKeys();
-			if (!keys) return null;
-			return keys.find((vault) => vault.vaultId === id) ?? null;
-		},
-	});
+	const { vaultInfo: currentVault } = useVaultInfo(id);
 
 	return (
 		<div className="flex flex-1 items-center justify-center p-8 text-center">

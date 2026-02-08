@@ -1,9 +1,9 @@
 {
-  "platforms": ["apple", "android"],
-  "apple": {
-    "modules": ["CredentialProviderModule"]
-  },
-  "android": {
-    "modules": ["expo.modules.credentialprovider.CredentialProviderModule"]
-  }
+	"platforms": ["apple", "android"],
+	"apple": {
+		"modules": ["CredentialProviderModule"]
+	},
+	"android": {
+		"modules": ["expo.modules.credentialprovider.CredentialProviderModule"]
+	}
 }

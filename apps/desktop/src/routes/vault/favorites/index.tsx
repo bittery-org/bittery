@@ -1,5 +1,5 @@
+import { IconStarOutlineDuo18 } from "@bittery/ui/icons";
 import { createFileRoute } from "@tanstack/react-router";
-import { Star } from "lucide-react";
 
 export const Route = createFileRoute("/vault/favorites/")({
 	component: FavoritesIndexComponent,
@@ -10,7 +10,10 @@ function FavoritesIndexComponent() {
 		<div className="flex flex-1 items-center justify-center p-8 text-center">
 			<div>
 				<div className="mb-4 inline-flex rounded-full bg-muted p-6">
-					<Star className="size-12 text-yellow-500" fill="currentColor" />
+					<IconStarOutlineDuo18
+						className="size-12 text-yellow-500"
+						fill="currentColor"
+					/>
 				</div>
 				<h3 className="mb-2 font-semibold text-lg">Favorites</h3>
 				<p className="text-muted-foreground text-sm">No item selected</p>

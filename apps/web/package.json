@@ -20,9 +20,12 @@
 	"dependencies": {
 		"@bittery/api": "workspace:*",
 		"@bittery/auth": "workspace:*",
-		"@bittery/crypto": "workspace:*",
+		"@bittery/crypto-wasm": "workspace:*",
+		"@bittery/core": "workspace:*",
 		"@bittery/shared": "workspace:*",
+		"@bittery/storage": "workspace:*",
 		"@bittery/sync": "workspace:*",
+		"@bittery/types": "workspace:*",
 		"@bittery/ui": "workspace:*",
 		"@tailwindcss/vite": "^4.1.8",
 		"@tanstack/react-form": "^1.23.5",

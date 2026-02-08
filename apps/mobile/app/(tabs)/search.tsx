@@ -1,48 +1,29 @@
+import { useItems } from "@bittery/core/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
+import { Input, TextField } from "heroui-native";
 import { Clock, Search as SearchIcon, X } from "lucide-react-native";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-	FlatList,
-	ScrollView,
-	Text,
-	TextInput,
-	TouchableOpacity,
-	View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { FlatList, Text, TouchableOpacity, View } from "react-native";
+import { withUniwind } from "uniwind";
+import { CategoryFilter } from "@/components/category-filter";
+import { EmptyItemsState } from "@/components/empty-items-state";
+import { ItemListItem } from "@/components/item-list-item";
+import { SafeAreaView } from "@/components/safe-area-view";
+import { useFilteredItems } from "@/hooks/use-filtered-items";
 
-import { ItemListItem } from "../../src/components/item-list-item";
-import {
-	type CrossVaultDecryptedItem,
-	useAllDecryptedItems,
-} from "../../src/hooks/use-all-decrypted-items";
+// Create styled icon components
+const StyledSearch = withUniwind(SearchIcon);
+const StyledClock = withUniwind(Clock);
+const StyledX = withUniwind(X);
 
 const RECENT_SEARCHES_KEY = "bittery_recent_searches";
 const MAX_RECENT_SEARCHES = 10;
 
-const categoryLabels: Record<ItemCategory | "all", string> = {
-	all: "All",
-	login: "Login",
-	"credit-card": "Card",
-	identity: "Identity",
-	"secure-note": "Note",
-	totp: "TOTP",
-};
-
-const categories: (ItemCategory | "all")[] = [
-	"all",
-	"login",
-	"credit-card",
-	"identity",
-	"secure-note",
-	"totp",
-];
-
 export default function SearchScreen() {
 	const router = useRouter();
-	const inputRef = useRef<TextInput>(null);
+	const inputRef = useRef<any>(null);
 	const [searchQuery, setSearchQuery] = useState("");
 	const [selectedCategory, setSelectedCategory] = useState<
 		ItemCategory | "all"
@@ -50,7 +31,14 @@ export default function SearchScreen() {
 	const [recentSearches, setRecentSearches] = useState<string[]>([]);
 	const [debouncedQuery, setDebouncedQuery] = useState("");
 
-	const { items } = useAllDecryptedItems();
+	const { items } = useItems();
+
+	// Filter items based on debounced search query
+	const { filteredItems } = useFilteredItems({
+		items,
+		searchQuery: debouncedQuery,
+		selectedCategory,
+	});
 
 	const loadRecentSearches = useCallback(async () => {
 		try {
@@ -129,34 +117,7 @@ export default function SearchScreen() {
 		}
 	};
 
-	// Filter items based on search
-	const filteredItems = useMemo(() => {
-		if (!debouncedQuery.trim()) return [];
-
-		const query = debouncedQuery.toLowerCase();
-		let filtered = items.filter(
-			(item) =>
-				item.title?.toLowerCase().includes(query) ||
-				item.username?.toLowerCase().includes(query) ||
-				item.url?.toLowerCase().includes(query) ||
-				item.notes?.toLowerCase().includes(query) ||
-				item.tags?.some((tag) => tag.toLowerCase().includes(query)),
-		);
-
-		// Apply category filter
-		if (selectedCategory !== "all") {
-			filtered = filtered.filter((item) => item.category === selectedCategory);
-		}
-
-		// Sort: favorites first, then alphabetically
-		return filtered.sort((a, b) => {
-			if (a.favorite && !b.favorite) return -1;
-			if (!a.favorite && b.favorite) return 1;
-			return (a.title || "").localeCompare(b.title || "");
-		});
-	}, [items, debouncedQuery, selectedCategory]);
-
-	const handleItemPress = (item: CrossVaultDecryptedItem) => {
+	const handleItemPress = (item: (typeof filteredItems)[number]) => {
 		saveRecentSearch(searchQuery);
 		router.push(`/(vault)/${item.vaultId}/${item.id}`);
 	};
@@ -166,100 +127,42 @@ export default function SearchScreen() {
 		setDebouncedQuery(query);
 	};
 
-	const renderCategoryFilter = () => (
-		<View className="border-border border-b">
-			<ScrollView
-				horizontal
-				showsHorizontalScrollIndicator={false}
-				contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 8 }}
-			>
-				{categories.map((category) => (
-					<TouchableOpacity
-						key={category}
-						onPress={() => setSelectedCategory(category)}
-						className={`mr-2 rounded-full px-4 py-2 ${
-							selectedCategory === category ? "bg-primary" : "bg-secondary"
-						}`}
-					>
-						<Text
-							className={`font-medium text-sm ${
-								selectedCategory === category
-									? "text-primary-foreground"
-									: "text-foreground"
-							}`}
-						>
-							{categoryLabels[category]}
-						</Text>
-					</TouchableOpacity>
-				))}
-			</ScrollView>
-		</View>
-	);
-
-	const renderItem = ({ item }: { item: CrossVaultDecryptedItem }) => (
-		<ItemListItem
-			id={item.id}
-			title={item.title || "[Untitled]"}
-			category={item.category}
-			favorite={item.favorite}
-			username={item.username}
-			url={item.url}
-			vault={item.vault}
-			showVaultBadge
-			onPress={() => handleItemPress(item)}
-			// Pass TOTP data for inline display
-			totpSecret={item.totpSecret}
-			totpAlgorithm={item.totpAlgorithm}
-			totpDigits={item.totpDigits}
-			totpPeriod={item.totpPeriod}
-			// Show inline TOTP for TOTP items or login items with TOTP secret
-			showInlineTotp={
-				(item.category === "totp" || item.category === "login") &&
-				Boolean(item.totpSecret)
-			}
-		/>
-	);
-
 	const renderRecentSearches = () => {
 		if (recentSearches.length === 0) {
 			return (
-				<View className="flex-1 items-center justify-center p-8">
-					<SearchIcon size={48} color="#9ca3af" />
-					<Text className="mt-4 text-center font-semibold text-foreground text-lg">
-						Search your vault
-					</Text>
-					<Text className="mt-2 text-center text-muted-foreground">
-						Find passwords, cards, notes, and more
-					</Text>
-				</View>
+				<EmptyItemsState
+					icon={<StyledSearch size={48} className="mb-4 text-muted" />}
+					title="Search your vault"
+					description="Find passwords, cards, notes, and more"
+				/>
 			);
 		}
 
 		return (
 			<View className="flex-1">
 				<View className="flex-row items-center justify-between px-4 py-3">
-					<Text className="font-semibold text-muted-foreground text-sm">
+					<Text className="font-semibold text-muted text-sm uppercase tracking-wide">
 						Recent Searches
 					</Text>
 					<TouchableOpacity onPress={clearRecentSearches}>
-						<Text className="text-primary text-sm">Clear all</Text>
+						<Text className="text-accent text-sm">Clear all</Text>
 					</TouchableOpacity>
 				</View>
 				{recentSearches.map((query) => (
 					<TouchableOpacity
 						key={query}
 						onPress={() => handleRecentSearchPress(query)}
-						className="flex-row items-center border-border border-b px-4 py-3"
+						className="flex-row items-center px-4 py-3"
 						activeOpacity={0.7}
 					>
-						<Clock size={18} color="#9ca3af" />
+						<StyledClock size={18} className="text-muted" />
 						<Text className="ml-3 flex-1 text-foreground">{query}</Text>
 						<TouchableOpacity
 							onPress={() => removeRecentSearch(query)}
 							className="p-1"
 							hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
 						>
-							<X size={16} color="#9ca3af" />
+							<StyledX size={16} className="text-muted" />
 						</TouchableOpacity>
 					</TouchableOpacity>
 				))}
@@ -270,26 +173,44 @@ export default function SearchScreen() {
 	const renderSearchResults = () => {
 		if (filteredItems.length === 0) {
 			return (
-				<View className="flex-1 items-center justify-center p-8">
-					<SearchIcon size={48} color="#9ca3af" />
-					<Text className="mt-4 text-center font-semibold text-foreground text-lg">
-						No results found
-					</Text>
-					<Text className="mt-2 text-center text-muted-foreground">
-						Try a different search term or filter
-					</Text>
-				</View>
+				<EmptyItemsState
+					icon={<StyledSearch size={48} className="mb-4 text-muted" />}
+					title="No results found"
+					description="Try a different search term or filter"
+				/>
 			);
 		}
 
 		return (
 			<FlatList
 				data={filteredItems}
-				renderItem={renderItem}
+				renderItem={({ item }) => (
+					<ItemListItem
+						id={item.id}
+						title={item.title || "[Untitled]"}
+						category={item.category}
+						favorite={item.favorite}
+						username={item.username}
+						url={item.url}
+						vault={"vault" in item ? item.vault : undefined}
+						showVaultBadge
+						onPress={() => handleItemPress(item)}
+						// Pass TOTP data for inline display
+						totpSecret={item.totpSecret}
+						totpAlgorithm={item.totpAlgorithm}
+						totpDigits={item.totpDigits}
+						totpPeriod={item.totpPeriod}
+						// Show inline TOTP for TOTP items or login items with TOTP secret
+						showInlineTotp={
+							(item.category === "totp" || item.category === "login") &&
+							Boolean(item.totpSecret)
+						}
+					/>
+				)}
 				keyExtractor={(item) => item.id}
 				ListHeaderComponent={
 					<View className="px-4 py-2">
-						<Text className="text-muted-foreground text-sm">
+						<Text className="text-muted text-sm">
 							{filteredItems.length} result
 							{filteredItems.length !== 1 ? "s" : ""}
 						</Text>
@@ -305,36 +226,47 @@ export default function SearchScreen() {
 	return (
 		<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
 			{/* Search Input */}
-			<View className="border-border border-b px-4 py-2">
-				<View className="flex-row items-center rounded-lg bg-secondary px-3 py-2">
-					<SearchIcon size={18} color="#6b7280" />
-					<TextInput
-						ref={inputRef}
-						className="ml-2 flex-1 text-foreground"
-						placeholder="Search items..."
-						value={searchQuery}
-						onChangeText={setSearchQuery}
-						placeholderTextColor="#9ca3af"
-						returnKeyType="search"
-						autoCapitalize="none"
-						autoCorrect={false}
-					/>
-					{searchQuery.length > 0 && (
-						<TouchableOpacity
-							onPress={() => {
-								setSearchQuery("");
-								setDebouncedQuery("");
-							}}
-							className="p-1"
-						>
-							<X size={18} color="#6b7280" />
-						</TouchableOpacity>
-					)}
-				</View>
+			<View className="px-4 py-3">
+				<TextField>
+					<View className="w-full flex-row items-center">
+						<Input
+							ref={inputRef}
+							placeholder="Search items..."
+							value={searchQuery}
+							onChangeText={setSearchQuery}
+							returnKeyType="search"
+							autoCapitalize="none"
+							autoCorrect={false}
+							className="flex-1 pr-12 pl-12"
+						/>
+						<StyledSearch
+							size={18}
+							className="absolute left-3.5 text-muted"
+							pointerEvents="none"
+						/>
+						{searchQuery.length > 0 && (
+							<TouchableOpacity
+								onPress={() => {
+									setSearchQuery("");
+									setDebouncedQuery("");
+								}}
+								className="absolute right-3.5 p-1"
+								hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+							>
+								<StyledX size={18} className="text-muted" />
+							</TouchableOpacity>
+						)}
+					</View>
+				</TextField>
 			</View>
 
 			{/* Category Filter (only show when searching) */}
-			{hasQuery && renderCategoryFilter()}
+			{hasQuery && (
+				<CategoryFilter
+					selectedCategory={selectedCategory}
+					onCategoryChange={setSelectedCategory}
+				/>
+			)}
 
 			{/* Content */}
 			{hasQuery ? renderSearchResults() : renderRecentSearches()}

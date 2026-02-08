@@ -3,11 +3,55 @@
  * Handles tab screenshot capture and TOTP field updates
  */
 
-import { decrypt, encrypt } from "@bittery/crypto/encryption";
-import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import { storage } from "../lib/storage";
+import { decrypt, encrypt } from "../lib/wasm-crypto";
+import {
+	ensureDesktopWriteCapability,
+	hydrateDesktopAccountMaterial,
+} from "./desktop-key-material";
+import { desktopSync } from "./desktop-sync";
+import { onLocalItemUpdated } from "./services/local-item-cache-service";
 import { isUnlocked, updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
+
+async function resolveAccountEmailForVault(
+	vaultId: string,
+): Promise<string | undefined> {
+	const activeAccount = await storage.getActiveAccount();
+	if (activeAccount?.type === "single") {
+		await ensureDesktopWriteCapability(activeAccount.email);
+		return activeAccount.email;
+	}
+
+	const localUnlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
+	const desktopStatus =
+		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
+	const desktopUnlockedEmails =
+		desktopStatus?.available && !desktopStatus.locked
+			? (desktopStatus.unlockedAccounts ?? [])
+			: [];
+
+	const candidateEmails = Array.from(
+		new Set([...localUnlockedEmails, ...desktopUnlockedEmails]),
+	);
+
+	for (const email of candidateEmails) {
+		await hydrateDesktopAccountMaterial(email);
+		let vaultKeys = await storage.getVaultKeys(email);
+		if (!vaultKeys || vaultKeys.length === 0) {
+			const hydrated = await ensureDesktopWriteCapability(email);
+			if (hydrated) {
+				vaultKeys = await storage.getVaultKeys(email);
+			}
+		}
+		if (vaultKeys?.some((vaultKey) => vaultKey.vaultId === vaultId)) {
+			return email;
+		}
+	}
+
+	return undefined;
+}
 
 /**
  * Handle CAPTURE_TAB_SCREENSHOT message - Capture screenshot of current tab
@@ -46,13 +90,14 @@ export async function handleCaptureTabScreenshot(): Promise<MessageResponse> {
 			success: true,
 			dataUrl,
 		};
-	} catch (error: any) {
+	} catch (error) {
 		console.error("Error capturing tab screenshot:", error);
+		const errorMessage = error instanceof Error ? error.message : String(error);
 
 		// Handle specific Chrome permission errors
 		if (
-			error.message?.includes("Cannot access") ||
-			error.message?.includes("permission")
+			errorMessage.includes("Cannot access") ||
+			errorMessage.includes("permission")
 		) {
 			return {
 				success: false,
@@ -63,7 +108,7 @@ export async function handleCaptureTabScreenshot(): Promise<MessageResponse> {
 
 		return {
 			success: false,
-			error: error.message || "Failed to capture tab screenshot",
+			error: errorMessage || "Failed to capture tab screenshot",
 		};
 	}
 }
@@ -130,8 +175,27 @@ export async function handleUpdateItemTotp(payload: {
 			};
 		}
 
+		const accountEmail = await resolveAccountEmailForVault(item.vaultId);
+		if (!accountEmail) {
+			return {
+				success: false,
+				error:
+					"Could not resolve account for this vault. Please re-authenticate.",
+				errorType: "vault_key",
+			};
+		}
+
+		const hasWriteCapability = await ensureDesktopWriteCapability(accountEmail);
+		if (!hasWriteCapability) {
+			return {
+				success: false,
+				error: "No vault keys available. Please re-authenticate.",
+				errorType: "vault_key",
+			};
+		}
+
 		// Get vault key for the item's vault
-		const vaultKeys = await chromeStorage.getVaultKeys();
+		const vaultKeys = await storage.getVaultKeys(accountEmail);
 		if (!vaultKeys || vaultKeys.length === 0) {
 			return {
 				success: false,
@@ -150,8 +214,9 @@ export async function handleUpdateItemTotp(payload: {
 		}
 
 		// Decrypt vault key
-		const vaultKey = await chromeStorage.decryptVaultKey(
+		const vaultKey = await storage.decryptVaultKey(
 			vaultKeyData.encryptedVaultKey,
+			accountEmail,
 		);
 
 		// Decrypt existing item data
@@ -187,43 +252,52 @@ export async function handleUpdateItemTotp(payload: {
 			encryptionIv: encryptedData.iv,
 		});
 
+		// Keep local cache in sync for immediate UI consistency.
+		await onLocalItemUpdated({
+			itemId,
+			encryptedData,
+			accountEmail,
+		});
+
 		return {
 			success: true,
 			message: "TOTP added successfully",
 		};
-	} catch (error: any) {
+	} catch (error) {
 		console.error("Error updating item TOTP:", error);
+		const errorMessageRaw =
+			error instanceof Error ? error.message : String(error);
 
 		// Determine error type and message
 		let errorMessage = "Failed to update item with TOTP. Please try again.";
 		let errorType = "unknown";
 
 		if (
-			error.message?.includes("network") ||
-			error.message?.includes("fetch")
+			errorMessageRaw.includes("network") ||
+			errorMessageRaw.includes("fetch")
 		) {
 			errorMessage = "Network error. Check your connection and try again.";
 			errorType = "network";
 		} else if (
-			error.message?.includes("decrypt") ||
-			error.message?.includes("encryption")
+			errorMessageRaw.includes("decrypt") ||
+			errorMessageRaw.includes("encryption")
 		) {
 			errorMessage = "Encryption error. Please unlock and try again.";
 			errorType = "encryption";
 		} else if (
-			error.message?.includes("unauthorized") ||
-			error.message?.includes("auth")
+			errorMessageRaw.includes("unauthorized") ||
+			errorMessageRaw.includes("auth")
 		) {
 			errorMessage = "Authentication error. Please re-authenticate.";
 			errorType = "auth";
 		} else if (
-			error.message?.includes("permission") ||
-			error.message?.includes("access")
+			errorMessageRaw.includes("permission") ||
+			errorMessageRaw.includes("access")
 		) {
 			errorMessage =
 				"Permission denied. You may not have write access to this vault.";
 			errorType = "permission";
-		} else if (error.message?.includes("not found")) {
+		} else if (errorMessageRaw.includes("not found")) {
 			errorMessage = "Item not found. It may have been deleted.";
 			errorType = "not_found";
 		}

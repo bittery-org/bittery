@@ -1,5 +1,5 @@
+import { IconTagOutlineDuo18 } from "@bittery/ui/icons";
 import { createFileRoute } from "@tanstack/react-router";
-import { Tag } from "lucide-react";
 import { getTagColorFromName } from "../../../../components/vault/tag-badge";
 
 export const Route = createFileRoute("/vault/tag/$tagName/")({
@@ -18,7 +18,10 @@ function TagIndexComponent() {
 					className="mb-4 inline-flex rounded-full p-6"
 					style={{ backgroundColor: `${tagColor}20` }}
 				>
-					<Tag className="size-12" style={{ color: tagColor }} />
+					<IconTagOutlineDuo18
+						className="size-12"
+						style={{ color: tagColor }}
+					/>
 				</div>
 				<h3 className="mb-2 font-semibold text-lg">{decodedTagName}</h3>
 				<p className="text-muted-foreground text-sm">No item selected</p>

@@ -1,5 +1,5 @@
-import type { AccountMetadata } from "@bittery/crypto/storage-tauri";
-import { Avatar, AvatarFallback, cn } from "@bittery/ui";
+import { Avatar, AvatarFallback, AvatarImage, cn } from "@bittery/ui";
+import type { AccountMetadata } from "@/lib/storage";
 
 interface AccountAvatarProps {
 	account: AccountMetadata | null;
@@ -38,6 +38,10 @@ export function AccountAvatar({
 
 	return (
 		<Avatar className={cn(sizeClasses[size], className)}>
+			<AvatarImage
+				src={account?.teamAvatarUrl ?? undefined}
+				alt={account?.teamName || account?.name || account?.email}
+			/>
 			<AvatarFallback className={sizeClasses[size]}>{initials}</AvatarFallback>
 		</Avatar>
 	);

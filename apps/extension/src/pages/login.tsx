@@ -1,14 +1,20 @@
-import { normalizeServerUrl } from "@bittery/crypto/server-url";
-import * as chromeStorage from "@bittery/crypto/storage-chrome";
-import { Button, Card, Input, Label, toast } from "@bittery/ui";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
+import { Button, Card, Input, Label, toast, VaultIcon } from "@bittery/ui";
+import {
+	IconArrowLeftOutlineDuo18,
+	IconEyeOutlineDuo18,
+	IconEyeSlashOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
-import { useMutation } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
-import { Eye, EyeOff } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { storage } from "../lib/storage";
 
 export function LoginPage() {
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
+	const { addingAccount } = useSearch({ from: "/login" });
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
 	const fallbackServerUrl =
@@ -17,7 +23,7 @@ export function LoginPage() {
 
 	useEffect(() => {
 		let active = true;
-		chromeStorage.getServerUrl().then((stored) => {
+		storage.getServerUrl().then((stored) => {
 			if (!active || !stored) return;
 			setServerUrl(stored);
 		});
@@ -26,13 +32,13 @@ export function LoginPage() {
 		};
 	}, []);
 
-	const persistServerUrl = async () => {
+	const persistServerUrl = async (email?: string) => {
 		const normalized = normalizeServerUrl(serverUrl);
 		if (!normalized) {
 			toast.error("Invalid server URL");
 			return null;
 		}
-		await chromeStorage.storeServerUrl(normalized);
+		await storage.storeServerUrl(normalized, email);
 		if (normalized !== serverUrl) {
 			setServerUrl(normalized);
 		}
@@ -46,7 +52,7 @@ export function LoginPage() {
 			secretKey: "",
 		},
 		onSubmit: async ({ value }) => {
-			const persisted = await persistServerUrl();
+			const persisted = await persistServerUrl(value.email);
 			if (!persisted) {
 				return;
 			}
@@ -72,8 +78,15 @@ export function LoginPage() {
 
 			return response;
 		},
-		onSuccess: () => {
-			toast.success("Signed in successfully!");
+		onSuccess: async () => {
+			// Refresh accounts queries to pick up the new account
+			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+
+			toast.success(
+				addingAccount
+					? "Account added successfully"
+					: "Signed in successfully!",
+			);
 			navigate({ to: "/vault" });
 		},
 		onError: (error: Error) => {
@@ -81,127 +94,165 @@ export function LoginPage() {
 		},
 	});
 
-	return (
-		<div className="flex min-h-[400px] items-center justify-center p-4">
-			<div className="w-full max-w-sm space-y-4">
-				<div className="flex flex-col space-y-2 text-center">
-					<h1 className="font-semibold text-xl tracking-tight">
-						Sign in to your account
-					</h1>
-					<p className="text-muted-foreground text-sm">
-						Enter your details below to access your vault
-					</p>
-				</div>
+	const handleBackToVault = () => {
+		navigate({ to: "/vault" });
+	};
 
-				<Card className="border-0 bg-transparent p-8 shadow-none sm:border sm:bg-card sm:shadow-sm">
-					<form
-						onSubmit={(e) => {
-							e.preventDefault();
-							form.handleSubmit();
-						}}
-						className="space-y-4"
-					>
-						<div className="space-y-2">
-							<Label htmlFor="serverUrl">Server URL</Label>
-							<Input
-								id="serverUrl"
-								name="serverUrl"
-								type="url"
-								placeholder="https://your-server.com"
-								value={serverUrl}
-								onChange={(e) => setServerUrl(e.target.value)}
-								onBlur={() => {
-									persistServerUrl();
-								}}
-								required
-							/>
-							<p className="text-muted-foreground text-xs">
-								Use your self-hosted Bittery server URL.
+	return (
+		<div className="h-full overflow-y-auto">
+			<div className="flex min-h-full justify-center p-4">
+				<div className="my-auto w-full max-w-sm space-y-6">
+					{addingAccount && (
+						<Button
+							variant="ghost"
+							onClick={handleBackToVault}
+							className="absolute top-4 left-4"
+						>
+							<IconArrowLeftOutlineDuo18 className="mr-2 size-4" />
+							Back
+						</Button>
+					)}
+					<div className="flex flex-col items-center space-y-3 text-center">
+						<div style={{ width: 80, height: 80 }}>
+							<VaultIcon state="locked" size={80} />
+						</div>
+						<div>
+							<h1 className="font-semibold text-xl tracking-tight">
+								{addingAccount ? "Add Another Account" : "Sign in to Bittery"}
+							</h1>
+							<p className="mt-1 text-muted-foreground text-sm">
+								Enter your credentials to access your vault
 							</p>
 						</div>
+					</div>
 
-						<form.Field name="email">
-							{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor={field.name}>Email</Label>
-									<Input
-										id={field.name}
-										name={field.name}
-										type="email"
-										placeholder="name@example.com"
-										value={field.state.value}
-										onChange={(e) => field.handleChange(e.target.value)}
-										required
-									/>
-								</div>
-							)}
-						</form.Field>
-
-						<form.Field name="password">
-							{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor={field.name}>Password</Label>
-									<div className="relative">
-										<Input
-											id={field.name}
-											name={field.name}
-											type={showPassword ? "text" : "password"}
-											placeholder="••••••••"
-											value={field.state.value}
-											onChange={(e) => field.handleChange(e.target.value)}
-											required
-										/>
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon"
-											className="absolute top-0 right-0 h-full"
-											onClick={() => setShowPassword(!showPassword)}
-										>
-											{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-										</Button>
-									</div>
-								</div>
-							)}
-						</form.Field>
-
-						<form.Field name="secretKey">
-							{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor={field.name}>Secret Key</Label>
-									<div className="relative">
-										<Input
-											id={field.name}
-											name={field.name}
-											type={showSecretKey ? "text" : "password"}
-											placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
-											value={field.state.value}
-											onChange={(e) => field.handleChange(e.target.value)}
-											required
-										/>
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon"
-											className="absolute top-0 right-0 h-full"
-											onClick={() => setShowSecretKey(!showSecretKey)}
-										>
-											{showSecretKey ? <EyeOff size={16} /> : <Eye size={16} />}
-										</Button>
-									</div>
-								</div>
-							)}
-						</form.Field>
-
-						<Button
-							type="submit"
-							className="w-full"
-							disabled={loginMutation.isPending}
+					<Card className="border-0 bg-transparent p-6 shadow-none sm:border sm:bg-card sm:shadow-sm">
+						<form
+							onSubmit={(e) => {
+								e.preventDefault();
+								form.handleSubmit();
+							}}
+							className="space-y-4"
 						>
-							{loginMutation.isPending ? "Signing in..." : "Sign in"}
-						</Button>
-					</form>
-				</Card>
+							<div className="space-y-2">
+								<Label htmlFor="serverUrl" className="font-medium text-sm">
+									Server URL
+								</Label>
+								<Input
+									id="serverUrl"
+									name="serverUrl"
+									type="url"
+									placeholder="https://your-server.com"
+									value={serverUrl}
+									onChange={(e) => setServerUrl(e.target.value)}
+									required
+									className="h-10"
+								/>
+								<p className="text-muted-foreground text-xs">
+									Your self-hosted Bittery server URL
+								</p>
+							</div>
+
+							<form.Field name="email">
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name} className="font-medium text-sm">
+											Email
+										</Label>
+										<Input
+											id={field.name}
+											name={field.name}
+											type="email"
+											placeholder="name@example.com"
+											value={field.state.value}
+											onChange={(e) => field.handleChange(e.target.value)}
+											required
+											className="h-10"
+										/>
+									</div>
+								)}
+							</form.Field>
+
+							<form.Field name="password">
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name} className="font-medium text-sm">
+											Password
+										</Label>
+										<div className="relative">
+											<Input
+												id={field.name}
+												name={field.name}
+												type={showPassword ? "text" : "password"}
+												placeholder="••••••••"
+												value={field.state.value}
+												onChange={(e) => field.handleChange(e.target.value)}
+												required
+												className="h-10 pr-10"
+											/>
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon"
+												className="absolute top-1/2 right-0 size-10 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+												onClick={() => setShowPassword(!showPassword)}
+											>
+												{showPassword ? (
+													<IconEyeSlashOutlineDuo18 size={16} />
+												) : (
+													<IconEyeOutlineDuo18 size={16} />
+												)}
+											</Button>
+										</div>
+									</div>
+								)}
+							</form.Field>
+
+							<form.Field name="secretKey">
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name} className="font-medium text-sm">
+											Secret Key
+										</Label>
+										<div className="relative">
+											<Input
+												id={field.name}
+												name={field.name}
+												type={showSecretKey ? "text" : "password"}
+												placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+												value={field.state.value}
+												onChange={(e) => field.handleChange(e.target.value)}
+												required
+												className="h-10 pr-10"
+											/>
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon"
+												className="absolute top-1/2 right-0 size-10 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+												onClick={() => setShowSecretKey(!showSecretKey)}
+											>
+												{showSecretKey ? (
+													<IconEyeSlashOutlineDuo18 size={16} />
+												) : (
+													<IconEyeOutlineDuo18 size={16} />
+												)}
+											</Button>
+										</div>
+									</div>
+								)}
+							</form.Field>
+
+							<Button
+								type="submit"
+								className="h-10 w-full font-medium"
+								disabled={loginMutation.isPending}
+							>
+								{loginMutation.isPending ? "Signing in..." : "Sign in"}
+							</Button>
+						</form>
+					</Card>
+				</div>
 			</div>
 		</div>
 	);

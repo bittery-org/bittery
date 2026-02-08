@@ -1,11 +1,3 @@
-import { decrypt, encrypt } from "@bittery/crypto/encryption";
-import { deriveKeys } from "@bittery/crypto/key-derivation";
-import {
-	generateSecretKey,
-	getSecretKeyHint,
-} from "@bittery/crypto/secret-key";
-import { getStoredSecretKey } from "@bittery/crypto/session-storage";
-import { generateSRPRegistration } from "@bittery/crypto/srp-client";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -25,6 +17,15 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Copy, Download, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { useState } from "react";
+import { storage } from "@/lib/storage";
+import {
+	decrypt,
+	deriveKeys,
+	encrypt,
+	generateSecretKey,
+	generateSRPRegistration,
+	getSecretKeyHint,
+} from "@/lib/wasm-crypto";
 
 export function RegenerateSecretKeyDialog({
 	userEmail,
@@ -77,7 +78,7 @@ export function RegenerateSecretKeyDialog({
 			return;
 		}
 
-		const oldSecretKey = getStoredSecretKey();
+		const oldSecretKey = await storage.getStoredSecretKey();
 		if (!oldSecretKey) {
 			toast.error(
 				"Secret key not found. Please log out and log in again with your full credentials.",
@@ -126,7 +127,7 @@ export function RegenerateSecretKeyDialog({
 			return;
 		}
 
-		const oldSecretKey = getStoredSecretKey();
+		const oldSecretKey = await storage.getStoredSecretKey();
 		if (!oldSecretKey) {
 			toast.error("Secret key not found");
 			return;

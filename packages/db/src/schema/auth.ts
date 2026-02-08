@@ -1,24 +1,40 @@
 import { relations } from "drizzle-orm";
-import { boolean, index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import {
+	boolean,
+	index,
+	integer,
+	pgTable,
+	text,
+	timestamp,
+} from "drizzle-orm/pg-core";
+import { teamRoleEnum } from "./enums";
+import { team } from "./team";
 
-export const user = pgTable("user", {
-	id: text("id").primaryKey(),
-	name: text("name").notNull(),
-	email: text("email").notNull().unique(),
-	emailVerified: boolean("email_verified").default(false).notNull(),
-	// Zero-knowledge authentication fields
-	secretKeyHint: text("secret_key_hint"), // First segment of Secret Key (A3-XXXXXX)
-	srpSalt: text("srp_salt").notNull(),
-	srpVerifier: text("srp_verifier").notNull(),
-	// RSA keys for vault sharing
-	publicKey: text("public_key").notNull(), // RSA public key (PEM)
-	encryptedPrivateKey: text("encrypted_private_key").notNull(), // RSA private key encrypted with Master Unlock Key
-	createdAt: timestamp("created_at").defaultNow().notNull(),
-	updatedAt: timestamp("updated_at")
-		.defaultNow()
-		.$onUpdate(() => /* @__PURE__ */ new Date())
-		.notNull(),
-});
+export const user = pgTable(
+	"user",
+	{
+		id: text("id").primaryKey(),
+		name: text("name").notNull(),
+		email: text("email").notNull().unique(),
+		emailVerified: boolean("email_verified").default(false).notNull(),
+		// Zero-knowledge authentication fields
+		secretKeyHint: text("secret_key_hint"), // First segment of Secret Key (A3-XXXXXX)
+		srpSalt: text("srp_salt").notNull(),
+		srpVerifier: text("srp_verifier").notNull(),
+		// RSA keys for vault sharing
+		publicKey: text("public_key").notNull(), // RSA public key (PEM)
+		encryptedPrivateKey: text("encrypted_private_key").notNull(), // RSA private key encrypted with Master Unlock Key
+		// Team membership (one-to-one relationship)
+		teamId: text("team_id"),
+		role: teamRoleEnum("role").default("owner").notNull(),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+		updatedAt: timestamp("updated_at")
+			.defaultNow()
+			.$onUpdate(() => /* @__PURE__ */ new Date())
+			.notNull(),
+	},
+	(table) => [index("user_team_id_idx").on(table.teamId)],
+);
 
 export const session = pgTable(
 	"session",
@@ -48,13 +64,68 @@ export const session = pgTable(
 	(table) => [index("session_userId_idx").on(table.userId)],
 );
 
-export const userRelations = relations(user, ({ many }) => ({
+export const loginRateLimit = pgTable(
+	"login_rate_limit",
+	{
+		id: text("id").primaryKey(),
+		email: text("email").notNull(),
+		ipAddress: text("ip_address"),
+		attempts: integer("attempts").default(0).notNull(),
+		lastAttemptAt: timestamp("last_attempt_at").defaultNow().notNull(),
+		lockedUntil: timestamp("locked_until"),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+		updatedAt: timestamp("updated_at")
+			.defaultNow()
+			.$onUpdate(() => /* @__PURE__ */ new Date())
+			.notNull(),
+	},
+	(table) => [
+		index("login_rate_limit_email_idx").on(table.email),
+		index("login_rate_limit_ip_idx").on(table.ipAddress),
+		index("login_rate_limit_locked_until_idx").on(table.lockedUntil),
+	],
+);
+
+export const auditLog = pgTable(
+	"audit_log",
+	{
+		id: text("id").primaryKey(),
+		// Kept as plain text (no FK) so logs can survive account deletion.
+		userId: text("user_id").notNull(),
+		action: text("action").notNull(),
+		entityType: text("entity_type"),
+		entityId: text("entity_id"),
+		ipAddress: text("ip_address"),
+		userAgent: text("user_agent"),
+		metadata: text("metadata"),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+	},
+	(table) => [
+		index("audit_log_userId_idx").on(table.userId),
+		index("audit_log_action_idx").on(table.action),
+		index("audit_log_createdAt_idx").on(table.createdAt),
+	],
+);
+
+export const userRelations = relations(user, ({ one, many }) => ({
 	sessions: many(session),
+	auditLogs: many(auditLog),
+	team: one(team, {
+		fields: [user.teamId],
+		references: [team.id],
+	}),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
 	user: one(user, {
 		fields: [session.userId],
+		references: [user.id],
+	}),
+}));
+
+export const auditLogRelations = relations(auditLog, ({ one }) => ({
+	user: one(user, {
+		fields: [auditLog.userId],
 		references: [user.id],
 	}),
 }));

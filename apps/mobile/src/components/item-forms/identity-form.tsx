@@ -1,0 +1,74 @@
+import { Input, Label, TextField } from "heroui-native";
+import { forwardRef, useImperativeHandle, useState } from "react";
+import { View } from "react-native";
+
+export interface IdentityFormData {
+	firstName: string;
+	lastName: string;
+	email?: string;
+}
+
+export interface IdentityFormRef {
+	getData: () => IdentityFormData;
+	isValid: () => boolean;
+}
+
+interface IdentityFormProps {
+	initialData?: Partial<IdentityFormData>;
+}
+
+export const IdentityForm = forwardRef<IdentityFormRef, IdentityFormProps>(
+	({ initialData }, ref) => {
+		const [firstName, setFirstName] = useState(initialData?.firstName || "");
+		const [lastName, setLastName] = useState(initialData?.lastName || "");
+		const [email, setEmail] = useState(initialData?.email || "");
+
+		useImperativeHandle(ref, () => ({
+			getData: () => ({
+				firstName,
+				lastName,
+				email: email || undefined,
+			}),
+			isValid: () => true, // Add validation as needed
+		}));
+
+		return (
+			<>
+				<View className="mb-4 flex-row gap-2">
+					<TextField className="flex-1">
+						<Label>First Name</Label>
+						<Input
+							placeholder="First name"
+							value={firstName}
+							onChangeText={setFirstName}
+							autoCapitalize="words"
+						/>
+					</TextField>
+
+					<TextField className="flex-1">
+						<Label>Last Name</Label>
+						<Input
+							placeholder="Last name"
+							value={lastName}
+							onChangeText={setLastName}
+							autoCapitalize="words"
+						/>
+					</TextField>
+				</View>
+
+				<TextField className="mb-4">
+					<Label>Email</Label>
+					<Input
+						placeholder="email@example.com"
+						value={email}
+						onChangeText={setEmail}
+						autoCapitalize="none"
+						keyboardType="email-address"
+					/>
+				</TextField>
+			</>
+		);
+	},
+);
+
+IdentityForm.displayName = "IdentityForm";

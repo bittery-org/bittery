@@ -19,6 +19,14 @@ export type {
 	SecureNoteDisplayData,
 	TotpDisplayData,
 };
+export {
+	DetailCustomField,
+	DetailField,
+	DetailHeader,
+	DetailPasswordField,
+	DetailSection,
+	DetailUrlField,
+} from "./field-components";
 export type { CustomField, ItemDetailData, ItemDetailProps } from "./shared";
 
 export default function ItemDetail({

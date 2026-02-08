@@ -1,7 +1,7 @@
-import { useTRPC } from "@bittery/shared/trpc";
+import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createOfflineQueue, type OfflineQueue } from "./offline-queue";
+import { performDeltaSync } from "./delta-sync";
 import {
 	createQueryInvalidator,
 	invalidateQueriesForEvent,
@@ -10,6 +10,7 @@ import {
 import { createSyncManager, type SyncManager } from "./sync-manager";
 import type {
 	ConnectionStatus,
+	ItemCacheAdapter,
 	SyncEvent,
 	SyncStatus,
 	SyncStorage,
@@ -25,6 +26,7 @@ export interface UseSyncOptions {
 	queryClient: QueryClient;
 	storage?: SyncStorage;
 	enabled?: boolean;
+	itemCacheAdapter?: ItemCacheAdapter;
 }
 
 /**
@@ -32,6 +34,7 @@ export interface UseSyncOptions {
  */
 export function useSync(options: UseSyncOptions) {
 	const trpc = useTRPC();
+	const trpcClient = useTRPCClient();
 
 	const {
 		serverUrl,
@@ -40,6 +43,7 @@ export function useSync(options: UseSyncOptions) {
 		queryClient,
 		storage,
 		enabled = true,
+		itemCacheAdapter,
 	} = options;
 
 	const [status, setStatus] = useState<SyncStatus>({
@@ -50,20 +54,34 @@ export function useSync(options: UseSyncOptions) {
 	});
 
 	const syncManagerRef = useRef<SyncManager | null>(null);
-	const offlineQueueRef = useRef<OfflineQueue | null>(null);
 
 	/**
 	 * Handle incoming sync events from other clients
-	 * This invalidates the appropriate queries to refresh stale data
+	 * Delta sync: fetch only the changed entity, update local cache, then invalidate queries
 	 */
 	const handleSyncEvent = useCallback(
 		async (event: SyncEvent) => {
-			// Invalidate queries based on the event type
+			// Step 1: Delta sync - fetch only changed entity, update local cache
+			if (itemCacheAdapter?.supportsItemCache) {
+				try {
+					await performDeltaSync(trpcClient, itemCacheAdapter, event);
+				} catch (e) {
+					console.error(
+						"[useSync] Delta sync failed, falling back to full invalidation:",
+						e,
+					);
+				}
+			}
+
+			// Step 2: Invalidate queries (reads from updated cache if delta sync succeeded)
 			await invalidateQueriesForEvent({
 				queryClient,
 				trpc: trpc as unknown as QueryKeyHelpers,
 				event,
 			});
+
+			// Step 3: Save last sync timestamp for catch-up on next connect
+			await syncManagerRef.current?.saveLastSyncTimestamp();
 
 			// Update last sync time
 			setStatus((prev) => ({
@@ -71,40 +89,67 @@ export function useSync(options: UseSyncOptions) {
 				lastSyncTime: event.timestamp,
 			}));
 		},
-		[queryClient, trpc],
+		[queryClient, trpc, trpcClient, itemCacheAdapter],
 	);
 
 	/**
 	 * Handle connection status changes
 	 */
 	const handleStatusChange = useCallback(
-		(connectionStatus: ConnectionStatus) => {
+		async (connectionStatus: ConnectionStatus) => {
 			setStatus((prev) => ({
 				...prev,
 				connectionStatus,
 				error: connectionStatus === "error" ? "Connection failed" : null,
 			}));
 
-			// If reconnected, process offline queue
-			if (connectionStatus === "connected" && offlineQueueRef.current) {
-				// TODO: Process offline queue with actual API calls
+			// Catch-up on missed events when reconnected
+			if (
+				connectionStatus === "connected" &&
+				itemCacheAdapter?.supportsItemCache
+			) {
+				try {
+					const lastTimestamp =
+						await syncManagerRef.current?.getStoredLastSyncTimestamp();
+					if (lastTimestamp) {
+						const result = await trpcClient.sync.getEventsSince.query({
+							since: lastTimestamp,
+						});
+						for (const event of result.events) {
+							// Skip own events
+							if (event.clientId === clientId) continue;
+							await performDeltaSync(
+								trpcClient,
+								itemCacheAdapter,
+								event as SyncEvent,
+							);
+						}
+						// Save the latest timestamp
+						await syncManagerRef.current?.saveLastSyncTimestamp();
+						// Invalidate all item queries after catch-up
+						await queryClient.invalidateQueries({
+							queryKey: ["items"],
+						});
+						await queryClient.invalidateQueries({
+							queryKey: ["vault-items"],
+						});
+						await queryClient.invalidateQueries({
+							queryKey: ["decrypted-item"],
+						});
+					}
+				} catch (e) {
+					console.error(
+						"[useSync] Catch-up failed, full refetch will happen:",
+						e,
+					);
+				}
 			}
 		},
-		[],
+		[trpcClient, itemCacheAdapter, clientId, queryClient],
 	);
 
 	/**
-	 * Handle offline queue changes
-	 */
-	const handleQueueChange = useCallback((count: number) => {
-		setStatus((prev) => ({
-			...prev,
-			pendingChanges: count,
-		}));
-	}, []);
-
-	/**
-	 * Initialize sync manager and offline queue
+	 * Initialize sync manager
 	 */
 	useEffect(() => {
 		if (!enabled) {
@@ -122,13 +167,8 @@ export function useSync(options: UseSyncOptions) {
 		});
 		syncManagerRef.current = syncManager;
 
-		// Create offline queue
-		const offlineQueue = createOfflineQueue(storage, handleQueueChange);
-		offlineQueueRef.current = offlineQueue;
-
-		// Initialize offline queue and connect
+		// Connect
 		(async () => {
-			await offlineQueue.init();
 			await syncManager.connect();
 		})();
 
@@ -136,7 +176,6 @@ export function useSync(options: UseSyncOptions) {
 		return () => {
 			syncManager.disconnect();
 			syncManagerRef.current = null;
-			offlineQueueRef.current = null;
 		};
 	}, [
 		enabled,
@@ -146,7 +185,6 @@ export function useSync(options: UseSyncOptions) {
 		storage,
 		handleSyncEvent,
 		handleStatusChange,
-		handleQueueChange,
 	]);
 
 	/**
@@ -169,32 +207,6 @@ export function useSync(options: UseSyncOptions) {
 	}, []);
 
 	/**
-	 * Add operation to offline queue
-	 */
-	const queueOperation = useCallback(
-		async (operation: {
-			type: "create" | "update" | "delete";
-			entityType: "item" | "vault" | "vault_member" | "vault_key";
-			entityId: string;
-			vaultId: string;
-			data: unknown;
-		}) => {
-			if (offlineQueueRef.current) {
-				return offlineQueueRef.current.mergeOperation(operation);
-			}
-			return "";
-		},
-		[],
-	);
-
-	/**
-	 * Get pending changes count
-	 */
-	const getPendingChanges = useCallback(() => {
-		return offlineQueueRef.current?.count() || 0;
-	}, []);
-
-	/**
 	 * Query invalidator for use by mutations
 	 * Provides centralized invalidation methods that match sync event handling
 	 */
@@ -212,8 +224,6 @@ export function useSync(options: UseSyncOptions) {
 		clientId,
 		reconnect,
 		disconnect,
-		queueOperation,
-		getPendingChanges,
 		invalidator,
 		isConnected: status.connectionStatus === "connected",
 		isOnline:

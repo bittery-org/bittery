@@ -1,0 +1,32 @@
+[package]
+name = "bittery-crypto-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WebAssembly bindings for Bittery crypto"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bittery-crypto-core.workspace = true
+
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+js-sys.workspace = true
+getrandom.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+serde-wasm-bindgen = "0.6"
+base64.workspace = true
+
+# For console logging in WASM
+console_error_panic_hook = "0.1"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[profile.release]
+# Optimize for small code size
+opt-level = "s"

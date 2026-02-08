@@ -1,6 +1,6 @@
 import { db, syncEvent, syncEventAck, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, router } from "../index";
@@ -32,7 +32,7 @@ export const syncRouter = router({
 				: userVaultIds;
 
 			if (targetVaultIds.length === 0) {
-				return { events: [], hasMore: false };
+				return { events: [], hasMore: false, requiresFullRefresh: false };
 			}
 
 			const sinceDate = new Date(input.since);
@@ -50,6 +50,17 @@ export const syncRouter = router({
 			const hasMore = events.length > input.limit;
 			const resultEvents = hasMore ? events.slice(0, input.limit) : events;
 
+			// Check if the oldest available event is newer than the requested timestamp.
+			// If so, some events have been pruned and the client needs a full refresh.
+			const oldestEvent = await db.query.syncEvent.findFirst({
+				where: inArray(syncEvent.vaultId, targetVaultIds),
+				orderBy: [asc(syncEvent.createdAt)],
+			});
+
+			const requiresFullRefresh =
+				oldestEvent !== undefined &&
+				oldestEvent.createdAt.getTime() > input.since;
+
 			return {
 				events: resultEvents.map((e) => ({
 					id: e.id,
@@ -64,6 +75,7 @@ export const syncRouter = router({
 					timestamp: e.createdAt.getTime(),
 				})),
 				hasMore,
+				requiresFullRefresh,
 			};
 		}),
 

@@ -1,9 +1,9 @@
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
 import type { SyncStorage } from "@bittery/sync";
 import { generateClientId, useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { Store } from "@tauri-apps/plugin-store";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { storage } from "@/lib/storage";
 
 /**
  * Storage key for client ID
@@ -76,7 +76,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		(async () => {
 			const [id, url] = await Promise.all([
 				getOrCreateClientId(),
-				tauriStorage.getServerUrl(),
+				storage.getServerUrl(),
 			]);
 			setClientId(id);
 			setServerUrl(url || "");
@@ -85,18 +85,19 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 	}, []);
 
 	const getAuthToken = useCallback(async () => {
-		return tauriStorage.getAuthToken();
+		return storage.getAuthToken();
 	}, []);
 
-	const storage = useMemo(() => new TauriSyncStorage(), []);
+	const syncStorage = useMemo(() => new TauriSyncStorage(), []);
 
 	const syncState = useSync({
 		serverUrl,
 		getAuthToken,
 		clientId,
 		queryClient,
-		storage,
+		storage: syncStorage,
 		enabled: enabled && isInitialized && !!serverUrl && !!clientId,
+		itemCacheAdapter: storage,
 	});
 
 	return {

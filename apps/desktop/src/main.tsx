@@ -6,6 +6,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { AccountProvider } from "./contexts/account-context";
 import { queryClient, trpc, trpcClient } from "./lib/providers";
+import { initializeStorage } from "./lib/storage";
+import { DesktopPlatformProvider } from "./providers/platform-provider";
 import { DesktopSyncProvider } from "./providers/sync-provider";
 // Import the generated route tree
 import { routeTree } from "./routeTree.gen";
@@ -26,16 +28,21 @@ declare module "@tanstack/react-router" {
 }
 
 async function initializeApp() {
+	// Initialize storage adapter (loads Tauri plugins)
+	await initializeStorage();
+
 	ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 		<React.StrictMode>
 			<QueryClientProvider client={queryClient}>
 				{/* @ts-ignore */}
 				<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-					<DesktopSyncProvider queryClient={queryClient}>
-						<AccountProvider>
-							<RouterProvider router={router} />
-						</AccountProvider>
-					</DesktopSyncProvider>
+					<AccountProvider router={router}>
+						<DesktopSyncProvider queryClient={queryClient}>
+							<DesktopPlatformProvider>
+								<RouterProvider router={router} />
+							</DesktopPlatformProvider>
+						</DesktopSyncProvider>
+					</AccountProvider>
 				</TRPCProvider>
 			</QueryClientProvider>
 		</React.StrictMode>,

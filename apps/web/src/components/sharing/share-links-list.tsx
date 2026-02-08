@@ -147,7 +147,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 		);
 	}
 
-	const links = linksQuery.data || [];
+	const links = linksQuery.data?.links || [];
 
 	if (links.length === 0) {
 		return (

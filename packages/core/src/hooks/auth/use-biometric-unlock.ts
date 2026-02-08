@@ -1,0 +1,179 @@
+/**
+ * useBiometricUnlock Hook
+ *
+ * React hook for performing biometric unlock (Touch ID / Face ID).
+ * Desktop and mobile only - web/extension don't support biometric.
+ */
+
+import type { BiometricAuthResult } from "@bittery/storage";
+import { type UseMutationResult, useMutation } from "@tanstack/react-query";
+import { usePlatformStorage } from "../../context/platform-context";
+
+/**
+ * Options for useBiometricUnlock hook
+ */
+export interface UseBiometricUnlockOptions {
+	/**
+	 * Callback when biometric unlock succeeds.
+	 */
+	onSuccess?: () => void | Promise<void>;
+
+	/**
+	 * Callback when biometric unlock fails.
+	 */
+	onError?: (error: BiometricUnlockError) => void;
+
+	/**
+	 * Prompt message shown during biometric authentication.
+	 * Defaults to "Unlock Bittery"
+	 */
+	promptMessage?: string;
+}
+
+/**
+ * Input for biometric unlock
+ */
+export interface BiometricUnlockInput {
+	/**
+	 * Email for multi-account platforms.
+	 * Optional - uses active account if not provided.
+	 */
+	email?: string;
+}
+
+/**
+ * Biometric unlock error with structured error type
+ */
+export interface BiometricUnlockError {
+	type:
+		| "not_available"
+		| "not_enrolled"
+		| "not_enabled"
+		| "master_password_required"
+		| "session_expired"
+		| "user_cancelled"
+		| "lockout"
+		| "authentication_failed"
+		| "unknown";
+	message: string;
+}
+
+/**
+ * Result from biometric unlock
+ */
+export interface BiometricUnlockResult {
+	success: boolean;
+}
+
+/**
+ * Hook for performing biometric unlock.
+ *
+ * @example
+ * ```tsx
+ * const biometricUnlock = useBiometricUnlock({
+ *   onSuccess: () => navigate('/vault'),
+ *   onError: (error) => {
+ *     if (error.type === 'master_password_required') {
+ *       showPasswordPrompt();
+ *     } else {
+ *       toast.error(error.message);
+ *     }
+ *   },
+ * });
+ *
+ * // Check if biometric is available
+ * const canUseBiometric = await storage.canBiometricUnlock();
+ * if (canUseBiometric) {
+ *   biometricUnlock.mutate({});
+ * }
+ * ```
+ */
+export function useBiometricUnlock(
+	options: UseBiometricUnlockOptions = {},
+): UseMutationResult<
+	BiometricUnlockResult,
+	BiometricUnlockError,
+	BiometricUnlockInput
+> {
+	const storage = usePlatformStorage();
+
+	return useMutation({
+		mutationFn: async (input: BiometricUnlockInput) => {
+			// Check if biometric is supported
+			if (!storage.supportsBiometric) {
+				throw {
+					type: "not_available",
+					message: "Biometric authentication is not supported on this platform",
+				} as BiometricUnlockError;
+			}
+
+			// Check if master password re-entry is required (30-day security policy)
+			// This check happens before biometric auth for better UX
+			if (storage.isMasterPasswordReentryRequired) {
+				const requiresReentry = await storage.isMasterPasswordReentryRequired(
+					input.email,
+				);
+				if (requiresReentry) {
+					throw {
+						type: "master_password_required",
+						message:
+							"For security, please enter your master password. This is required every 30 days.",
+					} as BiometricUnlockError;
+				}
+			}
+
+			// Use enhanced biometric auth if available for better error handling
+			if (storage.authenticateWithBiometricEnhanced) {
+				const result: BiometricAuthResult =
+					await storage.authenticateWithBiometricEnhanced(
+						options.promptMessage ?? "Unlock Bittery",
+						input.email,
+					);
+
+				if (!result.success) {
+					throw {
+						type: result.error ?? "unknown",
+						message: result.message ?? "Biometric authentication failed",
+					} as BiometricUnlockError;
+				}
+
+				// Now try to restore the MUK using biometric unlock
+				if (storage.unlockWithBiometric) {
+					const unlocked = await storage.unlockWithBiometric(input.email);
+					if (!unlocked) {
+						throw {
+							type: "authentication_failed",
+							message: "Failed to unlock vault after biometric authentication",
+						} as BiometricUnlockError;
+					}
+				}
+
+				return { success: true };
+			}
+
+			// Fallback to simple biometric unlock
+			if (storage.unlockWithBiometric) {
+				const success = await storage.unlockWithBiometric(input.email);
+				if (!success) {
+					throw {
+						type: "authentication_failed",
+						message: "Biometric unlock failed",
+					} as BiometricUnlockError;
+				}
+				return { success: true };
+			}
+
+			// No biometric unlock method available
+			throw {
+				type: "not_available",
+				message: "Biometric unlock is not available",
+			} as BiometricUnlockError;
+		},
+		onSuccess: () => {
+			options.onSuccess?.();
+		},
+		onError: (error) => {
+			options.onError?.(error);
+		},
+	});
+}

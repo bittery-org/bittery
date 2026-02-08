@@ -1,9 +1,15 @@
-import { encrypt } from "@bittery/crypto/encryption";
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
-import { useTRPCClient } from "@bittery/shared/trpc";
-import type { ItemCategory } from "@bittery/shared/types";
+import {
+	type CreateVaultInput,
+	useAccountMetadataSyncAll,
+	useAllVaultKeys,
+	useCreateItem,
+	useCreateVault,
+	useCrossVaultTags,
+	useDeleteVault,
+	useUpdateVault,
+} from "@bittery/core/hooks";
+import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { toast } from "@bittery/ui";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	createFileRoute,
 	Outlet,
@@ -11,77 +17,72 @@ import {
 	useNavigate,
 	useParams,
 } from "@tanstack/react-router";
-import { useState } from "react";
-import { CreateItemDialog } from "../../components/vault/create-item-dialog";
+import { useEffect, useState } from "react";
+import { storage } from "@/lib/storage";
+import { CreateItemSheet } from "../../components/vault/create-item-sheet";
+import type { AccountOption } from "../../components/vault/create-vault-dialog";
 import { CreateVaultDialog } from "../../components/vault/create-vault-dialog";
 import { DeleteVaultDialog } from "../../components/vault/delete-vault-dialog";
 import { EditVaultDialog } from "../../components/vault/edit-vault-dialog";
 import { ImportDialog } from "../../components/vault/import-dialog";
-import { useVaultOperations } from "../../components/vault/use-vault-operations";
 import { VaultHeader } from "../../components/vault/vault-header";
 import { VaultSidebar } from "../../components/vault/vault-sidebar";
-import { useCrossVaultTags } from "../../hooks/use-cross-vault-tags";
-import { trpc } from "../../lib/providers";
 import { VaultDndProvider } from "../../providers/dnd-provider";
-import { useQueryInvalidator } from "../../providers/sync-provider";
 
 export const Route = createFileRoute("/vault")({
 	component: RouteComponent,
 	beforeLoad: async () => {
 		// Get active account
-		const activeEmail = await tauriStorage.getActiveAccountEmail();
-		if (!activeEmail) {
+		const activeAccount = await storage.getActiveAccount();
+		if (!activeAccount) {
 			throw redirect({ to: "/login" });
 		}
 
-		// Check if user has stored credentials for active account
-		const hasSecretKey = await tauriStorage.hasStoredSecretKey(activeEmail);
-		const sessionValid = await tauriStorage.isSessionValid(activeEmail);
-
-		if (!hasSecretKey || !sessionValid) {
-			throw redirect({ to: "/unlock", search: { email: activeEmail } });
+		// Handle "All Accounts" mode specially
+		if (activeAccount.type === "all") {
+			// Check if we have any unlocked accounts
+			const unlockedAccounts = await storage.getUnlockedAccounts?.();
+			if (!unlockedAccounts || unlockedAccounts.length === 0) {
+				// No unlocked accounts, redirect to unlock
+				throw redirect({ to: "/unlock" });
+			}
+			// At least one account is unlocked, allow access
+			return;
 		}
 
-		const restored = await tauriStorage.tryRestoreSession(true, activeEmail);
+		// Single account mode: validate session for specific account
+		// Check if user has stored credentials for active account
+		const hasSecretKey = await storage.getStoredSecretKey(activeAccount.email);
+		const sessionValid = await storage.isSessionValid(activeAccount.email);
+
+		if (!hasSecretKey || !sessionValid) {
+			throw redirect({ to: "/unlock", search: { email: activeAccount.email } });
+		}
+
+		const restored = await storage.tryRestoreSession(true, activeAccount.email);
 
 		if (!restored) {
-			throw redirect({ to: "/unlock", search: { email: activeEmail } });
+			throw redirect({ to: "/unlock", search: { email: activeAccount.email } });
 		}
 	},
 });
 
-interface DecryptedItemData {
-	title: string;
-	url?: string;
-	username?: string;
-	password?: string;
-	notes?: string;
-	note?: string;
-	// Identity fields
-	firstName?: string;
-	middleName?: string;
-	lastName?: string;
-	email?: string;
-}
-
 function RouteComponent() {
-	const { data: vaultKeys } = useQuery({
-		queryKey: ["vault-keys"],
-		queryFn: async () => {
-			const keys = await tauriStorage.getVaultKeys();
-			return keys;
-		},
-	});
+	// Fetch all vault keys with account metadata
+	// Automatically handles single-account vs "All Accounts" mode
+	const { vaultKeys, isAllAccountsMode } = useAllVaultKeys();
 
 	// Get cross-vault tags for sidebar
 	const { tags: crossVaultTags } = useCrossVaultTags();
 
 	const params = useParams({ strict: false });
 	const navigate = useNavigate();
-	const trpcClient = useTRPCClient();
-	const queryClient = useQueryClient();
-	const invalidator = useQueryInvalidator();
-	const { createVault, updateVault, deleteVault } = useVaultOperations();
+
+	// Shared hooks for vault and item operations
+	const createVaultMutation = useCreateVault();
+	const updateVaultMutation = useUpdateVault();
+	const deleteVaultMutation = useDeleteVault();
+	const createItemMutation = useCreateItem();
 
 	const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
 	const [isNewVaultDialogOpen, setIsNewVaultDialogOpen] = useState(false);
@@ -89,6 +90,8 @@ function RouteComponent() {
 	const [editingVault, setEditingVault] = useState<{
 		id: string;
 		name: string;
+		icon?: string | null;
+		imageUrl?: string | null;
 	} | null>(null);
 	const [isDeleteVaultDialogOpen, setIsDeleteVaultDialogOpen] = useState(false);
 	const [deletingVault, setDeletingVault] = useState<{
@@ -97,37 +100,196 @@ function RouteComponent() {
 	} | null>(null);
 	const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
 	const [importingVaultId, setImportingVaultId] = useState<string | null>(null);
+	const [importingVaultAccountEmail, setImportingVaultAccountEmail] = useState<
+		string | undefined
+	>(undefined);
+	const [availableAccounts, setAvailableAccounts] = useState<AccountOption[]>(
+		[],
+	);
 
+	// Load available accounts for multi-account mode
+	useEffect(() => {
+		const loadAccounts = async () => {
+			if (isAllAccountsMode) {
+				const emails = await storage.getUnlockedAccounts?.();
+				if (emails && emails.length > 0) {
+					// Fetch metadata for each account
+					const accounts = await Promise.all(
+						emails.map(async (email) => {
+							const metadata = await storage.getAccountMetadata?.(email);
+							return {
+								email,
+								name: metadata?.name,
+								teamName: metadata?.teamName,
+							};
+						}),
+					);
+					setAvailableAccounts(accounts);
+				}
+			}
+		};
+		loadAccounts();
+	}, [isAllAccountsMode]);
+
+	// Get all account emails for metadata sync
+	const [accountEmails, setAccountEmails] = useState<string[]>([]);
+
+	useEffect(() => {
+		const getAccountEmails = async () => {
+			const activeAccount = await storage.getActiveAccount();
+			if (!activeAccount) {
+				setAccountEmails([]);
+				return;
+			}
+
+			if (activeAccount.type === "all") {
+				// In "All Accounts" mode, sync all unlocked accounts
+				const emails = await storage.getUnlockedAccounts?.();
+				setAccountEmails(emails || []);
+			} else {
+				// Single account mode
+				setAccountEmails([activeAccount.email]);
+			}
+		};
+		getAccountEmails();
+	}, []);
+
+	// Sync account metadata for all accounts periodically
+	// This keeps team avatar URLs up-to-date
+	useAccountMetadataSyncAll({
+		emails: accountEmails,
+		enabled: accountEmails.length > 0,
+		refetchInterval: 60000, // Check every minute
+	});
+
+	// Vault operation handlers
+	const handleCreateVault = async (data: CreateVaultInput) => {
+		try {
+			// Determine accountEmail for new vault
+			let accountEmail = data.accountEmail;
+
+			// If no account email provided and we're not in all-accounts mode,
+			// get the active account email
+			if (!accountEmail && !isAllAccountsMode) {
+				const activeAccount = await storage.getActiveAccount();
+				if (activeAccount?.type === "single") {
+					accountEmail = activeAccount.email;
+				}
+			}
+
+			// If in all-accounts mode and no account selected, require selection
+			if (isAllAccountsMode && !accountEmail) {
+				toast.error("Please select an account for the new vault");
+				throw new Error("Account selection required");
+			}
+
+			// Hook handles image upload internally if imageFile is provided
+			const result = await createVaultMutation.mutateAsync({
+				...data,
+				accountEmail,
+			});
+
+			toast.success("Vault created successfully");
+			navigate({ to: "/vault/$id", params: { id: result.vaultId } });
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : "Failed to create vault";
+			toast.error(errorMessage);
+			throw error;
+		}
+	};
+
+	const handleOpenEditVault = (vault: {
+		id: string;
+		name: string;
+		icon?: string | null;
+		imageUrl?: string | null;
+	}) => {
+		setEditingVault(vault);
+		setIsEditVaultDialogOpen(true);
+	};
+
+	const handleUpdateVault = async (
+		vaultId: string,
+		data: {
+			name: string;
+			icon?: string | null;
+			imageFile?: File;
+			removeImage?: boolean;
+		},
+	) => {
+		try {
+			// Find the vault to get its account email
+			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
+			const accountEmail =
+				vault && "accountEmail" in vault ? vault.accountEmail : undefined;
+
+			await updateVaultMutation.mutateAsync({
+				vaultId,
+				name: data.name,
+				icon: data.icon,
+				imageFile: data.imageFile,
+				removeImage: data.removeImage,
+				accountEmail,
+			});
+			setEditingVault(null);
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : "Failed to update vault";
+			toast.error(errorMessage);
+			throw error;
+		}
+	};
+
+	const handleOpenDeleteVault = (vault: { id: string; name: string }) => {
+		setDeletingVault(vault);
+		setIsDeleteVaultDialogOpen(true);
+	};
+
+	const handleDeleteVault = async (vaultId: string) => {
+		try {
+			// Find the vault to get its account email
+			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
+			const accountEmail =
+				vault && "accountEmail" in vault ? vault.accountEmail : undefined;
+
+			await deleteVaultMutation.mutateAsync({
+				vaultId,
+				accountEmail,
+			});
+			setDeletingVault(null);
+
+			if (params.id === vaultId) {
+				navigate({ to: "/vault" });
+			}
+
+			toast.success("Vault deleted successfully");
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : "Failed to delete vault";
+			toast.error(errorMessage);
+			throw error;
+		}
+	};
+
+	// Item operation handlers
 	const handleCreateItem = async (
 		data: DecryptedItemData,
 		vaultId: string,
 		category: ItemCategory,
 	) => {
 		try {
-			// Get vault key for encryption
-			const vaultKey = await tauriStorage.getDecryptedVaultKey(vaultId);
+			// Find the vault to get its account email
+			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
+			const accountEmail =
+				vault && "accountEmail" in vault ? vault.accountEmail : undefined;
 
-			if (!vaultKey) {
-				throw new Error("No vault key found");
-			}
-
-			// Encrypt the item data
-			const encryptedData = await encrypt(JSON.stringify(data), vaultKey);
-
-			const createdItem = await trpcClient.vault.createItem.mutate({
-				vaultId: vaultId,
-				category: category,
-				encryptedData: encryptedData.ciphertext,
-				encryptionIv: encryptedData.iv,
-				encryptionAlgorithm: encryptedData.algorithm,
+			const result = await createItemMutation.mutateAsync({
+				vaultId,
+				category,
+				data,
+				accountEmail,
 			});
-
-			// Prefetch the item to avoid race condition
-			await queryClient.prefetchQuery(
-				trpc.vault.getItem.queryOptions({ itemId: createdItem.itemId }),
-			);
-			// Invalidate queries to refresh the list
-			await invalidator.invalidateVaultList(vaultId);
 
 			// Close dialog
 			setIsNewItemDialogOpen(false);
@@ -135,7 +297,7 @@ function RouteComponent() {
 			// Navigate to the newly created item
 			navigate({
 				to: "/vault/$id/$itemId",
-				params: { id: vaultId, itemId: createdItem.itemId },
+				params: { id: vaultId, itemId: result.itemId },
 			});
 
 			toast.success("Item created successfully");
@@ -147,59 +309,42 @@ function RouteComponent() {
 		}
 	};
 
-	const handleOpenEditVault = (vault: { id: string; name: string }) => {
-		setEditingVault(vault);
-		setIsEditVaultDialogOpen(true);
-	};
-
-	const handleUpdateVault = async (vaultId: string, name: string) => {
-		await updateVault(vaultId, name);
-		setEditingVault(null);
-	};
-
-	const handleOpenDeleteVault = (vault: { id: string; name: string }) => {
-		setDeletingVault(vault);
-		setIsDeleteVaultDialogOpen(true);
-	};
-
-	const handleDeleteVault = async (vaultId: string) => {
-		await deleteVault(vaultId, params.id);
-		setDeletingVault(null);
-	};
-
 	const handleOpenImportDialog = (vaultId: string) => {
+		// Find the vault to get its account email
+		const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
+		const accountEmail =
+			vault && "accountEmail" in vault ? vault.accountEmail : undefined;
+
 		setImportingVaultId(vaultId);
+		setImportingVaultAccountEmail(accountEmail);
 		setIsImportDialogOpen(true);
 	};
 
 	return (
 		<VaultDndProvider>
-			<div className="flex h-screen flex-col overflow-hidden">
-				<VaultHeader
-					hasVaults={!!vaultKeys?.length}
-					onNewItemClick={() => setIsNewItemDialogOpen(true)}
+			<div className="flex h-screen overflow-hidden">
+				<VaultSidebar
+					vaults={vaultKeys || []}
+					tags={crossVaultTags}
+					currentVaultId={params.id}
+					onNewVault={() => setIsNewVaultDialogOpen(true)}
+					onEditVault={handleOpenEditVault}
+					onDeleteVault={handleOpenDeleteVault}
+					onImportItems={handleOpenImportDialog}
 				/>
 
-				<div className="flex flex-1 overflow-hidden">
-					<VaultSidebar
-						vaults={vaultKeys || []}
-						tags={crossVaultTags}
-						currentVaultId={params.id}
-						onNewVault={() => setIsNewVaultDialogOpen(true)}
-						onEditVault={handleOpenEditVault}
-						onDeleteVault={handleOpenDeleteVault}
-						onImportItems={handleOpenImportDialog}
+				<div className="flex h-full flex-1 flex-col overflow-hidden">
+					<VaultHeader
+						hasVaults={!!vaultKeys?.length}
+						onNewItemClick={() => setIsNewItemDialogOpen(true)}
 					/>
-
-					<div className="flex h-full flex-1 flex-col">
-						<div className="flex flex-1 overflow-hidden">
-							<Outlet />
-						</div>
+					<div className="flex flex-1 overflow-hidden">
+						<Outlet />
 					</div>
 				</div>
 
-				{/* New Item Dialog */}
-				<CreateItemDialog
+				{/* New Item Sheet */}
+				<CreateItemSheet
 					open={isNewItemDialogOpen}
 					onOpenChange={setIsNewItemDialogOpen}
 					vaults={
@@ -207,6 +352,16 @@ function RouteComponent() {
 							id: v.vaultId,
 							name: v.vaultName,
 							type: v.vaultType as "personal" | "team",
+							icon: v.vaultIcon,
+							imageUrl: v.vaultImageUrl,
+							accountEmail: "accountEmail" in v ? v.accountEmail : undefined,
+							accountName: "accountName" in v ? v.accountName : undefined,
+							accountTeamName:
+								"accountTeamName" in v ? v.accountTeamName : undefined,
+							accountTeamAvatarUrl:
+								"accountTeamAvatarUrl" in v
+									? v.accountTeamAvatarUrl
+									: undefined,
 						})) || []
 					}
 					selectedVaultId={params.id}
@@ -218,7 +373,8 @@ function RouteComponent() {
 				<CreateVaultDialog
 					open={isNewVaultDialogOpen}
 					onOpenChange={setIsNewVaultDialogOpen}
-					onSubmit={createVault}
+					onSubmit={handleCreateVault}
+					accounts={isAllAccountsMode ? availableAccounts : undefined}
 				/>
 
 				<EditVaultDialog
@@ -249,11 +405,13 @@ function RouteComponent() {
 				{importingVaultId && (
 					<ImportDialog
 						vaultId={importingVaultId}
+						accountEmail={importingVaultAccountEmail}
 						open={isImportDialogOpen}
 						onOpenChange={(open) => {
 							setIsImportDialogOpen(open);
 							if (!open) {
 								setImportingVaultId(null);
+								setImportingVaultAccountEmail(undefined);
 							}
 						}}
 					/>

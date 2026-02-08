@@ -32,9 +32,29 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hyper = { version = "0.14", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+async-stream = "0.3"
 reqwest = { version = "0.11", features = ["json"] }
 dirs = "5.0"
 base64 = "0.22"
+urlencoding = "2.1"
+
+# Native crypto
+bittery-crypto-core = { path = "../../../packages/crypto/core/crates/bittery-crypto-core" }
+
+# OS keychain access (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+# Platform-specific features must be enabled for actual keychain storage
+[target.'cfg(target_os = "macos")'.dependencies.keyring]
+version = "3"
+features = ["apple-native"]
+
+[target.'cfg(target_os = "windows")'.dependencies.keyring]
+version = "3"
+features = ["windows-native"]
+
+[target.'cfg(target_os = "linux")'.dependencies.keyring]
+version = "3"
+features = ["linux-native"]
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

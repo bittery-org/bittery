@@ -1,87 +1,32 @@
-import "../src/global.css";
-import { install as installQuickCrypto } from "react-native-quick-crypto";
-import crypto from "react-native-quick-crypto";
-import { setCryptoProvider, type HashAlgorithm } from "@bittery/srp6a";
-import { setKeyDerivationCryptoProvider } from "@bittery/crypto/key-derivation";
-
-// Install crypto polyfill before any other imports that might use crypto
-installQuickCrypto();
-
-// Set up native crypto provider for SRP6a (uses native PBKDF2 instead of JS)
-setCryptoProvider({
-	getRandomValues: (array: Uint8Array) => {
-		crypto.getRandomValues(array);
-	},
-	digest: async (algorithm: HashAlgorithm, data: ArrayBuffer) => {
-		const hashName = algorithm.replace("-", "").toLowerCase(); // "SHA-256" -> "sha256"
-		const hash = crypto.createHash(hashName);
-		hash.update(Buffer.from(data));
-		return hash.digest().buffer as ArrayBuffer;
-	},
-	deriveKeyWithPBKDF2: async (
-		algorithm: HashAlgorithm,
-		salt: ArrayBuffer,
-		password: string,
-		iterations = 100000,
-	) => {
-		const hashName = algorithm.replace("-", "").toLowerCase();
-		return new Promise<ArrayBuffer>((resolve, reject) => {
-			crypto.pbkdf2(
-				password,
-				Buffer.from(salt),
-				iterations,
-				32, // 256 bits
-				hashName,
-				(err, derivedKey) => {
-					if (err) reject(err);
-					else if (!derivedKey) reject(new Error("PBKDF2 returned undefined"));
-					else resolve(derivedKey.buffer as ArrayBuffer);
-				},
-			);
-		});
-	},
-});
-
-// Set up native crypto provider for key derivation (deriveKeys function)
-setKeyDerivationCryptoProvider({
-	pbkdf2: (
-		password: Uint8Array,
-		salt: Uint8Array,
-		iterations: number,
-		keyLength: number,
-	): Promise<Uint8Array> => {
-		return new Promise((resolve, reject) => {
-			crypto.pbkdf2(
-				Buffer.from(password),
-				Buffer.from(salt),
-				iterations,
-				keyLength,
-				"sha256",
-				(err, derivedKey) => {
-					if (err) reject(err);
-					else if (!derivedKey) reject(new Error("PBKDF2 returned undefined"));
-					else resolve(new Uint8Array(derivedKey));
-				},
-			);
-		});
-	},
-});
+import "../global.css";
+// Native crypto is provided by @bittery/crypto-nitro Expo module
+// No polyfill setup needed - all crypto operations use native Rust code
+// See apps/mobile/src/lib/crypto/ for the unified crypto API
 
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
+import { HeroUINativeProvider, useThemeColor } from "heroui-native";
 import { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import {
+	SafeAreaListener,
+	SafeAreaProvider,
+} from "react-native-safe-area-context";
+import { Uniwind } from "uniwind";
 import { BiometricAuthModal } from "../src/components/biometric-auth-modal";
-import { OfflineModeBanner } from "../src/components/sync-status-indicator";
 import { AccountProvider } from "../src/contexts/account-context";
 import {
 	BiometricAuthProvider,
 	useBiometricAuth,
 } from "../src/contexts/biometric-auth-context";
-import { OfflineVaultProvider } from "../src/contexts/offline-vault-context";
 import { TRPCProvider } from "../src/lib/trpc";
+import { MobilePlatformProvider } from "../src/providers/platform-provider";
+import { storage } from "../src/services/storage";
+import { loadThemePreference } from "../src/services/theme-storage";
+
+// Initial theme will be loaded from storage during app initialization
+Uniwind.setTheme("system");
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -90,13 +35,18 @@ SplashScreen.preventAutoHideAsync();
 function AppContent() {
 	const { showAuthModal, dismissAuthRequirement } = useBiometricAuth();
 
+	const [background] = useThemeColor(["background"]);
+
 	return (
-		<>
-			<OfflineModeBanner />
+		<SafeAreaListener
+			onChange={({ insets }) => {
+				Uniwind.updateInsets(insets);
+			}}
+		>
 			<Stack
 				screenOptions={{
 					headerShown: false,
-					contentStyle: { backgroundColor: "#ffffff" },
+					contentStyle: { backgroundColor: background },
 				}}
 			>
 				<Stack.Screen name="index" />
@@ -104,13 +54,20 @@ function AppContent() {
 				<Stack.Screen name="(tabs)" options={{ headerShown: false }} />
 				<Stack.Screen name="(vault)" options={{ headerShown: false }} />
 				<Stack.Screen name="settings" options={{ headerShown: false }} />
+				<Stack.Screen
+					name="autofill-unlock"
+					options={{
+						headerShown: false,
+						presentation: "modal",
+					}}
+				/>
 			</Stack>
 			<BiometricAuthModal
 				visible={showAuthModal}
 				onSuccess={dismissAuthRequirement}
 			/>
 			<StatusBar style="auto" />
-		</>
+		</SafeAreaListener>
 	);
 }
 
@@ -119,10 +76,19 @@ export default function RootLayout() {
 
 	useEffect(() => {
 		async function prepare() {
-			// Add any initialization logic here
-			// e.g., load fonts, check auth state, etc.
-			setAppIsReady(true);
-			await SplashScreen.hideAsync();
+			try {
+				// Initialize storage adapter (loads Expo modules)
+				await storage.initialize();
+
+				// Load and apply saved theme preference
+				const savedTheme = await loadThemePreference();
+				Uniwind.setTheme(savedTheme);
+			} catch (error) {
+				console.error("[RootLayout] Failed to initialize storage:", error);
+			} finally {
+				setAppIsReady(true);
+				await SplashScreen.hideAsync();
+			}
 		}
 
 		prepare();
@@ -134,17 +100,19 @@ export default function RootLayout() {
 
 	return (
 		<GestureHandlerRootView style={{ flex: 1 }}>
-			<SafeAreaProvider>
-				<TRPCProvider>
-					<AccountProvider>
-						<OfflineVaultProvider>
-							<BiometricAuthProvider>
-								<AppContent />
-							</BiometricAuthProvider>
-						</OfflineVaultProvider>
-					</AccountProvider>
-				</TRPCProvider>
-			</SafeAreaProvider>
+			<HeroUINativeProvider>
+				<SafeAreaProvider>
+					<TRPCProvider>
+						<MobilePlatformProvider>
+							<AccountProvider>
+								<BiometricAuthProvider>
+									<AppContent />
+								</BiometricAuthProvider>
+							</AccountProvider>
+						</MobilePlatformProvider>
+					</TRPCProvider>
+				</SafeAreaProvider>
+			</HeroUINativeProvider>
 		</GestureHandlerRootView>
 	);
 }

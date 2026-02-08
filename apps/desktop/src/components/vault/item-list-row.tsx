@@ -1,35 +1,25 @@
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import type { DecryptedItem } from "@bittery/shared/types";
+import { cn } from "@bittery/ui";
+import { IconMobileOutlineDuo18 } from "@bittery/ui/icons";
 import { useDraggable } from "@dnd-kit/core";
 import { useNavigate } from "@tanstack/react-router";
-import { Smartphone, Star } from "lucide-react";
 import type { DragItemData } from "../../providers/dnd-provider";
 import { Favicon } from "./favicon";
-import { VaultAvatar } from "./vault-avatar";
-
-interface VaultInfo {
-	name: string;
-	icon: string | null;
-	imageUrl: string | null;
-}
 
 interface ItemListRowProps {
-	item: DecryptedItem & { vault?: VaultInfo };
+	item: DecryptedItem;
 	isSelected: boolean;
-	onToggleFavorite: (e: React.MouseEvent) => void;
 	linkTo: string;
 	linkParams: Record<string, string>;
-	showVaultBadge?: boolean;
 	vaultId: string;
 }
 
 export function ItemListRow({
 	item,
 	isSelected,
-	onToggleFavorite,
 	linkTo,
 	linkParams,
-	showVaultBadge = false,
 	vaultId,
 }: ItemListRowProps) {
 	const navigate = useNavigate();
@@ -67,9 +57,13 @@ export function ItemListRow({
 					handleClick();
 				}
 			}}
-			className={`mb-1 w-full cursor-pointer rounded-md px-3 py-2.5 text-left transition-colors ${
-				isSelected ? "bg-muted/60" : "hover:bg-muted/30"
-			} ${isDragging ? "opacity-50" : ""}`}
+			className={cn(
+				"mb-1 w-full cursor-pointer rounded-md px-3 py-2.5 text-left transition-colors",
+				isSelected
+					? "bg-primary text-primary-foreground"
+					: "hover:bg-primary/10",
+				isDragging && "opacity-50",
+			)}
 		>
 			<div className="flex min-w-0 items-center gap-3">
 				<Favicon
@@ -83,49 +77,35 @@ export function ItemListRow({
 						<span className="truncate font-medium text-sm">{item.title}</span>
 						{item.category === "login" && item.totpSecret && (
 							<span title="Has 2FA">
-								<Smartphone className="size-3 shrink-0 text-primary" />
+								<IconMobileOutlineDuo18 className="size-3 shrink-0 text-primary-foreground" />
 							</span>
 						)}
 					</div>
 					{item.username && (
-						<div className="mt-0.5 truncate text-muted-foreground text-xs">
+						<div
+							className={cn(
+								"mt-0.5 truncate text-xs",
+								isSelected
+									? "text-primary-foreground"
+									: "text-muted-foreground",
+							)}
+						>
 							{item.username}
 						</div>
 					)}
 					{maskedCardNumber && (
-						<div className="mt-0.5 truncate text-muted-foreground text-xs">
+						<div
+							className={cn(
+								"mt-0.5 truncate text-xs",
+								isSelected
+									? "text-primary-foreground"
+									: "text-muted-foreground",
+							)}
+						>
 							{maskedCardNumber}
 						</div>
 					)}
-					{showVaultBadge && item.vault && (
-						<div className="mt-0.5 flex items-center gap-1 text-muted-foreground/70 text-xs">
-							<VaultAvatar
-								name={item.vault.name}
-								icon={item.vault.icon}
-								imageUrl={item.vault.imageUrl}
-								size="xs"
-							/>
-							<span className="truncate">{item.vault.name}</span>
-						</div>
-					)}
 				</div>
-				<button
-					type="button"
-					onClick={(e) => {
-						e.stopPropagation();
-						onToggleFavorite(e);
-					}}
-					className={`shrink-0 ${
-						item.favorite
-							? "text-yellow-500 hover:text-yellow-600"
-							: "text-muted-foreground hover:text-yellow-500"
-					}`}
-				>
-					<Star
-						className="size-4"
-						fill={item.favorite ? "currentColor" : "none"}
-					/>
-				</button>
 			</div>
 		</div>
 	);

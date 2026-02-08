@@ -17,9 +17,10 @@
 		"zod": "catalog:",
 		"drizzle-orm": "catalog:",
 		"@bittery/api": "workspace:*",
-		"@bittery/storage": "workspace:*",
 		"@bittery/auth": "workspace:*",
-		"@bittery/db": "workspace:*"
+		"@bittery/db": "workspace:*",
+		"@bittery/jobs": "workspace:*",
+		"@bittery/pubsub": "workspace:*"
 	},
 	"devDependencies": {
 		"typescript": "^5.8.2",

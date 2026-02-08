@@ -109,28 +109,39 @@ fn get_native_host_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, Box<dy
 }
 
 /// Create the manifest JSON content
-/// 
-/// Note: Chrome doesn't support wildcards in allowed_origins.
-/// For development, we use the local unpacked extension ID.
-/// For production, the extension ID is set at compile time.
+///
+/// Note: Chrome doesn't support wildcards in allowed_origins, but DOES support multiple IDs.
+/// We include both dev (unpacked) and production (Chrome Web Store) extension IDs.
 fn create_manifest_json(native_host_path: &PathBuf) -> serde_json::Value {
     // Development extension ID (unpacked extension)
     const DEV_EXTENSION_ID: &str = "blnkglankmihhigfnediedhhighfajei";
-    
-    // Try to get production extension ID from compile-time environment
-    let extension_id = option_env!("BITTERY_EXTENSION_ID")
-        .unwrap_or(DEV_EXTENSION_ID);
-    
-    eprintln!("📝 Using extension ID: {}", extension_id);
-    
+
+    // Production extension ID from compile-time environment (Chrome Web Store)
+    let prod_extension_id = option_env!("BITTERY_EXTENSION_ID");
+
+    // Build allowed_origins list with both dev and production IDs
+    let mut allowed_origins = vec![
+        format!("chrome-extension://{}/", DEV_EXTENSION_ID),
+    ];
+
+    // Add production ID if it's set and different from dev
+    if let Some(prod_id) = prod_extension_id {
+        if prod_id != DEV_EXTENSION_ID && !prod_id.is_empty() && prod_id != "YOUR_PRODUCTION_EXTENSION_ID_HERE" {
+            allowed_origins.push(format!("chrome-extension://{}/", prod_id));
+            eprintln!("📝 Using extension IDs: {} (dev), {} (prod)", DEV_EXTENSION_ID, prod_id);
+        } else {
+            eprintln!("📝 Using extension ID: {} (dev only)", DEV_EXTENSION_ID);
+        }
+    } else {
+        eprintln!("📝 Using extension ID: {} (dev only)", DEV_EXTENSION_ID);
+    }
+
     json!({
         "name": "com.bittery.desktop",
         "description": "Bittery Desktop Native Messaging Host",
         "path": native_host_path.to_string_lossy(),
         "type": "stdio",
-        "allowed_origins": [
-            format!("chrome-extension://{}/", extension_id),
-        ]
+        "allowed_origins": allowed_origins,
     })
 }
 

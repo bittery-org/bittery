@@ -1,10 +1,11 @@
-import * as tauriStorage from "@bittery/crypto/storage-tauri";
-import { useQuery } from "@tanstack/react-query";
+import {
+	useAvailableTags,
+	useVaultInfo,
+	useVaultItems,
+} from "@bittery/core/hooks";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { ItemDetailPage } from "../../../../components/vault/item-detail-page";
-import { useAvailableTags } from "../../../../hooks/use-available-tags";
-import { useDecryptedItems } from "../../../../hooks/use-decrypted-items";
 
 export const Route = createFileRoute("/vault/$id/$itemId/")({
 	component: VaultItemComponent,
@@ -15,18 +16,12 @@ function VaultItemComponent() {
 	const navigate = useNavigate();
 
 	// Get all items in vault for available tags
-	const { items: allVaultItems } = useDecryptedItems(selectedVaultId);
+	// useVaultItems automatically handles single-account vs all-accounts mode
+	const { items: allVaultItems } = useVaultItems(selectedVaultId);
 	const availableTags = useAvailableTags(allVaultItems);
 
-	// Get vault info from storage
-	const { data: currentVault } = useQuery({
-		queryKey: ["vault-keys", selectedVaultId],
-		queryFn: async () => {
-			const keys = await tauriStorage.getVaultKeys();
-			if (!keys) return null;
-			return keys.find((v) => v.vaultId === selectedVaultId);
-		},
-	});
+	// Get vault info from storage (now includes account metadata)
+	const { vaultInfo: currentVault } = useVaultInfo(selectedVaultId);
 
 	// Handle tag click - navigate to per-vault tag view
 	const handleTagClick = useCallback(
@@ -39,13 +34,21 @@ function VaultItemComponent() {
 		[navigate, selectedVaultId],
 	);
 
-	const vaultInfo = currentVault
-		? {
-				name: currentVault.vaultName,
-				icon: currentVault.vaultIcon,
-				imageUrl: currentVault.vaultImageUrl,
-			}
-		: undefined;
+	const vaultInfo = useMemo(
+		() =>
+			currentVault
+				? {
+						name: currentVault.vaultName,
+						type: currentVault.vaultType,
+						icon: currentVault.vaultIcon,
+						imageUrl: currentVault.vaultImageUrl,
+						accountName: currentVault.accountName,
+						accountTeamName: currentVault.accountTeamName,
+						accountTeamAvatarUrl: currentVault.accountTeamAvatarUrl,
+					}
+				: undefined,
+		[currentVault],
+	);
 
 	return (
 		<ItemDetailPage

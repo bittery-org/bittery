@@ -2,12 +2,13 @@
  * Test utilities for tRPC integration tests
  * Provides helpers for creating test contexts, mock data, and database operations
  *
- * Note: Environment variables are loaded via bun's --env-file flag in the test scripts.
- * See package.json for the test command configuration.
+ * Note: Tests use a separate database (bittery_test) to avoid affecting development data.
+ * Environment variables are loaded from apps/server/.env.test via bun's --env-file flag.
+ * Run `pnpm run db:test:setup` to create and migrate the test database.
  */
 
 import { db } from "@bittery/db";
-import { session, user } from "@bittery/db/schema/auth";
+import { auditLog, session, user } from "@bittery/db/schema/auth";
 import {
 	shareAccessLog,
 	shareEmailVerification,
@@ -23,8 +24,17 @@ import {
 	vaultKey,
 	vaultKeyRotation,
 } from "@bittery/db/schema/vault";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import initCryptoWasm, {
+	deriveKeys as deriveKeysWasm,
+	encrypt as encryptWasm,
+	generateEncryptionKey as generateEncryptionKeyWasm,
+	generateRSAKeyPair as generateRSAKeyPairWasm,
+	generateSecretKey as generateSecretKeyWasm,
+	getSecretKeyHint as getSecretKeyHintWasm,
+	JsSrpClient,
+} from "../../../crypto/wasm/bittery_crypto.js";
 import type { Context } from "../context";
 
 // Test data generation helpers
@@ -40,7 +50,12 @@ export function generateTestUserId(): string {
  * Create a mock context for testing
  */
 export function createTestContext(
-	sessionData?: { userId: string; email: string; sessionId: string } | null,
+	sessionData?: {
+		userId: string;
+		email: string;
+		sessionId: string;
+		sessionTokenHash: string;
+	} | null,
 ): Context {
 	return {
 		session: sessionData || null,
@@ -63,6 +78,7 @@ export function createAuthenticatedContext(
 		userId,
 		email,
 		sessionId: sessionId || nanoid(),
+		sessionTokenHash: nanoid(),
 	});
 }
 
@@ -101,6 +117,136 @@ xwIDAQAB
 	// Secret key hint
 	secretKeyHint: "A3-TESTKEY",
 };
+
+let cryptoWasmInitPromise: Promise<void> | null = null;
+
+async function ensureCryptoWasmInitialized(): Promise<void> {
+	if (!cryptoWasmInitPromise) {
+		cryptoWasmInitPromise = initCryptoWasm().then(() => undefined);
+	}
+
+	await cryptoWasmInitPromise;
+}
+
+function toEncryptedJson(data: {
+	ciphertext: string;
+	iv: string;
+	algorithm: string;
+}): string {
+	return JSON.stringify({
+		ciphertext: data.ciphertext,
+		iv: data.iv,
+		algorithm: data.algorithm,
+	});
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+	return Uint8Array.from(Buffer.from(base64, "base64"));
+}
+
+export interface TestAuthCryptoData {
+	accountPassword: string;
+	authPassword: string;
+	secretKey: string;
+	secretKeyHint: string;
+	srpSalt: string;
+	srpVerifier: string;
+	publicKey: string;
+	encryptedPrivateKey: string;
+	encryptedVaultKey: string;
+}
+
+export async function generateTestAuthCryptoData(params: {
+	email: string;
+	accountPassword?: string;
+	secretKey?: string;
+}): Promise<TestAuthCryptoData> {
+	await ensureCryptoWasmInitialized();
+
+	const normalizedEmail = params.email.toLowerCase();
+	const accountPassword = params.accountPassword || `TestPass-${nanoid(10)}!`;
+	const secretKey = params.secretKey || generateSecretKeyWasm();
+	const secretKeyHint = getSecretKeyHintWasm(secretKey);
+
+	const derivedKeys = deriveKeysWasm(
+		accountPassword,
+		secretKey,
+		normalizedEmail,
+	);
+
+	// Signup/login uses auth key bytes interpreted as a UTF-8 string password.
+	const authPassword = new TextDecoder().decode(
+		base64ToBytes(derivedKeys.auth_key),
+	);
+
+	const srpClient = new JsSrpClient("SHA-256", 4096);
+	const srpSalt = srpClient.generateSalt();
+	const privateKey = srpClient.deriveSafePrivateKey(srpSalt, authPassword);
+	const srpVerifier = srpClient.deriveVerifier(privateKey);
+
+	const rsaKeyPair = generateRSAKeyPairWasm();
+	const encryptedPrivateKey = toEncryptedJson(
+		encryptWasm(rsaKeyPair.private_key, derivedKeys.master_unlock_key),
+	);
+	const encryptedVaultKey = toEncryptedJson(
+		encryptWasm(generateEncryptionKeyWasm(), derivedKeys.master_unlock_key),
+	);
+
+	return {
+		accountPassword,
+		authPassword,
+		secretKey,
+		secretKeyHint,
+		srpSalt,
+		srpVerifier,
+		publicKey: rsaKeyPair.public_key,
+		encryptedPrivateKey,
+		encryptedVaultKey,
+	};
+}
+
+export async function generateTestSrpClientEphemeral(): Promise<{
+	clientPublicKey: string;
+	clientSecret: string;
+}> {
+	await ensureCryptoWasmInitialized();
+
+	const srpClient = new JsSrpClient("SHA-256", 4096);
+	const ephemeral = srpClient.generateEphemeral();
+
+	return {
+		clientPublicKey: ephemeral.public,
+		clientSecret: ephemeral.secret,
+	};
+}
+
+export async function deriveTestSrpClientProof(params: {
+	clientSecret: string;
+	salt: string;
+	serverPublicKey: string;
+	authPassword: string;
+}): Promise<{
+	clientProof: string;
+}> {
+	await ensureCryptoWasmInitialized();
+
+	const srpClient = new JsSrpClient("SHA-256", 4096);
+	const privateKey = srpClient.deriveSafePrivateKey(
+		params.salt,
+		params.authPassword,
+	);
+	const session = srpClient.deriveSession(
+		params.clientSecret,
+		params.serverPublicKey,
+		params.salt,
+		"",
+		privateKey,
+	);
+
+	return {
+		clientProof: session.proof,
+	};
+}
 
 // Mock item data for testing
 export const mockItemData = {
@@ -234,6 +380,7 @@ export async function createTestItem(
 
 /**
  * Create a test team
+ * Sets user.teamId and user.role (one-to-one relationship)
  */
 export async function createTestTeam(
 	ownerId: string,
@@ -245,39 +392,28 @@ export async function createTestTeam(
 		id: teamId,
 		name: overrides.name || "Test Team",
 		ownerId,
+		...(overrides.type && { type: overrides.type }),
 	});
 
-	// Add owner as team member
-	await db.insert(teamMember).values({
-		id: nanoid(),
-		teamId,
-		userId: ownerId,
-		role: "owner",
-		joinedAt: new Date(),
-	});
+	// Set user's team (one-to-one relationship)
+	await db
+		.update(user)
+		.set({ teamId, role: "owner" })
+		.where(eq(user.id, ownerId));
 
 	return teamId;
 }
 
 /**
  * Add a member to a team
+ * Sets user.teamId and user.role (one-to-one relationship)
  */
 export async function addTeamMember(
 	teamId: string,
 	userId: string,
 	role: "owner" | "admin" | "member" = "member",
 ) {
-	const memberId = nanoid();
-
-	await db.insert(teamMember).values({
-		id: memberId,
-		teamId,
-		userId,
-		role,
-		joinedAt: new Date(),
-	});
-
-	return memberId;
+	await db.update(user).set({ teamId, role }).where(eq(user.id, userId));
 }
 
 /**
@@ -452,6 +588,7 @@ export async function cleanupTestData(userIds: string[] = []) {
 
 		// Clean up sessions and user
 		await db.delete(session).where(eq(session.userId, userId));
+		await db.delete(auditLog).where(eq(auditLog.userId, userId));
 		await db.delete(user).where(eq(user.id, userId));
 	}
 }
@@ -512,13 +649,14 @@ export async function getVaultKey(vaultId: string, userId: string) {
 }
 
 /**
- * Get team member
+ * Get team member by checking user.teamId (one-to-one relationship)
  */
 export async function getTeamMember(teamId: string, userId: string) {
-	return db.query.teamMember.findFirst({
-		where: (tm, { and, eq }) =>
-			and(eq(tm.teamId, teamId), eq(tm.userId, userId)),
+	const userData = await db.query.user.findFirst({
+		where: (u, { eq }) => eq(u.id, userId),
 	});
+	if (!userData || userData.teamId !== teamId) return undefined;
+	return { role: userData.role, userId: userData.id };
 }
 
 /**
@@ -532,11 +670,154 @@ export async function countVaultItems(vaultId: string) {
 }
 
 /**
- * Count team members
+ * Count team members by checking user.teamId (one-to-one relationship)
  */
 export async function countTeamMembers(teamId: string) {
-	const members = await db.query.teamMember.findMany({
-		where: (tm, { eq }) => eq(tm.teamId, teamId),
+	const members = await db.query.user.findMany({
+		where: (u, { eq }) => eq(u.teamId, teamId),
 	});
 	return members.length;
+}
+
+/**
+ * Truncate all tables — fast cleanup for test isolation.
+ * Replaces the per-user cleanupTestData() with a single TRUNCATE CASCADE.
+ */
+export async function truncateAll() {
+	await db.execute(sql`
+		TRUNCATE TABLE
+			share_access_log, share_email_verification, share_link_allowed_email,
+			share_link_rate_limit, share_link,
+			sync_event_ack, sync_event,
+			item, vault_key, vault_key_rotation, folder, vault,
+			team_invitation, team_member, team,
+			login_rate_limit, session, audit_log, "user"
+		CASCADE
+	`);
+}
+
+/**
+ * Create a test sync event directly in the database
+ */
+export async function createTestSyncEvent(
+	vaultId: string,
+	userId: string,
+	overrides: Partial<typeof syncEvent.$inferInsert> = {},
+) {
+	const eventId = overrides.id || nanoid();
+
+	await db.insert(syncEvent).values({
+		id: eventId,
+		eventType: overrides.eventType || "item_created",
+		entityId: overrides.entityId || nanoid(),
+		entityType: overrides.entityType || "item",
+		vaultId,
+		userId,
+		clientId: overrides.clientId || null,
+		version: overrides.version || 1,
+		metadata: overrides.metadata || null,
+	});
+
+	return eventId;
+}
+
+/**
+ * Get sync event from database
+ */
+export async function getSyncEvent(eventId: string) {
+	return db.query.syncEvent.findFirst({
+		where: (e, { eq }) => eq(e.id, eventId),
+	});
+}
+
+/**
+ * Get sync event acks for a user/client
+ */
+export async function getSyncEventAcks(userId: string, clientId: string) {
+	return db.query.syncEventAck.findMany({
+		where: (a, { and, eq }) =>
+			and(eq(a.userId, userId), eq(a.clientId, clientId)),
+	});
+}
+
+/**
+ * Create an authenticated caller for a router in a single call.
+ * Handles user creation, session creation, and caller setup.
+ */
+export async function setup<T extends { createCaller: (ctx: Context) => any }>(
+	router: T,
+	overrides?: Partial<typeof user.$inferInsert>,
+): Promise<{
+	userId: string;
+	email: string;
+	sessionId: string;
+	caller: ReturnType<T["createCaller"]>;
+}> {
+	const { userId, email } = await createTestUser(overrides);
+	const sessionId = await createTestSession(userId);
+	const caller = router.createCaller(
+		createAuthenticatedContext(userId, email, sessionId),
+	);
+	return { userId, email, sessionId, caller };
+}
+
+/**
+ * Create a vault with N items in one call.
+ */
+export async function setupVaultWithItems(
+	userId: string,
+	itemCount = 1,
+	vaultOverrides?: Partial<typeof vault.$inferInsert>,
+	itemOverrides?: Partial<typeof item.$inferInsert>,
+) {
+	const vaultId = await createTestVault(userId, vaultOverrides);
+	const itemIds = await Promise.all(
+		Array.from({ length: itemCount }, () =>
+			createTestItem(vaultId, userId, itemOverrides),
+		),
+	);
+	return { vaultId, itemIds };
+}
+
+/**
+ * Create a complete share link setup: vault → item → share link.
+ */
+export async function setupShareLink(
+	userId: string,
+	opts: {
+		vaultOverrides?: Partial<typeof vault.$inferInsert>;
+		itemOverrides?: Partial<typeof item.$inferInsert>;
+		shareLinkOverrides?: Partial<typeof shareLink.$inferInsert>;
+	} = {},
+) {
+	const vaultId = await createTestVault(userId, opts.vaultOverrides);
+	const itemId = await createTestItem(vaultId, userId, opts.itemOverrides);
+	const { shareLinkId, token } = await createTestShareLink(
+		itemId,
+		userId,
+		opts.shareLinkOverrides,
+	);
+	return { vaultId, itemId, shareLinkId, token };
+}
+
+/**
+ * Create a team with the owner and additional members (creates new users for each member).
+ */
+export async function setupTeamWithMembers(
+	ownerId: string,
+	members: Array<{
+		role?: "admin" | "member";
+		overrides?: Partial<typeof user.$inferInsert>;
+	}> = [],
+	teamOverrides?: Partial<typeof team.$inferInsert>,
+) {
+	const teamId = await createTestTeam(ownerId, teamOverrides);
+	const memberResults = await Promise.all(
+		members.map(async ({ role = "member", overrides = {} }) => {
+			const { userId, email } = await createTestUser(overrides);
+			await addTeamMember(teamId, userId, role);
+			return { userId, email, role };
+		}),
+	);
+	return { teamId, members: memberResults };
 }

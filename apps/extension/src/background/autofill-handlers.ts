@@ -1,29 +1,52 @@
 /**
  * Autofill Handlers
- * Handles autofill-specific messages
+ * Handles autofill-specific messages.
  */
 
-import * as chromeStorage from "@bittery/crypto/storage-chrome";
+import type { DecryptedItem } from "@bittery/shared/types";
+import { storage } from "../lib/storage";
 import { AUTOFILL_REAUTH_WINDOW_MS } from "./constants";
+import { desktopSync } from "./desktop-sync";
 import {
 	getLastActivityTimestamp,
 	isUnlocked,
+	setDesktopModeSentinel,
 	updateActivity,
 } from "./session-manager";
 import type { MessageResponse } from "./types";
-import { decryptVaultItems, hostnameMatches } from "./vault-utils";
+import {
+	getDecryptedItemsForCurrentMode,
+	hostnameMatches,
+} from "./vault-utils";
+
+async function isDesktopUnlockedNow(): Promise<boolean> {
+	const status =
+		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
+
+	return !!(
+		status?.available &&
+		!status.locked &&
+		(status.unlockedAccounts?.length ?? 0) > 0
+	);
+}
 
 /**
  * Handle CHECK_AUTOFILL_AUTH message - Check if autofill is authenticated
  */
 export async function handleCheckAutofillAuth(): Promise<MessageResponse> {
-	const unlocked = isUnlocked();
+	const desktopUnlocked = await isDesktopUnlockedNow();
+	let unlocked = isUnlocked();
+
+	// Service worker restart can lose sentinel MUK; recover desktop mode eagerly.
+	if (!unlocked && desktopUnlocked) {
+		setDesktopModeSentinel();
+		unlocked = true;
+	}
 
 	if (!unlocked) {
 		return { success: true, authenticated: false, unlocked: false };
 	}
 
-	// Additional check: autofill requires more frequent re-auth
 	const now = Date.now();
 	const timeSinceLastActivity = now - getLastActivityTimestamp();
 	const needsReauth = timeSinceLastActivity > AUTOFILL_REAUTH_WINDOW_MS;
@@ -37,7 +60,9 @@ export async function handleCheckAutofillAuth(): Promise<MessageResponse> {
 		};
 	}
 
-	const authenticated = await chromeStorage.isAuthenticated();
+	const localAuthenticated = await storage.isAuthenticated();
+	const authenticated = localAuthenticated || desktopUnlocked;
+
 	return { success: true, authenticated, unlocked: true, needsReauth: false };
 }
 
@@ -50,6 +75,13 @@ export async function handleUpdateAutofillTimestamp(): Promise<MessageResponse> 
 }
 
 /**
+ * Get all decrypted items for the current runtime mode.
+ */
+async function getAllDecryptedItems(): Promise<Array<DecryptedItem | null>> {
+	return getDecryptedItemsForCurrentMode();
+}
+
+/**
  * Handle GET_AUTOFILL_ITEMS message - Get autofill items for a hostname
  */
 export async function handleGetAutofillItems(payload: {
@@ -58,13 +90,11 @@ export async function handleGetAutofillItems(payload: {
 	updateActivity();
 
 	const { hostname } = payload;
+	const items = await getAllDecryptedItems();
 
-	const items = await decryptVaultItems();
-
-	// Filter by hostname and only include login items
 	const filtered = items.filter(
 		(item) =>
-			item?.category === "login" && hostnameMatches(item?.url, hostname),
+			item?.category === "login" && hostnameMatches(item?.url ?? "", hostname),
 	);
 
 	return { success: true, items: filtered };
@@ -76,9 +106,7 @@ export async function handleGetAutofillItems(payload: {
 export async function handleGetAutofillCreditCards(): Promise<MessageResponse> {
 	updateActivity();
 
-	const items = await decryptVaultItems();
-
-	// Filter to only credit card items
+	const items = await getAllDecryptedItems();
 	const creditCards = items.filter(
 		(item) => item?.category === "credit-card" && item?.cardNumber,
 	);
@@ -92,9 +120,7 @@ export async function handleGetAutofillCreditCards(): Promise<MessageResponse> {
 export async function handleGetAutofillIdentities(): Promise<MessageResponse> {
 	updateActivity();
 
-	const items = await decryptVaultItems();
-
-	// Filter to only identity items
+	const items = await getAllDecryptedItems();
 	const identities = items.filter((item) => item?.category === "identity");
 
 	return { success: true, items: identities };

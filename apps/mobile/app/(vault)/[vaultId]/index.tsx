@@ -1,76 +1,42 @@
-import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
+import { useAllVaultKeys, useVaultItems } from "@bittery/core/hooks";
+import type { ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import {
-	ArrowLeft,
-	CreditCard,
-	FileText,
-	Key,
-	Plus,
-	Search,
-	Star,
-	Timer,
-	User,
-} from "lucide-react-native";
+import { Button, Card, Input, Skeleton, TextField } from "heroui-native";
+import { ArrowLeft, Key, Plus, Search } from "lucide-react-native";
 import { useState } from "react";
-import {
-	FlatList,
-	RefreshControl,
-	Text,
-	TextInput,
-	TouchableOpacity,
-	View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { View } from "react-native";
+import { withUniwind } from "uniwind";
+import { CategoryFilter } from "@/components/category-filter";
+import { EmptyItemsState } from "@/components/empty-items-state";
+import { ItemSectionsList } from "@/components/item-sections-list";
+import { ItemsSkeletonList } from "@/components/items-skeleton-list";
+import { SafeAreaView } from "@/components/safe-area-view";
+import { VaultAvatar } from "@/components/vault-avatar";
+import { useFilteredItems } from "@/hooks/use-filtered-items";
 
-import { TotpDisplay } from "../../../src/components/totp-display";
-import { useDecryptedItems } from "../../../src/hooks/use-decrypted-items";
-
-const categoryIcons: Record<ItemCategory, typeof Key> = {
-	login: Key,
-	"credit-card": CreditCard,
-	identity: User,
-	"secure-note": FileText,
-	totp: Timer,
-};
-
-const categoryLabels: Record<ItemCategory, string> = {
-	login: "Login",
-	"credit-card": "Credit Card",
-	identity: "Identity",
-	"secure-note": "Secure Note",
-	totp: "TOTP",
-};
+// Create styled icon components
+const StyledSearch = withUniwind(Search);
+const StyledKey = withUniwind(Key);
+const StyledPlus = withUniwind(Plus);
+const StyledArrowLeft = withUniwind(ArrowLeft);
 
 export default function VaultItemsScreen() {
 	const router = useRouter();
 	const { vaultId } = useLocalSearchParams<{ vaultId: string }>();
-	const [searchQuery, setSearchQuery] = useState("");
-	const [selectedCategory, setSelectedCategory] = useState<ItemCategory | null>(
-		null,
-	);
+	const [selectedCategory, setSelectedCategory] = useState<
+		ItemCategory | "all"
+	>("all");
 	const [refreshing, setRefreshing] = useState(false);
 
-	const { items, isLoading, error, refetch } = useDecryptedItems(vaultId);
+	const { items, isLoading, error, refetch } = useVaultItems(vaultId);
+	const { vaultKeys = [] } = useAllVaultKeys();
+	const currentVault = vaultKeys.find((v) => v.vaultId === vaultId);
 
-	// Filter items based on search and category
-	const filteredItems = items.filter((item) => {
-		const matchesSearch =
-			searchQuery === "" ||
-			item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-			item.username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-			item.url?.toLowerCase().includes(searchQuery.toLowerCase());
-
-		const matchesCategory =
-			selectedCategory === null || item.category === selectedCategory;
-
-		return matchesSearch && matchesCategory;
-	});
-
-	// Sort: favorites first, then alphabetically
-	const sortedItems = [...filteredItems].sort((a, b) => {
-		if (a.favorite && !b.favorite) return -1;
-		if (!a.favorite && b.favorite) return 1;
-		return a.title.localeCompare(b.title);
+	// Filter and sort items
+	const { favorites, regularItems } = useFilteredItems({
+		items,
+		searchQuery: "",
+		selectedCategory,
 	});
 
 	const handleRefresh = async () => {
@@ -82,227 +48,142 @@ export default function VaultItemsScreen() {
 		}
 	};
 
-	const renderCategoryFilter = () => {
-		const categories: (ItemCategory | null)[] = [
-			null,
-			"login",
-			"credit-card",
-			"identity",
-			"secure-note",
-			"totp",
-		];
-
-		return (
-			<View className="flex-row px-4 py-2">
-				{categories.map((category) => (
-					<TouchableOpacity
-						key={category || "all"}
-						onPress={() => setSelectedCategory(category)}
-						className={`mr-2 rounded-full px-4 py-2 ${
-							selectedCategory === category ? "bg-primary" : "bg-secondary"
-						}`}
-					>
-						<Text
-							className={`font-medium text-sm ${
-								selectedCategory === category
-									? "text-primary-foreground"
-									: "text-foreground"
-							}`}
-						>
-							{category ? categoryLabels[category] : "All"}
-						</Text>
-					</TouchableOpacity>
-				))}
-			</View>
-		);
-	};
-
-	const renderItem = ({ item }: { item: DecryptedItem }) => {
-		const Icon = categoryIcons[item.category];
-		const hasTotpSecret = Boolean(item.totpSecret);
-
-		return (
-			<TouchableOpacity
-				onPress={() => router.push(`/(vault)/${vaultId}/${item.id}`)}
-				className="flex-row items-center border-border border-b px-4 py-4"
-			>
-				<View className="mr-4 h-10 w-10 items-center justify-center rounded-lg bg-secondary">
-					<Icon size={20} color="#6b7280" />
-				</View>
-				<View className="flex-1">
-					<View className="flex-row items-center">
-						<Text className="font-medium text-foreground">{item.title}</Text>
-						{item.favorite && (
-							<Star size={14} color="#eab308" fill="#eab308" className="ml-2" />
-						)}
-					</View>
-					{/* Show username/url for non-TOTP items or TOTP items without a secret */}
-					{!hasTotpSecret && item.username && (
-						<Text className="text-muted-foreground text-sm" numberOfLines={1}>
-							{item.username}
-						</Text>
-					)}
-					{!hasTotpSecret && item.url && (
-						<Text className="text-muted-foreground text-sm" numberOfLines={1}>
-							{item.url}
-						</Text>
-					)}
-					{/* Show inline TOTP for items with TOTP secret */}
-					{hasTotpSecret && (
-						<View className="mt-1">
-							<TotpDisplay
-								totpSecret={item.totpSecret as string}
-								totpAlgorithm={item.totpAlgorithm}
-								totpDigits={item.totpDigits}
-								totpPeriod={item.totpPeriod}
-								inline
-							/>
-						</View>
-					)}
-				</View>
-			</TouchableOpacity>
-		);
-	};
-
-	const renderSkeletonItem = (index: number) => (
-		<View
-			key={index}
-			className="flex-row items-center border-border border-b px-4 py-4"
-		>
-			<View className="mr-4 h-10 w-10 animate-pulse rounded-lg bg-secondary" />
-			<View className="flex-1">
-				<View className="h-4 w-32 animate-pulse rounded bg-secondary" />
-				<View className="mt-2 h-3 w-24 animate-pulse rounded bg-secondary" />
-			</View>
-		</View>
-	);
-
 	if (isLoading) {
 		return (
 			<SafeAreaView className="flex-1 bg-background">
 				{/* Header */}
-				<View className="border-border border-b px-4 py-4">
+				<View className="px-4 py-4">
 					<View className="flex-row items-center">
-						<View className="mr-3 rounded-full bg-secondary p-2">
-							<ArrowLeft size={20} color="#6b7280" />
-						</View>
-						<Text className="flex-1 font-bold text-foreground text-xl">
-							Items
-						</Text>
-						<View className="rounded-full bg-secondary p-2">
-							<Plus size={20} color="#6b7280" />
-						</View>
+						<Button isIconOnly variant="secondary" size="sm" className="mr-3">
+							<StyledArrowLeft size={18} className="text-muted" />
+						</Button>
+						<Card.Title className="flex-1 text-xl" numberOfLines={1}>
+							Loading...
+						</Card.Title>
+						<Button isIconOnly variant="secondary" size="sm">
+							<StyledPlus size={18} className="text-muted" />
+						</Button>
 					</View>
 
 					{/* Search skeleton */}
-					<View className="mt-4 flex-row items-center rounded-lg bg-secondary px-3 py-2">
-						<Search size={18} color="#6b7280" />
-						<View className="ml-2 h-5 flex-1 rounded bg-muted" />
+					<View className="mt-4">
+						<TextField>
+							<View className="w-full flex-row items-center">
+								<Input
+									placeholder="Search items..."
+									editable={false}
+									className="flex-1 pr-4 pl-12"
+								/>
+								<StyledSearch
+									size={18}
+									className="absolute left-3.5 text-muted"
+									pointerEvents="none"
+								/>
+							</View>
+						</TextField>
 					</View>
 				</View>
 
 				{/* Category filter skeleton */}
-				<View className="flex-row px-4 py-2">
-					{[1, 2, 3, 4].map((i) => (
-						<View
-							key={i}
-							className="mr-2 h-8 w-16 animate-pulse rounded-full bg-secondary"
-						/>
+				<View className="flex-row gap-2 px-4 py-3">
+					{[1, 2, 3, 4, 5].map((i) => (
+						<Skeleton key={i} className="h-8 w-16 rounded-full" />
 					))}
 				</View>
 
 				{/* Skeleton items */}
-				{[1, 2, 3, 4, 5, 6].map(renderSkeletonItem)}
+				<ItemsSkeletonList />
 			</SafeAreaView>
 		);
 	}
 
 	if (error) {
 		return (
-			<SafeAreaView className="flex-1 items-center justify-center bg-background">
-				<Text className="text-destructive">Error loading items</Text>
-				<TouchableOpacity
-					onPress={handleRefresh}
-					className="mt-4 rounded-lg bg-primary px-4 py-2"
-				>
-					<Text className="text-primary-foreground">Retry</Text>
-				</TouchableOpacity>
+			<SafeAreaView className="flex-1 items-center justify-center bg-background p-8">
+				<Card variant="secondary" className="w-full max-w-sm items-center p-8">
+					<Card.Title className="mb-4 text-center text-danger text-lg">
+						Error loading items
+					</Card.Title>
+					<Button onPress={handleRefresh} variant="primary">
+						Retry
+					</Button>
+				</Card>
 			</SafeAreaView>
 		);
 	}
 
+	const hasNoItems = favorites.length === 0 && regularItems.length === 0;
+	const hasFilterOrSearch = selectedCategory !== "all";
+
 	return (
 		<SafeAreaView className="flex-1 bg-background">
 			{/* Header */}
-			<View className="border-border border-b px-4 py-4">
+			<View className="px-4 py-4">
 				<View className="flex-row items-center">
-					<TouchableOpacity
+					<Button
+						isIconOnly
+						variant="secondary"
+						size="sm"
 						onPress={() => router.back()}
-						className="mr-3 rounded-full bg-secondary p-2"
+						className="mr-3"
 					>
-						<ArrowLeft size={20} color="#6b7280" />
-					</TouchableOpacity>
-					<Text className="flex-1 font-bold text-foreground text-xl">
-						Items
-					</Text>
-					<TouchableOpacity
-						onPress={() => router.push(`/(vault)/${vaultId}/create`)}
-						className="rounded-full bg-primary p-2"
+						<StyledArrowLeft size={18} className="text-foreground" />
+					</Button>
+					{currentVault && (
+						<VaultAvatar
+							name={currentVault.vaultName}
+							icon={currentVault.vaultIcon}
+							imageUrl={currentVault.vaultImageUrl}
+							size="sm"
+							className="mr-3"
+						/>
+					)}
+					<Card.Title className="flex-1 text-xl" numberOfLines={1}>
+						{currentVault?.vaultName || "Items"}
+					</Card.Title>
+					<Button
+						isIconOnly
+						variant="primary"
+						size="sm"
+						onPress={() => router.push(`/(vault)/create?vaultId=${vaultId}`)}
 					>
-						<Plus size={20} color="#fff" />
-					</TouchableOpacity>
-				</View>
-
-				{/* Search */}
-				<View className="mt-4 flex-row items-center rounded-lg bg-secondary px-3 py-2">
-					<Search size={18} color="#6b7280" />
-					<TextInput
-						className="ml-2 flex-1 text-foreground"
-						placeholder="Search items..."
-						value={searchQuery}
-						onChangeText={setSearchQuery}
-						placeholderTextColor="#9ca3af"
-					/>
+						<StyledPlus size={18} className="text-accent-foreground" />
+					</Button>
 				</View>
 			</View>
 
 			{/* Category Filter */}
-			{renderCategoryFilter()}
-
-			{/* Item List */}
-			<FlatList
-				data={sortedItems}
-				renderItem={renderItem}
-				keyExtractor={(item) => item.id}
-				refreshControl={
-					<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-				}
-				ListEmptyComponent={
-					<View className="flex-1 items-center justify-center p-8">
-						<Key size={48} color="#9ca3af" />
-						<Text className="mt-4 text-center font-semibold text-foreground text-lg">
-							{searchQuery || selectedCategory
-								? "No items found"
-								: "No items yet"}
-						</Text>
-						<Text className="mt-2 text-center text-muted-foreground">
-							{searchQuery || selectedCategory
-								? "Try a different search or filter"
-								: "Add your first password or secure item"}
-						</Text>
-						{!searchQuery && !selectedCategory && (
-							<TouchableOpacity
-								onPress={() => router.push(`/(vault)/${vaultId}/create`)}
-								className="mt-4 rounded-lg bg-primary px-6 py-3"
-							>
-								<Text className="font-medium text-primary-foreground">
-									Add Item
-								</Text>
-							</TouchableOpacity>
-						)}
-					</View>
-				}
+			<CategoryFilter
+				selectedCategory={selectedCategory}
+				onCategoryChange={setSelectedCategory}
 			/>
+
+			{/* Items List */}
+			{hasNoItems ? (
+				<EmptyItemsState
+					icon={<StyledKey size={48} className="mb-4 text-muted" />}
+					title={hasFilterOrSearch ? "No items found" : "No items yet"}
+					description={
+						hasFilterOrSearch
+							? "Try a different search or filter"
+							: "Add your first password or secure item"
+					}
+					actionLabel={!hasFilterOrSearch ? "Add Item" : undefined}
+					onAction={
+						!hasFilterOrSearch
+							? () => router.push(`/(vault)/create?vaultId=${vaultId}`)
+							: undefined
+					}
+				/>
+			) : (
+				<ItemSectionsList
+					favorites={favorites}
+					regularItems={regularItems}
+					onItemPress={(item) => router.push(`/(vault)/${vaultId}/${item.id}`)}
+					refreshing={refreshing}
+					onRefresh={handleRefresh}
+				/>
+			)}
 		</SafeAreaView>
 	);
 }

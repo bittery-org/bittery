@@ -19,11 +19,13 @@
 		"./identity": "./src/identity.ts",
 		"./totp": "./src/totp.ts",
 		"./trpc": "./src/trpc.ts",
+		"./crypto": "./src/crypto.ts",
+		"./server-url": "./src/server-url.ts",
+		"./trpc-client-factory": "./src/trpc-client-factory.ts",
 		"./types": "./src/types.ts"
 	},
 	"dependencies": {
 		"@bittery/api": "workspace:*",
-		"@bittery/crypto": "workspace:*",
 		"@tanstack/react-query": "^5.85.5",
 		"@trpc/client": "catalog:",
 		"@trpc/tanstack-react-query": "catalog:"

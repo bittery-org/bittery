@@ -1,4 +1,6 @@
+import { useMoveItem } from "@bittery/core/hooks";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
+import { toast } from "@bittery/ui";
 import {
 	DndContext,
 	type DragEndEvent,
@@ -8,9 +10,9 @@ import {
 	useSensor,
 	useSensors,
 } from "@dnd-kit/core";
+import { useNavigate } from "@tanstack/react-router";
 import { createContext, type ReactNode, useContext, useState } from "react";
 import { ItemDragPreview } from "../components/vault/item-drag-preview";
-import { useVaultItemOperations } from "../components/vault/use-vault-item-operations";
 
 /**
  * Data attached to draggable items
@@ -51,7 +53,8 @@ interface VaultDndProviderProps {
 export function VaultDndProvider({ children }: VaultDndProviderProps) {
 	const [activeItem, setActiveItem] = useState<DecryptedItem | null>(null);
 	const [sourceVaultId, setSourceVaultId] = useState<string | null>(null);
-	const { moveItem } = useVaultItemOperations();
+	const moveItem = useMoveItem();
+	const navigate = useNavigate();
 
 	// Configure pointer sensor with activation distance to prevent accidental drags
 	const sensors = useSensors(
@@ -138,13 +141,43 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 			linkedItemId: draggedItem.linkedItemId,
 		};
 
-		// Perform the move
-		moveItem.mutate({
-			itemId: draggedItem.id,
-			sourceVaultId: draggedSourceVaultId,
-			targetVaultId,
-			decryptedData,
-		});
+		// Perform the move with toast and navigation callbacks
+		moveItem.mutate(
+			{
+				itemId: draggedItem.id,
+				sourceVaultId: draggedSourceVaultId,
+				targetVaultId,
+				category: draggedItem.category,
+				decryptedData,
+			},
+			{
+				onSuccess: (result) => {
+					if (result.crossAccount) {
+						toast.success("Item transferred to other account successfully");
+						// For cross-account transfers, use the new item ID
+						navigate({
+							to: "/vault/$id/$itemId",
+							params: {
+								id: targetVaultId,
+								itemId: result.newItemId || draggedItem.id,
+							},
+						});
+					} else {
+						toast.success("Item moved successfully");
+						// Navigate to the item in the target vault
+						navigate({
+							to: "/vault/$id/$itemId",
+							params: { id: targetVaultId, itemId: draggedItem.id },
+						});
+					}
+				},
+				onError: (error) => {
+					const errorMessage =
+						error instanceof Error ? error.message : "Failed to move item";
+					toast.error(errorMessage);
+				},
+			},
+		);
 	}
 
 	function handleDragCancel() {

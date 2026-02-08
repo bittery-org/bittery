@@ -20,6 +20,53 @@ export type SyncEventType =
 export type SyncEntityType = "item" | "vault" | "vault_member" | "vault_key";
 
 /**
+ * Typed metadata per event type.
+ * All metadata objects include the SSE-injected fields (isOwnEvent, originClientId).
+ */
+interface SyncMetadataBase {
+	isOwnEvent?: boolean;
+	originClientId?: string | null;
+}
+
+export interface ItemMovedMetadata extends SyncMetadataBase {
+	sourceVaultId: string;
+}
+
+export interface VaultMemberAddedMetadata extends SyncMetadataBase {
+	addedUserId: string;
+	role: string;
+}
+
+export interface VaultMemberRemovedMetadata extends SyncMetadataBase {
+	removedUserId: string;
+}
+
+export interface VaultKeyRotatedMetadata extends SyncMetadataBase {
+	reason: string;
+	keyRotationId: string;
+}
+
+/** Default metadata for events that carry no extra fields */
+export interface DefaultSyncMetadata extends SyncMetadataBase {
+	[key: string]: unknown;
+}
+
+/** Map from event type to its metadata shape */
+export interface SyncMetadataMap {
+	item_created: DefaultSyncMetadata;
+	item_updated: DefaultSyncMetadata;
+	item_deleted: DefaultSyncMetadata;
+	item_restored: DefaultSyncMetadata;
+	item_moved: ItemMovedMetadata;
+	vault_created: DefaultSyncMetadata;
+	vault_updated: DefaultSyncMetadata;
+	vault_deleted: DefaultSyncMetadata;
+	vault_member_added: VaultMemberAddedMetadata;
+	vault_member_removed: VaultMemberRemovedMetadata;
+	vault_key_rotated: VaultKeyRotatedMetadata;
+}
+
+/**
  * Sync event received from server
  */
 export interface SyncEvent {
@@ -32,11 +79,22 @@ export interface SyncEvent {
 	clientId: string | null;
 	userId: string;
 	timestamp: number;
-	metadata?: {
-		isOwnEvent?: boolean;
-		originClientId?: string | null;
-		[key: string]: unknown;
-	};
+	metadata?: SyncMetadataBase & { [key: string]: unknown };
+}
+
+/**
+ * Type-safe metadata accessor. Narrows metadata based on event type.
+ *
+ * @example
+ *   if (event.type === "item_moved") {
+ *     const meta = getTypedMetadata(event);
+ *     console.log(meta?.sourceVaultId); // string | undefined
+ *   }
+ */
+export function getTypedMetadata<T extends SyncEventType>(
+	event: SyncEvent & { type: T },
+): SyncMetadataMap[T] | undefined {
+	return event.metadata as SyncMetadataMap[T] | undefined;
 }
 
 /**
@@ -94,6 +152,24 @@ export interface SyncManagerOptions {
 	onStatusChange?: (status: ConnectionStatus) => void;
 	reconnectDelay?: number;
 	maxReconnectDelay?: number;
+}
+
+/**
+ * Adapter interface for item cache operations (subset of IStorageAdapter)
+ * Used by delta sync to update local cache on incoming events
+ */
+export interface ItemCacheAdapter {
+	supportsItemCache?: boolean;
+	upsertCachedItem?(
+		item: import("@bittery/types").CachedEncryptedItem,
+		email?: string,
+	): Promise<void>;
+	removeCachedItem?(itemId: string, email?: string): Promise<void>;
+	upsertCachedVault?(
+		vault: import("@bittery/types").CachedVaultMetadata,
+		email?: string,
+	): Promise<void>;
+	removeCachedVault?(vaultId: string, email?: string): Promise<void>;
 }
 
 /**

@@ -6,23 +6,24 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@bittery/ui";
+import {
+	IconBoxArchive3OutlineDuo18,
+	IconDotsOutlineDuo18,
+	IconGrid2OutlineDuo18,
+	IconPen2OutlineDuo18,
+	IconStarOutlineDuo18,
+	IconTagOutlineDuo18,
+	IconTrash2OutlineDuo18,
+	IconUpload3OutlineDuo18,
+} from "@bittery/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation } from "@tanstack/react-router";
-import {
-	Archive,
-	FileUp,
-	LayoutGrid,
-	MoreHorizontal,
-	Pencil,
-	Star,
-	Tag,
-	Trash2,
-} from "lucide-react";
 import {
 	type DragItemData,
 	type DropVaultData,
 	useVaultDnd,
 } from "../../providers/dnd-provider";
+import { AccountSwitcher } from "../account-switcher";
 import { SidebarSection } from "./sidebar-section";
 import { getTagColorFromName } from "./tag-badge";
 import { VaultAvatar } from "./vault-avatar";
@@ -34,6 +35,9 @@ interface VaultInfo {
 	vaultIcon?: string | null;
 	vaultImageUrl?: string | null;
 	role: string;
+	accountEmail?: string;
+	accountName?: string;
+	accountTeamName?: string;
 }
 
 interface VaultSidebarProps {
@@ -41,7 +45,12 @@ interface VaultSidebarProps {
 	tags: string[];
 	currentVaultId?: string;
 	onNewVault: () => void;
-	onEditVault: (vault: { id: string; name: string }) => void;
+	onEditVault: (vault: {
+		id: string;
+		name: string;
+		icon?: string | null;
+		imageUrl?: string | null;
+	}) => void;
 	onDeleteVault: (vault: { id: string; name: string }) => void;
 	onImportItems?: (vaultId: string) => void;
 }
@@ -49,7 +58,12 @@ interface VaultSidebarProps {
 interface DroppableVaultEntryProps {
 	vault: VaultInfo;
 	isActive: boolean;
-	onEditVault: (vault: { id: string; name: string }) => void;
+	onEditVault: (vault: {
+		id: string;
+		name: string;
+		icon?: string | null;
+		imageUrl?: string | null;
+	}) => void;
 	onDeleteVault: (vault: { id: string; name: string }) => void;
 	onImportItems?: (vaultId: string) => void;
 }
@@ -99,7 +113,7 @@ function DroppableVaultEntry({
 		<div
 			ref={setNodeRef}
 			className={`group relative mb-0.5 w-full rounded-md text-left text-sm transition-colors ${
-				isActive ? "bg-muted/60" : "hover:bg-muted/30"
+				isActive ? "bg-primary/10" : "hover:bg-muted/30"
 			} ${ringStyle}`}
 		>
 			<Link
@@ -123,10 +137,10 @@ function DroppableVaultEntry({
 						<Button
 							variant="ghost"
 							size="sm"
-							className="-translate-y-1/2 absolute top-1/2 right-1 h-5 w-5 p-0 opacity-0 group-hover:opacity-100"
+							className="absolute top-1/2 right-1 h-5 w-5 -translate-y-1/2 p-0 opacity-0 group-hover:opacity-100"
 							onClick={(e) => e.stopPropagation()}
 						>
-							<MoreHorizontal className="h-3.5 w-3.5" />
+							<IconDotsOutlineDuo18 className="h-3.5 w-3.5" />
 						</Button>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
@@ -135,15 +149,17 @@ function DroppableVaultEntry({
 								onEditVault({
 									id: vault.vaultId,
 									name: vault.vaultName,
+									icon: vault.vaultIcon,
+									imageUrl: vault.vaultImageUrl,
 								})
 							}
 						>
-							<Pencil className="mr-2 h-4 w-4" />
-							Rename
+							<IconPen2OutlineDuo18 className="h-4 w-4" />
+							Edit
 						</DropdownMenuItem>
 						{onImportItems && (
 							<DropdownMenuItem onClick={() => onImportItems(vault.vaultId)}>
-								<FileUp className="mr-2 h-4 w-4" />
+								<IconUpload3OutlineDuo18 className="h-4 w-4" />
 								Import Items
 							</DropdownMenuItem>
 						)}
@@ -157,7 +173,7 @@ function DroppableVaultEntry({
 								})
 							}
 						>
-							<Trash2 className="mr-2 h-4 w-4" />
+							<IconTrash2OutlineDuo18 className="h-4 w-4" />
 							Delete
 						</DropdownMenuItem>
 					</DropdownMenuContent>
@@ -188,17 +204,73 @@ export function VaultSidebar({
 		? decodeURIComponent(pathname.split("/vault/tag/")[1]?.split("/")[0] || "")
 		: null;
 
+	// Check if we're in multi-account mode (vaults have accountEmail)
+	const isMultiAccountMode = vaults.length > 0 && vaults[0].accountEmail;
+
+	// Group vaults by account if in multi-account mode
+	const vaultsByAccount = isMultiAccountMode
+		? vaults.reduce(
+				(acc, vault) => {
+					const email = vault.accountEmail;
+					if (!email) return acc;
+					if (!acc[email]) {
+						acc[email] = {
+							accountEmail: email,
+							accountName: vault.accountName || email.split("@")[0],
+							accountTeamName: vault.accountTeamName,
+							vaults: [],
+						};
+					}
+					acc[email].vaults.push(vault);
+					return acc;
+				},
+				{} as Record<
+					string,
+					{
+						accountEmail: string;
+						accountName: string;
+						accountTeamName?: string;
+						vaults: VaultInfo[];
+					}
+				>,
+			)
+		: null;
+
+	const renderVaultEntry = (vault: VaultInfo) => (
+		<DroppableVaultEntry
+			key={vault.vaultId}
+			vault={vault}
+			isActive={
+				currentVaultId === vault.vaultId &&
+				!isAllItemsActive &&
+				!isFavoritesActive &&
+				!isTrashActive &&
+				!isTagActive
+			}
+			onEditVault={onEditVault}
+			onDeleteVault={onDeleteVault}
+			onImportItems={onImportItems}
+		/>
+	);
+
 	return (
-		<div className="flex w-48 flex-col border-r bg-background">
+		<div className="relative flex w-50 flex-col border-r bg-sidebar pt-10">
+			<div className="absolute inset-x-0 top-0 h-9" data-tauri-drag-region />
+			{/* Account Switcher - Fixed at top */}
+			<div className="p-2">
+				<AccountSwitcher />
+			</div>
+
+			{/* Scrollable sidebar content */}
 			<div className="flex flex-1 flex-col overflow-y-auto p-2">
 				{/* All Objects */}
 				<Link
 					to="/vault/all-items"
 					className={`mb-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-						isAllItemsActive ? "bg-muted/60" : "hover:bg-muted/30"
+						isAllItemsActive ? "bg-primary/10" : "hover:bg-muted/30"
 					}`}
 				>
-					<LayoutGrid className="size-4 text-muted-foreground" />
+					<IconGrid2OutlineDuo18 className="size-4 text-muted-foreground" />
 					<span>All Objects</span>
 				</Link>
 
@@ -206,38 +278,42 @@ export function VaultSidebar({
 				<Link
 					to="/vault/favorites"
 					className={`mb-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-						isFavoritesActive ? "bg-muted/60" : "hover:bg-muted/30"
+						isFavoritesActive ? "bg-primary/10" : "hover:bg-muted/30"
 					}`}
 				>
-					<Star className="size-4 text-yellow-500" fill="currentColor" />
+					<IconStarOutlineDuo18
+						className="size-4 text-yellow-500"
+						fill="currentColor"
+					/>
 					<span>Favorites</span>
 				</Link>
 
 				{/* Vaults Section */}
 				<div className="mt-2">
-					<SidebarSection
-						title="Vaults"
-						storageKey="vaults"
-						defaultOpen={true}
-						onAdd={onNewVault}
-					>
-						{vaults.map((vault) => (
-							<DroppableVaultEntry
-								key={vault.vaultId}
-								vault={vault}
-								isActive={
-									currentVaultId === vault.vaultId &&
-									!isAllItemsActive &&
-									!isFavoritesActive &&
-									!isTrashActive &&
-									!isTagActive
-								}
-								onEditVault={onEditVault}
-								onDeleteVault={onDeleteVault}
-								onImportItems={onImportItems}
-							/>
-						))}
-					</SidebarSection>
+					{isMultiAccountMode && vaultsByAccount ? (
+						// Multi-account mode: Group vaults by account
+						Object.values(vaultsByAccount).map((accountGroup) => (
+							<SidebarSection
+								key={accountGroup.accountEmail}
+								title={accountGroup.accountTeamName || accountGroup.accountName}
+								storageKey={`account-${accountGroup.accountEmail}`}
+								defaultOpen={true}
+								onAdd={onNewVault}
+							>
+								{accountGroup.vaults.map(renderVaultEntry)}
+							</SidebarSection>
+						))
+					) : (
+						// Single account mode: Show vaults in one section
+						<SidebarSection
+							title="Vaults"
+							storageKey="vaults"
+							defaultOpen={true}
+							onAdd={onNewVault}
+						>
+							{vaults.map(renderVaultEntry)}
+						</SidebarSection>
+					)}
 				</div>
 
 				{/* Tags Section */}
@@ -253,10 +329,13 @@ export function VaultSidebar({
 										to="/vault/tag/$tagName"
 										params={{ tagName: encodeURIComponent(tagName) }}
 										className={`mb-0.5 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-											isActive ? "bg-muted/60" : "hover:bg-muted/30"
+											isActive ? "bg-primary/10" : "hover:bg-muted/30"
 										}`}
 									>
-										<Tag className="size-3.5 shrink-0" style={{ color }} />
+										<IconTagOutlineDuo18
+											className="size-3.5 shrink-0"
+											style={{ color }}
+										/>
 										<span className="truncate">{tagName}</span>
 									</Link>
 								);
@@ -269,11 +348,11 @@ export function VaultSidebar({
 				<Link
 					to="/vault/trash"
 					className={`mt-2 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-						isTrashActive ? "bg-muted/60" : "hover:bg-muted/30"
+						isTrashActive ? "bg-primary/10" : "hover:bg-muted/30"
 					}`}
 				>
-					<Archive className="size-4 text-muted-foreground" />
-					<span>Trash</span>
+					<IconBoxArchive3OutlineDuo18 className="size-4 text-muted-foreground" />
+					<span>Archive</span>
 				</Link>
 			</div>
 		</div>
