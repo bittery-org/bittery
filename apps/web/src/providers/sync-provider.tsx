@@ -1,7 +1,6 @@
 import type { QueryInvalidator, SyncStatus } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext } from "react";
-import { useVaultKeysSync } from "../hooks/use-vault-keys-sync";
 import { useSyncClientId, useWebSync } from "../hooks/use-web-sync";
 
 /**
@@ -32,10 +31,6 @@ export function SyncProvider({
 	enabled?: boolean;
 }) {
 	const syncState = useWebSync(queryClient, enabled);
-
-	// Keep sessionStorage vault keys in sync with vault.list query data
-	// This ensures new vaults created on other devices have their keys available
-	useVaultKeysSync();
 
 	return (
 		<SyncContext.Provider value={syncState}>{children}</SyncContext.Provider>

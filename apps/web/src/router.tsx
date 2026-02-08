@@ -100,9 +100,8 @@ const trpcClient = createTRPCClient<AppRouter>({
 					...options,
 					credentials: "include",
 					headers: {
-						// @ts-expect-error need to fix types upstream
-						Authorization: authToken ? `Bearer ${authToken}` : undefined,
 						...options?.headers,
+						...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
 					},
 				});
 			},

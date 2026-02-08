@@ -17,7 +17,6 @@ export function useVaultKeysSync() {
 
 	const { data: vaults } = useQuery({
 		...trpc.vault.list.queryOptions(),
-		// Only run when authenticated (the query will fail without auth)
 		retry: false,
 	});
 
