@@ -22,7 +22,7 @@
 		"dev:desktop": "turbo -F desktop tauri:dev",
 		"build:desktop": "turbo -F desktop tauri:build",
 		"dev:web": "turbo -F web dev",
-		"build:web": "turbo -F web build",
+		"build:web": "pnpm build:crypto-wasm && turbo -F web build",
 		"dev:server": "pnpm build:crypto-napi && turbo -F server dev",
 		"build:server": "turbo -F server build",
 		"dev:extension": "turbo -F extension dev",
