@@ -469,6 +469,9 @@ importers:
       hono:
         specifier: 'catalog:'
         version: 4.11.5
+      pg:
+        specifier: ^8.16.3
+        version: 8.17.2
       zod:
         specifier: 'catalog:'
         version: 4.3.5

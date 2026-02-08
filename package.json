@@ -1,53 +1,53 @@
 {
-	"name": "bittery",
-	"private": true,
-	"type": "module",
-	"pnpm": {
-		"overrides": {
-			"react": "19.1.0",
-			"react-dom": "19.1.0"
-		}
-	},
-	"scripts": {
-		"check": "biome check --write .",
-		"test": "turbo test",
-		"dev": "turbo dev",
-		"build": "turbo build",
-		"check-types": "turbo check-types",
-		"build:crypto-wasm": "cd packages/crypto/core && ./build-wasm.sh",
-		"build:crypto-napi": "cd packages/crypto/core && ./build-napi.sh",
-		"build:crypto-android": "pnpm --filter @bittery/crypto-nitro run build:android",
-		"build:crypto-ios": "pnpm --filter @bittery/crypto-nitro run build:ios",
-		"build:crypto": "pnpm run build:crypto-wasm && pnpm run build:crypto-napi && pnpm run build:crypto-android && pnpm run build:crypto-ios",
-		"dev:desktop": "turbo -F desktop dev",
-		"build:desktop": "turbo -F desktop build:release",
-		"dev:web": "turbo -F web dev",
-		"build:web": "pnpm build:crypto-wasm && turbo -F web build",
-		"dev:server": "turbo -F server dev",
-		"build:server": "pnpm build:crypto-napi && turbo -F server build",
-		"dev:extension": "turbo -F extension dev",
-		"build:extension": "turbo -F extension build:release",
-		"dev:mobile": "turbo -F mobile dev",
-		"build:mobile": "turbo -F mobile build",
-		"db:studio": "turbo -F @bittery/db db:studio",
-		"db:generate": "turbo -F @bittery/db db:generate",
-		"db:migrate": "turbo -F @bittery/db db:migrate",
-		"db:start": "turbo -F @bittery/db db:start",
-		"db:watch": "turbo -F @bittery/db db:watch",
-		"db:test:setup": "turbo -F @bittery/db db:test:setup",
-		"db:stop": "turbo -F @bittery/db db:stop",
-		"db:down": "turbo -F @bittery/db db:down",
-		"shadcn": "pnpm --filter @bittery/ui run shadcn",
-		"preinstall": "export $(cat .env | xargs) || true"
-	},
-	"dependencies": {
-		"dotenv": "^17.2.2",
-		"zod": "^4.1.13"
-	},
-	"devDependencies": {
-		"turbo": "^2.5.4",
-		"@biomejs/biome": "^2.2.0",
-		"@types/bun": "^1.2.6"
-	},
-	"packageManager": "pnpm@10.18.3"
+  "name": "bittery",
+  "private": true,
+  "type": "module",
+  "pnpm": {
+    "overrides": {
+      "react": "19.1.0",
+      "react-dom": "19.1.0"
+    }
+  },
+  "scripts": {
+    "preinstall": "export $(cat .env | xargs) || true",
+    "check": "biome check --write .",
+    "check-types": "turbo check-types",
+    "shadcn": "pnpm --filter @bittery/ui run shadcn",
+    "test": "turbo test",
+    "dev": "turbo dev",
+    "dev:desktop": "turbo -F desktop dev",
+    "dev:web": "turbo -F web dev",
+    "dev:server": "turbo -F server dev",
+    "dev:extension": "turbo -F extension dev",
+    "dev:mobile": "turbo -F mobile dev",
+    "build": "turbo build",
+    "build:desktop": "turbo -F desktop build:release",
+    "build:web": "pnpm build:crypto-wasm && turbo -F web build",
+    "build:server": "pnpm build:crypto-napi && turbo -F server build",
+    "build:extension": "turbo -F extension build:release",
+    "build:mobile": "turbo -F mobile build",
+    "build:crypto-wasm": "cd packages/crypto/core && ./build-wasm.sh",
+    "build:crypto-napi": "cd packages/crypto/core && ./build-napi.sh",
+    "build:crypto-android": "pnpm --filter @bittery/crypto-nitro run build:android",
+    "build:crypto-ios": "pnpm --filter @bittery/crypto-nitro run build:ios",
+    "build:crypto": "pnpm run build:crypto-wasm && pnpm run build:crypto-napi && pnpm run build:crypto-android && pnpm run build:crypto-ios",
+    "db:studio": "turbo -F @bittery/db db:studio",
+    "db:generate": "turbo -F @bittery/db db:generate",
+    "db:migrate": "turbo -F @bittery/db db:migrate",
+    "db:start": "turbo -F @bittery/db db:start",
+    "db:watch": "turbo -F @bittery/db db:watch",
+    "db:test:setup": "turbo -F @bittery/db db:test:setup",
+    "db:stop": "turbo -F @bittery/db db:stop",
+    "db:down": "turbo -F @bittery/db db:down"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.2",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.4",
+    "@biomejs/biome": "^2.2.0",
+    "@types/bun": "^1.2.6"
+  },
+  "packageManager": "pnpm@10.18.3"
 }
