@@ -1,137 +1,136 @@
-# bittery
+# Bittery
 
-This project was created with [Better-T-Stack](https://github.com/AmanVarshney01/create-better-t-stack), a modern TypeScript stack that combines React, TanStack Start, Hono, TRPC, and more.
+A zero-knowledge password manager with end-to-end encryption. All sensitive data is encrypted client-side before reaching the server — your passwords never leave your device unencrypted.
 
-## Features
+## Platforms
 
-- **TypeScript** - For type safety and improved developer experience
-- **TanStack Start** - SSR framework with TanStack Router
-- **TailwindCSS** - Utility-first CSS for rapid UI development
-- **shadcn/ui** - Reusable UI components
-- **Hono** - Lightweight, performant server framework
-- **tRPC** - End-to-end type-safe APIs
-- **Bun** - Runtime environment
-- **Drizzle** - TypeScript-first ORM
-- **PostgreSQL** - Database engine
-- **Authentication** - Better-Auth
-- **Biome** - Linting and formatting
-- **Turborepo** - Optimized monorepo build system
+- **Web** — React app with TanStack Router + Vite
+- **Desktop** — Tauri 2 (macOS, Windows, Linux)
+- **Browser Extension** — Chrome Manifest V3
+- **Mobile** — React Native with Expo (iOS, Android)
 
-## Getting Started
+## Security
 
-First, install the dependencies:
+- **Zero-knowledge architecture** — the server never sees plaintext passwords or encryption keys
+- **Dual-key model** — account password + Secret Key (A3-XXXXXX format)
+- **AES-256-GCM** — all vault data encrypted client-side with random IVs
+- **SRP-6a authentication** — password never transmitted, not even as a hash
+- **RSA-4096** — asymmetric key pairs for secure vault sharing between users
+- **PBKDF2 (310k iterations) + HKDF** — key derivation from master password
+- **All crypto in Rust** — single Rust implementation compiled to WASM, NAPI, Tauri commands, and native mobile bindings
 
-```bash
-pnpm install
-```
-## Database Setup
+## Tech Stack
 
-This project uses PostgreSQL with Drizzle ORM.
-
-1. Make sure you have a PostgreSQL database set up.
-2. Update your `apps/server/.env` file with your PostgreSQL connection details.
-
-3. Apply the schema to your database:
-```bash
-pnpm run db:migrate
-```
-
-
-Then, run the development server:
-
-```bash
-pnpm run dev
-```
-
-Open [http://localhost:3001](http://localhost:3001) in your browser to see the web application.
-The API is running at [http://localhost:3000](http://localhost:3000).
-
-
-
-
-
-
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 19, TanStack Router + Query, Tailwind CSS 4, Radix UI + shadcn/ui |
+| Backend | Hono + tRPC on Bun |
+| Database | PostgreSQL + Drizzle ORM |
+| Desktop | Tauri 2 (Rust) |
+| Mobile | React Native + Expo |
+| Extension | Chrome MV3 service worker |
+| Crypto | Rust core with WASM, NAPI, and native bindings |
+| Monorepo | pnpm + Turborepo |
+| Code Quality | Biome (linting + formatting), TypeScript |
 
 ## Project Structure
 
 ```
 bittery/
 ├── apps/
-│   ├── web/         # Frontend application (React + TanStack Start)
-│   └── server/      # Backend API (Hono, TRPC)
+│   ├── web/              # React web app
+│   ├── server/           # Hono + tRPC API server
+│   ├── desktop/          # Tauri 2 desktop app
+│   ├── extension/        # Chrome extension
+│   └── mobile/           # React Native (Expo) app
 ├── packages/
-│   ├── api/         # API layer / business logic
-│   ├── auth/        # Authentication configuration & logic
-│   └── db/          # Database schema & queries
+│   ├── api/              # tRPC router definitions
+│   ├── auth/             # Server-side SRP-6a auth + JWT sessions
+│   ├── crypto/           # Rust crypto core + platform bindings
+│   ├── core/             # Shared business logic and React hooks
+│   ├── db/               # Drizzle ORM schema + migrations
+│   ├── jobs/             # Background job queue (pg-boss)
+│   ├── pubsub/           # Pub/sub messaging
+│   ├── storage/          # Platform-specific storage adapters
+│   ├── sync/             # Multi-device sync + offline support
+│   ├── shared/           # Shared utilities + tRPC client helpers
+│   ├── types/            # Shared TypeScript types
+│   ├── ui/               # Shared UI component library
+│   └── config/           # Shared TypeScript configuration
 ```
 
-## Available Scripts
+## Getting Started
 
-- `pnpm run dev`: Start all applications in development mode
-- `pnpm run build`: Build all applications
-- `pnpm run dev:web`: Start only the web application
-- `pnpm run dev:server`: Start only the server
-- `pnpm run check-types`: Check TypeScript types across all apps
-- `pnpm run db:migrate`: Apply migrations to database
-- `pnpm run db:studio`: Open database studio UI
-- `pnpm run check`: Run Biome formatting and linting
+### Prerequisites
 
+- [Node.js](https://nodejs.org/) 20+
+- [pnpm](https://pnpm.io/) 10+
+- [Bun](https://bun.sh/) (server runtime)
+- [Docker](https://www.docker.com/) (for PostgreSQL)
+- [Rust](https://rustup.rs/) (for building crypto bindings)
 
+### Setup
 
-Continue Phase 5 (Migration & Cleanup) from packages/bittery-crypto/PLAN.md.                                                        
-                                                                                                                                      
-                                                                                                                                      
-                                                                                                                                      
-  All platforms now use native Rust crypto:                                                                                           
-                                                                                                                                      
-  - Web app: WASM (Phase 2.1) ✅                                                                                                      
-                                                                                                                                      
-  - Server: NAPI bindings (Phase 2.2) ✅                                                                                              
-                                                                                                                                      
-  - Mobile: Nitro module (Phase 3) ✅                                                                                                 
-                                                                                                                                      
-  - Credential Provider: JNI (Phase 3.7) ✅                                                                                           
-                                                                                                                                      
-  - Desktop: Tauri commands (Phase 4.1) ✅                                                                                            
-                                                                                                                                      
-  - Browser Extension: WASM (Phase 4.2) ✅                                                                                            
-                                                                                                                                      
-                                                                                                                                      
-                                                                                                                                      
-  Cleanup tasks:                                                                                                                      
-                                                                                                                                      
-  1. Remove pure JS crypto implementations from packages/crypto/                                                                      
-                                                                                                                                      
-  - Keep TypeScript types/interfaces (EncryptedData, DerivedKeys, etc.)                                                               
-                                                                                                                                      
-  - Remove key-derivation.ts implementation (keep types)                                                                              
-                                                                                                                                      
-  - Remove encryption.ts implementation (keep types)                                                                                  
-                                                                                                                                      
-  - Remove srp-client.ts implementation (keep types)                                                                                  
-                                                                                                                                      
-  - Remove rsa.ts implementation (keep types)                                                                                         
-                                                                                                                                      
-  - Keep storage-chrome.ts and server-url.ts (Chrome-specific utilities)                                                              
-                                                                                                                                      
-                                                                                                                                      
-                                                                                                                                      
-  2. Remove deprecated dependencies from apps/mobile/package.json:                                                                    
-                                                                                                                                      
-  - react-native-quick-crypto                                                                                                         
-                                                                                                                                      
-                                                                                                                                      
-                                                                                                                                      
-  3. Remove apps/mobile/modules/srp6a/ Expo module entirely                                                                           
-                                                                                                                                      
-                                                                                                                                      
-                                                                                                                                      
-  4. Update any remaining imports that still use the old implementations                                                              
-                                                                                                                                      
-                                                                                                                                      
-                                                                                                                                      
-  5. Run pnpm install to update lockfile after dependency changes                                                                     
-                                                                                                                                      
-                                                                                                                                      
-                                                                                                                                      
-  Reference: packages/bittery-crypto/PLAN.md 
+```bash
+# Install dependencies
+pnpm install
+
+# Start PostgreSQL
+pnpm run db:start
+
+# Apply database migrations
+pnpm run db:migrate
+
+# Start all apps in development mode
+pnpm run dev
+```
+
+The web app runs at [http://localhost:3001](http://localhost:3001) and the API server at [http://localhost:3000](http://localhost:3000).
+
+### Development Commands
+
+```bash
+# Run individual apps
+pnpm run dev:web          # Web app only
+pnpm run dev:server       # API server only
+pnpm run dev:desktop      # Desktop app (Tauri)
+pnpm run dev:extension    # Browser extension
+pnpm run dev:mobile       # Mobile app (Expo)
+
+# Code quality
+pnpm run check            # Biome linting + formatting
+pnpm run check-types      # TypeScript type checking
+pnpm run test             # Run tests
+
+# Database
+pnpm run db:studio        # Open Drizzle Studio
+pnpm run db:generate      # Generate migrations from schema changes
+pnpm run db:migrate       # Apply migrations
+
+# Build
+pnpm run build            # Build everything
+pnpm run build:desktop    # Tauri desktop binary
+pnpm run build:extension  # Chrome extension
+pnpm run build:mobile     # EAS production build
+pnpm run build:crypto-wasm   # Rebuild WASM bindings
+pnpm run build:crypto-napi   # Rebuild NAPI bindings
+```
+
+### Environment Variables
+
+Create `apps/server/.env`:
+
+```env
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/bittery
+JWT_SECRET=<random-secret>
+BITTERY_STORAGE_ENDPOINT=       # S3-compatible storage
+BITTERY_STORAGE_BUCKET=
+BITTERY_STORAGE_ACCESS_KEY_ID=
+BITTERY_STORAGE_SECRET_ACCESS_KEY=
+BITTERY_STORAGE_REGION=auto
+BITTERY_STORAGE_CDN_URL=        # or BITTERY_STORAGE_PUBLIC_URL
+```
+
+## License
+
+All rights reserved.

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Bittery is a zero-knowledge password manager with multi-platform support (web, desktop via Tauri, browser extension, mobile via React Native/Expo). All sensitive data is encrypted client-side using AES-256-GCM before reaching the server. Authentication uses the SRP-6a protocol — the server never sees plaintext passwords or encryption keys.
 
-**Security model:** Dual-key architecture (account password + Secret Key in A3-XXXXXX format). Master Unlock Key derived via PBKDF2 (100k iterations) + HKDF. RSA-4096 key pairs for vault sharing. 14-day encrypted session persistence with device keys.
+**Security model:** Dual-key architecture (account password + Secret Key in A3-XXXXXX format). Master Unlock Key derived via PBKDF2 (310k iterations) + HKDF. RSA-4096 key pairs for vault sharing. 14-day encrypted session persistence with device keys.
 
 ## Development Commands
 
@@ -123,7 +123,7 @@ All crypto is implemented in Rust (`packages/crypto/core/crates/bittery-crypto-c
 | Mobile | Expo module | `apps/mobile/src/lib/crypto/` (wraps `@bittery/crypto-nitro`) |
 
 **Rust core modules** (`packages/crypto/core/crates/bittery-crypto-core/src/`):
-- `key_derivation.rs` — PBKDF2(SHA-256, 100k iter, salt=lowercase email) + HKDF split into `authKey` ("bittery-auth-key") and `masterUnlockKey` ("bittery-unlock-key")
+- `key_derivation.rs` — PBKDF2(SHA-256, 310k iter, salt=lowercase email) + HKDF split into `authKey` ("bittery-auth-key") and `masterUnlockKey` ("bittery-unlock-key")
 - `encryption.rs` — AES-256-GCM encrypt/decrypt
 - `rsa.rs` — RSA-4096 OAEP key pair generation, encrypt, decrypt
 - `secret_key.rs` — A3-XXXXXX format generation/validation
