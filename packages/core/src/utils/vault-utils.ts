@@ -4,11 +4,11 @@
  * Compatibility wrappers around core vault services.
  */
 
+import type { IStorageAdapter } from "@bittery/storage/adapter";
 import {
 	refreshVaultKeys as refreshVaultKeysCore,
 	type TRPCVaultClient,
 } from "../services/vault-service";
-import type { IStorageAdapter } from "@bittery/storage/adapter";
 
 /**
  * Refresh vault keys from server and store in local storage.

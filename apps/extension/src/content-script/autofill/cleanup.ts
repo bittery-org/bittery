@@ -1,8 +1,8 @@
 import { contentState } from "../state";
 import { hideAutofillOverlay } from "./credential";
 import { hideCreditCardAutofillOverlay } from "./credit-card";
-import { hideIdentityAutofillOverlay } from "./identity";
 import { hideFieldIcon } from "./icon";
+import { hideIdentityAutofillOverlay } from "./identity";
 
 export function cleanupAutofillState() {
 	for (const field of contentState.detectedFields.values()) {

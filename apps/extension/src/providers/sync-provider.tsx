@@ -1,5 +1,5 @@
-import type { IQueryInvalidator } from "@bittery/types";
 import type { ConnectionStatus, SyncEvent } from "@bittery/sync";
+import type { IQueryInvalidator } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
 import {
 	createContext,

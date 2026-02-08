@@ -277,11 +277,14 @@ export function VaultPage() {
 
 		const storedSelection = readSelectedItemForScope(selectionScope);
 		const hasStoredVisibleSelection =
-			!!storedSelection && sortedItems.some((item) => item.id === storedSelection);
+			!!storedSelection &&
+			sortedItems.some((item) => item.id === storedSelection);
 
 		if (!selectedItemId) {
 			setSelectedItemId(
-				hasStoredVisibleSelection ? storedSelection : (sortedItems[0]?.id ?? null),
+				hasStoredVisibleSelection
+					? storedSelection
+					: (sortedItems[0]?.id ?? null),
 			);
 			return;
 		}
@@ -289,7 +292,9 @@ export function VaultPage() {
 		const stillVisible = sortedItems.some((item) => item.id === selectedItemId);
 		if (!stillVisible) {
 			setSelectedItemId(
-				hasStoredVisibleSelection ? storedSelection : (sortedItems[0]?.id ?? null),
+				hasStoredVisibleSelection
+					? storedSelection
+					: (sortedItems[0]?.id ?? null),
 			);
 		}
 	}, [sortedItems, selectedItemId, selectionScope]);

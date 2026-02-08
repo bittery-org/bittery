@@ -3,12 +3,12 @@
  * Handles both single account and "All Accounts" mode.
  */
 
-import type { AccountInfo as CoreAccountInfo } from "../services/account-resolver";
 import { useQuery } from "@tanstack/react-query";
 import {
 	useCoreContext,
 	usePlatformStorage,
 } from "../context/platform-context";
+import type { AccountInfo as CoreAccountInfo } from "../services/account-resolver";
 
 /**
  * Complete account information including metadata, credentials, and tRPC client

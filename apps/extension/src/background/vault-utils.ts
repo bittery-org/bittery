@@ -3,19 +3,19 @@
  * Shared helpers for vault operations.
  */
 
+import type { MultiAccountItem } from "@bittery/core";
 import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import type {
 	DecryptedItem,
 	DecryptedItemData,
 	ItemCategory,
 } from "@bittery/shared/types";
+import type { AccountMetadata, ActiveAccount } from "@bittery/storage";
 import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 	RawEncryptedItemWithVault,
 } from "@bittery/types";
-import type { MultiAccountItem } from "@bittery/core";
-import type { AccountMetadata, ActiveAccount } from "@bittery/storage";
 import { storage } from "../lib/storage";
 import { core } from "./core-instance";
 import { desktopClient } from "./desktop-client";
@@ -265,7 +265,9 @@ async function decryptVaultItemsForAccountViaDesktop(
 		}
 	}
 
-	console.log(`[vault-utils] Desktop cache miss for ${email}, fetching vault list`);
+	console.log(
+		`[vault-utils] Desktop cache miss for ${email}, fetching vault list`,
+	);
 
 	const authToken = await desktopClient.getAuthToken(email);
 	if (!authToken) {
@@ -275,7 +277,8 @@ async function decryptVaultItemsForAccountViaDesktop(
 		return [];
 	}
 
-	const serverUrl = (await storage.getServerUrl(email)) || "http://localhost:3000";
+	const serverUrl =
+		(await storage.getServerUrl(email)) || "http://localhost:3000";
 	const accountClient = createAccountTrpcClient(authToken, serverUrl);
 	const vaults = await accountClient.vault.list.query();
 	const rawItems = buildRawItemsFromVaultList(vaults);
@@ -327,7 +330,8 @@ export async function getDecryptedItemsForCurrentMode(): Promise<
 		}
 	}
 
-	const { accountsInfo, isAllAccountsMode } = await core.accounts.resolveAccounts();
+	const { accountsInfo, isAllAccountsMode } =
+		await core.accounts.resolveAccounts();
 	return core.items.fetchAndDecryptItems(accountsInfo, { isAllAccountsMode });
 }
 

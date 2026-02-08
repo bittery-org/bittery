@@ -1,6 +1,6 @@
 import {
-	detectCreditCardFields,
 	detectCredentialFields,
+	detectCreditCardFields,
 	detectIdentityFields,
 } from "./detectors";
 import { MULTI_STEP_INDICATORS } from "./patterns";
@@ -91,10 +91,15 @@ export function detectMultiStepForm(form: HTMLFormElement): {
 	if (form.dataset.step || form.dataset.steps || form.dataset.currentStep) {
 		result.isMultiStep = true;
 		const totalSteps =
-			Number.parseInt(form.dataset.steps || form.dataset.totalSteps || "0", 10) ||
-			result.totalSteps;
+			Number.parseInt(
+				form.dataset.steps || form.dataset.totalSteps || "0",
+				10,
+			) || result.totalSteps;
 		const currentStep =
-			Number.parseInt(form.dataset.step || form.dataset.currentStep || "1", 10) || 1;
+			Number.parseInt(
+				form.dataset.step || form.dataset.currentStep || "1",
+				10,
+			) || 1;
 		result.totalSteps = Math.max(result.totalSteps, totalSteps);
 		result.currentStep = currentStep;
 	}
@@ -185,7 +190,9 @@ export function isLikelyLoginForm(form: HTMLFormElement): boolean {
 	const allFields = detectCredentialFields(document);
 	const fields = allFields.filter((f) => f.form === form);
 	const hasPassword = fields.some((f) => f.type === "password");
-	const hasUsername = fields.some((f) => f.type === "username" || f.type === "email");
+	const hasUsername = fields.some(
+		(f) => f.type === "username" || f.type === "email",
+	);
 
 	// Check form attributes
 	const formAction = form.action?.toLowerCase() || "";

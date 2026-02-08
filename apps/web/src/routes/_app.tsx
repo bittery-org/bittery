@@ -1,8 +1,4 @@
-import {
-	SidebarInset,
-	SidebarProvider,
-	SidebarTrigger,
-} from "@bittery/ui";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@bittery/ui";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { AppSidebar } from "@/components/layout/sidebar";
 import { storage } from "@/lib/storage";

@@ -1,16 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { SyncEvent } from "@bittery/sync";
 import {
+	createSyncCacheService,
 	type SyncCacheDesktopClient,
 	type SyncCacheStorage,
 	type SyncEventQueryClient,
-	createSyncCacheService,
 } from "../../src/background/services/sync-cache-service";
 
-type ActiveAccount =
-	| { type: "single"; email: string }
-	| { type: "all" }
-	| null;
+type ActiveAccount = { type: "single"; email: string } | { type: "all" } | null;
 
 function createClientStub(): SyncEventQueryClient {
 	return {

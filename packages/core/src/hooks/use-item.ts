@@ -5,8 +5,8 @@
  * Works in both single-account and "All Accounts" mode without manual account management.
  */
 
-import type { DecryptedItemData } from "@bittery/shared/types";
 import { useTRPCClient } from "@bittery/shared/trpc";
+import type { DecryptedItemData } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
 import { useCoreContext, usePlatform } from "../context/platform-context";
 import { useItems } from "./use-items";
@@ -56,7 +56,8 @@ export function useItem(
 	});
 
 	const isAllAccountsMode = activeAccount?.type === "all";
-	const shouldResolveFromItems = enabled && isAllAccountsMode && !explicitAccountEmail;
+	const shouldResolveFromItems =
+		enabled && isAllAccountsMode && !explicitAccountEmail;
 	const isResolvingAccountMode =
 		enabled &&
 		storage.supportsMultiAccount &&

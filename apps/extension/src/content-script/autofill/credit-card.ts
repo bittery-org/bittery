@@ -1,6 +1,7 @@
 import type { DecryptedItem } from "@bittery/shared/types";
 import { contentState } from "../state";
 import type { CreditCardField } from "../types";
+import { hideAutofillOverlay } from "./credential";
 import { hideFieldIcon, showFieldIcon } from "./icon";
 import {
 	applyAutofillHighlight,
@@ -9,7 +10,6 @@ import {
 	showReauthPromptCard,
 	showUnlockIframePrompt,
 } from "./overlay-utils";
-import { hideAutofillOverlay } from "./credential";
 
 // Handle credit card field focus
 export async function handleCreditCardFieldFocus(field: CreditCardField) {
@@ -83,7 +83,10 @@ export function handleCreditCardFieldBlur(field: CreditCardField) {
 }
 
 // Show credit card autofill overlay
-function showCreditCardAutofillOverlay(field: CreditCardField, items: DecryptedItem[]) {
+function showCreditCardAutofillOverlay(
+	field: CreditCardField,
+	items: DecryptedItem[],
+) {
 	showItemsOverlay({
 		field,
 		items,
@@ -98,7 +101,8 @@ function showCreditCardAutofillOverlay(field: CreditCardField, items: DecryptedI
 			contentState.currentCreditCardIframe = iframe;
 		},
 		keyboardHandler: handleCreditCardKeyboardNavigation,
-		timeoutLog: "Timeout waiting for credit card iframe ready, sending items anyway",
+		timeoutLog:
+			"Timeout waiting for credit card iframe ready, sending items anyway",
 		isAutofilling: () => contentState.isAutofilling,
 	});
 }
@@ -121,7 +125,11 @@ function handleCreditCardKeyboardNavigation(event: KeyboardEvent) {
 			contentState.currentFocusedCreditCardField = null;
 		}
 	}
-	if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Enter") {
+	if (
+		event.key === "ArrowDown" ||
+		event.key === "ArrowUp" ||
+		event.key === "Enter"
+	) {
 		if (contentState.currentCreditCardIframe) {
 			event.preventDefault();
 			contentState.currentCreditCardIframe.contentWindow?.postMessage(
@@ -241,5 +249,8 @@ function showCreditCardUnlockPrompt(field: CreditCardField) {
 
 // Show re-auth prompt for credit card fields
 function showCreditCardReauthPrompt(field: CreditCardField) {
-	showReauthPromptCard(field, "Please re-authenticate to use credit card autofill");
+	showReauthPromptCard(
+		field,
+		"Please re-authenticate to use credit card autofill",
+	);
 }

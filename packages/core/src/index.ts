@@ -14,10 +14,6 @@ export {
 	type ResolveAccountsResult,
 } from "./services/account-resolver";
 export {
-	CacheManager,
-	type EncryptedPayload,
-} from "./services/cache-manager";
-export {
 	type CheckEmailResult,
 	checkEmailExists,
 	clearSession,
@@ -38,6 +34,10 @@ export {
 	storeUnlockSession,
 	type UnlockResult,
 } from "./services/auth-service";
+export {
+	CacheManager,
+	type EncryptedPayload,
+} from "./services/cache-manager";
 export {
 	type CreateItemInput,
 	type CreateItemResult,

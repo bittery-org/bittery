@@ -4,11 +4,6 @@
  * Creates a secure share link for a vault item.
  */
 
-import {
-	buildShareUrl as buildShareUrlCore,
-	type ShareAccessMode,
-	type ShareExpirationOption,
-} from "../../services/share-service";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";
@@ -16,6 +11,11 @@ import {
 	useCoreContext,
 	useQueryInvalidator,
 } from "../../context/platform-context";
+import {
+	buildShareUrl as buildShareUrlCore,
+	type ShareAccessMode,
+	type ShareExpirationOption,
+} from "../../services/share-service";
 import { useItems } from "../use-items";
 
 export type { ShareAccessMode, ShareExpirationOption };

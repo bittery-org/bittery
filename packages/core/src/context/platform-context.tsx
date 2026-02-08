@@ -5,7 +5,6 @@
  * Each app wraps its root with PlatformProvider, injecting platform-specific implementations.
  */
 
-import { type CoreContext, createCoreContext } from "../core-context";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type {
 	IAutolockService,
@@ -15,6 +14,7 @@ import type {
 	ISyncContext,
 } from "@bittery/types";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
+import { type CoreContext, createCoreContext } from "../core-context";
 
 /**
  * Platform context value containing all platform-specific dependencies

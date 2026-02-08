@@ -72,6 +72,18 @@ export {
 	usePlatformSync,
 	useQueryInvalidator,
 } from "../context/platform-context";
+// Services (platform-specific autolock implementations)
+export {
+	createMobileAutolockService,
+	createWebAutolockService,
+	type MobileAutolockOptions,
+} from "../services/autolock";
+export {
+	findAccountEmailForItem,
+	getItemAccountEmail,
+} from "../utils/account-helper";
+// Utilities
+export { refreshVaultKeys } from "../utils/vault-utils";
 // Auth Hooks (React Query wrappers for login/unlock)
 export {
 	type BiometricUnlockError,
@@ -106,37 +118,6 @@ export {
 	useAccountMetadataSync,
 	useAccountMetadataSyncAll,
 } from "./auth/use-account-metadata-sync";
-// Data Hooks (read operations)
-export {
-	type AccountInfo,
-	type UseAccountsInfoOptions,
-	useAccountsInfo,
-} from "./use-accounts-info";
-export {
-	type UseAllVaultKeysOptions,
-	useAllVaultKeys,
-	type VaultKeyWithAccount,
-} from "./use-all-vault-keys";
-export {
-	type DeletedItem,
-	type UseDeletedItemsOptions,
-	useDeletedItems,
-} from "./use-deleted-items";
-export {
-	filterItemsByTags,
-	useAvailableTags,
-} from "./use-available-tags";
-export { useCrossVaultTags } from "./use-cross-vault-tags";
-export { type UseItemResult, useItem } from "./use-item";
-export {
-	type UseVaultInfoOptions,
-	useVaultInfo,
-	type VaultInfoWithAccount,
-} from "./use-vault-info";
-export {
-	type UseVaultItemsOptions,
-	useVaultItems,
-} from "./use-vault-items";
 // Item Mutation Hooks (write operations)
 export {
 	type CreateItemInput,
@@ -166,11 +147,33 @@ export {
 } from "./share";
 // Team Mutation Hooks (write operations)
 export { useTeamAvatar } from "./team/use-team-avatar";
+// Data Hooks (read operations)
+export {
+	type AccountInfo,
+	type UseAccountsInfoOptions,
+	useAccountsInfo,
+} from "./use-accounts-info";
+export {
+	type UseAllVaultKeysOptions,
+	useAllVaultKeys,
+	type VaultKeyWithAccount,
+} from "./use-all-vault-keys";
+export {
+	filterItemsByTags,
+	useAvailableTags,
+} from "./use-available-tags";
+export { useCrossVaultTags } from "./use-cross-vault-tags";
+export {
+	type DeletedItem,
+	type UseDeletedItemsOptions,
+	useDeletedItems,
+} from "./use-deleted-items";
+export { type UseItemResult, useItem } from "./use-item";
 // Unified Data Hooks (automatically handle single-account vs "All Accounts" mode)
 export {
 	type UnifiedItem,
-	type UseItemsUnifiedOptions,
 	type UseItemsOptions,
+	type UseItemsUnifiedOptions,
 	useItems,
 	useItemsUnified,
 } from "./use-items";
@@ -178,6 +181,15 @@ export {
 	analyzePassword,
 	usePasswordSecurity,
 } from "./use-password-security";
+export {
+	type UseVaultInfoOptions,
+	useVaultInfo,
+	type VaultInfoWithAccount,
+} from "./use-vault-info";
+export {
+	type UseVaultItemsOptions,
+	useVaultItems,
+} from "./use-vault-items";
 export {
 	type SearchResult,
 	type SingleVaultSearchResult,
@@ -194,15 +206,3 @@ export {
 	useDeleteVault,
 	useUpdateVault,
 } from "./vault";
-// Services (platform-specific autolock implementations)
-export {
-	createMobileAutolockService,
-	createWebAutolockService,
-	type MobileAutolockOptions,
-} from "../services/autolock";
-export {
-	findAccountEmailForItem,
-	getItemAccountEmail,
-} from "../utils/account-helper";
-// Utilities
-export { refreshVaultKeys } from "../utils/vault-utils";

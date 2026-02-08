@@ -12,13 +12,6 @@ import {
 	observeShadowRoots,
 } from "../lib/field-detection";
 import {
-	disableChromeAutofill,
-	disableChromeAutofillForCreditCard,
-	disableChromeAutofillForIdentity,
-	injectAutofillBlockerStyles,
-} from "./browser-autofill";
-import { attachFormSubmitListeners } from "./capture";
-import {
 	handleCreditCardFieldBlur,
 	handleCreditCardFieldFocus,
 	handleFieldBlur,
@@ -26,7 +19,14 @@ import {
 	handleIdentityFieldBlur,
 	handleIdentityFieldFocus,
 } from "./autofill";
-import { DETECTION_DEBOUNCE_MS, contentState } from "./state";
+import {
+	disableChromeAutofill,
+	disableChromeAutofillForCreditCard,
+	disableChromeAutofillForIdentity,
+	injectAutofillBlockerStyles,
+} from "./browser-autofill";
+import { attachFormSubmitListeners } from "./capture";
+import { contentState, DETECTION_DEBOUNCE_MS } from "./state";
 import type { CredentialField, CreditCardField, IdentityField } from "./types";
 
 /**
@@ -38,7 +38,10 @@ import type { CredentialField, CreditCardField, IdentityField } from "./types";
  */
 export function detectPasswordFields(root: Document | ShadowRoot = document) {
 	// Use enhanced detection for comprehensive field discovery
-	const enhancedFields = [...detectCredentialFields(root), ...detectOTPFields(root)];
+	const enhancedFields = [
+		...detectCredentialFields(root),
+		...detectOTPFields(root),
+	];
 
 	for (const enhancedField of enhancedFields) {
 		const input = enhancedField.element;
@@ -49,12 +52,9 @@ export function detectPasswordFields(root: Document | ShadowRoot = document) {
 		if (enhancedField.confidence < 0.1) continue;
 
 		// Filter to credential + OTP types
-		if (![
-			"username",
-			"email",
-			"password",
-			"otp",
-		].includes(enhancedField.type)) {
+		if (
+			!["username", "email", "password", "otp"].includes(enhancedField.type)
+		) {
 			continue;
 		}
 
@@ -238,7 +238,10 @@ function detectIdentityFieldsOnPage(root: Document | ShadowRoot = document) {
 function scanForShadowRoots(root: Document | ShadowRoot = document) {
 	const elements = root.querySelectorAll("*");
 	for (const element of elements) {
-		if (element.shadowRoot && !contentState.observedShadowRoots.has(element.shadowRoot)) {
+		if (
+			element.shadowRoot &&
+			!contentState.observedShadowRoots.has(element.shadowRoot)
+		) {
 			contentState.observedShadowRoots.add(element.shadowRoot);
 			// Detect fields within shadow root
 			detectPasswordFields(element.shadowRoot);

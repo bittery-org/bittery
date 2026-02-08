@@ -1,8 +1,8 @@
 import { contentState } from "../state";
 import { hideAutofillOverlay } from "./credential";
 import { hideCreditCardAutofillOverlay } from "./credit-card";
-import { hideIdentityAutofillOverlay } from "./identity";
 import { hideFieldIcon } from "./icon";
+import { hideIdentityAutofillOverlay } from "./identity";
 
 let outsideClickHandlerRegistered = false;
 
@@ -32,7 +32,9 @@ export function setupOutsideClickHandler() {
 			}
 
 			if (contentState.currentFocusedCreditCardField) {
-				const isOnInput = path.includes(contentState.currentFocusedCreditCardField.input);
+				const isOnInput = path.includes(
+					contentState.currentFocusedCreditCardField.input,
+				);
 				const isOnOverlay =
 					contentState.currentFocusedCreditCardField.overlay &&
 					path.includes(contentState.currentFocusedCreditCardField.overlay);
@@ -41,14 +43,18 @@ export function setupOutsideClickHandler() {
 					path.includes(contentState.currentFocusedCreditCardField.icon);
 
 				if (!isOnInput && !isOnOverlay && !isOnIcon) {
-					hideCreditCardAutofillOverlay(contentState.currentFocusedCreditCardField);
+					hideCreditCardAutofillOverlay(
+						contentState.currentFocusedCreditCardField,
+					);
 					hideFieldIcon(contentState.currentFocusedCreditCardField);
 					contentState.currentFocusedCreditCardField = null;
 				}
 			}
 
 			if (contentState.currentFocusedIdentityField) {
-				const isOnInput = path.includes(contentState.currentFocusedIdentityField.input);
+				const isOnInput = path.includes(
+					contentState.currentFocusedIdentityField.input,
+				);
 				const isOnOverlay =
 					contentState.currentFocusedIdentityField.overlay &&
 					path.includes(contentState.currentFocusedIdentityField.overlay);

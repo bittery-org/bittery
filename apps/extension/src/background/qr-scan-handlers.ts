@@ -185,8 +185,7 @@ export async function handleUpdateItemTotp(payload: {
 			};
 		}
 
-		const hasWriteCapability =
-			await ensureDesktopWriteCapability(accountEmail);
+		const hasWriteCapability = await ensureDesktopWriteCapability(accountEmail);
 		if (!hasWriteCapability) {
 			return {
 				success: false,

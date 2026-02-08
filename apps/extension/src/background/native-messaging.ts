@@ -572,7 +572,9 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		if (!options?.preserveActiveAccount) {
 			if (accounts.length > 1) {
 				await storage.setActiveAccount({ type: "all" });
-				console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Set active account to 'all'");
+				console.log(
+					"[NATIVE_BIOMETRIC_UNLOCK_ALL] Set active account to 'all'",
+				);
 			} else {
 				await storage.setActiveAccount({
 					type: "single",

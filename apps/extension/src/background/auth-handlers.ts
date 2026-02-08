@@ -13,6 +13,7 @@ import {
 } from "@bittery/core";
 import { cryptoAdapter } from "../lib/crypto-adapter";
 import { storage } from "../lib/storage";
+import { desktopSync } from "./desktop-sync";
 import {
 	isUnlocked,
 	lock,
@@ -20,7 +21,6 @@ import {
 	setMasterUnlockKey,
 	updateActivity,
 } from "./session-manager";
-import { desktopSync } from "./desktop-sync";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
 

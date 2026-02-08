@@ -1,8 +1,4 @@
-import type {
-	CredentialField,
-	CreditCardField,
-	IdentityField,
-} from "./types";
+import type { CredentialField, CreditCardField, IdentityField } from "./types";
 
 export const FORM_SUBMISSION_DEBOUNCE_MS = 500;
 export const DETECTION_DEBOUNCE_MS = 100;

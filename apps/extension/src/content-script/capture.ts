@@ -3,9 +3,13 @@ import {
 	getAllInputs,
 	isFieldVisible,
 } from "../lib/field-detection";
-import { FORM_SUBMISSION_DEBOUNCE_MS, contentState } from "./state";
-import type { CapturedCredentials, CredentialField, PendingRequest } from "./types";
 import { showSavePrompt } from "./save-prompt";
+import { contentState, FORM_SUBMISSION_DEBOUNCE_MS } from "./state";
+import type {
+	CapturedCredentials,
+	CredentialField,
+	PendingRequest,
+} from "./types";
 
 const recentFormSubmissions = new WeakMap<HTMLFormElement, number>();
 const pendingAjaxRequests = new Map<string, PendingRequest>();
@@ -65,7 +69,9 @@ export function attachFormSubmitListeners(form: HTMLFormElement) {
 }
 
 // Capture credentials from a form
-function captureCredentials(form?: HTMLFormElement): CapturedCredentials | null {
+function captureCredentials(
+	form?: HTMLFormElement,
+): CapturedCredentials | null {
 	// Determine the scope to search for fields
 	const searchScope = form || document;
 

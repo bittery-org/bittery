@@ -8,15 +8,6 @@
  */
 
 import { db } from "@bittery/db";
-import initCryptoWasm, {
-	JsSrpClient,
-	deriveKeys as deriveKeysWasm,
-	encrypt as encryptWasm,
-	generateEncryptionKey as generateEncryptionKeyWasm,
-	generateRSAKeyPair as generateRSAKeyPairWasm,
-	generateSecretKey as generateSecretKeyWasm,
-	getSecretKeyHint as getSecretKeyHintWasm,
-} from "../../../crypto/wasm/bittery_crypto.js";
 import { auditLog, session, user } from "@bittery/db/schema/auth";
 import {
 	shareAccessLog,
@@ -35,6 +26,15 @@ import {
 } from "@bittery/db/schema/vault";
 import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import initCryptoWasm, {
+	deriveKeys as deriveKeysWasm,
+	encrypt as encryptWasm,
+	generateEncryptionKey as generateEncryptionKeyWasm,
+	generateRSAKeyPair as generateRSAKeyPairWasm,
+	generateSecretKey as generateSecretKeyWasm,
+	getSecretKeyHint as getSecretKeyHintWasm,
+	JsSrpClient,
+} from "../../../crypto/wasm/bittery_crypto.js";
 import type { Context } from "../context";
 
 // Test data generation helpers

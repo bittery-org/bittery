@@ -10,11 +10,17 @@ import {
 	hydrateDesktopAccountMaterial,
 } from "./desktop-key-material";
 import { desktopSync } from "./desktop-sync";
-import { onLocalItemCreated, onLocalItemUpdated } from "./services/local-item-cache-service";
+import {
+	onLocalItemCreated,
+	onLocalItemUpdated,
+} from "./services/local-item-cache-service";
 import { isUnlocked, updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
-import { getDecryptedItemsForCurrentMode, hostnameMatches } from "./vault-utils";
+import {
+	getDecryptedItemsForCurrentMode,
+	hostnameMatches,
+} from "./vault-utils";
 
 /**
  * Helper function to extract hostname from URL
@@ -192,8 +198,7 @@ export async function handleSaveNewCredential(payload: {
 			};
 		}
 
-		const hasWriteCapability =
-			await ensureDesktopWriteCapability(accountEmail);
+		const hasWriteCapability = await ensureDesktopWriteCapability(accountEmail);
 		if (!hasWriteCapability) {
 			return {
 				success: false,
@@ -317,8 +322,7 @@ export async function handleUpdateExistingCredential(payload: {
 			};
 		}
 
-		const hasWriteCapability =
-			await ensureDesktopWriteCapability(accountEmail);
+		const hasWriteCapability = await ensureDesktopWriteCapability(accountEmail);
 		if (!hasWriteCapability) {
 			return {
 				success: false,

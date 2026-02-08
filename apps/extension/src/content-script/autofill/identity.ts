@@ -1,6 +1,8 @@
 import type { DecryptedItem } from "@bittery/shared/types";
 import { contentState } from "../state";
 import type { IdentityField } from "../types";
+import { hideAutofillOverlay } from "./credential";
+import { hideCreditCardAutofillOverlay } from "./credit-card";
 import { hideFieldIcon, showFieldIcon } from "./icon";
 import {
 	applyAutofillHighlight,
@@ -9,8 +11,6 @@ import {
 	showReauthPromptCard,
 	showUnlockIframePrompt,
 } from "./overlay-utils";
-import { hideAutofillOverlay } from "./credential";
-import { hideCreditCardAutofillOverlay } from "./credit-card";
 
 // Handle identity field focus
 export async function handleIdentityFieldFocus(field: IdentityField) {
@@ -89,7 +89,10 @@ export function handleIdentityFieldBlur(field: IdentityField) {
 }
 
 // Show identity autofill overlay
-function showIdentityAutofillOverlay(field: IdentityField, items: DecryptedItem[]) {
+function showIdentityAutofillOverlay(
+	field: IdentityField,
+	items: DecryptedItem[],
+) {
 	showItemsOverlay({
 		field,
 		items,
@@ -104,7 +107,8 @@ function showIdentityAutofillOverlay(field: IdentityField, items: DecryptedItem[
 			contentState.currentIdentityIframe = iframe;
 		},
 		keyboardHandler: handleIdentityKeyboardNavigation,
-		timeoutLog: "Timeout waiting for identity iframe ready, sending items anyway",
+		timeoutLog:
+			"Timeout waiting for identity iframe ready, sending items anyway",
 		isAutofilling: () => contentState.isAutofilling,
 	});
 }
@@ -127,7 +131,11 @@ function handleIdentityKeyboardNavigation(event: KeyboardEvent) {
 			contentState.currentFocusedIdentityField = null;
 		}
 	}
-	if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Enter") {
+	if (
+		event.key === "ArrowDown" ||
+		event.key === "ArrowUp" ||
+		event.key === "Enter"
+	) {
 		if (contentState.currentIdentityIframe) {
 			event.preventDefault();
 			contentState.currentIdentityIframe.contentWindow?.postMessage(
@@ -139,7 +147,10 @@ function handleIdentityKeyboardNavigation(event: KeyboardEvent) {
 }
 
 // Handle identity autofill selection
-async function handleIdentityAutofillSelect(field: IdentityField, item: DecryptedItem) {
+async function handleIdentityAutofillSelect(
+	field: IdentityField,
+	item: DecryptedItem,
+) {
 	await chrome.runtime.sendMessage({
 		type: "UPDATE_AUTOFILL_TIMESTAMP",
 	});
@@ -334,5 +345,8 @@ function showIdentityUnlockPrompt(field: IdentityField) {
 
 // Show re-auth prompt for identity fields
 function showIdentityReauthPrompt(field: IdentityField) {
-	showReauthPromptCard(field, "Please re-authenticate to use identity autofill");
+	showReauthPromptCard(
+		field,
+		"Please re-authenticate to use identity autofill",
+	);
 }

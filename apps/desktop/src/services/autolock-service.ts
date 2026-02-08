@@ -6,8 +6,8 @@
  * lockAllAccounts when timeout is exceeded.
  */
 
-import type { IAutolockService } from "@bittery/types";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
+import type { IAutolockService } from "@bittery/types";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 /**

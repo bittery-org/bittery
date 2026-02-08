@@ -658,7 +658,9 @@ export const shareRouter = router({
 					),
 				);
 
-			if ((totalCodesResult[0]?.count ?? 0) >= MAX_VERIFICATION_CODES_PER_EMAIL) {
+			if (
+				(totalCodesResult[0]?.count ?? 0) >= MAX_VERIFICATION_CODES_PER_EMAIL
+			) {
 				throw new TRPCError({
 					code: "TOO_MANY_REQUESTS",
 					message:

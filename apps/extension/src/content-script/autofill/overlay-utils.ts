@@ -30,7 +30,8 @@ function createOverlayHost(field: AutofillField, minWidth = 300) {
 	shadowHost.style.zIndex = "2147483647";
 	shadowHost.style.opacity = "0";
 	shadowHost.style.transform = "translateY(-8px)";
-	shadowHost.style.transition = "opacity 0.15s ease-out, transform 0.15s ease-out";
+	shadowHost.style.transition =
+		"opacity 0.15s ease-out, transform 0.15s ease-out";
 	document.body.appendChild(shadowHost);
 
 	const shadow = shadowHost.attachShadow({ mode: "open" });

@@ -5,9 +5,9 @@
  * and fetches deleted items accordingly. Components don't need to care about the mode.
  */
 
-import type { MultiAccountDeletedItem as CoreMultiAccountDeletedItem } from "../services/item-service";
 import { useQuery } from "@tanstack/react-query";
 import { useCoreContext } from "../context/platform-context";
+import type { MultiAccountDeletedItem as CoreMultiAccountDeletedItem } from "../services/item-service";
 import { useAccountsInfo } from "./use-accounts-info";
 
 export type DeletedItem = CoreMultiAccountDeletedItem;

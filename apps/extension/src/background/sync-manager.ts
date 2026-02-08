@@ -157,7 +157,8 @@ async function catchUpMissedEvents(): Promise<void> {
 		}
 
 		const clientId = await getClientId();
-		const client = await syncCacheService.getClientForEmail(syncConnectionEmail);
+		const client =
+			await syncCacheService.getClientForEmail(syncConnectionEmail);
 		const result = await client.sync.getEventsSince.query({
 			since: lastTimestamp,
 		});
@@ -177,7 +178,8 @@ async function catchUpMissedEvents(): Promise<void> {
 			console.info(
 				`[sync-manager] Catch-up applied ${processed} missed event(s)`,
 			);
-			const latestTimestamp = result.events[result.events.length - 1]?.timestamp;
+			const latestTimestamp =
+				result.events[result.events.length - 1]?.timestamp;
 			if (latestTimestamp) {
 				await chrome.storage.local.set({
 					[LAST_SYNC_KEY]: latestTimestamp,
@@ -185,7 +187,10 @@ async function catchUpMissedEvents(): Promise<void> {
 			}
 		}
 	} catch (error) {
-		console.error("[sync-manager] Catch-up failed, full refetch will happen:", error);
+		console.error(
+			"[sync-manager] Catch-up failed, full refetch will happen:",
+			error,
+		);
 	}
 }
 
@@ -325,7 +330,10 @@ async function processEvent(eventStr: string): Promise<void> {
 		}
 
 		if (!isSyncEventPayload(parsed)) {
-			console.warn("[sync-manager] Ignoring malformed sync event payload", parsed);
+			console.warn(
+				"[sync-manager] Ignoring malformed sync event payload",
+				parsed,
+			);
 			return;
 		}
 

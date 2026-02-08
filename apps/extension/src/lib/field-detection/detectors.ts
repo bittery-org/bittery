@@ -1,7 +1,11 @@
 import { getAllInputs } from "./dom";
 import { shouldExcludeField } from "./exclusion";
 import { detectFieldType } from "./field-type";
-import type { CreditCardFieldType, DetectedField, IdentityFieldType } from "./types";
+import type {
+	CreditCardFieldType,
+	DetectedField,
+	IdentityFieldType,
+} from "./types";
 
 /**
  * Check if a field type is a credit card field

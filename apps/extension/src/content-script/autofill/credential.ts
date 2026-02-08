@@ -17,7 +17,10 @@ import {
 
 // Handle field focus
 export async function handleFieldFocus(field: CredentialField) {
-	if (contentState.currentFocusedField && contentState.currentFocusedField !== field) {
+	if (
+		contentState.currentFocusedField &&
+		contentState.currentFocusedField !== field
+	) {
 		hideAutofillOverlay(contentState.currentFocusedField);
 		hideFieldIcon(contentState.currentFocusedField);
 	}
@@ -118,7 +121,11 @@ function handleKeyboardNavigation(event: KeyboardEvent) {
 			contentState.currentFocusedField = null;
 		}
 	}
-	if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Enter") {
+	if (
+		event.key === "ArrowDown" ||
+		event.key === "ArrowUp" ||
+		event.key === "Enter"
+	) {
 		if (contentState.currentAutofillIframe) {
 			event.preventDefault();
 			contentState.currentAutofillIframe.contentWindow?.postMessage(
@@ -160,7 +167,9 @@ function isPotentialOtpSegmentInput(input: HTMLInputElement): boolean {
 	);
 }
 
-function getOtpInputCandidates(referenceInput: HTMLInputElement): HTMLInputElement[] {
+function getOtpInputCandidates(
+	referenceInput: HTMLInputElement,
+): HTMLInputElement[] {
 	const referenceForm = referenceInput.closest("form");
 	const detectedOtpInputs = detectOTPFields(document)
 		.map((field) => field.element)
@@ -177,7 +186,9 @@ function getOtpInputCandidates(referenceInput: HTMLInputElement): HTMLInputEleme
 		fallbackScope.querySelectorAll<HTMLInputElement>("input"),
 	).filter(isPotentialOtpSegmentInput);
 
-	let candidates = Array.from(new Set([...detectedOtpInputs, ...fallbackOtpSegments]));
+	let candidates = Array.from(
+		new Set([...detectedOtpInputs, ...fallbackOtpSegments]),
+	);
 
 	if (referenceForm) {
 		const sameFormCandidates = candidates.filter(
@@ -231,7 +242,8 @@ async function autofillTotpCodeForItem(
 			: otpInputs[0];
 		if (!targetInput) return false;
 
-		const valueToFill = targetInput.maxLength === 1 ? (otpCode[0] ?? "") : otpCode;
+		const valueToFill =
+			targetInput.maxLength === 1 ? (otpCode[0] ?? "") : otpCode;
 		fillInputWithEvents(targetInput, valueToFill);
 		return true;
 	} catch (error) {
@@ -241,7 +253,10 @@ async function autofillTotpCodeForItem(
 }
 
 // Handle autofill selection
-async function handleAutofillSelect(field: CredentialField, item: DecryptedItem) {
+async function handleAutofillSelect(
+	field: CredentialField,
+	item: DecryptedItem,
+) {
 	await chrome.runtime.sendMessage({
 		type: "UPDATE_AUTOFILL_TIMESTAMP",
 	});
@@ -253,7 +268,10 @@ async function handleAutofillSelect(field: CredentialField, item: DecryptedItem)
 	} else {
 		if (field.type === "password" && item.password) {
 			fillInputWithEvents(field.input, item.password);
-		} else if ((field.type === "username" || field.type === "email") && item.username) {
+		} else if (
+			(field.type === "username" || field.type === "email") &&
+			item.username
+		) {
 			fillInputWithEvents(field.input, item.username);
 		}
 

@@ -10,7 +10,11 @@
  */
 
 import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
-import type { DeltaSyncClient, ItemCacheAdapter, SyncEvent } from "@bittery/sync";
+import type {
+	DeltaSyncClient,
+	ItemCacheAdapter,
+	SyncEvent,
+} from "@bittery/sync";
 import { performDeltaSync } from "@bittery/sync";
 import { storage } from "../../lib/storage";
 import { desktopClient } from "../desktop-client";
@@ -24,10 +28,7 @@ export type SyncConnectionContext = {
 	token: string;
 };
 
-type ActiveAccount =
-	| { type: "single"; email: string }
-	| { type: "all" }
-	| null;
+type ActiveAccount = { type: "single"; email: string } | { type: "all" } | null;
 
 type VaultKeyLike = {
 	vaultId: string;
@@ -84,7 +85,10 @@ const defaultDeps: SyncCacheServiceDeps = {
 	desktopClient,
 	defaultClient: trpcClient as unknown as SyncEventQueryClient,
 	createAccountClient: (token, serverUrl) =>
-		createAccountTrpcClient(token, serverUrl) as unknown as SyncEventQueryClient,
+		createAccountTrpcClient(
+			token,
+			serverUrl,
+		) as unknown as SyncEventQueryClient,
 	deltaSync: performDeltaSync,
 	logger: console,
 };
@@ -150,7 +154,8 @@ export function createSyncCacheService(
 		}
 
 		try {
-			const desktopToken = await deps.desktopClient.getAuthToken(normalizedEmail);
+			const desktopToken =
+				await deps.desktopClient.getAuthToken(normalizedEmail);
 			if (!desktopToken) {
 				return null;
 			}
@@ -164,7 +169,9 @@ export function createSyncCacheService(
 
 	async function getServerUrlForEmail(email?: string | null): Promise<string> {
 		if (email) {
-			const accountScoped = await deps.storage.getServerUrl(normalizeEmail(email));
+			const accountScoped = await deps.storage.getServerUrl(
+				normalizeEmail(email),
+			);
 			if (accountScoped) {
 				return accountScoped;
 			}

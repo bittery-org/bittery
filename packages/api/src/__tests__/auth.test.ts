@@ -31,7 +31,9 @@ import {
 	truncateAll,
 } from "./test-utils";
 
-function toSignupCryptoInput(data: Awaited<ReturnType<typeof generateTestAuthCryptoData>>) {
+function toSignupCryptoInput(
+	data: Awaited<ReturnType<typeof generateTestAuthCryptoData>>,
+) {
 	return {
 		secretKeyHint: data.secretKeyHint,
 		srpSalt: data.srpSalt,
@@ -260,7 +262,11 @@ describe("Auth Router", () => {
 		test("should return current user data when authenticated", async () => {
 			const seedEmail = generateTestEmail();
 			const cryptoData = authCryptoFixture;
-			const { userId, email: createdEmail, caller } = await setup(authRouter, {
+			const {
+				userId,
+				email: createdEmail,
+				caller,
+			} = await setup(authRouter, {
 				name: "Current User",
 				email: seedEmail,
 				secretKeyHint: cryptoData.secretKeyHint,

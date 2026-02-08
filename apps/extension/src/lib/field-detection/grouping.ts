@@ -1,5 +1,5 @@
-import { isFieldVisible } from "./dom";
 import { isCreditCardFieldType, isIdentityFieldType } from "./detectors";
+import { isFieldVisible } from "./dom";
 import { detectMultiStepForm } from "./form-heuristics";
 import type {
 	DetectedCreditCardForm,
@@ -239,7 +239,8 @@ export function findCredentialPair(fields: DetectedField[]): {
 	if (passwordFields.length > 0) {
 		// Prefer visible password fields
 		passwordField =
-			passwordFields.find((f) => isFieldVisible(f.element)) || passwordFields[0];
+			passwordFields.find((f) => isFieldVisible(f.element)) ||
+			passwordFields[0];
 	}
 
 	// Find best username/email field
@@ -248,7 +249,9 @@ export function findCredentialPair(fields: DetectedField[]): {
 	);
 	if (usernameFields.length > 0) {
 		// Prefer visible fields with higher confidence
-		const visibleUserFields = usernameFields.filter((f) => isFieldVisible(f.element));
+		const visibleUserFields = usernameFields.filter((f) =>
+			isFieldVisible(f.element),
+		);
 		if (visibleUserFields.length > 0) {
 			// Sort by confidence and take the best
 			visibleUserFields.sort((a, b) => b.confidence - a.confidence);

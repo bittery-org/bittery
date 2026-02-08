@@ -191,8 +191,12 @@ describe("Share Router", () => {
 				}),
 			]);
 
-			const successCount = results.filter((r) => r.status === "fulfilled").length;
-			const failureCount = results.filter((r) => r.status === "rejected").length;
+			const successCount = results.filter(
+				(r) => r.status === "fulfilled",
+			).length;
+			const failureCount = results.filter(
+				(r) => r.status === "rejected",
+			).length;
 			expect(successCount).toBe(1);
 			expect(failureCount).toBe(1);
 		});
@@ -215,8 +219,10 @@ describe("Share Router", () => {
 		});
 
 		test("should only return own links for member", async () => {
-			const [{ userId: ownerId, caller: ownerCaller }, { userId: memberId, caller }] =
-				await Promise.all([setup(shareRouter), setup(shareRouter)]);
+			const [
+				{ userId: ownerId, caller: ownerCaller },
+				{ userId: memberId, caller },
+			] = await Promise.all([setup(shareRouter), setup(shareRouter)]);
 			const vaultId = await createTestVault(ownerId);
 			const itemId = await createTestItem(vaultId, ownerId);
 			await addVaultMember(vaultId, memberId, "member");
@@ -470,7 +476,9 @@ describe("Share Router", () => {
 				Array.from({ length: 10 }, () => caller.accessPublic({ token })),
 			);
 
-			const successCount = attempts.filter((a) => a.status === "fulfilled").length;
+			const successCount = attempts.filter(
+				(a) => a.status === "fulfilled",
+			).length;
 			expect(successCount).toBe(1);
 
 			const link = await db.query.shareLink.findFirst({

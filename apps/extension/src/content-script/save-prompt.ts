@@ -1,7 +1,4 @@
-import type {
-	ActiveSavePrompt,
-	CapturedCredentials,
-} from "./types";
+import type { ActiveSavePrompt, CapturedCredentials } from "./types";
 
 let activeSavePrompt: ActiveSavePrompt | null = null;
 

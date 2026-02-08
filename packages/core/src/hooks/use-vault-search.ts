@@ -9,11 +9,11 @@
 import type { ItemCategory } from "@bittery/shared/types";
 import { useMemo } from "react";
 import { useAllVaultKeys } from "./use-all-vault-keys";
+import { useCrossVaultTags } from "./use-cross-vault-tags";
 import type { MultiAccountItem } from "./use-items";
+import { useItems } from "./use-items";
 import { useVaultInfo } from "./use-vault-info";
 import { useVaultItems } from "./use-vault-items";
-import { useCrossVaultTags } from "./use-cross-vault-tags";
-import { useItems } from "./use-items";
 
 /**
  * Search result type for vault search

@@ -82,7 +82,9 @@ async function routeRuntimeMessage(message: RuntimeMessage): Promise<unknown> {
 		// Authentication
 		case "LOGIN": {
 			const result = await handleLogin(
-				getPayload<{ email: string; password: string; secretKey: string }>(message),
+				getPayload<{ email: string; password: string; secretKey: string }>(
+					message,
+				),
 			);
 			if (result.success) {
 				ensureSyncInitialized("LOGIN");
@@ -177,7 +179,9 @@ async function routeRuntimeMessage(message: RuntimeMessage): Promise<unknown> {
 		// Credential management
 		case "CHECK_EXISTING_CREDENTIALS": {
 			return handleCheckExistingCredentials(
-				getPayload<{ url: string; username?: string; password?: string }>(message),
+				getPayload<{ url: string; username?: string; password?: string }>(
+					message,
+				),
 			);
 		}
 
@@ -319,4 +323,3 @@ export function registerBackgroundMessageRouter(): void {
 		return true; // Keep channel open for async response.
 	});
 }
-

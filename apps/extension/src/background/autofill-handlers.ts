@@ -14,7 +14,10 @@ import {
 	updateActivity,
 } from "./session-manager";
 import type { MessageResponse } from "./types";
-import { getDecryptedItemsForCurrentMode, hostnameMatches } from "./vault-utils";
+import {
+	getDecryptedItemsForCurrentMode,
+	hostnameMatches,
+} from "./vault-utils";
 
 async function isDesktopUnlockedNow(): Promise<boolean> {
 	const status =

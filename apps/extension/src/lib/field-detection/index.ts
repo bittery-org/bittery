@@ -8,19 +8,6 @@
  * - Advanced heuristics for field type identification
  */
 
-export type {
-	CreditCardFieldType,
-	DetectedCreditCardForm,
-	DetectedField,
-	DetectedIdentityForm,
-	FormContext,
-	IdentityFieldType,
-} from "./types";
-
-export { FIELD_PATTERNS, MULTI_STEP_INDICATORS } from "./patterns";
-export { getAllInputs, isFieldVisible } from "./dom";
-export { shouldExcludeField } from "./exclusion";
-export { detectFieldType } from "./field-type";
 export {
 	detectAllFields,
 	detectCredentialFields,
@@ -30,12 +17,9 @@ export {
 	isCreditCardFieldType,
 	isIdentityFieldType,
 } from "./detectors";
-export {
-	findCredentialPair,
-	groupCreditCardFieldsByForm,
-	groupFieldsByForm,
-	groupIdentityFieldsByForm,
-} from "./grouping";
+export { getAllInputs, isFieldVisible } from "./dom";
+export { shouldExcludeField } from "./exclusion";
+export { detectFieldType } from "./field-type";
 export {
 	detectMultiStepForm,
 	isLikelyAddressForm,
@@ -43,4 +27,19 @@ export {
 	isLikelyPaymentForm,
 	isLikelyRegistrationForm,
 } from "./form-heuristics";
+export {
+	findCredentialPair,
+	groupCreditCardFieldsByForm,
+	groupFieldsByForm,
+	groupIdentityFieldsByForm,
+} from "./grouping";
 export { createEnhancedObserver, observeShadowRoots } from "./observers";
+export { FIELD_PATTERNS, MULTI_STEP_INDICATORS } from "./patterns";
+export type {
+	CreditCardFieldType,
+	DetectedCreditCardForm,
+	DetectedField,
+	DetectedIdentityForm,
+	FormContext,
+	IdentityFieldType,
+} from "./types";
