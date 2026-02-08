@@ -1,3 +1,4 @@
+/** biome-ignore-all lint/style/noNonNullAssertion: The queries are only enabled when a team id is there */
 import { useTRPC } from "@bittery/shared/trpc";
 import {
 	Card,

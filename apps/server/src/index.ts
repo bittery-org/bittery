@@ -2,6 +2,7 @@ import "dotenv/config";
 import { createContext } from "@bittery/api/context";
 import { appRouter } from "@bittery/api/routers/index";
 import { createPresignedDownload } from "@bittery/api/storage/s3";
+import runMigrations from "@bittery/db/migrate";
 import { JobRunner } from "@bittery/jobs";
 import { createPubSubAdapter } from "@bittery/pubsub";
 import { trpcServer } from "@hono/trpc-server";
@@ -9,7 +10,6 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { createSyncRouter } from "./sync/sse-handler";
-import runMigrations from "@bittery/db/migrate";
 
 await runMigrations();
 
@@ -36,7 +36,8 @@ app.route("/sync", syncRouter);
 
 // Start pg-boss job runner (replaces setInterval-based pruning)
 const jobRunner = new JobRunner({
-	connectionString: process.env.DATABASE_URL!,
+	// @ts-expect-error - we now its defined
+	connectionString: process.env.DATABASE_URL,
 });
 await jobRunner.start();
 

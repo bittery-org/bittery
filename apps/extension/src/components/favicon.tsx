@@ -31,7 +31,9 @@ function getInitials(title: string): string {
 	const words = cleaned.split(/\s+/);
 
 	if (words.length >= 2) {
-		return (words[0]![0]! + words[1]![0]!).toUpperCase();
+		const first = words[0]?.[0] ?? "";
+		const second = words[1]?.[0] ?? "";
+		return (first + second).toUpperCase();
 	}
 
 	return cleaned.slice(0, 2).toUpperCase();
@@ -68,7 +70,9 @@ function getAvatarColor(title: string): string {
 		hash = title.charCodeAt(i) + ((hash << 5) - hash);
 	}
 
-	return colors[Math.abs(hash) % colors.length]!;
+	const color = colors[Math.abs(hash) % colors.length] ?? "bg-gray-50";
+
+	return color;
 }
 
 export function Favicon({

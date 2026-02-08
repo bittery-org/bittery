@@ -22,6 +22,7 @@
 			"!**/build",
 			"!packages/crypto/wasm",
 			"!packages/crypto/napi",
+			"!packages/ui/src/components",
 			"!**/target",
 			"!**/.turbo",
 			"!**/dev-dist",
