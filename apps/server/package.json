@@ -18,6 +18,7 @@
 		"drizzle-orm": "catalog:",
 		"@bittery/api": "workspace:*",
 		"@bittery/auth": "workspace:*",
+		"@bittery/crypto-napi": "workspace:*",
 		"@bittery/db": "workspace:*",
 		"@bittery/jobs": "workspace:*",
 		"@bittery/pubsub": "workspace:*"

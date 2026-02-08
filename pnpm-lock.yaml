@@ -442,6 +442,9 @@ importers:
       '@bittery/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@bittery/crypto-napi':
+        specifier: workspace:*
+        version: link:../../packages/crypto/napi
       '@bittery/db':
         specifier: workspace:*
         version: link:../../packages/db
