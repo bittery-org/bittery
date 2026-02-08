@@ -38,7 +38,8 @@
     "db:watch": "turbo -F @bittery/db db:watch",
     "db:test:setup": "turbo -F @bittery/db db:test:setup",
     "db:stop": "turbo -F @bittery/db db:stop",
-    "db:down": "turbo -F @bittery/db db:down"
+    "db:down": "turbo -F @bittery/db db:down",
+    "start:server": "pnpm --filter server run start"
   },
   "dependencies": {
     "dotenv": "^17.2.2",

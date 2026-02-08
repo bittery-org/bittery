@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client as PgClient } from "pg";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 
 export default async function runMigrations() {
   let pgClient: PgClient | null = null;
@@ -14,8 +14,9 @@ export default async function runMigrations() {
     const db = drizzle(pgClient);
 
     const migrationsFolder = join(
-      dirname(import.meta.url.replace("file:/", "")),
-      "migrations",
+      process.cwd(),
+      "../..",
+      "packages/db/src/migrations",
     );
 
     console.log(migrationsFolder);
