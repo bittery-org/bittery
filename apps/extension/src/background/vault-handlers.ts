@@ -4,28 +4,29 @@
  */
 
 import type { DecryptedItem } from "@bittery/shared/types";
+import { storage } from "../lib/storage";
 import { core } from "./core-instance";
+import { desktopSync } from "./desktop-sync";
 import { updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
+import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
 async function getAllDecryptedItems(): Promise<Array<DecryptedItem | null>> {
-	const { accountsInfo, isAllAccountsMode } =
-		await core.accounts.resolveAccounts();
-	return core.items.fetchAndDecryptItems(accountsInfo, { isAllAccountsMode });
+	return getDecryptedItemsForCurrentMode();
 }
 
 async function resolveItemAccountEmail(
 	itemId: string,
 ): Promise<string | undefined> {
-	const { accountsInfo, isAllAccountsMode } =
-		await core.accounts.resolveAccounts();
-	if (!isAllAccountsMode) return undefined;
+	const activeAccount = await storage.getActiveAccount();
+	if (activeAccount?.type !== "all") return undefined;
 
-	const items = await core.items.fetchAndDecryptItems(accountsInfo, {
-		isAllAccountsMode: true,
-	});
-	const item = items.find((candidate) => candidate.id === itemId);
+	const items = await getAllDecryptedItems();
+	const item = items.find((candidate) => candidate?.id === itemId) as
+		| (DecryptedItem & { account?: { email?: string } })
+		| undefined;
+
 	return item?.account?.email;
 }
 
@@ -51,6 +52,15 @@ export async function handleGetVaultItem(payload: {
 	updateActivity();
 
 	const { itemId } = payload;
+	const desktopStatus = desktopSync.getLastStatus();
+	const useDesktopPath = !!desktopStatus?.available && !desktopStatus.locked;
+
+	if (useDesktopPath) {
+		const items = await getAllDecryptedItems();
+		const item = items.find((candidate) => candidate?.id === itemId) ?? null;
+		return { success: true, item };
+	}
+
 	const accountEmail = await resolveItemAccountEmail(itemId);
 
 	const result = await core.items.fetchAndDecryptItem(

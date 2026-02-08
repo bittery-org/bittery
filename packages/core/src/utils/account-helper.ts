@@ -8,7 +8,7 @@ import {
 	findAccountForItem as findAccountForItemCore,
 	getClientForAccount as getClientForAccountCore,
 	getItemAccountEmail as getItemAccountEmailCore,
-} from "../../services/account-resolver";
+} from "../services/account-resolver";
 import type { useTRPCClient } from "@bittery/shared";
 import type { IStorageAdapter } from "@bittery/storage";
 import type { DeletedItem } from "../hooks/use-deleted-items";

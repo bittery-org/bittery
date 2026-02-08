@@ -6,14 +6,13 @@
 import type { DecryptedItem } from "@bittery/shared/types";
 import { storage } from "../lib/storage";
 import { AUTOFILL_REAUTH_WINDOW_MS } from "./constants";
-import { core } from "./core-instance";
 import {
 	getLastActivityTimestamp,
 	isUnlocked,
 	updateActivity,
 } from "./session-manager";
 import type { MessageResponse } from "./types";
-import { hostnameMatches } from "./vault-utils";
+import { getDecryptedItemsForCurrentMode, hostnameMatches } from "./vault-utils";
 
 /**
  * Handle CHECK_AUTOFILL_AUTH message - Check if autofill is authenticated
@@ -51,12 +50,10 @@ export async function handleUpdateAutofillTimestamp(): Promise<MessageResponse> 
 }
 
 /**
- * Get all decrypted items from @bittery/core.
+ * Get all decrypted items for the current runtime mode.
  */
 async function getAllDecryptedItems(): Promise<Array<DecryptedItem | null>> {
-	const { accountsInfo, isAllAccountsMode } =
-		await core.accounts.resolveAccounts();
-	return core.items.fetchAndDecryptItems(accountsInfo, { isAllAccountsMode });
+	return getDecryptedItemsForCurrentMode();
 }
 
 /**

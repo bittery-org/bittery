@@ -7,8 +7,8 @@
  * - Sync context from ExtensionSyncProvider
  */
 
-import type { ISyncContext } from "@bittery/core/hooks";
 import { PlatformProvider } from "@bittery/core/hooks";
+import type { ISyncContext } from "@bittery/types";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { cryptoAdapter } from "@/lib/crypto-adapter";

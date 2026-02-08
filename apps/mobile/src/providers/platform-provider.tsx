@@ -7,11 +7,8 @@
  * - Real-time sync using WebSocket connection to server
  */
 
-import {
-	type ICrypto,
-	type ISyncContext,
-	PlatformProvider,
-} from "@bittery/core/hooks";
+import { PlatformProvider } from "@bittery/core/hooks";
+import type { ICrypto, ISyncContext } from "@bittery/types";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useMemo } from "react";

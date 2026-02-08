@@ -1,4 +1,4 @@
-import type { IQueryInvalidator } from "@bittery/core/hooks";
+import type { IQueryInvalidator } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
 
 /**

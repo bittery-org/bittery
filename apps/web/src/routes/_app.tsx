@@ -1,5 +1,4 @@
 import {
-	Separator,
 	SidebarInset,
 	SidebarProvider,
 	SidebarTrigger,

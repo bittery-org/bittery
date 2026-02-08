@@ -4,8 +4,13 @@ import type {
 	ItemCategory,
 } from "@bittery/shared/types";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
-import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
-import type { ICrypto } from "../types";
+import type {
+	CachedEncryptedItem,
+	CachedVaultMetadata,
+	ICrypto,
+	RawEncryptedItem,
+	RawEncryptedItemWithVault,
+} from "@bittery/types";
 import type {
 	AccountInfo,
 	AccountResolver,
@@ -13,28 +18,7 @@ import type {
 } from "./account-resolver";
 import type { CacheManager, EncryptedPayload } from "./cache-manager";
 
-export interface RawEncryptedItem {
-	id: string;
-	vaultId: string;
-	category: string;
-	favorite: boolean;
-	encryptedData: string;
-	encryptionIv: string;
-	encryptionAlgorithm: string;
-	createdAt: string | Date;
-	updatedAt: string | Date;
-	deletedAt?: string | Date | null;
-}
-
-export interface RawEncryptedItemWithVault extends RawEncryptedItem {
-	vault: {
-		id: string;
-		name: string;
-		type: string;
-		icon: string | null;
-		imageUrl: string | null;
-	};
-}
+export type { RawEncryptedItem, RawEncryptedItemWithVault };
 
 export interface RawEncryptedItemWithVersion extends RawEncryptedItem {
 	version: number;

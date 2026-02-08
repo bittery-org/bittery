@@ -5,10 +5,11 @@
 
 import { storage } from "../lib/storage";
 import { core } from "./core-instance";
+import { desktopSync } from "./desktop-sync";
 import { isUnlocked, updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
-import { hostnameMatches } from "./vault-utils";
+import { getDecryptedItemsForCurrentMode, hostnameMatches } from "./vault-utils";
 
 /**
  * Helper function to extract hostname from URL
@@ -23,9 +24,7 @@ function extractHostname(url: string): string {
 }
 
 async function getAllItemsForMatching() {
-	const { accountsInfo, isAllAccountsMode } =
-		await core.accounts.resolveAccounts();
-	return core.items.fetchAndDecryptItems(accountsInfo, { isAllAccountsMode });
+	return getDecryptedItemsForCurrentMode();
 }
 
 async function resolveAccountEmailForVault(
@@ -36,7 +35,17 @@ async function resolveAccountEmailForVault(
 		return activeAccount.email;
 	}
 
-	const unlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
+	const localUnlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
+	const desktopStatus = desktopSync.getLastStatus();
+	const desktopUnlockedEmails =
+		desktopStatus?.available && !desktopStatus.locked
+			? (desktopStatus.unlockedAccounts ?? [])
+			: [];
+
+	const unlockedEmails = Array.from(
+		new Set([...localUnlockedEmails, ...desktopUnlockedEmails]),
+	);
+
 	for (const email of unlockedEmails) {
 		const vaultKeys = await storage.getVaultKeys(email);
 		if (vaultKeys?.some((vaultKey) => vaultKey.vaultId === vaultId)) {
@@ -50,16 +59,16 @@ async function resolveAccountEmailForVault(
 async function resolveAccountEmailForItem(
 	itemId: string,
 ): Promise<string | undefined> {
-	const { accountsInfo, isAllAccountsMode } =
-		await core.accounts.resolveAccounts();
-	if (!isAllAccountsMode) {
+	const activeAccount = await storage.getActiveAccount();
+	if (activeAccount?.type !== "all") {
 		return undefined;
 	}
 
-	const items = await core.items.fetchAndDecryptItems(accountsInfo, {
-		isAllAccountsMode: true,
-	});
-	const item = items.find((candidate) => candidate.id === itemId);
+	const items = await getAllItemsForMatching();
+	const item = items.find((candidate) => candidate?.id === itemId) as
+		| { account?: { email?: string } }
+		| undefined;
+
 	return item?.account?.email;
 }
 
@@ -94,7 +103,10 @@ export async function handleCheckExistingCredentials(payload: {
 	}
 
 	const items = await getAllItemsForMatching();
-	const matchingItems = items.filter((item) =>
+	const resolvedItems = items.filter(
+		(item): item is NonNullable<(typeof items)[number]> => item !== null,
+	);
+	const matchingItems = resolvedItems.filter((item) =>
 		hostnameMatches(item?.url ?? "", hostname),
 	);
 

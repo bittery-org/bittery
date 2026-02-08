@@ -7,11 +7,8 @@
  * - Sync context from DesktopSyncProvider
  */
 
-import {
-	type ICrypto,
-	type ISyncContext,
-	PlatformProvider,
-} from "@bittery/core/hooks";
+import { PlatformProvider } from "@bittery/core/hooks";
+import type { ICrypto, ISyncContext } from "@bittery/types";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { storage } from "@/lib/storage";

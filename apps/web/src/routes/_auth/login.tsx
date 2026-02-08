@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { z } from "zod";
 import SignInForm from "@/components/sign-in-form";

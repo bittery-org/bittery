@@ -1,6 +1,6 @@
 import type { DecryptedItem } from "@bittery/shared/types";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
-import type { ICrypto } from "../types";
+import type { ICrypto } from "@bittery/types";
 import type { AccountResolver, DefaultTrpcClient } from "./account-resolver";
 
 export type ShareExpirationOption =

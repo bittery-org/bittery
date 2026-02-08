@@ -5,7 +5,7 @@
  */
 
 import type { IStorageAdapter, VaultKeyData } from "@bittery/storage";
-import type { ICrypto } from "../types";
+import type { ICrypto } from "@bittery/types";
 
 /**
  * Input for SRP login (full login with password + secret key)

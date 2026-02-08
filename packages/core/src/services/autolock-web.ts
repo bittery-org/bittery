@@ -8,7 +8,7 @@
  */
 
 import type { IStorageAdapter } from "@bittery/storage/adapter";
-import type { IAutolockService } from "../types";
+import type { IAutolockService } from "@bittery/types";
 
 /**
  * Activity events to track for resetting the inactivity timer

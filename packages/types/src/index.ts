@@ -17,6 +17,33 @@ export interface DerivedKeys {
 	masterUnlockKey: Uint8Array;
 }
 
+/**
+ * Crypto interface for platform-specific encryption operations.
+ * All platforms (WASM, Tauri, FFI) implement this shape.
+ */
+export interface ICrypto {
+	decrypt(encryptedData: EncryptedData, key: Uint8Array): Promise<string>;
+	encrypt(plaintext: string, key: Uint8Array): Promise<EncryptedData>;
+	generateEncryptionKey(): Promise<Uint8Array>;
+	deriveKeys(
+		password: string,
+		secretKey: string,
+		email: string,
+	): Promise<DerivedKeys>;
+	generateClientEphemeral(): SRPClientEphemeral | Promise<SRPClientEphemeral>;
+	deriveClientSession(
+		secret: string,
+		challenge: SRPServerChallenge,
+		password: string,
+	): Promise<SRPClientSession>;
+	verifyServerSession(
+		publicKey: string,
+		session: SRPClientSession,
+		proof: string,
+	): Promise<void>;
+	validateSecretKey(secretKey: string): boolean | Promise<boolean>;
+}
+
 // ============================================================================
 // Encryption Types
 // ============================================================================
@@ -181,4 +208,88 @@ export interface ItemCacheMetadata {
 	lastFullSyncAt: number;
 	itemCount: number;
 	cacheVersion: number;
+}
+
+// ============================================================================
+// Hook/Platform Integration Types
+// ============================================================================
+
+/**
+ * Query invalidator interface for cache invalidation after mutations.
+ * Matches the return type of createQueryInvalidator() from @bittery/sync.
+ */
+export interface IQueryInvalidator {
+	invalidateItem(itemId: string, vaultId: string): Promise<void>;
+	invalidateVaultList(vaultId: string): Promise<void>;
+	invalidateVaultKeys(): Promise<void>;
+	invalidateDeletedItems(vaultId: string): Promise<void>;
+	invalidateTeam(): Promise<void>;
+	invalidateTeamInvitations(): Promise<void>;
+	invalidateShare(itemId?: string): Promise<void>;
+	invalidateVaultMembers(vaultId: string): Promise<void>;
+}
+
+/**
+ * Sync context - subset of sync state needed by shared hooks.
+ */
+export interface ISyncContext {
+	clientId: string;
+	isConnected: boolean;
+	isOnline: boolean;
+	invalidator: IQueryInvalidator;
+}
+
+/**
+ * Item decryption interface.
+ * @deprecated Use ICrypto from @bittery/types instead.
+ */
+export interface IItemDecrypt {
+	decrypt(encryptedData: EncryptedData, vaultKey: Uint8Array): Promise<string>;
+}
+
+/**
+ * Autolock service interface used by platform providers.
+ */
+export interface IAutolockService {
+	initialize(): Promise<void>;
+	recordActivity(): void;
+	shouldLock(): Promise<boolean>;
+	lock(): Promise<void>;
+	onLock(callback: () => void): () => void;
+	getTimeout(): Promise<number>;
+	setTimeout(ms: number): Promise<void>;
+	dispose(): void;
+}
+
+// ============================================================================
+// Raw Item Payload Types
+// ============================================================================
+
+/**
+ * Raw encrypted item returned by API/query layers.
+ */
+export interface RawEncryptedItem {
+	id: string;
+	vaultId: string;
+	category: string;
+	favorite: boolean;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+	createdAt: string | Date;
+	updatedAt: string | Date;
+	deletedAt?: string | Date | null;
+}
+
+/**
+ * Raw encrypted item with vault metadata.
+ */
+export interface RawEncryptedItemWithVault extends RawEncryptedItem {
+	vault: {
+		id: string;
+		name: string;
+		type: string;
+		icon: string | null;
+		imageUrl: string | null;
+	};
 }

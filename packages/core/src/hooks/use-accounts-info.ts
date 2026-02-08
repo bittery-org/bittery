@@ -3,7 +3,7 @@
  * Handles both single account and "All Accounts" mode.
  */
 
-import type { AccountInfo as CoreAccountInfo } from "../../services/account-resolver";
+import type { AccountInfo as CoreAccountInfo } from "../services/account-resolver";
 import { useQuery } from "@tanstack/react-query";
 import {
 	useCoreContext,

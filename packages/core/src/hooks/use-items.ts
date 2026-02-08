@@ -5,7 +5,7 @@
  * and fetches items accordingly. Components don't need to care about the mode.
  */
 
-import type { MultiAccountItem as CoreMultiAccountItem } from "../../services/item-service";
+import type { MultiAccountItem as CoreMultiAccountItem } from "../services/item-service";
 import { useQuery } from "@tanstack/react-query";
 import { useCoreContext } from "../context/platform-context";
 import { useAccountsInfo } from "./use-accounts-info";

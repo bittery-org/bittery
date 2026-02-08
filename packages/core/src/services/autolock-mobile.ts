@@ -11,7 +11,7 @@
  */
 
 import type { IStorageAdapter } from "@bittery/storage/adapter";
-import type { IAutolockService } from "../types";
+import type { IAutolockService } from "@bittery/types";
 
 /**
  * Extended storage adapter interface for mobile-specific methods

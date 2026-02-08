@@ -7,7 +7,7 @@
 import {
 	refreshVaultKeys as refreshVaultKeysCore,
 	type TRPCVaultClient,
-} from "../../services/vault-service";
+} from "../services/vault-service";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 
 /**
