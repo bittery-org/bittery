@@ -9,6 +9,9 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { createSyncRouter } from "./sync/sse-handler";
+import runMigrations from "@bittery/db/migrate";
+
+await runMigrations();
 
 const app = new Hono();
 
