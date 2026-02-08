@@ -65,8 +65,10 @@ bittery/
 │   │   ├── wasm/         # Built WASM package (@bittery/crypto-wasm)
 │   │   ├── napi/         # NAPI bindings for Bun/Node (@bittery/crypto-napi)
 │   │   └── expo-module/  # Expo module for React Native (@bittery/crypto-nitro)
+│   ├── core/             # Central business logic, services, and shared React hooks
 │   ├── db/               # Drizzle ORM schema + PostgreSQL migrations
-│   ├── hooks/            # Shared React hooks (auth, vault, items, sharing)
+│   ├── jobs/             # Job queue and scheduler (pg-boss)
+│   ├── pubsub/           # Publish-subscribe messaging abstraction
 │   ├── storage/          # Platform-specific storage adapters
 │   ├── sync/             # Offline sync, query invalidation, WebSocket sync manager
 │   ├── shared/           # Shared utilities, tRPC client helpers, types
@@ -76,9 +78,9 @@ bittery/
 ```
 
 **Key dependency flow:**
-- Apps → `hooks`, `storage`, `shared`, `sync`, `ui`, `types` + platform-specific crypto binding
-- `hooks` → `storage`, `shared` (platform-agnostic via `PlatformProvider` context)
-- `server` → `api`, `auth`, `db`
+- Apps → `core`, `storage`, `shared`, `sync`, `ui`, `types` + platform-specific crypto binding
+- `core` → `storage`, `shared`, `types` (platform-agnostic via `PlatformProvider` context)
+- `server` → `api`, `auth`, `db`, `jobs`, `pubsub`
 - `api` → `auth`, `db`
 - `auth` → `db`, `crypto-napi`
 
@@ -143,9 +145,9 @@ RSA key pair (per user):
   └─ Private key: encrypted with Master Unlock Key
 ```
 
-### PlatformProvider Pattern (`packages/hooks`)
+### Core Package (`packages/core`)
 
-All shared React hooks are platform-agnostic. Each app injects dependencies via `PlatformProvider`:
+Central business logic and shared React hooks. All apps inject dependencies via `PlatformProvider`:
 
 ```tsx
 <PlatformProvider storage={storage} crypto={crypto} sync={syncContext} autolock={autolockService}>
@@ -153,13 +155,9 @@ All shared React hooks are platform-agnostic. Each app injects dependencies via 
 </PlatformProvider>
 ```
 
-**Hook categories:**
-- `hooks/auth/` — `useLogin`, `useQuickUnlock`, `useBiometricUnlock`, `useLogout`, `useSessionState`, `useAccountSwitcher`
-- `hooks/items/` — `useCreateItem`, `useUpdateItem`, `useDeleteItem`, `useRestoreItem`, `useMoveItem`, `useToggleFavorite`
-- `hooks/vault/` — `useCreateVault`, `useUpdateVault`, `useDeleteVault`
-- `hooks/share/` — `useCreateShare`
-- `hooks/internal/` — Unified data access: `useItem`, `useItems`, `useVaultItems`, `useVaultSearch`, vault key decryption
-- `auth/` (non-React) — `performSRPLogin`, `performSRPUnlock`, `storeLoginSession`, `getSessionState` (used by extension service worker)
+**Key services:** `AccountResolver`, `AuthService`, `CacheManager`, `ItemService`, `VaultService`, `ShareService`
+
+**Auth utilities (non-React):** `performSRPLogin`, `performSRPUnlock`, `storeLoginSession`, `getSessionState` (used by extension service worker)
 
 ### Storage Adapters (`packages/storage`)
 
@@ -180,7 +178,7 @@ All implement `IStorageAdapter` interface. Master Unlock Key is kept in memory o
 
 **tRPC:** Router changes in `packages/api` auto-propagate types to all clients. Use `protectedProcedure` for authenticated endpoints.
 
-**Cross-platform:** Never import crypto primitives directly — use app-specific wrappers. All apps use `@bittery/hooks` with `PlatformProvider` for shared logic.
+**Cross-platform:** Never import crypto primitives directly — use app-specific wrappers. All apps use `@bittery/core` with `PlatformProvider` for shared logic.
 
 **Item types:** Categories: `login`, `secure-note`, `credit-card`, `identity`, `totp`. `overview` = unencrypted searchable metadata, `encryptedData` = encrypted sensitive fields. Always generate random IV per encryption.
 
