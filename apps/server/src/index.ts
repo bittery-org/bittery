@@ -2,6 +2,8 @@ import "dotenv/config";
 import { createContext } from "@bittery/api/context";
 import { appRouter } from "@bittery/api/routers/index";
 import { createPresignedDownload } from "@bittery/api/storage/s3";
+import { JobRunner } from "@bittery/jobs";
+import { createPubSubAdapter } from "@bittery/pubsub";
 import { trpcServer } from "@hono/trpc-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -22,9 +24,18 @@ app.use(
 	}),
 );
 
+// Initialize PubSub adapter (Redis if REDIS_URL is set, in-memory otherwise)
+const pubsub = await createPubSubAdapter();
+
 // Mount sync router for SSE real-time events
-const syncRouter = createSyncRouter();
+const syncRouter = createSyncRouter(pubsub);
 app.route("/sync", syncRouter);
+
+// Start pg-boss job runner (replaces setInterval-based pruning)
+const jobRunner = new JobRunner({
+	connectionString: process.env.DATABASE_URL!,
+});
+await jobRunner.start();
 
 app.get("/cdn/*", async (c) => {
 	const key = c.req.path.replace(/^\/cdn\//, "");

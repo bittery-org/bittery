@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { SyncEvent, SyncEventType } from "./types";
+import { getTypedMetadata } from "./types";
 
 /**
  * tRPC-like interface for generating query keys
@@ -77,12 +78,12 @@ export function getQueryKeysForEvent(
 			keys.push(["decrypted-item"]);
 			break;
 
-			case "item_deleted":
-				keys.push(trpc.vault.listAllItems.queryKey());
-				keys.push(trpc.vault.listAllDeletedItems.queryKey());
-				// Invalidate unified queries
-				keys.push(["items"]);
-				keys.push(["deleted-items"]);
+		case "item_deleted":
+			keys.push(trpc.vault.listAllItems.queryKey());
+			keys.push(trpc.vault.listAllDeletedItems.queryKey());
+			// Invalidate unified queries
+			keys.push(["items"]);
+			keys.push(["deleted-items"]);
 			if (vaultId) {
 				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
 				keys.push(trpc.vault.listDeletedItems.queryKey({ vaultId }));
@@ -93,12 +94,12 @@ export function getQueryKeysForEvent(
 			keys.push(["decrypted-item"]);
 			break;
 
-			case "item_restored":
-				keys.push(trpc.vault.listAllItems.queryKey());
-				keys.push(trpc.vault.listAllDeletedItems.queryKey());
-				// Invalidate unified queries
-				keys.push(["items"]);
-				keys.push(["deleted-items"]);
+		case "item_restored":
+			keys.push(trpc.vault.listAllItems.queryKey());
+			keys.push(trpc.vault.listAllDeletedItems.queryKey());
+			// Invalidate unified queries
+			keys.push(["items"]);
+			keys.push(["deleted-items"]);
 			if (vaultId) {
 				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
 				keys.push(trpc.vault.listDeletedItems.queryKey({ vaultId }));
@@ -109,7 +110,7 @@ export function getQueryKeysForEvent(
 			keys.push(["decrypted-item"]);
 			break;
 
-		case "item_moved":
+		case "item_moved": {
 			keys.push(trpc.vault.listAllItems.queryKey());
 			keys.push(trpc.vault.getItem.queryKey({ itemId: entityId }));
 			// Invalidate unified items queries
@@ -123,8 +124,11 @@ export function getQueryKeysForEvent(
 				keys.push(["vault-items", vaultId]);
 			}
 			// Source vault from metadata
-			if (event.metadata?.sourceVaultId) {
-				const sourceVaultId = event.metadata.sourceVaultId as string;
+			const movedMeta = getTypedMetadata(
+				event as SyncEvent & { type: "item_moved" },
+			);
+			if (movedMeta?.sourceVaultId) {
+				const sourceVaultId = movedMeta.sourceVaultId;
 				keys.push(trpc.vault.listItems.queryKey({ vaultId: sourceVaultId }));
 				// Invalidate useVaultItems queries for source vault (prefix match)
 				keys.push(["vault-items", sourceVaultId]);
@@ -132,6 +136,7 @@ export function getQueryKeysForEvent(
 			// Invalidate all decrypted items (prefix match)
 			keys.push(["decrypted-item"]);
 			break;
+		}
 
 		case "vault_created":
 			keys.push(trpc.vault.list.queryKey());
@@ -300,10 +305,10 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 				queryClient.invalidateQueries({
 					queryKey: trpc.vault.listAllDeletedItems.queryKey(),
 				}),
-					// Invalidate unified deleted items queries (used by useDeletedItems hook)
-					queryClient.invalidateQueries({
-						queryKey: ["deleted-items"],
-					}),
+				// Invalidate unified deleted items queries (used by useDeletedItems hook)
+				queryClient.invalidateQueries({
+					queryKey: ["deleted-items"],
+				}),
 			]);
 		},
 
@@ -392,10 +397,10 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 				queryClient.invalidateQueries({ queryKey: ["accounts", "info"] }),
 
 				// NEW: Unified items queries (replaces old keys)
-					queryClient.invalidateQueries({ queryKey: ["items"] }),
-					queryClient.invalidateQueries({
-						queryKey: ["deleted-items"],
-					}),
+				queryClient.invalidateQueries({ queryKey: ["items"] }),
+				queryClient.invalidateQueries({
+					queryKey: ["deleted-items"],
+				}),
 
 				// Keep existing decrypted item caches
 				queryClient.invalidateQueries({
@@ -422,8 +427,8 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 			// - ["accounts", "metadata"] -> replaced by ["accounts", "info"]
 			// - ["all-accounts-items"] -> replaced by ["items"]
 			// - ["all-decrypted-items"] -> replaced by ["items"]
-				// - ["all-deleted-items"] -> replaced by ["deleted-items"]
-				// - ["all-accounts-deleted-items"] -> replaced by ["deleted-items"]
+			// - ["all-deleted-items"] -> replaced by ["deleted-items"]
+			// - ["all-accounts-deleted-items"] -> replaced by ["deleted-items"]
 		},
 	};
 }

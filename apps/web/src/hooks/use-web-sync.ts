@@ -10,7 +10,7 @@ function getClientId(): string {
 	if (typeof window === "undefined") {
 		return "server";
 	}
-	return getOrCreateClientId(window.sessionStorage);
+	return getOrCreateClientId(window.localStorage);
 }
 
 /**

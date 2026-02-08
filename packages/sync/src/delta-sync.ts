@@ -58,28 +58,8 @@ export async function performDeltaSync(
 			const item = await trpcClient.vault.getItem.query({
 				itemId: event.entityId,
 			});
-			await cache.upsertCachedItem?.({
-				id: item.id,
-				vaultId: item.vaultId,
-				category: item.category,
-				favorite: item.favorite,
-				encryptedData: item.encryptedData,
-				encryptionIv: item.encryptionIv,
-				encryptionAlgorithm: item.encryptionAlgorithm,
-				version: item.version,
-				lastModifiedBy: item.lastModifiedBy,
-				createdAt: String(item.createdAt),
-				updatedAt: String(item.updatedAt),
-				deletedAt: item.deletedAt ? String(item.deletedAt) : null,
-			} as CachedEncryptedItem, accountEmail);
-			break;
-		}
-		case "item_deleted": {
-			try {
-				const item = await trpcClient.vault.getItem.query({
-					itemId: event.entityId,
-				});
-				await cache.upsertCachedItem?.({
+			await cache.upsertCachedItem?.(
+				{
 					id: item.id,
 					vaultId: item.vaultId,
 					category: item.category,
@@ -92,7 +72,33 @@ export async function performDeltaSync(
 					createdAt: String(item.createdAt),
 					updatedAt: String(item.updatedAt),
 					deletedAt: item.deletedAt ? String(item.deletedAt) : null,
-				} as CachedEncryptedItem, accountEmail);
+				} as CachedEncryptedItem,
+				accountEmail,
+			);
+			break;
+		}
+		case "item_deleted": {
+			try {
+				const item = await trpcClient.vault.getItem.query({
+					itemId: event.entityId,
+				});
+				await cache.upsertCachedItem?.(
+					{
+						id: item.id,
+						vaultId: item.vaultId,
+						category: item.category,
+						favorite: item.favorite,
+						encryptedData: item.encryptedData,
+						encryptionIv: item.encryptionIv,
+						encryptionAlgorithm: item.encryptionAlgorithm,
+						version: item.version,
+						lastModifiedBy: item.lastModifiedBy,
+						createdAt: String(item.createdAt),
+						updatedAt: String(item.updatedAt),
+						deletedAt: item.deletedAt ? String(item.deletedAt) : null,
+					} as CachedEncryptedItem,
+					accountEmail,
+				);
 			} catch {
 				// Item might be permanently deleted, remove from cache
 				await cache.removeCachedItem?.(event.entityId, accountEmail);
@@ -104,13 +110,16 @@ export async function performDeltaSync(
 			const vault = await trpcClient.vault.get.query({
 				vaultId: event.entityId,
 			});
-			await cache.upsertCachedVault?.({
-				id: vault.id,
-				name: vault.name,
-				type: vault.type,
-				icon: vault.icon,
-				imageUrl: vault.imageUrl,
-			} as CachedVaultMetadata, accountEmail);
+			await cache.upsertCachedVault?.(
+				{
+					id: vault.id,
+					name: vault.name,
+					type: vault.type,
+					icon: vault.icon,
+					imageUrl: vault.imageUrl,
+				} as CachedVaultMetadata,
+				accountEmail,
+			);
 			break;
 		}
 		case "vault_deleted":

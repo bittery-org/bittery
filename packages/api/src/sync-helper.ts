@@ -17,6 +17,10 @@ export type SyncEventType =
 
 export type SyncEntityType = "item" | "vault" | "vault_member" | "vault_key";
 
+/** Drizzle transaction or db instance — anything with .insert() */
+type Transaction = Parameters<Parameters<(typeof db)["transaction"]>[0]>[0];
+export type DbOrTx = typeof db | Transaction;
+
 export interface CreateSyncEventParams {
 	eventType: SyncEventType;
 	entityId: string;
@@ -28,16 +32,32 @@ export interface CreateSyncEventParams {
 	metadata?: Record<string, unknown>;
 }
 
+/** Payload returned by createSyncEvent for deferred broadcast */
+export interface SyncBroadcastPayload {
+	id: string;
+	type: SyncEventType;
+	entityId: string;
+	entityType: SyncEntityType;
+	vaultId: string | null;
+	version: number;
+	clientId: string | null;
+	userId: string;
+	timestamp: number;
+	metadata?: Record<string, unknown>;
+}
+
 /**
- * Create a sync event in the database
- * This is called after each mutation to record the change
+ * Create a sync event in the database.
+ * Accepts an optional transaction handle so the event insert can be atomic
+ * with the mutation that triggered it.
  */
 export async function createSyncEvent(
 	params: CreateSyncEventParams,
-): Promise<string> {
+	tx?: DbOrTx,
+): Promise<SyncBroadcastPayload> {
 	const eventId = nanoid();
 
-	await db.insert(syncEvent).values({
+	await (tx ?? db).insert(syncEvent).values({
 		id: eventId,
 		eventType: params.eventType,
 		entityId: params.entityId,
@@ -49,27 +69,25 @@ export async function createSyncEvent(
 		metadata: params.metadata ? JSON.stringify(params.metadata) : null,
 	});
 
-	return eventId;
+	return {
+		id: eventId,
+		type: params.eventType,
+		entityId: params.entityId,
+		entityType: params.entityType,
+		vaultId: params.vaultId,
+		version: params.version || 1,
+		clientId: params.clientId || null,
+		userId: params.userId,
+		timestamp: Date.now(),
+		metadata: params.metadata,
+	};
 }
 
 /**
  * Broadcast helper - to be used in conjunction with SSE handler
  * This is a placeholder that will be connected to the SSE handler
  */
-let broadcastFn:
-	| ((event: {
-			id: string;
-			type: SyncEventType;
-			entityId: string;
-			entityType: SyncEntityType;
-			vaultId: string | null;
-			version: number;
-			clientId: string | null;
-			userId: string;
-			timestamp: number;
-			metadata?: Record<string, unknown>;
-	  }) => Promise<void>)
-	| null = null;
+let broadcastFn: ((event: SyncBroadcastPayload) => Promise<void>) | null = null;
 
 /**
  * Set the broadcast function (called by server on startup)
@@ -79,28 +97,41 @@ export function setBroadcastFunction(fn: typeof broadcastFn): void {
 }
 
 /**
- * Create and broadcast a sync event
+ * Broadcast a sync event to connected SSE clients.
+ * Call this AFTER the database transaction has committed.
+ */
+export async function broadcastSyncPayload(
+	payload: SyncBroadcastPayload,
+): Promise<void> {
+	if (broadcastFn) {
+		await broadcastFn(payload);
+	}
+}
+
+/**
+ * Broadcast multiple sync events to connected SSE clients.
+ * Call this AFTER the database transaction has committed.
+ */
+export async function broadcastSyncPayloads(
+	payloads: SyncBroadcastPayload[],
+): Promise<void> {
+	for (const payload of payloads) {
+		await broadcastSyncPayload(payload);
+	}
+}
+
+/**
+ * Create and broadcast a sync event in one call.
+ * Use this for simple mutations that don't need an explicit transaction —
+ * the insert and broadcast happen sequentially (not atomically with the mutation).
+ *
+ * For atomic mutation + event, use db.transaction() with createSyncEvent(params, tx)
+ * inside, then broadcastSyncPayload() after the transaction commits.
  */
 export async function emitSyncEvent(
 	params: CreateSyncEventParams,
 ): Promise<string> {
-	const eventId = await createSyncEvent(params);
-
-	// Broadcast to connected clients if function is set
-	if (broadcastFn) {
-		await broadcastFn({
-			id: eventId,
-			type: params.eventType,
-			entityId: params.entityId,
-			entityType: params.entityType,
-			vaultId: params.vaultId,
-			version: params.version || 1,
-			clientId: params.clientId || null,
-			userId: params.userId,
-			timestamp: Date.now(),
-			metadata: params.metadata,
-		});
-	}
-
-	return eventId;
+	const payload = await createSyncEvent(params);
+	await broadcastSyncPayload(payload);
+	return payload.id;
 }

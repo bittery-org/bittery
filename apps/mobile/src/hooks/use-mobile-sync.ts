@@ -115,6 +115,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		queryClient,
 		storage: syncStorage,
 		enabled: enabled && isInitialized && !!serverUrl && !!clientId,
+		itemCacheAdapter: storage,
 	});
 
 	return {

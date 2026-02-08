@@ -8,7 +8,12 @@ import {
 	arrayBufferToBase64,
 	base64ToArrayBuffer,
 } from "@bittery/shared/crypto";
-import type { EncryptedData } from "@bittery/types";
+import type {
+	CachedEncryptedItem,
+	CachedVaultMetadata,
+	EncryptedData,
+	ItemCacheMetadata,
+} from "@bittery/types";
 import type * as CryptoType from "expo-crypto";
 import type * as LocalAuthenticationType from "expo-local-authentication";
 import type * as SecureStoreType from "expo-secure-store";
@@ -50,6 +55,8 @@ interface AccountCache {
 	authToken: string | null;
 	vaultKeys: VaultKeyData[] | null;
 	masterUnlockKey: Uint8Array | null;
+	cachedItems: CachedEncryptedItem[] | null;
+	cachedVaults: CachedVaultMetadata[] | null;
 }
 
 // In-memory caches - keyed by email
@@ -78,6 +85,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	readonly platform = "mobile" as const;
 	readonly supportsMultiAccount = true;
 	readonly supportsBiometric = true;
+	readonly supportsItemCache = true;
 
 	private SecureStore: typeof SecureStoreType | null = null;
 	private SQLite: typeof SQLiteType | null = null;
@@ -206,7 +214,13 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		const key = email.toLowerCase();
 		let cache = accountCaches.get(key);
 		if (!cache) {
-			cache = { authToken: null, vaultKeys: null, masterUnlockKey: null };
+			cache = {
+				authToken: null,
+				vaultKeys: null,
+				masterUnlockKey: null,
+				cachedItems: null,
+				cachedVaults: null,
+			};
 			accountCaches.set(key, cache);
 		}
 		return cache;
@@ -934,6 +948,195 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 			privateKeyPEM,
 		);
 		return base64ToArrayBuffer(vaultKeyBase64);
+	}
+
+	// ============================================================================
+	// Item Cache
+	// ============================================================================
+
+	async setCachedItems(
+		items: CachedEncryptedItem[],
+		email?: string,
+	): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return;
+
+		const cache = this.getAccountCache(resolvedEmail);
+		cache.cachedItems = items;
+
+		const key = getAccountKey(resolvedEmail, "cached_items");
+		await this.setItem(key, JSON.stringify(items));
+	}
+
+	async getCachedItems(email?: string): Promise<CachedEncryptedItem[] | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+
+		const cache = this.getAccountCache(resolvedEmail);
+		if (cache.cachedItems) {
+			return cache.cachedItems;
+		}
+
+		const key = getAccountKey(resolvedEmail, "cached_items");
+		const stored = await this.getItem(key);
+		if (stored) {
+			try {
+				cache.cachedItems = JSON.parse(stored);
+			} catch {
+				return null;
+			}
+		}
+		return cache.cachedItems;
+	}
+
+	async upsertCachedItem(
+		item: CachedEncryptedItem,
+		email?: string,
+	): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return;
+
+		let items = await this.getCachedItems(resolvedEmail);
+		if (!items) {
+			items = [];
+		}
+
+		const index = items.findIndex((i) => i.id === item.id);
+		if (index >= 0) {
+			items[index] = item;
+		} else {
+			items.push(item);
+		}
+
+		await this.setCachedItems(items, resolvedEmail);
+	}
+
+	async removeCachedItem(itemId: string, email?: string): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return;
+
+		const items = await this.getCachedItems(resolvedEmail);
+		if (!items) return;
+
+		const filtered = items.filter((i) => i.id !== itemId);
+		await this.setCachedItems(filtered, resolvedEmail);
+	}
+
+	async setCachedVaults(
+		vaults: CachedVaultMetadata[],
+		email?: string,
+	): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return;
+
+		const cache = this.getAccountCache(resolvedEmail);
+		cache.cachedVaults = vaults;
+
+		const key = getAccountKey(resolvedEmail, "cached_vaults");
+		await this.setItem(key, JSON.stringify(vaults));
+	}
+
+	async getCachedVaults(email?: string): Promise<CachedVaultMetadata[] | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+
+		const cache = this.getAccountCache(resolvedEmail);
+		if (cache.cachedVaults) {
+			return cache.cachedVaults;
+		}
+
+		const key = getAccountKey(resolvedEmail, "cached_vaults");
+		const stored = await this.getItem(key);
+		if (stored) {
+			try {
+				cache.cachedVaults = JSON.parse(stored);
+			} catch {
+				return null;
+			}
+		}
+		return cache.cachedVaults;
+	}
+
+	async upsertCachedVault(
+		vault: CachedVaultMetadata,
+		email?: string,
+	): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return;
+
+		let vaults = await this.getCachedVaults(resolvedEmail);
+		if (!vaults) {
+			vaults = [];
+		}
+
+		const index = vaults.findIndex((v) => v.id === vault.id);
+		if (index >= 0) {
+			vaults[index] = vault;
+		} else {
+			vaults.push(vault);
+		}
+
+		await this.setCachedVaults(vaults, resolvedEmail);
+	}
+
+	async removeCachedVault(vaultId: string, email?: string): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return;
+
+		// Remove the vault metadata
+		const vaults = await this.getCachedVaults(resolvedEmail);
+		if (vaults) {
+			const filtered = vaults.filter((v) => v.id !== vaultId);
+			await this.setCachedVaults(filtered, resolvedEmail);
+		}
+
+		// Also remove all items belonging to this vault
+		const items = await this.getCachedItems(resolvedEmail);
+		if (items) {
+			const filtered = items.filter((i) => i.vaultId !== vaultId);
+			await this.setCachedItems(filtered, resolvedEmail);
+		}
+	}
+
+	async getItemCacheMetadata(
+		email?: string,
+	): Promise<ItemCacheMetadata | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+
+		const key = getAccountKey(resolvedEmail, "item_cache_meta");
+		const stored = await this.getItem(key);
+		if (!stored) return null;
+
+		try {
+			return JSON.parse(stored) as ItemCacheMetadata;
+		} catch {
+			return null;
+		}
+	}
+
+	async setItemCacheMetadata(
+		metadata: ItemCacheMetadata,
+		email?: string,
+	): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return;
+
+		const key = getAccountKey(resolvedEmail, "item_cache_meta");
+		await this.setItem(key, JSON.stringify(metadata));
+	}
+
+	async clearItemCache(email?: string): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return;
+
+		const cache = this.getAccountCache(resolvedEmail);
+		cache.cachedItems = null;
+		cache.cachedVaults = null;
+
+		await this.deleteItem(getAccountKey(resolvedEmail, "cached_items"));
+		await this.deleteItem(getAccountKey(resolvedEmail, "cached_vaults"));
+		await this.deleteItem(getAccountKey(resolvedEmail, "item_cache_meta"));
 	}
 
 	// ============================================================================

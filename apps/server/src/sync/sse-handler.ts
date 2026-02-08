@@ -1,6 +1,7 @@
 import { setBroadcastFunction } from "@bittery/api/sync-helper";
 import { verifySession } from "@bittery/auth";
 import { db, vaultKey } from "@bittery/db";
+import type { PubSubAdapter } from "@bittery/pubsub";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -31,53 +32,39 @@ export interface SyncEventPayload {
 }
 
 /**
- * Event channel that supports both push and async waiting
+ * Event channel that supports both push and async waiting.
+ * Single-consumer: only one waiter at a time (enforced by the event loop pattern).
  */
 class EventChannel<T> {
 	private queue: T[] = [];
-	private waitResolve: ((value: T) => void) | null = null;
+	private waitResolve: ((value: T | null) => void) | null = null;
 	private closed = false;
 
-	/**
-	 * Push an event to the channel
-	 * If someone is waiting, they receive it immediately
-	 */
 	push(event: T): void {
 		if (this.closed) return;
 
 		if (this.waitResolve) {
-			// Someone is waiting - deliver immediately
 			const resolve = this.waitResolve;
 			this.waitResolve = null;
 			resolve(event);
 		} else {
-			// No one waiting - queue it
 			this.queue.push(event);
 		}
 	}
 
-	/**
-	 * Take all currently queued events (non-blocking)
-	 */
 	drain(): T[] {
 		const events = this.queue;
 		this.queue = [];
 		return events;
 	}
 
-	/**
-	 * Wait for the next event with timeout
-	 * Returns the event or null on timeout
-	 */
 	waitWithTimeout(ms: number, signal: AbortSignal): Promise<T | null> {
 		return new Promise((resolve, reject) => {
-			// Check if already aborted
 			if (signal.aborted) {
 				reject(signal.reason);
 				return;
 			}
 
-			// Check queue first
 			if (this.queue.length > 0) {
 				resolve(this.queue.shift() as T);
 				return;
@@ -98,22 +85,19 @@ class EventChannel<T> {
 				this.waitResolve = null;
 			};
 
-			// Set up abort handler
 			const onAbort = () => {
 				cleanup();
 				reject(signal.reason);
 			};
 			signal.addEventListener("abort", onAbort, { once: true });
 
-			// Set up timeout
 			timeoutId = setTimeout(() => {
 				signal.removeEventListener("abort", onAbort);
 				cleanup();
 				resolve(null);
 			}, ms);
 
-			// Set up wait resolver
-			this.waitResolve = (event: T) => {
+			this.waitResolve = (event: T | null) => {
 				signal.removeEventListener("abort", onAbort);
 				cleanup();
 				resolve(event);
@@ -124,9 +108,9 @@ class EventChannel<T> {
 	close(): void {
 		this.closed = true;
 		if (this.waitResolve) {
-			// Resolve any pending wait with undefined to signal close
-			// Actually we need to handle this differently - just set closed flag
-			// The waitWithTimeout will return null on next check
+			const resolve = this.waitResolve;
+			this.waitResolve = null;
+			resolve(null);
 		}
 	}
 
@@ -142,20 +126,21 @@ interface Connection {
 	channel: EventChannel<SyncEventPayload>;
 }
 
-// Store active connections per user
-// Map<userId, Map<connectionId, Connection>>
+// Active connections per user: Map<userId, Map<connectionId, Connection>>
 const connections = new Map<string, Map<string, Connection>>();
 
-// Store user's vault memberships for filtering events
-// Map<userId, Set<vaultId>>
+// Vault memberships for connected users: Map<userId, Set<vaultId>>
 const userVaults = new Map<string, Set<string>>();
 
 // Heartbeat interval in milliseconds
 const HEARTBEAT_INTERVAL = 15_000;
 
-/**
- * Generate unique connection ID
- */
+// Re-validate session every N heartbeats (~5 minutes)
+const SESSION_REVALIDATION_HEARTBEATS = 20;
+
+// Max connections per user to prevent resource exhaustion
+const MAX_CONNECTIONS_PER_USER = 10;
+
 function generateConnectionId(): string {
 	return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
@@ -172,9 +157,6 @@ async function getUserVaults(userId: string): Promise<Set<string>> {
 	return vaultIds;
 }
 
-/**
- * Register a new connection
- */
 function addConnection(connection: Connection): void {
 	const { userId, id } = connection;
 	let userConnections = connections.get(userId);
@@ -188,9 +170,6 @@ function addConnection(connection: Connection): void {
 	);
 }
 
-/**
- * Remove a connection
- */
 function removeConnection(userId: string, connectionId: string): void {
 	const userConnections = connections.get(userId);
 	if (userConnections) {
@@ -210,15 +189,13 @@ function removeConnection(userId: string, connectionId: string): void {
 }
 
 /**
- * Broadcast a sync event to all relevant users
- * Only sends to users who have access to the vault
+ * Deliver a sync event to all locally connected users who have access.
+ * Scans connections and filters by vault membership — simple and correct.
  */
-export async function broadcastSyncEvent(
-	event: SyncEventPayload,
-): Promise<void> {
+function deliverToConnections(event: SyncEventPayload): void {
 	const { vaultId, clientId, userId: eventUserId } = event;
 
-	// If no vaultId, only broadcast to the user who triggered the event
+	// If no vaultId, only deliver to the user who triggered the event
 	if (!vaultId) {
 		const userConnections = connections.get(eventUserId);
 		if (userConnections) {
@@ -229,26 +206,36 @@ export async function broadcastSyncEvent(
 		return;
 	}
 
-	// Get all users who have access to this vault
-	const vaultMembers = await db.query.vaultKey.findMany({
-		where: eq(vaultKey.vaultId, vaultId),
-	});
+	// Scan all connected users and deliver to vault members
+	for (const [userId, userConnections] of connections) {
+		const vaults = userVaults.get(userId);
+		if (!vaults?.has(vaultId)) continue;
 
-	for (const member of vaultMembers) {
-		const memberUserId = member.userId;
-		const userConnections = connections.get(memberUserId);
+		for (const connection of userConnections.values()) {
+			connection.channel.push({
+				...event,
+				metadata: {
+					...event.metadata,
+					isOwnEvent: userId === eventUserId,
+					originClientId: clientId,
+				},
+			});
+		}
+	}
 
-		if (userConnections) {
-			for (const connection of userConnections.values()) {
-				connection.channel.push({
-					...event,
-					metadata: {
-						...event.metadata,
-						isOwnEvent: memberUserId === eventUserId,
-						originClientId: clientId,
-					},
-				});
-			}
+	// Refresh vault membership cache when membership changes
+	if (event.type === "vault_member_added" && event.metadata?.addedUserId) {
+		const addedUserId = event.metadata.addedUserId as string;
+		if (connections.has(addedUserId)) {
+			void getUserVaults(addedUserId);
+		}
+	} else if (
+		event.type === "vault_member_removed" &&
+		event.metadata?.removedUserId
+	) {
+		const removedUserId = event.metadata.removedUserId as string;
+		if (connections.has(removedUserId)) {
+			void getUserVaults(removedUserId);
 		}
 	}
 }
@@ -262,9 +249,6 @@ export async function refreshUserVaults(userId: string): Promise<void> {
 	}
 }
 
-/**
- * Get connection statistics
- */
 export function getConnectionStats(): {
 	totalUsers: number;
 	totalConnections: number;
@@ -280,23 +264,21 @@ export function getConnectionStats(): {
 }
 
 /**
- * Initialize the broadcast function for the API package
+ * Create the Hono router for SSE sync endpoints.
+ * Accepts a PubSubAdapter for decoupled event delivery.
  */
-export function initializeSyncBroadcast(): void {
-	setBroadcastFunction(broadcastSyncEvent);
-}
+export function createSyncRouter(pubsub: PubSubAdapter): Hono {
+	pubsub.subscribe("sync", (message) => {
+		deliverToConnections(message.payload as SyncEventPayload);
+	});
 
-/**
- * Create the Hono router for SSE sync endpoints
- */
-export function createSyncRouter(): Hono {
-	initializeSyncBroadcast();
+	setBroadcastFunction(async (event) => {
+		await pubsub.publish("sync", event);
+	});
 
 	const app = new Hono();
 
-	// SSE endpoint for real-time sync events
 	app.get("/events", async (c) => {
-		// Extract and verify JWT token
 		const authHeader = c.req.header("Authorization");
 		const token = authHeader?.replace("Bearer ", "");
 
@@ -312,7 +294,15 @@ export function createSyncRouter(): Hono {
 		const userId = session.userId;
 		const connectionId = generateConnectionId();
 
-		// Get initial vault memberships
+		// Reject if user already has too many connections
+		const existingConnections = connections.get(userId);
+		if (
+			existingConnections &&
+			existingConnections.size >= MAX_CONNECTIONS_PER_USER
+		) {
+			return c.json({ error: "Too many connections" }, 429);
+		}
+
 		await getUserVaults(userId);
 
 		return streamSSE(
@@ -321,8 +311,8 @@ export function createSyncRouter(): Hono {
 				const abortController = new AbortController();
 				const channel = new EventChannel<SyncEventPayload>();
 				let eventId = 0;
+				let heartbeatCount = 0;
 
-				// Register connection
 				const connection: Connection = {
 					id: connectionId,
 					userId,
@@ -330,13 +320,11 @@ export function createSyncRouter(): Hono {
 				};
 				addConnection(connection);
 
-				// Cleanup on abort
 				stream.onAbort(() => {
 					abortController.abort();
 					removeConnection(userId, connectionId);
 				});
 
-				// Send initial connection message
 				await stream.writeSSE({
 					event: "connected",
 					data: JSON.stringify({
@@ -351,7 +339,6 @@ export function createSyncRouter(): Hono {
 				// Main event loop
 				while (!abortController.signal.aborted && !channel.isClosed()) {
 					try {
-						// First, drain any queued events
 						const queuedEvents = channel.drain();
 						for (const event of queuedEvents) {
 							await stream.writeSSE({
@@ -361,32 +348,41 @@ export function createSyncRouter(): Hono {
 							});
 						}
 
-						// Wait for next event or timeout for heartbeat
 						const event = await channel.waitWithTimeout(
 							HEARTBEAT_INTERVAL,
 							abortController.signal,
 						);
 
 						if (event) {
-							// Got an event - send it
 							await stream.writeSSE({
 								event: "sync",
 								data: JSON.stringify(event),
 								id: String(eventId++),
 							});
 						} else {
-							// Timeout - send heartbeat
-							await stream.writeSSE({
-								event: "heartbeat",
-								data: JSON.stringify({ timestamp: Date.now() }),
-								id: String(eventId++),
-							});
+							// Heartbeat — periodically re-validate session
+							heartbeatCount++;
+							if (heartbeatCount % SESSION_REVALIDATION_HEARTBEATS === 0) {
+								const valid = await verifySession(token);
+								if (!valid) {
+									console.log(
+										`[SSE] Session revoked for ${connectionId}, disconnecting`,
+									);
+									break;
+								}
+								// Also refresh vault memberships on revalidation
+								await getUserVaults(userId);
+							}
+
+							await stream.write(`: heartbeat ${Date.now()}\n\n`);
 						}
 					} catch {
-						// Aborted or connection closed
 						break;
 					}
 				}
+
+				// Clean up on exit (may already be cleaned up by onAbort)
+				removeConnection(userId, connectionId);
 			},
 			async (err) => {
 				if (err.name !== "AbortError") {
@@ -396,7 +392,6 @@ export function createSyncRouter(): Hono {
 		);
 	});
 
-	// Health check endpoint
 	app.get("/health", (c) => {
 		return c.json({
 			status: "ok",
