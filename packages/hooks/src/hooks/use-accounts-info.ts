@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
 	useCoreContext,
 	usePlatformStorage,
-} from "../../context/platform-context";
+} from "../context/platform-context";
 
 /**
  * Complete account information including metadata, credentials, and tRPC client

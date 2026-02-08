@@ -1,5 +1,5 @@
 import {
-	useAllDeletedItems,
+	useDeletedItems,
 	usePermanentDeleteItem,
 	useRestoreItem,
 } from "@bittery/hooks";
@@ -35,7 +35,7 @@ function TrashComponent() {
 		vaultId: string;
 	} | null>(null);
 
-	const { items: deletedItems, isLoading } = useAllDeletedItems();
+	const { items: deletedItems, isLoading } = useDeletedItems();
 
 	// Shared hooks for item operations
 	const restoreItem = useRestoreItem();
@@ -123,29 +123,30 @@ function TrashComponent() {
 						</div>
 					) : (
 						<div className="flex flex-col p-2">
-							{sortedItems.map((item) => {
-								const maskedCardNumber = item.cardNumber
-									? maskCardNumber(item.cardNumber)
-									: undefined;
+								{sortedItems.map((item) => {
+									const maskedCardNumber = item.cardNumber
+										? maskCardNumber(item.cardNumber)
+										: undefined;
+									const title = item.title || "[Untitled]";
 
-								return (
-									<div
+									return (
+										<div
 										key={item.id}
 										className="group mb-1 w-full rounded-md px-3 py-2.5 text-left transition-colors hover:bg-muted/30"
 									>
-										<div className="flex min-w-0 items-center gap-3">
-											<Favicon
-												url={item.url}
-												title={item.title}
-												category={item.category}
-												size="sm"
-											/>
-											<div className="min-w-0 flex-1">
-												<div className="flex items-center gap-1.5">
-													<span className="truncate font-medium text-sm">
-														{item.title}
-													</span>
-												</div>
+											<div className="flex min-w-0 items-center gap-3">
+												<Favicon
+													url={item.url}
+													title={title}
+													category={item.category}
+													size="sm"
+												/>
+												<div className="min-w-0 flex-1">
+													<div className="flex items-center gap-1.5">
+														<span className="truncate font-medium text-sm">
+															{title}
+														</span>
+													</div>
 												{item.username && (
 													<div className="mt-0.5 truncate text-muted-foreground text-xs">
 														{item.username}

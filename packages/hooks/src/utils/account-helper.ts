@@ -11,14 +11,14 @@ import {
 } from "@bittery/core";
 import type { useTRPCClient } from "@bittery/shared";
 import type { IStorageAdapter } from "@bittery/storage";
-import type { UnifiedDeletedItem } from "../hooks/use-all-deleted-items";
+import type { DeletedItem } from "../hooks/use-deleted-items";
 import type { UnifiedItem } from "../hooks/use-items";
 
 /**
  * Extracts the account email from an item if it has account metadata.
  */
 export function getItemAccountEmail(
-	item: UnifiedItem | UnifiedDeletedItem | undefined,
+	item: UnifiedItem | DeletedItem | undefined,
 ): string | undefined {
 	return getItemAccountEmailCore(
 		item as { id: string; account?: { email?: string } } | undefined,
@@ -30,7 +30,7 @@ export function getItemAccountEmail(
  */
 export function findAccountEmailForItem(
 	itemId: string,
-	items: (UnifiedItem | UnifiedDeletedItem)[],
+	items: (UnifiedItem | DeletedItem)[],
 ): string | undefined {
 	return findAccountForItemCore(
 		itemId,

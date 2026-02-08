@@ -10,7 +10,7 @@ import {
 	useCoreContext,
 	useQueryInvalidator,
 } from "../../context/platform-context";
-import { useAllDeletedItems } from "../use-all-deleted-items";
+import { useDeletedItems } from "../use-deleted-items";
 
 /**
  * Input for restoring an item from trash
@@ -24,7 +24,7 @@ export interface RestoreItemInput {
  * Hook for restoring a soft-deleted item from trash.
  */
 export function useRestoreItem() {
-	const { items: deletedItems } = useAllDeletedItems();
+	const { items: deletedItems } = useDeletedItems();
 	const defaultClient = useTRPCClient();
 	const core = useCoreContext();
 	const invalidator = useQueryInvalidator();

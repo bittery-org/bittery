@@ -8,7 +8,7 @@
 - ✅ Phase 5 completed
 - ✅ Phase 6 completed
 - ✅ Phase 7 completed
-- ⏳ Phase 8 not implemented (optional)
+- ✅ Phase 8 completed
 
 ## Context
 
@@ -275,7 +275,7 @@ Introduce `@bittery/core` — framework-agnostic TypeScript services that own al
 
 ## Phase 8 (Optional): Move Auth Utilities to Core
 
-**Status:** ⏳ Not implemented (optional)
+**Status:** ✅ Completed
 
 **Goal:** Consolidate all framework-agnostic business logic under `@bittery/core`.
 
@@ -288,10 +288,16 @@ Introduce `@bittery/core` — framework-agnostic TypeScript services that own al
 - `packages/core/src/services/auth-service.ts`
 
 **Files modified:**
-- `packages/hooks/src/auth/srp-login.ts` — move to core
-- `packages/hooks/src/auth/srp-unlock.ts` — move to core
-- `packages/hooks/src/auth/session-utils.ts` — move to core
+- `packages/core/src/index.ts` — export auth utilities and types
+- `packages/core/package.json` — add `./services/auth-service` export
 - `packages/hooks/src/auth/index.ts` — re-export from `@bittery/core`
+- `packages/hooks/src/auth/srp-login.ts` — removed (moved to core)
+- `packages/hooks/src/auth/srp-unlock.ts` — removed (moved to core)
+- `packages/hooks/src/auth/session-utils.ts` — removed (moved to core)
+- `packages/hooks/src/auth/types.ts` — removed (moved to core)
+- `apps/extension/src/background/auth-handlers.ts` — import auth utilities from `@bittery/core`
+
+**Verify:** ✅ `pnpm --filter @bittery/core check-types` passed; ✅ `pnpm --filter @bittery/hooks check-types` passed; ✅ `pnpm --filter extension check-types` passed.
 
 ---
 
@@ -300,6 +306,7 @@ Introduce `@bittery/core` — framework-agnostic TypeScript services that own al
 ```
 @bittery/core (NEW - zero React dependency)
   ├── AccountResolver    ← from useAccountsInfo + account-helper.ts
+  ├── AuthService        ← from hooks/auth SRP + session utilities
   ├── ItemService        ← from use-items-unified, use-create-item, etc.
   ├── VaultService       ← from use-create-vault, vault-utils.ts
   ├── ShareService       ← from use-create-share

@@ -253,7 +253,7 @@ export function VaultPage() {
 	const handleItemUpdated = useCallback(() => {
 		// Invalidate all vault items queries
 		queryClient.invalidateQueries({ queryKey: ["vault-items"] });
-		queryClient.invalidateQueries({ queryKey: ["items-unified"] });
+		queryClient.invalidateQueries({ queryKey: ["items"] });
 	}, [queryClient]);
 
 	return (

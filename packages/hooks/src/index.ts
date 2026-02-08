@@ -111,30 +111,32 @@ export {
 	type AccountInfo,
 	type UseAccountsInfoOptions,
 	useAccountsInfo,
-} from "./hooks/internal/use-accounts-info";
+} from "./hooks/use-accounts-info";
 export {
 	type UseAllVaultKeysOptions,
 	useAllVaultKeys,
 	type VaultKeyWithAccount,
-} from "./hooks/internal/use-all-vault-keys";
-export { useDecryptedItem } from "./hooks/internal/use-decrypted-item";
+} from "./hooks/use-all-vault-keys";
 export {
-	type UseDeletedItemsUnifiedOptions,
-	useDeletedItemsUnified,
-} from "./hooks/internal/use-deleted-items-unified";
+	type DeletedItem,
+	type UseDeletedItemsOptions,
+	useDeletedItems,
+} from "./hooks/use-deleted-items";
 export {
-	type UseItemsUnifiedOptions,
-	useItemsUnified,
-} from "./hooks/internal/use-items-unified";
+	filterItemsByTags,
+	useAvailableTags,
+} from "./hooks/use-available-tags";
+export { useCrossVaultTags } from "./hooks/use-cross-vault-tags";
+export { type UseItemResult, useItem } from "./hooks/use-item";
 export {
 	type UseVaultInfoOptions,
 	useVaultInfo,
 	type VaultInfoWithAccount,
-} from "./hooks/internal/use-vault-info";
+} from "./hooks/use-vault-info";
 export {
 	type UseVaultItemsOptions,
 	useVaultItems,
-} from "./hooks/internal/use-vault-items";
+} from "./hooks/use-vault-items";
 // Item Mutation Hooks (write operations)
 export {
 	type CreateItemInput,
@@ -164,22 +166,13 @@ export {
 } from "./hooks/share";
 // Team Mutation Hooks (write operations)
 export { useTeamAvatar } from "./hooks/team/use-team-avatar";
-export {
-	type UnifiedDeletedItem,
-	type UseAllDeletedItemsOptions,
-	useAllDeletedItems,
-} from "./hooks/use-all-deleted-items";
-export {
-	filterItemsByTags,
-	useAvailableTags,
-} from "./hooks/use-available-tags";
-export { useCrossVaultTags } from "./hooks/use-cross-vault-tags";
-export { type UseItemResult, useItem } from "./hooks/use-item";
 // Unified Data Hooks (automatically handle single-account vs "All Accounts" mode)
 export {
 	type UnifiedItem,
+	type UseItemsUnifiedOptions,
 	type UseItemsOptions,
 	useItems,
+	useItemsUnified,
 } from "./hooks/use-items";
 export {
 	analyzePassword,

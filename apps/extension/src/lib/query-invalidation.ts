@@ -19,7 +19,7 @@ export function createExtensionInvalidator(
 			await Promise.all([
 				queryClient.invalidateQueries({ queryKey: ["vault-item"] }),
 				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
-				queryClient.invalidateQueries({ queryKey: ["items-unified"] }),
+				queryClient.invalidateQueries({ queryKey: ["items"] }),
 			]);
 		},
 
@@ -29,7 +29,7 @@ export function createExtensionInvalidator(
 		invalidateVaultList: async (_vaultId: string): Promise<void> => {
 			await Promise.all([
 				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
-				queryClient.invalidateQueries({ queryKey: ["items-unified"] }),
+				queryClient.invalidateQueries({ queryKey: ["items"] }),
 			]);
 		},
 
@@ -44,10 +44,7 @@ export function createExtensionInvalidator(
 		 * Invalidate deleted items list queries
 		 */
 		invalidateDeletedItems: async (_vaultId: string): Promise<void> => {
-			await Promise.all([
-				queryClient.invalidateQueries({ queryKey: ["deleted-items"] }),
-				queryClient.invalidateQueries({ queryKey: ["deleted-items-unified"] }),
-			]);
+			await queryClient.invalidateQueries({ queryKey: ["deleted-items"] });
 		},
 
 		/**

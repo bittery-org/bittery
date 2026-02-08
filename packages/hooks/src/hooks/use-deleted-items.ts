@@ -1,32 +1,38 @@
 /**
- * Unified Deleted Items Hook
+ * useDeletedItems Hook - Deleted Item Fetching
  *
- * Handles both single account and "All Accounts" mode with a unified implementation.
+ * Automatically detects whether we're in single-account or "All Accounts" mode
+ * and fetches deleted items accordingly. Components don't need to care about the mode.
  */
 
 import type { MultiAccountDeletedItem as CoreMultiAccountDeletedItem } from "@bittery/core";
 import { useQuery } from "@tanstack/react-query";
-import { useCoreContext } from "../../context/platform-context";
+import { useCoreContext } from "../context/platform-context";
 import { useAccountsInfo } from "./use-accounts-info";
 
-/**
- * Deleted item with source account metadata (for multi-account mode)
- */
-export type MultiAccountDeletedItem = CoreMultiAccountDeletedItem;
+export type DeletedItem = CoreMultiAccountDeletedItem;
 
-/**
- * Options for useDeletedItemsUnified hook
- */
-export interface UseDeletedItemsUnifiedOptions {
+export interface UseDeletedItemsOptions {
 	enabled?: boolean;
 }
 
 /**
- * Hook to fetch and decrypt deleted items from active account(s).
+ * Hook to fetch deleted items across vaults.
+ * Automatically handles single-account vs "All Accounts" mode.
+ *
+ * @param options - Query options
+ * @returns Deleted items, loading state, error, and refetch function
+ *
+ * @example
+ * ```tsx
+ * const { items, isLoading } = useDeletedItems();
+ *
+ * items.map(item => (
+ *   <DeletedItemCard key={item.id} item={item} />
+ * ))
+ * ```
  */
-export function useDeletedItemsUnified(
-	options: UseDeletedItemsUnifiedOptions = {},
-) {
+export function useDeletedItems(options: UseDeletedItemsOptions = {}) {
 	const core = useCoreContext();
 	const {
 		accountsInfo,
@@ -41,7 +47,7 @@ export function useDeletedItemsUnified(
 		refetch,
 	} = useQuery({
 		queryKey: [
-			"deleted-items-unified",
+			"deleted-items",
 			accountsInfo.map((account) => account.email).sort(),
 		],
 		queryFn: () =>

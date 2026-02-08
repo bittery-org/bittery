@@ -1,6 +1,6 @@
 import {
-	type UnifiedDeletedItem,
-	useAllDeletedItems,
+	type DeletedItem,
+	useDeletedItems,
 	usePermanentDeleteItem,
 	useRestoreItem,
 } from "@bittery/hooks";
@@ -50,7 +50,7 @@ export default function TrashScreen() {
 	const [refreshing, setRefreshing] = useState(false);
 	const [actionInProgress, setActionInProgress] = useState<string | null>(null);
 
-	const { items, isLoading, error, refetch } = useAllDeletedItems();
+	const { items, isLoading, error, refetch } = useDeletedItems();
 
 	// Shared hooks for item operations
 	const restoreItem = useRestoreItem();
@@ -74,7 +74,7 @@ export default function TrashScreen() {
 		}
 	};
 
-	const handleRestore = async (item: UnifiedDeletedItem) => {
+	const handleRestore = async (item: DeletedItem) => {
 		setActionInProgress(item.id);
 		try {
 			await restoreItem.mutateAsync({ itemId: item.id, vaultId: item.vaultId });
@@ -96,7 +96,7 @@ export default function TrashScreen() {
 		}
 	};
 
-	const handlePermanentDelete = (item: UnifiedDeletedItem) => {
+	const handlePermanentDelete = (item: DeletedItem) => {
 		Alert.alert(
 			"Permanently Delete",
 			`Are you sure you want to permanently delete "${item.title}"? This cannot be undone.`,
@@ -134,7 +134,7 @@ export default function TrashScreen() {
 		);
 	};
 
-	const renderRightActions = (item: UnifiedDeletedItem) => (
+	const renderRightActions = (item: DeletedItem) => (
 		<View className="items-center justify-center bg-danger px-6">
 			{actionInProgress === item.id ? (
 				<ActivityIndicator size="small" color="#fff" />
@@ -151,7 +151,7 @@ export default function TrashScreen() {
 		</View>
 	);
 
-	const renderLeftActions = (item: UnifiedDeletedItem) => (
+	const renderLeftActions = (item: DeletedItem) => (
 		<View className="items-center justify-center bg-success px-6">
 			{actionInProgress === item.id ? (
 				<ActivityIndicator size="small" color="#fff" />
@@ -168,7 +168,7 @@ export default function TrashScreen() {
 		</View>
 	);
 
-	const renderItem = ({ item }: { item: UnifiedDeletedItem }) => (
+	const renderItem = ({ item }: { item: DeletedItem }) => (
 		<Swipeable
 			renderRightActions={() => renderRightActions(item)}
 			renderLeftActions={() => renderLeftActions(item)}

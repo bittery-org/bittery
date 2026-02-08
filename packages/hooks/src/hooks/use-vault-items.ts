@@ -4,7 +4,7 @@
 
 import type { DecryptedItem } from "@bittery/shared/types";
 import { useQuery } from "@tanstack/react-query";
-import { useCoreContext } from "../../context/platform-context";
+import { useCoreContext } from "../context/platform-context";
 import { useAccountsInfo } from "./use-accounts-info";
 
 export interface UseVaultItemsOptions {

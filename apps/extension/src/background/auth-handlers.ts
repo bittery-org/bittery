@@ -2,7 +2,7 @@
  * Authentication Handlers
  * Handles LOGIN, QUICK_UNLOCK, CHECK_AUTH, and related authentication messages
  *
- * Uses shared auth utilities from @bittery/hooks for SRP login/unlock logic.
+ * Uses shared auth utilities from @bittery/core for SRP login/unlock logic.
  */
 
 import {
@@ -10,7 +10,7 @@ import {
 	performSRPUnlock,
 	storeLoginSession,
 	storeUnlockSession,
-} from "@bittery/hooks/auth";
+} from "@bittery/core";
 import { cryptoAdapter } from "../lib/crypto-adapter";
 import { storage } from "../lib/storage";
 import {

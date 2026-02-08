@@ -7,7 +7,7 @@
 
 import type { VaultKeyData } from "@bittery/storage/types";
 import { useQuery } from "@tanstack/react-query";
-import { usePlatformStorage } from "../../context/platform-context";
+import { usePlatformStorage } from "../context/platform-context";
 import { useAccountsInfo } from "./use-accounts-info";
 
 /**

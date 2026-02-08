@@ -10,7 +10,7 @@ import {
 	useCoreContext,
 	useQueryInvalidator,
 } from "../../context/platform-context";
-import { useAllDeletedItems } from "../use-all-deleted-items";
+import { useDeletedItems } from "../use-deleted-items";
 
 /**
  * Input for permanently deleting an item
@@ -24,7 +24,7 @@ export interface PermanentDeleteItemInput {
  * Hook for permanently deleting an item from trash.
  */
 export function usePermanentDeleteItem() {
-	const { items: deletedItems } = useAllDeletedItems();
+	const { items: deletedItems } = useDeletedItems();
 	const defaultClient = useTRPCClient();
 	const core = useCoreContext();
 	const invalidator = useQueryInvalidator();

@@ -128,7 +128,7 @@ export function useSync(options: UseSyncOptions) {
 						await syncManagerRef.current?.saveLastSyncTimestamp();
 						// Invalidate all item queries after catch-up
 						await queryClient.invalidateQueries({
-							queryKey: ["items-unified"],
+							queryKey: ["items"],
 						});
 						await queryClient.invalidateQueries({
 							queryKey: ["vault-items"],

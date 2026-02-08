@@ -7,7 +7,7 @@
  */
 
 import { useMemo } from "react";
-import type { MultiAccountItem } from "./internal/use-items-unified";
+import type { MultiAccountItem } from "./use-items";
 import { useItems } from "./use-items";
 
 /**

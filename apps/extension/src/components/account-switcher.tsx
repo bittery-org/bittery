@@ -145,7 +145,7 @@ export function ExtensionAccountSwitcher() {
 				await Promise.all([
 					invalidator.invalidateVaultKeys(),
 					queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
-					queryClient.invalidateQueries({ queryKey: ["items-unified"] }),
+					queryClient.invalidateQueries({ queryKey: ["items"] }),
 					queryClient.invalidateQueries({ queryKey: ["accounts"] }),
 				]);
 			} else {
@@ -189,7 +189,7 @@ export function ExtensionAccountSwitcher() {
 			await Promise.all([
 				invalidator.invalidateVaultKeys(),
 				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
-				queryClient.invalidateQueries({ queryKey: ["items-unified"] }),
+				queryClient.invalidateQueries({ queryKey: ["items"] }),
 				queryClient.invalidateQueries({ queryKey: ["accounts"] }),
 			]);
 		} catch (error) {
