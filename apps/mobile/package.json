@@ -10,7 +10,7 @@
 		"android": "expo run:android",
 		"ports": "adb reverse tcp:3000 tcp:3000",
 		"ios": "expo run:ios",
-		"build": "eas build",
+		"build:eas": "eas build",
 		"build:preview": "eas build --profile preview",
 		"build:production": "eas build --profile production",
 		"check-types": "tsc --noEmit"

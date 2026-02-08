@@ -6,7 +6,7 @@
 	"scripts": {
 		"check-types": "tsc --noEmit",
 		"dev": "vite dev",
-		"build": "vite build",
+		"build:release": "vite build",
 		"preview": "vite preview",
 		"test:e2e": "playwright test",
 		"test:e2e:ui": "playwright test --ui",
