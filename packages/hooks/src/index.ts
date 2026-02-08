@@ -63,6 +63,7 @@ export {
 	type PlatformContextValue,
 	PlatformProvider,
 	type PlatformProviderProps,
+	useCoreContext,
 	usePlatform,
 	usePlatformAutolock,
 	usePlatformCrypto,

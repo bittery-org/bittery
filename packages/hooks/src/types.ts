@@ -5,110 +5,16 @@
  * Apps provide implementations via PlatformProvider.
  */
 
+import type { ICrypto } from "@bittery/core";
 import type { EncryptedData } from "@bittery/types";
 
-/**
- * Derived keys from password + secret key
- */
-export interface DerivedKeys {
-	authKey: Uint8Array;
-	masterUnlockKey: Uint8Array;
-}
-
-/**
- * SRP client ephemeral key pair
- */
-export interface SRPClientEphemeral {
-	publicKey: string;
-	secret: string;
-}
-
-/**
- * SRP server challenge (from startLogin)
- */
-export interface SRPServerChallenge {
-	salt: string;
-	serverPublicKey: string;
-}
-
-/**
- * SRP client session (after deriving)
- */
-export interface SRPClientSession {
-	key: string;
-	proof: string;
-}
-
-/**
- * Crypto interface for platform-specific encryption operations.
- * All platforms (WASM, Tauri, FFI) export these exact functions
- * with identical signatures - apps just pass their crypto module directly.
- */
-export interface ICrypto {
-	/**
-	 * Decrypt data using AES-256-GCM.
-	 * @param encryptedData - The encrypted data object (ciphertext, iv, algorithm)
-	 * @param key - The decryption key (256-bit)
-	 * @returns Decrypted plaintext string
-	 */
-	decrypt(encryptedData: EncryptedData, key: Uint8Array): Promise<string>;
-
-	/**
-	 * Encrypt data using AES-256-GCM.
-	 * @param plaintext - The string to encrypt
-	 * @param key - The encryption key (256-bit)
-	 * @returns Encrypted data object with ciphertext, iv, and algorithm
-	 */
-	encrypt(plaintext: string, key: Uint8Array): Promise<EncryptedData>;
-
-	/**
-	 * Generate a random 256-bit encryption key.
-	 * @returns A new random key as Uint8Array
-	 */
-	generateEncryptionKey(): Promise<Uint8Array>;
-
-	// ============================================================================
-	// SRP Authentication Methods
-	// ============================================================================
-
-	/**
-	 * Derive authentication key and Master Unlock Key from password + secret key.
-	 * Uses PBKDF2 + HKDF key splitting.
-	 */
-	deriveKeys(
-		password: string,
-		secretKey: string,
-		email: string,
-	): Promise<DerivedKeys>;
-
-	/**
-	 * Generate client ephemeral key pair for SRP handshake.
-	 */
-	generateClientEphemeral(): SRPClientEphemeral | Promise<SRPClientEphemeral>;
-
-	/**
-	 * Derive client session from ephemeral secret and server challenge.
-	 */
-	deriveClientSession(
-		secret: string,
-		challenge: SRPServerChallenge,
-		password: string,
-	): Promise<SRPClientSession>;
-
-	/**
-	 * Verify server's proof to complete mutual authentication.
-	 */
-	verifyServerSession(
-		publicKey: string,
-		session: SRPClientSession,
-		proof: string,
-	): Promise<void>;
-
-	/**
-	 * Validate secret key format (A3-XXXXXX-... format).
-	 */
-	validateSecretKey(secretKey: string): boolean | Promise<boolean>;
-}
+export type {
+	DerivedKeys,
+	SRPClientEphemeral,
+	SRPClientSession,
+	SRPServerChallenge,
+} from "@bittery/core";
+export type { ICrypto };
 
 /**
  * Query invalidator interface for cache invalidation after mutations.

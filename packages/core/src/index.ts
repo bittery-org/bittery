@@ -1,0 +1,64 @@
+export {
+	type CoreContext,
+	type CreateCoreContextOptions,
+	createCoreContext,
+} from "./core-context";
+export {
+	type AccountInfo,
+	AccountResolver,
+	type DefaultTrpcClient,
+	findAccountForItem,
+	getClientForAccount,
+	getItemAccountEmail,
+	type ItemWithOptionalAccount,
+	type ResolveAccountsResult,
+} from "./services/account-resolver";
+export {
+	CacheManager,
+	type EncryptedPayload,
+} from "./services/cache-manager";
+export {
+	type CreateItemInput,
+	type CreateItemResult,
+	type DeleteItemResult,
+	type FetchDecryptedItemResult,
+	type FetchDeletedItemsOptions,
+	type FetchItemsOptions,
+	ItemService,
+	type MoveItemInput,
+	type MoveItemResult,
+	type MultiAccountDeletedItem,
+	type MultiAccountItem,
+	type PermanentDeleteItemResult,
+	type RawEncryptedItem,
+	type RawEncryptedItemWithVault,
+	type RestoreItemResult,
+	type ToggleFavoriteResult,
+	type UpdateItemInput,
+	type UpdateItemResult,
+} from "./services/item-service";
+export {
+	buildShareUrl,
+	type CreateShareInput,
+	type CreateShareResult,
+	type ShareAccessMode,
+	type ShareExpirationOption,
+	ShareService,
+} from "./services/share-service";
+export {
+	type CreateVaultInput,
+	type CreateVaultResult,
+	type ImageFileInput,
+	refreshVaultKeys,
+	type TRPCVaultClient,
+	type UpdateVaultInput,
+	type VaultListItem,
+	VaultService,
+} from "./services/vault-service";
+export type {
+	DerivedKeys,
+	ICrypto,
+	SRPClientEphemeral,
+	SRPClientSession,
+	SRPServerChallenge,
+} from "./types";

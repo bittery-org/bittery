@@ -2,99 +2,46 @@
  * useDeleteItem Hook
  *
  * Soft-deletes a vault item (moves to trash).
- * Returns a React Query mutation - apps handle success/error UI.
- * Automatically handles multi-account mode.
  */
 
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { useMutation } from "@tanstack/react-query";
 import {
-	usePlatformStorage,
+	useCoreContext,
 	useQueryInvalidator,
 } from "../../context/platform-context";
-import {
-	findAccountEmailForItem,
-	getTRPCClientForAccount,
-} from "../../utils/account-helper";
 import { useItems } from "../use-items";
 
 /**
  * Input for deleting an item
  */
 export interface DeleteItemInput {
-	/** ID of the item to delete */
 	itemId: string;
-	/** ID of the vault containing the item */
 	vaultId: string;
 }
 
 /**
  * Hook for soft-deleting a vault item.
- *
- * Soft delete moves the item to trash where it can be restored or permanently deleted.
- *
- * Handles:
- * - Soft-deleting the item via API
- * - Invalidating relevant queries (vault list + deleted items)
- * - Multi-account mode (automatically uses correct account's client)
- *
- * Does NOT handle:
- * - Toast notifications (app responsibility)
- * - Navigation after deletion (app responsibility)
- * - Confirmation dialog (app responsibility)
- *
- * @example
- * ```tsx
- * const deleteItem = useDeleteItem();
- *
- * const handleDelete = async () => {
- *   try {
- *     await deleteItem.mutateAsync({ itemId, vaultId });
- *     toast.success("Item moved to trash");
- *     navigate({ to: "/vault/$id", params: { id: vaultId } });
- *   } catch (error) {
- *     toast.error(error.message);
- *   }
- * };
- * ```
  */
 export function useDeleteItem() {
 	const { items } = useItems();
 	const defaultClient = useTRPCClient();
-	const storage = usePlatformStorage();
+	const core = useCoreContext();
 	const invalidator = useQueryInvalidator();
 
 	return useMutation({
-		mutationFn: async (
-			input: DeleteItemInput,
-		): Promise<{ _accountEmail: string | undefined }> => {
-			// Find which account this item belongs to (if in "All Accounts" mode)
-			const accountEmail = findAccountEmailForItem(input.itemId, items);
-			const client = await getTRPCClientForAccount(
-				storage,
-				defaultClient,
-				accountEmail,
+		mutationFn: async (input: DeleteItemInput) => {
+			const accountEmail = core.accounts.findAccountForItem(
+				input.itemId,
+				items,
 			);
-
-			await client.vault.deleteItem.mutate({ itemId: input.itemId });
-			return { _accountEmail: accountEmail };
+			return core.items.deleteItem(input.itemId, defaultClient, accountEmail);
 		},
 		onSuccess: async (data, variables) => {
-			// Update local cache - mark item as deleted
-			if (storage.supportsItemCache) {
-				const cachedItems = await storage.getCachedItems?.(data._accountEmail);
-				const existing = cachedItems?.find((i) => i.id === variables.itemId);
-				if (existing) {
-					storage.upsertCachedItem?.(
-						{
-							...existing,
-							deletedAt: new Date().toISOString(),
-							updatedAt: new Date().toISOString(),
-						},
-						data._accountEmail,
-					);
-				}
-			}
+			await core.cache.onItemDeleted({
+				itemId: variables.itemId,
+				accountEmail: data._accountEmail,
+			});
 			await invalidator.invalidateVaultList(variables.vaultId);
 			await invalidator.invalidateDeletedItems(variables.vaultId);
 		},

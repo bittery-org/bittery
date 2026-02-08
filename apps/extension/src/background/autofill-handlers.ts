@@ -1,24 +1,19 @@
 /**
  * Autofill Handlers
- * Handles autofill-specific messages
+ * Handles autofill-specific messages.
  */
 
 import type { DecryptedItem } from "@bittery/shared/types";
 import { storage } from "../lib/storage";
 import { AUTOFILL_REAUTH_WINDOW_MS } from "./constants";
-import { desktopSync } from "./desktop-sync";
+import { core } from "./core-instance";
 import {
 	getLastActivityTimestamp,
 	isUnlocked,
 	updateActivity,
 } from "./session-manager";
 import type { MessageResponse } from "./types";
-import {
-	decryptVaultItems,
-	decryptVaultItemsViaDesktop,
-	getDecryptedItemsCacheFirst,
-	hostnameMatches,
-} from "./vault-utils";
+import { hostnameMatches } from "./vault-utils";
 
 /**
  * Handle CHECK_AUTOFILL_AUTH message - Check if autofill is authenticated
@@ -30,7 +25,6 @@ export async function handleCheckAutofillAuth(): Promise<MessageResponse> {
 		return { success: true, authenticated: false, unlocked: false };
 	}
 
-	// Additional check: autofill requires more frequent re-auth
 	const now = Date.now();
 	const timeSinceLastActivity = now - getLastActivityTimestamp();
 	const needsReauth = timeSinceLastActivity > AUTOFILL_REAUTH_WINDOW_MS;
@@ -57,25 +51,12 @@ export async function handleUpdateAutofillTimestamp(): Promise<MessageResponse> 
 }
 
 /**
- * Get all decrypted items using cache-first strategy with desktop/WASM fallback
+ * Get all decrypted items from @bittery/core.
  */
 async function getAllDecryptedItems(): Promise<Array<DecryptedItem | null>> {
-	const desktopStatus = desktopSync.getLastStatus();
-	const desktopAvailable = desktopStatus?.available && !desktopStatus.locked;
-
-	try {
-		return await getDecryptedItemsCacheFirst(!!desktopAvailable);
-	} catch (error) {
-		console.warn("[autofill] Cache-first failed, falling back:", error);
-		if (desktopAvailable) {
-			try {
-				return await decryptVaultItemsViaDesktop();
-			} catch {
-				return await decryptVaultItems();
-			}
-		}
-		return await decryptVaultItems();
-	}
+	const { accountsInfo, isAllAccountsMode } =
+		await core.accounts.resolveAccounts();
+	return core.items.fetchAndDecryptItems(accountsInfo, { isAllAccountsMode });
 }
 
 /**
@@ -89,7 +70,6 @@ export async function handleGetAutofillItems(payload: {
 	const { hostname } = payload;
 	const items = await getAllDecryptedItems();
 
-	// Filter by hostname and only include login items
 	const filtered = items.filter(
 		(item) =>
 			item?.category === "login" && hostnameMatches(item?.url ?? "", hostname),
@@ -105,8 +85,6 @@ export async function handleGetAutofillCreditCards(): Promise<MessageResponse> {
 	updateActivity();
 
 	const items = await getAllDecryptedItems();
-
-	// Filter to only credit card items
 	const creditCards = items.filter(
 		(item) => item?.category === "credit-card" && item?.cardNumber,
 	);
@@ -121,8 +99,6 @@ export async function handleGetAutofillIdentities(): Promise<MessageResponse> {
 	updateActivity();
 
 	const items = await getAllDecryptedItems();
-
-	// Filter to only identity items
 	const identities = items.filter((item) => item?.category === "identity");
 
 	return { success: true, items: identities };

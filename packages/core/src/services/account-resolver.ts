@@ -1,0 +1,168 @@
+import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
+import type { IStorageAdapter } from "@bittery/storage/adapter";
+import type { ActiveAccount } from "@bittery/storage/types";
+
+export type DefaultTrpcClient = ReturnType<typeof createAccountTrpcClient>;
+
+/**
+ * Complete account information including metadata, credentials, and tRPC client.
+ */
+export interface AccountInfo {
+	email: string;
+	userId: string;
+	name: string;
+	teamName?: string;
+	teamAvatarUrl?: string | null;
+	authToken: string;
+	serverUrl: string;
+	trpcClient: ReturnType<typeof createAccountTrpcClient>;
+}
+
+export interface ResolveAccountsResult {
+	activeAccount: ActiveAccount;
+	accountsInfo: AccountInfo[];
+	isAllAccountsMode: boolean;
+}
+
+export interface ItemWithOptionalAccount {
+	id: string;
+	account?: {
+		email?: string;
+	} | null;
+}
+
+/**
+ * Extracts the account email from an item if it has account metadata.
+ */
+export function getItemAccountEmail(
+	item: ItemWithOptionalAccount | null | undefined,
+): string | undefined {
+	if (!item) return undefined;
+	return item.account?.email;
+}
+
+/**
+ * Finds the account email for a specific item by searching through a list of items.
+ */
+export function findAccountForItem(
+	itemId: string,
+	items: Array<ItemWithOptionalAccount | null | undefined>,
+): string | undefined {
+	const item = items.find((candidate) => candidate?.id === itemId);
+	return getItemAccountEmail(item);
+}
+
+/**
+ * Returns an account-specific tRPC client when accountEmail is provided.
+ */
+export async function getClientForAccount(
+	storage: IStorageAdapter,
+	defaultClient: DefaultTrpcClient,
+	accountEmail?: string,
+): Promise<DefaultTrpcClient> {
+	if (!accountEmail) {
+		return defaultClient;
+	}
+
+	const [authToken, serverUrl] = await Promise.all([
+		storage.getAuthToken(accountEmail),
+		storage.getServerUrl(accountEmail),
+	]);
+
+	if (!authToken) {
+		return defaultClient;
+	}
+
+	return createAccountTrpcClient(
+		authToken,
+		serverUrl || "http://localhost:3000",
+	);
+}
+
+/**
+ * Resolves active account configuration into per-account API clients.
+ */
+export class AccountResolver {
+	constructor(private readonly storage: IStorageAdapter) {}
+
+	async resolveAccounts(
+		activeAccountOverride?: ActiveAccount,
+	): Promise<ResolveAccountsResult> {
+		const activeAccount =
+			typeof activeAccountOverride === "undefined"
+				? await this.storage.getActiveAccount()
+				: activeAccountOverride;
+
+		if (!activeAccount) {
+			return {
+				activeAccount,
+				accountsInfo: [],
+				isAllAccountsMode: false,
+			};
+		}
+
+		const emails =
+			activeAccount.type === "single"
+				? [activeAccount.email]
+				: ((await this.storage.getUnlockedAccounts?.()) ?? []);
+
+		const infos = await Promise.all(
+			emails.map(async (email): Promise<AccountInfo | null> => {
+				try {
+					const [metadata, authToken, serverUrl] = await Promise.all([
+						this.storage.getAccountMetadata?.(email),
+						this.storage.getAuthToken(email),
+						this.storage.getServerUrl(email),
+					]);
+
+					if (!metadata || !authToken) {
+						return null;
+					}
+
+					const resolvedServerUrl = serverUrl || "http://localhost:3000";
+					const trpcClient = createAccountTrpcClient(
+						authToken,
+						resolvedServerUrl,
+					);
+
+					return {
+						email: metadata.email,
+						userId: metadata.userId,
+						name: metadata.name,
+						teamName: metadata.teamName,
+						teamAvatarUrl: metadata.teamAvatarUrl,
+						authToken,
+						serverUrl: resolvedServerUrl,
+						trpcClient,
+					};
+				} catch (error) {
+					console.error(
+						`[AccountResolver] Failed to load account info for ${email}:`,
+						error,
+					);
+					return null;
+				}
+			}),
+		);
+
+		return {
+			activeAccount,
+			accountsInfo: infos.filter((info): info is AccountInfo => info !== null),
+			isAllAccountsMode: activeAccount.type === "all",
+		};
+	}
+
+	async getClientForAccount(
+		defaultClient: DefaultTrpcClient,
+		accountEmail?: string,
+	): Promise<DefaultTrpcClient> {
+		return getClientForAccount(this.storage, defaultClient, accountEmail);
+	}
+
+	findAccountForItem(
+		itemId: string,
+		items: Array<ItemWithOptionalAccount | null | undefined>,
+	): string | undefined {
+		return findAccountForItem(itemId, items);
+	}
+}

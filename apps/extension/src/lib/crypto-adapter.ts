@@ -5,7 +5,7 @@
  * for use with shared auth utilities.
  */
 
-import type { ICrypto } from "@bittery/hooks";
+import type { ICrypto } from "@bittery/core";
 import {
 	decrypt,
 	deriveClientSession,

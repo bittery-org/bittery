@@ -9,20 +9,16 @@ import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";
 import {
-	usePlatform,
+	useCoreContext,
 	useQueryInvalidator,
 } from "../../context/platform-context";
-import { getTRPCClientForAccount } from "../../utils/account-helper";
 
 /**
  * Input for creating a new item
  */
 export interface CreateItemInput {
-	/** ID of the vault to create the item in */
 	vaultId: string;
-	/** Category of the item */
 	category: ItemCategory;
-	/** Decrypted item data to encrypt and store */
 	data: DecryptedItemData;
 	accountEmail?: string;
 }
@@ -32,7 +28,6 @@ export interface CreateItemInput {
  */
 export interface CreateItemResult {
 	itemId: string;
-	/** Encrypted data captured for cache update */
 	_encryptedData?: {
 		ciphertext: string;
 		iv: string;
@@ -42,103 +37,24 @@ export interface CreateItemResult {
 
 /**
  * Hook for creating a new vault item.
- *
- * Handles:
- * - Encrypting item data with the vault key
- * - Creating the item via API
- * - Invalidating relevant queries
- *
- * Does NOT handle:
- * - Toast notifications (app responsibility)
- * - Navigation (app responsibility)
- *
- * @example
- * ```tsx
- * const createItem = useCreateItem();
- *
- * const handleSubmit = async (data) => {
- *   try {
- *     const result = await createItem.mutateAsync({
- *       vaultId,
- *       category: "login",
- *       data: { title: "Example", username: "user", password: "secret" },
- *     });
- *     toast.success("Item created");
- *     navigate({ to: "/vault/$id/$itemId", params: { id: vaultId, itemId: result.itemId } });
- *   } catch (error) {
- *     toast.error(error.message);
- *   }
- * };
- * ```
  */
 export function useCreateItem() {
 	const defaultClient = useTRPCClient();
-	const { storage, crypto } = usePlatform();
+	const core = useCoreContext();
 	const invalidator = useQueryInvalidator();
 
 	return useMutation({
-		mutationFn: async (input: CreateItemInput): Promise<CreateItemResult> => {
-			// Get the vault key for encryption
-			const vaultKey = await storage.getDecryptedVaultKey(
-				input.vaultId,
-				input.accountEmail,
-			);
-
-			if (!vaultKey) {
-				throw new Error("No vault key found. Please sign in again.");
-			}
-
-			const client = await getTRPCClientForAccount(
-				storage,
-				defaultClient,
-				input.accountEmail,
-			);
-
-			// Encrypt the item data
-			const encryptedData = await crypto.encrypt(
-				JSON.stringify(input.data),
-				vaultKey,
-			);
-
-			// Create the item
-			const result = await client.vault.createItem.mutate({
-				vaultId: input.vaultId,
-				category: input.category,
-				encryptedData: encryptedData.ciphertext,
-				encryptionIv: encryptedData.iv,
-				encryptionAlgorithm: encryptedData.algorithm,
-			});
-
-			return {
-				itemId: result.id,
-				_encryptedData: {
-					ciphertext: encryptedData.ciphertext,
-					iv: encryptedData.iv,
-					algorithm: encryptedData.algorithm,
-				},
-			};
-		},
+		mutationFn: (input: CreateItemInput): Promise<CreateItemResult> =>
+			core.items.createItem(input, defaultClient),
 		onSuccess: async (data, variables) => {
-			// Update local cache if supported
-			if (storage.supportsItemCache && data._encryptedData) {
-				const now = new Date().toISOString();
-				storage.upsertCachedItem?.(
-					{
-						id: data.itemId,
-						vaultId: variables.vaultId,
-						category: variables.category,
-						favorite: false,
-						encryptedData: data._encryptedData.ciphertext,
-						encryptionIv: data._encryptedData.iv,
-						encryptionAlgorithm: data._encryptedData.algorithm,
-						version: 1,
-						lastModifiedBy: null,
-						createdAt: now,
-						updatedAt: now,
-						deletedAt: null,
-					},
-					variables.accountEmail,
-				);
+			if (data._encryptedData) {
+				await core.cache.onItemCreated({
+					itemId: data.itemId,
+					vaultId: variables.vaultId,
+					category: variables.category,
+					encryptedData: data._encryptedData,
+					accountEmail: variables.accountEmail,
+				});
 			}
 			await invalidator.invalidateVaultList(variables.vaultId);
 		},

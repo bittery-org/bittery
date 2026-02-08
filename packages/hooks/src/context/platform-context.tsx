@@ -5,6 +5,7 @@
  * Each app wraps its root with PlatformProvider, injecting platform-specific implementations.
  */
 
+import { type CoreContext, createCoreContext } from "@bittery/core";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import type {
@@ -24,6 +25,9 @@ export interface PlatformContextValue {
 
 	/** Platform crypto module - all platforms have identical API */
 	crypto: ICrypto;
+
+	/** Shared framework-agnostic business logic services */
+	core: CoreContext;
 
 	/**
 	 * Item decryption service using platform crypto
@@ -119,15 +123,25 @@ export function PlatformProvider({
 		[itemDecrypt, crypto],
 	);
 
+	const core = useMemo(
+		() =>
+			createCoreContext({
+				storage,
+				crypto,
+			}),
+		[storage, crypto],
+	);
+
 	const value = useMemo(
 		() => ({
 			storage,
 			crypto,
+			core,
 			itemDecrypt: effectiveItemDecrypt,
 			autolock,
 			sync,
 		}),
-		[storage, crypto, effectiveItemDecrypt, autolock, sync],
+		[storage, crypto, core, effectiveItemDecrypt, autolock, sync],
 	);
 
 	return (
@@ -158,6 +172,13 @@ export function usePlatform(): PlatformContextValue {
  */
 export function usePlatformStorage(): IStorageAdapter {
 	return usePlatform().storage;
+}
+
+/**
+ * Hook to access framework-agnostic core services.
+ */
+export function useCoreContext(): CoreContext {
+	return usePlatform().core;
 }
 
 /**

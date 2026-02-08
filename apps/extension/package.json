@@ -16,6 +16,7 @@
 	"dependencies": {
 		"@bittery/api": "workspace:*",
 		"@bittery/auth": "workspace:*",
+		"@bittery/core": "workspace:*",
 		"@bittery/crypto-wasm": "workspace:*",
 		"@bittery/hooks": "workspace:*",
 		"@bittery/shared": "workspace:*",

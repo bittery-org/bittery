@@ -1,19 +1,14 @@
 /**
  * Credential Handlers
- * Handles saving and updating credentials (password capture)
+ * Handles saving and updating credentials (password capture).
  */
 
 import { storage } from "../lib/storage";
-import { encrypt } from "../lib/wasm-crypto";
-import { desktopSync } from "./desktop-sync";
+import { core } from "./core-instance";
 import { isUnlocked, updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
-import {
-	decryptVaultItems,
-	getDecryptedItemsCacheFirst,
-	hostnameMatches,
-} from "./vault-utils";
+import { hostnameMatches } from "./vault-utils";
 
 /**
  * Helper function to extract hostname from URL
@@ -25,6 +20,47 @@ function extractHostname(url: string): string {
 	} catch {
 		return url;
 	}
+}
+
+async function getAllItemsForMatching() {
+	const { accountsInfo, isAllAccountsMode } =
+		await core.accounts.resolveAccounts();
+	return core.items.fetchAndDecryptItems(accountsInfo, { isAllAccountsMode });
+}
+
+async function resolveAccountEmailForVault(
+	vaultId: string,
+): Promise<string | undefined> {
+	const activeAccount = await storage.getActiveAccount();
+	if (activeAccount?.type === "single") {
+		return activeAccount.email;
+	}
+
+	const unlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
+	for (const email of unlockedEmails) {
+		const vaultKeys = await storage.getVaultKeys(email);
+		if (vaultKeys?.some((vaultKey) => vaultKey.vaultId === vaultId)) {
+			return email;
+		}
+	}
+
+	return undefined;
+}
+
+async function resolveAccountEmailForItem(
+	itemId: string,
+): Promise<string | undefined> {
+	const { accountsInfo, isAllAccountsMode } =
+		await core.accounts.resolveAccounts();
+	if (!isAllAccountsMode) {
+		return undefined;
+	}
+
+	const items = await core.items.fetchAndDecryptItems(accountsInfo, {
+		isAllAccountsMode: true,
+	});
+	const item = items.find((candidate) => candidate.id === itemId);
+	return item?.account?.email;
 }
 
 /**
@@ -46,7 +82,6 @@ export async function handleCheckExistingCredentials(payload: {
 		};
 	}
 
-	// Extract hostname from URL
 	let hostname: string;
 	try {
 		const urlObj = new URL(url.startsWith("http") ? url : `https://${url}`);
@@ -58,22 +93,11 @@ export async function handleCheckExistingCredentials(payload: {
 		};
 	}
 
-	const desktopStatus = desktopSync.getLastStatus();
-	const desktopAvailable = desktopStatus?.available && !desktopStatus.locked;
-
-	let items: Array<any>;
-	try {
-		items = await getDecryptedItemsCacheFirst(!!desktopAvailable);
-	} catch {
-		items = await decryptVaultItems();
-	}
-
-	// Filter by hostname
+	const items = await getAllItemsForMatching();
 	const matchingItems = items.filter((item) =>
-		hostnameMatches(item?.url, hostname),
+		hostnameMatches(item?.url ?? "", hostname),
 	);
 
-	// If username is provided, filter further to find exact username matches
 	let exactMatches = matchingItems;
 	if (username) {
 		exactMatches = matchingItems.filter(
@@ -81,17 +105,13 @@ export async function handleCheckExistingCredentials(payload: {
 		);
 	}
 
-	// Check if credentials have actually changed
-	let hasChanges = true; // Default to true (show prompt)
+	let hasChanges = true;
 	if (exactMatches.length > 0 && username && password) {
-		// Check if any of the exact matches have the same password
 		const exactPasswordMatch = exactMatches.some(
 			(item) =>
 				item.username?.toLowerCase() === username.toLowerCase() &&
 				item.password === password,
 		);
-
-		// If we found an exact match (same username AND password), there are no changes
 		hasChanges = !exactPasswordMatch;
 	}
 
@@ -104,7 +124,7 @@ export async function handleCheckExistingCredentials(payload: {
 			url: item.url || "",
 		})),
 		hasDuplicates: exactMatches.length > 0,
-		hasChanges, // New field to indicate if credentials actually changed
+		hasChanges,
 	};
 }
 
@@ -121,7 +141,6 @@ export async function handleSaveNewCredential(payload: {
 
 	const { vaultId, username, password, url } = payload;
 
-	// Validate inputs
 	if (!vaultId || !username || !password || !url) {
 		return {
 			success: false,
@@ -130,7 +149,6 @@ export async function handleSaveNewCredential(payload: {
 		};
 	}
 
-	// Check if extension is still unlocked
 	if (!isUnlocked()) {
 		return {
 			success: false,
@@ -139,62 +157,37 @@ export async function handleSaveNewCredential(payload: {
 		};
 	}
 
-	// Get vault key for the selected vault
-	const vaultKeys = await storage.getVaultKeys();
-	if (!vaultKeys || vaultKeys.length === 0) {
-		return {
-			success: false,
-			error: "No vault keys available. Please re-authenticate.",
-			errorType: "vault_key",
-		};
-	}
-
-	const vaultKeyData = vaultKeys.find((vk) => vk.vaultId === vaultId);
-	if (!vaultKeyData) {
-		return {
-			success: false,
-			error: "Vault key not found. Please select a different vault.",
-			errorType: "vault_key",
-		};
-	}
-
 	try {
-		// Decrypt vault key
-		const vaultKey = await storage.decryptVaultKey(
-			vaultKeyData.encryptedVaultKey,
-		);
-
-		// Extract hostname from URL for title
+		const accountEmail = await resolveAccountEmailForVault(vaultId);
 		const hostname = extractHostname(url);
 
-		// Prepare credential data to encrypt (all data goes in encryptedData)
-		const credentialData = {
-			title: hostname,
-			url,
-			username,
-			password,
-		};
-
-		// Encrypt credential data with vault key
-		const encryptedData = await encrypt(
-			JSON.stringify(credentialData),
-			vaultKey,
+		const result = await core.items.createItem(
+			{
+				vaultId,
+				category: "login",
+				data: {
+					title: hostname,
+					url,
+					username,
+					password,
+				},
+				accountEmail,
+			},
+			trpcClient as Parameters<typeof core.items.createItem>[1],
 		);
 
-		// Create item via tRPC
-		const result = await trpcClient.vault.createItem.mutate({
+		await core.cache.onItemCreated({
+			itemId: result.itemId,
 			vaultId,
 			category: "login",
-			encryptedData: encryptedData.ciphertext,
-			encryptionIv: encryptedData.iv,
-			encryptionAlgorithm: encryptedData.algorithm,
+			encryptedData: result._encryptedData,
+			accountEmail,
 		});
 
 		return { success: true, itemId: result.itemId };
 	} catch (error: any) {
 		console.error("Error saving credential:", error);
 
-		// Determine error type and message
 		let errorMessage = "Failed to save credentials. Please try again.";
 		let errorType = "unknown";
 
@@ -247,7 +240,6 @@ export async function handleUpdateExistingCredential(payload: {
 
 	const { itemId, vaultId, username, password, url } = payload;
 
-	// Validate inputs
 	if (!itemId || !vaultId || !username || !password || !url) {
 		return {
 			success: false,
@@ -256,7 +248,6 @@ export async function handleUpdateExistingCredential(payload: {
 		};
 	}
 
-	// Check if extension is still unlocked
 	if (!isUnlocked()) {
 		return {
 			success: false,
@@ -265,60 +256,35 @@ export async function handleUpdateExistingCredential(payload: {
 		};
 	}
 
-	// Get vault key for the selected vault
-	const vaultKeys = await storage.getVaultKeys();
-	if (!vaultKeys || vaultKeys.length === 0) {
-		return {
-			success: false,
-			error: "No vault keys available. Please re-authenticate.",
-			errorType: "vault_key",
-		};
-	}
-
-	const vaultKeyData = vaultKeys.find((vk) => vk.vaultId === vaultId);
-	if (!vaultKeyData) {
-		return {
-			success: false,
-			error: "Vault key not found. Please select a different vault.",
-			errorType: "vault_key",
-		};
-	}
-
 	try {
-		// Decrypt vault key
-		const vaultKey = await storage.decryptVaultKey(
-			vaultKeyData.encryptedVaultKey,
-		);
-
-		// Extract hostname from URL for title
+		const accountEmail = await resolveAccountEmailForItem(itemId);
 		const hostname = extractHostname(url);
 
-		// Prepare credential data to encrypt (all data goes in encryptedData)
-		const credentialData = {
-			title: hostname,
-			url,
-			username,
-			password,
-		};
-
-		// Encrypt credential data with vault key
-		const encryptedData = await encrypt(
-			JSON.stringify(credentialData),
-			vaultKey,
+		const result = await core.items.updateItem(
+			{
+				itemId,
+				vaultId,
+				data: {
+					title: hostname,
+					url,
+					username,
+					password,
+				},
+				accountEmail,
+			},
+			trpcClient as Parameters<typeof core.items.updateItem>[1],
 		);
 
-		// Update item via tRPC
-		await trpcClient.vault.updateItem.mutate({
+		await core.cache.onItemUpdated({
 			itemId,
-			encryptedData: encryptedData.ciphertext,
-			encryptionIv: encryptedData.iv,
+			encryptedData: result._encryptedData,
+			accountEmail: result._accountEmail,
 		});
 
 		return { success: true };
 	} catch (error: any) {
 		console.error("Error updating credential:", error);
 
-		// Determine error type and message
 		let errorMessage = "Failed to update credentials. Please try again.";
 		let errorType = "unknown";
 

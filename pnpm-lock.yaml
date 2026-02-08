@@ -185,6 +185,9 @@ importers:
       '@bittery/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@bittery/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@bittery/crypto-wasm':
         specifier: workspace:*
         version: link:../../packages/crypto/wasm
@@ -689,6 +692,27 @@ importers:
 
   packages/config: {}
 
+  packages/core:
+    dependencies:
+      '@bittery/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@bittery/storage':
+        specifier: workspace:*
+        version: link:../storage
+      '@bittery/types':
+        specifier: workspace:*
+        version: link:../types
+    devDependencies:
+      '@bittery/config':
+        specifier: workspace:*
+        version: link:../config
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
+  packages/crypto/core: {}
+
   packages/crypto/expo-module:
     dependencies:
       '@bittery/types':
@@ -749,6 +773,9 @@ importers:
 
   packages/hooks:
     dependencies:
+      '@bittery/core':
+        specifier: workspace:*
+        version: link:../core
       '@bittery/shared':
         specifier: workspace:*
         version: link:../shared
