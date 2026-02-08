@@ -284,7 +284,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 				// Desktop sync
 				case "CHECK_DESKTOP_STATUS": {
-					const status = desktopSync.getLastStatus();
+					// If status cache is empty (e.g. fresh service worker), do one live check
+					// so popup routing can avoid incorrect lock-screen flashes.
+					const status =
+						desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
 					sendResponse({
 						success: true,
 						available: desktopSync.isDesktopAvailable(),

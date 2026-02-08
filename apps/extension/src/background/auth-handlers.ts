@@ -16,11 +16,24 @@ import { storage } from "../lib/storage";
 import {
 	isUnlocked,
 	lock,
+	setDesktopModeSentinel,
 	setMasterUnlockKey,
 	updateActivity,
 } from "./session-manager";
+import { desktopSync } from "./desktop-sync";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
+
+async function isDesktopUnlockedNow(): Promise<boolean> {
+	const status =
+		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
+
+	return !!(
+		status?.available &&
+		!status.locked &&
+		(status.unlockedAccounts?.length ?? 0) > 0
+	);
+}
 
 /**
  * Handle LOGIN message - Full SRP authentication
@@ -90,7 +103,7 @@ export async function handleQuickUnlock(payload: {
  */
 export async function handleCheckAuth(): Promise<MessageResponse> {
 	// Check if we have a valid session
-	const authenticated = await storage.isAuthenticated();
+	const localAuthenticated = await storage.isAuthenticated();
 
 	// Ensure an active account is set if accounts exist but none is active
 	// This handles the case where the first account is added but not set as active
@@ -98,11 +111,22 @@ export async function handleCheckAuth(): Promise<MessageResponse> {
 
 	// Try to restore sessions from storage if not already unlocked
 	// This handles browser restart where in-memory MUKs are cleared
-	if (authenticated && !isUnlocked()) {
+	if (localAuthenticated && !isUnlocked()) {
 		await tryRestoreAllSessions();
 	}
 
-	const unlocked = isUnlocked();
+	const desktopUnlocked = await isDesktopUnlockedNow();
+	let unlocked = isUnlocked();
+
+	// Service worker restart can lose sentinel MUK; recover desktop mode eagerly.
+	if (!unlocked && desktopUnlocked) {
+		setDesktopModeSentinel();
+		unlocked = true;
+	}
+
+	// In desktop mode, local tokens may not be restored yet, but API auth still works
+	// through desktop token bridging.
+	const authenticated = localAuthenticated || desktopUnlocked;
 
 	if (authenticated && unlocked) {
 		await updateActivity();

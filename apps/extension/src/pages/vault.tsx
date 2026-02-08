@@ -29,6 +29,43 @@ type MultiAccountItem = DecryptedItem & {
 	};
 };
 
+type PopupActiveAccount = Awaited<ReturnType<typeof storage.getActiveAccount>>;
+
+const LAST_SELECTED_ITEM_BY_SCOPE_KEY =
+	"bittery_popup_last_selected_item_by_scope";
+
+function getSelectionScope(activeAccount: PopupActiveAccount): string {
+	if (!activeAccount) return "none";
+	if (activeAccount.type === "all") return "all";
+	return `single:${activeAccount.email.toLowerCase()}`;
+}
+
+function readSelectedItemForScope(scope: string): string | null {
+	try {
+		const raw = localStorage.getItem(LAST_SELECTED_ITEM_BY_SCOPE_KEY);
+		if (!raw) return null;
+		const parsed = JSON.parse(raw) as Record<string, unknown>;
+		const value = parsed[scope];
+		return typeof value === "string" ? value : null;
+	} catch {
+		return null;
+	}
+}
+
+function writeSelectedItemForScope(scope: string, itemId: string): void {
+	try {
+		const raw = localStorage.getItem(LAST_SELECTED_ITEM_BY_SCOPE_KEY);
+		const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+		parsed[scope] = itemId;
+		localStorage.setItem(
+			LAST_SELECTED_ITEM_BY_SCOPE_KEY,
+			JSON.stringify(parsed),
+		);
+	} catch {
+		// Ignore storage failures in popup context.
+	}
+}
+
 function getBaseDomain(host: string): string {
 	const parts = host.split(".");
 	if (parts.length <= 2) return host;
@@ -144,6 +181,10 @@ export function VaultPage() {
 		queryFn: () => storage.getActiveAccount(),
 		staleTime: 5 * 1000,
 	});
+	const selectionScope = useMemo(
+		() => getSelectionScope(activeAccount ?? null),
+		[activeAccount],
+	);
 
 	const isAllAccountsMode = activeAccount?.type === "all";
 
@@ -234,16 +275,29 @@ export function VaultPage() {
 			return;
 		}
 
+		const storedSelection = readSelectedItemForScope(selectionScope);
+		const hasStoredVisibleSelection =
+			!!storedSelection && sortedItems.some((item) => item.id === storedSelection);
+
 		if (!selectedItemId) {
-			setSelectedItemId(sortedItems[0]?.id ?? null);
+			setSelectedItemId(
+				hasStoredVisibleSelection ? storedSelection : (sortedItems[0]?.id ?? null),
+			);
 			return;
 		}
 
 		const stillVisible = sortedItems.some((item) => item.id === selectedItemId);
 		if (!stillVisible) {
-			setSelectedItemId(sortedItems[0]?.id ?? null);
+			setSelectedItemId(
+				hasStoredVisibleSelection ? storedSelection : (sortedItems[0]?.id ?? null),
+			);
 		}
-	}, [sortedItems, selectedItemId]);
+	}, [sortedItems, selectedItemId, selectionScope]);
+
+	useEffect(() => {
+		if (!selectedItemId) return;
+		writeSelectedItemForScope(selectionScope, selectedItemId);
+	}, [selectionScope, selectedItemId]);
 
 	// Split into favorites and regular items
 	const favoriteItems = sortedItems.filter((item) => item.favorite);
