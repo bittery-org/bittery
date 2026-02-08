@@ -1,15 +1,26 @@
 /**
  * Extension Sync Manager
- * MV3-compatible sync implementation using SSE with service worker constraints
- * Supports delta sync: incoming events update the local item cache before notifying the popup
+ *
+ * MV3-compatible SSE sync with explicit service-worker recovery behavior.
+ * Incoming events follow a strict order:
+ * 1) persist last event timestamp
+ * 2) apply account-scoped cache delta updates
+ * 3) notify UI listeners for query invalidation/refetch
  */
 
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import type { ConnectionStatus, SyncEvent } from "@bittery/sync";
-import { performDeltaSync } from "@bittery/sync";
-import { storage } from "../lib/storage";
-import { desktopClient } from "./desktop-client";
-import { trpcClient } from "./trpc-client";
+import { syncCacheService } from "./services/sync-cache-service";
+
+// Storage keys
+const CLIENT_ID_KEY = "bittery_sync_client_id";
+const LAST_SYNC_KEY = "bittery_last_sync_timestamp";
+const SYNC_ALARM_NAME = "bittery_sync_reconnect";
+
+// Connection state
+let abortController: AbortController | null = null;
+let connectionStatus: ConnectionStatus = "disconnected";
+let reconnectAttempt = 0;
+let syncConnectionEmail: string | null = null;
 
 /**
  * Generate a random ID (simpler than nanoid for extension context)
@@ -25,23 +36,6 @@ function generateId(length = 8): string {
 	}
 	return result;
 }
-
-// Storage keys
-const CLIENT_ID_KEY = "bittery_sync_client_id";
-const LAST_SYNC_KEY = "bittery_last_sync_timestamp";
-const SYNC_ALARM_NAME = "bittery_sync_reconnect";
-
-// Connection state
-let abortController: AbortController | null = null;
-let connectionStatus: ConnectionStatus = "disconnected";
-let reconnectAttempt = 0;
-let syncConnectionEmail: string | null = null;
-
-type SyncConnectionContext = {
-	email: string | null;
-	serverUrl: string;
-	token: string;
-};
 
 /**
  * Get or create a unique client ID for this extension instance
@@ -63,188 +57,33 @@ export async function getClientId(): Promise<string> {
 	return getOrCreateClientId();
 }
 
-/**
- * Resolve the active account email
- */
-async function resolveActiveEmail(): Promise<string | null> {
-	const account = await storage.getActiveAccount();
-	if (!account || account.type === "all") return null;
-	return account.email.toLowerCase();
+type SyncRuntimeMessage =
+	| { type: "SYNC_STATUS_CHANGED"; status: ConnectionStatus }
+	| { type: "SYNC_EVENT"; event: SyncEvent };
+
+function sendRuntimeMessage(message: SyncRuntimeMessage): void {
+	chrome.runtime.sendMessage(message).catch(() => {
+		// Popup might not be open, ignore.
+	});
 }
 
 /**
- * Get auth token for an account, hydrating from desktop if available.
+ * Update connection status and notify popup.
  */
-async function getAuthTokenForEmail(email: string): Promise<string | null> {
-	const normalizedEmail = email.toLowerCase();
-	const localToken = await storage.getAuthToken(normalizedEmail);
-	if (localToken) {
-		return localToken;
-	}
-
-	try {
-		const desktopToken = await desktopClient.getAuthToken(normalizedEmail);
-		if (desktopToken) {
-			await storage.storeAuthToken(desktopToken, normalizedEmail);
-			return desktopToken;
-		}
-	} catch {
-		// Ignore desktop bridge errors and fall back to null.
-	}
-
-	return null;
-}
-
-/**
- * Build an account-scoped tRPC client. Returns null when no auth token is available.
- */
-async function getAccountClientForEmail(
-	email: string,
-): Promise<ReturnType<typeof createAccountTrpcClient> | null> {
-	const normalizedEmail = email.toLowerCase();
-	const authToken = await getAuthTokenForEmail(normalizedEmail);
-	if (!authToken) return null;
-
-	const serverUrl =
-		(await storage.getServerUrl(normalizedEmail)) ||
-		(await storage.getServerUrl()) ||
-		"http://localhost:3000";
-	return createAccountTrpcClient(authToken, serverUrl);
-}
-
-/**
- * Resolve auth context used to connect SSE.
- */
-async function resolveSyncConnectionContext(): Promise<SyncConnectionContext | null> {
-	const candidateEmails: string[] = [];
-	const activeEmail = await resolveActiveEmail();
-	if (activeEmail) {
-		candidateEmails.push(activeEmail);
-	}
-
-	const accounts = await storage.getAccountsList();
-	for (const account of accounts) {
-		const email = account.email.toLowerCase();
-		if (!candidateEmails.includes(email)) {
-			candidateEmails.push(email);
-		}
-	}
-
-	for (const email of candidateEmails) {
-		const token = await getAuthTokenForEmail(email);
-		if (!token) continue;
-
-		const serverUrl =
-			(await storage.getServerUrl(email)) ||
-			(await storage.getServerUrl()) ||
-			"http://localhost:3000";
-		return { email, serverUrl, token };
-	}
-
-	const fallbackToken = await storage.getAuthToken();
-	if (!fallbackToken) return null;
-
-	const fallbackServerUrl =
-		(await storage.getServerUrl()) || "http://localhost:3000";
-	return { email: null, serverUrl: fallbackServerUrl, token: fallbackToken };
-}
-
-/**
- * Get candidate account emails to apply cache updates for a sync event.
- */
-async function getCandidateEmailsForEvent(event: SyncEvent): Promise<string[]> {
-	const activeEmail = await resolveActiveEmail();
-	if (activeEmail) {
-		return [activeEmail];
-	}
-
-	const accounts = await storage.getAccountsList();
-	const allEmails = Array.from(
-		new Set(accounts.map((account) => account.email.toLowerCase())),
-	);
-	if (allEmails.length === 0) {
-		return [];
-	}
-
-	if (!event.vaultId) {
-		return allEmails;
-	}
-
-	const matchedEmails: string[] = [];
-	for (const email of allEmails) {
-		const vaultKeys = await storage.getVaultKeys(email);
-		if (vaultKeys?.some((vaultKey) => vaultKey.vaultId === event.vaultId)) {
-			matchedEmails.push(email);
-		}
-	}
-
-	return matchedEmails.length > 0 ? matchedEmails : allEmails;
-}
-
-/**
- * Apply delta sync updates to per-account caches.
- */
-async function applyDeltaSyncForEvent(event: SyncEvent): Promise<void> {
-	const candidateEmails = await getCandidateEmailsForEvent(event);
-
-	if (candidateEmails.length === 0) {
-		await performDeltaSync(trpcClient, storage, event);
+function setStatus(status: ConnectionStatus, reason: string): void {
+	if (connectionStatus === status) {
 		return;
 	}
 
-	let applied = 0;
-	for (const email of candidateEmails) {
-		try {
-			const client = await getAccountClientForEmail(email);
-			if (!client) continue;
-
-			await performDeltaSync(client, storage, event, email);
-			applied++;
-		} catch (error) {
-			console.warn(
-				`[sync-manager] Delta sync failed for ${email} (${event.type}):`,
-				error,
-			);
-		}
-	}
-
-	if (applied === 0) {
-		await Promise.all(
-			candidateEmails.map((email) => storage.clearItemCache?.(email)),
-		);
-		await performDeltaSync(trpcClient, storage, event);
-	}
-}
-
-/**
- * Create a tRPC client for a specific account email.
- * Falls back to the default trpcClient if email is not provided.
- */
-async function getClientForEmail(
-	email?: string | null,
-): Promise<typeof trpcClient> {
-	if (!email) return trpcClient;
-
-	const client = await getAccountClientForEmail(email);
-	return client ?? trpcClient;
-}
-
-/**
- * Update connection status and notify popup
- */
-function setStatus(status: ConnectionStatus) {
-	if (connectionStatus !== status) {
-		connectionStatus = status;
-		// Broadcast to popup
-		chrome.runtime
-			.sendMessage({
-				type: "SYNC_STATUS_CHANGED",
-				status,
-			})
-			.catch(() => {
-				// Popup might not be open, ignore
-			});
-	}
+	const previous = connectionStatus;
+	connectionStatus = status;
+	console.info(
+		`[sync-manager] Connection status ${previous} -> ${status} (${reason})`,
+	);
+	sendRuntimeMessage({
+		type: "SYNC_STATUS_CHANGED",
+		status,
+	});
 }
 
 /**
@@ -254,113 +93,125 @@ export function getStatus(): ConnectionStatus {
 	return connectionStatus;
 }
 
+function isSyncEventPayload(value: unknown): value is SyncEvent {
+	if (!value || typeof value !== "object") {
+		return false;
+	}
+
+	const event = value as Partial<SyncEvent>;
+	return (
+		typeof event.id === "string" &&
+		typeof event.type === "string" &&
+		typeof event.entityId === "string" &&
+		typeof event.entityType === "string" &&
+		typeof event.version === "number" &&
+		typeof event.userId === "string" &&
+		typeof event.timestamp === "number"
+	);
+}
+
 /**
  * Handle incoming sync event
- * Delta sync: fetch only the changed entity, update local cache, THEN broadcast to popup
+ * Cache updates happen before UI notifications so popup reads can be cache-first.
  */
-async function handleSyncEvent(event: SyncEvent) {
-	// Store last sync timestamp in local storage (survives service worker restarts)
+async function handleSyncEvent(event: SyncEvent): Promise<void> {
+	// Store last sync timestamp in local storage (survives service worker restarts).
 	await chrome.storage.local.set({ [LAST_SYNC_KEY]: event.timestamp });
 
-	// Skip events from our own client
+	// Skip events from our own client.
 	const clientId = await getClientId();
 	if (event.metadata?.originClientId === clientId) {
 		return;
 	}
 
-	// Delta sync: update local item cache before notifying popup
-	if (storage.supportsItemCache) {
+	if (syncCacheService.supportsItemCache()) {
 		try {
-			await applyDeltaSyncForEvent(event);
-			// Desktop decryption cache is keyed by item id, so clear on data-changing events.
-			if (event.type.startsWith("item_") || event.type.startsWith("vault_")) {
-				desktopClient.clearCache();
-			}
-		} catch (e) {
+			await syncCacheService.applyDeltaSyncForEvent(event);
+		} catch (error) {
 			console.error(
 				"[sync-manager] Delta sync failed, popup will do full refetch:",
-				e,
+				error,
 			);
 		}
 	}
 
-	// Notify popup to refresh data (reads from updated cache if delta sync succeeded)
-	chrome.runtime
-		.sendMessage({
-			type: "SYNC_EVENT",
-			event,
-		})
-		.catch(() => {
-			// Popup might not be open, ignore
-		});
+	// Notify popup to refresh data (reads from updated cache if delta sync succeeded).
+	sendRuntimeMessage({
+		type: "SYNC_EVENT",
+		event,
+	});
 }
 
 /**
- * Catch up on missed events since last sync timestamp
+ * Catch up on missed events since last sync timestamp.
  */
 async function catchUpMissedEvents(): Promise<void> {
-	if (!storage.supportsItemCache) return;
+	if (!syncCacheService.supportsItemCache()) {
+		return;
+	}
 
 	try {
 		const lastTimestamp = await getLastSyncTimestamp();
-		if (!lastTimestamp) return;
+		if (!lastTimestamp) {
+			return;
+		}
 
 		const clientId = await getClientId();
-		const client = await getClientForEmail(syncConnectionEmail);
-
+		const client = await syncCacheService.getClientForEmail(syncConnectionEmail);
 		const result = await client.sync.getEventsSince.query({
 			since: lastTimestamp,
 		});
 
 		let processed = 0;
 		for (const event of result.events) {
-			// Skip own events
-			if (event.clientId === clientId) continue;
-			await applyDeltaSyncForEvent(event as SyncEvent);
+			// Skip own events.
+			if (event.clientId === clientId) {
+				continue;
+			}
+
+			await syncCacheService.applyDeltaSyncForEvent(event as SyncEvent);
 			processed++;
 		}
 
 		if (processed > 0) {
-			console.log(
-				`[sync-manager] Catch-up: processed ${processed} missed events`,
+			console.info(
+				`[sync-manager] Catch-up applied ${processed} missed event(s)`,
 			);
-			desktopClient.clearCache();
-			// Save the latest timestamp
-			const latestTimestamp =
-				result.events[result.events.length - 1]?.timestamp;
+			const latestTimestamp = result.events[result.events.length - 1]?.timestamp;
 			if (latestTimestamp) {
 				await chrome.storage.local.set({
 					[LAST_SYNC_KEY]: latestTimestamp,
 				});
 			}
 		}
-	} catch (e) {
-		console.error(
-			"[sync-manager] Catch-up failed, full refetch will happen:",
-			e,
-		);
+	} catch (error) {
+		console.error("[sync-manager] Catch-up failed, full refetch will happen:", error);
 	}
 }
 
 /**
- * Connect to SSE endpoint
+ * Connect to SSE endpoint.
  */
 export async function connect(): Promise<void> {
 	if (connectionStatus === "connected" || connectionStatus === "connecting") {
 		return;
 	}
 
-	setStatus("connecting");
+	setStatus("connecting", "connect requested");
 
 	try {
-		const context = await resolveSyncConnectionContext();
+		const context = await syncCacheService.resolveConnectionContext();
 		if (!context) {
-			setStatus("disconnected");
+			syncConnectionEmail = null;
+			setStatus("disconnected", "no auth context available");
 			return;
 		}
-		syncConnectionEmail = context.email;
 
-		// Create abort controller
+		syncConnectionEmail = context.email;
+		console.info(
+			`[sync-manager] Connecting SSE for ${context.email ?? "fallback"} at ${context.serverUrl}`,
+		);
+
 		abortController = new AbortController();
 
 		const response = await fetch(`${context.serverUrl}/sync/events`, {
@@ -380,30 +231,30 @@ export async function connect(): Promise<void> {
 			throw new Error("No response body");
 		}
 
-		setStatus("connected");
+		setStatus("connected", "SSE stream opened");
 		reconnectAttempt = 0;
 
-		// Clear any pending reconnect alarms
+		// Clear any pending reconnect alarms.
 		await chrome.alarms.clear(SYNC_ALARM_NAME);
 
-		// Catch up on missed events since last sync
+		// Catch up on missed events since last sync.
 		await catchUpMissedEvents();
 
-		// Read SSE stream
+		// Read SSE stream.
 		await readStream(response.body);
 	} catch (error) {
 		if ((error as Error).name === "AbortError") {
 			return;
 		}
 
-		console.error("SSE connection error:", error);
-		setStatus("error");
-		scheduleReconnect();
+		console.error("[sync-manager] SSE connection error:", error);
+		setStatus("error", "connection failed");
+		scheduleReconnect("connection_error");
 	}
 }
 
 /**
- * Read and parse SSE stream
+ * Read and parse SSE stream.
  */
 async function readStream(body: ReadableStream<Uint8Array>): Promise<void> {
 	const reader = body.getReader();
@@ -415,14 +266,14 @@ async function readStream(body: ReadableStream<Uint8Array>): Promise<void> {
 			const { done, value } = await reader.read();
 
 			if (done) {
-				setStatus("reconnecting");
-				scheduleReconnect();
+				setStatus("reconnecting", "stream ended by server");
+				scheduleReconnect("stream_ended");
 				break;
 			}
 
 			buffer += decoder.decode(value, { stream: true });
 
-			// Process complete events
+			// Process complete events.
 			const events = buffer.split("\n\n");
 			buffer = events.pop() || "";
 
@@ -432,9 +283,9 @@ async function readStream(body: ReadableStream<Uint8Array>): Promise<void> {
 		}
 	} catch (error) {
 		if ((error as Error).name !== "AbortError") {
-			console.error("Stream read error:", error);
-			setStatus("reconnecting");
-			scheduleReconnect();
+			console.error("[sync-manager] Stream read error:", error);
+			setStatus("reconnecting", "stream read failure");
+			scheduleReconnect("stream_error");
 		}
 	} finally {
 		reader.releaseLock();
@@ -442,102 +293,105 @@ async function readStream(body: ReadableStream<Uint8Array>): Promise<void> {
 }
 
 /**
- * Process a single SSE event
+ * Process a single SSE event payload.
  */
 async function processEvent(eventStr: string): Promise<void> {
 	const lines = eventStr.trim().split("\n");
 	let data = "";
 
 	for (const line of lines) {
-		if (line.startsWith(":")) continue; // Skip heartbeats
+		if (line.startsWith(":")) {
+			continue; // Skip heartbeats/comments.
+		}
 		if (line.startsWith("data: ")) {
 			data = line.slice(6);
 		}
 	}
 
-	if (!data) return;
+	if (!data) {
+		return;
+	}
 
 	try {
-		const event = JSON.parse(data);
-
-		// Handle connection message
-		if (event.type === "connected") {
-			console.log("SSE connected:", event);
+		const parsed = JSON.parse(data) as unknown;
+		if (!parsed || typeof parsed !== "object") {
 			return;
 		}
 
-		// Convert to SyncEvent and handle
-		const syncEvent: SyncEvent = {
-			id: event.id,
-			type: event.type,
-			entityId: event.entityId,
-			entityType: event.entityType,
-			vaultId: event.vaultId,
-			version: event.version,
-			clientId: event.clientId,
-			userId: event.userId,
-			timestamp: event.timestamp,
-			metadata: event.metadata,
-		};
+		const eventType = (parsed as { type?: unknown }).type;
+		if (eventType === "connected") {
+			console.info("[sync-manager] SSE connected event received");
+			return;
+		}
 
-		await handleSyncEvent(syncEvent);
+		if (!isSyncEventPayload(parsed)) {
+			console.warn("[sync-manager] Ignoring malformed sync event payload", parsed);
+			return;
+		}
+
+		await handleSyncEvent(parsed);
 	} catch (error) {
-		console.error("Failed to parse SSE event:", error, data);
+		console.error("[sync-manager] Failed to parse SSE event:", error, data);
 	}
 }
 
 /**
- * Schedule reconnection using Chrome Alarms (MV3 compatible)
+ * Schedule reconnection using Chrome Alarms (MV3-compatible).
  */
-function scheduleReconnect() {
-	const delay = Math.min(1000 * 2 ** reconnectAttempt, 30000);
+function scheduleReconnect(reason: string): void {
+	const delayMs = Math.min(1000 * 2 ** reconnectAttempt, 30000);
 	reconnectAttempt++;
 
-	// Use Chrome Alarms for reconnection (survives service worker termination)
+	console.warn(
+		`[sync-manager] Scheduling reconnect attempt ${reconnectAttempt} in ${delayMs}ms (${reason})`,
+	);
+
 	chrome.alarms.create(SYNC_ALARM_NAME, {
-		delayInMinutes: delay / 60000,
+		delayInMinutes: delayMs / 60000,
 	});
 }
 
 /**
- * Handle reconnect alarm
+ * Handle reconnect alarm.
  */
-export async function handleSyncReconnectAlarm(alarm: chrome.alarms.Alarm) {
+export async function handleSyncReconnectAlarm(
+	alarm: chrome.alarms.Alarm,
+): Promise<void> {
 	if (alarm.name === SYNC_ALARM_NAME) {
 		await connect();
 	}
 }
 
 /**
- * Disconnect from SSE
+ * Disconnect from SSE.
  */
-export function disconnect() {
+export function disconnect(reason = "manual disconnect"): void {
 	if (abortController) {
 		abortController.abort();
 		abortController = null;
 	}
 	syncConnectionEmail = null;
-	chrome.alarms.clear(SYNC_ALARM_NAME);
-	setStatus("disconnected");
+	void chrome.alarms.clear(SYNC_ALARM_NAME);
+	setStatus("disconnected", reason);
 }
 
 /**
- * Initialize sync on login
+ * Initialize sync on login.
  */
-export async function initializeSync() {
+export async function initializeSync(): Promise<void> {
 	await connect();
 }
 
 /**
- * Cleanup sync on logout
+ * Cleanup sync on logout.
  */
-export async function cleanupSync() {
-	disconnect();
+export async function cleanupSync(): Promise<void> {
+	disconnect("logout cleanup");
 	await chrome.storage.local.remove([LAST_SYNC_KEY]);
 }
 
 /**
- * Get last sync timestamp
+ * Get last sync timestamp.
  */
 export async function getLastSyncTimestamp(): Promise<number | null> {
 	const result = await chrome.storage.local.get(LAST_SYNC_KEY);

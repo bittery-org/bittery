@@ -5,13 +5,12 @@
 
 import { storage } from "../lib/storage";
 import { decrypt, encrypt } from "../lib/wasm-crypto";
-import { core } from "./core-instance";
 import {
 	ensureDesktopWriteCapability,
 	hydrateDesktopAccountMaterial,
 } from "./desktop-key-material";
-import { desktopClient } from "./desktop-client";
 import { desktopSync } from "./desktop-sync";
+import { onLocalItemUpdated } from "./services/local-item-cache-service";
 import { isUnlocked, updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
@@ -91,13 +90,14 @@ export async function handleCaptureTabScreenshot(): Promise<MessageResponse> {
 			success: true,
 			dataUrl,
 		};
-	} catch (error: any) {
+	} catch (error) {
 		console.error("Error capturing tab screenshot:", error);
+		const errorMessage = error instanceof Error ? error.message : String(error);
 
 		// Handle specific Chrome permission errors
 		if (
-			error.message?.includes("Cannot access") ||
-			error.message?.includes("permission")
+			errorMessage.includes("Cannot access") ||
+			errorMessage.includes("permission")
 		) {
 			return {
 				success: false,
@@ -108,7 +108,7 @@ export async function handleCaptureTabScreenshot(): Promise<MessageResponse> {
 
 		return {
 			success: false,
-			error: error.message || "Failed to capture tab screenshot",
+			error: errorMessage || "Failed to capture tab screenshot",
 		};
 	}
 }
@@ -254,52 +254,51 @@ export async function handleUpdateItemTotp(payload: {
 		});
 
 		// Keep local cache in sync for immediate UI consistency.
-		await core.cache.onItemUpdated({
+		await onLocalItemUpdated({
 			itemId,
 			encryptedData,
 			accountEmail,
 		});
 
-		// Desktop decrypt cache is keyed only by item id; clear to avoid stale reads.
-		desktopClient.clearCache();
-
 		return {
 			success: true,
 			message: "TOTP added successfully",
 		};
-	} catch (error: any) {
+	} catch (error) {
 		console.error("Error updating item TOTP:", error);
+		const errorMessageRaw =
+			error instanceof Error ? error.message : String(error);
 
 		// Determine error type and message
 		let errorMessage = "Failed to update item with TOTP. Please try again.";
 		let errorType = "unknown";
 
 		if (
-			error.message?.includes("network") ||
-			error.message?.includes("fetch")
+			errorMessageRaw.includes("network") ||
+			errorMessageRaw.includes("fetch")
 		) {
 			errorMessage = "Network error. Check your connection and try again.";
 			errorType = "network";
 		} else if (
-			error.message?.includes("decrypt") ||
-			error.message?.includes("encryption")
+			errorMessageRaw.includes("decrypt") ||
+			errorMessageRaw.includes("encryption")
 		) {
 			errorMessage = "Encryption error. Please unlock and try again.";
 			errorType = "encryption";
 		} else if (
-			error.message?.includes("unauthorized") ||
-			error.message?.includes("auth")
+			errorMessageRaw.includes("unauthorized") ||
+			errorMessageRaw.includes("auth")
 		) {
 			errorMessage = "Authentication error. Please re-authenticate.";
 			errorType = "auth";
 		} else if (
-			error.message?.includes("permission") ||
-			error.message?.includes("access")
+			errorMessageRaw.includes("permission") ||
+			errorMessageRaw.includes("access")
 		) {
 			errorMessage =
 				"Permission denied. You may not have write access to this vault.";
 			errorType = "permission";
-		} else if (error.message?.includes("not found")) {
+		} else if (errorMessageRaw.includes("not found")) {
 			errorMessage = "Item not found. It may have been deleted.";
 			errorType = "not_found";
 		}

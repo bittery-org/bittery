@@ -7,6 +7,10 @@
 
 import { storage } from "../lib/storage";
 import { desktopClient } from "./desktop-client";
+import {
+	type DesktopModeStateSnapshot,
+	evaluateDesktopRecoveryDecision,
+} from "./services/desktop-recovery";
 import { _lockInternal, setDesktopModeSentinel } from "./session-manager";
 
 const DESKTOP_BASE_URL = "http://localhost:48765";
@@ -16,11 +20,6 @@ const DESKTOP_MODE_RECOVERY_WINDOW_MS = 60000; // 1 minute window to recover des
 
 // Storage keys for persistent state
 const STORAGE_KEY_DESKTOP_MODE = "desktop_mode_state";
-
-interface DesktopModeState {
-	lastConnectedAt: number;
-	activeAccount: string | null;
-}
 
 export interface DesktopStatus {
 	available: boolean;
@@ -57,6 +56,12 @@ class DesktopSyncService {
 
 	/**
 	 * Initialize the desktop sync service
+	 *
+	 * Lifecycle phases:
+	 * 1) Seed local account/cache state from desktop availability.
+	 * 2) Attempt restart recovery if desktop mode was recently active.
+	 * 3) Fall back to a fresh status check and subscribe to SSE.
+	 * 4) Keep polling as a safety net if SSE drops.
 	 */
 	async initialize(): Promise<void> {
 		console.log("[Desktop Sync] Initializing");
@@ -76,14 +81,23 @@ class DesktopSyncService {
 			}
 		}
 
-		// Check if we were previously in desktop mode (service worker restart recovery)
+		// Check if we were previously in desktop mode (service worker restart recovery).
 		const previousState = await this.loadDesktopModeState();
 		const now = Date.now();
+		const recoveryDecision = evaluateDesktopRecoveryDecision(
+			previousState,
+			now,
+			DESKTOP_MODE_RECOVERY_WINDOW_MS,
+		);
+		console.log(
+			`[Desktop Sync] Recovery decision: ${recoveryDecision.reason}${
+				recoveryDecision.ageMs !== null
+					? ` (${Math.round(recoveryDecision.ageMs / 1000)}s since last desktop session)`
+					: ""
+			}`,
+		);
 
-		if (
-			previousState &&
-			now - previousState.lastConnectedAt < DESKTOP_MODE_RECOVERY_WINDOW_MS
-		) {
+		if (recoveryDecision.shouldAttemptRecovery && previousState) {
 			console.log(
 				"[Desktop Sync] Recovering from service worker restart (desktop mode was active)",
 			);
@@ -139,10 +153,7 @@ class DesktopSyncService {
 		}
 
 		// Check desktop status immediately (fresh check if not recovering)
-		if (
-			!previousState ||
-			now - previousState.lastConnectedAt >= DESKTOP_MODE_RECOVERY_WINDOW_MS
-		) {
+		if (!recoveryDecision.shouldAttemptRecovery) {
 			const status = await this.checkDesktopStatus();
 
 			if (status?.available) {
@@ -654,7 +665,7 @@ class DesktopSyncService {
 	private async saveDesktopModeState(): Promise<void> {
 		try {
 			const activeAccount = await storage.getActiveAccount();
-			const state: DesktopModeState = {
+			const state: DesktopModeStateSnapshot = {
 				lastConnectedAt: Date.now(),
 				activeAccount:
 					activeAccount?.type === "single"
@@ -673,11 +684,11 @@ class DesktopSyncService {
 	/**
 	 * Load desktop mode state from persistent storage
 	 */
-	private async loadDesktopModeState(): Promise<DesktopModeState | null> {
+	private async loadDesktopModeState(): Promise<DesktopModeStateSnapshot | null> {
 		try {
 			const result = await chrome.storage.local.get(STORAGE_KEY_DESKTOP_MODE);
 			const state = result[STORAGE_KEY_DESKTOP_MODE] as
-				| DesktopModeState
+				| DesktopModeStateSnapshot
 				| undefined;
 			if (state) {
 				console.log("[Desktop Sync] Loaded desktop mode state:", state);

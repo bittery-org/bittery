@@ -10,6 +10,7 @@ import {
 	useState,
 } from "react";
 import { createExtensionInvalidator } from "../lib/query-invalidation";
+import { invalidateExtensionQueriesForSyncEvent } from "./sync-event-invalidation";
 
 /**
  * Context for sync state
@@ -39,6 +40,14 @@ interface SyncEventMessage {
 }
 
 type BackgroundMessage = SyncStatusMessage | SyncEventMessage;
+
+function isBackgroundMessage(message: unknown): message is BackgroundMessage {
+	if (!message || typeof message !== "object") {
+		return false;
+	}
+	const typed = message as Partial<BackgroundMessage>;
+	return typed.type === "SYNC_STATUS_CHANGED" || typed.type === "SYNC_EVENT";
+}
 
 /**
  * Provider component for sync functionality (Extension)
@@ -87,59 +96,28 @@ export function ExtensionSyncProvider({
 	// Handle sync events and invalidate queries
 	const handleSyncEvent = useCallback(
 		async (event: SyncEvent) => {
-			console.log("Received sync event:", event.type, event);
-
-			// Invalidate queries based on event type
-			switch (event.type) {
-				case "item_created":
-				case "item_updated":
-				case "item_moved":
-					if (event.vaultId) {
-						await invalidator.invalidateVaultList(event.vaultId);
-					}
-					if (event.entityId && event.vaultId) {
-						await invalidator.invalidateItem(event.entityId, event.vaultId);
-					}
-					break;
-
-				case "item_deleted":
-				case "item_restored":
-					if (event.vaultId) {
-						await invalidator.invalidateVaultList(event.vaultId);
-						await invalidator.invalidateDeletedItems(event.vaultId);
-					}
-					break;
-
-				case "vault_created":
-				case "vault_updated":
-				case "vault_deleted":
-					await invalidator.invalidateVaultKeys();
-					break;
-
-				case "vault_member_added":
-				case "vault_member_removed":
-					if (event.vaultId) {
-						await invalidator.invalidateVaultMembers(event.vaultId);
-					}
-					await invalidator.invalidateVaultKeys();
-					break;
-
-				case "vault_key_rotated":
-					await invalidator.invalidateVaultKeys();
-					if (event.vaultId) {
-						await invalidator.invalidateVaultList(event.vaultId);
-					}
-					break;
-			}
+			console.log("[Sync provider] Received sync event:", event.type, event.id);
+			await invalidateExtensionQueriesForSyncEvent(invalidator, event);
 		},
 		[invalidator],
 	);
 
 	// Listen for messages from background worker
 	useEffect(() => {
-		const handleMessage = (message: BackgroundMessage) => {
+		const handleMessage = (message: unknown) => {
+			if (!isBackgroundMessage(message)) {
+				return;
+			}
+
 			if (message.type === "SYNC_STATUS_CHANGED") {
-				setStatus(message.status);
+				setStatus((previous) => {
+					if (previous !== message.status) {
+						console.info(
+							`[Sync provider] Status ${previous} -> ${message.status}`,
+						);
+					}
+					return message.status;
+				});
 			} else if (message.type === "SYNC_EVENT") {
 				void handleSyncEvent(message.event);
 			}

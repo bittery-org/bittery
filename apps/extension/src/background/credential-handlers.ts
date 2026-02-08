@@ -10,6 +10,7 @@ import {
 	hydrateDesktopAccountMaterial,
 } from "./desktop-key-material";
 import { desktopSync } from "./desktop-sync";
+import { onLocalItemCreated, onLocalItemUpdated } from "./services/local-item-cache-service";
 import { isUnlocked, updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
@@ -217,7 +218,7 @@ export async function handleSaveNewCredential(payload: {
 			trpcClient as Parameters<typeof core.items.createItem>[1],
 		);
 
-		await core.cache.onItemCreated({
+		await onLocalItemCreated({
 			itemId: result.itemId,
 			vaultId,
 			category: "login",
@@ -226,33 +227,35 @@ export async function handleSaveNewCredential(payload: {
 		});
 
 		return { success: true, itemId: result.itemId };
-	} catch (error: any) {
+	} catch (error) {
 		console.error("Error saving credential:", error);
+		const errorMessageRaw =
+			error instanceof Error ? error.message : String(error);
 
 		let errorMessage = "Failed to save credentials. Please try again.";
 		let errorType = "unknown";
 
 		if (
-			error.message?.includes("network") ||
-			error.message?.includes("fetch")
+			errorMessageRaw.includes("network") ||
+			errorMessageRaw.includes("fetch")
 		) {
 			errorMessage = "Network error. Check your connection and try again.";
 			errorType = "network";
 		} else if (
-			error.message?.includes("decrypt") ||
-			error.message?.includes("encryption")
+			errorMessageRaw.includes("decrypt") ||
+			errorMessageRaw.includes("encryption")
 		) {
 			errorMessage = "Encryption error. Please unlock and try again.";
 			errorType = "encryption";
 		} else if (
-			error.message?.includes("unauthorized") ||
-			error.message?.includes("auth")
+			errorMessageRaw.includes("unauthorized") ||
+			errorMessageRaw.includes("auth")
 		) {
 			errorMessage = "Authentication error. Please re-authenticate.";
 			errorType = "auth";
 		} else if (
-			error.message?.includes("permission") ||
-			error.message?.includes("access")
+			errorMessageRaw.includes("permission") ||
+			errorMessageRaw.includes("access")
 		) {
 			errorMessage =
 				"Permission denied. You may not have write access to this vault.";
@@ -340,45 +343,47 @@ export async function handleUpdateExistingCredential(payload: {
 			trpcClient as Parameters<typeof core.items.updateItem>[1],
 		);
 
-		await core.cache.onItemUpdated({
+		await onLocalItemUpdated({
 			itemId,
 			encryptedData: result._encryptedData,
 			accountEmail: result._accountEmail,
 		});
 
 		return { success: true };
-	} catch (error: any) {
+	} catch (error) {
 		console.error("Error updating credential:", error);
+		const errorMessageRaw =
+			error instanceof Error ? error.message : String(error);
 
 		let errorMessage = "Failed to update credentials. Please try again.";
 		let errorType = "unknown";
 
 		if (
-			error.message?.includes("network") ||
-			error.message?.includes("fetch")
+			errorMessageRaw.includes("network") ||
+			errorMessageRaw.includes("fetch")
 		) {
 			errorMessage = "Network error. Check your connection and try again.";
 			errorType = "network";
 		} else if (
-			error.message?.includes("decrypt") ||
-			error.message?.includes("encryption")
+			errorMessageRaw.includes("decrypt") ||
+			errorMessageRaw.includes("encryption")
 		) {
 			errorMessage = "Encryption error. Please unlock and try again.";
 			errorType = "encryption";
 		} else if (
-			error.message?.includes("unauthorized") ||
-			error.message?.includes("auth")
+			errorMessageRaw.includes("unauthorized") ||
+			errorMessageRaw.includes("auth")
 		) {
 			errorMessage = "Authentication error. Please re-authenticate.";
 			errorType = "auth";
 		} else if (
-			error.message?.includes("permission") ||
-			error.message?.includes("access")
+			errorMessageRaw.includes("permission") ||
+			errorMessageRaw.includes("access")
 		) {
 			errorMessage =
 				"Permission denied. You may not have write access to this vault.";
 			errorType = "permission";
-		} else if (error.message?.includes("not found")) {
+		} else if (errorMessageRaw.includes("not found")) {
 			errorMessage = "Credential not found. It may have been deleted.";
 			errorType = "not_found";
 		}
