@@ -13,13 +13,23 @@ export function createExtensionInvalidator(
 		 * Invalidate a specific vault item and the items list
 		 */
 		invalidateItem: async (
-			_itemId: string,
-			_vaultId: string,
+			itemId: string,
+			vaultId: string,
 		): Promise<void> => {
 			await Promise.all([
 				queryClient.invalidateQueries({ queryKey: ["vault-item"] }),
+				queryClient.invalidateQueries({ queryKey: ["vault-item", itemId] }),
+				queryClient.invalidateQueries({
+					queryKey: ["vault-item-account", itemId],
+				}),
 				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
+				queryClient.invalidateQueries({ queryKey: ["vault-items", vaultId] }),
 				queryClient.invalidateQueries({ queryKey: ["items"] }),
+				queryClient.invalidateQueries({ queryKey: ["decrypted-item"] }),
+				queryClient.invalidateQueries({ queryKey: ["decrypted-item", itemId] }),
+				queryClient.invalidateQueries({
+					queryKey: ["decrypted-item-account", itemId],
+				}),
 			]);
 		},
 
@@ -30,6 +40,7 @@ export function createExtensionInvalidator(
 			await Promise.all([
 				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
 				queryClient.invalidateQueries({ queryKey: ["items"] }),
+				queryClient.invalidateQueries({ queryKey: ["decrypted-item"] }),
 			]);
 		},
 
@@ -37,14 +48,21 @@ export function createExtensionInvalidator(
 		 * Invalidate vault keys cache
 		 */
 		invalidateVaultKeys: async (): Promise<void> => {
-			await queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
+				queryClient.invalidateQueries({ queryKey: ["all-vault-keys"] }),
+			]);
 		},
 
 		/**
 		 * Invalidate deleted items list queries
 		 */
 		invalidateDeletedItems: async (_vaultId: string): Promise<void> => {
-			await queryClient.invalidateQueries({ queryKey: ["deleted-items"] });
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: ["deleted-items"] }),
+				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
+				queryClient.invalidateQueries({ queryKey: ["items"] }),
+			]);
 		},
 
 		/**

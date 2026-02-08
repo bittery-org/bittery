@@ -93,6 +93,7 @@ export function ExtensionSyncProvider({
 			switch (event.type) {
 				case "item_created":
 				case "item_updated":
+				case "item_moved":
 					if (event.vaultId) {
 						await invalidator.invalidateVaultList(event.vaultId);
 					}
@@ -140,7 +141,7 @@ export function ExtensionSyncProvider({
 			if (message.type === "SYNC_STATUS_CHANGED") {
 				setStatus(message.status);
 			} else if (message.type === "SYNC_EVENT") {
-				handleSyncEvent(message.event);
+				void handleSyncEvent(message.event);
 			}
 		};
 

@@ -48,6 +48,7 @@ export async function performDeltaSync(
 	trpcClient: DeltaSyncClient,
 	cache: ItemCacheAdapter,
 	event: SyncEvent,
+	accountEmail?: string,
 ): Promise<void> {
 	switch (event.type) {
 		case "item_created":
@@ -70,7 +71,7 @@ export async function performDeltaSync(
 				createdAt: String(item.createdAt),
 				updatedAt: String(item.updatedAt),
 				deletedAt: item.deletedAt ? String(item.deletedAt) : null,
-			} as CachedEncryptedItem);
+			} as CachedEncryptedItem, accountEmail);
 			break;
 		}
 		case "item_deleted": {
@@ -91,10 +92,10 @@ export async function performDeltaSync(
 					createdAt: String(item.createdAt),
 					updatedAt: String(item.updatedAt),
 					deletedAt: item.deletedAt ? String(item.deletedAt) : null,
-				} as CachedEncryptedItem);
+				} as CachedEncryptedItem, accountEmail);
 			} catch {
 				// Item might be permanently deleted, remove from cache
-				await cache.removeCachedItem?.(event.entityId);
+				await cache.removeCachedItem?.(event.entityId, accountEmail);
 			}
 			break;
 		}
@@ -109,11 +110,11 @@ export async function performDeltaSync(
 				type: vault.type,
 				icon: vault.icon,
 				imageUrl: vault.imageUrl,
-			} as CachedVaultMetadata);
+			} as CachedVaultMetadata, accountEmail);
 			break;
 		}
 		case "vault_deleted":
-			await cache.removeCachedVault?.(event.entityId);
+			await cache.removeCachedVault?.(event.entityId, accountEmail);
 			break;
 		// vault_key_rotated, vault_member_added, vault_member_removed: no cache changes needed
 	}

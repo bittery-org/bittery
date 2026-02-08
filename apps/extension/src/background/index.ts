@@ -71,6 +71,14 @@ desktopSync.initialize().catch((error) => {
 
 console.log("Bittery background service worker loaded");
 
+function ensureSyncInitialized(): void {
+	const status = getSyncStatus();
+	if (status === "connected" || status === "connecting") {
+		return;
+	}
+	initializeSync().catch(console.error);
+}
+
 // Message handler
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 	console.log("Background received message:", message.type);
@@ -84,7 +92,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 					const result = await handleLogin(message.payload);
 					// Initialize sync after successful login
 					if (result.success) {
-						initializeSync().catch(console.error);
+						ensureSyncInitialized();
 					}
 					sendResponse(result);
 					break;
@@ -92,18 +100,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 				case "QUICK_UNLOCK": {
 					const result = await handleQuickUnlock(message.payload);
+					if (result.success) {
+						ensureSyncInitialized();
+					}
 					sendResponse(result);
 					break;
 				}
 
 				case "QUICK_UNLOCK_ALL": {
 					const result = await handleQuickUnlockAll(message.payload);
+					if (result.success) {
+						ensureSyncInitialized();
+					}
 					sendResponse(result);
 					break;
 				}
 
 				case "CHECK_AUTH": {
 					const result = await handleCheckAuth();
+					if (result.success && result.authenticated) {
+						ensureSyncInitialized();
+					}
 					sendResponse(result);
 					break;
 				}
@@ -245,12 +262,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 				case "NATIVE_BIOMETRIC_UNLOCK": {
 					const result = await handleNativeBiometricUnlock();
+					if (result.success) {
+						ensureSyncInitialized();
+					}
 					sendResponse(result);
 					break;
 				}
 
 				case "NATIVE_BIOMETRIC_UNLOCK_ALL": {
 					const result = await handleNativeBiometricUnlockAll();
+					if (result.success) {
+						ensureSyncInitialized();
+					}
 					sendResponse(result);
 					break;
 				}

@@ -5,6 +5,10 @@
 
 import { storage } from "../lib/storage";
 import { core } from "./core-instance";
+import {
+	ensureDesktopWriteCapability,
+	hydrateDesktopAccountMaterial,
+} from "./desktop-key-material";
 import { desktopSync } from "./desktop-sync";
 import { isUnlocked, updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
@@ -47,7 +51,14 @@ async function resolveAccountEmailForVault(
 	);
 
 	for (const email of unlockedEmails) {
-		const vaultKeys = await storage.getVaultKeys(email);
+		await hydrateDesktopAccountMaterial(email);
+		let vaultKeys = await storage.getVaultKeys(email);
+		if (!vaultKeys || vaultKeys.length === 0) {
+			const hydrated = await ensureDesktopWriteCapability(email);
+			if (hydrated) {
+				vaultKeys = await storage.getVaultKeys(email);
+			}
+		}
 		if (vaultKeys?.some((vaultKey) => vaultKey.vaultId === vaultId)) {
 			return email;
 		}
@@ -171,6 +182,24 @@ export async function handleSaveNewCredential(payload: {
 
 	try {
 		const accountEmail = await resolveAccountEmailForVault(vaultId);
+		if (!accountEmail) {
+			return {
+				success: false,
+				error:
+					"Could not resolve account for the selected vault. Please re-authenticate.",
+				errorType: "vault_key",
+			};
+		}
+
+		const hasWriteCapability =
+			await ensureDesktopWriteCapability(accountEmail);
+		if (!hasWriteCapability) {
+			return {
+				success: false,
+				error: "No vault keys available. Please re-authenticate.",
+				errorType: "vault_key",
+			};
+		}
 		const hostname = extractHostname(url);
 
 		const result = await core.items.createItem(
@@ -269,7 +298,31 @@ export async function handleUpdateExistingCredential(payload: {
 	}
 
 	try {
-		const accountEmail = await resolveAccountEmailForItem(itemId);
+		let accountEmail = await resolveAccountEmailForItem(itemId);
+		if (!accountEmail) {
+			const activeAccount = await storage.getActiveAccount();
+			if (activeAccount?.type === "single") {
+				accountEmail = activeAccount.email;
+			}
+		}
+
+		if (!accountEmail) {
+			return {
+				success: false,
+				error: "Could not resolve account for this item.",
+				errorType: "vault_key",
+			};
+		}
+
+		const hasWriteCapability =
+			await ensureDesktopWriteCapability(accountEmail);
+		if (!hasWriteCapability) {
+			return {
+				success: false,
+				error: "No vault keys available. Please re-authenticate.",
+				errorType: "vault_key",
+			};
+		}
 		const hostname = extractHostname(url);
 
 		const result = await core.items.updateItem(

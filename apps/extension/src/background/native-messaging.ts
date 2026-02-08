@@ -294,7 +294,10 @@ export async function handleOpenDesktopApp(): Promise<MessageResponse> {
  * Biometric unlock all accounts
  * Strategy: If desktop available, unlock desktop. Otherwise unlock extension locally.
  */
-export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse> {
+export async function handleNativeBiometricUnlockAll(options?: {
+	forceLocalUnlock?: boolean;
+	preserveActiveAccount?: boolean;
+}): Promise<MessageResponse> {
 	console.log(
 		"[NATIVE_BIOMETRIC_UNLOCK_ALL] Starting biometric unlock for all accounts",
 	);
@@ -323,6 +326,7 @@ export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse>
 
 		// If desktop is available AND unlocked, we can use desktop mode directly
 		if (
+			!options?.forceLocalUnlock &&
 			desktopAvailable &&
 			!desktopLocked &&
 			desktopUnlockedAccounts.length > 0
@@ -565,17 +569,19 @@ export async function handleNativeBiometricUnlockAll(): Promise<MessageResponse>
 			);
 		}
 
-		if (accounts.length > 1) {
-			await storage.setActiveAccount({ type: "all" });
-			console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Set active account to 'all'");
-		} else {
-			await storage.setActiveAccount({
-				type: "single",
-				email: firstUnlockedEmail,
-			});
-			console.log(
-				`[NATIVE_BIOMETRIC_UNLOCK_ALL] Set active account to '${firstUnlockedEmail}'`,
-			);
+		if (!options?.preserveActiveAccount) {
+			if (accounts.length > 1) {
+				await storage.setActiveAccount({ type: "all" });
+				console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Set active account to 'all'");
+			} else {
+				await storage.setActiveAccount({
+					type: "single",
+					email: firstUnlockedEmail,
+				});
+				console.log(
+					`[NATIVE_BIOMETRIC_UNLOCK_ALL] Set active account to '${firstUnlockedEmail}'`,
+				);
+			}
 		}
 
 		// Verify unlocked accounts in storage

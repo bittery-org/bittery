@@ -5,9 +5,54 @@
 
 import { storage } from "../lib/storage";
 import { decrypt, encrypt } from "../lib/wasm-crypto";
+import { core } from "./core-instance";
+import {
+	ensureDesktopWriteCapability,
+	hydrateDesktopAccountMaterial,
+} from "./desktop-key-material";
+import { desktopClient } from "./desktop-client";
+import { desktopSync } from "./desktop-sync";
 import { isUnlocked, updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
+
+async function resolveAccountEmailForVault(
+	vaultId: string,
+): Promise<string | undefined> {
+	const activeAccount = await storage.getActiveAccount();
+	if (activeAccount?.type === "single") {
+		await ensureDesktopWriteCapability(activeAccount.email);
+		return activeAccount.email;
+	}
+
+	const localUnlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
+	const desktopStatus =
+		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
+	const desktopUnlockedEmails =
+		desktopStatus?.available && !desktopStatus.locked
+			? (desktopStatus.unlockedAccounts ?? [])
+			: [];
+
+	const candidateEmails = Array.from(
+		new Set([...localUnlockedEmails, ...desktopUnlockedEmails]),
+	);
+
+	for (const email of candidateEmails) {
+		await hydrateDesktopAccountMaterial(email);
+		let vaultKeys = await storage.getVaultKeys(email);
+		if (!vaultKeys || vaultKeys.length === 0) {
+			const hydrated = await ensureDesktopWriteCapability(email);
+			if (hydrated) {
+				vaultKeys = await storage.getVaultKeys(email);
+			}
+		}
+		if (vaultKeys?.some((vaultKey) => vaultKey.vaultId === vaultId)) {
+			return email;
+		}
+	}
+
+	return undefined;
+}
 
 /**
  * Handle CAPTURE_TAB_SCREENSHOT message - Capture screenshot of current tab
@@ -130,8 +175,28 @@ export async function handleUpdateItemTotp(payload: {
 			};
 		}
 
+		const accountEmail = await resolveAccountEmailForVault(item.vaultId);
+		if (!accountEmail) {
+			return {
+				success: false,
+				error:
+					"Could not resolve account for this vault. Please re-authenticate.",
+				errorType: "vault_key",
+			};
+		}
+
+		const hasWriteCapability =
+			await ensureDesktopWriteCapability(accountEmail);
+		if (!hasWriteCapability) {
+			return {
+				success: false,
+				error: "No vault keys available. Please re-authenticate.",
+				errorType: "vault_key",
+			};
+		}
+
 		// Get vault key for the item's vault
-		const vaultKeys = await storage.getVaultKeys();
+		const vaultKeys = await storage.getVaultKeys(accountEmail);
 		if (!vaultKeys || vaultKeys.length === 0) {
 			return {
 				success: false,
@@ -152,6 +217,7 @@ export async function handleUpdateItemTotp(payload: {
 		// Decrypt vault key
 		const vaultKey = await storage.decryptVaultKey(
 			vaultKeyData.encryptedVaultKey,
+			accountEmail,
 		);
 
 		// Decrypt existing item data
@@ -186,6 +252,16 @@ export async function handleUpdateItemTotp(payload: {
 			encryptedData: encryptedData.ciphertext,
 			encryptionIv: encryptedData.iv,
 		});
+
+		// Keep local cache in sync for immediate UI consistency.
+		await core.cache.onItemUpdated({
+			itemId,
+			encryptedData,
+			accountEmail,
+		});
+
+		// Desktop decrypt cache is keyed only by item id; clear to avoid stale reads.
+		desktopClient.clearCache();
 
 		return {
 			success: true,
