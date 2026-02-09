@@ -4,7 +4,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Button, Card, Input, Skeleton, TextField } from "heroui-native";
 import { ArrowLeft, Key, Plus, Search } from "lucide-react-native";
 import { useState } from "react";
-import { View } from "react-native";
+import { RefreshControl, ScrollView, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { CategoryFilter } from "@/components/category-filter";
 import { EmptyItemsState } from "@/components/empty-items-state";
@@ -160,21 +160,28 @@ export default function VaultItemsScreen() {
 
 			{/* Items List */}
 			{hasNoItems ? (
-				<EmptyItemsState
-					icon={<StyledKey size={48} className="mb-4 text-muted" />}
-					title={hasFilterOrSearch ? "No items found" : "No items yet"}
-					description={
-						hasFilterOrSearch
-							? "Try a different search or filter"
-							: "Add your first password or secure item"
+				<ScrollView
+					contentContainerStyle={{ flexGrow: 1 }}
+					refreshControl={
+						<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
 					}
-					actionLabel={!hasFilterOrSearch ? "Add Item" : undefined}
-					onAction={
-						!hasFilterOrSearch
-							? () => router.push(`/(vault)/create?vaultId=${vaultId}`)
-							: undefined
-					}
-				/>
+				>
+					<EmptyItemsState
+						icon={<StyledKey size={48} className="mb-4 text-muted" />}
+						title={hasFilterOrSearch ? "No items found" : "No items yet"}
+						description={
+							hasFilterOrSearch
+								? "Try a different search or filter"
+								: "Add your first password or secure item"
+						}
+						actionLabel={!hasFilterOrSearch ? "Add Item" : undefined}
+						onAction={
+							!hasFilterOrSearch
+								? () => router.push(`/(vault)/create?vaultId=${vaultId}`)
+								: undefined
+						}
+					/>
+				</ScrollView>
 			) : (
 				<ItemSectionsList
 					favorites={favorites}

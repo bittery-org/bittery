@@ -4,7 +4,7 @@ import { Tabs, useRouter } from "expo-router";
 import { Button, Card, Skeleton } from "heroui-native";
 import { Key, Plus } from "lucide-react-native";
 import { useState } from "react";
-import { View } from "react-native";
+import { RefreshControl, ScrollView, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { CategoryFilter } from "@/components/category-filter";
 import { EmptyItemsState } from "@/components/empty-items-state";
@@ -108,15 +108,25 @@ export default function AllItemsScreen() {
 
 				{/* Items List */}
 				{hasNoItems ? (
-					<EmptyItemsState
-						icon={<StyledKey size={48} className="mb-4 text-muted" />}
-						title={hasFilter ? "No items found" : "No items yet"}
-						description={
-							hasFilter
-								? "Try a different filter"
-								: "Add items to your vaults to see them here"
+					<ScrollView
+						contentContainerStyle={{ flexGrow: 1 }}
+						refreshControl={
+							<RefreshControl
+								refreshing={refreshing}
+								onRefresh={handleRefresh}
+							/>
 						}
-					/>
+					>
+						<EmptyItemsState
+							icon={<StyledKey size={48} className="mb-4 text-muted" />}
+							title={hasFilter ? "No items found" : "No items yet"}
+							description={
+								hasFilter
+									? "Try a different filter"
+									: "Add items to your vaults to see them here"
+							}
+						/>
+					</ScrollView>
 				) : (
 					<ItemSectionsList
 						favorites={favorites}
