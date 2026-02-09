@@ -50,6 +50,24 @@ export function UnlockPage() {
 	const hasAttemptedBiometric = useRef(false);
 	const { autoTrigger } = Route.useSearch();
 
+	// Track window focus so biometric only auto-triggers when the app is in the foreground
+	const [isWindowFocused, setIsWindowFocused] = useState(
+		() => document.hasFocus(),
+	);
+
+	useEffect(() => {
+		const handleFocus = () => setIsWindowFocused(true);
+		const handleBlur = () => setIsWindowFocused(false);
+
+		window.addEventListener("focus", handleFocus);
+		window.addEventListener("blur", handleBlur);
+
+		return () => {
+			window.removeEventListener("focus", handleFocus);
+			window.removeEventListener("blur", handleBlur);
+		};
+	}, []);
+
 	const allAccounts = accounts.data ?? [];
 
 	// Get session state for first account (to check biometric availability)
@@ -188,13 +206,14 @@ export function UnlockPage() {
 		}
 	}, [autoTrigger]);
 
-	// Auto-trigger biometric unlock on mount if available
+	// Auto-trigger biometric unlock when available AND window is focused
 	// OR if triggered by extension (autoTrigger=true)
 	useEffect(() => {
 		if (
 			(canUseBiometric || autoTrigger) &&
 			!hasAttemptedBiometric.current &&
-			allAccounts.length > 0
+			allAccounts.length > 0 &&
+			isWindowFocused
 		) {
 			hasAttemptedBiometric.current = true;
 			// Small delay to ensure everything is initialized
@@ -250,7 +269,7 @@ export function UnlockPage() {
 
 			return () => clearTimeout(timeout);
 		}
-	}, [canUseBiometric, autoTrigger, allAccounts, queryClient, navigate]);
+	}, [canUseBiometric, autoTrigger, allAccounts, queryClient, navigate, isWindowFocused]);
 
 	// Show loading state while accounts are being fetched
 	if (accounts.isLoading) {
