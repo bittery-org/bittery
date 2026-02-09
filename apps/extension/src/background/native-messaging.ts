@@ -19,13 +19,9 @@ import type { MessageResponse } from "./types";
  * Returns a promise that resolves with the response
  */
 export function sendNativeMessage(message: unknown): Promise<unknown> {
-	console.log("[Native Messaging] Attempting to connect to:", NATIVE_HOST_NAME);
-	console.log("[Native Messaging] Sending message:", message);
-
 	return new Promise((resolve, reject) => {
 		try {
 			const port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
-			console.log("[Native Messaging] Port connected successfully");
 
 			const timeout = setTimeout(() => {
 				console.error("[Native Messaging] Timeout after 30 seconds");
@@ -34,14 +30,12 @@ export function sendNativeMessage(message: unknown): Promise<unknown> {
 			}, 30000); // 30 second timeout
 
 			port.onMessage.addListener((response) => {
-				console.log("[Native Messaging] Received response:", response);
 				clearTimeout(timeout);
 				port.disconnect();
 				resolve(response);
 			});
 
 			port.onDisconnect.addListener(() => {
-				console.log("[Native Messaging] Port disconnected");
 				clearTimeout(timeout);
 				const error = chrome.runtime.lastError;
 				if (error) {
@@ -58,7 +52,6 @@ export function sendNativeMessage(message: unknown): Promise<unknown> {
 			});
 
 			port.postMessage(message);
-			console.log("[Native Messaging] Message posted to port");
 		} catch (error) {
 			console.error("[Native Messaging] Exception during connection:", error);
 			reject(error);
@@ -70,13 +63,11 @@ export function sendNativeMessage(message: unknown): Promise<unknown> {
  * Check if native biometric unlock is available
  */
 export async function handleCheckNativeBiometric(): Promise<MessageResponse> {
-	console.log("[CHECK_NATIVE_BIOMETRIC] Starting biometric availability check");
 	try {
 		const response = await sendNativeMessage({
 			type: "CHECK_BIOMETRIC_AVAILABLE",
 		});
 
-		console.log("[CHECK_NATIVE_BIOMETRIC] Processing response:", response);
 		const responseData = response as any;
 		const result = {
 			success: true,
@@ -85,7 +76,6 @@ export async function handleCheckNativeBiometric(): Promise<MessageResponse> {
 			enabled: responseData?.enabled || false,
 			appRunning: responseData?.app_running || false,
 		};
-		console.log("[CHECK_NATIVE_BIOMETRIC] Sending result:", result);
 		return result;
 	} catch (error) {
 		console.error("[CHECK_NATIVE_BIOMETRIC] Error:", error);
@@ -102,7 +92,6 @@ export async function handleCheckNativeBiometric(): Promise<MessageResponse> {
  * Request biometric unlock from desktop app
  */
 export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
-	console.log("[NATIVE_BIOMETRIC_UNLOCK] Starting biometric unlock request");
 	try {
 		// Verify we have an active account
 		const activeAccount = await storage.getActiveAccount();
@@ -111,12 +100,6 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 		}
 
 		const challenge = crypto.randomUUID();
-		console.log("[NATIVE_BIOMETRIC_UNLOCK] Generated challenge:", challenge);
-		console.log("[NATIVE_BIOMETRIC_UNLOCK] Extension ID:", chrome.runtime.id);
-		console.log(
-			"[NATIVE_BIOMETRIC_UNLOCK] Account email:",
-			activeAccount.email,
-		);
 
 		const response = await sendNativeMessage({
 			type: "BIOMETRIC_UNLOCK_REQUEST",
@@ -125,12 +108,8 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 			email: activeAccount.email,
 		});
 
-		console.log("[NATIVE_BIOMETRIC_UNLOCK] Received response:", response);
-
 		const responseData = response as any;
 		if (responseData?.type === "BIOMETRIC_UNLOCK_SUCCESS") {
-			console.log("[NATIVE_BIOMETRIC_UNLOCK] Success response received");
-
 			// Verify the response contains the expected data
 			if (
 				!responseData.encrypted_session ||
@@ -148,9 +127,6 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 				await (storage as any).updateBiometricEnabled(
 					activeAccount.email,
 					true,
-				);
-				console.log(
-					`[NATIVE_BIOMETRIC_UNLOCK] Synced biometric status for ${activeAccount.email}`,
 				);
 			}
 
@@ -176,8 +152,6 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 				deviceKey[i] = deviceKeyStr.charCodeAt(i);
 			}
 
-			console.log("[NATIVE_BIOMETRIC_UNLOCK] Decrypting MUK with device key");
-
 			// Decrypt the MUK using the device key
 			const mukBase64 = await decrypt(encryptedMuk, deviceKey);
 
@@ -187,8 +161,6 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 			for (let i = 0; i < mukStr.length; i++) {
 				muk[i] = mukStr.charCodeAt(i);
 			}
-
-			console.log("[NATIVE_BIOMETRIC_UNLOCK] ✓ MUK decrypted successfully");
 
 			// Store the MUK in memory
 			setMasterUnlockKey(muk);
@@ -298,10 +270,6 @@ export async function handleNativeBiometricUnlockAll(options?: {
 	forceLocalUnlock?: boolean;
 	preserveActiveAccount?: boolean;
 }): Promise<MessageResponse> {
-	console.log(
-		"[NATIVE_BIOMETRIC_UNLOCK_ALL] Starting biometric unlock for all accounts",
-	);
-
 	try {
 		const accounts = await storage.getAccountsList();
 
@@ -315,15 +283,6 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		const desktopLocked = desktopStatus?.locked ?? true;
 		const desktopUnlockedAccounts = desktopStatus?.unlockedAccounts ?? [];
 
-		console.log(
-			"[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop available:",
-			desktopAvailable,
-			"locked:",
-			desktopLocked,
-			"unlocked accounts:",
-			desktopUnlockedAccounts,
-		);
-
 		// If desktop is available AND unlocked, we can use desktop mode directly
 		if (
 			!options?.forceLocalUnlock &&
@@ -331,10 +290,6 @@ export async function handleNativeBiometricUnlockAll(options?: {
 			!desktopLocked &&
 			desktopUnlockedAccounts.length > 0
 		) {
-			console.log(
-				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop is already unlocked, using desktop mode",
-			);
-
 			// Desktop is already unlocked - just set sentinel and return success
 			setDesktopModeSentinel();
 
@@ -351,9 +306,6 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		// If desktop is available but locked, trigger unlock UI but DON'T return success
 		// The extension should wait for the unlock to complete via SSE events
 		if (desktopAvailable && desktopLocked) {
-			console.log(
-				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop is locked, triggering desktop unlock UI",
-			);
 			const DESKTOP_BASE_URL = "http://localhost:48765";
 
 			try {
@@ -370,10 +322,6 @@ export async function handleNativeBiometricUnlockAll(options?: {
 						`Desktop unlock trigger failed: ${response.statusText}`,
 					);
 				}
-
-				console.log(
-					"[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop unlock UI triggered",
-				);
 
 				// Don't return success - throw an error to let the UI know unlock is pending
 				throw new Error(
@@ -396,16 +344,9 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		}
 
 		// Fallback: Use native messaging (for standalone mode or if HTTP failed)
-		console.log(
-			"[NATIVE_BIOMETRIC_UNLOCK_ALL] Using native messaging unlock (standalone mode)",
-		);
-
 		// Generate challenge for replay attack protection
 		const challenge = crypto.randomUUID();
 		const extensionId = chrome.runtime.id;
-
-		console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Challenge:", challenge);
-		console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Extension ID:", extensionId);
 
 		// Call the native messaging endpoint
 		// This will unlock the extension locally in standalone mode
@@ -414,12 +355,6 @@ export async function handleNativeBiometricUnlockAll(options?: {
 			challenge,
 			extension_id: extensionId,
 		});
-
-		console.log("[NATIVE_BIOMETRIC_UNLOCK_ALL] Received response:", response);
-		console.log(
-			"[NATIVE_BIOMETRIC_UNLOCK_ALL] Response type:",
-			(response as any)?.type,
-		);
 
 		const responseData = response as any;
 		if (responseData?.type === "BIOMETRIC_UNLOCK_ALL_FAILED") {
@@ -468,16 +403,6 @@ export async function handleNativeBiometricUnlockAll(options?: {
 			throw new Error("Invalid response structure from desktop app");
 		}
 
-		console.log(
-			`[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop app unlocked ${responseData.unlocked?.length || 0} accounts`,
-		);
-		if (responseData.failed?.length > 0) {
-			console.log(
-				`[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop app failed ${responseData.failed.length} accounts:`,
-				responseData.failed,
-			);
-		}
-
 		// Verify signature (challenge + number of accounts)
 		const expectedSigData = `${challenge}:${responseData.accounts?.length || 0}`;
 		const expectedSig = btoa(expectedSigData);
@@ -504,8 +429,6 @@ export async function handleNativeBiometricUnlockAll(options?: {
 			const email = accountData.email;
 
 			try {
-				console.log(`[NATIVE_BIOMETRIC_UNLOCK_ALL] Processing ${email}`);
-
 				// Decode the encrypted session data
 				const encryptedSessionJson = atob(accountData.encrypted_session);
 				const encryptedMuk = JSON.parse(encryptedSessionJson);
@@ -535,7 +458,6 @@ export async function handleNativeBiometricUnlockAll(options?: {
 				}
 
 				unlocked.push(email);
-				console.log(`[NATIVE_BIOMETRIC_UNLOCK_ALL] ✓ Unlocked ${email}`);
 			} catch (error) {
 				failed.push({
 					email,
@@ -558,41 +480,15 @@ export async function handleNativeBiometricUnlockAll(options?: {
 			throw new Error("No unlocked email found");
 		}
 
-		console.log(
-			`[NATIVE_BIOMETRIC_UNLOCK_ALL] Unlocked ${unlocked.length} accounts:`,
-			unlocked,
-		);
-		if (failed.length > 0) {
-			console.log(
-				`[NATIVE_BIOMETRIC_UNLOCK_ALL] Failed ${failed.length} accounts:`,
-				failed.map((f) => f.email),
-			);
-		}
-
 		if (!options?.preserveActiveAccount) {
 			if (accounts.length > 1) {
 				await storage.setActiveAccount({ type: "all" });
-				console.log(
-					"[NATIVE_BIOMETRIC_UNLOCK_ALL] Set active account to 'all'",
-				);
 			} else {
 				await storage.setActiveAccount({
 					type: "single",
 					email: firstUnlockedEmail,
 				});
-				console.log(
-					`[NATIVE_BIOMETRIC_UNLOCK_ALL] Set active account to '${firstUnlockedEmail}'`,
-				);
 			}
-		}
-
-		// Verify unlocked accounts in storage
-		if (storage.getUnlockedAccounts) {
-			const unlockedAccounts = await storage.getUnlockedAccounts();
-			console.log(
-				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Verified unlocked accounts:",
-				unlockedAccounts,
-			);
 		}
 
 		// IMPORTANT: Update activity FIRST to set timestamp, otherwise isUnlocked()

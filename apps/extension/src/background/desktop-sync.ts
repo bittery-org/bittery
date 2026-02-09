@@ -64,8 +64,6 @@ class DesktopSyncService {
 	 * 4) Keep polling as a safety net if SSE drops.
 	 */
 	async initialize(): Promise<void> {
-		console.log("[Desktop Sync] Initializing");
-
 		// Check if desktop is available first
 		const status = await this.checkDesktopStatus();
 
@@ -75,7 +73,6 @@ class DesktopSyncService {
 
 			// If desktop is unlocked, set sentinel MUK to mark extension as unlocked
 			if (!status.locked && status.unlockedAccounts.length > 0) {
-				console.log("[Desktop Sync] Desktop is unlocked, setting sentinel MUK");
 				setDesktopModeSentinel();
 				await this.saveDesktopModeState();
 			}
@@ -89,30 +86,11 @@ class DesktopSyncService {
 			now,
 			DESKTOP_MODE_RECOVERY_WINDOW_MS,
 		);
-		console.log(
-			`[Desktop Sync] Recovery decision: ${recoveryDecision.reason}${
-				recoveryDecision.ageMs !== null
-					? ` (${Math.round(recoveryDecision.ageMs / 1000)}s since last desktop session)`
-					: ""
-			}`,
-		);
-
 		if (recoveryDecision.shouldAttemptRecovery && previousState) {
-			console.log(
-				"[Desktop Sync] Recovering from service worker restart (desktop mode was active)",
-			);
-			console.log(
-				`[Desktop Sync] Last connected ${Math.round((now - previousState.lastConnectedAt) / 1000)}s ago`,
-			);
-
 			// Attempt to reconnect to desktop
 			const status = await this.checkDesktopStatus();
 
 			if (status?.available && !status.locked) {
-				console.log(
-					"[Desktop Sync] Desktop still available and unlocked, recovering desktop mode",
-				);
-
 				// Set sentinel MUK to mark as "unlocked via desktop"
 				setDesktopModeSentinel();
 
@@ -122,15 +100,11 @@ class DesktopSyncService {
 						// Check if active account is "all" or a specific email
 						if (previousState.activeAccount === "all") {
 							await storage.setActiveAccount({ type: "all" });
-							console.log("[Desktop Sync] Restored active account: all");
 						} else {
 							await storage.setActiveAccount({
 								type: "single",
 								email: previousState.activeAccount,
 							});
-							console.log(
-								`[Desktop Sync] Restored active account: ${previousState.activeAccount}`,
-							);
 						}
 					} catch (error) {
 						console.error(
@@ -142,12 +116,7 @@ class DesktopSyncService {
 
 				// Subscribe to SSE for real-time events
 				await this.subscribeToSSE();
-
-				console.log("[Desktop Sync] Desktop mode recovered successfully");
 			} else {
-				console.log(
-					"[Desktop Sync] Desktop not available or locked, cannot recover desktop mode",
-				);
 				await this.clearDesktopModeState();
 			}
 		}
@@ -157,17 +126,11 @@ class DesktopSyncService {
 			const status = await this.checkDesktopStatus();
 
 			if (status?.available) {
-				console.log("[Desktop Sync] Desktop available, subscribing to SSE");
-
 				// If desktop is locked, ensure extension is locked
 				if (status.locked) {
-					console.log("[Desktop Sync] Desktop is locked, locking extension");
 					await _lockInternal();
 				} else if (status.unlockedAccounts.length > 0) {
 					// If desktop is unlocked, try to auto-unlock extension
-					console.log(
-						`[Desktop Sync] Desktop is unlocked for accounts: ${status.unlockedAccounts.join(", ")}, attempting auto-unlock`,
-					);
 					await this.handleUnlockEvent({
 						accounts: status.unlockedAccounts,
 						timestamp: status.timestamp,
@@ -176,10 +139,6 @@ class DesktopSyncService {
 
 				// Subscribe to SSE for real-time events
 				await this.subscribeToSSE();
-			} else {
-				console.log(
-					"[Desktop Sync] Desktop not available, operating independently",
-				);
 			}
 		}
 
@@ -192,12 +151,9 @@ class DesktopSyncService {
 	 * This ensures extension has the same accounts as desktop, even when locked
 	 */
 	async syncAccountsFromDesktop(): Promise<void> {
-		console.log("[Desktop Sync] Syncing accounts from desktop");
-
 		try {
 			const accountsData = await desktopClient.getAccounts();
 			if (!accountsData || !accountsData.accounts) {
-				console.log("[Desktop Sync] No accounts data from desktop");
 				return;
 			}
 
@@ -205,8 +161,6 @@ class DesktopSyncService {
 			const currentAccounts = await storage.getAccountsList();
 
 			// Add or update accounts from desktop
-			let addedCount = 0;
-			let updatedCount = 0;
 			for (const desktopAccount of accountsData.accounts) {
 				const email = desktopAccount.email.toLowerCase();
 				const existingAccount = currentAccounts.find(
@@ -226,10 +180,6 @@ class DesktopSyncService {
 						lastActiveAt: desktopAccount.lastActiveAt ?? Date.now(),
 						biometricEnabled: desktopAccount.biometricEnabled ?? false,
 					});
-					addedCount++;
-					console.log(
-						`[Desktop Sync] Added account from desktop: ${desktopAccount.email}`,
-					);
 				} else {
 					// Update existing account with latest data from desktop
 					// This ensures teamAvatarUrl and other fields stay in sync
@@ -243,10 +193,6 @@ class DesktopSyncService {
 							teamName: desktopAccount.teamName,
 							teamAvatarUrl: desktopAccount.teamAvatarUrl,
 						});
-						updatedCount++;
-						console.log(
-							`[Desktop Sync] Updated account metadata: ${desktopAccount.email}`,
-						);
 					}
 				}
 			}
@@ -256,25 +202,14 @@ class DesktopSyncService {
 				// Check if active account is "all" or a specific email
 				if (accountsData.active_account === "all") {
 					await storage.setActiveAccount({ type: "all" });
-					console.log("[Desktop Sync] Set active account: all");
 				} else {
 					await storage.setActiveAccount({
 						type: "single",
 						email: accountsData.active_account,
 					});
-					console.log(
-						`[Desktop Sync] Set active account: ${accountsData.active_account}`,
-					);
 				}
 			}
 
-			if (addedCount > 0 || updatedCount > 0) {
-				console.log(
-					`[Desktop Sync] Synced ${addedCount} new, ${updatedCount} updated account(s) from desktop`,
-				);
-			} else {
-				console.log("[Desktop Sync] Accounts already in sync");
-			}
 		} catch (error) {
 			console.error(
 				"[Desktop Sync] Failed to sync accounts from desktop:",
@@ -333,34 +268,22 @@ class DesktopSyncService {
 	async subscribeToSSE(): Promise<void> {
 		// Close existing connection
 		if (this.eventSource) {
-			console.log("[Desktop Sync] Closing existing SSE connection");
 			this.eventSource.close();
 		}
 
 		try {
-			console.log(
-				"[Desktop Sync] Creating new SSE connection to",
-				`${DESKTOP_BASE_URL}/native-bridge/lock-events`,
-			);
 			this.eventSource = new EventSource(
 				`${DESKTOP_BASE_URL}/native-bridge/lock-events`,
 			);
 
-			this.eventSource.addEventListener("connected", (event) => {
-				console.log("[Desktop Sync] ✅ SSE connected successfully", event.data);
+			this.eventSource.addEventListener("connected", (_event) => {
 				// Save desktop mode state when successfully connected
 				this.saveDesktopModeState();
 			});
 
-			this.eventSource.addEventListener("open", () => {
-				console.log("[Desktop Sync] ✅ SSE connection opened");
-			});
-
 			this.eventSource.addEventListener("lock", (event) => {
-				console.log("[Desktop Sync] 📨 SSE lock event received", event.data);
 				try {
 					const data: LockEvent = JSON.parse(event.data);
-					console.log("[Desktop Sync] Parsed lock event:", data);
 					this.handleLockEvent(data).catch((error) => {
 						console.error("[Desktop Sync] handleLockEvent failed:", error);
 					});
@@ -370,10 +293,8 @@ class DesktopSyncService {
 			});
 
 			this.eventSource.addEventListener("unlock", (event) => {
-				console.log("[Desktop Sync] 📨 SSE unlock event received", event.data);
 				try {
 					const data: UnlockEvent = JSON.parse(event.data);
-					console.log("[Desktop Sync] Parsed unlock event:", data);
 					this.handleUnlockEvent(data).catch((error) => {
 						console.error("[Desktop Sync] handleUnlockEvent failed:", error);
 					});
@@ -383,31 +304,19 @@ class DesktopSyncService {
 			});
 
 			this.eventSource.addEventListener("desktop_close", (event) => {
-				console.log("[Desktop Sync] 📨 SSE desktop_close event received");
 				const data: DesktopCloseEvent = JSON.parse(event.data);
 				this.handleDesktopCloseEvent(data);
 			});
 
 			this.eventSource.addEventListener("active_account_changed", (event) => {
-				console.log(
-					"[Desktop Sync] 📨 SSE active_account_changed event received",
-				);
 				const data: ActiveAccountChangedEvent = JSON.parse(event.data);
 				this.handleActiveAccountChanged(data);
 			});
 
 			this.eventSource.onerror = (error) => {
-				console.error("[Desktop Sync] ❌ SSE error:", error);
-				console.log(
-					"[Desktop Sync] SSE readyState:",
-					this.eventSource?.readyState,
-				);
+				console.error("[Desktop Sync] SSE error:", error);
 				this.eventSource?.close();
 				this.eventSource = null;
-
-				// Don't set desktopAvailable to false - we'll check via polling
-				// Fallback to polling
-				console.log("[Desktop Sync] SSE failed, relying on polling");
 			};
 		} catch (error) {
 			console.error("[Desktop Sync] Failed to subscribe to SSE:", error);
@@ -419,11 +328,6 @@ class DesktopSyncService {
 	 * Handle lock event from desktop
 	 */
 	async handleLockEvent(event: LockEvent): Promise<void> {
-		console.log("[Desktop Sync] 🔒 handleLockEvent CALLED", event);
-		console.log(
-			`[Desktop Sync] Desktop locked (${event.reason}), locking extension`,
-		);
-
 		// Clear desktop client cache
 		desktopClient.clearCache();
 
@@ -438,7 +342,6 @@ class DesktopSyncService {
 			});
 		} catch (_error) {
 			// Ignore if no listeners
-			console.log("[Desktop Sync] No UI listeners for DESKTOP_LOCKED event");
 		}
 
 		// Show notification (if API is available)
@@ -463,11 +366,6 @@ class DesktopSyncService {
 	 * Handle unlock event from desktop (set desktop mode and notify)
 	 */
 	async handleUnlockEvent(event: UnlockEvent): Promise<void> {
-		console.log("[Desktop Sync] 🔓 handleUnlockEvent CALLED", event);
-		console.log(
-			`[Desktop Sync] Desktop unlocked for accounts: ${event.accounts.join(", ")}`,
-		);
-
 		// Clear desktop client cache (will fetch fresh session data on next request)
 		desktopClient.clearCache();
 
@@ -478,9 +376,6 @@ class DesktopSyncService {
 
 		// In desktop mode, just set the sentinel MUK to mark extension as unlocked
 		setDesktopModeSentinel();
-		console.log(
-			"[Desktop Sync] Set desktop mode sentinel (extension unlocked)",
-		);
 
 		// Notify popup to navigate to vault immediately
 		try {
@@ -488,10 +383,8 @@ class DesktopSyncService {
 				type: "DESKTOP_UNLOCKED",
 				accounts: event.accounts,
 			});
-			console.log("[Desktop Sync] Sent DESKTOP_UNLOCKED message to popup");
 		} catch (_error) {
 			// Ignore if no listeners
-			console.log("[Desktop Sync] No UI listeners for DESKTOP_UNLOCKED event");
 		}
 
 		// Show notification
@@ -514,8 +407,6 @@ class DesktopSyncService {
 	 * Handle desktop close event
 	 */
 	async handleDesktopCloseEvent(_event: DesktopCloseEvent): Promise<void> {
-		console.log("[Desktop Sync] Desktop closed, locking extension");
-
 		// Clear desktop client cache
 		desktopClient.clearCache();
 
@@ -542,19 +433,12 @@ class DesktopSyncService {
 	async handleActiveAccountChanged(
 		event: ActiveAccountChangedEvent,
 	): Promise<void> {
-		console.log(
-			`[Desktop Sync] Active account changed in desktop to: ${event.email}`,
-		);
-
 		// Clear desktop client cache for the old account
 		desktopClient.clearCache();
 
 		// Update active account in extension storage to match desktop
 		try {
 			await storage.setActiveAccount({ type: "single", email: event.email });
-			console.log(
-				`[Desktop Sync] Updated extension active account to: ${event.email}`,
-			);
 		} catch (error) {
 			console.error("[Desktop Sync] Failed to update active account:", error);
 		}
@@ -566,7 +450,6 @@ class DesktopSyncService {
 	startPolling(): void {
 		if (this.pollInterval) return;
 
-		console.log("[Desktop Sync] Starting status polling");
 		this.pollInterval = setInterval(async () => {
 			const previousStatus = this.lastDesktopStatus;
 			const newStatus = await this.checkDesktopStatus();
@@ -579,14 +462,12 @@ class DesktopSyncService {
 
 				if (!wasLocked && isLocked) {
 					// Desktop just locked
-					console.log("[Desktop Sync] Polling detected lock event");
 					await this.handleLockEvent({
 						reason: "poll-detected",
 						timestamp: newStatus.timestamp,
 					});
 				} else if (wasLocked && !isLocked) {
 					// Desktop just unlocked
-					console.log("[Desktop Sync] Polling detected unlock event");
 					await this.handleUnlockEvent({
 						accounts: newStatus.unlockedAccounts,
 						timestamp: newStatus.timestamp,
@@ -599,9 +480,6 @@ class DesktopSyncService {
 					JSON.stringify(previousStatus.unlockedAccounts) !==
 						JSON.stringify(newStatus.unlockedAccounts)
 				) {
-					console.log(
-						"[Desktop Sync] Polling detected unlocked accounts changed",
-					);
 					// Could trigger account sync here if needed
 				}
 			}
@@ -615,7 +493,6 @@ class DesktopSyncService {
 		if (this.pollInterval) {
 			clearInterval(this.pollInterval);
 			this.pollInterval = null;
-			console.log("[Desktop Sync] Stopped status polling");
 		}
 	}
 
@@ -675,7 +552,6 @@ class DesktopSyncService {
 							: null,
 			};
 			await chrome.storage.local.set({ [STORAGE_KEY_DESKTOP_MODE]: state });
-			console.log("[Desktop Sync] Saved desktop mode state");
 		} catch (error) {
 			console.error("[Desktop Sync] Failed to save desktop mode state:", error);
 		}
@@ -691,7 +567,6 @@ class DesktopSyncService {
 				| DesktopModeStateSnapshot
 				| undefined;
 			if (state) {
-				console.log("[Desktop Sync] Loaded desktop mode state:", state);
 				return state;
 			}
 			return null;
@@ -707,7 +582,6 @@ class DesktopSyncService {
 	private async clearDesktopModeState(): Promise<void> {
 		try {
 			await chrome.storage.local.remove(STORAGE_KEY_DESKTOP_MODE);
-			console.log("[Desktop Sync] Cleared desktop mode state");
 		} catch (error) {
 			console.error(
 				"[Desktop Sync] Failed to clear desktop mode state:",

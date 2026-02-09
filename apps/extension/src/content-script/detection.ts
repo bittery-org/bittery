@@ -89,9 +89,6 @@ export function detectPasswordFields(root: Document | ShadowRoot = document) {
 					"data-bittery-total-steps",
 					String(multiStepInfo.totalSteps),
 				);
-				console.log(
-					`Detected multi-step form: ${multiStepInfo.currentStep}/${multiStepInfo.totalSteps}`,
-				);
 			}
 		}
 
@@ -105,10 +102,6 @@ export function detectPasswordFields(root: Document | ShadowRoot = document) {
 			contentState.processedForms.add(form);
 		}
 
-		console.log(
-			`Detected ${field.type} field with confidence ${field.confidence?.toFixed(2)}:`,
-			input.name || input.id || "unnamed",
-		);
 	}
 
 	// Also scan for Shadow DOM roots and observe them
@@ -166,10 +159,6 @@ function detectCreditCardFieldsOnPage(root: Document | ShadowRoot = document) {
 		input.addEventListener("focus", () => handleCreditCardFieldFocus(field));
 		input.addEventListener("blur", () => handleCreditCardFieldBlur(field));
 
-		console.log(
-			`Detected credit card ${field.type} field with confidence ${field.confidence?.toFixed(2)}:`,
-			input.name || input.id || "unnamed",
-		);
 	}
 }
 
@@ -225,10 +214,6 @@ function detectIdentityFieldsOnPage(root: Document | ShadowRoot = document) {
 		input.addEventListener("focus", () => handleIdentityFieldFocus(field));
 		input.addEventListener("blur", () => handleIdentityFieldBlur(field));
 
-		console.log(
-			`Detected identity ${field.type} field with confidence ${field.confidence?.toFixed(2)}:`,
-			input.name || input.id || "unnamed",
-		);
 	}
 }
 

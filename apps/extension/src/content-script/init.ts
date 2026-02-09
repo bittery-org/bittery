@@ -9,8 +9,6 @@ import {
 import { restorePendingSavePrompt } from "./save-prompt";
 
 export function initContentScript() {
-	console.log("Bittery content script loaded");
-
 	setupOutsideClickHandler();
 	setupAjaxDetection();
 

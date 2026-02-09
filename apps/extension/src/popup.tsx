@@ -81,17 +81,11 @@ function Popup() {
 			accounts?: string[];
 		}) => {
 			if (message.type === "DESKTOP_LOCKED") {
-				console.log(
-					"[Popup] Desktop locked, clearing cache and navigating to unlock",
-				);
 				// Clear all cached data
 				queryClient.clear();
 				// Navigate to unlock screen
 				router.navigate({ to: "/unlock" });
 			} else if (message.type === "DESKTOP_UNLOCKED") {
-				console.log(
-					"[Popup] Desktop unlocked, clearing cache and navigating to vault",
-				);
 				// Clear all cached data to fetch fresh
 				queryClient.clear();
 				// Navigate to vault screen

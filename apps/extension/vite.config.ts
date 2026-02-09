@@ -28,6 +28,8 @@ export default defineConfig({
 			input: {
 				popup: "popup.html",
 				autofillIframe: "autofill-iframe.html",
+				savePromptIframe: "save-prompt-iframe.html",
+				creditCardAutofillIframe: "credit-card-autofill-iframe.html",
 				identityAutofillIframe: "identity-autofill-iframe.html",
 			},
 		},

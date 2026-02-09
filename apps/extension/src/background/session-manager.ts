@@ -72,7 +72,6 @@ function resetAutoLockTimer() {
 
 	// Use setTimeout for in-memory timer
 	autoLockTimer = setTimeout(() => {
-		console.log("Auto-locking due to inactivity");
 		_lockInternal().catch((error) => {
 			console.error("Failed to lock extension:", error);
 		});
@@ -93,10 +92,8 @@ function resetAutoLockTimer() {
 function startKeepalive() {
 	if (keepaliveInterval) return; // Already running
 
-	console.log("Starting service worker keepalive");
 	keepaliveInterval = setInterval(() => {
 		// Simple no-op to keep service worker alive
-		console.debug("Keepalive ping");
 	}, KEEPALIVE_INTERVAL_MS);
 }
 
@@ -107,7 +104,6 @@ function stopKeepalive() {
 	if (keepaliveInterval) {
 		clearInterval(keepaliveInterval);
 		keepaliveInterval = null;
-		console.log("Stopped service worker keepalive");
 	}
 }
 
@@ -149,8 +145,6 @@ export async function _lockInternal(): Promise<void> {
 	if (storage.lockAllAccounts) {
 		await storage.lockAllAccounts();
 	}
-
-	console.log("Extension locked (all accounts)");
 }
 
 /**
@@ -177,7 +171,6 @@ export function isDesktopMode(): boolean {
 export function setDesktopModeSentinel(): void {
 	masterUnlockKey = DESKTOP_MODE_SENTINEL;
 	lastActivityTimestamp = Date.now();
-	console.log("[Session Manager] Set desktop mode sentinel MUK");
 }
 
 /**
@@ -194,7 +187,6 @@ export function isUnlocked(): boolean {
 
 		if (!desktopAvailable) {
 			// Desktop disconnected, lock extension
-			console.log("[Session Manager] Desktop disconnected, locking extension");
 			_lockInternal().catch((error) => {
 				console.error("Failed to auto-lock:", error);
 			});
@@ -203,7 +195,6 @@ export function isUnlocked(): boolean {
 
 		if (desktopLocked) {
 			// Desktop is locked, extension should be locked too
-			console.log("[Session Manager] Desktop is locked, locking extension");
 			_lockInternal().catch((error) => {
 				console.error("Failed to auto-lock:", error);
 			});
@@ -261,8 +252,6 @@ export async function handleAutoLockAlarm(
 	alarm: chrome.alarms.Alarm,
 ): Promise<void> {
 	if (alarm.name === AUTO_LOCK_ALARM_NAME) {
-		console.log("Auto-lock alarm triggered");
-
 		// Refresh the timeout value from storage
 		await refreshAutoLockTimeout();
 

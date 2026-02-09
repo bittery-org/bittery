@@ -63,15 +63,12 @@ function getPayload<TPayload>(message: RuntimeMessage): TPayload {
 	return message.payload as TPayload;
 }
 
-function ensureSyncInitialized(reason: string): void {
+function ensureSyncInitialized(_reason: string): void {
 	const status = getSyncStatus();
 	if (status === "connected" || status === "connecting") {
 		return;
 	}
 
-	console.info(
-		`[Background router] Initializing sync after ${reason} (status=${status})`,
-	);
 	initializeSync().catch((error) => {
 		console.error("[Background router] Failed to initialize sync:", error);
 	});
@@ -305,8 +302,6 @@ async function routeRuntimeMessage(message: RuntimeMessage): Promise<unknown> {
 export function registerBackgroundMessageRouter(): void {
 	chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		const runtimeMessage = message as RuntimeMessage;
-		console.log("[Background router] Received message:", runtimeMessage?.type);
-
 		void (async () => {
 			try {
 				const response = await routeRuntimeMessage(runtimeMessage);

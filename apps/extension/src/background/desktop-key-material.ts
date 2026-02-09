@@ -117,10 +117,6 @@ export async function ensureDesktopWriteCapability(
 		return false;
 	}
 
-	console.log(
-		`[desktop-key-material] Local write capability missing for ${normalizedEmail}, forcing native hydration`,
-	);
-
 	const unlockResult = await handleNativeBiometricUnlockAll({
 		forceLocalUnlock: true,
 		preserveActiveAccount: true,

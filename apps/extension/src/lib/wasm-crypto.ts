@@ -55,7 +55,6 @@ export async function initWasmCrypto(): Promise<void> {
 	initPromise = (async () => {
 		await init();
 		initialized = true;
-		console.log("[WASM Crypto] Initialized successfully");
 	})();
 
 	return initPromise;

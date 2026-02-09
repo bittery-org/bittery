@@ -148,8 +148,6 @@ async function ensureActiveAccountSet(): Promise<void> {
 		if (activeAccount) return; // Already have an active account
 
 		// No active account but we have accounts - set the first one as active
-		console.log("[Auth] No active account set, defaulting to first account");
-
 		if (accounts.length === 1) {
 			// Single account - set it as active
 			const firstAccount = accounts[0];
@@ -158,7 +156,6 @@ async function ensureActiveAccountSet(): Promise<void> {
 				type: "single",
 				email: firstAccount.email,
 			});
-			console.log(`[Auth] Set ${firstAccount.email} as active account`);
 		} else {
 			// Multiple accounts - check if any are unlocked
 			const unlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
@@ -166,7 +163,6 @@ async function ensureActiveAccountSet(): Promise<void> {
 			if (unlockedEmails.length > 1) {
 				// Multiple unlocked - use "all" mode
 				await storage.setActiveAccount({ type: "all" });
-				console.log("[Auth] Set active account to 'all' mode");
 			} else if (unlockedEmails.length === 1) {
 				// One unlocked - use that one
 				const unlockedEmail = unlockedEmails[0];
@@ -175,7 +171,6 @@ async function ensureActiveAccountSet(): Promise<void> {
 					type: "single",
 					email: unlockedEmail,
 				});
-				console.log(`[Auth] Set ${unlockedEmail} as active account`);
 			} else {
 				// None unlocked - default to first account
 				const firstAccount = accounts[0];
@@ -184,9 +179,6 @@ async function ensureActiveAccountSet(): Promise<void> {
 					type: "single",
 					email: firstAccount.email,
 				});
-				console.log(
-					`[Auth] Set ${firstAccount.email} as active account (none unlocked)`,
-				);
 			}
 		}
 	} catch (error) {
@@ -211,7 +203,6 @@ async function tryRestoreAllSessions(): Promise<void> {
 				const restored = await storage.tryRestoreSession(false, account.email);
 				if (restored) {
 					restoredEmails.push(account.email);
-					console.log(`[Auth] Restored session for ${account.email}`);
 				}
 			} catch (error) {
 				console.error(
@@ -230,9 +221,6 @@ async function tryRestoreAllSessions(): Promise<void> {
 			const muk = await storage.getMasterUnlockKey(restoredEmails[0]);
 			if (muk) {
 				setMasterUnlockKey(muk);
-				console.log(
-					`[Auth] Restored ${restoredEmails.length} account(s), set session manager MUK`,
-				);
 			}
 		}
 	} catch (error) {
@@ -328,9 +316,6 @@ export async function handleQuickUnlockAll(payload: {
 			// Check if account has stored secret key
 			const hasSecretKey = await storage.hasStoredSecretKey?.(account.email);
 			if (!hasSecretKey) {
-				console.log(
-					`[QUICK_UNLOCK_ALL] Skipping ${account.email} - no stored secret key`,
-				);
 				failed.push(account.email);
 				continue;
 			}

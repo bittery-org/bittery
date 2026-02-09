@@ -135,12 +135,7 @@ export function UnlockPage() {
 		onError: (error: Error) => {
 			setVaultState("locked");
 			// Don't show error toast if desktop is locked (user will unlock in desktop)
-			if (error.message?.includes("Desktop app is locked")) {
-				console.log(
-					"[Unlock] Desktop is locked, waiting for unlock via desktop app",
-				);
-				// User can still use password below
-			} else {
+			if (!error.message?.includes("Desktop app is locked")) {
 				toast.error(error.message || "Biometric unlock failed");
 			}
 		},
@@ -154,8 +149,6 @@ export function UnlockPage() {
 		chrome.runtime
 			.sendMessage({ type: "CHECK_NATIVE_BIOMETRIC" })
 			.then((response) => {
-				console.log("Biometric check response:", response);
-
 				const desktopAvailable =
 					response.available && response.enabled && response.appRunning;
 
@@ -168,10 +161,6 @@ export function UnlockPage() {
 					setTimeout(() => {
 						biometricUnlockMutation.mutate();
 					}, 100);
-				} else if (!desktopAvailable) {
-					console.log(
-						"Biometric unlock not available: desktop app not ready or biometric not enabled",
-					);
 				}
 			})
 			.catch((error) => {

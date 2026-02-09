@@ -102,7 +102,7 @@ export function showItemsOverlay<TField extends AutofillField>({
 	onSelect,
 	setCurrentIframe,
 	keyboardHandler,
-	timeoutLog,
+	timeoutLog: _timeoutLog,
 	isAutofilling,
 }: OverlayShowConfig<TField>) {
 	if (field.overlay) {
@@ -143,7 +143,6 @@ export function showItemsOverlay<TField extends AutofillField>({
 	window.addEventListener("message", messageHandler);
 
 	field.readyTimeout = setTimeout(() => {
-		console.log(timeoutLog);
 		iframe.contentWindow?.postMessage(
 			{
 				type: itemsMessageType,

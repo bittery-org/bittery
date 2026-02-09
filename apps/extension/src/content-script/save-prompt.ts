@@ -90,9 +90,6 @@ export async function showSavePrompt(
 
 	// Only show the prompt if credentials are new or have changed (like 1Password)
 	if (!hasChanges) {
-		console.log(
-			"Credentials unchanged - skipping save prompt (matches existing credential)",
-		);
 		return;
 	}
 
@@ -158,14 +155,6 @@ export async function showSavePrompt(
 		// Ignore messages not from our iframe
 		if (!event.data?.type) return;
 
-		// Log all messages for debugging (only save-related and resize messages)
-		if (
-			event.data.type.includes("SAVE") ||
-			event.data.type === "RESIZE_IFRAME"
-		) {
-			console.log("Content script received message:", event.data.type);
-		}
-
 		if (event.data.type === "SAVE_IFRAME_READY") {
 			// Send credentials, vaults, and duplicate info to iframe
 			iframe.contentWindow?.postMessage(
@@ -191,7 +180,6 @@ export async function showSavePrompt(
 		} else if (event.data.type === "UPDATE_EXISTING_CREDENTIAL") {
 			handleUpdateCredential(event.data, iframe);
 		} else if (event.data.type === "CANCEL_SAVE") {
-			console.log("Content script: Hiding save prompt due to CANCEL_SAVE");
 			hideSavePrompt();
 		}
 	};
@@ -215,11 +203,9 @@ export async function showSavePrompt(
 // Hide save prompt
 export function hideSavePrompt() {
 	if (!activeSavePrompt) {
-		console.log("Content script: hideSavePrompt called but no active prompt");
 		return;
 	}
 
-	console.log("Content script: Hiding save prompt");
 	clearPendingSavePrompt();
 
 	// Store reference to current prompt before clearing
@@ -237,7 +223,6 @@ export function hideSavePrompt() {
 		try {
 			promptToRemove.shadowHost.remove();
 			window.removeEventListener("message", promptToRemove.messageHandler);
-			console.log("Content script: Save prompt removed successfully");
 		} catch (error) {
 			console.error("Error removing save prompt:", error);
 		}
@@ -273,9 +258,7 @@ async function handleSaveCredential(
 		);
 
 		// If successful, hide prompt after brief delay (handled by iframe)
-		if (response.success) {
-			console.log("Credentials saved successfully");
-		} else {
+		if (!response.success) {
 			console.error("Failed to save credentials:", response.error);
 		}
 	} catch (error) {
@@ -332,9 +315,7 @@ async function handleUpdateCredential(
 		);
 
 		// If successful, hide prompt after brief delay (handled by iframe)
-		if (response.success) {
-			console.log("Credentials updated successfully");
-		} else {
+		if (!response.success) {
 			console.error("Failed to update credentials:", response.error);
 		}
 	} catch (error) {

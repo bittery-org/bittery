@@ -332,7 +332,6 @@ async function handleIdentityAutofillSelect(
 	hideIdentityAutofillOverlay(field);
 	contentState.currentFocusedIdentityField = null;
 
-	console.log("Identity autofill completed for:", item.title);
 }
 
 // Show unlock prompt for identity fields

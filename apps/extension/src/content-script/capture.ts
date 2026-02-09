@@ -138,7 +138,6 @@ function captureCredentials(
 
 	// If no password found, we can't capture credentials
 	if (!passwordValue || !passwordField) {
-		console.log("No password field found or password is empty");
 		return null;
 	}
 
@@ -243,7 +242,6 @@ function captureCredentials(
 	// If no username found, we might still want to capture just the password
 	// but for login forms, username is typically required
 	if (!usernameValue) {
-		console.log("No username field found or username is empty");
 		// Still return null for now - we need both username and password
 		// This could be adjusted in the future if needed
 		return null;
@@ -298,7 +296,6 @@ async function shouldSaveCredentials(
 		});
 
 		if (!authResponse.unlocked) {
-			console.log("Extension is locked - cannot save credentials");
 			return {
 				shouldSave: false,
 				reason: "Extension is locked",
@@ -325,40 +322,23 @@ async function handleFormSubmit(_event: Event | null, form: HTMLFormElement) {
 	const lastSubmission = recentFormSubmissions.get(form);
 
 	if (lastSubmission && now - lastSubmission < FORM_SUBMISSION_DEBOUNCE_MS) {
-		console.log("Form submission debounced - recently processed this form");
 		return;
 	}
 
 	// Mark this form as recently submitted
 	recentFormSubmissions.set(form, now);
 
-	console.log("Form submission detected:", form);
-
 	// Capture credentials from the form
 	const credentials = captureCredentials(form);
 
 	if (credentials) {
-		console.log("Captured credentials:", {
-			username: credentials.username,
-			url: credentials.url,
-			hostname: credentials.hostname,
-			// Don't log password for security
-		});
-
 		// Check if credentials should be saved
-		const { shouldSave, reason } = await shouldSaveCredentials(credentials);
+		const { shouldSave } = await shouldSaveCredentials(credentials);
 
 		if (shouldSave) {
-			console.log(
-				"Credentials are valid and extension is unlocked - ready to show save prompt",
-			);
 			// Show save prompt to user
 			showSavePrompt(credentials);
-		} else {
-			console.log("Credentials will not be saved:", reason);
 		}
-	} else {
-		console.log("Could not capture credentials from form");
 	}
 }
 
@@ -448,17 +428,12 @@ function handleAjaxResponse(
 
 	// Consider successful responses (2xx) as potential successful logins
 	if (statusCode >= 200 && statusCode < 300) {
-		console.log("AJAX login request detected:", request.url, statusCode);
-
 		// Treat this like a form submission
 		if (form) {
 			handleFormSubmit(null, form);
 		} else {
 			// If no form is associated, try to find password fields on the page
 			// This will be useful for custom login implementations
-			console.log(
-				"AJAX login detected but no form associated - credentials may have been submitted",
-			);
 			handleAjaxLoginWithoutForm(request);
 		}
 	}
@@ -476,33 +451,17 @@ function handleAjaxResponse(
 
 // Handle AJAX login when no form is associated
 async function handleAjaxLoginWithoutForm(_request: PendingRequest) {
-	console.log("Detected AJAX login without associated form");
-
 	// Try to capture credentials from the page (without a specific form)
 	const credentials = captureCredentials();
 
 	if (credentials) {
-		console.log("Captured credentials from AJAX request:", {
-			username: credentials.username,
-			url: credentials.url,
-			hostname: credentials.hostname,
-			// Don't log password for security
-		});
-
 		// Check if credentials should be saved
-		const { shouldSave, reason } = await shouldSaveCredentials(credentials);
+		const { shouldSave } = await shouldSaveCredentials(credentials);
 
 		if (shouldSave) {
-			console.log(
-				"Credentials are valid and extension is unlocked - ready to show save prompt",
-			);
 			// Show save prompt to user
 			showSavePrompt(credentials);
-		} else {
-			console.log("Credentials will not be saved:", reason);
 		}
-	} else {
-		console.log("Could not capture credentials from AJAX login");
 	}
 }
 

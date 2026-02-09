@@ -100,10 +100,6 @@ export function ExtensionAccountSwitcher() {
 						teamAvatarUrl: userData.teamAvatarUrl,
 					});
 
-					console.log(
-						`[account-switcher] Updated team name for ${account.email}: ${userData.teamName}`,
-					);
-
 					// Refresh accounts list
 					accounts.refetch();
 				} catch (error) {

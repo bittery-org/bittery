@@ -80,7 +80,6 @@ class DesktopClient {
 		if (this.sessionDataCache) {
 			const age = Date.now() - this.sessionDataCache.timestamp;
 			if (age < CACHE_TTL_MS) {
-				console.log("[desktop-client] Returning cached session data");
 				return this.sessionDataCache.data;
 			}
 		}
@@ -104,11 +103,6 @@ class DesktopClient {
 
 			const data = (await response.json()) as SessionDataResponse;
 			this.sessionDataCache = { data, timestamp: Date.now() };
-			console.log(
-				"[desktop-client] Fetched session data:",
-				data.accounts.length,
-				"accounts",
-			);
 			return data;
 		} catch (error) {
 			console.error("[desktop-client] Error fetching session data:", error);
@@ -125,7 +119,6 @@ class DesktopClient {
 		if (cached) {
 			const age = Date.now() - cached.timestamp;
 			if (age < CACHE_TTL_MS) {
-				console.log("[desktop-client] Returning cached vault keys for", email);
 				return cached.data;
 			}
 		}
@@ -150,7 +143,6 @@ class DesktopClient {
 				data,
 				timestamp: Date.now(),
 			});
-			console.log("[desktop-client] Fetched vault keys for", email);
 			return data;
 		} catch (error) {
 			console.error("[desktop-client] Error fetching vault keys:", error);
@@ -179,18 +171,8 @@ class DesktopClient {
 		}
 
 		if (uncachedItems.length === 0) {
-			console.log(
-				"[desktop-client] All items found in cache:",
-				cachedResults.length,
-			);
 			return cachedResults;
 		}
-
-		console.log(
-			"[desktop-client] Decrypting",
-			uncachedItems.length,
-			"items via desktop",
-		);
 
 		try {
 			const response = await fetch(
@@ -236,12 +218,6 @@ class DesktopClient {
 				);
 			}
 
-			console.log(
-				"[desktop-client] Successfully decrypted",
-				result.decrypted_items.length,
-				"items",
-			);
-
 			// Combine cached and newly decrypted items
 			return [...cachedResults, ...result.decrypted_items];
 		} catch (error) {
@@ -254,7 +230,6 @@ class DesktopClient {
 	 * Clear all caches (called on lock/unlock/disconnect)
 	 */
 	clearCache(): void {
-		console.log("[desktop-client] Clearing all caches");
 		this.sessionDataCache = null;
 		this.vaultKeysCache.clear();
 		this.decryptedItemsCache.clear();
@@ -264,7 +239,6 @@ class DesktopClient {
 	 * Clear cache for a specific account
 	 */
 	clearAccountCache(email: string): void {
-		console.log("[desktop-client] Clearing cache for", email);
 		this.vaultKeysCache.delete(email.toLowerCase());
 
 		// Note: We don't clear sessionDataCache as it contains all accounts
@@ -320,10 +294,6 @@ class DesktopClient {
 			}
 
 			const data = await response.json();
-			console.log(
-				"[desktop-client] Fetched accounts from desktop:",
-				data.accounts?.length ?? 0,
-			);
 			return data;
 		} catch (error) {
 			console.error("[desktop-client] Error fetching accounts:", error);

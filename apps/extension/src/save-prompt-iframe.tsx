@@ -84,9 +84,6 @@ function SavePromptIframe() {
 	}, [updateHeight]);
 
 	const handleCancel = React.useCallback(() => {
-		console.log(
-			"Save prompt: Cancel button clicked, sending CANCEL_SAVE message",
-		);
 		// Send cancel message to parent
 		window.parent.postMessage(
 			{
@@ -139,7 +136,6 @@ function SavePromptIframe() {
 
 		// Prevent double-clicks
 		if (state === "saving") {
-			console.log("Save already in progress, ignoring duplicate request");
 			return;
 		}
 

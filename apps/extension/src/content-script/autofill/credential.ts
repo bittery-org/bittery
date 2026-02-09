@@ -55,7 +55,7 @@ export async function handleFieldFocus(field: CredentialField) {
 
 	const itemsResponse = await chrome.runtime.sendMessage({
 		type: "GET_AUTOFILL_ITEMS",
-		url: window.location.href,
+		payload: { hostname: new URL(window.location.href).hostname },
 	});
 
 	if (contentState.currentFocusedField !== field) return;

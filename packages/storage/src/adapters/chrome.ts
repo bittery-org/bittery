@@ -109,9 +109,6 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 
 			// Clear active account cache if it changed
 			if (ACTIVE_ACCOUNT_KEY in changes) {
-				console.log(
-					"[storage-chrome] Active account changed in storage, clearing cache",
-				);
 				cachedActiveAccount = undefined;
 			}
 		});
@@ -228,10 +225,6 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			return false;
 		}
 
-		console.log(
-			`[storage-chrome] tryRestoreSession: Starting for ${resolvedEmail}`,
-		);
-
 		if (!(await this.isSessionValid(resolvedEmail))) {
 			console.log(
 				`[storage-chrome] tryRestoreSession: Session not valid for ${resolvedEmail}`,
@@ -242,9 +235,6 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		// First check if MUK is already in memory cache (e.g., after login)
 		const cache = this.getAccountCache(resolvedEmail);
 		if (cache.masterUnlockKey) {
-			console.log(
-				`[storage-chrome] tryRestoreSession: MUK already in memory for ${resolvedEmail}`,
-			);
 			// Also ensure auth token and vault keys are in cache
 			if (!cache.authToken) {
 				const authToken = await this.getAuthToken(resolvedEmail);
@@ -261,10 +251,6 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			return true;
 		}
 
-		console.log(
-			`[storage-chrome] tryRestoreSession: Attempting to decrypt stored MUK for ${resolvedEmail}`,
-		);
-
 		// Otherwise, try to decrypt from persistent storage
 		const masterUnlockKey =
 			await this.decryptStoredMasterUnlockKeyInternal(resolvedEmail);
@@ -274,10 +260,6 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			);
 			return false;
 		}
-
-		console.log(
-			`[storage-chrome] tryRestoreSession: MUK decrypted successfully for ${resolvedEmail}`,
-		);
 
 		await this.setMasterUnlockKey(masterUnlockKey, resolvedEmail);
 
@@ -301,9 +283,6 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		}
 		cache.vaultKeys = vaultKeys;
 
-		console.log(
-			`[storage-chrome] tryRestoreSession: Successfully restored session for ${resolvedEmail}`,
-		);
 		return true;
 	}
 
@@ -378,12 +357,6 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) throw new Error("No account specified");
 
-		console.log(
-			"[storage-chrome] Storing vault keys:",
-			vaultKeys.length,
-			"keys",
-		);
-
 		const cache = this.getAccountCache(resolvedEmail);
 		cache.vaultKeys = vaultKeys;
 
@@ -393,7 +366,6 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			await chrome.storage.local.set({
 				[key]: JSON.stringify(vaultKeys),
 			});
-			console.log("[storage-chrome] Vault keys stored successfully");
 		} catch (error) {
 			console.error("[storage-chrome] Failed to store vault keys:", error);
 			throw error;
@@ -409,15 +381,9 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			return cache.vaultKeys;
 		}
 
-		console.log("[storage-chrome] Getting vault keys from local storage");
 		const key = getAccountKey(resolvedEmail, "vault_keys");
 		const result = await chrome.storage.local.get(key);
 		const stored = result[key];
-		console.log(
-			"[storage-chrome] Vault keys found:",
-			!!stored,
-			stored ? `(${JSON.parse(stored as string).length} keys)` : "(none)",
-		);
 
 		if (stored) {
 			cache.vaultKeys = JSON.parse(stored as string);
@@ -533,7 +499,6 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 
 	private async getAccountsListInternal(): Promise<AccountsList> {
 		const result = await chrome.storage.local.get(ACCOUNTS_LIST_KEY);
-		console.log(result);
 
 		const stored = result[ACCOUNTS_LIST_KEY];
 		if (!stored) {
@@ -783,11 +748,6 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	}
 
 	async getUnlockedAccounts(): Promise<string[]> {
-		console.log(
-			"[storage-chrome] getUnlockedAccounts - accountCaches size:",
-			accountCaches.size,
-		);
-
 		// If cache is empty (e.g., after service worker restart), try to restore from storage
 		const accounts = await this.getAccountsList();
 
@@ -797,14 +757,12 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 
 			// Try to get MUK (will restore from storage if needed)
 			const muk = await this.getMasterUnlockKey(email);
-			console.log(`[storage-chrome] Account ${email} - has MUK:`, !!muk);
 
 			if (muk) {
 				unlockedEmails.push(email);
 			}
 		}
 
-		console.log("[storage-chrome] Unlocked accounts:", unlockedEmails);
 		return unlockedEmails;
 	}
 

@@ -16,5 +16,3 @@ import {
 initializeBackgroundServices();
 registerBackgroundMessageRouter();
 registerLifecycleListeners();
-
-console.log("Bittery background service worker loaded");

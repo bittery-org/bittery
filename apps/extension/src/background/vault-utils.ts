@@ -247,9 +247,6 @@ async function decryptVaultItemsForAccountViaDesktop(
 			!!cachedVaults &&
 			(cachedItems.length > 0 || cacheMeta !== null);
 		if (hasCacheSnapshot) {
-			console.log(
-				`[vault-utils] Desktop cache hit for ${email}: ${cachedItems.length} cached item(s)`,
-			);
 			try {
 				return await decryptRawItemsViaDesktop(
 					buildRawItemsFromCache(cachedItems, cachedVaults),
@@ -264,10 +261,6 @@ async function decryptVaultItemsForAccountViaDesktop(
 			}
 		}
 	}
-
-	console.log(
-		`[vault-utils] Desktop cache miss for ${email}, fetching vault list`,
-	);
 
 	const authToken = await desktopClient.getAuthToken(email);
 	if (!authToken) {

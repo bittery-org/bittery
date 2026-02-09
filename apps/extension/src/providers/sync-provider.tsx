@@ -96,7 +96,6 @@ export function ExtensionSyncProvider({
 	// Handle sync events and invalidate queries
 	const handleSyncEvent = useCallback(
 		async (event: SyncEvent) => {
-			console.log("[Sync provider] Received sync event:", event.type, event.id);
 			await invalidateExtensionQueriesForSyncEvent(invalidator, event);
 		},
 		[invalidator],
@@ -110,14 +109,7 @@ export function ExtensionSyncProvider({
 			}
 
 			if (message.type === "SYNC_STATUS_CHANGED") {
-				setStatus((previous) => {
-					if (previous !== message.status) {
-						console.info(
-							`[Sync provider] Status ${previous} -> ${message.status}`,
-						);
-					}
-					return message.status;
-				});
+				setStatus(message.status);
 			} else if (message.type === "SYNC_EVENT") {
 				void handleSyncEvent(message.event);
 			}

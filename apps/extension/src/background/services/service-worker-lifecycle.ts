@@ -15,8 +15,6 @@ import {
 import { handleSyncReconnectAlarm } from "../sync-manager";
 
 export function initializeBackgroundServices(): void {
-	console.log("[Background lifecycle] Bootstrapping background services");
-
 	initWasmCrypto().catch((error) => {
 		console.error(
 			"[Background lifecycle] Failed to initialize WASM crypto:",
@@ -52,13 +50,5 @@ export function registerLifecycleListeners(): void {
 	chrome.alarms.onAlarm.addListener((alarm) => {
 		void handleAutoLockAlarm(alarm);
 		void handleSyncReconnectAlarm(alarm);
-	});
-
-	chrome.runtime.onStartup.addListener(() => {
-		console.log("[Background lifecycle] Extension startup event");
-	});
-
-	chrome.runtime.onInstalled.addListener(() => {
-		console.log("[Background lifecycle] Extension installed/updated");
 	});
 }

@@ -70,16 +70,12 @@ function sendRuntimeMessage(message: SyncRuntimeMessage): void {
 /**
  * Update connection status and notify popup.
  */
-function setStatus(status: ConnectionStatus, reason: string): void {
+function setStatus(status: ConnectionStatus, _reason: string): void {
 	if (connectionStatus === status) {
 		return;
 	}
 
-	const previous = connectionStatus;
 	connectionStatus = status;
-	console.info(
-		`[sync-manager] Connection status ${previous} -> ${status} (${reason})`,
-	);
 	sendRuntimeMessage({
 		type: "SYNC_STATUS_CHANGED",
 		status,
@@ -175,9 +171,6 @@ async function catchUpMissedEvents(): Promise<void> {
 		}
 
 		if (processed > 0) {
-			console.info(
-				`[sync-manager] Catch-up applied ${processed} missed event(s)`,
-			);
 			const latestTimestamp =
 				result.events[result.events.length - 1]?.timestamp;
 			if (latestTimestamp) {
@@ -213,10 +206,6 @@ export async function connect(): Promise<void> {
 		}
 
 		syncConnectionEmail = context.email;
-		console.info(
-			`[sync-manager] Connecting SSE for ${context.email ?? "fallback"} at ${context.serverUrl}`,
-		);
-
 		abortController = new AbortController();
 
 		const response = await fetch(`${context.serverUrl}/sync/events`, {
@@ -325,7 +314,6 @@ async function processEvent(eventStr: string): Promise<void> {
 
 		const eventType = (parsed as { type?: unknown }).type;
 		if (eventType === "connected") {
-			console.info("[sync-manager] SSE connected event received");
 			return;
 		}
 
