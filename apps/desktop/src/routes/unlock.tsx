@@ -51,8 +51,8 @@ export function UnlockPage() {
 	const { autoTrigger } = Route.useSearch();
 
 	// Track window focus so biometric only auto-triggers when the app is in the foreground
-	const [isWindowFocused, setIsWindowFocused] = useState(
-		() => document.hasFocus(),
+	const [isWindowFocused, setIsWindowFocused] = useState(() =>
+		document.hasFocus(),
 	);
 
 	useEffect(() => {
@@ -269,7 +269,14 @@ export function UnlockPage() {
 
 			return () => clearTimeout(timeout);
 		}
-	}, [canUseBiometric, autoTrigger, allAccounts, queryClient, navigate, isWindowFocused]);
+	}, [
+		canUseBiometric,
+		autoTrigger,
+		allAccounts,
+		queryClient,
+		navigate,
+		isWindowFocused,
+	]);
 
 	// Show loading state while accounts are being fetched
 	if (accounts.isLoading) {

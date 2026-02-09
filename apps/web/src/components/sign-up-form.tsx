@@ -5,6 +5,7 @@ import {
 	Badge,
 	Button,
 	Card,
+	cn,
 	copyWithToast,
 	Input,
 	Label,
@@ -13,19 +14,11 @@ import {
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Copy, Download, Eye, EyeOff, Users } from "lucide-react";
+import { Copy, Download, Eye, EyeOff, Loader2, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { storage } from "@/lib/storage";
-import {
-	arrayBufferToBase64,
-	deriveKeys,
-	encrypt,
-	generateEncryptionKey,
-	generateRSAKeyPair,
-	generateSecretKeyAsync,
-	generateSRPRegistration,
-	getSecretKeyHint,
-} from "@/lib/wasm-crypto";
+import { generateSecretKeyAsync } from "@/lib/wasm-crypto";
+import { WorkerCrypto } from "@/lib/worker-crypto";
 
 export default function SignUpForm({
 	onSwitchToSignIn,
@@ -117,38 +110,49 @@ export default function SignUpForm({
 			}
 
 			setIsEncrypting(true);
+			const workerCrypto = new WorkerCrypto();
 			try {
 				// Use invitation email if signing up via invitation
 				const email = isInvitationSignup ? invitation.email : value.email;
 
-				// 1. Derive keys from password + secret key
-				const { authKey, masterUnlockKey } = await deriveKeys(
+				// All heavy crypto runs in a Web Worker via WorkerCrypto,
+				// keeping the main thread responsive with the spinner.
+
+				// 1. Derive keys (PBKDF2 310k iterations)
+				const { authKey, masterUnlockKey } = await workerCrypto.deriveKeys(
 					value.password,
 					secretKey,
 					email,
 				);
 
-				// Convert authKey to password string for SRP
-				const password = new TextDecoder().decode(authKey);
+				// 2. Generate SRP credentials
+				const srpPassword = new TextDecoder().decode(authKey);
+				const { salt, verifier } =
+					await workerCrypto.generateSRPRegistration(srpPassword);
 
-				// 2. Generate SRP credentials (salt and verifier)
-				const { salt, verifier } = await generateSRPRegistration(password);
-
-				// 3. Generate RSA key pair for vault sharing
-				const { publicKey, privateKey } = await generateRSAKeyPair();
+				// 3. Generate RSA-4096 key pair
+				const { publicKey, privateKey } =
+					await workerCrypto.generateRSAKeyPair();
 
 				// 4. Encrypt private key with Master Unlock Key
-				const encryptedPrivateKey = await encrypt(privateKey, masterUnlockKey);
+				const encryptedPrivateKey = await workerCrypto.encrypt(
+					privateKey,
+					masterUnlockKey,
+				);
 
 				// 5. Generate vault key and encrypt it
-				const vaultKey = await generateEncryptionKey();
-				const encryptedVaultKey = await encrypt(
-					arrayBufferToBase64(vaultKey),
+				const vaultKey = await workerCrypto.generateEncryptionKey();
+				const vaultKeyBase64 = btoa(
+					String.fromCharCode(...vaultKey),
+				);
+				const encryptedVaultKey = await workerCrypto.encrypt(
+					vaultKeyBase64,
 					masterUnlockKey,
 				);
 
 				// 6. Get secret key hint
-				const secretKeyHintValue = getSecretKeyHint(secretKey);
+				const secretKeyHint =
+					await workerCrypto.getSecretKeyHint(secretKey);
 
 				// 7. Call signup mutation
 				const result = await signupMutation.mutateAsync({
@@ -157,7 +161,7 @@ export default function SignUpForm({
 					...(value.accountType === "organization" && value.organizationName
 						? { organizationName: value.organizationName }
 						: {}),
-					secretKeyHint: secretKeyHintValue,
+					secretKeyHint,
 					srpSalt: salt,
 					srpVerifier: verifier,
 					publicKey,
@@ -165,15 +169,15 @@ export default function SignUpForm({
 					encryptedVaultKey: JSON.stringify(encryptedVaultKey),
 				});
 
-				// 7. Store Master Unlock Key in memory
+				// 8. Store Master Unlock Key in memory
 				await storage.setMasterUnlockKey(masterUnlockKey);
 
-				// 8. Store encrypted private key for RSA decryption of shared vault keys
+				// 9. Store encrypted private key for RSA decryption of shared vault keys
 				await storage.storeEncryptedPrivateKey(
 					JSON.stringify(encryptedPrivateKey),
 				);
 
-				// 9. Store secret key and encrypted session for quick unlock
+				// 10. Store secret key and encrypted session for quick unlock
 				await storage.storeSecretKey(secretKey);
 				await storage.storeSessionData(
 					masterUnlockKey,
@@ -194,6 +198,7 @@ export default function SignUpForm({
 				console.error("Signup error:", error);
 				toast.error(error.message || "Failed to create account");
 			} finally {
+				workerCrypto.terminate();
 				setIsEncrypting(false);
 			}
 		},
@@ -431,7 +436,14 @@ Generated: ${new Date().toLocaleString()}
 													onClick={() => field.handleChange("personal")}
 												>
 													<span className="font-medium">Personal</span>
-													<span className="text-left font-normal text-muted-foreground text-xs">
+													<span
+														className={cn(
+															"text-left font-normal text-xs",
+															field.state.value === "personal"
+																? "text-primary-foreground"
+																: "text-muted-foreground",
+														)}
+													>
 														For individual use
 													</span>
 												</Button>
@@ -446,7 +458,14 @@ Generated: ${new Date().toLocaleString()}
 													onClick={() => field.handleChange("organization")}
 												>
 													<span className="font-medium">Organization</span>
-													<span className="text-left font-normal text-muted-foreground text-xs">
+													<span
+														className={cn(
+															"text-left font-normal text-xs",
+															field.state.value === "organization"
+																? "text-primary-foreground"
+																: "text-muted-foreground",
+														)}
+													>
 														For teams and companies
 													</span>
 												</Button>
@@ -563,11 +582,16 @@ Generated: ${new Date().toLocaleString()}
 								className="h-10 w-full"
 								disabled={isEncrypting || signupMutation.isPending}
 							>
-								{isEncrypting
-									? "Encrypting..."
-									: signupMutation.isPending
-										? "Creating Account..."
-										: "Create Account"}
+								{isEncrypting || signupMutation.isPending ? (
+									<>
+										<Loader2 size={16} className="mr-2 animate-spin" />
+										{isEncrypting
+											? "Setting up encryption..."
+											: "Creating account..."}
+									</>
+								) : (
+									"Create Account"
+								)}
 							</Button>
 						</div>
 

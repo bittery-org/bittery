@@ -1,12 +1,16 @@
-import { useCheckEmail, useLogin, useSessionState } from "@bittery/core/hooks";
+import { useCheckEmail, useSessionState } from "@bittery/core/hooks";
+import { performSRPLogin, storeLoginSession } from "@bittery/core/hooks/auth";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
+import { useTRPCClient } from "@bittery/shared/trpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
+import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { storage } from "@/lib/storage";
+import { WorkerCrypto } from "@/lib/worker-crypto";
 
 export default function SignInForm({
 	onSwitchToSignUp,
@@ -36,8 +40,28 @@ export default function SignInForm({
 	// Check email for secret key hint
 	const { data: emailCheck } = useCheckEmail(email);
 
-	// Login mutation using the new hook
-	const loginMutation = useLogin({
+	const trpcClient = useTRPCClient();
+
+	// Login mutation using WorkerCrypto to keep the main thread responsive
+	const loginMutation = useMutation({
+		mutationFn: async (input: {
+			email: string;
+			password: string;
+			secretKey: string;
+		}) => {
+			const workerCrypto = new WorkerCrypto();
+			try {
+				const result = await performSRPLogin(input, {
+					crypto: workerCrypto,
+					trpcClient,
+					storage,
+				});
+				await storeLoginSession(result, input.secretKey, storage, input.email);
+				return result;
+			} finally {
+				workerCrypto.terminate();
+			}
+		},
 		onSuccess: () => {
 			const daysUntil = Math.floor(
 				DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24),
@@ -51,7 +75,7 @@ export default function SignInForm({
 				navigate({ to: "/home" });
 			}
 		},
-		onError: (error) => {
+		onError: (error: Error) => {
 			toast.error(error.message || "Failed to sign in");
 		},
 	});
@@ -289,11 +313,16 @@ export default function SignInForm({
 						className="h-10 w-full font-medium"
 						disabled={loginMutation.isPending}
 					>
-						{loginMutation.isPending
-							? "Signing In..."
-							: isQuickUnlock
-								? "Unlock Vault"
-								: "Sign In"}
+						{loginMutation.isPending ? (
+							<>
+								<Loader2 size={16} className="mr-2 animate-spin" />
+								Signing in...
+							</>
+						) : isQuickUnlock ? (
+							"Unlock Vault"
+						) : (
+							"Sign In"
+						)}
 					</Button>
 
 					{isQuickUnlock && (

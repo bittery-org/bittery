@@ -20,4 +20,8 @@ export default defineConfig({
 		}),
 		viteReact(),
 	],
+	worker: {
+		format: "es",
+		plugins: () => [tsconfigPaths()],
+	},
 });
