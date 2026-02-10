@@ -4,7 +4,9 @@
 FROM rust:1-bookworm AS wasm-builder
 
 RUN rustup target add wasm32-unknown-unknown
-RUN cargo install wasm-pack
+
+# Download pre-built wasm-pack binary (much faster than cargo install)
+RUN curl -fsSL https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
 
 WORKDIR /build
 
