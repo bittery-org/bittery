@@ -142,17 +142,14 @@ export default function SignUpForm({
 
 				// 5. Generate vault key and encrypt it
 				const vaultKey = await workerCrypto.generateEncryptionKey();
-				const vaultKeyBase64 = btoa(
-					String.fromCharCode(...vaultKey),
-				);
+				const vaultKeyBase64 = btoa(String.fromCharCode(...vaultKey));
 				const encryptedVaultKey = await workerCrypto.encrypt(
 					vaultKeyBase64,
 					masterUnlockKey,
 				);
 
 				// 6. Get secret key hint
-				const secretKeyHint =
-					await workerCrypto.getSecretKeyHint(secretKey);
+				const secretKeyHint = await workerCrypto.getSecretKeyHint(secretKey);
 
 				// 7. Call signup mutation
 				const result = await signupMutation.mutateAsync({

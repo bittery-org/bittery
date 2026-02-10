@@ -101,7 +101,6 @@ export function detectPasswordFields(root: Document | ShadowRoot = document) {
 			attachFormSubmitListeners(form);
 			contentState.processedForms.add(form);
 		}
-
 	}
 
 	// Also scan for Shadow DOM roots and observe them
@@ -158,7 +157,6 @@ function detectCreditCardFieldsOnPage(root: Document | ShadowRoot = document) {
 		// Add focus/blur listeners for credit card autofill
 		input.addEventListener("focus", () => handleCreditCardFieldFocus(field));
 		input.addEventListener("blur", () => handleCreditCardFieldBlur(field));
-
 	}
 }
 
@@ -213,7 +211,6 @@ function detectIdentityFieldsOnPage(root: Document | ShadowRoot = document) {
 		// Add focus/blur listeners for identity autofill
 		input.addEventListener("focus", () => handleIdentityFieldFocus(field));
 		input.addEventListener("blur", () => handleIdentityFieldBlur(field));
-
 	}
 }
 

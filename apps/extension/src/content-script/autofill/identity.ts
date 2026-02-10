@@ -331,7 +331,6 @@ async function handleIdentityAutofillSelect(
 
 	hideIdentityAutofillOverlay(field);
 	contentState.currentFocusedIdentityField = null;
-
 }
 
 // Show unlock prompt for identity fields

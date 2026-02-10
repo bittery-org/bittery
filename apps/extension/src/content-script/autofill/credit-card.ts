@@ -235,7 +235,6 @@ async function handleCreditCardAutofillSelect(
 
 	hideCreditCardAutofillOverlay(field);
 	contentState.currentFocusedCreditCardField = null;
-
 }
 
 // Show unlock prompt for credit card fields

@@ -13,13 +13,10 @@ export default async function runMigrations() {
 		await pgClient.connect();
 		const db = drizzle(pgClient);
 
-		const migrationsFolder = join(
-			process.cwd(),
-			"../..",
-			"packages/db/src/migrations",
-		);
+		const migrationsFolder =
+			process.env.MIGRATIONS_FOLDER ||
+			join(process.cwd(), "../..", "packages/db/src/migrations");
 
-		console.log(migrationsFolder);
 		console.log("Running migrations");
 
 		// Run migrations

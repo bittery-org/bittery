@@ -155,10 +155,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 			case "generateSRPRegistration": {
 				const client = getSrpClient();
 				const salt = client.generateSalt();
-				const privateKey = client.deriveSafePrivateKey(
-					salt,
-					msg.srpPassword,
-				);
+				const privateKey = client.deriveSafePrivateKey(salt, msg.srpPassword);
 				const verifier = client.deriveVerifier(privateKey);
 				result = { salt, verifier };
 				break;
