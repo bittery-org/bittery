@@ -5,25 +5,14 @@ FROM rust:1-bookworm AS wasm-builder
 
 RUN rustup target add wasm32-unknown-unknown
 
-# Download pre-built wasm-pack binary (much faster than cargo install)
-RUN curl -fsSL https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
-
 WORKDIR /build
 
-# Copy Rust workspace for WASM build
-COPY packages/crypto/core/Cargo.toml packages/crypto/core/Cargo.toml
-COPY packages/crypto/core/Cargo.lock packages/crypto/core/Cargo.lock
-COPY packages/crypto/core/crates packages/crypto/core/crates
+# Copy Rust workspace and build script
+COPY packages/crypto/core packages/crypto/core
+RUN mkdir -p packages/crypto/wasm
 
-# Build WASM package
-RUN cd packages/crypto/core && \
-    wasm-pack build crates/bittery-crypto-wasm \
-      --target web \
-      --out-dir ../../../wasm \
-      --out-name bittery_crypto
-
-# Write the correct package.json for the WASM package
-RUN echo '{"name":"@bittery/crypto-wasm","type":"module","version":"0.1.0","main":"bittery_crypto.js","types":"bittery_crypto.d.ts","exports":{".":{"types":"./bittery_crypto.d.ts","import":"./bittery_crypto.js"}},"sideEffects":["./bittery_crypto.js"]}' > packages/crypto/wasm/package.json
+# Use the existing build script (installs wasm-pack + writes package.json)
+RUN packages/crypto/core/build-wasm.sh
 
 # ============================================================
 # Stage 2: JS builder — install deps and build Vite SPA
