@@ -39,9 +39,6 @@ COPY --from=rust-builder /build/packages/crypto/napi/target/release/libbittery_c
 # Build server bundle
 RUN cd apps/server && pnpm exec tsdown
 
-# Prepare production node_modules via pnpm deploy
-RUN pnpm --filter server deploy --prod /deploy
-
 # ============================================================
 # Stage 3: Runtime — minimal Bun image
 # ============================================================
@@ -49,8 +46,8 @@ FROM oven/bun:1-slim
 
 WORKDIR /app
 
-# Copy production node_modules from deploy
-COPY --from=js-builder /deploy/node_modules ./node_modules
+# Copy node_modules from builder
+COPY --from=js-builder /app/node_modules ./node_modules
 
 # Copy built server bundle
 COPY --from=js-builder /app/apps/server/dist/index.mjs ./dist/index.mjs
