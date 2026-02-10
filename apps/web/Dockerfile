@@ -32,52 +32,17 @@ RUN corepack enable && corepack prepare pnpm@10.18.3 --activate
 
 WORKDIR /app
 
-# Copy workspace config
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+# Copy entire repo (filtered by .dockerignore)
+COPY . .
 
-# Copy all package.json files (needed for pnpm install)
-COPY apps/web/package.json apps/web/package.json
-COPY apps/server/package.json apps/server/package.json
-COPY packages/api/package.json packages/api/package.json
-COPY packages/auth/package.json packages/auth/package.json
-COPY packages/config/package.json packages/config/package.json
-COPY packages/core/package.json packages/core/package.json
-COPY packages/db/package.json packages/db/package.json
-COPY packages/jobs/package.json packages/jobs/package.json
-COPY packages/pubsub/package.json packages/pubsub/package.json
-COPY packages/shared/package.json packages/shared/package.json
-COPY packages/storage/package.json packages/storage/package.json
-COPY packages/sync/package.json packages/sync/package.json
-COPY packages/types/package.json packages/types/package.json
-COPY packages/ui/package.json packages/ui/package.json
-COPY packages/crypto/napi/package.json packages/crypto/napi/package.json
-
-# Stub workspace packages excluded by .dockerignore or not in git
-# crypto-wasm is built in stage 1 and copied later (line 69), stub is only for pnpm install
-RUN mkdir -p apps/desktop && echo '{"name":"desktop","version":"0.0.0","private":true}' > apps/desktop/package.json \
- && mkdir -p apps/extension && echo '{"name":"extension","version":"0.0.0","private":true}' > apps/extension/package.json \
- && mkdir -p apps/mobile && echo '{"name":"mobile","version":"0.0.0","private":true}' > apps/mobile/package.json \
- && mkdir -p packages/crypto/wasm && echo '{"name":"@bittery/crypto-wasm","version":"0.1.0","private":true}' > packages/crypto/wasm/package.json \
- && mkdir -p packages/crypto/core && echo '{"name":"@bittery/crypto-core","version":"0.0.0","private":true}' > packages/crypto/core/package.json \
- && mkdir -p packages/crypto/expo-module && echo '{"name":"@bittery/crypto-nitro","version":"0.0.0","private":true}' > packages/crypto/expo-module/package.json
+# Stub workspace packages whose package.json is generated (not in git)
+RUN mkdir -p packages/crypto/wasm && echo '{"name":"@bittery/crypto-wasm","version":"0.1.0","private":true}' > packages/crypto/wasm/package.json \
+ && mkdir -p packages/crypto/core && echo '{"name":"@bittery/crypto-core","version":"0.0.0","private":true}' > packages/crypto/core/package.json
 
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
-# Copy WASM build output from stage 1
+# Copy WASM build output from stage 1 (overwrites stub)
 COPY --from=wasm-builder /build/packages/crypto/wasm packages/crypto/wasm
-
-# Copy source code for web and all its transitive workspace dependencies
-COPY apps/web apps/web
-COPY packages/api packages/api
-COPY packages/auth packages/auth
-COPY packages/config packages/config
-COPY packages/core packages/core
-COPY packages/db packages/db
-COPY packages/shared packages/shared
-COPY packages/storage packages/storage
-COPY packages/sync packages/sync
-COPY packages/types packages/types
-COPY packages/ui packages/ui
 
 # Build the web app (Vite SPA — no VITE_SERVER_URL needed, defaults to same origin)
 RUN cd apps/web && pnpm run build
