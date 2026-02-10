@@ -1,0 +1,35 @@
+.git
+**/node_modules
+**/dist
+**/target
+**/*.node
+
+# Platform-specific apps not needed in Docker
+apps/desktop
+apps/mobile
+apps/extension
+
+# Crypto bindings not needed (built inside Docker)
+packages/crypto/expo-module
+
+# Test files
+**/*.test.ts
+**/*.spec.ts
+**/e2e
+**/playwright-report
+**/test-results
+
+# Environment and config
+**/.env
+**/.env.*
+!**/.env.example
+
+# IDE and OS
+.vscode
+.idea
+**/.DS_Store
+
+# Documentation
+docs
+*.md
+!deploy/**/*.md

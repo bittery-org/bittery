@@ -84,6 +84,10 @@ app.use(
 	}),
 );
 
+app.get("/healthz", (c) => {
+	return c.json({ status: "ok" });
+});
+
 app.get("/", (c) => {
 	return c.text("OK");
 });

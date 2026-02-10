@@ -209,7 +209,6 @@ class DesktopSyncService {
 					});
 				}
 			}
-
 		} catch (error) {
 			console.error(
 				"[Desktop Sync] Failed to sync accounts from desktop:",
