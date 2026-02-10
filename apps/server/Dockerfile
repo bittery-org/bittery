@@ -49,8 +49,8 @@ WORKDIR /app
 # Copy node_modules from builder
 COPY --from=js-builder /app/node_modules ./node_modules
 
-# Copy built server bundle
-COPY --from=js-builder /app/apps/server/dist/index.mjs ./dist/index.mjs
+# Copy built server bundle (includes chunks produced by tsdown)
+COPY --from=js-builder /app/apps/server/dist ./dist
 
 # Set up @bittery/crypto-napi module for runtime resolution
 COPY --from=rust-builder /build/packages/crypto/napi/target/release/libbittery_crypto_napi.so ./node_modules/@bittery/crypto-napi/bittery-crypto.node

@@ -6,7 +6,7 @@ set -euo pipefail
 #   Interactive:  curl -fsSL https://raw.githubusercontent.com/bittery-org/bittery/main/deploy/install.sh | bash
 #   Non-interactive: bash install.sh --domain bittery.example.com --install-dir /opt/bittery
 
-REPO_URL="https://raw.githubusercontent.com/bittery-org/bittery/main"
+REPO_URL="https://github.com/bittery-org/bittery/main"
 DEFAULT_INSTALL_DIR="$HOME/bittery"
 
 # Colors
