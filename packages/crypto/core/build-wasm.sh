@@ -47,7 +47,7 @@ cat > package.json << 'EOF'
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/bittery/bittery",
+    "url": "https://github.com/bittery-org/bittery",
     "directory": "packages/crypto/wasm"
   }
 }
