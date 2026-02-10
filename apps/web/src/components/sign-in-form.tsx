@@ -147,19 +147,11 @@ export default function SignInForm({
 	};
 
 	return (
-		<div className="w-full space-y-4">
-			<div className="flex flex-col space-y-2 text-center">
-				<h1 className="font-semibold text-xl tracking-tight">
-					{isQuickUnlock ? "Welcome back" : "Sign in to your account"}
-				</h1>
-				<p className="text-muted-foreground text-sm">
-					{isQuickUnlock
-						? "Enter your password to unlock profile"
-						: "Enter your details below to access profile"}
-				</p>
-			</div>
-
-			<Card className="border-0 bg-transparent p-8 shadow-none sm:border sm:bg-card sm:shadow-sm">
+		<div className="w-full">
+			<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+				{isQuickUnlock ? "Welcome back" : "Sign in"}
+			</h1>
+			<Card className="border bg-card p-6 shadow-sm">
 				{sessionExpired && (
 					<div className="mb-6 rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-900 dark:bg-yellow-950/30">
 						<div className="flex gap-3">

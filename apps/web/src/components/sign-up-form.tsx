@@ -232,21 +232,12 @@ Generated: ${new Date().toLocaleString()}
 		toast.success("Emergency Kit downloaded");
 	};
 
-	return (
-		<div className="w-full space-y-4">
-			<div className="flex flex-col space-y-2 text-center">
-				<h1 className="font-semibold text-xl tracking-tight">
-					{isInvitationSignup ? "Accept Invitation" : "Create an account"}
-				</h1>
-				<p className="text-muted-foreground text-sm">
-					{isInvitationSignup
-						? `Create an account to join ${invitation.teamName}`
-						: "Get started with secure password management"}
-				</p>
-			</div>
-
-			{!hasAcknowledged ? (
-				<Card className="space-y-4 border-0 bg-transparent p-6 shadow-none sm:border sm:bg-card sm:shadow-sm">
+	return !hasAcknowledged ? (
+		<div className="w-full">
+			<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+				{isInvitationSignup ? "Accept Invitation" : "Create an account"}
+			</h1>
+			<Card className="space-y-4 border bg-card p-6 shadow-sm">
 					<div className="space-y-2">
 						<h2 className="font-medium text-base">Save your Secret Key</h2>
 						<p className="text-muted-foreground text-sm leading-relaxed">
@@ -331,10 +322,15 @@ Generated: ${new Date().toLocaleString()}
 							Already have an account? Sign in
 						</Button>
 					</div>
-				</Card>
-			) : (
-				<Card className="border-0 bg-transparent p-8 shadow-none sm:border sm:bg-card sm:shadow-sm">
-					<form
+			</Card>
+		</div>
+	) : (
+		<div className="w-full">
+			<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+				{isInvitationSignup ? "Accept Invitation" : "Create an account"}
+			</h1>
+			<Card className="border bg-card p-6 shadow-sm">
+				<form
 						onSubmit={(e) => {
 							e.preventDefault();
 							e.stopPropagation();
@@ -600,9 +596,8 @@ Generated: ${new Date().toLocaleString()}
 						>
 							← Back to Secret Key
 						</Button>
-					</form>
-				</Card>
-			)}
+				</form>
+			</Card>
 		</div>
 	);
 }

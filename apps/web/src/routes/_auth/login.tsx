@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { z } from "zod";
 import SignInForm from "@/components/sign-in-form";
@@ -21,12 +22,19 @@ function RouteComponent() {
 	const [showSignIn, setShowSignIn] = useState(true);
 
 	// Extract invitation token from redirect URL if present
-	const invitationToken = redirect?.match(/^\/invite\/(.+)$/)?.[1] || undefined;
+	const invitationToken =
+		redirect?.match(/^\/invite\/(.+)$/)?.[1] || undefined;
 
 	return (
-		<div className="flex min-h-screen w-full items-center justify-center bg-muted/30 p-4 lg:p-8">
-			<div className="grid w-full max-w-6xl items-start gap-12 lg:grid-cols-2 lg:items-center">
-				<div className="order-2 mx-auto w-full max-w-md lg:order-1 lg:mr-0 lg:ml-auto">
+		<div className="relative flex min-h-svh flex-col bg-gray-50 dark:bg-gray-950">
+			{/* Logo — top left */}
+			<div className="relative z-10 px-5 pt-5 sm:px-8 sm:pt-6">
+				<img src="/logo.png" alt="Bittery" className="h-10 w-auto" />
+			</div>
+
+			{/* Main content */}
+			<main className="relative z-10 flex flex-1 flex-col items-center justify-center px-4 py-8 sm:px-6">
+				<div className="w-full max-w-[420px]">
 					{showSignIn ? (
 						<SignInForm
 							onSwitchToSignUp={() => setShowSignIn(false)}
@@ -40,40 +48,37 @@ function RouteComponent() {
 						/>
 					)}
 				</div>
+			</main>
 
-				<div className="order-1 mx-auto flex max-w-lg flex-col justify-start space-y-6 p-4 lg:order-2 lg:mx-0 lg:p-12">
-					<div className="mb-4 flex items-center gap-3 text-primary">
-						<img src="/logo.png" alt="Bittery Logo" className="h-16 w-auto" />
-					</div>
-					<div className="space-y-4">
-						<h1 className="font-bold text-4xl tracking-tighter md:text-5xl">
-							Secure by design. <br />
-							<span className="text-primary">Private by default.</span>
-						</h1>
-						<p className="text-lg text-muted-foreground">
-							Experience the next generation of password management. End-to-end
-							encryption that ensures only you hold the keys to your digital
-							vault.
-						</p>
-					</div>
-					<div className="grid gap-3 pt-2">
-						{[
-							"Zero-knowledge architecture",
-							"Secure Remote Password (SRP) protocol",
-							"Client-side AES-256 encryption",
-							"Emergency access kit",
-						].map((item) => (
-							<div
-								key={item}
-								className="flex items-center gap-3 font-medium text-sm"
-							>
-								<div className="h-1.5 w-1.5 rounded-full bg-primary" />
-								{item}
-							</div>
-						))}
+			{/* Footer */}
+			<footer className="relative z-10">
+				<div className="mx-auto flex max-w-lg flex-col items-center gap-3 px-4 py-4 sm:flex-row sm:justify-between">
+					<p className="text-muted-foreground/60 text-xs">
+						Bittery
+					</p>
+					<div className="flex items-center gap-4">
+						<a
+							href="https://github.com/nicepkg/bittery"
+							target="_blank"
+							rel="noopener noreferrer"
+							className="flex items-center gap-1 text-muted-foreground/60 text-xs transition-colors hover:text-muted-foreground"
+						>
+							GitHub
+							<ExternalLink size={10} />
+						</a>
+						<span className="text-muted-foreground/20">|</span>
+						<a
+							href="https://github.com/nicepkg/bittery/issues"
+							target="_blank"
+							rel="noopener noreferrer"
+							className="flex items-center gap-1 text-muted-foreground/60 text-xs transition-colors hover:text-muted-foreground"
+						>
+							Help
+							<ExternalLink size={10} />
+						</a>
 					</div>
 				</div>
-			</div>
+			</footer>
 		</div>
 	);
 }
