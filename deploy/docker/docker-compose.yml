@@ -19,7 +19,7 @@ services:
         condition: service_healthy
 
   server:
-    image: ghcr.io/nicosigmund/bittery-server:latest
+    image: ghcr.io/bittery-org/bittery-server:latest
     restart: unless-stopped
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql://bittery:${DB_PASSWORD}@postgres:5432/bittery}
@@ -43,7 +43,7 @@ services:
       retries: 3
 
   web:
-    image: ghcr.io/nicosigmund/bittery-web:latest
+    image: ghcr.io/bittery-org/bittery-web:latest
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/nginx-health"]
