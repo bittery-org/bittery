@@ -5,6 +5,9 @@ import { SecurityDashboard } from "@/components/dashboard/security-dashboard";
 
 export const Route = createFileRoute("/_app/security")({
 	component: SecurityPage,
+	head: () => ({
+		meta: [{ title: "Security - Bittery" }],
+	}),
 });
 
 function SecurityPage() {

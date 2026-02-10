@@ -14,6 +14,9 @@ import { Lock, Users } from "lucide-react";
 
 export const Route = createFileRoute("/_app/vaults/")({
 	component: VaultsPage,
+	head: () => ({
+		meta: [{ title: "Vaults - Bittery" }],
+	}),
 });
 
 function VaultsPage() {

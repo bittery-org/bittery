@@ -28,13 +28,46 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 				content: "width=device-width, initial-scale=1",
 			},
 			{
-				title: "My App",
+				title: "Bittery",
+			},
+			{
+				name: "description",
+				content:
+					"Bittery is a zero-knowledge password manager. Your passwords are encrypted client-side and never leave your device unencrypted.",
+			},
+			{
+				name: "apple-mobile-web-app-title",
+				content: "bittery",
 			},
 		],
 		links: [
 			{
 				rel: "stylesheet",
 				href: appCss,
+			},
+			{
+				rel: "icon",
+				type: "image/png",
+				href: "/favicon-96x96.png",
+				sizes: "96x96",
+			},
+			{
+				rel: "icon",
+				type: "image/svg+xml",
+				href: "/favicon.svg",
+			},
+			{
+				rel: "shortcut icon",
+				href: "/favicon.ico",
+			},
+			{
+				rel: "apple-touch-icon",
+				sizes: "180x180",
+				href: "/apple-touch-icon.png",
+			},
+			{
+				rel: "manifest",
+				href: "/site.webmanifest",
 			},
 		],
 	}),

@@ -22,6 +22,9 @@ import { TeamSettings } from "@/components/teams/team-settings";
 
 export const Route = createFileRoute("/_app/team/")({
 	component: TeamPage,
+	head: () => ({
+		meta: [{ title: "Team - Bittery" }],
+	}),
 });
 
 function TeamPage() {

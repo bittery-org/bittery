@@ -29,6 +29,9 @@ import { VaultMemberList } from "@/components/vaults/vault-member-list";
 
 export const Route = createFileRoute("/_app/vaults/$vaultId/")({
 	component: VaultDetailPage,
+	head: () => ({
+		meta: [{ title: "Vault - Bittery" }],
+	}),
 });
 
 function VaultDetailPage() {

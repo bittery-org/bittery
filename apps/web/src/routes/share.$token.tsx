@@ -35,6 +35,9 @@ import { base64ToArrayBuffer, decrypt } from "@/lib/wasm-crypto";
 
 export const Route = createFileRoute("/share/$token")({
 	component: ShareAccessPage,
+	head: () => ({
+		meta: [{ title: "Shared Item - Bittery" }],
+	}),
 });
 
 interface SharedItemData {

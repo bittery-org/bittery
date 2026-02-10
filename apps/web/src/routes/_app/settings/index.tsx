@@ -30,6 +30,9 @@ import { RegenerateSecretKeyDialog } from "@/components/settings/regenerate-secr
 
 export const Route = createFileRoute("/_app/settings/")({
 	component: SettingsPage,
+	head: () => ({
+		meta: [{ title: "Settings - Bittery" }],
+	}),
 });
 
 // Replace with your actual GitHub repo

@@ -7,6 +7,9 @@ import { StatsCards } from "@/components/dashboard/stats-cards";
 
 export const Route = createFileRoute("/_app/home")({
 	component: RouteComponent,
+	head: () => ({
+		meta: [{ title: "Dashboard - Bittery" }],
+	}),
 });
 
 function RouteComponent() {

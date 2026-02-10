@@ -25,6 +25,9 @@ import { storage } from "@/lib/storage";
 
 export const Route = createFileRoute("/invite/$token")({
 	component: InvitationPage,
+	head: () => ({
+		meta: [{ title: "Team Invitation - Bittery" }],
+	}),
 });
 
 function InvitationPage() {
