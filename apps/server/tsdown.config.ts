@@ -6,5 +6,5 @@ export default defineConfig({
 	outDir: "./dist",
 	clean: true,
 	external: ["@bittery/crypto-napi"],
-	noExternal: [/@bittery\/.*/],
+	noExternal: [/.*/],
 });

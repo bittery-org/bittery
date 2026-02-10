@@ -46,10 +46,7 @@ FROM oven/bun:1-slim
 
 WORKDIR /app
 
-# Copy node_modules from builder
-COPY --from=js-builder /app/node_modules ./node_modules
-
-# Copy built server bundle (includes chunks produced by tsdown)
+# Copy built server bundle (all deps bundled except crypto-napi)
 COPY --from=js-builder /app/apps/server/dist ./dist
 
 # Set up @bittery/crypto-napi module for runtime resolution
