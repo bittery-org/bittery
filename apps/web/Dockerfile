@@ -35,7 +35,11 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 # Copy WASM build output from stage 1 (overwrites stub)
 COPY --from=wasm-builder /build/packages/crypto/wasm packages/crypto/wasm
 
-# Build the web app (Vite SPA — no VITE_SERVER_URL needed, defaults to same origin)
+# Accept VITE_SERVER_URL from Railway build-time variables
+ARG VITE_SERVER_URL
+ENV VITE_SERVER_URL=$VITE_SERVER_URL
+
+# Build the web app (Vite inlines VITE_* env vars at build time)
 RUN cd apps/web && pnpm run build
 
 # ============================================================
