@@ -28,9 +28,6 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 # Copy all real package.json files (needed for pnpm install --frozen-lockfile)
 COPY apps/server/package.json apps/server/package.json
 COPY apps/web/package.json apps/web/package.json
-COPY apps/desktop/package.json apps/desktop/package.json
-COPY apps/extension/package.json apps/extension/package.json
-COPY apps/mobile/package.json apps/mobile/package.json
 COPY packages/api/package.json packages/api/package.json
 COPY packages/auth/package.json packages/auth/package.json
 COPY packages/config/package.json packages/config/package.json
@@ -45,10 +42,13 @@ COPY packages/types/package.json packages/types/package.json
 COPY packages/ui/package.json packages/ui/package.json
 COPY packages/crypto/napi/package.json packages/crypto/napi/package.json
 
-# Stub workspace packages whose package.json is generated or not in git
-RUN mkdir -p packages/crypto/wasm && echo '{"name":"@bittery/crypto-wasm","version":"0.1.0","private":true}' > packages/crypto/wasm/package.json
-RUN mkdir -p packages/crypto/core && echo '{"name":"@bittery/crypto-core","version":"0.0.0","private":true}' > packages/crypto/core/package.json
-RUN mkdir -p packages/crypto/expo-module && echo '{"name":"@bittery/crypto-nitro","version":"0.0.0","private":true}' > packages/crypto/expo-module/package.json
+# Stub workspace packages excluded by .dockerignore or not in git
+RUN mkdir -p apps/desktop && echo '{"name":"desktop","version":"0.0.0","private":true}' > apps/desktop/package.json \
+ && mkdir -p apps/extension && echo '{"name":"extension","version":"0.0.0","private":true}' > apps/extension/package.json \
+ && mkdir -p apps/mobile && echo '{"name":"mobile","version":"0.0.0","private":true}' > apps/mobile/package.json \
+ && mkdir -p packages/crypto/wasm && echo '{"name":"@bittery/crypto-wasm","version":"0.1.0","private":true}' > packages/crypto/wasm/package.json \
+ && mkdir -p packages/crypto/core && echo '{"name":"@bittery/crypto-core","version":"0.0.0","private":true}' > packages/crypto/core/package.json \
+ && mkdir -p packages/crypto/expo-module && echo '{"name":"@bittery/crypto-nitro","version":"0.0.0","private":true}' > packages/crypto/expo-module/package.json
 
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
