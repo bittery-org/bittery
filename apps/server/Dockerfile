@@ -44,9 +44,9 @@ COPY packages/sync/package.json packages/sync/package.json
 COPY packages/types/package.json packages/types/package.json
 COPY packages/ui/package.json packages/ui/package.json
 COPY packages/crypto/napi/package.json packages/crypto/napi/package.json
-COPY packages/crypto/wasm/package.json packages/crypto/wasm/package.json
 
-# Stub packages that aren't present in the repo but are in the workspace
+# Stub workspace packages whose package.json is generated or not in git
+RUN mkdir -p packages/crypto/wasm && echo '{"name":"@bittery/crypto-wasm","version":"0.1.0","private":true}' > packages/crypto/wasm/package.json
 RUN mkdir -p packages/crypto/core && echo '{"name":"@bittery/crypto-core","version":"0.0.0","private":true}' > packages/crypto/core/package.json
 RUN mkdir -p packages/crypto/expo-module && echo '{"name":"@bittery/crypto-nitro","version":"0.0.0","private":true}' > packages/crypto/expo-module/package.json
 
