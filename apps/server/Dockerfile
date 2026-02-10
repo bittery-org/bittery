@@ -5,11 +5,13 @@ FROM rust:1-bookworm AS rust-builder
 
 WORKDIR /build
 
-# Copy NAPI crate and its core dependency (preserve relative paths)
+# Copy the Rust workspace (needed for workspace inheritance in Cargo.toml)
+COPY packages/crypto/core packages/crypto/core
+
+# Copy NAPI crate
 COPY packages/crypto/napi/Cargo.toml packages/crypto/napi/Cargo.lock packages/crypto/napi/
 COPY packages/crypto/napi/build.rs packages/crypto/napi/
 COPY packages/crypto/napi/src packages/crypto/napi/src
-COPY packages/crypto/core/crates/bittery-crypto-core packages/crypto/core/crates/bittery-crypto-core
 
 RUN cd packages/crypto/napi && cargo build --release
 
