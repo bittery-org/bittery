@@ -54,9 +54,16 @@ export default function SignUpForm({
 		}),
 		enabled: !!invitationToken,
 	});
+	const registrationStatusQuery = useQuery(
+		trpc.auth.registrationStatus.queryOptions(),
+	);
 
 	const invitation = invitationQuery.data;
-	const isInvitationSignup = !!invitationToken && !!invitation;
+	const hasInvitationToken = !!invitationToken;
+	const isInvitationSignup = hasInvitationToken && !!invitation;
+	const registrationStatus = registrationStatusQuery.data;
+	const isSelfHostedMode = registrationStatus?.mode === "self-hosted";
+	const allowPublicSignup = registrationStatus?.allowPublicSignup ?? true;
 
 	// Generate Secret Key on mount (WASM auto-initializes)
 	useEffect(() => {
@@ -64,8 +71,43 @@ export default function SignUpForm({
 	}, []);
 
 	const signupMutation = useMutation({
-		mutationFn: async (input: any) => {
-			return await trpcClient.auth.signup.mutate(input);
+		mutationFn: async (input: {
+			email: string;
+			name: string;
+			secretKeyHint: string;
+			srpSalt: string;
+			srpVerifier: string;
+			publicKey: string;
+			encryptedPrivateKey: string;
+			encryptedVaultKey: string;
+			organizationName?: string;
+			token?: string;
+		}) => {
+			if (isInvitationSignup) {
+				return trpcClient.auth.signupWithInvitation.mutate({
+					token: input.token || "",
+					email: input.email,
+					name: input.name,
+					secretKeyHint: input.secretKeyHint,
+					srpSalt: input.srpSalt,
+					srpVerifier: input.srpVerifier,
+					publicKey: input.publicKey,
+					encryptedPrivateKey: input.encryptedPrivateKey,
+					encryptedVaultKey: input.encryptedVaultKey,
+				});
+			}
+
+			return trpcClient.auth.signup.mutate({
+				email: input.email,
+				name: input.name,
+				organizationName: input.organizationName,
+				secretKeyHint: input.secretKeyHint,
+				srpSalt: input.srpSalt,
+				srpVerifier: input.srpVerifier,
+				publicKey: input.publicKey,
+				encryptedPrivateKey: input.encryptedPrivateKey,
+				encryptedVaultKey: input.encryptedVaultKey,
+			});
 		},
 		onSuccess: async (data) => {
 			// Store auth token and vault keys
@@ -73,8 +115,11 @@ export default function SignUpForm({
 			await storage.storeVaultKeys(data.vaultKeys);
 
 			toast.success("Account created successfully!");
-			// Navigate to redirect URL (invitation page) if provided, otherwise go to home
-			if (redirectTo) {
+			// Invitation signup is accepted server-side.
+			if (isInvitationSignup) {
+				navigate({ to: "/team" });
+			} else if (redirectTo) {
+				// Navigate to redirect URL (invitation page) if provided, otherwise go to home
 				navigate({ to: redirectTo });
 			} else {
 				navigate({ to: "/home" });
@@ -113,7 +158,9 @@ export default function SignUpForm({
 			const workerCrypto = new WorkerCrypto();
 			try {
 				// Use invitation email if signing up via invitation
-				const email = isInvitationSignup ? invitation.email : value.email;
+				const email = isInvitationSignup
+					? invitation?.email || value.email
+					: value.email;
 
 				// All heavy crypto runs in a Web Worker via WorkerCrypto,
 				// keeping the main thread responsive with the spinner.
@@ -155,9 +202,12 @@ export default function SignUpForm({
 				const result = await signupMutation.mutateAsync({
 					email,
 					name: value.name,
-					...(value.accountType === "organization" && value.organizationName
+					...(!isSelfHostedMode &&
+					value.accountType === "organization" &&
+					value.organizationName
 						? { organizationName: value.organizationName }
 						: {}),
+					...(isInvitationSignup ? { token: invitationToken } : {}),
 					secretKeyHint,
 					srpSalt: salt,
 					srpVerifier: verifier,
@@ -232,10 +282,74 @@ Generated: ${new Date().toLocaleString()}
 		toast.success("Emergency Kit downloaded");
 	};
 
+	if (hasInvitationToken && invitationQuery.isError) {
+		return (
+			<div className="w-full">
+				<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+					Invitation Required
+				</h1>
+				<Card className="space-y-4 border bg-card p-6 shadow-sm">
+					<p className="text-muted-foreground text-sm leading-relaxed">
+						This invitation link is invalid or expired. Ask your admin to send a
+						new invite link.
+					</p>
+					<Button type="button" onClick={onSwitchToSignIn} className="w-full">
+						Back to Sign In
+					</Button>
+				</Card>
+			</div>
+		);
+	}
+
+	if (hasInvitationToken && invitationQuery.isLoading) {
+		return (
+			<div className="w-full">
+				<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+					Loading invitation
+				</h1>
+				<Card className="space-y-4 border bg-card p-6 shadow-sm">
+					<div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
+						<Loader2 className="h-4 w-4 animate-spin" />
+						Verifying invitation link...
+					</div>
+				</Card>
+			</div>
+		);
+	}
+
+	if (
+		!hasInvitationToken &&
+		!registrationStatusQuery.isLoading &&
+		!allowPublicSignup
+	) {
+		return (
+			<div className="w-full">
+				<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+					Invite-Only Registration
+				</h1>
+				<Card className="space-y-4 border bg-card p-6 shadow-sm">
+					<p className="text-muted-foreground text-sm leading-relaxed">
+						Registration is closed on this server. Ask an admin for an invite
+						link.
+					</p>
+					<Button type="button" onClick={onSwitchToSignIn} className="w-full">
+						Back to Sign In
+					</Button>
+				</Card>
+			</div>
+		);
+	}
+
+	const signupHeading = isInvitationSignup
+		? "Accept Invitation"
+		: isSelfHostedMode
+			? "Create admin account"
+			: "Create an account";
+
 	return !hasAcknowledged ? (
 		<div className="w-full">
 			<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
-				{isInvitationSignup ? "Accept Invitation" : "Create an account"}
+				{signupHeading}
 			</h1>
 			<Card className="space-y-4 border bg-card p-6 shadow-sm">
 				<div className="space-y-2">
@@ -327,7 +441,7 @@ Generated: ${new Date().toLocaleString()}
 	) : (
 		<div className="w-full">
 			<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
-				{isInvitationSignup ? "Accept Invitation" : "Create an account"}
+				{signupHeading}
 			</h1>
 			<Card className="border bg-card p-6 shadow-sm">
 				<form
@@ -397,19 +511,21 @@ Generated: ${new Date().toLocaleString()}
 								<div className="space-y-1">
 									<p className="font-medium text-sm">
 										You've been invited to join{" "}
-										<span className="text-primary">{invitation.teamName}</span>
+										<span className="text-primary">
+											{invitation?.teamName}
+										</span>
 									</p>
 									<div className="flex items-center gap-2 text-muted-foreground text-xs">
-										<span>Invited by {invitation.invitedByName}</span>
+										<span>Invited by {invitation?.invitedByName}</span>
 										<span>·</span>
 										<Badge variant="secondary" className="text-xs">
-											{invitation.role}
+											{invitation?.role}
 										</Badge>
 									</div>
 								</div>
 							</div>
 						</div>
-					) : (
+					) : !isSelfHostedMode ? (
 						<div className="space-y-4">
 							<form.Field name="accountType">
 								{(field) => (
@@ -492,7 +608,7 @@ Generated: ${new Date().toLocaleString()}
 								}
 							</form.Subscribe>
 						</div>
-					)}
+					) : null}
 
 					<div>
 						<form.Field name="email">
@@ -505,7 +621,9 @@ Generated: ${new Date().toLocaleString()}
 										type="email"
 										placeholder="name@example.com"
 										value={
-											isInvitationSignup ? invitation.email : field.state.value
+											isInvitationSignup
+												? invitation?.email || field.state.value
+												: field.state.value
 										}
 										onBlur={field.handleBlur}
 										onChange={(e) => field.handleChange(e.target.value)}

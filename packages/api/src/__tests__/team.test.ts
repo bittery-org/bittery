@@ -13,25 +13,36 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { db } from "@bittery/db";
 import { teamRouter } from "../routers/team";
 import {
+	addVaultMember,
 	addTeamMember,
-	// addVaultMember,
+	createTestSession,
 	createPublicContext,
 	createTestInvitation,
 	createTestTeam,
 	createTestVault,
 	generateTestEmail,
+	getSession,
 	getTeam,
 	getTeamMember,
+	getUser,
 	setup,
 	setupTeamWithMembers,
 	truncateAll,
 } from "./test-utils";
 
+const originalBitteryMode = process.env.BITTERY_MODE;
+
 describe("Team Router", () => {
 	afterEach(async () => {
 		await truncateAll();
+		if (originalBitteryMode === undefined) {
+			delete process.env.BITTERY_MODE;
+		} else {
+			process.env.BITTERY_MODE = originalBitteryMode;
+		}
 	});
 
 	describe("list", () => {
@@ -173,6 +184,16 @@ describe("Team Router", () => {
 				"Personal teams cannot be deleted",
 			);
 		});
+
+		test("should block team deletion in self-hosted mode", async () => {
+			process.env.BITTERY_MODE = "self-hosted";
+			const { caller, userId } = await setup(teamRouter);
+			const teamId = await createTestTeam(userId, { type: "organization" });
+
+			await expect(caller.delete({ teamId })).rejects.toThrow(
+				"Team deletion is disabled in self-hosted mode",
+			);
+		});
 	});
 
 	describe("leave", () => {
@@ -202,6 +223,126 @@ describe("Team Router", () => {
 			expect(result.map((m) => m.role)).toContain("owner");
 			expect(result.map((m) => m.role)).toContain("admin");
 			expect(result.map((m) => m.role)).toContain("member");
+		});
+	});
+
+	describe("members.remove", () => {
+		test("should remove member, revoke team vault keys, and invalidate sessions", async () => {
+			const [{ userId: ownerId, caller }, { userId: memberId }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
+			const teamId = await createTestTeam(ownerId);
+			await addTeamMember(teamId, memberId, "member");
+			const teamVaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+				name: "Shared Vault",
+			});
+			await addVaultMember(teamVaultId, memberId, "member");
+			const sessionId = await createTestSession(memberId);
+
+			const result = await caller.members.remove({ teamId, userId: memberId });
+
+			expect(result.success).toBe(true);
+			expect(result.warning).toBe("rotate_shared_credentials");
+			expect(await getTeamMember(teamId, memberId)).toBeUndefined();
+
+			const revokedVaultKey = await db.query.vaultKey.findFirst({
+				where: (vk, { and, eq }) =>
+					and(eq(vk.vaultId, teamVaultId), eq(vk.userId, memberId)),
+			});
+			expect(revokedVaultKey).toBeUndefined();
+			expect(await getSession(sessionId)).toBeUndefined();
+		});
+
+		test("should allow admin to remove admin", async () => {
+			const [
+				{ userId: ownerId },
+				{ userId: adminActorId, caller: adminCaller },
+				{ userId: adminTargetId },
+			] = await Promise.all([
+				setup(teamRouter),
+				setup(teamRouter),
+				setup(teamRouter),
+			]);
+			const teamId = await createTestTeam(ownerId);
+			await addTeamMember(teamId, adminActorId, "admin");
+			await addTeamMember(teamId, adminTargetId, "admin");
+
+			const result = await adminCaller.members.remove({
+				teamId,
+				userId: adminTargetId,
+			});
+
+			expect(result.success).toBe(true);
+			expect(await getTeamMember(teamId, adminTargetId)).toBeUndefined();
+		});
+
+		test("should deny removing owner", async () => {
+			const [{ userId: ownerId }, { userId: adminId, caller: adminCaller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
+			const teamId = await createTestTeam(ownerId);
+			await addTeamMember(teamId, adminId, "admin");
+
+			await expect(
+				adminCaller.members.remove({ teamId, userId: ownerId }),
+			).rejects.toThrow("The team owner cannot be removed");
+		});
+
+		test("should deny removing yourself", async () => {
+			const { userId, caller } = await setup(teamRouter);
+			const teamId = await createTestTeam(userId);
+
+			await expect(
+				caller.members.remove({ teamId, userId }),
+			).rejects.toThrow("You cannot remove yourself from the team");
+		});
+	});
+
+	describe("members.deleteAccount", () => {
+		test("should allow owner to permanently delete non-owner", async () => {
+			const [{ userId: ownerId, caller }, { userId: memberId }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
+			const teamId = await createTestTeam(ownerId);
+			await addTeamMember(teamId, memberId, "member");
+			const sessionId = await createTestSession(memberId);
+
+			const result = await caller.members.deleteAccount({
+				teamId,
+				userId: memberId,
+				confirmation: "DELETE",
+			});
+
+			expect(result.success).toBe(true);
+			expect(await getUser(memberId)).toBeUndefined();
+			expect(await getSession(sessionId)).toBeUndefined();
+		});
+
+		test("should deny admin from permanently deleting accounts", async () => {
+			const [{ userId: ownerId }, { userId: adminId, caller: adminCaller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
+			const teamId = await createTestTeam(ownerId);
+			await addTeamMember(teamId, adminId, "admin");
+
+			await expect(
+				adminCaller.members.deleteAccount({
+					teamId,
+					userId: ownerId,
+					confirmation: "DELETE",
+				}),
+			).rejects.toThrow("Only the team owner can permanently delete accounts");
+		});
+
+		test("should deny owner from deleting self", async () => {
+			const { userId, caller } = await setup(teamRouter);
+			const teamId = await createTestTeam(userId);
+
+			await expect(
+				caller.members.deleteAccount({
+					teamId,
+					userId,
+					confirmation: "DELETE",
+				}),
+			).rejects.toThrow("You cannot delete your own account from team management");
 		});
 	});
 
@@ -286,6 +427,7 @@ describe("Team Router", () => {
 			const result = await caller.invitations.list({ teamId });
 
 			expect(result.length).toBe(2);
+			expect(result[0]?.token).toBeDefined();
 		});
 	});
 

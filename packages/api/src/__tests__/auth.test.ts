@@ -17,8 +17,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { db } from "@bittery/db";
 import { authRouter } from "../routers/auth";
 import {
+	createTestInvitation,
 	createPublicContext,
 	createTestSession,
+	createTestTeam,
 	createTestUser,
 	createTestVault,
 	deriveTestSrpClientProof,
@@ -53,10 +55,16 @@ const nextAuthCryptoFixture = await generateTestAuthCryptoData({
 	email: "fixture-auth-next@example.com",
 	accountPassword: "TestPass-Fixture-2!",
 });
+const originalBitteryMode = process.env.BITTERY_MODE;
 
 describe("Auth Router", () => {
 	afterEach(async () => {
 		await truncateAll();
+		if (originalBitteryMode === undefined) {
+			delete process.env.BITTERY_MODE;
+		} else {
+			process.env.BITTERY_MODE = originalBitteryMode;
+		}
 	});
 
 	describe("signup", () => {
@@ -140,6 +148,87 @@ describe("Auth Router", () => {
 
 			const user = await getUser(result.userId);
 			expect(user?.email).toBe(baseEmail);
+		});
+
+		test("should allow only bootstrap signup in self-hosted mode", async () => {
+			process.env.BITTERY_MODE = "self-hosted";
+			const caller = authRouter.createCaller(createPublicContext());
+
+			const firstSignup = await caller.signup({
+				email: generateTestEmail(),
+				name: "First Admin",
+				...toSignupCryptoInput(authCryptoFixture),
+			});
+			expect(firstSignup.success).toBe(true);
+			expect(firstSignup.user.role).toBe("owner");
+			expect(firstSignup.user.teamType).toBe("organization");
+
+			await expect(
+				caller.signup({
+					email: generateTestEmail(),
+					name: "Second User",
+					...toSignupCryptoInput(nextAuthCryptoFixture),
+				}),
+			).rejects.toThrow("Public registration is disabled");
+		});
+
+		test("signupWithInvitation should create a personal vault for invitees", async () => {
+			const inviter = await setup(authRouter);
+			const teamId = await createTestTeam(inviter.userId, { name: "Invite Team" });
+			const inviteeEmail = generateTestEmail();
+			const invitation = await createTestInvitation(
+				teamId,
+				inviter.userId,
+				inviteeEmail,
+			);
+			const caller = authRouter.createCaller(createPublicContext());
+
+			const result = await caller.signupWithInvitation({
+				token: invitation.token,
+				email: inviteeEmail,
+				name: "Invitee",
+				...toSignupCryptoInput(nextAuthCryptoFixture),
+			});
+
+			expect(result.success).toBe(true);
+			expect(result.user.teamId).toBe(teamId);
+			const personalVault = result.vaultKeys.find((vk) => vk.vaultName === "Personal");
+			expect(personalVault).toBeDefined();
+			expect(personalVault?.role).toBe("owner");
+		});
+	});
+
+	describe("registrationStatus", () => {
+		test("should report cloud mode as open registration", async () => {
+			delete process.env.BITTERY_MODE;
+			const caller = authRouter.createCaller(createPublicContext());
+
+			const result = await caller.registrationStatus();
+
+			expect(result.mode).toBe("cloud");
+			expect(result.allowPublicSignup).toBe(true);
+		});
+
+		test("should report self-hosted bootstrap status before first user", async () => {
+			process.env.BITTERY_MODE = "self-hosted";
+			const caller = authRouter.createCaller(createPublicContext());
+
+			const result = await caller.registrationStatus();
+
+			expect(result.mode).toBe("self-hosted");
+			expect(result.allowPublicSignup).toBe(true);
+		});
+
+		test("should report self-hosted invite-only after bootstrap user exists", async () => {
+			process.env.BITTERY_MODE = "self-hosted";
+			await createTestUser();
+			const caller = authRouter.createCaller(createPublicContext());
+
+			const result = await caller.registrationStatus();
+
+			expect(result.mode).toBe("self-hosted");
+			expect(result.allowPublicSignup).toBe(false);
+			expect(result.reason).toBe("invite_only_after_bootstrap");
 		});
 	});
 

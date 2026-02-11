@@ -2,6 +2,7 @@ import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Badge,
 	Button,
+	copyWithToast,
 	Table,
 	TableBody,
 	TableCell,
@@ -11,11 +12,12 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useMutation } from "@tanstack/react-query";
-import { RefreshCw, X } from "lucide-react";
+import { Copy, RefreshCw, X } from "lucide-react";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface Invitation {
 	id: string;
+	token: string;
 	email: string;
 	role: string;
 	status: string;
@@ -25,7 +27,6 @@ interface Invitation {
 }
 
 interface PendingInvitationsListProps {
-	teamId: string;
 	invitations: Invitation[];
 	canManage: boolean;
 }
@@ -102,6 +103,20 @@ export function PendingInvitationsList({
 						{canManage && (
 							<TableCell>
 								<div className="flex gap-1">
+									<Button
+										variant="ghost"
+										size="icon"
+										onClick={() =>
+											copyWithToast(
+												`${window.location.origin}/invite/${invitation.token}`,
+												"Invite link",
+												{ showAutoClearMessage: false },
+											)
+										}
+										title="Copy invite link"
+									>
+										<Copy className="h-4 w-4" />
+									</Button>
 									<Button
 										variant="ghost"
 										size="icon"

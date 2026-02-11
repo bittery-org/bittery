@@ -1,6 +1,7 @@
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
+	copyWithToast,
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -18,7 +19,7 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { UserPlus } from "lucide-react";
+import { Copy, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
 import { rsaEncrypt } from "@/lib/wasm-crypto";
@@ -32,6 +33,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 	const [open, setOpen] = useState(false);
 	const [email, setEmail] = useState("");
 	const [role, setRole] = useState<"admin" | "member">("member");
+	const [inviteLink, setInviteLink] = useState<string | null>(null);
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
 	const invalidator = useQueryInvalidator();
@@ -114,12 +116,11 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 
 			return result;
 		},
-		onSuccess: async () => {
-			toast.success("Invitation sent");
+		onSuccess: async (data) => {
+			const url = `${window.location.origin}/invite/${data.token}`;
+			setInviteLink(url);
+			toast.success("Invitation created. Copy the invite link to share.");
 			await invalidator.invalidateTeam();
-			setOpen(false);
-			setEmail("");
-			setRole("member");
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);
@@ -132,8 +133,17 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 		inviteMutation.mutate({ teamId, email: email.trim(), role });
 	};
 
+	const handleOpenChange = (nextOpen: boolean) => {
+		setOpen(nextOpen);
+		if (!nextOpen) {
+			setEmail("");
+			setRole("member");
+			setInviteLink(null);
+		}
+	};
+
 	return (
-		<Dialog open={open} onOpenChange={setOpen}>
+		<Dialog open={open} onOpenChange={handleOpenChange}>
 			<DialogTrigger asChild>
 				<Button>
 					<UserPlus className="mr-2 h-4 w-4" />
@@ -178,6 +188,28 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 								Admins can invite members and manage team settings.
 							</p>
 						</div>
+						{inviteLink && (
+							<div className="rounded-md border bg-muted/40 p-3">
+								<p className="mb-2 font-medium text-sm">Invite Link</p>
+								<p className="break-all text-muted-foreground text-xs">
+									{inviteLink}
+								</p>
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									className="mt-3"
+									onClick={() =>
+										copyWithToast(inviteLink, "Invite link", {
+											showAutoClearMessage: false,
+										})
+									}
+								>
+									<Copy className="mr-2 h-4 w-4" />
+									Copy link
+								</Button>
+							</div>
+						)}
 					</div>
 					<DialogFooter>
 						<Button
@@ -188,7 +220,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 							Cancel
 						</Button>
 						<Button type="submit" disabled={inviteMutation.isPending}>
-							{inviteMutation.isPending ? "Sending..." : "Send Invitation"}
+							{inviteMutation.isPending ? "Sending..." : "Create Invitation"}
 						</Button>
 					</DialogFooter>
 				</form>

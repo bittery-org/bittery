@@ -29,6 +29,7 @@ interface TeamSettingsProps {
 	imageUrl?: string | null;
 	createdAt: Date | string;
 	updatedAt: Date | string;
+	isSelfHostedMode?: boolean;
 }
 
 export function TeamSettings({
@@ -38,6 +39,7 @@ export function TeamSettings({
 	imageUrl,
 	createdAt,
 	updatedAt,
+	isSelfHostedMode = false,
 }: TeamSettingsProps) {
 	const [isEditing, setIsEditing] = useState(false);
 	const [name, setName] = useState(teamName);
@@ -252,46 +254,48 @@ export function TeamSettings({
 			</Card>
 
 			{/* Danger Zone */}
-			<Card className="border-destructive/50">
-				<CardHeader>
-					<CardTitle className="flex items-center gap-2 text-destructive">
-						<AlertTriangle className="h-5 w-5" />
-						Danger Zone
-					</CardTitle>
-					<CardDescription>
-						Irreversible actions that affect the team
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="space-y-6">
-					{/* Leave Team (for non-owners) */}
-					{!isOwner && (
-						<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-							<div className="space-y-1">
-								<span className="font-medium text-sm">Leave Team</span>
-								<p className="text-muted-foreground text-sm">
-									Remove yourself from this team. You will lose access to all
-									team vaults.
-								</p>
+			{!isSelfHostedMode && (
+				<Card className="border-destructive/50">
+					<CardHeader>
+						<CardTitle className="flex items-center gap-2 text-destructive">
+							<AlertTriangle className="h-5 w-5" />
+							Danger Zone
+						</CardTitle>
+						<CardDescription>
+							Irreversible actions that affect the team
+						</CardDescription>
+					</CardHeader>
+					<CardContent className="space-y-6">
+						{/* Leave Team (for non-owners) */}
+						{!isOwner && (
+							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+								<div className="space-y-1">
+									<span className="font-medium text-sm">Leave Team</span>
+									<p className="text-muted-foreground text-sm">
+										Remove yourself from this team. You will lose access to all
+										team vaults.
+									</p>
+								</div>
+								<LeaveTeamDialog teamId={teamId} teamName={teamName} />
 							</div>
-							<LeaveTeamDialog teamId={teamId} teamName={teamName} />
-						</div>
-					)}
+						)}
 
-					{/* Delete Team (for owners only) */}
-					{isOwner && (
-						<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-							<div className="space-y-1">
-								<span className="font-medium text-sm">Delete Team</span>
-								<p className="text-muted-foreground text-sm">
-									Permanently delete this team and all associated data. This
-									action cannot be undone.
-								</p>
+						{/* Delete Team (for owners only) */}
+						{isOwner && (
+							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+								<div className="space-y-1">
+									<span className="font-medium text-sm">Delete Team</span>
+									<p className="text-muted-foreground text-sm">
+										Permanently delete this team and all associated data. This
+										action cannot be undone.
+									</p>
+								</div>
+								<DeleteTeamDialog teamId={teamId} teamName={teamName} />
 							</div>
-							<DeleteTeamDialog teamId={teamId} teamName={teamName} />
-						</div>
-					)}
-				</CardContent>
-			</Card>
+						)}
+					</CardContent>
+				</Card>
+			)}
 		</div>
 	);
 }

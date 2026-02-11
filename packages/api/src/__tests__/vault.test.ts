@@ -17,6 +17,7 @@ import {
 	addVaultMember,
 	countVaultItems,
 	createTestItem,
+	createTestTeam,
 	createTestVault,
 	getItem,
 	getVault,
@@ -123,6 +124,7 @@ describe("Vault Router", () => {
 
 		test("should create vault key for creator with owner role", async () => {
 			const { caller, userId } = await setup(vaultRouter);
+			const teamId = await createTestTeam(userId);
 
 			const result = await caller.create({
 				name: "My Vault",
@@ -130,9 +132,24 @@ describe("Vault Router", () => {
 				encryptedVaultKey: mockSrpData.encryptedVaultKey,
 			});
 
+			const createdVault = await getVault(result.vaultId);
+			expect(createdVault?.teamId).toBe(teamId);
+
 			const vaultKey = await getVaultKey(result.vaultId, userId);
 			expect(vaultKey?.role).toBe("owner");
 			expect(vaultKey?.encryptedVaultKey).toBe(mockSrpData.encryptedVaultKey);
+		});
+
+		test("should reject team vault creation for users without a team", async () => {
+			const { caller } = await setup(vaultRouter);
+
+			await expect(
+				caller.create({
+					name: "Team Vault",
+					type: "team",
+					encryptedVaultKey: mockSrpData.encryptedVaultKey,
+				}),
+			).rejects.toThrow("You must belong to a team to create a team vault");
 		});
 	});
 

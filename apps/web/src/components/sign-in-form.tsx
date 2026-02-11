@@ -1,11 +1,11 @@
 import { useCheckEmail, useSessionState } from "@bittery/core/hooks";
 import { performSRPLogin, storeLoginSession } from "@bittery/core/hooks/auth";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { Button, Card, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -26,6 +26,7 @@ export default function SignInForm({
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
 	const [sessionExpired, setSessionExpired] = useState(false);
+	const trpc = useTRPC();
 
 	// Load server URL on mount
 	useEffect(() => {
@@ -41,6 +42,13 @@ export default function SignInForm({
 	const { data: emailCheck } = useCheckEmail(email);
 
 	const trpcClient = useTRPCClient();
+	const registrationStatusQuery = useQuery(
+		trpc.auth.registrationStatus.queryOptions(),
+	);
+	const allowPublicSignup =
+		registrationStatusQuery.data?.allowPublicSignup ?? true;
+	const hasInvitationRedirect = !!redirectTo?.startsWith("/invite/");
+	const canShowSignup = allowPublicSignup || hasInvitationRedirect;
 
 	// Login mutation using WorkerCrypto to keep the main thread responsive
 	const loginMutation = useMutation({
@@ -149,7 +157,7 @@ export default function SignInForm({
 	return (
 		<div className="w-full">
 			<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
-				{isQuickUnlock ? "Welcome back" : "Sign in"}
+				{isQuickUnlock ? "Welcome back" : "Sign in to your account"}
 			</h1>
 			<Card className="border bg-card p-6 shadow-sm">
 				{sessionExpired && (
@@ -337,31 +345,38 @@ export default function SignInForm({
 							>
 								Sign in with a different account
 							</Button>
-							<div className="mt-2 text-center text-muted-foreground text-sm">
-								Need a different account?{" "}
+							{canShowSignup && (
+								<div className="mt-2 text-center text-muted-foreground text-sm">
+									Need a different account?{" "}
+									<button
+										type="button"
+										onClick={onSwitchToSignUp}
+										className="font-medium text-primary underline-offset-4 hover:underline"
+									>
+										Create another account
+									</button>
+								</div>
+							)}
+						</>
+					)}
+
+					{!isQuickUnlock &&
+						(canShowSignup ? (
+							<div className="mt-4 text-center text-muted-foreground text-sm">
+								Don&apos;t have an account?{" "}
 								<button
 									type="button"
 									onClick={onSwitchToSignUp}
 									className="font-medium text-primary underline-offset-4 hover:underline"
 								>
-									Create another account
+									Sign up
 								</button>
 							</div>
-						</>
-					)}
-
-					{!isQuickUnlock && (
-						<div className="mt-4 text-center text-muted-foreground text-sm">
-							Don&apos;t have an account?{" "}
-							<button
-								type="button"
-								onClick={onSwitchToSignUp}
-								className="font-medium text-primary underline-offset-4 hover:underline"
-							>
-								Sign up
-							</button>
-						</div>
-					)}
+						) : (
+							<div className="mt-4 text-center text-muted-foreground text-sm">
+								Registration is disabled on this server.
+							</div>
+						))}
 				</form>
 			</Card>
 		</div>

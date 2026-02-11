@@ -3,17 +3,20 @@
  * Handles team management, members, and invitations
  */
 
+import { deleteAllUserSessions, deleteUserAccount } from "@bittery/auth";
 import { db, team, teamInvitation, user, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { isSelfHostedMode } from "../config/mode";
 import { protectedProcedure, publicProcedure, router } from "../index";
 import {
 	createPresignedUpload,
 	createTeamImageKey,
 	getStoragePublicUrl,
 } from "../storage/s3";
+import { logAuditEvent } from "../utils/audit";
 
 /**
  * Helper function to get image URL from imageKey
@@ -233,6 +236,14 @@ export const teamRouter = router({
 	delete: protectedProcedure
 		.input(z.object({ teamId: z.string() }))
 		.mutation(async ({ ctx, input }) => {
+			if (isSelfHostedMode()) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message:
+						"Team deletion is disabled in self-hosted mode. This instance uses a single team.",
+				});
+			}
+
 			const userData = await db.query.user.findFirst({
 				where: (user, { eq }) => eq(user.id, ctx.session.userId),
 				with: { team: true },
@@ -315,6 +326,163 @@ export const teamRouter = router({
 					role: m.role,
 					joinedAt: m.createdAt,
 				}));
+			}),
+
+		remove: protectedProcedure
+			.input(z.object({ teamId: z.string(), userId: z.string() }))
+			.mutation(async ({ ctx, input }) => {
+				const actor = await db.query.user.findFirst({
+					where: (member, { eq }) => eq(member.id, ctx.session.userId),
+				});
+
+				if (actor?.teamId !== input.teamId) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "You are not a member of this team",
+					});
+				}
+
+				if (!["owner", "admin"].includes(actor.role)) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Insufficient permissions",
+					});
+				}
+
+				if (ctx.session.userId === input.userId) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "You cannot remove yourself from the team",
+					});
+				}
+
+				const targetUser = await db.query.user.findFirst({
+					where: (member, { eq }) => eq(member.id, input.userId),
+				});
+
+				if (!targetUser || targetUser.teamId !== input.teamId) {
+					throw new TRPCError({
+						code: "NOT_FOUND",
+						message: "Team member not found",
+					});
+				}
+
+				if (targetUser.role === "owner") {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "The team owner cannot be removed",
+					});
+				}
+
+				const teamVaults = await db.query.vault.findMany({
+					where: (teamVault, { eq }) => eq(teamVault.teamId, input.teamId),
+					columns: { id: true },
+				});
+				const teamVaultIds = teamVaults.map((teamVault) => teamVault.id);
+
+				if (teamVaultIds.length > 0) {
+					await db
+						.delete(vaultKey)
+						.where(
+							and(
+								eq(vaultKey.userId, input.userId),
+								inArray(vaultKey.vaultId, teamVaultIds),
+							),
+						);
+				}
+
+				await db
+					.update(user)
+					.set({ teamId: null, role: "member" })
+					.where(eq(user.id, input.userId));
+
+				await deleteAllUserSessions(input.userId);
+
+				await logAuditEvent({
+					userId: ctx.session.userId,
+					action: "team_member_removed",
+					device: ctx.device,
+					entityType: "user",
+					entityId: input.userId,
+					metadata: {
+						teamId: input.teamId,
+						actorRole: actor.role,
+					},
+				});
+
+				return {
+					success: true,
+					warning: "rotate_shared_credentials",
+				};
+			}),
+
+		deleteAccount: protectedProcedure
+			.input(
+				z.object({
+					teamId: z.string(),
+					userId: z.string(),
+					confirmation: z.literal("DELETE"),
+				}),
+			)
+			.mutation(async ({ ctx, input }) => {
+				const actor = await db.query.user.findFirst({
+					where: (member, { eq }) => eq(member.id, ctx.session.userId),
+				});
+
+				if (actor?.teamId !== input.teamId) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "You are not a member of this team",
+					});
+				}
+
+				if (actor.role !== "owner") {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Only the team owner can permanently delete accounts",
+					});
+				}
+
+				if (ctx.session.userId === input.userId) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "You cannot delete your own account from team management",
+					});
+				}
+
+				const targetUser = await db.query.user.findFirst({
+					where: (member, { eq }) => eq(member.id, input.userId),
+				});
+
+				if (!targetUser || targetUser.teamId !== input.teamId) {
+					throw new TRPCError({
+						code: "NOT_FOUND",
+						message: "Team member not found",
+					});
+				}
+
+				if (targetUser.role === "owner") {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "The team owner account cannot be deleted",
+					});
+				}
+
+				await deleteAllUserSessions(input.userId);
+				await deleteUserAccount(input.userId);
+
+				await logAuditEvent({
+					userId: ctx.session.userId,
+					action: "team_member_deleted",
+					device: ctx.device,
+					entityType: "user",
+					entityId: input.userId,
+					metadata: {
+						teamId: input.teamId,
+					},
+				});
+
+				return { success: true };
 			}),
 	}),
 
@@ -440,6 +608,7 @@ export const teamRouter = router({
 
 				return invitations.map((inv) => ({
 					id: inv.id,
+					token: inv.token,
 					email: inv.email,
 					role: inv.role,
 					status: inv.status,

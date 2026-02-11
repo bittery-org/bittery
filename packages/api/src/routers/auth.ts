@@ -34,6 +34,7 @@ import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { getBitteryMode, isSelfHostedMode } from "../config/mode";
 import { protectedProcedure, publicProcedure, router } from "../index";
 import { getStoragePublicUrl } from "../storage/s3";
 import { logAuditEvent } from "../utils/audit";
@@ -76,7 +77,34 @@ function generateDeterministicFakeHint(email: string): string {
 	return `A3-${digest.slice(0, 8)}`;
 }
 
+async function hasAnyRegisteredUser(): Promise<boolean> {
+	const existingUser = await db.query.user.findFirst({
+		columns: { id: true },
+	});
+	return !!existingUser;
+}
+
 export const authRouter = router({
+	registrationStatus: publicProcedure.query(async () => {
+		const mode = getBitteryMode();
+		if (mode === "cloud") {
+			return {
+				mode,
+				allowPublicSignup: true,
+			};
+		}
+
+		const allowPublicSignup = !(await hasAnyRegisteredUser());
+
+		return {
+			mode,
+			allowPublicSignup,
+			reason: allowPublicSignup
+				? undefined
+				: "invite_only_after_bootstrap",
+		};
+	}),
+
 	/**
 	 * Signup: Create new user with zero-knowledge authentication
 	 */
@@ -96,6 +124,18 @@ export const authRouter = router({
 		)
 		.mutation(async ({ ctx, input }) => {
 			const normalizedEmail = normalizeEmail(input.email);
+			const selfHostedMode = isSelfHostedMode();
+
+			if (selfHostedMode) {
+				const allowPublicSignup = !(await hasAnyRegisteredUser());
+				if (!allowPublicSignup) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message:
+							"Public registration is disabled. Ask an admin for an invite link.",
+					});
+				}
+			}
 
 			// Check if user already exists
 			const existingUser = await getUserByEmail(normalizedEmail);
@@ -106,11 +146,17 @@ export const authRouter = router({
 				});
 			}
 
-			// Determine team type and name based on organizationName
+			// Determine team configuration by deployment mode
 			const isOrganization = !!input.organizationName;
-			const teamType = isOrganization ? "organization" : "personal";
-			const teamName = input.organizationName || 'My Team';
-			const memberLimit = isOrganization ? null : 1;
+			const teamType = selfHostedMode
+				? "organization"
+				: isOrganization
+					? "organization"
+					: "personal";
+			const teamName = selfHostedMode
+				? input.organizationName?.trim() || "Bittery Instance"
+				: input.organizationName || "My Team";
+			const memberLimit = selfHostedMode ? null : isOrganization ? null : 1;
 
 			// Create user first (without team)
 			const userId = await createUser({
@@ -222,6 +268,7 @@ export const authRouter = router({
 				srpVerifier: z.string(),
 				publicKey: z.string(),
 				encryptedPrivateKey: z.string(),
+				encryptedVaultKey: z.string(),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
@@ -297,7 +344,25 @@ export const authRouter = router({
 				.set({ teamId: invitation.teamId, role: invitation.role })
 				.where(eq(user.id, userId));
 
-			// 3. Grant vault access if pendingVaultKeys were provided
+			// Create default personal vault for the new user
+			const personalVaultId = nanoid();
+			await db.insert(vault).values({
+				id: personalVaultId,
+				name: "Personal",
+				type: "personal",
+				icon: "lock",
+				createdById: userId,
+			});
+
+			await db.insert(vaultKey).values({
+				id: nanoid(),
+				vaultId: personalVaultId,
+				userId,
+				encryptedVaultKey: input.encryptedVaultKey,
+				role: "owner",
+			});
+
+			// 3. Grant shared vault access if pendingVaultKeys were provided
 			if (invitation.pendingVaultKeys) {
 				try {
 					const pendingKeys = JSON.parse(invitation.pendingVaultKeys) as Array<{

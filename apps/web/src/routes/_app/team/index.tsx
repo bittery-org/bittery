@@ -32,6 +32,10 @@ function TeamPage() {
 
 	const teamListQuery = useQuery(trpc.team.list.queryOptions());
 	const teamId = teamListQuery.data?.id;
+	const registrationStatusQuery = useQuery(
+		trpc.auth.registrationStatus.queryOptions(),
+	);
+	const meQuery = useQuery(trpc.auth.me.queryOptions());
 
 	const teamQuery = useQuery({
 		...trpc.team.get.queryOptions({ teamId: teamId! }),
@@ -48,6 +52,9 @@ function TeamPage() {
 
 	const team = teamQuery.data;
 	const canEdit = team?.userRole === "owner" || team?.userRole === "admin";
+	const isSelfHostedMode =
+		registrationStatusQuery.data?.mode === "self-hosted";
+	const currentUserId = meQuery.data?.id;
 
 	if (teamListQuery.isLoading || teamQuery.isLoading) {
 		return (
@@ -111,9 +118,15 @@ function TeamPage() {
 						<CardContent>
 							{membersQuery.isLoading ? (
 								<Skeleton className="h-32" />
-							) : (
-								<MemberList members={membersQuery.data || []} />
-							)}
+							) : teamId ? (
+								<MemberList
+									teamId={teamId}
+									members={membersQuery.data || []}
+									currentUserId={currentUserId}
+									currentUserRole={team.userRole}
+									isSelfHostedMode={isSelfHostedMode}
+								/>
+							) : null}
 						</CardContent>
 					</Card>
 				</TabsContent>
@@ -131,7 +144,6 @@ function TeamPage() {
 								<Skeleton className="h-32" />
 							) : teamId ? (
 								<PendingInvitationsList
-									teamId={teamId}
 									invitations={invitationsQuery.data || []}
 									canManage={canEdit}
 								/>
@@ -149,6 +161,7 @@ function TeamPage() {
 							imageUrl={team.imageUrl}
 							createdAt={team.createdAt}
 							updatedAt={team.updatedAt}
+							isSelfHostedMode={isSelfHostedMode}
 						/>
 					)}
 				</TabsContent>

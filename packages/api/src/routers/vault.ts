@@ -161,6 +161,23 @@ export const vaultRouter = router({
 		)
 		.mutation(async ({ input, ctx }) => {
 			const vaultId = nanoid();
+			let teamId: string | null = null;
+
+			if (input.type === "team") {
+				const currentUser = await db.query.user.findFirst({
+					where: (member, { eq }) => eq(member.id, ctx.session.userId),
+					columns: { teamId: true },
+				});
+
+				if (!currentUser?.teamId) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "You must belong to a team to create a team vault",
+					});
+				}
+
+				teamId = currentUser.teamId;
+			}
 
 			let broadcast: SyncBroadcastPayload;
 			await db.transaction(async (tx) => {
@@ -172,6 +189,7 @@ export const vaultRouter = router({
 					...(input.icon && { icon: input.icon }),
 					...(input.imageKey && { imageKey: input.imageKey }),
 					createdById: ctx.session.userId,
+					...(teamId && { teamId }),
 				});
 
 				// Store encrypted vault key for the creator

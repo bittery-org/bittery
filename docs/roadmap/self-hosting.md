@@ -101,6 +101,7 @@ The image should include a healthcheck (`/trpc/auth.heartbeat` or a dedicated `/
 | `JWT_SECRET` | Yes | — | Min 32 chars, used for session tokens |
 | `CORS_ORIGIN` | Yes | — | Comma-separated allowed origins |
 | `WEB_APP_URL` | Yes | — | Public URL of the web frontend |
+| `BITTERY_MODE` | No | `cloud` | Set to `self-hosted` for single-team, invite-only mode |
 | `PORT` | No | `3000` | Server listen port |
 | `HOST` | No | `0.0.0.0` | Server listen host |
 | `REDIS_URL` | No | — | Enables Redis pub/sub (multi-instance). Falls back to in-memory |
