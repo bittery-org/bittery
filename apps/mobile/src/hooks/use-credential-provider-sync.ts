@@ -574,16 +574,15 @@ export function useCredentialProviderSync(
 				);
 			}
 
-			if (isAllAccountsMode && accountsInfo.length > 1) {
-				console.log(
-					"[CredentialProviderSync] Skipping legacy credential sync in all-accounts mode",
-				);
+			// Skip legacy credential sync when vault-based sync succeeded.
+			// Legacy sync triggers a separate native BiometricPrompt ("Sync Passwords")
+			// which causes a redundant second biometric prompt on app startup.
+			if (vaultResult) {
 				setLastSyncResult({ synced: 0, deleted: 0 });
 				return { synced: 0, deleted: 0 };
 			}
 
-			// Also sync legacy credentials for backwards compatibility
-			// (This can be removed once all autofill flows use vault-based storage)
+			// Fallback to legacy sync only when vault sync failed
 			const credentials = extractCredentials();
 
 			if (credentials.length === 0) {
@@ -612,8 +611,6 @@ export function useCredentialProviderSync(
 	}, [
 		isAvailable,
 		isBiometricAvailable,
-		isAllAccountsMode,
-		accountsInfo.length,
 		extractCredentials,
 		syncVaultData,
 		flushPendingPasskeyMutationsAndRefresh,

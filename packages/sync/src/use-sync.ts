@@ -258,7 +258,7 @@ export function useSync(options: UseSyncOptions) {
 	 * Runs catch-up on an interval to recover missed updates even when no events stream in.
 	 */
 	useEffect(() => {
-		if (!enabled || catchUpIntervalMs <= 0) {
+		if (!enabled || catchUpIntervalMs <= 0 || realtimeEnabled) {
 			return;
 		}
 
@@ -271,7 +271,7 @@ export function useSync(options: UseSyncOptions) {
 		return () => {
 			clearInterval(interval);
 		};
-	}, [enabled, catchUpIntervalMs, runCatchUpSafely]);
+	}, [enabled, catchUpIntervalMs, runCatchUpSafely, realtimeEnabled]);
 
 	/**
 	 * Initialize sync manager
