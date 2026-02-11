@@ -31,7 +31,11 @@ import {
 } from "./desktop-key-material";
 import { desktopSync } from "./desktop-sync";
 import { onLocalItemCreated, onLocalItemUpdated } from "./services/local-item-cache-service";
-import { isUnlocked, updateActivity } from "./session-manager";
+import {
+	isUnlocked,
+	setDesktopModeSentinel,
+	updateActivity,
+} from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
@@ -129,6 +133,30 @@ async function isPasskeyFeatureEnabled(): Promise<boolean> {
 	}
 
 	return import.meta.env.MODE !== "production";
+}
+
+async function isDesktopUnlockedNow(): Promise<boolean> {
+	const status =
+		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
+	return !!(
+		status?.available &&
+		!status.locked &&
+		(status.unlockedAccounts?.length ?? 0) > 0
+	);
+}
+
+async function ensurePasskeyHandlerUnlocked(): Promise<boolean> {
+	if (isUnlocked()) {
+		return true;
+	}
+
+	if (await isDesktopUnlockedNow()) {
+		// Service worker restarts can lose the desktop sentinel between picker and selection.
+		setDesktopModeSentinel();
+		return true;
+	}
+
+	return false;
 }
 
 function normalizeHost(value: string): string {
@@ -720,10 +748,13 @@ async function findMatchingPasskeys(input: {
 async function updateStoredPasskey(input: {
 	match: MatchedPasskey;
 	update: (current: Passkey) => Passkey;
+	allowBiometricPrompt?: boolean;
 }): Promise<void> {
 	const accountEmail = await resolveAccountEmailForItem(input.match.item);
 	if (accountEmail) {
-		const hasWriteCapability = await ensureDesktopWriteCapability(accountEmail);
+		const hasWriteCapability = await ensureDesktopWriteCapability(accountEmail, {
+			allowBiometricPrompt: input.allowBiometricPrompt,
+		});
 		if (!hasWriteCapability) {
 			throw new Error("No vault keys available for passkey update");
 		}
@@ -772,6 +803,7 @@ async function updateAssertionUsage(input: {
 			statusReason: undefined,
 			statusUpdatedAt: usedAt,
 		}),
+		allowBiometricPrompt: false,
 	});
 }
 
@@ -788,7 +820,8 @@ async function markPasskeyAsSuspect(input: {
 			statusReason: input.reason,
 			statusUpdatedAt,
 		}),
-		});
+		allowBiometricPrompt: false,
+	});
 }
 
 async function markPasskeyAsSuspectSafely(input: {
@@ -869,7 +902,7 @@ export async function handlePasskeyCreate(
 		return { success: true, fallbackToNative: true };
 	}
 
-	if (!isUnlocked()) {
+	if (!(await ensurePasskeyHandlerUnlocked())) {
 		logPasskeyEvent("native_fallback", {
 			requestId: payload.requestId,
 			reason: "locked",
@@ -1052,7 +1085,7 @@ export async function handlePasskeyGet(
 		return { success: true, fallbackToNative: true };
 	}
 
-	if (!isUnlocked()) {
+	if (!(await ensurePasskeyHandlerUnlocked())) {
 		logPasskeyEvent("native_fallback", {
 			requestId: payload.requestId,
 			reason: "locked",
@@ -1140,10 +1173,27 @@ export async function handlePasskeyGet(
 		});
 
 		stage = "persist";
-		await updateAssertionUsage({
-			match,
-			nextSignCount,
-		});
+		try {
+			await updateAssertionUsage({
+				match,
+				nextSignCount,
+			});
+		} catch (persistError) {
+			logPasskeyEvent(
+				"handler_error",
+				{
+					requestId: payload.requestId,
+					rpId,
+					stage: "persist",
+					error:
+						persistError instanceof Error
+							? persistError.message
+							: String(persistError),
+					flow: "get",
+				},
+				"warn",
+			);
+		}
 
 		return {
 			success: true,

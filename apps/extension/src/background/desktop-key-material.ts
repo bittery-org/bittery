@@ -105,8 +105,12 @@ export async function hydrateDesktopAccountMaterial(
  */
 export async function ensureDesktopWriteCapability(
 	email: string,
+	options?: {
+		allowBiometricPrompt?: boolean;
+	},
 ): Promise<boolean> {
 	const normalizedEmail = email.toLowerCase();
+	const allowBiometricPrompt = options?.allowBiometricPrompt ?? true;
 
 	await hydrateDesktopAccountMaterial(normalizedEmail);
 	if (await hasLocalWriteCapability(normalizedEmail)) {
@@ -114,6 +118,10 @@ export async function ensureDesktopWriteCapability(
 	}
 
 	if (!(await isDesktopUnlockedNow())) {
+		return false;
+	}
+
+	if (!allowBiometricPrompt) {
 		return false;
 	}
 
