@@ -343,22 +343,6 @@ class DesktopSyncService {
 			// Ignore if no listeners
 		}
 
-		// Show notification (if API is available)
-		try {
-			if (typeof chrome !== "undefined" && chrome?.notifications?.create) {
-				await chrome.notifications.create({
-					type: "basic",
-					iconUrl: "icon128.png",
-					title: "Vault Locked",
-					message:
-						event.reason === "autolock"
-							? "Desktop auto-locked"
-							: "Desktop locked",
-				});
-			}
-		} catch (error) {
-			console.error("[Desktop Sync] Failed to show notification:", error);
-		}
 	}
 
 	/**
@@ -386,20 +370,6 @@ class DesktopSyncService {
 			// Ignore if no listeners
 		}
 
-		// Show notification
-		try {
-			await chrome.notifications.create({
-				type: "basic",
-				iconUrl: "icon128.png",
-				title: "Vault Unlocked",
-				message:
-					event.accounts.length === 1
-						? "Unlocked with desktop app"
-						: `${event.accounts.length} accounts unlocked with desktop app`,
-			});
-		} catch (error) {
-			console.error("[Desktop Sync] Failed to show notification:", error);
-		}
 	}
 
 	/**

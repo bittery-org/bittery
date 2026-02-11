@@ -28,6 +28,7 @@ import { storage } from "@/lib/storage";
 interface UnlockSearchParams {
 	email?: string;
 	autoTrigger?: boolean;
+	autoTriggerId?: string;
 }
 
 export const Route = createFileRoute("/unlock")({
@@ -36,6 +37,10 @@ export const Route = createFileRoute("/unlock")({
 		return {
 			email: typeof search.email === "string" ? search.email : undefined,
 			autoTrigger: search.autoTrigger === true || search.autoTrigger === "true",
+			autoTriggerId:
+				typeof search.autoTriggerId === "string"
+					? search.autoTriggerId
+					: undefined,
 		};
 	},
 });
@@ -48,25 +53,7 @@ export function UnlockPage() {
 	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
 	const [showPassword, setShowPassword] = useState(false);
 	const hasAttemptedBiometric = useRef(false);
-	const { autoTrigger } = Route.useSearch();
-
-	// Track window focus so biometric only auto-triggers when the app is in the foreground
-	const [isWindowFocused, setIsWindowFocused] = useState(() =>
-		document.hasFocus(),
-	);
-
-	useEffect(() => {
-		const handleFocus = () => setIsWindowFocused(true);
-		const handleBlur = () => setIsWindowFocused(false);
-
-		window.addEventListener("focus", handleFocus);
-		window.addEventListener("blur", handleBlur);
-
-		return () => {
-			window.removeEventListener("focus", handleFocus);
-			window.removeEventListener("blur", handleBlur);
-		};
-	}, []);
+	const { autoTrigger, autoTriggerId } = Route.useSearch();
 
 	const allAccounts = accounts.data ?? [];
 
@@ -199,21 +186,20 @@ export function UnlockPage() {
 	const canUseBiometric =
 		sessionState?.canBiometricUnlock && !requiresPasswordReentry;
 
-	// Reset attempt flag when autoTrigger changes to true (extension triggered unlock)
+	// Reset attempt flag on each extension trigger event.
 	useEffect(() => {
 		if (autoTrigger) {
 			hasAttemptedBiometric.current = false;
 		}
-	}, [autoTrigger]);
+	}, [autoTrigger, autoTriggerId]);
 
-	// Auto-trigger biometric unlock when available AND window is focused
-	// OR if triggered by extension (autoTrigger=true)
+	// Auto-trigger biometric only for extension-initiated unlock requests.
+	// Manual/app-initiated locks should remain locked until user action.
 	useEffect(() => {
 		if (
-			(canUseBiometric || autoTrigger) &&
+			autoTrigger &&
 			!hasAttemptedBiometric.current &&
-			allAccounts.length > 0 &&
-			isWindowFocused
+			allAccounts.length > 0
 		) {
 			hasAttemptedBiometric.current = true;
 			// Small delay to ensure everything is initialized
@@ -270,12 +256,10 @@ export function UnlockPage() {
 			return () => clearTimeout(timeout);
 		}
 	}, [
-		canUseBiometric,
 		autoTrigger,
 		allAccounts,
 		queryClient,
 		navigate,
-		isWindowFocused,
 	]);
 
 	// Show loading state while accounts are being fetched

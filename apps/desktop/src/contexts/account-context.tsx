@@ -214,13 +214,19 @@ export function AccountProvider({
 					console.log(
 						"[AccountContext] Received trigger-biometric-unlock event from extension",
 					);
-					// Navigate to unlock page with auto-trigger flag
-					if (router) {
-						router.navigate({ to: "/unlock", search: { autoTrigger: true } });
-					} else {
-						console.error(
-							"[AccountContext] Router not available for navigation",
-						);
+						// Navigate to unlock page with auto-trigger flag
+						if (router) {
+							router.navigate({
+								to: "/unlock",
+								search: {
+									autoTrigger: true,
+									autoTriggerId: Date.now().toString(),
+								},
+							});
+						} else {
+							console.error(
+								"[AccountContext] Router not available for navigation",
+							);
 					}
 				});
 			} catch (error) {

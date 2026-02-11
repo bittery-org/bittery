@@ -109,7 +109,7 @@ export const authRouter = router({
 			// Determine team type and name based on organizationName
 			const isOrganization = !!input.organizationName;
 			const teamType = isOrganization ? "organization" : "personal";
-			const teamName = input.organizationName || `${input.name}'s Team`;
+			const teamName = input.organizationName || 'My Team';
 			const memberLimit = isOrganization ? null : 1;
 
 			// Create user first (without team)
