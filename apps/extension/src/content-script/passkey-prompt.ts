@@ -109,7 +109,8 @@ async function showPrompt<TDecision>(
 	shadowRoot.appendChild(iframe);
 
 	const shouldSkipEnterAnimation =
-		Date.now() - lastPromptClosedAt < PASSKEY_PROMPT_REOPEN_NO_ANIMATION_WINDOW_MS;
+		Date.now() - lastPromptClosedAt <
+		PASSKEY_PROMPT_REOPEN_NO_ANIMATION_WINDOW_MS;
 	if (shouldSkipEnterAnimation) {
 		shadowHost.style.transition = "none";
 		shadowHost.style.opacity = "1";
@@ -144,7 +145,10 @@ async function showPrompt<TDecision>(
 				);
 				return;
 			}
-			if (message.type === "RESIZE_IFRAME" && typeof message.height === "number") {
+			if (
+				message.type === "RESIZE_IFRAME" &&
+				typeof message.height === "number"
+			) {
 				if (message.height > 0) {
 					iframe.style.height = `${message.height}px`;
 				}
@@ -177,7 +181,9 @@ async function showPrompt<TDecision>(
 			window.clearTimeout(timeoutId);
 			window.removeEventListener("message", messageHandler);
 			config.signal?.removeEventListener("abort", onAbort);
-			if (activePrompt?.finish === (finish as (value: unknown | null) => void)) {
+			if (
+				activePrompt?.finish === (finish as (value: unknown | null) => void)
+			) {
 				activePrompt = null;
 			}
 			lastPromptClosedAt = Date.now();
@@ -223,7 +229,8 @@ function parseGetSelection(value: unknown): string | null {
 		return null;
 	}
 	const payload = value as { credentialId?: unknown };
-	return typeof payload.credentialId === "string" && payload.credentialId.length > 0
+	return typeof payload.credentialId === "string" &&
+		payload.credentialId.length > 0
 		? payload.credentialId
 		: null;
 }
@@ -241,7 +248,10 @@ function parseCreateDecision(value: unknown): PasskeyCreateSaveDecision | null {
 		itemId?: unknown;
 		vaultId?: unknown;
 	};
-	if (decision.action === "attach-existing" && typeof decision.itemId === "string") {
+	if (
+		decision.action === "attach-existing" &&
+		typeof decision.itemId === "string"
+	) {
 		return {
 			action: "attach-existing",
 			itemId: decision.itemId,
@@ -250,7 +260,8 @@ function parseCreateDecision(value: unknown): PasskeyCreateSaveDecision | null {
 	if (decision.action === "create-new") {
 		return {
 			action: "create-new",
-			vaultId: typeof decision.vaultId === "string" ? decision.vaultId : undefined,
+			vaultId:
+				typeof decision.vaultId === "string" ? decision.vaultId : undefined,
 		};
 	}
 	return null;
@@ -276,7 +287,10 @@ export async function promptPasskeyGetSelection(input: {
 
 export async function promptPasskeyCreateDecision(input: {
 	requestId: string;
-	prompt: Extract<PasskeyUserInteractionRequest, { kind: "create-save-target" }>;
+	prompt: Extract<
+		PasskeyUserInteractionRequest,
+		{ kind: "create-save-target" }
+	>;
 	signal?: AbortSignal;
 }): Promise<PasskeyCreateSaveDecision | null> {
 	return showPrompt<PasskeyCreateSaveDecision>({

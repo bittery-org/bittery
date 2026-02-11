@@ -511,9 +511,7 @@ Generated: ${new Date().toLocaleString()}
 								<div className="space-y-1">
 									<p className="font-medium text-sm">
 										You've been invited to join{" "}
-										<span className="text-primary">
-											{invitation?.teamName}
-										</span>
+										<span className="text-primary">{invitation?.teamName}</span>
 									</p>
 									<div className="flex items-center gap-2 text-muted-foreground text-xs">
 										<span>Invited by {invitation?.invitedByName}</span>

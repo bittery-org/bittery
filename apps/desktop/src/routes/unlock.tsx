@@ -255,12 +255,7 @@ export function UnlockPage() {
 
 			return () => clearTimeout(timeout);
 		}
-	}, [
-		autoTrigger,
-		allAccounts,
-		queryClient,
-		navigate,
-	]);
+	}, [autoTrigger, allAccounts, queryClient, navigate]);
 
 	// Show loading state while accounts are being fetched
 	if (accounts.isLoading) {

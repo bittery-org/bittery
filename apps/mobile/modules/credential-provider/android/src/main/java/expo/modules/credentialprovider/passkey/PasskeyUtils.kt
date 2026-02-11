@@ -88,10 +88,8 @@ object PasskeyUtils {
         val ids = LinkedHashSet<String>(allow.length())
         for (index in 0 until allow.length()) {
             val descriptor = allow.optJSONObject(index) ?: continue
-            val id = canonicalizeCredentialId(descriptor.optString("id"))
-            if (!id.isNullOrBlank()) {
-                ids.add(id)
-            }
+            canonicalizeCredentialIdValue(descriptor.opt("id"))?.let { ids.add(it) }
+            canonicalizeCredentialIdValue(descriptor.opt("rawId"))?.let { ids.add(it) }
         }
         return ids
     }
@@ -101,8 +99,14 @@ object PasskeyUtils {
         val passkeys = ArrayList<StoredPasskey>(array.length())
         for (index in 0 until array.length()) {
             val passkeyJson = array.optJSONObject(index) ?: continue
-            val credentialId = canonicalizeCredentialId(passkeyJson.optString("credentialId")) ?: continue
-            val rpId = normalizeHost(passkeyJson.optString("rpId")).takeIf { it.isNotEmpty() } ?: continue
+            val credentialId = canonicalizeCredentialIdValue(
+                when {
+                    passkeyJson.has("credentialId") -> passkeyJson.opt("credentialId")
+                    passkeyJson.has("id") -> passkeyJson.opt("id")
+                    else -> passkeyJson.opt("rawId")
+                }
+            ) ?: continue
+            val rpId = extractRpId(passkeyJson) ?: continue
 
             val transports = mutableListOf<String>()
             val transportsJson = passkeyJson.optJSONArray("transports")
@@ -120,7 +124,7 @@ object PasskeyUtils {
                     credentialId = credentialId,
                     rpId = rpId,
                     rpName = passkeyJson.optString("rpName").ifBlank { rpId },
-                    userHandle = canonicalizeCredentialId(passkeyJson.optString("userHandle")).orEmpty(),
+                    userHandle = canonicalizeCredentialIdValue(passkeyJson.opt("userHandle")).orEmpty(),
                     userName = passkeyJson.optString("userName").orEmpty(),
                     userDisplayName = passkeyJson.optString("userDisplayName").ifBlank {
                         passkeyJson.optString("userName").orEmpty()
@@ -218,5 +222,32 @@ object PasskeyUtils {
     private fun parseRequestSource(requestJson: String): JSONObject {
         val root = JSONObject(requestJson)
         return root.optJSONObject("publicKey") ?: root
+    }
+
+    private fun canonicalizeCredentialIdValue(value: Any?): String? {
+        return when (value) {
+            is String -> canonicalizeCredentialId(value)
+            is JSONArray -> {
+                val bytes = ByteArray(value.length())
+                for (index in 0 until value.length()) {
+                    val numeric = value.optInt(index, -1)
+                    if (numeric !in 0..255) return null
+                    bytes[index] = numeric.toByte()
+                }
+                encodeBase64Url(bytes)
+            }
+            else -> null
+        }
+    }
+
+    private fun extractRpId(passkeyJson: JSONObject): String? {
+        val rpId = when {
+            passkeyJson.has("rpId") -> passkeyJson.optString("rpId")
+            passkeyJson.has("rpID") -> passkeyJson.optString("rpID")
+            passkeyJson.has("domain") -> passkeyJson.optString("domain")
+            else -> passkeyJson.optJSONObject("rp")?.optString("id").orEmpty()
+        }
+
+        return normalizeHost(rpId).takeIf { it.isNotEmpty() }
     }
 }

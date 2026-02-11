@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { Passkey } from "@bittery/shared/types";
-import type { PasskeyWritableVaultOption } from "../../src/passkey/types";
 import {
 	findMatchingPasskeysForItems,
 	resolveCreateDecision,
 	resolveGetSelection,
 	resolveUnknownCredentialSuspectMatch,
 } from "../../src/background/passkey-handlers";
+import type { PasskeyWritableVaultOption } from "../../src/passkey/types";
 
 function createPasskey(input: {
 	credentialId: string;
@@ -114,13 +114,25 @@ describe("passkey handler helpers", () => {
 				id: "item_1",
 				username: "alice",
 				url: "https://example.com",
-				passkeys: [createPasskey({ credentialId: "cred_a", rpId: "example.com", userName: "alice" })],
+				passkeys: [
+					createPasskey({
+						credentialId: "cred_a",
+						rpId: "example.com",
+						userName: "alice",
+					}),
+				],
 			}),
 			createLoginItem({
 				id: "item_2",
 				username: "bob",
 				url: "https://example.com",
-				passkeys: [createPasskey({ credentialId: "cred_b", rpId: "example.com", userName: "bob" })],
+				passkeys: [
+					createPasskey({
+						credentialId: "cred_b",
+						rpId: "example.com",
+						userName: "bob",
+					}),
+				],
 			}),
 		] as never[];
 		const matches = findMatchingPasskeysForItems({
@@ -154,7 +166,13 @@ describe("passkey handler helpers", () => {
 				id: "item_1",
 				username: "alice",
 				url: "https://example.com",
-				passkeys: [createPasskey({ credentialId: "cred_only", rpId: "example.com", userName: "alice" })],
+				passkeys: [
+					createPasskey({
+						credentialId: "cred_only",
+						rpId: "example.com",
+						userName: "alice",
+					}),
+				],
 			}),
 		] as never[];
 		const matches = findMatchingPasskeysForItems({
@@ -189,7 +207,13 @@ describe("passkey handler helpers", () => {
 				id: "item_1",
 				username: "alice",
 				url: "https://example.com",
-				passkeys: [createPasskey({ credentialId: "cred_only", rpId: "example.com", userName: "alice" })],
+				passkeys: [
+					createPasskey({
+						credentialId: "cred_only",
+						rpId: "example.com",
+						userName: "alice",
+					}),
+				],
 			}),
 		] as never[];
 
@@ -211,13 +235,25 @@ describe("passkey handler helpers", () => {
 				id: "item_1",
 				username: "alice",
 				url: "https://example.com",
-				passkeys: [createPasskey({ credentialId: "cred_a", rpId: "example.com", userName: "alice" })],
+				passkeys: [
+					createPasskey({
+						credentialId: "cred_a",
+						rpId: "example.com",
+						userName: "alice",
+					}),
+				],
 			}),
 			createLoginItem({
 				id: "item_2",
 				username: "bob",
 				url: "https://example.com",
-				passkeys: [createPasskey({ credentialId: "cred_b", rpId: "example.com", userName: "bob" })],
+				passkeys: [
+					createPasskey({
+						credentialId: "cred_b",
+						rpId: "example.com",
+						userName: "bob",
+					}),
+				],
 			}),
 		] as never[];
 
@@ -239,13 +275,25 @@ describe("passkey handler helpers", () => {
 				id: "item_1",
 				username: "alice",
 				url: "https://example.com",
-				passkeys: [createPasskey({ credentialId: "cred_a", rpId: "example.com", userName: "alice" })],
+				passkeys: [
+					createPasskey({
+						credentialId: "cred_a",
+						rpId: "example.com",
+						userName: "alice",
+					}),
+				],
 			}),
 			createLoginItem({
 				id: "item_2",
 				username: "bob",
 				url: "https://example.com",
-				passkeys: [createPasskey({ credentialId: "cred_b", rpId: "example.com", userName: "bob" })],
+				passkeys: [
+					createPasskey({
+						credentialId: "cred_b",
+						rpId: "example.com",
+						userName: "bob",
+					}),
+				],
 			}),
 		] as never[];
 
@@ -268,13 +316,25 @@ describe("passkey handler helpers", () => {
 				id: "item_1",
 				username: "alice-1",
 				url: "https://example.com",
-				passkeys: [createPasskey({ credentialId: "cred_a", rpId: "example.com", userName: "alice-1" })],
+				passkeys: [
+					createPasskey({
+						credentialId: "cred_a",
+						rpId: "example.com",
+						userName: "alice-1",
+					}),
+				],
 			}),
 			createLoginItem({
 				id: "item_2",
 				username: "alice-2",
 				url: "https://example.com",
-				passkeys: [createPasskey({ credentialId: "cred_b", rpId: "example.com", userName: "alice-2" })],
+				passkeys: [
+					createPasskey({
+						credentialId: "cred_b",
+						rpId: "example.com",
+						userName: "alice-2",
+					}),
+				],
 			}),
 		] as never[];
 		const writableVaults: PasskeyWritableVaultOption[] = [

@@ -34,7 +34,8 @@ function setLockIndicator(locked: boolean): void {
 
 	try {
 		const lockedIconPath =
-			chrome.runtime?.getURL(LOCKED_ACTION_ICON_PATH) ?? LOCKED_ACTION_ICON_PATH;
+			chrome.runtime?.getURL(LOCKED_ACTION_ICON_PATH) ??
+			LOCKED_ACTION_ICON_PATH;
 
 		chrome.action.setIcon({
 			path: locked ? lockedIconPath : DEFAULT_ACTION_ICON_PATHS,

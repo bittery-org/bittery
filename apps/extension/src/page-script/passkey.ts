@@ -51,10 +51,7 @@ function toUint8Array(buffer: BufferSource): Uint8Array {
 async function sha256(data: Uint8Array): Promise<Uint8Array> {
 	const buffer = new ArrayBuffer(data.byteLength);
 	new Uint8Array(buffer).set(data);
-	const digest = await crypto.subtle.digest(
-		"SHA-256",
-		buffer,
-	);
+	const digest = await crypto.subtle.digest("SHA-256", buffer);
 	return new Uint8Array(digest);
 }
 
@@ -85,7 +82,11 @@ function serializeDescriptor(
 function serializeCreateOptions(
 	publicKey: PublicKeyCredentialCreationOptions,
 ): SerializedCreationOptions | null {
-	if (!publicKey.rp?.name || !publicKey.user?.name || !publicKey.user?.displayName) {
+	if (
+		!publicKey.rp?.name ||
+		!publicKey.user?.name ||
+		!publicKey.user?.displayName
+	) {
 		return null;
 	}
 
@@ -131,7 +132,9 @@ function postPageMessage(message: object): void {
 }
 
 function sendBridgeRequest(input: {
-	type: typeof BITTERY_PASSKEY_CREATE_REQUEST | typeof BITTERY_PASSKEY_GET_REQUEST;
+	type:
+		| typeof BITTERY_PASSKEY_CREATE_REQUEST
+		| typeof BITTERY_PASSKEY_GET_REQUEST;
 	payload: PasskeyPageCreatePayload | PasskeyPageGetPayload;
 	timeoutMs?: number;
 }): { requestId: string; promise: Promise<PasskeyPageResponseMessage> } {
@@ -218,7 +221,11 @@ function finalizePendingResponse(response: PasskeyPageResponseMessage): void {
 }
 
 function handleBridgeMessage(event: MessageEvent): void {
-	if (event.source !== window || !event.data || typeof event.data !== "object") {
+	if (
+		event.source !== window ||
+		!event.data ||
+		typeof event.data !== "object"
+	) {
 		return;
 	}
 
@@ -241,10 +248,13 @@ function handleBridgeMessage(event: MessageEvent): void {
 	finalizePendingResponse(message as PasskeyPageResponseMessage);
 }
 
-function buildCreateCredential(result: SerializedCreateResult): PublicKeyCredential {
+function buildCreateCredential(
+	result: SerializedCreateResult,
+): PublicKeyCredential {
 	const response = {
 		clientDataJSON: base64UrlToBytes(result.response.clientDataJSON).buffer,
-		attestationObject: base64UrlToBytes(result.response.attestationObject).buffer,
+		attestationObject: base64UrlToBytes(result.response.attestationObject)
+			.buffer,
 		getPublicKeyAlgorithm: () => -7,
 		getPublicKey: () => null,
 		getAuthenticatorData: () => null,
@@ -273,10 +283,13 @@ function buildCreateCredential(result: SerializedCreateResult): PublicKeyCredent
 	return credential as unknown as PublicKeyCredential;
 }
 
-function buildAssertionCredential(result: SerializedGetResult): PublicKeyCredential {
+function buildAssertionCredential(
+	result: SerializedGetResult,
+): PublicKeyCredential {
 	const response = {
 		clientDataJSON: base64UrlToBytes(result.response.clientDataJSON).buffer,
-		authenticatorData: base64UrlToBytes(result.response.authenticatorData).buffer,
+		authenticatorData: base64UrlToBytes(result.response.authenticatorData)
+			.buffer,
 		signature: base64UrlToBytes(result.response.signature).buffer,
 		userHandle: result.response.userHandle
 			? base64UrlToBytes(result.response.userHandle).buffer
@@ -308,7 +321,9 @@ function buildAssertionCredential(result: SerializedGetResult): PublicKeyCredent
 }
 
 function supportsEs256(params: PublicKeyCredentialParameters[]): boolean {
-	return params.some((param) => param.type === "public-key" && param.alg === -7);
+	return params.some(
+		(param) => param.type === "public-key" && param.alg === -7,
+	);
 }
 
 async function interceptCreate(
@@ -327,8 +342,9 @@ async function interceptCreate(
 	if (!serializedOptions) {
 		return createNative(options);
 	}
-	const signal = (options as CredentialCreationOptions & { signal?: AbortSignal })
-		.signal;
+	const signal = (
+		options as CredentialCreationOptions & { signal?: AbortSignal }
+	).signal;
 	if (signal?.aborted) {
 		return createNative(options);
 	}
@@ -372,14 +388,19 @@ async function interceptCreate(
 		}
 		return buildCreateCredential(response.result);
 	} catch (error) {
-		console.warn("[Bittery Passkey] create interception failed, using native:", error);
+		console.warn(
+			"[Bittery Passkey] create interception failed, using native:",
+			error,
+		);
 		return createNative(options);
 	} finally {
 		detachAbort?.();
 	}
 }
 
-async function interceptGet(options?: CredentialRequestOptions): Promise<Credential | null> {
+async function interceptGet(
+	options?: CredentialRequestOptions,
+): Promise<Credential | null> {
 	if (!getNative || !options?.publicKey) {
 		return getNative?.(options) ?? null;
 	}
@@ -390,8 +411,9 @@ async function interceptGet(options?: CredentialRequestOptions): Promise<Credent
 			mediation?: CredentialMediationRequirement;
 		}
 	).mediation;
-	const signal = (options as CredentialRequestOptions & { signal?: AbortSignal })
-		.signal;
+	const signal = (
+		options as CredentialRequestOptions & { signal?: AbortSignal }
+	).signal;
 	if (mediation === "conditional" || mediation === "silent") {
 		// Conditional/silent requests can be quickly aborted/restarted by sites.
 		// Wait briefly so we skip cancelled attempts and only show a stable prompt.
@@ -445,7 +467,10 @@ async function interceptGet(options?: CredentialRequestOptions): Promise<Credent
 		if (signal?.aborted) {
 			throw error;
 		}
-		console.warn("[Bittery Passkey] get interception failed, using native:", error);
+		console.warn(
+			"[Bittery Passkey] get interception failed, using native:",
+			error,
+		);
 		return getNative(options);
 	} finally {
 		detachAbort?.();
@@ -475,7 +500,10 @@ function installPasskeyInterceptors(): void {
 			value: interceptGet,
 		});
 	} catch (error) {
-		console.warn("[Bittery Passkey] Failed to install WebAuthn interceptors:", error);
+		console.warn(
+			"[Bittery Passkey] Failed to install WebAuthn interceptors:",
+			error,
+		);
 	}
 }
 

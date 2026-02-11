@@ -8,6 +8,7 @@
  * on each wake from idle, so we use auto-init pattern.
  */
 
+import * as wasmCrypto from "@bittery/crypto-wasm";
 import init, {
 	JsEncryptedData,
 	type JsSession,
@@ -19,7 +20,6 @@ import init, {
 	rsaDecrypt as wasmRsaDecrypt,
 	validateSecretKey as wasmValidateSecretKey,
 } from "@bittery/crypto-wasm";
-import * as wasmCrypto from "@bittery/crypto-wasm";
 import type {
 	DerivedKeys,
 	EncryptedData,

@@ -351,9 +351,11 @@ function LoginItemDetail({
 									<p className="truncate text-[11px] text-muted-foreground">
 										{passkey.rpId}
 										{" \u2022 "}
-										used {formatPasskeyLastUsed(passkey.lastUsedAt ?? passkey.createdAt)}
-										{" \u2022 "}
-										#{passkey.signCount ?? 0}
+										used{" "}
+										{formatPasskeyLastUsed(
+											passkey.lastUsedAt ?? passkey.createdAt,
+										)}
+										{" \u2022 "}#{passkey.signCount ?? 0}
 									</p>
 								</div>
 								<Button

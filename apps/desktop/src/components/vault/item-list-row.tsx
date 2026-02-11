@@ -1,7 +1,10 @@
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { cn } from "@bittery/ui";
-import { IconCircleKeyOutlineDuo18, IconMobileOutlineDuo18 } from "@bittery/ui/icons";
+import {
+	IconCircleKeyOutlineDuo18,
+	IconMobileOutlineDuo18,
+} from "@bittery/ui/icons";
 import { useDraggable } from "@dnd-kit/core";
 import { useNavigate } from "@tanstack/react-router";
 import type { DragItemData } from "../../providers/dnd-provider";
@@ -26,7 +29,8 @@ export function ItemListRow({
 	const maskedCardNumber = item.cardNumber
 		? maskCardNumber(item.cardNumber)
 		: undefined;
-	const hasPasskeys = item.category === "login" && (item.passkeys?.length ?? 0) > 0;
+	const hasPasskeys =
+		item.category === "login" && (item.passkeys?.length ?? 0) > 0;
 
 	const dragData: DragItemData = {
 		type: "vault-item",
@@ -81,7 +85,9 @@ export function ItemListRow({
 								<IconMobileOutlineDuo18
 									className={cn(
 										"size-3 shrink-0",
-										isSelected ? "text-primary-foreground" : "text-muted-foreground",
+										isSelected
+											? "text-primary-foreground"
+											: "text-muted-foreground",
 									)}
 								/>
 							</span>
@@ -91,7 +97,9 @@ export function ItemListRow({
 								<IconCircleKeyOutlineDuo18
 									className={cn(
 										"size-3 shrink-0",
-										isSelected ? "text-primary-foreground" : "text-muted-foreground",
+										isSelected
+											? "text-primary-foreground"
+											: "text-muted-foreground",
 									)}
 								/>
 							</span>

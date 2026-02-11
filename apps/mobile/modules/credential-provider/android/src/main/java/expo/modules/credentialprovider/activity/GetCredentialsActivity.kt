@@ -324,6 +324,7 @@ class GetCredentialsActivity : FragmentActivity() {
                 }
 
                 val unlockedUserIds = VaultStateManager.getUnlockedUserIds()
+                Log.d(TAG, "Passkey create unlockedUserIds=$unlockedUserIds")
                 if (unlockedUserIds.isEmpty()) {
                     Log.w(TAG, "No unlocked user available for passkey create")
                     launchAppForPasswordUnlock(passwordRequired = false)
@@ -331,20 +332,57 @@ class GetCredentialsActivity : FragmentActivity() {
                 }
 
                 val candidates = withContext(Dispatchers.IO) {
-                    loadPasskeyCreateCandidates(unlockedUserIds, context.rpId)
+                    loadPasskeyCreateCandidates(
+                        userIds = unlockedUserIds,
+                        rpId = context.rpId,
+                        requestedUserName = context.userName
+                    )
+                }
+                val resolvedCandidates = if (candidates.isEmpty()) {
+                    val decryptedFallbackCandidates = withContext(Dispatchers.IO) {
+                        loadPasskeyCreateCandidatesByDecryptingItems(
+                            userIds = unlockedUserIds,
+                            rpId = context.rpId,
+                            requestedUserName = context.userName
+                        )
+                    }
+                    if (decryptedFallbackCandidates.isNotEmpty()) {
+                        Log.d(
+                            TAG,
+                            "Passkey create decrypted fallback candidates found (count=${decryptedFallbackCandidates.size}, itemIds=${decryptedFallbackCandidates.map { it.id }})"
+                        )
+                    }
+                    decryptedFallbackCandidates
+                } else {
+                    candidates
+                }
+                Log.d(
+                    TAG,
+                    "Passkey create candidates (rpId=${context.rpId}, user=${context.userName}, count=${resolvedCandidates.size}, itemIds=${resolvedCandidates.map { it.id }})"
+                )
+
+                if (resolvedCandidates.isEmpty()) {
+                    val allUserCandidates = withContext(Dispatchers.IO) {
+                        loadPasskeyCreateCandidatesAnyUser(
+                            rpId = context.rpId,
+                            requestedUserName = context.userName
+                        )
+                    }
+                    if (allUserCandidates.isNotEmpty()) {
+                        val lockedUserIds = allUserCandidates.map { it.userId }.distinct()
+                        Log.w(
+                            TAG,
+                            "Found matching passkey target in local DB but user is not unlocked. lockedUserIds=$lockedUserIds, itemIds=${allUserCandidates.map { it.id }}"
+                        )
+                        launchAppForPasswordUnlock(passwordRequired = false)
+                        return@launch
+                    }
                 }
 
-                val target = when {
-                    candidates.isEmpty() -> PasskeyCreateTarget.CreateNewItem
-                    candidates.size == 1 -> PasskeyCreateTarget.ExistingItem(candidates.first())
-                    else -> {
-                        val selected = selectPasskeyCreateTarget(candidates)
-                        if (selected == null) {
-                            finishWithError("Passkey save target selection cancelled")
-                            return@launch
-                        }
-                        selected
-                    }
+                val target = resolvePasskeyCreateTarget(resolvedCandidates, context.userName)
+                if (target == null) {
+                    finishWithError("Passkey save target selection cancelled")
+                    return@launch
                 }
 
                 completeCreatePasskeyCredential(
@@ -564,7 +602,7 @@ class GetCredentialsActivity : FragmentActivity() {
                     val passkeys = PasskeyUtils.parseStoredPasskeys(itemDataJson)
                     val targetPasskey = passkeys.firstOrNull {
                         PasskeyUtils.canonicalizeCredentialId(it.credentialId) == normalizedCredentialId &&
-                            PasskeyUtils.normalizeHost(it.rpId) == PasskeyUtils.normalizeHost(rpId)
+                            domainsEquivalent(it.rpId, rpId)
                     } ?: throw IllegalStateException("Passkey not found in selected item")
 
                     val nextSignCount = targetPasskey.signCount + 1
@@ -594,17 +632,19 @@ class GetCredentialsActivity : FragmentActivity() {
 
                     // Update passkey metadata in encrypted item payload
                     val nowIso = Instant.now().toString()
-                    val updatedPasskeys = passkeys.map { passkey ->
-                        if (PasskeyUtils.canonicalizeCredentialId(passkey.credentialId) == normalizedCredentialId) {
-                            passkey.copy(
-                                signCount = nextSignCount,
-                                lastUsedAt = nowIso
-                            )
-                        } else {
-                            passkey
-                        }
+                    val passkeyMetadataUpdated = updateStoredPasskeyUsageMetadata(
+                        itemDataJson = itemDataJson,
+                        credentialId = normalizedCredentialId,
+                        rpId = rpId,
+                        nextSignCount = nextSignCount,
+                        lastUsedAtIso = nowIso
+                    )
+                    if (!passkeyMetadataUpdated) {
+                        Log.w(
+                            TAG,
+                            "Passkey usage metadata not updated (credentialId=$normalizedCredentialId, rpId=$rpId)"
+                        )
                     }
-                    PasskeyUtils.writeStoredPasskeys(itemDataJson, updatedPasskeys)
 
                     val encryptedItem = VaultDecryptor.encryptItemJson(itemDataJson, decryptedVaultKey)
                     val updatedItem = item.copy(
@@ -616,16 +656,18 @@ class GetCredentialsActivity : FragmentActivity() {
                     )
                     database.itemDao().insert(updatedItem)
 
-                    // Queue durable writeback mutation (best effort local signCount update first).
-                    queuePendingPasskeyMutation(
-                        userId = item.userId,
-                        vaultId = item.vaultId,
-                        itemId = item.id,
-                        operation = "update_item",
-                        encryptedData = encryptedItem.ciphertext,
-                        encryptionIv = encryptedItem.iv,
-                        encryptionAlgorithm = encryptedItem.algorithm
-                    )
+                    // Queue durable writeback mutation only when the passkey payload changed.
+                    if (passkeyMetadataUpdated) {
+                        queuePendingPasskeyMutation(
+                            userId = item.userId,
+                            vaultId = item.vaultId,
+                            itemId = item.id,
+                            operation = "update_item",
+                            encryptedData = encryptedItem.ciphertext,
+                            encryptionIv = encryptedItem.iv,
+                            encryptionAlgorithm = encryptedItem.algorithm
+                        )
+                    }
 
                     val requestOptions = PublicKeyCredentialRequestOptions(passkeyOption.requestJson)
                     val packageName = providerGetRequest.callingAppInfo?.packageName ?: ""
@@ -735,9 +777,10 @@ class GetCredentialsActivity : FragmentActivity() {
             val authenticatorData = PasskeyUtils.decodeBase64OrBase64Url(
                 attestationJson.getString("authenticatorData")
             )
+            val requestedRpId = PasskeyUtils.normalizeHost(context.rpId)
             val passkeyModel = StoredPasskey(
                 credentialId = credentialId,
-                rpId = context.rpId,
+                rpId = requestedRpId,
                 rpName = context.rpName,
                 userHandle = context.userHandle,
                 userName = context.userName,
@@ -752,8 +795,7 @@ class GetCredentialsActivity : FragmentActivity() {
 
             val updatedItem = if (targetItem != null) {
                 val itemDataJson = VaultDecryptor.decryptItemJson(targetItem, decryptedVaultKey)
-                val passkeys = PasskeyUtils.parseStoredPasskeys(itemDataJson)
-                PasskeyUtils.writeStoredPasskeys(itemDataJson, passkeys + passkeyModel)
+                appendStoredPasskeyPreservingExisting(itemDataJson, passkeyModel)
 
                 val encryptedItem = VaultDecryptor.encryptItemJson(itemDataJson, decryptedVaultKey)
                 targetItem.copy(
@@ -775,11 +817,12 @@ class GetCredentialsActivity : FragmentActivity() {
                 }
             } else {
                 val tempItemId = "local_passkey_${UUID.randomUUID()}"
+                val primaryUrl = "https://${requestedRpId}"
                 val itemDataJson = JSONObject().apply {
-                    put("title", context.rpName.ifBlank { context.rpId })
+                    put("title", context.rpName.ifBlank { requestedRpId })
                     put("username", context.userName)
-                    put("url", "https://${context.rpId}")
-                    put("urls", JSONArray().put("https://${context.rpId}"))
+                    put("url", primaryUrl)
+                    put("urls", JSONArray())
                 }
                 PasskeyUtils.writeStoredPasskeys(itemDataJson, listOf(passkeyModel))
 
@@ -789,11 +832,11 @@ class GetCredentialsActivity : FragmentActivity() {
                     vaultId = vaultKeyEntity.vaultId,
                     userId = vaultKeyEntity.userId,
                     category = "login",
-                    displayTitle = context.rpName.ifBlank { context.rpId },
+                    displayTitle = context.rpName.ifBlank { requestedRpId },
                     encryptedData = encryptedItem.ciphertext,
                     encryptionIv = encryptedItem.iv,
                     encryptionAlgorithm = encryptedItem.algorithm,
-                    primaryDomain = context.rpId,
+                    primaryDomain = requestedRpId,
                     username = context.userName,
                     iconUrl = null,
                     lastUsedAt = 0L,
@@ -809,9 +852,9 @@ class GetCredentialsActivity : FragmentActivity() {
                     listOf(
                         ItemDomainEntity(
                             itemId = createdItem.id,
-                            domain = context.rpId,
+                            domain = requestedRpId,
                             isPrimary = true,
-                            fullUrl = "https://${context.rpId}"
+                            fullUrl = primaryUrl
                         )
                     )
                 )
@@ -1007,28 +1050,160 @@ class GetCredentialsActivity : FragmentActivity() {
 
     private suspend fun loadPasskeyCreateCandidates(
         userIds: List<String>,
-        rpId: String
+        rpId: String,
+        requestedUserName: String
     ): List<expo.modules.credentialprovider.storage.ItemEntity> {
         val normalizedRpId = PasskeyUtils.normalizeHost(rpId)
         if (normalizedRpId.isBlank()) return emptyList()
 
-        val parentDomain = extractParentDomain(normalizedRpId)
+        val canonicalRpId = canonicalDomainForLookup(normalizedRpId)
+        val domainsToQuery = linkedSetOf(normalizedRpId, canonicalRpId)
+            .filter { it.isNotBlank() }
         val results = LinkedHashMap<String, expo.modules.credentialprovider.storage.ItemEntity>()
         for (userId in userIds) {
-            val items = if (parentDomain.isNotBlank() && parentDomain != normalizedRpId) {
-                database.itemDao().getLoginItemsByDomainWithFallback(
-                    normalizedRpId,
-                    parentDomain,
-                    userId
-                )
-            } else {
-                database.itemDao().getLoginItemsByDomain(normalizedRpId, userId)
+            for (domain in domainsToQuery) {
+                val items = database.itemDao().getLoginItemsByDomain(domain, userId)
+                for (item in items) {
+                    results[item.id] = item
+                }
             }
-            for (item in items) {
+            // Fallback for legacy/stale rows where item_domains is missing but primaryDomain is populated.
+            val primaryDomainItems = database.itemDao().getLoginItemsByPrimaryDomain(
+                domain = normalizedRpId,
+                canonicalDomain = canonicalRpId,
+                userId = userId
+            )
+            for (item in primaryDomainItems) {
                 results[item.id] = item
             }
         }
+
+        val candidates = results.values.toList()
+        val normalizedRequestedUser = normalizeUsername(requestedUserName)
+        if (normalizedRequestedUser.isBlank()) {
+            return candidates
+        }
+
+        val exactUserMatches = candidates.filter {
+            normalizeUsername(it.username) == normalizedRequestedUser
+        }
+        Log.d(
+            TAG,
+            "Passkey candidate lookup complete (rpId=$normalizedRpId, canonicalRpId=$canonicalRpId, requestedUser=$normalizedRequestedUser, total=${candidates.size}, userMatches=${exactUserMatches.size})"
+        )
+        return if (exactUserMatches.isNotEmpty()) exactUserMatches else candidates
+    }
+
+    private suspend fun loadPasskeyCreateCandidatesAnyUser(
+        rpId: String,
+        requestedUserName: String
+    ): List<expo.modules.credentialprovider.storage.ItemEntity> {
+        val normalizedRpId = PasskeyUtils.normalizeHost(rpId)
+        if (normalizedRpId.isBlank()) return emptyList()
+
+        val canonicalRpId = canonicalDomainForLookup(normalizedRpId)
+        val domainsToQuery = linkedSetOf(normalizedRpId, canonicalRpId)
+            .filter { it.isNotBlank() }
+        val results = LinkedHashMap<String, expo.modules.credentialprovider.storage.ItemEntity>()
+
+        val byDomain = database.itemDao().getLoginItemsByDomainsAnyUser(domainsToQuery)
+        for (item in byDomain) {
+            results[item.id] = item
+        }
+
+        val byPrimaryDomain = database.itemDao().getLoginItemsByPrimaryDomainAnyUser(
+            domain = normalizedRpId,
+            canonicalDomain = canonicalRpId
+        )
+        for (item in byPrimaryDomain) {
+            results[item.id] = item
+        }
+
+        val candidates = results.values.toList()
+        val normalizedRequestedUser = normalizeUsername(requestedUserName)
+        if (normalizedRequestedUser.isBlank()) {
+            return candidates
+        }
+
+        val exactUserMatches = candidates.filter {
+            normalizeUsername(it.username) == normalizedRequestedUser
+        }
+        return if (exactUserMatches.isNotEmpty()) exactUserMatches else candidates
+    }
+
+    private suspend fun loadPasskeyCreateCandidatesByDecryptingItems(
+        userIds: List<String>,
+        rpId: String,
+        requestedUserName: String
+    ): List<expo.modules.credentialprovider.storage.ItemEntity> {
+        val normalizedRpId = PasskeyUtils.normalizeHost(rpId)
+        if (normalizedRpId.isBlank()) return emptyList()
+        val normalizedRequestedUser = normalizeUsername(requestedUserName)
+        if (normalizedRequestedUser.isBlank()) return emptyList()
+
+        val results = LinkedHashMap<String, expo.modules.credentialprovider.storage.ItemEntity>()
+        for (userId in userIds) {
+            val muk = VaultStateManager.getMasterUnlockKey(userId) ?: continue
+            val loginItems = database.itemDao().getLoginItemsByUserId(userId)
+            for (item in loginItems) {
+                if (normalizeUsername(item.username) != normalizedRequestedUser) {
+                    continue
+                }
+
+                val vaultKey = database.vaultKeyDao().getByVaultId(item.vaultId, item.userId)
+                    ?: continue
+
+                try {
+                    val decryptedVaultKey = VaultDecryptor.decryptVaultKeyWithMuk(vaultKey, muk)
+                    val itemDataJson = VaultDecryptor.decryptItemJson(item, decryptedVaultKey)
+                    val domains = extractCandidateDomainsFromItemData(itemDataJson)
+                    if (domains.any { domainsEquivalent(it, normalizedRpId) }) {
+                        results[item.id] = item
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed decrypted candidate lookup for item ${item.id}", e)
+                }
+            }
+        }
+
         return results.values.toList()
+    }
+
+    private suspend fun resolvePasskeyCreateTarget(
+        candidates: List<expo.modules.credentialprovider.storage.ItemEntity>,
+        requestedUserName: String
+    ): PasskeyCreateTarget? {
+        if (candidates.isEmpty()) return PasskeyCreateTarget.CreateNewItem
+
+        val normalizedRequestedUser = normalizeUsername(requestedUserName)
+        if (normalizedRequestedUser.isNotBlank()) {
+            val userMatches = candidates.filter {
+                normalizeUsername(it.username) == normalizedRequestedUser
+            }
+
+            if (userMatches.size == 1) {
+                Log.d(TAG, "Auto-selected existing login item by username match")
+                return PasskeyCreateTarget.ExistingItem(userMatches.first())
+            }
+
+            if (userMatches.size > 1) {
+                val bestMatch = userMatches.maxWithOrNull(
+                    compareBy<expo.modules.credentialprovider.storage.ItemEntity> {
+                        it.lastUsedAt
+                    }.thenBy {
+                        it.updatedAt
+                    }
+                ) ?: userMatches.first()
+                Log.d(TAG, "Auto-selected most recent login item among username matches")
+                return PasskeyCreateTarget.ExistingItem(bestMatch)
+            }
+        }
+
+        if (candidates.size == 1) {
+            return PasskeyCreateTarget.ExistingItem(candidates.first())
+        }
+
+        return selectPasskeyCreateTarget(candidates)
     }
 
     private suspend fun selectPasskeyCreateTarget(
@@ -1123,14 +1298,148 @@ class GetCredentialsActivity : FragmentActivity() {
         }
     }
 
-    private fun extractParentDomain(domain: String): String {
-        val normalized = PasskeyUtils.normalizeHost(domain)
-        if (normalized.isBlank()) return ""
-        val parts = normalized.split(".")
-        return if (parts.size > 2) {
-            parts.drop(1).joinToString(".")
-        } else {
-            normalized
+    private fun canonicalDomainForLookup(domain: String): String {
+        return PasskeyUtils.normalizeHost(domain).removePrefix("www.")
+    }
+
+    private fun domainsEquivalent(left: String, right: String): Boolean {
+        return canonicalDomainForLookup(left) == canonicalDomainForLookup(right)
+    }
+
+    private fun normalizeUsername(value: String?): String {
+        return value.orEmpty().trim().lowercase()
+    }
+
+    private fun extractCandidateDomainsFromItemData(itemDataJson: JSONObject): Set<String> {
+        val domains = LinkedHashSet<String>()
+
+        val primaryUrl = itemDataJson.optString("url")
+        val primaryDomain = PasskeyUtils.normalizeHost(primaryUrl)
+        if (primaryDomain.isNotBlank()) {
+            domains.add(primaryDomain)
+        }
+
+        val urls = itemDataJson.optJSONArray("urls")
+        if (urls != null) {
+            for (index in 0 until urls.length()) {
+                val raw = urls.optString(index)
+                val domain = PasskeyUtils.normalizeHost(raw)
+                if (domain.isNotBlank()) {
+                    domains.add(domain)
+                }
+            }
+        }
+
+        val storedPasskeys = PasskeyUtils.parseStoredPasskeys(itemDataJson)
+        for (passkey in storedPasskeys) {
+            val domain = PasskeyUtils.normalizeHost(passkey.rpId)
+            if (domain.isNotBlank()) {
+                domains.add(domain)
+            }
+        }
+
+        return domains
+    }
+
+    private fun updateStoredPasskeyUsageMetadata(
+        itemDataJson: JSONObject,
+        credentialId: String,
+        rpId: String,
+        nextSignCount: Int,
+        lastUsedAtIso: String
+    ): Boolean {
+        val passkeysJson = itemDataJson.optJSONArray("passkeys") ?: return false
+        var updated = false
+
+        for (index in 0 until passkeysJson.length()) {
+            val passkeyJson = passkeysJson.optJSONObject(index) ?: continue
+            val passkeyCredentialId = extractCanonicalCredentialIdFromPasskeyJson(passkeyJson) ?: continue
+            if (passkeyCredentialId != credentialId) {
+                continue
+            }
+
+            val passkeyRpId = extractRpIdFromPasskeyJson(passkeyJson)
+            if (passkeyRpId.isBlank() || !domainsEquivalent(passkeyRpId, rpId)) {
+                continue
+            }
+
+            passkeyJson.put("signCount", nextSignCount)
+            passkeyJson.put("lastUsedAt", lastUsedAtIso)
+            updated = true
+        }
+
+        return updated
+    }
+
+    private fun appendStoredPasskeyPreservingExisting(
+        itemDataJson: JSONObject,
+        passkey: StoredPasskey
+    ) {
+        val passkeysJson = itemDataJson.optJSONArray("passkeys")
+            ?: JSONArray().also { itemDataJson.put("passkeys", it) }
+        passkeysJson.put(serializeStoredPasskey(passkey))
+    }
+
+    private fun serializeStoredPasskey(passkey: StoredPasskey): JSONObject {
+        val transportsJson = JSONArray()
+        for (transport in passkey.transports) {
+            transportsJson.put(transport)
+        }
+
+        return JSONObject().apply {
+            put("credentialId", PasskeyUtils.canonicalizeCredentialId(passkey.credentialId) ?: passkey.credentialId)
+            put("rpId", PasskeyUtils.normalizeHost(passkey.rpId))
+            put("rpName", passkey.rpName)
+            put("userHandle", PasskeyUtils.canonicalizeCredentialId(passkey.userHandle) ?: passkey.userHandle)
+            put("userName", passkey.userName)
+            put("userDisplayName", passkey.userDisplayName)
+            put("privateKey", passkey.privateKey)
+            put("publicKey", passkey.publicKey)
+            put("algorithm", passkey.algorithm)
+            put("signCount", passkey.signCount)
+            put("createdAt", passkey.createdAt)
+            passkey.lastUsedAt?.let { put("lastUsedAt", it) }
+            passkey.status?.let { put("status", it) }
+            passkey.statusReason?.let { put("statusReason", it) }
+            passkey.statusUpdatedAt?.let { put("statusUpdatedAt", it) }
+            put("transports", transportsJson)
+        }
+    }
+
+    private fun extractCanonicalCredentialIdFromPasskeyJson(passkeyJson: JSONObject): String? {
+        val rawValue = when {
+            passkeyJson.has("credentialId") -> passkeyJson.opt("credentialId")
+            passkeyJson.has("id") -> passkeyJson.opt("id")
+            passkeyJson.has("rawId") -> passkeyJson.opt("rawId")
+            else -> null
+        }
+
+        return canonicalizeCredentialIdFromJsonValue(rawValue)
+    }
+
+    private fun extractRpIdFromPasskeyJson(passkeyJson: JSONObject): String {
+        val rpId = when {
+            passkeyJson.has("rpId") -> passkeyJson.optString("rpId")
+            passkeyJson.has("rpID") -> passkeyJson.optString("rpID")
+            else -> passkeyJson.optJSONObject("rp")?.optString("id").orEmpty()
+        }
+
+        return PasskeyUtils.normalizeHost(rpId)
+    }
+
+    private fun canonicalizeCredentialIdFromJsonValue(rawValue: Any?): String? {
+        return when (rawValue) {
+            is String -> PasskeyUtils.canonicalizeCredentialId(rawValue)
+            is JSONArray -> {
+                val bytes = ByteArray(rawValue.length())
+                for (index in 0 until rawValue.length()) {
+                    val numeric = rawValue.optInt(index, -1)
+                    if (numeric !in 0..255) return null
+                    bytes[index] = numeric.toByte()
+                }
+                PasskeyUtils.encodeBase64Url(bytes)
+            }
+            else -> null
         }
     }
 

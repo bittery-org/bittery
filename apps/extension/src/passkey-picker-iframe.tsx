@@ -120,7 +120,7 @@ function PasskeyPickerIframe() {
 
 	return (
 		<div ref={containerRef} className="w-full text-foreground">
-			<Card className="space-y-3 border border-border/80 bg-card gap-2 p-3 shadow-sm">
+			<Card className="gap-2 space-y-3 border border-border/80 bg-card p-3 shadow-sm">
 				<div className="flex items-start gap-2.5">
 					<div className="mt-0.5 rounded-xl border border-primary/25 bg-primary/10 p-1.5 text-primary shadow-sm">
 						<IconCircleKeyOutlineDuo18 size={16} />

@@ -65,7 +65,10 @@ function PasskeySaveTargetIframe() {
 		};
 
 		window.addEventListener("message", handleMessage);
-		window.parent.postMessage({ type: "PASSKEY_SAVE_TARGET_IFRAME_READY" }, "*");
+		window.parent.postMessage(
+			{ type: "PASSKEY_SAVE_TARGET_IFRAME_READY" },
+			"*",
+		);
 		return () => window.removeEventListener("message", handleMessage);
 	}, []);
 
@@ -256,7 +259,12 @@ function PasskeySaveTargetIframe() {
 					>
 						Continue
 					</Button>
-					<Button onClick={handleCancel} variant="ghost" size="sm" className="flex-1">
+					<Button
+						onClick={handleCancel}
+						variant="ghost"
+						size="sm"
+						className="flex-1"
+					>
 						Cancel
 					</Button>
 				</div>

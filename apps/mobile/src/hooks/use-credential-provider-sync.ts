@@ -1,13 +1,16 @@
 import { useAccountsInfo, useItems } from "@bittery/core/hooks";
 import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import { storage } from "@/services/storage";
 import type {
 	PendingPasskeyMutation,
 	SaveCredentialParams,
 } from "../../modules/credential-provider";
 import CredentialProvider from "../../modules/credential-provider";
+
+const MAX_PENDING_PASSKEY_ATTEMPTS = 5;
+const MAX_PENDING_PASSKEY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Extracts the domain from a URL string
@@ -60,7 +63,11 @@ export function useCredentialProviderSync(
 ) {
 	const { autoSync = true, debounceMs = 2000, enabled = true } = options;
 
-	const { items, isLoading: isLoadingItems } = useItems();
+	const {
+		items,
+		isLoading: isLoadingItems,
+		refetch: refetchItems,
+	} = useItems();
 	const { accountsInfo, isAllAccountsMode } = useAccountsInfo();
 
 	const [isSyncing, setIsSyncing] = useState(false);
@@ -232,11 +239,36 @@ export function useCredentialProviderSync(
 				const itemsData = loginItems
 					.filter((item) => item._encrypted)
 					.map((item) => {
-						const urls: string[] = [];
-						if (item.url) urls.push(item.url);
+						const urlSet = new Set<string>();
+						const addUrl = (value: unknown) => {
+							if (typeof value === "string" && value.trim().length > 0) {
+								urlSet.add(value.trim());
+							}
+						};
+						addUrl(item.url);
 						if (item.urls && Array.isArray(item.urls)) {
-							urls.push(...item.urls);
+							for (const value of item.urls) {
+								addUrl(value);
+							}
 						}
+						// Passkey-only items may not always carry explicit url/urls fields.
+						// Backfill domains into sync payload from stored passkey rpIds.
+						const passkeys = (item as { passkeys?: unknown }).passkeys;
+						if (Array.isArray(passkeys)) {
+							for (const passkey of passkeys) {
+								const rpId =
+									typeof passkey === "object" &&
+									passkey !== null &&
+									"rpId" in passkey &&
+									typeof (passkey as { rpId?: unknown }).rpId === "string"
+										? ((passkey as { rpId: string }).rpId || "").trim()
+										: "";
+								if (rpId) {
+									addUrl(`https://${rpId}`);
+								}
+							}
+						}
+						const urls = Array.from(urlSet);
 
 						const encrypted = item._encrypted as {
 							data: string;
@@ -320,14 +352,19 @@ export function useCredentialProviderSync(
 	const flushPendingPasskeyMutations = useCallback(async (): Promise<{
 		applied: number;
 		failed: number;
+		discarded: number;
 	}> => {
 		if (!isAvailable || Platform.OS !== "android") {
-			return { applied: 0, failed: 0 };
+			return { applied: 0, failed: 0, discarded: 0 };
+		}
+
+		if (accountsInfo.length === 0) {
+			return { applied: 0, failed: 0, discarded: 0 };
 		}
 
 		const pending = await CredentialProvider.getPendingPasskeyMutations("");
 		if (!pending || pending.length === 0) {
-			return { applied: 0, failed: 0 };
+			return { applied: 0, failed: 0, discarded: 0 };
 		}
 
 		const accountByUserId = new Map(
@@ -335,26 +372,76 @@ export function useCredentialProviderSync(
 		);
 
 		const appliedIds: string[] = [];
+		const discardedIds: string[] = [];
 		const failedByError = new Map<string, string[]>();
 
+		const getErrorMessage = (error: unknown): string => {
+			if (typeof error === "string") return error;
+			if (error instanceof Error) return error.message;
+			if (error && typeof error === "object") {
+				const maybe = error as {
+					message?: string;
+					data?: { code?: string };
+					shape?: { message?: string };
+				};
+				return (
+					maybe.shape?.message ||
+					maybe.message ||
+					maybe.data?.code ||
+					"Unknown passkey mutation flush error"
+				);
+			}
+			return "Unknown passkey mutation flush error";
+		};
+
+		const isNonRetriableFailure = (
+			mutation: PendingPasskeyMutation,
+			errorMessage: string,
+		): boolean => {
+			const normalized = errorMessage.toLowerCase();
+			if (
+				normalized.includes("item not found") ||
+				normalized.includes("access denied") ||
+				normalized.includes("read-only") ||
+				normalized.includes("forbidden") ||
+				normalized.includes("unauthorized") ||
+				normalized.includes("unsupported passkey mutation operation")
+			) {
+				return true;
+			}
+
+			// Local placeholder IDs cannot be updated remotely; once they fail, drop them.
+			if (
+				mutation.operation === "update_item" &&
+				mutation.itemId.startsWith("local_passkey_")
+			) {
+				return true;
+			}
+			return false;
+		};
+
 		const recordFailure = (mutationId: string, error: unknown) => {
-			const message =
-				error instanceof Error
-					? error.message
-					: typeof error === "string"
-						? error
-						: "Unknown passkey mutation flush error";
+			const message = getErrorMessage(error);
 			const ids = failedByError.get(message) ?? [];
 			ids.push(mutationId);
 			failedByError.set(message, ids);
 		};
 
 		for (const mutation of pending as PendingPasskeyMutation[]) {
+			const ageMs = Date.now() - mutation.createdAt;
+			if (
+				mutation.attemptCount >= MAX_PENDING_PASSKEY_ATTEMPTS ||
+				ageMs > MAX_PENDING_PASSKEY_AGE_MS
+			) {
+				discardedIds.push(mutation.id);
+				continue;
+			}
+
 			const account = accountByUserId.get(mutation.userId);
 			if (!account) {
-				recordFailure(
+				console.log(
+					"[CredentialProviderSync] Skipping passkey mutation flush (account locked or missing):",
 					mutation.id,
-					`No unlocked account context for userId=${mutation.userId}`,
 				);
 				continue;
 			}
@@ -375,21 +462,41 @@ export function useCredentialProviderSync(
 						encryptionAlgorithm: mutation.encryptionAlgorithm || "AES-GCM",
 					});
 				} else {
-					throw new Error(`Unsupported passkey mutation operation: ${mutation.operation}`);
+					throw new Error(
+						`Unsupported passkey mutation operation: ${mutation.operation}`,
+					);
 				}
 
 				appliedIds.push(mutation.id);
 			} catch (error) {
-				recordFailure(mutation.id, error);
+				const message = getErrorMessage(error);
+				if (isNonRetriableFailure(mutation, message)) {
+					discardedIds.push(mutation.id);
+					console.warn(
+						"[CredentialProviderSync] Discarding non-retriable passkey mutation:",
+						{
+							id: mutation.id,
+							operation: mutation.operation,
+							itemId: mutation.itemId,
+							error: message,
+						},
+					);
+				} else {
+					recordFailure(mutation.id, message);
+				}
 			}
 		}
 
-		if (appliedIds.length > 0) {
-			await CredentialProvider.markPendingPasskeyMutationsApplied(appliedIds);
+		const idsToDelete = [...appliedIds, ...discardedIds];
+		if (idsToDelete.length > 0) {
+			await CredentialProvider.markPendingPasskeyMutationsApplied(idsToDelete);
 		}
 
 		for (const [errorMessage, ids] of failedByError) {
-			await CredentialProvider.markPendingPasskeyMutationsFailed(ids, errorMessage);
+			await CredentialProvider.markPendingPasskeyMutationsFailed(
+				ids,
+				errorMessage,
+			);
 		}
 
 		return {
@@ -398,8 +505,17 @@ export function useCredentialProviderSync(
 				(total, ids) => total + ids.length,
 				0,
 			),
+			discarded: discardedIds.length,
 		};
 	}, [accountsInfo, isAvailable]);
+
+	const flushPendingPasskeyMutationsAndRefresh = useCallback(async () => {
+		const result = await flushPendingPasskeyMutations();
+		if (result.applied > 0) {
+			await refetchItems();
+		}
+		return result;
+	}, [flushPendingPasskeyMutations, refetchItems]);
 
 	/**
 	 * Perform the legacy sync operation.
@@ -440,9 +556,12 @@ export function useCredentialProviderSync(
 		setError(null);
 
 		try {
-			const flushResult = await flushPendingPasskeyMutations();
+			const flushResult = await flushPendingPasskeyMutationsAndRefresh();
 			if (flushResult.applied > 0 || flushResult.failed > 0) {
-				console.log("[CredentialProviderSync] Flushed pending passkey mutations:", flushResult);
+				console.log(
+					"[CredentialProviderSync] Flushed pending passkey mutations:",
+					flushResult,
+				);
 			}
 
 			// Sync vault data (new unified storage approach)
@@ -497,8 +616,61 @@ export function useCredentialProviderSync(
 		accountsInfo.length,
 		extractCredentials,
 		syncVaultData,
-		flushPendingPasskeyMutations,
+		flushPendingPasskeyMutationsAndRefresh,
 	]);
+
+	// Flush provider-generated passkey mutations while app is running.
+	// This avoids requiring an app restart before passkey-created items appear and sync remotely.
+	useEffect(() => {
+		if (!isAvailable || Platform.OS !== "android") {
+			return;
+		}
+
+		let disposed = false;
+		let inFlight = false;
+
+		const flushNow = async (reason: string) => {
+			if (disposed || inFlight) return;
+			inFlight = true;
+			try {
+				const result = await flushPendingPasskeyMutationsAndRefresh();
+				if (result.applied > 0 || result.failed > 0) {
+					console.log(
+						`[CredentialProviderSync] Background passkey flush (${reason}):`,
+						result,
+					);
+				}
+			} catch (error) {
+				console.warn(
+					"[CredentialProviderSync] Background passkey flush failed:",
+					error,
+				);
+			} finally {
+				inFlight = false;
+			}
+		};
+
+		void flushNow("mount");
+
+		const appStateSubscription = AppState.addEventListener(
+			"change",
+			(nextState) => {
+				if (nextState === "active") {
+					void flushNow("app_active");
+				}
+			},
+		);
+
+		const intervalId = setInterval(() => {
+			void flushNow("interval");
+		}, 15000);
+
+		return () => {
+			disposed = true;
+			appStateSubscription.remove();
+			clearInterval(intervalId);
+		};
+	}, [isAvailable, flushPendingPasskeyMutationsAndRefresh]);
 
 	/**
 	 * Calculate a hash of items to detect changes

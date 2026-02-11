@@ -52,8 +52,7 @@ function TeamPage() {
 
 	const team = teamQuery.data;
 	const canEdit = team?.userRole === "owner" || team?.userRole === "admin";
-	const isSelfHostedMode =
-		registrationStatusQuery.data?.mode === "self-hosted";
+	const isSelfHostedMode = registrationStatusQuery.data?.mode === "self-hosted";
 	const currentUserId = meQuery.data?.id;
 
 	if (teamListQuery.isLoading || teamQuery.isLoading) {

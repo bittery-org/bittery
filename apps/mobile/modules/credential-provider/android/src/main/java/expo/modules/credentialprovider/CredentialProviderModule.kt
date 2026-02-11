@@ -14,6 +14,7 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.credentialprovider.crypto.BiometricKeyManager
 import expo.modules.credentialprovider.crypto.MukEscrowManager
+import expo.modules.credentialprovider.crypto.VaultDecryptor
 import expo.modules.credentialprovider.state.VaultStateManager
 import expo.modules.credentialprovider.storage.CredentialStorageManager
 import expo.modules.credentialprovider.storage.CredentialDatabase
@@ -79,6 +80,48 @@ class CredentialProviderModule : Module() {
 
     private val currentActivity: FragmentActivity?
         get() = appContext.currentActivity as? FragmentActivity
+
+    private fun collectCandidateDomainsFromItemJson(itemDataJson: JSONObject): List<String> {
+        val domains = LinkedHashSet<String>()
+
+        val primaryUrl = itemDataJson.optString("url")
+        extractDomain(primaryUrl)?.let { domains.add(it) }
+
+        val urlsJson = itemDataJson.optJSONArray("urls")
+        if (urlsJson != null) {
+            for (index in 0 until urlsJson.length()) {
+                val rawUrl = urlsJson.optString(index, "")
+                extractDomain(rawUrl)?.let { domains.add(it) }
+            }
+        }
+
+        val passkeysJson = itemDataJson.optJSONArray("passkeys")
+        if (passkeysJson != null) {
+            for (index in 0 until passkeysJson.length()) {
+                val passkey = passkeysJson.optJSONObject(index) ?: continue
+                val rpId = passkey.optString("rpId", "")
+                extractDomain(rpId)?.let { domains.add(it) }
+            }
+        }
+
+        return domains.toList()
+    }
+
+    private suspend fun recoverDomainsFromEncryptedItem(
+        itemEntity: ItemEntity,
+        muk: ByteArray
+    ): List<String> {
+        return try {
+            val vaultKey = database.vaultKeyDao().getByVaultId(itemEntity.vaultId, itemEntity.userId)
+                ?: return emptyList()
+            val decryptedVaultKey = VaultDecryptor.decryptVaultKeyWithMuk(vaultKey, muk)
+            val itemDataJson = VaultDecryptor.decryptItemJson(itemEntity, decryptedVaultKey)
+            collectCandidateDomainsFromItemJson(itemDataJson)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to recover domains from encrypted item ${itemEntity.id}", e)
+            emptyList()
+        }
+    }
 
     override fun definition() = ModuleDefinition {
         Name("CredentialProvider")
@@ -620,7 +663,7 @@ class CredentialProviderModule : Module() {
 
                     Log.d(TAG, "syncVaultData: Syncing ${vaultKeysData.size} vault keys and ${itemsData.size} items for user $userId")
 
-                    withContext(Dispatchers.IO) {
+	                    withContext(Dispatchers.IO) {
                         // Ensure AuthDataEntity exists for this user
                         // If it doesn't exist, create a minimal one
                         val existingAuthData = database.authDataDao().getByUserId(userId)
@@ -701,52 +744,75 @@ class CredentialProviderModule : Module() {
                             }
                         }
 
-                        if (items.isNotEmpty()) {
-                            database.itemDao().insertAll(items)
-                            Log.d(TAG, "Inserted ${items.size} items")
-                        }
+	                        if (items.isNotEmpty()) {
+	                            database.itemDao().insertAll(items)
+	                            Log.d(TAG, "Inserted ${items.size} items")
+	                        }
 
-                        // Insert domain mappings for each item
-                        var totalDomains = 0
-                        for (i in 0 until itemsJson.length()) {
-                            try {
-                                val item = itemsJson.getJSONObject(i)
+	                        val itemById = items.associateBy { it.id }
+	                        val mukForDomainRepair = VaultStateManager.getMasterUnlockKey(userId)
+
+	                        // Insert domain mappings for each item
+	                        var totalDomains = 0
+	                        for (i in 0 until itemsJson.length()) {
+	                            try {
+	                                val item = itemsJson.getJSONObject(i)
                                 val itemId = item.optString("id", "")
                                 if (itemId.isEmpty()) continue
 
                                 val category = item.optString("category", "")
                                 if (category != "login") continue
 
-                                // Parse URLs array from JSON
-                                val urlsJson = item.optJSONArray("urls") ?: JSONArray()
-                                val urls = (0 until urlsJson.length()).map { i ->
-                                    urlsJson.getString(i)
-                                }
+	                                // Parse URLs array from JSON
+	                                val urlsJson = item.optJSONArray("urls") ?: JSONArray()
+	                                val urls = (0 until urlsJson.length()).map { i ->
+	                                    urlsJson.getString(i)
+	                                }
 
-                                if (urls.isEmpty()) {
-                                    Log.d(TAG, "Item $itemId has no URLs, skipping domain mapping")
-                                    continue
-                                }
+	                                val domainsByValue = LinkedHashMap<String, ItemDomainEntity>()
+	                                for (url in urls) {
+	                                    val domain = extractDomain(url) ?: continue
+	                                    if (!domainsByValue.containsKey(domain)) {
+	                                        domainsByValue[domain] = ItemDomainEntity(
+	                                            itemId = itemId,
+	                                            domain = domain,
+	                                            isPrimary = domainsByValue.isEmpty(),
+	                                            fullUrl = url
+	                                        )
+	                                    }
+	                                }
 
-                                val domains = urls.mapIndexedNotNull { urlIndex, url ->
-                                    val domain = extractDomain(url) ?: return@mapIndexedNotNull null
-                                    ItemDomainEntity(
-                                        itemId = itemId,
-                                        domain = domain,
-                                        isPrimary = urlIndex == 0,
-                                        fullUrl = url
-                                    )
-                                }
+	                                if (domainsByValue.isEmpty()) {
+	                                    val localItem = itemById[itemId]
+	                                    if (mukForDomainRepair != null && localItem != null) {
+	                                        val recoveredDomains = recoverDomainsFromEncryptedItem(localItem, mukForDomainRepair)
+	                                        for (domain in recoveredDomains) {
+	                                            if (!domainsByValue.containsKey(domain)) {
+	                                                domainsByValue[domain] = ItemDomainEntity(
+	                                                    itemId = itemId,
+	                                                    domain = domain,
+	                                                    isPrimary = domainsByValue.isEmpty(),
+	                                                    fullUrl = "https://$domain"
+	                                                )
+	                                            }
+	                                        }
+	                                    }
+	                                }
 
-                                if (domains.isNotEmpty()) {
-                                    database.itemDomainDao().replaceDomainsForItem(itemId, domains)
-                                    totalDomains += domains.size
-                                    Log.d(TAG, "Inserted ${domains.size} domains for item $itemId: ${domains.map { it.domain }}")
-                                }
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Failed to process domains for item at index $i", e)
-                            }
-                        }
+	                                val domains = domainsByValue.values.toList()
+
+	                                if (domains.isNotEmpty()) {
+	                                    database.itemDomainDao().replaceDomainsForItem(itemId, domains)
+	                                    totalDomains += domains.size
+	                                    Log.d(TAG, "Inserted ${domains.size} domains for item $itemId: ${domains.map { it.domain }}")
+	                                }
+	                                else {
+	                                    Log.d(TAG, "Item $itemId still has no domains after repair, skipping domain mapping")
+	                                }
+	                            } catch (e: Exception) {
+	                                Log.w(TAG, "Failed to process domains for item at index $i", e)
+	                            }
+	                        }
 
                         Log.d(TAG, "Inserted $totalDomains domain mappings")
 

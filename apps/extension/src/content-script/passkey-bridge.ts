@@ -6,8 +6,8 @@ import {
 	BITTERY_PASSKEY_GET_RESPONSE,
 	BITTERY_PASSKEY_SOURCE_CONTENT,
 	BITTERY_PASSKEY_SOURCE_PAGE,
-	PASSKEY_BRIDGE_TIMEOUT_MS,
 	isPasskeyPageRequestMessage,
+	PASSKEY_BRIDGE_TIMEOUT_MS,
 	type PasskeyBackgroundResponse,
 	type PasskeyCreateHandlerPayload,
 	type PasskeyGetHandlerPayload,
@@ -123,8 +123,14 @@ function sendRuntimeMessage(
 
 async function executePasskeyFlow(input: {
 	message:
-		| Extract<PasskeyPageRequestMessage, { type: typeof BITTERY_PASSKEY_CREATE_REQUEST }>
-		| Extract<PasskeyPageRequestMessage, { type: typeof BITTERY_PASSKEY_GET_REQUEST }>;
+		| Extract<
+				PasskeyPageRequestMessage,
+				{ type: typeof BITTERY_PASSKEY_CREATE_REQUEST }
+		  >
+		| Extract<
+				PasskeyPageRequestMessage,
+				{ type: typeof BITTERY_PASSKEY_GET_REQUEST }
+		  >;
 	signal: AbortSignal;
 }): Promise<PasskeyBackgroundResponse> {
 	const runtimeType =
@@ -231,7 +237,9 @@ function isTrustedPageMessage(event: MessageEvent): boolean {
 	return source === BITTERY_PASSKEY_SOURCE_PAGE;
 }
 
-async function handleRequest(message: PasskeyPageRequestMessage): Promise<void> {
+async function handleRequest(
+	message: PasskeyPageRequestMessage,
+): Promise<void> {
 	if (message.type === BITTERY_PASSKEY_CANCEL_REQUEST) {
 		const cancelledRequest = cancelRequest(message.requestId);
 		if (cancelledRequest) {

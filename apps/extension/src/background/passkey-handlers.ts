@@ -1,4 +1,8 @@
-import type { DecryptedItem, DecryptedItemData, Passkey } from "@bittery/shared/types";
+import type {
+	DecryptedItem,
+	DecryptedItemData,
+	Passkey,
+} from "@bittery/shared/types";
 import { storage } from "../lib/storage";
 import {
 	buildPasskeyAttestationObject,
@@ -30,7 +34,10 @@ import {
 	hydrateDesktopAccountMaterial,
 } from "./desktop-key-material";
 import { desktopSync } from "./desktop-sync";
-import { onLocalItemCreated, onLocalItemUpdated } from "./services/local-item-cache-service";
+import {
+	onLocalItemCreated,
+	onLocalItemUpdated,
+} from "./services/local-item-cache-service";
 import {
 	isUnlocked,
 	setDesktopModeSentinel,
@@ -236,7 +243,7 @@ function toDecryptedData(item: LoginItemWithAccount): DecryptedItemData {
 		updatedAt: _updatedAt,
 		vault: _vault,
 		account: _account,
-		_encrypted: _encrypted,
+		_encrypted,
 		...data
 	} = record;
 	return data as DecryptedItemData;
@@ -322,7 +329,10 @@ function allowCredentialIds(
 	);
 }
 
-function matchesCreationRpId(item: LoginItemWithAccount, rpId: string): boolean {
+function matchesCreationRpId(
+	item: LoginItemWithAccount,
+	rpId: string,
+): boolean {
 	return getItemCandidateRpIds(item).includes(rpId);
 }
 
@@ -366,7 +376,9 @@ function normalizeVaultType(type: string): "personal" | "team" {
 	return type === "team" ? "team" : "personal";
 }
 
-async function getWritableVaultOptions(): Promise<PasskeyWritableVaultOption[]> {
+async function getWritableVaultOptions(): Promise<
+	PasskeyWritableVaultOption[]
+> {
 	const vaults = await trpcClient.vault.list.query();
 	return vaults
 		.map((vault) => ({
@@ -498,8 +510,12 @@ export function resolveCreateDecision(input: {
 	createDecision?: PasskeyCreateSaveDecision;
 }): CreateDecisionResolution {
 	const createDecision = input.createDecision;
-	const autoAttachTarget = pickCreateTarget(input.candidateItems, input.userName);
-	const isAmbiguousCreate = input.candidateItems.length > 0 && !autoAttachTarget;
+	const autoAttachTarget = pickCreateTarget(
+		input.candidateItems,
+		input.userName,
+	);
+	const isAmbiguousCreate =
+		input.candidateItems.length > 0 && !autoAttachTarget;
 
 	if (createDecision?.action === "attach-existing") {
 		const selectedItem = input.candidateItems.find(
@@ -728,7 +744,9 @@ export function findMatchingPasskeysForItems(input: {
 		}
 	}
 
-	return matches.sort((left, right) => compareByMostRecent(left.passkey, right.passkey));
+	return matches.sort((left, right) =>
+		compareByMostRecent(left.passkey, right.passkey),
+	);
 }
 
 async function findMatchingPasskeys(input: {
@@ -750,9 +768,12 @@ async function updateStoredPasskey(input: {
 }): Promise<void> {
 	const accountEmail = await resolveAccountEmailForItem(input.match.item);
 	if (accountEmail) {
-		const hasWriteCapability = await ensureDesktopWriteCapability(accountEmail, {
-			allowBiometricPrompt: input.allowBiometricPrompt,
-		});
+		const hasWriteCapability = await ensureDesktopWriteCapability(
+			accountEmail,
+			{
+				allowBiometricPrompt: input.allowBiometricPrompt,
+			},
+		);
 		if (!hasWriteCapability) {
 			throw new Error("No vault keys available for passkey update");
 		}
@@ -847,7 +868,8 @@ async function markPasskeyAsSuspectSafely(input: {
 				requestId: input.requestId,
 				rpId: input.rpId,
 				stage: "mark_suspect",
-				error: markError instanceof Error ? markError.message : String(markError),
+				error:
+					markError instanceof Error ? markError.message : String(markError),
 				flow: "get",
 			},
 			"error",
@@ -867,7 +889,9 @@ function buildCreatePromptPayload(input: {
 		.map((item) => buildCreateExistingItemOption(item, input.rpId))
 		.sort((left, right) => {
 			const leftTs = Date.parse(left.lastUsedAt ?? "1970-01-01T00:00:00.000Z");
-			const rightTs = Date.parse(right.lastUsedAt ?? "1970-01-01T00:00:00.000Z");
+			const rightTs = Date.parse(
+				right.lastUsedAt ?? "1970-01-01T00:00:00.000Z",
+			);
 			return rightTs - leftTs;
 		});
 
@@ -905,7 +929,7 @@ export async function handlePasskeyCreate(
 	}
 
 	let rpId = "";
-	let rpName = payload.publicKey.rp.name;
+	const rpName = payload.publicKey.rp.name;
 	let stage: "matching" | "crypto" | "persist" = "matching";
 
 	try {
@@ -1148,7 +1172,9 @@ export async function handlePasskeyGet(
 		const assertion = await signPasskeyAssertion({
 			privateKeyBase64: match.passkey.privateKey,
 			rpId,
-			clientDataHashBase64: bytesToBase64(base64UrlToBytes(payload.clientDataHash)),
+			clientDataHashBase64: bytesToBase64(
+				base64UrlToBytes(payload.clientDataHash),
+			),
 			signCount: nextSignCount,
 		});
 

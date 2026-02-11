@@ -30,7 +30,11 @@ import {
 	DetailUrlField,
 } from "./field-components";
 import { InlineTotpDisplay } from "./inline-totp-display";
-import { handleCopy, type CategoryDetailProps, type LoginDisplayData } from "./shared";
+import {
+	type CategoryDetailProps,
+	handleCopy,
+	type LoginDisplayData,
+} from "./shared";
 
 function formatPasskeyLastUsed(value?: string): string {
 	if (!value) {
@@ -75,9 +79,9 @@ export function LoginDetail({
 	availableTags = [],
 	isUpdatingTags,
 }: CategoryDetailProps<LoginDisplayData>) {
-	const [removingCredentialId, setRemovingCredentialId] = useState<string | null>(
-		null,
-	);
+	const [removingCredentialId, setRemovingCredentialId] = useState<
+		string | null
+	>(null);
 	const [pendingRemoval, setPendingRemoval] = useState<{
 		credentialId: string;
 		label: string;
@@ -204,15 +208,13 @@ export function LoginDetail({
 													{formatPasskeyLastUsed(
 														passkey.lastUsedAt ?? passkey.createdAt,
 													)}
-													{" \u2022 "}
-													#{passkey.signCount ?? 0}
+													{" \u2022 "}#{passkey.signCount ?? 0}
 												</p>
 												{isSuspect && (
 													<p className="mt-1 flex items-center gap-1 text-[11px] text-destructive">
 														<IconTriangleWarningOutlineDuo18 className="size-3.5 shrink-0" />
 														Marked after extension sign-in failure (
-														{passkey.statusReason ?? "unknown"})
-														{" "}
+														{passkey.statusReason ?? "unknown"}){" "}
 														{formatStatusDate(passkey.statusUpdatedAt)}
 													</p>
 												)}

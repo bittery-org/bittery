@@ -5,6 +5,10 @@
  * Runtime message types are preserved for popup/content compatibility.
  */
 
+import type {
+	PasskeyCreateHandlerPayload,
+	PasskeyGetHandlerPayload,
+} from "../passkey/types";
 import {
 	handleCanQuickUnlock,
 	handleCheckAuth,
@@ -36,18 +40,14 @@ import {
 	handleOpenDesktopApp,
 } from "./native-messaging";
 import {
-	handleCaptureTabScreenshot,
-	handleUpdateItemTotp,
-} from "./qr-scan-handlers";
-import {
 	handlePasskeyCancel,
 	handlePasskeyCreate,
 	handlePasskeyGet,
 } from "./passkey-handlers";
-import type {
-	PasskeyCreateHandlerPayload,
-	PasskeyGetHandlerPayload,
-} from "../passkey/types";
+import {
+	handleCaptureTabScreenshot,
+	handleUpdateItemTotp,
+} from "./qr-scan-handlers";
 import { refreshAutoLockTimeout } from "./session-manager";
 import {
 	cleanupSync,

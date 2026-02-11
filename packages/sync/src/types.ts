@@ -161,6 +161,8 @@ export interface SyncManagerOptions {
 	onStatusChange?: (status: ConnectionStatus) => void;
 	reconnectDelay?: number;
 	maxReconnectDelay?: number;
+	/** Custom fetch implementation (e.g. `expo/fetch` for streaming support in React Native) */
+	fetch?: (url: string, init?: any) => Promise<Response>;
 }
 
 /**

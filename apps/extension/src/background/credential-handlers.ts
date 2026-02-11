@@ -14,7 +14,10 @@ import {
 	onLocalItemCreated,
 	onLocalItemUpdated,
 } from "./services/local-item-cache-service";
-import { ensureUnlockedOrRecoverFromDesktop, updateActivity } from "./session-manager";
+import {
+	ensureUnlockedOrRecoverFromDesktop,
+	updateActivity,
+} from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
 import {

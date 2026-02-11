@@ -116,7 +116,8 @@ function ItemListRow({
 }) {
 	const title = item.title;
 	const subtitle = item.username || item.url;
-	const passkeyCount = item.category === "login" ? (item.passkeys?.length ?? 0) : 0;
+	const passkeyCount =
+		item.category === "login" ? (item.passkeys?.length ?? 0) : 0;
 
 	return (
 		<button
@@ -149,7 +150,9 @@ function ItemListRow({
 								title={`${passkeyCount} passkey${passkeyCount === 1 ? "" : "s"}`}
 								className={cn(
 									"inline-flex items-center",
-									isSelected ? "text-primary-foreground/80" : "text-muted-foreground",
+									isSelected
+										? "text-primary-foreground/80"
+										: "text-muted-foreground",
 								)}
 							>
 								<IconCircleKeyOutlineDuo18 className="size-3.5 shrink-0" />

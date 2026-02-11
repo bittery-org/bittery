@@ -99,9 +99,7 @@ export const authRouter = router({
 		return {
 			mode,
 			allowPublicSignup,
-			reason: allowPublicSignup
-				? undefined
-				: "invite_only_after_bootstrap",
+			reason: allowPublicSignup ? undefined : "invite_only_after_bootstrap",
 		};
 	}),
 

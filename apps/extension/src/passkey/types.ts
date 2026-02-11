@@ -2,7 +2,8 @@ export const BITTERY_PASSKEY_SOURCE_PAGE = "BITTERY_PASSKEY_PAGE";
 export const BITTERY_PASSKEY_SOURCE_CONTENT = "BITTERY_PASSKEY_CONTENT";
 
 export const BITTERY_PASSKEY_CREATE_REQUEST = "BITTERY_PASSKEY_CREATE_REQUEST";
-export const BITTERY_PASSKEY_CREATE_RESPONSE = "BITTERY_PASSKEY_CREATE_RESPONSE";
+export const BITTERY_PASSKEY_CREATE_RESPONSE =
+	"BITTERY_PASSKEY_CREATE_RESPONSE";
 export const BITTERY_PASSKEY_GET_REQUEST = "BITTERY_PASSKEY_GET_REQUEST";
 export const BITTERY_PASSKEY_GET_RESPONSE = "BITTERY_PASSKEY_GET_RESPONSE";
 export const BITTERY_PASSKEY_CANCEL_REQUEST = "BITTERY_PASSKEY_CANCEL_REQUEST";
@@ -169,7 +170,9 @@ export type SerializedGetResult = {
 	authenticatorAttachment: AuthenticatorAttachment | null;
 };
 
-export type PasskeySerializedResult = SerializedCreateResult | SerializedGetResult;
+export type PasskeySerializedResult =
+	| SerializedCreateResult
+	| SerializedGetResult;
 
 export type PasskeyPageResponseMessage = BaseResponseMessage & {
 	type:

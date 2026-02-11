@@ -48,6 +48,11 @@ import java.time.Instant
  */
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 class BitteryCredentialProviderService : CredentialProviderService() {
+    private data class PasskeyCandidate(
+        val item: ItemEntity,
+        val passkey: StoredPasskey
+    )
+
     companion object {
         private const val TAG = "BitteryCredProvider"
         const val EXTRA_CREDENTIAL_ID = "credential_id"
@@ -321,13 +326,12 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         option: BeginGetPublicKeyCredentialOption
     ): PublicKeyCredentialEntry {
         val pendingIntent = createGetPasskeyPendingIntent(item.id, passkey.credentialId)
-        val displayUser = passkey.userDisplayName.ifBlank {
-            passkey.userName.ifBlank { item.username ?: "Passkey" }
-        }
+        val username = resolvePasskeyEntryUsername(passkey, item)
+        val displayUser = resolvePasskeyDisplayName(passkey, item)
 
         return PublicKeyCredentialEntry.Builder(
             applicationContext,
-            displayUser,
+            username,
             pendingIntent,
             option
         )
@@ -345,24 +349,35 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         if (normalizedRpId.isBlank()) return emptyList()
 
         val allowedCredentialIds = PasskeyUtils.parseAllowCredentialIdsFromGetRequestJson(option.requestJson)
-        val parentDomain = extractParentDomain(normalizedRpId)
-        val entries = mutableListOf<PublicKeyCredentialEntry>()
+        val parentDomain = extractParentDomain(normalizedRpId).takeIf { it.isNotBlank() }
+        val canonicalRpId = canonicalDomainForLookup(normalizedRpId)
+        val domainsToQuery = linkedSetOf(normalizedRpId, canonicalRpId, parentDomain)
+            .filterNotNull()
+            .filter { it.isNotBlank() }
+        val candidateByGroup = LinkedHashMap<String, PasskeyCandidate>()
         val seen = mutableSetOf<String>()
 
         for (userId in userIds) {
             val muk = VaultStateManager.getMasterUnlockKey(userId) ?: continue
 
-            val items = if (parentDomain.isNotBlank() && parentDomain != normalizedRpId) {
-                database.itemDao().getLoginItemsByDomainWithFallback(
-                    normalizedRpId,
-                    parentDomain,
-                    userId
-                )
-            } else {
-                database.itemDao().getLoginItemsByDomain(normalizedRpId, userId)
+            val itemById = LinkedHashMap<String, ItemEntity>()
+            for (domain in domainsToQuery) {
+                val domainItems = database.itemDao().getLoginItemsByDomain(domain, userId)
+                for (item in domainItems) {
+                    itemById[item.id] = item
+                }
+            }
+            // Fallback for stale/missing item_domains rows.
+            val primaryDomainItems = database.itemDao().getLoginItemsByPrimaryDomain(
+                domain = normalizedRpId,
+                canonicalDomain = canonicalRpId,
+                userId = userId
+            )
+            for (item in primaryDomainItems) {
+                itemById[item.id] = item
             }
 
-            for (item in items) {
+            for (item in itemById.values) {
                 val matchingPasskeys = loadMatchingPasskeysForItem(
                     item = item,
                     muk = muk,
@@ -376,9 +391,24 @@ class BitteryCredentialProviderService : CredentialProviderService() {
                         continue
                     }
 
-                    entries.add(createPasskeyEntryFromItem(item, passkey, option))
+                    val groupKey = passkeyGroupKey(item, passkey)
+                    val existing = candidateByGroup[groupKey]
+                    if (existing == null || shouldPreferPasskeyCandidate(item, passkey, existing)) {
+                        candidateByGroup[groupKey] = PasskeyCandidate(item, passkey)
+                    }
                 }
             }
+        }
+
+        val entries = mutableListOf<PublicKeyCredentialEntry>()
+        for (candidate in candidateByGroup.values) {
+            entries.add(
+                createPasskeyEntryFromItem(
+                    item = candidate.item,
+                    passkey = candidate.passkey,
+                    option = option
+                )
+            )
         }
 
         return entries
@@ -399,8 +429,11 @@ class BitteryCredentialProviderService : CredentialProviderService() {
             val passkeys = PasskeyUtils.parseStoredPasskeys(itemDataJson)
 
             passkeys.filter { passkey ->
+                if (passkey.privateKey.isBlank()) {
+                    return@filter false
+                }
                 val passkeyRpId = PasskeyUtils.normalizeHost(passkey.rpId)
-                if (passkeyRpId != rpId) {
+                if (!domainsEquivalent(passkeyRpId, rpId)) {
                     return@filter false
                 }
 
@@ -408,9 +441,8 @@ class BitteryCredentialProviderService : CredentialProviderService() {
                     return@filter true
                 }
 
-                allowedCredentialIds.contains(
-                    PasskeyUtils.canonicalizeCredentialId(passkey.credentialId)
-                )
+                val canonicalPasskeyId = PasskeyUtils.canonicalizeCredentialId(passkey.credentialId)
+                !canonicalPasskeyId.isNullOrBlank() && allowedCredentialIds.contains(canonicalPasskeyId)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to load passkeys for item ${item.id}", e)
@@ -657,5 +689,66 @@ class BitteryCredentialProviderService : CredentialProviderService() {
             // Already a base domain
             domain
         }
+    }
+
+    private fun resolvePasskeyEntryUsername(passkey: StoredPasskey, item: ItemEntity): String {
+        return passkey.userName
+            .takeIf { it.isNotBlank() }
+            ?: item.username?.takeIf { it.isNotBlank() }
+            ?: passkey.userDisplayName.takeIf { it.isNotBlank() }
+            ?: "Passkey"
+    }
+
+    private fun resolvePasskeyDisplayName(passkey: StoredPasskey, item: ItemEntity): String {
+        return passkey.userDisplayName
+            .takeIf { it.isNotBlank() }
+            ?: passkey.userName.takeIf { it.isNotBlank() }
+            ?: item.username?.takeIf { it.isNotBlank() }
+            ?: "Passkey"
+    }
+
+    private fun passkeyGroupKey(item: ItemEntity, passkey: StoredPasskey): String {
+        val normalizedUser = resolvePasskeyEntryUsername(passkey, item).trim().lowercase()
+        return "${item.userId}:$normalizedUser"
+    }
+
+    private fun shouldPreferPasskeyCandidate(
+        newItem: ItemEntity,
+        newPasskey: StoredPasskey,
+        existing: PasskeyCandidate
+    ): Boolean {
+        val newPasskeyTime = passkeyRecencyMillis(newPasskey)
+        val existingPasskeyTime = passkeyRecencyMillis(existing.passkey)
+        if (newPasskeyTime != existingPasskeyTime) {
+            return newPasskeyTime > existingPasskeyTime
+        }
+
+        return newItem.lastUsedAt > existing.item.lastUsedAt
+    }
+
+    private fun passkeyRecencyMillis(passkey: StoredPasskey): Long {
+        val lastUsed = parseIsoInstantMillis(passkey.lastUsedAt)
+        if (lastUsed > 0L) {
+            return lastUsed
+        }
+
+        return parseIsoInstantMillis(passkey.createdAt)
+    }
+
+    private fun parseIsoInstantMillis(value: String?): Long {
+        if (value.isNullOrBlank()) return 0L
+        return try {
+            Instant.parse(value).toEpochMilli()
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
+    private fun canonicalDomainForLookup(domain: String): String {
+        return PasskeyUtils.normalizeHost(domain).removePrefix("www.")
+    }
+
+    private fun domainsEquivalent(left: String, right: String): Boolean {
+        return canonicalDomainForLookup(left) == canonicalDomainForLookup(right)
     }
 }
