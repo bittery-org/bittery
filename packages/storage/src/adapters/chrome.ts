@@ -1,6 +1,6 @@
 /**
  * Chrome Extension Storage Adapter
- * Uses chrome.storage APIs instead of localStorage/sessionStorage
+ * Uses chrome.storage APIs for credentials/session and IndexedDB for item cache
  */
 /// <reference types="chrome" />
 /// <reference lib="dom" />
@@ -30,6 +30,16 @@ import {
 const DEVICE_KEY_STORAGE = "bittery_device_key";
 const ACTIVE_ACCOUNT_KEY = "bittery_active_account";
 const ACCOUNTS_LIST_KEY = "bittery_accounts_list";
+const ITEM_CACHE_DB_NAME = "bittery_item_cache_extension";
+const ITEM_CACHE_DB_VERSION = 1;
+const ITEM_CACHE_ITEMS_STORE = "items";
+const ITEM_CACHE_VAULTS_STORE = "vaults";
+const ITEM_CACHE_METADATA_STORE = "metadata";
+const ITEM_CACHE_ACCOUNT_INDEX = "by_account";
+const ITEM_CACHE_META_KEY = "item_cache_meta";
+const CACHED_ITEMS_SUFFIX = "cached_items";
+const CACHED_VAULTS_SUFFIX = "cached_vaults";
+const ITEM_CACHE_META_SUFFIX = "item_cache_meta";
 
 // Helper to generate namespaced keys for each account
 function getAccountKey(email: string, suffix: string): string {
@@ -39,6 +49,12 @@ function getAccountKey(email: string, suffix: string): string {
 
 interface AccountsList {
 	accounts: AccountMetadata[];
+}
+
+interface ItemCacheRecord<T> {
+	id: string;
+	accountKey: string;
+	value: T;
 }
 
 // Per-account cache structure
@@ -55,6 +71,21 @@ const accountCaches: Map<string, AccountCache> = new Map();
 
 // Cache for active account to avoid repeated storage reads
 let cachedActiveAccount: ActiveAccount | undefined;
+
+function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
+	return new Promise((resolve, reject) => {
+		request.onsuccess = () => resolve(request.result);
+		request.onerror = () => reject(request.error);
+	});
+}
+
+function waitForTransaction(transaction: IDBTransaction): Promise<void> {
+	return new Promise((resolve, reject) => {
+		transaction.oncomplete = () => resolve();
+		transaction.onerror = () => reject(transaction.error);
+		transaction.onabort = () => reject(transaction.error);
+	});
+}
 
 /**
  * Generate or retrieve device-specific encryption key
@@ -99,6 +130,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	readonly supportsMultiAccount = true;
 	readonly supportsBiometric = false;
 	readonly supportsItemCache = true;
+	private cacheDbPromise: Promise<IDBDatabase> | null = null;
 
 	constructor(private crypto: CryptoProvider) {}
 
@@ -141,6 +173,107 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 
 	private clearAccountCache(email: string): void {
 		accountCaches.delete(email.toLowerCase());
+	}
+
+	private getCacheRecordId(accountKey: string, entityId: string): string {
+		return `${accountKey}:${entityId}`;
+	}
+
+	private getMetadataRecordId(accountKey: string): string {
+		return this.getCacheRecordId(accountKey, ITEM_CACHE_META_KEY);
+	}
+
+	private async getItemCacheDb(): Promise<IDBDatabase | null> {
+		if (typeof indexedDB === "undefined") {
+			return null;
+		}
+
+		if (!this.cacheDbPromise) {
+			this.cacheDbPromise = new Promise((resolve, reject) => {
+				const request = indexedDB.open(ITEM_CACHE_DB_NAME, ITEM_CACHE_DB_VERSION);
+
+				request.onupgradeneeded = () => {
+					const db = request.result;
+					const upgradeTx = request.transaction;
+					if (!upgradeTx) return;
+
+					const ensureStore = (storeName: string) => {
+						let store: IDBObjectStore;
+						if (!db.objectStoreNames.contains(storeName)) {
+							store = db.createObjectStore(storeName, { keyPath: "id" });
+						} else {
+							store = upgradeTx.objectStore(storeName);
+						}
+
+						if (!store.indexNames.contains(ITEM_CACHE_ACCOUNT_INDEX)) {
+							store.createIndex(ITEM_CACHE_ACCOUNT_INDEX, "accountKey", {
+								unique: false,
+							});
+						}
+					};
+
+					ensureStore(ITEM_CACHE_ITEMS_STORE);
+					ensureStore(ITEM_CACHE_VAULTS_STORE);
+					ensureStore(ITEM_CACHE_METADATA_STORE);
+				};
+
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+		}
+
+		return this.cacheDbPromise;
+	}
+
+	private async deleteRecordsForAccount(
+		store: IDBObjectStore,
+		accountKey: string,
+	): Promise<void> {
+		const index = store.index(ITEM_CACHE_ACCOUNT_INDEX);
+
+		await new Promise<void>((resolve, reject) => {
+			const cursorRequest = index.openCursor(IDBKeyRange.only(accountKey));
+
+			cursorRequest.onsuccess = () => {
+				const cursor = cursorRequest.result;
+				if (!cursor) {
+					resolve();
+					return;
+				}
+
+				const deleteRequest = cursor.delete();
+				deleteRequest.onerror = () => reject(deleteRequest.error);
+				deleteRequest.onsuccess = () => cursor.continue();
+			};
+
+			cursorRequest.onerror = () => reject(cursorRequest.error);
+		});
+	}
+
+	private async getRecordsForAccount<T>(
+		db: IDBDatabase,
+		storeName: string,
+		accountKey: string,
+	): Promise<ItemCacheRecord<T>[]> {
+		const tx = db.transaction(storeName, "readonly");
+		const store = tx.objectStore(storeName);
+		const records = await requestToPromise(
+			store.index(ITEM_CACHE_ACCOUNT_INDEX).getAll(accountKey) as IDBRequest<
+				ItemCacheRecord<T>[]
+			>,
+		);
+		await waitForTransaction(tx);
+		return records ?? [];
+	}
+
+	private async clearStoreForAccount(
+		db: IDBDatabase,
+		storeName: string,
+		accountKey: string,
+	): Promise<void> {
+		const tx = db.transaction(storeName, "readwrite");
+		await this.deleteRecordsForAccount(tx.objectStore(storeName), accountKey);
+		await waitForTransaction(tx);
 	}
 
 	// ============================================================================
@@ -531,6 +664,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 
 	async removeAccount(email: string): Promise<void> {
 		const resolvedEmail = email.toLowerCase();
+		await this.clearItemCache(resolvedEmail);
 
 		// Delete all namespaced keys for this account
 		const keysToRemove = [
@@ -541,9 +675,9 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			getAccountKey(resolvedEmail, "server_url"),
 			getAccountKey(resolvedEmail, "encrypted_private_key"),
 			getAccountKey(resolvedEmail, "auto_lock_timeout"),
-			getAccountKey(resolvedEmail, "cached_items"),
-			getAccountKey(resolvedEmail, "cached_vaults"),
-			getAccountKey(resolvedEmail, "item_cache_meta"),
+			getAccountKey(resolvedEmail, CACHED_ITEMS_SUFFIX),
+			getAccountKey(resolvedEmail, CACHED_VAULTS_SUFFIX),
+			getAccountKey(resolvedEmail, ITEM_CACHE_META_SUFFIX),
 		];
 
 		await chrome.storage.local.remove(keysToRemove);
@@ -938,8 +1072,29 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		const cache = this.getAccountCache(resolvedEmail);
 		cache.cachedItems = items;
 
-		const key = getAccountKey(resolvedEmail, "cached_items");
-		await chrome.storage.local.set({ [key]: JSON.stringify(items) });
+		const db = await this.getItemCacheDb();
+		if (!db) {
+			const key = getAccountKey(resolvedEmail, CACHED_ITEMS_SUFFIX);
+			await chrome.storage.local.set({ [key]: JSON.stringify(items) });
+			return;
+		}
+
+		const tx = db.transaction(ITEM_CACHE_ITEMS_STORE, "readwrite");
+		const store = tx.objectStore(ITEM_CACHE_ITEMS_STORE);
+		await this.deleteRecordsForAccount(store, resolvedEmail);
+
+		for (const item of items) {
+			await requestToPromise(
+				store.put({
+					id: this.getCacheRecordId(resolvedEmail, item.id),
+					accountKey: resolvedEmail,
+					value: item,
+				} satisfies ItemCacheRecord<CachedEncryptedItem>),
+			);
+		}
+
+		await waitForTransaction(tx);
+		await chrome.storage.local.remove(getAccountKey(resolvedEmail, CACHED_ITEMS_SUFFIX));
 	}
 
 	async getCachedItems(email?: string): Promise<CachedEncryptedItem[] | null> {
@@ -951,16 +1106,35 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			return cache.cachedItems;
 		}
 
-		const key = getAccountKey(resolvedEmail, "cached_items");
-		const result = await chrome.storage.local.get(key);
-		const stored = result[key];
+		const db = await this.getItemCacheDb();
+		if (db) {
+			const records = await this.getRecordsForAccount<CachedEncryptedItem>(
+				db,
+				ITEM_CACHE_ITEMS_STORE,
+				resolvedEmail,
+			);
+			if (records.length > 0) {
+				cache.cachedItems = records.map((record) => record.value);
+				return cache.cachedItems;
+			}
+		}
+
+		const legacyKey = getAccountKey(resolvedEmail, CACHED_ITEMS_SUFFIX);
+		const result = await chrome.storage.local.get(legacyKey);
+		const stored = result[legacyKey];
 		if (stored) {
 			try {
-				cache.cachedItems = JSON.parse(stored as string);
+				cache.cachedItems = JSON.parse(stored as string) as CachedEncryptedItem[];
+				if (db) {
+					await this.setCachedItems(cache.cachedItems, resolvedEmail);
+				}
 			} catch {
 				return null;
 			}
+		} else {
+			cache.cachedItems = db ? [] : null;
 		}
+
 		return cache.cachedItems;
 	}
 
@@ -1007,8 +1181,31 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		const cache = this.getAccountCache(resolvedEmail);
 		cache.cachedVaults = vaults;
 
-		const key = getAccountKey(resolvedEmail, "cached_vaults");
-		await chrome.storage.local.set({ [key]: JSON.stringify(vaults) });
+		const db = await this.getItemCacheDb();
+		if (!db) {
+			const key = getAccountKey(resolvedEmail, CACHED_VAULTS_SUFFIX);
+			await chrome.storage.local.set({ [key]: JSON.stringify(vaults) });
+			return;
+		}
+
+		const tx = db.transaction(ITEM_CACHE_VAULTS_STORE, "readwrite");
+		const store = tx.objectStore(ITEM_CACHE_VAULTS_STORE);
+		await this.deleteRecordsForAccount(store, resolvedEmail);
+
+		for (const vault of vaults) {
+			await requestToPromise(
+				store.put({
+					id: this.getCacheRecordId(resolvedEmail, vault.id),
+					accountKey: resolvedEmail,
+					value: vault,
+				} satisfies ItemCacheRecord<CachedVaultMetadata>),
+			);
+		}
+
+		await waitForTransaction(tx);
+		await chrome.storage.local.remove(
+			getAccountKey(resolvedEmail, CACHED_VAULTS_SUFFIX),
+		);
 	}
 
 	async getCachedVaults(email?: string): Promise<CachedVaultMetadata[] | null> {
@@ -1020,16 +1217,35 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			return cache.cachedVaults;
 		}
 
-		const key = getAccountKey(resolvedEmail, "cached_vaults");
-		const result = await chrome.storage.local.get(key);
-		const stored = result[key];
+		const db = await this.getItemCacheDb();
+		if (db) {
+			const records = await this.getRecordsForAccount<CachedVaultMetadata>(
+				db,
+				ITEM_CACHE_VAULTS_STORE,
+				resolvedEmail,
+			);
+			if (records.length > 0) {
+				cache.cachedVaults = records.map((record) => record.value);
+				return cache.cachedVaults;
+			}
+		}
+
+		const legacyKey = getAccountKey(resolvedEmail, CACHED_VAULTS_SUFFIX);
+		const result = await chrome.storage.local.get(legacyKey);
+		const stored = result[legacyKey];
 		if (stored) {
 			try {
-				cache.cachedVaults = JSON.parse(stored as string);
+				cache.cachedVaults = JSON.parse(stored as string) as CachedVaultMetadata[];
+				if (db) {
+					await this.setCachedVaults(cache.cachedVaults, resolvedEmail);
+				}
 			} catch {
 				return null;
 			}
+		} else {
+			cache.cachedVaults = db ? [] : null;
 		}
+
 		return cache.cachedVaults;
 	}
 
@@ -1080,13 +1296,33 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) return null;
 
-		const key = getAccountKey(resolvedEmail, "item_cache_meta");
+		const db = await this.getItemCacheDb();
+		if (db) {
+			const tx = db.transaction(ITEM_CACHE_METADATA_STORE, "readonly");
+			const store = tx.objectStore(ITEM_CACHE_METADATA_STORE);
+			const record = await requestToPromise(
+				store.get(this.getMetadataRecordId(resolvedEmail)) as IDBRequest<
+					ItemCacheRecord<ItemCacheMetadata> | undefined
+				>,
+			);
+			await waitForTransaction(tx);
+
+			if (record?.value) {
+				return record.value;
+			}
+		}
+
+		const key = getAccountKey(resolvedEmail, ITEM_CACHE_META_SUFFIX);
 		const result = await chrome.storage.local.get(key);
 		const stored = result[key];
 		if (!stored) return null;
 
 		try {
-			return JSON.parse(stored as string) as ItemCacheMetadata;
+			const parsed = JSON.parse(stored as string) as ItemCacheMetadata;
+			if (db) {
+				await this.setItemCacheMetadata(parsed, resolvedEmail);
+			}
+			return parsed;
 		} catch {
 			return null;
 		}
@@ -1099,22 +1335,46 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) return;
 
-		const key = getAccountKey(resolvedEmail, "item_cache_meta");
-		await chrome.storage.local.set({ [key]: JSON.stringify(metadata) });
+		const db = await this.getItemCacheDb();
+		if (!db) {
+			const key = getAccountKey(resolvedEmail, ITEM_CACHE_META_SUFFIX);
+			await chrome.storage.local.set({ [key]: JSON.stringify(metadata) });
+			return;
+		}
+
+		const tx = db.transaction(ITEM_CACHE_METADATA_STORE, "readwrite");
+		await requestToPromise(
+			tx.objectStore(ITEM_CACHE_METADATA_STORE).put({
+				id: this.getMetadataRecordId(resolvedEmail),
+				accountKey: resolvedEmail,
+				value: metadata,
+			} satisfies ItemCacheRecord<ItemCacheMetadata>),
+		);
+		await waitForTransaction(tx);
+		await chrome.storage.local.remove(getAccountKey(resolvedEmail, ITEM_CACHE_META_SUFFIX));
 	}
 
 	async clearItemCache(email?: string): Promise<void> {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) return;
 
-		const cache = this.getAccountCache(resolvedEmail);
-		cache.cachedItems = null;
-		cache.cachedVaults = null;
+		const cache = accountCaches.get(resolvedEmail.toLowerCase());
+		if (cache) {
+			cache.cachedItems = null;
+			cache.cachedVaults = null;
+		}
+
+		const db = await this.getItemCacheDb();
+		if (db) {
+			await this.clearStoreForAccount(db, ITEM_CACHE_ITEMS_STORE, resolvedEmail);
+			await this.clearStoreForAccount(db, ITEM_CACHE_VAULTS_STORE, resolvedEmail);
+			await this.clearStoreForAccount(db, ITEM_CACHE_METADATA_STORE, resolvedEmail);
+		}
 
 		await chrome.storage.local.remove([
-			getAccountKey(resolvedEmail, "cached_items"),
-			getAccountKey(resolvedEmail, "cached_vaults"),
-			getAccountKey(resolvedEmail, "item_cache_meta"),
+			getAccountKey(resolvedEmail, CACHED_ITEMS_SUFFIX),
+			getAccountKey(resolvedEmail, CACHED_VAULTS_SUFFIX),
+			getAccountKey(resolvedEmail, ITEM_CACHE_META_SUFFIX),
 		]);
 	}
 }
