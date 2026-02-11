@@ -67,6 +67,7 @@ export default defineManifest({
 				"identity-autofill-iframe.html",
 				"passkey-picker-iframe.html",
 				"passkey-save-target-iframe.html",
+				"icons/lock-icon.png",
 			],
 			matches: ["<all_urls>"],
 		},

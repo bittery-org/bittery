@@ -7,6 +7,14 @@ import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "../lib/storage";
 import { AUTO_LOCK_ALARM_NAME, KEEPALIVE_INTERVAL_MS } from "./constants";
 import { desktopSync } from "./desktop-sync";
 
+const LOCKED_ACTION_ICON_PATH = "icons/lock-icon.png";
+const DEFAULT_ACTION_ICON_PATHS = {
+	16: "icons/icon-16.png",
+	32: "icons/icon-32.png",
+	48: "icons/icon-48.png",
+	128: "icons/icon-128.png",
+} as const;
+
 // In-memory state
 let masterUnlockKey: Uint8Array | null = null;
 let lastActivityTimestamp = 0;
@@ -18,6 +26,32 @@ let cachedAutoLockTimeoutMs = DEFAULT_AUTO_LOCK_TIMEOUT_MS;
 // Sentinel MUK for desktop mode (0xDE = "Desktop")
 // When this special value is set, it indicates the extension is unlocked via desktop app
 const DESKTOP_MODE_SENTINEL = new Uint8Array(32).fill(0xde);
+
+function setLockIndicator(locked: boolean): void {
+	if (typeof chrome === "undefined" || !chrome.action?.setIcon) {
+		return;
+	}
+
+	try {
+		const lockedIconPath =
+			chrome.runtime?.getURL(LOCKED_ACTION_ICON_PATH) ?? LOCKED_ACTION_ICON_PATH;
+
+		chrome.action.setIcon({
+			path: locked ? lockedIconPath : DEFAULT_ACTION_ICON_PATHS,
+		});
+		// Ensure old badge-based lock indicators are cleared.
+		chrome.action.setBadgeText?.({ text: "" });
+	} catch {
+		// Ignore icon updates when the action API is unavailable (e.g. tests).
+	}
+}
+
+/**
+ * Initialize toolbar lock indicator for current lock state.
+ */
+export function initializeLockBadge(): void {
+	setLockIndicator(!masterUnlockKey);
+}
 
 /**
  * Refresh the cached auto-lock timeout from storage
@@ -132,6 +166,7 @@ export async function lock(): Promise<void> {
 export async function _lockInternal(): Promise<void> {
 	// Clear session manager's global MUK (sentinel value for "unlocked" state)
 	masterUnlockKey = null;
+	setLockIndicator(true);
 	lastActivityTimestamp = 0;
 	if (autoLockTimer) {
 		clearTimeout(autoLockTimer);
@@ -170,6 +205,7 @@ export function isDesktopMode(): boolean {
  */
 export function setDesktopModeSentinel(): void {
 	masterUnlockKey = DESKTOP_MODE_SENTINEL;
+	setLockIndicator(false);
 	lastActivityTimestamp = Date.now();
 }
 
@@ -236,6 +272,41 @@ export function getMasterUnlockKey(): Uint8Array | null {
  */
 export function setMasterUnlockKey(muk: Uint8Array) {
 	masterUnlockKey = muk;
+	setLockIndicator(false);
+}
+
+/**
+ * Ensure lock state can be recovered from desktop mode on demand.
+ * Useful for handlers that run before desktop sync initialization settles.
+ */
+export async function ensureUnlockedOrRecoverFromDesktop(): Promise<boolean> {
+	if (isUnlocked()) {
+		return true;
+	}
+
+	const cachedStatus = desktopSync.getLastStatus();
+	const cachedUnlocked = !!(
+		cachedStatus?.available &&
+		!cachedStatus.locked &&
+		(cachedStatus.unlockedAccounts?.length ?? 0) > 0
+	);
+
+	let desktopUnlocked = cachedUnlocked;
+	if (!desktopUnlocked) {
+		const refreshedStatus = await desktopSync.checkDesktopStatus();
+		desktopUnlocked = !!(
+			refreshedStatus?.available &&
+			!refreshedStatus.locked &&
+			(refreshedStatus.unlockedAccounts?.length ?? 0) > 0
+		);
+	}
+
+	if (desktopUnlocked) {
+		setDesktopModeSentinel();
+		return true;
+	}
+
+	return false;
 }
 
 /**

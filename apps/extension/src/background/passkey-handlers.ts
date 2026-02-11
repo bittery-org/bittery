@@ -40,7 +40,6 @@ import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
-const PASSKEY_FEATURE_FLAG_KEY = "feature_passkeys_v1_enabled";
 const PASSKEY_TRANSPORTS: string[] = ["internal", "hybrid"];
 
 type LoginItemWithAccount = DecryptedItem & {
@@ -125,23 +124,22 @@ function logPasskeyEvent(
 	console.info("[Passkey]", payload);
 }
 
-async function isPasskeyFeatureEnabled(): Promise<boolean> {
-	const value = await chrome.storage.local.get(PASSKEY_FEATURE_FLAG_KEY);
-	const storedValue = value[PASSKEY_FEATURE_FLAG_KEY];
-	if (typeof storedValue === "boolean") {
-		return storedValue;
+async function isDesktopUnlockedNow(): Promise<boolean> {
+	const cachedStatus = desktopSync.getLastStatus();
+	const cachedUnlocked = !!(
+		cachedStatus?.available &&
+		!cachedStatus.locked &&
+		(cachedStatus.unlockedAccounts?.length ?? 0) > 0
+	);
+	if (cachedUnlocked) {
+		return true;
 	}
 
-	return import.meta.env.MODE !== "production";
-}
-
-async function isDesktopUnlockedNow(): Promise<boolean> {
-	const status =
-		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
+	const refreshedStatus = await desktopSync.checkDesktopStatus();
 	return !!(
-		status?.available &&
-		!status.locked &&
-		(status.unlockedAccounts?.length ?? 0) > 0
+		refreshedStatus?.available &&
+		!refreshedStatus.locked &&
+		(refreshedStatus.unlockedAccounts?.length ?? 0) > 0
 	);
 }
 
@@ -893,15 +891,6 @@ export async function handlePasskeyCreate(
 		origin: payload.origin,
 	});
 
-	if (!(await isPasskeyFeatureEnabled())) {
-		logPasskeyEvent("native_fallback", {
-			requestId: payload.requestId,
-			reason: "feature_disabled",
-			flow: "create",
-		});
-		return { success: true, fallbackToNative: true };
-	}
-
 	if (!(await ensurePasskeyHandlerUnlocked())) {
 		logPasskeyEvent("native_fallback", {
 			requestId: payload.requestId,
@@ -1075,15 +1064,6 @@ export async function handlePasskeyGet(
 		requestId: payload.requestId,
 		origin: payload.origin,
 	});
-
-	if (!(await isPasskeyFeatureEnabled())) {
-		logPasskeyEvent("native_fallback", {
-			requestId: payload.requestId,
-			reason: "feature_disabled",
-			flow: "get",
-		});
-		return { success: true, fallbackToNative: true };
-	}
 
 	if (!(await ensurePasskeyHandlerUnlocked())) {
 		logPasskeyEvent("native_fallback", {

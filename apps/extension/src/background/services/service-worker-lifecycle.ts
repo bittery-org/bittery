@@ -10,11 +10,14 @@ import { initWasmCrypto } from "../../lib/wasm-crypto";
 import { desktopSync } from "../desktop-sync";
 import {
 	handleAutoLockAlarm,
+	initializeLockBadge,
 	refreshAutoLockTimeout,
 } from "../session-manager";
 import { handleSyncReconnectAlarm } from "../sync-manager";
 
 export function initializeBackgroundServices(): void {
+	initializeLockBadge();
+
 	initWasmCrypto().catch((error) => {
 		console.error(
 			"[Background lifecycle] Failed to initialize WASM crypto:",

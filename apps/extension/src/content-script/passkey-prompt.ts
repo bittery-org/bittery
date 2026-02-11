@@ -5,6 +5,7 @@ import type {
 
 const PASSKEY_PROMPT_WIDTH_PX = 380;
 const PASSKEY_PROMPT_TIMEOUT_MS = 30_000;
+const PASSKEY_PROMPT_REOPEN_NO_ANIMATION_WINDOW_MS = 600;
 
 type PromptConfig<TDecision> = {
 	requestId: string;
@@ -21,12 +22,26 @@ type PromptConfig<TDecision> = {
 
 type ActivePrompt = {
 	requestId: string;
-	finish: (value: unknown | null) => void;
+	finish: (
+		value: unknown | null,
+		options?: {
+			animateClose?: boolean;
+		},
+	) => void;
 };
 
 let activePrompt: ActivePrompt | null = null;
+let lastPromptClosedAt = 0;
 
-function removePromptHost(shadowHost: HTMLElement): void {
+function removePromptHost(
+	shadowHost: HTMLElement,
+	options?: { animate?: boolean },
+): void {
+	if (options?.animate === false) {
+		shadowHost.remove();
+		return;
+	}
+
 	shadowHost.style.opacity = "0";
 	shadowHost.style.transform = "translateY(-8px)";
 	window.setTimeout(() => {
@@ -34,11 +49,14 @@ function removePromptHost(shadowHost: HTMLElement): void {
 	}, 160);
 }
 
-function closeActivePrompt(nextValue: unknown | null): void {
+function closeActivePrompt(
+	nextValue: unknown | null,
+	options?: { animateClose?: boolean },
+): void {
 	if (!activePrompt) {
 		return;
 	}
-	activePrompt.finish(nextValue);
+	activePrompt.finish(nextValue, options);
 }
 
 async function ensureDocumentBody(): Promise<void> {
@@ -61,7 +79,7 @@ async function showPrompt<TDecision>(
 	config: PromptConfig<TDecision>,
 ): Promise<TDecision | null> {
 	await ensureDocumentBody();
-	closeActivePrompt(null);
+	closeActivePrompt(null, { animateClose: false });
 
 	const shadowHost = document.createElement("div");
 	shadowHost.style.position = "fixed";
@@ -90,10 +108,18 @@ async function showPrompt<TDecision>(
 	iframe.src = chrome.runtime.getURL(config.iframePath);
 	shadowRoot.appendChild(iframe);
 
-	window.setTimeout(() => {
+	const shouldSkipEnterAnimation =
+		Date.now() - lastPromptClosedAt < PASSKEY_PROMPT_REOPEN_NO_ANIMATION_WINDOW_MS;
+	if (shouldSkipEnterAnimation) {
+		shadowHost.style.transition = "none";
 		shadowHost.style.opacity = "1";
 		shadowHost.style.transform = "translateY(0)";
-	}, 10);
+	} else {
+		window.setTimeout(() => {
+			shadowHost.style.opacity = "1";
+			shadowHost.style.transform = "translateY(0)";
+		}, 10);
+	}
 
 	return new Promise<TDecision | null>((resolve) => {
 		let settled = false;
@@ -135,10 +161,15 @@ async function showPrompt<TDecision>(
 		};
 
 		const onAbort = () => {
-			finish(null);
+			finish(null, { animateClose: false });
 		};
 
-		const finish = (value: TDecision | null) => {
+		const finish = (
+			value: TDecision | null,
+			options?: {
+				animateClose?: boolean;
+			},
+		) => {
 			if (settled) {
 				return;
 			}
@@ -149,7 +180,10 @@ async function showPrompt<TDecision>(
 			if (activePrompt?.finish === (finish as (value: unknown | null) => void)) {
 				activePrompt = null;
 			}
-			removePromptHost(shadowHost);
+			lastPromptClosedAt = Date.now();
+			removePromptHost(shadowHost, {
+				animate: options?.animateClose ?? true,
+			});
 			resolve(value);
 		};
 

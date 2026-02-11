@@ -14,7 +14,7 @@ import {
 	onLocalItemCreated,
 	onLocalItemUpdated,
 } from "./services/local-item-cache-service";
-import { isUnlocked, updateActivity } from "./session-manager";
+import { ensureUnlockedOrRecoverFromDesktop, updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
 import {
@@ -179,7 +179,7 @@ export async function handleSaveNewCredential(payload: {
 		};
 	}
 
-	if (!isUnlocked()) {
+	if (!(await ensureUnlockedOrRecoverFromDesktop())) {
 		return {
 			success: false,
 			error: "Extension is locked. Please unlock and try again.",
@@ -297,7 +297,7 @@ export async function handleUpdateExistingCredential(payload: {
 		};
 	}
 
-	if (!isUnlocked()) {
+	if (!(await ensureUnlockedOrRecoverFromDesktop())) {
 		return {
 			success: false,
 			error: "Extension is locked. Please unlock and try again.",
