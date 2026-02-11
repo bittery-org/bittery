@@ -32,6 +32,7 @@ const pendingRequests = new Map<string, PendingRequest>();
 const createNative = navigator.credentials?.create?.bind(navigator.credentials);
 const getNative = navigator.credentials?.get?.bind(navigator.credentials);
 const installFlag = "__bitteryPasskeyInterceptorInstalled";
+const PASSKEY_TRANSIENT_GET_STABILIZE_MS = 550;
 
 function randomRequestId(): string {
 	return `req_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
@@ -178,6 +179,31 @@ function attachAbortRelay(
 	return () => {
 		signal.removeEventListener("abort", onAbort);
 	};
+}
+
+function waitForAbortOrTimeout(
+	signal: AbortSignal | null | undefined,
+	timeoutMs: number,
+): Promise<boolean> {
+	if (!signal) {
+		return Promise.resolve(true);
+	}
+	if (signal.aborted) {
+		return Promise.resolve(false);
+	}
+
+	return new Promise<boolean>((resolve) => {
+		const onAbort = () => {
+			window.clearTimeout(timeoutId);
+			resolve(false);
+		};
+		const timeoutId = window.setTimeout(() => {
+			signal.removeEventListener("abort", onAbort);
+			resolve(true);
+		}, timeoutMs);
+
+		signal.addEventListener("abort", onAbort, { once: true });
+	});
 }
 
 function finalizePendingResponse(response: PasskeyPageResponseMessage): void {
@@ -359,8 +385,24 @@ async function interceptGet(options?: CredentialRequestOptions): Promise<Credent
 	}
 
 	const publicKey = options.publicKey;
+	const mediation = (
+		options as CredentialRequestOptions & {
+			mediation?: CredentialMediationRequirement;
+		}
+	).mediation;
 	const signal = (options as CredentialRequestOptions & { signal?: AbortSignal })
 		.signal;
+	if (mediation === "conditional" || mediation === "silent") {
+		// Conditional/silent requests can be quickly aborted/restarted by sites.
+		// Wait briefly so we skip cancelled attempts and only show a stable prompt.
+		const isStableRequest = await waitForAbortOrTimeout(
+			signal,
+			PASSKEY_TRANSIENT_GET_STABILIZE_MS,
+		);
+		if (!isStableRequest) {
+			return getNative(options);
+		}
+	}
 	if (signal?.aborted) {
 		return getNative(options);
 	}
@@ -373,11 +415,7 @@ async function interceptGet(options?: CredentialRequestOptions): Promise<Credent
 
 	const payload: PasskeyPageGetPayload = {
 		origin: window.location.origin,
-		mediation: (
-			options as CredentialRequestOptions & {
-				mediation?: CredentialMediationRequirement;
-			}
-		).mediation,
+		mediation,
 		publicKey: serializedOptions,
 		clientDataJSON: bytesToBase64Url(clientDataJsonBytes),
 		clientDataHash: bytesToBase64Url(clientDataHash),
@@ -404,6 +442,9 @@ async function interceptGet(options?: CredentialRequestOptions): Promise<Credent
 		}
 		return buildAssertionCredential(response.result);
 	} catch (error) {
+		if (signal?.aborted) {
+			throw error;
+		}
 		console.warn("[Bittery Passkey] get interception failed, using native:", error);
 		return getNative(options);
 	} finally {
