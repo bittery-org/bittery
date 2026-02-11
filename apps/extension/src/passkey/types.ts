@@ -57,6 +57,64 @@ export type PasskeyPageGetPayload = {
 	clientDataHash: string;
 };
 
+export type PasskeyCreateSaveDecision =
+	| {
+			action: "attach-existing";
+			itemId: string;
+	  }
+	| {
+			action: "create-new";
+			vaultId?: string;
+	  };
+
+export type PasskeyGetPromptOption = {
+	credentialId: string;
+	itemId: string;
+	itemTitle?: string;
+	itemUrl?: string;
+	itemUsername?: string;
+	passkeyUserName: string;
+	passkeyUserDisplayName?: string;
+	vaultName?: string;
+	accountEmail?: string;
+	createdAt: string;
+	lastUsedAt?: string;
+};
+
+export type PasskeyCreateExistingItemOption = {
+	itemId: string;
+	vaultId: string;
+	itemTitle?: string;
+	itemUrl?: string;
+	itemUsername?: string;
+	vaultName?: string;
+	accountEmail?: string;
+	lastUsedAt?: string;
+};
+
+export type PasskeyWritableVaultOption = {
+	id: string;
+	name: string;
+	type: "personal" | "team";
+	role: "owner" | "admin" | "member" | "read-only";
+};
+
+export type PasskeyUserInteractionRequest =
+	| {
+			kind: "get-picker";
+			rpId: string;
+			options: PasskeyGetPromptOption[];
+	  }
+	| {
+			kind: "create-save-target";
+			rpId: string;
+			rpName: string;
+			userName: string;
+			userDisplayName: string;
+			existingItems: PasskeyCreateExistingItemOption[];
+			writableVaults: PasskeyWritableVaultOption[];
+	  };
+
 type BaseRequestMessage = {
 	source: typeof BITTERY_PASSKEY_SOURCE_PAGE;
 	requestId: string;
@@ -121,6 +179,24 @@ export type PasskeyPageResponseMessage = BaseResponseMessage & {
 	fallbackToNative?: boolean;
 	result?: PasskeySerializedResult;
 	error?: string;
+};
+
+export type PasskeyBackgroundResponse = {
+	success: boolean;
+	fallbackToNative?: boolean;
+	result?: PasskeySerializedResult;
+	error?: string;
+	requiresUserInteraction?: PasskeyUserInteractionRequest;
+};
+
+export type PasskeyCreateHandlerPayload = PasskeyPageCreatePayload & {
+	requestId?: string;
+	createDecision?: PasskeyCreateSaveDecision;
+};
+
+export type PasskeyGetHandlerPayload = PasskeyPageGetPayload & {
+	requestId?: string;
+	selectedCredentialId?: string;
 };
 
 export function isPasskeyPageRequestMessage(

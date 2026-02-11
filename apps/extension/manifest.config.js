@@ -65,6 +65,8 @@ export default defineManifest({
 				"save-prompt-iframe.html",
 				"credit-card-autofill-iframe.html",
 				"identity-autofill-iframe.html",
+				"passkey-picker-iframe.html",
+				"passkey-save-target-iframe.html",
 			],
 			matches: ["<all_urls>"],
 		},

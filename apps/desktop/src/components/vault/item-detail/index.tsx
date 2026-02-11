@@ -34,6 +34,7 @@ export default function ItemDetail({
 	data,
 	onEdit,
 	onDelete,
+	onRemovePasskey,
 	onTagsChange,
 	onTagClick,
 	availableTags,
@@ -45,6 +46,7 @@ export default function ItemDetail({
 				data={data as LoginDisplayData}
 				onEdit={onEdit}
 				onDelete={onDelete}
+				onRemovePasskey={onRemovePasskey}
 				onTagsChange={onTagsChange}
 				onTagClick={onTagClick}
 				availableTags={availableTags}

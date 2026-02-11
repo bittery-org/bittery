@@ -13,9 +13,14 @@ import {
 	bytesToBase64Url,
 } from "../passkey/base64";
 import type {
-	PasskeyPageCreatePayload,
-	PasskeyPageGetPayload,
+	PasskeyCreateExistingItemOption,
+	PasskeyCreateHandlerPayload,
+	PasskeyCreateSaveDecision,
+	PasskeyGetHandlerPayload,
+	PasskeyGetPromptOption,
 	PasskeySerializedResult,
+	PasskeyUserInteractionRequest,
+	PasskeyWritableVaultOption,
 	SerializedCredentialDescriptor,
 	SerializedGetResult,
 } from "../passkey/types";
@@ -38,18 +43,83 @@ type LoginItemWithAccount = DecryptedItem & {
 	account?: {
 		email?: string;
 	};
+	vault?: {
+		name?: string;
+	};
 };
 
-type MatchedPasskey = {
+export type MatchedPasskey = {
 	item: LoginItemWithAccount;
 	passkey: Passkey;
 	passkeyIndex: number;
 };
 
-type PasskeyHandlerResponse = MessageResponse & {
+export type PasskeyHandlerResponse = MessageResponse & {
 	fallbackToNative?: boolean;
 	result?: PasskeySerializedResult;
+	requiresUserInteraction?: PasskeyUserInteractionRequest;
 };
+
+type PasskeyEventName =
+	| "create_intercepted"
+	| "get_intercepted"
+	| "native_fallback"
+	| "matching_error"
+	| "signing_error"
+	| "attach_create_decision"
+	| "mark_suspect"
+	| "handler_error";
+
+type GetSelectionResolution =
+	| {
+			kind: "fallback";
+			reason: "no_match" | "invalid_selection";
+	  }
+	| {
+			kind: "prompt";
+			options: PasskeyGetPromptOption[];
+	  }
+	| {
+			kind: "selected";
+			match: MatchedPasskey;
+	  };
+
+type CreateDecisionResolution =
+	| {
+			kind: "prompt";
+	  }
+	| {
+			kind: "attach-existing";
+			item: LoginItemWithAccount;
+	  }
+	| {
+			kind: "create-new";
+			vault: PasskeyWritableVaultOption;
+	  }
+	| {
+			kind: "invalid";
+			reason: string;
+	  };
+
+function logPasskeyEvent(
+	event: PasskeyEventName,
+	metadata: Record<string, unknown>,
+	level: "info" | "warn" | "error" = "info",
+): void {
+	const payload = {
+		event,
+		...metadata,
+	};
+	if (level === "error") {
+		console.error("[Passkey]", payload);
+		return;
+	}
+	if (level === "warn") {
+		console.warn("[Passkey]", payload);
+		return;
+	}
+	console.info("[Passkey]", payload);
+}
 
 async function isPasskeyFeatureEnabled(): Promise<boolean> {
 	const value = await chrome.storage.local.get(PASSKEY_FEATURE_FLAG_KEY);
@@ -252,6 +322,194 @@ function pickCreateTarget(
 	return null;
 }
 
+function normalizeVaultRole(
+	role: string,
+): "owner" | "admin" | "member" | "read-only" {
+	switch (role) {
+		case "owner":
+		case "admin":
+		case "member":
+		case "read-only":
+			return role;
+		default:
+			return "member";
+	}
+}
+
+function normalizeVaultType(type: string): "personal" | "team" {
+	return type === "team" ? "team" : "personal";
+}
+
+async function getWritableVaultOptions(): Promise<PasskeyWritableVaultOption[]> {
+	const vaults = await trpcClient.vault.list.query();
+	return vaults
+		.map((vault) => ({
+			id: vault.id,
+			name: vault.name,
+			type: normalizeVaultType(vault.type),
+			role: normalizeVaultRole(vault.role),
+		}))
+		.filter((vault) => vault.role !== "read-only");
+}
+
+function pickWritableVault(
+	vaults: PasskeyWritableVaultOption[],
+	vaultId?: string,
+): PasskeyWritableVaultOption | null {
+	if (vaultId) {
+		return vaults.find((vault) => vault.id === vaultId) ?? null;
+	}
+	return vaults[0] ?? null;
+}
+
+function getMostRecentMatchingPasskey(
+	item: LoginItemWithAccount,
+	rpId: string,
+): Passkey | null {
+	const matches = (item.passkeys ?? [])
+		.filter((passkey) => matchesStoredPasskey(passkey, rpId))
+		.sort(compareByMostRecent);
+	return matches[0] ?? null;
+}
+
+function buildGetPromptOption(match: MatchedPasskey): PasskeyGetPromptOption {
+	return {
+		credentialId: match.passkey.credentialId,
+		itemId: match.item.id,
+		itemTitle: match.item.title,
+		itemUrl: match.item.url,
+		itemUsername: match.item.username,
+		passkeyUserName: match.passkey.userName,
+		passkeyUserDisplayName: match.passkey.userDisplayName,
+		vaultName: match.item.vault?.name,
+		accountEmail: match.item.account?.email,
+		createdAt: match.passkey.createdAt,
+		lastUsedAt: match.passkey.lastUsedAt,
+	};
+}
+
+function buildCreateExistingItemOption(
+	item: LoginItemWithAccount,
+	rpId: string,
+): PasskeyCreateExistingItemOption {
+	const recentPasskey = getMostRecentMatchingPasskey(item, rpId);
+	return {
+		itemId: item.id,
+		vaultId: item.vaultId,
+		itemTitle: item.title,
+		itemUrl: item.url,
+		itemUsername: item.username,
+		vaultName: item.vault?.name,
+		accountEmail: item.account?.email,
+		lastUsedAt: recentPasskey?.lastUsedAt ?? recentPasskey?.createdAt,
+	};
+}
+
+export function resolveGetSelection(input: {
+	matches: MatchedPasskey[];
+	selectedCredentialId?: string;
+}): GetSelectionResolution {
+	if (input.matches.length === 0) {
+		return {
+			kind: "fallback",
+			reason: "no_match",
+		};
+	}
+
+	// Require an explicit user action before assertion, even for a single match.
+	if (!input.selectedCredentialId) {
+		return {
+			kind: "prompt",
+			options: input.matches.map(buildGetPromptOption),
+		};
+	}
+
+	const selectedMatch = input.matches.find(
+		(match) => match.passkey.credentialId === input.selectedCredentialId,
+	);
+	if (!selectedMatch) {
+		return {
+			kind: "fallback",
+			reason: "invalid_selection",
+		};
+	}
+
+	return {
+		kind: "selected",
+		match: selectedMatch,
+	};
+}
+
+export function resolveCreateDecision(input: {
+	candidateItems: LoginItemWithAccount[];
+	userName: string;
+	writableVaults: PasskeyWritableVaultOption[];
+	createDecision?: PasskeyCreateSaveDecision;
+}): CreateDecisionResolution {
+	const createDecision = input.createDecision;
+	const autoAttachTarget = pickCreateTarget(input.candidateItems, input.userName);
+	const isAmbiguousCreate = input.candidateItems.length > 0 && !autoAttachTarget;
+
+	if (createDecision?.action === "attach-existing") {
+		const selectedItem = input.candidateItems.find(
+			(item) => item.id === createDecision.itemId,
+		);
+		if (!selectedItem) {
+			return {
+				kind: "invalid",
+				reason: "Selected item is not a valid passkey target",
+			};
+		}
+		return {
+			kind: "attach-existing",
+			item: selectedItem,
+		};
+	}
+
+	if (createDecision?.action === "create-new") {
+		const selectedVault = pickWritableVault(
+			input.writableVaults,
+			createDecision.vaultId,
+		);
+		if (!selectedVault) {
+			return {
+				kind: "invalid",
+				reason: "Selected vault is not writable",
+			};
+		}
+		return {
+			kind: "create-new",
+			vault: selectedVault,
+		};
+	}
+
+	if (autoAttachTarget) {
+		return {
+			kind: "attach-existing",
+			item: autoAttachTarget,
+		};
+	}
+
+	if (isAmbiguousCreate) {
+		return {
+			kind: "prompt",
+		};
+	}
+
+	const defaultVault = pickWritableVault(input.writableVaults);
+	if (!defaultVault) {
+		return {
+			kind: "invalid",
+			reason: "No writable vault available",
+		};
+	}
+
+	return {
+		kind: "create-new",
+		vault: defaultVault,
+	};
+}
+
 async function attachPasskeyToExistingItem(input: {
 	item: LoginItemWithAccount;
 	passkey: Passkey;
@@ -291,16 +549,9 @@ async function createItemWithPasskey(input: {
 	rpId: string;
 	username: string;
 	passkey: Passkey;
+	targetVault: PasskeyWritableVaultOption;
 }): Promise<void> {
-	const writableVaults = (await trpcClient.vault.list.query()).filter(
-		(vault) => vault.role !== "read-only",
-	);
-	const targetVault = writableVaults[0];
-	if (!targetVault) {
-		throw new Error("No writable vault available");
-	}
-
-	const accountEmail = await resolveAccountEmailForVault(targetVault.id);
+	const accountEmail = await resolveAccountEmailForVault(input.targetVault.id);
 	if (!accountEmail) {
 		throw new Error("Unable to resolve account for writable vault");
 	}
@@ -312,7 +563,7 @@ async function createItemWithPasskey(input: {
 
 	const createResult = await core.items.createItem(
 		{
-			vaultId: targetVault.id,
+			vaultId: input.targetVault.id,
 			category: "login",
 			data: {
 				title: input.rpId,
@@ -327,7 +578,7 @@ async function createItemWithPasskey(input: {
 
 	await onLocalItemCreated({
 		itemId: createResult.itemId,
-		vaultId: targetVault.id,
+		vaultId: input.targetVault.id,
 		category: "login",
 		encryptedData: createResult._encryptedData,
 		accountEmail: createResult._accountEmail,
@@ -396,18 +647,19 @@ function toPasskeyModel(input: {
 		signCount: 0,
 		transports: PASSKEY_TRANSPORTS,
 		createdAt: new Date().toISOString(),
+		status: "active",
 	};
 }
 
-async function findMatchingPasskeys(input: {
+export function findMatchingPasskeysForItems(input: {
+	items: LoginItemWithAccount[];
 	rpId: string;
 	allowCredentials?: SerializedCredentialDescriptor[];
-}): Promise<MatchedPasskey[]> {
+}): MatchedPasskey[] {
 	const allowedIds = allowCredentialIds(input.allowCredentials);
-	const items = await getLoginItems();
 	const matches: MatchedPasskey[] = [];
 
-	for (const item of items) {
+	for (const item of input.items) {
 		const passkeys = item.passkeys ?? [];
 		for (const [index, passkey] of passkeys.entries()) {
 			if (!matchesStoredPasskey(passkey, input.rpId)) {
@@ -428,15 +680,27 @@ async function findMatchingPasskeys(input: {
 	return matches.sort((left, right) => compareByMostRecent(left.passkey, right.passkey));
 }
 
-async function updateAssertionUsage(input: {
+async function findMatchingPasskeys(input: {
+	rpId: string;
+	allowCredentials?: SerializedCredentialDescriptor[];
+}): Promise<MatchedPasskey[]> {
+	const items = await getLoginItems();
+	return findMatchingPasskeysForItems({
+		items,
+		rpId: input.rpId,
+		allowCredentials: input.allowCredentials,
+	});
+}
+
+async function updateStoredPasskey(input: {
 	match: MatchedPasskey;
-	nextSignCount: number;
+	update: (current: Passkey) => Passkey;
 }): Promise<void> {
 	const accountEmail = await resolveAccountEmailForItem(input.match.item);
 	if (accountEmail) {
 		const hasWriteCapability = await ensureDesktopWriteCapability(accountEmail);
 		if (!hasWriteCapability) {
-			throw new Error("No vault keys available for assertion update");
+			throw new Error("No vault keys available for passkey update");
 		}
 	}
 
@@ -446,11 +710,7 @@ async function updateAssertionUsage(input: {
 	if (!current) {
 		throw new Error("Passkey index out of bounds");
 	}
-	nextPasskeys[input.match.passkeyIndex] = {
-		...current,
-		signCount: input.nextSignCount,
-		lastUsedAt: new Date().toISOString(),
-	};
+	nextPasskeys[input.match.passkeyIndex] = input.update(current);
 
 	const updateResult = await core.items.updateItem(
 		{
@@ -472,16 +732,91 @@ async function updateAssertionUsage(input: {
 	});
 }
 
-export async function handlePasskeyCreate(payload: {
-	requestId?: string;
-} & PasskeyPageCreatePayload): Promise<PasskeyHandlerResponse> {
+async function updateAssertionUsage(input: {
+	match: MatchedPasskey;
+	nextSignCount: number;
+}): Promise<void> {
+	const usedAt = new Date().toISOString();
+	await updateStoredPasskey({
+		match: input.match,
+		update: (current) => ({
+			...current,
+			signCount: input.nextSignCount,
+			lastUsedAt: usedAt,
+			status: "active",
+			statusReason: undefined,
+			statusUpdatedAt: usedAt,
+		}),
+	});
+}
+
+async function markPasskeyAsSuspect(input: {
+	match: MatchedPasskey;
+	reason: NonNullable<Passkey["statusReason"]>;
+}): Promise<void> {
+	const statusUpdatedAt = new Date().toISOString();
+	await updateStoredPasskey({
+		match: input.match,
+		update: (current) => ({
+			...current,
+			status: "suspect",
+			statusReason: input.reason,
+			statusUpdatedAt,
+		}),
+	});
+}
+
+function buildCreatePromptPayload(input: {
+	rpId: string;
+	rpName: string;
+	userName: string;
+	userDisplayName: string;
+	candidateItems: LoginItemWithAccount[];
+	writableVaults: PasskeyWritableVaultOption[];
+}): Extract<PasskeyUserInteractionRequest, { kind: "create-save-target" }> {
+	const existingItems = input.candidateItems
+		.map((item) => buildCreateExistingItemOption(item, input.rpId))
+		.sort((left, right) => {
+			const leftTs = Date.parse(left.lastUsedAt ?? "1970-01-01T00:00:00.000Z");
+			const rightTs = Date.parse(right.lastUsedAt ?? "1970-01-01T00:00:00.000Z");
+			return rightTs - leftTs;
+		});
+
+	return {
+		kind: "create-save-target",
+		rpId: input.rpId,
+		rpName: input.rpName,
+		userName: input.userName,
+		userDisplayName: input.userDisplayName,
+		existingItems,
+		writableVaults: input.writableVaults,
+	};
+}
+
+export async function handlePasskeyCreate(
+	payload: PasskeyCreateHandlerPayload,
+): Promise<PasskeyHandlerResponse> {
 	updateActivity();
+	logPasskeyEvent("create_intercepted", {
+		requestId: payload.requestId,
+		origin: payload.origin,
+	});
 
 	if (!(await isPasskeyFeatureEnabled())) {
+		logPasskeyEvent("native_fallback", {
+			requestId: payload.requestId,
+			reason: "feature_disabled",
+			flow: "create",
+		});
 		return { success: true, fallbackToNative: true };
 	}
 
 	if (!isUnlocked()) {
+		logPasskeyEvent("native_fallback", {
+			requestId: payload.requestId,
+			reason: "locked",
+			flow: "create",
+		});
 		return {
 			success: false,
 			error: "Extension is locked",
@@ -489,11 +824,66 @@ export async function handlePasskeyCreate(payload: {
 		};
 	}
 
+	let rpId = "";
+	let rpName = payload.publicKey.rp.name;
+	let stage: "matching" | "crypto" | "persist" = "matching";
+
 	try {
-		const rpId = deriveRpId(payload.origin, payload.publicKey.rp.id);
-		const rpName = payload.publicKey.rp.name;
+		rpId = deriveRpId(payload.origin, payload.publicKey.rp.id);
 		const user = payload.publicKey.user;
 
+		const loginItems = await getLoginItems();
+		const candidateItems = loginItems.filter((item) =>
+			matchesCreationRpId(item, rpId),
+		);
+		const writableVaults = await getWritableVaultOptions();
+		const createResolution = resolveCreateDecision({
+			candidateItems,
+			userName: user.name,
+			writableVaults,
+			createDecision: payload.createDecision,
+		});
+
+		if (createResolution.kind === "prompt") {
+			logPasskeyEvent("attach_create_decision", {
+				requestId: payload.requestId,
+				rpId,
+				decision: "prompt_required",
+				candidateCount: candidateItems.length,
+			});
+			return {
+				success: true,
+				requiresUserInteraction: buildCreatePromptPayload({
+					rpId,
+					rpName,
+					userName: user.name,
+					userDisplayName: user.displayName,
+					candidateItems,
+					writableVaults,
+				}),
+			};
+		}
+
+		if (createResolution.kind === "invalid") {
+			logPasskeyEvent(
+				"native_fallback",
+				{
+					requestId: payload.requestId,
+					rpId,
+					reason: "invalid_create_decision",
+					details: createResolution.reason,
+					flow: "create",
+				},
+				"warn",
+			);
+			return {
+				success: false,
+				error: createResolution.reason,
+				fallbackToNative: true,
+			};
+		}
+
+		stage = "crypto";
 		const keypair = await generatePasskeyKeypair();
 		const credentialIdBase64 = await generatePasskeyCredentialId();
 		const credentialId = bytesToBase64Url(base64ToBytes(credentialIdBase64));
@@ -516,31 +906,31 @@ export async function handlePasskeyCreate(payload: {
 			publicKey: keypair.publicKeyCose,
 		});
 
-		const loginItems = await getLoginItems();
-		const candidateItems = loginItems.filter((item) =>
-			matchesCreationRpId(item, rpId),
-		);
-		const attachTarget = pickCreateTarget(candidateItems, user.name);
-
-		if (attachTarget) {
+		stage = "persist";
+		if (createResolution.kind === "attach-existing") {
 			await attachPasskeyToExistingItem({
-				item: attachTarget,
+				item: createResolution.item,
 				passkey,
 			});
-			console.info("[Passkey] create attached to existing item", {
+			logPasskeyEvent("attach_create_decision", {
 				requestId: payload.requestId,
 				rpId,
-				itemId: attachTarget.id,
+				decision: "attach-existing",
+				itemId: createResolution.item.id,
+				vaultId: createResolution.item.vaultId,
 			});
 		} else {
 			await createItemWithPasskey({
 				rpId,
 				username: user.name,
 				passkey,
+				targetVault: createResolution.vault,
 			});
-			console.info("[Passkey] create saved in new item", {
+			logPasskeyEvent("attach_create_decision", {
 				requestId: payload.requestId,
 				rpId,
+				decision: "create-new",
+				vaultId: createResolution.vault.id,
 			});
 		}
 
@@ -553,25 +943,63 @@ export async function handlePasskeyCreate(payload: {
 			}),
 		};
 	} catch (error) {
-		console.error("[Passkey] create failed:", error);
+		const message = error instanceof Error ? error.message : String(error);
+		if (stage === "matching") {
+			logPasskeyEvent(
+				"matching_error",
+				{
+					requestId: payload.requestId,
+					rpId,
+					error: message,
+					flow: "create",
+				},
+				"error",
+			);
+		} else {
+			logPasskeyEvent(
+				"handler_error",
+				{
+					requestId: payload.requestId,
+					rpId,
+					stage,
+					error: message,
+					flow: "create",
+				},
+				"error",
+			);
+		}
 		return {
 			success: false,
-			error: error instanceof Error ? error.message : String(error),
+			error: message,
 			fallbackToNative: true,
 		};
 	}
 }
 
-export async function handlePasskeyGet(payload: {
-	requestId?: string;
-} & PasskeyPageGetPayload): Promise<PasskeyHandlerResponse> {
+export async function handlePasskeyGet(
+	payload: PasskeyGetHandlerPayload,
+): Promise<PasskeyHandlerResponse> {
 	updateActivity();
+	logPasskeyEvent("get_intercepted", {
+		requestId: payload.requestId,
+		origin: payload.origin,
+	});
 
 	if (!(await isPasskeyFeatureEnabled())) {
+		logPasskeyEvent("native_fallback", {
+			requestId: payload.requestId,
+			reason: "feature_disabled",
+			flow: "get",
+		});
 		return { success: true, fallbackToNative: true };
 	}
 
 	if (!isUnlocked()) {
+		logPasskeyEvent("native_fallback", {
+			requestId: payload.requestId,
+			reason: "locked",
+			flow: "get",
+		});
 		return {
 			success: false,
 			error: "Extension is locked",
@@ -579,27 +1007,59 @@ export async function handlePasskeyGet(payload: {
 		};
 	}
 
+	let rpId = "";
+	let stage: "matching" | "signing" | "persist" = "matching";
+	let selectedMatch: MatchedPasskey | null = null;
 	try {
-		const rpId = deriveRpId(payload.origin, payload.publicKey.rpId);
+		rpId = deriveRpId(payload.origin, payload.publicKey.rpId);
 		const matches = await findMatchingPasskeys({
 			rpId,
 			allowCredentials: payload.publicKey.allowCredentials,
 		});
+		const selection = resolveGetSelection({
+			matches,
+			selectedCredentialId: payload.selectedCredentialId,
+		});
 
-		if (matches.length === 0) {
-			console.info("[Passkey] get fallback: no matching credential", {
+		if (selection.kind === "fallback") {
+			logPasskeyEvent("native_fallback", {
 				requestId: payload.requestId,
 				rpId,
+				reason: selection.reason,
+				flow: "get",
+				matchCount: matches.length,
 			});
-			return { success: true, fallbackToNative: true };
+			if (selection.reason === "no_match") {
+				return { success: true, fallbackToNative: true };
+			}
+			return {
+				success: false,
+				error: "Selected passkey is no longer available",
+				fallbackToNative: true,
+			};
 		}
 
-		const match = matches[0];
-		if (!match) {
-			return { success: true, fallbackToNative: true };
+		if (selection.kind === "prompt") {
+			logPasskeyEvent("attach_create_decision", {
+				requestId: payload.requestId,
+				rpId,
+				decision: "get-picker",
+				optionCount: selection.options.length,
+			});
+			return {
+				success: true,
+				requiresUserInteraction: {
+					kind: "get-picker",
+					rpId,
+					options: selection.options,
+				},
+			};
 		}
 
+		const match = selection.match;
+		selectedMatch = match;
 		const nextSignCount = (match.passkey.signCount ?? 0) + 1;
+		stage = "signing";
 		const assertion = await signPasskeyAssertion({
 			privateKeyBase64: match.passkey.privateKey,
 			rpId,
@@ -607,6 +1067,7 @@ export async function handlePasskeyGet(payload: {
 			signCount: nextSignCount,
 		});
 
+		stage = "persist";
 		await updateAssertionUsage({
 			match,
 			nextSignCount,
@@ -625,17 +1086,61 @@ export async function handlePasskeyGet(payload: {
 			}),
 		};
 	} catch (error) {
-		console.error("[Passkey] get failed:", error);
+		const message = error instanceof Error ? error.message : String(error);
+		if (stage === "signing" && selectedMatch) {
+			try {
+				await markPasskeyAsSuspect({
+					match: selectedMatch,
+					reason: "signing-error",
+				});
+				logPasskeyEvent("mark_suspect", {
+					requestId: payload.requestId,
+					rpId,
+					credentialId: selectedMatch.passkey.credentialId,
+					reason: "signing-error",
+					flow: "get",
+				});
+			} catch (markError) {
+				logPasskeyEvent(
+					"handler_error",
+					{
+						requestId: payload.requestId,
+						rpId,
+						stage: "mark_suspect",
+						error:
+							markError instanceof Error ? markError.message : String(markError),
+						flow: "get",
+					},
+					"error",
+				);
+			}
+		}
+		logPasskeyEvent(
+			stage === "matching" ? "matching_error" : "signing_error",
+			{
+				requestId: payload.requestId,
+				rpId,
+				stage,
+				error: message,
+				flow: "get",
+			},
+			"error",
+		);
 		return {
 			success: false,
-			error: error instanceof Error ? error.message : String(error),
+			error: message,
 			fallbackToNative: true,
 		};
 	}
 }
 
-export async function handlePasskeyCancel(_payload: {
+export async function handlePasskeyCancel(payload: {
 	requestId?: string;
 }): Promise<PasskeyHandlerResponse> {
+	logPasskeyEvent("native_fallback", {
+		requestId: payload.requestId,
+		reason: "request_cancelled",
+		flow: "bridge",
+	});
 	return { success: true };
 }

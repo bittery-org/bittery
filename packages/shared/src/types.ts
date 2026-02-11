@@ -39,6 +39,13 @@ export interface CustomField {
  * Stored passkey metadata for login items.
  * All fields are encrypted as part of the item data blob.
  */
+export type PasskeyStatus = "active" | "suspect";
+export type PasskeyStatusReason =
+	| "manual"
+	| "unknown-credential"
+	| "signing-error"
+	| "other";
+
 export interface Passkey {
 	credentialId: string;
 	rpId: string;
@@ -53,6 +60,9 @@ export interface Passkey {
 	transports: string[];
 	createdAt: string;
 	lastUsedAt?: string;
+	status?: PasskeyStatus;
+	statusReason?: PasskeyStatusReason;
+	statusUpdatedAt?: string;
 }
 
 /**

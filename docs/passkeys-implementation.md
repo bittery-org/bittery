@@ -88,7 +88,7 @@ Implemented:
 
 ## Phase 4: Background Passkey Handlers
 
-Status: **Partially complete**
+Status: **Complete for current extension V1 scope**
 
 Implemented:
 - Added passkey handlers:
@@ -105,25 +105,27 @@ Implemented:
   - `allowCredentials` filtering
   - signing path + `signCount`/`lastUsedAt` persistence
   - explicit fallback to native when no match
+- Ambiguous path handling now explicit:
+  - multi-match `get` returns UI prompt requirement (no silent first-match selection)
+  - ambiguous `create` returns save-target prompt requirement (attach existing vs create new)
+- Request correlation/cancel path strengthened in bridge+handler flow.
 - Feature flag gate added (`feature_passkeys_v1_enabled`).
 - Lock/session checks integrated with existing extension unlock behavior.
 
-Still pending to satisfy V1 UX requirements:
-- Multi-match get flow must show picker UI (currently first match is auto-selected).
-- Ambiguous create flow must prompt for save target (currently falls back to first writable vault/new item).
-- Strong cancellation semantics end-to-end (current cancel path is minimal).
+Pending for full lifecycle maturity:
+- Additional real-site end-to-end verification coverage.
 
 ## Phase 5: Extension UI (Picker and Save Target)
 
-Status: **Not started**
+Status: **Complete for extension V1**
 
-Pending:
-- New passkey picker iframe entry + HTML + web-accessible resource wiring.
-- Overlay launcher using existing overlay-utils model.
-- Save-target prompt for create:
-  - auto-attach when exactly one confident match
-  - prompt when ambiguous (existing login vs create new)
-- Minimal payload and ranking display (site/account/vault/last-used).
+Implemented:
+- Passkey picker iframe entry + HTML + web-accessible resource wiring.
+- Save-target prompt iframe entry + HTML + web-accessible resource wiring.
+- Content-script overlay launcher following existing extension iframe overlay conventions.
+- Multi-match `get` picker with explicit user selection and cancel handling.
+- Ambiguous `create` save-target prompt with explicit attach-existing vs create-new decision.
+- Minimal ranking/context payload rendered in UI (site/account/vault/last-used).
 
 ## Phase 6: Observability, Flagging, and Rollout
 
@@ -131,28 +133,39 @@ Status: **Partially complete**
 
 Implemented:
 - Feature flag gate exists in background handlers.
-
-Pending:
-- Structured telemetry/log events:
+- Structured passkey event logs for:
   - create intercepted
   - get intercepted
   - native fallback reason
-  - signing errors
-  - attach/create decision path
+  - matching/signing errors
+  - attach/create + picker decision paths
+- Added extension background tests for:
+  - router passkey dispatch + route error path
+  - matching + `allowCredentials` filtering
+  - multi-match picker decision resolution
+  - ambiguous create save-target decision resolution
+  - no-match native fallback decision resolution
+
+Pending:
 - Rollout workflow:
   - internal dogfood
   - staged beta
   - production enablement
+- Real-site E2E automation for passkey registration/login/picker/fallback matrix.
 
 ## V1 Completion Checklist (Extension)
 
 Remaining to declare extension V1 complete:
-- Passkey picker UI for multi-match `get`.
-- Save-target prompt for ambiguous `create`.
-- Background flow wiring to use those UI decisions.
-- Observability events + rollout policy.
-- Unit tests for message routing/matching/update/fallback paths.
-- E2E verification on real WebAuthn test sites:
+- [x] Passkey picker UI for multi-match `get`.
+- [x] Save-target prompt for ambiguous `create`.
+- [x] Background flow wiring to use explicit UI decisions.
+- [x] Structured observability events for intercept/fallback/error/decision paths.
+- [x] Unit/integration tests for message routing and matching/decision/fallback paths.
+- [ ] Rollout policy execution:
+  - internal dogfood
+  - staged beta
+  - production enablement
+- [ ] E2E verification on real WebAuthn test sites:
   - registration
   - login
   - multi-match selection

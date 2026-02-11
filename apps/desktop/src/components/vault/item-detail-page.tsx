@@ -109,6 +109,39 @@ export function ItemDetailPage({
 		[rawItem, decryptedData, updateItem],
 	);
 
+	const handleRemovePasskey = useCallback(
+		async (credentialId: string) => {
+			if (!rawItem || !decryptedData || rawItem.category !== "login") return;
+
+			const currentPasskeys = decryptedData.passkeys ?? [];
+			const nextPasskeys = currentPasskeys.filter(
+				(passkey) => passkey.credentialId !== credentialId,
+			);
+			if (nextPasskeys.length === currentPasskeys.length) {
+				return;
+			}
+
+			const updatedData: DecryptedItemData = {
+				...decryptedData,
+				passkeys: nextPasskeys.length > 0 ? nextPasskeys : undefined,
+			};
+
+			try {
+				await updateItem.mutateAsync({
+					itemId: rawItem.id,
+					vaultId: rawItem.vaultId,
+					data: updatedData,
+				});
+				toast.success("Passkey removed");
+			} catch (error) {
+				const errorMessage =
+					error instanceof Error ? error.message : "Failed to remove passkey";
+				toast.error(errorMessage);
+			}
+		},
+		[rawItem, decryptedData, updateItem],
+	);
+
 	const handleShare = () => {
 		setIsShareDialogOpen(true);
 	};
@@ -288,6 +321,7 @@ export function ItemDetailPage({
 					<ItemDetail
 						category={rawItem?.category ?? "login"}
 						data={decryptedData}
+						onRemovePasskey={handleRemovePasskey}
 						onTagsChange={handleTagsChange}
 						onTagClick={onTagClick}
 						availableTags={availableTags}

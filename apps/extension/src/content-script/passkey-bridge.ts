@@ -8,12 +8,24 @@ import {
 	BITTERY_PASSKEY_SOURCE_PAGE,
 	PASSKEY_BRIDGE_TIMEOUT_MS,
 	isPasskeyPageRequestMessage,
+	type PasskeyBackgroundResponse,
+	type PasskeyCreateHandlerPayload,
+	type PasskeyGetHandlerPayload,
 	type PasskeyPageRequestMessage,
 	type PasskeyPageResponseMessage,
 } from "../passkey/types";
+import {
+	cancelPasskeyPrompt,
+	promptPasskeyCreateDecision,
+	promptPasskeyGetSelection,
+} from "./passkey-prompt";
 
 type ActiveRequest = {
 	timeoutId: number;
+	abortController: AbortController;
+	responseType:
+		| typeof BITTERY_PASSKEY_CREATE_RESPONSE
+		| typeof BITTERY_PASSKEY_GET_RESPONSE;
 };
 
 const activeRequests = new Map<string, ActiveRequest>();
@@ -39,36 +51,169 @@ function finalizeRequest(requestId: string): void {
 	activeRequests.delete(requestId);
 }
 
-function routeToBackground(
-	message: PasskeyPageRequestMessage,
-): Promise<Record<string, unknown>> {
-	const runtimeType =
-		message.type === BITTERY_PASSKEY_CREATE_REQUEST
-			? "PASSKEY_CREATE"
-			: message.type === BITTERY_PASSKEY_GET_REQUEST
-				? "PASSKEY_GET"
-				: "PASSKEY_CANCEL";
+function responseTypeForMessage(
+	type:
+		| typeof BITTERY_PASSKEY_CREATE_REQUEST
+		| typeof BITTERY_PASSKEY_GET_REQUEST
+		| typeof BITTERY_PASSKEY_CANCEL_REQUEST,
+):
+	| typeof BITTERY_PASSKEY_CREATE_RESPONSE
+	| typeof BITTERY_PASSKEY_GET_RESPONSE {
+	return type === BITTERY_PASSKEY_CREATE_REQUEST
+		? BITTERY_PASSKEY_CREATE_RESPONSE
+		: BITTERY_PASSKEY_GET_RESPONSE;
+}
 
-	return new Promise<Record<string, unknown>>((resolve, reject) => {
+function cancelRequest(requestId: string): ActiveRequest | undefined {
+	const activeRequest = activeRequests.get(requestId);
+	if (!activeRequest) {
+		return undefined;
+	}
+
+	window.clearTimeout(activeRequest.timeoutId);
+	activeRequest.abortController.abort();
+	activeRequests.delete(requestId);
+	cancelPasskeyPrompt(requestId);
+	return activeRequest;
+}
+
+function postSerializedResponse(input: {
+	requestId: string;
+	responseType:
+		| typeof BITTERY_PASSKEY_CREATE_RESPONSE
+		| typeof BITTERY_PASSKEY_GET_RESPONSE;
+	response: PasskeyBackgroundResponse;
+}): void {
+	postResponse({
+		type: input.responseType,
+		requestId: input.requestId,
+		success: Boolean(input.response.success),
+		fallbackToNative: Boolean(input.response.fallbackToNative),
+		error:
+			typeof input.response.error === "string"
+				? input.response.error
+				: undefined,
+		result:
+			typeof input.response.result === "object" && input.response.result
+				? (input.response.result as PasskeyPageResponseMessage["result"])
+				: undefined,
+	});
+}
+
+function sendRuntimeMessage(
+	runtimeType: "PASSKEY_CREATE" | "PASSKEY_GET" | "PASSKEY_CANCEL",
+	payload: Record<string, unknown>,
+): Promise<PasskeyBackgroundResponse> {
+	return new Promise<PasskeyBackgroundResponse>((resolve, reject) => {
 		chrome.runtime.sendMessage(
 			{
 				type: runtimeType,
-				payload: {
-					requestId: message.requestId,
-					...(message.type === BITTERY_PASSKEY_CANCEL_REQUEST
-						? {}
-						: message.payload),
-				},
+				payload,
 			},
-			(response: Record<string, unknown>) => {
+			(response: PasskeyBackgroundResponse) => {
 				if (chrome.runtime.lastError) {
 					reject(new Error(chrome.runtime.lastError.message));
 					return;
 				}
-				resolve(response ?? {});
+				resolve(response ?? { success: false, fallbackToNative: true });
 			},
 		);
 	});
+}
+
+async function executePasskeyFlow(input: {
+	message:
+		| Extract<PasskeyPageRequestMessage, { type: typeof BITTERY_PASSKEY_CREATE_REQUEST }>
+		| Extract<PasskeyPageRequestMessage, { type: typeof BITTERY_PASSKEY_GET_REQUEST }>;
+	signal: AbortSignal;
+}): Promise<PasskeyBackgroundResponse> {
+	const runtimeType =
+		input.message.type === BITTERY_PASSKEY_CREATE_REQUEST
+			? "PASSKEY_CREATE"
+			: "PASSKEY_GET";
+
+	let response = await sendRuntimeMessage(runtimeType, {
+		requestId: input.message.requestId,
+		...input.message.payload,
+	});
+
+	for (let attempts = 0; attempts < 3; attempts++) {
+		if (!response.requiresUserInteraction) {
+			return response;
+		}
+
+		if (input.signal.aborted) {
+			return {
+				success: false,
+				fallbackToNative: true,
+				error: "Passkey request cancelled",
+			};
+		}
+
+		if (
+			response.requiresUserInteraction.kind === "get-picker" &&
+			input.message.type === BITTERY_PASSKEY_GET_REQUEST
+		) {
+			const selectedCredentialId = await promptPasskeyGetSelection({
+				requestId: input.message.requestId,
+				prompt: response.requiresUserInteraction,
+				signal: input.signal,
+			});
+			if (!selectedCredentialId) {
+				return {
+					success: false,
+					fallbackToNative: true,
+					error: "Passkey request cancelled",
+				};
+			}
+
+			const payload: PasskeyGetHandlerPayload = {
+				requestId: input.message.requestId,
+				...input.message.payload,
+				selectedCredentialId,
+			};
+			response = await sendRuntimeMessage("PASSKEY_GET", payload);
+			continue;
+		}
+
+		if (
+			response.requiresUserInteraction.kind === "create-save-target" &&
+			input.message.type === BITTERY_PASSKEY_CREATE_REQUEST
+		) {
+			const createDecision = await promptPasskeyCreateDecision({
+				requestId: input.message.requestId,
+				prompt: response.requiresUserInteraction,
+				signal: input.signal,
+			});
+			if (!createDecision) {
+				return {
+					success: false,
+					fallbackToNative: true,
+					error: "Passkey request cancelled",
+				};
+			}
+
+			const payload: PasskeyCreateHandlerPayload = {
+				requestId: input.message.requestId,
+				...input.message.payload,
+				createDecision,
+			};
+			response = await sendRuntimeMessage("PASSKEY_CREATE", payload);
+			continue;
+		}
+
+		return {
+			success: false,
+			fallbackToNative: true,
+			error: "Invalid passkey interaction state",
+		};
+	}
+
+	return {
+		success: false,
+		fallbackToNative: true,
+		error: "Passkey interaction did not resolve",
+	};
 }
 
 function isTrustedPageMessage(event: MessageEvent): boolean {
@@ -88,9 +233,20 @@ function isTrustedPageMessage(event: MessageEvent): boolean {
 
 async function handleRequest(message: PasskeyPageRequestMessage): Promise<void> {
 	if (message.type === BITTERY_PASSKEY_CANCEL_REQUEST) {
-		finalizeRequest(message.requestId);
+		const cancelledRequest = cancelRequest(message.requestId);
+		if (cancelledRequest) {
+			postResponse({
+				type: cancelledRequest.responseType,
+				requestId: message.requestId,
+				success: false,
+				fallbackToNative: true,
+				error: "Passkey request cancelled",
+			});
+		}
 		try {
-			await routeToBackground(message);
+			await sendRuntimeMessage("PASSKEY_CANCEL", {
+				requestId: message.requestId,
+			});
 		} catch (error) {
 			console.debug("[Passkey bridge] cancel propagation failed:", error);
 		}
@@ -101,46 +257,45 @@ async function handleRequest(message: PasskeyPageRequestMessage): Promise<void> 
 		return;
 	}
 
+	const responseType = responseTypeForMessage(message.type);
+	const abortController = new AbortController();
 	const timeoutId = window.setTimeout(() => {
-		activeRequests.delete(message.requestId);
+		cancelRequest(message.requestId);
 		postResponse({
-			type:
-				message.type === BITTERY_PASSKEY_CREATE_REQUEST
-					? BITTERY_PASSKEY_CREATE_RESPONSE
-					: BITTERY_PASSKEY_GET_RESPONSE,
+			type: responseType,
 			requestId: message.requestId,
 			success: false,
 			error: "Passkey bridge timeout",
 			fallbackToNative: true,
 		});
 	}, PASSKEY_BRIDGE_TIMEOUT_MS);
-	activeRequests.set(message.requestId, { timeoutId });
+	activeRequests.set(message.requestId, {
+		timeoutId,
+		abortController,
+		responseType,
+	});
 
 	try {
-		const response = await routeToBackground(message);
+		const response = await executePasskeyFlow({
+			message,
+			signal: abortController.signal,
+		});
+		if (!activeRequests.has(message.requestId)) {
+			return;
+		}
 		finalizeRequest(message.requestId);
-
-		postResponse({
-			type:
-				message.type === BITTERY_PASSKEY_CREATE_REQUEST
-					? BITTERY_PASSKEY_CREATE_RESPONSE
-					: BITTERY_PASSKEY_GET_RESPONSE,
+		postSerializedResponse({
 			requestId: message.requestId,
-			success: Boolean(response.success),
-			fallbackToNative: Boolean(response.fallbackToNative),
-			error: typeof response.error === "string" ? response.error : undefined,
-			result:
-				typeof response.result === "object" && response.result
-					? (response.result as PasskeyPageResponseMessage["result"])
-					: undefined,
+			responseType,
+			response,
 		});
 	} catch (error) {
+		if (!activeRequests.has(message.requestId)) {
+			return;
+		}
 		finalizeRequest(message.requestId);
 		postResponse({
-			type:
-				message.type === BITTERY_PASSKEY_CREATE_REQUEST
-					? BITTERY_PASSKEY_CREATE_RESPONSE
-					: BITTERY_PASSKEY_GET_RESPONSE,
+			type: responseType,
 			requestId: message.requestId,
 			success: false,
 			fallbackToNative: true,

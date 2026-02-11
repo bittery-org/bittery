@@ -1,7 +1,7 @@
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { cn } from "@bittery/ui";
-import { IconMobileOutlineDuo18 } from "@bittery/ui/icons";
+import { IconCircleKeyOutlineDuo18, IconMobileOutlineDuo18 } from "@bittery/ui/icons";
 import { useDraggable } from "@dnd-kit/core";
 import { useNavigate } from "@tanstack/react-router";
 import type { DragItemData } from "../../providers/dnd-provider";
@@ -26,6 +26,7 @@ export function ItemListRow({
 	const maskedCardNumber = item.cardNumber
 		? maskCardNumber(item.cardNumber)
 		: undefined;
+	const hasPasskeys = item.category === "login" && (item.passkeys?.length ?? 0) > 0;
 
 	const dragData: DragItemData = {
 		type: "vault-item",
@@ -77,7 +78,22 @@ export function ItemListRow({
 						<span className="truncate font-medium text-sm">{item.title}</span>
 						{item.category === "login" && item.totpSecret && (
 							<span title="Has 2FA">
-								<IconMobileOutlineDuo18 className="size-3 shrink-0 text-primary-foreground" />
+								<IconMobileOutlineDuo18
+									className={cn(
+										"size-3 shrink-0",
+										isSelected ? "text-primary-foreground" : "text-muted-foreground",
+									)}
+								/>
+							</span>
+						)}
+						{hasPasskeys && (
+							<span title="Has passkeys">
+								<IconCircleKeyOutlineDuo18
+									className={cn(
+										"size-3 shrink-0",
+										isSelected ? "text-primary-foreground" : "text-muted-foreground",
+									)}
+								/>
 							</span>
 						)}
 					</div>

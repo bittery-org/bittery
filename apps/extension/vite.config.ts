@@ -31,6 +31,8 @@ export default defineConfig({
 				savePromptIframe: "save-prompt-iframe.html",
 				creditCardAutofillIframe: "credit-card-autofill-iframe.html",
 				identityAutofillIframe: "identity-autofill-iframe.html",
+				passkeyPickerIframe: "passkey-picker-iframe.html",
+				passkeySaveTargetIframe: "passkey-save-target-iframe.html",
 			},
 		},
 	},

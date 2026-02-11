@@ -1,6 +1,7 @@
 import type { DecryptedItem } from "@bittery/shared/types";
 import { Badge, Button, cn, Input, Skeleton, toast } from "@bittery/ui";
 import {
+	IconCircleKeyOutlineDuo18,
 	IconGear3OutlineDuo18,
 	IconMagnifier3OutlineDuo18,
 	IconMobileOutlineDuo18,
@@ -115,6 +116,7 @@ function ItemListRow({
 }) {
 	const title = item.title;
 	const subtitle = item.username || item.url;
+	const passkeyCount = item.category === "login" ? (item.passkeys?.length ?? 0) : 0;
 
 	return (
 		<button
@@ -140,6 +142,17 @@ function ItemListRow({
 						{item.category === "login" && item.totpSecret && (
 							<span title="Has 2FA">
 								<IconMobileOutlineDuo18 className="size-3 shrink-0" />
+							</span>
+						)}
+						{passkeyCount > 0 && (
+							<span
+								title={`${passkeyCount} passkey${passkeyCount === 1 ? "" : "s"}`}
+								className={cn(
+									"inline-flex items-center",
+									isSelected ? "text-primary-foreground/80" : "text-muted-foreground",
+								)}
+							>
+								<IconCircleKeyOutlineDuo18 className="size-3.5 shrink-0" />
 							</span>
 						)}
 					</div>
