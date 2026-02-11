@@ -21,7 +21,10 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
 import { encrypt } from "../../lib/tauri-crypto";
-import { useQueryInvalidator } from "../../providers/sync-provider";
+import {
+	useClientId,
+	useQueryInvalidator,
+} from "../../providers/sync-provider";
 import type { ParsedImportItem } from "../../utils/import-parsers";
 import { parseImportFile } from "../../utils/import-parsers";
 
@@ -40,6 +43,7 @@ export function ImportDialog({
 }: ImportDialogProps) {
 	const defaultClient = useTRPCClient();
 	const invalidator = useQueryInvalidator();
+	const clientId = useClientId();
 
 	const [importStatus, setImportStatus] = useState<
 		"idle" | "parsing" | "encrypting" | "uploading" | "success" | "error"
@@ -163,6 +167,7 @@ export function ImportDialog({
 					client = createAccountTrpcClient(
 						authToken,
 						serverUrl || "http://localhost:3000",
+						clientId || undefined,
 					);
 				}
 			}
@@ -170,6 +175,7 @@ export function ImportDialog({
 			// Bulk import via tRPC
 			const result = await client.vault.bulkImportItems.mutate({
 				vaultId,
+				clientId: clientId || undefined,
 				items: encryptedItems,
 			});
 

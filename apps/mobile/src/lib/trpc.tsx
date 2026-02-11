@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import type { ReactNode } from "react";
 import { createContext, useContext, useEffect, useState } from "react";
+import { getOrCreateMobileSyncClientId } from "@/lib/sync-client-id";
 import { storage } from "@/services/storage";
 
 // Re-export the shared tRPC hooks for consistency
@@ -81,11 +82,13 @@ export function TRPCProvider({ children }: TRPCProviderProps) {
 							(await storage.getServerUrl()) || DEFAULT_SERVER_URL;
 						const resolvedUrl = buildTrpcUrl(currentServerUrl, url as string);
 						const authToken = await storage.getAuthToken();
+						const syncClientId = await getOrCreateMobileSyncClientId();
 						return fetch(resolvedUrl, {
 							...options,
 							credentials: "include",
 							headers: {
 								...options?.headers,
+								"X-Client-Id": syncClientId,
 								Authorization: (authToken
 									? `Bearer ${authToken}`
 									: undefined) as any,

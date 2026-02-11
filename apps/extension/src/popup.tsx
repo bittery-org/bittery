@@ -35,12 +35,20 @@ const trpcClient = createTRPCClient<AppRouter>({
 		httpBatchLink({
 			url: `${fallbackServerUrl}/trpc`,
 			async headers() {
-				// Get auth token from chrome.storage via background
-				const response = await chrome.runtime.sendMessage({
-					type: "GET_AUTH_TOKEN",
-				});
+				// Get auth token and sync client id from background.
+				const [authResponse, clientIdResponse] = await Promise.all([
+					chrome.runtime.sendMessage({
+						type: "GET_AUTH_TOKEN",
+					}),
+					chrome.runtime.sendMessage({
+						type: "GET_SYNC_CLIENT_ID",
+					}),
+				]);
 				return {
-					authorization: response.token ? `Bearer ${response.token}` : "",
+					authorization: authResponse.token
+						? `Bearer ${authResponse.token}`
+						: "",
+					"X-Client-Id": clientIdResponse.clientId || "",
 				};
 			},
 			async fetch(url, options) {

@@ -94,6 +94,21 @@ export function getQueryKeysForEvent(
 			keys.push(["decrypted-item"]);
 			break;
 
+		case "item_permanently_deleted":
+			keys.push(trpc.vault.listAllItems.queryKey());
+			keys.push(trpc.vault.listAllDeletedItems.queryKey());
+			keys.push(["items"]);
+			keys.push(["deleted-items"]);
+			if (vaultId) {
+				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
+				keys.push(trpc.vault.listDeletedItems.queryKey({ vaultId }));
+				keys.push(["vault-items", vaultId]);
+			}
+			keys.push(trpc.vault.getItem.queryKey({ itemId: entityId }));
+			keys.push(["vault-item", entityId]);
+			keys.push(["decrypted-item"]);
+			break;
+
 		case "item_restored":
 			keys.push(trpc.vault.listAllItems.queryKey());
 			keys.push(trpc.vault.listAllDeletedItems.queryKey());
@@ -159,6 +174,22 @@ export function getQueryKeysForEvent(
 			keys.push(["all-vault-keys"]);
 			keys.push(trpc.vault.listAllItems.queryKey());
 			break;
+
+		case "vault_access_revoked": {
+			keys.push(trpc.vault.list.queryKey());
+			keys.push(["vault-keys"]);
+			keys.push(["all-vault-keys"]);
+			keys.push(trpc.vault.listAllItems.queryKey());
+			const affectedVaultId = vaultId ?? entityId;
+			keys.push(trpc.vault.listItems.queryKey({ vaultId: affectedVaultId }));
+			keys.push(
+				trpc.vault.listDeletedItems.queryKey({ vaultId: affectedVaultId }),
+			);
+			keys.push(["vault-items", affectedVaultId]);
+			keys.push(["deleted-items"]);
+			keys.push(["decrypted-item"]);
+			break;
+		}
 
 		case "vault_member_added":
 		case "vault_member_removed":

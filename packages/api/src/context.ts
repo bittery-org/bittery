@@ -28,9 +28,11 @@ export async function createContext({ context }: CreateContextOptions) {
 		context.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ||
 		context.req.header("X-Real-IP") ||
 		null;
+	const clientId = context.req.header("X-Client-Id") ?? null;
 
 	return {
 		session,
+		clientId,
 		device: {
 			userAgent,
 			ipAddress,

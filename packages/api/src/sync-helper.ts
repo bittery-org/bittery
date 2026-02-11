@@ -7,10 +7,12 @@ export type SyncEventType =
 	| "item_updated"
 	| "item_deleted"
 	| "item_restored"
+	| "item_permanently_deleted"
 	| "item_moved"
 	| "vault_created"
 	| "vault_updated"
 	| "vault_deleted"
+	| "vault_access_revoked"
 	| "vault_member_added"
 	| "vault_member_removed"
 	| "vault_key_rotated";
@@ -54,20 +56,32 @@ export interface SyncBroadcastPayload {
 export async function createSyncEvent(
 	params: CreateSyncEventParams,
 	tx?: DbOrTx,
+	contextClientId?: string | null,
 ): Promise<SyncBroadcastPayload> {
+	const resolvedClientId = params.clientId ?? contextClientId ?? null;
+	const resolvedVersion = params.version ?? 1;
 	const eventId = nanoid();
 
-	await (tx ?? db).insert(syncEvent).values({
-		id: eventId,
-		eventType: params.eventType,
-		entityId: params.entityId,
-		entityType: params.entityType,
-		vaultId: params.vaultId,
-		userId: params.userId,
-		clientId: params.clientId || null,
-		version: params.version || 1,
-		metadata: params.metadata ? JSON.stringify(params.metadata) : null,
-	});
+	const [inserted] = await (tx ?? db)
+		.insert(syncEvent)
+		.values({
+			id: eventId,
+			eventType: params.eventType,
+			entityId: params.entityId,
+			entityType: params.entityType,
+			vaultId: params.vaultId,
+			userId: params.userId,
+			clientId: resolvedClientId,
+			version: resolvedVersion,
+			metadata: params.metadata ? JSON.stringify(params.metadata) : null,
+		})
+		.returning({
+			createdAt: syncEvent.createdAt,
+		});
+
+	if (!inserted) {
+		throw new Error("Failed to create sync event");
+	}
 
 	return {
 		id: eventId,
@@ -75,10 +89,10 @@ export async function createSyncEvent(
 		entityId: params.entityId,
 		entityType: params.entityType,
 		vaultId: params.vaultId,
-		version: params.version || 1,
-		clientId: params.clientId || null,
+		version: resolvedVersion,
+		clientId: resolvedClientId,
 		userId: params.userId,
-		timestamp: Date.now(),
+		timestamp: inserted.createdAt.getTime(),
 		metadata: params.metadata,
 	};
 }

@@ -99,6 +99,13 @@
 			"when": 1770496446000,
 			"tag": "0013_heavy_human_torch",
 			"breakpoints": true
+		},
+		{
+			"idx": 14,
+			"version": "7",
+			"when": 1770802874918,
+			"tag": "0014_open_vulcan",
+			"breakpoints": true
 		}
 	]
 }

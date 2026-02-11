@@ -26,6 +26,7 @@ export * from "./components/sidebar";
 export * from "./components/skeleton";
 export * from "./components/sonner";
 export * from "./components/sync-status";
+export * from "./components/sync-status-indicator";
 export * from "./components/table";
 export * from "./components/tabs";
 export * from "./components/vault-icon";

@@ -39,14 +39,25 @@ interface SyncEventMessage {
 	event: SyncEvent;
 }
 
-type BackgroundMessage = SyncStatusMessage | SyncEventMessage;
+interface SyncFullRefreshMessage {
+	type: "SYNC_FULL_REFRESH_REQUIRED";
+}
+
+type BackgroundMessage =
+	| SyncStatusMessage
+	| SyncEventMessage
+	| SyncFullRefreshMessage;
 
 function isBackgroundMessage(message: unknown): message is BackgroundMessage {
 	if (!message || typeof message !== "object") {
 		return false;
 	}
 	const typed = message as Partial<BackgroundMessage>;
-	return typed.type === "SYNC_STATUS_CHANGED" || typed.type === "SYNC_EVENT";
+	return (
+		typed.type === "SYNC_STATUS_CHANGED" ||
+		typed.type === "SYNC_EVENT" ||
+		typed.type === "SYNC_FULL_REFRESH_REQUIRED"
+	);
 }
 
 /**
@@ -101,6 +112,10 @@ export function ExtensionSyncProvider({
 		[invalidator],
 	);
 
+	const handleFullRefresh = useCallback(async () => {
+		await queryClient.invalidateQueries();
+	}, [queryClient]);
+
 	// Listen for messages from background worker
 	useEffect(() => {
 		const handleMessage = (message: unknown) => {
@@ -112,6 +127,8 @@ export function ExtensionSyncProvider({
 				setStatus(message.status);
 			} else if (message.type === "SYNC_EVENT") {
 				void handleSyncEvent(message.event);
+			} else if (message.type === "SYNC_FULL_REFRESH_REQUIRED") {
+				void handleFullRefresh();
 			}
 		};
 
@@ -120,7 +137,7 @@ export function ExtensionSyncProvider({
 		return () => {
 			chrome.runtime.onMessage.removeListener(handleMessage);
 		};
-	}, [handleSyncEvent]);
+	}, [handleSyncEvent, handleFullRefresh]);
 
 	const contextValue: SyncContextValue = {
 		status,

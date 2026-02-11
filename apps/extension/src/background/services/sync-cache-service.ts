@@ -52,12 +52,19 @@ export interface SyncCacheDesktopClient {
 export interface SyncEventQueryClient extends DeltaSyncClient {
 	sync: {
 		getEventsSince: {
-			query: (input: { since: number }) => Promise<{
+			query: (input: {
+				since: number;
+				sinceId?: string;
+				limit?: number;
+			}) => Promise<{
 				events: Array<
 					SyncEvent & {
 						clientId: string | null;
 					}
 				>;
+				hasMore: boolean;
+				requiresFullRefresh: boolean;
+				cursor: { timestamp: number; id: string } | null;
 			}>;
 		};
 	};
@@ -127,6 +134,7 @@ export interface SyncCacheService {
 	getClientForEmail: (email?: string | null) => Promise<SyncEventQueryClient>;
 	resolveCandidateEmailsForEvent: (event: SyncEvent) => Promise<string[]>;
 	applyDeltaSyncForEvent: (event: SyncEvent) => Promise<void>;
+	clearItemCachesForKnownAccounts: () => Promise<void>;
 }
 
 export function createSyncCacheService(
@@ -263,14 +271,19 @@ export function createSyncCacheService(
 			return [];
 		}
 
-		if (!event.vaultId) {
+		const effectiveVaultId =
+			event.vaultId ??
+			(event.type === "vault_access_revoked" ? event.entityId : null);
+		if (!effectiveVaultId) {
 			return allEmails;
 		}
 
 		const matched: string[] = [];
 		for (const email of allEmails) {
 			const vaultKeys = await deps.storage.getVaultKeys(email);
-			if (vaultKeys?.some((vaultKey) => vaultKey.vaultId === event.vaultId)) {
+			if (
+				vaultKeys?.some((vaultKey) => vaultKey.vaultId === effectiveVaultId)
+			) {
 				matched.push(email);
 			}
 		}
@@ -334,12 +347,32 @@ export function createSyncCacheService(
 		}
 	}
 
+	async function clearItemCachesForKnownAccounts(): Promise<void> {
+		if (!deps.storage.clearItemCache) {
+			return;
+		}
+
+		const activeSingleEmail = await resolveActiveSingleEmail();
+		const allEmails = await getAllKnownEmails();
+		const candidates = buildOrderedCandidates(activeSingleEmail, allEmails);
+
+		if (candidates.length === 0) {
+			await deps.storage.clearItemCache();
+			return;
+		}
+
+		await Promise.all(
+			candidates.map((email) => deps.storage.clearItemCache?.(email)),
+		);
+	}
+
 	return {
 		supportsItemCache,
 		resolveConnectionContext,
 		getClientForEmail,
 		resolveCandidateEmailsForEvent,
 		applyDeltaSyncForEvent,
+		clearItemCachesForKnownAccounts,
 	};
 }
 

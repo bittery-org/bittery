@@ -40,8 +40,31 @@ const clientCache = new Map<
 /**
  * Generate cache key for tRPC client.
  */
-function getCacheKey(authToken: string, serverUrl: string): string {
-	return `${serverUrl}:${authToken}`;
+function getCacheKey(
+	authToken: string,
+	serverUrl: string,
+	clientId?: string,
+): string {
+	return `${serverUrl}:${authToken}:${clientId ?? ""}`;
+}
+
+function getRuntimeClientId(): string | undefined {
+	const globalClientId = (globalThis as { __BITTERY_SYNC_CLIENT_ID__?: string })
+		.__BITTERY_SYNC_CLIENT_ID__;
+	if (globalClientId) {
+		return globalClientId;
+	}
+
+	if (typeof window === "undefined") {
+		return undefined;
+	}
+
+	try {
+		const clientId = window.localStorage.getItem("bittery_sync_client_id");
+		return clientId ?? undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 /**
@@ -61,9 +84,14 @@ function getCacheKey(authToken: string, serverUrl: string): string {
  * @param serverUrl - API server URL (defaults to env variable or localhost:3000)
  * @returns tRPC client configured for this account
  */
-export function createAccountTrpcClient(authToken: string, serverUrl: string) {
+export function createAccountTrpcClient(
+	authToken: string,
+	serverUrl: string,
+	clientId?: string,
+) {
 	const normalizedUrl = normalizeServerUrl(serverUrl) ?? DEFAULT_SERVER_URL;
-	const cacheKey = getCacheKey(authToken, normalizedUrl);
+	const resolvedClientId = clientId ?? getRuntimeClientId();
+	const cacheKey = getCacheKey(authToken, normalizedUrl, resolvedClientId);
 
 	// Return cached client if exists
 	const cachedClient = clientCache.get(cacheKey);
@@ -78,6 +106,7 @@ export function createAccountTrpcClient(authToken: string, serverUrl: string) {
 				url: `${normalizedUrl}/trpc`,
 				headers: {
 					Authorization: `Bearer ${authToken}`,
+					...(resolvedClientId ? { "X-Client-Id": resolvedClientId } : {}),
 				},
 				fetch: (url, options) => {
 					const resolvedUrl = buildTrpcUrl(normalizedUrl, url as string);
@@ -103,9 +132,14 @@ export function createAccountTrpcClient(authToken: string, serverUrl: string) {
  * @param authToken - JWT token for the account
  * @param serverUrl - API server URL
  */
-export function clearAccountTrpcClient(authToken: string, serverUrl: string) {
+export function clearAccountTrpcClient(
+	authToken: string,
+	serverUrl: string,
+	clientId?: string,
+) {
 	const normalizedUrl = normalizeServerUrl(serverUrl) ?? DEFAULT_SERVER_URL;
-	const cacheKey = getCacheKey(authToken, normalizedUrl);
+	const resolvedClientId = clientId ?? getRuntimeClientId();
+	const cacheKey = getCacheKey(authToken, normalizedUrl, resolvedClientId);
 	clientCache.delete(cacheKey);
 }
 
@@ -129,6 +163,7 @@ export function clearTrpcClientCache() {
  */
 export async function createAllAccountTrpcClients(
 	storage: IStorageAdapter,
+	clientId?: string,
 ): Promise<Map<string, ReturnType<typeof createAccountTrpcClient>>> {
 	// Get all unlocked accounts (accounts with MUK in memory)
 	const unlockedEmails = await storage.getUnlockedAccounts?.();
@@ -150,7 +185,7 @@ export async function createAllAccountTrpcClients(
 		}
 
 		const serverUrl = (await storage.getServerUrl(email)) ?? DEFAULT_SERVER_URL;
-		const client = createAccountTrpcClient(authToken, serverUrl);
+		const client = createAccountTrpcClient(authToken, serverUrl, clientId);
 
 		clients.set(email, client);
 	}

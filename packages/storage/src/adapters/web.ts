@@ -8,7 +8,12 @@ import {
 	arrayBufferToBase64,
 	base64ToArrayBuffer,
 } from "@bittery/shared/crypto";
-import type { EncryptedData } from "@bittery/types";
+import type {
+	CachedEncryptedItem,
+	CachedVaultMetadata,
+	EncryptedData,
+	ItemCacheMetadata,
+} from "@bittery/types";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
 import {
@@ -29,9 +34,30 @@ const VAULT_KEYS_KEY = "bittery_vault_keys";
 const SERVER_URL_STORAGE = "bittery_server_url";
 const ENCRYPTED_PRIVATE_KEY_STORAGE = "bittery_encrypted_private_key";
 const AUTO_LOCK_TIMEOUT_STORAGE = "bittery_auto_lock_timeout";
+const ITEM_CACHE_DB_NAME = "bittery_item_cache";
+const ITEM_CACHE_DB_VERSION = 1;
+const ITEM_CACHE_ITEMS_STORE = "items";
+const ITEM_CACHE_VAULTS_STORE = "vaults";
+const ITEM_CACHE_METADATA_STORE = "metadata";
+const ITEM_CACHE_META_KEY = "item_cache_meta";
 
 // In-memory cache for Master Unlock Key
 let masterUnlockKeyCache: Uint8Array | null = null;
+
+function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
+	return new Promise((resolve, reject) => {
+		request.onsuccess = () => resolve(request.result);
+		request.onerror = () => reject(request.error);
+	});
+}
+
+function waitForTransaction(transaction: IDBTransaction): Promise<void> {
+	return new Promise((resolve, reject) => {
+		transaction.oncomplete = () => resolve();
+		transaction.onerror = () => reject(transaction.error);
+		transaction.onabort = () => reject(transaction.error);
+	});
+}
 
 /**
  * Generate or retrieve device-specific encryption key
@@ -74,8 +100,46 @@ export class WebStorageAdapter implements IStorageAdapter {
 	readonly platform = "web" as const;
 	readonly supportsMultiAccount = false;
 	readonly supportsBiometric = false;
+	readonly supportsItemCache = true;
+	private cacheDbPromise: Promise<IDBDatabase> | null = null;
 
 	constructor(private crypto: CryptoProvider) {}
+
+	private async getItemCacheDb(): Promise<IDBDatabase | null> {
+		if (
+			typeof window === "undefined" ||
+			typeof window.indexedDB === "undefined"
+		) {
+			return null;
+		}
+
+		if (!this.cacheDbPromise) {
+			this.cacheDbPromise = new Promise((resolve, reject) => {
+				const request = window.indexedDB.open(
+					ITEM_CACHE_DB_NAME,
+					ITEM_CACHE_DB_VERSION,
+				);
+
+				request.onupgradeneeded = () => {
+					const db = request.result;
+					if (!db.objectStoreNames.contains(ITEM_CACHE_ITEMS_STORE)) {
+						db.createObjectStore(ITEM_CACHE_ITEMS_STORE, { keyPath: "id" });
+					}
+					if (!db.objectStoreNames.contains(ITEM_CACHE_VAULTS_STORE)) {
+						db.createObjectStore(ITEM_CACHE_VAULTS_STORE, { keyPath: "id" });
+					}
+					if (!db.objectStoreNames.contains(ITEM_CACHE_METADATA_STORE)) {
+						db.createObjectStore(ITEM_CACHE_METADATA_STORE, { keyPath: "key" });
+					}
+				};
+
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+		}
+
+		return this.cacheDbPromise;
+	}
 
 	async initialize(): Promise<void> {
 		// No initialization needed for web localStorage/sessionStorage
@@ -340,6 +404,183 @@ export class WebStorageAdapter implements IStorageAdapter {
 	}
 
 	// ============================================================================
+	// Item Cache
+	// ============================================================================
+
+	async setCachedItems(
+		items: CachedEncryptedItem[],
+		_email?: string,
+	): Promise<void> {
+		const db = await this.getItemCacheDb();
+		if (!db) return;
+
+		const tx = db.transaction(ITEM_CACHE_ITEMS_STORE, "readwrite");
+		const store = tx.objectStore(ITEM_CACHE_ITEMS_STORE);
+		await requestToPromise(store.clear());
+		for (const item of items) {
+			await requestToPromise(store.put(item));
+		}
+		await waitForTransaction(tx);
+	}
+
+	async getCachedItems(_email?: string): Promise<CachedEncryptedItem[] | null> {
+		const db = await this.getItemCacheDb();
+		if (!db) return null;
+
+		const tx = db.transaction(ITEM_CACHE_ITEMS_STORE, "readonly");
+		const store = tx.objectStore(ITEM_CACHE_ITEMS_STORE);
+		const items = await requestToPromise(
+			store.getAll() as IDBRequest<CachedEncryptedItem[]>,
+		);
+		await waitForTransaction(tx);
+		return items ?? [];
+	}
+
+	async upsertCachedItem(
+		item: CachedEncryptedItem,
+		_email?: string,
+	): Promise<void> {
+		const db = await this.getItemCacheDb();
+		if (!db) return;
+
+		const tx = db.transaction(ITEM_CACHE_ITEMS_STORE, "readwrite");
+		await requestToPromise(tx.objectStore(ITEM_CACHE_ITEMS_STORE).put(item));
+		await waitForTransaction(tx);
+	}
+
+	async removeCachedItem(itemId: string, _email?: string): Promise<void> {
+		const db = await this.getItemCacheDb();
+		if (!db) return;
+
+		const tx = db.transaction(ITEM_CACHE_ITEMS_STORE, "readwrite");
+		await requestToPromise(
+			tx.objectStore(ITEM_CACHE_ITEMS_STORE).delete(itemId),
+		);
+		await waitForTransaction(tx);
+	}
+
+	async setCachedVaults(
+		vaults: CachedVaultMetadata[],
+		_email?: string,
+	): Promise<void> {
+		const db = await this.getItemCacheDb();
+		if (!db) return;
+
+		const tx = db.transaction(ITEM_CACHE_VAULTS_STORE, "readwrite");
+		const store = tx.objectStore(ITEM_CACHE_VAULTS_STORE);
+		await requestToPromise(store.clear());
+		for (const vault of vaults) {
+			await requestToPromise(store.put(vault));
+		}
+		await waitForTransaction(tx);
+	}
+
+	async getCachedVaults(
+		_email?: string,
+	): Promise<CachedVaultMetadata[] | null> {
+		const db = await this.getItemCacheDb();
+		if (!db) return null;
+
+		const tx = db.transaction(ITEM_CACHE_VAULTS_STORE, "readonly");
+		const store = tx.objectStore(ITEM_CACHE_VAULTS_STORE);
+		const vaults = await requestToPromise(
+			store.getAll() as IDBRequest<CachedVaultMetadata[]>,
+		);
+		await waitForTransaction(tx);
+		return vaults ?? [];
+	}
+
+	async upsertCachedVault(
+		vault: CachedVaultMetadata,
+		_email?: string,
+	): Promise<void> {
+		const db = await this.getItemCacheDb();
+		if (!db) return;
+
+		const tx = db.transaction(ITEM_CACHE_VAULTS_STORE, "readwrite");
+		await requestToPromise(tx.objectStore(ITEM_CACHE_VAULTS_STORE).put(vault));
+		await waitForTransaction(tx);
+	}
+
+	async removeCachedVault(vaultId: string, _email?: string): Promise<void> {
+		const db = await this.getItemCacheDb();
+		if (!db) return;
+
+		const tx = db.transaction(
+			[ITEM_CACHE_VAULTS_STORE, ITEM_CACHE_ITEMS_STORE],
+			"readwrite",
+		);
+		await requestToPromise(
+			tx.objectStore(ITEM_CACHE_VAULTS_STORE).delete(vaultId),
+		);
+
+		const itemStore = tx.objectStore(ITEM_CACHE_ITEMS_STORE);
+		const items = await requestToPromise(
+			itemStore.getAll() as IDBRequest<CachedEncryptedItem[]>,
+		);
+		for (const item of items) {
+			if (item.vaultId === vaultId) {
+				await requestToPromise(itemStore.delete(item.id));
+			}
+		}
+
+		await waitForTransaction(tx);
+	}
+
+	async getItemCacheMetadata(
+		_email?: string,
+	): Promise<ItemCacheMetadata | null> {
+		const db = await this.getItemCacheDb();
+		if (!db) return null;
+
+		const tx = db.transaction(ITEM_CACHE_METADATA_STORE, "readonly");
+		const store = tx.objectStore(ITEM_CACHE_METADATA_STORE);
+		const result = await requestToPromise(
+			store.get(ITEM_CACHE_META_KEY) as IDBRequest<
+				{ key: string; value: ItemCacheMetadata } | undefined
+			>,
+		);
+		await waitForTransaction(tx);
+
+		return result?.value ?? null;
+	}
+
+	async setItemCacheMetadata(
+		metadata: ItemCacheMetadata,
+		_email?: string,
+	): Promise<void> {
+		const db = await this.getItemCacheDb();
+		if (!db) return;
+
+		const tx = db.transaction(ITEM_CACHE_METADATA_STORE, "readwrite");
+		await requestToPromise(
+			tx.objectStore(ITEM_CACHE_METADATA_STORE).put({
+				key: ITEM_CACHE_META_KEY,
+				value: metadata,
+			}),
+		);
+		await waitForTransaction(tx);
+	}
+
+	async clearItemCache(_email?: string): Promise<void> {
+		const db = await this.getItemCacheDb();
+		if (!db) return;
+
+		const tx = db.transaction(
+			[
+				ITEM_CACHE_ITEMS_STORE,
+				ITEM_CACHE_VAULTS_STORE,
+				ITEM_CACHE_METADATA_STORE,
+			],
+			"readwrite",
+		);
+		await requestToPromise(tx.objectStore(ITEM_CACHE_ITEMS_STORE).clear());
+		await requestToPromise(tx.objectStore(ITEM_CACHE_VAULTS_STORE).clear());
+		await requestToPromise(tx.objectStore(ITEM_CACHE_METADATA_STORE).clear());
+		await waitForTransaction(tx);
+	}
+
+	// ============================================================================
 	// Auth State
 	// ============================================================================
 
@@ -373,6 +614,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 		localStorage.removeItem(SESSION_DATA_STORAGE);
 		localStorage.removeItem(DEVICE_KEY_STORAGE);
 		await this.clearSession();
+		await this.clearItemCache();
 	}
 
 	async getStoredSessionData(

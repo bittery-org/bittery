@@ -22,8 +22,7 @@ function RouteComponent() {
 	const [showSignIn, setShowSignIn] = useState(true);
 
 	// Extract invitation token from redirect URL if present
-	const invitationToken =
-		redirect?.match(/^\/invite\/(.+)$/)?.[1] || undefined;
+	const invitationToken = redirect?.match(/^\/invite\/(.+)$/)?.[1] || undefined;
 
 	return (
 		<div className="relative flex min-h-svh flex-col bg-gray-50 dark:bg-gray-950">
@@ -53,9 +52,7 @@ function RouteComponent() {
 			{/* Footer */}
 			<footer className="relative z-10">
 				<div className="mx-auto flex max-w-lg flex-col items-center gap-3 px-4 py-4 sm:flex-row sm:justify-between">
-					<p className="text-muted-foreground/60 text-xs">
-						Bittery
-					</p>
+					<p className="text-muted-foreground/60 text-xs">Bittery</p>
 					<div className="flex items-center gap-4">
 						<a
 							href="https://github.com/nicepkg/bittery"

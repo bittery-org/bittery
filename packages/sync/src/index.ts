@@ -1,5 +1,12 @@
 // Query invalidation helpers
 
+export type {
+	CatchUpClient,
+	CatchUpPageResponse,
+	RunCatchUpOptions,
+	RunCatchUpResult,
+} from "./catch-up";
+export { runCatchUp } from "./catch-up";
 // Delta sync (platform-agnostic)
 export type { DeltaSyncClient } from "./delta-sync";
 export { performDeltaSync } from "./delta-sync";

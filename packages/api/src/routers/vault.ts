@@ -21,7 +21,6 @@ import {
 	broadcastSyncPayload,
 	broadcastSyncPayloads,
 	createSyncEvent,
-	emitSyncEvent,
 	type SyncBroadcastPayload,
 } from "../sync-helper";
 import { logAuditEvent } from "../utils/audit";
@@ -196,6 +195,7 @@ export const vaultRouter = router({
 						version: 1,
 					},
 					tx,
+					ctx.clientId,
 				);
 			});
 
@@ -282,6 +282,7 @@ export const vaultRouter = router({
 						version: 1,
 					},
 					tx,
+					ctx.clientId,
 				);
 
 				return result;
@@ -322,21 +323,55 @@ export const vaultRouter = router({
 
 			// Get image key before deleting (for S3 cleanup)
 			const imageKey = userVaultKey.vault.imageKey;
-
-			// Emit sync event BEFORE deleting (cascade FK on sync_event.vaultId
-			// means we must broadcast while vault still exists)
-			await emitSyncEvent({
-				eventType: "vault_deleted",
-				entityId: input.vaultId,
-				entityType: "vault",
-				vaultId: input.vaultId,
-				userId: ctx.session.userId,
-				clientId: input.clientId,
-				version: 1,
+			const currentMembers = await db.query.vaultKey.findMany({
+				where: (vk, { eq }) => eq(vk.vaultId, input.vaultId),
 			});
+			const broadcasts: SyncBroadcastPayload[] = [];
 
-			// Wrap deletes in a transaction for atomicity
+			// Wrap deletes and event creation in the same transaction for atomicity
 			await db.transaction(async (tx) => {
+				broadcasts.push(
+					await createSyncEvent(
+						{
+							eventType: "vault_deleted",
+							entityId: input.vaultId,
+							entityType: "vault",
+							vaultId: input.vaultId,
+							userId: ctx.session.userId,
+							clientId: input.clientId,
+							version: 1,
+						},
+						tx,
+						ctx.clientId,
+					),
+				);
+
+				for (const member of currentMembers) {
+					if (member.userId === ctx.session.userId) {
+						continue;
+					}
+
+					broadcasts.push(
+						await createSyncEvent(
+							{
+								eventType: "vault_access_revoked",
+								entityId: input.vaultId,
+								entityType: "vault",
+								vaultId: input.vaultId,
+								userId: member.userId,
+								clientId: input.clientId,
+								version: 1,
+								metadata: {
+									reason: "vault_deleted",
+									vaultId: input.vaultId,
+								},
+							},
+							tx,
+							ctx.clientId,
+						),
+					);
+				}
+
 				// Delete all items in the vault
 				await tx.delete(item).where(eq(item.vaultId, input.vaultId));
 
@@ -346,6 +381,8 @@ export const vaultRouter = router({
 				// Delete the vault itself
 				await tx.delete(vault).where(eq(vault.id, input.vaultId));
 			});
+
+			await broadcastSyncPayloads(broadcasts);
 
 			// Delete vault image from S3 if it exists
 			if (imageKey) {
@@ -612,6 +649,7 @@ export const vaultRouter = router({
 						version: 1,
 					},
 					tx,
+					ctx.clientId,
 				);
 			});
 
@@ -627,6 +665,7 @@ export const vaultRouter = router({
 		.input(
 			z.object({
 				vaultId: z.string(),
+				clientId: z.string().optional(),
 				items: z.array(
 					z.object({
 						category: z.enum([
@@ -675,6 +714,7 @@ export const vaultRouter = router({
 
 			for (let i = 0; i < input.items.length; i += batchSize) {
 				const batch = input.items.slice(i, i + batchSize);
+				const batchBroadcasts: SyncBroadcastPayload[] = [];
 				const itemsToInsert = batch.map((itemData) => ({
 					id: nanoid(),
 					vaultId: input.vaultId,
@@ -683,9 +723,33 @@ export const vaultRouter = router({
 					encryptedData: itemData.encryptedData,
 					encryptionIv: itemData.encryptionIv,
 					encryptionAlgorithm: itemData.encryptionAlgorithm,
+					version: 1,
+					lastModifiedBy: ctx.session.userId,
 				}));
 
-				await db.insert(item).values(itemsToInsert);
+				await db.transaction(async (tx) => {
+					await tx.insert(item).values(itemsToInsert);
+
+					for (const insertedItem of itemsToInsert) {
+						batchBroadcasts.push(
+							await createSyncEvent(
+								{
+									eventType: "item_created",
+									entityId: insertedItem.id,
+									entityType: "item",
+									vaultId: input.vaultId,
+									userId: ctx.session.userId,
+									clientId: input.clientId,
+									version: 1,
+								},
+								tx,
+								ctx.clientId,
+							),
+						);
+					}
+				});
+
+				await broadcastSyncPayloads(batchBroadcasts);
 				importedIds.push(...itemsToInsert.map((i) => i.id));
 			}
 
@@ -774,6 +838,7 @@ export const vaultRouter = router({
 						version: newVersion,
 					},
 					tx,
+					ctx.clientId,
 				);
 			});
 
@@ -833,10 +898,10 @@ export const vaultRouter = router({
 						entityType: "item",
 						vaultId: existingItem.vaultId,
 						userId: ctx.session.userId,
-						clientId: null,
 						version: existingItem.version,
 					},
 					tx,
+					ctx.clientId,
 				);
 			});
 
@@ -902,6 +967,7 @@ export const vaultRouter = router({
 						version: newVersion,
 					},
 					tx,
+					ctx.clientId,
 				);
 			});
 
@@ -1007,6 +1073,7 @@ export const vaultRouter = router({
 						version: newVersion,
 					},
 					tx,
+					ctx.clientId,
 				);
 			});
 
@@ -1128,6 +1195,7 @@ export const vaultRouter = router({
 						},
 					},
 					tx,
+					ctx.clientId,
 				);
 			});
 
@@ -1143,6 +1211,7 @@ export const vaultRouter = router({
 		.input(
 			z.object({
 				itemId: z.string(),
+				clientId: z.string().optional(),
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
@@ -1173,8 +1242,27 @@ export const vaultRouter = router({
 				throw new Error("Access denied");
 			}
 
-			// Permanently delete from database
-			await db.delete(item).where(eq(item.id, input.itemId));
+			let broadcast: SyncBroadcastPayload;
+			await db.transaction(async (tx) => {
+				broadcast = await createSyncEvent(
+					{
+						eventType: "item_permanently_deleted",
+						entityId: input.itemId,
+						entityType: "item",
+						vaultId: existingItem.vaultId,
+						userId: ctx.session.userId,
+						clientId: input.clientId,
+						version: existingItem.version || 1,
+					},
+					tx,
+					ctx.clientId,
+				);
+
+				// Permanently delete from database
+				await tx.delete(item).where(eq(item.id, input.itemId));
+			});
+
+			await broadcastSyncPayload(broadcast!);
 
 			return { success: true };
 		}),
@@ -1548,6 +1636,7 @@ export const vaultRouter = router({
 									},
 								},
 								tx,
+								ctx.clientId,
 							),
 						);
 
@@ -1567,6 +1656,27 @@ export const vaultRouter = router({
 									},
 								},
 								tx,
+								ctx.clientId,
+							),
+						);
+
+						broadcasts.push(
+							await createSyncEvent(
+								{
+									eventType: "vault_access_revoked",
+									entityId: input.vaultId,
+									entityType: "vault",
+									vaultId: input.vaultId,
+									userId: input.userId,
+									clientId: input.clientId,
+									version: newKeyVersion,
+									metadata: {
+										reason: "member_removed",
+										removedUserId: input.userId,
+									},
+								},
+								tx,
+								ctx.clientId,
 							),
 						);
 					});
@@ -1796,6 +1906,7 @@ export const vaultRouter = router({
 							},
 						},
 						tx,
+						ctx.clientId,
 					);
 				});
 

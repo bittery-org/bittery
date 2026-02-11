@@ -24,6 +24,7 @@ export async function invalidateExtensionQueriesForSyncEvent(
 			return;
 
 		case "item_deleted":
+		case "item_permanently_deleted":
 		case "item_restored":
 			if (event.vaultId) {
 				await invalidator.invalidateVaultList(event.vaultId);
@@ -34,6 +35,7 @@ export async function invalidateExtensionQueriesForSyncEvent(
 		case "vault_created":
 		case "vault_updated":
 		case "vault_deleted":
+		case "vault_access_revoked":
 			await invalidator.invalidateVaultKeys();
 			return;
 

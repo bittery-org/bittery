@@ -5,6 +5,7 @@ import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import { storage } from "@/lib/storage";
+import { getOrCreateDesktopSyncClientId } from "@/lib/sync-client-id";
 
 const fallbackServerUrl =
 	normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
@@ -99,6 +100,8 @@ const trpcClient = createTRPCClient<AppRouter>({
 				const headers: Record<string, string> = {
 					...(options?.headers as Record<string, string>),
 				};
+				const syncClientId = await getOrCreateDesktopSyncClientId();
+				headers["X-Client-Id"] = syncClientId;
 
 				// Only set Authorization header if we have a valid token
 				if (token) {

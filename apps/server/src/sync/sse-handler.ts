@@ -13,11 +13,13 @@ export interface SyncEventPayload {
 		| "item_created"
 		| "item_updated"
 		| "item_deleted"
+		| "item_permanently_deleted"
 		| "item_moved"
 		| "item_restored"
 		| "vault_created"
 		| "vault_updated"
 		| "vault_deleted"
+		| "vault_access_revoked"
 		| "vault_member_added"
 		| "vault_member_removed"
 		| "vault_key_rotated";
@@ -194,6 +196,24 @@ function removeConnection(userId: string, connectionId: string): void {
  */
 function deliverToConnections(event: SyncEventPayload): void {
 	const { vaultId, clientId, userId: eventUserId } = event;
+
+	// User-targeted control events are delivered directly to the target user.
+	if (event.type === "vault_access_revoked") {
+		const targetConnections = connections.get(eventUserId);
+		if (targetConnections) {
+			for (const connection of targetConnections.values()) {
+				connection.channel.push({
+					...event,
+					metadata: {
+						...event.metadata,
+						isOwnEvent: false,
+						originClientId: clientId,
+					},
+				});
+			}
+		}
+		return;
+	}
 
 	// If no vaultId, only deliver to the user who triggered the event
 	if (!vaultId) {

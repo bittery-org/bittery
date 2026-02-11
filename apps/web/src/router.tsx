@@ -1,6 +1,7 @@
 import type { AppRouter } from "@bittery/api/routers/index";
 import { buildTrpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
 import { TRPCProvider } from "@bittery/shared/trpc";
+import { getOrCreateClientId } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import Loader from "./components/loader";
@@ -88,6 +89,18 @@ const fallbackServerUrl =
 		? window.location.origin
 		: "http://localhost:3000");
 
+function getSyncClientIdHeader(): string | null {
+	if (typeof window === "undefined") {
+		return null;
+	}
+
+	try {
+		return getOrCreateClientId(window.localStorage);
+	} catch {
+		return null;
+	}
+}
+
 const trpcClient = createTRPCClient<AppRouter>({
 	links: [
 		httpBatchLink({
@@ -96,12 +109,14 @@ const trpcClient = createTRPCClient<AppRouter>({
 				const serverUrl = (await storage.getServerUrl()) ?? fallbackServerUrl;
 				const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
 				const authToken = await storage.getAuthToken();
+				const syncClientId = getSyncClientIdHeader();
 				return fetch(resolvedUrl, {
 					...options,
 					credentials: "include",
 					headers: {
 						...options?.headers,
 						...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+						...(syncClientId ? { "X-Client-Id": syncClientId } : {}),
 					},
 				});
 			},

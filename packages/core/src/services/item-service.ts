@@ -247,6 +247,29 @@ export class ItemService {
 		return vaults;
 	}
 
+	private async fetchBootstrapItems(
+		client: DefaultTrpcClient,
+	): Promise<RawEncryptedItemWithVault[]> {
+		const allItems: RawEncryptedItemWithVault[] = [];
+		let cursor: string | undefined;
+
+		while (true) {
+			const page = await client.sync.bootstrapItems.query({
+				cursor,
+				limit: 500,
+			});
+
+			allItems.push(...(page.items as RawEncryptedItemWithVault[]));
+			if (!page.hasMore || !page.nextCursor) {
+				break;
+			}
+
+			cursor = page.nextCursor;
+		}
+
+		return allItems;
+	}
+
 	async fetchAndDecryptItems(
 		accounts: AccountInfo[],
 		options: FetchItemsOptions = {},
@@ -271,7 +294,7 @@ export class ItemService {
 								false,
 							);
 						} else {
-							rawItems = await account.trpcClient.vault.listAllItems.query();
+							rawItems = await this.fetchBootstrapItems(account.trpcClient);
 							await this.cache.populateFromServerResponse(
 								this.toCachedItems(rawItems),
 								this.toCachedVaults(rawItems),
@@ -279,7 +302,7 @@ export class ItemService {
 							);
 						}
 					} else {
-						rawItems = await account.trpcClient.vault.listAllItems.query();
+						rawItems = await this.fetchBootstrapItems(account.trpcClient);
 					}
 
 					const vaultKeyCache = new Map<string, Uint8Array>();

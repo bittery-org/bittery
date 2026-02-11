@@ -25,7 +25,12 @@ function createClientStub(): SyncEventQueryClient {
 		},
 		sync: {
 			getEventsSince: {
-				query: async () => ({ events: [] }),
+				query: async () => ({
+					events: [],
+					hasMore: false,
+					requiresFullRefresh: false,
+					cursor: null,
+				}),
 			},
 		},
 	} as SyncEventQueryClient;

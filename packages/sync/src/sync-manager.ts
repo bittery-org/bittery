@@ -1,5 +1,6 @@
 import type {
 	ConnectionStatus,
+	SyncCursor,
 	SyncEvent,
 	SyncManagerOptions,
 	SyncStorage,
@@ -50,7 +51,7 @@ export class SyncManager {
 	private reconnectDelay: number;
 	private maxReconnectDelay: number;
 	private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
-	private lastEventTimestamp: number | null = null;
+	private lastEventCursor: SyncCursor | null = null;
 	private lastHeartbeatTime: number | null = null;
 	private staleCheckInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -83,7 +84,14 @@ export class SyncManager {
 	 * Get last event timestamp
 	 */
 	getLastEventTimestamp(): number | null {
-		return this.lastEventTimestamp;
+		return this.lastEventCursor?.timestamp ?? null;
+	}
+
+	/**
+	 * Get last event cursor
+	 */
+	getLastEventCursor(): SyncCursor | null {
+		return this.lastEventCursor;
 	}
 
 	/**
@@ -297,10 +305,13 @@ export class SyncManager {
 			};
 
 			// Update last event timestamp
-			this.lastEventTimestamp = syncEvent.timestamp;
+			this.lastEventCursor = {
+				timestamp: syncEvent.timestamp,
+				id: syncEvent.id,
+			};
 
 			// Skip events from own client (already handled via optimistic updates)
-			if (syncEvent.metadata?.originClientId === this.clientId) {
+			if (syncEvent.clientId === this.clientId) {
 				return;
 			}
 
@@ -386,19 +397,58 @@ export class SyncManager {
 	}
 
 	/**
-	 * Store last sync timestamp for offline recovery
+	 * Persist an explicit sync cursor.
 	 */
-	async saveLastSyncTimestamp(): Promise<void> {
-		if (this.lastEventTimestamp) {
-			await this.storage.set("lastSyncTimestamp", this.lastEventTimestamp);
+	async setStoredLastSyncCursor(cursor: SyncCursor): Promise<void> {
+		await this.storage.set("lastSyncCursor", cursor);
+	}
+
+	/**
+	 * Store the latest cursor from the active SSE stream for offline recovery.
+	 */
+	async saveLastSyncCursor(): Promise<void> {
+		if (this.lastEventCursor) {
+			await this.setStoredLastSyncCursor(this.lastEventCursor);
 		}
 	}
 
 	/**
-	 * Get stored last sync timestamp
+	 * Get stored sync cursor.
+	 * Supports migrating from legacy timestamp-only storage.
+	 */
+	async getStoredLastSyncCursor(): Promise<SyncCursor | null> {
+		const cursor =
+			(await this.storage.get<SyncCursor>("lastSyncCursor")) ??
+			(await this.storage.get<SyncCursor>("lastSyncTimestamp"));
+		if (cursor && typeof cursor === "object" && "timestamp" in cursor) {
+			return cursor;
+		}
+
+		const legacyTimestamp =
+			(await this.storage.get<number>("lastSyncTimestamp")) ?? null;
+		if (!legacyTimestamp) {
+			return null;
+		}
+
+		return {
+			timestamp: legacyTimestamp,
+			id: "",
+		};
+	}
+
+	/**
+	 * Backward-compatible wrapper for legacy callers.
+	 */
+	async saveLastSyncTimestamp(): Promise<void> {
+		await this.saveLastSyncCursor();
+	}
+
+	/**
+	 * Backward-compatible wrapper for legacy callers.
 	 */
 	async getStoredLastSyncTimestamp(): Promise<number | null> {
-		return this.storage.get<number>("lastSyncTimestamp");
+		const cursor = await this.getStoredLastSyncCursor();
+		return cursor?.timestamp ?? null;
 	}
 }
 

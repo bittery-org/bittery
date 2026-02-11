@@ -6,10 +6,12 @@ export type SyncEventType =
 	| "item_updated"
 	| "item_deleted"
 	| "item_restored"
+	| "item_permanently_deleted"
 	| "item_moved"
 	| "vault_created"
 	| "vault_updated"
 	| "vault_deleted"
+	| "vault_access_revoked"
 	| "vault_member_added"
 	| "vault_member_removed"
 	| "vault_key_rotated";
@@ -57,10 +59,12 @@ export interface SyncMetadataMap {
 	item_updated: DefaultSyncMetadata;
 	item_deleted: DefaultSyncMetadata;
 	item_restored: DefaultSyncMetadata;
+	item_permanently_deleted: DefaultSyncMetadata;
 	item_moved: ItemMovedMetadata;
 	vault_created: DefaultSyncMetadata;
 	vault_updated: DefaultSyncMetadata;
 	vault_deleted: DefaultSyncMetadata;
+	vault_access_revoked: DefaultSyncMetadata;
 	vault_member_added: VaultMemberAddedMetadata;
 	vault_member_removed: VaultMemberRemovedMetadata;
 	vault_key_rotated: VaultKeyRotatedMetadata;
@@ -80,6 +84,11 @@ export interface SyncEvent {
 	userId: string;
 	timestamp: number;
 	metadata?: SyncMetadataBase & { [key: string]: unknown };
+}
+
+export interface SyncCursor {
+	timestamp: number;
+	id: string;
 }
 
 /**
@@ -170,6 +179,7 @@ export interface ItemCacheAdapter {
 		email?: string,
 	): Promise<void>;
 	removeCachedVault?(vaultId: string, email?: string): Promise<void>;
+	clearItemCache?(email?: string): Promise<void>;
 }
 
 /**

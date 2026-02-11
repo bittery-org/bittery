@@ -15,6 +15,31 @@ import { desktopSync } from "./desktop-sync";
 
 const fallbackServerUrl =
 	normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";
+const CLIENT_ID_KEY = "bittery_sync_client_id";
+
+function generateClientId(): string {
+	const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+	const randomValues = new Uint8Array(8);
+	crypto.getRandomValues(randomValues);
+	let suffix = "";
+	for (let i = 0; i < randomValues.length; i++) {
+		const randomVal = randomValues[i] ?? 0;
+		suffix += chars[randomVal % chars.length];
+	}
+	return `ext_${Date.now()}_${suffix}`;
+}
+
+async function getOrCreateSyncClientId(): Promise<string> {
+	const result = await chrome.storage.local.get(CLIENT_ID_KEY);
+	const existing = result[CLIENT_ID_KEY];
+	if (typeof existing === "string" && existing.length > 0) {
+		return existing;
+	}
+
+	const clientId = generateClientId();
+	await chrome.storage.local.set({ [CLIENT_ID_KEY]: clientId });
+	return clientId;
+}
 
 /**
  * Get the best available auth token.
@@ -48,9 +73,13 @@ export const trpcClient = createTRPCClient<AppRouter>({
 		httpBatchLink({
 			url: `${fallbackServerUrl}/trpc`,
 			async headers() {
-				const token = await getAuthToken();
+				const [token, clientId] = await Promise.all([
+					getAuthToken(),
+					getOrCreateSyncClientId(),
+				]);
 				return {
 					authorization: token ? `Bearer ${token}` : "",
+					"X-Client-Id": clientId,
 				};
 			},
 			async fetch(url, options) {

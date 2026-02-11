@@ -1,6 +1,7 @@
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CatchUpClient, runCatchUp } from "./catch-up";
 import { performDeltaSync } from "./delta-sync";
 import {
 	createQueryInvalidator,
@@ -54,6 +55,20 @@ export function useSync(options: UseSyncOptions) {
 	});
 
 	const syncManagerRef = useRef<SyncManager | null>(null);
+	const invalidateAfterCatchUp = useCallback(async () => {
+		await Promise.all([
+			queryClient.invalidateQueries({ queryKey: ["items"] }),
+			queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
+			queryClient.invalidateQueries({ queryKey: ["decrypted-item"] }),
+			queryClient.invalidateQueries({ queryKey: ["deleted-items"] }),
+			queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
+		]);
+	}, [queryClient]);
+
+	const handleFullRefresh = useCallback(async () => {
+		await itemCacheAdapter?.clearItemCache?.();
+		await queryClient.invalidateQueries();
+	}, [itemCacheAdapter, queryClient]);
 
 	/**
 	 * Handle incoming sync events from other clients
@@ -80,8 +95,11 @@ export function useSync(options: UseSyncOptions) {
 				event,
 			});
 
-			// Step 3: Save last sync timestamp for catch-up on next connect
-			await syncManagerRef.current?.saveLastSyncTimestamp();
+			// Step 3: Persist cursor for catch-up recovery on reconnect/reload
+			await syncManagerRef.current?.setStoredLastSyncCursor({
+				timestamp: event.timestamp,
+				id: event.id,
+			});
 
 			// Update last sync time
 			setStatus((prev) => ({
@@ -109,33 +127,26 @@ export function useSync(options: UseSyncOptions) {
 				itemCacheAdapter?.supportsItemCache
 			) {
 				try {
-					const lastTimestamp =
-						await syncManagerRef.current?.getStoredLastSyncTimestamp();
-					if (lastTimestamp) {
-						const result = await trpcClient.sync.getEventsSince.query({
-							since: lastTimestamp,
-						});
-						for (const event of result.events) {
-							// Skip own events
-							if (event.clientId === clientId) continue;
-							await performDeltaSync(
-								trpcClient,
-								itemCacheAdapter,
-								event as SyncEvent,
-							);
-						}
-						// Save the latest timestamp
-						await syncManagerRef.current?.saveLastSyncTimestamp();
-						// Invalidate all item queries after catch-up
-						await queryClient.invalidateQueries({
-							queryKey: ["items"],
-						});
-						await queryClient.invalidateQueries({
-							queryKey: ["vault-items"],
-						});
-						await queryClient.invalidateQueries({
-							queryKey: ["decrypted-item"],
-						});
+					const lastCursor =
+						await syncManagerRef.current?.getStoredLastSyncCursor();
+					if (!lastCursor) return;
+
+					const result = await runCatchUp({
+						client: trpcClient as unknown as CatchUpClient,
+						initialCursor: lastCursor,
+						onEvent: async (event) => {
+							await performDeltaSync(trpcClient, itemCacheAdapter, event);
+						},
+						shouldProcessEvent: (event) => event.clientId !== clientId,
+						onRequiresFullRefresh: async () => {
+							await handleFullRefresh();
+						},
+					});
+
+					await syncManagerRef.current?.setStoredLastSyncCursor(result.cursor);
+
+					if (result.processedCount > 0 && !result.requiresFullRefresh) {
+						await invalidateAfterCatchUp();
 					}
 				} catch (e) {
 					console.error(
@@ -145,7 +156,13 @@ export function useSync(options: UseSyncOptions) {
 				}
 			}
 		},
-		[trpcClient, itemCacheAdapter, clientId, queryClient],
+		[
+			trpcClient,
+			itemCacheAdapter,
+			clientId,
+			handleFullRefresh,
+			invalidateAfterCatchUp,
+		],
 	);
 
 	/**

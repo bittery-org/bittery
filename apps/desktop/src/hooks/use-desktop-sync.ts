@@ -1,25 +1,12 @@
 import type { SyncStorage } from "@bittery/sync";
-import { generateClientId, useSync } from "@bittery/sync";
+import { useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
-import { Store } from "@tauri-apps/plugin-store";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { storage } from "@/lib/storage";
-
-/**
- * Storage key for client ID
- */
-const CLIENT_ID_KEY = "bittery_sync_client_id";
-
-/**
- * Get or initialize the sync store
- */
-let syncStoreInstance: Store | null = null;
-async function getSyncStore(): Promise<Store> {
-	if (!syncStoreInstance) {
-		syncStoreInstance = await Store.load("sync-store.json");
-	}
-	return syncStoreInstance;
-}
+import {
+	getDesktopSyncStore,
+	getOrCreateDesktopSyncClientId,
+} from "@/lib/sync-client-id";
 
 /**
  * Tauri-compatible sync storage implementation
@@ -27,7 +14,7 @@ async function getSyncStore(): Promise<Store> {
 class TauriSyncStorage implements SyncStorage {
 	async get<T>(key: string): Promise<T | null> {
 		try {
-			const store = await getSyncStore();
+			const store = await getDesktopSyncStore();
 			const value = await store.get<string>(key);
 			return value ? JSON.parse(value) : null;
 		} catch {
@@ -36,31 +23,16 @@ class TauriSyncStorage implements SyncStorage {
 	}
 
 	async set<T>(key: string, value: T): Promise<void> {
-		const store = await getSyncStore();
+		const store = await getDesktopSyncStore();
 		await store.set(key, JSON.stringify(value));
 		await store.save();
 	}
 
 	async remove(key: string): Promise<void> {
-		const store = await getSyncStore();
+		const store = await getDesktopSyncStore();
 		await store.delete(key);
 		await store.save();
 	}
-}
-
-/**
- * Get or create a unique client ID for this desktop instance
- */
-async function getOrCreateClientId(): Promise<string> {
-	const store = await getSyncStore();
-	const stored = await store.get<string>(CLIENT_ID_KEY);
-	if (stored) {
-		return stored;
-	}
-	const clientId = generateClientId();
-	await store.set(CLIENT_ID_KEY, clientId);
-	await store.save();
-	return clientId;
 }
 
 /**
@@ -75,7 +47,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 	useEffect(() => {
 		(async () => {
 			const [id, url] = await Promise.all([
-				getOrCreateClientId(),
+				getOrCreateDesktopSyncClientId(),
 				storage.getServerUrl(),
 			]);
 			setClientId(id);
@@ -114,7 +86,7 @@ export function useDesktopClientId(): string {
 	const [clientId, setClientId] = useState<string>("");
 
 	useEffect(() => {
-		getOrCreateClientId().then(setClientId);
+		getOrCreateDesktopSyncClientId().then(setClientId);
 	}, []);
 
 	return clientId;

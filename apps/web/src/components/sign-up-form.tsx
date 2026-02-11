@@ -238,90 +238,90 @@ Generated: ${new Date().toLocaleString()}
 				{isInvitationSignup ? "Accept Invitation" : "Create an account"}
 			</h1>
 			<Card className="space-y-4 border bg-card p-6 shadow-sm">
-					<div className="space-y-2">
-						<h2 className="font-medium text-base">Save your Secret Key</h2>
-						<p className="text-muted-foreground text-sm leading-relaxed">
-							This key is required to access your account. We cannot recover it
-							for you.
-						</p>
-					</div>
+				<div className="space-y-2">
+					<h2 className="font-medium text-base">Save your Secret Key</h2>
+					<p className="text-muted-foreground text-sm leading-relaxed">
+						This key is required to access your account. We cannot recover it
+						for you.
+					</p>
+				</div>
 
-					<div className="space-y-4">
-						<div className="relative rounded-xl border bg-muted/30 p-4">
-							<div className="absolute top-3 right-3">
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon"
-									className="h-8 w-8 text-muted-foreground hover:text-foreground"
-									onClick={() => setShowSecretKey(!showSecretKey)}
-								>
-									{showSecretKey ? <EyeOff size={16} /> : <Eye size={16} />}
-								</Button>
-							</div>
-							<div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-								Your Secret Key
-							</div>
-							<div className="break-all pr-8 font-mono text-sm tracking-wide">
-								{showSecretKey ? secretKey : "••••••-••••••-•••••-•••••-•••••"}
-							</div>
-						</div>
-
-						<div className="grid grid-cols-2 gap-3">
+				<div className="space-y-4">
+					<div className="relative rounded-xl border bg-muted/30 p-4">
+						<div className="absolute top-3 right-3">
 							<Button
 								type="button"
-								variant="outline"
-								className="w-full"
-								onClick={copySecretKey}
+								variant="ghost"
+								size="icon"
+								className="h-8 w-8 text-muted-foreground hover:text-foreground"
+								onClick={() => setShowSecretKey(!showSecretKey)}
 							>
-								<Copy size={16} className="mr-2" />
-								Copy
+								{showSecretKey ? <EyeOff size={16} /> : <Eye size={16} />}
 							</Button>
-							<Button
-								type="button"
-								variant="outline"
-								className="w-full"
-								onClick={downloadEmergencyKit}
-							>
-								<Download size={16} className="mr-2" />
-								Download Kit
-							</Button>
+						</div>
+						<div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
+							Your Secret Key
+						</div>
+						<div className="break-all pr-8 font-mono text-sm tracking-wide">
+							{showSecretKey ? secretKey : "••••••-••••••-•••••-•••••-•••••"}
 						</div>
 					</div>
 
-					<div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
-						<div className="flex gap-3">
-							<div className="text-amber-600 dark:text-amber-400">⚠️</div>
-							<div className="space-y-1">
-								<p className="font-medium text-amber-900 text-sm dark:text-amber-100">
-									There is no account recovery
-								</p>
-								<p className="text-amber-700 text-xs leading-relaxed dark:text-amber-300">
-									If you lose this Secret Key, you will lose access to your
-									vault forever. Please save it in a safe place.
-								</p>
-							</div>
+					<div className="grid grid-cols-2 gap-3">
+						<Button
+							type="button"
+							variant="outline"
+							className="w-full"
+							onClick={copySecretKey}
+						>
+							<Copy size={16} className="mr-2" />
+							Copy
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							className="w-full"
+							onClick={downloadEmergencyKit}
+						>
+							<Download size={16} className="mr-2" />
+							Download Kit
+						</Button>
+					</div>
+				</div>
+
+				<div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
+					<div className="flex gap-3">
+						<div className="text-amber-600 dark:text-amber-400">⚠️</div>
+						<div className="space-y-1">
+							<p className="font-medium text-amber-900 text-sm dark:text-amber-100">
+								There is no account recovery
+							</p>
+							<p className="text-amber-700 text-xs leading-relaxed dark:text-amber-300">
+								If you lose this Secret Key, you will lose access to your vault
+								forever. Please save it in a safe place.
+							</p>
 						</div>
 					</div>
+				</div>
 
-					<div className="space-y-3">
-						<Button
-							type="button"
-							className="w-full"
-							onClick={() => setHasAcknowledged(true)}
-						>
-							I have saved my Secret Key
-						</Button>
+				<div className="space-y-3">
+					<Button
+						type="button"
+						className="w-full"
+						onClick={() => setHasAcknowledged(true)}
+					>
+						I have saved my Secret Key
+					</Button>
 
-						<Button
-							type="button"
-							variant="ghost"
-							onClick={onSwitchToSignIn}
-							className="w-full"
-						>
-							Already have an account? Sign in
-						</Button>
-					</div>
+					<Button
+						type="button"
+						variant="ghost"
+						onClick={onSwitchToSignIn}
+						className="w-full"
+					>
+						Already have an account? Sign in
+					</Button>
+				</div>
 			</Card>
 		</div>
 	) : (
@@ -331,271 +331,259 @@ Generated: ${new Date().toLocaleString()}
 			</h1>
 			<Card className="border bg-card p-6 shadow-sm">
 				<form
-						onSubmit={(e) => {
-							e.preventDefault();
-							e.stopPropagation();
-							form.handleSubmit();
-						}}
-						className="space-y-4"
-					>
-						<div>
-							<div className="space-y-2">
-								<Label htmlFor="serverUrl">Server URL</Label>
-								<Input
-									id="serverUrl"
-									name="serverUrl"
-									type="url"
-									placeholder="https://your-server.com"
-									value={serverUrl}
-									onBlur={async () => {
-										const normalized = normalizeServerUrl(serverUrl);
-										if (!normalized) {
-											toast.error("Invalid server URL");
-											return;
-										}
-										await storage.storeServerUrl(normalized);
-										if (normalized !== serverUrl) {
-											setServerUrl(normalized);
-										}
-									}}
-									onChange={(e) => setServerUrl(e.target.value)}
-									required
-									className="h-10"
-								/>
-								<p className="text-muted-foreground text-xs">
-									Use your self-hosted Bittery server URL.
-								</p>
+					onSubmit={(e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						form.handleSubmit();
+					}}
+					className="space-y-4"
+				>
+					<div>
+						<div className="space-y-2">
+							<Label htmlFor="serverUrl">Server URL</Label>
+							<Input
+								id="serverUrl"
+								name="serverUrl"
+								type="url"
+								placeholder="https://your-server.com"
+								value={serverUrl}
+								onBlur={async () => {
+									const normalized = normalizeServerUrl(serverUrl);
+									if (!normalized) {
+										toast.error("Invalid server URL");
+										return;
+									}
+									await storage.storeServerUrl(normalized);
+									if (normalized !== serverUrl) {
+										setServerUrl(normalized);
+									}
+								}}
+								onChange={(e) => setServerUrl(e.target.value)}
+								required
+								className="h-10"
+							/>
+							<p className="text-muted-foreground text-xs">
+								Use your self-hosted Bittery server URL.
+							</p>
+						</div>
+					</div>
+
+					<div>
+						<form.Field name="name">
+							{(field) => (
+								<div className="space-y-2">
+									<Label htmlFor={field.name}>Full Name</Label>
+									<Input
+										id={field.name}
+										name={field.name}
+										placeholder="John Doe"
+										value={field.state.value}
+										onBlur={field.handleBlur}
+										onChange={(e) => field.handleChange(e.target.value)}
+										required
+										className="h-10"
+									/>
+								</div>
+							)}
+						</form.Field>
+					</div>
+
+					{isInvitationSignup ? (
+						<div className="rounded-lg border bg-muted/30 p-4">
+							<div className="flex items-start gap-3">
+								<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
+									<Users className="h-5 w-5 text-primary" />
+								</div>
+								<div className="space-y-1">
+									<p className="font-medium text-sm">
+										You've been invited to join{" "}
+										<span className="text-primary">{invitation.teamName}</span>
+									</p>
+									<div className="flex items-center gap-2 text-muted-foreground text-xs">
+										<span>Invited by {invitation.invitedByName}</span>
+										<span>·</span>
+										<Badge variant="secondary" className="text-xs">
+											{invitation.role}
+										</Badge>
+									</div>
+								</div>
 							</div>
 						</div>
-
-						<div>
-							<form.Field name="name">
+					) : (
+						<div className="space-y-4">
+							<form.Field name="accountType">
 								{(field) => (
-									<div className="space-y-2">
-										<Label htmlFor={field.name}>Full Name</Label>
+									<div className="space-y-3">
+										<Label>Account Type</Label>
+										<div className="grid grid-cols-2 gap-3">
+											<Button
+												type="button"
+												variant={
+													field.state.value === "personal"
+														? "default"
+														: "outline"
+												}
+												className="h-auto flex-col items-start gap-1 p-4"
+												onClick={() => field.handleChange("personal")}
+											>
+												<span className="font-medium">Personal</span>
+												<span
+													className={cn(
+														"text-left font-normal text-xs",
+														field.state.value === "personal"
+															? "text-primary-foreground"
+															: "text-muted-foreground",
+													)}
+												>
+													For individual use
+												</span>
+											</Button>
+											<Button
+												type="button"
+												variant={
+													field.state.value === "organization"
+														? "default"
+														: "outline"
+												}
+												className="h-auto flex-col items-start gap-1 p-4"
+												onClick={() => field.handleChange("organization")}
+											>
+												<span className="font-medium">Organization</span>
+												<span
+													className={cn(
+														"text-left font-normal text-xs",
+														field.state.value === "organization"
+															? "text-primary-foreground"
+															: "text-muted-foreground",
+													)}
+												>
+													For teams and companies
+												</span>
+											</Button>
+										</div>
+									</div>
+								)}
+							</form.Field>
+
+							<form.Subscribe selector={(state) => state.values.accountType}>
+								{(accountType) =>
+									accountType === "organization" ? (
+										<form.Field name="organizationName">
+											{(field) => (
+												<div className="space-y-2">
+													<Label htmlFor={field.name}>Organization Name</Label>
+													<Input
+														id={field.name}
+														name={field.name}
+														placeholder="Acme Inc."
+														value={field.state.value}
+														onBlur={field.handleBlur}
+														onChange={(e) => field.handleChange(e.target.value)}
+														required
+														className="h-10"
+													/>
+													<p className="text-[0.8rem] text-muted-foreground">
+														This will be the name of your team workspace
+													</p>
+												</div>
+											)}
+										</form.Field>
+									) : null
+								}
+							</form.Subscribe>
+						</div>
+					)}
+
+					<div>
+						<form.Field name="email">
+							{(field) => (
+								<div className="space-y-2">
+									<Label htmlFor={field.name}>Email</Label>
+									<Input
+										id={field.name}
+										name={field.name}
+										type="email"
+										placeholder="name@example.com"
+										value={
+											isInvitationSignup ? invitation.email : field.state.value
+										}
+										onBlur={field.handleBlur}
+										onChange={(e) => field.handleChange(e.target.value)}
+										required
+										disabled={isInvitationSignup}
+										className="h-10"
+									/>
+									{isInvitationSignup && (
+										<p className="text-muted-foreground text-xs">
+											This email was used to invite you and cannot be changed.
+										</p>
+									)}
+								</div>
+							)}
+						</form.Field>
+					</div>
+
+					<div>
+						<form.Field name="password">
+							{(field) => (
+								<div className="space-y-2">
+									<Label htmlFor={field.name}>Master Password</Label>
+									<div className="relative">
 										<Input
 											id={field.name}
 											name={field.name}
-											placeholder="John Doe"
+											type={showPassword ? "text" : "password"}
 											value={field.state.value}
 											onBlur={field.handleBlur}
 											onChange={(e) => field.handleChange(e.target.value)}
 											required
-											className="h-10"
+											className="h-10 pr-10"
 										/>
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon"
+											className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
+											onClick={() => setShowPassword(!showPassword)}
+										>
+											{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+										</Button>
 									</div>
-								)}
-							</form.Field>
-						</div>
-
-						{isInvitationSignup ? (
-							<div className="rounded-lg border bg-muted/30 p-4">
-								<div className="flex items-start gap-3">
-									<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
-										<Users className="h-5 w-5 text-primary" />
-									</div>
-									<div className="space-y-1">
-										<p className="font-medium text-sm">
-											You've been invited to join{" "}
-											<span className="text-primary">
-												{invitation.teamName}
-											</span>
-										</p>
-										<div className="flex items-center gap-2 text-muted-foreground text-xs">
-											<span>Invited by {invitation.invitedByName}</span>
-											<span>·</span>
-											<Badge variant="secondary" className="text-xs">
-												{invitation.role}
-											</Badge>
-										</div>
-									</div>
+									<p className="text-[0.8rem] text-muted-foreground">
+										Must be at least 8 characters long.
+									</p>
 								</div>
-							</div>
-						) : (
-							<div className="space-y-4">
-								<form.Field name="accountType">
-									{(field) => (
-										<div className="space-y-3">
-											<Label>Account Type</Label>
-											<div className="grid grid-cols-2 gap-3">
-												<Button
-													type="button"
-													variant={
-														field.state.value === "personal"
-															? "default"
-															: "outline"
-													}
-													className="h-auto flex-col items-start gap-1 p-4"
-													onClick={() => field.handleChange("personal")}
-												>
-													<span className="font-medium">Personal</span>
-													<span
-														className={cn(
-															"text-left font-normal text-xs",
-															field.state.value === "personal"
-																? "text-primary-foreground"
-																: "text-muted-foreground",
-														)}
-													>
-														For individual use
-													</span>
-												</Button>
-												<Button
-													type="button"
-													variant={
-														field.state.value === "organization"
-															? "default"
-															: "outline"
-													}
-													className="h-auto flex-col items-start gap-1 p-4"
-													onClick={() => field.handleChange("organization")}
-												>
-													<span className="font-medium">Organization</span>
-													<span
-														className={cn(
-															"text-left font-normal text-xs",
-															field.state.value === "organization"
-																? "text-primary-foreground"
-																: "text-muted-foreground",
-														)}
-													>
-														For teams and companies
-													</span>
-												</Button>
-											</div>
-										</div>
-									)}
-								</form.Field>
+							)}
+						</form.Field>
+					</div>
 
-								<form.Subscribe selector={(state) => state.values.accountType}>
-									{(accountType) =>
-										accountType === "organization" ? (
-											<form.Field name="organizationName">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Organization Name
-														</Label>
-														<Input
-															id={field.name}
-															name={field.name}
-															placeholder="Acme Inc."
-															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-															required
-															className="h-10"
-														/>
-														<p className="text-[0.8rem] text-muted-foreground">
-															This will be the name of your team workspace
-														</p>
-													</div>
-												)}
-											</form.Field>
-										) : null
-									}
-								</form.Subscribe>
-							</div>
-						)}
-
-						<div>
-							<form.Field name="email">
-								{(field) => (
-									<div className="space-y-2">
-										<Label htmlFor={field.name}>Email</Label>
-										<Input
-											id={field.name}
-											name={field.name}
-											type="email"
-											placeholder="name@example.com"
-											value={
-												isInvitationSignup
-													? invitation.email
-													: field.state.value
-											}
-											onBlur={field.handleBlur}
-											onChange={(e) => field.handleChange(e.target.value)}
-											required
-											disabled={isInvitationSignup}
-											className="h-10"
-										/>
-										{isInvitationSignup && (
-											<p className="text-muted-foreground text-xs">
-												This email was used to invite you and cannot be changed.
-											</p>
-										)}
-									</div>
-								)}
-							</form.Field>
-						</div>
-
-						<div>
-							<form.Field name="password">
-								{(field) => (
-									<div className="space-y-2">
-										<Label htmlFor={field.name}>Master Password</Label>
-										<div className="relative">
-											<Input
-												id={field.name}
-												name={field.name}
-												type={showPassword ? "text" : "password"}
-												value={field.state.value}
-												onBlur={field.handleBlur}
-												onChange={(e) => field.handleChange(e.target.value)}
-												required
-												className="h-10 pr-10"
-											/>
-											<Button
-												type="button"
-												variant="ghost"
-												size="icon"
-												className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
-												onClick={() => setShowPassword(!showPassword)}
-											>
-												{showPassword ? (
-													<EyeOff size={16} />
-												) : (
-													<Eye size={16} />
-												)}
-											</Button>
-										</div>
-										<p className="text-[0.8rem] text-muted-foreground">
-											Must be at least 8 characters long.
-										</p>
-									</div>
-								)}
-							</form.Field>
-						</div>
-
-						<div className="pt-2">
-							<Button
-								type="submit"
-								className="h-10 w-full"
-								disabled={isEncrypting || signupMutation.isPending}
-							>
-								{isEncrypting || signupMutation.isPending ? (
-									<>
-										<Loader2 size={16} className="mr-2 animate-spin" />
-										{isEncrypting
-											? "Setting up encryption..."
-											: "Creating account..."}
-									</>
-								) : (
-									"Create Account"
-								)}
-							</Button>
-						</div>
-
+					<div className="pt-2">
 						<Button
-							type="button"
-							variant="link"
-							onClick={() => setHasAcknowledged(false)}
-							className="w-full text-muted-foreground"
+							type="submit"
+							className="h-10 w-full"
+							disabled={isEncrypting || signupMutation.isPending}
 						>
-							← Back to Secret Key
+							{isEncrypting || signupMutation.isPending ? (
+								<>
+									<Loader2 size={16} className="mr-2 animate-spin" />
+									{isEncrypting
+										? "Setting up encryption..."
+										: "Creating account..."}
+								</>
+							) : (
+								"Create Account"
+							)}
 						</Button>
+					</div>
+
+					<Button
+						type="button"
+						variant="link"
+						onClick={() => setHasAcknowledged(false)}
+						className="w-full text-muted-foreground"
+					>
+						← Back to Secret Key
+					</Button>
 				</form>
 			</Card>
 		</div>

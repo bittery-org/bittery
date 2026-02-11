@@ -1,9 +1,10 @@
-import { db, syncEvent, syncEventAck, vaultKey } from "@bittery/db";
+import { db, item, syncEvent, syncEventAck, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, router } from "../index";
+import { getStoragePublicUrl } from "../storage/s3";
 
 export const syncRouter = router({
 	/**
@@ -14,6 +15,7 @@ export const syncRouter = router({
 		.input(
 			z.object({
 				since: z.number(), // Unix timestamp in milliseconds
+				sinceId: z.string().optional(),
 				vaultIds: z.array(z.string()).optional(), // Filter by specific vaults
 				limit: z.number().min(1).max(1000).default(100),
 			}),
@@ -31,35 +33,66 @@ export const syncRouter = router({
 				? input.vaultIds.filter((id) => userVaultIds.includes(id))
 				: userVaultIds;
 
-			if (targetVaultIds.length === 0) {
-				return { events: [], hasMore: false, requiresFullRefresh: false };
-			}
-
 			const sinceDate = new Date(input.since);
+			const cursorCondition = input.sinceId
+				? or(
+						gt(syncEvent.createdAt, sinceDate),
+						and(
+							eq(syncEvent.createdAt, sinceDate),
+							gt(syncEvent.id, input.sinceId),
+						),
+					)
+				: gt(syncEvent.createdAt, sinceDate);
 
-			// Get events for these vaults since the given timestamp
+			const vaultEventsWhere =
+				targetVaultIds.length > 0
+					? and(inArray(syncEvent.vaultId, targetVaultIds), cursorCondition)
+					: undefined;
+			const targetedControlEventsWhere = and(
+				eq(syncEvent.userId, ctx.session.userId),
+				eq(syncEvent.eventType, "vault_access_revoked"),
+				cursorCondition,
+			);
+			const eventsWhere = vaultEventsWhere
+				? or(vaultEventsWhere, targetedControlEventsWhere)
+				: targetedControlEventsWhere;
+
+			// Get events for these vaults since the given cursor
 			const events = await db.query.syncEvent.findMany({
-				where: and(
-					inArray(syncEvent.vaultId, targetVaultIds),
-					gt(syncEvent.createdAt, sinceDate),
-				),
-				orderBy: [desc(syncEvent.createdAt)],
+				where: eventsWhere,
+				orderBy: [asc(syncEvent.createdAt), asc(syncEvent.id)],
 				limit: input.limit + 1, // Get one extra to check if there are more
 			});
 
 			const hasMore = events.length > input.limit;
 			const resultEvents = hasMore ? events.slice(0, input.limit) : events;
 
-			// Check if the oldest available event is newer than the requested timestamp.
-			// If so, some events have been pruned and the client needs a full refresh.
+			const oldestVaultEventsWhere =
+				targetVaultIds.length > 0
+					? inArray(syncEvent.vaultId, targetVaultIds)
+					: undefined;
+			const oldestControlEventsWhere = and(
+				eq(syncEvent.userId, ctx.session.userId),
+				eq(syncEvent.eventType, "vault_access_revoked"),
+			);
+			const oldestEventWhere = oldestVaultEventsWhere
+				? or(oldestVaultEventsWhere, oldestControlEventsWhere)
+				: oldestControlEventsWhere;
+
+			// If the oldest retained event is newer than the requested cursor,
+			// a full refresh is required because part of history was pruned.
 			const oldestEvent = await db.query.syncEvent.findFirst({
-				where: inArray(syncEvent.vaultId, targetVaultIds),
-				orderBy: [asc(syncEvent.createdAt)],
+				where: oldestEventWhere,
+				orderBy: [asc(syncEvent.createdAt), asc(syncEvent.id)],
 			});
 
-			const requiresFullRefresh =
-				oldestEvent !== undefined &&
-				oldestEvent.createdAt.getTime() > input.since;
+			const requiresFullRefresh = Boolean(
+				oldestEvent &&
+					(oldestEvent.createdAt.getTime() > input.since ||
+						(oldestEvent.createdAt.getTime() === input.since &&
+							(!input.sinceId || oldestEvent.id > input.sinceId))),
+			);
+			const latestCursorEvent = resultEvents[resultEvents.length - 1];
 
 			return {
 				events: resultEvents.map((e) => ({
@@ -74,8 +107,87 @@ export const syncRouter = router({
 					metadata: e.metadata ? JSON.parse(e.metadata) : null,
 					timestamp: e.createdAt.getTime(),
 				})),
+				cursor: latestCursorEvent
+					? {
+							timestamp: latestCursorEvent.createdAt.getTime(),
+							id: latestCursorEvent.id,
+						}
+					: null,
 				hasMore,
 				requiresFullRefresh,
+			};
+		}),
+
+	/**
+	 * Paginated bootstrap endpoint for large vaults.
+	 * Returns encrypted items with vault metadata in deterministic pages.
+	 */
+	bootstrapItems: protectedProcedure
+		.input(
+			z.object({
+				cursor: z.string().optional(),
+				limit: z.number().min(1).max(1000).default(500),
+			}),
+		)
+		.query(async ({ ctx, input }) => {
+			const userVaults = await db.query.vaultKey.findMany({
+				where: eq(vaultKey.userId, ctx.session.userId),
+				with: {
+					vault: true,
+				},
+			});
+
+			if (userVaults.length === 0) {
+				return {
+					items: [],
+					nextCursor: null,
+					hasMore: false,
+				};
+			}
+
+			const vaultIds = userVaults.map((vk) => vk.vaultId);
+			const where = input.cursor
+				? and(
+						inArray(item.vaultId, vaultIds),
+						isNull(item.deletedAt),
+						gt(item.id, input.cursor),
+					)
+				: and(inArray(item.vaultId, vaultIds), isNull(item.deletedAt));
+
+			const pageItems = await db.query.item.findMany({
+				where,
+				orderBy: [asc(item.id)],
+				limit: input.limit + 1,
+			});
+
+			const hasMore = pageItems.length > input.limit;
+			const resultItems = hasMore ? pageItems.slice(0, input.limit) : pageItems;
+			const lastItem = resultItems[resultItems.length - 1];
+
+			const vaultMap = new Map(
+				userVaults.map((vk) => [
+					vk.vaultId,
+					{
+						id: vk.vault.id,
+						name: vk.vault.name,
+						type: vk.vault.type,
+						icon: vk.vault.icon,
+						imageUrl: vk.vault.imageKey
+							? getStoragePublicUrl(vk.vault.imageKey)
+							: null,
+						encryptedVaultKey: vk.encryptedVaultKey,
+						role: vk.role,
+					},
+				]),
+			);
+
+			return {
+				items: resultItems.map((vaultItem) => ({
+					...vaultItem,
+					vault: vaultMap.get(vaultItem.vaultId),
+				})),
+				nextCursor: lastItem?.id ?? null,
+				hasMore,
 			};
 		}),
 

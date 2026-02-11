@@ -105,6 +105,9 @@ export async function performDeltaSync(
 			}
 			break;
 		}
+		case "item_permanently_deleted":
+			await cache.removeCachedItem?.(event.entityId, accountEmail);
+			break;
 		case "vault_created":
 		case "vault_updated": {
 			const vault = await trpcClient.vault.get.query({
@@ -123,6 +126,10 @@ export async function performDeltaSync(
 			break;
 		}
 		case "vault_deleted":
+			await cache.removeCachedVault?.(event.entityId, accountEmail);
+			break;
+		case "vault_access_revoked":
+			// entityId is the affected vault id
 			await cache.removeCachedVault?.(event.entityId, accountEmail);
 			break;
 		// vault_key_rotated, vault_member_added, vault_member_removed: no cache changes needed

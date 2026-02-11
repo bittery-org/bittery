@@ -3,17 +3,24 @@
  *
  * MV3-compatible SSE sync with explicit service-worker recovery behavior.
  * Incoming events follow a strict order:
- * 1) persist last event timestamp
+ * 1) persist last processed cursor
  * 2) apply account-scoped cache delta updates
  * 3) notify UI listeners for query invalidation/refetch
  */
 
-import type { ConnectionStatus, SyncEvent } from "@bittery/sync";
+import {
+	type CatchUpClient,
+	type ConnectionStatus,
+	runCatchUp,
+	type SyncCursor,
+	type SyncEvent,
+} from "@bittery/sync";
 import { syncCacheService } from "./services/sync-cache-service";
 
 // Storage keys
 const CLIENT_ID_KEY = "bittery_sync_client_id";
-const LAST_SYNC_KEY = "bittery_last_sync_timestamp";
+const LAST_SYNC_CURSOR_KEY = "bittery_last_sync_cursor";
+const LEGACY_LAST_SYNC_KEY = "bittery_last_sync_timestamp";
 const SYNC_ALARM_NAME = "bittery_sync_reconnect";
 
 // Connection state
@@ -59,7 +66,8 @@ export async function getClientId(): Promise<string> {
 
 type SyncRuntimeMessage =
 	| { type: "SYNC_STATUS_CHANGED"; status: ConnectionStatus }
-	| { type: "SYNC_EVENT"; event: SyncEvent };
+	| { type: "SYNC_EVENT"; event: SyncEvent }
+	| { type: "SYNC_FULL_REFRESH_REQUIRED" };
 
 function sendRuntimeMessage(message: SyncRuntimeMessage): void {
 	chrome.runtime.sendMessage(message).catch(() => {
@@ -111,12 +119,15 @@ function isSyncEventPayload(value: unknown): value is SyncEvent {
  * Cache updates happen before UI notifications so popup reads can be cache-first.
  */
 async function handleSyncEvent(event: SyncEvent): Promise<void> {
-	// Store last sync timestamp in local storage (survives service worker restarts).
-	await chrome.storage.local.set({ [LAST_SYNC_KEY]: event.timestamp });
+	// Persist cursor in local storage (survives service worker restarts).
+	await setLastSyncCursor({
+		timestamp: event.timestamp,
+		id: event.id,
+	});
 
 	// Skip events from our own client.
 	const clientId = await getClientId();
-	if (event.metadata?.originClientId === clientId) {
+	if (event.clientId === clientId) {
 		return;
 	}
 
@@ -147,37 +158,32 @@ async function catchUpMissedEvents(): Promise<void> {
 	}
 
 	try {
-		const lastTimestamp = await getLastSyncTimestamp();
-		if (!lastTimestamp) {
+		const lastCursor = await getLastSyncCursor();
+		if (!lastCursor) {
 			return;
 		}
 
 		const clientId = await getClientId();
 		const client =
 			await syncCacheService.getClientForEmail(syncConnectionEmail);
-		const result = await client.sync.getEventsSince.query({
-			since: lastTimestamp,
+		const result = await runCatchUp({
+			client: client as CatchUpClient,
+			initialCursor: lastCursor,
+			shouldProcessEvent: (event) => event.clientId !== clientId,
+			onEvent: async (event) => {
+				await syncCacheService.applyDeltaSyncForEvent(event);
+			},
+			onRequiresFullRefresh: async () => {
+				await syncCacheService.clearItemCachesForKnownAccounts();
+				sendRuntimeMessage({ type: "SYNC_FULL_REFRESH_REQUIRED" });
+			},
 		});
 
-		let processed = 0;
-		for (const event of result.events) {
-			// Skip own events.
-			if (event.clientId === clientId) {
-				continue;
-			}
-
-			await syncCacheService.applyDeltaSyncForEvent(event as SyncEvent);
-			processed++;
-		}
-
-		if (processed > 0) {
-			const latestTimestamp =
-				result.events[result.events.length - 1]?.timestamp;
-			if (latestTimestamp) {
-				await chrome.storage.local.set({
-					[LAST_SYNC_KEY]: latestTimestamp,
-				});
-			}
+		await setLastSyncCursor(result.cursor);
+		if (result.processedCount > 0) {
+			sendRuntimeMessage({
+				type: "SYNC_FULL_REFRESH_REQUIRED",
+			});
 		}
 	} catch (error) {
 		console.error(
@@ -383,13 +389,44 @@ export async function initializeSync(): Promise<void> {
  */
 export async function cleanupSync(): Promise<void> {
 	disconnect("logout cleanup");
-	await chrome.storage.local.remove([LAST_SYNC_KEY]);
+	await chrome.storage.local.remove([
+		LAST_SYNC_CURSOR_KEY,
+		LEGACY_LAST_SYNC_KEY,
+	]);
 }
 
 /**
- * Get last sync timestamp.
+ * Persist last sync cursor.
  */
-export async function getLastSyncTimestamp(): Promise<number | null> {
-	const result = await chrome.storage.local.get(LAST_SYNC_KEY);
-	return (result[LAST_SYNC_KEY] as number) || null;
+export async function setLastSyncCursor(cursor: SyncCursor): Promise<void> {
+	await chrome.storage.local.set({ [LAST_SYNC_CURSOR_KEY]: cursor });
+}
+
+/**
+ * Get last sync cursor.
+ * Supports migration from legacy timestamp-only storage.
+ */
+export async function getLastSyncCursor(): Promise<SyncCursor | null> {
+	const result = await chrome.storage.local.get([
+		LAST_SYNC_CURSOR_KEY,
+		LEGACY_LAST_SYNC_KEY,
+	]);
+	const cursor = result[LAST_SYNC_CURSOR_KEY] as SyncCursor | undefined;
+	if (
+		cursor &&
+		typeof cursor.timestamp === "number" &&
+		typeof cursor.id === "string"
+	) {
+		return cursor;
+	}
+
+	const legacyTimestamp = result[LEGACY_LAST_SYNC_KEY] as number | undefined;
+	if (!legacyTimestamp) {
+		return null;
+	}
+
+	return {
+		timestamp: legacyTimestamp,
+		id: "",
+	};
 }

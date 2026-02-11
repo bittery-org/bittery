@@ -3,6 +3,7 @@ import { getRegisteredJobs } from "./registry";
 
 // Import all job modules to trigger auto-registration
 import "./jobs/sync-pruning";
+import "./jobs/tombstone-cleanup";
 
 export interface JobRunnerOptions {
 	connectionString: string;

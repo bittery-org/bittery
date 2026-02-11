@@ -59,6 +59,7 @@ export function createTestContext(
 ): Context {
 	return {
 		session: sessionData || null,
+		clientId: null,
 		device: {
 			userAgent: "Test/1.0 (Testing)",
 			ipAddress: "127.0.0.1",
