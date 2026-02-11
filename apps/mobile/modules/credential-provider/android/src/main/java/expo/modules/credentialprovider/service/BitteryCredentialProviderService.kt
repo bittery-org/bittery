@@ -15,15 +15,22 @@ import androidx.credentials.exceptions.GetCredentialUnknownException
 import androidx.credentials.provider.BeginCreateCredentialRequest
 import androidx.credentials.provider.BeginCreateCredentialResponse
 import androidx.credentials.provider.BeginCreatePasswordCredentialRequest
+import androidx.credentials.provider.BeginCreatePublicKeyCredentialRequest
 import androidx.credentials.provider.AuthenticationAction
 import androidx.credentials.provider.BeginGetCredentialRequest
 import androidx.credentials.provider.BeginGetCredentialResponse
 import androidx.credentials.provider.BeginGetPasswordOption
+import androidx.credentials.provider.BeginGetPublicKeyCredentialOption
 import androidx.credentials.provider.CreateEntry
+import androidx.credentials.provider.CredentialEntry
 import androidx.credentials.provider.CredentialProviderService
 import androidx.credentials.provider.PasswordCredentialEntry
+import androidx.credentials.provider.PublicKeyCredentialEntry
 import androidx.credentials.provider.ProviderClearCredentialStateRequest
 import expo.modules.credentialprovider.activity.GetCredentialsActivity
+import expo.modules.credentialprovider.crypto.VaultDecryptor
+import expo.modules.credentialprovider.passkey.PasskeyUtils
+import expo.modules.credentialprovider.passkey.StoredPasskey
 import expo.modules.credentialprovider.state.VaultStateManager
 import expo.modules.credentialprovider.storage.CredentialDatabase
 import expo.modules.credentialprovider.storage.CredentialEntity
@@ -48,10 +55,13 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         const val EXTRA_REQUEST_TYPE = "request_type"
         const val REQUEST_TYPE_GET = "get"
         const val REQUEST_TYPE_CREATE = "create"
+        const val REQUEST_TYPE_GET_PASSKEY = "get_passkey"
+        const val REQUEST_TYPE_CREATE_PASSKEY = "create_passkey"
         const val REQUEST_TYPE_UNLOCK = "unlock"
         const val EXTRA_ORIGIN = "origin"
         const val EXTRA_USERNAME = "username"
         const val EXTRA_PASSWORD = "password"
+        const val EXTRA_PASSKEY_CREDENTIAL_ID = "passkey_credential_id"
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -99,7 +109,7 @@ class BitteryCredentialProviderService : CredentialProviderService() {
             try {
                 val unlockedUserIds = VaultStateManager.getUnlockedUserIds()
                 val isVaultUnlocked = unlockedUserIds.isNotEmpty()
-                val credentialEntries = mutableListOf<PasswordCredentialEntry>()
+                val credentialEntries = mutableListOf<CredentialEntry>()
                 val authenticationActions = mutableListOf<AuthenticationAction>()
 
                 // If vault is locked, add an authentication action
@@ -149,6 +159,34 @@ class BitteryCredentialProviderService : CredentialProviderService() {
                         } else {
                             Log.d(TAG, "Vault locked - not returning credentials, only auth action")
                         }
+                    } else if (option is BeginGetPublicKeyCredentialOption) {
+                        val requestRpId = PasskeyUtils.parseRpIdFromGetRequestJson(option.requestJson)
+                        val origin = resolveCallingOrigin(rawOrigin, request.callingAppInfo?.packageName)
+                        val fallbackDomain = extractPasskeyRpIdFromOrigin(origin)
+                        val rpId = requestRpId?.takeIf { it.isNotBlank() } ?: fallbackDomain
+
+                        if (rpId.isBlank()) {
+                            Log.w(TAG, "Passkey option missing rpId/domain, skipping entry generation")
+                            continue
+                        }
+
+                        if (!isVaultUnlocked) {
+                            Log.d(TAG, "Vault locked - not returning passkey entries, only auth action")
+                            continue
+                        }
+
+                        val passkeyEntries = loadPasskeyEntriesForRpId(
+                            option = option,
+                            rpId = rpId,
+                            userIds = unlockedUserIds
+                        )
+
+                        if (passkeyEntries.isEmpty()) {
+                            Log.d(TAG, "No matching passkeys found for rpId=$rpId")
+                        } else {
+                            Log.d(TAG, "Adding ${passkeyEntries.size} passkey entries for rpId=$rpId")
+                            credentialEntries.addAll(passkeyEntries)
+                        }
                     }
                 }
 
@@ -195,8 +233,22 @@ class BitteryCredentialProviderService : CredentialProviderService() {
                     .build()
 
                 callback.onResult(response)
+            } else if (request is BeginCreatePublicKeyCredentialRequest) {
+                val createEntry = CreateEntry.Builder(
+                    "Bittery",
+                    createPasskeyCreatePendingIntent(request)
+                )
+                    .setDescription("Save passkey to Bittery")
+                    .setPublicKeyCredentialCount(1)
+                    .build()
+
+                val response = BeginCreateCredentialResponse.Builder()
+                    .setCreateEntries(listOf(createEntry))
+                    .build()
+
+                callback.onResult(response)
             } else {
-                // We only support password credentials for now
+                // Unknown credential type
                 callback.onError(CreateCredentialUnknownException("Unsupported credential type"))
             }
         } catch (e: Exception) {
@@ -261,6 +313,112 @@ class BitteryCredentialProviderService : CredentialProviderService() {
     }
 
     /**
+     * Create passkey entries for matching stored passkeys under an item.
+     */
+    private fun createPasskeyEntryFromItem(
+        item: ItemEntity,
+        passkey: StoredPasskey,
+        option: BeginGetPublicKeyCredentialOption
+    ): PublicKeyCredentialEntry {
+        val pendingIntent = createGetPasskeyPendingIntent(item.id, passkey.credentialId)
+        val displayUser = passkey.userDisplayName.ifBlank {
+            passkey.userName.ifBlank { item.username ?: "Passkey" }
+        }
+
+        return PublicKeyCredentialEntry.Builder(
+            applicationContext,
+            displayUser,
+            pendingIntent,
+            option
+        )
+            .setDisplayName(item.displayTitle.ifBlank { passkey.rpId })
+            .setLastUsedTime(Instant.ofEpochMilli(item.lastUsedAt))
+            .build()
+    }
+
+    private suspend fun loadPasskeyEntriesForRpId(
+        option: BeginGetPublicKeyCredentialOption,
+        rpId: String,
+        userIds: List<String>
+    ): List<PublicKeyCredentialEntry> {
+        val normalizedRpId = PasskeyUtils.normalizeHost(rpId)
+        if (normalizedRpId.isBlank()) return emptyList()
+
+        val allowedCredentialIds = PasskeyUtils.parseAllowCredentialIdsFromGetRequestJson(option.requestJson)
+        val parentDomain = extractParentDomain(normalizedRpId)
+        val entries = mutableListOf<PublicKeyCredentialEntry>()
+        val seen = mutableSetOf<String>()
+
+        for (userId in userIds) {
+            val muk = VaultStateManager.getMasterUnlockKey(userId) ?: continue
+
+            val items = if (parentDomain.isNotBlank() && parentDomain != normalizedRpId) {
+                database.itemDao().getLoginItemsByDomainWithFallback(
+                    normalizedRpId,
+                    parentDomain,
+                    userId
+                )
+            } else {
+                database.itemDao().getLoginItemsByDomain(normalizedRpId, userId)
+            }
+
+            for (item in items) {
+                val matchingPasskeys = loadMatchingPasskeysForItem(
+                    item = item,
+                    muk = muk,
+                    rpId = normalizedRpId,
+                    allowedCredentialIds = allowedCredentialIds
+                )
+
+                for (passkey in matchingPasskeys) {
+                    val dedupeKey = "${item.id}:${passkey.credentialId}"
+                    if (!seen.add(dedupeKey)) {
+                        continue
+                    }
+
+                    entries.add(createPasskeyEntryFromItem(item, passkey, option))
+                }
+            }
+        }
+
+        return entries
+    }
+
+    private suspend fun loadMatchingPasskeysForItem(
+        item: ItemEntity,
+        muk: ByteArray,
+        rpId: String,
+        allowedCredentialIds: Set<String>
+    ): List<StoredPasskey> {
+        return try {
+            val vaultKey = database.vaultKeyDao().getByVaultId(item.vaultId, item.userId)
+                ?: return emptyList()
+
+            val decryptedVaultKey = VaultDecryptor.decryptVaultKeyWithMuk(vaultKey, muk)
+            val itemDataJson = VaultDecryptor.decryptItemJson(item, decryptedVaultKey)
+            val passkeys = PasskeyUtils.parseStoredPasskeys(itemDataJson)
+
+            passkeys.filter { passkey ->
+                val passkeyRpId = PasskeyUtils.normalizeHost(passkey.rpId)
+                if (passkeyRpId != rpId) {
+                    return@filter false
+                }
+
+                if (allowedCredentialIds.isEmpty()) {
+                    return@filter true
+                }
+
+                allowedCredentialIds.contains(
+                    PasskeyUtils.canonicalizeCredentialId(passkey.credentialId)
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load passkeys for item ${item.id}", e)
+            emptyList()
+        }
+    }
+
+    /**
      * Create PendingIntent for credential retrieval (legacy storage).
      * Opens GetCredentialsActivity for biometric authentication.
      */
@@ -291,6 +449,25 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         return PendingIntent.getActivity(
             applicationContext,
             itemId.hashCode(),
+            intent,
+            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    }
+
+    /**
+     * Create PendingIntent for passkey credential retrieval.
+     */
+    private fun createGetPasskeyPendingIntent(itemId: String, credentialId: String): PendingIntent {
+        val intent = Intent(applicationContext, GetCredentialsActivity::class.java).apply {
+            putExtra(EXTRA_ITEM_ID, itemId)
+            putExtra(EXTRA_PASSKEY_CREDENTIAL_ID, credentialId)
+            putExtra(EXTRA_REQUEST_TYPE, REQUEST_TYPE_GET_PASSKEY)
+        }
+
+        val requestCode = "${itemId}_$credentialId".hashCode()
+        return PendingIntent.getActivity(
+            applicationContext,
+            requestCode,
             intent,
             PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
@@ -332,6 +509,25 @@ class BitteryCredentialProviderService : CredentialProviderService() {
     }
 
     /**
+     * Create PendingIntent for passkey registration.
+     */
+    private fun createPasskeyCreatePendingIntent(
+        request: BeginCreatePublicKeyCredentialRequest
+    ): PendingIntent {
+        val intent = Intent(applicationContext, GetCredentialsActivity::class.java).apply {
+            putExtra(EXTRA_REQUEST_TYPE, REQUEST_TYPE_CREATE_PASSKEY)
+        }
+
+        val requestCode = "${REQUEST_TYPE_CREATE_PASSKEY}:${request.requestJson.hashCode()}".hashCode()
+        return PendingIntent.getActivity(
+            applicationContext,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    }
+
+    /**
      * Extract domain from origin URL or package name.
      */
     private fun extractDomain(origin: String): String {
@@ -353,10 +549,54 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         }
     }
 
+    private fun extractPasskeyRpIdFromOrigin(origin: String): String {
+        return try {
+            if (!origin.startsWith("http")) {
+                ""
+            } else {
+                java.net.URI(origin).host?.lowercase()?.trimEnd('.') ?: ""
+            }
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
     private fun resolveCallingOrigin(originJsonOrString: String?, packageName: String?): String {
         val origins = extractOriginList(originJsonOrString)
-        val origin = origins.firstOrNull()?.takeIf { it.isNotBlank() }
+        val origin = origins
+            .firstOrNull { it.isNotBlank() }
+            ?.let { normalizeOrigin(it) }
         return origin ?: packageName.orEmpty()
+    }
+
+    private fun normalizeOrigin(origin: String): String {
+        val trimmed = origin.trim()
+        if (trimmed.isBlank()) return trimmed
+        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+            return trimmed
+        }
+
+        return try {
+            val uri = java.net.URI(trimmed)
+            val scheme = uri.scheme?.lowercase() ?: return trimmed.removeSuffix("/")
+            val host = uri.host?.lowercase() ?: return trimmed.removeSuffix("/")
+            val authorityHost = if (host.contains(":")) "[$host]" else host
+            val port = uri.port
+            val includePort = port != -1 &&
+                !((scheme == "https" && port == 443) || (scheme == "http" && port == 80))
+
+            buildString {
+                append(scheme)
+                append("://")
+                append(authorityHost)
+                if (includePort) {
+                    append(':')
+                    append(port)
+                }
+            }
+        } catch (_: Exception) {
+            trimmed.removeSuffix("/")
+        }
     }
 
     private fun extractOriginList(originJsonOrString: String?): List<String> {

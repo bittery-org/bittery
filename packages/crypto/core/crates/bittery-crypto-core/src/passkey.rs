@@ -35,6 +35,8 @@ pub struct PasskeyKeypair {
     pub private_key: [u8; 32],
     /// CBOR-encoded COSE public key (EC2, ES256).
     pub public_key_cose: Vec<u8>,
+    /// DER-encoded SubjectPublicKeyInfo public key for WebAuthn JSON (`response.publicKey`).
+    pub public_key_spki: Vec<u8>,
 }
 
 /// Attested credential data block for registration.
@@ -73,10 +75,12 @@ pub fn generate_passkey_keypair() -> Result<PasskeyKeypair, CryptoError> {
         .y()
         .ok_or_else(|| CryptoError::InvalidInput("Missing P-256 y coordinate".to_string()))?;
     let public_key_cose = encode_cose_public_key(x, y)?;
+    let public_key_spki = encode_spki_public_key(x, y)?;
 
     Ok(PasskeyKeypair {
         private_key,
         public_key_cose,
+        public_key_spki,
     })
 }
 
@@ -121,6 +125,33 @@ pub fn encode_cose_public_key(x: &[u8], y: &[u8]) -> Result<Vec<u8>, CryptoError
         CryptoError::InvalidInput(format!("Failed to encode COSE public key: {}", error))
     })?;
     Ok(encoded)
+}
+
+/// Encode a P-256 public key into DER SubjectPublicKeyInfo (SPKI) format.
+///
+/// This is required for the WebAuthn JSON `response.publicKey` field used by Chromium.
+pub fn encode_spki_public_key(x: &[u8], y: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    if x.len() != 32 || y.len() != 32 {
+        return Err(CryptoError::InvalidInput(
+            "P-256 coordinates must be 32 bytes".to_string(),
+        ));
+    }
+
+    // SEQUENCE {
+    //   SEQUENCE { OID ecPublicKey, OID prime256v1 }
+    //   BIT STRING { 0x00 || 0x04 || X || Y }
+    // }
+    const P256_SPKI_PREFIX: [u8; 26] = [
+        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06,
+        0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
+    ];
+
+    let mut spki = Vec::with_capacity(P256_SPKI_PREFIX.len() + 65);
+    spki.extend_from_slice(&P256_SPKI_PREFIX);
+    spki.push(0x04); // uncompressed EC point marker
+    spki.extend_from_slice(x);
+    spki.extend_from_slice(y);
+    Ok(spki)
 }
 
 /// Build WebAuthn authenticatorData bytes.
@@ -284,6 +315,21 @@ mod tests {
         assert_eq!(crv, &Value::Integer(1_i64.into()));
         assert!(matches!(x, Value::Bytes(bytes) if bytes.len() == 32));
         assert!(matches!(y, Value::Bytes(bytes) if bytes.len() == 32));
+    }
+
+    #[test]
+    fn test_spki_public_key_encoding_shape() {
+        let keypair = generate_passkey_keypair().unwrap();
+        let spki = &keypair.public_key_spki;
+        assert_eq!(spki.len(), 91);
+        assert_eq!(
+            &spki[0..26],
+            &[
+                0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
+                0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
+            ]
+        );
+        assert_eq!(spki[26], 0x04);
     }
 
     #[test]

@@ -3,7 +3,10 @@ import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 import { storage } from "@/services/storage";
-import type { SaveCredentialParams } from "../../modules/credential-provider";
+import type {
+	PendingPasskeyMutation,
+	SaveCredentialParams,
+} from "../../modules/credential-provider";
 import CredentialProvider from "../../modules/credential-provider";
 
 /**
@@ -311,6 +314,94 @@ export function useCredentialProviderSync(
 	}, [accountsInfo, ensureNativeMukSet, isAvailable, isAllAccountsMode, items]);
 
 	/**
+	 * Flush provider-side passkey mutations to server before inbound vault sync.
+	 * This prevents local passkey writes from being overwritten by pull sync.
+	 */
+	const flushPendingPasskeyMutations = useCallback(async (): Promise<{
+		applied: number;
+		failed: number;
+	}> => {
+		if (!isAvailable || Platform.OS !== "android") {
+			return { applied: 0, failed: 0 };
+		}
+
+		const pending = await CredentialProvider.getPendingPasskeyMutations("");
+		if (!pending || pending.length === 0) {
+			return { applied: 0, failed: 0 };
+		}
+
+		const accountByUserId = new Map(
+			accountsInfo.map((account) => [account.userId, account] as const),
+		);
+
+		const appliedIds: string[] = [];
+		const failedByError = new Map<string, string[]>();
+
+		const recordFailure = (mutationId: string, error: unknown) => {
+			const message =
+				error instanceof Error
+					? error.message
+					: typeof error === "string"
+						? error
+						: "Unknown passkey mutation flush error";
+			const ids = failedByError.get(message) ?? [];
+			ids.push(mutationId);
+			failedByError.set(message, ids);
+		};
+
+		for (const mutation of pending as PendingPasskeyMutation[]) {
+			const account = accountByUserId.get(mutation.userId);
+			if (!account) {
+				recordFailure(
+					mutation.id,
+					`No unlocked account context for userId=${mutation.userId}`,
+				);
+				continue;
+			}
+
+			try {
+				if (mutation.operation === "update_item") {
+					await account.trpcClient.vault.updateItem.mutate({
+						itemId: mutation.itemId,
+						encryptedData: mutation.encryptedData,
+						encryptionIv: mutation.encryptionIv,
+					});
+				} else if (mutation.operation === "create_item") {
+					await account.trpcClient.vault.createItem.mutate({
+						vaultId: mutation.vaultId,
+						category: "login",
+						encryptedData: mutation.encryptedData,
+						encryptionIv: mutation.encryptionIv,
+						encryptionAlgorithm: mutation.encryptionAlgorithm || "AES-GCM",
+					});
+				} else {
+					throw new Error(`Unsupported passkey mutation operation: ${mutation.operation}`);
+				}
+
+				appliedIds.push(mutation.id);
+			} catch (error) {
+				recordFailure(mutation.id, error);
+			}
+		}
+
+		if (appliedIds.length > 0) {
+			await CredentialProvider.markPendingPasskeyMutationsApplied(appliedIds);
+		}
+
+		for (const [errorMessage, ids] of failedByError) {
+			await CredentialProvider.markPendingPasskeyMutationsFailed(ids, errorMessage);
+		}
+
+		return {
+			applied: appliedIds.length,
+			failed: Array.from(failedByError.values()).reduce(
+				(total, ids) => total + ids.length,
+				0,
+			),
+		};
+	}, [accountsInfo, isAvailable]);
+
+	/**
 	 * Perform the legacy sync operation.
 	 *
 	 * This syncs decrypted credentials to the credential provider storage.
@@ -349,6 +440,11 @@ export function useCredentialProviderSync(
 		setError(null);
 
 		try {
+			const flushResult = await flushPendingPasskeyMutations();
+			if (flushResult.applied > 0 || flushResult.failed > 0) {
+				console.log("[CredentialProviderSync] Flushed pending passkey mutations:", flushResult);
+			}
+
 			// Sync vault data (new unified storage approach)
 			console.log("[CredentialProviderSync] Starting vault data sync...");
 			const vaultResult = await syncVaultData();
@@ -401,6 +497,7 @@ export function useCredentialProviderSync(
 		accountsInfo.length,
 		extractCredentials,
 		syncVaultData,
+		flushPendingPasskeyMutations,
 	]);
 
 	/**

@@ -1146,6 +1146,7 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
             let value = serde_json::json!({
                 "privateKey": STANDARD.encode(result.private_key),
                 "publicKeyCose": STANDARD.encode(result.public_key_cose),
+                "publicKeySpki": STANDARD.encode(result.public_key_spki),
             })
             .to_string();
             create_cp_result(&mut env, Some(&value), None)

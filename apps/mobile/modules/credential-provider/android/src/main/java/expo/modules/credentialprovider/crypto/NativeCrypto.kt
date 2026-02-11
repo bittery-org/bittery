@@ -162,10 +162,10 @@ object NativeCrypto {
     // ============================================================================
 
     /**
-     * Generate passkey private key + COSE public key.
+     * Generate passkey private key + COSE/SPKI public keys.
      *
      * Returns JSON in Result.value:
-     * {"privateKey":"...","publicKeyCose":"..."}
+     * {"privateKey":"...","publicKeyCose":"...","publicKeySpki":"..."}
      */
     fun passkeyGenerateKeypair(): Result {
         if (!isAvailable) {

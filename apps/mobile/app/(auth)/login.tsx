@@ -168,9 +168,9 @@ export default function LoginScreen() {
 							<PressableFeedback
 								onPress={() => {
 									// DEV ONLY: Auto-fill credentials
-									setEmail("pixelmund@gmail.com");
+									setEmail("user@bittery.com");
 									setPassword("Hofmann01");
-									setSecretKey("A3-RGLEBN-NWPY7E-W6ZRA-G4VD6-TUKG5");
+									setSecretKey("A3-73ASV5-LCMRCU-B7TMM-VMH3K-QC27G");
 								}}
 							>
 								<Image

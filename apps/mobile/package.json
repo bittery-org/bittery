@@ -4,7 +4,7 @@
 	"version": "0.1.0",
 	"main": "expo-router/entry",
 	"scripts": {
-		"dev:backup": "expo run:android --no-bundler && expo start --clear",
+		"dev": "expo run:android --no-bundler && expo start --clear",
 		"dev:build": "expo prebuild && expo run:android --no-bundler",
 		"dev:clear": "expo start --clear",
 		"android": "expo run:android",

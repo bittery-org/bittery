@@ -793,6 +793,94 @@ class CredentialProviderModule : Module() {
         }
 
         /**
+         * Get pending passkey mutations queued by the Android credential provider flows.
+         */
+        AsyncFunction("getPendingPasskeyMutations") { userId: String?, promise: Promise ->
+            moduleScope.launch {
+                try {
+                    val entities = withContext(Dispatchers.IO) {
+                        if (userId.isNullOrBlank()) {
+                            database.pendingPasskeyMutationDao().getAll()
+                        } else {
+                            database.pendingPasskeyMutationDao().getByUserId(userId)
+                        }
+                    }
+
+                    val result = entities.map { entity ->
+                        mapOf(
+                            "id" to entity.id,
+                            "userId" to entity.userId,
+                            "vaultId" to entity.vaultId,
+                            "itemId" to entity.itemId,
+                            "operation" to entity.operation,
+                            "encryptedData" to entity.encryptedData,
+                            "encryptionIv" to entity.encryptionIv,
+                            "encryptionAlgorithm" to entity.encryptionAlgorithm,
+                            "createdAt" to entity.createdAt,
+                            "attemptCount" to entity.attemptCount,
+                            "lastError" to entity.lastError
+                        )
+                    }
+
+                    promise.resolve(result)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to fetch pending passkey mutations", e)
+                    promise.reject(
+                        "GET_PENDING_PASSKEY_MUTATIONS_FAILED",
+                        "Failed to fetch pending passkey mutations: ${e.message}",
+                        e
+                    )
+                }
+            }
+        }
+
+        /**
+         * Mark queued passkey mutations as applied and remove them from local queue.
+         */
+        AsyncFunction("markPendingPasskeyMutationsApplied") { ids: List<String>, promise: Promise ->
+            moduleScope.launch {
+                try {
+                    if (ids.isNotEmpty()) {
+                        withContext(Dispatchers.IO) {
+                            database.pendingPasskeyMutationDao().deleteByIds(ids)
+                        }
+                    }
+                    promise.resolve(true)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to mark pending passkey mutations as applied", e)
+                    promise.reject(
+                        "MARK_PENDING_PASSKEY_MUTATIONS_APPLIED_FAILED",
+                        "Failed to mark pending passkey mutations as applied: ${e.message}",
+                        e
+                    )
+                }
+            }
+        }
+
+        /**
+         * Mark queued passkey mutations as failed (increments retry attempts and stores error).
+         */
+        AsyncFunction("markPendingPasskeyMutationsFailed") { ids: List<String>, error: String, promise: Promise ->
+            moduleScope.launch {
+                try {
+                    if (ids.isNotEmpty()) {
+                        withContext(Dispatchers.IO) {
+                            database.pendingPasskeyMutationDao().markFailed(ids, error)
+                        }
+                    }
+                    promise.resolve(true)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to mark pending passkey mutations as failed", e)
+                    promise.reject(
+                        "MARK_PENDING_PASSKEY_MUTATIONS_FAILED",
+                        "Failed to mark pending passkey mutations as failed: ${e.message}",
+                        e
+                    )
+                }
+            }
+        }
+
+        /**
          * Sync multiple credentials from the main vault.
          * This is more efficient than saving credentials one by one.
          * Uses time-bound authentication - after one biometric auth, can encrypt for 30 seconds.
