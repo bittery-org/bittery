@@ -21,6 +21,8 @@ hkdf = "0.12"
 sha1 = "0.10"
 sha2 = "0.10"
 rsa = { version = "0.9", features = ["sha2"] }
+p256 = { version = "0.13", features = ["ecdsa"] }
+ecdsa = "0.16"
 rand = "0.8"
 
 # BigInteger for SRP
@@ -31,6 +33,7 @@ num-integer = "0.1"
 # Encoding
 base64 = "0.22"
 hex = "0.4"
+ciborium = "0.2"
 
 # Bindings
 wasm-bindgen = "0.2"

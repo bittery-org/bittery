@@ -3,9 +3,10 @@
 //! Exposes the core crypto library to JavaScript/TypeScript via wasm-bindgen.
 
 use bittery_crypto_core::{
-    decrypt, derive_keys, encrypt, generate_encryption_key, generate_rsa_key_pair,
-    generate_secret_key, get_secret_key_hint,
+    decrypt, derive_keys, encrypt, generate_credential_id, generate_encryption_key,
+    generate_passkey_keypair, generate_rsa_key_pair, generate_secret_key, get_secret_key_hint,
     key_rotation::{self, ItemData, MemberKeyData},
+    passkey::{build_passkey_attestation_object, sign_passkey_assertion},
     rsa_decrypt, rsa_encrypt,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient, SrpServer},
     validate_secret_key, EncryptedData,
@@ -353,6 +354,98 @@ impl JsSrpServer {
             proof: session.proof.clone(),
         })
     }
+}
+
+// ============================================================================
+// Passkey / WebAuthn
+// ============================================================================
+
+#[wasm_bindgen]
+#[derive(Serialize, Deserialize)]
+pub struct JsPasskeyKeypair {
+    #[wasm_bindgen(getter_with_clone)]
+    pub private_key: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub public_key_cose: String,
+}
+
+#[wasm_bindgen]
+#[derive(Serialize, Deserialize)]
+pub struct JsPasskeyAttestation {
+    #[wasm_bindgen(getter_with_clone)]
+    pub authenticator_data: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub attestation_object: String,
+}
+
+#[wasm_bindgen]
+#[derive(Serialize, Deserialize)]
+pub struct JsPasskeyAssertion {
+    #[wasm_bindgen(getter_with_clone)]
+    pub authenticator_data: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub signature_der: String,
+}
+
+/// Generate passkey private key and COSE public key.
+#[wasm_bindgen(js_name = generatePasskeyKeypair)]
+pub fn js_generate_passkey_keypair() -> Result<JsPasskeyKeypair, JsError> {
+    let keypair = generate_passkey_keypair().map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(JsPasskeyKeypair {
+        private_key: base64_encode(&keypair.private_key),
+        public_key_cose: base64_encode(&keypair.public_key_cose),
+    })
+}
+
+/// Generate a random passkey credential ID (32 bytes), base64 encoded.
+#[wasm_bindgen(js_name = generatePasskeyCredentialId)]
+pub fn js_generate_passkey_credential_id() -> String {
+    base64_encode(&generate_credential_id())
+}
+
+/// Build authenticator data + attestation object for `navigator.credentials.create()`.
+#[wasm_bindgen(js_name = buildPasskeyAttestationObject)]
+pub fn js_build_passkey_attestation_object(
+    rp_id: &str,
+    credential_id_base64: &str,
+    cose_public_key_base64: &str,
+    sign_count: Option<u32>,
+) -> Result<JsPasskeyAttestation, JsError> {
+    let credential_id = base64_decode(credential_id_base64)?;
+    let cose_public_key = base64_decode(cose_public_key_base64)?;
+
+    let result = build_passkey_attestation_object(
+        rp_id,
+        &credential_id,
+        &cose_public_key,
+        sign_count.unwrap_or(0),
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
+
+    Ok(JsPasskeyAttestation {
+        authenticator_data: base64_encode(&result.authenticator_data),
+        attestation_object: base64_encode(&result.attestation_object),
+    })
+}
+
+/// Build assertion authenticator data and sign it for `navigator.credentials.get()`.
+#[wasm_bindgen(js_name = signPasskeyAssertion)]
+pub fn js_sign_passkey_assertion(
+    private_key_base64: &str,
+    rp_id: &str,
+    client_data_hash_base64: &str,
+    sign_count: u32,
+) -> Result<JsPasskeyAssertion, JsError> {
+    let private_key = base64_decode(private_key_base64)?;
+    let client_data_hash = base64_decode(client_data_hash_base64)?;
+
+    let result = sign_passkey_assertion(&private_key, rp_id, &client_data_hash, sign_count)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    Ok(JsPasskeyAssertion {
+        authenticator_data: base64_encode(&result.authenticator_data),
+        signature_der: base64_encode(&result.signature_der),
+    })
 }
 
 // ============================================================================

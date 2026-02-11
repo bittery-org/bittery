@@ -6,9 +6,10 @@
 mod jni;
 
 use bittery_crypto_core::{
-    decrypt, derive_keys, encrypt, generate_encryption_key, generate_rsa_key_pair,
-    generate_secret_key, get_secret_key_hint,
+    decrypt, derive_keys, encrypt, generate_credential_id, generate_encryption_key,
+    generate_passkey_keypair, generate_rsa_key_pair, generate_secret_key, get_secret_key_hint,
     key_rotation::{self, ItemData, MemberKeyData},
+    passkey::{build_passkey_attestation_object, sign_passkey_assertion},
     rsa_decrypt, rsa_encrypt,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient, SrpServer},
     validate_secret_key, EncryptedData,
@@ -305,6 +306,210 @@ pub extern "C" fn bittery_rsa_decrypt(
     match rsa_decrypt(&ciphertext_str, &pem) {
         Ok(plaintext) => string_to_c_str(plaintext),
         Err(e) => string_to_c_str(format!("ERROR:{}", e)),
+    }
+}
+
+// ============================================================================
+// Passkey / WebAuthn
+// ============================================================================
+
+#[repr(C)]
+pub struct PasskeyKeypairResult {
+    pub private_key: *mut c_char,
+    pub public_key_cose: *mut c_char,
+    pub error: *mut c_char,
+}
+
+#[repr(C)]
+pub struct PasskeyAttestationResult {
+    pub authenticator_data: *mut c_char,
+    pub attestation_object: *mut c_char,
+    pub error: *mut c_char,
+}
+
+#[repr(C)]
+pub struct PasskeyAssertionResult {
+    pub authenticator_data: *mut c_char,
+    pub signature_der: *mut c_char,
+    pub error: *mut c_char,
+}
+
+/// Generate passkey private key and COSE public key.
+#[no_mangle]
+pub extern "C" fn bittery_passkey_generate_keypair() -> PasskeyKeypairResult {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    match generate_passkey_keypair() {
+        Ok(result) => PasskeyKeypairResult {
+            private_key: string_to_c_str(STANDARD.encode(result.private_key)),
+            public_key_cose: string_to_c_str(STANDARD.encode(result.public_key_cose)),
+            error: ptr::null_mut(),
+        },
+        Err(e) => PasskeyKeypairResult {
+            private_key: ptr::null_mut(),
+            public_key_cose: ptr::null_mut(),
+            error: string_to_c_str(e.to_string()),
+        },
+    }
+}
+
+/// Generate passkey credential ID (base64).
+#[no_mangle]
+pub extern "C" fn bittery_passkey_generate_credential_id() -> *mut c_char {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    string_to_c_str(STANDARD.encode(generate_credential_id()))
+}
+
+/// Build authenticator data + attestation object (both base64).
+#[no_mangle]
+pub extern "C" fn bittery_passkey_build_attestation_object(
+    rp_id: *const c_char,
+    credential_id_base64: *const c_char,
+    cose_public_key_base64: *const c_char,
+    sign_count: u32,
+) -> PasskeyAttestationResult {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    let rp_id_str = match c_str_to_string(rp_id) {
+        Some(s) => s,
+        None => {
+            return PasskeyAttestationResult {
+                authenticator_data: ptr::null_mut(),
+                attestation_object: ptr::null_mut(),
+                error: string_to_c_str("Invalid rpId".to_string()),
+            }
+        }
+    };
+    let credential_id_str = match c_str_to_string(credential_id_base64) {
+        Some(s) => s,
+        None => {
+            return PasskeyAttestationResult {
+                authenticator_data: ptr::null_mut(),
+                attestation_object: ptr::null_mut(),
+                error: string_to_c_str("Invalid credentialId".to_string()),
+            }
+        }
+    };
+    let cose_public_key_str = match c_str_to_string(cose_public_key_base64) {
+        Some(s) => s,
+        None => {
+            return PasskeyAttestationResult {
+                authenticator_data: ptr::null_mut(),
+                attestation_object: ptr::null_mut(),
+                error: string_to_c_str("Invalid COSE public key".to_string()),
+            }
+        }
+    };
+
+    let credential_id = match STANDARD.decode(&credential_id_str) {
+        Ok(value) => value,
+        Err(error) => {
+            return PasskeyAttestationResult {
+                authenticator_data: ptr::null_mut(),
+                attestation_object: ptr::null_mut(),
+                error: string_to_c_str(format!("Invalid credentialId base64: {}", error)),
+            }
+        }
+    };
+    let cose_public_key = match STANDARD.decode(&cose_public_key_str) {
+        Ok(value) => value,
+        Err(error) => {
+            return PasskeyAttestationResult {
+                authenticator_data: ptr::null_mut(),
+                attestation_object: ptr::null_mut(),
+                error: string_to_c_str(format!("Invalid COSE key base64: {}", error)),
+            }
+        }
+    };
+
+    match build_passkey_attestation_object(&rp_id_str, &credential_id, &cose_public_key, sign_count)
+    {
+        Ok(result) => PasskeyAttestationResult {
+            authenticator_data: string_to_c_str(STANDARD.encode(result.authenticator_data)),
+            attestation_object: string_to_c_str(STANDARD.encode(result.attestation_object)),
+            error: ptr::null_mut(),
+        },
+        Err(e) => PasskeyAttestationResult {
+            authenticator_data: ptr::null_mut(),
+            attestation_object: ptr::null_mut(),
+            error: string_to_c_str(e.to_string()),
+        },
+    }
+}
+
+/// Build assertion authenticator data and signature (base64).
+#[no_mangle]
+pub extern "C" fn bittery_passkey_sign_assertion(
+    private_key_base64: *const c_char,
+    rp_id: *const c_char,
+    client_data_hash_base64: *const c_char,
+    sign_count: u32,
+) -> PasskeyAssertionResult {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    let private_key_str = match c_str_to_string(private_key_base64) {
+        Some(s) => s,
+        None => {
+            return PasskeyAssertionResult {
+                authenticator_data: ptr::null_mut(),
+                signature_der: ptr::null_mut(),
+                error: string_to_c_str("Invalid private key".to_string()),
+            }
+        }
+    };
+    let rp_id_str = match c_str_to_string(rp_id) {
+        Some(s) => s,
+        None => {
+            return PasskeyAssertionResult {
+                authenticator_data: ptr::null_mut(),
+                signature_der: ptr::null_mut(),
+                error: string_to_c_str("Invalid rpId".to_string()),
+            }
+        }
+    };
+    let client_data_hash_str = match c_str_to_string(client_data_hash_base64) {
+        Some(s) => s,
+        None => {
+            return PasskeyAssertionResult {
+                authenticator_data: ptr::null_mut(),
+                signature_der: ptr::null_mut(),
+                error: string_to_c_str("Invalid clientDataHash".to_string()),
+            }
+        }
+    };
+
+    let private_key = match STANDARD.decode(&private_key_str) {
+        Ok(value) => value,
+        Err(error) => {
+            return PasskeyAssertionResult {
+                authenticator_data: ptr::null_mut(),
+                signature_der: ptr::null_mut(),
+                error: string_to_c_str(format!("Invalid private key base64: {}", error)),
+            }
+        }
+    };
+    let client_data_hash = match STANDARD.decode(&client_data_hash_str) {
+        Ok(value) => value,
+        Err(error) => {
+            return PasskeyAssertionResult {
+                authenticator_data: ptr::null_mut(),
+                signature_der: ptr::null_mut(),
+                error: string_to_c_str(format!("Invalid clientDataHash base64: {}", error)),
+            }
+        }
+    };
+
+    match sign_passkey_assertion(&private_key, &rp_id_str, &client_data_hash, sign_count) {
+        Ok(result) => PasskeyAssertionResult {
+            authenticator_data: string_to_c_str(STANDARD.encode(result.authenticator_data)),
+            signature_der: string_to_c_str(STANDARD.encode(result.signature_der)),
+            error: ptr::null_mut(),
+        },
+        Err(e) => PasskeyAssertionResult {
+            authenticator_data: ptr::null_mut(),
+            signature_der: ptr::null_mut(),
+            error: string_to_c_str(e.to_string()),
+        },
     }
 }
 

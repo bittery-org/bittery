@@ -39,6 +39,11 @@ import {
 	handleCaptureTabScreenshot,
 	handleUpdateItemTotp,
 } from "./qr-scan-handlers";
+import {
+	handlePasskeyCancel,
+	handlePasskeyCreate,
+	handlePasskeyGet,
+} from "./passkey-handlers";
 import { refreshAutoLockTimeout } from "./session-manager";
 import {
 	cleanupSync,
@@ -224,6 +229,60 @@ async function routeRuntimeMessage(message: RuntimeMessage): Promise<unknown> {
 
 		case "GET_AUTOFILL_IDENTITIES": {
 			return handleGetAutofillIdentities();
+		}
+
+		// Passkeys
+		case "PASSKEY_CREATE": {
+			return handlePasskeyCreate(
+				getPayload<{
+					requestId?: string;
+					origin: string;
+					mediation?: CredentialMediationRequirement;
+					clientDataJSON: string;
+					clientDataHash: string;
+					publicKey: {
+						rp: { id?: string; name: string };
+						user: { id: string; name: string; displayName: string };
+						challenge: string;
+						pubKeyCredParams: PublicKeyCredentialParameters[];
+						timeout?: number;
+						excludeCredentials?: Array<{
+							type: "public-key";
+							id: string;
+							transports?: AuthenticatorTransport[];
+						}>;
+						authenticatorSelection?: AuthenticatorSelectionCriteria;
+						attestation?: AttestationConveyancePreference;
+					};
+				}>(message),
+			);
+		}
+
+		case "PASSKEY_GET": {
+			return handlePasskeyGet(
+				getPayload<{
+					requestId?: string;
+					origin: string;
+					mediation?: CredentialMediationRequirement;
+					clientDataJSON: string;
+					clientDataHash: string;
+					publicKey: {
+						challenge: string;
+						rpId?: string;
+						timeout?: number;
+						allowCredentials?: Array<{
+							type: "public-key";
+							id: string;
+							transports?: AuthenticatorTransport[];
+						}>;
+						userVerification?: UserVerificationRequirement;
+					};
+				}>(message),
+			);
+		}
+
+		case "PASSKEY_CANCEL": {
+			return handlePasskeyCancel(getPayload<{ requestId?: string }>(message));
 		}
 
 		// Native messaging (biometric unlock)

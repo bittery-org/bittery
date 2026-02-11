@@ -19,6 +19,7 @@ import init, {
 	rsaDecrypt as wasmRsaDecrypt,
 	validateSecretKey as wasmValidateSecretKey,
 } from "@bittery/crypto-wasm";
+import * as wasmCrypto from "@bittery/crypto-wasm";
 import type {
 	DerivedKeys,
 	EncryptedData,
@@ -34,6 +35,47 @@ export type {
 	SRPClientEphemeral,
 	SRPClientSession,
 	SRPServerChallenge,
+};
+
+export interface PasskeyKeypair {
+	privateKey: string;
+	publicKeyCose: string;
+}
+
+export interface PasskeyAttestation {
+	authenticatorData: Uint8Array;
+	attestationObject: Uint8Array;
+}
+
+export interface PasskeyAssertion {
+	authenticatorData: Uint8Array;
+	signatureDer: Uint8Array;
+}
+
+type PasskeyWasmExports = {
+	generatePasskeyKeypair?: () => {
+		private_key: string;
+		public_key_cose: string;
+	};
+	generatePasskeyCredentialId?: () => string;
+	buildPasskeyAttestationObject?: (
+		rpId: string,
+		credentialIdBase64: string,
+		cosePublicKeyBase64: string,
+		signCount?: number,
+	) => {
+		authenticator_data: string;
+		attestation_object: string;
+	};
+	signPasskeyAssertion?: (
+		privateKeyBase64: string,
+		rpId: string,
+		clientDataHashBase64: string,
+		signCount: number,
+	) => {
+		authenticator_data: string;
+		signature_der: string;
+	};
 };
 
 // ============================================================================
@@ -194,6 +236,100 @@ export async function generateEncryptionKey(): Promise<Uint8Array> {
 
 	const keyBase64 = wasmGenerateEncryptionKey();
 	return base64ToUint8Array(keyBase64);
+}
+
+// ============================================================================
+// Passkey / WebAuthn
+// ============================================================================
+
+function getPasskeyExports(): PasskeyWasmExports {
+	return wasmCrypto as unknown as PasskeyWasmExports;
+}
+
+export async function generatePasskeyKeypair(): Promise<PasskeyKeypair> {
+	await autoInit();
+
+	const fn = getPasskeyExports().generatePasskeyKeypair;
+	if (typeof fn !== "function") {
+		throw new Error(
+			"Missing WASM export generatePasskeyKeypair. Rebuild @bittery/crypto-wasm.",
+		);
+	}
+
+	const result = fn();
+	return {
+		privateKey: result.private_key,
+		publicKeyCose: result.public_key_cose,
+	};
+}
+
+export async function generatePasskeyCredentialId(): Promise<string> {
+	await autoInit();
+
+	const fn = getPasskeyExports().generatePasskeyCredentialId;
+	if (typeof fn !== "function") {
+		throw new Error(
+			"Missing WASM export generatePasskeyCredentialId. Rebuild @bittery/crypto-wasm.",
+		);
+	}
+
+	return fn();
+}
+
+export async function buildPasskeyAttestationObject(input: {
+	rpId: string;
+	credentialIdBase64: string;
+	cosePublicKeyBase64: string;
+	signCount?: number;
+}): Promise<PasskeyAttestation> {
+	await autoInit();
+
+	const fn = getPasskeyExports().buildPasskeyAttestationObject;
+	if (typeof fn !== "function") {
+		throw new Error(
+			"Missing WASM export buildPasskeyAttestationObject. Rebuild @bittery/crypto-wasm.",
+		);
+	}
+
+	const result = fn(
+		input.rpId,
+		input.credentialIdBase64,
+		input.cosePublicKeyBase64,
+		input.signCount,
+	);
+
+	return {
+		authenticatorData: base64ToUint8Array(result.authenticator_data),
+		attestationObject: base64ToUint8Array(result.attestation_object),
+	};
+}
+
+export async function signPasskeyAssertion(input: {
+	privateKeyBase64: string;
+	rpId: string;
+	clientDataHashBase64: string;
+	signCount: number;
+}): Promise<PasskeyAssertion> {
+	await autoInit();
+
+	const fn = getPasskeyExports().signPasskeyAssertion;
+	if (typeof fn !== "function") {
+		throw new Error(
+			"Missing WASM export signPasskeyAssertion. Rebuild @bittery/crypto-wasm.",
+		);
+	}
+
+	const result = fn(
+		input.privateKeyBase64,
+		input.rpId,
+		input.clientDataHashBase64,
+		input.signCount,
+	);
+
+	return {
+		authenticatorData: base64ToUint8Array(result.authenticator_data),
+		signatureDer: base64ToUint8Array(result.signature_der),
+	};
 }
 
 // ============================================================================

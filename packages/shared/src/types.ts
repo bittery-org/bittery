@@ -36,6 +36,26 @@ export interface CustomField {
 }
 
 /**
+ * Stored passkey metadata for login items.
+ * All fields are encrypted as part of the item data blob.
+ */
+export interface Passkey {
+	credentialId: string;
+	rpId: string;
+	rpName: string;
+	userHandle: string;
+	userName: string;
+	userDisplayName: string;
+	privateKey: string;
+	publicKey: string;
+	algorithm: number;
+	signCount: number;
+	transports: string[];
+	createdAt: string;
+	lastUsedAt?: string;
+}
+
+/**
  * Decrypted data payload for vault items (without metadata)
  * Contains all the actual sensitive data that gets encrypted/decrypted
  */
@@ -45,6 +65,7 @@ export interface DecryptedItemData {
 	urls?: string[];
 	username?: string;
 	password?: string;
+	passkeys?: Passkey[];
 	notes?: string;
 	note?: string;
 	customFields?: CustomField[];
@@ -101,6 +122,7 @@ export interface LoginDisplayData {
 	urls?: string[];
 	username?: string;
 	password?: string;
+	passkeys?: Passkey[];
 	notes?: string;
 	customFields?: CustomField[];
 	tags?: string[];
