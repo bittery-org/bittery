@@ -5,6 +5,7 @@ import {
 	findMatchingPasskeysForItems,
 	resolveCreateDecision,
 	resolveGetSelection,
+	resolveUnknownCredentialSuspectMatch,
 } from "../../src/background/passkey-handlers";
 
 function createPasskey(input: {
@@ -180,6 +181,85 @@ describe("passkey handler helpers", () => {
 			kind: "fallback",
 			reason: "no_match",
 		});
+	});
+
+	test("resolves unknown-credential suspect for single stored passkey when allowCredentials mismatch", () => {
+		const items = [
+			createLoginItem({
+				id: "item_1",
+				username: "alice",
+				url: "https://example.com",
+				passkeys: [createPasskey({ credentialId: "cred_only", rpId: "example.com", userName: "alice" })],
+			}),
+		] as never[];
+
+		const rpMatches = findMatchingPasskeysForItems({
+			items,
+			rpId: "example.com",
+		});
+		const suspect = resolveUnknownCredentialSuspectMatch({
+			rpMatches,
+			allowCredentials: [{ type: "public-key", id: "server_cred_1" }],
+		});
+
+		expect(suspect?.passkey.credentialId).toBe("cred_only");
+	});
+
+	test("does not auto-mark unknown-credential when multiple stored passkeys are ambiguous", () => {
+		const items = [
+			createLoginItem({
+				id: "item_1",
+				username: "alice",
+				url: "https://example.com",
+				passkeys: [createPasskey({ credentialId: "cred_a", rpId: "example.com", userName: "alice" })],
+			}),
+			createLoginItem({
+				id: "item_2",
+				username: "bob",
+				url: "https://example.com",
+				passkeys: [createPasskey({ credentialId: "cred_b", rpId: "example.com", userName: "bob" })],
+			}),
+		] as never[];
+
+		const rpMatches = findMatchingPasskeysForItems({
+			items,
+			rpId: "example.com",
+		});
+		const suspect = resolveUnknownCredentialSuspectMatch({
+			rpMatches,
+			allowCredentials: [{ type: "public-key", id: "server_cred_1" }],
+		});
+
+		expect(suspect).toBeNull();
+	});
+
+	test("marks explicit selection as unknown-credential suspect even in ambiguous set", () => {
+		const items = [
+			createLoginItem({
+				id: "item_1",
+				username: "alice",
+				url: "https://example.com",
+				passkeys: [createPasskey({ credentialId: "cred_a", rpId: "example.com", userName: "alice" })],
+			}),
+			createLoginItem({
+				id: "item_2",
+				username: "bob",
+				url: "https://example.com",
+				passkeys: [createPasskey({ credentialId: "cred_b", rpId: "example.com", userName: "bob" })],
+			}),
+		] as never[];
+
+		const rpMatches = findMatchingPasskeysForItems({
+			items,
+			rpId: "example.com",
+		});
+		const suspect = resolveUnknownCredentialSuspectMatch({
+			rpMatches,
+			allowCredentials: [{ type: "public-key", id: "server_cred_1" }],
+			selectedCredentialId: "cred_b",
+		});
+
+		expect(suspect?.passkey.credentialId).toBe("cred_b");
 	});
 
 	test("requires explicit save-target decision for ambiguous create", () => {

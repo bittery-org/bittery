@@ -440,6 +440,31 @@ export function resolveGetSelection(input: {
 	};
 }
 
+export function resolveUnknownCredentialSuspectMatch(input: {
+	rpMatches: MatchedPasskey[];
+	allowCredentials?: SerializedCredentialDescriptor[];
+	selectedCredentialId?: string;
+}): MatchedPasskey | null {
+	const allowedIds = allowCredentialIds(input.allowCredentials);
+	if (!allowedIds || allowedIds.size === 0) {
+		return null;
+	}
+
+	if (input.selectedCredentialId) {
+		return (
+			input.rpMatches.find(
+				(match) => match.passkey.credentialId === input.selectedCredentialId,
+			) ?? null
+		);
+	}
+
+	if (input.rpMatches.length === 1) {
+		return input.rpMatches[0] ?? null;
+	}
+
+	return null;
+}
+
 export function resolveCreateDecision(input: {
 	candidateItems: LoginItemWithAccount[];
 	userName: string;
@@ -763,7 +788,40 @@ async function markPasskeyAsSuspect(input: {
 			statusReason: input.reason,
 			statusUpdatedAt,
 		}),
-	});
+		});
+}
+
+async function markPasskeyAsSuspectSafely(input: {
+	requestId?: string;
+	rpId: string;
+	match: MatchedPasskey;
+	reason: NonNullable<Passkey["statusReason"]>;
+}): Promise<void> {
+	try {
+		await markPasskeyAsSuspect({
+			match: input.match,
+			reason: input.reason,
+		});
+		logPasskeyEvent("mark_suspect", {
+			requestId: input.requestId,
+			rpId: input.rpId,
+			credentialId: input.match.passkey.credentialId,
+			reason: input.reason,
+			flow: "get",
+		});
+	} catch (markError) {
+		logPasskeyEvent(
+			"handler_error",
+			{
+				requestId: input.requestId,
+				rpId: input.rpId,
+				stage: "mark_suspect",
+				error: markError instanceof Error ? markError.message : String(markError),
+				flow: "get",
+			},
+			"error",
+		);
+	}
 }
 
 function buildCreatePromptPayload(input: {
@@ -1030,6 +1088,20 @@ export async function handlePasskeyGet(
 				matchCount: matches.length,
 			});
 			if (selection.reason === "no_match") {
+				const rpMatches = await findMatchingPasskeys({ rpId });
+				const suspectMatch = resolveUnknownCredentialSuspectMatch({
+					rpMatches,
+					allowCredentials: payload.publicKey.allowCredentials,
+					selectedCredentialId: payload.selectedCredentialId,
+				});
+				if (suspectMatch) {
+					await markPasskeyAsSuspectSafely({
+						requestId: payload.requestId,
+						rpId,
+						match: suspectMatch,
+						reason: "unknown-credential",
+					});
+				}
 				return { success: true, fallbackToNative: true };
 			}
 			return {
@@ -1088,32 +1160,12 @@ export async function handlePasskeyGet(
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		if (stage === "signing" && selectedMatch) {
-			try {
-				await markPasskeyAsSuspect({
-					match: selectedMatch,
-					reason: "signing-error",
-				});
-				logPasskeyEvent("mark_suspect", {
-					requestId: payload.requestId,
-					rpId,
-					credentialId: selectedMatch.passkey.credentialId,
-					reason: "signing-error",
-					flow: "get",
-				});
-			} catch (markError) {
-				logPasskeyEvent(
-					"handler_error",
-					{
-						requestId: payload.requestId,
-						rpId,
-						stage: "mark_suspect",
-						error:
-							markError instanceof Error ? markError.message : String(markError),
-						flow: "get",
-					},
-					"error",
-				);
-			}
+			await markPasskeyAsSuspectSafely({
+				requestId: payload.requestId,
+				rpId,
+				match: selectedMatch,
+				reason: "signing-error",
+			});
 		}
 		logPasskeyEvent(
 			stage === "matching" ? "matching_error" : "signing_error",
