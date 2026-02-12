@@ -193,6 +193,29 @@ export default function SettingsScreen() {
 					if (allAccounts.length === 0) return;
 					await storage.storeAutoLockTimeout(option.value);
 					setAutoLockTimeout(option.value);
+
+					if (
+						Platform.OS === "android" &&
+						CredentialProvider.isAvailable()
+					) {
+						const accountsToUpdate = isAllAccountsMode
+							? allAccounts
+							: activeAccount
+								? [activeAccount]
+								: allAccounts;
+
+						for (const account of accountsToUpdate) {
+							const sessionData = await storage.getStoredSessionData(
+								account.email,
+							);
+							if (sessionData?.userId) {
+								CredentialProvider.setMukAutoLockTimeout(
+									option.value,
+									sessionData.userId,
+								);
+							}
+						}
+					}
 				},
 			})),
 		);

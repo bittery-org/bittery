@@ -15,7 +15,15 @@ import type {
  * appropriate fallback values on web.
  */
 class CredentialProviderModule extends NativeModule<CredentialProviderModuleEvents> {
-	setMasterUnlockKey(_mukBase64: string, _userId?: string): boolean {
+	setMasterUnlockKey(
+		_mukBase64: string,
+		_userId?: string,
+		_autoLockTimeoutMs?: number,
+	): boolean {
+		return false;
+	}
+
+	setMukAutoLockTimeout(_timeoutMs: number, _userId?: string): boolean {
 		return false;
 	}
 

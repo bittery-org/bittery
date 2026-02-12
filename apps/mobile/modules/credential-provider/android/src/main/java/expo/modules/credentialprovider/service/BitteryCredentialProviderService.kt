@@ -79,6 +79,11 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         loadAllowlistJson()
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        VaultStateManager.initialize(applicationContext)
+    }
+
     /**
      * Handle password autofill requests.
      * Called when an app requests credentials.

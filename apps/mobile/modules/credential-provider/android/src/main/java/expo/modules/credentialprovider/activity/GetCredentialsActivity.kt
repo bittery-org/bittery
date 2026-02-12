@@ -86,6 +86,7 @@ class GetCredentialsActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        VaultStateManager.initialize(applicationContext)
 
         storageManager = CredentialStorageManager(applicationContext)
         database = CredentialDatabase.getInstance(applicationContext)

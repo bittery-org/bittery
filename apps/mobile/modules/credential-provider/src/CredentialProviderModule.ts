@@ -21,7 +21,17 @@ declare class CredentialProviderModule extends NativeModule<CredentialProviderMo
 	 * @param mukBase64 Base64-encoded Master Unlock Key (32 bytes = 44 chars)
 	 * @returns true if successful
 	 */
-	setMasterUnlockKey(mukBase64: string, userId?: string): boolean;
+	setMasterUnlockKey(
+		mukBase64: string,
+		userId?: string,
+		autoLockTimeoutMs?: number,
+	): boolean;
+
+	/**
+	 * Update native MUK auto-lock timeout for a user.
+	 * Applies immediately to currently persisted native MUK state.
+	 */
+	setMukAutoLockTimeout(timeoutMs: number, userId?: string): boolean;
 
 	/**
 	 * Clear the Master Unlock Key (on logout or auto-lock).

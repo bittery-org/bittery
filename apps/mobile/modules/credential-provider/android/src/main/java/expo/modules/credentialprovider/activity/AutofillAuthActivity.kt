@@ -43,6 +43,7 @@ class AutofillAuthActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        VaultStateManager.initialize(applicationContext)
 
         Log.d(TAG, "AutofillAuthActivity started")
 

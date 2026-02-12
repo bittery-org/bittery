@@ -175,10 +175,16 @@ export function useCredentialProviderSync(
 			for (const email of unlockedEmails) {
 				const muk = await storage.getMasterUnlockKey(email);
 				const sessionData = await storage.getStoredSessionData(email);
+				const autoLockTimeoutMs =
+					await storage.getAutoLockTimeoutOrDefault(email);
 				console.log(`[CredentialProviderSync] ensureNativeMukSet: email=${email}, hasMuk=${!!muk}, hasSessionData=${!!sessionData}, userId=${sessionData?.userId ?? "null"}`);
 				if (muk && sessionData?.userId) {
 					const mukBase64 = arrayBufferToBase64(muk);
-					CredentialProvider.setMasterUnlockKey(mukBase64, sessionData.userId);
+					CredentialProvider.setMasterUnlockKey(
+						mukBase64,
+						sessionData.userId,
+						autoLockTimeoutMs,
+					);
 					console.log(`[CredentialProviderSync] ensureNativeMukSet: Set native MUK for userId=${sessionData.userId}`);
 				} else {
 					console.warn(`[CredentialProviderSync] ensureNativeMukSet: SKIPPING email=${email} (muk=${!!muk}, userId=${sessionData?.userId ?? "null"})`);

@@ -62,10 +62,15 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 		for (const email of emails) {
 			const muk = await storage.getMasterUnlockKey(email);
 			const sessionData = await storage.getStoredSessionData(email);
+			const autoLockTimeoutMs = await storage.getAutoLockTimeoutOrDefault(email);
 			console.log(`[BiometricAuth] setNativeMuksForAccounts: email=${email}, hasMuk=${!!muk}, userId=${sessionData?.userId ?? "null"}`);
 			if (muk && sessionData?.userId) {
 				const mukBase64 = arrayBufferToBase64(muk);
-				CredentialProvider.setMasterUnlockKey(mukBase64, sessionData.userId);
+				CredentialProvider.setMasterUnlockKey(
+					mukBase64,
+					sessionData.userId,
+					autoLockTimeoutMs,
+				);
 				console.log(`[BiometricAuth] setNativeMuksForAccounts: SUCCESS for userId=${sessionData.userId}`);
 			} else {
 				console.warn(`[BiometricAuth] setNativeMuksForAccounts: SKIPPED email=${email} (no muk or no userId)`);

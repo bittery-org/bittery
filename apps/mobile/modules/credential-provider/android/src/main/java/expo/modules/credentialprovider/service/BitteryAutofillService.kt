@@ -67,6 +67,11 @@ class BitteryAutofillService : AutofillService() {
 
     private var lastAttributionIntent: PendingIntent? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        VaultStateManager.initialize(applicationContext)
+    }
+
     override fun onFillRequest(
         request: FillRequest,
         cancellationSignal: CancellationSignal,

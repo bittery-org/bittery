@@ -81,6 +81,14 @@ class CredentialProviderModule : Module() {
     private val currentActivity: FragmentActivity?
         get() = appContext.currentActivity as? FragmentActivity
 
+    private fun ensureVaultStateManagerInitialized() {
+        try {
+            VaultStateManager.initialize(context)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize VaultStateManager", e)
+        }
+    }
+
     private fun collectCandidateDomainsFromItemJson(itemDataJson: JSONObject): List<String> {
         val domains = LinkedHashSet<String>()
 
@@ -138,11 +146,13 @@ class CredentialProviderModule : Module() {
          *
          * @param mukBase64 Base64-encoded Master Unlock Key (32 bytes = 44 chars)
          */
-        Function("setMasterUnlockKey") { mukBase64: String, userId: String? ->
+        Function("setMasterUnlockKey") { mukBase64: String, userId: String?, autoLockTimeoutMs: Double? ->
             try {
+                ensureVaultStateManagerInitialized()
                 val resolvedUserId = userId?.takeIf { it.isNotBlank() } ?: "default"
-                Log.d(TAG, "setMasterUnlockKey: CALLED from RN bridge (userId='$resolvedUserId', mukBase64Length=${mukBase64.length}, pid=${android.os.Process.myPid()})")
-                VaultStateManager.setMasterUnlockKeyFromBase64(mukBase64, resolvedUserId)
+                val resolvedTimeoutMs = autoLockTimeoutMs?.toLong()
+                Log.d(TAG, "setMasterUnlockKey: CALLED from RN bridge (userId='$resolvedUserId', mukBase64Length=${mukBase64.length}, timeoutMs=$resolvedTimeoutMs, pid=${android.os.Process.myPid()})")
+                VaultStateManager.setMasterUnlockKeyFromBase64(mukBase64, resolvedUserId, resolvedTimeoutMs)
                 Log.d(TAG, "setMasterUnlockKey: MUK set successfully, verifying...")
                 val verifyUnlocked = VaultStateManager.isUnlocked(resolvedUserId)
                 Log.d(TAG, "setMasterUnlockKey: Verification isUnlocked($resolvedUserId)=$verifyUnlocked")
@@ -154,10 +164,25 @@ class CredentialProviderModule : Module() {
             }
         }
 
+        Function("setMukAutoLockTimeout") { timeoutMs: Double, userId: String? ->
+            try {
+                ensureVaultStateManagerInitialized()
+                val resolvedUserId = userId?.takeIf { it.isNotBlank() } ?: "default"
+                val resolvedTimeoutMs = timeoutMs.toLong()
+                Log.d(TAG, "setMukAutoLockTimeout: userId='$resolvedUserId', timeoutMs=$resolvedTimeoutMs")
+                VaultStateManager.setMukAutoLockTimeout(resolvedUserId, resolvedTimeoutMs)
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "setMukAutoLockTimeout: failed", e)
+                false
+            }
+        }
+
         /**
          * Clear the Master Unlock Key (on logout or auto-lock).
          */
         Function("clearMasterUnlockKey") { userId: String? ->
+            ensureVaultStateManagerInitialized()
             Log.w(TAG, "clearMasterUnlockKey: CALLED from RN bridge (userId='$userId', pid=${android.os.Process.myPid()})")
             VaultStateManager.dumpDebugState("BEFORE clearMasterUnlockKey")
             if (userId.isNullOrBlank()) {
@@ -171,6 +196,7 @@ class CredentialProviderModule : Module() {
         }
 
         Function("clearAllMasterUnlockKeys") {
+            ensureVaultStateManagerInitialized()
             Log.w(TAG, "clearAllMasterUnlockKeys: CALLED from RN bridge (pid=${android.os.Process.myPid()})")
             VaultStateManager.dumpDebugState("BEFORE clearAllMasterUnlockKeys")
             VaultStateManager.clearAllMasterUnlockKeys()
@@ -183,6 +209,7 @@ class CredentialProviderModule : Module() {
          * Check if the vault is currently unlocked (MUK available).
          */
         Function("isVaultUnlocked") { userId: String? ->
+            ensureVaultStateManagerInitialized()
             Log.d(TAG, "isVaultUnlocked: CALLED from RN bridge (userId='$userId', pid=${android.os.Process.myPid()})")
             val unlocked = if (userId.isNullOrBlank()) {
                 VaultStateManager.isUnlocked()
@@ -200,6 +227,7 @@ class CredentialProviderModule : Module() {
          * WARNING: Only use in development builds.
          */
         Function("getMasterUnlockKeyBase64") { userId: String? ->
+            ensureVaultStateManagerInitialized()
             if (userId.isNullOrBlank()) {
                 VaultStateManager.getMasterUnlockKeyBase64()
             } else {
@@ -219,6 +247,7 @@ class CredentialProviderModule : Module() {
          * @param timeoutMs Optional escrow timeout in milliseconds (default 10 min)
          */
         AsyncFunction("escrowMukWithBiometric") { params: Map<String, Any>, promise: Promise ->
+            ensureVaultStateManagerInitialized()
             val activity = currentActivity
             if (activity == null) {
                 promise.reject("NO_ACTIVITY", "No activity available", null)
@@ -309,6 +338,7 @@ class CredentialProviderModule : Module() {
          * This unlocks the vault without requiring password entry.
          */
         AsyncFunction("retrieveEscrowedMuk") { promise: Promise ->
+            ensureVaultStateManagerInitialized()
             val activity = currentActivity
             if (activity == null) {
                 promise.reject("NO_ACTIVITY", "No activity available", null)
@@ -644,6 +674,7 @@ class CredentialProviderModule : Module() {
          *   - items: List of item objects (login items only)
          */
         AsyncFunction("syncVaultData") { dataJson: String, promise: Promise ->
+            ensureVaultStateManagerInitialized()
             Log.d(TAG, "syncVaultData called")
 
             moduleScope.launch {
