@@ -98,9 +98,10 @@ class GetCredentialsActivity : FragmentActivity() {
 
         Log.d(
             TAG,
-            "Activity started - requestType: $requestType, credentialId: $credentialId, itemId: $itemId, passkeyCredentialId: $passkeyCredentialId"
+            "Activity started - requestType: $requestType, credentialId: $credentialId, itemId: $itemId, passkeyCredentialId: $passkeyCredentialId, pid=${android.os.Process.myPid()}"
         )
-        Log.d(TAG, "VaultStateManager.isUnlocked: ${VaultStateManager.isUnlocked()}")
+        VaultStateManager.dumpDebugState("GetCredentialsActivity.onCreate")
+        Log.d(TAG, "MUK Escrow state: hasValidEscrow=${mukEscrowManager.hasValidEscrow()}, canUseBiometricUnlock=${mukEscrowManager.canUseBiometricUnlock()}, escrowUserId=${mukEscrowManager.getEscrowUserId()}")
 
         setupBiometricPrompt()
 
@@ -228,13 +229,16 @@ class GetCredentialsActivity : FragmentActivity() {
                 val muk = VaultStateManager.getMasterUnlockKey(item.userId)
                 if (muk == null) {
                     Log.w(TAG, "MUK not available for user ${item.userId}, need to unlock first")
+                    VaultStateManager.dumpDebugState("handleGetItemCredential MUK=null")
                     val escrowUserId = mukEscrowManager.getEscrowUserId()
-                    if (mukEscrowManager.hasValidEscrow() &&
-                        (escrowUserId == null || escrowUserId == item.userId)
-                    ) {
+                    val hasEscrow = mukEscrowManager.hasValidEscrow()
+                    val canBiometric = mukEscrowManager.canUseBiometricUnlock()
+                    Log.d(TAG, "Escrow state: hasValidEscrow=$hasEscrow, canBiometricUnlock=$canBiometric, escrowUserId=$escrowUserId, itemUserId=${item.userId}")
+                    if (hasEscrow && (escrowUserId == null || escrowUserId == item.userId)) {
+                        Log.d(TAG, "Attempting escrow unlock for item $iId")
                         handleUnlockWithEscrow(iId, escrowUserId ?: item.userId)
                     } else {
-                        Log.w(TAG, "No valid escrow for user, launching app for password unlock")
+                        Log.w(TAG, "No valid escrow for user (hasEscrow=$hasEscrow, escrowUserId=$escrowUserId vs itemUserId=${item.userId}), launching app for password unlock")
                         launchAppForPasswordUnlock(passwordRequired = false)
                     }
                     return@launch
@@ -272,7 +276,8 @@ class GetCredentialsActivity : FragmentActivity() {
 
                 val muk = VaultStateManager.getMasterUnlockKey(item.userId)
                 if (muk == null) {
-                    Log.w(TAG, "MUK not available for passkey get, launching app unlock flow")
+                    Log.w(TAG, "MUK not available for passkey get (userId=${item.userId})")
+                    VaultStateManager.dumpDebugState("handleGetPasskeyCredential MUK=null")
                     launchAppForPasswordUnlock(passwordRequired = false)
                     return@launch
                 }
@@ -424,7 +429,8 @@ class GetCredentialsActivity : FragmentActivity() {
                                     try {
                                         val muk = mukEscrowManager.retrieveEscrowedMuk(authenticatedCipher)
                                         VaultStateManager.setMasterUnlockKey(userId, muk)
-                                        Log.d(TAG, "Successfully retrieved escrowed MUK")
+                                        Log.d(TAG, "Successfully retrieved escrowed MUK for userId=$userId")
+                                        VaultStateManager.dumpDebugState("AFTER escrow unlock")
 
                                         // If we have a pending item, complete the retrieval
                                         if (pendingItemId != null) {
@@ -472,20 +478,31 @@ class GetCredentialsActivity : FragmentActivity() {
      * Handle unlock request (no specific credential, just unlock the vault).
      */
     private fun handleUnlock() {
+        Log.d(TAG, "handleUnlock: Starting unlock flow")
+        VaultStateManager.dumpDebugState("handleUnlock")
+
         // Check 30-day master password requirement
-        if (mukEscrowManager.isMasterPasswordReentryRequired()) {
+        val masterPwRequired = mukEscrowManager.isMasterPasswordReentryRequired()
+        Log.d(TAG, "handleUnlock: masterPasswordReentryRequired=$masterPwRequired")
+        if (masterPwRequired) {
             Log.d(TAG, "30-day master password re-entry required")
             launchAppForPasswordUnlock(passwordRequired = true)
             return
         }
 
         // Check if we can use escrowed MUK
-        if (mukEscrowManager.canUseBiometricUnlock()) {
-            val escrowUserId = mukEscrowManager.getEscrowUserId() ?: "default"
-            handleUnlockWithEscrow(null, escrowUserId)
+        val canBiometric = mukEscrowManager.canUseBiometricUnlock()
+        val hasEscrow = mukEscrowManager.hasValidEscrow()
+        val escrowUserId = mukEscrowManager.getEscrowUserId()
+        Log.d(TAG, "handleUnlock: canBiometricUnlock=$canBiometric, hasValidEscrow=$hasEscrow, escrowUserId=$escrowUserId")
+
+        if (canBiometric) {
+            val userId = escrowUserId ?: "default"
+            Log.d(TAG, "handleUnlock: Using escrow unlock for userId=$userId")
+            handleUnlockWithEscrow(null, userId)
         } else {
             // Need to launch main app for full unlock
-            Log.w(TAG, "No valid escrow, need full password unlock")
+            Log.w(TAG, "handleUnlock: No valid escrow (hasEscrow=$hasEscrow, canBiometric=$canBiometric), need full password unlock")
             launchAppForPasswordUnlock(passwordRequired = false)
         }
     }

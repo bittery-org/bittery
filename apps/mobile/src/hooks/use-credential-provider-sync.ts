@@ -166,14 +166,22 @@ export function useCredentialProviderSync(
 
 		try {
 			const unlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
-			if (unlockedEmails.length === 0) return;
+			console.log("[CredentialProviderSync] ensureNativeMukSet: unlockedEmails=", unlockedEmails);
+			if (unlockedEmails.length === 0) {
+				console.warn("[CredentialProviderSync] ensureNativeMukSet: No unlocked accounts found in RN storage!");
+				return;
+			}
 
 			for (const email of unlockedEmails) {
 				const muk = await storage.getMasterUnlockKey(email);
 				const sessionData = await storage.getStoredSessionData(email);
+				console.log(`[CredentialProviderSync] ensureNativeMukSet: email=${email}, hasMuk=${!!muk}, hasSessionData=${!!sessionData}, userId=${sessionData?.userId ?? "null"}`);
 				if (muk && sessionData?.userId) {
 					const mukBase64 = arrayBufferToBase64(muk);
 					CredentialProvider.setMasterUnlockKey(mukBase64, sessionData.userId);
+					console.log(`[CredentialProviderSync] ensureNativeMukSet: Set native MUK for userId=${sessionData.userId}`);
+				} else {
+					console.warn(`[CredentialProviderSync] ensureNativeMukSet: SKIPPING email=${email} (muk=${!!muk}, userId=${sessionData?.userId ?? "null"})`);
 				}
 			}
 

@@ -141,8 +141,11 @@ class CredentialProviderModule : Module() {
         Function("setMasterUnlockKey") { mukBase64: String, userId: String? ->
             try {
                 val resolvedUserId = userId?.takeIf { it.isNotBlank() } ?: "default"
+                Log.d(TAG, "setMasterUnlockKey: CALLED from RN bridge (userId='$resolvedUserId', mukBase64Length=${mukBase64.length}, pid=${android.os.Process.myPid()})")
                 VaultStateManager.setMasterUnlockKeyFromBase64(mukBase64, resolvedUserId)
-                Log.d(TAG, "setMasterUnlockKey: MUK set successfully")
+                Log.d(TAG, "setMasterUnlockKey: MUK set successfully, verifying...")
+                val verifyUnlocked = VaultStateManager.isUnlocked(resolvedUserId)
+                Log.d(TAG, "setMasterUnlockKey: Verification isUnlocked($resolvedUserId)=$verifyUnlocked")
                 sendEvent("onVaultUnlocked", mapOf("success" to true))
                 true
             } catch (e: Exception) {
@@ -155,19 +158,23 @@ class CredentialProviderModule : Module() {
          * Clear the Master Unlock Key (on logout or auto-lock).
          */
         Function("clearMasterUnlockKey") { userId: String? ->
+            Log.w(TAG, "clearMasterUnlockKey: CALLED from RN bridge (userId='$userId', pid=${android.os.Process.myPid()})")
+            VaultStateManager.dumpDebugState("BEFORE clearMasterUnlockKey")
             if (userId.isNullOrBlank()) {
                 VaultStateManager.clearAllMasterUnlockKeys()
             } else {
                 VaultStateManager.clearMasterUnlockKey(userId)
             }
-            Log.d(TAG, "clearMasterUnlockKey: MUK cleared")
+            VaultStateManager.dumpDebugState("AFTER clearMasterUnlockKey")
             sendEvent("onVaultLocked", mapOf("success" to true))
             true
         }
 
         Function("clearAllMasterUnlockKeys") {
+            Log.w(TAG, "clearAllMasterUnlockKeys: CALLED from RN bridge (pid=${android.os.Process.myPid()})")
+            VaultStateManager.dumpDebugState("BEFORE clearAllMasterUnlockKeys")
             VaultStateManager.clearAllMasterUnlockKeys()
-            Log.d(TAG, "clearAllMasterUnlockKeys: MUKs cleared")
+            VaultStateManager.dumpDebugState("AFTER clearAllMasterUnlockKeys")
             sendEvent("onVaultLocked", mapOf("success" to true))
             true
         }
@@ -176,12 +183,15 @@ class CredentialProviderModule : Module() {
          * Check if the vault is currently unlocked (MUK available).
          */
         Function("isVaultUnlocked") { userId: String? ->
+            Log.d(TAG, "isVaultUnlocked: CALLED from RN bridge (userId='$userId', pid=${android.os.Process.myPid()})")
             val unlocked = if (userId.isNullOrBlank()) {
                 VaultStateManager.isUnlocked()
             } else {
                 VaultStateManager.isUnlocked(userId)
             }
-            Log.d(TAG, "isVaultUnlocked: $unlocked")
+            if (!unlocked) {
+                VaultStateManager.dumpDebugState("isVaultUnlocked=FALSE")
+            }
             unlocked
         }
 

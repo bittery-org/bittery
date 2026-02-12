@@ -99,7 +99,7 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         val rawOrigin = try {
             request.callingAppInfo?.getOrigin(allowlistJson)
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to get origin", e)
+            Log.w(TAG, "Failed to get origin (caller may not be in allowlist): ${e::class.simpleName}: ${e.message}")
             null
         }
         val callingOrigin = resolveCallingOrigin(rawOrigin, request.callingAppInfo?.packageName)
@@ -107,7 +107,10 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         Log.d(TAG, "CallingAppInfo.origin(resolved): $callingOrigin")
         Log.d(TAG, "CallingAppInfo.packageName: ${request.callingAppInfo?.packageName}")
         Log.d(TAG, "Options count: ${request.beginGetCredentialOptions.size}")
-        Log.d(TAG, "VaultStateManager.isUnlocked: ${VaultStateManager.isUnlocked()}")
+        val optionTypes = request.beginGetCredentialOptions.map { it::class.simpleName }
+        Log.d(TAG, "Option types: $optionTypes")
+        // Full debug dump to diagnose MUK state at the moment the service is invoked
+        VaultStateManager.dumpDebugState("onBeginGetCredentialRequest")
         Log.d(TAG, "========================================")
 
         serviceScope.launch {
@@ -137,19 +140,24 @@ class BitteryCredentialProviderService : CredentialProviderService() {
                         // Query credentials matching the origin/domain
                         val domain = extractDomain(origin)
                         val parentDomain = extractParentDomain(domain)
-                        Log.d(TAG, "Extracted domain: $domain, parent: $parentDomain")
+                        val isValidWebDomain = isLikelyWebDomain(domain)
+                        Log.d(TAG, "Extracted domain: $domain, parent: $parentDomain, isValidWebDomain: $isValidWebDomain")
 
                         // Only return credentials if vault is unlocked
                         // Decryption happens in GetCredentialsActivity using MUK
                         if (isVaultUnlocked) {
                             val items = mutableListOf<ItemEntity>()
                             for (userId in unlockedUserIds) {
-                                val userItems = if (domain.isNotEmpty() && parentDomain.isNotEmpty()) {
+                                val userItems = if (isValidWebDomain && domain.isNotEmpty() && parentDomain.isNotEmpty()) {
                                     database.itemDao().getLoginItemsByDomainWithFallback(domain, parentDomain, userId)
-                                } else if (domain.isNotEmpty()) {
+                                } else if (isValidWebDomain && domain.isNotEmpty()) {
                                     database.itemDao().getLoginItemsByDomain(domain, userId)
                                 } else {
-                                    emptyList()
+                                    // Origin resolution failed (e.g., browser not in allowlist,
+                                    // native app, or signing cert mismatch). Fall back to returning
+                                    // all login credentials so the user can pick the right one.
+                                    Log.d(TAG, "Domain '$domain' is not a valid web domain, returning all login items for user $userId")
+                                    database.itemDao().getLoginItemsByUserId(userId)
                                 }
                                 items.addAll(userItems)
                             }
@@ -305,15 +313,24 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         option: BeginGetPasswordOption
     ): PasswordCredentialEntry {
         val pendingIntent = createGetPendingIntentForItem(item.id)
+        val username = item.username?.takeIf { it.isNotBlank() }
+            ?: item.displayTitle.takeIf { it.isNotBlank() }
+            ?: item.primaryDomain
+            ?: "Login"
+        val lastUsed = if (item.lastUsedAt > 0) {
+            Instant.ofEpochMilli(item.lastUsedAt)
+        } else {
+            Instant.ofEpochMilli(item.updatedAt)
+        }
 
         return PasswordCredentialEntry.Builder(
             applicationContext,
-            item.username ?: "",
+            username,
             pendingIntent,
             option
         )
-            .setDisplayName(item.displayTitle)
-            .setLastUsedTime(Instant.ofEpochMilli(item.lastUsedAt))
+            .setDisplayName(item.displayTitle.ifBlank { item.primaryDomain ?: "Login" })
+            .setLastUsedTime(lastUsed)
             .build()
     }
 
@@ -674,6 +691,29 @@ class BitteryCredentialProviderService : CredentialProviderService() {
             Log.w(TAG, "Failed to load allowlist JSON", e)
             "[]"
         }
+    }
+
+    /**
+     * Check if a domain looks like a valid web domain rather than an Android package name
+     * or other non-web identifier.
+     * e.g., "github.com" -> true, "com.android.chrome" -> false, "" -> false
+     */
+    private fun isLikelyWebDomain(domain: String): Boolean {
+        if (domain.isBlank()) return false
+        // Web domains have a TLD as the last segment (e.g., .com, .org, .io)
+        // Package names have a TLD as the first segment (e.g., com.android.chrome)
+        // Simple heuristic: if it contains a dot and the last segment looks like a TLD
+        val parts = domain.split(".")
+        if (parts.size < 2) return false
+        val lastPart = parts.last()
+        // Common TLDs are short (2-6 chars). Package name last segments are longer app names.
+        // Also check that first segment isn't a well-known TLD prefix (com, org, net, etc.)
+        val tldPrefixes = setOf("com", "org", "net", "io", "edu", "gov", "mil", "int")
+        if (tldPrefixes.contains(parts.first().lowercase()) && parts.size > 2) {
+            // Looks like a reversed-domain package name (com.android.chrome)
+            return false
+        }
+        return lastPart.length in 2..6
     }
 
     /**

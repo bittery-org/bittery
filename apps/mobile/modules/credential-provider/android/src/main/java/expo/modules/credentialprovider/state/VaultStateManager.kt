@@ -1,6 +1,8 @@
 package expo.modules.credentialprovider.state
 
+import android.os.Process
 import android.util.Base64
+import android.util.Log
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
@@ -18,6 +20,8 @@ import kotlin.concurrent.write
  * vault items on demand.
  */
 object VaultStateManager {
+
+    private const val TAG = "VaultStateManager"
 
     /**
      * Default user ID key for legacy single-account callers.
@@ -37,10 +41,66 @@ object VaultStateManager {
     private var mukSetTimestamps: MutableMap<String, Long> = mutableMapOf()
 
     /**
+     * Timestamp when each MUK was last cleared (per user), for debugging.
+     */
+    @Volatile
+    private var mukClearTimestamps: MutableMap<String, Long> = mutableMapOf()
+
+    /**
+     * Tracks the source/caller of the last set/clear for debugging.
+     */
+    @Volatile
+    private var lastSetCallers: MutableMap<String, String> = mutableMapOf()
+
+    @Volatile
+    private var lastClearCaller: String = ""
+
+    /**
+     * Singleton instance creation time, to detect process restarts.
+     */
+    private val instanceCreatedAt: Long = System.currentTimeMillis()
+    private val instancePid: Int = Process.myPid()
+
+    init {
+        Log.d(TAG, "=== VaultStateManager SINGLETON CREATED === pid=$instancePid, time=$instanceCreatedAt")
+    }
+
+    /**
      * Read-write lock for thread-safe access to the MUK.
      * Allows multiple concurrent reads but exclusive writes.
      */
     private val lock = ReentrantReadWriteLock()
+
+    /**
+     * Get a short caller description from the stack trace for debugging.
+     */
+    private fun getCallerInfo(): String {
+        val stack = Thread.currentThread().stackTrace
+        // Skip getCallerInfo, the VaultStateManager method, and dalvik frames
+        val caller = stack.drop(3).firstOrNull { frame ->
+            !frame.className.contains("VaultStateManager") &&
+                !frame.className.startsWith("dalvik.") &&
+                !frame.className.startsWith("java.lang.Thread")
+        }
+        return if (caller != null) {
+            "${caller.className.substringAfterLast('.')}#${caller.methodName}:${caller.lineNumber}"
+        } else {
+            "unknown"
+        }
+    }
+
+    /**
+     * Log a debug summary of current state.
+     */
+    private fun logState(operation: String) {
+        val userIds = masterUnlockKeys.keys.toList()
+        val ages = mukSetTimestamps.entries.associate { (userId, ts) ->
+            userId to "${(System.currentTimeMillis() - ts) / 1000}s ago"
+        }
+        Log.d(TAG, "[$operation] pid=$instancePid, instanceAge=${(System.currentTimeMillis() - instanceCreatedAt) / 1000}s, " +
+            "unlockedUsers=$userIds, mukAges=$ages, thread=${Thread.currentThread().name}"
+        )
+    }
 
     /**
      * Set the Master Unlock Key.
@@ -56,11 +116,16 @@ object VaultStateManager {
      * Set the Master Unlock Key for a specific user.
      */
     fun setMasterUnlockKey(userId: String, muk: ByteArray) {
+        val caller = getCallerInfo()
         lock.write {
             val normalizedUserId = userId.ifBlank { DEFAULT_USER_ID }
+            val wasAlreadySet = masterUnlockKeys.containsKey(normalizedUserId)
             masterUnlockKeys[normalizedUserId]?.fill(0)
             masterUnlockKeys[normalizedUserId] = muk.copyOf()
             mukSetTimestamps[normalizedUserId] = System.currentTimeMillis()
+            lastSetCallers[normalizedUserId] = caller
+            Log.d(TAG, ">>> SET MUK for userId='$normalizedUserId' (wasAlreadySet=$wasAlreadySet, mukSize=${muk.size}, caller=$caller)")
+            logState("SET")
         }
     }
 
@@ -76,8 +141,10 @@ object VaultStateManager {
     }
 
     fun setMasterUnlockKeyFromBase64(mukBase64: String, userId: String) {
+        Log.d(TAG, "setMasterUnlockKeyFromBase64: userId='$userId', base64Length=${mukBase64.length}, caller=${getCallerInfo()}")
         val muk = Base64.decode(mukBase64, Base64.NO_WRAP)
         if (muk.size != 32) {
+            Log.e(TAG, "setMasterUnlockKeyFromBase64: INVALID MUK SIZE ${muk.size} bytes (expected 32)")
             throw IllegalArgumentException("Master Unlock Key must be 32 bytes, got ${muk.size}")
         }
         setMasterUnlockKey(userId, muk)
@@ -94,9 +161,22 @@ object VaultStateManager {
     }
 
     fun getMasterUnlockKey(userId: String): ByteArray? {
+        val caller = getCallerInfo()
         return lock.read {
             val normalizedUserId = userId.ifBlank { DEFAULT_USER_ID }
-            masterUnlockKeys[normalizedUserId]?.copyOf()
+            val muk = masterUnlockKeys[normalizedUserId]?.copyOf()
+            val setTimestamp = mukSetTimestamps[normalizedUserId]
+            val clearTimestamp = mukClearTimestamps[normalizedUserId]
+            val lastSetBy = lastSetCallers[normalizedUserId]
+            if (muk != null) {
+                Log.d(TAG, "<<< GET MUK for userId='$normalizedUserId': FOUND (setAge=${setTimestamp?.let { "${(System.currentTimeMillis() - it) / 1000}s" } ?: "?"}, setBy=$lastSetBy, caller=$caller)")
+            } else {
+                Log.w(TAG, "<<< GET MUK for userId='$normalizedUserId': NOT FOUND! " +
+                    "(lastClearedAge=${clearTimestamp?.let { "${(System.currentTimeMillis() - it) / 1000}s ago" } ?: "never"}, " +
+                    "lastClearedBy='$lastClearCaller', allUnlockedUsers=${masterUnlockKeys.keys.toList()}, " +
+                    "pid=$instancePid, instanceAge=${(System.currentTimeMillis() - instanceCreatedAt) / 1000}s, caller=$caller)")
+            }
+            muk
         }
     }
 
@@ -128,21 +208,40 @@ object VaultStateManager {
     }
 
     fun clearMasterUnlockKey(userId: String) {
+        val caller = getCallerInfo()
         lock.write {
             val normalizedUserId = userId.ifBlank { DEFAULT_USER_ID }
+            val wasSet = masterUnlockKeys.containsKey(normalizedUserId)
+            val setAge = mukSetTimestamps[normalizedUserId]?.let { "${(System.currentTimeMillis() - it) / 1000}s" } ?: "n/a"
             masterUnlockKeys[normalizedUserId]?.fill(0)
             masterUnlockKeys.remove(normalizedUserId)
             mukSetTimestamps.remove(normalizedUserId)
+            mukClearTimestamps[normalizedUserId] = System.currentTimeMillis()
+            lastClearCaller = caller
+            Log.w(TAG, "!!! CLEAR MUK for userId='$normalizedUserId' (wasSet=$wasSet, mukAge=$setAge, caller=$caller)")
+            logState("CLEAR")
         }
     }
 
     fun clearAllMasterUnlockKeys() {
+        val caller = getCallerInfo()
         lock.write {
+            val clearedUsers = masterUnlockKeys.keys.toList()
+            val ages = mukSetTimestamps.entries.associate { (userId, ts) ->
+                userId to "${(System.currentTimeMillis() - ts) / 1000}s"
+            }
             for ((_, key) in masterUnlockKeys) {
                 key.fill(0)
             }
+            val now = System.currentTimeMillis()
+            for (userId in clearedUsers) {
+                mukClearTimestamps[userId] = now
+            }
             masterUnlockKeys.clear()
             mukSetTimestamps.clear()
+            lastClearCaller = caller
+            Log.w(TAG, "!!! CLEAR ALL MUKs (clearedUsers=$clearedUsers, mukAges=$ages, caller=$caller)")
+            logState("CLEAR_ALL")
         }
     }
 
@@ -153,20 +252,33 @@ object VaultStateManager {
      */
     fun isUnlocked(): Boolean {
         return lock.read {
-            masterUnlockKeys.isNotEmpty()
+            val result = masterUnlockKeys.isNotEmpty()
+            val caller = getCallerInfo()
+            Log.d(TAG, "isUnlocked(): $result (users=${masterUnlockKeys.keys.toList()}, pid=$instancePid, caller=$caller)")
+            result
         }
     }
 
     fun isUnlocked(userId: String): Boolean {
         return lock.read {
             val normalizedUserId = userId.ifBlank { DEFAULT_USER_ID }
-            masterUnlockKeys.containsKey(normalizedUserId)
+            val result = masterUnlockKeys.containsKey(normalizedUserId)
+            val caller = getCallerInfo()
+            if (!result) {
+                val clearAge = mukClearTimestamps[normalizedUserId]?.let { "${(System.currentTimeMillis() - it) / 1000}s ago" } ?: "never"
+                Log.d(TAG, "isUnlocked(userId='$normalizedUserId'): FALSE (lastCleared=$clearAge, lastClearedBy='$lastClearCaller', allUsers=${masterUnlockKeys.keys.toList()}, caller=$caller)")
+            } else {
+                Log.d(TAG, "isUnlocked(userId='$normalizedUserId'): TRUE (caller=$caller)")
+            }
+            result
         }
     }
 
     fun getUnlockedUserIds(): List<String> {
         return lock.read {
-            masterUnlockKeys.keys.toList()
+            val result = masterUnlockKeys.keys.toList()
+            Log.d(TAG, "getUnlockedUserIds(): $result (pid=$instancePid, instanceAge=${(System.currentTimeMillis() - instanceCreatedAt) / 1000}s)")
+            result
         }
     }
 
@@ -202,7 +314,36 @@ object VaultStateManager {
             val normalizedUserId = userId.ifBlank { DEFAULT_USER_ID }
             val timestamp = mukSetTimestamps[normalizedUserId] ?: return@read false
             val age = System.currentTimeMillis() - timestamp
-            age < maxAgeMs
+            val fresh = age < maxAgeMs
+            Log.d(TAG, "isMukFresh(userId='$normalizedUserId', maxAge=${maxAgeMs}ms): $fresh (age=${age}ms)")
+            fresh
+        }
+    }
+
+    /**
+     * Dump full debug state for diagnostics. Call from anywhere to get a snapshot.
+     */
+    fun dumpDebugState(label: String = "DUMP") {
+        lock.read {
+            Log.d(TAG, "========== VaultStateManager DEBUG DUMP ($label) ==========")
+            Log.d(TAG, "  PID: $instancePid")
+            Log.d(TAG, "  Instance created: $instanceCreatedAt (${(System.currentTimeMillis() - instanceCreatedAt) / 1000}s ago)")
+            Log.d(TAG, "  Unlocked users: ${masterUnlockKeys.keys.toList()}")
+            for ((userId, ts) in mukSetTimestamps) {
+                val age = (System.currentTimeMillis() - ts) / 1000
+                val setBy = lastSetCallers[userId] ?: "unknown"
+                Log.d(TAG, "  MUK[$userId]: set ${age}s ago by $setBy")
+            }
+            for ((userId, ts) in mukClearTimestamps) {
+                val age = (System.currentTimeMillis() - ts) / 1000
+                if (!masterUnlockKeys.containsKey(userId)) {
+                    Log.d(TAG, "  MUK[$userId]: CLEARED ${age}s ago by '$lastClearCaller'")
+                }
+            }
+            if (masterUnlockKeys.isEmpty()) {
+                Log.d(TAG, "  >>> ALL MUKs EMPTY - vault is LOCKED <<<")
+            }
+            Log.d(TAG, "========== END DEBUG DUMP ==========")
         }
     }
 }
