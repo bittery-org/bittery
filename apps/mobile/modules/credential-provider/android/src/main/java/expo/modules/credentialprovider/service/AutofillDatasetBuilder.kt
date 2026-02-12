@@ -248,14 +248,7 @@ class AutofillDatasetBuilder(
             return null
         }
 
-        // Create app icon for the inline suggestion
-        val appIcon = android.graphics.drawable.Icon.createWithResource(
-            context,
-            context.applicationInfo.icon
-        )
-
         val contentBuilder = InlineSuggestionUi.newContentBuilder(attributionIntent)
-            .setStartIcon(appIcon)
             .setTitle(title)
 
         if (!subtitle.isNullOrBlank()) {
@@ -304,14 +297,8 @@ class AutofillDatasetBuilder(
             setTextViewText(android.R.id.text1, "Open Bittery")
         }
 
-        val appIcon = android.graphics.drawable.Icon.createWithResource(
-            context,
-            context.applicationInfo.icon
-        )
-
         val inlinePresentation = InlinePresentation(
             InlineSuggestionUi.newContentBuilder(attributionIntent)
-                .setStartIcon(appIcon)
                 .setTitle("Open Bittery")
                 .setContentDescription("Open Bittery app")
                 .build()
