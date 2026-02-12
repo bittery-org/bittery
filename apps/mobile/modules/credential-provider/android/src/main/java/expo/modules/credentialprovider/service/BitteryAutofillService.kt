@@ -17,6 +17,7 @@ import android.util.Pair
 import android.view.View
 import android.view.autofill.AutofillId
 import androidx.annotation.RequiresApi
+import androidx.autofill.inline.UiVersions
 import expo.modules.credentialprovider.activity.AutofillAuthActivity
 import expo.modules.credentialprovider.state.VaultStateManager
 import expo.modules.credentialprovider.storage.CredentialDatabase
@@ -115,7 +116,24 @@ class BitteryAutofillService : AutofillService() {
                     Log.w(TAG, "  → Check: Gboard settings → Text correction → Show suggestions")
                 }
 
-                val inlineSpec = inlineRequest?.inlinePresentationSpecs?.firstOrNull()
+                val inlineSpec = inlineRequest?.inlinePresentationSpecs?.firstOrNull { spec ->
+                    val versions = UiVersions.getVersions(spec.style)
+                    versions.contains(UiVersions.INLINE_UI_VERSION_1)
+                }
+                if (inlineRequest != null && inlineSpec == null) {
+                    val availableVersions = inlineRequest.inlinePresentationSpecs.map { spec ->
+                        UiVersions.getVersions(spec.style)
+                    }
+                    Log.w(TAG, "Inline suggestions requested but no v1-compatible spec found: $availableVersions")
+                }
+                val inlineMaxSuggestionCount = if (inlineRequest != null && inlineSpec != null) {
+                    inlineRequest.maxSuggestionCount.coerceAtLeast(0)
+                } else {
+                    null
+                }
+                if (inlineMaxSuggestionCount != null) {
+                    Log.d(TAG, "Using inline maxSuggestionCount=$inlineMaxSuggestionCount")
+                }
                 val attributionIntent = createAttributionIntent().also { lastAttributionIntent = it }
 
                 val unlockedUserIds = VaultStateManager.getUnlockedUserIds()
@@ -136,6 +154,12 @@ class BitteryAutofillService : AutofillService() {
                     if (datasets.size >= MAX_DATASETS) break
                 }
 
+                if (inlineMaxSuggestionCount != null && datasets.size > inlineMaxSuggestionCount) {
+                    val originalSize = datasets.size
+                    datasets.subList(inlineMaxSuggestionCount, datasets.size).clear()
+                    Log.d(TAG, "Trimmed datasets from $originalSize to ${datasets.size} to respect IME inline max")
+                }
+
                 Log.d(TAG, "Built ${datasets.size} datasets")
 
                 if (datasets.isNotEmpty()) {
@@ -143,7 +167,7 @@ class BitteryAutofillService : AutofillService() {
                     datasets.forEach { responseBuilder.addDataset(it) }
 
                     // Add "Open Bittery" action at the end of inline suggestions (only for inline)
-                    if (inlineSpec != null) {
+                    if (inlineSpec != null && (inlineMaxSuggestionCount == null || datasets.size < inlineMaxSuggestionCount)) {
                         datasetBuilder.buildOpenAppDataset(
                             fieldIds = AutofillDatasetBuilder.FieldIds(fieldIds.usernameId, fieldIds.passwordId),
                             inlineSpec = inlineSpec,
@@ -152,6 +176,8 @@ class BitteryAutofillService : AutofillService() {
                             responseBuilder.addDataset(it)
                             Log.d(TAG, "Added 'Open Bittery' inline dataset")
                         }
+                    } else if (inlineSpec != null) {
+                        Log.d(TAG, "Skipping 'Open Bittery' inline dataset to respect IME max suggestions")
                     }
 
                     callback.onSuccess(responseBuilder.build())

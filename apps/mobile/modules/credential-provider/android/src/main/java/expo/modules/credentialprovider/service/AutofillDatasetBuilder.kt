@@ -24,6 +24,11 @@ class AutofillDatasetBuilder(
     private val database: CredentialDatabase,
     private val storageManager: CredentialStorageManager
 ) {
+    private data class PresentationContent(
+        val title: String,
+        val subtitle: String?
+    )
+
     data class FieldIds(
         val usernameId: AutofillId?,
         val passwordId: AutofillId?
@@ -170,15 +175,23 @@ class AutofillDatasetBuilder(
     ): Dataset? {
         if (!fieldIds.hasAny()) return null
 
-        Log.d(BitteryAutofillService.TAG, "Building dataset '$label': will fill username=${fieldIds.usernameId != null}, password=${fieldIds.passwordId != null}")
+        val presentationContent = buildPresentationContent(label = label, username = username)
+        Log.d(
+            BitteryAutofillService.TAG,
+            "Building dataset title='${presentationContent.title}', subtitle='${presentationContent.subtitle ?: ""}': " +
+                "will fill username=${fieldIds.usernameId != null}, password=${fieldIds.passwordId != null}"
+        )
 
-        val presentation = RemoteViews(context.packageName, android.R.layout.simple_list_item_1).apply {
-            setTextViewText(android.R.id.text1, label)
-        }
+        val presentation = createMenuPresentation(presentationContent)
 
         val builder = Dataset.Builder(presentation)
         val inlinePresentation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && inlineSpec != null && attributionIntent != null) {
-            createInlinePresentation(inlineSpec, label, username, attributionIntent)
+            createInlinePresentation(
+                spec = inlineSpec,
+                title = presentationContent.title,
+                subtitle = presentationContent.subtitle,
+                attributionIntent = attributionIntent
+            )
         } else {
             null
         }
@@ -198,10 +211,35 @@ class AutofillDatasetBuilder(
         return builder.build()
     }
 
+    private fun buildPresentationContent(label: String, username: String): PresentationContent {
+        val normalizedUsername = username.trim()
+        val normalizedLabel = label.trim()
+        val title = normalizedUsername.ifBlank {
+            normalizedLabel.ifBlank { "Login" }
+        }
+        val subtitle = normalizedLabel.takeIf {
+            it.isNotBlank() && !it.equals(title, ignoreCase = true)
+        }
+        return PresentationContent(title = title, subtitle = subtitle)
+    }
+
+    private fun createMenuPresentation(content: PresentationContent): RemoteViews {
+        return if (content.subtitle != null) {
+            RemoteViews(context.packageName, android.R.layout.simple_list_item_2).apply {
+                setTextViewText(android.R.id.text1, content.title)
+                setTextViewText(android.R.id.text2, content.subtitle)
+            }
+        } else {
+            RemoteViews(context.packageName, android.R.layout.simple_list_item_1).apply {
+                setTextViewText(android.R.id.text1, content.title)
+            }
+        }
+    }
+
     private fun createInlinePresentation(
         spec: InlinePresentationSpec,
-        label: String,
-        subtitle: String,
+        title: String,
+        subtitle: String?,
         attributionIntent: PendingIntent
     ): InlinePresentation? {
         val versions = UiVersions.getVersions(spec.style)
@@ -216,15 +254,20 @@ class AutofillDatasetBuilder(
             context.applicationInfo.icon
         )
 
-        val slice = InlineSuggestionUi.newContentBuilder(attributionIntent)
+        val contentBuilder = InlineSuggestionUi.newContentBuilder(attributionIntent)
             .setStartIcon(appIcon)
-            .setTitle(label)
-            .setSubtitle(subtitle)
-            .setContentDescription("$label - $subtitle")
-            .build()
-            .slice
+            .setTitle(title)
 
-        Log.d(BitteryAutofillService.TAG, "Created inline presentation for: $label ($subtitle)")
+        if (!subtitle.isNullOrBlank()) {
+            contentBuilder.setSubtitle(subtitle)
+            contentBuilder.setContentDescription("$title - $subtitle")
+        } else {
+            contentBuilder.setContentDescription(title)
+        }
+
+        val slice = contentBuilder.build().slice
+
+        Log.d(BitteryAutofillService.TAG, "Created inline presentation for: $title (${subtitle ?: "no subtitle"})")
         return InlinePresentation(slice, spec, false)
     }
 
