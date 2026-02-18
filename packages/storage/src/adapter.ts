@@ -423,8 +423,8 @@ export interface IStorageAdapter {
 	// ============================================================================
 
 	/**
-	 * Check if master password re-entry is required (30-day security policy).
-	 * Mobile-specific security feature.
+	 * Check if master password re-entry is required by security policy.
+	 * Platform-specific security feature.
 	 */
 	isMasterPasswordReentryRequired?(email?: string): Promise<boolean>;
 

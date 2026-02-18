@@ -69,11 +69,11 @@ export interface AccountSwitcherProps {
 	/** Optional: callback when user selects "All Accounts" */
 	onAllAccountsSelect?: () => void;
 
-	/** Optional: show "Account Settings" option */
-	showAccountSettings?: boolean;
+	/** Optional: show "Settings" option */
+	showSettings?: boolean;
 
-	/** Optional: callback when user clicks "Account Settings" */
-	onAccountSettings?: (email: string) => void;
+	/** Optional: callback when user clicks "Settings" */
+	onSettings?: () => void;
 
 	/** Optional: show "Remove Account" option */
 	showRemoveAccount?: boolean;
@@ -113,8 +113,8 @@ export function AccountSwitcher({
 	onLockAll,
 	showAllAccountsOption = false,
 	onAllAccountsSelect,
-	showAccountSettings = false,
-	onAccountSettings,
+	showSettings = false,
+	onSettings,
 	showRemoveAccount = false,
 	onRemoveAccount,
 	trigger,
@@ -282,14 +282,14 @@ export function AccountSwitcher({
 					<span className="text-sm">Add Account</span>
 				</DropdownMenuItem>
 
-				{/* Account Settings (optional) */}
-				{showAccountSettings && onAccountSettings && activeAccount && (
+				{/* Settings (optional) */}
+				{showSettings && onSettings && (
 					<DropdownMenuItem
-						onClick={() => onAccountSettings(activeAccount.email)}
+						onClick={onSettings}
 						className="flex cursor-pointer items-center gap-2"
 					>
 						<SettingsIcon className="size-4" />
-						<span className="text-sm">Account Settings</span>
+						<span className="text-sm">Settings</span>
 					</DropdownMenuItem>
 				)}
 

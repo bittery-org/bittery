@@ -35,6 +35,9 @@ const DEVICE_KEY_KEYCHAIN_KEY = "device_key"; // Stored in OS keychain
 const DEVICE_KEY_STORAGE_LEGACY = "bittery_device_key"; // Legacy: Tauri Store (for migration)
 const ACTIVE_ACCOUNT_KEY = "bittery_active_account";
 const ACCOUNTS_LIST_KEY = "bittery_accounts_list";
+const AUTO_LOCK_TIMEOUT_KEY = "bittery_auto_lock_timeout";
+const MASTER_PASSWORD_REENTRY_PERIOD_KEY =
+	"bittery_master_password_reentry_period_ms";
 const LEGACY_SERVER_URL_STORAGE = "bittery_server_url"; // Legacy, now account-scoped
 
 // Helper to generate namespaced keys for each account
@@ -659,7 +662,6 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		await store.delete(getAccountKey(resolvedEmail, "last_biometric_auth"));
 		await store.delete(getAccountKey(resolvedEmail, "server_url"));
 		await store.delete(getAccountKey(resolvedEmail, "encrypted_private_key"));
-		await store.delete(getAccountKey(resolvedEmail, "auto_lock_timeout"));
 		await store.delete(getAccountKey(resolvedEmail, "cached_items"));
 		await store.delete(getAccountKey(resolvedEmail, "cached_vaults"));
 		await store.delete(getAccountKey(resolvedEmail, "item_cache_meta"));
@@ -680,29 +682,103 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	// Settings
 	// ============================================================================
 
-	async storeAutoLockTimeout(timeoutMs: number, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
-
+	async storeAutoLockTimeout(
+		timeoutMs: number,
+		_email?: string,
+	): Promise<void> {
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "auto_lock_timeout");
-		await store.set(key, timeoutMs);
+		await store.set(AUTO_LOCK_TIMEOUT_KEY, timeoutMs);
+		await this.clearLegacyAutoLockTimeoutKeys();
 		await store.save();
 	}
 
 	async getAutoLockTimeout(email?: string): Promise<number | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
-
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "auto_lock_timeout");
-		return (await store.get<number>(key)) ?? null;
+		const globalTimeout = await store.get<number>(AUTO_LOCK_TIMEOUT_KEY);
+		if (typeof globalTimeout === "number") {
+			return globalTimeout;
+		}
+
+		// Legacy migration: account-scoped timeout -> app-scoped timeout.
+		const legacyTimeout = await this.getLegacyAutoLockTimeout(email);
+		if (legacyTimeout === null) {
+			return null;
+		}
+
+		await store.set(AUTO_LOCK_TIMEOUT_KEY, legacyTimeout);
+		await this.clearLegacyAutoLockTimeoutKeys();
+		await store.save();
+		return legacyTimeout;
 	}
 
 	async getAutoLockTimeoutOrDefault(email?: string): Promise<number> {
 		const timeout = await this.getAutoLockTimeout(email);
 		// Default: 10 minutes
 		return timeout ?? 10 * 60 * 1000;
+	}
+
+	async storeMasterPasswordReentryPeriodMs(periodMs: number): Promise<void> {
+		const store = await this.getStore();
+		await store.set(MASTER_PASSWORD_REENTRY_PERIOD_KEY, periodMs);
+		await store.save();
+	}
+
+	async getMasterPasswordReentryPeriodMs(): Promise<number> {
+		const store = await this.getStore();
+		const stored = await store.get<number>(MASTER_PASSWORD_REENTRY_PERIOD_KEY);
+		if (typeof stored === "number") {
+			return stored;
+		}
+		return MASTER_PASSWORD_REENTRY_PERIOD_MS;
+	}
+
+	private async getLegacyAutoLockTimeout(
+		email?: string,
+	): Promise<number | null> {
+		const store = await this.getStore();
+		const candidateEmails = new Set<string>();
+
+		if (email) {
+			candidateEmails.add(email.toLowerCase());
+		}
+
+		const resolvedEmail = await this.resolveEmail(email);
+		if (resolvedEmail) {
+			candidateEmails.add(resolvedEmail);
+		}
+
+		if (candidateEmails.size === 0) {
+			const accountsList = await this.getAccountsListInternal();
+			for (const account of accountsList.accounts) {
+				candidateEmails.add(account.email.toLowerCase());
+			}
+		}
+
+		for (const candidateEmail of candidateEmails) {
+			const legacyKey = getAccountKey(candidateEmail, "auto_lock_timeout");
+			const timeout = await store.get<number>(legacyKey);
+			if (typeof timeout === "number") {
+				return timeout;
+			}
+		}
+
+		return null;
+	}
+
+	private async clearLegacyAutoLockTimeoutKeys(): Promise<void> {
+		const store = await this.getStore();
+		const accountsList = await this.getAccountsListInternal();
+
+		for (const account of accountsList.accounts) {
+			await store.delete(
+				getAccountKey(account.email.toLowerCase(), "auto_lock_timeout"),
+			);
+		}
+	}
+
+	private formatMasterPasswordReentryPeriod(periodMs: number): string {
+		const days = Math.round(periodMs / (24 * 60 * 60 * 1000));
+		return `${days} day${days === 1 ? "" : "s"}`;
 	}
 
 	async storeServerUrl(serverUrl: string, email?: string): Promise<void> {
@@ -936,13 +1012,14 @@ export class TauriStorageAdapter implements IStorageAdapter {
 				};
 			}
 
-			// Check if master password re-entry is required (30-day policy)
+			// Check if master password re-entry is required by configured policy
 			if (await this.isMasterPasswordReentryRequired(resolvedEmail)) {
+				const reentryPeriodMs = await this.getMasterPasswordReentryPeriodMs();
 				return {
 					success: false,
 					error: "master_password_required",
 					message:
-						"For security, please enter your master password. This is required every 30 days.",
+						`For security, please enter your master password. This is required every ${this.formatMasterPasswordReentryPeriod(reentryPeriodMs)}.`,
 				};
 			}
 
@@ -995,8 +1072,9 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		const lastEntry =
 			sessionData.lastMasterPasswordEntry ?? sessionData.createdAt;
 		const timeSinceLastEntry = Date.now() - lastEntry;
-
-		return timeSinceLastEntry > MASTER_PASSWORD_REENTRY_PERIOD_MS;
+		const reentryPeriodMs = await this.getMasterPasswordReentryPeriodMs();
+		if (reentryPeriodMs < 0) return false;
+		return timeSinceLastEntry > reentryPeriodMs;
 	}
 
 	async updateLastMasterPasswordEntry(email?: string): Promise<void> {
@@ -1374,15 +1452,12 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	}
 
 	/**
-	 * Clear auto-lock timeout preference for an account
+	 * Clear app-wide auto-lock timeout preference
 	 */
-	async clearAutoLockTimeout(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
-
+	async clearAutoLockTimeout(_email?: string): Promise<void> {
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "auto_lock_timeout");
-		await store.delete(key);
+		await store.delete(AUTO_LOCK_TIMEOUT_KEY);
+		await this.clearLegacyAutoLockTimeoutKeys();
 		await store.save();
 	}
 

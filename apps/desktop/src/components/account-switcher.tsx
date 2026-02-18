@@ -17,9 +17,9 @@ import { useAccount } from "@/contexts/account-context";
 import { storage } from "@/lib/storage";
 import { useQueryInvalidator } from "@/providers/sync-provider";
 import { AccountAvatar } from "./account-avatar";
-import { AccountSettingsDialog } from "./account-settings-dialog";
 import { AddAccountDialog } from "./add-account-dialog";
 import { RemoveAccountDialog } from "./remove-account-dialog";
+import { SettingsDialog } from "./settings-dialog";
 
 export function AccountSwitcher() {
 	const {
@@ -105,7 +105,7 @@ export function AccountSwitcher() {
 		}
 	};
 
-	const handleAccountSettings = (_email: string) => {
+	const handleSettings = () => {
 		setShowSettings(true);
 	};
 
@@ -202,8 +202,8 @@ export function AccountSwitcher() {
 				onLockAll={handleLockAll}
 				showAllAccountsOption={true}
 				onAllAccountsSelect={handleAllAccountsSelect}
-				showAccountSettings={true}
-				onAccountSettings={handleAccountSettings}
+				showSettings={true}
+				onSettings={handleSettings}
 				showRemoveAccount={true}
 				onRemoveAccount={handleRemoveAccountClick}
 				trigger={trigger}
@@ -216,13 +216,7 @@ export function AccountSwitcher() {
 				onCancel={() => setAccountToRemove(null)}
 			/>
 
-			{activeAccount && (
-				<AccountSettingsDialog
-					open={showSettings}
-					onOpenChange={setShowSettings}
-					email={activeAccount.email}
-				/>
-			)}
+			<SettingsDialog open={showSettings} onOpenChange={setShowSettings} />
 
 			<AddAccountDialog
 				open={showAddAccount}

@@ -76,7 +76,7 @@ export interface SessionState {
 	canQuickUnlock: boolean;
 	/** Whether biometric unlock is available */
 	canBiometricUnlock: boolean;
-	/** Whether master password re-entry is required (mobile 30-day policy) */
+	/** Whether master password re-entry is required by security policy */
 	requiresPasswordReentry: boolean;
 	/** Email of the active account */
 	email: string | null;

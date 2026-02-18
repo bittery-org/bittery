@@ -107,7 +107,7 @@ export function useBiometricUnlock(
 				} as BiometricUnlockError;
 			}
 
-			// Check if master password re-entry is required (30-day security policy)
+			// Check if master password re-entry is required by policy
 			// This check happens before biometric auth for better UX
 			if (storage.isMasterPasswordReentryRequired) {
 				const requiresReentry = await storage.isMasterPasswordReentryRequired(
@@ -117,7 +117,7 @@ export function useBiometricUnlock(
 					throw {
 						type: "master_password_required",
 						message:
-							"For security, please enter your master password. This is required every 30 days.",
+							"For security, please enter your master password. This is required periodically based on your settings.",
 					} as BiometricUnlockError;
 				}
 			}

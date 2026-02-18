@@ -265,7 +265,7 @@ export function UnlockPage() {
 							<p className="font-medium text-amber-800">Password Required</p>
 							<p className="text-amber-700 text-sm">
 								For your security, please enter your master password. This is
-								required every 30 days.
+								required periodically based on your settings.
 							</p>
 						</div>
 					</div>
