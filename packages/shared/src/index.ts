@@ -5,6 +5,7 @@ export * from "./favicon";
 export * from "./identity";
 export * from "./password";
 export * from "./password-analysis";
+export * from "./password-history";
 export * from "./server-url";
 export * from "./trpc";
 export * from "./trpc-client-factory";

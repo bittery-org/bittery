@@ -38,6 +38,7 @@ import { VaultInfoPopover } from "./item-categories/shared/vault-info-popover";
 import ItemDetail from "./item-detail";
 import { ItemForm } from "./item-form";
 import { MoveItemDialog } from "./move-item-dialog";
+import { PasswordHistoryDialog } from "./password-history-dialog";
 import { ShareHistoryDialog } from "./share-history-dialog";
 import { ShareItemDialog } from "./share-item-dialog";
 
@@ -68,6 +69,7 @@ export function ItemDetailPage({
 	const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
 	const [isShareHistoryOpen, setIsShareHistoryOpen] = useState(false);
+	const [isPasswordHistoryOpen, setIsPasswordHistoryOpen] = useState(false);
 	const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
 	const [isUpdatingTags, setIsUpdatingTags] = useState(false);
 
@@ -179,6 +181,29 @@ export function ItemDetailPage({
 			toast.error(errorMessage);
 		}
 	};
+
+	const handleRestorePassword = useCallback(
+		async (password: string) => {
+			if (!rawItem) {
+				return;
+			}
+
+			try {
+				await updateItem.mutateAsync({
+					itemId: rawItem.id,
+					vaultId: rawItem.vaultId,
+					data: { password },
+				});
+				toast.success("Password restored");
+				setIsPasswordHistoryOpen(false);
+			} catch (error) {
+				const errorMessage =
+					error instanceof Error ? error.message : "Failed to restore password";
+				toast.error(errorMessage);
+			}
+		},
+		[rawItem, updateItem],
+	);
 
 	const confirmDelete = async () => {
 		if (!rawItem) return;
@@ -303,6 +328,14 @@ export function ItemDetailPage({
 									<IconHistoryOutlineDuo18 className="size-4" />
 									Share History
 								</DropdownMenuItem>
+								{rawItem?.category === "login" && (
+									<DropdownMenuItem
+										onClick={() => setIsPasswordHistoryOpen(true)}
+									>
+										<IconHistoryOutlineDuo18 className="size-4" />
+										Password History
+									</DropdownMenuItem>
+								)}
 								<DropdownMenuSeparator />
 								<DropdownMenuItem
 									onClick={handleDelete}
@@ -422,6 +455,18 @@ export function ItemDetailPage({
 					itemId={rawItem.id}
 					open={isShareHistoryOpen}
 					onOpenChange={setIsShareHistoryOpen}
+				/>
+			)}
+
+			{/* Password History Dialog */}
+			{rawItem?.category === "login" && decryptedData && (
+				<PasswordHistoryDialog
+					open={isPasswordHistoryOpen}
+					onOpenChange={setIsPasswordHistoryOpen}
+					passwordHistory={decryptedData.passwordHistory}
+					currentPassword={decryptedData.password}
+					onRestorePassword={handleRestorePassword}
+					isRestoring={updateItem.isPending}
 				/>
 			)}
 

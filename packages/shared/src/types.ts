@@ -35,6 +35,11 @@ export interface CustomField {
 	type: "text" | "password" | "email" | "url";
 }
 
+export interface PasswordHistoryEntry {
+	password: string;
+	changedAt: string;
+}
+
 /**
  * Stored passkey metadata for login items.
  * All fields are encrypted as part of the item data blob.
@@ -75,6 +80,7 @@ export interface DecryptedItemData {
 	urls?: string[];
 	username?: string;
 	password?: string;
+	passwordHistory?: PasswordHistoryEntry[];
 	passkeys?: Passkey[];
 	notes?: string;
 	note?: string;
@@ -132,6 +138,7 @@ export interface LoginDisplayData {
 	urls?: string[];
 	username?: string;
 	password?: string;
+	passwordHistory?: PasswordHistoryEntry[];
 	passkeys?: Passkey[];
 	notes?: string;
 	customFields?: CustomField[];

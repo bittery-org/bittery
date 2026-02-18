@@ -4,6 +4,7 @@ import { Button, Card, Popover } from "heroui-native";
 import {
 	ArrowLeft,
 	Edit,
+	History,
 	MoreVertical,
 	Share2,
 	Star,
@@ -17,6 +18,7 @@ import { ItemIcon } from "../item-icon";
 
 const StyledArrowLeft = withUniwind(ArrowLeft);
 const StyledEdit = withUniwind(Edit);
+const StyledHistory = withUniwind(History);
 const StyledShare2 = withUniwind(Share2);
 const StyledStar = withUniwind(Star);
 const StyledMoreVertical = withUniwind(MoreVertical);
@@ -34,6 +36,7 @@ interface ItemHeaderProps {
 	onEdit: () => void;
 	onDelete: () => void;
 	onShare: () => void;
+	onPasswordHistory?: () => void;
 	isDeleting: boolean;
 	isSharing?: boolean;
 	popoverRef: RefObject<PopoverTriggerRef | null>;
@@ -46,6 +49,7 @@ export function ItemHeader({
 	onEdit,
 	onDelete,
 	onShare,
+	onPasswordHistory,
 	isDeleting,
 	isSharing,
 	popoverRef,
@@ -133,6 +137,20 @@ export function ItemHeader({
 									{isSharing ? "Creating link..." : "Share Item"}
 								</Button.Label>
 							</Button>
+							{item.category === "login" && onPasswordHistory && (
+								<Button
+									variant="ghost"
+									onPress={() => {
+										popoverRef.current?.close();
+										onPasswordHistory();
+									}}
+									className="justify-start text-left"
+									size="sm"
+								>
+									<StyledHistory size={18} className="mr-1.5 text-current" />
+									<Button.Label>Password History</Button.Label>
+								</Button>
+							)}
 							<Button
 								variant="ghost"
 								onPress={onDelete}
