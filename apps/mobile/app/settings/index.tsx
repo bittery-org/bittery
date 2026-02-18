@@ -194,10 +194,7 @@ export default function SettingsScreen() {
 					await storage.storeAutoLockTimeout(option.value);
 					setAutoLockTimeout(option.value);
 
-					if (
-						Platform.OS === "android" &&
-						CredentialProvider.isAvailable()
-					) {
+					if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
 						const accountsToUpdate = isAllAccountsMode
 							? allAccounts
 							: activeAccount

@@ -133,8 +133,8 @@ function SettingsPage() {
 								<span className="font-medium text-sm">Secret Key</span>
 							</div>
 							<p className="text-muted-foreground text-sm">
-								Generate a new secret key. This invalidates your current Recovery
-								Key setup.
+								Generate a new secret key. This invalidates your current
+								Recovery Key setup.
 							</p>
 						</div>
 						{userQuery.data?.email && (

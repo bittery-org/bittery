@@ -15,6 +15,7 @@ import {
 	createUser,
 	createUserSession,
 	deleteAllUserSessions,
+	deleteOtherUserSessions,
 	deleteSession,
 	deleteUserAccount,
 	finishLogin,
@@ -26,12 +27,12 @@ import {
 	getUserVaultKeysForRecovery,
 	LoginRateLimitError,
 	normalizeEmail,
+	RecoveryRateLimitError,
 	recordFailedLoginAttempt,
 	recordFailedRecoveryAttempt,
 	renameSession,
 	resetUserPassword as resetUserPasswordWithRecovery,
 	revokeSession,
-	RecoveryRateLimitError,
 	startLogin,
 	storeEncryptedMasterKey,
 	updateSessionActivity,
@@ -985,6 +986,15 @@ export const authRouter = router({
 		.input(
 			z.object({
 				newEmail: z.string().email().max(255),
+				srpSalt: z.string(),
+				srpVerifier: z.string(),
+				encryptedPrivateKey: z.string(),
+				encryptedVaultKeys: z.array(
+					z.object({
+						vaultId: z.string(),
+						encryptedVaultKey: z.string(),
+					}),
+				),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
@@ -999,10 +1009,28 @@ export const authRouter = router({
 				});
 			}
 
-			await updateUserEmail(ctx.session.userId, normalizedNewEmail);
+			await updateUserEmail(ctx.session.userId, {
+				newEmail: normalizedNewEmail,
+				srpSalt: input.srpSalt,
+				srpVerifier: input.srpVerifier,
+				encryptedPrivateKey: input.encryptedPrivateKey,
+				encryptedVaultKeys: input.encryptedVaultKeys,
+			});
 
 			// Logout all sessions to force re-login with new email
 			await deleteAllUserSessions(ctx.session.userId);
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "email_changed",
+				device: ctx.device,
+				entityType: "user",
+				entityId: ctx.session.userId,
+				metadata: {
+					newEmail: normalizedNewEmail,
+					vaultKeysUpdated: input.encryptedVaultKeys.length,
+				},
+			});
 
 			return { success: true };
 		}),
@@ -1078,8 +1106,9 @@ export const authRouter = router({
 				encryptedVaultKeys: input.encryptedVaultKeys,
 			});
 
-			// Logout all sessions to force re-login with new secret key
-			await deleteAllUserSessions(ctx.session.userId);
+			// Invalidate all other sessions — those devices have stale MUKs.
+			// The current session stays active so the client can update local state.
+			await deleteOtherUserSessions(ctx.session.userId, ctx.session.sessionId);
 
 			await logAuditEvent({
 				userId: ctx.session.userId,

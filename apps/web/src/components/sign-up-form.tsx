@@ -1,15 +1,7 @@
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
-import {
-	Badge,
-	Button,
-	Card,
-	cn,
-	Input,
-	Label,
-	toast,
-} from "@bittery/ui";
+import { Badge, Button, cn, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -279,16 +271,17 @@ export default function SignUpForm({
 		},
 	});
 
-	const downloadEmergencyKit = () => {
+	const downloadEmergencyKit = async () => {
 		if (!secretKey || !recoveryKey) {
 			toast.error("Still generating account keys. Please try again.");
 			return;
 		}
 
-		const result = downloadRecoveryKit({
+		const result = await downloadRecoveryKit({
 			fileName: "bittery-emergency-kit",
 			title: "Bittery Emergency Kit",
-			subtitle: "Contains your Secret Key and Recovery Key for offline storage.",
+			subtitle:
+				"Contains your Secret Key and Recovery Key for offline storage.",
 			entries: [
 				{
 					label: "Secret Key",
@@ -299,8 +292,7 @@ export default function SignUpForm({
 				{
 					label: "Recovery Key",
 					value: recoveryKey,
-					description:
-						"Required with your Secret Key to reset your password if forgotten.",
+					description: "Required to reset your password if forgotten.",
 				},
 			],
 			cautions: [
@@ -314,21 +306,21 @@ export default function SignUpForm({
 		});
 
 		setHasDownloadedKit(true);
-		if (result === "print-opened") {
-			toast.success("Recovery Kit opened. Use Print to save as PDF.");
+		if (result === "pdf-downloaded") {
+			toast.success("Emergency Kit PDF downloaded.");
 			return;
 		}
 
-		toast.success("Recovery Kit downloaded as HTML. Open it and save to PDF.");
+		toast.success("PDF failed. Emergency Kit downloaded as text backup.");
 	};
 
 	if (hasInvitationToken && invitationQuery.isError) {
 		return (
 			<div className="w-full">
-				<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+				<h1 className="mb-6 text-center font-semibold text-2xl tracking-tight">
 					Invitation Required
 				</h1>
-				<Card className="space-y-4 border bg-card p-6 shadow-sm">
+				<div className="space-y-4">
 					<p className="text-muted-foreground text-sm leading-relaxed">
 						This invitation link is invalid or expired. Ask your admin to send a
 						new invite link.
@@ -336,7 +328,7 @@ export default function SignUpForm({
 					<Button type="button" onClick={onSwitchToSignIn} className="w-full">
 						Back to Sign In
 					</Button>
-				</Card>
+				</div>
 			</div>
 		);
 	}
@@ -344,15 +336,15 @@ export default function SignUpForm({
 	if (hasInvitationToken && invitationQuery.isLoading) {
 		return (
 			<div className="w-full">
-				<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+				<h1 className="mb-6 text-center font-semibold text-2xl tracking-tight">
 					Loading invitation
 				</h1>
-				<Card className="space-y-4 border bg-card p-6 shadow-sm">
+				<div className="space-y-4">
 					<div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
 						<Loader2 className="h-4 w-4 animate-spin" />
 						Verifying invitation link...
 					</div>
-				</Card>
+				</div>
 			</div>
 		);
 	}
@@ -364,10 +356,10 @@ export default function SignUpForm({
 	) {
 		return (
 			<div className="w-full">
-				<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+				<h1 className="mb-6 text-center font-semibold text-2xl tracking-tight">
 					Invite-Only Registration
 				</h1>
-				<Card className="space-y-4 border bg-card p-6 shadow-sm">
+				<div className="space-y-4">
 					<p className="text-muted-foreground text-sm leading-relaxed">
 						Registration is closed on this server. Ask an admin for an invite
 						link.
@@ -375,7 +367,7 @@ export default function SignUpForm({
 					<Button type="button" onClick={onSwitchToSignIn} className="w-full">
 						Back to Sign In
 					</Button>
-				</Card>
+				</div>
 			</div>
 		);
 	}
@@ -389,14 +381,11 @@ export default function SignUpForm({
 
 	return !hasAcknowledged ? (
 		<div className="w-full">
-			<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+			<h1 className="mb-6 text-center font-semibold text-2xl tracking-tight">
 				{signupHeading}
 			</h1>
-			<Card className="relative space-y-4 overflow-hidden border bg-card p-6 shadow-sm">
-				<div className="-top-16 pointer-events-none absolute right-[-84px] h-48 w-48 rounded-full bg-primary/10 blur-3xl" />
-				<div className="-bottom-20 pointer-events-none absolute left-[-70px] h-44 w-44 rounded-full bg-emerald-500/10 blur-3xl" />
-
-				<div className="relative rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-background to-emerald-500/10 p-5">
+			<div className="space-y-4">
+				<div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-background to-emerald-500/10 p-5">
 					<p className="font-medium text-[0.7rem] text-primary/80 uppercase tracking-[0.12em]">
 						Emergency Kit
 					</p>
@@ -425,7 +414,8 @@ export default function SignUpForm({
 					</Button>
 
 					<p className="mt-3 text-muted-foreground text-xs">
-						Opens a print view so you can save as PDF or print.
+						Downloads a PDF directly. If PDF creation fails, a text backup is
+						downloaded.
 					</p>
 
 					{hasDownloadedKit ? (
@@ -464,14 +454,14 @@ export default function SignUpForm({
 						Already have an account? Sign in
 					</Button>
 				</div>
-			</Card>
+			</div>
 		</div>
 	) : (
 		<div className="w-full">
-			<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+			<h1 className="mb-6 text-center font-semibold text-2xl tracking-tight">
 				{signupHeading}
 			</h1>
-			<Card className="border bg-card p-6 shadow-sm">
+			<div>
 				<form
 					onSubmit={(e) => {
 						e.preventDefault();
@@ -729,7 +719,7 @@ export default function SignUpForm({
 						← Back to Emergency Kit
 					</Button>
 				</form>
-			</Card>
+			</div>
 		</div>
 	);
 }

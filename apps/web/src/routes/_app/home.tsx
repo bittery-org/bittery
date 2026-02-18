@@ -19,7 +19,7 @@ function RouteComponent() {
 	return (
 		<div className="space-y-6">
 			<div>
-				<h1 className="font-bold text-3xl tracking-tight">
+				<h1 className="text-balance font-bold text-2xl tracking-tight md:text-3xl">
 					Welcome back{userQuery.data?.name ? `, ${userQuery.data.name}` : ""}
 				</h1>
 				<p className="text-muted-foreground">

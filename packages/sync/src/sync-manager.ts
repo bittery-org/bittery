@@ -72,7 +72,7 @@ export class SyncManager {
 		this.onStatusChange = options.onStatusChange;
 		this.reconnectDelay = options.reconnectDelay || 1000;
 		this.maxReconnectDelay = options.maxReconnectDelay || 30000;
-		this.fetchImpl = options.fetch || globalThis.fetch;
+		this.fetchImpl = options.fetch || globalThis.fetch.bind(globalThis);
 	}
 
 	/**

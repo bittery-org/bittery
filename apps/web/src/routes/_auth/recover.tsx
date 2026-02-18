@@ -1,8 +1,8 @@
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { useTRPCClient } from "@bittery/shared/trpc";
-import { Button, Card, Input, Label, toast } from "@bittery/ui";
+import { Button, Input, Label, toast } from "@bittery/ui";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ExternalLink, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { storage } from "@/lib/storage";
 import { WorkerCrypto } from "@/lib/worker-crypto";
@@ -285,7 +285,8 @@ function RecoverRouteComponent() {
 				recoveryKey,
 				email,
 			);
-			const recoveryKeyHint = recoveryKey.split("-").slice(0, 2).join("-") || "R1";
+			const recoveryKeyHint =
+				recoveryKey.split("-").slice(0, 2).join("-") || "R1";
 
 			const resetResult = await trpcClient.auth.resetPassword.mutate({
 				recoveryToken,
@@ -337,296 +338,259 @@ function RecoverRouteComponent() {
 	};
 
 	return (
-		<div className="relative flex min-h-svh flex-col bg-gray-50 dark:bg-gray-950">
-			<div className="relative z-10 flex px-5 pt-5 sm:px-8 sm:pt-6">
-				<a href="https://bittery.com" target="_blank" rel="noopener noreferrer">
-					<img src="/logo.png" alt="Bittery" className="h-10 w-auto" />
-				</a>
-			</div>
+		<div className="w-full">
+			<h1 className="mb-6 text-center font-semibold text-2xl tracking-tight">
+				Recover your account
+			</h1>
+			<div>
+				<div className="mb-6 text-center text-muted-foreground text-xs">
+					Step {stepNumber} of 4
+				</div>
 
-			<main className="relative z-10 flex flex-1 flex-col items-center justify-center px-4 py-8 sm:px-6">
-				<div className="w-full max-w-105 md:-mt-12">
-					<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
-						Recover your account
-					</h1>
-					<Card className="border bg-card p-6 shadow-sm">
-						<div className="mb-6 text-center text-muted-foreground text-xs">
-							Step {stepNumber} of 4
+				{step === "email" && (
+					<form onSubmit={handleRequestCode} className="space-y-4">
+						<div className="space-y-2">
+							<Label htmlFor="serverUrl">Server URL</Label>
+							<Input
+								id="serverUrl"
+								name="serverUrl"
+								type="url"
+								placeholder="https://your-server.com"
+								value={serverUrl}
+								onBlur={() => persistServerUrl()}
+								onChange={(e) => setServerUrl(e.target.value)}
+								required
+								className="h-10"
+							/>
 						</div>
 
-						{step === "email" && (
-							<form onSubmit={handleRequestCode} className="space-y-4">
-								<div className="space-y-2">
-									<Label htmlFor="serverUrl">Server URL</Label>
-									<Input
-										id="serverUrl"
-										name="serverUrl"
-										type="url"
-										placeholder="https://your-server.com"
-										value={serverUrl}
-										onBlur={() => persistServerUrl()}
-										onChange={(e) => setServerUrl(e.target.value)}
-										required
-										className="h-10"
-									/>
-								</div>
+						<div className="space-y-2">
+							<Label htmlFor="email">Email</Label>
+							<Input
+								id="email"
+								type="email"
+								placeholder="name@example.com"
+								value={email}
+								onChange={(e) => setEmail(e.target.value)}
+								required
+								className="h-10"
+							/>
+						</div>
 
-								<div className="space-y-2">
-									<Label htmlFor="email">Email</Label>
-									<Input
-										id="email"
-										type="email"
-										placeholder="name@example.com"
-										value={email}
-										onChange={(e) => setEmail(e.target.value)}
-										required
-										className="h-10"
-									/>
-								</div>
+						<Button
+							type="submit"
+							className="h-10 w-full"
+							disabled={isSubmitting}
+						>
+							{isSubmitting ? (
+								<>
+									<Loader2 size={16} className="mr-2 animate-spin" />
+									Sending code...
+								</>
+							) : (
+								"Send Verification Code"
+							)}
+						</Button>
+					</form>
+				)}
 
-								<Button type="submit" className="h-10 w-full" disabled={isSubmitting}>
-									{isSubmitting ? (
-										<>
-											<Loader2 size={16} className="mr-2 animate-spin" />
-											Sending code...
-										</>
+				{step === "code" && (
+					<form onSubmit={handleVerifyCode} className="space-y-4">
+						<div className="rounded-md bg-muted px-3 py-2 text-muted-foreground text-xs">
+							Code sent to <span className="font-medium">{email}</span>
+						</div>
+
+						<div className="space-y-2">
+							<Label htmlFor="code">Verification Code</Label>
+							<Input
+								id="code"
+								type="text"
+								inputMode="numeric"
+								maxLength={6}
+								placeholder="123456"
+								value={code}
+								onChange={(e) =>
+									setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+								}
+								required
+								className="h-10 text-center font-mono text-lg tracking-[0.3em]"
+							/>
+						</div>
+
+						<div className="grid grid-cols-2 gap-2">
+							<Button
+								type="button"
+								variant="outline"
+								onClick={() => setStep("email")}
+								disabled={isSubmitting}
+							>
+								Back
+							</Button>
+							<Button type="submit" disabled={isSubmitting}>
+								{isSubmitting ? (
+									<>
+										<Loader2 size={16} className="mr-2 animate-spin" />
+										Verifying...
+									</>
+								) : (
+									"Verify Code"
+								)}
+							</Button>
+						</div>
+					</form>
+				)}
+
+				{step === "keys" && (
+					<form onSubmit={handleValidateKeys} className="space-y-4">
+						<div className="space-y-2">
+							<Label htmlFor="secretKey">Secret Key</Label>
+							<div className="relative">
+								<Input
+									id="secretKey"
+									type={showSecretKey ? "text" : "password"}
+									placeholder="A3-XXXXXX-XXXXXX-XXXXX-XXXXX-XXXXX"
+									value={secretKey}
+									onChange={(e) => setSecretKey(e.target.value.toUpperCase())}
+									required
+									className="h-10 pr-10 font-mono"
+								/>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
+									onClick={() => setShowSecretKey(!showSecretKey)}
+								>
+									{showSecretKey ? <EyeOff size={16} /> : <Eye size={16} />}
+								</Button>
+							</div>
+						</div>
+
+						<div className="space-y-2">
+							<Label htmlFor="recoveryKey">Recovery Key</Label>
+							<div className="relative">
+								<Input
+									id="recoveryKey"
+									type={showRecoveryKey ? "text" : "password"}
+									placeholder="R1-XXXXXX-XXXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+									value={recoveryKey}
+									onChange={(e) => setRecoveryKey(e.target.value.toUpperCase())}
+									required
+									className="h-10 pr-10 font-mono"
+								/>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
+									onClick={() => setShowRecoveryKey(!showRecoveryKey)}
+								>
+									{showRecoveryKey ? <EyeOff size={16} /> : <Eye size={16} />}
+								</Button>
+							</div>
+						</div>
+
+						<div className="grid grid-cols-2 gap-2">
+							<Button
+								type="button"
+								variant="outline"
+								onClick={() => setStep("code")}
+							>
+								Back
+							</Button>
+							<Button type="submit">Continue</Button>
+						</div>
+					</form>
+				)}
+
+				{step === "password" && (
+					<form onSubmit={handleResetPassword} className="space-y-4">
+						<div className="space-y-2">
+							<Label htmlFor="newPassword">New Password</Label>
+							<div className="relative">
+								<Input
+									id="newPassword"
+									type={showPassword ? "text" : "password"}
+									value={newPassword}
+									onChange={(e) => setNewPassword(e.target.value)}
+									placeholder="Enter new password"
+									required
+									className="h-10 pr-10"
+								/>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
+									onClick={() => setShowPassword(!showPassword)}
+								>
+									{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+								</Button>
+							</div>
+						</div>
+
+						<div className="space-y-2">
+							<Label htmlFor="confirmPassword">Confirm Password</Label>
+							<div className="relative">
+								<Input
+									id="confirmPassword"
+									type={showConfirmPassword ? "text" : "password"}
+									value={confirmPassword}
+									onChange={(e) => setConfirmPassword(e.target.value)}
+									placeholder="Confirm new password"
+									required
+									className="h-10 pr-10"
+								/>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
+									onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+								>
+									{showConfirmPassword ? (
+										<EyeOff size={16} />
 									) : (
-										"Send Verification Code"
+										<Eye size={16} />
 									)}
 								</Button>
-							</form>
-						)}
-
-						{step === "code" && (
-							<form onSubmit={handleVerifyCode} className="space-y-4">
-								<div className="rounded-md bg-muted px-3 py-2 text-muted-foreground text-xs">
-									Code sent to <span className="font-medium">{email}</span>
-								</div>
-
-								<div className="space-y-2">
-									<Label htmlFor="code">Verification Code</Label>
-									<Input
-										id="code"
-										type="text"
-										inputMode="numeric"
-										maxLength={6}
-										placeholder="123456"
-										value={code}
-										onChange={(e) =>
-											setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
-										}
-										required
-										className="h-10 text-center font-mono text-lg tracking-[0.3em]"
-									/>
-								</div>
-
-								<div className="grid grid-cols-2 gap-2">
-									<Button
-										type="button"
-										variant="outline"
-										onClick={() => setStep("email")}
-										disabled={isSubmitting}
-									>
-										Back
-									</Button>
-									<Button type="submit" disabled={isSubmitting}>
-										{isSubmitting ? (
-											<>
-												<Loader2 size={16} className="mr-2 animate-spin" />
-												Verifying...
-											</>
-										) : (
-											"Verify Code"
-										)}
-									</Button>
-								</div>
-							</form>
-						)}
-
-						{step === "keys" && (
-							<form onSubmit={handleValidateKeys} className="space-y-4">
-								<div className="space-y-2">
-									<Label htmlFor="secretKey">Secret Key</Label>
-									<div className="relative">
-										<Input
-											id="secretKey"
-											type={showSecretKey ? "text" : "password"}
-											placeholder="A3-XXXXXX-XXXXXX-XXXXX-XXXXX-XXXXX"
-											value={secretKey}
-											onChange={(e) => setSecretKey(e.target.value.toUpperCase())}
-											required
-											className="h-10 pr-10 font-mono"
-										/>
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon"
-											className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
-											onClick={() => setShowSecretKey(!showSecretKey)}
-										>
-											{showSecretKey ? <EyeOff size={16} /> : <Eye size={16} />}
-										</Button>
-									</div>
-								</div>
-
-								<div className="space-y-2">
-									<Label htmlFor="recoveryKey">Recovery Key</Label>
-									<div className="relative">
-										<Input
-											id="recoveryKey"
-											type={showRecoveryKey ? "text" : "password"}
-											placeholder="R1-XXXXXX-XXXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
-											value={recoveryKey}
-											onChange={(e) => setRecoveryKey(e.target.value.toUpperCase())}
-											required
-											className="h-10 pr-10 font-mono"
-										/>
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon"
-											className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
-											onClick={() => setShowRecoveryKey(!showRecoveryKey)}
-										>
-											{showRecoveryKey ? (
-												<EyeOff size={16} />
-											) : (
-												<Eye size={16} />
-											)}
-										</Button>
-									</div>
-								</div>
-
-								<div className="grid grid-cols-2 gap-2">
-									<Button
-										type="button"
-										variant="outline"
-										onClick={() => setStep("code")}
-									>
-										Back
-									</Button>
-									<Button type="submit">Continue</Button>
-								</div>
-							</form>
-						)}
-
-						{step === "password" && (
-							<form onSubmit={handleResetPassword} className="space-y-4">
-								<div className="space-y-2">
-									<Label htmlFor="newPassword">New Password</Label>
-									<div className="relative">
-										<Input
-											id="newPassword"
-											type={showPassword ? "text" : "password"}
-											value={newPassword}
-											onChange={(e) => setNewPassword(e.target.value)}
-											placeholder="Enter new password"
-											required
-											className="h-10 pr-10"
-										/>
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon"
-											className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
-											onClick={() => setShowPassword(!showPassword)}
-										>
-											{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-										</Button>
-									</div>
-								</div>
-
-								<div className="space-y-2">
-									<Label htmlFor="confirmPassword">Confirm Password</Label>
-									<div className="relative">
-										<Input
-											id="confirmPassword"
-											type={showConfirmPassword ? "text" : "password"}
-											value={confirmPassword}
-											onChange={(e) => setConfirmPassword(e.target.value)}
-											placeholder="Confirm new password"
-											required
-											className="h-10 pr-10"
-										/>
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon"
-											className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
-											onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-										>
-											{showConfirmPassword ? (
-												<EyeOff size={16} />
-											) : (
-												<Eye size={16} />
-											)}
-										</Button>
-									</div>
-								</div>
-
-								<div className="grid grid-cols-2 gap-2">
-									<Button
-										type="button"
-										variant="outline"
-										onClick={() => setStep("keys")}
-										disabled={isSubmitting}
-									>
-										Back
-									</Button>
-									<Button type="submit" disabled={isSubmitting}>
-										{isSubmitting ? (
-											<>
-												<Loader2 size={16} className="mr-2 animate-spin" />
-												Resetting...
-											</>
-										) : (
-											"Reset Password"
-										)}
-									</Button>
-								</div>
-							</form>
-						)}
-
-						<div className="mt-4 text-center text-muted-foreground text-sm">
-							Remembered your password?{" "}
-							<button
-								type="button"
-								onClick={() => navigate({ to: "/login" })}
-								className="font-medium text-primary underline-offset-4 hover:underline"
-							>
-								Back to sign in
-							</button>
+							</div>
 						</div>
-					</Card>
-				</div>
-			</main>
 
-			<footer className="relative z-10">
-				<div className="mx-auto flex max-w-105 flex-col items-center gap-3 px-4 py-4 sm:flex-row sm:justify-between">
-					<p className="text-muted-foreground/60 text-xs">Bittery</p>
-					<div className="flex items-center gap-4">
-						<a
-							href="https://github.com/bittery-org/bittery"
-							target="_blank"
-							rel="noopener noreferrer"
-							className="flex items-center gap-1 text-muted-foreground/60 text-xs transition-colors hover:text-muted-foreground"
-						>
-							GitHub
-							<ExternalLink size={10} />
-						</a>
-						<span className="text-muted-foreground/20">|</span>
-						<a
-							href="https://github.com/bittery-org/bittery/issues"
-							target="_blank"
-							rel="noopener noreferrer"
-							className="flex items-center gap-1 text-muted-foreground/60 text-xs transition-colors hover:text-muted-foreground"
-						>
-							Help
-							<ExternalLink size={10} />
-						</a>
-					</div>
+						<div className="grid grid-cols-2 gap-2">
+							<Button
+								type="button"
+								variant="outline"
+								onClick={() => setStep("keys")}
+								disabled={isSubmitting}
+							>
+								Back
+							</Button>
+							<Button type="submit" disabled={isSubmitting}>
+								{isSubmitting ? (
+									<>
+										<Loader2 size={16} className="mr-2 animate-spin" />
+										Resetting...
+									</>
+								) : (
+									"Reset Password"
+								)}
+							</Button>
+						</div>
+					</form>
+				)}
+
+				<div className="mt-4 text-center text-muted-foreground text-sm">
+					Remembered your password?{" "}
+					<button
+						type="button"
+						onClick={() => navigate({ to: "/login" })}
+						className="font-medium text-primary underline-offset-4 hover:underline"
+					>
+						Back to sign in
+					</button>
 				</div>
-			</footer>
+			</div>
 		</div>
 	);
 }

@@ -130,7 +130,8 @@ export function RegenerateRecoveryKeyDialog({
 		}
 
 		setIsProcessing(true);
-		const recoveryKeyHint = recoveryKey.split("-").slice(0, 2).join("-") || "R1";
+		const recoveryKeyHint =
+			recoveryKey.split("-").slice(0, 2).join("-") || "R1";
 
 		storeRecoveryKeyMutation.mutate({
 			encryptedMasterKey,
@@ -157,8 +158,8 @@ export function RegenerateRecoveryKeyDialog({
 		});
 	};
 
-	const downloadEmergencyKit = () => {
-		const result = downloadRecoveryKit({
+	const downloadEmergencyKit = async () => {
+		const result = await downloadRecoveryKit({
 			fileName: "bittery-recovery-kit-regenerated",
 			title: "Bittery Recovery Kit (Regenerated)",
 			subtitle:
@@ -180,12 +181,12 @@ export function RegenerateRecoveryKeyDialog({
 				"This document is generated client-side and never uploaded to Bittery servers.",
 		});
 
-		if (result === "print-opened") {
-			toast.success("Recovery Kit opened. Use Print to save as PDF.");
+		if (result === "pdf-downloaded") {
+			toast.success("Recovery Kit PDF downloaded.");
 			return;
 		}
 
-		toast.success("Recovery Kit downloaded as HTML. Open it and save to PDF.");
+		toast.success("PDF failed. Recovery Kit downloaded as text backup.");
 	};
 
 	return (
@@ -269,7 +270,11 @@ export function RegenerateRecoveryKeyDialog({
 							</div>
 
 							<div className="grid grid-cols-2 gap-3">
-								<Button type="button" variant="outline" onClick={copyRecoveryKey}>
+								<Button
+									type="button"
+									variant="outline"
+									onClick={copyRecoveryKey}
+								>
 									<Copy size={16} className="mr-2" />
 									Copy
 								</Button>
@@ -307,7 +312,9 @@ export function RegenerateRecoveryKeyDialog({
 								type="button"
 								onClick={handleConfirmRegeneration}
 								disabled={
-									!hasAcknowledged || isProcessing || storeRecoveryKeyMutation.isPending
+									!hasAcknowledged ||
+									isProcessing ||
+									storeRecoveryKeyMutation.isPending
 								}
 							>
 								{isProcessing || storeRecoveryKeyMutation.isPending

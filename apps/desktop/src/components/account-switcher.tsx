@@ -156,7 +156,7 @@ export function AccountSwitcher() {
 		<Button
 			variant="ghost"
 			size="sm"
-			className="gap-2 w-full text-left justify-start" 
+			className="w-full justify-start gap-2 text-left"
 			disabled={switchAccount.isPending}
 		>
 			{isAllAccountsMode ? (
@@ -186,7 +186,7 @@ export function AccountSwitcher() {
 					</div>
 				</>
 			) : null}
-			<IconChevronDownOutlineDuo18 className="h-4 w-4 opacity-50 ml-auto" />
+			<IconChevronDownOutlineDuo18 className="ml-auto h-4 w-4 opacity-50" />
 		</Button>
 	);
 

@@ -3,7 +3,7 @@ import { performSRPLogin, storeLoginSession } from "@bittery/core/hooks/auth";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
-import { Button, Card, Input, Label, toast } from "@bittery/ui";
+import { Button, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -156,10 +156,10 @@ export default function SignInForm({
 
 	return (
 		<div className="w-full">
-			<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+			<h1 className="mb-6 text-center font-semibold text-2xl tracking-tight">
 				{isQuickUnlock ? "Welcome back" : "Sign in to your account"}
 			</h1>
-			<Card className="border bg-card p-6 shadow-sm">
+			<div>
 				{sessionExpired && (
 					<div className="mb-6 rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-900 dark:bg-yellow-950/30">
 						<div className="flex gap-3">
@@ -387,7 +387,7 @@ export default function SignInForm({
 							</div>
 						))}
 				</form>
-			</Card>
+			</div>
 		</div>
 	);
 }

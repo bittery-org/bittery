@@ -13,10 +13,10 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { Copy, Download, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { useState } from "react";
+import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { storage } from "@/lib/storage";
 import {
 	decrypt,
@@ -41,34 +41,9 @@ export function RegenerateSecretKeyDialog({
 	const [isProcessing, setIsProcessing] = useState(false);
 	const trpcClient = useTRPCClient();
 	const trpc = useTRPC();
-	const navigate = useNavigate();
 
 	const userQuery = useQuery(trpc.auth.me.queryOptions());
 	const vaultListQuery = useQuery(trpc.vault.list.queryOptions());
-
-	const regenerateSecretKeyMutation = useMutation({
-		mutationFn: (input: {
-			secretKeyHint: string;
-			srpSalt: string;
-			srpVerifier: string;
-			encryptedPrivateKey: string;
-			encryptedVaultKeys: Array<{
-				vaultId: string;
-				encryptedVaultKey: string;
-			}>;
-		}) => trpcClient.auth.regenerateSecretKey.mutate(input),
-		onSuccess: () => {
-			toast.success(
-				"Secret key regenerated successfully. Please sign in with your new secret key.",
-			);
-			setOpen(false);
-			navigate({ to: "/login" });
-		},
-		onError: (error: Error) => {
-			toast.error(error.message);
-			setIsProcessing(false);
-		},
-	});
 
 	const handleGenerateNewKey = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -213,14 +188,26 @@ export function RegenerateSecretKeyDialog({
 				});
 			}
 
-			// 7. Send to server
-			regenerateSecretKeyMutation.mutate({
+			// 7. Send to server (other sessions are invalidated, current one is kept)
+			await trpcClient.auth.regenerateSecretKey.mutate({
 				secretKeyHint: getSecretKeyHint(newSecretKey),
 				srpSalt,
 				srpVerifier,
 				encryptedPrivateKey: JSON.stringify(newEncryptedPrivateKey),
 				encryptedVaultKeys,
 			});
+
+			// 8. Update local state — store new secret key and new MUK
+			await storage.storeSecretKey(newSecretKey, userEmail);
+			await storage.setMasterUnlockKey(newMasterUnlockKey, userEmail);
+			await storage.storeSessionData(
+				newMasterUnlockKey,
+				userEmail,
+				currentUserId,
+			);
+
+			toast.success("Secret key regenerated successfully.");
+			setOpen(false);
 		} catch (error) {
 			console.error("Secret key regeneration error:", error);
 			toast.error("Failed to regenerate secret key");
@@ -232,32 +219,35 @@ export function RegenerateSecretKeyDialog({
 		copyWithToast(newSecretKey, "Secret Key", { showAutoClearMessage: false });
 	};
 
-	const downloadEmergencyKit = () => {
-		const content = `
-BITTERY EMERGENCY KIT - NEW SECRET KEY
-======================================
+	const downloadKit = async () => {
+		const result = await downloadRecoveryKit({
+			fileName: "bittery-new-secret-key",
+			title: "Bittery Secret Key Kit",
+			subtitle:
+				"This new Secret Key replaces your previous one. Your Recovery Key has been cleared and must be set up again.",
+			entries: [
+				{
+					label: "New Secret Key",
+					value: newSecretKey,
+					description:
+						"Required with your master password to unlock your account.",
+				},
+			],
+			cautions: [
+				"Destroy old copies of your previous Secret Key.",
+				"Store this kit offline in a secure location.",
+				"Set up a new Recovery Key in Settings after saving this.",
+			],
+			footerNote:
+				"This document is generated client-side and never uploaded to Bittery servers.",
+			includeHandwrittenPasswordSection: true,
+		});
 
-IMPORTANT: Keep this information safe and private!
-
-Your NEW Secret Key: ${newSecretKey}
-
-This Secret Key replaces your previous one.
-This key is required to access your account along with your Account Password.
-Store it in a safe place - you cannot recover your account without it.
-
-Generated: ${new Date().toLocaleString()}
-		`;
-
-		const blob = new Blob([content], { type: "text/plain" });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement("a");
-		a.href = url;
-		a.download = "bittery-new-secret-key.txt";
-		document.body.appendChild(a);
-		a.click();
-		document.body.removeChild(a);
-		URL.revokeObjectURL(url);
-		toast.success("Emergency Kit downloaded");
+		if (result === "pdf-downloaded") {
+			toast.success("Secret Key Kit PDF downloaded.");
+			return;
+		}
+		toast.success("Secret Key Kit downloaded as text file.");
 	};
 
 	const handleOpenChange = (newOpen: boolean) => {
@@ -287,8 +277,8 @@ Generated: ${new Date().toLocaleString()}
 							<DialogTitle>Regenerate Secret Key</DialogTitle>
 							<DialogDescription>
 								Generate a new secret key for your account. Your current secret
-								key will be invalidated and you'll need to use the new one to
-								sign in. Your Recovery Key setup will also be cleared.
+								key will be replaced and all other devices will be signed out.
+								Your Recovery Key setup will also be cleared.
 							</DialogDescription>
 						</DialogHeader>
 						<div className="grid gap-4 py-4">
@@ -375,7 +365,7 @@ Generated: ${new Date().toLocaleString()}
 									type="button"
 									variant="outline"
 									className="w-full"
-									onClick={downloadEmergencyKit}
+									onClick={downloadKit}
 								>
 									<Download size={16} className="mr-2" />
 									Download Kit
@@ -412,15 +402,9 @@ Generated: ${new Date().toLocaleString()}
 							<Button
 								type="button"
 								onClick={handleConfirmRegeneration}
-								disabled={
-									!hasAcknowledged ||
-									isProcessing ||
-									regenerateSecretKeyMutation.isPending
-								}
+								disabled={!hasAcknowledged || isProcessing}
 							>
-								{isProcessing || regenerateSecretKeyMutation.isPending
-									? "Saving..."
-									: "Confirm & Update"}
+								{isProcessing ? "Saving..." : "Confirm & Update"}
 							</Button>
 						</DialogFooter>
 					</>

@@ -18,7 +18,7 @@ import {
 	vaultKey,
 } from "@bittery/db";
 import type { SRPServerChallenge } from "@bittery/types";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, ne } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
 import { nanoid } from "nanoid";
 
@@ -482,6 +482,18 @@ export async function deleteAllUserSessions(userId: string) {
 }
 
 /**
+ * Delete all user sessions except the specified one (e.g. the current session)
+ */
+export async function deleteOtherUserSessions(
+	userId: string,
+	currentSessionId: string,
+) {
+	await db
+		.delete(session)
+		.where(and(eq(session.userId, userId), ne(session.id, currentSessionId)));
+}
+
+/**
  * Get session by ID
  */
 export async function getSessionById(sessionId: string) {
@@ -587,7 +599,9 @@ function generateRecoveryVerificationCode(): string {
 /**
  * Create a new recovery verification code (6 digits, 15 minutes).
  */
-export async function createRecoveryVerification(email: string): Promise<string> {
+export async function createRecoveryVerification(
+	email: string,
+): Promise<string> {
 	const normalizedEmail = normalizeEmail(email);
 	const now = new Date();
 	const code = generateRecoveryVerificationCode();
@@ -979,11 +993,41 @@ export async function renameSession(
 /**
  * Update user email
  */
-export async function updateUserEmail(userId: string, newEmail: string) {
+export async function updateUserEmail(
+	userId: string,
+	data: {
+		newEmail: string;
+		srpSalt: string;
+		srpVerifier: string;
+		encryptedPrivateKey: string;
+		encryptedVaultKeys: Array<{
+			vaultId: string;
+			encryptedVaultKey: string;
+		}>;
+	},
+) {
+	// Update email, SRP credentials, and re-encrypted private key
 	await db
 		.update(user)
-		.set({ email: normalizeEmail(newEmail) })
+		.set({
+			email: normalizeEmail(data.newEmail),
+			srpSalt: data.srpSalt,
+			srpVerifier: data.srpVerifier,
+			encryptedPrivateKey: data.encryptedPrivateKey,
+			encryptedMasterKey: null,
+			recoveryKeyHint: null,
+		})
 		.where(eq(user.id, userId));
+
+	// Update all vault keys with new encryption
+	for (const vk of data.encryptedVaultKeys) {
+		await db
+			.update(vaultKey)
+			.set({ encryptedVaultKey: vk.encryptedVaultKey })
+			.where(
+				and(eq(vaultKey.vaultId, vk.vaultId), eq(vaultKey.userId, userId)),
+			);
+	}
 }
 
 /**

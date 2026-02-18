@@ -27,10 +27,10 @@ import {
 import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import initCryptoWasm, {
-	deriveMasterKey as deriveMasterKeyWasm,
 	deriveKeys as deriveKeysWasm,
-	encrypt as encryptWasm,
+	deriveMasterKey as deriveMasterKeyWasm,
 	encryptMasterKey as encryptMasterKeyWasm,
+	encrypt as encryptWasm,
 	generateEncryptionKey as generateEncryptionKeyWasm,
 	generateRecoveryKey as generateRecoveryKeyWasm,
 	generateRSAKeyPair as generateRSAKeyPairWasm,
@@ -182,7 +182,11 @@ export async function generateTestAuthCryptoData(params: {
 		secretKey,
 		normalizedEmail,
 	);
-	const masterKey = deriveMasterKeyWasm(accountPassword, secretKey, normalizedEmail);
+	const masterKey = deriveMasterKeyWasm(
+		accountPassword,
+		secretKey,
+		normalizedEmail,
+	);
 
 	// Signup/login uses auth key bytes interpreted as a UTF-8 string password.
 	const authPassword = new TextDecoder().decode(

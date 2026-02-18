@@ -11,9 +11,9 @@ import init, {
 	JsSrpClient,
 	decrypt as wasmDecrypt,
 	decryptMasterKey as wasmDecryptMasterKey,
+	deriveKeys as wasmDeriveKeys,
 	deriveKeysFromMasterKey as wasmDeriveKeysFromMasterKey,
 	deriveMasterKey as wasmDeriveMasterKey,
-	deriveKeys as wasmDeriveKeys,
 	encrypt as wasmEncrypt,
 	encryptMasterKey as wasmEncryptMasterKey,
 	generateEncryptionKey as wasmGenerateEncryptionKey,
@@ -176,7 +176,11 @@ export async function deriveMasterKey(
 ): Promise<Uint8Array> {
 	await autoInit();
 
-	const masterKeyBase64 = wasmDeriveMasterKey(accountPassword, secretKey, email);
+	const masterKeyBase64 = wasmDeriveMasterKey(
+		accountPassword,
+		secretKey,
+		email,
+	);
 	return base64ToUint8Array(masterKeyBase64);
 }
 
@@ -189,7 +193,10 @@ export async function deriveKeysFromMasterKey(
 ): Promise<DerivedKeys> {
 	await autoInit();
 
-	const result = wasmDeriveKeysFromMasterKey(uint8ArrayToBase64(masterKey), email);
+	const result = wasmDeriveKeysFromMasterKey(
+		uint8ArrayToBase64(masterKey),
+		email,
+	);
 	return {
 		authKey: base64ToUint8Array(result.auth_key),
 		masterUnlockKey: base64ToUint8Array(result.master_unlock_key),
