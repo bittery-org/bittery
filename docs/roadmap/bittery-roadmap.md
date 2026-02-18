@@ -8,11 +8,11 @@
 | Billing | ❌ In Progress | Complete billing system (plans, payment processing, upgrades/downgrades). |
 | Onboarding | ❌ In Progress | Clean and simple. Integrate import option ("Do you already have a password manager?"). |
 | Device Setup | ❌ Missing | Easy way to add additional devices (QR code, Magic Link, etc.). |
-| Account Recovery | ❌ Missing | Generate Recovery Kit PDF during onboarding. Documented process for forgotten Master Password. |
+| Account Recovery | ✅ Done | Implemented in Desktop App (Recovery Kit PDF + forgotten Master Password flow). |
 | Export Finalization | 🟡 Partial | Already exists, needs to be finalized and tested. Important trust signal (no lock-in). |
 | Security Audit | 🟡 Partial | 2 partial audits completed so far. Full audit needed incl. Session Revocation enforcement. |
 | Session Revocation | 🟡 Partial | Session Management exists in Web App. Token Revocation must be enforced across all clients (Desktop, Mobile, Extension). |
-| Master Password Re-Auth | ❓ Verify | Enforce periodic Master Password entry (e.g. every 14 days, configurable). Similar to 1Password. Check if currently functional. |
+| Master Password Re-Auth | ✅ Done | Implemented in Desktop App with periodic Master Password re-authentication. |
 
 ## Important Features
 
