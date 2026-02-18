@@ -4,8 +4,14 @@ import {
 	SidebarTrigger,
 	// SyncStatusIndicator,
 } from "@bittery/ui";
-import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import {
+	createFileRoute,
+	Outlet,
+	redirect,
+	useRouterState,
+} from "@tanstack/react-router";
 import { AppSidebar } from "@/components/layout/sidebar";
+import { RevealLoader } from "@/components/loader";
 import { useVaultKeysSync } from "@/hooks/use-vault-keys-sync";
 import { storage } from "@/lib/storage";
 // import { useSyncContextOptional } from "@/providers/sync-provider";
@@ -21,6 +27,7 @@ export const Route = createFileRoute("/_app")({
 
 function AppLayout() {
 	useVaultKeysSync();
+	const isLoading = useRouterState({ select: (s) => s.isLoading });
 	// const syncContext = useSyncContextOptional();
 
 	return (
@@ -43,6 +50,7 @@ function AppLayout() {
 					<Outlet />
 				</div>
 			</SidebarInset>
+			<RevealLoader isLoading={isLoading} />
 		</SidebarProvider>
 	);
 }

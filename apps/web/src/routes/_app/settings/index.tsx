@@ -26,7 +26,9 @@ import { ChangeEmailDialog } from "@/components/settings/change-email-dialog";
 import { ChangePasswordDialog } from "@/components/settings/change-password-dialog";
 import { DeleteAccountDialog } from "@/components/settings/delete-account-dialog";
 import { DeviceManagement } from "@/components/settings/device-management";
+import { RegenerateRecoveryKeyDialog } from "@/components/settings/regenerate-recovery-key-dialog";
 import { RegenerateSecretKeyDialog } from "@/components/settings/regenerate-secret-key-dialog";
+import { SetupRecoveryKeyDialog } from "@/components/settings/setup-recovery-key-dialog";
 
 export const Route = createFileRoute("/_app/settings/")({
 	component: SettingsPage,
@@ -113,8 +115,8 @@ function SettingsPage() {
 								<span className="font-medium text-sm">Master Password</span>
 							</div>
 							<p className="text-muted-foreground text-sm">
-								Change your master password. Your private key will be
-								re-encrypted.
+								Change your master password. This invalidates your current
+								Recovery Key setup.
 							</p>
 						</div>
 						{userQuery.data?.email && (
@@ -131,12 +133,34 @@ function SettingsPage() {
 								<span className="font-medium text-sm">Secret Key</span>
 							</div>
 							<p className="text-muted-foreground text-sm">
-								Generate a new secret key. Your old key will no longer work.
+								Generate a new secret key. This invalidates your current
+								Recovery Key setup.
 							</p>
 						</div>
 						{userQuery.data?.email && (
 							<RegenerateSecretKeyDialog userEmail={userQuery.data.email} />
 						)}
+					</div>
+
+					<Separator />
+
+					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+						<div className="space-y-1">
+							<div className="flex items-center gap-2">
+								<Shield className="h-4 w-4 text-muted-foreground" />
+								<span className="font-medium text-sm">Recovery Key</span>
+							</div>
+							<p className="text-muted-foreground text-sm">
+								Use a Recovery Key to reset your password without losing vault
+								data.
+							</p>
+						</div>
+						{userQuery.data?.email &&
+							(userQuery.data.hasRecoveryKey ? (
+								<RegenerateRecoveryKeyDialog userEmail={userQuery.data.email} />
+							) : (
+								<SetupRecoveryKeyDialog userEmail={userQuery.data.email} />
+							))}
 					</div>
 
 					<Separator />

@@ -7,27 +7,40 @@
 import { createHmac } from "node:crypto";
 import {
 	checkLoginRateLimit,
+	checkRecoveryRateLimit,
 	clearLoginRateLimit,
+	clearRecoveryRateLimit,
+	createRecoveryToken,
+	createRecoveryVerification,
 	createUser,
 	createUserSession,
 	deleteAllUserSessions,
+	deleteOtherUserSessions,
 	deleteSession,
 	deleteUserAccount,
 	finishLogin,
+	getRecoveryData as getRecoveryDataForEmail,
 	getSessionById,
 	getUserByEmail,
 	getUserById,
 	getUserSessions,
+	getUserVaultKeysForRecovery,
 	LoginRateLimitError,
 	normalizeEmail,
+	RecoveryRateLimitError,
 	recordFailedLoginAttempt,
+	recordFailedRecoveryAttempt,
 	renameSession,
+	resetUserPassword as resetUserPasswordWithRecovery,
 	revokeSession,
 	startLogin,
+	storeEncryptedMasterKey,
 	updateSessionActivity,
 	updateUserEmail,
 	updateUserPassword,
 	updateUserSecretKey,
+	verifyRecoveryCode as verifyRecoveryCodeAttempt,
+	verifyRecoveryToken,
 } from "@bittery/auth";
 import { db, team, teamInvitation, user, vault, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
@@ -49,7 +62,10 @@ function getTeamImageUrl(imageKey: string | null | undefined): string | null {
 }
 
 function mapRateLimitError(error: unknown): TRPCError {
-	if (error instanceof LoginRateLimitError) {
+	if (
+		error instanceof LoginRateLimitError ||
+		error instanceof RecoveryRateLimitError
+	) {
 		return new TRPCError({
 			code: "TOO_MANY_REQUESTS",
 			message: error.message,
@@ -77,6 +93,13 @@ function generateDeterministicFakeHint(email: string): string {
 	return `A3-${digest.slice(0, 8)}`;
 }
 
+async function sendRecoveryCode(email: string, code: string): Promise<void> {
+	// TODO: Wire a production email provider (SES/Resend/etc.).
+	console.info(
+		`[recovery-code] email=${normalizeEmail(email)} code=${code} (dev stub)`,
+	);
+}
+
 async function hasAnyRegisteredUser(): Promise<boolean> {
 	const existingUser = await db.query.user.findFirst({
 		columns: { id: true },
@@ -99,9 +122,7 @@ export const authRouter = router({
 		return {
 			mode,
 			allowPublicSignup,
-			reason: allowPublicSignup
-				? undefined
-				: "invite_only_after_bootstrap",
+			reason: allowPublicSignup ? undefined : "invite_only_after_bootstrap",
 		};
 	}),
 
@@ -119,6 +140,8 @@ export const authRouter = router({
 				srpVerifier: z.string(),
 				publicKey: z.string(),
 				encryptedPrivateKey: z.string(),
+				encryptedMasterKey: z.string(),
+				recoveryKeyHint: z.string(),
 				encryptedVaultKey: z.string(), // Encrypted default vault key
 			}),
 		)
@@ -167,6 +190,8 @@ export const authRouter = router({
 				srpVerifier: input.srpVerifier,
 				publicKey: input.publicKey,
 				encryptedPrivateKey: input.encryptedPrivateKey,
+				encryptedMasterKey: input.encryptedMasterKey,
+				recoveryKeyHint: input.recoveryKeyHint,
 			});
 
 			// Create team with actual userId as owner
@@ -268,6 +293,8 @@ export const authRouter = router({
 				srpVerifier: z.string(),
 				publicKey: z.string(),
 				encryptedPrivateKey: z.string(),
+				encryptedMasterKey: z.string(),
+				recoveryKeyHint: z.string(),
 				encryptedVaultKey: z.string(),
 			}),
 		)
@@ -336,6 +363,8 @@ export const authRouter = router({
 				srpVerifier: input.srpVerifier,
 				publicKey: input.publicKey,
 				encryptedPrivateKey: input.encryptedPrivateKey,
+				encryptedMasterKey: input.encryptedMasterKey,
+				recoveryKeyHint: input.recoveryKeyHint,
 			});
 
 			// Link user to invited team
@@ -695,6 +724,192 @@ export const authRouter = router({
 		}),
 
 	/**
+	 * Request recovery verification code.
+	 * Response is intentionally non-enumerating.
+	 */
+	requestRecoveryVerification: publicProcedure
+		.input(
+			z.object({
+				email: z.string().email().max(255),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			const normalizedEmail = normalizeEmail(input.email);
+
+			try {
+				await checkRecoveryRateLimit(normalizedEmail, ctx.device.ipAddress);
+			} catch (error) {
+				throw mapRateLimitError(error);
+			}
+
+			const existingUser = await getUserByEmail(normalizedEmail);
+			if (existingUser?.encryptedMasterKey) {
+				const code = await createRecoveryVerification(normalizedEmail);
+				await sendRecoveryCode(normalizedEmail, code);
+			}
+
+			return { success: true };
+		}),
+
+	/**
+	 * Verify recovery code and return short-lived recovery token.
+	 * Response is intentionally non-enumerating.
+	 */
+	verifyRecoveryCode: publicProcedure
+		.input(
+			z.object({
+				email: z.string().email().max(255),
+				code: z.string().length(6),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			const normalizedEmail = normalizeEmail(input.email);
+
+			try {
+				await checkRecoveryRateLimit(normalizedEmail, ctx.device.ipAddress);
+			} catch (error) {
+				throw mapRateLimitError(error);
+			}
+
+			const isValid = await verifyRecoveryCodeAttempt(
+				normalizedEmail,
+				input.code,
+			);
+
+			if (!isValid) {
+				try {
+					await recordFailedRecoveryAttempt(
+						normalizedEmail,
+						ctx.device.ipAddress,
+					);
+				} catch (error) {
+					throw mapRateLimitError(error);
+				}
+
+				return { success: false as const };
+			}
+
+			await clearRecoveryRateLimit(normalizedEmail, ctx.device.ipAddress);
+			const recoveryToken = await createRecoveryToken(normalizedEmail);
+
+			return {
+				success: true as const,
+				recoveryToken,
+			};
+		}),
+
+	/**
+	 * Get encrypted recovery metadata and vault keys using a verified recovery token.
+	 */
+	getRecoveryData: publicProcedure
+		.input(
+			z.object({
+				recoveryToken: z.string().min(1),
+			}),
+		)
+		.query(async ({ input }) => {
+			const recoveryPayload = await verifyRecoveryToken(input.recoveryToken);
+			if (!recoveryPayload) {
+				throw new TRPCError({
+					code: "UNAUTHORIZED",
+					message: "Invalid recovery session",
+				});
+			}
+
+			const recoveryData = await getRecoveryDataForEmail(recoveryPayload.email);
+			if (!recoveryData) {
+				throw new TRPCError({
+					code: "UNAUTHORIZED",
+					message: "Invalid recovery session",
+				});
+			}
+
+			const vaultKeys = await getUserVaultKeysForRecovery(recoveryData.userId);
+
+			return {
+				userId: recoveryData.userId,
+				encryptedMasterKey: recoveryData.encryptedMasterKey,
+				encryptedPrivateKey: recoveryData.encryptedPrivateKey,
+				secretKeyHint: recoveryData.secretKeyHint,
+				recoveryKeyHint: recoveryData.recoveryKeyHint,
+				vaultKeys,
+			};
+		}),
+
+	/**
+	 * Reset password via recovery flow and issue a fresh session.
+	 */
+	resetPassword: publicProcedure
+		.input(
+			z.object({
+				recoveryToken: z.string().min(1),
+				srpSalt: z.string(),
+				srpVerifier: z.string(),
+				encryptedPrivateKey: z.string(),
+				encryptedMasterKey: z.string(),
+				recoveryKeyHint: z.string(),
+				secretKeyHint: z.string().optional(),
+				encryptedVaultKeys: z.array(
+					z.object({
+						vaultId: z.string(),
+						encryptedVaultKey: z.string(),
+					}),
+				),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			const recoveryPayload = await verifyRecoveryToken(input.recoveryToken);
+			if (!recoveryPayload) {
+				throw new TRPCError({
+					code: "UNAUTHORIZED",
+					message: "Invalid recovery session",
+				});
+			}
+
+			let userId: string;
+			try {
+				userId = await resetUserPasswordWithRecovery(recoveryPayload.email, {
+					srpSalt: input.srpSalt,
+					srpVerifier: input.srpVerifier,
+					encryptedPrivateKey: input.encryptedPrivateKey,
+					encryptedMasterKey: input.encryptedMasterKey,
+					recoveryKeyHint: input.recoveryKeyHint,
+					secretKeyHint: input.secretKeyHint,
+					encryptedVaultKeys: input.encryptedVaultKeys,
+				});
+			} catch {
+				throw new TRPCError({
+					code: "UNAUTHORIZED",
+					message: "Invalid recovery session",
+				});
+			}
+
+			const deviceInfo = parseUserAgent(ctx.device.userAgent);
+			const sessionData = await createUserSession(userId, {
+				...deviceInfo,
+				userAgent: ctx.device.userAgent,
+				ipAddress: ctx.device.ipAddress,
+			});
+
+			await logAuditEvent({
+				userId,
+				action: "password_reset_via_recovery",
+				device: ctx.device,
+				entityType: "user",
+				entityId: userId,
+				metadata: {
+					vaultKeysUpdated: input.encryptedVaultKeys.length,
+				},
+			});
+
+			return {
+				token: sessionData.token,
+				sessionId: sessionData.sessionId,
+				userId,
+			};
+		}),
+
+	/**
 	 * Get current user data
 	 */
 	me: protectedProcedure.query(async ({ ctx }) => {
@@ -722,6 +937,7 @@ export const authRouter = router({
 			secretKeyHint: userData.secretKeyHint,
 			publicKey: userData.publicKey,
 			encryptedPrivateKey: userData.encryptedPrivateKey,
+			hasRecoveryKey: userData.encryptedMasterKey !== null,
 			createdAt: userData.createdAt,
 		};
 	}),
@@ -772,6 +988,15 @@ export const authRouter = router({
 		.input(
 			z.object({
 				newEmail: z.string().email().max(255),
+				srpSalt: z.string(),
+				srpVerifier: z.string(),
+				encryptedPrivateKey: z.string(),
+				encryptedVaultKeys: z.array(
+					z.object({
+						vaultId: z.string(),
+						encryptedVaultKey: z.string(),
+					}),
+				),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
@@ -786,10 +1011,28 @@ export const authRouter = router({
 				});
 			}
 
-			await updateUserEmail(ctx.session.userId, normalizedNewEmail);
+			await updateUserEmail(ctx.session.userId, {
+				newEmail: normalizedNewEmail,
+				srpSalt: input.srpSalt,
+				srpVerifier: input.srpVerifier,
+				encryptedPrivateKey: input.encryptedPrivateKey,
+				encryptedVaultKeys: input.encryptedVaultKeys,
+			});
 
 			// Logout all sessions to force re-login with new email
 			await deleteAllUserSessions(ctx.session.userId);
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "email_changed",
+				device: ctx.device,
+				entityType: "user",
+				entityId: ctx.session.userId,
+				metadata: {
+					newEmail: normalizedNewEmail,
+					vaultKeysUpdated: input.encryptedVaultKeys.length,
+				},
+			});
 
 			return { success: true };
 		}),
@@ -865,8 +1108,9 @@ export const authRouter = router({
 				encryptedVaultKeys: input.encryptedVaultKeys,
 			});
 
-			// Logout all sessions to force re-login with new secret key
-			await deleteAllUserSessions(ctx.session.userId);
+			// Invalidate all other sessions — those devices have stale MUKs.
+			// The current session stays active so the client can update local state.
+			await deleteOtherUserSessions(ctx.session.userId, ctx.session.sessionId);
 
 			await logAuditEvent({
 				userId: ctx.session.userId,
@@ -877,6 +1121,46 @@ export const authRouter = router({
 				metadata: {
 					vaultKeysUpdated: input.encryptedVaultKeys.length,
 				},
+			});
+
+			return { success: true };
+		}),
+
+	/**
+	 * Store or regenerate recovery key metadata for current user
+	 */
+	storeRecoveryKey: protectedProcedure
+		.input(
+			z.object({
+				encryptedMasterKey: z.string(),
+				recoveryKeyHint: z.string(),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			const existingUser = await getUserById(ctx.session.userId);
+			if (!existingUser) {
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "User not found",
+				});
+			}
+
+			const hadRecoveryKey = existingUser.encryptedMasterKey !== null;
+
+			await storeEncryptedMasterKey(
+				ctx.session.userId,
+				input.encryptedMasterKey,
+				input.recoveryKeyHint,
+			);
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: hadRecoveryKey
+					? "recovery_key_regenerated"
+					: "recovery_key_setup",
+				device: ctx.device,
+				entityType: "user",
+				entityId: ctx.session.userId,
 			});
 
 			return { success: true };

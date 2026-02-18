@@ -1126,3 +1126,177 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
         Err(e) => create_cp_result(&mut env, None, Some(&e.to_string())),
     }
 }
+
+// ----------------------------------------------------------------------------
+// Passkey for Credential Provider (future Android flow)
+// ----------------------------------------------------------------------------
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_nativePasskeyGenerateKeypair<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+) -> JObject<'a> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::generate_passkey_keypair;
+
+    match generate_passkey_keypair() {
+        Ok(result) => {
+            let value = serde_json::json!({
+                "privateKey": STANDARD.encode(result.private_key),
+                "publicKeyCose": STANDARD.encode(result.public_key_cose),
+                "publicKeySpki": STANDARD.encode(result.public_key_spki),
+            })
+            .to_string();
+            create_cp_result(&mut env, Some(&value), None)
+        }
+        Err(e) => create_cp_result(&mut env, None, Some(&e.to_string())),
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_nativePasskeyGenerateCredentialId<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+) -> JObject<'a> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::generate_credential_id;
+
+    let value = STANDARD.encode(generate_credential_id());
+    create_cp_result(&mut env, Some(&value), None)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_nativePasskeyBuildAttestationObject<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    rp_id: JString<'a>,
+    credential_id_base64: JString<'a>,
+    cose_public_key_base64: JString<'a>,
+    sign_count: jint,
+) -> JObject<'a> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::build_passkey_attestation_object;
+
+    let rp_id_str = match get_string(&mut env, rp_id) {
+        Some(s) => s,
+        None => return create_cp_result(&mut env, None, Some("Invalid rpId")),
+    };
+    let credential_id_str = match get_string(&mut env, credential_id_base64) {
+        Some(s) => s,
+        None => return create_cp_result(&mut env, None, Some("Invalid credentialId")),
+    };
+    let cose_public_key_str = match get_string(&mut env, cose_public_key_base64) {
+        Some(s) => s,
+        None => return create_cp_result(&mut env, None, Some("Invalid COSE public key")),
+    };
+
+    let credential_id = match STANDARD.decode(&credential_id_str) {
+        Ok(value) => value,
+        Err(error) => {
+            return create_cp_result(
+                &mut env,
+                None,
+                Some(&format!("Invalid credentialId base64: {}", error)),
+            )
+        }
+    };
+    let cose_public_key = match STANDARD.decode(&cose_public_key_str) {
+        Ok(value) => value,
+        Err(error) => {
+            return create_cp_result(
+                &mut env,
+                None,
+                Some(&format!("Invalid COSE key base64: {}", error)),
+            )
+        }
+    };
+
+    match build_passkey_attestation_object(
+        &rp_id_str,
+        &credential_id,
+        &cose_public_key,
+        sign_count as u32,
+    ) {
+        Ok(result) => {
+            let value = serde_json::json!({
+                "authenticatorData": STANDARD.encode(result.authenticator_data),
+                "attestationObject": STANDARD.encode(result.attestation_object),
+            })
+            .to_string();
+            create_cp_result(&mut env, Some(&value), None)
+        }
+        Err(e) => create_cp_result(&mut env, None, Some(&e.to_string())),
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_nativePasskeySignAssertion<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    private_key_base64: JString<'a>,
+    rp_id: JString<'a>,
+    client_data_hash_base64: JString<'a>,
+    sign_count: jint,
+) -> JObject<'a> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::sign_passkey_assertion;
+
+    let private_key_str = match get_string(&mut env, private_key_base64) {
+        Some(s) => s,
+        None => return create_cp_result(&mut env, None, Some("Invalid private key")),
+    };
+    let rp_id_str = match get_string(&mut env, rp_id) {
+        Some(s) => s,
+        None => return create_cp_result(&mut env, None, Some("Invalid rpId")),
+    };
+    let client_data_hash_str = match get_string(&mut env, client_data_hash_base64) {
+        Some(s) => s,
+        None => return create_cp_result(&mut env, None, Some("Invalid clientDataHash")),
+    };
+
+    let private_key = match STANDARD.decode(&private_key_str) {
+        Ok(value) => value,
+        Err(error) => {
+            return create_cp_result(
+                &mut env,
+                None,
+                Some(&format!("Invalid private key base64: {}", error)),
+            )
+        }
+    };
+    let client_data_hash = match STANDARD.decode(&client_data_hash_str) {
+        Ok(value) => value,
+        Err(error) => {
+            return create_cp_result(
+                &mut env,
+                None,
+                Some(&format!("Invalid clientDataHash base64: {}", error)),
+            )
+        }
+    };
+
+    match sign_passkey_assertion(
+        &private_key,
+        &rp_id_str,
+        &client_data_hash,
+        sign_count as u32,
+    ) {
+        Ok(result) => {
+            let value = serde_json::json!({
+                "authenticatorData": STANDARD.encode(result.authenticator_data),
+                "signatureDer": STANDARD.encode(result.signature_der),
+            })
+            .to_string();
+            create_cp_result(&mut env, Some(&value), None)
+        }
+        Err(e) => create_cp_result(&mut env, None, Some(&e.to_string())),
+    }
+}

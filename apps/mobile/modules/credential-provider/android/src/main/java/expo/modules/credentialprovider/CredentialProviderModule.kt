@@ -14,6 +14,7 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.credentialprovider.crypto.BiometricKeyManager
 import expo.modules.credentialprovider.crypto.MukEscrowManager
+import expo.modules.credentialprovider.crypto.VaultDecryptor
 import expo.modules.credentialprovider.state.VaultStateManager
 import expo.modules.credentialprovider.storage.CredentialStorageManager
 import expo.modules.credentialprovider.storage.CredentialDatabase
@@ -80,6 +81,56 @@ class CredentialProviderModule : Module() {
     private val currentActivity: FragmentActivity?
         get() = appContext.currentActivity as? FragmentActivity
 
+    private fun ensureVaultStateManagerInitialized() {
+        try {
+            VaultStateManager.initialize(context)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize VaultStateManager", e)
+        }
+    }
+
+    private fun collectCandidateDomainsFromItemJson(itemDataJson: JSONObject): List<String> {
+        val domains = LinkedHashSet<String>()
+
+        val primaryUrl = itemDataJson.optString("url")
+        extractDomain(primaryUrl)?.let { domains.add(it) }
+
+        val urlsJson = itemDataJson.optJSONArray("urls")
+        if (urlsJson != null) {
+            for (index in 0 until urlsJson.length()) {
+                val rawUrl = urlsJson.optString(index, "")
+                extractDomain(rawUrl)?.let { domains.add(it) }
+            }
+        }
+
+        val passkeysJson = itemDataJson.optJSONArray("passkeys")
+        if (passkeysJson != null) {
+            for (index in 0 until passkeysJson.length()) {
+                val passkey = passkeysJson.optJSONObject(index) ?: continue
+                val rpId = passkey.optString("rpId", "")
+                extractDomain(rpId)?.let { domains.add(it) }
+            }
+        }
+
+        return domains.toList()
+    }
+
+    private suspend fun recoverDomainsFromEncryptedItem(
+        itemEntity: ItemEntity,
+        muk: ByteArray
+    ): List<String> {
+        return try {
+            val vaultKey = database.vaultKeyDao().getByVaultId(itemEntity.vaultId, itemEntity.userId)
+                ?: return emptyList()
+            val decryptedVaultKey = VaultDecryptor.decryptVaultKeyWithMuk(vaultKey, muk)
+            val itemDataJson = VaultDecryptor.decryptItemJson(itemEntity, decryptedVaultKey)
+            collectCandidateDomainsFromItemJson(itemDataJson)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to recover domains from encrypted item ${itemEntity.id}", e)
+            emptyList()
+        }
+    }
+
     override fun definition() = ModuleDefinition {
         Name("CredentialProvider")
 
@@ -95,11 +146,16 @@ class CredentialProviderModule : Module() {
          *
          * @param mukBase64 Base64-encoded Master Unlock Key (32 bytes = 44 chars)
          */
-        Function("setMasterUnlockKey") { mukBase64: String, userId: String? ->
+        Function("setMasterUnlockKey") { mukBase64: String, userId: String?, autoLockTimeoutMs: Double? ->
             try {
+                ensureVaultStateManagerInitialized()
                 val resolvedUserId = userId?.takeIf { it.isNotBlank() } ?: "default"
-                VaultStateManager.setMasterUnlockKeyFromBase64(mukBase64, resolvedUserId)
-                Log.d(TAG, "setMasterUnlockKey: MUK set successfully")
+                val resolvedTimeoutMs = autoLockTimeoutMs?.toLong()
+                Log.d(TAG, "setMasterUnlockKey: CALLED from RN bridge (userId='$resolvedUserId', mukBase64Length=${mukBase64.length}, timeoutMs=$resolvedTimeoutMs, pid=${android.os.Process.myPid()})")
+                VaultStateManager.setMasterUnlockKeyFromBase64(mukBase64, resolvedUserId, resolvedTimeoutMs)
+                Log.d(TAG, "setMasterUnlockKey: MUK set successfully, verifying...")
+                val verifyUnlocked = VaultStateManager.isUnlocked(resolvedUserId)
+                Log.d(TAG, "setMasterUnlockKey: Verification isUnlocked($resolvedUserId)=$verifyUnlocked")
                 sendEvent("onVaultUnlocked", mapOf("success" to true))
                 true
             } catch (e: Exception) {
@@ -108,23 +164,43 @@ class CredentialProviderModule : Module() {
             }
         }
 
+        Function("setMukAutoLockTimeout") { timeoutMs: Double, userId: String? ->
+            try {
+                ensureVaultStateManagerInitialized()
+                val resolvedUserId = userId?.takeIf { it.isNotBlank() } ?: "default"
+                val resolvedTimeoutMs = timeoutMs.toLong()
+                Log.d(TAG, "setMukAutoLockTimeout: userId='$resolvedUserId', timeoutMs=$resolvedTimeoutMs")
+                VaultStateManager.setMukAutoLockTimeout(resolvedUserId, resolvedTimeoutMs)
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "setMukAutoLockTimeout: failed", e)
+                false
+            }
+        }
+
         /**
          * Clear the Master Unlock Key (on logout or auto-lock).
          */
         Function("clearMasterUnlockKey") { userId: String? ->
+            ensureVaultStateManagerInitialized()
+            Log.w(TAG, "clearMasterUnlockKey: CALLED from RN bridge (userId='$userId', pid=${android.os.Process.myPid()})")
+            VaultStateManager.dumpDebugState("BEFORE clearMasterUnlockKey")
             if (userId.isNullOrBlank()) {
                 VaultStateManager.clearAllMasterUnlockKeys()
             } else {
                 VaultStateManager.clearMasterUnlockKey(userId)
             }
-            Log.d(TAG, "clearMasterUnlockKey: MUK cleared")
+            VaultStateManager.dumpDebugState("AFTER clearMasterUnlockKey")
             sendEvent("onVaultLocked", mapOf("success" to true))
             true
         }
 
         Function("clearAllMasterUnlockKeys") {
+            ensureVaultStateManagerInitialized()
+            Log.w(TAG, "clearAllMasterUnlockKeys: CALLED from RN bridge (pid=${android.os.Process.myPid()})")
+            VaultStateManager.dumpDebugState("BEFORE clearAllMasterUnlockKeys")
             VaultStateManager.clearAllMasterUnlockKeys()
-            Log.d(TAG, "clearAllMasterUnlockKeys: MUKs cleared")
+            VaultStateManager.dumpDebugState("AFTER clearAllMasterUnlockKeys")
             sendEvent("onVaultLocked", mapOf("success" to true))
             true
         }
@@ -133,12 +209,16 @@ class CredentialProviderModule : Module() {
          * Check if the vault is currently unlocked (MUK available).
          */
         Function("isVaultUnlocked") { userId: String? ->
+            ensureVaultStateManagerInitialized()
+            Log.d(TAG, "isVaultUnlocked: CALLED from RN bridge (userId='$userId', pid=${android.os.Process.myPid()})")
             val unlocked = if (userId.isNullOrBlank()) {
                 VaultStateManager.isUnlocked()
             } else {
                 VaultStateManager.isUnlocked(userId)
             }
-            Log.d(TAG, "isVaultUnlocked: $unlocked")
+            if (!unlocked) {
+                VaultStateManager.dumpDebugState("isVaultUnlocked=FALSE")
+            }
             unlocked
         }
 
@@ -147,6 +227,7 @@ class CredentialProviderModule : Module() {
          * WARNING: Only use in development builds.
          */
         Function("getMasterUnlockKeyBase64") { userId: String? ->
+            ensureVaultStateManagerInitialized()
             if (userId.isNullOrBlank()) {
                 VaultStateManager.getMasterUnlockKeyBase64()
             } else {
@@ -166,6 +247,7 @@ class CredentialProviderModule : Module() {
          * @param timeoutMs Optional escrow timeout in milliseconds (default 10 min)
          */
         AsyncFunction("escrowMukWithBiometric") { params: Map<String, Any>, promise: Promise ->
+            ensureVaultStateManagerInitialized()
             val activity = currentActivity
             if (activity == null) {
                 promise.reject("NO_ACTIVITY", "No activity available", null)
@@ -256,6 +338,7 @@ class CredentialProviderModule : Module() {
          * This unlocks the vault without requiring password entry.
          */
         AsyncFunction("retrieveEscrowedMuk") { promise: Promise ->
+            ensureVaultStateManagerInitialized()
             val activity = currentActivity
             if (activity == null) {
                 promise.reject("NO_ACTIVITY", "No activity available", null)
@@ -591,6 +674,7 @@ class CredentialProviderModule : Module() {
          *   - items: List of item objects (login items only)
          */
         AsyncFunction("syncVaultData") { dataJson: String, promise: Promise ->
+            ensureVaultStateManagerInitialized()
             Log.d(TAG, "syncVaultData called")
 
             moduleScope.launch {
@@ -620,7 +704,7 @@ class CredentialProviderModule : Module() {
 
                     Log.d(TAG, "syncVaultData: Syncing ${vaultKeysData.size} vault keys and ${itemsData.size} items for user $userId")
 
-                    withContext(Dispatchers.IO) {
+	                    withContext(Dispatchers.IO) {
                         // Ensure AuthDataEntity exists for this user
                         // If it doesn't exist, create a minimal one
                         val existingAuthData = database.authDataDao().getByUserId(userId)
@@ -701,52 +785,75 @@ class CredentialProviderModule : Module() {
                             }
                         }
 
-                        if (items.isNotEmpty()) {
-                            database.itemDao().insertAll(items)
-                            Log.d(TAG, "Inserted ${items.size} items")
-                        }
+	                        if (items.isNotEmpty()) {
+	                            database.itemDao().insertAll(items)
+	                            Log.d(TAG, "Inserted ${items.size} items")
+	                        }
 
-                        // Insert domain mappings for each item
-                        var totalDomains = 0
-                        for (i in 0 until itemsJson.length()) {
-                            try {
-                                val item = itemsJson.getJSONObject(i)
+	                        val itemById = items.associateBy { it.id }
+	                        val mukForDomainRepair = VaultStateManager.getMasterUnlockKey(userId)
+
+	                        // Insert domain mappings for each item
+	                        var totalDomains = 0
+	                        for (i in 0 until itemsJson.length()) {
+	                            try {
+	                                val item = itemsJson.getJSONObject(i)
                                 val itemId = item.optString("id", "")
                                 if (itemId.isEmpty()) continue
 
                                 val category = item.optString("category", "")
                                 if (category != "login") continue
 
-                                // Parse URLs array from JSON
-                                val urlsJson = item.optJSONArray("urls") ?: JSONArray()
-                                val urls = (0 until urlsJson.length()).map { i ->
-                                    urlsJson.getString(i)
-                                }
+	                                // Parse URLs array from JSON
+	                                val urlsJson = item.optJSONArray("urls") ?: JSONArray()
+	                                val urls = (0 until urlsJson.length()).map { i ->
+	                                    urlsJson.getString(i)
+	                                }
 
-                                if (urls.isEmpty()) {
-                                    Log.d(TAG, "Item $itemId has no URLs, skipping domain mapping")
-                                    continue
-                                }
+	                                val domainsByValue = LinkedHashMap<String, ItemDomainEntity>()
+	                                for (url in urls) {
+	                                    val domain = extractDomain(url) ?: continue
+	                                    if (!domainsByValue.containsKey(domain)) {
+	                                        domainsByValue[domain] = ItemDomainEntity(
+	                                            itemId = itemId,
+	                                            domain = domain,
+	                                            isPrimary = domainsByValue.isEmpty(),
+	                                            fullUrl = url
+	                                        )
+	                                    }
+	                                }
 
-                                val domains = urls.mapIndexedNotNull { urlIndex, url ->
-                                    val domain = extractDomain(url) ?: return@mapIndexedNotNull null
-                                    ItemDomainEntity(
-                                        itemId = itemId,
-                                        domain = domain,
-                                        isPrimary = urlIndex == 0,
-                                        fullUrl = url
-                                    )
-                                }
+	                                if (domainsByValue.isEmpty()) {
+	                                    val localItem = itemById[itemId]
+	                                    if (mukForDomainRepair != null && localItem != null) {
+	                                        val recoveredDomains = recoverDomainsFromEncryptedItem(localItem, mukForDomainRepair)
+	                                        for (domain in recoveredDomains) {
+	                                            if (!domainsByValue.containsKey(domain)) {
+	                                                domainsByValue[domain] = ItemDomainEntity(
+	                                                    itemId = itemId,
+	                                                    domain = domain,
+	                                                    isPrimary = domainsByValue.isEmpty(),
+	                                                    fullUrl = "https://$domain"
+	                                                )
+	                                            }
+	                                        }
+	                                    }
+	                                }
 
-                                if (domains.isNotEmpty()) {
-                                    database.itemDomainDao().replaceDomainsForItem(itemId, domains)
-                                    totalDomains += domains.size
-                                    Log.d(TAG, "Inserted ${domains.size} domains for item $itemId: ${domains.map { it.domain }}")
-                                }
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Failed to process domains for item at index $i", e)
-                            }
-                        }
+	                                val domains = domainsByValue.values.toList()
+
+	                                if (domains.isNotEmpty()) {
+	                                    database.itemDomainDao().replaceDomainsForItem(itemId, domains)
+	                                    totalDomains += domains.size
+	                                    Log.d(TAG, "Inserted ${domains.size} domains for item $itemId: ${domains.map { it.domain }}")
+	                                }
+	                                else {
+	                                    Log.d(TAG, "Item $itemId still has no domains after repair, skipping domain mapping")
+	                                }
+	                            } catch (e: Exception) {
+	                                Log.w(TAG, "Failed to process domains for item at index $i", e)
+	                            }
+	                        }
 
                         Log.d(TAG, "Inserted $totalDomains domain mappings")
 
@@ -788,6 +895,94 @@ class CredentialProviderModule : Module() {
                 } catch (e: Exception) {
                     Log.e(TAG, "syncVaultData failed", e)
                     promise.reject("SYNC_FAILED", "Failed to sync vault data: ${e.message}", e)
+                }
+            }
+        }
+
+        /**
+         * Get pending passkey mutations queued by the Android credential provider flows.
+         */
+        AsyncFunction("getPendingPasskeyMutations") { userId: String?, promise: Promise ->
+            moduleScope.launch {
+                try {
+                    val entities = withContext(Dispatchers.IO) {
+                        if (userId.isNullOrBlank()) {
+                            database.pendingPasskeyMutationDao().getAll()
+                        } else {
+                            database.pendingPasskeyMutationDao().getByUserId(userId)
+                        }
+                    }
+
+                    val result = entities.map { entity ->
+                        mapOf(
+                            "id" to entity.id,
+                            "userId" to entity.userId,
+                            "vaultId" to entity.vaultId,
+                            "itemId" to entity.itemId,
+                            "operation" to entity.operation,
+                            "encryptedData" to entity.encryptedData,
+                            "encryptionIv" to entity.encryptionIv,
+                            "encryptionAlgorithm" to entity.encryptionAlgorithm,
+                            "createdAt" to entity.createdAt,
+                            "attemptCount" to entity.attemptCount,
+                            "lastError" to entity.lastError
+                        )
+                    }
+
+                    promise.resolve(result)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to fetch pending passkey mutations", e)
+                    promise.reject(
+                        "GET_PENDING_PASSKEY_MUTATIONS_FAILED",
+                        "Failed to fetch pending passkey mutations: ${e.message}",
+                        e
+                    )
+                }
+            }
+        }
+
+        /**
+         * Mark queued passkey mutations as applied and remove them from local queue.
+         */
+        AsyncFunction("markPendingPasskeyMutationsApplied") { ids: List<String>, promise: Promise ->
+            moduleScope.launch {
+                try {
+                    if (ids.isNotEmpty()) {
+                        withContext(Dispatchers.IO) {
+                            database.pendingPasskeyMutationDao().deleteByIds(ids)
+                        }
+                    }
+                    promise.resolve(true)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to mark pending passkey mutations as applied", e)
+                    promise.reject(
+                        "MARK_PENDING_PASSKEY_MUTATIONS_APPLIED_FAILED",
+                        "Failed to mark pending passkey mutations as applied: ${e.message}",
+                        e
+                    )
+                }
+            }
+        }
+
+        /**
+         * Mark queued passkey mutations as failed (increments retry attempts and stores error).
+         */
+        AsyncFunction("markPendingPasskeyMutationsFailed") { ids: List<String>, error: String, promise: Promise ->
+            moduleScope.launch {
+                try {
+                    if (ids.isNotEmpty()) {
+                        withContext(Dispatchers.IO) {
+                            database.pendingPasskeyMutationDao().markFailed(ids, error)
+                        }
+                    }
+                    promise.resolve(true)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to mark pending passkey mutations as failed", e)
+                    promise.reject(
+                        "MARK_PENDING_PASSKEY_MUTATIONS_FAILED",
+                        "Failed to mark pending passkey mutations as failed: ${e.message}",
+                        e
+                    )
                 }
             }
         }

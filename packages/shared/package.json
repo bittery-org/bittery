@@ -15,6 +15,7 @@
 		"./export-types": "./src/export-types.ts",
 		"./password": "./src/password.ts",
 		"./password-analysis": "./src/password-analysis.ts",
+		"./password-history": "./src/password-history.ts",
 		"./favicon": "./src/favicon.ts",
 		"./identity": "./src/identity.ts",
 		"./totp": "./src/totp.ts",

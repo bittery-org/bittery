@@ -19,6 +19,8 @@ export const user = pgTable(
 		emailVerified: boolean("email_verified").default(false).notNull(),
 		// Zero-knowledge authentication fields
 		secretKeyHint: text("secret_key_hint"), // First segment of Secret Key (A3-XXXXXX)
+		encryptedMasterKey: text("encrypted_master_key"), // Encrypted PBKDF2 master key for recovery flow
+		recoveryKeyHint: text("recovery_key_hint"), // First segment of Recovery Key (R1-XXXXXX)
 		srpSalt: text("srp_salt").notNull(),
 		srpVerifier: text("srp_verifier").notNull(),
 		// RSA keys for vault sharing
@@ -83,6 +85,47 @@ export const loginRateLimit = pgTable(
 		index("login_rate_limit_email_idx").on(table.email),
 		index("login_rate_limit_ip_idx").on(table.ipAddress),
 		index("login_rate_limit_locked_until_idx").on(table.lockedUntil),
+	],
+);
+
+export const recoveryVerification = pgTable(
+	"recovery_verification",
+	{
+		id: text("id").primaryKey(),
+		email: text("email").notNull(),
+		code: text("code").notNull(), // 6-digit code
+		attempts: integer("attempts").default(0).notNull(),
+		maxAttempts: integer("max_attempts").default(5).notNull(),
+		expiresAt: timestamp("expires_at").notNull(),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+		usedAt: timestamp("used_at"),
+	},
+	(table) => [
+		index("recovery_verification_email_idx").on(table.email),
+		index("recovery_verification_code_idx").on(table.code),
+		index("recovery_verification_expires_at_idx").on(table.expiresAt),
+	],
+);
+
+export const recoveryRateLimit = pgTable(
+	"recovery_rate_limit",
+	{
+		id: text("id").primaryKey(),
+		email: text("email").notNull(),
+		ipAddress: text("ip_address"),
+		attempts: integer("attempts").default(0).notNull(),
+		lastAttemptAt: timestamp("last_attempt_at").defaultNow().notNull(),
+		lockedUntil: timestamp("locked_until"),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+		updatedAt: timestamp("updated_at")
+			.defaultNow()
+			.$onUpdate(() => /* @__PURE__ */ new Date())
+			.notNull(),
+	},
+	(table) => [
+		index("recovery_rate_limit_email_idx").on(table.email),
+		index("recovery_rate_limit_ip_idx").on(table.ipAddress),
+		index("recovery_rate_limit_locked_until_idx").on(table.lockedUntil),
 	],
 );
 

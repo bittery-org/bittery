@@ -17,9 +17,10 @@ import { useAccount } from "@/contexts/account-context";
 import { storage } from "@/lib/storage";
 import { useQueryInvalidator } from "@/providers/sync-provider";
 import { AccountAvatar } from "./account-avatar";
-import { AccountSettingsDialog } from "./account-settings-dialog";
 import { AddAccountDialog } from "./add-account-dialog";
+import { DeviceSetupDialog } from "./device-setup-dialog";
 import { RemoveAccountDialog } from "./remove-account-dialog";
+import { SettingsDialog } from "./settings-dialog";
 
 export function AccountSwitcher() {
 	const {
@@ -36,6 +37,7 @@ export function AccountSwitcher() {
 	const [accountToRemove, setAccountToRemove] = useState<string | null>(null);
 	const [showSettings, setShowSettings] = useState(false);
 	const [showAddAccount, setShowAddAccount] = useState(false);
+	const [showDeviceSetup, setShowDeviceSetup] = useState(false);
 
 	const accountsData = accounts.data ?? [];
 	const unlockedEmailsList = unlockedEmails.data ?? [];
@@ -105,8 +107,12 @@ export function AccountSwitcher() {
 		}
 	};
 
-	const handleAccountSettings = (_email: string) => {
+	const handleSettings = () => {
 		setShowSettings(true);
+	};
+
+	const handleSetupAnotherDevice = () => {
+		setShowDeviceSetup(true);
 	};
 
 	const handleRemoveAccountClick = (email: string) => {
@@ -156,7 +162,7 @@ export function AccountSwitcher() {
 		<Button
 			variant="ghost"
 			size="sm"
-			className="gap-2"
+			className="w-full justify-start gap-2 text-left"
 			disabled={switchAccount.isPending}
 		>
 			{isAllAccountsMode ? (
@@ -186,7 +192,7 @@ export function AccountSwitcher() {
 					</div>
 				</>
 			) : null}
-			<IconChevronDownOutlineDuo18 className="h-4 w-4 opacity-50" />
+			<IconChevronDownOutlineDuo18 className="ml-auto h-4 w-4 opacity-50" />
 		</Button>
 	);
 
@@ -202,8 +208,10 @@ export function AccountSwitcher() {
 				onLockAll={handleLockAll}
 				showAllAccountsOption={true}
 				onAllAccountsSelect={handleAllAccountsSelect}
-				showAccountSettings={true}
-				onAccountSettings={handleAccountSettings}
+				showSettings={true}
+				onSettings={handleSettings}
+				showSetupAnotherDevice={true}
+				onSetupAnotherDevice={handleSetupAnotherDevice}
 				showRemoveAccount={true}
 				onRemoveAccount={handleRemoveAccountClick}
 				trigger={trigger}
@@ -216,17 +224,18 @@ export function AccountSwitcher() {
 				onCancel={() => setAccountToRemove(null)}
 			/>
 
-			{activeAccount && (
-				<AccountSettingsDialog
-					open={showSettings}
-					onOpenChange={setShowSettings}
-					email={activeAccount.email}
-				/>
-			)}
+			<SettingsDialog open={showSettings} onOpenChange={setShowSettings} />
 
 			<AddAccountDialog
 				open={showAddAccount}
 				onOpenChange={setShowAddAccount}
+			/>
+
+			<DeviceSetupDialog
+				open={showDeviceSetup}
+				onOpenChange={setShowDeviceSetup}
+				accounts={accountsData}
+				initialAccountEmail={activeAccountEmail}
 			/>
 		</>
 	);

@@ -114,6 +114,21 @@ object VaultDecryptor {
     }
 
     /**
+     * Decrypt an item's encrypted data and parse to JSON.
+     */
+    fun decryptItemJson(item: ItemEntity, vaultKey: ByteArray): JSONObject {
+        val decryptedJson = decryptItemData(item, vaultKey)
+        return JSONObject(decryptedJson)
+    }
+
+    /**
+     * Encrypt an updated item JSON object using the item's vault key.
+     */
+    fun encryptItemJson(updatedJson: JSONObject, vaultKey: ByteArray): AesGcmCrypto.EncryptedData {
+        return AesGcmCrypto.encrypt(updatedJson.toString(), vaultKey)
+    }
+
+    /**
      * Decrypt a login item and parse its fields.
      *
      * @param item The item entity from database

@@ -50,7 +50,7 @@ export async function runCatchUp({
 		const previousCursorKey = `${cursor.timestamp}:${cursor.id}`;
 		const page = await client.sync.getEventsSince.query({
 			since: cursor.timestamp,
-			sinceId: cursor.id,
+			sinceId: cursor.id || undefined,
 			limit,
 		});
 

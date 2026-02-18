@@ -4,7 +4,7 @@ import { TRPCProvider } from "@bittery/shared/trpc";
 import { getOrCreateClientId } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
-import Loader from "./components/loader";
+import { PendingLoader } from "./components/loader";
 import { storage } from "./lib/storage";
 import "./index.css";
 import { initWasmCrypto } from "./lib/wasm-crypto";
@@ -134,8 +134,9 @@ export const getRouter = () => {
 		routeTree,
 		scrollRestoration: true,
 		defaultPreloadStaleTime: 0,
+		defaultPendingMinMs: 350,
 		context: { trpc, queryClient },
-		defaultPendingComponent: () => <Loader />,
+		defaultPendingComponent: PendingLoader,
 		defaultNotFoundComponent: () => <div>Not Found</div>,
 		Wrap: ({ children }) => (
 			<QueryClientProvider client={queryClient}>

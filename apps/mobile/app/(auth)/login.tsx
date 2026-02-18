@@ -1,6 +1,10 @@
 import { useLogin } from "@bittery/core/hooks";
+import {
+	parseDeviceSetupParams,
+	type ParsedDeviceSetupPayload,
+} from "@bittery/shared";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import {
 	Button,
 	ControlField,
@@ -16,9 +20,10 @@ import {
 	Fingerprint,
 	Lock,
 	Mail,
+	QrCode,
 	Server,
 } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 	Alert,
 	Image,
@@ -30,6 +35,7 @@ import {
 	View,
 } from "react-native";
 import { withUniwind } from "uniwind";
+import { DeviceSetupQrScanner } from "@/components/device-setup-qr-scanner";
 import { SafeAreaView } from "@/components/safe-area-view";
 import { defaultServerUrl } from "@/constants/server-url";
 import { useAccount } from "../../src/contexts/account-context";
@@ -43,16 +49,27 @@ const StyledLock = withUniwind(Lock);
 const StyledEye = withUniwind(Eye);
 const StyledEyeOff = withUniwind(EyeOff);
 const StyledFingerprint = withUniwind(Fingerprint);
+const StyledQrCode = withUniwind(QrCode);
 
 export default function LoginScreen() {
 	const router = useRouter();
+	const searchParams = useLocalSearchParams<{
+		setup?: string;
+		v?: string;
+		email?: string;
+		serverUrl?: string;
+		secretKey?: string;
+		teamName?: string;
+	}>();
 	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
 	const { refreshAccounts } = useAccount();
+	const processedSetupParamsRef = useRef<string | null>(null);
 
 	const [serverUrl, setServerUrl] = useState(defaultServerUrl);
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [secretKey, setSecretKey] = useState("");
+	const [showSetupScanner, setShowSetupScanner] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
 	const [enableBiometric, setEnableBiometric] = useState(true);
 	const [biometricAvailable, setBiometricAvailable] = useState(false);
@@ -61,6 +78,76 @@ export default function LoginScreen() {
 		hasHardware: boolean;
 		isEnrolled: boolean;
 	}>({ hasHardware: false, isEnrolled: false });
+
+	const applySetupPayload = (payload: ParsedDeviceSetupPayload) => {
+		setEmail(payload.email);
+		setServerUrl(payload.serverUrl);
+		if (payload.secretKey) {
+			setSecretKey(payload.secretKey);
+		}
+	};
+
+	useEffect(() => {
+		const signature = JSON.stringify({
+			setup: searchParams.setup,
+			v: searchParams.v,
+			email: searchParams.email,
+			serverUrl: searchParams.serverUrl,
+			secretKey: searchParams.secretKey,
+			teamName: searchParams.teamName,
+		});
+
+		if (processedSetupParamsRef.current === signature) {
+			return;
+		}
+
+		const setupValue = Array.isArray(searchParams.setup)
+			? searchParams.setup[0]
+			: searchParams.setup;
+		if (setupValue !== "1") {
+			return;
+		}
+
+		try {
+			const parsed = parseDeviceSetupParams({
+				setup: searchParams.setup,
+				v: searchParams.v,
+				email: searchParams.email,
+				serverUrl: searchParams.serverUrl,
+				secretKey: searchParams.secretKey,
+				teamName: searchParams.teamName,
+			});
+
+			if (!parsed) {
+				return;
+			}
+
+			applySetupPayload(parsed);
+			processedSetupParamsRef.current = signature;
+
+			if (!parsed.secretKey) {
+				Alert.alert(
+					"Setup link loaded",
+					"Email and server URL were filled. Enter your Secret Key to continue.",
+				);
+			}
+		} catch (error) {
+			processedSetupParamsRef.current = signature;
+			Alert.alert(
+				"Invalid setup link",
+				error instanceof Error
+					? error.message
+					: "Could not parse this setup link.",
+			);
+		}
+	}, [
+		searchParams.email,
+		searchParams.secretKey,
+		searchParams.serverUrl,
+		searchParams.setup,
+		searchParams.teamName,
+		searchParams.v,
+	]);
 
 	useEffect(() => {
 		async function checkBiometric() {
@@ -168,9 +255,9 @@ export default function LoginScreen() {
 							<PressableFeedback
 								onPress={() => {
 									// DEV ONLY: Auto-fill credentials
-									setEmail("pixelmund@gmail.com");
+									setEmail("user@bittery.com");
 									setPassword("Hofmann01");
-									setSecretKey("A3-RGLEBN-NWPY7E-W6ZRA-G4VD6-TUKG5");
+									setSecretKey("A3-73ASV5-LCMRCU-B7TMM-VMH3K-QC27G");
 								}}
 							>
 								<Image
@@ -276,6 +363,16 @@ export default function LoginScreen() {
 								<Description>
 									Your Secret Key was provided when you created your account
 								</Description>
+								<Button
+									onPress={() => setShowSetupScanner(true)}
+									variant="secondary"
+									className="mt-3"
+								>
+									<View className="flex-row items-center gap-2">
+										<StyledQrCode size={18} className="text-muted" />
+										<Text className="text-muted">Scan setup QR</Text>
+									</View>
+								</Button>
 							</TextField>
 
 							{/* Biometric Toggle */}
@@ -343,6 +440,13 @@ export default function LoginScreen() {
 					</View>
 				</ScrollView>
 			</KeyboardAvoidingView>
+			<DeviceSetupQrScanner
+				visible={showSetupScanner}
+				onClose={() => setShowSetupScanner(false)}
+				onScanSuccess={(payload) => {
+					applySetupPayload(payload);
+				}}
+			/>
 		</SafeAreaView>
 	);
 }

@@ -80,3 +80,21 @@ export interface CredentialProviderModuleEvents {
 	onVaultLocked: (params: { success: boolean }) => void;
 	[key: string]: any;
 }
+
+/**
+ * Deferred mutation written by the Android credential provider.
+ * Flushed by the React Native sync layer before pulling inbound vault data.
+ */
+export interface PendingPasskeyMutation {
+	id: string;
+	userId: string;
+	vaultId: string;
+	itemId: string;
+	operation: "create_item" | "update_item";
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+	createdAt: number;
+	attemptCount: number;
+	lastError?: string | null;
+}

@@ -12,6 +12,7 @@ import androidx.room.RoomDatabase
  * - v1: Original CredentialEntity with double-encryption
  * - v2: Unified storage with AuthDataEntity, VaultKeyEntity, ItemEntity, ItemDomainEntity
  *       Stores encrypted server data directly, decryption on-demand with MUK
+ * - v3: Added pending passkey mutation queue for durable writeback
  *
  * The database uses destructive migration because all data can be re-synced from the server.
  * The MUK is the only critical piece, and it's managed separately in VaultStateManager.
@@ -24,9 +25,10 @@ import androidx.room.RoomDatabase
         AuthDataEntity::class,
         VaultKeyEntity::class,
         ItemEntity::class,
-        ItemDomainEntity::class
+        ItemDomainEntity::class,
+        PendingPasskeyMutationEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class CredentialDatabase : RoomDatabase() {
@@ -38,6 +40,7 @@ abstract class CredentialDatabase : RoomDatabase() {
     abstract fun vaultKeyDao(): VaultKeyDao
     abstract fun itemDao(): ItemDao
     abstract fun itemDomainDao(): ItemDomainDao
+    abstract fun pendingPasskeyMutationDao(): PendingPasskeyMutationDao
 
     companion object {
         private const val DATABASE_NAME = "bittery_credentials.db"

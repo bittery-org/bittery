@@ -46,6 +46,10 @@ function getAccountKey(email: string, suffix: string): string {
 	return `bittery_account_${sanitized}_${suffix}`;
 }
 
+function isSecureStoreOnlyKey(key: string): boolean {
+	return key === DEVICE_KEY_STORAGE || key.endsWith("_session_data");
+}
+
 interface AccountsList {
 	accounts: AccountMetadata[];
 }
@@ -146,6 +150,22 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	private async setItem(key: string, value: string): Promise<void> {
+		if (isSecureStoreOnlyKey(key)) {
+			if (!this.SecureStore) {
+				throw new Error(
+					`SecureStore not available for sensitive key write: ${key}`,
+				);
+			}
+
+			await this.SecureStore.setItemAsync(key, value);
+
+			// Ensure sensitive keys do not remain in SQLite fallback storage.
+			if (this.db) {
+				await this.db.runAsync("DELETE FROM kv_store WHERE key = ?", [key]);
+			}
+			return;
+		}
+
 		// For sensitive data under 2KB, use SecureStore
 		if (value.length < 2000 && this.SecureStore) {
 			try {
@@ -166,6 +186,45 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	private async getItem(key: string): Promise<string | null> {
+		if (isSecureStoreOnlyKey(key)) {
+			if (!this.SecureStore) {
+				console.warn(
+					`[storage-react-native] SecureStore unavailable for sensitive key read: ${key}`,
+				);
+				return null;
+			}
+
+			try {
+				const secureValue = await this.SecureStore.getItemAsync(key);
+				if (secureValue !== null) return secureValue;
+			} catch {
+				// Continue to migration check from legacy SQLite fallback.
+			}
+
+			// Legacy migration: promote historical SQLite value to SecureStore.
+			if (this.db) {
+				const legacy = await this.db.getFirstAsync<{ value: string }>(
+					"SELECT value FROM kv_store WHERE key = ?",
+					[key],
+				);
+				if (legacy?.value != null) {
+					try {
+						await this.SecureStore.setItemAsync(key, legacy.value);
+						await this.db.runAsync("DELETE FROM kv_store WHERE key = ?", [key]);
+						return legacy.value;
+					} catch (error) {
+						console.error(
+							"[storage-react-native] Failed migrating sensitive key to SecureStore:",
+							error,
+						);
+						return null;
+					}
+				}
+			}
+
+			return null;
+		}
+
 		// Try SecureStore first
 		if (this.SecureStore) {
 			try {

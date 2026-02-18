@@ -4,6 +4,7 @@ import type {
 	Credential,
 	CredentialProviderModuleEvents,
 	EscrowMukParams,
+	PendingPasskeyMutation,
 	SaveCredentialParams,
 	SyncResult,
 } from "./CredentialProvider.types";
@@ -20,7 +21,17 @@ declare class CredentialProviderModule extends NativeModule<CredentialProviderMo
 	 * @param mukBase64 Base64-encoded Master Unlock Key (32 bytes = 44 chars)
 	 * @returns true if successful
 	 */
-	setMasterUnlockKey(mukBase64: string, userId?: string): boolean;
+	setMasterUnlockKey(
+		mukBase64: string,
+		userId?: string,
+		autoLockTimeoutMs?: number,
+	): boolean;
+
+	/**
+	 * Update native MUK auto-lock timeout for a user.
+	 * Applies immediately to currently persisted native MUK state.
+	 */
+	setMukAutoLockTimeout(timeoutMs: number, userId?: string): boolean;
 
 	/**
 	 * Clear the Master Unlock Key (on logout or auto-lock).
@@ -89,6 +100,26 @@ declare class CredentialProviderModule extends NativeModule<CredentialProviderMo
 		items: number;
 		domains: number;
 	}>;
+
+	/**
+	 * Get queued passkey mutations pending durable server writeback.
+	 */
+	getPendingPasskeyMutations(
+		userId?: string,
+	): Promise<PendingPasskeyMutation[]>;
+
+	/**
+	 * Mark queued passkey mutations as successfully applied remotely.
+	 */
+	markPendingPasskeyMutationsApplied(ids: string[]): Promise<boolean>;
+
+	/**
+	 * Mark queued passkey mutations as failed (increments attempt count).
+	 */
+	markPendingPasskeyMutationsFailed(
+		ids: string[],
+		error: string,
+	): Promise<boolean>;
 
 	// ============================================
 	// 30-Day Master Password Re-entry

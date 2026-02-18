@@ -16,11 +16,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { db } from "@bittery/db";
 import { teamRouter } from "../routers/team";
 import {
-	addVaultMember,
 	addTeamMember,
-	createTestSession,
+	addVaultMember,
 	createPublicContext,
 	createTestInvitation,
+	createTestSession,
 	createTestTeam,
 	createTestVault,
 	generateTestEmail,
@@ -292,9 +292,9 @@ describe("Team Router", () => {
 			const { userId, caller } = await setup(teamRouter);
 			const teamId = await createTestTeam(userId);
 
-			await expect(
-				caller.members.remove({ teamId, userId }),
-			).rejects.toThrow("You cannot remove yourself from the team");
+			await expect(caller.members.remove({ teamId, userId })).rejects.toThrow(
+				"You cannot remove yourself from the team",
+			);
 		});
 	});
 
@@ -342,7 +342,9 @@ describe("Team Router", () => {
 					userId,
 					confirmation: "DELETE",
 				}),
-			).rejects.toThrow("You cannot delete your own account from team management");
+			).rejects.toThrow(
+				"You cannot delete your own account from team management",
+			);
 		});
 	});
 

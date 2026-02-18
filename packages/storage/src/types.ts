@@ -124,7 +124,7 @@ export function getBiometricErrorMessage(error: BiometricErrorType): string {
 		case "lockout":
 			return "Too many failed attempts. Please use your master password to unlock.";
 		case "master_password_required":
-			return "For security, please enter your master password. This is required every 30 days.";
+			return "For security, please enter your master password. This is required periodically based on your settings.";
 		case "session_expired":
 			return "Your session has expired. Please log in with your credentials.";
 		default:

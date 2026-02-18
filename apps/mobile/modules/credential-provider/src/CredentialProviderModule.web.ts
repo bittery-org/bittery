@@ -4,6 +4,7 @@ import type {
 	Credential,
 	CredentialProviderModuleEvents,
 	EscrowMukParams,
+	PendingPasskeyMutation,
 	SaveCredentialParams,
 	SyncResult,
 } from "./CredentialProvider.types";
@@ -14,7 +15,15 @@ import type {
  * appropriate fallback values on web.
  */
 class CredentialProviderModule extends NativeModule<CredentialProviderModuleEvents> {
-	setMasterUnlockKey(_mukBase64: string, _userId?: string): boolean {
+	setMasterUnlockKey(
+		_mukBase64: string,
+		_userId?: string,
+		_autoLockTimeoutMs?: number,
+	): boolean {
+		return false;
+	}
+
+	setMukAutoLockTimeout(_timeoutMs: number, _userId?: string): boolean {
 		return false;
 	}
 
@@ -114,6 +123,23 @@ class CredentialProviderModule extends NativeModule<CredentialProviderModuleEven
 		domains: number;
 	}> {
 		return { vaultKeys: 0, items: 0, domains: 0 };
+	}
+
+	async getPendingPasskeyMutations(
+		_userId?: string,
+	): Promise<PendingPasskeyMutation[]> {
+		return [];
+	}
+
+	async markPendingPasskeyMutationsApplied(_ids: string[]): Promise<boolean> {
+		return true;
+	}
+
+	async markPendingPasskeyMutationsFailed(
+		_ids: string[],
+		_error: string,
+	): Promise<boolean> {
+		return true;
 	}
 
 	async getAllCredentials(): Promise<Credential[]> {

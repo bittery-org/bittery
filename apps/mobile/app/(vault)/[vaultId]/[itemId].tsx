@@ -1,6 +1,7 @@
 import {
 	useCreateShare,
 	useDeleteItem,
+	useUpdateItem,
 	useVaultItems,
 } from "@bittery/core/hooks";
 import * as Clipboard from "expo-clipboard";
@@ -21,6 +22,7 @@ import {
 	TagsSection,
 } from "@/components/item-details";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { PasswordHistorySheet } from "@/components/password-history-sheet";
 import { ShareItemSheet } from "@/components/share/share-item-sheet";
 
 export default function ItemDetailScreen() {
@@ -33,9 +35,11 @@ export default function ItemDetailScreen() {
 	const { items, isLoading, error } = useVaultItems(vaultId);
 	const deleteItem = useDeleteItem();
 	const createShare = useCreateShare();
+	const updateItem = useUpdateItem();
 	const { toast } = useToast();
 	const popoverRef = useRef<PopoverTriggerRef>(null);
 	const [shareSheetVisible, setShareSheetVisible] = useState(false);
+	const [passwordHistoryVisible, setPasswordHistoryVisible] = useState(false);
 
 	const item = items.find((i) => i.id === itemId);
 
@@ -77,6 +81,34 @@ export default function ItemDetailScreen() {
 		setShareSheetVisible(true);
 	};
 
+	const handlePasswordHistory = () => {
+		setPasswordHistoryVisible(true);
+	};
+
+	const handleRestorePassword = async (password: string) => {
+		try {
+			await updateItem.mutateAsync({
+				itemId,
+				vaultId,
+				data: { password },
+			});
+			toast.show({
+				variant: "accent",
+				label: "Password restored",
+				description: "The password has been restored successfully.",
+				placement: "bottom",
+			});
+			setPasswordHistoryVisible(false);
+		} catch (error) {
+			toast.show({
+				variant: "danger",
+				label: "Failed to restore password",
+				description: error instanceof Error ? error.message : "Unknown error",
+				placement: "bottom",
+			});
+		}
+	};
+
 	// Loading state
 	if (isLoading) {
 		return <LoadingState />;
@@ -101,6 +133,7 @@ export default function ItemDetailScreen() {
 				onEdit={handleEdit}
 				onDelete={handleDelete}
 				onShare={handleShare}
+				onPasswordHistory={handlePasswordHistory}
 				isDeleting={deleteItem.isPending}
 				isSharing={createShare.isPending}
 				popoverRef={popoverRef}
@@ -135,6 +168,16 @@ export default function ItemDetailScreen() {
 				item={item}
 				visible={shareSheetVisible}
 				onClose={() => setShareSheetVisible(false)}
+			/>
+
+			<PasswordHistorySheet
+				visible={passwordHistoryVisible}
+				onClose={() => setPasswordHistoryVisible(false)}
+				passwordHistory={item.passwordHistory}
+				currentPassword={item.password}
+				onCopyPassword={(password) => handleCopy(password, "Password")}
+				onRestorePassword={handleRestorePassword}
+				isRestoring={updateItem.isPending}
 			/>
 		</SafeAreaView>
 	);

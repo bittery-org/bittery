@@ -3,12 +3,15 @@
 //! Exposes the core crypto library to JavaScript/TypeScript via wasm-bindgen.
 
 use bittery_crypto_core::{
-    decrypt, derive_keys, encrypt, generate_encryption_key, generate_rsa_key_pair,
-    generate_secret_key, get_secret_key_hint,
+    decrypt, decrypt_master_key, derive_keys, derive_keys_from_master_key, derive_master_key,
+    encrypt, encrypt_master_key, generate_credential_id, generate_encryption_key,
+    generate_passkey_keypair, generate_recovery_key, generate_rsa_key_pair, generate_secret_key,
+    get_secret_key_hint,
     key_rotation::{self, ItemData, MemberKeyData},
+    passkey::{build_passkey_attestation_object, sign_passkey_assertion},
     rsa_decrypt, rsa_encrypt,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient, SrpServer},
-    validate_secret_key, EncryptedData,
+    validate_recovery_key, validate_secret_key, EncryptedData,
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -104,6 +107,34 @@ pub fn js_derive_keys(
     })
 }
 
+/// Derive intermediate master key (PBKDF2 output) from password + secret key
+#[wasm_bindgen(js_name = deriveMasterKey)]
+pub fn js_derive_master_key(
+    account_password: &str,
+    secret_key: &str,
+    email: &str,
+) -> Result<String, JsError> {
+    let master_key =
+        derive_master_key(account_password, secret_key, email).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(base64_encode(&master_key))
+}
+
+/// Derive auth key + master unlock key from a raw master key
+#[wasm_bindgen(js_name = deriveKeysFromMasterKey)]
+pub fn js_derive_keys_from_master_key(
+    master_key_base64: &str,
+    email: &str,
+) -> Result<JsDerivedKeys, JsError> {
+    let master_key = base64_decode(master_key_base64)?;
+    let keys = derive_keys_from_master_key(&master_key, email)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    Ok(JsDerivedKeys {
+        auth_key: base64_encode(&keys.auth_key),
+        master_unlock_key: base64_encode(&keys.master_unlock_key),
+    })
+}
+
 // ============================================================================
 // AES-256-GCM Encryption
 // ============================================================================
@@ -177,16 +208,64 @@ pub fn js_generate_secret_key() -> String {
     generate_secret_key()
 }
 
+/// Generate a new recovery key
+#[wasm_bindgen(js_name = generateRecoveryKey)]
+pub fn js_generate_recovery_key() -> String {
+    generate_recovery_key()
+}
+
 /// Validate secret key format
 #[wasm_bindgen(js_name = validateSecretKey)]
 pub fn js_validate_secret_key(secret_key: &str) -> bool {
     validate_secret_key(secret_key)
 }
 
+/// Validate recovery key format
+#[wasm_bindgen(js_name = validateRecoveryKey)]
+pub fn js_validate_recovery_key(recovery_key: &str) -> bool {
+    validate_recovery_key(recovery_key)
+}
+
 /// Get secret key hint (first segment)
 #[wasm_bindgen(js_name = getSecretKeyHint)]
 pub fn js_get_secret_key_hint(secret_key: &str) -> String {
     get_secret_key_hint(secret_key)
+}
+
+/// Encrypt a raw 32-byte master key using recovery key material
+#[wasm_bindgen(js_name = encryptMasterKey)]
+pub fn js_encrypt_master_key(
+    master_key_base64: &str,
+    recovery_key: &str,
+    email: &str,
+) -> Result<JsEncryptedData, JsError> {
+    let master_key = base64_decode(master_key_base64)?;
+    let encrypted =
+        encrypt_master_key(&master_key, recovery_key, email).map_err(|e| JsError::new(&e.to_string()))?;
+
+    Ok(JsEncryptedData {
+        ciphertext: encrypted.ciphertext,
+        iv: encrypted.iv,
+        algorithm: encrypted.algorithm,
+    })
+}
+
+/// Decrypt encrypted recovery material and return the raw master key as base64
+#[wasm_bindgen(js_name = decryptMasterKey)]
+pub fn js_decrypt_master_key(
+    encrypted_data: JsEncryptedData,
+    recovery_key: &str,
+    email: &str,
+) -> Result<String, JsError> {
+    let data = EncryptedData {
+        ciphertext: encrypted_data.ciphertext,
+        iv: encrypted_data.iv,
+        algorithm: encrypted_data.algorithm,
+    };
+
+    let master_key =
+        decrypt_master_key(&data, recovery_key, email).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(base64_encode(&master_key))
 }
 
 // ============================================================================
@@ -353,6 +432,98 @@ impl JsSrpServer {
             proof: session.proof.clone(),
         })
     }
+}
+
+// ============================================================================
+// Passkey / WebAuthn
+// ============================================================================
+
+#[wasm_bindgen]
+#[derive(Serialize, Deserialize)]
+pub struct JsPasskeyKeypair {
+    #[wasm_bindgen(getter_with_clone)]
+    pub private_key: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub public_key_cose: String,
+}
+
+#[wasm_bindgen]
+#[derive(Serialize, Deserialize)]
+pub struct JsPasskeyAttestation {
+    #[wasm_bindgen(getter_with_clone)]
+    pub authenticator_data: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub attestation_object: String,
+}
+
+#[wasm_bindgen]
+#[derive(Serialize, Deserialize)]
+pub struct JsPasskeyAssertion {
+    #[wasm_bindgen(getter_with_clone)]
+    pub authenticator_data: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub signature_der: String,
+}
+
+/// Generate passkey private key and COSE public key.
+#[wasm_bindgen(js_name = generatePasskeyKeypair)]
+pub fn js_generate_passkey_keypair() -> Result<JsPasskeyKeypair, JsError> {
+    let keypair = generate_passkey_keypair().map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(JsPasskeyKeypair {
+        private_key: base64_encode(&keypair.private_key),
+        public_key_cose: base64_encode(&keypair.public_key_cose),
+    })
+}
+
+/// Generate a random passkey credential ID (32 bytes), base64 encoded.
+#[wasm_bindgen(js_name = generatePasskeyCredentialId)]
+pub fn js_generate_passkey_credential_id() -> String {
+    base64_encode(&generate_credential_id())
+}
+
+/// Build authenticator data + attestation object for `navigator.credentials.create()`.
+#[wasm_bindgen(js_name = buildPasskeyAttestationObject)]
+pub fn js_build_passkey_attestation_object(
+    rp_id: &str,
+    credential_id_base64: &str,
+    cose_public_key_base64: &str,
+    sign_count: Option<u32>,
+) -> Result<JsPasskeyAttestation, JsError> {
+    let credential_id = base64_decode(credential_id_base64)?;
+    let cose_public_key = base64_decode(cose_public_key_base64)?;
+
+    let result = build_passkey_attestation_object(
+        rp_id,
+        &credential_id,
+        &cose_public_key,
+        sign_count.unwrap_or(0),
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
+
+    Ok(JsPasskeyAttestation {
+        authenticator_data: base64_encode(&result.authenticator_data),
+        attestation_object: base64_encode(&result.attestation_object),
+    })
+}
+
+/// Build assertion authenticator data and sign it for `navigator.credentials.get()`.
+#[wasm_bindgen(js_name = signPasskeyAssertion)]
+pub fn js_sign_passkey_assertion(
+    private_key_base64: &str,
+    rp_id: &str,
+    client_data_hash_base64: &str,
+    sign_count: u32,
+) -> Result<JsPasskeyAssertion, JsError> {
+    let private_key = base64_decode(private_key_base64)?;
+    let client_data_hash = base64_decode(client_data_hash_base64)?;
+
+    let result = sign_passkey_assertion(&private_key, rp_id, &client_data_hash, sign_count)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    Ok(JsPasskeyAssertion {
+        authenticator_data: base64_encode(&result.authenticator_data),
+        signature_der: base64_encode(&result.signature_der),
+    })
 }
 
 // ============================================================================
@@ -642,5 +813,24 @@ mod tests {
         assert!(js_validate_secret_key(&key));
         let hint = js_get_secret_key_hint(&key);
         assert!(hint.starts_with("A3-"));
+    }
+
+    #[test]
+    fn test_recovery_master_key_roundtrip() {
+        let recovery_key = js_generate_recovery_key();
+        assert!(js_validate_recovery_key(&recovery_key));
+
+        let master_key = js_derive_master_key(
+            "password",
+            "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2",
+            "test@example.com",
+        )
+        .unwrap();
+
+        let encrypted = js_encrypt_master_key(&master_key, &recovery_key, "test@example.com")
+            .unwrap();
+        let decrypted =
+            js_decrypt_master_key(encrypted, &recovery_key, "test@example.com").unwrap();
+        assert_eq!(master_key, decrypted);
     }
 }

@@ -190,7 +190,10 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 
 		if (!this.cacheDbPromise) {
 			this.cacheDbPromise = new Promise((resolve, reject) => {
-				const request = indexedDB.open(ITEM_CACHE_DB_NAME, ITEM_CACHE_DB_VERSION);
+				const request = indexedDB.open(
+					ITEM_CACHE_DB_NAME,
+					ITEM_CACHE_DB_VERSION,
+				);
 
 				request.onupgradeneeded = () => {
 					const db = request.result;
@@ -1094,7 +1097,9 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		}
 
 		await waitForTransaction(tx);
-		await chrome.storage.local.remove(getAccountKey(resolvedEmail, CACHED_ITEMS_SUFFIX));
+		await chrome.storage.local.remove(
+			getAccountKey(resolvedEmail, CACHED_ITEMS_SUFFIX),
+		);
 	}
 
 	async getCachedItems(email?: string): Promise<CachedEncryptedItem[] | null> {
@@ -1124,7 +1129,9 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		const stored = result[legacyKey];
 		if (stored) {
 			try {
-				cache.cachedItems = JSON.parse(stored as string) as CachedEncryptedItem[];
+				cache.cachedItems = JSON.parse(
+					stored as string,
+				) as CachedEncryptedItem[];
 				if (db) {
 					await this.setCachedItems(cache.cachedItems, resolvedEmail);
 				}
@@ -1235,7 +1242,9 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		const stored = result[legacyKey];
 		if (stored) {
 			try {
-				cache.cachedVaults = JSON.parse(stored as string) as CachedVaultMetadata[];
+				cache.cachedVaults = JSON.parse(
+					stored as string,
+				) as CachedVaultMetadata[];
 				if (db) {
 					await this.setCachedVaults(cache.cachedVaults, resolvedEmail);
 				}
@@ -1351,7 +1360,9 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			} satisfies ItemCacheRecord<ItemCacheMetadata>),
 		);
 		await waitForTransaction(tx);
-		await chrome.storage.local.remove(getAccountKey(resolvedEmail, ITEM_CACHE_META_SUFFIX));
+		await chrome.storage.local.remove(
+			getAccountKey(resolvedEmail, ITEM_CACHE_META_SUFFIX),
+		);
 	}
 
 	async clearItemCache(email?: string): Promise<void> {
@@ -1366,9 +1377,21 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 
 		const db = await this.getItemCacheDb();
 		if (db) {
-			await this.clearStoreForAccount(db, ITEM_CACHE_ITEMS_STORE, resolvedEmail);
-			await this.clearStoreForAccount(db, ITEM_CACHE_VAULTS_STORE, resolvedEmail);
-			await this.clearStoreForAccount(db, ITEM_CACHE_METADATA_STORE, resolvedEmail);
+			await this.clearStoreForAccount(
+				db,
+				ITEM_CACHE_ITEMS_STORE,
+				resolvedEmail,
+			);
+			await this.clearStoreForAccount(
+				db,
+				ITEM_CACHE_VAULTS_STORE,
+				resolvedEmail,
+			);
+			await this.clearStoreForAccount(
+				db,
+				ITEM_CACHE_METADATA_STORE,
+				resolvedEmail,
+			);
 		}
 
 		await chrome.storage.local.remove([

@@ -38,6 +38,7 @@ import { VaultInfoPopover } from "./item-categories/shared/vault-info-popover";
 import ItemDetail from "./item-detail";
 import { ItemForm } from "./item-form";
 import { MoveItemDialog } from "./move-item-dialog";
+import { PasswordHistoryDialog } from "./password-history-dialog";
 import { ShareHistoryDialog } from "./share-history-dialog";
 import { ShareItemDialog } from "./share-item-dialog";
 
@@ -68,6 +69,7 @@ export function ItemDetailPage({
 	const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
 	const [isShareHistoryOpen, setIsShareHistoryOpen] = useState(false);
+	const [isPasswordHistoryOpen, setIsPasswordHistoryOpen] = useState(false);
 	const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
 	const [isUpdatingTags, setIsUpdatingTags] = useState(false);
 
@@ -109,6 +111,39 @@ export function ItemDetailPage({
 		[rawItem, decryptedData, updateItem],
 	);
 
+	const handleRemovePasskey = useCallback(
+		async (credentialId: string) => {
+			if (!rawItem || !decryptedData || rawItem.category !== "login") return;
+
+			const currentPasskeys = decryptedData.passkeys ?? [];
+			const nextPasskeys = currentPasskeys.filter(
+				(passkey) => passkey.credentialId !== credentialId,
+			);
+			if (nextPasskeys.length === currentPasskeys.length) {
+				return;
+			}
+
+			const updatedData: DecryptedItemData = {
+				...decryptedData,
+				passkeys: nextPasskeys.length > 0 ? nextPasskeys : undefined,
+			};
+
+			try {
+				await updateItem.mutateAsync({
+					itemId: rawItem.id,
+					vaultId: rawItem.vaultId,
+					data: updatedData,
+				});
+				toast.success("Passkey removed");
+			} catch (error) {
+				const errorMessage =
+					error instanceof Error ? error.message : "Failed to remove passkey";
+				toast.error(errorMessage);
+			}
+		},
+		[rawItem, decryptedData, updateItem],
+	);
+
 	const handleShare = () => {
 		setIsShareDialogOpen(true);
 	};
@@ -146,6 +181,29 @@ export function ItemDetailPage({
 			toast.error(errorMessage);
 		}
 	};
+
+	const handleRestorePassword = useCallback(
+		async (password: string) => {
+			if (!rawItem) {
+				return;
+			}
+
+			try {
+				await updateItem.mutateAsync({
+					itemId: rawItem.id,
+					vaultId: rawItem.vaultId,
+					data: { password },
+				});
+				toast.success("Password restored");
+				setIsPasswordHistoryOpen(false);
+			} catch (error) {
+				const errorMessage =
+					error instanceof Error ? error.message : "Failed to restore password";
+				toast.error(errorMessage);
+			}
+		},
+		[rawItem, updateItem],
+	);
 
 	const confirmDelete = async () => {
 		if (!rawItem) return;
@@ -270,6 +328,14 @@ export function ItemDetailPage({
 									<IconHistoryOutlineDuo18 className="size-4" />
 									Share History
 								</DropdownMenuItem>
+								{rawItem?.category === "login" && (
+									<DropdownMenuItem
+										onClick={() => setIsPasswordHistoryOpen(true)}
+									>
+										<IconHistoryOutlineDuo18 className="size-4" />
+										Password History
+									</DropdownMenuItem>
+								)}
 								<DropdownMenuSeparator />
 								<DropdownMenuItem
 									onClick={handleDelete}
@@ -288,6 +354,7 @@ export function ItemDetailPage({
 					<ItemDetail
 						category={rawItem?.category ?? "login"}
 						data={decryptedData}
+						onRemovePasskey={handleRemovePasskey}
 						onTagsChange={handleTagsChange}
 						onTagClick={onTagClick}
 						availableTags={availableTags}
@@ -388,6 +455,18 @@ export function ItemDetailPage({
 					itemId={rawItem.id}
 					open={isShareHistoryOpen}
 					onOpenChange={setIsShareHistoryOpen}
+				/>
+			)}
+
+			{/* Password History Dialog */}
+			{rawItem?.category === "login" && decryptedData && (
+				<PasswordHistoryDialog
+					open={isPasswordHistoryOpen}
+					onOpenChange={setIsPasswordHistoryOpen}
+					passwordHistory={decryptedData.passwordHistory}
+					currentPassword={decryptedData.password}
+					onRestorePassword={handleRestorePassword}
+					isRestoring={updateItem.isPending}
 				/>
 			)}
 

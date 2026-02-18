@@ -35,6 +35,41 @@ export interface CustomField {
 	type: "text" | "password" | "email" | "url";
 }
 
+export interface PasswordHistoryEntry {
+	password: string;
+	changedAt: string;
+}
+
+/**
+ * Stored passkey metadata for login items.
+ * All fields are encrypted as part of the item data blob.
+ */
+export type PasskeyStatus = "active" | "suspect";
+export type PasskeyStatusReason =
+	| "manual"
+	| "unknown-credential"
+	| "signing-error"
+	| "other";
+
+export interface Passkey {
+	credentialId: string;
+	rpId: string;
+	rpName: string;
+	userHandle: string;
+	userName: string;
+	userDisplayName: string;
+	privateKey: string;
+	publicKey: string;
+	algorithm: number;
+	signCount: number;
+	transports: string[];
+	createdAt: string;
+	lastUsedAt?: string;
+	status?: PasskeyStatus;
+	statusReason?: PasskeyStatusReason;
+	statusUpdatedAt?: string;
+}
+
 /**
  * Decrypted data payload for vault items (without metadata)
  * Contains all the actual sensitive data that gets encrypted/decrypted
@@ -45,6 +80,8 @@ export interface DecryptedItemData {
 	urls?: string[];
 	username?: string;
 	password?: string;
+	passwordHistory?: PasswordHistoryEntry[];
+	passkeys?: Passkey[];
 	notes?: string;
 	note?: string;
 	customFields?: CustomField[];
@@ -101,6 +138,8 @@ export interface LoginDisplayData {
 	urls?: string[];
 	username?: string;
 	password?: string;
+	passwordHistory?: PasswordHistoryEntry[];
+	passkeys?: Passkey[];
 	notes?: string;
 	customFields?: CustomField[];
 	tags?: string[];

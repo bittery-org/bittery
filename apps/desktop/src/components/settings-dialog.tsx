@@ -31,53 +31,72 @@ const AUTO_LOCK_OPTIONS = [
 	{ value: "-1", label: "Never" },
 ] as const;
 
-interface AccountSettingsDialogProps {
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MASTER_PASSWORD_REENTRY_OPTIONS = [
+	{ value: String(14 * DAY_MS), label: "14 days" },
+	{ value: String(30 * DAY_MS), label: "30 days" },
+	{ value: String(60 * DAY_MS), label: "60 days" },
+	{ value: String(90 * DAY_MS), label: "90 days" },
+] as const;
+
+interface SettingsDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	email: string;
 }
 
-export function AccountSettingsDialog({
-	open,
-	onOpenChange,
-	email,
-}: AccountSettingsDialogProps) {
+export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 	const queryClient = useQueryClient();
 	const [autoLockTimeout, setAutoLockTimeout] = useState(
 		String(DEFAULT_AUTO_LOCK_TIMEOUT_MS),
 	);
+	const [masterPasswordReentry, setMasterPasswordReentry] = useState(
+		String(30 * DAY_MS),
+	);
 	const [isDirty, setIsDirty] = useState(false);
 
-	// Query for auto-lock timeout
-	const autoLockTimeoutQuery = useQuery({
-		queryKey: ["autoLockTimeout", email],
+	const settingsQuery = useQuery({
+		queryKey: ["desktopSettings"],
 		queryFn: async () => {
-			const timeout = await storage.getAutoLockTimeoutOrDefault(email);
-			return timeout;
+			const [autoLockTimeoutMs, masterPasswordReentryMs] = await Promise.all([
+				storage.getAutoLockTimeoutOrDefault(),
+				storage.getMasterPasswordReentryPeriodMs(),
+			]);
+			return { autoLockTimeoutMs, masterPasswordReentryMs };
 		},
 		enabled: open,
 	});
 
-	// Reset form when dialog opens or data loads
 	useEffect(() => {
 		if (open) {
-			if (autoLockTimeoutQuery.data !== undefined) {
-				setAutoLockTimeout(String(autoLockTimeoutQuery.data));
+			if (settingsQuery.data !== undefined) {
+				setAutoLockTimeout(String(settingsQuery.data.autoLockTimeoutMs));
+				setMasterPasswordReentry(
+					String(settingsQuery.data.masterPasswordReentryMs),
+				);
 			}
 			setIsDirty(false);
 		}
-	}, [open, autoLockTimeoutQuery.data]);
+	}, [open, settingsQuery.data]);
 
-	// Mutation to save settings
 	const saveMutation = useMutation({
-		mutationFn: async ({ timeout }: { timeout: string }) => {
-			// Save auto-lock timeout
+		mutationFn: async ({
+			timeout,
+			reentryPeriod,
+		}: {
+			timeout: string;
+			reentryPeriod: string;
+		}) => {
 			const timeoutMs = Number.parseInt(timeout, 10);
-			await storage.storeAutoLockTimeout(timeoutMs, email);
+			const reentryPeriodMs = Number.parseInt(reentryPeriod, 10);
+			await Promise.all([
+				storage.storeAutoLockTimeout(timeoutMs),
+				storage.storeMasterPasswordReentryPeriodMs(reentryPeriodMs),
+			]);
 		},
 		onSuccess: () => {
 			toast.success("Settings saved successfully");
-			queryClient.invalidateQueries({ queryKey: ["autoLockTimeout", email] });
+			queryClient.invalidateQueries({ queryKey: ["desktopSettings"] });
+			queryClient.invalidateQueries({ queryKey: ["sessionState"] });
 			setIsDirty(false);
 			onOpenChange(false);
 		},
@@ -87,14 +106,19 @@ export function AccountSettingsDialog({
 	});
 
 	const handleSave = () => {
-		saveMutation.mutate({ timeout: autoLockTimeout });
+		saveMutation.mutate({
+			timeout: autoLockTimeout,
+			reentryPeriod: masterPasswordReentry,
+		});
 	};
 
 	const handleClose = () => {
 		if (isDirty) {
-			// Reset to original values
 			setAutoLockTimeout(
-				String(autoLockTimeoutQuery.data ?? DEFAULT_AUTO_LOCK_TIMEOUT_MS),
+				String(settingsQuery.data?.autoLockTimeoutMs ?? DEFAULT_AUTO_LOCK_TIMEOUT_MS),
+			);
+			setMasterPasswordReentry(
+				String(settingsQuery.data?.masterPasswordReentryMs ?? 30 * DAY_MS),
 			);
 			setIsDirty(false);
 		}
@@ -106,14 +130,19 @@ export function AccountSettingsDialog({
 		setIsDirty(true);
 	};
 
-	const isLoading = autoLockTimeoutQuery.isLoading;
+	const handleMasterPasswordReentryChange = (value: string) => {
+		setMasterPasswordReentry(value);
+		setIsDirty(true);
+	};
+
+	const isLoading = settingsQuery.isLoading;
 
 	return (
 		<Dialog open={open} onOpenChange={handleClose}>
 			<DialogContent className="sm:max-w-md">
 				<DialogHeader>
-					<DialogTitle>Account Settings</DialogTitle>
-					<DialogDescription>Configure settings for {email}</DialogDescription>
+					<DialogTitle>Settings</DialogTitle>
+					<DialogDescription>Configure app settings</DialogDescription>
 				</DialogHeader>
 
 				{isLoading ? (
@@ -141,6 +170,31 @@ export function AccountSettingsDialog({
 							</Select>
 							<p className="text-muted-foreground text-xs">
 								Automatically lock your vault after a period of inactivity.
+							</p>
+						</div>
+
+						<div className="space-y-2">
+							<Label htmlFor="masterPasswordReentry">
+								Master Password Re-entry
+							</Label>
+							<Select
+								value={masterPasswordReentry}
+								onValueChange={handleMasterPasswordReentryChange}
+							>
+								<SelectTrigger id="masterPasswordReentry">
+									<SelectValue placeholder="Select interval" />
+								</SelectTrigger>
+								<SelectContent>
+									{MASTER_PASSWORD_REENTRY_OPTIONS.map((option) => (
+										<SelectItem key={option.value} value={option.value}>
+											{option.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+							<p className="text-muted-foreground text-xs">
+								Require the master password periodically when using biometric
+								unlock.
 							</p>
 						</div>
 					</div>

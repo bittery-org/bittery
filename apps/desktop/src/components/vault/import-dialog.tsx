@@ -185,6 +185,13 @@ export function ImportDialog({
 			return result;
 		},
 		onSuccess: async () => {
+			// Clear local item cache so the next fetch hits the server
+			// (React Query invalidation alone isn't enough — the cache-first
+			// pattern in ItemService would return stale cached items)
+			if (storage.clearItemCache) {
+				await storage.clearItemCache(accountEmail);
+			}
+
 			// Invalidate queries to refresh the item list
 			await invalidator.invalidateVaultList(vaultId);
 

@@ -45,6 +45,7 @@ export class SyncManager {
 	private onEvent?: (event: SyncEvent) => void;
 	private onStatusChange?: (status: ConnectionStatus) => void;
 
+	private fetchImpl: (url: string, init?: any) => Promise<Response>;
 	private abortController: AbortController | null = null;
 	private connectionStatus: ConnectionStatus = "disconnected";
 	private reconnectAttempt = 0;
@@ -71,6 +72,7 @@ export class SyncManager {
 		this.onStatusChange = options.onStatusChange;
 		this.reconnectDelay = options.reconnectDelay || 1000;
 		this.maxReconnectDelay = options.maxReconnectDelay || 30000;
+		this.fetchImpl = options.fetch || globalThis.fetch.bind(globalThis);
 	}
 
 	/**
@@ -157,14 +159,15 @@ export class SyncManager {
 		try {
 			const token = await this.getAuthToken();
 			if (!token) {
-				this.setStatus("error");
+				this.setStatus("reconnecting");
+				this.scheduleReconnect();
 				return;
 			}
 
 			// Create abort controller for this connection
 			this.abortController = new AbortController();
 
-			const response = await fetch(`${this.serverUrl}/sync/events`, {
+			const response = await this.fetchImpl(`${this.serverUrl}/sync/events`, {
 				method: "GET",
 				headers: {
 					Authorization: `Bearer ${token}`,
@@ -223,7 +226,7 @@ export class SyncManager {
 				buffer += decoder.decode(value, { stream: true });
 
 				// Process complete events in buffer
-				const events = buffer.split("\n\n");
+				const events = buffer.split(/\r?\n\r?\n/);
 				buffer = events.pop() || ""; // Keep incomplete event in buffer
 
 				for (const eventStr of events) {
@@ -245,8 +248,8 @@ export class SyncManager {
 	 * Process a single SSE event
 	 */
 	private processEvent(eventStr: string): void {
-		const lines = eventStr.trim().split("\n");
-		let data = "";
+		const lines = eventStr.trim().split(/\r?\n/);
+		const dataLines: string[] = [];
 		let eventType = "";
 
 		for (const line of lines) {
@@ -263,11 +266,12 @@ export class SyncManager {
 
 			if (line.startsWith("event: ")) {
 				eventType = line.slice(7);
-			} else if (line.startsWith("data: ")) {
-				data = line.slice(6);
+			} else if (line.startsWith("data:")) {
+				dataLines.push(line.slice(5).trimStart());
 			}
 		}
 
+		const data = dataLines.join("\n");
 		if (!data) {
 			return;
 		}
@@ -309,6 +313,9 @@ export class SyncManager {
 				timestamp: syncEvent.timestamp,
 				id: syncEvent.id,
 			};
+			void this.setStoredLastSyncCursor(this.lastEventCursor).catch((error) => {
+				console.error("Failed to persist sync cursor:", error);
+			});
 
 			// Skip events from own client (already handled via optimistic updates)
 			if (syncEvent.clientId === this.clientId) {

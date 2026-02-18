@@ -32,11 +32,6 @@ type DesktopAccountContext = {
 	name: string;
 };
 
-function isDesktopDecryptionAvailable(): boolean {
-	const status = desktopSync.getLastStatus();
-	return Boolean(status?.available && !status.locked);
-}
-
 function buildAccountContext(
 	account: AccountMetadata | null,
 	email: string,
@@ -312,7 +307,13 @@ async function decryptVaultItemsViaDesktop(): Promise<MultiAccountItem[]> {
 export async function getDecryptedItemsForCurrentMode(): Promise<
 	Array<DecryptedItem | null>
 > {
-	if (isDesktopDecryptionAvailable()) {
+	const desktopStatus =
+		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
+	const desktopDecryptionAvailable = Boolean(
+		desktopStatus?.available && !desktopStatus.locked,
+	);
+
+	if (desktopDecryptionAvailable) {
 		try {
 			return await decryptVaultItemsViaDesktop();
 		} catch (error) {

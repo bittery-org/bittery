@@ -5,6 +5,10 @@
  * Runtime message types are preserved for popup/content compatibility.
  */
 
+import type {
+	PasskeyCreateHandlerPayload,
+	PasskeyGetHandlerPayload,
+} from "../passkey/types";
 import {
 	handleCanQuickUnlock,
 	handleCheckAuth,
@@ -36,6 +40,11 @@ import {
 	handleOpenDesktopApp,
 } from "./native-messaging";
 import {
+	handlePasskeyCancel,
+	handlePasskeyCreate,
+	handlePasskeyGet,
+} from "./passkey-handlers";
+import {
 	handleCaptureTabScreenshot,
 	handleUpdateItemTotp,
 } from "./qr-scan-handlers";
@@ -59,6 +68,12 @@ type RuntimeMessage = {
 	payload?: unknown;
 };
 
+type PasskeyRouteOverrides = Partial<{
+	handlePasskeyCreate: typeof handlePasskeyCreate;
+	handlePasskeyGet: typeof handlePasskeyGet;
+	handlePasskeyCancel: typeof handlePasskeyCancel;
+}>;
+
 function getPayload<TPayload>(message: RuntimeMessage): TPayload {
 	return message.payload as TPayload;
 }
@@ -74,7 +89,17 @@ function ensureSyncInitialized(_reason: string): void {
 	});
 }
 
-async function routeRuntimeMessage(message: RuntimeMessage): Promise<unknown> {
+export async function routeRuntimeMessage(
+	message: RuntimeMessage,
+	overrides?: PasskeyRouteOverrides,
+): Promise<unknown> {
+	const passkeyHandlers = {
+		handlePasskeyCreate,
+		handlePasskeyGet,
+		handlePasskeyCancel,
+		...overrides,
+	};
+
 	switch (message.type) {
 		// Authentication
 		case "LOGIN": {
@@ -224,6 +249,25 @@ async function routeRuntimeMessage(message: RuntimeMessage): Promise<unknown> {
 
 		case "GET_AUTOFILL_IDENTITIES": {
 			return handleGetAutofillIdentities();
+		}
+
+		// Passkeys
+		case "PASSKEY_CREATE": {
+			return passkeyHandlers.handlePasskeyCreate(
+				getPayload<PasskeyCreateHandlerPayload>(message),
+			);
+		}
+
+		case "PASSKEY_GET": {
+			return passkeyHandlers.handlePasskeyGet(
+				getPayload<PasskeyGetHandlerPayload>(message),
+			);
+		}
+
+		case "PASSKEY_CANCEL": {
+			return passkeyHandlers.handlePasskeyCancel(
+				getPayload<{ requestId?: string }>(message),
+			);
 		}
 
 		// Native messaging (biometric unlock)

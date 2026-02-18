@@ -17,8 +17,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { db } from "@bittery/db";
 import { authRouter } from "../routers/auth";
 import {
-	createTestInvitation,
 	createPublicContext,
+	createTestInvitation,
 	createTestSession,
 	createTestTeam,
 	createTestUser,
@@ -38,10 +38,12 @@ function toSignupCryptoInput(
 ) {
 	return {
 		secretKeyHint: data.secretKeyHint,
+		recoveryKeyHint: data.recoveryKeyHint,
 		srpSalt: data.srpSalt,
 		srpVerifier: data.srpVerifier,
 		publicKey: data.publicKey,
 		encryptedPrivateKey: data.encryptedPrivateKey,
+		encryptedMasterKey: data.encryptedMasterKey,
 		encryptedVaultKey: data.encryptedVaultKey,
 	};
 }
@@ -174,7 +176,9 @@ describe("Auth Router", () => {
 
 		test("signupWithInvitation should create a personal vault for invitees", async () => {
 			const inviter = await setup(authRouter);
-			const teamId = await createTestTeam(inviter.userId, { name: "Invite Team" });
+			const teamId = await createTestTeam(inviter.userId, {
+				name: "Invite Team",
+			});
 			const inviteeEmail = generateTestEmail();
 			const invitation = await createTestInvitation(
 				teamId,
@@ -192,7 +196,9 @@ describe("Auth Router", () => {
 
 			expect(result.success).toBe(true);
 			expect(result.user.teamId).toBe(teamId);
-			const personalVault = result.vaultKeys.find((vk) => vk.vaultName === "Personal");
+			const personalVault = result.vaultKeys.find(
+				(vk) => vk.vaultName === "Personal",
+			);
 			expect(personalVault).toBeDefined();
 			expect(personalVault?.role).toBe("owner");
 		});

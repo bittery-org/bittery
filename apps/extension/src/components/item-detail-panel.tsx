@@ -33,6 +33,26 @@ const getItemNotes = (item: DecryptedItem) => item.notes || item.note || "";
 const normalizeUrl = (url: string) =>
 	url.includes("://") ? url : `https://${url}`;
 
+const formatPasskeyLastUsed = (value?: string) => {
+	if (!value) {
+		return "never";
+	}
+
+	const timestamp = Date.parse(value);
+	if (Number.isNaN(timestamp)) {
+		return "recently";
+	}
+
+	const deltaMs = Date.now() - timestamp;
+	const deltaDays = Math.floor(deltaMs / (24 * 60 * 60 * 1000));
+
+	if (deltaDays <= 0) return "today";
+	if (deltaDays === 1) return "yesterday";
+	if (deltaDays < 30) return `${deltaDays}d ago`;
+
+	return new Date(timestamp).toLocaleDateString();
+};
+
 const handleOpenUrl = (targetUrl: string | undefined) => {
 	if (!targetUrl) {
 		toast.error("No URL to open");
@@ -184,6 +204,11 @@ function LoginItemDetail({
 	const [showQRScanner, setShowQRScanner] = useState(false);
 	const [isSaving, setIsSaving] = useState(false);
 	const notes = getItemNotes(item);
+	const passkeys = [...(item.passkeys ?? [])].sort((left, right) => {
+		const leftTs = Date.parse(left.lastUsedAt ?? left.createdAt);
+		const rightTs = Date.parse(right.lastUsedAt ?? right.createdAt);
+		return rightTs - leftTs;
+	});
 
 	const handleQRScanComplete = useCallback(
 		async (result: QRScanResult) => {
@@ -307,6 +332,45 @@ function LoginItemDetail({
 							</ButtonGroup>
 						</InputGroupAddon>
 					</InputGroup>
+				</div>
+			)}
+
+			{passkeys.length > 0 && (
+				<div className="space-y-2">
+					<Label className="font-medium text-sm">Passkeys</Label>
+					<div className="space-y-1">
+						{passkeys.map((passkey, index) => (
+							<div
+								key={`${passkey.credentialId}-${index}`}
+								className="flex items-center justify-between gap-2 rounded-md border px-2.5 py-2"
+							>
+								<div className="min-w-0">
+									<p className="truncate font-medium text-sm">
+										{passkey.userDisplayName || passkey.userName || "Passkey"}
+									</p>
+									<p className="truncate text-[11px] text-muted-foreground">
+										{passkey.rpId}
+										{" \u2022 "}
+										used{" "}
+										{formatPasskeyLastUsed(
+											passkey.lastUsedAt ?? passkey.createdAt,
+										)}
+										{" \u2022 "}#{passkey.signCount ?? 0}
+									</p>
+								</div>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className="size-7 shrink-0"
+									title="Copy passkey credential ID"
+									onClick={() => handleCopy(passkey.credentialId, "Passkey ID")}
+								>
+									<IconCopyOutlineDuo18 className="size-4" />
+								</Button>
+							</div>
+						))}
+					</div>
 				</div>
 			)}
 

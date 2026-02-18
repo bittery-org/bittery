@@ -117,9 +117,15 @@ export default function UnlockScreen() {
 		for (const email of emails) {
 			const muk = await storage.getMasterUnlockKey(email);
 			const sessionData = await storage.getStoredSessionData(email);
+			const autoLockTimeoutMs =
+				await storage.getAutoLockTimeoutOrDefault(email);
 			if (muk && sessionData?.userId) {
 				const mukBase64 = arrayBufferToBase64(muk);
-				CredentialProvider.setMasterUnlockKey(mukBase64, sessionData.userId);
+				CredentialProvider.setMasterUnlockKey(
+					mukBase64,
+					sessionData.userId,
+					autoLockTimeoutMs,
+				);
 			}
 		}
 	}, []);

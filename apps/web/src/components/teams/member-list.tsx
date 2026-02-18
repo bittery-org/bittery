@@ -111,7 +111,8 @@ export function MemberList({
 		return role;
 	};
 
-	const isBusy = removeMemberMutation.isPending || deleteAccountMutation.isPending;
+	const isBusy =
+		removeMemberMutation.isPending || deleteAccountMutation.isPending;
 
 	return (
 		<Table>
@@ -120,7 +121,9 @@ export function MemberList({
 					<TableHead>Member</TableHead>
 					<TableHead>Role</TableHead>
 					<TableHead>Joined</TableHead>
-					{canManageMembers && <TableHead className="w-[180px]">Actions</TableHead>}
+					{canManageMembers && (
+						<TableHead className="w-[180px]">Actions</TableHead>
+					)}
 				</TableRow>
 			</TableHeader>
 			<TableBody>
@@ -166,11 +169,7 @@ export function MemberList({
 										{canRemove && (
 											<AlertDialog>
 												<AlertDialogTrigger asChild>
-													<Button
-														variant="outline"
-														size="sm"
-														disabled={isBusy}
-													>
+													<Button variant="outline" size="sm" disabled={isBusy}>
 														<UserMinus className="mr-2 h-4 w-4" />
 														Remove
 													</Button>
@@ -179,9 +178,9 @@ export function MemberList({
 													<AlertDialogHeader>
 														<AlertDialogTitle>Remove Member</AlertDialogTitle>
 														<AlertDialogDescription>
-															Remove {member.name} from this team? Their current sessions
-															will be invalidated and their team vault access will be
-															revoked.
+															Remove {member.name} from this team? Their current
+															sessions will be invalidated and their team vault
+															access will be revoked.
 														</AlertDialogDescription>
 													</AlertDialogHeader>
 													<AlertDialogFooter>
@@ -221,10 +220,13 @@ export function MemberList({
 												</AlertDialogTrigger>
 												<AlertDialogContent>
 													<AlertDialogHeader>
-														<AlertDialogTitle>Delete Account Permanently</AlertDialogTitle>
+														<AlertDialogTitle>
+															Delete Account Permanently
+														</AlertDialogTitle>
 														<AlertDialogDescription>
-															This permanently deletes {member.name}'s account and all
-															associated data. This action cannot be undone.
+															This permanently deletes {member.name}'s account
+															and all associated data. This action cannot be
+															undone.
 														</AlertDialogDescription>
 													</AlertDialogHeader>
 													<AlertDialogFooter>

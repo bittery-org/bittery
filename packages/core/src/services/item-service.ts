@@ -3,6 +3,7 @@ import type {
 	DecryptedItemData,
 	ItemCategory,
 } from "@bittery/shared/types";
+import { applyPasswordHistoryOnPasswordChange } from "@bittery/shared/password-history";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type {
 	CachedEncryptedItem,
@@ -98,7 +99,7 @@ export interface CreateItemResult {
 export interface UpdateItemInput {
 	itemId: string;
 	vaultId: string;
-	data: DecryptedItemData;
+	data: Partial<DecryptedItemData>;
 	accountEmail?: string;
 }
 
@@ -770,8 +771,30 @@ export class ItemService {
 			throw new Error("No vault key found. Please sign in again.");
 		}
 
+		let encryptedPayload: Partial<DecryptedItemData> = input.data;
+		const { rawItem, decryptedData } = await this.fetchAndDecryptItem(
+			input.itemId,
+			defaultClient,
+			input.accountEmail,
+		);
+
+		if (rawItem?.category === "login" && decryptedData) {
+			const mergedLoginData: DecryptedItemData = {
+				...decryptedData,
+				...input.data,
+			};
+
+			mergedLoginData.passwordHistory = applyPasswordHistoryOnPasswordChange({
+				passwordHistory: mergedLoginData.passwordHistory,
+				previousPassword: decryptedData.password,
+				nextPassword: mergedLoginData.password,
+			});
+
+			encryptedPayload = mergedLoginData;
+		}
+
 		const encryptedData = await this.crypto.encrypt(
-			JSON.stringify(input.data),
+			JSON.stringify(encryptedPayload),
 			vaultKey,
 		);
 

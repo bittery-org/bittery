@@ -96,7 +96,18 @@ export function AddAccountDialog({
 			};
 
 			await storage.addAccountToList(accountMetadata);
-			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+
+			// Clear stale item cache for this account (e.g. from a previous session)
+			if (storage.clearItemCache) {
+				await storage.clearItemCache(normalizedEmail);
+			}
+
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: ["accounts"] }),
+				queryClient.invalidateQueries({ queryKey: ["items"] }),
+				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
+				queryClient.invalidateQueries({ queryKey: ["decrypted-item"] }),
+			]);
 
 			toast.success("Account added successfully");
 			onOpenChange(false);

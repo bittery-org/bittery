@@ -11,18 +11,19 @@ import {
 	InputGroupButton,
 	InputGroupInput,
 	toast,
-	VaultIcon,
-	type VaultIconState,
 } from "@bittery/ui";
 import {
 	IconEyeOutlineDuo18,
 	IconEyeSlashOutlineDuo18,
 	IconFingerprintOutlineDuo18,
 	IconKeyOutlineDuo18,
+	IconLoader2Fill18,
 } from "@bittery/ui/icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { AuthDoorsLayout } from "@/components/auth/auth-doors-layout";
+import { triggerAuthRevealToVault } from "@/lib/auth-reveal-transition";
 import { storage } from "@/lib/storage";
 
 interface UnlockSearchParams {
@@ -50,7 +51,6 @@ export function UnlockPage() {
 	const { accounts } = useAccountSwitcher();
 	const queryClient = useQueryClient();
 	const [password, setPassword] = useState("");
-	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
 	const [showPassword, setShowPassword] = useState(false);
 	const hasAttemptedBiometric = useRef(false);
 	const { autoTrigger, autoTriggerId } = Route.useSearch();
@@ -77,8 +77,6 @@ export function UnlockPage() {
 				});
 			}
 
-			setVaultState("unlocked");
-
 			if (result.failed.length === 0) {
 				if (allAccounts.length === 1) {
 					toast.success("Vault unlocked");
@@ -91,9 +89,7 @@ export function UnlockPage() {
 				);
 			}
 
-			setTimeout(() => {
-				navigate({ to: "/vault" });
-			}, 600);
+			triggerAuthRevealToVault();
 		},
 		onPartialSuccess: async (result) => {
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
@@ -101,27 +97,19 @@ export function UnlockPage() {
 			if (allAccounts.length > 1) {
 				await storage.setActiveAccount({ type: "all" });
 			}
-
-			setVaultState("unlocked");
 			toast.warning(
 				`Unlocked ${result.unlocked.length} of ${allAccounts.length} accounts`,
 			);
-
-			setTimeout(() => {
-				navigate({ to: "/vault" });
-			}, 600);
+			triggerAuthRevealToVault();
 		},
 		onError: (error) => {
 			console.error("Unlock all error:", error);
-			setVaultState("locked");
 			toast.error(error.message || "Failed to unlock accounts");
 		},
 	});
 
 	// Biometric unlock all accounts with ONE prompt
 	const handleBiometricUnlockAll = async () => {
-		setVaultState("unlocking");
-
 		try {
 			// Use the unified biometric unlock method that shows ONE prompt for all accounts
 			if (!storage.unlockAllAccountsWithBiometric) {
@@ -146,7 +134,6 @@ export function UnlockPage() {
 			}
 
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
-			setVaultState("unlocked");
 
 			if (failed.length === 0) {
 				if (allAccounts.length === 1) {
@@ -160,12 +147,9 @@ export function UnlockPage() {
 				);
 			}
 
-			setTimeout(() => {
-				navigate({ to: "/vault" });
-			}, 600);
+			triggerAuthRevealToVault();
 		} catch (error) {
 			console.error("Biometric unlock error:", error);
-			setVaultState("locked");
 			toast.error(
 				error instanceof Error ? error.message : "Biometric unlock failed",
 			);
@@ -174,7 +158,6 @@ export function UnlockPage() {
 
 	const handlePasswordUnlock = async (e: React.FormEvent) => {
 		e.preventDefault();
-		setVaultState("unlocking");
 
 		// Unlock all accounts with the same password
 		quickUnlockAll.mutate({ password });
@@ -204,8 +187,6 @@ export function UnlockPage() {
 			hasAttemptedBiometric.current = true;
 			// Small delay to ensure everything is initialized
 			const timeout = setTimeout(async () => {
-				setVaultState("unlocking");
-
 				try {
 					if (!storage.unlockAllAccountsWithBiometric) {
 						throw new Error("Biometric unlock not supported on this platform");
@@ -229,7 +210,6 @@ export function UnlockPage() {
 					}
 
 					await queryClient.invalidateQueries({ queryKey: ["accounts"] });
-					setVaultState("unlocked");
 
 					if (failed.length === 0) {
 						if (allAccounts.length === 1) {
@@ -243,31 +223,25 @@ export function UnlockPage() {
 						);
 					}
 
-					setTimeout(() => {
-						navigate({ to: "/vault" });
-					}, 600);
+					triggerAuthRevealToVault();
 				} catch (error) {
 					console.error("Biometric unlock error:", error);
-					setVaultState("locked");
 					// Don't show toast on auto-trigger failure - user can manually try
 				}
 			}, 100);
 
 			return () => clearTimeout(timeout);
 		}
-	}, [
-		autoTrigger,
-		allAccounts,
-		queryClient,
-		navigate,
-	]);
+	}, [autoTrigger, allAccounts, queryClient]);
 
 	// Show loading state while accounts are being fetched
 	if (accounts.isLoading) {
 		return (
-			<div className="flex h-full items-center justify-center">
-				<div className="text-gray-600">Loading...</div>
-			</div>
+			<AuthDoorsLayout showFooter={false}>
+				<div className="flex items-center justify-center rounded-full border border-border bg-white p-4 shadow-sm dark:bg-gray-900">
+					<IconLoader2Fill18 className="size-7 animate-spin text-primary" />
+				</div>
+			</AuthDoorsLayout>
 		);
 	}
 
@@ -278,105 +252,81 @@ export function UnlockPage() {
 	}
 
 	return (
-		<div className="flex h-full items-center justify-center bg-gray-50 p-4">
-			<div className="w-full max-w-2xl">
-				<div className="flex items-start gap-12">
-					{/* Left side - Vault Icon */}
-					<div className="shrink-0">
-						<VaultIcon state={vaultState} size={180} />
-					</div>
-
-					{/* Right side - Unlock Form */}
-					<div className="flex-1 pt-6">
-						{/* Account Avatars */}
-						<div className="mb-5">
-							<AvatarGroup accounts={allAccounts} maxVisible={3} size="lg" />
-						</div>
-
-						{/* Master Password Required Notice */}
-						{requiresPasswordReentry && (
-							<div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
-								<IconKeyOutlineDuo18 className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
-								<div>
-									<p className="font-medium text-amber-800">
-										Password Required
-									</p>
-									<p className="text-amber-700 text-sm">
-										For your security, please enter your master password. This
-										is required every 30 days.
-									</p>
-								</div>
-							</div>
-						)}
-
-						{/* Password Input with Eye and Fingerprint */}
-						<form onSubmit={handlePasswordUnlock} className="w-80">
-							<InputGroup>
-								<InputGroupInput
-									id="password"
-									type={showPassword ? "text" : "password"}
-									value={password}
-									onChange={(e) => setPassword(e.target.value)}
-									required
-									placeholder="Enter your password"
-									autoFocus
-									disabled={loading}
-									className="text-base"
-									onKeyDown={(e) => {
-										if (e.key === "Enter" && !loading) {
-											handlePasswordUnlock(e as unknown as React.FormEvent);
-										}
-									}}
-								/>
-								<InputGroupAddon align="inline-end">
-									<ButtonGroup>
-										<InputGroupButton
-											type="button"
-											size="icon-sm"
-											onClick={() => setShowPassword(!showPassword)}
-											disabled={loading}
-											aria-label={
-												showPassword ? "Hide password" : "Show password"
-											}
-										>
-											{showPassword ? (
-												<IconEyeSlashOutlineDuo18
-													className="h-4 w-4"
-													strokeWidth={1}
-												/>
-											) : (
-												<IconEyeOutlineDuo18
-													className="h-4 w-4"
-													strokeWidth={1}
-												/>
-											)}
-										</InputGroupButton>
-										{canUseBiometric && (
-											<InputGroupButton
-												type="button"
-												size="icon-sm"
-												onClick={handleBiometricUnlockAll}
-												disabled={loading}
-												aria-label="Unlock with biometric"
-												className="text-primary hover:text-primary/80"
-											>
-												<IconFingerprintOutlineDuo18 className="h-5 w-5" />
-											</InputGroupButton>
-										)}
-									</ButtonGroup>
-								</InputGroupAddon>
-							</InputGroup>
-						</form>
-
-						{/* Lock message */}
-						<p className="mt-4 w-80 text-muted-foreground text-sm">
-							{allAccounts.length === 1
-								? "Bittery was locked due to inactivity."
-								: `Bittery was locked with ${allAccounts.length} accounts.`}
-						</p>
-					</div>
+		<AuthDoorsLayout showFooter={false}>
+			<div className="w-full max-w-sm lg:pt-6">
+				<div className="mb-5">
+					<AvatarGroup accounts={allAccounts} maxVisible={3} size="lg" />
 				</div>
+
+				{requiresPasswordReentry && (
+					<div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+						<IconKeyOutlineDuo18 className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+						<div>
+							<p className="font-medium text-amber-800">Password Required</p>
+							<p className="text-amber-700 text-sm">
+								For your security, please enter your master password. This is
+								required periodically based on your settings.
+							</p>
+						</div>
+					</div>
+				)}
+
+				<form onSubmit={handlePasswordUnlock} className="w-full">
+					<InputGroup>
+						<InputGroupInput
+							id="password"
+							type={showPassword ? "text" : "password"}
+							value={password}
+							onChange={(e) => setPassword(e.target.value)}
+							required
+							placeholder="Enter your password"
+							autoFocus
+							disabled={loading}
+							className="text-base"
+							onKeyDown={(e) => {
+								if (e.key === "Enter" && !loading) {
+									handlePasswordUnlock(e as unknown as React.FormEvent);
+								}
+							}}
+						/>
+						<InputGroupAddon align="inline-end">
+							<ButtonGroup>
+								<InputGroupButton
+									type="button"
+									size="icon-sm"
+									onClick={() => setShowPassword(!showPassword)}
+									disabled={loading}
+									aria-label={showPassword ? "Hide password" : "Show password"}
+								>
+									{showPassword ? (
+										<IconEyeSlashOutlineDuo18 className="h-4 w-4" strokeWidth={1} />
+									) : (
+										<IconEyeOutlineDuo18 className="h-4 w-4" strokeWidth={1} />
+									)}
+								</InputGroupButton>
+								{canUseBiometric && (
+									<InputGroupButton
+										type="button"
+										size="icon-sm"
+										onClick={handleBiometricUnlockAll}
+										disabled={loading}
+										aria-label="Unlock with biometric"
+										className="text-primary hover:text-primary/80"
+									>
+										<IconFingerprintOutlineDuo18 className="h-5 w-5" />
+									</InputGroupButton>
+								)}
+							</ButtonGroup>
+						</InputGroupAddon>
+					</InputGroup>
+				</form>
+
+				<p className="mt-4 text-muted-foreground text-sm">
+					{allAccounts.length === 1
+						? "Bittery was locked due to inactivity."
+						: `Bittery was locked with ${allAccounts.length} accounts.`}
+				</p>
 			</div>
-		</div>
+		</AuthDoorsLayout>
 	);
 }

@@ -11,7 +11,10 @@ import {
 } from "./desktop-key-material";
 import { desktopSync } from "./desktop-sync";
 import { onLocalItemUpdated } from "./services/local-item-cache-service";
-import { isUnlocked, updateActivity } from "./session-manager";
+import {
+	ensureUnlockedOrRecoverFromDesktop,
+	updateActivity,
+} from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
 
@@ -146,7 +149,7 @@ export async function handleUpdateItemTotp(payload: {
 	}
 
 	// Check if extension is still unlocked
-	if (!isUnlocked()) {
+	if (!(await ensureUnlockedOrRecoverFromDesktop())) {
 		return {
 			success: false,
 			error: "Extension is locked. Please unlock and try again.",

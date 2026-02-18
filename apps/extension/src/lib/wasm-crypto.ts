@@ -8,15 +8,22 @@
  * on each wake from idle, so we use auto-init pattern.
  */
 
+import * as wasmCrypto from "@bittery/crypto-wasm";
 import init, {
 	JsEncryptedData,
 	type JsSession,
 	JsSrpClient,
 	decrypt as wasmDecrypt,
+	decryptMasterKey as wasmDecryptMasterKey,
 	deriveKeys as wasmDeriveKeys,
+	deriveKeysFromMasterKey as wasmDeriveKeysFromMasterKey,
+	deriveMasterKey as wasmDeriveMasterKey,
 	encrypt as wasmEncrypt,
+	encryptMasterKey as wasmEncryptMasterKey,
 	generateEncryptionKey as wasmGenerateEncryptionKey,
+	generateRecoveryKey as wasmGenerateRecoveryKey,
 	rsaDecrypt as wasmRsaDecrypt,
+	validateRecoveryKey as wasmValidateRecoveryKey,
 	validateSecretKey as wasmValidateSecretKey,
 } from "@bittery/crypto-wasm";
 import type {
@@ -34,6 +41,47 @@ export type {
 	SRPClientEphemeral,
 	SRPClientSession,
 	SRPServerChallenge,
+};
+
+export interface PasskeyKeypair {
+	privateKey: string;
+	publicKeyCose: string;
+}
+
+export interface PasskeyAttestation {
+	authenticatorData: Uint8Array;
+	attestationObject: Uint8Array;
+}
+
+export interface PasskeyAssertion {
+	authenticatorData: Uint8Array;
+	signatureDer: Uint8Array;
+}
+
+type PasskeyWasmExports = {
+	generatePasskeyKeypair?: () => {
+		private_key: string;
+		public_key_cose: string;
+	};
+	generatePasskeyCredentialId?: () => string;
+	buildPasskeyAttestationObject?: (
+		rpId: string,
+		credentialIdBase64: string,
+		cosePublicKeyBase64: string,
+		signCount?: number,
+	) => {
+		authenticator_data: string;
+		attestation_object: string;
+	};
+	signPasskeyAssertion?: (
+		privateKeyBase64: string,
+		rpId: string,
+		clientDataHashBase64: string,
+		signCount: number,
+	) => {
+		authenticator_data: string;
+		signature_der: string;
+	};
 };
 
 // ============================================================================
@@ -142,6 +190,43 @@ export async function deriveKeys(
 	};
 }
 
+/**
+ * Derive intermediate master key (PBKDF2 output) from password + secret key
+ */
+export async function deriveMasterKey(
+	accountPassword: string,
+	secretKey: string,
+	email: string,
+): Promise<Uint8Array> {
+	await autoInit();
+
+	const masterKeyBase64 = wasmDeriveMasterKey(
+		accountPassword,
+		secretKey,
+		email,
+	);
+	return base64ToUint8Array(masterKeyBase64);
+}
+
+/**
+ * Derive auth key + master unlock key from a raw master key
+ */
+export async function deriveKeysFromMasterKey(
+	masterKey: Uint8Array,
+	email: string,
+): Promise<DerivedKeys> {
+	await autoInit();
+
+	const result = wasmDeriveKeysFromMasterKey(
+		uint8ArrayToBase64(masterKey),
+		email,
+	);
+	return {
+		authKey: base64ToUint8Array(result.auth_key),
+		masterUnlockKey: base64ToUint8Array(result.master_unlock_key),
+	};
+}
+
 // ============================================================================
 // AES-256-GCM Encryption (matching @bittery/crypto/encryption)
 // ============================================================================
@@ -194,6 +279,188 @@ export async function generateEncryptionKey(): Promise<Uint8Array> {
 
 	const keyBase64 = wasmGenerateEncryptionKey();
 	return base64ToUint8Array(keyBase64);
+}
+
+/**
+ * Generate a new recovery key in R1-XXXXXX format
+ */
+export function generateRecoveryKey(): string {
+	ensureInitialized();
+	return wasmGenerateRecoveryKey();
+}
+
+/**
+ * Generate a new recovery key (async version for compatibility)
+ */
+export async function generateRecoveryKeyAsync(): Promise<string> {
+	await autoInit();
+	return wasmGenerateRecoveryKey();
+}
+
+/**
+ * Validate recovery key format
+ */
+export function validateRecoveryKey(recoveryKey: string): boolean {
+	ensureInitialized();
+	return wasmValidateRecoveryKey(recoveryKey);
+}
+
+/**
+ * Validate recovery key format (async version for compatibility)
+ */
+export async function validateRecoveryKeyAsync(
+	recoveryKey: string,
+): Promise<boolean> {
+	await autoInit();
+	return wasmValidateRecoveryKey(recoveryKey);
+}
+
+/**
+ * Get the hint (first segment) from a recovery key
+ */
+export function getRecoveryKeyHint(recoveryKey: string): string {
+	const parts = recoveryKey.split("-");
+	if (parts.length >= 2) {
+		return `${parts[0]}-${parts[1]}`;
+	}
+	return "";
+}
+
+/**
+ * Encrypt a raw master key using recovery key material
+ */
+export async function encryptMasterKey(
+	masterKey: Uint8Array,
+	recoveryKey: string,
+	email: string,
+): Promise<EncryptedData> {
+	await autoInit();
+
+	const result = wasmEncryptMasterKey(
+		uint8ArrayToBase64(masterKey),
+		recoveryKey,
+		email,
+	);
+
+	return {
+		ciphertext: result.ciphertext,
+		iv: result.iv,
+		algorithm: result.algorithm,
+	};
+}
+
+/**
+ * Decrypt encrypted recovery material back into a raw master key
+ */
+export async function decryptMasterKey(
+	data: EncryptedData,
+	recoveryKey: string,
+	email: string,
+): Promise<Uint8Array> {
+	await autoInit();
+
+	const wasmData = new JsEncryptedData(
+		data.ciphertext,
+		data.iv,
+		data.algorithm,
+	);
+
+	const masterKeyBase64 = wasmDecryptMasterKey(wasmData, recoveryKey, email);
+	return base64ToUint8Array(masterKeyBase64);
+}
+
+// ============================================================================
+// Passkey / WebAuthn
+// ============================================================================
+
+function getPasskeyExports(): PasskeyWasmExports {
+	return wasmCrypto as unknown as PasskeyWasmExports;
+}
+
+export async function generatePasskeyKeypair(): Promise<PasskeyKeypair> {
+	await autoInit();
+
+	const fn = getPasskeyExports().generatePasskeyKeypair;
+	if (typeof fn !== "function") {
+		throw new Error(
+			"Missing WASM export generatePasskeyKeypair. Rebuild @bittery/crypto-wasm.",
+		);
+	}
+
+	const result = fn();
+	return {
+		privateKey: result.private_key,
+		publicKeyCose: result.public_key_cose,
+	};
+}
+
+export async function generatePasskeyCredentialId(): Promise<string> {
+	await autoInit();
+
+	const fn = getPasskeyExports().generatePasskeyCredentialId;
+	if (typeof fn !== "function") {
+		throw new Error(
+			"Missing WASM export generatePasskeyCredentialId. Rebuild @bittery/crypto-wasm.",
+		);
+	}
+
+	return fn();
+}
+
+export async function buildPasskeyAttestationObject(input: {
+	rpId: string;
+	credentialIdBase64: string;
+	cosePublicKeyBase64: string;
+	signCount?: number;
+}): Promise<PasskeyAttestation> {
+	await autoInit();
+
+	const fn = getPasskeyExports().buildPasskeyAttestationObject;
+	if (typeof fn !== "function") {
+		throw new Error(
+			"Missing WASM export buildPasskeyAttestationObject. Rebuild @bittery/crypto-wasm.",
+		);
+	}
+
+	const result = fn(
+		input.rpId,
+		input.credentialIdBase64,
+		input.cosePublicKeyBase64,
+		input.signCount,
+	);
+
+	return {
+		authenticatorData: base64ToUint8Array(result.authenticator_data),
+		attestationObject: base64ToUint8Array(result.attestation_object),
+	};
+}
+
+export async function signPasskeyAssertion(input: {
+	privateKeyBase64: string;
+	rpId: string;
+	clientDataHashBase64: string;
+	signCount: number;
+}): Promise<PasskeyAssertion> {
+	await autoInit();
+
+	const fn = getPasskeyExports().signPasskeyAssertion;
+	if (typeof fn !== "function") {
+		throw new Error(
+			"Missing WASM export signPasskeyAssertion. Rebuild @bittery/crypto-wasm.",
+		);
+	}
+
+	const result = fn(
+		input.privateKeyBase64,
+		input.rpId,
+		input.clientDataHashBase64,
+		input.signCount,
+	);
+
+	return {
+		authenticatorData: base64ToUint8Array(result.authenticator_data),
+		signatureDer: base64ToUint8Array(result.signature_der),
+	};
 }
 
 // ============================================================================

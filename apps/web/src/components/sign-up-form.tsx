@@ -1,12 +1,11 @@
-import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import {
 	Badge,
 	Button,
 	Card,
+	CardContent,
 	cn,
-	copyWithToast,
 	Input,
 	Label,
 	toast,
@@ -14,10 +13,22 @@ import {
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Copy, Download, Eye, EyeOff, Loader2, Users } from "lucide-react";
+import {
+	CheckCircle2,
+	Download,
+	Eye,
+	EyeOff,
+	Loader2,
+	Users,
+} from "lucide-react";
 import { useEffect, useState } from "react";
+import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
+import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { storage } from "@/lib/storage";
-import { generateSecretKeyAsync } from "@/lib/wasm-crypto";
+import {
+	generateRecoveryKeyAsync,
+	generateSecretKeyAsync,
+} from "@/lib/wasm-crypto";
 import { WorkerCrypto } from "@/lib/worker-crypto";
 
 export default function SignUpForm({
@@ -32,20 +43,11 @@ export default function SignUpForm({
 	const navigate = useNavigate();
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
-	const defaultServerUrl = import.meta.env.VITE_SERVER_URL ?? "";
 	const [secretKey, setSecretKey] = useState<string>("");
-	const [showSecretKey, setShowSecretKey] = useState(true);
-	const [hasAcknowledged, setHasAcknowledged] = useState(false);
+	const [recoveryKey, setRecoveryKey] = useState<string>("");
+	const [hasDownloadedKit, setHasDownloadedKit] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
-	const [serverUrl, setServerUrl] = useState(defaultServerUrl);
 	const [isEncrypting, setIsEncrypting] = useState(false);
-
-	// Load server URL on mount
-	useEffect(() => {
-		storage.getServerUrl().then((url) => {
-			if (url) setServerUrl(url);
-		});
-	}, []);
 
 	// Query invitation details if token is provided
 	const invitationQuery = useQuery({
@@ -64,10 +66,25 @@ export default function SignUpForm({
 	const registrationStatus = registrationStatusQuery.data;
 	const isSelfHostedMode = registrationStatus?.mode === "self-hosted";
 	const allowPublicSignup = registrationStatus?.allowPublicSignup ?? true;
+	const signupHeading = isInvitationSignup
+		? "Accept Invitation"
+		: isSelfHostedMode
+			? "Create admin account"
+			: "Create an account";
+	const signupDescription = isInvitationSignup
+		? "Create your account to securely join the invited workspace."
+		: isSelfHostedMode
+			? "Set up the first admin account for this server."
+			: "Create your encrypted account and start protecting your vaults.";
 
-	// Generate Secret Key on mount (WASM auto-initializes)
+	// Generate Secret Key + Recovery Key on mount (WASM auto-initializes)
 	useEffect(() => {
-		generateSecretKeyAsync().then(setSecretKey);
+		Promise.all([generateSecretKeyAsync(), generateRecoveryKeyAsync()]).then(
+			([generatedSecretKey, generatedRecoveryKey]) => {
+				setSecretKey(generatedSecretKey);
+				setRecoveryKey(generatedRecoveryKey);
+			},
+		);
 	}, []);
 
 	const signupMutation = useMutation({
@@ -79,6 +96,8 @@ export default function SignUpForm({
 			srpVerifier: string;
 			publicKey: string;
 			encryptedPrivateKey: string;
+			encryptedMasterKey: string;
+			recoveryKeyHint: string;
 			encryptedVaultKey: string;
 			organizationName?: string;
 			token?: string;
@@ -93,6 +112,8 @@ export default function SignUpForm({
 					srpVerifier: input.srpVerifier,
 					publicKey: input.publicKey,
 					encryptedPrivateKey: input.encryptedPrivateKey,
+					encryptedMasterKey: input.encryptedMasterKey,
+					recoveryKeyHint: input.recoveryKeyHint,
 					encryptedVaultKey: input.encryptedVaultKey,
 				});
 			}
@@ -106,6 +127,8 @@ export default function SignUpForm({
 				srpVerifier: input.srpVerifier,
 				publicKey: input.publicKey,
 				encryptedPrivateKey: input.encryptedPrivateKey,
+				encryptedMasterKey: input.encryptedMasterKey,
+				recoveryKeyHint: input.recoveryKeyHint,
 				encryptedVaultKey: input.encryptedVaultKey,
 			});
 		},
@@ -139,18 +162,10 @@ export default function SignUpForm({
 			organizationName: "",
 		},
 		onSubmit: async ({ value }) => {
-			const normalizedServerUrl = normalizeServerUrl(serverUrl);
-			if (!normalizedServerUrl) {
-				toast.error("Invalid server URL");
-				return;
-			}
-			await storage.storeServerUrl(normalizedServerUrl);
-			if (normalizedServerUrl !== serverUrl) {
-				setServerUrl(normalizedServerUrl);
-			}
+			await resolveActiveAuthServerUrl();
 
-			if (!hasAcknowledged) {
-				toast.error("Please save your Secret Key before continuing");
+			if (!hasDownloadedKit) {
+				toast.error("Please download your Emergency Kit before continuing");
 				return;
 			}
 
@@ -165,12 +180,14 @@ export default function SignUpForm({
 				// All heavy crypto runs in a Web Worker via WorkerCrypto,
 				// keeping the main thread responsive with the spinner.
 
-				// 1. Derive keys (PBKDF2 310k iterations)
-				const { authKey, masterUnlockKey } = await workerCrypto.deriveKeys(
+				// 1. Derive raw master key, then split into auth + unlock keys
+				const masterKey = await workerCrypto.deriveMasterKey(
 					value.password,
 					secretKey,
 					email,
 				);
+				const { authKey, masterUnlockKey } =
+					await workerCrypto.deriveKeysFromMasterKey(masterKey, email);
 
 				// 2. Generate SRP credentials
 				const srpPassword = new TextDecoder().decode(authKey);
@@ -198,7 +215,16 @@ export default function SignUpForm({
 				// 6. Get secret key hint
 				const secretKeyHint = await workerCrypto.getSecretKeyHint(secretKey);
 
-				// 7. Call signup mutation
+				// 7. Encrypt raw master key with recovery key material
+				const encryptedMasterKey = await workerCrypto.encryptMasterKey(
+					masterKey,
+					recoveryKey,
+					email,
+				);
+				const recoveryKeyHint =
+					recoveryKey.split("-").slice(0, 2).join("-") || "R1";
+
+				// 8. Call signup mutation
 				const result = await signupMutation.mutateAsync({
 					email,
 					name: value.name,
@@ -213,18 +239,20 @@ export default function SignUpForm({
 					srpVerifier: verifier,
 					publicKey,
 					encryptedPrivateKey: JSON.stringify(encryptedPrivateKey),
+					encryptedMasterKey: JSON.stringify(encryptedMasterKey),
+					recoveryKeyHint,
 					encryptedVaultKey: JSON.stringify(encryptedVaultKey),
 				});
 
-				// 8. Store Master Unlock Key in memory
+				// 9. Store Master Unlock Key in memory
 				await storage.setMasterUnlockKey(masterUnlockKey);
 
-				// 9. Store encrypted private key for RSA decryption of shared vault keys
+				// 10. Store encrypted private key for RSA decryption of shared vault keys
 				await storage.storeEncryptedPrivateKey(
 					JSON.stringify(encryptedPrivateKey),
 				);
 
-				// 10. Store secret key and encrypted session for quick unlock
+				// 11. Store secret key and encrypted session for quick unlock
 				await storage.storeSecretKey(secretKey);
 				await storage.storeSessionData(
 					masterUnlockKey,
@@ -251,51 +279,71 @@ export default function SignUpForm({
 		},
 	});
 
-	const copySecretKey = () => {
-		copyWithToast(secretKey, "Secret Key", { showAutoClearMessage: false });
-	};
+	const downloadEmergencyKit = async () => {
+		if (!secretKey || !recoveryKey) {
+			toast.error("Still generating account keys. Please try again.");
+			return;
+		}
 
-	const downloadEmergencyKit = () => {
-		const content = `
-BITTERY EMERGENCY KIT
-====================
+		const result = await downloadRecoveryKit({
+			fileName: "bittery-emergency-kit",
+			title: "Bittery Emergency Kit",
+			subtitle:
+				"Contains your Secret Key and Recovery Key for offline storage.",
+			entries: [
+				{
+					label: "Secret Key",
+					value: secretKey,
+					description:
+						"Required with your master password to unlock your account.",
+				},
+				{
+					label: "Recovery Key",
+					value: recoveryKey,
+					description: "Required to reset your password if forgotten.",
+				},
+			],
+			cautions: [
+				"Store this kit offline in a secure location you trust.",
+				"Do not save this file in shared folders or chats.",
+				"If Secret Key, Recovery Key, and password are all lost, your vault cannot be recovered.",
+			],
+			footerNote:
+				"Bittery is zero-knowledge: recovery material is generated and handled locally in your browser.",
+			includeHandwrittenPasswordSection: true,
+		});
 
-IMPORTANT: Keep this information safe and private!
+		setHasDownloadedKit(true);
+		if (result === "pdf-downloaded") {
+			toast.success("Emergency Kit PDF downloaded.");
+			return;
+		}
 
-Secret Key: ${secretKey}
-
-This Secret Key is required to access your account along with your Account Password.
-Store it in a safe place - you cannot recover your account without it.
-
-Generated: ${new Date().toLocaleString()}
-		`;
-
-		const blob = new Blob([content], { type: "text/plain" });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement("a");
-		a.href = url;
-		a.download = "bittery-emergency-kit.txt";
-		document.body.appendChild(a);
-		a.click();
-		document.body.removeChild(a);
-		URL.revokeObjectURL(url);
-		toast.success("Emergency Kit downloaded");
+		toast.success("PDF failed. Emergency Kit downloaded as text backup.");
 	};
 
 	if (hasInvitationToken && invitationQuery.isError) {
 		return (
 			<div className="w-full">
-				<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+				<h1 className="text-center font-semibold text-2xl tracking-tight">
 					Invitation Required
 				</h1>
-				<Card className="space-y-4 border bg-card p-6 shadow-sm">
-					<p className="text-muted-foreground text-sm leading-relaxed">
-						This invitation link is invalid or expired. Ask your admin to send a
-						new invite link.
-					</p>
-					<Button type="button" onClick={onSwitchToSignIn} className="w-full">
-						Back to Sign In
-					</Button>
+				<Card className="mt-6">
+					<CardContent>
+						<div className="space-y-4">
+							<p className="text-muted-foreground text-sm leading-relaxed">
+								This invitation link is invalid or expired. Ask your admin to
+								send a new invite link.
+							</p>
+							<Button
+								type="button"
+								onClick={onSwitchToSignIn}
+								className="w-full"
+							>
+								Back to Sign In
+							</Button>
+						</div>
+					</CardContent>
 				</Card>
 			</div>
 		);
@@ -304,14 +352,16 @@ Generated: ${new Date().toLocaleString()}
 	if (hasInvitationToken && invitationQuery.isLoading) {
 		return (
 			<div className="w-full">
-				<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+				<h1 className="text-center font-semibold text-2xl tracking-tight">
 					Loading invitation
 				</h1>
-				<Card className="space-y-4 border bg-card p-6 shadow-sm">
-					<div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
-						<Loader2 className="h-4 w-4 animate-spin" />
-						Verifying invitation link...
-					</div>
+				<Card className="mt-6">
+					<CardContent>
+						<div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
+							<Loader2 className="h-4 w-4 animate-spin" />
+							Verifying invitation link...
+						</div>
+					</CardContent>
 				</Card>
 			</div>
 		);
@@ -324,385 +374,321 @@ Generated: ${new Date().toLocaleString()}
 	) {
 		return (
 			<div className="w-full">
-				<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+				<h1 className="text-center font-semibold text-2xl tracking-tight">
 					Invite-Only Registration
 				</h1>
-				<Card className="space-y-4 border bg-card p-6 shadow-sm">
-					<p className="text-muted-foreground text-sm leading-relaxed">
-						Registration is closed on this server. Ask an admin for an invite
-						link.
-					</p>
-					<Button type="button" onClick={onSwitchToSignIn} className="w-full">
-						Back to Sign In
-					</Button>
+				<Card className="mt-6">
+					<CardContent>
+						<div className="space-y-4">
+							<p className="text-muted-foreground text-sm leading-relaxed">
+								Registration is closed on this server. Ask an admin for an
+								invite link.
+							</p>
+							<Button
+								type="button"
+								onClick={onSwitchToSignIn}
+								className="w-full"
+							>
+								Back to Sign In
+							</Button>
+						</div>
+					</CardContent>
 				</Card>
 			</div>
 		);
 	}
 
-	const signupHeading = isInvitationSignup
-		? "Accept Invitation"
-		: isSelfHostedMode
-			? "Create admin account"
-			: "Create an account";
+	const hasAllKeyMaterial = Boolean(secretKey) && Boolean(recoveryKey);
 
-	return !hasAcknowledged ? (
+	return (
 		<div className="w-full">
-			<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
+			<h1 className="text-center font-semibold text-2xl tracking-tight">
 				{signupHeading}
 			</h1>
-			<Card className="space-y-4 border bg-card p-6 shadow-sm">
-				<div className="space-y-2">
-					<h2 className="font-medium text-base">Save your Secret Key</h2>
-					<p className="text-muted-foreground text-sm leading-relaxed">
-						This key is required to access your account. We cannot recover it
-						for you.
-					</p>
-				</div>
-
-				<div className="space-y-4">
-					<div className="relative rounded-xl border bg-muted/30 p-4">
-						<div className="absolute top-3 right-3">
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon"
-								className="h-8 w-8 text-muted-foreground hover:text-foreground"
-								onClick={() => setShowSecretKey(!showSecretKey)}
-							>
-								{showSecretKey ? <EyeOff size={16} /> : <Eye size={16} />}
-							</Button>
-						</div>
-						<div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-							Your Secret Key
-						</div>
-						<div className="break-all pr-8 font-mono text-sm tracking-wide">
-							{showSecretKey ? secretKey : "••••••-••••••-•••••-•••••-•••••"}
-						</div>
-					</div>
-
-					<div className="grid grid-cols-2 gap-3">
-						<Button
-							type="button"
-							variant="outline"
-							className="w-full"
-							onClick={copySecretKey}
-						>
-							<Copy size={16} className="mr-2" />
-							Copy
-						</Button>
-						<Button
-							type="button"
-							variant="outline"
-							className="w-full"
-							onClick={downloadEmergencyKit}
-						>
-							<Download size={16} className="mr-2" />
-							Download Kit
-						</Button>
-					</div>
-				</div>
-
-				<div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
-					<div className="flex gap-3">
-						<div className="text-amber-600 dark:text-amber-400">⚠️</div>
-						<div className="space-y-1">
-							<p className="font-medium text-amber-900 text-sm dark:text-amber-100">
-								There is no account recovery
-							</p>
-							<p className="text-amber-700 text-xs leading-relaxed dark:text-amber-300">
-								If you lose this Secret Key, you will lose access to your vault
-								forever. Please save it in a safe place.
-							</p>
-						</div>
-					</div>
-				</div>
-
-				<div className="space-y-3">
-					<Button
-						type="button"
-						className="w-full"
-						onClick={() => setHasAcknowledged(true)}
+			<p className="mx-auto mt-2 max-w-80 text-center text-muted-foreground text-sm">
+				{signupDescription}
+			</p>
+			<Card className="mt-6">
+				<CardContent>
+					<form
+						onSubmit={(e) => {
+							e.preventDefault();
+							e.stopPropagation();
+							form.handleSubmit();
+						}}
+						className="space-y-4"
 					>
-						I have saved my Secret Key
-					</Button>
-
-					<Button
-						type="button"
-						variant="ghost"
-						onClick={onSwitchToSignIn}
-						className="w-full"
-					>
-						Already have an account? Sign in
-					</Button>
-				</div>
-			</Card>
-		</div>
-	) : (
-		<div className="w-full">
-			<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
-				{signupHeading}
-			</h1>
-			<Card className="border bg-card p-6 shadow-sm">
-				<form
-					onSubmit={(e) => {
-						e.preventDefault();
-						e.stopPropagation();
-						form.handleSubmit();
-					}}
-					className="space-y-4"
-				>
-					<div>
-						<div className="space-y-2">
-							<Label htmlFor="serverUrl">Server URL</Label>
-							<Input
-								id="serverUrl"
-								name="serverUrl"
-								type="url"
-								placeholder="https://your-server.com"
-								value={serverUrl}
-								onBlur={async () => {
-									const normalized = normalizeServerUrl(serverUrl);
-									if (!normalized) {
-										toast.error("Invalid server URL");
-										return;
-									}
-									await storage.storeServerUrl(normalized);
-									if (normalized !== serverUrl) {
-										setServerUrl(normalized);
-									}
-								}}
-								onChange={(e) => setServerUrl(e.target.value)}
-								required
-								className="h-10"
-							/>
-							<p className="text-muted-foreground text-xs">
-								Use your self-hosted Bittery server URL.
-							</p>
-						</div>
-					</div>
-
-					<div>
-						<form.Field name="name">
-							{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor={field.name}>Full Name</Label>
-									<Input
-										id={field.name}
-										name={field.name}
-										placeholder="John Doe"
-										value={field.state.value}
-										onBlur={field.handleBlur}
-										onChange={(e) => field.handleChange(e.target.value)}
-										required
-										className="h-10"
-									/>
-								</div>
-							)}
-						</form.Field>
-					</div>
-
-					{isInvitationSignup ? (
-						<div className="rounded-lg border bg-muted/30 p-4">
-							<div className="flex items-start gap-3">
-								<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
-									<Users className="h-5 w-5 text-primary" />
-								</div>
-								<div className="space-y-1">
-									<p className="font-medium text-sm">
-										You've been invited to join{" "}
-										<span className="text-primary">
-											{invitation?.teamName}
-										</span>
-									</p>
-									<div className="flex items-center gap-2 text-muted-foreground text-xs">
-										<span>Invited by {invitation?.invitedByName}</span>
-										<span>·</span>
-										<Badge variant="secondary" className="text-xs">
-											{invitation?.role}
-										</Badge>
-									</div>
-								</div>
-							</div>
-						</div>
-					) : !isSelfHostedMode ? (
-						<div className="space-y-4">
-							<form.Field name="accountType">
+						<div>
+							<form.Field name="name">
 								{(field) => (
-									<div className="space-y-3">
-										<Label>Account Type</Label>
-										<div className="grid grid-cols-2 gap-3">
-											<Button
-												type="button"
-												variant={
-													field.state.value === "personal"
-														? "default"
-														: "outline"
-												}
-												className="h-auto flex-col items-start gap-1 p-4"
-												onClick={() => field.handleChange("personal")}
-											>
-												<span className="font-medium">Personal</span>
-												<span
-													className={cn(
-														"text-left font-normal text-xs",
-														field.state.value === "personal"
-															? "text-primary-foreground"
-															: "text-muted-foreground",
-													)}
-												>
-													For individual use
-												</span>
-											</Button>
-											<Button
-												type="button"
-												variant={
-													field.state.value === "organization"
-														? "default"
-														: "outline"
-												}
-												className="h-auto flex-col items-start gap-1 p-4"
-												onClick={() => field.handleChange("organization")}
-											>
-												<span className="font-medium">Organization</span>
-												<span
-													className={cn(
-														"text-left font-normal text-xs",
-														field.state.value === "organization"
-															? "text-primary-foreground"
-															: "text-muted-foreground",
-													)}
-												>
-													For teams and companies
-												</span>
-											</Button>
-										</div>
-									</div>
-								)}
-							</form.Field>
-
-							<form.Subscribe selector={(state) => state.values.accountType}>
-								{(accountType) =>
-									accountType === "organization" ? (
-										<form.Field name="organizationName">
-											{(field) => (
-												<div className="space-y-2">
-													<Label htmlFor={field.name}>Organization Name</Label>
-													<Input
-														id={field.name}
-														name={field.name}
-														placeholder="Acme Inc."
-														value={field.state.value}
-														onBlur={field.handleBlur}
-														onChange={(e) => field.handleChange(e.target.value)}
-														required
-														className="h-10"
-													/>
-													<p className="text-[0.8rem] text-muted-foreground">
-														This will be the name of your team workspace
-													</p>
-												</div>
-											)}
-										</form.Field>
-									) : null
-								}
-							</form.Subscribe>
-						</div>
-					) : null}
-
-					<div>
-						<form.Field name="email">
-							{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor={field.name}>Email</Label>
-									<Input
-										id={field.name}
-										name={field.name}
-										type="email"
-										placeholder="name@example.com"
-										value={
-											isInvitationSignup
-												? invitation?.email || field.state.value
-												: field.state.value
-										}
-										onBlur={field.handleBlur}
-										onChange={(e) => field.handleChange(e.target.value)}
-										required
-										disabled={isInvitationSignup}
-										className="h-10"
-									/>
-									{isInvitationSignup && (
-										<p className="text-muted-foreground text-xs">
-											This email was used to invite you and cannot be changed.
-										</p>
-									)}
-								</div>
-							)}
-						</form.Field>
-					</div>
-
-					<div>
-						<form.Field name="password">
-							{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor={field.name}>Master Password</Label>
-									<div className="relative">
+									<div className="space-y-2">
+										<Label htmlFor={field.name}>Full Name</Label>
 										<Input
 											id={field.name}
 											name={field.name}
-											type={showPassword ? "text" : "password"}
+											placeholder="John Doe"
 											value={field.state.value}
 											onBlur={field.handleBlur}
 											onChange={(e) => field.handleChange(e.target.value)}
 											required
-											className="h-10 pr-10"
+											className="h-10"
 										/>
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon"
-											className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
-											onClick={() => setShowPassword(!showPassword)}
-										>
-											{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-										</Button>
 									</div>
-									<p className="text-[0.8rem] text-muted-foreground">
-										Must be at least 8 characters long.
-									</p>
+								)}
+							</form.Field>
+						</div>
+
+						{isInvitationSignup ? (
+							<div className="rounded-lg border bg-muted/30 p-4">
+								<div className="flex items-start gap-3">
+									<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
+										<Users className="h-5 w-5 text-primary" />
+									</div>
+									<div className="space-y-1">
+										<p className="font-medium text-sm">
+											You've been invited to join{" "}
+											<span className="text-primary">
+												{invitation?.teamName}
+											</span>
+										</p>
+										<div className="flex items-center gap-2 text-muted-foreground text-xs">
+											<span>Invited by {invitation?.invitedByName}</span>
+											<span>·</span>
+											<Badge variant="secondary" className="text-xs">
+												{invitation?.role}
+											</Badge>
+										</div>
+									</div>
 								</div>
-							)}
-						</form.Field>
-					</div>
+							</div>
+						) : !isSelfHostedMode ? (
+							<div className="space-y-4">
+								<form.Field name="accountType">
+									{(field) => (
+										<div className="space-y-3">
+											<Label>Account Type</Label>
+											<div className="grid gap-3 sm:grid-cols-2">
+												<Button
+													type="button"
+													variant={
+														field.state.value === "personal"
+															? "default"
+															: "outline"
+													}
+													className="h-auto flex-col items-start gap-1 p-4"
+													onClick={() => field.handleChange("personal")}
+												>
+													<span className="font-medium">Personal</span>
+													<span
+														className={cn(
+															"text-left font-normal text-xs",
+															field.state.value === "personal"
+																? "text-primary-foreground"
+																: "text-muted-foreground",
+														)}
+													>
+														For individual use
+													</span>
+												</Button>
+												<Button
+													type="button"
+													variant={
+														field.state.value === "organization"
+															? "default"
+															: "outline"
+													}
+													className="h-auto flex-col items-start gap-1 p-4"
+													onClick={() => field.handleChange("organization")}
+												>
+													<span className="font-medium">Organization</span>
+													<span
+														className={cn(
+															"text-left font-normal text-xs",
+															field.state.value === "organization"
+																? "text-primary-foreground"
+																: "text-muted-foreground",
+														)}
+													>
+														For teams and companies
+													</span>
+												</Button>
+											</div>
+										</div>
+									)}
+								</form.Field>
 
-					<div className="pt-2">
-						<Button
-							type="submit"
-							className="h-10 w-full"
-							disabled={isEncrypting || signupMutation.isPending}
+								<form.Subscribe selector={(state) => state.values.accountType}>
+									{(accountType) =>
+										accountType === "organization" ? (
+											<form.Field name="organizationName">
+												{(field) => (
+													<div className="space-y-2">
+														<Label htmlFor={field.name}>
+															Organization Name
+														</Label>
+														<Input
+															id={field.name}
+															name={field.name}
+															placeholder="Acme Inc."
+															value={field.state.value}
+															onBlur={field.handleBlur}
+															onChange={(e) =>
+																field.handleChange(e.target.value)
+															}
+															required
+															className="h-10"
+														/>
+														<p className="text-[0.8rem] text-muted-foreground">
+															This will be the name of your team workspace
+														</p>
+													</div>
+												)}
+											</form.Field>
+										) : null
+									}
+								</form.Subscribe>
+							</div>
+						) : null}
+
+						<div>
+							<form.Field name="email">
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name}>Email</Label>
+										<Input
+											id={field.name}
+											name={field.name}
+											type="email"
+											placeholder="name@example.com"
+											value={
+												isInvitationSignup
+													? invitation?.email || field.state.value
+													: field.state.value
+											}
+											onBlur={field.handleBlur}
+											onChange={(e) => field.handleChange(e.target.value)}
+											required
+											disabled={isInvitationSignup}
+											className="h-10"
+										/>
+										{isInvitationSignup && (
+											<p className="text-muted-foreground text-xs">
+												This email was used to invite you and cannot be changed.
+											</p>
+										)}
+									</div>
+								)}
+							</form.Field>
+						</div>
+
+						<div>
+							<form.Field name="password">
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name}>Master Password</Label>
+										<div className="relative">
+											<Input
+												id={field.name}
+												name={field.name}
+												type={showPassword ? "text" : "password"}
+												value={field.state.value}
+												onBlur={field.handleBlur}
+												onChange={(e) => field.handleChange(e.target.value)}
+												required
+												className="h-10 pr-10"
+											/>
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon"
+												className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
+												onClick={() => setShowPassword(!showPassword)}
+											>
+												{showPassword ? (
+													<EyeOff size={16} />
+												) : (
+													<Eye size={16} />
+												)}
+											</Button>
+										</div>
+										<p className="text-[0.8rem] text-muted-foreground">
+											Must be at least 8 characters long.
+										</p>
+									</div>
+								)}
+							</form.Field>
+						</div>
+
+						<button
+							type="button"
+							disabled={!hasAllKeyMaterial}
+							onClick={downloadEmergencyKit}
+							className={cn(
+								"flex w-full items-center gap-2.5 rounded-lg border px-3.5 py-3 text-left transition-colors",
+								hasDownloadedKit
+									? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-900/40 dark:bg-emerald-950/20"
+									: "hover:bg-muted/50",
+							)}
 						>
-							{isEncrypting || signupMutation.isPending ? (
-								<>
-									<Loader2 size={16} className="mr-2 animate-spin" />
-									{isEncrypting
-										? "Setting up encryption..."
-										: "Creating account..."}
-								</>
+							{hasDownloadedKit ? (
+								<CheckCircle2
+									size={16}
+									className="shrink-0 text-emerald-600 dark:text-emerald-400"
+								/>
 							) : (
-								"Create Account"
+								<Download
+									size={16}
+									className="shrink-0 text-muted-foreground"
+								/>
 							)}
-						</Button>
-					</div>
+							<div className="min-w-0 flex-1">
+								<p className="font-medium text-sm">
+									{hasDownloadedKit
+										? "Emergency Kit saved"
+										: "Download Emergency Kit"}
+								</p>
+								<p className="text-muted-foreground text-xs">
+									Secret Key & Recovery Key for account recovery
+								</p>
+							</div>
+						</button>
 
-					<Button
-						type="button"
-						variant="link"
-						onClick={() => setHasAcknowledged(false)}
-						className="w-full text-muted-foreground"
-					>
-						← Back to Secret Key
-					</Button>
-				</form>
+						<div className="pt-1">
+							<Button
+								type="submit"
+								className="h-10 w-full"
+								disabled={
+									isEncrypting || signupMutation.isPending || !hasDownloadedKit
+								}
+							>
+								{isEncrypting || signupMutation.isPending ? (
+									<>
+										<Loader2 size={16} className="mr-2 animate-spin" />
+										{isEncrypting
+											? "Setting up encryption..."
+											: "Creating account..."}
+									</>
+								) : !hasDownloadedKit ? (
+									<>
+										<Download size={16} className="mr-2" />
+										Download Emergency Kit to continue
+									</>
+								) : (
+									"Create Account"
+								)}
+							</Button>
+						</div>
+
+						<Button
+							type="button"
+							variant="ghost"
+							onClick={onSwitchToSignIn}
+							className="w-full"
+						>
+							Already have an account? Sign in
+						</Button>
+					</form>
+				</CardContent>
 			</Card>
 		</div>
 	);

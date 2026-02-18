@@ -68,6 +68,10 @@ export class WorkerCrypto implements ICrypto {
 		return this.call({ type: "validateSecretKey", secretKey });
 	}
 
+	async validateRecoveryKey(recoveryKey: string): Promise<boolean> {
+		return this.call({ type: "validateRecoveryKey", recoveryKey });
+	}
+
 	async deriveKeys(
 		password: string,
 		secretKey: string,
@@ -77,6 +81,35 @@ export class WorkerCrypto implements ICrypto {
 			type: "deriveKeys",
 			password,
 			secretKey,
+			email,
+		});
+		return {
+			authKey: base64ToUint8Array(result.authKey),
+			masterUnlockKey: base64ToUint8Array(result.masterUnlockKey),
+		};
+	}
+
+	async deriveMasterKey(
+		password: string,
+		secretKey: string,
+		email: string,
+	): Promise<Uint8Array> {
+		const base64 = await this.call({
+			type: "deriveMasterKey",
+			password,
+			secretKey,
+			email,
+		});
+		return base64ToUint8Array(base64);
+	}
+
+	async deriveKeysFromMasterKey(
+		masterKey: Uint8Array,
+		email: string,
+	): Promise<DerivedKeys> {
+		const result = await this.call({
+			type: "deriveKeysFromMasterKey",
+			masterKeyBase64: uint8ArrayToBase64(masterKey),
 			email,
 		});
 		return {
@@ -136,6 +169,39 @@ export class WorkerCrypto implements ICrypto {
 
 	async generateEncryptionKey(): Promise<Uint8Array> {
 		const base64 = await this.call({ type: "generateEncryptionKey" });
+		return base64ToUint8Array(base64);
+	}
+
+	async generateRecoveryKey(): Promise<string> {
+		return this.call({ type: "generateRecoveryKey" });
+	}
+
+	async encryptMasterKey(
+		masterKey: Uint8Array,
+		recoveryKey: string,
+		email: string,
+	): Promise<EncryptedData> {
+		return this.call({
+			type: "encryptMasterKey",
+			masterKeyBase64: uint8ArrayToBase64(masterKey),
+			recoveryKey,
+			email,
+		});
+	}
+
+	async decryptMasterKey(
+		data: EncryptedData,
+		recoveryKey: string,
+		email: string,
+	): Promise<Uint8Array> {
+		const base64 = await this.call({
+			type: "decryptMasterKey",
+			ciphertext: data.ciphertext,
+			iv: data.iv,
+			algorithm: data.algorithm,
+			recoveryKey,
+			email,
+		});
 		return base64ToUint8Array(base64);
 	}
 

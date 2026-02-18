@@ -19,7 +19,7 @@ import { useItems } from "../use-items";
 export interface UpdateItemInput {
 	itemId: string;
 	vaultId: string;
-	data: DecryptedItemData;
+	data: Partial<DecryptedItemData>;
 }
 
 /**

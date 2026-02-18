@@ -31,6 +31,19 @@ export default defineManifest({
 	content_scripts: [
 		{
 			matches: ["<all_urls>"],
+			js: ["src/page-script/passkey.ts"],
+			run_at: "document_start",
+			all_frames: false,
+			world: "MAIN",
+		},
+		{
+			matches: ["<all_urls>"],
+			js: ["src/content-script/passkey-bridge-entry.ts"],
+			run_at: "document_start",
+			all_frames: false,
+		},
+		{
+			matches: ["<all_urls>"],
 			js: ["src/content.ts"],
 			run_at: "document_end",
 			all_frames: false,
@@ -52,6 +65,9 @@ export default defineManifest({
 				"save-prompt-iframe.html",
 				"credit-card-autofill-iframe.html",
 				"identity-autofill-iframe.html",
+				"passkey-picker-iframe.html",
+				"passkey-save-target-iframe.html",
+				"icons/lock-icon.png",
 			],
 			matches: ["<all_urls>"],
 		},

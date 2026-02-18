@@ -50,6 +50,20 @@ pub fn derive_keys(
     secret_key: &str,
     email: &str,
 ) -> Result<DerivedKeys, CryptoError> {
+    let mut master_key = derive_master_key(account_password, secret_key, email)?;
+    let derived_keys = derive_keys_from_master_key(&master_key, email);
+    master_key.zeroize();
+    derived_keys
+}
+
+/// Derive the intermediate 32-byte master key from password + secret key
+///
+/// This is the PBKDF2 step used before HKDF key splitting.
+pub fn derive_master_key(
+    account_password: &str,
+    secret_key: &str,
+    email: &str,
+) -> Result<[u8; KEY_LENGTH], CryptoError> {
     // Combine with length prefixes: [len(password)][password][len(secret)][secret]
     let password_bytes = account_password.as_bytes();
     let secret_bytes = secret_key.as_bytes();
@@ -71,13 +85,33 @@ pub fn derive_keys(
     let mut master_key = [0u8; KEY_LENGTH];
     pbkdf2_hmac::<Sha256>(&combined, &salt_bytes, PBKDF2_ITERATIONS, &mut master_key);
 
+    combined.zeroize();
+    salt_bytes.zeroize();
+
+    Ok(master_key)
+}
+
+/// Split a raw master key into auth key + master unlock key
+///
+/// This is the HKDF step used by the login/signup flows.
+pub fn derive_keys_from_master_key(
+    master_key: &[u8],
+    email: &str,
+) -> Result<DerivedKeys, CryptoError> {
+    if master_key.len() != KEY_LENGTH {
+        return Err(CryptoError::InvalidKeyLength {
+            expected: KEY_LENGTH,
+            actual: master_key.len(),
+        });
+    }
+
+    let mut salt_bytes = email.to_lowercase().into_bytes();
+
     // Split master key into auth key and master unlock key using HKDF
-    let hkdf = Hkdf::<Sha256>::new(Some(&salt_bytes), &master_key);
+    let hkdf = Hkdf::<Sha256>::new(Some(&salt_bytes), master_key);
 
     let mut auth_key = [0u8; KEY_LENGTH];
     if let Err(e) = hkdf.expand(AUTH_KEY_INFO, &mut auth_key) {
-        master_key.zeroize();
-        combined.zeroize();
         salt_bytes.zeroize();
         return Err(CryptoError::KeyDerivation(e.to_string()));
     }
@@ -85,14 +119,10 @@ pub fn derive_keys(
     let mut master_unlock_key = [0u8; KEY_LENGTH];
     if let Err(e) = hkdf.expand(UNLOCK_KEY_INFO, &mut master_unlock_key) {
         auth_key.zeroize();
-        master_key.zeroize();
-        combined.zeroize();
         salt_bytes.zeroize();
         return Err(CryptoError::KeyDerivation(e.to_string()));
     }
 
-    master_key.zeroize();
-    combined.zeroize();
     salt_bytes.zeroize();
 
     Ok(DerivedKeys {
@@ -158,5 +188,29 @@ mod tests {
 
         assert_ne!(keys1.auth_key, keys2.auth_key);
         assert_ne!(keys1.master_unlock_key, keys2.master_unlock_key);
+    }
+
+    #[test]
+    fn test_derive_keys_from_master_key_matches_derive_keys() {
+        let password = "test_password";
+        let secret_key = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
+        let email = "test@example.com";
+
+        let derived_direct = derive_keys(password, secret_key, email).unwrap();
+        let master_key = derive_master_key(password, secret_key, email).unwrap();
+        let derived_from_master = derive_keys_from_master_key(&master_key, email).unwrap();
+
+        assert_eq!(derived_direct.auth_key, derived_from_master.auth_key);
+        assert_eq!(
+            derived_direct.master_unlock_key,
+            derived_from_master.master_unlock_key
+        );
+    }
+
+    #[test]
+    fn test_derive_keys_from_master_key_invalid_length() {
+        let short_master_key = [0u8; 16];
+        let result = derive_keys_from_master_key(&short_master_key, "test@example.com");
+        assert!(matches!(result, Err(CryptoError::InvalidKeyLength { .. })));
     }
 }

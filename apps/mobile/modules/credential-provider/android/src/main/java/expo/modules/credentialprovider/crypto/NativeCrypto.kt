@@ -158,6 +158,79 @@ object NativeCrypto {
     }
 
     // ============================================================================
+    // Passkey / WebAuthn (future credential flows)
+    // ============================================================================
+
+    /**
+     * Generate passkey private key + COSE/SPKI public keys.
+     *
+     * Returns JSON in Result.value:
+     * {"privateKey":"...","publicKeyCose":"...","publicKeySpki":"..."}
+     */
+    fun passkeyGenerateKeypair(): Result {
+        if (!isAvailable) {
+            return Result(null, "Native crypto library not available")
+        }
+        return nativePasskeyGenerateKeypair()
+    }
+
+    /**
+     * Generate passkey credential ID (base64) in Result.value.
+     */
+    fun passkeyGenerateCredentialId(): Result {
+        if (!isAvailable) {
+            return Result(null, "Native crypto library not available")
+        }
+        return nativePasskeyGenerateCredentialId()
+    }
+
+    /**
+     * Build passkey attestation object.
+     *
+     * Returns JSON in Result.value:
+     * {"authenticatorData":"...","attestationObject":"..."}
+     */
+    fun passkeyBuildAttestationObject(
+        rpId: String,
+        credentialIdBase64: String,
+        cosePublicKeyBase64: String,
+        signCount: Int
+    ): Result {
+        if (!isAvailable) {
+            return Result(null, "Native crypto library not available")
+        }
+        return nativePasskeyBuildAttestationObject(
+            rpId,
+            credentialIdBase64,
+            cosePublicKeyBase64,
+            signCount
+        )
+    }
+
+    /**
+     * Sign passkey assertion.
+     *
+     * Returns JSON in Result.value:
+     * {"authenticatorData":"...","signatureDer":"..."}
+     */
+    fun passkeySignAssertion(
+        privateKeyBase64: String,
+        rpId: String,
+        clientDataHashBase64: String,
+        signCount: Int
+    ): Result {
+        if (!isAvailable) {
+            return Result(null, "Native crypto library not available")
+        }
+        return nativePasskeySignAssertion(
+            privateKeyBase64,
+            rpId,
+            clientDataHashBase64,
+            signCount
+        )
+    }
+
+    // ============================================================================
     // Native JNI Methods
     // ============================================================================
 
@@ -186,5 +259,23 @@ object NativeCrypto {
     private external fun nativeRsaDecrypt(
         ciphertext: String,
         privateKeyPem: String
+    ): Result
+
+    private external fun nativePasskeyGenerateKeypair(): Result
+
+    private external fun nativePasskeyGenerateCredentialId(): Result
+
+    private external fun nativePasskeyBuildAttestationObject(
+        rpId: String,
+        credentialIdBase64: String,
+        cosePublicKeyBase64: String,
+        signCount: Int
+    ): Result
+
+    private external fun nativePasskeySignAssertion(
+        privateKeyBase64: String,
+        rpId: String,
+        clientDataHashBase64: String,
+        signCount: Int
     ): Result
 }

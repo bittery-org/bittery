@@ -342,7 +342,6 @@ class DesktopSyncService {
 		} catch (_error) {
 			// Ignore if no listeners
 		}
-
 	}
 
 	/**
@@ -369,7 +368,6 @@ class DesktopSyncService {
 		} catch (_error) {
 			// Ignore if no listeners
 		}
-
 	}
 
 	/**

@@ -201,8 +201,8 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 						<DialogTitle>Change Password</DialogTitle>
 						<DialogDescription>
 							Change your master password. Your private key will be re-encrypted
-							with the new password. You will be logged out and need to sign in
-							again.
+							with the new password. Your existing Recovery Key setup will be
+							cleared and must be configured again.
 						</DialogDescription>
 					</DialogHeader>
 					<div className="grid gap-4 py-4">
@@ -271,9 +271,8 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 					</div>
 					<div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
 						<p className="text-amber-700 text-xs dark:text-amber-300">
-							<strong>Warning:</strong> Make sure you remember your new
-							password. If you forget it, you will lose access to your account
-							and all your data.
+							<strong>Warning:</strong> After changing your password, set up a
+							new Recovery Key in Settings before you sign out.
 						</p>
 					</div>
 					<DialogFooter>
