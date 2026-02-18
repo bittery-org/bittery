@@ -19,7 +19,7 @@
 | Feature | Status | Notes |
 |---|---|---|
 | Emergency Access | ❌ Missing | Trusted contacts that gain access after inactivity. Architecturally challenging with Zero-Knowledge. |
-| Password History | ❌ Missing | View and restore previous versions of an item. |
+| Password History | ✅ Done | Implemented for login items on Desktop + Mobile with encrypted history and restore support. |
 | Travel Mode | ❌ Missing | Hide specific vaults during border crossings. Strong differentiator. |
 | Secure File Storage | ❌ Missing | Attach documents to items (ID copies, contracts, etc.). |
 | Import | ❌ Missing | Adapter pattern: 1Password (.1pux), Bitwarden (.json), KeePass (.kdbx), Chrome/Firefox CSV, LastPass CSV, generic CSV. Integrate in Web App. |
