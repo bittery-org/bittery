@@ -848,6 +848,7 @@ export const authRouter = router({
 				encryptedPrivateKey: z.string(),
 				encryptedMasterKey: z.string(),
 				recoveryKeyHint: z.string(),
+				secretKeyHint: z.string().optional(),
 				encryptedVaultKeys: z.array(
 					z.object({
 						vaultId: z.string(),
@@ -873,6 +874,7 @@ export const authRouter = router({
 					encryptedPrivateKey: input.encryptedPrivateKey,
 					encryptedMasterKey: input.encryptedMasterKey,
 					recoveryKeyHint: input.recoveryKeyHint,
+					secretKeyHint: input.secretKeyHint,
 					encryptedVaultKeys: input.encryptedVaultKeys,
 				});
 			} catch {

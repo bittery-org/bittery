@@ -1,16 +1,16 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
-import SignInForm from "@/components/sign-in-form";
+import SignUpForm from "@/components/sign-up-form";
 
 const searchSchema = z.object({
 	redirect: z.string().optional(),
 });
 
-export const Route = createFileRoute("/_auth/login")({
+export const Route = createFileRoute("/_auth/signup")({
 	component: RouteComponent,
 	validateSearch: searchSchema,
 	head: () => ({
-		meta: [{ title: "Sign In - Bittery" }],
+		meta: [{ title: "Sign Up - Bittery" }],
 	}),
 });
 
@@ -18,16 +18,19 @@ function RouteComponent() {
 	const navigate = useNavigate();
 	const { redirect } = Route.useSearch();
 
+	const invitationToken = redirect?.match(/^\/invite\/(.+)$/)?.[1] || undefined;
+
 	return (
-		<SignInForm
-			onSwitchToSignUp={() => {
+		<SignUpForm
+			onSwitchToSignIn={() => {
 				if (redirect) {
-					navigate({ to: "/signup", search: { redirect } });
+					navigate({ to: "/login", search: { redirect } });
 					return;
 				}
 
-				navigate({ to: "/signup" });
+				navigate({ to: "/login" });
 			}}
+			invitationToken={invitationToken}
 			redirectTo={redirect}
 		/>
 	);

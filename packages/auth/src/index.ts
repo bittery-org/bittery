@@ -861,6 +861,7 @@ export async function resetUserPassword(
 		encryptedPrivateKey: string;
 		encryptedMasterKey: string;
 		recoveryKeyHint: string;
+		secretKeyHint?: string;
 		encryptedVaultKeys: Array<{
 			vaultId: string;
 			encryptedVaultKey: string;
@@ -902,6 +903,7 @@ export async function resetUserPassword(
 				encryptedPrivateKey: data.encryptedPrivateKey,
 				encryptedMasterKey: data.encryptedMasterKey,
 				recoveryKeyHint: data.recoveryKeyHint,
+				...(data.secretKeyHint ? { secretKeyHint: data.secretKeyHint } : {}),
 			})
 			.where(eq(user.id, existingUser.id));
 

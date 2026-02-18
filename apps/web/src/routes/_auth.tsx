@@ -131,15 +131,17 @@ function AuthLayout() {
 				</div>
 
 				{/* Main content */}
-				<main className="flex flex-1 flex-col items-center justify-center px-4 py-8 sm:px-6">
-					<div className="w-full max-w-110 md:-mt-12">
-						<Outlet />
+				<main className="flex flex-1 flex-col px-4 py-8 sm:px-6">
+					<div className="flex flex-1 items-center justify-center">
+						<div className="w-full max-w-110">
+							<Outlet />
+						</div>
 					</div>
 				</main>
 
 				{/* Footer */}
-				<footer>
-					<div className="mx-auto flex max-w-105 flex-col items-center gap-3 px-4 py-4 sm:flex-row sm:justify-between">
+				<footer className="px-4">
+					<div className="mx-auto flex max-w-110 flex-col items-center gap-3 py-4 sm:flex-row sm:justify-between">
 						<Popover
 							open={isServerPopoverOpen}
 							onOpenChange={setIsServerPopoverOpen}
@@ -149,7 +151,7 @@ function AuthLayout() {
 									type="button"
 									variant="ghost"
 									size="sm"
-									className="h-7 gap-1 px-3 sm:px-4 text-muted-foreground/70 text-xs hover:text-muted-foreground"
+									className="h-7 gap-1 px-3 text-muted-foreground/70 text-xs hover:text-muted-foreground sm:px-4"
 								>
 									<Server size={12} />
 									<span className="max-w-44 truncate">
@@ -174,14 +176,19 @@ function AuthLayout() {
 											}}
 											className="h-8 w-full justify-between px-2 text-xs"
 										>
-											<span className="truncate">{getServerLabel(serverUrl)}</span>
+											<span className="truncate">
+												{getServerLabel(serverUrl)}
+											</span>
 											{serverUrl === activeServerUrl ? (
 												<Check size={12} className="shrink-0 text-primary" />
 											) : null}
 										</Button>
 									))}
 								</div>
-								<form onSubmit={handleAddServer} className="mt-2 flex gap-2 border-t pt-2">
+								<form
+									onSubmit={handleAddServer}
+									className="mt-2 flex gap-2 border-t pt-2"
+								>
 									<Input
 										type="url"
 										placeholder="https://your-server.com"

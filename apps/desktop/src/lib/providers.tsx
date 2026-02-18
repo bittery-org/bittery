@@ -4,6 +4,7 @@ import { toast } from "@bittery/ui";
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
+import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
 import { storage } from "@/lib/storage";
 import { getOrCreateDesktopSyncClientId } from "@/lib/sync-client-id";
 
@@ -85,16 +86,23 @@ const trpcClient = createTRPCClient<AppRouter>({
 		httpBatchLink({
 			url: `${fallbackServerUrl}/trpc`,
 			async fetch(url, options) {
-				const serverUrl = (await storage.getServerUrl()) ?? fallbackServerUrl;
-				const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
-
 				// Check if we're in "All Accounts" mode
 				const activeAccount = await storage.getActiveAccount();
+				const accountServerUrl =
+					activeAccount?.type === "single"
+						? await storage.getServerUrl(activeAccount.email)
+						: null;
+				const activeAuthServerUrl = await resolveActiveAuthServerUrl();
+				const serverUrl =
+					normalizeServerUrl(accountServerUrl ?? "") ??
+					activeAuthServerUrl ??
+					fallbackServerUrl;
+				const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
 
 				// Only get auth token if we have a real account (not "all" mode)
 				const token =
 					activeAccount?.type === "single"
-						? await storage.getAuthToken()
+						? await storage.getAuthToken(activeAccount.email)
 						: null;
 
 				const headers: Record<string, string> = {

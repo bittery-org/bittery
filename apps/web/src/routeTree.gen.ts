@@ -14,6 +14,7 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ShareTokenRouteImport } from './routes/share.$token'
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
+import { Route as AuthSignupRouteImport } from './routes/_auth/signup'
 import { Route as AuthRecoverRouteImport } from './routes/_auth/recover'
 import { Route as AuthLoginRouteImport } from './routes/_auth/login'
 import { Route as AppSecurityRouteImport } from './routes/_app/security'
@@ -45,6 +46,11 @@ const InviteTokenRoute = InviteTokenRouteImport.update({
   id: '/invite/$token',
   path: '/invite/$token',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthSignupRoute = AuthSignupRouteImport.update({
+  id: '/signup',
+  path: '/signup',
+  getParentRoute: () => AuthRoute,
 } as any)
 const AuthRecoverRoute = AuthRecoverRouteImport.update({
   id: '/recover',
@@ -93,6 +99,7 @@ export interface FileRoutesByFullPath {
   '/security': typeof AppSecurityRoute
   '/login': typeof AuthLoginRoute
   '/recover': typeof AuthRecoverRoute
+  '/signup': typeof AuthSignupRoute
   '/invite/$token': typeof InviteTokenRoute
   '/share/$token': typeof ShareTokenRoute
   '/settings/': typeof AppSettingsIndexRoute
@@ -106,6 +113,7 @@ export interface FileRoutesByTo {
   '/security': typeof AppSecurityRoute
   '/login': typeof AuthLoginRoute
   '/recover': typeof AuthRecoverRoute
+  '/signup': typeof AuthSignupRoute
   '/invite/$token': typeof InviteTokenRoute
   '/share/$token': typeof ShareTokenRoute
   '/settings': typeof AppSettingsIndexRoute
@@ -122,6 +130,7 @@ export interface FileRoutesById {
   '/_app/security': typeof AppSecurityRoute
   '/_auth/login': typeof AuthLoginRoute
   '/_auth/recover': typeof AuthRecoverRoute
+  '/_auth/signup': typeof AuthSignupRoute
   '/invite/$token': typeof InviteTokenRoute
   '/share/$token': typeof ShareTokenRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
@@ -137,6 +146,7 @@ export interface FileRouteTypes {
     | '/security'
     | '/login'
     | '/recover'
+    | '/signup'
     | '/invite/$token'
     | '/share/$token'
     | '/settings/'
@@ -150,6 +160,7 @@ export interface FileRouteTypes {
     | '/security'
     | '/login'
     | '/recover'
+    | '/signup'
     | '/invite/$token'
     | '/share/$token'
     | '/settings'
@@ -165,6 +176,7 @@ export interface FileRouteTypes {
     | '/_app/security'
     | '/_auth/login'
     | '/_auth/recover'
+    | '/_auth/signup'
     | '/invite/$token'
     | '/share/$token'
     | '/_app/settings/'
@@ -217,6 +229,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/invite/$token'
       preLoaderRoute: typeof InviteTokenRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_auth/signup': {
+      id: '/_auth/signup'
+      path: '/signup'
+      fullPath: '/signup'
+      preLoaderRoute: typeof AuthSignupRouteImport
+      parentRoute: typeof AuthRoute
     }
     '/_auth/recover': {
       id: '/_auth/recover'
@@ -300,11 +319,13 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 interface AuthRouteChildren {
   AuthLoginRoute: typeof AuthLoginRoute
   AuthRecoverRoute: typeof AuthRecoverRoute
+  AuthSignupRoute: typeof AuthSignupRoute
 }
 
 const AuthRouteChildren: AuthRouteChildren = {
   AuthLoginRoute: AuthLoginRoute,
   AuthRecoverRoute: AuthRecoverRoute,
+  AuthSignupRoute: AuthSignupRoute,
 }
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
