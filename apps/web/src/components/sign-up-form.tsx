@@ -1,12 +1,21 @@
-import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { Badge, Button, cn, Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Download, Eye, EyeOff, Loader2, Users } from "lucide-react";
+import {
+	CheckCircle2,
+	Download,
+	Eye,
+	EyeOff,
+	KeyRound,
+	Loader2,
+	ShieldAlert,
+	Users,
+} from "lucide-react";
 import { useEffect, useState } from "react";
+import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { storage } from "@/lib/storage";
 import {
@@ -27,21 +36,12 @@ export default function SignUpForm({
 	const navigate = useNavigate();
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
-	const defaultServerUrl = import.meta.env.VITE_SERVER_URL ?? "";
 	const [secretKey, setSecretKey] = useState<string>("");
 	const [recoveryKey, setRecoveryKey] = useState<string>("");
 	const [hasDownloadedKit, setHasDownloadedKit] = useState(false);
 	const [hasAcknowledged, setHasAcknowledged] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
-	const [serverUrl, setServerUrl] = useState(defaultServerUrl);
 	const [isEncrypting, setIsEncrypting] = useState(false);
-
-	// Load server URL on mount
-	useEffect(() => {
-		storage.getServerUrl().then((url) => {
-			if (url) setServerUrl(url);
-		});
-	}, []);
 
 	// Query invitation details if token is provided
 	const invitationQuery = useQuery({
@@ -146,15 +146,7 @@ export default function SignUpForm({
 			organizationName: "",
 		},
 		onSubmit: async ({ value }) => {
-			const normalizedServerUrl = normalizeServerUrl(serverUrl);
-			if (!normalizedServerUrl) {
-				toast.error("Invalid server URL");
-				return;
-			}
-			await storage.storeServerUrl(normalizedServerUrl);
-			if (normalizedServerUrl !== serverUrl) {
-				setServerUrl(normalizedServerUrl);
-			}
+			await resolveActiveAuthServerUrl();
 
 			if (!hasAcknowledged) {
 				toast.error("Please save your Emergency Kit before continuing");
@@ -385,53 +377,78 @@ export default function SignUpForm({
 				{signupHeading}
 			</h1>
 			<div className="space-y-4">
-				<div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-background to-emerald-500/10 p-5">
-					<p className="font-medium text-[0.7rem] text-primary/80 uppercase tracking-[0.12em]">
-						Emergency Kit
-					</p>
-					<h2 className="mt-2 font-semibold text-lg tracking-tight">
-						Save it before creating your account
-					</h2>
-					<p className="mt-2 text-muted-foreground text-sm leading-relaxed">
-						Contains your Secret Key, Recovery Key, and a handwritten password
-						section for secure paper storage.
-					</p>
+				<div className="relative overflow-hidden rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-background to-primary/5 p-5 shadow-sm">
+					<div className="-right-10 -top-16 pointer-events-none absolute h-36 w-36 rounded-full bg-emerald-500/20 blur-3xl" />
+					<div className="-bottom-14 -left-8 pointer-events-none absolute h-32 w-32 rounded-full bg-primary/15 blur-3xl" />
 
-					<Button
-						type="button"
-						variant="default"
-						className={cn(
-							"mt-4 w-full shadow-sm",
-							hasDownloadedKit
-								? "bg-emerald-600 text-white hover:bg-emerald-600/90"
-								: "",
-						)}
-						disabled={!hasAllKeyMaterial}
-						onClick={downloadEmergencyKit}
-					>
-						<Download size={16} className="mr-2" />
-						{hasDownloadedKit ? "Emergency Kit Ready" : "Save Emergency Kit"}
-					</Button>
-
-					<p className="mt-3 text-muted-foreground text-xs">
-						Downloads a PDF directly. If PDF creation fails, a text backup is
-						downloaded.
-					</p>
-
-					{hasDownloadedKit ? (
-						<div className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 font-medium text-emerald-700 text-xs dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">
-							Emergency Kit saved for this signup session.
+					<div className="relative space-y-4">
+						<div className="flex items-start justify-between gap-3">
+							<div>
+								<p className="font-medium text-[0.7rem] text-emerald-700 uppercase tracking-[0.12em] dark:text-emerald-300">
+									Emergency Kit
+								</p>
+								<h2 className="mt-2 font-semibold text-lg tracking-tight">
+									Secure recovery materials before setup
+								</h2>
+							</div>
+							<div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-2">
+								<KeyRound size={16} className="text-emerald-700 dark:text-emerald-300" />
+							</div>
 						</div>
-					) : null}
 
-					<div className="mt-4 border-border/60 border-t pt-3">
-						<p className="font-medium text-[0.7rem] text-muted-foreground uppercase tracking-[0.1em]">
-							Critical
+						<p className="text-muted-foreground text-sm leading-relaxed">
+							Download a printable kit with your Secret Key, Recovery Key, and
+							a handwritten password section for offline storage.
 						</p>
-						<p className="mt-1 text-foreground/80 text-xs leading-relaxed">
-							If your password, Secret Key, and Recovery Key are all lost,
-							recovery is impossible. Keep this kit offline.
+
+						<div className="grid gap-2 text-xs text-foreground/80 sm:grid-cols-2">
+							<div className="flex items-center gap-2 rounded-lg border border-border/60 bg-background/85 px-3 py-2">
+								<CheckCircle2 size={14} className="shrink-0 text-emerald-600" />
+								<span>Generated locally in your browser</span>
+							</div>
+							<div className="flex items-center gap-2 rounded-lg border border-border/60 bg-background/85 px-3 py-2">
+								<ShieldAlert size={14} className="shrink-0 text-amber-600" />
+								<span>Keep it offline and private</span>
+							</div>
+						</div>
+
+						<Button
+							type="button"
+							variant="default"
+							className={cn(
+								"w-full shadow-sm",
+								hasDownloadedKit
+									? "bg-emerald-600 text-white hover:bg-emerald-600/90"
+									: "",
+							)}
+							disabled={!hasAllKeyMaterial}
+							onClick={downloadEmergencyKit}
+						>
+							<Download size={16} className="mr-2" />
+							{hasDownloadedKit ? "Emergency Kit Saved" : "Download Emergency Kit"}
+						</Button>
+
+						<p className="text-muted-foreground text-xs">
+							PDF downloads automatically. If PDF generation fails, a text
+							backup is downloaded.
 						</p>
+
+						{hasDownloadedKit ? (
+							<div className="flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 font-medium text-emerald-700 text-xs dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">
+								<CheckCircle2 size={14} />
+								Emergency Kit saved for this signup session.
+							</div>
+						) : null}
+
+						<div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+							<p className="font-medium text-[0.7rem] text-amber-700 uppercase tracking-[0.1em] dark:text-amber-300">
+								No Recovery Fallback
+							</p>
+							<p className="mt-1 text-xs leading-relaxed text-amber-900/80 dark:text-amber-200/80">
+								If your password, Secret Key, and Recovery Key are all lost,
+								your vault cannot be recovered.
+							</p>
+						</div>
 					</div>
 				</div>
 
@@ -470,36 +487,6 @@ export default function SignUpForm({
 					}}
 					className="space-y-4"
 				>
-					<div>
-						<div className="space-y-2">
-							<Label htmlFor="serverUrl">Server URL</Label>
-							<Input
-								id="serverUrl"
-								name="serverUrl"
-								type="url"
-								placeholder="https://your-server.com"
-								value={serverUrl}
-								onBlur={async () => {
-									const normalized = normalizeServerUrl(serverUrl);
-									if (!normalized) {
-										toast.error("Invalid server URL");
-										return;
-									}
-									await storage.storeServerUrl(normalized);
-									if (normalized !== serverUrl) {
-										setServerUrl(normalized);
-									}
-								}}
-								onChange={(e) => setServerUrl(e.target.value)}
-								required
-								className="h-10"
-							/>
-							<p className="text-muted-foreground text-xs">
-								Use your self-hosted Bittery server URL.
-							</p>
-						</div>
-					</div>
-
 					<div>
 						<form.Field name="name">
 							{(field) => (

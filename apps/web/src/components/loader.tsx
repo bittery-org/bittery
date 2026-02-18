@@ -21,7 +21,7 @@ function Doors({
 		>
 			{/* Left door — 1/3 width */}
 			<div
-				className="absolute inset-y-0 left-0 z-10 w-1/3 overflow-visible bg-secondary md:w-1/4"
+				className="absolute inset-y-0 left-0 z-10 w-1/3 overflow-visible bg-secondary"
 				style={{
 					transform: open ? "translateX(-110%)" : "translateX(0)",
 					transition: open

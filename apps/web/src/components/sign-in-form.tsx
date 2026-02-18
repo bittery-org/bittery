@@ -1,6 +1,5 @@
 import { useCheckEmail, useSessionState } from "@bittery/core/hooks";
 import { performSRPLogin, storeLoginSession } from "@bittery/core/hooks/auth";
-import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { Button, Input, Label, toast } from "@bittery/ui";
@@ -9,6 +8,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
 import { storage } from "@/lib/storage";
 import { WorkerCrypto } from "@/lib/worker-crypto";
 
@@ -20,20 +20,11 @@ export default function SignInForm({
 	redirectTo?: string;
 }) {
 	const navigate = useNavigate();
-	const defaultServerUrl = import.meta.env.VITE_SERVER_URL ?? "";
 	const [email, setEmail] = useState("");
-	const [serverUrl, setServerUrl] = useState(defaultServerUrl);
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
 	const [sessionExpired, setSessionExpired] = useState(false);
 	const trpc = useTRPC();
-
-	// Load server URL on mount
-	useEffect(() => {
-		storage.getServerUrl().then((url) => {
-			if (url) setServerUrl(url);
-		});
-	}, []);
 
 	// Check session state for quick unlock
 	const { data: sessionState, isLoading: isLoadingSession } = useSessionState();
@@ -104,19 +95,6 @@ export default function SignInForm({
 		}
 	}, [isLoadingSession, sessionState]);
 
-	const persistServerUrl = async () => {
-		const normalized = normalizeServerUrl(serverUrl);
-		if (!normalized) {
-			toast.error("Invalid server URL");
-			return null;
-		}
-		await storage.storeServerUrl(normalized);
-		if (normalized !== serverUrl) {
-			setServerUrl(normalized);
-		}
-		return normalized;
-	};
-
 	const form = useForm({
 		defaultValues: {
 			email: "",
@@ -124,9 +102,7 @@ export default function SignInForm({
 			secretKey: "",
 		},
 		onSubmit: async ({ value }) => {
-			if (!(await persistServerUrl())) {
-				return;
-			}
+			await resolveActiveAuthServerUrl();
 			await loginMutation.mutateAsync(value);
 		},
 	});
@@ -147,9 +123,7 @@ export default function SignInForm({
 
 	const handleEmailBlur = async (newEmail: string) => {
 		if (newEmail?.includes("@")) {
-			if (!(await persistServerUrl())) {
-				return;
-			}
+			await resolveActiveAuthServerUrl();
 			setEmail(newEmail);
 		}
 	};
@@ -185,26 +159,6 @@ export default function SignInForm({
 					}}
 					className="space-y-4"
 				>
-					<div>
-						<div className="space-y-2">
-							<Label htmlFor="serverUrl">Server URL</Label>
-							<Input
-								id="serverUrl"
-								name="serverUrl"
-								type="url"
-								placeholder="https://your-server.com"
-								value={serverUrl}
-								onBlur={() => persistServerUrl()}
-								onChange={(e) => setServerUrl(e.target.value)}
-								required
-								className="h-10"
-							/>
-							<p className="text-muted-foreground text-xs">
-								Use your self-hosted Bittery server URL.
-							</p>
-						</div>
-					</div>
-
 					<div>
 						<form.Field name="email">
 							{(field) => (

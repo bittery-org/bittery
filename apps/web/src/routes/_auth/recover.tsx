@@ -1,9 +1,9 @@
-import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button, Input, Label, toast } from "@bittery/ui";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
+import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
 import { storage } from "@/lib/storage";
 import { WorkerCrypto } from "@/lib/worker-crypto";
 
@@ -49,10 +49,8 @@ export const Route = createFileRoute("/_auth/recover")({
 function RecoverRouteComponent() {
 	const navigate = useNavigate();
 	const trpcClient = useTRPCClient();
-	const defaultServerUrl = import.meta.env.VITE_SERVER_URL ?? "";
 
 	const [step, setStep] = useState<RecoveryStep>("email");
-	const [serverUrl, setServerUrl] = useState(defaultServerUrl);
 	const [email, setEmail] = useState("");
 	const [code, setCode] = useState("");
 	const [recoveryToken, setRecoveryToken] = useState("");
@@ -66,28 +64,9 @@ function RecoverRouteComponent() {
 	const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 
-	useEffect(() => {
-		storage.getServerUrl().then((url) => {
-			if (url) setServerUrl(url);
-		});
-	}, []);
-
 	const stepNumber = useMemo(() => getRecoveryStepNumber(step), [step]);
 
-	const persistServerUrl = async (): Promise<string | null> => {
-		const normalized = normalizeServerUrl(serverUrl);
-		if (!normalized) {
-			toast.error("Invalid server URL");
-			return null;
-		}
-		await storage.storeServerUrl(normalized);
-		if (normalized !== serverUrl) {
-			setServerUrl(normalized);
-		}
-		return normalized;
-	};
-
-	const handleRequestCode = async (e: React.FormEvent) => {
+	const handleRequestCode = async (e: FormEvent) => {
 		e.preventDefault();
 
 		if (!email.trim()) {
@@ -95,9 +74,7 @@ function RecoverRouteComponent() {
 			return;
 		}
 
-		if (!(await persistServerUrl())) {
-			return;
-		}
+		await resolveActiveAuthServerUrl();
 
 		setIsSubmitting(true);
 		try {
@@ -115,7 +92,7 @@ function RecoverRouteComponent() {
 		}
 	};
 
-	const handleVerifyCode = async (e: React.FormEvent) => {
+	const handleVerifyCode = async (e: FormEvent) => {
 		e.preventDefault();
 
 		if (code.trim().length !== 6) {
@@ -144,7 +121,7 @@ function RecoverRouteComponent() {
 		}
 	};
 
-	const handleValidateKeys = async (e: React.FormEvent) => {
+	const handleValidateKeys = async (e: FormEvent) => {
 		e.preventDefault();
 
 		const workerCrypto = new WorkerCrypto();
@@ -174,7 +151,7 @@ function RecoverRouteComponent() {
 		}
 	};
 
-	const handleResetPassword = async (e: React.FormEvent) => {
+	const handleResetPassword = async (e: FormEvent) => {
 		e.preventDefault();
 
 		if (!recoveryToken) {
@@ -193,9 +170,7 @@ function RecoverRouteComponent() {
 			return;
 		}
 
-		if (!(await persistServerUrl())) {
-			return;
-		}
+		await resolveActiveAuthServerUrl();
 
 		setIsSubmitting(true);
 		const workerCrypto = new WorkerCrypto();
@@ -349,21 +324,6 @@ function RecoverRouteComponent() {
 
 				{step === "email" && (
 					<form onSubmit={handleRequestCode} className="space-y-4">
-						<div className="space-y-2">
-							<Label htmlFor="serverUrl">Server URL</Label>
-							<Input
-								id="serverUrl"
-								name="serverUrl"
-								type="url"
-								placeholder="https://your-server.com"
-								value={serverUrl}
-								onBlur={() => persistServerUrl()}
-								onChange={(e) => setServerUrl(e.target.value)}
-								required
-								className="h-10"
-							/>
-						</div>
-
 						<div className="space-y-2">
 							<Label htmlFor="email">Email</Label>
 							<Input
