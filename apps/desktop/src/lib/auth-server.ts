@@ -3,8 +3,8 @@ import { storage } from "./storage";
 
 const KNOWN_AUTH_SERVERS_STORAGE_KEY = "bittery_known_auth_servers";
 const ACTIVE_AUTH_SERVER_STORAGE_KEY = "bittery_active_auth_server";
-const AUTH_SERVER_CHANGED_EVENT = "bittery:auth-server-changed";
 const MAX_KNOWN_AUTH_SERVERS = 10;
+const activeAuthServerListeners = new Set<(serverUrl: string) => void>();
 
 function getFallbackServerUrl(): string {
 	return (
@@ -49,13 +49,9 @@ function writeKnownServerUrls(serverUrls: string[]): void {
 }
 
 function notifyServerChange(serverUrl: string): void {
-	if (typeof window === "undefined") {
-		return;
+	for (const listener of [...activeAuthServerListeners]) {
+		listener(serverUrl);
 	}
-
-	window.dispatchEvent(
-		new CustomEvent<string>(AUTH_SERVER_CHANGED_EVENT, { detail: serverUrl }),
-	);
 }
 
 function storeActiveServerUrl(serverUrl: string): void {
@@ -83,20 +79,9 @@ function readStoredActiveServerUrl(): string | null {
 export function subscribeActiveAuthServerUrl(
 	onChange: (serverUrl: string) => void,
 ): () => void {
-	if (typeof window === "undefined") {
-		return () => {};
-	}
-
-	const handler = (event: Event) => {
-		const customEvent = event as CustomEvent<string>;
-		if (typeof customEvent.detail === "string") {
-			onChange(customEvent.detail);
-		}
-	};
-
-	window.addEventListener(AUTH_SERVER_CHANGED_EVENT, handler);
+	activeAuthServerListeners.add(onChange);
 	return () => {
-		window.removeEventListener(AUTH_SERVER_CHANGED_EVENT, handler);
+		activeAuthServerListeners.delete(onChange);
 	};
 }
 

@@ -1,20 +1,14 @@
-const AUTH_REVEAL_TO_VAULT_EVENT = "bittery:auth-reveal-to-vault";
+const authRevealListeners = new Set<() => void>();
 
 export function triggerAuthRevealToVault(): void {
-	if (typeof window === "undefined") {
-		return;
+	for (const listener of [...authRevealListeners]) {
+		listener();
 	}
-
-	window.dispatchEvent(new Event(AUTH_REVEAL_TO_VAULT_EVENT));
 }
 
 export function subscribeAuthRevealToVault(onTrigger: () => void): () => void {
-	if (typeof window === "undefined") {
-		return () => {};
-	}
-
-	window.addEventListener(AUTH_REVEAL_TO_VAULT_EVENT, onTrigger);
+	authRevealListeners.add(onTrigger);
 	return () => {
-		window.removeEventListener(AUTH_REVEAL_TO_VAULT_EVENT, onTrigger);
+		authRevealListeners.delete(onTrigger);
 	};
 }
