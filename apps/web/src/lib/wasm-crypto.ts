@@ -10,15 +10,21 @@ import init, {
 	type JsSession,
 	JsSrpClient,
 	decrypt as wasmDecrypt,
+	decryptMasterKey as wasmDecryptMasterKey,
+	deriveKeysFromMasterKey as wasmDeriveKeysFromMasterKey,
+	deriveMasterKey as wasmDeriveMasterKey,
 	deriveKeys as wasmDeriveKeys,
 	encrypt as wasmEncrypt,
+	encryptMasterKey as wasmEncryptMasterKey,
 	generateEncryptionKey as wasmGenerateEncryptionKey,
+	generateRecoveryKey as wasmGenerateRecoveryKey,
 	generateRSAKeyPair as wasmGenerateRSAKeyPair,
 	generateSecretKey as wasmGenerateSecretKey,
 	getSecretKeyHint as wasmGetSecretKeyHint,
 	performKeyRotation as wasmPerformKeyRotation,
 	rsaDecrypt as wasmRsaDecrypt,
 	rsaEncrypt as wasmRsaEncrypt,
+	validateRecoveryKey as wasmValidateRecoveryKey,
 	validateRotationData as wasmValidateRotationData,
 	validateSecretKey as wasmValidateSecretKey,
 } from "@bittery/crypto-wasm";
@@ -154,6 +160,36 @@ export async function deriveKeys(
 
 	const result = wasmDeriveKeys(accountPassword, secretKey, email);
 
+	return {
+		authKey: base64ToUint8Array(result.auth_key),
+		masterUnlockKey: base64ToUint8Array(result.master_unlock_key),
+	};
+}
+
+/**
+ * Derive intermediate master key (PBKDF2 output) from password + secret key
+ */
+export async function deriveMasterKey(
+	accountPassword: string,
+	secretKey: string,
+	email: string,
+): Promise<Uint8Array> {
+	await autoInit();
+
+	const masterKeyBase64 = wasmDeriveMasterKey(accountPassword, secretKey, email);
+	return base64ToUint8Array(masterKeyBase64);
+}
+
+/**
+ * Derive auth key + master unlock key from a raw master key
+ */
+export async function deriveKeysFromMasterKey(
+	masterKey: Uint8Array,
+	email: string,
+): Promise<DerivedKeys> {
+	await autoInit();
+
+	const result = wasmDeriveKeysFromMasterKey(uint8ArrayToBase64(masterKey), email);
 	return {
 		authKey: base64ToUint8Array(result.auth_key),
 		masterUnlockKey: base64ToUint8Array(result.master_unlock_key),
@@ -307,6 +343,94 @@ export async function getSecretKeyHintAsync(
 ): Promise<string> {
 	await autoInit();
 	return wasmGetSecretKeyHint(secretKey);
+}
+
+/**
+ * Generate a new recovery key in R1-XXXXXX format
+ */
+export function generateRecoveryKey(): string {
+	ensureInitialized();
+	return wasmGenerateRecoveryKey();
+}
+
+/**
+ * Generate a new recovery key (async version for compatibility)
+ */
+export async function generateRecoveryKeyAsync(): Promise<string> {
+	await autoInit();
+	return wasmGenerateRecoveryKey();
+}
+
+/**
+ * Validate recovery key format
+ */
+export function validateRecoveryKey(recoveryKey: string): boolean {
+	ensureInitialized();
+	return wasmValidateRecoveryKey(recoveryKey);
+}
+
+/**
+ * Validate recovery key format (async version for compatibility)
+ */
+export async function validateRecoveryKeyAsync(
+	recoveryKey: string,
+): Promise<boolean> {
+	await autoInit();
+	return wasmValidateRecoveryKey(recoveryKey);
+}
+
+/**
+ * Get the hint (first segment) from a recovery key
+ */
+export function getRecoveryKeyHint(recoveryKey: string): string {
+	const parts = recoveryKey.split("-");
+	if (parts.length >= 2) {
+		return `${parts[0]}-${parts[1]}`;
+	}
+	return "";
+}
+
+/**
+ * Encrypt a raw master key using recovery key material
+ */
+export async function encryptMasterKey(
+	masterKey: Uint8Array,
+	recoveryKey: string,
+	email: string,
+): Promise<EncryptedData> {
+	await autoInit();
+
+	const result = wasmEncryptMasterKey(
+		uint8ArrayToBase64(masterKey),
+		recoveryKey,
+		email,
+	);
+
+	return {
+		ciphertext: result.ciphertext,
+		iv: result.iv,
+		algorithm: result.algorithm,
+	};
+}
+
+/**
+ * Decrypt encrypted recovery material back into a raw master key
+ */
+export async function decryptMasterKey(
+	data: EncryptedData,
+	recoveryKey: string,
+	email: string,
+): Promise<Uint8Array> {
+	await autoInit();
+
+	const wasmData = new JsEncryptedData(
+		data.ciphertext,
+		data.iv,
+		data.algorithm,
+	);
+
+	const masterKeyBase64 = wasmDecryptMasterKey(wasmData, recoveryKey, email);
+	return base64ToUint8Array(masterKeyBase64);
 }
 
 // ============================================================================

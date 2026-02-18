@@ -5,7 +5,7 @@
 use rand::{rngs::OsRng, RngCore};
 
 /// Base32 charset without confusing characters (0, 1, 8, 9, O, I, L)
-const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+pub(crate) const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 /// Version prefix for secret keys
 const VERSION_PREFIX: &str = "A3";

@@ -37,7 +37,7 @@
 		"db:migrate": "turbo -F @bittery/db db:migrate",
 		"db:start": "turbo -F @bittery/db db:start",
 		"db:watch": "turbo -F @bittery/db db:watch",
-		"db:test:setup": "turbo -F @bittery/db db:test:setup",
+		"db:test:setup": "pnpm --filter @bittery/db run db:test:setup",
 		"db:stop": "turbo -F @bittery/db db:stop",
 		"db:down": "turbo -F @bittery/db db:down",
 		"start:server": "pnpm --filter server run start"

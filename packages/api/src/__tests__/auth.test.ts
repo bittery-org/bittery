@@ -38,10 +38,12 @@ function toSignupCryptoInput(
 ) {
 	return {
 		secretKeyHint: data.secretKeyHint,
+		recoveryKeyHint: data.recoveryKeyHint,
 		srpSalt: data.srpSalt,
 		srpVerifier: data.srpVerifier,
 		publicKey: data.publicKey,
 		encryptedPrivateKey: data.encryptedPrivateKey,
+		encryptedMasterKey: data.encryptedMasterKey,
 		encryptedVaultKey: data.encryptedVaultKey,
 	};
 }

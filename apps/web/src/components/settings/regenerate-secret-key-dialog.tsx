@@ -288,14 +288,15 @@ Generated: ${new Date().toLocaleString()}
 							<DialogDescription>
 								Generate a new secret key for your account. Your current secret
 								key will be invalidated and you'll need to use the new one to
-								sign in.
+								sign in. Your Recovery Key setup will also be cleared.
 							</DialogDescription>
 						</DialogHeader>
 						<div className="grid gap-4 py-4">
 							<div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3">
 								<p className="text-destructive text-xs">
 									<strong>Warning:</strong> This action cannot be undone. Make
-									sure you save your new secret key before proceeding.
+									sure you save your new secret key and reconfigure Recovery Key
+									after completion.
 								</p>
 							</div>
 							<div className="grid gap-2">
@@ -383,8 +384,8 @@ Generated: ${new Date().toLocaleString()}
 
 							<div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
 								<p className="text-amber-700 text-xs dark:text-amber-300">
-									<strong>Important:</strong> If you lose this secret key, you
-									will lose access to your account and all your data.
+									<strong>Important:</strong> After regeneration, set up a new
+									Recovery Key in Settings.
 								</p>
 							</div>
 

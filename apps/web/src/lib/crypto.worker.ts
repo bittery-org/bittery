@@ -6,11 +6,17 @@ import init, {
 	JsEncryptedData,
 	JsSrpClient,
 	decrypt as wasmDecrypt,
+	decryptMasterKey as wasmDecryptMasterKey,
+	deriveKeysFromMasterKey as wasmDeriveKeysFromMasterKey,
+	deriveMasterKey as wasmDeriveMasterKey,
 	deriveKeys as wasmDeriveKeys,
 	encrypt as wasmEncrypt,
+	encryptMasterKey as wasmEncryptMasterKey,
 	generateEncryptionKey as wasmGenerateEncryptionKey,
+	generateRecoveryKey as wasmGenerateRecoveryKey,
 	generateRSAKeyPair as wasmGenerateRSAKeyPair,
 	getSecretKeyHint as wasmGetSecretKeyHint,
+	validateRecoveryKey as wasmValidateRecoveryKey,
 	validateSecretKey as wasmValidateSecretKey,
 } from "@bittery/crypto-wasm";
 
@@ -35,7 +41,15 @@ type WorkerRequest = {
 	id: number;
 } & (
 	| { type: "validateSecretKey"; secretKey: string }
+	| { type: "validateRecoveryKey"; recoveryKey: string }
 	| { type: "deriveKeys"; password: string; secretKey: string; email: string }
+	| {
+			type: "deriveMasterKey";
+			password: string;
+			secretKey: string;
+			email: string;
+	  }
+	| { type: "deriveKeysFromMasterKey"; masterKeyBase64: string; email: string }
 	| { type: "generateClientEphemeral" }
 	| {
 			type: "deriveClientSession";
@@ -59,6 +73,21 @@ type WorkerRequest = {
 			keyBase64: string;
 	  }
 	| { type: "generateEncryptionKey" }
+	| { type: "generateRecoveryKey" }
+	| {
+			type: "encryptMasterKey";
+			masterKeyBase64: string;
+			recoveryKey: string;
+			email: string;
+	  }
+	| {
+			type: "decryptMasterKey";
+			ciphertext: string;
+			iv: string;
+			algorithm: string;
+			recoveryKey: string;
+			email: string;
+	  }
 	| { type: "generateRSAKeyPair" }
 	| { type: "generateSRPRegistration"; srpPassword: string }
 	| { type: "getSecretKeyHint"; secretKey: string }
@@ -78,8 +107,27 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 				result = wasmValidateSecretKey(msg.secretKey);
 				break;
 			}
+			case "validateRecoveryKey": {
+				result = wasmValidateRecoveryKey(msg.recoveryKey);
+				break;
+			}
 			case "deriveKeys": {
 				const derived = wasmDeriveKeys(msg.password, msg.secretKey, msg.email);
+				result = {
+					authKey: derived.auth_key,
+					masterUnlockKey: derived.master_unlock_key,
+				};
+				break;
+			}
+			case "deriveMasterKey": {
+				result = wasmDeriveMasterKey(msg.password, msg.secretKey, msg.email);
+				break;
+			}
+			case "deriveKeysFromMasterKey": {
+				const derived = wasmDeriveKeysFromMasterKey(
+					msg.masterKeyBase64,
+					msg.email,
+				);
 				result = {
 					authKey: derived.auth_key,
 					masterUnlockKey: derived.master_unlock_key,
@@ -145,6 +193,32 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 			}
 			case "generateEncryptionKey": {
 				result = wasmGenerateEncryptionKey();
+				break;
+			}
+			case "generateRecoveryKey": {
+				result = wasmGenerateRecoveryKey();
+				break;
+			}
+			case "encryptMasterKey": {
+				const enc = wasmEncryptMasterKey(
+					msg.masterKeyBase64,
+					msg.recoveryKey,
+					msg.email,
+				);
+				result = {
+					ciphertext: enc.ciphertext,
+					iv: enc.iv,
+					algorithm: enc.algorithm,
+				};
+				break;
+			}
+			case "decryptMasterKey": {
+				const wasmData = new JsEncryptedData(
+					msg.ciphertext,
+					msg.iv,
+					msg.algorithm,
+				);
+				result = wasmDecryptMasterKey(wasmData, msg.recoveryKey, msg.email);
 				break;
 			}
 			case "generateRSAKeyPair": {

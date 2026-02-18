@@ -8,9 +8,17 @@ import {
 	deriveServerSession,
 	generateServerEphemeral,
 } from "@bittery/crypto-napi";
-import { db, loginRateLimit, session, user, vaultKey } from "@bittery/db";
+import {
+	db,
+	loginRateLimit,
+	recoveryRateLimit,
+	recoveryVerification,
+	session,
+	user,
+	vaultKey,
+} from "@bittery/db";
 import type { SRPServerChallenge } from "@bittery/types";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
 import { nanoid } from "nanoid";
 
@@ -41,9 +49,12 @@ if (jwtSecretRaw.length < 32) {
 const JWT_SECRET = new TextEncoder().encode(jwtSecretRaw);
 const JWT_ISSUER = "bittery";
 const JWT_AUDIENCE = "bittery-users";
+const RECOVERY_JWT_AUDIENCE = "bittery-recovery";
 const SESSION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 days
+const RECOVERY_TOKEN_DURATION = "15m";
 const LOGIN_RATE_LIMIT_FREE_ATTEMPTS = 5;
 const LOGIN_RATE_LIMIT_MAX_LOCK_MINUTES = 30;
+const RECOVERY_VERIFICATION_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 
 export function normalizeEmail(email: string): string {
 	return email.trim().toLowerCase();
@@ -67,11 +78,23 @@ export class LoginRateLimitError extends Error {
 	}
 }
 
+export class RecoveryRateLimitError extends Error {
+	constructor(message = "Too many recovery attempts. Please try again later.") {
+		super(message);
+		this.name = "RecoveryRateLimitError";
+	}
+}
+
 export interface SessionPayload {
 	userId: string;
 	email: string;
 	sessionId: string;
 	sessionTokenHash: string;
+}
+
+export interface RecoveryTokenPayload {
+	email: string;
+	type: "recovery";
 }
 
 /**
@@ -85,6 +108,8 @@ export async function createUser(data: {
 	srpVerifier: string;
 	publicKey: string;
 	encryptedPrivateKey: string;
+	encryptedMasterKey?: string | null;
+	recoveryKeyHint?: string | null;
 }) {
 	const userId = nanoid();
 
@@ -98,6 +123,8 @@ export async function createUser(data: {
 		srpVerifier: data.srpVerifier,
 		publicKey: data.publicKey,
 		encryptedPrivateKey: data.encryptedPrivateKey,
+		encryptedMasterKey: data.encryptedMasterKey ?? null,
+		recoveryKeyHint: data.recoveryKeyHint ?? null,
 	});
 
 	return userId;
@@ -279,6 +306,53 @@ export async function verifySession(
 }
 
 /**
+ * Create short-lived recovery token after successful recovery code verification
+ */
+export async function createRecoveryToken(email: string): Promise<string> {
+	const normalizedEmail = normalizeEmail(email);
+
+	// @ts-expect-error -- jose types
+	return new SignJWT({
+		email: normalizedEmail,
+		type: "recovery",
+	} as RecoveryTokenPayload)
+		.setProtectedHeader({ alg: "HS256" })
+		.setIssuedAt()
+		.setIssuer(JWT_ISSUER)
+		.setAudience(RECOVERY_JWT_AUDIENCE)
+		.setExpirationTime(RECOVERY_TOKEN_DURATION)
+		.sign(JWT_SECRET);
+}
+
+/**
+ * Verify short-lived recovery token
+ */
+export async function verifyRecoveryToken(
+	token: string,
+): Promise<RecoveryTokenPayload | null> {
+	try {
+		const { payload } = await jwtVerify(token, JWT_SECRET, {
+			issuer: JWT_ISSUER,
+			audience: RECOVERY_JWT_AUDIENCE,
+		});
+
+		const email = typeof payload.email === "string" ? payload.email : null;
+		const type = payload.type;
+
+		if (!email || type !== "recovery") {
+			return null;
+		}
+
+		return {
+			email: normalizeEmail(email),
+			type: "recovery",
+		};
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Get user by email
  */
 export async function getUserByEmail(email: string) {
@@ -302,6 +376,23 @@ export async function getUserById(userId: string) {
 		.limit(1);
 
 	return existingUser || null;
+}
+
+/**
+ * Store or update encrypted master key recovery metadata
+ */
+export async function storeEncryptedMasterKey(
+	userId: string,
+	encryptedMasterKey: string,
+	recoveryKeyHint: string,
+) {
+	await db
+		.update(user)
+		.set({
+			encryptedMasterKey,
+			recoveryKeyHint,
+		})
+		.where(eq(user.id, userId));
 }
 
 /**
@@ -489,6 +580,342 @@ export async function clearLoginRateLimit(
 	await db.delete(loginRateLimit).where(eq(loginRateLimit.id, id));
 }
 
+function generateRecoveryVerificationCode(): string {
+	return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+/**
+ * Create a new recovery verification code (6 digits, 15 minutes).
+ */
+export async function createRecoveryVerification(email: string): Promise<string> {
+	const normalizedEmail = normalizeEmail(email);
+	const now = new Date();
+	const code = generateRecoveryVerificationCode();
+
+	// Invalidate previous active codes so only one can be used at a time.
+	await db
+		.update(recoveryVerification)
+		.set({ usedAt: now })
+		.where(
+			and(
+				eq(recoveryVerification.email, normalizedEmail),
+				isNull(recoveryVerification.usedAt),
+			),
+		);
+
+	await db.insert(recoveryVerification).values({
+		id: nanoid(),
+		email: normalizedEmail,
+		code,
+		expiresAt: new Date(now.getTime() + RECOVERY_VERIFICATION_DURATION_MS),
+	});
+
+	return code;
+}
+
+/**
+ * Verify recovery code. Returns false on failure and increments attempt counters.
+ */
+export async function verifyRecoveryCode(
+	email: string,
+	code: string,
+): Promise<boolean> {
+	const normalizedEmail = normalizeEmail(email);
+	const now = new Date();
+
+	const validVerification = await db.query.recoveryVerification.findFirst({
+		where: (record, { and, eq, gt, isNull }) =>
+			and(
+				eq(record.email, normalizedEmail),
+				eq(record.code, code),
+				gt(record.expiresAt, now),
+				isNull(record.usedAt),
+			),
+		orderBy: (record, { desc }) => [desc(record.createdAt)],
+	});
+
+	if (validVerification) {
+		if (validVerification.attempts >= validVerification.maxAttempts) {
+			return false;
+		}
+		return true;
+	}
+
+	// Increment attempts for the latest active verification to mitigate brute forcing.
+	const activeVerification = await db.query.recoveryVerification.findFirst({
+		where: (record, { and, eq, gt, isNull }) =>
+			and(
+				eq(record.email, normalizedEmail),
+				gt(record.expiresAt, now),
+				isNull(record.usedAt),
+			),
+		orderBy: (record, { desc }) => [desc(record.createdAt)],
+	});
+
+	if (activeVerification) {
+		const nextAttempts = activeVerification.attempts + 1;
+		await db
+			.update(recoveryVerification)
+			.set({
+				attempts: nextAttempts,
+				...(nextAttempts >= activeVerification.maxAttempts
+					? { usedAt: now }
+					: {}),
+			})
+			.where(eq(recoveryVerification.id, activeVerification.id));
+	}
+
+	return false;
+}
+
+/**
+ * Check whether recovery attempts are currently rate-limited for an email + IP pair
+ */
+export async function checkRecoveryRateLimit(
+	email: string,
+	ipAddress: string | null,
+): Promise<void> {
+	const id = getRateLimitId(email, ipAddress);
+	const now = new Date();
+
+	const [existingLimit] = await db
+		.select()
+		.from(recoveryRateLimit)
+		.where(eq(recoveryRateLimit.id, id))
+		.limit(1);
+
+	if (existingLimit?.lockedUntil && existingLimit.lockedUntil > now) {
+		throw new RecoveryRateLimitError();
+	}
+}
+
+/**
+ * Record failed recovery attempt and potentially lock future attempts
+ */
+export async function recordFailedRecoveryAttempt(
+	email: string,
+	ipAddress: string | null,
+): Promise<void> {
+	const normalizedEmail = normalizeEmail(email);
+	const normalizedIp = ipAddress?.trim() || null;
+	const id = getRateLimitId(normalizedEmail, normalizedIp);
+	const now = new Date();
+
+	const [existingLimit] = await db
+		.select()
+		.from(recoveryRateLimit)
+		.where(eq(recoveryRateLimit.id, id))
+		.limit(1);
+
+	const attempts = (existingLimit?.attempts ?? 0) + 1;
+	let lockedUntil: Date | null = null;
+
+	if (attempts >= LOGIN_RATE_LIMIT_FREE_ATTEMPTS) {
+		const lockMinutes = Math.min(
+			LOGIN_RATE_LIMIT_MAX_LOCK_MINUTES,
+			2 ** (attempts - LOGIN_RATE_LIMIT_FREE_ATTEMPTS),
+		);
+		lockedUntil = new Date(now.getTime() + lockMinutes * 60 * 1000);
+	}
+
+	if (existingLimit) {
+		await db
+			.update(recoveryRateLimit)
+			.set({
+				attempts,
+				lastAttemptAt: now,
+				lockedUntil,
+			})
+			.where(eq(recoveryRateLimit.id, id));
+	} else {
+		await db.insert(recoveryRateLimit).values({
+			id,
+			email: normalizedEmail,
+			ipAddress: normalizedIp,
+			attempts,
+			lastAttemptAt: now,
+			lockedUntil,
+		});
+	}
+
+	if (lockedUntil && lockedUntil > now) {
+		throw new RecoveryRateLimitError();
+	}
+}
+
+/**
+ * Clear failed recovery attempts after a successful recovery
+ */
+export async function clearRecoveryRateLimit(
+	email: string,
+	ipAddress: string | null,
+): Promise<void> {
+	const id = getRateLimitId(email, ipAddress?.trim() || null);
+	await db.delete(recoveryRateLimit).where(eq(recoveryRateLimit.id, id));
+}
+
+/**
+ * Get encrypted recovery metadata for a verified recovery session
+ */
+export async function getRecoveryData(email: string): Promise<{
+	userId: string;
+	encryptedMasterKey: string;
+	encryptedPrivateKey: string;
+	secretKeyHint: string | null;
+	recoveryKeyHint: string | null;
+} | null> {
+	const normalizedEmail = normalizeEmail(email);
+	const now = new Date();
+
+	const activeVerification = await db.query.recoveryVerification.findFirst({
+		where: (record, { and, eq, gt, isNull }) =>
+			and(
+				eq(record.email, normalizedEmail),
+				gt(record.expiresAt, now),
+				isNull(record.usedAt),
+			),
+		orderBy: (record, { desc }) => [desc(record.createdAt)],
+	});
+
+	if (!activeVerification) {
+		return null;
+	}
+
+	const existingUser = await db.query.user.findFirst({
+		where: (record, { eq }) => eq(record.email, normalizedEmail),
+		columns: {
+			id: true,
+			encryptedMasterKey: true,
+			encryptedPrivateKey: true,
+			secretKeyHint: true,
+			recoveryKeyHint: true,
+		},
+	});
+
+	if (!existingUser?.encryptedMasterKey) {
+		return null;
+	}
+
+	return {
+		userId: existingUser.id,
+		encryptedMasterKey: existingUser.encryptedMasterKey,
+		encryptedPrivateKey: existingUser.encryptedPrivateKey,
+		secretKeyHint: existingUser.secretKeyHint,
+		recoveryKeyHint: existingUser.recoveryKeyHint,
+	};
+}
+
+/**
+ * Get all vault keys for recovery (includes vault creator to identify MUK-encrypted keys)
+ */
+export async function getUserVaultKeysForRecovery(userId: string): Promise<
+	Array<{
+		vaultId: string;
+		encryptedVaultKey: string;
+		createdById: string;
+	}>
+> {
+	const userVaultKeys = await db.query.vaultKey.findMany({
+		where: (record, { eq }) => eq(record.userId, userId),
+		with: {
+			vault: {
+				columns: {
+					id: true,
+					createdById: true,
+				},
+			},
+		},
+		orderBy: (record, { desc }) => [desc(record.createdAt)],
+	});
+
+	return userVaultKeys.map((record) => ({
+		vaultId: record.vaultId,
+		encryptedVaultKey: record.encryptedVaultKey,
+		createdById: record.vault.createdById,
+	}));
+}
+
+/**
+ * Reset user password and recovery metadata in a single transaction.
+ * Also invalidates existing sessions and marks recovery verification as used.
+ */
+export async function resetUserPassword(
+	email: string,
+	data: {
+		srpSalt: string;
+		srpVerifier: string;
+		encryptedPrivateKey: string;
+		encryptedMasterKey: string;
+		recoveryKeyHint: string;
+		encryptedVaultKeys: Array<{
+			vaultId: string;
+			encryptedVaultKey: string;
+		}>;
+	},
+): Promise<string> {
+	const normalizedEmail = normalizeEmail(email);
+	const now = new Date();
+
+	return db.transaction(async (tx) => {
+		const existingVerification = await tx.query.recoveryVerification.findFirst({
+			where: (record, { and, eq, gt, isNull }) =>
+				and(
+					eq(record.email, normalizedEmail),
+					gt(record.expiresAt, now),
+					isNull(record.usedAt),
+				),
+			orderBy: (record, { desc }) => [desc(record.createdAt)],
+		});
+
+		if (!existingVerification) {
+			throw new Error("Recovery session expired or already used");
+		}
+
+		const existingUser = await tx.query.user.findFirst({
+			where: (record, { eq }) => eq(record.email, normalizedEmail),
+			columns: { id: true },
+		});
+
+		if (!existingUser) {
+			throw new Error("Recovery session expired or already used");
+		}
+
+		await tx
+			.update(user)
+			.set({
+				srpSalt: data.srpSalt,
+				srpVerifier: data.srpVerifier,
+				encryptedPrivateKey: data.encryptedPrivateKey,
+				encryptedMasterKey: data.encryptedMasterKey,
+				recoveryKeyHint: data.recoveryKeyHint,
+			})
+			.where(eq(user.id, existingUser.id));
+
+		for (const vk of data.encryptedVaultKeys) {
+			await tx
+				.update(vaultKey)
+				.set({ encryptedVaultKey: vk.encryptedVaultKey })
+				.where(
+					and(
+						eq(vaultKey.vaultId, vk.vaultId),
+						eq(vaultKey.userId, existingUser.id),
+					),
+				);
+		}
+
+		await tx.delete(session).where(eq(session.userId, existingUser.id));
+		await tx
+			.update(recoveryVerification)
+			.set({ usedAt: now })
+			.where(eq(recoveryVerification.id, existingVerification.id));
+		await tx
+			.delete(recoveryRateLimit)
+			.where(eq(recoveryRateLimit.email, normalizedEmail));
+
+		return existingUser.id;
+	});
+}
+
 /**
  * Get all sessions for a user
  */
@@ -581,6 +1008,8 @@ export async function updateUserPassword(
 			srpSalt: data.srpSalt,
 			srpVerifier: data.srpVerifier,
 			encryptedPrivateKey: data.encryptedPrivateKey,
+			encryptedMasterKey: null,
+			recoveryKeyHint: null,
 		})
 		.where(eq(user.id, userId));
 
@@ -619,6 +1048,8 @@ export async function updateUserSecretKey(
 			srpSalt: data.srpSalt,
 			srpVerifier: data.srpVerifier,
 			encryptedPrivateKey: data.encryptedPrivateKey,
+			encryptedMasterKey: null,
+			recoveryKeyHint: null,
 		})
 		.where(eq(user.id, userId));
 

@@ -281,6 +281,15 @@ export default function SignInForm({
 								<div className="space-y-2">
 									<div className="flex items-center justify-between">
 										<Label htmlFor={field.name}>Password</Label>
+										{!isQuickUnlock && (
+											<button
+												type="button"
+												onClick={() => navigate({ to: "/recover" })}
+												className="text-muted-foreground text-xs underline-offset-4 hover:text-foreground hover:underline"
+											>
+												Forgot Password?
+											</button>
+										)}
 									</div>
 									<div className="relative">
 										<Input

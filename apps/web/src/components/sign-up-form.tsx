@@ -6,7 +6,6 @@ import {
 	Button,
 	Card,
 	cn,
-	copyWithToast,
 	Input,
 	Label,
 	toast,
@@ -14,10 +13,14 @@ import {
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Copy, Download, Eye, EyeOff, Loader2, Users } from "lucide-react";
+import { Download, Eye, EyeOff, Loader2, Users } from "lucide-react";
 import { useEffect, useState } from "react";
+import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { storage } from "@/lib/storage";
-import { generateSecretKeyAsync } from "@/lib/wasm-crypto";
+import {
+	generateRecoveryKeyAsync,
+	generateSecretKeyAsync,
+} from "@/lib/wasm-crypto";
 import { WorkerCrypto } from "@/lib/worker-crypto";
 
 export default function SignUpForm({
@@ -34,7 +37,8 @@ export default function SignUpForm({
 	const trpcClient = useTRPCClient();
 	const defaultServerUrl = import.meta.env.VITE_SERVER_URL ?? "";
 	const [secretKey, setSecretKey] = useState<string>("");
-	const [showSecretKey, setShowSecretKey] = useState(true);
+	const [recoveryKey, setRecoveryKey] = useState<string>("");
+	const [hasDownloadedKit, setHasDownloadedKit] = useState(false);
 	const [hasAcknowledged, setHasAcknowledged] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
 	const [serverUrl, setServerUrl] = useState(defaultServerUrl);
@@ -65,9 +69,14 @@ export default function SignUpForm({
 	const isSelfHostedMode = registrationStatus?.mode === "self-hosted";
 	const allowPublicSignup = registrationStatus?.allowPublicSignup ?? true;
 
-	// Generate Secret Key on mount (WASM auto-initializes)
+	// Generate Secret Key + Recovery Key on mount (WASM auto-initializes)
 	useEffect(() => {
-		generateSecretKeyAsync().then(setSecretKey);
+		Promise.all([generateSecretKeyAsync(), generateRecoveryKeyAsync()]).then(
+			([generatedSecretKey, generatedRecoveryKey]) => {
+				setSecretKey(generatedSecretKey);
+				setRecoveryKey(generatedRecoveryKey);
+			},
+		);
 	}, []);
 
 	const signupMutation = useMutation({
@@ -79,6 +88,8 @@ export default function SignUpForm({
 			srpVerifier: string;
 			publicKey: string;
 			encryptedPrivateKey: string;
+			encryptedMasterKey: string;
+			recoveryKeyHint: string;
 			encryptedVaultKey: string;
 			organizationName?: string;
 			token?: string;
@@ -93,6 +104,8 @@ export default function SignUpForm({
 					srpVerifier: input.srpVerifier,
 					publicKey: input.publicKey,
 					encryptedPrivateKey: input.encryptedPrivateKey,
+					encryptedMasterKey: input.encryptedMasterKey,
+					recoveryKeyHint: input.recoveryKeyHint,
 					encryptedVaultKey: input.encryptedVaultKey,
 				});
 			}
@@ -106,6 +119,8 @@ export default function SignUpForm({
 				srpVerifier: input.srpVerifier,
 				publicKey: input.publicKey,
 				encryptedPrivateKey: input.encryptedPrivateKey,
+				encryptedMasterKey: input.encryptedMasterKey,
+				recoveryKeyHint: input.recoveryKeyHint,
 				encryptedVaultKey: input.encryptedVaultKey,
 			});
 		},
@@ -150,7 +165,7 @@ export default function SignUpForm({
 			}
 
 			if (!hasAcknowledged) {
-				toast.error("Please save your Secret Key before continuing");
+				toast.error("Please save your Emergency Kit before continuing");
 				return;
 			}
 
@@ -165,12 +180,14 @@ export default function SignUpForm({
 				// All heavy crypto runs in a Web Worker via WorkerCrypto,
 				// keeping the main thread responsive with the spinner.
 
-				// 1. Derive keys (PBKDF2 310k iterations)
-				const { authKey, masterUnlockKey } = await workerCrypto.deriveKeys(
+				// 1. Derive raw master key, then split into auth + unlock keys
+				const masterKey = await workerCrypto.deriveMasterKey(
 					value.password,
 					secretKey,
 					email,
 				);
+				const { authKey, masterUnlockKey } =
+					await workerCrypto.deriveKeysFromMasterKey(masterKey, email);
 
 				// 2. Generate SRP credentials
 				const srpPassword = new TextDecoder().decode(authKey);
@@ -198,7 +215,16 @@ export default function SignUpForm({
 				// 6. Get secret key hint
 				const secretKeyHint = await workerCrypto.getSecretKeyHint(secretKey);
 
-				// 7. Call signup mutation
+				// 7. Encrypt raw master key with recovery key material
+				const encryptedMasterKey = await workerCrypto.encryptMasterKey(
+					masterKey,
+					recoveryKey,
+					email,
+				);
+				const recoveryKeyHint =
+					recoveryKey.split("-").slice(0, 2).join("-") || "R1";
+
+				// 8. Call signup mutation
 				const result = await signupMutation.mutateAsync({
 					email,
 					name: value.name,
@@ -213,18 +239,20 @@ export default function SignUpForm({
 					srpVerifier: verifier,
 					publicKey,
 					encryptedPrivateKey: JSON.stringify(encryptedPrivateKey),
+					encryptedMasterKey: JSON.stringify(encryptedMasterKey),
+					recoveryKeyHint,
 					encryptedVaultKey: JSON.stringify(encryptedVaultKey),
 				});
 
-				// 8. Store Master Unlock Key in memory
+				// 9. Store Master Unlock Key in memory
 				await storage.setMasterUnlockKey(masterUnlockKey);
 
-				// 9. Store encrypted private key for RSA decryption of shared vault keys
+				// 10. Store encrypted private key for RSA decryption of shared vault keys
 				await storage.storeEncryptedPrivateKey(
 					JSON.stringify(encryptedPrivateKey),
 				);
 
-				// 10. Store secret key and encrypted session for quick unlock
+				// 11. Store secret key and encrypted session for quick unlock
 				await storage.storeSecretKey(secretKey);
 				await storage.storeSessionData(
 					masterUnlockKey,
@@ -251,35 +279,47 @@ export default function SignUpForm({
 		},
 	});
 
-	const copySecretKey = () => {
-		copyWithToast(secretKey, "Secret Key", { showAutoClearMessage: false });
-	};
-
 	const downloadEmergencyKit = () => {
-		const content = `
-BITTERY EMERGENCY KIT
-====================
+		if (!secretKey || !recoveryKey) {
+			toast.error("Still generating account keys. Please try again.");
+			return;
+		}
 
-IMPORTANT: Keep this information safe and private!
+		const result = downloadRecoveryKit({
+			fileName: "bittery-emergency-kit",
+			title: "Bittery Emergency Kit",
+			subtitle: "Contains your Secret Key and Recovery Key for offline storage.",
+			entries: [
+				{
+					label: "Secret Key",
+					value: secretKey,
+					description:
+						"Required with your master password to unlock your account.",
+				},
+				{
+					label: "Recovery Key",
+					value: recoveryKey,
+					description:
+						"Required with your Secret Key to reset your password if forgotten.",
+				},
+			],
+			cautions: [
+				"Store this kit offline in a secure location you trust.",
+				"Do not save this file in shared folders or chats.",
+				"If Secret Key, Recovery Key, and password are all lost, your vault cannot be recovered.",
+			],
+			footerNote:
+				"Bittery is zero-knowledge: recovery material is generated and handled locally in your browser.",
+			includeHandwrittenPasswordSection: true,
+		});
 
-Secret Key: ${secretKey}
+		setHasDownloadedKit(true);
+		if (result === "print-opened") {
+			toast.success("Recovery Kit opened. Use Print to save as PDF.");
+			return;
+		}
 
-This Secret Key is required to access your account along with your Account Password.
-Store it in a safe place - you cannot recover your account without it.
-
-Generated: ${new Date().toLocaleString()}
-		`;
-
-		const blob = new Blob([content], { type: "text/plain" });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement("a");
-		a.href = url;
-		a.download = "bittery-emergency-kit.txt";
-		document.body.appendChild(a);
-		a.click();
-		document.body.removeChild(a);
-		URL.revokeObjectURL(url);
-		toast.success("Emergency Kit downloaded");
+		toast.success("Recovery Kit downloaded as HTML. Open it and save to PDF.");
 	};
 
 	if (hasInvitationToken && invitationQuery.isError) {
@@ -345,76 +385,63 @@ Generated: ${new Date().toLocaleString()}
 		: isSelfHostedMode
 			? "Create admin account"
 			: "Create an account";
+	const hasAllKeyMaterial = Boolean(secretKey) && Boolean(recoveryKey);
 
 	return !hasAcknowledged ? (
 		<div className="w-full">
 			<h1 className="mb-4 text-center font-semibold text-2xl tracking-tight">
 				{signupHeading}
 			</h1>
-			<Card className="space-y-4 border bg-card p-6 shadow-sm">
-				<div className="space-y-2">
-					<h2 className="font-medium text-base">Save your Secret Key</h2>
-					<p className="text-muted-foreground text-sm leading-relaxed">
-						This key is required to access your account. We cannot recover it
-						for you.
+			<Card className="relative space-y-4 overflow-hidden border bg-card p-6 shadow-sm">
+				<div className="-top-16 pointer-events-none absolute right-[-84px] h-48 w-48 rounded-full bg-primary/10 blur-3xl" />
+				<div className="-bottom-20 pointer-events-none absolute left-[-70px] h-44 w-44 rounded-full bg-emerald-500/10 blur-3xl" />
+
+				<div className="relative rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-background to-emerald-500/10 p-5">
+					<p className="font-medium text-[0.7rem] text-primary/80 uppercase tracking-[0.12em]">
+						Emergency Kit
 					</p>
-				</div>
+					<h2 className="mt-2 font-semibold text-lg tracking-tight">
+						Save it before creating your account
+					</h2>
+					<p className="mt-2 text-muted-foreground text-sm leading-relaxed">
+						Contains your Secret Key, Recovery Key, and a handwritten password
+						section for secure paper storage.
+					</p>
 
-				<div className="space-y-4">
-					<div className="relative rounded-xl border bg-muted/30 p-4">
-						<div className="absolute top-3 right-3">
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon"
-								className="h-8 w-8 text-muted-foreground hover:text-foreground"
-								onClick={() => setShowSecretKey(!showSecretKey)}
-							>
-								{showSecretKey ? <EyeOff size={16} /> : <Eye size={16} />}
-							</Button>
-						</div>
-						<div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-							Your Secret Key
-						</div>
-						<div className="break-all pr-8 font-mono text-sm tracking-wide">
-							{showSecretKey ? secretKey : "••••••-••••••-•••••-•••••-•••••"}
-						</div>
-					</div>
+					<Button
+						type="button"
+						variant="default"
+						className={cn(
+							"mt-4 w-full shadow-sm",
+							hasDownloadedKit
+								? "bg-emerald-600 text-white hover:bg-emerald-600/90"
+								: "",
+						)}
+						disabled={!hasAllKeyMaterial}
+						onClick={downloadEmergencyKit}
+					>
+						<Download size={16} className="mr-2" />
+						{hasDownloadedKit ? "Emergency Kit Ready" : "Save Emergency Kit"}
+					</Button>
 
-					<div className="grid grid-cols-2 gap-3">
-						<Button
-							type="button"
-							variant="outline"
-							className="w-full"
-							onClick={copySecretKey}
-						>
-							<Copy size={16} className="mr-2" />
-							Copy
-						</Button>
-						<Button
-							type="button"
-							variant="outline"
-							className="w-full"
-							onClick={downloadEmergencyKit}
-						>
-							<Download size={16} className="mr-2" />
-							Download Kit
-						</Button>
-					</div>
-				</div>
+					<p className="mt-3 text-muted-foreground text-xs">
+						Opens a print view so you can save as PDF or print.
+					</p>
 
-				<div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
-					<div className="flex gap-3">
-						<div className="text-amber-600 dark:text-amber-400">⚠️</div>
-						<div className="space-y-1">
-							<p className="font-medium text-amber-900 text-sm dark:text-amber-100">
-								There is no account recovery
-							</p>
-							<p className="text-amber-700 text-xs leading-relaxed dark:text-amber-300">
-								If you lose this Secret Key, you will lose access to your vault
-								forever. Please save it in a safe place.
-							</p>
+					{hasDownloadedKit ? (
+						<div className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 font-medium text-emerald-700 text-xs dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">
+							Emergency Kit saved for this signup session.
 						</div>
+					) : null}
+
+					<div className="mt-4 border-border/60 border-t pt-3">
+						<p className="font-medium text-[0.7rem] text-muted-foreground uppercase tracking-[0.1em]">
+							Critical
+						</p>
+						<p className="mt-1 text-foreground/80 text-xs leading-relaxed">
+							If your password, Secret Key, and Recovery Key are all lost,
+							recovery is impossible. Keep this kit offline.
+						</p>
 					</div>
 				</div>
 
@@ -422,9 +449,10 @@ Generated: ${new Date().toLocaleString()}
 					<Button
 						type="button"
 						className="w-full"
+						disabled={!hasAllKeyMaterial || !hasDownloadedKit}
 						onClick={() => setHasAcknowledged(true)}
 					>
-						I have saved my Secret Key
+						I have saved my Emergency Kit
 					</Button>
 
 					<Button
@@ -698,7 +726,7 @@ Generated: ${new Date().toLocaleString()}
 						onClick={() => setHasAcknowledged(false)}
 						className="w-full text-muted-foreground"
 					>
-						← Back to Secret Key
+						← Back to Emergency Kit
 					</Button>
 				</form>
 			</Card>

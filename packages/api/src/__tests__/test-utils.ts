@@ -27,9 +27,12 @@ import {
 import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import initCryptoWasm, {
+	deriveMasterKey as deriveMasterKeyWasm,
 	deriveKeys as deriveKeysWasm,
 	encrypt as encryptWasm,
+	encryptMasterKey as encryptMasterKeyWasm,
 	generateEncryptionKey as generateEncryptionKeyWasm,
+	generateRecoveryKey as generateRecoveryKeyWasm,
 	generateRSAKeyPair as generateRSAKeyPairWasm,
 	generateSecretKey as generateSecretKeyWasm,
 	getSecretKeyHint as getSecretKeyHintWasm,
@@ -150,10 +153,12 @@ export interface TestAuthCryptoData {
 	authPassword: string;
 	secretKey: string;
 	secretKeyHint: string;
+	recoveryKeyHint: string;
 	srpSalt: string;
 	srpVerifier: string;
 	publicKey: string;
 	encryptedPrivateKey: string;
+	encryptedMasterKey: string;
 	encryptedVaultKey: string;
 }
 
@@ -161,19 +166,23 @@ export async function generateTestAuthCryptoData(params: {
 	email: string;
 	accountPassword?: string;
 	secretKey?: string;
+	recoveryKey?: string;
 }): Promise<TestAuthCryptoData> {
 	await ensureCryptoWasmInitialized();
 
 	const normalizedEmail = params.email.toLowerCase();
 	const accountPassword = params.accountPassword || `TestPass-${nanoid(10)}!`;
 	const secretKey = params.secretKey || generateSecretKeyWasm();
+	const recoveryKey = params.recoveryKey || generateRecoveryKeyWasm();
 	const secretKeyHint = getSecretKeyHintWasm(secretKey);
+	const recoveryKeyHint = recoveryKey.split("-").slice(0, 2).join("-");
 
 	const derivedKeys = deriveKeysWasm(
 		accountPassword,
 		secretKey,
 		normalizedEmail,
 	);
+	const masterKey = deriveMasterKeyWasm(accountPassword, secretKey, normalizedEmail);
 
 	// Signup/login uses auth key bytes interpreted as a UTF-8 string password.
 	const authPassword = new TextDecoder().decode(
@@ -189,6 +198,9 @@ export async function generateTestAuthCryptoData(params: {
 	const encryptedPrivateKey = toEncryptedJson(
 		encryptWasm(rsaKeyPair.private_key, derivedKeys.master_unlock_key),
 	);
+	const encryptedMasterKey = toEncryptedJson(
+		encryptMasterKeyWasm(masterKey, recoveryKey, normalizedEmail),
+	);
 	const encryptedVaultKey = toEncryptedJson(
 		encryptWasm(generateEncryptionKeyWasm(), derivedKeys.master_unlock_key),
 	);
@@ -198,10 +210,12 @@ export async function generateTestAuthCryptoData(params: {
 		authPassword,
 		secretKey,
 		secretKeyHint,
+		recoveryKeyHint,
 		srpSalt,
 		srpVerifier,
 		publicKey: rsaKeyPair.public_key,
 		encryptedPrivateKey,
+		encryptedMasterKey,
 		encryptedVaultKey,
 	};
 }
@@ -692,7 +706,8 @@ export async function truncateAll() {
 			sync_event_ack, sync_event,
 			item, vault_key, vault_key_rotation, folder, vault,
 			team_invitation, team_member, team,
-			login_rate_limit, session, audit_log, "user"
+			login_rate_limit, recovery_rate_limit, recovery_verification,
+			session, audit_log, "user"
 		CASCADE
 	`);
 }

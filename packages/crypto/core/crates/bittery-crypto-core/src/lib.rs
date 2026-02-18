@@ -8,13 +8,14 @@ pub mod error;
 pub mod key_derivation;
 pub mod key_rotation;
 pub mod passkey;
+pub mod recovery;
 pub mod rsa;
 pub mod secret_key;
 pub mod srp6a;
 
 pub use encryption::{decrypt, encrypt, generate_encryption_key, EncryptedData};
 pub use error::CryptoError;
-pub use key_derivation::{derive_keys, DerivedKeys};
+pub use key_derivation::{derive_keys, derive_keys_from_master_key, derive_master_key, DerivedKeys};
 pub use key_rotation::{
     encrypt_vault_key_for_member, encrypt_vault_key_with_muk, perform_key_rotation,
     re_encrypt_item, validate_rotation_data, ItemData, KeyRotationResult, MemberEncryptedKey,
@@ -25,6 +26,10 @@ pub use passkey::{
     generate_credential_id, generate_passkey_keypair, sign_assertion, sign_passkey_assertion,
     AttestedCredentialData, PasskeyAssertion, PasskeyAttestation, PasskeyKeypair, FLAG_AT, FLAG_BE,
     FLAG_BS, FLAG_UP, FLAG_UV, PASSKEY_AAGUID,
+};
+pub use recovery::{
+    decrypt_master_key, derive_recovery_encryption_key, encrypt_master_key, generate_recovery_key,
+    validate_recovery_key,
 };
 pub use rsa::{generate_rsa_key_pair, rsa_decrypt, rsa_encrypt, RsaKeyPair};
 pub use secret_key::{generate_secret_key, get_secret_key_hint, validate_secret_key};

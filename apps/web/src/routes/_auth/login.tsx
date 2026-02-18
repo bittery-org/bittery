@@ -57,7 +57,7 @@ function RouteComponent() {
 					<p className="text-muted-foreground/60 text-xs">Bittery</p>
 					<div className="flex items-center gap-4">
 						<a
-							href="https://github.com/nicepkg/bittery"
+							href="https://github.com/bittery-org/bittery"
 							target="_blank"
 							rel="noopener noreferrer"
 							className="flex items-center gap-1 text-muted-foreground/60 text-xs transition-colors hover:text-muted-foreground"
@@ -67,7 +67,7 @@ function RouteComponent() {
 						</a>
 						<span className="text-muted-foreground/20">|</span>
 						<a
-							href="https://github.com/nicepkg/bittery/issues"
+							href="https://github.com/bittery-org/bittery/issues"
 							target="_blank"
 							rel="noopener noreferrer"
 							className="flex items-center gap-1 text-muted-foreground/60 text-xs transition-colors hover:text-muted-foreground"
