@@ -18,6 +18,7 @@ import { storage } from "@/lib/storage";
 import { useQueryInvalidator } from "@/providers/sync-provider";
 import { AccountAvatar } from "./account-avatar";
 import { AddAccountDialog } from "./add-account-dialog";
+import { DeviceSetupDialog } from "./device-setup-dialog";
 import { RemoveAccountDialog } from "./remove-account-dialog";
 import { SettingsDialog } from "./settings-dialog";
 
@@ -36,6 +37,7 @@ export function AccountSwitcher() {
 	const [accountToRemove, setAccountToRemove] = useState<string | null>(null);
 	const [showSettings, setShowSettings] = useState(false);
 	const [showAddAccount, setShowAddAccount] = useState(false);
+	const [showDeviceSetup, setShowDeviceSetup] = useState(false);
 
 	const accountsData = accounts.data ?? [];
 	const unlockedEmailsList = unlockedEmails.data ?? [];
@@ -107,6 +109,10 @@ export function AccountSwitcher() {
 
 	const handleSettings = () => {
 		setShowSettings(true);
+	};
+
+	const handleSetupAnotherDevice = () => {
+		setShowDeviceSetup(true);
 	};
 
 	const handleRemoveAccountClick = (email: string) => {
@@ -204,6 +210,8 @@ export function AccountSwitcher() {
 				onAllAccountsSelect={handleAllAccountsSelect}
 				showSettings={true}
 				onSettings={handleSettings}
+				showSetupAnotherDevice={true}
+				onSetupAnotherDevice={handleSetupAnotherDevice}
 				showRemoveAccount={true}
 				onRemoveAccount={handleRemoveAccountClick}
 				trigger={trigger}
@@ -221,6 +229,13 @@ export function AccountSwitcher() {
 			<AddAccountDialog
 				open={showAddAccount}
 				onOpenChange={setShowAddAccount}
+			/>
+
+			<DeviceSetupDialog
+				open={showDeviceSetup}
+				onOpenChange={setShowDeviceSetup}
+				accounts={accountsData}
+				initialAccountEmail={activeAccountEmail}
 			/>
 		</>
 	);

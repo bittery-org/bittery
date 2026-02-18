@@ -7,7 +7,7 @@
 | iOS Autofill | ❌ Missing | Apple Developer License required. Without iOS Autofill, Bittery is barely usable for mobile users – high priority. |
 | Billing | ❌ In Progress | Complete billing system (plans, payment processing, upgrades/downgrades). |
 | Onboarding | ❌ In Progress | Clean and simple. Integrate import option ("Do you already have a password manager?"). |
-| Device Setup | ❌ Missing | Easy way to add additional devices (QR code, Magic Link, etc.). |
+| Device Setup | 🟡 Needs Testing | Desktop-first flow implemented (account selection, setup QR, deep link prefill). Validate end-to-end on mobile scanner + deep link opening. |
 | Account Recovery | ✅ Done | Implemented in Desktop App (Recovery Kit PDF + forgotten Master Password flow). |
 | Export Finalization | 🟡 Partial | Already exists, needs to be finalized and tested. Important trust signal (no lock-in). |
 | Security Audit | 🟡 Partial | 2 partial audits completed so far. Full audit needed incl. Session Revocation enforcement. |

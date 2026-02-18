@@ -18,6 +18,7 @@ import {
 	LogOutIcon,
 	PlusIcon,
 	SettingsIcon,
+	SmartphoneIcon,
 	UsersIcon,
 } from "lucide-react";
 import type React from "react";
@@ -75,6 +76,12 @@ export interface AccountSwitcherProps {
 	/** Optional: callback when user clicks "Settings" */
 	onSettings?: () => void;
 
+	/** Optional: show "Set up another device" option */
+	showSetupAnotherDevice?: boolean;
+
+	/** Optional: callback when user clicks "Set up another device" */
+	onSetupAnotherDevice?: () => void;
+
 	/** Optional: show "Remove Account" option */
 	showRemoveAccount?: boolean;
 
@@ -115,6 +122,8 @@ export function AccountSwitcher({
 	onAllAccountsSelect,
 	showSettings = false,
 	onSettings,
+	showSetupAnotherDevice = false,
+	onSetupAnotherDevice,
 	showRemoveAccount = false,
 	onRemoveAccount,
 	trigger,
@@ -281,6 +290,17 @@ export function AccountSwitcher({
 					<PlusIcon className="size-4" />
 					<span className="text-sm">Add Account</span>
 				</DropdownMenuItem>
+
+				{/* Set up another device (optional) */}
+				{showSetupAnotherDevice && onSetupAnotherDevice && (
+					<DropdownMenuItem
+						onClick={onSetupAnotherDevice}
+						className="flex cursor-pointer items-center gap-2"
+					>
+						<SmartphoneIcon className="size-4" />
+						<span className="text-sm">Set up another device</span>
+					</DropdownMenuItem>
+				)}
 
 				{/* Settings (optional) */}
 				{showSettings && onSettings && (

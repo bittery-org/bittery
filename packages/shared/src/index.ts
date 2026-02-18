@@ -1,4 +1,5 @@
 export * from "./credit-card";
+export * from "./device-setup";
 export * from "./export-types";
 export * from "./favicon";
 export * from "./identity";
