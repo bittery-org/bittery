@@ -24,4 +24,9 @@ export default defineConfig({
 		format: "es",
 		plugins: () => [tsconfigPaths()],
 	},
+	server: {
+		host: true,
+		port: 3001,
+		allowedHosts: ["bittery.test"]
+	}
 });
