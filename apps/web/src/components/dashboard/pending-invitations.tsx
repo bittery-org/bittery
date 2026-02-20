@@ -49,8 +49,8 @@ export function PendingInvitations() {
 	}
 
 	return (
-		<Card>
-			<CardHeader>
+		<Card className="overflow-hidden border-border/70 py-0">
+			<CardHeader className="border-b bg-muted/30 py-5">
 				<CardTitle className="flex items-center gap-2">
 					<Mail className="h-5 w-5" />
 					Pending Invitations
@@ -60,19 +60,19 @@ export function PendingInvitations() {
 					{pendingQuery.data.length > 1 ? "s" : ""}
 				</CardDescription>
 			</CardHeader>
-			<CardContent>
+			<CardContent className="space-y-3 p-5">
 				<div className="space-y-3">
 					{pendingQuery.data.map((invitation) => (
 						<div
 							key={invitation.id}
-							className="flex items-center justify-between rounded-lg border p-3"
+							className="flex flex-col gap-3 rounded-lg border bg-background/70 p-3 sm:flex-row sm:items-center sm:justify-between"
 						>
 							<div className="space-y-1">
-								<div className="flex items-center gap-2">
+								<div className="flex flex-wrap items-center gap-2">
 									<span className="font-medium">{invitation.teamName}</span>
 									<Badge variant="secondary">{invitation.role}</Badge>
 								</div>
-								<div className="flex items-center gap-3 text-muted-foreground text-sm">
+								<div className="flex flex-wrap items-center gap-3 text-muted-foreground text-sm">
 									<span>Invited by {invitation.invitedBy}</span>
 									<span className="flex items-center gap-1">
 										<Clock className="h-3 w-3" />

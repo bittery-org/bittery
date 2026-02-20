@@ -128,9 +128,7 @@ export function AppSidebar() {
 								<svg
 									xmlns="http://www.w3.org/2000/svg"
 									viewBox="0 0 841.9 285.7"
-									className="h-10! w-auto! fill-current text-primary"
-									width={841.9}
-									height={285.7}
+									className="h-7.5! w-auto! fill-current text-primary"
 								>
 									<title>Bittery</title>
 									<path d="m394.3 71.3-.2 2.7 2.5-2.7h-2.2Z" />
