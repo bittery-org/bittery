@@ -34,7 +34,7 @@ import { storage } from "@/lib/storage";
 
 const navItems = [
 	{ path: "/home", icon: Home, label: "Dashboard" },
-	{ path: "/security", icon: ShieldCheck, label: "Security" },
+	{ path: "/security", icon: ShieldCheck, label: "Sentinel" },
 	{ path: "/team", icon: Users, label: "Team" },
 	{ path: "/vaults", icon: Lock, label: "Vaults" },
 	{ path: "/settings", icon: Settings, label: "Settings" },

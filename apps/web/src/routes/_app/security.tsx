@@ -6,7 +6,7 @@ import { SecurityDashboard } from "@/components/dashboard/security-dashboard";
 export const Route = createFileRoute("/_app/security")({
 	component: SecurityPage,
 	head: () => ({
-		meta: [{ title: "Security - Bittery" }],
+		meta: [{ title: "Sentinel - Bittery" }],
 	}),
 });
 
@@ -29,14 +29,12 @@ function SecurityPage() {
 	}, [items]);
 
 	return (
-		<div className="space-y-6">
+		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
 			<div>
-				<h1 className="font-bold text-3xl tracking-tight">
-					Security Dashboard
-				</h1>
+				<h1 className="font-bold text-3xl tracking-tight">Sentinel</h1>
 				<p className="text-muted-foreground">
-					Analyze your password security and get recommendations for
-					improvement.
+					Monitor password health, track threats, and follow prioritized
+					guidance to strengthen every account.
 				</p>
 			</div>
 

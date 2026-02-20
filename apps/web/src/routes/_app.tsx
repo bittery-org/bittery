@@ -31,9 +31,9 @@ function AppLayout() {
 	// const syncContext = useSyncContextOptional();
 
 	return (
-		<SidebarProvider>
+		<SidebarProvider className="h-svh overflow-hidden">
 			<AppSidebar />
-			<SidebarInset>
+			<SidebarInset className="min-h-0 overflow-hidden">
 				<header className="flex h-16 shrink-0 items-center gap-2">
 					<div className="flex items-center gap-2 px-5">
 						<SidebarTrigger className="-ml-1" />
@@ -46,7 +46,7 @@ function AppLayout() {
 						) : null} */}
 					</div>
 				</header>
-				<div className="flex flex-1 flex-col gap-4 px-5 py-4 pt-0">
+				<div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4 pt-0">
 					<Outlet />
 				</div>
 			</SidebarInset>

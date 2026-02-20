@@ -33,7 +33,7 @@ import {
 	IconMagicShieldOutlineDuo18 as ShieldCheck,
 } from "@bittery/ui/icons";
 import { Link } from "@tanstack/react-router";
-import { type ComponentType, useState } from "react";
+import { type ComponentType, useMemo, useState } from "react";
 import { Favicon } from "../vault/favicon";
 
 interface SecurityDashboardProps {
@@ -47,6 +47,14 @@ type DashboardIcon = ComponentType<{
 	strokeWidth?: number;
 }>;
 
+interface DistributionBucket {
+	label: string;
+	count: number;
+	percentage: number;
+	barClassName: string;
+	dotClassName: string;
+}
+
 /**
  * Get the vault name for an item
  */
@@ -57,296 +65,458 @@ function getVaultName(
 	return vaults.find((v) => v.id === vaultId)?.name || "Unknown Vault";
 }
 
-/**
- * Score color based on value
- */
-function getScoreColor(score: number): string {
-	if (score >= 80) return "text-green-500";
-	if (score >= 60) return "text-lime-500";
-	if (score >= 40) return "text-yellow-500";
-	if (score >= 20) return "text-orange-500";
-	return "text-red-500";
+function getScorePalette(score: number) {
+	if (score >= 85) {
+		return {
+			label: "FORTIFIED",
+			description:
+				"Your overall password posture is strong. Keep rotating aging credentials and preserve this baseline.",
+			textClassName: "text-emerald-300",
+			ringClassName: "from-emerald-400 via-teal-300 to-cyan-300",
+		};
+	}
+
+	if (score >= 70) {
+		return {
+			label: "STABLE",
+			description:
+				"Coverage is healthy, but there are weak points worth hardening before they become meaningful risk.",
+			textClassName: "text-lime-300",
+			ringClassName: "from-lime-400 via-emerald-300 to-cyan-300",
+		};
+	}
+
+	if (score >= 50) {
+		return {
+			label: "EXPOSED",
+			description:
+				"Risk signals are building up. Prioritize weak and reused passwords to improve resilience quickly.",
+			textClassName: "text-amber-300",
+			ringClassName: "from-amber-400 via-orange-300 to-yellow-300",
+		};
+	}
+
+	if (score >= 30) {
+		return {
+			label: "AT RISK",
+			description:
+				"Multiple vulnerabilities are active. Resolve urgent issues now to reduce account takeover exposure.",
+			textClassName: "text-orange-300",
+			ringClassName: "from-orange-400 via-rose-300 to-red-300",
+		};
+	}
+
+	return {
+		label: "CRITICAL",
+		description:
+			"Your vault has severe password risk. Immediate remediation is recommended across high-value accounts.",
+		textClassName: "text-rose-300",
+		ringClassName: "from-rose-400 via-red-400 to-orange-400",
+	};
 }
 
-/**
- * Score label for speedometer gauge
- */
-function getScoreGaugeLabel(score: number): string {
-	if (score >= 80) return "EXCELLENT";
-	if (score >= 60) return "GOOD";
-	if (score >= 40) return "FAIR";
-	if (score >= 20) return "WEAK";
-	return "CRITICAL";
+function getDistribution(report: SecurityReport): DistributionBucket[] {
+	const total = Math.max(report.totalPasswords, 0);
+	if (total === 0) {
+		return [
+			{
+				label: "Healthy",
+				count: 0,
+				percentage: 0,
+				barClassName: "bg-emerald-400",
+				dotClassName: "bg-emerald-400",
+			},
+			{
+				label: "Aging",
+				count: 0,
+				percentage: 0,
+				barClassName: "bg-amber-400",
+				dotClassName: "bg-amber-400",
+			},
+			{
+				label: "Reused",
+				count: 0,
+				percentage: 0,
+				barClassName: "bg-orange-400",
+				dotClassName: "bg-orange-400",
+			},
+			{
+				label: "Weak",
+				count: 0,
+				percentage: 0,
+				barClassName: "bg-rose-400",
+				dotClassName: "bg-rose-400",
+			},
+		];
+	}
+
+	const weakIds = new Set(report.weakPasswords.map((issue) => issue.item.id));
+	const reusedIds = new Set(
+		report.reusedPasswords.map((issue) => issue.item.id),
+	);
+	const oldIds = new Set(report.oldPasswords.map((issue) => issue.item.id));
+
+	const classifiedIds = new Set<string>();
+	const weakCount = weakIds.size;
+	for (const id of weakIds) {
+		classifiedIds.add(id);
+	}
+
+	let reusedCount = 0;
+	for (const id of reusedIds) {
+		if (!classifiedIds.has(id)) {
+			reusedCount += 1;
+			classifiedIds.add(id);
+		}
+	}
+
+	let oldCount = 0;
+	for (const id of oldIds) {
+		if (!classifiedIds.has(id)) {
+			oldCount += 1;
+			classifiedIds.add(id);
+		}
+	}
+
+	const healthyCount = Math.max(total - classifiedIds.size, 0);
+
+	return [
+		{
+			label: "Healthy",
+			count: healthyCount,
+			percentage: (healthyCount / total) * 100,
+			barClassName: "bg-emerald-400",
+			dotClassName: "bg-emerald-400",
+		},
+		{
+			label: "Aging",
+			count: oldCount,
+			percentage: (oldCount / total) * 100,
+			barClassName: "bg-amber-400",
+			dotClassName: "bg-amber-400",
+		},
+		{
+			label: "Reused",
+			count: reusedCount,
+			percentage: (reusedCount / total) * 100,
+			barClassName: "bg-orange-400",
+			dotClassName: "bg-orange-400",
+		},
+		{
+			label: "Weak",
+			count: weakCount,
+			percentage: (weakCount / total) * 100,
+			barClassName: "bg-rose-400",
+			dotClassName: "bg-rose-400",
+		},
+	];
 }
 
-/**
- * Speedometer-style gauge component with arc marker
- */
-function SpeedometerGauge({
-	value,
-	size = 160,
-}: {
-	value: number;
-	size?: number;
-}) {
-	const strokeWidth = 14;
-	const radius = (size - strokeWidth) / 2;
-	const centerX = size / 2;
-	const centerY = size / 2;
-
-	// Define gradient stops for the gauge
-	const gradientId = "gauge-gradient";
-
-	// Calculate marker position on the arc (0 = left, 180 = right)
-	const angleRad = (value / 100) * Math.PI; // 0 to PI radians
-	const markerX = centerX - Math.cos(angleRad) * radius;
-	const markerY = centerY - Math.sin(angleRad) * radius;
-
-	// Calculate triangle rotation to point inward
-	const triangleRotation = (value / 100) * 180 - 90;
+function ScoreRing({ score }: { score: number }) {
+	const normalizedScore = Math.max(0, Math.min(100, score));
+	const radius = 66;
+	const circumference = 2 * Math.PI * radius;
+	const strokeOffset = circumference - (normalizedScore / 100) * circumference;
+	const scorePalette = getScorePalette(normalizedScore);
 
 	return (
-		<div className="relative" style={{ width: size, height: size / 2 + 10 }}>
+		<div className="relative h-44 w-44">
 			<svg
-				width={size}
-				height={size / 2 + 10}
-				viewBox={`0 0 ${size} ${size / 2 + 10}`}
+				viewBox="0 0 176 176"
+				className="h-full w-full -rotate-90"
 				aria-hidden="true"
 			>
-				<defs>
-					<linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="0%">
-						<stop offset="0%" stopColor="#ef4444" />
-						<stop offset="25%" stopColor="#f97316" />
-						<stop offset="45%" stopColor="#eab308" />
-						<stop offset="65%" stopColor="#84cc16" />
-						<stop offset="100%" stopColor="#22c55e" />
-					</linearGradient>
-				</defs>
-				{/* Background arc */}
-				<path
-					d={`M ${strokeWidth / 2} ${centerY} A ${radius} ${radius} 0 0 1 ${size - strokeWidth / 2} ${centerY}`}
+				<circle
+					cx="88"
+					cy="88"
+					r="66"
+					stroke="currentColor"
+					strokeWidth="14"
+					className="text-white/15"
 					fill="none"
-					stroke={`url(#${gradientId})`}
-					strokeWidth={strokeWidth}
-					strokeLinecap="round"
 				/>
-				{/* Triangle marker on the arc */}
-				<g
-					transform={`translate(${markerX}, ${markerY}) rotate(${triangleRotation})`}
-					style={{ transition: "transform 0.5s ease-out" }}
-				>
-					<polygon
-						points="0,-10 6,4 -6,4"
-						fill="currentColor"
-						className="text-foreground"
-					/>
-				</g>
+				<circle
+					cx="88"
+					cy="88"
+					r="66"
+					stroke="currentColor"
+					strokeWidth="14"
+					strokeLinecap="round"
+					fill="none"
+					strokeDasharray={circumference}
+					strokeDashoffset={strokeOffset}
+					className={`${scorePalette.textClassName} transition-[stroke-dashoffset] duration-700 ease-out`}
+				/>
 			</svg>
-			{/* Score display - centered inside the arc */}
-			<div
-				className="absolute flex flex-col items-center"
-				style={{
-					bottom: 4,
-					left: "50%",
-					transform: "translateX(-50%)",
-				}}
-			>
+			<div className="absolute inset-0 flex flex-col items-center justify-center text-center">
 				<span
-					className={`font-bold text-4xl leading-none ${getScoreColor(value)}`}
+					className={`font-semibold text-5xl leading-none ${scorePalette.textClassName}`}
 				>
-					{value}
+					{normalizedScore}
 				</span>
-				<span className="font-medium text-[10px] text-muted-foreground tracking-wider">
-					{getScoreGaugeLabel(value)}
+				<span className="mt-1 text-[11px] text-white/60 tracking-[0.28em]">
+					SCORE
 				</span>
 			</div>
+			<div
+				className={`pointer-events-none absolute inset-0 -z-10 rounded-full bg-gradient-to-br opacity-35 blur-2xl ${scorePalette.ringClassName}`}
+			/>
 		</div>
 	);
 }
 
-/**
- * Score gauge section - displays the speedometer
- */
-function ScoreGaugeSection({
-	score,
-	isLoading,
-}: {
-	score: number;
-	isLoading: boolean;
-}) {
-	return (
-		<div className="flex justify-start">
-			{isLoading ? (
-				<Skeleton className="h-[90px] w-40" />
-			) : (
-				<SpeedometerGauge value={score} />
-			)}
-		</div>
-	);
-}
-
-/**
- * Password strength distribution bar (1Password style)
- */
-function StrengthDistributionBar({
+function SentinelOverview({
 	report,
 	isLoading,
 }: {
 	report: SecurityReport;
 	isLoading: boolean;
 }) {
-	const total = report.totalPasswords || 1;
-	const weak = report.weakPasswords.length;
-	const reused = report.reusedPasswords.length;
-	const old = report.oldPasswords.length;
-
-	// Calculate strong passwords (not weak, reused, or old)
-	const problemPasswords = new Set([
-		...report.weakPasswords.map((p) => p.item.id),
-		...report.reusedPasswords.map((p) => p.item.id),
-		...report.oldPasswords.map((p) => p.item.id),
-	]);
-	const strong = Math.max(0, total - problemPasswords.size);
-
-	// Calculate percentages
-	const strongPct = (strong / total) * 100;
-	const weakPct = (weak / total) * 100;
-	const reusedPct = (reused / total) * 100;
-	const oldPct = (old / total) * 100;
+	const distribution = useMemo(() => getDistribution(report), [report]);
+	const total = report.totalPasswords;
+	const uniqueRiskCount = useMemo(() => {
+		const riskIds = new Set([
+			...report.weakPasswords.map((issue) => issue.item.id),
+			...report.reusedPasswords.map((issue) => issue.item.id),
+			...report.oldPasswords.map((issue) => issue.item.id),
+		]);
+		return riskIds.size;
+	}, [report]);
+	const healthyCount = Math.max(total - uniqueRiskCount, 0);
+	const healthCoverage =
+		total > 0 ? Math.round((healthyCount / total) * 100) : 0;
+	const highPriorityCount = report.recommendations.filter(
+		(recommendation) => recommendation.priority === "high",
+	).length;
+	const scorePalette = getScorePalette(report.securityScore);
 
 	if (isLoading) {
 		return (
-			<div className="space-y-2">
-				<Skeleton className="h-4 w-48" />
-				<Skeleton className="h-3 w-full rounded-full" />
-			</div>
+			<Card className="overflow-hidden border-border/60">
+				<CardContent className="space-y-6 p-6 md:p-8">
+					<Skeleton className="h-6 w-40" />
+					<Skeleton className="h-9 w-80" />
+					<div className="grid gap-4 sm:grid-cols-3">
+						<Skeleton className="h-20 w-full" />
+						<Skeleton className="h-20 w-full" />
+						<Skeleton className="h-20 w-full" />
+					</div>
+					<Skeleton className="h-32 w-full" />
+				</CardContent>
+			</Card>
 		);
 	}
 
 	return (
-		<div className="space-y-2">
-			<h3 className="font-medium text-sm">Overall Password Strength</h3>
-			<div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
-				{strongPct > 0 && (
-					<div
-						className="h-full bg-green-500 transition-all duration-500"
-						style={{ width: `${strongPct}%` }}
-						title={`Strong: ${strong}`}
-					/>
-				)}
-				{oldPct > 0 && (
-					<div
-						className="h-full bg-yellow-500 transition-all duration-500"
-						style={{ width: `${oldPct}%` }}
-						title={`Old: ${old}`}
-					/>
-				)}
-				{reusedPct > 0 && (
-					<div
-						className="h-full bg-orange-500 transition-all duration-500"
-						style={{ width: `${reusedPct}%` }}
-						title={`Reused: ${reused}`}
-					/>
-				)}
-				{weakPct > 0 && (
-					<div
-						className="h-full bg-red-500 transition-all duration-500"
-						style={{ width: `${weakPct}%` }}
-						title={`Weak: ${weak}`}
-					/>
-				)}
-			</div>
-			<div className="flex flex-wrap items-center justify-between gap-4 text-muted-foreground text-xs">
-				<div className="flex flex-wrap gap-4">
-					<span className="flex items-center gap-1.5">
-						<span className="h-2 w-2 rounded-full bg-green-500" />
-						Strong ({strong})
-					</span>
-					<span className="flex items-center gap-1.5">
-						<span className="h-2 w-2 rounded-full bg-yellow-500" />
-						Old ({old})
-					</span>
-					<span className="flex items-center gap-1.5">
-						<span className="h-2 w-2 rounded-full bg-orange-500" />
-						Reused ({reused})
-					</span>
-					<span className="flex items-center gap-1.5">
-						<span className="h-2 w-2 rounded-full bg-red-500" />
-						Weak ({weak})
-					</span>
+		<Card className="relative overflow-hidden border-slate-900/80 bg-[radial-gradient(circle_at_15%_20%,rgba(16,185,129,0.28),transparent_38%),radial-gradient(circle_at_90%_10%,rgba(34,211,238,0.18),transparent_30%),linear-gradient(130deg,#020617_0%,#0f172a_45%,#022c22_100%)] text-slate-100 shadow-[0_24px_70px_-45px_rgba(16,185,129,0.85)]">
+			<div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(148,163,184,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(148,163,184,0.06)_1px,transparent_1px)] bg-[size:28px_28px]" />
+			<CardContent className="relative space-y-8 p-6 md:p-8">
+				<div className="flex flex-wrap items-center gap-2">
+					<Badge
+						variant="outline"
+						className="border-emerald-300/40 bg-emerald-300/10 px-2.5 py-0.5 font-medium text-[11px] text-emerald-100 tracking-[0.2em]"
+					>
+						SENTINEL WATCH
+					</Badge>
+					<Badge
+						variant="outline"
+						className="border-cyan-300/35 bg-cyan-300/10 px-2.5 py-0.5 font-medium text-[11px] text-cyan-100 tracking-[0.16em]"
+					>
+						{scorePalette.label}
+					</Badge>
 				</div>
-				<span>
-					<span className="font-medium text-foreground">{total}</span> passwords
-					analyzed
-				</span>
-			</div>
-		</div>
+
+				<div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px] lg:items-center">
+					<div className="space-y-6">
+						<div className="space-y-2">
+							<h2 className="font-semibold text-2xl tracking-tight sm:text-3xl">
+								Security posture, live and prioritized
+							</h2>
+							<p className="max-w-2xl text-slate-300 text-sm leading-relaxed sm:text-base">
+								{scorePalette.description}
+							</p>
+						</div>
+
+						<div className="grid gap-3 sm:grid-cols-3">
+							<div className="rounded-xl border border-white/15 bg-white/8 p-4 backdrop-blur-sm">
+								<p className="text-[11px] text-slate-300 uppercase tracking-[0.16em]">
+									Passwords monitored
+								</p>
+								<p className="mt-2 font-semibold text-3xl leading-none">
+									{total}
+								</p>
+							</div>
+							<div className="rounded-xl border border-white/15 bg-white/8 p-4 backdrop-blur-sm">
+								<p className="text-[11px] text-slate-300 uppercase tracking-[0.16em]">
+									At-risk items
+								</p>
+								<p className="mt-2 font-semibold text-3xl text-rose-200 leading-none">
+									{uniqueRiskCount}
+								</p>
+							</div>
+							<div className="rounded-xl border border-white/15 bg-white/8 p-4 backdrop-blur-sm">
+								<p className="text-[11px] text-slate-300 uppercase tracking-[0.16em]">
+									High-priority actions
+								</p>
+								<p className="mt-2 font-semibold text-3xl text-amber-100 leading-none">
+									{highPriorityCount}
+								</p>
+							</div>
+						</div>
+
+						<div className="space-y-3 rounded-xl border border-white/15 bg-white/8 p-4 backdrop-blur-sm">
+							<div className="flex items-center justify-between text-[11px] text-slate-300 uppercase tracking-[0.16em]">
+								<span>Password health mix</span>
+								<span>{total} monitored</span>
+							</div>
+
+							{total > 0 ? (
+								<>
+									<div className="flex h-3 w-full overflow-hidden rounded-full bg-white/12">
+										{distribution
+											.filter((bucket) => bucket.percentage > 0)
+											.map((bucket) => (
+												<div
+													key={bucket.label}
+													className={`h-full ${bucket.barClassName} transition-all duration-700`}
+													style={{ width: `${bucket.percentage}%` }}
+													title={`${bucket.label}: ${bucket.count}`}
+												/>
+											))}
+									</div>
+									<div className="flex flex-wrap gap-x-4 gap-y-2 text-slate-200 text-xs">
+										{distribution.map((bucket) => (
+											<span
+												key={bucket.label}
+												className="inline-flex items-center gap-1.5"
+											>
+												<span
+													className={`h-2 w-2 rounded-full ${bucket.dotClassName}`}
+												/>
+												{bucket.label} ({bucket.count})
+											</span>
+										))}
+									</div>
+								</>
+							) : (
+								<p className="text-slate-300 text-sm">
+									Add passwords to start your first Sentinel health scan.
+								</p>
+							)}
+						</div>
+					</div>
+
+					<div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-white/15 bg-white/10 p-6 backdrop-blur-sm">
+						<ScoreRing score={report.securityScore} />
+						<div className="text-center">
+							<p className="font-semibold text-base">Sentinel Security Score</p>
+							<p className="text-slate-300 text-xs uppercase tracking-[0.16em]">
+								{healthCoverage}% healthy coverage
+							</p>
+						</div>
+					</div>
+				</div>
+			</CardContent>
+		</Card>
 	);
 }
 
-/**
- * Issue card component (1Password Watchtower style)
- */
 function IssueCard({
 	count,
 	title,
 	description,
 	icon: Icon,
-	iconColor,
 	isLoading,
+	tone,
 	onViewItems,
 }: {
 	count: number;
 	title: string;
 	description: string;
 	icon: DashboardIcon;
-	iconColor: string;
 	isLoading: boolean;
+	tone: "weak" | "reused" | "old";
 	onViewItems?: () => void;
 }) {
 	const hasIssues = count > 0;
 
+	const toneConfig = {
+		weak: {
+			accent: "from-rose-500/70 via-rose-500/30 to-transparent",
+			iconShell: "border-rose-500/25 bg-rose-500/10",
+			iconColor: "text-rose-500",
+			pillClassName: "border-rose-500/30 bg-rose-500/10 text-rose-600",
+		},
+		reused: {
+			accent: "from-orange-500/70 via-orange-500/30 to-transparent",
+			iconShell: "border-orange-500/25 bg-orange-500/10",
+			iconColor: "text-orange-500",
+			pillClassName: "border-orange-500/30 bg-orange-500/10 text-orange-600",
+		},
+		old: {
+			accent: "from-amber-500/70 via-amber-500/30 to-transparent",
+			iconShell: "border-amber-500/25 bg-amber-500/10",
+			iconColor: "text-amber-600",
+			pillClassName: "border-amber-500/30 bg-amber-500/10 text-amber-700",
+		},
+	} as const;
+
+	const config = toneConfig[tone];
+
 	return (
-		<Card className="flex h-full flex-col">
-			<CardContent className="flex flex-1 flex-col">
-				{/* Top section: Number + Icon */}
-				<div className="flex items-start justify-between">
-					{isLoading ? (
-						<Skeleton className="h-12 w-16" />
+		<Card className="relative h-full overflow-hidden border-border/60 bg-card/90 shadow-sm">
+			<div
+				className={`pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${config.accent}`}
+			/>
+			<CardContent className="flex h-full flex-col p-5">
+				<div className="flex items-start justify-between gap-4">
+					<div className={`rounded-xl border p-2.5 ${config.iconShell}`}>
+						<Icon className={`h-5 w-5 ${config.iconColor}`} strokeWidth={1.6} />
+					</div>
+					{hasIssues && !isLoading ? (
+						<Badge variant="outline" className={config.pillClassName}>
+							Needs action
+						</Badge>
 					) : (
-						<p className="font-light text-[48px] leading-none tracking-tight">
+						<Badge
+							variant="outline"
+							className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
+						>
+							Resolved
+						</Badge>
+					)}
+				</div>
+
+				<div className="mt-4">
+					{isLoading ? (
+						<Skeleton className="h-12 w-20" />
+					) : (
+						<p className="font-semibold text-5xl leading-none tracking-tight">
 							{count}
 						</p>
 					)}
-					<Icon
-						className={`h-10 w-10 ${iconColor} opacity-30`}
-						strokeWidth={1}
-					/>
-				</div>
-
-				{/* Title + Description */}
-				<div className="mt-3 flex-1">
-					<p className="font-semibold text-[15px]">{title}</p>
+					<h3 className="mt-3 font-semibold text-base tracking-tight">
+						{title}
+					</h3>
 					<p className="mt-1.5 text-[13px] text-muted-foreground leading-relaxed">
 						{description}
 					</p>
 				</div>
 
-				{/* View items link */}
-				<div className="mt-4 border-t pt-3">
+				<div className="mt-5 border-t pt-3">
 					{hasIssues && onViewItems ? (
 						<button
 							type="button"
 							onClick={onViewItems}
-							className="flex w-full items-center justify-between font-medium text-primary text-sm hover:underline"
+							className="inline-flex w-full items-center justify-between font-medium text-primary text-sm transition-colors hover:text-primary/80"
 						>
-							View items
+							Review items
 							<ArrowRight className="h-4 w-4" />
 						</button>
 					) : (
-						<span className="flex w-full items-center justify-between text-muted-foreground text-sm">
-							No issues
-							<CheckCircle className="h-4 w-4 text-green-500" />
+						<span className="inline-flex w-full items-center justify-between text-muted-foreground text-sm">
+							No active issues
+							<CheckCircle className="h-4 w-4 text-emerald-500" />
 						</span>
 					)}
 				</div>
@@ -355,9 +525,6 @@ function IssueCard({
 	);
 }
 
-/**
- * Issue cards section (1Password Watchtower style)
- */
 function IssueCardsSection({
 	report,
 	isLoading,
@@ -367,46 +534,49 @@ function IssueCardsSection({
 	isLoading: boolean;
 	onViewIssues: (tab: "weak" | "reused" | "old") => void;
 }) {
-	const weakCount = report.weakPasswords.length;
-	const reusedCount = report.reusedPasswords.length;
-	const oldCount = report.oldPasswords.length;
-
 	return (
-		<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+		<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
 			<IssueCard
-				count={weakCount}
-				title="Weak Passwords"
-				description="Weak passwords are easier to guess. Generate secure passwords to protect your accounts."
+				count={report.weakPasswords.length}
+				title="Weak passwords"
+				description="Easy-to-crack credentials are your most urgent exposure and should be replaced first."
 				icon={ShieldAlert}
-				iconColor="text-red-500"
 				isLoading={isLoading}
-				onViewItems={weakCount > 0 ? () => onViewIssues("weak") : undefined}
+				tone="weak"
+				onViewItems={
+					report.weakPasswords.length > 0
+						? () => onViewIssues("weak")
+						: undefined
+				}
 			/>
 			<IssueCard
-				count={reusedCount}
-				title="Reused Passwords"
-				description="Don't use the same password across multiple websites. Generate unique passwords to increase your security."
+				count={report.reusedPasswords.length}
+				title="Reused passwords"
+				description="Credential reuse multiplies blast radius. Split shared passwords into unique logins."
 				icon={Copy}
-				iconColor="text-orange-500"
 				isLoading={isLoading}
-				onViewItems={reusedCount > 0 ? () => onViewIssues("reused") : undefined}
+				tone="reused"
+				onViewItems={
+					report.reusedPasswords.length > 0
+						? () => onViewIssues("reused")
+						: undefined
+				}
 			/>
 			<IssueCard
-				count={oldCount}
-				title="Old Passwords"
-				description="Passwords older than 90 days should be updated regularly for better security."
+				count={report.oldPasswords.length}
+				title="Aging passwords"
+				description="Long-lived passwords become brittle over time. Rotate these to stay ahead of breaches."
 				icon={Clock}
-				iconColor="text-amber-500"
 				isLoading={isLoading}
-				onViewItems={oldCount > 0 ? () => onViewIssues("old") : undefined}
+				tone="old"
+				onViewItems={
+					report.oldPasswords.length > 0 ? () => onViewIssues("old") : undefined
+				}
 			/>
 		</div>
 	);
 }
 
-/**
- * Password issue list item
- */
 function PasswordIssueItem({
 	issue,
 	vaults,
@@ -421,58 +591,46 @@ function PasswordIssueItem({
 		<Link
 			to="/vaults/$vaultId"
 			params={{ vaultId: item.vaultId }}
-			className="block"
+			className="group block"
 		>
-			<div className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50">
+			<div className="flex items-center gap-3 rounded-xl border border-border/60 bg-background/50 p-3 transition-all hover:border-primary/45 hover:bg-muted/40">
 				<Favicon
 					url={item.url}
 					title={item.title}
 					category={item.category}
 					size="sm"
 				/>
-				<div className="min-w-0 flex-1">
+				<div className="min-w-0 flex-1 space-y-1">
 					<div className="flex items-center gap-2">
 						<span className="truncate font-medium">{item.title}</span>
 						{issue.analysis && (
 							<Badge
 								variant="outline"
-								className={strengthToTextColor(issue.analysis.strength)}
+								className={`text-[11px] ${strengthToTextColor(issue.analysis.strength)}`}
 							>
 								{strengthToLabel(issue.analysis.strength)}
 							</Badge>
 						)}
 					</div>
-					<div className="flex items-center gap-2 text-muted-foreground text-xs">
+					<div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
 						<span className="truncate">{vaultName}</span>
-						{issue.issueType === "reused" && issue.reusedCount && (
-							<>
-								<span>·</span>
-								<span>Used in {issue.reusedCount} items</span>
-							</>
-						)}
-						{issue.issueType === "old" && issue.daysSinceUpdate && (
-							<>
-								<span>·</span>
-								<span>{issue.daysSinceUpdate} days old</span>
-							</>
-						)}
-						{issue.analysis?.crackTime && (
-							<>
-								<span>·</span>
-								<span>Crack time: {issue.analysis.crackTime}</span>
-							</>
-						)}
+						{issue.issueType === "reused" && issue.reusedCount ? (
+							<span>Used in {issue.reusedCount} items</span>
+						) : null}
+						{issue.issueType === "old" && issue.daysSinceUpdate ? (
+							<span>{issue.daysSinceUpdate} days old</span>
+						) : null}
+						{issue.analysis?.crackTime ? (
+							<span>Crack time: {issue.analysis.crackTime}</span>
+						) : null}
 					</div>
 				</div>
-				<ExternalLink className="h-4 w-4 shrink-0 text-muted-foreground" />
+				<ExternalLink className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
 			</div>
 		</Link>
 	);
 }
 
-/**
- * Password issues list
- */
 function PasswordIssuesList({
 	issues,
 	vaults,
@@ -486,16 +644,19 @@ function PasswordIssuesList({
 }) {
 	if (issues.length === 0) {
 		return (
-			<div className="flex flex-col items-center justify-center py-8 text-center">
-				<EmptyIcon className="mb-2 h-12 w-12 text-green-500" />
-				<p className="text-muted-foreground">{emptyMessage}</p>
+			<div className="flex flex-col items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/5 py-10 text-center">
+				<EmptyIcon
+					className="mb-2 h-12 w-12 text-emerald-500"
+					strokeWidth={1.6}
+				/>
+				<p className="text-muted-foreground text-sm">{emptyMessage}</p>
 			</div>
 		);
 	}
 
 	return (
-		<ScrollArea className="h-[300px] pr-4">
-			<div className="space-y-2">
+		<ScrollArea className="h-[320px] pr-4">
+			<div className="space-y-2.5">
 				{issues.map((issue) => (
 					<PasswordIssueItem
 						key={`${issue.item.id}-${issue.issueType}`}
@@ -508,89 +669,99 @@ function PasswordIssuesList({
 	);
 }
 
-/**
- * Recommendations section
- */
-function RecommendationsSection({ report }: { report: SecurityReport }) {
+function SentinelRecommendations({ report }: { report: SecurityReport }) {
 	const priorityConfig = {
 		high: {
 			icon: AlertCircle,
-			iconColor: "text-red-500",
-			bgColor: "bg-red-500/10",
-			borderColor: "border-l-red-500",
+			iconClassName: "text-rose-600",
 			label: "High Priority",
+			cardClassName: "border-rose-500/25 bg-rose-500/6",
+			pillClassName: "border-rose-500/30 bg-rose-500/10 text-rose-600",
 		},
 		medium: {
 			icon: AlertTriangle,
-			iconColor: "text-yellow-500",
-			bgColor: "bg-yellow-500/10",
-			borderColor: "border-l-yellow-500",
+			iconClassName: "text-amber-600",
 			label: "Medium",
+			cardClassName: "border-amber-500/25 bg-amber-500/6",
+			pillClassName: "border-amber-500/30 bg-amber-500/10 text-amber-700",
 		},
 		low: {
 			icon: CheckCircle,
-			iconColor: "text-green-500",
-			bgColor: "bg-green-500/10",
-			borderColor: "border-l-green-500",
+			iconClassName: "text-emerald-600",
 			label: "Low",
+			cardClassName: "border-emerald-500/25 bg-emerald-500/6",
+			pillClassName: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700",
 		},
-	};
-
-	if (report.recommendations.length === 0) {
-		return null;
-	}
+	} as const;
 
 	return (
-		<Card>
+		<Card className="border-border/60">
 			<CardHeader>
 				<CardTitle className="flex items-center gap-2">
-					<div className="rounded-lg bg-primary/10 p-2">
+					<div className="rounded-lg border border-primary/20 bg-primary/10 p-2">
 						<ShieldCheck className="h-5 w-5 text-primary" />
 					</div>
-					Recommendations
+					Sentinel briefing
 				</CardTitle>
 				<CardDescription>
-					Actionable steps to improve your password security
+					Prioritized guidance generated from your current password risk
+					profile.
 				</CardDescription>
 			</CardHeader>
 			<CardContent>
-				<div className="space-y-3">
-					{report.recommendations.map((rec, index) => {
-						const config = priorityConfig[rec.priority];
-						const Icon = config.icon;
-						return (
-							<div
-								key={index}
-								className={`flex gap-4 rounded-lg border-l-4 bg-muted/30 p-4 ${config.borderColor}`}
-							>
-								<div className={`rounded-lg p-2 ${config.bgColor} h-fit`}>
-									<Icon className={`h-4 w-4 ${config.iconColor}`} />
-								</div>
-								<div className="min-w-0 flex-1">
-									<div className="mb-1 flex items-center gap-2">
-										<p className="font-medium">{rec.title}</p>
-										<Badge
-											variant="outline"
-											className={`px-1.5 py-0 text-[10px] ${config.iconColor}`}
-										>
-											{config.label}
-										</Badge>
+				{report.recommendations.length === 0 ? (
+					<div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+						<p className="font-medium text-emerald-700 text-sm dark:text-emerald-400">
+							No critical actions right now.
+						</p>
+						<p className="mt-1 text-muted-foreground text-sm">
+							Sentinel is not detecting urgent password risks in your vault.
+						</p>
+					</div>
+				) : (
+					<div className="space-y-3">
+						{report.recommendations.map((recommendation, index) => {
+							const config = priorityConfig[recommendation.priority];
+							const Icon = config.icon;
+
+							return (
+								<div
+									key={index}
+									className={`rounded-xl border p-4 ${config.cardClassName}`}
+								>
+									<div className="flex items-start gap-3">
+										<div className="rounded-lg bg-background/75 p-2">
+											<Icon className={`h-4 w-4 ${config.iconClassName}`} />
+										</div>
+										<div className="min-w-0 flex-1 space-y-1">
+											<div className="flex items-center gap-2">
+												<p className="font-medium text-sm">
+													{recommendation.title}
+												</p>
+												<Badge
+													variant="outline"
+													className={config.pillClassName}
+												>
+													{config.label}
+												</Badge>
+											</div>
+											<p className="text-muted-foreground text-sm">
+												{recommendation.description}
+											</p>
+										</div>
 									</div>
-									<p className="text-muted-foreground text-sm">
-										{rec.description}
-									</p>
 								</div>
-							</div>
-						);
-					})}
-				</div>
+							);
+						})}
+					</div>
+				)}
 			</CardContent>
 		</Card>
 	);
 }
 
 /**
- * Main Security Dashboard component (1Password Watchtower style)
+ * Main Security Dashboard component
  */
 export function SecurityDashboard({
 	report,
@@ -607,78 +778,71 @@ export function SecurityDashboard({
 
 	return (
 		<div className="space-y-6">
-			{/* Score gauge + Password strength distribution bar */}
-			<div className="flex flex-col items-start gap-6 md:flex-row md:items-center">
-				<ScoreGaugeSection score={report.securityScore} isLoading={isLoading} />
-				<div className="w-full flex-1">
-					<StrengthDistributionBar report={report} isLoading={isLoading} />
-				</div>
-			</div>
+			<SentinelOverview report={report} isLoading={isLoading} />
 
-			{/* Issue cards grid (1Password Watchtower style) */}
 			<IssueCardsSection
 				report={report}
 				isLoading={isLoading}
 				onViewIssues={handleViewIssues}
 			/>
 
-			{/* Detailed issues list (shown when clicking View items) */}
-			{showDetails && !isLoading && (
-				<Card>
-					<CardHeader className="flex flex-row items-center justify-between">
+			{showDetails && !isLoading ? (
+				<Card className="border-border/60">
+					<CardHeader className="flex flex-row items-start justify-between gap-4">
 						<div>
-							<CardTitle>Password Issues</CardTitle>
+							<CardTitle>Issue drilldown</CardTitle>
 							<CardDescription>
-								Review and fix security issues with your passwords
+								Inspect flagged credentials and jump directly to each affected
+								vault.
 							</CardDescription>
 						</div>
 						<button
 							type="button"
 							onClick={() => setShowDetails(false)}
-							className="text-muted-foreground text-sm hover:text-foreground"
+							className="text-muted-foreground text-sm transition-colors hover:text-foreground"
 						>
-							Hide
+							Hide panel
 						</button>
 					</CardHeader>
 					<CardContent>
 						<Tabs
 							value={activeTab}
-							onValueChange={(v) => setActiveTab(v as typeof activeTab)}
+							onValueChange={(value) => setActiveTab(value as typeof activeTab)}
 							className="w-full"
 						>
-							<TabsList className="grid w-full grid-cols-3">
+							<TabsList className="grid w-full grid-cols-3 bg-muted/60 p-1">
 								<TabsTrigger value="weak" className="flex items-center gap-2">
 									<ShieldAlert className="h-4 w-4" />
 									Weak
-									{report.weakPasswords.length > 0 && (
+									{report.weakPasswords.length > 0 ? (
 										<Badge variant="destructive" className="ml-1">
 											{report.weakPasswords.length}
 										</Badge>
-									)}
+									) : null}
 								</TabsTrigger>
 								<TabsTrigger value="reused" className="flex items-center gap-2">
 									<Copy className="h-4 w-4" />
 									Reused
-									{report.reusedPasswords.length > 0 && (
+									{report.reusedPasswords.length > 0 ? (
 										<Badge
 											variant="secondary"
-											className="ml-1 bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400"
+											className="ml-1 bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300"
 										>
 											{report.reusedPasswords.length}
 										</Badge>
-									)}
+									) : null}
 								</TabsTrigger>
 								<TabsTrigger value="old" className="flex items-center gap-2">
 									<Clock className="h-4 w-4" />
-									Old
-									{report.oldPasswords.length > 0 && (
+									Aging
+									{report.oldPasswords.length > 0 ? (
 										<Badge
 											variant="secondary"
-											className="ml-1 bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400"
+											className="ml-1 bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
 										>
 											{report.oldPasswords.length}
 										</Badge>
-									)}
+									) : null}
 								</TabsTrigger>
 							</TabsList>
 
@@ -686,7 +850,7 @@ export function SecurityDashboard({
 								<PasswordIssuesList
 									issues={report.weakPasswords}
 									vaults={vaults}
-									emptyMessage="No weak passwords found. Great job!"
+									emptyMessage="No weak passwords found. Nice work."
 									emptyIcon={ShieldCheck}
 								/>
 							</TabsContent>
@@ -695,7 +859,7 @@ export function SecurityDashboard({
 								<PasswordIssuesList
 									issues={report.reusedPasswords}
 									vaults={vaults}
-									emptyMessage="No reused passwords found. Each password is unique!"
+									emptyMessage="No reused passwords found. Each login is unique."
 									emptyIcon={CheckCircle}
 								/>
 							</TabsContent>
@@ -704,17 +868,37 @@ export function SecurityDashboard({
 								<PasswordIssuesList
 									issues={report.oldPasswords}
 									vaults={vaults}
-									emptyMessage="No old passwords found. Your passwords are up to date!"
+									emptyMessage="No aging passwords right now. Your rotation cadence looks good."
 									emptyIcon={RefreshCw}
 								/>
 							</TabsContent>
 						</Tabs>
 					</CardContent>
 				</Card>
+			) : (
+				!isLoading && (
+					<Card className="border-border/60">
+						<CardContent className="flex flex-col items-start gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+							<div>
+								<p className="font-medium">Issue drilldown panel is hidden</p>
+								<p className="text-muted-foreground text-sm">
+									Pick any issue category above to inspect affected credentials.
+								</p>
+							</div>
+							<button
+								type="button"
+								onClick={() => setShowDetails(true)}
+								className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 font-medium text-sm transition-colors hover:bg-muted"
+							>
+								Open drilldown
+								<ArrowRight className="h-4 w-4" />
+							</button>
+						</CardContent>
+					</Card>
+				)
 			)}
 
-			{/* Recommendations */}
-			{!isLoading && <RecommendationsSection report={report} />}
+			{!isLoading ? <SentinelRecommendations report={report} /> : null}
 		</div>
 	);
 }
