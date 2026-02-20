@@ -1,7 +1,12 @@
 import { useTRPC } from "@bittery/shared/trpc";
 import { Card, CardContent, Skeleton } from "@bittery/ui";
+import {
+	IconKeyOutlineDuo18 as Key,
+	IconLockOutlineDuo18 as Lock,
+	IconEnvelopeOutlineDuo18 as Mail,
+	IconUsers6OutlineDuo18 as Users,
+} from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Key, Lock, Mail, Users } from "lucide-react";
 
 export function StatsCards() {
 	const trpc = useTRPC();

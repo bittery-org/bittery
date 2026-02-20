@@ -18,9 +18,13 @@ import {
 	TabsList,
 	TabsTrigger,
 } from "@bittery/ui";
+import {
+	IconArrowLeftOutlineDuo18 as ArrowLeft,
+	IconKeyOutlineDuo18 as Key,
+	IconUsers6OutlineDuo18 as Users,
+} from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, Key, Users } from "lucide-react";
 import { useState } from "react";
 import ItemDetail from "@/components/vault/item-detail";
 import { ItemList } from "@/components/vault/item-list";

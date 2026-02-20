@@ -26,8 +26,11 @@ import {
 	TableRow,
 	toast,
 } from "@bittery/ui";
+import {
+	IconLoader2OutlineDuo18 as Loader2,
+	IconTrash2OutlineDuo18 as Trash2,
+} from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
-import { Loader2, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
 import { performKeyRotation } from "@/lib/wasm-crypto";

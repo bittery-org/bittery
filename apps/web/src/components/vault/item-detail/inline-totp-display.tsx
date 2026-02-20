@@ -1,7 +1,7 @@
 import { generateTotp, type TotpResult } from "@bittery/shared/totp";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import { Button, copyWithToast } from "@bittery/ui";
-import { Copy } from "lucide-react";
+import { IconCopyOutlineDuo18 as Copy } from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
 
 interface InlineTotpDisplayProps {

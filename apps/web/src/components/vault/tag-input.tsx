@@ -10,7 +10,11 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@bittery/ui";
-import { Check, Plus, Tags } from "lucide-react";
+import {
+	IconCheckOutlineDuo18 as Check,
+	IconPlusOutlineDuo18 as Plus,
+	IconTagsOutlineDuo18 as Tags,
+} from "@bittery/ui/icons";
 import { useState } from "react";
 import { getTagColorFromName, TagBadge } from "./tag-badge";
 

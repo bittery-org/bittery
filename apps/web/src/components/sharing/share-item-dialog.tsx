@@ -33,7 +33,14 @@ import {
 	SelectValue,
 	toast,
 } from "@bittery/ui";
-import { AlertTriangle, Copy, Link, Loader2, Share2, X } from "lucide-react";
+import {
+	IconTriangleWarningOutlineDuo18 as AlertTriangle,
+	IconCopyOutlineDuo18 as Copy,
+	IconLinkOutlineDuo18 as Link,
+	IconLoader2OutlineDuo18 as Loader2,
+	IconShareLeft2OutlineDuo18 as Share2,
+	IconXmarkOutlineDuo18 as X,
+} from "@bittery/ui/icons";
 import { useState } from "react";
 
 interface ShareItemDialogProps {

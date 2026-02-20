@@ -5,7 +5,11 @@ import {
 } from "@bittery/shared/totp";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Card, copyWithToast, Input, Label } from "@bittery/ui";
-import { Copy, Eye, EyeOff } from "lucide-react";
+import {
+	IconCopyOutlineDuo18 as Copy,
+	IconEyeOutlineDuo18 as Eye,
+	IconEyeSlashOutlineDuo18 as EyeOff,
+} from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
 import { ShareHistoryDialog, ShareItemDialog } from "@/components/sharing";
 import { Favicon } from "../favicon";

@@ -12,8 +12,8 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
+import { IconPlusOutlineDuo18 as Plus } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
 import { useState } from "react";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 

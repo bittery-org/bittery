@@ -10,17 +10,17 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
+import {
+	IconCircleCheck2OutlineDuo18 as CheckCircle2,
+	IconClipboardArrowInOutlineDuo18 as Download,
+	IconEyeOutlineDuo18 as Eye,
+	IconEyeSlashOutlineDuo18 as EyeOff,
+	IconLoader2OutlineDuo18 as Loader2,
+	IconUsers6OutlineDuo18 as Users,
+} from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import {
-	CheckCircle2,
-	Download,
-	Eye,
-	EyeOff,
-	Loader2,
-	Users,
-} from "lucide-react";
 import { useEffect, useState } from "react";
 import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";

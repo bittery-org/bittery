@@ -15,8 +15,13 @@ import {
 	Separator,
 	toast,
 } from "@bittery/ui";
+import {
+	IconTriangleWarningOutlineDuo18 as AlertTriangle,
+	IconGear3OutlineDuo18 as Settings,
+	IconUpload3OutlineDuo18 as Upload,
+	IconXmarkOutlineDuo18 as X,
+} from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
-import { AlertTriangle, Settings, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 import { DeleteTeamDialog } from "./delete-team-dialog";

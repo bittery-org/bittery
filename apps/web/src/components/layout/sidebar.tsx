@@ -19,17 +19,17 @@ import {
 	SidebarMenuItem,
 	useSidebar,
 } from "@bittery/ui";
+import {
+	IconSortObjTopToBottomOutlineDuo18 as ChevronsUpDown,
+	IconGrid2OutlineDuo18 as Home,
+	IconLockOutlineDuo18 as Lock,
+	IconArrowDoorOutOutlineDuo18 as LogOut,
+	IconGear3OutlineDuo18 as Settings,
+	IconMagicShieldOutlineDuo18 as ShieldCheck,
+	IconUsers6OutlineDuo18 as Users,
+} from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import {
-	ChevronsUpDown,
-	Home,
-	Lock,
-	LogOut,
-	Settings,
-	ShieldCheck,
-	Users,
-} from "lucide-react";
 import { storage } from "@/lib/storage";
 
 const navItems = [

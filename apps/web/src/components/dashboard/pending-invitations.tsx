@@ -9,9 +9,14 @@ import {
 	CardTitle,
 	toast,
 } from "@bittery/ui";
+import {
+	IconCheckOutlineDuo18 as Check,
+	IconClockTimeOutlineDuo18 as Clock,
+	IconEnvelopeOutlineDuo18 as Mail,
+	IconXmarkOutlineDuo18 as X,
+} from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { Check, Clock, Mail, X } from "lucide-react";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 export function PendingInvitations() {

@@ -7,7 +7,7 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@bittery/ui";
-import { History } from "lucide-react";
+import { IconHistoryOutlineDuo18 as History } from "@bittery/ui/icons";
 import { useState } from "react";
 import { ShareLinksList } from "./share-links-list";
 

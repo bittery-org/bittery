@@ -15,7 +15,13 @@ import {
 	Skeleton,
 	toast,
 } from "@bittery/ui";
-import { Key, Search, Smartphone, Star, X } from "lucide-react";
+import {
+	IconKeyOutlineDuo18 as Key,
+	IconMagnifier3OutlineDuo18 as Search,
+	IconMobileOutlineDuo18 as Smartphone,
+	IconStarOutlineDuo18 as Star,
+	IconXmarkOutlineDuo18 as X,
+} from "@bittery/ui/icons";
 import { useMemo, useState } from "react";
 import { Favicon } from "./favicon";
 import { TagBadge } from "./tag-badge";

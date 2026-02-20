@@ -3,10 +3,14 @@ import { performSRPLogin, storeLoginSession } from "@bittery/core/hooks/auth";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { Button, Card, CardContent, Input, Label, toast } from "@bittery/ui";
+import {
+	IconEyeOutlineDuo18 as Eye,
+	IconEyeSlashOutlineDuo18 as EyeOff,
+	IconLoader2OutlineDuo18 as Loader2,
+} from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
 import { storage } from "@/lib/storage";

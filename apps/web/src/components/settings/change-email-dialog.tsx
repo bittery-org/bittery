@@ -12,9 +12,13 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
+import {
+	IconEyeOutlineDuo18 as Eye,
+	IconEyeSlashOutlineDuo18 as EyeOff,
+	IconEnvelopeOutlineDuo18 as Mail,
+} from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Eye, EyeOff, Mail } from "lucide-react";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
 import {

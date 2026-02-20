@@ -9,18 +9,18 @@ import {
 	Separator,
 	Skeleton,
 } from "@bittery/ui";
+import {
+	IconClockTimeOutlineDuo18 as Clock,
+	IconExternalLinkOutlineDuo18 as ExternalLink,
+	IconSquareTerminalOutlineDuo18 as Github,
+	IconKeyOutlineDuo18 as Key,
+	IconSquareTerminalOutlineDuo18 as Monitor,
+	IconMagicShieldOutlineDuo18 as Shield,
+	IconTrash2OutlineDuo18 as Trash2,
+	IconUserOutlineDuo18 as User,
+} from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import {
-	Clock,
-	ExternalLink,
-	Github,
-	Key,
-	Monitor,
-	Shield,
-	Trash2,
-	User,
-} from "lucide-react";
 import { AutoLockSettings } from "@/components/settings/auto-lock-settings";
 import { ChangeEmailDialog } from "@/components/settings/change-email-dialog";
 import { ChangePasswordDialog } from "@/components/settings/change-password-dialog";

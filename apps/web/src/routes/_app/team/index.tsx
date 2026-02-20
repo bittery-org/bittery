@@ -12,9 +12,13 @@ import {
 	TabsList,
 	TabsTrigger,
 } from "@bittery/ui";
+import {
+	IconEnvelopeOutlineDuo18 as Mail,
+	IconGear3OutlineDuo18 as Settings,
+	IconUsers6OutlineDuo18 as Users,
+} from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Mail, Settings, Users } from "lucide-react";
 import { InviteDialog } from "@/components/teams/invite-dialog";
 import { MemberList } from "@/components/teams/member-list";
 import { PendingInvitationsList } from "@/components/teams/pending-invitations-list";

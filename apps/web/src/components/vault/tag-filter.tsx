@@ -11,7 +11,11 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@bittery/ui";
-import { Check, ChevronDown, Filter } from "lucide-react";
+import {
+	IconCheckOutlineDuo18 as Check,
+	IconChevronDownOutlineDuo18 as ChevronDown,
+	IconSortObjTopToBottomOutlineDuo18 as Filter,
+} from "@bittery/ui/icons";
 import { useState } from "react";
 import { getTagColorFromName, TagBadge } from "./tag-badge";
 

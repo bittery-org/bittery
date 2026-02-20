@@ -25,15 +25,15 @@ import {
 	Skeleton,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-	Chrome,
-	Edit2,
-	Globe,
-	LogOut,
-	Monitor,
-	Smartphone,
-} from "lucide-react";
+	IconEarthOutlineDuo18 as Chrome,
+	IconPen2OutlineDuo18 as Edit2,
+	IconEarthOutlineDuo18 as Globe,
+	IconArrowDoorOutOutlineDuo18 as LogOut,
+	IconSquareTerminalOutlineDuo18 as Monitor,
+	IconMobileOutlineDuo18 as Smartphone,
+} from "@bittery/ui/icons";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 // Platform icons

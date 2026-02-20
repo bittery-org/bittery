@@ -11,8 +11,12 @@ import {
 	TableRow,
 	toast,
 } from "@bittery/ui";
+import {
+	IconCopyOutlineDuo18 as Copy,
+	IconArrowsLeftRightTrailOutlineDuo18 as RefreshCw,
+	IconXmarkOutlineDuo18 as X,
+} from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
-import { Copy, RefreshCw, X } from "lucide-react";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface Invitation {

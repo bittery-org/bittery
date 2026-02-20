@@ -1,7 +1,14 @@
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button, Card, CardContent, Input, Label, toast } from "@bittery/ui";
+import {
+	IconCheckOutlineDuo18 as Check,
+	IconCopyOutlineDuo18 as Copy,
+	IconClipboardArrowInOutlineDuo18 as Download,
+	IconEyeOutlineDuo18 as Eye,
+	IconEyeSlashOutlineDuo18 as EyeOff,
+	IconLoader2OutlineDuo18 as Loader2,
+} from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Check, Copy, Download, Eye, EyeOff, Loader2 } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
 import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";

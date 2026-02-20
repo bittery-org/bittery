@@ -12,9 +12,9 @@ import {
 	Button,
 	toast,
 } from "@bittery/ui";
+import { IconArrowDoorOutOutlineDuo18 as LogOut } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { LogOut } from "lucide-react";
 import { useState } from "react";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 

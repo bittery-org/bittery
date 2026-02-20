@@ -10,7 +10,11 @@ import {
 } from "@bittery/shared/identity";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Card, Input, Label } from "@bittery/ui";
-import { Copy, Eye, EyeOff } from "lucide-react";
+import {
+	IconCopyOutlineDuo18 as Copy,
+	IconEyeOutlineDuo18 as Eye,
+	IconEyeSlashOutlineDuo18 as EyeOff,
+} from "@bittery/ui/icons";
 import { useState } from "react";
 import { ShareHistoryDialog, ShareItemDialog } from "@/components/sharing";
 import { Favicon } from "../favicon";

@@ -13,23 +13,23 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
+import {
+	IconCircleWarningOutlineDuo18 as AlertCircle,
+	IconCalendarOutlineDuo18 as Calendar,
+	IconCheckOutlineDuo18 as Check,
+	IconClockTimeOutlineDuo18 as Clock,
+	IconCopyOutlineDuo18 as Copy,
+	IconExternalLinkOutlineDuo18 as ExternalLink,
+	IconEyeOutlineDuo18 as Eye,
+	IconEyeSlashOutlineDuo18 as EyeOff,
+	IconLoader2OutlineDuo18 as Loader2,
+	IconLockOutlineDuo18 as Lock,
+	IconEnvelopeOutlineDuo18 as Mail,
+	IconMagicShieldOutlineDuo18 as ShieldCheck,
+	IconXmarkOutlineDuo18 as X,
+} from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import {
-	AlertCircle,
-	Calendar,
-	Check,
-	Clock,
-	Copy,
-	ExternalLink,
-	Eye,
-	EyeOff,
-	Loader2,
-	Lock,
-	Mail,
-	ShieldCheck,
-	X,
-} from "lucide-react";
 import { useEffect, useState } from "react";
 import { base64ToArrayBuffer, decrypt } from "@/lib/wasm-crypto";
 

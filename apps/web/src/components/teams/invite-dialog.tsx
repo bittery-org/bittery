@@ -18,8 +18,11 @@ import {
 	SelectValue,
 	toast,
 } from "@bittery/ui";
+import {
+	IconCopyOutlineDuo18 as Copy,
+	IconUsers6OutlineDuo18 as UserPlus,
+} from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Copy, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
 import { rsaEncrypt } from "@/lib/wasm-crypto";

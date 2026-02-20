@@ -13,8 +13,14 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
+import {
+	IconCopyOutlineDuo18 as Copy,
+	IconClipboardArrowInOutlineDuo18 as Download,
+	IconEyeOutlineDuo18 as Eye,
+	IconEyeSlashOutlineDuo18 as EyeOff,
+	IconArrowsLeftRightTrailOutlineDuo18 as RefreshCw,
+} from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Copy, Download, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { storage } from "@/lib/storage";

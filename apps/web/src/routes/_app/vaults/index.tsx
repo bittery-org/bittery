@@ -8,9 +8,12 @@ import {
 	CardTitle,
 	Skeleton,
 } from "@bittery/ui";
+import {
+	IconLockOutlineDuo18 as Lock,
+	IconUsers6OutlineDuo18 as Users,
+} from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Lock, Users } from "lucide-react";
 
 export const Route = createFileRoute("/_app/vaults/")({
 	component: VaultsPage,

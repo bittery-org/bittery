@@ -20,21 +20,20 @@ import {
 	TabsList,
 	TabsTrigger,
 } from "@bittery/ui";
-import { Link } from "@tanstack/react-router";
-import type { LucideIcon } from "lucide-react";
 import {
-	AlertCircle,
-	AlertTriangle,
-	ArrowRight,
-	CheckCircle,
-	Clock,
-	Copy,
-	ExternalLink,
-	RefreshCw,
-	ShieldAlert,
-	ShieldCheck,
-} from "lucide-react";
-import { useState } from "react";
+	IconCircleWarningOutlineDuo18 as AlertCircle,
+	IconTriangleWarningOutlineDuo18 as AlertTriangle,
+	IconVShapedArrowRightOutlineDuo18 as ArrowRight,
+	IconCircleCheck2OutlineDuo18 as CheckCircle,
+	IconClockTimeOutlineDuo18 as Clock,
+	IconCopyOutlineDuo18 as Copy,
+	IconExternalLinkOutlineDuo18 as ExternalLink,
+	IconArrowsLeftRightTrailOutlineDuo18 as RefreshCw,
+	IconCircleWarningOutlineDuo18 as ShieldAlert,
+	IconMagicShieldOutlineDuo18 as ShieldCheck,
+} from "@bittery/ui/icons";
+import { Link } from "@tanstack/react-router";
+import { type ComponentType, useState } from "react";
 import { Favicon } from "../vault/favicon";
 
 interface SecurityDashboardProps {
@@ -42,6 +41,11 @@ interface SecurityDashboardProps {
 	isLoading: boolean;
 	vaults?: Array<{ id: string; name: string }>;
 }
+
+type DashboardIcon = ComponentType<{
+	className?: string;
+	strokeWidth?: number;
+}>;
 
 /**
  * Get the vault name for an item
@@ -295,7 +299,7 @@ function IssueCard({
 	count: number;
 	title: string;
 	description: string;
-	icon: LucideIcon;
+	icon: DashboardIcon;
 	iconColor: string;
 	isLoading: boolean;
 	onViewItems?: () => void;
@@ -478,7 +482,7 @@ function PasswordIssuesList({
 	issues: PasswordIssue[];
 	vaults: Array<{ id: string; name: string }>;
 	emptyMessage: string;
-	emptyIcon: LucideIcon;
+	emptyIcon: DashboardIcon;
 }) {
 	if (issues.length === 0) {
 		return (

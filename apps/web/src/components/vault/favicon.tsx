@@ -1,7 +1,13 @@
 import { getDomainFromUrl, getFaviconUrl } from "@bittery/shared/favicon";
 import type { ItemCategory } from "@bittery/shared/types";
 import { cn } from "@bittery/ui";
-import { CreditCard, FileText, Globe, KeyRound, User } from "lucide-react";
+import {
+	IconCreditCardLockOutlineDuo18 as CreditCard,
+	IconFileLockOutlineDuo18 as FileText,
+	IconEarthOutlineDuo18 as Globe,
+	IconCircleKeyOutlineDuo18 as KeyRound,
+	IconUserOutlineDuo18 as User,
+} from "@bittery/ui/icons";
 import { useState } from "react";
 
 interface FaviconProps {

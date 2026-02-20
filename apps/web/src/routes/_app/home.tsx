@@ -1,8 +1,11 @@
 import { useTRPC } from "@bittery/shared/trpc";
 import { Badge, Button } from "@bittery/ui";
+import {
+	IconMagicShieldOutlineDuo18 as ShieldCheck,
+	IconVault3OutlineDuo18 as Vault,
+} from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ShieldCheck, Vault } from "lucide-react";
 import { DownloadCard } from "@/components/dashboard/download-card";
 import { PendingInvitations } from "@/components/dashboard/pending-invitations";
 import { StatsCards } from "@/components/dashboard/stats-cards";

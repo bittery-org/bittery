@@ -9,17 +9,17 @@ import {
 	CardTitle,
 	toast,
 } from "@bittery/ui";
+import {
+	IconCircleWarningOutlineDuo18 as AlertCircle,
+	IconCheckOutlineDuo18 as Check,
+	IconClockTimeOutlineDuo18 as Clock,
+	IconLoader2OutlineDuo18 as Loader2,
+	IconMagicShieldOutlineDuo18 as ShieldCheck,
+	IconUsers6OutlineDuo18 as Users,
+	IconXmarkOutlineDuo18 as X,
+} from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import {
-	AlertCircle,
-	Check,
-	Clock,
-	Loader2,
-	ShieldCheck,
-	Users,
-	X,
-} from "lucide-react";
 import { useEffect, useState } from "react";
 import { storage } from "@/lib/storage";
 

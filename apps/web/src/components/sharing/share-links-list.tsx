@@ -23,20 +23,20 @@ import {
 	Skeleton,
 	toast,
 } from "@bittery/ui";
-import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-	Calendar,
-	Clock,
-	Copy,
-	Eye,
-	Globe,
-	Link,
-	Loader2,
-	Mail,
-	Shield,
-	Trash2,
-	Users,
-} from "lucide-react";
+	IconCalendarOutlineDuo18 as Calendar,
+	IconClockTimeOutlineDuo18 as Clock,
+	IconCopyOutlineDuo18 as Copy,
+	IconEyeOutlineDuo18 as Eye,
+	IconEarthOutlineDuo18 as Globe,
+	IconLinkOutlineDuo18 as Link,
+	IconLoader2OutlineDuo18 as Loader2,
+	IconEnvelopeOutlineDuo18 as Mail,
+	IconMagicShieldOutlineDuo18 as Shield,
+	IconTrash2OutlineDuo18 as Trash2,
+	IconUsers6OutlineDuo18 as Users,
+} from "@bittery/ui/icons";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 

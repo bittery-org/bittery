@@ -1,5 +1,5 @@
 import { cn } from "@bittery/ui";
-import { X } from "lucide-react";
+import { IconXmarkOutlineDuo18 as X } from "@bittery/ui/icons";
 
 interface TagBadgeProps {
 	name: string;

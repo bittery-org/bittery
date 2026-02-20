@@ -6,10 +6,16 @@ import {
 	PopoverTrigger,
 	toast,
 } from "@bittery/ui";
-import { IconLockOutlineDuo18 } from "@bittery/ui/icons";
+import {
+	IconCheckOutlineDuo18 as Check,
+	IconChevronDownOutlineDuo18 as ChevronDown,
+	IconExternalLinkOutlineDuo18 as ExternalLink,
+	IconLockOutlineDuo18,
+	IconPlusOutlineDuo18 as Plus,
+	IconConnectedDots3OutlineDuo18 as Server,
+} from "@bittery/ui/icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Outlet } from "@tanstack/react-router";
-import { Check, ChevronDown, ExternalLink, Plus, Server } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import {
 	readKnownServerUrls,

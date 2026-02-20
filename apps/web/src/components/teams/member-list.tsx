@@ -21,8 +21,11 @@ import {
 	TableRow,
 	toast,
 } from "@bittery/ui";
+import {
+	IconTrash2OutlineDuo18 as Trash2,
+	IconUserOutlineDuo18 as UserMinus,
+} from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
-import { Trash2, UserMinus } from "lucide-react";
 import { useState } from "react";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 

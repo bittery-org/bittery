@@ -8,13 +8,12 @@ import {
 	CardTitle,
 } from "@bittery/ui";
 import {
-	Apple,
-	Download,
-	ExternalLink,
-	Monitor,
-	ShieldCheck,
-	Zap,
-} from "lucide-react";
+	IconMobileOutlineDuo18 as Apple,
+	IconClipboardArrowInOutlineDuo18 as Download,
+	IconExternalLinkOutlineDuo18 as ExternalLink,
+	IconSquareTerminalOutlineDuo18 as Monitor,
+	IconStarSparkle2OutlineDuo18 as Zap,
+} from "@bittery/ui/icons";
 
 function detectOS(): "macos" | "windows" | "linux" | "unknown" {
 	if (typeof navigator === "undefined") return "unknown";
@@ -66,7 +65,7 @@ export function DownloadCard() {
 		os === "unknown" ? "Browse Desktop Releases" : `Download for ${name}`;
 
 	return (
-		<Card className="overflow-hidden border-border/70 py-0 gap-0">
+		<Card className="gap-0 overflow-hidden border-border/70 py-0">
 			<CardHeader className="border-b bg-muted/35 py-4">
 				<div className="flex items-center justify-between gap-3">
 					<CardTitle className="flex items-center gap-2 text-base">

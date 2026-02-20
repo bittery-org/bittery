@@ -19,8 +19,8 @@ import {
 	SelectValue,
 	toast,
 } from "@bittery/ui";
+import { IconUsers6OutlineDuo18 as UserPlus } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { UserPlus } from "lucide-react";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
 import { arrayBufferToBase64, rsaEncrypt } from "@/lib/wasm-crypto";
