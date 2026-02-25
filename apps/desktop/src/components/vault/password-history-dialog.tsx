@@ -51,9 +51,8 @@ export function PasswordHistoryDialog({
 	onRestorePassword,
 	isRestoring = false,
 }: PasswordHistoryDialogProps) {
-	const [pendingRestore, setPendingRestore] = useState<PasswordHistoryEntry | null>(
-		null,
-	);
+	const [pendingRestore, setPendingRestore] =
+		useState<PasswordHistoryEntry | null>(null);
 
 	const sortedHistory = useMemo(() => {
 		return [...(passwordHistory ?? [])].sort((left, right) => {

@@ -64,10 +64,18 @@ export function applyPasswordHistoryOnPasswordChange({
 	previousPassword,
 	nextPassword,
 	changedAt,
-}: ApplyPasswordHistoryOnPasswordChangeInput): PasswordHistoryEntry[] | undefined {
-	const normalizedHistory = normalizePasswordHistory(passwordHistory, nextPassword);
+}: ApplyPasswordHistoryOnPasswordChangeInput):
+	| PasswordHistoryEntry[]
+	| undefined {
+	const normalizedHistory = normalizePasswordHistory(
+		passwordHistory,
+		nextPassword,
+	);
 
-	if (!isNonEmptyString(previousPassword) || previousPassword === nextPassword) {
+	if (
+		!isNonEmptyString(previousPassword) ||
+		previousPassword === nextPassword
+	) {
 		return normalizedHistory;
 	}
 

@@ -169,6 +169,37 @@ export const vaultKeyRotation = pgTable(
 	],
 );
 
+// Encrypted file attachments for vault items
+export const itemAttachment = pgTable(
+	"item_attachment",
+	{
+		id: text("id").primaryKey(),
+		itemId: text("item_id")
+			.notNull()
+			.references(() => item.id, { onDelete: "cascade" }),
+		vaultId: text("vault_id")
+			.notNull()
+			.references(() => vault.id, { onDelete: "cascade" }),
+		// S3 object key for the encrypted file
+		storageKey: text("storage_key").notNull(),
+		// Encrypted metadata (filename + contentType encrypted with vault key)
+		encryptedName: text("encrypted_name").notNull(),
+		encryptedContentType: text("encrypted_content_type").notNull(),
+		encryptionIv: text("encryption_iv").notNull(),
+		encryptionAlgorithm: text("encryption_algorithm")
+			.notNull()
+			.default("AES-GCM"),
+		// File size in bytes (not sensitive)
+		fileSize: integer("file_size").notNull(),
+		uploadedBy: text("uploaded_by").references(() => user.id),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+	},
+	(table) => [
+		index("item_attachment_itemId_idx").on(table.itemId),
+		index("item_attachment_vaultId_idx").on(table.vaultId),
+	],
+);
+
 // Relations
 export const vaultRelations = relations(vault, ({ one, many }) => ({
 	createdBy: one(user, {
@@ -192,9 +223,21 @@ export const vaultKeyRelations = relations(vaultKey, ({ one }) => ({
 	}),
 }));
 
-export const itemRelations = relations(item, ({ one }) => ({
+export const itemRelations = relations(item, ({ one, many }) => ({
 	vault: one(vault, {
 		fields: [item.vaultId],
+		references: [vault.id],
+	}),
+	attachments: many(itemAttachment),
+}));
+
+export const itemAttachmentRelations = relations(itemAttachment, ({ one }) => ({
+	item: one(item, {
+		fields: [itemAttachment.itemId],
+		references: [item.id],
+	}),
+	vault: one(vault, {
+		fields: [itemAttachment.vaultId],
 		references: [vault.id],
 	}),
 }));

@@ -14,6 +14,7 @@ import {
 	CategoryFields,
 	CustomFields,
 	ErrorState,
+	ItemAttachments,
 	ItemHeader,
 	ItemMetadata,
 	LoadingState,
@@ -21,8 +22,8 @@ import {
 	NotFoundState,
 	TagsSection,
 } from "@/components/item-details";
-import { SafeAreaView } from "@/components/safe-area-view";
 import { PasswordHistorySheet } from "@/components/password-history-sheet";
+import { SafeAreaView } from "@/components/safe-area-view";
 import { ShareItemSheet } from "@/components/share/share-item-sheet";
 
 export default function ItemDetailScreen() {
@@ -158,6 +159,9 @@ export default function ItemDetailScreen() {
 
 				{/* Custom Fields */}
 				<CustomFields fields={item.customFields} onCopy={handleCopy} />
+
+				{/* Attachments */}
+				<ItemAttachments itemId={itemId} vaultId={vaultId} canEdit />
 
 				{/* Metadata */}
 				<ItemMetadata createdAt={item.createdAt} updatedAt={item.updatedAt} />

@@ -299,7 +299,10 @@ export function UnlockPage() {
 									aria-label={showPassword ? "Hide password" : "Show password"}
 								>
 									{showPassword ? (
-										<IconEyeSlashOutlineDuo18 className="h-4 w-4" strokeWidth={1} />
+										<IconEyeSlashOutlineDuo18
+											className="h-4 w-4"
+											strokeWidth={1}
+										/>
 									) : (
 										<IconEyeOutlineDuo18 className="h-4 w-4" strokeWidth={1} />
 									)}

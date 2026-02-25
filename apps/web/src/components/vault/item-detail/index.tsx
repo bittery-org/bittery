@@ -10,6 +10,7 @@ import { Label, Separator } from "@bittery/ui";
 import { TagInput } from "../tag-input";
 import { CreditCardDetail } from "./credit-card-detail";
 import { IdentityDetail } from "./identity-detail";
+import { ItemAttachments } from "./item-attachments";
 import { LoginDetail } from "./login-detail";
 import { SecureNoteDetail } from "./secure-note-detail";
 import type { ItemDetailProps } from "./shared";
@@ -126,6 +127,18 @@ export default function ItemDetail({
 							</p>
 						)}
 					</div>
+				</>
+			)}
+
+			{/* Attachments section */}
+			{item && vaultId && (
+				<>
+					<Separator />
+					<ItemAttachments
+						itemId={item.id}
+						vaultId={vaultId}
+						canEdit={canEdit}
+					/>
 				</>
 			)}
 		</div>

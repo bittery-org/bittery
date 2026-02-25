@@ -1,9 +1,9 @@
+import { applyPasswordHistoryOnPasswordChange } from "@bittery/shared/password-history";
 import type {
 	DecryptedItem,
 	DecryptedItemData,
 	ItemCategory,
 } from "@bittery/shared/types";
-import { applyPasswordHistoryOnPasswordChange } from "@bittery/shared/password-history";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type {
 	CachedEncryptedItem,

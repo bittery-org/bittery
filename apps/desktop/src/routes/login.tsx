@@ -89,7 +89,8 @@ export function LoginPage() {
 				setEmail(prefillEmail);
 				if (storedSecretKey) setSecretKey(storedSecretKey);
 				if (storedServerUrl) {
-					const appliedServerUrl = await setActiveAuthServerUrl(storedServerUrl);
+					const appliedServerUrl =
+						await setActiveAuthServerUrl(storedServerUrl);
 					if (!active) return;
 					if (appliedServerUrl) {
 						setServerUrl(appliedServerUrl);

@@ -1018,8 +1018,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 				return {
 					success: false,
 					error: "master_password_required",
-					message:
-						`For security, please enter your master password. This is required every ${this.formatMasterPasswordReentryPeriod(reentryPeriodMs)}.`,
+					message: `For security, please enter your master password. This is required every ${this.formatMasterPasswordReentryPeriod(reentryPeriodMs)}.`,
 				};
 			}
 

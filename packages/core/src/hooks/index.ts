@@ -169,6 +169,12 @@ export {
 	useDeletedItems,
 } from "./use-deleted-items";
 export { type UseItemResult, useItem } from "./use-item";
+export {
+	type AttachmentMeta,
+	type DecryptedAttachment,
+	type FileInput,
+	useItemAttachments,
+} from "./use-item-attachments";
 // Unified Data Hooks (automatically handle single-account vs "All Accounts" mode)
 export {
 	type UnifiedItem,
