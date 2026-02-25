@@ -15,7 +15,7 @@ import {
 	IconLoader2Fill18 as Loader,
 	IconPen2OutlineDuo18 as Pencil,
 	IconTrash2OutlineDuo18 as Trash,
-	IconUpload3OutlineDuo18 as Upload,
+	IconUpload4OutlineDuo18 as Upload,
 	IconXmarkOutlineDuo18 as X,
 } from "@bittery/ui/icons";
 import { useCallback, useEffect, useRef, useState } from "react";

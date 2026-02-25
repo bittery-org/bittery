@@ -14,7 +14,7 @@ import {
 	IconStarOutlineDuo18,
 	IconTagOutlineDuo18,
 	IconTrash2OutlineDuo18,
-	IconUpload3OutlineDuo18,
+	IconUpload4OutlineDuo18,
 } from "@bittery/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation } from "@tanstack/react-router";
@@ -159,7 +159,7 @@ function DroppableVaultEntry({
 						</DropdownMenuItem>
 						{onImportItems && (
 							<DropdownMenuItem onClick={() => onImportItems(vault.vaultId)}>
-								<IconUpload3OutlineDuo18 className="h-4 w-4" />
+								<IconUpload4OutlineDuo18 className="h-4 w-4" />
 								Import Items
 							</DropdownMenuItem>
 						)}

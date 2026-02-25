@@ -3,17 +3,12 @@ import {
 	Badge,
 	Button,
 	copyWithToast,
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
 	toast,
 } from "@bittery/ui";
 import {
 	IconCopyOutlineDuo18 as Copy,
 	IconArrowsLeftRightTrailOutlineDuo18 as RefreshCw,
+	IconClockTimeOutlineDuo18 as Clock,
 	IconXmarkOutlineDuo18 as X,
 } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
@@ -68,48 +63,75 @@ export function PendingInvitationsList({
 
 	if (invitations.length === 0) {
 		return (
-			<p className="py-4 text-center text-muted-foreground">
-				No pending invitations
-			</p>
+			<div className="flex flex-col items-center justify-center rounded-xl border border-border/70 border-dashed py-12 text-center">
+				<div className="inline-flex size-10 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground">
+					<Clock className="h-5 w-5" />
+				</div>
+				<p className="mt-3 font-medium text-sm">No pending invitations</p>
+				<p className="mt-1 text-muted-foreground text-xs">
+					Invite a member to get started.
+				</p>
+			</div>
 		);
 	}
 
 	const isExpired = (expiresAt: Date) => new Date(expiresAt) < new Date();
 
 	return (
-		<Table>
-			<TableHeader>
-				<TableRow>
-					<TableHead>Email</TableHead>
-					<TableHead>Role</TableHead>
-					<TableHead>Invited By</TableHead>
-					<TableHead>Status</TableHead>
-					{canManage && <TableHead className="w-[100px]">Actions</TableHead>}
-				</TableRow>
-			</TableHeader>
-			<TableBody>
-				{invitations.map((invitation) => (
-					<TableRow key={invitation.id}>
-						<TableCell className="font-medium">{invitation.email}</TableCell>
-						<TableCell>
-							<Badge variant="secondary">{invitation.role}</Badge>
-						</TableCell>
-						<TableCell className="text-muted-foreground">
-							{invitation.invitedBy}
-						</TableCell>
-						<TableCell>
-							{isExpired(new Date(invitation.expiresAt)) ? (
-								<Badge variant="destructive">Expired</Badge>
-							) : (
-								<Badge variant="outline">Pending</Badge>
-							)}
-						</TableCell>
-						{canManage && (
-							<TableCell>
-								<div className="flex gap-1">
+		<div className="grid gap-3 sm:grid-cols-2">
+			{invitations.map((invitation) => {
+				const expired = isExpired(new Date(invitation.expiresAt));
+
+				return (
+					<div
+						key={invitation.id}
+						className="group relative overflow-hidden rounded-xl border border-border/70 bg-card/90 p-4 transition-all hover:-translate-y-0.5 hover:shadow-md"
+					>
+						{/* Top accent bar */}
+						<div
+							className={`pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${
+								expired
+									? "from-destructive/70 via-destructive/30 to-transparent"
+									: "from-amber-500/70 via-amber-500/30 to-transparent"
+							}`}
+						/>
+
+						<div className="flex items-start justify-between gap-3">
+							<div className="min-w-0 flex-1 space-y-1">
+								<div className="flex items-center gap-2">
+									<span className="truncate font-medium text-sm">
+										{invitation.email}
+									</span>
+								</div>
+								<p className="text-muted-foreground text-xs">
+									Invited by {invitation.invitedBy}
+								</p>
+							</div>
+							<div className="flex shrink-0 items-center gap-1.5">
+								<Badge variant="secondary" className="capitalize">
+									{invitation.role}
+								</Badge>
+								{expired ? (
+									<Badge variant="destructive">Expired</Badge>
+								) : (
+									<Badge variant="outline">Pending</Badge>
+								)}
+							</div>
+						</div>
+
+						<div className="mt-3 flex items-center justify-between border-t pt-3">
+							<span className="text-muted-foreground text-xs">
+								{expired
+									? `Expired ${new Date(invitation.expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+									: `Expires ${new Date(invitation.expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
+							</span>
+
+							{canManage && (
+								<div className="flex items-center gap-1">
 									<Button
 										variant="ghost"
-										size="icon"
+										size="sm"
+										className="h-7 gap-1.5 px-2 text-muted-foreground text-xs hover:text-foreground"
 										onClick={() =>
 											copyWithToast(
 												`${window.location.origin}/invite/${invitation.token}`,
@@ -119,36 +141,41 @@ export function PendingInvitationsList({
 										}
 										title="Copy invite link"
 									>
-										<Copy className="h-4 w-4" />
+										<Copy className="h-3.5 w-3.5" />
+										Copy
 									</Button>
 									<Button
 										variant="ghost"
-										size="icon"
+										size="sm"
+										className="h-7 gap-1.5 px-2 text-muted-foreground text-xs hover:text-foreground"
 										onClick={() =>
 											resendMutation.mutate({ invitationId: invitation.id })
 										}
 										disabled={resendMutation.isPending}
 										title="Resend invitation"
 									>
-										<RefreshCw className="h-4 w-4" />
+										<RefreshCw className="h-3.5 w-3.5" />
+										Resend
 									</Button>
 									<Button
 										variant="ghost"
-										size="icon"
+										size="sm"
+										className="h-7 gap-1.5 px-2 text-destructive text-xs hover:bg-destructive/10 hover:text-destructive"
 										onClick={() =>
 											cancelMutation.mutate({ invitationId: invitation.id })
 										}
 										disabled={cancelMutation.isPending}
 										title="Cancel invitation"
 									>
-										<X className="h-4 w-4 text-destructive" />
+										<X className="h-3.5 w-3.5" />
+										Cancel
 									</Button>
 								</div>
-							</TableCell>
-						)}
-					</TableRow>
-				))}
-			</TableBody>
-		</Table>
+							)}
+						</div>
+					</div>
+				);
+			})}
+		</div>
 	);
 }

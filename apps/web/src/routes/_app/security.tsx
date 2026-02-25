@@ -30,14 +30,6 @@ function SecurityPage() {
 
 	return (
 		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
-			<div>
-				<h1 className="font-bold text-3xl tracking-tight">Sentinel</h1>
-				<p className="text-muted-foreground">
-					Monitor password health, track threats, and follow prioritized
-					guidance to strengthen every account.
-				</p>
-			</div>
-
 			<SecurityDashboard
 				report={report}
 				isLoading={isLoading}

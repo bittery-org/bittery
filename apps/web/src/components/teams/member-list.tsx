@@ -13,12 +13,6 @@ import {
 	AvatarFallback,
 	Badge,
 	Button,
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
 	toast,
 } from "@bittery/ui";
 import {
@@ -114,153 +108,175 @@ export function MemberList({
 		return role;
 	};
 
+	const getRoleBadgeVariant = (role: Member["role"]) => {
+		if (role === "owner") return "default" as const;
+		if (role === "admin") return "secondary" as const;
+		return "outline" as const;
+	};
+
 	const isBusy =
 		removeMemberMutation.isPending || deleteAccountMutation.isPending;
 
+	if (members.length === 0) {
+		return (
+			<p className="py-8 text-center text-muted-foreground">
+				No members found
+			</p>
+		);
+	}
+
 	return (
-		<Table>
-			<TableHeader>
-				<TableRow>
-					<TableHead>Member</TableHead>
-					<TableHead>Role</TableHead>
-					<TableHead>Joined</TableHead>
-					{canManageMembers && (
-						<TableHead className="w-[180px]">Actions</TableHead>
-					)}
-				</TableRow>
-			</TableHeader>
-			<TableBody>
-				{members.map((member) => {
-					const isCurrentUser = member.userId === currentUserId;
-					const canRemove =
-						canManageMembers && !isCurrentUser && member.role !== "owner";
-					const canDelete =
-						canPermanentlyDelete && !isCurrentUser && member.role !== "owner";
+		<div className="grid gap-3 sm:grid-cols-2">
+			{members.map((member) => {
+				const isCurrentUser = member.userId === currentUserId;
+				const canRemove =
+					canManageMembers && !isCurrentUser && member.role !== "owner";
+				const canDelete =
+					canPermanentlyDelete && !isCurrentUser && member.role !== "owner";
 
-					return (
-						<TableRow key={member.userId}>
-							<TableCell>
-								<div className="flex items-center gap-3">
-									<Avatar className="h-8 w-8">
-										<AvatarFallback className="text-xs">
-											{getInitials(member.name)}
-										</AvatarFallback>
-									</Avatar>
-									<div>
-										<div className="font-medium">{member.name}</div>
-										<div className="text-muted-foreground text-sm">
-											{member.email}
-										</div>
-									</div>
+				return (
+					<div
+						key={member.userId}
+						className="group relative overflow-hidden rounded-xl border border-border/70 bg-card/90 p-4 transition-all hover:-translate-y-0.5 hover:shadow-md"
+					>
+						<div className="flex items-start gap-3.5">
+							<Avatar className="h-10 w-10 border shadow-sm">
+								<AvatarFallback className="font-medium text-xs">
+									{getInitials(member.name)}
+								</AvatarFallback>
+							</Avatar>
+							<div className="min-w-0 flex-1">
+								<div className="flex items-center gap-2">
+									<span className="truncate font-medium text-sm">
+										{member.name}
+									</span>
+									{isCurrentUser && (
+										<Badge
+											variant="outline"
+											className="border-primary/30 bg-primary/10 text-[10px] text-primary"
+										>
+											You
+										</Badge>
+									)}
 								</div>
-							</TableCell>
-							<TableCell>
-								<Badge
-									variant={member.role === "owner" ? "default" : "secondary"}
-								>
-									{getRoleLabel(member.role)}
-								</Badge>
-							</TableCell>
-							<TableCell className="text-muted-foreground">
-								{member.joinedAt
-									? new Date(member.joinedAt).toLocaleDateString()
-									: "—"}
-							</TableCell>
-							{canManageMembers && (
-								<TableCell>
-									<div className="flex items-center gap-2">
-										{canRemove && (
-											<AlertDialog>
-												<AlertDialogTrigger asChild>
-													<Button variant="outline" size="sm" disabled={isBusy}>
-														<UserMinus className="mr-2 h-4 w-4" />
-														Remove
-													</Button>
-												</AlertDialogTrigger>
-												<AlertDialogContent>
-													<AlertDialogHeader>
-														<AlertDialogTitle>Remove Member</AlertDialogTitle>
-														<AlertDialogDescription>
-															Remove {member.name} from this team? Their current
-															sessions will be invalidated and their team vault
-															access will be revoked.
-														</AlertDialogDescription>
-													</AlertDialogHeader>
-													<AlertDialogFooter>
-														<AlertDialogCancel disabled={isBusy}>
-															Cancel
-														</AlertDialogCancel>
-														<AlertDialogAction
-															disabled={isBusy}
-															onClick={() => {
-																setRemovingUserId(member.userId);
-																removeMemberMutation.mutate({
-																	teamId,
-																	userId: member.userId,
-																});
-															}}
-														>
-															{removingUserId === member.userId
-																? "Removing..."
-																: "Remove member"}
-														</AlertDialogAction>
-													</AlertDialogFooter>
-												</AlertDialogContent>
-											</AlertDialog>
-										)}
+								<p className="truncate text-muted-foreground text-xs">
+									{member.email}
+								</p>
+							</div>
+							<Badge
+								variant={getRoleBadgeVariant(member.role)}
+								className="shrink-0 capitalize"
+							>
+								{getRoleLabel(member.role)}
+							</Badge>
+						</div>
 
-										{canDelete && (
-											<AlertDialog>
-												<AlertDialogTrigger asChild>
-													<Button
-														variant="destructive"
-														size="sm"
+						<div className="mt-3 flex items-center justify-between border-t pt-3">
+							<span className="text-muted-foreground text-xs">
+								{member.joinedAt
+									? `Joined ${new Date(member.joinedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
+									: "Joined —"}
+							</span>
+
+							{canManageMembers && (canRemove || canDelete) && (
+								<div className="flex items-center gap-1">
+									{canRemove && (
+										<AlertDialog>
+											<AlertDialogTrigger asChild>
+												<Button
+													variant="ghost"
+													size="sm"
+													disabled={isBusy}
+													className="h-7 gap-1.5 px-2 text-muted-foreground text-xs hover:text-foreground"
+												>
+													<UserMinus className="h-3.5 w-3.5" />
+													Remove
+												</Button>
+											</AlertDialogTrigger>
+											<AlertDialogContent>
+												<AlertDialogHeader>
+													<AlertDialogTitle>Remove Member</AlertDialogTitle>
+													<AlertDialogDescription>
+														Remove {member.name} from this team? Their current
+														sessions will be invalidated and their team vault
+														access will be revoked.
+													</AlertDialogDescription>
+												</AlertDialogHeader>
+												<AlertDialogFooter>
+													<AlertDialogCancel disabled={isBusy}>
+														Cancel
+													</AlertDialogCancel>
+													<AlertDialogAction
 														disabled={isBusy}
+														onClick={() => {
+															setRemovingUserId(member.userId);
+															removeMemberMutation.mutate({
+																teamId,
+																userId: member.userId,
+															});
+														}}
 													>
-														<Trash2 className="mr-2 h-4 w-4" />
-														Delete permanently
-													</Button>
-												</AlertDialogTrigger>
-												<AlertDialogContent>
-													<AlertDialogHeader>
-														<AlertDialogTitle>
-															Delete Account Permanently
-														</AlertDialogTitle>
-														<AlertDialogDescription>
-															This permanently deletes {member.name}'s account
-															and all associated data. This action cannot be
-															undone.
-														</AlertDialogDescription>
-													</AlertDialogHeader>
-													<AlertDialogFooter>
-														<AlertDialogCancel disabled={isBusy}>
-															Cancel
-														</AlertDialogCancel>
-														<AlertDialogAction
-															disabled={isBusy}
-															onClick={() => {
-																setDeletingUserId(member.userId);
-																deleteAccountMutation.mutate({
-																	teamId,
-																	userId: member.userId,
-																});
-															}}
-														>
-															{deletingUserId === member.userId
-																? "Deleting..."
-																: "Delete permanently"}
-														</AlertDialogAction>
-													</AlertDialogFooter>
-												</AlertDialogContent>
-											</AlertDialog>
-										)}
-									</div>
-								</TableCell>
+														{removingUserId === member.userId
+															? "Removing..."
+															: "Remove member"}
+													</AlertDialogAction>
+												</AlertDialogFooter>
+											</AlertDialogContent>
+										</AlertDialog>
+									)}
+
+									{canDelete && (
+										<AlertDialog>
+											<AlertDialogTrigger asChild>
+												<Button
+													variant="ghost"
+													size="sm"
+													disabled={isBusy}
+													className="h-7 gap-1.5 px-2 text-destructive text-xs hover:bg-destructive/10 hover:text-destructive"
+												>
+													<Trash2 className="h-3.5 w-3.5" />
+													Delete
+												</Button>
+											</AlertDialogTrigger>
+											<AlertDialogContent>
+												<AlertDialogHeader>
+													<AlertDialogTitle>
+														Delete Account Permanently
+													</AlertDialogTitle>
+													<AlertDialogDescription>
+														This permanently deletes {member.name}'s account
+														and all associated data. This action cannot be
+														undone.
+													</AlertDialogDescription>
+												</AlertDialogHeader>
+												<AlertDialogFooter>
+													<AlertDialogCancel disabled={isBusy}>
+														Cancel
+													</AlertDialogCancel>
+													<AlertDialogAction
+														disabled={isBusy}
+														onClick={() => {
+															setDeletingUserId(member.userId);
+															deleteAccountMutation.mutate({
+																teamId,
+																userId: member.userId,
+															});
+														}}
+													>
+														{deletingUserId === member.userId
+															? "Deleting..."
+															: "Delete permanently"}
+													</AlertDialogAction>
+												</AlertDialogFooter>
+											</AlertDialogContent>
+										</AlertDialog>
+									)}
+								</div>
 							)}
-						</TableRow>
-					);
-				})}
-			</TableBody>
-		</Table>
+						</div>
+					</div>
+				);
+			})}
+		</div>
 	);
 }

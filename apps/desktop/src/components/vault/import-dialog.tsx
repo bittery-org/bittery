@@ -18,7 +18,7 @@ import {
 import {
 	IconCircleCheck2OutlineDuo18,
 	IconCircleWarningOutlineDuo18,
-	IconUpload3OutlineDuo18,
+	IconUpload4OutlineDuo18,
 } from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
@@ -309,7 +309,7 @@ export function ImportDialog({
 												importStatus === "uploading"
 											}
 										>
-											<IconUpload3OutlineDuo18 className="h-4 w-4" />
+											<IconUpload4OutlineDuo18 className="h-4 w-4" />
 											<span className="max-w-xs truncate">
 												{field.state.value
 													? field.state.value.name
