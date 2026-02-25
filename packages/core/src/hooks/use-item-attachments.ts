@@ -2,7 +2,7 @@
  * useItemAttachments Hook
  *
  * Provides attachment operations for vault items:
- * - List attachments (derived from the item query — attachments are loaded with the item)
+ * - List attachments (derived from local `useItem` repository state)
  * - Upload (encrypt client-side → presigned upload → save metadata)
  * - Download (get presigned URL → fetch encrypted blob → decrypt → save/preview)
  * - Rename (re-encrypt name with a new IV)
@@ -13,9 +13,10 @@ import {
 	getDecryptedVaultKey,
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTRPCClient } from "@bittery/shared/trpc";
+import { useMutation } from "@tanstack/react-query";
 import { usePlatform } from "../context/platform-context";
+import { useItem } from "./use-item";
 
 export interface AttachmentMeta {
 	id: string;
@@ -52,11 +53,9 @@ export interface FileInput {
 /**
  * Hook to list, upload, download, and delete attachments for a vault item.
  *
- * Attachments are loaded alongside the item via `vault.getItem` (which now
- * includes `with: { attachments: true }`). This means:
- * - No separate network request for the attachment list
- * - Attachments are cached together with the item data
- * - When a sync event invalidates the item, attachments refresh automatically
+ * Attachment list is read from local repository state via `useItem`.
+ * This means opening item detail does not trigger `vault.getItem` network calls.
+ * After attachment mutations, we refresh repository data through the shared refetch path.
  *
  * @param itemId - The item to manage attachments for
  * @param vaultId - The vault the item belongs to (needed to look up vault key)
@@ -67,31 +66,16 @@ export function useItemAttachments(
 	vaultId: string | undefined,
 	accountEmail?: string,
 ) {
-	const trpc = useTRPC();
 	const client = useTRPCClient();
 	const { storage, crypto } = usePlatform();
-	const queryClient = useQueryClient();
 
-	// Derive the item query key — this is what getItem uses (and what sync invalidates)
-	const itemQueryKey = trpc.vault.getItem.queryKey({
-		itemId: itemId ?? "",
-	});
-
-	// Read attachments from the getItem query.
-	// The item is already loaded by useItem / the page — this just reads from
-	// the same tRPC query and extracts the attachments array via `select`.
 	const {
-		data: attachments = [],
+		rawItem,
 		isLoading,
 		error,
-	} = useQuery({
-		...trpc.vault.getItem.queryOptions(
-			{ itemId: itemId ?? "" },
-			{ enabled: !!itemId },
-		),
-		select: (data) => ((data as any).attachments ?? []) as AttachmentMeta[],
-		staleTime: 5 * 60 * 1000,
-	});
+		refetch: refetchItem,
+	} = useItem(itemId ?? "", { enabled: !!itemId });
+	const attachments = (rawItem?.attachments ?? []) as AttachmentMeta[];
 
 	// Helper to get the decrypted vault key
 	async function getVaultKey(): Promise<Uint8Array> {
@@ -132,19 +116,9 @@ export function useItemAttachments(
 		return { ...attachment, name, contentType };
 	}
 
-	/** Invalidate the item query so attachments + item data are re-fetched together */
+	/** Refresh local repository snapshot after attachment mutation succeeds */
 	function invalidateItem() {
-		// Invalidate the tRPC getItem query
-		queryClient.invalidateQueries({ queryKey: itemQueryKey });
-		// Also invalidate the decrypted-item queries used by useItem
-		if (itemId) {
-			queryClient.invalidateQueries({
-				queryKey: ["decrypted-item", itemId],
-			});
-			queryClient.invalidateQueries({
-				queryKey: ["decrypted-item-account", itemId],
-			});
-		}
+		void refetchItem();
 	}
 
 	// Upload mutation
