@@ -1,17 +1,20 @@
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ICrypto } from "@bittery/types";
 import { AccountResolver } from "./services/account-resolver";
-import { CacheManager } from "./services/cache-manager";
 import { ItemService } from "./services/item-service";
 import { ShareService } from "./services/share-service";
+import {
+	getOrCreateVaultRepositoryCoordinator,
+	type VaultRepositoryCoordinator,
+} from "./services/vault-repository-coordinator";
 import { VaultService } from "./services/vault-service";
 
 export interface CoreContext {
 	accounts: AccountResolver;
-	cache: CacheManager;
 	items: ItemService;
 	vaults: VaultService;
 	shares: ShareService;
+	vaultCoordinator: VaultRepositoryCoordinator;
 }
 
 export interface CreateCoreContextOptions {
@@ -23,12 +26,14 @@ export function createCoreContext(
 	options: CreateCoreContextOptions,
 ): CoreContext {
 	const accounts = new AccountResolver(options.storage);
-	const cache = new CacheManager(options.storage);
+	const vaultCoordinator = getOrCreateVaultRepositoryCoordinator(
+		options.crypto,
+		options.storage,
+	);
 	const items = new ItemService({
 		storage: options.storage,
 		crypto: options.crypto,
 		accounts,
-		cache,
 	});
 	const vaults = new VaultService({
 		storage: options.storage,
@@ -43,9 +48,9 @@ export function createCoreContext(
 
 	return {
 		accounts,
-		cache,
 		items,
 		vaults,
 		shares,
+		vaultCoordinator,
 	};
 }

@@ -1515,7 +1515,8 @@ export const vaultRouter = router({
 				encryptedName: attachment.encryptedName,
 				encryptedContentType: attachment.encryptedContentType,
 				encryptionIv: attachment.encryptionIv,
-				encryptedContentTypeIv: attachment.encryptedContentTypeIv ?? attachment.encryptionIv,
+				encryptedContentTypeIv:
+					attachment.encryptedContentTypeIv ?? attachment.encryptionIv,
 				encryptionAlgorithm: attachment.encryptionAlgorithm,
 				fileSize: attachment.fileSize,
 			};

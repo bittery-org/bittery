@@ -10,6 +10,12 @@ export { runCatchUp } from "./catch-up";
 // Delta sync (platform-agnostic)
 export type { DeltaSyncClient } from "./delta-sync";
 export { performDeltaSync } from "./delta-sync";
+export {
+	OutboundQueue,
+	type OutboundQueueClient,
+	type PendingMutation,
+	type TempIdMapping,
+} from "./outbound-queue";
 export type {
 	InvalidationContext,
 	QueryInvalidator,
@@ -23,6 +29,10 @@ export {
 } from "./query-invalidation";
 // Core sync functionality
 export { createSyncManager, SyncManager } from "./sync-manager";
+export {
+	SyncOrchestrator,
+	type SyncOrchestratorOptions,
+} from "./sync-orchestrator";
 export * from "./types";
 // React hooks
 export type { UseSyncOptions } from "./use-sync";

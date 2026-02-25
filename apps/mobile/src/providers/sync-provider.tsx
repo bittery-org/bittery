@@ -1,4 +1,8 @@
-import type { QueryInvalidator, SyncStatus } from "@bittery/sync";
+import type {
+	OutboundQueue,
+	QueryInvalidator,
+	SyncStatus,
+} from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext } from "react";
 import { useMobileClientId, useMobileSync } from "../hooks/use-mobile-sync";
@@ -15,6 +19,7 @@ interface SyncContextValue {
 	reconnect: () => Promise<void>;
 	disconnect: () => void;
 	invalidator: QueryInvalidator;
+	outboundQueue: OutboundQueue;
 }
 
 const SyncContext = createContext<SyncContextValue | null>(null);

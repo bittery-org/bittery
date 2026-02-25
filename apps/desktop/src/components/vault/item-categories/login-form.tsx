@@ -138,7 +138,6 @@ export function LoginForm({
 				};
 
 				await onSubmit(submitData, currentVaultId);
-				toast.success("Item saved successfully");
 			} catch (error) {
 				const errorMessage =
 					error instanceof Error ? error.message : "Failed to save item";

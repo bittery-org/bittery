@@ -1,3 +1,7 @@
+import {
+	getDecryptedVaultKey,
+	type VaultKeyCryptoProvider,
+} from "@bittery/shared";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	AlertDialog,
@@ -33,7 +37,7 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
-import { performKeyRotation } from "@/lib/wasm-crypto";
+import { decrypt, performKeyRotation, rsaDecrypt } from "@/lib/wasm-crypto";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface VaultMember {
@@ -98,7 +102,14 @@ export function VaultMemberList({
 
 		try {
 			// Step 1: Get the current decrypted vault key and Master Unlock Key
-			const currentVaultKey = await storage.getDecryptedVaultKey(vaultId);
+			const currentVaultKey = await getDecryptedVaultKey({
+				vaultId,
+				storage,
+				crypto: {
+					decrypt,
+					rsaDecrypt,
+				} as VaultKeyCryptoProvider,
+			});
 			if (!currentVaultKey) {
 				throw new Error("Could not decrypt vault key. Please log in again.");
 			}

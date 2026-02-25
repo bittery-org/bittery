@@ -1,4 +1,9 @@
-import type { ConnectionStatus, SyncEvent } from "@bittery/sync";
+import {
+	type ConnectionStatus,
+	OutboundQueue,
+	type SyncEvent,
+	type SyncStorage,
+} from "@bittery/sync";
 import type { IQueryInvalidator } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
 import {
@@ -7,6 +12,7 @@ import {
 	useCallback,
 	useContext,
 	useEffect,
+	useMemo,
 	useState,
 } from "react";
 import { createExtensionInvalidator } from "../lib/query-invalidation";
@@ -22,6 +28,22 @@ interface SyncContextValue {
 	isOnline: boolean;
 	isInitialized: boolean;
 	invalidator: IQueryInvalidator;
+	outboundQueue: OutboundQueue;
+}
+
+class ChromeSyncStorage implements SyncStorage {
+	async get<T>(key: string): Promise<T | null> {
+		const result = await chrome.storage.local.get(key);
+		return (result[key] as T | undefined) ?? null;
+	}
+
+	async set<T>(key: string, value: T): Promise<void> {
+		await chrome.storage.local.set({ [key]: value });
+	}
+
+	async remove(key: string): Promise<void> {
+		await chrome.storage.local.remove(key);
+	}
 }
 
 const SyncContext = createContext<SyncContextValue | null>(null);
@@ -75,6 +97,16 @@ export function ExtensionSyncProvider({
 	const [clientId, setClientId] = useState<string>("");
 	const [isInitialized, setIsInitialized] = useState(false);
 	const [invalidator] = useState(() => createExtensionInvalidator(queryClient));
+	const syncStorage = useMemo(() => new ChromeSyncStorage(), []);
+	const resolvedClientId = clientId || "extension_pending_queue_client";
+	const outboundQueue = useMemo(
+		() => new OutboundQueue(syncStorage, resolvedClientId),
+		[syncStorage, resolvedClientId],
+	);
+
+	useEffect(() => {
+		void outboundQueue.restore();
+	}, [outboundQueue]);
 
 	// Initialize: request initial state from background worker
 	useEffect(() => {
@@ -146,6 +178,7 @@ export function ExtensionSyncProvider({
 		isOnline: status === "connected", // Extension is always online if connected
 		isInitialized,
 		invalidator,
+		outboundQueue,
 	};
 
 	return (

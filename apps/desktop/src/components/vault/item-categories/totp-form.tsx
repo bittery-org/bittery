@@ -88,7 +88,6 @@ export function TotpForm({
 					tags: initialData?.tags,
 				};
 				await onSubmit(submitData, currentVaultId);
-				toast.success("Authenticator saved successfully");
 			} catch (error) {
 				const errorMessage =
 					error instanceof Error

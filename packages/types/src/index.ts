@@ -24,6 +24,7 @@ export interface DerivedKeys {
 export interface ICrypto {
 	decrypt(encryptedData: EncryptedData, key: Uint8Array): Promise<string>;
 	encrypt(plaintext: string, key: Uint8Array): Promise<EncryptedData>;
+	rsaDecrypt?(ciphertext: string, privateKeyPem: string): Promise<string>;
 	generateEncryptionKey(): Promise<Uint8Array>;
 	deriveKeys(
 		password: string,
@@ -250,6 +251,12 @@ export interface IQueryInvalidator {
 	invalidateVaultMembers(vaultId: string): Promise<void>;
 }
 
+export interface IPendingMutationQueue {
+	enqueue(mutation: unknown): void;
+	getPendingCount?(): number;
+	hasPendingForItem?(itemId: string): boolean;
+}
+
 /**
  * Sync context - subset of sync state needed by shared hooks.
  */
@@ -258,6 +265,7 @@ export interface ISyncContext {
 	isConnected: boolean;
 	isOnline: boolean;
 	invalidator: IQueryInvalidator;
+	outboundQueue: IPendingMutationQueue;
 }
 
 /**

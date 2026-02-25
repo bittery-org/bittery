@@ -17,6 +17,7 @@ import type {
 } from "@bittery/sync";
 import { performDeltaSync } from "@bittery/sync";
 import { storage } from "../../lib/storage";
+import { core } from "../core-instance";
 import { desktopClient } from "../desktop-client";
 import { trpcClient } from "../trpc-client";
 
@@ -34,14 +35,14 @@ type VaultKeyLike = {
 	vaultId: string;
 };
 
-export interface SyncCacheStorage extends ItemCacheAdapter {
+export interface SyncCacheStorage {
+	supportsItemCache: boolean;
 	getActiveAccount: () => Promise<ActiveAccount>;
 	getAccountsList: () => Promise<Array<{ email: string }>>;
 	getAuthToken: (email?: string) => Promise<string | null>;
 	storeAuthToken: (token: string, email?: string) => Promise<void>;
 	getServerUrl: (email?: string) => Promise<string | null>;
 	getVaultKeys: (email?: string) => Promise<VaultKeyLike[] | null>;
-	clearItemCache?: (email?: string) => Promise<void>;
 }
 
 export interface SyncCacheDesktopClient {
@@ -72,6 +73,7 @@ export interface SyncEventQueryClient extends DeltaSyncClient {
 
 export interface SyncCacheServiceDeps {
 	storage: SyncCacheStorage;
+	itemCache: ItemCacheAdapter;
 	desktopClient: SyncCacheDesktopClient;
 	defaultClient: SyncEventQueryClient;
 	createAccountClient: (
@@ -89,6 +91,7 @@ export interface SyncCacheServiceDeps {
 
 const defaultDeps: SyncCacheServiceDeps = {
 	storage: storage as unknown as SyncCacheStorage,
+	itemCache: core.vaultCoordinator,
 	desktopClient,
 	defaultClient: trpcClient as unknown as SyncEventQueryClient,
 	createAccountClient: (token, serverUrl) =>
@@ -129,7 +132,6 @@ function shouldClearDesktopCacheForEvent(event: SyncEvent): boolean {
 }
 
 export interface SyncCacheService {
-	supportsItemCache: () => boolean;
 	resolveConnectionContext: () => Promise<SyncConnectionContext | null>;
 	getClientForEmail: (email?: string | null) => Promise<SyncEventQueryClient>;
 	resolveCandidateEmailsForEvent: (event: SyncEvent) => Promise<string[]>;
@@ -200,10 +202,6 @@ export function createSyncCacheService(
 
 		const serverUrl = await getServerUrlForEmail(normalizedEmail);
 		return deps.createAccountClient(token, serverUrl);
-	}
-
-	function supportsItemCache(): boolean {
-		return !!deps.storage.supportsItemCache;
 	}
 
 	async function resolveConnectionContext(): Promise<SyncConnectionContext | null> {
@@ -292,10 +290,6 @@ export function createSyncCacheService(
 	}
 
 	async function applyDeltaSyncForEvent(event: SyncEvent): Promise<void> {
-		if (!deps.storage.supportsItemCache) {
-			return;
-		}
-
 		const candidateEmails = await resolveCandidateEmailsForEvent(event);
 		deps.logger.debug(
 			`[sync-cache-service] Applying ${event.type} for candidate accounts: ${
@@ -304,7 +298,7 @@ export function createSyncCacheService(
 		);
 
 		if (candidateEmails.length === 0) {
-			await deps.deltaSync(deps.defaultClient, deps.storage, event);
+			await deps.deltaSync(deps.defaultClient, deps.itemCache, event);
 			if (shouldClearDesktopCacheForEvent(event)) {
 				deps.desktopClient.clearCache();
 			}
@@ -322,7 +316,7 @@ export function createSyncCacheService(
 					continue;
 				}
 
-				await deps.deltaSync(accountClient, deps.storage, event, email);
+				await deps.deltaSync(accountClient, deps.itemCache, event, email);
 				applied++;
 			} catch (error) {
 				deps.logger.warn(
@@ -337,9 +331,9 @@ export function createSyncCacheService(
 				`[sync-cache-service] No account-scoped delta applied for ${event.type}; falling back to global cache update`,
 			);
 			await Promise.all(
-				candidateEmails.map((email) => deps.storage.clearItemCache?.(email)),
+				candidateEmails.map((email) => deps.itemCache.clearItemCache?.(email)),
 			);
-			await deps.deltaSync(deps.defaultClient, deps.storage, event);
+			await deps.deltaSync(deps.defaultClient, deps.itemCache, event);
 		}
 
 		if (shouldClearDesktopCacheForEvent(event)) {
@@ -348,7 +342,7 @@ export function createSyncCacheService(
 	}
 
 	async function clearItemCachesForKnownAccounts(): Promise<void> {
-		if (!deps.storage.clearItemCache) {
+		if (!deps.itemCache.clearItemCache) {
 			return;
 		}
 
@@ -357,17 +351,16 @@ export function createSyncCacheService(
 		const candidates = buildOrderedCandidates(activeSingleEmail, allEmails);
 
 		if (candidates.length === 0) {
-			await deps.storage.clearItemCache();
+			await deps.itemCache.clearItemCache();
 			return;
 		}
 
 		await Promise.all(
-			candidates.map((email) => deps.storage.clearItemCache?.(email)),
+			candidates.map((email) => deps.itemCache.clearItemCache?.(email)),
 		);
 	}
 
 	return {
-		supportsItemCache,
 		resolveConnectionContext,
 		getClientForEmail,
 		resolveCandidateEmailsForEvent,

@@ -1,3 +1,7 @@
+import {
+	decryptStoredVaultKey,
+	type VaultKeyCryptoProvider,
+} from "@bittery/shared";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -25,7 +29,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
-import { rsaEncrypt } from "@/lib/wasm-crypto";
+import { decrypt, rsaDecrypt, rsaEncrypt } from "@/lib/wasm-crypto";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface InviteDialogProps {
@@ -63,22 +67,19 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 					encryptedVaultKey: string;
 				}> = [];
 
-				// Get Master Unlock Key for decrypting vault keys
-				const masterUnlockKey = await storage.getMasterUnlockKey();
-				if (!masterUnlockKey) {
-					// Can't provision keys without MUK - invitation still sent
-					console.warn("Could not provision vault keys: MUK not available");
-					return result;
-				}
-
 				// For each team vault, decrypt the key and re-encrypt with invitee's public key
 				for (const vault of teamVaultsQuery.data) {
 					if (vault.encryptedVaultKey) {
 						try {
 							// Decrypt vault key with our MUK
-							const vaultKey = await storage.decryptVaultKey(
-								vault.encryptedVaultKey,
-							);
+							const vaultKey = await decryptStoredVaultKey({
+								encryptedVaultKey: vault.encryptedVaultKey,
+								storage,
+								crypto: {
+									decrypt,
+									rsaDecrypt,
+								} as VaultKeyCryptoProvider,
+							});
 
 							// Convert vault key to base64 string for RSA encryption
 							const vaultKeyBase64 = btoa(

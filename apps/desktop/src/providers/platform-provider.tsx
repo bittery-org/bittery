@@ -23,6 +23,7 @@ const crypto: ICrypto = {
 	// Core encryption methods
 	decrypt: tauriCrypto.decrypt,
 	encrypt: tauriCrypto.encrypt,
+	rsaDecrypt: tauriCrypto.rsaDecrypt,
 	generateEncryptionKey: tauriCrypto.generateEncryptionKey,
 	// SRP authentication methods
 	deriveKeys: tauriCrypto.deriveKeys,
@@ -60,12 +61,14 @@ export function DesktopPlatformProvider({
 			isConnected: syncContext.isConnected,
 			isOnline: syncContext.isOnline,
 			invalidator: syncContext.invalidator,
+			outboundQueue: syncContext.outboundQueue,
 		}),
 		[
 			syncContext.clientId,
 			syncContext.isConnected,
 			syncContext.isOnline,
 			syncContext.invalidator,
+			syncContext.outboundQueue,
 		],
 	);
 

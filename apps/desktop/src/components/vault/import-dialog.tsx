@@ -1,3 +1,7 @@
+import {
+	getDecryptedVaultKey,
+	type VaultKeyCryptoProvider,
+} from "@bittery/shared";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import {
@@ -20,7 +24,7 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
-import { encrypt } from "../../lib/tauri-crypto";
+import { decrypt, encrypt, rsaDecrypt } from "../../lib/tauri-crypto";
 import {
 	useClientId,
 	useQueryInvalidator,
@@ -113,10 +117,15 @@ export function ImportDialog({
 
 			// Get vault key for encryption
 			setImportStatus("encrypting");
-			const vaultKey = await storage.getDecryptedVaultKey(
+			const vaultKey = await getDecryptedVaultKey({
 				vaultId,
-				accountEmail,
-			);
+				email: accountEmail,
+				storage,
+				crypto: {
+					decrypt,
+					rsaDecrypt,
+				} as VaultKeyCryptoProvider,
+			});
 			if (!vaultKey) {
 				throw new Error("Failed to get vault key for encryption");
 			}

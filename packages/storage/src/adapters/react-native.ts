@@ -11,7 +11,6 @@ import {
 import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
-	EncryptedData,
 	ItemCacheMetadata,
 } from "@bittery/types";
 import type * as CryptoType from "expo-crypto";
@@ -65,22 +64,6 @@ interface AccountCache {
 
 // In-memory caches - keyed by email
 const accountCaches: Map<string, AccountCache> = new Map();
-
-/**
- * Check if an encrypted vault key is AES-GCM encrypted (JSON format) or RSA encrypted (plain base64)
- */
-function isAesEncryptedVaultKey(encryptedVaultKey: string): boolean {
-	try {
-		const parsed = JSON.parse(encryptedVaultKey);
-		return (
-			parsed &&
-			typeof parsed.ciphertext === "string" &&
-			typeof parsed.iv === "string"
-		);
-	} catch {
-		return false;
-	}
-}
 
 /**
  * React Native Storage Adapter Implementation
@@ -507,19 +490,6 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 			cache.vaultKeys = JSON.parse(stored);
 		}
 		return cache.vaultKeys;
-	}
-
-	async getDecryptedVaultKey(
-		vaultId: string,
-		email?: string,
-	): Promise<Uint8Array | null> {
-		const vaultKeys = await this.getVaultKeys(email);
-		if (!vaultKeys) return null;
-
-		const vaultKeyData = vaultKeys.find((vk) => vk.vaultId === vaultId);
-		if (!vaultKeyData) return null;
-
-		return this.decryptVaultKey(vaultKeyData.encryptedVaultKey, email);
 	}
 
 	async storeEncryptedPrivateKey(
@@ -965,48 +935,6 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		} catch {
 			return null;
 		}
-	}
-
-	async decryptVaultKey(
-		encryptedVaultKey: string,
-		email?: string,
-	): Promise<Uint8Array> {
-		const muk = await this.getMasterUnlockKey(email);
-		if (!muk) {
-			throw new Error("Master Unlock Key not available. Please log in again.");
-		}
-
-		if (isAesEncryptedVaultKey(encryptedVaultKey)) {
-			const encryptedData: EncryptedData = JSON.parse(encryptedVaultKey);
-			const mukBase64 = arrayBufferToBase64(muk);
-			const decryptedBase64 = await this.crypto.decrypt(
-				encryptedData,
-				base64ToArrayBuffer(mukBase64),
-			);
-			return base64ToArrayBuffer(decryptedBase64);
-		}
-
-		// RSA encrypted (shared vault key)
-		const encryptedPrivateKey = await this.getEncryptedPrivateKey(email);
-		if (!encryptedPrivateKey) {
-			throw new Error(
-				"Encrypted private key not available. Please log in again.",
-			);
-		}
-
-		const privateKeyEncryptedData: EncryptedData =
-			JSON.parse(encryptedPrivateKey);
-		const mukBase64 = arrayBufferToBase64(muk);
-		const privateKeyPEM = await this.crypto.decrypt(
-			privateKeyEncryptedData,
-			base64ToArrayBuffer(mukBase64),
-		);
-
-		const vaultKeyBase64 = await this.crypto.rsaDecrypt(
-			encryptedVaultKey,
-			privateKeyPEM,
-		);
-		return base64ToArrayBuffer(vaultKeyBase64);
 	}
 
 	// ============================================================================

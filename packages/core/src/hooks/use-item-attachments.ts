@@ -9,6 +9,10 @@
  * - Delete
  */
 
+import {
+	getDecryptedVaultKey,
+	type VaultKeyCryptoProvider,
+} from "@bittery/shared";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePlatform } from "../context/platform-context";
@@ -92,7 +96,12 @@ export function useItemAttachments(
 	// Helper to get the decrypted vault key
 	async function getVaultKey(): Promise<Uint8Array> {
 		if (!vaultId) throw new Error("vaultId is required");
-		const key = await storage.getDecryptedVaultKey(vaultId, accountEmail);
+		const key = await getDecryptedVaultKey({
+			vaultId,
+			email: accountEmail,
+			storage,
+			crypto: crypto as unknown as VaultKeyCryptoProvider,
+		});
 		if (!key) throw new Error("Vault key not found. Please sign in again.");
 		return key;
 	}

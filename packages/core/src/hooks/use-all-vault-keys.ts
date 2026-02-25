@@ -1,14 +1,12 @@
 /**
  * useAllVaultKeys Hook
  *
- * Fetches all vault keys with account metadata for active account(s).
- * Uses useAccountsInfo to handle both single and multi-account modes.
+ * Fetches all vault keys with account metadata from VaultRepositoryCoordinator.
  */
 
 import type { VaultKeyData } from "@bittery/storage/types";
-import { useQuery } from "@tanstack/react-query";
-import { usePlatformStorage } from "../context/platform-context";
-import { useAccountsInfo } from "./use-accounts-info";
+import { useMemo } from "react";
+import { useVaultRepositorySync } from "./use-vault-repository-sync";
 
 /**
  * Vault key with associated account metadata
@@ -48,62 +46,39 @@ export interface UseAllVaultKeysOptions {
  * ```
  */
 export function useAllVaultKeys(options: UseAllVaultKeysOptions = {}) {
-	const storage = usePlatformStorage();
-
-	// Get all account info using utility hook
 	const {
 		accountsInfo,
-		isLoading: isLoadingAccounts,
 		isAllAccountsMode,
-	} = useAccountsInfo({ enabled: options.enabled });
-
-	// Fetch vault keys from all accounts IN PARALLEL
-	const {
-		data: vaultKeys = [],
-		isLoading: isLoadingVaults,
-		error,
-	} = useQuery({
-		queryKey: ["all-vault-keys", accountsInfo.map((a) => a.email).sort()],
-		queryFn: async (): Promise<VaultKeyWithAccount[]> => {
-			if (accountsInfo.length === 0) return [];
-
-			// Fetch vault keys from all accounts in parallel
-			const results = await Promise.all(
-				accountsInfo.map(async (account) => {
-					try {
-						const keys = await storage.getVaultKeys(account.email);
-						if (!keys || keys.length === 0) return [];
-
-						// Add account metadata to each vault key (needed for both modes)
-						return keys.map((key) => ({
-							...key,
-							accountEmail: account.email,
-							accountName: account.name,
-							accountTeamName: account.teamName,
-							accountTeamAvatarUrl: account.teamAvatarUrl,
-						}));
-					} catch (error) {
-						console.error(
-							`[useAllVaultKeys] Failed to fetch vault keys for ${account.email}:`,
-							error,
-						);
-						return [];
-					}
-				}),
-			);
-
-			// Flatten results from all accounts
-			return results.flat();
-		},
-		enabled: accountsInfo.length > 0 && options.enabled !== false,
-		staleTime: 5 * 60 * 1000, // 5 minutes
-		gcTime: 10 * 60 * 1000, // 10 minutes
+		isLoading,
+		snapshot,
+		vaultCoordinator,
+	} = useVaultRepositorySync({
+		enabled: options.enabled,
 	});
+
+	const vaultKeys = useMemo(() => {
+		if (accountsInfo.length === 0) {
+			return [] as VaultKeyWithAccount[];
+		}
+
+		return accountsInfo.flatMap((account) =>
+			vaultCoordinator
+				.getRepositoryForEmail(account.email)
+				.getVaultKeys()
+				.map((vaultKey) => ({
+					...vaultKey,
+					accountEmail: account.email,
+					accountName: account.name,
+					accountTeamName: account.teamName,
+					accountTeamAvatarUrl: account.teamAvatarUrl,
+				})),
+		);
+	}, [accountsInfo, snapshot, vaultCoordinator]);
 
 	return {
 		vaultKeys,
-		isLoading: isLoadingAccounts || isLoadingVaults,
-		error,
+		isLoading,
+		error: null,
 		isAllAccountsMode,
 	};
 }

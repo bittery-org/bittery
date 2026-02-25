@@ -3,9 +3,8 @@
  */
 
 import type { DecryptedItem } from "@bittery/shared/types";
-import { useQuery } from "@tanstack/react-query";
-import { useCoreContext } from "../context/platform-context";
-import { useAccountsInfo } from "./use-accounts-info";
+import { useMemo } from "react";
+import { useVaultRepositorySync } from "./use-vault-repository-sync";
 
 export interface UseVaultItemsOptions {
 	enabled?: boolean;
@@ -18,31 +17,21 @@ export function useVaultItems(
 	vaultId: string,
 	options: UseVaultItemsOptions = {},
 ) {
-	const core = useCoreContext();
-	const {
-		accountsInfo,
-		isLoading: isLoadingAccounts,
-		isAllAccountsMode,
-	} = useAccountsInfo({ enabled: options.enabled });
+	const { isAllAccountsMode, isLoading, refetch, snapshot, vaultCoordinator } =
+		useVaultRepositorySync({
+			enabled: options.enabled,
+			requiredId: vaultId,
+		});
 
-	const {
-		data: items = [],
-		isLoading: isLoadingItems,
-		error,
-		refetch,
-	} = useQuery({
-		queryKey: ["vault-items", vaultId, accountsInfo.map((a) => a.email).sort()],
-		queryFn: async (): Promise<DecryptedItem[]> =>
-			core.items.fetchVaultItems(vaultId, accountsInfo),
-		enabled: !!vaultId && accountsInfo.length > 0 && options.enabled !== false,
-		staleTime: 5 * 60 * 1000,
-		gcTime: 10 * 60 * 1000,
-	});
+	const items = useMemo(
+		() => vaultCoordinator.getByVault(vaultId) as DecryptedItem[],
+		[vaultCoordinator, vaultId, snapshot],
+	);
 
 	return {
 		items,
-		isLoading: isLoadingAccounts || isLoadingItems,
-		error,
+		isLoading,
+		error: null,
 		refetch,
 		isAllAccountsMode,
 	};

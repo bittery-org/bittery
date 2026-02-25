@@ -1,3 +1,7 @@
+import {
+	getDecryptedVaultKey,
+	type VaultKeyCryptoProvider,
+} from "@bittery/shared";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Avatar,
@@ -23,7 +27,12 @@ import { IconUsers6OutlineDuo18 as UserPlus } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
-import { arrayBufferToBase64, rsaEncrypt } from "@/lib/wasm-crypto";
+import {
+	arrayBufferToBase64,
+	decrypt,
+	rsaDecrypt,
+	rsaEncrypt,
+} from "@/lib/wasm-crypto";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface AddMemberDialogProps {
@@ -81,7 +90,14 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 
 		try {
 			// 1. Get the decrypted vault key
-			const vaultKey = await storage.getDecryptedVaultKey(vaultId);
+			const vaultKey = await getDecryptedVaultKey({
+				vaultId,
+				storage,
+				crypto: {
+					decrypt,
+					rsaDecrypt,
+				} as VaultKeyCryptoProvider,
+			});
 			if (!vaultKey) {
 				toast.error("Could not decrypt vault key. Please log in again.");
 				return;

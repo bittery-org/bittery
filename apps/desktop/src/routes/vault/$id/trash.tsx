@@ -1,6 +1,8 @@
-import { usePermanentDeleteItem, useRestoreItem } from "@bittery/core/hooks";
-import { useTRPC } from "@bittery/shared/trpc";
-import type { ItemCategory } from "@bittery/shared/types";
+import {
+	useDeletedItems,
+	usePermanentDeleteItem,
+	useRestoreItem,
+} from "@bittery/core/hooks";
 import {
 	Button,
 	Dialog,
@@ -16,109 +18,33 @@ import {
 	IconShareLeft2OutlineDuo18,
 	IconTrash2OutlineDuo18,
 } from "@bittery/ui/icons";
-import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { storage } from "@/lib/storage";
+import { useMemo, useState } from "react";
 import { Favicon } from "../../../components/vault/favicon";
-import { decrypt } from "../../../lib/tauri-crypto";
 
 export const Route = createFileRoute("/vault/$id/trash")({
 	component: TrashComponent,
 });
 
-interface DeletedItem {
-	id: string;
-	vaultId: string;
-	category: ItemCategory;
-	encryptedData: string;
-	encryptionIv: string;
-	encryptionAlgorithm: string;
-	createdAt: string;
-	updatedAt: string;
-	deletedAt: string | null;
-}
-
-interface DecryptedDeletedItem extends DeletedItem {
-	title: string;
-	url?: string;
-	username?: string;
-}
-
 function TrashComponent() {
-	const trpc = useTRPC();
-
 	const { id: vaultId } = Route.useParams();
 
 	const [itemToDelete, setItemToDelete] = useState<string | null>(null);
-	const [decryptedItems, setDecryptedItems] = useState<DecryptedDeletedItem[]>(
-		[],
-	);
 
 	// Shared hooks for item operations
 	const restoreItem = useRestoreItem();
 	const permanentDeleteItem = usePermanentDeleteItem();
+	const { items: allDeletedItems, isLoading } = useDeletedItems();
 
-	// Fetch deleted items
-	const { data: rawItems = [] } = useQuery({
-		...trpc.vault.listDeletedItems.queryOptions({
-			vaultId: vaultId || "",
-		}),
-		enabled: !!vaultId,
-	});
-
-	// Decrypt items when they change
-	useEffect(() => {
-		if (!vaultId || rawItems.length === 0) {
-			setDecryptedItems([]);
-			return;
-		}
-
-		const decryptItems = async () => {
-			const vaultKey = await storage.getDecryptedVaultKey(vaultId);
-			if (!vaultKey) {
-				console.error("Failed to get vault key");
-				return;
-			}
-
-			const decrypted: DecryptedDeletedItem[] = [];
-
-			for (const item of rawItems) {
-				try {
-					const decryptedData = await decrypt(
-						{
-							algorithm: item.encryptionAlgorithm,
-							iv: item.encryptionIv,
-							ciphertext: item.encryptedData,
-						},
-						vaultKey,
-					);
-
-					const data = JSON.parse(decryptedData);
-
-					decrypted.push({
-						...item,
-						title: data.title || "Untitled",
-						url: data.url,
-						username: data.username,
-					});
-				} catch (error) {
-					console.error("Failed to decrypt item:", item.id, error);
-					// Add item with fallback data
-					decrypted.push({
-						...item,
-						title: "Unable to decrypt",
-						url: undefined,
-						username: undefined,
-					});
-				}
-			}
-
-			setDecryptedItems(decrypted);
-		};
-
-		decryptItems();
-	}, [rawItems, vaultId]);
+	const deletedItems = useMemo(() => {
+		return allDeletedItems
+			.filter((item) => item.vaultId === vaultId)
+			.sort((a, b) => {
+				const dateA = a.deletedAt ? new Date(a.deletedAt).getTime() : 0;
+				const dateB = b.deletedAt ? new Date(b.deletedAt).getTime() : 0;
+				return dateB - dateA;
+			});
+	}, [allDeletedItems, vaultId]);
 
 	const handleRestore = async (itemId: string) => {
 		try {
@@ -180,7 +106,11 @@ function TrashComponent() {
 
 			{/* Content */}
 			<div className="flex-1 overflow-y-auto p-8">
-				{decryptedItems.length === 0 ? (
+				{isLoading ? (
+					<div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+						Loading trash...
+					</div>
+				) : deletedItems.length === 0 ? (
 					<div className="flex h-full flex-col items-center justify-center text-center">
 						<div className="mb-4 inline-flex rounded-full bg-muted p-6">
 							<IconBoxArchive3OutlineDuo18
@@ -195,7 +125,7 @@ function TrashComponent() {
 					</div>
 				) : (
 					<div className="mx-auto max-w-4xl space-y-2">
-						{decryptedItems.map((item) => (
+						{deletedItems.map((item) => (
 							<div
 								key={item.id}
 								className="flex items-center justify-between rounded-lg border bg-card p-4 transition-colors hover:bg-muted/30"
@@ -208,7 +138,9 @@ function TrashComponent() {
 										size="md"
 									/>
 									<div className="min-w-0 flex-1">
-										<div className="font-medium">{item.title}</div>
+										<div className="font-medium">
+											{item.title || "Untitled"}
+										</div>
 										{item.username && (
 											<div className="mt-0.5 text-muted-foreground text-sm">
 												{item.username}

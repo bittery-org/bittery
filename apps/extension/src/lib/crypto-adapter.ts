@@ -13,6 +13,7 @@ import {
 	encrypt,
 	generateClientEphemeralAsync,
 	generateEncryptionKey,
+	rsaDecrypt,
 	validateSecretKeyAsync,
 	verifyServerSession,
 } from "./wasm-crypto";
@@ -23,6 +24,7 @@ import {
 export const cryptoAdapter: ICrypto = {
 	decrypt,
 	encrypt,
+	rsaDecrypt,
 	generateEncryptionKey,
 	deriveKeys,
 	generateClientEphemeral: generateClientEphemeralAsync,

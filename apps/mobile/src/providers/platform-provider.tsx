@@ -21,6 +21,7 @@ import {
 	encrypt,
 	generateClientEphemeral,
 	generateEncryptionKey as nativeGenerateEncryptionKey,
+	rsaDecrypt,
 	validateSecretKey,
 	verifyServerSession,
 } from "../lib/crypto/native-crypto";
@@ -34,6 +35,7 @@ const crypto: ICrypto = {
 	// Core encryption methods
 	decrypt,
 	encrypt,
+	rsaDecrypt,
 	// Native generateEncryptionKey returns base64 string, so we need to convert
 	generateEncryptionKey: async () => {
 		const keyBase64 = nativeGenerateEncryptionKey();
@@ -77,12 +79,14 @@ export function MobilePlatformProvider({
 			isConnected: syncState.isConnected,
 			isOnline: syncState.isOnline,
 			invalidator: syncState.invalidator,
+			outboundQueue: syncState.outboundQueue,
 		}),
 		[
 			syncState.clientId,
 			syncState.isConnected,
 			syncState.isOnline,
 			syncState.invalidator,
+			syncState.outboundQueue,
 		],
 	);
 

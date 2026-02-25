@@ -103,12 +103,23 @@ function AttachmentRow({
 		}
 		setIsRenaming(true);
 		try {
-			await rename.mutateAsync({ attachmentId: attachment.id, newName: trimmed });
+			await rename.mutateAsync({
+				attachmentId: attachment.id,
+				newName: trimmed,
+			});
 			setDecryptedName(trimmed);
 			setIsEditing(false);
-			toast.show({ variant: "accent", label: "Attachment renamed", placement: "bottom" });
+			toast.show({
+				variant: "accent",
+				label: "Attachment renamed",
+				placement: "bottom",
+			});
 		} catch {
-			toast.show({ variant: "danger", label: "Rename failed", placement: "bottom" });
+			toast.show({
+				variant: "danger",
+				label: "Rename failed",
+				placement: "bottom",
+			});
 		} finally {
 			setIsRenaming(false);
 		}
@@ -125,18 +136,35 @@ function AttachmentRow({
 								<TextInput
 									value={editValue}
 									onChangeText={setEditValue}
-									className="flex-1 text-foreground text-sm border-b border-muted pb-0.5"
+									className="flex-1 border-muted border-b pb-0.5 text-foreground text-sm"
 									autoFocus
 									editable={!isRenaming}
 									submitBehavior="submit"
 									onSubmitEditing={confirmRename}
 								/>
-								<Button isIconOnly size="sm" variant="ghost" onPress={confirmRename} isDisabled={isRenaming}>
-									{isRenaming
-										? <StyledLoader2 size={14} className="animate-spin text-foreground" />
-										: <StyledCheck size={14} className="text-foreground" />}
+								<Button
+									isIconOnly
+									size="sm"
+									variant="ghost"
+									onPress={confirmRename}
+									isDisabled={isRenaming}
+								>
+									{isRenaming ? (
+										<StyledLoader2
+											size={14}
+											className="animate-spin text-foreground"
+										/>
+									) : (
+										<StyledCheck size={14} className="text-foreground" />
+									)}
 								</Button>
-								<Button isIconOnly size="sm" variant="ghost" onPress={() => setIsEditing(false)} isDisabled={isRenaming}>
+								<Button
+									isIconOnly
+									size="sm"
+									variant="ghost"
+									onPress={() => setIsEditing(false)}
+									isDisabled={isRenaming}
+								>
 									<StyledX size={14} className="text-foreground" />
 								</Button>
 							</View>
@@ -193,7 +221,8 @@ export function ItemAttachments({
 	const [isUploading, setIsUploading] = useState(false);
 	const [isDownloading, setIsDownloading] = useState(false);
 	// Pending file waiting for a display name before upload
-	const [pendingAsset, setPendingAsset] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
+	const [pendingAsset, setPendingAsset] =
+		useState<DocumentPicker.DocumentPickerAsset | null>(null);
 	const [pendingName, setPendingName] = useState("");
 
 	const { attachments, isLoading, upload, download, remove } =
@@ -225,9 +254,15 @@ export function ItemAttachments({
 		try {
 			const fileInput = createFileInputFromAsset(pendingAsset);
 			await upload.mutateAsync(
-				Object.assign(fileInput, { displayName: pendingName.trim() || pendingAsset.name }),
+				Object.assign(fileInput, {
+					displayName: pendingName.trim() || pendingAsset.name,
+				}),
 			);
-			toast.show({ variant: "accent", label: "Attachment uploaded", placement: "bottom" });
+			toast.show({
+				variant: "accent",
+				label: "Attachment uploaded",
+				placement: "bottom",
+			});
 		} catch {
 			toast.show({
 				variant: "danger",
@@ -334,28 +369,48 @@ export function ItemAttachments({
 
 				{/* Name input shown after picking a file */}
 				{pendingAsset && (
-					<View className="mb-2 rounded-md border border-muted p-2 gap-2">
+					<View className="mb-2 gap-2 rounded-md border border-muted p-2">
 						<Text className="text-muted text-xs">
 							Display name for{" "}
-							<Text className="text-foreground font-medium">{pendingAsset.name}</Text>
+							<Text className="font-medium text-foreground">
+								{pendingAsset.name}
+							</Text>
 						</Text>
 						<TextInput
 							value={pendingName}
 							onChangeText={setPendingName}
-							className="text-foreground text-sm border border-muted rounded px-2 py-1"
+							className="rounded border border-muted px-2 py-1 text-foreground text-sm"
 							placeholder={pendingAsset.name}
 							editable={!isUploading}
 							submitBehavior="submit"
 							onSubmitEditing={handleConfirmUpload}
 						/>
 						<View className="flex-row gap-2">
-							<Button size="sm" onPress={handleConfirmUpload} isDisabled={isUploading} className="flex-1">
-								{isUploading
-									? <StyledLoader2 size={14} className="animate-spin text-foreground mr-1" />
-									: null}
-								<Text className="text-sm">{isUploading ? "Uploading..." : "Upload"}</Text>
+							<Button
+								size="sm"
+								onPress={handleConfirmUpload}
+								isDisabled={isUploading}
+								className="flex-1"
+							>
+								{isUploading ? (
+									<StyledLoader2
+										size={14}
+										className="mr-1 animate-spin text-foreground"
+									/>
+								) : null}
+								<Text className="text-sm">
+									{isUploading ? "Uploading..." : "Upload"}
+								</Text>
 							</Button>
-							<Button size="sm" variant="ghost" onPress={() => { setPendingAsset(null); setPendingName(""); }} isDisabled={isUploading}>
+							<Button
+								size="sm"
+								variant="ghost"
+								onPress={() => {
+									setPendingAsset(null);
+									setPendingName("");
+								}}
+								isDisabled={isUploading}
+							>
 								<Text className="text-sm">Cancel</Text>
 							</Button>
 						</View>

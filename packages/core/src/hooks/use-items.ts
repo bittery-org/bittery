@@ -1,19 +1,17 @@
 /**
  * useItems Hook - Unified Item Fetching
  *
- * Automatically detects whether we're in single-account or "All Accounts" mode
- * and fetches items accordingly. Components don't need to care about the mode.
+ * Local-first read path backed by VaultRepositoryCoordinator.
  */
 
-import { useQuery } from "@tanstack/react-query";
-import { useCoreContext } from "../context/platform-context";
-import type { MultiAccountItem as CoreMultiAccountItem } from "../services/item-service";
-import { useAccountsInfo } from "./use-accounts-info";
+import { useMemo } from "react";
+import type { CoordinatedItem } from "../services/vault-repository-coordinator";
+import { useVaultRepositorySync } from "./use-vault-repository-sync";
 
 /**
  * Decrypted item with source account metadata (for multi-account mode)
  */
-export type MultiAccountItem = CoreMultiAccountItem;
+export type MultiAccountItem = CoordinatedItem;
 export type UnifiedItem = MultiAccountItem;
 
 export interface UseItemsOptions {
@@ -27,33 +25,26 @@ export type UseItemsUnifiedOptions = UseItemsOptions;
  * Hook to fetch and decrypt items from active account(s).
  */
 export function useItems(options: UseItemsOptions = {}) {
-	const core = useCoreContext();
 	const {
 		accountsInfo,
-		isLoading: isLoadingAccounts,
 		isAllAccountsMode,
-	} = useAccountsInfo({ enabled: options.enabled });
-
-	const {
-		data: items = [],
-		isLoading: isLoadingItems,
-		error,
+		isLoading,
 		refetch,
-	} = useQuery({
-		queryKey: ["items", accountsInfo.map((account) => account.email).sort()],
-		queryFn: () =>
-			core.items.fetchAndDecryptItems(accountsInfo, {
-				isAllAccountsMode,
-			}),
-		enabled: accountsInfo.length > 0 && options.enabled !== false,
-		staleTime: 5 * 60 * 1000,
-		gcTime: 10 * 60 * 1000,
+		snapshot,
+		vaultCoordinator,
+	} = useVaultRepositorySync({
+		enabled: options.enabled,
 	});
+
+	const items = useMemo(
+		() => vaultCoordinator.getAll() as MultiAccountItem[],
+		[vaultCoordinator, snapshot, isAllAccountsMode],
+	);
 
 	return {
 		items,
-		isLoading: isLoadingAccounts || isLoadingItems,
-		error,
+		isLoading,
+		error: null,
 		refetch,
 		isAllAccountsMode,
 		unlockedAccounts: accountsInfo,

@@ -79,7 +79,10 @@ function AttachmentRow({
 		}
 		setIsRenaming(true);
 		try {
-			await rename.mutateAsync({ attachmentId: attachment.id, newName: trimmed });
+			await rename.mutateAsync({
+				attachmentId: attachment.id,
+				newName: trimmed,
+			});
 			setDecryptedName(trimmed);
 			setIsEditing(false);
 		} catch {
@@ -106,10 +109,24 @@ function AttachmentRow({
 							autoFocus
 							disabled={isRenaming}
 						/>
-						<Button size="sm" variant="ghost" onClick={confirmRename} disabled={isRenaming}>
-							{isRenaming ? <Loader size={14} className="animate-spin" /> : <Check size={14} />}
+						<Button
+							size="sm"
+							variant="ghost"
+							onClick={confirmRename}
+							disabled={isRenaming}
+						>
+							{isRenaming ? (
+								<Loader size="14" className="animate-spin" />
+							) : (
+								<Check size={14} />
+							)}
 						</Button>
-						<Button size="sm" variant="ghost" onClick={() => setIsEditing(false)} disabled={isRenaming}>
+						<Button
+							size="sm"
+							variant="ghost"
+							onClick={() => setIsEditing(false)}
+							disabled={isRenaming}
+						>
 							<X size={14} />
 						</Button>
 					</div>
@@ -196,7 +213,9 @@ export function ItemAttachments({
 		setIsUploading(true);
 		try {
 			await upload.mutateAsync(
-				Object.assign(pendingFile, { displayName: pendingName.trim() || pendingFile.name }),
+				Object.assign(pendingFile, {
+					displayName: pendingName.trim() || pendingFile.name,
+				}),
 			);
 			toast.success("Attachment uploaded successfully");
 		} catch {
@@ -296,31 +315,46 @@ export function ItemAttachments({
 
 			{/* Name input shown after picking a file */}
 			{pendingFile && (
-				<div className="rounded-md border p-3 space-y-2">
-					<p className="text-sm text-muted-foreground">
-						Display name for <span className="font-medium text-foreground">{pendingFile.name}</span>
+				<div className="space-y-2 rounded-md border p-3">
+					<p className="text-muted-foreground text-sm">
+						Display name for{" "}
+						<span className="font-medium text-foreground">
+							{pendingFile.name}
+						</span>
 					</p>
 					<div className="flex items-center gap-2">
 						<Input
-							className="h-8 text-sm flex-1"
+							className="h-8 flex-1 text-sm"
 							placeholder={pendingFile.name}
 							value={pendingName}
 							onChange={(e) => setPendingName(e.target.value)}
 							onKeyDown={(e) => {
 								if (e.key === "Enter") handleConfirmUpload();
-								if (e.key === "Escape") { setPendingFile(null); setPendingName(""); }
+								if (e.key === "Escape") {
+									setPendingFile(null);
+									setPendingName("");
+								}
 							}}
 							autoFocus
 							disabled={isUploading}
 						/>
-						<Button size="sm" onClick={handleConfirmUpload} disabled={isUploading}>
-							{isUploading ? <Loader size={14} className="mr-1 animate-spin" /> : null}
+						<Button
+							size="sm"
+							onClick={handleConfirmUpload}
+							disabled={isUploading}
+						>
+							{isUploading ? (
+								<Loader size="14" className="mr-1 animate-spin" />
+							) : null}
 							{isUploading ? "Uploading..." : "Upload"}
 						</Button>
 						<Button
 							size="sm"
 							variant="ghost"
-							onClick={() => { setPendingFile(null); setPendingName(""); }}
+							onClick={() => {
+								setPendingFile(null);
+								setPendingName("");
+							}}
 							disabled={isUploading}
 						>
 							Cancel

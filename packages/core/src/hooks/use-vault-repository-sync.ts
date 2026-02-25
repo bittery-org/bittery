@@ -1,0 +1,78 @@
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCoreContext } from "../context/platform-context";
+import type { VaultRepositoryCoordinator } from "../services/vault-repository-coordinator";
+import { useAccountsInfo } from "./use-accounts-info";
+
+export interface UseVaultRepositorySyncOptions {
+	enabled?: boolean;
+	requiredId?: string;
+}
+
+interface UseVaultRepositorySyncResult {
+	snapshot: number;
+	isLoading: boolean;
+	isAllAccountsMode: boolean;
+	refetch: () => Promise<void>;
+	accountsInfo: ReturnType<typeof useAccountsInfo>["accountsInfo"];
+	vaultCoordinator: VaultRepositoryCoordinator;
+}
+
+export function useVaultRepositorySync(
+	options: UseVaultRepositorySyncOptions = {},
+): UseVaultRepositorySyncResult {
+	const core = useCoreContext();
+	const { enabled = true, requiredId } = options;
+	const {
+		accountsInfo,
+		isLoading: isLoadingAccounts,
+		isAllAccountsMode,
+	} = useAccountsInfo({ enabled });
+
+	const accountsKey = useMemo(
+		() =>
+			accountsInfo
+				.map((account) => account.email)
+				.sort()
+				.join("|"),
+		[accountsInfo],
+	);
+
+	useEffect(() => {
+		if (!enabled || isLoadingAccounts || accountsInfo.length === 0) {
+			return;
+		}
+		if (typeof requiredId !== "undefined" && !requiredId) {
+			return;
+		}
+		void core.vaultCoordinator.hydrate(accountsInfo);
+	}, [
+		core.vaultCoordinator,
+		enabled,
+		isLoadingAccounts,
+		accountsInfo,
+		accountsKey,
+		requiredId,
+	]);
+
+	const snapshot = useSyncExternalStore(
+		core.vaultCoordinator.subscribe,
+		core.vaultCoordinator.getSnapshot,
+		core.vaultCoordinator.getSnapshot,
+	);
+
+	const refetch = useCallback(async () => {
+		if (accountsInfo.length === 0) {
+			return;
+		}
+		await core.vaultCoordinator.refreshFromServer(accountsInfo);
+	}, [core.vaultCoordinator, accountsInfo, accountsKey]);
+
+	return {
+		snapshot,
+		isLoading: isLoadingAccounts || core.vaultCoordinator.isHydrating(),
+		isAllAccountsMode,
+		refetch,
+		accountsInfo,
+		vaultCoordinator: core.vaultCoordinator,
+	};
+}
