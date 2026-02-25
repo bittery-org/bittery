@@ -1,5 +1,8 @@
 import type { IStorageAdapter } from "@bittery/storage/adapter";
-import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
+import type {
+	CachedEncryptedItem,
+	CachedVaultMetadata,
+} from "@bittery/types";
 
 export interface EncryptedPayload {
 	ciphertext: string;

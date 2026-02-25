@@ -185,7 +185,10 @@ export const itemAttachment = pgTable(
 		// Encrypted metadata (filename + contentType encrypted with vault key)
 		encryptedName: text("encrypted_name").notNull(),
 		encryptedContentType: text("encrypted_content_type").notNull(),
+		// IV used to encrypt the filename
 		encryptionIv: text("encryption_iv").notNull(),
+		// Separate IV for content-type (null on older rows → fall back to encryptionIv)
+		encryptedContentTypeIv: text("encrypted_content_type_iv"),
 		encryptionAlgorithm: text("encryption_algorithm")
 			.notNull()
 			.default("AES-GCM"),

@@ -453,11 +453,12 @@ export const vaultRouter = router({
 				throw new Error("Access denied to this vault");
 			}
 
-			// Get items (exclude soft-deleted)
+			// Get items (exclude soft-deleted), include attachment metadata
 			const items = await db.query.item.findMany({
 				where: (item, { and, eq, isNull }) =>
 					and(eq(item.vaultId, input.vaultId), isNull(item.deletedAt)),
 				orderBy: (item, { desc }) => [desc(item.updatedAt)],
+				with: { attachments: true },
 			});
 
 			return items;
@@ -483,11 +484,12 @@ export const vaultRouter = router({
 		// Get all vault IDs
 		const vaultIds = userVaults.map((vk) => vk.vaultId);
 
-		// Get all items from all vaults (exclude soft-deleted)
+		// Get all items from all vaults (exclude soft-deleted), include attachment metadata
 		const allItems = await db.query.item.findMany({
 			where: (item, { and }) =>
 				and(inArray(item.vaultId, vaultIds), isNull(item.deletedAt)),
 			orderBy: (item, { desc }) => [desc(item.updatedAt)],
+			with: { attachments: true },
 		});
 
 		// Build a map of vault metadata for quick lookup
@@ -580,9 +582,10 @@ export const vaultRouter = router({
 			}),
 		)
 		.query(async ({ input, ctx }) => {
-			// Get the item first
+			// Get the item first (include attachments so they're cached alongside the item)
 			const existingItem = await db.query.item.findFirst({
 				where: (item, { eq }) => eq(item.id, input.itemId),
+				with: { attachments: true },
 			});
 
 			if (!existingItem) {
@@ -1378,6 +1381,7 @@ export const vaultRouter = router({
 				encryptedName: z.string().min(1),
 				encryptedContentType: z.string().min(1),
 				encryptionIv: z.string().min(1),
+				encryptedContentTypeIv: z.string().min(1),
 				encryptionAlgorithm: z.string().default("AES-GCM"),
 				fileSize: z.number().int().positive(),
 			}),
@@ -1404,18 +1408,36 @@ export const vaultRouter = router({
 			}
 
 			const attachmentId = nanoid();
-			await db.insert(itemAttachment).values({
-				id: attachmentId,
-				itemId: input.itemId,
-				vaultId: existingItem.vaultId,
-				storageKey: input.storageKey,
-				encryptedName: input.encryptedName,
-				encryptedContentType: input.encryptedContentType,
-				encryptionIv: input.encryptionIv,
-				encryptionAlgorithm: input.encryptionAlgorithm,
-				fileSize: input.fileSize,
-				uploadedBy: ctx.session.userId,
+			let broadcast: SyncBroadcastPayload;
+			await db.transaction(async (tx) => {
+				await tx.insert(itemAttachment).values({
+					id: attachmentId,
+					itemId: input.itemId,
+					vaultId: existingItem.vaultId,
+					storageKey: input.storageKey,
+					encryptedName: input.encryptedName,
+					encryptedContentType: input.encryptedContentType,
+					encryptionIv: input.encryptionIv,
+					encryptedContentTypeIv: input.encryptedContentTypeIv,
+					encryptionAlgorithm: input.encryptionAlgorithm,
+					fileSize: input.fileSize,
+					uploadedBy: ctx.session.userId,
+				});
+
+				broadcast = await createSyncEvent(
+					{
+						eventType: "item_updated",
+						entityId: input.itemId,
+						entityType: "item",
+						vaultId: existingItem.vaultId,
+						userId: ctx.session.userId,
+					},
+					tx,
+					ctx.clientId,
+				);
 			});
+
+			await broadcastSyncPayload(broadcast!);
 
 			return { attachmentId };
 		}),
@@ -1493,9 +1515,75 @@ export const vaultRouter = router({
 				encryptedName: attachment.encryptedName,
 				encryptedContentType: attachment.encryptedContentType,
 				encryptionIv: attachment.encryptionIv,
+				encryptedContentTypeIv: attachment.encryptedContentTypeIv ?? attachment.encryptionIv,
 				encryptionAlgorithm: attachment.encryptionAlgorithm,
 				fileSize: attachment.fileSize,
 			};
+		}),
+
+	/**
+	 * Rename an attachment (re-encrypt name with a new IV)
+	 */
+	updateAttachment: protectedProcedure
+		.input(
+			z.object({
+				attachmentId: z.string(),
+				encryptedName: z.string().min(1),
+				encryptionIv: z.string().min(1),
+				encryptionAlgorithm: z.string().default("AES-GCM"),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			const attachment = await db.query.itemAttachment.findFirst({
+				where: (a, { eq }) => eq(a.id, input.attachmentId),
+			});
+
+			if (!attachment) {
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "Attachment not found",
+				});
+			}
+
+			const userVaultKey = await db.query.vaultKey.findFirst({
+				where: (vk, { and, eq }) =>
+					and(
+						eq(vk.vaultId, attachment.vaultId),
+						eq(vk.userId, ctx.session.userId),
+					),
+			});
+
+			if (!userVaultKey || userVaultKey.role === "read-only") {
+				throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
+			}
+
+			let broadcast: SyncBroadcastPayload;
+			await db.transaction(async (tx) => {
+				await tx
+					.update(itemAttachment)
+					.set({
+						encryptedName: input.encryptedName,
+						encryptionIv: input.encryptionIv,
+						encryptionAlgorithm: input.encryptionAlgorithm,
+					})
+					.where(eq(itemAttachment.id, input.attachmentId));
+
+				broadcast = await createSyncEvent(
+					{
+						eventType: "item_updated",
+						entityId: attachment.itemId,
+						entityType: "item",
+						vaultId: attachment.vaultId,
+						userId: ctx.session.userId,
+					},
+					tx,
+					ctx.clientId,
+				);
+			});
+
+			await broadcastSyncPayload(broadcast!);
+
+			return { success: true };
 		}),
 
 	/**
@@ -1545,11 +1633,28 @@ export const vaultRouter = router({
 				}
 			}
 
-			// Delete from S3 then DB
+			// Delete from S3 first (not transactional), then DB + sync event atomically
 			await deleteObject(attachment.storageKey);
-			await db
-				.delete(itemAttachment)
-				.where(eq(itemAttachment.id, input.attachmentId));
+			let broadcast: SyncBroadcastPayload;
+			await db.transaction(async (tx) => {
+				await tx
+					.delete(itemAttachment)
+					.where(eq(itemAttachment.id, input.attachmentId));
+
+				broadcast = await createSyncEvent(
+					{
+						eventType: "item_updated",
+						entityId: attachment.itemId,
+						entityType: "item",
+						vaultId: attachment.vaultId,
+						userId: ctx.session.userId,
+					},
+					tx,
+					ctx.clientId,
+				);
+			});
+
+			await broadcastSyncPayload(broadcast!);
 
 			return { success: true };
 		}),

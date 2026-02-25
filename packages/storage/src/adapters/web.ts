@@ -35,7 +35,7 @@ const SERVER_URL_STORAGE = "bittery_server_url";
 const ENCRYPTED_PRIVATE_KEY_STORAGE = "bittery_encrypted_private_key";
 const AUTO_LOCK_TIMEOUT_STORAGE = "bittery_auto_lock_timeout";
 const ITEM_CACHE_DB_NAME = "bittery_item_cache";
-const ITEM_CACHE_DB_VERSION = 1;
+const ITEM_CACHE_DB_VERSION = 2;
 const ITEM_CACHE_ITEMS_STORE = "items";
 const ITEM_CACHE_VAULTS_STORE = "vaults";
 const ITEM_CACHE_METADATA_STORE = "metadata";
@@ -130,6 +130,13 @@ export class WebStorageAdapter implements IStorageAdapter {
 					}
 					if (!db.objectStoreNames.contains(ITEM_CACHE_METADATA_STORE)) {
 						db.createObjectStore(ITEM_CACHE_METADATA_STORE, { keyPath: "key" });
+					}
+					if (!db.objectStoreNames.contains(ITEM_CACHE_ATTACHMENTS_STORE)) {
+						const attachmentsStore = db.createObjectStore(
+							ITEM_CACHE_ATTACHMENTS_STORE,
+							{ keyPath: "id" },
+						);
+						attachmentsStore.createIndex("by_item", "itemId", { unique: false });
 					}
 				};
 

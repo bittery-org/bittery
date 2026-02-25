@@ -2,17 +2,21 @@
  * ItemAttachments Component
  *
  * Displays encrypted file attachments for a vault item.
- * Supports upload, download (with client-side decryption), preview, and delete.
+ * Supports upload (with optional display name), download (with client-side decryption),
+ * rename, preview, and delete.
  */
 
 import type { AttachmentMeta } from "@bittery/core/hooks";
 import { useItemAttachments } from "@bittery/core/hooks";
-import { Button, toast } from "@bittery/ui";
+import { Button, Input, toast } from "@bittery/ui";
 import {
+	IconCheckOutlineDuo18 as Check,
 	IconFileLockOutlineDuo18 as FileIcon,
 	IconLoader2Fill18 as Loader,
+	IconPen2OutlineDuo18 as Pencil,
 	IconTrash2OutlineDuo18 as Trash,
 	IconUpload3OutlineDuo18 as Upload,
+	IconXmarkOutlineDuo18 as X,
 } from "@bittery/ui/icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -34,16 +38,22 @@ function AttachmentRow({
 	onDownload,
 	onDelete,
 	canEdit,
+	accountEmail,
 }: {
 	attachment: AttachmentMeta;
 	onDownload: (attachment: AttachmentMeta) => void;
 	onDelete: (attachmentId: string) => void;
 	canEdit: boolean;
+	accountEmail?: string;
 }) {
 	const [decryptedName, setDecryptedName] = useState<string | null>(null);
-	const { decryptMeta } = useItemAttachments(
+	const [isEditing, setIsEditing] = useState(false);
+	const [editValue, setEditValue] = useState("");
+	const [isRenaming, setIsRenaming] = useState(false);
+	const { decryptMeta, rename } = useItemAttachments(
 		attachment.itemId,
 		attachment.vaultId,
+		accountEmail,
 	);
 
 	// Lazy-decrypt the name on mount
@@ -56,13 +66,58 @@ function AttachmentRow({
 
 	const displayName = decryptedName ?? "Loading...";
 
+	function startEdit() {
+		setEditValue(decryptedName ?? "");
+		setIsEditing(true);
+	}
+
+	async function confirmRename() {
+		const trimmed = editValue.trim();
+		if (!trimmed || trimmed === decryptedName) {
+			setIsEditing(false);
+			return;
+		}
+		setIsRenaming(true);
+		try {
+			await rename.mutateAsync({ attachmentId: attachment.id, newName: trimmed });
+			setDecryptedName(trimmed);
+			setIsEditing(false);
+		} catch {
+			toast.error("Failed to rename attachment.");
+		} finally {
+			setIsRenaming(false);
+		}
+	}
+
 	return (
 		<div className="flex items-center gap-3 rounded-md border p-3">
 			<FileIcon size={18} className="shrink-0 text-muted-foreground" />
 			<div className="min-w-0 flex-1">
-				<p className="truncate font-medium text-sm" title={displayName}>
-					{displayName}
-				</p>
+				{isEditing ? (
+					<div className="flex items-center gap-1">
+						<Input
+							className="h-6 py-0 text-sm"
+							value={editValue}
+							onChange={(e) => setEditValue(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") confirmRename();
+								if (e.key === "Escape") setIsEditing(false);
+							}}
+							autoFocus
+							disabled={isRenaming}
+						/>
+						<Button size="sm" variant="ghost" onClick={confirmRename} disabled={isRenaming}>
+							{isRenaming ? <Loader size={14} className="animate-spin" /> : <Check size={14} />}
+						</Button>
+						<Button size="sm" variant="ghost" onClick={() => setIsEditing(false)} disabled={isRenaming}>
+							<X size={14} />
+						</Button>
+					</div>
+				) : (
+					<p className="truncate font-medium text-sm" title={displayName}>
+						{displayName}
+					</p>
+				)}
 				<p className="text-muted-foreground text-xs">
 					{formatBytes(attachment.fileSize)}
 				</p>
@@ -76,6 +131,16 @@ function AttachmentRow({
 				>
 					<Upload size={16} className="rotate-180" />
 				</Button>
+				{canEdit && !isEditing && (
+					<Button
+						size="sm"
+						variant="ghost"
+						onClick={startEdit}
+						title="Rename attachment"
+					>
+						<Pencil size={16} />
+					</Button>
+				)}
 				{canEdit && (
 					<Button
 						size="sm"
@@ -100,35 +165,48 @@ export function ItemAttachments({
 }: ItemAttachmentsProps) {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const [isUploading, setIsUploading] = useState(false);
+	// Pending file waiting for a display name before upload
+	const [pendingFile, setPendingFile] = useState<File | null>(null);
+	const [pendingName, setPendingName] = useState("");
 
 	const { attachments, isLoading, upload, download, remove } =
 		useItemAttachments(itemId, vaultId, accountEmail);
 
 	const handleFileChange = useCallback(
-		async (e: React.ChangeEvent<HTMLInputElement>) => {
+		(e: React.ChangeEvent<HTMLInputElement>) => {
 			const file = e.target.files?.[0];
 			if (!file) return;
 
 			// 25 MB limit
 			if (file.size > 25 * 1024 * 1024) {
 				toast.error("File too large. Maximum size is 25 MB.");
+				if (fileInputRef.current) fileInputRef.current.value = "";
 				return;
 			}
 
-			setIsUploading(true);
-			try {
-				await upload.mutateAsync(file);
-				toast.success("Attachment uploaded successfully");
-			} catch {
-				toast.error("Failed to upload attachment. Please try again.");
-			} finally {
-				setIsUploading(false);
-				// Reset input so the same file can be re-selected
-				if (fileInputRef.current) fileInputRef.current.value = "";
-			}
+			setPendingName(file.name);
+			setPendingFile(file);
+			if (fileInputRef.current) fileInputRef.current.value = "";
 		},
-		[upload],
+		[],
 	);
+
+	const handleConfirmUpload = useCallback(async () => {
+		if (!pendingFile) return;
+		setIsUploading(true);
+		try {
+			await upload.mutateAsync(
+				Object.assign(pendingFile, { displayName: pendingName.trim() || pendingFile.name }),
+			);
+			toast.success("Attachment uploaded successfully");
+		} catch {
+			toast.error("Failed to upload attachment. Please try again.");
+		} finally {
+			setIsUploading(false);
+			setPendingFile(null);
+			setPendingName("");
+		}
+	}, [pendingFile, pendingName, upload]);
 
 	const handleDownload = useCallback(
 		async (attachment: AttachmentMeta) => {
@@ -202,24 +280,54 @@ export function ItemAttachments({
 							type="file"
 							className="hidden"
 							onChange={handleFileChange}
-							disabled={isUploading}
 						/>
 						<Button
 							size="sm"
 							variant="outline"
 							onClick={() => fileInputRef.current?.click()}
-							disabled={isUploading}
+							disabled={isUploading || !!pendingFile}
 						>
-							{isUploading ? (
-								<Loader className="mr-1 animate-spin" />
-							) : (
-								<Upload size={14} className="mr-1" />
-							)}
-							{isUploading ? "Uploading..." : "Attach file"}
+							<Upload size={14} className="mr-1" />
+							Attach file
 						</Button>
 					</>
 				)}
 			</div>
+
+			{/* Name input shown after picking a file */}
+			{pendingFile && (
+				<div className="rounded-md border p-3 space-y-2">
+					<p className="text-sm text-muted-foreground">
+						Display name for <span className="font-medium text-foreground">{pendingFile.name}</span>
+					</p>
+					<div className="flex items-center gap-2">
+						<Input
+							className="h-8 text-sm flex-1"
+							placeholder={pendingFile.name}
+							value={pendingName}
+							onChange={(e) => setPendingName(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") handleConfirmUpload();
+								if (e.key === "Escape") { setPendingFile(null); setPendingName(""); }
+							}}
+							autoFocus
+							disabled={isUploading}
+						/>
+						<Button size="sm" onClick={handleConfirmUpload} disabled={isUploading}>
+							{isUploading ? <Loader size={14} className="mr-1 animate-spin" /> : null}
+							{isUploading ? "Uploading..." : "Upload"}
+						</Button>
+						<Button
+							size="sm"
+							variant="ghost"
+							onClick={() => { setPendingFile(null); setPendingName(""); }}
+							disabled={isUploading}
+						>
+							Cancel
+						</Button>
+					</div>
+				</div>
+			)}
 
 			{isLoading && (
 				<div className="flex items-center gap-2 text-muted-foreground text-sm">
@@ -241,6 +349,7 @@ export function ItemAttachments({
 							onDownload={handleDownload}
 							onDelete={handleDelete}
 							canEdit={canEdit}
+							accountEmail={accountEmail}
 						/>
 					))}
 				</div>

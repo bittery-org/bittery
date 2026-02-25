@@ -5,14 +5,17 @@ import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { Button, Card, useToast } from "heroui-native";
 import {
+	Check,
 	Download,
 	File,
 	Loader2,
 	Paperclip,
+	Pencil,
 	Trash2,
+	X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Text, TextInput, View } from "react-native";
 import { withUniwind } from "uniwind";
 
 const StyledFile = withUniwind(File);
@@ -20,6 +23,9 @@ const StyledDownload = withUniwind(Download);
 const StyledTrash2 = withUniwind(Trash2);
 const StyledPaperclip = withUniwind(Paperclip);
 const StyledLoader2 = withUniwind(Loader2);
+const StyledPencil = withUniwind(Pencil);
+const StyledCheck = withUniwind(Check);
+const StyledX = withUniwind(X);
 
 interface ItemAttachmentsProps {
 	itemId: string;
@@ -56,16 +62,23 @@ function AttachmentRow({
 	onDownload,
 	onDelete,
 	canEdit,
+	accountEmail,
 }: {
 	attachment: AttachmentMeta;
 	onDownload: (attachment: AttachmentMeta) => void;
 	onDelete: (attachmentId: string) => void;
 	canEdit: boolean;
+	accountEmail?: string;
 }) {
 	const [decryptedName, setDecryptedName] = useState<string | null>(null);
-	const { decryptMeta } = useItemAttachments(
+	const [isEditing, setIsEditing] = useState(false);
+	const [editValue, setEditValue] = useState("");
+	const [isRenaming, setIsRenaming] = useState(false);
+	const { toast } = useToast();
+	const { decryptMeta, rename } = useItemAttachments(
 		attachment.itemId,
 		attachment.vaultId,
+		accountEmail,
 	);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: decryptMeta is stable for same vault
@@ -77,18 +90,64 @@ function AttachmentRow({
 
 	const displayName = decryptedName ?? "Loading...";
 
+	function startEdit() {
+		setEditValue(decryptedName ?? "");
+		setIsEditing(true);
+	}
+
+	async function confirmRename() {
+		const trimmed = editValue.trim();
+		if (!trimmed || trimmed === decryptedName) {
+			setIsEditing(false);
+			return;
+		}
+		setIsRenaming(true);
+		try {
+			await rename.mutateAsync({ attachmentId: attachment.id, newName: trimmed });
+			setDecryptedName(trimmed);
+			setIsEditing(false);
+			toast.show({ variant: "accent", label: "Attachment renamed", placement: "bottom" });
+		} catch {
+			toast.show({ variant: "danger", label: "Rename failed", placement: "bottom" });
+		} finally {
+			setIsRenaming(false);
+		}
+	}
+
 	return (
 		<Card variant="default" className="mb-2">
 			<Card.Body className="py-2">
 				<View className="flex-row items-center gap-3">
 					<StyledFile size={18} className="shrink-0 text-muted" />
 					<View className="flex-1">
-						<Text
-							className="font-medium text-foreground text-sm"
-							numberOfLines={1}
-						>
-							{displayName}
-						</Text>
+						{isEditing ? (
+							<View className="flex-row items-center gap-1">
+								<TextInput
+									value={editValue}
+									onChangeText={setEditValue}
+									className="flex-1 text-foreground text-sm border-b border-muted pb-0.5"
+									autoFocus
+									editable={!isRenaming}
+									submitBehavior="submit"
+									onSubmitEditing={confirmRename}
+								/>
+								<Button isIconOnly size="sm" variant="ghost" onPress={confirmRename} isDisabled={isRenaming}>
+									{isRenaming
+										? <StyledLoader2 size={14} className="animate-spin text-foreground" />
+										: <StyledCheck size={14} className="text-foreground" />}
+								</Button>
+								<Button isIconOnly size="sm" variant="ghost" onPress={() => setIsEditing(false)} isDisabled={isRenaming}>
+									<StyledX size={14} className="text-foreground" />
+								</Button>
+							</View>
+						) : (
+							<Text
+								className="font-medium text-foreground text-sm"
+								numberOfLines={1}
+							>
+								{displayName}
+							</Text>
+						)}
 						<Text className="text-muted text-xs">
 							{formatBytes(attachment.fileSize)}
 						</Text>
@@ -102,6 +161,11 @@ function AttachmentRow({
 						>
 							<StyledDownload size={18} className="text-foreground" />
 						</Button>
+						{canEdit && !isEditing && (
+							<Button isIconOnly size="sm" variant="ghost" onPress={startEdit}>
+								<StyledPencil size={18} className="text-foreground" />
+							</Button>
+						)}
 						{canEdit && (
 							<Button
 								isIconOnly
@@ -128,11 +192,14 @@ export function ItemAttachments({
 	const { toast } = useToast();
 	const [isUploading, setIsUploading] = useState(false);
 	const [isDownloading, setIsDownloading] = useState(false);
+	// Pending file waiting for a display name before upload
+	const [pendingAsset, setPendingAsset] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
+	const [pendingName, setPendingName] = useState("");
 
 	const { attachments, isLoading, upload, download, remove } =
 		useItemAttachments(itemId, vaultId, accountEmail);
 
-	const handlePickAndUpload = useCallback(async () => {
+	const handlePickFile = useCallback(async () => {
 		const result = await DocumentPicker.getDocumentAsync({
 			copyToCacheDirectory: true,
 			multiple: false,
@@ -148,15 +215,19 @@ export function ItemAttachments({
 			return;
 		}
 
+		setPendingName(asset.name);
+		setPendingAsset(asset);
+	}, []);
+
+	const handleConfirmUpload = useCallback(async () => {
+		if (!pendingAsset) return;
 		setIsUploading(true);
 		try {
-			const fileInput = createFileInputFromAsset(asset);
-			await upload.mutateAsync(fileInput);
-			toast.show({
-				variant: "accent",
-				label: "Attachment uploaded",
-				placement: "bottom",
-			});
+			const fileInput = createFileInputFromAsset(pendingAsset);
+			await upload.mutateAsync(
+				Object.assign(fileInput, { displayName: pendingName.trim() || pendingAsset.name }),
+			);
+			toast.show({ variant: "accent", label: "Attachment uploaded", placement: "bottom" });
 		} catch {
 			toast.show({
 				variant: "danger",
@@ -166,8 +237,10 @@ export function ItemAttachments({
 			});
 		} finally {
 			setIsUploading(false);
+			setPendingAsset(null);
+			setPendingName("");
 		}
-	}, [upload, toast]);
+	}, [pendingAsset, pendingName, upload, toast]);
 
 	const handleDownload = useCallback(
 		async (attachment: AttachmentMeta) => {
@@ -250,23 +323,44 @@ export function ItemAttachments({
 						<Button
 							size="sm"
 							variant="ghost"
-							onPress={handlePickAndUpload}
-							isDisabled={isUploading}
+							onPress={handlePickFile}
+							isDisabled={isUploading || !!pendingAsset}
 						>
-							{isUploading ? (
-								<StyledLoader2
-									size={14}
-									className="animate-spin text-foreground"
-								/>
-							) : (
-								<StyledPaperclip size={14} className="text-foreground" />
-							)}
-							<Text className="ml-1 text-foreground text-sm">
-								{isUploading ? "Uploading..." : "Attach"}
-							</Text>
+							<StyledPaperclip size={14} className="text-foreground" />
+							<Text className="ml-1 text-foreground text-sm">Attach</Text>
 						</Button>
 					)}
 				</View>
+
+				{/* Name input shown after picking a file */}
+				{pendingAsset && (
+					<View className="mb-2 rounded-md border border-muted p-2 gap-2">
+						<Text className="text-muted text-xs">
+							Display name for{" "}
+							<Text className="text-foreground font-medium">{pendingAsset.name}</Text>
+						</Text>
+						<TextInput
+							value={pendingName}
+							onChangeText={setPendingName}
+							className="text-foreground text-sm border border-muted rounded px-2 py-1"
+							placeholder={pendingAsset.name}
+							editable={!isUploading}
+							submitBehavior="submit"
+							onSubmitEditing={handleConfirmUpload}
+						/>
+						<View className="flex-row gap-2">
+							<Button size="sm" onPress={handleConfirmUpload} isDisabled={isUploading} className="flex-1">
+								{isUploading
+									? <StyledLoader2 size={14} className="animate-spin text-foreground mr-1" />
+									: null}
+								<Text className="text-sm">{isUploading ? "Uploading..." : "Upload"}</Text>
+							</Button>
+							<Button size="sm" variant="ghost" onPress={() => { setPendingAsset(null); setPendingName(""); }} isDisabled={isUploading}>
+								<Text className="text-sm">Cancel</Text>
+							</Button>
+						</View>
+					</View>
+				)}
 
 				{isLoading && (
 					<View className="flex-row items-center gap-2 py-2">
@@ -288,6 +382,7 @@ export function ItemAttachments({
 								onDownload={handleDownload}
 								onDelete={handleDelete}
 								canEdit={canEdit}
+								accountEmail={accountEmail}
 							/>
 						))}
 					</View>

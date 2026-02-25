@@ -6,6 +6,7 @@ import type {
 } from "@bittery/shared/types";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type {
+	CachedAttachment,
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 	ICrypto,
@@ -24,6 +25,7 @@ export type { RawEncryptedItem, RawEncryptedItemWithVault };
 export interface RawEncryptedItemWithVersion extends RawEncryptedItem {
 	version: number;
 	lastModifiedBy: string | null;
+	attachments?: CachedAttachment[];
 }
 
 export interface MultiAccountItem extends DecryptedItem {
@@ -187,6 +189,7 @@ export class ItemService {
 					createdAt: item.createdAt,
 					updatedAt: item.updatedAt,
 					deletedAt: item.deletedAt,
+					attachments: item.attachments,
 					vault: vault
 						? {
 								id: vault.id,
@@ -222,6 +225,10 @@ export class ItemService {
 			createdAt: String(item.createdAt),
 			updatedAt: String(item.updatedAt),
 			deletedAt: item.deletedAt ? String(item.deletedAt) : null,
+			attachments: item.attachments?.map((a) => ({
+				...a,
+				createdAt: String(a.createdAt),
+			})),
 		}));
 	}
 
@@ -533,6 +540,7 @@ export class ItemService {
 					createdAt: cached.createdAt,
 					updatedAt: cached.updatedAt,
 					deletedAt: cached.deletedAt ?? null,
+					attachments: cached.attachments,
 				};
 			}
 		}
@@ -556,6 +564,10 @@ export class ItemService {
 				createdAt: fetched.createdAt,
 				updatedAt: fetched.updatedAt,
 				deletedAt: fetched.deletedAt,
+				attachments: (fetched as any).attachments?.map((a: any) => ({
+					...a,
+					createdAt: String(a.createdAt),
+				})),
 			};
 		}
 

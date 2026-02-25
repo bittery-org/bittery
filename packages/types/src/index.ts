@@ -188,6 +188,8 @@ export interface CachedEncryptedItem {
 	createdAt: string;
 	updatedAt: string;
 	deletedAt?: string | null;
+	/** Attachment metadata cached alongside the item */
+	attachments?: CachedAttachment[];
 }
 
 /**
@@ -208,6 +210,25 @@ export interface ItemCacheMetadata {
 	lastFullSyncAt: number;
 	itemCount: number;
 	cacheVersion: number;
+}
+
+/**
+ * Cached attachment metadata for local-first storage.
+ * Stores the encrypted form (requires vault key to decrypt name/content-type).
+ */
+export interface CachedAttachment {
+	id: string;
+	itemId: string;
+	vaultId: string;
+	storageKey: string;
+	encryptedName: string;
+	encryptedContentType: string;
+	encryptionIv: string;
+	encryptedContentTypeIv: string | null;
+	encryptionAlgorithm: string;
+	fileSize: number;
+	uploadedBy: string | null;
+	createdAt: string;
 }
 
 // ============================================================================
@@ -279,6 +300,8 @@ export interface RawEncryptedItem {
 	createdAt: string | Date;
 	updatedAt: string | Date;
 	deletedAt?: string | Date | null;
+	/** Attachment metadata loaded alongside the item */
+	attachments?: CachedAttachment[];
 }
 
 /**
