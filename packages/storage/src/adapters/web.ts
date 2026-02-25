@@ -11,7 +11,6 @@ import {
 import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
-	EncryptedData,
 	ItemCacheMetadata,
 } from "@bittery/types";
 import type { IStorageAdapter } from "../adapter";
@@ -35,9 +34,10 @@ const SERVER_URL_STORAGE = "bittery_server_url";
 const ENCRYPTED_PRIVATE_KEY_STORAGE = "bittery_encrypted_private_key";
 const AUTO_LOCK_TIMEOUT_STORAGE = "bittery_auto_lock_timeout";
 const ITEM_CACHE_DB_NAME = "bittery_item_cache";
-const ITEM_CACHE_DB_VERSION = 1;
+const ITEM_CACHE_DB_VERSION = 2;
 const ITEM_CACHE_ITEMS_STORE = "items";
 const ITEM_CACHE_VAULTS_STORE = "vaults";
+const ITEM_CACHE_ATTACHMENTS_STORE = "attachments";
 const ITEM_CACHE_METADATA_STORE = "metadata";
 const ITEM_CACHE_META_KEY = "item_cache_meta";
 
@@ -78,22 +78,6 @@ async function getDeviceKey(): Promise<Uint8Array> {
 }
 
 /**
- * Check if an encrypted vault key is AES-GCM encrypted (JSON format) or RSA encrypted (plain base64)
- */
-function isAesEncryptedVaultKey(encryptedVaultKey: string): boolean {
-	try {
-		const parsed = JSON.parse(encryptedVaultKey);
-		return (
-			parsed &&
-			typeof parsed.ciphertext === "string" &&
-			typeof parsed.iv === "string"
-		);
-	} catch {
-		return false;
-	}
-}
-
-/**
  * Web Storage Adapter Implementation
  */
 export class WebStorageAdapter implements IStorageAdapter {
@@ -130,6 +114,15 @@ export class WebStorageAdapter implements IStorageAdapter {
 					}
 					if (!db.objectStoreNames.contains(ITEM_CACHE_METADATA_STORE)) {
 						db.createObjectStore(ITEM_CACHE_METADATA_STORE, { keyPath: "key" });
+					}
+					if (!db.objectStoreNames.contains(ITEM_CACHE_ATTACHMENTS_STORE)) {
+						const attachmentsStore = db.createObjectStore(
+							ITEM_CACHE_ATTACHMENTS_STORE,
+							{ keyPath: "id" },
+						);
+						attachmentsStore.createIndex("by_item", "itemId", {
+							unique: false,
+						});
 					}
 				};
 
@@ -279,19 +272,6 @@ export class WebStorageAdapter implements IStorageAdapter {
 			return stored ? JSON.parse(stored) : null;
 		}
 		return null;
-	}
-
-	async getDecryptedVaultKey(
-		vaultId: string,
-		_email?: string,
-	): Promise<Uint8Array | null> {
-		const vaultKeys = await this.getVaultKeys();
-		if (!vaultKeys) return null;
-
-		const vaultKeyData = vaultKeys.find((vk) => vk.vaultId === vaultId);
-		if (!vaultKeyData) return null;
-
-		return this.decryptVaultKey(vaultKeyData.encryptedVaultKey);
 	}
 
 	async storeEncryptedPrivateKey(
@@ -746,51 +726,6 @@ export class WebStorageAdapter implements IStorageAdapter {
 	private clearStoredSession(): void {
 		if (typeof window === "undefined") return;
 		localStorage.removeItem(SESSION_DATA_STORAGE);
-	}
-
-	async decryptVaultKey(
-		encryptedVaultKey: string,
-		_email?: string,
-	): Promise<Uint8Array> {
-		const muk = await this.getMasterUnlockKey();
-		if (!muk) {
-			throw new Error("Master Unlock Key not available. Please log in again.");
-		}
-
-		if (isAesEncryptedVaultKey(encryptedVaultKey)) {
-			// AES-GCM encrypted (owner's vault key)
-			const encryptedData: EncryptedData = JSON.parse(encryptedVaultKey);
-			const mukBase64 = arrayBufferToBase64(muk);
-			const decryptedBase64 = await this.crypto.decrypt(
-				encryptedData,
-				base64ToArrayBuffer(mukBase64),
-			);
-			return base64ToArrayBuffer(decryptedBase64);
-		}
-
-		// RSA encrypted (shared vault key)
-		const encryptedPrivateKey = await this.getEncryptedPrivateKey();
-		if (!encryptedPrivateKey) {
-			throw new Error(
-				"Encrypted private key not available. Please log in again.",
-			);
-		}
-
-		// Decrypt private key with MUK
-		const privateKeyEncryptedData: EncryptedData =
-			JSON.parse(encryptedPrivateKey);
-		const mukBase64 = arrayBufferToBase64(muk);
-		const privateKeyPEM = await this.crypto.decrypt(
-			privateKeyEncryptedData,
-			base64ToArrayBuffer(mukBase64),
-		);
-
-		// Use RSA to decrypt vault key
-		const vaultKeyBase64 = await this.crypto.rsaDecrypt(
-			encryptedVaultKey,
-			privateKeyPEM,
-		);
-		return base64ToArrayBuffer(vaultKeyBase64);
 	}
 }
 

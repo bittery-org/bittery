@@ -25,8 +25,8 @@ import {
 	IconLoader2OutlineDuo18,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import { useEffect, useMemo, useState } from "react";
 import { storage } from "@/lib/storage";
 
 interface DeviceSetupAccount {

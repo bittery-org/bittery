@@ -1,15 +1,12 @@
 /**
  * useItem Hook - Unified Single Item Fetching
  *
- * Automatically detects the account for an item and fetches it with the correct credentials.
- * Works in both single-account and "All Accounts" mode without manual account management.
+ * Reads from the local VaultRepositoryCoordinator.
  */
 
-import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItemData } from "@bittery/shared/types";
-import { useQuery } from "@tanstack/react-query";
-import { useCoreContext, usePlatform } from "../context/platform-context";
-import { useItems } from "./use-items";
+import { useMemo } from "react";
+import { useVaultRepositorySync } from "./use-vault-repository-sync";
 
 export interface UseItemOptions {
 	accountEmail?: string;
@@ -24,83 +21,86 @@ export interface UseItemResult {
 	refetch: () => void;
 }
 
+function extractDecryptedData(item: any): DecryptedItemData {
+	const data = { ...item } as Record<string, unknown>;
+	delete data.id;
+	delete data.vaultId;
+	delete data.category;
+	delete data.favorite;
+	delete data.createdAt;
+	delete data.updatedAt;
+	delete data.deletedAt;
+	delete data.version;
+	delete data.lastModifiedBy;
+	delete data.attachments;
+	delete data._encrypted;
+	delete data.vault;
+	delete data.account;
+	return data as unknown as DecryptedItemData;
+}
+
 /**
  * Hook to fetch and decrypt a single item.
- * Automatically handles account detection in "All Accounts" mode.
- *
- * @param itemId - The ID of the item to fetch
- * @returns Object containing raw item, decrypted data, loading state, and error
- *
- * @example
- * ```tsx
- * const { decryptedData, isLoading } = useItem(itemId);
- *
- * if (isLoading) return <Loader />;
- * return <ItemDetails data={decryptedData} />;
- * ```
  */
 export function useItem(
 	itemId: string,
 	options: UseItemOptions = {},
 ): UseItemResult {
-	const trpcClient = useTRPCClient();
-	const core = useCoreContext();
-	const { storage } = usePlatform();
-	const { accountEmail: explicitAccountEmail, enabled = true } = options;
+	const { enabled = true } = options;
+	const { isLoading, refetch, snapshot, vaultCoordinator } =
+		useVaultRepositorySync({
+			enabled,
+			requiredId: itemId,
+		});
 
-	const { data: activeAccount, isLoading: isLoadingActiveAccount } = useQuery({
-		queryKey: ["accounts", "active"],
-		queryFn: () => storage.getActiveAccount(),
-		staleTime: 5 * 1000,
-		enabled: enabled && storage.supportsMultiAccount && !explicitAccountEmail,
-	});
+	const item = useMemo(() => {
+		if (!enabled || !itemId) {
+			return undefined;
+		}
+		return vaultCoordinator.getById(itemId);
+	}, [vaultCoordinator, enabled, itemId, snapshot]);
 
-	const isAllAccountsMode = activeAccount?.type === "all";
-	const shouldResolveFromItems =
-		enabled && isAllAccountsMode && !explicitAccountEmail;
-	const isResolvingAccountMode =
-		enabled &&
-		storage.supportsMultiAccount &&
-		!explicitAccountEmail &&
-		isLoadingActiveAccount;
+	if (!enabled || !itemId) {
+		return {
+			rawItem: null,
+			decryptedData: null,
+			isLoading: false,
+			error: null,
+			refetch,
+		};
+	}
 
-	// In all-accounts mode without explicit account, find the source account first.
-	const { items, isLoading: isLoadingItems } = useItems({
-		enabled: shouldResolveFromItems,
-	});
+	if (!item) {
+		return {
+			rawItem: null,
+			decryptedData: null,
+			isLoading,
+			error: null,
+			refetch,
+		};
+	}
 
-	const itemFromList = shouldResolveFromItems
-		? items.find((i) => i.id === itemId)
-		: undefined;
-	const resolvedAccountEmail = explicitAccountEmail
-		? explicitAccountEmail
-		: isAllAccountsMode && itemFromList && "account" in itemFromList
-			? (itemFromList as any).account?.email
-			: undefined;
-
-	const { data, isLoading, error, refetch } = useQuery({
-		queryKey: resolvedAccountEmail
-			? ["decrypted-item-account", itemId, resolvedAccountEmail]
-			: ["decrypted-item", itemId],
-		queryFn: () =>
-			core.items.fetchAndDecryptItem(itemId, trpcClient, resolvedAccountEmail),
-		enabled:
-			!!itemId &&
-			enabled &&
-			!isResolvingAccountMode &&
-			(!isAllAccountsMode || !!resolvedAccountEmail),
-		staleTime: 5 * 60 * 1000,
-		gcTime: 10 * 60 * 1000,
-	});
+	const rawItem = {
+		id: item.id,
+		vaultId: item.vaultId,
+		category: item.category,
+		favorite: item.favorite,
+		encryptedData: item._encrypted.data,
+		encryptionIv: item._encrypted.iv,
+		encryptionAlgorithm: item._encrypted.algorithm,
+		version: item.version,
+		lastModifiedBy: item.lastModifiedBy,
+		createdAt: item.createdAt,
+		updatedAt: item.updatedAt,
+		deletedAt: item.deletedAt,
+		attachments: item.attachments,
+	};
 
 	return {
-		rawItem: data?.rawItem,
-		decryptedData: data?.decryptedData,
-		isLoading:
-			isLoading ||
-			isLoadingActiveAccount ||
-			(shouldResolveFromItems && isLoadingItems),
-		error: (error as Error | null) ?? null,
+		rawItem,
+		decryptedData: extractDecryptedData(item),
+		isLoading,
+		error: null,
 		refetch,
 	};
 }

@@ -102,7 +102,9 @@ function normalizePayload(
 	};
 }
 
-function createSetupUrl(payload: DeviceSetupQrPayload | DeviceSetupLinkPayload) {
+function createSetupUrl(
+	payload: DeviceSetupQrPayload | DeviceSetupLinkPayload,
+) {
 	const normalizedServerUrl = normalizeServerUrl(payload.serverUrl);
 	if (!normalizedServerUrl) {
 		throw new Error("Invalid server URL in setup payload");
@@ -140,7 +142,9 @@ export function buildDeviceSetupQrUri(payload: DeviceSetupQrPayload): string {
 	return createSetupUrl(payload);
 }
 
-export function buildDeviceSetupLinkUri(payload: DeviceSetupLinkPayload): string {
+export function buildDeviceSetupLinkUri(
+	payload: DeviceSetupLinkPayload,
+): string {
 	return createSetupUrl(payload);
 }
 

@@ -24,6 +24,7 @@ export interface DerivedKeys {
 export interface ICrypto {
 	decrypt(encryptedData: EncryptedData, key: Uint8Array): Promise<string>;
 	encrypt(plaintext: string, key: Uint8Array): Promise<EncryptedData>;
+	rsaDecrypt?(ciphertext: string, privateKeyPem: string): Promise<string>;
 	generateEncryptionKey(): Promise<Uint8Array>;
 	deriveKeys(
 		password: string,
@@ -188,6 +189,8 @@ export interface CachedEncryptedItem {
 	createdAt: string;
 	updatedAt: string;
 	deletedAt?: string | null;
+	/** Attachment metadata cached alongside the item */
+	attachments?: CachedAttachment[];
 }
 
 /**
@@ -210,6 +213,25 @@ export interface ItemCacheMetadata {
 	cacheVersion: number;
 }
 
+/**
+ * Cached attachment metadata for local-first storage.
+ * Stores the encrypted form (requires vault key to decrypt name/content-type).
+ */
+export interface CachedAttachment {
+	id: string;
+	itemId: string;
+	vaultId: string;
+	storageKey: string;
+	encryptedName: string;
+	encryptedContentType: string;
+	encryptionIv: string;
+	encryptedContentTypeIv: string | null;
+	encryptionAlgorithm: string;
+	fileSize: number;
+	uploadedBy: string | null;
+	createdAt: string;
+}
+
 // ============================================================================
 // Hook/Platform Integration Types
 // ============================================================================
@@ -229,6 +251,12 @@ export interface IQueryInvalidator {
 	invalidateVaultMembers(vaultId: string): Promise<void>;
 }
 
+export interface IPendingMutationQueue {
+	enqueue(mutation: unknown): void;
+	getPendingCount?(): number;
+	hasPendingForItem?(itemId: string): boolean;
+}
+
 /**
  * Sync context - subset of sync state needed by shared hooks.
  */
@@ -237,6 +265,7 @@ export interface ISyncContext {
 	isConnected: boolean;
 	isOnline: boolean;
 	invalidator: IQueryInvalidator;
+	outboundQueue: IPendingMutationQueue;
 }
 
 /**
@@ -279,6 +308,8 @@ export interface RawEncryptedItem {
 	createdAt: string | Date;
 	updatedAt: string | Date;
 	deletedAt?: string | Date | null;
+	/** Attachment metadata loaded alongside the item */
+	attachments?: CachedAttachment[];
 }
 
 /**

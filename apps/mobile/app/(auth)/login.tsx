@@ -1,7 +1,7 @@
 import { useLogin } from "@bittery/core/hooks";
 import {
-	parseDeviceSetupParams,
 	type ParsedDeviceSetupPayload,
+	parseDeviceSetupParams,
 } from "@bittery/shared";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { useLocalSearchParams, useRouter } from "expo-router";

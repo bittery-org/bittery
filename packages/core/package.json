@@ -22,7 +22,6 @@
 		"./hooks/auth": "./src/auth/index.ts",
 		"./services/account-resolver": "./src/services/account-resolver.ts",
 		"./services/auth-service": "./src/services/auth-service.ts",
-		"./services/cache-manager": "./src/services/cache-manager.ts",
 		"./services/item-service": "./src/services/item-service.ts",
 		"./services/vault-service": "./src/services/vault-service.ts",
 		"./services/share-service": "./src/services/share-service.ts"

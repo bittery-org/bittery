@@ -128,24 +128,6 @@ export interface IStorageAdapter {
 	getVaultKeys(email?: string): Promise<VaultKeyData[] | null>;
 
 	/**
-	 * Get decrypted vault key for a specific vault.
-	 * Requires MUK to be available in memory.
-	 */
-	getDecryptedVaultKey(
-		vaultId: string,
-		email?: string,
-	): Promise<Uint8Array | null>;
-
-	/**
-	 * Decrypt a vault key string (AES-GCM or RSA encrypted).
-	 * Requires MUK to be available in memory.
-	 */
-	decryptVaultKey(
-		encryptedVaultKey: string,
-		email?: string,
-	): Promise<Uint8Array>;
-
-	/**
 	 * Store encrypted private key (for RSA operations / vault sharing).
 	 */
 	storeEncryptedPrivateKey(key: string, email?: string): Promise<void>;
@@ -373,11 +355,11 @@ export interface IStorageAdapter {
 	// ============================================================================
 
 	// ============================================================================
-	// Item Cache (optional, check supportsItemCache first)
+	// Item Cache
 	// ============================================================================
 
 	/** Whether this adapter supports local item caching */
-	readonly supportsItemCache?: boolean;
+	readonly supportsItemCache: boolean;
 
 	/** Store all cached items (bulk, for initial sync) */
 	setCachedItems?(items: CachedEncryptedItem[], email?: string): Promise<void>;

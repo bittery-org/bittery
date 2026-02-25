@@ -1,11 +1,10 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: The queries are only enabled when a team id is there */
 import { useTRPC } from "@bittery/shared/trpc";
 import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
+	Avatar,
+	AvatarFallback,
+	AvatarImage,
+	Badge,
 	Skeleton,
 	Tabs,
 	TabsContent,
@@ -16,6 +15,7 @@ import {
 	IconEnvelopeOutlineDuo18 as Mail,
 	IconGear3OutlineDuo18 as Settings,
 	IconUsers6OutlineDuo18 as Users,
+	IconVault3OutlineDuo18 as Vault,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -61,8 +61,13 @@ function TeamPage() {
 
 	if (teamListQuery.isLoading || teamQuery.isLoading) {
 		return (
-			<div className="space-y-6">
-				<Skeleton className="h-8 w-48" />
+			<div className="mx-auto w-full max-w-6xl space-y-6">
+				<Skeleton className="h-48 w-full rounded-2xl" />
+				<div className="grid gap-4 sm:grid-cols-3">
+					<Skeleton className="h-24" />
+					<Skeleton className="h-24" />
+					<Skeleton className="h-24" />
+				</div>
 				<Skeleton className="h-64" />
 			</div>
 		);
@@ -76,19 +81,74 @@ function TeamPage() {
 		);
 	}
 
-	return (
-		<div className="space-y-6">
-			<div className="flex items-center gap-4">
-				<div className="flex-1">
-					<h1 className="font-bold text-3xl tracking-tight">{team.name}</h1>
-					<p className="text-muted-foreground">
-						{team.memberCount} member{team.memberCount !== 1 ? "s" : ""} ·
-						Created by {team.ownerName}
-					</p>
-				</div>
-				{canEdit && teamId && <InviteDialog teamId={teamId} />}
-			</div>
+	const getTeamInitials = () =>
+		team.name
+			.split(" ")
+			.map((w) => w[0])
+			.join("")
+			.toUpperCase()
+			.slice(0, 2);
 
+	const roleBadgeVariant =
+		team.userRole === "owner"
+			? "default"
+			: team.userRole === "admin"
+				? "secondary"
+				: "outline";
+
+	return (
+		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
+			{/* Hero Banner */}
+			<section className="relative overflow-hidden rounded-2xl border bg-card p-6 sm:p-7">
+				<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent" />
+				<div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-muted/50 blur-3xl" />
+
+				<div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+					<div className="flex items-start gap-5">
+						<Avatar className="h-16 w-16 rounded-xl border shadow-sm">
+							{team.imageUrl && (
+								<AvatarImage src={team.imageUrl} alt={team.name} />
+							)}
+							<AvatarFallback className="rounded-xl text-lg">
+								{getTeamInitials()}
+							</AvatarFallback>
+						</Avatar>
+						<div className="space-y-3">
+							<div className="flex flex-wrap items-center gap-2">
+								<Badge variant="secondary" className="w-fit">
+									Team
+								</Badge>
+								<Badge variant={roleBadgeVariant} className="capitalize">
+									{team.userRole}
+								</Badge>
+							</div>
+							<div className="space-y-1.5">
+								<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl">
+									{team.name}
+								</h1>
+								<p className="text-muted-foreground">
+									{team.memberCount} member
+									{team.memberCount !== 1 ? "s" : ""} · Created by{" "}
+									{team.ownerName}
+								</p>
+							</div>
+							<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
+								<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
+									<Vault className="h-3.5 w-3.5" />
+									{team.memberCount} seat
+									{team.memberCount !== 1 ? "s" : ""} active
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<div className="flex flex-wrap gap-2 lg:justify-end">
+						{canEdit && teamId && <InviteDialog teamId={teamId} />}
+					</div>
+				</div>
+			</section>
+
+			{/* Tabs Area */}
 			<Tabs defaultValue="members">
 				<TabsList>
 					<TabsTrigger value="members">
@@ -111,48 +171,55 @@ function TeamPage() {
 				</TabsList>
 
 				<TabsContent value="members" className="mt-4">
-					<Card>
-						<CardHeader>
-							<CardTitle>Team Members</CardTitle>
-							<CardDescription>
+					<div className="space-y-3">
+						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+							<h2 className="font-semibold text-lg tracking-tight">
+								Team Members
+							</h2>
+							<p className="text-muted-foreground text-sm">
 								Manage who has access to this team.
-							</CardDescription>
-						</CardHeader>
-						<CardContent>
-							{membersQuery.isLoading ? (
-								<Skeleton className="h-32" />
-							) : teamId ? (
-								<MemberList
-									teamId={teamId}
-									members={membersQuery.data || []}
-									currentUserId={currentUserId}
-									currentUserRole={team.userRole}
-									isSelfHostedMode={isSelfHostedMode}
-								/>
-							) : null}
-						</CardContent>
-					</Card>
+							</p>
+						</div>
+						{membersQuery.isLoading ? (
+							<div className="grid gap-3 sm:grid-cols-2">
+								<Skeleton className="h-28" />
+								<Skeleton className="h-28" />
+								<Skeleton className="h-28" />
+							</div>
+						) : teamId ? (
+							<MemberList
+								teamId={teamId}
+								members={membersQuery.data || []}
+								currentUserId={currentUserId}
+								currentUserRole={team.userRole}
+								isSelfHostedMode={isSelfHostedMode}
+							/>
+						) : null}
+					</div>
 				</TabsContent>
 
 				<TabsContent value="invitations" className="mt-4">
-					<Card>
-						<CardHeader>
-							<CardTitle>Pending Invitations</CardTitle>
-							<CardDescription>
+					<div className="space-y-3">
+						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+							<h2 className="font-semibold text-lg tracking-tight">
+								Pending Invitations
+							</h2>
+							<p className="text-muted-foreground text-sm">
 								Invitations that haven't been accepted yet.
-							</CardDescription>
-						</CardHeader>
-						<CardContent>
-							{invitationsQuery.isLoading ? (
-								<Skeleton className="h-32" />
-							) : teamId ? (
-								<PendingInvitationsList
-									invitations={invitationsQuery.data || []}
-									canManage={canEdit}
-								/>
-							) : null}
-						</CardContent>
-					</Card>
+							</p>
+						</div>
+						{invitationsQuery.isLoading ? (
+							<div className="grid gap-3 sm:grid-cols-2">
+								<Skeleton className="h-28" />
+								<Skeleton className="h-28" />
+							</div>
+						) : teamId ? (
+							<PendingInvitationsList
+								invitations={invitationsQuery.data || []}
+								canManage={canEdit}
+							/>
+						) : null}
+					</div>
 				</TabsContent>
 
 				<TabsContent value="settings" className="mt-4">

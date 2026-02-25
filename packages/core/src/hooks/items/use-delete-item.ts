@@ -4,13 +4,12 @@
  * Soft-deletes a vault item (moves to trash).
  */
 
-import { useTRPCClient } from "@bittery/shared/trpc";
 import { useMutation } from "@tanstack/react-query";
 import {
-	useCoreContext,
-	useQueryInvalidator,
-} from "../../context/platform-context";
-import { useItems } from "../use-items";
+	enqueueItemMutation,
+	requireLocalItemMutationContext,
+	useItemMutationRuntime,
+} from "./mutation-utils";
 
 /**
  * Input for deleting an item
@@ -24,26 +23,24 @@ export interface DeleteItemInput {
  * Hook for soft-deleting a vault item.
  */
 export function useDeleteItem() {
-	const { items } = useItems();
-	const defaultClient = useTRPCClient();
-	const core = useCoreContext();
-	const invalidator = useQueryInvalidator();
+	const { core, queue } = useItemMutationRuntime();
 
 	return useMutation({
 		mutationFn: async (input: DeleteItemInput) => {
-			const accountEmail = core.accounts.findAccountForItem(
+			const context = requireLocalItemMutationContext(
+				core,
 				input.itemId,
-				items,
 			);
-			return core.items.deleteItem(input.itemId, defaultClient, accountEmail);
-		},
-		onSuccess: async (data, variables) => {
-			await core.cache.onItemDeleted({
-				itemId: variables.itemId,
-				accountEmail: data._accountEmail,
+			await context.repo.softDelete(input.itemId);
+			enqueueItemMutation(queue, context, {
+				type: "delete",
+				entityId: input.itemId,
+				vaultId: input.vaultId,
 			});
-			await invalidator.invalidateVaultList(variables.vaultId);
-			await invalidator.invalidateDeletedItems(variables.vaultId);
+
+			return {
+				_accountEmail: context.accountEmail,
+			};
 		},
 	});
 }

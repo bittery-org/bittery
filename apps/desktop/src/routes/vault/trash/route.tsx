@@ -43,7 +43,9 @@ function TrashComponent() {
 
 	// Sort items by deletedAt (most recent first)
 	const sortedItems = [...deletedItems].sort((a, b) => {
-		return new Date(b.deletedAt).getTime() - new Date(a.deletedAt).getTime();
+		const left = b.deletedAt ? new Date(b.deletedAt).getTime() : 0;
+		const right = a.deletedAt ? new Date(a.deletedAt).getTime() : 0;
+		return left - right;
 	});
 
 	const handleRestore = async (

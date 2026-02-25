@@ -45,7 +45,6 @@ export function SecureNoteForm({
 					tags: initialData?.tags,
 				};
 				await onSubmit(submitData, currentVaultId);
-				toast.success("Note saved successfully");
 			} catch (error) {
 				const errorMessage =
 					error instanceof Error ? error.message : "Failed to save note";

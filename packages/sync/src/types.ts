@@ -126,19 +126,7 @@ export interface SyncStatus {
 	error: string | null;
 }
 
-/**
- * Offline operation to be synced
- */
-export interface OfflineOperation {
-	id: string;
-	type: "create" | "update" | "delete";
-	entityType: SyncEntityType;
-	entityId: string;
-	vaultId: string;
-	data: unknown;
-	timestamp: number;
-	retryCount: number;
-}
+export type { PendingMutation } from "./outbound-queue";
 
 /**
  * Storage interface for platform-specific implementations
@@ -170,7 +158,17 @@ export interface SyncManagerOptions {
  * Used by delta sync to update local cache on incoming events
  */
 export interface ItemCacheAdapter {
-	supportsItemCache?: boolean;
+	supportsItemCache: boolean;
+	upsertEncrypted?(
+		item: import("@bittery/types").CachedEncryptedItem,
+		email?: string,
+	): Promise<void>;
+	removeItem?(itemId: string, email?: string): Promise<void>;
+	upsertVault?(
+		vault: import("@bittery/types").CachedVaultMetadata,
+		email?: string,
+	): Promise<void>;
+	removeVault?(vaultId: string, email?: string): Promise<void>;
 	upsertCachedItem?(
 		item: import("@bittery/types").CachedEncryptedItem,
 		email?: string,

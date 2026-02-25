@@ -4,13 +4,12 @@
  * Restores a soft-deleted vault item from trash.
  */
 
-import { useTRPCClient } from "@bittery/shared/trpc";
 import { useMutation } from "@tanstack/react-query";
 import {
-	useCoreContext,
-	useQueryInvalidator,
-} from "../../context/platform-context";
-import { useDeletedItems } from "../use-deleted-items";
+	enqueueItemMutation,
+	requireLocalItemMutationContext,
+	useItemMutationRuntime,
+} from "./mutation-utils";
 
 /**
  * Input for restoring an item from trash
@@ -24,26 +23,24 @@ export interface RestoreItemInput {
  * Hook for restoring a soft-deleted item from trash.
  */
 export function useRestoreItem() {
-	const { items: deletedItems } = useDeletedItems();
-	const defaultClient = useTRPCClient();
-	const core = useCoreContext();
-	const invalidator = useQueryInvalidator();
+	const { core, queue } = useItemMutationRuntime();
 
 	return useMutation({
 		mutationFn: async (input: RestoreItemInput) => {
-			const accountEmail = core.accounts.findAccountForItem(
+			const context = requireLocalItemMutationContext(
+				core,
 				input.itemId,
-				deletedItems,
 			);
-			return core.items.restoreItem(input.itemId, defaultClient, accountEmail);
-		},
-		onSuccess: async (data, variables) => {
-			await core.cache.onItemRestored({
-				itemId: variables.itemId,
-				accountEmail: data._accountEmail,
+			await context.repo.restore(input.itemId);
+			enqueueItemMutation(queue, context, {
+				type: "restore",
+				entityId: input.itemId,
+				vaultId: input.vaultId,
 			});
-			await invalidator.invalidateVaultList(variables.vaultId);
-			await invalidator.invalidateDeletedItems(variables.vaultId);
+
+			return {
+				_accountEmail: context.accountEmail,
+			};
 		},
 	});
 }

@@ -115,7 +115,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 	const handleClose = () => {
 		if (isDirty) {
 			setAutoLockTimeout(
-				String(settingsQuery.data?.autoLockTimeoutMs ?? DEFAULT_AUTO_LOCK_TIMEOUT_MS),
+				String(
+					settingsQuery.data?.autoLockTimeoutMs ?? DEFAULT_AUTO_LOCK_TIMEOUT_MS,
+				),
 			);
 			setMasterPasswordReentry(
 				String(settingsQuery.data?.masterPasswordReentryMs ?? 30 * DAY_MS),

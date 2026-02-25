@@ -158,6 +158,7 @@ export const syncRouter = router({
 				where,
 				orderBy: [asc(item.id)],
 				limit: input.limit + 1,
+				with: { attachments: true },
 			});
 
 			const hasMore = pageItems.length > input.limit;

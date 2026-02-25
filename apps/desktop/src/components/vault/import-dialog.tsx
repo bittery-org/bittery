@@ -1,3 +1,7 @@
+import {
+	getDecryptedVaultKey,
+	type VaultKeyCryptoProvider,
+} from "@bittery/shared";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import {
@@ -14,13 +18,13 @@ import {
 import {
 	IconCircleCheck2OutlineDuo18,
 	IconCircleWarningOutlineDuo18,
-	IconUpload3OutlineDuo18,
+	IconUpload4OutlineDuo18,
 } from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
-import { encrypt } from "../../lib/tauri-crypto";
+import { decrypt, encrypt, rsaDecrypt } from "../../lib/tauri-crypto";
 import {
 	useClientId,
 	useQueryInvalidator,
@@ -113,10 +117,15 @@ export function ImportDialog({
 
 			// Get vault key for encryption
 			setImportStatus("encrypting");
-			const vaultKey = await storage.getDecryptedVaultKey(
+			const vaultKey = await getDecryptedVaultKey({
 				vaultId,
-				accountEmail,
-			);
+				email: accountEmail,
+				storage,
+				crypto: {
+					decrypt,
+					rsaDecrypt,
+				} as VaultKeyCryptoProvider,
+			});
 			if (!vaultKey) {
 				throw new Error("Failed to get vault key for encryption");
 			}
@@ -300,7 +309,7 @@ export function ImportDialog({
 												importStatus === "uploading"
 											}
 										>
-											<IconUpload3OutlineDuo18 className="h-4 w-4" />
+											<IconUpload4OutlineDuo18 className="h-4 w-4" />
 											<span className="max-w-xs truncate">
 												{field.state.value
 													? field.state.value.name

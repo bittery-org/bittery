@@ -1,17 +1,18 @@
 /**
  * useUpdateItem Hook
  *
- * Updates an existing vault item with encryption.
+ * Updates an existing vault item with local-first persistence when sync queue is available.
  */
 
-import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItemData } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";
 import {
-	useCoreContext,
-	useQueryInvalidator,
-} from "../../context/platform-context";
-import { useItems } from "../use-items";
+	enqueueItemMutation,
+	extractDecryptedItemData,
+	requireLocalItemMutationContext,
+	toQueueEncryptedPayload,
+	useItemMutationRuntime,
+} from "./mutation-utils";
 
 /**
  * Input for updating an item
@@ -26,26 +27,47 @@ export interface UpdateItemInput {
  * Hook for updating a vault item.
  */
 export function useUpdateItem() {
-	const { items } = useItems();
-	const defaultClient = useTRPCClient();
-	const core = useCoreContext();
-	const invalidator = useQueryInvalidator();
+	const { core, queue } = useItemMutationRuntime();
 
 	return useMutation({
 		mutationFn: async (input: UpdateItemInput) => {
-			const accountEmail = core.accounts.findAccountForItem(
+			const context = requireLocalItemMutationContext(
+				core,
 				input.itemId,
-				items,
 			);
-			return core.items.updateItem({ ...input, accountEmail }, defaultClient);
-		},
-		onSuccess: async (data, variables) => {
-			await core.cache.onItemUpdated({
-				itemId: variables.itemId,
-				encryptedData: data._encryptedData,
-				accountEmail: data._accountEmail,
+			const existing = context.item;
+
+			const mergedData = core.items.mergeItemUpdate(
+				extractDecryptedItemData(existing),
+				input.data,
+				existing.category,
+			);
+
+			const encrypted = await context.repo.encryptWithVaultKey(
+				existing.vaultId,
+				mergedData,
+			);
+
+			await context.repo.upsertLocal(
+				{
+					...existing,
+					...mergedData,
+					updatedAt: new Date().toISOString(),
+				},
+				encrypted,
+			);
+
+			enqueueItemMutation(queue, context, {
+				type: "update",
+				entityId: input.itemId,
+				vaultId: existing.vaultId,
+				encryptedPayload: toQueueEncryptedPayload(encrypted),
 			});
-			await invalidator.invalidateItem(variables.itemId, variables.vaultId);
+
+			return {
+				_encryptedData: encrypted,
+				_accountEmail: context.accountEmail,
+			};
 		},
 	});
 }

@@ -36,6 +36,7 @@ import { useCallback, useState } from "react";
 import Loader from "../loader";
 import { VaultInfoPopover } from "./item-categories/shared/vault-info-popover";
 import ItemDetail from "./item-detail";
+import { ItemAttachments } from "./item-detail/item-attachments";
 import { ItemForm } from "./item-form";
 import { MoveItemDialog } from "./move-item-dialog";
 import { PasswordHistoryDialog } from "./password-history-dialog";
@@ -360,6 +361,13 @@ export function ItemDetailPage({
 						availableTags={availableTags}
 						isUpdatingTags={isUpdatingTags}
 					/>
+					{rawItem && (
+						<ItemAttachments
+							itemId={rawItem.id}
+							vaultId={rawItem.vaultId}
+							canEdit
+						/>
+					)}
 				</div>
 			</div>
 

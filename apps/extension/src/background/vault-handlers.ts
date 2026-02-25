@@ -4,9 +4,6 @@
  */
 
 import type { DecryptedItem } from "@bittery/shared/types";
-import { storage } from "../lib/storage";
-import { core } from "./core-instance";
-import { desktopSync } from "./desktop-sync";
 import { updateActivity } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
@@ -14,20 +11,6 @@ import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
 async function getAllDecryptedItems(): Promise<Array<DecryptedItem | null>> {
 	return getDecryptedItemsForCurrentMode();
-}
-
-async function resolveItemAccountEmail(
-	itemId: string,
-): Promise<string | undefined> {
-	const activeAccount = await storage.getActiveAccount();
-	if (activeAccount?.type !== "all") return undefined;
-
-	const items = await getAllDecryptedItems();
-	const item = items.find((candidate) => candidate?.id === itemId) as
-		| (DecryptedItem & { account?: { email?: string } })
-		| undefined;
-
-	return item?.account?.email;
 }
 
 /**
@@ -52,34 +35,9 @@ export async function handleGetVaultItem(payload: {
 	updateActivity();
 
 	const { itemId } = payload;
-	const desktopStatus = desktopSync.getLastStatus();
-	const useDesktopPath = !!desktopStatus?.available && !desktopStatus.locked;
-
-	if (useDesktopPath) {
-		const items = await getAllDecryptedItems();
-		const item = items.find((candidate) => candidate?.id === itemId) ?? null;
-		return { success: true, item };
-	}
-
-	const accountEmail = await resolveItemAccountEmail(itemId);
-
-	const result = await core.items.fetchAndDecryptItem(
-		itemId,
-		trpcClient as Parameters<typeof core.items.fetchAndDecryptItem>[1],
-		accountEmail,
-	);
-
-	if (!result.rawItem || !result.decryptedData) {
-		return { success: true, item: null };
-	}
-
-	return {
-		success: true,
-		item: {
-			...result.rawItem,
-			...result.decryptedData,
-		},
-	};
+	const items = await getAllDecryptedItems();
+	const item = items.find((candidate) => candidate?.id === itemId) ?? null;
+	return { success: true, item };
 }
 
 /**

@@ -3,7 +3,6 @@
  * Shared helpers for vault operations.
  */
 
-import type { MultiAccountItem } from "@bittery/core";
 import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
 import type {
 	DecryptedItem,
@@ -25,6 +24,20 @@ type AccountTrpcClient = ReturnType<typeof createAccountTrpcClient>;
 type VaultListResponse = Awaited<
 	ReturnType<AccountTrpcClient["vault"]["list"]["query"]>
 >;
+type MultiAccountItem = DecryptedItem & {
+	vault: {
+		id: string;
+		name: string;
+		type: string;
+		icon: string | null;
+		imageUrl: string | null;
+	};
+	account?: {
+		email: string;
+		userId: string;
+		name: string;
+	};
+};
 
 type DesktopAccountContext = {
 	email: string;
@@ -230,30 +243,29 @@ async function decryptVaultItemsForAccountViaDesktop(
 	email: string,
 	includeAccountContext: boolean,
 ): Promise<MultiAccountItem[]> {
-	if (storage.supportsItemCache) {
-		const [cachedItems, cachedVaults, cacheMeta] = await Promise.all([
+	const [cachedItemsSnapshot, cachedVaultsSnapshot, cacheMeta] =
+		await Promise.all([
 			storage.getCachedItems?.(email),
 			storage.getCachedVaults?.(email),
 			storage.getItemCacheMetadata?.(email),
 		]);
 
-		const hasCacheSnapshot =
-			!!cachedItems &&
-			!!cachedVaults &&
-			(cachedItems.length > 0 || cacheMeta !== null);
-		if (hasCacheSnapshot) {
-			try {
-				return await decryptRawItemsViaDesktop(
-					buildRawItemsFromCache(cachedItems, cachedVaults),
-					email,
-					includeAccountContext,
-				);
-			} catch (error) {
-				console.warn(
-					`[vault-utils] Cache decrypt failed for ${email}, refetching from server:`,
-					error,
-				);
-			}
+	const hasCacheSnapshot =
+		!!cachedItemsSnapshot &&
+		!!cachedVaultsSnapshot &&
+		(cachedItemsSnapshot.length > 0 || cacheMeta !== null);
+	if (hasCacheSnapshot) {
+		try {
+			return await decryptRawItemsViaDesktop(
+				buildRawItemsFromCache(cachedItemsSnapshot, cachedVaultsSnapshot),
+				email,
+				includeAccountContext,
+			);
+		} catch (error) {
+			console.warn(
+				`[vault-utils] Cache decrypt failed for ${email}, refetching from server:`,
+				error,
+			);
 		}
 	}
 
@@ -271,13 +283,19 @@ async function decryptVaultItemsForAccountViaDesktop(
 	const vaults = await accountClient.vault.list.query();
 	const rawItems = buildRawItemsFromVaultList(vaults);
 
-	if (storage.supportsItemCache) {
-		await core.cache.populateFromServerResponse(
-			buildCachedItemsFromVaultList(vaults),
-			buildCachedVaultsFromVaultList(vaults),
+	const cachedItems = buildCachedItemsFromVaultList(vaults);
+	await Promise.all([
+		storage.setCachedItems?.(cachedItems, email),
+		storage.setCachedVaults?.(buildCachedVaultsFromVaultList(vaults), email),
+		storage.setItemCacheMetadata?.(
+			{
+				lastFullSyncAt: Date.now(),
+				itemCount: cachedItems.length,
+				cacheVersion: 1,
+			},
 			email,
-		);
-	}
+		),
+	]);
 
 	return decryptRawItemsViaDesktop(rawItems, email, includeAccountContext);
 }
@@ -324,9 +342,9 @@ export async function getDecryptedItemsForCurrentMode(): Promise<
 		}
 	}
 
-	const { accountsInfo, isAllAccountsMode } =
-		await core.accounts.resolveAccounts();
-	return core.items.fetchAndDecryptItems(accountsInfo, { isAllAccountsMode });
+	const { accountsInfo } = await core.accounts.resolveAccounts();
+	await core.vaultCoordinator.hydrate(accountsInfo);
+	return core.vaultCoordinator.getAll();
 }
 
 /**

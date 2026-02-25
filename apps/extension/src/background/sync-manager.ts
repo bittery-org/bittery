@@ -131,15 +131,13 @@ async function handleSyncEvent(event: SyncEvent): Promise<void> {
 		return;
 	}
 
-	if (syncCacheService.supportsItemCache()) {
-		try {
-			await syncCacheService.applyDeltaSyncForEvent(event);
-		} catch (error) {
-			console.error(
-				"[sync-manager] Delta sync failed, popup will do full refetch:",
-				error,
-			);
-		}
+	try {
+		await syncCacheService.applyDeltaSyncForEvent(event);
+	} catch (error) {
+		console.error(
+			"[sync-manager] Delta sync failed, popup will do full refetch:",
+			error,
+		);
 	}
 
 	// Notify popup to refresh data (reads from updated cache if delta sync succeeded).
@@ -153,10 +151,6 @@ async function handleSyncEvent(event: SyncEvent): Promise<void> {
  * Catch up on missed events since last sync timestamp.
  */
 async function catchUpMissedEvents(): Promise<void> {
-	if (!syncCacheService.supportsItemCache()) {
-		return;
-	}
-
 	try {
 		const lastCursor = await getLastSyncCursor();
 		if (!lastCursor) {

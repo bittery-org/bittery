@@ -35,13 +35,8 @@ export {
 	type UnlockResult,
 } from "./services/auth-service";
 export {
-	CacheManager,
-	type EncryptedPayload,
-} from "./services/cache-manager";
-export {
 	type CreateItemInput,
 	type CreateItemResult,
-	type DeleteItemResult,
 	type FetchDecryptedItemResult,
 	type FetchDeletedItemsOptions,
 	type FetchItemsOptions,
@@ -50,11 +45,8 @@ export {
 	type MoveItemResult,
 	type MultiAccountDeletedItem,
 	type MultiAccountItem,
-	type PermanentDeleteItemResult,
 	type RawEncryptedItem,
 	type RawEncryptedItemWithVault,
-	type RestoreItemResult,
-	type ToggleFavoriteResult,
 	type UpdateItemInput,
 	type UpdateItemResult,
 } from "./services/item-service";
@@ -66,6 +58,18 @@ export {
 	type ShareExpirationOption,
 	ShareService,
 } from "./services/share-service";
+export {
+	type BootstrapItemsClient,
+	type EncryptedPayload as RepositoryEncryptedPayload,
+	VaultRepository,
+	type VaultRepositoryItem,
+	type VaultView,
+} from "./services/vault-repository";
+export {
+	type CoordinatedItem,
+	getOrCreateVaultRepositoryCoordinator,
+	VaultRepositoryCoordinator,
+} from "./services/vault-repository-coordinator";
 export {
 	type CreateVaultInput,
 	type CreateVaultResult,

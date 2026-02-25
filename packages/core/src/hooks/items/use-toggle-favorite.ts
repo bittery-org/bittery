@@ -4,13 +4,12 @@
  * Toggles the favorite status of a vault item.
  */
 
-import { useTRPCClient } from "@bittery/shared/trpc";
 import { useMutation } from "@tanstack/react-query";
 import {
-	useCoreContext,
-	useQueryInvalidator,
-} from "../../context/platform-context";
-import { useItems } from "../use-items";
+	enqueueItemMutation,
+	requireLocalItemMutationContext,
+	useItemMutationRuntime,
+} from "./mutation-utils";
 
 /**
  * Input for toggling favorite status
@@ -25,31 +24,25 @@ export interface ToggleFavoriteInput {
  * Hook for toggling an item's favorite status.
  */
 export function useToggleFavorite() {
-	const { items } = useItems();
-	const defaultClient = useTRPCClient();
-	const core = useCoreContext();
-	const invalidator = useQueryInvalidator();
+	const { core, queue } = useItemMutationRuntime();
 
 	return useMutation({
 		mutationFn: async (input: ToggleFavoriteInput) => {
-			const accountEmail = core.accounts.findAccountForItem(
+			const context = requireLocalItemMutationContext(
+				core,
 				input.itemId,
-				items,
 			);
-			return core.items.toggleFavorite(
-				input.itemId,
-				input.favorite,
-				defaultClient,
-				accountEmail,
-			);
-		},
-		onSuccess: async (data, variables) => {
-			await core.cache.onFavoriteToggled({
-				itemId: variables.itemId,
-				favorite: variables.favorite,
-				accountEmail: data._accountEmail,
+			await context.repo.updateFavorite(input.itemId, input.favorite);
+			enqueueItemMutation(queue, context, {
+				type: "toggle_favorite",
+				entityId: input.itemId,
+				vaultId: input.vaultId,
+				favorite: input.favorite,
 			});
-			await invalidator.invalidateItem(variables.itemId, variables.vaultId);
+
+			return {
+				_accountEmail: context.accountEmail,
+			};
 		},
 	});
 }

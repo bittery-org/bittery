@@ -27,6 +27,7 @@ const crypto: ICrypto = {
 	// Core encryption methods
 	decrypt: wasmCrypto.decrypt,
 	encrypt: wasmCrypto.encrypt,
+	rsaDecrypt: wasmCrypto.rsaDecrypt,
 	generateEncryptionKey: wasmCrypto.generateEncryptionKey,
 	// SRP authentication methods
 	deriveKeys: wasmCrypto.deriveKeys,
@@ -72,12 +73,14 @@ export function WebPlatformProvider({ children }: WebPlatformProviderProps) {
 			isConnected: syncContext.isConnected,
 			isOnline: syncContext.isOnline,
 			invalidator: syncContext.invalidator,
+			outboundQueue: syncContext.outboundQueue,
 		}),
 		[
 			syncContext.clientId,
 			syncContext.isConnected,
 			syncContext.isOnline,
 			syncContext.invalidator,
+			syncContext.outboundQueue,
 		],
 	);
 

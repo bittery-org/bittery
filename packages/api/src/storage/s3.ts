@@ -88,6 +88,15 @@ export function createVaultImageKey(params: {
 	return `vaults/${params.userId}/${vaultSegment}/${randomUUID()}-${safeName}`;
 }
 
+export function createAttachmentKey(params: {
+	userId: string;
+	itemId: string;
+	fileName: string;
+}): string {
+	const safeName = sanitizeFileName(params.fileName);
+	return `attachments/${params.userId}/${params.itemId}/${randomUUID()}-${safeName}`;
+}
+
 export function createTeamImageKey(params: {
 	teamId: string;
 	fileName: string;

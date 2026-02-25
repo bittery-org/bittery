@@ -3,8 +3,12 @@
  * Handles tab screenshot capture and TOTP field updates
  */
 
+import {
+	decryptStoredVaultKey,
+	type VaultKeyCryptoProvider,
+} from "@bittery/shared";
 import { storage } from "../lib/storage";
-import { decrypt, encrypt } from "../lib/wasm-crypto";
+import { decrypt, encrypt, rsaDecrypt } from "../lib/wasm-crypto";
 import {
 	ensureDesktopWriteCapability,
 	hydrateDesktopAccountMaterial,
@@ -217,10 +221,15 @@ export async function handleUpdateItemTotp(payload: {
 		}
 
 		// Decrypt vault key
-		const vaultKey = await storage.decryptVaultKey(
-			vaultKeyData.encryptedVaultKey,
-			accountEmail,
-		);
+		const vaultKey = await decryptStoredVaultKey({
+			encryptedVaultKey: vaultKeyData.encryptedVaultKey,
+			email: accountEmail,
+			storage,
+			crypto: {
+				decrypt,
+				rsaDecrypt,
+			} as VaultKeyCryptoProvider,
+		});
 
 		// Decrypt existing item data
 		const decrypted = await decrypt(

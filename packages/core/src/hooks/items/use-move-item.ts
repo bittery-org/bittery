@@ -4,14 +4,15 @@
  * Moves a vault item to a different vault with re-encryption.
  */
 
-import { useTRPCClient } from "@bittery/shared/trpc";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";
 import {
-	useCoreContext,
-	useQueryInvalidator,
-} from "../../context/platform-context";
-import { useItems } from "../use-items";
+	enqueueItemMutation,
+	refreshRepositoriesFromServer,
+	requireLocalItemMutationContext,
+	toQueueEncryptedPayload,
+	useItemMutationRuntime,
+} from "./mutation-utils";
 
 /**
  * Input for moving an item to another vault
@@ -29,45 +30,75 @@ export interface MoveItemInput {
  * Hook for moving an item to a different vault.
  */
 export function useMoveItem() {
-	const { items } = useItems();
-	const defaultClient = useTRPCClient();
-	const core = useCoreContext();
-	const invalidator = useQueryInvalidator();
+	const { core, defaultClient, invalidator, queue } = useItemMutationRuntime();
 
 	return useMutation({
 		mutationFn: async (input: MoveItemInput) => {
-			const sourceAccountEmail = core.accounts.findAccountForItem(
+			const sourceContext = requireLocalItemMutationContext(
+				core,
 				input.itemId,
-				items,
+			);
+			const targetAccount = input.targetAccountEmail
+				? {
+						email: input.targetAccountEmail,
+						repo: core.vaultCoordinator.getRepositoryForEmail(
+							input.targetAccountEmail,
+						),
+					}
+				: core.vaultCoordinator.findAccountForVault(input.targetVaultId);
+
+			if (!targetAccount) {
+				throw new Error(
+					`No account repository found for target vault ${input.targetVaultId}`,
+				);
+			}
+
+			if (sourceContext.accountEmail !== targetAccount.email) {
+				return core.items.moveItem(
+					{
+						...input,
+						sourceAccountEmail: sourceContext.accountEmail,
+						targetAccountEmail: targetAccount.email,
+					},
+					defaultClient,
+				);
+			}
+
+			const encryptedData = await core.items.reEncryptForVault(
+				input.decryptedData,
+				await sourceContext.repo.decryptVaultKey(input.targetVaultId),
+			);
+			await sourceContext.repo.moveItem(
+				input.itemId,
+				input.targetVaultId,
+				encryptedData,
 			);
 
-			return core.items.moveItem(
-				{
-					...input,
-					sourceAccountEmail,
-				},
-				defaultClient,
-			);
-		},
-		onSuccess: async (data, variables) => {
-			await core.cache.onItemMoved({
-				itemId: variables.itemId,
-				sourceVaultId: variables.sourceVaultId,
-				targetVaultId: variables.targetVaultId,
-				category: variables.category,
-				crossAccount: data.crossAccount,
-				newItemId: data.newItemId,
-				encryptedData: data._encryptedData,
-				sourceAccountEmail: data._sourceAccountEmail,
-				targetAccountEmail: data._targetAccountEmail,
+			enqueueItemMutation(queue, sourceContext, {
+				type: "move",
+				entityId: input.itemId,
+				vaultId: input.sourceVaultId,
+				targetVaultId: input.targetVaultId,
+				encryptedPayload: toQueueEncryptedPayload(encryptedData),
 			});
+
+			return {
+				crossAccount: false,
+				_encryptedData: encryptedData,
+				_sourceAccountEmail: sourceContext.accountEmail,
+				_targetAccountEmail: targetAccount.email,
+			};
+		},
+		onSuccess: async (data: any, variables) => {
+			if (!data.crossAccount) {
+				return;
+			}
+			await refreshRepositoriesFromServer(core);
 
 			await invalidator.invalidateVaultList(variables.sourceVaultId);
 			await invalidator.invalidateVaultList(variables.targetVaultId);
 
-			if (data.crossAccount) {
-				await invalidator.invalidateDeletedItems(variables.sourceVaultId);
-			}
+			await invalidator.invalidateDeletedItems(variables.sourceVaultId);
 
 			await invalidator.invalidateVaultKeys();
 		},

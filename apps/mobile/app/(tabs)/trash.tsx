@@ -59,8 +59,8 @@ export default function TrashScreen() {
 	// Sort by deletion date (most recent first)
 	const sortedItems = useMemo(() => {
 		return [...items].sort((a, b) => {
-			const dateA = new Date(a.deletedAt).getTime();
-			const dateB = new Date(b.deletedAt).getTime();
+			const dateA = a.deletedAt ? new Date(a.deletedAt).getTime() : 0;
+			const dateB = b.deletedAt ? new Date(b.deletedAt).getTime() : 0;
 			return dateB - dateA;
 		});
 	}, [items]);
@@ -187,11 +187,7 @@ export default function TrashScreen() {
 				onPress={() => {}}
 				rightContent={
 					<Text className="text-muted text-xs">
-						{formatDeletedAt(
-							typeof item.deletedAt === "string"
-								? item.deletedAt
-								: item.deletedAt?.toISOString() || "",
-						)}
+						{formatDeletedAt(item.deletedAt ?? "")}
 					</Text>
 				}
 			/>

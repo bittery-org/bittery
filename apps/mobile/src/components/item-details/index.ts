@@ -4,6 +4,7 @@ export { CustomFields } from "./custom-fields";
 export { ErrorState } from "./error-state";
 export { FieldRow } from "./field-row";
 export { IdentityFields } from "./identity-fields";
+export { ItemAttachments } from "./item-attachments";
 export { ItemHeader } from "./item-header";
 export { ItemMetadata } from "./item-metadata";
 export { LoadingState } from "./loading-state";

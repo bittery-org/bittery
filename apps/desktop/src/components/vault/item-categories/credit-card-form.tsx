@@ -62,7 +62,6 @@ export function CreditCardForm({
 					tags: initialData?.tags,
 				};
 				await onSubmit(submitData, currentVaultId);
-				toast.success("Credit card saved successfully");
 			} catch (error) {
 				const errorMessage =
 					error instanceof Error ? error.message : "Failed to save credit card";

@@ -1,8 +1,22 @@
+import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core";
 import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
+import type { ICrypto } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
 import { fetch as expoFetch } from "expo/fetch";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+	base64ToArrayBuffer,
+	decrypt,
+	deriveClientSession,
+	deriveKeys,
+	encrypt,
+	generateClientEphemeral,
+	generateEncryptionKey as nativeGenerateEncryptionKey,
+	rsaDecrypt,
+	validateSecretKey,
+	verifyServerSession,
+} from "../lib/crypto/native-crypto";
 import {
 	getMobileSyncDb,
 	getOrCreateMobileSyncClientId,
@@ -44,6 +58,21 @@ class ReactNativeSyncStorage implements SyncStorage {
 		await db.runAsync("DELETE FROM sync_storage WHERE key = ?", [key]);
 	}
 }
+
+const crypto: ICrypto = {
+	decrypt,
+	encrypt,
+	rsaDecrypt,
+	generateEncryptionKey: async () => {
+		const keyBase64 = nativeGenerateEncryptionKey();
+		return base64ToArrayBuffer(keyBase64);
+	},
+	deriveKeys,
+	generateClientEphemeral,
+	deriveClientSession,
+	verifyServerSession,
+	validateSecretKey,
+};
 
 /**
  * Resolve the best available account-scoped sync context.
@@ -139,6 +168,10 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 	}, [syncAccountEmail]);
 
 	const syncStorage = useMemo(() => new ReactNativeSyncStorage(), []);
+	const vaultCoordinator = useMemo(
+		() => getOrCreateVaultRepositoryCoordinator(crypto, storage),
+		[],
+	);
 
 	const syncState = useSync({
 		serverUrl,
@@ -148,10 +181,8 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		storage: syncStorage,
 		enabled: enabled && isInitialized && !!serverUrl && !!clientId,
 		realtimeEnabled: true,
-		itemCacheAdapter: storage,
+		itemCacheAdapter: vaultCoordinator,
 		itemCacheAccountEmail: syncAccountEmail,
-		// RN fallback: periodically run catch-up in case SSE stream stalls on device.
-		catchUpIntervalMs: 15000,
 		fetch: expoFetch,
 	});
 

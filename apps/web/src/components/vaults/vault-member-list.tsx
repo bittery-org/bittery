@@ -1,3 +1,7 @@
+import {
+	getDecryptedVaultKey,
+	type VaultKeyCryptoProvider,
+} from "@bittery/shared";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	AlertDialog,
@@ -18,22 +22,17 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
 	toast,
 } from "@bittery/ui";
 import {
 	IconLoader2OutlineDuo18 as Loader2,
 	IconTrash2OutlineDuo18 as Trash2,
+	IconUsers6OutlineDuo18 as Users,
 } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
-import { performKeyRotation } from "@/lib/wasm-crypto";
+import { decrypt, performKeyRotation, rsaDecrypt } from "@/lib/wasm-crypto";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface VaultMember {
@@ -98,7 +97,14 @@ export function VaultMemberList({
 
 		try {
 			// Step 1: Get the current decrypted vault key and Master Unlock Key
-			const currentVaultKey = await storage.getDecryptedVaultKey(vaultId);
+			const currentVaultKey = await getDecryptedVaultKey({
+				vaultId,
+				storage,
+				crypto: {
+					decrypt,
+					rsaDecrypt,
+				} as VaultKeyCryptoProvider,
+			});
 			if (!currentVaultKey) {
 				throw new Error("Could not decrypt vault key. Please log in again.");
 			}
@@ -206,41 +212,49 @@ export function VaultMemberList({
 
 	if (members.length === 0) {
 		return (
-			<p className="py-4 text-center text-muted-foreground">
-				No members in this vault.
-			</p>
+			<div className="flex flex-col items-center gap-3 rounded-xl border border-dashed p-10 text-center">
+				<div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+					<Users className="h-6 w-6 text-muted-foreground" />
+				</div>
+				<p className="text-muted-foreground">No members in this vault.</p>
+			</div>
 		);
 	}
 
 	return (
-		<Table>
-			<TableHeader>
-				<TableRow>
-					<TableHead>Member</TableHead>
-					<TableHead>Role</TableHead>
-					{canManage && <TableHead className="w-[100px]">Actions</TableHead>}
-				</TableRow>
-			</TableHeader>
-			<TableBody>
-				{members.map((member) => (
-					<TableRow key={member.userId}>
-						<TableCell>
-							<div className="flex items-center gap-3">
-								<Avatar className="h-8 w-8">
-									<AvatarFallback className="text-xs">
-										{getInitials(member.name)}
-									</AvatarFallback>
-								</Avatar>
-								<div>
-									<div className="font-medium">{member.name}</div>
-									<div className="text-muted-foreground text-sm">
-										{member.email}
-									</div>
+		<div className="grid gap-3 sm:grid-cols-2">
+			{members.map((member) => {
+				const isOwner = member.role === "owner";
+				const canRemove =
+					canManage &&
+					!isOwner &&
+					!(userRole === "admin" && member.role === "admin");
+
+				return (
+					<div
+						key={member.userId}
+						className="relative overflow-hidden rounded-xl border bg-card p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+					>
+						<div className="flex items-start gap-3">
+							<Avatar className="h-10 w-10 shrink-0">
+								<AvatarFallback className="text-xs">
+									{getInitials(member.name)}
+								</AvatarFallback>
+							</Avatar>
+							<div className="min-w-0 flex-1">
+								<div className="flex items-center gap-2">
+									<span className="truncate font-semibold leading-tight">
+										{member.name}
+									</span>
 								</div>
+								<p className="mt-0.5 truncate text-muted-foreground text-xs">
+									{member.email}
+								</p>
 							</div>
-						</TableCell>
-						<TableCell>
-							{canManage && member.role !== "owner" ? (
+						</div>
+
+						<div className="mt-3 flex items-center justify-between">
+							{canManage && !isOwner ? (
 								<Select
 									value={member.role}
 									onValueChange={(value: "admin" | "member" | "read-only") =>
@@ -251,7 +265,7 @@ export function VaultMemberList({
 										(userRole === "admin" && member.role === "admin")
 									}
 								>
-									<SelectTrigger className="w-[120px]">
+									<SelectTrigger className="h-7 w-27.5 text-xs">
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
@@ -265,66 +279,63 @@ export function VaultMemberList({
 									{member.role}
 								</Badge>
 							)}
-						</TableCell>
-						{canManage && (
-							<TableCell>
-								{member.role !== "owner" &&
-									!(userRole === "admin" && member.role === "admin") && (
-										<AlertDialog>
-											<AlertDialogTrigger asChild>
-												<Button
-													variant="ghost"
-													size="icon"
-													disabled={isRotating}
-												>
-													{rotatingUserId === member.userId ? (
-														<Loader2 className="h-4 w-4 animate-spin" />
-													) : (
-														<Trash2 className="h-4 w-4 text-destructive" />
-													)}
-												</Button>
-											</AlertDialogTrigger>
-											<AlertDialogContent>
-												<AlertDialogHeader>
-													<AlertDialogTitle>Remove Member</AlertDialogTitle>
-													<AlertDialogDescription>
-														Are you sure you want to remove {member.name} from
-														this vault? They will lose access to all items in
-														this vault.
-														<br />
-														<br />
-														<span className="text-muted-foreground text-xs">
-															Note: This will rotate the vault encryption key
-															and re-encrypt all items for security.
-														</span>
-													</AlertDialogDescription>
-												</AlertDialogHeader>
-												<AlertDialogFooter>
-													<AlertDialogCancel disabled={isRotating}>
-														Cancel
-													</AlertDialogCancel>
-													<AlertDialogAction
-														onClick={() => handleRemove(member.userId)}
-														disabled={isRotating}
-													>
-														{isRotating ? (
-															<>
-																<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-																Rotating keys...
-															</>
-														) : (
-															"Remove"
-														)}
-													</AlertDialogAction>
-												</AlertDialogFooter>
-											</AlertDialogContent>
-										</AlertDialog>
-									)}
-							</TableCell>
-						)}
-					</TableRow>
-				))}
-			</TableBody>
-		</Table>
+
+							{canRemove && (
+								<AlertDialog>
+									<AlertDialogTrigger asChild>
+										<Button
+											variant="ghost"
+											size="icon"
+											className="h-7 w-7"
+											disabled={isRotating}
+										>
+											{rotatingUserId === member.userId ? (
+												<Loader2 className="h-3.5 w-3.5 animate-spin" />
+											) : (
+												<Trash2 className="h-3.5 w-3.5 text-destructive" />
+											)}
+										</Button>
+									</AlertDialogTrigger>
+									<AlertDialogContent>
+										<AlertDialogHeader>
+											<AlertDialogTitle>Remove Member</AlertDialogTitle>
+											<AlertDialogDescription>
+												Are you sure you want to remove {member.name} from
+												this vault? They will lose access to all items in
+												this vault.
+												<br />
+												<br />
+												<span className="text-muted-foreground text-xs">
+													Note: This will rotate the vault encryption key
+													and re-encrypt all items for security.
+												</span>
+											</AlertDialogDescription>
+										</AlertDialogHeader>
+										<AlertDialogFooter>
+											<AlertDialogCancel disabled={isRotating}>
+												Cancel
+											</AlertDialogCancel>
+											<AlertDialogAction
+												onClick={() => handleRemove(member.userId)}
+												disabled={isRotating}
+											>
+												{isRotating ? (
+													<>
+														<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+														Rotating keys...
+													</>
+												) : (
+													"Remove"
+												)}
+											</AlertDialogAction>
+										</AlertDialogFooter>
+									</AlertDialogContent>
+								</AlertDialog>
+							)}
+						</div>
+					</div>
+				);
+			})}
+		</div>
 	);
 }

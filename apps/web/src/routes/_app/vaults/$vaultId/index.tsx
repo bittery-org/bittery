@@ -1,14 +1,13 @@
-import { useAvailableTags, useVaultItems } from "@bittery/core/hooks";
+import {
+	useAvailableTags,
+	useVaultInfo,
+	useVaultItems,
+} from "@bittery/core/hooks";
 import { useTRPC } from "@bittery/shared/trpc";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	Badge,
 	Button,
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
 	ScrollArea,
 	Sheet,
 	SheetContent,
@@ -17,15 +16,17 @@ import {
 	TabsContent,
 	TabsList,
 	TabsTrigger,
+	useSidebar,
 } from "@bittery/ui";
 import {
 	IconArrowLeftOutlineDuo18 as ArrowLeft,
 	IconKeyOutlineDuo18 as Key,
+	IconLockOutlineDuo18 as Lock,
 	IconUsers6OutlineDuo18 as Users,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ItemDetail from "@/components/vault/item-detail";
 import { ItemList } from "@/components/vault/item-list";
 import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
@@ -42,23 +43,53 @@ function VaultDetailPage() {
 	const { vaultId } = Route.useParams();
 	const trpc = useTRPC();
 
+	const { state: sidebarState, isMobile } = useSidebar();
 	const [selectedItem, setSelectedItem] = useState<DecryptedItem | null>(null);
+	const [showCompactHeader, setShowCompactHeader] = useState(false);
+	const headerRef = useRef<HTMLElement>(null);
 
-	const vaultQuery = useQuery(trpc.vault.get.queryOptions({ vaultId }));
+	// Observe main header visibility to show compact fixed header on scroll
+	useEffect(() => {
+		const el = headerRef.current;
+		if (!el) return;
+
+		// Find nearest scrollable ancestor (the overflow-y-auto container)
+		let scrollParent: HTMLElement | null = el.parentElement;
+		while (scrollParent) {
+			const overflow = getComputedStyle(scrollParent).overflowY;
+			if (overflow === "auto" || overflow === "scroll") break;
+			scrollParent = scrollParent.parentElement;
+		}
+
+		const observer = new IntersectionObserver(
+			([entry]) => {
+				if (entry) setShowCompactHeader(!entry.isIntersecting);
+			},
+			{ root: scrollParent, threshold: 0 },
+		);
+
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, []);
+
+	// Use core hooks for vault metadata and items (local-first, same as desktop)
+	const { vaultInfo, isLoading: isLoadingVault } = useVaultInfo(vaultId);
+	const { items: decryptedItems, isLoading: isLoadingItems } =
+		useVaultItems(vaultId);
+
+	// Members still come from tRPC (no local hook for membership data)
 	const membersQuery = useQuery(
 		trpc.vault.members.list.queryOptions({ vaultId }),
 	);
 
-	// Use vault items hook
-	const { items: decryptedItems, isLoading: isLoadingItems } =
-		useVaultItems(vaultId);
-
 	// Get available tags from decrypted items
 	const availableTags = useAvailableTags(decryptedItems);
 
-	const vault = vaultQuery.data;
-	const canManage = vault?.userRole === "owner" || vault?.userRole === "admin";
-	const canEdit = vault?.userRole !== "read-only";
+	const role = vaultInfo?.role;
+	const canManage = role === "owner" || role === "admin";
+	const canEdit = role !== "read-only";
+	const itemCount = decryptedItems.length;
+	const memberCount = membersQuery.data?.length ?? 0;
 
 	const handleItemSelect = (item: DecryptedItem) => {
 		setSelectedItem(item);
@@ -68,53 +99,166 @@ function VaultDetailPage() {
 		setSelectedItem(null);
 	};
 
-	if (vaultQuery.isLoading) {
+	if (isLoadingVault) {
 		return (
-			<div className="space-y-6">
-				<Skeleton className="h-8 w-48" />
+			<div className="mx-auto w-full max-w-6xl space-y-6">
+				<Skeleton className="h-48 w-full rounded-2xl" />
 				<Skeleton className="h-64" />
 			</div>
 		);
 	}
 
-	if (!vault) {
+	if (!vaultInfo) {
 		return (
-			<div className="py-8 text-center">
+			<div className="flex flex-col items-center gap-3 py-12 text-center">
+				<div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+					<Lock className="h-6 w-6 text-muted-foreground" />
+				</div>
 				<p className="text-muted-foreground">Vault not found</p>
-				<Link to="/vaults" className="text-primary hover:underline">
+				<Link to="/vaults" className="text-primary text-sm hover:underline">
 					Back to vaults
 				</Link>
 			</div>
 		);
 	}
 
+	const roleBadgeVariant =
+		role === "owner"
+			? "default"
+			: role === "admin"
+				? "secondary"
+				: "outline";
+
+	const compactHeaderLeft = isMobile
+		? "0px"
+		: sidebarState === "expanded"
+			? "var(--sidebar-width)"
+			: "calc(var(--sidebar-width-icon) + 1.5rem)";
+
 	return (
-		<div className="flex h-full flex-col gap-6">
-			<div className="flex shrink-0 items-center gap-4">
-				<Link to="/vaults">
-					<Button variant="ghost" size="icon">
-						<ArrowLeft className="h-4 w-4" />
-					</Button>
-				</Link>
-				<div className="flex-1">
-					<div className="flex items-center gap-3">
-						<h1 className="font-bold text-3xl tracking-tight">{vault.name}</h1>
-						<Badge
-							variant={vault.userRole === "owner" ? "default" : "secondary"}
-						>
-							{vault.userRole}
-						</Badge>
-					</div>
-					<p className="text-muted-foreground">
-						{vault.itemCount} item{vault.itemCount !== 1 ? "s" : ""} ·{" "}
-						{vault.memberCount} member{vault.memberCount !== 1 ? "s" : ""} ·{" "}
-						<span className="capitalize">{vault.type}</span> vault
-					</p>
+		<div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-6 pb-3">
+			{/* Compact fixed header (visible on scroll) */}
+			<div
+				className={`fixed top-0 right-0 z-50 flex h-11 items-center border-b bg-background/80 backdrop-blur-sm transition-[left,opacity,transform] duration-200 ${
+					showCompactHeader && vaultInfo
+						? "translate-y-0 opacity-100"
+						: "-translate-y-full opacity-0 pointer-events-none"
+				}`}
+				style={{ left: compactHeaderLeft }}
+			>
+				<div className="mx-auto flex h-full w-full max-w-6xl items-center justify-between pl-14 pr-5 lg:pl-16 lg:pr-6 xl:pl-6">
+					{vaultInfo && (
+						<>
+							<div className="flex items-center gap-2.5">
+								<div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-muted/50">
+									{vaultInfo.vaultType === "team" ? (
+										<Users className="h-3.5 w-3.5 text-muted-foreground" />
+									) : (
+										<Lock className="h-3.5 w-3.5 text-muted-foreground" />
+									)}
+								</div>
+								<span className="font-medium text-sm">
+									{vaultInfo.vaultName}
+								</span>
+								<Badge
+									variant={roleBadgeVariant}
+									className="capitalize text-[11px] px-1.5 py-0"
+								>
+									{role}
+								</Badge>
+							</div>
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-7 text-xs"
+								asChild
+							>
+								<Link to="/vaults">
+									<ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+									All Vaults
+								</Link>
+							</Button>
+						</>
+					)}
 				</div>
 			</div>
 
-			<Tabs defaultValue="items" className="flex min-h-0 flex-1 flex-col">
-				<TabsList className="shrink-0">
+			{/* Header */}
+			<section ref={headerRef} className="relative overflow-hidden rounded-2xl border bg-card p-6 sm:p-7 lg:rounded-xl lg:p-5">
+				<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent lg:from-muted/30" />
+
+				<div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
+					<div className="flex items-start gap-5 lg:items-center lg:gap-3.5">
+						<div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border bg-background shadow-sm lg:h-10 lg:w-10 lg:rounded-lg">
+							{vaultInfo.vaultType === "team" ? (
+								<Users className="h-7 w-7 text-muted-foreground lg:h-5 lg:w-5" />
+							) : (
+								<Lock className="h-7 w-7 text-muted-foreground lg:h-5 lg:w-5" />
+							)}
+						</div>
+						<div className="space-y-3 lg:space-y-0.5">
+							<div className="flex flex-wrap items-center gap-2 lg:hidden">
+								<Badge variant="secondary" className="capitalize">
+									{vaultInfo.vaultType} vault
+								</Badge>
+								<Badge variant={roleBadgeVariant} className="capitalize">
+									{role}
+								</Badge>
+							</div>
+							<div className="space-y-1.5 lg:space-y-0">
+								<div className="flex items-center gap-2.5">
+									<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl lg:text-xl lg:font-semibold">
+										{vaultInfo.vaultName}
+									</h1>
+									<div className="hidden items-center gap-1.5 lg:flex">
+										<Badge variant="secondary" className="capitalize text-[11px] px-1.5 py-0">
+											{vaultInfo.vaultType}
+										</Badge>
+										<Badge variant={roleBadgeVariant} className="capitalize text-[11px] px-1.5 py-0">
+											{role}
+										</Badge>
+									</div>
+								</div>
+								<p className="text-muted-foreground lg:text-xs">
+									{itemCount} item{itemCount !== 1 ? "s" : ""} ·{" "}
+									{memberCount} member
+									{memberCount !== 1 ? "s" : ""}
+								</p>
+							</div>
+							<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs lg:hidden">
+								<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
+									<Key className="h-3.5 w-3.5" />
+									{itemCount} item{itemCount !== 1 ? "s" : ""} encrypted
+								</div>
+								<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
+									<Users className="h-3.5 w-3.5" />
+									{memberCount} member
+									{memberCount !== 1 ? "s" : ""}
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<div className="flex flex-wrap gap-2 lg:justify-end">
+						<Button variant="outline" size="default" className="lg:h-8 lg:text-xs lg:px-3" asChild>
+							<Link to="/vaults">
+								<ArrowLeft className="mr-2 h-4 w-4 lg:mr-1.5 lg:h-3.5 lg:w-3.5" />
+								All Vaults
+							</Link>
+						</Button>
+						{canManage && vaultInfo.vaultType === "team" && (
+							<AddMemberDialog vaultId={vaultId} />
+						)}
+					</div>
+				</div>
+			</section>
+
+			{/* Tabs Area */}
+			<Tabs
+				defaultValue="items"
+				className="flex min-h-0 flex-1 flex-col"
+			>
+				<TabsList className="w-fit shrink-0">
 					<TabsTrigger value="items">
 						<Key className="mr-2 h-4 w-4" />
 						Items
@@ -122,9 +266,9 @@ function VaultDetailPage() {
 					<TabsTrigger value="members">
 						<Users className="mr-2 h-4 w-4" />
 						Members
-						{vault.memberCount > 1 && (
+						{memberCount > 1 && (
 							<span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
-								{vault.memberCount}
+								{memberCount}
 							</span>
 						)}
 					</TabsTrigger>
@@ -134,18 +278,16 @@ function VaultDetailPage() {
 					value="items"
 					className="mt-4 flex min-h-0 flex-1 flex-col"
 				>
-					<Card className="flex min-h-0 flex-1 flex-col">
-						<CardHeader className="shrink-0">
-							<div className="flex items-start justify-between">
-								<div>
-									<CardTitle>Vault Items</CardTitle>
-									<CardDescription>
-										Click on an item to view its details.
-									</CardDescription>
-								</div>
-							</div>
-						</CardHeader>
-						<CardContent className="flex min-h-0 flex-1 flex-col pb-6">
+					<div className="flex min-h-0 flex-1 flex-col space-y-3">
+						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+							<h2 className="font-semibold text-lg tracking-tight">
+								Vault Items
+							</h2>
+							<p className="text-muted-foreground text-sm">
+								Click on an item to view its details.
+							</p>
+						</div>
+						<div className="min-h-0 flex-1">
 							<ItemList
 								items={decryptedItems}
 								isLoading={isLoadingItems}
@@ -153,50 +295,44 @@ function VaultDetailPage() {
 								onItemSelect={handleItemSelect}
 								selectedItemId={selectedItem?.id}
 							/>
-						</CardContent>
-					</Card>
+						</div>
+					</div>
 				</TabsContent>
 
 				<TabsContent value="members" className="mt-4">
-					<Card>
-						<CardHeader>
-							<div className="flex items-start justify-between">
-								<div>
-									<CardTitle>Vault Members</CardTitle>
-									<CardDescription>
-										{canManage
-											? "Manage who has access to this vault and their permissions."
-											: "People who have access to this vault."}
-									</CardDescription>
-								</div>
-								{canManage && vault.type === "team" && (
-									<AddMemberDialog vaultId={vaultId} />
-								)}
+					<div className="space-y-3">
+						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+							<h2 className="font-semibold text-lg tracking-tight">
+								Vault Members
+							</h2>
+							<p className="text-muted-foreground text-sm">
+								{canManage
+									? "Manage who has access and their permissions."
+									: "People who have access to this vault."}
+							</p>
+						</div>
+						{membersQuery.isLoading ? (
+							<div className="grid gap-3 sm:grid-cols-2">
+								<Skeleton className="h-28" />
+								<Skeleton className="h-28" />
 							</div>
-						</CardHeader>
-						<CardContent>
-							{membersQuery.isLoading ? (
-								<Skeleton className="h-32" />
-							) : (
-								<VaultMemberList
-									vaultId={vaultId}
-									members={membersQuery.data || []}
-									userRole={vault.userRole}
-								/>
-							)}
-						</CardContent>
-					</Card>
+						) : (
+							<VaultMemberList
+								vaultId={vaultId}
+								members={membersQuery.data || []}
+								userRole={role ?? "member"}
+							/>
+						)}
+					</div>
 
-					{vault.type === "personal" && (
-						<Card className="mt-4">
-							<CardHeader>
-								<CardTitle>Personal Vault</CardTitle>
-								<CardDescription>
-									This is a personal vault. To share access with others, convert
-									it to a team vault in the desktop app.
-								</CardDescription>
-							</CardHeader>
-						</Card>
+					{vaultInfo.vaultType === "personal" && (
+						<div className="mt-4 flex items-center gap-3 rounded-xl border border-dashed p-5 text-muted-foreground text-sm">
+							<Lock className="h-5 w-5 shrink-0" />
+							<p>
+								This is a personal vault. To share access with others, convert
+								it to a team vault in the desktop app.
+							</p>
+						</div>
 					)}
 				</TabsContent>
 			</Tabs>

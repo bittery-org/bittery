@@ -1,3 +1,7 @@
+import {
+	getDecryptedVaultKey as getDecryptedVaultKeyUtil,
+	type VaultKeyCryptoProvider,
+} from "@bittery/shared";
 import type { DecryptedItem } from "@bittery/shared/types";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ICrypto } from "@bittery/types";
@@ -69,10 +73,12 @@ export class ShareService {
 			accountEmail,
 		} = input;
 
-		const vaultKey = await this.storage.getDecryptedVaultKey(
-			item.vaultId,
-			accountEmail,
-		);
+		const vaultKey = await getDecryptedVaultKeyUtil({
+			vaultId: item.vaultId,
+			email: accountEmail,
+			storage: this.storage,
+			crypto: this.crypto as unknown as VaultKeyCryptoProvider,
+		});
 		if (!vaultKey) {
 			throw new Error("Could not decrypt vault key. Please log in again.");
 		}

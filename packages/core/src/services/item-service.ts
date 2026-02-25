@@ -1,11 +1,16 @@
+import {
+	getDecryptedVaultKey as getDecryptedVaultKeyUtil,
+	type VaultKeyCryptoProvider,
+} from "@bittery/shared";
+import { applyPasswordHistoryOnPasswordChange } from "@bittery/shared/password-history";
 import type {
 	DecryptedItem,
 	DecryptedItemData,
 	ItemCategory,
 } from "@bittery/shared/types";
-import { applyPasswordHistoryOnPasswordChange } from "@bittery/shared/password-history";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type {
+	CachedAttachment,
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 	ICrypto,
@@ -17,13 +22,19 @@ import type {
 	AccountResolver,
 	DefaultTrpcClient,
 } from "./account-resolver";
-import type { CacheManager, EncryptedPayload } from "./cache-manager";
 
 export type { RawEncryptedItem, RawEncryptedItemWithVault };
+
+export interface EncryptedPayload {
+	ciphertext: string;
+	iv: string;
+	algorithm: string;
+}
 
 export interface RawEncryptedItemWithVersion extends RawEncryptedItem {
 	version: number;
 	lastModifiedBy: string | null;
+	attachments?: CachedAttachment[];
 }
 
 export interface MultiAccountItem extends DecryptedItem {
@@ -108,22 +119,6 @@ export interface UpdateItemResult {
 	_accountEmail?: string;
 }
 
-export interface DeleteItemResult {
-	_accountEmail?: string;
-}
-
-export interface RestoreItemResult {
-	_accountEmail?: string;
-}
-
-export interface PermanentDeleteItemResult {
-	_accountEmail?: string;
-}
-
-export interface ToggleFavoriteResult {
-	_accountEmail?: string;
-}
-
 export interface MoveItemInput {
 	itemId: string;
 	sourceVaultId: string;
@@ -146,20 +141,64 @@ interface ItemServiceDeps {
 	storage: IStorageAdapter;
 	crypto: ICrypto;
 	accounts: AccountResolver;
-	cache: CacheManager;
 }
 
 export class ItemService {
 	private readonly storage: IStorageAdapter;
 	private readonly crypto: ICrypto;
 	private readonly accounts: AccountResolver;
-	private readonly cache: CacheManager;
 
 	constructor(deps: ItemServiceDeps) {
 		this.storage = deps.storage;
 		this.crypto = deps.crypto;
 		this.accounts = deps.accounts;
-		this.cache = deps.cache;
+	}
+
+	async encryptItemData(
+		data: DecryptedItemData,
+		vaultKey: Uint8Array,
+	): Promise<EncryptedPayload> {
+		return this.crypto.encrypt(JSON.stringify(data), vaultKey);
+	}
+
+	mergeItemUpdate(
+		existing: DecryptedItemData,
+		update: Partial<DecryptedItemData>,
+		category: ItemCategory,
+	): DecryptedItemData {
+		const merged: DecryptedItemData = {
+			...existing,
+			...update,
+		};
+
+		if (category === "login") {
+			merged.passwordHistory = applyPasswordHistoryOnPasswordChange({
+				passwordHistory: merged.passwordHistory,
+				previousPassword: existing.password,
+				nextPassword: merged.password,
+			});
+		}
+
+		return merged;
+	}
+
+	async reEncryptForVault(
+		data: DecryptedItemData,
+		targetVaultKey: Uint8Array,
+	): Promise<EncryptedPayload> {
+		return this.crypto.encrypt(JSON.stringify(data), targetVaultKey);
+	}
+
+	private async getVaultKey(
+		vaultId: string,
+		email?: string,
+	): Promise<Uint8Array | null> {
+		return getDecryptedVaultKeyUtil({
+			vaultId,
+			email,
+			storage: this.storage,
+			crypto: this.crypto as unknown as VaultKeyCryptoProvider,
+		});
 	}
 
 	private buildRawItemsFromCache(
@@ -187,6 +226,7 @@ export class ItemService {
 					createdAt: item.createdAt,
 					updatedAt: item.updatedAt,
 					deletedAt: item.deletedAt,
+					attachments: item.attachments,
 					vault: vault
 						? {
 								id: vault.id,
@@ -222,6 +262,10 @@ export class ItemService {
 			createdAt: String(item.createdAt),
 			updatedAt: String(item.updatedAt),
 			deletedAt: item.deletedAt ? String(item.deletedAt) : null,
+			attachments: item.attachments?.map((a) => ({
+				...a,
+				createdAt: String(a.createdAt),
+			})),
 		}));
 	}
 
@@ -282,28 +326,33 @@ export class ItemService {
 				try {
 					let rawItems: RawEncryptedItemWithVault[];
 
-					if (this.cache.supportsCache) {
-						const [cachedItems, cachedVaults] = await Promise.all([
-							this.cache.getCachedItems(account.email),
-							this.cache.getCachedVaults(account.email),
-						]);
+					const [cachedItems, cachedVaults] = await Promise.all([
+						this.storage.getCachedItems?.(account.email),
+						this.storage.getCachedVaults?.(account.email),
+					]);
 
-						if (cachedItems && cachedVaults && cachedItems.length > 0) {
-							rawItems = this.buildRawItemsFromCache(
-								cachedItems,
-								cachedVaults,
-								false,
-							);
-						} else {
-							rawItems = await this.fetchBootstrapItems(account.trpcClient);
-							await this.cache.populateFromServerResponse(
-								this.toCachedItems(rawItems),
-								this.toCachedVaults(rawItems),
-								account.email,
-							);
-						}
+					if (cachedItems && cachedVaults && cachedItems.length > 0) {
+						rawItems = this.buildRawItemsFromCache(
+							cachedItems,
+							cachedVaults,
+							false,
+						);
 					} else {
 						rawItems = await this.fetchBootstrapItems(account.trpcClient);
+						const cachedItems = this.toCachedItems(rawItems);
+						const cachedVaults = this.toCachedVaults(rawItems);
+						await Promise.all([
+							this.storage.setCachedItems?.(cachedItems, account.email),
+							this.storage.setCachedVaults?.(cachedVaults, account.email),
+							this.storage.setItemCacheMetadata?.(
+								{
+									lastFullSyncAt: Date.now(),
+									itemCount: cachedItems.length,
+									cacheVersion: 1,
+								},
+								account.email,
+							),
+						]);
 					}
 
 					const vaultKeyCache = new Map<string, Uint8Array>();
@@ -312,7 +361,7 @@ export class ItemService {
 							try {
 								let vaultKey = vaultKeyCache.get(rawItem.vaultId);
 								if (!vaultKey) {
-									const fetchedKey = await this.storage.getDecryptedVaultKey(
+									const fetchedKey = await this.getVaultKey(
 										rawItem.vaultId,
 										account.email,
 									);
@@ -416,29 +465,23 @@ export class ItemService {
 		}
 
 		let rawItems: RawEncryptedItem[];
-		if (this.cache.supportsCache) {
-			const cachedItems = await this.cache.getCachedItems(ownerAccount.email);
-			if (cachedItems && cachedItems.length > 0) {
-				const vaultItems = cachedItems.filter(
-					(item) => item.vaultId === vaultId && !item.deletedAt,
-				);
-				if (vaultItems.length > 0) {
-					rawItems = vaultItems.map((item) => ({
-						id: item.id,
-						vaultId: item.vaultId,
-						category: item.category,
-						favorite: item.favorite,
-						encryptedData: item.encryptedData,
-						encryptionIv: item.encryptionIv,
-						encryptionAlgorithm: item.encryptionAlgorithm,
-						createdAt: item.createdAt,
-						updatedAt: item.updatedAt,
-					}));
-				} else {
-					rawItems = await ownerAccount.trpcClient.vault.listItems.query({
-						vaultId,
-					});
-				}
+		const cachedItems = await this.storage.getCachedItems?.(ownerAccount.email);
+		if (cachedItems && cachedItems.length > 0) {
+			const vaultItems = cachedItems.filter(
+				(item) => item.vaultId === vaultId && !item.deletedAt,
+			);
+			if (vaultItems.length > 0) {
+				rawItems = vaultItems.map((item) => ({
+					id: item.id,
+					vaultId: item.vaultId,
+					category: item.category,
+					favorite: item.favorite,
+					encryptedData: item.encryptedData,
+					encryptionIv: item.encryptionIv,
+					encryptionAlgorithm: item.encryptionAlgorithm,
+					createdAt: item.createdAt,
+					updatedAt: item.updatedAt,
+				}));
 			} else {
 				rawItems = await ownerAccount.trpcClient.vault.listItems.query({
 					vaultId,
@@ -454,10 +497,7 @@ export class ItemService {
 			return [];
 		}
 
-		const vaultKey = await this.storage.getDecryptedVaultKey(
-			vaultId,
-			ownerAccount.email,
-		);
+		const vaultKey = await this.getVaultKey(vaultId, ownerAccount.email);
 		if (!vaultKey) {
 			throw new Error(`No vault key found for vault ${vaultId}`);
 		}
@@ -516,25 +556,24 @@ export class ItemService {
 
 		let rawItem: RawEncryptedItemWithVersion | null = null;
 
-		if (this.cache.supportsCache) {
-			const cachedItems = await this.cache.getCachedItems(accountEmail);
-			const cached = cachedItems?.find((item) => item.id === itemId);
-			if (cached) {
-				rawItem = {
-					id: cached.id,
-					vaultId: cached.vaultId,
-					category: cached.category,
-					favorite: cached.favorite,
-					encryptedData: cached.encryptedData,
-					encryptionIv: cached.encryptionIv,
-					encryptionAlgorithm: cached.encryptionAlgorithm,
-					version: cached.version,
-					lastModifiedBy: cached.lastModifiedBy,
-					createdAt: cached.createdAt,
-					updatedAt: cached.updatedAt,
-					deletedAt: cached.deletedAt ?? null,
-				};
-			}
+		const cachedItems = await this.storage.getCachedItems?.(accountEmail);
+		const cached = cachedItems?.find((item) => item.id === itemId);
+		if (cached) {
+			rawItem = {
+				id: cached.id,
+				vaultId: cached.vaultId,
+				category: cached.category,
+				favorite: cached.favorite,
+				encryptedData: cached.encryptedData,
+				encryptionIv: cached.encryptionIv,
+				encryptionAlgorithm: cached.encryptionAlgorithm,
+				version: cached.version,
+				lastModifiedBy: cached.lastModifiedBy,
+				createdAt: cached.createdAt,
+				updatedAt: cached.updatedAt,
+				deletedAt: cached.deletedAt ?? null,
+				attachments: cached.attachments,
+			};
 		}
 
 		if (!rawItem) {
@@ -556,12 +595,14 @@ export class ItemService {
 				createdAt: fetched.createdAt,
 				updatedAt: fetched.updatedAt,
 				deletedAt: fetched.deletedAt,
+				attachments: (fetched as any).attachments?.map((a: any) => ({
+					...a,
+					createdAt: String(a.createdAt),
+				})),
 			};
 		}
 
-		const vaultKey = accountEmail
-			? await this.storage.getDecryptedVaultKey(rawItem.vaultId, accountEmail)
-			: await this.storage.getDecryptedVaultKey(rawItem.vaultId);
+		const vaultKey = await this.getVaultKey(rawItem.vaultId, accountEmail);
 
 		if (!vaultKey) {
 			throw new Error(
@@ -595,26 +636,19 @@ export class ItemService {
 				try {
 					let rawItems: RawEncryptedItemWithVault[];
 
-					if (this.cache.supportsCache) {
-						const [cachedItems, cachedVaults] = await Promise.all([
-							this.cache.getCachedItems(account.email),
-							this.cache.getCachedVaults(account.email),
-						]);
+					const [cachedItems, cachedVaults] = await Promise.all([
+						this.storage.getCachedItems?.(account.email),
+						this.storage.getCachedVaults?.(account.email),
+					]);
 
-						if (cachedItems && cachedVaults) {
-							const deletedItems = cachedItems.filter(
-								(item) => !!item.deletedAt,
+					if (cachedItems && cachedVaults) {
+						const deletedItems = cachedItems.filter((item) => !!item.deletedAt);
+						if (deletedItems.length > 0) {
+							rawItems = this.buildRawItemsFromCache(
+								cachedItems,
+								cachedVaults,
+								true,
 							);
-							if (deletedItems.length > 0) {
-								rawItems = this.buildRawItemsFromCache(
-									cachedItems,
-									cachedVaults,
-									true,
-								);
-							} else {
-								rawItems =
-									await account.trpcClient.vault.listAllDeletedItems.query();
-							}
 						} else {
 							rawItems =
 								await account.trpcClient.vault.listAllDeletedItems.query();
@@ -631,7 +665,7 @@ export class ItemService {
 								try {
 									let vaultKey = vaultKeyCache.get(rawItem.vaultId);
 									if (!vaultKey) {
-										const fetchedKey = await this.storage.getDecryptedVaultKey(
+										const fetchedKey = await this.getVaultKey(
 											rawItem.vaultId,
 											account.email,
 										);
@@ -721,10 +755,7 @@ export class ItemService {
 		input: CreateItemInput,
 		defaultClient: DefaultTrpcClient,
 	): Promise<CreateItemResult> {
-		const vaultKey = await this.storage.getDecryptedVaultKey(
-			input.vaultId,
-			input.accountEmail,
-		);
+		const vaultKey = await this.getVaultKey(input.vaultId, input.accountEmail);
 		if (!vaultKey) {
 			throw new Error("No vault key found. Please sign in again.");
 		}
@@ -763,10 +794,7 @@ export class ItemService {
 		input: UpdateItemInput,
 		defaultClient: DefaultTrpcClient,
 	): Promise<UpdateItemResult> {
-		const vaultKey = await this.storage.getDecryptedVaultKey(
-			input.vaultId,
-			input.accountEmail,
-		);
+		const vaultKey = await this.getVaultKey(input.vaultId, input.accountEmail);
 		if (!vaultKey) {
 			throw new Error("No vault key found. Please sign in again.");
 		}
@@ -812,59 +840,6 @@ export class ItemService {
 		return { _encryptedData: encryptedData, _accountEmail: input.accountEmail };
 	}
 
-	async deleteItem(
-		itemId: string,
-		defaultClient: DefaultTrpcClient,
-		accountEmail?: string,
-	): Promise<DeleteItemResult> {
-		const client = await this.accounts.getClientForAccount(
-			defaultClient,
-			accountEmail,
-		);
-		await client.vault.deleteItem.mutate({ itemId });
-		return { _accountEmail: accountEmail };
-	}
-
-	async restoreItem(
-		itemId: string,
-		defaultClient: DefaultTrpcClient,
-		accountEmail?: string,
-	): Promise<RestoreItemResult> {
-		const client = await this.accounts.getClientForAccount(
-			defaultClient,
-			accountEmail,
-		);
-		await client.vault.restoreItem.mutate({ itemId });
-		return { _accountEmail: accountEmail };
-	}
-
-	async permanentDeleteItem(
-		itemId: string,
-		defaultClient: DefaultTrpcClient,
-		accountEmail?: string,
-	): Promise<PermanentDeleteItemResult> {
-		const client = await this.accounts.getClientForAccount(
-			defaultClient,
-			accountEmail,
-		);
-		await client.vault.permanentlyDeleteItem.mutate({ itemId });
-		return { _accountEmail: accountEmail };
-	}
-
-	async toggleFavorite(
-		itemId: string,
-		favorite: boolean,
-		defaultClient: DefaultTrpcClient,
-		accountEmail?: string,
-	): Promise<ToggleFavoriteResult> {
-		const client = await this.accounts.getClientForAccount(
-			defaultClient,
-			accountEmail,
-		);
-		await client.vault.toggleFavorite.mutate({ itemId, favorite });
-		return { _accountEmail: accountEmail };
-	}
-
 	async moveItem(
 		input: MoveItemInput,
 		defaultClient: DefaultTrpcClient,
@@ -901,7 +876,7 @@ export class ItemService {
 		}
 
 		const isCrossAccount = sourceAccountEmail !== targetAccountEmail;
-		const targetVaultKey = await this.storage.getDecryptedVaultKey(
+		const targetVaultKey = await this.getVaultKey(
 			input.targetVaultId,
 			targetAccountEmail,
 		);

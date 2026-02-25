@@ -1,5 +1,7 @@
+import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core";
 import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
+import type { ICrypto } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { storage } from "@/lib/storage";
@@ -7,6 +9,7 @@ import {
 	getDesktopSyncStore,
 	getOrCreateDesktopSyncClientId,
 } from "@/lib/sync-client-id";
+import * as tauriCrypto from "@/lib/tauri-crypto";
 
 /**
  * Tauri-compatible sync storage implementation
@@ -35,6 +38,18 @@ class TauriSyncStorage implements SyncStorage {
 	}
 }
 
+const crypto: ICrypto = {
+	decrypt: tauriCrypto.decrypt,
+	encrypt: tauriCrypto.encrypt,
+	rsaDecrypt: tauriCrypto.rsaDecrypt,
+	generateEncryptionKey: tauriCrypto.generateEncryptionKey,
+	deriveKeys: tauriCrypto.deriveKeys,
+	generateClientEphemeral: tauriCrypto.generateClientEphemeral,
+	deriveClientSession: tauriCrypto.deriveClientSession,
+	verifyServerSession: tauriCrypto.verifyServerSession,
+	validateSecretKey: tauriCrypto.validateSecretKey,
+};
+
 /**
  * Desktop-specific sync hook that integrates with Tauri storage
  */
@@ -61,6 +76,10 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 	}, []);
 
 	const syncStorage = useMemo(() => new TauriSyncStorage(), []);
+	const vaultCoordinator = useMemo(
+		() => getOrCreateVaultRepositoryCoordinator(crypto, storage),
+		[],
+	);
 
 	const syncState = useSync({
 		serverUrl,
@@ -69,7 +88,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		queryClient,
 		storage: syncStorage,
 		enabled: enabled && isInitialized && !!serverUrl && !!clientId,
-		itemCacheAdapter: storage,
+		itemCacheAdapter: vaultCoordinator,
 	});
 
 	return {

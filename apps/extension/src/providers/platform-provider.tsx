@@ -43,12 +43,14 @@ export function ExtensionPlatformProvider({
 			isConnected: syncContext.isConnected,
 			isOnline: syncContext.isOnline,
 			invalidator: syncContext.invalidator,
+			outboundQueue: syncContext.outboundQueue,
 		}),
 		[
 			syncContext.clientId,
 			syncContext.isConnected,
 			syncContext.isOnline,
 			syncContext.invalidator,
+			syncContext.outboundQueue,
 		],
 	);
 
