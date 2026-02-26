@@ -1,6 +1,6 @@
 import { db, item, syncEvent, syncEventAck, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, ne, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, router } from "../index";
@@ -34,12 +34,19 @@ export const syncRouter = router({
 				: userVaultIds;
 
 			const sinceDate = new Date(input.since);
+			// When sinceId is provided, explicitly exclude it to prevent infinite
+			// re-fetching caused by PostgreSQL microsecond timestamp precision
+			// vs JavaScript millisecond precision (Date.getTime() truncates µs,
+			// so the "same" event always appears as gt in Postgres).
 			const cursorCondition = input.sinceId
-				? or(
-						gt(syncEvent.createdAt, sinceDate),
-						and(
-							eq(syncEvent.createdAt, sinceDate),
-							gt(syncEvent.id, input.sinceId),
+				? and(
+						ne(syncEvent.id, input.sinceId),
+						or(
+							gt(syncEvent.createdAt, sinceDate),
+							and(
+								eq(syncEvent.createdAt, sinceDate),
+								gt(syncEvent.id, input.sinceId),
+							),
 						),
 					)
 				: gt(syncEvent.createdAt, sinceDate);
