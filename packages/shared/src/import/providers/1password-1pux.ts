@@ -992,7 +992,9 @@ function consumePrimaryPassword(
 	return selected.value;
 }
 
-function selectLongestFieldValue(fields: ParsedField[]): ParsedField | undefined {
+function selectLongestFieldValue(
+	fields: ParsedField[],
+): ParsedField | undefined {
 	return fields.reduce<ParsedField | undefined>((best, current) => {
 		if (!best) {
 			return current;

@@ -383,7 +383,6 @@ function RouteComponent() {
 					vault={deletingVault}
 					onConfirm={handleDeleteVault}
 				/>
-
 			</div>
 		</VaultDndProvider>
 	);

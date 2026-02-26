@@ -23,7 +23,7 @@ import {
 	QrCode,
 	Server,
 } from "lucide-react-native";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	Alert,
 	Image,
@@ -79,13 +79,13 @@ export default function LoginScreen() {
 		isEnrolled: boolean;
 	}>({ hasHardware: false, isEnrolled: false });
 
-	const applySetupPayload = (payload: ParsedDeviceSetupPayload) => {
+	const applySetupPayload = useCallback((payload: ParsedDeviceSetupPayload) => {
 		setEmail(payload.email);
 		setServerUrl(payload.serverUrl);
 		if (payload.secretKey) {
 			setSecretKey(payload.secretKey);
 		}
-	};
+	}, []);
 
 	useEffect(() => {
 		const signature = JSON.stringify({
@@ -147,6 +147,7 @@ export default function LoginScreen() {
 		searchParams.setup,
 		searchParams.teamName,
 		searchParams.v,
+		applySetupPayload,
 	]);
 
 	useEffect(() => {

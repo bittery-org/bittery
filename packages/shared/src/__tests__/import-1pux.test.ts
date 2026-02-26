@@ -16,7 +16,9 @@ function concatUint8Arrays(chunks: Uint8Array[]): Uint8Array {
 	return output;
 }
 
-function createStoredZip(entries: Array<{ name: string; content: string }>): Uint8Array {
+function createStoredZip(
+	entries: Array<{ name: string; content: string }>,
+): Uint8Array {
 	const encoder = new TextEncoder();
 	const localChunks: Uint8Array[] = [];
 	const centralChunks: Uint8Array[] = [];
@@ -248,13 +250,14 @@ describe("onePassword1puxImportProvider", () => {
 		expect(preview.summary.vaultCount).toBe(2);
 		expect(preview.summary.itemCount).toBe(6);
 		expect(preview.summary.skippedCount).toBe(2);
-		expect(preview.sourceVaults.find((vault) => vault.id === "vault-work"))
-			.toEqual({
-				id: "vault-work",
-				name: "Work",
-				itemCount: 4,
-				skippedCount: 2,
-			});
+		expect(
+			preview.sourceVaults.find((vault) => vault.id === "vault-work"),
+		).toEqual({
+			id: "vault-work",
+			name: "Work",
+			itemCount: 4,
+			skippedCount: 2,
+		});
 
 		const loginItem = preview.sourceItems.find((item) => item.id === "login-1");
 		expect(loginItem?.category).toBe("login");
@@ -286,12 +289,16 @@ describe("onePassword1puxImportProvider", () => {
 		expect(totpItem?.data.totpIssuer).toBe("AWS");
 		expect(totpItem?.data.totpDigits).toBe(6);
 
-		const unknownItem = preview.sourceItems.find((item) => item.id === "unknown-1");
+		const unknownItem = preview.sourceItems.find(
+			(item) => item.id === "unknown-1",
+		);
 		expect(unknownItem?.category).toBe("login");
 
 		expect(preview.sourceItems.some((item) => item.id === "doc-1")).toBe(false);
 		expect(
-			preview.warnings.some((warning) => warning.code === "attachments-skipped"),
+			preview.warnings.some(
+				(warning) => warning.code === "attachments-skipped",
+			),
 		).toBe(true);
 		expect(
 			preview.warnings.some((warning) => warning.code === "documents-skipped"),
@@ -303,8 +310,12 @@ describe("onePassword1puxImportProvider", () => {
 			preview.warnings.some((warning) => warning.code === "category-fallback"),
 		).toBe(true);
 
+		if (!loginItem) {
+			throw new Error("Expected login item to exist in parsed preview");
+		}
+
 		const decrypted =
-			onePassword1puxImportProvider.toDecryptedItemData(loginItem!);
+			onePassword1puxImportProvider.toDecryptedItemData(loginItem);
 		expect(decrypted.category).toBe("login");
 		expect(decrypted.favorite).toBe(true);
 		expect(decrypted.data.title).toBe("GitHub");
@@ -395,7 +406,11 @@ describe("onePassword1puxImportProvider", () => {
 							details: {
 								fields: [
 									{ id: "username", designation: "username", value: "jane" },
-									{ id: "entry[password]", designation: "password", value: "1" },
+									{
+										id: "entry[password]",
+										designation: "password",
+										value: "1",
+									},
 									{
 										id: "entry[password][repeat]",
 										type: "p",

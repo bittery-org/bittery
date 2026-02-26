@@ -34,10 +34,7 @@ export function useMoveItem() {
 
 	return useMutation({
 		mutationFn: async (input: MoveItemInput) => {
-			const sourceContext = requireLocalItemMutationContext(
-				core,
-				input.itemId,
-			);
+			const sourceContext = requireLocalItemMutationContext(core, input.itemId);
 			const targetAccount = input.targetAccountEmail
 				? {
 						email: input.targetAccountEmail,

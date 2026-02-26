@@ -440,8 +440,15 @@ describe("Auth Router", () => {
 		test("should update user email and logout all sessions", async () => {
 			const { userId, caller } = await setup(authRouter);
 			const newEmail = generateTestEmail();
+			const cryptoData = nextAuthCryptoFixture;
 
-			const result = await caller.updateEmail({ newEmail });
+			const result = await caller.updateEmail({
+				newEmail,
+				srpSalt: cryptoData.srpSalt,
+				srpVerifier: cryptoData.srpVerifier,
+				encryptedPrivateKey: cryptoData.encryptedPrivateKey,
+				encryptedVaultKeys: [],
+			});
 
 			expect(result.success).toBe(true);
 
@@ -454,10 +461,17 @@ describe("Auth Router", () => {
 				setup(authRouter),
 				setup(authRouter),
 			]);
+			const cryptoData = nextAuthCryptoFixture;
 
-			await expect(caller.updateEmail({ newEmail: email2 })).rejects.toThrow(
-				"Email already in use",
-			);
+			await expect(
+				caller.updateEmail({
+					newEmail: email2,
+					srpSalt: cryptoData.srpSalt,
+					srpVerifier: cryptoData.srpVerifier,
+					encryptedPrivateKey: cryptoData.encryptedPrivateKey,
+					encryptedVaultKeys: [],
+				}),
+			).rejects.toThrow("Email already in use");
 		});
 	});
 

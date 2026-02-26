@@ -36,10 +36,11 @@ export function useItems(options: UseItemsOptions = {}) {
 		enabled: options.enabled,
 	});
 
-	const items = useMemo(
-		() => vaultCoordinator.getAll() as MultiAccountItem[],
-		[vaultCoordinator, snapshot, isAllAccountsMode],
-	);
+	const items = useMemo(() => {
+		// Snapshot is an invalidation signal from the coordinator store.
+		void snapshot;
+		return vaultCoordinator.getAll() as MultiAccountItem[];
+	}, [vaultCoordinator, snapshot]);
 
 	return {
 		items,

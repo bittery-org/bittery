@@ -75,10 +75,7 @@ export async function runCatchUp({
 
 		const latestEvent = page.events[page.events.length - 1];
 		const nextCursor =
-			page.cursor ??
-			(latestEvent
-				? { seq: latestEvent.seq }
-				: null);
+			page.cursor ?? (latestEvent ? { seq: latestEvent.seq } : null);
 		if (nextCursor) {
 			cursor = nextCursor;
 		}

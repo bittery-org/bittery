@@ -54,6 +54,9 @@ export function useItem(
 		});
 
 	const item = useMemo(() => {
+		// Snapshot is an invalidation signal from the coordinator store.
+		void snapshot;
+
 		if (!enabled || !itemId) {
 			return undefined;
 		}

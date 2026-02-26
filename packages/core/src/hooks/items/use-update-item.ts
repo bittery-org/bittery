@@ -31,10 +31,7 @@ export function useUpdateItem() {
 
 	return useMutation({
 		mutationFn: async (input: UpdateItemInput) => {
-			const context = requireLocalItemMutationContext(
-				core,
-				input.itemId,
-			);
+			const context = requireLocalItemMutationContext(core, input.itemId);
 			const existing = context.item;
 
 			const mergedData = core.items.mergeItemUpdate(

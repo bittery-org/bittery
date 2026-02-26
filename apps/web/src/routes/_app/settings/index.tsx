@@ -10,20 +10,20 @@ import {
 	TabsTrigger,
 } from "@bittery/ui";
 import {
+	IconCircleCheck2OutlineDuo18 as CheckCircle,
 	IconClockTimeOutlineDuo18 as Clock,
 	IconExternalLinkOutlineDuo18 as ExternalLink,
+	IconFingerprintOutlineDuo18 as Fingerprint,
+	IconGear3OutlineDuo18 as Gear,
 	IconSquareTerminalOutlineDuo18 as Github,
 	IconKeyOutlineDuo18 as Key,
 	IconLockKeyOutlineDuo18 as LockKey,
+	IconEnvelopeOutlineDuo18 as Mail,
 	IconMobileOutlineDuo18 as Mobile,
 	IconMagicShieldOutlineDuo18 as Shield,
 	IconTrash2OutlineDuo18 as Trash2,
-	IconUserOutlineDuo18 as User,
-	IconGear3OutlineDuo18 as Gear,
-	IconEnvelopeOutlineDuo18 as Mail,
-	IconCircleCheck2OutlineDuo18 as CheckCircle,
-	IconFingerprintOutlineDuo18 as Fingerprint,
 	IconUpload4OutlineDuo18 as Upload,
+	IconUserOutlineDuo18 as User,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -160,9 +160,7 @@ function SettingsPage() {
 											</p>
 										</div>
 										{userQuery.data?.email && (
-											<ChangeEmailDialog
-												currentEmail={userQuery.data.email}
-											/>
+											<ChangeEmailDialog currentEmail={userQuery.data.email} />
 										)}
 									</div>
 								</div>
@@ -185,8 +183,6 @@ function SettingsPage() {
 								</div>
 							</div>
 						)}
-
-
 					</div>
 				</TabsContent>
 
@@ -221,9 +217,7 @@ function SettingsPage() {
 										</div>
 									</div>
 									{userQuery.data?.email && (
-										<ChangePasswordDialog
-											userEmail={userQuery.data.email}
-										/>
+										<ChangePasswordDialog userEmail={userQuery.data.email} />
 									)}
 								</div>
 							</div>
@@ -331,9 +325,7 @@ function SettingsPage() {
 				<TabsContent value="general" className="mt-4">
 					<div className="space-y-6">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-							<h2 className="font-semibold text-lg tracking-tight">
-								General
-							</h2>
+							<h2 className="font-semibold text-lg tracking-tight">General</h2>
 							<p className="text-muted-foreground text-sm">
 								App information and account management.
 							</p>
@@ -409,8 +401,8 @@ function SettingsPage() {
 									<div className="space-y-0.5">
 										<span className="font-medium text-sm">Delete Account</span>
 										<p className="text-muted-foreground text-xs">
-											Permanently delete your account and all data. This
-											cannot be undone.
+											Permanently delete your account and all data. This cannot
+											be undone.
 										</p>
 									</div>
 								</div>

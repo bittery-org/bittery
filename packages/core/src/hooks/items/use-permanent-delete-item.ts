@@ -27,10 +27,7 @@ export function usePermanentDeleteItem() {
 
 	return useMutation({
 		mutationFn: async (input: PermanentDeleteItemInput) => {
-			const context = requireLocalItemMutationContext(
-				core,
-				input.itemId,
-			);
+			const context = requireLocalItemMutationContext(core, input.itemId);
 			await context.repo.removeItem(input.itemId);
 			enqueueItemMutation(queue, context, {
 				type: "permanent_delete",

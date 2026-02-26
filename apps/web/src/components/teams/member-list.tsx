@@ -119,9 +119,7 @@ export function MemberList({
 
 	if (members.length === 0) {
 		return (
-			<p className="py-8 text-center text-muted-foreground">
-				No members found
-			</p>
+			<p className="py-8 text-center text-muted-foreground">No members found</p>
 		);
 	}
 
@@ -244,9 +242,8 @@ export function MemberList({
 														Delete Account Permanently
 													</AlertDialogTitle>
 													<AlertDialogDescription>
-														This permanently deletes {member.name}'s account
-														and all associated data. This action cannot be
-														undone.
+														This permanently deletes {member.name}'s account and
+														all associated data. This action cannot be undone.
 													</AlertDialogDescription>
 												</AlertDialogHeader>
 												<AlertDialogFooter>

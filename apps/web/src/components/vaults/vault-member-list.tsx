@@ -300,14 +300,13 @@ export function VaultMemberList({
 										<AlertDialogHeader>
 											<AlertDialogTitle>Remove Member</AlertDialogTitle>
 											<AlertDialogDescription>
-												Are you sure you want to remove {member.name} from
-												this vault? They will lose access to all items in
-												this vault.
+												Are you sure you want to remove {member.name} from this
+												vault? They will lose access to all items in this vault.
 												<br />
 												<br />
 												<span className="text-muted-foreground text-xs">
-													Note: This will rotate the vault encryption key
-													and re-encrypt all items for security.
+													Note: This will rotate the vault encryption key and
+													re-encrypt all items for security.
 												</span>
 											</AlertDialogDescription>
 										</AlertDialogHeader>

@@ -62,10 +62,7 @@ export class SyncOrchestrator {
 			this.setStatus({ pendingChanges });
 
 			// Drain newly enqueued mutations immediately when already connected.
-			if (
-				pendingChanges > 0 &&
-				this.status.connectionStatus === "connected"
-			) {
+			if (pendingChanges > 0 && this.status.connectionStatus === "connected") {
 				void this.drainQueue().catch((error) => {
 					console.error(
 						"[SyncOrchestrator] Queue drain failed while connected:",

@@ -23,10 +23,11 @@ export function useVaultItems(
 			requiredId: vaultId,
 		});
 
-	const items = useMemo(
-		() => vaultCoordinator.getByVault(vaultId) as DecryptedItem[],
-		[vaultCoordinator, vaultId, snapshot],
-	);
+	const items = useMemo(() => {
+		// Snapshot is an invalidation signal from the coordinator store.
+		void snapshot;
+		return vaultCoordinator.getByVault(vaultId) as DecryptedItem[];
+	}, [vaultCoordinator, vaultId, snapshot]);
 
 	return {
 		items,

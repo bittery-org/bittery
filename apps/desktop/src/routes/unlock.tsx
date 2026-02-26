@@ -53,6 +53,7 @@ export function UnlockPage() {
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
 	const hasAttemptedBiometric = useRef(false);
+	const lastAutoTriggerId = useRef<string | undefined>(undefined);
 	const { autoTrigger, autoTriggerId } = Route.useSearch();
 
 	const allAccounts = accounts.data ?? [];
@@ -171,9 +172,14 @@ export function UnlockPage() {
 
 	// Reset attempt flag on each extension trigger event.
 	useEffect(() => {
-		if (autoTrigger) {
-			hasAttemptedBiometric.current = false;
+		if (!autoTrigger) {
+			return;
 		}
+		if (lastAutoTriggerId.current === autoTriggerId) {
+			return;
+		}
+		lastAutoTriggerId.current = autoTriggerId;
+		hasAttemptedBiometric.current = false;
 	}, [autoTrigger, autoTriggerId]);
 
 	// Auto-trigger biometric only for extension-initiated unlock requests.

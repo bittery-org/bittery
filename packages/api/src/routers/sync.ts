@@ -95,9 +95,7 @@ export const syncRouter = router({
 					metadata: e.metadata ? JSON.parse(e.metadata) : null,
 					timestamp: e.createdAt.getTime(),
 				})),
-				cursor: latestCursorEvent
-					? { seq: latestCursorEvent.seq }
-					: null,
+				cursor: latestCursorEvent ? { seq: latestCursorEvent.seq } : null,
 				hasMore,
 				requiresFullRefresh,
 			};

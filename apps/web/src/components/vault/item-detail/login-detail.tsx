@@ -89,7 +89,7 @@ export function LoginDetail({
 							<Input
 								value={data.url}
 								readOnly
-								className="min-w-0 w-full text-[13px]"
+								className="w-full min-w-0 text-[13px]"
 							/>
 							<div className="flex shrink-0 items-center gap-2">
 								<Button
@@ -115,7 +115,11 @@ export function LoginDetail({
 					<div className="min-w-0 space-y-2">
 						<Label>Username</Label>
 						<div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-							<Input value={data.username} readOnly className="min-w-0 w-full" />
+							<Input
+								value={data.username}
+								readOnly
+								className="w-full min-w-0"
+							/>
 							<div className="flex shrink-0 items-center gap-2">
 								<Button
 									size="icon"
@@ -137,7 +141,7 @@ export function LoginDetail({
 								type={showPassword ? "text" : "password"}
 								value={data.password}
 								readOnly
-								className="min-w-0 w-full font-mono"
+								className="w-full min-w-0 font-mono"
 							/>
 							<div className="flex shrink-0 items-center gap-2">
 								<Button
@@ -193,7 +197,7 @@ export function LoginDetail({
 								<Input
 									value={url}
 									readOnly
-									className="min-w-0 w-full text-[13px]"
+									className="w-full min-w-0 text-[13px]"
 								/>
 								<div className="flex shrink-0 items-center gap-2">
 									<Button
@@ -231,7 +235,7 @@ export function LoginDetail({
 										}
 										value={field.value}
 										readOnly
-										className="min-w-0 w-full"
+										className="w-full min-w-0"
 									/>
 									<div className="flex shrink-0 items-center gap-2">
 										{field.type === "password" && (

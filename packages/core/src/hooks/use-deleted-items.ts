@@ -29,10 +29,11 @@ export function useDeletedItems(options: UseDeletedItemsOptions = {}) {
 		enabled: options.enabled,
 	});
 
-	const items = useMemo(
-		() => vaultCoordinator.getDeleted() as DeletedItem[],
-		[vaultCoordinator, snapshot],
-	);
+	const items = useMemo(() => {
+		// Snapshot is an invalidation signal from the coordinator store.
+		void snapshot;
+		return vaultCoordinator.getDeleted() as DeletedItem[];
+	}, [vaultCoordinator, snapshot]);
 
 	return {
 		items,

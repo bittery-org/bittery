@@ -80,11 +80,21 @@ export function AutofillIframeBase({
 		window.parent.postMessage({ type: config.readyMessageType }, "*");
 
 		return () => window.removeEventListener("message", handleMessage);
-	}, []);
+	}, [
+		config.defaultFieldType,
+		config.filterFn,
+		config.filterMessageType,
+		config.itemsMessageType,
+		config.preprocessItems,
+		config.readyMessageType,
+	]);
 
-	const handleSelect = useCallback((item: DecryptedItem) => {
-		window.parent.postMessage({ type: config.selectMessageType, item }, "*");
-	}, []);
+	const handleSelect = useCallback(
+		(item: DecryptedItem) => {
+			window.parent.postMessage({ type: config.selectMessageType, item }, "*");
+		},
+		[config.selectMessageType],
+	);
 
 	// Keyboard navigation via native keydown and forwarded KEYBOARD_NAV messages
 	useEffect(() => {

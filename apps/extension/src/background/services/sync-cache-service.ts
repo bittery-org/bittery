@@ -53,19 +53,11 @@ export interface SyncCacheDesktopClient {
 export interface SyncEventQueryClient extends DeltaSyncClient {
 	sync: {
 		getEventsSince: {
-			query: (input: {
-				since: number;
-				sinceId?: string;
-				limit?: number;
-			}) => Promise<{
-				events: Array<
-					SyncEvent & {
-						clientId: string | null;
-					}
-				>;
+			query: (input: { sinceSeq: number; limit?: number }) => Promise<{
+				events: SyncEvent[];
 				hasMore: boolean;
 				requiresFullRefresh: boolean;
-				cursor: { timestamp: number; id: string } | null;
+				cursor: { seq: number; timestamp?: number; id?: string } | null;
 			}>;
 		};
 	};

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useCoreContext } from "../context/platform-context";
 import type { VaultRepositoryCoordinator } from "../services/vault-repository-coordinator";
 import { useAccountsInfo } from "./use-accounts-info";
@@ -28,15 +28,6 @@ export function useVaultRepositorySync(
 		isAllAccountsMode,
 	} = useAccountsInfo({ enabled });
 
-	const accountsKey = useMemo(
-		() =>
-			accountsInfo
-				.map((account) => account.email)
-				.sort()
-				.join("|"),
-		[accountsInfo],
-	);
-
 	useEffect(() => {
 		if (!enabled || isLoadingAccounts || accountsInfo.length === 0) {
 			return;
@@ -50,7 +41,6 @@ export function useVaultRepositorySync(
 		enabled,
 		isLoadingAccounts,
 		accountsInfo,
-		accountsKey,
 		requiredId,
 	]);
 
@@ -65,7 +55,7 @@ export function useVaultRepositorySync(
 			return;
 		}
 		await core.vaultCoordinator.refreshFromServer(accountsInfo);
-	}, [core.vaultCoordinator, accountsInfo, accountsKey]);
+	}, [core.vaultCoordinator, accountsInfo]);
 
 	return {
 		snapshot,

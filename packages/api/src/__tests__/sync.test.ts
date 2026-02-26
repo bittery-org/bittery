@@ -30,7 +30,6 @@ describe("Sync Router", () => {
 			const vaultId = await createTestVault(userId);
 
 			// Create events at different times
-			const oldTime = Date.now() - 60000;
 			await createTestSyncEvent(vaultId, userId, {
 				eventType: "item_created",
 				entityId: "item-1",

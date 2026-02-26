@@ -139,5 +139,6 @@ body {
 /* Keep the autofill iframe document transparent so only the card is visible. */
 html.autofill-iframe-root,
 html.autofill-iframe-root body.autofill-iframe-body {
+	/* biome-ignore lint/complexity/noImportantStyles: required to override host page styles in injected iframe */
 	background: transparent !important;
 }

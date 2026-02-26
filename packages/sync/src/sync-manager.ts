@@ -424,7 +424,12 @@ export class SyncManager {
 	async getStoredLastSyncCursor(): Promise<SyncCursor | null> {
 		// Try new seq-based cursor first
 		const cursor = await this.storage.get<SyncCursor>("lastSyncCursor");
-		if (cursor && typeof cursor === "object" && "seq" in cursor && typeof cursor.seq === "number") {
+		if (
+			cursor &&
+			typeof cursor === "object" &&
+			"seq" in cursor &&
+			typeof cursor.seq === "number"
+		) {
 			return cursor;
 		}
 

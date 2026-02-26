@@ -66,7 +66,11 @@ function VaultDetailPage() {
 		let scrollParent: HTMLElement | null = el.parentElement;
 		while (scrollParent) {
 			const overflow = getComputedStyle(scrollParent).overflowY;
-			if (overflow === "auto" || overflow === "scroll" || overflow === "overlay") {
+			if (
+				overflow === "auto" ||
+				overflow === "scroll" ||
+				overflow === "overlay"
+			) {
 				break;
 			}
 			scrollParent = scrollParent.parentElement;
@@ -81,7 +85,7 @@ function VaultDetailPage() {
 
 		observer.observe(el);
 		return () => observer.disconnect();
-	}, [isLoadingVault, vaultId]);
+	}, [isLoadingVault]);
 
 	// Members still come from tRPC (no local hook for membership data)
 	const membersQuery = useQuery(
@@ -129,11 +133,7 @@ function VaultDetailPage() {
 	}
 
 	const roleBadgeVariant =
-		role === "owner"
-			? "default"
-			: role === "admin"
-				? "secondary"
-				: "outline";
+		role === "owner" ? "default" : role === "admin" ? "secondary" : "outline";
 
 	const compactHeaderLeft = isMobile
 		? "0px"
@@ -148,11 +148,11 @@ function VaultDetailPage() {
 				className={`fixed top-0 right-0 z-50 flex h-11 items-center border-b bg-background/80 backdrop-blur-sm transition-[left,opacity,transform] duration-200 ${
 					showCompactHeader && vaultInfo
 						? "translate-y-0 opacity-100"
-						: "-translate-y-full opacity-0 pointer-events-none"
+						: "pointer-events-none -translate-y-full opacity-0"
 				}`}
 				style={{ left: compactHeaderLeft }}
 			>
-				<div className="mx-auto flex h-full w-full max-w-6xl items-center justify-between pl-14 pr-5 lg:pl-16 lg:pr-6 xl:pl-6">
+				<div className="mx-auto flex h-full w-full max-w-6xl items-center justify-between pr-5 pl-14 lg:pr-6 lg:pl-16 xl:pl-6">
 					{vaultInfo && (
 						<>
 							<div className="flex items-center gap-2.5">
@@ -168,17 +168,12 @@ function VaultDetailPage() {
 								</span>
 								<Badge
 									variant={roleBadgeVariant}
-									className="capitalize text-[11px] px-1.5 py-0"
+									className="px-1.5 py-0 text-[11px] capitalize"
 								>
 									{role}
 								</Badge>
 							</div>
-							<Button
-								variant="ghost"
-								size="sm"
-								className="h-7 text-xs"
-								asChild
-							>
+							<Button variant="ghost" size="sm" className="h-7 text-xs" asChild>
 								<Link to="/vaults">
 									<ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
 									All Vaults
@@ -190,7 +185,10 @@ function VaultDetailPage() {
 			</div>
 
 			{/* Header */}
-			<section ref={headerRef} className="relative overflow-hidden rounded-2xl border bg-card p-6 sm:p-7 lg:rounded-xl lg:p-5">
+			<section
+				ref={headerRef}
+				className="relative overflow-hidden rounded-2xl border bg-card p-6 sm:p-7 lg:rounded-xl lg:p-5"
+			>
 				<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent lg:from-muted/30" />
 
 				<div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
@@ -213,21 +211,27 @@ function VaultDetailPage() {
 							</div>
 							<div className="space-y-1.5 lg:space-y-0">
 								<div className="flex items-center gap-2.5">
-									<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl lg:text-xl lg:font-semibold">
+									<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl lg:font-semibold lg:text-xl">
 										{vaultInfo.vaultName}
 									</h1>
 									<div className="hidden items-center gap-1.5 lg:flex">
-										<Badge variant="secondary" className="capitalize text-[11px] px-1.5 py-0">
+										<Badge
+											variant="secondary"
+											className="px-1.5 py-0 text-[11px] capitalize"
+										>
 											{vaultInfo.vaultType}
 										</Badge>
-										<Badge variant={roleBadgeVariant} className="capitalize text-[11px] px-1.5 py-0">
+										<Badge
+											variant={roleBadgeVariant}
+											className="px-1.5 py-0 text-[11px] capitalize"
+										>
 											{role}
 										</Badge>
 									</div>
 								</div>
 								<p className="text-muted-foreground lg:text-xs">
-									{itemCount} item{itemCount !== 1 ? "s" : ""} ·{" "}
-									{memberCount} member
+									{itemCount} item{itemCount !== 1 ? "s" : ""} · {memberCount}{" "}
+									member
 									{memberCount !== 1 ? "s" : ""}
 								</p>
 							</div>
@@ -246,7 +250,12 @@ function VaultDetailPage() {
 					</div>
 
 					<div className="flex flex-wrap gap-2 lg:justify-end">
-						<Button variant="outline" size="default" className="lg:h-8 lg:text-xs lg:px-3" asChild>
+						<Button
+							variant="outline"
+							size="default"
+							className="lg:h-8 lg:px-3 lg:text-xs"
+							asChild
+						>
 							<Link to="/vaults">
 								<ArrowLeft className="mr-2 h-4 w-4 lg:mr-1.5 lg:h-3.5 lg:w-3.5" />
 								All Vaults
@@ -260,10 +269,7 @@ function VaultDetailPage() {
 			</section>
 
 			{/* Tabs Area */}
-			<Tabs
-				defaultValue="items"
-				className="flex min-h-0 flex-1 flex-col"
-			>
+			<Tabs defaultValue="items" className="flex min-h-0 flex-1 flex-col">
 				<TabsList className="w-fit shrink-0">
 					<TabsTrigger value="items">
 						<Key className="mr-2 h-4 w-4" />
@@ -344,25 +350,25 @@ function VaultDetailPage() {
 			</Tabs>
 
 			{/* Item Detail Sheet */}
-				<Sheet
-					open={!!selectedItem}
-					onOpenChange={(open) => !open && handleCloseSheet()}
-				>
-					<SheetContent className="w-full min-w-0 sm:max-w-2xl">
-						<div className="h-full min-w-0 overflow-y-auto">
-							{selectedItem && (
-								<ItemDetail
-									category={selectedItem.category}
+			<Sheet
+				open={!!selectedItem}
+				onOpenChange={(open) => !open && handleCloseSheet()}
+			>
+				<SheetContent className="w-full min-w-0 sm:max-w-2xl">
+					<div className="h-full min-w-0 overflow-y-auto">
+						{selectedItem && (
+							<ItemDetail
+								category={selectedItem.category}
 								data={selectedItem}
 								item={selectedItem}
 								vaultId={vaultId}
 								availableTags={availableTags}
-									canEdit={canEdit}
-								/>
-							)}
-						</div>
-					</SheetContent>
-				</Sheet>
-			</div>
+								canEdit={canEdit}
+							/>
+						)}
+					</div>
+				</SheetContent>
+			</Sheet>
+		</div>
 	);
 }

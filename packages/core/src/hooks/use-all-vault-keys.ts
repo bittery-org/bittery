@@ -57,6 +57,9 @@ export function useAllVaultKeys(options: UseAllVaultKeysOptions = {}) {
 	});
 
 	const vaultKeys = useMemo(() => {
+		// Snapshot is an invalidation signal from the coordinator store.
+		void snapshot;
+
 		if (accountsInfo.length === 0) {
 			return [] as VaultKeyWithAccount[];
 		}

@@ -91,9 +91,7 @@ function VaultsPage() {
 			) : (
 				<div className="space-y-3">
 					<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-						<h2 className="font-semibold text-lg tracking-tight">
-							All Vaults
-						</h2>
+						<h2 className="font-semibold text-lg tracking-tight">All Vaults</h2>
 						<p className="text-muted-foreground text-sm">
 							Click a vault to view items and manage access.
 						</p>

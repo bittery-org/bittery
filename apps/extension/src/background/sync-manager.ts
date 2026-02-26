@@ -9,7 +9,6 @@
  */
 
 import {
-	type CatchUpClient,
 	type ConnectionStatus,
 	runCatchUp,
 	type SyncCursor,
@@ -159,7 +158,7 @@ async function catchUpMissedEvents(): Promise<void> {
 		const client =
 			await syncCacheService.getClientForEmail(syncConnectionEmail);
 		const result = await runCatchUp({
-			client: client as CatchUpClient,
+			client,
 			initialCursor: lastCursor,
 			shouldProcessEvent: (event) => event.clientId !== clientId,
 			onEvent: async (event) => {
@@ -404,10 +403,7 @@ export async function getLastSyncCursor(): Promise<SyncCursor | null> {
 		LEGACY_LAST_SYNC_KEY,
 	]);
 	const cursor = result[LAST_SYNC_CURSOR_KEY] as SyncCursor | undefined;
-	if (
-		cursor &&
-		typeof cursor.seq === "number"
-	) {
+	if (cursor && typeof cursor.seq === "number") {
 		return cursor;
 	}
 

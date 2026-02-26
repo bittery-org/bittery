@@ -26,7 +26,10 @@ interface DetailFieldValueProps {
 function DetailFieldValue({ value, className }: DetailFieldValueProps) {
 	return (
 		<div className="min-w-0 flex-1 px-3">
-			<p className={cn("truncate py-2 text-sm leading-5", className)} title={value}>
+			<p
+				className={cn("truncate py-2 text-sm leading-5", className)}
+				title={value}
+			>
 				{value}
 			</p>
 		</div>
