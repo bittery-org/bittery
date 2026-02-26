@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
 import {
+	bigserial,
 	index,
 	integer,
 	pgEnum,
@@ -40,6 +41,7 @@ export const syncEvent = pgTable(
 	"sync_event",
 	{
 		id: text("id").primaryKey(),
+		seq: bigserial("seq", { mode: "number" }).notNull(),
 		eventType: syncEventTypeEnum("event_type").notNull(),
 		vaultId: text("vault_id").references(() => vault.id, {
 			onDelete: "set null",
@@ -62,7 +64,7 @@ export const syncEvent = pgTable(
 		index("sync_event_vaultId_idx").on(table.vaultId),
 		index("sync_event_userId_idx").on(table.userId),
 		index("sync_event_createdAt_idx").on(table.createdAt),
-		index("sync_event_createdAt_id_idx").on(table.createdAt, table.id),
+		index("sync_event_seq_idx").on(table.seq),
 		index("sync_event_entityId_idx").on(table.entityId),
 	],
 );

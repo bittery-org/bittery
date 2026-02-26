@@ -9,6 +9,7 @@ import { streamSSE } from "hono/streaming";
 // Types for sync events
 export interface SyncEventPayload {
 	id: string;
+	seq: number;
 	type:
 		| "item_created"
 		| "item_updated"

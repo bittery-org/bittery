@@ -41,7 +41,7 @@ describe("Sync Router", () => {
 			});
 
 			const result = await caller.getEventsSince({
-				since: oldTime,
+				sinceSeq: 0,
 			});
 
 			expect(result.events.length).toBe(2);
@@ -63,7 +63,7 @@ describe("Sync Router", () => {
 			});
 
 			const result = await caller.getEventsSince({
-				since: Date.now() - 60000,
+				sinceSeq: 0,
 				vaultIds: [vault1],
 			});
 
@@ -75,7 +75,7 @@ describe("Sync Router", () => {
 			const { caller } = await setup(syncRouter);
 
 			const result = await caller.getEventsSince({
-				since: Date.now() - 60000,
+				sinceSeq: 0,
 			});
 
 			expect(result.events).toEqual([]);
@@ -93,7 +93,7 @@ describe("Sync Router", () => {
 			});
 
 			const result = await caller.getEventsSince({
-				since: Date.now() - 60000,
+				sinceSeq: 0,
 				vaultIds: [vaultId],
 			});
 
@@ -113,7 +113,7 @@ describe("Sync Router", () => {
 			}
 
 			const result = await caller.getEventsSince({
-				since: Date.now() - 60000,
+				sinceSeq: 0,
 				limit: 3,
 			});
 
@@ -132,7 +132,7 @@ describe("Sync Router", () => {
 			});
 
 			const result = await caller.getEventsSince({
-				since: Date.now() - 60000,
+				sinceSeq: 0,
 			});
 
 			expect(result.events[0]?.metadata).toEqual({

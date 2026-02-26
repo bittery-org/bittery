@@ -1,6 +1,6 @@
 import { db, item, syncEvent, syncEventAck, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gt, inArray, isNull, ne, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { protectedProcedure, router } from "../index";
@@ -8,14 +8,13 @@ import { getStoragePublicUrl } from "../storage/s3";
 
 export const syncRouter = router({
 	/**
-	 * Get sync events since a given timestamp
+	 * Get sync events since a given sequence number
 	 * Used for catching up after reconnection
 	 */
 	getEventsSince: protectedProcedure
 		.input(
 			z.object({
-				since: z.number(), // Unix timestamp in milliseconds
-				sinceId: z.string().optional(),
+				sinceSeq: z.number(), // Sequence number cursor
 				vaultIds: z.array(z.string()).optional(), // Filter by specific vaults
 				limit: z.number().min(1).max(1000).default(100),
 			}),
@@ -33,23 +32,7 @@ export const syncRouter = router({
 				? input.vaultIds.filter((id) => userVaultIds.includes(id))
 				: userVaultIds;
 
-			const sinceDate = new Date(input.since);
-			// When sinceId is provided, explicitly exclude it to prevent infinite
-			// re-fetching caused by PostgreSQL microsecond timestamp precision
-			// vs JavaScript millisecond precision (Date.getTime() truncates µs,
-			// so the "same" event always appears as gt in Postgres).
-			const cursorCondition = input.sinceId
-				? and(
-						ne(syncEvent.id, input.sinceId),
-						or(
-							gt(syncEvent.createdAt, sinceDate),
-							and(
-								eq(syncEvent.createdAt, sinceDate),
-								gt(syncEvent.id, input.sinceId),
-							),
-						),
-					)
-				: gt(syncEvent.createdAt, sinceDate);
+			const cursorCondition = gt(syncEvent.seq, input.sinceSeq);
 
 			const vaultEventsWhere =
 				targetVaultIds.length > 0
@@ -67,7 +50,7 @@ export const syncRouter = router({
 			// Get events for these vaults since the given cursor
 			const events = await db.query.syncEvent.findMany({
 				where: eventsWhere,
-				orderBy: [asc(syncEvent.createdAt), asc(syncEvent.id)],
+				orderBy: [asc(syncEvent.seq)],
 				limit: input.limit + 1, // Get one extra to check if there are more
 			});
 
@@ -90,20 +73,18 @@ export const syncRouter = router({
 			// a full refresh is required because part of history was pruned.
 			const oldestEvent = await db.query.syncEvent.findFirst({
 				where: oldestEventWhere,
-				orderBy: [asc(syncEvent.createdAt), asc(syncEvent.id)],
+				orderBy: [asc(syncEvent.seq)],
 			});
 
 			const requiresFullRefresh = Boolean(
-				oldestEvent &&
-					(oldestEvent.createdAt.getTime() > input.since ||
-						(oldestEvent.createdAt.getTime() === input.since &&
-							(!input.sinceId || oldestEvent.id > input.sinceId))),
+				oldestEvent && oldestEvent.seq > input.sinceSeq,
 			);
 			const latestCursorEvent = resultEvents[resultEvents.length - 1];
 
 			return {
 				events: resultEvents.map((e) => ({
 					id: e.id,
+					seq: e.seq,
 					type: e.eventType,
 					entityId: e.entityId,
 					entityType: e.entityType,
@@ -115,10 +96,7 @@ export const syncRouter = router({
 					timestamp: e.createdAt.getTime(),
 				})),
 				cursor: latestCursorEvent
-					? {
-							timestamp: latestCursorEvent.createdAt.getTime(),
-							id: latestCursorEvent.id,
-						}
+					? { seq: latestCursorEvent.seq }
 					: null,
 				hasMore,
 				requiresFullRefresh,

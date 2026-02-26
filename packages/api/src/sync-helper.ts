@@ -37,6 +37,7 @@ export interface CreateSyncEventParams {
 /** Payload returned by createSyncEvent for deferred broadcast */
 export interface SyncBroadcastPayload {
 	id: string;
+	seq: number;
 	type: SyncEventType;
 	entityId: string;
 	entityType: SyncEntityType;
@@ -77,6 +78,7 @@ export async function createSyncEvent(
 		})
 		.returning({
 			createdAt: syncEvent.createdAt,
+			seq: syncEvent.seq,
 		});
 
 	if (!inserted) {
@@ -85,6 +87,7 @@ export async function createSyncEvent(
 
 	return {
 		id: eventId,
+		seq: inserted.seq,
 		type: params.eventType,
 		entityId: params.entityId,
 		entityType: params.entityType,

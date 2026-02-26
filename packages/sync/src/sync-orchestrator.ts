@@ -118,10 +118,7 @@ export class SyncOrchestrator {
 			this.getDeltaSyncAccountEmail(),
 		);
 		await this.onEventProcessed?.(event);
-		await this.syncManager.setStoredLastSyncCursor({
-			timestamp: event.timestamp,
-			id: event.id,
-		});
+		await this.syncManager.setStoredLastSyncCursor({ seq: event.seq });
 		this.setStatus({
 			lastSyncTime: event.timestamp,
 		});
@@ -144,10 +141,7 @@ export class SyncOrchestrator {
 		try {
 			const cursor = await this.syncManager.getStoredLastSyncCursor();
 			if (!cursor) {
-				await this.syncManager.setStoredLastSyncCursor({
-					timestamp: Date.now(),
-					id: "",
-				});
+				await this.syncManager.setStoredLastSyncCursor({ seq: 0 });
 				return;
 			}
 

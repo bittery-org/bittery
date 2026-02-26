@@ -75,6 +75,7 @@ export interface SyncMetadataMap {
  */
 export interface SyncEvent {
 	id: string;
+	seq: number;
 	type: SyncEventType;
 	entityId: string;
 	entityType: SyncEntityType;
@@ -87,8 +88,11 @@ export interface SyncEvent {
 }
 
 export interface SyncCursor {
-	timestamp: number;
-	id: string;
+	seq: number;
+	/** @deprecated kept for backward compatibility during migration */
+	timestamp?: number;
+	/** @deprecated kept for backward compatibility during migration */
+	id?: string;
 }
 
 /**

@@ -297,6 +297,7 @@ export class SyncManager {
 			// Convert to SyncEvent
 			const syncEvent: SyncEvent = {
 				id: event.id,
+				seq: event.seq,
 				type: event.type,
 				entityId: event.entityId,
 				entityType: event.entityType,
@@ -308,11 +309,8 @@ export class SyncManager {
 				metadata: event.metadata,
 			};
 
-			// Update last event timestamp
-			this.lastEventCursor = {
-				timestamp: syncEvent.timestamp,
-				id: syncEvent.id,
-			};
+			// Update last event cursor
+			this.lastEventCursor = { seq: syncEvent.seq };
 			void this.setStoredLastSyncCursor(this.lastEventCursor).catch((error) => {
 				console.error("Failed to persist sync cursor:", error);
 			});
@@ -421,26 +419,26 @@ export class SyncManager {
 
 	/**
 	 * Get stored sync cursor.
-	 * Supports migrating from legacy timestamp-only storage.
+	 * Supports migrating from legacy timestamp+id storage.
 	 */
 	async getStoredLastSyncCursor(): Promise<SyncCursor | null> {
-		const cursor =
-			(await this.storage.get<SyncCursor>("lastSyncCursor")) ??
-			(await this.storage.get<SyncCursor>("lastSyncTimestamp"));
-		if (cursor && typeof cursor === "object" && "timestamp" in cursor) {
+		// Try new seq-based cursor first
+		const cursor = await this.storage.get<SyncCursor>("lastSyncCursor");
+		if (cursor && typeof cursor === "object" && "seq" in cursor && typeof cursor.seq === "number") {
 			return cursor;
 		}
 
-		const legacyTimestamp =
-			(await this.storage.get<number>("lastSyncTimestamp")) ?? null;
-		if (!legacyTimestamp) {
-			return null;
+		// Legacy: timestamp+id cursor — treat as needing full refresh (seq=0)
+		if (cursor && typeof cursor === "object" && "timestamp" in cursor) {
+			return { seq: 0 };
 		}
 
-		return {
-			timestamp: legacyTimestamp,
-			id: "",
-		};
+		const legacyTimestamp = await this.storage.get<number>("lastSyncTimestamp");
+		if (legacyTimestamp) {
+			return { seq: 0 };
+		}
+
+		return null;
 	}
 
 	/**

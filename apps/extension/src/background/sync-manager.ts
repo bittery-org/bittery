@@ -105,6 +105,7 @@ function isSyncEventPayload(value: unknown): value is SyncEvent {
 	const event = value as Partial<SyncEvent>;
 	return (
 		typeof event.id === "string" &&
+		typeof event.seq === "number" &&
 		typeof event.type === "string" &&
 		typeof event.entityId === "string" &&
 		typeof event.entityType === "string" &&
@@ -120,10 +121,7 @@ function isSyncEventPayload(value: unknown): value is SyncEvent {
  */
 async function handleSyncEvent(event: SyncEvent): Promise<void> {
 	// Persist cursor in local storage (survives service worker restarts).
-	await setLastSyncCursor({
-		timestamp: event.timestamp,
-		id: event.id,
-	});
+	await setLastSyncCursor({ seq: event.seq });
 
 	// Skip events from our own client.
 	const clientId = await getClientId();
@@ -398,7 +396,7 @@ export async function setLastSyncCursor(cursor: SyncCursor): Promise<void> {
 
 /**
  * Get last sync cursor.
- * Supports migration from legacy timestamp-only storage.
+ * Supports migration from legacy timestamp+id storage.
  */
 export async function getLastSyncCursor(): Promise<SyncCursor | null> {
 	const result = await chrome.storage.local.get([
@@ -408,19 +406,20 @@ export async function getLastSyncCursor(): Promise<SyncCursor | null> {
 	const cursor = result[LAST_SYNC_CURSOR_KEY] as SyncCursor | undefined;
 	if (
 		cursor &&
-		typeof cursor.timestamp === "number" &&
-		typeof cursor.id === "string"
+		typeof cursor.seq === "number"
 	) {
 		return cursor;
 	}
 
-	const legacyTimestamp = result[LEGACY_LAST_SYNC_KEY] as number | undefined;
-	if (!legacyTimestamp) {
-		return null;
+	// Legacy cursor — start from beginning
+	if (cursor && typeof cursor === "object" && "timestamp" in cursor) {
+		return { seq: 0 };
 	}
 
-	return {
-		timestamp: legacyTimestamp,
-		id: "",
-	};
+	const legacyTimestamp = result[LEGACY_LAST_SYNC_KEY] as number | undefined;
+	if (legacyTimestamp) {
+		return { seq: 0 };
+	}
+
+	return null;
 }
