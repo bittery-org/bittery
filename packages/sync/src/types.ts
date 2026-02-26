@@ -183,6 +183,18 @@ export interface ItemCacheAdapter {
 		email?: string,
 	): Promise<void>;
 	removeCachedVault?(vaultId: string, email?: string): Promise<void>;
+	syncVaultKeys?(
+		vaultKeys: Array<{
+			vaultId: string;
+			vaultName: string;
+			vaultType: "personal" | "team";
+			vaultIcon?: string | null;
+			vaultImageUrl?: string | null;
+			encryptedVaultKey: string;
+			role: "owner" | "admin" | "member" | "read-only";
+		}>,
+		email?: string,
+	): Promise<void>;
 	clearItemCache?(email?: string): Promise<void>;
 }
 

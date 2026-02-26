@@ -1,3 +1,4 @@
+import { useCoreContext } from "@bittery/core/hooks";
 import {
 	getDecryptedVaultKey,
 	type VaultKeyCryptoProvider,
@@ -46,6 +47,7 @@ export function ImportDialog({
 	accountEmail,
 }: ImportDialogProps) {
 	const defaultClient = useTRPCClient();
+	const core = useCoreContext();
 	const invalidator = useQueryInvalidator();
 	const clientId = useClientId();
 
@@ -203,6 +205,10 @@ export function ImportDialog({
 
 			// Invalidate queries to refresh the item list
 			await invalidator.invalidateVaultList(vaultId);
+			const { accountsInfo } = await core.accounts.resolveAccounts();
+			if (accountsInfo.length > 0) {
+				await core.vaultCoordinator.refreshFromServer(accountsInfo);
+			}
 
 			// Auto-close dialog after a short delay
 			setTimeout(() => {

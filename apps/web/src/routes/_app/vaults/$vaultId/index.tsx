@@ -8,7 +8,6 @@ import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	Badge,
 	Button,
-	ScrollArea,
 	Sheet,
 	SheetContent,
 	Skeleton,
@@ -48,8 +47,18 @@ function VaultDetailPage() {
 	const [showCompactHeader, setShowCompactHeader] = useState(false);
 	const headerRef = useRef<HTMLElement>(null);
 
+	// Use core hooks for vault metadata and items (local-first, same as desktop)
+	const { vaultInfo, isLoading: isLoadingVault } = useVaultInfo(vaultId);
+	const { items: decryptedItems, isLoading: isLoadingItems } =
+		useVaultItems(vaultId);
+
 	// Observe main header visibility to show compact fixed header on scroll
 	useEffect(() => {
+		if (isLoadingVault) {
+			setShowCompactHeader(false);
+			return;
+		}
+
 		const el = headerRef.current;
 		if (!el) return;
 
@@ -57,7 +66,9 @@ function VaultDetailPage() {
 		let scrollParent: HTMLElement | null = el.parentElement;
 		while (scrollParent) {
 			const overflow = getComputedStyle(scrollParent).overflowY;
-			if (overflow === "auto" || overflow === "scroll") break;
+			if (overflow === "auto" || overflow === "scroll" || overflow === "overlay") {
+				break;
+			}
 			scrollParent = scrollParent.parentElement;
 		}
 
@@ -70,12 +81,7 @@ function VaultDetailPage() {
 
 		observer.observe(el);
 		return () => observer.disconnect();
-	}, []);
-
-	// Use core hooks for vault metadata and items (local-first, same as desktop)
-	const { vaultInfo, isLoading: isLoadingVault } = useVaultInfo(vaultId);
-	const { items: decryptedItems, isLoading: isLoadingItems } =
-		useVaultItems(vaultId);
+	}, [isLoadingVault, vaultId]);
 
 	// Members still come from tRPC (no local hook for membership data)
 	const membersQuery = useQuery(
@@ -338,25 +344,25 @@ function VaultDetailPage() {
 			</Tabs>
 
 			{/* Item Detail Sheet */}
-			<Sheet
-				open={!!selectedItem}
-				onOpenChange={(open) => !open && handleCloseSheet()}
-			>
-				<SheetContent className="w-full sm:max-w-lg">
-					<ScrollArea className="h-full pr-4">
-						{selectedItem && (
-							<ItemDetail
-								category={selectedItem.category}
+				<Sheet
+					open={!!selectedItem}
+					onOpenChange={(open) => !open && handleCloseSheet()}
+				>
+					<SheetContent className="w-full min-w-0 sm:max-w-2xl">
+						<div className="h-full min-w-0 overflow-y-auto">
+							{selectedItem && (
+								<ItemDetail
+									category={selectedItem.category}
 								data={selectedItem}
 								item={selectedItem}
 								vaultId={vaultId}
 								availableTags={availableTags}
-								canEdit={canEdit}
-							/>
-						)}
-					</ScrollArea>
-				</SheetContent>
-			</Sheet>
-		</div>
+									canEdit={canEdit}
+								/>
+							)}
+						</div>
+					</SheetContent>
+				</Sheet>
+			</div>
 	);
 }

@@ -330,12 +330,12 @@ export class SyncManager {
 	}
 
 	/**
-	 * Schedule an event for dispatch, deduplicating by entityId.
-	 * If another event for the same entity arrives within the window,
+	 * Schedule an event for dispatch, deduplicating by event type + entityId.
+	 * If another event for the same entity and type arrives within the window,
 	 * the previous one is replaced and only the latest is dispatched.
 	 */
 	private scheduleEventDispatch(event: SyncEvent): void {
-		const key = event.entityId;
+		const key = `${event.type}:${event.entityId}`;
 		const existing = this.pendingEvents.get(key);
 
 		if (existing) {

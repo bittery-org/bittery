@@ -59,18 +59,26 @@ export function getQueryKeysForEvent(
 
 		case "vault_created":
 			keys.push(["vault-keys"]);
+			keys.push(trpc.vault.list.queryKey());
 			break;
 
 		case "vault_updated":
 			keys.push(["vault-keys"]);
+			keys.push(trpc.vault.list.queryKey());
+			if (event.metadata?.reason === "bulk_import" && vaultId) {
+				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
+				keys.push(trpc.vault.listAllItems.queryKey());
+			}
 			break;
 
 		case "vault_deleted":
 			keys.push(["vault-keys"]);
+			keys.push(trpc.vault.list.queryKey());
 			break;
 
 		case "vault_access_revoked": {
 			keys.push(["vault-keys"]);
+			keys.push(trpc.vault.list.queryKey());
 			break;
 		}
 
@@ -80,10 +88,12 @@ export function getQueryKeysForEvent(
 				keys.push(trpc.vault.members.list.queryKey({ vaultId }));
 			}
 			keys.push(["vault-keys"]);
+			keys.push(trpc.vault.list.queryKey());
 			break;
 
 		case "vault_key_rotated":
 			keys.push(["vault-keys"]);
+			keys.push(trpc.vault.list.queryKey());
 			break;
 	}
 
@@ -119,6 +129,7 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		): Promise<void> => {
 			const syntheticEvent: SyncEvent = {
 				id: `local_${Date.now()}`,
+				seq: 0,
 				type,
 				entityId,
 				entityType: getEntityTypeForEventType(type),
@@ -189,8 +200,13 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 * Invalidate vault keys
 		 */
 		invalidateVaultKeys: async (): Promise<void> => {
-			const { queryClient } = options;
-			await queryClient.invalidateQueries({ queryKey: ["vault-keys"] });
+			const { queryClient, trpc } = options;
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
+				queryClient.invalidateQueries({
+					queryKey: trpc.vault.list.queryKey(),
+				}),
+			]);
 		},
 
 		/**

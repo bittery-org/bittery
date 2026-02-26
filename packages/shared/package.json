@@ -18,6 +18,7 @@
 		"./password-history": "./src/password-history.ts",
 		"./favicon": "./src/favicon.ts",
 		"./identity": "./src/identity.ts",
+		"./import": "./src/import/index.ts",
 		"./totp": "./src/totp.ts",
 		"./trpc": "./src/trpc.ts",
 		"./crypto": "./src/crypto.ts",
@@ -29,7 +30,8 @@
 		"@bittery/api": "workspace:*",
 		"@tanstack/react-query": "^5.85.5",
 		"@trpc/client": "catalog:",
-		"@trpc/tanstack-react-query": "catalog:"
+		"@trpc/tanstack-react-query": "catalog:",
+		"jszip": "^3.10.1"
 	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",

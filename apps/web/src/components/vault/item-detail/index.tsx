@@ -102,7 +102,7 @@ export default function ItemDetail({
 	// Full editing is done in the desktop app.
 
 	return (
-		<div className="space-y-6">
+		<div className="min-w-0 space-y-6">
 			{renderDetail()}
 
 			{/* Tags section - display only in web app */}

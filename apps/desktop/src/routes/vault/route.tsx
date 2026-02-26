@@ -24,7 +24,6 @@ import type { AccountOption } from "../../components/vault/create-vault-dialog";
 import { CreateVaultDialog } from "../../components/vault/create-vault-dialog";
 import { DeleteVaultDialog } from "../../components/vault/delete-vault-dialog";
 import { EditVaultDialog } from "../../components/vault/edit-vault-dialog";
-import { ImportDialog } from "../../components/vault/import-dialog";
 import { VaultHeader } from "../../components/vault/vault-header";
 import { VaultSidebar } from "../../components/vault/vault-sidebar";
 import { VaultDndProvider } from "../../providers/dnd-provider";
@@ -98,11 +97,6 @@ function RouteComponent() {
 		id: string;
 		name: string;
 	} | null>(null);
-	const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
-	const [importingVaultId, setImportingVaultId] = useState<string | null>(null);
-	const [importingVaultAccountEmail, setImportingVaultAccountEmail] = useState<
-		string | undefined
-	>(undefined);
 	const [availableAccounts, setAvailableAccounts] = useState<AccountOption[]>(
 		[],
 	);
@@ -309,17 +303,6 @@ function RouteComponent() {
 		}
 	};
 
-	const handleOpenImportDialog = (vaultId: string) => {
-		// Find the vault to get its account email
-		const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
-		const accountEmail =
-			vault && "accountEmail" in vault ? vault.accountEmail : undefined;
-
-		setImportingVaultId(vaultId);
-		setImportingVaultAccountEmail(accountEmail);
-		setIsImportDialogOpen(true);
-	};
-
 	return (
 		<VaultDndProvider>
 			<div className="flex h-screen overflow-hidden">
@@ -330,15 +313,14 @@ function RouteComponent() {
 					onNewVault={() => setIsNewVaultDialogOpen(true)}
 					onEditVault={handleOpenEditVault}
 					onDeleteVault={handleOpenDeleteVault}
-					onImportItems={handleOpenImportDialog}
 				/>
 
-				<div className="flex h-full flex-1 flex-col overflow-hidden">
+				<div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
 					<VaultHeader
 						hasVaults={!!vaultKeys?.length}
 						onNewItemClick={() => setIsNewItemDialogOpen(true)}
 					/>
-					<div className="flex flex-1 overflow-hidden">
+					<div className="flex min-w-0 flex-1 overflow-hidden">
 						<Outlet />
 					</div>
 				</div>
@@ -402,20 +384,6 @@ function RouteComponent() {
 					onConfirm={handleDeleteVault}
 				/>
 
-				{importingVaultId && (
-					<ImportDialog
-						vaultId={importingVaultId}
-						accountEmail={importingVaultAccountEmail}
-						open={isImportDialogOpen}
-						onOpenChange={(open) => {
-							setIsImportDialogOpen(open);
-							if (!open) {
-								setImportingVaultId(null);
-								setImportingVaultAccountEmail(undefined);
-							}
-						}}
-					/>
-				)}
 			</div>
 		</VaultDndProvider>
 	);

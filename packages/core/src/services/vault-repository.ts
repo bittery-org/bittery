@@ -472,10 +472,10 @@ export class VaultRepository {
 		try {
 			const [cachedItems, cachedVaults, cacheMeta, storedVaultKeys] =
 				await Promise.all([
-				this.storage.getCachedItems?.(this.email),
-				this.storage.getCachedVaults?.(this.email),
-				this.storage.getItemCacheMetadata?.(this.email),
-				this.storage.getVaultKeys(this.email),
+					this.storage.getCachedItems?.(this.email),
+					this.storage.getCachedVaults?.(this.email),
+					this.storage.getItemCacheMetadata?.(this.email),
+					this.storage.getVaultKeys(this.email),
 				]);
 
 			this.items.clear();
@@ -638,6 +638,19 @@ export class VaultRepository {
 			});
 		}
 		await this.storage.upsertCachedVault?.(vault, this.email);
+		this.emit();
+	}
+
+	async syncVaultKeys(
+		vaultKeys: VaultKeyData[],
+		email?: string,
+	): Promise<void> {
+		if (!this.shouldHandleEmail(email)) {
+			return;
+		}
+
+		this.mergeVaultKeyEntries(vaultKeys);
+		await this.storage.storeVaultKeys(vaultKeys, this.email);
 		this.emit();
 	}
 

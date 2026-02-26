@@ -14,7 +14,6 @@ import {
 	IconStarOutlineDuo18,
 	IconTagOutlineDuo18,
 	IconTrash2OutlineDuo18,
-	IconUpload4OutlineDuo18,
 } from "@bittery/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation } from "@tanstack/react-router";
@@ -52,7 +51,6 @@ interface VaultSidebarProps {
 		imageUrl?: string | null;
 	}) => void;
 	onDeleteVault: (vault: { id: string; name: string }) => void;
-	onImportItems?: (vaultId: string) => void;
 }
 
 interface DroppableVaultEntryProps {
@@ -65,7 +63,6 @@ interface DroppableVaultEntryProps {
 		imageUrl?: string | null;
 	}) => void;
 	onDeleteVault: (vault: { id: string; name: string }) => void;
-	onImportItems?: (vaultId: string) => void;
 }
 
 function DroppableVaultEntry({
@@ -73,7 +70,6 @@ function DroppableVaultEntry({
 	isActive,
 	onEditVault,
 	onDeleteVault,
-	onImportItems,
 }: DroppableVaultEntryProps) {
 	const { activeItem } = useVaultDnd();
 
@@ -157,12 +153,6 @@ function DroppableVaultEntry({
 							<IconPen2OutlineDuo18 className="h-4 w-4" />
 							Edit
 						</DropdownMenuItem>
-						{onImportItems && (
-							<DropdownMenuItem onClick={() => onImportItems(vault.vaultId)}>
-								<IconUpload4OutlineDuo18 className="h-4 w-4" />
-								Import Items
-							</DropdownMenuItem>
-						)}
 						<DropdownMenuSeparator />
 						<DropdownMenuItem
 							variant="destructive"
@@ -190,7 +180,6 @@ export function VaultSidebar({
 	onNewVault,
 	onEditVault,
 	onDeleteVault,
-	onImportItems,
 }: VaultSidebarProps) {
 	const location = useLocation();
 	const pathname = location.pathname;
@@ -249,7 +238,6 @@ export function VaultSidebar({
 			}
 			onEditVault={onEditVault}
 			onDeleteVault={onDeleteVault}
-			onImportItems={onImportItems}
 		/>
 	);
 

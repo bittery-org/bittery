@@ -47,9 +47,11 @@ export function SecureNoteDetail({
 				)}
 			</div>
 
-			<Card>
-				<div className="whitespace-pre-wrap p-6 leading-relaxed">
-					{data.note}
+			<Card className="gap-0 py-0">
+				<div className="overflow-x-auto px-6 py-4">
+					<pre className="m-0 inline-block min-w-full whitespace-pre text-[13px] leading-5">
+						{data.note}
+					</pre>
 				</div>
 			</Card>
 		</div>

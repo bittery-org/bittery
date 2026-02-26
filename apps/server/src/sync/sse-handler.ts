@@ -200,6 +200,9 @@ function deliverToConnections(event: SyncEventPayload): void {
 
 	// User-targeted control events are delivered directly to the target user.
 	if (event.type === "vault_access_revoked") {
+		if (vaultId) {
+			userVaults.get(eventUserId)?.delete(vaultId);
+		}
 		const targetConnections = connections.get(eventUserId);
 		if (targetConnections) {
 			for (const connection of targetConnections.values()) {
@@ -214,6 +217,38 @@ function deliverToConnections(event: SyncEventPayload): void {
 			}
 		}
 		return;
+	}
+
+	// Keep cached memberships coherent for membership-changing events so
+	// subsequent events can be routed immediately.
+	if (event.type === "vault_created" && vaultId) {
+		const creatorVaults = userVaults.get(eventUserId);
+		if (creatorVaults) {
+			creatorVaults.add(vaultId);
+		}
+	}
+
+	if (event.type === "vault_deleted" && vaultId) {
+		for (const connectedVaults of userVaults.values()) {
+			connectedVaults.delete(vaultId);
+		}
+	}
+
+	if (event.type === "vault_member_added" && vaultId) {
+		const addedUserId = event.metadata?.addedUserId as string | undefined;
+		if (addedUserId) {
+			const addedUserVaults = userVaults.get(addedUserId);
+			if (addedUserVaults) {
+				addedUserVaults.add(vaultId);
+			}
+		}
+	}
+
+	if (event.type === "vault_member_removed" && vaultId) {
+		const removedUserId = event.metadata?.removedUserId as string | undefined;
+		if (removedUserId) {
+			userVaults.get(removedUserId)?.delete(vaultId);
+		}
 	}
 
 	// If no vaultId, only deliver to the user who triggered the event

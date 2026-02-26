@@ -42,6 +42,38 @@ export interface DeltaSyncClient {
 				imageUrl: string | null;
 			}>;
 		};
+		listItems: {
+			query: (input: { vaultId: string }) => Promise<
+				Array<{
+					id: string;
+					vaultId: string;
+					category: string;
+					favorite: boolean;
+					encryptedData: string;
+					encryptionIv: string;
+					encryptionAlgorithm: string;
+					version: number;
+					lastModifiedBy: string | null;
+					createdAt: Date | string;
+					updatedAt: Date | string;
+					deletedAt: Date | string | null;
+					attachments?: CachedAttachment[];
+				}>
+			>;
+		};
+		list: {
+			query: () => Promise<
+				Array<{
+					id: string;
+					name: string;
+					type: "personal" | "team";
+					icon: string | null;
+					imageUrl: string | null;
+					encryptedVaultKey: string;
+					role: "owner" | "admin" | "member" | "read-only";
+				}>
+			>;
+		};
 	};
 }
 
@@ -86,6 +118,39 @@ export async function performDeltaSync(
 		}
 		await cache.removeCachedVault?.(vaultId, accountEmail);
 	};
+
+	const syncVaultKeysFromServer = async () => {
+		if (!cache.syncVaultKeys) {
+			return;
+		}
+
+		const vaults = await trpcClient.vault.list.query();
+		await cache.syncVaultKeys(
+			vaults.map((vault) => ({
+				vaultId: vault.id,
+				vaultName: vault.name,
+				vaultType: vault.type,
+				vaultIcon: vault.icon,
+				vaultImageUrl: vault.imageUrl,
+				encryptedVaultKey: vault.encryptedVaultKey,
+				role: vault.role,
+			})),
+			accountEmail,
+		);
+	};
+
+	if (
+		event.type === "vault_created" ||
+		event.type === "vault_deleted" ||
+		event.type === "vault_access_revoked" ||
+		event.type === "vault_member_added" ||
+		event.type === "vault_member_removed" ||
+		(event.type === "vault_updated" &&
+			event.metadata?.reason === "bulk_import") ||
+		event.type === "vault_key_rotated"
+	) {
+		await syncVaultKeysFromServer();
+	}
 
 	switch (event.type) {
 		case "item_created":
@@ -143,6 +208,36 @@ export async function performDeltaSync(
 			break;
 		case "vault_created":
 		case "vault_updated": {
+			// Bulk imports emit a vault-level sync event to avoid one SSE event per item.
+			// In that case, refresh the vault's items in one query.
+			if (
+				event.type === "vault_updated" &&
+				event.metadata?.reason === "bulk_import"
+			) {
+				const targetVaultId = event.vaultId ?? event.entityId;
+				const items = await trpcClient.vault.listItems.query({
+					vaultId: targetVaultId,
+				});
+
+				for (const vaultItem of items) {
+					await upsertItem({
+						id: vaultItem.id,
+						vaultId: vaultItem.vaultId,
+						category: vaultItem.category,
+						favorite: vaultItem.favorite,
+						encryptedData: vaultItem.encryptedData,
+						encryptionIv: vaultItem.encryptionIv,
+						encryptionAlgorithm: vaultItem.encryptionAlgorithm,
+						version: vaultItem.version,
+						lastModifiedBy: vaultItem.lastModifiedBy,
+						createdAt: String(vaultItem.createdAt),
+						updatedAt: String(vaultItem.updatedAt),
+						deletedAt: vaultItem.deletedAt ? String(vaultItem.deletedAt) : null,
+						attachments: vaultItem.attachments,
+					} as CachedEncryptedItem);
+				}
+			}
+
 			const vault = await trpcClient.vault.get.query({
 				vaultId: event.entityId,
 			});
@@ -162,6 +257,7 @@ export async function performDeltaSync(
 			// entityId is the affected vault id
 			await removeVault(event.entityId);
 			break;
-		// vault_key_rotated, vault_member_added, vault_member_removed: no cache changes needed
+		// vault_key_rotated, vault_member_added, vault_member_removed:
+		// vault keys are already refreshed above.
 	}
 }

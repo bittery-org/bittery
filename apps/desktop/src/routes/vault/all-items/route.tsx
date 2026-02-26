@@ -92,8 +92,8 @@ function RouteComponent() {
 				</div>
 			</div>
 
-			<div className="flex h-full flex-1 flex-col">
-				<div className="flex flex-1 flex-col overflow-y-auto">
+			<div className="flex h-full min-w-0 flex-1 flex-col">
+				<div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
 					<Outlet />
 				</div>
 			</div>

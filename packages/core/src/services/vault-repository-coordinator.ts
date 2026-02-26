@@ -1,4 +1,5 @@
 import type { IStorageAdapter } from "@bittery/storage/adapter";
+import type { VaultKeyData } from "@bittery/storage/types";
 import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
@@ -360,6 +361,21 @@ export class VaultRepositoryCoordinator {
 
 	async removeCachedVault(vaultId: string, email?: string): Promise<void> {
 		await this.removeVault(vaultId, email);
+	}
+
+	async syncVaultKeys(
+		vaultKeys: VaultKeyData[],
+		email?: string,
+	): Promise<void> {
+		const targetEmail =
+			email ??
+			(this.activeEmails.size === 1
+				? Array.from(this.activeEmails)[0]
+				: undefined);
+		if (!targetEmail) {
+			return;
+		}
+		await this.getOrCreate(targetEmail).syncVaultKeys(vaultKeys, targetEmail);
 	}
 
 	async clearItemCache(email?: string): Promise<void> {

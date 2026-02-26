@@ -18,6 +18,21 @@ import { useState } from "react";
 import type { CustomField } from "./shared";
 import { handleCopy } from "./shared";
 
+interface DetailFieldValueProps {
+	value: string;
+	className?: string;
+}
+
+function DetailFieldValue({ value, className }: DetailFieldValueProps) {
+	return (
+		<div className="min-w-0 flex-1 px-3">
+			<p className={cn("truncate py-2 text-sm leading-5", className)} title={value}>
+				{value}
+			</p>
+		</div>
+	);
+}
+
 // Basic read-only field with optional copy button
 interface DetailFieldProps {
 	label: string;
@@ -35,12 +50,12 @@ export function DetailField({
 	if (!value) return null;
 
 	return (
-		<div className={cn("space-y-2", className)}>
-			<Label className="font-medium text-sm">{label}</Label>
-			<InputGroup>
-				<InputGroupInput value={value} readOnly />
+		<div className={cn("min-w-0 space-y-2", className)}>
+			{label && <Label className="font-medium text-sm">{label}</Label>}
+			<InputGroup className="min-w-0 overflow-hidden">
+				<DetailFieldValue value={value} />
 				{onCopy && (
-					<InputGroupAddon align="inline-end">
+					<InputGroupAddon align="inline-end" className="shrink-0">
 						<InputGroupButton
 							size="icon-sm"
 							onClick={() => handleCopy(value, label)}
@@ -75,16 +90,16 @@ export function DetailPasswordField({
 	const displayValue = showPassword ? value : maskValue || value;
 
 	return (
-		<div className={cn("space-y-2", className)}>
-			<Label className="font-medium text-sm">{label}</Label>
-			<InputGroup>
+		<div className={cn("min-w-0 space-y-2", className)}>
+			{label && <Label className="font-medium text-sm">{label}</Label>}
+			<InputGroup className="min-w-0 overflow-hidden">
 				<InputGroupInput
 					type={showPassword ? "text" : "password"}
 					value={displayValue}
 					readOnly
-					className="font-mono"
+					className="min-w-0 font-mono"
 				/>
-				<InputGroupAddon align="inline-end">
+				<InputGroupAddon align="inline-end" className="shrink-0">
 					<ButtonGroup>
 						<InputGroupButton
 							size="icon-sm"
@@ -124,11 +139,11 @@ export function DetailUrlField({
 	if (!value) return null;
 
 	return (
-		<div className={cn("space-y-2", className)}>
-			<Label className="font-medium text-sm">{label}</Label>
-			<InputGroup>
-				<InputGroupInput value={value} readOnly />
-				<InputGroupAddon align="inline-end">
+		<div className={cn("min-w-0 space-y-2", className)}>
+			{label && <Label className="font-medium text-sm">{label}</Label>}
+			<InputGroup className="min-w-0 overflow-hidden">
+				<DetailFieldValue value={value} />
+				<InputGroupAddon align="inline-end" className="shrink-0">
 					<ButtonGroup>
 						<InputGroupButton
 							size="icon-sm"

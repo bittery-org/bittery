@@ -48,6 +48,10 @@ export function useCreateVault() {
 			core.vaults.createVault(input, defaultClient),
 		onSuccess: async (_data, variables) => {
 			await core.vaults.refreshVaultKeys(defaultClient, variables.accountEmail);
+			const { accountsInfo } = await core.accounts.resolveAccounts();
+			if (accountsInfo.length > 0) {
+				await core.vaultCoordinator.refreshFromServer(accountsInfo);
+			}
 			await invalidator.invalidateVaultKeys();
 		},
 	});

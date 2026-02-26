@@ -732,50 +732,61 @@ export const vaultRouter = router({
 				});
 			}
 
-			// Process items in batches to avoid overwhelming the database
-			const batchSize = 50;
-			const importedIds: string[] = [];
-
-			for (let i = 0; i < input.items.length; i += batchSize) {
-				const batch = input.items.slice(i, i + batchSize);
-				const batchBroadcasts: SyncBroadcastPayload[] = [];
-				const itemsToInsert = batch.map((itemData) => ({
-					id: nanoid(),
-					vaultId: input.vaultId,
-					category: itemData.category,
-					favorite: itemData.favorite ?? false,
-					encryptedData: itemData.encryptedData,
-					encryptionIv: itemData.encryptionIv,
-					encryptionAlgorithm: itemData.encryptionAlgorithm,
-					version: 1,
-					lastModifiedBy: ctx.session.userId,
-				}));
-
-				await db.transaction(async (tx) => {
-					await tx.insert(item).values(itemsToInsert);
-
-					for (const insertedItem of itemsToInsert) {
-						batchBroadcasts.push(
-							await createSyncEvent(
-								{
-									eventType: "item_created",
-									entityId: insertedItem.id,
-									entityType: "item",
-									vaultId: input.vaultId,
-									userId: ctx.session.userId,
-									clientId: input.clientId,
-									version: 1,
-								},
-								tx,
-								ctx.clientId,
-							),
-						);
-					}
-				});
-
-				await broadcastSyncPayloads(batchBroadcasts);
-				importedIds.push(...itemsToInsert.map((i) => i.id));
+			if (input.items.length === 0) {
+				return {
+					success: true,
+					importedCount: 0,
+					itemIds: [],
+				};
 			}
+
+			// Process inserts in DB batches, but emit only one sync event for the import
+			// to avoid flooding SSE with one event per item.
+			const batchSize = 200;
+			const importedIds: string[] = [];
+			let broadcast: SyncBroadcastPayload;
+
+			await db.transaction(async (tx) => {
+				for (let i = 0; i < input.items.length; i += batchSize) {
+					const batch = input.items.slice(i, i + batchSize);
+					const itemsToInsert = batch.map((itemData) => ({
+						id: nanoid(),
+						vaultId: input.vaultId,
+						category: itemData.category,
+						favorite: itemData.favorite ?? false,
+						encryptedData: itemData.encryptedData,
+						encryptionIv: itemData.encryptionIv,
+						encryptionAlgorithm: itemData.encryptionAlgorithm,
+						version: 1,
+						lastModifiedBy: ctx.session.userId,
+					}));
+
+					await tx.insert(item).values(itemsToInsert);
+					importedIds.push(
+						...itemsToInsert.map((insertedItem) => insertedItem.id),
+					);
+				}
+
+				broadcast = await createSyncEvent(
+					{
+						eventType: "vault_updated",
+						entityId: input.vaultId,
+						entityType: "vault",
+						vaultId: input.vaultId,
+						userId: ctx.session.userId,
+						clientId: input.clientId,
+						version: 1,
+						metadata: {
+							reason: "bulk_import",
+							importedCount: importedIds.length,
+						},
+					},
+					tx,
+					ctx.clientId,
+				);
+			});
+
+			await broadcastSyncPayload(broadcast!);
 
 			return {
 				success: true,

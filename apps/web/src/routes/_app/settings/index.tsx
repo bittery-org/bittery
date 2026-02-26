@@ -23,9 +23,12 @@ import {
 	IconEnvelopeOutlineDuo18 as Mail,
 	IconCircleCheck2OutlineDuo18 as CheckCircle,
 	IconFingerprintOutlineDuo18 as Fingerprint,
+	IconUpload4OutlineDuo18 as Upload,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import { VaultImportDialog } from "@/components/import/vault-import-dialog";
 import { AutoLockSettings } from "@/components/settings/auto-lock-settings";
 import { ChangeEmailDialog } from "@/components/settings/change-email-dialog";
 import { ChangePasswordDialog } from "@/components/settings/change-password-dialog";
@@ -34,6 +37,7 @@ import { DeviceManagement } from "@/components/settings/device-management";
 import { RegenerateRecoveryKeyDialog } from "@/components/settings/regenerate-recovery-key-dialog";
 import { RegenerateSecretKeyDialog } from "@/components/settings/regenerate-secret-key-dialog";
 import { SetupRecoveryKeyDialog } from "@/components/settings/setup-recovery-key-dialog";
+import { useImportOnboardingState } from "@/hooks/use-import-onboarding-state";
 
 export const Route = createFileRoute("/_app/settings/")({
 	component: SettingsPage,
@@ -47,6 +51,8 @@ const GITHUB_REPO = "bittery-org/bittery";
 function SettingsPage() {
 	const trpc = useTRPC();
 	const userQuery = useQuery(trpc.auth.me.queryOptions());
+	const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+	const onboardingImport = useImportOnboardingState();
 
 	return (
 		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
@@ -367,6 +373,32 @@ function SettingsPage() {
 							</div>
 						</div>
 
+						<div className="rounded-xl border bg-card p-5">
+							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+								<div className="flex items-start gap-3">
+									<div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
+										<Upload className="h-4 w-4 text-muted-foreground" />
+									</div>
+									<div className="space-y-1">
+										<span className="font-medium text-sm">
+											Import from another password manager
+										</span>
+										<p className="text-muted-foreground text-xs">
+											Reopen the migration flow anytime. Supports 1Password{" "}
+											<code>.1pux</code> item import in v1.
+										</p>
+									</div>
+								</div>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setIsImportDialogOpen(true)}
+								>
+									Open Import
+								</Button>
+							</div>
+						</div>
+
 						{/* Danger Zone */}
 						<div className="rounded-xl border border-destructive/20 p-5">
 							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -390,6 +422,16 @@ function SettingsPage() {
 					</div>
 				</TabsContent>
 			</Tabs>
+
+			<VaultImportDialog
+				open={isImportDialogOpen}
+				onOpenChange={setIsImportDialogOpen}
+				onImportCompleted={(summary) => {
+					if (summary.failedVaultCount === 0) {
+						onboardingImport.markCompleted();
+					}
+				}}
+			/>
 		</div>
 	);
 }

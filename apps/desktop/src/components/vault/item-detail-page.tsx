@@ -248,10 +248,10 @@ export function ItemDetailPage({
 
 	return (
 		<>
-			<div className="flex flex-1 flex-col">
+			<div className="flex min-w-0 flex-1 flex-col">
 				{/* Top bar */}
-				<div className="mb-3 flex items-center justify-between px-4 py-2">
-					<div className="-ml-2">
+				<div className="mb-3 flex min-w-0 items-center justify-between px-4 py-2">
+					<div className="-ml-2 min-w-0">
 						<VaultInfoPopover
 							vaultName={vaultInfo?.name || "Unknown Vault"}
 							vaultIcon={vaultInfo?.icon}
@@ -262,7 +262,7 @@ export function ItemDetailPage({
 							accountTeamAvatarUrl={vaultInfo?.accountTeamAvatarUrl}
 						/>
 					</div>
-					<div className="flex items-center gap-2">
+					<div className="flex shrink-0 items-center gap-2">
 						<Button variant="ghost" size="sm" onClick={handleShare}>
 							<IconShareLeft2OutlineDuo18 />
 							Share
@@ -351,7 +351,7 @@ export function ItemDetailPage({
 				</div>
 
 				{/* Content area */}
-				<div className="flex-1 overflow-y-auto px-4 py-3">
+				<div className="min-w-0 flex-1 overflow-y-auto px-4 py-3">
 					<ItemDetail
 						category={rawItem?.category ?? "login"}
 						data={decryptedData}

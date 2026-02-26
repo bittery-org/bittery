@@ -46,7 +46,7 @@ export function LoginDetail({
 	};
 
 	return (
-		<div className="space-y-4">
+		<div className="min-w-0 space-y-4">
 			<div className="flex items-center gap-4">
 				<Favicon url={data.url} title={data.title} category="login" size="lg" />
 				<div className="min-w-0 flex-1">
@@ -61,7 +61,7 @@ export function LoginDetail({
 				</div>
 			</div>
 
-			<div className="flex gap-2">
+			<div className="flex flex-wrap gap-2">
 				{onEdit && (
 					<Button size="sm" variant="outline" onClick={onEdit}>
 						Edit
@@ -81,70 +81,80 @@ export function LoginDetail({
 				)}
 			</div>
 
-			<div className="space-y-4">
+			<div className="min-w-0 space-y-4">
 				{data.url && (
-					<div className="space-y-2">
+					<div className="min-w-0 space-y-2">
 						<Label>Website</Label>
-						<div className="flex gap-2">
-							<Input value={data.url} readOnly className="flex-1" />
-							<Button
-								size="icon"
-								variant="outline"
-								onClick={() => handleCopy(data.url!, "URL")}
-							>
-								<Copy size={16} />
-							</Button>
-							<Button
-								size="icon"
-								variant="outline"
-								onClick={() => window.open(data.url, "_blank")}
-							>
-								<ExternalLink size={16} />
-							</Button>
+						<div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+							<Input
+								value={data.url}
+								readOnly
+								className="min-w-0 w-full text-[13px]"
+							/>
+							<div className="flex shrink-0 items-center gap-2">
+								<Button
+									size="icon"
+									variant="outline"
+									onClick={() => handleCopy(data.url!, "URL")}
+								>
+									<Copy size={16} />
+								</Button>
+								<Button
+									size="icon"
+									variant="outline"
+									onClick={() => window.open(data.url, "_blank")}
+								>
+									<ExternalLink size={16} />
+								</Button>
+							</div>
 						</div>
 					</div>
 				)}
 
 				{data.username && (
-					<div className="space-y-2">
+					<div className="min-w-0 space-y-2">
 						<Label>Username</Label>
-						<div className="flex gap-2">
-							<Input value={data.username} readOnly className="flex-1" />
-							<Button
-								size="icon"
-								variant="outline"
-								onClick={() => handleCopy(data.username!, "Username")}
-							>
-								<Copy size={16} />
-							</Button>
+						<div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+							<Input value={data.username} readOnly className="min-w-0 w-full" />
+							<div className="flex shrink-0 items-center gap-2">
+								<Button
+									size="icon"
+									variant="outline"
+									onClick={() => handleCopy(data.username!, "Username")}
+								>
+									<Copy size={16} />
+								</Button>
+							</div>
 						</div>
 					</div>
 				)}
 
 				{data.password && (
-					<div className="space-y-2">
+					<div className="min-w-0 space-y-2">
 						<Label>Password</Label>
-						<div className="flex gap-2">
+						<div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
 							<Input
 								type={showPassword ? "text" : "password"}
 								value={data.password}
 								readOnly
-								className="flex-1 font-mono"
+								className="min-w-0 w-full font-mono"
 							/>
-							<Button
-								size="icon"
-								variant="outline"
-								onClick={() => setShowPassword(!showPassword)}
-							>
-								{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-							</Button>
-							<Button
-								size="icon"
-								variant="outline"
-								onClick={() => handleCopy(data.password!, "Password")}
-							>
-								<Copy size={16} />
-							</Button>
+							<div className="flex shrink-0 items-center gap-2">
+								<Button
+									size="icon"
+									variant="outline"
+									onClick={() => setShowPassword(!showPassword)}
+								>
+									{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+								</Button>
+								<Button
+									size="icon"
+									variant="outline"
+									onClick={() => handleCopy(data.password!, "Password")}
+								>
+									<Copy size={16} />
+								</Button>
+							</div>
 						</div>
 					</div>
 				)}
@@ -173,36 +183,45 @@ export function LoginDetail({
 				)}
 
 				{data.urls && data.urls.length > 0 && (
-					<div className="space-y-2">
+					<div className="min-w-0 space-y-2">
 						<Label>Additional Websites</Label>
 						{data.urls.map((url) => (
-							<div key={url} className="flex gap-2">
-								<Input value={url} readOnly className="flex-1" />
-								<Button
-									size="icon"
-									variant="outline"
-									onClick={() => handleCopy(url, "URL")}
-								>
-									<Copy size={16} />
-								</Button>
-								<Button
-									size="icon"
-									variant="outline"
-									onClick={() => window.open(url, "_blank")}
-								>
-									<ExternalLink size={16} />
-								</Button>
+							<div
+								key={url}
+								className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2"
+							>
+								<Input
+									value={url}
+									readOnly
+									className="min-w-0 w-full text-[13px]"
+								/>
+								<div className="flex shrink-0 items-center gap-2">
+									<Button
+										size="icon"
+										variant="outline"
+										onClick={() => handleCopy(url, "URL")}
+									>
+										<Copy size={16} />
+									</Button>
+									<Button
+										size="icon"
+										variant="outline"
+										onClick={() => window.open(url, "_blank")}
+									>
+										<ExternalLink size={16} />
+									</Button>
+								</div>
 							</div>
 						))}
 					</div>
 				)}
 
 				{data.customFields && data.customFields.length > 0 && (
-					<div className="space-y-3">
+					<div className="min-w-0 space-y-3">
 						{data.customFields.map((field) => (
-							<div key={field.id} className="space-y-2">
+							<div key={field.id} className="min-w-0 space-y-2">
 								<Label className="text-sm">{field.label}</Label>
-								<div className="flex gap-2">
+								<div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
 									<Input
 										type={
 											field.type === "password" &&
@@ -212,37 +231,39 @@ export function LoginDetail({
 										}
 										value={field.value}
 										readOnly
-										className="flex-1"
+										className="min-w-0 w-full"
 									/>
-									{field.type === "password" && (
+									<div className="flex shrink-0 items-center gap-2">
+										{field.type === "password" && (
+											<Button
+												size="icon"
+												variant="outline"
+												onClick={() => toggleCustomFieldVisibility(field.id)}
+											>
+												{visibleCustomFields.has(field.id) ? (
+													<EyeOff size={16} />
+												) : (
+													<Eye size={16} />
+												)}
+											</Button>
+										)}
 										<Button
 											size="icon"
 											variant="outline"
-											onClick={() => toggleCustomFieldVisibility(field.id)}
+											onClick={() => handleCopy(field.value, field.label)}
 										>
-											{visibleCustomFields.has(field.id) ? (
-												<EyeOff size={16} />
-											) : (
-												<Eye size={16} />
-											)}
+											<Copy size={16} />
 										</Button>
-									)}
-									<Button
-										size="icon"
-										variant="outline"
-										onClick={() => handleCopy(field.value, field.label)}
-									>
-										<Copy size={16} />
-									</Button>
-									{field.type === "url" && (
-										<Button
-											size="icon"
-											variant="outline"
-											onClick={() => window.open(field.value, "_blank")}
-										>
-											<ExternalLink size={16} />
-										</Button>
-									)}
+										{field.type === "url" && (
+											<Button
+												size="icon"
+												variant="outline"
+												onClick={() => window.open(field.value, "_blank")}
+											>
+												<ExternalLink size={16} />
+											</Button>
+										)}
+									</div>
 								</div>
 							</div>
 						))}
