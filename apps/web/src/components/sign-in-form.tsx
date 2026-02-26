@@ -139,7 +139,7 @@ export default function SignInForm({
 	};
 
 	return (
-		<div className="w-full">
+		<div className="w-full mt-6">
 			<h1 className="text-center font-semibold text-2xl tracking-tight">
 				{signInTitle}
 			</h1>

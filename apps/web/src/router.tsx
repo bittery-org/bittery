@@ -133,6 +133,7 @@ export const getRouter = () => {
 	const router = createTanStackRouter({
 		routeTree,
 		scrollRestoration: true,
+		scrollToTopSelectors: ["#auth-scroll-area", "#app-scroll-area"],
 		defaultPreloadStaleTime: 0,
 		defaultPendingMinMs: 350,
 		context: { trpc, queryClient },

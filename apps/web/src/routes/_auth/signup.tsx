@@ -24,11 +24,11 @@ function RouteComponent() {
 		<SignUpForm
 			onSwitchToSignIn={() => {
 				if (redirect) {
-					navigate({ to: "/login", search: { redirect } });
+					navigate({ to: "/login", search: { redirect }, resetScroll: true });
 					return;
 				}
 
-				navigate({ to: "/login" });
+				navigate({ to: "/login", resetScroll: true });
 			}}
 			invitationToken={invitationToken}
 			redirectTo={redirect}

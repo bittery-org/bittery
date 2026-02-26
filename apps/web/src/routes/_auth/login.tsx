@@ -22,11 +22,11 @@ function RouteComponent() {
 		<SignInForm
 			onSwitchToSignUp={() => {
 				if (redirect) {
-					navigate({ to: "/signup", search: { redirect } });
+					navigate({ to: "/signup", search: { redirect }, resetScroll: true });
 					return;
 				}
 
-				navigate({ to: "/signup" });
+				navigate({ to: "/signup", resetScroll: true });
 			}}
 			redirectTo={redirect}
 		/>

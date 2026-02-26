@@ -99,7 +99,7 @@ function AuthLayout() {
 	};
 
 	return (
-		<div className="flex min-h-svh flex-col md:flex-row">
+		<div className="flex min-h-svh flex-col md:h-svh md:flex-row md:overflow-hidden">
 			{/* Left panel — branding sidebar */}
 			<div className="relative hidden w-1/3 flex-col bg-sidebar md:flex lg:w-1/3">
 				<div className="absolute top-4 left-4 sm:top-5 sm:left-6">
@@ -124,9 +124,9 @@ function AuthLayout() {
 			</div>
 
 			{/* Right panel — content area */}
-			<div className="flex min-h-svh flex-1 flex-col bg-white dark:bg-gray-900">
+			<div className="flex min-h-svh flex-1 flex-col bg-white dark:bg-gray-900 md:h-svh md:min-h-0">
 				{/* Mobile logo */}
-				<div className="flex px-5 pt-5 sm:px-8 sm:pt-6 md:hidden">
+				<div className="flex shrink-0 px-5 pt-5 sm:px-8 sm:pt-6 md:hidden">
 					<a
 						href="https://bittery.com"
 						target="_blank"
@@ -137,8 +137,11 @@ function AuthLayout() {
 				</div>
 
 				{/* Main content */}
-				<main className="flex flex-1 flex-col px-4 py-8 sm:px-6">
-					<div className="flex flex-1 items-center justify-center">
+				<main
+					id="auth-scroll-area"
+					className="flex flex-1 flex-col px-4 py-8 sm:px-6 md:min-h-0 md:overflow-y-auto md:pt-12"
+				>
+					<div className="flex flex-1 items-center justify-center md:items-start">
 						<div className="w-full max-w-110">
 							<Outlet />
 						</div>
@@ -146,8 +149,8 @@ function AuthLayout() {
 				</main>
 
 				{/* Footer */}
-				<footer className="px-4">
-					<div className="mx-auto flex max-w-110 flex-col items-center gap-3 py-4 sm:flex-row sm:justify-between">
+				<footer className="shrink-0 px-4">
+					<div className="mx-auto flex max-w-110 flex-col items-center gap-3 py-1.5 sm:flex-row sm:justify-between">
 						<Popover
 							open={isServerPopoverOpen}
 							onOpenChange={setIsServerPopoverOpen}
