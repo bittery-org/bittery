@@ -1,5 +1,6 @@
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core";
-import type { SyncStorage } from "@bittery/sync";
+import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
+import type { OutboundQueueClient, SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { ICrypto } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
@@ -10,6 +11,58 @@ import {
 	getOrCreateDesktopSyncClientId,
 } from "@/lib/sync-client-id";
 import * as tauriCrypto from "@/lib/tauri-crypto";
+
+interface SyncConnectionContext {
+	email: string | null;
+	serverUrl: string;
+}
+
+async function resolveDesktopSyncContext(): Promise<SyncConnectionContext | null> {
+	const [activeAccount, accounts, unlocked] = await Promise.all([
+		storage.getActiveAccount(),
+		storage.getAccountsList(),
+		storage.getUnlockedAccounts?.(),
+	]);
+
+	const candidates: string[] = [];
+	if (activeAccount?.type === "single") {
+		candidates.push(activeAccount.email.toLowerCase());
+	} else if (activeAccount?.type === "all") {
+		for (const email of unlocked ?? []) {
+			const normalized = email.toLowerCase();
+			if (!candidates.includes(normalized)) {
+				candidates.push(normalized);
+			}
+		}
+	}
+
+	for (const account of accounts) {
+		const normalized = account.email.toLowerCase();
+		if (!candidates.includes(normalized)) {
+			candidates.push(normalized);
+		}
+	}
+
+	for (const email of candidates) {
+		const [token, url] = await Promise.all([
+			storage.getAuthToken(email),
+			storage.getServerUrl(email),
+		]);
+		if (token && url) {
+			return { email, serverUrl: url };
+		}
+	}
+
+	const [fallbackToken, fallbackUrl] = await Promise.all([
+		storage.getAuthToken(),
+		storage.getServerUrl(),
+	]);
+	if (fallbackToken && fallbackUrl) {
+		return { email: null, serverUrl: fallbackUrl };
+	}
+
+	return null;
+}
 
 /**
  * Tauri-compatible sync storage implementation
@@ -56,24 +109,78 @@ const crypto: ICrypto = {
 export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 	const [clientId, setClientId] = useState<string>("");
 	const [serverUrl, setServerUrl] = useState<string>("");
+	const [syncAccountEmail, setSyncAccountEmail] = useState<string | null>(null);
 	const [isInitialized, setIsInitialized] = useState(false);
 
-	// Initialize client ID and server URL
+	// Initialize and keep sync connection context fresh.
 	useEffect(() => {
-		(async () => {
-			const [id, url] = await Promise.all([
-				getOrCreateDesktopSyncClientId(),
-				storage.getServerUrl(),
-			]);
-			setClientId(id);
-			setServerUrl(url || "");
-			setIsInitialized(true);
-		})();
+		let mounted = true;
+		let resolving = false;
+
+		const resolveContext = async () => {
+			if (resolving) {
+				return;
+			}
+			resolving = true;
+			try {
+				const [id, context] = await Promise.all([
+					getOrCreateDesktopSyncClientId(),
+					resolveDesktopSyncContext(),
+				]);
+				if (!mounted) {
+					return;
+				}
+				setClientId(id);
+				setServerUrl(context?.serverUrl ?? "");
+				setSyncAccountEmail(context?.email ?? null);
+				setIsInitialized(true);
+			} finally {
+				resolving = false;
+			}
+		};
+
+		void resolveContext();
+		const interval = setInterval(() => {
+			void resolveContext();
+		}, 5000);
+
+		return () => {
+			mounted = false;
+			clearInterval(interval);
+		};
 	}, []);
 
 	const getAuthToken = useCallback(async () => {
-		return storage.getAuthToken();
-	}, []);
+		return storage.getAuthToken(syncAccountEmail ?? undefined);
+	}, [syncAccountEmail]);
+
+	const getClientForAccount = useCallback(
+		async (email: string): Promise<OutboundQueueClient> => {
+			const normalizedEmail = email.toLowerCase();
+			const [accountToken, accountServerUrl] = await Promise.all([
+				storage.getAuthToken(normalizedEmail),
+				storage.getServerUrl(normalizedEmail),
+			]);
+			if (accountToken) {
+				return createAccountTrpcClient(
+					accountToken,
+					accountServerUrl || serverUrl || "http://localhost:3000",
+				) as unknown as OutboundQueueClient;
+			}
+
+			const fallbackToken = await getAuthToken();
+			if (!fallbackToken) {
+				throw new Error(
+					`No auth token available for account queue drain (${normalizedEmail})`,
+				);
+			}
+			return createAccountTrpcClient(
+				fallbackToken,
+				serverUrl || "http://localhost:3000",
+			) as unknown as OutboundQueueClient;
+		},
+		[getAuthToken, serverUrl],
+	);
 
 	const syncStorage = useMemo(() => new TauriSyncStorage(), []);
 	const vaultCoordinator = useMemo(
@@ -89,6 +196,8 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		storage: syncStorage,
 		enabled: enabled && isInitialized && !!serverUrl && !!clientId,
 		itemCacheAdapter: vaultCoordinator,
+		itemCacheAccountEmail: syncAccountEmail,
+		getClientForAccount,
 	});
 
 	return {

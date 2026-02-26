@@ -29,6 +29,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert, Platform, ScrollView, Text, View } from "react-native";
 import { Uniwind, useUniwind, withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { cn } from "@/lib/utils";
 import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
 import { storage } from "../../src/services/storage";
@@ -334,9 +335,14 @@ export default function SettingsScreen() {
 			pressableFeedbackVariant="highlight"
 		>
 			<View
-				className={`h-10 w-10 items-center justify-center rounded-lg ${
-					destructive ? "bg-danger-soft" : "bg-secondary"
-				}`}
+				className={cn(
+					"h-10",
+					"w-10",
+					"items-center",
+					"justify-center",
+					"rounded-lg",
+					destructive ? "bg-danger-soft" : "bg-secondary",
+				)}
 			>
 				<Icon
 					size={20}
@@ -345,9 +351,10 @@ export default function SettingsScreen() {
 			</View>
 			<View className="flex-1">
 				<Text
-					className={`font-medium ${
-						destructive ? "text-danger" : "text-foreground"
-					}`}
+					className={cn(
+						"font-medium",
+						destructive ? "text-danger" : "text-foreground",
+					)}
 				>
 					{label}
 				</Text>

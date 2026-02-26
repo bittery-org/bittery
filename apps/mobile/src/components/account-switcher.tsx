@@ -17,7 +17,7 @@ import {
 import { useState } from "react";
 import { Alert, Platform, Text, View } from "react-native";
 import { withUniwind } from "uniwind";
-
+import { cn } from "@/lib/utils";
 import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../contexts/account-context";
 import { type AccountMetadata, storage } from "../services/storage";
@@ -216,9 +216,14 @@ export function AccountSwitcher() {
 							<PressableFeedback
 								onPress={handleAllAccountsSwitch}
 								isDisabled={switching}
-								className={`flex-row items-center rounded-2xl px-4 py-3 ${
-									isAllAccountsMode ? "bg-surface-tertiary" : ""
-								}`}
+								className={cn(
+									"flex-row",
+									"items-center",
+									"rounded-2xl",
+									"px-4",
+									"py-3",
+									isAllAccountsMode ? "bg-surface-tertiary" : "",
+								)}
 							>
 								<PressableFeedback.Highlight />
 								<View className="mr-3">
@@ -248,9 +253,14 @@ export function AccountSwitcher() {
 									key={account.email}
 									onPress={() => handleAccountSwitch(account)}
 									isDisabled={switching}
-									className={`flex-row items-center rounded-2xl px-4 py-3 ${
-										isActive ? "bg-surface-tertiary" : ""
-									}`}
+									className={cn(
+										"flex-row",
+										"items-center",
+										"rounded-2xl",
+										"px-4",
+										"py-3",
+										isActive ? "bg-surface-tertiary" : "",
+									)}
 								>
 									<PressableFeedback.Highlight />
 									{/* Avatar with team image support */}

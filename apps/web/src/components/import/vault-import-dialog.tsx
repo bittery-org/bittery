@@ -7,6 +7,7 @@ import {
 import {
 	Badge,
 	Button,
+	cn,
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -321,32 +322,51 @@ export function VaultImportDialog({
 								return (
 									<div
 										key={stepItem.label}
-										className={`rounded-lg border px-3 py-2 ${
+										className={cn(
+											"flex",
+											"items-center",
+											"rounded-lg",
+											"border",
+											"px-3",
+											"py-2",
 											isDone
 												? "border-primary/35 bg-primary/5"
 												: isActive
 													? "border-foreground/20 bg-muted/40"
-													: "bg-background"
-										}`}
+													: "bg-background",
+										)}
 									>
 										<div className="flex items-center gap-2">
 											{isDone ? (
 												<CheckCircle className="h-4 w-4 text-primary" />
 											) : (
 												<span
-													className={`inline-flex h-5 w-5 items-center justify-center rounded-full border font-medium text-[11px] ${
+													className={cn(
+														"inline-flex",
+														"h-5",
+														"w-5",
+														"items-center",
+														"justify-center",
+														"rounded-full",
+														"border",
+														"font-medium",
+														"text-[11px]",
 														isActive
 															? "border-primary/50 text-primary"
-															: "border-border text-muted-foreground"
-													}`}
+															: "border-border text-muted-foreground",
+													)}
 												>
 													{stepItem.step}
 												</span>
 											)}
 											<span
-												className={`font-medium text-xs ${
-													isActive ? "text-foreground" : "text-muted-foreground"
-												}`}
+												className={cn(
+													"font-medium",
+													"text-xs",
+													isActive
+														? "text-foreground"
+														: "text-muted-foreground",
+												)}
 											>
 												{stepItem.label}
 											</span>
@@ -386,11 +406,21 @@ export function VaultImportDialog({
 													setSelectedFileName("");
 													reset();
 												}}
-												className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition ${
+												className={cn(
+													"flex",
+													"w-full",
+													"items-center",
+													"gap-3",
+													"rounded-xl",
+													"border",
+													"px-4",
+													"py-3",
+													"text-left",
+													"transition",
 													isSelected
 														? "border-primary/45 bg-primary/5"
-														: "border-border bg-card hover:border-foreground/30 hover:bg-accent/30"
-												}`}
+														: "border-border bg-card hover:border-foreground/30 hover:bg-accent/30",
+												)}
 												aria-pressed={isSelected}
 											>
 												<ImportProviderLogo provider={provider} />
@@ -450,15 +480,21 @@ export function VaultImportDialog({
 
 								<label
 									htmlFor="vault-import-file"
-									className={`block space-y-3 rounded-lg border border-dashed p-4 transition ${
+									className={cn(
+										"block",
+										"space-y-3",
+										"rounded-lg",
+										"border",
+										"border-dashed",
+										"p-4",
+										"transition",
 										isDropzoneActive
 											? "border-primary/45 bg-primary/5"
-											: "border-border bg-background/40"
-									} ${
+											: "border-border bg-background/40",
 										isBusy || !selectedProvider
 											? "cursor-not-allowed opacity-70"
-											: "cursor-pointer"
-									}`}
+											: "cursor-pointer",
+									)}
 									onDragOver={handleDropzoneDragOver}
 									onDragLeave={handleDropzoneDragLeave}
 									onDrop={handleDropzoneDrop}

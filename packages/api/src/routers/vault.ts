@@ -679,7 +679,7 @@ export const vaultRouter = router({
 
 			await broadcastSyncPayload(broadcast!);
 
-			return { itemId, id: input.vaultId };
+			return { itemId, id: itemId };
 		}),
 
 	/**

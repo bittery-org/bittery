@@ -1,5 +1,6 @@
 import {
 	Button,
+	cn,
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
@@ -108,9 +109,18 @@ function DroppableVaultEntry({
 	return (
 		<div
 			ref={setNodeRef}
-			className={`group relative mb-0.5 w-full rounded-md text-left text-sm transition-colors ${
-				isActive ? "bg-primary/10" : "hover:bg-muted/30"
-			} ${ringStyle}`}
+			className={cn(
+				"group",
+				"relative",
+				"mb-0.5",
+				"w-full",
+				"rounded-md",
+				"text-left",
+				"text-sm",
+				"transition-colors",
+				isActive ? "bg-primary/10" : "hover:bg-muted/30",
+				ringStyle,
+			)}
 		>
 			<Link
 				to="/vault/$id"
@@ -254,9 +264,20 @@ export function VaultSidebar({
 				{/* All Objects */}
 				<Link
 					to="/vault/all-items"
-					className={`mb-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-						isAllItemsActive ? "bg-primary/10" : "hover:bg-muted/30"
-					}`}
+					className={cn(
+						"mb-1",
+						"flex",
+						"w-full",
+						"items-center",
+						"gap-2",
+						"rounded-md",
+						"px-3",
+						"py-2",
+						"text-left",
+						"text-sm",
+						"transition-colors",
+						isAllItemsActive ? "bg-primary/10" : "hover:bg-muted/30",
+					)}
 				>
 					<IconGrid2OutlineDuo18 className="size-4 text-muted-foreground" />
 					<span>All Objects</span>
@@ -265,9 +286,20 @@ export function VaultSidebar({
 				{/* Favorites */}
 				<Link
 					to="/vault/favorites"
-					className={`mb-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-						isFavoritesActive ? "bg-primary/10" : "hover:bg-muted/30"
-					}`}
+					className={cn(
+						"mb-1",
+						"flex",
+						"w-full",
+						"items-center",
+						"gap-2",
+						"rounded-md",
+						"px-3",
+						"py-2",
+						"text-left",
+						"text-sm",
+						"transition-colors",
+						isFavoritesActive ? "bg-primary/10" : "hover:bg-muted/30",
+					)}
 				>
 					<IconStarOutlineDuo18
 						className="size-4 text-yellow-500"
@@ -316,9 +348,20 @@ export function VaultSidebar({
 										key={tagName}
 										to="/vault/tag/$tagName"
 										params={{ tagName: encodeURIComponent(tagName) }}
-										className={`mb-0.5 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-											isActive ? "bg-primary/10" : "hover:bg-muted/30"
-										}`}
+										className={cn(
+											"mb-0.5",
+											"flex",
+											"w-full",
+											"items-center",
+											"gap-2",
+											"rounded-md",
+											"px-3",
+											"py-2",
+											"text-left",
+											"text-sm",
+											"transition-colors",
+											isActive ? "bg-primary/10" : "hover:bg-muted/30",
+										)}
 									>
 										<IconTagOutlineDuo18
 											className="size-3.5 shrink-0"
@@ -335,9 +378,20 @@ export function VaultSidebar({
 				{/* Trash */}
 				<Link
 					to="/vault/trash"
-					className={`mt-2 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-						isTrashActive ? "bg-primary/10" : "hover:bg-muted/30"
-					}`}
+					className={cn(
+						"mt-2",
+						"flex",
+						"w-full",
+						"items-center",
+						"gap-2",
+						"rounded-md",
+						"px-3",
+						"py-2",
+						"text-left",
+						"text-sm",
+						"transition-colors",
+						isTrashActive ? "bg-primary/10" : "hover:bg-muted/30",
+					)}
 				>
 					<IconBoxArchive3OutlineDuo18 className="size-4 text-muted-foreground" />
 					<span>Archive</span>

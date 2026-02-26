@@ -1,5 +1,5 @@
 import "./index.css";
-import { Button } from "@bittery/ui";
+import { Button, cn } from "@bittery/ui";
 import {
 	IconCircleCheck2OutlineDuo18,
 	IconCircleXmarkOutlineDuo18,
@@ -407,11 +407,22 @@ function SavePromptIframe() {
 											setSelectedVaultId(vault.id);
 											setIsDropdownOpen(false);
 										}}
-										className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent ${
+										className={cn(
+											"flex",
+											"w-full",
+											"items-center",
+											"gap-2",
+											"rounded",
+											"px-2",
+											"py-1.5",
+											"text-left",
+											"text-sm",
+											"transition-colors",
+											"hover:bg-accent",
 											selectedVaultId === vault.id
 												? "bg-accent text-accent-foreground"
-												: ""
-										}`}
+												: "",
+										)}
 									>
 										<IconKeyOutlineDuo18
 											size={14}

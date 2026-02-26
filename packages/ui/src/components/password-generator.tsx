@@ -9,6 +9,7 @@ import { Button } from "./button";
 import { Input } from "./input";
 import { Label } from "./label";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
+import { cn } from "../lib/utils";
 
 interface PasswordGeneratorProps {
 	onPasswordGenerated?: (password: string) => void;
@@ -173,7 +174,7 @@ export function PasswordGenerator({
 						</div>
 						<div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
 							<div
-								className={`h-full transition-all duration-300 ${strength.color}`}
+								className={cn("h-full", "transition-all", "duration-300", strength.color)}
 								style={{ width: `${strength.score}%` }}
 							/>
 						</div>

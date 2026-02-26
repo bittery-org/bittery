@@ -8,6 +8,7 @@ import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	Badge,
 	Button,
+	cn,
 	Sheet,
 	SheetContent,
 	Skeleton,
@@ -145,11 +146,23 @@ function VaultDetailPage() {
 		<div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-6 pb-3">
 			{/* Compact fixed header (visible on scroll) */}
 			<div
-				className={`fixed top-0 right-0 z-50 flex h-11 items-center border-b bg-background/80 backdrop-blur-sm transition-[left,opacity,transform] duration-200 ${
+				className={cn(
+					"fixed",
+					"top-0",
+					"right-0",
+					"z-50",
+					"flex",
+					"h-11",
+					"items-center",
+					"border-b",
+					"bg-background/80",
+					"backdrop-blur-sm",
+					"transition-[left,opacity,transform]",
+					"duration-200",
 					showCompactHeader && vaultInfo
 						? "translate-y-0 opacity-100"
-						: "pointer-events-none -translate-y-full opacity-0"
-				}`}
+						: "pointer-events-none -translate-y-full opacity-0",
+				)}
 				style={{ left: compactHeaderLeft }}
 			>
 				<div className="mx-auto flex h-full w-full max-w-6xl items-center justify-between pr-5 pl-14 lg:pr-6 lg:pl-16 xl:pl-6">

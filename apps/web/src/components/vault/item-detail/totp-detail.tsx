@@ -4,7 +4,7 @@ import {
 	type TotpResult,
 } from "@bittery/shared/totp";
 import type { DecryptedItem } from "@bittery/shared/types";
-import { Button, Card, copyWithToast, Input, Label } from "@bittery/ui";
+import { Button, Card, cn, copyWithToast, Input, Label } from "@bittery/ui";
 import {
 	IconCopyOutlineDuo18 as Copy,
 	IconEyeOutlineDuo18 as Eye,
@@ -134,7 +134,11 @@ export function TotpDetail({ data, onEdit, onDelete, item }: TotpDetailProps) {
 									fill="none"
 									strokeWidth="3"
 									strokeLinecap="round"
-									className={`transition-all duration-300 ${getProgressColor()}`}
+									className={cn(
+										"transition-all",
+										"duration-300",
+										getProgressColor(),
+									)}
 									style={{
 										strokeDasharray: circumference,
 										strokeDashoffset: strokeDashoffset,

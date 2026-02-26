@@ -22,6 +22,7 @@ import {
 import { forwardRef, useImperativeHandle, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { withUniwind } from "uniwind";
+import { cn } from "@/lib/utils";
 import { QrCodeScanner } from "../qr-code-scanner";
 import { TotpDisplay } from "../totp-display";
 
@@ -267,10 +268,20 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 										<Pressable
 											key={d}
 											onPress={() => setTotpDigits(d as TotpDigits)}
-											className={`flex-1 items-center py-2 ${totpDigits === d ? "bg-primary" : ""}`}
+											className={cn(
+												"flex-1",
+												"items-center",
+												"py-2",
+												totpDigits === d ? "bg-primary" : "",
+											)}
 										>
 											<Text
-												className={`text-sm ${totpDigits === d ? "text-primary-foreground" : "text-foreground"}`}
+												className={cn(
+													"text-sm",
+													totpDigits === d
+														? "text-primary-foreground"
+														: "text-foreground",
+												)}
 											>
 												{d}
 											</Text>
@@ -297,10 +308,20 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 										<Pressable
 											key={algo}
 											onPress={() => setTotpAlgorithm(algo)}
-											className={`flex-1 items-center py-2 ${totpAlgorithm === algo ? "bg-primary" : ""}`}
+											className={cn(
+												"flex-1",
+												"items-center",
+												"py-2",
+												totpAlgorithm === algo ? "bg-primary" : "",
+											)}
 										>
 											<Text
-												className={`text-xs ${totpAlgorithm === algo ? "text-primary-foreground" : "text-foreground"}`}
+												className={cn(
+													"text-xs",
+													totpAlgorithm === algo
+														? "text-primary-foreground"
+														: "text-foreground",
+												)}
 											>
 												{algo}
 											</Text>

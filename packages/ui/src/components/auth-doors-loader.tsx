@@ -7,6 +7,7 @@ import {
 } from "../icons/index.js";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
+import { cn } from "../lib/utils";
 
 const DEFAULT_LOGO_POSITION = "top-8 left-4 sm:top-9 sm:left-6";
 const UNLOCK_DELAY_MS = 400;
@@ -88,7 +89,7 @@ export function AuthDoorsOverlay({
           {children}
         </div>
 
-        <div className={`absolute ${logoPositionClassName}`}>
+        <div className={cn("absolute", logoPositionClassName)}>
           <img src="/logo.png" alt="Bittery" className="h-7 w-auto sm:h-10" />
         </div>
       </div>

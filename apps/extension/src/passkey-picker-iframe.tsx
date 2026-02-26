@@ -1,5 +1,5 @@
 import "./index.css";
-import { Button, Card } from "@bittery/ui";
+import { Button, Card, cn } from "@bittery/ui";
 import {
 	IconCircleCheck2OutlineDuo18,
 	IconCircleKeyOutlineDuo18,
@@ -158,11 +158,24 @@ function PasskeyPickerIframe() {
 								type="button"
 								aria-pressed={isSelected}
 								onClick={() => setSelectedCredentialId(option.credentialId)}
-								className={`group relative w-full overflow-hidden rounded-lg border px-2.5 py-2.5 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${
+								className={cn(
+									"group",
+									"relative",
+									"w-full",
+									"overflow-hidden",
+									"rounded-lg",
+									"border",
+									"px-2.5",
+									"py-2.5",
+									"text-left",
+									"transition-all",
+									"focus-visible:outline-none",
+									"focus-visible:ring-2",
+									"focus-visible:ring-primary/35",
 									isSelected
 										? "border-primary/45 bg-primary/10 shadow-sm"
-										: "border-border/80 bg-background/75 hover:border-primary/30 hover:bg-accent/70"
-								}`}
+										: "border-border/80 bg-background/75 hover:border-primary/30 hover:bg-accent/70",
+								)}
 							>
 								<div className="flex items-start gap-2">
 									<Favicon
@@ -181,11 +194,21 @@ function PasskeyPickerIframe() {
 												{displayName}
 											</p>
 											<span
-												className={`ml-auto inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors ${
+												className={cn(
+													"ml-auto",
+													"inline-flex",
+													"h-4",
+													"w-4",
+													"shrink-0",
+													"items-center",
+													"justify-center",
+													"rounded-full",
+													"border",
+													"transition-colors",
 													isSelected
 														? "border-primary/40 bg-primary/15 text-primary"
-														: "border-border text-transparent"
-												}`}
+														: "border-border text-transparent",
+												)}
 											>
 												<IconCircleCheck2OutlineDuo18 size={11} />
 											</span>
@@ -195,21 +218,33 @@ function PasskeyPickerIframe() {
 										</p>
 										<div className="mt-1.5 flex flex-wrap gap-1 text-[10px]">
 											<span
-												className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ${
+												className={cn(
+													"inline-flex",
+													"items-center",
+													"gap-1",
+													"rounded-full",
+													"px-1.5",
+													"py-0.5",
 													isSelected
 														? "bg-primary/10 text-primary"
-														: "bg-muted/75 text-muted-foreground"
-												}`}
+														: "bg-muted/75 text-muted-foreground",
+												)}
 											>
 												<IconUserOutlineDuo18 size={11} />
 												{option.vaultName || "Vault"}
 											</span>
 											<span
-												className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ${
+												className={cn(
+													"inline-flex",
+													"items-center",
+													"gap-1",
+													"rounded-full",
+													"px-1.5",
+													"py-0.5",
 													isSelected
 														? "bg-primary/10 text-primary"
-														: "bg-muted/75 text-muted-foreground"
-												}`}
+														: "bg-muted/75 text-muted-foreground",
+												)}
 											>
 												<IconClockTimeOutlineDuo18 size={11} />
 												{formatRelativeTime(

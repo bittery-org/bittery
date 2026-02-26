@@ -309,14 +309,19 @@ export class SyncManager {
 				metadata: event.metadata,
 			};
 
-			// Update last event cursor
+			// Track last seen cursor from stream. Persistence is handled after
+			// successful event application in the orchestrator path.
 			this.lastEventCursor = { seq: syncEvent.seq };
-			void this.setStoredLastSyncCursor(this.lastEventCursor).catch((error) => {
-				console.error("Failed to persist sync cursor:", error);
-			});
 
-			// Skip events from own client (already handled via optimistic updates)
+			// Events from this client are already reflected locally via optimistic
+			// updates. They do not require delta application, so we can acknowledge
+			// the cursor immediately.
 			if (syncEvent.clientId === this.clientId) {
+				void this.setStoredLastSyncCursor({ seq: syncEvent.seq }).catch(
+					(error) => {
+						console.error("Failed to persist sync cursor:", error);
+					},
+				);
 				return;
 			}
 
@@ -329,6 +334,29 @@ export class SyncManager {
 		}
 	}
 
+	private mergeDedupedEvent(existing: SyncEvent, incoming: SyncEvent): SyncEvent {
+		if (
+			existing.type === "vault_updated" &&
+			incoming.type === "vault_updated" &&
+			existing.entityId === incoming.entityId
+		) {
+			const existingBulkImport = existing.metadata?.reason === "bulk_import";
+			const incomingBulkImport = incoming.metadata?.reason === "bulk_import";
+			if (existingBulkImport || incomingBulkImport) {
+				return {
+					...incoming,
+					metadata: {
+						...(existing.metadata ?? {}),
+						...(incoming.metadata ?? {}),
+						reason: "bulk_import",
+					},
+				};
+			}
+		}
+
+		return incoming;
+	}
+
 	/**
 	 * Schedule an event for dispatch, deduplicating by event type + entityId.
 	 * If another event for the same entity and type arrives within the window,
@@ -337,6 +365,9 @@ export class SyncManager {
 	private scheduleEventDispatch(event: SyncEvent): void {
 		const key = `${event.type}:${event.entityId}`;
 		const existing = this.pendingEvents.get(key);
+		const mergedEvent = existing
+			? this.mergeDedupedEvent(existing.event, event)
+			: event;
 
 		if (existing) {
 			clearTimeout(existing.timer);
@@ -344,10 +375,10 @@ export class SyncManager {
 
 		const timer = setTimeout(() => {
 			this.pendingEvents.delete(key);
-			this.onEvent?.(event);
+			this.onEvent?.(mergedEvent);
 		}, SyncManager.DEDUP_WINDOW_MS);
 
-		this.pendingEvents.set(key, { event, timer });
+		this.pendingEvents.set(key, { event: mergedEvent, timer });
 	}
 
 	/**

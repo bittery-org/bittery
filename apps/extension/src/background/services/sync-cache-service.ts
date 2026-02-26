@@ -43,6 +43,7 @@ export interface SyncCacheStorage {
 	storeAuthToken: (token: string, email?: string) => Promise<void>;
 	getServerUrl: (email?: string) => Promise<string | null>;
 	getVaultKeys: (email?: string) => Promise<VaultKeyLike[] | null>;
+	clearItemCache?: (email?: string) => Promise<void>;
 }
 
 export interface SyncCacheDesktopClient {
@@ -132,8 +133,27 @@ export interface SyncCacheService {
 }
 
 export function createSyncCacheService(
-	deps: SyncCacheServiceDeps = defaultDeps,
+	overrides: Partial<SyncCacheServiceDeps> = {},
 ): SyncCacheService {
+	const deps: SyncCacheServiceDeps = {
+		...defaultDeps,
+		...overrides,
+	};
+
+	async function clearItemCacheForEmail(email?: string): Promise<void> {
+		await deps.storage.clearItemCache?.(email);
+		if (!deps.itemCache.clearItemCache) {
+			return;
+		}
+		try {
+			await deps.itemCache.clearItemCache(email);
+		} catch (error) {
+			deps.logger.debug(
+				`[sync-cache-service] Item cache clear skipped for ${email ?? "global"}: ${String(error)}`,
+			);
+		}
+	}
+
 	async function resolveActiveSingleEmail(): Promise<string | null> {
 		const active = await deps.storage.getActiveAccount();
 		if (!active || active.type !== "single") {
@@ -322,9 +342,11 @@ export function createSyncCacheService(
 			deps.logger.warn(
 				`[sync-cache-service] No account-scoped delta applied for ${event.type}; falling back to global cache update`,
 			);
-			await Promise.all(
-				candidateEmails.map((email) => deps.itemCache.clearItemCache?.(email)),
-			);
+			if (deps.storage.clearItemCache || deps.itemCache.clearItemCache) {
+				await Promise.all(
+					candidateEmails.map((email) => clearItemCacheForEmail(email)),
+				);
+			}
 			await deps.deltaSync(deps.defaultClient, deps.itemCache, event);
 		}
 
@@ -334,7 +356,7 @@ export function createSyncCacheService(
 	}
 
 	async function clearItemCachesForKnownAccounts(): Promise<void> {
-		if (!deps.itemCache.clearItemCache) {
+		if (!deps.storage.clearItemCache && !deps.itemCache.clearItemCache) {
 			return;
 		}
 
@@ -343,13 +365,11 @@ export function createSyncCacheService(
 		const candidates = buildOrderedCandidates(activeSingleEmail, allEmails);
 
 		if (candidates.length === 0) {
-			await deps.itemCache.clearItemCache();
+			await clearItemCacheForEmail();
 			return;
 		}
 
-		await Promise.all(
-			candidates.map((email) => deps.itemCache.clearItemCache?.(email)),
-		);
+		await Promise.all(candidates.map((email) => clearItemCacheForEmail(email)));
 	}
 
 	return {

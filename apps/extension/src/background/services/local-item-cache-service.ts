@@ -16,8 +16,28 @@ interface EncryptedPayload {
 	algorithm: string;
 }
 
+interface LocalItemCreatedInput {
+	itemId: string;
+	vaultId: string;
+	category: string;
+	encryptedData: EncryptedPayload;
+	accountEmail?: string;
+}
+
+interface LocalItemUpdatedInput {
+	itemId: string;
+	encryptedData: EncryptedPayload;
+	accountEmail?: string;
+}
+
+interface LegacyLocalCache {
+	onItemCreated: (input: LocalItemCreatedInput) => Promise<void>;
+	onItemUpdated: (input: LocalItemUpdatedInput) => Promise<void>;
+}
+
 interface LocalItemCacheServiceDeps {
-	vaultCoordinator: typeof core.vaultCoordinator;
+	vaultCoordinator?: typeof core.vaultCoordinator;
+	cache?: LegacyLocalCache;
 	desktopClient: {
 		clearCache: () => void;
 	};
@@ -29,19 +49,29 @@ const defaultDeps: LocalItemCacheServiceDeps = {
 };
 
 export function createLocalItemCacheService(
-	deps: LocalItemCacheServiceDeps = defaultDeps,
+	inputDeps: LocalItemCacheServiceDeps = defaultDeps,
 ) {
+	const deps: LocalItemCacheServiceDeps = {
+		...defaultDeps,
+		...inputDeps,
+	};
+
 	return {
-		async onLocalItemCreated(input: {
-			itemId: string;
-			vaultId: string;
-			category: string;
-			encryptedData: EncryptedPayload;
-			accountEmail?: string;
-		}): Promise<void> {
+		async onLocalItemCreated(input: LocalItemCreatedInput): Promise<void> {
+			if (deps.cache) {
+				await deps.cache.onItemCreated(input);
+				deps.desktopClient.clearCache();
+				return;
+			}
+
+			const vaultCoordinator = deps.vaultCoordinator;
+			if (!vaultCoordinator) {
+				return;
+			}
+
 			const accountEmail =
 				input.accountEmail ??
-				deps.vaultCoordinator.findAccountForVault(input.vaultId)?.email;
+				vaultCoordinator.findAccountForVault(input.vaultId)?.email;
 			if (!accountEmail) {
 				return;
 			}
@@ -60,23 +90,30 @@ export function createLocalItemCacheService(
 				updatedAt: now,
 				deletedAt: null,
 			};
-			await deps.vaultCoordinator.upsertEncrypted(item, accountEmail);
+			await vaultCoordinator.upsertEncrypted(item, accountEmail);
 			deps.desktopClient.clearCache();
 		},
 
-		async onLocalItemUpdated(input: {
-			itemId: string;
-			encryptedData: EncryptedPayload;
-			accountEmail?: string;
-		}): Promise<void> {
+		async onLocalItemUpdated(input: LocalItemUpdatedInput): Promise<void> {
+			if (deps.cache) {
+				await deps.cache.onItemUpdated(input);
+				deps.desktopClient.clearCache();
+				return;
+			}
+
+			const vaultCoordinator = deps.vaultCoordinator;
+			if (!vaultCoordinator) {
+				return;
+			}
+
 			const resolvedAccount = input.accountEmail
 				? {
 						email: input.accountEmail,
-						repo: deps.vaultCoordinator.getRepositoryForEmail(
+						repo: vaultCoordinator.getRepositoryForEmail(
 							input.accountEmail,
 						),
 					}
-				: deps.vaultCoordinator.findAccountForItem(input.itemId);
+				: vaultCoordinator.findAccountForItem(input.itemId);
 			if (!resolvedAccount) {
 				return;
 			}
@@ -99,7 +136,7 @@ export function createLocalItemCacheService(
 				deletedAt: existing.deletedAt,
 				attachments: existing.attachments,
 			};
-			await deps.vaultCoordinator.upsertEncrypted(item, resolvedAccount.email);
+			await vaultCoordinator.upsertEncrypted(item, resolvedAccount.email);
 			deps.desktopClient.clearCache();
 		},
 	};
@@ -107,20 +144,14 @@ export function createLocalItemCacheService(
 
 const localItemCacheService = createLocalItemCacheService();
 
-export async function onLocalItemCreated(input: {
-	itemId: string;
-	vaultId: string;
-	category: string;
-	encryptedData: EncryptedPayload;
-	accountEmail?: string;
-}): Promise<void> {
+export async function onLocalItemCreated(
+	input: LocalItemCreatedInput,
+): Promise<void> {
 	await localItemCacheService.onLocalItemCreated(input);
 }
 
-export async function onLocalItemUpdated(input: {
-	itemId: string;
-	encryptedData: EncryptedPayload;
-	accountEmail?: string;
-}): Promise<void> {
+export async function onLocalItemUpdated(
+	input: LocalItemUpdatedInput,
+): Promise<void> {
 	await localItemCacheService.onLocalItemUpdated(input);
 }

@@ -20,6 +20,7 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+import { cn } from "@/lib/utils";
 
 interface SyncConflict {
 	itemId: string;
@@ -257,11 +258,19 @@ export function ConflictResolutionModal({
 						<TouchableOpacity
 							onPress={handleKeepLocal}
 							disabled={resolving !== null}
-							className={`flex-1 flex-row items-center justify-center rounded-lg border-2 border-blue-500 py-3 ${
+							className={cn(
+								"flex-1",
+								"flex-row",
+								"items-center",
+								"justify-center",
+								"rounded-lg",
+								"border-2",
+								"border-blue-500",
+								"py-3",
 								resolving === "local"
 									? "bg-blue-500"
-									: "bg-blue-50 dark:bg-blue-900/30"
-							}`}
+									: "bg-blue-50 dark:bg-blue-900/30",
+							)}
 						>
 							{resolving === "local" ? (
 								<ActivityIndicator color="#fff" size="small" />
@@ -278,11 +287,23 @@ export function ConflictResolutionModal({
 						<TouchableOpacity
 							onPress={handleKeepServer}
 							disabled={resolving !== null}
-							className={`flex-1 flex-row items-center justify-center rounded-lg border-2 py-3 ${
+							className={cn(
+								"flex-1",
+								"flex-row",
+								"items-center",
+								"justify-center",
+								"rounded-lg",
+								"border-2",
+								"py-3",
 								isDeleteConflict
 									? "border-red-500 bg-red-50 dark:bg-red-900/30"
-									: "border-green-500 bg-green-50 dark:bg-green-900/30"
-							} ${resolving === "server" ? (isDeleteConflict ? "bg-red-500" : "bg-green-500") : ""}`}
+									: "border-green-500 bg-green-50 dark:bg-green-900/30",
+								resolving === "server"
+									? isDeleteConflict
+										? "bg-red-500"
+										: "bg-green-500"
+									: "",
+							)}
 						>
 							{resolving === "server" ? (
 								<ActivityIndicator color="#fff" size="small" />

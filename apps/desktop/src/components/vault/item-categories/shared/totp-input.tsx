@@ -4,7 +4,7 @@ import {
 	parseOtpAuthUri,
 } from "@bittery/shared/totp";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
-import { Button, Input, Label, toast } from "@bittery/ui";
+import { Button, cn, Input, Label, toast } from "@bittery/ui";
 import {
 	IconClipboardArrowInOutlineDuo18,
 	IconMobileOutlineDuo18,
@@ -146,7 +146,12 @@ export function TotpInputSection({
 								}}
 								onBlur={() => validateSecret(state.secret)}
 								placeholder="XXXX XXXX XXXX XXXX"
-								className={`flex-1 font-mono tracking-wider ${secretError ? "border-destructive" : ""}`}
+								className={cn(
+									"flex-1",
+									"font-mono",
+									"tracking-wider",
+									secretError ? "border-destructive" : "",
+								)}
 							/>
 							<Button
 								type="button"

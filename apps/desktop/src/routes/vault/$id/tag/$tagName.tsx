@@ -1,6 +1,6 @@
 import { useToggleFavorite, useVaultItems } from "@bittery/core/hooks";
 import { maskCardNumber } from "@bittery/shared/credit-card";
-import { Button } from "@bittery/ui";
+import { Button, cn } from "@bittery/ui";
 import {
 	IconArrowLeftOutlineDuo18,
 	IconMobileOutlineDuo18,
@@ -154,11 +154,12 @@ function TagRouteComponent() {
 										onClick={(e) =>
 											handleToggleFavorite(e, item.id, item.favorite)
 										}
-										className={`shrink-0 ${
+										className={cn(
+											"shrink-0",
 											item.favorite
 												? "text-yellow-500 hover:text-yellow-600"
-												: "text-muted-foreground hover:text-yellow-500"
-										}`}
+												: "text-muted-foreground hover:text-yellow-500",
+										)}
 									>
 										<IconStarOutlineDuo18
 											className="size-4"

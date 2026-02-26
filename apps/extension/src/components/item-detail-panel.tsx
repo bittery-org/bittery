@@ -8,6 +8,7 @@ import {
 	Button,
 	ButtonGroup,
 	Card,
+	cn,
 	copyWithToast,
 	InputGroup,
 	InputGroupAddon,
@@ -157,7 +158,11 @@ function InlineTotpDisplay({
 							fill="none"
 							strokeWidth="2.5"
 							strokeLinecap="round"
-							className={`transition-all duration-300 ${getProgressColor()}`}
+							className={cn(
+								"transition-all",
+								"duration-300",
+								getProgressColor(),
+							)}
 							style={{
 								strokeDasharray: circumference,
 								strokeDashoffset: strokeDashoffset,

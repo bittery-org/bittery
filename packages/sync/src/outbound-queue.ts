@@ -83,12 +83,16 @@ function normalizeEmail(email: string): string {
 	return email.toLowerCase();
 }
 
-function sanitizeEmail(email: string): string {
+function sanitizeEmailLegacy(email: string): string {
 	return normalizeEmail(email).replace(/[^a-z0-9]/g, "_");
 }
 
 function getQueueKeyForEmail(email: string): string {
-	return `bittery_pending_mutations_${sanitizeEmail(email)}`;
+	return `bittery_pending_mutations_${encodeURIComponent(normalizeEmail(email))}`;
+}
+
+function getLegacyQueueKeyForEmail(email: string): string {
+	return `bittery_pending_mutations_${sanitizeEmailLegacy(email)}`;
 }
 
 function getHttpStatus(error: unknown): number | null {
@@ -155,11 +159,19 @@ export class OutboundQueue {
 	private async persistQueue(email: string): Promise<void> {
 		const normalized = normalizeEmail(email);
 		const queue = this.queuesByEmail.get(normalized) ?? [];
+		const queueKey = getQueueKeyForEmail(normalized);
+		const legacyQueueKey = getLegacyQueueKeyForEmail(normalized);
 		if (queue.length === 0) {
-			await this.storage.remove(getQueueKeyForEmail(normalized));
+			await this.storage.remove(queueKey);
+			if (legacyQueueKey !== queueKey) {
+				await this.storage.remove(legacyQueueKey);
+			}
 			this.queuesByEmail.delete(normalized);
 		} else {
-			await this.storage.set(getQueueKeyForEmail(normalized), queue);
+			await this.storage.set(queueKey, queue);
+			if (legacyQueueKey !== queueKey) {
+				await this.storage.remove(legacyQueueKey);
+			}
 		}
 		await this.persistIndex();
 	}
@@ -203,10 +215,18 @@ export class OutboundQueue {
 			) ?? [];
 
 		for (const email of emails) {
-			const queue =
-				(await this.storage.get<PendingMutation[]>(
-					getQueueKeyForEmail(email),
-				)) ?? [];
+			const queueKey = getQueueKeyForEmail(email);
+			const legacyQueueKey = getLegacyQueueKeyForEmail(email);
+			let queue = (await this.storage.get<PendingMutation[]>(queueKey)) ?? [];
+			if (queue.length === 0 && legacyQueueKey !== queueKey) {
+				const legacyQueue =
+					(await this.storage.get<PendingMutation[]>(legacyQueueKey)) ?? [];
+				if (legacyQueue.length > 0) {
+					queue = legacyQueue;
+					await this.storage.set(queueKey, legacyQueue);
+					await this.storage.remove(legacyQueueKey);
+				}
+			}
 			if (queue.length > 0) {
 				this.queuesByEmail.set(
 					email,
@@ -286,7 +306,9 @@ export class OutboundQueue {
 					encryptionAlgorithm: payload.encryptionAlgorithm,
 				});
 
-				const realId = result.itemId ?? result.id;
+				const fallbackId =
+					result.id && result.id !== mutation.vaultId ? result.id : undefined;
+				const realId = result.itemId ?? fallbackId;
 				if (realId && realId !== mutation.entityId) {
 					this.latestMappings.push({
 						tempId: mutation.entityId,
@@ -353,7 +375,9 @@ export class OutboundQueue {
 	}
 
 	async drain(
-		getClient: (email: string) => OutboundQueueClient,
+		getClient: (
+			email: string,
+		) => OutboundQueueClient | Promise<OutboundQueueClient>,
 	): Promise<void> {
 		this.latestMappings = [];
 
@@ -367,7 +391,7 @@ export class OutboundQueue {
 				if (!mutation) {
 					break;
 				}
-				const client = getClient(email);
+				const client = await getClient(email);
 
 				try {
 					await this.processMutation(client, mutation);
@@ -434,10 +458,14 @@ export class OutboundQueue {
 
 	compact(): void {
 		for (const [email, sourceQueue] of this.queuesByEmail.entries()) {
-			let compacted = [...sourceQueue];
+			const sourceWithIndex = sourceQueue.map((mutation, index) => ({
+				mutation,
+				index,
+			}));
+			let compacted = [...sourceWithIndex];
 
 			// Drop updates/moves/favorite toggles for items that are subsequently deleted.
-			for (const mutation of sourceQueue) {
+			for (const { mutation, index: mutationIndex } of sourceWithIndex) {
 				if (
 					mutation.type !== "delete" &&
 					mutation.type !== "permanent_delete"
@@ -445,23 +473,26 @@ export class OutboundQueue {
 					continue;
 				}
 				compacted = compacted.filter((candidate) => {
-					if (candidate.entityId !== mutation.entityId) {
+					if (candidate.mutation.entityId !== mutation.entityId) {
 						return true;
 					}
-					if (candidate.id === mutation.id) {
+					if (candidate.mutation.id === mutation.id) {
+						return true;
+					}
+					if (candidate.index > mutationIndex) {
 						return true;
 					}
 					return !(
-						candidate.type === "update" ||
-						candidate.type === "toggle_favorite" ||
-						candidate.type === "move"
+						candidate.mutation.type === "update" ||
+						candidate.mutation.type === "toggle_favorite" ||
+						candidate.mutation.type === "move"
 					);
 				});
 			}
 
 			// Collapse sequential updates/toggles/moves for the same item, keep latest.
 			const result: PendingMutation[] = [];
-			for (const mutation of compacted) {
+			for (const { mutation } of compacted) {
 				if (
 					mutation.type === "update" ||
 					mutation.type === "toggle_favorite" ||
@@ -520,6 +551,7 @@ export class OutboundQueue {
 		this.queuesByEmail.clear();
 		for (const accountEmail of emails) {
 			void this.storage.remove(getQueueKeyForEmail(accountEmail));
+			void this.storage.remove(getLegacyQueueKeyForEmail(accountEmail));
 		}
 		void this.storage.remove(QUEUE_INDEX_KEY);
 		this.emit();

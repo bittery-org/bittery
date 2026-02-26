@@ -180,7 +180,12 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 											className="flex items-center gap-1"
 										>
 											<span
-												className={`h-2 w-2 rounded-full ${STATUS_COLORS[link.status]}`}
+												className={cn(
+													"h-2",
+													"w-2",
+													"rounded-full",
+													STATUS_COLORS[link.status],
+												)}
 											/>
 											{STATUS_LABELS[link.status]}
 										</Badge>

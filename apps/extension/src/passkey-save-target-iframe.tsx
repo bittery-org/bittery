@@ -1,5 +1,5 @@
 import "./index.css";
-import { Button, Card } from "@bittery/ui";
+import { Button, Card, cn } from "@bittery/ui";
 import {
 	IconCircleKeyOutlineDuo18,
 	IconFolderOutlineDuo18,
@@ -139,11 +139,21 @@ function PasskeySaveTargetIframe() {
 						<button
 							type="button"
 							onClick={() => setMode("attach-existing")}
-							className={`flex w-full items-center justify-between rounded-md border px-2.5 py-2 text-left transition-colors ${
+							className={cn(
+								"flex",
+								"w-full",
+								"items-center",
+								"justify-between",
+								"rounded-md",
+								"border",
+								"px-2.5",
+								"py-2",
+								"text-left",
+								"transition-colors",
 								mode === "attach-existing"
 									? "border-primary bg-primary/5"
-									: "border-border hover:bg-accent/70"
-							}`}
+									: "border-border hover:bg-accent/70",
+							)}
 						>
 							<span className="flex items-center gap-2 text-xs">
 								<IconUserOutlineDuo18 size={14} />
@@ -162,11 +172,18 @@ function PasskeySaveTargetIframe() {
 										setMode("attach-existing");
 										setSelectedItemId(item.itemId);
 									}}
-									className={`w-full rounded-md border px-2 py-2 text-left transition-colors ${
+									className={cn(
+										"w-full",
+										"rounded-md",
+										"border",
+										"px-2",
+										"py-2",
+										"text-left",
+										"transition-colors",
 										mode === "attach-existing" && selectedItemId === item.itemId
 											? "border-primary bg-primary/5"
-											: "border-border hover:bg-accent/70"
-									}`}
+											: "border-border hover:bg-accent/70",
+									)}
 								>
 									<div className="flex items-start gap-2">
 										<Favicon
@@ -199,11 +216,21 @@ function PasskeySaveTargetIframe() {
 						<button
 							type="button"
 							onClick={() => setMode("create-new")}
-							className={`flex w-full items-center justify-between rounded-md border px-2.5 py-2 text-left transition-colors ${
+							className={cn(
+								"flex",
+								"w-full",
+								"items-center",
+								"justify-between",
+								"rounded-md",
+								"border",
+								"px-2.5",
+								"py-2",
+								"text-left",
+								"transition-colors",
 								mode === "create-new"
 									? "border-primary bg-primary/5"
-									: "border-border hover:bg-accent/70"
-							}`}
+									: "border-border hover:bg-accent/70",
+							)}
 						>
 							<span className="flex items-center gap-2 text-xs">
 								<IconPlusOutlineDuo18 size={14} />
@@ -222,11 +249,21 @@ function PasskeySaveTargetIframe() {
 											key={vault.id}
 											type="button"
 											onClick={() => setSelectedVaultId(vault.id)}
-											className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+											className={cn(
+												"flex",
+												"w-full",
+												"items-center",
+												"gap-2",
+												"rounded-md",
+												"px-2",
+												"py-1.5",
+												"text-left",
+												"text-xs",
+												"transition-colors",
 												selectedVaultId === vault.id
 													? "bg-accent text-accent-foreground"
-													: "hover:bg-accent/70"
-											}`}
+													: "hover:bg-accent/70",
+											)}
 										>
 											<IconFolderOutlineDuo18 size={14} />
 											<span className="truncate">{vault.name}</span>

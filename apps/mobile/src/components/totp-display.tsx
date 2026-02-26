@@ -6,6 +6,7 @@ import { Copy } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, Text, TouchableOpacity, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
+import { cn } from "@/lib/utils";
 
 interface TotpDisplayProps {
 	totpSecret: string;
@@ -247,7 +248,16 @@ export function TotpDisplay({
 
 	return (
 		<View
-			className={`flex-row items-center justify-between rounded-lg border border-border bg-muted/30 ${compact ? "p-2" : "p-3"}`}
+			className={cn(
+				"flex-row",
+				"items-center",
+				"justify-between",
+				"rounded-lg",
+				"border",
+				"border-border",
+				"bg-muted/30",
+				compact ? "p-2" : "p-3",
+			)}
 		>
 			<TouchableOpacity
 				onPress={handleCopy}
@@ -293,7 +303,12 @@ export function TotpDisplay({
 					</Svg>
 					{/* Seconds remaining text */}
 					<Text
-						className={`absolute font-medium font-mono ${compact ? "text-xs" : "text-xs"}`}
+						className={cn(
+							"absolute",
+							"font-medium",
+							"font-mono",
+							compact ? "text-xs" : "text-xs",
+						)}
 						style={{ color: getProgressColor() }}
 					>
 						{totpResult?.remainingSeconds ?? "--"}
@@ -303,7 +318,13 @@ export function TotpDisplay({
 				{/* Code display with fade animation */}
 				<View className="flex-col">
 					<Animated.Text
-						className={`font-bold font-mono text-foreground tracking-widest ${compact ? "text-lg" : "text-2xl"}`}
+						className={cn(
+							"font-bold",
+							"font-mono",
+							"text-foreground",
+							"tracking-widest",
+							compact ? "text-lg" : "text-2xl",
+						)}
 						style={{ opacity: fadeAnim }}
 					>
 						{formatCode(totpResult?.code || "")}
@@ -316,7 +337,13 @@ export function TotpDisplay({
 			<TouchableOpacity
 				onPress={handleCopy}
 				disabled={!totpResult?.code}
-				className={`rounded-lg border border-input bg-background ${compact ? "p-2" : "p-2.5"}`}
+				className={cn(
+					"rounded-lg",
+					"border",
+					"border-input",
+					"bg-background",
+					compact ? "p-2" : "p-2.5",
+				)}
 				accessibilityLabel="Copy code to clipboard"
 				accessibilityRole="button"
 			>

@@ -42,7 +42,9 @@ export interface UseSyncOptions {
 	realtimeEnabled?: boolean;
 	itemCacheAdapter?: ItemCacheAdapter;
 	itemCacheAccountEmail?: string | null;
-	getClientForAccount?: (email: string) => OutboundQueueClient;
+	getClientForAccount?: (
+		email: string,
+	) => OutboundQueueClient | Promise<OutboundQueueClient>;
 	/** Custom fetch implementation (e.g. `expo/fetch` for streaming support in React Native) */
 	fetch?: (url: string, init?: any) => Promise<Response>;
 }

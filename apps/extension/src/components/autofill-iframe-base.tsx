@@ -1,5 +1,5 @@
 import type { DecryptedItem } from "@bittery/shared/types";
-import { Card } from "@bittery/ui";
+import { Card, cn } from "@bittery/ui";
 import { IconLockOutlineDuo18 } from "@bittery/ui/icons";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -216,11 +216,17 @@ export function AutofillIframeBase({
 									? (el) => el?.scrollIntoView({ block: "nearest" })
 									: undefined
 							}
-							className={`w-full rounded-md px-2.5 py-2 text-left transition-colors ${
+							className={cn(
+								"w-full",
+								"rounded-md",
+								"px-2.5",
+								"py-2",
+								"text-left",
+								"transition-colors",
 								index === selectedIndex
 									? "bg-accent text-accent-foreground"
-									: "hover:bg-accent/50"
-							}`}
+									: "hover:bg-accent/50",
+							)}
 							onClick={() => handleSelect(item)}
 							onMouseEnter={() => setSelectedIndex(index)}
 						>

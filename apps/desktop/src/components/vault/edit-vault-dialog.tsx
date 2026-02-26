@@ -1,5 +1,6 @@
 import {
 	Button,
+	cn,
 	Dialog,
 	DialogContent,
 	DialogHeader,
@@ -176,11 +177,16 @@ export function EditVaultDialog({
 								// biome-ignore lint/a11y/noStaticElementInteractions: TODO
 								// biome-ignore lint/a11y/useKeyWithClickEvents: TODO
 								<div
-									className={`relative cursor-pointer rounded-xl p-1 transition-all ${
+									className={cn(
+										"relative",
+										"cursor-pointer",
+										"rounded-xl",
+										"p-1",
+										"transition-all",
 										isDragging
 											? "ring-2 ring-primary ring-offset-2"
-											: "hover:ring-2 hover:ring-muted hover:ring-offset-2"
-									}`}
+											: "hover:ring-2 hover:ring-muted hover:ring-offset-2",
+									)}
 									onDrop={handleDrop}
 									onDragOver={handleDragOver}
 									onDragLeave={handleDragLeave}
@@ -237,11 +243,17 @@ export function EditVaultDialog({
 									type="button"
 									onClick={() => setIcon(option.value)}
 									disabled={form.state.isSubmitting}
-									className={`flex size-9 items-center justify-center rounded-lg transition-all ${
+									className={cn(
+										"flex",
+										"size-9",
+										"items-center",
+										"justify-center",
+										"rounded-lg",
+										"transition-all",
 										icon === option.value
 											? "bg-primary text-primary-foreground shadow-sm"
-											: "bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground"
-									}`}
+											: "bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+									)}
 									aria-label={option.label}
 								>
 									<option.Icon className="size-4" />

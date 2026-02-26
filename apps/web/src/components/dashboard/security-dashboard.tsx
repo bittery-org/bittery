@@ -13,6 +13,7 @@ import {
 	CardDescription,
 	CardHeader,
 	CardTitle,
+	cn,
 	ScrollArea,
 	Skeleton,
 	Tabs,
@@ -245,12 +246,22 @@ function ScoreRing({ score }: { score: number }) {
 					fill="none"
 					strokeDasharray={circumference}
 					strokeDashoffset={strokeOffset}
-					className={`${scorePalette.textClassName} transition-[stroke-dashoffset] duration-700 ease-out`}
+					className={cn(
+						scorePalette.textClassName,
+						"transition-[stroke-dashoffset]",
+						"duration-700",
+						"ease-out",
+					)}
 				/>
 			</svg>
 			<div className="absolute inset-0 flex flex-col items-center justify-center text-center">
 				<span
-					className={`font-semibold text-5xl leading-none ${scorePalette.textClassName}`}
+					className={cn(
+						"font-semibold",
+						"text-5xl",
+						"leading-none",
+						scorePalette.textClassName,
+					)}
 				>
 					{normalizedScore}
 				</span>
@@ -259,7 +270,17 @@ function ScoreRing({ score }: { score: number }) {
 				</span>
 			</div>
 			<div
-				className={`pointer-events-none absolute inset-0 -z-10 rounded-full bg-gradient-to-br opacity-35 blur-2xl ${scorePalette.ringClassName}`}
+				className={cn(
+					"pointer-events-none",
+					"absolute",
+					"inset-0",
+					"-z-10",
+					"rounded-full",
+					"bg-gradient-to-br",
+					"opacity-35",
+					"blur-2xl",
+					scorePalette.ringClassName,
+				)}
 			/>
 		</div>
 	);
@@ -378,7 +399,12 @@ function SentinelOverview({
 											.map((bucket) => (
 												<div
 													key={bucket.label}
-													className={`h-full ${bucket.barClassName} transition-all duration-700`}
+													className={cn(
+														"h-full",
+														bucket.barClassName,
+														"transition-all",
+														"duration-700",
+													)}
 													style={{ width: `${bucket.percentage}%` }}
 													title={`${bucket.label}: ${bucket.count}`}
 												/>
@@ -391,7 +417,12 @@ function SentinelOverview({
 												className="inline-flex items-center gap-1.5"
 											>
 												<span
-													className={`h-2 w-2 rounded-full ${bucket.dotClassName}`}
+													className={cn(
+														"h-2",
+														"w-2",
+														"rounded-full",
+														bucket.dotClassName,
+													)}
 												/>
 												{bucket.label} ({bucket.count})
 											</span>
@@ -466,12 +497,25 @@ function IssueCard({
 	return (
 		<Card className="relative h-full overflow-hidden border-border/60 bg-card/90 shadow-sm">
 			<div
-				className={`pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${config.accent}`}
+				className={cn(
+					"pointer-events-none",
+					"absolute",
+					"inset-x-0",
+					"top-0",
+					"h-1",
+					"bg-gradient-to-r",
+					config.accent,
+				)}
 			/>
 			<CardContent className="flex h-full flex-col p-5">
 				<div className="flex items-start justify-between gap-4">
-					<div className={`rounded-xl border p-2.5 ${config.iconShell}`}>
-						<Icon className={`h-5 w-5 ${config.iconColor}`} strokeWidth={1.6} />
+					<div
+						className={cn("rounded-xl", "border", "p-2.5", config.iconShell)}
+					>
+						<Icon
+							className={cn("h-5", "w-5", config.iconColor)}
+							strokeWidth={1.6}
+						/>
 					</div>
 					{hasIssues && !isLoading ? (
 						<Badge variant="outline" className={config.pillClassName}>
@@ -606,7 +650,10 @@ function PasswordIssueItem({
 						{issue.analysis && (
 							<Badge
 								variant="outline"
-								className={`text-[11px] ${strengthToTextColor(issue.analysis.strength)}`}
+								className={cn(
+									"text-[11px]",
+									strengthToTextColor(issue.analysis.strength),
+								)}
 							>
 								{strengthToLabel(issue.analysis.strength)}
 							</Badge>
@@ -727,11 +774,18 @@ function SentinelRecommendations({ report }: { report: SecurityReport }) {
 							return (
 								<div
 									key={index}
-									className={`rounded-xl border p-4 ${config.cardClassName}`}
+									className={cn(
+										"rounded-xl",
+										"border",
+										"p-4",
+										config.cardClassName,
+									)}
 								>
 									<div className="flex items-start gap-3">
 										<div className="rounded-lg bg-background/75 p-2">
-											<Icon className={`h-4 w-4 ${config.iconClassName}`} />
+											<Icon
+												className={cn("h-4", "w-4", config.iconClassName)}
+											/>
 										</div>
 										<div className="min-w-0 flex-1 space-y-1">
 											<div className="flex items-center gap-2">

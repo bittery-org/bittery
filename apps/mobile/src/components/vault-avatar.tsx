@@ -12,6 +12,7 @@ import {
 import { useState } from "react";
 import { Image, View } from "react-native";
 import { withUniwind } from "uniwind";
+import { cn } from "@/lib/utils";
 
 type VaultIconName =
 	| "lock"
@@ -127,11 +128,17 @@ export function VaultAvatar({
 
 	return (
 		<View
-			className={`flex shrink-0 items-center justify-center overflow-hidden rounded-lg ${
-				sizeClasses[size]
-			} ${showImage || showIcon ? "bg-surface-secondary" : avatarColor} ${
-				className || ""
-			}`}
+			className={cn(
+				"flex",
+				"shrink-0",
+				"items-center",
+				"justify-center",
+				"overflow-hidden",
+				"rounded-lg",
+				sizeClasses[size],
+				showImage || showIcon ? "bg-surface-secondary" : avatarColor,
+				className || "",
+			)}
 		>
 			{showImage ? (
 				<Image
@@ -144,7 +151,12 @@ export function VaultAvatar({
 				<Icon size={iconSizes[size]} className="text-muted" />
 			) : (
 				<Card.Title
-					className={`select-none font-semibold text-white ${textSizes[size]}`}
+					className={cn(
+						"select-none",
+						"font-semibold",
+						"text-white",
+						textSizes[size],
+					)}
 				>
 					{initials}
 				</Card.Title>

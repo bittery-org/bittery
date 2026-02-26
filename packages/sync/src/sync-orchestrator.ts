@@ -20,7 +20,9 @@ export interface SyncOrchestratorOptions {
 	itemCache: MutableItemCacheAdapter;
 	outboundQueue: OutboundQueue;
 	itemCacheAccountEmail?: string | null;
-	getClientForAccount?: (email: string) => OutboundQueueClient;
+	getClientForAccount?: (
+		email: string,
+	) => OutboundQueueClient | Promise<OutboundQueueClient>;
 	onEventProcessed?: (event: SyncEvent) => Promise<void>;
 }
 
@@ -28,7 +30,9 @@ export class SyncOrchestrator {
 	private readonly syncManager: SyncManager;
 	private readonly listeners = new Set<(status: SyncStatus) => void>();
 	private readonly itemCacheAccountEmail?: string | null;
-	private readonly getClientForAccount?: (email: string) => OutboundQueueClient;
+	private readonly getClientForAccount?: (
+		email: string,
+	) => OutboundQueueClient | Promise<OutboundQueueClient>;
 	private readonly onEventProcessed?: (event: SyncEvent) => Promise<void>;
 
 	private status: SyncStatus = {
@@ -103,8 +107,16 @@ export class SyncOrchestrator {
 		return this.itemCacheAccountEmail ?? undefined;
 	}
 
+	private async acknowledgeEvent(event: SyncEvent): Promise<void> {
+		await this.syncManager.setStoredLastSyncCursor({ seq: event.seq });
+		this.setStatus({
+			lastSyncTime: event.timestamp,
+		});
+	}
+
 	private async applyEvent(event: SyncEvent): Promise<void> {
 		if (this.options.outboundQueue.hasPendingForItem(event.entityId)) {
+			await this.acknowledgeEvent(event);
 			return;
 		}
 
@@ -115,10 +127,7 @@ export class SyncOrchestrator {
 			this.getDeltaSyncAccountEmail(),
 		);
 		await this.onEventProcessed?.(event);
-		await this.syncManager.setStoredLastSyncCursor({ seq: event.seq });
-		this.setStatus({
-			lastSyncTime: event.timestamp,
-		});
+		await this.acknowledgeEvent(event);
 	}
 
 	private async handleEvent(event: SyncEvent): Promise<void> {
@@ -142,6 +151,7 @@ export class SyncOrchestrator {
 				return;
 			}
 
+			let fullRefreshHandled = false;
 			const result = await runCatchUp({
 				client: this.options.trpcClient,
 				initialCursor: cursor,
@@ -151,7 +161,21 @@ export class SyncOrchestrator {
 				onEvent: async (event) => {
 					await this.applyEvent(event);
 				},
+				onRequiresFullRefresh: async () => {
+					const clearItemCache = this.options.itemCache.clearItemCache;
+					if (!clearItemCache) {
+						return;
+					}
+					await clearItemCache(this.getDeltaSyncAccountEmail());
+					fullRefreshHandled = true;
+				},
 			});
+
+			if (result.requiresFullRefresh && !fullRefreshHandled) {
+				throw new Error(
+					"Catch-up requested full refresh but cache adapter could not clear local state",
+				);
+			}
 
 			await this.syncManager.setStoredLastSyncCursor(result.cursor);
 		} finally {

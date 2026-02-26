@@ -146,7 +146,7 @@ export function Favicon({
 				<img
 					src={faviconUrl}
 					alt=""
-					className={`${imageSizes[size]} rounded-lg object-contain`}
+					className={cn(imageSizes[size], "rounded-lg", "object-contain")}
 					onError={() => setImageError(true)}
 				/>
 			) : category === "login" && url ? (

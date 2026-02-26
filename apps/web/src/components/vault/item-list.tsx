@@ -5,6 +5,7 @@ import {
 	Badge,
 	Button,
 	Checkbox,
+	cn,
 	Input,
 	ScrollArea,
 	Select,
@@ -373,13 +374,21 @@ function ItemRow({
 
 	return (
 		<div
-			className={`relative flex items-center gap-3 rounded-lg border p-3 transition-colors ${
+			className={cn(
+				"relative",
+				"flex",
+				"items-center",
+				"gap-3",
+				"rounded-lg",
+				"border",
+				"p-3",
+				"transition-colors",
 				isSelected
 					? "border-primary/50 bg-muted/60"
 					: isChecked
 						? "border-primary/30 bg-primary/5"
-						: "border-transparent hover:bg-muted/30"
-			}`}
+						: "border-transparent hover:bg-muted/30",
+			)}
 		>
 			{/* Selection checkbox in selection mode */}
 			{selectionMode && (
@@ -456,11 +465,15 @@ function ItemRow({
 					aria-label={
 						item.favorite ? "Remove from favorites" : "Add to favorites"
 					}
-					className={`relative z-10 shrink-0 transition-colors ${
+					className={cn(
+						"relative",
+						"z-10",
+						"shrink-0",
+						"transition-colors",
 						item.favorite
 							? "text-yellow-500 hover:text-yellow-600"
-							: "text-muted-foreground hover:text-yellow-500"
-					}`}
+							: "text-muted-foreground hover:text-yellow-500",
+					)}
 				>
 					<Star
 						className="h-4 w-4"

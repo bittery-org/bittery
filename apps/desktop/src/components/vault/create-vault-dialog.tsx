@@ -1,6 +1,7 @@
 import type { CreateVaultInput } from "@bittery/core/hooks";
 import {
 	Button,
+	cn,
 	Dialog,
 	DialogContent,
 	DialogHeader,
@@ -175,11 +176,16 @@ export function CreateVaultDialog({
 								// biome-ignore lint/a11y/useKeyWithClickEvents: TODO
 								// biome-ignore lint/a11y/noStaticElementInteractions: TODO
 								<div
-									className={`relative cursor-pointer rounded-xl p-1 transition-all ${
+									className={cn(
+										"relative",
+										"cursor-pointer",
+										"rounded-xl",
+										"p-1",
+										"transition-all",
 										isDragging
 											? "ring-2 ring-primary ring-offset-2"
-											: "hover:ring-2 hover:ring-muted hover:ring-offset-2"
-									}`}
+											: "hover:ring-2 hover:ring-muted hover:ring-offset-2",
+									)}
 									onDrop={handleDrop}
 									onDragOver={handleDragOver}
 									onDragLeave={handleDragLeave}
@@ -237,11 +243,17 @@ export function CreateVaultDialog({
 									type="button"
 									onClick={() => setIcon(option.value)}
 									disabled={form.state.isSubmitting}
-									className={`flex size-9 items-center justify-center rounded-lg transition-all ${
+									className={cn(
+										"flex",
+										"size-9",
+										"items-center",
+										"justify-center",
+										"rounded-lg",
+										"transition-all",
 										icon === option.value
 											? "bg-primary text-primary-foreground shadow-sm"
-											: "bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground"
-									}`}
+											: "bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+									)}
 									aria-label={option.label}
 								>
 									<option.Icon className="size-4" />
@@ -320,11 +332,22 @@ export function CreateVaultDialog({
 										type="button"
 										onClick={() => field.handleChange("personal")}
 										disabled={form.state.isSubmitting}
-										className={`flex items-center justify-center gap-2 rounded-lg border-2 px-4 py-3 font-medium text-sm transition-all ${
+										className={cn(
+											"flex",
+											"items-center",
+											"justify-center",
+											"gap-2",
+											"rounded-lg",
+											"border-2",
+											"px-4",
+											"py-3",
+											"font-medium",
+											"text-sm",
+											"transition-all",
 											field.state.value === "personal"
 												? "border-primary bg-primary/5 text-primary"
-												: "border-border bg-background text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground"
-										}`}
+												: "border-border bg-background text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground",
+										)}
 									>
 										<IconUserOutlineDuo18 className="size-4" />
 										Personal
@@ -333,11 +356,22 @@ export function CreateVaultDialog({
 										type="button"
 										onClick={() => field.handleChange("team")}
 										disabled={form.state.isSubmitting}
-										className={`flex items-center justify-center gap-2 rounded-lg border-2 px-4 py-3 font-medium text-sm transition-all ${
+										className={cn(
+											"flex",
+											"items-center",
+											"justify-center",
+											"gap-2",
+											"rounded-lg",
+											"border-2",
+											"px-4",
+											"py-3",
+											"font-medium",
+											"text-sm",
+											"transition-all",
 											field.state.value === "team"
 												? "border-primary bg-primary/5 text-primary"
-												: "border-border bg-background text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground"
-										}`}
+												: "border-border bg-background text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground",
+										)}
 									>
 										<IconUsers6OutlineDuo18 className="size-4" />
 										Team

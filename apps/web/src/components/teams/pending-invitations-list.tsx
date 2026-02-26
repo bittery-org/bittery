@@ -1,5 +1,5 @@
 import { useTRPCClient } from "@bittery/shared/trpc";
-import { Badge, Button, copyWithToast, toast } from "@bittery/ui";
+import { Badge, Button, cn, copyWithToast, toast } from "@bittery/ui";
 import {
 	IconClockTimeOutlineDuo18 as Clock,
 	IconCopyOutlineDuo18 as Copy,
@@ -84,11 +84,17 @@ export function PendingInvitationsList({
 					>
 						{/* Top accent bar */}
 						<div
-							className={`pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${
+							className={cn(
+								"pointer-events-none",
+								"absolute",
+								"inset-x-0",
+								"top-0",
+								"h-1",
+								"bg-gradient-to-r",
 								expired
 									? "from-destructive/70 via-destructive/30 to-transparent"
-									: "from-amber-500/70 via-amber-500/30 to-transparent"
-							}`}
+									: "from-amber-500/70 via-amber-500/30 to-transparent",
+							)}
 						/>
 
 						<div className="flex items-start justify-between gap-3">

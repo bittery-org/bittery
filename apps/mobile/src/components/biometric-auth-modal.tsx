@@ -20,6 +20,7 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+import { cn } from "@/lib/utils";
 import { useBiometricAuth } from "../contexts/biometric-auth-context";
 import {
 	type BiometricErrorType,
@@ -166,9 +167,15 @@ export function BiometricAuthModal({
 			return (
 				<>
 					<View
-						className={`mb-6 h-20 w-20 items-center justify-center rounded-full ${
-							lastAuthResult.error === "lockout" ? "bg-red-100" : "bg-red-100"
-						}`}
+						className={cn(
+							"mb-6",
+							"h-20",
+							"w-20",
+							"items-center",
+							"justify-center",
+							"rounded-full",
+							lastAuthResult.error === "lockout" ? "bg-red-100" : "bg-red-100",
+						)}
 					>
 						{getErrorIcon(lastAuthResult.error)}
 					</View>

@@ -4,6 +4,7 @@ import { CreditCard, FileText, Key, Timer, User } from "lucide-react-native";
 import { useState } from "react";
 import { Image, View } from "react-native";
 import { withUniwind } from "uniwind";
+import { cn } from "@/lib/utils";
 
 // Create styled icon components
 const StyledKey = withUniwind(Key);
@@ -61,7 +62,15 @@ export function ItemIcon({
 
 	return (
 		<View
-			className={`items-center justify-center overflow-hidden rounded-lg bg-surface-secondary ${container} ${className || ""}`}
+			className={cn(
+				"items-center",
+				"justify-center",
+				"overflow-hidden",
+				"rounded-lg",
+				"bg-surface-secondary",
+				container,
+				className || "",
+			)}
 		>
 			{faviconUrl ? (
 				<Image

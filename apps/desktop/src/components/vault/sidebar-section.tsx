@@ -3,6 +3,7 @@ import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
+	cn,
 } from "@bittery/ui";
 import {
 	IconChevronRightOutlineDuo18,
@@ -53,7 +54,12 @@ export function SidebarSection({
 			<div className="flex items-center justify-between gap-1 px-2 py-1">
 				<CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 py-1.5 font-semibold text-muted-foreground text-xs uppercase hover:bg-muted/50">
 					<IconChevronRightOutlineDuo18
-						className={`size-3 shrink-0 transition-transform ${isOpen ? "rotate-90" : ""}`}
+						className={cn(
+							"size-3",
+							"shrink-0",
+							"transition-transform",
+							isOpen ? "rotate-90" : "",
+						)}
 					/>
 					{icon && <span className="mr-0.5 shrink-0">{icon}</span>}
 					<span className="truncate">{title}</span>

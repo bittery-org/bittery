@@ -3,7 +3,7 @@ import {
 	generateTotp,
 	type TotpResult,
 } from "@bittery/shared/totp";
-import { Button, Card, copyWithToast, Label } from "@bittery/ui";
+import { Button, Card, cn, copyWithToast, Label } from "@bittery/ui";
 import { IconCopyOutlineDuo18 } from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
 import { Favicon } from "../favicon";
@@ -121,7 +121,11 @@ export function TotpDetail({
 									fill="none"
 									strokeWidth="3"
 									strokeLinecap="round"
-									className={`transition-all duration-300 ${getProgressColor()}`}
+									className={cn(
+										"transition-all",
+										"duration-300",
+										getProgressColor(),
+									)}
 									style={{
 										strokeDasharray: circumference,
 										strokeDashoffset: strokeDashoffset,

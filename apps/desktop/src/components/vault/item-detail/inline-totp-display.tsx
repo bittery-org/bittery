@@ -1,6 +1,6 @@
 import { generateTotp, type TotpResult } from "@bittery/shared/totp";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
-import { Button, copyWithToast } from "@bittery/ui";
+import { Button, cn, copyWithToast } from "@bittery/ui";
 import { IconCopyOutlineDuo18 } from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
 
@@ -88,7 +88,11 @@ export function InlineTotpDisplay({
 							fill="none"
 							strokeWidth="2.5"
 							strokeLinecap="round"
-							className={`transition-all duration-300 ${getProgressColor()}`}
+							className={cn(
+								"transition-all",
+								"duration-300",
+								getProgressColor(),
+							)}
 							style={{
 								strokeDasharray: circumference,
 								strokeDashoffset: strokeDashoffset,

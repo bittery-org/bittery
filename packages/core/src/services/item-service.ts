@@ -778,7 +778,9 @@ export class ItemService {
 			encryptionAlgorithm: encryptedData.algorithm,
 		})) as { itemId?: string; id?: string };
 
-		const itemId = result.itemId ?? result.id;
+		const fallbackId =
+			result.id && result.id !== input.vaultId ? result.id : undefined;
+		const itemId = result.itemId ?? fallbackId;
 		if (!itemId) {
 			throw new Error("Failed to create item");
 		}
@@ -907,7 +909,11 @@ export class ItemService {
 				id?: string;
 			};
 
-			const newItemId = createResult.itemId ?? createResult.id;
+			const fallbackId =
+				createResult.id && createResult.id !== input.targetVaultId
+					? createResult.id
+					: undefined;
+			const newItemId = createResult.itemId ?? fallbackId;
 			if (!newItemId) {
 				throw new Error("Failed to create item in target account");
 			}
