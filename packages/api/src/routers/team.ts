@@ -9,13 +9,20 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { isSelfHostedMode } from "../config/mode";
+import { resolveEffectiveEntitlements } from "../billing/entitlements";
+import { syncTeamSeatQuantity } from "../billing/stripe";
+import { getBitteryMode, isSelfHostedMode } from "../config/mode";
 import { protectedProcedure, publicProcedure, router } from "../index";
 import {
 	createPresignedUpload,
 	createTeamImageKey,
 	getStoragePublicUrl,
 } from "../storage/s3";
+import {
+	assertInvitationPendingVaultKeysAreAuthorized,
+	normalizePendingVaultKeys,
+	parsePendingVaultKeys,
+} from "../utils/pending-vault-keys";
 import { logAuditEvent } from "../utils/audit";
 
 /**
@@ -24,6 +31,43 @@ import { logAuditEvent } from "../utils/audit";
 function getTeamImageUrl(imageKey: string | null): string | null {
 	if (!imageKey) return null;
 	return getStoragePublicUrl(imageKey);
+}
+
+async function syncSeatsBestEffort(teamId: string, billingPlan: string) {
+	if (billingPlan !== "team") return;
+
+	try {
+		await syncTeamSeatQuantity(teamId);
+	} catch (error) {
+		console.error("Failed to sync Stripe seats:", error);
+	}
+}
+
+function assertTeamManagementEntitlement(teamData: {
+	id: string;
+	billingPlan: "free" | "personal" | "family" | "team";
+	billingStatus:
+		| "none"
+		| "incomplete"
+		| "trialing"
+		| "active"
+		| "past_due"
+		| "canceled"
+		| "unpaid";
+}) {
+	const entitlements = resolveEffectiveEntitlements({
+		mode: getBitteryMode(),
+		billingPlan: teamData.billingPlan,
+		billingStatus: teamData.billingStatus,
+	});
+
+	if (!entitlements.team_management) {
+		throw new TRPCError({
+			code: "FORBIDDEN",
+			message:
+				"Team management is only available on Family or Team plans with active billing.",
+		});
+	}
 }
 
 export const teamRouter = router({
@@ -333,6 +377,7 @@ export const teamRouter = router({
 			.mutation(async ({ ctx, input }) => {
 				const actor = await db.query.user.findFirst({
 					where: (member, { eq }) => eq(member.id, ctx.session.userId),
+					with: { team: true },
 				});
 
 				if (actor?.teamId !== input.teamId) {
@@ -347,6 +392,9 @@ export const teamRouter = router({
 						code: "FORBIDDEN",
 						message: "Insufficient permissions",
 					});
+				}
+				if (actor.team) {
+					assertTeamManagementEntitlement(actor.team);
 				}
 
 				if (ctx.session.userId === input.userId) {
@@ -410,6 +458,8 @@ export const teamRouter = router({
 					},
 				});
 
+				await syncSeatsBestEffort(input.teamId, actor.team?.billingPlan || "free");
+
 				return {
 					success: true,
 					warning: "rotate_shared_credentials",
@@ -427,6 +477,7 @@ export const teamRouter = router({
 			.mutation(async ({ ctx, input }) => {
 				const actor = await db.query.user.findFirst({
 					where: (member, { eq }) => eq(member.id, ctx.session.userId),
+					with: { team: true },
 				});
 
 				if (actor?.teamId !== input.teamId) {
@@ -441,6 +492,9 @@ export const teamRouter = router({
 						code: "FORBIDDEN",
 						message: "Only the team owner can permanently delete accounts",
 					});
+				}
+				if (actor.team) {
+					assertTeamManagementEntitlement(actor.team);
 				}
 
 				if (ctx.session.userId === input.userId) {
@@ -482,6 +536,8 @@ export const teamRouter = router({
 					},
 				});
 
+				await syncSeatsBestEffort(input.teamId, actor.team?.billingPlan || "free");
+
 				return { success: true };
 			}),
 	}),
@@ -495,6 +551,7 @@ export const teamRouter = router({
 			// Verify user has access to this team
 			const userData = await db.query.user.findFirst({
 				where: (user, { eq }) => eq(user.id, ctx.session.userId),
+				with: { team: true },
 			});
 
 			if (userData?.teamId !== input.teamId) {
@@ -509,6 +566,9 @@ export const teamRouter = router({
 					code: "FORBIDDEN",
 					message: "Insufficient permissions",
 				});
+			}
+			if (userData.team) {
+				assertTeamManagementEntitlement(userData.team);
 			}
 
 			// Get all vaults for this team
@@ -589,6 +649,7 @@ export const teamRouter = router({
 				// Verify user has access to this team
 				const userData = await db.query.user.findFirst({
 					where: (user, { eq }) => eq(user.id, ctx.session.userId),
+					with: { team: true },
 				});
 
 				if (userData?.teamId !== input.teamId) {
@@ -596,6 +657,9 @@ export const teamRouter = router({
 						code: "FORBIDDEN",
 						message: "You are not a member of this team",
 					});
+				}
+				if (userData?.team) {
+					assertTeamManagementEntitlement(userData.team);
 				}
 
 				const invitations = await db.query.teamInvitation.findMany({
@@ -630,15 +694,15 @@ export const teamRouter = router({
 					email: z.string().email(),
 					role: z.enum(["admin", "member"]).default("member"),
 					// Encrypted vault keys for existing users (encrypted with their RSA public key)
-					pendingVaultKeys: z
-						.array(
-							z.object({
-								vaultId: z.string(),
-								encryptedVaultKey: z.string(),
-							}),
-						)
-						.optional(),
-				}),
+						pendingVaultKeys: z
+							.array(
+								z.object({
+									vaultId: z.string().min(1),
+									encryptedVaultKey: z.string().min(1),
+								}),
+							)
+							.optional(),
+					}),
 			)
 			.mutation(async ({ ctx, input }) => {
 				// Verify user has owner or admin role in their team
@@ -661,12 +725,17 @@ export const teamRouter = router({
 					});
 				}
 
-				// Check team capacity (family teams have limits)
-				if (
-					userData.team &&
-					userData.team.type === "family" &&
-					userData.team.memberLimit
-				) {
+				if (!userData.team) {
+					throw new TRPCError({
+						code: "NOT_FOUND",
+						message: "Team not found",
+					});
+				}
+
+				assertTeamManagementEntitlement(userData.team);
+
+				// Check team capacity when a member limit is configured
+				if (userData.team.memberLimit) {
 					const currentMembers = await db.query.user.findMany({
 						where: (user, { eq }) => eq(user.teamId, input.teamId),
 					});
@@ -711,17 +780,26 @@ export const teamRouter = router({
 						),
 				});
 
-				if (existingInvitation) {
-					throw new TRPCError({
-						code: "BAD_REQUEST",
-						message: "An invitation is already pending for this email",
-					});
-				}
+					if (existingInvitation) {
+						throw new TRPCError({
+							code: "BAD_REQUEST",
+							message: "An invitation is already pending for this email",
+						});
+					}
 
-				const invitationId = nanoid();
-				const token = nanoid(32); // Longer token for security
-				const expiresAt = new Date();
-				expiresAt.setDate(expiresAt.getDate() + 7); // 7 days expiry
+					const normalizedPendingVaultKeys = normalizePendingVaultKeys(
+						input.pendingVaultKeys,
+					);
+					await assertInvitationPendingVaultKeysAreAuthorized({
+						teamId: input.teamId,
+						inviterId: ctx.session.userId,
+						pendingVaultKeys: normalizedPendingVaultKeys,
+					});
+
+					const invitationId = nanoid();
+					const token = nanoid(32); // Longer token for security
+					const expiresAt = new Date();
+					expiresAt.setDate(expiresAt.getDate() + 7); // 7 days expiry
 
 				await db.insert(teamInvitation).values({
 					id: invitationId,
@@ -729,13 +807,13 @@ export const teamRouter = router({
 					email: input.email,
 					role: input.role,
 					invitedById: ctx.session.userId,
-					token,
-					expiresAt,
-					// Store pending vault keys if provided (for existing users)
-					pendingVaultKeys: input.pendingVaultKeys
-						? JSON.stringify(input.pendingVaultKeys)
-						: null,
-				});
+						token,
+						expiresAt,
+						// Store pending vault keys if provided (for existing users)
+						pendingVaultKeys: normalizedPendingVaultKeys.length
+							? JSON.stringify(normalizedPendingVaultKeys)
+							: null,
+					});
 
 				// Return user's public key if they exist (so client can encrypt vault keys)
 				return {
@@ -753,6 +831,7 @@ export const teamRouter = router({
 			.mutation(async ({ ctx, input }) => {
 				const invitation = await db.query.teamInvitation.findFirst({
 					where: (inv, { eq }) => eq(inv.id, input.invitationId),
+					with: { team: true },
 				});
 
 				if (!invitation) {
@@ -762,22 +841,22 @@ export const teamRouter = router({
 					});
 				}
 
-				// Must be owner, admin, or the person who sent it
-				const userData = await db.query.user.findFirst({
-					where: (user, { eq }) => eq(user.id, ctx.session.userId),
-				});
-
-				const isInviter = invitation.invitedById === ctx.session.userId;
-				const isAdminOrOwner =
-					userData?.teamId === invitation.teamId &&
-					(userData?.role === "owner" || userData?.role === "admin");
-
-				if (!isInviter && !isAdminOrOwner) {
-					throw new TRPCError({
-						code: "FORBIDDEN",
-						message: "Insufficient permissions",
+					// Must be current owner/admin in the invitation team
+					const userData = await db.query.user.findFirst({
+						where: (user, { eq }) => eq(user.id, ctx.session.userId),
 					});
+
+					const isAdminOrOwner =
+						userData?.teamId === invitation.teamId &&
+						(userData?.role === "owner" || userData?.role === "admin");
+
+					if (!isAdminOrOwner) {
+						throw new TRPCError({
+							code: "FORBIDDEN",
+							message: "Insufficient permissions",
+						});
 				}
+				assertTeamManagementEntitlement(invitation.team);
 
 				await db
 					.delete(teamInvitation)
@@ -794,6 +873,7 @@ export const teamRouter = router({
 			.mutation(async ({ ctx, input }) => {
 				const invitation = await db.query.teamInvitation.findFirst({
 					where: (inv, { eq }) => eq(inv.id, input.invitationId),
+					with: { team: true },
 				});
 
 				if (!invitation) {
@@ -803,22 +883,23 @@ export const teamRouter = router({
 					});
 				}
 
-				// Must be owner, admin, or the person who sent it
-				const userData = await db.query.user.findFirst({
-					where: (user, { eq }) => eq(user.id, ctx.session.userId),
-				});
-
-				const isInviter = invitation.invitedById === ctx.session.userId;
-				const isAdminOrOwner =
-					userData?.teamId === invitation.teamId &&
-					(userData?.role === "owner" || userData?.role === "admin");
-
-				if (!isInviter && !isAdminOrOwner) {
-					throw new TRPCError({
-						code: "FORBIDDEN",
-						message: "Insufficient permissions",
+					// Must be current owner/admin in the invitation team
+					const userData = await db.query.user.findFirst({
+						where: (user, { eq }) => eq(user.id, ctx.session.userId),
 					});
+
+					const isAdminOrOwner =
+						userData?.teamId === invitation.teamId &&
+						(userData?.role === "owner" || userData?.role === "admin");
+
+					if (!isAdminOrOwner) {
+						throw new TRPCError({
+							code: "FORBIDDEN",
+							message: "Insufficient permissions",
+						});
 				}
+
+				assertTeamManagementEntitlement(invitation.team);
 
 				const newExpiry = new Date();
 				newExpiry.setDate(newExpiry.getDate() + 7);
@@ -906,6 +987,8 @@ export const teamRouter = router({
 					});
 				}
 
+				assertTeamManagementEntitlement(invitation.team);
+
 				// Verify the invitation is for this user's email
 				const userData = await db.query.user.findFirst({
 					where: (u, { eq }) => eq(u.id, ctx.session.userId),
@@ -919,75 +1002,58 @@ export const teamRouter = router({
 				}
 
 				// Check user doesn't already have a team
-				if (userData.teamId) {
-					throw new TRPCError({
-						code: "BAD_REQUEST",
-						message: "You already belong to a team",
+					if (userData.teamId) {
+						throw new TRPCError({
+							code: "BAD_REQUEST",
+							message: "You already belong to a team",
+						});
+					}
+
+					const pendingKeys = parsePendingVaultKeys(invitation.pendingVaultKeys);
+					await assertInvitationPendingVaultKeysAreAuthorized({
+						teamId: invitation.teamId,
+						inviterId: invitation.invitedById,
+						pendingVaultKeys: pendingKeys,
 					});
-				}
 
-				// Link user to team
-				await db
-					.update(user)
-					.set({ teamId: invitation.teamId, role: invitation.role })
-					.where(eq(user.id, ctx.session.userId));
+					// Convert invitation role to vault role
+					const vaultRole = invitation.role === "admin" ? "admin" : "member";
 
-				// Provision vault access if pendingVaultKeys were provided during invite
-				if (invitation.pendingVaultKeys) {
-					try {
-						const pendingKeys = JSON.parse(
-							invitation.pendingVaultKeys,
-						) as Array<{
-							vaultId: string;
-							encryptedVaultKey: string;
-						}>;
+					await db.transaction(async (tx) => {
+						// Link user to team
+						await tx
+							.update(user)
+							.set({ teamId: invitation.teamId, role: invitation.role })
+							.where(eq(user.id, ctx.session.userId));
 
-						// Convert invitation role to vault role
-						const vaultRole = invitation.role === "admin" ? "admin" : "member";
-
-						// Create vault key entries for each pending key
 						for (const keyData of pendingKeys) {
-							// Verify the vault belongs to this team
-							const vaultData = await db.query.vault.findFirst({
-								where: (v, { and, eq }) =>
+							// Skip duplicate provisioning if access already exists.
+							const existingKey = await tx.query.vaultKey.findFirst({
+								where: (vk, { and, eq }) =>
 									and(
-										eq(v.id, keyData.vaultId),
-										eq(v.teamId, invitation.teamId),
+										eq(vk.vaultId, keyData.vaultId),
+										eq(vk.userId, ctx.session.userId),
 									),
 							});
-
-							if (vaultData) {
-								// Check if user doesn't already have access
-								const existingKey = await db.query.vaultKey.findFirst({
-									where: (vk, { and, eq }) =>
-										and(
-											eq(vk.vaultId, keyData.vaultId),
-											eq(vk.userId, ctx.session.userId),
-										),
+							if (!existingKey) {
+								await tx.insert(vaultKey).values({
+									id: nanoid(),
+									vaultId: keyData.vaultId,
+									userId: ctx.session.userId,
+									encryptedVaultKey: keyData.encryptedVaultKey,
+									role: vaultRole,
 								});
-
-								if (!existingKey) {
-									await db.insert(vaultKey).values({
-										id: nanoid(),
-										vaultId: keyData.vaultId,
-										userId: ctx.session.userId,
-										encryptedVaultKey: keyData.encryptedVaultKey,
-										role: vaultRole,
-									});
-								}
 							}
 						}
-					} catch (e) {
-						// Log error but don't fail the invitation acceptance
-						console.error("Failed to provision vault keys:", e);
-					}
-				}
 
-				// Mark invitation as accepted
-				await db
-					.update(teamInvitation)
-					.set({ status: "accepted", acceptedAt: new Date() })
-					.where(eq(teamInvitation.id, invitation.id));
+						// Mark invitation as accepted
+						await tx
+							.update(teamInvitation)
+							.set({ status: "accepted", acceptedAt: new Date() })
+							.where(eq(teamInvitation.id, invitation.id));
+					});
+
+					await syncSeatsBestEffort(invitation.teamId, invitation.team.billingPlan);
 
 				return {
 					teamId: invitation.team.id,

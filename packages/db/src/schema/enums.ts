@@ -17,3 +17,22 @@ export const invitationStatusEnum = pgEnum("invitation_status", [
 	"declined",
 	"expired",
 ]);
+
+// Billing plans
+export const billingPlanEnum = pgEnum("billing_plan", [
+	"free",
+	"personal",
+	"family",
+	"team",
+]);
+
+// Billing status derived from Stripe subscription state
+export const billingStatusEnum = pgEnum("billing_status", [
+	"none",
+	"incomplete",
+	"trialing",
+	"active",
+	"past_due",
+	"canceled",
+	"unpaid",
+]);

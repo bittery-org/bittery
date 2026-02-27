@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import {
 	DeleteObjectCommand,
 	GetObjectCommand,
@@ -22,6 +22,9 @@ export interface PresignedUploadResult {
 }
 
 let client: S3Client | null = null;
+const ATTACHMENT_UPLOAD_KEY_TTL_MS = 15 * 60 * 1000;
+const ATTACHMENT_UPLOAD_KEY_PATTERN =
+	/^attachments\/([^/]+)\/([^/]+)\/(\d{13})-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-([A-Za-z0-9_-]{43})-([A-Za-z0-9._-]{1,120})$/i;
 
 function getStorageConfig(): StorageConfig {
 	const endpoint = process.env.BITTERY_STORAGE_ENDPOINT;
@@ -78,6 +81,23 @@ function sanitizeFileName(fileName: string): string {
 	return safe.slice(0, 120) || "image";
 }
 
+function getAttachmentUploadSigningSecret(): string {
+	const secret =
+		process.env.BITTERY_ATTACHMENT_UPLOAD_SECRET || process.env.JWT_SECRET;
+	if (!secret) {
+		throw new Error(
+			"Missing attachment upload signing secret. Set BITTERY_ATTACHMENT_UPLOAD_SECRET or JWT_SECRET.",
+		);
+	}
+	return secret;
+}
+
+function signAttachmentUploadIntent(payload: string): string {
+	return createHmac("sha256", getAttachmentUploadSigningSecret())
+		.update(payload)
+		.digest("base64url");
+}
+
 export function createVaultImageKey(params: {
 	userId: string;
 	vaultId?: string;
@@ -94,7 +114,43 @@ export function createAttachmentKey(params: {
 	fileName: string;
 }): string {
 	const safeName = sanitizeFileName(params.fileName);
-	return `attachments/${params.userId}/${params.itemId}/${randomUUID()}-${safeName}`;
+	const uploadId = randomUUID();
+	const expiresAtMs = Date.now() + ATTACHMENT_UPLOAD_KEY_TTL_MS;
+	const signature = signAttachmentUploadIntent(
+		`${params.userId}:${params.itemId}:${uploadId}:${expiresAtMs}`,
+	);
+
+	return `attachments/${params.userId}/${params.itemId}/${expiresAtMs}-${uploadId}-${signature}-${safeName}`;
+}
+
+export function isValidAttachmentUploadKey(params: {
+	key: string;
+	userId: string;
+	itemId: string;
+	now?: Date;
+}): boolean {
+	const match = ATTACHMENT_UPLOAD_KEY_PATTERN.exec(params.key);
+	if (!match) {
+		return false;
+	}
+
+	const [, keyUserId, keyItemId, expiresAtRaw, uploadId, signature] = match;
+	if (keyUserId !== params.userId || keyItemId !== params.itemId) {
+		return false;
+	}
+
+	const expiresAtMs = Number(expiresAtRaw);
+	if (!Number.isFinite(expiresAtMs)) {
+		return false;
+	}
+	if (expiresAtMs < (params.now?.getTime() ?? Date.now())) {
+		return false;
+	}
+
+	const expectedSignature = signAttachmentUploadIntent(
+		`${keyUserId}:${keyItemId}:${uploadId}:${expiresAtMs}`,
+	);
+	return signature === expectedSignature;
 }
 
 export function createTeamImageKey(params: {

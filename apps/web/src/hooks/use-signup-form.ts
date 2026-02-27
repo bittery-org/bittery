@@ -66,6 +66,7 @@ export function useSignupForm({
 		mutationFn: async (input: {
 			email: string;
 			name: string;
+			plan?: CloudPlanId;
 			secretKeyHint: string;
 			srpSalt: string;
 			srpVerifier: string;
@@ -96,6 +97,7 @@ export function useSignupForm({
 			return trpcClient.auth.signup.mutate({
 				email: input.email,
 				name: input.name,
+				plan: input.plan,
 				organizationName: input.organizationName,
 				secretKeyHint: input.secretKeyHint,
 				srpSalt: input.srpSalt,
@@ -107,12 +109,38 @@ export function useSignupForm({
 				encryptedVaultKey: input.encryptedVaultKey,
 			});
 		},
-		onSuccess: async (data) => {
+		onSuccess: async (data, variables) => {
 			// Store auth token and vault keys
 			await storage.storeAuthToken(data.token);
 			await storage.storeVaultKeys(data.vaultKeys);
 
 			toast.success("Account created successfully!");
+
+			if (
+				isCloudSelfServeSignup &&
+				!isInvitationSignup &&
+				variables.plan &&
+				variables.plan !== "free"
+			) {
+				try {
+					const checkout = await trpcClient.billing.createCheckoutSession.mutate({
+						plan: variables.plan,
+					});
+
+					if (checkout.url) {
+						window.location.href = checkout.url;
+						return;
+					}
+				} catch (error: any) {
+					toast.error(
+						error?.message ||
+							"Account created, but checkout could not be started. Open billing to continue.",
+					);
+					navigate({ to: "/billing" });
+					return;
+				}
+			}
+
 			// Invitation signup is accepted server-side.
 			if (isInvitationSignup) {
 				navigate({ to: "/team" });
@@ -133,7 +161,7 @@ export function useSignupForm({
 			email: "",
 			password: "",
 			name: "",
-			plan: "personal" as CloudPlanId,
+			plan: "free" as CloudPlanId,
 			organizationName: "",
 		},
 		onSubmit: async ({ value }) => {
@@ -208,6 +236,7 @@ export function useSignupForm({
 				const result = await signupMutation.mutateAsync({
 					email,
 					name: value.name,
+					plan: value.plan,
 					...(isCloudSelfServeSignup && value.plan === "team" && teamName
 						? { organizationName: teamName }
 						: {}),

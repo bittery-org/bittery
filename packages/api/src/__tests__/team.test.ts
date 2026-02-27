@@ -14,6 +14,8 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { db } from "@bittery/db";
+import { user } from "@bittery/db/schema/auth";
+import { eq } from "drizzle-orm";
 import { teamRouter } from "../routers/team";
 import {
 	addTeamMember,
@@ -230,7 +232,11 @@ describe("Team Router", () => {
 		test("should remove member, revoke team vault keys, and invalidate sessions", async () => {
 			const [{ userId: ownerId, caller }, { userId: memberId }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			await addTeamMember(teamId, memberId, "member");
 			const teamVaultId = await createTestVault(ownerId, {
 				type: "team",
@@ -264,7 +270,11 @@ describe("Team Router", () => {
 				setup(teamRouter),
 				setup(teamRouter),
 			]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			await addTeamMember(teamId, adminActorId, "admin");
 			await addTeamMember(teamId, adminTargetId, "admin");
 
@@ -280,7 +290,11 @@ describe("Team Router", () => {
 		test("should deny removing owner", async () => {
 			const [{ userId: ownerId }, { userId: adminId, caller: adminCaller }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			await addTeamMember(teamId, adminId, "admin");
 
 			await expect(
@@ -290,7 +304,11 @@ describe("Team Router", () => {
 
 		test("should deny removing yourself", async () => {
 			const { userId, caller } = await setup(teamRouter);
-			const teamId = await createTestTeam(userId);
+			const teamId = await createTestTeam(userId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 
 			await expect(caller.members.remove({ teamId, userId })).rejects.toThrow(
 				"You cannot remove yourself from the team",
@@ -302,7 +320,11 @@ describe("Team Router", () => {
 		test("should allow owner to permanently delete non-owner", async () => {
 			const [{ userId: ownerId, caller }, { userId: memberId }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			await addTeamMember(teamId, memberId, "member");
 			const sessionId = await createTestSession(memberId);
 
@@ -320,7 +342,11 @@ describe("Team Router", () => {
 		test("should deny admin from permanently deleting accounts", async () => {
 			const [{ userId: ownerId }, { userId: adminId, caller: adminCaller }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			await addTeamMember(teamId, adminId, "admin");
 
 			await expect(
@@ -334,7 +360,11 @@ describe("Team Router", () => {
 
 		test("should deny owner from deleting self", async () => {
 			const { userId, caller } = await setup(teamRouter);
-			const teamId = await createTestTeam(userId);
+			const teamId = await createTestTeam(userId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 
 			await expect(
 				caller.members.deleteAccount({
@@ -348,10 +378,14 @@ describe("Team Router", () => {
 		});
 	});
 
-	describe("invitations.send", () => {
+		describe("invitations.send", () => {
 		test("should create invitation for new email", async () => {
 			const { caller, userId } = await setup(teamRouter);
-			const teamId = await createTestTeam(userId);
+			const teamId = await createTestTeam(userId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			const inviteeEmail = generateTestEmail();
 
 			const result = await caller.invitations.send({
@@ -368,7 +402,11 @@ describe("Team Router", () => {
 		test("should return public key for existing user", async () => {
 			const [{ userId: ownerId, caller }, { email: existingEmail }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 
 			const result = await caller.invitations.send({
 				teamId,
@@ -384,7 +422,11 @@ describe("Team Router", () => {
 				{ userId: ownerId, caller },
 				{ userId: memberId, email: memberEmail },
 			] = await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			await addTeamMember(teamId, memberId, "member");
 
 			await expect(
@@ -396,9 +438,13 @@ describe("Team Router", () => {
 			).rejects.toThrow("This user already belongs to a team");
 		});
 
-		test("should reject duplicate pending invitation", async () => {
-			const { caller, userId } = await setup(teamRouter);
-			const teamId = await createTestTeam(userId);
+			test("should reject duplicate pending invitation", async () => {
+				const { caller, userId } = await setup(teamRouter);
+			const teamId = await createTestTeam(userId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			const inviteeEmail = generateTestEmail();
 
 			// First invitation
@@ -409,20 +455,93 @@ describe("Team Router", () => {
 			});
 
 			// Duplicate invitation
-			await expect(
-				caller.invitations.send({
+				await expect(
+					caller.invitations.send({
+						teamId,
+						email: inviteeEmail,
+						role: "member",
+					}),
+				).rejects.toThrow("An invitation is already pending for this email");
+			});
+
+			test("should reject pendingVaultKeys for vaults outside the invited team", async () => {
+				const [{ caller, userId }, { userId: otherOwnerId }] = await Promise.all([
+					setup(teamRouter),
+					setup(teamRouter),
+				]);
+				const teamId = await createTestTeam(userId, {
+					billingPlan: "family",
+					billingStatus: "active",
+					type: "family",
+				});
+				const otherTeamId = await createTestTeam(otherOwnerId, {
+					billingPlan: "family",
+					billingStatus: "active",
+					type: "family",
+				});
+				const foreignVaultId = await createTestVault(otherOwnerId, {
+					type: "team",
+					teamId: otherTeamId,
+				});
+
+				await expect(
+					caller.invitations.send({
+						teamId,
+						email: generateTestEmail(),
+						role: "member",
+						pendingVaultKeys: [
+							{
+								vaultId: foreignVaultId,
+								encryptedVaultKey: "encrypted-key",
+							},
+						],
+					}),
+				).rejects.toThrow("pendingVaultKeys contains vaults outside the invited team");
+			});
+
+			test("should reject pendingVaultKeys when inviter lacks vault admin rights", async () => {
+				const [{ userId: ownerId }, { userId: adminId, caller }] = await Promise.all([
+					setup(teamRouter),
+					setup(teamRouter),
+				]);
+				const teamId = await createTestTeam(ownerId, {
+					billingPlan: "family",
+					billingStatus: "active",
+					type: "family",
+				});
+				await addTeamMember(teamId, adminId, "admin");
+				const teamVaultId = await createTestVault(ownerId, {
+					type: "team",
 					teamId,
-					email: inviteeEmail,
-					role: "member",
-				}),
-			).rejects.toThrow("An invitation is already pending for this email");
+				});
+				await addVaultMember(teamVaultId, adminId, "read-only");
+
+				await expect(
+					caller.invitations.send({
+						teamId,
+						email: generateTestEmail(),
+						role: "member",
+						pendingVaultKeys: [
+							{
+								vaultId: teamVaultId,
+								encryptedVaultKey: "encrypted-key",
+							},
+						],
+					}),
+				).rejects.toThrow(
+					"You do not have permission to grant access for one or more vaults",
+				);
+			});
 		});
-	});
 
 	describe("invitations.list", () => {
 		test("should return pending invitations for a team", async () => {
 			const { caller, userId } = await setup(teamRouter);
-			const teamId = await createTestTeam(userId);
+			const teamId = await createTestTeam(userId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			await createTestInvitation(teamId, userId, "invite1@example.com");
 			await createTestInvitation(teamId, userId, "invite2@example.com");
 
@@ -476,7 +595,11 @@ describe("Team Router", () => {
 	describe("invitations.cancel", () => {
 		test("should allow inviter to cancel invitation", async () => {
 			const { caller, userId } = await setup(teamRouter);
-			const teamId = await createTestTeam(userId);
+			const teamId = await createTestTeam(userId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			const { invitationId } = await createTestInvitation(
 				teamId,
 				userId,
@@ -492,7 +615,11 @@ describe("Team Router", () => {
 	describe("invitations.resend", () => {
 		test("should reset expiration date", async () => {
 			const { caller, userId } = await setup(teamRouter);
-			const teamId = await createTestTeam(userId);
+			const teamId = await createTestTeam(userId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			const { invitationId } = await createTestInvitation(
 				teamId,
 				userId,
@@ -510,7 +637,12 @@ describe("Team Router", () => {
 		test("should return pending invitations for current user", async () => {
 			const [{ userId: ownerId }, { email: inviteeEmail, caller }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId, { name: "Inviting Team" });
+			const teamId = await createTestTeam(ownerId, {
+				name: "Inviting Team",
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			await createTestInvitation(teamId, ownerId, inviteeEmail, {
 				role: "member",
 			});
@@ -528,7 +660,12 @@ describe("Team Router", () => {
 				{ userId: ownerId },
 				{ userId: inviteeId, email: inviteeEmail, caller },
 			] = await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId, { name: "Join Me" });
+			const teamId = await createTestTeam(ownerId, {
+				name: "Join Me",
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			const { token } = await createTestInvitation(
 				teamId,
 				ownerId,
@@ -548,7 +685,11 @@ describe("Team Router", () => {
 		test("should reject expired invitation", async () => {
 			const [{ userId: ownerId }, { email: inviteeEmail, caller }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			const { token } = await createTestInvitation(
 				teamId,
 				ownerId,
@@ -566,7 +707,11 @@ describe("Team Router", () => {
 				setup(teamRouter),
 				setup(teamRouter),
 			]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			const { token } = await createTestInvitation(
 				teamId,
 				ownerId,
@@ -582,7 +727,11 @@ describe("Team Router", () => {
 	describe("vaults", () => {
 		test("should return team vaults for owner", async () => {
 			const { caller, userId } = await setup(teamRouter);
-			const teamId = await createTestTeam(userId);
+			const teamId = await createTestTeam(userId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			await createTestVault(userId, { name: "Team Vault", teamId });
 
 			const result = await caller.vaults({ teamId });
@@ -596,7 +745,11 @@ describe("Team Router", () => {
 				setup(teamRouter),
 				setup(teamRouter),
 			]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 
 			await expect(caller.vaults({ teamId })).rejects.toThrow(
 				"You are not a member of this team",
@@ -606,7 +759,11 @@ describe("Team Router", () => {
 		test("should deny access to regular members", async () => {
 			const [{ userId: ownerId }, { userId: memberId, caller }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			await addTeamMember(teamId, memberId, "member");
 
 			await expect(caller.vaults({ teamId })).rejects.toThrow(
@@ -616,7 +773,11 @@ describe("Team Router", () => {
 
 		test("should include encrypted vault keys for the requesting user", async () => {
 			const { caller, userId } = await setup(teamRouter);
-			const teamId = await createTestTeam(userId);
+			const teamId = await createTestTeam(userId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			await createTestVault(userId, { teamId });
 
 			const result = await caller.vaults({ teamId });
@@ -643,7 +804,11 @@ describe("Team Router", () => {
 		test("should deny non-owner/admin from sending invitations", async () => {
 			const [{ userId: ownerId }, { userId: memberId, caller }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			await addTeamMember(teamId, memberId, "member");
 
 			await expect(
@@ -656,13 +821,17 @@ describe("Team Router", () => {
 		});
 	});
 
-	describe("invitations.accept - edge cases", () => {
-		test("should reject if user already belongs to a team", async () => {
+		describe("invitations.accept - edge cases", () => {
+			test("should reject if user already belongs to a team", async () => {
 			const [
 				{ userId: ownerId },
 				{ userId: inviteeId, email: inviteeEmail, caller },
 			] = await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			const { token } = await createTestInvitation(
 				teamId,
 				ownerId,
@@ -672,17 +841,62 @@ describe("Team Router", () => {
 			// Give invitee their own team first
 			await createTestTeam(inviteeId, { name: "Already Has Team" });
 
-			await expect(caller.invitations.accept({ token })).rejects.toThrow(
-				"You already belong to a team",
-			);
-		});
-	});
+				await expect(caller.invitations.accept({ token })).rejects.toThrow(
+					"You already belong to a team",
+				);
+			});
 
-	describe("invitations.cancel - edge cases", () => {
-		test("should deny non-inviter non-admin from cancelling", async () => {
+			test("should reject invitation with unauthorized pendingVaultKeys and leave membership unchanged", async () => {
+				const [
+					{ userId: ownerId },
+					{ userId: inviteeId, email: inviteeEmail, caller },
+					{ userId: otherOwnerId },
+				] = await Promise.all([
+					setup(teamRouter),
+					setup(teamRouter),
+					setup(teamRouter),
+				]);
+				const teamId = await createTestTeam(ownerId, {
+					billingPlan: "family",
+					billingStatus: "active",
+					type: "family",
+				});
+				const otherTeamId = await createTestTeam(otherOwnerId, {
+					billingPlan: "family",
+					billingStatus: "active",
+					type: "family",
+				});
+				const foreignVaultId = await createTestVault(otherOwnerId, {
+					type: "team",
+					teamId: otherTeamId,
+				});
+				const { token } = await createTestInvitation(teamId, ownerId, inviteeEmail, {
+					pendingVaultKeys: JSON.stringify([
+						{
+							vaultId: foreignVaultId,
+							encryptedVaultKey: "malicious-key",
+						},
+					]),
+				});
+
+				await expect(caller.invitations.accept({ token })).rejects.toThrow(
+					"pendingVaultKeys contains vaults outside the invited team",
+				);
+
+				const invitee = await getUser(inviteeId);
+				expect(invitee?.teamId).toBeNull();
+			});
+		});
+
+		describe("invitations.cancel - edge cases", () => {
+			test("should deny non-inviter non-admin from cancelling", async () => {
 			const [{ userId: ownerId }, { userId: memberId, caller }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			await addTeamMember(teamId, memberId, "member");
 			const { invitationId } = await createTestInvitation(
 				teamId,
@@ -690,17 +904,46 @@ describe("Team Router", () => {
 				"someone@example.com",
 			);
 
-			await expect(caller.invitations.cancel({ invitationId })).rejects.toThrow(
-				"Insufficient permissions",
-			);
-		});
-	});
+				await expect(caller.invitations.cancel({ invitationId })).rejects.toThrow(
+					"Insufficient permissions",
+				);
+			});
 
-	describe("invitations.resend - edge cases", () => {
-		test("should deny non-inviter non-admin from resending", async () => {
+			test("should deny inviter after they lose team membership", async () => {
+				const [{ userId: ownerId }, { userId: inviterId, caller }] =
+					await Promise.all([setup(teamRouter), setup(teamRouter)]);
+				const teamId = await createTestTeam(ownerId, {
+					billingPlan: "family",
+					billingStatus: "active",
+					type: "family",
+				});
+				await addTeamMember(teamId, inviterId, "admin");
+				const { invitationId } = await createTestInvitation(
+					teamId,
+					inviterId,
+					"someone@example.com",
+				);
+
+				await db
+					.update(user)
+					.set({ teamId: null, role: "member" })
+					.where(eq(user.id, inviterId));
+
+				await expect(caller.invitations.cancel({ invitationId })).rejects.toThrow(
+					"Insufficient permissions",
+				);
+			});
+		});
+
+		describe("invitations.resend - edge cases", () => {
+			test("should deny non-inviter non-admin from resending", async () => {
 			const [{ userId: ownerId }, { userId: memberId, caller }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			await addTeamMember(teamId, memberId, "member");
 			const { invitationId } = await createTestInvitation(
 				teamId,
@@ -708,11 +951,36 @@ describe("Team Router", () => {
 				"someone@example.com",
 			);
 
-			await expect(caller.invitations.resend({ invitationId })).rejects.toThrow(
-				"Insufficient permissions",
-			);
+				await expect(caller.invitations.resend({ invitationId })).rejects.toThrow(
+					"Insufficient permissions",
+				);
+			});
+
+			test("should deny inviter resend after they lose team membership", async () => {
+				const [{ userId: ownerId }, { userId: inviterId, caller }] =
+					await Promise.all([setup(teamRouter), setup(teamRouter)]);
+				const teamId = await createTestTeam(ownerId, {
+					billingPlan: "family",
+					billingStatus: "active",
+					type: "family",
+				});
+				await addTeamMember(teamId, inviterId, "admin");
+				const { invitationId } = await createTestInvitation(
+					teamId,
+					inviterId,
+					"someone@example.com",
+				);
+
+				await db
+					.update(user)
+					.set({ teamId: null, role: "member" })
+					.where(eq(user.id, inviterId));
+
+				await expect(caller.invitations.resend({ invitationId })).rejects.toThrow(
+					"Insufficient permissions",
+				);
+			});
 		});
-	});
 
 	describe("invitations.decline", () => {
 		test("should decline invitation", async () => {
@@ -720,7 +988,11 @@ describe("Team Router", () => {
 				{ userId: ownerId },
 				{ userId: inviteeId, email: inviteeEmail, caller },
 			] = await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 			const { token } = await createTestInvitation(
 				teamId,
 				ownerId,

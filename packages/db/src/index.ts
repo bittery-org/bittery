@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as authSchema from "./schema/auth";
+import * as billingSchema from "./schema/billing";
 import * as enumsSchema from "./schema/enums";
 import * as sharingSchema from "./schema/sharing";
 import * as syncSchema from "./schema/sync";
@@ -10,6 +11,7 @@ export const db = drizzle(process.env.DATABASE_URL || "", {
 	schema: {
 		...enumsSchema,
 		...authSchema,
+		...billingSchema,
 		...vaultSchema,
 		...teamSchema,
 		...sharingSchema,
@@ -18,6 +20,7 @@ export const db = drizzle(process.env.DATABASE_URL || "", {
 });
 
 export * from "./schema/auth";
+export * from "./schema/billing";
 export * from "./schema/enums";
 export * from "./schema/sharing";
 export * from "./schema/sync";

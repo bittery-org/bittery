@@ -8,9 +8,15 @@ import {
 	vaultKeyRotation,
 } from "@bittery/db/schema/vault";
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import {
+	type EntitlementKey,
+	resolveEffectiveEntitlementLimits,
+	resolveEffectiveEntitlements,
+} from "../billing/entitlements";
+import { getBitteryMode } from "../config/mode";
 import { protectedProcedure, router } from "../index";
 import {
 	createAttachmentKey,
@@ -19,6 +25,7 @@ import {
 	createVaultImageKey,
 	deleteObject,
 	getStoragePublicUrl,
+	isValidAttachmentUploadKey,
 } from "../storage/s3";
 import {
 	broadcastSyncPayload,
@@ -27,6 +34,63 @@ import {
 	type SyncBroadcastPayload,
 } from "../sync-helper";
 import { logAuditEvent } from "../utils/audit";
+
+async function assertUserEntitlement(
+	userId: string,
+	entitlement: EntitlementKey,
+	message: string,
+) {
+	const userData = await db.query.user.findFirst({
+		where: (user, { eq: eqFn }) => eqFn(user.id, userId),
+		with: { team: true },
+	});
+	const mode = getBitteryMode();
+
+	// In cloud mode, fail closed for orphaned users with no team linkage.
+	if (!userData?.team) {
+		if (mode === "self-hosted") {
+			return;
+		}
+		throw new TRPCError({
+			code: "FORBIDDEN",
+			message,
+		});
+	}
+
+	const entitlements = resolveEffectiveEntitlements({
+		mode,
+		billingPlan: userData.team.billingPlan,
+		billingStatus: userData.team.billingStatus,
+	});
+
+	if (!entitlements[entitlement]) {
+		throw new TRPCError({
+			code: "FORBIDDEN",
+			message,
+		});
+	}
+}
+
+async function canUseAttachments(userId: string): Promise<boolean> {
+	const userData = await db.query.user.findFirst({
+		where: (user, { eq: eqFn }) => eqFn(user.id, userId),
+		with: { team: true },
+	});
+	const mode = getBitteryMode();
+
+	// In cloud mode, fail closed for orphaned users with no team linkage.
+	if (!userData?.team) {
+		return mode === "self-hosted";
+	}
+
+	const entitlements = resolveEffectiveEntitlements({
+		mode,
+		billingPlan: userData.team.billingPlan,
+		billingStatus: userData.team.billingStatus,
+	});
+
+	return entitlements.attachments;
+}
 
 export const vaultRouter = router({
 	/**
@@ -161,31 +225,74 @@ export const vaultRouter = router({
 				imageKey: z.string().min(1).optional(),
 				clientId: z.string().optional(), // For sync event correlation
 			}),
-		)
-		.mutation(async ({ input, ctx }) => {
-			const vaultId = nanoid();
-			let teamId: string | null = null;
+			)
+			.mutation(async ({ input, ctx }) => {
+				const vaultId = nanoid();
+				let teamId: string | null = null;
+				let sharedVaultLimit: number | null = null;
 
 			if (input.type === "team") {
 				const currentUser = await db.query.user.findFirst({
 					where: (member, { eq }) => eq(member.id, ctx.session.userId),
 					columns: { teamId: true },
+					with: { team: true },
 				});
 
-				if (!currentUser?.teamId) {
+				if (!currentUser?.teamId || !currentUser.team) {
 					throw new TRPCError({
 						code: "BAD_REQUEST",
 						message: "You must belong to a team to create a team vault",
 					});
 				}
+				const currentTeamId = currentUser.teamId;
 
-				teamId = currentUser.teamId;
-			}
+				const entitlements = resolveEffectiveEntitlements({
+					mode: getBitteryMode(),
+					billingPlan: currentUser.team.billingPlan,
+					billingStatus: currentUser.team.billingStatus,
+				});
+				if (!entitlements.vault_sharing) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message:
+							"Shared vaults are only available on Family or Team plans with active billing.",
+					});
+				}
 
-			let broadcast: SyncBroadcastPayload;
-			await db.transaction(async (tx) => {
-				// Create vault
-				await tx.insert(vault).values({
+					const limits = resolveEffectiveEntitlementLimits(
+						{
+							mode: getBitteryMode(),
+							billingPlan: currentUser.team.billingPlan,
+							billingStatus: currentUser.team.billingStatus,
+						},
+						entitlements,
+					);
+					sharedVaultLimit = limits.shared_vaults;
+
+					teamId = currentTeamId;
+				}
+
+				let broadcast: SyncBroadcastPayload;
+				await db.transaction(async (tx) => {
+					if (input.type === "team" && teamId && sharedVaultLimit !== null) {
+						await tx.execute(
+							sql`SELECT pg_advisory_xact_lock(hashtext(${`shared-vaults:${teamId}`}))`,
+						);
+						const sharedVaultCount = await tx
+							.select({ count: sql<number>`count(*)::int` })
+							.from(vault)
+							.where(and(eq(vault.teamId, teamId), eq(vault.type, "team")));
+
+						if ((sharedVaultCount[0]?.count ?? 0) >= sharedVaultLimit) {
+							throw new TRPCError({
+								code: "FORBIDDEN",
+								message: `Your current plan allows up to ${sharedVaultLimit} shared vaults. Upgrade to add more.`,
+							});
+						}
+					}
+
+					// Create vault
+					await tx.insert(vault).values({
 					id: vaultId,
 					name: input.name,
 					type: input.type,
@@ -453,6 +560,8 @@ export const vaultRouter = router({
 				throw new Error("Access denied to this vault");
 			}
 
+			const attachmentsEnabled = await canUseAttachments(ctx.session.userId);
+
 			// Get items (exclude soft-deleted), include attachment metadata
 			const items = await db.query.item.findMany({
 				where: (item, { and, eq, isNull }) =>
@@ -461,7 +570,10 @@ export const vaultRouter = router({
 				with: { attachments: true },
 			});
 
-			return items;
+			if (attachmentsEnabled) {
+				return items;
+			}
+			return items.map((vaultItem) => ({ ...vaultItem, attachments: [] }));
 		}),
 
 	/**
@@ -469,6 +581,8 @@ export const vaultRouter = router({
 	 * Returns items with vault metadata and encrypted vault keys
 	 */
 	listAllItems: protectedProcedure.query(async ({ ctx }) => {
+		const attachmentsEnabled = await canUseAttachments(ctx.session.userId);
+
 		// Get all vaults the user has access to
 		const userVaults = await db.query.vaultKey.findMany({
 			where: (vaultKey, { eq }) => eq(vaultKey.userId, ctx.session.userId),
@@ -515,6 +629,7 @@ export const vaultRouter = router({
 			const vaultMeta = vaultMap.get(item.vaultId)!;
 			return {
 				...item,
+				attachments: attachmentsEnabled ? item.attachments : [],
 				vault: vaultMeta,
 			};
 		});
@@ -582,6 +697,8 @@ export const vaultRouter = router({
 			}),
 		)
 		.query(async ({ input, ctx }) => {
+			const attachmentsEnabled = await canUseAttachments(ctx.session.userId);
+
 			// Get the item first (include attachments so they're cached alongside the item)
 			const existingItem = await db.query.item.findFirst({
 				where: (item, { eq }) => eq(item.id, input.itemId),
@@ -605,7 +722,13 @@ export const vaultRouter = router({
 				throw new Error("Access denied");
 			}
 
-			return existingItem;
+			if (attachmentsEnabled) {
+				return existingItem;
+			}
+			return {
+				...existingItem,
+				attachments: [],
+			};
 		}),
 
 	/**
@@ -1351,6 +1474,12 @@ export const vaultRouter = router({
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
+			await assertUserEntitlement(
+				ctx.session.userId,
+				"attachments",
+				"Attachments are only available on paid plans with active billing.",
+			);
+
 			// Verify user has access to the item's vault
 			const existingItem = await db.query.item.findFirst({
 				where: (i, { eq }) => eq(i.id, input.itemId),
@@ -1398,6 +1527,12 @@ export const vaultRouter = router({
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
+			await assertUserEntitlement(
+				ctx.session.userId,
+				"attachments",
+				"Attachments are only available on paid plans with active billing.",
+			);
+
 			const existingItem = await db.query.item.findFirst({
 				where: (i, { eq }) => eq(i.id, input.itemId),
 			});
@@ -1414,12 +1549,25 @@ export const vaultRouter = router({
 					),
 			});
 
-			if (!userVaultKey || userVaultKey.role === "read-only") {
-				throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
-			}
+				if (!userVaultKey || userVaultKey.role === "read-only") {
+					throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
+				}
 
-			const attachmentId = nanoid();
-			let broadcast: SyncBroadcastPayload;
+				if (
+					!isValidAttachmentUploadKey({
+						key: input.storageKey,
+						userId: ctx.session.userId,
+						itemId: input.itemId,
+					})
+				) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "Invalid or expired attachment upload key",
+					});
+				}
+
+				const attachmentId = nanoid();
+				let broadcast: SyncBroadcastPayload;
 			await db.transaction(async (tx) => {
 				await tx.insert(itemAttachment).values({
 					id: attachmentId,
@@ -1459,6 +1607,12 @@ export const vaultRouter = router({
 	listAttachments: protectedProcedure
 		.input(z.object({ itemId: z.string() }))
 		.query(async ({ input, ctx }) => {
+			await assertUserEntitlement(
+				ctx.session.userId,
+				"attachments",
+				"Attachments are only available on paid plans with active billing.",
+			);
+
 			const existingItem = await db.query.item.findFirst({
 				where: (i, { eq }) => eq(i.id, input.itemId),
 			});
@@ -1493,6 +1647,12 @@ export const vaultRouter = router({
 	getAttachmentDownloadUrl: protectedProcedure
 		.input(z.object({ attachmentId: z.string() }))
 		.mutation(async ({ input, ctx }) => {
+			await assertUserEntitlement(
+				ctx.session.userId,
+				"attachments",
+				"Attachments are only available on paid plans with active billing.",
+			);
+
 			const attachment = await db.query.itemAttachment.findFirst({
 				where: (a, { eq }) => eq(a.id, input.attachmentId),
 			});
@@ -1546,6 +1706,12 @@ export const vaultRouter = router({
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
+			await assertUserEntitlement(
+				ctx.session.userId,
+				"attachments",
+				"Attachments are only available on paid plans with active billing.",
+			);
+
 			const attachment = await db.query.itemAttachment.findFirst({
 				where: (a, { eq }) => eq(a.id, input.attachmentId),
 			});
@@ -1604,6 +1770,12 @@ export const vaultRouter = router({
 	deleteAttachment: protectedProcedure
 		.input(z.object({ attachmentId: z.string() }))
 		.mutation(async ({ input, ctx }) => {
+			await assertUserEntitlement(
+				ctx.session.userId,
+				"attachments",
+				"Attachments are only available on paid plans with active billing.",
+			);
+
 			const attachment = await db.query.itemAttachment.findFirst({
 				where: (a, { eq }) => eq(a.id, input.attachmentId),
 			});
@@ -1615,35 +1787,33 @@ export const vaultRouter = router({
 				});
 			}
 
-			const userVaultKey = await db.query.vaultKey.findFirst({
-				where: (vk, { and, eq }) =>
-					and(
-						eq(vk.vaultId, attachment.vaultId),
-						eq(vk.userId, ctx.session.userId),
-					),
-			});
+				const userVaultKey = await db.query.vaultKey.findFirst({
+					where: (vk, { and, eq }) =>
+						and(
+							eq(vk.vaultId, attachment.vaultId),
+							eq(vk.userId, ctx.session.userId),
+						),
+				});
 
-			if (
-				!userVaultKey ||
-				!["owner", "admin", "member"].includes(userVaultKey.role)
-			) {
-				// Members who uploaded can delete their own; owners/admins can delete any
-				if (
-					userVaultKey?.role === "member" &&
-					attachment.uploadedBy !== ctx.session.userId
-				) {
-					throw new TRPCError({
-						code: "FORBIDDEN",
-						message: "You can only delete your own attachments",
-					});
-				}
 				if (!userVaultKey) {
 					throw new TRPCError({
 						code: "FORBIDDEN",
 						message: "Access denied",
 					});
 				}
-			}
+				if (userVaultKey.role === "member") {
+					if (attachment.uploadedBy !== ctx.session.userId) {
+						throw new TRPCError({
+							code: "FORBIDDEN",
+							message: "You can only delete your own attachments",
+						});
+					}
+				} else if (!["owner", "admin"].includes(userVaultKey.role)) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Access denied",
+					});
+				}
 
 			// Delete from S3 first (not transactional), then DB + sync event atomically
 			await deleteObject(attachment.storageKey);
@@ -1721,6 +1891,12 @@ export const vaultRouter = router({
 				}),
 			)
 			.mutation(async ({ ctx, input }) => {
+				await assertUserEntitlement(
+					ctx.session.userId,
+					"vault_sharing",
+					"Shared vault management is only available on Family or Team plans with active billing.",
+				);
+
 				// Check user has admin/owner access
 				const userVaultKey = await db.query.vaultKey.findFirst({
 					where: (vk, { and, eq }) =>
@@ -1821,6 +1997,12 @@ export const vaultRouter = router({
 				}),
 			)
 			.mutation(async ({ ctx, input }) => {
+				await assertUserEntitlement(
+					ctx.session.userId,
+					"vault_sharing",
+					"Shared vault management is only available on Family or Team plans with active billing.",
+				);
+
 				// Check user has admin/owner access
 				const userVaultKey = await db.query.vaultKey.findFirst({
 					where: (vk, { and, eq }) =>
@@ -2106,6 +2288,12 @@ export const vaultRouter = router({
 				}),
 			)
 			.query(async ({ ctx, input }) => {
+				await assertUserEntitlement(
+					ctx.session.userId,
+					"vault_sharing",
+					"Shared vault management is only available on Family or Team plans with active billing.",
+				);
+
 				// Check user has admin/owner access
 				const userVaultKey = await db.query.vaultKey.findFirst({
 					where: (vk, { and, eq }) =>
@@ -2160,6 +2348,12 @@ export const vaultRouter = router({
 		lookupUser: protectedProcedure
 			.input(z.object({ email: z.string().email() }))
 			.query(async ({ ctx, input }) => {
+				await assertUserEntitlement(
+					ctx.session.userId,
+					"vault_sharing",
+					"Shared vault management is only available on Family or Team plans with active billing.",
+				);
+
 				// Don't allow looking up yourself
 				const currentUser = await db.query.user.findFirst({
 					where: (u, { eq }) => eq(u.id, ctx.session.userId),
@@ -2206,6 +2400,12 @@ export const vaultRouter = router({
 				}),
 			)
 			.mutation(async ({ ctx, input }) => {
+				await assertUserEntitlement(
+					ctx.session.userId,
+					"vault_sharing",
+					"Shared vault management is only available on Family or Team plans with active billing.",
+				);
+
 				// Check user has admin/owner access
 				const userVaultKey = await db.query.vaultKey.findFirst({
 					where: (vk, { and, eq }) =>
@@ -2213,6 +2413,9 @@ export const vaultRouter = router({
 							eq(vk.vaultId, input.vaultId),
 							eq(vk.userId, ctx.session.userId),
 						),
+					with: {
+						vault: true,
+					},
 				});
 
 				if (!userVaultKey || !["owner", "admin"].includes(userVaultKey.role)) {

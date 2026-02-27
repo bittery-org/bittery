@@ -47,11 +47,18 @@ import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { resolveEffectiveEntitlements } from "../billing/entitlements";
+import { mapPlanToTeamType, planMemberLimits } from "../billing/plans";
+import { syncTeamSeatQuantity } from "../billing/stripe";
 import { getBitteryMode, isSelfHostedMode } from "../config/mode";
 import { protectedProcedure, publicProcedure, router } from "../index";
 import { getStoragePublicUrl } from "../storage/s3";
 import { logAuditEvent } from "../utils/audit";
 import { parseUserAgent } from "../utils/device";
+import {
+	assertInvitationPendingVaultKeysAreAuthorized,
+	parsePendingVaultKeys,
+} from "../utils/pending-vault-keys";
 
 /**
  * Helper function to get team avatar URL from imageKey
@@ -134,6 +141,7 @@ export const authRouter = router({
 			z.object({
 				email: z.string().email().max(255),
 				name: z.string().min(2),
+				plan: z.enum(["free", "personal", "family", "team"]).optional(),
 				organizationName: z.string().optional(),
 				secretKeyHint: z.string(),
 				srpSalt: z.string(),
@@ -170,16 +178,14 @@ export const authRouter = router({
 			}
 
 			// Determine team configuration by deployment mode
-			const isOrganization = !!input.organizationName;
+			const selectedPlan = selfHostedMode ? "free" : input.plan || "personal";
 			const teamType = selfHostedMode
 				? "organization"
-				: isOrganization
-					? "organization"
-					: "personal";
+				: mapPlanToTeamType(selectedPlan);
 			const teamName = selfHostedMode
 				? input.organizationName?.trim() || "Bittery Instance"
 				: input.organizationName || "My Team";
-			const memberLimit = selfHostedMode ? null : isOrganization ? null : 1;
+			const memberLimit = selfHostedMode ? null : planMemberLimits[selectedPlan];
 
 			// Create user first (without team)
 			const userId = await createUser({
@@ -202,6 +208,8 @@ export const authRouter = router({
 				ownerId: userId,
 				type: teamType,
 				memberLimit,
+				billingPlan: selectedPlan,
+				billingStatus: selectedPlan === "free" ? "none" : "incomplete",
 			});
 
 			// Link user to team
@@ -315,6 +323,19 @@ export const authRouter = router({
 				});
 			}
 
+			const invitationEntitlements = resolveEffectiveEntitlements({
+				mode: getBitteryMode(),
+				billingPlan: invitation.team.billingPlan,
+				billingStatus: invitation.team.billingStatus,
+			});
+			if (!invitationEntitlements.team_management) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message:
+						"This team cannot accept invitations on its current plan or billing status.",
+				});
+			}
+
 			// Check expiry
 			if (invitation.expiresAt < new Date()) {
 				throw new TRPCError({
@@ -340,22 +361,29 @@ export const authRouter = router({
 				});
 			}
 
-			// Check team capacity (family teams have limits)
-			if (invitation.team.type === "family" && invitation.team.memberLimit) {
-				const currentMembers = await db.query.user.findMany({
-					where: (user, { eq }) => eq(user.teamId, invitation.teamId),
-				});
+			// Check team capacity when a member limit is configured
+				if (invitation.team.memberLimit) {
+					const currentMembers = await db.query.user.findMany({
+						where: (user, { eq }) => eq(user.teamId, invitation.teamId),
+					});
 
 				if (currentMembers.length >= invitation.team.memberLimit) {
 					throw new TRPCError({
 						code: "BAD_REQUEST",
 						message: "Team has reached member limit",
-					});
+						});
+					}
 				}
-			}
 
-			// 2. Create user account
-			const userId = await createUser({
+				const pendingKeys = parsePendingVaultKeys(invitation.pendingVaultKeys);
+				await assertInvitationPendingVaultKeysAreAuthorized({
+					teamId: invitation.teamId,
+					inviterId: invitation.invitedById,
+					pendingVaultKeys: pendingKeys,
+				});
+
+				// 2. Create user account
+				const userId = await createUser({
 				email: normalizedEmail,
 				name: input.name,
 				secretKeyHint: input.secretKeyHint,
@@ -391,14 +419,8 @@ export const authRouter = router({
 				role: "owner",
 			});
 
-			// 3. Grant shared vault access if pendingVaultKeys were provided
-			if (invitation.pendingVaultKeys) {
-				try {
-					const pendingKeys = JSON.parse(invitation.pendingVaultKeys) as Array<{
-						vaultId: string;
-						encryptedVaultKey: string;
-					}>;
-
+				// 3. Grant shared vault access if pendingVaultKeys were provided
+				if (pendingKeys.length > 0) {
 					// Convert invitation role to vault role
 					const vaultRole = invitation.role === "admin" ? "admin" : "member";
 
@@ -412,16 +434,21 @@ export const authRouter = router({
 							role: vaultRole,
 						});
 					}
-				} catch (e) {
-					console.error("Failed to provision vault keys:", e);
 				}
-			}
 
 			// 4. Mark invitation as accepted
 			await db
 				.update(teamInvitation)
 				.set({ status: "accepted", acceptedAt: new Date() })
 				.where(eq(teamInvitation.id, invitation.id));
+
+			if (invitation.team.billingPlan === "team") {
+				try {
+					await syncTeamSeatQuantity(invitation.teamId);
+				} catch (error) {
+					console.error("Failed to sync Stripe seats after invited signup:", error);
+				}
+			}
 
 			// Parse device info from context
 			const deviceInfo = parseUserAgent(ctx.device.userAgent);

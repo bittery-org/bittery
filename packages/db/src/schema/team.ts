@@ -8,7 +8,13 @@ import {
 	timestamp,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth";
-import { invitationStatusEnum, teamRoleEnum, teamTypeEnum } from "./enums";
+import {
+	billingPlanEnum,
+	billingStatusEnum,
+	invitationStatusEnum,
+	teamRoleEnum,
+	teamTypeEnum,
+} from "./enums";
 import { vault } from "./vault";
 
 export const team = pgTable("team", {
@@ -19,6 +25,15 @@ export const team = pgTable("team", {
 		.references(() => user.id, { onDelete: "cascade" }),
 	type: teamTypeEnum("type").default("personal").notNull(),
 	memberLimit: integer("member_limit"), // NULL = unlimited
+	billingPlan: billingPlanEnum("billing_plan").default("free").notNull(),
+	billingStatus: billingStatusEnum("billing_status").default("none").notNull(),
+	stripeCustomerId: text("stripe_customer_id").unique(),
+	stripeSubscriptionId: text("stripe_subscription_id").unique(),
+	stripeSubscriptionItemId: text("stripe_subscription_item_id"),
+	stripePriceId: text("stripe_price_id"),
+	seatsPurchased: integer("seats_purchased"),
+	currentPeriodEnd: timestamp("current_period_end"),
+	cancelAtPeriodEnd: boolean("cancel_at_period_end").default(false).notNull(),
 	imageKey: text("image_key"), // S3 key for team avatar
 	createdAt: timestamp("created_at").defaultNow().notNull(),
 	updatedAt: timestamp("updated_at")

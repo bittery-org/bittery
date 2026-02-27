@@ -411,7 +411,18 @@ export async function createTestTeam(
 		id: teamId,
 		name: overrides.name || "Test Team",
 		ownerId,
-		...(overrides.type && { type: overrides.type }),
+		type: overrides.type || "personal",
+		memberLimit: overrides.memberLimit ?? null,
+		billingPlan: overrides.billingPlan || "free",
+		billingStatus: overrides.billingStatus || "none",
+		stripeCustomerId: overrides.stripeCustomerId || null,
+		stripeSubscriptionId: overrides.stripeSubscriptionId || null,
+		stripeSubscriptionItemId: overrides.stripeSubscriptionItemId || null,
+		stripePriceId: overrides.stripePriceId || null,
+		seatsPurchased: overrides.seatsPurchased ?? null,
+		currentPeriodEnd: overrides.currentPeriodEnd || null,
+		cancelAtPeriodEnd: overrides.cancelAtPeriodEnd || false,
+		imageKey: overrides.imageKey || null,
 	});
 
 	// Set user's team (one-to-one relationship)
@@ -708,6 +719,7 @@ export async function truncateAll() {
 			share_access_log, share_email_verification, share_link_allowed_email,
 			share_link_rate_limit, share_link,
 			sync_event_ack, sync_event,
+			stripe_event_log,
 			item, vault_key, vault_key_rotation, folder, vault,
 			team_invitation, team_member, team,
 			login_rate_limit, recovery_rate_limit, recovery_verification,

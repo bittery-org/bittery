@@ -19,6 +19,7 @@ import { Route as AuthRecoverRouteImport } from './routes/_auth/recover'
 import { Route as AuthLoginRouteImport } from './routes/_auth/login'
 import { Route as AppSecurityRouteImport } from './routes/_app/security'
 import { Route as AppHomeRouteImport } from './routes/_app/home'
+import { Route as AppBillingRouteImport } from './routes/_app/billing'
 import { Route as AppVaultsIndexRouteImport } from './routes/_app/vaults/index'
 import { Route as AppTeamIndexRouteImport } from './routes/_app/team/index'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
@@ -72,6 +73,11 @@ const AppHomeRoute = AppHomeRouteImport.update({
   path: '/home',
   getParentRoute: () => AppRoute,
 } as any)
+const AppBillingRoute = AppBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppVaultsIndexRoute = AppVaultsIndexRouteImport.update({
   id: '/vaults/',
   path: '/vaults/',
@@ -95,6 +101,7 @@ const AppVaultsVaultIdIndexRoute = AppVaultsVaultIdIndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/billing': typeof AppBillingRoute
   '/home': typeof AppHomeRoute
   '/security': typeof AppSecurityRoute
   '/login': typeof AuthLoginRoute
@@ -109,6 +116,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/billing': typeof AppBillingRoute
   '/home': typeof AppHomeRoute
   '/security': typeof AppSecurityRoute
   '/login': typeof AuthLoginRoute
@@ -126,6 +134,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_app': typeof AppRouteWithChildren
   '/_auth': typeof AuthRouteWithChildren
+  '/_app/billing': typeof AppBillingRoute
   '/_app/home': typeof AppHomeRoute
   '/_app/security': typeof AppSecurityRoute
   '/_auth/login': typeof AuthLoginRoute
@@ -142,6 +151,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/billing'
     | '/home'
     | '/security'
     | '/login'
@@ -156,6 +166,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/billing'
     | '/home'
     | '/security'
     | '/login'
@@ -172,6 +183,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_app'
     | '/_auth'
+    | '/_app/billing'
     | '/_app/home'
     | '/_app/security'
     | '/_auth/login'
@@ -265,6 +277,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppHomeRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/billing': {
+      id: '/_app/billing'
+      path: '/billing'
+      fullPath: '/billing'
+      preLoaderRoute: typeof AppBillingRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/vaults/': {
       id: '/_app/vaults/'
       path: '/vaults'
@@ -297,6 +316,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AppRouteChildren {
+  AppBillingRoute: typeof AppBillingRoute
   AppHomeRoute: typeof AppHomeRoute
   AppSecurityRoute: typeof AppSecurityRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
@@ -306,6 +326,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppBillingRoute: AppBillingRoute,
   AppHomeRoute: AppHomeRoute,
   AppSecurityRoute: AppSecurityRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,

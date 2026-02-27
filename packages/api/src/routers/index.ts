@@ -1,5 +1,6 @@
 import { protectedProcedure, publicProcedure, router } from "../index";
 import { authRouter } from "./auth";
+import { billingRouter } from "./billing";
 import { shareRouter } from "./share";
 import { syncRouter } from "./sync";
 import { teamRouter } from "./team";
@@ -9,6 +10,7 @@ export const appRouter = router({
 	healthCheck: publicProcedure.query(() => {
 		return "OK";
 	}),
+	billing: billingRouter,
 	privateData: protectedProcedure.query(({ ctx }) => {
 		return {
 			message: "This is private",
