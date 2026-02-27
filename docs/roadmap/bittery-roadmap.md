@@ -6,7 +6,7 @@
 |---|---|---|
 | iOS Autofill | ❌ Missing | Apple Developer License required. Without iOS Autofill, Bittery is barely usable for mobile users – high priority. |
 | Billing | ❌ In Progress | Complete billing system (plans, payment processing, upgrades/downgrades). |
-| Onboarding | ❌ In Progress | Clean and simple. Integrate import option ("Do you already have a password manager?"). |
+| Onboarding | 🟡 In Progress | Flow is improved and clearer than before, but still not complete. Continue polishing first-run UX and import handoff ("Do you already have a password manager?"). |
 | Device Setup | 🟡 Needs Testing | Desktop-first flow implemented (account selection, setup QR, deep link prefill). Validate end-to-end on mobile scanner + deep link opening. |
 | Account Recovery | ✅ Done | Implemented in Desktop App (Recovery Kit PDF + forgotten Master Password flow). |
 | Export Finalization | 🟡 Partial | Already exists, needs to be finalized and tested. Important trust signal (no lock-in). |
@@ -21,8 +21,8 @@
 | Emergency Access | ❌ Missing | Trusted contacts that gain access after inactivity. Architecturally challenging with Zero-Knowledge. |
 | Password History | ✅ Done | Implemented for login items on Desktop + Mobile with encrypted history and restore support. |
 | Travel Mode | ❌ Missing | Hide specific vaults during border crossings. Strong differentiator. |
-| Secure File Storage | ❌ Missing | Attach documents to items (ID copies, contracts, etc.). |
-| Import | ❌ Missing | Adapter pattern: 1Password (.1pux), Bitwarden (.json), KeePass (.kdbx), Chrome/Firefox CSV, LastPass CSV, generic CSV. Integrate in Web App. |
+| Secure File Storage | ✅ Done | Encrypted file attachments for items are now available. |
+| Import | ✅ Done | Import support is available for bringing data from other password managers into Bittery. |
 | i18n | ❌ Missing | At minimum English & German. Complex but important for international launch. |
 
 ## Team / Business Features
@@ -43,4 +43,4 @@
 
 ---
 
-*Last updated: February 2026*
+*Last updated: February 27, 2026*
