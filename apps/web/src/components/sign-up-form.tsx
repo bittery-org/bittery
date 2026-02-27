@@ -1,35 +1,77 @@
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
-import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
+import { Badge, Button, cn, Input, Label, toast } from "@bittery/ui";
 import {
-	Badge,
-	Button,
-	Card,
-	CardContent,
-	cn,
-	Input,
-	Label,
-	toast,
-} from "@bittery/ui";
-import {
+	IconArrowLeftOutlineDuo18 as ArrowLeft,
+	IconSuitcase3OutlineDuo18 as Briefcase,
+	IconCheckOutlineDuo18 as Check,
 	IconCircleCheck2OutlineDuo18 as CheckCircle2,
 	IconClipboardArrowInOutlineDuo18 as Download,
 	IconEyeOutlineDuo18 as Eye,
 	IconEyeSlashOutlineDuo18 as EyeOff,
+	IconHeartOutlineDuo18 as Heart,
 	IconLoader2OutlineDuo18 as Loader2,
-	IconUsers6OutlineDuo18 as Users,
+	IconLockOutlineDuo18 as Lock,
+	IconMagicShieldOutlineDuo18 as Shield,
+	IconStarSparkle2OutlineDuo18 as Sparkle,
 } from "@bittery/ui/icons";
-import { useForm } from "@tanstack/react-form";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
-import { downloadRecoveryKit } from "@/lib/recovery-kit";
-import { storage } from "@/lib/storage";
-import {
-	generateRecoveryKeyAsync,
-	generateSecretKeyAsync,
-} from "@/lib/wasm-crypto";
-import { WorkerCrypto } from "@/lib/worker-crypto";
+import { useState } from "react";
+import type { CloudPlanId } from "@/hooks/use-signup-form";
+import { useSignupForm } from "@/hooks/use-signup-form";
+import PlanComparisonDialog from "./plan-comparison-dialog";
+import SelfHostedSignUpForm from "./self-hosted-sign-up-form";
+
+const cloudPlans: Array<{
+	id: CloudPlanId;
+	name: string;
+	priceLabel: string;
+	priceSuffix?: string;
+	description: string;
+	isRecommended?: boolean;
+	icon: React.ComponentType<{ size?: number; className?: string }>;
+	accentClass: string;
+	iconBgClass: string;
+}> = [
+	{
+		id: "free",
+		name: "Free",
+		priceLabel: "$0",
+		description: "Basic vault for getting started.",
+		icon: Lock,
+		accentClass: "border-border dark:border-border",
+		iconBgClass: "bg-muted text-muted-foreground",
+	},
+	{
+		id: "personal",
+		name: "Personal",
+		priceLabel: "$4",
+		priceSuffix: "/mo",
+		description: "Daily password security with premium features.",
+		isRecommended: true,
+		icon: Sparkle,
+		accentClass: "border-primary/60 dark:border-primary/40",
+		iconBgClass: "bg-primary/10 text-primary",
+	},
+	{
+		id: "family",
+		name: "Family",
+		priceLabel: "$9",
+		priceSuffix: "/mo",
+		description: "Shared protection for your household.",
+		icon: Heart,
+		accentClass: "border-amber-300/60 dark:border-amber-500/30",
+		iconBgClass:
+			"bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
+	},
+	{
+		id: "team",
+		name: "Team",
+		priceLabel: "$12",
+		priceSuffix: "/user",
+		description: "Teams and businesses with shared workspaces.",
+		icon: Briefcase,
+		accentClass: "border-sky-300/60 dark:border-sky-500/30",
+		iconBgClass: "bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400",
+	},
+];
 
 export default function SignUpForm({
 	onSwitchToSignIn,
@@ -40,656 +82,597 @@ export default function SignUpForm({
 	invitationToken?: string;
 	redirectTo?: string;
 }) {
-	const navigate = useNavigate();
-	const trpc = useTRPC();
-	const trpcClient = useTRPCClient();
-	const [secretKey, setSecretKey] = useState<string>("");
-	const [recoveryKey, setRecoveryKey] = useState<string>("");
-	const [hasDownloadedKit, setHasDownloadedKit] = useState(false);
-	const [showPassword, setShowPassword] = useState(false);
-	const [isEncrypting, setIsEncrypting] = useState(false);
-
-	// Query invitation details if token is provided
-	const invitationQuery = useQuery({
-		...trpc.team.invitations.getByToken.queryOptions({
-			token: invitationToken || "",
-		}),
-		enabled: !!invitationToken,
-	});
-	const registrationStatusQuery = useQuery(
-		trpc.auth.registrationStatus.queryOptions(),
+	const signup = useSignupForm({ invitationToken, redirectTo });
+	const [cloudSignupStep, setCloudSignupStep] = useState<"plan" | "account">(
+		"plan",
 	);
 
-	const invitation = invitationQuery.data;
-	const hasInvitationToken = !!invitationToken;
-	const isInvitationSignup = hasInvitationToken && !!invitation;
-	const registrationStatus = registrationStatusQuery.data;
-	const isSelfHostedMode = registrationStatus?.mode === "self-hosted";
-	const allowPublicSignup = registrationStatus?.allowPublicSignup ?? true;
-	const signupHeading = isInvitationSignup
-		? "Accept Invitation"
-		: isSelfHostedMode
-			? "Create admin account"
-			: "Create an account";
-	const signupDescription = isInvitationSignup
-		? "Create your account to securely join the invited workspace."
-		: isSelfHostedMode
-			? "Set up the first admin account for this server."
-			: "Create your encrypted account and start protecting your vaults.";
-
-	// Generate Secret Key + Recovery Key on mount (WASM auto-initializes)
-	useEffect(() => {
-		Promise.all([generateSecretKeyAsync(), generateRecoveryKeyAsync()]).then(
-			([generatedSecretKey, generatedRecoveryKey]) => {
-				setSecretKey(generatedSecretKey);
-				setRecoveryKey(generatedRecoveryKey);
-			},
-		);
-	}, []);
-
-	const signupMutation = useMutation({
-		mutationFn: async (input: {
-			email: string;
-			name: string;
-			secretKeyHint: string;
-			srpSalt: string;
-			srpVerifier: string;
-			publicKey: string;
-			encryptedPrivateKey: string;
-			encryptedMasterKey: string;
-			recoveryKeyHint: string;
-			encryptedVaultKey: string;
-			organizationName?: string;
-			token?: string;
-		}) => {
-			if (isInvitationSignup) {
-				return trpcClient.auth.signupWithInvitation.mutate({
-					token: input.token || "",
-					email: input.email,
-					name: input.name,
-					secretKeyHint: input.secretKeyHint,
-					srpSalt: input.srpSalt,
-					srpVerifier: input.srpVerifier,
-					publicKey: input.publicKey,
-					encryptedPrivateKey: input.encryptedPrivateKey,
-					encryptedMasterKey: input.encryptedMasterKey,
-					recoveryKeyHint: input.recoveryKeyHint,
-					encryptedVaultKey: input.encryptedVaultKey,
-				});
-			}
-
-			return trpcClient.auth.signup.mutate({
-				email: input.email,
-				name: input.name,
-				organizationName: input.organizationName,
-				secretKeyHint: input.secretKeyHint,
-				srpSalt: input.srpSalt,
-				srpVerifier: input.srpVerifier,
-				publicKey: input.publicKey,
-				encryptedPrivateKey: input.encryptedPrivateKey,
-				encryptedMasterKey: input.encryptedMasterKey,
-				recoveryKeyHint: input.recoveryKeyHint,
-				encryptedVaultKey: input.encryptedVaultKey,
-			});
-		},
-		onSuccess: async (data) => {
-			// Store auth token and vault keys
-			await storage.storeAuthToken(data.token);
-			await storage.storeVaultKeys(data.vaultKeys);
-
-			toast.success("Account created successfully!");
-			// Invitation signup is accepted server-side.
-			if (isInvitationSignup) {
-				navigate({ to: "/team" });
-			} else if (redirectTo) {
-				// Navigate to redirect URL (invitation page) if provided, otherwise go to home
-				navigate({ to: redirectTo });
-			} else {
-				navigate({ to: "/home" });
-			}
-		},
-		onError: (error: any) => {
-			toast.error(error.message || "Failed to create account");
-		},
-	});
-
-	const form = useForm({
-		defaultValues: {
-			email: "",
-			password: "",
-			name: "",
-			accountType: "personal" as "personal" | "organization",
-			organizationName: "",
-		},
-		onSubmit: async ({ value }) => {
-			await resolveActiveAuthServerUrl();
-
-			if (!hasDownloadedKit) {
-				toast.error("Please download your Emergency Kit before continuing");
-				return;
-			}
-
-			setIsEncrypting(true);
-			const workerCrypto = new WorkerCrypto();
-			try {
-				// Use invitation email if signing up via invitation
-				const email = isInvitationSignup
-					? invitation?.email || value.email
-					: value.email;
-
-				// All heavy crypto runs in a Web Worker via WorkerCrypto,
-				// keeping the main thread responsive with the spinner.
-
-				// 1. Derive raw master key, then split into auth + unlock keys
-				const masterKey = await workerCrypto.deriveMasterKey(
-					value.password,
-					secretKey,
-					email,
-				);
-				const { authKey, masterUnlockKey } =
-					await workerCrypto.deriveKeysFromMasterKey(masterKey, email);
-
-				// 2. Generate SRP credentials
-				const srpPassword = new TextDecoder().decode(authKey);
-				const { salt, verifier } =
-					await workerCrypto.generateSRPRegistration(srpPassword);
-
-				// 3. Generate RSA-4096 key pair
-				const { publicKey, privateKey } =
-					await workerCrypto.generateRSAKeyPair();
-
-				// 4. Encrypt private key with Master Unlock Key
-				const encryptedPrivateKey = await workerCrypto.encrypt(
-					privateKey,
-					masterUnlockKey,
-				);
-
-				// 5. Generate vault key and encrypt it
-				const vaultKey = await workerCrypto.generateEncryptionKey();
-				const vaultKeyBase64 = btoa(String.fromCharCode(...vaultKey));
-				const encryptedVaultKey = await workerCrypto.encrypt(
-					vaultKeyBase64,
-					masterUnlockKey,
-				);
-
-				// 6. Get secret key hint
-				const secretKeyHint = await workerCrypto.getSecretKeyHint(secretKey);
-
-				// 7. Encrypt raw master key with recovery key material
-				const encryptedMasterKey = await workerCrypto.encryptMasterKey(
-					masterKey,
-					recoveryKey,
-					email,
-				);
-				const recoveryKeyHint =
-					recoveryKey.split("-").slice(0, 2).join("-") || "R1";
-
-				// 8. Call signup mutation
-				const result = await signupMutation.mutateAsync({
-					email,
-					name: value.name,
-					...(!isSelfHostedMode &&
-					value.accountType === "organization" &&
-					value.organizationName
-						? { organizationName: value.organizationName }
-						: {}),
-					...(isInvitationSignup ? { token: invitationToken } : {}),
-					secretKeyHint,
-					srpSalt: salt,
-					srpVerifier: verifier,
-					publicKey,
-					encryptedPrivateKey: JSON.stringify(encryptedPrivateKey),
-					encryptedMasterKey: JSON.stringify(encryptedMasterKey),
-					recoveryKeyHint,
-					encryptedVaultKey: JSON.stringify(encryptedVaultKey),
-				});
-
-				// 9. Store Master Unlock Key in memory
-				await storage.setMasterUnlockKey(masterUnlockKey);
-
-				// 10. Store encrypted private key for RSA decryption of shared vault keys
-				await storage.storeEncryptedPrivateKey(
-					JSON.stringify(encryptedPrivateKey),
-				);
-
-				// 11. Store secret key and encrypted session for quick unlock
-				await storage.storeSecretKey(secretKey);
-				await storage.storeSessionData(
-					masterUnlockKey,
-					email,
-					result.userId,
-					undefined,
-					result.sessionId,
-				);
-
-				const daysUntil = Math.floor(
-					DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24),
-				);
-
-				toast.success(
-					`Account created! Quick unlock available for ${daysUntil} days.`,
-				);
-			} catch (error: any) {
-				console.error("Signup error:", error);
-				toast.error(error.message || "Failed to create account");
-			} finally {
-				workerCrypto.terminate();
-				setIsEncrypting(false);
-			}
-		},
-	});
-
-	const downloadEmergencyKit = async () => {
-		if (!secretKey || !recoveryKey) {
-			toast.error("Still generating account keys. Please try again.");
-			return;
-		}
-
-		const result = await downloadRecoveryKit({
-			fileName: "bittery-emergency-kit",
-			title: "Bittery Emergency Kit",
-			subtitle:
-				"Contains your Secret Key and Recovery Key for offline storage.",
-			entries: [
-				{
-					label: "Secret Key",
-					value: secretKey,
-					description:
-						"Required with your master password to unlock your account.",
-				},
-				{
-					label: "Recovery Key",
-					value: recoveryKey,
-					description: "Required to reset your password if forgotten.",
-				},
-			],
-			cautions: [
-				"Store this kit offline in a secure location you trust.",
-				"Do not save this file in shared folders or chats.",
-				"If Secret Key, Recovery Key, and password are all lost, your vault cannot be recovered.",
-			],
-			footerNote:
-				"Bittery is zero-knowledge: recovery material is generated and handled locally in your browser.",
-			includeHandwrittenPasswordSection: true,
-		});
-
-		setHasDownloadedKit(true);
-		if (result === "pdf-downloaded") {
-			toast.success("Emergency Kit PDF downloaded.");
-			return;
-		}
-
-		toast.success("PDF failed. Emergency Kit downloaded as text backup.");
-	};
-
-	if (hasInvitationToken && invitationQuery.isError) {
+	// Delegate to self-hosted component for self-hosted or invitation flows
+	if (signup.isSelfHostedMode || signup.isInvitationSignup) {
 		return (
-			<div className="w-full">
-				<h1 className="text-center font-semibold text-2xl tracking-tight">
-					Invitation Required
-				</h1>
-				<Card className="mt-6">
-					<CardContent>
-						<div className="space-y-4">
-							<p className="text-muted-foreground text-sm leading-relaxed">
-								This invitation link is invalid or expired. Ask your admin to
-								send a new invite link.
-							</p>
-							<Button
-								type="button"
-								onClick={onSwitchToSignIn}
-								className="w-full"
-							>
-								Back to Sign In
-							</Button>
-						</div>
-					</CardContent>
-				</Card>
-			</div>
+			<SelfHostedSignUpForm
+				onSwitchToSignIn={onSwitchToSignIn}
+				invitationToken={invitationToken}
+				redirectTo={redirectTo}
+			/>
 		);
 	}
 
-	if (hasInvitationToken && invitationQuery.isLoading) {
-		return (
-			<div className="w-full">
-				<h1 className="text-center font-semibold text-2xl tracking-tight">
-					Loading invitation
-				</h1>
-				<Card className="mt-6">
-					<CardContent>
-						<div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
-							<Loader2 className="h-4 w-4 animate-spin" />
-							Verifying invitation link...
-						</div>
-					</CardContent>
-				</Card>
-			</div>
-		);
-	}
-
+	// Guard states for cloud mode
 	if (
-		!hasInvitationToken &&
-		!registrationStatusQuery.isLoading &&
-		!allowPublicSignup
+		!signup.hasInvitationToken &&
+		!signup.registrationStatusQuery.isLoading &&
+		!signup.allowPublicSignup
 	) {
 		return (
 			<div className="w-full">
 				<h1 className="text-center font-semibold text-2xl tracking-tight">
 					Invite-Only Registration
 				</h1>
-				<Card className="mt-6">
-					<CardContent>
-						<div className="space-y-4">
-							<p className="text-muted-foreground text-sm leading-relaxed">
-								Registration is closed on this server. Ask an admin for an
-								invite link.
-							</p>
-							<Button
-								type="button"
-								onClick={onSwitchToSignIn}
-								className="w-full"
-							>
-								Back to Sign In
-							</Button>
-						</div>
-					</CardContent>
-				</Card>
+				<div className="mt-6 rounded-2xl border bg-card p-6">
+					<div className="space-y-4">
+						<p className="text-muted-foreground text-sm leading-relaxed">
+							Registration is closed on this server. Ask an admin for an invite
+							link.
+						</p>
+						<Button type="button" onClick={onSwitchToSignIn} className="w-full">
+							Back to Sign In
+						</Button>
+					</div>
+				</div>
 			</div>
 		);
 	}
 
-	const hasAllKeyMaterial = Boolean(secretKey) && Boolean(recoveryKey);
+	const showPlanStep = cloudSignupStep === "plan";
 
 	return (
 		<div className="w-full">
-			<h1 className="text-center font-semibold text-2xl tracking-tight">
-				{signupHeading}
-			</h1>
-			<p className="mx-auto mt-2 max-w-80 text-center text-muted-foreground text-sm">
-				{signupDescription}
-			</p>
-			<Card className="mt-6">
-				<CardContent>
-					<form
-						onSubmit={(e) => {
-							e.preventDefault();
-							e.stopPropagation();
-							form.handleSubmit();
-						}}
-						className="space-y-4"
-					>
-						<div>
-							<form.Field name="name">
-								{(field) => (
-									<div className="space-y-2">
-										<Label htmlFor={field.name}>Full Name</Label>
-										<Input
-											id={field.name}
-											name={field.name}
-											placeholder="John Doe"
-											value={field.state.value}
-											onBlur={field.handleBlur}
-											onChange={(e) => field.handleChange(e.target.value)}
-											required
-											className="h-10"
-										/>
-									</div>
-								)}
-							</form.Field>
-						</div>
+			{/* Header */}
+			<div className="text-center">
+				<h1 className="font-semibold text-2xl tracking-tight">
+					{showPlanStep ? "Choose your plan" : "Create your account"}
+				</h1>
+				<p className="mx-auto mt-2 max-w-80 text-muted-foreground text-sm">
+					{showPlanStep
+						? "Select a plan to get started. You can change it anytime."
+						: "Set up your encrypted account and secure your vault."}
+				</p>
+			</div>
 
-						{isInvitationSignup ? (
-							<div className="rounded-lg border bg-muted/30 p-4">
-								<div className="flex items-start gap-3">
-									<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
-										<Users className="h-5 w-5 text-primary" />
-									</div>
-									<div className="space-y-1">
-										<p className="font-medium text-sm">
-											You've been invited to join{" "}
-											<span className="text-primary">
-												{invitation?.teamName}
-											</span>
-										</p>
-										<div className="flex items-center gap-2 text-muted-foreground text-xs">
-											<span>Invited by {invitation?.invitedByName}</span>
-											<span>·</span>
-											<Badge variant="secondary" className="text-xs">
-												{invitation?.role}
+			{/* Segmented Stepper */}
+			<div className="mt-6">
+				<div className="relative flex h-10 rounded-xl border bg-muted/40 p-1">
+					{/* Sliding indicator */}
+					<div
+						className={cn(
+							"absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-lg bg-background shadow-sm transition-all duration-300 ease-out",
+							showPlanStep ? "left-1" : "left-[calc(50%+3px)]",
+						)}
+					/>
+					<button
+						type="button"
+						className={cn(
+							"relative z-10 flex flex-1 items-center justify-center gap-2 rounded-lg font-medium text-xs transition-colors duration-200",
+							showPlanStep
+								? "text-foreground"
+								: "text-muted-foreground hover:text-foreground/70",
+						)}
+						onClick={() => setCloudSignupStep("plan")}
+					>
+						{!showPlanStep ? (
+							<span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
+								<Check size={10} />
+							</span>
+						) : (
+							<span className="flex h-4 w-4 items-center justify-center rounded-full border border-primary/50 bg-primary/10 font-bold text-[10px] text-primary">
+								1
+							</span>
+						)}
+						Plan
+					</button>
+					<button
+						type="button"
+						className={cn(
+							"relative z-10 flex flex-1 items-center justify-center gap-2 rounded-lg font-medium text-xs transition-colors duration-200",
+							!showPlanStep ? "text-foreground" : "text-muted-foreground",
+						)}
+						disabled={showPlanStep}
+					>
+						<span
+							className={cn(
+								"flex h-4 w-4 items-center justify-center rounded-full font-bold text-[10px] transition-colors duration-200",
+								!showPlanStep
+									? "border border-primary/50 bg-primary/10 text-primary"
+									: "border border-border text-muted-foreground",
+							)}
+						>
+							2
+						</span>
+						Account
+					</button>
+				</div>
+			</div>
+
+			{/* Step Content */}
+			<div className="mt-5">
+				{showPlanStep ? (
+					<PlanSelectionStep
+						form={signup.form}
+						onContinue={() => setCloudSignupStep("account")}
+						onSwitchToSignIn={onSwitchToSignIn}
+					/>
+				) : (
+					<AccountSetupStep
+						signup={signup}
+						onBack={() => setCloudSignupStep("plan")}
+						onSwitchToSignIn={onSwitchToSignIn}
+					/>
+				)}
+			</div>
+		</div>
+	);
+}
+
+/* ─── Plan Selection Step ──────────────────────────────────────────── */
+
+function PlanSelectionStep({
+	form,
+	onContinue,
+	onSwitchToSignIn,
+}: {
+	form: ReturnType<typeof useSignupForm>["form"];
+	onContinue: () => void;
+	onSwitchToSignIn: () => void;
+}) {
+	const [showComparison, setShowComparison] = useState(false);
+
+	return (
+		<div className="space-y-4">
+			<form.Field name="plan">
+				{(field) => (
+					<div className="grid grid-cols-2 gap-2.5">
+						{cloudPlans.map((plan) => {
+							const isSelected = field.state.value === plan.id;
+							const Icon = plan.icon;
+
+							return (
+								<button
+									key={plan.id}
+									type="button"
+									className={cn(
+										"group relative flex flex-col rounded-xl border-2 p-3.5 text-left transition-all duration-200",
+										isSelected
+											? cn(
+													plan.accentClass,
+													"bg-card shadow-sm",
+													plan.isRecommended && "ring-2 ring-primary/15",
+												)
+											: "border-transparent bg-muted/50 hover:border-border hover:bg-muted/70",
+									)}
+									onClick={() => field.handleChange(plan.id)}
+								>
+									{/* Recommended badge */}
+									{plan.isRecommended && (
+										<div className="absolute -top-2.5 right-3">
+											<Badge
+												variant="default"
+												className="h-5 rounded-full px-2 font-medium text-[10px] shadow-sm"
+											>
+												Popular
 											</Badge>
 										</div>
-									</div>
-								</div>
-							</div>
-						) : !isSelfHostedMode ? (
-							<div className="space-y-4">
-								<form.Field name="accountType">
-									{(field) => (
-										<div className="space-y-3">
-											<Label>Account Type</Label>
-											<div className="grid gap-3 sm:grid-cols-2">
-												<Button
-													type="button"
-													variant={
-														field.state.value === "personal"
-															? "default"
-															: "outline"
-													}
-													className="h-auto flex-col items-start gap-1 p-4"
-													onClick={() => field.handleChange("personal")}
-												>
-													<span className="font-medium">Personal</span>
-													<span
-														className={cn(
-															"text-left font-normal text-xs",
-															field.state.value === "personal"
-																? "text-primary-foreground"
-																: "text-muted-foreground",
-														)}
-													>
-														For individual use
-													</span>
-												</Button>
-												<Button
-													type="button"
-													variant={
-														field.state.value === "organization"
-															? "default"
-															: "outline"
-													}
-													className="h-auto flex-col items-start gap-1 p-4"
-													onClick={() => field.handleChange("organization")}
-												>
-													<span className="font-medium">Organization</span>
-													<span
-														className={cn(
-															"text-left font-normal text-xs",
-															field.state.value === "organization"
-																? "text-primary-foreground"
-																: "text-muted-foreground",
-														)}
-													>
-														For teams and companies
-													</span>
-												</Button>
-											</div>
-										</div>
 									)}
-								</form.Field>
 
-								<form.Subscribe selector={(state) => state.values.accountType}>
-									{(accountType) =>
-										accountType === "organization" ? (
-											<form.Field name="organizationName">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Organization Name
-														</Label>
-														<Input
-															id={field.name}
-															name={field.name}
-															placeholder="Acme Inc."
-															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-															required
-															className="h-10"
-														/>
-														<p className="text-[0.8rem] text-muted-foreground">
-															This will be the name of your team workspace
-														</p>
-													</div>
-												)}
-											</form.Field>
-										) : null
-									}
-								</form.Subscribe>
-							</div>
-						) : null}
-
-						<div>
-							<form.Field name="email">
-								{(field) => (
-									<div className="space-y-2">
-										<Label htmlFor={field.name}>Email</Label>
-										<Input
-											id={field.name}
-											name={field.name}
-											type="email"
-											placeholder="name@example.com"
-											value={
-												isInvitationSignup
-													? invitation?.email || field.state.value
-													: field.state.value
-											}
-											onBlur={field.handleBlur}
-											onChange={(e) => field.handleChange(e.target.value)}
-											required
-											disabled={isInvitationSignup}
-											className="h-10"
-										/>
-										{isInvitationSignup && (
-											<p className="text-muted-foreground text-xs">
-												This email was used to invite you and cannot be changed.
-											</p>
-										)}
-									</div>
-								)}
-							</form.Field>
-						</div>
-
-						<div>
-							<form.Field name="password">
-								{(field) => (
-									<div className="space-y-2">
-										<Label htmlFor={field.name}>Master Password</Label>
-										<div className="relative">
-											<Input
-												id={field.name}
-												name={field.name}
-												type={showPassword ? "text" : "password"}
-												value={field.state.value}
-												onBlur={field.handleBlur}
-												onChange={(e) => field.handleChange(e.target.value)}
-												required
-												className="h-10 pr-10"
-											/>
-											<Button
-												type="button"
-												variant="ghost"
-												size="icon"
-												className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
-												onClick={() => setShowPassword(!showPassword)}
-											>
-												{showPassword ? (
-													<EyeOff size={16} />
-												) : (
-													<Eye size={16} />
-												)}
-											</Button>
+									{/* Icon + Selection indicator */}
+									<div className="flex items-center justify-between">
+										<div
+											className={cn(
+												"flex h-8 w-8 items-center justify-center rounded-lg transition-colors duration-200",
+												isSelected
+													? plan.iconBgClass
+													: "bg-muted text-muted-foreground",
+											)}
+										>
+											<Icon size={16} />
 										</div>
-										<p className="text-[0.8rem] text-muted-foreground">
-											Must be at least 8 characters long.
+										<span
+											className={cn(
+												"flex h-4.5 w-4.5 items-center justify-center rounded-full border-2 transition-all duration-200",
+												isSelected
+													? "scale-100 border-primary bg-primary text-primary-foreground"
+													: "scale-90 border-border bg-background opacity-50 group-hover:scale-100 group-hover:opacity-80",
+											)}
+										>
+											{isSelected ? <Check size={10} /> : null}
+										</span>
+									</div>
+
+									{/* Content */}
+									<div className="mt-3 space-y-1">
+										<p className="font-semibold text-sm leading-none">
+											{plan.name}
+										</p>
+										<p
+											className={cn(
+												"text-[11px] leading-snug",
+												isSelected
+													? "text-muted-foreground"
+													: "text-muted-foreground/70",
+											)}
+										>
+											{plan.description}
 										</p>
 									</div>
-								)}
-							</form.Field>
-						</div>
 
+									{/* Price */}
+									<div className="mt-3 flex items-baseline gap-0.5">
+										<span
+											className={cn(
+												"font-bold text-lg leading-none tracking-tight",
+												isSelected ? "text-foreground" : "text-foreground/70",
+											)}
+										>
+											{plan.priceLabel}
+										</span>
+										{plan.priceSuffix && (
+											<span className="text-[11px] text-muted-foreground">
+												{plan.priceSuffix}
+											</span>
+										)}
+									</div>
+								</button>
+							);
+						})}
+					</div>
+				)}
+			</form.Field>
+
+			{/* Compare plans link */}
+			<form.Subscribe selector={(state) => state.values.plan}>
+				{(selectedPlan) => (
+					<>
 						<button
 							type="button"
-							disabled={!hasAllKeyMaterial}
-							onClick={downloadEmergencyKit}
-							className={cn(
-								"flex w-full items-center gap-2.5 rounded-lg border px-3.5 py-3 text-left transition-colors",
-								hasDownloadedKit
-									? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-900/40 dark:bg-emerald-950/20"
-									: "hover:bg-muted/50",
-							)}
+							onClick={() => setShowComparison(true)}
+							className="flex w-full items-center justify-center gap-1.5 py-1 text-muted-foreground text-xs transition-colors hover:text-foreground"
 						>
-							{hasDownloadedKit ? (
-								<CheckCircle2
-									size={16}
-									className="shrink-0 text-emerald-600 dark:text-emerald-400"
-								/>
-							) : (
-								<Download
-									size={16}
-									className="shrink-0 text-muted-foreground"
-								/>
-							)}
-							<div className="min-w-0 flex-1">
-								<p className="font-medium text-sm">
-									{hasDownloadedKit
-										? "Emergency Kit saved"
-										: "Download Emergency Kit"}
-								</p>
-								<p className="text-muted-foreground text-xs">
-									Secret Key & Recovery Key for account recovery
-								</p>
-							</div>
+							<span className="border-current border-b border-dashed">
+								Compare all plans & features
+							</span>
 						</button>
+						<PlanComparisonDialog
+							open={showComparison}
+							onOpenChange={setShowComparison}
+							selectedPlan={selectedPlan}
+							onSelectPlan={(id) => form.setFieldValue("plan", id)}
+						/>
+					</>
+				)}
+			</form.Subscribe>
 
-						<div className="pt-1">
-							<Button
-								type="submit"
-								className="h-10 w-full"
-								disabled={
-									isEncrypting || signupMutation.isPending || !hasDownloadedKit
-								}
+			{/* Team name input (conditional) */}
+			<form.Subscribe selector={(state) => state.values.plan}>
+				{(selectedPlan) =>
+					selectedPlan === "team" ? (
+						<form.Field name="organizationName">
+							{(field) => (
+								<div className="space-y-2 rounded-xl border bg-muted/20 p-3.5">
+									<Label htmlFor={field.name} className="text-xs">
+										Team / Business Name
+									</Label>
+									<Input
+										id={field.name}
+										name={field.name}
+										placeholder="Acme Security"
+										value={field.state.value}
+										onBlur={field.handleBlur}
+										onChange={(e) => field.handleChange(e.target.value)}
+										required
+										className="h-9"
+									/>
+									<p className="text-[11px] text-muted-foreground/70">
+										Shown as your workspace name for members.
+									</p>
+								</div>
+							)}
+						</form.Field>
+					) : null
+				}
+			</form.Subscribe>
+
+			{/* Continue CTA */}
+			<form.Subscribe
+				selector={(state) => ({
+					organizationName: state.values.organizationName,
+					plan: state.values.plan,
+				})}
+			>
+				{({ plan, organizationName }) => (
+					<Button
+						type="button"
+						className="h-10 w-full bg-primary font-medium shadow-sm"
+						onClick={() => {
+							if (plan === "team" && !organizationName.trim()) {
+								toast.error("Please enter a team or business name to continue");
+								return;
+							}
+							onContinue();
+						}}
+					>
+						Continue
+					</Button>
+				)}
+			</form.Subscribe>
+
+			<Button
+				type="button"
+				variant="ghost"
+				onClick={onSwitchToSignIn}
+				className="w-full text-muted-foreground"
+			>
+				Already have an account? Sign in
+			</Button>
+		</div>
+	);
+}
+
+/* ─── Account Setup Step ───────────────────────────────────────────── */
+
+function AccountSetupStep({
+	signup,
+	onBack,
+	onSwitchToSignIn,
+}: {
+	signup: ReturnType<typeof useSignupForm>;
+	onBack: () => void;
+	onSwitchToSignIn: () => void;
+}) {
+	const {
+		form,
+		signupMutation,
+		hasDownloadedKit,
+		showPassword,
+		setShowPassword,
+		isEncrypting,
+		downloadEmergencyKit,
+		hasAllKeyMaterial,
+	} = signup;
+
+	return (
+		<form
+			onSubmit={(e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				form.handleSubmit();
+			}}
+			className="space-y-4"
+		>
+			{/* Plan summary chip */}
+			<form.Subscribe
+				selector={(state) => ({
+					organizationName: state.values.organizationName,
+					plan: state.values.plan,
+				})}
+			>
+				{({ plan, organizationName }) => {
+					const selectedPlan = cloudPlans.find((p) => p.id === plan);
+					if (!selectedPlan) return null;
+					const Icon = selectedPlan.icon;
+
+					return (
+						<div className="flex items-center justify-between rounded-xl border bg-muted/25 px-3.5 py-2.5">
+							<div className="flex items-center gap-2.5">
+								<div
+									className={cn(
+										"flex h-7 w-7 items-center justify-center rounded-lg",
+										selectedPlan.iconBgClass,
+									)}
+								>
+									<Icon size={14} />
+								</div>
+								<div>
+									<p className="font-medium text-sm leading-none">
+										{selectedPlan.name}
+									</p>
+									<p className="mt-0.5 text-[11px] text-muted-foreground">
+										{selectedPlan.priceLabel}
+										{selectedPlan.priceSuffix || ""}
+										{plan === "team" && organizationName.trim()
+											? ` · ${organizationName.trim()}`
+											: ""}
+									</p>
+								</div>
+							</div>
+							<button
+								type="button"
+								onClick={onBack}
+								className="rounded-lg px-2.5 py-1 font-medium text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground"
 							>
-								{isEncrypting || signupMutation.isPending ? (
-									<>
-										<Loader2 size={16} className="mr-2 animate-spin" />
-										{isEncrypting
-											? "Setting up encryption..."
-											: "Creating account..."}
-									</>
-								) : !hasDownloadedKit ? (
-									<>
-										<Download size={16} className="mr-2" />
-										Download Emergency Kit to continue
-									</>
-								) : (
-									"Create Account"
-								)}
+								Change
+							</button>
+						</div>
+					);
+				}}
+			</form.Subscribe>
+
+			{/* Name field */}
+			<form.Field name="name">
+				{(field) => (
+					<div className="space-y-1.5">
+						<Label htmlFor={field.name} className="font-medium text-xs">
+							Full Name
+						</Label>
+						<Input
+							id={field.name}
+							name={field.name}
+							placeholder="John Doe"
+							value={field.state.value}
+							onBlur={field.handleBlur}
+							onChange={(e) => field.handleChange(e.target.value)}
+							required
+							className="h-10"
+						/>
+					</div>
+				)}
+			</form.Field>
+
+			{/* Email field */}
+			<form.Field name="email">
+				{(field) => (
+					<div className="space-y-1.5">
+						<Label htmlFor={field.name} className="font-medium text-xs">
+							Email
+						</Label>
+						<Input
+							id={field.name}
+							name={field.name}
+							type="email"
+							placeholder="name@example.com"
+							value={field.state.value}
+							onBlur={field.handleBlur}
+							onChange={(e) => field.handleChange(e.target.value)}
+							required
+							className="h-10"
+						/>
+					</div>
+				)}
+			</form.Field>
+
+			{/* Password field */}
+			<form.Field name="password">
+				{(field) => (
+					<div className="space-y-1.5">
+						<Label htmlFor={field.name} className="font-medium text-xs">
+							Master Password
+						</Label>
+						<div className="relative">
+							<Input
+								id={field.name}
+								name={field.name}
+								type={showPassword ? "text" : "password"}
+								value={field.state.value}
+								onBlur={field.handleBlur}
+								onChange={(e) => field.handleChange(e.target.value)}
+								required
+								className="h-10 pr-10"
+							/>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon"
+								className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
+								onClick={() => setShowPassword(!showPassword)}
+							>
+								{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
 							</Button>
 						</div>
+						<p className="text-[11px] text-muted-foreground/70">
+							Must be at least 8 characters long.
+						</p>
+					</div>
+				)}
+			</form.Field>
 
-						<Button
-							type="button"
-							variant="ghost"
-							onClick={onSwitchToSignIn}
-							className="w-full"
-						>
-							Already have an account? Sign in
-						</Button>
-					</form>
-				</CardContent>
-			</Card>
-		</div>
+			{/* Emergency Kit — distinctive card */}
+			<button
+				type="button"
+				disabled={!hasAllKeyMaterial}
+				onClick={downloadEmergencyKit}
+				className={cn(
+					"group relative flex w-full items-center gap-3 overflow-hidden rounded-xl border px-4 py-3.5 text-left transition-all duration-200",
+					hasDownloadedKit
+						? "border-emerald-300/70 bg-emerald-50/40 dark:border-emerald-800/50 dark:bg-emerald-950/20"
+						: "border-border border-dashed hover:border-primary/40 hover:bg-primary/2",
+				)}
+			>
+				{/* Shield icon container */}
+				<div
+					className={cn(
+						"flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors duration-200",
+						hasDownloadedKit
+							? "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"
+							: "bg-muted/60 text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary",
+					)}
+				>
+					{hasDownloadedKit ? <CheckCircle2 size={18} /> : <Shield size={18} />}
+				</div>
+
+				<div className="min-w-0 flex-1">
+					<p className="font-medium text-sm leading-none">
+						{hasDownloadedKit
+							? "Emergency Kit saved"
+							: "Download Emergency Kit"}
+					</p>
+					<p
+						className={cn(
+							"mt-1 text-[11px] leading-snug",
+							hasDownloadedKit
+								? "text-emerald-700/70 dark:text-emerald-400/60"
+								: "text-muted-foreground/70",
+						)}
+					>
+						{hasDownloadedKit
+							? "Your Secret Key & Recovery Key have been saved"
+							: "Required before creating your account"}
+					</p>
+				</div>
+
+				{!hasDownloadedKit && (
+					<Download
+						size={16}
+						className="shrink-0 text-muted-foreground/50 transition-colors group-hover:text-primary"
+					/>
+				)}
+			</button>
+
+			{/* Submit */}
+			<div className="pt-1">
+				<Button
+					type="submit"
+					className="h-10 w-full font-medium shadow-sm"
+					disabled={
+						isEncrypting || signupMutation.isPending || !hasDownloadedKit
+					}
+				>
+					{isEncrypting || signupMutation.isPending ? (
+						<>
+							<Loader2 size={16} className="mr-2 animate-spin" />
+							{isEncrypting
+								? "Setting up encryption..."
+								: "Creating account..."}
+						</>
+					) : !hasDownloadedKit ? (
+						<>
+							<Shield size={16} className="mr-2" />
+							Download Emergency Kit to continue
+						</>
+					) : (
+						"Create Account"
+					)}
+				</Button>
+			</div>
+
+			<div className="flex items-center gap-2">
+				<Button
+					type="button"
+					variant="ghost"
+					onClick={onBack}
+					className="h-9 gap-1.5 px-3 text-muted-foreground"
+				>
+					<ArrowLeft size={14} />
+					Back
+				</Button>
+				<div className="h-4 w-px bg-border" />
+				<Button
+					type="button"
+					variant="ghost"
+					onClick={onSwitchToSignIn}
+					className="flex-1 text-muted-foreground"
+				>
+					Already have an account? Sign in
+				</Button>
+			</div>
+		</form>
 	);
 }

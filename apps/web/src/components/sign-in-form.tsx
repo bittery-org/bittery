@@ -2,7 +2,7 @@ import { useCheckEmail, useSessionState } from "@bittery/core/hooks";
 import { performSRPLogin, storeLoginSession } from "@bittery/core/hooks/auth";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
-import { Button, Card, CardContent, Input, Label, toast } from "@bittery/ui";
+import { Button, Input, Label, toast } from "@bittery/ui";
 import {
 	IconEyeOutlineDuo18 as Eye,
 	IconEyeSlashOutlineDuo18 as EyeOff,
@@ -40,6 +40,7 @@ export default function SignInForm({
 	const registrationStatusQuery = useQuery(
 		trpc.auth.registrationStatus.queryOptions(),
 	);
+	const isCloudMode = registrationStatusQuery.data?.mode !== "self-hosted";
 	const allowPublicSignup =
 		registrationStatusQuery.data?.allowPublicSignup ?? true;
 	const hasInvitationRedirect = !!redirectTo?.startsWith("/invite/");
@@ -138,146 +139,124 @@ export default function SignInForm({
 		}
 	};
 
+	const renderCloudSignupPrompt = () => (
+		<>
+			New to Bittery Cloud?{" "}
+			<button
+				type="button"
+				onClick={onSwitchToSignUp}
+				className="font-medium text-primary underline-offset-4 hover:underline"
+			>
+				View plans and Sign up
+			</button>
+		</>
+	);
+
+	const renderSelfHostedSignupPrompt = () => (
+		<>
+			Don&apos;t have an account?{" "}
+			<button
+				type="button"
+				onClick={onSwitchToSignUp}
+				className="font-medium text-primary underline-offset-4 hover:underline"
+			>
+				Sign up
+			</button>
+		</>
+	);
+
 	return (
-		<div className="w-full mt-6">
+		<div className="w-full">
 			<h1 className="text-center font-semibold text-2xl tracking-tight">
 				{signInTitle}
 			</h1>
 			<p className="mx-auto mt-2 max-w-80 text-center text-muted-foreground text-sm">
 				{signInDescription}
 			</p>
-			<Card className="mt-6">
-				<CardContent>
-					{sessionExpired && (
-						<div className="mb-8 rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-900 dark:bg-yellow-950/30">
-							<div className="flex gap-3">
-								<div className="text-xl">&#9203;</div>
-								<div>
-									<p className="font-medium text-sm text-yellow-900 dark:text-yellow-100">
-										Session Expired
-									</p>
-									<p className="mt-1 text-xs text-yellow-700 dark:text-yellow-300">
-										Your 14-day quick unlock period has ended. Please enter your
-										Secret Key to sign in.
-									</p>
-								</div>
+			<div className="mt-6">
+				{sessionExpired && (
+					<div className="mb-6 rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-900 dark:bg-yellow-950/30">
+						<div className="flex gap-3">
+							<div className="text-xl">&#9203;</div>
+							<div>
+								<p className="font-medium text-sm text-yellow-900 dark:text-yellow-100">
+									Session Expired
+								</p>
+								<p className="mt-1 text-xs text-yellow-700 dark:text-yellow-300">
+									Your 14-day quick unlock period has ended. Please enter your
+									Secret Key to sign in.
+								</p>
 							</div>
+						</div>
+					</div>
+				)}
+
+				<form
+					onSubmit={(e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						form.handleSubmit();
+					}}
+					className="space-y-4"
+				>
+					<div>
+						<form.Field name="email">
+							{(field) => (
+								<div className="space-y-2">
+									<Label htmlFor={field.name}>Email</Label>
+									<Input
+										id={field.name}
+										name={field.name}
+										type="email"
+										placeholder="name@example.com"
+										value={field.state.value}
+										onBlur={(e) => {
+											field.handleBlur();
+											handleEmailBlur(e.target.value);
+										}}
+										onChange={(e) => field.handleChange(e.target.value)}
+										required
+										disabled={isQuickUnlock}
+										className="h-10"
+									/>
+								</div>
+							)}
+						</form.Field>
+					</div>
+
+					{emailCheck?.secretKeyHint && !isQuickUnlock && (
+						<div className="rounded-md bg-muted px-3 py-2 text-muted-foreground text-xs">
+							<span className="font-medium">Hint:</span>{" "}
+							{emailCheck.secretKeyHint}
 						</div>
 					)}
 
-					<form
-						onSubmit={(e) => {
-							e.preventDefault();
-							e.stopPropagation();
-							form.handleSubmit();
-						}}
-						className="space-y-4"
-					>
+					{!isQuickUnlock && (
 						<div>
-							<form.Field name="email">
+							<form.Field name="secretKey">
 								{(field) => (
 									<div className="space-y-2">
-										<Label htmlFor={field.name}>Email</Label>
-										<Input
-											id={field.name}
-											name={field.name}
-											type="email"
-											placeholder="name@example.com"
-											value={field.state.value}
-											onBlur={(e) => {
-												field.handleBlur();
-												handleEmailBlur(e.target.value);
-											}}
-											onChange={(e) => field.handleChange(e.target.value)}
-											required
-											disabled={isQuickUnlock}
-											className="h-10"
-										/>
-									</div>
-								)}
-							</form.Field>
-						</div>
-
-						{emailCheck?.secretKeyHint && !isQuickUnlock && (
-							<div className="rounded-md bg-muted px-3 py-2 text-muted-foreground text-xs">
-								<span className="font-medium">Hint:</span>{" "}
-								{emailCheck.secretKeyHint}
-							</div>
-						)}
-
-						{!isQuickUnlock && (
-							<div>
-								<form.Field name="secretKey">
-									{(field) => (
-										<div className="space-y-2">
-											<Label htmlFor={field.name}>Secret Key</Label>
-											<div className="relative">
-												<Input
-													id={field.name}
-													name={field.name}
-													type={showSecretKey ? "text" : "password"}
-													value={field.state.value}
-													onBlur={field.handleBlur}
-													onChange={(e) => field.handleChange(e.target.value)}
-													placeholder="A3-XXXXXX-XXXXXX-XXXXX-XXXXX-XXXXX"
-													required
-													className="h-10 pr-10 font-mono"
-												/>
-												<Button
-													type="button"
-													variant="ghost"
-													size="icon"
-													className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
-													onClick={() => setShowSecretKey(!showSecretKey)}
-												>
-													{showSecretKey ? (
-														<EyeOff size={16} />
-													) : (
-														<Eye size={16} />
-													)}
-												</Button>
-											</div>
-										</div>
-									)}
-								</form.Field>
-							</div>
-						)}
-
-						<div>
-							<form.Field name="password">
-								{(field) => (
-									<div className="space-y-2">
-										<div className="flex items-center justify-between">
-											<Label htmlFor={field.name}>Password</Label>
-											{!isQuickUnlock && (
-												<button
-													type="button"
-													onClick={() => navigate({ to: "/recover" })}
-													className="text-muted-foreground text-xs underline-offset-4 hover:text-foreground hover:underline"
-												>
-													Forgot Password?
-												</button>
-											)}
-										</div>
+										<Label htmlFor={field.name}>Secret Key</Label>
 										<div className="relative">
 											<Input
 												id={field.name}
 												name={field.name}
-												type={showPassword ? "text" : "password"}
+												type={showSecretKey ? "text" : "password"}
 												value={field.state.value}
 												onBlur={field.handleBlur}
 												onChange={(e) => field.handleChange(e.target.value)}
+												placeholder="A3-XXXXXX-XXXXXX-XXXXX-XXXXX-XXXXX"
 												required
-												className="h-10 pr-10"
+												className="h-10 pr-10 font-mono"
 											/>
 											<Button
 												type="button"
 												variant="ghost"
 												size="icon"
 												className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
-												onClick={() => setShowPassword(!showPassword)}
+												onClick={() => setShowSecretKey(!showSecretKey)}
 											>
-												{showPassword ? (
+												{showSecretKey ? (
 													<EyeOff size={16} />
 												) : (
 													<Eye size={16} />
@@ -288,79 +267,120 @@ export default function SignInForm({
 								)}
 							</form.Field>
 						</div>
+					)}
 
-						<Button
-							type="submit"
-							className="h-10 w-full font-medium"
-							disabled={loginMutation.isPending}
-						>
-							{loginMutation.isPending ? (
-								<>
-									<Loader2 size={16} className="mr-2 animate-spin" />
-									Signing in...
-								</>
-							) : isQuickUnlock ? (
-								"Unlock Vault"
-							) : (
-								"Sign In"
-							)}
-						</Button>
-
-						{isQuickUnlock && (
-							<>
-								<Button
-									type="button"
-									variant="link"
-									onClick={async () => {
-										// Clear session data from storage
-										await storage.clearSession();
-										// Clear form values
-										form.setFieldValue("email", "");
-										form.setFieldValue("secretKey", "");
-										setEmail("");
-										setSessionExpired(false);
-										// Force refresh session state
-										window.location.reload();
-									}}
-									className="w-full text-muted-foreground"
-								>
-									Sign in with a different account
-								</Button>
-								{canShowSignup && (
-									<div className="mt-2 text-center text-muted-foreground text-sm">
-										Need a different account?{" "}
-										<button
-											type="button"
-											onClick={onSwitchToSignUp}
-											className="font-medium text-primary underline-offset-4 hover:underline"
-										>
-											Create another account
-										</button>
+					<div>
+						<form.Field name="password">
+							{(field) => (
+								<div className="space-y-2">
+									<div className="flex items-center justify-between">
+										<Label htmlFor={field.name}>Password</Label>
+										{!isQuickUnlock && (
+											<button
+												type="button"
+												onClick={() => navigate({ to: "/recover" })}
+												className="text-muted-foreground text-xs underline-offset-4 hover:text-foreground hover:underline"
+											>
+												Forgot Password?
+											</button>
+										)}
 									</div>
-								)}
-							</>
-						)}
+									<div className="relative">
+										<Input
+											id={field.name}
+											name={field.name}
+											type={showPassword ? "text" : "password"}
+											value={field.state.value}
+											onBlur={field.handleBlur}
+											onChange={(e) => field.handleChange(e.target.value)}
+											required
+											className="h-10 pr-10"
+										/>
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon"
+											className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
+											onClick={() => setShowPassword(!showPassword)}
+										>
+											{showPassword ? (
+												<EyeOff size={16} />
+											) : (
+												<Eye size={16} />
+											)}
+										</Button>
+									</div>
+								</div>
+							)}
+						</form.Field>
+					</div>
 
-						{!isQuickUnlock &&
-							(canShowSignup ? (
-								<div className="mt-4 text-center text-muted-foreground text-sm">
-									Don&apos;t have an account?{" "}
+					<Button
+						type="submit"
+						className="h-10 w-full font-medium"
+						disabled={loginMutation.isPending}
+					>
+						{loginMutation.isPending ? (
+							<>
+								<Loader2 size={16} className="mr-2 animate-spin" />
+								Signing in...
+							</>
+						) : isQuickUnlock ? (
+							"Unlock Vault"
+						) : (
+							"Sign In"
+						)}
+					</Button>
+
+					{isQuickUnlock && (
+						<>
+							<Button
+								type="button"
+								variant="link"
+								onClick={async () => {
+									// Clear session data from storage
+									await storage.clearSession();
+									// Clear form values
+									form.setFieldValue("email", "");
+									form.setFieldValue("secretKey", "");
+									setEmail("");
+									setSessionExpired(false);
+									// Force refresh session state
+									window.location.reload();
+								}}
+								className="w-full text-muted-foreground"
+							>
+								Sign in with a different account
+							</Button>
+							{canShowSignup && (
+								<div className="mt-2 text-center text-muted-foreground text-sm">
+									Need a different account?{" "}
 									<button
 										type="button"
 										onClick={onSwitchToSignUp}
 										className="font-medium text-primary underline-offset-4 hover:underline"
 									>
-										Sign up
+										Create another account
 									</button>
 								</div>
-							) : (
-								<div className="mt-4 text-center text-muted-foreground text-sm">
-									Registration is disabled on this server.
-								</div>
-							))}
-					</form>
-				</CardContent>
-			</Card>
+							)}
+						</>
+					)}
+
+					{!isQuickUnlock &&
+						(canShowSignup ? (
+							<div className="mt-4 text-center text-muted-foreground text-sm">
+								{isCloudMode
+									? renderCloudSignupPrompt()
+									: renderSelfHostedSignupPrompt()}
+							</div>
+						) : (
+							<div className="mt-4 text-center text-muted-foreground text-sm">
+								Registration is disabled on this server.
+							</div>
+						))}
+				</form>
+			</div>
 		</div>
 	);
 }

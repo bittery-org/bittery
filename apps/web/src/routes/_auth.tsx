@@ -126,7 +126,7 @@ function AuthLayout() {
 			{/* Right panel — content area */}
 			<div className="flex min-h-svh flex-1 flex-col bg-white dark:bg-gray-900 md:h-svh md:min-h-0">
 				{/* Mobile logo */}
-				<div className="flex shrink-0 px-5 pt-5 sm:px-8 sm:pt-6 md:hidden">
+				<div className="flex items-center justify-center shrink-0 px-5 pt-4 sm:px-8 sm:pt-6 md:hidden">
 					<a
 						href="https://bittery.com"
 						target="_blank"
@@ -141,7 +141,7 @@ function AuthLayout() {
 					id="auth-scroll-area"
 					className="flex flex-1 flex-col px-4 py-8 sm:px-6 md:min-h-0 md:overflow-y-auto md:pt-12"
 				>
-					<div className="flex flex-1 items-center justify-center md:items-start">
+					<div className="flex flex-1 justify-center items-center">
 						<div className="w-full max-w-110">
 							<Outlet />
 						</div>
