@@ -10,7 +10,7 @@ import {
 } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, Fragment, useMemo, useState } from "react";
-import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
+
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { storage } from "@/lib/storage";
 import { generateSecretKeyAsync } from "@/lib/wasm-crypto";
@@ -90,8 +90,6 @@ function RecoverRouteComponent() {
 			toast.error("Please enter your email");
 			return;
 		}
-
-		await resolveActiveAuthServerUrl();
 
 		setIsSubmitting(true);
 		try {
@@ -179,8 +177,6 @@ function RecoverRouteComponent() {
 			toast.error("Passwords do not match");
 			return;
 		}
-
-		await resolveActiveAuthServerUrl();
 
 		setIsSubmitting(true);
 		const workerCrypto = new WorkerCrypto();

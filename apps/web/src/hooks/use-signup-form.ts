@@ -5,7 +5,7 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
+
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { storage } from "@/lib/storage";
 import {
@@ -137,7 +137,6 @@ export function useSignupForm({
 			organizationName: "",
 		},
 		onSubmit: async ({ value }) => {
-			await resolveActiveAuthServerUrl();
 
 			if (!hasDownloadedKit) {
 				toast.error("Please download your Emergency Kit before continuing");

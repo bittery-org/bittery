@@ -1,103 +1,14 @@
 import {
-	Button,
-	Input,
-	Popover,
-	PopoverContent,
-	PopoverTrigger,
-	toast,
-} from "@bittery/ui";
-import {
-	IconCheckOutlineDuo18 as Check,
-	IconChevronDownOutlineDuo18 as ChevronDown,
 	IconExternalLinkOutlineDuo18 as ExternalLink,
 	IconLockOutlineDuo18,
-	IconPlusOutlineDuo18 as Plus,
-	IconConnectedDots3OutlineDuo18 as Server,
 } from "@bittery/ui/icons";
-import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Outlet } from "@tanstack/react-router";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
-import {
-	readKnownServerUrls,
-	resolveActiveAuthServerUrl,
-	setActiveAuthServerUrl,
-} from "@/lib/auth-server";
 
 export const Route = createFileRoute("/_auth")({
 	component: AuthLayout,
 });
 
-function getServerLabel(serverUrl: string): string {
-	try {
-		const parsed = new URL(serverUrl);
-		return `${parsed.hostname}${parsed.port ? `:${parsed.port}` : ""}`;
-	} catch {
-		return serverUrl;
-	}
-}
-
 function AuthLayout() {
-	const queryClient = useQueryClient();
-	const [activeServerUrl, setActiveServerUrl] = useState("");
-	const [knownServerUrls, setKnownServerUrls] = useState<string[]>([]);
-	const [isServerPopoverOpen, setIsServerPopoverOpen] = useState(false);
-	const [newServerUrl, setNewServerUrl] = useState("");
-
-	useEffect(() => {
-		let isMounted = true;
-
-		const hydrateServerState = async () => {
-			const currentServerUrl = await resolveActiveAuthServerUrl();
-			if (!isMounted) {
-				return;
-			}
-
-			setActiveServerUrl(currentServerUrl);
-			setKnownServerUrls(readKnownServerUrls());
-		};
-
-		void hydrateServerState();
-
-		return () => {
-			isMounted = false;
-		};
-	}, []);
-
-	const activeServerLabel = useMemo(
-		() => getServerLabel(activeServerUrl),
-		[activeServerUrl],
-	);
-
-	const applyServerChange = async (serverUrl: string) => {
-		const nextServerUrl = await setActiveAuthServerUrl(serverUrl);
-		if (!nextServerUrl) {
-			toast.error("Please enter a valid server URL.");
-			return false;
-		}
-
-		setActiveServerUrl(nextServerUrl);
-		setKnownServerUrls(readKnownServerUrls());
-		await queryClient.invalidateQueries();
-		return true;
-	};
-
-	const handleAddServer = async (event: FormEvent) => {
-		event.preventDefault();
-		if (!(await applyServerChange(newServerUrl))) {
-			return;
-		}
-
-		setNewServerUrl("");
-		setIsServerPopoverOpen(false);
-		toast.success("Server updated.");
-	};
-
-	const handleSelectServer = async (serverUrl: string) => {
-		if (await applyServerChange(serverUrl)) {
-			setIsServerPopoverOpen(false);
-		}
-	};
-
 	return (
 		<div className="flex min-h-svh flex-col md:h-svh md:flex-row md:overflow-hidden">
 			{/* Left panel — branding sidebar */}
@@ -150,67 +61,7 @@ function AuthLayout() {
 
 				{/* Footer */}
 				<footer className="shrink-0 px-4">
-					<div className="mx-auto flex max-w-110 flex-col items-center gap-3 py-1.5 sm:flex-row sm:justify-between">
-						<Popover
-							open={isServerPopoverOpen}
-							onOpenChange={setIsServerPopoverOpen}
-						>
-							<PopoverTrigger asChild>
-								<Button
-									type="button"
-									variant="ghost"
-									size="sm"
-									className="h-7 gap-1 px-3 text-muted-foreground/70 text-xs hover:text-muted-foreground sm:px-4"
-								>
-									<Server size={12} />
-									<span className="max-w-44 truncate">
-										{activeServerLabel || "Loading server..."}
-									</span>
-									<ChevronDown size={12} className="opacity-60" />
-								</Button>
-							</PopoverTrigger>
-							<PopoverContent align="start" className="w-72 p-2">
-								<p className="px-1 pb-2 font-medium text-[0.65rem] text-muted-foreground uppercase tracking-[0.1em]">
-									Server
-								</p>
-								<div className="space-y-1">
-									{knownServerUrls.map((serverUrl) => (
-										<Button
-											key={serverUrl}
-											type="button"
-											variant="ghost"
-											size="sm"
-											onClick={() => {
-												void handleSelectServer(serverUrl);
-											}}
-											className="h-8 w-full justify-between px-2 text-xs"
-										>
-											<span className="truncate">
-												{getServerLabel(serverUrl)}
-											</span>
-											{serverUrl === activeServerUrl ? (
-												<Check size={12} className="shrink-0 text-primary" />
-											) : null}
-										</Button>
-									))}
-								</div>
-								<form
-									onSubmit={handleAddServer}
-									className="mt-2 flex gap-2 border-t pt-2"
-								>
-									<Input
-										type="url"
-										placeholder="https://your-server.com"
-										value={newServerUrl}
-										onChange={(event) => setNewServerUrl(event.target.value)}
-										className="h-8 text-xs"
-									/>
-									<Button type="submit" size="sm" className="h-8 px-3">
-										<Plus size={12} />
-									</Button>
-								</form>
-							</PopoverContent>
-						</Popover>
+					<div className="mx-auto flex max-w-110 flex-col items-center gap-3 py-1.5 sm:flex-row sm:justify-center">
 						<div className="flex items-center gap-4">
 							<a
 								href="https://github.com/bittery-org/bittery"

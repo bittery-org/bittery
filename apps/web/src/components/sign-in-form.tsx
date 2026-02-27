@@ -12,7 +12,7 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
+
 import { storage } from "@/lib/storage";
 import { WorkerCrypto } from "@/lib/worker-crypto";
 
@@ -113,7 +113,6 @@ export default function SignInForm({
 			secretKey: "",
 		},
 		onSubmit: async ({ value }) => {
-			await resolveActiveAuthServerUrl();
 			await loginMutation.mutateAsync(value);
 		},
 	});
@@ -134,7 +133,6 @@ export default function SignInForm({
 
 	const handleEmailBlur = async (newEmail: string) => {
 		if (newEmail?.includes("@")) {
-			await resolveActiveAuthServerUrl();
 			setEmail(newEmail);
 		}
 	};

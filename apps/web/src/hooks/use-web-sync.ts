@@ -2,7 +2,8 @@ import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core";
 import { getOrCreateClientId, type SyncStorage, useSync } from "@bittery/sync";
 import type { ICrypto } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
+import { getServerUrl } from "@/lib/auth-server";
 import { storage } from "@/lib/storage";
 import * as wasmCrypto from "@/lib/wasm-crypto";
 
@@ -70,17 +71,13 @@ const crypto: ICrypto = {
  * Web-specific sync hook that integrates with existing auth system
  */
 export function useWebSync(queryClient: QueryClient, enabled = true) {
-	const [serverUrl, setServerUrl] = useState("");
+	const serverUrl = getServerUrl();
 	const clientId = useMemo(() => getClientId(), []);
 	const syncStorage = useMemo(() => new WebSyncStorage(), []);
 	const vaultCoordinator = useMemo(
 		() => getOrCreateVaultRepositoryCoordinator(crypto, storage),
 		[],
 	);
-
-	useEffect(() => {
-		storage.getServerUrl().then((url) => setServerUrl(url || ""));
-	}, []);
 
 	const getAuthTokenAsync = useCallback(async () => {
 		return (await storage.getAuthToken()) || null;
@@ -92,7 +89,7 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 		clientId,
 		queryClient,
 		storage: syncStorage,
-		enabled: enabled && !!serverUrl,
+		enabled,
 		itemCacheAdapter: vaultCoordinator,
 	});
 }

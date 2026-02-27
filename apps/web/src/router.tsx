@@ -1,10 +1,11 @@
 import type { AppRouter } from "@bittery/api/routers/index";
-import { buildTrpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
+import { buildTrpcUrl } from "@bittery/shared/server-url";
 import { TRPCProvider } from "@bittery/shared/trpc";
 import { getOrCreateClientId } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { PendingLoader } from "./components/loader";
+import { getServerUrl } from "./lib/auth-server";
 import { storage } from "./lib/storage";
 import "./index.css";
 import { initWasmCrypto } from "./lib/wasm-crypto";
@@ -83,11 +84,7 @@ export const queryClient = new QueryClient({
 	defaultOptions: { queries: { staleTime: 60 * 1000 } },
 });
 
-const fallbackServerUrl =
-	normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
-	(typeof window !== "undefined"
-		? window.location.origin
-		: "http://localhost:3000");
+const serverUrl = getServerUrl();
 
 function getSyncClientIdHeader(): string | null {
 	if (typeof window === "undefined") {
@@ -104,9 +101,8 @@ function getSyncClientIdHeader(): string | null {
 const trpcClient = createTRPCClient<AppRouter>({
 	links: [
 		httpBatchLink({
-			url: `${fallbackServerUrl}/trpc`,
+			url: `${serverUrl}/trpc`,
 			async fetch(url, options) {
-				const serverUrl = (await storage.getServerUrl()) ?? fallbackServerUrl;
 				const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
 				const authToken = await storage.getAuthToken();
 				const syncClientId = getSyncClientIdHeader();
