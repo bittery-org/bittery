@@ -17,7 +17,7 @@ const footerLinks = [
 			{ label: "Documentation", href: "/docs" },
 			{ label: "Help Center", href: "/docs" },
 			{ label: "Security", href: "/docs/security" },
-			{ label: "Status", href: "/#" },
+			{ label: "Status", href: "https://status.bittery.com", external: true },
 		],
 	},
 	{
