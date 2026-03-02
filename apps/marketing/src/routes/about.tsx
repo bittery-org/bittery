@@ -18,6 +18,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Layout } from "@/components/layout";
 import { cn } from "@/lib/utils";
+import { signupUrl } from "@/lib/urls";
 
 export const Route = createFileRoute("/about")({
 	component: AboutPage,
@@ -520,7 +521,7 @@ function AboutPage() {
 									className="gap-2 rounded-full px-7"
 									asChild
 								>
-									<a href="https://app.bittery.com">
+								<a href={signupUrl()}>
 										Get started free
 										<ArrowRight className="size-4" />
 									</a>

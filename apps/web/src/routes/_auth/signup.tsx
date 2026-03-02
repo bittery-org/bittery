@@ -4,6 +4,7 @@ import SignUpForm from "@/components/sign-up-form";
 
 const searchSchema = z.object({
 	redirect: z.string().optional(),
+	plan: z.string().optional(),
 });
 
 export const Route = createFileRoute("/_auth/signup")({

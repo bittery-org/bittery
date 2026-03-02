@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import { type CloudPlanId, planFeatureBullets, planInfo } from "@bittery/shared/pricing";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { signupUrl } from "@/lib/urls";
 import { PricingComparison } from "./pricing-comparison";
 
 const planExtras: Record<CloudPlanId, {
@@ -88,14 +89,12 @@ export function PricingSection() {
 							<Button
 								variant={plan.ctaVariant}
 								className="mb-5 w-full gap-2 rounded-full"
+								asChild
 							>
-								{plan.ctaVariant === "outline" && (
+								<a href={signupUrl(plan.id)}>
+									{plan.cta}
 									<plan.ctaIcon className="size-4" />
-								)}
-								{plan.cta}
-								{plan.ctaVariant === "default" && (
-									<plan.ctaIcon className="size-4" />
-								)}
+								</a>
 							</Button>
 
 							<ul className="space-y-2.5">

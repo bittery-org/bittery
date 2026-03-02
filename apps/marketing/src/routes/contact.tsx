@@ -13,6 +13,7 @@ import { motion } from "motion/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Layout } from "@/components/layout";
+import { signupUrl } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/contact")({
@@ -322,7 +323,7 @@ function ContactPage() {
 									className="gap-2 rounded-full px-7"
 									asChild
 								>
-									<a href="https://app.bittery.com">
+								<a href={signupUrl()}>
 										Get started free
 										<ArrowRight className="size-4" />
 									</a>

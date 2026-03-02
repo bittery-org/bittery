@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "@/components/ui/button";
+import { signupUrl } from "@/lib/urls";
 
 function FloatingIcon({
 	icon: Icon,
@@ -165,9 +166,12 @@ export function HeroVault() {
 							<Button
 								size="lg"
 								className="h-11 gap-2 rounded-full px-7 text-sm"
+								asChild
 							>
-								Get Started
-								<ArrowRight className="size-4" />
+								<a href={signupUrl()}>
+									Get Started
+									<ArrowRight className="size-4" />
+								</a>
 							</Button>
 							<Button
 								size="lg"

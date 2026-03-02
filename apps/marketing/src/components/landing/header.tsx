@@ -5,6 +5,7 @@ import { Link, useLocation } from "@tanstack/react-router";
 import { BitteryLogo } from "@/components/bittery-logo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { signupUrl } from "@/lib/urls";
 
 interface NavLink {
 	label: string;
@@ -190,8 +191,8 @@ export function Header() {
 
 				<div className="flex items-center gap-1.5">
 					<ThemeToggle />
-					<Button size="sm" className="rounded-full px-5 font-semibold text-xs">
-						Get Started
+					<Button size="sm" className="rounded-full px-5 font-semibold text-xs" asChild>
+						<a href={signupUrl()}>Get Started</a>
 					</Button>
 					<button
 						type="button"
