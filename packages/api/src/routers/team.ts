@@ -11,7 +11,7 @@ import {
 	vaultKeyRotation,
 } from "@bittery/db/schema/vault";
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { resolveEffectiveEntitlements } from "../billing/entitlements";

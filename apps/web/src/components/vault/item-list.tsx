@@ -32,6 +32,7 @@ interface ItemListProps {
 	items: DecryptedItem[];
 	isLoading: boolean;
 	vaultId: string;
+	canWriteItems?: boolean;
 	onItemSelect?: (item: DecryptedItem) => void;
 	selectedItemId?: string;
 	selectionMode?: boolean;
@@ -54,6 +55,7 @@ export function ItemList({
 	items,
 	isLoading,
 	vaultId,
+	canWriteItems = true,
 	onItemSelect,
 	selectedItemId,
 	selectionMode = false,
@@ -283,7 +285,7 @@ export function ItemList({
 					<p className="max-w-sm text-muted-foreground text-sm">
 						{hasActiveFilters
 							? "Try adjusting your search or filters"
-							: "Create your first item in the desktop app"}
+							: "Create your first item to get started"}
 					</p>
 				</div>
 			) : (
@@ -305,6 +307,7 @@ export function ItemList({
 										isSelected={selectedItemId === item.id}
 										onSelect={onItemSelect}
 										onToggleFavorite={handleToggleFavorite}
+										canWriteItems={canWriteItems}
 										selectionMode={selectionMode}
 										isChecked={selectedItemIds.includes(item.id)}
 										onToggleCheck={() => handleToggleSelection(item.id)}
@@ -328,6 +331,7 @@ export function ItemList({
 										isSelected={selectedItemId === item.id}
 										onSelect={onItemSelect}
 										onToggleFavorite={handleToggleFavorite}
+										canWriteItems={canWriteItems}
 										selectionMode={selectionMode}
 										isChecked={selectedItemIds.includes(item.id)}
 										onToggleCheck={() => handleToggleSelection(item.id)}
@@ -351,6 +355,7 @@ interface ItemRowProps {
 		itemId: string,
 		currentFavorite: boolean,
 	) => void;
+	canWriteItems: boolean;
 	selectionMode?: boolean;
 	isChecked?: boolean;
 	onToggleCheck?: () => void;
@@ -361,6 +366,7 @@ function ItemRow({
 	isSelected,
 	onSelect,
 	onToggleFavorite,
+	canWriteItems,
 	selectionMode = false,
 	isChecked = false,
 	onToggleCheck,
@@ -458,7 +464,7 @@ function ItemRow({
 			</div>
 
 			{/* Favorite button - interactive, above the overlay */}
-			{!selectionMode && (
+			{!selectionMode && canWriteItems && (
 				<button
 					type="button"
 					onClick={(e) => onToggleFavorite(e, item.id, item.favorite)}

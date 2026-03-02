@@ -199,13 +199,30 @@ describe("Team Router", () => {
 	});
 
 	describe("leave", () => {
-		test("should reject leaving team (not allowed in new architecture)", async () => {
+		test("should reject owner from leaving team", async () => {
 			const { caller, userId } = await setup(teamRouter);
-			const teamId = await createTestTeam(userId);
+			const teamId = await createTestTeam(userId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 
-			await expect(caller.leave({ teamId })).rejects.toThrow(
-				"You cannot leave your team",
-			);
+			await expect(
+				caller.leave({ teamId, vaultRotations: [] }),
+			).rejects.toThrow("The team owner cannot leave");
+		});
+
+		test("should reject leaving a personal team", async () => {
+			const [{ userId: ownerId }, { userId: memberId, caller: memberCaller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
+			const teamId = await createTestTeam(ownerId, {
+				type: "personal",
+			});
+			await addTeamMember(teamId, memberId, "member");
+
+			await expect(
+				memberCaller.leave({ teamId, vaultRotations: [] }),
+			).rejects.toThrow("You cannot leave a personal team");
 		});
 	});
 
@@ -229,7 +246,7 @@ describe("Team Router", () => {
 	});
 
 	describe("members.remove", () => {
-		test("should remove member, revoke team vault keys, and invalidate sessions", async () => {
+		test("should remove member with empty vault rotations when no team vaults exist", async () => {
 			const [{ userId: ownerId, caller }, { userId: memberId }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);
 			const teamId = await createTestTeam(ownerId, {
@@ -238,25 +255,23 @@ describe("Team Router", () => {
 				type: "family",
 			});
 			await addTeamMember(teamId, memberId, "member");
-			const teamVaultId = await createTestVault(ownerId, {
-				type: "team",
-				teamId,
-				name: "Shared Vault",
-			});
-			await addVaultMember(teamVaultId, memberId, "member");
 			const sessionId = await createTestSession(memberId);
 
-			const result = await caller.members.remove({ teamId, userId: memberId });
+			const result = await caller.members.remove({
+				teamId,
+				userId: memberId,
+				vaultRotations: [],
+			});
 
 			expect(result.success).toBe(true);
-			expect(result.warning).toBe("rotate_shared_credentials");
+			expect(result.vaultRotations).toEqual([]);
+			// Removed user should now have a personal team (not orphaned)
+			const removedUser = await getUser(memberId);
+			expect(removedUser).toBeDefined();
+			expect(removedUser?.teamId).toBeDefined();
+			expect(removedUser?.teamId).not.toBe(teamId);
+			expect(removedUser?.role).toBe("owner");
 			expect(await getTeamMember(teamId, memberId)).toBeUndefined();
-
-			const revokedVaultKey = await db.query.vaultKey.findFirst({
-				where: (vk, { and, eq }) =>
-					and(eq(vk.vaultId, teamVaultId), eq(vk.userId, memberId)),
-			});
-			expect(revokedVaultKey).toBeUndefined();
 			expect(await getSession(sessionId)).toBeUndefined();
 		});
 
@@ -281,6 +296,7 @@ describe("Team Router", () => {
 			const result = await adminCaller.members.remove({
 				teamId,
 				userId: adminTargetId,
+				vaultRotations: [],
 			});
 
 			expect(result.success).toBe(true);
@@ -298,7 +314,11 @@ describe("Team Router", () => {
 			await addTeamMember(teamId, adminId, "admin");
 
 			await expect(
-				adminCaller.members.remove({ teamId, userId: ownerId }),
+				adminCaller.members.remove({
+					teamId,
+					userId: ownerId,
+					vaultRotations: [],
+				}),
 			).rejects.toThrow("The team owner cannot be removed");
 		});
 
@@ -310,14 +330,14 @@ describe("Team Router", () => {
 				type: "family",
 			});
 
-			await expect(caller.members.remove({ teamId, userId })).rejects.toThrow(
-				"You cannot remove yourself from the team",
-			);
+			await expect(
+				caller.members.remove({ teamId, userId, vaultRotations: [] }),
+			).rejects.toThrow("You cannot remove yourself from the team");
 		});
 	});
 
 	describe("members.deleteAccount", () => {
-		test("should allow owner to permanently delete non-owner", async () => {
+		test("should reject with deprecation message", async () => {
 			const [{ userId: ownerId, caller }, { userId: memberId }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);
 			const teamId = await createTestTeam(ownerId, {
@@ -326,55 +346,19 @@ describe("Team Router", () => {
 				type: "family",
 			});
 			await addTeamMember(teamId, memberId, "member");
-			const sessionId = await createTestSession(memberId);
-
-			const result = await caller.members.deleteAccount({
-				teamId,
-				userId: memberId,
-				confirmation: "DELETE",
-			});
-
-			expect(result.success).toBe(true);
-			expect(await getUser(memberId)).toBeUndefined();
-			expect(await getSession(sessionId)).toBeUndefined();
-		});
-
-		test("should deny admin from permanently deleting accounts", async () => {
-			const [{ userId: ownerId }, { userId: adminId, caller: adminCaller }] =
-				await Promise.all([setup(teamRouter), setup(teamRouter)]);
-			const teamId = await createTestTeam(ownerId, {
-				billingPlan: "family",
-				billingStatus: "active",
-				type: "family",
-			});
-			await addTeamMember(teamId, adminId, "admin");
-
-			await expect(
-				adminCaller.members.deleteAccount({
-					teamId,
-					userId: ownerId,
-					confirmation: "DELETE",
-				}),
-			).rejects.toThrow("Only the team owner can permanently delete accounts");
-		});
-
-		test("should deny owner from deleting self", async () => {
-			const { userId, caller } = await setup(teamRouter);
-			const teamId = await createTestTeam(userId, {
-				billingPlan: "family",
-				billingStatus: "active",
-				type: "family",
-			});
 
 			await expect(
 				caller.members.deleteAccount({
 					teamId,
-					userId,
+					userId: memberId,
 					confirmation: "DELETE",
 				}),
 			).rejects.toThrow(
-				"You cannot delete your own account from team management",
+				"Account deletion by team admins is no longer supported",
 			);
+
+			// User should still exist
+			expect(await getUser(memberId)).toBeDefined();
 		});
 	});
 
