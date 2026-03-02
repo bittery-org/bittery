@@ -9,14 +9,15 @@ import { cn } from "@/lib/utils";
 interface NavLink {
 	label: string;
 	href: string;
+	hash?: string;
 	sectionId: string | null;
 	isExternal?: boolean;
 }
 
 const navLinks: NavLink[] = [
-	{ label: "Features", href: "/#features", sectionId: "features" },
-	{ label: "Pricing", href: "/#pricing", sectionId: "pricing" },
-	{ label: "FAQ", href: "/#faq", sectionId: "faq" },
+	{ label: "Features", href: "/", hash: "features", sectionId: "features" },
+	{ label: "Pricing", href: "/", hash: "pricing", sectionId: "pricing" },
+	{ label: "FAQ", href: "/", hash: "faq", sectionId: "faq" },
 	{ label: "Docs", href: "/docs", sectionId: null },
 	{ label: "GitHub", href: "https://github.com/bittery-org/bittery", sectionId: null, isExternal: true },
 ];
@@ -173,8 +174,9 @@ export function Header() {
 
 						return (
 							<Link
-								key={link.href}
+								key={link.href + (link.hash ?? "")}
 								to={link.href}
+								hash={link.hash}
 								className={linkClassName}
 							>
 								{content}
@@ -232,8 +234,9 @@ export function Header() {
 
 							return (
 								<Link
-									key={link.href}
+									key={link.href + (link.hash ?? "")}
 									to={link.href}
+									hash={link.hash}
 									className={mobileLinkClassName}
 									onClick={() => setMobileOpen(false)}
 								>

@@ -224,7 +224,7 @@ function TermsPage() {
 			</section>
 
 			{/* ─── Terms content ───────────────────────────────────── */}
-			<section className="px-4 pb-16 sm:pb-20">
+			<section className="px-4 pt-8 pb-16 sm:pt-12 sm:pb-20">
 				<div className="mx-auto max-w-3xl">
 					<div className="space-y-8">
 						{sections.map((section, i) => (

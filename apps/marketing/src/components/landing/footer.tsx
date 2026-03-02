@@ -5,10 +5,10 @@ const footerLinks = [
 	{
 		title: "Product",
 		links: [
-			{ label: "Features", href: "/#features" },
-			{ label: "Pricing", href: "/#pricing" },
-			{ label: "Download", href: "/#" },
-			{ label: "Changelog", href: "/#" },
+			{ label: "Features", href: "/", hash: "features" },
+			{ label: "Pricing", href: "/", hash: "pricing" },
+			{ label: "Download", href: "/" },
+			{ label: "Changelog", href: "/" },
 		],
 	},
 	{
@@ -24,7 +24,7 @@ const footerLinks = [
 		title: "Company",
 		links: [
 			{ label: "About", href: "/about" },
-			{ label: "Blog", href: "/#" },
+			{ label: "Blog", href: "/" },
 			{ label: "GitHub", href: "https://github.com/bittery-org/bittery", external: true },
 			{ label: "Contact", href: "/contact" },
 		],
