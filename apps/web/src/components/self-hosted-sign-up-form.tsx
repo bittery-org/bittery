@@ -123,26 +123,6 @@ export default function SelfHostedSignUpForm({
 					}}
 					className="space-y-4"
 				>
-						<div>
-							<form.Field name="name">
-								{(field) => (
-									<div className="space-y-2">
-										<Label htmlFor={field.name}>Full Name</Label>
-										<Input
-											id={field.name}
-											name={field.name}
-											placeholder="John Doe"
-											value={field.state.value}
-											onBlur={field.handleBlur}
-											onChange={(e) => field.handleChange(e.target.value)}
-											required
-											className="h-10"
-										/>
-									</div>
-								)}
-							</form.Field>
-						</div>
-
 						{isInvitationSignup ? (
 							<div className="rounded-lg border bg-muted/30 p-4">
 								<div className="flex items-start gap-3">
@@ -167,6 +147,26 @@ export default function SelfHostedSignUpForm({
 								</div>
 							</div>
 						) : null}
+
+						<div>
+							<form.Field name="name">
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name}>Full Name</Label>
+										<Input
+											id={field.name}
+											name={field.name}
+											placeholder="John Doe"
+											value={field.state.value}
+											onBlur={field.handleBlur}
+											onChange={(e) => field.handleChange(e.target.value)}
+											required
+											className="h-10"
+										/>
+									</div>
+								)}
+							</form.Field>
+						</div>
 
 						<div>
 							<form.Field name="email">
