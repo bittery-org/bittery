@@ -133,4 +133,4 @@ BITTERY_STORAGE_CDN_URL=        # or BITTERY_STORAGE_PUBLIC_URL
 
 ## License
 
-This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+This project is licensed under the [Functional Source License 1.1 (FSL-1.1-ALv2)](LICENSE). After two years, each release converts to the Apache License 2.0.

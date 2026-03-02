@@ -2,7 +2,7 @@
 name = "bittery-crypto-napi"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "FSL-1.1-ALv2"
 description = "NAPI bindings for Bittery crypto (Node.js/Bun server)"
 
 [lib]

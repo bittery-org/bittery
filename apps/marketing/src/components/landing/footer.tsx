@@ -26,15 +26,15 @@ const footerLinks = [
 			{ label: "About", href: "/about" },
 			{ label: "Blog", href: "/#" },
 			{ label: "GitHub", href: "https://github.com/bittery-org/bittery", external: true },
-			{ label: "Contact", href: "/#" },
+			{ label: "Contact", href: "/contact" },
 		],
 	},
 	{
 		title: "Legal",
 		links: [
-			{ label: "Privacy", href: "/#" },
-			{ label: "Terms", href: "/#" },
-			{ label: "License", href: "/#" },
+			{ label: "Privacy", href: "/privacy" },
+			{ label: "Terms", href: "/terms" },
+			{ label: "License", href: "https://github.com/bittery-org/bittery/blob/main/LICENSE", external: true },
 		],
 	},
 ];

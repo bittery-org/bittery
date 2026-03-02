@@ -27,7 +27,7 @@ cat > package.json << 'EOF'
   "type": "module",
   "description": "WebAssembly bindings for Bittery crypto",
   "version": "0.1.0",
-  "license": "MIT",
+  "license": "FSL-1.1-ALv2",
   "files": [
     "bittery_crypto_bg.wasm",
     "bittery_crypto_bg.wasm.d.ts",
