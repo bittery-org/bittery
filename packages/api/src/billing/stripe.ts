@@ -151,8 +151,6 @@ async function applyCheckoutSessionCompleted(session: Stripe.Checkout.Session) {
 						stripeSubscriptionId: toObjectId(session.subscription as any),
 				  }
 				: {}),
-			billingStatus:
-				plan && plan !== "free" ? "incomplete" : teamData.billingStatus,
 			updatedAt: new Date(),
 		})
 		.where(eq(team.id, teamData.id));
@@ -464,10 +462,10 @@ export async function syncTeamSeatQuantity(teamId: string) {
 	return { synced: true as const, quantity };
 }
 
-export function parseStripeWebhookEvent(
+export async function parseStripeWebhookEvent(
 	rawBody: string,
 	signatureHeader: string | null,
-): Stripe.Event {
+): Promise<Stripe.Event> {
 	const webhookSecret = getStripeWebhookSecret();
 	if (!webhookSecret) {
 		throw new Error("Stripe webhook is not configured (missing STRIPE_WEBHOOK_SECRET)");
@@ -478,7 +476,7 @@ export function parseStripeWebhookEvent(
 	}
 
 	const stripe = getStripeClient();
-	return stripe.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret);
+	return stripe.webhooks.constructEventAsync(rawBody, signatureHeader, webhookSecret);
 }
 
 export function isStripeWebhookConfigured(): boolean {

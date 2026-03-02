@@ -111,7 +111,7 @@ app.post("/webhooks/stripe", async (c) => {
 	const signatureHeader = c.req.header("stripe-signature") || null;
 
 	try {
-		const event = parseStripeWebhookEvent(rawBody, signatureHeader);
+		const event = await parseStripeWebhookEvent(rawBody, signatureHeader);
 		const result = await processStripeWebhookEvent(rawBody, event);
 
 		return c.json({

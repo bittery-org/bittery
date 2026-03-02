@@ -1,7 +1,5 @@
 import { cloudPlanIds, type CloudPlanId } from "../billing/plans";
 
-const stripeApiBaseUrl = "https://api.stripe.com/v1";
-
 type PaidPlanId = Exclude<CloudPlanId, "free">;
 
 const priceEnvByPlan: Record<PaidPlanId, string> = {
@@ -16,10 +14,6 @@ export function getStripeSecretKey(): string | null {
 
 export function getStripeWebhookSecret(): string | null {
 	return process.env.STRIPE_WEBHOOK_SECRET?.trim() || null;
-}
-
-export function getStripeApiBaseUrl(): string {
-	return stripeApiBaseUrl;
 }
 
 export function getStripePriceId(plan: PaidPlanId): string | null {
