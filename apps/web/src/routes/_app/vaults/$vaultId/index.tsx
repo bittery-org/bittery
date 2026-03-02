@@ -429,6 +429,7 @@ function VaultDetailPage() {
 							</Button>
 							{canWriteItems && (
 								<Button
+									variant="outline"
 									size="sm"
 									className="h-8 px-2 text-xs lg:px-3"
 									onClick={() => setIsCreateItemSheetOpen(true)}

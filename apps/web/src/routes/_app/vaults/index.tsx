@@ -2,6 +2,7 @@ import {
 	type CreateVaultInput,
 	useAllVaultKeys,
 	useCreateVault,
+	useDeletedItems,
 	useDeleteVault,
 	useItems,
 	useUpdateVault,
@@ -47,6 +48,8 @@ function VaultsPage() {
 	const navigate = useNavigate();
 	const { vaultKeys, isLoading } = useAllVaultKeys();
 	const { items } = useItems();
+	const { items: deletedItems, isLoading: isLoadingDeletedItems } =
+		useDeletedItems();
 	const createVault = useCreateVault();
 	const updateVault = useUpdateVault();
 	const deleteVault = useDeleteVault();
@@ -55,9 +58,10 @@ function VaultsPage() {
 	const [isEditVaultDialogOpen, setIsEditVaultDialogOpen] = useState(false);
 	const [isDeleteVaultDialogOpen, setIsDeleteVaultDialogOpen] = useState(false);
 	const [editingVault, setEditingVault] = useState<EditVaultData | null>(null);
-	const [deletingVault, setDeletingVault] = useState<
-		{ id: string; name: string } | null
-	>(null);
+	const [deletingVault, setDeletingVault] = useState<{
+		id: string;
+		name: string;
+	} | null>(null);
 
 	// Build per-vault item counts from local decrypted items
 	const itemCountByVault = useMemo(() => {
@@ -70,6 +74,7 @@ function VaultsPage() {
 
 	const totalItems = items.length;
 	const totalVaults = vaultKeys.length;
+	const totalDeletedItems = deletedItems.length;
 
 	const handleCreateVault = async (data: CreateVaultInput) => {
 		const result = await createVault.mutateAsync(data);
@@ -138,13 +143,28 @@ function VaultsPage() {
 							)}
 						</div>
 
-						<Button
-							onClick={() => setIsCreateVaultDialogOpen(true)}
-							data-testid="new-vault-button"
-						>
-							<Plus className="mr-2 h-4 w-4" />
-							New Vault
-						</Button>
+						<div className="flex flex-wrap items-center gap-2">
+							<Button variant="outline" asChild data-testid="open-trash-button">
+								<Link to="/vaults/trash">
+									<Trash className="mr-2 h-4 w-4" />
+									Trash
+									<Badge
+										variant="secondary"
+										className="ml-2 h-5 rounded px-1.5 text-[11px]"
+									>
+										{isLoadingDeletedItems ? "…" : totalDeletedItems}
+									</Badge>
+								</Link>
+							</Button>
+
+							<Button
+								onClick={() => setIsCreateVaultDialogOpen(true)}
+								data-testid="new-vault-button"
+							>
+								<Plus className="mr-2 h-4 w-4" />
+								New Vault
+							</Button>
+						</div>
 					</div>
 				</section>
 

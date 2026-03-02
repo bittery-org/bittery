@@ -23,6 +23,7 @@ import { Route as AppVaultsIndexRouteImport } from './routes/_app/vaults/index'
 import { Route as AppTeamIndexRouteImport } from './routes/_app/team/index'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
 import { Route as AuthInviteTokenRouteImport } from './routes/_auth/invite.$token'
+import { Route as AppVaultsTrashRouteImport } from './routes/_app/vaults/trash'
 import { Route as AppVaultsVaultIdIndexRouteImport } from './routes/_app/vaults/$vaultId/index'
 
 const AuthRoute = AuthRouteImport.update({
@@ -93,6 +94,11 @@ const AuthInviteTokenRoute = AuthInviteTokenRouteImport.update({
   path: '/invite/$token',
   getParentRoute: () => AuthRoute,
 } as any)
+const AppVaultsTrashRoute = AppVaultsTrashRouteImport.update({
+  id: '/vaults/trash',
+  path: '/vaults/trash',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppVaultsVaultIdIndexRoute = AppVaultsVaultIdIndexRouteImport.update({
   id: '/vaults/$vaultId/',
   path: '/vaults/$vaultId/',
@@ -108,6 +114,7 @@ export interface FileRoutesByFullPath {
   '/recover': typeof AuthRecoverRoute
   '/signup': typeof AuthSignupRoute
   '/share/$token': typeof ShareTokenRoute
+  '/vaults/trash': typeof AppVaultsTrashRoute
   '/invite/$token': typeof AuthInviteTokenRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/team/': typeof AppTeamIndexRoute
@@ -123,6 +130,7 @@ export interface FileRoutesByTo {
   '/recover': typeof AuthRecoverRoute
   '/signup': typeof AuthSignupRoute
   '/share/$token': typeof ShareTokenRoute
+  '/vaults/trash': typeof AppVaultsTrashRoute
   '/invite/$token': typeof AuthInviteTokenRoute
   '/settings': typeof AppSettingsIndexRoute
   '/team': typeof AppTeamIndexRoute
@@ -141,6 +149,7 @@ export interface FileRoutesById {
   '/_auth/recover': typeof AuthRecoverRoute
   '/_auth/signup': typeof AuthSignupRoute
   '/share/$token': typeof ShareTokenRoute
+  '/_app/vaults/trash': typeof AppVaultsTrashRoute
   '/_auth/invite/$token': typeof AuthInviteTokenRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/team/': typeof AppTeamIndexRoute
@@ -158,6 +167,7 @@ export interface FileRouteTypes {
     | '/recover'
     | '/signup'
     | '/share/$token'
+    | '/vaults/trash'
     | '/invite/$token'
     | '/settings/'
     | '/team/'
@@ -173,6 +183,7 @@ export interface FileRouteTypes {
     | '/recover'
     | '/signup'
     | '/share/$token'
+    | '/vaults/trash'
     | '/invite/$token'
     | '/settings'
     | '/team'
@@ -190,6 +201,7 @@ export interface FileRouteTypes {
     | '/_auth/recover'
     | '/_auth/signup'
     | '/share/$token'
+    | '/_app/vaults/trash'
     | '/_auth/invite/$token'
     | '/_app/settings/'
     | '/_app/team/'
@@ -304,6 +316,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthInviteTokenRouteImport
       parentRoute: typeof AuthRoute
     }
+    '/_app/vaults/trash': {
+      id: '/_app/vaults/trash'
+      path: '/vaults/trash'
+      fullPath: '/vaults/trash'
+      preLoaderRoute: typeof AppVaultsTrashRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/vaults/$vaultId/': {
       id: '/_app/vaults/$vaultId/'
       path: '/vaults/$vaultId'
@@ -318,6 +337,7 @@ interface AppRouteChildren {
   AppBillingRoute: typeof AppBillingRoute
   AppHomeRoute: typeof AppHomeRoute
   AppSecurityRoute: typeof AppSecurityRoute
+  AppVaultsTrashRoute: typeof AppVaultsTrashRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
   AppTeamIndexRoute: typeof AppTeamIndexRoute
   AppVaultsIndexRoute: typeof AppVaultsIndexRoute
@@ -328,6 +348,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppBillingRoute: AppBillingRoute,
   AppHomeRoute: AppHomeRoute,
   AppSecurityRoute: AppSecurityRoute,
+  AppVaultsTrashRoute: AppVaultsTrashRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
   AppTeamIndexRoute: AppTeamIndexRoute,
   AppVaultsIndexRoute: AppVaultsIndexRoute,
