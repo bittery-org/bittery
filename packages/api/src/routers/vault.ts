@@ -1880,6 +1880,71 @@ export const vaultRouter = router({
 			}),
 
 		/**
+		 * List team members who are NOT already members of this vault.
+		 * Used for the "add member" UI to show available team members.
+		 * Only available for team vaults.
+		 */
+		availableTeamMembers: protectedProcedure
+			.input(z.object({ vaultId: z.string() }))
+			.query(async ({ ctx, input }) => {
+				await assertUserEntitlement(
+					ctx.session.userId,
+					"vault_sharing",
+					"Shared vault management is only available on Family or Team plans with active billing.",
+				);
+
+				// Check user has admin/owner access to this vault
+				const userVaultKey = await db.query.vaultKey.findFirst({
+					where: (vk, { and, eq: eqFn }) =>
+						and(
+							eqFn(vk.vaultId, input.vaultId),
+							eqFn(vk.userId, ctx.session.userId),
+						),
+					with: {
+						vault: true,
+					},
+				});
+
+				if (!userVaultKey || !["owner", "admin"].includes(userVaultKey.role)) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Only vault owner or admin can manage members",
+					});
+				}
+
+				const vaultData = userVaultKey.vault;
+				if (vaultData.type !== "team" || !vaultData.teamId) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "Only team vaults support adding members",
+					});
+				}
+
+				// Get all team members
+				const teamMembers = await db.query.user.findMany({
+					where: (u, { eq: eqFn }) => eqFn(u.teamId, vaultData.teamId!),
+				});
+
+				// Get existing vault members
+				const existingVaultKeys = await db.query.vaultKey.findMany({
+					where: (vk, { eq: eqFn }) => eqFn(vk.vaultId, input.vaultId),
+				});
+				const existingMemberIds = new Set(
+					existingVaultKeys.map((vk) => vk.userId),
+				);
+
+				// Return team members who aren't already in the vault
+				return teamMembers
+					.filter((m) => !existingMemberIds.has(m.id))
+					.map((m) => ({
+						userId: m.id,
+						name: m.name,
+						email: m.email,
+						publicKey: m.publicKey,
+					}));
+			}),
+
+		/**
 		 * Update vault member role (owner/admin only)
 		 */
 		updateRole: protectedProcedure

@@ -478,9 +478,6 @@ function VaultDetailPage() {
 									{!isMobile ? "Delete Vault" : null}
 								</Button>
 							)}
-							{canManageMembers && vaultInfo.vaultType === "team" && (
-								<AddMemberDialog vaultId={vaultId} />
-							)}
 						</div>
 					</div>
 				</section>
@@ -527,19 +524,24 @@ function VaultDetailPage() {
 					</TabsContent>
 
 					<TabsContent value="members" className="mt-4">
-						<div className="space-y-3">
-							<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-								<h2 className="font-semibold text-lg tracking-tight">Vault Members</h2>
-								<p className="text-muted-foreground text-sm">
-									{canManageMembers
-										? "Manage who has access and their permissions."
-										: "People who have access to this vault."}
-								</p>
+						<div className="space-y-4">
+							<div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+								<div>
+									<h2 className="font-semibold text-lg tracking-tight">Vault Members</h2>
+									<p className="text-muted-foreground text-sm">
+										{canManageMembers
+											? "Manage who has access and their permissions."
+											: "People who have access to this vault."}
+									</p>
+								</div>
+								{canManageMembers && vaultInfo.vaultType === "team" && (
+									<AddMemberDialog vaultId={vaultId} />
+								)}
 							</div>
 							{membersQuery.isLoading ? (
-								<div className="grid gap-3 sm:grid-cols-2">
-									<Skeleton className="h-28" />
-									<Skeleton className="h-28" />
+								<div className="space-y-1 overflow-hidden rounded-xl border">
+									<Skeleton className="h-13 rounded-none" />
+									<Skeleton className="h-13 rounded-none" />
 								</div>
 							) : (
 								<VaultMemberList
