@@ -192,6 +192,28 @@ describe("Sync Router", () => {
 	});
 
 	describe("bootstrapItems", () => {
+		test("should include soft-deleted items in bootstrap payload", async () => {
+			const { caller, userId } = await setup(syncRouter);
+			const vaultId = await createTestVault(userId);
+
+			const activeItemId = await createTestItem(vaultId, userId);
+			const deletedItemId = await createTestItem(vaultId, userId, {
+				deletedAt: new Date(),
+			});
+
+			const result = await caller.bootstrapItems({});
+			const returnedItemIds = result.items.map((item) => item.id);
+			const activeItem = result.items.find((item) => item.id === activeItemId);
+			const deletedItem = result.items.find((item) => item.id === deletedItemId);
+
+			expect(returnedItemIds).toContain(activeItemId);
+			expect(returnedItemIds).toContain(deletedItemId);
+			expect(deletedItem).toBeDefined();
+			expect(deletedItem?.deletedAt).not.toBeNull();
+			expect(activeItem).toBeDefined();
+			expect(activeItem?.deletedAt).toBeNull();
+		});
+
 		test("should hide attachment metadata when attachments entitlement is disabled", async () => {
 			const { caller, userId } = await setup(syncRouter);
 			await createTestTeam(userId, {

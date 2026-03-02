@@ -1,6 +1,6 @@
 import { db, item, syncEvent, syncEventAck, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { resolveEffectiveEntitlements } from "../billing/entitlements";
@@ -157,10 +157,9 @@ export const syncRouter = router({
 			const where = input.cursor
 				? and(
 						inArray(item.vaultId, vaultIds),
-						isNull(item.deletedAt),
 						gt(item.id, input.cursor),
 					)
-				: and(inArray(item.vaultId, vaultIds), isNull(item.deletedAt));
+				: and(inArray(item.vaultId, vaultIds));
 
 			const pageItems = await db.query.item.findMany({
 				where,

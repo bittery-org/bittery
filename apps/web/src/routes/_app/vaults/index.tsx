@@ -2,7 +2,6 @@ import {
 	type CreateVaultInput,
 	useAllVaultKeys,
 	useCreateVault,
-	useDeletedItems,
 	useDeleteVault,
 	useItems,
 	useUpdateVault,
@@ -48,8 +47,6 @@ function VaultsPage() {
 	const navigate = useNavigate();
 	const { vaultKeys, isLoading } = useAllVaultKeys();
 	const { items } = useItems();
-	const { items: deletedItems, isLoading: isLoadingDeletedItems } =
-		useDeletedItems();
 	const createVault = useCreateVault();
 	const updateVault = useUpdateVault();
 	const deleteVault = useDeleteVault();
@@ -74,7 +71,6 @@ function VaultsPage() {
 
 	const totalItems = items.length;
 	const totalVaults = vaultKeys.length;
-	const totalDeletedItems = deletedItems.length;
 
 	const handleCreateVault = async (data: CreateVaultInput) => {
 		const result = await createVault.mutateAsync(data);
@@ -148,12 +144,6 @@ function VaultsPage() {
 								<Link to="/vaults/trash">
 									<Trash className="mr-2 h-4 w-4" />
 									Trash
-									<Badge
-										variant="secondary"
-										className="ml-2 h-5 rounded px-1.5 text-[11px]"
-									>
-										{isLoadingDeletedItems ? "…" : totalDeletedItems}
-									</Badge>
 								</Link>
 							</Button>
 
