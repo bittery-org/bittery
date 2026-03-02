@@ -1,3 +1,7 @@
+import {
+	getDecryptedVaultKey,
+	type VaultKeyCryptoProvider,
+} from "@bittery/shared";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	AlertDialog,
@@ -15,12 +19,10 @@ import {
 	Button,
 	toast,
 } from "@bittery/ui";
-import {
-	IconTrash2OutlineDuo18 as Trash2,
-	IconUserOutlineDuo18 as UserMinus,
-} from "@bittery/ui/icons";
-import { useMutation } from "@tanstack/react-query";
+import { IconUserOutlineDuo18 as UserMinus } from "@bittery/ui/icons";
 import { useState } from "react";
+import { storage } from "@/lib/storage";
+import { decrypt, performKeyRotation, rsaDecrypt } from "@/lib/wasm-crypto";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface Member {
@@ -49,49 +51,152 @@ export function MemberList({
 	const trpcClient = useTRPCClient();
 	const invalidator = useQueryInvalidator();
 	const [removingUserId, setRemovingUserId] = useState<string | null>(null);
-	const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+	const [isRotating, setIsRotating] = useState(false);
 
 	const canManageMembers =
 		currentUserRole === "owner" || currentUserRole === "admin";
-	const canPermanentlyDelete = currentUserRole === "owner";
 
-	const removeMemberMutation = useMutation({
-		mutationFn: (input: { teamId: string; userId: string }) =>
-			trpcClient.team.members.remove.mutate(input),
-		onSuccess: async (data) => {
-			toast.success("Member removed from team");
-			if (data.warning === "rotate_shared_credentials") {
-				toast.info(
-					"Shared credentials this user could access should be rotated.",
+	/**
+	 * Handle member removal with key rotation for ALL team vaults.
+	 *
+	 * Steps:
+	 * 1. Get the Master Unlock Key and current user ID from storage
+	 * 2. Fetch team rotation data (all team vaults with members' public keys and items)
+	 * 3. For each team vault: decrypt current vault key, perform key rotation
+	 * 4. Submit all vault rotations to server in a single atomic call
+	 * 5. Update local vault keys in storage
+	 */
+	const handleRemoveMember = async (userId: string) => {
+		setIsRotating(true);
+		setRemovingUserId(userId);
+
+		try {
+			// Step 1: Get MUK and current user ID
+			const masterUnlockKey = await storage.getMasterUnlockKey();
+			if (!masterUnlockKey) {
+				throw new Error(
+					"Master Unlock Key not available. Please log in again.",
 				);
 			}
-			await invalidator.invalidateTeam();
-		},
-		onError: (error: Error) => {
-			toast.error(error.message);
-		},
-		onSettled: () => {
-			setRemovingUserId(null);
-		},
-	});
 
-	const deleteAccountMutation = useMutation({
-		mutationFn: (input: { teamId: string; userId: string }) =>
-			trpcClient.team.members.deleteAccount.mutate({
-				...input,
-				confirmation: "DELETE",
-			}),
-		onSuccess: async () => {
-			toast.success("Account permanently deleted");
+			const currentUserId = await storage.getActiveAccountUserId();
+			if (!currentUserId) {
+				throw new Error("Session data not available. Please log in again.");
+			}
+
+			// Step 2: Fetch team rotation data from server
+			const teamRotationData =
+				await trpcClient.team.members.getTeamRotationData.query({
+					teamId,
+					excludeUserId: userId,
+				});
+
+			// Step 3: Perform key rotation for each team vault
+			const vaultRotations: Array<{
+				vaultId: string;
+				keyRotation: {
+					memberKeys: Array<{
+						userId: string;
+						encryptedVaultKey: string;
+					}>;
+					reEncryptedItems: Array<{
+						itemId: string;
+						encryptedData: string;
+						encryptionIv: string;
+					}>;
+				};
+			}> = [];
+
+			for (const vaultData of teamRotationData.vaults) {
+				// Decrypt the current vault key for this vault
+				const currentVaultKey = await getDecryptedVaultKey({
+					vaultId: vaultData.vaultId,
+					storage,
+					crypto: {
+						decrypt,
+						rsaDecrypt,
+					} as VaultKeyCryptoProvider,
+				});
+
+				if (!currentVaultKey) {
+					throw new Error(
+						`Could not decrypt vault key for vault "${vaultData.vaultName}". Please log in again.`,
+					);
+				}
+
+				// Perform key rotation on client side
+				const rotationResult = await performKeyRotation(
+					currentVaultKey,
+					vaultData.members.map((m) => ({
+						userId: m.userId,
+						publicKey: m.publicKey,
+					})),
+					vaultData.items,
+					currentUserId,
+					masterUnlockKey,
+				);
+
+				vaultRotations.push({
+					vaultId: vaultData.vaultId,
+					keyRotation: {
+						memberKeys: rotationResult.memberEncryptedKeys,
+						reEncryptedItems: rotationResult.reEncryptedItems,
+					},
+				});
+			}
+
+			// Step 4: Submit to server
+			const result = await trpcClient.team.members.remove.mutate({
+				teamId,
+				userId,
+				vaultRotations,
+			});
+
+			// Step 5: Update local vault keys in storage
+			const vaultKeys = await storage.getVaultKeys();
+			if (vaultKeys) {
+				const updatedVaultKeys = vaultKeys.map((vk) => {
+					// Find if this vault was rotated
+					const rotationIdx = teamRotationData.vaults.findIndex(
+						(v) => v.vaultId === vk.vaultId,
+					);
+					if (rotationIdx === -1) return vk;
+
+					const rotation = vaultRotations[rotationIdx];
+					if (!rotation) return vk;
+
+					// Find the current user's new encrypted key
+					const myNewKey = rotation.keyRotation.memberKeys.find(
+						(mk) => mk.userId === currentUserId,
+					);
+					if (myNewKey) {
+						return { ...vk, encryptedVaultKey: myNewKey.encryptedVaultKey };
+					}
+					return vk;
+				});
+				await storage.storeVaultKeys(updatedVaultKeys);
+			}
+
+			const totalItems = result.vaultRotations?.reduce(
+				(sum, _vr, i) =>
+					sum + (vaultRotations[i]?.keyRotation.reEncryptedItems.length ?? 0),
+				0,
+			) ?? 0;
+
+			toast.success(
+				`Member removed. ${result.vaultRotations?.length ?? 0} vault(s) rotated, ${totalItems} item(s) re-encrypted.`,
+			);
 			await invalidator.invalidateTeam();
-		},
-		onError: (error: Error) => {
-			toast.error(error.message);
-		},
-		onSettled: () => {
-			setDeletingUserId(null);
-		},
-	});
+		} catch (error) {
+			console.error("Team member removal with key rotation failed:", error);
+			toast.error(
+				error instanceof Error ? error.message : "Failed to remove member",
+			);
+		} finally {
+			setIsRotating(false);
+			setRemovingUserId(null);
+		}
+	};
 
 	const getInitials = (name: string) =>
 		name
@@ -114,8 +219,7 @@ export function MemberList({
 		return "outline" as const;
 	};
 
-	const isBusy =
-		removeMemberMutation.isPending || deleteAccountMutation.isPending;
+	const isBusy = isRotating;
 
 	if (members.length === 0) {
 		return (
@@ -129,8 +233,6 @@ export function MemberList({
 				const isCurrentUser = member.userId === currentUserId;
 				const canRemove =
 					canManageMembers && !isCurrentUser && member.role !== "owner";
-				const canDelete =
-					canPermanentlyDelete && !isCurrentUser && member.role !== "owner";
 
 				return (
 					<div
@@ -176,98 +278,45 @@ export function MemberList({
 									: "Joined —"}
 							</span>
 
-							{canManageMembers && (canRemove || canDelete) && (
+							{canRemove && (
 								<div className="flex items-center gap-1">
-									{canRemove && (
-										<AlertDialog>
-											<AlertDialogTrigger asChild>
-												<Button
-													variant="ghost"
-													size="sm"
+									<AlertDialog>
+										<AlertDialogTrigger asChild>
+											<Button
+												variant="ghost"
+												size="sm"
+												disabled={isBusy}
+												className="h-7 gap-1.5 px-2 text-muted-foreground text-xs hover:text-foreground"
+											>
+												<UserMinus className="h-3.5 w-3.5" />
+												Remove
+											</Button>
+										</AlertDialogTrigger>
+										<AlertDialogContent>
+											<AlertDialogHeader>
+												<AlertDialogTitle>Remove Member</AlertDialogTitle>
+												<AlertDialogDescription>
+													Remove {member.name} from this team? Their sessions
+													will be invalidated, team vault access revoked, and
+													all shared vault keys will be rotated. They will be
+													moved to a free personal plan.
+												</AlertDialogDescription>
+											</AlertDialogHeader>
+											<AlertDialogFooter>
+												<AlertDialogCancel disabled={isBusy}>
+													Cancel
+												</AlertDialogCancel>
+												<AlertDialogAction
 													disabled={isBusy}
-													className="h-7 gap-1.5 px-2 text-muted-foreground text-xs hover:text-foreground"
+													onClick={() => handleRemoveMember(member.userId)}
 												>
-													<UserMinus className="h-3.5 w-3.5" />
-													Remove
-												</Button>
-											</AlertDialogTrigger>
-											<AlertDialogContent>
-												<AlertDialogHeader>
-													<AlertDialogTitle>Remove Member</AlertDialogTitle>
-													<AlertDialogDescription>
-														Remove {member.name} from this team? Their current
-														sessions will be invalidated and their team vault
-														access will be revoked.
-													</AlertDialogDescription>
-												</AlertDialogHeader>
-												<AlertDialogFooter>
-													<AlertDialogCancel disabled={isBusy}>
-														Cancel
-													</AlertDialogCancel>
-													<AlertDialogAction
-														disabled={isBusy}
-														onClick={() => {
-															setRemovingUserId(member.userId);
-															removeMemberMutation.mutate({
-																teamId,
-																userId: member.userId,
-															});
-														}}
-													>
-														{removingUserId === member.userId
-															? "Removing..."
-															: "Remove member"}
-													</AlertDialogAction>
-												</AlertDialogFooter>
-											</AlertDialogContent>
-										</AlertDialog>
-									)}
-
-									{canDelete && (
-										<AlertDialog>
-											<AlertDialogTrigger asChild>
-												<Button
-													variant="ghost"
-													size="sm"
-													disabled={isBusy}
-													className="h-7 gap-1.5 px-2 text-destructive text-xs hover:bg-destructive/10 hover:text-destructive"
-												>
-													<Trash2 className="h-3.5 w-3.5" />
-													Delete
-												</Button>
-											</AlertDialogTrigger>
-											<AlertDialogContent>
-												<AlertDialogHeader>
-													<AlertDialogTitle>
-														Delete Account Permanently
-													</AlertDialogTitle>
-													<AlertDialogDescription>
-														This permanently deletes {member.name}'s account and
-														all associated data. This action cannot be undone.
-													</AlertDialogDescription>
-												</AlertDialogHeader>
-												<AlertDialogFooter>
-													<AlertDialogCancel disabled={isBusy}>
-														Cancel
-													</AlertDialogCancel>
-													<AlertDialogAction
-														disabled={isBusy}
-														onClick={() => {
-															setDeletingUserId(member.userId);
-															deleteAccountMutation.mutate({
-																teamId,
-																userId: member.userId,
-															});
-														}}
-													>
-														{deletingUserId === member.userId
-															? "Deleting..."
-															: "Delete permanently"}
-													</AlertDialogAction>
-												</AlertDialogFooter>
-											</AlertDialogContent>
-										</AlertDialog>
-									)}
+													{removingUserId === member.userId
+														? "Removing & rotating keys..."
+														: "Remove member"}
+												</AlertDialogAction>
+											</AlertDialogFooter>
+										</AlertDialogContent>
+									</AlertDialog>
 								</div>
 							)}
 						</div>

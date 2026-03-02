@@ -3,8 +3,13 @@
  * Handles team management, members, and invitations
  */
 
-import { deleteAllUserSessions, deleteUserAccount } from "@bittery/auth";
+import { deleteAllUserSessions } from "@bittery/auth";
 import { db, team, teamInvitation, user, vaultKey } from "@bittery/db";
+import {
+	item,
+	vault,
+	vaultKeyRotation,
+} from "@bittery/db/schema/vault";
 import { TRPCError } from "@trpc/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -12,12 +17,18 @@ import { z } from "zod";
 import { resolveEffectiveEntitlements } from "../billing/entitlements";
 import { syncTeamSeatQuantity } from "../billing/stripe";
 import { getBitteryMode, isSelfHostedMode } from "../config/mode";
+import { createPersonalTeamForUser } from "../helpers/team";
 import { protectedProcedure, publicProcedure, router } from "../index";
 import {
 	createPresignedUpload,
 	createTeamImageKey,
 	getStoragePublicUrl,
 } from "../storage/s3";
+import {
+	broadcastSyncPayloads,
+	createSyncEvent,
+	type SyncBroadcastPayload,
+} from "../sync-helper";
 import {
 	assertInvitationPendingVaultKeysAreAuthorized,
 	normalizePendingVaultKeys,
@@ -323,17 +334,341 @@ export const teamRouter = router({
 		}),
 
 	/**
-	 * Leave team (not allowed - users belong to exactly one team)
-	 * @deprecated Users cannot leave teams in the new architecture
+	 * Leave a non-personal team with mandatory vault key rotation.
+	 *
+	 * The leaving user must provide re-encrypted vault keys and items for ALL
+	 * team vaults they have access to. After leaving, they get a new personal
+	 * team with a free plan.
+	 *
+	 * Owners cannot leave their own team — they must transfer ownership first.
 	 */
 	leave: protectedProcedure
-		.input(z.object({ teamId: z.string() }))
-		.mutation(async () => {
-			throw new TRPCError({
-				code: "BAD_REQUEST",
-				message:
-					"You cannot leave your team. Each user belongs to exactly one team.",
+		.input(
+			z.object({
+				teamId: z.string(),
+				vaultRotations: z.array(
+					z.object({
+						vaultId: z.string(),
+						keyRotation: z.object({
+							memberKeys: z.array(
+								z.object({
+									userId: z.string(),
+									encryptedVaultKey: z.string(),
+								}),
+							),
+							reEncryptedItems: z.array(
+								z.object({
+									itemId: z.string(),
+									encryptedData: z.string(),
+									encryptionIv: z.string(),
+								}),
+							),
+						}),
+					}),
+				),
+				clientId: z.string().optional(),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			const userData = await db.query.user.findFirst({
+				where: (u, { eq: eqFn }) => eqFn(u.id, ctx.session.userId),
+				with: { team: true },
 			});
+
+			if (!userData || userData.teamId !== input.teamId) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "You are not a member of this team",
+				});
+			}
+
+			if (userData.role === "owner") {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message:
+						"The team owner cannot leave. Transfer ownership first.",
+				});
+			}
+
+			if (userData.team?.type === "personal") {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "You cannot leave a personal team.",
+				});
+			}
+
+			// Get team vaults with user's access
+			const teamVaults = await db.query.vault.findMany({
+				where: (v, { eq: eqFn }) => eqFn(v.teamId, input.teamId),
+			});
+
+			const teamVaultIds = teamVaults.map((v) => v.id);
+			const userVaultKeys =
+				teamVaultIds.length > 0
+					? await db.query.vaultKey.findMany({
+							where: (vk, { and, eq: eqFn, inArray: inArrayFn }) =>
+								and(
+									eqFn(vk.userId, ctx.session.userId),
+									inArrayFn(vk.vaultId, teamVaultIds),
+								),
+						})
+					: [];
+
+			const vaultsWithAccess = new Set(
+				userVaultKeys.map((vk) => vk.vaultId),
+			);
+			const rotationVaultIds = new Set(
+				input.vaultRotations.map((vr) => vr.vaultId),
+			);
+
+			// Ensure rotation data for every vault the leaving user has access to
+			for (const vaultId of vaultsWithAccess) {
+				if (!rotationVaultIds.has(vaultId)) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: `Missing key rotation data for vault ${vaultId}. Rotation is required for all team vaults.`,
+					});
+				}
+			}
+
+			const vaultMap = new Map(teamVaults.map((v) => [v.id, v]));
+
+			// Create rotation records
+			const rotationRecords: Array<{ vaultId: string; rotationId: string; newKeyVersion: number }> = [];
+			for (const vaultRotation of input.vaultRotations) {
+				const vaultData = vaultMap.get(vaultRotation.vaultId);
+				if (!vaultData) continue;
+
+				const rotationId = nanoid();
+				const newKeyVersion = vaultData.keyVersion + 1;
+
+				await db.insert(vaultKeyRotation).values({
+					id: rotationId,
+					vaultId: vaultRotation.vaultId,
+					keyVersion: newKeyVersion,
+					reason: "member_removed",
+					initiatedById: ctx.session.userId,
+					removedUserId: ctx.session.userId,
+					itemsReEncrypted: vaultRotation.keyRotation.reEncryptedItems.length,
+					membersUpdated: vaultRotation.keyRotation.memberKeys.length,
+					status: "in_progress",
+				});
+
+				rotationRecords.push({ vaultId: vaultRotation.vaultId, rotationId, newKeyVersion });
+			}
+
+			try {
+				const broadcasts: SyncBroadcastPayload[] = [];
+
+				await db.transaction(async (tx) => {
+					for (const vaultRotation of input.vaultRotations) {
+						const record = rotationRecords.find(
+							(r) => r.vaultId === vaultRotation.vaultId,
+						);
+						if (!record) continue;
+
+						// Delete leaving user's vault key
+						await tx
+							.delete(vaultKey)
+							.where(
+								and(
+									eq(vaultKey.vaultId, vaultRotation.vaultId),
+									eq(vaultKey.userId, ctx.session.userId),
+								),
+							);
+
+						// Update remaining members' vault keys
+						for (const memberKey of vaultRotation.keyRotation.memberKeys) {
+							await tx
+								.update(vaultKey)
+								.set({ encryptedVaultKey: memberKey.encryptedVaultKey })
+								.where(
+									and(
+										eq(vaultKey.vaultId, vaultRotation.vaultId),
+										eq(vaultKey.userId, memberKey.userId),
+									),
+								);
+						}
+
+						// Re-encrypt items
+						for (const reEncryptedItem of vaultRotation.keyRotation.reEncryptedItems) {
+							await tx
+								.update(item)
+								.set({
+									encryptedData: reEncryptedItem.encryptedData,
+									encryptionIv: reEncryptedItem.encryptionIv,
+									updatedAt: new Date(),
+								})
+								.where(
+									and(
+										eq(item.id, reEncryptedItem.itemId),
+										eq(item.vaultId, vaultRotation.vaultId),
+									),
+								);
+						}
+
+						// Update vault key version
+						await tx
+							.update(vault)
+							.set({
+								keyVersion: record.newKeyVersion,
+								updatedAt: new Date(),
+							})
+							.where(eq(vault.id, vaultRotation.vaultId));
+
+						// Mark rotation completed
+						await tx
+							.update(vaultKeyRotation)
+							.set({ status: "completed", completedAt: new Date() })
+							.where(eq(vaultKeyRotation.id, record.rotationId));
+
+						// Create sync events
+						broadcasts.push(
+							await createSyncEvent(
+								{
+									eventType: "vault_member_removed",
+									entityId: ctx.session.userId,
+									entityType: "vault_member",
+									vaultId: vaultRotation.vaultId,
+									userId: ctx.session.userId,
+									clientId: input.clientId,
+									version: record.newKeyVersion,
+									metadata: { removedUserId: ctx.session.userId, reason: "member_left" },
+								},
+								tx,
+								ctx.clientId,
+							),
+						);
+
+						broadcasts.push(
+							await createSyncEvent(
+								{
+									eventType: "vault_key_rotated",
+									entityId: vaultRotation.vaultId,
+									entityType: "vault_key",
+									vaultId: vaultRotation.vaultId,
+									userId: ctx.session.userId,
+									clientId: input.clientId,
+									version: record.newKeyVersion,
+									metadata: {
+										reason: "member_left",
+										keyRotationId: record.rotationId,
+									},
+								},
+								tx,
+								ctx.clientId,
+							),
+						);
+					}
+
+					// Create personal team for the leaving user
+					await createPersonalTeamForUser(
+						ctx.session.userId,
+						userData.name,
+						tx,
+					);
+				});
+
+				// After transaction: invalidate sessions, broadcast
+				await deleteAllUserSessions(ctx.session.userId);
+				await broadcastSyncPayloads(broadcasts);
+
+				await logAuditEvent({
+					userId: ctx.session.userId,
+					action: "team_member_removed",
+					device: ctx.device,
+					entityType: "user",
+					entityId: ctx.session.userId,
+					metadata: {
+						teamId: input.teamId,
+						reason: "voluntary_leave",
+						vaultsRotated: rotationRecords.length,
+					},
+				});
+
+				await syncSeatsBestEffort(
+					input.teamId,
+					userData.team?.billingPlan || "free",
+				);
+
+				return { success: true };
+			} catch (error) {
+				for (const record of rotationRecords) {
+					await db
+						.update(vaultKeyRotation)
+						.set({
+							status: "failed",
+							errorMessage:
+								error instanceof Error ? error.message : "Unknown error",
+						})
+						.where(eq(vaultKeyRotation.id, record.rotationId));
+				}
+
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: "Failed to leave team during key rotation. Please try again.",
+				});
+			}
+		}),
+
+	/**
+	 * Get data needed for key rotation when a member is leaving a team.
+	 * Returns remaining members' public keys and all items per team vault.
+	 */
+	getLeaveRotationData: protectedProcedure
+		.input(z.object({ teamId: z.string() }))
+		.query(async ({ ctx, input }) => {
+			const userData = await db.query.user.findFirst({
+				where: (u, { eq: eqFn }) => eqFn(u.id, ctx.session.userId),
+				with: { team: true },
+			});
+
+			if (!userData || userData.teamId !== input.teamId) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "You are not a member of this team",
+				});
+			}
+
+			const teamVaults = await db.query.vault.findMany({
+				where: (v, { eq: eqFn }) => eqFn(v.teamId, userData.teamId!),
+			});
+
+			const vaultRotationData = await Promise.all(
+				teamVaults.map(async (v) => {
+					const members = await db.query.vaultKey.findMany({
+						where: (vk, { and, eq: eqFn, ne }) =>
+							and(
+								eqFn(vk.vaultId, v.id),
+								ne(vk.userId, ctx.session.userId),
+							),
+						with: { user: true },
+					});
+
+					const items = await db.query.item.findMany({
+						where: (i, { eq: eqFn }) => eqFn(i.vaultId, v.id),
+					});
+
+					return {
+						vaultId: v.id,
+						vaultName: v.name,
+						keyVersion: v.keyVersion,
+						members: members.map((m) => ({
+							userId: m.userId,
+							publicKey: m.user.publicKey,
+							role: m.role,
+						})),
+						items: items.map((i) => ({
+							id: i.id,
+							encryptedData: i.encryptedData,
+							encryptionIv: i.encryptionIv,
+							encryptionAlgorithm: i.encryptionAlgorithm,
+						})),
+					};
+				}),
+			);
+
+			return { vaults: vaultRotationData };
 		}),
 
 	/**
@@ -372,8 +707,125 @@ export const teamRouter = router({
 				}));
 			}),
 
+		/**
+		 * Get data needed for key rotation across all team vaults.
+		 * Called before removing a member to prepare for key rotation.
+		 * Returns remaining members' public keys and all items per vault.
+		 */
+		getTeamRotationData: protectedProcedure
+			.input(
+				z.object({
+					teamId: z.string(),
+					excludeUserId: z.string(), // The user being removed
+				}),
+			)
+			.query(async ({ ctx, input }) => {
+				const actor = await db.query.user.findFirst({
+					where: (member, { eq }) => eq(member.id, ctx.session.userId),
+					with: { team: true },
+				});
+
+				if (actor?.teamId !== input.teamId) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "You are not a member of this team",
+					});
+				}
+
+				if (!["owner", "admin"].includes(actor.role)) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Only owner or admin can perform key rotation",
+					});
+				}
+
+				if (actor.team) {
+					assertTeamManagementEntitlement(actor.team);
+				}
+
+				// Get all team vaults
+				const teamVaults = await db.query.vault.findMany({
+					where: (v, { eq }) => eq(v.teamId, input.teamId),
+				});
+
+				const vaultRotationData = await Promise.all(
+					teamVaults.map(async (v) => {
+						// Get remaining members (excluding the user being removed)
+						const members = await db.query.vaultKey.findMany({
+							where: (vk, { and, eq: eqFn, ne }) =>
+								and(
+									eqFn(vk.vaultId, v.id),
+									ne(vk.userId, input.excludeUserId),
+								),
+							with: { user: true },
+						});
+
+						// Get all items in the vault
+						const items = await db.query.item.findMany({
+							where: (i, { eq: eqFn }) => eqFn(i.vaultId, v.id),
+						});
+
+						return {
+							vaultId: v.id,
+							vaultName: v.name,
+							keyVersion: v.keyVersion,
+							members: members.map((m) => ({
+								userId: m.userId,
+								publicKey: m.user.publicKey,
+								role: m.role,
+							})),
+							items: items.map((i) => ({
+								id: i.id,
+								encryptedData: i.encryptedData,
+								encryptionIv: i.encryptionIv,
+								encryptionAlgorithm: i.encryptionAlgorithm,
+							})),
+						};
+					}),
+				);
+
+				return { vaults: vaultRotationData };
+			}),
+
+		/**
+		 * Remove a team member with mandatory vault key rotation.
+		 *
+		 * When removing a member from a team, the client must provide re-encrypted data
+		 * for ALL team vaults that the member had access to:
+		 * - New encrypted vault keys for all remaining members
+		 * - Re-encrypted items using the new vault key
+		 *
+		 * The removed user gets a new personal team with a free plan so they
+		 * aren't left in an orphaned state.
+		 */
 		remove: protectedProcedure
-			.input(z.object({ teamId: z.string(), userId: z.string() }))
+			.input(
+				z.object({
+					teamId: z.string(),
+					userId: z.string(),
+					vaultRotations: z.array(
+						z.object({
+							vaultId: z.string(),
+							keyRotation: z.object({
+								memberKeys: z.array(
+									z.object({
+										userId: z.string(),
+										encryptedVaultKey: z.string(),
+									}),
+								),
+								reEncryptedItems: z.array(
+									z.object({
+										itemId: z.string(),
+										encryptedData: z.string(),
+										encryptionIv: z.string(),
+									}),
+								),
+							}),
+						}),
+					),
+					clientId: z.string().optional(),
+				}),
+			)
 			.mutation(async ({ ctx, input }) => {
 				const actor = await db.query.user.findFirst({
 					where: (member, { eq }) => eq(member.id, ctx.session.userId),
@@ -422,50 +874,281 @@ export const teamRouter = router({
 					});
 				}
 
+				// Verify that the removed user actually has vault keys in team vaults
 				const teamVaults = await db.query.vault.findMany({
-					where: (teamVault, { eq }) => eq(teamVault.teamId, input.teamId),
-					columns: { id: true },
+					where: (v, { eq }) => eq(v.teamId, input.teamId),
 				});
-				const teamVaultIds = teamVaults.map((teamVault) => teamVault.id);
 
-				if (teamVaultIds.length > 0) {
-					await db
-						.delete(vaultKey)
-						.where(
-							and(
-								eq(vaultKey.userId, input.userId),
-								inArray(vaultKey.vaultId, teamVaultIds),
-							),
-						);
+				// Get vault IDs where the removed user has keys
+				const teamVaultIds = teamVaults.map((v) => v.id);
+				const userVaultKeys =
+					teamVaultIds.length > 0
+						? await db.query.vaultKey.findMany({
+								where: (vk, { and, eq: eqFn, inArray: inArrayFn }) =>
+									and(
+										eqFn(vk.userId, input.userId),
+										inArrayFn(vk.vaultId, teamVaultIds),
+									),
+							})
+						: [];
+
+				const vaultsWithAccess = new Set(
+					userVaultKeys.map((vk) => vk.vaultId),
+				);
+				const rotationVaultIds = new Set(
+					input.vaultRotations.map((vr) => vr.vaultId),
+				);
+
+				// Ensure rotation data was provided for every vault the user has access to
+				for (const vaultId of vaultsWithAccess) {
+					if (!rotationVaultIds.has(vaultId)) {
+						throw new TRPCError({
+							code: "BAD_REQUEST",
+							message: `Missing key rotation data for vault ${vaultId}. Rotation is required for all team vaults.`,
+						});
+					}
 				}
 
-				await db
-					.update(user)
-					.set({ teamId: null, role: "member" })
-					.where(eq(user.id, input.userId));
+				// Build a map of team vaults for quick lookup
+				const vaultMap = new Map(teamVaults.map((v) => [v.id, v]));
 
-				await deleteAllUserSessions(input.userId);
+				// Create key rotation records for each vault
+				const rotationRecords: Array<{ vaultId: string; rotationId: string; newKeyVersion: number }> = [];
+				for (const vaultRotation of input.vaultRotations) {
+					const vaultData = vaultMap.get(vaultRotation.vaultId);
+					if (!vaultData) continue;
 
-				await logAuditEvent({
-					userId: ctx.session.userId,
-					action: "team_member_removed",
-					device: ctx.device,
-					entityType: "user",
-					entityId: input.userId,
-					metadata: {
-						teamId: input.teamId,
-						actorRole: actor.role,
-					},
-				});
+					const rotationId = nanoid();
+					const newKeyVersion = vaultData.keyVersion + 1;
 
-				await syncSeatsBestEffort(input.teamId, actor.team?.billingPlan || "free");
+					await db.insert(vaultKeyRotation).values({
+						id: rotationId,
+						vaultId: vaultRotation.vaultId,
+						keyVersion: newKeyVersion,
+						reason: "member_removed",
+						initiatedById: ctx.session.userId,
+						removedUserId: input.userId,
+						itemsReEncrypted: vaultRotation.keyRotation.reEncryptedItems.length,
+						membersUpdated: vaultRotation.keyRotation.memberKeys.length,
+						status: "in_progress",
+					});
 
-				return {
-					success: true,
-					warning: "rotate_shared_credentials",
-				};
+					rotationRecords.push({ vaultId: vaultRotation.vaultId, rotationId, newKeyVersion });
+				}
+
+				try {
+					const broadcasts: SyncBroadcastPayload[] = [];
+
+					await db.transaction(async (tx) => {
+						// Process key rotation for each team vault
+						for (const vaultRotation of input.vaultRotations) {
+							const record = rotationRecords.find(
+								(r) => r.vaultId === vaultRotation.vaultId,
+							);
+							if (!record) continue;
+
+							// Delete the removed user's vault key
+							const removedKey = await tx
+								.delete(vaultKey)
+								.where(
+									and(
+										eq(vaultKey.vaultId, vaultRotation.vaultId),
+										eq(vaultKey.userId, input.userId),
+									),
+								)
+								.returning({ id: vaultKey.id });
+
+							if (removedKey.length === 0) {
+								throw new Error(
+									`Vault key not found for user in vault ${vaultRotation.vaultId}`,
+								);
+							}
+
+							// Update vault keys for all remaining members
+							for (const memberKey of vaultRotation.keyRotation.memberKeys) {
+								const updatedKey = await tx
+									.update(vaultKey)
+									.set({ encryptedVaultKey: memberKey.encryptedVaultKey })
+									.where(
+										and(
+											eq(vaultKey.vaultId, vaultRotation.vaultId),
+											eq(vaultKey.userId, memberKey.userId),
+										),
+									)
+									.returning({ id: vaultKey.id });
+
+								if (updatedKey.length === 0) {
+									throw new Error(
+										`Member key not found for user ${memberKey.userId} in vault ${vaultRotation.vaultId}`,
+									);
+								}
+							}
+
+							// Re-encrypt all items with new vault key
+							for (const reEncryptedItem of vaultRotation.keyRotation.reEncryptedItems) {
+								const updatedItem = await tx
+									.update(item)
+									.set({
+										encryptedData: reEncryptedItem.encryptedData,
+										encryptionIv: reEncryptedItem.encryptionIv,
+										updatedAt: new Date(),
+									})
+									.where(
+										and(
+											eq(item.id, reEncryptedItem.itemId),
+											eq(item.vaultId, vaultRotation.vaultId),
+										),
+									)
+									.returning({ id: item.id });
+
+								if (updatedItem.length === 0) {
+									throw new Error(
+										`Item not found in vault: ${reEncryptedItem.itemId}`,
+									);
+								}
+							}
+
+							// Update vault key version
+							await tx
+								.update(vault)
+								.set({
+									keyVersion: record.newKeyVersion,
+									updatedAt: new Date(),
+								})
+								.where(eq(vault.id, vaultRotation.vaultId));
+
+							// Mark rotation as completed
+							await tx
+								.update(vaultKeyRotation)
+								.set({
+									status: "completed",
+									completedAt: new Date(),
+								})
+								.where(eq(vaultKeyRotation.id, record.rotationId));
+
+							// Create sync events
+							broadcasts.push(
+								await createSyncEvent(
+									{
+										eventType: "vault_member_removed",
+										entityId: input.userId,
+										entityType: "vault_member",
+										vaultId: vaultRotation.vaultId,
+										userId: ctx.session.userId,
+										clientId: input.clientId,
+										version: record.newKeyVersion,
+										metadata: { removedUserId: input.userId },
+									},
+									tx,
+									ctx.clientId,
+								),
+							);
+
+							broadcasts.push(
+								await createSyncEvent(
+									{
+										eventType: "vault_key_rotated",
+										entityId: vaultRotation.vaultId,
+										entityType: "vault_key",
+										vaultId: vaultRotation.vaultId,
+										userId: ctx.session.userId,
+										clientId: input.clientId,
+										version: record.newKeyVersion,
+										metadata: {
+											reason: "team_member_removed",
+											keyRotationId: record.rotationId,
+										},
+									},
+									tx,
+									ctx.clientId,
+								),
+							);
+
+							broadcasts.push(
+								await createSyncEvent(
+									{
+										eventType: "vault_access_revoked",
+										entityId: vaultRotation.vaultId,
+										entityType: "vault",
+										vaultId: vaultRotation.vaultId,
+										userId: input.userId,
+										clientId: input.clientId,
+										version: record.newKeyVersion,
+										metadata: {
+											reason: "team_member_removed",
+											removedUserId: input.userId,
+										},
+									},
+									tx,
+									ctx.clientId,
+								),
+							);
+						}
+
+						// Create a personal team with free plan for the removed user
+						await createPersonalTeamForUser(
+							input.userId,
+							targetUser.name,
+							tx,
+						);
+					});
+
+					// After transaction commits: invalidate sessions and broadcast
+					await deleteAllUserSessions(input.userId);
+					await broadcastSyncPayloads(broadcasts);
+
+					await logAuditEvent({
+						userId: ctx.session.userId,
+						action: "team_member_removed",
+						device: ctx.device,
+						entityType: "user",
+						entityId: input.userId,
+						metadata: {
+							teamId: input.teamId,
+							actorRole: actor.role,
+							vaultsRotated: rotationRecords.length,
+						},
+					});
+
+					await syncSeatsBestEffort(
+						input.teamId,
+						actor.team?.billingPlan || "free",
+					);
+
+					return {
+						success: true,
+						vaultRotations: rotationRecords.map((r) => ({
+							vaultId: r.vaultId,
+							rotationId: r.rotationId,
+							newKeyVersion: r.newKeyVersion,
+						})),
+					};
+				} catch (error) {
+					// Mark all rotations as failed
+					for (const record of rotationRecords) {
+						await db
+							.update(vaultKeyRotation)
+							.set({
+								status: "failed",
+								errorMessage:
+									error instanceof Error ? error.message : "Unknown error",
+							})
+							.where(eq(vaultKeyRotation.id, record.rotationId));
+					}
+
+					throw new TRPCError({
+						code: "INTERNAL_SERVER_ERROR",
+						message:
+							"Team member removal failed during key rotation. Please try again.",
+					});
+				}
 			}),
 
+		/**
+		 * @deprecated Account deletion by team admins is no longer supported.
+		 * Team admins can only remove members from the team. The removed member
+		 * manages their own account lifecycle via auth.deleteAccount.
+		 */
 		deleteAccount: protectedProcedure
 			.input(
 				z.object({
@@ -474,71 +1157,12 @@ export const teamRouter = router({
 					confirmation: z.literal("DELETE"),
 				}),
 			)
-			.mutation(async ({ ctx, input }) => {
-				const actor = await db.query.user.findFirst({
-					where: (member, { eq }) => eq(member.id, ctx.session.userId),
-					with: { team: true },
+			.mutation(async () => {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message:
+						"Account deletion by team admins is no longer supported. Use 'Remove member' instead. The removed user can delete their own account.",
 				});
-
-				if (actor?.teamId !== input.teamId) {
-					throw new TRPCError({
-						code: "FORBIDDEN",
-						message: "You are not a member of this team",
-					});
-				}
-
-				if (actor.role !== "owner") {
-					throw new TRPCError({
-						code: "FORBIDDEN",
-						message: "Only the team owner can permanently delete accounts",
-					});
-				}
-				if (actor.team) {
-					assertTeamManagementEntitlement(actor.team);
-				}
-
-				if (ctx.session.userId === input.userId) {
-					throw new TRPCError({
-						code: "BAD_REQUEST",
-						message: "You cannot delete your own account from team management",
-					});
-				}
-
-				const targetUser = await db.query.user.findFirst({
-					where: (member, { eq }) => eq(member.id, input.userId),
-				});
-
-				if (!targetUser || targetUser.teamId !== input.teamId) {
-					throw new TRPCError({
-						code: "NOT_FOUND",
-						message: "Team member not found",
-					});
-				}
-
-				if (targetUser.role === "owner") {
-					throw new TRPCError({
-						code: "FORBIDDEN",
-						message: "The team owner account cannot be deleted",
-					});
-				}
-
-				await deleteAllUserSessions(input.userId);
-				await deleteUserAccount(input.userId);
-
-				await logAuditEvent({
-					userId: ctx.session.userId,
-					action: "team_member_deleted",
-					device: ctx.device,
-					entityType: "user",
-					entityId: input.userId,
-					metadata: {
-						teamId: input.teamId,
-					},
-				});
-
-				await syncSeatsBestEffort(input.teamId, actor.team?.billingPlan || "free");
-
-				return { success: true };
 			}),
 	}),
 
