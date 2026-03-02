@@ -276,6 +276,9 @@ importers:
 
   apps/marketing:
     dependencies:
+      '@bittery/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@mdx-js/react':
         specifier: ^3.1.1
         version: 3.1.1(@types/react@19.1.17)(react@19.1.0)

@@ -9,224 +9,25 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
+import { type CloudPlanId, featureCategories, planInfo } from "@bittery/shared/pricing";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-/* ─── Types & Data ───────────────────────────────────────────────── */
+/* ─── Plan Data (UI-specific styling layered on shared plan info) ── */
 
-type PlanId = "free" | "personal" | "family" | "team";
-
-type PlanFeature = {
-	label: string;
-	values: Record<PlanId, string | boolean>;
+const planIcons: Record<CloudPlanId, React.ComponentType<{ className?: string }>> = {
+	free: Lock,
+	personal: Sparkle,
+	family: Heart,
+	team: Briefcase,
 };
 
-const featureCategories: Array<{
-	name: string;
-	features: PlanFeature[];
-}> = [
-	{
-		name: "Vaults & Items",
-		features: [
-			{
-				label: "Vaults",
-				values: {
-					free: "1",
-					personal: "Unlimited",
-					family: "Unlimited",
-					team: "Unlimited",
-				},
-			},
-			{
-				label: "Items per vault",
-				values: {
-					free: "50",
-					personal: "Unlimited",
-					family: "Unlimited",
-					team: "Unlimited",
-				},
-			},
-			{
-				label: "Item types",
-				values: {
-					free: "Logins only",
-					personal: "All types",
-					family: "All types",
-					team: "All types",
-				},
-			},
-			{
-				label: "Storage",
-				values: {
-					free: false,
-					personal: "250 MB",
-					family: "1 GB",
-					team: "2 GB",
-				},
-			},
-			{
-				label: "Max file size",
-				values: {
-					free: false,
-					personal: "10 MB",
-					family: "25 MB",
-					team: "50 MB",
-				},
-			},
-		],
-	},
-	{
-		name: "Security",
-		features: [
-			{
-				label: "Zero-knowledge encryption",
-				values: { free: true, personal: true, family: true, team: true },
-			},
-			{
-				label: "Two-factor authentication",
-				values: { free: true, personal: true, family: true, team: true },
-			},
-			{
-				label: "Passkey support",
-				values: { free: false, personal: true, family: true, team: true },
-			},
-			{
-				label: "Emergency Kit & Recovery",
-				values: { free: true, personal: true, family: true, team: true },
-			},
-			{
-				label: "Breach monitoring",
-				values: { free: false, personal: true, family: true, team: true },
-			},
-		],
-	},
-	{
-		name: "Sharing & Collaboration",
-		features: [
-			{
-				label: "Secure sharing links",
-				values: {
-					free: false,
-					personal: "5 active",
-					family: "Unlimited",
-					team: "Unlimited",
-				},
-			},
-			{
-				label: "Shared vaults",
-				values: {
-					free: false,
-					personal: false,
-					family: "5",
-					team: "Unlimited",
-				},
-			},
-			{
-				label: "Team members",
-				values: {
-					free: false,
-					personal: false,
-					family: "Up to 6",
-					team: "Unlimited",
-				},
-			},
-			{
-				label: "Role-based access",
-				values: { free: false, personal: false, family: true, team: true },
-			},
-		],
-	},
-	{
-		name: "Apps & Devices",
-		features: [
-			{
-				label: "Web app",
-				values: { free: true, personal: true, family: true, team: true },
-			},
-			{
-				label: "Desktop app",
-				values: { free: true, personal: true, family: true, team: true },
-			},
-			{
-				label: "Browser extension",
-				values: { free: true, personal: true, family: true, team: true },
-			},
-			{
-				label: "Mobile app",
-				values: { free: true, personal: true, family: true, team: true },
-			},
-			{
-				label: "Synced devices",
-				values: {
-					free: "2",
-					personal: "Unlimited",
-					family: "Unlimited",
-					team: "Unlimited",
-				},
-			},
-		],
-	},
-	{
-		name: "Admin & Support",
-		features: [
-			{
-				label: "Priority support",
-				values: { free: false, personal: true, family: true, team: true },
-			},
-			{
-				label: "Admin console",
-				values: { free: false, personal: false, family: false, team: true },
-			},
-			{
-				label: "Activity logs",
-				values: { free: false, personal: false, family: false, team: true },
-			},
-			{
-				label: "Custom policies",
-				values: { free: false, personal: false, family: false, team: true },
-			},
-		],
-	},
-];
-
-const plans: Array<{
-	id: PlanId;
-	name: string;
-	priceLabel: string;
-	priceSuffix?: string;
-	isPopular?: boolean;
-	icon: React.ComponentType<{ className?: string }>;
-}> = [
-	{
-		id: "free",
-		name: "Free",
-		priceLabel: "$0",
-		icon: Lock,
-	},
-	{
-		id: "personal",
-		name: "Personal",
-		priceLabel: "$3",
-		priceSuffix: "/mo",
-		isPopular: true,
-		icon: Sparkle,
-	},
-	{
-		id: "family",
-		name: "Family",
-		priceLabel: "$7",
-		priceSuffix: "/mo",
-		icon: Heart,
-	},
-	{
-		id: "team",
-		name: "Team",
-		priceLabel: "$9",
-		priceSuffix: "/user/mo",
-		icon: Briefcase,
-	},
-];
+const plans = planInfo.map((plan) => ({
+	...plan,
+	isPopular: plan.isRecommended,
+	icon: planIcons[plan.id],
+}));
 
 /* ─── Feature Value Cell ─────────────────────────────────────────── */
 

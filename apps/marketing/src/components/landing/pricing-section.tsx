@@ -1,84 +1,29 @@
 import { ArrowRight, Check, Lock } from "lucide-react";
 import { motion } from "motion/react";
+import { type CloudPlanId, planFeatureBullets, planInfo } from "@bittery/shared/pricing";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PricingComparison } from "./pricing-comparison";
 
-const plans = [
-	{
-		name: "Free",
-		description: "Basic vault for getting started.",
-		price: "$0",
-		priceNote: "forever",
-		cta: "Get started",
-		ctaVariant: "outline" as const,
-		ctaIcon: Lock,
-		highlighted: false,
-		features: [
-			"1 vault, 50 items",
-			"Logins only",
-			"Zero-knowledge encryption",
-			"Two-factor authentication",
-			"All apps & extensions",
-			"2 synced devices",
-		],
-	},
-	{
-		name: "Personal",
-		description: "Daily password security with premium features.",
-		price: "$3",
-		priceNote: "/ month",
-		cta: "Get started",
-		ctaVariant: "default" as const,
-		ctaIcon: ArrowRight,
-		highlighted: true,
-		features: [
-			"Unlimited vaults & items",
-			"All item types",
-			"250 MB secure storage",
-			"Passkeys & breach monitoring",
-			"5 active sharing links",
-			"Unlimited devices",
-			"Priority support",
-		],
-	},
-	{
-		name: "Family",
-		description: "Shared protection for your household.",
-		price: "$7",
-		priceNote: "/ month",
-		cta: "Get started",
-		ctaVariant: "outline" as const,
-		ctaIcon: ArrowRight,
-		highlighted: false,
-		features: [
-			"Everything in Personal",
-			"Unlimited vaults, 5 shared vaults",
-			"Up to 6 family members",
-			"1 GB secure storage",
-			"Unlimited sharing links",
-			"Role-based access",
-		],
-	},
-	{
-		name: "Team",
-		description: "For teams and businesses with shared workspaces.",
-		price: "$9",
-		priceNote: "user / month",
-		cta: "Get started",
-		ctaVariant: "outline" as const,
-		ctaIcon: ArrowRight,
-		highlighted: false,
-		features: [
-			"Everything in Family",
-			"Unlimited vaults & members",
-			"2 GB secure storage",
-			"Admin console",
-			"Activity logs",
-			"Custom policies",
-		],
-	},
-];
+const planExtras: Record<CloudPlanId, {
+	priceNote: string;
+	cta: string;
+	ctaVariant: "outline" | "default";
+	ctaIcon: React.ComponentType<{ className?: string }>;
+	highlighted: boolean;
+}> = {
+	free: { priceNote: "forever", cta: "Get started", ctaVariant: "outline", ctaIcon: Lock, highlighted: false },
+	personal: { priceNote: "/ month", cta: "Get started", ctaVariant: "default", ctaIcon: ArrowRight, highlighted: true },
+	family: { priceNote: "/ month", cta: "Get started", ctaVariant: "outline", ctaIcon: ArrowRight, highlighted: false },
+	team: { priceNote: "user / month", cta: "Get started", ctaVariant: "outline", ctaIcon: ArrowRight, highlighted: false },
+};
+
+const plans = planInfo.map((plan) => ({
+	...plan,
+	price: plan.priceLabel,
+	...planExtras[plan.id],
+	features: planFeatureBullets[plan.id],
+}));
 
 export function PricingSection() {
 	return (

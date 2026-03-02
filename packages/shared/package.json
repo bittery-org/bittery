@@ -24,7 +24,8 @@
 		"./crypto": "./src/crypto.ts",
 		"./server-url": "./src/server-url.ts",
 		"./trpc-client-factory": "./src/trpc-client-factory.ts",
-		"./types": "./src/types.ts"
+		"./types": "./src/types.ts",
+		"./pricing": "./src/pricing.ts"
 	},
 	"dependencies": {
 		"@bittery/api": "workspace:*",

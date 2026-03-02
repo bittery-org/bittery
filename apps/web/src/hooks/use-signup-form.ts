@@ -14,7 +14,8 @@ import {
 } from "@/lib/wasm-crypto";
 import { WorkerCrypto } from "@/lib/worker-crypto";
 
-export type CloudPlanId = "free" | "personal" | "family" | "team";
+export type { CloudPlanId } from "@bittery/shared/pricing";
+type CloudPlanId = import("@bittery/shared/pricing").CloudPlanId;
 
 export function useSignupForm({
 	invitationToken,
