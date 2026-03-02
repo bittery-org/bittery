@@ -21,6 +21,7 @@
 		"dev:server": "turbo -F server dev",
 		"dev:extension": "turbo -F extension dev",
 		"dev:mobile": "turbo -F mobile dev",
+		"dev:marketing": "turbo -F marketing dev",
 		"build": "turbo build",
 		"build:desktop": "turbo -F desktop build:release",
 		"build:web": "pnpm build:crypto-wasm && turbo -F web build",

@@ -1,0 +1,78 @@
+---
+title: Zero-Knowledge Architecture
+description: How Bittery ensures that nobody — not even us — can access your data.
+category: security
+order: 1
+---
+
+# Zero-Knowledge Architecture
+
+Bittery is built on a **zero-knowledge** security model. This means your sensitive data is encrypted and decrypted entirely on your device. Our servers never see your master password, Secret Key, or any plaintext vault data.
+
+## What "zero-knowledge" means
+
+In a zero-knowledge system:
+
+- **Your password never leaves your device.** We use SRP-6a (Secure Remote Password) for authentication — even during login, your password is never transmitted.
+- **Encryption happens locally.** All vault data is encrypted with AES-256-GCM on your device before being sent to our servers.
+- **We cannot read your data.** Even with full database access, your vault contents remain encrypted and unreadable without your keys.
+- **We cannot reset your password.** Because we don't have it. Only you can decrypt your vault.
+
+## The encryption flow
+
+```
+Master Password + Secret Key + Email
+        │
+        ▼
+   PBKDF2 (310,000 iterations, SHA-256)
+        │
+        ▼
+   HKDF Split
+   ┌─────────────┬──────────────────┐
+   │ Auth Key    │ Master Unlock Key│
+   │ (for SRP)   │ (for encryption) │
+   └─────────────┴──────────────────┘
+                          │
+                   ┌──────┴──────┐
+                   │             │
+               Vault Keys   RSA Private Key
+                   │
+               Item Data
+           (AES-256-GCM)
+```
+
+## Key derivation
+
+Your **Master Unlock Key** is derived using:
+
+1. **PBKDF2** with SHA-256, 310,000 iterations, using your lowercase email as salt
+2. **HKDF** to split the derived key into an authentication key (for SRP login) and the Master Unlock Key (for encryption)
+
+This makes brute-force attacks computationally infeasible — even with powerful hardware.
+
+## Vault encryption
+
+Each vault has its own **symmetric key** (AES-256). This vault key is encrypted with your Master Unlock Key and stored per-user. When you access a vault:
+
+1. Your Master Unlock Key decrypts the vault key
+2. The vault key decrypts individual items
+3. Each item uses a unique random IV (initialization vector)
+
+<Callout type="info">
+Every encryption operation uses a fresh random IV, ensuring that encrypting the same data twice produces different ciphertext.
+</Callout>
+
+## What we store
+
+| Data | Encrypted? | Can we read it? |
+|------|-----------|----------------|
+| Email | No | Yes |
+| SRP verifier | No (but it's a one-way value) | Cannot derive password |
+| Vault items | Yes (AES-256-GCM) | No |
+| Vault keys | Yes (AES-256-GCM) | No |
+| RSA private key | Yes (AES-256-GCM) | No |
+| RSA public key | No | Yes (it's public by design) |
+
+## Why this matters
+
+If Bittery's servers were ever breached, attackers would get encrypted blobs that are computationally infeasible to decrypt. Your data remains safe even in the worst-case scenario.

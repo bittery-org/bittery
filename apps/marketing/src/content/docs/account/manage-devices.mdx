@@ -1,0 +1,51 @@
+---
+title: Manage Your Devices
+description: View, rename, and revoke access for devices connected to your Bittery account.
+category: account
+order: 2
+---
+
+# Manage Your Devices
+
+Bittery keeps track of all devices where you're signed in. You can view active sessions, rename devices for easy identification, and revoke access to any device remotely.
+
+## Viewing your devices
+
+Go to **Settings → Devices** in the web or desktop app to see all active sessions. Each entry shows:
+
+- **Device name** (e.g., "MacBook Pro", "iPhone 15")
+- **Platform** (web, desktop, mobile, extension)
+- **Browser / OS** information
+- **Last active** timestamp
+- **Current device** indicator
+
+## Renaming a device
+
+Click the device name or the edit icon to give it a recognizable name. This is especially helpful if you have multiple devices of the same type.
+
+## Revoking access
+
+If you've lost a device or want to sign out remotely:
+
+<Steps>
+<Step title="Find the device">
+Locate the device in your active sessions list.
+</Step>
+<Step title="Click 'Revoke'">
+Confirm the action. The session will be immediately invalidated.
+</Step>
+<Step title="The device is signed out">
+The next time the device tries to communicate with Bittery, it will be required to sign in again with the full credentials (email + password + Secret Key).
+</Step>
+</Steps>
+
+<Callout type="tip">
+If you suspect unauthorized access, use **"Sign out all devices"** to revoke every session at once, then change your password immediately.
+</Callout>
+
+## Session security
+
+- Sessions are encrypted and expire after **14 days** of inactivity
+- Each device has a unique **device key** for session persistence
+- The Master Unlock Key is never stored on disk — it's kept in memory only
+- Quick unlock (biometric/PIN) is available on supported devices but never stores the master password
