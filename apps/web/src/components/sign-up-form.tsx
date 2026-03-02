@@ -39,18 +39,25 @@ const cloudPlans = planInfo.map((plan) => ({
 	...planStyles[plan.id],
 }));
 
+const validPlanIds = new Set<string>(["free", "personal", "family", "team"]);
+
 export default function SignUpForm({
 	onSwitchToSignIn,
 	invitationToken,
 	redirectTo,
+	initialPlan,
 }: {
 	onSwitchToSignIn: () => void;
 	invitationToken?: string;
 	redirectTo?: string;
+	initialPlan?: string;
 }) {
-	const signup = useSignupForm({ invitationToken, redirectTo });
+	const resolvedPlan = initialPlan && validPlanIds.has(initialPlan)
+		? (initialPlan as CloudPlanId)
+		: undefined;
+	const signup = useSignupForm({ invitationToken, redirectTo, initialPlan: resolvedPlan });
 	const [cloudSignupStep, setCloudSignupStep] = useState<"plan" | "account">(
-		"plan",
+		resolvedPlan ? "account" : "plan",
 	);
 
 	// Delegate to self-hosted component for self-hosted or invitation flows

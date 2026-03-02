@@ -17,7 +17,7 @@ export const Route = createFileRoute("/_auth/signup")({
 
 function RouteComponent() {
 	const navigate = useNavigate();
-	const { redirect } = Route.useSearch();
+	const { redirect, plan } = Route.useSearch();
 
 	const invitationToken = redirect?.match(/^\/invite\/(.+)$/)?.[1] || undefined;
 
@@ -33,6 +33,7 @@ function RouteComponent() {
 			}}
 			invitationToken={invitationToken}
 			redirectTo={redirect}
+			initialPlan={plan}
 		/>
 	);
 }

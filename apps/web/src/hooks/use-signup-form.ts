@@ -20,9 +20,11 @@ type CloudPlanId = import("@bittery/shared/pricing").CloudPlanId;
 export function useSignupForm({
 	invitationToken,
 	redirectTo,
+	initialPlan,
 }: {
 	invitationToken?: string;
 	redirectTo?: string;
+	initialPlan?: CloudPlanId;
 }) {
 	const navigate = useNavigate();
 	const trpc = useTRPC();
@@ -162,7 +164,7 @@ export function useSignupForm({
 			email: "",
 			password: "",
 			name: "",
-			plan: "free" as CloudPlanId,
+			plan: (initialPlan ?? "free") as CloudPlanId,
 			organizationName: "",
 		},
 		onSubmit: async ({ value }) => {
