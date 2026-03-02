@@ -42,7 +42,7 @@ const cloudPlans: Array<{
 	{
 		id: "personal",
 		name: "Personal",
-		priceLabel: "$4",
+		priceLabel: "$3",
 		priceSuffix: "/mo",
 		description: "Daily password security with premium features.",
 		isRecommended: true,
@@ -53,7 +53,7 @@ const cloudPlans: Array<{
 	{
 		id: "family",
 		name: "Family",
-		priceLabel: "$9",
+		priceLabel: "$7",
 		priceSuffix: "/mo",
 		description: "Shared protection for your household.",
 		icon: Heart,
@@ -64,7 +64,7 @@ const cloudPlans: Array<{
 	{
 		id: "team",
 		name: "Team",
-		priceLabel: "$12",
+		priceLabel: "$9",
 		priceSuffix: "/user",
 		description: "Teams and businesses with shared workspaces.",
 		icon: Briefcase,

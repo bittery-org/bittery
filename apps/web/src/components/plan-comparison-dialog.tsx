@@ -38,7 +38,7 @@ const featureCategories: Array<{
 		features: [
 			{
 				label: "Vaults",
-				values: { free: "1", personal: "10", family: "25", team: "Unlimited" },
+				values: { free: "1", personal: "Unlimited", family: "Unlimited", team: "Unlimited" },
 			},
 			{
 				label: "Items per vault",
@@ -59,12 +59,21 @@ const featureCategories: Array<{
 				},
 			},
 			{
-				label: "File attachments",
+				label: "Storage",
 				values: {
 					free: false,
-					personal: "1 GB",
-					family: "5 GB",
-					team: "10 GB",
+					personal: "250 MB",
+					family: "1 GB",
+					team: "2 GB",
+				},
+			},
+			{
+				label: "Max file size",
+				values: {
+					free: false,
+					personal: "10 MB",
+					family: "25 MB",
+					team: "50 MB",
 				},
 			},
 		],
@@ -208,7 +217,7 @@ const plans: Array<{
 	{
 		id: "personal",
 		name: "Personal",
-		priceLabel: "$4",
+		priceLabel: "$3",
 		priceSuffix: "/mo",
 		description: "Daily password security with premium features",
 		isRecommended: true,
@@ -220,7 +229,7 @@ const plans: Array<{
 	{
 		id: "family",
 		name: "Family",
-		priceLabel: "$9",
+		priceLabel: "$7",
 		priceSuffix: "/mo",
 		description: "Shared protection for your household",
 		icon: Heart,
@@ -232,7 +241,7 @@ const plans: Array<{
 	{
 		id: "team",
 		name: "Team",
-		priceLabel: "$12",
+		priceLabel: "$9",
 		priceSuffix: "/user",
 		description: "Teams and businesses with shared workspaces",
 		icon: Briefcase,
