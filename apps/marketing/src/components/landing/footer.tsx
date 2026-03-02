@@ -23,7 +23,7 @@ const footerLinks = [
 	{
 		title: "Company",
 		links: [
-			{ label: "About", href: "/#" },
+			{ label: "About", href: "/about" },
 			{ label: "Blog", href: "/#" },
 			{ label: "GitHub", href: "https://github.com/bittery-org/bittery", external: true },
 			{ label: "Contact", href: "/#" },
