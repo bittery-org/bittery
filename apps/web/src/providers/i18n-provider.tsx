@@ -1,9 +1,9 @@
 import {
 	type AppLocale,
-	type LocaleRuntimeAdapter,
-	type LocaleStorageAdapter,
 	defaultLocale,
 	isAppLocale,
+	type LocaleRuntimeAdapter,
+	type LocaleStorageAdapter,
 } from "@bittery/i18n";
 import { createI18nReact } from "@bittery/i18n/react";
 import { m } from "@/paraglide/messages";

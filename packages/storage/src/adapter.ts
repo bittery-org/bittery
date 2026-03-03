@@ -6,8 +6,8 @@
 import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
-	KdfParams,
 	ItemCacheMetadata,
+	KdfParams,
 } from "@bittery/types";
 import type {
 	AccountMetadata,

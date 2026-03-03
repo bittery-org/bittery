@@ -13,10 +13,11 @@ A zero-knowledge password manager with end-to-end encryption. All sensitive data
 
 - **Zero-knowledge architecture** — the server never sees plaintext passwords or encryption keys
 - **Dual-key model** — account password + Secret Key (A3-XXXXXX format)
-- **AES-256-GCM** — all vault data encrypted client-side with random IVs
+- **AES-256-GCM + context binding (`AES-GCM-AAD-V1`)** — vault data encrypted client-side with random IVs and entity-bound integrity checks
 - **SRP-6a authentication** — password never transmitted, not even as a hash
 - **RSA-4096** — asymmetric key pairs for secure vault sharing between users
 - **PBKDF2 (310k iterations) + HKDF** — key derivation from master password
+- **Login KDF policy + pinning** — server KDF parameters are validated and pinned locally to block downgrade/tamper attempts
 - **All crypto in Rust** — single Rust implementation compiled to WASM, NAPI, Tauri commands, and native mobile bindings
 
 ## Tech Stack

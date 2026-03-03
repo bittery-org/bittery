@@ -28,10 +28,10 @@ Bittery uses a **dual-key architecture**: your account password and a randomly g
 | Secret Key hint | First segment only (`A3-XXXXXX`) | Partial (for UX) |
 | SRP salt and verifier | Hex strings | Cannot recover password |
 | RSA public key | PEM plaintext | Yes (needed for sharing) |
-| RSA private key | AES-256-GCM encrypted | No |
-| Vault encryption keys | AES-256-GCM or RSA-OAEP encrypted | No |
-| Vault item data | AES-256-GCM encrypted | No |
-| Shared item snapshots | AES-256-GCM encrypted | No |
+| RSA private key | AES-GCM-AAD-V1 encrypted | No |
+| Vault encryption keys | AES-GCM-AAD-V1 or RSA-OAEP encrypted | No |
+| Vault item data | AES-GCM-AAD-V1 encrypted | No |
+| Shared item snapshots | AES-GCM-AAD-V1 encrypted | No |
 | Session tokens | SHA-256 hashed | No (only hash stored) |
 
 ### What Never Leaves Your Device (Unencrypted)
@@ -69,11 +69,12 @@ The Secret Key ensures that even a weak master password cannot be brute-forced f
 
 ### Symmetric Encryption
 
-All sensitive data is encrypted with **AES-256-GCM** (Galois/Counter Mode):
+Bittery uses **AES-256-GCM** for symmetric encryption. Serialized payloads use the algorithm identifier **`AES-GCM-AAD-V1`**.
 
 - **Key size**: 256 bits
 - **IV/Nonce**: 96 bits, cryptographically random, generated fresh for every encryption operation
 - **Authentication**: GCM provides authenticated encryption (AEAD) — tampering is detected automatically
+- **Context binding**: Item and attachment payloads are bound to deterministic entity context (`vaultId`, `entityId`, `entityType`, `version`, `userId`) to prevent ciphertext swapping across entities
 - **Output format**: JSON containing base64-encoded ciphertext, IV, and algorithm identifier
 
 ### Asymmetric Encryption
@@ -82,7 +83,7 @@ Each user has an **RSA-4096** key pair:
 
 - **Padding**: OAEP with SHA-256 (randomized — same plaintext produces different ciphertexts)
 - **Public key**: Stored on the server in SPKI PEM format (needed for vault sharing)
-- **Private key**: Encrypted with the Master Unlock Key (AES-256-GCM) before being stored on the server
+- **Private key**: Encrypted with the Master Unlock Key (`AES-GCM-AAD-V1` payload format backed by AES-256-GCM) before being stored on the server
 
 RSA is used exclusively for encrypting vault keys when sharing vaults with other users. It is not used for bulk data encryption.
 
@@ -122,6 +123,18 @@ Bittery uses the **Secure Remote Password (SRP-6a)** protocol ([RFC 5054](https:
 
 At no point does the server see the password, the Auth Key, or any value that could be used to derive them.
 
+### Login KDF Policy and Pinning
+
+During login challenge (`startLogin`), the server returns explicit KDF parameters (`schemaVersion`, `algorithm`, `iterations`, `salt`).
+
+The client enforces:
+- `algorithm` must be `pbkdf2-sha256`
+- `iterations` must be at least `310,000`
+- `salt` must be valid hex and at least 16 bytes
+- after first successful login, the client pins values locally; future logins reject schema/algorithm/salt changes and iteration downgrades
+
+This blocks KDF downgrade/tampering attempts if the login challenge path is manipulated.
+
 ### Session Management
 
 - **JWT algorithm**: HS256 (HMAC-SHA256) with a server-side secret (minimum 32 bytes)
@@ -154,11 +167,11 @@ Auth Key   Master Unlock Key
    │    ┌────┴─────────────────┐
    │    ▼                      ▼
    │  Vault Keys          RSA Private Key
-   │  (AES-256-GCM)       (AES-256-GCM)
+   │  (AES-GCM-AAD-V1)    (AES-GCM-AAD-V1)
    │    │
    │    ▼
    │  Item Data
-   │  (AES-256-GCM, random IV per item)
+   │  (AES-GCM-AAD-V1, random IV per item, context-bound)
    │
    ▼
 SRP-6a Authentication
@@ -168,8 +181,8 @@ SRP-6a Authentication
 ### Personal Vaults
 
 1. A random 256-bit vault key is generated when a vault is created
-2. The vault key is encrypted with your Master Unlock Key (AES-256-GCM) and stored in the `vaultKey` table
-3. Each item in the vault is encrypted with the vault key using AES-256-GCM with a fresh random IV
+2. The vault key is encrypted with your Master Unlock Key (`AES-GCM-AAD-V1`) and stored in the `vaultKey` table
+3. Each item in the vault is encrypted with the vault key using AES-256-GCM with a fresh random IV and deterministic context binding
 
 ### Shared Vaults (Teams)
 
@@ -186,7 +199,7 @@ This means vault sharing never exposes the vault key to the server — only the 
 When a member is removed from a shared vault, key rotation occurs automatically:
 
 1. A new random vault key is generated
-2. The new key is encrypted for each remaining member (RSA-OAEP for shared members, AES-256-GCM for the owner)
+2. The new key is encrypted for each remaining member (RSA-OAEP for shared members, `AES-GCM-AAD-V1` for the owner)
 3. All items in the vault are re-encrypted with the new key (each with a fresh random IV)
 4. The old vault key entries for the removed member are deleted
 
@@ -197,7 +210,7 @@ This ensures the removed member cannot decrypt any data added after their remova
 Items can be shared via encrypted links:
 
 1. A random share key is generated client-side
-2. The item data is decrypted with the vault key, then re-encrypted with the share key (AES-256-GCM)
+2. The item data is decrypted with the vault key, then re-encrypted with the share key (`AES-GCM-AAD-V1`)
 3. The encrypted snapshot and encrypted share key are sent to the server
 4. The server generates a unique share token (32-character nanoid)
 
@@ -231,8 +244,10 @@ Audit logs use a non-foreign-key user reference so they survive account deletion
 | PBKDF2 iterations | 310,000 |
 | Master key size | 256 bits |
 | Vault key size | 256 bits |
-| Symmetric encryption | AES-256-GCM |
+| Symmetric encryption | AES-256-GCM (`AES-GCM-AAD-V1`) |
+| Ciphertext binding | Deterministic entity context for items and attachments |
 | GCM IV length | 96 bits (random per operation) |
+| Login KDF hardening | Baseline policy checks + local parameter pinning |
 | Asymmetric encryption | RSA-4096 OAEP (SHA-256) |
 | SRP group | 4,096-bit safe prime (RFC 5054) |
 | SRP hash | SHA-256 |

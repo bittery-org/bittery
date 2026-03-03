@@ -2,6 +2,11 @@
  * ICrypto implementation that delegates all operations to a Web Worker.
  * Keeps the main thread responsive during heavy crypto (PBKDF2, SRP, RSA).
  */
+
+import {
+	unwrapPlaintextWithContext,
+	wrapPlaintextWithContext,
+} from "@bittery/shared/crypto-context-envelope";
 import type {
 	DerivedKeys,
 	EncryptedData,
@@ -11,10 +16,6 @@ import type {
 	SRPClientSession,
 	SRPServerChallenge,
 } from "@bittery/types";
-import {
-	unwrapPlaintextWithContext,
-	wrapPlaintextWithContext,
-} from "@bittery/shared/crypto-context-envelope";
 import CryptoWorker from "@/lib/crypto.worker?worker";
 
 function base64ToUint8Array(base64: string): Uint8Array {
@@ -180,9 +181,7 @@ export class WorkerCrypto implements ICrypto {
 			algorithm: data.algorithm,
 			keyBase64: uint8ArrayToBase64(key),
 		});
-		return context
-			? unwrapPlaintextWithContext(decrypted, context)
-			: decrypted;
+		return context ? unwrapPlaintextWithContext(decrypted, context) : decrypted;
 	}
 
 	async generateEncryptionKey(): Promise<Uint8Array> {

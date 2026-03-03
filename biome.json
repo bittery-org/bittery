@@ -38,7 +38,8 @@
 			"!**/.svelte-kit",
 			"!**/wrangler.jsonc",
 			"!**/.source",
-			"!**/playwright-report"
+			"!**/playwright-report",
+			"!**/paraglide"
 		]
 	},
 	"formatter": {

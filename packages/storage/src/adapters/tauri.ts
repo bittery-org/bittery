@@ -509,10 +509,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		return (await store.get<string>(key)) ?? null;
 	}
 
-	async storePinnedKdfParams(
-		params: KdfParams,
-		email?: string,
-	): Promise<void> {
+	async storePinnedKdfParams(params: KdfParams, email?: string): Promise<void> {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) throw new Error("No account specified");
 

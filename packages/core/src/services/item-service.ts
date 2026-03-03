@@ -744,8 +744,7 @@ export class ItemService {
 									const context = buildItemEncryptionContext({
 										vaultId: rawItem.vaultId,
 										itemId: rawItem.id,
-										version:
-											(rawItem as { version?: number }).version ?? 1,
+										version: (rawItem as { version?: number }).version ?? 1,
 										userId:
 											(rawItem as { lastModifiedBy?: string | null })
 												.lastModifiedBy ?? account.userId,

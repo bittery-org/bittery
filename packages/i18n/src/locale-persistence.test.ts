@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { initializeLocale, persistLocaleSelection } from "./locale-persistence";
 import type { AppLocale } from "./index";
+import { initializeLocale, persistLocaleSelection } from "./locale-persistence";
 
 describe("locale persistence", () => {
 	test("persistLocaleSelection stores locale and updates runtime without reload", async () => {
 		const values: Record<string, string> = {};
-		const runtimeCalls: Array<{ locale: AppLocale; reload: boolean | undefined }> =
-			[];
+		const runtimeCalls: Array<{
+			locale: AppLocale;
+			reload: boolean | undefined;
+		}> = [];
 
 		await persistLocaleSelection({
 			locale: "de",

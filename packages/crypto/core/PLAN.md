@@ -81,13 +81,13 @@ packages/crypto-nitro/                      # Expo Module for React Native ✅
 
 ### Key Derivation
 - **Input**: `"${password}|${secretKey}"` UTF-8 + `email.toLowerCase()` UTF-8 as salt
-- **PBKDF2**: SHA-256, 100,000 iterations, 32-byte output
+- **PBKDF2**: SHA-256, 310,000 iterations, 32-byte output
 - **HKDF**: SHA-256, info strings: `"bittery-auth-key"`, `"bittery-unlock-key"`
 - **Output**: 32-byte authKey + 32-byte masterUnlockKey
 
 ### AES-256-GCM
 - **Key**: 32 bytes, **IV**: 12 bytes (random per operation)
-- **Output**: `{ciphertext: base64, iv: base64, algorithm: "AES-GCM"}`
+- **Output**: `{ciphertext: base64, iv: base64, algorithm: "AES-GCM-AAD-V1"}`
 
 ### RSA-4096
 - **Algorithm**: RSA-OAEP with SHA-256
@@ -259,7 +259,7 @@ Replaced Kotlin crypto implementations in credential-provider with FFI calls to 
 1. Add `bittery-crypto-core` as Cargo dependency to `apps/desktop/src-tauri/Cargo.toml` ✅
 2. Create Tauri commands in `apps/desktop/src-tauri/src/crypto_commands.rs` ✅
    - `crypto_derive_keys` - key derivation (PBKDF2 + HKDF)
-   - `crypto_encrypt` / `crypto_decrypt` - AES-256-GCM encryption
+   - `crypto_encrypt` / `crypto_decrypt` - AES-256-GCM encryption (`AES-GCM-AAD-V1` payload format)
    - `crypto_generate_encryption_key` - random key generation
    - `crypto_generate_rsa_key_pair` - RSA-4096 key pair
    - `crypto_rsa_encrypt` / `crypto_rsa_decrypt` - RSA-OAEP encryption
@@ -375,7 +375,7 @@ napi-derive = "2"
 | File | Purpose |
 |------|---------|
 | `packages/crypto/src/key-derivation.ts` | Key derivation spec (PBKDF2 + HKDF params) |
-| `packages/crypto/src/encryption.ts` | AES-256-GCM encryption spec |
+| `packages/crypto/src/encryption.ts` | AES-256-GCM encryption spec (`AES-GCM-AAD-V1` payload format) |
 | `packages/crypto/src/rsa.ts` | RSA-4096 OAEP spec (PEM format) |
 | `packages/crypto/src/secret-key.ts` | Secret key format and charset |
 | `packages/js-srp6a/src/client.ts` | SRP client with session derivation |

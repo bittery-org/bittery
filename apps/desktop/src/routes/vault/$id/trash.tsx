@@ -20,8 +20,8 @@ import {
 } from "@bittery/ui/icons";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { formatDate } from "../../../lib/i18n-format";
 import { Favicon } from "../../../components/vault/favicon";
+import { formatDate } from "../../../lib/i18n-format";
 
 export const Route = createFileRoute("/vault/$id/trash")({
 	component: TrashComponent,

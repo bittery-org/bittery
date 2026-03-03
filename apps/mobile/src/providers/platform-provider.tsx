@@ -20,11 +20,11 @@ import {
 	deriveKeys,
 	encrypt,
 	generateClientEphemeral,
-	generateEncryptionKey as nativeGenerateEncryptionKey,
 	generateUuid,
+	generateEncryptionKey as nativeGenerateEncryptionKey,
 	rsaDecrypt,
-	validateServerKdfParams,
 	validateSecretKey,
+	validateServerKdfParams,
 	verifyServerSession,
 } from "../lib/crypto/native-crypto";
 import { storage } from "../services/storage";

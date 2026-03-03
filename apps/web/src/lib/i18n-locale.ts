@@ -1,8 +1,9 @@
 import {
 	type AppLocale,
-	persistLocaleSelection as persistLocaleSelectionCore,
 	localeStorageKey,
+	persistLocaleSelection as persistLocaleSelectionCore,
 } from "@bittery/i18n";
+
 export { resolveBrowserLocale, resolveLocale } from "@bittery/i18n";
 
 export async function persistLocaleSelection(input: {

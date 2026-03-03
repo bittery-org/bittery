@@ -21,6 +21,11 @@ import {
 	validateSecretKey as nativeValidateSecretKey,
 	type PrimeGroup,
 } from "@bittery/crypto-nitro";
+import {
+	unwrapPlaintextWithContext,
+	wrapPlaintextWithContext,
+} from "@bittery/shared/crypto-context-envelope";
+import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
 import type {
 	DerivedKeys,
 	EncryptedData,
@@ -32,11 +37,6 @@ import type {
 	SRPRegistration,
 	SRPServerChallenge,
 } from "@bittery/types";
-import {
-	unwrapPlaintextWithContext,
-	wrapPlaintextWithContext,
-} from "@bittery/shared/crypto-context-envelope";
-import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
 
 // Re-export types from @bittery/types
 export type {

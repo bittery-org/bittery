@@ -20,6 +20,7 @@ import {
 	IconTriangleWarningOutlineDuo18,
 } from "@bittery/ui/icons";
 import { useMemo, useState } from "react";
+import { formatDate, formatDateTime } from "../../../lib/i18n-format";
 import { Favicon } from "../favicon";
 import { TagInput } from "../tag-input";
 import {
@@ -35,7 +36,6 @@ import {
 	handleCopy,
 	type LoginDisplayData,
 } from "./shared";
-import { formatDate, formatDateTime } from "../../../lib/i18n-format";
 
 function formatPasskeyLastUsed(value?: string): string {
 	if (!value) {

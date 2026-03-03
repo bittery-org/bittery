@@ -1,12 +1,12 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
 	type AppLocale,
-	type LocaleRuntimeAdapter,
-	type LocaleStorageAdapter,
 	defaultLocale,
 	isAppLocale,
+	type LocaleRuntimeAdapter,
+	type LocaleStorageAdapter,
 } from "@bittery/i18n";
 import { createI18nReact } from "@bittery/i18n/react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { m } from "@/paraglide/messages";
 import {
 	getLocale as getRuntimeLocale,

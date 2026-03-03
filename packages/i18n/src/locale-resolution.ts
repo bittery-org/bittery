@@ -1,4 +1,4 @@
-import { defaultLocale, isAppLocale, type AppLocale } from "./index";
+import { type AppLocale, defaultLocale, isAppLocale } from "./index";
 
 export function resolveBrowserLocale(
 	browserLocale: string | null | undefined,

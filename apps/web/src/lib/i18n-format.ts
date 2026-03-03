@@ -3,9 +3,5 @@ import { getLocale } from "@/paraglide/runtime";
 
 const formatters = createI18nFormatters(getLocale);
 
-export const {
-	formatDate,
-	formatDateTime,
-	formatNumber,
-	formatCurrency,
-} = formatters;
+export const { formatDate, formatDateTime, formatNumber, formatCurrency } =
+	formatters;

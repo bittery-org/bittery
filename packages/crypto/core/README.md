@@ -8,11 +8,12 @@ Unified Rust cryptographic core for the Bittery password manager. Compiles to mu
 
 ## Features
 
-- **Key Derivation**: PBKDF2 (100k iterations) + HKDF for deriving auth and master unlock keys
-- **AES-256-GCM**: Symmetric encryption with random IVs
+- **Key Derivation**: PBKDF2 (310k iterations) + HKDF for deriving auth and master unlock keys
+- **AES-256-GCM (`AES-GCM-AAD-V1`)**: Symmetric encryption with random IVs and entity context binding support
 - **RSA-4096 OAEP**: Asymmetric encryption for vault sharing
 - **Secret Key Generation**: 1Password-style A3-XXXXXX format
 - **SRP-6a Protocol**: Zero-knowledge password authentication (RFC 5054)
+- **KDF Policy Validation**: Baseline validation + pinned-parameter downgrade detection for login challenges
 
 ## Building
 
@@ -67,6 +68,7 @@ import init, {
   deriveKeys,
   encrypt,
   decrypt,
+  generateEncryptionKey,
   generateSecretKey,
   JsSrpClient,
   JsSrpServer,
@@ -82,6 +84,10 @@ console.log(keys.auth_key, keys.master_unlock_key);
 const key = generateEncryptionKey();
 const encrypted = encrypt('secret data', key);
 const decrypted = decrypt(encrypted, key);
+
+// Context-aware variants are also available:
+// encryptWithContext(plaintext, key, { vault_id, entity_id, entity_type, version, user_id })
+// decryptWithContext(encryptedData, key, { vault_id, entity_id, entity_type, version, user_id })
 
 // SRP-6a Authentication
 const client = new JsSrpClient('SHA-256', 4096);

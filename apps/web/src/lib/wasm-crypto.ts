@@ -29,6 +29,10 @@ import init, {
 	validateRotationData as wasmValidateRotationData,
 	validateSecretKey as wasmValidateSecretKey,
 } from "@bittery/crypto-wasm";
+import {
+	unwrapPlaintextWithContext as unwrapWithContext,
+	wrapPlaintextWithContext as wrapWithContext,
+} from "@bittery/shared/crypto-context-envelope";
 import type {
 	DerivedKeys,
 	EncryptedData,
@@ -39,10 +43,6 @@ import type {
 	SRPRegistration,
 	SRPServerChallenge,
 } from "@bittery/types";
-import {
-	unwrapPlaintextWithContext as unwrapWithContext,
-	wrapPlaintextWithContext as wrapWithContext,
-} from "@bittery/shared/crypto-context-envelope";
 
 // Re-export types for consumers
 export type {

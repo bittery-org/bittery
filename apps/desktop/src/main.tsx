@@ -7,9 +7,9 @@ import ReactDOM from "react-dom/client";
 import { AccountProvider } from "./contexts/account-context";
 import { queryClient, trpc, trpcClient } from "./lib/providers";
 import { initializeStorage } from "./lib/storage";
+import { I18nProvider } from "./providers/i18n-provider";
 import { DesktopPlatformProvider } from "./providers/platform-provider";
 import { DesktopSyncProvider } from "./providers/sync-provider";
-import { I18nProvider } from "./providers/i18n-provider";
 // Import the generated route tree
 import { routeTree } from "./routeTree.gen";
 

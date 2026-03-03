@@ -4,8 +4,8 @@
  * extensions, or any other runtime.
  */
 
-import type { IStorageAdapter, VaultKeyData } from "@bittery/storage";
 import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
+import type { IStorageAdapter, VaultKeyData } from "@bittery/storage";
 import type { ICrypto, KdfParams } from "@bittery/types";
 
 /**
@@ -196,7 +196,7 @@ async function persistPinnedKdfParamsIfNeeded(
 		pinned.iterations !== params.iterations ||
 		pinned.salt !== params.salt
 	) {
-		console.log('storing pinned kdf params', pinned);
+		console.log("storing pinned kdf params", pinned);
 		await storage.storePinnedKdfParams(params, email);
 	}
 }

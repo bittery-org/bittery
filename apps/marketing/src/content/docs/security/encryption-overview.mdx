@@ -13,20 +13,24 @@ Bittery uses industry-standard cryptographic primitives, composed carefully to p
 
 | Primitive | Algorithm | Usage |
 |-----------|-----------|-------|
-| **Symmetric encryption** | AES-256-GCM | Vault items, vault keys, private keys |
+| **Symmetric encryption** | AES-256-GCM (`AES-GCM-AAD-V1` format) | Vault items, vault keys, private keys |
 | **Key derivation** | PBKDF2-SHA256 (310k iter) | Derive keys from master password |
 | **Key expansion** | HKDF-SHA256 | Split derived key into auth + unlock keys |
 | **Asymmetric encryption** | RSA-4096 OAEP | Vault sharing between users |
 | **Authentication** | SRP-6a | Password-authenticated key exchange |
+| **Login hardening** | KDF policy + local pinning | Detect and block KDF downgrade/tampering |
 
-## AES-256-GCM
+## AES-256-GCM with Context Binding
 
-All sensitive data is encrypted using **AES-256-GCM** (Galois/Counter Mode). GCM provides both confidentiality and authenticity — if ciphertext is tampered with, decryption will fail.
+All sensitive data is encrypted using **AES-256-GCM** (Galois/Counter Mode). Serialized ciphertexts use algorithm identifier **`AES-GCM-AAD-V1`**.
+
+GCM provides both confidentiality and authenticity, and Bittery also binds entity metadata to item/attachment payloads so ciphertext cannot be swapped between entities without verification failure.
 
 Key properties:
 - **256-bit keys** — considered secure against quantum computers with Grover's algorithm (still 128-bit security)
 - **Random 96-bit IV** per encryption — generated using a cryptographically secure random number generator
 - **Authentication tag** — ensures data integrity
+- **Deterministic context binding** — item and attachment payloads bind `vaultId`, `entityId`, `entityType`, `version`, and `userId`
 
 ## SRP-6a Authentication
 
@@ -39,6 +43,17 @@ Rather than sending your password to the server (even hashed), Bittery uses the 
 <Callout type="tip">
 SRP-6a is resistant to man-in-the-middle attacks and server compromise. Even if an attacker captures the verifier, they cannot derive your password from it.
 </Callout>
+
+## Login KDF Policy and Pinning
+
+During login challenge (`startLogin`), the server returns explicit KDF parameters (`schemaVersion`, `algorithm`, `iterations`, `salt`).
+
+Clients enforce:
+
+1. `algorithm` must be `pbkdf2-sha256`
+2. `iterations` must stay at or above the minimum policy
+3. `salt` format and length must be valid
+4. After first successful login, pinned values are stored locally and future downgrades/changes are rejected
 
 ## RSA-4096 for Sharing
 

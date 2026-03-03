@@ -87,7 +87,9 @@ export function UnlockPage() {
 					return;
 				}
 
-				toast.success(m["toast.auth.unlock.success.all"]({ count: unlockedCount }));
+				toast.success(
+					m["toast.auth.unlock.success.all"]({ count: unlockedCount }),
+				);
 				return;
 			}
 
@@ -328,8 +330,12 @@ export function UnlockPage() {
 									disabled={loading}
 									aria-label={
 										showPassword
-											? m["vaults.detail.items.form.login.action.hide_password"]()
-											: m["vaults.detail.items.form.login.action.show_password"]()
+											? m[
+													"vaults.detail.items.form.login.action.hide_password"
+												]()
+											: m[
+													"vaults.detail.items.form.login.action.show_password"
+												]()
 									}
 								>
 									{showPassword ? (

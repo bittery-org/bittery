@@ -67,9 +67,9 @@ export function unwrapPlaintextWithContext(
 	if (
 		typeof parsed !== "object" ||
 		parsed === null ||
-		!Object.prototype.hasOwnProperty.call(parsed, "marker") ||
-		!Object.prototype.hasOwnProperty.call(parsed, "context") ||
-		!Object.prototype.hasOwnProperty.call(parsed, "payload")
+		!("marker" in parsed) ||
+		!("context" in parsed) ||
+		!("payload" in parsed)
 	) {
 		throw new Error("Invalid encryption context envelope");
 	}

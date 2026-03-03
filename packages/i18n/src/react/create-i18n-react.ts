@@ -9,12 +9,12 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { defaultLocale, type AppLocale } from "../index";
 import type {
 	LocaleEnvironmentAdapter,
 	LocaleRuntimeAdapter,
 	LocaleStorageAdapter,
 } from "../adapters";
+import { type AppLocale, defaultLocale } from "../index";
 import {
 	initializeLocale,
 	persistLocaleSelection,
@@ -46,14 +46,8 @@ export function createI18nReact<M>(input: {
 	sideEffects?: Pick<LocaleEnvironmentAdapter, "applyLocale">;
 	storageKey?: string;
 }) {
-	const {
-		messages,
-		runtime,
-		storage,
-		detectLocale,
-		sideEffects,
-		storageKey,
-	} = input;
+	const { messages, runtime, storage, detectLocale, sideEffects, storageKey } =
+		input;
 
 	const I18nContext = createContext<I18nContextValue<M> | null>(null);
 
@@ -93,19 +87,16 @@ export function createI18nReact<M>(input: {
 			};
 		}, []);
 
-		const setLocale = useCallback(
-			(nextLocale: AppLocale) => {
-				hasManualLocaleSelectionRef.current = true;
-				setLocaleState(nextLocale);
-				void persistLocaleSelection({
-					locale: nextLocale,
-					runtime,
-					storage,
-					storageKey,
-				});
-			},
-			[runtime, storage, storageKey],
-		);
+		const setLocale = useCallback((nextLocale: AppLocale) => {
+			hasManualLocaleSelectionRef.current = true;
+			setLocaleState(nextLocale);
+			void persistLocaleSelection({
+				locale: nextLocale,
+				runtime,
+				storage,
+				storageKey,
+			});
+		}, []);
 
 		useEffect(() => {
 			sideEffects?.applyLocale?.(locale);

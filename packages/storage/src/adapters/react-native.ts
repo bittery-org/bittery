@@ -512,10 +512,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		return this.getItem(key);
 	}
 
-	async storePinnedKdfParams(
-		params: KdfParams,
-		email?: string,
-	): Promise<void> {
+	async storePinnedKdfParams(params: KdfParams, email?: string): Promise<void> {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (!resolvedEmail) throw new Error("No account specified");
 

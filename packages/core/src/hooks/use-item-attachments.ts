@@ -15,12 +15,12 @@ import {
 } from "@bittery/shared";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { useMutation } from "@tanstack/react-query";
+import { usePlatform } from "../context/platform-context";
 import {
 	buildAttachmentBlobEncryptionContext,
 	buildAttachmentContentTypeEncryptionContext,
 	buildAttachmentNameEncryptionContext,
 } from "../services/encryption-context";
-import { usePlatform } from "../context/platform-context";
 import { useItem } from "./use-item";
 
 export interface AttachmentMeta {
@@ -155,6 +155,7 @@ export function useItemAttachments(
 	const uploadMutation = useMutation({
 		mutationFn: async (file: FileInput & { displayName?: string }) => {
 			if (!itemId) throw new Error("itemId is required");
+			if (!vaultId) throw new Error("vaultId is required");
 			const vaultKey = await getVaultKey();
 			const userId = await getCurrentUserId();
 
@@ -175,18 +176,22 @@ export function useItemAttachments(
 			});
 
 			const blobContext = buildAttachmentBlobEncryptionContext({
-				vaultId: vaultId!,
+				vaultId,
 				attachmentKey: upload.key,
 				userId,
 			});
-			const encryptedFile = await crypto.encrypt(base64File, vaultKey, blobContext);
+			const encryptedFile = await crypto.encrypt(
+				base64File,
+				vaultKey,
+				blobContext,
+			);
 
 			// Use custom display name if provided, otherwise use the file name
 			const nameToEncrypt = file.displayName?.trim() || file.name;
 
 			// Encrypt name and content-type with separate IVs
 			const nameContext = buildAttachmentNameEncryptionContext({
-				vaultId: vaultId!,
+				vaultId,
 				attachmentKey: upload.key,
 				userId,
 			});
@@ -196,7 +201,7 @@ export function useItemAttachments(
 				nameContext,
 			);
 			const contentTypeContext = buildAttachmentContentTypeEncryptionContext({
-				vaultId: vaultId!,
+				vaultId,
 				attachmentKey: upload.key,
 				userId,
 			});

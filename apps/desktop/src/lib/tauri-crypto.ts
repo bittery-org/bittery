@@ -5,6 +5,10 @@
  * in the desktop app, but uses native Rust crypto via Tauri commands.
  */
 
+import {
+	unwrapPlaintextWithContext,
+	wrapPlaintextWithContext,
+} from "@bittery/shared/crypto-context-envelope";
 import type {
 	DerivedKeys,
 	EncryptedData,
@@ -16,10 +20,6 @@ import type {
 	SRPRegistration,
 	SRPServerChallenge,
 } from "@bittery/types";
-import {
-	unwrapPlaintextWithContext,
-	wrapPlaintextWithContext,
-} from "@bittery/shared/crypto-context-envelope";
 import { invoke } from "@tauri-apps/api/core";
 
 // Re-export types for consumers
