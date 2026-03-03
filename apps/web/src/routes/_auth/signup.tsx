@@ -4,6 +4,7 @@ import SignUpForm from "@/components/sign-up-form";
 
 const searchSchema = z.object({
 	redirect: z.string().optional(),
+	plan: z.string().optional(),
 });
 
 export const Route = createFileRoute("/_auth/signup")({
@@ -16,7 +17,7 @@ export const Route = createFileRoute("/_auth/signup")({
 
 function RouteComponent() {
 	const navigate = useNavigate();
-	const { redirect } = Route.useSearch();
+	const { redirect, plan } = Route.useSearch();
 
 	const invitationToken = redirect?.match(/^\/invite\/(.+)$/)?.[1] || undefined;
 
@@ -32,6 +33,7 @@ function RouteComponent() {
 			}}
 			invitationToken={invitationToken}
 			redirectTo={redirect}
+			initialPlan={plan}
 		/>
 	);
 }

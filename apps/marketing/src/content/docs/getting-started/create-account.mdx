@@ -1,0 +1,56 @@
+---
+title: Create Your Account
+description: Sign up for Bittery and set up your zero-knowledge vault in under two minutes.
+category: getting-started
+order: 1
+---
+
+# Create Your Account
+
+Getting started with Bittery takes less than two minutes. Your account is secured from the very first step — we never see your password or encryption keys.
+
+## What you'll need
+
+- An email address
+- A strong master password (we recommend 14+ characters)
+
+## Sign up
+
+<Steps>
+<Step title="Go to the sign-up page">
+Visit [app.bittery.com](https://app.bittery.com) and click **Create Account**.
+</Step>
+<Step title="Enter your email">
+Provide a valid email address. This is used as part of your encryption salt and for account recovery.
+</Step>
+<Step title="Choose a master password">
+Pick a strong, memorable password. This is the only password you'll ever need to remember. Bittery will never store or transmit it.
+</Step>
+<Step title="Save your Secret Key">
+After signing up, you'll receive a **Secret Key** in the format `A3-XXXXXX-XXXXXX-...`. Write this down and store it somewhere safe — it's required to sign in on new devices.
+
+<Callout type="warning">
+Your Secret Key cannot be recovered if lost. Store it in a secure physical location.
+</Callout>
+</Step>
+<Step title="You're in!">
+Your vault is created and encrypted. Start adding passwords, secure notes, and more.
+</Step>
+</Steps>
+
+## Understanding your credentials
+
+Bittery uses a **dual-key architecture** for maximum security:
+
+| Credential | Purpose | Can be changed? |
+|-----------|---------|----------------|
+| **Master Password** | Unlocks your vault on trusted devices | Yes |
+| **Secret Key** | Required for new device sign-ins | Yes (regenerate) |
+| **Email** | Account identifier and encryption salt | Yes |
+
+Together, these derive your **Master Unlock Key** via PBKDF2 (310,000 iterations), which encrypts and decrypts everything in your vault.
+
+## Next steps
+
+- [Install the browser extension](/docs/getting-started/install-extension) for autofill
+- [Import existing passwords](/docs/getting-started/import-passwords) from another manager

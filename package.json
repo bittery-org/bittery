@@ -1,7 +1,7 @@
 {
 	"name": "bittery",
 	"private": true,
-	"license": "AGPL-3.0-or-later",
+	"license": "FSL-1.1-ALv2",
 	"type": "module",
 	"pnpm": {
 		"overrides": {
@@ -21,6 +21,7 @@
 		"dev:server": "turbo -F server dev",
 		"dev:extension": "turbo -F extension dev",
 		"dev:mobile": "turbo -F mobile dev",
+		"dev:marketing": "turbo -F marketing dev",
 		"build": "turbo build",
 		"build:desktop": "turbo -F desktop build:release",
 		"build:web": "pnpm build:crypto-wasm && turbo -F web build",
@@ -40,7 +41,8 @@
 		"db:test:setup": "pnpm --filter @bittery/db run db:test:setup",
 		"db:stop": "turbo -F @bittery/db db:stop",
 		"db:down": "turbo -F @bittery/db db:down",
-		"start:server": "pnpm --filter server run start"
+		"start:server": "pnpm --filter server run start",
+		"stripe:webhooks": "stripe listen --forward-to http://localhost:3000/webhooks/stripe"
 	},
 	"dependencies": {
 		"dotenv": "^17.2.2",

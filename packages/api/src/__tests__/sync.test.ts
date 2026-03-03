@@ -11,9 +11,14 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { db } from "@bittery/db";
+import { itemAttachment } from "@bittery/db/schema/vault";
+import { nanoid } from "nanoid";
 import { syncRouter } from "../routers/sync";
 import {
+	createTestItem,
 	createTestSyncEvent,
+	createTestTeam,
 	createTestVault,
 	setup,
 	truncateAll,
@@ -183,6 +188,81 @@ describe("Sync Router", () => {
 
 			// Should not include the inaccessible vault
 			expect(result[vaultId]).toBeUndefined();
+		});
+	});
+
+	describe("bootstrapItems", () => {
+		test("should include soft-deleted items in bootstrap payload", async () => {
+			const { caller, userId } = await setup(syncRouter);
+			const vaultId = await createTestVault(userId);
+
+			const activeItemId = await createTestItem(vaultId, userId);
+			const deletedItemId = await createTestItem(vaultId, userId, {
+				deletedAt: new Date(),
+			});
+
+			const result = await caller.bootstrapItems({});
+			const returnedItemIds = result.items.map((item) => item.id);
+			const activeItem = result.items.find((item) => item.id === activeItemId);
+			const deletedItem = result.items.find((item) => item.id === deletedItemId);
+
+			expect(returnedItemIds).toContain(activeItemId);
+			expect(returnedItemIds).toContain(deletedItemId);
+			expect(deletedItem).toBeDefined();
+			expect(deletedItem?.deletedAt).not.toBeNull();
+			expect(activeItem).toBeDefined();
+			expect(activeItem?.deletedAt).toBeNull();
+		});
+
+		test("should hide attachment metadata when attachments entitlement is disabled", async () => {
+			const { caller, userId } = await setup(syncRouter);
+			await createTestTeam(userId, {
+				billingPlan: "free",
+				billingStatus: "none",
+				type: "personal",
+			});
+			const vaultId = await createTestVault(userId);
+			const itemId = await createTestItem(vaultId, userId);
+			await db.insert(itemAttachment).values({
+				id: nanoid(),
+				itemId,
+				vaultId,
+				storageKey: `attachments/${userId}/${itemId}/file.enc`,
+				encryptedName: "enc-name",
+				encryptedContentType: "enc-type",
+				encryptionIv: "enc-iv",
+				encryptedContentTypeIv: "enc-type-iv",
+				encryptionAlgorithm: "AES-GCM",
+				fileSize: 123,
+				uploadedBy: userId,
+			});
+
+			const result = await caller.bootstrapItems({});
+			expect(result.items.length).toBe(1);
+			expect(result.items[0]?.attachments).toEqual([]);
+		});
+
+		test("should hide attachment metadata for cloud users without a team", async () => {
+			const { caller, userId } = await setup(syncRouter);
+			const vaultId = await createTestVault(userId);
+			const itemId = await createTestItem(vaultId, userId);
+			await db.insert(itemAttachment).values({
+				id: nanoid(),
+				itemId,
+				vaultId,
+				storageKey: `attachments/${userId}/${itemId}/file.enc`,
+				encryptedName: "enc-name",
+				encryptedContentType: "enc-type",
+				encryptionIv: "enc-iv",
+				encryptedContentTypeIv: "enc-type-iv",
+				encryptionAlgorithm: "AES-GCM",
+				fileSize: 123,
+				uploadedBy: userId,
+			});
+
+			const result = await caller.bootstrapItems({});
+			expect(result.items.length).toBe(1);
+			expect(result.items[0]?.attachments).toEqual([]);
 		});
 	});
 

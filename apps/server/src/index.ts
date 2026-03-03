@@ -1,4 +1,10 @@
 import "dotenv/config";
+import {
+	isStripeWebhookConfigured,
+	parseStripeWebhookEvent,
+	processStripeWebhookEvent,
+} from "@bittery/api/billing/stripe";
+import { isSelfHostedMode } from "@bittery/api/config/mode";
 import { createContext } from "@bittery/api/context";
 import { appRouter } from "@bittery/api/routers/index";
 import { createPresignedDownload } from "@bittery/api/storage/s3";
@@ -90,6 +96,32 @@ app.get("/healthz", (c) => {
 
 app.get("/", (c) => {
 	return c.text("OK");
+});
+
+app.post("/webhooks/stripe", async (c) => {
+	if (isSelfHostedMode()) {
+		return c.text("Not Found", 404);
+	}
+
+	if (!isStripeWebhookConfigured()) {
+		return c.text("Stripe webhook not configured", 503);
+	}
+
+	const rawBody = await c.req.text();
+	const signatureHeader = c.req.header("stripe-signature") || null;
+
+	try {
+		const event = await parseStripeWebhookEvent(rawBody, signatureHeader);
+		const result = await processStripeWebhookEvent(rawBody, event);
+
+		return c.json({
+			received: true,
+			duplicate: result.duplicate,
+		});
+	} catch (error) {
+		console.error("Stripe webhook error:", error);
+		return c.text("Invalid Stripe webhook", 400);
+	}
 });
 
 export default {

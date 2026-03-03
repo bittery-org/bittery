@@ -10,8 +10,6 @@ import {
 } from "@bittery/crypto-napi";
 import {
 	db,
-	loginRateLimit,
-	recoveryRateLimit,
 	recoveryVerification,
 	session,
 	user,
@@ -21,6 +19,13 @@ import type { SRPServerChallenge } from "@bittery/types";
 import { and, eq, gt, isNull, ne } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
 import { nanoid } from "nanoid";
+import {
+	clearRateLimitBySubject,
+	clearRateLimitState,
+	getRateLimitState,
+	recordRateLimitFailure,
+	RATE_LIMIT_NAMESPACE,
+} from "./rate-limit";
 
 export interface DeviceInfo {
 	deviceName?: string;
@@ -55,6 +60,8 @@ const RECOVERY_TOKEN_DURATION = "15m";
 const LOGIN_RATE_LIMIT_FREE_ATTEMPTS = 5;
 const LOGIN_RATE_LIMIT_MAX_LOCK_MINUTES = 30;
 const RECOVERY_VERIFICATION_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+const LOGIN_RATE_LIMIT_NAMESPACE = RATE_LIMIT_NAMESPACE.authLogin;
+const RECOVERY_RATE_LIMIT_NAMESPACE = RATE_LIMIT_NAMESPACE.authRecovery;
 
 export function normalizeEmail(email: string): string {
 	return email.trim().toLowerCase();
@@ -516,11 +523,7 @@ export async function checkLoginRateLimit(
 	const id = getRateLimitId(email, ipAddress);
 	const now = new Date();
 
-	const [existingLimit] = await db
-		.select()
-		.from(loginRateLimit)
-		.where(eq(loginRateLimit.id, id))
-		.limit(1);
+	const existingLimit = await getRateLimitState(LOGIN_RATE_LIMIT_NAMESPACE, id);
 
 	if (existingLimit?.lockedUntil && existingLimit.lockedUntil > now) {
 		throw new LoginRateLimitError();
@@ -535,48 +538,19 @@ export async function recordFailedLoginAttempt(
 	ipAddress: string | null,
 ): Promise<void> {
 	const normalizedEmail = normalizeEmail(email);
-	const normalizedIp = ipAddress?.trim() || null;
-	const id = getRateLimitId(normalizedEmail, normalizedIp);
+	const id = getRateLimitId(normalizedEmail, ipAddress?.trim() || null);
 	const now = new Date();
 
-	const [existingLimit] = await db
-		.select()
-		.from(loginRateLimit)
-		.where(eq(loginRateLimit.id, id))
-		.limit(1);
+	const state = await recordRateLimitFailure({
+		namespace: LOGIN_RATE_LIMIT_NAMESPACE,
+		key: id,
+		subject: normalizedEmail,
+		now,
+		freeAttempts: LOGIN_RATE_LIMIT_FREE_ATTEMPTS,
+		maxLockMinutes: LOGIN_RATE_LIMIT_MAX_LOCK_MINUTES,
+	});
 
-	const attempts = (existingLimit?.attempts ?? 0) + 1;
-	let lockedUntil: Date | null = null;
-
-	if (attempts >= LOGIN_RATE_LIMIT_FREE_ATTEMPTS) {
-		const lockMinutes = Math.min(
-			LOGIN_RATE_LIMIT_MAX_LOCK_MINUTES,
-			2 ** (attempts - LOGIN_RATE_LIMIT_FREE_ATTEMPTS),
-		);
-		lockedUntil = new Date(now.getTime() + lockMinutes * 60 * 1000);
-	}
-
-	if (existingLimit) {
-		await db
-			.update(loginRateLimit)
-			.set({
-				attempts,
-				lastAttemptAt: now,
-				lockedUntil,
-			})
-			.where(eq(loginRateLimit.id, id));
-	} else {
-		await db.insert(loginRateLimit).values({
-			id,
-			email: normalizedEmail,
-			ipAddress: normalizedIp,
-			attempts,
-			lastAttemptAt: now,
-			lockedUntil,
-		});
-	}
-
-	if (lockedUntil && lockedUntil > now) {
+	if (state.lockedUntil && state.lockedUntil > now) {
 		throw new LoginRateLimitError();
 	}
 }
@@ -589,7 +563,7 @@ export async function clearLoginRateLimit(
 	ipAddress: string | null,
 ): Promise<void> {
 	const id = getRateLimitId(email, ipAddress?.trim() || null);
-	await db.delete(loginRateLimit).where(eq(loginRateLimit.id, id));
+	await clearRateLimitState(LOGIN_RATE_LIMIT_NAMESPACE, id);
 }
 
 function generateRecoveryVerificationCode(): string {
@@ -692,11 +666,7 @@ export async function checkRecoveryRateLimit(
 	const id = getRateLimitId(email, ipAddress);
 	const now = new Date();
 
-	const [existingLimit] = await db
-		.select()
-		.from(recoveryRateLimit)
-		.where(eq(recoveryRateLimit.id, id))
-		.limit(1);
+	const existingLimit = await getRateLimitState(RECOVERY_RATE_LIMIT_NAMESPACE, id);
 
 	if (existingLimit?.lockedUntil && existingLimit.lockedUntil > now) {
 		throw new RecoveryRateLimitError();
@@ -711,48 +681,19 @@ export async function recordFailedRecoveryAttempt(
 	ipAddress: string | null,
 ): Promise<void> {
 	const normalizedEmail = normalizeEmail(email);
-	const normalizedIp = ipAddress?.trim() || null;
-	const id = getRateLimitId(normalizedEmail, normalizedIp);
+	const id = getRateLimitId(normalizedEmail, ipAddress?.trim() || null);
 	const now = new Date();
 
-	const [existingLimit] = await db
-		.select()
-		.from(recoveryRateLimit)
-		.where(eq(recoveryRateLimit.id, id))
-		.limit(1);
+	const state = await recordRateLimitFailure({
+		namespace: RECOVERY_RATE_LIMIT_NAMESPACE,
+		key: id,
+		subject: normalizedEmail,
+		now,
+		freeAttempts: LOGIN_RATE_LIMIT_FREE_ATTEMPTS,
+		maxLockMinutes: LOGIN_RATE_LIMIT_MAX_LOCK_MINUTES,
+	});
 
-	const attempts = (existingLimit?.attempts ?? 0) + 1;
-	let lockedUntil: Date | null = null;
-
-	if (attempts >= LOGIN_RATE_LIMIT_FREE_ATTEMPTS) {
-		const lockMinutes = Math.min(
-			LOGIN_RATE_LIMIT_MAX_LOCK_MINUTES,
-			2 ** (attempts - LOGIN_RATE_LIMIT_FREE_ATTEMPTS),
-		);
-		lockedUntil = new Date(now.getTime() + lockMinutes * 60 * 1000);
-	}
-
-	if (existingLimit) {
-		await db
-			.update(recoveryRateLimit)
-			.set({
-				attempts,
-				lastAttemptAt: now,
-				lockedUntil,
-			})
-			.where(eq(recoveryRateLimit.id, id));
-	} else {
-		await db.insert(recoveryRateLimit).values({
-			id,
-			email: normalizedEmail,
-			ipAddress: normalizedIp,
-			attempts,
-			lastAttemptAt: now,
-			lockedUntil,
-		});
-	}
-
-	if (lockedUntil && lockedUntil > now) {
+	if (state.lockedUntil && state.lockedUntil > now) {
 		throw new RecoveryRateLimitError();
 	}
 }
@@ -765,7 +706,7 @@ export async function clearRecoveryRateLimit(
 	ipAddress: string | null,
 ): Promise<void> {
 	const id = getRateLimitId(email, ipAddress?.trim() || null);
-	await db.delete(recoveryRateLimit).where(eq(recoveryRateLimit.id, id));
+	await clearRateLimitState(RECOVERY_RATE_LIMIT_NAMESPACE, id);
 }
 
 /**
@@ -871,7 +812,7 @@ export async function resetUserPassword(
 	const normalizedEmail = normalizeEmail(email);
 	const now = new Date();
 
-	return db.transaction(async (tx) => {
+	const userId = await db.transaction(async (tx) => {
 		const existingVerification = await tx.query.recoveryVerification.findFirst({
 			where: (record, { and, eq, gt, isNull }) =>
 				and(
@@ -924,12 +865,24 @@ export async function resetUserPassword(
 			.update(recoveryVerification)
 			.set({ usedAt: now })
 			.where(eq(recoveryVerification.id, existingVerification.id));
-		await tx
-			.delete(recoveryRateLimit)
-			.where(eq(recoveryRateLimit.email, normalizedEmail));
 
 		return existingUser.id;
 	});
+
+	// Recovery lockouts should be lifted after a successful password reset.
+	try {
+		await clearRateLimitBySubject(
+			RECOVERY_RATE_LIMIT_NAMESPACE,
+			normalizedEmail,
+		);
+	} catch (error) {
+		console.warn(
+			"[auth] Failed to clear recovery rate limits after password reset:",
+			error,
+		);
+	}
+
+	return userId;
 }
 
 /**

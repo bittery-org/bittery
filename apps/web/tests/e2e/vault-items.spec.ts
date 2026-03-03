@@ -7,11 +7,10 @@
  * - Item detail view
  * - Favoriting items
  * - Search and filtering
- *
- * Note: Item creation and editing is done in the desktop app.
- * The web app is primarily for viewing and sharing items.
+ * - Vault and item CRUD flows in web
  */
 
+import type { Page } from "@playwright/test";
 import {
 	createNetworkSimulator,
 	waitForVaultDetailReady,
@@ -23,6 +22,16 @@ import {
 	generateTestUser,
 	test,
 } from "../fixtures/test-fixtures";
+
+async function createVaultFromVaultsPage(page: Page, name: string) {
+	await page.goto("/vaults");
+	await waitForVaultsPageReady(page);
+	await page.getByTestId("new-vault-button").click();
+	await expect(page.getByTestId("create-vault-dialog")).toBeVisible();
+	await page.getByPlaceholder("Enter vault name").fill(name);
+	await page.getByTestId("create-vault-submit-button").click();
+	await expect(page).toHaveURL(/.*\/vaults\/.+/);
+}
 
 test.describe("Vault List", () => {
 	let secretKey: string;
@@ -384,6 +393,128 @@ test.describe("Vault Item Detail Sheet", () => {
 				await expect(sheet).toBeVisible({ timeout: 5000 });
 			}
 		}
+	});
+});
+
+test.describe("Vault and Item CRUD", () => {
+	let secretKey: string;
+	let testUser: ReturnType<typeof generateTestUser>;
+
+	test.beforeAll(async ({ browser }) => {
+		testUser = generateTestUser();
+		const context = await browser.newContext();
+		const page = await context.newPage();
+		const bitteryPage = new BitteryPage(page);
+
+		secretKey = await bitteryPage.completeSignup(testUser);
+
+		await context.close();
+	});
+
+	test.beforeEach(async ({ page }) => {
+		const bitteryPage = new BitteryPage(page);
+		testUser.secretKey = secretKey;
+		await bitteryPage.login(
+			testUser.email,
+			testUser.password,
+			testUser.secretKey,
+		);
+	});
+
+	test("should create vault from /vaults and navigate to the new vault", async ({
+		page,
+	}) => {
+		const vaultName = `E2E Vault ${Date.now()}`;
+		await createVaultFromVaultsPage(page, vaultName);
+		await expect(
+			page.getByRole("heading", { name: vaultName }).first(),
+		).toBeVisible();
+	});
+
+	test("should edit vault name from vault card actions", async ({ page }) => {
+		const originalName = `Edit Source ${Date.now()}`;
+		const updatedName = `${originalName} Updated`;
+
+		await createVaultFromVaultsPage(page, originalName);
+		await page.goto("/vaults");
+		await waitForVaultsPageReady(page);
+
+		const targetCard = page
+			.getByTestId("vault-card-container")
+			.filter({ has: page.getByText(originalName) })
+			.first();
+		await expect(targetCard).toBeVisible();
+		await targetCard.locator('[data-testid^="vault-card-actions-trigger-"]').click();
+		await page.locator('[data-testid^="vault-card-edit-action-"]').click();
+		await expect(page.getByTestId("edit-vault-dialog")).toBeVisible();
+		await page.getByPlaceholder("Enter vault name").fill(updatedName);
+		await page.getByTestId("edit-vault-submit-button").click();
+
+		await expect(
+			page
+				.getByTestId("vault-card-container")
+				.filter({ has: page.getByText(updatedName) }),
+		).toBeVisible();
+	});
+
+	test("should delete vault as owner from vault card actions", async ({ page }) => {
+		const vaultName = `Delete Vault ${Date.now()}`;
+
+		await createVaultFromVaultsPage(page, vaultName);
+		await page.goto("/vaults");
+		await waitForVaultsPageReady(page);
+
+		const targetCard = page
+			.getByTestId("vault-card-container")
+			.filter({ has: page.getByText(vaultName) })
+			.first();
+		await expect(targetCard).toBeVisible();
+		await targetCard.locator('[data-testid^="vault-card-actions-trigger-"]').click();
+		await page.locator('[data-testid^="vault-card-delete-action-"]').click();
+		await expect(page.getByTestId("delete-vault-dialog")).toBeVisible();
+		await page.getByTestId("delete-vault-confirm-button").click();
+
+		await expect(
+			page
+				.getByTestId("vault-card-container")
+				.filter({ has: page.getByText(vaultName) }),
+		).toHaveCount(0);
+	});
+
+	test("should create, edit, and delete an item in vault detail", async ({
+		page,
+	}) => {
+		const vaultName = `Items Vault ${Date.now()}`;
+		const itemName = `Item ${Date.now()}`;
+		const updatedItemName = `${itemName} Updated`;
+
+		await createVaultFromVaultsPage(page, vaultName);
+		await waitForVaultDetailReady(page);
+
+		await page.getByTestId("new-item-button").click();
+		await expect(page.getByTestId("create-item-sheet")).toBeVisible();
+		await page.getByTestId("item-category-login").click();
+		await page.getByLabel("Title *").fill(itemName);
+		await page.getByLabel("Username").fill("e2e-user");
+		await page.getByLabel("Password").fill("e2e-password");
+		await page.getByTestId("item-form-submit-button").click();
+
+		await expect(page.getByText(itemName).first()).toBeVisible();
+		await page.getByText(itemName).first().click();
+		await expect(page.getByTestId("item-detail-sheet")).toBeVisible();
+
+		await page.getByRole("button", { name: "Edit" }).first().click();
+		await expect(page.getByTestId("edit-item-dialog")).toBeVisible();
+		await page.getByLabel("Title *").fill(updatedItemName);
+		await page.getByTestId("item-form-submit-button").click();
+
+		await expect(page.getByText(updatedItemName).first()).toBeVisible();
+
+		await page.getByRole("button", { name: "Delete" }).first().click();
+		await expect(page.getByTestId("delete-item-dialog")).toBeVisible();
+		await page.getByTestId("delete-item-confirm-button").click();
+
+		await expect(page.getByText(updatedItemName)).toHaveCount(0);
 	});
 });
 

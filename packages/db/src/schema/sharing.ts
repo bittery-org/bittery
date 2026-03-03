@@ -143,22 +143,6 @@ export const shareAccessLog = pgTable(
 	],
 );
 
-// Rate limiting for share link generation
-export const shareLinkRateLimit = pgTable(
-	"share_link_rate_limit",
-	{
-		id: text("id").primaryKey(),
-		userId: text("user_id")
-			.notNull()
-			.references(() => user.id, { onDelete: "cascade" }),
-		linksCreatedToday: integer("links_created_today").notNull().default(0),
-		dailyLimit: integer("daily_limit").notNull().default(50),
-		lastResetAt: timestamp("last_reset_at").defaultNow().notNull(),
-		createdAt: timestamp("created_at").defaultNow().notNull(),
-	},
-	(table) => [index("share_link_rate_limit_userId_idx").on(table.userId)],
-);
-
 // Relations
 export const shareLinkRelations = relations(shareLink, ({ one, many }) => ({
 	item: one(item, {
@@ -200,13 +184,3 @@ export const shareAccessLogRelations = relations(shareAccessLog, ({ one }) => ({
 		references: [shareLink.id],
 	}),
 }));
-
-export const shareLinkRateLimitRelations = relations(
-	shareLinkRateLimit,
-	({ one }) => ({
-		user: one(user, {
-			fields: [shareLinkRateLimit.userId],
-			references: [user.id],
-		}),
-	}),
-);

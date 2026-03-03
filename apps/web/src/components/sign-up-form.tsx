@@ -13,78 +13,51 @@ import {
 	IconMagicShieldOutlineDuo18 as Shield,
 	IconStarSparkle2OutlineDuo18 as Sparkle,
 } from "@bittery/ui/icons";
+import { type CloudPlanId, planInfo } from "@bittery/shared/pricing";
 import { useState } from "react";
-import type { CloudPlanId } from "@/hooks/use-signup-form";
 import { useSignupForm } from "@/hooks/use-signup-form";
 import PlanComparisonDialog from "./plan-comparison-dialog";
 import SelfHostedSignUpForm from "./self-hosted-sign-up-form";
 
-const cloudPlans: Array<{
-	id: CloudPlanId;
-	name: string;
-	priceLabel: string;
-	priceSuffix?: string;
-	description: string;
-	isRecommended?: boolean;
-	icon: React.ComponentType<{ size?: number; className?: string }>;
-	accentClass: string;
-	iconBgClass: string;
-}> = [
-	{
-		id: "free",
-		name: "Free",
-		priceLabel: "$0",
-		description: "Basic vault for getting started.",
-		icon: Lock,
-		accentClass: "border-border dark:border-border",
-		iconBgClass: "bg-muted text-muted-foreground",
-	},
-	{
-		id: "personal",
-		name: "Personal",
-		priceLabel: "$4",
-		priceSuffix: "/mo",
-		description: "Daily password security with premium features.",
-		isRecommended: true,
-		icon: Sparkle,
-		accentClass: "border-primary/60 dark:border-primary/40",
-		iconBgClass: "bg-primary/10 text-primary",
-	},
-	{
-		id: "family",
-		name: "Family",
-		priceLabel: "$9",
-		priceSuffix: "/mo",
-		description: "Shared protection for your household.",
-		icon: Heart,
-		accentClass: "border-amber-300/60 dark:border-amber-500/30",
-		iconBgClass:
-			"bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
-	},
-	{
-		id: "team",
-		name: "Team",
-		priceLabel: "$12",
-		priceSuffix: "/user",
-		description: "Teams and businesses with shared workspaces.",
-		icon: Briefcase,
-		accentClass: "border-sky-300/60 dark:border-sky-500/30",
-		iconBgClass: "bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400",
-	},
-];
+const planIcons: Record<CloudPlanId, React.ComponentType<{ size?: number; className?: string }>> = {
+	free: Lock,
+	personal: Sparkle,
+	family: Heart,
+	team: Briefcase,
+};
+
+const planStyles: Record<CloudPlanId, { accentClass: string; iconBgClass: string }> = {
+	free: { accentClass: "border-border dark:border-border", iconBgClass: "bg-muted text-muted-foreground" },
+	personal: { accentClass: "border-primary/60 dark:border-primary/40", iconBgClass: "bg-primary/10 text-primary" },
+	family: { accentClass: "border-amber-300/60 dark:border-amber-500/30", iconBgClass: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400" },
+	team: { accentClass: "border-sky-300/60 dark:border-sky-500/30", iconBgClass: "bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400" },
+};
+
+const cloudPlans = planInfo.map((plan) => ({
+	...plan,
+	icon: planIcons[plan.id],
+	...planStyles[plan.id],
+}));
+
+const validPlanIds = new Set<string>(["free", "personal", "family", "team"]);
 
 export default function SignUpForm({
 	onSwitchToSignIn,
 	invitationToken,
 	redirectTo,
+	initialPlan,
 }: {
 	onSwitchToSignIn: () => void;
 	invitationToken?: string;
 	redirectTo?: string;
+	initialPlan?: string;
 }) {
-	const signup = useSignupForm({ invitationToken, redirectTo });
+	const resolvedPlan = initialPlan && validPlanIds.has(initialPlan)
+		? (initialPlan as CloudPlanId)
+		: undefined;
+	const signup = useSignupForm({ invitationToken, redirectTo, initialPlan: resolvedPlan });
 	const [cloudSignupStep, setCloudSignupStep] = useState<"plan" | "account">(
-		"plan",
+		resolvedPlan ? "account" : "plan",
 	);
 
 	// Delegate to self-hosted component for self-hosted or invitation flows

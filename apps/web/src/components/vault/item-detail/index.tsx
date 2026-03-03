@@ -97,15 +97,11 @@ export default function ItemDetail({
 		);
 	};
 
-	// Note: Tag changes require updating the item's encrypted data.
-	// For the web app (read-only), we just display tags.
-	// Full editing is done in the desktop app.
-
 	return (
 		<div className="min-w-0 space-y-6">
 			{renderDetail()}
 
-			{/* Tags section - display only in web app */}
+			{/* Tags section */}
 			{item && vaultId && (
 				<>
 					<Separator />
@@ -115,16 +111,11 @@ export default function ItemDetail({
 							<TagInput
 								tags={itemTags}
 								availableTags={availableTags}
-								onChange={() => {
-									// Tags are read-only in web app
-									// Full editing is done in desktop app
-								}}
-								disabled={!canEdit}
+								onChange={() => {}}
+								disabled
 							/>
 						) : (
-							<p className="text-muted-foreground text-sm">
-								No tags. Edit in the desktop app to add tags.
-							</p>
+							<p className="text-muted-foreground text-sm">No tags.</p>
 						)}
 					</div>
 				</>

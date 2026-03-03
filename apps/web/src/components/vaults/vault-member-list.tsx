@@ -26,6 +26,7 @@ import {
 } from "@bittery/ui";
 import {
 	IconLoader2OutlineDuo18 as Loader2,
+	IconMagicShieldOutlineDuo18 as Shield,
 	IconTrash2OutlineDuo18 as Trash2,
 	IconUsers6OutlineDuo18 as Users,
 } from "@bittery/ui/icons";
@@ -210,6 +211,27 @@ export function VaultMemberList({
 		}
 	};
 
+	const getRoleDescription = (role: string) => {
+		switch (role) {
+			case "owner":
+				return "Full control";
+			case "admin":
+				return "Manage members & items";
+			case "member":
+				return "View & edit items";
+			case "read-only":
+				return "View only";
+			default:
+				return "";
+		}
+	};
+
+	// Sort: owner first, then admin, then member, then read-only
+	const sortedMembers = [...members].sort((a, b) => {
+		const order = { owner: 0, admin: 1, member: 2, "read-only": 3 };
+		return (order[a.role] ?? 4) - (order[b.role] ?? 4);
+	});
+
 	if (members.length === 0) {
 		return (
 			<div className="flex flex-col items-center gap-3 rounded-xl border border-dashed p-10 text-center">
@@ -222,119 +244,140 @@ export function VaultMemberList({
 	}
 
 	return (
-		<div className="grid gap-3 sm:grid-cols-2">
-			{members.map((member) => {
-				const isOwner = member.role === "owner";
-				const canRemove =
-					canManage &&
-					!isOwner &&
-					!(userRole === "admin" && member.role === "admin");
+		<div className="overflow-hidden rounded-xl border">
+			<div className="divide-y">
+				{sortedMembers.map((member) => {
+					const isOwner = member.role === "owner";
+					const canRemove =
+						canManage &&
+						!isOwner &&
+						!(userRole === "admin" && member.role === "admin");
 
-				return (
-					<div
-						key={member.userId}
-						className="relative overflow-hidden rounded-xl border bg-card p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
-					>
-						<div className="flex items-start gap-3">
-							<Avatar className="h-10 w-10 shrink-0">
-								<AvatarFallback className="text-xs">
+					return (
+						<div
+							key={member.userId}
+							className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30"
+						>
+							<Avatar className="h-9 w-9 shrink-0">
+								<AvatarFallback className="font-medium text-xs">
 									{getInitials(member.name)}
 								</AvatarFallback>
 							</Avatar>
 							<div className="min-w-0 flex-1">
 								<div className="flex items-center gap-2">
-									<span className="truncate font-semibold leading-tight">
+									<span className="truncate font-medium text-sm">
 										{member.name}
 									</span>
+									{isOwner && (
+										<Shield className="h-3.5 w-3.5 shrink-0 text-primary" />
+									)}
 								</div>
-								<p className="mt-0.5 truncate text-muted-foreground text-xs">
+								<p className="truncate text-muted-foreground text-xs">
 									{member.email}
 								</p>
 							</div>
-						</div>
 
-						<div className="mt-3 flex items-center justify-between">
-							{canManage && !isOwner ? (
-								<Select
-									value={member.role}
-									onValueChange={(value: "admin" | "member" | "read-only") =>
-										handleRoleChange(member.userId, value)
-									}
-									disabled={
-										updateRoleMutation.isPending ||
-										(userRole === "admin" && member.role === "admin")
-									}
-								>
-									<SelectTrigger className="h-7 w-27.5 text-xs">
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="admin">Admin</SelectItem>
-										<SelectItem value="member">Member</SelectItem>
-										<SelectItem value="read-only">Read-only</SelectItem>
-									</SelectContent>
-								</Select>
-							) : (
-								<Badge variant={getRoleBadgeVariant(member.role)}>
-									{member.role}
-								</Badge>
-							)}
+							<div className="flex shrink-0 items-center gap-2">
+								{canManage && !isOwner ? (
+									<Select
+										value={member.role}
+										onValueChange={(
+											value: "admin" | "member" | "read-only",
+										) =>
+											handleRoleChange(member.userId, value)
+										}
+										disabled={
+											updateRoleMutation.isPending ||
+											(userRole === "admin" &&
+												member.role === "admin")
+										}
+									>
+										<SelectTrigger className="h-7 w-28 text-xs">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="admin">Admin</SelectItem>
+											<SelectItem value="member">Member</SelectItem>
+											<SelectItem value="read-only">Read-only</SelectItem>
+										</SelectContent>
+									</Select>
+								) : (
+									<Badge
+										variant={getRoleBadgeVariant(member.role)}
+										className="px-2 py-0.5 text-xs capitalize"
+									>
+										{member.role}
+									</Badge>
+								)}
 
-							{canRemove && (
-								<AlertDialog>
-									<AlertDialogTrigger asChild>
-										<Button
-											variant="ghost"
-											size="icon"
-											className="h-7 w-7"
-											disabled={isRotating}
-										>
-											{rotatingUserId === member.userId ? (
-												<Loader2 className="h-3.5 w-3.5 animate-spin" />
-											) : (
-												<Trash2 className="h-3.5 w-3.5 text-destructive" />
-											)}
-										</Button>
-									</AlertDialogTrigger>
-									<AlertDialogContent>
-										<AlertDialogHeader>
-											<AlertDialogTitle>Remove Member</AlertDialogTitle>
-											<AlertDialogDescription>
-												Are you sure you want to remove {member.name} from this
-												vault? They will lose access to all items in this vault.
-												<br />
-												<br />
-												<span className="text-muted-foreground text-xs">
-													Note: This will rotate the vault encryption key and
-													re-encrypt all items for security.
-												</span>
-											</AlertDialogDescription>
-										</AlertDialogHeader>
-										<AlertDialogFooter>
-											<AlertDialogCancel disabled={isRotating}>
-												Cancel
-											</AlertDialogCancel>
-											<AlertDialogAction
-												onClick={() => handleRemove(member.userId)}
+								{canRemove && (
+									<AlertDialog>
+										<AlertDialogTrigger asChild>
+											<Button
+												variant="ghost"
+												size="icon"
+												className="h-7 w-7 text-muted-foreground hover:text-destructive"
 												disabled={isRotating}
 											>
-												{isRotating ? (
-													<>
-														<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-														Rotating keys...
-													</>
+												{rotatingUserId === member.userId ? (
+													<Loader2 className="h-3.5 w-3.5 animate-spin" />
 												) : (
-													"Remove"
+													<Trash2 className="h-3.5 w-3.5" />
 												)}
-											</AlertDialogAction>
-										</AlertDialogFooter>
-									</AlertDialogContent>
-								</AlertDialog>
-							)}
+											</Button>
+										</AlertDialogTrigger>
+										<AlertDialogContent>
+											<AlertDialogHeader>
+												<AlertDialogTitle>
+													Remove Member
+												</AlertDialogTitle>
+												<AlertDialogDescription>
+													Are you sure you want to remove{" "}
+													<span className="font-medium text-foreground">
+														{member.name}
+													</span>{" "}
+													from this vault? They will lose
+													access to all items.
+													<br />
+													<br />
+													<span className="text-muted-foreground text-xs">
+														The vault encryption key will
+														be rotated and all items
+														re-encrypted for security.
+													</span>
+												</AlertDialogDescription>
+											</AlertDialogHeader>
+											<AlertDialogFooter>
+												<AlertDialogCancel
+													disabled={isRotating}
+												>
+													Cancel
+												</AlertDialogCancel>
+												<AlertDialogAction
+													onClick={() =>
+														handleRemove(member.userId)
+													}
+													disabled={isRotating}
+													className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+												>
+													{isRotating ? (
+														<>
+															<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+															Rotating keys...
+														</>
+													) : (
+														"Remove"
+													)}
+												</AlertDialogAction>
+											</AlertDialogFooter>
+										</AlertDialogContent>
+									</AlertDialog>
+								)}
+							</div>
 						</div>
-					</div>
-				);
-			})}
+					);
+				})}
+			</div>
 		</div>
 	);
 }

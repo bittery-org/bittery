@@ -13,15 +13,18 @@ import { Route as AuthRouteImport } from './routes/_auth'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ShareTokenRouteImport } from './routes/share.$token'
-import { Route as InviteTokenRouteImport } from './routes/invite.$token'
 import { Route as AuthSignupRouteImport } from './routes/_auth/signup'
 import { Route as AuthRecoverRouteImport } from './routes/_auth/recover'
 import { Route as AuthLoginRouteImport } from './routes/_auth/login'
 import { Route as AppSecurityRouteImport } from './routes/_app/security'
 import { Route as AppHomeRouteImport } from './routes/_app/home'
+import { Route as AppBillingRouteImport } from './routes/_app/billing'
 import { Route as AppVaultsIndexRouteImport } from './routes/_app/vaults/index'
 import { Route as AppTeamIndexRouteImport } from './routes/_app/team/index'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
+import { Route as AppAdminIndexRouteImport } from './routes/_app/admin/index'
+import { Route as AuthInviteTokenRouteImport } from './routes/_auth/invite.$token'
+import { Route as AppVaultsTrashRouteImport } from './routes/_app/vaults/trash'
 import { Route as AppVaultsVaultIdIndexRouteImport } from './routes/_app/vaults/$vaultId/index'
 
 const AuthRoute = AuthRouteImport.update({
@@ -40,11 +43,6 @@ const IndexRoute = IndexRouteImport.update({
 const ShareTokenRoute = ShareTokenRouteImport.update({
   id: '/share/$token',
   path: '/share/$token',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const InviteTokenRoute = InviteTokenRouteImport.update({
-  id: '/invite/$token',
-  path: '/invite/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthSignupRoute = AuthSignupRouteImport.update({
@@ -72,6 +70,11 @@ const AppHomeRoute = AppHomeRouteImport.update({
   path: '/home',
   getParentRoute: () => AppRoute,
 } as any)
+const AppBillingRoute = AppBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppVaultsIndexRoute = AppVaultsIndexRouteImport.update({
   id: '/vaults/',
   path: '/vaults/',
@@ -87,6 +90,21 @@ const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   path: '/settings/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAdminIndexRoute = AppAdminIndexRouteImport.update({
+  id: '/admin/',
+  path: '/admin/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AuthInviteTokenRoute = AuthInviteTokenRouteImport.update({
+  id: '/invite/$token',
+  path: '/invite/$token',
+  getParentRoute: () => AuthRoute,
+} as any)
+const AppVaultsTrashRoute = AppVaultsTrashRouteImport.update({
+  id: '/vaults/trash',
+  path: '/vaults/trash',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppVaultsVaultIdIndexRoute = AppVaultsVaultIdIndexRouteImport.update({
   id: '/vaults/$vaultId/',
   path: '/vaults/$vaultId/',
@@ -95,13 +113,16 @@ const AppVaultsVaultIdIndexRoute = AppVaultsVaultIdIndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/billing': typeof AppBillingRoute
   '/home': typeof AppHomeRoute
   '/security': typeof AppSecurityRoute
   '/login': typeof AuthLoginRoute
   '/recover': typeof AuthRecoverRoute
   '/signup': typeof AuthSignupRoute
-  '/invite/$token': typeof InviteTokenRoute
   '/share/$token': typeof ShareTokenRoute
+  '/vaults/trash': typeof AppVaultsTrashRoute
+  '/invite/$token': typeof AuthInviteTokenRoute
+  '/admin/': typeof AppAdminIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/team/': typeof AppTeamIndexRoute
   '/vaults/': typeof AppVaultsIndexRoute
@@ -109,13 +130,16 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/billing': typeof AppBillingRoute
   '/home': typeof AppHomeRoute
   '/security': typeof AppSecurityRoute
   '/login': typeof AuthLoginRoute
   '/recover': typeof AuthRecoverRoute
   '/signup': typeof AuthSignupRoute
-  '/invite/$token': typeof InviteTokenRoute
   '/share/$token': typeof ShareTokenRoute
+  '/vaults/trash': typeof AppVaultsTrashRoute
+  '/invite/$token': typeof AuthInviteTokenRoute
+  '/admin': typeof AppAdminIndexRoute
   '/settings': typeof AppSettingsIndexRoute
   '/team': typeof AppTeamIndexRoute
   '/vaults': typeof AppVaultsIndexRoute
@@ -126,13 +150,16 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_app': typeof AppRouteWithChildren
   '/_auth': typeof AuthRouteWithChildren
+  '/_app/billing': typeof AppBillingRoute
   '/_app/home': typeof AppHomeRoute
   '/_app/security': typeof AppSecurityRoute
   '/_auth/login': typeof AuthLoginRoute
   '/_auth/recover': typeof AuthRecoverRoute
   '/_auth/signup': typeof AuthSignupRoute
-  '/invite/$token': typeof InviteTokenRoute
   '/share/$token': typeof ShareTokenRoute
+  '/_app/vaults/trash': typeof AppVaultsTrashRoute
+  '/_auth/invite/$token': typeof AuthInviteTokenRoute
+  '/_app/admin/': typeof AppAdminIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/team/': typeof AppTeamIndexRoute
   '/_app/vaults/': typeof AppVaultsIndexRoute
@@ -142,13 +169,16 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/billing'
     | '/home'
     | '/security'
     | '/login'
     | '/recover'
     | '/signup'
-    | '/invite/$token'
     | '/share/$token'
+    | '/vaults/trash'
+    | '/invite/$token'
+    | '/admin/'
     | '/settings/'
     | '/team/'
     | '/vaults/'
@@ -156,13 +186,16 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/billing'
     | '/home'
     | '/security'
     | '/login'
     | '/recover'
     | '/signup'
-    | '/invite/$token'
     | '/share/$token'
+    | '/vaults/trash'
+    | '/invite/$token'
+    | '/admin'
     | '/settings'
     | '/team'
     | '/vaults'
@@ -172,13 +205,16 @@ export interface FileRouteTypes {
     | '/'
     | '/_app'
     | '/_auth'
+    | '/_app/billing'
     | '/_app/home'
     | '/_app/security'
     | '/_auth/login'
     | '/_auth/recover'
     | '/_auth/signup'
-    | '/invite/$token'
     | '/share/$token'
+    | '/_app/vaults/trash'
+    | '/_auth/invite/$token'
+    | '/_app/admin/'
     | '/_app/settings/'
     | '/_app/team/'
     | '/_app/vaults/'
@@ -189,7 +225,6 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRouteWithChildren
   AuthRoute: typeof AuthRouteWithChildren
-  InviteTokenRoute: typeof InviteTokenRoute
   ShareTokenRoute: typeof ShareTokenRoute
 }
 
@@ -221,13 +256,6 @@ declare module '@tanstack/react-router' {
       path: '/share/$token'
       fullPath: '/share/$token'
       preLoaderRoute: typeof ShareTokenRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/invite/$token': {
-      id: '/invite/$token'
-      path: '/invite/$token'
-      fullPath: '/invite/$token'
-      preLoaderRoute: typeof InviteTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_auth/signup': {
@@ -265,6 +293,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppHomeRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/billing': {
+      id: '/_app/billing'
+      path: '/billing'
+      fullPath: '/billing'
+      preLoaderRoute: typeof AppBillingRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/vaults/': {
       id: '/_app/vaults/'
       path: '/vaults'
@@ -286,6 +321,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/admin/': {
+      id: '/_app/admin/'
+      path: '/admin'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AppAdminIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_auth/invite/$token': {
+      id: '/_auth/invite/$token'
+      path: '/invite/$token'
+      fullPath: '/invite/$token'
+      preLoaderRoute: typeof AuthInviteTokenRouteImport
+      parentRoute: typeof AuthRoute
+    }
+    '/_app/vaults/trash': {
+      id: '/_app/vaults/trash'
+      path: '/vaults/trash'
+      fullPath: '/vaults/trash'
+      preLoaderRoute: typeof AppVaultsTrashRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/vaults/$vaultId/': {
       id: '/_app/vaults/$vaultId/'
       path: '/vaults/$vaultId'
@@ -297,8 +353,11 @@ declare module '@tanstack/react-router' {
 }
 
 interface AppRouteChildren {
+  AppBillingRoute: typeof AppBillingRoute
   AppHomeRoute: typeof AppHomeRoute
   AppSecurityRoute: typeof AppSecurityRoute
+  AppVaultsTrashRoute: typeof AppVaultsTrashRoute
+  AppAdminIndexRoute: typeof AppAdminIndexRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
   AppTeamIndexRoute: typeof AppTeamIndexRoute
   AppVaultsIndexRoute: typeof AppVaultsIndexRoute
@@ -306,8 +365,11 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppBillingRoute: AppBillingRoute,
   AppHomeRoute: AppHomeRoute,
   AppSecurityRoute: AppSecurityRoute,
+  AppVaultsTrashRoute: AppVaultsTrashRoute,
+  AppAdminIndexRoute: AppAdminIndexRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
   AppTeamIndexRoute: AppTeamIndexRoute,
   AppVaultsIndexRoute: AppVaultsIndexRoute,
@@ -320,12 +382,14 @@ interface AuthRouteChildren {
   AuthLoginRoute: typeof AuthLoginRoute
   AuthRecoverRoute: typeof AuthRecoverRoute
   AuthSignupRoute: typeof AuthSignupRoute
+  AuthInviteTokenRoute: typeof AuthInviteTokenRoute
 }
 
 const AuthRouteChildren: AuthRouteChildren = {
   AuthLoginRoute: AuthLoginRoute,
   AuthRecoverRoute: AuthRecoverRoute,
   AuthSignupRoute: AuthSignupRoute,
+  AuthInviteTokenRoute: AuthInviteTokenRoute,
 }
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
@@ -334,7 +398,6 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRouteWithChildren,
   AuthRoute: AuthRouteWithChildren,
-  InviteTokenRoute: InviteTokenRoute,
   ShareTokenRoute: ShareTokenRoute,
 }
 export const routeTree = rootRouteImport

@@ -135,4 +135,4 @@ Test vectors are verified against the existing TypeScript implementation to ensu
 
 ## License
 
-MIT
+FSL-1.1-ALv2

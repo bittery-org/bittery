@@ -145,7 +145,7 @@ export default function SignInForm({
 				onClick={onSwitchToSignUp}
 				className="font-medium text-primary underline-offset-4 hover:underline"
 			>
-				View plans and Sign up
+				{hasInvitationRedirect ? "Create an account" : "Get started"}
 			</button>
 		</>
 	);

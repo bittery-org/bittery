@@ -2,8 +2,13 @@ import { useItems, usePasswordSecurity } from "@bittery/core/hooks";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { SecurityDashboard } from "@/components/dashboard/security-dashboard";
+import { createRouteGuard } from "@/lib/route-guards";
 
 export const Route = createFileRoute("/_app/security")({
+	beforeLoad: createRouteGuard({
+		requiresMode: "cloud",
+		requiresEntitlements: ["sentinel"],
+	}),
 	component: SecurityPage,
 	head: () => ({
 		meta: [{ title: "Sentinel - Bittery" }],

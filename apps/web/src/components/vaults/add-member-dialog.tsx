@@ -6,26 +6,32 @@ import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Avatar,
 	AvatarFallback,
+	Badge,
 	Button,
+	cn,
 	Dialog,
 	DialogContent,
 	DialogDescription,
-	DialogFooter,
 	DialogHeader,
 	DialogTitle,
 	DialogTrigger,
 	Input,
-	Label,
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
 	toast,
+	useSidebar,
 } from "@bittery/ui";
-import { IconUsers6OutlineDuo18 as UserPlus } from "@bittery/ui/icons";
+import {
+	IconCircleCheck2OutlineDuo18 as Check,
+	IconLoader2OutlineDuo18 as Loader2,
+	IconMagnifier3OutlineDuo18 as Search,
+	IconUsers6OutlineDuo18 as UserPlus,
+} from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { storage } from "@/lib/storage";
 import {
 	arrayBufferToBase64,
@@ -40,21 +46,35 @@ interface AddMemberDialogProps {
 }
 
 export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
+	const { isMobile } = useSidebar();
 	const [open, setOpen] = useState(false);
-	const [email, setEmail] = useState("");
-	const [role, setRole] = useState<"admin" | "member" | "read-only">("member");
-	const [searchedEmail, setSearchedEmail] = useState("");
+	const [search, setSearch] = useState("");
+	const [addingUserId, setAddingUserId] = useState<string | null>(null);
+	const [addedUserIds, setAddedUserIds] = useState<Set<string>>(new Set());
+	const [selectedRoles, setSelectedRoles] = useState<
+		Record<string, "admin" | "member" | "read-only">
+	>({});
 
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
 	const invalidator = useQueryInvalidator();
 
-	// Look up user by email
-	const userQuery = useQuery({
-		...trpc.vault.members.lookupUser.queryOptions({ email: searchedEmail }),
-		enabled: searchedEmail.length > 0 && searchedEmail.includes("@"),
-		retry: false,
+	// Fetch available team members (not already in vault)
+	const availableQuery = useQuery({
+		...trpc.vault.members.availableTeamMembers.queryOptions({ vaultId }),
+		enabled: open,
 	});
+
+	const filteredMembers = useMemo(() => {
+		const members = availableQuery.data ?? [];
+		if (!search.trim()) return members;
+		const q = search.toLowerCase();
+		return members.filter(
+			(m) =>
+				m.name.toLowerCase().includes(q) ||
+				m.email.toLowerCase().includes(q),
+		);
+	}, [availableQuery.data, search]);
 
 	const addMemberMutation = useMutation({
 		mutationFn: async (input: {
@@ -63,33 +83,26 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 			role: "admin" | "member" | "read-only";
 			encryptedVaultKey: string;
 		}) => trpcClient.vault.members.add.mutate(input),
-		onSuccess: async () => {
+		onSuccess: async (_data, variables) => {
+			setAddedUserIds((prev) => new Set([...prev, variables.userId]));
+			setAddingUserId(null);
 			toast.success("Member added successfully");
 			await invalidator.invalidateVaultMembers(vaultId);
-			setOpen(false);
-			resetForm();
+			availableQuery.refetch();
 		},
 		onError: (error: Error) => {
+			setAddingUserId(null);
 			toast.error(error.message);
 		},
 	});
 
-	const resetForm = () => {
-		setEmail("");
-		setSearchedEmail("");
-		setRole("member");
-	};
-
-	const handleSearch = (e: React.FormEvent) => {
-		e.preventDefault();
-		setSearchedEmail(email.trim().toLowerCase());
-	};
-
-	const handleAddMember = async () => {
-		if (!userQuery.data) return;
+	const handleAddMember = async (member: {
+		userId: string;
+		publicKey: string;
+	}) => {
+		setAddingUserId(member.userId);
 
 		try {
-			// 1. Get the decrypted vault key
 			const vaultKey = await getDecryptedVaultKey({
 				vaultId,
 				storage,
@@ -100,28 +113,37 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 			});
 			if (!vaultKey) {
 				toast.error("Could not decrypt vault key. Please log in again.");
+				setAddingUserId(null);
 				return;
 			}
 
-			// 2. Convert vault key to base64 for encryption
 			const vaultKeyBase64 = arrayBufferToBase64(vaultKey);
-
-			// 3. Encrypt the vault key with the new member's RSA public key
 			const encryptedVaultKey = await rsaEncrypt(
 				vaultKeyBase64,
-				userQuery.data.publicKey,
+				member.publicKey,
 			);
 
-			// 4. Add the member
+			const role = selectedRoles[member.userId] ?? "member";
 			addMemberMutation.mutate({
 				vaultId,
-				userId: userQuery.data.id,
+				userId: member.userId,
 				role,
 				encryptedVaultKey,
 			});
 		} catch (error) {
 			toast.error("Failed to encrypt vault key for new member");
 			console.error(error);
+			setAddingUserId(null);
+		}
+	};
+
+	const handleOpenChange = (newOpen: boolean) => {
+		setOpen(newOpen);
+		if (!newOpen) {
+			setSearch("");
+			setAddingUserId(null);
+			setAddedUserIds(new Set());
+			setSelectedRoles({});
 		}
 	};
 
@@ -133,125 +155,183 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 			.toUpperCase()
 			.slice(0, 2);
 
+	const availableCount = availableQuery.data?.length ?? 0;
+
 	return (
-		<Dialog open={open} onOpenChange={setOpen}>
+		<Dialog open={open} onOpenChange={handleOpenChange}>
 			<DialogTrigger asChild>
-				<Button>
-					<UserPlus className="mr-2 h-4 w-4" />
-					Add Member
+				<Button
+					size="sm"
+					variant="outline"
+					className="h-8 px-2 text-xs lg:px-3"
+				>
+					<UserPlus
+						className={cn(
+							"h-3.5 w-3.5",
+							!isMobile ? "mr-1.5" : undefined,
+						)}
+					/>
+					{!isMobile ? "Add Member" : null}
 				</Button>
 			</DialogTrigger>
-			<DialogContent>
-				<DialogHeader>
-					<DialogTitle>Add Member to Vault</DialogTitle>
+			<DialogContent className="flex max-h-[70vh] flex-col gap-0 p-0 sm:max-w-md">
+				<DialogHeader className="border-b px-5 pt-5 pb-4">
+					<DialogTitle>Add Members</DialogTitle>
 					<DialogDescription>
-						Search for a user by email to add them to this vault. They will be
-						able to access all items based on their assigned role.
+						Add team members to this vault. They&apos;ll get access to
+						all items based on their role.
 					</DialogDescription>
 				</DialogHeader>
 
-				<form onSubmit={handleSearch} className="space-y-4">
-					<div className="space-y-2">
-						<Label htmlFor="email">Email Address</Label>
-						<div className="flex gap-2">
-							<Input
-								id="email"
-								type="email"
-								placeholder="user@example.com"
-								value={email}
-								onChange={(e) => setEmail(e.target.value)}
-								className="flex-1"
-							/>
-							<Button
-								type="submit"
-								variant="secondary"
-								disabled={!email.includes("@")}
-							>
-								Search
-							</Button>
-						</div>
+				{/* Search */}
+				<div className="border-b px-4 py-3">
+					<div className="relative">
+						<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+						<Input
+							placeholder="Filter team members..."
+							value={search}
+							onChange={(e) => setSearch(e.target.value)}
+							className="h-9 pl-9 text-sm"
+						/>
 					</div>
-				</form>
+				</div>
 
-				{userQuery.isLoading && (
-					<p className="text-muted-foreground text-sm">Searching...</p>
-				)}
-
-				{userQuery.isError && searchedEmail && (
-					<p className="text-destructive text-sm">
-						{userQuery.error.message === "User not found"
-							? "No user found with this email address."
-							: userQuery.error.message}
-					</p>
-				)}
-
-				{userQuery.data && (
-					<div className="space-y-4">
-						<div className="flex items-center gap-3 rounded-lg border p-3">
-							<Avatar className="h-10 w-10">
-								<AvatarFallback>
-									{getInitials(userQuery.data.name)}
-								</AvatarFallback>
-							</Avatar>
-							<div className="min-w-0 flex-1">
-								<div className="font-medium">{userQuery.data.name}</div>
-								<div className="truncate text-muted-foreground text-sm">
-									{userQuery.data.email}
+				{/* Members List */}
+				<div className="min-h-0 flex-1 overflow-y-auto">
+					{availableQuery.isLoading ? (
+						<div className="flex flex-col gap-3 p-4">
+							{Array.from({ length: 3 }).map((_, i) => (
+								<div
+									key={`skeleton-${i}`}
+									className="flex items-center gap-3"
+								>
+									<div className="h-9 w-9 animate-pulse rounded-full bg-muted" />
+									<div className="flex-1 space-y-1.5">
+										<div className="h-3.5 w-28 animate-pulse rounded bg-muted" />
+										<div className="h-3 w-40 animate-pulse rounded bg-muted" />
+									</div>
 								</div>
-							</div>
+							))}
 						</div>
-
-						<div className="space-y-2">
-							<Label htmlFor="role">Role</Label>
-							<Select
-								value={role}
-								onValueChange={(value: "admin" | "member" | "read-only") =>
-									setRole(value)
-								}
-							>
-								<SelectTrigger id="role">
-									<SelectValue />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="admin">
-										<div>
-											<div>Admin</div>
-											<div className="text-muted-foreground text-xs">
-												Can manage members and items
-											</div>
-										</div>
-									</SelectItem>
-									<SelectItem value="member">
-										<div>
-											<div>Member</div>
-											<div className="text-muted-foreground text-xs">
-												Can view and edit items
-											</div>
-										</div>
-									</SelectItem>
-									<SelectItem value="read-only">
-										<div>
-											<div>Read-only</div>
-											<div className="text-muted-foreground text-xs">
-												Can only view items
-											</div>
-										</div>
-									</SelectItem>
-								</SelectContent>
-							</Select>
+					) : filteredMembers.length === 0 ? (
+						<div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+							<UserPlus className="h-8 w-8 text-muted-foreground/50" />
+							<p className="text-muted-foreground text-sm">
+								{availableCount === 0
+									? "All team members already have access to this vault."
+									: "No team members match your search."}
+							</p>
 						</div>
+					) : (
+						<div className="divide-y">
+							{filteredMembers.map((member) => {
+								const isAdding = addingUserId === member.userId;
+								const isAdded = addedUserIds.has(member.userId);
+								const selectedRole =
+									selectedRoles[member.userId] ?? "member";
 
-						<DialogFooter>
-							<Button variant="outline" onClick={() => setOpen(false)}>
-								Cancel
-							</Button>
-							<Button
-								onClick={handleAddMember}
-								disabled={addMemberMutation.isPending}
-							>
-								{addMemberMutation.isPending ? "Adding..." : "Add Member"}
-							</Button>
-						</DialogFooter>
+								return (
+									<div
+										key={member.userId}
+										className={cn(
+											"flex items-center gap-3 px-4 py-3 transition-colors",
+											isAdded
+												? "bg-primary/5"
+												: "hover:bg-muted/50",
+										)}
+									>
+										<Avatar className="h-9 w-9 shrink-0">
+											<AvatarFallback className="font-medium text-xs">
+												{getInitials(member.name)}
+											</AvatarFallback>
+										</Avatar>
+										<div className="min-w-0 flex-1">
+											<div className="truncate font-medium text-sm leading-tight">
+												{member.name}
+											</div>
+											<div className="truncate text-muted-foreground text-xs">
+												{member.email}
+											</div>
+										</div>
+										<div className="flex shrink-0 items-center gap-2">
+											{!isAdded && (
+												<Select
+													value={selectedRole}
+													onValueChange={(
+														value:
+															| "admin"
+															| "member"
+															| "read-only",
+													) =>
+														setSelectedRoles(
+															(prev) => ({
+																...prev,
+																[member.userId]:
+																	value,
+															}),
+														)
+													}
+													disabled={isAdding}
+												>
+													<SelectTrigger className="h-7 w-26 text-xs">
+														<SelectValue />
+													</SelectTrigger>
+													<SelectContent>
+														<SelectItem value="admin">
+															Admin
+														</SelectItem>
+														<SelectItem value="member">
+															Member
+														</SelectItem>
+														<SelectItem value="read-only">
+															Read-only
+														</SelectItem>
+													</SelectContent>
+												</Select>
+											)}
+											{isAdded ? (
+												<Badge
+													variant="secondary"
+													className="gap-1 px-2 py-0.5 text-xs"
+												>
+													<Check className="h-3 w-3" />
+													Added
+												</Badge>
+											) : (
+												<Button
+													size="sm"
+													variant="outline"
+													className="h-7 px-2.5 text-xs"
+													onClick={() =>
+														handleAddMember(member)
+													}
+													disabled={
+														isAdding ||
+														addingUserId !== null
+													}
+												>
+													{isAdding ? (
+														<Loader2 className="h-3.5 w-3.5 animate-spin" />
+													) : (
+														"Add"
+													)}
+												</Button>
+											)}
+										</div>
+									</div>
+								);
+							})}
+						</div>
+					)}
+				</div>
+
+				{/* Footer */}
+				{availableCount > 0 && !availableQuery.isLoading && (
+					<div className="border-t px-4 py-3">
+						<p className="text-muted-foreground text-xs">
+							{filteredMembers.length} of {availableCount} team member
+							{availableCount !== 1 ? "s" : ""} available
+						</p>
 					</div>
 				)}
 			</DialogContent>

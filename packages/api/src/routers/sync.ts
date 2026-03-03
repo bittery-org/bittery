@@ -1,10 +1,33 @@
 import { db, item, syncEvent, syncEventAck, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { resolveEffectiveEntitlements } from "../billing/entitlements";
+import { getBitteryMode } from "../config/mode";
 import { protectedProcedure, router } from "../index";
 import { getStoragePublicUrl } from "../storage/s3";
+
+async function canUseAttachments(userId: string): Promise<boolean> {
+	const userData = await db.query.user.findFirst({
+		where: (user, { eq: eqFn }) => eqFn(user.id, userId),
+		with: { team: true },
+	});
+	const mode = getBitteryMode();
+
+	// In cloud mode, fail closed for orphaned users with no team linkage.
+	if (!userData?.team) {
+		return mode === "self-hosted";
+	}
+
+	const entitlements = resolveEffectiveEntitlements({
+		mode,
+		billingPlan: userData.team.billingPlan,
+		billingStatus: userData.team.billingStatus,
+	});
+
+	return entitlements.attachments;
+}
 
 export const syncRouter = router({
 	/**
@@ -113,6 +136,8 @@ export const syncRouter = router({
 			}),
 		)
 		.query(async ({ ctx, input }) => {
+			const attachmentsEnabled = await canUseAttachments(ctx.session.userId);
+
 			const userVaults = await db.query.vaultKey.findMany({
 				where: eq(vaultKey.userId, ctx.session.userId),
 				with: {
@@ -132,10 +157,9 @@ export const syncRouter = router({
 			const where = input.cursor
 				? and(
 						inArray(item.vaultId, vaultIds),
-						isNull(item.deletedAt),
 						gt(item.id, input.cursor),
 					)
-				: and(inArray(item.vaultId, vaultIds), isNull(item.deletedAt));
+				: and(inArray(item.vaultId, vaultIds));
 
 			const pageItems = await db.query.item.findMany({
 				where,
@@ -168,6 +192,7 @@ export const syncRouter = router({
 			return {
 				items: resultItems.map((vaultItem) => ({
 					...vaultItem,
+					attachments: attachmentsEnabled ? vaultItem.attachments : [],
 					vault: vaultMap.get(vaultItem.vaultId),
 				})),
 				nextCursor: lastItem?.id ?? null,

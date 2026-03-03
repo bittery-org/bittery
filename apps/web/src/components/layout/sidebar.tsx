@@ -21,25 +21,14 @@ import {
 } from "@bittery/ui";
 import {
 	IconChevronExpandYOutlineDuo18 as ChevronsUpDown,
-	IconGrid2OutlineDuo18 as Home,
-	IconLockOutlineDuo18 as Lock,
 	IconArrowDoorOutOutlineDuo18 as LogOut,
 	IconGear3OutlineDuo18 as Settings,
-	IconMagicShieldOutlineDuo18 as ShieldCheck,
-	IconUsers6OutlineDuo18 as Users,
 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ImportOnboardingCard } from "@/components/import/import-onboarding-card";
+import { appNavItems, filterNavItems } from "@/components/layout/nav-config";
 import { storage } from "@/lib/storage";
-
-const navItems = [
-	{ path: "/home", icon: Home, label: "Dashboard" },
-	{ path: "/security", icon: ShieldCheck, label: "Sentinel" },
-	{ path: "/team", icon: Users, label: "Team" },
-	{ path: "/vaults", icon: Lock, label: "Vaults" },
-	{ path: "/settings", icon: Settings, label: "Settings" },
-] as const;
 
 function UserNav() {
 	const trpc = useTRPC();
@@ -116,9 +105,18 @@ function UserNav() {
 }
 
 export function AppSidebar() {
+	const trpc = useTRPC();
 	const routerState = useRouterState();
 	const currentPath = routerState.location.pathname;
 	const { state } = useSidebar();
+	const entitlementQuery = useQuery(trpc.billing.entitlements.queryOptions());
+	const meQuery = useQuery(trpc.auth.me.queryOptions());
+	const navItems = filterNavItems(appNavItems, {
+		mode: entitlementQuery.data?.mode ?? "cloud",
+		entitlements: entitlementQuery.data?.entitlements ?? {},
+		plan: entitlementQuery.data?.plan,
+		role: meQuery.data?.role,
+	});
 
 	return (
 		<Sidebar variant="inset" collapsible="icon">

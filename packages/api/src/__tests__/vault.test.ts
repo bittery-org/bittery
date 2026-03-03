@@ -12,8 +12,11 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { db } from "@bittery/db";
+import { itemAttachment } from "@bittery/db/schema/vault";
+import { nanoid } from "nanoid";
 import { vaultRouter } from "../routers/vault";
 import {
+	addTeamMember,
 	addVaultMember,
 	countVaultItems,
 	createTestItem,
@@ -28,6 +31,16 @@ import {
 	truncateAll,
 } from "./test-utils";
 
+async function setupVaultSharingUser(overrides?: Parameters<typeof setup>[1]) {
+	const result = await setup(vaultRouter, overrides);
+	await createTestTeam(result.userId, {
+		billingPlan: "family",
+		billingStatus: "active",
+		type: "family",
+	});
+	return result;
+}
+
 describe("Vault Router", () => {
 	afterEach(async () => {
 		await truncateAll();
@@ -35,7 +48,7 @@ describe("Vault Router", () => {
 
 	describe("list", () => {
 		test("should return all vaults for the current user", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			await createTestVault(userId, { name: "Vault 1" });
 			await createTestVault(userId, { name: "Vault 2" });
 
@@ -47,7 +60,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should return empty array for user with no vaults", async () => {
-			const { caller } = await setup(vaultRouter);
+			const { caller } = await setupVaultSharingUser();
 
 			const result = await caller.list();
 
@@ -55,7 +68,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should include vault items in response", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId, { name: "Test Vault" });
 			await createTestItem(vaultId, userId);
 			await createTestItem(vaultId, userId);
@@ -68,7 +81,7 @@ describe("Vault Router", () => {
 
 	describe("get", () => {
 		test("should return vault details with item count", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId, { name: "My Vault" });
 			await createTestItem(vaultId, userId);
 			await createTestItem(vaultId, userId);
@@ -83,7 +96,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should throw NOT_FOUND for non-existent vault", async () => {
-			const { caller } = await setup(vaultRouter);
+			const { caller } = await setupVaultSharingUser();
 
 			await expect(caller.get({ vaultId: "nonexistent" })).rejects.toThrow(
 				"Vault not found or access denied",
@@ -92,8 +105,8 @@ describe("Vault Router", () => {
 
 		test("should deny access to vault user is not member of", async () => {
 			const [{ userId: ownerId }, { caller }] = await Promise.all([
-				setup(vaultRouter),
-				setup(vaultRouter),
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
 			]);
 			const vaultId = await createTestVault(ownerId);
 
@@ -105,7 +118,7 @@ describe("Vault Router", () => {
 
 	describe("create", () => {
 		test("should create a new vault", async () => {
-			const { caller } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 
 			const result = await caller.create({
 				name: "New Vault",
@@ -120,11 +133,22 @@ describe("Vault Router", () => {
 			expect(vault?.name).toBe("New Vault");
 			expect(vault?.type).toBe("personal");
 			expect(vault?.icon).toBe("folder");
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "vault_created")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(result.vaultId);
 		});
 
 		test("should create vault key for creator with owner role", async () => {
-			const { caller, userId } = await setup(vaultRouter);
-			const teamId = await createTestTeam(userId);
+			const { caller, userId } = await setupVaultSharingUser();
+			const teamId = await createTestTeam(userId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
 
 			const result = await caller.create({
 				name: "My Vault",
@@ -140,22 +164,94 @@ describe("Vault Router", () => {
 			expect(vaultKey?.encryptedVaultKey).toBe(mockSrpData.encryptedVaultKey);
 		});
 
-		test("should reject team vault creation for users without a team", async () => {
-			const { caller } = await setup(vaultRouter);
+			test("should reject team vault creation for users without a team", async () => {
+				const { caller } = await setup(vaultRouter);
 
-			await expect(
-				caller.create({
-					name: "Team Vault",
-					type: "team",
-					encryptedVaultKey: mockSrpData.encryptedVaultKey,
-				}),
-			).rejects.toThrow("You must belong to a team to create a team vault");
+				await expect(
+					caller.create({
+						name: "Team Vault",
+						type: "team",
+						encryptedVaultKey: mockSrpData.encryptedVaultKey,
+					}),
+				).rejects.toThrow("You must belong to a team to create a team vault");
+			});
+
+			test("should enforce shared vault limit for family plan", async () => {
+				const { caller, userId } = await setupVaultSharingUser();
+				const actor = await db.query.user.findFirst({
+					where: (u, { eq }) => eq(u.id, userId),
+				});
+				const teamId = actor?.teamId;
+				expect(teamId).toBeDefined();
+
+				for (let i = 0; i < 5; i += 1) {
+					await createTestVault(userId, {
+						name: `Existing Team Vault ${i + 1}`,
+						type: "team",
+						teamId: teamId!,
+					});
+				}
+
+				await expect(
+					caller.create({
+						name: "Overflow Team Vault",
+						type: "team",
+						encryptedVaultKey: mockSrpData.encryptedVaultKey,
+					}),
+				).rejects.toThrow(
+					"Your current plan allows up to 5 shared vaults. Upgrade to add more.",
+				);
+			});
+
+			test("should enforce shared vault cap under concurrent requests", async () => {
+				const { caller, userId } = await setupVaultSharingUser();
+				const actor = await db.query.user.findFirst({
+					where: (u, { eq }) => eq(u.id, userId),
+				});
+				const teamId = actor?.teamId;
+				expect(teamId).toBeDefined();
+
+				for (let i = 0; i < 4; i += 1) {
+					await createTestVault(userId, {
+						name: `Existing Team Vault ${i + 1}`,
+						type: "team",
+						teamId: teamId!,
+					});
+				}
+
+				const attempts = await Promise.allSettled([
+					caller.create({
+						name: "Concurrent Team Vault A",
+						type: "team",
+						encryptedVaultKey: mockSrpData.encryptedVaultKey,
+					}),
+					caller.create({
+						name: "Concurrent Team Vault B",
+						type: "team",
+						encryptedVaultKey: mockSrpData.encryptedVaultKey,
+					}),
+				]);
+
+				const successCount = attempts.filter(
+					(attempt) => attempt.status === "fulfilled",
+				).length;
+				const failureCount = attempts.filter(
+					(attempt) => attempt.status === "rejected",
+				).length;
+				expect(successCount).toBe(1);
+				expect(failureCount).toBe(1);
+
+				const teamVaults = await db.query.vault.findMany({
+					where: (teamVault, { and, eq }) =>
+						and(eq(teamVault.teamId, teamId!), eq(teamVault.type, "team")),
+				});
+				expect(teamVaults.length).toBe(5);
+			});
 		});
-	});
 
 	describe("update", () => {
 		test("should update vault name and icon", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId, { name: "Old Name" });
 
 			const result = await caller.update({
@@ -166,11 +262,18 @@ describe("Vault Router", () => {
 
 			expect(result.name).toBe("New Name");
 			expect(result.icon).toBe("star");
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "vault_updated")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(vaultId);
 		});
 
 		test("should deny update for non-admin members", async () => {
 			const [{ userId: ownerId }, { userId: memberId, caller }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, memberId, "member");
 
@@ -181,7 +284,7 @@ describe("Vault Router", () => {
 
 		test("should allow admin to update vault", async () => {
 			const [{ userId: ownerId }, { userId: adminId, caller }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, adminId, "admin");
 
@@ -193,7 +296,7 @@ describe("Vault Router", () => {
 
 	describe("delete", () => {
 		test("should delete vault and all its items", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 			await createTestItem(vaultId, userId);
 			await createTestItem(vaultId, userId);
@@ -215,7 +318,7 @@ describe("Vault Router", () => {
 
 		test("should deny deletion by non-owner", async () => {
 			const [{ userId: ownerId }, { userId: adminId, caller }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, adminId, "admin");
 
@@ -225,35 +328,150 @@ describe("Vault Router", () => {
 		});
 	});
 
-	describe("listItems", () => {
-		test("should return all non-deleted items in a vault", async () => {
-			const { caller, userId } = await setup(vaultRouter);
-			const vaultId = await createTestVault(userId);
-			await createTestItem(vaultId, userId, { category: "login" });
-			await createTestItem(vaultId, userId, { category: "secure-note" });
-			await createTestItem(vaultId, userId, { deletedAt: new Date() }); // Soft deleted
+		describe("listItems", () => {
+			test("should return all non-deleted items in a vault", async () => {
+				const { caller, userId } = await setupVaultSharingUser();
+				const vaultId = await createTestVault(userId);
+				await createTestItem(vaultId, userId, { category: "login" });
+				await createTestItem(vaultId, userId, { category: "secure-note" });
+				await createTestItem(vaultId, userId, { deletedAt: new Date() }); // Soft deleted
 
-			const result = await caller.listItems({ vaultId });
+				const result = await caller.listItems({ vaultId });
 
-			expect(result.length).toBe(2);
+				expect(result.length).toBe(2);
+			});
+
+			test("should deny access to non-member", async () => {
+				const [{ userId: ownerId }, { caller }] = await Promise.all([
+					setupVaultSharingUser(),
+					setupVaultSharingUser(),
+				]);
+				const vaultId = await createTestVault(ownerId);
+
+				await expect(caller.listItems({ vaultId })).rejects.toThrow(
+					"Access denied to this vault",
+				);
+			});
+
+			test("should hide attachment metadata when attachments entitlement is disabled", async () => {
+				const { caller, userId } = await setupVaultSharingUser();
+				await createTestTeam(userId, {
+					billingPlan: "free",
+					billingStatus: "none",
+					type: "personal",
+				});
+
+				const vaultId = await createTestVault(userId);
+				const itemId = await createTestItem(vaultId, userId);
+				await db.insert(itemAttachment).values({
+					id: nanoid(),
+					itemId,
+					vaultId,
+					storageKey: `attachments/${userId}/${itemId}/file.enc`,
+					encryptedName: "enc-name",
+					encryptedContentType: "enc-type",
+					encryptionIv: "enc-iv",
+					encryptedContentTypeIv: "enc-type-iv",
+					encryptionAlgorithm: "AES-GCM",
+					fileSize: 123,
+					uploadedBy: userId,
+				});
+
+				const listResult = await caller.listItems({ vaultId });
+				expect(listResult[0]?.attachments).toEqual([]);
+
+				const getItemResult = await caller.getItem({ itemId });
+				expect(getItemResult.attachments).toEqual([]);
+
+				const listAllResult = await caller.listAllItems();
+				const matchingItem = listAllResult.find((result) => result.id === itemId);
+				expect(matchingItem?.attachments).toEqual([]);
+			});
 		});
 
-		test("should deny access to non-member", async () => {
-			const [{ userId: ownerId }, { caller }] = await Promise.all([
-				setup(vaultRouter),
-				setup(vaultRouter),
-			]);
-			const vaultId = await createTestVault(ownerId);
+		describe("attachments", () => {
+			test("should fail closed for cloud users without a team", async () => {
+				const { caller } = await setup(vaultRouter);
 
-			await expect(caller.listItems({ vaultId })).rejects.toThrow(
-				"Access denied to this vault",
-			);
+				await expect(
+					caller.createAttachment({
+						itemId: "nonexistent-item",
+						storageKey: "attachments/user/item/key.enc",
+						encryptedName: "enc-name",
+						encryptedContentType: "enc-type",
+						encryptionIv: "enc-iv",
+						encryptedContentTypeIv: "enc-type-iv",
+						encryptionAlgorithm: "AES-GCM",
+						fileSize: 123,
+					}),
+				).rejects.toThrow(
+					"Attachments are only available on paid plans with active billing.",
+				);
+			});
+
+			test("should reject createAttachment with unissued storage key", async () => {
+				const { caller, userId } = await setupVaultSharingUser();
+				await createTestTeam(userId, {
+					billingPlan: "personal",
+					billingStatus: "active",
+					type: "personal",
+				});
+				const vaultId = await createTestVault(userId);
+				const itemId = await createTestItem(vaultId, userId);
+
+				await expect(
+					caller.createAttachment({
+						itemId,
+						storageKey: `attachments/other-user/${itemId}/foreign-key.enc`,
+						encryptedName: "enc-name",
+						encryptedContentType: "enc-type",
+						encryptionIv: "enc-iv",
+						encryptedContentTypeIv: "enc-type-iv",
+						encryptionAlgorithm: "AES-GCM",
+						fileSize: 123,
+					}),
+				).rejects.toThrow("Invalid or expired attachment upload key");
+			});
+
+			test("should block member from deleting attachments uploaded by others", async () => {
+				const [{ userId: ownerId }, { userId: memberId, caller }] =
+					await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
+				const teamId = await createTestTeam(ownerId, {
+					billingPlan: "family",
+					billingStatus: "active",
+					type: "family",
+				});
+				await addTeamMember(teamId, memberId, "member");
+				const vaultId = await createTestVault(ownerId, {
+					type: "team",
+					teamId,
+				});
+				await addVaultMember(vaultId, memberId, "member");
+				const itemId = await createTestItem(vaultId, ownerId);
+				const attachmentId = nanoid();
+				await db.insert(itemAttachment).values({
+					id: attachmentId,
+					itemId,
+					vaultId,
+					storageKey: `attachments/${ownerId}/${itemId}/file.enc`,
+					encryptedName: "enc-name",
+					encryptedContentType: "enc-type",
+					encryptionIv: "enc-iv",
+					encryptedContentTypeIv: "enc-type-iv",
+					encryptionAlgorithm: "AES-GCM",
+					fileSize: 123,
+					uploadedBy: ownerId,
+				});
+
+				await expect(
+					caller.deleteAttachment({ attachmentId }),
+				).rejects.toThrow("You can only delete your own attachments");
+			});
 		});
-	});
 
 	describe("createItem", () => {
 		test("should create a new item in the vault", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 
 			const result = await caller.createItem({
@@ -268,11 +486,18 @@ describe("Vault Router", () => {
 			const item = await getItem(result.itemId);
 			expect(item?.category).toBe("login");
 			expect(item?.version).toBe(1);
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "item_created")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(result.itemId);
 		});
 
 		test("should deny item creation for read-only members", async () => {
 			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, readOnlyId, "read-only");
 
@@ -289,7 +514,7 @@ describe("Vault Router", () => {
 
 	describe("updateItem", () => {
 		test("should update item data and increment version", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId);
 
@@ -307,7 +532,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should detect version conflict", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId, { version: 5 });
 
@@ -324,7 +549,7 @@ describe("Vault Router", () => {
 
 	describe("deleteItem", () => {
 		test("should soft delete an item", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId);
 
@@ -334,12 +559,19 @@ describe("Vault Router", () => {
 
 			const item = await getItem(itemId);
 			expect(item?.deletedAt).toBeDefined();
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "item_deleted")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(itemId);
 		});
 	});
 
 	describe("toggleFavorite", () => {
 		test("should toggle item favorite status", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId, { favorite: false });
 
@@ -354,7 +586,7 @@ describe("Vault Router", () => {
 
 	describe("listDeletedItems", () => {
 		test("should return only deleted items", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 			await createTestItem(vaultId, userId); // Not deleted
 			await createTestItem(vaultId, userId, { deletedAt: new Date() });
@@ -368,7 +600,7 @@ describe("Vault Router", () => {
 
 	describe("restoreItem", () => {
 		test("should restore a deleted item", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId, {
 				deletedAt: new Date(),
@@ -380,10 +612,17 @@ describe("Vault Router", () => {
 
 			const item = await getItem(itemId);
 			expect(item?.deletedAt).toBeNull();
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "item_restored")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(itemId);
 		});
 
 		test("should reject restoring non-deleted item", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId); // Not deleted
 
@@ -395,7 +634,7 @@ describe("Vault Router", () => {
 
 	describe("permanentlyDeleteItem", () => {
 		test("should permanently delete a trashed item", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId, {
 				deletedAt: new Date(),
@@ -407,10 +646,20 @@ describe("Vault Router", () => {
 
 			const item = await getItem(itemId);
 			expect(item).toBeUndefined();
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(
+						eq(log.userId, userId),
+						eq(log.action, "item_permanently_deleted"),
+					),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(itemId);
 		});
 
 		test("should reject deleting non-trashed item", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId); // Not deleted
 
@@ -422,7 +671,7 @@ describe("Vault Router", () => {
 
 	describe("bulkImportItems", () => {
 		test("should import multiple items at once", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 
 			const result = await caller.bulkImportItems({
@@ -456,12 +705,19 @@ describe("Vault Router", () => {
 
 			const itemCount = await countVaultItems(vaultId);
 			expect(itemCount).toBe(3);
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "vault_updated")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(vaultId);
 		});
 	});
 
 	describe("stats", () => {
 		test("should return correct dashboard stats", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 			await createTestItem(vaultId, userId);
 			await createTestItem(vaultId, userId);
@@ -477,8 +733,8 @@ describe("Vault Router", () => {
 		test("should return all vault members", async () => {
 			const [{ userId: ownerId, caller }, { userId: memberId }] =
 				await Promise.all([
-					setup(vaultRouter, { name: "Owner" }),
-					setup(vaultRouter, { name: "Member" }),
+					setupVaultSharingUser({ name: "Owner" }),
+					setupVaultSharingUser({ name: "Member" }),
 				]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, memberId, "member");
@@ -494,7 +750,7 @@ describe("Vault Router", () => {
 	describe("members.updateRole", () => {
 		test("should update member role", async () => {
 			const [{ userId: ownerId, caller }, { userId: memberId }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, memberId, "member");
 
@@ -511,7 +767,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should not allow changing own role", async () => {
-			const { userId: ownerId, caller } = await setup(vaultRouter);
+			const { userId: ownerId, caller } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(ownerId);
 
 			await expect(
@@ -525,7 +781,7 @@ describe("Vault Router", () => {
 
 		test("should not allow changing owner role", async () => {
 			const [{ userId: ownerId }, { userId: adminId, caller }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, adminId, "admin");
 
@@ -542,7 +798,7 @@ describe("Vault Router", () => {
 	describe("members.add", () => {
 		test("should add a new member to the vault", async () => {
 			const [{ userId: ownerId, caller }, { userId: newMemberId }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 
 			const result = await caller.members.add({
@@ -568,7 +824,7 @@ describe("Vault Router", () => {
 
 		test("should reject adding existing member", async () => {
 			const [{ userId: ownerId, caller }, { userId: memberId }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, memberId, "member");
 
@@ -585,7 +841,7 @@ describe("Vault Router", () => {
 
 	describe("getItem", () => {
 		test("should return item by id", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId, {
 				category: "login",
@@ -600,8 +856,8 @@ describe("Vault Router", () => {
 
 		test("should deny access to non-member", async () => {
 			const [{ userId: ownerId }, { caller }] = await Promise.all([
-				setup(vaultRouter),
-				setup(vaultRouter),
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
 			]);
 			const vaultId = await createTestVault(ownerId);
 			const itemId = await createTestItem(vaultId, ownerId);
@@ -610,7 +866,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should throw for non-existent item", async () => {
-			const { caller } = await setup(vaultRouter);
+			const { caller } = await setupVaultSharingUser();
 
 			await expect(caller.getItem({ itemId: "nonexistent" })).rejects.toThrow(
 				"Item not found",
@@ -620,7 +876,7 @@ describe("Vault Router", () => {
 
 	describe("listAllItems", () => {
 		test("should return items from all accessible vaults", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vault1 = await createTestVault(userId, { name: "Vault 1" });
 			const vault2 = await createTestVault(userId, { name: "Vault 2" });
 			await createTestItem(vault1, userId);
@@ -634,7 +890,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should exclude soft-deleted items", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 			await createTestItem(vaultId, userId);
 			await createTestItem(vaultId, userId, { deletedAt: new Date() });
@@ -645,7 +901,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should return empty array for user with no vaults", async () => {
-			const { caller } = await setup(vaultRouter);
+			const { caller } = await setupVaultSharingUser();
 
 			const result = await caller.listAllItems();
 
@@ -655,7 +911,7 @@ describe("Vault Router", () => {
 
 	describe("listAllDeletedItems", () => {
 		test("should return deleted items from all vaults", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vault1 = await createTestVault(userId, { name: "Vault 1" });
 			const vault2 = await createTestVault(userId, { name: "Vault 2" });
 			await createTestItem(vault1, userId, { deletedAt: new Date() });
@@ -669,7 +925,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should return empty array when no deleted items", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			await createTestVault(userId);
 
 			const result = await caller.listAllDeletedItems();
@@ -680,7 +936,7 @@ describe("Vault Router", () => {
 
 	describe("moveItem", () => {
 		test("should move item between vaults", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const sourceVault = await createTestVault(userId, { name: "Source" });
 			const targetVault = await createTestVault(userId, { name: "Target" });
 			const itemId = await createTestItem(sourceVault, userId);
@@ -698,10 +954,17 @@ describe("Vault Router", () => {
 			const item = await getItem(itemId);
 			expect(item?.vaultId).toBe(targetVault);
 			expect(item?.encryptedData).toBe("re-encrypted-data");
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "item_moved")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(itemId);
 		});
 
 		test("should reject moving non-existent item", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 
 			await expect(
@@ -716,7 +979,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should reject if item is not in source vault", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vault1 = await createTestVault(userId, { name: "Vault 1" });
 			const vault2 = await createTestVault(userId, { name: "Vault 2" });
 			const itemId = await createTestItem(vault1, userId);
@@ -733,7 +996,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should reject moving deleted items", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const sourceVault = await createTestVault(userId);
 			const targetVault = await createTestVault(userId);
 			const itemId = await createTestItem(sourceVault, userId, {
@@ -753,7 +1016,7 @@ describe("Vault Router", () => {
 
 		test("should reject moving to read-only target vault", async () => {
 			const [{ userId: ownerId }, { userId: memberId, caller }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const sourceVault = await createTestVault(ownerId);
 			const targetVault = await createTestVault(ownerId);
 			await addVaultMember(sourceVault, memberId, "member");
@@ -773,7 +1036,7 @@ describe("Vault Router", () => {
 
 		test("should reject if user has no access to source vault", async () => {
 			const [{ userId: ownerId }, { userId: otherId, caller }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const sourceVault = await createTestVault(ownerId);
 			const targetVault = await createTestVault(otherId);
 			const itemId = await createTestItem(sourceVault, ownerId);
@@ -793,7 +1056,7 @@ describe("Vault Router", () => {
 	describe("updateItem - edge cases", () => {
 		test("should deny update for read-only members", async () => {
 			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, readOnlyId, "read-only");
 			const itemId = await createTestItem(vaultId, ownerId);
@@ -808,7 +1071,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should throw for non-existent item", async () => {
-			const { caller } = await setup(vaultRouter);
+			const { caller } = await setupVaultSharingUser();
 
 			await expect(
 				caller.updateItem({
@@ -823,7 +1086,7 @@ describe("Vault Router", () => {
 	describe("deleteItem - edge cases", () => {
 		test("should deny deletion for read-only members", async () => {
 			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, readOnlyId, "read-only");
 			const itemId = await createTestItem(vaultId, ownerId);
@@ -834,7 +1097,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should throw for non-existent item", async () => {
-			const { caller } = await setup(vaultRouter);
+			const { caller } = await setupVaultSharingUser();
 
 			await expect(
 				caller.deleteItem({ itemId: "nonexistent" }),
@@ -845,7 +1108,7 @@ describe("Vault Router", () => {
 	describe("toggleFavorite - edge cases", () => {
 		test("should deny favorite toggle for read-only members", async () => {
 			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, readOnlyId, "read-only");
 			const itemId = await createTestItem(vaultId, ownerId);
@@ -859,7 +1122,7 @@ describe("Vault Router", () => {
 	describe("bulkImportItems - edge cases", () => {
 		test("should deny import for read-only members", async () => {
 			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, readOnlyId, "read-only");
 
@@ -879,8 +1142,8 @@ describe("Vault Router", () => {
 
 		test("should deny import for non-member", async () => {
 			const [{ userId: ownerId }, { caller }] = await Promise.all([
-				setup(vaultRouter),
-				setup(vaultRouter),
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
 			]);
 			const vaultId = await createTestVault(ownerId);
 
@@ -902,7 +1165,7 @@ describe("Vault Router", () => {
 	describe("restoreItem - edge cases", () => {
 		test("should deny restore for read-only members", async () => {
 			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, readOnlyId, "read-only");
 			const itemId = await createTestItem(vaultId, ownerId, {
@@ -918,7 +1181,7 @@ describe("Vault Router", () => {
 	describe("permanentlyDeleteItem - edge cases", () => {
 		test("should deny permanent deletion for read-only members", async () => {
 			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, readOnlyId, "read-only");
 			const itemId = await createTestItem(vaultId, ownerId, {
@@ -938,9 +1201,9 @@ describe("Vault Router", () => {
 				{ userId: admin1Id, caller },
 				{ userId: admin2Id },
 			] = await Promise.all([
-				setup(vaultRouter),
-				setup(vaultRouter),
-				setup(vaultRouter),
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
 			]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, admin1Id, "admin");
@@ -961,9 +1224,9 @@ describe("Vault Router", () => {
 				{ userId: memberId, caller },
 				{ userId: targetId },
 			] = await Promise.all([
-				setup(vaultRouter),
-				setup(vaultRouter),
-				setup(vaultRouter),
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
 			]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, memberId, "member");
@@ -986,9 +1249,9 @@ describe("Vault Router", () => {
 				{ userId: memberId, caller },
 				{ userId: newUserId },
 			] = await Promise.all([
-				setup(vaultRouter),
-				setup(vaultRouter),
-				setup(vaultRouter),
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
 			]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, memberId, "member");
@@ -1004,7 +1267,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should throw NOT_FOUND for non-existent user", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 
 			await expect(
@@ -1021,7 +1284,7 @@ describe("Vault Router", () => {
 	describe("members.remove", () => {
 		test("should remove member with key rotation", async () => {
 			const [{ userId: ownerId, caller }, { userId: memberId }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, memberId, "member");
 			const itemId = await createTestItem(vaultId, ownerId);
@@ -1069,7 +1332,7 @@ describe("Vault Router", () => {
 
 		test("should rollback key rotation if an item update fails", async () => {
 			const [{ userId: ownerId, caller }, { userId: memberId }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, memberId, "member");
 			const itemId = await createTestItem(vaultId, ownerId);
@@ -1109,9 +1372,9 @@ describe("Vault Router", () => {
 				{ userId: memberId, caller },
 				{ userId: targetId },
 			] = await Promise.all([
-				setup(vaultRouter),
-				setup(vaultRouter),
-				setup(vaultRouter),
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
 			]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, memberId, "member");
@@ -1130,7 +1393,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should not allow removing yourself", async () => {
-			const { caller, userId } = await setup(vaultRouter);
+			const { caller, userId } = await setupVaultSharingUser();
 			const vaultId = await createTestVault(userId);
 
 			await expect(
@@ -1147,7 +1410,7 @@ describe("Vault Router", () => {
 
 		test("should not allow removing vault owner", async () => {
 			const [{ userId: ownerId }, { userId: adminId, caller }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, adminId, "admin");
 
@@ -1169,9 +1432,9 @@ describe("Vault Router", () => {
 				{ userId: admin1Id, caller },
 				{ userId: admin2Id },
 			] = await Promise.all([
-				setup(vaultRouter),
-				setup(vaultRouter),
-				setup(vaultRouter),
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
 			]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, admin1Id, "admin");
@@ -1193,7 +1456,7 @@ describe("Vault Router", () => {
 	describe("members.getRotationData", () => {
 		test("should return remaining members and items", async () => {
 			const [{ userId: ownerId, caller }, { userId: memberId }] =
-				await Promise.all([setup(vaultRouter), setup(vaultRouter)]);
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, memberId, "member");
 			await createTestItem(vaultId, ownerId);
@@ -1216,9 +1479,9 @@ describe("Vault Router", () => {
 				{ userId: memberId, caller },
 				{ userId: targetId },
 			] = await Promise.all([
-				setup(vaultRouter),
-				setup(vaultRouter),
-				setup(vaultRouter),
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
 			]);
 			const vaultId = await createTestVault(ownerId);
 			await addVaultMember(vaultId, memberId, "member");
@@ -1237,8 +1500,8 @@ describe("Vault Router", () => {
 		test("should find user by email and return public key", async () => {
 			const [{ userId: lookupUserId, email: lookupEmail }, { caller }] =
 				await Promise.all([
-					setup(vaultRouter, { name: "Lookup User" }),
-					setup(vaultRouter),
+					setupVaultSharingUser({ name: "Lookup User" }),
+					setupVaultSharingUser(),
 				]);
 
 			const result = await caller.members.lookupUser({ email: lookupEmail });
@@ -1249,7 +1512,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should not allow looking up yourself", async () => {
-			const { email, caller } = await setup(vaultRouter);
+			const { email, caller } = await setupVaultSharingUser();
 
 			await expect(caller.members.lookupUser({ email })).rejects.toThrow(
 				"Cannot add yourself as a member",
@@ -1257,7 +1520,7 @@ describe("Vault Router", () => {
 		});
 
 		test("should throw NOT_FOUND for non-existent user", async () => {
-			const { caller } = await setup(vaultRouter);
+			const { caller } = await setupVaultSharingUser();
 
 			await expect(
 				caller.members.lookupUser({ email: "nonexistent@example.com" }),

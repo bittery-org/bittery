@@ -19,228 +19,47 @@ import {
 	IconStarSparkle2OutlineDuo18 as Sparkle,
 	IconXmarkOutlineDuo18 as X,
 } from "@bittery/ui/icons";
+import { type CloudPlanId, featureCategories, planInfo } from "@bittery/shared/pricing";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CloudPlanId } from "@/hooks/use-signup-form";
 
-/* ─── Plan Data ──────────────────────────────────────────────────── */
+/* ─── Plan Data (UI-specific styling layered on shared plan info) ── */
 
-type PlanFeature = {
-	label: string;
-	values: Record<CloudPlanId, string | boolean>;
-};
-
-const featureCategories: Array<{
-	name: string;
-	features: PlanFeature[];
-}> = [
-	{
-		name: "Vaults & Items",
-		features: [
-			{
-				label: "Vaults",
-				values: { free: "1", personal: "10", family: "25", team: "Unlimited" },
-			},
-			{
-				label: "Items per vault",
-				values: {
-					free: "50",
-					personal: "Unlimited",
-					family: "Unlimited",
-					team: "Unlimited",
-				},
-			},
-			{
-				label: "Item types",
-				values: {
-					free: "Logins only",
-					personal: "All types",
-					family: "All types",
-					team: "All types",
-				},
-			},
-			{
-				label: "File attachments",
-				values: {
-					free: false,
-					personal: "1 GB",
-					family: "5 GB",
-					team: "10 GB",
-				},
-			},
-		],
-	},
-	{
-		name: "Security",
-		features: [
-			{
-				label: "Zero-knowledge encryption",
-				values: { free: true, personal: true, family: true, team: true },
-			},
-			{
-				label: "Two-factor authentication",
-				values: { free: true, personal: true, family: true, team: true },
-			},
-			{
-				label: "Passkey support",
-				values: { free: false, personal: true, family: true, team: true },
-			},
-			{
-				label: "Emergency Kit & Recovery",
-				values: { free: true, personal: true, family: true, team: true },
-			},
-			{
-				label: "Breach monitoring",
-				values: { free: false, personal: true, family: true, team: true },
-			},
-		],
-	},
-	{
-		name: "Sharing & Collaboration",
-		features: [
-			{
-				label: "Secure sharing links",
-				values: {
-					free: false,
-					personal: "5 active",
-					family: "Unlimited",
-					team: "Unlimited",
-				},
-			},
-			{
-				label: "Shared vaults",
-				values: {
-					free: false,
-					personal: false,
-					family: "5",
-					team: "Unlimited",
-				},
-			},
-			{
-				label: "Team members",
-				values: {
-					free: false,
-					personal: false,
-					family: "Up to 6",
-					team: "Unlimited",
-				},
-			},
-			{
-				label: "Role-based access",
-				values: { free: false, personal: false, family: true, team: true },
-			},
-		],
-	},
-	{
-		name: "Apps & Devices",
-		features: [
-			{
-				label: "Web app",
-				values: { free: true, personal: true, family: true, team: true },
-			},
-			{
-				label: "Desktop app",
-				values: { free: true, personal: true, family: true, team: true },
-			},
-			{
-				label: "Browser extension",
-				values: { free: true, personal: true, family: true, team: true },
-			},
-			{
-				label: "Mobile app",
-				values: { free: true, personal: true, family: true, team: true },
-			},
-			{
-				label: "Synced devices",
-				values: {
-					free: "2",
-					personal: "Unlimited",
-					family: "Unlimited",
-					team: "Unlimited",
-				},
-			},
-		],
-	},
-	{
-		name: "Admin & Support",
-		features: [
-			{
-				label: "Priority support",
-				values: { free: false, personal: true, family: true, team: true },
-			},
-			{
-				label: "Admin console",
-				values: { free: false, personal: false, family: false, team: true },
-			},
-			{
-				label: "Activity logs",
-				values: { free: false, personal: false, family: false, team: true },
-			},
-			{
-				label: "Custom policies",
-				values: { free: false, personal: false, family: false, team: true },
-			},
-		],
-	},
-];
-
-const plans: Array<{
-	id: CloudPlanId;
-	name: string;
-	priceLabel: string;
-	priceSuffix?: string;
-	description: string;
-	isRecommended?: boolean;
+const planStyles: Record<CloudPlanId, {
 	icon: React.ComponentType<{ size?: number; className?: string }>;
 	accentClass: string;
 	iconBgClass: string;
 	headerGradient: string;
-}> = [
-	{
-		id: "free",
-		name: "Free",
-		priceLabel: "$0",
-		description: "Basic vault for getting started",
+}> = {
+	free: {
 		icon: Lock,
 		accentClass: "border-border",
 		iconBgClass: "bg-muted text-muted-foreground",
 		headerGradient: "from-muted/60 to-transparent",
 	},
-	{
-		id: "personal",
-		name: "Personal",
-		priceLabel: "$4",
-		priceSuffix: "/mo",
-		description: "Daily password security with premium features",
-		isRecommended: true,
+	personal: {
 		icon: Sparkle,
 		accentClass: "border-primary/40",
 		iconBgClass: "bg-primary/10 text-primary",
 		headerGradient: "from-primary/8 to-transparent",
 	},
-	{
-		id: "family",
-		name: "Family",
-		priceLabel: "$9",
-		priceSuffix: "/mo",
-		description: "Shared protection for your household",
+	family: {
 		icon: Heart,
 		accentClass: "border-amber-400/40 dark:border-amber-500/30",
-		iconBgClass:
-			"bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
+		iconBgClass: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
 		headerGradient: "from-amber-50/80 dark:from-amber-500/5 to-transparent",
 	},
-	{
-		id: "team",
-		name: "Team",
-		priceLabel: "$12",
-		priceSuffix: "/user",
-		description: "Teams and businesses with shared workspaces",
+	team: {
 		icon: Briefcase,
 		accentClass: "border-sky-400/40 dark:border-sky-500/30",
 		iconBgClass: "bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400",
 		headerGradient: "from-sky-50/80 dark:from-sky-500/5 to-transparent",
 	},
-];
+};
+
+const plans = planInfo.map((plan) => ({
+	...plan,
+	...planStyles[plan.id],
+}));
 
 /* ─── Feature Cell ───────────────────────────────────────────────── */
 

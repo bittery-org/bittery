@@ -1,23 +1,36 @@
 import { db } from "@bittery/db";
 import {
+	incrementRateLimitWindow,
+	RATE_LIMIT_NAMESPACE,
+	startOfLocalDay,
+} from "@bittery/auth/rate-limit";
+import { user } from "@bittery/db/schema/auth";
+import {
 	EXPIRATION_OPTIONS,
 	type ExpirationOption,
 	shareAccessLog,
 	shareEmailVerification,
 	shareLink,
 	shareLinkAllowedEmail,
-	shareLinkRateLimit,
 } from "@bittery/db/schema/sharing";
 import { TRPCError } from "@trpc/server";
-import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import {
+	resolveEffectiveEntitlementLimits,
+	resolveEffectiveEntitlements,
+} from "../billing/entitlements";
+import { getBitteryMode } from "../config/mode";
 import { protectedProcedure, publicProcedure, router } from "../index";
 import { logAuditEvent } from "../utils/audit";
 
 // Email validation regex
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_VERIFICATION_CODES_PER_EMAIL = 5;
+const SHARE_LINKS_UNAVAILABLE_MESSAGE =
+	"Share links are not available on your current plan. Upgrade to continue.";
+const DEFAULT_SHARE_LINK_DAILY_LIMIT = 50;
 
 /**
  * Get the base share URL from the WEB_APP_URL environment variable
@@ -94,6 +107,10 @@ export const shareRouter = router({
 				});
 			}
 
+				const shareLinksAccess = await assertShareLinksEntitlement(
+					ctx.session.userId,
+				);
+
 			// Validate allowed emails for email-restricted mode
 			if (input.accessMode === "email-restricted") {
 				if (!input.allowedEmails || input.allowedEmails.length === 0) {
@@ -123,40 +140,87 @@ export const shareRouter = router({
 				EXPIRATION_OPTIONS[input.expiresIn as ExpirationOption];
 			const expiresAt = new Date(Date.now() + expirationHours * 60 * 60 * 1000);
 
-			// Generate secure token
-			const token = generateSecureToken();
-			const shareLinkId = nanoid();
+				// Generate secure token
+				const token = generateSecureToken();
+				const shareLinkId = nanoid();
 
-			// Create share link
-			await db.insert(shareLink).values({
-				id: shareLinkId,
-				itemId: input.itemId,
-				createdById: ctx.session.userId,
-				token,
-				accessMode: input.accessMode,
-				isOneTimeUse: input.isOneTimeUse,
-				encryptedItemData: input.encryptedItemData,
-				encryptionIv: input.encryptionIv,
-				encryptedShareKey: input.encryptedShareKey,
-				shareKeyIv: input.shareKeyIv,
-				maxAccessCount: input.isOneTimeUse ? 1 : null,
-				expiresAt,
-			});
+				await db.transaction(async (tx) => {
+					if (shareLinksAccess.maxActiveLinks !== null) {
+						const lockScope = shareLinksAccess.teamId ?? ctx.session.userId;
+						await tx.execute(
+							sql`SELECT pg_advisory_xact_lock(hashtext(${`share-links:${lockScope}`}))`,
+						);
 
-			// Add allowed emails for email-restricted mode
-			if (
-				input.accessMode === "email-restricted" &&
-				input.allowedEmails &&
-				input.allowedEmails.length > 0
-			) {
-				await db.insert(shareLinkAllowedEmail).values(
-					input.allowedEmails.map((email) => ({
-						id: nanoid(),
-						shareLinkId,
-						email: email.toLowerCase(),
-					})),
-				);
-			}
+						const now = new Date();
+						const validityFilters = and(
+							eq(shareLink.status, "active"),
+							gt(shareLink.expiresAt, now),
+							or(
+								isNull(shareLink.maxAccessCount),
+								sql`${shareLink.accessCount} < ${shareLink.maxAccessCount}`,
+							),
+						);
+						const activeCountResult = shareLinksAccess.teamId
+							? await tx
+									.select({ count: sql<number>`count(*)::int` })
+									.from(shareLink)
+									.innerJoin(user, eq(shareLink.createdById, user.id))
+									.where(
+										and(
+											eq(user.teamId, shareLinksAccess.teamId),
+											validityFilters,
+										),
+									)
+							: await tx
+									.select({ count: sql<number>`count(*)::int` })
+									.from(shareLink)
+									.where(
+										and(
+											eq(shareLink.createdById, ctx.session.userId),
+											validityFilters,
+										),
+									);
+
+						const activeShareLinks = activeCountResult[0]?.count ?? 0;
+						if (activeShareLinks >= shareLinksAccess.maxActiveLinks) {
+							throw new TRPCError({
+								code: "FORBIDDEN",
+								message: `Your plan allows up to ${shareLinksAccess.maxActiveLinks} active share links. Revoke a link or upgrade to continue.`,
+							});
+						}
+					}
+
+					// Create share link
+					await tx.insert(shareLink).values({
+						id: shareLinkId,
+						itemId: input.itemId,
+						createdById: ctx.session.userId,
+						token,
+						accessMode: input.accessMode,
+						isOneTimeUse: input.isOneTimeUse,
+						encryptedItemData: input.encryptedItemData,
+						encryptionIv: input.encryptionIv,
+						encryptedShareKey: input.encryptedShareKey,
+						shareKeyIv: input.shareKeyIv,
+						maxAccessCount: input.isOneTimeUse ? 1 : null,
+						expiresAt,
+					});
+
+					// Add allowed emails for email-restricted mode
+					if (
+						input.accessMode === "email-restricted" &&
+						input.allowedEmails &&
+						input.allowedEmails.length > 0
+					) {
+						await tx.insert(shareLinkAllowedEmail).values(
+							input.allowedEmails.map((email) => ({
+								id: nanoid(),
+								shareLinkId,
+								email: email.toLowerCase(),
+							})),
+						);
+					}
+				});
 
 			await logAuditEvent({
 				userId: ctx.session.userId,
@@ -187,6 +251,8 @@ export const shareRouter = router({
 	listByItem: protectedProcedure
 		.input(z.object({ itemId: z.string() }))
 		.query(async ({ ctx, input }) => {
+			await assertShareLinksEntitlement(ctx.session.userId);
+
 			// Verify user has access to the item's vault
 			const itemRecord = await db.query.item.findFirst({
 				where: (i, { eq }) => eq(i.id, input.itemId),
@@ -270,6 +336,8 @@ export const shareRouter = router({
 	get: protectedProcedure
 		.input(z.object({ linkId: z.string() }))
 		.query(async ({ ctx, input }) => {
+			await assertShareLinksEntitlement(ctx.session.userId);
+
 			const link = await db.query.shareLink.findFirst({
 				where: (sl, { eq }) => eq(sl.id, input.linkId),
 				with: {
@@ -411,6 +479,8 @@ export const shareRouter = router({
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
+			await assertShareLinksEntitlement(ctx.session.userId);
+
 			const link = await db.query.shareLink.findFirst({
 				where: (sl, { eq }) => eq(sl.id, input.linkId),
 				with: {
@@ -478,14 +548,52 @@ export const shareRouter = router({
 				);
 			}
 
-			// Remove emails
-			if (input.removeEmailIds && input.removeEmailIds.length > 0) {
-				for (const emailId of input.removeEmailIds) {
-					await db
+				// Remove emails
+				if (input.removeEmailIds && input.removeEmailIds.length > 0) {
+					const uniqueRemoveEmailIds = [...new Set(input.removeEmailIds)];
+					if (uniqueRemoveEmailIds.length !== input.removeEmailIds.length) {
+						throw new TRPCError({
+							code: "BAD_REQUEST",
+							message: "Duplicate removeEmailIds are not allowed",
+						});
+					}
+
+					const removedEmails = await db
 						.delete(shareLinkAllowedEmail)
-						.where(eq(shareLinkAllowedEmail.id, emailId));
+						.where(
+							and(
+								eq(shareLinkAllowedEmail.shareLinkId, input.linkId),
+								inArray(shareLinkAllowedEmail.id, uniqueRemoveEmailIds),
+							),
+						)
+						.returning({
+							id: shareLinkAllowedEmail.id,
+							email: shareLinkAllowedEmail.email,
+						});
+
+					if (removedEmails.length !== uniqueRemoveEmailIds.length) {
+						throw new TRPCError({
+							code: "BAD_REQUEST",
+							message: "One or more removeEmailIds are invalid for this share link",
+						});
+					}
+
+					const revokedEmails = [
+						...new Set(removedEmails.map((removed) => removed.email.toLowerCase())),
+					];
+					if (revokedEmails.length > 0) {
+						await db
+							.update(shareEmailVerification)
+							.set({ usedAt: new Date() })
+							.where(
+								and(
+									eq(shareEmailVerification.shareLinkId, input.linkId),
+									inArray(shareEmailVerification.email, revokedEmails),
+									isNull(shareEmailVerification.usedAt),
+								),
+							);
+					}
 				}
-			}
 
 			return { success: true };
 		}),
@@ -496,6 +604,8 @@ export const shareRouter = router({
 	getAccessLogs: protectedProcedure
 		.input(z.object({ linkId: z.string() }))
 		.query(async ({ ctx, input }) => {
+			await assertShareLinksEntitlement(ctx.session.userId);
+
 			const link = await db.query.shareLink.findFirst({
 				where: (sl, { eq }) => eq(sl.id, input.linkId),
 				with: {
@@ -562,6 +672,14 @@ export const shareRouter = router({
 				});
 			}
 
+			if (!(await hasShareLinksEntitlement(link.createdById))) {
+				return {
+					valid: false,
+					reason: "disabled",
+					accessMode: link.accessMode,
+				};
+			}
+
 			// Check if link is still valid
 			const now = new Date();
 			if (link.status === "revoked") {
@@ -619,6 +737,13 @@ export const shareRouter = router({
 				throw new TRPCError({
 					code: "NOT_FOUND",
 					message: "Share link not found",
+				});
+			}
+
+			if (!(await hasShareLinksEntitlement(link.createdById))) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "This share link is no longer valid",
 				});
 			}
 
@@ -742,6 +867,21 @@ export const shareRouter = router({
 				});
 			}
 
+			if (!(await hasShareLinksEntitlement(link.createdById))) {
+				await logAccess(link.id, {
+					email: input.email,
+					ipAddress: input.ipAddress,
+					userAgent: input.userAgent,
+					success: false,
+					failureReason: "Share links disabled for creator plan",
+				});
+
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "This share link is no longer valid",
+				});
+			}
+
 			// Check if link is valid
 			const now = new Date();
 			if (
@@ -763,10 +903,28 @@ export const shareRouter = router({
 				});
 			}
 
-			const normalizedEmail = input.email.toLowerCase();
+				const normalizedEmail = input.email.toLowerCase();
 
-			// Find verification record
-			const verification = await db.query.shareEmailVerification.findFirst({
+				const isStillAllowed = link.allowedEmails.some(
+					(emailEntry) => emailEntry.email.toLowerCase() === normalizedEmail,
+				);
+				if (!isStillAllowed) {
+					await logAccess(link.id, {
+						email: input.email,
+						ipAddress: input.ipAddress,
+						userAgent: input.userAgent,
+						success: false,
+						failureReason: "Email no longer authorized for this link",
+					});
+
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "This email is not authorized to access this link",
+					});
+				}
+
+				// Find verification record
+				const verification = await db.query.shareEmailVerification.findFirst({
 				where: (v, { and, eq, gt, isNull }) =>
 					and(
 						eq(v.shareLinkId, link.id),
@@ -935,6 +1093,20 @@ export const shareRouter = router({
 				});
 			}
 
+			if (!(await hasShareLinksEntitlement(link.createdById))) {
+				await logAccess(link.id, {
+					ipAddress: input.ipAddress,
+					userAgent: input.userAgent,
+					success: false,
+					failureReason: "Share links disabled for creator plan",
+				});
+
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "This share link is no longer valid",
+				});
+			}
+
 			// Check if link is valid
 			const now = new Date();
 			if (link.status !== "active") {
@@ -1037,50 +1209,89 @@ export const shareRouter = router({
 
 // Helper functions
 
-async function checkAndIncrementRateLimit(userId: string): Promise<void> {
-	const now = new Date();
-	const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+interface ShareLinksAccess {
+	enabled: boolean;
+	maxActiveLinks: number | null;
+	teamId: string | null;
+}
 
-	const rateLimit = await db.query.shareLinkRateLimit.findFirst({
-		where: (rl, { eq }) => eq(rl.userId, userId),
+async function resolveShareLinksAccess(userId: string): Promise<ShareLinksAccess> {
+	const mode = getBitteryMode();
+	const actor = await db.query.user.findFirst({
+		where: (u, { eq: eqFn }) => eqFn(u.id, userId),
+		with: {
+			team: true,
+		},
 	});
 
-	if (!rateLimit) {
-		// Create rate limit record
-		await db.insert(shareLinkRateLimit).values({
-			id: nanoid(),
-			userId,
-			linksCreatedToday: 0,
-			lastResetAt: todayStart,
-		});
+	// In cloud mode, fail closed for orphaned users with no team linkage.
+	if (!actor?.team) {
+		return {
+			enabled: mode === "self-hosted",
+			maxActiveLinks: mode === "self-hosted" ? null : 0,
+			teamId: null,
+		};
 	}
 
-	const result = await db
-		.update(shareLinkRateLimit)
-		.set({
-			linksCreatedToday: sql`CASE
-				WHEN ${shareLinkRateLimit.lastResetAt} < ${todayStart}
-				THEN 1
-				ELSE ${shareLinkRateLimit.linksCreatedToday} + 1
-			END`,
-			lastResetAt: sql`CASE
-				WHEN ${shareLinkRateLimit.lastResetAt} < ${todayStart}
-				THEN ${todayStart}
-				ELSE ${shareLinkRateLimit.lastResetAt}
-			END`,
-		})
-		.where(
-			and(
-				eq(shareLinkRateLimit.userId, userId),
-				or(
-					sql`${shareLinkRateLimit.lastResetAt} < ${todayStart}`,
-					sql`${shareLinkRateLimit.linksCreatedToday} < ${shareLinkRateLimit.dailyLimit}`,
-				),
-			),
-		)
-		.returning({ id: shareLinkRateLimit.id });
+	const entitlementInput = {
+		mode,
+		billingPlan: actor.team.billingPlan,
+		billingStatus: actor.team.billingStatus,
+	} as const;
+	const entitlements = resolveEffectiveEntitlements(entitlementInput);
+	const limits = resolveEffectiveEntitlementLimits(
+		entitlementInput,
+		entitlements,
+	);
 
-	if (result.length === 0) {
+	return {
+		enabled: entitlements.share_links,
+		maxActiveLinks: limits.share_links,
+		teamId: actor.team.id,
+	};
+}
+
+async function assertShareLinksEntitlement(
+	userId: string,
+): Promise<ShareLinksAccess> {
+	const access = await resolveShareLinksAccess(userId);
+	if (!access.enabled) {
+		throw new TRPCError({
+			code: "FORBIDDEN",
+			message: SHARE_LINKS_UNAVAILABLE_MESSAGE,
+		});
+	}
+	return access;
+}
+
+async function hasShareLinksEntitlement(userId: string): Promise<boolean> {
+	const access = await resolveShareLinksAccess(userId);
+	return access.enabled;
+}
+
+function getShareLinkDailyLimit(): number {
+	const raw = process.env.SHARE_LINK_DAILY_LIMIT;
+	if (!raw) {
+		return DEFAULT_SHARE_LINK_DAILY_LIMIT;
+	}
+
+	const parsed = Number.parseInt(raw, 10);
+	return Number.isFinite(parsed) && parsed > 0
+		? parsed
+		: DEFAULT_SHARE_LINK_DAILY_LIMIT;
+}
+
+async function checkAndIncrementRateLimit(userId: string): Promise<void> {
+	const now = new Date();
+	const result = await incrementRateLimitWindow({
+		namespace: RATE_LIMIT_NAMESPACE.shareCreateDaily,
+		key: userId,
+		subject: userId,
+		now,
+		windowStart: startOfLocalDay(now),
+		limit: getShareLinkDailyLimit(),
+	});
+	if (!result.allowed) {
 		throw new TRPCError({
 			code: "TOO_MANY_REQUESTS",
 			message: "Daily share link limit reached",

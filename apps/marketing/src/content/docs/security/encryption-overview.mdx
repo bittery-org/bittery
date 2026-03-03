@@ -1,0 +1,66 @@
+---
+title: Encryption Overview
+description: A technical overview of the cryptographic primitives and protocols Bittery uses.
+category: security
+order: 2
+---
+
+# Encryption Overview
+
+Bittery uses industry-standard cryptographic primitives, composed carefully to provide defense-in-depth. Here's what's under the hood.
+
+## Cryptographic primitives
+
+| Primitive | Algorithm | Usage |
+|-----------|-----------|-------|
+| **Symmetric encryption** | AES-256-GCM | Vault items, vault keys, private keys |
+| **Key derivation** | PBKDF2-SHA256 (310k iter) | Derive keys from master password |
+| **Key expansion** | HKDF-SHA256 | Split derived key into auth + unlock keys |
+| **Asymmetric encryption** | RSA-4096 OAEP | Vault sharing between users |
+| **Authentication** | SRP-6a | Password-authenticated key exchange |
+
+## AES-256-GCM
+
+All sensitive data is encrypted using **AES-256-GCM** (Galois/Counter Mode). GCM provides both confidentiality and authenticity — if ciphertext is tampered with, decryption will fail.
+
+Key properties:
+- **256-bit keys** — considered secure against quantum computers with Grover's algorithm (still 128-bit security)
+- **Random 96-bit IV** per encryption — generated using a cryptographically secure random number generator
+- **Authentication tag** — ensures data integrity
+
+## SRP-6a Authentication
+
+Rather than sending your password to the server (even hashed), Bittery uses the **Secure Remote Password (SRP-6a)** protocol:
+
+1. During sign-up, a **verifier** is computed from your auth key and stored server-side
+2. During login, a zero-knowledge proof exchange occurs — the server confirms you know the password without ever seeing it
+3. A shared session key is derived, used to establish the authenticated session
+
+<Callout type="tip">
+SRP-6a is resistant to man-in-the-middle attacks and server compromise. Even if an attacker captures the verifier, they cannot derive your password from it.
+</Callout>
+
+## RSA-4096 for Sharing
+
+When you share a vault with another user:
+
+1. The vault key is encrypted with the **recipient's RSA-4096 public key**
+2. Only the recipient's corresponding **private key** (which is encrypted with their own Master Unlock Key) can decrypt it
+3. The sharing user never has access to the recipient's private key
+
+This means vault sharing works without exposing any party's master password or encryption keys.
+
+## Implementation
+
+All cryptographic operations are implemented in **Rust** and compiled to platform-specific bindings:
+
+- **Web & Extension**: WebAssembly (WASM)
+- **Desktop**: Tauri commands (native Rust)
+- **Server**: NAPI bindings for Bun
+- **Mobile**: Expo native module
+
+This ensures consistent, auditable cryptography across all platforms with no JavaScript crypto dependencies.
+
+## Open source
+
+The entire crypto implementation is open source and available for audit at [github.com/bittery-org/bittery](https://github.com/bittery-org/bittery). We believe transparency is fundamental to trust in a security product.
