@@ -462,6 +462,151 @@ export async function syncTeamSeatQuantity(teamId: string) {
 	return { synced: true as const, quantity };
 }
 
+export interface TeamSeatInvoicePreviewLine {
+	id: string;
+	description: string;
+	amountCents: number;
+	currency: string;
+	periodStart: Date;
+	periodEnd: Date;
+	quantity: number | null;
+	unitAmountCents: number | null;
+	isProration: boolean;
+}
+
+export interface TeamSeatInvoicePreview {
+	currency: string;
+	currentQuantity: number;
+	nextQuantity: number;
+	estimatedNextPaymentCents: number;
+	totalLineItemsCents: number;
+	lines: TeamSeatInvoicePreviewLine[];
+}
+
+function isProrationLine(line: Stripe.InvoiceLineItem): boolean {
+	return (
+		line.parent?.subscription_item_details?.proration === true ||
+		line.parent?.invoice_item_details?.proration === true
+	);
+}
+
+function getLineUnitAmountCents(line: Stripe.InvoiceLineItem): number | null {
+	const amountDecimal = line.pricing?.unit_amount_decimal;
+	if (typeof amountDecimal === "string") {
+		const parsed = Number(amountDecimal);
+		if (Number.isFinite(parsed)) {
+			return Math.round(parsed);
+		}
+	}
+
+	if (typeof line.quantity === "number" && line.quantity > 0) {
+		return Math.round(line.amount / line.quantity);
+	}
+
+	return null;
+}
+
+export async function previewUpcomingTeamSeatInvoice(input: {
+	teamId: string;
+	seatIncrement?: number;
+}): Promise<TeamSeatInvoicePreview | null> {
+	const teamData = await db.query.team.findFirst({
+		where: (t, { eq: eqFn }) => eqFn(t.id, input.teamId),
+	});
+
+	if (
+		!teamData ||
+		teamData.billingPlan !== "team" ||
+		!teamData.stripeCustomerId ||
+		!teamData.stripeSubscriptionId
+	) {
+		return null;
+	}
+
+	const stripe = getStripeClient();
+	const subscription = await stripe.subscriptions.retrieve(
+		teamData.stripeSubscriptionId,
+		{
+			expand: ["items.data.price"],
+		},
+	);
+
+	const subscriptionItem =
+		subscription.items.data.find(
+			(item) => item.id === teamData.stripeSubscriptionItemId,
+		) || subscription.items.data[0];
+	if (!subscriptionItem) {
+		return null;
+	}
+
+	const currentQuantity = Math.max(
+		1,
+		subscriptionItem.quantity ?? teamData.seatsPurchased ?? 1,
+	);
+	const seatIncrement = Math.max(1, input.seatIncrement ?? 1);
+	const nextQuantity = currentQuantity + seatIncrement;
+
+	const upcomingInvoice = await stripe.invoices.createPreview({
+		customer: teamData.stripeCustomerId,
+		subscription: teamData.stripeSubscriptionId,
+		subscription_details: {
+			items: [
+				{
+					id: subscriptionItem.id,
+					quantity: nextQuantity,
+				},
+			],
+		},
+	});
+
+	const fallbackCurrency = upcomingInvoice.currency || subscription.currency || "eur";
+
+	const nonZeroLines = upcomingInvoice.lines.data.filter((line) => line.amount !== 0);
+	const subscriptionScopedLines = nonZeroLines.filter((line) => {
+		const subscriptionItemId =
+			line.parent?.subscription_item_details?.subscription_item;
+		const subscriptionId = line.parent?.invoice_item_details?.subscription;
+		return (
+			subscriptionItemId === subscriptionItem.id ||
+			subscriptionId === teamData.stripeSubscriptionId
+		);
+	});
+	const linesSource =
+		subscriptionScopedLines.length > 0 ? subscriptionScopedLines : nonZeroLines;
+
+	const lines = linesSource
+		.filter((line) => line.amount !== 0)
+		.map((line) => ({
+			id: line.id,
+			description: line.description || "Team",
+			amountCents: line.amount,
+			currency: line.currency || fallbackCurrency,
+			periodStart: new Date(line.period.start * 1000),
+			periodEnd: new Date(line.period.end * 1000),
+			quantity: typeof line.quantity === "number" ? line.quantity : null,
+			unitAmountCents: getLineUnitAmountCents(line),
+			isProration: isProrationLine(line),
+		}))
+		.sort((a, b) => a.periodStart.getTime() - b.periodStart.getTime());
+
+	const totalLineItemsCents = lines.reduce((sum, line) => sum + line.amountCents, 0);
+	const estimatedNextPaymentCents =
+		typeof upcomingInvoice.amount_due === "number"
+			? upcomingInvoice.amount_due
+			: typeof upcomingInvoice.total === "number"
+				? upcomingInvoice.total
+				: totalLineItemsCents;
+
+	return {
+		currency: fallbackCurrency,
+		currentQuantity,
+		nextQuantity,
+		estimatedNextPaymentCents,
+		totalLineItemsCents,
+		lines,
+	};
+}
+
 export async function parseStripeWebhookEvent(
 	rawBody: string,
 	signatureHeader: string | null,

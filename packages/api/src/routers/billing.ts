@@ -13,6 +13,7 @@ import {
 	createStripeCheckoutSession,
 	ensureTeamStripeCustomer,
 	isStripeApiConfigured,
+	previewUpcomingTeamSeatInvoice,
 	syncTeamSeatQuantity,
 } from "../billing/stripe";
 import { getStripePriceId, getWebAppUrl } from "../config/billing";
@@ -283,4 +284,21 @@ export const billingRouter = router({
 			const result = await syncTeamSeatQuantity(targetTeamId);
 			return result;
 		}),
+
+	previewAdditionalTeamSeat: protectedProcedure.query(async ({ ctx }) => {
+		assertCloudBillingEnabled();
+
+		const actor = await getBillingActor(ctx.session.userId);
+		ensureBillingAdmin(actor.role);
+
+		try {
+			return await previewUpcomingTeamSeatInvoice({
+				teamId: actor.team.id,
+				seatIncrement: 1,
+			});
+		} catch (error) {
+			console.error("Failed to preview upcoming team seat invoice:", error);
+			return null;
+		}
+	}),
 });
