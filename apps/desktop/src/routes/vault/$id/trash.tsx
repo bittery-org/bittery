@@ -20,6 +20,7 @@ import {
 } from "@bittery/ui/icons";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { formatDate } from "../../../lib/i18n-format";
 import { Favicon } from "../../../components/vault/favicon";
 
 export const Route = createFileRoute("/vault/$id/trash")({
@@ -79,14 +80,13 @@ function TrashComponent() {
 		}
 	};
 
-	const formatDate = (dateString: string | null) => {
+	const formatDeletedDate = (dateString: string | null) => {
 		if (!dateString) return "";
-		const date = new Date(dateString);
-		return new Intl.DateTimeFormat("en-US", {
+		return formatDate(dateString, {
 			month: "short",
 			day: "numeric",
 			year: "numeric",
-		}).format(date);
+		});
 	};
 
 	return (
@@ -147,7 +147,7 @@ function TrashComponent() {
 											</div>
 										)}
 										<div className="mt-1 text-muted-foreground text-xs">
-											Deleted {formatDate(item.deletedAt)}
+											Deleted {formatDeletedDate(item.deletedAt)}
 										</div>
 									</div>
 								</div>

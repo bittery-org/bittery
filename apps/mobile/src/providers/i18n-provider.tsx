@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
 	type AppLocale,
 	type LocaleRuntimeAdapter,
@@ -13,6 +14,23 @@ import {
 	overwriteSetLocale,
 	setLocale as setRuntimeLocale,
 } from "@/paraglide/runtime";
+
+function detectDeviceLocale(): string | undefined {
+	try {
+		const locale = Intl.DateTimeFormat().resolvedOptions().locale;
+		if (locale) {
+			return locale;
+		}
+	} catch {
+		// Ignore Intl lookup failures and fall back to navigator below.
+	}
+
+	if (typeof navigator !== "undefined") {
+		return navigator.language;
+	}
+
+	return undefined;
+}
 
 let currentLocale: AppLocale = defaultLocale;
 
@@ -35,29 +53,16 @@ const runtimeAdapter: LocaleRuntimeAdapter = {
 	setLocale: (locale, options) => setRuntimeLocale(locale, options),
 };
 
-const storageAdapter: LocaleStorageAdapter | undefined =
-	typeof window === "undefined"
-		? undefined
-		: {
-				getItem: (key) => window.localStorage.getItem(key),
-				setItem: (key, value) => {
-					window.localStorage.setItem(key, value);
-				},
-			};
+const storageAdapter: LocaleStorageAdapter = {
+	getItem: (key) => AsyncStorage.getItem(key),
+	setItem: (key, value) => AsyncStorage.setItem(key, value),
+};
 
 const { I18nProvider, useI18n } = createI18nReact({
 	messages: m,
 	runtime: runtimeAdapter,
 	storage: storageAdapter,
-	detectLocale: () =>
-		typeof window === "undefined" ? undefined : window.navigator.language,
-	sideEffects: {
-		applyLocale: (locale) => {
-			if (typeof document !== "undefined") {
-				document.documentElement.lang = locale;
-			}
-		},
-	},
+	detectLocale: detectDeviceLocale,
 });
 
 export { I18nProvider, useI18n };

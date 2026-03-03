@@ -20,6 +20,7 @@ import {
 } from "@bittery/ui";
 import { IconCopyOutlineDuo18 } from "@bittery/ui/icons";
 import { useMemo, useState } from "react";
+import { formatDateTime } from "../../lib/i18n-format";
 
 interface PasswordHistoryDialogProps {
 	open: boolean;
@@ -36,7 +37,7 @@ function formatChangedAt(changedAt: string): string {
 		return changedAt;
 	}
 
-	return new Date(timestamp).toLocaleString();
+	return formatDateTime(timestamp);
 }
 
 function maskPassword(password: string): string {

@@ -35,6 +35,7 @@ import {
 	handleCopy,
 	type LoginDisplayData,
 } from "./shared";
+import { formatDate, formatDateTime } from "../../../lib/i18n-format";
 
 function formatPasskeyLastUsed(value?: string): string {
 	if (!value) {
@@ -53,7 +54,7 @@ function formatPasskeyLastUsed(value?: string): string {
 	if (deltaDays === 1) return "yesterday";
 	if (deltaDays < 30) return `${deltaDays}d ago`;
 
-	return new Date(timestamp).toLocaleDateString();
+	return formatDate(timestamp);
 }
 
 function formatStatusDate(value?: string): string {
@@ -66,7 +67,7 @@ function formatStatusDate(value?: string): string {
 		return "recently";
 	}
 
-	return new Date(timestamp).toLocaleString();
+	return formatDateTime(timestamp);
 }
 
 export function LoginDetail({

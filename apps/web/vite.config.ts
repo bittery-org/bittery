@@ -10,8 +10,7 @@ export default defineConfig({
 		paraglideVitePlugin({
 			project: "../../packages/i18n/project.inlang",
 			outdir: "./src/paraglide",
-			strategy: ["localStorage", "preferredLanguage", "baseLocale"],
-			localStorageKey: "bittery.locale",
+			strategy: ["baseLocale"],
 		}),
 		tsconfigPaths(),
 		tailwindcss(),

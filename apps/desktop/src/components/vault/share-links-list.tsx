@@ -38,6 +38,7 @@ import {
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { formatDateTime } from "../../lib/i18n-format";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface ShareLinksListProps {
@@ -114,7 +115,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 	};
 
 	const formatDate = (date: string) => {
-		return new Date(date).toLocaleDateString(undefined, {
+		return formatDateTime(date, {
 			month: "short",
 			day: "numeric",
 			year: "numeric",

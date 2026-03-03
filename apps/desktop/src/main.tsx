@@ -9,6 +9,7 @@ import { queryClient, trpc, trpcClient } from "./lib/providers";
 import { initializeStorage } from "./lib/storage";
 import { DesktopPlatformProvider } from "./providers/platform-provider";
 import { DesktopSyncProvider } from "./providers/sync-provider";
+import { I18nProvider } from "./providers/i18n-provider";
 // Import the generated route tree
 import { routeTree } from "./routeTree.gen";
 
@@ -33,18 +34,20 @@ async function initializeApp() {
 
 	ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 		<React.StrictMode>
-			<QueryClientProvider client={queryClient}>
-				{/* @ts-ignore */}
-				<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-					<AccountProvider router={router}>
-						<DesktopSyncProvider queryClient={queryClient}>
-							<DesktopPlatformProvider>
-								<RouterProvider router={router} />
-							</DesktopPlatformProvider>
-						</DesktopSyncProvider>
-					</AccountProvider>
-				</TRPCProvider>
-			</QueryClientProvider>
+			<I18nProvider>
+				<QueryClientProvider client={queryClient}>
+					{/* @ts-ignore */}
+					<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+						<AccountProvider router={router}>
+							<DesktopSyncProvider queryClient={queryClient}>
+								<DesktopPlatformProvider>
+									<RouterProvider router={router} />
+								</DesktopPlatformProvider>
+							</DesktopSyncProvider>
+						</AccountProvider>
+					</TRPCProvider>
+				</QueryClientProvider>
+			</I18nProvider>
 		</React.StrictMode>,
 	);
 }

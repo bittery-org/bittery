@@ -21,6 +21,7 @@ import {
 	useBiometricAuth,
 } from "../src/contexts/biometric-auth-context";
 import { TRPCProvider } from "../src/lib/trpc";
+import { I18nProvider } from "../src/providers/i18n-provider";
 import { MobilePlatformProvider } from "../src/providers/platform-provider";
 import { storage } from "../src/services/storage";
 import { loadThemePreference } from "../src/services/theme-storage";
@@ -103,13 +104,15 @@ export default function RootLayout() {
 			<HeroUINativeProvider>
 				<SafeAreaProvider>
 					<TRPCProvider>
-						<MobilePlatformProvider>
-							<AccountProvider>
-								<BiometricAuthProvider>
-									<AppContent />
-								</BiometricAuthProvider>
-							</AccountProvider>
-						</MobilePlatformProvider>
+						<I18nProvider>
+							<MobilePlatformProvider>
+								<AccountProvider>
+									<BiometricAuthProvider>
+										<AppContent />
+									</BiometricAuthProvider>
+								</AccountProvider>
+							</MobilePlatformProvider>
+						</I18nProvider>
 					</TRPCProvider>
 				</SafeAreaProvider>
 			</HeroUINativeProvider>

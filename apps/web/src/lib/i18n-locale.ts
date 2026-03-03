@@ -1,25 +1,9 @@
 import {
 	type AppLocale,
-	defaultLocale,
-	isAppLocale,
+	persistLocaleSelection as persistLocaleSelectionCore,
 	localeStorageKey,
 } from "@bittery/i18n";
-
-export function resolveBrowserLocale(
-	browserLocale: string | null | undefined,
-): AppLocale {
-	return browserLocale?.toLowerCase().startsWith("de") ? "de" : defaultLocale;
-}
-
-export function resolveLocale(input: {
-	storedLocale: string | null | undefined;
-	browserLocale: string | null | undefined;
-}): AppLocale {
-	if (isAppLocale(input.storedLocale)) {
-		return input.storedLocale;
-	}
-	return resolveBrowserLocale(input.browserLocale);
-}
+export { resolveBrowserLocale, resolveLocale } from "@bittery/i18n";
 
 export async function persistLocaleSelection(input: {
 	locale: AppLocale;
@@ -36,6 +20,19 @@ export async function persistLocaleSelection(input: {
 		storage,
 		storageKey = localeStorageKey,
 	} = input;
-	storage?.setItem(storageKey, locale);
-	await setRuntimeLocale(locale, { reload: false });
+
+	await persistLocaleSelectionCore({
+		locale,
+		runtime: {
+			getLocale: () => locale,
+			setLocale: setRuntimeLocale,
+		},
+		storage: storage
+			? {
+					getItem: () => null,
+					setItem: storage.setItem.bind(storage),
+				}
+			: undefined,
+		storageKey,
+	});
 }
