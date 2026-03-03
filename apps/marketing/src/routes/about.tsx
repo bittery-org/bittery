@@ -1,3 +1,4 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	ArrowRight,
 	Building2,
@@ -14,11 +15,10 @@ import {
 	Users,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { Button } from "@/components/ui/button";
 import { Layout } from "@/components/layout";
-import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { signupUrl } from "@/lib/urls";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/about")({
 	component: AboutPage,
@@ -132,8 +132,8 @@ function AboutPage() {
 							</h1>
 							<p className="mt-4 max-w-lg text-base text-muted-foreground leading-relaxed sm:text-lg">
 								Bittery is a password manager that keeps your data completely
-								private — even from us. Simple to use, available everywhere,
-								and made in Germany by{" "}
+								private — even from us. Simple to use, available everywhere, and
+								made in Germany by{" "}
 								<a
 									href="https://qrawall.com/"
 									target="_blank"
@@ -147,11 +147,7 @@ function AboutPage() {
 							</p>
 
 							<div className="mt-8 flex flex-wrap items-center gap-3">
-								<Button
-									size="lg"
-									className="gap-2 rounded-full px-7"
-									asChild
-								>
+								<Button size="lg" className="gap-2 rounded-full px-7" asChild>
 									<a
 										href="https://github.com/bittery-org/bittery"
 										target="_blank"
@@ -182,18 +178,18 @@ function AboutPage() {
 							<div className="absolute -inset-4 rounded-3xl bg-linear-to-br from-primary/6 via-transparent to-primary/4 blur-2xl" />
 							<div className="relative overflow-hidden rounded-2xl border border-border/60 shadow-black/5 shadow-xl dark:shadow-black/20">
 								<img
-										src="https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=1200&q=80"
-										alt="Team collaborating around a laptop"
-										className="aspect-4/3 w-full object-cover"
-										loading="eager"
-									/>
-									<div className="absolute inset-0 bg-linear-to-t from-background/90 via-background/30 to-transparent" />
-									<div className="absolute inset-x-0 bottom-0 p-5">
-										<p className="font-display font-semibold text-foreground text-sm drop-shadow-sm">
-											Small team, big mission
-										</p>
-										<p className="mt-0.5 text-muted-foreground text-xs drop-shadow-sm">
-											Building the password manager we always wished existed
+									src="https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=1200&q=80"
+									alt="Team collaborating around a laptop"
+									className="aspect-4/3 w-full object-cover"
+									loading="eager"
+								/>
+								<div className="absolute inset-0 bg-linear-to-t from-background/90 via-background/30 to-transparent" />
+								<div className="absolute inset-x-0 bottom-0 p-5">
+									<p className="font-display font-semibold text-foreground text-sm drop-shadow-sm">
+										Small team, big mission
+									</p>
+									<p className="mt-0.5 text-muted-foreground text-xs drop-shadow-sm">
+										Building the password manager we always wished existed
 									</p>
 								</div>
 							</div>
@@ -242,14 +238,14 @@ function AboutPage() {
 								</p>
 								<p className="mt-3 text-muted-foreground text-sm leading-relaxed sm:text-base">
 									With Bittery, your passwords are scrambled on your device
-									before they ever leave it. That means we can't see them.
-									We can't access them. Not even if we wanted to. That's not
-									a feature — it's a promise.
+									before they ever leave it. That means we can't see them. We
+									can't access them. Not even if we wanted to. That's not a
+									feature — it's a promise.
 								</p>
 								<p className="mt-3 text-muted-foreground text-sm leading-relaxed sm:text-base">
-									And because Bittery is open source, anyone can look at how
-									it works. No secrets. No hidden tricks. Just honest software
-									you can verify yourself.
+									And because Bittery is open source, anyone can look at how it
+									works. No secrets. No hidden tricks. Just honest software you
+									can verify yourself.
 								</p>
 							</div>
 						</div>
@@ -271,8 +267,8 @@ function AboutPage() {
 							Our story
 						</h2>
 						<p className="mx-auto mt-4 max-w-xl text-base text-muted-foreground sm:text-lg">
-							How a simple frustration turned into something people use
-							every day.
+							How a simple frustration turned into something people use every
+							day.
 						</p>
 					</motion.div>
 
@@ -301,7 +297,7 @@ function AboutPage() {
 									{i % 2 === 0 ? (
 										<>
 											<div className="pl-12 sm:pr-8 sm:pl-0">
-											<h3 className="font-display font-semibold text-base text-foreground sm:text-lg">
+												<h3 className="font-display font-semibold text-base text-foreground sm:text-lg">
 													{item.title}
 												</h3>
 												<p className="mt-2 text-muted-foreground text-sm leading-relaxed">
@@ -314,7 +310,7 @@ function AboutPage() {
 										<>
 											<div className="hidden sm:block" />
 											<div className="pl-12 sm:pl-8 sm:text-left">
-											<h3 className="font-display font-semibold text-base text-foreground sm:text-lg">
+												<h3 className="font-display font-semibold text-base text-foreground sm:text-lg">
 													{item.title}
 												</h3>
 												<p className="mt-2 text-muted-foreground text-sm leading-relaxed">
@@ -434,9 +430,9 @@ function AboutPage() {
 										qrawall GmbH
 									</a>
 									, a software company based in Germany. We're focused on
-									building tools that respect user privacy and follow
-									security best practices — operating under EU data
-									protection regulations, including GDPR.
+									building tools that respect user privacy and follow security
+									best practices — operating under EU data protection
+									regulations, including GDPR.
 								</p>
 								<a
 									href="https://qrawall.com/"
@@ -466,9 +462,8 @@ function AboutPage() {
 									EU jurisdiction
 								</h3>
 								<p className="text-muted-foreground text-sm leading-relaxed">
-									Operating under GDPR — one of the strictest privacy
-									frameworks in the world. Your data enjoys European-level
-									protection.
+									Operating under GDPR — one of the strictest privacy frameworks
+									in the world. Your data enjoys European-level protection.
 								</p>
 							</motion.div>
 
@@ -511,17 +506,13 @@ function AboutPage() {
 							<h2 className="font-display text-2xl tracking-tight sm:text-3xl lg:text-4xl">
 								Ready to take back your privacy?
 							</h2>
-						<p className="mx-auto mt-4 max-w-md text-base text-muted-foreground sm:text-lg">
-							Join the people who decided their passwords deserve better.
-							Free to start, no credit card needed.
+							<p className="mx-auto mt-4 max-w-md text-base text-muted-foreground sm:text-lg">
+								Join the people who decided their passwords deserve better. Free
+								to start, no credit card needed.
 							</p>
 							<div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-								<Button
-									size="lg"
-									className="gap-2 rounded-full px-7"
-									asChild
-								>
-								<a href={signupUrl()}>
+								<Button size="lg" className="gap-2 rounded-full px-7" asChild>
+									<a href={signupUrl()}>
 										Get started free
 										<ArrowRight className="size-4" />
 									</a>

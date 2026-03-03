@@ -89,12 +89,12 @@ function UserNav() {
 									{initials}
 								</AvatarFallback>
 							</Avatar>
-								<div className="grid flex-1 text-left text-sm leading-tight">
-									<span className="truncate font-medium">
-										{user?.name || m["nav.user.default_name"]()}
-									</span>
-									<span className="truncate text-muted-foreground text-xs">
-										{user?.email || ""}
+							<div className="grid flex-1 text-left text-sm leading-tight">
+								<span className="truncate font-medium">
+									{user?.name || m["nav.user.default_name"]()}
+								</span>
+								<span className="truncate text-muted-foreground text-xs">
+									{user?.email || ""}
 								</span>
 							</div>
 							<ChevronsUpDown className="ml-auto size-4" />
@@ -106,22 +106,22 @@ function UserNav() {
 						align="end"
 						sideOffset={4}
 					>
-							<DropdownMenuItem asChild>
-								<Link to="/settings" className="cursor-pointer">
-									<Settings className="mr-2 h-4 w-4" />
-									{m["nav.menu.settings"]()}
-								</Link>
-							</DropdownMenuItem>
+						<DropdownMenuItem asChild>
+							<Link to="/settings" className="cursor-pointer">
+								<Settings className="mr-2 h-4 w-4" />
+								{m["nav.menu.settings"]()}
+							</Link>
+						</DropdownMenuItem>
 						<DropdownMenuSeparator />
 						<DropdownMenuItem
 							onClick={handleLogout}
 							className="cursor-pointer text-destructive"
-							>
-								<LogOut className="mr-2 h-4 w-4" />
-								{m["nav.menu.log_out"]()}
-							</DropdownMenuItem>
-						</DropdownMenuContent>
-					</DropdownMenu>
+						>
+							<LogOut className="mr-2 h-4 w-4" />
+							{m["nav.menu.log_out"]()}
+						</DropdownMenuItem>
+					</DropdownMenuContent>
+				</DropdownMenu>
 			</SidebarMenuItem>
 		</SidebarMenu>
 	);

@@ -1,3 +1,4 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	BookOpen,
 	CreditCard,
@@ -6,16 +7,9 @@ import {
 	UserCog,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import {
-	DocsSidebar,
-	MobileDocsDrawer,
-} from "@/components/docs/docs-sidebar";
+import { DocsSidebar, MobileDocsDrawer } from "@/components/docs/docs-sidebar";
 import { Layout } from "@/components/layout";
-import {
-	getAllArticles,
-	getCategories,
-} from "@/lib/docs";
+import { getAllArticles, getCategories } from "@/lib/docs";
 
 export const Route = createFileRoute("/docs/")({
 	component: DocsIndex,
@@ -74,47 +68,45 @@ function DocsIndex() {
 
 							{/* Categories */}
 							<motion.div
-									className="mt-14 grid gap-4 sm:grid-cols-2"
-									initial={{ opacity: 0, y: 16 }}
-									animate={{ opacity: 1, y: 0 }}
-									transition={{
-										duration: 0.5,
-										delay: 0.2,
-										ease: "easeOut",
-									}}
-								>
-									{categories.map((cat) => {
-										const Icon = iconMap[cat.icon] ?? BookOpen;
-										return (
-											<Link
-												key={cat.slug}
-												to="/docs/$"
-												params={{ _splat: cat.slug }}
-												className="group rounded-xl border border-border/60 bg-card/50 p-5 transition-all hover:border-primary/20 hover:bg-card/80 hover:shadow-md"
-											>
-												<div className="flex items-start gap-4">
-													<div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/8 text-primary transition-colors group-hover:bg-primary/12">
-														<Icon className="size-5" />
-													</div>
-													<div className="min-w-0">
-														<h3 className="font-semibold text-foreground text-sm">
-															{cat.title}
-														</h3>
-														<p className="mt-1 text-muted-foreground text-xs leading-relaxed">
-															{cat.description}
-														</p>
-														<span className="mt-2 inline-block text-muted-foreground/60 text-xs">
-															{cat.articleCount}{" "}
-															{cat.articleCount === 1
-																? "article"
-																: "articles"}
-														</span>
-													</div>
+								className="mt-14 grid gap-4 sm:grid-cols-2"
+								initial={{ opacity: 0, y: 16 }}
+								animate={{ opacity: 1, y: 0 }}
+								transition={{
+									duration: 0.5,
+									delay: 0.2,
+									ease: "easeOut",
+								}}
+							>
+								{categories.map((cat) => {
+									const Icon = iconMap[cat.icon] ?? BookOpen;
+									return (
+										<Link
+											key={cat.slug}
+											to="/docs/$"
+											params={{ _splat: cat.slug }}
+											className="group rounded-xl border border-border/60 bg-card/50 p-5 transition-all hover:border-primary/20 hover:bg-card/80 hover:shadow-md"
+										>
+											<div className="flex items-start gap-4">
+												<div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/8 text-primary transition-colors group-hover:bg-primary/12">
+													<Icon className="size-5" />
 												</div>
-											</Link>
-										);
-									})}
-								</motion.div>
+												<div className="min-w-0">
+													<h3 className="font-semibold text-foreground text-sm">
+														{cat.title}
+													</h3>
+													<p className="mt-1 text-muted-foreground text-xs leading-relaxed">
+														{cat.description}
+													</p>
+													<span className="mt-2 inline-block text-muted-foreground/60 text-xs">
+														{cat.articleCount}{" "}
+														{cat.articleCount === 1 ? "article" : "articles"}
+													</span>
+												</div>
+											</div>
+										</Link>
+									);
+								})}
+							</motion.div>
 
 							{/* Popular articles */}
 							<motion.div
@@ -161,5 +153,3 @@ function DocsIndex() {
 		</Layout>
 	);
 }
-
-

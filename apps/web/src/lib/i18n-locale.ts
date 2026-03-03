@@ -1,8 +1,8 @@
 import {
+	type AppLocale,
 	defaultLocale,
 	isAppLocale,
 	localeStorageKey,
-	type AppLocale,
 } from "@bittery/i18n";
 
 export function resolveBrowserLocale(
@@ -30,8 +30,12 @@ export async function persistLocaleSelection(input: {
 	storage?: Pick<Storage, "setItem">;
 	storageKey?: string;
 }): Promise<void> {
-	const { locale, setRuntimeLocale, storage, storageKey = localeStorageKey } =
-		input;
+	const {
+		locale,
+		setRuntimeLocale,
+		storage,
+		storageKey = localeStorageKey,
+	} = input;
 	storage?.setItem(storageKey, locale);
 	await setRuntimeLocale(locale, { reload: false });
 }

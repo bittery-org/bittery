@@ -84,7 +84,9 @@ export function TagFilter({
 				<PopoverContent className="w-64 p-0" align="start">
 					<Command>
 						<CommandInput
-							placeholder={m["vaults.detail.items.tag_filter.search.placeholder"]()}
+							placeholder={m[
+								"vaults.detail.items.tag_filter.search.placeholder"
+							]()}
 							value={searchValue}
 							onValueChange={setSearchValue}
 						/>

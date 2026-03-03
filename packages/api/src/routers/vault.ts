@@ -225,11 +225,11 @@ export const vaultRouter = router({
 				imageKey: z.string().min(1).optional(),
 				clientId: z.string().optional(), // For sync event correlation
 			}),
-			)
-			.mutation(async ({ input, ctx }) => {
-				const vaultId = nanoid();
-				let teamId: string | null = null;
-				let sharedVaultLimit: number | null = null;
+		)
+		.mutation(async ({ input, ctx }) => {
+			const vaultId = nanoid();
+			let teamId: string | null = null;
+			let sharedVaultLimit: number | null = null;
 
 			if (input.type === "team") {
 				const currentUser = await db.query.user.findFirst({
@@ -259,40 +259,40 @@ export const vaultRouter = router({
 					});
 				}
 
-					const limits = resolveEffectiveEntitlementLimits(
-						{
-							mode: getBitteryMode(),
-							billingPlan: currentUser.team.billingPlan,
-							billingStatus: currentUser.team.billingStatus,
-						},
-						entitlements,
-					);
-					sharedVaultLimit = limits.shared_vaults;
+				const limits = resolveEffectiveEntitlementLimits(
+					{
+						mode: getBitteryMode(),
+						billingPlan: currentUser.team.billingPlan,
+						billingStatus: currentUser.team.billingStatus,
+					},
+					entitlements,
+				);
+				sharedVaultLimit = limits.shared_vaults;
 
-					teamId = currentTeamId;
+				teamId = currentTeamId;
+			}
+
+			let broadcast: SyncBroadcastPayload;
+			await db.transaction(async (tx) => {
+				if (input.type === "team" && teamId && sharedVaultLimit !== null) {
+					await tx.execute(
+						sql`SELECT pg_advisory_xact_lock(hashtext(${`shared-vaults:${teamId}`}))`,
+					);
+					const sharedVaultCount = await tx
+						.select({ count: sql<number>`count(*)::int` })
+						.from(vault)
+						.where(and(eq(vault.teamId, teamId), eq(vault.type, "team")));
+
+					if ((sharedVaultCount[0]?.count ?? 0) >= sharedVaultLimit) {
+						throw new TRPCError({
+							code: "FORBIDDEN",
+							message: `Your current plan allows up to ${sharedVaultLimit} shared vaults. Upgrade to add more.`,
+						});
+					}
 				}
 
-				let broadcast: SyncBroadcastPayload;
-				await db.transaction(async (tx) => {
-					if (input.type === "team" && teamId && sharedVaultLimit !== null) {
-						await tx.execute(
-							sql`SELECT pg_advisory_xact_lock(hashtext(${`shared-vaults:${teamId}`}))`,
-						);
-						const sharedVaultCount = await tx
-							.select({ count: sql<number>`count(*)::int` })
-							.from(vault)
-							.where(and(eq(vault.teamId, teamId), eq(vault.type, "team")));
-
-						if ((sharedVaultCount[0]?.count ?? 0) >= sharedVaultLimit) {
-							throw new TRPCError({
-								code: "FORBIDDEN",
-								message: `Your current plan allows up to ${sharedVaultLimit} shared vaults. Upgrade to add more.`,
-							});
-						}
-					}
-
-					// Create vault
-					await tx.insert(vault).values({
+				// Create vault
+				await tx.insert(vault).values({
 					id: vaultId,
 					name: input.name,
 					type: input.type,
@@ -1651,25 +1651,25 @@ export const vaultRouter = router({
 					),
 			});
 
-				if (!userVaultKey || userVaultKey.role === "read-only") {
-					throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
-				}
+			if (!userVaultKey || userVaultKey.role === "read-only") {
+				throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
+			}
 
-				if (
-					!isValidAttachmentUploadKey({
-						key: input.storageKey,
-						userId: ctx.session.userId,
-						itemId: input.itemId,
-					})
-				) {
-					throw new TRPCError({
-						code: "BAD_REQUEST",
-						message: "Invalid or expired attachment upload key",
-					});
-				}
+			if (
+				!isValidAttachmentUploadKey({
+					key: input.storageKey,
+					userId: ctx.session.userId,
+					itemId: input.itemId,
+				})
+			) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Invalid or expired attachment upload key",
+				});
+			}
 
-				const attachmentId = nanoid();
-				let broadcast: SyncBroadcastPayload;
+			const attachmentId = nanoid();
+			let broadcast: SyncBroadcastPayload;
 			await db.transaction(async (tx) => {
 				await tx.insert(itemAttachment).values({
 					id: attachmentId,
@@ -1889,33 +1889,33 @@ export const vaultRouter = router({
 				});
 			}
 
-				const userVaultKey = await db.query.vaultKey.findFirst({
-					where: (vk, { and, eq }) =>
-						and(
-							eq(vk.vaultId, attachment.vaultId),
-							eq(vk.userId, ctx.session.userId),
-						),
-				});
+			const userVaultKey = await db.query.vaultKey.findFirst({
+				where: (vk, { and, eq }) =>
+					and(
+						eq(vk.vaultId, attachment.vaultId),
+						eq(vk.userId, ctx.session.userId),
+					),
+			});
 
-				if (!userVaultKey) {
+			if (!userVaultKey) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "Access denied",
+				});
+			}
+			if (userVaultKey.role === "member") {
+				if (attachment.uploadedBy !== ctx.session.userId) {
 					throw new TRPCError({
 						code: "FORBIDDEN",
-						message: "Access denied",
+						message: "You can only delete your own attachments",
 					});
 				}
-				if (userVaultKey.role === "member") {
-					if (attachment.uploadedBy !== ctx.session.userId) {
-						throw new TRPCError({
-							code: "FORBIDDEN",
-							message: "You can only delete your own attachments",
-						});
-					}
-				} else if (!["owner", "admin"].includes(userVaultKey.role)) {
-					throw new TRPCError({
-						code: "FORBIDDEN",
-						message: "Access denied",
-					});
-				}
+			} else if (!["owner", "admin"].includes(userVaultKey.role)) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "Access denied",
+				});
+			}
 
 			// Delete from S3 first (not transactional), then DB + sync event atomically
 			await deleteObject(attachment.storageKey);

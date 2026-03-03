@@ -2,17 +2,7 @@ import { db } from "@bittery/db";
 import { auditLog } from "@bittery/db/schema/auth";
 import { shareAccessLog, shareLink } from "@bittery/db/schema/sharing";
 import { TRPCError } from "@trpc/server";
-import {
-	and,
-	desc,
-	eq,
-	gte,
-	ilike,
-	inArray,
-	lt,
-	lte,
-	or,
-} from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, lt, lte, or } from "drizzle-orm";
 import { z } from "zod";
 import { resolveEffectiveEntitlements } from "../billing/entitlements";
 import { getBitteryMode } from "../config/mode";
@@ -118,7 +108,9 @@ function decodeCursor(raw: string): EventCursorPayload {
 	}
 }
 
-function parseMetadata(metadata: string | null): Record<string, unknown> | null {
+function parseMetadata(
+	metadata: string | null,
+): Record<string, unknown> | null {
 	if (!metadata) return null;
 	try {
 		const parsed = JSON.parse(metadata);
@@ -202,7 +194,10 @@ function buildCursorCondition(
 	}
 
 	if (sourceRank < cursorRank) {
-		return or(lt(timestampColumn, cursorTimestamp), eq(timestampColumn, cursorTimestamp));
+		return or(
+			lt(timestampColumn, cursorTimestamp),
+			eq(timestampColumn, cursorTimestamp),
+		);
 	}
 
 	return or(
@@ -291,10 +286,16 @@ export const auditRouter = router({
 			const fromDate = input.from ? new Date(input.from) : null;
 			const toDate = input.to ? new Date(input.to) : null;
 			if (fromDate && Number.isNaN(fromDate.getTime())) {
-				throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid from date" });
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Invalid from date",
+				});
 			}
 			if (toDate && Number.isNaN(toDate.getTime())) {
-				throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid to date" });
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Invalid to date",
+				});
 			}
 			if (fromDate && toDate && fromDate > toDate) {
 				throw new TRPCError({
@@ -419,7 +420,10 @@ export const auditRouter = router({
 								accessedAt: shareAccessLog.accessedAt,
 							})
 							.from(shareAccessLog)
-							.innerJoin(shareLink, eq(shareAccessLog.shareLinkId, shareLink.id))
+							.innerJoin(
+								shareLink,
+								eq(shareAccessLog.shareLinkId, shareLink.id),
+							)
 							.where(and(...shareConditions))
 							.orderBy(desc(shareAccessLog.accessedAt), desc(shareAccessLog.id))
 							.limit(fetchLimit)

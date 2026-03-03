@@ -1,153 +1,153 @@
 {
-  "version": "7",
-  "dialect": "postgresql",
-  "entries": [
-    {
-      "idx": 0,
-      "version": "7",
-      "when": 1768740435712,
-      "tag": "0000_robust_rogue",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1768762111483,
-      "tag": "0001_foamy_bucky",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1768811547191,
-      "tag": "0002_unknown_pestilence",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1768837767873,
-      "tag": "0003_slippery_jocasta",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1768907793164,
-      "tag": "0004_parallel_callisto",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1768913170520,
-      "tag": "0005_sparkling_stingray",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1768929072904,
-      "tag": "0006_grey_madame_masque",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1769011674754,
-      "tag": "0007_illegal_mach_iv",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "7",
-      "when": 1769017149452,
-      "tag": "0008_graceful_reavers",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "7",
-      "when": 1769040934582,
-      "tag": "0009_silky_black_crow",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "7",
-      "when": 1769454928694,
-      "tag": "0010_first_karnak",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "7",
-      "when": 1769779475792,
-      "tag": "0011_foamy_mandrill",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "7",
-      "when": 1770492034610,
-      "tag": "0012_young_norman_osborn",
-      "breakpoints": true
-    },
-    {
-      "idx": 13,
-      "version": "7",
-      "when": 1770496446000,
-      "tag": "0013_heavy_human_torch",
-      "breakpoints": true
-    },
-    {
-      "idx": 14,
-      "version": "7",
-      "when": 1770802874918,
-      "tag": "0014_open_vulcan",
-      "breakpoints": true
-    },
-    {
-      "idx": 15,
-      "version": "7",
-      "when": 1771418019116,
-      "tag": "0015_nervous_chameleon",
-      "breakpoints": true
-    },
-    {
-      "idx": 16,
-      "version": "7",
-      "when": 1771500000000,
-      "tag": "0016_item_attachments",
-      "breakpoints": true
-    },
-    {
-      "idx": 17,
-      "version": "7",
-      "when": 1772033810518,
-      "tag": "0017_whole_blade",
-      "breakpoints": true
-    },
-    {
-      "idx": 18,
-      "version": "7",
-      "when": 1772098185075,
-      "tag": "0018_sticky_namor",
-      "breakpoints": true
-    },
-    {
-      "idx": 19,
-      "version": "7",
-      "when": 1772196206972,
-      "tag": "0019_lumpy_captain_universe",
-      "breakpoints": true
-    },
-    {
-      "idx": 20,
-      "version": "7",
-      "when": 1772500000000,
-      "tag": "0020_orange_rate_limits",
-      "breakpoints": true
-    }
-  ]
+	"version": "7",
+	"dialect": "postgresql",
+	"entries": [
+		{
+			"idx": 0,
+			"version": "7",
+			"when": 1768740435712,
+			"tag": "0000_robust_rogue",
+			"breakpoints": true
+		},
+		{
+			"idx": 1,
+			"version": "7",
+			"when": 1768762111483,
+			"tag": "0001_foamy_bucky",
+			"breakpoints": true
+		},
+		{
+			"idx": 2,
+			"version": "7",
+			"when": 1768811547191,
+			"tag": "0002_unknown_pestilence",
+			"breakpoints": true
+		},
+		{
+			"idx": 3,
+			"version": "7",
+			"when": 1768837767873,
+			"tag": "0003_slippery_jocasta",
+			"breakpoints": true
+		},
+		{
+			"idx": 4,
+			"version": "7",
+			"when": 1768907793164,
+			"tag": "0004_parallel_callisto",
+			"breakpoints": true
+		},
+		{
+			"idx": 5,
+			"version": "7",
+			"when": 1768913170520,
+			"tag": "0005_sparkling_stingray",
+			"breakpoints": true
+		},
+		{
+			"idx": 6,
+			"version": "7",
+			"when": 1768929072904,
+			"tag": "0006_grey_madame_masque",
+			"breakpoints": true
+		},
+		{
+			"idx": 7,
+			"version": "7",
+			"when": 1769011674754,
+			"tag": "0007_illegal_mach_iv",
+			"breakpoints": true
+		},
+		{
+			"idx": 8,
+			"version": "7",
+			"when": 1769017149452,
+			"tag": "0008_graceful_reavers",
+			"breakpoints": true
+		},
+		{
+			"idx": 9,
+			"version": "7",
+			"when": 1769040934582,
+			"tag": "0009_silky_black_crow",
+			"breakpoints": true
+		},
+		{
+			"idx": 10,
+			"version": "7",
+			"when": 1769454928694,
+			"tag": "0010_first_karnak",
+			"breakpoints": true
+		},
+		{
+			"idx": 11,
+			"version": "7",
+			"when": 1769779475792,
+			"tag": "0011_foamy_mandrill",
+			"breakpoints": true
+		},
+		{
+			"idx": 12,
+			"version": "7",
+			"when": 1770492034610,
+			"tag": "0012_young_norman_osborn",
+			"breakpoints": true
+		},
+		{
+			"idx": 13,
+			"version": "7",
+			"when": 1770496446000,
+			"tag": "0013_heavy_human_torch",
+			"breakpoints": true
+		},
+		{
+			"idx": 14,
+			"version": "7",
+			"when": 1770802874918,
+			"tag": "0014_open_vulcan",
+			"breakpoints": true
+		},
+		{
+			"idx": 15,
+			"version": "7",
+			"when": 1771418019116,
+			"tag": "0015_nervous_chameleon",
+			"breakpoints": true
+		},
+		{
+			"idx": 16,
+			"version": "7",
+			"when": 1771500000000,
+			"tag": "0016_item_attachments",
+			"breakpoints": true
+		},
+		{
+			"idx": 17,
+			"version": "7",
+			"when": 1772033810518,
+			"tag": "0017_whole_blade",
+			"breakpoints": true
+		},
+		{
+			"idx": 18,
+			"version": "7",
+			"when": 1772098185075,
+			"tag": "0018_sticky_namor",
+			"breakpoints": true
+		},
+		{
+			"idx": 19,
+			"version": "7",
+			"when": 1772196206972,
+			"tag": "0019_lumpy_captain_universe",
+			"breakpoints": true
+		},
+		{
+			"idx": 20,
+			"version": "7",
+			"when": 1772500000000,
+			"tag": "0020_orange_rate_limits",
+			"breakpoints": true
+		}
+	]
 }

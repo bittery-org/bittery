@@ -86,7 +86,9 @@ export function LoginDetail({
 			<div className="min-w-0 space-y-4">
 				{data.url && (
 					<div className="min-w-0 space-y-2">
-						<Label>{m["vaults.detail.items.detail.login.field.website"]()}</Label>
+						<Label>
+							{m["vaults.detail.items.detail.login.field.website"]()}
+						</Label>
 						<div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
 							<Input
 								value={data.url}
@@ -121,7 +123,9 @@ export function LoginDetail({
 
 				{data.username && (
 					<div className="min-w-0 space-y-2">
-						<Label>{m["vaults.detail.items.detail.login.field.username"]()}</Label>
+						<Label>
+							{m["vaults.detail.items.detail.login.field.username"]()}
+						</Label>
 						<div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
 							<Input
 								value={data.username}
@@ -149,7 +153,9 @@ export function LoginDetail({
 
 				{data.password && (
 					<div className="min-w-0 space-y-2">
-						<Label>{m["vaults.detail.items.detail.login.field.password"]()}</Label>
+						<Label>
+							{m["vaults.detail.items.detail.login.field.password"]()}
+						</Label>
 						<div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
 							<Input
 								type={showPassword ? "text" : "password"}
@@ -213,7 +219,9 @@ export function LoginDetail({
 				{data.urls && data.urls.length > 0 && (
 					<div className="min-w-0 space-y-2">
 						<Label>
-							{m["vaults.detail.items.detail.login.field.additional_websites"]()}
+							{m[
+								"vaults.detail.items.detail.login.field.additional_websites"
+							]()}
 						</Label>
 						{data.urls.map((url) => (
 							<div

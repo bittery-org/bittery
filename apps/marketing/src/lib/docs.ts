@@ -1,4 +1,4 @@
-import { categories, type CategoryMeta } from "@/content/docs/_categories";
+import { type CategoryMeta, categories } from "@/content/docs/_categories";
 
 export interface ArticleFrontmatter {
 	title: string;
@@ -52,10 +52,8 @@ function buildArticles(): ArticleEntry[] {
 
 	return entries.sort((a, b) => {
 		// Sort by category order, then by article order
-		const catA =
-			categories.find((c) => c.slug === a.category)?.order ?? 999;
-		const catB =
-			categories.find((c) => c.slug === b.category)?.order ?? 999;
+		const catA = categories.find((c) => c.slug === a.category)?.order ?? 999;
+		const catB = categories.find((c) => c.slug === b.category)?.order ?? 999;
 		if (catA !== catB) return catA - catB;
 		return (a.frontmatter.order ?? 999) - (b.frontmatter.order ?? 999);
 	});

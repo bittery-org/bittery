@@ -100,27 +100,33 @@ export function CreateVaultDialog({
 		setSelectedAccountEmail(accounts?.[0]?.email);
 	};
 
-	const processFile = useCallback((file: File | undefined) => {
-		if (!file) {
-			setImageFile(undefined);
-			setImagePreview(null);
-			return false;
-		}
+	const processFile = useCallback(
+		(file: File | undefined) => {
+			if (!file) {
+				setImageFile(undefined);
+				setImagePreview(null);
+				return false;
+			}
 
-		if (!file.type.startsWith("image/")) {
-			toast.error(m["vaults.create_dialog.toast.invalid_image_file"]());
-			return false;
-		}
+			if (!file.type.startsWith("image/")) {
+				toast.error(m["vaults.create_dialog.toast.invalid_image_file"]());
+				return false;
+			}
 
-		if (file.size > 2 * 1024 * 1024) {
-			toast.error(m["vaults.create_dialog.toast.image_too_large"]());
-			return false;
-		}
+			if (file.size > 2 * 1024 * 1024) {
+				toast.error(m["vaults.create_dialog.toast.image_too_large"]());
+				return false;
+			}
 
-		setImageFile(file);
-		setImagePreview(URL.createObjectURL(file));
-		return true;
-	}, []);
+			setImageFile(file);
+			setImagePreview(URL.createObjectURL(file));
+			return true;
+		},
+		[
+			m["vaults.create_dialog.toast.image_too_large"],
+			m["vaults.create_dialog.toast.invalid_image_file"],
+		],
+	);
 
 	const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
 		const file = event.target.files?.[0];
@@ -280,7 +286,9 @@ export function CreateVaultDialog({
 							>
 								<SelectTrigger id="account" className="h-10">
 									<SelectValue
-										placeholder={m["vaults.create_dialog.placeholder.account"]()}
+										placeholder={m[
+											"vaults.create_dialog.placeholder.account"
+										]()}
 									/>
 								</SelectTrigger>
 								<SelectContent>

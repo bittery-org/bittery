@@ -1,3 +1,4 @@
+import { createFileRoute } from "@tanstack/react-router";
 import {
 	ArrowRight,
 	Building2,
@@ -10,9 +11,8 @@ import {
 	Shield,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { createFileRoute } from "@tanstack/react-router";
-import { Button } from "@/components/ui/button";
 import { Layout } from "@/components/layout";
+import { Button } from "@/components/ui/button";
 import { signupUrl } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 
@@ -122,8 +122,8 @@ function ContactPage() {
 							<span className="text-primary">from you.</span>
 						</h1>
 						<p className="mx-auto mt-4 max-w-lg text-base text-muted-foreground leading-relaxed sm:text-lg">
-							Whether you have a question, found a bug, or just want to say
-							hi — there are plenty of ways to reach us.
+							Whether you have a question, found a bug, or just want to say hi —
+							there are plenty of ways to reach us.
 						</p>
 					</motion.div>
 				</div>
@@ -200,9 +200,9 @@ function ContactPage() {
 									>
 										qrawall GmbH
 									</a>
-									, based in Germany. We operate under strict EU data
-									protection regulations including GDPR, ensuring your
-									privacy is protected by law — not just by promise.
+									, based in Germany. We operate under strict EU data protection
+									regulations including GDPR, ensuring your privacy is protected
+									by law — not just by promise.
 								</p>
 							</div>
 
@@ -215,9 +215,7 @@ function ContactPage() {
 										<p className="font-medium text-foreground text-sm">
 											Location
 										</p>
-										<p className="text-muted-foreground text-sm">
-											Germany, EU
-										</p>
+										<p className="text-muted-foreground text-sm">Germany, EU</p>
 									</div>
 								</div>
 								<div className="flex items-start gap-3">
@@ -314,16 +312,12 @@ function ContactPage() {
 								Ready to take back your privacy?
 							</h2>
 							<p className="mx-auto mt-4 max-w-md text-base text-muted-foreground sm:text-lg">
-								Join the people who decided their passwords deserve better.
-								Free to start, no credit card needed.
+								Join the people who decided their passwords deserve better. Free
+								to start, no credit card needed.
 							</p>
 							<div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-								<Button
-									size="lg"
-									className="gap-2 rounded-full px-7"
-									asChild
-								>
-								<a href={signupUrl()}>
+								<Button size="lg" className="gap-2 rounded-full px-7" asChild>
+									<a href={signupUrl()}>
 										Get started free
 										<ArrowRight className="size-4" />
 									</a>

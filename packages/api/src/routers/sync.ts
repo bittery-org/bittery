@@ -155,10 +155,7 @@ export const syncRouter = router({
 
 			const vaultIds = userVaults.map((vk) => vk.vaultId);
 			const where = input.cursor
-				? and(
-						inArray(item.vaultId, vaultIds),
-						gt(item.id, input.cursor),
-					)
+				? and(inArray(item.vaultId, vaultIds), gt(item.id, input.cursor))
 				: and(inArray(item.vaultId, vaultIds));
 
 			const pageItems = await db.query.item.findMany({

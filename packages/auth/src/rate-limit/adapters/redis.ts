@@ -104,7 +104,8 @@ export class RedisRateLimitAdapter implements RateLimitAdapter {
 		const ttlSeconds = lockedUntil
 			? Math.max(
 					3600,
-					Math.ceil((lockedUntil.getTime() - input.now.getTime()) / 1000) + 3600,
+					Math.ceil((lockedUntil.getTime() - input.now.getTime()) / 1000) +
+						3600,
 				)
 			: 24 * 60 * 60;
 		await this.redis.expire(redisKey, ttlSeconds);

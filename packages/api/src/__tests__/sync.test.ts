@@ -204,7 +204,9 @@ describe("Sync Router", () => {
 			const result = await caller.bootstrapItems({});
 			const returnedItemIds = result.items.map((item) => item.id);
 			const activeItem = result.items.find((item) => item.id === activeItemId);
-			const deletedItem = result.items.find((item) => item.id === deletedItemId);
+			const deletedItem = result.items.find(
+				(item) => item.id === deletedItemId,
+			);
 
 			expect(returnedItemIds).toContain(activeItemId);
 			expect(returnedItemIds).toContain(deletedItemId);

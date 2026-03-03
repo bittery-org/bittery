@@ -7,7 +7,7 @@ import {
 	resolveEffectiveEntitlementLimits,
 	resolveEffectiveEntitlements,
 } from "../billing/entitlements";
-import { type CloudPlanId } from "../billing/plans";
+import type { CloudPlanId } from "../billing/plans";
 import {
 	createStripeBillingPortalSession,
 	createStripeCheckoutSession,
@@ -184,7 +184,8 @@ export const billingRouter = router({
 				where: (u, { eq: eqFn }) => eqFn(u.teamId, actor.team.id),
 				columns: { id: true },
 			});
-			const quantity = targetPlan === "team" ? Math.max(1, teamMembers.length) : 1;
+			const quantity =
+				targetPlan === "team" ? Math.max(1, teamMembers.length) : 1;
 
 			const customerId = await ensureTeamStripeCustomer({
 				teamId: actor.team.id,

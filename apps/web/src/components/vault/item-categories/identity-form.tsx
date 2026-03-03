@@ -152,7 +152,9 @@ export function IdentityForm({
 					{(field) => (
 						<TitleField
 							field={field}
-							placeholder={m["vaults.detail.items.form.identity.placeholder.title"]()}
+							placeholder={m[
+								"vaults.detail.items.form.identity.placeholder.title"
+							]()}
 						/>
 					)}
 				</form.Field>
@@ -161,7 +163,9 @@ export function IdentityForm({
 			{/* Personal Information Section */}
 			<div className="space-y-4 rounded-lg border p-4">
 				<h3 className="font-medium text-sm">
-					{m["vaults.detail.items.form.identity.section.personal_information"]()}
+					{m[
+						"vaults.detail.items.form.identity.section.personal_information"
+					]()}
 				</h3>
 
 				<div className="grid grid-cols-2 gap-4">
@@ -342,7 +346,9 @@ export function IdentityForm({
 			{/* Addresses Section */}
 			<div className="space-y-2">
 				<div className="flex items-center justify-between">
-					<Label>{m["vaults.detail.items.form.identity.section.addresses"]()}</Label>
+					<Label>
+						{m["vaults.detail.items.form.identity.section.addresses"]()}
+					</Label>
 					<Button
 						type="button"
 						variant="outline"
@@ -379,14 +385,18 @@ export function IdentityForm({
 						/>
 						<div className="grid grid-cols-2 gap-2">
 							<Input
-								placeholder={m["vaults.detail.items.form.identity.placeholder.city"]()}
+								placeholder={m[
+									"vaults.detail.items.form.identity.placeholder.city"
+								]()}
 								value={address.city}
 								onChange={(e) =>
 									updateAddress(address.id, { city: e.target.value })
 								}
 							/>
 							<Input
-								placeholder={m["vaults.detail.items.form.identity.placeholder.state"]()}
+								placeholder={m[
+									"vaults.detail.items.form.identity.placeholder.state"
+								]()}
 								value={address.state}
 								onChange={(e) =>
 									updateAddress(address.id, { state: e.target.value })
@@ -481,7 +491,9 @@ export function IdentityForm({
 						{(field) => (
 							<div className="space-y-2">
 								<Label htmlFor={field.name}>
-									{m["vaults.detail.items.form.identity.field.drivers_license"]()}
+									{m[
+										"vaults.detail.items.form.identity.field.drivers_license"
+									]()}
 								</Label>
 								<Input
 									id={field.name}

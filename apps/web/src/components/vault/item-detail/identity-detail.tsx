@@ -100,7 +100,9 @@ export function IdentityDetail({
 					data.dateOfBirth) && (
 					<div className="space-y-4 rounded-lg border p-4">
 						<h3 className="font-medium text-sm">
-							{m["vaults.detail.items.detail.identity.section.personal_information"]()}
+							{m[
+								"vaults.detail.items.detail.identity.section.personal_information"
+							]()}
 						</h3>
 
 						{data.firstName && (
@@ -177,7 +179,9 @@ export function IdentityDetail({
 
 						{data.email && (
 							<div className="space-y-2">
-								<Label>{m["vaults.detail.items.form.identity.field.email"]()}</Label>
+								<Label>
+									{m["vaults.detail.items.form.identity.field.email"]()}
+								</Label>
 								<div className="flex gap-2">
 									<Input value={data.email} readOnly className="flex-1" />
 									<Button
@@ -262,7 +266,9 @@ export function IdentityDetail({
 
 				{data.addresses && data.addresses.length > 0 && (
 					<div className="space-y-2">
-						<Label>{m["vaults.detail.items.form.identity.section.addresses"]()}</Label>
+						<Label>
+							{m["vaults.detail.items.form.identity.section.addresses"]()}
+						</Label>
 						{data.addresses.map((address) => (
 							<div key={address.id} className="space-y-2">
 								<Card>
@@ -283,7 +289,9 @@ export function IdentityDetail({
 									className="w-full"
 								>
 									<Copy size={16} className="mr-2" />
-									{m["vaults.detail.items.detail.identity.action.copy_address"]()}
+									{m[
+										"vaults.detail.items.detail.identity.action.copy_address"
+									]()}
 								</Button>
 							</div>
 						))}
@@ -379,7 +387,9 @@ export function IdentityDetail({
 						{data.driversLicense && (
 							<div className="space-y-2">
 								<Label>
-									{m["vaults.detail.items.form.identity.field.drivers_license"]()}
+									{m[
+										"vaults.detail.items.form.identity.field.drivers_license"
+									]()}
 								</Label>
 								<div className="flex gap-2">
 									<Input

@@ -1,4 +1,8 @@
 export {
+	IconGermany as IconFlagGermany,
+	IconUnitedStates as IconFlagUnitedStates,
+} from "nucleo-flags";
+export {
 	IconArrowDoorOutOutlineDuo18,
 	IconArrowLeftOutlineDuo18,
 	IconArrowsLeftRightTrailOutlineDuo18,
@@ -77,8 +81,4 @@ export {
 	IconVShapedArrowUpOutlineDuo18,
 	IconXmarkOutlineDuo18,
 } from "nucleo-ui-outline-duo-18";
-export {
-	IconGermany as IconFlagGermany,
-	IconUnitedStates as IconFlagUnitedStates,
-} from "nucleo-flags";
 export { default as IconLoader2Fill18 } from "./IconLoader2Fill18";

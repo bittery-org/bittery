@@ -11,9 +11,9 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { storage } from "@/lib/storage";
-import SignUpForm from "@/components/sign-up-form";
 import SignInForm from "@/components/sign-in-form";
+import SignUpForm from "@/components/sign-up-form";
+import { storage } from "@/lib/storage";
 
 export const Route = createFileRoute("/_auth/invite/$token")({
 	component: InvitationPage,
@@ -201,9 +201,7 @@ function InvitationPage() {
 						{invitation.teamName}
 					</span>{" "}
 					as a{" "}
-					<span className="font-medium text-foreground">
-						{invitation.role}
-					</span>
+					<span className="font-medium text-foreground">{invitation.role}</span>
 					.
 				</p>
 			</div>

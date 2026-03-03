@@ -1,11 +1,11 @@
+import { Link, useLocation } from "@tanstack/react-router";
 import { Menu, Moon, Sun, X } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
-import { Link, useLocation } from "@tanstack/react-router";
 import { BitteryLogo } from "@/components/bittery-logo";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { signupUrl } from "@/lib/urls";
+import { cn } from "@/lib/utils";
 
 interface NavLink {
 	label: string;
@@ -20,7 +20,12 @@ const navLinks: NavLink[] = [
 	{ label: "Pricing", href: "/", hash: "pricing", sectionId: "pricing" },
 	{ label: "FAQ", href: "/", hash: "faq", sectionId: "faq" },
 	{ label: "Docs", href: "/docs", sectionId: null },
-	{ label: "GitHub", href: "https://github.com/bittery-org/bittery", sectionId: null, isExternal: true },
+	{
+		label: "GitHub",
+		href: "https://github.com/bittery-org/bittery",
+		sectionId: null,
+		isExternal: true,
+	},
 ];
 
 const sectionIds = navLinks.map((l) => l.sectionId).filter(Boolean) as string[];
@@ -134,9 +139,11 @@ export function Header() {
 				<div className="hidden items-center gap-1 md:flex">
 					{navLinks.map((link) => {
 						const isActive =
-						link.sectionId != null
-							? link.sectionId === activeSection
-							: !link.isExternal && link.href !== "/" && location.pathname.startsWith(link.href);
+							link.sectionId != null
+								? link.sectionId === activeSection
+								: !link.isExternal &&
+									link.href !== "/" &&
+									location.pathname.startsWith(link.href);
 						const linkClassName = cn(
 							"relative rounded-lg px-3 py-1.5 text-sm transition-colors",
 							isActive
@@ -191,7 +198,11 @@ export function Header() {
 
 				<div className="flex items-center gap-1.5">
 					<ThemeToggle />
-					<Button size="sm" className="rounded-full px-5 font-semibold text-xs" asChild>
+					<Button
+						size="sm"
+						className="rounded-full px-5 font-semibold text-xs"
+						asChild
+					>
 						<a href={signupUrl()}>Get Started</a>
 					</Button>
 					<button
@@ -212,10 +223,12 @@ export function Header() {
 				<div className="fixed inset-x-0 top-16 z-50 px-4 pt-2 md:hidden">
 					<div className="space-y-1 rounded-2xl border border-border/60 bg-background/95 p-4 shadow-xl backdrop-blur-2xl">
 						{navLinks.map((link) => {
-						const isActive =
-							link.sectionId != null
-								? link.sectionId === activeSection
-								: !link.isExternal && link.href !== "/" && location.pathname.startsWith(link.href);
+							const isActive =
+								link.sectionId != null
+									? link.sectionId === activeSection
+									: !link.isExternal &&
+										link.href !== "/" &&
+										location.pathname.startsWith(link.href);
 							const mobileLinkClassName = cn(
 								"block rounded-lg px-3 py-2.5 text-sm transition-colors",
 								isActive

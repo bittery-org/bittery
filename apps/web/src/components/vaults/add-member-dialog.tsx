@@ -33,13 +33,13 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { storage } from "@/lib/storage";
-import { useI18n } from "@/providers/i18n-provider";
 import {
 	arrayBufferToBase64,
 	decrypt,
 	rsaDecrypt,
 	rsaEncrypt,
 } from "@/lib/wasm-crypto";
+import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface AddMemberDialogProps {
@@ -73,8 +73,7 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 		const q = search.toLowerCase();
 		return members.filter(
 			(m) =>
-				m.name.toLowerCase().includes(q) ||
-				m.email.toLowerCase().includes(q),
+				m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q),
 		);
 	}, [availableQuery.data, search]);
 
@@ -178,10 +177,7 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 					className="h-8 px-2 text-xs lg:px-3"
 				>
 					<UserPlus
-						className={cn(
-							"h-3.5 w-3.5",
-							!isMobile ? "mr-1.5" : undefined,
-						)}
+						className={cn("h-3.5 w-3.5", !isMobile ? "mr-1.5" : undefined)}
 					/>
 					{!isMobile ? m["vaults.add_member_dialog.trigger"]() : null}
 				</Button>
@@ -212,10 +208,7 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 					{availableQuery.isLoading ? (
 						<div className="flex flex-col gap-3 p-4">
 							{Array.from({ length: 3 }).map((_, i) => (
-								<div
-									key={`skeleton-${i}`}
-									className="flex items-center gap-3"
-								>
+								<div key={`skeleton-${i}`} className="flex items-center gap-3">
 									<div className="h-9 w-9 animate-pulse rounded-full bg-muted" />
 									<div className="flex-1 space-y-1.5">
 										<div className="h-3.5 w-28 animate-pulse rounded bg-muted" />
@@ -238,17 +231,14 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 							{filteredMembers.map((member) => {
 								const isAdding = addingUserId === member.userId;
 								const isAdded = addedUserIds.has(member.userId);
-								const selectedRole =
-									selectedRoles[member.userId] ?? "member";
+								const selectedRole = selectedRoles[member.userId] ?? "member";
 
 								return (
 									<div
 										key={member.userId}
 										className={cn(
 											"flex items-center gap-3 px-4 py-3 transition-colors",
-											isAdded
-												? "bg-primary/5"
-												: "hover:bg-muted/50",
+											isAdded ? "bg-primary/5" : "hover:bg-muted/50",
 										)}
 									>
 										<Avatar className="h-9 w-9 shrink-0">
@@ -269,18 +259,12 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 												<Select
 													value={selectedRole}
 													onValueChange={(
-														value:
-															| "admin"
-															| "member"
-															| "read-only",
+														value: "admin" | "member" | "read-only",
 													) =>
-														setSelectedRoles(
-															(prev) => ({
-																...prev,
-																[member.userId]:
-																	value,
-															}),
-														)
+														setSelectedRoles((prev) => ({
+															...prev,
+															[member.userId]: value,
+														}))
 													}
 													disabled={isAdding}
 												>
@@ -313,13 +297,8 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 													size="sm"
 													variant="outline"
 													className="h-7 px-2.5 text-xs"
-													onClick={() =>
-														handleAddMember(member)
-													}
-													disabled={
-														isAdding ||
-														addingUserId !== null
-													}
+													onClick={() => handleAddMember(member)}
+													disabled={isAdding || addingUserId !== null}
 												>
 													{isAdding ? (
 														<Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -339,7 +318,9 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 				{/* Footer */}
 				{availableCount > 0 && !availableQuery.isLoading && (
 					<div className="border-t px-4 py-3">
-						<p className="text-muted-foreground text-xs">{availableMemberSummary}</p>
+						<p className="text-muted-foreground text-xs">
+							{availableMemberSummary}
+						</p>
 					</div>
 				)}
 			</DialogContent>

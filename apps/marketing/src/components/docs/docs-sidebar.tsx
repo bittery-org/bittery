@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import {
 	BookOpen,
 	ChevronDown,
@@ -10,13 +11,9 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
-import { Link } from "@tanstack/react-router";
 import { DocsSearch } from "@/components/docs/docs-search";
+import { getArticlesByCategory, getCategories } from "@/lib/docs";
 import { cn } from "@/lib/utils";
-import {
-	getCategories,
-	getArticlesByCategory,
-} from "@/lib/docs";
 
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
 	Rocket,
@@ -170,7 +167,10 @@ export function DocsSidebar({ currentSlug }: { currentSlug: string }) {
 			animate={{ opacity: 1, x: 0 }}
 			transition={{ duration: 0.4, ease: "easeOut" }}
 		>
-			<div className="sticky top-28 w-60 overflow-y-auto pr-2" style={{ maxHeight: "calc(100vh - 8rem)" }}>
+			<div
+				className="sticky top-28 w-60 overflow-y-auto pr-2"
+				style={{ maxHeight: "calc(100vh - 8rem)" }}
+			>
 				<DocsSearch className="mb-3" />
 				<SidebarContent currentSlug={currentSlug} />
 			</div>
@@ -186,7 +186,7 @@ export function MobileDocsDrawer({ currentSlug }: { currentSlug: string }) {
 	// Close on route change
 	useEffect(() => {
 		setIsOpen(false);
-	}, [currentSlug]);
+	}, []);
 
 	// Prevent body scroll when open
 	useEffect(() => {

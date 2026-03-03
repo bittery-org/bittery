@@ -33,8 +33,8 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
-import { useI18n } from "@/providers/i18n-provider";
 import { decrypt, performKeyRotation, rsaDecrypt } from "@/lib/wasm-crypto";
+import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface VaultMember {
@@ -304,15 +304,12 @@ export function VaultMemberList({
 								{canManage && !isOwner ? (
 									<Select
 										value={member.role}
-										onValueChange={(
-											value: "admin" | "member" | "read-only",
-										) =>
+										onValueChange={(value: "admin" | "member" | "read-only") =>
 											handleRoleChange(member.userId, value)
 										}
 										disabled={
 											updateRoleMutation.isPending ||
-											(userRole === "admin" &&
-												member.role === "admin")
+											(userRole === "admin" && member.role === "admin")
 										}
 									>
 										<SelectTrigger className="h-7 w-28 text-xs">
@@ -367,30 +364,34 @@ export function VaultMemberList({
 													<br />
 													<br />
 													<span className="text-muted-foreground text-xs">
-														{m["vaults.member_list.remove_dialog.rotation_notice"]()}
+														{m[
+															"vaults.member_list.remove_dialog.rotation_notice"
+														]()}
 													</span>
 												</AlertDialogDescription>
 											</AlertDialogHeader>
 											<AlertDialogFooter>
-												<AlertDialogCancel
-													disabled={isRotating}
-												>
-													{m["vaults.member_list.remove_dialog.action.cancel"]()}
+												<AlertDialogCancel disabled={isRotating}>
+													{m[
+														"vaults.member_list.remove_dialog.action.cancel"
+													]()}
 												</AlertDialogCancel>
 												<AlertDialogAction
-													onClick={() =>
-														handleRemove(member.userId)
-													}
+													onClick={() => handleRemove(member.userId)}
 													disabled={isRotating}
 													className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 												>
 													{isRotating ? (
 														<>
 															<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-															{m["vaults.member_list.remove_dialog.action.rotating"]()}
+															{m[
+																"vaults.member_list.remove_dialog.action.rotating"
+															]()}
 														</>
 													) : (
-														m["vaults.member_list.remove_dialog.action.confirm"]()
+														m[
+															"vaults.member_list.remove_dialog.action.confirm"
+														]()
 													)}
 												</AlertDialogAction>
 											</AlertDialogFooter>

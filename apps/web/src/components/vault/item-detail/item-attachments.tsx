@@ -64,7 +64,9 @@ function AttachmentRow({
 		decryptMeta(attachment)
 			.then((d) => setDecryptedName(d.name))
 			.catch(() =>
-				setDecryptedName(m["vaults.detail.items.attachments.row.encrypted_file"]()),
+				setDecryptedName(
+					m["vaults.detail.items.attachments.row.encrypted_file"](),
+				),
 			);
 	}, [attachment.id, m]);
 
@@ -160,7 +162,9 @@ function AttachmentRow({
 						size="sm"
 						variant="ghost"
 						onClick={startEdit}
-						title={m["vaults.detail.items.attachments.action.rename_attachment"]()}
+						title={m[
+							"vaults.detail.items.attachments.action.rename_attachment"
+						]()}
 					>
 						<Pencil size={16} />
 					</Button>
@@ -171,7 +175,9 @@ function AttachmentRow({
 						variant="ghost"
 						className="text-destructive hover:bg-destructive/10 hover:text-destructive"
 						onClick={() => onDelete(attachment.id)}
-						title={m["vaults.detail.items.attachments.action.delete_attachment"]()}
+						title={m[
+							"vaults.detail.items.attachments.action.delete_attachment"
+						]()}
 					>
 						<Trash size={16} />
 					</Button>
@@ -215,7 +221,7 @@ export function ItemAttachments({
 			setPendingFile(file);
 			if (fileInputRef.current) fileInputRef.current.value = "";
 		},
-		[],
+		[m["vaults.detail.items.attachments.toast.file_too_large"]],
 	);
 
 	const handleConfirmUpload = useCallback(async () => {
@@ -229,9 +235,7 @@ export function ItemAttachments({
 			);
 			toast.success(m["vaults.detail.items.attachments.toast.uploaded"]());
 		} catch {
-			toast.error(
-				m["vaults.detail.items.attachments.toast.upload_failed"](),
-			);
+			toast.error(m["vaults.detail.items.attachments.toast.upload_failed"]());
 		} finally {
 			setIsUploading(false);
 			setPendingFile(null);
@@ -289,9 +293,7 @@ export function ItemAttachments({
 				await remove.mutateAsync(attachmentId);
 				toast.success(m["vaults.detail.items.attachments.toast.deleted"]());
 			} catch {
-				toast.error(
-					m["vaults.detail.items.attachments.toast.delete_failed"](),
-				);
+				toast.error(m["vaults.detail.items.attachments.toast.delete_failed"]());
 			}
 		},
 		[m, remove],

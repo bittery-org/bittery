@@ -104,24 +104,30 @@ export function EditVaultDialog({
 		};
 	}, [imagePreview]);
 
-	const processFile = useCallback((file: File | undefined) => {
-		if (!file) return false;
+	const processFile = useCallback(
+		(file: File | undefined) => {
+			if (!file) return false;
 
-		if (!file.type.startsWith("image/")) {
-			toast.error(m["vaults.edit_dialog.toast.invalid_image_file"]());
-			return false;
-		}
+			if (!file.type.startsWith("image/")) {
+				toast.error(m["vaults.edit_dialog.toast.invalid_image_file"]());
+				return false;
+			}
 
-		if (file.size > 2 * 1024 * 1024) {
-			toast.error(m["vaults.edit_dialog.toast.image_too_large"]());
-			return false;
-		}
+			if (file.size > 2 * 1024 * 1024) {
+				toast.error(m["vaults.edit_dialog.toast.image_too_large"]());
+				return false;
+			}
 
-		setImageFile(file);
-		setImagePreview(URL.createObjectURL(file));
-		setRemoveImage(false);
-		return true;
-	}, []);
+			setImageFile(file);
+			setImagePreview(URL.createObjectURL(file));
+			setRemoveImage(false);
+			return true;
+		},
+		[
+			m["vaults.edit_dialog.toast.image_too_large"],
+			m["vaults.edit_dialog.toast.invalid_image_file"],
+		],
+	);
 
 	const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
 		const file = event.target.files?.[0];

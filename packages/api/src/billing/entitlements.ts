@@ -43,14 +43,19 @@ export interface EntitlementLimits {
 
 const activeStatuses = new Set<BillingStatus>(["active", "trialing"]);
 
-export function isBillingActive(status: BillingStatus | null | undefined): boolean {
+export function isBillingActive(
+	status: BillingStatus | null | undefined,
+): boolean {
 	if (!status) {
 		return false;
 	}
 	return activeStatuses.has(status);
 }
 
-export const planEntitlementMap: Record<CloudPlanId, readonly EntitlementKey[]> = {
+export const planEntitlementMap: Record<
+	CloudPlanId,
+	readonly EntitlementKey[]
+> = {
 	free: [],
 	personal: ["sentinel", "share_links", "billing_portal", "attachments"],
 	family: [
@@ -167,7 +172,8 @@ export function assertPaidPlanIsActive(team: TeamBillingState): void {
 	if (!isBillingActive(team.billingStatus)) {
 		throw new TRPCError({
 			code: "FORBIDDEN",
-			message: "A paid subscription is required for this plan. Complete billing to continue.",
+			message:
+				"A paid subscription is required for this plan. Complete billing to continue.",
 		});
 	}
 }

@@ -5,7 +5,9 @@
  * @param params – optional query params, e.g. { plan: "personal" }
  */
 export function webappUrl(path = "/", params?: Record<string, string>): string {
-	const base = (import.meta.env.VITE_WEBAPP_URL ?? "https://app.bittery.com").replace(/\/+$/, "");
+	const base = (
+		import.meta.env.VITE_WEBAPP_URL ?? "https://app.bittery.com"
+	).replace(/\/+$/, "");
 	const url = new URL(path, base);
 	if (params) {
 		for (const [key, value] of Object.entries(params)) {

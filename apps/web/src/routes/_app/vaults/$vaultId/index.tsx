@@ -54,11 +54,11 @@ import type { VaultOption } from "@/components/vault/types";
 import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { DeleteVaultDialog } from "@/components/vaults/delete-vault-dialog";
 import {
-	type UpdateVaultData,
 	EditVaultDialog,
+	type UpdateVaultData,
 } from "@/components/vaults/edit-vault-dialog";
-import { VaultMemberList } from "@/components/vaults/vault-member-list";
 import { VaultAvatar } from "@/components/vaults/vault-avatar";
+import { VaultMemberList } from "@/components/vaults/vault-member-list";
 import { m as messages } from "@/paraglide/messages";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -180,7 +180,9 @@ function VaultDetailPage() {
 			return;
 		}
 
-		const stillExists = decryptedItems.some((item) => item.id === selectedItem.id);
+		const stillExists = decryptedItems.some(
+			(item) => item.id === selectedItem.id,
+		);
 		if (!stillExists) {
 			setSelectedItem(null);
 			setIsEditItemDialogOpen(false);
@@ -259,7 +261,10 @@ function VaultDetailPage() {
 		}
 	};
 
-	const handleUpdateVault = async (targetVaultId: string, data: UpdateVaultData) => {
+	const handleUpdateVault = async (
+		targetVaultId: string,
+		data: UpdateVaultData,
+	) => {
 		await updateVault.mutateAsync({
 			vaultId: targetVaultId,
 			name: data.name,
@@ -292,7 +297,9 @@ function VaultDetailPage() {
 				<div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
 					<Lock className="h-6 w-6 text-muted-foreground" />
 				</div>
-				<p className="text-muted-foreground">{m["vaults.detail.empty.not_found"]()}</p>
+				<p className="text-muted-foreground">
+					{m["vaults.detail.empty.not_found"]()}
+				</p>
 				<Link to="/vaults" className="text-primary text-sm hover:underline">
 					{m["vaults.detail.empty.back_to_vaults"]()}
 				</Link>
@@ -375,7 +382,12 @@ function VaultDetailPage() {
 										{getVaultRoleLabel(role ?? "member", m)}
 									</Badge>
 								</div>
-								<Button variant="ghost" size="sm" className="h-7 text-xs" asChild>
+								<Button
+									variant="ghost"
+									size="sm"
+									className="h-7 text-xs"
+									asChild
+								>
 									<Link to="/vaults">
 										<ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
 										{m["vaults.detail.action.all_vaults"]()}
@@ -540,7 +552,10 @@ function VaultDetailPage() {
 						</TabsTrigger>
 					</TabsList>
 
-					<TabsContent value="items" className="mt-4 flex min-h-0 flex-1 flex-col">
+					<TabsContent
+						value="items"
+						className="mt-4 flex min-h-0 flex-1 flex-col"
+					>
 						<div className="flex min-h-0 flex-1 flex-col space-y-3">
 							<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 								<h2 className="font-semibold text-lg tracking-tight">
@@ -599,9 +614,7 @@ function VaultDetailPage() {
 						{vaultInfo.vaultType === "personal" && (
 							<div className="mt-4 flex items-center gap-3 rounded-xl border border-dashed p-5 text-muted-foreground text-sm">
 								<Lock className="h-5 w-5 shrink-0" />
-								<p>
-									{m["vaults.detail.members.personal_hint"]()}
-								</p>
+								<p>{m["vaults.detail.members.personal_hint"]()}</p>
 							</div>
 						)}
 					</TabsContent>
@@ -612,7 +625,10 @@ function VaultDetailPage() {
 					open={!!selectedItem}
 					onOpenChange={(open) => !open && handleCloseSheet()}
 				>
-					<SheetContent className="w-full min-w-0 sm:max-w-2xl" data-testid="item-detail-sheet">
+					<SheetContent
+						className="w-full min-w-0 sm:max-w-2xl"
+						data-testid="item-detail-sheet"
+					>
 						<div className="h-full min-w-0 overflow-y-auto">
 							{selectedItem && (
 								<ItemDetail
@@ -622,8 +638,16 @@ function VaultDetailPage() {
 									vaultId={vaultId}
 									availableTags={availableTags}
 									canEdit={canWriteItems}
-									onEdit={canWriteItems ? () => setIsEditItemDialogOpen(true) : undefined}
-									onDelete={canWriteItems ? () => setIsDeleteItemDialogOpen(true) : undefined}
+									onEdit={
+										canWriteItems
+											? () => setIsEditItemDialogOpen(true)
+											: undefined
+									}
+									onDelete={
+										canWriteItems
+											? () => setIsDeleteItemDialogOpen(true)
+											: undefined
+									}
 								/>
 							)}
 						</div>
@@ -641,10 +665,18 @@ function VaultDetailPage() {
 			/>
 
 			{/* Edit Item Dialog */}
-			<Dialog open={isEditItemDialogOpen} onOpenChange={setIsEditItemDialogOpen}>
-				<DialogContent className="flex max-h-[85vh] max-w-2xl flex-col" data-testid="edit-item-dialog">
+			<Dialog
+				open={isEditItemDialogOpen}
+				onOpenChange={setIsEditItemDialogOpen}
+			>
+				<DialogContent
+					className="flex max-h-[85vh] max-w-2xl flex-col"
+					data-testid="edit-item-dialog"
+				>
 					<DialogHeader className="shrink-0">
-						<DialogTitle>{m["vaults.detail.edit_item_dialog.title"]()}</DialogTitle>
+						<DialogTitle>
+							{m["vaults.detail.edit_item_dialog.title"]()}
+						</DialogTitle>
 						<DialogDescription>
 							{m["vaults.detail.edit_item_dialog.description"]()}
 						</DialogDescription>
@@ -666,10 +698,15 @@ function VaultDetailPage() {
 			</Dialog>
 
 			{/* Delete Item Confirmation Dialog */}
-			<Dialog open={isDeleteItemDialogOpen} onOpenChange={setIsDeleteItemDialogOpen}>
+			<Dialog
+				open={isDeleteItemDialogOpen}
+				onOpenChange={setIsDeleteItemDialogOpen}
+			>
 				<DialogContent data-testid="delete-item-dialog">
 					<DialogHeader>
-						<DialogTitle>{m["vaults.detail.delete_item_dialog.title"]()}</DialogTitle>
+						<DialogTitle>
+							{m["vaults.detail.delete_item_dialog.title"]()}
+						</DialogTitle>
 						<DialogDescription>
 							{m["vaults.detail.delete_item_dialog.description"]()}
 						</DialogDescription>

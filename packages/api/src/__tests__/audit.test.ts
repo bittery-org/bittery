@@ -107,10 +107,8 @@ describe("Audit Router", () => {
 	});
 
 	test("events are scoped to the actor's team", async () => {
-		const [
-			{ caller: callerA, userId: userA },
-			{ userId: userB },
-		] = await Promise.all([setup(auditRouter), setup(auditRouter)]);
+		const [{ caller: callerA, userId: userA }, { userId: userB }] =
+			await Promise.all([setup(auditRouter), setup(auditRouter)]);
 
 		await Promise.all([
 			createTestTeam(userA, {

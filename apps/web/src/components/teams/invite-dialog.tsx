@@ -9,9 +9,6 @@ import {
 	copyWithToast,
 	Dialog,
 	DialogContent,
-	Popover,
-	PopoverContent,
-	PopoverTrigger,
 	DialogDescription,
 	DialogFooter,
 	DialogHeader,
@@ -19,6 +16,9 @@ import {
 	DialogTrigger,
 	Input,
 	Label,
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
 	Select,
 	SelectContent,
 	SelectItem,
@@ -35,8 +35,8 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import {
-	formatCurrency as formatLocalizedCurrency,
 	formatDate,
+	formatCurrency as formatLocalizedCurrency,
 } from "@/lib/i18n-format";
 import { storage } from "@/lib/storage";
 import { decrypt, rsaDecrypt, rsaEncrypt } from "@/lib/wasm-crypto";
@@ -286,7 +286,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 												"team.invite_dialog.billing_impact.estimated_invoice"
 											]()}
 										</p>
-										<p className="text-lg font-semibold leading-tight tracking-tight tabular-nums">
+										<p className="font-semibold text-lg tabular-nums leading-tight tracking-tight">
 											{formatCurrencyFromCents(
 												seatPreview.estimatedNextPaymentCents,
 												seatPreview.currency,

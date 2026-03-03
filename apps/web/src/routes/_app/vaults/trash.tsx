@@ -17,8 +17,8 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconArrowLeftOutlineDuo18 as ArrowLeft,
 	IconBoxArchive3OutlineDuo18 as Archive,
+	IconArrowLeftOutlineDuo18 as ArrowLeft,
 	IconShareLeft2OutlineDuo18 as Restore,
 	IconTrash2OutlineDuo18 as Trash,
 } from "@bittery/ui/icons";
@@ -259,9 +259,7 @@ function VaultTrashPage() {
 			>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>
-							{m["vaults.trash.delete_dialog.title"]()}
-						</DialogTitle>
+						<DialogTitle>{m["vaults.trash.delete_dialog.title"]()}</DialogTitle>
 						<DialogDescription>
 							{itemToDelete?.title
 								? m["vaults.trash.delete_dialog.description.named"]({

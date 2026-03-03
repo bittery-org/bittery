@@ -106,7 +106,9 @@ export function CreditCardForm({
 					{(field) => (
 						<TitleField
 							field={field}
-							placeholder={m["vaults.detail.items.form.credit_card.placeholder.title"]()}
+							placeholder={m[
+								"vaults.detail.items.form.credit_card.placeholder.title"
+							]()}
 						/>
 					)}
 				</form.Field>
@@ -117,7 +119,9 @@ export function CreditCardForm({
 					{(field) => (
 						<div className="space-y-2">
 							<Label htmlFor={field.name}>
-								{m["vaults.detail.items.form.credit_card.field.cardholder_name.required"]()}
+								{m[
+									"vaults.detail.items.form.credit_card.field.cardholder_name.required"
+								]()}
 							</Label>
 							<Input
 								id={field.name}
@@ -205,7 +209,9 @@ export function CreditCardForm({
 						{(field) => (
 							<div className="space-y-2">
 								<Label htmlFor={field.name}>
-									{m["vaults.detail.items.form.credit_card.field.cvv.required"]()}
+									{m[
+										"vaults.detail.items.form.credit_card.field.cvv.required"
+									]()}
 								</Label>
 								<Input
 									id={field.name}

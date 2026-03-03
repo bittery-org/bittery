@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { billingRouter } from "../routers/billing";
-import { createPublicContext, createTestTeam, setup, truncateAll } from "./test-utils";
+import {
+	createPublicContext,
+	createTestTeam,
+	setup,
+	truncateAll,
+} from "./test-utils";
 
 const originalBitteryMode = process.env.BITTERY_MODE;
 const originalStripeSecret = process.env.STRIPE_SECRET_KEY;
@@ -125,9 +130,9 @@ describe("Billing Router", () => {
 			type: "organization",
 		});
 
-		await expect(caller.createCheckoutSession({ plan: "team" })).rejects.toThrow(
-			"Stripe is not configured",
-		);
+		await expect(
+			caller.createCheckoutSession({ plan: "team" }),
+		).rejects.toThrow("Stripe is not configured");
 	});
 
 	test("createCheckoutSession should be blocked in self-hosted mode", async () => {
@@ -139,9 +144,9 @@ describe("Billing Router", () => {
 			type: "organization",
 		});
 
-		await expect(caller.createCheckoutSession({ plan: "team" })).rejects.toThrow(
-			"Billing is disabled in self-hosted mode",
-		);
+		await expect(
+			caller.createCheckoutSession({ plan: "team" }),
+		).rejects.toThrow("Billing is disabled in self-hosted mode");
 	});
 
 	test("status should reject when user has no team", async () => {

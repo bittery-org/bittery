@@ -46,7 +46,9 @@ function getEventPayloadHash(payload: string): string {
 	return createHash("sha256").update(payload).digest("hex");
 }
 
-function toObjectId(value: string | { id?: string } | null | undefined): string | null {
+function toObjectId(
+	value: string | { id?: string } | null | undefined,
+): string | null {
 	if (!value) return null;
 	if (typeof value === "string") return value;
 	if (typeof value.id === "string") return value.id;
@@ -72,8 +74,6 @@ function mapStripeStatus(status: string | null | undefined): BillingStatus {
 			return "canceled";
 		case "unpaid":
 			return "unpaid";
-		case "incomplete":
-		case "incomplete_expired":
 		default:
 			return "incomplete";
 	}
@@ -100,7 +100,7 @@ async function findTeamForEvent(input: {
 }) {
 	if (input.teamId) {
 		const direct = await db.query.team.findFirst({
-			where: (t, { eq: eqFn }) => eqFn(t.id, input.teamId!),
+			where: (t, { eq: eqFn }) => eqFn(t.id, input.teamId),
 		});
 		if (direct) return direct;
 	}
@@ -108,7 +108,7 @@ async function findTeamForEvent(input: {
 	if (input.stripeSubscriptionId) {
 		const bySubscription = await db.query.team.findFirst({
 			where: (t, { eq: eqFn }) =>
-				eqFn(t.stripeSubscriptionId, input.stripeSubscriptionId!),
+				eqFn(t.stripeSubscriptionId, input.stripeSubscriptionId),
 		});
 		if (bySubscription) return bySubscription;
 	}
@@ -116,7 +116,7 @@ async function findTeamForEvent(input: {
 	if (input.stripeCustomerId) {
 		return db.query.team.findFirst({
 			where: (t, { eq: eqFn }) =>
-				eqFn(t.stripeCustomerId, input.stripeCustomerId!),
+				eqFn(t.stripeCustomerId, input.stripeCustomerId),
 		});
 	}
 
@@ -149,7 +149,7 @@ async function applyCheckoutSessionCompleted(session: Stripe.Checkout.Session) {
 			...(session.subscription
 				? {
 						stripeSubscriptionId: toObjectId(session.subscription as any),
-				  }
+					}
 				: {}),
 			updatedAt: new Date(),
 		})
@@ -185,10 +185,12 @@ async function applySubscriptionUpdate(
 			...(subscription.customer
 				? {
 						stripeCustomerId: toObjectId(subscription.customer as any),
-				  }
+					}
 				: {}),
 			stripeSubscriptionId: clearSubscription ? null : subscription.id,
-			stripeSubscriptionItemId: clearSubscription ? null : firstItem?.id || null,
+			stripeSubscriptionItemId: clearSubscription
+				? null
+				: firstItem?.id || null,
 			stripePriceId: clearSubscription ? null : stripePriceId,
 			seatsPurchased:
 				clearSubscription || !isTeamPlan(billingPlan)
@@ -270,16 +272,27 @@ export async function processStripeWebhookEvent(
 
 	switch (event.type) {
 		case "checkout.session.completed":
-			await applyCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session);
+			await applyCheckoutSessionCompleted(
+				event.data.object as Stripe.Checkout.Session,
+			);
 			break;
 		case "customer.subscription.created":
-			await applySubscriptionUpdate(event.data.object as Stripe.Subscription, "created");
+			await applySubscriptionUpdate(
+				event.data.object as Stripe.Subscription,
+				"created",
+			);
 			break;
 		case "customer.subscription.updated":
-			await applySubscriptionUpdate(event.data.object as Stripe.Subscription, "updated");
+			await applySubscriptionUpdate(
+				event.data.object as Stripe.Subscription,
+				"updated",
+			);
 			break;
 		case "customer.subscription.deleted":
-			await applySubscriptionUpdate(event.data.object as Stripe.Subscription, "deleted");
+			await applySubscriptionUpdate(
+				event.data.object as Stripe.Subscription,
+				"deleted",
+			);
 			break;
 		case "invoice.paid":
 			await applyInvoicePaid(event.data.object as Stripe.Invoice);
@@ -559,9 +572,12 @@ export async function previewUpcomingTeamSeatInvoice(input: {
 		},
 	});
 
-	const fallbackCurrency = upcomingInvoice.currency || subscription.currency || "eur";
+	const fallbackCurrency =
+		upcomingInvoice.currency || subscription.currency || "eur";
 
-	const nonZeroLines = upcomingInvoice.lines.data.filter((line) => line.amount !== 0);
+	const nonZeroLines = upcomingInvoice.lines.data.filter(
+		(line) => line.amount !== 0,
+	);
 	const subscriptionScopedLines = nonZeroLines.filter((line) => {
 		const subscriptionItemId =
 			line.parent?.subscription_item_details?.subscription_item;
@@ -589,7 +605,10 @@ export async function previewUpcomingTeamSeatInvoice(input: {
 		}))
 		.sort((a, b) => a.periodStart.getTime() - b.periodStart.getTime());
 
-	const totalLineItemsCents = lines.reduce((sum, line) => sum + line.amountCents, 0);
+	const totalLineItemsCents = lines.reduce(
+		(sum, line) => sum + line.amountCents,
+		0,
+	);
 	const estimatedNextPaymentCents =
 		typeof upcomingInvoice.amount_due === "number"
 			? upcomingInvoice.amount_due
@@ -613,7 +632,9 @@ export async function parseStripeWebhookEvent(
 ): Promise<Stripe.Event> {
 	const webhookSecret = getStripeWebhookSecret();
 	if (!webhookSecret) {
-		throw new Error("Stripe webhook is not configured (missing STRIPE_WEBHOOK_SECRET)");
+		throw new Error(
+			"Stripe webhook is not configured (missing STRIPE_WEBHOOK_SECRET)",
+		);
 	}
 
 	if (!signatureHeader) {
@@ -621,7 +642,11 @@ export async function parseStripeWebhookEvent(
 	}
 
 	const stripe = getStripeClient();
-	return stripe.webhooks.constructEventAsync(rawBody, signatureHeader, webhookSecret);
+	return stripe.webhooks.constructEventAsync(
+		rawBody,
+		signatureHeader,
+		webhookSecret,
+	);
 }
 
 export function isStripeWebhookConfigured(): boolean {

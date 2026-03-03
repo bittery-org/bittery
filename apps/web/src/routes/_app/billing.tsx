@@ -109,7 +109,10 @@ const paidPlanIds = ["personal", "family", "team"] as const;
 
 type BillingMessageCatalog = ReturnType<typeof useI18n>["m"];
 
-function getPlanLabel(planId: CloudPlanId | string, m: BillingMessageCatalog): string {
+function getPlanLabel(
+	planId: CloudPlanId | string,
+	m: BillingMessageCatalog,
+): string {
 	switch (planId) {
 		case "free":
 			return m["billing.plan.free.name"]();
@@ -127,16 +130,25 @@ function getPlanLabel(planId: CloudPlanId | string, m: BillingMessageCatalog): s
 function getStatusDisplay(status: string, m: BillingMessageCatalog) {
 	switch (status) {
 		case "active":
-			return { label: m["billing.status.active"](), variant: "default" as const };
+			return {
+				label: m["billing.status.active"](),
+				variant: "default" as const,
+			};
 		case "trialing":
-			return { label: m["billing.status.trialing"](), variant: "secondary" as const };
+			return {
+				label: m["billing.status.trialing"](),
+				variant: "secondary" as const,
+			};
 		case "past_due":
 			return {
 				label: m["billing.status.past_due"](),
 				variant: "destructive" as const,
 			};
 		case "canceled":
-			return { label: m["billing.status.canceled"](), variant: "outline" as const };
+			return {
+				label: m["billing.status.canceled"](),
+				variant: "outline" as const,
+			};
 		case "unpaid":
 			return {
 				label: m["billing.status.unpaid"](),
@@ -165,13 +177,19 @@ function getMemberLimitLabel(
 		: m["billing.plan.member_limit.plural"]({ count: memberLimit });
 }
 
-function getSeatsLabel(seatsPurchased: number, m: BillingMessageCatalog): string {
+function getSeatsLabel(
+	seatsPurchased: number,
+	m: BillingMessageCatalog,
+): string {
 	return seatsPurchased === 1
 		? m["billing.subscription.seats.single"]({ count: seatsPurchased })
 		: m["billing.subscription.seats.plural"]({ count: seatsPurchased });
 }
 
-function getShareLinksLimitLabel(limit: number, m: BillingMessageCatalog): string {
+function getShareLinksLimitLabel(
+	limit: number,
+	m: BillingMessageCatalog,
+): string {
 	const countLabel = limit === 0 ? m["billing.limits.none"]() : String(limit);
 	const label =
 		limit === 1
@@ -180,7 +198,10 @@ function getShareLinksLimitLabel(limit: number, m: BillingMessageCatalog): strin
 	return `${countLabel} ${label}`;
 }
 
-function getSharedVaultsLimitLabel(limit: number, m: BillingMessageCatalog): string {
+function getSharedVaultsLimitLabel(
+	limit: number,
+	m: BillingMessageCatalog,
+): string {
 	const countLabel = limit === 0 ? m["billing.limits.none"]() : String(limit);
 	const label =
 		limit === 1
@@ -271,7 +292,9 @@ function BillingRoute() {
 			<div className="mx-auto w-full max-w-6xl">
 				<div className="rounded-2xl border bg-card p-8 text-center">
 					<CircleWarning className="mx-auto h-8 w-8 text-muted-foreground" />
-					<p className="mt-3 font-medium">{m["billing.error.load_status.title"]()}</p>
+					<p className="mt-3 font-medium">
+						{m["billing.error.load_status.title"]()}
+					</p>
 					<p className="mt-1 text-muted-foreground text-sm">
 						{m["billing.error.load_status.description"]()}
 					</p>
@@ -649,7 +672,9 @@ function BillingRoute() {
 											<div className="h-4 w-4 shrink-0 rounded-full border-2 border-muted" />
 										)}
 										<span
-											className={enabled ? "" : "text-muted-foreground line-through"}
+											className={
+												enabled ? "" : "text-muted-foreground line-through"
+											}
 										>
 											{formatEntitlementLabel(key, m)}
 										</span>
@@ -674,7 +699,8 @@ function BillingRoute() {
 											</div>
 										)}
 									{entitlementsQuery.data.limits.shared_vaults !== null &&
-										entitlementsQuery.data.limits.shared_vaults !== undefined && (
+										entitlementsQuery.data.limits.shared_vaults !==
+											undefined && (
 											<div className="text-muted-foreground text-xs">
 												<span className="font-medium text-foreground">
 													{getSharedVaultsLimitLabel(

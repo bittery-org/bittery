@@ -1,12 +1,7 @@
 import { createRateLimitAdapter } from "./create-adapter";
-import type {
-	RateLimitState,
-	WindowIncrementResult,
-} from "./types";
+import type { RateLimitState, WindowIncrementResult } from "./types";
 
-let adapterPromise:
-	| Promise<import("./types").RateLimitAdapter>
-	| null = null;
+let adapterPromise: Promise<import("./types").RateLimitAdapter> | null = null;
 
 async function getAdapter(): Promise<import("./types").RateLimitAdapter> {
 	if (!adapterPromise) {

@@ -1,4 +1,9 @@
 import {
+	type CloudPlanId,
+	featureCategories,
+	planInfo,
+} from "@bittery/shared/pricing";
+import {
 	Briefcase,
 	Check,
 	ChevronDown,
@@ -9,14 +14,16 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
-import { type CloudPlanId, featureCategories, planInfo } from "@bittery/shared/pricing";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /* ─── Plan Data (UI-specific styling layered on shared plan info) ── */
 
-const planIcons: Record<CloudPlanId, React.ComponentType<{ className?: string }>> = {
+const planIcons: Record<
+	CloudPlanId,
+	React.ComponentType<{ className?: string }>
+> = {
 	free: Lock,
 	personal: Sparkle,
 	family: Heart,
@@ -46,9 +53,7 @@ function FeatureValue({ value }: { value: string | boolean }) {
 			</span>
 		);
 	}
-	return (
-		<span className="font-medium text-foreground text-xs">{value}</span>
-	);
+	return <span className="font-medium text-foreground text-xs">{value}</span>;
 }
 
 /* ─── Desktop Table ──────────────────────────────────────────────── */
@@ -113,9 +118,7 @@ function DesktopComparison() {
 						{plans.map((plan) => (
 							<div
 								key={plan.id}
-								className={cn(
-									plan.isPopular && "bg-primary/2",
-								)}
+								className={cn(plan.isPopular && "bg-primary/2")}
 							/>
 						))}
 					</div>
@@ -178,9 +181,7 @@ function MobileComparison() {
 								plan.isPopular && "bg-primary/3",
 							)}
 						>
-							<span className="font-semibold text-xs">
-								{plan.name}
-							</span>
+							<span className="font-semibold text-xs">{plan.name}</span>
 							<span className="mt-0.5 font-bold text-sm">
 								{plan.priceLabel}
 							</span>
@@ -243,9 +244,7 @@ function MobileComparison() {
 															plan.isPopular && "bg-primary/2",
 														)}
 													>
-														<FeatureValue
-															value={feature.values[plan.id]}
-														/>
+														<FeatureValue value={feature.values[plan.id]} />
 													</div>
 												))}
 											</div>

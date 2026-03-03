@@ -147,8 +147,8 @@ export {
 } from "./share";
 // Team Mutation Hooks (write operations)
 export {
-	type TeamAvatarErrorCode,
 	TeamAvatarError,
+	type TeamAvatarErrorCode,
 	useTeamAvatar,
 } from "./team/use-team-avatar";
 // Data Hooks (read operations)

@@ -84,7 +84,9 @@ export function CreditCardDetail({
 			<div className="space-y-4">
 				<div className="space-y-2">
 					<Label>
-						{m["vaults.detail.items.detail.credit_card.field.cardholder_name"]()}
+						{m[
+							"vaults.detail.items.detail.credit_card.field.cardholder_name"
+						]()}
 					</Label>
 					<div className="flex gap-2">
 						<Input value={data.cardholderName} readOnly className="flex-1" />
@@ -166,7 +168,9 @@ export function CreditCardDetail({
 					</div>
 
 					<div className="space-y-2">
-						<Label>{m["vaults.detail.items.detail.credit_card.field.cvv"]()}</Label>
+						<Label>
+							{m["vaults.detail.items.detail.credit_card.field.cvv"]()}
+						</Label>
 						<div className="flex gap-2">
 							<Input
 								type={showCVV ? "text" : "password"}
@@ -185,7 +189,11 @@ export function CreditCardDetail({
 								size="icon"
 								variant="outline"
 								onClick={() =>
-									handleCopy(data.cvv, m["vaults.detail.items.copy.label.cvv"](), m)
+									handleCopy(
+										data.cvv,
+										m["vaults.detail.items.copy.label.cvv"](),
+										m,
+									)
 								}
 							>
 								<Copy size={16} />
@@ -197,7 +205,9 @@ export function CreditCardDetail({
 				{data.billingAddress && (
 					<div className="space-y-2">
 						<Label className="font-medium text-sm">
-							{m["vaults.detail.items.detail.credit_card.field.billing_address"]()}
+							{m[
+								"vaults.detail.items.detail.credit_card.field.billing_address"
+							]()}
 						</Label>
 						<Card>
 							<div className="whitespace-pre-wrap px-4 py-1 text-sm">

@@ -21,7 +21,8 @@ export function TitleField({
 }: TitleFieldProps) {
 	const { m } = useI18n();
 	const resolvedPlaceholder =
-		placeholder ?? m["vaults.detail.items.form.field.title.placeholder.default"]();
+		placeholder ??
+		m["vaults.detail.items.form.field.title.placeholder.default"]();
 	const resolvedLabel =
 		label ?? m["vaults.detail.items.form.field.title.label.required"]();
 

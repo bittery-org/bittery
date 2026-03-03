@@ -334,7 +334,10 @@ export class SyncManager {
 		}
 	}
 
-	private mergeDedupedEvent(existing: SyncEvent, incoming: SyncEvent): SyncEvent {
+	private mergeDedupedEvent(
+		existing: SyncEvent,
+		incoming: SyncEvent,
+	): SyncEvent {
 		if (
 			existing.type === "vault_updated" &&
 			incoming.type === "vault_updated" &&

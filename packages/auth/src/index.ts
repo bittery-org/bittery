@@ -8,13 +8,7 @@ import {
 	deriveServerSession,
 	generateServerEphemeral,
 } from "@bittery/crypto-napi";
-import {
-	db,
-	recoveryVerification,
-	session,
-	user,
-	vaultKey,
-} from "@bittery/db";
+import { db, recoveryVerification, session, user, vaultKey } from "@bittery/db";
 import type { SRPServerChallenge } from "@bittery/types";
 import { and, eq, gt, isNull, ne } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
@@ -23,8 +17,8 @@ import {
 	clearRateLimitBySubject,
 	clearRateLimitState,
 	getRateLimitState,
-	recordRateLimitFailure,
 	RATE_LIMIT_NAMESPACE,
+	recordRateLimitFailure,
 } from "./rate-limit";
 
 export interface DeviceInfo {
@@ -666,7 +660,10 @@ export async function checkRecoveryRateLimit(
 	const id = getRateLimitId(email, ipAddress);
 	const now = new Date();
 
-	const existingLimit = await getRateLimitState(RECOVERY_RATE_LIMIT_NAMESPACE, id);
+	const existingLimit = await getRateLimitState(
+		RECOVERY_RATE_LIMIT_NAMESPACE,
+		id,
+	);
 
 	if (existingLimit?.lockedUntil && existingLimit.lockedUntil > now) {
 		throw new RecoveryRateLimitError();

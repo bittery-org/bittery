@@ -104,7 +104,7 @@ export default function SignInForm({
 				toast.info(m["toast.auth.session_expired"]());
 			}
 		}
-	}, [isLoadingSession, sessionState]);
+	}, [isLoadingSession, sessionState, m["toast.auth.session_expired"]]);
 
 	const form = useForm({
 		defaultValues: {
@@ -236,11 +236,11 @@ export default function SignInForm({
 						<div>
 							<form.Field name="secretKey">
 								{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor={field.name}>
-										{m["auth.signin.label.secret_key"]()}
-									</Label>
-									<div className="relative">
+									<div className="space-y-2">
+										<Label htmlFor={field.name}>
+											{m["auth.signin.label.secret_key"]()}
+										</Label>
+										<div className="relative">
 											<Input
 												id={field.name}
 												name={field.name}
@@ -284,11 +284,11 @@ export default function SignInForm({
 											<button
 												type="button"
 												onClick={() => navigate({ to: "/recover" })}
-											className="text-muted-foreground text-xs underline-offset-4 hover:text-foreground hover:underline"
-										>
-											{m["auth.signin.forgot_password"]()}
-										</button>
-									)}
+												className="text-muted-foreground text-xs underline-offset-4 hover:text-foreground hover:underline"
+											>
+												{m["auth.signin.forgot_password"]()}
+											</button>
+										)}
 									</div>
 									<div className="relative">
 										<Input
@@ -308,11 +308,7 @@ export default function SignInForm({
 											className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
 											onClick={() => setShowPassword(!showPassword)}
 										>
-											{showPassword ? (
-												<EyeOff size={16} />
-											) : (
-												<Eye size={16} />
-											)}
+											{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
 										</Button>
 									</div>
 								</div>

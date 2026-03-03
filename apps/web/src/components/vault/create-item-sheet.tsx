@@ -84,11 +84,17 @@ function getCategoryDescription(
 		case "totp":
 			return m["vaults.detail.items.create_sheet.category.totp.description"]();
 		case "secure-note":
-			return m["vaults.detail.items.create_sheet.category.secure_note.description"]();
+			return m[
+				"vaults.detail.items.create_sheet.category.secure_note.description"
+			]();
 		case "credit-card":
-			return m["vaults.detail.items.create_sheet.category.credit_card.description"]();
+			return m[
+				"vaults.detail.items.create_sheet.category.credit_card.description"
+			]();
 		case "identity":
-			return m["vaults.detail.items.create_sheet.category.identity.description"]();
+			return m[
+				"vaults.detail.items.create_sheet.category.identity.description"
+			]();
 		default:
 			return "";
 	}
@@ -124,7 +130,9 @@ export function CreateItemSheet({
 
 	const handleSubmit = async (data: DecryptedItemData, vaultId: string) => {
 		if (!vaultId) {
-			toast.error(m["vaults.detail.items.create_sheet.toast.no_vault_selected"]());
+			toast.error(
+				m["vaults.detail.items.create_sheet.toast.no_vault_selected"](),
+			);
 			return;
 		}
 

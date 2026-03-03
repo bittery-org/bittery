@@ -31,12 +31,12 @@ import { CreateVaultDialog } from "@/components/vaults/create-vault-dialog";
 import { DeleteVaultDialog } from "@/components/vaults/delete-vault-dialog";
 import {
 	type EditVaultData,
-	type UpdateVaultData,
 	EditVaultDialog,
+	type UpdateVaultData,
 } from "@/components/vaults/edit-vault-dialog";
+import { VaultAvatar } from "@/components/vaults/vault-avatar";
 import { m as messages } from "@/paraglide/messages";
 import { useI18n } from "@/providers/i18n-provider";
-import { VaultAvatar } from "@/components/vaults/vault-avatar";
 
 export const Route = createFileRoute("/_app/vaults/")({
 	component: VaultsPage,
@@ -108,8 +108,12 @@ function VaultsPage() {
 			: m["vaults.page.hero.stat.vault_count.plural"]({ count: totalVaults });
 	const totalItemsLabel =
 		totalItems === 1
-			? m["vaults.page.hero.stat.item_count_total.single"]({ count: totalItems })
-			: m["vaults.page.hero.stat.item_count_total.plural"]({ count: totalItems });
+			? m["vaults.page.hero.stat.item_count_total.single"]({
+					count: totalItems,
+				})
+			: m["vaults.page.hero.stat.item_count_total.plural"]({
+					count: totalItems,
+				});
 
 	const handleCreateVault = async (data: CreateVaultInput) => {
 		const result = await createVault.mutateAsync(data);
@@ -313,12 +317,12 @@ function VaultsPage() {
 												<div className="absolute top-0 left-0 h-full w-1 rounded-l-xl bg-primary/80" />
 												<div className="flex items-start justify-between gap-3">
 													<div className="flex min-w-0 items-center gap-3">
-												<VaultAvatar
-													name={vault.vaultName}
-													icon={vault.vaultIcon}
-													imageUrl={vault.vaultImageUrl}
-													size="md"
-												/>
+														<VaultAvatar
+															name={vault.vaultName}
+															icon={vault.vaultIcon}
+															imageUrl={vault.vaultImageUrl}
+															size="md"
+														/>
 														<div className="min-w-0">
 															<h3
 																className="truncate font-semibold leading-tight"

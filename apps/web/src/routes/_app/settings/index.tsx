@@ -18,11 +18,11 @@ import {
 	IconCircleCheck2OutlineDuo18 as CheckCircle,
 	IconClockTimeOutlineDuo18 as Clock,
 	IconExternalLinkOutlineDuo18 as ExternalLink,
-	IconFlagGermany,
-	IconFlagUnitedStates,
 	IconFingerprintOutlineDuo18 as Fingerprint,
 	IconGear3OutlineDuo18 as Gear,
 	IconSquareTerminalOutlineDuo18 as Github,
+	IconFlagGermany,
+	IconFlagUnitedStates,
 	IconKeyOutlineDuo18 as Key,
 	IconLockKeyOutlineDuo18 as LockKey,
 	IconEnvelopeOutlineDuo18 as Mail,
@@ -425,7 +425,7 @@ function SettingsPage() {
 								>
 									<SelectTrigger
 										aria-label={m["settings.general.language.title"]()}
-										className="h-7 min-w-28 border-0 bg-transparent px-1.5 text-sm shadow-none ring-0 focus:ring-0 max-w-30"
+										className="h-7 min-w-28 max-w-30 border-0 bg-transparent px-1.5 text-sm shadow-none ring-0 focus:ring-0"
 									>
 										<ActiveLocaleFlag size={14} className="shrink-0" />
 										<span className="truncate">{activeLocaleLabel}</span>

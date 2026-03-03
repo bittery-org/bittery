@@ -5,11 +5,7 @@
 
 import { deleteAllUserSessions } from "@bittery/auth";
 import { db, team, teamInvitation, user, vaultKey } from "@bittery/db";
-import {
-	item,
-	vault,
-	vaultKeyRotation,
-} from "@bittery/db/schema/vault";
+import { item, vault, vaultKeyRotation } from "@bittery/db/schema/vault";
 import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -29,12 +25,12 @@ import {
 	createSyncEvent,
 	type SyncBroadcastPayload,
 } from "../sync-helper";
+import { logAuditEvent } from "../utils/audit";
 import {
 	assertInvitationPendingVaultKeysAreAuthorized,
 	normalizePendingVaultKeys,
 	parsePendingVaultKeys,
 } from "../utils/pending-vault-keys";
-import { logAuditEvent } from "../utils/audit";
 
 /**
  * Helper function to get image URL from imageKey
@@ -385,8 +381,7 @@ export const teamRouter = router({
 			if (userData.role === "owner") {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
-					message:
-						"The team owner cannot leave. Transfer ownership first.",
+					message: "The team owner cannot leave. Transfer ownership first.",
 				});
 			}
 
@@ -414,9 +409,7 @@ export const teamRouter = router({
 						})
 					: [];
 
-			const vaultsWithAccess = new Set(
-				userVaultKeys.map((vk) => vk.vaultId),
-			);
+			const vaultsWithAccess = new Set(userVaultKeys.map((vk) => vk.vaultId));
 			const rotationVaultIds = new Set(
 				input.vaultRotations.map((vr) => vr.vaultId),
 			);
@@ -434,7 +427,11 @@ export const teamRouter = router({
 			const vaultMap = new Map(teamVaults.map((v) => [v.id, v]));
 
 			// Create rotation records
-			const rotationRecords: Array<{ vaultId: string; rotationId: string; newKeyVersion: number }> = [];
+			const rotationRecords: Array<{
+				vaultId: string;
+				rotationId: string;
+				newKeyVersion: number;
+			}> = [];
 			for (const vaultRotation of input.vaultRotations) {
 				const vaultData = vaultMap.get(vaultRotation.vaultId);
 				if (!vaultData) continue;
@@ -454,7 +451,11 @@ export const teamRouter = router({
 					status: "in_progress",
 				});
 
-				rotationRecords.push({ vaultId: vaultRotation.vaultId, rotationId, newKeyVersion });
+				rotationRecords.push({
+					vaultId: vaultRotation.vaultId,
+					rotationId,
+					newKeyVersion,
+				});
 			}
 
 			try {
@@ -491,7 +492,8 @@ export const teamRouter = router({
 						}
 
 						// Re-encrypt items
-						for (const reEncryptedItem of vaultRotation.keyRotation.reEncryptedItems) {
+						for (const reEncryptedItem of vaultRotation.keyRotation
+							.reEncryptedItems) {
 							await tx
 								.update(item)
 								.set({
@@ -533,7 +535,10 @@ export const teamRouter = router({
 									userId: ctx.session.userId,
 									clientId: input.clientId,
 									version: record.newKeyVersion,
-									metadata: { removedUserId: ctx.session.userId, reason: "member_left" },
+									metadata: {
+										removedUserId: ctx.session.userId,
+										reason: "member_left",
+									},
 								},
 								tx,
 								ctx.clientId,
@@ -606,7 +611,8 @@ export const teamRouter = router({
 
 				throw new TRPCError({
 					code: "INTERNAL_SERVER_ERROR",
-					message: "Failed to leave team during key rotation. Please try again.",
+					message:
+						"Failed to leave team during key rotation. Please try again.",
 				});
 			}
 		}),
@@ -623,7 +629,8 @@ export const teamRouter = router({
 				with: { team: true },
 			});
 
-			if (!userData || userData.teamId !== input.teamId) {
+			const teamId = userData?.teamId;
+			if (!teamId || teamId !== input.teamId) {
 				throw new TRPCError({
 					code: "FORBIDDEN",
 					message: "You are not a member of this team",
@@ -631,17 +638,14 @@ export const teamRouter = router({
 			}
 
 			const teamVaults = await db.query.vault.findMany({
-				where: (v, { eq: eqFn }) => eqFn(v.teamId, userData.teamId!),
+				where: (v, { eq: eqFn }) => eqFn(v.teamId, teamId),
 			});
 
 			const vaultRotationData = await Promise.all(
 				teamVaults.map(async (v) => {
 					const members = await db.query.vaultKey.findMany({
 						where: (vk, { and, eq: eqFn, ne }) =>
-							and(
-								eqFn(vk.vaultId, v.id),
-								ne(vk.userId, ctx.session.userId),
-							),
+							and(eqFn(vk.vaultId, v.id), ne(vk.userId, ctx.session.userId)),
 						with: { user: true },
 					});
 
@@ -753,10 +757,7 @@ export const teamRouter = router({
 						// Get remaining members (excluding the user being removed)
 						const members = await db.query.vaultKey.findMany({
 							where: (vk, { and, eq: eqFn, ne }) =>
-								and(
-									eqFn(vk.vaultId, v.id),
-									ne(vk.userId, input.excludeUserId),
-								),
+								and(eqFn(vk.vaultId, v.id), ne(vk.userId, input.excludeUserId)),
 							with: { user: true },
 						});
 
@@ -892,9 +893,7 @@ export const teamRouter = router({
 							})
 						: [];
 
-				const vaultsWithAccess = new Set(
-					userVaultKeys.map((vk) => vk.vaultId),
-				);
+				const vaultsWithAccess = new Set(userVaultKeys.map((vk) => vk.vaultId));
 				const rotationVaultIds = new Set(
 					input.vaultRotations.map((vr) => vr.vaultId),
 				);
@@ -913,7 +912,11 @@ export const teamRouter = router({
 				const vaultMap = new Map(teamVaults.map((v) => [v.id, v]));
 
 				// Create key rotation records for each vault
-				const rotationRecords: Array<{ vaultId: string; rotationId: string; newKeyVersion: number }> = [];
+				const rotationRecords: Array<{
+					vaultId: string;
+					rotationId: string;
+					newKeyVersion: number;
+				}> = [];
 				for (const vaultRotation of input.vaultRotations) {
 					const vaultData = vaultMap.get(vaultRotation.vaultId);
 					if (!vaultData) continue;
@@ -933,7 +936,11 @@ export const teamRouter = router({
 						status: "in_progress",
 					});
 
-					rotationRecords.push({ vaultId: vaultRotation.vaultId, rotationId, newKeyVersion });
+					rotationRecords.push({
+						vaultId: vaultRotation.vaultId,
+						rotationId,
+						newKeyVersion,
+					});
 				}
 
 				try {
@@ -985,7 +992,8 @@ export const teamRouter = router({
 							}
 
 							// Re-encrypt all items with new vault key
-							for (const reEncryptedItem of vaultRotation.keyRotation.reEncryptedItems) {
+							for (const reEncryptedItem of vaultRotation.keyRotation
+								.reEncryptedItems) {
 								const updatedItem = await tx
 									.update(item)
 									.set({
@@ -1086,11 +1094,7 @@ export const teamRouter = router({
 						}
 
 						// Create a personal team with free plan for the removed user
-						await createPersonalTeamForUser(
-							input.userId,
-							targetUser.name,
-							tx,
-						);
+						await createPersonalTeamForUser(input.userId, targetUser.name, tx);
 					});
 
 					// After transaction commits: invalidate sessions and broadcast
@@ -1318,15 +1322,15 @@ export const teamRouter = router({
 					email: z.string().email(),
 					role: z.enum(["admin", "member"]).default("member"),
 					// Encrypted vault keys for existing users (encrypted with their RSA public key)
-						pendingVaultKeys: z
-							.array(
-								z.object({
-									vaultId: z.string().min(1),
-									encryptedVaultKey: z.string().min(1),
-								}),
-							)
-							.optional(),
-					}),
+					pendingVaultKeys: z
+						.array(
+							z.object({
+								vaultId: z.string().min(1),
+								encryptedVaultKey: z.string().min(1),
+							}),
+						)
+						.optional(),
+				}),
 			)
 			.mutation(async ({ ctx, input }) => {
 				// Verify user has owner or admin role in their team
@@ -1404,26 +1408,26 @@ export const teamRouter = router({
 						),
 				});
 
-					if (existingInvitation) {
-						throw new TRPCError({
-							code: "BAD_REQUEST",
-							message: "An invitation is already pending for this email",
-						});
-					}
-
-					const normalizedPendingVaultKeys = normalizePendingVaultKeys(
-						input.pendingVaultKeys,
-					);
-					await assertInvitationPendingVaultKeysAreAuthorized({
-						teamId: input.teamId,
-						inviterId: ctx.session.userId,
-						pendingVaultKeys: normalizedPendingVaultKeys,
+				if (existingInvitation) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "An invitation is already pending for this email",
 					});
+				}
 
-					const invitationId = nanoid();
-					const token = nanoid(32); // Longer token for security
-					const expiresAt = new Date();
-					expiresAt.setDate(expiresAt.getDate() + 7); // 7 days expiry
+				const normalizedPendingVaultKeys = normalizePendingVaultKeys(
+					input.pendingVaultKeys,
+				);
+				await assertInvitationPendingVaultKeysAreAuthorized({
+					teamId: input.teamId,
+					inviterId: ctx.session.userId,
+					pendingVaultKeys: normalizedPendingVaultKeys,
+				});
+
+				const invitationId = nanoid();
+				const token = nanoid(32); // Longer token for security
+				const expiresAt = new Date();
+				expiresAt.setDate(expiresAt.getDate() + 7); // 7 days expiry
 
 				await db.insert(teamInvitation).values({
 					id: invitationId,
@@ -1431,13 +1435,13 @@ export const teamRouter = router({
 					email: input.email,
 					role: input.role,
 					invitedById: ctx.session.userId,
-						token,
-						expiresAt,
-						// Store pending vault keys if provided (for existing users)
-						pendingVaultKeys: normalizedPendingVaultKeys.length
-							? JSON.stringify(normalizedPendingVaultKeys)
-							: null,
-					});
+					token,
+					expiresAt,
+					// Store pending vault keys if provided (for existing users)
+					pendingVaultKeys: normalizedPendingVaultKeys.length
+						? JSON.stringify(normalizedPendingVaultKeys)
+						: null,
+				});
 
 				// Return user's public key if they exist (so client can encrypt vault keys)
 				return {
@@ -1465,20 +1469,20 @@ export const teamRouter = router({
 					});
 				}
 
-					// Must be current owner/admin in the invitation team
-					const userData = await db.query.user.findFirst({
-						where: (user, { eq }) => eq(user.id, ctx.session.userId),
+				// Must be current owner/admin in the invitation team
+				const userData = await db.query.user.findFirst({
+					where: (user, { eq }) => eq(user.id, ctx.session.userId),
+				});
+
+				const isAdminOrOwner =
+					userData?.teamId === invitation.teamId &&
+					(userData?.role === "owner" || userData?.role === "admin");
+
+				if (!isAdminOrOwner) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Insufficient permissions",
 					});
-
-					const isAdminOrOwner =
-						userData?.teamId === invitation.teamId &&
-						(userData?.role === "owner" || userData?.role === "admin");
-
-					if (!isAdminOrOwner) {
-						throw new TRPCError({
-							code: "FORBIDDEN",
-							message: "Insufficient permissions",
-						});
 				}
 				assertTeamManagementEntitlement(invitation.team);
 
@@ -1507,20 +1511,20 @@ export const teamRouter = router({
 					});
 				}
 
-					// Must be current owner/admin in the invitation team
-					const userData = await db.query.user.findFirst({
-						where: (user, { eq }) => eq(user.id, ctx.session.userId),
+				// Must be current owner/admin in the invitation team
+				const userData = await db.query.user.findFirst({
+					where: (user, { eq }) => eq(user.id, ctx.session.userId),
+				});
+
+				const isAdminOrOwner =
+					userData?.teamId === invitation.teamId &&
+					(userData?.role === "owner" || userData?.role === "admin");
+
+				if (!isAdminOrOwner) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Insufficient permissions",
 					});
-
-					const isAdminOrOwner =
-						userData?.teamId === invitation.teamId &&
-						(userData?.role === "owner" || userData?.role === "admin");
-
-					if (!isAdminOrOwner) {
-						throw new TRPCError({
-							code: "FORBIDDEN",
-							message: "Insufficient permissions",
-						});
 				}
 
 				assertTeamManagementEntitlement(invitation.team);
@@ -1626,58 +1630,61 @@ export const teamRouter = router({
 				}
 
 				// Check user doesn't already have a team
-					if (userData.teamId) {
-						throw new TRPCError({
-							code: "BAD_REQUEST",
-							message: "You already belong to a team",
+				if (userData.teamId) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "You already belong to a team",
+					});
+				}
+
+				const pendingKeys = parsePendingVaultKeys(invitation.pendingVaultKeys);
+				await assertInvitationPendingVaultKeysAreAuthorized({
+					teamId: invitation.teamId,
+					inviterId: invitation.invitedById,
+					pendingVaultKeys: pendingKeys,
+				});
+
+				// Convert invitation role to vault role
+				const vaultRole = invitation.role === "admin" ? "admin" : "member";
+
+				await db.transaction(async (tx) => {
+					// Link user to team
+					await tx
+						.update(user)
+						.set({ teamId: invitation.teamId, role: invitation.role })
+						.where(eq(user.id, ctx.session.userId));
+
+					for (const keyData of pendingKeys) {
+						// Skip duplicate provisioning if access already exists.
+						const existingKey = await tx.query.vaultKey.findFirst({
+							where: (vk, { and, eq }) =>
+								and(
+									eq(vk.vaultId, keyData.vaultId),
+									eq(vk.userId, ctx.session.userId),
+								),
 						});
+						if (!existingKey) {
+							await tx.insert(vaultKey).values({
+								id: nanoid(),
+								vaultId: keyData.vaultId,
+								userId: ctx.session.userId,
+								encryptedVaultKey: keyData.encryptedVaultKey,
+								role: vaultRole,
+							});
+						}
 					}
 
-					const pendingKeys = parsePendingVaultKeys(invitation.pendingVaultKeys);
-					await assertInvitationPendingVaultKeysAreAuthorized({
-						teamId: invitation.teamId,
-						inviterId: invitation.invitedById,
-						pendingVaultKeys: pendingKeys,
-					});
+					// Mark invitation as accepted
+					await tx
+						.update(teamInvitation)
+						.set({ status: "accepted", acceptedAt: new Date() })
+						.where(eq(teamInvitation.id, invitation.id));
+				});
 
-					// Convert invitation role to vault role
-					const vaultRole = invitation.role === "admin" ? "admin" : "member";
-
-					await db.transaction(async (tx) => {
-						// Link user to team
-						await tx
-							.update(user)
-							.set({ teamId: invitation.teamId, role: invitation.role })
-							.where(eq(user.id, ctx.session.userId));
-
-						for (const keyData of pendingKeys) {
-							// Skip duplicate provisioning if access already exists.
-							const existingKey = await tx.query.vaultKey.findFirst({
-								where: (vk, { and, eq }) =>
-									and(
-										eq(vk.vaultId, keyData.vaultId),
-										eq(vk.userId, ctx.session.userId),
-									),
-							});
-							if (!existingKey) {
-								await tx.insert(vaultKey).values({
-									id: nanoid(),
-									vaultId: keyData.vaultId,
-									userId: ctx.session.userId,
-									encryptedVaultKey: keyData.encryptedVaultKey,
-									role: vaultRole,
-								});
-							}
-						}
-
-						// Mark invitation as accepted
-						await tx
-							.update(teamInvitation)
-							.set({ status: "accepted", acceptedAt: new Date() })
-							.where(eq(teamInvitation.id, invitation.id));
-					});
-
-					await syncSeatsBestEffort(invitation.teamId, invitation.team.billingPlan);
+				await syncSeatsBestEffort(
+					invitation.teamId,
+					invitation.team.billingPlan,
+				);
 
 				return {
 					teamId: invitation.team.id,

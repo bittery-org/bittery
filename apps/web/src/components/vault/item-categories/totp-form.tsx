@@ -68,7 +68,9 @@ export function TotpForm({
 		},
 		onSubmit: async ({ value }) => {
 			if (!isValidBase32(value.totpSecret)) {
-				setSecretError(m["vaults.detail.items.form.totp.error.invalid_setup_key"]());
+				setSecretError(
+					m["vaults.detail.items.form.totp.error.invalid_setup_key"](),
+				);
 				return;
 			}
 
@@ -159,7 +161,9 @@ export function TotpForm({
 					setSecretError(null);
 					setHasImported(true);
 					if (!silent) {
-						toast.success(m["vaults.detail.items.totp.toast.setup_key_pasted"]());
+						toast.success(
+							m["vaults.detail.items.totp.toast.setup_key_pasted"](),
+						);
 					}
 					return true;
 				}
@@ -172,7 +176,9 @@ export function TotpForm({
 				return false;
 			} catch {
 				if (!silent) {
-					toast.error(m["vaults.detail.items.totp.toast.clipboard_read_failed"]());
+					toast.error(
+						m["vaults.detail.items.totp.toast.clipboard_read_failed"](),
+					);
 				}
 				return false;
 			}
@@ -245,7 +251,9 @@ export function TotpForm({
 							className="w-full"
 							onClick={handleManualEntry}
 						>
-							{m["vaults.detail.items.form.totp.action.enter_setup_key_manually"]()}
+							{m[
+								"vaults.detail.items.form.totp.action.enter_setup_key_manually"
+							]()}
 						</Button>
 					</div>
 
@@ -291,7 +299,9 @@ export function TotpForm({
 						<TitleField
 							field={field}
 							label={m["vaults.detail.items.form.totp.field.name"]()}
-							placeholder={m["vaults.detail.items.form.totp.placeholder.name"]()}
+							placeholder={m[
+								"vaults.detail.items.form.totp.placeholder.name"
+							]()}
 							autoFocus={!field.state.value}
 						/>
 					)}
@@ -319,7 +329,9 @@ export function TotpForm({
 										field.handleChange(e.target.value);
 										validateSecret(e.target.value);
 									}}
-									placeholder={m["vaults.detail.items.form.totp.placeholder.setup_key"]()}
+									placeholder={m[
+										"vaults.detail.items.form.totp.placeholder.setup_key"
+									]()}
 									className={cn(
 										"flex-1",
 										"font-mono",
@@ -363,7 +375,9 @@ export function TotpForm({
 									value={field.state.value}
 									onBlur={field.handleBlur}
 									onChange={(e) => field.handleChange(e.target.value)}
-									placeholder={m["vaults.detail.items.form.totp.placeholder.service"]()}
+									placeholder={m[
+										"vaults.detail.items.form.totp.placeholder.service"
+									]()}
 								/>
 							</div>
 						)}
@@ -383,7 +397,9 @@ export function TotpForm({
 									value={field.state.value}
 									onBlur={field.handleBlur}
 									onChange={(e) => field.handleChange(e.target.value)}
-									placeholder={m["vaults.detail.items.form.totp.placeholder.account"]()}
+									placeholder={m[
+										"vaults.detail.items.form.totp.placeholder.account"
+									]()}
 								/>
 							</div>
 						)}

@@ -15,6 +15,7 @@ import {
 import { WorkerCrypto } from "@/lib/worker-crypto";
 
 export type { CloudPlanId } from "@bittery/shared/pricing";
+
 type CloudPlanId = import("@bittery/shared/pricing").CloudPlanId;
 
 export function useSignupForm({
@@ -126,9 +127,10 @@ export function useSignupForm({
 				variables.plan !== "free"
 			) {
 				try {
-					const checkout = await trpcClient.billing.createCheckoutSession.mutate({
-						plan: variables.plan,
-					});
+					const checkout =
+						await trpcClient.billing.createCheckoutSession.mutate({
+							plan: variables.plan,
+						});
 
 					if (checkout.url) {
 						window.location.href = checkout.url;
@@ -168,7 +170,6 @@ export function useSignupForm({
 			organizationName: "",
 		},
 		onSubmit: async ({ value }) => {
-
 			if (!hasDownloadedKit) {
 				toast.error("Please download your Emergency Kit before continuing");
 				return;

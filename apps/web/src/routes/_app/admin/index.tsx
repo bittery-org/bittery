@@ -84,7 +84,9 @@ interface Filters {
 const DEFAULT_LIMIT = 50;
 
 function toLocalDateTimeValue(date: Date): string {
-	const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+	const localDate = new Date(
+		date.getTime() - date.getTimezoneOffset() * 60_000,
+	);
 	return localDate.toISOString().slice(0, 16);
 }
 
@@ -164,7 +166,10 @@ function getResultLabel(
 	}
 }
 
-function getSourceLabel(source: TeamEvent["source"], m: AdminMessageCatalog): string {
+function getSourceLabel(
+	source: TeamEvent["source"],
+	m: AdminMessageCatalog,
+): string {
 	switch (source) {
 		case "audit_log":
 			return m["admin.page.event.source.audit_log"]();
@@ -346,10 +351,12 @@ function TeamAdminConsolePage() {
 
 					<div className="grid gap-3 md:grid-cols-2 lg:grid-cols-6">
 						<div className="relative md:col-span-2">
-							<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
+							<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 							<Input
 								value={filters.search}
-								onChange={(event) => updateFilters({ search: event.target.value })}
+								onChange={(event) =>
+									updateFilters({ search: event.target.value })
+								}
 								placeholder={m["admin.page.filter.search.placeholder"]()}
 								className="pl-9"
 							/>
@@ -363,7 +370,9 @@ function TeamAdminConsolePage() {
 						>
 							<SelectTrigger>
 								<SelectValue
-									placeholder={m["admin.page.filter.action_group.placeholder"]()}
+									placeholder={m[
+										"admin.page.filter.action_group.placeholder"
+									]()}
 								/>
 							</SelectTrigger>
 							<SelectContent>
@@ -398,7 +407,9 @@ function TeamAdminConsolePage() {
 							}
 						>
 							<SelectTrigger>
-								<SelectValue placeholder={m["admin.page.filter.result.placeholder"]()} />
+								<SelectValue
+									placeholder={m["admin.page.filter.result.placeholder"]()}
+								/>
 							</SelectTrigger>
 							<SelectContent>
 								<SelectItem value="all">
@@ -418,7 +429,9 @@ function TeamAdminConsolePage() {
 							onValueChange={(value) => updateFilters({ actorUserId: value })}
 						>
 							<SelectTrigger>
-								<SelectValue placeholder={m["admin.page.filter.actor.placeholder"]()} />
+								<SelectValue
+									placeholder={m["admin.page.filter.actor.placeholder"]()}
+								/>
 							</SelectTrigger>
 							<SelectContent>
 								<SelectItem value="all">
@@ -479,11 +492,21 @@ function TeamAdminConsolePage() {
 								<TableHeader>
 									<TableRow>
 										<TableHead>{m["admin.page.table.header.time"]()}</TableHead>
-										<TableHead>{m["admin.page.table.header.action"]()}</TableHead>
-										<TableHead>{m["admin.page.table.header.actor"]()}</TableHead>
-										<TableHead>{m["admin.page.table.header.entity"]()}</TableHead>
-										<TableHead>{m["admin.page.table.header.result"]()}</TableHead>
-										<TableHead>{m["admin.page.table.header.network"]()}</TableHead>
+										<TableHead>
+											{m["admin.page.table.header.action"]()}
+										</TableHead>
+										<TableHead>
+											{m["admin.page.table.header.actor"]()}
+										</TableHead>
+										<TableHead>
+											{m["admin.page.table.header.entity"]()}
+										</TableHead>
+										<TableHead>
+											{m["admin.page.table.header.result"]()}
+										</TableHead>
+										<TableHead>
+											{m["admin.page.table.header.network"]()}
+										</TableHead>
 										<TableHead className="w-[90px]" />
 									</TableRow>
 								</TableHeader>
@@ -526,7 +549,10 @@ function TeamAdminConsolePage() {
 											</TableCell>
 											<TableCell className="text-xs">
 												<div className="space-y-1">
-													<div>{event.network.maskedIp || m["admin.page.fallback.empty"]()}</div>
+													<div>
+														{event.network.maskedIp ||
+															m["admin.page.fallback.empty"]()}
+													</div>
 													<div className="text-muted-foreground">
 														{event.network.maskedUserAgent ||
 															m["admin.page.fallback.empty"]()}
@@ -570,80 +596,86 @@ function TeamAdminConsolePage() {
 				open={!!selectedEvent}
 				onOpenChange={(open) => !open && setSelectedEvent(null)}
 			>
-					<DialogContent className="sm:max-w-2xl">
-						<DialogHeader>
-							<DialogTitle>
-								{selectedEvent
-									? getEventActionLabel(selectedEvent.action, m)
-									: m["admin.page.dialog.fallback_title"]()}
-							</DialogTitle>
-							<DialogDescription>
-								{m["admin.page.dialog.description"]()}
-							</DialogDescription>
-						</DialogHeader>
-						{selectedEvent && (
-							<ScrollArea className="max-h-[70vh]">
-								<div className="space-y-4">
-									<div className="grid gap-2 sm:grid-cols-2">
-										<Detail
-											label={m["admin.page.detail.label.timestamp"]()}
-											value={formatTimestamp(selectedEvent.timestamp)}
-										/>
-										<Detail
-											label={m["admin.page.detail.label.result"]()}
-											value={getResultLabel(selectedEvent.result, m)}
-											className={
-												selectedEvent.result === "failure"
-													? "text-destructive"
+				<DialogContent className="sm:max-w-2xl">
+					<DialogHeader>
+						<DialogTitle>
+							{selectedEvent
+								? getEventActionLabel(selectedEvent.action, m)
+								: m["admin.page.dialog.fallback_title"]()}
+						</DialogTitle>
+						<DialogDescription>
+							{m["admin.page.dialog.description"]()}
+						</DialogDescription>
+					</DialogHeader>
+					{selectedEvent && (
+						<ScrollArea className="max-h-[70vh]">
+							<div className="space-y-4">
+								<div className="grid gap-2 sm:grid-cols-2">
+									<Detail
+										label={m["admin.page.detail.label.timestamp"]()}
+										value={formatTimestamp(selectedEvent.timestamp)}
+									/>
+									<Detail
+										label={m["admin.page.detail.label.result"]()}
+										value={getResultLabel(selectedEvent.result, m)}
+										className={
+											selectedEvent.result === "failure"
+												? "text-destructive"
 												: "text-emerald-600"
 										}
-										/>
-										<Detail
-											label={m["admin.page.detail.label.actor"]()}
-											value={
-												selectedEvent.actor.email ||
-												selectedEvent.actor.name ||
-												m["admin.page.fallback.unknown_actor"]()
-											}
-										/>
-										<Detail
-											label={m["admin.page.detail.label.source"]()}
-											value={getSourceLabel(selectedEvent.source, m)}
-										/>
-										<Detail
-											label={m["admin.page.detail.label.entity_type"]()}
-											value={getEntityTypeLabel(selectedEvent.entity.type, m)}
-										/>
-										<Detail
-											label={m["admin.page.detail.label.entity_id"]()}
-											value={selectedEvent.entity.id || m["admin.page.fallback.empty"]()}
-										/>
-									</div>
+									/>
+									<Detail
+										label={m["admin.page.detail.label.actor"]()}
+										value={
+											selectedEvent.actor.email ||
+											selectedEvent.actor.name ||
+											m["admin.page.fallback.unknown_actor"]()
+										}
+									/>
+									<Detail
+										label={m["admin.page.detail.label.source"]()}
+										value={getSourceLabel(selectedEvent.source, m)}
+									/>
+									<Detail
+										label={m["admin.page.detail.label.entity_type"]()}
+										value={getEntityTypeLabel(selectedEvent.entity.type, m)}
+									/>
+									<Detail
+										label={m["admin.page.detail.label.entity_id"]()}
+										value={
+											selectedEvent.entity.id ||
+											m["admin.page.fallback.empty"]()
+										}
+									/>
+								</div>
 
-									<div className="space-y-2 rounded-lg border p-3">
-										<h3 className="font-medium text-sm">
-											{m["admin.page.section.network_details"]()}
-										</h3>
-										<Detail
-											label={m["admin.page.detail.label.ip_address"]()}
-											value={selectedEvent.network.fullIp || m["admin.page.fallback.empty"]()}
-										/>
-										<Detail
-											label={m["admin.page.detail.label.user_agent"]()}
-											value={
-												selectedEvent.network.fullUserAgent ||
-												m["admin.page.fallback.empty"]()
-											}
-										/>
-									</div>
+								<div className="space-y-2 rounded-lg border p-3">
+									<h3 className="font-medium text-sm">
+										{m["admin.page.section.network_details"]()}
+									</h3>
+									<Detail
+										label={m["admin.page.detail.label.ip_address"]()}
+										value={
+											selectedEvent.network.fullIp ||
+											m["admin.page.fallback.empty"]()
+										}
+									/>
+									<Detail
+										label={m["admin.page.detail.label.user_agent"]()}
+										value={
+											selectedEvent.network.fullUserAgent ||
+											m["admin.page.fallback.empty"]()
+										}
+									/>
+								</div>
 
-									<div className="space-y-2 rounded-lg border p-3">
-										<h3 className="font-medium text-sm">
-											{m["admin.page.section.metadata"]()}
-										</h3>
-										<pre className="overflow-x-auto rounded bg-muted p-3 text-xs">
-											{JSON.stringify(selectedEvent.metadata, null, 2)}
-										</pre>
+								<div className="space-y-2 rounded-lg border p-3">
+									<h3 className="font-medium text-sm">
+										{m["admin.page.section.metadata"]()}
+									</h3>
+									<pre className="overflow-x-auto rounded bg-muted p-3 text-xs">
+										{JSON.stringify(selectedEvent.metadata, null, 2)}
+									</pre>
 								</div>
 							</div>
 						</ScrollArea>

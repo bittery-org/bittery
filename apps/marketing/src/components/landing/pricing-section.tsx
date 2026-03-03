@@ -1,22 +1,53 @@
+import {
+	type CloudPlanId,
+	planFeatureBullets,
+	planInfo,
+} from "@bittery/shared/pricing";
 import { ArrowRight, Check, Lock } from "lucide-react";
 import { motion } from "motion/react";
-import { type CloudPlanId, planFeatureBullets, planInfo } from "@bittery/shared/pricing";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { signupUrl } from "@/lib/urls";
+import { cn } from "@/lib/utils";
 import { PricingComparison } from "./pricing-comparison";
 
-const planExtras: Record<CloudPlanId, {
-	priceNote: string;
-	cta: string;
-	ctaVariant: "outline" | "default";
-	ctaIcon: React.ComponentType<{ className?: string }>;
-	highlighted: boolean;
-}> = {
-	free: { priceNote: "forever", cta: "Get started", ctaVariant: "outline", ctaIcon: Lock, highlighted: false },
-	personal: { priceNote: "/ month", cta: "Get started", ctaVariant: "default", ctaIcon: ArrowRight, highlighted: true },
-	family: { priceNote: "/ month", cta: "Get started", ctaVariant: "outline", ctaIcon: ArrowRight, highlighted: false },
-	team: { priceNote: "user / month", cta: "Get started", ctaVariant: "outline", ctaIcon: ArrowRight, highlighted: false },
+const planExtras: Record<
+	CloudPlanId,
+	{
+		priceNote: string;
+		cta: string;
+		ctaVariant: "outline" | "default";
+		ctaIcon: React.ComponentType<{ className?: string }>;
+		highlighted: boolean;
+	}
+> = {
+	free: {
+		priceNote: "forever",
+		cta: "Get started",
+		ctaVariant: "outline",
+		ctaIcon: Lock,
+		highlighted: false,
+	},
+	personal: {
+		priceNote: "/ month",
+		cta: "Get started",
+		ctaVariant: "default",
+		ctaIcon: ArrowRight,
+		highlighted: true,
+	},
+	family: {
+		priceNote: "/ month",
+		cta: "Get started",
+		ctaVariant: "outline",
+		ctaIcon: ArrowRight,
+		highlighted: false,
+	},
+	team: {
+		priceNote: "user / month",
+		cta: "Get started",
+		ctaVariant: "outline",
+		ctaIcon: ArrowRight,
+		highlighted: false,
+	},
 };
 
 const plans = planInfo.map((plan) => ({
@@ -53,7 +84,7 @@ export function PricingSection() {
 							className={cn(
 								"relative rounded-2xl border p-6 transition-all duration-300",
 								plan.highlighted
-								? "border-primary/30 bg-linear-to-b from-primary/4 to-card shadow-lg shadow-primary/4"
+									? "border-primary/30 bg-linear-to-b from-primary/4 to-card shadow-lg shadow-primary/4"
 									: "border-border/60 bg-card hover:border-border",
 							)}
 							initial={{ opacity: 0, y: 12 }}

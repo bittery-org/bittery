@@ -22,8 +22,10 @@ export function NotesField({
 }: NotesFieldProps) {
 	const { m } = useI18n();
 	const resolvedPlaceholder =
-		placeholder ?? m["vaults.detail.items.form.field.notes.placeholder.default"]();
-	const resolvedLabel = label ?? m["vaults.detail.items.form.field.notes.label"]();
+		placeholder ??
+		m["vaults.detail.items.form.field.notes.placeholder.default"]();
+	const resolvedLabel =
+		label ?? m["vaults.detail.items.form.field.notes.label"]();
 
 	return (
 		<div className="space-y-2">

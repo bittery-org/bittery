@@ -84,7 +84,9 @@ export function TotpInputSection({
 					});
 					onSecretErrorChange(null);
 					if (!silent) {
-						toast.success(m["vaults.detail.items.totp.toast.setup_key_pasted"]());
+						toast.success(
+							m["vaults.detail.items.totp.toast.setup_key_pasted"](),
+						);
 					}
 					return true;
 				}
@@ -97,7 +99,9 @@ export function TotpInputSection({
 				return false;
 			} catch {
 				if (!silent) {
-					toast.error(m["vaults.detail.items.totp.toast.clipboard_read_failed"]());
+					toast.error(
+						m["vaults.detail.items.totp.toast.clipboard_read_failed"](),
+					);
 				}
 				return false;
 			}
@@ -133,7 +137,9 @@ export function TotpInputSection({
 			<div className="flex items-center justify-between">
 				<Label className="flex items-center gap-2">
 					<IconMobileOutlineDuo18 className="size-4" />
-					{m["vaults.detail.items.form.totp.section.two_factor_authentication"]()}
+					{m[
+						"vaults.detail.items.form.totp.section.two_factor_authentication"
+					]()}
 				</Label>
 				{!showSection && (
 					<Button
@@ -152,7 +158,9 @@ export function TotpInputSection({
 				<div className="space-y-4 rounded-lg border p-4">
 					{/* Setup Key */}
 					<div className="space-y-2">
-						<Label>{m["vaults.detail.items.form.totp.field.setup_key"]()}</Label>
+						<Label>
+							{m["vaults.detail.items.form.totp.field.setup_key"]()}
+						</Label>
 						<div className="flex gap-2">
 							<Input
 								value={state.secret}
@@ -161,7 +169,9 @@ export function TotpInputSection({
 									validateSecret(e.target.value);
 								}}
 								onBlur={() => validateSecret(state.secret)}
-								placeholder={m["vaults.detail.items.form.totp.placeholder.setup_key"]()}
+								placeholder={m[
+									"vaults.detail.items.form.totp.placeholder.setup_key"
+								]()}
 								className={cn(
 									"flex-1",
 									"font-mono",
@@ -173,7 +183,9 @@ export function TotpInputSection({
 								type="button"
 								variant="outline"
 								onClick={() => handlePasteFromClipboard()}
-								title={m["vaults.detail.items.form.totp.action.paste_from_clipboard"]()}
+								title={m[
+									"vaults.detail.items.form.totp.action.paste_from_clipboard"
+								]()}
 							>
 								<IconClipboardArrowInOutlineDuo18 size={16} />
 								{m["vaults.detail.items.form.totp.action.paste"]()}
@@ -187,21 +199,29 @@ export function TotpInputSection({
 					{/* Account info */}
 					<div className="grid grid-cols-2 gap-4">
 						<div className="space-y-2">
-							<Label>{m["vaults.detail.items.form.totp.field.service"]()}</Label>
+							<Label>
+								{m["vaults.detail.items.form.totp.field.service"]()}
+							</Label>
 							<Input
 								value={state.issuer}
 								onChange={(e) => onChange({ ...state, issuer: e.target.value })}
-								placeholder={m["vaults.detail.items.form.totp.placeholder.service"]()}
+								placeholder={m[
+									"vaults.detail.items.form.totp.placeholder.service"
+								]()}
 							/>
 						</div>
 						<div className="space-y-2">
-							<Label>{m["vaults.detail.items.form.totp.field.account"]()}</Label>
+							<Label>
+								{m["vaults.detail.items.form.totp.field.account"]()}
+							</Label>
 							<Input
 								value={state.accountName}
 								onChange={(e) =>
 									onChange({ ...state, accountName: e.target.value })
 								}
-								placeholder={m["vaults.detail.items.form.totp.placeholder.account"]()}
+								placeholder={m[
+									"vaults.detail.items.form.totp.placeholder.account"
+								]()}
 							/>
 						</div>
 					</div>

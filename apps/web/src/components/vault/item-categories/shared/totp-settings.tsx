@@ -57,7 +57,9 @@ export function TotpAdvancedSettings({
 					</p>
 					<div className="grid grid-cols-3 gap-4">
 						<div className="space-y-2">
-							<Label>{m["vaults.detail.items.totp.settings.field.algorithm"]()}</Label>
+							<Label>
+								{m["vaults.detail.items.totp.settings.field.algorithm"]()}
+							</Label>
 							<select
 								value={algorithm}
 								onChange={(e) =>
@@ -66,13 +68,19 @@ export function TotpAdvancedSettings({
 								className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 							>
 								<option value="SHA1">
-									{m["vaults.detail.items.totp.settings.option.algorithm.sha1"]()}
+									{m[
+										"vaults.detail.items.totp.settings.option.algorithm.sha1"
+									]()}
 								</option>
 								<option value="SHA256">
-									{m["vaults.detail.items.totp.settings.option.algorithm.sha256"]()}
+									{m[
+										"vaults.detail.items.totp.settings.option.algorithm.sha256"
+									]()}
 								</option>
 								<option value="SHA512">
-									{m["vaults.detail.items.totp.settings.option.algorithm.sha512"]()}
+									{m[
+										"vaults.detail.items.totp.settings.option.algorithm.sha512"
+									]()}
 								</option>
 							</select>
 						</div>
@@ -99,7 +107,9 @@ export function TotpAdvancedSettings({
 							</select>
 						</div>
 						<div className="space-y-2">
-							<Label>{m["vaults.detail.items.totp.settings.field.refresh"]()}</Label>
+							<Label>
+								{m["vaults.detail.items.totp.settings.field.refresh"]()}
+							</Label>
 							<Input
 								type="number"
 								min={15}

@@ -253,7 +253,9 @@ export function ItemList({
 					>
 						<SelectTrigger className="w-40">
 							<SelectValue
-								placeholder={m["vaults.detail.items.list.filter.category.placeholder"]()}
+								placeholder={m[
+									"vaults.detail.items.list.filter.category.placeholder"
+								]()}
 							/>
 						</SelectTrigger>
 						<SelectContent>

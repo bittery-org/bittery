@@ -164,90 +164,96 @@ describe("Vault Router", () => {
 			expect(vaultKey?.encryptedVaultKey).toBe(mockSrpData.encryptedVaultKey);
 		});
 
-			test("should reject team vault creation for users without a team", async () => {
-				const { caller } = await setup(vaultRouter);
+		test("should reject team vault creation for users without a team", async () => {
+			const { caller } = await setup(vaultRouter);
 
-				await expect(
-					caller.create({
-						name: "Team Vault",
-						type: "team",
-						encryptedVaultKey: mockSrpData.encryptedVaultKey,
-					}),
-				).rejects.toThrow("You must belong to a team to create a team vault");
-			});
-
-			test("should enforce shared vault limit for family plan", async () => {
-				const { caller, userId } = await setupVaultSharingUser();
-				const actor = await db.query.user.findFirst({
-					where: (u, { eq }) => eq(u.id, userId),
-				});
-				const teamId = actor?.teamId;
-				expect(teamId).toBeDefined();
-
-				for (let i = 0; i < 5; i += 1) {
-					await createTestVault(userId, {
-						name: `Existing Team Vault ${i + 1}`,
-						type: "team",
-						teamId: teamId!,
-					});
-				}
-
-				await expect(
-					caller.create({
-						name: "Overflow Team Vault",
-						type: "team",
-						encryptedVaultKey: mockSrpData.encryptedVaultKey,
-					}),
-				).rejects.toThrow(
-					"Your current plan allows up to 5 shared vaults. Upgrade to add more.",
-				);
-			});
-
-			test("should enforce shared vault cap under concurrent requests", async () => {
-				const { caller, userId } = await setupVaultSharingUser();
-				const actor = await db.query.user.findFirst({
-					where: (u, { eq }) => eq(u.id, userId),
-				});
-				const teamId = actor?.teamId;
-				expect(teamId).toBeDefined();
-
-				for (let i = 0; i < 4; i += 1) {
-					await createTestVault(userId, {
-						name: `Existing Team Vault ${i + 1}`,
-						type: "team",
-						teamId: teamId!,
-					});
-				}
-
-				const attempts = await Promise.allSettled([
-					caller.create({
-						name: "Concurrent Team Vault A",
-						type: "team",
-						encryptedVaultKey: mockSrpData.encryptedVaultKey,
-					}),
-					caller.create({
-						name: "Concurrent Team Vault B",
-						type: "team",
-						encryptedVaultKey: mockSrpData.encryptedVaultKey,
-					}),
-				]);
-
-				const successCount = attempts.filter(
-					(attempt) => attempt.status === "fulfilled",
-				).length;
-				const failureCount = attempts.filter(
-					(attempt) => attempt.status === "rejected",
-				).length;
-				expect(successCount).toBe(1);
-				expect(failureCount).toBe(1);
-
-				const teamVaults = await db.query.vault.findMany({
-					where: (teamVault, { and, eq }) =>
-						and(eq(teamVault.teamId, teamId!), eq(teamVault.type, "team")),
-				});
-				expect(teamVaults.length).toBe(5);
-			});
+			await expect(
+				caller.create({
+					name: "Team Vault",
+					type: "team",
+					encryptedVaultKey: mockSrpData.encryptedVaultKey,
+				}),
+			).rejects.toThrow("You must belong to a team to create a team vault");
 		});
+
+		test("should enforce shared vault limit for family plan", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			const actor = await db.query.user.findFirst({
+				where: (u, { eq }) => eq(u.id, userId),
+			});
+			const teamId = actor?.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected setup user to have a teamId");
+			}
+
+			for (let i = 0; i < 5; i += 1) {
+				await createTestVault(userId, {
+					name: `Existing Team Vault ${i + 1}`,
+					type: "team",
+					teamId,
+				});
+			}
+
+			await expect(
+				caller.create({
+					name: "Overflow Team Vault",
+					type: "team",
+					encryptedVaultKey: mockSrpData.encryptedVaultKey,
+				}),
+			).rejects.toThrow(
+				"Your current plan allows up to 5 shared vaults. Upgrade to add more.",
+			);
+		});
+
+		test("should enforce shared vault cap under concurrent requests", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			const actor = await db.query.user.findFirst({
+				where: (u, { eq }) => eq(u.id, userId),
+			});
+			const teamId = actor?.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected setup user to have a teamId");
+			}
+
+			for (let i = 0; i < 4; i += 1) {
+				await createTestVault(userId, {
+					name: `Existing Team Vault ${i + 1}`,
+					type: "team",
+					teamId,
+				});
+			}
+
+			const attempts = await Promise.allSettled([
+				caller.create({
+					name: "Concurrent Team Vault A",
+					type: "team",
+					encryptedVaultKey: mockSrpData.encryptedVaultKey,
+				}),
+				caller.create({
+					name: "Concurrent Team Vault B",
+					type: "team",
+					encryptedVaultKey: mockSrpData.encryptedVaultKey,
+				}),
+			]);
+
+			const successCount = attempts.filter(
+				(attempt) => attempt.status === "fulfilled",
+			).length;
+			const failureCount = attempts.filter(
+				(attempt) => attempt.status === "rejected",
+			).length;
+			expect(successCount).toBe(1);
+			expect(failureCount).toBe(1);
+
+			const teamVaults = await db.query.vault.findMany({
+				where: (teamVault, { and, eq }) =>
+					and(eq(teamVault.teamId, teamId), eq(teamVault.type, "team")),
+			});
+			expect(teamVaults.length).toBe(5);
+		});
+	});
 
 	describe("update", () => {
 		test("should update vault name and icon", async () => {
@@ -328,146 +334,146 @@ describe("Vault Router", () => {
 		});
 	});
 
-		describe("listItems", () => {
-			test("should return all non-deleted items in a vault", async () => {
-				const { caller, userId } = await setupVaultSharingUser();
-				const vaultId = await createTestVault(userId);
-				await createTestItem(vaultId, userId, { category: "login" });
-				await createTestItem(vaultId, userId, { category: "secure-note" });
-				await createTestItem(vaultId, userId, { deletedAt: new Date() }); // Soft deleted
+	describe("listItems", () => {
+		test("should return all non-deleted items in a vault", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			const vaultId = await createTestVault(userId);
+			await createTestItem(vaultId, userId, { category: "login" });
+			await createTestItem(vaultId, userId, { category: "secure-note" });
+			await createTestItem(vaultId, userId, { deletedAt: new Date() }); // Soft deleted
 
-				const result = await caller.listItems({ vaultId });
+			const result = await caller.listItems({ vaultId });
 
-				expect(result.length).toBe(2);
+			expect(result.length).toBe(2);
+		});
+
+		test("should deny access to non-member", async () => {
+			const [{ userId: ownerId }, { caller }] = await Promise.all([
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
+			]);
+			const vaultId = await createTestVault(ownerId);
+
+			await expect(caller.listItems({ vaultId })).rejects.toThrow(
+				"Access denied to this vault",
+			);
+		});
+
+		test("should hide attachment metadata when attachments entitlement is disabled", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			await createTestTeam(userId, {
+				billingPlan: "free",
+				billingStatus: "none",
+				type: "personal",
 			});
 
-			test("should deny access to non-member", async () => {
-				const [{ userId: ownerId }, { caller }] = await Promise.all([
-					setupVaultSharingUser(),
-					setupVaultSharingUser(),
-				]);
-				const vaultId = await createTestVault(ownerId);
-
-				await expect(caller.listItems({ vaultId })).rejects.toThrow(
-					"Access denied to this vault",
-				);
+			const vaultId = await createTestVault(userId);
+			const itemId = await createTestItem(vaultId, userId);
+			await db.insert(itemAttachment).values({
+				id: nanoid(),
+				itemId,
+				vaultId,
+				storageKey: `attachments/${userId}/${itemId}/file.enc`,
+				encryptedName: "enc-name",
+				encryptedContentType: "enc-type",
+				encryptionIv: "enc-iv",
+				encryptedContentTypeIv: "enc-type-iv",
+				encryptionAlgorithm: "AES-GCM",
+				fileSize: 123,
+				uploadedBy: userId,
 			});
 
-			test("should hide attachment metadata when attachments entitlement is disabled", async () => {
-				const { caller, userId } = await setupVaultSharingUser();
-				await createTestTeam(userId, {
-					billingPlan: "free",
-					billingStatus: "none",
-					type: "personal",
-				});
+			const listResult = await caller.listItems({ vaultId });
+			expect(listResult[0]?.attachments).toEqual([]);
 
-				const vaultId = await createTestVault(userId);
-				const itemId = await createTestItem(vaultId, userId);
-				await db.insert(itemAttachment).values({
-					id: nanoid(),
-					itemId,
-					vaultId,
-					storageKey: `attachments/${userId}/${itemId}/file.enc`,
+			const getItemResult = await caller.getItem({ itemId });
+			expect(getItemResult.attachments).toEqual([]);
+
+			const listAllResult = await caller.listAllItems();
+			const matchingItem = listAllResult.find((result) => result.id === itemId);
+			expect(matchingItem?.attachments).toEqual([]);
+		});
+	});
+
+	describe("attachments", () => {
+		test("should fail closed for cloud users without a team", async () => {
+			const { caller } = await setup(vaultRouter);
+
+			await expect(
+				caller.createAttachment({
+					itemId: "nonexistent-item",
+					storageKey: "attachments/user/item/key.enc",
 					encryptedName: "enc-name",
 					encryptedContentType: "enc-type",
 					encryptionIv: "enc-iv",
 					encryptedContentTypeIv: "enc-type-iv",
 					encryptionAlgorithm: "AES-GCM",
 					fileSize: 123,
-					uploadedBy: userId,
-				});
-
-				const listResult = await caller.listItems({ vaultId });
-				expect(listResult[0]?.attachments).toEqual([]);
-
-				const getItemResult = await caller.getItem({ itemId });
-				expect(getItemResult.attachments).toEqual([]);
-
-				const listAllResult = await caller.listAllItems();
-				const matchingItem = listAllResult.find((result) => result.id === itemId);
-				expect(matchingItem?.attachments).toEqual([]);
-			});
+				}),
+			).rejects.toThrow(
+				"Attachments are only available on paid plans with active billing.",
+			);
 		});
 
-		describe("attachments", () => {
-			test("should fail closed for cloud users without a team", async () => {
-				const { caller } = await setup(vaultRouter);
-
-				await expect(
-					caller.createAttachment({
-						itemId: "nonexistent-item",
-						storageKey: "attachments/user/item/key.enc",
-						encryptedName: "enc-name",
-						encryptedContentType: "enc-type",
-						encryptionIv: "enc-iv",
-						encryptedContentTypeIv: "enc-type-iv",
-						encryptionAlgorithm: "AES-GCM",
-						fileSize: 123,
-					}),
-				).rejects.toThrow(
-					"Attachments are only available on paid plans with active billing.",
-				);
+		test("should reject createAttachment with unissued storage key", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			await createTestTeam(userId, {
+				billingPlan: "personal",
+				billingStatus: "active",
+				type: "personal",
 			});
+			const vaultId = await createTestVault(userId);
+			const itemId = await createTestItem(vaultId, userId);
 
-			test("should reject createAttachment with unissued storage key", async () => {
-				const { caller, userId } = await setupVaultSharingUser();
-				await createTestTeam(userId, {
-					billingPlan: "personal",
-					billingStatus: "active",
-					type: "personal",
-				});
-				const vaultId = await createTestVault(userId);
-				const itemId = await createTestItem(vaultId, userId);
-
-				await expect(
-					caller.createAttachment({
-						itemId,
-						storageKey: `attachments/other-user/${itemId}/foreign-key.enc`,
-						encryptedName: "enc-name",
-						encryptedContentType: "enc-type",
-						encryptionIv: "enc-iv",
-						encryptedContentTypeIv: "enc-type-iv",
-						encryptionAlgorithm: "AES-GCM",
-						fileSize: 123,
-					}),
-				).rejects.toThrow("Invalid or expired attachment upload key");
-			});
-
-			test("should block member from deleting attachments uploaded by others", async () => {
-				const [{ userId: ownerId }, { userId: memberId, caller }] =
-					await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
-				const teamId = await createTestTeam(ownerId, {
-					billingPlan: "family",
-					billingStatus: "active",
-					type: "family",
-				});
-				await addTeamMember(teamId, memberId, "member");
-				const vaultId = await createTestVault(ownerId, {
-					type: "team",
-					teamId,
-				});
-				await addVaultMember(vaultId, memberId, "member");
-				const itemId = await createTestItem(vaultId, ownerId);
-				const attachmentId = nanoid();
-				await db.insert(itemAttachment).values({
-					id: attachmentId,
+			await expect(
+				caller.createAttachment({
 					itemId,
-					vaultId,
-					storageKey: `attachments/${ownerId}/${itemId}/file.enc`,
+					storageKey: `attachments/other-user/${itemId}/foreign-key.enc`,
 					encryptedName: "enc-name",
 					encryptedContentType: "enc-type",
 					encryptionIv: "enc-iv",
 					encryptedContentTypeIv: "enc-type-iv",
 					encryptionAlgorithm: "AES-GCM",
 					fileSize: 123,
-					uploadedBy: ownerId,
-				});
-
-				await expect(
-					caller.deleteAttachment({ attachmentId }),
-				).rejects.toThrow("You can only delete your own attachments");
-			});
+				}),
+			).rejects.toThrow("Invalid or expired attachment upload key");
 		});
+
+		test("should block member from deleting attachments uploaded by others", async () => {
+			const [{ userId: ownerId }, { userId: memberId, caller }] =
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			await addTeamMember(teamId, memberId, "member");
+			const vaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
+			await addVaultMember(vaultId, memberId, "member");
+			const itemId = await createTestItem(vaultId, ownerId);
+			const attachmentId = nanoid();
+			await db.insert(itemAttachment).values({
+				id: attachmentId,
+				itemId,
+				vaultId,
+				storageKey: `attachments/${ownerId}/${itemId}/file.enc`,
+				encryptedName: "enc-name",
+				encryptedContentType: "enc-type",
+				encryptionIv: "enc-iv",
+				encryptedContentTypeIv: "enc-type-iv",
+				encryptionAlgorithm: "AES-GCM",
+				fileSize: 123,
+				uploadedBy: ownerId,
+			});
+
+			await expect(caller.deleteAttachment({ attachmentId })).rejects.toThrow(
+				"You can only delete your own attachments",
+			);
+		});
+	});
 
 	describe("createItem", () => {
 		test("should create a new item in the vault", async () => {

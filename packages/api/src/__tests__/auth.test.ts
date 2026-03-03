@@ -91,8 +91,13 @@ describe("Auth Router", () => {
 			expect(result.user.email).toBe(email.toLowerCase());
 			expect(result.user.teamName).toBe("Test Org");
 			expect(result.user.teamType).toBe("organization");
+			const teamId = result.user.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected signup to return a teamId");
+			}
 			const teamData = await db.query.team.findFirst({
-				where: (t, { eq }) => eq(t.id, result.user.teamId!),
+				where: (t, { eq }) => eq(t.id, teamId),
 			});
 			expect(teamData?.billingPlan).toBe("team");
 			expect(teamData?.billingStatus).toBe("incomplete");
@@ -116,8 +121,13 @@ describe("Auth Router", () => {
 
 			expect(result.success).toBe(true);
 			expect(result.userId).toBeDefined();
+			const teamId = result.user.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected signup to return a teamId");
+			}
 			const teamData = await db.query.team.findFirst({
-				where: (t, { eq }) => eq(t.id, result.user.teamId!),
+				where: (t, { eq }) => eq(t.id, teamId),
 			});
 			expect(teamData?.billingPlan).toBe("personal");
 			expect(teamData?.billingStatus).toBe("incomplete");
@@ -175,8 +185,13 @@ describe("Auth Router", () => {
 			expect(firstSignup.success).toBe(true);
 			expect(firstSignup.user.role).toBe("owner");
 			expect(firstSignup.user.teamType).toBe("organization");
+			const teamId = firstSignup.user.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected signup to return a teamId");
+			}
 			const firstTeam = await db.query.team.findFirst({
-				where: (t, { eq }) => eq(t.id, firstSignup.user.teamId!),
+				where: (t, { eq }) => eq(t.id, teamId),
 			});
 			expect(firstTeam?.billingPlan).toBe("free");
 			expect(firstTeam?.billingStatus).toBe("none");
@@ -190,9 +205,9 @@ describe("Auth Router", () => {
 			).rejects.toThrow("Public registration is disabled");
 		});
 
-			test("signupWithInvitation should create a personal vault for invitees", async () => {
-				const inviter = await setup(authRouter);
-				const teamId = await createTestTeam(inviter.userId, {
+		test("signupWithInvitation should create a personal vault for invitees", async () => {
+			const inviter = await setup(authRouter);
+			const teamId = await createTestTeam(inviter.userId, {
 				name: "Invite Team",
 				billingPlan: "family",
 				billingStatus: "active",
@@ -218,60 +233,62 @@ describe("Auth Router", () => {
 			const personalVault = result.vaultKeys.find(
 				(vk) => vk.vaultName === "Personal",
 			);
-				expect(personalVault).toBeDefined();
-				expect(personalVault?.role).toBe("owner");
-			});
-
-			test("signupWithInvitation should reject unauthorized pendingVaultKeys", async () => {
-				const inviter = await setup(authRouter);
-				const outsider = await setup(authRouter);
-				const teamId = await createTestTeam(inviter.userId, {
-					name: "Invite Team",
-					billingPlan: "family",
-					billingStatus: "active",
-					type: "family",
-				});
-				const outsiderTeamId = await createTestTeam(outsider.userId, {
-					name: "Outside Team",
-					billingPlan: "family",
-					billingStatus: "active",
-					type: "family",
-				});
-				const foreignVaultId = await createTestVault(outsider.userId, {
-					type: "team",
-					teamId: outsiderTeamId,
-				});
-				const inviteeEmail = generateTestEmail();
-				const invitation = await createTestInvitation(
-					teamId,
-					inviter.userId,
-					inviteeEmail,
-					{
-						pendingVaultKeys: JSON.stringify([
-							{
-								vaultId: foreignVaultId,
-								encryptedVaultKey: "malicious-key",
-							},
-						]),
-					},
-				);
-				const caller = authRouter.createCaller(createPublicContext());
-
-				await expect(
-					caller.signupWithInvitation({
-						token: invitation.token,
-						email: inviteeEmail,
-						name: "Invitee",
-						...toSignupCryptoInput(nextAuthCryptoFixture),
-					}),
-				).rejects.toThrow("pendingVaultKeys contains vaults outside the invited team");
-
-				const createdUser = await db.query.user.findFirst({
-					where: (u, { eq }) => eq(u.email, inviteeEmail.toLowerCase()),
-				});
-				expect(createdUser).toBeUndefined();
-			});
+			expect(personalVault).toBeDefined();
+			expect(personalVault?.role).toBe("owner");
 		});
+
+		test("signupWithInvitation should reject unauthorized pendingVaultKeys", async () => {
+			const inviter = await setup(authRouter);
+			const outsider = await setup(authRouter);
+			const teamId = await createTestTeam(inviter.userId, {
+				name: "Invite Team",
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			const outsiderTeamId = await createTestTeam(outsider.userId, {
+				name: "Outside Team",
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			const foreignVaultId = await createTestVault(outsider.userId, {
+				type: "team",
+				teamId: outsiderTeamId,
+			});
+			const inviteeEmail = generateTestEmail();
+			const invitation = await createTestInvitation(
+				teamId,
+				inviter.userId,
+				inviteeEmail,
+				{
+					pendingVaultKeys: JSON.stringify([
+						{
+							vaultId: foreignVaultId,
+							encryptedVaultKey: "malicious-key",
+						},
+					]),
+				},
+			);
+			const caller = authRouter.createCaller(createPublicContext());
+
+			await expect(
+				caller.signupWithInvitation({
+					token: invitation.token,
+					email: inviteeEmail,
+					name: "Invitee",
+					...toSignupCryptoInput(nextAuthCryptoFixture),
+				}),
+			).rejects.toThrow(
+				"pendingVaultKeys contains vaults outside the invited team",
+			);
+
+			const createdUser = await db.query.user.findFirst({
+				where: (u, { eq }) => eq(u.email, inviteeEmail.toLowerCase()),
+			});
+			expect(createdUser).toBeUndefined();
+		});
+	});
 
 	describe("registrationStatus", () => {
 		test("should report cloud mode as open registration", async () => {

@@ -199,7 +199,9 @@ export function LoginForm({
 					{(field) => (
 						<TitleField
 							field={field}
-							placeholder={m["vaults.detail.items.form.login.placeholder.title"]()}
+							placeholder={m[
+								"vaults.detail.items.form.login.placeholder.title"
+							]()}
 						/>
 					)}
 				</form.Field>
@@ -219,7 +221,9 @@ export function LoginForm({
 								value={field.state.value}
 								onBlur={field.handleBlur}
 								onChange={(e) => field.handleChange(e.target.value)}
-								placeholder={m["vaults.detail.items.form.login.placeholder.website"]()}
+								placeholder={m[
+									"vaults.detail.items.form.login.placeholder.website"
+								]()}
 							/>
 							{additionalUrls.map((url, index) => (
 								<InputGroup key={index}>
@@ -227,7 +231,9 @@ export function LoginForm({
 										type="url"
 										value={url}
 										onChange={(e) => updateAdditionalUrl(index, e.target.value)}
-										placeholder={m["vaults.detail.items.form.login.placeholder.website"]()}
+										placeholder={m[
+											"vaults.detail.items.form.login.placeholder.website"
+										]()}
 									/>
 									<InputGroupAddon align="inline-end">
 										<InputGroupButton
@@ -271,7 +277,9 @@ export function LoginForm({
 								value={field.state.value}
 								onBlur={field.handleBlur}
 								onChange={(e) => field.handleChange(e.target.value)}
-								placeholder={m["vaults.detail.items.form.login.placeholder.username"]()}
+								placeholder={m[
+									"vaults.detail.items.form.login.placeholder.username"
+								]()}
 							/>
 						</div>
 					)}
@@ -293,7 +301,9 @@ export function LoginForm({
 									value={field.state.value}
 									onBlur={field.handleBlur}
 									onChange={(e) => field.handleChange(e.target.value)}
-									placeholder={m["vaults.detail.items.form.login.placeholder.password"]()}
+									placeholder={m[
+										"vaults.detail.items.form.login.placeholder.password"
+									]()}
 									className="font-mono"
 								/>
 								<InputGroupAddon align="inline-end">
@@ -304,8 +314,12 @@ export function LoginForm({
 											onClick={() => setShowPassword(!showPassword)}
 											aria-label={
 												showPassword
-													? m["vaults.detail.items.form.login.action.hide_password"]()
-													: m["vaults.detail.items.form.login.action.show_password"]()
+													? m[
+															"vaults.detail.items.form.login.action.hide_password"
+														]()
+													: m[
+															"vaults.detail.items.form.login.action.show_password"
+														]()
 											}
 										>
 											{showPassword ? (
@@ -346,7 +360,9 @@ export function LoginForm({
 			{/* Custom Fields */}
 			<div className="space-y-2">
 				<div className="flex items-center justify-between">
-					<Label>{m["vaults.detail.items.form.login.section.custom_fields"]()}</Label>
+					<Label>
+						{m["vaults.detail.items.form.login.section.custom_fields"]()}
+					</Label>
 					<Button
 						type="button"
 						variant="outline"
@@ -388,7 +404,9 @@ export function LoginForm({
 									]()}
 								</option>
 								<option value="email">
-									{m["vaults.detail.items.form.login.custom_field_type.email"]()}
+									{m[
+										"vaults.detail.items.form.login.custom_field_type.email"
+									]()}
 								</option>
 								<option value="url">
 									{m["vaults.detail.items.form.login.custom_field_type.url"]()}

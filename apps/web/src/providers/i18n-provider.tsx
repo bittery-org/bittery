@@ -1,8 +1,4 @@
-import {
-	defaultLocale,
-	localeStorageKey,
-	type AppLocale,
-} from "@bittery/i18n";
+import { type AppLocale, defaultLocale, localeStorageKey } from "@bittery/i18n";
 import {
 	createContext,
 	type ReactNode,

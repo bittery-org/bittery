@@ -8,7 +8,6 @@ export const localeStorageKey = "bittery.locale";
 
 export function isAppLocale(value: unknown): value is AppLocale {
 	return (
-		typeof value === "string" &&
-		supportedLocales.includes(value as AppLocale)
+		typeof value === "string" && supportedLocales.includes(value as AppLocale)
 	);
 }

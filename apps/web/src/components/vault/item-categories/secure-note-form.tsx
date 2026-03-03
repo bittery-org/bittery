@@ -69,7 +69,9 @@ export function SecureNoteForm({
 					{(field) => (
 						<TitleField
 							field={field}
-							placeholder={m["vaults.detail.items.form.secure_note.placeholder.title"]()}
+							placeholder={m[
+								"vaults.detail.items.form.secure_note.placeholder.title"
+							]()}
 						/>
 					)}
 				</form.Field>

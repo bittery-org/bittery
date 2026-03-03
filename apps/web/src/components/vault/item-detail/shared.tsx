@@ -7,8 +7,8 @@ import type {
 	SecureNoteDisplayData,
 	TotpDisplayData,
 } from "@bittery/shared/types";
-import { copyWithToast, type CopyWithToastOptions } from "@bittery/ui";
-import { useI18n } from "@/providers/i18n-provider";
+import { type CopyWithToastOptions, copyWithToast } from "@bittery/ui";
+import type { useI18n } from "@/providers/i18n-provider";
 
 export type {
 	CreditCardDisplayData,
@@ -46,7 +46,10 @@ export function handleCopy(
 	text: string | null | undefined,
 	label: string,
 	m: ReturnType<typeof useI18n>["m"],
-	options: Pick<CopyWithToastOptions, "autoClearMs" | "showAutoClearMessage"> = {},
+	options: Pick<
+		CopyWithToastOptions,
+		"autoClearMs" | "showAutoClearMessage"
+	> = {},
 ) {
 	const autoClearMs = options.autoClearMs ?? 30000;
 	const showAutoClearMessage = options.showAutoClearMessage ?? true;

@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { persistLocaleSelection, resolveBrowserLocale, resolveLocale } from "./i18n-locale";
+import {
+	persistLocaleSelection,
+	resolveBrowserLocale,
+	resolveLocale,
+} from "./i18n-locale";
 
 test.describe("i18n locale helpers", () => {
 	test("resolveBrowserLocale picks de for de-DE and en otherwise", () => {
@@ -28,7 +32,8 @@ test.describe("i18n locale helpers", () => {
 
 	test("persistLocaleSelection stores locale and updates runtime", async () => {
 		const values: Record<string, string> = {};
-		const runtimeCalls: Array<{ locale: string; reload: boolean | undefined }> = [];
+		const runtimeCalls: Array<{ locale: string; reload: boolean | undefined }> =
+			[];
 
 		await persistLocaleSelection({
 			locale: "de",
