@@ -1,4 +1,4 @@
-import { useTeamAvatar } from "@bittery/core/hooks";
+import { TeamAvatarError, useTeamAvatar } from "@bittery/core/hooks";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Avatar,
@@ -21,6 +21,8 @@ import {
 } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
 import { useRef, useState } from "react";
+import { formatDate } from "@/lib/i18n-format";
+import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 import { DeleteTeamDialog } from "./delete-team-dialog";
 import { LeaveTeamDialog } from "./leave-team-dialog";
@@ -51,6 +53,7 @@ export function TeamSettings({
 	const invalidator = useQueryInvalidator();
 	const { uploadAvatar, removeAvatar, isUploading, isRemoving } =
 		useTeamAvatar();
+	const { m } = useI18n();
 
 	const isOwner = userRole === "owner";
 	const canEdit = isOwner || userRole === "admin";
@@ -59,7 +62,7 @@ export function TeamSettings({
 		mutationFn: (input: { teamId: string; name: string }) =>
 			trpcClient.team.update.mutate(input),
 		onSuccess: async () => {
-			toast.success("Team name updated");
+			toast.success(m["team.settings.toast.name_updated"]());
 			await invalidator.invalidateTeam();
 			setIsEditing(false);
 		},
@@ -91,11 +94,23 @@ export function TeamSettings({
 
 		try {
 			await uploadAvatar({ teamId, file });
-			toast.success("Team avatar updated");
+			toast.success(m["team.settings.toast.avatar_updated"]());
 		} catch (error) {
-			toast.error(
-				error instanceof Error ? error.message : "Failed to upload avatar",
-			);
+			if (error instanceof TeamAvatarError) {
+				if (error.code === "INVALID_FILE_TYPE") {
+					toast.error(m["team.settings.error.avatar_invalid_file_type"]());
+				} else if (error.code === "FILE_TOO_LARGE") {
+					toast.error(m["team.settings.error.avatar_file_too_large"]());
+				} else {
+					toast.error(m["team.settings.error.avatar_upload_storage_failed"]());
+				}
+			} else {
+				toast.error(
+					error instanceof Error
+						? error.message
+						: m["team.settings.toast.avatar_upload_failed"](),
+				);
+			}
 		}
 
 		// Reset input
@@ -107,10 +122,12 @@ export function TeamSettings({
 	const handleRemoveAvatar = async () => {
 		try {
 			await removeAvatar({ teamId });
-			toast.success("Team avatar removed");
+			toast.success(m["team.settings.toast.avatar_removed"]());
 		} catch (error) {
 			toast.error(
-				error instanceof Error ? error.message : "Failed to remove avatar",
+				error instanceof Error
+					? error.message
+					: m["team.settings.toast.avatar_remove_failed"](),
 			);
 		}
 	};
@@ -136,9 +153,11 @@ export function TeamSettings({
 								<Settings className="h-4 w-4" />
 							</div>
 							<div>
-								<h3 className="font-semibold text-sm">General Settings</h3>
+								<h3 className="font-semibold text-sm">
+									{m["team.settings.general.title"]()}
+								</h3>
 								<p className="text-muted-foreground text-xs">
-									Manage your team's identity and basic information.
+									{m["team.settings.general.description"]()}
 								</p>
 							</div>
 						</div>
@@ -165,7 +184,9 @@ export function TeamSettings({
 											disabled={isUploading || isRemoving}
 										>
 											<Upload className="mr-1.5 h-3.5 w-3.5" />
-											{isUploading ? "..." : "Upload"}
+											{isUploading
+												? m["team.settings.avatar.button.uploading"]()
+												: m["team.settings.avatar.button.upload"]()}
 										</Button>
 										{imageUrl && (
 											<Button
@@ -176,13 +197,15 @@ export function TeamSettings({
 												disabled={isUploading || isRemoving}
 											>
 												<X className="mr-1.5 h-3.5 w-3.5" />
-												{isRemoving ? "..." : "Remove"}
+												{isRemoving
+													? m["team.settings.avatar.button.removing"]()
+													: m["team.settings.avatar.button.remove"]()}
 											</Button>
 										)}
 									</div>
 								)}
 								<p className="text-center text-[10px] text-muted-foreground">
-									Max 5 MB · PNG, JPG, GIF
+									{m["team.settings.avatar.hint"]()}
 								</p>
 								<input
 									ref={fileInputRef}
@@ -200,7 +223,7 @@ export function TeamSettings({
 										htmlFor="teamName"
 										className="font-medium text-muted-foreground text-xs uppercase tracking-[0.12em]"
 									>
-										Team Name
+										{m["team.settings.field.team_name"]()}
 									</Label>
 									{isEditing ? (
 										<div className="flex gap-2">
@@ -208,7 +231,7 @@ export function TeamSettings({
 												id="teamName"
 												value={name}
 												onChange={(e) => setName(e.target.value)}
-												placeholder="Enter team name"
+												placeholder={m["team.settings.placeholder.team_name"]()}
 												className="h-9"
 											/>
 											<Button
@@ -216,14 +239,16 @@ export function TeamSettings({
 												onClick={handleSave}
 												disabled={updateMutation.isPending || !name.trim()}
 											>
-												{updateMutation.isPending ? "Saving..." : "Save"}
+												{updateMutation.isPending
+													? m["team.settings.button.saving"]()
+													: m["team.settings.button.save"]()}
 											</Button>
 											<Button
 												variant="outline"
 												size="sm"
 												onClick={handleCancel}
 											>
-												Cancel
+												{m["team.common.action.cancel"]()}
 											</Button>
 										</div>
 									) : (
@@ -236,7 +261,7 @@ export function TeamSettings({
 													className="h-7 px-2.5 text-xs"
 													onClick={handleStartEdit}
 												>
-													Edit
+													{m["team.settings.button.edit"]()}
 												</Button>
 											)}
 										</div>
@@ -253,10 +278,10 @@ export function TeamSettings({
 										</div>
 										<div>
 											<p className="text-[10px] text-muted-foreground uppercase tracking-[0.12em]">
-												Created
+												{m["team.settings.metadata.created"]()}
 											</p>
 											<p className="font-medium text-sm">
-												{new Date(createdAt).toLocaleDateString("en-US", {
+												{formatDate(createdAt, {
 													month: "short",
 													day: "numeric",
 													year: "numeric",
@@ -270,10 +295,10 @@ export function TeamSettings({
 										</div>
 										<div>
 											<p className="text-[10px] text-muted-foreground uppercase tracking-[0.12em]">
-												Last Updated
+												{m["team.settings.metadata.last_updated"]()}
 											</p>
 											<p className="font-medium text-sm">
-												{new Date(updatedAt).toLocaleDateString("en-US", {
+												{formatDate(updatedAt, {
 													month: "short",
 													day: "numeric",
 													year: "numeric",
@@ -299,10 +324,10 @@ export function TeamSettings({
 								</div>
 								<div>
 									<h3 className="font-semibold text-destructive text-sm">
-										Danger Zone
+										{m["team.settings.danger.title"]()}
 									</h3>
 									<p className="text-muted-foreground text-xs">
-										Irreversible actions that affect this team.
+										{m["team.settings.danger.description"]()}
 									</p>
 								</div>
 							</div>
@@ -313,9 +338,11 @@ export function TeamSettings({
 							{!isOwner && (
 								<div className="flex flex-col gap-3 rounded-lg border bg-background/70 p-4 sm:flex-row sm:items-center sm:justify-between">
 									<div className="space-y-0.5">
-										<span className="font-medium text-sm">Leave Team</span>
+										<span className="font-medium text-sm">
+											{m["team.settings.danger.leave.title"]()}
+										</span>
 										<p className="text-muted-foreground text-xs">
-											Remove yourself and lose access to all team vaults.
+											{m["team.settings.danger.leave.description"]()}
 										</p>
 									</div>
 									<LeaveTeamDialog teamId={teamId} teamName={teamName} />
@@ -326,9 +353,11 @@ export function TeamSettings({
 							{isOwner && (
 								<div className="flex flex-col gap-3 rounded-lg border bg-background/70 p-4 sm:flex-row sm:items-center sm:justify-between">
 									<div className="space-y-0.5">
-										<span className="font-medium text-sm">Delete Team</span>
+										<span className="font-medium text-sm">
+											{m["team.settings.danger.delete.title"]()}
+										</span>
 										<p className="text-muted-foreground text-xs">
-											Permanently delete this team and all associated data.
+											{m["team.settings.danger.delete.description"]()}
 										</p>
 									</div>
 									<DeleteTeamDialog teamId={teamId} teamName={teamName} />

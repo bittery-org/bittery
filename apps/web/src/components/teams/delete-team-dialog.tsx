@@ -18,6 +18,7 @@ import { IconTrash2OutlineDuo18 as Trash2 } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface DeleteTeamDialogProps {
@@ -31,11 +32,12 @@ export function DeleteTeamDialog({ teamId, teamName }: DeleteTeamDialogProps) {
 	const trpcClient = useTRPCClient();
 	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
+	const { m } = useI18n();
 
 	const deleteMutation = useMutation({
 		mutationFn: () => trpcClient.team.delete.mutate({ teamId }),
 		onSuccess: async () => {
-			toast.success("Team deleted successfully");
+			toast.success(m["team.delete_dialog.toast.deleted"]());
 			await invalidator.invalidateTeam();
 			setOpen(false);
 			navigate({ to: "/team" });
@@ -47,7 +49,7 @@ export function DeleteTeamDialog({ teamId, teamName }: DeleteTeamDialogProps) {
 
 	const handleDelete = () => {
 		if (confirmText !== teamName) {
-			toast.error("Please type the team name to confirm");
+			toast.error(m["team.delete_dialog.toast.confirm_name_required"]());
 			return;
 		}
 		deleteMutation.mutate();
@@ -65,36 +67,43 @@ export function DeleteTeamDialog({ teamId, teamName }: DeleteTeamDialogProps) {
 			<AlertDialogTrigger asChild>
 				<Button variant="destructive">
 					<Trash2 className="mr-2 h-4 w-4" />
-					Delete Team
+					{m["team.delete_dialog.trigger"]()}
 				</Button>
 			</AlertDialogTrigger>
 			<AlertDialogContent>
 				<AlertDialogHeader>
-					<AlertDialogTitle>Delete Team</AlertDialogTitle>
+					<AlertDialogTitle>{m["team.delete_dialog.title"]()}</AlertDialogTitle>
 					<AlertDialogDescription>
-						This action cannot be undone. This will permanently delete the team{" "}
-						<strong>{teamName}</strong> and remove all members and invitations.
+						{m["team.delete_dialog.description.prefix"]()}{" "}
+						<strong>{teamName}</strong>{" "}
+						{m["team.delete_dialog.description.suffix"]()}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<div className="grid gap-2 py-4">
 					<Label htmlFor="confirmTeamName">
-						Type <strong>{teamName}</strong> to confirm
+						{m["team.delete_dialog.confirm_label.prefix"]()}{" "}
+						<strong>{teamName}</strong>{" "}
+						{m["team.delete_dialog.confirm_label.suffix"]()}
 					</Label>
 					<Input
 						id="confirmTeamName"
 						value={confirmText}
 						onChange={(e) => setConfirmText(e.target.value)}
-						placeholder="Enter team name"
+						placeholder={m["team.delete_dialog.placeholder.team_name"]()}
 					/>
 				</div>
 				<AlertDialogFooter>
-					<AlertDialogCancel>Cancel</AlertDialogCancel>
+					<AlertDialogCancel>
+						{m["team.common.action.cancel"]()}
+					</AlertDialogCancel>
 					<AlertDialogAction
 						onClick={handleDelete}
 						disabled={confirmText !== teamName || deleteMutation.isPending}
 						className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 					>
-						{deleteMutation.isPending ? "Deleting..." : "Delete Team"}
+						{deleteMutation.isPending
+							? m["team.delete_dialog.action.deleting"]()
+							: m["team.delete_dialog.action.confirm"]()}
 					</AlertDialogAction>
 				</AlertDialogFooter>
 			</AlertDialogContent>

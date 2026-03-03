@@ -21,7 +21,9 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
 import { decrypt, performKeyRotation, rsaDecrypt } from "@/lib/wasm-crypto";
+import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
+import { TeamRotationError } from "./team-rotation-error";
 
 interface LeaveTeamDialogProps {
 	teamId: string;
@@ -34,6 +36,7 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 	const trpcClient = useTRPCClient();
 	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
+	const { m } = useI18n();
 
 	/**
 	 * Handle leaving the team with key rotation for all team vaults.
@@ -50,14 +53,12 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 		try {
 			const masterUnlockKey = await storage.getMasterUnlockKey();
 			if (!masterUnlockKey) {
-				throw new Error(
-					"Master Unlock Key not available. Please log in again.",
-				);
+				throw new TeamRotationError("MASTER_UNLOCK_KEY_MISSING");
 			}
 
 			const currentUserId = await storage.getActiveAccountUserId();
 			if (!currentUserId) {
-				throw new Error("Session data not available. Please log in again.");
+				throw new TeamRotationError("SESSION_DATA_MISSING");
 			}
 
 			// Fetch rotation data for all team vaults
@@ -91,9 +92,9 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 				});
 
 				if (!currentVaultKey) {
-					throw new Error(
-						`Could not decrypt vault key for vault "${vaultData.vaultName}". Please log in again.`,
-					);
+					throw new TeamRotationError("VAULT_KEY_DECRYPT_FAILED", {
+						vaultName: vaultData.vaultName,
+					});
 				}
 
 				const rotationResult = await performKeyRotation(
@@ -121,15 +122,32 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 				vaultRotations,
 			});
 
-			toast.success("You have left the team");
+			toast.success(m["team.leave_dialog.toast.left"]());
 			await invalidator.invalidateTeam();
 			setOpen(false);
 			navigate({ to: "/team" });
 		} catch (error) {
 			console.error("Failed to leave team:", error);
-			toast.error(
-				error instanceof Error ? error.message : "Failed to leave team",
-			);
+			if (error instanceof TeamRotationError) {
+				if (error.code === "MASTER_UNLOCK_KEY_MISSING") {
+					toast.error(m["team.error.master_unlock_key_missing"]());
+				} else if (error.code === "SESSION_DATA_MISSING") {
+					toast.error(m["team.error.session_data_missing"]());
+				} else {
+					toast.error(
+						m["team.error.vault_key_decrypt_failed"]({
+							vaultName:
+								error.params.vaultName ?? m["team.common.unknown_vault"](),
+						}),
+					);
+				}
+			} else {
+				toast.error(
+					error instanceof Error
+						? error.message
+						: m["team.leave_dialog.toast.leave_failed"](),
+				);
+			}
 		} finally {
 			setIsLeaving(false);
 		}
@@ -140,26 +158,26 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 			<AlertDialogTrigger asChild>
 				<Button variant="outline">
 					<LogOut className="mr-2 h-4 w-4" />
-					Leave Team
+					{m["team.leave_dialog.trigger"]()}
 				</Button>
 			</AlertDialogTrigger>
 			<AlertDialogContent>
 				<AlertDialogHeader>
-					<AlertDialogTitle>Leave Team</AlertDialogTitle>
+					<AlertDialogTitle>{m["team.leave_dialog.title"]()}</AlertDialogTitle>
 					<AlertDialogDescription>
-						Are you sure you want to leave <strong>{teamName}</strong>? You will
-						lose access to all team vaults, shared vault keys will be rotated,
-						and you will be moved to a free personal plan. You will need to be
-						re-invited to rejoin.
+						{m["team.leave_dialog.description.prefix"]()}{" "}
+						<strong>{teamName}</strong>{" "}
+						{m["team.leave_dialog.description.suffix"]()}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>
-					<AlertDialogCancel>Cancel</AlertDialogCancel>
-					<AlertDialogAction
-						onClick={handleLeave}
-						disabled={isLeaving}
-					>
-						{isLeaving ? "Leaving & rotating keys..." : "Leave Team"}
+					<AlertDialogCancel>
+						{m["team.common.action.cancel"]()}
+					</AlertDialogCancel>
+					<AlertDialogAction onClick={handleLeave} disabled={isLeaving}>
+						{isLeaving
+							? m["team.leave_dialog.action.leaving"]()
+							: m["team.leave_dialog.action.confirm"]()}
 					</AlertDialogAction>
 				</AlertDialogFooter>
 			</AlertDialogContent>

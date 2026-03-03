@@ -146,7 +146,11 @@ export {
 	useCreateShare,
 } from "./share";
 // Team Mutation Hooks (write operations)
-export { useTeamAvatar } from "./team/use-team-avatar";
+export {
+	type TeamAvatarErrorCode,
+	TeamAvatarError,
+	useTeamAvatar,
+} from "./team/use-team-avatar";
 // Data Hooks (read operations)
 export {
 	type AccountInfo,

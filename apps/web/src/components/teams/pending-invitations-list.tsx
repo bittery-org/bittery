@@ -7,6 +7,8 @@ import {
 	IconXmarkOutlineDuo18 as X,
 } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
+import { formatDate } from "@/lib/i18n-format";
+import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface Invitation {
@@ -31,12 +33,26 @@ export function PendingInvitationsList({
 }: PendingInvitationsListProps) {
 	const trpcClient = useTRPCClient();
 	const invalidator = useQueryInvalidator();
+	const { m } = useI18n();
+
+	const getRoleLabel = (role: string) => {
+		switch (role) {
+			case "owner":
+				return m["team.role.owner"]();
+			case "admin":
+				return m["team.role.admin"]();
+			case "member":
+				return m["team.role.member"]();
+			default:
+				return role;
+		}
+	};
 
 	const cancelMutation = useMutation({
 		mutationFn: (input: { invitationId: string }) =>
 			trpcClient.team.invitations.cancel.mutate(input),
 		onSuccess: async () => {
-			toast.success("Invitation cancelled");
+			toast.success(m["team.invitations.toast.cancelled"]());
 			await invalidator.invalidateTeam();
 		},
 		onError: (error: Error) => {
@@ -48,7 +64,7 @@ export function PendingInvitationsList({
 		mutationFn: (input: { invitationId: string }) =>
 			trpcClient.team.invitations.resend.mutate(input),
 		onSuccess: async () => {
-			toast.success("Invitation resent");
+			toast.success(m["team.invitations.toast.resent"]());
 			await invalidator.invalidateTeam();
 		},
 		onError: (error: Error) => {
@@ -62,9 +78,11 @@ export function PendingInvitationsList({
 				<div className="inline-flex size-10 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground">
 					<Clock className="h-5 w-5" />
 				</div>
-				<p className="mt-3 font-medium text-sm">No pending invitations</p>
+				<p className="mt-3 font-medium text-sm">
+					{m["team.invitations.empty.title"]()}
+				</p>
 				<p className="mt-1 text-muted-foreground text-xs">
-					Invite a member to get started.
+					{m["team.invitations.empty.description"]()}
 				</p>
 			</div>
 		);
@@ -105,17 +123,23 @@ export function PendingInvitationsList({
 									</span>
 								</div>
 								<p className="text-muted-foreground text-xs">
-									Invited by {invitation.invitedBy}
+									{m["team.invitations.invited_by"]({
+										name: invitation.invitedBy,
+									})}
 								</p>
 							</div>
 							<div className="flex shrink-0 items-center gap-1.5">
 								<Badge variant="secondary" className="capitalize">
-									{invitation.role}
+									{getRoleLabel(invitation.role)}
 								</Badge>
 								{expired ? (
-									<Badge variant="destructive">Expired</Badge>
+									<Badge variant="destructive">
+										{m["team.invitations.status.expired"]()}
+									</Badge>
 								) : (
-									<Badge variant="outline">Pending</Badge>
+									<Badge variant="outline">
+										{m["team.invitations.status.pending"]()}
+									</Badge>
 								)}
 							</div>
 						</div>
@@ -123,8 +147,18 @@ export function PendingInvitationsList({
 						<div className="mt-3 flex items-center justify-between border-t pt-3">
 							<span className="text-muted-foreground text-xs">
 								{expired
-									? `Expired ${new Date(invitation.expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
-									: `Expires ${new Date(invitation.expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
+									? m["team.invitations.expires.expired"]({
+											date: formatDate(invitation.expiresAt, {
+												month: "short",
+												day: "numeric",
+											}),
+										})
+									: m["team.invitations.expires.active"]({
+											date: formatDate(invitation.expiresAt, {
+												month: "short",
+												day: "numeric",
+											}),
+										})}
 							</span>
 
 							{canManage && (
@@ -136,14 +170,14 @@ export function PendingInvitationsList({
 										onClick={() =>
 											copyWithToast(
 												`${window.location.origin}/invite/${invitation.token}`,
-												"Invite link",
+												m["team.invitations.copy_label"](),
 												{ showAutoClearMessage: false },
 											)
 										}
-										title="Copy invite link"
+										title={m["team.invitations.action.copy_title"]()}
 									>
 										<Copy className="h-3.5 w-3.5" />
-										Copy
+										{m["team.invitations.action.copy"]()}
 									</Button>
 									<Button
 										variant="ghost"
@@ -153,10 +187,10 @@ export function PendingInvitationsList({
 											resendMutation.mutate({ invitationId: invitation.id })
 										}
 										disabled={resendMutation.isPending}
-										title="Resend invitation"
+										title={m["team.invitations.action.resend_title"]()}
 									>
 										<RefreshCw className="h-3.5 w-3.5" />
-										Resend
+										{m["team.invitations.action.resend"]()}
 									</Button>
 									<Button
 										variant="ghost"
@@ -166,10 +200,10 @@ export function PendingInvitationsList({
 											cancelMutation.mutate({ invitationId: invitation.id })
 										}
 										disabled={cancelMutation.isPending}
-										title="Cancel invitation"
+										title={m["team.invitations.action.cancel_title"]()}
 									>
 										<X className="h-3.5 w-3.5" />
-										Cancel
+										{m["team.invitations.action.cancel"]()}
 									</Button>
 								</div>
 							)}
