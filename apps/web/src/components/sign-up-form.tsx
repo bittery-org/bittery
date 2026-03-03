@@ -16,6 +16,7 @@ import {
 import { type CloudPlanId, planInfo } from "@bittery/shared/pricing";
 import { useState } from "react";
 import { useSignupForm } from "@/hooks/use-signup-form";
+import { useI18n } from "@/providers/i18n-provider";
 import PlanComparisonDialog from "./plan-comparison-dialog";
 import SelfHostedSignUpForm from "./self-hosted-sign-up-form";
 
@@ -52,6 +53,7 @@ export default function SignUpForm({
 	redirectTo?: string;
 	initialPlan?: string;
 }) {
+	const { m } = useI18n();
 	const resolvedPlan = initialPlan && validPlanIds.has(initialPlan)
 		? (initialPlan as CloudPlanId)
 		: undefined;
@@ -77,22 +79,21 @@ export default function SignUpForm({
 		!signup.registrationStatusQuery.isLoading &&
 		!signup.allowPublicSignup
 	) {
-		return (
-			<div className="w-full">
-				<h1 className="text-center font-semibold text-2xl tracking-tight">
-					Invite-Only Registration
-				</h1>
-				<div className="mt-6 rounded-2xl border bg-card p-6">
-					<div className="space-y-4">
-						<p className="text-muted-foreground text-sm leading-relaxed">
-							Registration is closed on this server. Ask an admin for an invite
-							link.
-						</p>
-						<Button type="button" onClick={onSwitchToSignIn} className="w-full">
-							Back to Sign In
-						</Button>
+			return (
+				<div className="w-full">
+					<h1 className="text-center font-semibold text-2xl tracking-tight">
+						{m["auth.signup.invite_only.title"]()}
+					</h1>
+					<div className="mt-6 rounded-2xl border bg-card p-6">
+						<div className="space-y-4">
+							<p className="text-muted-foreground text-sm leading-relaxed">
+								{m["auth.signup.invite_only.description"]()}
+							</p>
+							<Button type="button" onClick={onSwitchToSignIn} className="w-full">
+								{m["auth.signup.button.back_to_signin"]()}
+							</Button>
+						</div>
 					</div>
-				</div>
 			</div>
 		);
 	}
@@ -100,18 +101,20 @@ export default function SignUpForm({
 	const showPlanStep = cloudSignupStep === "plan";
 
 	return (
-		<div className="w-full">
-			{/* Header */}
-			<div className="text-center">
-				<h1 className="font-semibold text-2xl tracking-tight">
-					{showPlanStep ? "Choose your plan" : "Create your account"}
-				</h1>
-				<p className="mx-auto mt-2 max-w-80 text-muted-foreground text-sm">
-					{showPlanStep
-						? "Select a plan to get started. You can change it anytime."
-						: "Set up your encrypted account and secure your vault."}
-				</p>
-			</div>
+			<div className="w-full">
+				{/* Header */}
+				<div className="text-center">
+					<h1 className="font-semibold text-2xl tracking-tight">
+						{showPlanStep
+							? m["auth.signup.header.choose_plan"]()
+							: m["auth.signup.header.create_account"]()}
+					</h1>
+					<p className="mx-auto mt-2 max-w-80 text-muted-foreground text-sm">
+						{showPlanStep
+							? m["auth.signup.subheader.choose_plan"]()
+							: m["auth.signup.subheader.create_account"]()}
+					</p>
+				</div>
 
 			{/* Segmented Stepper */}
 			<div className="mt-6">
@@ -141,9 +144,9 @@ export default function SignUpForm({
 							<span className="flex h-4 w-4 items-center justify-center rounded-full border border-primary/50 bg-primary/10 font-bold text-[10px] text-primary">
 								1
 							</span>
-						)}
-						Plan
-					</button>
+							)}
+							{m["auth.signup.step.plan"]()}
+						</button>
 					<button
 						type="button"
 						className={cn(
@@ -162,24 +165,26 @@ export default function SignUpForm({
 						>
 							2
 						</span>
-						Account
-					</button>
+							{m["auth.signup.step.account"]()}
+						</button>
+					</div>
 				</div>
-			</div>
 
 			{/* Step Content */}
 			<div className="mt-5">
 				{showPlanStep ? (
-					<PlanSelectionStep
-						form={signup.form}
-						onContinue={() => setCloudSignupStep("account")}
-						onSwitchToSignIn={onSwitchToSignIn}
-					/>
-				) : (
-					<AccountSetupStep
-						signup={signup}
-						onBack={() => setCloudSignupStep("plan")}
-						onSwitchToSignIn={onSwitchToSignIn}
+						<PlanSelectionStep
+							m={m}
+							form={signup.form}
+							onContinue={() => setCloudSignupStep("account")}
+							onSwitchToSignIn={onSwitchToSignIn}
+						/>
+					) : (
+						<AccountSetupStep
+							m={m}
+							signup={signup}
+							onBack={() => setCloudSignupStep("plan")}
+							onSwitchToSignIn={onSwitchToSignIn}
 					/>
 				)}
 			</div>
@@ -190,10 +195,12 @@ export default function SignUpForm({
 /* ─── Plan Selection Step ──────────────────────────────────────────── */
 
 function PlanSelectionStep({
+	m,
 	form,
 	onContinue,
 	onSwitchToSignIn,
 }: {
+	m: ReturnType<typeof useI18n>["m"];
 	form: ReturnType<typeof useSignupForm>["form"];
 	onContinue: () => void;
 	onSwitchToSignIn: () => void;
@@ -228,12 +235,12 @@ function PlanSelectionStep({
 									{/* Recommended badge */}
 									{plan.isRecommended && (
 										<div className="absolute -top-2.5 right-3">
-											<Badge
-												variant="default"
-												className="h-5 rounded-full px-2 font-medium text-[10px] shadow-sm"
-											>
-												Popular
-											</Badge>
+										<Badge
+											variant="default"
+											className="h-5 rounded-full px-2 font-medium text-[10px] shadow-sm"
+										>
+											{m["auth.signup.plan.popular"]()}
+										</Badge>
 										</div>
 									)}
 
@@ -309,11 +316,11 @@ function PlanSelectionStep({
 							type="button"
 							onClick={() => setShowComparison(true)}
 							className="flex w-full items-center justify-center gap-1.5 py-1 text-muted-foreground text-xs transition-colors hover:text-foreground"
-						>
-							<span className="border-current border-b border-dashed">
-								Compare all plans & features
-							</span>
-						</button>
+							>
+								<span className="border-current border-b border-dashed">
+									{m["auth.signup.compare_all_plans"]()}
+								</span>
+							</button>
 						<PlanComparisonDialog
 							open={showComparison}
 							onOpenChange={setShowComparison}
@@ -329,26 +336,26 @@ function PlanSelectionStep({
 				{(selectedPlan) =>
 					selectedPlan === "team" ? (
 						<form.Field name="organizationName">
-							{(field) => (
-								<div className="space-y-2 rounded-xl border bg-muted/20 p-3.5">
-									<Label htmlFor={field.name} className="text-xs">
-										Team / Business Name
-									</Label>
-									<Input
-										id={field.name}
-										name={field.name}
-										placeholder="Acme Security"
+								{(field) => (
+									<div className="space-y-2 rounded-xl border bg-muted/20 p-3.5">
+										<Label htmlFor={field.name} className="text-xs">
+											{m["auth.signup.team_name.label"]()}
+										</Label>
+										<Input
+											id={field.name}
+											name={field.name}
+											placeholder={m["auth.signup.team_name.placeholder"]()}
 										value={field.state.value}
 										onBlur={field.handleBlur}
 										onChange={(e) => field.handleChange(e.target.value)}
 										required
 										className="h-9"
 									/>
-									<p className="text-[11px] text-muted-foreground/70">
-										Shown as your workspace name for members.
-									</p>
-								</div>
-							)}
+										<p className="text-[11px] text-muted-foreground/70">
+											{m["auth.signup.team_name.help"]()}
+										</p>
+									</div>
+								)}
 						</form.Field>
 					) : null
 				}
@@ -367,13 +374,13 @@ function PlanSelectionStep({
 						className="h-10 w-full bg-primary font-medium shadow-sm"
 						onClick={() => {
 							if (plan === "team" && !organizationName.trim()) {
-								toast.error("Please enter a team or business name to continue");
+								toast.error(m["auth.signup.error.team_name_required"]());
 								return;
 							}
 							onContinue();
 						}}
 					>
-						Continue
+						{m["auth.signup.button.continue"]()}
 					</Button>
 				)}
 			</form.Subscribe>
@@ -384,7 +391,7 @@ function PlanSelectionStep({
 				onClick={onSwitchToSignIn}
 				className="w-full text-muted-foreground"
 			>
-				Already have an account? Sign in
+				{m["auth.signup.button.have_account"]()}
 			</Button>
 		</div>
 	);
@@ -393,10 +400,12 @@ function PlanSelectionStep({
 /* ─── Account Setup Step ───────────────────────────────────────────── */
 
 function AccountSetupStep({
+	m,
 	signup,
 	onBack,
 	onSwitchToSignIn,
 }: {
+	m: ReturnType<typeof useI18n>["m"];
 	signup: ReturnType<typeof useSignupForm>;
 	onBack: () => void;
 	onSwitchToSignIn: () => void;
@@ -462,7 +471,7 @@ function AccountSetupStep({
 								onClick={onBack}
 								className="rounded-lg px-2.5 py-1 font-medium text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground"
 							>
-								Change
+								{m["auth.signup.summary.change"]()}
 							</button>
 						</div>
 					);
@@ -472,14 +481,14 @@ function AccountSetupStep({
 			{/* Name field */}
 			<form.Field name="name">
 				{(field) => (
-					<div className="space-y-1.5">
-						<Label htmlFor={field.name} className="font-medium text-xs">
-							Full Name
-						</Label>
-						<Input
-							id={field.name}
-							name={field.name}
-							placeholder="John Doe"
+						<div className="space-y-1.5">
+							<Label htmlFor={field.name} className="font-medium text-xs">
+								{m["auth.signup.form.full_name"]()}
+							</Label>
+							<Input
+								id={field.name}
+								name={field.name}
+								placeholder={m["auth.signup.form.full_name.placeholder"]()}
 							value={field.state.value}
 							onBlur={field.handleBlur}
 							onChange={(e) => field.handleChange(e.target.value)}
@@ -493,15 +502,15 @@ function AccountSetupStep({
 			{/* Email field */}
 			<form.Field name="email">
 				{(field) => (
-					<div className="space-y-1.5">
-						<Label htmlFor={field.name} className="font-medium text-xs">
-							Email
-						</Label>
-						<Input
+						<div className="space-y-1.5">
+							<Label htmlFor={field.name} className="font-medium text-xs">
+								{m["auth.signup.form.email"]()}
+							</Label>
+							<Input
 							id={field.name}
 							name={field.name}
-							type="email"
-							placeholder="name@example.com"
+								type="email"
+								placeholder={m["auth.signup.form.email.placeholder"]()}
 							value={field.state.value}
 							onBlur={field.handleBlur}
 							onChange={(e) => field.handleChange(e.target.value)}
@@ -515,10 +524,10 @@ function AccountSetupStep({
 			{/* Password field */}
 			<form.Field name="password">
 				{(field) => (
-					<div className="space-y-1.5">
-						<Label htmlFor={field.name} className="font-medium text-xs">
-							Master Password
-						</Label>
+						<div className="space-y-1.5">
+							<Label htmlFor={field.name} className="font-medium text-xs">
+								{m["auth.signup.form.master_password"]()}
+							</Label>
 						<div className="relative">
 							<Input
 								id={field.name}
@@ -540,11 +549,11 @@ function AccountSetupStep({
 								{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
 							</Button>
 						</div>
-						<p className="text-[11px] text-muted-foreground/70">
-							Must be at least 8 characters long.
-						</p>
-					</div>
-				)}
+							<p className="text-[11px] text-muted-foreground/70">
+								{m["auth.signup.form.master_password.help"]()}
+							</p>
+						</div>
+					)}
 			</form.Field>
 
 			{/* Emergency Kit — distinctive card */}
@@ -571,12 +580,12 @@ function AccountSetupStep({
 					{hasDownloadedKit ? <CheckCircle2 size={18} /> : <Shield size={18} />}
 				</div>
 
-				<div className="min-w-0 flex-1">
-					<p className="font-medium text-sm leading-none">
-						{hasDownloadedKit
-							? "Emergency Kit saved"
-							: "Download Emergency Kit"}
-					</p>
+					<div className="min-w-0 flex-1">
+						<p className="font-medium text-sm leading-none">
+							{hasDownloadedKit
+								? m["auth.signup.emergency_kit.saved_title"]()
+								: m["auth.signup.emergency_kit.download_title"]()}
+						</p>
 					<p
 						className={cn(
 							"mt-1 text-[11px] leading-snug",
@@ -584,12 +593,12 @@ function AccountSetupStep({
 								? "text-emerald-700/70 dark:text-emerald-400/60"
 								: "text-muted-foreground/70",
 						)}
-					>
-						{hasDownloadedKit
-							? "Your Secret Key & Recovery Key have been saved"
-							: "Required before creating your account"}
-					</p>
-				</div>
+						>
+							{hasDownloadedKit
+								? m["auth.signup.emergency_kit.saved_description"]()
+								: m["auth.signup.emergency_kit.required_description"]()}
+						</p>
+					</div>
 
 				{!hasDownloadedKit && (
 					<Download
@@ -612,16 +621,16 @@ function AccountSetupStep({
 						<>
 							<Loader2 size={16} className="mr-2 animate-spin" />
 							{isEncrypting
-								? "Setting up encryption..."
-								: "Creating account..."}
+								? m["auth.signup.button.setting_up_encryption"]()
+								: m["auth.signup.button.creating_account"]()}
 						</>
 					) : !hasDownloadedKit ? (
 						<>
 							<Shield size={16} className="mr-2" />
-							Download Emergency Kit to continue
+							{m["auth.signup.button.download_kit_to_continue"]()}
 						</>
 					) : (
-						"Create Account"
+						m["auth.signup.button.create_account"]()
 					)}
 				</Button>
 			</div>
@@ -634,7 +643,7 @@ function AccountSetupStep({
 					className="h-9 gap-1.5 px-3 text-muted-foreground"
 				>
 					<ArrowLeft size={14} />
-					Back
+					{m["auth.signup.button.back"]()}
 				</Button>
 				<div className="h-4 w-px bg-border" />
 				<Button
@@ -643,7 +652,7 @@ function AccountSetupStep({
 					onClick={onSwitchToSignIn}
 					className="flex-1 text-muted-foreground"
 				>
-					Already have an account? Sign in
+					{m["auth.signup.button.have_account"]()}
 				</Button>
 			</div>
 		</form>

@@ -7,6 +7,7 @@ import {
 	IconUsers6OutlineDuo18 as Users,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
+import { useI18n } from "@/providers/i18n-provider";
 
 export function StatsCards() {
 	const trpc = useTRPC();
@@ -14,35 +15,40 @@ export function StatsCards() {
 	const invitationsQuery = useQuery(
 		trpc.team.invitations.pending.queryOptions(),
 	);
+	const { m } = useI18n();
 	const isLoading = statsQuery.isLoading || invitationsQuery.isLoading;
 
 	const stats = [
 		{
-			title: "Teams",
+			id: "teams",
+			title: m["dashboard.stats.card.teams.title"](),
 			value: statsQuery.data?.teamCount ?? 0,
 			icon: Users,
-			description: "Teams you belong to",
+			description: m["dashboard.stats.card.teams.description"](),
 			barWidth: "45%",
 		},
 		{
-			title: "Vaults",
+			id: "vaults",
+			title: m["dashboard.stats.card.vaults.title"](),
 			value: statsQuery.data?.vaultCount ?? 0,
 			icon: Lock,
-			description: "Accessible vaults",
+			description: m["dashboard.stats.card.vaults.description"](),
 			barWidth: "62%",
 		},
 		{
-			title: "Items",
+			id: "items",
+			title: m["dashboard.stats.card.items.title"](),
 			value: statsQuery.data?.itemCount ?? 0,
 			icon: Key,
-			description: "Stored credentials",
+			description: m["dashboard.stats.card.items.description"](),
 			barWidth: "78%",
 		},
 		{
-			title: "Invites",
+			id: "invites",
+			title: m["dashboard.stats.card.invites.title"](),
 			value: invitationsQuery.data?.length ?? 0,
 			icon: Mail,
-			description: "Pending team invitations",
+			description: m["dashboard.stats.card.invites.description"](),
 			barWidth: "36%",
 		},
 	];
@@ -51,7 +57,7 @@ export function StatsCards() {
 		<div className="grid gap-4 sm:grid-cols-2">
 			{stats.map((stat) => (
 				<Card
-					key={stat.title}
+					key={stat.id}
 					className="group relative gap-4 overflow-hidden border-border/70 py-5 transition-all hover:-translate-y-0.5 hover:shadow-md"
 				>
 					<div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-border/80" />

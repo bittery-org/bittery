@@ -7,6 +7,7 @@ import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { PendingLoader } from "./components/loader";
 import { getServerUrl } from "./lib/auth-server";
 import { storage } from "./lib/storage";
+import { m } from "./paraglide/messages";
 import "./index.css";
 import { initWasmCrypto } from "./lib/wasm-crypto";
 
@@ -22,6 +23,7 @@ import {
 } from "@tanstack/react-query";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
+import { I18nProvider } from "./providers/i18n-provider";
 import { WebPlatformProvider } from "./providers/platform-provider";
 import { SyncProvider } from "./providers/sync-provider";
 import { routeTree } from "./routeTree.gen";
@@ -52,7 +54,7 @@ function handleUnauthorizedError() {
 	queryClient.clear();
 
 	storage.clearSession().then(() => {
-		toast.error("Session expired. Please sign in again.");
+		toast.error(m["toast.auth.session_expired"]());
 		window.location.href = "/login";
 	});
 }
@@ -136,13 +138,15 @@ export const getRouter = () => {
 		defaultPendingComponent: PendingLoader,
 		defaultNotFoundComponent: () => <div>Not Found</div>,
 		Wrap: ({ children }) => (
-			<QueryClientProvider client={queryClient}>
-				<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-					<SyncProvider queryClient={queryClient}>
-						<WebPlatformProvider>{children}</WebPlatformProvider>
-					</SyncProvider>
-				</TRPCProvider>
-			</QueryClientProvider>
+			<I18nProvider>
+				<QueryClientProvider client={queryClient}>
+					<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+						<SyncProvider queryClient={queryClient}>
+							<WebPlatformProvider>{children}</WebPlatformProvider>
+						</SyncProvider>
+					</TRPCProvider>
+				</QueryClientProvider>
+			</I18nProvider>
 		),
 	});
 	return router;

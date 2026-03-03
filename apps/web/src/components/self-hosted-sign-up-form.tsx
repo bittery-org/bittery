@@ -8,6 +8,7 @@ import {
 	IconUsers6OutlineDuo18 as Users,
 } from "@bittery/ui/icons";
 import { useSignupForm } from "@/hooks/use-signup-form";
+import { useI18n } from "@/providers/i18n-provider";
 
 export default function SelfHostedSignUpForm({
 	onSwitchToSignIn,
@@ -18,6 +19,7 @@ export default function SelfHostedSignUpForm({
 	invitationToken?: string;
 	redirectTo?: string;
 }) {
+	const { m } = useI18n();
 	const {
 		form,
 		signupMutation,
@@ -36,29 +38,28 @@ export default function SelfHostedSignUpForm({
 	} = useSignupForm({ invitationToken, redirectTo });
 
 	const signupHeading = isInvitationSignup
-		? "Accept Invitation"
-		: "Create admin account";
+		? m["auth.self_hosted.title.accept_invitation"]()
+		: m["auth.self_hosted.title.create_admin"]();
 	const signupDescription = isInvitationSignup
-		? "Create your account to securely join the invited workspace."
-		: "Set up the first admin account for this server.";
+		? m["auth.self_hosted.description.accept_invitation"]()
+		: m["auth.self_hosted.description.create_admin"]();
 
 	if (hasInvitationToken && invitationQuery.isError) {
 		return (
 			<div className="w-full">
 				<h1 className="text-center font-semibold text-2xl tracking-tight">
-					Invitation Required
+					{m["auth.self_hosted.invitation_required.title"]()}
 				</h1>
 				<div className="mt-6 space-y-4">
 					<p className="text-muted-foreground text-sm leading-relaxed">
-						This invitation link is invalid or expired. Ask your admin to
-						send a new invite link.
+						{m["auth.self_hosted.invitation_required.description"]()}
 					</p>
 					<Button
 						type="button"
 						onClick={onSwitchToSignIn}
 						className="w-full"
 					>
-						Back to Sign In
+						{m["auth.signup.button.back_to_signin"]()}
 					</Button>
 				</div>
 			</div>
@@ -69,11 +70,11 @@ export default function SelfHostedSignUpForm({
 		return (
 			<div className="w-full">
 				<h1 className="text-center font-semibold text-2xl tracking-tight">
-					Loading invitation
+					{m["auth.self_hosted.loading_invitation.title"]()}
 				</h1>
 			<div className="mt-6 flex items-center justify-center gap-2 text-muted-foreground text-sm">
 				<Loader2 className="h-4 w-4 animate-spin" />
-				Verifying invitation link...
+				{m["auth.self_hosted.loading_invitation.description"]()}
 			</div>
 			</div>
 		);
@@ -87,19 +88,18 @@ export default function SelfHostedSignUpForm({
 		return (
 			<div className="w-full">
 				<h1 className="text-center font-semibold text-2xl tracking-tight">
-					Invite-Only Registration
+					{m["auth.signup.invite_only.title"]()}
 				</h1>
 				<div className="mt-6 space-y-4">
 					<p className="text-muted-foreground text-sm leading-relaxed">
-						Registration is closed on this server. Ask an admin for an
-						invite link.
+						{m["auth.signup.invite_only.description"]()}
 					</p>
 					<Button
 						type="button"
 						onClick={onSwitchToSignIn}
 						className="w-full"
 					>
-						Back to Sign In
+						{m["auth.signup.button.back_to_signin"]()}
 					</Button>
 				</div>
 			</div>
@@ -129,15 +129,18 @@ export default function SelfHostedSignUpForm({
 									<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
 										<Users className="h-5 w-5 text-primary" />
 									</div>
-									<div className="space-y-1">
-										<p className="font-medium text-sm">
-											You've been invited to join{" "}
-											<span className="text-primary">
-												{invitation?.teamName}
-											</span>
-										</p>
+										<div className="space-y-1">
+											<p className="font-medium text-sm">
+												{m["auth.self_hosted.invited_to_join"]({
+													teamName: invitation?.teamName ?? "",
+												})}
+											</p>
 										<div className="flex items-center gap-2 text-muted-foreground text-xs">
-											<span>Invited by {invitation?.invitedByName}</span>
+											<span>
+												{m["auth.self_hosted.invited_by"]({
+													invitedByName: invitation?.invitedByName ?? "",
+												})}
+											</span>
 											<span>·</span>
 											<Badge variant="secondary" className="text-xs">
 												{invitation?.role}
@@ -152,11 +155,13 @@ export default function SelfHostedSignUpForm({
 							<form.Field name="name">
 								{(field) => (
 									<div className="space-y-2">
-										<Label htmlFor={field.name}>Full Name</Label>
+										<Label htmlFor={field.name}>
+											{m["auth.signup.form.full_name"]()}
+										</Label>
 										<Input
 											id={field.name}
 											name={field.name}
-											placeholder="John Doe"
+											placeholder={m["auth.signup.form.full_name.placeholder"]()}
 											value={field.state.value}
 											onBlur={field.handleBlur}
 											onChange={(e) => field.handleChange(e.target.value)}
@@ -172,12 +177,14 @@ export default function SelfHostedSignUpForm({
 							<form.Field name="email">
 								{(field) => (
 									<div className="space-y-2">
-										<Label htmlFor={field.name}>Email</Label>
+										<Label htmlFor={field.name}>
+											{m["auth.signup.form.email"]()}
+										</Label>
 										<Input
 											id={field.name}
 											name={field.name}
 											type="email"
-											placeholder="name@example.com"
+											placeholder={m["auth.signup.form.email.placeholder"]()}
 											value={
 												isInvitationSignup
 													? invitation?.email || field.state.value
@@ -191,7 +198,7 @@ export default function SelfHostedSignUpForm({
 										/>
 										{isInvitationSignup && (
 											<p className="text-muted-foreground text-xs">
-												This email was used to invite you and cannot be changed.
+												{m["auth.self_hosted.email_locked"]()}
 											</p>
 										)}
 									</div>
@@ -203,7 +210,9 @@ export default function SelfHostedSignUpForm({
 							<form.Field name="password">
 								{(field) => (
 									<div className="space-y-2">
-										<Label htmlFor={field.name}>Master Password</Label>
+										<Label htmlFor={field.name}>
+											{m["auth.signup.form.master_password"]()}
+										</Label>
 										<div className="relative">
 											<Input
 												id={field.name}
@@ -230,7 +239,7 @@ export default function SelfHostedSignUpForm({
 											</Button>
 										</div>
 										<p className="text-[0.8rem] text-muted-foreground">
-											Must be at least 8 characters long.
+											{m["auth.signup.form.master_password.help"]()}
 										</p>
 									</div>
 								)}
@@ -262,11 +271,11 @@ export default function SelfHostedSignUpForm({
 							<div className="min-w-0 flex-1">
 								<p className="font-medium text-sm">
 									{hasDownloadedKit
-										? "Emergency Kit saved"
-										: "Download Emergency Kit"}
+										? m["auth.signup.emergency_kit.saved_title"]()
+										: m["auth.signup.emergency_kit.download_title"]()}
 								</p>
 								<p className="text-muted-foreground text-xs">
-									Secret Key & Recovery Key for account recovery
+									{m["auth.self_hosted.emergency_kit.description"]()}
 								</p>
 							</div>
 						</button>
@@ -285,16 +294,16 @@ export default function SelfHostedSignUpForm({
 									<>
 										<Loader2 size={16} className="mr-2 animate-spin" />
 										{isEncrypting
-											? "Setting up encryption..."
-											: "Creating account..."}
+											? m["auth.signup.button.setting_up_encryption"]()
+											: m["auth.signup.button.creating_account"]()}
 									</>
 								) : !hasDownloadedKit ? (
 									<>
 										<Download size={16} className="mr-2" />
-										Download Emergency Kit to continue
+										{m["auth.signup.button.download_kit_to_continue"]()}
 									</>
 								) : (
-									"Create Account"
+									m["auth.signup.button.create_account"]()
 								)}
 							</Button>
 						</div>
@@ -305,7 +314,7 @@ export default function SelfHostedSignUpForm({
 							onClick={onSwitchToSignIn}
 							className="w-full"
 						>
-							Already have an account? Sign in
+							{m["auth.signup.button.have_account"]()}
 						</Button>
 				</form>
 			</div>

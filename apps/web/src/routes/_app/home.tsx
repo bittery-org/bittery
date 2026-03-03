@@ -9,6 +9,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { DownloadCard } from "@/components/dashboard/download-card";
 import { PendingInvitations } from "@/components/dashboard/pending-invitations";
 import { StatsCards } from "@/components/dashboard/stats-cards";
+import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/home")({
 	component: RouteComponent,
@@ -20,6 +21,7 @@ export const Route = createFileRoute("/_app/home")({
 function RouteComponent() {
 	const trpc = useTRPC();
 	const userQuery = useQuery(trpc.auth.me.queryOptions());
+	const { m } = useI18n();
 	const name = userQuery.data?.name;
 
 	return (
@@ -31,34 +33,40 @@ function RouteComponent() {
 				<div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
 					<div className="space-y-4">
 						<Badge variant="secondary" className="w-fit">
-							Control Center
+							{m["dashboard.home.hero_badge"]()}
 						</Badge>
 						<div className="space-y-2">
 							<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl">
-								{name ? `${name}'s workspace` : "Workspace overview"}
+								{name
+									? m["dashboard.home.hero_heading.named"]({ name })
+									: m["dashboard.home.hero_heading.default"]()}
 							</h1>
 							<p className="max-w-2xl text-muted-foreground">
-								Access your teams, vaults, and security settings from one place.
+								{m["dashboard.home.hero_description"]()}
 							</p>
 						</div>
 						<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
 							<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
 								<ShieldCheck className="h-3.5 w-3.5" />
-								Zero-knowledge security
+								{m["dashboard.home.hero_pill.zero_knowledge"]()}
 							</div>
 							<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
 								<Vault className="h-3.5 w-3.5" />
-								All vault activity at a glance
+								{m["dashboard.home.hero_pill.vault_activity"]()}
 							</div>
 						</div>
 					</div>
 
 					<div className="flex flex-wrap gap-2 lg:justify-end">
 						<Button asChild>
-							<Link to="/vaults">Open Vaults</Link>
+							<Link to="/vaults">
+								{m["dashboard.home.button.open_vaults"]()}
+							</Link>
 						</Button>
 						<Button variant="outline" asChild>
-							<Link to="/settings">Account Settings</Link>
+							<Link to="/settings">
+								{m["dashboard.home.button.account_settings"]()}
+							</Link>
 						</Button>
 					</div>
 				</div>
@@ -69,10 +77,10 @@ function RouteComponent() {
 					<section className="space-y-3">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 							<h2 className="font-semibold text-lg tracking-tight">
-								Workspace Metrics
+								{m["dashboard.home.metrics_heading"]()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
-								Live totals across teams, vaults, items, and invites.
+								{m["dashboard.home.metrics_description"]()}
 							</p>
 						</div>
 						<StatsCards />

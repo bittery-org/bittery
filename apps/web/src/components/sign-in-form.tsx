@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 
 import { storage } from "@/lib/storage";
 import { WorkerCrypto } from "@/lib/worker-crypto";
+import { useI18n } from "@/providers/i18n-provider";
 
 export default function SignInForm({
 	onSwitchToSignUp,
@@ -23,6 +24,7 @@ export default function SignInForm({
 	onSwitchToSignUp: () => void;
 	redirectTo?: string;
 }) {
+	const { m } = useI18n();
 	const navigate = useNavigate();
 	const [email, setEmail] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
@@ -70,9 +72,7 @@ export default function SignInForm({
 			const daysUntil = Math.floor(
 				DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24),
 			);
-			toast.success(
-				`Signed in successfully! Quick unlock available for ${daysUntil} days.`,
-			);
+			toast.success(m["toast.auth.signin_success"]({ daysUntil }));
 			if (redirectTo) {
 				navigate({ to: redirectTo });
 			} else {
@@ -80,7 +80,7 @@ export default function SignInForm({
 			}
 		},
 		onError: (error: Error) => {
-			toast.error(error.message || "Failed to sign in");
+			toast.error(error.message || m["toast.auth.signin_error"]());
 		},
 	});
 
@@ -89,11 +89,11 @@ export default function SignInForm({
 		sessionState?.canQuickUnlock && sessionState?.email,
 	);
 	const signInTitle = isQuickUnlock
-		? "Welcome back"
-		: "Sign in to your account";
+		? m["auth.signin.title.quick_unlock"]()
+		: m["auth.signin.title.default"]();
 	const signInDescription = isQuickUnlock
-		? "Enter your password to unlock your vault."
-		: "Use your email, password, and Secret Key to access your vault.";
+		? m["auth.signin.description.quick_unlock"]()
+		: m["auth.signin.description.default"]();
 
 	// Handle session expiration detection
 	useEffect(() => {
@@ -101,7 +101,7 @@ export default function SignInForm({
 			// If we have stored data but session is invalid, show expired message
 			if (sessionState.email && !sessionState.isValid) {
 				setSessionExpired(true);
-				toast.info("Session expired. Please sign in again.");
+				toast.info(m["toast.auth.session_expired"]());
 			}
 		}
 	}, [isLoadingSession, sessionState]);
@@ -139,26 +139,28 @@ export default function SignInForm({
 
 	const renderCloudSignupPrompt = () => (
 		<>
-			New to Bittery Cloud?{" "}
+			{m["auth.signin.signup.cloud_prefix"]()}{" "}
 			<button
 				type="button"
 				onClick={onSwitchToSignUp}
 				className="font-medium text-primary underline-offset-4 hover:underline"
 			>
-				{hasInvitationRedirect ? "Create an account" : "Get started"}
+				{hasInvitationRedirect
+					? m["auth.signin.signup.cloud_create_account"]()
+					: m["auth.signin.signup.cloud_get_started"]()}
 			</button>
 		</>
 	);
 
 	const renderSelfHostedSignupPrompt = () => (
 		<>
-			Don&apos;t have an account?{" "}
+			{m["auth.signin.signup.self_hosted_prefix"]()}{" "}
 			<button
 				type="button"
 				onClick={onSwitchToSignUp}
 				className="font-medium text-primary underline-offset-4 hover:underline"
 			>
-				Sign up
+				{m["auth.signin.signup.self_hosted_button"]()}
 			</button>
 		</>
 	);
@@ -178,11 +180,10 @@ export default function SignInForm({
 							<div className="text-xl">&#9203;</div>
 							<div>
 								<p className="font-medium text-sm text-yellow-900 dark:text-yellow-100">
-									Session Expired
+									{m["auth.signin.session_expired.title"]()}
 								</p>
 								<p className="mt-1 text-xs text-yellow-700 dark:text-yellow-300">
-									Your 14-day quick unlock period has ended. Please enter your
-									Secret Key to sign in.
+									{m["auth.signin.session_expired.description"]()}
 								</p>
 							</div>
 						</div>
@@ -201,12 +202,14 @@ export default function SignInForm({
 						<form.Field name="email">
 							{(field) => (
 								<div className="space-y-2">
-									<Label htmlFor={field.name}>Email</Label>
+									<Label htmlFor={field.name}>
+										{m["auth.signin.label.email"]()}
+									</Label>
 									<Input
 										id={field.name}
 										name={field.name}
 										type="email"
-										placeholder="name@example.com"
+										placeholder={m["auth.signin.placeholder.email"]()}
 										value={field.state.value}
 										onBlur={(e) => {
 											field.handleBlur();
@@ -224,7 +227,7 @@ export default function SignInForm({
 
 					{emailCheck?.secretKeyHint && !isQuickUnlock && (
 						<div className="rounded-md bg-muted px-3 py-2 text-muted-foreground text-xs">
-							<span className="font-medium">Hint:</span>{" "}
+							<span className="font-medium">{m["auth.signin.hint"]()}:</span>{" "}
 							{emailCheck.secretKeyHint}
 						</div>
 					)}
@@ -233,9 +236,11 @@ export default function SignInForm({
 						<div>
 							<form.Field name="secretKey">
 								{(field) => (
-									<div className="space-y-2">
-										<Label htmlFor={field.name}>Secret Key</Label>
-										<div className="relative">
+								<div className="space-y-2">
+									<Label htmlFor={field.name}>
+										{m["auth.signin.label.secret_key"]()}
+									</Label>
+									<div className="relative">
 											<Input
 												id={field.name}
 												name={field.name}
@@ -243,7 +248,7 @@ export default function SignInForm({
 												value={field.state.value}
 												onBlur={field.handleBlur}
 												onChange={(e) => field.handleChange(e.target.value)}
-												placeholder="A3-XXXXXX-XXXXXX-XXXXX-XXXXX-XXXXX"
+												placeholder={m["auth.signin.placeholder.secret_key"]()}
 												required
 												className="h-10 pr-10 font-mono"
 											/>
@@ -272,16 +277,18 @@ export default function SignInForm({
 							{(field) => (
 								<div className="space-y-2">
 									<div className="flex items-center justify-between">
-										<Label htmlFor={field.name}>Password</Label>
+										<Label htmlFor={field.name}>
+											{m["auth.signin.label.password"]()}
+										</Label>
 										{!isQuickUnlock && (
 											<button
 												type="button"
 												onClick={() => navigate({ to: "/recover" })}
-												className="text-muted-foreground text-xs underline-offset-4 hover:text-foreground hover:underline"
-											>
-												Forgot Password?
-											</button>
-										)}
+											className="text-muted-foreground text-xs underline-offset-4 hover:text-foreground hover:underline"
+										>
+											{m["auth.signin.forgot_password"]()}
+										</button>
+									)}
 									</div>
 									<div className="relative">
 										<Input
@@ -321,12 +328,12 @@ export default function SignInForm({
 						{loginMutation.isPending ? (
 							<>
 								<Loader2 size={16} className="mr-2 animate-spin" />
-								Signing in...
+								{m["auth.signin.button.signing_in"]()}
 							</>
 						) : isQuickUnlock ? (
-							"Unlock Vault"
+							m["auth.signin.button.unlock_vault"]()
 						) : (
-							"Sign In"
+							m["auth.signin.button.sign_in"]()
 						)}
 					</Button>
 
@@ -348,17 +355,17 @@ export default function SignInForm({
 								}}
 								className="w-full text-muted-foreground"
 							>
-								Sign in with a different account
+								{m["auth.signin.button.different_account"]()}
 							</Button>
 							{canShowSignup && (
 								<div className="mt-2 text-center text-muted-foreground text-sm">
-									Need a different account?{" "}
+									{m["auth.signin.signup.need_different_account"]()}{" "}
 									<button
 										type="button"
 										onClick={onSwitchToSignUp}
 										className="font-medium text-primary underline-offset-4 hover:underline"
 									>
-										Create another account
+										{m["auth.signin.signup.create_another_account"]()}
 									</button>
 								</div>
 							)}
@@ -374,7 +381,7 @@ export default function SignInForm({
 							</div>
 						) : (
 							<div className="mt-4 text-center text-muted-foreground text-sm">
-								Registration is disabled on this server.
+								{m["auth.signin.signup.disabled"]()}
 							</div>
 						))}
 				</form>

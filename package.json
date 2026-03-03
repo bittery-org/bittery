@@ -13,6 +13,7 @@
 		"preinstall": "export $(cat .env | xargs) || true",
 		"check": "biome check --write .",
 		"check-types": "turbo check-types",
+		"i18n:check": "pnpm --filter @bittery/i18n run check:keys",
 		"shadcn": "pnpm --filter @bittery/ui run shadcn",
 		"test": "turbo test",
 		"dev": "turbo dev",
