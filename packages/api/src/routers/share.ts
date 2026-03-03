@@ -1,4 +1,9 @@
 import { db } from "@bittery/db";
+import {
+	incrementRateLimitWindow,
+	RATE_LIMIT_NAMESPACE,
+	startOfLocalDay,
+} from "@bittery/auth/rate-limit";
 import { user } from "@bittery/db/schema/auth";
 import {
 	EXPIRATION_OPTIONS,
@@ -7,7 +12,6 @@ import {
 	shareEmailVerification,
 	shareLink,
 	shareLinkAllowedEmail,
-	shareLinkRateLimit,
 } from "@bittery/db/schema/sharing";
 import { TRPCError } from "@trpc/server";
 import { and, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
@@ -26,6 +30,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_VERIFICATION_CODES_PER_EMAIL = 5;
 const SHARE_LINKS_UNAVAILABLE_MESSAGE =
 	"Share links are not available on your current plan. Upgrade to continue.";
+const DEFAULT_SHARE_LINK_DAILY_LIMIT = 50;
 
 /**
  * Get the base share URL from the WEB_APP_URL environment variable
@@ -1264,50 +1269,29 @@ async function hasShareLinksEntitlement(userId: string): Promise<boolean> {
 	return access.enabled;
 }
 
-async function checkAndIncrementRateLimit(userId: string): Promise<void> {
-	const now = new Date();
-	const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-	const rateLimit = await db.query.shareLinkRateLimit.findFirst({
-		where: (rl, { eq }) => eq(rl.userId, userId),
-	});
-
-	if (!rateLimit) {
-		// Create rate limit record
-		await db.insert(shareLinkRateLimit).values({
-			id: nanoid(),
-			userId,
-			linksCreatedToday: 0,
-			lastResetAt: todayStart,
-		});
+function getShareLinkDailyLimit(): number {
+	const raw = process.env.SHARE_LINK_DAILY_LIMIT;
+	if (!raw) {
+		return DEFAULT_SHARE_LINK_DAILY_LIMIT;
 	}
 
-	const result = await db
-		.update(shareLinkRateLimit)
-		.set({
-			linksCreatedToday: sql`CASE
-				WHEN ${shareLinkRateLimit.lastResetAt} < ${todayStart}
-				THEN 1
-				ELSE ${shareLinkRateLimit.linksCreatedToday} + 1
-			END`,
-			lastResetAt: sql`CASE
-				WHEN ${shareLinkRateLimit.lastResetAt} < ${todayStart}
-				THEN ${todayStart}
-				ELSE ${shareLinkRateLimit.lastResetAt}
-			END`,
-		})
-		.where(
-			and(
-				eq(shareLinkRateLimit.userId, userId),
-				or(
-					sql`${shareLinkRateLimit.lastResetAt} < ${todayStart}`,
-					sql`${shareLinkRateLimit.linksCreatedToday} < ${shareLinkRateLimit.dailyLimit}`,
-				),
-			),
-		)
-		.returning({ id: shareLinkRateLimit.id });
+	const parsed = Number.parseInt(raw, 10);
+	return Number.isFinite(parsed) && parsed > 0
+		? parsed
+		: DEFAULT_SHARE_LINK_DAILY_LIMIT;
+}
 
-	if (result.length === 0) {
+async function checkAndIncrementRateLimit(userId: string): Promise<void> {
+	const now = new Date();
+	const result = await incrementRateLimitWindow({
+		namespace: RATE_LIMIT_NAMESPACE.shareCreateDaily,
+		key: userId,
+		subject: userId,
+		now,
+		windowStart: startOfLocalDay(now),
+		limit: getShareLinkDailyLimit(),
+	});
+	if (!result.allowed) {
 		throw new TRPCError({
 			code: "TOO_MANY_REQUESTS",
 			message: "Daily share link limit reached",

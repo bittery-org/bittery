@@ -129,6 +129,12 @@ BITTERY_STORAGE_ACCESS_KEY_ID=
 BITTERY_STORAGE_SECRET_ACCESS_KEY=
 BITTERY_STORAGE_REGION=auto
 BITTERY_STORAGE_CDN_URL=        # or BITTERY_STORAGE_PUBLIC_URL
+
+# Optional: rate limiting backend
+RATE_LIMIT_ADAPTER=auto         # auto | postgres | redis | valkey
+RATE_LIMIT_REDIS_URL=           # Redis/Valkey URL for rate limits (falls back to REDIS_URL)
+REDIS_URL=                      # Shared Redis URL (also used by pubsub)
+SHARE_LINK_DAILY_LIMIT=50
 ```
 
 ## License

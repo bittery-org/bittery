@@ -32,6 +32,10 @@ services:
       - BITTERY_STORAGE_SECRET_ACCESS_KEY=${BITTERY_STORAGE_SECRET_ACCESS_KEY:-}
       - BITTERY_STORAGE_REGION=${BITTERY_STORAGE_REGION:-auto}
       - BITTERY_STORAGE_CDN_URL=${BITTERY_STORAGE_CDN_URL:-}
+      - RATE_LIMIT_ADAPTER=${RATE_LIMIT_ADAPTER:-auto}
+      - RATE_LIMIT_REDIS_URL=${RATE_LIMIT_REDIS_URL:-}
+      - REDIS_URL=${REDIS_URL:-}
+      - SHARE_LINK_DAILY_LIMIT=${SHARE_LINK_DAILY_LIMIT:-50}
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,6 +89,19 @@ services:
       - minio_data:/data
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Optional Valkey for shared pubsub + rate limiting — activate with: docker compose --profile cache up -d
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    profiles:
+      - cache
+    command: valkey-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3

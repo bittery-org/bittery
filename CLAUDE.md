@@ -110,10 +110,11 @@ Five routers combined in `appRouter` (plus top-level `healthCheck` and `privateD
 
 | File | Tables | Notes |
 |------|--------|-------|
-| `auth.ts` | `user`, `session`, `loginRateLimit`, `auditLog` | User has SRP credentials, RSA keys, `teamId` (one-to-one). Session tracks device info (platform, browser, OS). Rate limiting and audit logging. |
+| `auth.ts` | `user`, `session`, `auditLog` | User has SRP credentials, RSA keys, `teamId` (one-to-one). Session tracks device info (platform, browser, OS). Audit logging. |
 | `vault.ts` | `vault`, `vaultKey`, `item`, `folder`, `vaultKeyRotation` | Vault has `keyVersion`, `icon`, `imageKey`. Items have categories: `login`, `secure-note`, `credit-card`, `identity`, `totp`. VaultKey stores per-user encrypted keys with role. |
 | `team.ts` | `team`, `teamMember` (deprecated, still in schema), `teamInvitation` | Team types: `personal`, `family`, `organization`. User now references team directly via `user.teamId`. |
-| `sharing.ts` | `shareLink`, `shareLinkAllowedEmail`, `shareEmailVerification`, `shareAccessLog`, `shareLinkRateLimit` | Encrypted share links with email-restricted or public access, one-time use, expiration, audit logging. |
+| `sharing.ts` | `shareLink`, `shareLinkAllowedEmail`, `shareEmailVerification`, `shareAccessLog` | Encrypted share links with email-restricted or public access, one-time use, expiration, audit logging. |
+| `rate-limit.ts` | `rateLimitState` | Unified rate-limit state for login, recovery, and share-link creation. Adapter-backed (Postgres or Redis/Valkey). |
 | `sync.ts` | `syncEvent`, `syncEventAck` | Event-based sync for multi-device. Event types: item/vault CRUD, member changes, key rotation. |
 
 **Patterns:** Soft deletes via `deletedAt` timestamp. All tables have `createdAt`/`updatedAt`. Vault roles: `owner`, `admin`, `member`, `read-only`.

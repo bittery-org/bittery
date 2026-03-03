@@ -14,8 +14,8 @@ import {
 	shareEmailVerification,
 	shareLink,
 	shareLinkAllowedEmail,
-	shareLinkRateLimit,
 } from "@bittery/db/schema/sharing";
+import { rateLimitState } from "@bittery/db/schema/rate-limit";
 import { syncEvent, syncEventAck } from "@bittery/db/schema/sync";
 import { team, teamInvitation, teamMember } from "@bittery/db/schema/team";
 import {
@@ -24,7 +24,7 @@ import {
 	vaultKey,
 	vaultKeyRotation,
 } from "@bittery/db/schema/vault";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import initCryptoWasm, {
 	deriveKeys as deriveKeysWasm,
@@ -577,8 +577,13 @@ export async function cleanupTestData(userIds: string[] = []) {
 
 		await db.delete(shareLink).where(eq(shareLink.createdById, userId));
 		await db
-			.delete(shareLinkRateLimit)
-			.where(eq(shareLinkRateLimit.userId, userId));
+			.delete(rateLimitState)
+			.where(
+				and(
+					eq(rateLimitState.scope, "share_create_daily"),
+					eq(rateLimitState.key, userId),
+				),
+			);
 
 		// Clean up sync events
 		await db.delete(syncEventAck).where(eq(syncEventAck.userId, userId));
@@ -717,12 +722,12 @@ export async function truncateAll() {
 	await db.execute(sql`
 		TRUNCATE TABLE
 			share_access_log, share_email_verification, share_link_allowed_email,
-			share_link_rate_limit, share_link,
+			share_link, rate_limit_state,
 			sync_event_ack, sync_event,
 			stripe_event_log,
 			item, vault_key, vault_key_rotation, folder, vault,
 			team_invitation, team_member, team,
-			login_rate_limit, recovery_rate_limit, recovery_verification,
+			recovery_verification,
 			session, audit_log, "user"
 		CASCADE
 	`);

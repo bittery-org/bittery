@@ -66,28 +66,6 @@ export const session = pgTable(
 	(table) => [index("session_userId_idx").on(table.userId)],
 );
 
-export const loginRateLimit = pgTable(
-	"login_rate_limit",
-	{
-		id: text("id").primaryKey(),
-		email: text("email").notNull(),
-		ipAddress: text("ip_address"),
-		attempts: integer("attempts").default(0).notNull(),
-		lastAttemptAt: timestamp("last_attempt_at").defaultNow().notNull(),
-		lockedUntil: timestamp("locked_until"),
-		createdAt: timestamp("created_at").defaultNow().notNull(),
-		updatedAt: timestamp("updated_at")
-			.defaultNow()
-			.$onUpdate(() => /* @__PURE__ */ new Date())
-			.notNull(),
-	},
-	(table) => [
-		index("login_rate_limit_email_idx").on(table.email),
-		index("login_rate_limit_ip_idx").on(table.ipAddress),
-		index("login_rate_limit_locked_until_idx").on(table.lockedUntil),
-	],
-);
-
 export const recoveryVerification = pgTable(
 	"recovery_verification",
 	{
@@ -104,28 +82,6 @@ export const recoveryVerification = pgTable(
 		index("recovery_verification_email_idx").on(table.email),
 		index("recovery_verification_code_idx").on(table.code),
 		index("recovery_verification_expires_at_idx").on(table.expiresAt),
-	],
-);
-
-export const recoveryRateLimit = pgTable(
-	"recovery_rate_limit",
-	{
-		id: text("id").primaryKey(),
-		email: text("email").notNull(),
-		ipAddress: text("ip_address"),
-		attempts: integer("attempts").default(0).notNull(),
-		lastAttemptAt: timestamp("last_attempt_at").defaultNow().notNull(),
-		lockedUntil: timestamp("locked_until"),
-		createdAt: timestamp("created_at").defaultNow().notNull(),
-		updatedAt: timestamp("updated_at")
-			.defaultNow()
-			.$onUpdate(() => /* @__PURE__ */ new Date())
-			.notNull(),
-	},
-	(table) => [
-		index("recovery_rate_limit_email_idx").on(table.email),
-		index("recovery_rate_limit_ip_idx").on(table.ipAddress),
-		index("recovery_rate_limit_locked_until_idx").on(table.lockedUntil),
 	],
 );
 

@@ -13,10 +13,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { db } from "@bittery/db";
-import {
-	shareEmailVerification,
-	shareLinkRateLimit,
-} from "@bittery/db/schema/sharing";
+import { shareEmailVerification } from "@bittery/db/schema/sharing";
 import { nanoid } from "nanoid";
 import { shareRouter } from "../routers/share";
 import {
@@ -301,42 +298,42 @@ describe("Share Router", () => {
 			const { caller, userId } = await setupShareUser();
 			const vaultId = await createTestVault(userId);
 			const itemId = await createTestItem(vaultId, userId);
-			const todayStart = new Date();
-			todayStart.setHours(0, 0, 0, 0);
+			const originalLimit = process.env.SHARE_LINK_DAILY_LIMIT;
+			process.env.SHARE_LINK_DAILY_LIMIT = "1";
 
-			await db.insert(shareLinkRateLimit).values({
-				id: nanoid(),
-				userId,
-				linksCreatedToday: 0,
-				dailyLimit: 1,
-				lastResetAt: todayStart,
-			});
+			try {
+				const results = await Promise.allSettled([
+					caller.create({
+						itemId,
+						accessMode: "anyone",
+						isOneTimeUse: false,
+						expiresIn: "1day",
+						...mockShareData,
+					}),
+					caller.create({
+						itemId,
+						accessMode: "anyone",
+						isOneTimeUse: false,
+						expiresIn: "1day",
+						...mockShareData,
+					}),
+				]);
 
-			const results = await Promise.allSettled([
-				caller.create({
-					itemId,
-					accessMode: "anyone",
-					isOneTimeUse: false,
-					expiresIn: "1day",
-					...mockShareData,
-				}),
-				caller.create({
-					itemId,
-					accessMode: "anyone",
-					isOneTimeUse: false,
-					expiresIn: "1day",
-					...mockShareData,
-				}),
-			]);
-
-			const successCount = results.filter(
-				(r) => r.status === "fulfilled",
-			).length;
-			const failureCount = results.filter(
-				(r) => r.status === "rejected",
-			).length;
-			expect(successCount).toBe(1);
-			expect(failureCount).toBe(1);
+				const successCount = results.filter(
+					(r) => r.status === "fulfilled",
+				).length;
+				const failureCount = results.filter(
+					(r) => r.status === "rejected",
+				).length;
+				expect(successCount).toBe(1);
+				expect(failureCount).toBe(1);
+			} finally {
+				if (originalLimit === undefined) {
+					delete process.env.SHARE_LINK_DAILY_LIMIT;
+				} else {
+					process.env.SHARE_LINK_DAILY_LIMIT = originalLimit;
+				}
+			}
 		});
 	});
 
