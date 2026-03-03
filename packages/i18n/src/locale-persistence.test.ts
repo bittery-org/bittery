@@ -28,6 +28,30 @@ describe("locale persistence", () => {
 		expect(runtimeCalls).toEqual([{ locale: "de", reload: false }]);
 	});
 
+	test("persistLocaleSelection applies runtime locale before async storage settles", async () => {
+		const callOrder: string[] = [];
+
+		await persistLocaleSelection({
+			locale: "de",
+			runtime: {
+				getLocale: () => "en",
+				setLocale: () => {
+					callOrder.push("runtime");
+				},
+			},
+			storage: {
+				getItem: () => null,
+				setItem: async () => {
+					callOrder.push("storage-start");
+					await Promise.resolve();
+					callOrder.push("storage-end");
+				},
+			},
+		});
+
+		expect(callOrder).toEqual(["runtime", "storage-start", "storage-end"]);
+	});
+
 	test("initializeLocale uses stored locale when present", async () => {
 		const runtimeCalls: AppLocale[] = [];
 		const locale = await initializeLocale({

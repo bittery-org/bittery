@@ -19,11 +19,15 @@ export async function persistLocaleSelection(input: {
 		storageKey = localeStorageKey,
 	} = input;
 
+	// Apply runtime locale first so UI renders with the selected locale immediately.
+	// Storage persistence can resolve asynchronously afterward.
+	const runtimeResult = runtime.setLocale(locale, { reload: false });
+
 	if (storage) {
 		await storage.setItem(storageKey, locale);
 	}
 
-	await runtime.setLocale(locale, { reload: false });
+	await runtimeResult;
 }
 
 export async function initializeLocale(input: {

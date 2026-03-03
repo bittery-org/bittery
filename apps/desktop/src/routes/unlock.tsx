@@ -21,10 +21,11 @@ import {
 } from "@bittery/ui/icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AuthDoorsLayout } from "@/components/auth/auth-doors-layout";
 import { triggerAuthRevealToVault } from "@/lib/auth-reveal-transition";
 import { storage } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
 
 interface UnlockSearchParams {
 	email?: string;
@@ -47,6 +48,7 @@ export const Route = createFileRoute("/unlock")({
 });
 
 export function UnlockPage() {
+	const { m } = useI18n();
 	const navigate = useNavigate();
 	const { accounts } = useAccountSwitcher();
 	const queryClient = useQueryClient();
@@ -57,6 +59,42 @@ export function UnlockPage() {
 	const { autoTrigger, autoTriggerId } = Route.useSearch();
 
 	const allAccounts = accounts.data ?? [];
+	const getPartialUnlockMessage = useCallback(
+		(unlockedCount: number) =>
+			m["toast.auth.unlock.warning.partial"]({
+				unlockedCount,
+				totalCount: allAccounts.length,
+			}),
+		[allAccounts.length, m],
+	);
+	const showUnlockToast = useCallback(
+		({
+			unlockedCount,
+			failedCount,
+			biometric = false,
+		}: {
+			unlockedCount: number;
+			failedCount: number;
+			biometric?: boolean;
+		}) => {
+			if (failedCount === 0) {
+				if (allAccounts.length === 1) {
+					toast.success(
+						biometric
+							? m["toast.auth.unlock.success.biometric_single"]()
+							: m["toast.auth.unlock.success.single"](),
+					);
+					return;
+				}
+
+				toast.success(m["toast.auth.unlock.success.all"]({ count: unlockedCount }));
+				return;
+			}
+
+			toast.warning(getPartialUnlockMessage(unlockedCount));
+		},
+		[allAccounts.length, getPartialUnlockMessage, m],
+	);
 
 	// Get session state for first account (to check biometric availability)
 	const { data: sessionState } = useSessionState(
@@ -78,17 +116,10 @@ export function UnlockPage() {
 				});
 			}
 
-			if (result.failed.length === 0) {
-				if (allAccounts.length === 1) {
-					toast.success("Vault unlocked");
-				} else {
-					toast.success(`All ${result.unlocked.length} accounts unlocked`);
-				}
-			} else {
-				toast.warning(
-					`Unlocked ${result.unlocked.length} of ${allAccounts.length} accounts`,
-				);
-			}
+			showUnlockToast({
+				unlockedCount: result.unlocked.length,
+				failedCount: result.failed.length,
+			});
 
 			triggerAuthRevealToVault();
 		},
@@ -98,14 +129,12 @@ export function UnlockPage() {
 			if (allAccounts.length > 1) {
 				await storage.setActiveAccount({ type: "all" });
 			}
-			toast.warning(
-				`Unlocked ${result.unlocked.length} of ${allAccounts.length} accounts`,
-			);
+			toast.warning(getPartialUnlockMessage(result.unlocked.length));
 			triggerAuthRevealToVault();
 		},
 		onError: (error) => {
 			console.error("Unlock all error:", error);
-			toast.error(error.message || "Failed to unlock accounts");
+			toast.error(error.message || m["toast.auth.unlock.error.failed"]());
 		},
 	});
 
@@ -114,14 +143,14 @@ export function UnlockPage() {
 		try {
 			// Use the unified biometric unlock method that shows ONE prompt for all accounts
 			if (!storage.unlockAllAccountsWithBiometric) {
-				throw new Error("Biometric unlock not supported on this platform");
+				throw new Error(m["toast.auth.unlock.error.biometric_not_supported"]());
 			}
 
 			const { unlocked, failed } =
 				await storage.unlockAllAccountsWithBiometric();
 
 			if (unlocked.length === 0) {
-				throw new Error("Failed to unlock any accounts with biometric");
+				throw new Error(m["toast.auth.unlock.error.biometric_none_unlocked"]());
 			}
 
 			// Set active mode
@@ -136,23 +165,19 @@ export function UnlockPage() {
 
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
-			if (failed.length === 0) {
-				if (allAccounts.length === 1) {
-					toast.success("Unlocked with biometric");
-				} else {
-					toast.success(`All ${unlocked.length} accounts unlocked`);
-				}
-			} else {
-				toast.warning(
-					`Unlocked ${unlocked.length} of ${allAccounts.length} accounts`,
-				);
-			}
+			showUnlockToast({
+				unlockedCount: unlocked.length,
+				failedCount: failed.length,
+				biometric: true,
+			});
 
 			triggerAuthRevealToVault();
 		} catch (error) {
 			console.error("Biometric unlock error:", error);
 			toast.error(
-				error instanceof Error ? error.message : "Biometric unlock failed",
+				error instanceof Error
+					? error.message
+					: m["toast.auth.unlock.error.biometric_failed"](),
 			);
 		}
 	};
@@ -195,14 +220,18 @@ export function UnlockPage() {
 			const timeout = setTimeout(async () => {
 				try {
 					if (!storage.unlockAllAccountsWithBiometric) {
-						throw new Error("Biometric unlock not supported on this platform");
+						throw new Error(
+							m["toast.auth.unlock.error.biometric_not_supported"](),
+						);
 					}
 
 					const { unlocked, failed } =
 						await storage.unlockAllAccountsWithBiometric();
 
 					if (unlocked.length === 0) {
-						throw new Error("Failed to unlock any accounts with biometric");
+						throw new Error(
+							m["toast.auth.unlock.error.biometric_none_unlocked"](),
+						);
 					}
 
 					// Set active mode
@@ -217,17 +246,11 @@ export function UnlockPage() {
 
 					await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
-					if (failed.length === 0) {
-						if (allAccounts.length === 1) {
-							toast.success("Unlocked with biometric");
-						} else {
-							toast.success(`All ${unlocked.length} accounts unlocked`);
-						}
-					} else {
-						toast.warning(
-							`Unlocked ${unlocked.length} of ${allAccounts.length} accounts`,
-						);
-					}
+					showUnlockToast({
+						unlockedCount: unlocked.length,
+						failedCount: failed.length,
+						biometric: true,
+					});
 
 					triggerAuthRevealToVault();
 				} catch (error) {
@@ -238,7 +261,7 @@ export function UnlockPage() {
 
 			return () => clearTimeout(timeout);
 		}
-	}, [autoTrigger, allAccounts, queryClient]);
+	}, [autoTrigger, allAccounts, queryClient, m, showUnlockToast]);
 
 	// Show loading state while accounts are being fetched
 	if (accounts.isLoading) {
@@ -268,10 +291,11 @@ export function UnlockPage() {
 					<div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
 						<IconKeyOutlineDuo18 className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
 						<div>
-							<p className="font-medium text-amber-800">Password Required</p>
+							<p className="font-medium text-amber-800">
+								{m["auth.unlock.password_required.title"]()}
+							</p>
 							<p className="text-amber-700 text-sm">
-								For your security, please enter your master password. This is
-								required periodically based on your settings.
+								{m["auth.unlock.password_required.description"]()}
 							</p>
 						</div>
 					</div>
@@ -285,7 +309,7 @@ export function UnlockPage() {
 							value={password}
 							onChange={(e) => setPassword(e.target.value)}
 							required
-							placeholder="Enter your password"
+							placeholder={m["auth.signin.placeholder.password"]()}
 							autoFocus
 							disabled={loading}
 							className="text-base"
@@ -302,7 +326,11 @@ export function UnlockPage() {
 									size="icon-sm"
 									onClick={() => setShowPassword(!showPassword)}
 									disabled={loading}
-									aria-label={showPassword ? "Hide password" : "Show password"}
+									aria-label={
+										showPassword
+											? m["vaults.detail.items.form.login.action.hide_password"]()
+											: m["vaults.detail.items.form.login.action.show_password"]()
+									}
 								>
 									{showPassword ? (
 										<IconEyeSlashOutlineDuo18
@@ -319,7 +347,7 @@ export function UnlockPage() {
 										size="icon-sm"
 										onClick={handleBiometricUnlockAll}
 										disabled={loading}
-										aria-label="Unlock with biometric"
+										aria-label={m["auth.unlock.action.biometric"]()}
 										className="text-primary hover:text-primary/80"
 									>
 										<IconFingerprintOutlineDuo18 className="h-5 w-5" />
@@ -332,8 +360,10 @@ export function UnlockPage() {
 
 				<p className="mt-4 text-muted-foreground text-sm">
 					{allAccounts.length === 1
-						? "Bittery was locked due to inactivity."
-						: `Bittery was locked with ${allAccounts.length} accounts.`}
+						? m["auth.unlock.description.single"]()
+						: m["auth.unlock.description.multiple"]({
+								count: allAccounts.length,
+							})}
 				</p>
 			</div>
 		</AuthDoorsLayout>

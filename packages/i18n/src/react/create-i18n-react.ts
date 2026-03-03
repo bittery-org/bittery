@@ -6,6 +6,7 @@ import {
 	useContext,
 	useEffect,
 	useMemo,
+	useRef,
 	useState,
 } from "react";
 import { defaultLocale, type AppLocale } from "../index";
@@ -60,6 +61,7 @@ export function createI18nReact<M>(input: {
 		const [locale, setLocaleState] = useState<AppLocale>(() =>
 			safeGetLocale(runtime),
 		);
+		const hasManualLocaleSelectionRef = useRef(false);
 
 		useEffect(() => {
 			let isMounted = true;
@@ -76,6 +78,11 @@ export function createI18nReact<M>(input: {
 					return;
 				}
 
+				// Avoid overwriting a locale chosen by the user while init was in-flight.
+				if (hasManualLocaleSelectionRef.current) {
+					return;
+				}
+
 				setLocaleState(initializedLocale);
 			};
 
@@ -88,6 +95,7 @@ export function createI18nReact<M>(input: {
 
 		const setLocale = useCallback(
 			(nextLocale: AppLocale) => {
+				hasManualLocaleSelectionRef.current = true;
 				setLocaleState(nextLocale);
 				void persistLocaleSelection({
 					locale: nextLocale,
@@ -96,7 +104,7 @@ export function createI18nReact<M>(input: {
 					storageKey,
 				});
 			},
-			[],
+			[runtime, storage, storageKey],
 		);
 
 		useEffect(() => {
