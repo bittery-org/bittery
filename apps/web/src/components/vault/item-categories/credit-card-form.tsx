@@ -6,6 +6,7 @@ import {
 import { Input, Label, toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useState } from "react";
+import { useI18n } from "@/providers/i18n-provider";
 import {
 	type BaseFormProps,
 	FormWrapper,
@@ -34,11 +35,12 @@ export function CreditCardForm({
 	initialData,
 	onSubmit,
 	onCancel,
-	submitLabel = "Save",
+	submitLabel,
 	isSubmitting = false,
 	vaults = [],
 	selectedVaultId,
 }: CreditCardFormProps) {
+	const { m } = useI18n();
 	const { currentVaultId, setCurrentVaultId } = useFormVault(
 		vaults,
 		selectedVaultId,
@@ -63,9 +65,10 @@ export function CreditCardForm({
 				};
 				await onSubmit(submitData, currentVaultId);
 			} catch (error) {
-				const errorMessage =
-					error instanceof Error ? error.message : "Failed to save credit card";
-				toast.error(errorMessage);
+				toast.error(
+					m["vaults.detail.items.form.toast.save_credit_card_failed"](),
+				);
+				console.error(error);
 			}
 		},
 	});
@@ -100,7 +103,12 @@ export function CreditCardForm({
 		>
 			<div>
 				<form.Field name="title">
-					{(field) => <TitleField field={field} placeholder="My Credit Card" />}
+					{(field) => (
+						<TitleField
+							field={field}
+							placeholder={m["vaults.detail.items.form.credit_card.placeholder.title"]()}
+						/>
+					)}
 				</form.Field>
 			</div>
 
@@ -108,14 +116,18 @@ export function CreditCardForm({
 				<form.Field name="cardholderName">
 					{(field) => (
 						<div className="space-y-2">
-							<Label htmlFor={field.name}>Cardholder Name *</Label>
+							<Label htmlFor={field.name}>
+								{m["vaults.detail.items.form.credit_card.field.cardholder_name.required"]()}
+							</Label>
 							<Input
 								id={field.name}
 								name={field.name}
 								value={field.state.value}
 								onBlur={field.handleBlur}
 								onChange={(e) => field.handleChange(e.target.value)}
-								placeholder="JOHN DOE"
+								placeholder={m[
+									"vaults.detail.items.form.credit_card.placeholder.cardholder_name"
+								]()}
 								required
 							/>
 						</div>
@@ -128,7 +140,11 @@ export function CreditCardForm({
 					{(field) => (
 						<div className="space-y-2">
 							<div className="flex items-center justify-between">
-								<Label htmlFor={field.name}>Card Number *</Label>
+								<Label htmlFor={field.name}>
+									{m[
+										"vaults.detail.items.form.credit_card.field.card_number.required"
+									]()}
+								</Label>
 								{detectedBrand && (
 									<span className="text-muted-foreground text-xs">
 										{getCardBrandDisplayName(detectedBrand as any)}
@@ -144,7 +160,9 @@ export function CreditCardForm({
 								)}
 								onBlur={field.handleBlur}
 								onChange={(e) => handleCardNumberChange(e.target.value)}
-								placeholder="1234 5678 9012 3456"
+								placeholder={m[
+									"vaults.detail.items.form.credit_card.placeholder.card_number"
+								]()}
 								className="font-mono"
 								required
 								maxLength={19}
@@ -159,14 +177,20 @@ export function CreditCardForm({
 					<form.Field name="expiryDate">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>Expiry Date *</Label>
+								<Label htmlFor={field.name}>
+									{m[
+										"vaults.detail.items.form.credit_card.field.expiry_date.required"
+									]()}
+								</Label>
 								<Input
 									id={field.name}
 									name={field.name}
 									value={field.state.value}
 									onBlur={field.handleBlur}
 									onChange={(e) => handleExpiryChange(e.target.value)}
-									placeholder="MM/YY"
+									placeholder={m[
+										"vaults.detail.items.form.credit_card.placeholder.expiry_date"
+									]()}
 									className="font-mono"
 									required
 									maxLength={5}
@@ -180,7 +204,9 @@ export function CreditCardForm({
 					<form.Field name="cvv">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>CVV *</Label>
+								<Label htmlFor={field.name}>
+									{m["vaults.detail.items.form.credit_card.field.cvv.required"]()}
+								</Label>
 								<Input
 									id={field.name}
 									name={field.name}
@@ -191,7 +217,9 @@ export function CreditCardForm({
 										const value = e.target.value.replace(/\D/g, "");
 										field.handleChange(value);
 									}}
-									placeholder="123"
+									placeholder={m[
+										"vaults.detail.items.form.credit_card.placeholder.cvv"
+									]()}
 									className="font-mono"
 									required
 									maxLength={4}
@@ -207,8 +235,12 @@ export function CreditCardForm({
 					{(field) => (
 						<NotesField
 							field={field as any}
-							label="Billing Address"
-							placeholder="123 Main St, Apt 4B, New York, NY 10001"
+							label={m[
+								"vaults.detail.items.form.credit_card.field.billing_address"
+							]()}
+							placeholder={m[
+								"vaults.detail.items.form.credit_card.placeholder.billing_address"
+							]()}
 							rows={3}
 						/>
 					)}

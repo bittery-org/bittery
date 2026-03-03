@@ -10,7 +10,7 @@ Requirements:
 4. If non-UI layers generate English copy, refactor them to return stable keys/params and localize only in the UI.
 5. Handle count-based singular/plural copy correctly.
 6. Preserve behavior and design; only change what’s needed for i18n.
-7. Run i18n parity checks & type checks, then report results.
+7. Run i18n parity checks, then report results.
 
 Output:
 

@@ -32,7 +32,10 @@ export class RedisRateLimitAdapter implements RateLimitAdapter {
 	};
 
 	constructor(redisUrl: string) {
-		const { RedisClient } = globalThis.Bun ?? {};
+		const bunGlobal = globalThis as typeof globalThis & {
+			Bun?: { RedisClient?: new (url: string) => unknown };
+		};
+		const { RedisClient } = bunGlobal.Bun ?? {};
 		if (!RedisClient) {
 			throw new Error(
 				"RedisRateLimitAdapter requires Bun runtime with RedisClient support",

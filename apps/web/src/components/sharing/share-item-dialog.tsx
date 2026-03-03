@@ -42,23 +42,25 @@ import {
 	IconXmarkOutlineDuo18 as X,
 } from "@bittery/ui/icons";
 import { useState } from "react";
+import { useI18n } from "@/providers/i18n-provider";
 
 interface ShareItemDialogProps {
 	item: DecryptedItem;
 }
 
-const EXPIRATION_LABELS: Record<ShareExpirationOption, string> = {
-	"1hour": "1 hour",
-	"1day": "1 day",
-	"7days": "7 days",
-	"14days": "14 days",
-	"30days": "30 days",
-};
+const EXPIRATION_OPTIONS: ShareExpirationOption[] = [
+	"1hour",
+	"1day",
+	"7days",
+	"14days",
+	"30days",
+];
 
 export function ShareItemDialog({ item }: ShareItemDialogProps) {
 	const [open, setOpen] = useState(false);
 	const [showConfirmation, setShowConfirmation] = useState(false);
 	const [generatedLink, setGeneratedLink] = useState<string | null>(null);
+	const { m } = useI18n();
 
 	// Form state
 	const [accessMode, setAccessMode] = useState<ShareAccessMode>("anyone");
@@ -86,11 +88,9 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 			const shareUrl = `${baseUrl}/share/${result.token}#${result.shareKeyBase64}`;
 
 			setGeneratedLink(shareUrl);
-			toast.success("Share link created successfully!");
-		} catch (error) {
-			const errorMessage =
-				error instanceof Error ? error.message : "Failed to create share link";
-			toast.error(errorMessage);
+			toast.success(m["sharing.item_dialog.toast.create_success"]());
+		} catch {
+			toast.error(m["sharing.item_dialog.toast.create_error"]());
 		}
 	};
 
@@ -101,12 +101,12 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 		// Basic email validation
 		const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 		if (!emailRegex.test(email)) {
-			toast.error("Please enter a valid email address");
+			toast.error(m["sharing.item_dialog.toast.invalid_email"]());
 			return;
 		}
 
 		if (allowedEmails.includes(email)) {
-			toast.error("Email already added");
+			toast.error(m["sharing.item_dialog.toast.email_already_added"]());
 			return;
 		}
 
@@ -119,7 +119,7 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 	};
 
 	const handleCopyLink = () => {
-		copyWithToast(generatedLink, "Link", {
+		copyWithToast(generatedLink, m["sharing.common.link_label"](), {
 			autoClearMs: 0,
 			showAutoClearMessage: false,
 		});
@@ -157,14 +157,14 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 				<DialogTrigger asChild>
 					<Button size="sm" variant="outline">
 						<Share2 className="mr-2 h-4 w-4" />
-						Share
+						{m["sharing.item_dialog.trigger"]()}
 					</Button>
 				</DialogTrigger>
 				<DialogContent className="sm:max-w-md">
 					<DialogHeader>
-						<DialogTitle>Share Item</DialogTitle>
+						<DialogTitle>{m["sharing.item_dialog.title"]()}</DialogTitle>
 						<DialogDescription>
-							Create a secure link to share "{item.title}" with others.
+							{m["sharing.item_dialog.description"]({ itemTitle: item.title })}
 						</DialogDescription>
 					</DialogHeader>
 
@@ -174,15 +174,16 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 							<div className="rounded-lg border bg-muted/50 p-4">
 								<div className="flex items-center gap-2 text-green-600">
 									<Link className="h-4 w-4" />
-									<span className="font-medium text-sm">Link created!</span>
+									<span className="font-medium text-sm">
+										{m["sharing.item_dialog.generated.title"]()}
+									</span>
 								</div>
 								<p className="mt-2 text-muted-foreground text-xs">
-									This link will expire based on your settings. Anyone with this
-									link{" "}
 									{accessMode === "email-restricted"
-										? "and a verified email "
-										: ""}
-									can view this item.
+										? m[
+												"sharing.item_dialog.generated.description.email_restricted"
+											]()
+										: m["sharing.item_dialog.generated.description.anyone"]()}
 								</p>
 							</div>
 
@@ -198,7 +199,9 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 							</div>
 
 							<DialogFooter>
-								<Button onClick={handleClose}>Done</Button>
+								<Button onClick={handleClose}>
+									{m["sharing.item_dialog.action.done"]()}
+								</Button>
 							</DialogFooter>
 						</div>
 					) : (
@@ -206,7 +209,7 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 						<div className="space-y-4">
 							{/* Access Mode */}
 							<div className="space-y-2">
-								<Label>Who can access</Label>
+								<Label>{m["sharing.item_dialog.field.access_mode"]()}</Label>
 								<Select
 									value={accessMode}
 									onValueChange={(value: ShareAccessMode) =>
@@ -219,17 +222,25 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 									<SelectContent>
 										<SelectItem value="anyone">
 											<div>
-												<div>Anyone with the link</div>
+												<div>
+													{m["sharing.item_dialog.access_mode.anyone"]()}
+												</div>
 												<div className="text-muted-foreground text-xs">
-													No email verification required
+													{m["sharing.item_dialog.access_mode.anyone_hint"]()}
 												</div>
 											</div>
 										</SelectItem>
 										<SelectItem value="email-restricted">
 											<div>
-												<div>Specific email addresses</div>
+												<div>
+													{m[
+														"sharing.item_dialog.access_mode.email_restricted"
+													]()}
+												</div>
 												<div className="text-muted-foreground text-xs">
-													Recipients must verify their email
+													{m[
+														"sharing.item_dialog.access_mode.email_restricted_hint"
+													]()}
 												</div>
 											</div>
 										</SelectItem>
@@ -240,11 +251,13 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 							{/* Email Addresses (for restricted mode) */}
 							{accessMode === "email-restricted" && (
 								<div className="space-y-2">
-									<Label>Allowed email addresses</Label>
+									<Label>
+										{m["sharing.item_dialog.field.allowed_emails"]()}
+									</Label>
 									<div className="flex gap-2">
 										<Input
 											type="email"
-											placeholder="email@example.com"
+											placeholder={m["sharing.item_dialog.placeholder.email"]()}
 											value={emailInput}
 											onChange={(e) => setEmailInput(e.target.value)}
 											onKeyDown={(e) => e.key === "Enter" && handleAddEmail()}
@@ -254,7 +267,7 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 											onClick={handleAddEmail}
 											variant="secondary"
 										>
-											Add
+											{m["sharing.item_dialog.action.add_email"]()}
 										</Button>
 									</div>
 									{allowedEmails.length > 0 && (
@@ -282,7 +295,7 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 
 							{/* Expiration */}
 							<div className="space-y-2">
-								<Label>Link expires in</Label>
+								<Label>{m["sharing.item_dialog.field.expires_in"]()}</Label>
 								<Select
 									value={expiresIn}
 									onValueChange={(value: ShareExpirationOption) =>
@@ -293,9 +306,9 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
-										{Object.entries(EXPIRATION_LABELS).map(([value, label]) => (
+										{EXPIRATION_OPTIONS.map((value) => (
 											<SelectItem key={value} value={value}>
-												{label}
+												{m[`sharing.item_dialog.expiration.${value}`]()}
 											</SelectItem>
 										))}
 									</SelectContent>
@@ -312,13 +325,13 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 									}
 								/>
 								<Label htmlFor="one-time" className="cursor-pointer">
-									One-time use (link becomes invalid after first access)
+									{m["sharing.item_dialog.field.one_time_use"]()}
 								</Label>
 							</div>
 
 							<DialogFooter>
 								<Button variant="outline" onClick={handleClose}>
-									Cancel
+									{m["sharing.item_dialog.action.cancel"]()}
 								</Button>
 								<Button
 									onClick={handleCreateLink}
@@ -331,12 +344,12 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 									{createShare.isPending ? (
 										<>
 											<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-											Creating...
+											{m["sharing.item_dialog.action.creating"]()}
 										</>
 									) : (
 										<>
 											<Link className="mr-2 h-4 w-4" />
-											Create Link
+											{m["sharing.item_dialog.action.create_link"]()}
 										</>
 									)}
 								</Button>
@@ -352,29 +365,36 @@ export function ShareItemDialog({ item }: ShareItemDialogProps) {
 					<AlertDialogHeader>
 						<AlertDialogTitle className="flex items-center gap-2">
 							<AlertTriangle className="h-5 w-5 text-amber-500" />
-							Share Sensitive Item?
+							{m["sharing.item_dialog.confirm.title"]()}
 						</AlertDialogTitle>
 						<AlertDialogDescription>
-							You are about to share "{item.title}". This will create a link
-							that allows others to view this item's contents.
+							{m["sharing.item_dialog.confirm.description"]({
+								itemTitle: item.title,
+							})}
 							<br />
 							<br />
-							<strong>Security reminders:</strong>
+							<strong>
+								{m["sharing.item_dialog.confirm.security_title"]()}
+							</strong>
 							<ul className="mt-2 list-inside list-disc">
-								<li>The link will contain encrypted data</li>
+								<li>{m["sharing.item_dialog.confirm.security_item_data"]()}</li>
 								<li>
-									Anyone with the link can access the item until it expires
+									{m["sharing.item_dialog.confirm.security_item_access"]()}
 								</li>
 								<li>
-									Consider using email-restricted access for sensitive items
+									{m[
+										"sharing.item_dialog.confirm.security_item_recommendation"
+									]()}
 								</li>
 							</ul>
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
-						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogCancel>
+							{m["sharing.item_dialog.action.cancel"]()}
+						</AlertDialogCancel>
 						<AlertDialogAction onClick={handleConfirmCreate}>
-							Yes, Create Link
+							{m["sharing.item_dialog.confirm.action_confirm"]()}
 						</AlertDialogAction>
 					</AlertDialogFooter>
 				</AlertDialogContent>

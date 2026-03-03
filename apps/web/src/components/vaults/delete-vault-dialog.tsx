@@ -10,6 +10,7 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useState } from "react";
+import { useI18n } from "@/providers/i18n-provider";
 
 interface DeleteVaultDialogProps {
 	open: boolean;
@@ -24,6 +25,7 @@ export function DeleteVaultDialog({
 	vault,
 	onConfirm,
 }: DeleteVaultDialogProps) {
+	const { m } = useI18n();
 	const [isDeleting, setIsDeleting] = useState(false);
 
 	const handleDelete = async () => {
@@ -33,10 +35,8 @@ export function DeleteVaultDialog({
 		try {
 			await onConfirm(vault.id);
 			onOpenChange(false);
-		} catch (error) {
-			const errorMessage =
-				error instanceof Error ? error.message : "Failed to delete vault";
-			toast.error(errorMessage);
+		} catch {
+			toast.error(m["vaults.delete_dialog.toast.delete_failed"]());
 		} finally {
 			setIsDeleting(false);
 		}
@@ -46,11 +46,11 @@ export function DeleteVaultDialog({
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
 			<AlertDialogContent data-testid="delete-vault-dialog">
 				<AlertDialogHeader>
-					<AlertDialogTitle>Delete Vault</AlertDialogTitle>
+					<AlertDialogTitle>{m["vaults.delete_dialog.title"]()}</AlertDialogTitle>
 					<AlertDialogDescription>
-						Are you sure you want to delete "{vault?.name}"? This will
-						permanently delete the vault and all its items. This action cannot
-						be undone.
+						{m["vaults.delete_dialog.description"]({
+							vaultName: vault?.name ?? "",
+						})}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>
@@ -58,7 +58,7 @@ export function DeleteVaultDialog({
 						disabled={isDeleting}
 						data-testid="delete-vault-cancel-button"
 					>
-						Cancel
+						{m["vaults.delete_dialog.action.cancel"]()}
 					</AlertDialogCancel>
 					<AlertDialogAction
 						onClick={handleDelete}
@@ -66,7 +66,9 @@ export function DeleteVaultDialog({
 						className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 						data-testid="delete-vault-confirm-button"
 					>
-						{isDeleting ? "Deleting..." : "Delete"}
+						{isDeleting
+							? m["vaults.delete_dialog.action.deleting"]()
+							: m["vaults.delete_dialog.action.confirm"]()}
 					</AlertDialogAction>
 				</AlertDialogFooter>
 			</AlertDialogContent>

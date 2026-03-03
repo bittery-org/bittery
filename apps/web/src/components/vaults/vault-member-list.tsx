@@ -33,6 +33,7 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
 import { decrypt, performKeyRotation, rsaDecrypt } from "@/lib/wasm-crypto";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
@@ -56,6 +57,7 @@ export function VaultMemberList({
 }: VaultMemberListProps) {
 	const trpcClient = useTRPCClient();
 	const invalidator = useQueryInvalidator();
+	const { m } = useI18n();
 	const canManage = userRole === "owner" || userRole === "admin";
 	const [isRotating, setIsRotating] = useState(false);
 	const [rotatingUserId, setRotatingUserId] = useState<string | null>(null);
@@ -67,11 +69,11 @@ export function VaultMemberList({
 			role: "admin" | "member" | "read-only";
 		}) => trpcClient.vault.members.updateRole.mutate(input),
 		onSuccess: async () => {
-			toast.success("Role updated");
+			toast.success(m["vaults.member_list.toast.role_updated"]());
 			await invalidator.invalidateVaultMembers(vaultId);
 		},
-		onError: (error: Error) => {
-			toast.error(error.message);
+		onError: () => {
+			toast.error(m["vaults.member_list.toast.role_update_failed"]());
 		},
 	});
 
@@ -107,19 +109,17 @@ export function VaultMemberList({
 				} as VaultKeyCryptoProvider,
 			});
 			if (!currentVaultKey) {
-				throw new Error("Could not decrypt vault key. Please log in again.");
+				throw new Error("vault_key_decrypt_failed");
 			}
 
 			const masterUnlockKey = await storage.getMasterUnlockKey();
 			if (!masterUnlockKey) {
-				throw new Error(
-					"Master Unlock Key not available. Please log in again.",
-				);
+				throw new Error("master_unlock_key_missing");
 			}
 
 			const currentUserId = await storage.getActiveAccountUserId();
 			if (!currentUserId) {
-				throw new Error("Session data not available. Please log in again.");
+				throw new Error("session_data_missing");
 			}
 
 			// Step 2: Get rotation data from server
@@ -176,14 +176,35 @@ export function VaultMemberList({
 			}
 
 			toast.success(
-				`Member removed and vault key rotated (${result.keyRotation?.itemsReEncrypted ?? 0} items re-encrypted)`,
+				m["vaults.member_list.toast.member_removed_rotated"]({
+					count: result.keyRotation?.itemsReEncrypted ?? 0,
+				}),
 			);
 			await invalidator.invalidateVaultMembers(vaultId);
 		} catch (error) {
 			console.error("Key rotation failed:", error);
-			toast.error(
-				error instanceof Error ? error.message : "Failed to remove member",
-			);
+			if (error instanceof Error) {
+				switch (error.message) {
+					case "vault_key_decrypt_failed":
+						toast.error(
+							m["vaults.member_list.error.vault_key_decrypt_failed"](),
+						);
+						break;
+					case "master_unlock_key_missing":
+						toast.error(
+							m["vaults.member_list.error.master_unlock_key_missing"](),
+						);
+						break;
+					case "session_data_missing":
+						toast.error(m["vaults.member_list.error.session_data_missing"]());
+						break;
+					default:
+						toast.error(m["vaults.member_list.toast.remove_failed"]());
+						break;
+				}
+			} else {
+				toast.error(m["vaults.member_list.toast.remove_failed"]());
+			}
 		} finally {
 			setIsRotating(false);
 			setRotatingUserId(null);
@@ -211,18 +232,18 @@ export function VaultMemberList({
 		}
 	};
 
-	const getRoleDescription = (role: string) => {
+	const getRoleLabel = (role: VaultMember["role"]) => {
 		switch (role) {
 			case "owner":
-				return "Full control";
+				return m["vaults.common.role.owner"]();
 			case "admin":
-				return "Manage members & items";
+				return m["vaults.common.role.admin"]();
 			case "member":
-				return "View & edit items";
+				return m["vaults.common.role.member"]();
 			case "read-only":
-				return "View only";
+				return m["vaults.common.role.read_only"]();
 			default:
-				return "";
+				return role;
 		}
 	};
 
@@ -238,7 +259,9 @@ export function VaultMemberList({
 				<div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
 					<Users className="h-6 w-6 text-muted-foreground" />
 				</div>
-				<p className="text-muted-foreground">No members in this vault.</p>
+				<p className="text-muted-foreground">
+					{m["vaults.member_list.empty"]()}
+				</p>
 			</div>
 		);
 	}
@@ -296,9 +319,15 @@ export function VaultMemberList({
 											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="admin">Admin</SelectItem>
-											<SelectItem value="member">Member</SelectItem>
-											<SelectItem value="read-only">Read-only</SelectItem>
+											<SelectItem value="admin">
+												{m["vaults.common.role.admin"]()}
+											</SelectItem>
+											<SelectItem value="member">
+												{m["vaults.common.role.member"]()}
+											</SelectItem>
+											<SelectItem value="read-only">
+												{m["vaults.common.role.read_only"]()}
+											</SelectItem>
 										</SelectContent>
 									</Select>
 								) : (
@@ -306,7 +335,7 @@ export function VaultMemberList({
 										variant={getRoleBadgeVariant(member.role)}
 										className="px-2 py-0.5 text-xs capitalize"
 									>
-										{member.role}
+										{getRoleLabel(member.role)}
 									</Badge>
 								)}
 
@@ -329,21 +358,16 @@ export function VaultMemberList({
 										<AlertDialogContent>
 											<AlertDialogHeader>
 												<AlertDialogTitle>
-													Remove Member
+													{m["vaults.member_list.remove_dialog.title"]()}
 												</AlertDialogTitle>
 												<AlertDialogDescription>
-													Are you sure you want to remove{" "}
-													<span className="font-medium text-foreground">
-														{member.name}
-													</span>{" "}
-													from this vault? They will lose
-													access to all items.
+													{m["vaults.member_list.remove_dialog.description"]({
+														name: member.name,
+													})}
 													<br />
 													<br />
 													<span className="text-muted-foreground text-xs">
-														The vault encryption key will
-														be rotated and all items
-														re-encrypted for security.
+														{m["vaults.member_list.remove_dialog.rotation_notice"]()}
 													</span>
 												</AlertDialogDescription>
 											</AlertDialogHeader>
@@ -351,7 +375,7 @@ export function VaultMemberList({
 												<AlertDialogCancel
 													disabled={isRotating}
 												>
-													Cancel
+													{m["vaults.member_list.remove_dialog.action.cancel"]()}
 												</AlertDialogCancel>
 												<AlertDialogAction
 													onClick={() =>
@@ -363,10 +387,10 @@ export function VaultMemberList({
 													{isRotating ? (
 														<>
 															<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-															Rotating keys...
+															{m["vaults.member_list.remove_dialog.action.rotating"]()}
 														</>
 													) : (
-														"Remove"
+														m["vaults.member_list.remove_dialog.action.confirm"]()
 													)}
 												</AlertDialogAction>
 											</AlertDialogFooter>

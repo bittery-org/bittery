@@ -10,6 +10,7 @@ import {
 } from "@bittery/ui/icons";
 import { useState } from "react";
 import { ShareHistoryDialog, ShareItemDialog } from "@/components/sharing";
+import { useI18n } from "@/providers/i18n-provider";
 import { Favicon } from "../favicon";
 import { InlineTotpDisplay } from "./inline-totp-display";
 import {
@@ -28,6 +29,7 @@ export function LoginDetail({
 	onDelete,
 	item,
 }: LoginDetailProps) {
+	const { m } = useI18n();
 	const [showPassword, setShowPassword] = useState(false);
 	const [visibleCustomFields, setVisibleCustomFields] = useState<Set<string>>(
 		new Set(),
@@ -64,7 +66,7 @@ export function LoginDetail({
 			<div className="flex flex-wrap gap-2">
 				{onEdit && (
 					<Button size="sm" variant="outline" onClick={onEdit}>
-						Edit
+						{m["vaults.detail.items.detail.action.edit"]()}
 					</Button>
 				)}
 				{item && <ShareItemDialog item={item} />}
@@ -76,7 +78,7 @@ export function LoginDetail({
 						className="text-destructive hover:bg-destructive/10 hover:text-destructive"
 						onClick={onDelete}
 					>
-						Delete
+						{m["vaults.detail.items.detail.action.delete"]()}
 					</Button>
 				)}
 			</div>
@@ -84,7 +86,7 @@ export function LoginDetail({
 			<div className="min-w-0 space-y-4">
 				{data.url && (
 					<div className="min-w-0 space-y-2">
-						<Label>Website</Label>
+						<Label>{m["vaults.detail.items.detail.login.field.website"]()}</Label>
 						<div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
 							<Input
 								value={data.url}
@@ -95,7 +97,13 @@ export function LoginDetail({
 								<Button
 									size="icon"
 									variant="outline"
-									onClick={() => handleCopy(data.url!, "URL")}
+									onClick={() =>
+										handleCopy(
+											data.url!,
+											m["vaults.detail.items.copy.label.url"](),
+											m,
+										)
+									}
 								>
 									<Copy size={16} />
 								</Button>
@@ -113,7 +121,7 @@ export function LoginDetail({
 
 				{data.username && (
 					<div className="min-w-0 space-y-2">
-						<Label>Username</Label>
+						<Label>{m["vaults.detail.items.detail.login.field.username"]()}</Label>
 						<div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
 							<Input
 								value={data.username}
@@ -124,7 +132,13 @@ export function LoginDetail({
 								<Button
 									size="icon"
 									variant="outline"
-									onClick={() => handleCopy(data.username!, "Username")}
+									onClick={() =>
+										handleCopy(
+											data.username!,
+											m["vaults.detail.items.copy.label.username"](),
+											m,
+										)
+									}
 								>
 									<Copy size={16} />
 								</Button>
@@ -135,7 +149,7 @@ export function LoginDetail({
 
 				{data.password && (
 					<div className="min-w-0 space-y-2">
-						<Label>Password</Label>
+						<Label>{m["vaults.detail.items.detail.login.field.password"]()}</Label>
 						<div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
 							<Input
 								type={showPassword ? "text" : "password"}
@@ -154,7 +168,13 @@ export function LoginDetail({
 								<Button
 									size="icon"
 									variant="outline"
-									onClick={() => handleCopy(data.password!, "Password")}
+									onClick={() =>
+										handleCopy(
+											data.password!,
+											m["vaults.detail.items.copy.label.password"](),
+											m,
+										)
+									}
 								>
 									<Copy size={16} />
 								</Button>
@@ -165,7 +185,9 @@ export function LoginDetail({
 
 				{data.totpSecret && (
 					<div className="space-y-2">
-						<Label>One-Time Password</Label>
+						<Label>
+							{m["vaults.detail.items.detail.login.field.one_time_password"]()}
+						</Label>
 						<InlineTotpDisplay
 							totpSecret={data.totpSecret}
 							totpAlgorithm={data.totpAlgorithm}
@@ -177,7 +199,9 @@ export function LoginDetail({
 
 				{data.notes && (
 					<div className="space-y-2">
-						<Label className="font-medium text-sm">Notes</Label>
+						<Label className="font-medium text-sm">
+							{m["vaults.detail.items.form.field.notes.label"]()}
+						</Label>
 						<Card>
 							<div className="whitespace-pre-wrap px-4 py-1 text-sm">
 								{data.notes}
@@ -188,7 +212,9 @@ export function LoginDetail({
 
 				{data.urls && data.urls.length > 0 && (
 					<div className="min-w-0 space-y-2">
-						<Label>Additional Websites</Label>
+						<Label>
+							{m["vaults.detail.items.detail.login.field.additional_websites"]()}
+						</Label>
 						{data.urls.map((url) => (
 							<div
 								key={url}
@@ -203,7 +229,13 @@ export function LoginDetail({
 									<Button
 										size="icon"
 										variant="outline"
-										onClick={() => handleCopy(url, "URL")}
+										onClick={() =>
+											handleCopy(
+												url,
+												m["vaults.detail.items.copy.label.url"](),
+												m,
+											)
+										}
 									>
 										<Copy size={16} />
 									</Button>
@@ -254,7 +286,7 @@ export function LoginDetail({
 										<Button
 											size="icon"
 											variant="outline"
-											onClick={() => handleCopy(field.value, field.label)}
+											onClick={() => handleCopy(field.value, field.label, m)}
 										>
 											<Copy size={16} />
 										</Button>

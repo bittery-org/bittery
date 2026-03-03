@@ -17,6 +17,7 @@ import {
 } from "@bittery/ui/icons";
 import { useState } from "react";
 import { ShareHistoryDialog, ShareItemDialog } from "@/components/sharing";
+import { useI18n } from "@/providers/i18n-provider";
 import { Favicon } from "../favicon";
 import {
 	type CategoryDetailProps,
@@ -34,6 +35,7 @@ export function IdentityDetail({
 	onDelete,
 	item,
 }: IdentityDetailProps) {
+	const { m } = useI18n();
 	const [showSSN, setShowSSN] = useState(false);
 	const [showPassport, setShowPassport] = useState(false);
 	const [showDriversLicense, setShowDriversLicense] = useState(false);
@@ -41,6 +43,21 @@ export function IdentityDetail({
 	const fullName = [data.firstName, data.middleName, data.lastName]
 		.filter(Boolean)
 		.join(" ");
+
+	const getPhoneLabel = (label: string) => {
+		switch (label) {
+			case "Mobile":
+				return m["vaults.detail.items.form.identity.phone_type.mobile"]();
+			case "Home":
+				return m["vaults.detail.items.form.identity.phone_type.home"]();
+			case "Work":
+				return m["vaults.detail.items.form.identity.phone_type.work"]();
+			case "Other":
+				return m["vaults.detail.items.form.identity.phone_type.other"]();
+			default:
+				return label;
+		}
+	};
 
 	return (
 		<div className="space-y-4">
@@ -59,7 +76,7 @@ export function IdentityDetail({
 			<div className="flex gap-2">
 				{onEdit && (
 					<Button size="sm" variant="outline" onClick={onEdit}>
-						Edit
+						{m["vaults.detail.items.detail.action.edit"]()}
 					</Button>
 				)}
 				{item && <ShareItemDialog item={item} />}
@@ -71,7 +88,7 @@ export function IdentityDetail({
 						className="text-destructive hover:bg-destructive/10 hover:text-destructive"
 						onClick={onDelete}
 					>
-						Delete
+						{m["vaults.detail.items.detail.action.delete"]()}
 					</Button>
 				)}
 			</div>
@@ -82,17 +99,27 @@ export function IdentityDetail({
 					data.email ||
 					data.dateOfBirth) && (
 					<div className="space-y-4 rounded-lg border p-4">
-						<h3 className="font-medium text-sm">Personal Information</h3>
+						<h3 className="font-medium text-sm">
+							{m["vaults.detail.items.detail.identity.section.personal_information"]()}
+						</h3>
 
 						{data.firstName && (
 							<div className="space-y-2">
-								<Label>First Name</Label>
+								<Label>
+									{m["vaults.detail.items.form.identity.field.first_name"]()}
+								</Label>
 								<div className="flex gap-2">
 									<Input value={data.firstName} readOnly className="flex-1" />
 									<Button
 										size="icon"
 										variant="outline"
-										onClick={() => handleCopy(data.firstName!, "First name")}
+										onClick={() =>
+											handleCopy(
+												data.firstName!,
+												m["vaults.detail.items.copy.label.first_name"](),
+												m,
+											)
+										}
 									>
 										<Copy size={16} />
 									</Button>
@@ -102,13 +129,21 @@ export function IdentityDetail({
 
 						{data.middleName && (
 							<div className="space-y-2">
-								<Label>Middle Name</Label>
+								<Label>
+									{m["vaults.detail.items.form.identity.field.middle_name"]()}
+								</Label>
 								<div className="flex gap-2">
 									<Input value={data.middleName} readOnly className="flex-1" />
 									<Button
 										size="icon"
 										variant="outline"
-										onClick={() => handleCopy(data.middleName!, "Middle name")}
+										onClick={() =>
+											handleCopy(
+												data.middleName!,
+												m["vaults.detail.items.copy.label.middle_name"](),
+												m,
+											)
+										}
 									>
 										<Copy size={16} />
 									</Button>
@@ -118,13 +153,21 @@ export function IdentityDetail({
 
 						{data.lastName && (
 							<div className="space-y-2">
-								<Label>Last Name</Label>
+								<Label>
+									{m["vaults.detail.items.form.identity.field.last_name"]()}
+								</Label>
 								<div className="flex gap-2">
 									<Input value={data.lastName} readOnly className="flex-1" />
 									<Button
 										size="icon"
 										variant="outline"
-										onClick={() => handleCopy(data.lastName!, "Last name")}
+										onClick={() =>
+											handleCopy(
+												data.lastName!,
+												m["vaults.detail.items.copy.label.last_name"](),
+												m,
+											)
+										}
 									>
 										<Copy size={16} />
 									</Button>
@@ -134,13 +177,19 @@ export function IdentityDetail({
 
 						{data.email && (
 							<div className="space-y-2">
-								<Label>Email</Label>
+								<Label>{m["vaults.detail.items.form.identity.field.email"]()}</Label>
 								<div className="flex gap-2">
 									<Input value={data.email} readOnly className="flex-1" />
 									<Button
 										size="icon"
 										variant="outline"
-										onClick={() => handleCopy(data.email!, "Email")}
+										onClick={() =>
+											handleCopy(
+												data.email!,
+												m["vaults.detail.items.copy.label.email"](),
+												m,
+											)
+										}
 									>
 										<Copy size={16} />
 									</Button>
@@ -150,14 +199,20 @@ export function IdentityDetail({
 
 						{data.dateOfBirth && (
 							<div className="space-y-2">
-								<Label>Date of Birth</Label>
+								<Label>
+									{m["vaults.detail.items.form.identity.field.date_of_birth"]()}
+								</Label>
 								<div className="flex gap-2">
 									<Input value={data.dateOfBirth} readOnly className="flex-1" />
 									<Button
 										size="icon"
 										variant="outline"
 										onClick={() =>
-											handleCopy(data.dateOfBirth!, "Date of birth")
+											handleCopy(
+												data.dateOfBirth!,
+												m["vaults.detail.items.copy.label.date_of_birth"](),
+												m,
+											)
 										}
 									>
 										<Copy size={16} />
@@ -170,11 +225,13 @@ export function IdentityDetail({
 
 				{data.phoneNumbers && data.phoneNumbers.length > 0 && (
 					<div className="space-y-2">
-						<Label>Phone Numbers</Label>
+						<Label>
+							{m["vaults.detail.items.form.identity.section.phone_numbers"]()}
+						</Label>
 						{data.phoneNumbers.map((phone) => (
 							<div key={phone.id} className="space-y-1">
 								<Label className="text-muted-foreground text-xs">
-									{phone.label}
+									{getPhoneLabel(phone.label)}
 								</Label>
 								<div className="flex gap-2">
 									<Input
@@ -186,7 +243,13 @@ export function IdentityDetail({
 										size="icon"
 										variant="outline"
 										onClick={() =>
-											handleCopy(phone.number, `${phone.label} phone`)
+											handleCopy(
+												phone.number,
+												m["vaults.detail.items.copy.label.phone"]({
+													label: getPhoneLabel(phone.label),
+												}),
+												m,
+											)
 										}
 									>
 										<Copy size={16} />
@@ -199,7 +262,7 @@ export function IdentityDetail({
 
 				{data.addresses && data.addresses.length > 0 && (
 					<div className="space-y-2">
-						<Label>Addresses</Label>
+						<Label>{m["vaults.detail.items.form.identity.section.addresses"]()}</Label>
 						{data.addresses.map((address) => (
 							<div key={address.id} className="space-y-2">
 								<Card>
@@ -210,11 +273,17 @@ export function IdentityDetail({
 								<Button
 									size="sm"
 									variant="outline"
-									onClick={() => handleCopy(formatAddress(address), "Address")}
+									onClick={() =>
+										handleCopy(
+											formatAddress(address),
+											m["vaults.detail.items.copy.label.address"](),
+											m,
+										)
+									}
 									className="w-full"
 								>
 									<Copy size={16} className="mr-2" />
-									Copy Address
+									{m["vaults.detail.items.detail.identity.action.copy_address"]()}
 								</Button>
 							</div>
 						))}
@@ -223,11 +292,17 @@ export function IdentityDetail({
 
 				{(data.ssn || data.passportNumber || data.driversLicense) && (
 					<div className="space-y-4 rounded-lg border p-4">
-						<h3 className="font-medium text-sm">Government IDs</h3>
+						<h3 className="font-medium text-sm">
+							{m["vaults.detail.items.form.identity.section.government_ids"]()}
+						</h3>
 
 						{data.ssn && (
 							<div className="space-y-2">
-								<Label>Social Security Number</Label>
+								<Label>
+									{m[
+										"vaults.detail.items.form.identity.field.social_security_number"
+									]()}
+								</Label>
 								<div className="flex gap-2">
 									<Input
 										type={showSSN ? "text" : "password"}
@@ -245,7 +320,13 @@ export function IdentityDetail({
 									<Button
 										size="icon"
 										variant="outline"
-										onClick={() => handleCopy(data.ssn!, "SSN")}
+										onClick={() =>
+											handleCopy(
+												data.ssn!,
+												m["vaults.detail.items.copy.label.ssn"](),
+												m,
+											)
+										}
 									>
 										<Copy size={16} />
 									</Button>
@@ -255,7 +336,11 @@ export function IdentityDetail({
 
 						{data.passportNumber && (
 							<div className="space-y-2">
-								<Label>Passport Number</Label>
+								<Label>
+									{m[
+										"vaults.detail.items.form.identity.field.passport_number"
+									]()}
+								</Label>
 								<div className="flex gap-2">
 									<Input
 										type={showPassport ? "text" : "password"}
@@ -278,7 +363,11 @@ export function IdentityDetail({
 										size="icon"
 										variant="outline"
 										onClick={() =>
-											handleCopy(data.passportNumber!, "Passport number")
+											handleCopy(
+												data.passportNumber!,
+												m["vaults.detail.items.copy.label.passport_number"](),
+												m,
+											)
 										}
 									>
 										<Copy size={16} />
@@ -289,7 +378,9 @@ export function IdentityDetail({
 
 						{data.driversLicense && (
 							<div className="space-y-2">
-								<Label>Driver's License</Label>
+								<Label>
+									{m["vaults.detail.items.form.identity.field.drivers_license"]()}
+								</Label>
 								<div className="flex gap-2">
 									<Input
 										type={showDriversLicense ? "text" : "password"}
@@ -316,7 +407,11 @@ export function IdentityDetail({
 										size="icon"
 										variant="outline"
 										onClick={() =>
-											handleCopy(data.driversLicense!, "Driver's license")
+											handleCopy(
+												data.driversLicense!,
+												m["vaults.detail.items.copy.label.drivers_license"](),
+												m,
+											)
 										}
 									>
 										<Copy size={16} />
@@ -329,7 +424,9 @@ export function IdentityDetail({
 
 				{data.notes && (
 					<div className="space-y-2">
-						<Label className="font-medium text-sm">Notes</Label>
+						<Label className="font-medium text-sm">
+							{m["vaults.detail.items.form.field.notes.label"]()}
+						</Label>
 						<Card>
 							<div className="whitespace-pre-wrap px-4 py-1 text-sm">
 								{data.notes}

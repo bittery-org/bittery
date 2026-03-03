@@ -1,6 +1,7 @@
 import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, Card } from "@bittery/ui";
 import { ShareHistoryDialog, ShareItemDialog } from "@/components/sharing";
+import { useI18n } from "@/providers/i18n-provider";
 import { Favicon } from "../favicon";
 import type { CategoryDetailProps, SecureNoteDisplayData } from "./shared";
 
@@ -15,6 +16,7 @@ export function SecureNoteDetail({
 	onDelete,
 	item,
 }: SecureNoteDetailProps) {
+	const { m } = useI18n();
 	return (
 		<div className="space-y-4">
 			<div className="flex items-center gap-4">
@@ -23,14 +25,16 @@ export function SecureNoteDetail({
 					<h2 className="truncate font-semibold text-2xl tracking-tight">
 						{data.title}
 					</h2>
-					<p className="mt-1 text-muted-foreground text-sm">Secure Note</p>
+					<p className="mt-1 text-muted-foreground text-sm">
+						{m["vaults.detail.items.category.secure_note.title"]()}
+					</p>
 				</div>
 			</div>
 
 			<div className="flex gap-2">
 				{onEdit && (
 					<Button size="sm" variant="outline" onClick={onEdit}>
-						Edit
+						{m["vaults.detail.items.detail.action.edit"]()}
 					</Button>
 				)}
 				{item && <ShareItemDialog item={item} />}
@@ -42,7 +46,7 @@ export function SecureNoteDetail({
 						className="text-destructive hover:bg-destructive/10 hover:text-destructive"
 						onClick={onDelete}
 					>
-						Delete
+						{m["vaults.detail.items.detail.action.delete"]()}
 					</Button>
 				)}
 			</div>

@@ -207,7 +207,7 @@ export class SyncManager {
 	/**
 	 * Read and parse SSE stream
 	 */
-	private async readStream(body: ReadableStream<Uint8Array>): Promise<void> {
+	private async readStream(body: NonNullable<Response["body"]>): Promise<void> {
 		const reader = body.getReader();
 		const decoder = new TextDecoder();
 		let buffer = "";

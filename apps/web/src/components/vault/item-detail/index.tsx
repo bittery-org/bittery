@@ -7,6 +7,7 @@ import type {
 	TotpDisplayData,
 } from "@bittery/shared/types";
 import { Label, Separator } from "@bittery/ui";
+import { useI18n } from "@/providers/i18n-provider";
 import { TagInput } from "../tag-input";
 import { CreditCardDetail } from "./credit-card-detail";
 import { IdentityDetail } from "./identity-detail";
@@ -42,6 +43,7 @@ export default function ItemDetail({
 	availableTags = [],
 	canEdit = false,
 }: ItemDetailComponentProps) {
+	const { m } = useI18n();
 	// Get tags for this item directly from the item data
 	const itemTags = item?.tags || [];
 
@@ -106,7 +108,9 @@ export default function ItemDetail({
 				<>
 					<Separator />
 					<div className="space-y-2">
-						<Label className="text-muted-foreground text-sm">Tags</Label>
+						<Label className="text-muted-foreground text-sm">
+							{m["vaults.detail.items.detail.tags.label"]()}
+						</Label>
 						{itemTags.length > 0 ? (
 							<TagInput
 								tags={itemTags}
@@ -115,7 +119,9 @@ export default function ItemDetail({
 								disabled
 							/>
 						) : (
-							<p className="text-muted-foreground text-sm">No tags.</p>
+							<p className="text-muted-foreground text-sm">
+								{m["vaults.detail.items.detail.tags.empty"]()}
+							</p>
 						)}
 					</div>
 				</>

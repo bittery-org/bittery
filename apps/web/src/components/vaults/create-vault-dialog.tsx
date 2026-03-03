@@ -23,6 +23,7 @@ import {
 } from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useI18n } from "@/providers/i18n-provider";
 import { VaultAvatar, vaultIconOptions } from "./vault-avatar";
 
 export interface AccountOption {
@@ -44,6 +45,7 @@ export function CreateVaultDialog({
 	onSubmit,
 	accounts,
 }: CreateVaultDialogProps) {
+	const { m } = useI18n();
 	const [icon, setIcon] = useState("lock");
 	const [imageFile, setImageFile] = useState<File | undefined>(undefined);
 	const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -75,11 +77,9 @@ export function CreateVaultDialog({
 				});
 				resetForm();
 				onOpenChange(false);
-				toast.success("Vault created successfully");
-			} catch (error) {
-				const errorMessage =
-					error instanceof Error ? error.message : "Failed to create vault";
-				toast.error(errorMessage);
+				toast.success(m["vaults.create_dialog.toast.created"]());
+			} catch {
+				toast.error(m["vaults.create_dialog.toast.create_failed"]());
 			}
 		},
 	});
@@ -108,12 +108,12 @@ export function CreateVaultDialog({
 		}
 
 		if (!file.type.startsWith("image/")) {
-			toast.error("Please select an image file");
+			toast.error(m["vaults.create_dialog.toast.invalid_image_file"]());
 			return false;
 		}
 
 		if (file.size > 2 * 1024 * 1024) {
-			toast.error("Image must be smaller than 2MB");
+			toast.error(m["vaults.create_dialog.toast.image_too_large"]());
 			return false;
 		}
 
@@ -159,7 +159,7 @@ export function CreateVaultDialog({
 		>
 			<DialogContent className="sm:max-w-105" data-testid="create-vault-dialog">
 				<DialogHeader>
-					<DialogTitle>Create New Vault</DialogTitle>
+					<DialogTitle>{m["vaults.create_dialog.title"]()}</DialogTitle>
 				</DialogHeader>
 
 				<form
@@ -192,7 +192,7 @@ export function CreateVaultDialog({
 									onClick={() => fileInputRef.current?.click()}
 								>
 									<VaultAvatar
-										name={name || "Vault"}
+										name={name || m["vaults.create_dialog.avatar_fallback"]()}
 										icon={icon}
 										imageUrl={imagePreview}
 										size="xl"
@@ -224,18 +224,20 @@ export function CreateVaultDialog({
 								className="h-7 gap-1.5 text-muted-foreground text-xs"
 							>
 								<IconXmarkOutlineDuo18 className="size-3" />
-								Remove image
+								{m["vaults.create_dialog.image.action.remove"]()}
 							</Button>
 						) : (
 							<p className="text-muted-foreground text-xs">
-								Click or drag to upload
+								{m["vaults.create_dialog.image.help"]()}
 							</p>
 						)}
 					</div>
 
 					{/* Icon Picker */}
 					<div className="space-y-2">
-						<Label className="text-muted-foreground text-xs">Icon</Label>
+						<Label className="text-muted-foreground text-xs">
+							{m["vaults.create_dialog.field.icon"]()}
+						</Label>
 						<div className="flex flex-wrap justify-center gap-1.5">
 							{vaultIconOptions.map((option) => (
 								<button
@@ -269,7 +271,7 @@ export function CreateVaultDialog({
 								htmlFor="account"
 								className="text-muted-foreground text-xs"
 							>
-								Account
+								{m["vaults.create_dialog.field.account"]()}
 							</Label>
 							<Select
 								value={selectedAccountEmail}
@@ -277,7 +279,9 @@ export function CreateVaultDialog({
 								disabled={form.state.isSubmitting}
 							>
 								<SelectTrigger id="account" className="h-10">
-									<SelectValue placeholder="Select account" />
+									<SelectValue
+										placeholder={m["vaults.create_dialog.placeholder.account"]()}
+									/>
 								</SelectTrigger>
 								<SelectContent>
 									{accounts.map((account) => (
@@ -305,12 +309,12 @@ export function CreateVaultDialog({
 									htmlFor={field.name}
 									className="text-muted-foreground text-xs"
 								>
-									Name
+									{m["vaults.create_dialog.field.name"]()}
 								</Label>
 								<Input
 									id={field.name}
 									name={field.name}
-									placeholder="Enter vault name"
+									placeholder={m["vaults.create_dialog.placeholder.name"]()}
 									value={field.state.value}
 									onBlur={field.handleBlur}
 									onChange={(e) => field.handleChange(e.target.value)}
@@ -326,7 +330,9 @@ export function CreateVaultDialog({
 					<form.Field name="type">
 						{(field) => (
 							<div className="space-y-2">
-								<Label className="text-muted-foreground text-xs">Type</Label>
+								<Label className="text-muted-foreground text-xs">
+									{m["vaults.create_dialog.field.type"]()}
+								</Label>
 								<div className="grid grid-cols-2 gap-2">
 									<button
 										type="button"
@@ -350,7 +356,7 @@ export function CreateVaultDialog({
 										)}
 									>
 										<IconUserOutlineDuo18 className="size-4" />
-										Personal
+										{m["vaults.create_dialog.type.personal"]()}
 									</button>
 									<button
 										type="button"
@@ -374,7 +380,7 @@ export function CreateVaultDialog({
 										)}
 									>
 										<IconUsers6OutlineDuo18 className="size-4" />
-										Team
+										{m["vaults.create_dialog.type.team"]()}
 									</button>
 								</div>
 							</div>
@@ -394,7 +400,7 @@ export function CreateVaultDialog({
 							className="flex-1"
 							data-testid="create-vault-cancel-button"
 						>
-							Cancel
+							{m["vaults.create_dialog.action.cancel"]()}
 						</Button>
 						<Button
 							type="submit"
@@ -402,7 +408,9 @@ export function CreateVaultDialog({
 							className="flex-1"
 							data-testid="create-vault-submit-button"
 						>
-							{form.state.isSubmitting ? "Creating..." : "Create Vault"}
+							{form.state.isSubmitting
+								? m["vaults.create_dialog.action.creating"]()
+								: m["vaults.create_dialog.action.submit"]()}
 						</Button>
 					</div>
 				</form>

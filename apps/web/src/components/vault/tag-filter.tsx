@@ -17,6 +17,7 @@ import {
 	IconSortObjTopToBottomOutlineDuo18 as Filter,
 } from "@bittery/ui/icons";
 import { useState } from "react";
+import { useI18n } from "@/providers/i18n-provider";
 import { getTagColorFromName, TagBadge } from "./tag-badge";
 
 interface TagFilterProps {
@@ -32,6 +33,7 @@ export function TagFilter({
 	onSelectionChange,
 	disabled = false,
 }: TagFilterProps) {
+	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
 	const [searchValue, setSearchValue] = useState("");
 
@@ -67,8 +69,14 @@ export function TagFilter({
 						<Filter className="h-3.5 w-3.5" />
 						<span>
 							{selectedTags.length > 0
-								? `${selectedTags.length} tag${selectedTags.length > 1 ? "s" : ""}`
-								: "Tags"}
+								? selectedTags.length === 1
+									? m["vaults.detail.items.tag_filter.button.count.single"]({
+											count: selectedTags.length,
+										})
+									: m["vaults.detail.items.tag_filter.button.count.plural"]({
+											count: selectedTags.length,
+										})
+								: m["vaults.detail.items.tag_filter.button.default"]()}
 						</span>
 						<ChevronDown className="h-3.5 w-3.5 opacity-50" />
 					</Button>
@@ -76,13 +84,15 @@ export function TagFilter({
 				<PopoverContent className="w-64 p-0" align="start">
 					<Command>
 						<CommandInput
-							placeholder="Search tags..."
+							placeholder={m["vaults.detail.items.tag_filter.search.placeholder"]()}
 							value={searchValue}
 							onValueChange={setSearchValue}
 						/>
 						<CommandList>
 							{filteredTags.length === 0 && (
-								<CommandEmpty>No tags found.</CommandEmpty>
+								<CommandEmpty>
+									{m["vaults.detail.items.tag_filter.empty"]()}
+								</CommandEmpty>
 							)}
 							{filteredTags.length > 0 && (
 								<CommandGroup>
@@ -131,7 +141,7 @@ export function TagFilter({
 							onClick={handleClearAll}
 							className="ml-1 text-muted-foreground text-xs hover:text-foreground"
 						>
-							Clear all
+							{m["vaults.detail.items.tag_filter.action.clear_all"]()}
 						</button>
 					)}
 				</div>

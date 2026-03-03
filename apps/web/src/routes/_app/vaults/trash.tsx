@@ -26,32 +26,39 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Favicon } from "@/components/vault/favicon";
 import { VaultAvatar } from "@/components/vaults/vault-avatar";
+import { formatDate } from "@/lib/i18n-format";
+import { m as messages } from "@/paraglide/messages";
+import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/trash")({
 	component: VaultTrashPage,
 	head: () => ({
-		meta: [{ title: "Trash - Bittery" }],
+		meta: [{ title: messages["vaults.trash.meta_title"]() }],
 	}),
 });
 
-function formatDeletedDate(value: string | Date | null | undefined): string {
+function formatDeletedDate(
+	value: string | Date | null | undefined,
+	fallbackLabel: string,
+): string {
 	if (!value) {
-		return "recently";
+		return fallbackLabel;
 	}
 
 	const date = value instanceof Date ? value : new Date(value);
 	if (Number.isNaN(date.getTime())) {
-		return "recently";
+		return fallbackLabel;
 	}
 
-	return new Intl.DateTimeFormat("en-US", {
+	return formatDate(date, {
 		month: "short",
 		day: "numeric",
 		year: "numeric",
-	}).format(date);
+	});
 }
 
 function VaultTrashPage() {
+	const { m } = useI18n();
 	const { items: deletedItems, isLoading } = useDeletedItems();
 	const restoreItem = useRestoreItem();
 	const permanentDeleteItem = usePermanentDeleteItem();
@@ -69,15 +76,17 @@ function VaultTrashPage() {
 			return right - left;
 		});
 	}, [deletedItems]);
+	const trashCountLabel =
+		sortedItems.length === 1
+			? m["vaults.trash.list.count.single"]({ count: sortedItems.length })
+			: m["vaults.trash.list.count.plural"]({ count: sortedItems.length });
 
 	const handleRestore = async (itemId: string, vaultId: string) => {
 		try {
 			await restoreItem.mutateAsync({ itemId, vaultId });
-			toast.success("Item restored successfully");
-		} catch (error) {
-			const errorMessage =
-				error instanceof Error ? error.message : "Failed to restore item";
-			toast.error(errorMessage);
+			toast.success(m["vaults.trash.toast.restore_success"]());
+		} catch {
+			toast.error(m["vaults.trash.toast.restore_error"]());
 		}
 	};
 
@@ -92,11 +101,9 @@ function VaultTrashPage() {
 				vaultId: itemToDelete.vaultId,
 			});
 			setItemToDelete(null);
-			toast.success("Item permanently deleted");
-		} catch (error) {
-			const errorMessage =
-				error instanceof Error ? error.message : "Failed to delete item";
-			toast.error(errorMessage);
+			toast.success(m["vaults.trash.toast.permanent_delete_success"]());
+		} catch {
+			toast.error(m["vaults.trash.toast.permanent_delete_error"]());
 			setItemToDelete(null);
 		}
 	};
@@ -112,14 +119,14 @@ function VaultTrashPage() {
 						<div className="space-y-4">
 							<Badge variant="secondary" className="w-fit">
 								<Archive className="mr-1 h-3.5 w-3.5" />
-								Trash
+								{m["vaults.trash.hero.badge"]()}
 							</Badge>
 							<div className="space-y-2">
 								<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl">
-									Deleted Items
+									{m["vaults.trash.hero.heading"]()}
 								</h1>
 								<p className="max-w-2xl text-muted-foreground">
-									Items moved to trash can be restored or permanently deleted.
+									{m["vaults.trash.hero.description"]()}
 								</p>
 							</div>
 						</div>
@@ -127,7 +134,7 @@ function VaultTrashPage() {
 						<Button variant="outline" asChild>
 							<Link to="/vaults">
 								<ArrowLeft className="mr-2 h-4 w-4" />
-								Back to Vaults
+								{m["vaults.trash.action.back_to_vaults"]()}
 							</Link>
 						</Button>
 					</div>
@@ -145,9 +152,11 @@ function VaultTrashPage() {
 							<Archive className="h-6 w-6 text-muted-foreground" />
 						</div>
 						<div>
-							<h3 className="font-medium text-lg">Trash is empty</h3>
+							<h3 className="font-medium text-lg">
+								{m["vaults.trash.empty.title"]()}
+							</h3>
 							<p className="mt-1 text-muted-foreground text-sm">
-								Deleted items will appear here.
+								{m["vaults.trash.empty.description"]()}
 							</p>
 						</div>
 					</div>
@@ -155,12 +164,9 @@ function VaultTrashPage() {
 					<div className="space-y-3">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 							<h2 className="font-semibold text-lg tracking-tight">
-								All Trash
+								{m["vaults.trash.list.heading"]()}
 							</h2>
-							<p className="text-muted-foreground text-sm">
-								{sortedItems.length} item{sortedItems.length !== 1 ? "s" : ""}{" "}
-								in trash
-							</p>
+							<p className="text-muted-foreground text-sm">{trashCountLabel}</p>
 						</div>
 
 						<div className="space-y-2">
@@ -168,7 +174,7 @@ function VaultTrashPage() {
 								const maskedCardNumber = item.cardNumber
 									? maskCardNumber(item.cardNumber)
 									: undefined;
-								const title = item.title || "[Untitled]";
+								const title = item.title || m["vaults.trash.item.untitled"]();
 								const secondaryText =
 									item.username || item.email || maskedCardNumber || item.url;
 
@@ -202,7 +208,12 @@ function VaultTrashPage() {
 													<span className="truncate">{item.vault.name}</span>
 													<span>•</span>
 													<span>
-														Deleted {formatDeletedDate(item.deletedAt)}
+														{m["vaults.trash.item.deleted_at"]({
+															date: formatDeletedDate(
+																item.deletedAt,
+																m["vaults.trash.item.deleted_recently"](),
+															),
+														})}
 													</span>
 												</div>
 											</div>
@@ -215,7 +226,7 @@ function VaultTrashPage() {
 													disabled={restoreItem.isPending}
 												>
 													<Restore className="h-4 w-4" />
-													Restore
+													{m["vaults.trash.item.action.restore"]()}
 												</Button>
 												<Button
 													variant="destructive"
@@ -230,7 +241,7 @@ function VaultTrashPage() {
 													disabled={permanentDeleteItem.isPending}
 												>
 													<Trash className="h-4 w-4" />
-													Delete Forever
+													{m["vaults.trash.item.action.delete_forever"]()}
 												</Button>
 											</div>
 										</div>
@@ -248,22 +259,26 @@ function VaultTrashPage() {
 			>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>Permanently Delete Item?</DialogTitle>
+						<DialogTitle>
+							{m["vaults.trash.delete_dialog.title"]()}
+						</DialogTitle>
 						<DialogDescription>
-							This action cannot be undone.{" "}
-							{itemToDelete?.title ? `"${itemToDelete.title}"` : "This item"}{" "}
-							will be permanently removed.
+							{itemToDelete?.title
+								? m["vaults.trash.delete_dialog.description.named"]({
+										title: itemToDelete.title,
+									})
+								: m["vaults.trash.delete_dialog.description.unnamed"]()}
 						</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>
 						<Button variant="outline" onClick={() => setItemToDelete(null)}>
-							Cancel
+							{m["vaults.trash.delete_dialog.action.cancel"]()}
 						</Button>
 						<Button
 							variant="destructive"
 							onClick={handleConfirmPermanentDelete}
 						>
-							Delete Forever
+							{m["vaults.trash.delete_dialog.action.confirm"]()}
 						</Button>
 					</DialogFooter>
 				</DialogContent>

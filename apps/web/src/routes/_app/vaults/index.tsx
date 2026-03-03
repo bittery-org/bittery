@@ -34,17 +34,48 @@ import {
 	type UpdateVaultData,
 	EditVaultDialog,
 } from "@/components/vaults/edit-vault-dialog";
+import { m as messages } from "@/paraglide/messages";
+import { useI18n } from "@/providers/i18n-provider";
 import { VaultAvatar } from "@/components/vaults/vault-avatar";
 
 export const Route = createFileRoute("/_app/vaults/")({
 	component: VaultsPage,
 	head: () => ({
-		meta: [{ title: "Vaults - Bittery" }],
+		meta: [{ title: messages["vaults.page.meta_title"]() }],
 	}),
 });
 
+type VaultMessageCatalog = ReturnType<typeof useI18n>["m"];
+
+function getVaultRoleLabel(role: string, m: VaultMessageCatalog): string {
+	switch (role) {
+		case "owner":
+			return m["vaults.common.role.owner"]();
+		case "admin":
+			return m["vaults.common.role.admin"]();
+		case "member":
+			return m["vaults.common.role.member"]();
+		case "read-only":
+			return m["vaults.common.role.read_only"]();
+		default:
+			return role;
+	}
+}
+
+function getVaultTypeLabel(type: string, m: VaultMessageCatalog): string {
+	switch (type) {
+		case "personal":
+			return m["vaults.common.type.personal"]();
+		case "team":
+			return m["vaults.common.type.team"]();
+		default:
+			return type;
+	}
+}
+
 function VaultsPage() {
 	const navigate = useNavigate();
+	const { m } = useI18n();
 	const { vaultKeys, isLoading } = useAllVaultKeys();
 	const { items } = useItems();
 	const createVault = useCreateVault();
@@ -71,6 +102,14 @@ function VaultsPage() {
 
 	const totalItems = items.length;
 	const totalVaults = vaultKeys.length;
+	const totalVaultsLabel =
+		totalVaults === 1
+			? m["vaults.page.hero.stat.vault_count.single"]({ count: totalVaults })
+			: m["vaults.page.hero.stat.vault_count.plural"]({ count: totalVaults });
+	const totalItemsLabel =
+		totalItems === 1
+			? m["vaults.page.hero.stat.item_count_total.single"]({ count: totalItems })
+			: m["vaults.page.hero.stat.item_count_total.plural"]({ count: totalItems });
 
 	const handleCreateVault = async (data: CreateVaultInput) => {
 		const result = await createVault.mutateAsync(data);
@@ -115,25 +154,25 @@ function VaultsPage() {
 						<div className="space-y-4">
 							<Badge variant="secondary" className="w-fit">
 								<Vault className="mr-1 h-3.5 w-3.5" />
-								Vaults
+								{m["vaults.page.hero.badge"]()}
 							</Badge>
 							<div className="space-y-2">
 								<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl">
-									Your Vaults
+									{m["vaults.page.hero.heading"]()}
 								</h1>
 								<p className="max-w-2xl text-muted-foreground">
-									Browse and manage your encrypted password vaults.
+									{m["vaults.page.hero.description"]()}
 								</p>
 							</div>
 							{!isLoading && totalVaults > 0 && (
 								<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
 									<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
 										<Lock className="h-3.5 w-3.5" />
-										{totalVaults} vault{totalVaults !== 1 ? "s" : ""}
+										{totalVaultsLabel}
 									</div>
 									<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
 										<Key className="h-3.5 w-3.5" />
-										{totalItems} item{totalItems !== 1 ? "s" : ""} total
+										{totalItemsLabel}
 									</div>
 								</div>
 							)}
@@ -143,7 +182,7 @@ function VaultsPage() {
 							<Button variant="outline" asChild data-testid="open-trash-button">
 								<Link to="/vaults/trash">
 									<Trash className="mr-2 h-4 w-4" />
-									Trash
+									{m["vaults.page.action.open_trash"]()}
 								</Link>
 							</Button>
 
@@ -152,7 +191,7 @@ function VaultsPage() {
 								data-testid="new-vault-button"
 							>
 								<Plus className="mr-2 h-4 w-4" />
-								New Vault
+								{m["vaults.page.action.new_vault"]()}
 							</Button>
 						</div>
 					</div>
@@ -171,9 +210,11 @@ function VaultsPage() {
 							<Vault className="h-6 w-6 text-muted-foreground" />
 						</div>
 						<div>
-							<h3 className="font-medium text-lg">No vaults yet</h3>
+							<h3 className="font-medium text-lg">
+								{m["vaults.page.empty.title"]()}
+							</h3>
 							<p className="mt-1 text-muted-foreground text-sm">
-								Create your first vault to get started.
+								{m["vaults.page.empty.description"]()}
 							</p>
 						</div>
 						<Button
@@ -181,15 +222,17 @@ function VaultsPage() {
 							data-testid="empty-new-vault-button"
 						>
 							<Plus className="mr-2 h-4 w-4" />
-							Create Vault
+							{m["vaults.page.empty.action.create_vault"]()}
 						</Button>
 					</div>
 				) : (
 					<div className="space-y-3">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-							<h2 className="font-semibold text-lg tracking-tight">All Vaults</h2>
+							<h2 className="font-semibold text-lg tracking-tight">
+								{m["vaults.page.list.heading"]()}
+							</h2>
 							<p className="text-muted-foreground text-sm">
-								Click a vault to view items and manage access.
+								{m["vaults.page.list.description"]()}
 							</p>
 						</div>
 						<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -232,7 +275,7 @@ function VaultsPage() {
 																data-testid={`vault-card-edit-action-${vault.vaultId}`}
 															>
 																<Pen className="h-4 w-4" />
-																Edit Vault
+																{m["vaults.page.card.action.edit_vault"]()}
 															</DropdownMenuItem>
 														)}
 														{canEditVault && canDeleteVault && (
@@ -250,7 +293,7 @@ function VaultsPage() {
 																data-testid={`vault-card-delete-action-${vault.vaultId}`}
 															>
 																<Trash className="h-4 w-4" />
-																Delete Vault
+																{m["vaults.page.card.action.delete_vault"]()}
 															</DropdownMenuItem>
 														)}
 													</DropdownMenuContent>
@@ -287,7 +330,9 @@ function VaultsPage() {
 																className="mt-0.5 text-muted-foreground text-xs capitalize"
 																data-testid="vault-type"
 															>
-																{vault.vaultType} vault
+																{m["vaults.page.card.vault_type"]({
+																	type: getVaultTypeLabel(vault.vaultType, m),
+																})}
 															</p>
 														</div>
 													</div>
@@ -297,13 +342,19 @@ function VaultsPage() {
 														}
 														className="shrink-0"
 													>
-														{vault.role}
+														{getVaultRoleLabel(vault.role, m)}
 													</Badge>
 												</div>
 												<div className="mt-4 flex items-center gap-3 text-muted-foreground text-xs">
 													<div className="flex items-center gap-1">
 														<Key className="h-3.5 w-3.5" />
-														{itemCount} item{itemCount !== 1 ? "s" : ""}
+														{itemCount === 1
+															? m["vaults.page.card.item_count.single"]({
+																	count: itemCount,
+																})
+															: m["vaults.page.card.item_count.plural"]({
+																	count: itemCount,
+																})}
 													</div>
 												</div>
 											</div>
