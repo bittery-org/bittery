@@ -22,6 +22,7 @@ import { Route as AppBillingRouteImport } from './routes/_app/billing'
 import { Route as AppVaultsIndexRouteImport } from './routes/_app/vaults/index'
 import { Route as AppTeamIndexRouteImport } from './routes/_app/team/index'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
+import { Route as AppAdminIndexRouteImport } from './routes/_app/admin/index'
 import { Route as AuthInviteTokenRouteImport } from './routes/_auth/invite.$token'
 import { Route as AppVaultsTrashRouteImport } from './routes/_app/vaults/trash'
 import { Route as AppVaultsVaultIdIndexRouteImport } from './routes/_app/vaults/$vaultId/index'
@@ -89,6 +90,11 @@ const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   path: '/settings/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAdminIndexRoute = AppAdminIndexRouteImport.update({
+  id: '/admin/',
+  path: '/admin/',
+  getParentRoute: () => AppRoute,
+} as any)
 const AuthInviteTokenRoute = AuthInviteTokenRouteImport.update({
   id: '/invite/$token',
   path: '/invite/$token',
@@ -116,6 +122,7 @@ export interface FileRoutesByFullPath {
   '/share/$token': typeof ShareTokenRoute
   '/vaults/trash': typeof AppVaultsTrashRoute
   '/invite/$token': typeof AuthInviteTokenRoute
+  '/admin/': typeof AppAdminIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/team/': typeof AppTeamIndexRoute
   '/vaults/': typeof AppVaultsIndexRoute
@@ -132,6 +139,7 @@ export interface FileRoutesByTo {
   '/share/$token': typeof ShareTokenRoute
   '/vaults/trash': typeof AppVaultsTrashRoute
   '/invite/$token': typeof AuthInviteTokenRoute
+  '/admin': typeof AppAdminIndexRoute
   '/settings': typeof AppSettingsIndexRoute
   '/team': typeof AppTeamIndexRoute
   '/vaults': typeof AppVaultsIndexRoute
@@ -151,6 +159,7 @@ export interface FileRoutesById {
   '/share/$token': typeof ShareTokenRoute
   '/_app/vaults/trash': typeof AppVaultsTrashRoute
   '/_auth/invite/$token': typeof AuthInviteTokenRoute
+  '/_app/admin/': typeof AppAdminIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/team/': typeof AppTeamIndexRoute
   '/_app/vaults/': typeof AppVaultsIndexRoute
@@ -169,6 +178,7 @@ export interface FileRouteTypes {
     | '/share/$token'
     | '/vaults/trash'
     | '/invite/$token'
+    | '/admin/'
     | '/settings/'
     | '/team/'
     | '/vaults/'
@@ -185,6 +195,7 @@ export interface FileRouteTypes {
     | '/share/$token'
     | '/vaults/trash'
     | '/invite/$token'
+    | '/admin'
     | '/settings'
     | '/team'
     | '/vaults'
@@ -203,6 +214,7 @@ export interface FileRouteTypes {
     | '/share/$token'
     | '/_app/vaults/trash'
     | '/_auth/invite/$token'
+    | '/_app/admin/'
     | '/_app/settings/'
     | '/_app/team/'
     | '/_app/vaults/'
@@ -309,6 +321,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/admin/': {
+      id: '/_app/admin/'
+      path: '/admin'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AppAdminIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_auth/invite/$token': {
       id: '/_auth/invite/$token'
       path: '/invite/$token'
@@ -338,6 +357,7 @@ interface AppRouteChildren {
   AppHomeRoute: typeof AppHomeRoute
   AppSecurityRoute: typeof AppSecurityRoute
   AppVaultsTrashRoute: typeof AppVaultsTrashRoute
+  AppAdminIndexRoute: typeof AppAdminIndexRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
   AppTeamIndexRoute: typeof AppTeamIndexRoute
   AppVaultsIndexRoute: typeof AppVaultsIndexRoute
@@ -349,6 +369,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppHomeRoute: AppHomeRoute,
   AppSecurityRoute: AppSecurityRoute,
   AppVaultsTrashRoute: AppVaultsTrashRoute,
+  AppAdminIndexRoute: AppAdminIndexRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
   AppTeamIndexRoute: AppTeamIndexRoute,
   AppVaultsIndexRoute: AppVaultsIndexRoute,

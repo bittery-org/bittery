@@ -330,6 +330,19 @@ export const vaultRouter = router({
 			// Broadcast AFTER transaction commits
 			await broadcastSyncPayload(broadcast!);
 
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "vault_created",
+				device: ctx.device,
+				entityType: "vault",
+				entityId: vaultId,
+				metadata: {
+					vaultName: input.name,
+					vaultType: input.type,
+					teamId: teamId ?? undefined,
+				},
+			});
+
 			return { vaultId };
 		}),
 
@@ -417,6 +430,22 @@ export const vaultRouter = router({
 			});
 
 			await broadcastSyncPayload(broadcast!);
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "vault_updated",
+				device: ctx.device,
+				entityType: "vault",
+				entityId: input.vaultId,
+				metadata: {
+					previousName: userVaultKey.vault.name,
+					newName: updatedVault.name,
+					previousIcon: userVaultKey.vault.icon,
+					newIcon: updatedVault.icon,
+					previousImageKey: oldImageKey,
+					newImageKey: updatedVault.imageKey,
+				},
+			});
 
 			return {
 				id: updatedVault.id,
@@ -802,6 +831,18 @@ export const vaultRouter = router({
 
 			await broadcastSyncPayload(broadcast!);
 
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "item_created",
+				device: ctx.device,
+				entityType: "item",
+				entityId: itemId,
+				metadata: {
+					vaultId: input.vaultId,
+					category: input.category,
+				},
+			});
+
 			return { itemId, id: itemId };
 		}),
 
@@ -910,6 +951,18 @@ export const vaultRouter = router({
 			});
 
 			await broadcastSyncPayload(broadcast!);
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "vault_updated",
+				device: ctx.device,
+				entityType: "vault",
+				entityId: input.vaultId,
+				metadata: {
+					reason: "bulk_import",
+					importedCount: importedIds.length,
+				},
+			});
 
 			return {
 				success: true,
@@ -1131,6 +1184,18 @@ export const vaultRouter = router({
 
 			await broadcastSyncPayload(broadcast!);
 
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "item_deleted",
+				device: ctx.device,
+				entityType: "item",
+				entityId: input.itemId,
+				metadata: {
+					vaultId: existingItem.vaultId,
+					version: newVersion,
+				},
+			});
+
 			return { success: true };
 		}),
 
@@ -1236,6 +1301,18 @@ export const vaultRouter = router({
 			});
 
 			await broadcastSyncPayload(broadcast!);
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "item_restored",
+				device: ctx.device,
+				entityType: "item",
+				entityId: input.itemId,
+				metadata: {
+					vaultId: existingItem.vaultId,
+					version: newVersion,
+				},
+			});
 
 			return { success: true };
 		}),
@@ -1359,6 +1436,19 @@ export const vaultRouter = router({
 
 			await broadcastSyncPayload(broadcast!);
 
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "item_moved",
+				device: ctx.device,
+				entityType: "item",
+				entityId: input.itemId,
+				metadata: {
+					sourceVaultId: input.sourceVaultId,
+					targetVaultId: input.targetVaultId,
+					version: newVersion,
+				},
+			});
+
 			return { success: true, version: newVersion };
 		}),
 
@@ -1421,6 +1511,18 @@ export const vaultRouter = router({
 			});
 
 			await broadcastSyncPayload(broadcast!);
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "item_permanently_deleted",
+				device: ctx.device,
+				entityType: "item",
+				entityId: input.itemId,
+				metadata: {
+					vaultId: existingItem.vaultId,
+					version: existingItem.version || 1,
+				},
+			});
 
 			return { success: true };
 		}),

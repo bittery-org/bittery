@@ -1,16 +1,27 @@
 import type { EntitlementKey } from "@bittery/api/billing/entitlements";
+import type { CloudPlanId } from "@bittery/api/billing/plans";
 import {
-	IconGear3OutlineDuo18 as Settings,
+	IconHistoryOutlineDuo18 as History,
 	IconGrid2OutlineDuo18 as Home,
 	IconLockOutlineDuo18 as Lock,
-	IconMagicShieldOutlineDuo18 as ShieldCheck,
 	IconMoneyDollarOutlineDuo18 as Money,
+	IconGear3OutlineDuo18 as Settings,
+	IconMagicShieldOutlineDuo18 as ShieldCheck,
 	IconUsers6OutlineDuo18 as Users,
 } from "@bittery/ui/icons";
 import type { ComponentType } from "react";
 import type { DeploymentMode } from "@/lib/route-guards";
 
-type NavPath = "/home" | "/security" | "/billing" | "/team" | "/vaults" | "/settings";
+type NavPath =
+	| "/home"
+	| "/security"
+	| "/billing"
+	| "/team"
+	| "/admin"
+	| "/vaults"
+	| "/settings";
+
+type TeamRole = "owner" | "admin" | "member";
 
 type NavIcon = ComponentType<{ className?: string }>;
 
@@ -20,11 +31,15 @@ export interface AppNavItem {
 	icon: NavIcon;
 	requiresMode: DeploymentMode | "any";
 	requiresEntitlements: readonly EntitlementKey[];
+	requiresPlans?: readonly CloudPlanId[];
+	requiresRoles?: readonly TeamRole[];
 }
 
 export interface NavFilterInput {
 	mode: DeploymentMode;
 	entitlements: Partial<Record<EntitlementKey, boolean>>;
+	plan?: CloudPlanId;
+	role?: TeamRole;
 }
 
 export const appNavItems: readonly AppNavItem[] = [
@@ -48,6 +63,7 @@ export const appNavItems: readonly AppNavItem[] = [
 		label: "Billing",
 		requiresMode: "cloud",
 		requiresEntitlements: [],
+		requiresRoles: ["owner", "admin"],
 	},
 	{
 		path: "/team",
@@ -55,6 +71,15 @@ export const appNavItems: readonly AppNavItem[] = [
 		label: "Team",
 		requiresMode: "any",
 		requiresEntitlements: [],
+	},
+	{
+		path: "/admin",
+		icon: History,
+		label: "Admin",
+		requiresMode: "cloud",
+		requiresEntitlements: ["team_management"],
+		requiresPlans: ["team"],
+		requiresRoles: ["owner", "admin"],
 	},
 	{
 		path: "/vaults",
@@ -79,6 +104,16 @@ export function filterNavItems(
 	return items.filter((item) => {
 		if (item.requiresMode !== "any" && item.requiresMode !== input.mode) {
 			return false;
+		}
+		if (item.requiresPlans?.length) {
+			if (!input.plan || !item.requiresPlans.includes(input.plan)) {
+				return false;
+			}
+		}
+		if (item.requiresRoles?.length) {
+			if (!input.role || !item.requiresRoles.includes(input.role)) {
+				return false;
+			}
 		}
 		return item.requiresEntitlements.every(
 			(entitlement) => input.entitlements[entitlement],

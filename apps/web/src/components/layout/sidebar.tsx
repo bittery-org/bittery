@@ -110,9 +110,12 @@ export function AppSidebar() {
 	const currentPath = routerState.location.pathname;
 	const { state } = useSidebar();
 	const entitlementQuery = useQuery(trpc.billing.entitlements.queryOptions());
+	const meQuery = useQuery(trpc.auth.me.queryOptions());
 	const navItems = filterNavItems(appNavItems, {
 		mode: entitlementQuery.data?.mode ?? "cloud",
 		entitlements: entitlementQuery.data?.entitlements ?? {},
+		plan: entitlementQuery.data?.plan,
+		role: meQuery.data?.role,
 	});
 
 	return (

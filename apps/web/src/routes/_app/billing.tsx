@@ -11,15 +11,27 @@ import {
 	IconUsers6OutlineDuo18 as Users,
 } from "@bittery/ui/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { z } from "zod";
-import { createRouteGuard } from "@/lib/route-guards";
 
 export const Route = createFileRoute("/_app/billing")({
-	beforeLoad: createRouteGuard({
-		requiresMode: "cloud",
-	}),
+	beforeLoad: async ({ context }) => {
+		const access = await context.queryClient.ensureQueryData(
+			context.trpc.billing.entitlements.queryOptions(),
+		);
+
+		if (access.mode !== "cloud") {
+			throw redirect({ to: "/home" });
+		}
+
+		const me = await context.queryClient.ensureQueryData(
+			context.trpc.auth.me.queryOptions(),
+		);
+		if (me.role !== "owner" && me.role !== "admin") {
+			throw redirect({ to: "/team" });
+		}
+	},
 	component: BillingRoute,
 	validateSearch: z.object({
 		checkout: z.string().optional(),

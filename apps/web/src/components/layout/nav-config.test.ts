@@ -10,31 +10,63 @@ test.describe("Navigation visibility filter", () => {
 		const result = filterNavItems(appNavItems, {
 			mode: "cloud",
 			entitlements: { sentinel: true },
+			plan: "personal",
+			role: "owner",
 		});
 
 		expect(getPaths(result)).toContain("/billing");
 		expect(getPaths(result)).toContain("/security");
+		expect(getPaths(result)).not.toContain("/admin");
 	});
 
 	test("hides sentinel when entitlement is missing", () => {
 		const result = filterNavItems(appNavItems, {
 			mode: "cloud",
-			entitlements: { sentinel: false },
+			entitlements: { sentinel: false, team_management: true },
+			plan: "team",
+			role: "owner",
 		});
 
 		expect(getPaths(result)).toContain("/billing");
 		expect(getPaths(result)).not.toContain("/security");
+		expect(getPaths(result)).toContain("/admin");
 	});
 
 	test("hides cloud-only nav in self-hosted mode", () => {
 		const result = filterNavItems(appNavItems, {
 			mode: "self-hosted",
 			entitlements: { sentinel: true },
+			plan: "team",
+			role: "owner",
 		});
 
 		expect(getPaths(result)).not.toContain("/billing");
 		expect(getPaths(result)).not.toContain("/security");
+		expect(getPaths(result)).not.toContain("/admin");
 		expect(getPaths(result)).toContain("/vaults");
 		expect(getPaths(result)).toContain("/team");
+	});
+
+	test("hides admin nav for non-admin team members", () => {
+		const result = filterNavItems(appNavItems, {
+			mode: "cloud",
+			entitlements: { team_management: true },
+			plan: "team",
+			role: "member",
+		});
+
+		expect(getPaths(result)).not.toContain("/admin");
+		expect(getPaths(result)).not.toContain("/billing");
+	});
+
+	test("hides billing nav for members on non-team plans", () => {
+		const result = filterNavItems(appNavItems, {
+			mode: "cloud",
+			entitlements: {},
+			plan: "personal",
+			role: "member",
+		});
+
+		expect(getPaths(result)).not.toContain("/billing");
 	});
 });

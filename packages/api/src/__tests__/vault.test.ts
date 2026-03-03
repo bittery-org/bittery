@@ -116,9 +116,9 @@ describe("Vault Router", () => {
 		});
 	});
 
-		describe("create", () => {
+	describe("create", () => {
 		test("should create a new vault", async () => {
-			const { caller } = await setupVaultSharingUser();
+			const { caller, userId } = await setupVaultSharingUser();
 
 			const result = await caller.create({
 				name: "New Vault",
@@ -133,6 +133,13 @@ describe("Vault Router", () => {
 			expect(vault?.name).toBe("New Vault");
 			expect(vault?.type).toBe("personal");
 			expect(vault?.icon).toBe("folder");
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "vault_created")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(result.vaultId);
 		});
 
 		test("should create vault key for creator with owner role", async () => {
@@ -255,6 +262,13 @@ describe("Vault Router", () => {
 
 			expect(result.name).toBe("New Name");
 			expect(result.icon).toBe("star");
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "vault_updated")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(vaultId);
 		});
 
 		test("should deny update for non-admin members", async () => {
@@ -472,6 +486,13 @@ describe("Vault Router", () => {
 			const item = await getItem(result.itemId);
 			expect(item?.category).toBe("login");
 			expect(item?.version).toBe(1);
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "item_created")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(result.itemId);
 		});
 
 		test("should deny item creation for read-only members", async () => {
@@ -538,6 +559,13 @@ describe("Vault Router", () => {
 
 			const item = await getItem(itemId);
 			expect(item?.deletedAt).toBeDefined();
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "item_deleted")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(itemId);
 		});
 	});
 
@@ -584,6 +612,13 @@ describe("Vault Router", () => {
 
 			const item = await getItem(itemId);
 			expect(item?.deletedAt).toBeNull();
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "item_restored")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(itemId);
 		});
 
 		test("should reject restoring non-deleted item", async () => {
@@ -611,6 +646,16 @@ describe("Vault Router", () => {
 
 			const item = await getItem(itemId);
 			expect(item).toBeUndefined();
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(
+						eq(log.userId, userId),
+						eq(log.action, "item_permanently_deleted"),
+					),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(itemId);
 		});
 
 		test("should reject deleting non-trashed item", async () => {
@@ -660,6 +705,13 @@ describe("Vault Router", () => {
 
 			const itemCount = await countVaultItems(vaultId);
 			expect(itemCount).toBe(3);
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "vault_updated")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(vaultId);
 		});
 	});
 
@@ -902,6 +954,13 @@ describe("Vault Router", () => {
 			const item = await getItem(itemId);
 			expect(item?.vaultId).toBe(targetVault);
 			expect(item?.encryptedData).toBe("re-encrypted-data");
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "item_moved")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.entityId).toBe(itemId);
 		});
 
 		test("should reject moving non-existent item", async () => {
