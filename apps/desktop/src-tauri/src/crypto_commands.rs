@@ -5,7 +5,8 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use bittery_crypto_core::{
     decrypt, derive_keys, encrypt, generate_encryption_key, generate_rsa_key_pair,
-    generate_secret_key, get_secret_key_hint, rsa_decrypt, rsa_encrypt, validate_secret_key,
+    generate_secret_key, generate_uuid, get_secret_key_hint, rsa_decrypt, rsa_encrypt, validate_secret_key,
+    validate_server_kdf_params, KdfParams,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient},
     key_rotation::{self, ItemData, MemberKeyData},
     EncryptedData,
@@ -103,16 +104,42 @@ pub fn crypto_decrypt(
     let data = EncryptedData {
         ciphertext,
         iv,
-        algorithm: "AES-GCM".to_string(),
+        algorithm: "AES-GCM-AAD-V1".to_string(),
     };
 
     decrypt(&data, &key).map_err(|e| e.to_string())
+}
+
+/// Validate server-provided KDF params against policy and optional pin.
+#[tauri::command]
+pub fn crypto_validate_server_kdf_params(
+    server_params_json: String,
+    pinned_params_json: Option<String>,
+) -> Result<(), String> {
+    let server: KdfParams =
+        serde_json::from_str(&server_params_json).map_err(|e| format!("Invalid server KDF params JSON: {}", e))?;
+
+    let pinned: Option<KdfParams> = match pinned_params_json {
+        Some(value) => Some(
+            serde_json::from_str(&value)
+                .map_err(|e| format!("Invalid pinned KDF params JSON: {}", e))?,
+        ),
+        None => None,
+    };
+
+    validate_server_kdf_params(&server, pinned.as_ref()).map_err(|e| e.to_string())
 }
 
 /// Generate a random 256-bit encryption key
 #[tauri::command]
 pub fn crypto_generate_encryption_key() -> String {
     STANDARD.encode(generate_encryption_key())
+}
+
+/// Generate a random UUID v4 string
+#[tauri::command]
+pub fn crypto_generate_uuid() -> String {
+    generate_uuid()
 }
 
 // ============================================================================

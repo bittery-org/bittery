@@ -43,6 +43,10 @@ export function useUpdateItem() {
 			const encrypted = await context.repo.encryptWithVaultKey(
 				existing.vaultId,
 				mergedData,
+				{
+					itemId: existing.id,
+					version: existing.version + 1,
+				},
 			);
 
 			await context.repo.upsertLocal(

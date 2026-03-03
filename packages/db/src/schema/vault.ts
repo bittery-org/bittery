@@ -89,7 +89,7 @@ export const item = pgTable(
 		encryptionIv: text("encryption_iv").notNull(),
 		encryptionAlgorithm: text("encryption_algorithm")
 			.notNull()
-			.default("AES-GCM"),
+			.default("AES-GCM-AAD-V1"),
 		// Version for conflict detection (increments on each update)
 		version: integer("version").notNull().default(1),
 		// User who last modified this item
@@ -191,7 +191,7 @@ export const itemAttachment = pgTable(
 		encryptedContentTypeIv: text("encrypted_content_type_iv"),
 		encryptionAlgorithm: text("encryption_algorithm")
 			.notNull()
-			.default("AES-GCM"),
+			.default("AES-GCM-AAD-V1"),
 		// File size in bytes (not sensitive)
 		fileSize: integer("file_size").notNull(),
 		uploadedBy: text("uploaded_by").references(() => user.id),

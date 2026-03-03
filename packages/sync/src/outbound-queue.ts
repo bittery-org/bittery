@@ -36,6 +36,7 @@ export interface OutboundQueueClient {
 	vault: {
 		createItem: {
 			mutate: (input: {
+				itemId?: string;
 				vaultId: string;
 				category: string;
 				encryptedData: string;
@@ -48,6 +49,7 @@ export interface OutboundQueueClient {
 				itemId: string;
 				encryptedData: string;
 				encryptionIv: string;
+				encryptionAlgorithm?: string;
 			}) => Promise<unknown>;
 		};
 		deleteItem: {
@@ -66,6 +68,7 @@ export interface OutboundQueueClient {
 				targetVaultId: string;
 				encryptedData: string;
 				encryptionIv: string;
+				encryptionAlgorithm?: string;
 			}) => Promise<unknown>;
 		};
 		toggleFavorite: {
@@ -299,6 +302,7 @@ export class OutboundQueue {
 					);
 				}
 				const result = await client.vault.createItem.mutate({
+					itemId: mutation.entityId,
 					vaultId: mutation.vaultId,
 					category: mutation.category,
 					encryptedData: payload.encryptedData,
@@ -330,6 +334,7 @@ export class OutboundQueue {
 					itemId: mutation.entityId,
 					encryptedData: payload.encryptedData,
 					encryptionIv: payload.encryptionIv,
+					encryptionAlgorithm: payload.encryptionAlgorithm,
 				});
 				break;
 			}
@@ -355,6 +360,7 @@ export class OutboundQueue {
 					targetVaultId: mutation.targetVaultId,
 					encryptedData: payload.encryptedData,
 					encryptionIv: payload.encryptionIv,
+					encryptionAlgorithm: payload.encryptionAlgorithm,
 				});
 				break;
 			}

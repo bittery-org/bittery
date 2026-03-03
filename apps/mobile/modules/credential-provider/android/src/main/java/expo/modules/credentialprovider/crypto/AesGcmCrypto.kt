@@ -6,7 +6,7 @@ import android.util.Base64
  * AES-256-GCM encryption/decryption using native Rust crypto via JNI.
  *
  * Uses:
- * - Algorithm: AES-GCM
+ * - Algorithm: AES-GCM-AAD-V1
  * - Key length: 256 bits (32 bytes)
  * - IV length: 96 bits (12 bytes) - recommended for GCM
  * - Tag length: 128 bits (16 bytes)
@@ -26,7 +26,7 @@ object AesGcmCrypto {
         /** Base64-encoded IV */
         val iv: String,
         /** Algorithm identifier */
-        val algorithm: String = "AES-GCM"
+        val algorithm: String = "AES-GCM-AAD-V1"
     )
 
     /**
@@ -59,7 +59,7 @@ object AesGcmCrypto {
         return EncryptedData(
             ciphertext = result.ciphertext,
             iv = result.iv,
-            algorithm = result.algorithm ?: "AES-GCM"
+            algorithm = result.algorithm ?: "AES-GCM-AAD-V1"
         )
     }
 
@@ -91,7 +91,7 @@ object AesGcmCrypto {
         return EncryptedData(
             ciphertext = result.ciphertext,
             iv = result.iv,
-            algorithm = result.algorithm ?: "AES-GCM"
+            algorithm = result.algorithm ?: "AES-GCM-AAD-V1"
         )
     }
 

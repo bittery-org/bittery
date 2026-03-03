@@ -22,8 +22,16 @@ export interface DerivedKeys {
  * All platforms (WASM, Tauri, FFI) implement this shape.
  */
 export interface ICrypto {
-	decrypt(encryptedData: EncryptedData, key: Uint8Array): Promise<string>;
-	encrypt(plaintext: string, key: Uint8Array): Promise<EncryptedData>;
+	decrypt(
+		encryptedData: EncryptedData,
+		key: Uint8Array,
+		context?: EncryptionContext,
+	): Promise<string>;
+	encrypt(
+		plaintext: string,
+		key: Uint8Array,
+		context?: EncryptionContext,
+	): Promise<EncryptedData>;
 	rsaDecrypt?(ciphertext: string, privateKeyPem: string): Promise<string>;
 	generateEncryptionKey(): Promise<Uint8Array>;
 	deriveKeys(
@@ -31,6 +39,10 @@ export interface ICrypto {
 		secretKey: string,
 		email: string,
 	): Promise<DerivedKeys>;
+	validateServerKdfParams?(
+		serverParams: KdfParams,
+		pinnedParams?: KdfParams | null,
+	): Promise<void> | void;
 	generateClientEphemeral(): SRPClientEphemeral | Promise<SRPClientEphemeral>;
 	deriveClientSession(
 		secret: string,
@@ -43,6 +55,7 @@ export interface ICrypto {
 		proof: string,
 	): Promise<void>;
 	validateSecretKey(secretKey: string): boolean | Promise<boolean>;
+	generateUuid?(): string | Promise<string>;
 }
 
 // ============================================================================
@@ -57,8 +70,36 @@ export interface EncryptedData {
 	ciphertext: string;
 	/** Base64-encoded initialization vector */
 	iv: string;
-	/** Encryption algorithm (always "AES-GCM") */
+	/** Encryption algorithm (always "AES-GCM-AAD-V1") */
 	algorithm: string;
+}
+
+/**
+ * Encryption context bound to ciphertext integrity.
+ *
+ * This schema is deterministic across platforms and used to prevent
+ * ciphertext swapping between entities.
+ */
+export interface EncryptionContext {
+	vaultId: string;
+	entityId: string;
+	entityType:
+		| "item"
+		| "attachment_name"
+		| "attachment_content_type"
+		| "attachment_blob";
+	version: number;
+	userId: string;
+}
+
+/**
+ * Login KDF params provided by the server and pinned locally.
+ */
+export interface KdfParams {
+	schemaVersion: 1;
+	algorithm: "pbkdf2-sha256";
+	iterations: number;
+	salt: string;
 }
 
 // ============================================================================
@@ -101,6 +142,7 @@ export interface SRPClientEphemeral {
 export interface SRPServerChallenge {
 	salt: string;
 	serverPublicKey: string;
+	kdfParams: KdfParams;
 }
 
 /**
@@ -305,6 +347,8 @@ export interface RawEncryptedItem {
 	encryptedData: string;
 	encryptionIv: string;
 	encryptionAlgorithm: string;
+	version?: number;
+	lastModifiedBy?: string | null;
 	createdAt: string | Date;
 	updatedAt: string | Date;
 	deletedAt?: string | Date | null;

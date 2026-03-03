@@ -22,6 +22,8 @@
 		"./totp": "./src/totp.ts",
 		"./trpc": "./src/trpc.ts",
 		"./crypto": "./src/crypto.ts",
+		"./crypto-context-envelope": "./src/crypto-context-envelope.ts",
+		"./kdf-policy": "./src/kdf-policy.ts",
 		"./server-url": "./src/server-url.ts",
 		"./trpc-client-factory": "./src/trpc-client-factory.ts",
 		"./types": "./src/types.ts",

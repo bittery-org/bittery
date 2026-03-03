@@ -219,7 +219,7 @@ pub extern "C" fn bittery_decrypt(
     let data = EncryptedData {
         ciphertext: ciphertext_str,
         iv: iv_str,
-        algorithm: "AES-GCM".to_string(),
+        algorithm: "AES-GCM-AAD-V1".to_string(),
     };
 
     match decrypt(&data, &key) {

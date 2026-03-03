@@ -56,6 +56,7 @@ const LEGACY_SESSION_DATA_KEY: &str = "bittery_session_data";
 const LEGACY_BIOMETRIC_ENABLED_KEY: &str = "bittery_biometric_enabled";
 const LEGACY_JWT_TOKEN_KEY: &str = "bittery_jwt_token";
 const LEGACY_VAULT_KEYS_KEY: &str = "bittery_vault_keys";
+const CONTEXT_ENVELOPE_MARKER: &str = "bittery-context-envelope-v1";
 
 fn sanitize_email_for_key(email: &str) -> String {
     email
@@ -67,6 +68,24 @@ fn sanitize_email_for_key(email: &str) -> String {
 
 fn account_key(email: &str, suffix: &str) -> String {
     format!("bittery_account_{}_{}", sanitize_email_for_key(email), suffix)
+}
+
+fn normalize_decrypted_item_payload(decrypted_data: String) -> String {
+    let parsed: serde_json::Value = match serde_json::from_str(&decrypted_data) {
+        Ok(value) => value,
+        Err(_) => return decrypted_data,
+    };
+
+    let marker = parsed.get("marker").and_then(|value| value.as_str());
+    let payload = parsed.get("payload").and_then(|value| value.as_str());
+
+    if marker == Some(CONTEXT_ENVELOPE_MARKER) {
+        if let Some(payload_json) = payload {
+            return payload_json.to_string();
+        }
+    }
+
+    decrypted_data
 }
 
 fn get_active_account_email<R: Runtime>(store: &Store<R>) -> Option<String> {
@@ -1329,9 +1348,10 @@ async fn decrypt_items_internal(
             vault_key.unwrap().clone(),
         ) {
             Ok(decrypted_data) => {
+                let normalized_decrypted_data = normalize_decrypted_item_payload(decrypted_data);
                 decrypted_items.push(serde_json::json!({
                     "id": item_id,
-                    "decrypted_data": decrypted_data,
+                    "decrypted_data": normalized_decrypted_data,
                 }));
             }
             Err(e) => {
@@ -1421,7 +1441,9 @@ pub fn run() {
             crypto_commands::crypto_derive_keys,
             crypto_commands::crypto_encrypt,
             crypto_commands::crypto_decrypt,
+            crypto_commands::crypto_validate_server_kdf_params,
             crypto_commands::crypto_generate_encryption_key,
+            crypto_commands::crypto_generate_uuid,
             crypto_commands::crypto_generate_rsa_key_pair,
             crypto_commands::crypto_rsa_encrypt,
             crypto_commands::crypto_rsa_decrypt,

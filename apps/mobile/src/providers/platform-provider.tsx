@@ -21,7 +21,9 @@ import {
 	encrypt,
 	generateClientEphemeral,
 	generateEncryptionKey as nativeGenerateEncryptionKey,
+	generateUuid,
 	rsaDecrypt,
+	validateServerKdfParams,
 	validateSecretKey,
 	verifyServerSession,
 } from "../lib/crypto/native-crypto";
@@ -41,12 +43,14 @@ const crypto: ICrypto = {
 		const keyBase64 = nativeGenerateEncryptionKey();
 		return base64ToArrayBuffer(keyBase64);
 	},
+	generateUuid,
 	// SRP authentication methods
 	deriveKeys,
 	generateClientEphemeral,
 	deriveClientSession,
 	verifyServerSession,
 	validateSecretKey,
+	validateServerKdfParams,
 };
 
 /**

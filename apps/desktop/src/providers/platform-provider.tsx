@@ -25,12 +25,14 @@ const crypto: ICrypto = {
 	encrypt: tauriCrypto.encrypt,
 	rsaDecrypt: tauriCrypto.rsaDecrypt,
 	generateEncryptionKey: tauriCrypto.generateEncryptionKey,
+	generateUuid: tauriCrypto.generateUuid,
 	// SRP authentication methods
 	deriveKeys: tauriCrypto.deriveKeys,
 	generateClientEphemeral: tauriCrypto.generateClientEphemeral,
 	deriveClientSession: tauriCrypto.deriveClientSession,
 	verifyServerSession: tauriCrypto.verifyServerSession,
 	validateSecretKey: tauriCrypto.validateSecretKey,
+	validateServerKdfParams: tauriCrypto.validateServerKdfParams,
 };
 
 /**

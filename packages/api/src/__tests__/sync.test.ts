@@ -234,7 +234,7 @@ describe("Sync Router", () => {
 				encryptedContentType: "enc-type",
 				encryptionIv: "enc-iv",
 				encryptedContentTypeIv: "enc-type-iv",
-				encryptionAlgorithm: "AES-GCM",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
 				fileSize: 123,
 				uploadedBy: userId,
 			});
@@ -257,7 +257,7 @@ describe("Sync Router", () => {
 				encryptedContentType: "enc-type",
 				encryptionIv: "enc-iv",
 				encryptedContentTypeIv: "enc-type-iv",
-				encryptionAlgorithm: "AES-GCM",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
 				fileSize: 123,
 				uploadedBy: userId,
 			});

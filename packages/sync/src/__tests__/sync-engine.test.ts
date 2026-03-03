@@ -322,7 +322,7 @@ describe("sync engine regressions", () => {
 			encryptedPayload: {
 				encryptedData: "cipher",
 				encryptionIv: "iv",
-				encryptionAlgorithm: "AES-GCM",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
 			},
 			baseVersion: 3,
 			accountEmail: "alice@example.com",

@@ -42,8 +42,8 @@ data class AuthDataEntity(
     /** IV used to encrypt the private key (Base64 encoded) */
     val encryptedPrivateKeyIv: String,
 
-    /** Encryption algorithm used (should be "AES-GCM") */
-    val encryptionAlgorithm: String = "AES-GCM",
+    /** Encryption algorithm used (should be "AES-GCM-AAD-V1") */
+    val encryptionAlgorithm: String = "AES-GCM-AAD-V1",
 
     /** Hint for the secret key (e.g., last 4 characters) */
     val secretKeyHint: String? = null,

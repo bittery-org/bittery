@@ -6,6 +6,7 @@
 import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
+	KdfParams,
 	ItemCacheMetadata,
 } from "@bittery/types";
 import type {
@@ -136,6 +137,16 @@ export interface IStorageAdapter {
 	 * Get encrypted private key.
 	 */
 	getEncryptedPrivateKey(email?: string): Promise<string | null>;
+
+	/**
+	 * Store pinned login KDF parameters for downgrade/tamper detection.
+	 */
+	storePinnedKdfParams(params: KdfParams, email?: string): Promise<void>;
+
+	/**
+	 * Get pinned login KDF parameters.
+	 */
+	getPinnedKdfParams(email?: string): Promise<KdfParams | null>;
 
 	// ============================================================================
 	// Multi-Account (desktop/mobile)

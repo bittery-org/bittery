@@ -5,11 +5,16 @@
 import type {
 	DerivedKeys,
 	EncryptedData,
+	EncryptionContext,
 	ICrypto,
 	SRPClientEphemeral,
 	SRPClientSession,
 	SRPServerChallenge,
 } from "@bittery/types";
+import {
+	unwrapPlaintextWithContext,
+	wrapPlaintextWithContext,
+} from "@bittery/shared/crypto-context-envelope";
 import CryptoWorker from "@/lib/crypto.worker?worker";
 
 function base64ToUint8Array(base64: string): Uint8Array {
@@ -149,22 +154,35 @@ export class WorkerCrypto implements ICrypto {
 		});
 	}
 
-	async encrypt(plaintext: string, key: Uint8Array): Promise<EncryptedData> {
+	async encrypt(
+		plaintext: string,
+		key: Uint8Array,
+		context?: EncryptionContext,
+	): Promise<EncryptedData> {
 		return this.call({
 			type: "encrypt",
-			plaintext,
+			plaintext: context
+				? wrapPlaintextWithContext(plaintext, context)
+				: plaintext,
 			keyBase64: uint8ArrayToBase64(key),
 		});
 	}
 
-	async decrypt(data: EncryptedData, key: Uint8Array): Promise<string> {
-		return this.call({
+	async decrypt(
+		data: EncryptedData,
+		key: Uint8Array,
+		context?: EncryptionContext,
+	): Promise<string> {
+		const decrypted = await this.call({
 			type: "decrypt",
 			ciphertext: data.ciphertext,
 			iv: data.iv,
 			algorithm: data.algorithm,
 			keyBase64: uint8ArrayToBase64(key),
 		});
+		return context
+			? unwrapPlaintextWithContext(decrypted, context)
+			: decrypted;
 	}
 
 	async generateEncryptionKey(): Promise<Uint8Array> {

@@ -61,9 +61,30 @@ export function useMoveItem() {
 				);
 			}
 
+			const resolvedAccounts = await core.accounts.resolveAccounts({
+				type: "single",
+				email: sourceContext.accountEmail,
+			});
+			const sourceAccount = resolvedAccounts.accountsInfo.find(
+				(account) =>
+					account.email.toLowerCase() ===
+					sourceContext.accountEmail.toLowerCase(),
+			);
+			const contextUserId =
+				sourceAccount?.userId ??
+				sourceContext.item.lastModifiedBy ??
+				"unknown-user";
+
 			const encryptedData = await core.items.reEncryptForVault(
 				input.decryptedData,
 				await sourceContext.repo.decryptVaultKey(input.targetVaultId),
+				{
+					vaultId: input.targetVaultId,
+					entityId: input.itemId,
+					entityType: "item",
+					version: sourceContext.item.version + 1,
+					userId: contextUserId,
+				},
 			);
 			await sourceContext.repo.moveItem(
 				input.itemId,

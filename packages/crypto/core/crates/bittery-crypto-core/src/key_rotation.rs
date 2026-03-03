@@ -328,7 +328,7 @@ mod tests {
         let new_encrypted = EncryptedData {
             ciphertext: re_encrypted.encrypted_data,
             iv: re_encrypted.encryption_iv,
-            algorithm: "AES-GCM".to_string(),
+            algorithm: "AES-GCM-AAD-V1".to_string(),
         };
         let decrypted = decrypt(&new_encrypted, &new_key).unwrap();
 

@@ -12,6 +12,7 @@ import type {
 	EncryptedData,
 	ICrypto,
 } from "@bittery/types";
+import { buildItemEncryptionContext } from "./encryption-context";
 
 export interface VaultView {
 	id: string;
@@ -186,6 +187,20 @@ export class VaultRepository {
 		};
 	}
 
+	private async resolveUserId(): Promise<string> {
+		const sessionData = await this.storage.getStoredSessionData?.(this.email);
+		if (sessionData?.userId) {
+			return sessionData.userId;
+		}
+
+		const activeUserId = await this.storage.getActiveAccountUserId();
+		if (activeUserId) {
+			return activeUserId;
+		}
+
+		throw new Error("User ID not available for encryption context");
+	}
+
 	private toCachedItem(item: VaultRepositoryItem): CachedEncryptedItem {
 		return {
 			id: item.id,
@@ -297,6 +312,13 @@ export class VaultRepository {
 
 	async decryptItem(item: CachedEncryptedItem): Promise<VaultRepositoryItem> {
 		const vaultKey = await this.decryptVaultKey(item.vaultId);
+		const userId = item.lastModifiedBy ?? (await this.resolveUserId());
+		const context = buildItemEncryptionContext({
+			vaultId: item.vaultId,
+			itemId: item.id,
+			version: item.version,
+			userId,
+		});
 		const decryptedData = await this.crypto.decrypt(
 			{
 				ciphertext: item.encryptedData,
@@ -304,6 +326,7 @@ export class VaultRepository {
 				algorithm: item.encryptionAlgorithm,
 			},
 			vaultKey,
+			context,
 		);
 		return this.buildItem(item, JSON.parse(decryptedData) as DecryptedItemData);
 	}
@@ -432,6 +455,12 @@ export class VaultRepository {
 		}
 
 		const targetVaultKey = await this.decryptVaultKey(targetVaultId);
+		const context = buildItemEncryptionContext({
+			vaultId: targetVaultId,
+			itemId: itemId,
+			version: (existing.version ?? 1) + 1,
+			userId: await this.resolveUserId(),
+		});
 		const decrypted = await this.crypto.decrypt(
 			{
 				ciphertext: newEncryptedPayload.ciphertext,
@@ -439,6 +468,7 @@ export class VaultRepository {
 				algorithm: newEncryptedPayload.algorithm,
 			},
 			targetVaultKey,
+			context,
 		);
 		const parsed = JSON.parse(decrypted) as DecryptedItemData;
 
@@ -680,8 +710,22 @@ export class VaultRepository {
 	async encryptWithVaultKey(
 		vaultId: string,
 		data: DecryptedItemData,
+		options?: {
+			itemId?: string;
+			version?: number;
+			userId?: string;
+		},
 	): Promise<EncryptedData> {
 		const vaultKey = await this.decryptVaultKey(vaultId);
-		return this.crypto.encrypt(JSON.stringify(data), vaultKey);
+		if (!options?.itemId) {
+			return this.crypto.encrypt(JSON.stringify(data), vaultKey);
+		}
+		const context = buildItemEncryptionContext({
+			vaultId,
+			itemId: options.itemId,
+			version: options.version ?? 1,
+			userId: options.userId ?? (await this.resolveUserId()),
+		});
+		return this.crypto.encrypt(JSON.stringify(data), vaultKey, context);
 	}
 }

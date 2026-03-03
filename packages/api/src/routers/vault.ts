@@ -766,6 +766,7 @@ export const vaultRouter = router({
 	createItem: protectedProcedure
 		.input(
 			z.object({
+				itemId: z.string().max(64).optional(),
 				vaultId: z.string(),
 				category: z.enum([
 					"login",
@@ -776,7 +777,7 @@ export const vaultRouter = router({
 				]),
 				encryptedData: z.string(),
 				encryptionIv: z.string(),
-				encryptionAlgorithm: z.string().default("AES-GCM"),
+				encryptionAlgorithm: z.string().default("AES-GCM-AAD-V1"),
 				clientId: z.string().optional(), // For sync event correlation
 			}),
 		)
@@ -799,7 +800,7 @@ export const vaultRouter = router({
 				throw new Error("Read-only access cannot create items");
 			}
 
-			const itemId = nanoid();
+			const itemId = input.itemId ?? nanoid();
 
 			let broadcast: SyncBroadcastPayload;
 			await db.transaction(async (tx) => {
@@ -866,7 +867,7 @@ export const vaultRouter = router({
 						favorite: z.boolean().optional(),
 						encryptedData: z.string(),
 						encryptionIv: z.string(),
-						encryptionAlgorithm: z.string().default("AES-GCM"),
+						encryptionAlgorithm: z.string().default("AES-GCM-AAD-V1"),
 					}),
 				),
 			}),
@@ -980,6 +981,7 @@ export const vaultRouter = router({
 				itemId: z.string(),
 				encryptedData: z.string().optional(),
 				encryptionIv: z.string().optional(),
+				encryptionAlgorithm: z.string().optional(),
 				expectedVersion: z.number().optional(), // For conflict detection
 				clientId: z.string().optional(), // For sync event correlation
 			}),
@@ -1032,6 +1034,9 @@ export const vaultRouter = router({
 					.set({
 						...(input.encryptedData && { encryptedData: input.encryptedData }),
 						...(input.encryptionIv && { encryptionIv: input.encryptionIv }),
+						...(input.encryptionAlgorithm && {
+							encryptionAlgorithm: input.encryptionAlgorithm,
+						}),
 						version: newVersion,
 						lastModifiedBy: ctx.session.userId,
 						updatedAt: new Date(),
@@ -1329,6 +1334,7 @@ export const vaultRouter = router({
 				targetVaultId: z.string(),
 				encryptedData: z.string(), // Re-encrypted with target vault key
 				encryptionIv: z.string(),
+				encryptionAlgorithm: z.string().optional(),
 				clientId: z.string().optional(),
 			}),
 		)
@@ -1410,6 +1416,9 @@ export const vaultRouter = router({
 						vaultId: input.targetVaultId,
 						encryptedData: input.encryptedData,
 						encryptionIv: input.encryptionIv,
+						...(input.encryptionAlgorithm && {
+							encryptionAlgorithm: input.encryptionAlgorithm,
+						}),
 						version: newVersion,
 						lastModifiedBy: ctx.session.userId,
 						updatedAt: new Date(),
@@ -1624,7 +1633,7 @@ export const vaultRouter = router({
 				encryptedContentType: z.string().min(1),
 				encryptionIv: z.string().min(1),
 				encryptedContentTypeIv: z.string().min(1),
-				encryptionAlgorithm: z.string().default("AES-GCM"),
+				encryptionAlgorithm: z.string().default("AES-GCM-AAD-V1"),
 				fileSize: z.number().int().positive(),
 			}),
 		)
@@ -1804,7 +1813,7 @@ export const vaultRouter = router({
 				attachmentId: z.string(),
 				encryptedName: z.string().min(1),
 				encryptionIv: z.string().min(1),
-				encryptionAlgorithm: z.string().default("AES-GCM"),
+				encryptionAlgorithm: z.string().default("AES-GCM-AAD-V1"),
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {

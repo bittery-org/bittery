@@ -98,25 +98,27 @@ async function findTeamForEvent(input: {
 	stripeCustomerId?: string | null;
 	stripeSubscriptionId?: string | null;
 }) {
-	if (input.teamId) {
+	const teamId = input.teamId ?? null;
+	if (teamId) {
 		const direct = await db.query.team.findFirst({
-			where: (t, { eq: eqFn }) => eqFn(t.id, input.teamId),
+			where: (t, { eq: eqFn }) => eqFn(t.id, teamId),
 		});
 		if (direct) return direct;
 	}
 
-	if (input.stripeSubscriptionId) {
+	const stripeSubscriptionId = input.stripeSubscriptionId ?? null;
+	if (stripeSubscriptionId) {
 		const bySubscription = await db.query.team.findFirst({
 			where: (t, { eq: eqFn }) =>
-				eqFn(t.stripeSubscriptionId, input.stripeSubscriptionId),
+				eqFn(t.stripeSubscriptionId, stripeSubscriptionId),
 		});
 		if (bySubscription) return bySubscription;
 	}
 
-	if (input.stripeCustomerId) {
+	const stripeCustomerId = input.stripeCustomerId ?? null;
+	if (stripeCustomerId) {
 		return db.query.team.findFirst({
-			where: (t, { eq: eqFn }) =>
-				eqFn(t.stripeCustomerId, input.stripeCustomerId),
+			where: (t, { eq: eqFn }) => eqFn(t.stripeCustomerId, stripeCustomerId),
 		});
 	}
 

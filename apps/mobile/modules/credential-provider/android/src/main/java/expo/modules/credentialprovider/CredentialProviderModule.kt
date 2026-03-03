@@ -732,7 +732,7 @@ class CredentialProviderModule : Module() {
                                     vaultType = keyData["vaultType"] as? String ?: "personal",
                                     encryptedKey = keyData["encryptedKey"] as? String ?: return@mapNotNull null,
                                     encryptionIv = keyData["encryptionIv"] as? String ?: return@mapNotNull null,
-                                    encryptionAlgorithm = keyData["encryptionAlgorithm"] as? String ?: "AES-GCM",
+                                    encryptionAlgorithm = keyData["encryptionAlgorithm"] as? String ?: "AES-GCM-AAD-V1",
                                     role = keyData["role"] as? String ?: "member",
                                     syncedAt = System.currentTimeMillis()
                                 )
@@ -769,7 +769,7 @@ class CredentialProviderModule : Module() {
                                     displayTitle = itemData["displayTitle"] as? String ?: "",
                                     encryptedData = itemData["encryptedData"] as? String ?: return@mapNotNull null,
                                     encryptionIv = itemData["encryptionIv"] as? String ?: return@mapNotNull null,
-                                    encryptionAlgorithm = itemData["encryptionAlgorithm"] as? String ?: "AES-GCM",
+                                    encryptionAlgorithm = itemData["encryptionAlgorithm"] as? String ?: "AES-GCM-AAD-V1",
                                     primaryDomain = primaryDomain,
                                     username = itemData["username"] as? String,
                                     iconUrl = itemData["iconUrl"] as? String,

@@ -58,8 +58,8 @@ data class ItemEntity(
     /** IV used for encryption (Base64 encoded) */
     val encryptionIv: String,
 
-    /** Encryption algorithm (should be "AES-GCM") */
-    val encryptionAlgorithm: String = "AES-GCM",
+    /** Encryption algorithm (should be "AES-GCM-AAD-V1") */
+    val encryptionAlgorithm: String = "AES-GCM-AAD-V1",
 
     // ============================================
     // Denormalized fields for credential lookup

@@ -12,6 +12,7 @@ import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 	ItemCacheMetadata,
+	KdfParams,
 } from "@bittery/types";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
@@ -32,6 +33,7 @@ const JWT_TOKEN_KEY = "bittery_jwt_token";
 const VAULT_KEYS_KEY = "bittery_vault_keys";
 const SERVER_URL_STORAGE = "bittery_server_url";
 const ENCRYPTED_PRIVATE_KEY_STORAGE = "bittery_encrypted_private_key";
+const PINNED_KDF_PARAMS_STORAGE = "bittery_pinned_kdf_params";
 const AUTO_LOCK_TIMEOUT_STORAGE = "bittery_auto_lock_timeout";
 const ITEM_CACHE_DB_NAME = "bittery_item_cache";
 const ITEM_CACHE_DB_VERSION = 2;
@@ -291,6 +293,30 @@ export class WebStorageAdapter implements IStorageAdapter {
 			return sessionStorage.getItem(ENCRYPTED_PRIVATE_KEY_STORAGE);
 		}
 		return null;
+	}
+
+	async storePinnedKdfParams(
+		params: KdfParams,
+		_email?: string,
+	): Promise<void> {
+		if (typeof window !== "undefined") {
+			localStorage.setItem(PINNED_KDF_PARAMS_STORAGE, JSON.stringify(params));
+		}
+	}
+
+	async getPinnedKdfParams(_email?: string): Promise<KdfParams | null> {
+		if (typeof window === "undefined") {
+			return null;
+		}
+		const stored = localStorage.getItem(PINNED_KDF_PARAMS_STORAGE);
+		if (!stored) {
+			return null;
+		}
+		try {
+			return JSON.parse(stored) as KdfParams;
+		} catch {
+			return null;
+		}
 	}
 
 	// ============================================================================
@@ -593,6 +619,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 		localStorage.removeItem(SECRET_KEY_STORAGE);
 		localStorage.removeItem(SESSION_DATA_STORAGE);
 		localStorage.removeItem(DEVICE_KEY_STORAGE);
+		localStorage.removeItem(PINNED_KDF_PARAMS_STORAGE);
 		await this.clearSession();
 		await this.clearItemCache();
 	}

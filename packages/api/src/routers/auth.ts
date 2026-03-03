@@ -533,6 +533,7 @@ export const authRouter = router({
 					userId,
 					salt: challenge.salt,
 					serverPublicKey: challenge.serverPublicKey,
+					kdfParams: challenge.kdfParams,
 					serverSecret: serverEphemeralSecret, // Temporary storage for next request
 				};
 			} catch (error) {

@@ -271,7 +271,7 @@ export async function deriveTestSrpClientProof(params: {
 export const mockItemData = {
 	encryptedData: "dGVzdC1lbmNyeXB0ZWQtaXRlbS1kYXRhLWZvci10ZXN0aW5nLXB1cnBvc2Vz",
 	encryptionIv: "YWJjZGVmZ2hpamts",
-	encryptionAlgorithm: "AES-GCM",
+	encryptionAlgorithm: "AES-GCM-AAD-V1",
 };
 
 // Mock share data for testing

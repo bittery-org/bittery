@@ -29,7 +29,7 @@ describe("local-item-cache-service", () => {
 			encryptedData: {
 				ciphertext: "encrypted",
 				iv: "iv",
-				algorithm: "AES-GCM",
+				algorithm: "AES-GCM-AAD-V1",
 			},
 		});
 
@@ -67,7 +67,7 @@ describe("local-item-cache-service", () => {
 			encryptedData: {
 				ciphertext: "encrypted",
 				iv: "iv",
-				algorithm: "AES-GCM",
+				algorithm: "AES-GCM-AAD-V1",
 			},
 		});
 

@@ -24,12 +24,19 @@ import {
 import type {
 	DerivedKeys,
 	EncryptedData,
+	EncryptionContext,
+	KdfParams,
 	RsaKeyPair,
 	SRPClientEphemeral,
 	SRPClientSession,
 	SRPRegistration,
 	SRPServerChallenge,
 } from "@bittery/types";
+import {
+	unwrapPlaintextWithContext,
+	wrapPlaintextWithContext,
+} from "@bittery/shared/crypto-context-envelope";
+import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
 
 // Re-export types from @bittery/types
 export type {
@@ -75,9 +82,13 @@ export async function deriveKeys(
 export async function encrypt(
 	plaintext: string,
 	key: Uint8Array,
+	context?: EncryptionContext,
 ): Promise<EncryptedData> {
 	const keyBase64 = arrayBufferToBase64(key);
-	return nativeEncrypt(plaintext, keyBase64);
+	const plaintextToEncrypt = context
+		? wrapPlaintextWithContext(plaintext, context)
+		: plaintext;
+	return nativeEncrypt(plaintextToEncrypt, keyBase64);
 }
 
 /**
@@ -97,9 +108,22 @@ export async function encryptWithBase64Key(
 export async function decrypt(
 	encryptedData: EncryptedData,
 	key: Uint8Array,
+	context?: EncryptionContext,
 ): Promise<string> {
 	const keyBase64 = arrayBufferToBase64(key);
-	return nativeDecrypt(encryptedData.ciphertext, encryptedData.iv, keyBase64);
+	const decrypted = await nativeDecrypt(
+		encryptedData.ciphertext,
+		encryptedData.iv,
+		keyBase64,
+	);
+	return context ? unwrapPlaintextWithContext(decrypted, context) : decrypted;
+}
+
+export function validateServerKdfParams(
+	serverParams: KdfParams,
+	pinnedParams?: KdfParams | null,
+): void {
+	validateServerKdfParamsOrThrow(serverParams, pinnedParams);
 }
 
 /**
@@ -128,6 +152,17 @@ export async function decryptData(
  */
 export function generateEncryptionKey(): string {
 	return nativeGenerateEncryptionKey();
+}
+
+/**
+ * Generate a UUID for client-side entity IDs.
+ */
+export function generateUuid(): string {
+	const random = globalThis?.crypto?.randomUUID?.();
+	if (random) {
+		return random;
+	}
+	return `item_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
 }
 
 // ============================================================================

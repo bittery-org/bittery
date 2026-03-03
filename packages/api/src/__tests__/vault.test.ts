@@ -378,7 +378,7 @@ describe("Vault Router", () => {
 				encryptedContentType: "enc-type",
 				encryptionIv: "enc-iv",
 				encryptedContentTypeIv: "enc-type-iv",
-				encryptionAlgorithm: "AES-GCM",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
 				fileSize: 123,
 				uploadedBy: userId,
 			});
@@ -407,7 +407,7 @@ describe("Vault Router", () => {
 					encryptedContentType: "enc-type",
 					encryptionIv: "enc-iv",
 					encryptedContentTypeIv: "enc-type-iv",
-					encryptionAlgorithm: "AES-GCM",
+					encryptionAlgorithm: "AES-GCM-AAD-V1",
 					fileSize: 123,
 				}),
 			).rejects.toThrow(
@@ -433,7 +433,7 @@ describe("Vault Router", () => {
 					encryptedContentType: "enc-type",
 					encryptionIv: "enc-iv",
 					encryptedContentTypeIv: "enc-type-iv",
-					encryptionAlgorithm: "AES-GCM",
+					encryptionAlgorithm: "AES-GCM-AAD-V1",
 					fileSize: 123,
 				}),
 			).rejects.toThrow("Invalid or expired attachment upload key");
@@ -464,7 +464,7 @@ describe("Vault Router", () => {
 				encryptedContentType: "enc-type",
 				encryptionIv: "enc-iv",
 				encryptedContentTypeIv: "enc-type-iv",
-				encryptionAlgorithm: "AES-GCM",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
 				fileSize: 123,
 				uploadedBy: ownerId,
 			});
@@ -687,20 +687,20 @@ describe("Vault Router", () => {
 						category: "login",
 						encryptedData: "data1",
 						encryptionIv: "iv1",
-						encryptionAlgorithm: "AES-GCM",
+						encryptionAlgorithm: "AES-GCM-AAD-V1",
 					},
 					{
 						category: "secure-note",
 						encryptedData: "data2",
 						encryptionIv: "iv2",
-						encryptionAlgorithm: "AES-GCM",
+						encryptionAlgorithm: "AES-GCM-AAD-V1",
 					},
 					{
 						category: "credit-card",
 						favorite: true,
 						encryptedData: "data3",
 						encryptionIv: "iv3",
-						encryptionAlgorithm: "AES-GCM",
+						encryptionAlgorithm: "AES-GCM-AAD-V1",
 					},
 				],
 			});

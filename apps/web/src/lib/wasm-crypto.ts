@@ -20,6 +20,7 @@ import init, {
 	generateRecoveryKey as wasmGenerateRecoveryKey,
 	generateRSAKeyPair as wasmGenerateRSAKeyPair,
 	generateSecretKey as wasmGenerateSecretKey,
+	generateUuid as wasmGenerateUuid,
 	getSecretKeyHint as wasmGetSecretKeyHint,
 	performKeyRotation as wasmPerformKeyRotation,
 	rsaDecrypt as wasmRsaDecrypt,
@@ -31,12 +32,17 @@ import init, {
 import type {
 	DerivedKeys,
 	EncryptedData,
+	EncryptionContext,
 	RsaKeyPair,
 	SRPClientEphemeral,
 	SRPClientSession,
 	SRPRegistration,
 	SRPServerChallenge,
 } from "@bittery/types";
+import {
+	unwrapPlaintextWithContext as unwrapWithContext,
+	wrapPlaintextWithContext as wrapWithContext,
+} from "@bittery/shared/crypto-context-envelope";
 
 // Re-export types for consumers
 export type {
@@ -213,11 +219,15 @@ export async function deriveKeysFromMasterKey(
 export async function encrypt(
 	plaintext: string,
 	key: Uint8Array,
+	context?: EncryptionContext,
 ): Promise<EncryptedData> {
 	await autoInit();
 
 	const keyBase64 = uint8ArrayToBase64(key);
-	const result = wasmEncrypt(plaintext, keyBase64);
+	const plaintextToEncrypt = context
+		? wrapWithContext(plaintext, context)
+		: plaintext;
+	const result = wasmEncrypt(plaintextToEncrypt, keyBase64);
 
 	return {
 		ciphertext: result.ciphertext,
@@ -232,6 +242,7 @@ export async function encrypt(
 export async function decrypt(
 	data: EncryptedData,
 	key: Uint8Array,
+	context?: EncryptionContext,
 ): Promise<string> {
 	await autoInit();
 
@@ -244,7 +255,8 @@ export async function decrypt(
 		data.algorithm,
 	);
 
-	return wasmDecrypt(wasmData, keyBase64);
+	const decrypted = wasmDecrypt(wasmData, keyBase64);
+	return context ? unwrapWithContext(decrypted, context) : decrypted;
 }
 
 /**
@@ -255,6 +267,29 @@ export async function generateEncryptionKey(): Promise<Uint8Array> {
 
 	const keyBase64 = wasmGenerateEncryptionKey();
 	return base64ToUint8Array(keyBase64);
+}
+
+/**
+ * Generate a UUID for client-side entity IDs.
+ */
+export async function generateUuid(): Promise<string> {
+	await autoInit();
+
+	if (typeof window !== "undefined") {
+		return wasmGenerateUuid();
+	}
+
+	const random = globalThis?.crypto?.randomUUID?.();
+	if (random) {
+		return random;
+	}
+
+	// Last-resort fallback for non-browser environments without WebCrypto.
+	const hex = () =>
+		Math.floor(Math.random() * 0xffffffff)
+			.toString(16)
+			.padStart(8, "0");
+	return `${hex()}-${hex().slice(0, 4)}-4${hex().slice(0, 3)}-a${hex().slice(0, 3)}-${hex()}${hex().slice(0, 4)}`;
 }
 
 // ============================================================================

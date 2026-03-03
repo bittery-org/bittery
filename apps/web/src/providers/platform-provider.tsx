@@ -29,6 +29,7 @@ const crypto: ICrypto = {
 	encrypt: wasmCrypto.encrypt,
 	rsaDecrypt: wasmCrypto.rsaDecrypt,
 	generateEncryptionKey: wasmCrypto.generateEncryptionKey,
+	generateUuid: wasmCrypto.generateUuid,
 	// SRP authentication methods
 	deriveKeys: wasmCrypto.deriveKeys,
 	generateClientEphemeral: wasmCrypto.generateClientEphemeralAsync,

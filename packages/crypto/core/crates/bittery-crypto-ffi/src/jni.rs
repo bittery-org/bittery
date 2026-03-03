@@ -270,7 +270,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     let data = EncryptedData {
         ciphertext: ciphertext_str,
         iv: iv_str,
-        algorithm: "AES-GCM".to_string(),
+        algorithm: "AES-GCM-AAD-V1".to_string(),
     };
 
     match decrypt(&data, &key) {
@@ -1062,7 +1062,7 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     let data = EncryptedData {
         ciphertext: ciphertext_str,
         iv: iv_str,
-        algorithm: "AES-GCM".to_string(),
+        algorithm: "AES-GCM-AAD-V1".to_string(),
     };
 
     match decrypt(&data, &key) {

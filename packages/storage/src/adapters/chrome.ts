@@ -13,6 +13,7 @@ import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 	ItemCacheMetadata,
+	KdfParams,
 } from "@bittery/types";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
@@ -533,6 +534,36 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		return (result[key] as string | undefined) || null;
 	}
 
+	async storePinnedKdfParams(
+		params: KdfParams,
+		email?: string,
+	): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) {
+			throw new Error("No account specified");
+		}
+		const key = getAccountKey(resolvedEmail, "pinned_kdf_params");
+		await chrome.storage.local.set({ [key]: JSON.stringify(params) });
+	}
+
+	async getPinnedKdfParams(email?: string): Promise<KdfParams | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) {
+			return null;
+		}
+		const key = getAccountKey(resolvedEmail, "pinned_kdf_params");
+		const result = await chrome.storage.local.get(key);
+		const stored = result[key];
+		if (!stored) {
+			return null;
+		}
+		try {
+			return JSON.parse(stored as string) as KdfParams;
+		} catch {
+			return null;
+		}
+	}
+
 	// ============================================================================
 	// Multi-Account
 	// ============================================================================
@@ -645,6 +676,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			getAccountKey(resolvedEmail, "session_data"),
 			getAccountKey(resolvedEmail, "jwt_token"),
 			getAccountKey(resolvedEmail, "vault_keys"),
+			getAccountKey(resolvedEmail, "pinned_kdf_params"),
 			getAccountKey(resolvedEmail, "server_url"),
 			getAccountKey(resolvedEmail, "encrypted_private_key"),
 			getAccountKey(resolvedEmail, "auto_lock_timeout"),

@@ -5,7 +5,8 @@
  */
 
 import type { IStorageAdapter, VaultKeyData } from "@bittery/storage";
-import type { ICrypto } from "@bittery/types";
+import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
+import type { ICrypto, KdfParams } from "@bittery/types";
 
 /**
  * Input for SRP login (full login with password + secret key)
@@ -93,6 +94,7 @@ export interface StartLoginResponse {
 	userId: string;
 	salt: string;
 	serverPublicKey: string;
+	kdfParams: KdfParams;
 	serverSecret: string;
 }
 
@@ -167,6 +169,38 @@ export interface SRPUnlockDeps {
 	storage: IStorageAdapter;
 }
 
+async function validateAndPinServerKdfParams(
+	email: string,
+	serverParams: KdfParams,
+	deps: SRPLoginDeps | SRPUnlockDeps,
+): Promise<void> {
+	const pinnedParams = await deps.storage.getPinnedKdfParams(email);
+
+	if (deps.crypto.validateServerKdfParams) {
+		await deps.crypto.validateServerKdfParams(serverParams, pinnedParams);
+	} else {
+		validateServerKdfParamsOrThrow(serverParams, pinnedParams);
+	}
+}
+
+async function persistPinnedKdfParamsIfNeeded(
+	email: string,
+	params: KdfParams,
+	storage: IStorageAdapter,
+): Promise<void> {
+	const pinned = await storage.getPinnedKdfParams(email);
+	if (
+		!pinned ||
+		pinned.schemaVersion !== params.schemaVersion ||
+		pinned.algorithm !== params.algorithm ||
+		pinned.iterations !== params.iterations ||
+		pinned.salt !== params.salt
+	) {
+		console.log('storing pinned kdf params', pinned);
+		await storage.storePinnedKdfParams(params, email);
+	}
+}
+
 /**
  * Performs a complete SRP login handshake.
  */
@@ -195,11 +229,14 @@ export async function performSRPLogin(
 		clientPublicKey: clientEphemeral.publicKey,
 	});
 
+	await validateAndPinServerKdfParams(email, startResult.kdfParams, deps);
+
 	const clientSession = await crypto.deriveClientSession(
 		clientEphemeral.secret,
 		{
 			salt: startResult.salt,
 			serverPublicKey: startResult.serverPublicKey,
+			kdfParams: startResult.kdfParams,
 		},
 		srpPassword,
 	);
@@ -219,6 +256,12 @@ export async function performSRPLogin(
 			finishResult.serverProof,
 		);
 	}
+
+	await persistPinnedKdfParamsIfNeeded(
+		email,
+		startResult.kdfParams,
+		deps.storage,
+	);
 
 	return {
 		token: finishResult.token,
@@ -316,11 +359,14 @@ export async function performSRPUnlock(
 		clientPublicKey: clientEphemeral.publicKey,
 	});
 
+	await validateAndPinServerKdfParams(email, startResult.kdfParams, deps);
+
 	const clientSession = await crypto.deriveClientSession(
 		clientEphemeral.secret,
 		{
 			salt: startResult.salt,
 			serverPublicKey: startResult.serverPublicKey,
+			kdfParams: startResult.kdfParams,
 		},
 		srpPassword,
 	);
@@ -341,6 +387,12 @@ export async function performSRPUnlock(
 			finishResult.serverProof,
 		);
 	}
+
+	await persistPinnedKdfParamsIfNeeded(
+		email,
+		startResult.kdfParams,
+		deps.storage,
+	);
 
 	return {
 		token: finishResult.token,

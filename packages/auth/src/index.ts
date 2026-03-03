@@ -9,7 +9,7 @@ import {
 	generateServerEphemeral,
 } from "@bittery/crypto-napi";
 import { db, recoveryVerification, session, user, vaultKey } from "@bittery/db";
-import type { SRPServerChallenge } from "@bittery/types";
+import type { KdfParams, SRPServerChallenge } from "@bittery/types";
 import { and, eq, gt, isNull, ne } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
 import { nanoid } from "nanoid";
@@ -56,9 +56,21 @@ const LOGIN_RATE_LIMIT_MAX_LOCK_MINUTES = 30;
 const RECOVERY_VERIFICATION_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 const LOGIN_RATE_LIMIT_NAMESPACE = RATE_LIMIT_NAMESPACE.authLogin;
 const RECOVERY_RATE_LIMIT_NAMESPACE = RATE_LIMIT_NAMESPACE.authRecovery;
+const LOGIN_KDF_SCHEMA_VERSION = 1 as const;
+const LOGIN_KDF_ALGORITHM = "pbkdf2-sha256" as const;
+const LOGIN_KDF_ITERATIONS = 310_000;
 
 export function normalizeEmail(email: string): string {
 	return email.trim().toLowerCase();
+}
+
+function buildLoginKdfParams(salt: string): KdfParams {
+	return {
+		schemaVersion: LOGIN_KDF_SCHEMA_VERSION,
+		algorithm: LOGIN_KDF_ALGORITHM,
+		iterations: LOGIN_KDF_ITERATIONS,
+		salt,
+	};
 }
 
 function hashToken(token: string): string {
@@ -161,6 +173,7 @@ export async function startLogin(
 		challenge: {
 			salt: existingUser.srpSalt,
 			serverPublicKey: serverEphemeral.public,
+			kdfParams: buildLoginKdfParams(existingUser.srpSalt),
 		},
 		serverEphemeralSecret: serverEphemeral.secret,
 	};

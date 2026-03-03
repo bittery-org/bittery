@@ -4,14 +4,17 @@
 
 use bittery_crypto_core::{
     decrypt, decrypt_master_key, derive_keys, derive_keys_from_master_key, derive_master_key,
-    encrypt, encrypt_master_key, generate_credential_id, generate_encryption_key,
+    decrypt_with_aad, encrypt, encrypt_master_key, encrypt_with_aad, generate_credential_id,
+    generate_encryption_key, generate_uuid,
     generate_passkey_keypair, generate_recovery_key, generate_rsa_key_pair, generate_secret_key,
     get_secret_key_hint,
+    kdf_policy::KdfParams,
     key_rotation::{self, ItemData, MemberKeyData},
     passkey::{build_passkey_attestation_object, sign_passkey_assertion},
     rsa_decrypt, rsa_encrypt,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient, SrpServer},
-    validate_recovery_key, validate_secret_key, EncryptedData,
+    validate_recovery_key, validate_secret_key, validate_server_kdf_params, AadContext,
+    EncryptedData,
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -87,6 +90,33 @@ pub struct JsSession {
     pub proof: String,
 }
 
+#[wasm_bindgen]
+#[derive(Serialize, Deserialize)]
+pub struct JsAadContext {
+    #[wasm_bindgen(getter_with_clone)]
+    pub vault_id: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub entity_id: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub entity_type: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub version: u64,
+    #[wasm_bindgen(getter_with_clone)]
+    pub user_id: String,
+}
+
+impl From<JsAadContext> for AadContext {
+    fn from(value: JsAadContext) -> Self {
+        AadContext {
+            vault_id: value.vault_id,
+            entity_id: value.entity_id,
+            entity_type: value.entity_type,
+            version: value.version,
+            user_id: value.user_id,
+        }
+    }
+}
+
 // ============================================================================
 // Key Derivation
 // ============================================================================
@@ -136,6 +166,30 @@ pub fn js_derive_keys_from_master_key(
 }
 
 // ============================================================================
+// KDF Policy Validation
+// ============================================================================
+
+#[wasm_bindgen(js_name = validateServerKdfParams)]
+pub fn js_validate_server_kdf_params(
+    server_params: JsValue,
+    pinned_params: Option<JsValue>,
+) -> Result<(), JsError> {
+    let server: KdfParams = serde_wasm_bindgen::from_value(server_params)
+        .map_err(|e| JsError::new(&format!("Invalid server KDF params: {}", e)))?;
+
+    let pinned: Option<KdfParams> = match pinned_params {
+        Some(value) => Some(
+            serde_wasm_bindgen::from_value(value)
+                .map_err(|e| JsError::new(&format!("Invalid pinned KDF params: {}", e)))?,
+        ),
+        None => None,
+    };
+
+    validate_server_kdf_params(&server, pinned.as_ref())
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+// ============================================================================
 // AES-256-GCM Encryption
 // ============================================================================
 
@@ -144,6 +198,24 @@ pub fn js_derive_keys_from_master_key(
 pub fn js_encrypt(plaintext: &str, key_base64: &str) -> Result<JsEncryptedData, JsError> {
     let key = base64_decode(key_base64)?;
     let encrypted = encrypt(plaintext, &key).map_err(|e| JsError::new(&e.to_string()))?;
+
+    Ok(JsEncryptedData {
+        ciphertext: encrypted.ciphertext,
+        iv: encrypted.iv,
+        algorithm: encrypted.algorithm,
+    })
+}
+
+/// Encrypt plaintext using AES-256-GCM with authenticated context.
+#[wasm_bindgen(js_name = encryptWithContext)]
+pub fn js_encrypt_with_context(
+    plaintext: &str,
+    key_base64: &str,
+    context: JsAadContext,
+) -> Result<JsEncryptedData, JsError> {
+    let key = base64_decode(key_base64)?;
+    let encrypted = encrypt_with_aad(plaintext, &key, &context.into())
+        .map_err(|e| JsError::new(&e.to_string()))?;
 
     Ok(JsEncryptedData {
         ciphertext: encrypted.ciphertext,
@@ -165,10 +237,33 @@ pub fn js_decrypt(encrypted_data: JsEncryptedData, key_base64: &str) -> Result<S
     decrypt(&data, &key).map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Decrypt data using AES-256-GCM with authenticated context.
+#[wasm_bindgen(js_name = decryptWithContext)]
+pub fn js_decrypt_with_context(
+    encrypted_data: JsEncryptedData,
+    key_base64: &str,
+    context: JsAadContext,
+) -> Result<String, JsError> {
+    let key = base64_decode(key_base64)?;
+    let data = EncryptedData {
+        ciphertext: encrypted_data.ciphertext,
+        iv: encrypted_data.iv,
+        algorithm: encrypted_data.algorithm,
+    };
+
+    decrypt_with_aad(&data, &key, &context.into()).map_err(|e| JsError::new(&e.to_string()))
+}
+
 /// Generate a random 32-byte encryption key
 #[wasm_bindgen(js_name = generateEncryptionKey)]
 pub fn js_generate_encryption_key() -> String {
     base64_encode(&generate_encryption_key())
+}
+
+/// Generate a random UUID v4 string.
+#[wasm_bindgen(js_name = generateUuid)]
+pub fn js_generate_uuid() -> String {
+    generate_uuid()
 }
 
 // ============================================================================
