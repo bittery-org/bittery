@@ -49,6 +49,7 @@ export interface AccountSwitcherLabels {
 	allAccountsLabel?: string;
 	unlockedCount?: (params: { count: number }) => string;
 	viewItemsFromAccounts?: (params: { count: number }) => string;
+	manageAccountsLabel?: string;
 	addAccountLabel?: string;
 	setupAnotherDeviceLabel?: string;
 	settingsLabel?: string;
@@ -72,11 +73,20 @@ export interface AccountSwitcherProps {
 	/** Callback when user selects an account */
 	onAccountSelect: (email: string) => void;
 
-	/** Callback when user clicks "Add Account" */
-	onAddAccount: () => void;
+	/** Optional: callback when user clicks "Add Account" */
+	onAddAccount?: () => void;
 
 	/** Callback when user clicks "Lock All" */
 	onLockAll: () => void;
+
+	/** Optional: show "Manage Accounts" option */
+	showManageAccounts?: boolean;
+
+	/** Optional: callback when user clicks "Manage Accounts" */
+	onManageAccounts?: () => void;
+
+	/** Optional: show "Add Account" option */
+	showAddAccount?: boolean;
 
 	/** Optional: show "All Accounts" option */
 	showAllAccountsOption?: boolean;
@@ -135,6 +145,9 @@ export function AccountSwitcher({
 	onAccountSelect,
 	onAddAccount,
 	onLockAll,
+	showManageAccounts = false,
+	onManageAccounts,
+	showAddAccount = true,
 	showAllAccountsOption = false,
 	onAllAccountsSelect,
 	showSettings = false,
@@ -160,6 +173,7 @@ export function AccountSwitcher({
 			count === 1
 				? `View items from ${count} account`
 				: `View items from ${count} accounts`,
+		manageAccountsLabel: "Manage Accounts",
 		addAccountLabel: "Add Account",
 		setupAnotherDeviceLabel: "Set up another device",
 		settingsLabel: "Settings",
@@ -328,14 +342,29 @@ export function AccountSwitcher({
 						</>
 					)}
 
-				{/* Add Account */}
-				<DropdownMenuItem
-					onClick={onAddAccount}
-					className="flex cursor-pointer items-center gap-2"
-				>
-					<PlusIcon className="size-4" />
-					<span className="text-sm">{resolvedLabels.addAccountLabel}</span>
-				</DropdownMenuItem>
+				{/* Manage Accounts (optional) */}
+				{showManageAccounts && onManageAccounts && (
+					<DropdownMenuItem
+						onClick={onManageAccounts}
+						className="flex cursor-pointer items-center gap-2"
+					>
+						<UsersIcon className="size-4" />
+						<span className="text-sm">
+							{resolvedLabels.manageAccountsLabel}
+						</span>
+					</DropdownMenuItem>
+				)}
+
+				{/* Add Account (optional) */}
+				{showAddAccount && onAddAccount && (
+					<DropdownMenuItem
+						onClick={onAddAccount}
+						className="flex cursor-pointer items-center gap-2"
+					>
+						<PlusIcon className="size-4" />
+						<span className="text-sm">{resolvedLabels.addAccountLabel}</span>
+					</DropdownMenuItem>
+				)}
 
 				{/* Set up another device (optional) */}
 				{showSetupAnotherDevice && onSetupAnotherDevice && (
