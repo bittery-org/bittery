@@ -33,8 +33,8 @@ import {
 } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useState } from "react";
-import Loader from "../loader";
 import { useI18n } from "../../providers/i18n-provider";
+import Loader from "../loader";
 import { VaultInfoPopover } from "./item-categories/shared/vault-info-popover";
 import ItemDetail from "./item-detail";
 import { ItemAttachments } from "./item-detail/item-attachments";
@@ -137,7 +137,9 @@ export function ItemDetailPage({
 					vaultId: rawItem.vaultId,
 					data: updatedData,
 				});
-				toast.success(m["vaults.detail.items.detail_page.toast.passkey_removed"]());
+				toast.success(
+					m["vaults.detail.items.detail_page.toast.passkey_removed"](),
+				);
 			} catch (error) {
 				const errorMessage =
 					error instanceof Error
@@ -178,7 +180,9 @@ export function ItemDetailPage({
 				data: duplicatedData,
 			});
 
-			toast.success(m["vaults.detail.items.detail_page.toast.item_duplicated"]());
+			toast.success(
+				m["vaults.detail.items.detail_page.toast.item_duplicated"](),
+			);
 
 			// Navigate to the duplicated item
 			navigate({
@@ -207,7 +211,9 @@ export function ItemDetailPage({
 					data: { password },
 				});
 				toast.success(
-					m["vaults.detail.items.password_history_dialog.toast.restore_success"](),
+					m[
+						"vaults.detail.items.password_history_dialog.toast.restore_success"
+					](),
 				);
 				setIsPasswordHistoryOpen(false);
 			} catch (error) {
@@ -352,9 +358,7 @@ export function ItemDetailPage({
 										? m[
 												"vaults.detail.items.list.item.action.remove_favorite"
 											]()
-										: m[
-												"vaults.detail.items.list.item.action.add_favorite"
-											]()}
+										: m["vaults.detail.items.list.item.action.add_favorite"]()}
 								</DropdownMenuItem>
 								<DropdownMenuItem onClick={() => setIsShareHistoryOpen(true)}>
 									<IconHistoryOutlineDuo18 className="size-4" />
@@ -406,7 +410,9 @@ export function ItemDetailPage({
 			<Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
 				<DialogContent className="flex max-h-[85vh] max-w-2xl flex-col">
 					<DialogHeader className="shrink-0">
-						<DialogTitle>{m["vaults.detail.edit_item_dialog.title"]()}</DialogTitle>
+						<DialogTitle>
+							{m["vaults.detail.edit_item_dialog.title"]()}
+						</DialogTitle>
 						<DialogDescription>
 							{m["vaults.detail.items.detail_page.edit_dialog.description"]({
 								category: getCategoryDisplayName(rawItem?.category ?? "login"),
@@ -447,7 +453,9 @@ export function ItemDetailPage({
 			<Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>{m["vaults.detail.delete_item_dialog.title"]()}</DialogTitle>
+						<DialogTitle>
+							{m["vaults.detail.delete_item_dialog.title"]()}
+						</DialogTitle>
 						<DialogDescription>
 							{m["vaults.detail.delete_item_dialog.description"]()}
 						</DialogDescription>

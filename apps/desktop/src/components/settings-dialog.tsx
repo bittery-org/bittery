@@ -298,7 +298,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 											<SelectItem key={value} value={value}>
 												<span className="inline-flex items-center gap-2 whitespace-nowrap">
 													{value === "en" ? (
-														<IconFlagUnitedStates size={14} className="shrink-0" />
+														<IconFlagUnitedStates
+															size={14}
+															className="shrink-0"
+														/>
 													) : (
 														<IconFlagGermany size={14} className="shrink-0" />
 													)}
@@ -353,7 +356,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 								>
 									<SelectTrigger id="masterPasswordReentry">
 										<SelectValue
-											placeholder={m["settings.dialog.master_password_reentry.placeholder"]()}
+											placeholder={m[
+												"settings.dialog.master_password_reentry.placeholder"
+											]()}
 										/>
 									</SelectTrigger>
 									<SelectContent>

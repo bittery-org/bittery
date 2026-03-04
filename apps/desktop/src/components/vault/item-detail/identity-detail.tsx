@@ -110,7 +110,9 @@ export function IdentityDetail({
 							copyLabel={m["vaults.detail.items.copy.label.email"]()}
 						/>
 						<DetailField
-							label={m["vaults.detail.items.form.identity.field.date_of_birth"]()}
+							label={m[
+								"vaults.detail.items.form.identity.field.date_of_birth"
+							]()}
 							value={data.dateOfBirth}
 							copyLabel={m["vaults.detail.items.copy.label.date_of_birth"]()}
 						/>
@@ -160,7 +162,9 @@ export function IdentityDetail({
 									className="w-full"
 								>
 									<IconCopyOutlineDuo18 size={16} />
-									{m["vaults.detail.items.detail.identity.action.copy_address"]()}
+									{m[
+										"vaults.detail.items.detail.identity.action.copy_address"
+									]()}
 								</Button>
 							</div>
 						))}
@@ -169,15 +173,15 @@ export function IdentityDetail({
 
 				{(data.ssn || data.passportNumber || data.driversLicense) && (
 					<DetailSection
-						title={m["vaults.detail.items.form.identity.section.government_ids"]()}
+						title={m[
+							"vaults.detail.items.form.identity.section.government_ids"
+						]()}
 					>
 						{data.ssn && (
 							<DetailPasswordField
-								label={
-									m[
-										"vaults.detail.items.form.identity.field.social_security_number"
-									]()
-								}
+								label={m[
+									"vaults.detail.items.form.identity.field.social_security_number"
+								]()}
 								value={data.ssn}
 								maskValue={maskSSN(data.ssn)}
 								copyLabel={m["vaults.detail.items.copy.label.ssn"]()}
@@ -185,22 +189,26 @@ export function IdentityDetail({
 						)}
 						{data.passportNumber && (
 							<DetailPasswordField
-								label={
-									m["vaults.detail.items.form.identity.field.passport_number"]()
-								}
+								label={m[
+									"vaults.detail.items.form.identity.field.passport_number"
+								]()}
 								value={data.passportNumber}
 								maskValue={maskPassportNumber(data.passportNumber)}
-								copyLabel={m["vaults.detail.items.copy.label.passport_number"]()}
+								copyLabel={m[
+									"vaults.detail.items.copy.label.passport_number"
+								]()}
 							/>
 						)}
 						{data.driversLicense && (
 							<DetailPasswordField
-								label={
-									m["vaults.detail.items.form.identity.field.drivers_license"]()
-								}
+								label={m[
+									"vaults.detail.items.form.identity.field.drivers_license"
+								]()}
 								value={data.driversLicense}
 								maskValue={maskDriversLicense(data.driversLicense)}
-								copyLabel={m["vaults.detail.items.copy.label.drivers_license"]()}
+								copyLabel={m[
+									"vaults.detail.items.copy.label.drivers_license"
+								]()}
 							/>
 						)}
 					</DetailSection>

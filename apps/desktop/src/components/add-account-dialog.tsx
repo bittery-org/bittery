@@ -155,7 +155,9 @@ export function AddAccountDialog({
 
 				<form onSubmit={handleSubmit} className="space-y-4">
 					<div className="grid gap-1.5">
-						<Label htmlFor="add-serverUrl">{m["auth.footer.server.title"]()}</Label>
+						<Label htmlFor="add-serverUrl">
+							{m["auth.footer.server.title"]()}
+						</Label>
 						<Input
 							id="add-serverUrl"
 							type="url"

@@ -179,7 +179,9 @@ export function PasswordHistoryDialog({
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle>
-							{m["vaults.detail.items.password_history_dialog.restore_dialog.title"]()}
+							{m[
+								"vaults.detail.items.password_history_dialog.restore_dialog.title"
+							]()}
 						</AlertDialogTitle>
 						<AlertDialogDescription>
 							{m[

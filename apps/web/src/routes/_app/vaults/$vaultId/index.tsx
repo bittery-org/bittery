@@ -219,7 +219,8 @@ function VaultDetailPage() {
 	const memberCount = membersQuery.data?.length ?? 0;
 	const canMakeShared = isOwner && vaultInfo?.vaultType === "personal";
 	const canMakePrivate = isOwner && vaultInfo?.vaultType === "team";
-	const canMakePrivateNow = canMakePrivate && hasMemberData && memberCount === 1;
+	const canMakePrivateNow =
+		canMakePrivate && hasMemberData && memberCount === 1;
 	const showMakePrivateDisabledAction = canMakePrivate && !canMakePrivateNow;
 	const showMakePrivateDisabledReason =
 		canMakePrivate && hasMemberData && memberCount > 1;
@@ -608,7 +609,9 @@ function VaultDetailPage() {
 
 										{showMakePrivateDisabledReason && (
 											<DropdownMenuItem disabled>
-												{m["vaults.detail.convert.make_private_disabled_reason"]({
+												{m[
+													"vaults.detail.convert.make_private_disabled_reason"
+												]({
 													count: memberCount,
 												})}
 											</DropdownMenuItem>
@@ -830,77 +833,77 @@ function VaultDetailPage() {
 							{m["vaults.detail.delete_item_dialog.action.confirm"]()}
 						</Button>
 					</DialogFooter>
-					</DialogContent>
-				</Dialog>
+				</DialogContent>
+			</Dialog>
 
-				{/* Vault Type Conversion Dialogs */}
-				<Dialog
-					open={isMakeSharedDialogOpen}
-					onOpenChange={setIsMakeSharedDialogOpen}
-				>
-					<DialogContent data-testid="make-shared-dialog">
-						<DialogHeader>
-							<DialogTitle>
-								{m["vaults.detail.convert.confirm.make_shared.title"]()}
-							</DialogTitle>
-							<DialogDescription>
-								{m["vaults.detail.convert.confirm.make_shared.description"]()}
-							</DialogDescription>
-						</DialogHeader>
-						<DialogFooter>
-							<Button
-								variant="outline"
-								onClick={() => setIsMakeSharedDialogOpen(false)}
-								disabled={convertVaultType.isPending}
-							>
-								{m["settings.common.action.cancel"]()}
-							</Button>
-							<Button
-								onClick={() => handleConvertVaultType("team")}
-								disabled={convertVaultType.isPending}
-								data-testid="make-shared-confirm-button"
-							>
-								{m["vaults.detail.convert.confirm.make_shared.action.confirm"]()}
-							</Button>
-						</DialogFooter>
-					</DialogContent>
-				</Dialog>
+			{/* Vault Type Conversion Dialogs */}
+			<Dialog
+				open={isMakeSharedDialogOpen}
+				onOpenChange={setIsMakeSharedDialogOpen}
+			>
+				<DialogContent data-testid="make-shared-dialog">
+					<DialogHeader>
+						<DialogTitle>
+							{m["vaults.detail.convert.confirm.make_shared.title"]()}
+						</DialogTitle>
+						<DialogDescription>
+							{m["vaults.detail.convert.confirm.make_shared.description"]()}
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={() => setIsMakeSharedDialogOpen(false)}
+							disabled={convertVaultType.isPending}
+						>
+							{m["settings.common.action.cancel"]()}
+						</Button>
+						<Button
+							onClick={() => handleConvertVaultType("team")}
+							disabled={convertVaultType.isPending}
+							data-testid="make-shared-confirm-button"
+						>
+							{m["vaults.detail.convert.confirm.make_shared.action.confirm"]()}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 
-				<Dialog
-					open={isMakePrivateDialogOpen}
-					onOpenChange={setIsMakePrivateDialogOpen}
-				>
-					<DialogContent data-testid="make-private-dialog">
-						<DialogHeader>
-							<DialogTitle>
-								{m["vaults.detail.convert.confirm.make_private.title"]()}
-							</DialogTitle>
-							<DialogDescription>
-								{m["vaults.detail.convert.confirm.make_private.description"]()}
-							</DialogDescription>
-						</DialogHeader>
-						<DialogFooter>
-							<Button
-								variant="outline"
-								onClick={() => setIsMakePrivateDialogOpen(false)}
-								disabled={convertVaultType.isPending}
-							>
-								{m["settings.common.action.cancel"]()}
-							</Button>
-							<Button
-								onClick={() => handleConvertVaultType("personal")}
-								disabled={convertVaultType.isPending}
-								data-testid="make-private-confirm-button"
-							>
-								{m["vaults.detail.convert.confirm.make_private.action.confirm"]()}
-							</Button>
-						</DialogFooter>
-					</DialogContent>
-				</Dialog>
+			<Dialog
+				open={isMakePrivateDialogOpen}
+				onOpenChange={setIsMakePrivateDialogOpen}
+			>
+				<DialogContent data-testid="make-private-dialog">
+					<DialogHeader>
+						<DialogTitle>
+							{m["vaults.detail.convert.confirm.make_private.title"]()}
+						</DialogTitle>
+						<DialogDescription>
+							{m["vaults.detail.convert.confirm.make_private.description"]()}
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={() => setIsMakePrivateDialogOpen(false)}
+							disabled={convertVaultType.isPending}
+						>
+							{m["settings.common.action.cancel"]()}
+						</Button>
+						<Button
+							onClick={() => handleConvertVaultType("personal")}
+							disabled={convertVaultType.isPending}
+							data-testid="make-private-confirm-button"
+						>
+							{m["vaults.detail.convert.confirm.make_private.action.confirm"]()}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 
-				{/* Vault Management Dialogs */}
-				<EditVaultDialog
-					key={vaultInfo.vaultId}
+			{/* Vault Management Dialogs */}
+			<EditVaultDialog
+				key={vaultInfo.vaultId}
 				open={isEditVaultDialogOpen}
 				onOpenChange={setIsEditVaultDialogOpen}
 				vault={{

@@ -22,13 +22,13 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
-import { useI18n } from "@/providers/i18n-provider";
 import {
 	decrypt,
 	deriveKeys,
 	encrypt,
 	generateSRPRegistration,
 } from "@/lib/wasm-crypto";
+import { useI18n } from "@/providers/i18n-provider";
 
 export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 	const { m } = useI18n();
@@ -89,7 +89,9 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			return;
 		}
 		if (newPassword !== confirmPassword) {
-			toast.error(m["settings.change_password_dialog.toast.password_mismatch"]());
+			toast.error(
+				m["settings.change_password_dialog.toast.password_mismatch"](),
+			);
 			return;
 		}
 
@@ -186,45 +188,47 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 				encryptedPrivateKey: JSON.stringify(newEncryptedPrivateKey),
 				encryptedVaultKeys,
 			});
-			} catch (error) {
-				console.error("Password change error:", error);
-				toast.error(m["settings.change_password_dialog.toast.change_failed"]());
-				setIsProcessing(false);
-			}
-		};
+		} catch (error) {
+			console.error("Password change error:", error);
+			toast.error(m["settings.change_password_dialog.toast.change_failed"]());
+			setIsProcessing(false);
+		}
+	};
 
-		return (
-			<Dialog open={open} onOpenChange={setOpen}>
-				<DialogTrigger asChild>
-					<Button variant="outline">
-						<Key className="mr-2 h-4 w-4" />
-						{m["settings.change_password_dialog.trigger"]()}
-					</Button>
-				</DialogTrigger>
-				<DialogContent>
-					<form onSubmit={handleSubmit}>
-						<DialogHeader>
-							<DialogTitle>
-								{m["settings.change_password_dialog.title"]()}
-							</DialogTitle>
-							<DialogDescription>
-								{m["settings.change_password_dialog.description"]()}
-							</DialogDescription>
-						</DialogHeader>
-						<div className="grid gap-4 py-4">
-							<div className="grid gap-2">
-								<Label htmlFor="currentPassword">
-									{m["settings.change_password_dialog.field.current_password"]()}
-								</Label>
-								<div className="relative">
-									<Input
+	return (
+		<Dialog open={open} onOpenChange={setOpen}>
+			<DialogTrigger asChild>
+				<Button variant="outline">
+					<Key className="mr-2 h-4 w-4" />
+					{m["settings.change_password_dialog.trigger"]()}
+				</Button>
+			</DialogTrigger>
+			<DialogContent>
+				<form onSubmit={handleSubmit}>
+					<DialogHeader>
+						<DialogTitle>
+							{m["settings.change_password_dialog.title"]()}
+						</DialogTitle>
+						<DialogDescription>
+							{m["settings.change_password_dialog.description"]()}
+						</DialogDescription>
+					</DialogHeader>
+					<div className="grid gap-4 py-4">
+						<div className="grid gap-2">
+							<Label htmlFor="currentPassword">
+								{m["settings.change_password_dialog.field.current_password"]()}
+							</Label>
+							<div className="relative">
+								<Input
 									id="currentPassword"
-										type={showCurrentPassword ? "text" : "password"}
-										value={currentPassword}
-										onChange={(e) => setCurrentPassword(e.target.value)}
-										placeholder={m["settings.change_password_dialog.placeholder.current_password"]()}
-										autoFocus
-										className="pr-10"
+									type={showCurrentPassword ? "text" : "password"}
+									value={currentPassword}
+									onChange={(e) => setCurrentPassword(e.target.value)}
+									placeholder={m[
+										"settings.change_password_dialog.placeholder.current_password"
+									]()}
+									autoFocus
+									className="pr-10"
 								/>
 								<Button
 									type="button"
@@ -240,19 +244,21 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 									)}
 								</Button>
 							</div>
-							</div>
-							<div className="grid gap-2">
-								<Label htmlFor="newPassword">
-									{m["settings.change_password_dialog.field.new_password"]()}
-								</Label>
-								<div className="relative">
-									<Input
+						</div>
+						<div className="grid gap-2">
+							<Label htmlFor="newPassword">
+								{m["settings.change_password_dialog.field.new_password"]()}
+							</Label>
+							<div className="relative">
+								<Input
 									id="newPassword"
-										type={showNewPassword ? "text" : "password"}
-										value={newPassword}
-										onChange={(e) => setNewPassword(e.target.value)}
-										placeholder={m["settings.change_password_dialog.placeholder.new_password"]()}
-										className="pr-10"
+									type={showNewPassword ? "text" : "password"}
+									value={newPassword}
+									onChange={(e) => setNewPassword(e.target.value)}
+									placeholder={m[
+										"settings.change_password_dialog.placeholder.new_password"
+									]()}
+									className="pr-10"
 								/>
 								<Button
 									type="button"
@@ -263,48 +269,56 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 								>
 									{showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
 								</Button>
-								</div>
-								<p className="text-muted-foreground text-xs">
-									{m["settings.change_password_dialog.hint.password_min_length"]()}
-								</p>
 							</div>
-							<div className="grid gap-2">
-								<Label htmlFor="confirmPassword">
-									{m["settings.change_password_dialog.field.confirm_new_password"]()}
-								</Label>
-								<Input
-									id="confirmPassword"
-									type="password"
-									value={confirmPassword}
-									onChange={(e) => setConfirmPassword(e.target.value)}
-									placeholder={m["settings.change_password_dialog.placeholder.confirm_new_password"]()}
-								/>
-							</div>
-						</div>
-						<div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
-							<p className="text-amber-700 text-xs dark:text-amber-300">
-								<strong>{m["settings.common.warning"]()}</strong>{" "}
-								{m["settings.change_password_dialog.warning.recovery_key_setup"]()}
+							<p className="text-muted-foreground text-xs">
+								{m[
+									"settings.change_password_dialog.hint.password_min_length"
+								]()}
 							</p>
 						</div>
-						<DialogFooter>
+						<div className="grid gap-2">
+							<Label htmlFor="confirmPassword">
+								{m[
+									"settings.change_password_dialog.field.confirm_new_password"
+								]()}
+							</Label>
+							<Input
+								id="confirmPassword"
+								type="password"
+								value={confirmPassword}
+								onChange={(e) => setConfirmPassword(e.target.value)}
+								placeholder={m[
+									"settings.change_password_dialog.placeholder.confirm_new_password"
+								]()}
+							/>
+						</div>
+					</div>
+					<div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+						<p className="text-amber-700 text-xs dark:text-amber-300">
+							<strong>{m["settings.common.warning"]()}</strong>{" "}
+							{m[
+								"settings.change_password_dialog.warning.recovery_key_setup"
+							]()}
+						</p>
+					</div>
+					<DialogFooter>
 						<Button
-								type="button"
-								variant="outline"
-								onClick={() => setOpen(false)}
-							>
-								{m["settings.common.action.cancel"]()}
-							</Button>
-							<Button
-								type="submit"
-								disabled={isProcessing || changePasswordMutation.isPending}
-							>
-								{isProcessing || changePasswordMutation.isPending
-									? m["settings.change_password_dialog.action.changing"]()
-									: m["settings.change_password_dialog.action.submit"]()}
-							</Button>
-						</DialogFooter>
-					</form>
+							type="button"
+							variant="outline"
+							onClick={() => setOpen(false)}
+						>
+							{m["settings.common.action.cancel"]()}
+						</Button>
+						<Button
+							type="submit"
+							disabled={isProcessing || changePasswordMutation.isPending}
+						>
+							{isProcessing || changePasswordMutation.isPending
+								? m["settings.change_password_dialog.action.changing"]()
+								: m["settings.change_password_dialog.action.submit"]()}
+						</Button>
+					</DialogFooter>
+				</form>
 			</DialogContent>
 		</Dialog>
 	);

@@ -548,9 +548,7 @@ export const vaultRouter = router({
 					const sharedVaultCount = await tx
 						.select({ count: sql<number>`count(*)::int` })
 						.from(vault)
-						.where(
-							and(eq(vault.teamId, targetTeamId), eq(vault.type, "team")),
-						);
+						.where(and(eq(vault.teamId, targetTeamId), eq(vault.type, "team")));
 
 					if ((sharedVaultCount[0]?.count ?? 0) >= sharedVaultLimit) {
 						throw new TRPCError({

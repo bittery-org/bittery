@@ -174,7 +174,9 @@ export function MoveItemDialog({
 					<div className="relative">
 						<IconMagnifier3OutlineDuo18 className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
 						<Input
-							placeholder={m["vaults.detail.items.move_dialog.search.placeholder"]()}
+							placeholder={m[
+								"vaults.detail.items.move_dialog.search.placeholder"
+							]()}
 							value={searchQuery}
 							onChange={(e) => setSearchQuery(e.target.value)}
 							className="pl-9"
@@ -323,7 +325,9 @@ export function MoveItemDialog({
 												</span>
 												{isCurrentVault && (
 													<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
-														{m["vaults.detail.items.move_dialog.badge.current"]()}
+														{m[
+															"vaults.detail.items.move_dialog.badge.current"
+														]()}
 													</span>
 												)}
 												{isSelected && !isDisabled && (

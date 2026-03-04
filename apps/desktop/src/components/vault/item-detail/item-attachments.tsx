@@ -182,7 +182,9 @@ function AttachmentRow({
 						size="sm"
 						variant="ghost"
 						onClick={startEdit}
-						title={m["vaults.detail.items.attachments.action.rename_attachment"]()}
+						title={m[
+							"vaults.detail.items.attachments.action.rename_attachment"
+						]()}
 					>
 						<Pencil className="size-4" />
 					</Button>
@@ -193,7 +195,9 @@ function AttachmentRow({
 						variant="ghost"
 						className="text-destructive hover:bg-destructive/10 hover:text-destructive"
 						onClick={() => onDelete(attachment.id)}
-						title={m["vaults.detail.items.attachments.action.delete_attachment"]()}
+						title={m[
+							"vaults.detail.items.attachments.action.delete_attachment"
+						]()}
 					>
 						<Trash className="size-4" />
 					</Button>
@@ -225,7 +229,9 @@ export function ItemAttachments({
 
 			// 25 MB limit
 			if (file.size > 25 * 1024 * 1024) {
-				toast.error(m["vaults.detail.items.attachments.toast.file_too_large"]());
+				toast.error(
+					m["vaults.detail.items.attachments.toast.file_too_large"](),
+				);
 				if (fileInputRef.current) fileInputRef.current.value = "";
 				return;
 			}

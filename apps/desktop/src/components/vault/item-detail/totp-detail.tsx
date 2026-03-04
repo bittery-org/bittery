@@ -10,7 +10,11 @@ import { useI18n } from "../../../providers/i18n-provider";
 import { Favicon } from "../favicon";
 import { TagInput } from "../tag-input";
 import { DetailHeader, DetailPasswordField } from "./field-components";
-import { handleCopy, type CategoryDetailProps, type TotpDisplayData } from "./shared";
+import {
+	type CategoryDetailProps,
+	handleCopy,
+	type TotpDisplayData,
+} from "./shared";
 
 export function TotpDetail({
 	data,

@@ -130,7 +130,9 @@ export function CreateItemSheet({
 
 	const handleSubmit = async (data: DecryptedItemData, vaultId: string) => {
 		if (!vaultId) {
-			toast.error(m["vaults.detail.items.create_sheet.toast.no_vault_selected"]());
+			toast.error(
+				m["vaults.detail.items.create_sheet.toast.no_vault_selected"](),
+			);
 			return;
 		}
 

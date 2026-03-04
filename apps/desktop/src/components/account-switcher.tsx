@@ -301,10 +301,7 @@ export function AccountSwitcher() {
 				align="start"
 			/>
 
-			<Dialog
-				open={showManageAccounts}
-				onOpenChange={setShowManageAccounts}
-			>
+			<Dialog open={showManageAccounts} onOpenChange={setShowManageAccounts}>
 				<DialogContent className="max-w-2xl overflow-hidden p-0">
 					<DialogHeader className="gap-3 border-b bg-background px-6 py-5">
 						<div className="flex flex-wrap items-start justify-between gap-3">

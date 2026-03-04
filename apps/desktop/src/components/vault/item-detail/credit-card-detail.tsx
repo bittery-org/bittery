@@ -66,17 +66,23 @@ export function CreditCardDetail({
 
 			<div className="space-y-3">
 				<DetailField
-					label={m["vaults.detail.items.detail.credit_card.field.cardholder_name"]()}
+					label={m[
+						"vaults.detail.items.detail.credit_card.field.cardholder_name"
+					]()}
 					value={data.cardholderName}
 				/>
 				<DetailPasswordField
-					label={m["vaults.detail.items.detail.credit_card.field.card_number"]()}
+					label={m[
+						"vaults.detail.items.detail.credit_card.field.card_number"
+					]()}
 					value={data.cardNumber}
 				/>
 
 				<div className="grid grid-cols-2 gap-4">
 					<DetailField
-						label={m["vaults.detail.items.detail.credit_card.field.expiry_date"]()}
+						label={m[
+							"vaults.detail.items.detail.credit_card.field.expiry_date"
+						]()}
 						value={formattedExpiry}
 					/>
 					<DetailPasswordField
@@ -88,7 +94,9 @@ export function CreditCardDetail({
 				{data.billingAddress && (
 					<div className="space-y-2">
 						<Label className="font-medium text-sm">
-							{m["vaults.detail.items.detail.credit_card.field.billing_address"]()}
+							{m[
+								"vaults.detail.items.detail.credit_card.field.billing_address"
+							]()}
 						</Label>
 						<Card>
 							<div className="whitespace-pre-wrap px-4 py-1 text-sm">

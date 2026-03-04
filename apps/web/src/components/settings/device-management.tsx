@@ -74,7 +74,8 @@ function formatDeviceDisplayLocalized(
 	device: DeviceSession,
 	m: Messages,
 ): { title: string; subtitle: string } {
-	const title = device.deviceName ?? m["settings.devices.common.unknown_device"]();
+	const title =
+		device.deviceName ?? m["settings.devices.common.unknown_device"]();
 
 	const parts: string[] = [];
 	if (device.osName) {
@@ -192,7 +193,9 @@ function RenameDeviceDialog({
 			<DialogContent>
 				<form onSubmit={handleSubmit}>
 					<DialogHeader>
-						<DialogTitle>{m["settings.devices.rename_dialog.title"]()}</DialogTitle>
+						<DialogTitle>
+							{m["settings.devices.rename_dialog.title"]()}
+						</DialogTitle>
 						<DialogDescription>
 							{m["settings.devices.rename_dialog.description"]()}
 						</DialogDescription>
@@ -205,7 +208,9 @@ function RenameDeviceDialog({
 							id="deviceName"
 							value={deviceName}
 							onChange={(e) => setDeviceName(e.target.value)}
-							placeholder={m["settings.devices.rename_dialog.placeholder.device_name"]()}
+							placeholder={m[
+								"settings.devices.rename_dialog.placeholder.device_name"
+							]()}
 							className="mt-2"
 							autoFocus
 						/>
@@ -279,7 +284,9 @@ function RevokeDeviceDialog({
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>
-					<AlertDialogCancel>{m["settings.common.action.cancel"]()}</AlertDialogCancel>
+					<AlertDialogCancel>
+						{m["settings.common.action.cancel"]()}
+					</AlertDialogCancel>
 					<Button
 						variant="destructive"
 						onClick={() => revokeMutation.mutate(session.id)}
@@ -408,7 +415,11 @@ export function DeviceManagement() {
 	return (
 		<div className="space-y-3">
 			{sortedDevices.map((session) => (
-				<DeviceCard key={session.id} session={session} onUpdate={handleUpdate} />
+				<DeviceCard
+					key={session.id}
+					session={session}
+					onUpdate={handleUpdate}
+				/>
 			))}
 		</div>
 	);

@@ -45,8 +45,8 @@ import {
 	type ImportExecutionProgress,
 	type ImportExecutionSummary,
 	type ImportMessageDescriptor,
-	type VaultImportErrorCode,
 	useVaultImport,
+	type VaultImportErrorCode,
 } from "@/hooks/use-vault-import";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -505,7 +505,10 @@ export function VaultImportDialog({
 
 			toast.success(m["vaults.import.toast.completed_successfully"]());
 		} catch (executionError) {
-			const descriptor = toImportErrorDescriptor(executionError, "execution-failed");
+			const descriptor = toImportErrorDescriptor(
+				executionError,
+				"execution-failed",
+			);
 			toast.error(getImportErrorMessage(descriptor, m));
 		}
 	}, [executeImport, m, onImportCompleted]);
@@ -690,14 +693,18 @@ export function VaultImportDialog({
 													title={getProviderImageDescription(provider, m)}
 												/>
 												<div className="flex-1 space-y-0.5">
-													<p className="font-medium text-sm">{provider.title}</p>
+													<p className="font-medium text-sm">
+														{provider.title}
+													</p>
 													<p className="text-muted-foreground text-xs">
 														{getProviderDescription(provider, m)}
 													</p>
 												</div>
 												<Badge variant={isSelected ? "default" : "secondary"}>
 													{isSelected
-														? m["vaults.import.manager.provider_card.selected"]()
+														? m[
+																"vaults.import.manager.provider_card.selected"
+															]()
 														: m["vaults.import.manager.provider_card.select"]()}
 												</Badge>
 											</button>
@@ -787,7 +794,10 @@ export function VaultImportDialog({
 										</span>
 
 										{selectedFileName && (
-											<Badge variant="secondary" className="max-w-full truncate">
+											<Badge
+												variant="secondary"
+												className="max-w-full truncate"
+											>
 												{selectedFileName}
 											</Badge>
 										)}
@@ -931,15 +941,21 @@ export function VaultImportDialog({
 											>
 												<div className="flex flex-wrap items-center justify-between gap-2">
 													<div>
-														<p className="font-medium text-sm">{sourceVault.name}</p>
+														<p className="font-medium text-sm">
+															{sourceVault.name}
+														</p>
 														<p className="text-muted-foreground text-xs">
 															{sourceVault.itemCount === 1
-																? m["vaults.import.mapping.source_item_count.single"]({
+																? m[
+																		"vaults.import.mapping.source_item_count.single"
+																	]({
 																		count: sourceVault.itemCount,
-																})
-																: m["vaults.import.mapping.source_item_count.plural"]({
+																	})
+																: m[
+																		"vaults.import.mapping.source_item_count.plural"
+																	]({
 																		count: sourceVault.itemCount,
-																})}
+																	})}
 														</p>
 													</div>
 													<Badge variant="secondary">
@@ -1013,8 +1029,8 @@ export function VaultImportDialog({
 																		>
 																			{vault.role === "read-only"
 																				? m[
-																					"vaults.import.mapping.target_vault.read_only"
-																				]({ vaultName: vault.vaultName })
+																						"vaults.import.mapping.target_vault.read_only"
+																					]({ vaultName: vault.vaultName })
 																				: vault.vaultName}
 																		</SelectItem>
 																	))

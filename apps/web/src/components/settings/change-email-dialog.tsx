@@ -22,13 +22,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
-import { useI18n } from "@/providers/i18n-provider";
 import {
 	decrypt,
 	deriveKeys,
 	encrypt,
 	generateSRPRegistration,
 } from "@/lib/wasm-crypto";
+import { useI18n } from "@/providers/i18n-provider";
 
 export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 	const { m } = useI18n();
@@ -57,9 +57,7 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 			return;
 		}
 		if (newEmail.toLowerCase() === currentEmail.toLowerCase()) {
-			toast.error(
-				m["settings.change_email_dialog.toast.email_must_differ"](),
-			);
+			toast.error(m["settings.change_email_dialog.toast.email_must_differ"]());
 			return;
 		}
 		if (!currentPassword.trim()) {
@@ -150,23 +148,23 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 			}
 
 			// 7. Send to server
-				await trpcClient.auth.updateEmail.mutate({
-					newEmail: normalizedNewEmail,
-					srpSalt,
+			await trpcClient.auth.updateEmail.mutate({
+				newEmail: normalizedNewEmail,
+				srpSalt,
 				srpVerifier,
 				encryptedPrivateKey: JSON.stringify(newEncryptedPrivateKey),
 				encryptedVaultKeys,
-				});
+			});
 
-				toast.success(m["settings.change_email_dialog.toast.updated"]());
-				setOpen(false);
-				navigate({ to: "/login" });
-			} catch (error) {
-				console.error("Email change error:", error);
-				toast.error(m["settings.change_email_dialog.toast.update_failed"]());
-				setIsProcessing(false);
-			}
-		};
+			toast.success(m["settings.change_email_dialog.toast.updated"]());
+			setOpen(false);
+			navigate({ to: "/login" });
+		} catch (error) {
+			console.error("Email change error:", error);
+			toast.error(m["settings.change_email_dialog.toast.update_failed"]());
+			setIsProcessing(false);
+		}
+	};
 
 	const handleOpenChange = (newOpen: boolean) => {
 		setOpen(newOpen);
@@ -179,74 +177,80 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 		}
 	};
 
-		return (
-			<Dialog open={open} onOpenChange={handleOpenChange}>
-				<DialogTrigger asChild>
-					<Button variant="outline">
-						<Mail className="mr-2 h-4 w-4" />
-						{m["settings.change_email_dialog.trigger"]()}
-					</Button>
-				</DialogTrigger>
-				<DialogContent>
-					<form onSubmit={handleSubmit}>
-						<DialogHeader>
-							<DialogTitle>
-								{m["settings.change_email_dialog.title"]()}
-							</DialogTitle>
-							<DialogDescription>
-								{m["settings.change_email_dialog.description"]()}
-							</DialogDescription>
-						</DialogHeader>
-						<div className="grid gap-4 py-4">
-							<div className="grid gap-2">
-								<Label htmlFor="currentEmail">
-									{m["settings.change_email_dialog.field.current_email"]()}
-								</Label>
-								<Input
-									id="currentEmail"
-									value={currentEmail}
+	return (
+		<Dialog open={open} onOpenChange={handleOpenChange}>
+			<DialogTrigger asChild>
+				<Button variant="outline">
+					<Mail className="mr-2 h-4 w-4" />
+					{m["settings.change_email_dialog.trigger"]()}
+				</Button>
+			</DialogTrigger>
+			<DialogContent>
+				<form onSubmit={handleSubmit}>
+					<DialogHeader>
+						<DialogTitle>
+							{m["settings.change_email_dialog.title"]()}
+						</DialogTitle>
+						<DialogDescription>
+							{m["settings.change_email_dialog.description"]()}
+						</DialogDescription>
+					</DialogHeader>
+					<div className="grid gap-4 py-4">
+						<div className="grid gap-2">
+							<Label htmlFor="currentEmail">
+								{m["settings.change_email_dialog.field.current_email"]()}
+							</Label>
+							<Input
+								id="currentEmail"
+								value={currentEmail}
 								disabled
 								className="bg-muted"
 							/>
-							</div>
-							<div className="grid gap-2">
-								<Label htmlFor="newEmail">
-									{m["settings.change_email_dialog.field.new_email"]()}
-								</Label>
+						</div>
+						<div className="grid gap-2">
+							<Label htmlFor="newEmail">
+								{m["settings.change_email_dialog.field.new_email"]()}
+							</Label>
+							<Input
+								id="newEmail"
+								type="email"
+								value={newEmail}
+								onChange={(e) => setNewEmail(e.target.value)}
+								placeholder={m[
+									"settings.change_email_dialog.placeholder.new_email"
+								]()}
+								autoFocus
+							/>
+						</div>
+						<div className="grid gap-2">
+							<Label htmlFor="confirmEmail">
+								{m["settings.change_email_dialog.field.confirm_new_email"]()}
+							</Label>
+							<Input
+								id="confirmEmail"
+								type="email"
+								value={confirmEmail}
+								onChange={(e) => setConfirmEmail(e.target.value)}
+								placeholder={m[
+									"settings.change_email_dialog.placeholder.confirm_new_email"
+								]()}
+							/>
+						</div>
+						<div className="grid gap-2">
+							<Label htmlFor="emailChangePassword">
+								{m["settings.change_email_dialog.field.password"]()}
+							</Label>
+							<div className="relative">
 								<Input
-									id="newEmail"
-									type="email"
-									value={newEmail}
-									onChange={(e) => setNewEmail(e.target.value)}
-									placeholder={m["settings.change_email_dialog.placeholder.new_email"]()}
-									autoFocus
-								/>
-							</div>
-							<div className="grid gap-2">
-								<Label htmlFor="confirmEmail">
-									{m["settings.change_email_dialog.field.confirm_new_email"]()}
-								</Label>
-								<Input
-									id="confirmEmail"
-									type="email"
-									value={confirmEmail}
-									onChange={(e) => setConfirmEmail(e.target.value)}
-									placeholder={m["settings.change_email_dialog.placeholder.confirm_new_email"]()}
-								/>
-							</div>
-							<div className="grid gap-2">
-								<Label htmlFor="emailChangePassword">
-									{m["settings.change_email_dialog.field.password"]()}
-								</Label>
-								<div className="relative">
-									<Input
 									id="emailChangePassword"
-										type={showPassword ? "text" : "password"}
-										value={currentPassword}
-										onChange={(e) => setCurrentPassword(e.target.value)}
-										placeholder={m["settings.change_email_dialog.placeholder.password"]()}
-										className="pr-10"
-									/>
+									type={showPassword ? "text" : "password"}
+									value={currentPassword}
+									onChange={(e) => setCurrentPassword(e.target.value)}
+									placeholder={m[
+										"settings.change_email_dialog.placeholder.password"
+									]()}
+									className="pr-10"
+								/>
 								<Button
 									type="button"
 									variant="ghost"
@@ -258,28 +262,28 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 								</Button>
 							</div>
 						</div>
-						</div>
-						<div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
-							<p className="text-amber-700 text-xs dark:text-amber-300">
-								<strong>{m["settings.common.warning"]()}</strong>{" "}
-								{m["settings.change_email_dialog.warning.recovery_key_reset"]()}
-							</p>
-						</div>
-						<DialogFooter>
-							<Button
-								type="button"
-								variant="outline"
-								onClick={() => setOpen(false)}
-							>
-								{m["settings.common.action.cancel"]()}
-							</Button>
-							<Button type="submit" disabled={isProcessing}>
-								{isProcessing
-									? m["settings.change_email_dialog.action.updating"]()
-									: m["settings.change_email_dialog.action.submit"]()}
-							</Button>
-						</DialogFooter>
-					</form>
+					</div>
+					<div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+						<p className="text-amber-700 text-xs dark:text-amber-300">
+							<strong>{m["settings.common.warning"]()}</strong>{" "}
+							{m["settings.change_email_dialog.warning.recovery_key_reset"]()}
+						</p>
+					</div>
+					<DialogFooter>
+						<Button
+							type="button"
+							variant="outline"
+							onClick={() => setOpen(false)}
+						>
+							{m["settings.common.action.cancel"]()}
+						</Button>
+						<Button type="submit" disabled={isProcessing}>
+							{isProcessing
+								? m["settings.change_email_dialog.action.updating"]()
+								: m["settings.change_email_dialog.action.submit"]()}
+						</Button>
+					</DialogFooter>
+				</form>
 			</DialogContent>
 		</Dialog>
 	);

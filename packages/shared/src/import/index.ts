@@ -4,11 +4,10 @@ export {
 	getImportProviders,
 } from "./provider-registry";
 export { onePassword1puxImportProvider } from "./providers/1password-1pux";
-export { ImportProviderError } from "./types";
 export type {
 	ImportDecryptedItem,
-	ImportErrorCode,
 	ImportError,
+	ImportErrorCode,
 	ImportMessageParams,
 	ImportMessageValue,
 	ImportPreview,
@@ -17,6 +16,7 @@ export type {
 	ImportProviderId,
 	ImportSourceItem,
 	ImportSourceVault,
-	ImportWarningCode,
 	ImportWarning,
+	ImportWarningCode,
 } from "./types";
+export { ImportProviderError } from "./types";

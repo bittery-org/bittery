@@ -62,10 +62,14 @@ function formatPasskeyLastUsed(
 	}
 	if (deltaDays < 30) {
 		return deltaDays === 1
-			? m["vaults.detail.items.detail.login.passkeys.last_used.days_ago.single"]({
+			? m[
+					"vaults.detail.items.detail.login.passkeys.last_used.days_ago.single"
+				]({
 					count: deltaDays,
 				})
-			: m["vaults.detail.items.detail.login.passkeys.last_used.days_ago.plural"]({
+			: m[
+					"vaults.detail.items.detail.login.passkeys.last_used.days_ago.plural"
+				]({
 					count: deltaDays,
 				});
 	}
@@ -193,7 +197,9 @@ export function LoginDetail({
 					{data.totpSecret && (
 						<div className="space-y-2">
 							<Label>
-								{m["vaults.detail.items.detail.login.field.one_time_password"]()}
+								{m[
+									"vaults.detail.items.detail.login.field.one_time_password"
+								]()}
 							</Label>
 							<InlineTotpDisplay
 								totpSecret={data.totpSecret}
@@ -208,16 +214,16 @@ export function LoginDetail({
 						<div className="space-y-2">
 							<Label className="font-medium text-sm">
 								{passkeys.length === 1
-									? m[
-											"vaults.detail.items.detail.login.passkeys.label.single"
-										]({
-											count: passkeys.length,
-										})
-									: m[
-											"vaults.detail.items.detail.login.passkeys.label.plural"
-										]({
-											count: passkeys.length,
-										})}
+									? m["vaults.detail.items.detail.login.passkeys.label.single"](
+											{
+												count: passkeys.length,
+											},
+										)
+									: m["vaults.detail.items.detail.login.passkeys.label.plural"](
+											{
+												count: passkeys.length,
+											},
+										)}
 							</Label>
 							<div className="space-y-2">
 								{passkeys.map((passkey, index) => {
@@ -295,11 +301,9 @@ export function LoginDetail({
 													variant="ghost"
 													size="icon"
 													className="size-7"
-													title={
-														m[
-															"vaults.detail.items.detail.login.passkeys.action.copy_credential_id"
-														]()
-													}
+													title={m[
+														"vaults.detail.items.detail.login.passkeys.action.copy_credential_id"
+													]()}
 													onClick={() =>
 														handleCopy(
 															passkey.credentialId,
@@ -316,11 +320,9 @@ export function LoginDetail({
 														variant="ghost"
 														size="icon"
 														className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
-														title={
-															m[
-																"vaults.detail.items.detail.login.passkeys.action.remove"
-															]()
-														}
+														title={m[
+															"vaults.detail.items.detail.login.passkeys.action.remove"
+														]()}
 														disabled={Boolean(isRemoving)}
 														onClick={() =>
 															setPendingRemoval({
@@ -410,7 +412,9 @@ export function LoginDetail({
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle>
-							{m["vaults.detail.items.detail.login.passkeys.remove_dialog.title"]()}
+							{m[
+								"vaults.detail.items.detail.login.passkeys.remove_dialog.title"
+							]()}
 						</AlertDialogTitle>
 						<AlertDialogDescription>
 							{m[

@@ -6,14 +6,14 @@
  */
 
 export {
-	type CreateVaultInput,
-	type CreateVaultResult,
-	useCreateVault,
-} from "./use-create-vault";
-export {
 	type ConvertVaultTypeInput,
 	type ConvertVaultTypeResult,
 	useConvertVaultType,
 } from "./use-convert-vault-type";
+export {
+	type CreateVaultInput,
+	type CreateVaultResult,
+	useCreateVault,
+} from "./use-create-vault";
 export { type DeleteVaultInput, useDeleteVault } from "./use-delete-vault";
 export { type UpdateVaultInput, useUpdateVault } from "./use-update-vault";

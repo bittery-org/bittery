@@ -6,7 +6,6 @@ import type {
 	TotpAlgorithm,
 	TotpDigits,
 } from "../../types";
-import { ImportProviderError } from "../types";
 import type {
 	ImportDecryptedItem,
 	ImportPreview,
@@ -15,6 +14,7 @@ import type {
 	ImportSourceVault,
 	ImportWarning,
 } from "../types";
+import { ImportProviderError } from "../types";
 
 const CATEGORY_UUID_MAP: Record<string, ItemCategory> = {
 	"001": "login",

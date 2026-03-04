@@ -61,8 +61,7 @@ const roadmapCategories: RoadmapCategory[] = [
 			},
 			{
 				title: "Billing",
-				description:
-					"Plans, payment processing, and upgrade/downgrade flows.",
+				description: "Plans, payment processing, and upgrade/downgrade flows.",
 				status: "done",
 			},
 			{
@@ -132,8 +131,7 @@ const roadmapCategories: RoadmapCategory[] = [
 			},
 			{
 				title: "Secure File Storage",
-				description:
-					"Encrypted file attachments for any item in your vault.",
+				description: "Encrypted file attachments for any item in your vault.",
 				status: "done",
 			},
 			{
@@ -144,8 +142,7 @@ const roadmapCategories: RoadmapCategory[] = [
 			},
 			{
 				title: "Internationalization",
-				description:
-					"Multi-language support starting with English and German.",
+				description: "Multi-language support starting with English and German.",
 				status: "in-progress",
 			},
 		],
@@ -162,8 +159,7 @@ const roadmapCategories: RoadmapCategory[] = [
 			},
 			{
 				title: "Sharing",
-				description:
-					"Securely share passwords and items with team members.",
+				description: "Securely share passwords and items with team members.",
 				status: "done",
 			},
 			{
@@ -204,7 +200,12 @@ const roadmapCategories: RoadmapCategory[] = [
 
 const statusConfig: Record<
 	ItemStatus,
-	{ label: string; icon: typeof CheckCircle2; className: string; dotClass: string }
+	{
+		label: string;
+		icon: typeof CheckCircle2;
+		className: string;
+		dotClass: string;
+	}
 > = {
 	done: {
 		label: "Done",
@@ -223,8 +224,7 @@ const statusConfig: Record<
 	planned: {
 		label: "Planned",
 		icon: Circle,
-		className:
-			"bg-muted text-muted-foreground border-border",
+		className: "bg-muted text-muted-foreground border-border",
 		dotClass: "bg-muted-foreground/40",
 	},
 };
@@ -262,8 +262,7 @@ function StatusBadge({ status }: { status: ItemStatus }) {
 function ProgressBar() {
 	const stats = getRoadmapStats();
 	const donePercent = (stats.done / stats.total) * 100;
-	const progressPercent =
-		((stats.done + stats.inProgress) / stats.total) * 100;
+	const progressPercent = ((stats.done + stats.inProgress) / stats.total) * 100;
 
 	return (
 		<div className="space-y-3">
@@ -292,9 +291,7 @@ function ProgressBar() {
 			<div className="flex gap-4 text-xs">
 				<span className="flex items-center gap-1.5">
 					<span className="size-2 rounded-full bg-emerald-500" />
-					<span className="text-muted-foreground">
-						{stats.done} Done
-					</span>
+					<span className="text-muted-foreground">{stats.done} Done</span>
 				</span>
 				<span className="flex items-center gap-1.5">
 					<span className="size-2 rounded-full bg-amber-400 dark:bg-amber-500/60" />
@@ -304,9 +301,7 @@ function ProgressBar() {
 				</span>
 				<span className="flex items-center gap-1.5">
 					<span className="size-2 rounded-full bg-muted-foreground/30" />
-					<span className="text-muted-foreground">
-						{stats.planned} Planned
-					</span>
+					<span className="text-muted-foreground">{stats.planned} Planned</span>
 				</span>
 			</div>
 		</div>
@@ -335,12 +330,11 @@ function RoadmapPage() {
 							Product Roadmap
 						</div>
 						<h1 className="font-bold font-display text-3xl tracking-tight sm:text-4xl lg:text-5xl">
-							See what we're{" "}
-							<span className="text-primary">building next</span>
+							See what we're <span className="text-primary">building next</span>
 						</h1>
 						<p className="mt-4 text-base text-muted-foreground leading-relaxed sm:text-lg">
-							Transparency is one of our core values. Here's exactly what
-							we're working on, what's done, and what's coming next.
+							Transparency is one of our core values. Here's exactly what we're
+							working on, what's done, and what's coming next.
 						</p>
 					</motion.div>
 
@@ -453,11 +447,7 @@ function RoadmapPage() {
 								contribute directly on GitHub.
 							</p>
 							<div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-								<Button
-									size="lg"
-									className="gap-2 rounded-full px-7"
-									asChild
-								>
+								<Button size="lg" className="gap-2 rounded-full px-7" asChild>
 									<a
 										href="https://github.com/bittery-org/bittery"
 										target="_blank"
