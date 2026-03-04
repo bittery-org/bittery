@@ -77,6 +77,21 @@ export interface BootstrapItemsClient {
 			}) => Promise<BootstrapItemPage>;
 		};
 	};
+	vault?: {
+		list?: {
+			query: () => Promise<
+				Array<{
+					id: string;
+					name: string;
+					type: "personal" | "team";
+					icon: string | null;
+					imageUrl: string | null;
+					encryptedVaultKey: string;
+					role: "owner" | "admin" | "member" | "read-only";
+				}>
+			>;
+		};
+	};
 }
 
 export class VaultRepository {
@@ -241,6 +256,30 @@ export class VaultRepository {
 				icon: vaultKey.vaultIcon ?? null,
 				imageUrl: vaultKey.vaultImageUrl ?? null,
 			});
+		}
+	}
+
+	private async fetchVaultKeysFromServer(
+		client: BootstrapItemsClient,
+	): Promise<VaultKeyData[] | null> {
+		if (!client.vault?.list?.query) {
+			return null;
+		}
+
+		try {
+			const vaults = await client.vault.list.query();
+			return vaults.map((vault) => ({
+				vaultId: vault.id,
+				vaultName: vault.name,
+				vaultType: vault.type,
+				vaultIcon: vault.icon,
+				vaultImageUrl: vault.imageUrl,
+				encryptedVaultKey: vault.encryptedVaultKey,
+				role: vault.role,
+			}));
+		} catch (error) {
+			console.error("[VaultRepository] Failed to refresh vault keys:", error);
+			return null;
 		}
 	}
 
@@ -584,13 +623,19 @@ export class VaultRepository {
 			cursor = page.nextCursor;
 		}
 
-		const storedVaultKeys = await this.storage.getVaultKeys(this.email);
+		const refreshedVaultKeys = await this.fetchVaultKeysFromServer(client);
+		const vaultKeys =
+			refreshedVaultKeys ?? (await this.storage.getVaultKeys(this.email));
 
 		this.vaults.clear();
 		for (const vault of vaults.values()) {
 			this.vaults.set(vault.id, vault);
 		}
-		this.mergeVaultKeyEntries(storedVaultKeys);
+
+		if (refreshedVaultKeys) {
+			await this.storage.storeVaultKeys(refreshedVaultKeys, this.email);
+		}
+		this.mergeVaultKeyEntries(vaultKeys);
 
 		this.items.clear();
 		for (const cachedItem of cachedItems) {
@@ -607,7 +652,10 @@ export class VaultRepository {
 
 		await Promise.all([
 			this.storage.setCachedItems?.(cachedItems, this.email),
-			this.storage.setCachedVaults?.(Array.from(vaults.values()), this.email),
+			this.storage.setCachedVaults?.(
+				Array.from(this.vaults.values()),
+				this.email,
+			),
 			this.storage.setItemCacheMetadata?.(
 				{
 					lastFullSyncAt: Date.now(),

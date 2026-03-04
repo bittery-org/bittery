@@ -200,7 +200,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
 			const { accountsInfo } = await core.accounts.resolveAccounts();
 			if (accountsInfo.length > 0) {
-				await core.vaultCoordinator.refreshFromServer(accountsInfo);
+				// Run a single hydration pass after cache reset.
+				// With an empty item cache this triggers one bootstrap sync per account.
+				await core.vaultCoordinator.hydrate(accountsInfo);
 			}
 
 			if (wasConnected) {

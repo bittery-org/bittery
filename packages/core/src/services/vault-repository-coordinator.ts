@@ -52,6 +52,34 @@ export class VaultRepositoryCoordinator {
 		return email.toLowerCase();
 	}
 
+	private resolvePreferredEmail(email?: string): string | undefined {
+		if (email) {
+			const normalized = this.normalizeEmail(email);
+			if (this.activeEmails.size === 0) {
+				return normalized;
+			}
+			if (this.activeEmails.has(normalized)) {
+				return normalized;
+			}
+			// If sync context points to a stale account while the UI has exactly one
+			// active account, prefer the active account to keep cache updates visible.
+			if (this.activeEmails.size === 1) {
+				return Array.from(this.activeEmails)[0];
+			}
+			return normalized;
+		}
+
+		if (this.activeEmails.size === 1) {
+			return Array.from(this.activeEmails)[0];
+		}
+
+		if (this.activeEmails.size === 0 && this.repos.size === 1) {
+			return Array.from(this.repos.keys())[0];
+		}
+
+		return undefined;
+	}
+
 	private emit(): void {
 		this.snapshot++;
 		for (const listener of this.listeners) {
@@ -292,11 +320,7 @@ export class VaultRepositoryCoordinator {
 		item: CachedEncryptedItem,
 		email?: string,
 	): Promise<void> {
-		const targetEmail =
-			email ??
-			(this.activeEmails.size === 1
-				? Array.from(this.activeEmails)[0]
-				: undefined);
+		const targetEmail = this.resolvePreferredEmail(email);
 		if (!targetEmail) {
 			return;
 		}
@@ -329,11 +353,7 @@ export class VaultRepositoryCoordinator {
 	}
 
 	async upsertVault(vault: CachedVaultMetadata, email?: string): Promise<void> {
-		const targetEmail =
-			email ??
-			(this.activeEmails.size === 1
-				? Array.from(this.activeEmails)[0]
-				: undefined);
+		const targetEmail = this.resolvePreferredEmail(email);
 		if (!targetEmail) {
 			return;
 		}
@@ -367,11 +387,7 @@ export class VaultRepositoryCoordinator {
 		vaultKeys: VaultKeyData[],
 		email?: string,
 	): Promise<void> {
-		const targetEmail =
-			email ??
-			(this.activeEmails.size === 1
-				? Array.from(this.activeEmails)[0]
-				: undefined);
+		const targetEmail = this.resolvePreferredEmail(email);
 		if (!targetEmail) {
 			return;
 		}

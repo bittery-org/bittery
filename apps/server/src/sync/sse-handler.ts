@@ -197,6 +197,47 @@ function removeConnection(userId: string, connectionId: string): void {
  */
 function deliverToConnections(event: SyncEventPayload): void {
 	const { vaultId, clientId, userId: eventUserId } = event;
+	const pushEventToRecipients = (recipients: Set<string>) => {
+		for (const userId of recipients) {
+			const userConnections = connections.get(userId);
+			if (!userConnections) continue;
+
+			for (const connection of userConnections.values()) {
+				connection.channel.push({
+					...event,
+					metadata: {
+						...event.metadata,
+						isOwnEvent: userId === eventUserId,
+						originClientId: clientId,
+					},
+				});
+			}
+		}
+	};
+	const vaultCreatedRecipients =
+		event.type === "vault_created" && vaultId
+			? (() => {
+					const recipients = new Set<string>([eventUserId]);
+					for (const [userId] of connections) {
+						if (userVaults.get(userId)?.has(vaultId)) {
+							recipients.add(userId);
+						}
+					}
+					return recipients;
+				})()
+			: null;
+	const vaultDeletedRecipients =
+		event.type === "vault_deleted" && vaultId
+			? (() => {
+					const recipients = new Set<string>([eventUserId]);
+					for (const [userId] of connections) {
+						if (userVaults.get(userId)?.has(vaultId)) {
+							recipients.add(userId);
+						}
+					}
+					return recipients;
+				})()
+			: null;
 
 	// User-targeted control events are delivered directly to the target user.
 	if (event.type === "vault_access_revoked") {
@@ -259,6 +300,20 @@ function deliverToConnections(event: SyncEventPayload): void {
 				connection.channel.push(event);
 			}
 		}
+		return;
+	}
+
+	// For vault creation we always deliver to the creator and any recipients
+	// already known to have access.
+	if (event.type === "vault_created" && vaultCreatedRecipients) {
+		pushEventToRecipients(vaultCreatedRecipients);
+		return;
+	}
+
+	// For vault deletion we need to deliver to users who had access before the
+	// membership cache was mutated above.
+	if (event.type === "vault_deleted" && vaultDeletedRecipients) {
+		pushEventToRecipients(vaultDeletedRecipients);
 		return;
 	}
 
