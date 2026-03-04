@@ -15,6 +15,7 @@ import {
 	IconMobileOutlineDuo18,
 } from "@bittery/ui/icons";
 import { useState } from "react";
+import { useI18n } from "../../providers/i18n-provider";
 import type { VaultOption } from "./item-form";
 import { ItemForm } from "./item-form";
 
@@ -33,35 +34,71 @@ interface CreateItemSheetProps {
 const categories = [
 	{
 		type: "login" as const,
-		title: "Login",
-		description: "Save website credentials with optional 2FA",
 		icon: IconKeyOutlineDuo18,
 	},
 	{
 		type: "totp" as const,
-		title: "Standalone Authenticator",
-		description: "Store 2FA code without login credentials",
 		icon: IconMobileOutlineDuo18,
 	},
 	{
 		type: "secure-note" as const,
-		title: "Secure Note",
-		description: "Store sensitive information",
 		icon: IconFileLockOutlineDuo18,
 	},
 	{
 		type: "credit-card" as const,
-		title: "Credit Card",
-		description: "Save payment details",
 		icon: IconCreditCardLockOutlineDuo18,
 	},
 	{
 		type: "identity" as const,
-		title: "Identity",
-		description: "Store personal information",
 		icon: IconIdBadge2OutlineDuo18,
 	},
 ];
+
+function getCategoryTitle(
+	category: ItemCategory,
+	m: ReturnType<typeof useI18n>["m"],
+) {
+	switch (category) {
+		case "login":
+			return m["vaults.detail.items.category.login.title"]();
+		case "totp":
+			return m["vaults.detail.items.category.totp.title"]();
+		case "secure-note":
+			return m["vaults.detail.items.category.secure_note.title"]();
+		case "credit-card":
+			return m["vaults.detail.items.category.credit_card.title"]();
+		case "identity":
+			return m["vaults.detail.items.category.identity.title"]();
+		default:
+			return category;
+	}
+}
+
+function getCategoryDescription(
+	category: ItemCategory,
+	m: ReturnType<typeof useI18n>["m"],
+) {
+	switch (category) {
+		case "login":
+			return m["vaults.detail.items.create_sheet.category.login.description"]();
+		case "totp":
+			return m["vaults.detail.items.create_sheet.category.totp.description"]();
+		case "secure-note":
+			return m[
+				"vaults.detail.items.create_sheet.category.secure_note.description"
+			]();
+		case "credit-card":
+			return m[
+				"vaults.detail.items.create_sheet.category.credit_card.description"
+			]();
+		case "identity":
+			return m[
+				"vaults.detail.items.create_sheet.category.identity.description"
+			]();
+		default:
+			return "";
+	}
+}
 
 export function CreateItemSheet({
 	open,
@@ -70,6 +107,7 @@ export function CreateItemSheet({
 	selectedVaultId,
 	onCreateItem,
 }: CreateItemSheetProps) {
+	const { m } = useI18n();
 	const [step, setStep] = useState<1 | 2>(1);
 	const [selectedCategory, setSelectedCategory] =
 		useState<ItemCategory>("login");
@@ -92,7 +130,7 @@ export function CreateItemSheet({
 
 	const handleSubmit = async (data: DecryptedItemData, vaultId: string) => {
 		if (!vaultId) {
-			toast.error("No vault selected");
+			toast.error(m["vaults.detail.items.create_sheet.toast.no_vault_selected"]());
 			return;
 		}
 
@@ -130,13 +168,15 @@ export function CreateItemSheet({
 				<SheetHeader className="px-7 py-4">
 					<SheetTitle className="mb-1">
 						{step === 1
-							? "Create New Item"
-							: `Create ${categories.find((c) => c.type === selectedCategory)?.title}`}
+							? m["vaults.detail.items.create_sheet.title.default"]()
+							: m["vaults.detail.items.create_sheet.title.selected"]({
+									category: getCategoryTitle(selectedCategory, m),
+								})}
 					</SheetTitle>
 					<SheetDescription>
 						{step === 1
-							? "Choose the type of item you want to create."
-							: "Fill in the details for your new item."}
+							? m["vaults.detail.items.create_sheet.description.default"]()
+							: m["vaults.detail.items.create_sheet.description.selected"]()}
 					</SheetDescription>
 				</SheetHeader>
 
@@ -154,9 +194,11 @@ export function CreateItemSheet({
 										<category.icon className="size-5" />
 									</div>
 									<div className="flex-1">
-										<h3 className="font-medium">{category.title}</h3>
+										<h3 className="font-medium">
+											{getCategoryTitle(category.type, m)}
+										</h3>
 										<p className="mt-1 text-muted-foreground text-sm">
-											{category.description}
+											{getCategoryDescription(category.type, m)}
 										</p>
 									</div>
 								</button>
@@ -167,7 +209,7 @@ export function CreateItemSheet({
 							category={selectedCategory}
 							onSubmit={handleSubmit}
 							onCancel={handleCancel}
-							submitLabel="Create"
+							submitLabel={m["vaults.detail.items.form.action.create"]()}
 							isSubmitting={isSubmitting}
 							vaults={vaults}
 							selectedVaultId={selectedVaultId}

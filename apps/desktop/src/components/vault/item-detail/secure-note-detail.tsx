@@ -1,4 +1,5 @@
 import { Button, Card, Label } from "@bittery/ui";
+import { useI18n } from "../../../providers/i18n-provider";
 import { Favicon } from "../favicon";
 import { TagInput } from "../tag-input";
 import { DetailHeader } from "./field-components";
@@ -13,18 +14,20 @@ export function SecureNoteDetail({
 	availableTags = [],
 	isUpdatingTags,
 }: CategoryDetailProps<SecureNoteDisplayData>) {
+	const { m } = useI18n();
+
 	return (
 		<div className="space-y-4">
 			<DetailHeader
 				icon={<Favicon title={data.title} category="secure-note" size="lg" />}
 				title={data.title}
-				subtitle="Secure Note"
+				subtitle={m["vaults.detail.items.category.secure_note.title"]()}
 			/>
 
 			<div className="flex gap-2">
 				{onEdit && (
 					<Button size="sm" variant="outline" onClick={onEdit}>
-						Edit
+						{m["vaults.detail.items.detail.action.edit"]()}
 					</Button>
 				)}
 				{onDelete && (
@@ -34,7 +37,7 @@ export function SecureNoteDetail({
 						className="text-destructive hover:bg-destructive/10 hover:text-destructive"
 						onClick={onDelete}
 					>
-						Delete
+						{m["vaults.detail.items.detail.action.delete"]()}
 					</Button>
 				)}
 			</div>
@@ -50,7 +53,7 @@ export function SecureNoteDetail({
 			{/* Tags */}
 			{onTagsChange && (
 				<div className="space-y-2">
-					<Label>Tags</Label>
+					<Label>{m["vaults.detail.items.detail.tags.label"]()}</Label>
 					<TagInput
 						tags={data.tags || []}
 						availableTags={availableTags}

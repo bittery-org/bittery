@@ -132,10 +132,18 @@ export function ImportDialog({
 				throw new Error("Failed to get vault key for encryption");
 			}
 
+			const sessionData = await storage.getStoredSessionData?.(accountEmail);
+			const userId =
+				sessionData?.userId ?? (await storage.getActiveAccountUserId());
+			if (!userId) {
+				throw new Error("User ID not available for encryption context");
+			}
+
 			// Encrypt all items
 			const encryptedItems = [];
 			for (let i = 0; i < parseResult.items.length; i++) {
 				const item = parseResult.items[i];
+				const itemId = await core.items.generateItemId();
 
 				// Merge overview and sensitiveData into a single object for encryption
 				// This matches the manual creation flow where ALL data is encrypted
@@ -150,9 +158,17 @@ export function ImportDialog({
 				const encryptedData = await encrypt(
 					JSON.stringify(completeItemData),
 					vaultKey,
+					{
+						vaultId,
+						entityId: itemId,
+						entityType: "item",
+						version: 1,
+						userId,
+					},
 				);
 
 				encryptedItems.push({
+					itemId,
 					category: item.category,
 					favorite: item.favorite,
 					encryptedData: encryptedData.ciphertext,

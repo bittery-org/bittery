@@ -34,6 +34,7 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useState } from "react";
 import Loader from "../loader";
+import { useI18n } from "../../providers/i18n-provider";
 import { VaultInfoPopover } from "./item-categories/shared/vault-info-popover";
 import ItemDetail from "./item-detail";
 import { ItemAttachments } from "./item-detail/item-attachments";
@@ -66,6 +67,7 @@ export function ItemDetailPage({
 	availableTags,
 	onTagClick,
 }: ItemDetailPageProps) {
+	const { m } = useI18n();
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
@@ -135,14 +137,16 @@ export function ItemDetailPage({
 					vaultId: rawItem.vaultId,
 					data: updatedData,
 				});
-				toast.success("Passkey removed");
+				toast.success(m["vaults.detail.items.detail_page.toast.passkey_removed"]());
 			} catch (error) {
 				const errorMessage =
-					error instanceof Error ? error.message : "Failed to remove passkey";
+					error instanceof Error
+						? error.message
+						: m["vaults.detail.items.detail_page.toast.passkey_remove_error"]();
 				toast.error(errorMessage);
 			}
 		},
-		[rawItem, decryptedData, updateItem],
+		[rawItem, decryptedData, m, updateItem],
 	);
 
 	const handleShare = () => {
@@ -157,10 +161,15 @@ export function ItemDetailPage({
 		if (!rawItem || !decryptedData) return;
 
 		try {
-			// Create a duplicate with "Copy of" prefix
+			const titleForDuplicate =
+				decryptedData.title ||
+				m["vaults.detail.items.detail_page.duplicate.default_title"]();
+
 			const duplicatedData: DecryptedItemData = {
 				...decryptedData,
-				title: `Copy of ${decryptedData.title || "Item"}`,
+				title: m["vaults.detail.items.detail_page.duplicate.title"]({
+					title: titleForDuplicate,
+				}),
 			};
 
 			const result = await createItem.mutateAsync({
@@ -169,7 +178,7 @@ export function ItemDetailPage({
 				data: duplicatedData,
 			});
 
-			toast.success("Item duplicated successfully");
+			toast.success(m["vaults.detail.items.detail_page.toast.item_duplicated"]());
 
 			// Navigate to the duplicated item
 			navigate({
@@ -178,7 +187,9 @@ export function ItemDetailPage({
 			});
 		} catch (error) {
 			const errorMessage =
-				error instanceof Error ? error.message : "Failed to duplicate item";
+				error instanceof Error
+					? error.message
+					: m["vaults.detail.items.detail_page.toast.item_duplicate_error"]();
 			toast.error(errorMessage);
 		}
 	};
@@ -195,20 +206,25 @@ export function ItemDetailPage({
 					vaultId: rawItem.vaultId,
 					data: { password },
 				});
-				toast.success("Password restored");
+				toast.success(
+					m["vaults.detail.items.password_history_dialog.toast.restore_success"](),
+				);
 				setIsPasswordHistoryOpen(false);
 			} catch (error) {
 				const errorMessage =
-					error instanceof Error ? error.message : "Failed to restore password";
+					error instanceof Error
+						? error.message
+						: m[
+								"vaults.detail.items.password_history_dialog.toast.restore_error"
+							]();
 				toast.error(errorMessage);
 			}
 		},
-		[rawItem, updateItem],
+		[rawItem, m, updateItem],
 	);
 
 	const confirmDelete = async () => {
 		if (!rawItem) return;
-		console.log(rawItem);
 
 		try {
 			await deleteItem.mutateAsync({
@@ -216,13 +232,15 @@ export function ItemDetailPage({
 				vaultId: rawItem.vaultId,
 			});
 
-			toast.success("Item moved to trash");
+			toast.success(m["vaults.detail.toast.item_moved_to_trash"]());
 
 			// Navigate back to vault
 			navigate({ to: "/vault/$id", params: { id: rawItem.vaultId } });
 		} catch (error) {
 			const errorMessage =
-				error instanceof Error ? error.message : "Failed to delete item";
+				error instanceof Error
+					? error.message
+					: m["vaults.detail.toast.item_delete_error"]();
 			toast.error(errorMessage);
 		}
 	};
@@ -230,15 +248,15 @@ export function ItemDetailPage({
 	const getCategoryDisplayName = (category: string) => {
 		switch (category) {
 			case "secure-note":
-				return "secure note";
+				return m["vaults.detail.items.category.secure_note.title"]();
 			case "credit-card":
-				return "credit card";
+				return m["vaults.detail.items.category.credit_card.title"]();
 			case "identity":
-				return "identity";
+				return m["vaults.detail.items.category.identity.title"]();
 			case "totp":
-				return "authenticator";
+				return m["vaults.detail.items.category.totp.title"]();
 			default:
-				return "login";
+				return m["vaults.detail.items.category.login.title"]();
 		}
 	};
 
@@ -253,7 +271,10 @@ export function ItemDetailPage({
 				<div className="mb-3 flex min-w-0 items-center justify-between px-4 py-2">
 					<div className="-ml-2 min-w-0">
 						<VaultInfoPopover
-							vaultName={vaultInfo?.name || "Unknown Vault"}
+							vaultName={
+								vaultInfo?.name ||
+								m["vaults.detail.items.detail_page.vault.unknown"]()
+							}
 							vaultIcon={vaultInfo?.icon}
 							vaultImageUrl={vaultInfo?.imageUrl}
 							vaultType={vaultInfo?.type}
@@ -265,7 +286,7 @@ export function ItemDetailPage({
 					<div className="flex shrink-0 items-center gap-2">
 						<Button variant="ghost" size="sm" onClick={handleShare}>
 							<IconShareLeft2OutlineDuo18 />
-							Share
+							{m["sharing.item_dialog.trigger"]()}
 						</Button>
 						<Button
 							variant="ghost"
@@ -273,7 +294,7 @@ export function ItemDetailPage({
 							onClick={() => setIsEditDialogOpen(true)}
 						>
 							<IconPen2OutlineDuo18 />
-							Edit
+							{m["vaults.detail.items.detail.action.edit"]()}
 						</Button>
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>
@@ -287,11 +308,11 @@ export function ItemDetailPage({
 									disabled={createItem.isPending}
 								>
 									<IconCopyOutlineDuo18 className="size-4" />
-									Duplicate
+									{m["vaults.detail.items.detail_page.action.duplicate"]()}
 								</DropdownMenuItem>
 								<DropdownMenuItem onClick={() => setIsMoveDialogOpen(true)}>
 									<IconArrowsLeftRightTrailOutlineDuo18 className="size-4" />
-									Move to Vault
+									{m["vaults.detail.items.move_dialog.action.open"]()}
 								</DropdownMenuItem>
 								<DropdownMenuItem
 									onClick={async () => {
@@ -304,14 +325,20 @@ export function ItemDetailPage({
 											});
 											toast.success(
 												!rawItem.favorite
-													? "Added to favorites"
-													: "Removed from favorites",
+													? m[
+															"vaults.detail.items.detail_page.toast.favorite_added"
+														]()
+													: m[
+															"vaults.detail.items.detail_page.toast.favorite_removed"
+														](),
 											);
 										} catch (error) {
 											const errorMessage =
 												error instanceof Error
 													? error.message
-													: "Failed to update favorite";
+													: m[
+															"vaults.detail.items.list.toast.favorite_update_failed"
+														]();
 											toast.error(errorMessage);
 										}
 									}}
@@ -322,19 +349,23 @@ export function ItemDetailPage({
 										fill={rawItem?.favorite ? "currentColor" : "none"}
 									/>
 									{rawItem?.favorite
-										? "Remove from Favorites"
-										: "Add to Favorites"}
+										? m[
+												"vaults.detail.items.list.item.action.remove_favorite"
+											]()
+										: m[
+												"vaults.detail.items.list.item.action.add_favorite"
+											]()}
 								</DropdownMenuItem>
 								<DropdownMenuItem onClick={() => setIsShareHistoryOpen(true)}>
 									<IconHistoryOutlineDuo18 className="size-4" />
-									Share History
+									{m["sharing.history_dialog.title"]()}
 								</DropdownMenuItem>
 								{rawItem?.category === "login" && (
 									<DropdownMenuItem
 										onClick={() => setIsPasswordHistoryOpen(true)}
 									>
 										<IconHistoryOutlineDuo18 className="size-4" />
-										Password History
+										{m["vaults.detail.items.password_history_dialog.title"]()}
 									</DropdownMenuItem>
 								)}
 								<DropdownMenuSeparator />
@@ -343,7 +374,7 @@ export function ItemDetailPage({
 									className="text-destructive focus:text-destructive"
 								>
 									<IconTrash2OutlineDuo18 className="size-4" />
-									Delete
+									{m["vaults.detail.items.detail.action.delete"]()}
 								</DropdownMenuItem>
 							</DropdownMenuContent>
 						</DropdownMenu>
@@ -375,9 +406,11 @@ export function ItemDetailPage({
 			<Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
 				<DialogContent className="flex max-h-[85vh] max-w-2xl flex-col">
 					<DialogHeader className="shrink-0">
-						<DialogTitle>Edit Item</DialogTitle>
+						<DialogTitle>{m["vaults.detail.edit_item_dialog.title"]()}</DialogTitle>
 						<DialogDescription>
-							Update your {getCategoryDisplayName(rawItem?.category ?? "login")}
+							{m["vaults.detail.items.detail_page.edit_dialog.description"]({
+								category: getCategoryDisplayName(rawItem?.category ?? "login"),
+							})}
 						</DialogDescription>
 					</DialogHeader>
 					{decryptedData && rawItem && (
@@ -391,19 +424,19 @@ export function ItemDetailPage({
 										vaultId: rawItem.vaultId,
 										data,
 									});
-									toast.success("Item updated successfully");
+									toast.success(m["vaults.detail.toast.item_updated"]());
 									setIsEditDialogOpen(false);
 								} catch (error) {
 									const errorMessage =
 										error instanceof Error
 											? error.message
-											: "Failed to update item";
+											: m["vaults.detail.items.form.toast.save_item_failed"]();
 									toast.error(errorMessage);
 								}
 							}}
 							onCancel={() => setIsEditDialogOpen(false)}
 							isSubmitting={updateItem.isPending}
-							submitLabel="Update"
+							submitLabel={m["vaults.detail.edit_item_dialog.action.submit"]()}
 							selectedVaultId={rawItem.vaultId}
 						/>
 					)}
@@ -414,10 +447,9 @@ export function ItemDetailPage({
 			<Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>Move to Trash?</DialogTitle>
+						<DialogTitle>{m["vaults.detail.delete_item_dialog.title"]()}</DialogTitle>
 						<DialogDescription>
-							This item will be moved to trash. You can restore it later or
-							delete it permanently from the trash.
+							{m["vaults.detail.delete_item_dialog.description"]()}
 						</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>
@@ -425,14 +457,14 @@ export function ItemDetailPage({
 							variant="outline"
 							onClick={() => setIsDeleteDialogOpen(false)}
 						>
-							Cancel
+							{m["vaults.detail.delete_item_dialog.action.cancel"]()}
 						</Button>
 						<Button
 							variant="destructive"
 							onClick={confirmDelete}
 							disabled={deleteItem.isPending}
 						>
-							Move to Trash
+							{m["vaults.detail.delete_item_dialog.action.confirm"]()}
 						</Button>
 					</DialogFooter>
 				</DialogContent>

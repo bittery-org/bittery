@@ -378,6 +378,27 @@ export function useVaultImport() {
 		const resolvedTargets = new Map<string, ResolvedTargetVault>();
 		const failedVaults: ImportFailedVault[] = [];
 		const createdVaults: ResolvedTargetVault[] = [];
+		const userIdByAccount = new Map<string, string>();
+
+		const resolveUserIdForContext = async (
+			accountEmail?: string,
+		): Promise<string> => {
+			const cacheKey = accountEmail ?? "__active__";
+			const cachedUserId = userIdByAccount.get(cacheKey);
+			if (cachedUserId) {
+				return cachedUserId;
+			}
+
+			const sessionData = await storage.getStoredSessionData?.(accountEmail);
+			const userId =
+				sessionData?.userId ?? (await storage.getActiveAccountUserId());
+			if (!userId) {
+				throw new Error("User ID not available for encryption context");
+			}
+
+			userIdByAccount.set(cacheKey, userId);
+			return userId;
+		};
 
 		setIsBusy(true);
 		setError(null);
@@ -526,16 +547,28 @@ export function useVaultImport() {
 							targetVaultName: resolvedTarget.vaultName,
 						});
 					}
+					const userId = await resolveUserIdForContext(
+						resolvedTarget.accountEmail,
+					);
 
 					const encryptedItems = [];
 					for (const sourceItem of sourceItems) {
 						const decryptedItem = provider.toDecryptedItemData(sourceItem);
+						const itemId = await core.items.generateItemId();
 						const encryptedData = await encrypt(
 							JSON.stringify(decryptedItem.data),
 							vaultKey,
+							{
+								vaultId: resolvedTarget.vaultId,
+								entityId: itemId,
+								entityType: "item",
+								version: 1,
+								userId,
+							},
 						);
 
 						encryptedItems.push({
+							itemId,
 							category: decryptedItem.category,
 							favorite: decryptedItem.favorite,
 							encryptedData: encryptedData.ciphertext,
@@ -662,11 +695,12 @@ export function useVaultImport() {
 	}, [
 		preview,
 		providerId,
-		mappings,
-		existingVaultById,
-		core.vaults,
-		core.accounts,
-		core.vaultCoordinator,
+			mappings,
+			existingVaultById,
+			core.items,
+			core.vaults,
+			core.accounts,
+			core.vaultCoordinator,
 		trpcClient,
 		invalidator,
 		clientId,

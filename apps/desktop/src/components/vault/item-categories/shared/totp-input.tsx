@@ -12,6 +12,7 @@ import {
 	IconTrash2OutlineDuo18,
 } from "@bittery/ui/icons";
 import { useCallback } from "react";
+import { useI18n } from "../../../../providers/i18n-provider";
 import { TotpAdvancedSettings } from "./totp-settings";
 
 export interface TotpState {
@@ -40,6 +41,8 @@ export function TotpInputSection({
 	secretError,
 	onSecretErrorChange,
 }: TotpInputSectionProps) {
+	const { m } = useI18n();
+
 	const handlePasteFromClipboard = useCallback(
 		async (silent = false) => {
 			try {
@@ -48,7 +51,11 @@ export function TotpInputSection({
 					const parsed = parseOtpAuthUri(text);
 
 					if (parsed.type !== "totp") {
-						if (!silent) toast.error("Only TOTP codes are supported");
+						if (!silent) {
+							toast.error(
+								m["vaults.detail.items.totp.toast.only_totp_supported"](),
+							);
+						}
 						return false;
 					}
 
@@ -63,7 +70,11 @@ export function TotpInputSection({
 					});
 
 					onSecretErrorChange(null);
-					if (!silent) toast.success("2FA setup imported successfully!");
+					if (!silent) {
+						toast.success(
+							m["vaults.detail.items.totp.toast.imported_successfully"](),
+						);
+					}
 					return true;
 				}
 
@@ -73,26 +84,34 @@ export function TotpInputSection({
 						secret: formatSecretForDisplay(text),
 					});
 					onSecretErrorChange(null);
-					if (!silent) toast.success("Setup key pasted!");
+					if (!silent)
+						toast.success(
+							m["vaults.detail.items.totp.toast.setup_key_pasted"](),
+						);
 					return true;
 				}
 
 				if (!silent) {
-					toast.error("No valid 2FA setup found in clipboard");
+					toast.error(
+						m["vaults.detail.items.totp.toast.no_valid_setup_in_clipboard"](),
+					);
 				}
 				return false;
 			} catch {
-				if (!silent) toast.error("Unable to read clipboard");
+				if (!silent)
+					toast.error(
+						m["vaults.detail.items.totp.toast.clipboard_read_failed"](),
+					);
 				return false;
 			}
 		},
-		[state, onChange, onSecretErrorChange],
+		[state, onChange, onSecretErrorChange, m],
 	);
 
 	const validateSecret = (value: string) => {
 		if (value && !isValidBase32(value.replace(/\s/g, ""))) {
 			onSecretErrorChange(
-				"Invalid format - should be letters A-Z and numbers 2-7",
+				m["vaults.detail.items.form.totp.error.invalid_format"](),
 			);
 		} else {
 			onSecretErrorChange(null);
@@ -117,7 +136,9 @@ export function TotpInputSection({
 			<div className="flex items-center justify-between">
 				<Label className="flex items-center gap-2">
 					<IconMobileOutlineDuo18 className="size-4" />
-					Two-Factor Authentication
+					{m[
+						"vaults.detail.items.form.totp.section.two_factor_authentication"
+					]()}
 				</Label>
 				{!showSection && (
 					<Button
@@ -127,7 +148,7 @@ export function TotpInputSection({
 						onClick={() => onShowSectionChange(true)}
 					>
 						<IconPlusOutlineDuo18 className="mr-1 size-3" />
-						Add TOTP
+						{m["vaults.detail.items.form.totp.action.add_totp"]()}
 					</Button>
 				)}
 			</div>
@@ -136,7 +157,9 @@ export function TotpInputSection({
 				<div className="space-y-4 rounded-lg border p-4">
 					{/* Setup Key */}
 					<div className="space-y-2">
-						<Label>Setup Key *</Label>
+						<Label>
+							{m["vaults.detail.items.form.totp.field.setup_key"]()}
+						</Label>
 						<div className="flex gap-2">
 							<Input
 								value={state.secret}
@@ -145,7 +168,9 @@ export function TotpInputSection({
 									validateSecret(e.target.value);
 								}}
 								onBlur={() => validateSecret(state.secret)}
-								placeholder="XXXX XXXX XXXX XXXX"
+								placeholder={m[
+									"vaults.detail.items.form.totp.placeholder.setup_key"
+								]()}
 								className={cn(
 									"flex-1",
 									"font-mono",
@@ -157,10 +182,12 @@ export function TotpInputSection({
 								type="button"
 								variant="outline"
 								onClick={() => handlePasteFromClipboard()}
-								title="Paste from clipboard"
+								title={m[
+									"vaults.detail.items.form.totp.action.paste_from_clipboard"
+								]()}
 							>
 								<IconClipboardArrowInOutlineDuo18 size={16} />
-								Paste
+								{m["vaults.detail.items.form.totp.action.paste"]()}
 							</Button>
 						</div>
 						{secretError && (
@@ -171,21 +198,29 @@ export function TotpInputSection({
 					{/* Account info */}
 					<div className="grid grid-cols-2 gap-4">
 						<div className="space-y-2">
-							<Label>Service</Label>
+							<Label>
+								{m["vaults.detail.items.form.totp.field.service"]()}
+							</Label>
 							<Input
 								value={state.issuer}
 								onChange={(e) => onChange({ ...state, issuer: e.target.value })}
-								placeholder="Google, GitHub, etc."
+								placeholder={m[
+									"vaults.detail.items.form.totp.placeholder.service"
+								]()}
 							/>
 						</div>
 						<div className="space-y-2">
-							<Label>Account</Label>
+							<Label>
+								{m["vaults.detail.items.form.totp.field.account"]()}
+							</Label>
 							<Input
 								value={state.accountName}
 								onChange={(e) =>
 									onChange({ ...state, accountName: e.target.value })
 								}
-								placeholder="your@email.com"
+								placeholder={m[
+									"vaults.detail.items.form.totp.placeholder.account"
+								]()}
 							/>
 						</div>
 					</div>
@@ -209,7 +244,7 @@ export function TotpInputSection({
 						onClick={handleRemoveTotp}
 					>
 						<IconTrash2OutlineDuo18 size={14} className="mr-1" />
-						Remove TOTP
+						{m["vaults.detail.items.form.totp.action.remove_totp"]()}
 					</Button>
 				</div>
 			)}

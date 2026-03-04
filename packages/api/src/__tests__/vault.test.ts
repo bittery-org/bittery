@@ -684,18 +684,21 @@ describe("Vault Router", () => {
 				vaultId,
 				items: [
 					{
+						itemId: "import-item-1",
 						category: "login",
 						encryptedData: "data1",
 						encryptionIv: "iv1",
 						encryptionAlgorithm: "AES-GCM-AAD-V1",
 					},
 					{
+						itemId: "import-item-2",
 						category: "secure-note",
 						encryptedData: "data2",
 						encryptionIv: "iv2",
 						encryptionAlgorithm: "AES-GCM-AAD-V1",
 					},
 					{
+						itemId: "import-item-3",
 						category: "credit-card",
 						favorite: true,
 						encryptedData: "data3",
@@ -708,6 +711,11 @@ describe("Vault Router", () => {
 			expect(result.success).toBe(true);
 			expect(result.importedCount).toBe(3);
 			expect(result.itemIds.length).toBe(3);
+			expect(result.itemIds).toEqual([
+				"import-item-1",
+				"import-item-2",
+				"import-item-3",
+			]);
 
 			const itemCount = await countVaultItems(vaultId);
 			expect(itemCount).toBe(3);
@@ -1137,6 +1145,7 @@ describe("Vault Router", () => {
 					vaultId,
 					items: [
 						{
+							itemId: "readonly-import-1",
 							category: "login",
 							encryptedData: "data",
 							encryptionIv: "iv",
@@ -1158,6 +1167,7 @@ describe("Vault Router", () => {
 					vaultId,
 					items: [
 						{
+							itemId: "non-member-import-1",
 							category: "login",
 							encryptedData: "data",
 							encryptionIv: "iv",
@@ -1165,6 +1175,49 @@ describe("Vault Router", () => {
 					],
 				}),
 			).rejects.toThrow("Access denied to this vault");
+		});
+
+		test("should reject duplicate item IDs in payload", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			const vaultId = await createTestVault(userId);
+
+			await expect(
+				caller.bulkImportItems({
+					vaultId,
+					items: [
+						{
+							itemId: "duplicate-import-item",
+							category: "login",
+							encryptedData: "data1",
+							encryptionIv: "iv1",
+						},
+						{
+							itemId: "duplicate-import-item",
+							category: "secure-note",
+							encryptedData: "data2",
+							encryptionIv: "iv2",
+						},
+					],
+				}),
+			).rejects.toThrow("Duplicate item IDs in import payload");
+		});
+
+		test("should reject import items missing itemId", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			const vaultId = await createTestVault(userId);
+
+			await expect(
+				caller.bulkImportItems({
+					vaultId,
+					items: [
+						{
+							category: "login",
+							encryptedData: "data",
+							encryptionIv: "iv",
+						},
+					],
+				} as any),
+			).rejects.toThrow("itemId");
 		});
 	});
 

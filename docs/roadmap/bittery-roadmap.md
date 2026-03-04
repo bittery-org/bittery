@@ -23,7 +23,7 @@
 | Travel Mode | ❌ Missing | Hide specific vaults during border crossings. Strong differentiator. |
 | Secure File Storage | ✅ Done | Encrypted file attachments for items are now available. |
 | Import | ✅ Done | Import support is available for bringing data from other password managers into Bittery. |
-| i18n | ❌ Missing | At minimum English & German. Complex but important for international launch. |
+| i18n | In Progress | At minimum English & German. Complex but important for international launch. |
 
 ## Team / Business Features
 
@@ -43,4 +43,4 @@
 
 ---
 
-*Last updated: March 3, 2026*
+*Last updated: March 4, 2026*

@@ -857,6 +857,7 @@ export const vaultRouter = router({
 				clientId: z.string().optional(),
 				items: z.array(
 					z.object({
+						itemId: z.string().max(64),
 						category: z.enum([
 							"login",
 							"secure-note",
@@ -905,6 +906,14 @@ export const vaultRouter = router({
 				};
 			}
 
+			const importedItemIds = input.items.map((itemData) => itemData.itemId);
+			if (new Set(importedItemIds).size !== importedItemIds.length) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Duplicate item IDs in import payload",
+				});
+			}
+
 			// Process inserts in DB batches, but emit only one sync event for the import
 			// to avoid flooding SSE with one event per item.
 			const batchSize = 200;
@@ -915,7 +924,7 @@ export const vaultRouter = router({
 				for (let i = 0; i < input.items.length; i += batchSize) {
 					const batch = input.items.slice(i, i + batchSize);
 					const itemsToInsert = batch.map((itemData) => ({
-						id: nanoid(),
+						id: itemData.itemId,
 						vaultId: input.vaultId,
 						category: itemData.category,
 						favorite: itemData.favorite ?? false,
