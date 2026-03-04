@@ -29,6 +29,20 @@ export interface UpdateVaultInput {
 	accountEmail?: string;
 }
 
+export interface ConvertVaultTypeInput {
+	vaultId: string;
+	targetType: "personal" | "team";
+	personalEncryptedVaultKey?: string;
+	accountEmail?: string;
+}
+
+export interface ConvertVaultTypeResult {
+	success: true;
+	vaultId: string;
+	previousType: "personal" | "team";
+	newType: "personal" | "team";
+}
+
 export interface VaultListItem {
 	id: string;
 	name: string;
@@ -208,6 +222,23 @@ export class VaultService {
 			...(input.name !== undefined ? { name: input.name.trim() } : {}),
 			...(input.icon !== undefined ? { icon: input.icon } : {}),
 			...(imageKey !== undefined ? { imageKey } : {}),
+		});
+	}
+
+	async convertVaultType(
+		input: ConvertVaultTypeInput,
+		defaultClient: DefaultTrpcClient,
+	): Promise<ConvertVaultTypeResult> {
+		const client = await this.accounts.getClientForAccount(
+			defaultClient,
+			input.accountEmail,
+		);
+		return client.vault.convertType.mutate({
+			vaultId: input.vaultId,
+			targetType: input.targetType,
+			...(input.personalEncryptedVaultKey
+				? { personalEncryptedVaultKey: input.personalEncryptedVaultKey }
+				: {}),
 		});
 	}
 

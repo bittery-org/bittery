@@ -458,6 +458,204 @@ export const vaultRouter = router({
 		}),
 
 	/**
+	 * Convert vault type (owner only)
+	 */
+	convertType: protectedProcedure
+		.input(
+			z.object({
+				vaultId: z.string(),
+				targetType: z.enum(["personal", "team"]),
+				personalEncryptedVaultKey: z.string().optional(),
+				clientId: z.string().optional(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			const ownerVaultKey = await db.query.vaultKey.findFirst({
+				where: (vk, { and, eq }) =>
+					and(eq(vk.vaultId, input.vaultId), eq(vk.userId, ctx.session.userId)),
+				with: {
+					vault: true,
+				},
+			});
+
+			if (!ownerVaultKey || ownerVaultKey.role !== "owner") {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "Only the vault owner can convert vault type",
+				});
+			}
+
+			const previousType = ownerVaultKey.vault.type;
+			if (previousType === input.targetType) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Vault is already the requested type",
+				});
+			}
+
+			let targetTeamId: string | null = ownerVaultKey.vault.teamId;
+			let sharedVaultLimit: number | null = null;
+			if (previousType === "personal" && input.targetType === "team") {
+				const currentUser = await db.query.user.findFirst({
+					where: (member, { eq }) => eq(member.id, ctx.session.userId),
+					columns: { teamId: true },
+					with: { team: true },
+				});
+
+				if (!currentUser?.teamId || !currentUser.team) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "You must belong to a team to convert to a shared vault",
+					});
+				}
+
+				const entitlements = resolveEffectiveEntitlements({
+					mode: getBitteryMode(),
+					billingPlan: currentUser.team.billingPlan,
+					billingStatus: currentUser.team.billingStatus,
+				});
+				if (!entitlements.vault_sharing) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message:
+							"Shared vaults are only available on Family or Team plans with active billing.",
+					});
+				}
+
+				const limits = resolveEffectiveEntitlementLimits(
+					{
+						mode: getBitteryMode(),
+						billingPlan: currentUser.team.billingPlan,
+						billingStatus: currentUser.team.billingStatus,
+					},
+					entitlements,
+				);
+				sharedVaultLimit = limits.shared_vaults;
+				targetTeamId = currentUser.teamId;
+			}
+
+			let broadcast: SyncBroadcastPayload;
+			await db.transaction(async (tx) => {
+				if (
+					previousType === "personal" &&
+					input.targetType === "team" &&
+					targetTeamId &&
+					sharedVaultLimit !== null
+				) {
+					await tx.execute(
+						sql`SELECT pg_advisory_xact_lock(hashtext(${`shared-vaults:${targetTeamId}`}))`,
+					);
+					const sharedVaultCount = await tx
+						.select({ count: sql<number>`count(*)::int` })
+						.from(vault)
+						.where(
+							and(eq(vault.teamId, targetTeamId), eq(vault.type, "team")),
+						);
+
+					if ((sharedVaultCount[0]?.count ?? 0) >= sharedVaultLimit) {
+						throw new TRPCError({
+							code: "FORBIDDEN",
+							message: `Your current plan allows up to ${sharedVaultLimit} shared vaults. Upgrade to add more.`,
+						});
+					}
+
+					await tx
+						.update(vault)
+						.set({
+							type: "team",
+							teamId: targetTeamId,
+							updatedAt: new Date(),
+						})
+						.where(eq(vault.id, input.vaultId));
+				} else if (previousType === "team" && input.targetType === "personal") {
+					const members = await tx.query.vaultKey.findMany({
+						where: (vk, { eq }) => eq(vk.vaultId, input.vaultId),
+					});
+
+					const ownerIsOnlyMember =
+						members.length === 1 &&
+						members[0]?.userId === ctx.session.userId &&
+						members[0]?.role === "owner";
+					if (!ownerIsOnlyMember) {
+						throw new TRPCError({
+							code: "BAD_REQUEST",
+							message:
+								"Team vault can only be converted to personal when the owner is the only member",
+						});
+					}
+
+					await tx
+						.update(vault)
+						.set({
+							type: "personal",
+							teamId: null,
+							updatedAt: new Date(),
+						})
+						.where(eq(vault.id, input.vaultId));
+
+					if (input.personalEncryptedVaultKey) {
+						await tx
+							.update(vaultKey)
+							.set({
+								encryptedVaultKey: input.personalEncryptedVaultKey,
+							})
+							.where(
+								and(
+									eq(vaultKey.vaultId, input.vaultId),
+									eq(vaultKey.userId, ctx.session.userId),
+								),
+							);
+					}
+
+					targetTeamId = null;
+				}
+
+				broadcast = await createSyncEvent(
+					{
+						eventType: "vault_updated",
+						entityId: input.vaultId,
+						entityType: "vault",
+						vaultId: input.vaultId,
+						userId: ctx.session.userId,
+						clientId: input.clientId,
+						version: 1,
+						metadata: {
+							reason: "vault_type_converted",
+							fromType: previousType,
+							toType: input.targetType,
+						},
+					},
+					tx,
+					ctx.clientId,
+				);
+			});
+
+			await broadcastSyncPayload(broadcast!);
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "vault_updated",
+				device: ctx.device,
+				entityType: "vault",
+				entityId: input.vaultId,
+				metadata: {
+					reason: "vault_type_converted",
+					fromType: previousType,
+					toType: input.targetType,
+					previousTeamId: ownerVaultKey.vault.teamId,
+					newTeamId: targetTeamId,
+				},
+			});
+
+			return {
+				success: true as const,
+				vaultId: input.vaultId,
+				previousType,
+				newType: input.targetType,
+			};
+		}),
+
+	/**
 	 * Delete a vault (owner only)
 	 */
 	delete: protectedProcedure
@@ -2619,6 +2817,20 @@ export const vaultRouter = router({
 					throw new TRPCError({
 						code: "NOT_FOUND",
 						message: "User not found",
+					});
+				}
+
+				const vaultData = userVaultKey.vault;
+				if (vaultData.type !== "team" || !vaultData.teamId) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "Only team vaults support adding members",
+					});
+				}
+				if (targetUser.teamId !== vaultData.teamId) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "User must belong to the same team as this vault",
 					});
 				}
 

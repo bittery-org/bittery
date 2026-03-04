@@ -208,10 +208,13 @@ export {
 } from "./use-vault-search";
 // Vault Mutation Hooks (write operations)
 export {
+	type ConvertVaultTypeInput,
+	type ConvertVaultTypeResult,
 	type CreateVaultInput,
 	type CreateVaultResult,
 	type DeleteVaultInput,
 	type UpdateVaultInput,
+	useConvertVaultType,
 	useCreateVault,
 	useDeleteVault,
 	useUpdateVault,

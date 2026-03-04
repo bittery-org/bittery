@@ -1,3 +1,4 @@
+import { isAesEncryptedVaultKey } from "@bittery/shared";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -119,15 +120,15 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 
 			// 6. Re-encrypt vault keys with new MUK
 			const serverVaultKeys = vaultListQuery.data;
-			const currentUserId = userQuery.data.id;
 			const encryptedVaultKeys: Array<{
 				vaultId: string;
 				encryptedVaultKey: string;
 			}> = [];
 
 			for (const vk of serverVaultKeys) {
-				// Skip shared vaults (RSA-encrypted vault keys)
-				if (vk.createdById !== currentUserId) {
+				// Only re-encrypt AES(MUK)-wrapped keys.
+				// RSA-wrapped keys are not tied to the master unlock key.
+				if (!isAesEncryptedVaultKey(vk.encryptedVaultKey)) {
 					continue;
 				}
 

@@ -1,5 +1,6 @@
 import {
 	useAvailableTags,
+	useConvertVaultType,
 	useCreateItem,
 	useDeleteItem,
 	useDeleteVault,
@@ -24,6 +25,11 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
 	Sheet,
 	SheetContent,
 	Skeleton,
@@ -36,6 +42,7 @@ import {
 } from "@bittery/ui";
 import {
 	IconArrowLeftOutlineDuo18 as ArrowLeft,
+	IconDotsOutlineDuo18 as Dots,
 	IconKeyOutlineDuo18 as Key,
 	IconLockOutlineDuo18 as Lock,
 	IconPen2OutlineDuo18 as Pen,
@@ -111,6 +118,8 @@ function VaultDetailPage() {
 	const [isDeleteItemDialogOpen, setIsDeleteItemDialogOpen] = useState(false);
 	const [isEditVaultDialogOpen, setIsEditVaultDialogOpen] = useState(false);
 	const [isDeleteVaultDialogOpen, setIsDeleteVaultDialogOpen] = useState(false);
+	const [isMakeSharedDialogOpen, setIsMakeSharedDialogOpen] = useState(false);
+	const [isMakePrivateDialogOpen, setIsMakePrivateDialogOpen] = useState(false);
 	const [pendingItemIdToSelect, setPendingItemIdToSelect] = useState<
 		string | null
 	>(null);
@@ -123,6 +132,7 @@ function VaultDetailPage() {
 	const createItem = useCreateItem();
 	const updateItem = useUpdateItem();
 	const deleteItem = useDeleteItem();
+	const convertVaultType = useConvertVaultType();
 	const updateVault = useUpdateVault();
 	const deleteVault = useDeleteVault();
 
@@ -199,12 +209,24 @@ function VaultDetailPage() {
 	const availableTags = useAvailableTags(decryptedItems);
 
 	const role = vaultInfo?.role;
+	const isOwner = role === "owner";
 	const canWriteItems = role !== "read-only";
 	const canEditVault = role === "owner" || role === "admin";
 	const canDeleteVault = role === "owner";
 	const canManageMembers = canEditVault;
 	const itemCount = decryptedItems.length;
+	const hasMemberData = Array.isArray(membersQuery.data);
 	const memberCount = membersQuery.data?.length ?? 0;
+	const canMakeShared = isOwner && vaultInfo?.vaultType === "personal";
+	const canMakePrivate = isOwner && vaultInfo?.vaultType === "team";
+	const canMakePrivateNow = canMakePrivate && hasMemberData && memberCount === 1;
+	const showMakePrivateDisabledAction = canMakePrivate && !canMakePrivateNow;
+	const showMakePrivateDisabledReason =
+		canMakePrivate && hasMemberData && memberCount > 1;
+	const hasVaultConversionActions =
+		canMakeShared || canMakePrivateNow || showMakePrivateDisabledAction;
+	const hasVaultMenuActions =
+		canEditVault || canDeleteVault || hasVaultConversionActions;
 
 	const handleItemSelect = (item: DecryptedItem) => {
 		setSelectedItem(item);
@@ -280,6 +302,29 @@ function VaultDetailPage() {
 		});
 		toast.success(m["vaults.detail.toast.vault_deleted"]());
 		navigate({ to: "/vaults" });
+	};
+
+	const handleConvertVaultType = async (targetType: "personal" | "team") => {
+		try {
+			await convertVaultType.mutateAsync({
+				vaultId,
+				targetType,
+				accountEmail: vaultInfo?.accountEmail,
+			});
+			if (targetType === "team") {
+				setIsMakeSharedDialogOpen(false);
+				toast.success(m["vaults.detail.toast.convert_to_shared_success"]());
+			} else {
+				setIsMakePrivateDialogOpen(false);
+				toast.success(m["vaults.detail.toast.convert_to_private_success"]());
+			}
+		} catch (error) {
+			const apiMessage =
+				error instanceof Error && error.message.trim().length > 0
+					? error.message
+					: null;
+			toast.error(apiMessage ?? m["vaults.detail.toast.convert_failed"]());
+		}
 	};
 
 	if (isLoadingVault) {
@@ -496,39 +541,95 @@ function VaultDetailPage() {
 									{!isMobile ? m["vaults.detail.action.new_item"]() : null}
 								</Button>
 							)}
-							{canEditVault && (
-								<Button
-									variant="outline"
-									size="sm"
-									className="h-8 px-2 text-xs lg:px-3"
-									onClick={() => setIsEditVaultDialogOpen(true)}
-									data-testid="edit-vault-button"
-								>
-									<Pen
-										className={cn(
-											"h-3.5 w-3.5",
-											!isMobile ? "mr-1.5" : undefined,
+							{hasVaultMenuActions && (
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button
+											variant="outline"
+											size="sm"
+											className="h-8 px-2 text-xs lg:px-3"
+											data-testid="vault-menu-button"
+										>
+											<Dots
+												className={cn(
+													"h-3.5 w-3.5",
+													!isMobile ? "mr-1.5" : undefined,
+												)}
+											/>
+											{!isMobile ? m["vaults.detail.action.manage"]() : null}
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="end">
+										{canEditVault && (
+											<DropdownMenuItem
+												onClick={() => setIsEditVaultDialogOpen(true)}
+												data-testid="edit-vault-button"
+											>
+												<Pen className="h-4 w-4" />
+												{m["vaults.detail.action.edit_vault"]()}
+											</DropdownMenuItem>
 										)}
-									/>
-									{!isMobile ? m["vaults.detail.action.edit_vault"]() : null}
-								</Button>
-							)}
-							{canDeleteVault && (
-								<Button
-									variant="outline"
-									size="sm"
-									className="h-8 px-2 text-xs lg:px-3"
-									onClick={() => setIsDeleteVaultDialogOpen(true)}
-									data-testid="delete-vault-button"
-								>
-									<Trash
-										className={cn(
-											"h-3.5 w-3.5",
-											!isMobile ? "mr-1.5" : undefined,
+
+										{canEditVault && hasVaultConversionActions && (
+											<DropdownMenuSeparator />
 										)}
-									/>
-									{!isMobile ? m["vaults.detail.action.delete_vault"]() : null}
-								</Button>
+
+										{canMakeShared && (
+											<DropdownMenuItem
+												onClick={() => setIsMakeSharedDialogOpen(true)}
+												disabled={convertVaultType.isPending}
+												data-testid="make-shared-button"
+											>
+												<Users className="h-4 w-4" />
+												{m["vaults.detail.convert.action.make_shared"]()}
+											</DropdownMenuItem>
+										)}
+
+										{canMakePrivateNow && (
+											<DropdownMenuItem
+												onClick={() => setIsMakePrivateDialogOpen(true)}
+												disabled={convertVaultType.isPending}
+												data-testid="make-private-button"
+											>
+												<Lock className="h-4 w-4" />
+												{m["vaults.detail.convert.action.make_private"]()}
+											</DropdownMenuItem>
+										)}
+
+										{showMakePrivateDisabledAction && (
+											<DropdownMenuItem
+												disabled
+												data-testid="make-private-button-disabled"
+											>
+												<Lock className="h-4 w-4" />
+												{m["vaults.detail.convert.action.make_private"]()}
+											</DropdownMenuItem>
+										)}
+
+										{showMakePrivateDisabledReason && (
+											<DropdownMenuItem disabled>
+												{m["vaults.detail.convert.make_private_disabled_reason"]({
+													count: memberCount,
+												})}
+											</DropdownMenuItem>
+										)}
+
+										{hasVaultConversionActions && canDeleteVault && (
+											<DropdownMenuSeparator />
+										)}
+
+										{canDeleteVault && (
+											<DropdownMenuItem
+												variant="destructive"
+												onClick={() => setIsDeleteVaultDialogOpen(true)}
+												data-testid="delete-vault-button"
+											>
+												<Trash className="h-4 w-4" />
+												{m["vaults.detail.action.delete_vault"]()}
+											</DropdownMenuItem>
+										)}
+									</DropdownMenuContent>
+								</DropdownMenu>
 							)}
 						</div>
 					</div>
@@ -729,12 +830,77 @@ function VaultDetailPage() {
 							{m["vaults.detail.delete_item_dialog.action.confirm"]()}
 						</Button>
 					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+					</DialogContent>
+				</Dialog>
 
-			{/* Vault Management Dialogs */}
-			<EditVaultDialog
-				key={vaultInfo.vaultId}
+				{/* Vault Type Conversion Dialogs */}
+				<Dialog
+					open={isMakeSharedDialogOpen}
+					onOpenChange={setIsMakeSharedDialogOpen}
+				>
+					<DialogContent data-testid="make-shared-dialog">
+						<DialogHeader>
+							<DialogTitle>
+								{m["vaults.detail.convert.confirm.make_shared.title"]()}
+							</DialogTitle>
+							<DialogDescription>
+								{m["vaults.detail.convert.confirm.make_shared.description"]()}
+							</DialogDescription>
+						</DialogHeader>
+						<DialogFooter>
+							<Button
+								variant="outline"
+								onClick={() => setIsMakeSharedDialogOpen(false)}
+								disabled={convertVaultType.isPending}
+							>
+								{m["settings.common.action.cancel"]()}
+							</Button>
+							<Button
+								onClick={() => handleConvertVaultType("team")}
+								disabled={convertVaultType.isPending}
+								data-testid="make-shared-confirm-button"
+							>
+								{m["vaults.detail.convert.confirm.make_shared.action.confirm"]()}
+							</Button>
+						</DialogFooter>
+					</DialogContent>
+				</Dialog>
+
+				<Dialog
+					open={isMakePrivateDialogOpen}
+					onOpenChange={setIsMakePrivateDialogOpen}
+				>
+					<DialogContent data-testid="make-private-dialog">
+						<DialogHeader>
+							<DialogTitle>
+								{m["vaults.detail.convert.confirm.make_private.title"]()}
+							</DialogTitle>
+							<DialogDescription>
+								{m["vaults.detail.convert.confirm.make_private.description"]()}
+							</DialogDescription>
+						</DialogHeader>
+						<DialogFooter>
+							<Button
+								variant="outline"
+								onClick={() => setIsMakePrivateDialogOpen(false)}
+								disabled={convertVaultType.isPending}
+							>
+								{m["settings.common.action.cancel"]()}
+							</Button>
+							<Button
+								onClick={() => handleConvertVaultType("personal")}
+								disabled={convertVaultType.isPending}
+								data-testid="make-private-confirm-button"
+							>
+								{m["vaults.detail.convert.confirm.make_private.action.confirm"]()}
+							</Button>
+						</DialogFooter>
+					</DialogContent>
+				</Dialog>
+
+				{/* Vault Management Dialogs */}
+				<EditVaultDialog
+					key={vaultInfo.vaultId}
 				open={isEditVaultDialogOpen}
 				onOpenChange={setIsEditVaultDialogOpen}
 				vault={{

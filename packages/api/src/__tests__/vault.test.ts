@@ -300,6 +300,274 @@ describe("Vault Router", () => {
 		});
 	});
 
+	describe("convertType", () => {
+		test("should convert personal vault to team vault for owner", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			const actor = await db.query.user.findFirst({
+				where: (u, { eq }) => eq(u.id, userId),
+			});
+			const teamId = actor?.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected setup user to have a teamId");
+			}
+
+			const vaultId = await createTestVault(userId, {
+				type: "personal",
+				teamId: null,
+			});
+
+			const result = await caller.convertType({
+				vaultId,
+				targetType: "team",
+			});
+
+			expect(result.success).toBe(true);
+			expect(result.previousType).toBe("personal");
+			expect(result.newType).toBe("team");
+
+			const updatedVault = await getVault(vaultId);
+			expect(updatedVault?.type).toBe("team");
+			expect(updatedVault?.teamId).toBe(teamId);
+		});
+
+		test("should reject personal->team conversion without vault sharing entitlement", async () => {
+			const { caller, userId } = await setup(vaultRouter);
+			await createTestTeam(userId, {
+				billingPlan: "free",
+				billingStatus: "active",
+				type: "personal",
+			});
+			const vaultId = await createTestVault(userId, {
+				type: "personal",
+			});
+
+			await expect(
+				caller.convertType({
+					vaultId,
+					targetType: "team",
+				}),
+			).rejects.toThrow(
+				"Shared vaults are only available on Family or Team plans with active billing.",
+			);
+		});
+
+		test("should reject personal->team conversion when shared vault limit is reached", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			const actor = await db.query.user.findFirst({
+				where: (u, { eq }) => eq(u.id, userId),
+			});
+			const teamId = actor?.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected setup user to have a teamId");
+			}
+
+			for (let i = 0; i < 5; i += 1) {
+				await createTestVault(userId, {
+					name: `Existing Team Vault ${i + 1}`,
+					type: "team",
+					teamId,
+				});
+			}
+			const vaultId = await createTestVault(userId, {
+				type: "personal",
+				teamId: null,
+			});
+
+			await expect(
+				caller.convertType({
+					vaultId,
+					targetType: "team",
+				}),
+			).rejects.toThrow(
+				"Your current plan allows up to 5 shared vaults. Upgrade to add more.",
+			);
+		});
+
+		test("should convert team vault to personal when owner is sole member", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			const actor = await db.query.user.findFirst({
+				where: (u, { eq }) => eq(u.id, userId),
+			});
+			const teamId = actor?.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected setup user to have a teamId");
+			}
+
+			const vaultId = await createTestVault(userId, {
+				type: "team",
+				teamId,
+			});
+
+			const result = await caller.convertType({
+				vaultId,
+				targetType: "personal",
+			});
+
+			expect(result.success).toBe(true);
+			expect(result.previousType).toBe("team");
+			expect(result.newType).toBe("personal");
+
+			const updatedVault = await getVault(vaultId);
+			expect(updatedVault?.type).toBe("personal");
+			expect(updatedVault?.teamId).toBeNull();
+		});
+
+		test("should reject team->personal conversion when member count is greater than one", async () => {
+			const [{ userId: ownerId, caller }, { userId: memberId }] =
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
+			const owner = await db.query.user.findFirst({
+				where: (u, { eq }) => eq(u.id, ownerId),
+			});
+			const teamId = owner?.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected setup owner to have a teamId");
+			}
+
+			await addTeamMember(teamId, memberId, "member");
+			const vaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
+			await addVaultMember(vaultId, memberId, "member");
+
+			await expect(
+				caller.convertType({
+					vaultId,
+					targetType: "personal",
+				}),
+			).rejects.toThrow(
+				"Team vault can only be converted to personal when the owner is the only member",
+			);
+		});
+
+		test("should reject conversion by non-owner", async () => {
+			const [{ userId: ownerId }, { userId: memberId, caller }] =
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
+			const owner = await db.query.user.findFirst({
+				where: (u, { eq }) => eq(u.id, ownerId),
+			});
+			const teamId = owner?.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected setup owner to have a teamId");
+			}
+
+			await addTeamMember(teamId, memberId, "member");
+			const vaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
+			await addVaultMember(vaultId, memberId, "member");
+
+			await expect(
+				caller.convertType({
+					vaultId,
+					targetType: "personal",
+				}),
+			).rejects.toThrow("Only the vault owner can convert vault type");
+		});
+
+		test("should reject no-op conversion", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			const vaultId = await createTestVault(userId, {
+				type: "personal",
+			});
+
+			await expect(
+				caller.convertType({
+					vaultId,
+					targetType: "personal",
+				}),
+			).rejects.toThrow("Vault is already the requested type");
+		});
+
+		test("should transition teamId correctly across both directions", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			const actor = await db.query.user.findFirst({
+				where: (u, { eq }) => eq(u.id, userId),
+			});
+			const teamId = actor?.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected setup user to have a teamId");
+			}
+
+			const vaultId = await createTestVault(userId, {
+				type: "personal",
+				teamId: null,
+			});
+
+			await caller.convertType({
+				vaultId,
+				targetType: "team",
+			});
+
+			const asTeam = await getVault(vaultId);
+			expect(asTeam?.teamId).toBe(teamId);
+			expect(asTeam?.type).toBe("team");
+
+			await caller.convertType({
+				vaultId,
+				targetType: "personal",
+			});
+
+			const asPersonal = await getVault(vaultId);
+			expect(asPersonal?.teamId).toBeNull();
+			expect(asPersonal?.type).toBe("personal");
+		});
+
+		test("should create vault_updated sync event and audit metadata", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			const vaultId = await createTestVault(userId, {
+				type: "personal",
+				teamId: null,
+			});
+
+			await caller.convertType({
+				vaultId,
+				targetType: "team",
+			});
+
+			const syncEvents = await db.query.syncEvent.findMany({
+				where: (event, { and, eq }) =>
+					and(
+						eq(event.userId, userId),
+						eq(event.entityId, vaultId),
+						eq(event.eventType, "vault_updated"),
+					),
+			});
+			expect(syncEvents.length).toBe(1);
+			expect(syncEvents[0]?.metadata).toBeTruthy();
+			const syncMetadata = JSON.parse(syncEvents[0]?.metadata || "{}") as {
+				reason?: string;
+				fromType?: string;
+				toType?: string;
+			};
+			expect(syncMetadata.reason).toBe("vault_type_converted");
+			expect(syncMetadata.fromType).toBe("personal");
+			expect(syncMetadata.toType).toBe("team");
+
+			const auditLogs = await db.query.auditLog.findMany({
+				where: (log, { and, eq }) =>
+					and(eq(log.userId, userId), eq(log.action, "vault_updated")),
+			});
+			expect(auditLogs.length).toBe(1);
+			expect(auditLogs[0]?.metadata).toBeTruthy();
+			const auditMetadata = JSON.parse(auditLogs[0]?.metadata || "{}") as {
+				reason?: string;
+				fromType?: string;
+				toType?: string;
+			};
+			expect(auditMetadata.reason).toBe("vault_type_converted");
+			expect(auditMetadata.fromType).toBe("personal");
+			expect(auditMetadata.toType).toBe("team");
+		});
+	});
+
 	describe("delete", () => {
 		test("should delete vault and all its items", async () => {
 			const { caller, userId } = await setupVaultSharingUser();
@@ -813,7 +1081,20 @@ describe("Vault Router", () => {
 		test("should add a new member to the vault", async () => {
 			const [{ userId: ownerId, caller }, { userId: newMemberId }] =
 				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
-			const vaultId = await createTestVault(ownerId);
+			const owner = await db.query.user.findFirst({
+				where: (u, { eq }) => eq(u.id, ownerId),
+			});
+			const teamId = owner?.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected setup owner to have a teamId");
+			}
+			await addTeamMember(teamId, newMemberId, "member");
+
+			const vaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
 
 			const result = await caller.members.add({
 				vaultId,
@@ -839,7 +1120,20 @@ describe("Vault Router", () => {
 		test("should reject adding existing member", async () => {
 			const [{ userId: ownerId, caller }, { userId: memberId }] =
 				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
-			const vaultId = await createTestVault(ownerId);
+			const owner = await db.query.user.findFirst({
+				where: (u, { eq }) => eq(u.id, ownerId),
+			});
+			const teamId = owner?.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected setup owner to have a teamId");
+			}
+			await addTeamMember(teamId, memberId, "member");
+
+			const vaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
 			await addVaultMember(vaultId, memberId, "member");
 
 			await expect(
@@ -1337,6 +1631,50 @@ describe("Vault Router", () => {
 					encryptedVaultKey: mockSrpData.encryptedVaultKey,
 				}),
 			).rejects.toThrow("User not found");
+		});
+
+		test("should reject adding members to personal vaults", async () => {
+			const [{ userId: ownerId, caller }, { userId: newUserId }] =
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
+			const vaultId = await createTestVault(ownerId, {
+				type: "personal",
+			});
+
+			await expect(
+				caller.members.add({
+					vaultId,
+					userId: newUserId,
+					role: "member",
+					encryptedVaultKey: mockSrpData.encryptedVaultKey,
+				}),
+			).rejects.toThrow("Only team vaults support adding members");
+		});
+
+		test("should reject adding users from a different team", async () => {
+			const [{ userId: ownerId, caller }, { userId: crossTeamUserId }] =
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
+			const owner = await db.query.user.findFirst({
+				where: (u, { eq }) => eq(u.id, ownerId),
+			});
+			const teamId = owner?.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected setup owner to have a teamId");
+			}
+
+			const vaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
+
+			await expect(
+				caller.members.add({
+					vaultId,
+					userId: crossTeamUserId,
+					role: "member",
+					encryptedVaultKey: mockSrpData.encryptedVaultKey,
+				}),
+			).rejects.toThrow("User must belong to the same team as this vault");
 		});
 	});
 

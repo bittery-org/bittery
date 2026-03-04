@@ -1,3 +1,4 @@
+import { isAesEncryptedVaultKey } from "@bittery/shared";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -147,16 +148,15 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			// Only re-encrypt vault keys for vaults the user created (MUK-encrypted)
 			// Shared vault keys are RSA-encrypted and don't need re-encryption
 			const serverVaultKeys = vaultListQuery.data;
-			const currentUserId = userQuery.data.id;
 			const encryptedVaultKeys: Array<{
 				vaultId: string;
 				encryptedVaultKey: string;
 			}> = [];
 
 			for (const vk of serverVaultKeys) {
-				// Skip vaults where user was added (RSA-encrypted vault keys)
-				// Only re-encrypt vaults the user created (MUK-encrypted vault keys)
-				if (vk.createdById !== currentUserId) {
+				// Only re-encrypt AES(MUK)-wrapped keys.
+				// RSA-wrapped keys are not tied to the master unlock key.
+				if (!isAesEncryptedVaultKey(vk.encryptedVaultKey)) {
 					continue;
 				}
 

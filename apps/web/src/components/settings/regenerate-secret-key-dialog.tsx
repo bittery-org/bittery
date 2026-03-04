@@ -1,3 +1,4 @@
+import { isAesEncryptedVaultKey } from "@bittery/shared";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -171,9 +172,9 @@ export function RegenerateSecretKeyDialog({
 			}> = [];
 
 			for (const vk of serverVaultKeys) {
-				// Skip vaults where user was added (RSA-encrypted vault keys)
-				// Only re-encrypt vaults the user created (MUK-encrypted vault keys)
-				if (vk.createdById !== currentUserId) {
+				// Only re-encrypt AES(MUK)-wrapped keys.
+				// RSA-wrapped keys are not tied to the master unlock key.
+				if (!isAesEncryptedVaultKey(vk.encryptedVaultKey)) {
 					continue;
 				}
 
