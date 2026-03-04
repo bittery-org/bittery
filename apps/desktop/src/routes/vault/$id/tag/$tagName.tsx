@@ -8,6 +8,7 @@ import {
 	IconTagOutlineDuo18,
 } from "@bittery/ui/icons";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useI18n } from "@/providers/i18n-provider";
 import { Favicon } from "../../../../components/vault/favicon";
 import { getTagColorFromName } from "../../../../components/vault/tag-badge";
 
@@ -16,6 +17,7 @@ export const Route = createFileRoute("/vault/$id/tag/$tagName")({
 });
 
 function TagRouteComponent() {
+	const { m } = useI18n();
 	const { id: vaultId, tagName } = Route.useParams();
 	const navigate = useNavigate();
 
@@ -53,7 +55,9 @@ function TagRouteComponent() {
 		return (
 			<div className="flex flex-1 flex-col">
 				<div className="flex flex-1 items-center justify-center">
-					<div className="text-muted-foreground text-sm">Loading items...</div>
+					<div className="text-muted-foreground text-sm">
+						{m["vaults.tag.loading"]()}
+					</div>
 				</div>
 			</div>
 		);
@@ -84,8 +88,13 @@ function TagRouteComponent() {
 				<div>
 					<h2 className="font-semibold text-lg">{decodedTagName}</h2>
 					<p className="text-muted-foreground text-sm">
-						{filteredItems.length}{" "}
-						{filteredItems.length === 1 ? "item" : "items"}
+						{filteredItems.length === 1
+							? m["vaults.detail.count.items.single"]({
+									count: filteredItems.length,
+								})
+							: m["vaults.detail.count.items.plural"]({
+									count: filteredItems.length,
+								})}
 					</p>
 				</div>
 			</div>
@@ -101,10 +110,12 @@ function TagRouteComponent() {
 							<IconTagOutlineDuo18 size={48} style={{ color: tagColor }} />
 						</div>
 						<h3 className="mb-2 font-semibold text-lg">
-							No items with this tag
+							{m["vaults.tag.empty.title"]()}
 						</h3>
 						<p className="text-muted-foreground text-sm">
-							Items tagged with "{decodedTagName}" will appear here
+							{m["vaults.tag.empty.description"]({
+								tagName: decodedTagName,
+							})}
 						</p>
 					</div>
 				) : (
@@ -132,7 +143,11 @@ function TagRouteComponent() {
 											<div className="flex items-center gap-2">
 												<span className="font-medium">{item.title}</span>
 												{item.category === "login" && item.totpSecret && (
-													<span title="Has 2FA">
+													<span
+														title={m[
+															"vaults.detail.items.list.item.badge.has_2fa"
+														]()}
+													>
 														<IconMobileOutlineDuo18 className="size-3.5 text-primary" />
 													</span>
 												)}

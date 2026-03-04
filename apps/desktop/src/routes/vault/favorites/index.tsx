@@ -1,11 +1,14 @@
 import { IconStarOutlineDuo18 } from "@bittery/ui/icons";
 import { createFileRoute } from "@tanstack/react-router";
+import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/vault/favorites/")({
 	component: FavoritesIndexComponent,
 });
 
 function FavoritesIndexComponent() {
+	const { m } = useI18n();
+
 	return (
 		<div className="flex flex-1 items-center justify-center p-8 text-center">
 			<div>
@@ -15,10 +18,14 @@ function FavoritesIndexComponent() {
 						fill="currentColor"
 					/>
 				</div>
-				<h3 className="mb-2 font-semibold text-lg">Favorites</h3>
-				<p className="text-muted-foreground text-sm">No item selected</p>
+				<h3 className="mb-2 font-semibold text-lg">
+					{m["vaults.favorites.title"]()}
+				</h3>
 				<p className="text-muted-foreground text-sm">
-					Select an item from the list to view its details.
+					{m["vaults.shared.empty.no_item_selected"]()}
+				</p>
+				<p className="text-muted-foreground text-sm">
+					{m["vaults.shared.empty.select_item_to_view_details"]()}
 				</p>
 			</div>
 		</div>

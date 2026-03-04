@@ -1,6 +1,6 @@
 Internationalize this new feature/route end-to-end.
 
-We use Paraglide JS for i18n.
+We use Paraglide JS for i18n. Reuse any existing keys if they fit the context, but create new ones if needed. Follow the existing key naming conventions and structure.
 
 Requirements:
 

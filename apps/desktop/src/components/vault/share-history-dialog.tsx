@@ -5,6 +5,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@bittery/ui";
+import { useI18n } from "../../providers/i18n-provider";
 import { ShareLinksList } from "./share-links-list";
 
 interface ShareHistoryDialogProps {
@@ -18,13 +19,15 @@ export function ShareHistoryDialog({
 	open,
 	onOpenChange,
 }: ShareHistoryDialogProps) {
+	const { m } = useI18n();
+
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="flex max-h-[80vh] max-w-2xl flex-col overflow-hidden">
 				<DialogHeader>
-					<DialogTitle>Share History</DialogTitle>
+					<DialogTitle>{m["sharing.history_dialog.title"]()}</DialogTitle>
 					<DialogDescription>
-						View and manage all share links created for this item.
+						{m["sharing.history_dialog.description"]()}
 					</DialogDescription>
 				</DialogHeader>
 				<div className="flex-1 overflow-y-auto pr-2">

@@ -10,6 +10,7 @@ import {
 	toast,
 } from "@bittery/ui";
 import { useState } from "react";
+import { useI18n } from "../../providers/i18n-provider";
 
 interface DeleteVaultDialogProps {
 	open: boolean;
@@ -24,6 +25,7 @@ export function DeleteVaultDialog({
 	vault,
 	onConfirm,
 }: DeleteVaultDialogProps) {
+	const { m } = useI18n();
 	const [isDeleting, setIsDeleting] = useState(false);
 
 	const handleDelete = async () => {
@@ -35,7 +37,9 @@ export function DeleteVaultDialog({
 			onOpenChange(false);
 		} catch (error) {
 			const errorMessage =
-				error instanceof Error ? error.message : "Failed to delete vault";
+				error instanceof Error
+					? error.message
+					: m["vaults.delete_dialog.toast.delete_failed"]();
 			toast.error(errorMessage);
 		} finally {
 			setIsDeleting(false);
@@ -46,21 +50,27 @@ export function DeleteVaultDialog({
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
 			<AlertDialogContent>
 				<AlertDialogHeader>
-					<AlertDialogTitle>Delete Vault</AlertDialogTitle>
+					<AlertDialogTitle>
+						{m["vaults.delete_dialog.title"]()}
+					</AlertDialogTitle>
 					<AlertDialogDescription>
-						Are you sure you want to delete "{vault?.name}"? This will
-						permanently delete the vault and all its items. This action cannot
-						be undone.
+						{m["vaults.delete_dialog.description"]({
+							vaultName: vault?.name ?? "",
+						})}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>
-					<AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+					<AlertDialogCancel disabled={isDeleting}>
+						{m["vaults.delete_dialog.action.cancel"]()}
+					</AlertDialogCancel>
 					<AlertDialogAction
 						onClick={handleDelete}
 						disabled={isDeleting}
 						className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 					>
-						{isDeleting ? "Deleting..." : "Delete"}
+						{isDeleting
+							? m["vaults.delete_dialog.action.deleting"]()
+							: m["vaults.delete_dialog.action.confirm"]()}
 					</AlertDialogAction>
 				</AlertDialogFooter>
 			</AlertDialogContent>

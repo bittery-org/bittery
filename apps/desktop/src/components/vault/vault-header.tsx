@@ -1,6 +1,7 @@
 import { Button } from "@bittery/ui";
 import { IconPlusOutlineDuo18 } from "@bittery/ui/icons";
 // import { useSyncContextOptional } from "../../providers/sync-provider";
+import { useI18n } from "../../providers/i18n-provider";
 import { SearchCombobox } from "./search-combobox";
 
 interface VaultHeaderProps {
@@ -9,6 +10,7 @@ interface VaultHeaderProps {
 }
 
 export function VaultHeader({ hasVaults, onNewItemClick }: VaultHeaderProps) {
+	const { m } = useI18n();
 	// const syncContext = useSyncContextOptional();
 
 	return (
@@ -24,7 +26,7 @@ export function VaultHeader({ hasVaults, onNewItemClick }: VaultHeaderProps) {
 			) : null} */}
 			<Button onClick={onNewItemClick} disabled={!hasVaults}>
 				<IconPlusOutlineDuo18 />
-				New Item
+				{m["vaults.detail.action.new_item"]()}
 			</Button>
 		</header>
 	);

@@ -10,6 +10,7 @@ import {
 	useNavigate,
 	useParams,
 } from "@tanstack/react-router";
+import { useI18n } from "@/providers/i18n-provider";
 import { ItemListRow } from "../../../../components/vault/item-list-row";
 import { getTagColorFromName } from "../../../../components/vault/tag-badge";
 
@@ -18,6 +19,7 @@ export const Route = createFileRoute("/vault/tag/$tagName")({
 });
 
 function CrossVaultTagRouteComponent() {
+	const { m } = useI18n();
 	const { tagName } = Route.useParams();
 	const { itemId } = useParams({ strict: false });
 	const navigate = useNavigate();
@@ -45,7 +47,9 @@ function CrossVaultTagRouteComponent() {
 		return (
 			<div className="flex w-78 flex-col border-r bg-background">
 				<div className="flex flex-1 items-center justify-center">
-					<div className="text-muted-foreground text-sm">Loading items...</div>
+					<div className="text-muted-foreground text-sm">
+						{m["vaults.tag.loading"]()}
+					</div>
 				</div>
 			</div>
 		);
@@ -83,9 +87,13 @@ function CrossVaultTagRouteComponent() {
 									style={{ color: tagColor }}
 								/>
 							</div>
-							<h3 className="mb-2 font-semibold">No items with this tag</h3>
+							<h3 className="mb-2 font-semibold">
+								{m["vaults.tag.empty.title"]()}
+							</h3>
 							<p className="text-muted-foreground text-sm">
-								Items tagged with "{decodedTagName}" will appear here
+								{m["vaults.tag.empty.description"]({
+									tagName: decodedTagName,
+								})}
 							</p>
 						</div>
 					) : (

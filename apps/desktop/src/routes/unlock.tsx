@@ -136,7 +136,7 @@ export function UnlockPage() {
 		},
 		onError: (error) => {
 			console.error("Unlock all error:", error);
-			toast.error(error.message || m["toast.auth.unlock.error.failed"]());
+			toast.error(m["toast.auth.unlock.error.failed"]());
 		},
 	});
 

@@ -15,6 +15,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useAccount } from "@/contexts/account-context";
 import { storage } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "@/providers/sync-provider";
 import { AccountAvatar } from "./account-avatar";
 import { AddAccountDialog } from "./add-account-dialog";
@@ -23,6 +24,7 @@ import { RemoveAccountDialog } from "./remove-account-dialog";
 import { SettingsDialog } from "./settings-dialog";
 
 export function AccountSwitcher() {
+	const { m } = useI18n();
 	const {
 		accounts,
 		activeAccount: activeAccountQuery,
@@ -67,16 +69,14 @@ export function AccountSwitcher() {
 			}
 		} catch (error) {
 			console.error("Failed to switch account:", error);
-			toast.error("Failed to switch account");
+			toast.error(m["toast.account_switcher.switch_account_failed"]());
 		}
 	};
 
 	const handleAllAccountsSelect = async () => {
 		// Check if we have any unlocked accounts
 		if (unlockedEmailsList.length === 0) {
-			toast.error(
-				"No accounts are unlocked. Please unlock at least one account.",
-			);
+			toast.error(m["toast.account_switcher.no_unlocked_accounts"]());
 			return;
 		}
 
@@ -87,7 +87,7 @@ export function AccountSwitcher() {
 			navigate({ to: "/vault" });
 		} catch (error) {
 			console.error("Failed to switch to All Accounts mode:", error);
-			toast.error("Failed to switch to All Accounts mode");
+			toast.error(m["toast.account_switcher.switch_all_accounts_failed"]());
 		}
 	};
 
@@ -100,10 +100,10 @@ export function AccountSwitcher() {
 			// Use AccountContext's version which broadcasts to extension
 			await lockAllAccountsWithBroadcast();
 			navigate({ to: "/unlock" });
-			toast.success("All accounts locked");
+			toast.success(m["toast.account_switcher.lock_all_success"]());
 		} catch (error) {
 			console.error("Failed to lock all accounts:", error);
-			toast.error("Failed to lock accounts");
+			toast.error(m["toast.account_switcher.lock_all_failed"]());
 		}
 	};
 
@@ -148,10 +148,10 @@ export function AccountSwitcher() {
 				}
 			}
 
-			toast.success("Account removed");
+			toast.success(m["toast.account_switcher.remove_account_success"]());
 		} catch (error) {
 			console.error("Failed to remove account:", error);
-			toast.error("Failed to remove account");
+			toast.error(m["toast.account_switcher.remove_account_failed"]());
 		} finally {
 			setAccountToRemove(null);
 		}
@@ -176,7 +176,7 @@ export function AccountSwitcher() {
 					/>
 					<div className="flex flex-col items-start overflow-hidden">
 						<span className="max-w-24 truncate font-medium text-sm">
-							All Accounts
+							{m["vaults.sidebar.account_switcher.menu.all_accounts"]()}
 						</span>
 					</div>
 				</>
@@ -203,6 +203,36 @@ export function AccountSwitcher() {
 				activeEmail={activeAccountEmail}
 				unlockedEmails={unlockedEmailsList}
 				isLoading={switchAccount.isPending}
+				labels={{
+					accountsLabel: m["vaults.sidebar.account_switcher.menu.accounts"](),
+					noAccountsAdded: m[
+						"vaults.sidebar.account_switcher.menu.no_accounts_added"
+					](),
+					allAccountsLabel: m[
+						"vaults.sidebar.account_switcher.menu.all_accounts"
+					](),
+					viewItemsFromAccounts: ({ count }) =>
+						count === 1
+							? m[
+									"vaults.sidebar.account_switcher.menu.view_items_from_accounts.single"
+								]({ count })
+							: m[
+									"vaults.sidebar.account_switcher.menu.view_items_from_accounts.plural"
+								]({ count }),
+					addAccountLabel: m[
+						"vaults.sidebar.account_switcher.menu.add_account"
+					](),
+					setupAnotherDeviceLabel: m[
+						"vaults.sidebar.account_switcher.menu.setup_another_device"
+					](),
+					settingsLabel: m["nav.menu.settings"](),
+					lockAllAccountsLabel: m[
+						"vaults.sidebar.account_switcher.menu.lock_all_accounts"
+					](),
+					removeAccountLabel: m[
+						"vaults.sidebar.account_switcher.menu.remove_account"
+					](),
+				}}
 				onAccountSelect={handleAccountSelect}
 				onAddAccount={handleAddAccount}
 				onLockAll={handleLockAll}

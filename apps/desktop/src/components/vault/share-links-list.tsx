@@ -39,6 +39,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { formatDateTime } from "../../lib/i18n-format";
+import { useI18n } from "../../providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface ShareLinksListProps {
@@ -66,14 +67,8 @@ const STATUS_COLORS: Record<string, string> = {
 	revoked: "bg-red-500",
 };
 
-const STATUS_LABELS: Record<string, string> = {
-	active: "Active",
-	expired: "Expired",
-	exhausted: "Used",
-	revoked: "Revoked",
-};
-
 export function ShareLinksList({ itemId }: ShareLinksListProps) {
+	const { m } = useI18n();
 	const [selectedLink, setSelectedLink] = useState<ShareLinkData | null>(null);
 	const [showAccessLogs, setShowAccessLogs] = useState(false);
 	const [linkToRevoke, setLinkToRevoke] = useState<string | null>(null);
@@ -87,7 +82,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 	const revokeMutation = useMutation({
 		mutationFn: (linkId: string) => trpcClient.share.revoke.mutate({ linkId }),
 		onSuccess: async () => {
-			toast.success("Share link revoked");
+			toast.success(m["sharing.links_list.toast.revoke_success"]());
 			await invalidator.invalidateShare(itemId);
 			setLinkToRevoke(null);
 		},
@@ -107,10 +102,9 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 		// Use the baseShareUrl from the API response
 		const baseShareUrl = linksQuery.data?.baseShareUrl || "";
 		const shareUrl = `${baseShareUrl}${token}`;
-		copyWithToast(shareUrl, "Link", {
+		copyWithToast(shareUrl, m["sharing.common.link_label"](), {
 			autoClearMs: 0,
-			successMessage:
-				"Link copied (note: you'll need the original link with decryption key)",
+			successMessage: m["sharing.links_list.toast.copy_warning"](),
 		});
 	};
 
@@ -128,14 +122,37 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 		const now = new Date();
 		const diff = new Date(date).getTime() - now.getTime();
 
-		if (diff < 0) return "Expired";
+		if (diff < 0) return m["sharing.links_list.status.expired"]();
 
 		const hours = Math.floor(diff / (1000 * 60 * 60));
 		const days = Math.floor(hours / 24);
 
-		if (days > 0) return `${days} day${days !== 1 ? "s" : ""} left`;
-		if (hours > 0) return `${hours} hour${hours !== 1 ? "s" : ""} left`;
-		return "Less than an hour";
+		if (days > 0) {
+			return days === 1
+				? m["sharing.links_list.relative.days_left.single"]({ count: days })
+				: m["sharing.links_list.relative.days_left.plural"]({ count: days });
+		}
+		if (hours > 0) {
+			return hours === 1
+				? m["sharing.links_list.relative.hours_left.single"]({ count: hours })
+				: m["sharing.links_list.relative.hours_left.plural"]({ count: hours });
+		}
+		return m["sharing.links_list.relative.less_than_hour"]();
+	};
+
+	const getStatusLabel = (status: string) => {
+		switch (status) {
+			case "active":
+				return m["sharing.links_list.status.active"]();
+			case "expired":
+				return m["sharing.links_list.status.expired"]();
+			case "exhausted":
+				return m["sharing.links_list.status.exhausted"]();
+			case "revoked":
+				return m["sharing.links_list.status.revoked"]();
+			default:
+				return status;
+		}
 	};
 
 	if (linksQuery.isLoading) {
@@ -155,7 +172,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 				<CardContent className="flex flex-col items-center justify-center py-8">
 					<IconLinkOutlineDuo18 className="mb-4 h-8 w-8 text-muted-foreground" />
 					<p className="text-muted-foreground text-sm">
-						No share links created yet
+						{m["sharing.links_list.empty.links"]()}
 					</p>
 				</CardContent>
 			</Card>
@@ -187,25 +204,27 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 													STATUS_COLORS[link.status],
 												)}
 											/>
-											{STATUS_LABELS[link.status]}
+											{getStatusLabel(link.status)}
 										</Badge>
 										<Badge variant="secondary">
 											{link.accessMode === "anyone" ? (
 												<>
 													<IconEarthOutlineDuo18 className="mr-1 h-3 w-3" />
-													Anyone
+													{m["sharing.links_list.access_mode.anyone"]()}
 												</>
 											) : (
 												<>
 													<IconEnvelopeOutlineDuo18 className="mr-1 h-3 w-3" />
-													Email restricted
+													{m[
+														"sharing.links_list.access_mode.email_restricted"
+													]()}
 												</>
 											)}
 										</Badge>
 										{link.isOneTimeUse && (
 											<Badge variant="secondary">
 												<IconMagicShieldOutlineDuo18 className="mr-1 h-3 w-3" />
-												One-time
+												{m["sharing.links_list.badge.one_time"]()}
 											</Badge>
 										)}
 									</div>
@@ -214,19 +233,41 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 									<div className="flex flex-wrap gap-4 text-muted-foreground text-xs">
 										<span className="flex items-center gap-1">
 											<IconEyeOutlineDuo18 className="h-3 w-3" />
-											{link.accessCount} access
-											{link.accessCount !== 1 ? "es" : ""}
-											{link.maxAccessCount && ` / ${link.maxAccessCount}`}
+											{link.maxAccessCount !== null
+												? link.accessCount === 1
+													? m[
+															"sharing.links_list.access_count_with_limit.single"
+														]({
+															count: link.accessCount,
+															max: link.maxAccessCount,
+														})
+													: m[
+															"sharing.links_list.access_count_with_limit.plural"
+														]({
+															count: link.accessCount,
+															max: link.maxAccessCount,
+														})
+												: link.accessCount === 1
+													? m["sharing.links_list.access_count.single"]({
+															count: link.accessCount,
+														})
+													: m["sharing.links_list.access_count.plural"]({
+															count: link.accessCount,
+														})}
 										</span>
 										<span className="flex items-center gap-1">
 											<IconClockTimeOutlineDuo18 className="h-3 w-3" />
 											{link.status === "active"
 												? formatRelativeTime(link.expiresAt)
-												: `Expires: ${formatDate(link.expiresAt)}`}
+												: m["sharing.links_list.label.expires_at"]({
+														date: formatDate(link.expiresAt),
+													})}
 										</span>
 										<span className="flex items-center gap-1">
 											<IconCalendarOutlineDuo18 className="h-3 w-3" />
-											Created: {formatDate(link.createdAt)}
+											{m["sharing.links_list.label.created_at"]({
+												date: formatDate(link.createdAt),
+											})}
 										</span>
 									</div>
 
@@ -241,7 +282,10 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 														className="text-xs"
 													>
 														{e.email}
-														{e.verified && " (verified)"}
+														{e.verified &&
+															m[
+																"sharing.links_list.allowed_email.verified_suffix"
+															]()}
 													</Badge>
 												))}
 											</div>
@@ -254,7 +298,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 										size="sm"
 										variant="ghost"
 										onClick={() => handleCopyLink(link.token)}
-										title="Copy link"
+										title={m["sharing.links_list.action.copy_link"]()}
 									>
 										<IconCopyOutlineDuo18 className="h-4 w-4" />
 									</Button>
@@ -265,7 +309,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 											setSelectedLink(link as ShareLinkData);
 											setShowAccessLogs(true);
 										}}
-										title="View access logs"
+										title={m["sharing.links_list.action.view_access_logs"]()}
 									>
 										<IconUsers6OutlineDuo18 className="h-4 w-4" />
 									</Button>
@@ -275,7 +319,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 											variant="ghost"
 											onClick={() => setLinkToRevoke(link.id)}
 											className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-											title="Revoke link"
+											title={m["sharing.links_list.action.revoke_link"]()}
 										>
 											<IconTrash2OutlineDuo18 className="h-4 w-4" />
 										</Button>
@@ -291,9 +335,9 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 			<Dialog open={showAccessLogs} onOpenChange={setShowAccessLogs}>
 				<DialogContent className="sm:max-w-lg">
 					<DialogHeader>
-						<DialogTitle>Access Logs</DialogTitle>
+						<DialogTitle>{m["sharing.links_list.logs.title"]()}</DialogTitle>
 						<DialogDescription>
-							View who has accessed this share link.
+							{m["sharing.links_list.logs.description"]()}
 						</DialogDescription>
 					</DialogHeader>
 
@@ -315,7 +359,9 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 														<Badge
 															variant={log.success ? "default" : "destructive"}
 														>
-															{log.success ? "Success" : "Failed"}
+															{log.success
+																? m["sharing.links_list.logs.status.success"]()
+																: m["sharing.links_list.logs.status.failed"]()}
 														</Badge>
 														{log.accessedByEmail && (
 															<span className="text-sm">
@@ -328,7 +374,9 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 													</p>
 													{log.ipAddress && (
 														<p className="text-muted-foreground text-xs">
-															IP: {log.ipAddress}
+															{m["sharing.links_list.logs.ip"]({
+																ipAddress: log.ipAddress,
+															})}
 														</p>
 													)}
 													{log.failureReason && (
@@ -346,7 +394,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 							<div className="py-8 text-center">
 								<IconEyeOutlineDuo18 className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
 								<p className="text-muted-foreground text-sm">
-									No access logs yet
+									{m["sharing.links_list.empty.logs"]()}
 								</p>
 							</div>
 						)}
@@ -361,15 +409,17 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 			>
 				<AlertDialogContent>
 					<AlertDialogHeader>
-						<AlertDialogTitle>Revoke Share Link?</AlertDialogTitle>
+						<AlertDialogTitle>
+							{m["sharing.links_list.revoke_dialog.title"]()}
+						</AlertDialogTitle>
 						<AlertDialogDescription>
-							This will immediately disable the share link. Anyone with the link
-							will no longer be able to access the shared item. This action
-							cannot be undone.
+							{m["sharing.links_list.revoke_dialog.description"]()}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
-						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogCancel>
+							{m["sharing.links_list.action.cancel"]()}
+						</AlertDialogCancel>
 						<AlertDialogAction
 							onClick={() =>
 								linkToRevoke && revokeMutation.mutate(linkToRevoke)
@@ -381,7 +431,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 							) : (
 								<IconTrash2OutlineDuo18 className="h-4 w-4" />
 							)}
-							Revoke Link
+							{m["sharing.links_list.action.revoke_link"]()}
 						</AlertDialogAction>
 					</AlertDialogFooter>
 				</AlertDialogContent>

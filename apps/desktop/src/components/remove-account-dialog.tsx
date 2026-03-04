@@ -7,6 +7,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@bittery/ui";
+import { useI18n } from "@/providers/i18n-provider";
 
 interface RemoveAccountDialogProps {
 	email: string | null;
@@ -19,6 +20,8 @@ export function RemoveAccountDialog({
 	onConfirm,
 	onCancel,
 }: RemoveAccountDialogProps) {
+	const { m } = useI18n();
+
 	if (!email) return null;
 
 	return (
@@ -28,19 +31,25 @@ export function RemoveAccountDialog({
 		>
 			<DialogContent showCloseButton={false}>
 				<DialogHeader>
-					<DialogTitle>Remove Account</DialogTitle>
+					<DialogTitle>
+						{m["vaults.sidebar.account_switcher.menu.remove_account"]()}
+					</DialogTitle>
 					<DialogDescription>
-						Are you sure you want to remove <strong>{email}</strong> from this
-						device? You will need to log in again with your email, password, and
-						secret key to access this account.
+						{m[
+							"vaults.sidebar.account_switcher.remove_account_dialog.description.prefix"
+						]()}{" "}
+						<strong>{email}</strong>{" "}
+						{m[
+							"vaults.sidebar.account_switcher.remove_account_dialog.description.suffix"
+						]()}
 					</DialogDescription>
 				</DialogHeader>
 				<DialogFooter>
 					<Button variant="outline" onClick={onCancel}>
-						Cancel
+						{m["settings.common.action.cancel"]()}
 					</Button>
 					<Button onClick={() => onConfirm(email)} variant="destructive">
-						Remove Account
+						{m["vaults.sidebar.account_switcher.menu.remove_account"]()}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

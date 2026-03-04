@@ -28,6 +28,7 @@ import { useQuery } from "@tanstack/react-query";
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useMemo, useState } from "react";
 import { storage } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
 
 interface DeviceSetupAccount {
 	email: string;
@@ -42,12 +43,19 @@ interface DeviceSetupDialogProps {
 	initialAccountEmail?: string | null;
 }
 
+type SetupPreviewErrorKey =
+	| "vaults.sidebar.account_switcher.device_setup_dialog.error.select_account"
+	| "vaults.sidebar.account_switcher.device_setup_dialog.error.no_server_url"
+	| "vaults.sidebar.account_switcher.device_setup_dialog.error.no_secret_key"
+	| "vaults.sidebar.account_switcher.device_setup_dialog.error.generate_failed";
+
 export function DeviceSetupDialog({
 	open,
 	onOpenChange,
 	accounts,
 	initialAccountEmail,
 }: DeviceSetupDialogProps) {
+	const { m } = useI18n();
 	const fallbackServerUrl =
 		normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ?? null;
 	const [selectedEmail, setSelectedEmail] = useState("");
@@ -101,7 +109,8 @@ export function DeviceSetupDialog({
 			return {
 				linkUri: null,
 				qrUri: null,
-				error: "Select an account to generate setup details.",
+				errorKey:
+					"vaults.sidebar.account_switcher.device_setup_dialog.error.select_account" as SetupPreviewErrorKey,
 			};
 		}
 
@@ -109,7 +118,8 @@ export function DeviceSetupDialog({
 			return {
 				linkUri: null,
 				qrUri: null,
-				error: "No server URL found for this account.",
+				errorKey:
+					"vaults.sidebar.account_switcher.device_setup_dialog.error.no_server_url" as SetupPreviewErrorKey,
 			};
 		}
 
@@ -125,7 +135,8 @@ export function DeviceSetupDialog({
 				return {
 					linkUri,
 					qrUri: null,
-					error: "No secret key is stored for this account.",
+					errorKey:
+						"vaults.sidebar.account_switcher.device_setup_dialog.error.no_secret_key" as SetupPreviewErrorKey,
 				};
 			}
 
@@ -137,45 +148,80 @@ export function DeviceSetupDialog({
 			return {
 				linkUri,
 				qrUri,
-				error: null,
+				errorKey: null,
 			};
-		} catch (error) {
+		} catch {
 			return {
 				linkUri: null,
 				qrUri: null,
-				error:
-					error instanceof Error
-						? error.message
-						: "Unable to generate setup details.",
+				errorKey:
+					"vaults.sidebar.account_switcher.device_setup_dialog.error.generate_failed" as SetupPreviewErrorKey,
 			};
 		}
 	}, [selectedAccount, setupDataQuery.data]);
 
+	const setupPreviewError = useMemo(() => {
+		switch (setupPreview.errorKey) {
+			case "vaults.sidebar.account_switcher.device_setup_dialog.error.select_account":
+				return m[
+					"vaults.sidebar.account_switcher.device_setup_dialog.error.select_account"
+				]();
+			case "vaults.sidebar.account_switcher.device_setup_dialog.error.no_server_url":
+				return m[
+					"vaults.sidebar.account_switcher.device_setup_dialog.error.no_server_url"
+				]();
+			case "vaults.sidebar.account_switcher.device_setup_dialog.error.no_secret_key":
+				return m[
+					"vaults.sidebar.account_switcher.device_setup_dialog.error.no_secret_key"
+				]();
+			case "vaults.sidebar.account_switcher.device_setup_dialog.error.generate_failed":
+				return m[
+					"vaults.sidebar.account_switcher.device_setup_dialog.error.generate_failed"
+				]();
+			default:
+				return null;
+		}
+	}, [m, setupPreview.errorKey]);
+
 	const handleCopyLink = async () => {
-		await copyWithToast(setupPreview.linkUri, "Link", {
-			autoClearMs: 0,
-			showAutoClearMessage: false,
-		});
+		await copyWithToast(
+			setupPreview.linkUri,
+			m["sharing.common.link_label"](),
+			{
+				autoClearMs: 0,
+				showAutoClearMessage: false,
+			},
+		);
 	};
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="sm:max-w-md">
 				<DialogHeader>
-					<DialogTitle>Set up another device</DialogTitle>
+					<DialogTitle>
+						{m["vaults.sidebar.account_switcher.menu.setup_another_device"]()}
+					</DialogTitle>
 					<DialogDescription>
-						Select an account and scan the QR code in mobile sign in.
+						{m[
+							"vaults.sidebar.account_switcher.device_setup_dialog.description"
+						]()}
 					</DialogDescription>
 				</DialogHeader>
 
 				<div className="space-y-3">
 					<div className="space-y-1.5">
 						<Label htmlFor="device-setup-account" className="text-xs">
-							Account
+							{m[
+								"vaults.sidebar.account_switcher.device_setup_dialog.field.account"
+							]()}
 						</Label>
 						<Select value={selectedEmail} onValueChange={setSelectedEmail}>
 							<SelectTrigger id="device-setup-account">
-								<SelectValue placeholder="Select an account" />
+								<SelectValue
+									placeholder={m[
+										"vaults.sidebar.account_switcher.device_setup_dialog.placeholder.select_account"
+									]()}
+								/>
 							</SelectTrigger>
 							<SelectContent>
 								{accounts.map((account) => (
@@ -201,21 +247,25 @@ export function DeviceSetupDialog({
 							</div>
 						) : (
 							<p className="text-center text-muted-foreground text-sm">
-								{setupPreview.error}
+								{setupPreviewError}
 							</p>
 						)}
 					</div>
 
 					<div className="space-y-1.5">
 						<Label htmlFor="device-setup-link" className="text-xs">
-							Setup link
+							{m[
+								"vaults.sidebar.account_switcher.device_setup_dialog.field.setup_link"
+							]()}
 						</Label>
 						<div className="flex gap-2">
 							<Input
 								id="device-setup-link"
 								value={setupPreview.linkUri ?? ""}
 								readOnly
-								placeholder="Link unavailable for this account"
+								placeholder={m[
+									"vaults.sidebar.account_switcher.device_setup_dialog.placeholder.link_unavailable"
+								]()}
 								className="font-mono text-[11px]"
 							/>
 							<Button
@@ -232,7 +282,9 @@ export function DeviceSetupDialog({
 
 				<DialogFooter>
 					<Button variant="outline" onClick={() => onOpenChange(false)}>
-						Close
+						{m[
+							"vaults.sidebar.account_switcher.device_setup_dialog.action.close"
+						]()}
 					</Button>
 				</DialogFooter>
 			</DialogContent>
