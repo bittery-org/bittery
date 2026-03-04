@@ -24,6 +24,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { storage } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
 import {
 	decrypt,
 	deriveKeysFromMasterKey,
@@ -33,6 +34,7 @@ import {
 } from "@/lib/wasm-crypto";
 
 export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
+	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
 	const [step, setStep] = useState<"verify" | "display">("verify");
 	const [currentPassword, setCurrentPassword] = useState("");
@@ -54,11 +56,11 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 		}) => trpcClient.auth.storeRecoveryKey.mutate(input),
 		onSuccess: async () => {
 			await queryClient.invalidateQueries();
-			toast.success("Recovery Key has been set up.");
+			toast.success(m["settings.recovery_key.setup.toast.configured"]());
 			handleOpenChange(false);
 		},
-		onError: (error: Error) => {
-			toast.error(error.message || "Failed to store Recovery Key");
+		onError: () => {
+			toast.error(m["settings.recovery_key.setup.toast.configure_failed"]());
 			setIsProcessing(false);
 		},
 	});
@@ -67,20 +69,18 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 		e.preventDefault();
 
 		if (!currentPassword.trim()) {
-			toast.error("Please enter your current password");
+			toast.error(m["settings.recovery_key.common.toast.current_password_required"]());
 			return;
 		}
 
 		const secretKey = await storage.getStoredSecretKey();
 		if (!secretKey) {
-			toast.error(
-				"Secret key not found. Please sign out and sign in with full credentials.",
-			);
+			toast.error(m["settings.common.toast.secret_key_not_found_sign_out"]());
 			return;
 		}
 
 		if (!userQuery.data?.encryptedPrivateKey) {
-			toast.error("Could not load your account metadata");
+			toast.error(m["settings.recovery_key.common.toast.account_metadata_failed"]());
 			return;
 		}
 
@@ -112,22 +112,22 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 			setRecoveryKey(generatedRecoveryKey);
 			setEncryptedMasterKey(JSON.stringify(encryptedMasterKeyData));
 			setStep("display");
-		} catch (error) {
-			console.error("Recovery setup failed:", error);
-			toast.error("Failed to verify password. Please try again.");
-		} finally {
-			setIsProcessing(false);
-		}
-	};
+			} catch (error) {
+				console.error("Recovery setup failed:", error);
+				toast.error(m["settings.recovery_key.common.toast.verify_password_failed"]());
+			} finally {
+				setIsProcessing(false);
+			}
+		};
 
 	const handleConfirmSetup = async () => {
 		if (!hasAcknowledged) {
-			toast.error("Please confirm you saved the Recovery Key");
+			toast.error(m["settings.recovery_key.setup.toast.acknowledgement_required"]());
 			return;
 		}
 
 		if (!recoveryKey || !encryptedMasterKey) {
-			toast.error("Recovery setup data missing. Please retry.");
+			toast.error(m["settings.recovery_key.common.toast.data_missing"]());
 			return;
 		}
 
@@ -155,7 +155,7 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 	};
 
 	const copyRecoveryKey = () => {
-		copyWithToast(recoveryKey, "Recovery Key", {
+		copyWithToast(recoveryKey, m["settings.recovery_key.common.copy_label"](), {
 			showAutoClearMessage: false,
 		});
 	};
@@ -163,65 +163,69 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 	const downloadEmergencyKit = async () => {
 		const result = await downloadRecoveryKit({
 			fileName: "bittery-recovery-kit",
-			title: "Bittery Recovery Kit",
-			subtitle:
-				"Generated on-device to help you recover account access if your password is lost.",
+			title: m["settings.recovery_key.setup.kit.title"](),
+			subtitle: m["settings.recovery_key.setup.kit.subtitle"](),
 			entries: [
 				{
-					label: "Recovery Key",
+					label: m["settings.recovery_key.setup.kit.entry.label"](),
 					value: recoveryKey,
-					description:
-						"Use this Recovery Key to reset your password and recover access.",
+					description: m["settings.recovery_key.setup.kit.entry.description"](),
 				},
 			],
 			cautions: [
-				"Store this kit separately from your password manager.",
-				"Keep at least one offline backup in a secure place.",
-				"Anyone with this key and your Secret Key can reset your password.",
+				m["settings.recovery_key.setup.kit.caution.separate_manager"](),
+				m["settings.recovery_key.setup.kit.caution.keep_offline_backup"](),
+				m["settings.recovery_key.setup.kit.caution.anyone_can_reset"](),
 			],
-			footerNote:
-				"This document is generated client-side and never uploaded to Bittery servers.",
+			footerNote: m["settings.recovery_key.common.kit.footer_note"](),
+			labels: {
+				documentTitle: m["settings.recovery_key.common.kit.document_title"](),
+				generatedLabel: m["settings.recovery_key.common.kit.generated_label"](),
+				storeOfflineHeading: m["settings.recovery_key.common.kit.store_offline_heading"](),
+				badgeText: m["settings.recovery_key.common.kit.badge_text"](),
+			},
 		});
 
 		if (result === "pdf-downloaded") {
-			toast.success("Recovery Kit PDF downloaded.");
+			toast.success(m["settings.recovery_key.common.toast.kit_pdf_downloaded"]());
 			return;
 		}
 
-		toast.success("PDF failed. Recovery Kit downloaded as text backup.");
+		toast.success(m["settings.recovery_key.common.toast.kit_text_downloaded"]());
 	};
 
-	return (
-		<Dialog open={open} onOpenChange={handleOpenChange}>
-			<DialogTrigger asChild>
-				<Button variant="outline">
-					<Shield className="mr-2 h-4 w-4" />
-					Set up Recovery Key
-				</Button>
-			</DialogTrigger>
-			<DialogContent className="sm:max-w-md">
-				{step === "verify" ? (
-					<form onSubmit={handleGenerateRecoveryKey}>
-						<DialogHeader>
-							<DialogTitle>Set up Recovery Key</DialogTitle>
-							<DialogDescription>
-								Enter your password to generate a Recovery Key for password
-								recovery.
-							</DialogDescription>
-						</DialogHeader>
-						<div className="grid gap-4 py-4">
-							<div className="grid gap-2">
-								<Label htmlFor="setupRecoveryPassword">Current Password</Label>
-								<div className="relative">
-									<Input
+		return (
+			<Dialog open={open} onOpenChange={handleOpenChange}>
+				<DialogTrigger asChild>
+					<Button variant="outline">
+						<Shield className="mr-2 h-4 w-4" />
+						{m["settings.recovery_key.setup.trigger"]()}
+					</Button>
+				</DialogTrigger>
+				<DialogContent className="sm:max-w-md">
+					{step === "verify" ? (
+						<form onSubmit={handleGenerateRecoveryKey}>
+							<DialogHeader>
+								<DialogTitle>{m["settings.recovery_key.setup.title"]()}</DialogTitle>
+								<DialogDescription>
+									{m["settings.recovery_key.setup.description"]()}
+								</DialogDescription>
+							</DialogHeader>
+							<div className="grid gap-4 py-4">
+								<div className="grid gap-2">
+									<Label htmlFor="setupRecoveryPassword">
+										{m["settings.recovery_key.common.field.current_password"]()}
+									</Label>
+									<div className="relative">
+										<Input
 										id="setupRecoveryPassword"
-										type={showPassword ? "text" : "password"}
-										value={currentPassword}
-										onChange={(e) => setCurrentPassword(e.target.value)}
-										placeholder="Enter your password"
-										autoFocus
-										className="pr-10"
-									/>
+											type={showPassword ? "text" : "password"}
+											value={currentPassword}
+											onChange={(e) => setCurrentPassword(e.target.value)}
+											placeholder={m["settings.recovery_key.common.placeholder.password"]()}
+											autoFocus
+											className="pr-10"
+										/>
 									<Button
 										type="button"
 										variant="ghost"
@@ -234,91 +238,95 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 								</div>
 							</div>
 						</div>
-						<DialogFooter>
-							<Button
-								type="button"
-								variant="outline"
-								onClick={() => setOpen(false)}
-							>
-								Cancel
-							</Button>
-							<Button type="submit" disabled={isProcessing}>
-								{isProcessing ? "Verifying..." : "Generate Recovery Key"}
-							</Button>
-						</DialogFooter>
-					</form>
-				) : (
-					<>
-						<DialogHeader>
-							<DialogTitle>Save Your Recovery Key</DialogTitle>
-							<DialogDescription>
-								This key is shown once. Store it securely before continuing.
-							</DialogDescription>
-						</DialogHeader>
-						<div className="grid gap-4 py-4">
-							<div className="relative rounded-xl border bg-muted/30 p-4">
-								<div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-									Your Recovery Key
-								</div>
-								<div className="break-all font-mono text-sm tracking-wide">
-									{recoveryKey}
+							<DialogFooter>
+								<Button
+									type="button"
+									variant="outline"
+									onClick={() => setOpen(false)}
+								>
+									{m["settings.common.action.cancel"]()}
+								</Button>
+								<Button type="submit" disabled={isProcessing}>
+									{isProcessing
+										? m["settings.recovery_key.common.action.verifying"]()
+										: m["settings.recovery_key.setup.action.generate"]()}
+								</Button>
+							</DialogFooter>
+						</form>
+					) : (
+						<>
+							<DialogHeader>
+								<DialogTitle>
+									{m["settings.recovery_key.setup.display.title"]()}
+								</DialogTitle>
+								<DialogDescription>
+									{m["settings.recovery_key.common.display.description"]()}
+								</DialogDescription>
+							</DialogHeader>
+							<div className="grid gap-4 py-4">
+								<div className="relative rounded-xl border bg-muted/30 p-4">
+									<div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
+										{m["settings.recovery_key.setup.display.key_label"]()}
+									</div>
+									<div className="break-all font-mono text-sm tracking-wide">
+										{recoveryKey}
 								</div>
 							</div>
 
 							<div className="grid grid-cols-2 gap-3">
 								<Button
-									type="button"
-									variant="outline"
-									onClick={copyRecoveryKey}
-								>
-									<Copy size={16} className="mr-2" />
-									Copy
-								</Button>
-								<Button
-									type="button"
-									variant="outline"
-									onClick={downloadEmergencyKit}
-								>
-									<Download size={16} className="mr-2" />
-									Download Kit
-								</Button>
-							</div>
+										type="button"
+										variant="outline"
+										onClick={copyRecoveryKey}
+									>
+										<Copy size={16} className="mr-2" />
+										{m["settings.common.action.copy"]()}
+									</Button>
+									<Button
+										type="button"
+										variant="outline"
+										onClick={downloadEmergencyKit}
+									>
+										<Download size={16} className="mr-2" />
+										{m["settings.common.action.download_kit"]()}
+									</Button>
+								</div>
 
 							<label className="flex items-start gap-2">
 								<input
 									type="checkbox"
 									checked={hasAcknowledged}
 									onChange={(e) => setHasAcknowledged(e.target.checked)}
-									className="mt-1"
-								/>
-								<span className="text-sm">
-									I have saved my Recovery Key in a secure location
-								</span>
-							</label>
-						</div>
+										className="mt-1"
+									/>
+									<span className="text-sm">
+										{m["settings.recovery_key.setup.display.acknowledgement"]()}
+									</span>
+								</label>
+							</div>
 						<DialogFooter>
-							<Button
-								type="button"
-								variant="outline"
-								onClick={() => setOpen(false)}
-							>
-								Cancel
-							</Button>
-							<Button
-								type="button"
+								<Button
+									type="button"
+									variant="outline"
+									onClick={() => setOpen(false)}
+								>
+									{m["settings.common.action.cancel"]()}
+								</Button>
+								<Button
+									type="button"
 								onClick={handleConfirmSetup}
 								disabled={
 									!hasAcknowledged ||
 									isProcessing ||
 									storeRecoveryKeyMutation.isPending
 								}
-							>
-								{isProcessing || storeRecoveryKeyMutation.isPending
-									? "Saving..."
-									: "Confirm & Save"}
-							</Button>
-						</DialogFooter>
-					</>
+								>
+									{isProcessing || storeRecoveryKeyMutation.isPending
+										? m["settings.common.action.saving"]()
+										: m["settings.recovery_key.setup.action.confirm"]()}
+								</Button>
+							</DialogFooter>
+						</>
 				)}
 			</DialogContent>
 		</Dialog>

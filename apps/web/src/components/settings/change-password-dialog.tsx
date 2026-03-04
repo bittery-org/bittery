@@ -21,6 +21,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
 import {
 	decrypt,
 	deriveKeys,
@@ -29,6 +30,7 @@ import {
 } from "@/lib/wasm-crypto";
 
 export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
+	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
 	const [currentPassword, setCurrentPassword] = useState("");
 	const [newPassword, setNewPassword] = useState("");
@@ -54,14 +56,12 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			}>;
 		}) => trpcClient.auth.changePassword.mutate(input),
 		onSuccess: () => {
-			toast.success(
-				"Password changed successfully. Please sign in with your new password.",
-			);
+			toast.success(m["settings.change_password_dialog.toast.changed"]());
 			setOpen(false);
 			navigate({ to: "/login" });
 		},
-		onError: (error: Error) => {
-			toast.error(error.message);
+		onError: () => {
+			toast.error(m["settings.change_password_dialog.toast.change_failed"]());
 			setIsProcessing(false);
 		},
 	});
@@ -70,37 +70,41 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 		e.preventDefault();
 
 		if (!currentPassword.trim()) {
-			toast.error("Please enter your current password");
+			toast.error(
+				m["settings.change_password_dialog.toast.current_password_required"](),
+			);
 			return;
 		}
 		if (!newPassword.trim()) {
-			toast.error("Please enter a new password");
+			toast.error(
+				m["settings.change_password_dialog.toast.new_password_required"](),
+			);
 			return;
 		}
 		if (newPassword.length < 8) {
-			toast.error("Password must be at least 8 characters");
+			toast.error(
+				m["settings.change_password_dialog.toast.password_min_length"](),
+			);
 			return;
 		}
 		if (newPassword !== confirmPassword) {
-			toast.error("Passwords do not match");
+			toast.error(m["settings.change_password_dialog.toast.password_mismatch"]());
 			return;
 		}
 
 		const secretKey = await storage.getStoredSecretKey();
 		if (!secretKey) {
-			toast.error(
-				"Secret key not found. Please log out and log in again with your full credentials.",
-			);
+			toast.error(m["settings.common.toast.secret_key_not_found"]());
 			return;
 		}
 
 		if (!userQuery.data?.encryptedPrivateKey) {
-			toast.error("Could not load user data. Please try again.");
+			toast.error(m["settings.common.toast.user_data_load_failed"]());
 			return;
 		}
 
 		if (!vaultListQuery.data || vaultListQuery.data.length === 0) {
-			toast.error("Could not load vault keys. Please try again.");
+			toast.error(m["settings.common.toast.vault_keys_load_failed"]());
 			return;
 		}
 
@@ -182,45 +186,45 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 				encryptedPrivateKey: JSON.stringify(newEncryptedPrivateKey),
 				encryptedVaultKeys,
 			});
-		} catch (error) {
-			console.error("Password change error:", error);
-			toast.error(
-				"Failed to change password. Please verify your current password is correct.",
-			);
-			setIsProcessing(false);
-		}
-	};
+			} catch (error) {
+				console.error("Password change error:", error);
+				toast.error(m["settings.change_password_dialog.toast.change_failed"]());
+				setIsProcessing(false);
+			}
+		};
 
-	return (
-		<Dialog open={open} onOpenChange={setOpen}>
-			<DialogTrigger asChild>
-				<Button variant="outline">
-					<Key className="mr-2 h-4 w-4" />
-					Change Password
-				</Button>
-			</DialogTrigger>
-			<DialogContent>
-				<form onSubmit={handleSubmit}>
-					<DialogHeader>
-						<DialogTitle>Change Password</DialogTitle>
-						<DialogDescription>
-							Change your master password. Your private key will be re-encrypted
-							with the new password. Your existing Recovery Key setup will be
-							cleared and must be configured again.
-						</DialogDescription>
-					</DialogHeader>
-					<div className="grid gap-4 py-4">
-						<div className="grid gap-2">
-							<Label htmlFor="currentPassword">Current Password</Label>
-							<div className="relative">
-								<Input
+		return (
+			<Dialog open={open} onOpenChange={setOpen}>
+				<DialogTrigger asChild>
+					<Button variant="outline">
+						<Key className="mr-2 h-4 w-4" />
+						{m["settings.change_password_dialog.trigger"]()}
+					</Button>
+				</DialogTrigger>
+				<DialogContent>
+					<form onSubmit={handleSubmit}>
+						<DialogHeader>
+							<DialogTitle>
+								{m["settings.change_password_dialog.title"]()}
+							</DialogTitle>
+							<DialogDescription>
+								{m["settings.change_password_dialog.description"]()}
+							</DialogDescription>
+						</DialogHeader>
+						<div className="grid gap-4 py-4">
+							<div className="grid gap-2">
+								<Label htmlFor="currentPassword">
+									{m["settings.change_password_dialog.field.current_password"]()}
+								</Label>
+								<div className="relative">
+									<Input
 									id="currentPassword"
-									type={showCurrentPassword ? "text" : "password"}
-									value={currentPassword}
-									onChange={(e) => setCurrentPassword(e.target.value)}
-									placeholder="Enter current password"
-									autoFocus
-									className="pr-10"
+										type={showCurrentPassword ? "text" : "password"}
+										value={currentPassword}
+										onChange={(e) => setCurrentPassword(e.target.value)}
+										placeholder={m["settings.change_password_dialog.placeholder.current_password"]()}
+										autoFocus
+										className="pr-10"
 								/>
 								<Button
 									type="button"
@@ -236,17 +240,19 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 									)}
 								</Button>
 							</div>
-						</div>
-						<div className="grid gap-2">
-							<Label htmlFor="newPassword">New Password</Label>
-							<div className="relative">
-								<Input
+							</div>
+							<div className="grid gap-2">
+								<Label htmlFor="newPassword">
+									{m["settings.change_password_dialog.field.new_password"]()}
+								</Label>
+								<div className="relative">
+									<Input
 									id="newPassword"
-									type={showNewPassword ? "text" : "password"}
-									value={newPassword}
-									onChange={(e) => setNewPassword(e.target.value)}
-									placeholder="Enter new password"
-									className="pr-10"
+										type={showNewPassword ? "text" : "password"}
+										value={newPassword}
+										onChange={(e) => setNewPassword(e.target.value)}
+										placeholder={m["settings.change_password_dialog.placeholder.new_password"]()}
+										className="pr-10"
 								/>
 								<Button
 									type="button"
@@ -257,46 +263,48 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 								>
 									{showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
 								</Button>
+								</div>
+								<p className="text-muted-foreground text-xs">
+									{m["settings.change_password_dialog.hint.password_min_length"]()}
+								</p>
 							</div>
-							<p className="text-muted-foreground text-xs">
-								Must be at least 8 characters long
+							<div className="grid gap-2">
+								<Label htmlFor="confirmPassword">
+									{m["settings.change_password_dialog.field.confirm_new_password"]()}
+								</Label>
+								<Input
+									id="confirmPassword"
+									type="password"
+									value={confirmPassword}
+									onChange={(e) => setConfirmPassword(e.target.value)}
+									placeholder={m["settings.change_password_dialog.placeholder.confirm_new_password"]()}
+								/>
+							</div>
+						</div>
+						<div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+							<p className="text-amber-700 text-xs dark:text-amber-300">
+								<strong>{m["settings.common.warning"]()}</strong>{" "}
+								{m["settings.change_password_dialog.warning.recovery_key_setup"]()}
 							</p>
 						</div>
-						<div className="grid gap-2">
-							<Label htmlFor="confirmPassword">Confirm New Password</Label>
-							<Input
-								id="confirmPassword"
-								type="password"
-								value={confirmPassword}
-								onChange={(e) => setConfirmPassword(e.target.value)}
-								placeholder="Confirm new password"
-							/>
-						</div>
-					</div>
-					<div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
-						<p className="text-amber-700 text-xs dark:text-amber-300">
-							<strong>Warning:</strong> After changing your password, set up a
-							new Recovery Key in Settings before you sign out.
-						</p>
-					</div>
-					<DialogFooter>
+						<DialogFooter>
 						<Button
-							type="button"
-							variant="outline"
-							onClick={() => setOpen(false)}
-						>
-							Cancel
-						</Button>
-						<Button
-							type="submit"
-							disabled={isProcessing || changePasswordMutation.isPending}
-						>
-							{isProcessing || changePasswordMutation.isPending
-								? "Changing..."
-								: "Change Password"}
-						</Button>
-					</DialogFooter>
-				</form>
+								type="button"
+								variant="outline"
+								onClick={() => setOpen(false)}
+							>
+								{m["settings.common.action.cancel"]()}
+							</Button>
+							<Button
+								type="submit"
+								disabled={isProcessing || changePasswordMutation.isPending}
+							>
+								{isProcessing || changePasswordMutation.isPending
+									? m["settings.change_password_dialog.action.changing"]()
+									: m["settings.change_password_dialog.action.submit"]()}
+							</Button>
+						</DialogFooter>
+					</form>
 			</DialogContent>
 		</Dialog>
 	);

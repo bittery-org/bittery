@@ -4,6 +4,17 @@ type RecoveryKitEntry = {
 	description: string;
 };
 
+type RecoveryKitLabels = {
+	documentTitle: string;
+	generatedLabel: string;
+	storeOfflineHeading: string;
+	badgeText: string;
+	handwrittenTitle: string;
+	handwrittenDescription: string;
+	handwrittenPasswordLabel: string;
+	handwrittenPasswordLine: string;
+};
+
 type RecoveryKitOptions = {
 	fileName: string;
 	title: string;
@@ -12,6 +23,7 @@ type RecoveryKitOptions = {
 	cautions: string[];
 	footerNote: string;
 	includeHandwrittenPasswordSection?: boolean;
+	labels?: Partial<RecoveryKitLabels>;
 };
 
 export type RecoveryKitDownloadResult = "pdf-downloaded" | "txt-downloaded";
@@ -19,6 +31,26 @@ export type RecoveryKitDownloadResult = "pdf-downloaded" | "txt-downloaded";
 const A4_WIDTH = 595.28;
 const A4_HEIGHT = 841.89;
 const PAGE_MARGIN = 44;
+
+const RECOVERY_KIT_DEFAULT_LABELS: RecoveryKitLabels = {
+	documentTitle: "BITTERY RECOVERY KIT",
+	generatedLabel: "Generated",
+	storeOfflineHeading: "Store This Offline",
+	badgeText: "RECOVERY KIT",
+	handwrittenTitle: "Optional: Write Password By Hand",
+	handwrittenDescription:
+		"For paper storage only. Leave this blank in digital copies.",
+	handwrittenPasswordLabel: "Master Password",
+	handwrittenPasswordLine:
+		"MASTER PASSWORD (WRITE BY HAND): ______________________________",
+};
+
+const resolveLabels = (
+	labels?: Partial<RecoveryKitLabels>,
+): RecoveryKitLabels => ({
+	...RECOVERY_KIT_DEFAULT_LABELS,
+	...labels,
+});
 
 const triggerDownload = (blob: Blob, fileName: string) => {
 	const url = URL.createObjectURL(blob);
@@ -182,11 +214,14 @@ const drawRoundedRect = ({
 	page.drawSvgPath(path, options);
 };
 
-const buildRecoveryKitText = (options: RecoveryKitOptions): string => {
+const buildRecoveryKitText = (
+	options: RecoveryKitOptions,
+	labels: RecoveryKitLabels,
+): string => {
 	const generatedAt = new Date().toLocaleString();
 	const lines: string[] = [
-		"BITTERY RECOVERY KIT",
-		`Generated: ${generatedAt}`,
+		labels.documentTitle,
+		`${labels.generatedLabel}: ${generatedAt}`,
 		"",
 		options.title,
 		options.subtitle,
@@ -200,13 +235,11 @@ const buildRecoveryKitText = (options: RecoveryKitOptions): string => {
 	}
 
 	if (options.includeHandwrittenPasswordSection) {
-		lines.push(
-			"MASTER PASSWORD (WRITE BY HAND): ______________________________",
-		);
+		lines.push(labels.handwrittenPasswordLine);
 		lines.push("");
 	}
 
-	lines.push("STORE THIS OFFLINE:");
+	lines.push(`${labels.storeOfflineHeading}:`);
 	for (const caution of options.cautions) {
 		lines.push(`- ${caution}`);
 	}
@@ -218,6 +251,7 @@ const buildRecoveryKitText = (options: RecoveryKitOptions): string => {
 
 const tryGeneratePdf = async (
 	options: RecoveryKitOptions,
+	labels: RecoveryKitLabels,
 ): Promise<Uint8Array> => {
 	const pdfLib: any = await import("pdf-lib");
 	const { PDFDocument, StandardFonts, rgb } = pdfLib;
@@ -254,7 +288,7 @@ const tryGeneratePdf = async (
 	const contentWidth = A4_WIDTH - PAGE_MARGIN * 2;
 	let y = A4_HEIGHT - PAGE_MARGIN;
 
-	const generatedAt = `Generated: ${new Date().toLocaleString()}`;
+	const generatedAt = `${labels.generatedLabel}: ${new Date().toLocaleString()}`;
 	const headerHeight = 118;
 	drawRoundedRect({
 		page,
@@ -293,7 +327,7 @@ const tryGeneratePdf = async (
 	const generatedWidth = regularFont.widthOfTextAtSize(generatedAt, 9);
 	const generatedX = PAGE_MARGIN + contentWidth - 16 - generatedWidth;
 	const headerTextX = headerLeft + (logoWidth > 0 ? logoWidth + 12 : 0);
-	const badgeText = "RECOVERY KIT";
+	const badgeText = labels.badgeText;
 	const badgeFontSize = 8.5;
 	const badgePaddingX = 7;
 	const badgePaddingY = 4;
@@ -458,24 +492,21 @@ const tryGeneratePdf = async (
 		});
 
 		const sectionX = PAGE_MARGIN + 16;
-		page.drawText("Optional: Write Password By Hand", {
+		page.drawText(labels.handwrittenTitle, {
 			x: sectionX,
 			y: y - 20,
 			size: 12,
 			font: boldFont,
 			color: rgb(0.12, 0.22, 0.54),
 		});
-		page.drawText(
-			"For paper storage only. Leave this blank in digital copies.",
-			{
-				x: sectionX,
-				y: y - 36,
-				size: 9,
-				font: regularFont,
-				color: colors.muted,
-			},
-		);
-		page.drawText("Master Password", {
+		page.drawText(labels.handwrittenDescription, {
+			x: sectionX,
+			y: y - 36,
+			size: 9,
+			font: regularFont,
+			color: colors.muted,
+		});
+		page.drawText(labels.handwrittenPasswordLabel, {
 			x: sectionX,
 			y: y - 58,
 			size: 9,
@@ -513,7 +544,7 @@ const tryGeneratePdf = async (
 		borderWidth: 1,
 	});
 
-	page.drawText("Store This Offline", {
+	page.drawText(labels.storeOfflineHeading, {
 		x: PAGE_MARGIN + 16,
 		y: y - 18,
 		size: 11,
@@ -570,8 +601,9 @@ const tryGeneratePdf = async (
 export const downloadRecoveryKit = async (
 	options: RecoveryKitOptions,
 ): Promise<RecoveryKitDownloadResult> => {
+	const labels = resolveLabels(options.labels);
 	try {
-		const pdfBytes = await tryGeneratePdf(options);
+		const pdfBytes = await tryGeneratePdf(options, labels);
 		const normalizedPdfBytes = new Uint8Array(pdfBytes);
 		const pdfBlob = new Blob([normalizedPdfBytes], {
 			type: "application/pdf",
@@ -580,7 +612,7 @@ export const downloadRecoveryKit = async (
 		return "pdf-downloaded";
 	} catch (error) {
 		console.error("PDF generation failed, using txt fallback.", error);
-		const textContent = buildRecoveryKitText(options);
+		const textContent = buildRecoveryKitText(options, labels);
 		const textBlob = new Blob([textContent], { type: "text/plain" });
 		triggerDownload(textBlob, `${options.fileName}.txt`);
 		return "txt-downloaded";

@@ -6,16 +6,51 @@ import type { DecryptedItemData, ItemCategory } from "../types";
  */
 export type ImportProviderId = "1password-1pux";
 
+export type ImportMessageValue = string | number;
+
+export type ImportMessageParams = Record<string, ImportMessageValue>;
+
+export type ImportWarningCode =
+	| "item-parse-failed"
+	| "invalid-item"
+	| "archived-skipped"
+	| "missing-title"
+	| "documents-skipped"
+	| "attachments-skipped"
+	| "category-fallback"
+	| "totp-secret-missing";
+
 export interface ImportWarning {
-	code: string;
-	message: string;
+	code: ImportWarningCode;
+	params?: ImportMessageParams;
 	sourceVaultId?: string;
 	sourceItemId?: string;
 }
 
+export type ImportErrorCode =
+	| "unsupported-file-type"
+	| "archive-read-failed"
+	| "missing-export-data"
+	| "read-export-data-failed"
+	| "invalid-export-data-json"
+	| "no-vaults-found"
+	| "unsupported-item-provider";
+
+export class ImportProviderError extends Error {
+	readonly code: ImportErrorCode;
+	readonly params?: ImportMessageParams;
+
+	constructor(code: ImportErrorCode, params?: ImportMessageParams) {
+		super(code);
+		this.name = "ImportProviderError";
+		this.code = code;
+		this.params = params;
+	}
+}
+
 export interface ImportError {
-	code: string;
-	message: string;
+	code: ImportErrorCode;
+	params?: ImportMessageParams;
 	sourceVaultId?: string;
 	sourceItemId?: string;
 }

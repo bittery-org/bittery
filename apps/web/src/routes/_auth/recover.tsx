@@ -15,6 +15,8 @@ import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { storage } from "@/lib/storage";
 import { generateSecretKeyAsync } from "@/lib/wasm-crypto";
 import { WorkerCrypto } from "@/lib/worker-crypto";
+import { m as messages } from "@/paraglide/messages";
+import { useI18n } from "@/providers/i18n-provider";
 
 type RecoveryStep =
 	| "email"
@@ -22,6 +24,35 @@ type RecoveryStep =
 	| "recoveryKey"
 	| "password"
 	| "newSecretKey";
+
+type RecoveryMessageCatalog = ReturnType<typeof useI18n>["m"];
+type RecoveryFlowErrorCode = "invalid_encrypted_data_payload";
+
+class RecoveryFlowError extends Error {
+	code: RecoveryFlowErrorCode;
+
+	constructor(code: RecoveryFlowErrorCode) {
+		super(code);
+		this.code = code;
+		this.name = "RecoveryFlowError";
+	}
+}
+
+function getRecoveryFlowErrorMessage(
+	error: unknown,
+	m: RecoveryMessageCatalog,
+): string | null {
+	if (!(error instanceof RecoveryFlowError)) {
+		return null;
+	}
+
+	switch (error.code) {
+		case "invalid_encrypted_data_payload":
+			return m["auth.recover.error.invalid_encrypted_data_payload"]();
+		default:
+			return null;
+	}
+}
 
 function getRecoveryStepNumber(step: RecoveryStep): number {
 	if (step === "email") return 1;
@@ -44,7 +75,7 @@ function parseEncryptedData(value: string): {
 		typeof parsed.iv !== "string" ||
 		typeof parsed.algorithm !== "string"
 	) {
-		throw new Error("Invalid encrypted data payload");
+		throw new RecoveryFlowError("invalid_encrypted_data_payload");
 	}
 
 	return {
@@ -57,13 +88,14 @@ function parseEncryptedData(value: string): {
 export const Route = createFileRoute("/_auth/recover")({
 	component: RecoverRouteComponent,
 	head: () => ({
-		meta: [{ title: "Recover Account - Bittery" }],
+		meta: [{ title: messages["auth.recover.meta_title"]() }],
 	}),
 });
 
 function RecoverRouteComponent() {
 	const navigate = useNavigate();
 	const trpcClient = useTRPCClient();
+	const { m } = useI18n();
 
 	const [step, setStep] = useState<RecoveryStep>("email");
 	const [email, setEmail] = useState("");
@@ -82,12 +114,23 @@ function RecoverRouteComponent() {
 	const [hasCopiedKey, setHasCopiedKey] = useState(false);
 
 	const stepNumber = useMemo(() => getRecoveryStepNumber(step), [step]);
+	const getLocalizedErrorMessage = (
+		error: unknown,
+		fallback: string,
+	): string => {
+		const recoveryFlowErrorMessage = getRecoveryFlowErrorMessage(error, m);
+		if (recoveryFlowErrorMessage) {
+			return recoveryFlowErrorMessage;
+		}
+
+		return fallback;
+	};
 
 	const handleRequestCode = async (e: FormEvent) => {
 		e.preventDefault();
 
 		if (!email.trim()) {
-			toast.error("Please enter your email");
+			toast.error(m["auth.recover.toast.email_required"]());
 			return;
 		}
 
@@ -96,12 +139,15 @@ function RecoverRouteComponent() {
 			await trpcClient.auth.requestRecoveryVerification.mutate({
 				email: email.trim(),
 			});
-			toast.success(
-				"If recovery is configured for this account, a verification code has been sent.",
-			);
+			toast.success(m["auth.recover.toast.code_requested"]());
 			setStep("code");
-		} catch (error: any) {
-			toast.error(error?.message || "Failed to request recovery code");
+		} catch (error: unknown) {
+			toast.error(
+				getLocalizedErrorMessage(
+					error,
+					m["auth.recover.toast.request_code_failed"](),
+				),
+			);
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -111,7 +157,7 @@ function RecoverRouteComponent() {
 		e.preventDefault();
 
 		if (code.trim().length !== 6) {
-			toast.error("Enter the 6-digit verification code");
+			toast.error(m["auth.recover.toast.code_length_invalid"]());
 			return;
 		}
 
@@ -123,14 +169,19 @@ function RecoverRouteComponent() {
 			});
 
 			if (!result.success || !result.recoveryToken) {
-				toast.error("Invalid or expired verification code");
+				toast.error(m["auth.recover.toast.code_invalid_or_expired"]());
 				return;
 			}
 
 			setRecoveryToken(result.recoveryToken);
 			setStep("recoveryKey");
-		} catch (error: any) {
-			toast.error(error?.message || "Failed to verify code");
+		} catch (error: unknown) {
+			toast.error(
+				getLocalizedErrorMessage(
+					error,
+					m["auth.recover.toast.verify_code_failed"](),
+				),
+			);
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -146,14 +197,19 @@ function RecoverRouteComponent() {
 			);
 
 			if (!isRecoveryKeyValid) {
-				toast.error("Invalid Recovery Key format");
+				toast.error(m["auth.recover.toast.recovery_key_invalid"]());
 				return;
 			}
 
 			setRecoveryKey(recoveryKey.trim());
 			setStep("password");
-		} catch (error: any) {
-			toast.error(error?.message || "Failed to validate key");
+		} catch (error: unknown) {
+			toast.error(
+				getLocalizedErrorMessage(
+					error,
+					m["auth.recover.toast.validate_key_failed"](),
+				),
+			);
 		} finally {
 			workerCrypto.terminate();
 		}
@@ -163,18 +219,18 @@ function RecoverRouteComponent() {
 		e.preventDefault();
 
 		if (!recoveryToken) {
-			toast.error("Recovery session expired. Start again.");
+			toast.error(m["auth.recover.toast.session_expired"]());
 			setStep("email");
 			return;
 		}
 
 		if (newPassword.length < 8) {
-			toast.error("Password must be at least 8 characters");
+			toast.error(m["auth.recover.toast.password_too_short"]());
 			return;
 		}
 
 		if (newPassword !== confirmPassword) {
-			toast.error("Passwords do not match");
+			toast.error(m["auth.recover.toast.password_mismatch"]());
 			return;
 		}
 
@@ -313,10 +369,12 @@ function RecoverRouteComponent() {
 
 			setGeneratedSecretKey(newSecretKey);
 			setStep("newSecretKey");
-			toast.success("Password reset successfully");
-		} catch (error: any) {
+			toast.success(m["auth.recover.toast.reset_success"]());
+		} catch (error: unknown) {
 			console.error("Recovery flow failed:", error);
-			toast.error(error?.message || "Failed to reset password");
+			toast.error(
+				getLocalizedErrorMessage(error, m["auth.recover.toast.reset_failed"]()),
+			);
 		} finally {
 			workerCrypto.terminate();
 			setIsSubmitting(false);
@@ -325,55 +383,52 @@ function RecoverRouteComponent() {
 
 	const handleDownloadEmergencyKit = async () => {
 		if (!generatedSecretKey || !recoveryKey) {
-			toast.error("Missing keys. Please try again.");
+			toast.error(m["auth.recover.toast.missing_keys"]());
 			return;
 		}
 
 		const result = await downloadRecoveryKit({
-			fileName: "bittery-emergency-kit",
-			title: "Bittery Emergency Kit",
-			subtitle:
-				"Contains your new Secret Key and Recovery Key for offline storage.",
+			fileName: m["auth.recover.kit.file_name"](),
+			title: m["auth.recover.kit.title"](),
+			subtitle: m["auth.recover.kit.subtitle"](),
 			entries: [
 				{
-					label: "Secret Key",
+					label: m["auth.recover.kit.entry.secret_key.label"](),
 					value: generatedSecretKey,
-					description:
-						"Required with your master password to unlock your account.",
+					description: m["auth.recover.kit.entry.secret_key.description"](),
 				},
 				{
-					label: "Recovery Key",
+					label: m["auth.recover.kit.entry.recovery_key.label"](),
 					value: recoveryKey,
-					description: "Required to reset your password if forgotten.",
+					description: m["auth.recover.kit.entry.recovery_key.description"](),
 				},
 			],
 			cautions: [
-				"Your Secret Key has changed. Previous Emergency Kits are now outdated.",
-				"Store this kit offline in a secure location you trust.",
-				"Do not save this file in shared folders or chats.",
+				m["auth.recover.kit.caution.secret_key_changed"](),
+				m["auth.recover.kit.caution.store_offline"](),
+				m["auth.recover.kit.caution.avoid_shared"](),
 			],
-			footerNote:
-				"Bittery is zero-knowledge: recovery material is generated and handled locally in your browser.",
+			footerNote: m["auth.recover.kit.footer_note"](),
 			includeHandwrittenPasswordSection: true,
 		});
 
 		setHasDownloadedKit(true);
 		if (result === "pdf-downloaded") {
-			toast.success("Emergency Kit PDF downloaded.");
+			toast.success(m["auth.recover.toast.kit_pdf_downloaded"]());
 			return;
 		}
 
-		toast.success("PDF failed. Emergency Kit downloaded as text backup.");
+		toast.success(m["auth.recover.toast.kit_text_downloaded"]());
 	};
 
 	const handleCopySecretKey = async () => {
 		try {
 			await navigator.clipboard.writeText(generatedSecretKey);
 			setHasCopiedKey(true);
-			toast.success("Secret Key copied to clipboard");
+			toast.success(m["auth.recover.toast.secret_key_copied"]());
 			setTimeout(() => setHasCopiedKey(false), 2000);
 		} catch {
-			toast.error("Failed to copy to clipboard");
+			toast.error(m["auth.recover.toast.copy_failed"]());
 		}
 	};
 
@@ -381,10 +436,10 @@ function RecoverRouteComponent() {
 		<div className="w-full">
 			<div className="text-center">
 				<h1 className="font-semibold text-2xl tracking-tight">
-					Recover your account
+					{m["auth.recover.header.title"]()}
 				</h1>
 				<p className="mx-auto mt-2 max-w-80 text-muted-foreground text-sm">
-					Verify your identity, enter your Recovery Key, and set a new password.
+					{m["auth.recover.header.description"]()}
 				</p>
 			</div>
 
@@ -422,12 +477,12 @@ function RecoverRouteComponent() {
 					<form onSubmit={handleRequestCode} className="space-y-3.5">
 						<div className="space-y-1.5">
 							<Label htmlFor="email" className="font-medium text-xs">
-								Email
+								{m["auth.recover.form.email.label"]()}
 							</Label>
 							<Input
 								id="email"
 								type="email"
-								placeholder="name@example.com"
+								placeholder={m["auth.recover.form.email.placeholder"]()}
 								value={email}
 								onChange={(e) => setEmail(e.target.value)}
 								required
@@ -444,10 +499,10 @@ function RecoverRouteComponent() {
 								{isSubmitting ? (
 									<>
 										<Loader2 size={16} className="mr-2 animate-spin" />
-										Sending code...
+										{m["auth.recover.button.sending_code"]()}
 									</>
 								) : (
-									"Send Verification Code"
+									m["auth.recover.button.send_code"]()
 								)}
 							</Button>
 						</div>
@@ -458,21 +513,20 @@ function RecoverRouteComponent() {
 					<form onSubmit={handleVerifyCode} className="space-y-3.5">
 						<div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
 							<span className="text-muted-foreground text-xs">
-								Code sent to{" "}
-								<span className="font-medium text-foreground">{email}</span>
+								{m["auth.recover.info.code_sent_to"]({ email })}
 							</span>
 						</div>
 
 						<div className="space-y-1.5">
 							<Label htmlFor="code" className="font-medium text-xs">
-								Verification Code
+								{m["auth.recover.form.code.label"]()}
 							</Label>
 							<Input
 								id="code"
 								type="text"
 								inputMode="numeric"
 								maxLength={6}
-								placeholder="123456"
+								placeholder={m["auth.recover.form.code.placeholder"]()}
 								value={code}
 								onChange={(e) =>
 									setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
@@ -489,7 +543,7 @@ function RecoverRouteComponent() {
 								onClick={() => setStep("email")}
 								disabled={isSubmitting}
 							>
-								Back
+								{m["auth.recover.button.back"]()}
 							</Button>
 							<Button
 								type="submit"
@@ -499,10 +553,10 @@ function RecoverRouteComponent() {
 								{isSubmitting ? (
 									<>
 										<Loader2 size={16} className="mr-2 animate-spin" />
-										Verifying...
+										{m["auth.recover.button.verifying_code"]()}
 									</>
 								) : (
-									"Verify Code"
+									m["auth.recover.button.verify_code"]()
 								)}
 							</Button>
 						</div>
@@ -513,13 +567,15 @@ function RecoverRouteComponent() {
 					<form onSubmit={handleValidateRecoveryKey} className="space-y-3.5">
 						<div className="space-y-1.5">
 							<Label htmlFor="recoveryKey" className="font-medium text-xs">
-								Recovery Key
+								{m["auth.recover.form.recovery_key.label"]()}
 							</Label>
 							<div className="relative">
 								<Input
 									id="recoveryKey"
 									type={showRecoveryKey ? "text" : "password"}
-									placeholder="R1-XXXXXX-XXXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+									placeholder={m[
+										"auth.recover.form.recovery_key.placeholder"
+									]()}
 									value={recoveryKey}
 									onChange={(e) => setRecoveryKey(e.target.value.toUpperCase())}
 									required
@@ -538,7 +594,7 @@ function RecoverRouteComponent() {
 						</div>
 
 						<p className="text-[11px] text-muted-foreground/70">
-							A new Secret Key will be generated after resetting your password.
+							{m["auth.recover.form.recovery_key.help"]()}
 						</p>
 
 						<div className="grid grid-cols-2 gap-2 pt-1">
@@ -547,10 +603,10 @@ function RecoverRouteComponent() {
 								variant="outline"
 								onClick={() => setStep("code")}
 							>
-								Back
+								{m["auth.recover.button.back"]()}
 							</Button>
 							<Button type="submit" className="shadow-sm">
-								Continue
+								{m["auth.recover.button.continue"]()}
 							</Button>
 						</div>
 					</form>
@@ -560,7 +616,7 @@ function RecoverRouteComponent() {
 					<form onSubmit={handleResetPassword} className="space-y-3.5">
 						<div className="space-y-1.5">
 							<Label htmlFor="newPassword" className="font-medium text-xs">
-								New Password
+								{m["auth.recover.form.password.new_label"]()}
 							</Label>
 							<div className="relative">
 								<Input
@@ -568,7 +624,9 @@ function RecoverRouteComponent() {
 									type={showPassword ? "text" : "password"}
 									value={newPassword}
 									onChange={(e) => setNewPassword(e.target.value)}
-									placeholder="Enter new password"
+									placeholder={m[
+										"auth.recover.form.password.new_placeholder"
+									]()}
 									required
 									className="h-10 pr-10"
 								/>
@@ -586,7 +644,7 @@ function RecoverRouteComponent() {
 
 						<div className="space-y-1.5">
 							<Label htmlFor="confirmPassword" className="font-medium text-xs">
-								Confirm Password
+								{m["auth.recover.form.password.confirm_label"]()}
 							</Label>
 							<div className="relative">
 								<Input
@@ -594,7 +652,9 @@ function RecoverRouteComponent() {
 									type={showConfirmPassword ? "text" : "password"}
 									value={confirmPassword}
 									onChange={(e) => setConfirmPassword(e.target.value)}
-									placeholder="Confirm new password"
+									placeholder={m[
+										"auth.recover.form.password.confirm_placeholder"
+									]()}
 									required
 									className="h-10 pr-10"
 								/>
@@ -621,7 +681,7 @@ function RecoverRouteComponent() {
 								onClick={() => setStep("recoveryKey")}
 								disabled={isSubmitting}
 							>
-								Back
+								{m["auth.recover.button.back"]()}
 							</Button>
 							<Button
 								type="submit"
@@ -631,10 +691,10 @@ function RecoverRouteComponent() {
 								{isSubmitting ? (
 									<>
 										<Loader2 size={16} className="mr-2 animate-spin" />
-										Resetting...
+										{m["auth.recover.button.resetting_password"]()}
 									</>
 								) : (
-									"Reset Password"
+									m["auth.recover.button.reset_password"]()
 								)}
 							</Button>
 						</div>
@@ -649,16 +709,18 @@ function RecoverRouteComponent() {
 							</span>
 							<div>
 								<p className="font-medium text-amber-900 text-sm leading-none dark:text-amber-100">
-									New Secret Key Generated
+									{m["auth.recover.secret_key.banner.title"]()}
 								</p>
 								<p className="mt-1.5 text-[11px] text-amber-700/70 leading-snug dark:text-amber-300/60">
-									Save it now — you won't see it again.
+									{m["auth.recover.secret_key.banner.description"]()}
 								</p>
 							</div>
 						</div>
 
 						<div className="space-y-1.5">
-							<Label className="font-medium text-xs">New Secret Key</Label>
+							<Label className="font-medium text-xs">
+								{m["auth.recover.secret_key.label"]()}
+							</Label>
 							<div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2.5 font-mono text-sm">
 								<span className="flex-1 select-all break-all">
 									{generatedSecretKey}
@@ -682,7 +744,7 @@ function RecoverRouteComponent() {
 							onClick={handleDownloadEmergencyKit}
 						>
 							<Download size={16} className="mr-2" />
-							Download Emergency Kit
+							{m["auth.recover.button.download_kit"]()}
 						</Button>
 
 						<Button
@@ -691,12 +753,12 @@ function RecoverRouteComponent() {
 							disabled={!hasDownloadedKit}
 							onClick={() => navigate({ to: "/home" })}
 						>
-							Continue to Vault
+							{m["auth.recover.button.continue_to_vault"]()}
 						</Button>
 
 						{!hasDownloadedKit && (
 							<p className="text-center text-[11px] text-muted-foreground/70">
-								Download your Emergency Kit to continue.
+								{m["auth.recover.secret_key.download_required"]()}
 							</p>
 						)}
 					</div>
@@ -704,13 +766,13 @@ function RecoverRouteComponent() {
 
 				{step !== "newSecretKey" && (
 					<div className="pt-6 text-center text-muted-foreground text-sm">
-						Remembered your password?{" "}
+						{m["auth.recover.footer.remembered_password"]()}{" "}
 						<button
 							type="button"
 							onClick={() => navigate({ to: "/login" })}
 							className="font-medium text-primary underline-offset-4 hover:underline"
 						>
-							Back to sign in
+							{m["auth.recover.footer.back_to_sign_in"]()}
 						</button>
 					</div>
 				)}

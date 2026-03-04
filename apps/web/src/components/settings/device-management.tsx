@@ -1,4 +1,3 @@
-import { formatDeviceDisplay, formatLastActive } from "@bittery/shared/device";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	AlertDialog,
@@ -35,6 +34,9 @@ import {
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { useI18n } from "@/providers/i18n-provider";
+
+type Messages = ReturnType<typeof useI18n>["m"];
 
 // Platform icons
 function getPlatformIcon(platform?: string | null) {
@@ -49,6 +51,84 @@ function getPlatformIcon(platform?: string | null) {
 		default:
 			return <Globe className="h-5 w-5" />;
 	}
+}
+
+function getPlatformLabel(platform: string | null | undefined, m: Messages) {
+	switch (platform) {
+		case "web":
+			return m["settings.devices.platform.web"]();
+		case "desktop":
+			return m["settings.devices.platform.desktop"]();
+		case "extension":
+			return m["settings.devices.platform.extension"]();
+		case "ios":
+			return m["settings.devices.platform.ios"]();
+		case "android":
+			return m["settings.devices.platform.android"]();
+		default:
+			return m["settings.devices.platform.unknown"]();
+	}
+}
+
+function formatDeviceDisplayLocalized(
+	device: DeviceSession,
+	m: Messages,
+): { title: string; subtitle: string } {
+	const title = device.deviceName ?? m["settings.devices.common.unknown_device"]();
+
+	const parts: string[] = [];
+	if (device.osName) {
+		parts.push(
+			device.osVersion ? `${device.osName} ${device.osVersion}` : device.osName,
+		);
+	}
+	if (device.browserName && device.browserVersion) {
+		parts.push(`${device.browserName} ${device.browserVersion}`);
+	}
+
+	const subtitle =
+		parts.length > 0 ? parts.join(" - ") : getPlatformLabel(device.platform, m);
+
+	return { title, subtitle };
+}
+
+function formatLastActiveLocalized(
+	date: Date | string,
+	locale: string,
+	m: Messages,
+): string {
+	const now = new Date();
+	const lastActive = typeof date === "string" ? new Date(date) : date;
+	const diffMs = now.getTime() - lastActive.getTime();
+	const diffMins = Math.floor(diffMs / 60_000);
+	const diffHours = Math.floor(diffMs / 3_600_000);
+	const diffDays = Math.floor(diffMs / 86_400_000);
+
+	if (Number.isNaN(lastActive.getTime()) || diffMins < 1) {
+		return m["settings.devices.last_active.just_now"]();
+	}
+	if (diffMins < 60) {
+		return diffMins === 1
+			? m["settings.devices.last_active.minutes.single"]({ count: diffMins })
+			: m["settings.devices.last_active.minutes.plural"]({ count: diffMins });
+	}
+	if (diffHours < 24) {
+		return diffHours === 1
+			? m["settings.devices.last_active.hours.single"]({ count: diffHours })
+			: m["settings.devices.last_active.hours.plural"]({ count: diffHours });
+	}
+	if (diffDays < 7) {
+		return diffDays === 1
+			? m["settings.devices.last_active.days.single"]({ count: diffDays })
+			: m["settings.devices.last_active.days.plural"]({ count: diffDays });
+	}
+
+	return new Intl.DateTimeFormat(locale, {
+		month: "short",
+		day: "numeric",
+		year:
+			lastActive.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+	}).format(lastActive);
 }
 
 interface DeviceSession {
@@ -72,6 +152,7 @@ function RenameDeviceDialog({
 	session: DeviceSession;
 	onSuccess: () => void;
 }) {
+	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
 	const [deviceName, setDeviceName] = useState(session.deviceName || "");
 	const trpcClient = useTRPCClient();
@@ -80,19 +161,19 @@ function RenameDeviceDialog({
 		mutationFn: (input: { sessionId: string; deviceName: string }) =>
 			trpcClient.auth.renameDevice.mutate(input),
 		onSuccess: () => {
-			toast.success("Device renamed successfully");
+			toast.success(m["settings.devices.toast.rename_success"]());
 			setOpen(false);
 			onSuccess();
 		},
-		onError: (error: Error) => {
-			toast.error(error.message);
+		onError: () => {
+			toast.error(m["settings.devices.toast.rename_failed"]());
 		},
 	});
 
 	const handleSubmit = (e: React.FormEvent) => {
 		e.preventDefault();
 		if (!deviceName.trim()) {
-			toast.error("Please enter a device name");
+			toast.error(m["settings.devices.toast.device_name_required"]());
 			return;
 		}
 		renameMutation.mutate({
@@ -111,18 +192,20 @@ function RenameDeviceDialog({
 			<DialogContent>
 				<form onSubmit={handleSubmit}>
 					<DialogHeader>
-						<DialogTitle>Rename Device</DialogTitle>
+						<DialogTitle>{m["settings.devices.rename_dialog.title"]()}</DialogTitle>
 						<DialogDescription>
-							Give this device a custom name to easily identify it.
+							{m["settings.devices.rename_dialog.description"]()}
 						</DialogDescription>
 					</DialogHeader>
 					<div className="py-4">
-						<Label htmlFor="deviceName">Device Name</Label>
+						<Label htmlFor="deviceName">
+							{m["settings.devices.rename_dialog.field.device_name"]()}
+						</Label>
 						<Input
 							id="deviceName"
 							value={deviceName}
 							onChange={(e) => setDeviceName(e.target.value)}
-							placeholder="My Laptop"
+							placeholder={m["settings.devices.rename_dialog.placeholder.device_name"]()}
 							className="mt-2"
 							autoFocus
 						/>
@@ -133,10 +216,12 @@ function RenameDeviceDialog({
 							variant="outline"
 							onClick={() => setOpen(false)}
 						>
-							Cancel
+							{m["settings.common.action.cancel"]()}
 						</Button>
 						<Button type="submit" disabled={renameMutation.isPending}>
-							{renameMutation.isPending ? "Saving..." : "Save"}
+							{renameMutation.isPending
+								? m["settings.devices.rename_dialog.action.saving"]()
+								: m["settings.devices.rename_dialog.action.submit"]()}
 						</Button>
 					</DialogFooter>
 				</form>
@@ -152,6 +237,7 @@ function RevokeDeviceDialog({
 	session: DeviceSession;
 	onSuccess: () => void;
 }) {
+	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
 	const trpcClient = useTRPCClient();
 
@@ -159,16 +245,16 @@ function RevokeDeviceDialog({
 		mutationFn: (sessionId: string) =>
 			trpcClient.auth.revokeDevice.mutate({ sessionId }),
 		onSuccess: () => {
-			toast.success("Device session revoked");
+			toast.success(m["settings.devices.toast.revoke_success"]());
 			setOpen(false);
 			onSuccess();
 		},
-		onError: (error: Error) => {
-			toast.error(error.message);
+		onError: () => {
+			toast.error(m["settings.devices.toast.revoke_failed"]());
 		},
 	});
 
-	const { title } = formatDeviceDisplay(session);
+	const { title } = formatDeviceDisplayLocalized(session, m);
 
 	return (
 		<AlertDialog open={open} onOpenChange={setOpen}>
@@ -183,21 +269,25 @@ function RevokeDeviceDialog({
 			</AlertDialogTrigger>
 			<AlertDialogContent>
 				<AlertDialogHeader>
-					<AlertDialogTitle>Revoke Device Access</AlertDialogTitle>
+					<AlertDialogTitle>
+						{m["settings.devices.revoke_dialog.title"]()}
+					</AlertDialogTitle>
 					<AlertDialogDescription>
-						Are you sure you want to revoke access for <strong>{title}</strong>?
-						This will log out that device immediately. The device will need to
-						sign in again to access your account.
+						{m["settings.devices.revoke_dialog.description.prefix"]()}{" "}
+						<strong>{title}</strong>{" "}
+						{m["settings.devices.revoke_dialog.description.suffix"]()}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>
-					<AlertDialogCancel>Cancel</AlertDialogCancel>
+					<AlertDialogCancel>{m["settings.common.action.cancel"]()}</AlertDialogCancel>
 					<Button
 						variant="destructive"
 						onClick={() => revokeMutation.mutate(session.id)}
 						disabled={revokeMutation.isPending}
 					>
-						{revokeMutation.isPending ? "Revoking..." : "Revoke Access"}
+						{revokeMutation.isPending
+							? m["settings.devices.revoke_dialog.action.revoking"]()
+							: m["settings.devices.revoke_dialog.action.submit"]()}
 					</Button>
 				</AlertDialogFooter>
 			</AlertDialogContent>
@@ -212,7 +302,9 @@ function DeviceCard({
 	session: DeviceSession;
 	onUpdate: () => void;
 }) {
-	const { title, subtitle } = formatDeviceDisplay(session);
+	const { m, locale } = useI18n();
+	const { title, subtitle } = formatDeviceDisplayLocalized(session, m);
+	const lastActive = formatLastActiveLocalized(session.lastActiveAt, locale, m);
 
 	return (
 		<Card className={session.isCurrentSession ? "border-primary" : ""}>
@@ -225,13 +317,15 @@ function DeviceCard({
 						<span className="truncate font-medium">{title}</span>
 						{session.isCurrentSession && (
 							<Badge variant="secondary" className="text-xs">
-								This device
+								{m["settings.devices.badge.current"]()}
 							</Badge>
 						)}
 					</div>
 					<p className="truncate text-muted-foreground text-sm">{subtitle}</p>
 					<div className="mt-1 flex items-center gap-2 text-muted-foreground text-xs">
-						<span>Last active: {formatLastActive(session.lastActiveAt)}</span>
+						<span>
+							{m["settings.devices.last_active.label"]()}: {lastActive}
+						</span>
 						{session.ipAddress && (
 							<>
 								<span>•</span>
@@ -271,6 +365,7 @@ function DeviceListSkeleton() {
 }
 
 export function DeviceManagement() {
+	const { m } = useI18n();
 	const trpc = useTRPC();
 
 	const devicesQuery = useQuery(trpc.auth.listDevices.queryOptions());
@@ -286,7 +381,7 @@ export function DeviceManagement() {
 	if (devicesQuery.error) {
 		return (
 			<div className="py-8 text-center text-muted-foreground">
-				Failed to load devices. Please try again.
+				{m["settings.devices.list.error"]()}
 			</div>
 		);
 	}
@@ -296,7 +391,7 @@ export function DeviceManagement() {
 	if (devices.length === 0) {
 		return (
 			<div className="py-8 text-center text-muted-foreground">
-				No active sessions found.
+				{m["settings.devices.list.empty"]()}
 			</div>
 		);
 	}
@@ -313,11 +408,7 @@ export function DeviceManagement() {
 	return (
 		<div className="space-y-3">
 			{sortedDevices.map((session) => (
-				<DeviceCard
-					key={session.id}
-					session={session}
-					onUpdate={handleUpdate}
-				/>
+				<DeviceCard key={session.id} session={session} onUpdate={handleUpdate} />
 			))}
 		</div>
 	);

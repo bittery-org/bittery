@@ -24,6 +24,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { storage } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
 import {
 	decrypt,
 	deriveKeys,
@@ -38,6 +39,7 @@ export function RegenerateSecretKeyDialog({
 }: {
 	userEmail: string;
 }) {
+	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
 	const [step, setStep] = useState<"confirm" | "display">("confirm");
 	const [currentPassword, setCurrentPassword] = useState("");
@@ -55,20 +57,18 @@ export function RegenerateSecretKeyDialog({
 		e.preventDefault();
 
 		if (!currentPassword.trim()) {
-			toast.error("Please enter your current password");
+			toast.error(m["settings.secret_key.regenerate.toast.current_password_required"]());
 			return;
 		}
 
 		const oldSecretKey = await storage.getStoredSecretKey();
 		if (!oldSecretKey) {
-			toast.error(
-				"Secret key not found. Please log out and log in again with your full credentials.",
-			);
+			toast.error(m["settings.common.toast.secret_key_not_found"]());
 			return;
 		}
 
 		if (!userQuery.data?.encryptedPrivateKey) {
-			toast.error("Could not load user data. Please try again.");
+			toast.error(m["settings.common.toast.user_data_load_failed"]());
 			return;
 		}
 
@@ -93,34 +93,36 @@ export function RegenerateSecretKeyDialog({
 			setNewSecretKey(generatedSecretKey);
 			setStep("display");
 			setIsProcessing(false);
-		} catch (error) {
-			console.error("Secret key regeneration error:", error);
-			toast.error(
-				"Failed to verify password. Please check your current password.",
-			);
-			setIsProcessing(false);
-		}
-	};
+			} catch (error) {
+				console.error("Secret key regeneration error:", error);
+				toast.error(
+					m["settings.secret_key.regenerate.toast.verify_password_failed"](),
+				);
+				setIsProcessing(false);
+			}
+		};
 
 	const handleConfirmRegeneration = async () => {
 		if (!hasAcknowledged) {
-			toast.error("Please confirm that you have saved your new Secret Key");
+			toast.error(
+				m["settings.secret_key.regenerate.toast.acknowledgement_required"](),
+			);
 			return;
 		}
 
 		const oldSecretKey = await storage.getStoredSecretKey();
 		if (!oldSecretKey) {
-			toast.error("Secret key not found");
+			toast.error(m["settings.secret_key.regenerate.toast.secret_key_not_found"]());
 			return;
 		}
 
 		if (!userQuery.data?.encryptedPrivateKey) {
-			toast.error("Could not load user data");
+			toast.error(m["settings.secret_key.regenerate.toast.user_data_load_failed"]());
 			return;
 		}
 
 		if (!vaultListQuery.data || vaultListQuery.data.length === 0) {
-			toast.error("Could not load vault keys. Please try again.");
+			toast.error(m["settings.common.toast.vault_keys_load_failed"]());
 			return;
 		}
 
@@ -206,54 +208,62 @@ export function RegenerateSecretKeyDialog({
 			// 8. Update local state — store new secret key and new MUK
 			await storage.storeSecretKey(newSecretKey, userEmail);
 			await storage.setMasterUnlockKey(newMasterUnlockKey, userEmail);
-			await storage.storeSessionData(
-				newMasterUnlockKey,
-				userEmail,
-				currentUserId,
-			);
+				await storage.storeSessionData(
+					newMasterUnlockKey,
+					userEmail,
+					currentUserId,
+				);
 
-			toast.success("Secret key regenerated successfully.");
-			setOpen(false);
-		} catch (error) {
-			console.error("Secret key regeneration error:", error);
-			toast.error("Failed to regenerate secret key");
-			setIsProcessing(false);
-		}
-	};
+				toast.success(m["settings.secret_key.regenerate.toast.regenerated"]());
+				setOpen(false);
+			} catch (error) {
+				console.error("Secret key regeneration error:", error);
+				toast.error(m["settings.secret_key.regenerate.toast.regenerate_failed"]());
+				setIsProcessing(false);
+			}
+		};
 
 	const copySecretKey = () => {
-		copyWithToast(newSecretKey, "Secret Key", { showAutoClearMessage: false });
+		copyWithToast(newSecretKey, m["settings.secret_key.regenerate.copy_label"](), {
+			showAutoClearMessage: false,
+		});
 	};
 
 	const downloadKit = async () => {
 		const result = await downloadRecoveryKit({
 			fileName: "bittery-new-secret-key",
-			title: "Bittery Secret Key Kit",
-			subtitle:
-				"This new Secret Key replaces your previous one. Your Recovery Key has been cleared and must be set up again.",
+			title: m["settings.secret_key.regenerate.kit.title"](),
+			subtitle: m["settings.secret_key.regenerate.kit.subtitle"](),
 			entries: [
 				{
-					label: "New Secret Key",
+					label: m["settings.secret_key.regenerate.kit.entry.label"](),
 					value: newSecretKey,
-					description:
-						"Required with your master password to unlock your account.",
+					description: m["settings.secret_key.regenerate.kit.entry.description"](),
 				},
 			],
 			cautions: [
-				"Destroy old copies of your previous Secret Key.",
-				"Store this kit offline in a secure location.",
-				"Set up a new Recovery Key in Settings after saving this.",
+				m["settings.secret_key.regenerate.kit.caution.destroy_old"](),
+				m["settings.secret_key.regenerate.kit.caution.store_offline"](),
+				m["settings.secret_key.regenerate.kit.caution.setup_recovery_key"](),
 			],
-			footerNote:
-				"This document is generated client-side and never uploaded to Bittery servers.",
+			footerNote: m["settings.recovery_key.common.kit.footer_note"](),
 			includeHandwrittenPasswordSection: true,
+			labels: {
+				documentTitle: m["settings.recovery_key.common.kit.document_title"](),
+				generatedLabel: m["settings.recovery_key.common.kit.generated_label"](),
+				storeOfflineHeading: m["settings.recovery_key.common.kit.store_offline_heading"](),
+				badgeText: m["settings.recovery_key.common.kit.badge_text"](),
+				handwrittenTitle: m["settings.secret_key.regenerate.kit.handwritten_title"](),
+				handwrittenDescription: m["settings.secret_key.regenerate.kit.handwritten_description"](),
+				handwrittenPasswordLabel: m["settings.secret_key.regenerate.kit.handwritten_password_label"](),
+			},
 		});
 
 		if (result === "pdf-downloaded") {
-			toast.success("Secret Key Kit PDF downloaded.");
+			toast.success(m["settings.secret_key.regenerate.toast.kit_pdf_downloaded"]());
 			return;
 		}
-		toast.success("Secret Key Kit downloaded as text file.");
+		toast.success(m["settings.secret_key.regenerate.toast.kit_text_downloaded"]());
 	};
 
 	const handleOpenChange = (newOpen: boolean) => {
@@ -268,47 +278,46 @@ export function RegenerateSecretKeyDialog({
 		}
 	};
 
-	return (
-		<Dialog open={open} onOpenChange={handleOpenChange}>
-			<DialogTrigger asChild>
-				<Button variant="outline">
-					<RefreshCw className="mr-2 h-4 w-4" />
-					Regenerate Secret Key
-				</Button>
-			</DialogTrigger>
-			<DialogContent className="sm:max-w-md">
-				{step === "confirm" ? (
-					<form onSubmit={handleGenerateNewKey}>
-						<DialogHeader>
-							<DialogTitle>Regenerate Secret Key</DialogTitle>
-							<DialogDescription>
-								Generate a new secret key for your account. Your current secret
-								key will be replaced and all other devices will be signed out.
-								Your Recovery Key setup will also be cleared.
-							</DialogDescription>
-						</DialogHeader>
-						<div className="grid gap-4 py-4">
-							<div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3">
-								<p className="text-destructive text-xs">
-									<strong>Warning:</strong> This action cannot be undone. Make
-									sure you save your new secret key and reconfigure Recovery Key
-									after completion.
-								</p>
-							</div>
-							<div className="grid gap-2">
-								<Label htmlFor="currentPassword">
-									Enter your password to continue
-								</Label>
-								<div className="relative">
-									<Input
+		return (
+			<Dialog open={open} onOpenChange={handleOpenChange}>
+				<DialogTrigger asChild>
+					<Button variant="outline">
+						<RefreshCw className="mr-2 h-4 w-4" />
+						{m["settings.secret_key.regenerate.trigger"]()}
+					</Button>
+				</DialogTrigger>
+				<DialogContent className="sm:max-w-md">
+					{step === "confirm" ? (
+						<form onSubmit={handleGenerateNewKey}>
+							<DialogHeader>
+								<DialogTitle>
+									{m["settings.secret_key.regenerate.title"]()}
+								</DialogTitle>
+								<DialogDescription>
+									{m["settings.secret_key.regenerate.description"]()}
+								</DialogDescription>
+							</DialogHeader>
+							<div className="grid gap-4 py-4">
+								<div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3">
+									<p className="text-destructive text-xs">
+										<strong>{m["settings.common.warning"]()}</strong>{" "}
+										{m["settings.secret_key.regenerate.warning"]()}
+									</p>
+								</div>
+								<div className="grid gap-2">
+									<Label htmlFor="currentPassword">
+										{m["settings.secret_key.regenerate.field.password"]()}
+									</Label>
+									<div className="relative">
+										<Input
 										id="currentPassword"
-										type={showPassword ? "text" : "password"}
-										value={currentPassword}
-										onChange={(e) => setCurrentPassword(e.target.value)}
-										placeholder="Enter your password"
-										autoFocus
-										className="pr-10"
-									/>
+											type={showPassword ? "text" : "password"}
+											value={currentPassword}
+											onChange={(e) => setCurrentPassword(e.target.value)}
+											placeholder={m["settings.secret_key.regenerate.placeholder.password"]()}
+											autoFocus
+											className="pr-10"
+										/>
 									<Button
 										type="button"
 										variant="ghost"
@@ -321,39 +330,42 @@ export function RegenerateSecretKeyDialog({
 								</div>
 							</div>
 						</div>
-						<DialogFooter>
-							<Button
-								type="button"
-								variant="outline"
-								onClick={() => setOpen(false)}
-							>
-								Cancel
-							</Button>
-							<Button
-								type="submit"
-								variant="destructive"
-								disabled={isProcessing}
-							>
-								{isProcessing ? "Verifying..." : "Generate New Key"}
-							</Button>
-						</DialogFooter>
-					</form>
-				) : (
-					<>
-						<DialogHeader>
-							<DialogTitle>Save Your New Secret Key</DialogTitle>
-							<DialogDescription>
-								This is your new secret key. Save it before continuing - you
-								cannot access it again!
-							</DialogDescription>
-						</DialogHeader>
-						<div className="grid gap-4 py-4">
-							<div className="relative rounded-xl border bg-muted/30 p-4">
-								<div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-									Your New Secret Key
-								</div>
-								<div className="break-all font-mono text-sm tracking-wide">
-									{newSecretKey}
+							<DialogFooter>
+								<Button
+									type="button"
+									variant="outline"
+									onClick={() => setOpen(false)}
+								>
+									{m["settings.common.action.cancel"]()}
+								</Button>
+								<Button
+									type="submit"
+									variant="destructive"
+									disabled={isProcessing}
+								>
+									{isProcessing
+										? m["settings.recovery_key.common.action.verifying"]()
+										: m["settings.secret_key.regenerate.action.generate"]()}
+								</Button>
+							</DialogFooter>
+						</form>
+					) : (
+						<>
+							<DialogHeader>
+								<DialogTitle>
+									{m["settings.secret_key.regenerate.display.title"]()}
+								</DialogTitle>
+								<DialogDescription>
+									{m["settings.secret_key.regenerate.display.description"]()}
+								</DialogDescription>
+							</DialogHeader>
+							<div className="grid gap-4 py-4">
+								<div className="relative rounded-xl border bg-muted/30 p-4">
+									<div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
+										{m["settings.secret_key.regenerate.display.key_label"]()}
+									</div>
+									<div className="break-all font-mono text-sm tracking-wide">
+										{newSecretKey}
 								</div>
 							</div>
 
@@ -361,59 +373,61 @@ export function RegenerateSecretKeyDialog({
 								<Button
 									type="button"
 									variant="outline"
-									className="w-full"
-									onClick={copySecretKey}
-								>
-									<Copy size={16} className="mr-2" />
-									Copy
-								</Button>
-								<Button
-									type="button"
-									variant="outline"
-									className="w-full"
-									onClick={downloadKit}
-								>
-									<Download size={16} className="mr-2" />
-									Download Kit
-								</Button>
-							</div>
+										className="w-full"
+										onClick={copySecretKey}
+									>
+										<Copy size={16} className="mr-2" />
+										{m["settings.common.action.copy"]()}
+									</Button>
+									<Button
+										type="button"
+										variant="outline"
+										className="w-full"
+										onClick={downloadKit}
+									>
+										<Download size={16} className="mr-2" />
+										{m["settings.common.action.download_kit"]()}
+									</Button>
+								</div>
 
-							<div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
-								<p className="text-amber-700 text-xs dark:text-amber-300">
-									<strong>Important:</strong> After regeneration, set up a new
-									Recovery Key in Settings.
-								</p>
-							</div>
+								<div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+									<p className="text-amber-700 text-xs dark:text-amber-300">
+										<strong>{m["settings.secret_key.regenerate.important"]()}</strong>{" "}
+										{m["settings.secret_key.regenerate.display.recovery_key_notice"]()}
+									</p>
+								</div>
 
 							<label className="flex items-start gap-2">
 								<input
 									type="checkbox"
 									checked={hasAcknowledged}
 									onChange={(e) => setHasAcknowledged(e.target.checked)}
-									className="mt-1"
-								/>
-								<span className="text-sm">
-									I have saved my new secret key in a safe place
-								</span>
-							</label>
-						</div>
+										className="mt-1"
+									/>
+									<span className="text-sm">
+										{m["settings.secret_key.regenerate.display.acknowledgement"]()}
+									</span>
+								</label>
+							</div>
 						<DialogFooter>
-							<Button
-								type="button"
-								variant="outline"
-								onClick={() => setOpen(false)}
-							>
-								Cancel
-							</Button>
-							<Button
-								type="button"
-								onClick={handleConfirmRegeneration}
-								disabled={!hasAcknowledged || isProcessing}
-							>
-								{isProcessing ? "Saving..." : "Confirm & Update"}
-							</Button>
-						</DialogFooter>
-					</>
+								<Button
+									type="button"
+									variant="outline"
+									onClick={() => setOpen(false)}
+								>
+									{m["settings.common.action.cancel"]()}
+								</Button>
+								<Button
+									type="button"
+									onClick={handleConfirmRegeneration}
+									disabled={!hasAcknowledged || isProcessing}
+								>
+									{isProcessing
+										? m["settings.common.action.saving"]()
+										: m["settings.secret_key.regenerate.action.confirm"]()}
+								</Button>
+							</DialogFooter>
+						</>
 				)}
 			</DialogContent>
 		</Dialog>

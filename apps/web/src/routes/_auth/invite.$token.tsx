@@ -14,19 +14,57 @@ import { useEffect, useState } from "react";
 import SignInForm from "@/components/sign-in-form";
 import SignUpForm from "@/components/sign-up-form";
 import { storage } from "@/lib/storage";
+import { m as messages } from "@/paraglide/messages";
+import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_auth/invite/$token")({
 	component: InvitationPage,
 	head: () => ({
-		meta: [{ title: "Team Invitation - Bittery" }],
+		meta: [{ title: messages["auth.invite.meta_title"]() }],
 	}),
 });
+
+type InviteMessageCatalog = ReturnType<typeof useI18n>["m"];
+
+function getInvitationRoleLabel(role: string, m: InviteMessageCatalog): string {
+	switch (role) {
+		case "owner":
+			return m["team.role.owner"]();
+		case "admin":
+			return m["team.role.admin"]();
+		case "member":
+			return m["team.role.member"]();
+		default:
+			return role;
+	}
+}
+
+function getInvitationStatusLabel(
+	status: string,
+	m: InviteMessageCatalog,
+): string {
+	switch (status) {
+		case "accepted":
+			return m["auth.invite.status.accepted"]();
+		case "declined":
+			return m["auth.invite.status.declined"]();
+		case "expired":
+			return m["auth.invite.status.expired"]();
+		case "canceled":
+			return m["auth.invite.status.canceled"]();
+		case "pending":
+			return m["auth.invite.status.pending"]();
+		default:
+			return status;
+	}
+}
 
 function InvitationPage() {
 	const { token } = Route.useParams();
 	const navigate = useNavigate();
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
+	const { m } = useI18n();
 	const [authenticated, setAuthenticated] = useState<boolean | null>(null);
 	const [view, setView] = useState<"signup" | "signin">("signup");
 
@@ -43,11 +81,11 @@ function InvitationPage() {
 	const acceptMutation = useMutation({
 		mutationFn: () => trpcClient.team.invitations.accept.mutate({ token }),
 		onSuccess: (data) => {
-			toast.success(`Successfully joined ${data.teamName}!`);
+			toast.success(m["auth.invite.toast.joined"]({ teamName: data.teamName }));
 			navigate({ to: "/team" });
 		},
-		onError: (error: Error) => {
-			toast.error(error.message);
+		onError: () => {
+			toast.error(m["auth.invite.toast.accept_failed"]());
 		},
 	});
 
@@ -55,11 +93,11 @@ function InvitationPage() {
 	const declineMutation = useMutation({
 		mutationFn: () => trpcClient.team.invitations.decline.mutate({ token }),
 		onSuccess: () => {
-			toast.success("Invitation declined");
+			toast.success(m["auth.invite.toast.declined"]());
 			navigate({ to: "/team" });
 		},
-		onError: (error: Error) => {
-			toast.error(error.message);
+		onError: () => {
+			toast.error(m["auth.invite.toast.decline_failed"]());
 		},
 	});
 
@@ -68,7 +106,9 @@ function InvitationPage() {
 		return (
 			<div className="flex w-full flex-col items-center justify-center py-12">
 				<Loader2 className="h-8 w-8 animate-spin text-primary" />
-				<p className="mt-4 text-muted-foreground text-sm">Loading...</p>
+				<p className="mt-4 text-muted-foreground text-sm">
+					{m["auth.invite.loading.auth"]()}
+				</p>
 			</div>
 		);
 	}
@@ -79,7 +119,7 @@ function InvitationPage() {
 			<div className="flex w-full flex-col items-center justify-center py-12">
 				<Loader2 className="h-8 w-8 animate-spin text-primary" />
 				<p className="mt-4 text-muted-foreground text-sm">
-					Loading invitation...
+					{m["auth.invite.loading.invitation"]()}
 				</p>
 			</div>
 		);
@@ -94,15 +134,17 @@ function InvitationPage() {
 						<AlertCircle className="h-6 w-6 text-destructive" />
 					</div>
 					<h1 className="font-semibold text-2xl tracking-tight">
-						Invitation Not Found
+						{m["auth.invite.not_found.title"]()}
 					</h1>
 					<p className="mx-auto mt-2 max-w-80 text-muted-foreground text-sm">
-						This invitation link is invalid or has already been used.
+						{m["auth.invite.not_found.description"]()}
 					</p>
 				</div>
 				<div className="mt-6 flex justify-center">
 					<Link to="/login">
-						<Button variant="outline">Go to Sign In</Button>
+						<Button variant="outline">
+							{m["auth.invite.action.go_to_sign_in"]()}
+						</Button>
 					</Link>
 				</div>
 			</div>
@@ -120,16 +162,19 @@ function InvitationPage() {
 						<Clock className="h-6 w-6 text-muted-foreground" />
 					</div>
 					<h1 className="font-semibold text-2xl tracking-tight">
-						Invitation Expired
+						{m["auth.invite.expired.title"]()}
 					</h1>
 					<p className="mx-auto mt-2 max-w-80 text-muted-foreground text-sm">
-						This invitation has expired. Please ask {invitation.invitedByName}{" "}
-						to send a new invitation.
+						{m["auth.invite.expired.description"]({
+							invitedByName: invitation.invitedByName,
+						})}
 					</p>
 				</div>
 				<div className="mt-6 flex justify-center">
 					<Link to="/login">
-						<Button variant="outline">Go to Sign In</Button>
+						<Button variant="outline">
+							{m["auth.invite.action.go_to_sign_in"]()}
+						</Button>
 					</Link>
 				</div>
 			</div>
@@ -145,16 +190,20 @@ function InvitationPage() {
 						<Check className="h-6 w-6 text-muted-foreground" />
 					</div>
 					<h1 className="font-semibold text-2xl tracking-tight">
-						Invitation Already Used
+						{m["auth.invite.used.title"]()}
 					</h1>
 					<p className="mx-auto mt-2 max-w-80 text-muted-foreground text-sm">
-						This invitation has already been {invitation?.status}.
+						{m["auth.invite.used.description"]({
+							status: getInvitationStatusLabel(invitation?.status ?? "", m),
+						})}
 					</p>
 				</div>
 				<div className="mt-6 flex justify-center">
 					<Link to={authenticated ? "/team" : "/login"}>
 						<Button variant="outline">
-							{authenticated ? "Go to Teams" : "Go to Sign In"}
+							{authenticated
+								? m["auth.invite.action.go_to_teams"]()
+								: m["auth.invite.action.go_to_sign_in"]()}
 						</Button>
 					</Link>
 				</div>
@@ -190,25 +239,27 @@ function InvitationPage() {
 					<Users className="h-7 w-7 text-primary" />
 				</div>
 				<h1 className="font-semibold text-2xl tracking-tight">
-					Team Invitation
+					{m["auth.invite.header.title"]()}
 				</h1>
 				<p className="mx-auto mt-2 max-w-80 text-muted-foreground text-sm">
 					<span className="font-medium text-foreground">
 						{invitation.invitedByName}
 					</span>{" "}
-					has invited you to join{" "}
+					{m["auth.invite.header.description.join"]()}{" "}
 					<span className="font-medium text-foreground">
 						{invitation.teamName}
 					</span>{" "}
-					as a{" "}
-					<span className="font-medium text-foreground">{invitation.role}</span>
-					.
+					{m["auth.invite.header.description.role_prefix"]()}{" "}
+					<span className="font-medium text-foreground">
+						{getInvitationRoleLabel(invitation.role, m)}
+					</span>
+					{m["auth.invite.header.description.role_suffix"]()}
 				</p>
 			</div>
 
 			<div className="mt-6 space-y-4">
 				<p className="text-center text-muted-foreground text-sm">
-					Would you like to accept this invitation?
+					{m["auth.invite.prompt"]()}
 				</p>
 
 				<div className="flex gap-3">
@@ -223,7 +274,7 @@ function InvitationPage() {
 						) : (
 							<X size={16} className="mr-2" />
 						)}
-						Decline
+						{m["auth.invite.action.decline"]()}
 					</Button>
 					<Button
 						className="h-10 flex-1"
@@ -235,7 +286,7 @@ function InvitationPage() {
 						) : (
 							<Check size={16} className="mr-2" />
 						)}
-						Accept Invitation
+						{m["auth.invite.action.accept"]()}
 					</Button>
 				</div>
 			</div>

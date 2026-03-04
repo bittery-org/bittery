@@ -2,6 +2,9 @@ import { useAllVaultKeys, useCoreContext } from "@bittery/core/hooks";
 import {
 	getDecryptedVaultKey,
 	getImportProvider,
+	ImportProviderError,
+	type ImportErrorCode,
+	type ImportMessageParams,
 	type ImportPreview,
 	type ImportProviderId,
 	type ImportSourceItem,
@@ -43,7 +46,6 @@ export type ImportExecutionStage =
 
 export interface ImportExecutionProgress {
 	stage: ImportExecutionStage;
-	message: string;
 	totalItems: number;
 	processedItems: number;
 	totalVaults: number;
@@ -51,11 +53,34 @@ export interface ImportExecutionProgress {
 	currentVaultName?: string;
 }
 
+type HookImportErrorCode =
+	| "provider-unavailable"
+	| "file-incompatible"
+	| "no-importable-items"
+	| "import-not-ready"
+	| "mapping-missing"
+	| "target-vault-required"
+	| "target-vault-name-required"
+	| "target-vault-missing"
+	| "target-vault-read-only"
+	| "missing-target-mapping"
+	| "target-vault-key-decrypt-failed"
+	| "vault-import-failed"
+	| "parse-failed"
+	| "execution-failed";
+
+export type VaultImportErrorCode = HookImportErrorCode | ImportErrorCode;
+
+export interface ImportMessageDescriptor {
+	code: VaultImportErrorCode;
+	params?: ImportMessageParams;
+}
+
 export interface ImportFailedVault {
 	sourceVaultId: string;
 	sourceVaultName: string;
 	itemCount: number;
-	message: string;
+	reason: ImportMessageDescriptor;
 }
 
 export interface ImportExecutionSummary {
@@ -74,20 +99,26 @@ interface ResolvedTargetVault {
 	accountEmail?: string;
 }
 
+class VaultImportError extends Error {
+	readonly code: VaultImportErrorCode;
+	readonly params?: ImportMessageParams;
+
+	constructor(code: VaultImportErrorCode, params?: ImportMessageParams) {
+		super(code);
+		this.name = "VaultImportError";
+		this.code = code;
+		this.params = params;
+	}
+}
+
 function createEmptyProgress(): ImportExecutionProgress {
 	return {
 		stage: "idle",
-		message: "",
 		totalItems: 0,
 		processedItems: 0,
 		totalVaults: 0,
 		processedVaults: 0,
 	};
-}
-
-function normalizeCreatedVaultName(name: string): string {
-	const trimmed = name.trim();
-	return trimmed.length > 0 ? trimmed : "Imported Vault";
 }
 
 function buildDefaultMappings(
@@ -148,41 +179,24 @@ function groupItemsBySourceVault(
 	return groups;
 }
 
-function getImportErrorMessage(error: unknown): string {
-	if (error instanceof Error) {
-		return error.message;
-	}
-	return "Import failed due to an unexpected error.";
+function toImportMessageDescriptor(error: VaultImportError): ImportMessageDescriptor {
+	return {
+		code: error.code,
+		...(error.params ? { params: error.params } : {}),
+	};
 }
 
-function getProgressMessage(
-	stage: ImportExecutionStage,
-	currentVaultName?: string,
-): string {
-	switch (stage) {
-		case "parsing":
-			return "Parsing import file...";
-		case "mapping":
-			return currentVaultName
-				? `Preparing vault "${currentVaultName}"...`
-				: "Preparing vault mappings...";
-		case "encrypting":
-			return currentVaultName
-				? `Encrypting items for "${currentVaultName}"...`
-				: "Encrypting imported items...";
-		case "uploading":
-			return currentVaultName
-				? `Uploading items to "${currentVaultName}"...`
-				: "Uploading encrypted batches...";
-		case "finalizing":
-			return "Finalizing import...";
-		case "completed":
-			return "Import completed.";
-		case "error":
-			return "Import failed.";
-		default:
-			return "";
+function normalizeImportError(
+	error: unknown,
+	fallbackCode: HookImportErrorCode,
+): VaultImportError {
+	if (error instanceof VaultImportError) {
+		return error;
 	}
+	if (error instanceof ImportProviderError) {
+		return new VaultImportError(error.code, error.params);
+	}
+	return new VaultImportError(fallbackCode);
 }
 
 export function useVaultImport() {
@@ -201,7 +215,7 @@ export function useVaultImport() {
 		createEmptyProgress(),
 	);
 	const [summary, setSummary] = useState<ImportExecutionSummary | null>(null);
-	const [error, setError] = useState<string | null>(null);
+	const [error, setError] = useState<ImportMessageDescriptor | null>(null);
 	const [isBusy, setIsBusy] = useState(false);
 	const [skippedEmptyVaultCount, setSkippedEmptyVaultCount] = useState(0);
 
@@ -237,7 +251,6 @@ export function useVaultImport() {
 			setSummary(null);
 			setProgress({
 				stage: "parsing",
-				message: getProgressMessage("parsing"),
 				totalItems: 0,
 				processedItems: 0,
 				totalVaults: 0,
@@ -247,13 +260,13 @@ export function useVaultImport() {
 			try {
 				const provider = getImportProvider(selectedProviderId);
 				if (!provider) {
-					throw new Error("Selected import provider is unavailable.");
+					throw new VaultImportError("provider-unavailable");
 				}
 
 				if (!provider.canParse(file)) {
-					throw new Error(
-						`This file is not compatible with ${provider.title}. Please upload a valid export file.`,
-					);
+					throw new VaultImportError("file-incompatible", {
+						providerTitle: provider.title,
+					});
 				}
 
 				const parsedPreview = await provider.parse(file);
@@ -263,9 +276,7 @@ export function useVaultImport() {
 				setSkippedEmptyVaultCount(emptyVaultCount);
 				const importablePreview = filterImportablePreview(parsedPreview);
 				if (importablePreview.sourceVaults.length === 0) {
-					throw new Error(
-						"No importable items were found. This export only contains empty vaults.",
-					);
+					throw new VaultImportError("no-importable-items");
 				}
 
 				setProviderId(provider.id);
@@ -273,28 +284,26 @@ export function useVaultImport() {
 				setMappings(buildDefaultMappings(importablePreview.sourceVaults));
 				setProgress({
 					stage: "mapping",
-					message: getProgressMessage("mapping"),
 					totalItems: importablePreview.sourceItems.length,
 					processedItems: 0,
 					totalVaults: importablePreview.sourceVaults.length,
 					processedVaults: 0,
 				});
 			} catch (parseError) {
-				const message = getImportErrorMessage(parseError);
-				setError(message);
+				const normalizedError = normalizeImportError(parseError, "parse-failed");
+				setError(toImportMessageDescriptor(normalizedError));
 				setProviderId(null);
 				setPreview(null);
 				setMappings({});
 				setSkippedEmptyVaultCount(0);
 				setProgress({
 					stage: "error",
-					message,
 					totalItems: 0,
 					processedItems: 0,
 					totalVaults: 0,
 					processedVaults: 0,
 				});
-				throw parseError;
+				throw normalizedError;
 			} finally {
 				setIsBusy(false);
 			}
@@ -354,316 +363,314 @@ export function useVaultImport() {
 		[updateVaultMapping],
 	);
 
-	const executeImport =
-		useCallback(async (): Promise<ImportExecutionSummary> => {
-			if (!preview || !providerId) {
-				throw new Error(
-					"Upload and parse an export file before starting import.",
-				);
-			}
+	const executeImport = useCallback(async (): Promise<ImportExecutionSummary> => {
+		if (!preview || !providerId) {
+			throw new VaultImportError("import-not-ready");
+		}
 
-			const provider = getImportProvider(providerId);
-			if (!provider) {
-				throw new Error("Import provider is unavailable.");
-			}
+		const provider = getImportProvider(providerId);
+		if (!provider) {
+			throw new VaultImportError("provider-unavailable");
+		}
 
-			const sourceVaults = preview.sourceVaults;
-			const sourceItemsByVault = groupItemsBySourceVault(preview.sourceItems);
-			const resolvedTargets = new Map<string, ResolvedTargetVault>();
-			const failedVaults: ImportFailedVault[] = [];
-			const createdVaults: ResolvedTargetVault[] = [];
+		const sourceVaults = preview.sourceVaults;
+		const sourceItemsByVault = groupItemsBySourceVault(preview.sourceItems);
+		const resolvedTargets = new Map<string, ResolvedTargetVault>();
+		const failedVaults: ImportFailedVault[] = [];
+		const createdVaults: ResolvedTargetVault[] = [];
 
-			setIsBusy(true);
-			setError(null);
-			setSummary(null);
+		setIsBusy(true);
+		setError(null);
+		setSummary(null);
 
-			let importedCount = 0;
-			let skippedCount = preview.summary.skippedCount;
-			let processedItems = 0;
-			let processedVaults = 0;
+		let importedCount = 0;
+		let skippedCount = preview.summary.skippedCount;
+		let processedItems = 0;
+		let processedVaults = 0;
 
-			setProgress({
-				stage: "mapping",
-				message: getProgressMessage("mapping"),
-				totalItems: preview.sourceItems.length,
-				processedItems: 0,
-				totalVaults: sourceVaults.length,
-				processedVaults: 0,
-			});
+		setProgress({
+			stage: "mapping",
+			totalItems: preview.sourceItems.length,
+			processedItems: 0,
+			totalVaults: sourceVaults.length,
+			processedVaults: 0,
+		});
 
-			try {
-				for (const sourceVault of sourceVaults) {
-					const mapping = mappings[sourceVault.id];
-					if (!mapping) {
-						throw new Error(
-							`Missing mapping for source vault "${sourceVault.name}".`,
-						);
-					}
-
-					if (mapping.mode === "existing") {
-						if (!mapping.targetVaultId) {
-							throw new Error(
-								`Select a target vault for "${sourceVault.name}" or choose create new.`,
-							);
-						}
-
-						const targetVault = existingVaultById.get(mapping.targetVaultId);
-						if (!targetVault) {
-							throw new Error(
-								`Selected target vault for "${sourceVault.name}" is no longer available.`,
-							);
-						}
-
-						if (targetVault.role === "read-only") {
-							throw new Error(
-								`"${targetVault.vaultName}" is read-only. Choose another vault or create a new one.`,
-							);
-						}
-
-						resolvedTargets.set(sourceVault.id, {
-							vaultId: targetVault.vaultId,
-							vaultName: targetVault.vaultName,
-							accountEmail: targetVault.accountEmail,
-						});
-					}
+		try {
+			for (const sourceVault of sourceVaults) {
+				const mapping = mappings[sourceVault.id];
+				if (!mapping) {
+					throw new VaultImportError("mapping-missing", {
+						sourceVaultName: sourceVault.name,
+					});
 				}
 
-				const activeAccount = await storage.getActiveAccount();
-				const defaultAccountEmail =
-					activeAccount?.type === "single" ? activeAccount.email : undefined;
-
-				for (const sourceVault of sourceVaults) {
-					const mapping = mappings[sourceVault.id];
-					if (!mapping || mapping.mode !== "create") {
-						continue;
-					}
-
-					const targetVaultName = normalizeCreatedVaultName(
-						mapping.targetVaultName,
-					);
-					setProgress((current) => ({
-						...current,
-						stage: "mapping",
-						message: getProgressMessage("mapping", targetVaultName),
-						currentVaultName: targetVaultName,
-					}));
-
-					const createdVault = await core.vaults.createVault(
-						{
-							name: targetVaultName,
-							type: "personal",
-							icon: DEFAULT_CREATED_VAULT_ICON,
-							accountEmail: defaultAccountEmail,
-						},
-						trpcClient,
-					);
-
-					const resolvedTarget: ResolvedTargetVault = {
-						vaultId: createdVault.vaultId,
-						vaultName: targetVaultName,
-						accountEmail: defaultAccountEmail,
-					};
-
-					createdVaults.push(resolvedTarget);
-					resolvedTargets.set(sourceVault.id, resolvedTarget);
-				}
-
-				if (createdVaults.length > 0) {
-					await core.vaults.refreshVaultKeys(
-						trpcClient,
-						createdVaults[0].accountEmail,
-					);
-					await invalidator.invalidateVaultKeys();
-				}
-
-				for (const sourceVault of sourceVaults) {
-					const sourceItems = sourceItemsByVault.get(sourceVault.id) ?? [];
-					const resolvedTarget = resolvedTargets.get(sourceVault.id);
-
-					if (!resolvedTarget) {
-						failedVaults.push({
-							sourceVaultId: sourceVault.id,
+				if (mapping.mode === "create") {
+					if (!mapping.targetVaultName.trim()) {
+						throw new VaultImportError("target-vault-name-required", {
 							sourceVaultName: sourceVault.name,
-							itemCount: sourceItems.length,
-							message: "No target vault mapping found.",
 						});
-						skippedCount += sourceItems.length;
-						processedItems += sourceItems.length;
-						processedVaults += 1;
-						continue;
+					}
+					continue;
+				}
+
+				if (!mapping.targetVaultId) {
+					throw new VaultImportError("target-vault-required", {
+						sourceVaultName: sourceVault.name,
+					});
+				}
+
+				const targetVault = existingVaultById.get(mapping.targetVaultId);
+				if (!targetVault) {
+					throw new VaultImportError("target-vault-missing", {
+						sourceVaultName: sourceVault.name,
+					});
+				}
+
+				if (targetVault.role === "read-only") {
+					throw new VaultImportError("target-vault-read-only", {
+						targetVaultName: targetVault.vaultName,
+					});
+				}
+
+				resolvedTargets.set(sourceVault.id, {
+					vaultId: targetVault.vaultId,
+					vaultName: targetVault.vaultName,
+					accountEmail: targetVault.accountEmail,
+				});
+			}
+
+			const activeAccount = await storage.getActiveAccount();
+			const defaultAccountEmail =
+				activeAccount?.type === "single" ? activeAccount.email : undefined;
+
+			for (const sourceVault of sourceVaults) {
+				const mapping = mappings[sourceVault.id];
+				if (!mapping || mapping.mode !== "create") {
+					continue;
+				}
+
+				const targetVaultName = mapping.targetVaultName.trim();
+				setProgress((current) => ({
+					...current,
+					stage: "mapping",
+					currentVaultName: targetVaultName,
+				}));
+
+				const createdVault = await core.vaults.createVault(
+					{
+						name: targetVaultName,
+						type: "personal",
+						icon: DEFAULT_CREATED_VAULT_ICON,
+						accountEmail: defaultAccountEmail,
+					},
+					trpcClient,
+				);
+
+				const resolvedTarget: ResolvedTargetVault = {
+					vaultId: createdVault.vaultId,
+					vaultName: targetVaultName,
+					accountEmail: defaultAccountEmail,
+				};
+
+				createdVaults.push(resolvedTarget);
+				resolvedTargets.set(sourceVault.id, resolvedTarget);
+			}
+
+			if (createdVaults.length > 0) {
+				await core.vaults.refreshVaultKeys(
+					trpcClient,
+					createdVaults[0].accountEmail,
+				);
+				await invalidator.invalidateVaultKeys();
+			}
+
+			for (const sourceVault of sourceVaults) {
+				const sourceItems = sourceItemsByVault.get(sourceVault.id) ?? [];
+				const resolvedTarget = resolvedTargets.get(sourceVault.id);
+
+				if (!resolvedTarget) {
+					failedVaults.push({
+						sourceVaultId: sourceVault.id,
+						sourceVaultName: sourceVault.name,
+						itemCount: sourceItems.length,
+						reason: { code: "missing-target-mapping" },
+					});
+					skippedCount += sourceItems.length;
+					processedItems += sourceItems.length;
+					processedVaults += 1;
+					continue;
+				}
+
+				setProgress((current) => ({
+					...current,
+					stage: "encrypting",
+					currentVaultName: sourceVault.name,
+					processedVaults,
+					processedItems,
+				}));
+
+				let encryptedItemsInVault = 0;
+				let importedItemsInVault = 0;
+
+				try {
+					const vaultKey = await getDecryptedVaultKey({
+						vaultId: resolvedTarget.vaultId,
+						email: resolvedTarget.accountEmail,
+						storage,
+						crypto: vaultKeyCrypto,
+					});
+
+					if (!vaultKey) {
+						throw new VaultImportError("target-vault-key-decrypt-failed", {
+							targetVaultName: resolvedTarget.vaultName,
+						});
 					}
 
-					setProgress((current) => ({
-						...current,
-						stage: "encrypting",
-						message: getProgressMessage("encrypting", sourceVault.name),
-						currentVaultName: sourceVault.name,
-						processedVaults,
-						processedItems,
-					}));
+					const encryptedItems = [];
+					for (const sourceItem of sourceItems) {
+						const decryptedItem = provider.toDecryptedItemData(sourceItem);
+						const encryptedData = await encrypt(
+							JSON.stringify(decryptedItem.data),
+							vaultKey,
+						);
 
-					let encryptedItemsInVault = 0;
-					let importedItemsInVault = 0;
-
-					try {
-						const vaultKey = await getDecryptedVaultKey({
-							vaultId: resolvedTarget.vaultId,
-							email: resolvedTarget.accountEmail,
-							storage,
-							crypto: vaultKeyCrypto,
+						encryptedItems.push({
+							category: decryptedItem.category,
+							favorite: decryptedItem.favorite,
+							encryptedData: encryptedData.ciphertext,
+							encryptionIv: encryptedData.iv,
+							encryptionAlgorithm: encryptedData.algorithm,
 						});
 
-						if (!vaultKey) {
-							throw new Error(
-								`Could not decrypt target vault key for "${resolvedTarget.vaultName}".`,
-							);
-						}
-
-						const encryptedItems = [];
-						for (const sourceItem of sourceItems) {
-							const decryptedItem = provider.toDecryptedItemData(sourceItem);
-							const encryptedData = await encrypt(
-								JSON.stringify(decryptedItem.data),
-								vaultKey,
-							);
-
-							encryptedItems.push({
-								category: decryptedItem.category,
-								favorite: decryptedItem.favorite,
-								encryptedData: encryptedData.ciphertext,
-								encryptionIv: encryptedData.iv,
-								encryptionAlgorithm: encryptedData.algorithm,
-							});
-
-							encryptedItemsInVault += 1;
-							processedItems += 1;
-
-							setProgress((current) => ({
-								...current,
-								stage: "encrypting",
-								message: getProgressMessage("encrypting", sourceVault.name),
-								currentVaultName: sourceVault.name,
-								processedItems,
-							}));
-						}
+						encryptedItemsInVault += 1;
+						processedItems += 1;
 
 						setProgress((current) => ({
 							...current,
-							stage: "uploading",
-							message: getProgressMessage("uploading", sourceVault.name),
+							stage: "encrypting",
 							currentVaultName: sourceVault.name,
+							processedItems,
 						}));
-
-						for (
-							let index = 0;
-							index < encryptedItems.length;
-							index += IMPORT_BATCH_SIZE
-						) {
-							const batch = encryptedItems.slice(
-								index,
-								index + IMPORT_BATCH_SIZE,
-							);
-							const result = await trpcClient.vault.bulkImportItems.mutate({
-								vaultId: resolvedTarget.vaultId,
-								clientId: clientId || undefined,
-								items: batch,
-							});
-							importedItemsInVault += result.importedCount;
-							importedCount += result.importedCount;
-						}
-
-						await invalidator.invalidateVaultList(resolvedTarget.vaultId);
-					} catch (vaultError) {
-						const remainingItems = Math.max(
-							0,
-							sourceItems.length - encryptedItemsInVault,
-						);
-						processedItems += remainingItems;
-						const skippedItemsInVault = Math.max(
-							0,
-							sourceItems.length - importedItemsInVault,
-						);
-						skippedCount += skippedItemsInVault;
-						failedVaults.push({
-							sourceVaultId: sourceVault.id,
-							sourceVaultName: sourceVault.name,
-							itemCount: skippedItemsInVault,
-							message: getImportErrorMessage(vaultError),
-						});
 					}
 
-					processedVaults += 1;
 					setProgress((current) => ({
 						...current,
-						processedVaults,
-						processedItems,
+						stage: "uploading",
+						currentVaultName: sourceVault.name,
 					}));
+
+					for (
+						let index = 0;
+						index < encryptedItems.length;
+						index += IMPORT_BATCH_SIZE
+					) {
+						const batch = encryptedItems.slice(index, index + IMPORT_BATCH_SIZE);
+						const result = await trpcClient.vault.bulkImportItems.mutate({
+							vaultId: resolvedTarget.vaultId,
+							clientId: clientId || undefined,
+							items: batch,
+						});
+						importedItemsInVault += result.importedCount;
+						importedCount += result.importedCount;
+					}
+
+					await invalidator.invalidateVaultList(resolvedTarget.vaultId);
+				} catch (vaultError) {
+					const remainingItems = Math.max(
+						0,
+						sourceItems.length - encryptedItemsInVault,
+					);
+					processedItems += remainingItems;
+					const skippedItemsInVault = Math.max(
+						0,
+						sourceItems.length - importedItemsInVault,
+					);
+					skippedCount += skippedItemsInVault;
+					const normalizedVaultError = normalizeImportError(
+						vaultError,
+						"vault-import-failed",
+					);
+					failedVaults.push({
+						sourceVaultId: sourceVault.id,
+						sourceVaultName: sourceVault.name,
+						itemCount: skippedItemsInVault,
+						reason: toImportMessageDescriptor(normalizedVaultError),
+					});
 				}
 
+				processedVaults += 1;
 				setProgress((current) => ({
 					...current,
-					stage: "finalizing",
-					message: getProgressMessage("finalizing"),
-					currentVaultName: undefined,
-				}));
-
-				if (storage.clearItemCache) {
-					await storage.clearItemCache();
-				}
-
-				const { accountsInfo } = await core.accounts.resolveAccounts();
-				if (accountsInfo.length > 0) {
-					await core.vaultCoordinator.refreshFromServer(accountsInfo);
-				}
-
-				if (createdVaults.length > 0) {
-					await invalidator.invalidateVaultKeys();
-				}
-
-				const resultSummary: ImportExecutionSummary = {
-					providerId,
-					importedCount,
-					skippedCount,
-					warningCount: preview.warnings.length,
-					createdVaultCount: createdVaults.length,
-					failedVaultCount: failedVaults.length,
-					failedVaults,
-				};
-
-				setSummary(resultSummary);
-				setProgress({
-					stage: "completed",
-					message: getProgressMessage("completed"),
-					totalItems: preview.sourceItems.length,
-					processedItems,
-					totalVaults: sourceVaults.length,
 					processedVaults,
-				});
-				return resultSummary;
-			} catch (executionError) {
-				const message = getImportErrorMessage(executionError);
-				setError(message);
-				setProgress((current) => ({
-					...current,
-					stage: "error",
-					message,
+					processedItems,
 				}));
-				throw executionError;
-			} finally {
-				setIsBusy(false);
 			}
-		}, [
-			preview,
-			providerId,
-			mappings,
-			existingVaultById,
-			core.vaults,
-			core.accounts,
-			core.vaultCoordinator,
-			trpcClient,
-			invalidator,
-			clientId,
-		]);
+
+			setProgress((current) => ({
+				...current,
+				stage: "finalizing",
+				currentVaultName: undefined,
+			}));
+
+			if (storage.clearItemCache) {
+				await storage.clearItemCache();
+			}
+
+			const { accountsInfo } = await core.accounts.resolveAccounts();
+			if (accountsInfo.length > 0) {
+				await core.vaultCoordinator.refreshFromServer(accountsInfo);
+			}
+
+			if (createdVaults.length > 0) {
+				await invalidator.invalidateVaultKeys();
+			}
+
+			const resultSummary: ImportExecutionSummary = {
+				providerId,
+				importedCount,
+				skippedCount,
+				warningCount: preview.warnings.length,
+				createdVaultCount: createdVaults.length,
+				failedVaultCount: failedVaults.length,
+				failedVaults,
+			};
+
+			setSummary(resultSummary);
+			setProgress({
+				stage: "completed",
+				totalItems: preview.sourceItems.length,
+				processedItems,
+				totalVaults: sourceVaults.length,
+				processedVaults,
+			});
+			return resultSummary;
+		} catch (executionError) {
+			const normalizedError = normalizeImportError(
+				executionError,
+				"execution-failed",
+			);
+			setError(toImportMessageDescriptor(normalizedError));
+			setProgress((current) => ({
+				...current,
+				stage: "error",
+			}));
+			throw normalizedError;
+		} finally {
+			setIsBusy(false);
+		}
+	}, [
+		preview,
+		providerId,
+		mappings,
+		existingVaultById,
+		core.vaults,
+		core.accounts,
+		core.vaultCoordinator,
+		trpcClient,
+		invalidator,
+		clientId,
+	]);
 
 	return {
 		providerId,

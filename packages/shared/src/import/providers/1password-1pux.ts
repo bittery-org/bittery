@@ -6,6 +6,7 @@ import type {
 	TotpAlgorithm,
 	TotpDigits,
 } from "../../types";
+import { ImportProviderError } from "../types";
 import type {
 	ImportDecryptedItem,
 	ImportPreview,
@@ -81,7 +82,7 @@ export const onePassword1puxImportProvider: ImportProvider = {
 		const vaultCandidates = extractVaultCandidates(payload);
 
 		if (vaultCandidates.length === 0) {
-			throw new Error("No vaults found in the provided 1PUX export.");
+			throw new ImportProviderError("no-vaults-found");
 		}
 
 		for (const vaultCandidate of vaultCandidates) {
@@ -113,9 +114,9 @@ export const onePassword1puxImportProvider: ImportProvider = {
 
 	toDecryptedItemData(sourceItem: ImportSourceItem): ImportDecryptedItem {
 		if (sourceItem.providerId !== onePassword1puxImportProvider.id) {
-			throw new Error(
-				`Unsupported import item provider: ${sourceItem.providerId}`,
-			);
+			throw new ImportProviderError("unsupported-item-provider", {
+				providerId: sourceItem.providerId,
+			});
 		}
 
 		return {
@@ -128,9 +129,7 @@ export const onePassword1puxImportProvider: ImportProvider = {
 
 async function parse1puxArchive(file: File): Promise<unknown> {
 	if (!onePassword1puxImportProvider.canParse(file)) {
-		throw new Error(
-			"Unsupported file type. Please upload a .1pux export file.",
-		);
+		throw new ImportProviderError("unsupported-file-type");
 	}
 
 	let archiveEntries: JSZipObject[];
@@ -138,34 +137,26 @@ async function parse1puxArchive(file: File): Promise<unknown> {
 		const archiveBuffer = await file.arrayBuffer();
 		const archive = await JSZip.loadAsync(archiveBuffer);
 		archiveEntries = Object.values(archive.files);
-	} catch (error) {
-		throw new Error(
-			`Could not read 1PUX archive: ${error instanceof Error ? error.message : "unknown error"}`,
-		);
+	} catch {
+		throw new ImportProviderError("archive-read-failed");
 	}
 
 	const exportDataEntry = findExportDataEntry(archiveEntries);
 	if (!exportDataEntry) {
-		throw new Error("Missing export.data in 1PUX archive.");
+		throw new ImportProviderError("missing-export-data");
 	}
 
 	let exportDataText: string;
 	try {
 		exportDataText = await exportDataEntry.async("string");
-	} catch (error) {
-		throw new Error(
-			`Could not read export.data entry: ${
-				error instanceof Error ? error.message : "unknown error"
-			}`,
-		);
+	} catch {
+		throw new ImportProviderError("read-export-data-failed");
 	}
 
 	try {
 		return JSON.parse(exportDataText);
-	} catch (error) {
-		throw new Error(
-			`Invalid export.data JSON: ${error instanceof Error ? error.message : "unknown error"}`,
-		);
+	} catch {
+		throw new ImportProviderError("invalid-export-data-json");
 	}
 }
 
@@ -207,12 +198,13 @@ function parseVault(
 				return;
 			}
 			parsedItems.push(parsedItem);
-		} catch (error) {
+		} catch {
 			warnings.push({
 				code: "item-parse-failed",
-				message: `Skipped item ${index + 1} in "${vaultCandidate.name}": ${
-					error instanceof Error ? error.message : "unknown parse error"
-				}`,
+				params: {
+					itemNumber: index + 1,
+					vaultName: vaultCandidate.name,
+				},
 				sourceVaultId: vaultCandidate.id,
 			});
 			skippedCount += 1;
@@ -240,7 +232,10 @@ function parseItem(
 	if (!item) {
 		warnings.push({
 			code: "invalid-item",
-			message: `Skipped malformed item ${index + 1} in "${vault.name}".`,
+			params: {
+				itemNumber: index + 1,
+				vaultName: vault.name,
+			},
 			sourceVaultId: vault.id,
 		});
 		return null;
@@ -257,7 +252,7 @@ function parseItem(
 	if (state === "archived") {
 		warnings.push({
 			code: "archived-skipped",
-			message: `${title}: archived items are skipped during import.`,
+			params: { title },
 			sourceVaultId: vault.id,
 			sourceItemId: itemId,
 		});
@@ -267,7 +262,11 @@ function parseItem(
 	if (usedFallbackTitle) {
 		warnings.push({
 			code: "missing-title",
-			message: `Item ${index + 1} in "${vault.name}" is missing a title and was renamed to "${title}".`,
+			params: {
+				itemNumber: index + 1,
+				vaultName: vault.name,
+				title,
+			},
 			sourceVaultId: vault.id,
 			sourceItemId: itemId,
 		});
@@ -276,7 +275,7 @@ function parseItem(
 	if (isDocumentItem(item, sourceCategory, fields)) {
 		warnings.push({
 			code: "documents-skipped",
-			message: `${title}: document items are skipped in v1 (attachments skipped).`,
+			params: { title },
 			sourceVaultId: vault.id,
 			sourceItemId: itemId,
 		});
@@ -286,7 +285,7 @@ function parseItem(
 	if (attachmentCount > 0) {
 		warnings.push({
 			code: "attachments-skipped",
-			message: `${title}: attachments skipped during import.`,
+			params: { title },
 			sourceVaultId: vault.id,
 			sourceItemId: itemId,
 		});
@@ -296,7 +295,10 @@ function parseItem(
 	if (categoryResolution.isFallback) {
 		warnings.push({
 			code: "category-fallback",
-			message: `${title}: unrecognized category "${sourceCategory || "unknown"}", imported as login.`,
+			params: {
+				title,
+				sourceCategory,
+			},
 			sourceVaultId: vault.id,
 			sourceItemId: itemId,
 		});
@@ -332,7 +334,7 @@ function parseItem(
 		if (!totp?.secret) {
 			warnings.push({
 				code: "totp-secret-missing",
-				message: `${title}: no TOTP secret found, imported as secure note.`,
+				params: { title },
 				sourceVaultId: vault.id,
 				sourceItemId: itemId,
 			});

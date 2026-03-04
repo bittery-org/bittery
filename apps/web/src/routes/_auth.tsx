@@ -85,7 +85,7 @@ function AuthLayout() {
 							</a>
 							<span className="text-muted-foreground/20">|</span>
 							<a
-								href="https://github.com/bittery-org/bittery/issues"
+								href="https://bittery.com/docs"
 								target="_blank"
 								rel="noopener noreferrer"
 								className="flex items-center gap-1 text-muted-foreground/60 text-xs transition-colors hover:text-muted-foreground"

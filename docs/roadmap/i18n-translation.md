@@ -1,4 +1,4 @@
-Internationalize this new feature/route end-to-end (feature).
+Internationalize this new feature/route end-to-end.
 
 We use Paraglide JS for i18n.
 
@@ -10,7 +10,7 @@ Requirements:
 4. If non-UI layers generate English copy, refactor them to return stable keys/params and localize only in the UI.
 5. Handle count-based singular/plural copy correctly.
 6. Preserve behavior and design; only change what’s needed for i18n.
-7. Run i18n parity checks, then report results.
+7. Run i18n parity checks, dont compile, dont build anything, just check types.
 
 Output:
 
