@@ -1,9 +1,6 @@
 import { useTRPC } from "@bittery/shared/trpc";
-import { Badge, Button } from "@bittery/ui";
-import {
-	IconMagicShieldOutlineDuo18 as ShieldCheck,
-	IconVault3OutlineDuo18 as Vault,
-} from "@bittery/ui/icons";
+import { Button } from "@bittery/ui";
+import { IconMagicShieldOutlineDuo18 as ShieldCheck } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { DownloadCard } from "@/components/dashboard/download-card";
@@ -26,46 +23,35 @@ function RouteComponent() {
 
 	return (
 		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
-			<section className="relative overflow-hidden rounded-2xl border bg-card p-6 sm:p-7">
+			<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
 				<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent" />
-				<div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-muted/50 blur-3xl" />
 
-				<div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-					<div className="space-y-4">
-						<Badge variant="secondary" className="w-fit">
-							{m["dashboard.home.hero_badge"]()}
-						</Badge>
-						<div className="space-y-2">
-							<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl">
+				<div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+					<div className="flex min-w-0 items-center gap-3">
+						<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted shadow-sm sm:h-10 sm:w-10">
+							<ShieldCheck className="h-4 w-4 text-muted-foreground sm:h-5 sm:w-5" />
+						</div>
+						<div className="min-w-0">
+							<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
 								{name
 									? m["dashboard.home.hero_heading.named"]({ name })
 									: m["dashboard.home.hero_heading.default"]()}
 							</h1>
-							<p className="max-w-2xl text-muted-foreground">
+							<p className="text-muted-foreground text-xs">
 								{m["dashboard.home.hero_description"]()}
 							</p>
 						</div>
-						<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
-							<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
-								<ShieldCheck className="h-3.5 w-3.5" />
-								{m["dashboard.home.hero_pill.zero_knowledge"]()}
-							</div>
-							<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
-								<Vault className="h-3.5 w-3.5" />
-								{m["dashboard.home.hero_pill.vault_activity"]()}
-							</div>
-						</div>
 					</div>
 
-					<div className="flex flex-wrap gap-2 lg:justify-end">
-						<Button asChild>
-							<Link to="/vaults">
-								{m["dashboard.home.button.open_vaults"]()}
+					<div className="flex items-center gap-2 sm:shrink-0">
+						<Button variant="outline" size="sm" className="h-8 px-2 sm:px-3" asChild>
+							<Link to="/settings">
+								<span className="text-xs">{m["dashboard.home.button.account_settings"]()}</span>
 							</Link>
 						</Button>
-						<Button variant="outline" asChild>
-							<Link to="/settings">
-								{m["dashboard.home.button.account_settings"]()}
+						<Button size="sm" className="h-8 px-2 sm:px-3" asChild>
+							<Link to="/vaults">
+								<span className="text-xs">{m["dashboard.home.button.open_vaults"]()}</span>
 							</Link>
 						</Button>
 					</div>

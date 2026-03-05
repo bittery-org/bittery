@@ -1,6 +1,5 @@
 import { DEFAULT_AUTO_LOCK_TIMEOUT_MS } from "@bittery/storage";
 import {
-	Label,
 	Select,
 	SelectContent,
 	SelectItem,
@@ -66,43 +65,22 @@ export function AutoLockSettings() {
 			: m["settings.auto_lock.option.minutes.plural"]({ count });
 	};
 
-	if (isLoading) {
-		return (
-			<div className="flex items-center justify-between">
-				<div className="space-y-1">
-					<Label className="font-medium text-sm">
-						{m["settings.auto_lock.label.timeout"]()}
-					</Label>
-					<p className="text-muted-foreground text-sm">
-						{m["settings.auto_lock.loading"]()}
-					</p>
-				</div>
-			</div>
-		);
-	}
-
 	return (
-		<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-			<div className="space-y-1">
-				<Label className="font-medium text-sm">
-					{m["settings.auto_lock.label.timeout"]()}
-				</Label>
-				<p className="text-muted-foreground text-sm">
-					{m["settings.auto_lock.description"]()}
-				</p>
-			</div>
-			<Select value={selectedTimeout} onValueChange={handleTimeoutChange}>
-				<SelectTrigger className="w-[180px]">
-					<SelectValue placeholder={m["settings.auto_lock.placeholder"]()} />
-				</SelectTrigger>
-				<SelectContent>
-					{AUTO_LOCK_OPTIONS.map((option) => (
-						<SelectItem key={option.value} value={option.value}>
-							{getOptionLabel(option)}
-						</SelectItem>
-					))}
-				</SelectContent>
-			</Select>
-		</div>
+		<Select
+			value={isLoading ? undefined : selectedTimeout}
+			onValueChange={handleTimeoutChange}
+			disabled={isLoading}
+		>
+			<SelectTrigger className="w-full sm:w-45">
+				<SelectValue />
+			</SelectTrigger>
+			<SelectContent>
+				{AUTO_LOCK_OPTIONS.map((option) => (
+					<SelectItem key={option.value} value={option.value}>
+						{getOptionLabel(option)}
+					</SelectItem>
+				))}
+			</SelectContent>
+		</Select>
 	);
 }

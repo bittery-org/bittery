@@ -57,7 +57,7 @@ function UserNav() {
 	const { m } = useI18n();
 	const queryClient = useQueryClient();
 	const navigate = useNavigate();
-	const { isMobile } = useSidebar();
+	const { isMobile, setOpenMobile } = useSidebar();
 	const userQuery = useQuery(trpc.auth.me.queryOptions());
 	const user = userQuery.data;
 	const initials = user?.name
@@ -107,7 +107,7 @@ function UserNav() {
 						sideOffset={4}
 					>
 						<DropdownMenuItem asChild>
-							<Link to="/settings" className="cursor-pointer">
+							<Link to="/settings" className="cursor-pointer" onClick={() => { if (isMobile) setOpenMobile(false); }}>
 								<Settings className="mr-2 h-4 w-4" />
 								{m["nav.menu.settings"]()}
 							</Link>
@@ -132,7 +132,11 @@ export function AppSidebar() {
 	const { m } = useI18n();
 	const routerState = useRouterState();
 	const currentPath = routerState.location.pathname;
-	const { state } = useSidebar();
+	const { state, isMobile, setOpenMobile } = useSidebar();
+
+	const handleMobileLinkClick = () => {
+		if (isMobile) setOpenMobile(false);
+	};
 	const entitlementQuery = useQuery(trpc.billing.entitlements.queryOptions());
 	const meQuery = useQuery(trpc.auth.me.queryOptions());
 	const navItems = filterNavItems(appNavItems, {
@@ -152,7 +156,7 @@ export function AppSidebar() {
 							className="group-data-[state=collapsed]:flex group-data-[state=collapsed]:items-center group-data-[state=collapsed]:justify-center"
 							asChild
 						>
-							<Link to="/home">
+							<Link to="/home" onClick={handleMobileLinkClick}>
 								{state === "collapsed" ? (
 									<svg
 										xmlns="http://www.w3.org/2000/svg"
@@ -200,7 +204,7 @@ export function AppSidebar() {
 											isActive={currentPath.startsWith(item.path)}
 											tooltip={label}
 										>
-											<Link to={item.path}>
+											<Link to={item.path} onClick={handleMobileLinkClick}>
 												<item.icon />
 												<span>{label}</span>
 											</Link>

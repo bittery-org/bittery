@@ -383,11 +383,6 @@ function VaultDetailPage() {
 		memberCount === 1
 			? m["vaults.detail.count.members.single"]({ count: memberCount })
 			: m["vaults.detail.count.members.plural"]({ count: memberCount });
-	const encryptedItemCountLabel =
-		itemCount === 1
-			? m["vaults.detail.count.items_encrypted.single"]({ count: itemCount })
-			: m["vaults.detail.count.items_encrypted.plural"]({ count: itemCount });
-
 	return (
 		<>
 			<div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-6 pb-3">
@@ -451,99 +446,67 @@ function VaultDetailPage() {
 				{/* Header */}
 				<section
 					ref={headerRef}
-					className="relative overflow-hidden rounded-2xl border bg-card p-6 sm:p-7 lg:rounded-xl lg:p-5"
+					className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5 lg:rounded-xl lg:p-5"
 				>
 					<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent lg:from-muted/30" />
 
-					<div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
-						<div className="flex flex-col items-center gap-4 text-center lg:flex-row lg:items-center lg:gap-3.5 lg:text-left">
+					<div className="relative flex flex-col gap-3 sm:gap-4 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
+						<div className="flex items-center gap-3 text-left lg:gap-3.5">
 							<VaultAvatar
 								name={vaultInfo.vaultName}
 								icon={vaultInfo.vaultIcon}
 								imageUrl={vaultInfo.vaultImageUrl}
 								size="lg"
-								className="h-14 w-14 rounded-xl shadow-sm lg:h-10 lg:w-10 lg:rounded-lg"
+								className="h-9 w-9 shrink-0 rounded-lg shadow-sm sm:h-10 sm:w-10 lg:rounded-lg"
 							/>
-							<div className="space-y-3 lg:space-y-0.5">
-								<div className="flex flex-wrap items-center justify-center gap-2 lg:hidden">
-									<Badge variant="secondary" className="capitalize">
-										{m["vaults.detail.hero.mobile_vault_type"]({
-											type: getVaultTypeLabel(vaultInfo.vaultType, m),
-										})}
-									</Badge>
-									<Badge variant={roleBadgeVariant} className="capitalize">
-										{getVaultRoleLabel(role ?? "member", m)}
-									</Badge>
-								</div>
-								<div className="space-y-1.5 lg:space-y-0">
-									<div className="flex flex-wrap items-center justify-center gap-2.5 lg:justify-start">
-										<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl lg:font-semibold lg:text-xl">
-											{vaultInfo.vaultName}
-										</h1>
-										<div className="hidden items-center gap-1.5 lg:flex">
-											<Badge
-												variant="secondary"
-												className="px-1.5 py-0 text-[11px] capitalize"
-											>
-												{getVaultTypeLabel(vaultInfo.vaultType, m)}
-											</Badge>
-											<Badge
-												variant={roleBadgeVariant}
-												className="px-1.5 py-0 text-[11px] capitalize"
-											>
-												{getVaultRoleLabel(role ?? "member", m)}
-											</Badge>
-										</div>
-									</div>
-									<p className="text-center text-muted-foreground lg:text-left lg:text-xs">
-										{itemCountLabel} · {memberCountLabel}
-									</p>
-								</div>
-								<div className="flex flex-wrap items-center justify-center gap-2 text-muted-foreground text-xs lg:hidden">
-									<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
-										<Key className="h-3.5 w-3.5" />
-										{encryptedItemCountLabel}
-									</div>
-									<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
-										<Users className="h-3.5 w-3.5" />
-										{memberCountLabel}
+							<div className="min-w-0 space-y-0.5">
+								<div className="flex flex-wrap items-center gap-2">
+									<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl lg:text-xl">
+										{vaultInfo.vaultName}
+									</h1>
+									<div className="flex items-center gap-1.5">
+										<Badge
+											variant="secondary"
+											className="px-1.5 py-0 text-[11px] capitalize"
+										>
+											{getVaultTypeLabel(vaultInfo.vaultType, m)}
+										</Badge>
+										<Badge
+											variant={roleBadgeVariant}
+											className="px-1.5 py-0 text-[11px] capitalize"
+										>
+											{getVaultRoleLabel(role ?? "member", m)}
+										</Badge>
 									</div>
 								</div>
+								<p className="text-muted-foreground text-xs">
+									{itemCountLabel} · {memberCountLabel}
+								</p>
 							</div>
 						</div>
 
-						<div className="flex w-full flex-wrap items-center justify-center gap-2 lg:w-auto lg:justify-end">
+						<div className="flex w-full flex-wrap items-center gap-1.5 sm:gap-2 lg:w-auto lg:justify-end">
 							<Button
 								variant="outline"
 								size="sm"
-								className="h-8 px-2 text-xs lg:px-3"
+								className="h-8 px-2 text-xs sm:px-3"
 								asChild
 							>
 								<Link to="/vaults">
-									<ArrowLeft
-										className={cn(
-											"h-3.5 w-3.5",
-											!isMobile ? "mr-1.5" : undefined,
-										)}
-									/>
-									{!isMobile ? m["vaults.detail.action.all_vaults"]() : null}
+									<ArrowLeft className="h-3.5 w-3.5 sm:mr-1.5" />
+									<span className="hidden sm:inline">{m["vaults.detail.action.all_vaults"]()}</span>
 								</Link>
 							</Button>
 							{canWriteItems && (
 								<Button
 									variant="outline"
 									size="sm"
-									className="h-8 px-2 text-xs lg:px-3"
+									className="h-8 px-2 text-xs sm:px-3"
 									onClick={() => setIsCreateItemSheetOpen(true)}
 									data-testid="new-item-button"
 								>
-									<Plus
-										className={cn(
-											"h-3.5 w-3.5",
-											!isMobile ? "mr-1.5" : undefined,
-										)}
-									/>
-									{!isMobile ? m["vaults.detail.action.new_item"]() : null}
+									<Plus className="h-3.5 w-3.5 sm:mr-1.5" />
+									<span className="hidden sm:inline">{m["vaults.detail.action.new_item"]()}</span>
 								</Button>
 							)}
 							{hasVaultMenuActions && (
@@ -552,16 +515,11 @@ function VaultDetailPage() {
 										<Button
 											variant="outline"
 											size="sm"
-											className="h-8 px-2 text-xs lg:px-3"
+											className="h-8 px-2 text-xs sm:px-3"
 											data-testid="vault-menu-button"
 										>
-											<Dots
-												className={cn(
-													"h-3.5 w-3.5",
-													!isMobile ? "mr-1.5" : undefined,
-												)}
-											/>
-											{!isMobile ? m["vaults.detail.action.manage"]() : null}
+											<Dots className="h-3.5 w-3.5 sm:mr-1.5" />
+											<span className="hidden sm:inline">{m["vaults.detail.action.manage"]()}</span>
 										</Button>
 									</DropdownMenuTrigger>
 									<DropdownMenuContent align="end">

@@ -70,34 +70,23 @@ function SettingsPage() {
 	return (
 		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
 			{/* Hero Banner */}
-			<section className="relative overflow-hidden rounded-2xl border bg-card p-6 sm:p-7">
+			<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
 				<div className="pointer-events-none absolute inset-0 bg-linear-to-br from-muted/60 via-transparent to-transparent" />
-				<div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-muted/50 blur-3xl" />
 
-				<div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-					<div className="space-y-4">
-						<Badge variant="secondary" className="w-fit">
-							{m["settings.page.hero_badge"]()}
-						</Badge>
-						<div className="space-y-2">
-							<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl">
+				<div className="relative flex items-center justify-between gap-3">
+					<div className="flex min-w-0 items-center gap-3">
+						<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted shadow-sm sm:h-10 sm:w-10">
+							<Gear className="h-4 w-4 text-muted-foreground sm:h-5 sm:w-5" />
+						</div>
+						<div className="min-w-0">
+							<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
 								{m["settings.page.hero_heading"]()}
 							</h1>
-							<p className="max-w-2xl text-muted-foreground">
-								{m["settings.page.hero_description"]()}
-							</p>
-						</div>
-						<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
 							{userQuery.data?.email && (
-								<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
-									<Mail className="h-3.5 w-3.5" />
+								<p className="truncate text-muted-foreground text-xs">
 									{userQuery.data.email}
-								</div>
+								</p>
 							)}
-							<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
-								<Gear className="h-3.5 w-3.5" />
-								{m["settings.page.hero_pill"]()}
-							</div>
 						</div>
 					</div>
 				</div>
@@ -105,22 +94,22 @@ function SettingsPage() {
 
 			{/* Tabs Area */}
 			<Tabs defaultValue="account">
-				<TabsList>
-					<TabsTrigger value="account">
-						<User className="mr-2 h-4 w-4" />
-						{m["settings.tab.account"]()}
+				<TabsList className="w-full sm:w-fit">
+					<TabsTrigger value="account" className="flex-1 sm:flex-none">
+						<User className="h-4 w-4 sm:mr-2" />
+						<span className="hidden sm:inline">{m["settings.tab.account"]()}</span>
 					</TabsTrigger>
-					<TabsTrigger value="security">
-						<Shield className="mr-2 h-4 w-4" />
-						{m["settings.tab.security"]()}
+					<TabsTrigger value="security" className="flex-1 sm:flex-none">
+						<Shield className="h-4 w-4 sm:mr-2" />
+						<span className="hidden sm:inline">{m["settings.tab.security"]()}</span>
 					</TabsTrigger>
-					<TabsTrigger value="devices">
-						<Mobile className="mr-2 h-4 w-4" />
-						{m["settings.tab.devices"]()}
+					<TabsTrigger value="devices" className="flex-1 sm:flex-none">
+						<Mobile className="h-4 w-4 sm:mr-2" />
+						<span className="hidden sm:inline">{m["settings.tab.devices"]()}</span>
 					</TabsTrigger>
-					<TabsTrigger value="general">
-						<Gear className="mr-2 h-4 w-4" />
-						{m["settings.tab.general"]()}
+					<TabsTrigger value="general" className="flex-1 sm:flex-none">
+						<Gear className="h-4 w-4 sm:mr-2" />
+						<span className="hidden sm:inline">{m["settings.tab.general"]()}</span>
 					</TabsTrigger>
 				</TabsList>
 
@@ -147,7 +136,7 @@ function SettingsPage() {
 								{/* Name */}
 								<div className="rounded-xl border bg-card p-5">
 									<div className="flex items-center gap-3">
-										<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
+									<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
 											<User className="h-4 w-4 text-muted-foreground" />
 										</div>
 										<div className="min-w-0 flex-1">
@@ -163,17 +152,19 @@ function SettingsPage() {
 
 								{/* Email */}
 								<div className="rounded-xl border bg-card p-5">
-									<div className="flex items-center gap-3">
-										<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
-											<Mail className="h-4 w-4 text-muted-foreground" />
-										</div>
-										<div className="min-w-0 flex-1">
-											<p className="text-muted-foreground text-xs">
-												{m["settings.field.email"]()}
-											</p>
-											<p className="truncate font-medium text-sm">
-												{userQuery.data?.email || "—"}
-											</p>
+								<div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+										<div className="flex items-center gap-3">
+										<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+												<Mail className="h-4 w-4 text-muted-foreground" />
+											</div>
+											<div className="min-w-0 flex-1">
+												<p className="text-muted-foreground text-xs">
+													{m["settings.field.email"]()}
+												</p>
+												<p className="truncate font-medium text-sm">
+													{userQuery.data?.email || "—"}
+												</p>
+											</div>
 										</div>
 										{userQuery.data?.email && (
 											<ChangeEmailDialog currentEmail={userQuery.data.email} />
@@ -184,7 +175,7 @@ function SettingsPage() {
 								{/* Secret Key Hint */}
 								<div className="rounded-xl border bg-card p-5 sm:col-span-2">
 									<div className="flex items-center gap-3">
-										<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
+									<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
 											<Fingerprint className="h-4 w-4 text-muted-foreground" />
 										</div>
 										<div className="min-w-0 flex-1">
@@ -220,7 +211,7 @@ function SettingsPage() {
 							<div className="rounded-xl border bg-card p-5">
 								<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 									<div className="flex items-center gap-3">
-										<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
+										<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
 											<LockKey className="h-4 w-4 text-muted-foreground" />
 										</div>
 										<div className="space-y-0.5">
@@ -242,7 +233,7 @@ function SettingsPage() {
 							<div className="rounded-xl border bg-card p-5">
 								<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 									<div className="flex items-center gap-3">
-										<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
+										<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
 											<Key className="h-4 w-4 text-muted-foreground" />
 										</div>
 										<div className="space-y-0.5">
@@ -266,7 +257,7 @@ function SettingsPage() {
 							<div className="rounded-xl border bg-card p-5">
 								<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 									<div className="flex items-center gap-3">
-										<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
+										<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
 											<Shield className="h-4 w-4 text-muted-foreground" />
 										</div>
 										<div className="flex items-center gap-2">
@@ -306,20 +297,22 @@ function SettingsPage() {
 
 							{/* Auto-Lock */}
 							<div className="rounded-xl border bg-card p-5">
-								<div className="mb-4 flex items-center gap-3">
-									<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
-										<Clock className="h-4 w-4 text-muted-foreground" />
+								<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+									<div className="flex items-center gap-3">
+										<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+											<Clock className="h-4 w-4 text-muted-foreground" />
+										</div>
+										<div className="space-y-0.5">
+											<span className="font-medium text-sm">
+												{m["settings.security.auto_lock"]()}
+											</span>
+											<p className="text-muted-foreground text-xs">
+												{m["settings.security.auto_lock_description"]()}
+											</p>
+										</div>
 									</div>
-									<div className="space-y-0.5">
-										<span className="font-medium text-sm">
-											{m["settings.security.auto_lock"]()}
-										</span>
-										<p className="text-muted-foreground text-xs">
-											{m["settings.security.auto_lock_description"]()}
-										</p>
-									</div>
+									<AutoLockSettings />
 								</div>
-								<AutoLockSettings />
 							</div>
 						</div>
 					</div>
@@ -387,7 +380,7 @@ function SettingsPage() {
 						<div className="rounded-xl border bg-card p-5">
 							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 								<div className="flex items-start gap-3">
-									<div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
+								<div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
 										<Upload className="h-4 w-4 text-muted-foreground" />
 									</div>
 									<div className="space-y-1">
@@ -459,7 +452,7 @@ function SettingsPage() {
 						<div className="rounded-xl border border-destructive/20 p-5">
 							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 								<div className="flex items-center gap-3">
-									<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-destructive/10">
+									<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-destructive/10">
 										<Trash2 className="h-4 w-4 text-destructive" />
 									</div>
 									<div className="space-y-0.5">

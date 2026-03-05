@@ -382,59 +382,55 @@ function BillingRoute() {
 	return (
 		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
 			{/* Hero Banner */}
-			<section className="relative overflow-hidden rounded-2xl border bg-card p-6 sm:p-7">
-				<div className="pointer-events-none absolute inset-0 bg-linear-to-br from-muted/60 via-transparent to-transparent" />
-				<div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-muted/50 blur-3xl" />
+			<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
+				<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent" />
 
-				<div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-					<div className="space-y-4">
-						<Badge variant="secondary" className="w-fit">
-							{m["billing.page.badge"]()}
-						</Badge>
-						<div className="space-y-2">
-							<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl">
-								{m["billing.page.heading"]()}
-							</h1>
-							<p className="max-w-2xl text-muted-foreground">
-								{m["billing.page.description"]()}
-							</p>
+				<div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+					<div className="flex min-w-0 items-center gap-3">
+						<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted shadow-sm sm:h-10 sm:w-10">
+							<CreditCard className="h-4 w-4 text-muted-foreground sm:h-5 sm:w-5" />
 						</div>
-						<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
-							<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
-								<CreditCard className="h-3.5 w-3.5" />
-								{m["billing.page.plan_badge"]({
-									planName: getPlanLabel(billing.plan, m),
-								})}
-							</div>
-							<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
+						<div className="min-w-0">
+							<div className="flex flex-wrap items-center gap-1.5">
+								<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
+									{m["billing.page.heading"]()}
+								</h1>
 								<Badge
 									variant={statusDisplay.variant}
-									className="h-auto px-1.5 py-0 text-[10px]"
+									className="px-1.5 py-0 text-[11px]"
 								>
 									{statusDisplay.label}
 								</Badge>
 							</div>
-							{billing.cancelAtPeriodEnd && billing.currentPeriodEnd && (
-								<div className="inline-flex items-center gap-1.5 rounded-md border border-amber-300/40 bg-amber-50/80 px-2.5 py-1 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400">
-									<CircleWarning className="h-3.5 w-3.5" />
-									{m["billing.page.cancels"]({
-										date: formatDate(billing.currentPeriodEnd),
-									})}
-								</div>
-							)}
+							<p className="text-muted-foreground text-xs">
+								{getPlanLabel(billing.plan, m)}
+								{billing.cancelAtPeriodEnd && billing.currentPeriodEnd && (
+									<>
+										{" · "}
+										<span className="text-amber-600 dark:text-amber-400">
+											{m["billing.page.cancels"]({
+												date: formatDate(billing.currentPeriodEnd),
+											})}
+										</span>
+									</>
+								)}
+							</p>
 						</div>
 					</div>
 
 					{billing.stripeCustomerId && (
-						<div className="flex flex-wrap gap-2 lg:justify-end">
+						<div className="sm:shrink-0">
 							<Button
 								variant="outline"
 								size="sm"
+								className="h-8 px-2 sm:px-3"
 								onClick={() => portalMutation.mutate()}
 								disabled={isPending}
 							>
-								<ExternalLink className="mr-2 h-3.5 w-3.5" />
-								{m["billing.page.manage_stripe"]()}
+								<ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+								<span className="text-xs">
+									{m["billing.page.manage_stripe"]()}
+								</span>
 							</Button>
 						</div>
 					)}

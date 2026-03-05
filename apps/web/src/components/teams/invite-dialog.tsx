@@ -208,9 +208,9 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 	return (
 		<Dialog open={open} onOpenChange={handleOpenChange}>
 			<DialogTrigger asChild>
-				<Button>
-					<UserPlus className="mr-2 h-4 w-4" />
-					{m["team.invite_dialog.trigger"]()}
+				<Button size="sm" className="h-8 px-2 sm:px-3">
+					<UserPlus className="mr-1.5 h-3.5 w-3.5" />
+					<span className="text-xs">{m["team.invite_dialog.trigger"]()}</span>
 				</Button>
 			</DialogTrigger>
 			<DialogContent className="max-h-[85vh] overflow-y-auto">

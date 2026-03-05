@@ -10,8 +10,6 @@ import {
 	AlertDialogTrigger,
 	Badge,
 	Button,
-	Card,
-	CardContent,
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -25,12 +23,12 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconEarthOutlineDuo18 as Chrome,
 	IconPen2OutlineDuo18 as Edit2,
 	IconEarthOutlineDuo18 as Globe,
 	IconArrowDoorOutOutlineDuo18 as LogOut,
-	IconSquareTerminalOutlineDuo18 as Monitor,
 	IconMobileOutlineDuo18 as Smartphone,
+	IconSquareTerminalOutlineDuo18 as Monitor,
+	IconConnectedDots3OutlineDuo18 as Extension,
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -43,13 +41,13 @@ function getPlatformIcon(platform?: string | null) {
 	switch (platform) {
 		case "ios":
 		case "android":
-			return <Smartphone className="h-5 w-5" />;
+			return <Smartphone className="h-4 w-4" />;
 		case "desktop":
-			return <Monitor className="h-5 w-5" />;
+			return <Monitor className="h-4 w-4" />;
 		case "extension":
-			return <Chrome className="h-5 w-5" />;
+			return <Extension className="h-4 w-4" />;
 		default:
-			return <Globe className="h-5 w-5" />;
+			return <Globe className="h-4 w-4" />;
 	}
 }
 
@@ -314,58 +312,54 @@ function DeviceCard({
 	const lastActive = formatLastActiveLocalized(session.lastActiveAt, locale, m);
 
 	return (
-		<Card className={session.isCurrentSession ? "border-primary" : ""}>
-			<CardContent className="flex items-center gap-4 p-4">
-				<div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
-					{getPlatformIcon(session.platform)}
-				</div>
-				<div className="min-w-0 flex-1">
-					<div className="flex items-center gap-2">
-						<span className="truncate font-medium">{title}</span>
-						{session.isCurrentSession && (
-							<Badge variant="secondary" className="text-xs">
-								{m["settings.devices.badge.current"]()}
-							</Badge>
-						)}
-					</div>
-					<p className="truncate text-muted-foreground text-sm">{subtitle}</p>
-					<div className="mt-1 flex items-center gap-2 text-muted-foreground text-xs">
-						<span>
-							{m["settings.devices.last_active.label"]()}: {lastActive}
-						</span>
-						{session.ipAddress && (
-							<>
-								<span>•</span>
-								<span>{session.ipAddress}</span>
-							</>
-						)}
-					</div>
-				</div>
-				<div className="flex items-center gap-1">
-					<RenameDeviceDialog session={session} onSuccess={onUpdate} />
-					{!session.isCurrentSession && (
-						<RevokeDeviceDialog session={session} onSuccess={onUpdate} />
+		<div
+			className={`flex items-center gap-3 rounded-xl border bg-card p-4 ${session.isCurrentSession ? "border-primary/40" : ""}`}
+		>
+			<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+				{getPlatformIcon(session.platform)}
+			</div>
+			<div className="min-w-0 flex-1">
+				<div className="flex flex-wrap items-center gap-1.5">
+					<span className="truncate font-medium text-sm">{title}</span>
+					{session.isCurrentSession && (
+						<Badge variant="secondary" className="text-[10px]">
+							{m["settings.devices.badge.current"]()}
+						</Badge>
 					)}
 				</div>
-			</CardContent>
-		</Card>
+				<p className="truncate text-muted-foreground text-xs">{subtitle}</p>
+				<div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-muted-foreground text-xs">
+					<span>{lastActive}</span>
+					{session.ipAddress && (
+						<>
+							<span className="opacity-40">·</span>
+							<span className="font-mono">{session.ipAddress}</span>
+						</>
+					)}
+				</div>
+			</div>
+			<div className="flex shrink-0 items-center gap-0.5">
+				<RenameDeviceDialog session={session} onSuccess={onUpdate} />
+				{!session.isCurrentSession && (
+					<RevokeDeviceDialog session={session} onSuccess={onUpdate} />
+				)}
+			</div>
+		</div>
 	);
 }
 
 function DeviceListSkeleton() {
 	return (
-		<div className="space-y-3">
+		<div className="space-y-2">
 			{[1, 2, 3].map((i) => (
-				<Card key={i}>
-					<CardContent className="flex items-center gap-4 p-4">
-						<Skeleton className="h-10 w-10 rounded-full" />
-						<div className="flex-1 space-y-2">
-							<Skeleton className="h-4 w-32" />
-							<Skeleton className="h-3 w-48" />
-							<Skeleton className="h-3 w-24" />
-						</div>
-					</CardContent>
-				</Card>
+				<div key={i} className="flex items-center gap-3 rounded-xl border bg-card p-4">
+					<Skeleton className="h-9 w-9 shrink-0 rounded-lg" />
+					<div className="flex-1 space-y-1.5">
+						<Skeleton className="h-4 w-32" />
+						<Skeleton className="h-3 w-48" />
+						<Skeleton className="h-3 w-20" />
+					</div>
+				</div>
 			))}
 		</div>
 	);
@@ -413,7 +407,7 @@ export function DeviceManagement() {
 	});
 
 	return (
-		<div className="space-y-3">
+		<div className="space-y-2">
 			{sortedDevices.map((session) => (
 				<DeviceCard
 					key={session.id}

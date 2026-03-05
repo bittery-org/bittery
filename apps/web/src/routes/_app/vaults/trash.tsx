@@ -5,7 +5,6 @@ import {
 } from "@bittery/core/hooks";
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import {
-	Badge,
 	Button,
 	Dialog,
 	DialogContent,
@@ -111,30 +110,28 @@ function VaultTrashPage() {
 	return (
 		<>
 			<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
-				<section className="relative overflow-hidden rounded-2xl border bg-card p-6 sm:p-7">
+				<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
 					<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent" />
-					<div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-muted/50 blur-3xl" />
 
-					<div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-						<div className="space-y-4">
-							<Badge variant="secondary" className="w-fit">
-								<Archive className="mr-1 h-3.5 w-3.5" />
-								{m["vaults.trash.hero.badge"]()}
-							</Badge>
-							<div className="space-y-2">
-								<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl">
+					<div className="relative flex items-center justify-between gap-3">
+						<div className="flex min-w-0 items-center gap-3">
+							<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted shadow-sm sm:h-10 sm:w-10">
+								<Archive className="h-4 w-4 text-muted-foreground sm:h-5 sm:w-5" />
+							</div>
+							<div className="min-w-0">
+								<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
 									{m["vaults.trash.hero.heading"]()}
 								</h1>
-								<p className="max-w-2xl text-muted-foreground">
-									{m["vaults.trash.hero.description"]()}
-								</p>
+								{!isLoading && (
+									<p className="text-muted-foreground text-xs">{trashCountLabel}</p>
+								)}
 							</div>
 						</div>
 
-						<Button variant="outline" asChild>
+						<Button variant="outline" size="sm" className="h-8 shrink-0 px-2 sm:px-3" asChild>
 							<Link to="/vaults">
-								<ArrowLeft className="mr-2 h-4 w-4" />
-								{m["vaults.trash.action.back_to_vaults"]()}
+								<ArrowLeft className="h-3.5 w-3.5 sm:mr-1.5" />
+								<span className="hidden sm:inline text-xs">{m["vaults.trash.action.back_to_vaults"]()}</span>
 							</Link>
 						</Button>
 					</div>

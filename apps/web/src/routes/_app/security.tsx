@@ -34,7 +34,7 @@ function SecurityPage() {
 	}, [items]);
 
 	return (
-		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
+		<div className="mx-auto flex w-full max-w-6xl flex-col gap-4 pb-6 sm:gap-6">
 			<SecurityDashboard
 				report={report}
 				isLoading={isLoading}

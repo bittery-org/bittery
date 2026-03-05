@@ -8,7 +8,7 @@ import {
 	CardTitle,
 } from "@bittery/ui";
 import {
-	IconMobileOutlineDuo18 as Apple,
+	IconLaptop2OutlineDuo18 as Apple,
 	IconClipboardArrowInOutlineDuo18 as Download,
 	IconExternalLinkOutlineDuo18 as ExternalLink,
 	IconSquareTerminalOutlineDuo18 as Monitor,
@@ -77,7 +77,7 @@ export function DownloadCard() {
 					</CardTitle>
 					<Badge variant="secondary">{m["dashboard.download.badge"]()}</Badge>
 				</div>
-				<CardDescription className="text-sm">
+				<CardDescription className="text-xs">
 					{m["dashboard.download.description"]()}
 				</CardDescription>
 			</CardHeader>
@@ -107,7 +107,7 @@ export function DownloadCard() {
 					</Button>
 				</div>
 
-				<div className="space-y-2 text-muted-foreground text-sm">
+				<div className="space-y-2 text-muted-foreground text-xs">
 					<div className="flex items-center gap-2">
 						<Zap className="h-4 w-4" />
 						{m["dashboard.download.feature.biometric_unlock"]()}

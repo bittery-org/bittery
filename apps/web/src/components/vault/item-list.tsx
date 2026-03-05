@@ -186,9 +186,9 @@ export function ItemList({
 	if (isLoading) {
 		return (
 			<div className="flex min-h-0 flex-1 flex-col gap-4">
-				<div className="flex shrink-0 gap-2">
+				<div className="flex shrink-0 flex-col gap-2 sm:flex-row">
 					<Skeleton className="h-10 flex-1" />
-					<Skeleton className="h-10 w-40" />
+					<Skeleton className="h-10 w-full sm:w-40" />
 				</div>
 				<div className="min-h-0 flex-1 space-y-2">
 					{[1, 2, 3, 4, 5].map((i) => (
@@ -227,7 +227,7 @@ export function ItemList({
 		<div className="flex min-h-0 flex-1 flex-col gap-4">
 			{/* Search and Filter Bar - Fixed Header */}
 			<div className="flex shrink-0 flex-col gap-2">
-				<div className="flex gap-2">
+				<div className="flex flex-col gap-2 sm:flex-row">
 					<div className="relative flex-1">
 						<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 						<Input
@@ -251,7 +251,7 @@ export function ItemList({
 						value={categoryFilter}
 						onValueChange={(value: CategoryFilter) => setCategoryFilter(value)}
 					>
-						<SelectTrigger className="w-40">
+						<SelectTrigger className="w-full sm:w-40">
 							<SelectValue
 								placeholder={m[
 									"vaults.detail.items.list.filter.category.placeholder"

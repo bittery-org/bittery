@@ -2,8 +2,6 @@ import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Badge,
 	Button,
-	Card,
-	CardContent,
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -330,38 +328,41 @@ function TeamAdminConsolePage() {
 
 	return (
 		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
-			<section className="relative overflow-hidden rounded-2xl border bg-card p-6 sm:p-7">
-				<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent" />
-				<div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-muted/50 blur-3xl" />
+			{/* Hero Banner */}
+			<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
+				<div className="pointer-events-none absolute inset-0 bg-linear-to-br from-muted/60 via-transparent to-transparent" />
 
-				<div className="relative space-y-4">
-					<div className="flex items-center gap-3">
-						<div className="rounded-xl border bg-background/80 p-2.5">
-							<History className="h-5 w-5 text-primary" />
-						</div>
-						<div>
-							<h1 className="font-bold text-3xl tracking-tight">
-								{m["admin.page.hero.title"]()}
-							</h1>
-							<p className="text-muted-foreground text-sm">
-								{m["admin.page.hero.description"]()}
-							</p>
-						</div>
+				<div className="relative flex items-center gap-3">
+					<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted shadow-sm sm:h-10 sm:w-10">
+						<History className="h-4 w-4 text-muted-foreground sm:h-5 sm:w-5" />
+					</div>
+					<div className="min-w-0">
+						<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
+							{m["admin.page.hero.title"]()}
+						</h1>
+						<p className="truncate text-muted-foreground text-xs">
+							{m["admin.page.hero.description"]()}
+						</p>
+					</div>
+				</div>
+			</section>
+
+			{/* Filters */}
+			<div className="rounded-xl border bg-card p-4">
+				<div className="flex flex-col gap-3">
+					<div className="relative">
+						<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+						<Input
+							value={filters.search}
+							onChange={(event) =>
+								updateFilters({ search: event.target.value })
+							}
+							placeholder={m["admin.page.filter.search.placeholder"]()}
+							className="pl-9"
+						/>
 					</div>
 
-					<div className="grid gap-3 md:grid-cols-2 lg:grid-cols-6">
-						<div className="relative md:col-span-2">
-							<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-							<Input
-								value={filters.search}
-								onChange={(event) =>
-									updateFilters({ search: event.target.value })
-								}
-								placeholder={m["admin.page.filter.search.placeholder"]()}
-								className="pl-9"
-							/>
-						</div>
-
+					<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
 						<Select
 							value={filters.actionGroup}
 							onValueChange={(value) =>
@@ -448,12 +449,13 @@ function TeamAdminConsolePage() {
 						<Button
 							variant="outline"
 							onClick={() => setFilters(defaultFilters())}
+							className="w-full"
 						>
 							{m["admin.page.filter.reset"]()}
 						</Button>
 					</div>
 
-					<div className="grid gap-3 md:grid-cols-2 lg:max-w-xl">
+					<div className="grid grid-cols-2 gap-2">
 						<Input
 							type="datetime-local"
 							value={filters.from}
@@ -466,54 +468,54 @@ function TeamAdminConsolePage() {
 						/>
 					</div>
 				</div>
-			</section>
+			</div>
 
-			<Card>
-				<CardContent className="space-y-4 p-4">
-					{eventsQuery.isLoading ? (
-						<div className="space-y-2">
-							<Skeleton className="h-12 w-full" />
-							<Skeleton className="h-12 w-full" />
-							<Skeleton className="h-12 w-full" />
-						</div>
-					) : allEvents.length === 0 ? (
-						<div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
-							<History className="h-8 w-8 text-muted-foreground" />
-							<p className="font-medium text-sm">
-								{m["admin.page.empty.title"]()}
-							</p>
-							<p className="text-muted-foreground text-xs">
-								{m["admin.page.empty.description"]()}
-							</p>
-						</div>
-					) : (
-						<>
+			<div className="rounded-xl border bg-card">
+				{eventsQuery.isLoading ? (
+					<div className="space-y-2 p-4">
+						<Skeleton className="h-12 w-full" />
+						<Skeleton className="h-12 w-full" />
+						<Skeleton className="h-12 w-full" />
+					</div>
+				) : allEvents.length === 0 ? (
+					<div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+						<History className="h-8 w-8 text-muted-foreground" />
+						<p className="font-medium text-sm">
+							{m["admin.page.empty.title"]()}
+						</p>
+						<p className="text-muted-foreground text-xs">
+							{m["admin.page.empty.description"]()}
+						</p>
+					</div>
+				) : (
+					<>
+						<div className="overflow-x-auto">
 							<Table>
 								<TableHeader>
 									<TableRow>
-										<TableHead>{m["admin.page.table.header.time"]()}</TableHead>
-										<TableHead>
+										<TableHead className="whitespace-nowrap">{m["admin.page.table.header.time"]()}</TableHead>
+										<TableHead className="whitespace-nowrap">
 											{m["admin.page.table.header.action"]()}
 										</TableHead>
-										<TableHead>
+										<TableHead className="whitespace-nowrap">
 											{m["admin.page.table.header.actor"]()}
 										</TableHead>
-										<TableHead>
+										<TableHead className="hidden whitespace-nowrap md:table-cell">
 											{m["admin.page.table.header.entity"]()}
 										</TableHead>
-										<TableHead>
+										<TableHead className="whitespace-nowrap">
 											{m["admin.page.table.header.result"]()}
 										</TableHead>
-										<TableHead>
+										<TableHead className="hidden whitespace-nowrap lg:table-cell">
 											{m["admin.page.table.header.network"]()}
 										</TableHead>
-										<TableHead className="w-[90px]" />
+										<TableHead className="w-20" />
 									</TableRow>
 								</TableHeader>
 								<TableBody>
 									{allEvents.map((event) => (
-										<TableRow key={`${event.source}-${event.id}`}>
-											<TableCell className="text-muted-foreground text-xs">
+										<TableRow key={`${event.source}-${event.id}`} className="cursor-pointer" onClick={() => setSelectedEvent(event)}>
+											<TableCell className="whitespace-nowrap text-muted-foreground text-xs">
 												{formatTimestamp(event.timestamp)}
 											</TableCell>
 											<TableCell>
@@ -521,17 +523,17 @@ function TeamAdminConsolePage() {
 													<span className="font-medium text-sm">
 														{getEventActionLabel(event.action, m)}
 													</span>
-													<Badge variant="outline" className="w-fit capitalize">
+													<Badge variant="outline" className="w-fit capitalize text-[11px]">
 														{getActionGroupLabel(event.actionGroup, m)}
 													</Badge>
 												</div>
 											</TableCell>
-											<TableCell className="text-sm">
+											<TableCell className="max-w-35 truncate text-sm">
 												{event.actor.email ||
 													event.actor.name ||
 													m["admin.page.fallback.unknown_actor"]()}
 											</TableCell>
-											<TableCell className="text-xs">
+											<TableCell className="hidden text-xs md:table-cell">
 												{event.entity.type && event.entity.id
 													? `${getEntityTypeLabel(event.entity.type, m)}:${event.entity.id.slice(0, 8)}`
 													: m["admin.page.fallback.empty"]()}
@@ -547,8 +549,8 @@ function TeamAdminConsolePage() {
 													{getResultLabel(event.result, m)}
 												</Badge>
 											</TableCell>
-											<TableCell className="text-xs">
-												<div className="space-y-1">
+											<TableCell className="hidden text-xs lg:table-cell">
+												<div className="space-y-0.5">
 													<div>
 														{event.network.maskedIp ||
 															m["admin.page.fallback.empty"]()}
@@ -562,8 +564,8 @@ function TeamAdminConsolePage() {
 											<TableCell>
 												<Button
 													size="sm"
-													variant="outline"
-													onClick={() => setSelectedEvent(event)}
+													variant="ghost"
+													onClick={(e) => { e.stopPropagation(); setSelectedEvent(event); }}
 												>
 													{m["admin.page.table.action.view"]()}
 												</Button>
@@ -572,25 +574,25 @@ function TeamAdminConsolePage() {
 									))}
 								</TableBody>
 							</Table>
+						</div>
 
-							{eventsQuery.hasNextPage && (
-								<div className="flex justify-center">
-									<Button
-										variant="outline"
-										onClick={() => eventsQuery.fetchNextPage()}
-										disabled={eventsQuery.isFetchingNextPage}
-									>
-										{eventsQuery.isFetchingNextPage && (
-											<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-										)}
-										{m["admin.page.pagination.load_more"]()}
-									</Button>
-								</div>
-							)}
-						</>
-					)}
-				</CardContent>
-			</Card>
+						{eventsQuery.hasNextPage && (
+							<div className="flex justify-center border-t p-4">
+								<Button
+									variant="outline"
+									onClick={() => eventsQuery.fetchNextPage()}
+									disabled={eventsQuery.isFetchingNextPage}
+								>
+									{eventsQuery.isFetchingNextPage && (
+										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									)}
+									{m["admin.page.pagination.load_more"]()}
+								</Button>
+							</div>
+						)}
+					</>
+				)}
+			</div>
 
 			<Dialog
 				open={!!selectedEvent}

@@ -19,7 +19,6 @@ import {
 import {
 	IconDotsOutlineDuo18 as Dots,
 	IconKeyOutlineDuo18 as Key,
-	IconLockOutlineDuo18 as Lock,
 	IconPen2OutlineDuo18 as Pen,
 	IconPlusOutlineDuo18 as Plus,
 	IconTrash2OutlineDuo18 as Trash,
@@ -150,52 +149,42 @@ function VaultsPage() {
 		<>
 			<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
 				{/* Hero Banner */}
-				<section className="relative overflow-hidden rounded-2xl border bg-card p-6 sm:p-7">
+				<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
 					<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent" />
-					<div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-muted/50 blur-3xl" />
 
-					<div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-						<div className="space-y-4">
-							<Badge variant="secondary" className="w-fit">
-								<Vault className="mr-1 h-3.5 w-3.5" />
-								{m["vaults.page.hero.badge"]()}
-							</Badge>
-							<div className="space-y-2">
-								<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl">
+					<div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+						<div className="flex min-w-0 items-center gap-3">
+							<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted shadow-sm sm:h-10 sm:w-10">
+								<Vault className="h-4 w-4 text-muted-foreground sm:h-5 sm:w-5" />
+							</div>
+							<div className="min-w-0">
+								<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
 									{m["vaults.page.hero.heading"]()}
 								</h1>
-								<p className="max-w-2xl text-muted-foreground">
-									{m["vaults.page.hero.description"]()}
-								</p>
+								{!isLoading && totalVaults > 0 && (
+									<p className="text-muted-foreground text-xs">
+										{totalVaultsLabel} · {totalItemsLabel}
+									</p>
+								)}
 							</div>
-							{!isLoading && totalVaults > 0 && (
-								<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
-									<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
-										<Lock className="h-3.5 w-3.5" />
-										{totalVaultsLabel}
-									</div>
-									<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
-										<Key className="h-3.5 w-3.5" />
-										{totalItemsLabel}
-									</div>
-								</div>
-							)}
 						</div>
 
-						<div className="flex flex-wrap items-center gap-2">
-							<Button variant="outline" asChild data-testid="open-trash-button">
+						<div className="flex items-center gap-2 sm:shrink-0">
+							<Button variant="outline" size="sm" className="h-8 px-2 sm:px-3" asChild data-testid="open-trash-button">
 								<Link to="/vaults/trash">
-									<Trash className="mr-2 h-4 w-4" />
-									{m["vaults.page.action.open_trash"]()}
+									<Trash className="mr-1.5 h-3.5 w-3.5" />
+									<span className="text-xs">{m["vaults.page.action.open_trash"]()}</span>
 								</Link>
 							</Button>
 
 							<Button
+								size="sm"
+								className="h-8 px-2 sm:px-3"
 								onClick={() => setIsCreateVaultDialogOpen(true)}
 								data-testid="new-vault-button"
 							>
-								<Plus className="mr-2 h-4 w-4" />
-								{m["vaults.page.action.new_vault"]()}
+								<Plus className="mr-1.5 h-3.5 w-3.5" />
+								<span className="text-xs">{m["vaults.page.action.new_vault"]()}</span>
 							</Button>
 						</div>
 					</div>

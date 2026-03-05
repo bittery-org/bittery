@@ -15,7 +15,6 @@ import {
 	IconEnvelopeOutlineDuo18 as Mail,
 	IconGear3OutlineDuo18 as Settings,
 	IconUsers6OutlineDuo18 as Users,
-	IconVault3OutlineDuo18 as Vault,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -123,77 +122,62 @@ function TeamPage() {
 					ownerName: team.ownerName,
 				});
 
-	const activeSeatLabel =
-		team.memberCount === 1
-			? m["team.page.hero.active_seats.single"]({ count: team.memberCount })
-			: m["team.page.hero.active_seats.plural"]({ count: team.memberCount });
-
 	return (
 		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
 			{/* Hero Banner */}
-			<section className="relative overflow-hidden rounded-2xl border bg-card p-6 sm:p-7">
+			<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
 				<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent" />
-				<div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-muted/50 blur-3xl" />
 
-				<div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-					<div className="flex items-start gap-5">
-						<Avatar className="h-16 w-16 rounded-xl border shadow-sm">
+				<div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+					<div className="flex min-w-0 items-center gap-3">
+						<Avatar className="h-9 w-9 shrink-0 rounded-lg border shadow-sm sm:h-10 sm:w-10">
 							{team.imageUrl && (
 								<AvatarImage src={team.imageUrl} alt={team.name} />
 							)}
-							<AvatarFallback className="rounded-xl text-lg">
+							<AvatarFallback className="rounded-lg text-sm">
 								{getTeamInitials()}
 							</AvatarFallback>
 						</Avatar>
-						<div className="space-y-3">
+						<div className="min-w-0">
 							<div className="flex flex-wrap items-center gap-2">
-								<Badge variant="secondary" className="w-fit">
-									{m["team.page.hero.badge"]()}
-								</Badge>
-								<Badge variant={roleBadgeVariant}>
+								<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
+									{team.name}
+								</h1>
+								<Badge variant={roleBadgeVariant} className="px-1.5 py-0 text-[11px] capitalize">
 									{getRoleLabel(team.userRole)}
 								</Badge>
 							</div>
-							<div className="space-y-1.5">
-								<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl">
-									{team.name}
-								</h1>
-								<p className="text-muted-foreground">{memberCountLabel}</p>
-							</div>
-							<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
-								<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
-									<Vault className="h-3.5 w-3.5" />
-									{activeSeatLabel}
-								</div>
-							</div>
+							<p className="text-muted-foreground text-xs">{memberCountLabel}</p>
 						</div>
 					</div>
 
-					<div className="flex flex-wrap gap-2 lg:justify-end">
-						{canEdit && teamId && <InviteDialog teamId={teamId} />}
-					</div>
+					{canEdit && teamId && (
+						<div className="sm:shrink-0">
+							<InviteDialog teamId={teamId} />
+						</div>
+					)}
 				</div>
 			</section>
 
 			{/* Tabs Area */}
 			<Tabs defaultValue="members">
-				<TabsList>
-					<TabsTrigger value="members">
-						<Users className="mr-2 h-4 w-4" />
-						{m["team.page.tab.members"]()}
+				<TabsList className="w-full sm:w-fit">
+					<TabsTrigger value="members" className="flex-1 sm:flex-none">
+						<Users className="h-4 w-4 sm:mr-2" />
+						<span className="hidden sm:inline">{m["team.page.tab.members"]()}</span>
 					</TabsTrigger>
-					<TabsTrigger value="invitations">
-						<Mail className="mr-2 h-4 w-4" />
-						{m["team.page.tab.invitations"]()}
+					<TabsTrigger value="invitations" className="flex-1 sm:flex-none">
+						<Mail className="h-4 w-4 sm:mr-2" />
+						<span className="hidden sm:inline">{m["team.page.tab.invitations"]()}</span>
 						{invitationsQuery.data?.length ? (
-							<span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-primary-foreground text-xs">
+							<span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-primary-foreground text-xs">
 								{invitationsQuery.data.length}
 							</span>
 						) : null}
 					</TabsTrigger>
-					<TabsTrigger value="settings">
-						<Settings className="mr-2 h-4 w-4" />
-						{m["team.page.tab.settings"]()}
+					<TabsTrigger value="settings" className="flex-1 sm:flex-none">
+						<Settings className="h-4 w-4 sm:mr-2" />
+						<span className="hidden sm:inline">{m["team.page.tab.settings"]()}</span>
 					</TabsTrigger>
 				</TabsList>
 
