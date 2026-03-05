@@ -5,6 +5,10 @@ import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
+import {
+	invalidateDesktopAccountSession,
+	isUnauthorizedTrpcError,
+} from "@/lib/session-invalidation";
 import { storage } from "@/lib/storage";
 import { getOrCreateDesktopSyncClientId } from "@/lib/sync-client-id";
 
@@ -15,15 +19,7 @@ const fallbackServerUrl =
 let isHandlingAuthError = false;
 
 function isUnauthorizedError(error: unknown): boolean {
-	if (
-		error &&
-		typeof error === "object" &&
-		"data" in error &&
-		(error as any).data?.code === "UNAUTHORIZED"
-	) {
-		return true;
-	}
-	return false;
+	return isUnauthorizedTrpcError(error);
 }
 
 function handleUnauthorizedError() {
@@ -39,18 +35,24 @@ function handleUnauthorizedError() {
 	queryClient.clear();
 
 	// Get active account email before clearing session so login page can prefill
-	storage.getActiveAccount().then((activeAccount) => {
+	storage.getActiveAccount().then(async (activeAccount) => {
 		const prefillEmail =
 			activeAccount?.type === "single" ? activeAccount.email : undefined;
 
-		storage.clearSession().then(() => {
-			toast.error("Session expired. Please sign in again.");
-			if (prefillEmail) {
-				window.location.href = `/login?prefillEmail=${encodeURIComponent(prefillEmail)}`;
-			} else {
-				window.location.href = "/";
-			}
-		});
+		if (activeAccount?.type === "single") {
+			await invalidateDesktopAccountSession(activeAccount.email);
+		} else {
+			// In all-accounts mode we cannot reliably determine the failing account
+			// from generic query/mutation errors.
+			await storage.lockAllAccounts?.();
+		}
+
+		toast.error("Session expired. Please sign in again.");
+		if (prefillEmail) {
+			window.location.href = `/login?prefillEmail=${encodeURIComponent(prefillEmail)}`;
+		} else {
+			window.location.href = "/";
+		}
 	});
 }
 

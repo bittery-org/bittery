@@ -16,6 +16,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { db } from "@bittery/db";
 import { authRouter } from "../routers/auth";
+import { setControlBroadcastFunction } from "../sync-helper";
 import {
 	createPublicContext,
 	createTestInvitation,
@@ -61,6 +62,7 @@ const originalBitteryMode = process.env.BITTERY_MODE;
 
 describe("Auth Router", () => {
 	afterEach(async () => {
+		setControlBroadcastFunction(null);
 		await truncateAll();
 		if (originalBitteryMode === undefined) {
 			delete process.env.BITTERY_MODE;
@@ -705,6 +707,36 @@ describe("Auth Router", () => {
 					and(eq(log.userId, userId), eq(log.action, "device_revoked")),
 			});
 			expect(auditLogs.length).toBe(1);
+		});
+
+		test("should broadcast session revocation control payload", async () => {
+			const { userId, caller } = await setup(authRouter);
+			const otherSession = await createTestSession(userId, {
+				deviceName: "Other",
+			});
+			const payloads: Array<{
+				type: string;
+				userId: string;
+				sessionId: string;
+				timestamp: number;
+				reason?: string;
+			}> = [];
+
+			setControlBroadcastFunction(async (payload) => {
+				payloads.push(payload);
+			});
+
+			const result = await caller.revokeDevice({ sessionId: otherSession });
+
+			expect(result.success).toBe(true);
+			expect(payloads).toHaveLength(1);
+			expect(payloads[0]).toMatchObject({
+				type: "session_revoked",
+				userId,
+				sessionId: otherSession,
+				reason: "device_revoked",
+			});
+			expect(typeof payloads[0]?.timestamp).toBe("number");
 		});
 
 		test("should not allow revoking current session", async () => {

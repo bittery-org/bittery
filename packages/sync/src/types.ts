@@ -95,6 +95,14 @@ export interface SyncCursor {
 	id?: string;
 }
 
+export interface SessionRevokedControlPayload {
+	type: "session_revoked";
+	userId: string;
+	sessionId: string;
+	timestamp: number;
+	reason?: string;
+}
+
 /**
  * Type-safe metadata accessor. Narrows metadata based on event type.
  *
@@ -151,6 +159,9 @@ export interface SyncManagerOptions {
 	storage?: SyncStorage;
 	onEvent?: (event: SyncEvent) => void;
 	onStatusChange?: (status: ConnectionStatus) => void;
+	onSessionRevoked?: (
+		payload: SessionRevokedControlPayload,
+	) => void | Promise<void>;
 	reconnectDelay?: number;
 	maxReconnectDelay?: number;
 	/** Custom fetch implementation (e.g. `expo/fetch` for streaming support in React Native) */

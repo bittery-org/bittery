@@ -84,6 +84,15 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 		return (await storage.getAuthToken()) || null;
 	}, []);
 
+	const onSessionRevoked = useCallback(async () => {
+		await storage.clearSession();
+		queryClient.clear();
+
+		if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+			window.location.href = "/login";
+		}
+	}, [queryClient]);
+
 	return useSync({
 		serverUrl,
 		getAuthToken: getAuthTokenAsync,
@@ -92,6 +101,7 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 		storage: syncStorage,
 		enabled,
 		itemCacheAdapter: vaultCoordinator,
+		onSessionRevoked,
 	});
 }
 

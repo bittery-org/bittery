@@ -1,4 +1,8 @@
-import { setBroadcastFunction } from "@bittery/api/sync-helper";
+import {
+	setBroadcastFunction,
+	setControlBroadcastFunction,
+	type SessionControlPayload,
+} from "@bittery/api/sync-helper";
 import { verifySession } from "@bittery/auth";
 import { db, vaultKey } from "@bittery/db";
 import type { PubSubAdapter } from "@bittery/pubsub";
@@ -32,6 +36,14 @@ export interface SyncEventPayload {
 	userId: string;
 	timestamp: number;
 	metadata?: Record<string, unknown>;
+}
+
+type StreamPayload = SyncEventPayload | SessionControlPayload;
+
+function isSessionControlPayload(
+	payload: StreamPayload,
+): payload is SessionControlPayload {
+	return payload.type === "session_revoked";
 }
 
 /**
@@ -126,7 +138,8 @@ class EventChannel<T> {
 interface Connection {
 	id: string;
 	userId: string;
-	channel: EventChannel<SyncEventPayload>;
+	sessionId: string;
+	channel: EventChannel<StreamPayload>;
 }
 
 // Active connections per user: Map<userId, Map<connectionId, Connection>>
@@ -351,6 +364,20 @@ function deliverToConnections(event: SyncEventPayload): void {
 	}
 }
 
+function deliverSessionControl(payload: SessionControlPayload): void {
+	const userConnections = connections.get(payload.userId);
+	if (!userConnections) {
+		return;
+	}
+
+	for (const connection of userConnections.values()) {
+		if (connection.sessionId !== payload.sessionId) {
+			continue;
+		}
+		connection.channel.push(payload);
+	}
+}
+
 /**
  * Refresh vault memberships for a user after membership changes
  */
@@ -383,8 +410,16 @@ export function createSyncRouter(pubsub: PubSubAdapter): Hono {
 		deliverToConnections(message.payload as SyncEventPayload);
 	});
 
+	pubsub.subscribe("sync-control", (message) => {
+		deliverSessionControl(message.payload as SessionControlPayload);
+	});
+
 	setBroadcastFunction(async (event) => {
 		await pubsub.publish("sync", event);
+	});
+
+	setControlBroadcastFunction(async (payload) => {
+		await pubsub.publish("sync-control", payload);
 	});
 
 	const app = new Hono();
@@ -403,6 +438,7 @@ export function createSyncRouter(pubsub: PubSubAdapter): Hono {
 		}
 
 		const userId = session.userId;
+		const sessionId = session.sessionId;
 		const connectionId = generateConnectionId();
 
 		// Reject if user already has too many connections
@@ -416,20 +452,21 @@ export function createSyncRouter(pubsub: PubSubAdapter): Hono {
 
 		await getUserVaults(userId);
 
-		return streamSSE(
-			c,
-			async (stream) => {
-				const abortController = new AbortController();
-				const channel = new EventChannel<SyncEventPayload>();
-				let eventId = 0;
-				let heartbeatCount = 0;
+			return streamSSE(
+				c,
+				async (stream) => {
+					const abortController = new AbortController();
+					const channel = new EventChannel<StreamPayload>();
+					let eventId = 0;
+					let heartbeatCount = 0;
 
-				const connection: Connection = {
-					id: connectionId,
-					userId,
-					channel,
-				};
-				addConnection(connection);
+					const connection: Connection = {
+						id: connectionId,
+						userId,
+						sessionId,
+						channel,
+					};
+					addConnection(connection);
 
 				stream.onAbort(() => {
 					abortController.abort();
@@ -447,33 +484,54 @@ export function createSyncRouter(pubsub: PubSubAdapter): Hono {
 					id: String(eventId++),
 				});
 
-				// Main event loop
-				while (!abortController.signal.aborted && !channel.isClosed()) {
-					try {
-						const queuedEvents = channel.drain();
-						for (const event of queuedEvents) {
+					const writePayload = async (event: StreamPayload) => {
+						if (isSessionControlPayload(event)) {
 							await stream.writeSSE({
-								event: "sync",
+								event: "control",
 								data: JSON.stringify(event),
 								id: String(eventId++),
 							});
+							return "disconnect" as const;
 						}
 
-						const event = await channel.waitWithTimeout(
-							HEARTBEAT_INTERVAL,
-							abortController.signal,
-						);
+						await stream.writeSSE({
+							event: "sync",
+							data: JSON.stringify(event),
+							id: String(eventId++),
+						});
+						return "continue" as const;
+					};
 
-						if (event) {
-							await stream.writeSSE({
-								event: "sync",
-								data: JSON.stringify(event),
-								id: String(eventId++),
-							});
-						} else {
-							// Heartbeat — periodically re-validate session
-							heartbeatCount++;
-							if (heartbeatCount % SESSION_REVALIDATION_HEARTBEATS === 0) {
+					// Main event loop
+					while (!abortController.signal.aborted && !channel.isClosed()) {
+						try {
+							const queuedEvents = channel.drain();
+							for (const event of queuedEvents) {
+								const action = await writePayload(event);
+								if (action === "disconnect") {
+									abortController.abort();
+									break;
+								}
+							}
+
+							if (abortController.signal.aborted) {
+								break;
+							}
+
+							const event = await channel.waitWithTimeout(
+								HEARTBEAT_INTERVAL,
+								abortController.signal,
+							);
+
+							if (event) {
+								const action = await writePayload(event);
+								if (action === "disconnect") {
+									break;
+								}
+							} else {
+								// Heartbeat — periodically re-validate session
+								heartbeatCount++;
+								if (heartbeatCount % SESSION_REVALIDATION_HEARTBEATS === 0) {
 								const valid = await verifySession(token);
 								if (!valid) {
 									console.log(
@@ -485,12 +543,12 @@ export function createSyncRouter(pubsub: PubSubAdapter): Hono {
 								await getUserVaults(userId);
 							}
 
-							await stream.write(`: heartbeat ${Date.now()}\n\n`);
+								await stream.write(`: heartbeat ${Date.now()}\n\n`);
+							}
+						} catch {
+							break;
 						}
-					} catch {
-						break;
 					}
-				}
 
 				// Clean up on exit (may already be cleaned up by onAbort)
 				removeConnection(userId, connectionId);

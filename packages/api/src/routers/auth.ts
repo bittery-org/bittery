@@ -52,6 +52,7 @@ import { mapPlanToTeamType, planMemberLimits } from "../billing/plans";
 import { syncTeamSeatQuantity } from "../billing/stripe";
 import { getBitteryMode, isSelfHostedMode } from "../config/mode";
 import { protectedProcedure, publicProcedure, router } from "../index";
+import { broadcastSessionControlPayload } from "../sync-helper";
 import { getStoragePublicUrl } from "../storage/s3";
 import { logAuditEvent } from "../utils/audit";
 import { parseUserAgent } from "../utils/device";
@@ -1268,19 +1269,26 @@ export const authRouter = router({
 				sessionId: z.string(),
 			}),
 		)
-		.mutation(async ({ ctx, input }) => {
-			// Prevent revoking current session
-			if (input.sessionId === ctx.session.sessionId) {
+			.mutation(async ({ ctx, input }) => {
+				// Prevent revoking current session
+				if (input.sessionId === ctx.session.sessionId) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
 					message: "Cannot revoke current session. Use logout instead.",
 				});
 			}
 
-			await revokeSession(input.sessionId, ctx.session.userId);
+				await revokeSession(input.sessionId, ctx.session.userId);
+				await broadcastSessionControlPayload({
+					type: "session_revoked",
+					userId: ctx.session.userId,
+					sessionId: input.sessionId,
+					timestamp: Date.now(),
+					reason: "device_revoked",
+				});
 
-			await logAuditEvent({
-				userId: ctx.session.userId,
+				await logAuditEvent({
+					userId: ctx.session.userId,
 				action: "device_revoked",
 				device: ctx.device,
 				entityType: "session",
