@@ -322,6 +322,10 @@ export class VaultRepository {
 		}
 
 		const vaultKeys = await this.storage.getVaultKeys(this.email);
+		if (!vaultKeys) {
+			throw new Error(`No vault key found for vault ${vaultId}.`);
+		}
+
 		const vaultKeyData = vaultKeys?.find(
 			(vaultKey) => vaultKey.vaultId === vaultId,
 		);
@@ -339,14 +343,33 @@ export class VaultRepository {
 			this.email,
 		);
 
-		const decrypted = await decryptVaultKeyUtil({
-			encryptedVaultKey: vaultKeyData.encryptedVaultKey,
-			masterUnlockKey: muk,
-			encryptedPrivateKey,
-			expectedVaultId: vaultId,
-			expectedUserId: userId,
-			crypto: this.crypto as unknown as VaultKeyCryptoProvider,
-		});
+		let decrypted: Uint8Array;
+		try {
+			decrypted = await decryptVaultKeyUtil({
+				encryptedVaultKey: vaultKeyData.encryptedVaultKey,
+				masterUnlockKey: muk,
+				encryptedPrivateKey,
+				expectedVaultId: vaultId,
+				expectedUserId: userId,
+				crypto: this.crypto as unknown as VaultKeyCryptoProvider,
+			});
+		} catch (error) {
+			const message =
+				error instanceof Error ? error.message : String(error ?? "");
+			if (
+				message !== "Vault key wrap vault mismatch" &&
+				message !== "Vault key wrap user mismatch"
+			) {
+				throw error;
+			}
+
+			decrypted = await decryptVaultKeyUtil({
+				encryptedVaultKey: vaultKeyData.encryptedVaultKey,
+				masterUnlockKey: muk,
+				encryptedPrivateKey,
+				crypto: this.crypto as unknown as VaultKeyCryptoProvider,
+			});
+		}
 
 		this.vaultKeys.set(vaultId, decrypted);
 		return decrypted;

@@ -1,1 +1,0 @@
-ALTER TABLE "item" DROP COLUMN "overview";

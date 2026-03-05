@@ -43,7 +43,6 @@ export const session = pgTable(
 	{
 		id: text("id").primaryKey(),
 		expiresAt: timestamp("expires_at").notNull(),
-		token: text("token").notNull().unique(),
 		createdAt: timestamp("created_at").defaultNow().notNull(),
 		updatedAt: timestamp("updated_at")
 			.$onUpdate(() => /* @__PURE__ */ new Date())
@@ -53,6 +52,7 @@ export const session = pgTable(
 		// Device information
 		deviceName: text("device_name"), // User-editable name or auto-generated (e.g., "Chrome on macOS")
 		platform: text("platform"), // "web" | "desktop" | "extension" | "ios" | "android"
+		deviceInfo: text("device_info"), // User agent / device identifier payload for session management
 		browserName: text("browser_name"), // "Chrome", "Safari", "Firefox", etc.
 		browserVersion: text("browser_version"), // "120.0.0"
 		osName: text("os_name"), // "macOS", "Windows", "Linux", "iOS", "Android"

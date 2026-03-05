@@ -55,9 +55,9 @@ export function generateTestUserId(): string {
 export function createTestContext(
 	sessionData?: {
 		userId: string;
-		email: string;
 		sessionId: string;
-		sessionTokenHash: string;
+		expiresAt: Date;
+		platform?: string | null;
 	} | null,
 ): Context {
 	return {
@@ -75,14 +75,14 @@ export function createTestContext(
  */
 export function createAuthenticatedContext(
 	userId: string,
-	email: string,
+	_email: string,
 	sessionId?: string,
 ): Context {
 	return createTestContext({
 		userId,
-		email,
 		sessionId: sessionId || nanoid(),
-		sessionTokenHash: nanoid(),
+		expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+		platform: "web",
 	});
 }
 
@@ -321,7 +321,6 @@ export async function createTestSession(
 	await db.insert(session).values({
 		id: sessionId,
 		userId,
-		token: overrides.token || nanoid(32),
 		expiresAt,
 		deviceName: overrides.deviceName || "Test Device",
 		platform: overrides.platform || "web",

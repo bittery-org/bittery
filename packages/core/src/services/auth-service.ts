@@ -148,7 +148,14 @@ export interface IAuthTRPCClient {
 			}): Promise<FinishLoginResponse>;
 		};
 		logout: {
-			mutate(input: { sessionId: string }): Promise<{ success: boolean }>;
+			mutate(): Promise<{ success: boolean }>;
+		};
+		refreshSession: {
+			mutate(): Promise<{
+				token: string;
+				sessionId: string;
+				expiresAt: string | Date;
+			}>;
 		};
 	};
 }

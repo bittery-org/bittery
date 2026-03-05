@@ -1,9 +1,10 @@
-import type { AppRouter } from "@bittery/api/routers/index";
-import { buildTrpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
+import {
+	createAppTrpcOptionsProxy,
+} from "@bittery/shared/trpc-client";
+import { createSessionRefreshingTrpcClient } from "@bittery/shared/trpc-session-refresh";
 import { toast } from "@bittery/ui";
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
-import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
 import {
 	invalidateDesktopAccountSession,
@@ -83,54 +84,56 @@ const queryClient = new QueryClient({
 	defaultOptions: { queries: { staleTime: 60 * 1000 } },
 });
 
-const trpcClient = createTRPCClient<AppRouter>({
-	links: [
-		httpBatchLink({
-			url: `${fallbackServerUrl}/trpc`,
-			async fetch(url, options) {
-				// Check if we're in "All Accounts" mode
-				const activeAccount = await storage.getActiveAccount();
-				const accountServerUrl =
-					activeAccount?.type === "single"
-						? await storage.getServerUrl(activeAccount.email)
-						: null;
-				const activeAuthServerUrl = await resolveActiveAuthServerUrl();
-				const serverUrl =
-					normalizeServerUrl(accountServerUrl ?? "") ??
-					activeAuthServerUrl ??
-					fallbackServerUrl;
-				const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
+async function resolveDesktopServerUrl(): Promise<string> {
+	const activeAccount = await storage.getActiveAccount();
+	const accountServerUrl =
+		activeAccount?.type === "single"
+			? await storage.getServerUrl(activeAccount.email)
+			: null;
+	const activeAuthServerUrl = await resolveActiveAuthServerUrl();
+	return (
+		normalizeServerUrl(accountServerUrl ?? "") ??
+		activeAuthServerUrl ??
+		fallbackServerUrl
+	);
+}
 
-				// Only get auth token if we have a real account (not "all" mode)
-				const token =
-					activeAccount?.type === "single"
-						? await storage.getAuthToken(activeAccount.email)
-						: null;
+const trpcClient = createSessionRefreshingTrpcClient({
+	defaultServerUrl: fallbackServerUrl,
+	getServerUrl: resolveDesktopServerUrl,
+	getSessionSnapshot: async () => {
+		const activeAccount = await storage.getActiveAccount();
+		if (activeAccount?.type !== "single") {
+			return { token: null, issuedAt: null, expiresAt: null };
+		}
 
-				const headers: Record<string, string> = {
-					...(options?.headers as Record<string, string>),
-				};
-				const syncClientId = await getOrCreateDesktopSyncClientId();
-				headers["X-Client-Id"] = syncClientId;
+		const [token, sessionData] = await Promise.all([
+			storage.getAuthToken(activeAccount.email),
+			storage.getStoredSessionData(activeAccount.email),
+		]);
 
-				// Only set Authorization header if we have a valid token
-				if (token) {
-					headers.Authorization = `Bearer ${token}`;
-				}
-
-				return fetch(resolvedUrl, {
-					...options,
-					credentials: "include",
-					headers,
-				});
-			},
-		}),
-	],
+		return {
+			token,
+			issuedAt: sessionData?.createdAt ?? null,
+			expiresAt: sessionData?.expiresAt ?? null,
+		};
+	},
+	getRefreshToken: async () => {
+		const activeAccount = await storage.getActiveAccount();
+		if (activeAccount?.type !== "single") {
+			return null;
+		}
+		return storage.getAuthToken(activeAccount.email);
+	},
+	storeRefreshedToken: async (token) => {
+		const activeAccount = await storage.getActiveAccount();
+		if (activeAccount?.type === "single") {
+			await storage.storeAuthToken(token, activeAccount.email);
+		}
+	},
+	getClientId: async () => getOrCreateDesktopSyncClientId(),
 });
 
-const trpc = createTRPCOptionsProxy({
-	client: trpcClient,
-	queryClient: queryClient,
-});
+const trpc = createAppTrpcOptionsProxy(trpcClient, queryClient);
 
 export { trpc, trpcClient, queryClient };

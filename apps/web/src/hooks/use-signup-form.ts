@@ -69,6 +69,8 @@ export function useSignupForm({
 
 	const signupMutation = useMutation({
 		mutationFn: async (input: {
+			userId?: string;
+			vaultId?: string;
 			email: string;
 			name: string;
 			plan?: CloudPlanId;
@@ -86,6 +88,8 @@ export function useSignupForm({
 			if (isInvitationSignup) {
 				return trpcClient.auth.signupWithInvitation.mutate({
 					token: input.token || "",
+					userId: input.userId,
+					vaultId: input.vaultId,
 					email: input.email,
 					name: input.name,
 					secretKeyHint: input.secretKeyHint,
@@ -100,6 +104,8 @@ export function useSignupForm({
 			}
 
 			return trpcClient.auth.signup.mutate({
+				userId: input.userId,
+				vaultId: input.vaultId,
 				email: input.email,
 				name: input.name,
 				plan: input.plan,

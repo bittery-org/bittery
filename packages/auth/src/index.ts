@@ -47,9 +47,16 @@ if (jwtSecretRaw.length < 32) {
 
 const JWT_SECRET = new TextEncoder().encode(jwtSecretRaw);
 const JWT_ISSUER = "bittery";
-const JWT_AUDIENCE = "bittery-users";
 const RECOVERY_JWT_AUDIENCE = "bittery-recovery";
-const SESSION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 days
+const DEFAULT_SESSION_DURATION = 30 * 24 * 60 * 60 * 1000;
+const SESSION_DURATION_BY_PLATFORM: Record<string, number> = {
+	web: 24 * 60 * 60 * 1000,
+	desktop: 30 * 24 * 60 * 60 * 1000,
+	mobile: 30 * 24 * 60 * 60 * 1000,
+	extension: 7 * 24 * 60 * 60 * 1000,
+	ios: 30 * 24 * 60 * 60 * 1000,
+	android: 30 * 24 * 60 * 60 * 1000,
+};
 const RECOVERY_TOKEN_DURATION = "15m";
 const LOGIN_RATE_LIMIT_FREE_ATTEMPTS = 5;
 const LOGIN_RATE_LIMIT_MAX_LOCK_MINUTES = 30;
@@ -77,6 +84,30 @@ function hashToken(token: string): string {
 	return createHash("sha256").update(token).digest("hex");
 }
 
+function generateOpaqueSessionToken(): string {
+	return randomBytes(32).toString("base64url");
+}
+
+function normalizeSessionPlatform(platform?: string): string {
+	if (!platform) return "desktop";
+	const normalized = platform.toLowerCase();
+	if (normalized === "ios" || normalized === "android") return "mobile";
+	if (
+		normalized === "web" ||
+		normalized === "desktop" ||
+		normalized === "mobile" ||
+		normalized === "extension"
+	) {
+		return normalized;
+	}
+	return "desktop";
+}
+
+function getSessionDurationMs(platform?: string): number {
+	const normalized = normalizeSessionPlatform(platform);
+	return SESSION_DURATION_BY_PLATFORM[normalized] ?? DEFAULT_SESSION_DURATION;
+}
+
 function getRateLimitId(email: string, ipAddress: string | null): string {
 	const ipPart = ipAddress?.trim() || "unknown";
 	return createHash("sha256")
@@ -100,9 +131,9 @@ export class RecoveryRateLimitError extends Error {
 
 export interface SessionPayload {
 	userId: string;
-	email: string;
 	sessionId: string;
-	sessionTokenHash: string;
+	expiresAt: Date;
+	platform?: string | null;
 }
 
 export interface RecoveryTokenPayload {
@@ -194,6 +225,7 @@ export async function finishLogin(
 	success: boolean;
 	token?: string;
 	sessionId?: string;
+	expiresAt?: Date;
 	serverProof?: string;
 	user?: {
 		id: string;
@@ -225,19 +257,19 @@ export async function finishLogin(
 			clientProof,
 		);
 
-		// Create session
-		const sessionId = nanoid();
-		const expiresAt = new Date(Date.now() + SESSION_DURATION);
-		const sessionTokenHash = hashToken(serverSession.key);
+		const opaqueToken = generateOpaqueSessionToken();
+		const sessionId = hashToken(opaqueToken);
+		const sessionDurationMs = getSessionDurationMs(deviceInfo?.platform);
+		const expiresAt = new Date(Date.now() + sessionDurationMs);
 
 		await db.insert(session).values({
 			id: sessionId,
 			userId: existingUser.id,
-			token: sessionTokenHash,
 			expiresAt,
 			// Device tracking fields
 			deviceName: deviceInfo?.deviceName,
-			platform: deviceInfo?.platform,
+			platform: normalizeSessionPlatform(deviceInfo?.platform),
+			deviceInfo: deviceInfo?.userAgent,
 			browserName: deviceInfo?.browserName,
 			browserVersion: deviceInfo?.browserVersion,
 			osName: deviceInfo?.osName,
@@ -247,25 +279,11 @@ export async function finishLogin(
 			lastActiveAt: new Date(),
 		});
 
-		// Generate JWT
-		// @ts-expect-error -- jose types
-		const token = await new SignJWT({
-			userId: existingUser.id,
-			email: existingUser.email,
-			sessionId,
-			sessionTokenHash,
-		} as SessionPayload)
-			.setProtectedHeader({ alg: "HS256" })
-			.setIssuedAt()
-			.setIssuer(JWT_ISSUER)
-			.setAudience(JWT_AUDIENCE)
-			.setExpirationTime("30d")
-			.sign(JWT_SECRET);
-
 		return {
 			success: true,
-			token,
+			token: opaqueToken,
 			sessionId,
+			expiresAt,
 			serverProof: serverSession.proof,
 			user: {
 				id: existingUser.id,
@@ -283,38 +301,33 @@ export async function finishLogin(
 }
 
 /**
- * Verify JWT token and get session
+ * Verify opaque bearer token and resolve active session
  */
 export async function verifySession(
 	token: string,
 ): Promise<SessionPayload | null> {
+	if (!token) {
+		return null;
+	}
+
 	try {
-		const { payload } = await jwtVerify(token, JWT_SECRET, {
-			issuer: JWT_ISSUER,
-			audience: JWT_AUDIENCE,
-		});
-
-		const sessionPayload = payload as unknown as SessionPayload;
-
-		// Check if session still exists and is valid
+		const hashedId = hashToken(token);
 		const [existingSession] = await db
 			.select()
 			.from(session)
-			.where(
-				and(
-					eq(session.id, sessionPayload.sessionId),
-					eq(session.userId, sessionPayload.userId),
-					eq(session.token, sessionPayload.sessionTokenHash),
-					gt(session.expiresAt, new Date()),
-				),
-			)
+			.where(and(eq(session.id, hashedId), gt(session.expiresAt, new Date())))
 			.limit(1);
 
 		if (!existingSession) {
 			return null;
 		}
 
-		return sessionPayload;
+		return {
+			userId: existingSession.userId,
+			sessionId: existingSession.id,
+			expiresAt: existingSession.expiresAt,
+			platform: existingSession.platform,
+		};
 	} catch {
 		return null;
 	}
@@ -411,7 +424,7 @@ export async function storeEncryptedMasterKey(
 }
 
 /**
- * Create a user session and return JWT token
+ * Create a user session and return opaque bearer token
  * Used after signup or when creating a session without SRP
  */
 export async function createUserSession(
@@ -428,22 +441,19 @@ export async function createUserSession(
 		throw new Error("User not found");
 	}
 
-	// Create session
-	const sessionId = nanoid();
-	const expiresAt = new Date(Date.now() + SESSION_DURATION);
-
-	// Generate a random session key for non-SRP sessions
-	const sessionKey = randomBytes(32).toString("base64url");
-	const sessionTokenHash = hashToken(sessionKey);
+	const opaqueToken = generateOpaqueSessionToken();
+	const sessionId = hashToken(opaqueToken);
+	const sessionDurationMs = getSessionDurationMs(deviceInfo?.platform);
+	const expiresAt = new Date(Date.now() + sessionDurationMs);
 
 	await db.insert(session).values({
 		id: sessionId,
 		userId: existingUser.id,
-		token: sessionTokenHash,
 		expiresAt,
 		// Device tracking fields
 		deviceName: deviceInfo?.deviceName,
-		platform: deviceInfo?.platform,
+		platform: normalizeSessionPlatform(deviceInfo?.platform),
+		deviceInfo: deviceInfo?.userAgent,
 		browserName: deviceInfo?.browserName,
 		browserVersion: deviceInfo?.browserVersion,
 		osName: deviceInfo?.osName,
@@ -453,24 +463,10 @@ export async function createUserSession(
 		lastActiveAt: new Date(),
 	});
 
-	// Generate JWT
-	// @ts-expect-error -- jose types
-	const token = await new SignJWT({
-		userId: existingUser.id,
-		email: existingUser.email,
-		sessionId,
-		sessionTokenHash,
-	} as SessionPayload)
-		.setProtectedHeader({ alg: "HS256" })
-		.setIssuedAt()
-		.setIssuer(JWT_ISSUER)
-		.setAudience(JWT_AUDIENCE)
-		.setExpirationTime("30d")
-		.sign(JWT_SECRET);
-
 	return {
-		token,
+		token: opaqueToken,
 		sessionId,
+		expiresAt,
 		user: {
 			id: existingUser.id,
 			email: existingUser.email,
@@ -479,6 +475,54 @@ export async function createUserSession(
 			publicKey: existingUser.publicKey,
 			encryptedPrivateKey: existingUser.encryptedPrivateKey,
 		},
+	};
+}
+
+export async function refreshSession(currentSessionId: string): Promise<{
+	token: string;
+	sessionId: string;
+	expiresAt: Date;
+}> {
+	const [existingSession] = await db
+		.select()
+		.from(session)
+		.where(and(eq(session.id, currentSessionId), gt(session.expiresAt, new Date())))
+		.limit(1);
+
+	if (!existingSession) {
+		throw new Error("Session not found");
+	}
+
+	const nextOpaqueToken = generateOpaqueSessionToken();
+	const nextSessionId = hashToken(nextOpaqueToken);
+	const expiresAt = new Date(
+		Date.now() + getSessionDurationMs(existingSession.platform || undefined),
+	);
+
+	await db.transaction(async (tx) => {
+		await tx.insert(session).values({
+			id: nextSessionId,
+			userId: existingSession.userId,
+			expiresAt,
+			ipAddress: existingSession.ipAddress,
+			userAgent: existingSession.userAgent,
+			deviceName: existingSession.deviceName,
+			platform: existingSession.platform,
+			deviceInfo: existingSession.deviceInfo,
+			browserName: existingSession.browserName,
+			browserVersion: existingSession.browserVersion,
+			osName: existingSession.osName,
+			osVersion: existingSession.osVersion,
+			lastActiveAt: existingSession.lastActiveAt,
+		});
+
+		await tx.delete(session).where(eq(session.id, currentSessionId));
+	});
+
+	return {
+		token: nextOpaqueToken,
+		sessionId: nextSessionId,
+		expiresAt,
 	};
 }
 

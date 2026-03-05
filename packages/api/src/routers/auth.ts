@@ -20,13 +20,13 @@ import {
 	deleteUserAccount,
 	finishLogin,
 	getRecoveryData as getRecoveryDataForEmail,
-	getSessionById,
 	getUserByEmail,
 	getUserById,
 	getUserSessions,
 	getUserVaultKeysForRecovery,
 	LoginRateLimitError,
 	normalizeEmail,
+	refreshSession,
 	RecoveryRateLimitError,
 	recordFailedLoginAttempt,
 	recordFailedRecoveryAttempt,
@@ -305,6 +305,8 @@ export const authRouter = router({
 		.input(
 			z.object({
 				token: z.string(),
+				userId: z.string().optional(),
+				vaultId: z.string().optional(),
 				email: z.string().email().max(255),
 				name: z.string().min(2),
 				secretKeyHint: z.string(),
@@ -395,6 +397,7 @@ export const authRouter = router({
 
 			// 2. Create user account
 			const userId = await createUser({
+				id: input.userId,
 				email: normalizedEmail,
 				name: input.name,
 				secretKeyHint: input.secretKeyHint,
@@ -413,7 +416,7 @@ export const authRouter = router({
 				.where(eq(user.id, userId));
 
 			// Create default personal vault for the new user
-			const personalVaultId = nanoid();
+			const personalVaultId = input.vaultId ?? nanoid();
 			await db.insert(vault).values({
 				id: personalVaultId,
 				name: "Personal",
@@ -988,24 +991,31 @@ export const authRouter = router({
 	/**
 	 * Logout from current session
 	 */
-	logout: protectedProcedure
-		.input(
-			z.object({
-				sessionId: z.string(),
-			}),
-		)
-		.mutation(async ({ ctx, input }) => {
-			const targetSession = await getSessionById(input.sessionId);
-			if (!targetSession || targetSession.userId !== ctx.session.userId) {
+	logout: protectedProcedure.mutation(async ({ ctx }) => {
+			await deleteSession(ctx.session.sessionId);
+			return { success: true };
+		}),
+
+	refreshSession: protectedProcedure.mutation(async ({ ctx }) => {
+		try {
+			const nextSession = await refreshSession(ctx.session.sessionId);
+
+			return {
+				token: nextSession.token,
+				sessionId: nextSession.sessionId,
+				expiresAt: nextSession.expiresAt,
+			};
+		} catch (error) {
+			if (error instanceof Error && error.message === "Session not found") {
 				throw new TRPCError({
-					code: "NOT_FOUND",
-					message: "Session not found",
+					code: "UNAUTHORIZED",
+					message: "Session expired",
 				});
 			}
 
-			await deleteSession(input.sessionId);
-			return { success: true };
-		}),
+			throw error;
+		}
+	}),
 
 	/**
 	 * Logout from all sessions

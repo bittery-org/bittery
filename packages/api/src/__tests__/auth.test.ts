@@ -18,6 +18,7 @@ import { db } from "@bittery/db";
 import { authRouter } from "../routers/auth";
 import { setControlBroadcastFunction } from "../sync-helper";
 import {
+	createAuthenticatedContext,
 	createPublicContext,
 	createTestInvitation,
 	createTestSession,
@@ -478,23 +479,73 @@ describe("Auth Router", () => {
 	describe("logout", () => {
 		test("should delete own session", async () => {
 			const { sessionId, caller } = await setup(authRouter);
-			const result = await caller.logout({ sessionId });
+			const result = await caller.logout();
 
 			expect(result.success).toBe(true);
 
 			const session = await getSession(sessionId);
 			expect(session).toBeUndefined();
 		});
+	});
 
-		test("should reject deleting another user's session", async () => {
-			const [{ caller }, { sessionId }] = await Promise.all([
-				setup(authRouter),
-				setup(authRouter),
-			]);
+	describe("refreshSession", () => {
+		test("should rotate session and invalidate previous session", async () => {
+			const { userId, email, sessionId, caller } = await setup(authRouter);
 
-			await expect(caller.logout({ sessionId })).rejects.toThrow(
-				"Session not found",
+			const result = await caller.refreshSession();
+
+			expect(result.token).toBeDefined();
+			expect(result.sessionId).toBeDefined();
+			expect(result.sessionId).not.toBe(sessionId);
+
+			const oldSession = await getSession(sessionId);
+			expect(oldSession).toBeUndefined();
+
+			const nextSession = await getSession(result.sessionId);
+			expect(nextSession).toBeDefined();
+			expect(nextSession?.userId).toBe(userId);
+
+			const staleCaller = authRouter.createCaller(
+				createAuthenticatedContext(userId, email, sessionId),
 			);
+			await expect(staleCaller.refreshSession()).rejects.toThrow(
+				"Session expired",
+			);
+		});
+
+		test("should reject refresh when session is expired", async () => {
+			const { userId, email } = await setup(authRouter);
+			const expiredSessionId = await createTestSession(userId, {
+				expiresAt: new Date(Date.now() - 60_000),
+			});
+
+			const caller = authRouter.createCaller(
+				createAuthenticatedContext(userId, email, expiredSessionId),
+			);
+
+			await expect(caller.refreshSession()).rejects.toThrow("Session expired");
+		});
+
+		test("should preserve platform session duration policy", async () => {
+			const { userId, email } = await setup(authRouter);
+			const extensionSessionId = await createTestSession(userId, {
+				platform: "extension",
+				expiresAt: new Date(Date.now() + 60_000),
+			});
+
+			const caller = authRouter.createCaller(
+				createAuthenticatedContext(userId, email, extensionSessionId),
+			);
+
+			const now = Date.now();
+			const result = await caller.refreshSession();
+			const expiresAtMs = new Date(result.expiresAt).getTime();
+
+			expect(expiresAtMs).toBeGreaterThan(now + 6 * 24 * 60 * 60 * 1000);
+			expect(expiresAtMs).toBeLessThan(now + 8 * 24 * 60 * 60 * 1000);
+
+			const refreshedSession = await getSession(result.sessionId);
+			expect(refreshedSession?.platform).toBe("extension");
 		});
 	});
 

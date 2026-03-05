@@ -89,23 +89,7 @@ export function useLogout(
 			// Notify server about logout (invalidate session)
 			if (notifyServer) {
 				try {
-					// Get session data to extract session ID
-					const sessionData = storage.getStoredSessionData
-						? await storage.getStoredSessionData(email)
-						: null;
-
-					// Only call server if we have a session ID
-					// The session might be stored in sessionStorage which we can't access here
-					// so we just skip server notification if we don't have the ID
-					if (
-						sessionData &&
-						"sessionId" in sessionData &&
-						sessionData.sessionId
-					) {
-						await trpcClient.auth.logout.mutate({
-							sessionId: sessionData.sessionId as string,
-						});
-					}
+					await trpcClient.auth.logout.mutate();
 				} catch {
 					// Ignore server errors during logout
 					// The user still wants to clear local data

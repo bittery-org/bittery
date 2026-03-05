@@ -12,6 +12,7 @@ export * from "./password-history";
 export * from "./pricing";
 export * from "./server-url";
 export * from "./trpc";
+export * from "./trpc-client";
 export * from "./trpc-client-factory";
 export * from "./types";
 export * from "./vault-key-crypto";
