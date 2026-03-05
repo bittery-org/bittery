@@ -15,7 +15,7 @@ export interface DeviceInfo {
 /**
  * Parse User-Agent string to extract device information
  */
-export function parseUserAgent(userAgent: string): DeviceInfo {
+export function parseUserAgent(userAgent: string, appPlatform?: string | null): DeviceInfo {
 	const ua = userAgent.toLowerCase();
 
 	// Detect OS
@@ -101,9 +101,17 @@ export function parseUserAgent(userAgent: string): DeviceInfo {
 		if (match?.[1]) browserVersion = match[1];
 	}
 
-	// Determine platform
+	// Determine platform — prefer explicit X-App-Platform header over UA sniffing
 	let platform: DeviceInfo["platform"] = "web";
-	if (
+	if (appPlatform === "desktop") {
+		platform = "desktop";
+	} else if (appPlatform === "ios") {
+		platform = "ios";
+	} else if (appPlatform === "android") {
+		platform = "android";
+	} else if (appPlatform === "extension") {
+		platform = "extension";
+	} else if (
 		ua.includes("iphone") ||
 		ua.includes("ipad") ||
 		(ua.includes("ios") && ua.includes("mobile"))
@@ -113,11 +121,26 @@ export function parseUserAgent(userAgent: string): DeviceInfo {
 		platform = "android";
 	}
 
-	// Generate device name
-	const parts: string[] = [];
-	if (browserName) parts.push(browserName);
-	if (osName) parts.push(`on ${osName}`);
-	const deviceName = parts.length > 0 ? parts.join(" ") : "Unknown Device";
+	// Generate device name based on platform
+	let deviceName: string;
+	if (platform === "desktop") {
+		deviceName = osName ? `Bittery Desktop on ${osName}` : "Bittery Desktop";
+	} else if (platform === "extension") {
+		const browserLabel = browserName ?? "Browser";
+		const osLabel = osName ? ` on ${osName}` : "";
+		deviceName = `Bittery Extension (${browserLabel}${osLabel})`;
+	} else if (platform === "ios") {
+		const osLabel = osName ?? "iOS";
+		deviceName = osVersion ? `Bittery on ${osLabel} ${osVersion}` : `Bittery on ${osLabel}`;
+	} else if (platform === "android") {
+		const osLabel = osVersion ? `Android ${osVersion}` : "Android";
+		deviceName = `Bittery on ${osLabel}`;
+	} else {
+		const parts: string[] = [];
+		if (browserName) parts.push(browserName);
+		if (osName) parts.push(`on ${osName}`);
+		deviceName = parts.length > 0 ? parts.join(" ") : "Unknown Device";
+	}
 
 	return {
 		deviceName,

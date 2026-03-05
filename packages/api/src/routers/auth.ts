@@ -249,7 +249,7 @@ export const authRouter = router({
 			});
 
 			// Parse device info from context
-			const deviceInfo = parseUserAgent(ctx.device.userAgent);
+			const deviceInfo = parseUserAgent(ctx.device.userAgent, ctx.device.appPlatform);
 
 			// Create session and generate token with device info
 			const sessionData = await createUserSession(userId, {
@@ -468,7 +468,7 @@ export const authRouter = router({
 			}
 
 			// Parse device info from context
-			const deviceInfo = parseUserAgent(ctx.device.userAgent);
+			const deviceInfo = parseUserAgent(ctx.device.userAgent, ctx.device.appPlatform);
 
 			// Create session
 			const sessionData = await createUserSession(userId, {
@@ -585,7 +585,7 @@ export const authRouter = router({
 			}
 
 			// Parse device info from request context
-			const deviceInfo = parseUserAgent(ctx.device.userAgent);
+			const deviceInfo = parseUserAgent(ctx.device.userAgent, ctx.device.appPlatform);
 
 			const result = await finishLogin(
 				input.userId,
@@ -679,7 +679,7 @@ export const authRouter = router({
 			}
 
 			// Parse device info from request context
-			const deviceInfo = parseUserAgent(ctx.device.userAgent);
+			const deviceInfo = parseUserAgent(ctx.device.userAgent, ctx.device.appPlatform);
 
 			const result = await finishLogin(
 				input.userId,
@@ -930,7 +930,7 @@ export const authRouter = router({
 				});
 			}
 
-			const deviceInfo = parseUserAgent(ctx.device.userAgent);
+			const deviceInfo = parseUserAgent(ctx.device.userAgent, ctx.device.appPlatform);
 			const sessionData = await createUserSession(userId, {
 				...deviceInfo,
 				userAgent: ctx.device.userAgent,

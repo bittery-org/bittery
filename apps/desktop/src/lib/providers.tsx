@@ -101,6 +101,7 @@ async function resolveDesktopServerUrl(): Promise<string> {
 const trpcClient = createSessionRefreshingTrpcClient({
 	defaultServerUrl: fallbackServerUrl,
 	getServerUrl: resolveDesktopServerUrl,
+	appPlatform: "desktop",
 	getSessionSnapshot: async () => {
 		const activeAccount = await storage.getActiveAccount();
 		if (activeAccount?.type !== "single") {

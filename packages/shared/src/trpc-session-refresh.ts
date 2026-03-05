@@ -13,6 +13,8 @@ interface SessionRefreshingFetchOptions {
 	storeRefreshedToken: (token: string) => Promise<void>;
 	getClientId?: () => Promise<string | null>;
 	thresholdRatio?: number;
+	/** Platform identifier sent as X-App-Platform header (e.g. 'desktop', 'ios', 'android') */
+	appPlatform?: string;
 }
 
 function toHeaderRecord(headers?: HeadersInit): Record<string, string> {
@@ -32,6 +34,7 @@ async function createAuthHeaders(
 		baseHeaders?: HeadersInit;
 		token: string | null;
 		clientId: string | null;
+		appPlatform?: string;
 	},
 ): Promise<Record<string, string>> {
 	const headers = toHeaderRecord(options.baseHeaders);
@@ -42,6 +45,10 @@ async function createAuthHeaders(
 
 	if (options.clientId) {
 		headers["X-Client-Id"] = options.clientId;
+	}
+
+	if (options.appPlatform) {
+		headers["X-App-Platform"] = options.appPlatform;
 	}
 
 	return headers;
@@ -64,6 +71,7 @@ export function createSessionRefreshingTrpcFetch(
 				baseHeaders: requestOptions?.headers,
 				token: refreshToken,
 				clientId,
+				appPlatform: options.appPlatform,
 			});
 
 			return fetch(resolvedUrl, {
@@ -94,6 +102,7 @@ export function createSessionRefreshingTrpcFetch(
 			baseHeaders: requestOptions?.headers,
 			token: authToken,
 			clientId,
+			appPlatform: options.appPlatform,
 		});
 
 		const response = await fetch(resolvedUrl, {

@@ -96,4 +96,5 @@ export const trpcClient = createSessionRefreshingTrpcClient({
 		await storage.storeAuthToken(token, email);
 	},
 	getClientId: async () => getOrCreateSyncClientId(),
+	appPlatform: "extension",
 });

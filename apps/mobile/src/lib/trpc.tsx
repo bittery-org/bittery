@@ -4,6 +4,7 @@ import { createSessionRefreshingTrpcClient } from "@bittery/shared/trpc-session-
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { createContext, useContext, useEffect, useState } from "react";
+import { Platform } from "react-native";
 import { getOrCreateMobileSyncClientId } from "@/lib/sync-client-id";
 import { storage } from "@/services/storage";
 
@@ -96,6 +97,7 @@ export function TRPCProvider({ children }: TRPCProviderProps) {
 				await storage.storeAuthToken(token);
 			},
 			getClientId: async () => getOrCreateMobileSyncClientId(),
+			appPlatform: Platform.OS,
 		}),
 	);
 

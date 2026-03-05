@@ -8,6 +8,7 @@ export type CreateContextOptions = {
 export interface DeviceContext {
 	userAgent: string;
 	ipAddress: string | null;
+	appPlatform: string | null;
 }
 
 export async function createContext({ context }: CreateContextOptions) {
@@ -33,6 +34,7 @@ export async function createContext({ context }: CreateContextOptions) {
 		context.req.header("X-Real-IP") ||
 		null;
 	const clientId = context.req.header("X-Client-Id") ?? null;
+	const appPlatform = context.req.header("X-App-Platform") ?? null;
 
 	return {
 		session,
@@ -41,6 +43,7 @@ export async function createContext({ context }: CreateContextOptions) {
 		device: {
 			userAgent,
 			ipAddress,
+			appPlatform,
 		} as DeviceContext,
 	};
 }
