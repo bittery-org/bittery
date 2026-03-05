@@ -10,6 +10,8 @@ export interface CopyWithToastOptions {
 	successMessage?: string;
 	/** Custom error message when text is empty. If provided, overrides default "No {label} to copy" */
 	emptyErrorMessage?: string;
+	/** Custom error message when copying fails. If provided, overrides default "Failed to copy to clipboard" */
+	copyErrorMessage?: string;
 }
 
 /**
@@ -26,6 +28,7 @@ export async function copyWithToast(
 		showAutoClearMessage = true,
 		successMessage,
 		emptyErrorMessage,
+		copyErrorMessage,
 	} = options;
 
 	if (!text) {
@@ -45,7 +48,7 @@ export async function copyWithToast(
 		toast.success(message);
 		return true;
 	} catch {
-		toast.error("Failed to copy to clipboard");
+		toast.error(copyErrorMessage ?? "Failed to copy to clipboard");
 		return false;
 	}
 }

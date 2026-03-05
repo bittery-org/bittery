@@ -10,20 +10,22 @@ import {
 } from "@bittery/ui";
 import { useEffect, useState } from "react";
 import { storage } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
 
 // Auto-lock timeout options (in milliseconds)
 // -1 means never auto-lock
 export const AUTO_LOCK_OPTIONS = [
-	{ value: "60000", label: "1 minute" },
-	{ value: "300000", label: "5 minutes" },
-	{ value: "600000", label: "10 minutes" },
-	{ value: "900000", label: "15 minutes" },
-	{ value: "1800000", label: "30 minutes" },
-	{ value: "3600000", label: "1 hour" },
-	{ value: "-1", label: "Never" },
+	{ value: "60000", unit: "minute" },
+	{ value: "300000", unit: "minute" },
+	{ value: "600000", unit: "minute" },
+	{ value: "900000", unit: "minute" },
+	{ value: "1800000", unit: "minute" },
+	{ value: "3600000", unit: "hour" },
+	{ value: "-1", unit: "never" },
 ] as const;
 
 export function AutoLockSettings() {
+	const { m } = useI18n();
 	const [selectedTimeout, setSelectedTimeout] = useState<string>(
 		String(DEFAULT_AUTO_LOCK_TIMEOUT_MS),
 	);
@@ -43,15 +45,37 @@ export function AutoLockSettings() {
 		const timeoutMs = Number.parseInt(value, 10);
 		await storage.storeAutoLockTimeout(timeoutMs);
 		setSelectedTimeout(value);
-		toast.success("Auto-lock timeout updated");
+		toast.success(m["settings.auto_lock.toast.updated"]());
+	};
+
+	const getOptionLabel = (option: (typeof AUTO_LOCK_OPTIONS)[number]) => {
+		if (option.unit === "never") {
+			return m["settings.auto_lock.option.never"]();
+		}
+		const count =
+			option.unit === "hour"
+				? Number(option.value) / 3_600_000
+				: Number(option.value) / 60_000;
+		if (option.unit === "hour") {
+			return count === 1
+				? m["settings.auto_lock.option.hours.single"]({ count })
+				: m["settings.auto_lock.option.hours.plural"]({ count });
+		}
+		return count === 1
+			? m["settings.auto_lock.option.minutes.single"]({ count })
+			: m["settings.auto_lock.option.minutes.plural"]({ count });
 	};
 
 	if (isLoading) {
 		return (
 			<div className="flex items-center justify-between">
 				<div className="space-y-1">
-					<Label className="font-medium text-sm">Auto-Lock Timeout</Label>
-					<p className="text-muted-foreground text-sm">Loading...</p>
+					<Label className="font-medium text-sm">
+						{m["settings.auto_lock.label.timeout"]()}
+					</Label>
+					<p className="text-muted-foreground text-sm">
+						{m["settings.auto_lock.loading"]()}
+					</p>
 				</div>
 			</div>
 		);
@@ -60,19 +84,21 @@ export function AutoLockSettings() {
 	return (
 		<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 			<div className="space-y-1">
-				<Label className="font-medium text-sm">Auto-Lock Timeout</Label>
+				<Label className="font-medium text-sm">
+					{m["settings.auto_lock.label.timeout"]()}
+				</Label>
 				<p className="text-muted-foreground text-sm">
-					Automatically lock your vault after a period of inactivity
+					{m["settings.auto_lock.description"]()}
 				</p>
 			</div>
 			<Select value={selectedTimeout} onValueChange={handleTimeoutChange}>
 				<SelectTrigger className="w-[180px]">
-					<SelectValue placeholder="Select timeout" />
+					<SelectValue placeholder={m["settings.auto_lock.placeholder"]()} />
 				</SelectTrigger>
 				<SelectContent>
 					{AUTO_LOCK_OPTIONS.map((option) => (
 						<SelectItem key={option.value} value={option.value}>
-							{option.label}
+							{getOptionLabel(option)}
 						</SelectItem>
 					))}
 				</SelectContent>

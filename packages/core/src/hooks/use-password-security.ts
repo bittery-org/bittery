@@ -56,9 +56,8 @@ function generateRecommendations(
 	if (weakCount > 0) {
 		recommendations.push({
 			priority: "high",
-			title: `Update ${weakCount} weak password${weakCount > 1 ? "s" : ""}`,
-			description:
-				"Weak passwords can be easily cracked. Use the password generator to create strong, unique passwords.",
+			key: "weak_passwords",
+			count: weakCount,
 			actionable: true,
 		});
 	}
@@ -66,9 +65,8 @@ function generateRecommendations(
 	if (reusedCount > 0) {
 		recommendations.push({
 			priority: "high",
-			title: `Change ${reusedCount} reused password${reusedCount > 1 ? "s" : ""}`,
-			description:
-				"Using the same password across multiple accounts puts all of them at risk if one is compromised.",
+			key: "reused_passwords",
+			count: reusedCount,
 			actionable: true,
 		});
 	}
@@ -76,9 +74,8 @@ function generateRecommendations(
 	if (oldCount > 0) {
 		recommendations.push({
 			priority: "medium",
-			title: `Review ${oldCount} old password${oldCount > 1 ? "s" : ""}`,
-			description:
-				"Passwords that haven't been updated in over a year may be at risk. Consider updating them periodically.",
+			key: "old_passwords",
+			count: oldCount,
 			actionable: true,
 		});
 	}
@@ -86,9 +83,7 @@ function generateRecommendations(
 	if (totalPasswords > 0 && weakCount === 0 && reusedCount === 0) {
 		recommendations.push({
 			priority: "low",
-			title: "Great job!",
-			description:
-				"Your passwords are strong and unique. Keep up the good security practices.",
+			key: "good_practices",
 			actionable: false,
 		});
 	}
@@ -96,9 +91,7 @@ function generateRecommendations(
 	if (totalPasswords === 0) {
 		recommendations.push({
 			priority: "low",
-			title: "Add some passwords",
-			description:
-				"Start adding passwords to your vault to see security recommendations.",
+			key: "add_passwords",
 			actionable: false,
 		});
 	}

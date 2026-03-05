@@ -151,9 +151,9 @@ export function HeroVault() {
 							</h1>
 
 							<p className="mx-auto mt-6 max-w-136 text-base text-muted-foreground leading-relaxed sm:text-lg lg:mx-0">
-								The password manager that can't spy on you — even if it
-								wanted to. Your data is encrypted before it leaves your device,
-								so only you can ever see it.
+								The password manager that can't spy on you — even if it wanted
+								to. Your data is encrypted before it leaves your device, so only
+								you can ever see it.
 							</p>
 						</motion.div>
 

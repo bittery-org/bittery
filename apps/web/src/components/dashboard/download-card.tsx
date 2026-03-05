@@ -14,6 +14,7 @@ import {
 	IconSquareTerminalOutlineDuo18 as Monitor,
 	IconStarSparkle2OutlineDuo18 as Zap,
 } from "@bittery/ui/icons";
+import { useI18n } from "@/providers/i18n-provider";
 
 function detectOS(): "macos" | "windows" | "linux" | "unknown" {
 	if (typeof navigator === "undefined") return "unknown";
@@ -24,45 +25,47 @@ function detectOS(): "macos" | "windows" | "linux" | "unknown" {
 	return "unknown";
 }
 
-const osInfo = {
-	macos: {
-		name: "macOS",
-		icon: Apple,
-		file: "Bittery.dmg",
-		hint: "Native app for Apple devices",
-	},
-	windows: {
-		name: "Windows",
-		icon: Monitor,
-		file: "Bittery.exe",
-		hint: "Installer for Windows desktop",
-	},
-	linux: {
-		name: "Linux",
-		icon: Monitor,
-		file: "Bittery.AppImage",
-		hint: "Portable AppImage package",
-	},
-	unknown: {
-		name: "Desktop",
-		icon: Download,
-		file: "",
-		hint: "Choose a build manually",
-	},
-};
-
 // Replace with your actual GitHub org/repo
 const GITHUB_REPO = "bittery-org/bittery";
 const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
 
 export function DownloadCard() {
+	const { m } = useI18n();
 	const os = detectOS();
+	const osInfo = {
+		macos: {
+			name: m["dashboard.download.platform.macos"](),
+			icon: Apple,
+			file: "Bittery.dmg",
+			hint: m["dashboard.download.platform_hint.macos"](),
+		},
+		windows: {
+			name: m["dashboard.download.platform.windows"](),
+			icon: Monitor,
+			file: "Bittery.exe",
+			hint: m["dashboard.download.platform_hint.windows"](),
+		},
+		linux: {
+			name: m["dashboard.download.platform.linux"](),
+			icon: Monitor,
+			file: "Bittery.AppImage",
+			hint: m["dashboard.download.platform_hint.linux"](),
+		},
+		unknown: {
+			name: m["dashboard.download.platform.desktop"](),
+			icon: Download,
+			file: "",
+			hint: m["dashboard.download.platform_hint.desktop"](),
+		},
+	};
 	const { name, icon: Icon, file, hint } = osInfo[os];
 	const downloadUrl = file
 		? `${RELEASES_URL}/latest/download/${file}`
 		: RELEASES_URL;
 	const primaryLabel =
-		os === "unknown" ? "Browse Desktop Releases" : `Download for ${name}`;
+		os === "unknown"
+			? m["dashboard.download.button.browse_releases"]()
+			: m["dashboard.download.button.download_for"]({ platform: name });
 
 	return (
 		<Card className="gap-0 overflow-hidden border-border/70 py-0">
@@ -70,13 +73,12 @@ export function DownloadCard() {
 				<div className="flex items-center justify-between gap-3">
 					<CardTitle className="flex items-center gap-2 text-base">
 						<Download className="h-4 w-4" />
-						Desktop App
+						{m["dashboard.download.title"]()}
 					</CardTitle>
-					<Badge variant="secondary">Recommended</Badge>
+					<Badge variant="secondary">{m["dashboard.download.badge"]()}</Badge>
 				</div>
 				<CardDescription className="text-sm">
-					Install Bittery locally for faster unlock, autofill, and offline
-					access.
+					{m["dashboard.download.description"]()}
 				</CardDescription>
 			</CardHeader>
 
@@ -88,7 +90,9 @@ export function DownloadCard() {
 								<Icon className="h-4 w-4" />
 							</div>
 							<div className="space-y-0.5">
-								<p className="font-medium text-sm">Detected platform</p>
+								<p className="font-medium text-sm">
+									{m["dashboard.download.detected_platform"]()}
+								</p>
 								<p className="text-muted-foreground text-xs">{hint}</p>
 							</div>
 						</div>
@@ -106,13 +110,13 @@ export function DownloadCard() {
 				<div className="space-y-2 text-muted-foreground text-sm">
 					<div className="flex items-center gap-2">
 						<Zap className="h-4 w-4" />
-						Biometric unlock and stronger local workflow.
+						{m["dashboard.download.feature.biometric_unlock"]()}
 					</div>
 				</div>
 
 				<Button variant="outline" className="w-full" asChild>
 					<a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
-						All Downloads
+						{m["dashboard.download.button.all_downloads"]()}
 						<ExternalLink className="ml-2 h-3.5 w-3.5" />
 					</a>
 				</Button>

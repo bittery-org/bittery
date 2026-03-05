@@ -4,7 +4,7 @@ import {
 	type TotpResult,
 } from "@bittery/shared/totp";
 import type { DecryptedItem } from "@bittery/shared/types";
-import { Button, Card, cn, copyWithToast, Input, Label } from "@bittery/ui";
+import { Button, Card, cn, Input, Label } from "@bittery/ui";
 import {
 	IconCopyOutlineDuo18 as Copy,
 	IconEyeOutlineDuo18 as Eye,
@@ -12,6 +12,7 @@ import {
 } from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
 import { ShareHistoryDialog, ShareItemDialog } from "@/components/sharing";
+import { useI18n } from "@/providers/i18n-provider";
 import { Favicon } from "../favicon";
 import {
 	type CategoryDetailProps,
@@ -24,6 +25,7 @@ interface TotpDetailProps extends CategoryDetailProps<TotpDisplayData> {
 }
 
 export function TotpDetail({ data, onEdit, onDelete, item }: TotpDetailProps) {
+	const { m } = useI18n();
 	const [totpResult, setTotpResult] = useState<TotpResult | null>(null);
 	const [showSecret, setShowSecret] = useState(false);
 
@@ -52,7 +54,7 @@ export function TotpDetail({ data, onEdit, onDelete, item }: TotpDetailProps) {
 	}, [generateCode]);
 
 	const handleCopyCode = () => {
-		copyWithToast(totpResult?.code, "Code");
+		handleCopy(totpResult?.code, m["vaults.detail.items.copy.label.code"](), m);
 	};
 
 	const progress = totpResult?.progress || 0;
@@ -87,7 +89,7 @@ export function TotpDetail({ data, onEdit, onDelete, item }: TotpDetailProps) {
 			<div className="flex gap-2">
 				{onEdit && (
 					<Button size="sm" variant="outline" onClick={onEdit}>
-						Edit
+						{m["vaults.detail.items.detail.action.edit"]()}
 					</Button>
 				)}
 				{item && <ShareItemDialog item={item} />}
@@ -99,7 +101,7 @@ export function TotpDetail({ data, onEdit, onDelete, item }: TotpDetailProps) {
 						className="text-destructive hover:bg-destructive/10 hover:text-destructive"
 						onClick={onDelete}
 					>
-						Delete
+						{m["vaults.detail.items.detail.action.delete"]()}
 					</Button>
 				)}
 			</div>
@@ -110,7 +112,7 @@ export function TotpDetail({ data, onEdit, onDelete, item }: TotpDetailProps) {
 						type="button"
 						onClick={handleCopyCode}
 						className="group flex cursor-pointer items-center gap-4 rounded-lg transition-colors hover:bg-muted/50"
-						title="Click to copy"
+						title={m["vaults.detail.items.detail.totp.action.click_to_copy"]()}
 					>
 						<div className="relative flex size-12 items-center justify-center">
 							<svg
@@ -157,7 +159,7 @@ export function TotpDetail({ data, onEdit, onDelete, item }: TotpDetailProps) {
 									: "--- ---"}
 							</span>
 							<span className="text-muted-foreground text-xs">
-								Click to copy
+								{m["vaults.detail.items.detail.totp.action.click_to_copy"]()}
 							</span>
 						</div>
 					</button>
@@ -175,7 +177,7 @@ export function TotpDetail({ data, onEdit, onDelete, item }: TotpDetailProps) {
 
 			<div className="space-y-4">
 				<div className="space-y-2">
-					<Label>Secret Key</Label>
+					<Label>{m["vaults.detail.items.form.totp.field.setup_key"]()}</Label>
 					<div className="flex gap-2">
 						<Input
 							type={showSecret ? "text" : "password"}
@@ -197,7 +199,13 @@ export function TotpDetail({ data, onEdit, onDelete, item }: TotpDetailProps) {
 						<Button
 							size="icon"
 							variant="outline"
-							onClick={() => handleCopy(data.totpSecret, "Secret key")}
+							onClick={() =>
+								handleCopy(
+									data.totpSecret,
+									m["vaults.detail.items.copy.label.secret_key"](),
+									m,
+								)
+							}
 						>
 							<Copy size={16} />
 						</Button>
@@ -205,18 +213,26 @@ export function TotpDetail({ data, onEdit, onDelete, item }: TotpDetailProps) {
 				</div>
 
 				<div className="rounded-lg border p-4">
-					<h3 className="mb-3 font-medium text-sm">Settings</h3>
+					<h3 className="mb-3 font-medium text-sm">
+						{m["vaults.detail.items.detail.totp.section.settings"]()}
+					</h3>
 					<div className="grid grid-cols-3 gap-4 text-sm">
 						<div>
-							<Label className="text-muted-foreground text-xs">Algorithm</Label>
+							<Label className="text-muted-foreground text-xs">
+								{m["vaults.detail.items.totp.settings.field.algorithm"]()}
+							</Label>
 							<p className="font-medium">{data.totpAlgorithm || "SHA-1"}</p>
 						</div>
 						<div>
-							<Label className="text-muted-foreground text-xs">Digits</Label>
+							<Label className="text-muted-foreground text-xs">
+								{m["vaults.detail.items.totp.settings.field.digits"]()}
+							</Label>
 							<p className="font-medium">{data.totpDigits || 6}</p>
 						</div>
 						<div>
-							<Label className="text-muted-foreground text-xs">Period</Label>
+							<Label className="text-muted-foreground text-xs">
+								{m["vaults.detail.items.totp.settings.field.period"]()}
+							</Label>
 							<p className="font-medium">{data.totpPeriod || 30}s</p>
 						</div>
 					</div>
@@ -224,7 +240,9 @@ export function TotpDetail({ data, onEdit, onDelete, item }: TotpDetailProps) {
 
 				{data.notes && (
 					<div className="space-y-2">
-						<Label className="font-medium text-sm">Notes</Label>
+						<Label className="font-medium text-sm">
+							{m["vaults.detail.items.form.field.notes.label"]()}
+						</Label>
 						<Card>
 							<div className="whitespace-pre-wrap px-4 py-1 text-sm">
 								{data.notes}

@@ -4,7 +4,10 @@
 //! When a member is removed from a vault, all data must be re-encrypted
 //! with a new key to ensure the removed member cannot decrypt future data.
 
-use crate::encryption::{decrypt, encrypt, generate_encryption_key, EncryptedData};
+use crate::encryption::{
+    decrypt, decrypt_with_aad, encrypt, encrypt_with_aad, generate_encryption_key, AadContext,
+    EncryptedData,
+};
 use crate::error::CryptoError;
 use crate::rsa::rsa_encrypt;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -56,12 +59,59 @@ pub struct MemberEncryptedKey {
 /// Key rotation result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyRotationResult {
-    /// New vault key (base64-encoded)
-    pub new_vault_key_base64: String,
     /// Encrypted keys for each member
     pub member_encrypted_keys: Vec<MemberEncryptedKey>,
     /// Re-encrypted items
     pub re_encrypted_items: Vec<ReEncryptedItem>,
+}
+
+/// Fixed entity type for MUK-wrapped vault keys.
+pub const VAULT_KEY_WRAP_ENTITY_TYPE: &str = "vault_key";
+/// Fixed purpose for MUK-wrapped vault keys.
+pub const VAULT_KEY_WRAP_PURPOSE: &str = "vault-key-wrap";
+
+/// Context metadata for MUK-wrapped vault keys.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultKeyWrapContext {
+    /// Vault that this key belongs to
+    pub vault_id: String,
+    /// User that this wrapped key is bound to
+    pub user_id: String,
+    /// Vault key version
+    pub key_version: u64,
+    /// Wrap purpose marker
+    pub purpose: String,
+}
+
+impl VaultKeyWrapContext {
+    pub fn new(vault_id: &str, user_id: &str, key_version: u64) -> Self {
+        Self {
+            vault_id: vault_id.to_string(),
+            user_id: user_id.to_string(),
+            key_version,
+            purpose: VAULT_KEY_WRAP_PURPOSE.to_string(),
+        }
+    }
+
+    fn to_aad_context(&self) -> AadContext {
+        AadContext {
+            vault_id: self.vault_id.clone(),
+            entity_id: self.purpose.clone(),
+            entity_type: VAULT_KEY_WRAP_ENTITY_TYPE.to_string(),
+            version: self.key_version,
+            user_id: self.user_id.clone(),
+        }
+    }
+}
+
+/// JSON payload stored in `encryptedVaultKey` for owner/MUK wrapping.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedVaultKeyData {
+    #[serde(flatten)]
+    pub encrypted: EncryptedData,
+    pub context: VaultKeyWrapContext,
 }
 
 /// Validation result for rotation data
@@ -107,9 +157,11 @@ pub fn encrypt_vault_key_for_member(
 pub fn encrypt_vault_key_with_muk(
     vault_key: &[u8],
     master_unlock_key: &[u8],
+    wrap_context: &VaultKeyWrapContext,
 ) -> Result<String, CryptoError> {
     let mut vault_key_base64 = BASE64.encode(vault_key);
-    let encrypted = match encrypt(&vault_key_base64, master_unlock_key) {
+    let aad_context = wrap_context.to_aad_context();
+    let encrypted = match encrypt_with_aad(&vault_key_base64, master_unlock_key, &aad_context) {
         Ok(value) => value,
         Err(e) => {
             vault_key_base64.zeroize();
@@ -117,8 +169,36 @@ pub fn encrypt_vault_key_with_muk(
         }
     };
     vault_key_base64.zeroize();
-    serde_json::to_string(&encrypted)
+    serde_json::to_string(&WrappedVaultKeyData {
+        encrypted,
+        context: wrap_context.clone(),
+    })
         .map_err(|e| CryptoError::Encryption(format!("JSON serialization failed: {}", e)))
+}
+
+/// Decrypt and validate a vault key wrapped with MUK + AAD context.
+pub fn decrypt_vault_key_with_muk(
+    wrapped_json: &str,
+    master_unlock_key: &[u8],
+    expected_context: &VaultKeyWrapContext,
+) -> Result<Vec<u8>, CryptoError> {
+    let wrapped: WrappedVaultKeyData = serde_json::from_str(wrapped_json)
+        .map_err(|e| CryptoError::InvalidInput(format!("Invalid wrapped vault key JSON: {}", e)))?;
+
+    if wrapped.context != *expected_context {
+        return Err(CryptoError::InvalidInput(
+            "Vault key wrap context mismatch".to_string(),
+        ));
+    }
+
+    let aad_context = wrapped.context.to_aad_context();
+    let mut decrypted_base64 =
+        decrypt_with_aad(&wrapped.encrypted, master_unlock_key, &aad_context)?;
+    let decrypted = BASE64
+        .decode(decrypted_base64.as_bytes())
+        .map_err(|e| CryptoError::Base64Decode(e.to_string()))?;
+    decrypted_base64.zeroize();
+    Ok(decrypted)
 }
 
 /// Re-encrypt an item with a new vault key
@@ -184,19 +264,21 @@ pub fn perform_key_rotation(
     old_vault_key: &[u8],
     members: &[MemberKeyData],
     items: &[ItemData],
+    vault_id: &str,
+    key_version: u64,
     current_user_id: &str,
     master_unlock_key: &[u8],
 ) -> Result<KeyRotationResult, CryptoError> {
     // 1. Generate new vault key
     let mut new_vault_key = generate_new_vault_key();
-    let new_vault_key_base64 = BASE64.encode(&new_vault_key);
 
     // 2. Encrypt new vault key for each member
     let mut member_encrypted_keys = Vec::with_capacity(members.len());
     for member in members {
         let encrypted_key = if member.user_id == current_user_id {
             // Current user: encrypt with AES-GCM using Master Unlock Key
-            match encrypt_vault_key_with_muk(&new_vault_key, master_unlock_key) {
+            let wrap_context = VaultKeyWrapContext::new(vault_id, current_user_id, key_version);
+            match encrypt_vault_key_with_muk(&new_vault_key, master_unlock_key, &wrap_context) {
                 Ok(value) => value,
                 Err(e) => {
                     new_vault_key.zeroize();
@@ -234,7 +316,6 @@ pub fn perform_key_rotation(
     }
 
     let result = KeyRotationResult {
-        new_vault_key_base64,
         member_encrypted_keys,
         re_encrypted_items,
     };
@@ -295,14 +376,19 @@ mod tests {
     fn test_encrypt_vault_key_with_muk() {
         let vault_key = generate_new_vault_key();
         let muk = generate_new_vault_key();
+        let context = VaultKeyWrapContext::new("vault-1", "user-1", 3);
 
-        let encrypted_json = encrypt_vault_key_with_muk(&vault_key, &muk).unwrap();
+        let encrypted_json = encrypt_vault_key_with_muk(&vault_key, &muk, &context).unwrap();
 
         // Should be valid JSON
-        let encrypted: EncryptedData = serde_json::from_str(&encrypted_json).unwrap();
-        let decrypted = decrypt(&encrypted, &muk).unwrap();
+        let wrapped: WrappedVaultKeyData = serde_json::from_str(&encrypted_json).unwrap();
+        assert_eq!(wrapped.context, context);
+        let decrypted = decrypt_vault_key_with_muk(&encrypted_json, &muk, &context).unwrap();
+        assert_eq!(decrypted, vault_key.to_vec());
 
-        assert_eq!(decrypted, BASE64.encode(&vault_key));
+        // Context mismatch must fail.
+        let wrong_context = VaultKeyWrapContext::new("vault-2", "user-1", 3);
+        assert!(decrypt_vault_key_with_muk(&encrypted_json, &muk, &wrong_context).is_err());
     }
 
     #[test]
@@ -328,7 +414,7 @@ mod tests {
         let new_encrypted = EncryptedData {
             ciphertext: re_encrypted.encrypted_data,
             iv: re_encrypted.encryption_iv,
-            algorithm: "AES-GCM".to_string(),
+            algorithm: "AES-GCM-AAD-V1".to_string(),
         };
         let decrypted = decrypt(&new_encrypted, &new_key).unwrap();
 
@@ -378,7 +464,8 @@ mod tests {
         ];
 
         let result =
-            perform_key_rotation(&old_vault_key, &members, &items, "owner-id", &muk).unwrap();
+            perform_key_rotation(&old_vault_key, &members, &items, "vault-1", 2, "owner-id", &muk)
+                .unwrap();
 
         // Should have encrypted keys for all members
         assert_eq!(result.member_encrypted_keys.len(), 2);
@@ -392,10 +479,12 @@ mod tests {
             .iter()
             .find(|k| k.user_id == "owner-id")
             .unwrap();
-        let owner_encrypted: EncryptedData =
-            serde_json::from_str(&owner_key_entry.encrypted_vault_key).unwrap();
-        let owner_decrypted = decrypt(&owner_encrypted, &muk).unwrap();
-        assert_eq!(owner_decrypted, result.new_vault_key_base64);
+        let owner_decrypted = decrypt_vault_key_with_muk(
+            &owner_key_entry.encrypted_vault_key,
+            &muk,
+            &VaultKeyWrapContext::new("vault-1", "owner-id", 2),
+        )
+        .unwrap();
 
         // Member's key should be RSA encrypted
         let member_key_entry = result
@@ -408,7 +497,8 @@ mod tests {
             &member_keys.private_key,
         )
         .unwrap();
-        assert_eq!(member_decrypted, result.new_vault_key_base64);
+        let member_key_bytes = BASE64.decode(member_decrypted.as_bytes()).unwrap();
+        assert_eq!(member_key_bytes, owner_decrypted);
     }
 
     #[test]

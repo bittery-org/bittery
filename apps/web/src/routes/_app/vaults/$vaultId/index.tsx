@@ -1,5 +1,6 @@
 import {
 	useAvailableTags,
+	useConvertVaultType,
 	useCreateItem,
 	useDeleteItem,
 	useDeleteVault,
@@ -24,6 +25,11 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
 	Sheet,
 	SheetContent,
 	Skeleton,
@@ -36,6 +42,7 @@ import {
 } from "@bittery/ui";
 import {
 	IconArrowLeftOutlineDuo18 as ArrowLeft,
+	IconDotsOutlineDuo18 as Dots,
 	IconKeyOutlineDuo18 as Key,
 	IconLockOutlineDuo18 as Lock,
 	IconPen2OutlineDuo18 as Pen,
@@ -49,37 +56,70 @@ import { useEffect, useRef, useState } from "react";
 import { CreateItemSheet } from "@/components/vault/create-item-sheet";
 import ItemDetail from "@/components/vault/item-detail";
 import { ItemForm } from "@/components/vault/item-form";
+import { ItemList } from "@/components/vault/item-list";
 import type { VaultOption } from "@/components/vault/types";
 import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { DeleteVaultDialog } from "@/components/vaults/delete-vault-dialog";
 import {
-	type UpdateVaultData,
 	EditVaultDialog,
+	type UpdateVaultData,
 } from "@/components/vaults/edit-vault-dialog";
-import { VaultMemberList } from "@/components/vaults/vault-member-list";
 import { VaultAvatar } from "@/components/vaults/vault-avatar";
-import { ItemList } from "@/components/vault/item-list";
+import { VaultMemberList } from "@/components/vaults/vault-member-list";
+import { m as messages } from "@/paraglide/messages";
+import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/$vaultId/")({
 	component: VaultDetailPage,
 	head: () => ({
-		meta: [{ title: "Vault - Bittery" }],
+		meta: [{ title: messages["vaults.detail.meta_title"]() }],
 	}),
 });
+
+type VaultMessageCatalog = ReturnType<typeof useI18n>["m"];
+
+function getVaultRoleLabel(role: string, m: VaultMessageCatalog): string {
+	switch (role) {
+		case "owner":
+			return m["vaults.common.role.owner"]();
+		case "admin":
+			return m["vaults.common.role.admin"]();
+		case "member":
+			return m["vaults.common.role.member"]();
+		case "read-only":
+			return m["vaults.common.role.read_only"]();
+		default:
+			return role;
+	}
+}
+
+function getVaultTypeLabel(type: string, m: VaultMessageCatalog): string {
+	switch (type) {
+		case "personal":
+			return m["vaults.common.type.personal"]();
+		case "team":
+			return m["vaults.common.type.team"]();
+		default:
+			return type;
+	}
+}
 
 function VaultDetailPage() {
 	const { vaultId } = Route.useParams();
 	const navigate = useNavigate();
 	const trpc = useTRPC();
+	const { m } = useI18n();
 
 	const { state: sidebarState, isMobile } = useSidebar();
-	const [selectedItem, setSelectedItem] = useState<DecryptedItem | null>(null);
+	const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 	const [showCompactHeader, setShowCompactHeader] = useState(false);
 	const [isCreateItemSheetOpen, setIsCreateItemSheetOpen] = useState(false);
 	const [isEditItemDialogOpen, setIsEditItemDialogOpen] = useState(false);
 	const [isDeleteItemDialogOpen, setIsDeleteItemDialogOpen] = useState(false);
 	const [isEditVaultDialogOpen, setIsEditVaultDialogOpen] = useState(false);
 	const [isDeleteVaultDialogOpen, setIsDeleteVaultDialogOpen] = useState(false);
+	const [isMakeSharedDialogOpen, setIsMakeSharedDialogOpen] = useState(false);
+	const [isMakePrivateDialogOpen, setIsMakePrivateDialogOpen] = useState(false);
 	const [pendingItemIdToSelect, setPendingItemIdToSelect] = useState<
 		string | null
 	>(null);
@@ -89,9 +129,14 @@ function VaultDetailPage() {
 	const { vaultInfo, isLoading: isLoadingVault } = useVaultInfo(vaultId);
 	const { items: decryptedItems, isLoading: isLoadingItems } =
 		useVaultItems(vaultId);
+	const selectedItem =
+		selectedItemId === null
+			? null
+			: decryptedItems.find((item) => item.id === selectedItemId) ?? null;
 	const createItem = useCreateItem();
 	const updateItem = useUpdateItem();
 	const deleteItem = useDeleteItem();
+	const convertVaultType = useConvertVaultType();
 	const updateVault = useUpdateVault();
 	const deleteVault = useDeleteVault();
 
@@ -139,23 +184,25 @@ function VaultDetailPage() {
 			(item) => item.id === pendingItemIdToSelect,
 		);
 		if (itemToSelect) {
-			setSelectedItem(itemToSelect);
+			setSelectedItemId(itemToSelect.id);
 			setPendingItemIdToSelect(null);
 		}
 	}, [decryptedItems, pendingItemIdToSelect]);
 
 	useEffect(() => {
-		if (!selectedItem) {
+		if (!selectedItemId) {
 			return;
 		}
 
-		const stillExists = decryptedItems.some((item) => item.id === selectedItem.id);
+		const stillExists = decryptedItems.some(
+			(item) => item.id === selectedItemId,
+		);
 		if (!stillExists) {
-			setSelectedItem(null);
+			setSelectedItemId(null);
 			setIsEditItemDialogOpen(false);
 			setIsDeleteItemDialogOpen(false);
 		}
-	}, [decryptedItems, selectedItem]);
+	}, [decryptedItems, selectedItemId]);
 
 	// Members still come from tRPC (no local hook for membership data)
 	const membersQuery = useQuery(
@@ -166,19 +213,32 @@ function VaultDetailPage() {
 	const availableTags = useAvailableTags(decryptedItems);
 
 	const role = vaultInfo?.role;
+	const isOwner = role === "owner";
 	const canWriteItems = role !== "read-only";
 	const canEditVault = role === "owner" || role === "admin";
 	const canDeleteVault = role === "owner";
 	const canManageMembers = canEditVault;
 	const itemCount = decryptedItems.length;
+	const hasMemberData = Array.isArray(membersQuery.data);
 	const memberCount = membersQuery.data?.length ?? 0;
+	const canMakeShared = isOwner && vaultInfo?.vaultType === "personal";
+	const canMakePrivate = isOwner && vaultInfo?.vaultType === "team";
+	const canMakePrivateNow =
+		canMakePrivate && hasMemberData && memberCount === 1;
+	const showMakePrivateDisabledAction = canMakePrivate && !canMakePrivateNow;
+	const showMakePrivateDisabledReason =
+		canMakePrivate && hasMemberData && memberCount > 1;
+	const hasVaultConversionActions =
+		canMakeShared || canMakePrivateNow || showMakePrivateDisabledAction;
+	const hasVaultMenuActions =
+		canEditVault || canDeleteVault || hasVaultConversionActions;
 
 	const handleItemSelect = (item: DecryptedItem) => {
-		setSelectedItem(item);
+		setSelectedItemId(item.id);
 	};
 
 	const handleCloseSheet = () => {
-		setSelectedItem(null);
+		setSelectedItemId(null);
 	};
 
 	const handleCreateItem = async (
@@ -193,7 +253,7 @@ function VaultDetailPage() {
 		});
 		setPendingItemIdToSelect(result.itemId);
 		setIsCreateItemSheetOpen(false);
-		toast.success("Item created successfully");
+		toast.success(m["vaults.detail.toast.item_created"]());
 	};
 
 	const handleUpdateItem = async (data: DecryptedItemData) => {
@@ -207,7 +267,7 @@ function VaultDetailPage() {
 			data,
 		});
 		setIsEditItemDialogOpen(false);
-		toast.success("Item updated successfully");
+		toast.success(m["vaults.detail.toast.item_updated"]());
 	};
 
 	const handleDeleteItem = async () => {
@@ -221,16 +281,17 @@ function VaultDetailPage() {
 				vaultId: selectedItem.vaultId,
 			});
 			setIsDeleteItemDialogOpen(false);
-			setSelectedItem(null);
-			toast.success("Item moved to trash");
-		} catch (error) {
-			const errorMessage =
-				error instanceof Error ? error.message : "Failed to delete item";
-			toast.error(errorMessage);
+			setSelectedItemId(null);
+			toast.success(m["vaults.detail.toast.item_moved_to_trash"]());
+		} catch {
+			toast.error(m["vaults.detail.toast.item_delete_error"]());
 		}
 	};
 
-	const handleUpdateVault = async (targetVaultId: string, data: UpdateVaultData) => {
+	const handleUpdateVault = async (
+		targetVaultId: string,
+		data: UpdateVaultData,
+	) => {
 		await updateVault.mutateAsync({
 			vaultId: targetVaultId,
 			name: data.name,
@@ -244,8 +305,31 @@ function VaultDetailPage() {
 		await deleteVault.mutateAsync({
 			vaultId: targetVaultId,
 		});
-		toast.success("Vault deleted successfully");
+		toast.success(m["vaults.detail.toast.vault_deleted"]());
 		navigate({ to: "/vaults" });
+	};
+
+	const handleConvertVaultType = async (targetType: "personal" | "team") => {
+		try {
+			await convertVaultType.mutateAsync({
+				vaultId,
+				targetType,
+				accountEmail: vaultInfo?.accountEmail,
+			});
+			if (targetType === "team") {
+				setIsMakeSharedDialogOpen(false);
+				toast.success(m["vaults.detail.toast.convert_to_shared_success"]());
+			} else {
+				setIsMakePrivateDialogOpen(false);
+				toast.success(m["vaults.detail.toast.convert_to_private_success"]());
+			}
+		} catch (error) {
+			const apiMessage =
+				error instanceof Error && error.message.trim().length > 0
+					? error.message
+					: null;
+			toast.error(apiMessage ?? m["vaults.detail.toast.convert_failed"]());
+		}
 	};
 
 	if (isLoadingVault) {
@@ -263,9 +347,11 @@ function VaultDetailPage() {
 				<div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
 					<Lock className="h-6 w-6 text-muted-foreground" />
 				</div>
-				<p className="text-muted-foreground">Vault not found</p>
+				<p className="text-muted-foreground">
+					{m["vaults.detail.empty.not_found"]()}
+				</p>
 				<Link to="/vaults" className="text-primary text-sm hover:underline">
-					Back to vaults
+					{m["vaults.detail.empty.back_to_vaults"]()}
 				</Link>
 			</div>
 		);
@@ -289,6 +375,18 @@ function VaultDetailPage() {
 			imageUrl: vaultInfo.vaultImageUrl,
 		},
 	];
+	const itemCountLabel =
+		itemCount === 1
+			? m["vaults.detail.count.items.single"]({ count: itemCount })
+			: m["vaults.detail.count.items.plural"]({ count: itemCount });
+	const memberCountLabel =
+		memberCount === 1
+			? m["vaults.detail.count.members.single"]({ count: memberCount })
+			: m["vaults.detail.count.members.plural"]({ count: memberCount });
+	const encryptedItemCountLabel =
+		itemCount === 1
+			? m["vaults.detail.count.items_encrypted.single"]({ count: itemCount })
+			: m["vaults.detail.count.items_encrypted.plural"]({ count: itemCount });
 
 	return (
 		<>
@@ -317,13 +415,13 @@ function VaultDetailPage() {
 					<div className="mx-auto flex h-full w-full max-w-6xl items-center justify-between pr-5 pl-14 lg:pr-6 lg:pl-16 xl:pl-6">
 						{vaultInfo && (
 							<>
-							<div className="flex items-center gap-2.5">
-								<VaultAvatar
-									name={vaultInfo.vaultName}
-									icon={vaultInfo.vaultIcon}
-									imageUrl={vaultInfo.vaultImageUrl}
-									size="xs"
-								/>
+								<div className="flex items-center gap-2.5">
+									<VaultAvatar
+										name={vaultInfo.vaultName}
+										icon={vaultInfo.vaultIcon}
+										imageUrl={vaultInfo.vaultImageUrl}
+										size="xs"
+									/>
 									<span className="font-medium text-sm">
 										{vaultInfo.vaultName}
 									</span>
@@ -331,13 +429,18 @@ function VaultDetailPage() {
 										variant={roleBadgeVariant}
 										className="px-1.5 py-0 text-[11px] capitalize"
 									>
-										{role}
+										{getVaultRoleLabel(role ?? "member", m)}
 									</Badge>
 								</div>
-								<Button variant="ghost" size="sm" className="h-7 text-xs" asChild>
+								<Button
+									variant="ghost"
+									size="sm"
+									className="h-7 text-xs"
+									asChild
+								>
 									<Link to="/vaults">
 										<ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
-										All Vaults
+										{m["vaults.detail.action.all_vaults"]()}
 									</Link>
 								</Button>
 							</>
@@ -364,10 +467,12 @@ function VaultDetailPage() {
 							<div className="space-y-3 lg:space-y-0.5">
 								<div className="flex flex-wrap items-center justify-center gap-2 lg:hidden">
 									<Badge variant="secondary" className="capitalize">
-										{vaultInfo.vaultType} vault
+										{m["vaults.detail.hero.mobile_vault_type"]({
+											type: getVaultTypeLabel(vaultInfo.vaultType, m),
+										})}
 									</Badge>
 									<Badge variant={roleBadgeVariant} className="capitalize">
-										{role}
+										{getVaultRoleLabel(role ?? "member", m)}
 									</Badge>
 								</div>
 								<div className="space-y-1.5 lg:space-y-0">
@@ -380,31 +485,28 @@ function VaultDetailPage() {
 												variant="secondary"
 												className="px-1.5 py-0 text-[11px] capitalize"
 											>
-												{vaultInfo.vaultType}
+												{getVaultTypeLabel(vaultInfo.vaultType, m)}
 											</Badge>
 											<Badge
 												variant={roleBadgeVariant}
 												className="px-1.5 py-0 text-[11px] capitalize"
 											>
-												{role}
+												{getVaultRoleLabel(role ?? "member", m)}
 											</Badge>
 										</div>
 									</div>
 									<p className="text-center text-muted-foreground lg:text-left lg:text-xs">
-										{itemCount} item{itemCount !== 1 ? "s" : ""} · {memberCount}{" "}
-										member
-										{memberCount !== 1 ? "s" : ""}
+										{itemCountLabel} · {memberCountLabel}
 									</p>
 								</div>
 								<div className="flex flex-wrap items-center justify-center gap-2 text-muted-foreground text-xs lg:hidden">
 									<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
 										<Key className="h-3.5 w-3.5" />
-										{itemCount} item{itemCount !== 1 ? "s" : ""} encrypted
+										{encryptedItemCountLabel}
 									</div>
 									<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
 										<Users className="h-3.5 w-3.5" />
-										{memberCount} member
-										{memberCount !== 1 ? "s" : ""}
+										{memberCountLabel}
 									</div>
 								</div>
 							</div>
@@ -424,7 +526,7 @@ function VaultDetailPage() {
 											!isMobile ? "mr-1.5" : undefined,
 										)}
 									/>
-									{!isMobile ? "All Vaults" : null}
+									{!isMobile ? m["vaults.detail.action.all_vaults"]() : null}
 								</Link>
 							</Button>
 							{canWriteItems && (
@@ -441,42 +543,100 @@ function VaultDetailPage() {
 											!isMobile ? "mr-1.5" : undefined,
 										)}
 									/>
-									{!isMobile ? "New Item" : null}
+									{!isMobile ? m["vaults.detail.action.new_item"]() : null}
 								</Button>
 							)}
-							{canEditVault && (
-								<Button
-									variant="outline"
-									size="sm"
-									className="h-8 px-2 text-xs lg:px-3"
-									onClick={() => setIsEditVaultDialogOpen(true)}
-									data-testid="edit-vault-button"
-								>
-									<Pen
-										className={cn(
-											"h-3.5 w-3.5",
-											!isMobile ? "mr-1.5" : undefined,
+							{hasVaultMenuActions && (
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button
+											variant="outline"
+											size="sm"
+											className="h-8 px-2 text-xs lg:px-3"
+											data-testid="vault-menu-button"
+										>
+											<Dots
+												className={cn(
+													"h-3.5 w-3.5",
+													!isMobile ? "mr-1.5" : undefined,
+												)}
+											/>
+											{!isMobile ? m["vaults.detail.action.manage"]() : null}
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="end">
+										{canEditVault && (
+											<DropdownMenuItem
+												onClick={() => setIsEditVaultDialogOpen(true)}
+												data-testid="edit-vault-button"
+											>
+												<Pen className="h-4 w-4" />
+												{m["vaults.detail.action.edit_vault"]()}
+											</DropdownMenuItem>
 										)}
-									/>
-									{!isMobile ? "Edit Vault" : null}
-								</Button>
-							)}
-							{canDeleteVault && (
-								<Button
-									variant="outline"
-									size="sm"
-									className="h-8 px-2 text-xs lg:px-3"
-									onClick={() => setIsDeleteVaultDialogOpen(true)}
-									data-testid="delete-vault-button"
-								>
-									<Trash
-										className={cn(
-											"h-3.5 w-3.5",
-											!isMobile ? "mr-1.5" : undefined,
+
+										{canEditVault && hasVaultConversionActions && (
+											<DropdownMenuSeparator />
 										)}
-									/>
-									{!isMobile ? "Delete Vault" : null}
-								</Button>
+
+										{canMakeShared && (
+											<DropdownMenuItem
+												onClick={() => setIsMakeSharedDialogOpen(true)}
+												disabled={convertVaultType.isPending}
+												data-testid="make-shared-button"
+											>
+												<Users className="h-4 w-4" />
+												{m["vaults.detail.convert.action.make_shared"]()}
+											</DropdownMenuItem>
+										)}
+
+										{canMakePrivateNow && (
+											<DropdownMenuItem
+												onClick={() => setIsMakePrivateDialogOpen(true)}
+												disabled={convertVaultType.isPending}
+												data-testid="make-private-button"
+											>
+												<Lock className="h-4 w-4" />
+												{m["vaults.detail.convert.action.make_private"]()}
+											</DropdownMenuItem>
+										)}
+
+										{showMakePrivateDisabledAction && (
+											<DropdownMenuItem
+												disabled
+												data-testid="make-private-button-disabled"
+											>
+												<Lock className="h-4 w-4" />
+												{m["vaults.detail.convert.action.make_private"]()}
+											</DropdownMenuItem>
+										)}
+
+										{showMakePrivateDisabledReason && (
+											<DropdownMenuItem disabled>
+												{m[
+													"vaults.detail.convert.make_private_disabled_reason"
+												]({
+													count: memberCount,
+												})}
+											</DropdownMenuItem>
+										)}
+
+										{hasVaultConversionActions && canDeleteVault && (
+											<DropdownMenuSeparator />
+										)}
+
+										{canDeleteVault && (
+											<DropdownMenuItem
+												variant="destructive"
+												onClick={() => setIsDeleteVaultDialogOpen(true)}
+												data-testid="delete-vault-button"
+											>
+												<Trash className="h-4 w-4" />
+												{m["vaults.detail.action.delete_vault"]()}
+											</DropdownMenuItem>
+										)}
+									</DropdownMenuContent>
+								</DropdownMenu>
 							)}
 						</div>
 					</div>
@@ -487,11 +647,11 @@ function VaultDetailPage() {
 					<TabsList className="w-fit shrink-0">
 						<TabsTrigger value="items">
 							<Key className="mr-2 h-4 w-4" />
-							Items
+							{m["vaults.detail.tab.items"]()}
 						</TabsTrigger>
 						<TabsTrigger value="members">
 							<Users className="mr-2 h-4 w-4" />
-							Members
+							{m["vaults.detail.tab.members"]()}
 							{memberCount > 1 && (
 								<span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
 									{memberCount}
@@ -500,14 +660,19 @@ function VaultDetailPage() {
 						</TabsTrigger>
 					</TabsList>
 
-					<TabsContent value="items" className="mt-4 flex min-h-0 flex-1 flex-col">
+					<TabsContent
+						value="items"
+						className="mt-4 flex min-h-0 flex-1 flex-col"
+					>
 						<div className="flex min-h-0 flex-1 flex-col space-y-3">
 							<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-								<h2 className="font-semibold text-lg tracking-tight">Vault Items</h2>
+								<h2 className="font-semibold text-lg tracking-tight">
+									{m["vaults.detail.items.heading"]()}
+								</h2>
 								<p className="text-muted-foreground text-sm">
 									{canWriteItems
-										? "Click on an item to view or update details."
-										: "You have read-only access to this vault."}
+										? m["vaults.detail.items.description.can_write"]()
+										: m["vaults.detail.items.description.read_only"]()}
 								</p>
 							</div>
 							<div className="min-h-0 flex-1">
@@ -516,7 +681,7 @@ function VaultDetailPage() {
 									isLoading={isLoadingItems}
 									vaultId={vaultId}
 									onItemSelect={handleItemSelect}
-									selectedItemId={selectedItem?.id}
+									selectedItemId={selectedItemId ?? undefined}
 									canWriteItems={canWriteItems}
 								/>
 							</div>
@@ -527,11 +692,13 @@ function VaultDetailPage() {
 						<div className="space-y-4">
 							<div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
 								<div>
-									<h2 className="font-semibold text-lg tracking-tight">Vault Members</h2>
+									<h2 className="font-semibold text-lg tracking-tight">
+										{m["vaults.detail.members.heading"]()}
+									</h2>
 									<p className="text-muted-foreground text-sm">
 										{canManageMembers
-											? "Manage who has access and their permissions."
-											: "People who have access to this vault."}
+											? m["vaults.detail.members.description.can_manage"]()
+											: m["vaults.detail.members.description.read_only"]()}
 									</p>
 								</div>
 								{canManageMembers && vaultInfo.vaultType === "team" && (
@@ -555,10 +722,7 @@ function VaultDetailPage() {
 						{vaultInfo.vaultType === "personal" && (
 							<div className="mt-4 flex items-center gap-3 rounded-xl border border-dashed p-5 text-muted-foreground text-sm">
 								<Lock className="h-5 w-5 shrink-0" />
-								<p>
-									This is a personal vault. To share access with others, convert
-									it to a team vault in the desktop app.
-								</p>
+								<p>{m["vaults.detail.members.personal_hint"]()}</p>
 							</div>
 						)}
 					</TabsContent>
@@ -569,7 +733,10 @@ function VaultDetailPage() {
 					open={!!selectedItem}
 					onOpenChange={(open) => !open && handleCloseSheet()}
 				>
-					<SheetContent className="w-full min-w-0 sm:max-w-2xl" data-testid="item-detail-sheet">
+					<SheetContent
+						className="w-full min-w-0 sm:max-w-2xl"
+						data-testid="item-detail-sheet"
+					>
 						<div className="h-full min-w-0 overflow-y-auto">
 							{selectedItem && (
 								<ItemDetail
@@ -579,8 +746,16 @@ function VaultDetailPage() {
 									vaultId={vaultId}
 									availableTags={availableTags}
 									canEdit={canWriteItems}
-									onEdit={canWriteItems ? () => setIsEditItemDialogOpen(true) : undefined}
-									onDelete={canWriteItems ? () => setIsDeleteItemDialogOpen(true) : undefined}
+									onEdit={
+										canWriteItems
+											? () => setIsEditItemDialogOpen(true)
+											: undefined
+									}
+									onDelete={
+										canWriteItems
+											? () => setIsDeleteItemDialogOpen(true)
+											: undefined
+									}
 								/>
 							)}
 						</div>
@@ -598,12 +773,20 @@ function VaultDetailPage() {
 			/>
 
 			{/* Edit Item Dialog */}
-			<Dialog open={isEditItemDialogOpen} onOpenChange={setIsEditItemDialogOpen}>
-				<DialogContent className="flex max-h-[85vh] max-w-2xl flex-col" data-testid="edit-item-dialog">
+			<Dialog
+				open={isEditItemDialogOpen}
+				onOpenChange={setIsEditItemDialogOpen}
+			>
+				<DialogContent
+					className="flex max-h-[85vh] max-w-2xl flex-col"
+					data-testid="edit-item-dialog"
+				>
 					<DialogHeader className="shrink-0">
-						<DialogTitle>Edit Item</DialogTitle>
+						<DialogTitle>
+							{m["vaults.detail.edit_item_dialog.title"]()}
+						</DialogTitle>
 						<DialogDescription>
-							Update your selected vault item.
+							{m["vaults.detail.edit_item_dialog.description"]()}
 						</DialogDescription>
 					</DialogHeader>
 					{selectedItem && (
@@ -615,7 +798,7 @@ function VaultDetailPage() {
 							}}
 							onCancel={() => setIsEditItemDialogOpen(false)}
 							isSubmitting={updateItem.isPending || !canWriteItems}
-							submitLabel="Update"
+							submitLabel={m["vaults.detail.edit_item_dialog.action.submit"]()}
 							selectedVaultId={vaultId}
 						/>
 					)}
@@ -623,13 +806,17 @@ function VaultDetailPage() {
 			</Dialog>
 
 			{/* Delete Item Confirmation Dialog */}
-			<Dialog open={isDeleteItemDialogOpen} onOpenChange={setIsDeleteItemDialogOpen}>
+			<Dialog
+				open={isDeleteItemDialogOpen}
+				onOpenChange={setIsDeleteItemDialogOpen}
+			>
 				<DialogContent data-testid="delete-item-dialog">
 					<DialogHeader>
-						<DialogTitle>Move to Trash?</DialogTitle>
+						<DialogTitle>
+							{m["vaults.detail.delete_item_dialog.title"]()}
+						</DialogTitle>
 						<DialogDescription>
-							This item will be moved to trash. You can restore it later or
-							delete it permanently from the trash.
+							{m["vaults.detail.delete_item_dialog.description"]()}
 						</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>
@@ -639,7 +826,7 @@ function VaultDetailPage() {
 							disabled={deleteItem.isPending}
 							data-testid="delete-item-cancel-button"
 						>
-							Cancel
+							{m["vaults.detail.delete_item_dialog.action.cancel"]()}
 						</Button>
 						<Button
 							variant="destructive"
@@ -647,7 +834,72 @@ function VaultDetailPage() {
 							disabled={deleteItem.isPending || !canWriteItems}
 							data-testid="delete-item-confirm-button"
 						>
-							Move to Trash
+							{m["vaults.detail.delete_item_dialog.action.confirm"]()}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			{/* Vault Type Conversion Dialogs */}
+			<Dialog
+				open={isMakeSharedDialogOpen}
+				onOpenChange={setIsMakeSharedDialogOpen}
+			>
+				<DialogContent data-testid="make-shared-dialog">
+					<DialogHeader>
+						<DialogTitle>
+							{m["vaults.detail.convert.confirm.make_shared.title"]()}
+						</DialogTitle>
+						<DialogDescription>
+							{m["vaults.detail.convert.confirm.make_shared.description"]()}
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={() => setIsMakeSharedDialogOpen(false)}
+							disabled={convertVaultType.isPending}
+						>
+							{m["settings.common.action.cancel"]()}
+						</Button>
+						<Button
+							onClick={() => handleConvertVaultType("team")}
+							disabled={convertVaultType.isPending}
+							data-testid="make-shared-confirm-button"
+						>
+							{m["vaults.detail.convert.confirm.make_shared.action.confirm"]()}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			<Dialog
+				open={isMakePrivateDialogOpen}
+				onOpenChange={setIsMakePrivateDialogOpen}
+			>
+				<DialogContent data-testid="make-private-dialog">
+					<DialogHeader>
+						<DialogTitle>
+							{m["vaults.detail.convert.confirm.make_private.title"]()}
+						</DialogTitle>
+						<DialogDescription>
+							{m["vaults.detail.convert.confirm.make_private.description"]()}
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={() => setIsMakePrivateDialogOpen(false)}
+							disabled={convertVaultType.isPending}
+						>
+							{m["settings.common.action.cancel"]()}
+						</Button>
+						<Button
+							onClick={() => handleConvertVaultType("personal")}
+							disabled={convertVaultType.isPending}
+							data-testid="make-private-confirm-button"
+						>
+							{m["vaults.detail.convert.confirm.make_private.action.confirm"]()}
 						</Button>
 					</DialogFooter>
 				</DialogContent>

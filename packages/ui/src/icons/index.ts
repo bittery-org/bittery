@@ -1,4 +1,8 @@
 export {
+	IconGermany as IconFlagGermany,
+	IconUnitedStates as IconFlagUnitedStates,
+} from "nucleo-flags";
+export {
 	IconArrowDoorOutOutlineDuo18,
 	IconArrowLeftOutlineDuo18,
 	IconArrowsLeftRightTrailOutlineDuo18,

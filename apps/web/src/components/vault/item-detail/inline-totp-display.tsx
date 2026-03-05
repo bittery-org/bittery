@@ -1,8 +1,10 @@
 import { generateTotp, type TotpResult } from "@bittery/shared/totp";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
-import { Button, cn, copyWithToast } from "@bittery/ui";
+import { Button, cn } from "@bittery/ui";
 import { IconCopyOutlineDuo18 as Copy } from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
+import { useI18n } from "@/providers/i18n-provider";
+import { handleCopy } from "./shared";
 
 interface InlineTotpDisplayProps {
 	totpSecret: string;
@@ -17,6 +19,7 @@ export function InlineTotpDisplay({
 	totpDigits = 6,
 	totpPeriod = 30,
 }: InlineTotpDisplayProps) {
+	const { m } = useI18n();
 	const [totpResult, setTotpResult] = useState<TotpResult | null>(null);
 
 	const generateCode = useCallback(async () => {
@@ -44,7 +47,7 @@ export function InlineTotpDisplay({
 	}, [generateCode]);
 
 	const handleCopyCode = () => {
-		copyWithToast(totpResult?.code, "Code");
+		handleCopy(totpResult?.code, m["vaults.detail.items.copy.label.code"](), m);
 	};
 
 	const progress = totpResult?.progress || 0;
@@ -64,7 +67,7 @@ export function InlineTotpDisplay({
 				type="button"
 				onClick={handleCopyCode}
 				className="group flex cursor-pointer items-center gap-3 rounded-lg transition-colors hover:bg-muted/50"
-				title="Click to copy"
+				title={m["vaults.detail.items.detail.totp.action.click_to_copy"]()}
 			>
 				<div className="relative flex size-9 items-center justify-center">
 					<svg
@@ -111,7 +114,7 @@ export function InlineTotpDisplay({
 							: "--- ---"}
 					</span>
 					<span className="text-muted-foreground text-xs">
-						One-time password
+						{m["vaults.detail.items.detail.login.field.one_time_password"]()}
 					</span>
 				</div>
 			</button>

@@ -1,5 +1,6 @@
 import { useVaultItems } from "@bittery/core/hooks";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
+import { useI18n } from "@/providers/i18n-provider";
 import { ItemListRow } from "../../../components/vault/item-list-row";
 
 export const Route = createFileRoute("/vault/$id")({
@@ -7,6 +8,7 @@ export const Route = createFileRoute("/vault/$id")({
 });
 
 function RouteComponent() {
+	const { m } = useI18n();
 	const { id, itemId } = useParams({ strict: false });
 
 	// Fetch and decrypt items for the selected vault
@@ -29,7 +31,9 @@ function RouteComponent() {
 		return (
 			<div className="flex w-78 flex-col border-r bg-background">
 				<div className="flex flex-1 items-center justify-center">
-					<div className="text-muted-foreground text-sm">Loading items...</div>
+					<div className="text-muted-foreground text-sm">
+						{m["vaults.favorites.loading"]()}
+					</div>
 				</div>
 			</div>
 		);
@@ -41,9 +45,11 @@ function RouteComponent() {
 				<div className="flex-1 overflow-y-auto">
 					{items.length === 0 ? (
 						<div className="flex h-full flex-col items-center justify-center p-8 text-center">
-							<h3 className="mb-2 font-semibold">No items yet</h3>
+							<h3 className="mb-2 font-semibold">
+								{m["vaults.detail.items.list.empty.default.title"]()}
+							</h3>
 							<p className="text-muted-foreground text-sm">
-								Create your first item
+								{m["vaults.detail.items.list.empty.default.description"]()}
 							</p>
 						</div>
 					) : (
@@ -51,7 +57,7 @@ function RouteComponent() {
 							{favoriteItems.length > 0 && (
 								<>
 									<div className="mb-2 px-3 font-semibold text-muted-foreground text-xs uppercase">
-										Favorites
+										{m["vaults.favorites.title"]()}
 									</div>
 									{id &&
 										favoriteItems.map((item) => (
@@ -65,7 +71,7 @@ function RouteComponent() {
 											/>
 										))}
 									<div className="mt-4 mb-2 px-3 font-semibold text-muted-foreground text-xs uppercase">
-										All Items
+										{m["vaults.detail.tab.items"]()}
 									</div>
 								</>
 							)}

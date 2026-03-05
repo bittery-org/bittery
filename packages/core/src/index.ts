@@ -71,6 +71,8 @@ export {
 	VaultRepositoryCoordinator,
 } from "./services/vault-repository-coordinator";
 export {
+	type ConvertVaultTypeInput,
+	type ConvertVaultTypeResult,
 	type CreateVaultInput,
 	type CreateVaultResult,
 	type ImageFileInput,

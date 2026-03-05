@@ -25,6 +25,7 @@ import {
 import { useForm } from "@tanstack/react-form";
 import { nanoid } from "nanoid";
 import { useState } from "react";
+import { useI18n } from "@/providers/i18n-provider";
 import type { CustomField } from "../types";
 import {
 	type BaseFormProps,
@@ -62,11 +63,12 @@ export function LoginForm({
 	initialData,
 	onSubmit,
 	onCancel,
-	submitLabel = "Save",
+	submitLabel,
 	isSubmitting = false,
 	vaults = [],
 	selectedVaultId,
 }: LoginFormProps) {
+	const { m } = useI18n();
 	const { currentVaultId, setCurrentVaultId } = useFormVault(
 		vaults,
 		selectedVaultId,
@@ -107,7 +109,9 @@ export function LoginForm({
 				totpState.secret &&
 				!isValidBase32(totpState.secret.replace(/\s/g, ""))
 			) {
-				setTotpSecretError("Invalid setup key. Please check the format.");
+				setTotpSecretError(
+					m["vaults.detail.items.form.totp.error.invalid_setup_key"](),
+				);
 				return;
 			}
 
@@ -139,9 +143,8 @@ export function LoginForm({
 
 				await onSubmit(submitData, currentVaultId);
 			} catch (error) {
-				const errorMessage =
-					error instanceof Error ? error.message : "Failed to save item";
-				toast.error(errorMessage);
+				toast.error(m["vaults.detail.items.form.toast.save_item_failed"]());
+				console.error(error);
 			}
 		},
 	});
@@ -193,7 +196,14 @@ export function LoginForm({
 		>
 			<div>
 				<form.Field name="title">
-					{(field) => <TitleField field={field} placeholder="My Account" />}
+					{(field) => (
+						<TitleField
+							field={field}
+							placeholder={m[
+								"vaults.detail.items.form.login.placeholder.title"
+							]()}
+						/>
+					)}
 				</form.Field>
 			</div>
 
@@ -201,7 +211,9 @@ export function LoginForm({
 				<form.Field name="url">
 					{(field) => (
 						<div className="space-y-2">
-							<Label htmlFor={field.name}>Website</Label>
+							<Label htmlFor={field.name}>
+								{m["vaults.detail.items.form.login.field.website"]()}
+							</Label>
 							<Input
 								id={field.name}
 								name={field.name}
@@ -209,7 +221,9 @@ export function LoginForm({
 								value={field.state.value}
 								onBlur={field.handleBlur}
 								onChange={(e) => field.handleChange(e.target.value)}
-								placeholder="https://example.com"
+								placeholder={m[
+									"vaults.detail.items.form.login.placeholder.website"
+								]()}
 							/>
 							{additionalUrls.map((url, index) => (
 								<InputGroup key={index}>
@@ -217,14 +231,18 @@ export function LoginForm({
 										type="url"
 										value={url}
 										onChange={(e) => updateAdditionalUrl(index, e.target.value)}
-										placeholder="https://example.com"
+										placeholder={m[
+											"vaults.detail.items.form.login.placeholder.website"
+										]()}
 									/>
 									<InputGroupAddon align="inline-end">
 										<InputGroupButton
 											type="button"
 											size="icon-sm"
 											onClick={() => removeAdditionalUrl(index)}
-											aria-label="Remove website"
+											aria-label={m[
+												"vaults.detail.items.form.login.action.remove_website"
+											]()}
 										>
 											<IconXmarkOutlineDuo18 className="size-4" />
 										</InputGroupButton>
@@ -239,7 +257,7 @@ export function LoginForm({
 								onClick={addAdditionalUrl}
 							>
 								<IconPlusOutlineDuo18 className="mr-1 size-3" />
-								Add another website
+								{m["vaults.detail.items.form.login.action.add_website"]()}
 							</Button>
 						</div>
 					)}
@@ -250,14 +268,18 @@ export function LoginForm({
 				<form.Field name="username">
 					{(field) => (
 						<div className="space-y-2">
-							<Label htmlFor={field.name}>Username</Label>
+							<Label htmlFor={field.name}>
+								{m["vaults.detail.items.form.login.field.username"]()}
+							</Label>
 							<Input
 								id={field.name}
 								name={field.name}
 								value={field.state.value}
 								onBlur={field.handleBlur}
 								onChange={(e) => field.handleChange(e.target.value)}
-								placeholder="user@example.com"
+								placeholder={m[
+									"vaults.detail.items.form.login.placeholder.username"
+								]()}
 							/>
 						</div>
 					)}
@@ -268,7 +290,9 @@ export function LoginForm({
 				<form.Field name="password">
 					{(field) => (
 						<div className="space-y-2">
-							<Label htmlFor={field.name}>Password</Label>
+							<Label htmlFor={field.name}>
+								{m["vaults.detail.items.form.login.field.password"]()}
+							</Label>
 							<InputGroup>
 								<InputGroupInput
 									id={field.name}
@@ -277,7 +301,9 @@ export function LoginForm({
 									value={field.state.value}
 									onBlur={field.handleBlur}
 									onChange={(e) => field.handleChange(e.target.value)}
-									placeholder="••••••••••"
+									placeholder={m[
+										"vaults.detail.items.form.login.placeholder.password"
+									]()}
 									className="font-mono"
 								/>
 								<InputGroupAddon align="inline-end">
@@ -287,7 +313,13 @@ export function LoginForm({
 											size="icon-sm"
 											onClick={() => setShowPassword(!showPassword)}
 											aria-label={
-												showPassword ? "Hide password" : "Show password"
+												showPassword
+													? m[
+															"vaults.detail.items.form.login.action.hide_password"
+														]()
+													: m[
+															"vaults.detail.items.form.login.action.show_password"
+														]()
 											}
 										>
 											{showPassword ? (
@@ -303,7 +335,9 @@ export function LoginForm({
 												<InputGroupButton
 													type="button"
 													size="icon-sm"
-													aria-label="Generate password"
+													aria-label={m[
+														"vaults.detail.items.form.login.action.generate_password"
+													]()}
 												>
 													<IconCircleKeyOutlineDuo18 className="size-4" />
 												</InputGroupButton>
@@ -326,7 +360,9 @@ export function LoginForm({
 			{/* Custom Fields */}
 			<div className="space-y-2">
 				<div className="flex items-center justify-between">
-					<Label>Custom Fields</Label>
+					<Label>
+						{m["vaults.detail.items.form.login.section.custom_fields"]()}
+					</Label>
 					<Button
 						type="button"
 						variant="outline"
@@ -334,14 +370,16 @@ export function LoginForm({
 						onClick={addCustomField}
 					>
 						<IconPlusOutlineDuo18 className="mr-1 size-3" />
-						Add Field
+						{m["vaults.detail.items.form.login.action.add_custom_field"]()}
 					</Button>
 				</div>
 				{customFields.map((field) => (
 					<div key={field.id} className="space-y-2 rounded-lg border p-3">
 						<div className="flex gap-2">
 							<Input
-								placeholder="Field label"
+								placeholder={m[
+									"vaults.detail.items.form.login.placeholder.custom_field_label"
+								]()}
 								value={field.label}
 								onChange={(e) =>
 									updateCustomField(field.id, { label: e.target.value })
@@ -357,10 +395,22 @@ export function LoginForm({
 								}
 								className="rounded-md border border-input bg-background px-3 py-2 text-sm"
 							>
-								<option value="text">Text</option>
-								<option value="password">Password</option>
-								<option value="email">Email</option>
-								<option value="url">URL</option>
+								<option value="text">
+									{m["vaults.detail.items.form.login.custom_field_type.text"]()}
+								</option>
+								<option value="password">
+									{m[
+										"vaults.detail.items.form.login.custom_field_type.password"
+									]()}
+								</option>
+								<option value="email">
+									{m[
+										"vaults.detail.items.form.login.custom_field_type.email"
+									]()}
+								</option>
+								<option value="url">
+									{m["vaults.detail.items.form.login.custom_field_type.url"]()}
+								</option>
 							</select>
 							<Button
 								type="button"
@@ -373,7 +423,9 @@ export function LoginForm({
 						</div>
 						<Input
 							type={field.type === "password" ? "password" : "text"}
-							placeholder="Value"
+							placeholder={m[
+								"vaults.detail.items.form.login.placeholder.custom_field_value"
+							]()}
 							value={field.value}
 							onChange={(e) =>
 								updateCustomField(field.id, { value: e.target.value })

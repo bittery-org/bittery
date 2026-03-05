@@ -21,9 +21,17 @@ import {
 	validateSecretKey as nativeValidateSecretKey,
 	type PrimeGroup,
 } from "@bittery/crypto-nitro";
+import {
+	unwrapPlaintextWithContext,
+	wrapPlaintextWithContext,
+} from "@bittery/shared/crypto-context-envelope";
+import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
+import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
 import type {
 	DerivedKeys,
 	EncryptedData,
+	EncryptionContext,
+	KdfParams,
 	RsaKeyPair,
 	SRPClientEphemeral,
 	SRPClientSession,
@@ -75,9 +83,23 @@ export async function deriveKeys(
 export async function encrypt(
 	plaintext: string,
 	key: Uint8Array,
+	context?: EncryptionContext,
 ): Promise<EncryptedData> {
 	const keyBase64 = arrayBufferToBase64(key);
-	return nativeEncrypt(plaintext, keyBase64);
+	const plaintextToEncrypt = context
+		? wrapPlaintextWithContext(plaintext, context)
+		: plaintext;
+	const encryptedData = await nativeEncrypt(plaintextToEncrypt, keyBase64);
+
+	if (context?.entityType === "vault_key") {
+		return attachVaultKeyWrapContext(encryptedData, {
+			vaultId: context.vaultId,
+			userId: context.userId,
+			keyVersion: context.version,
+		}) as EncryptedData;
+	}
+
+	return encryptedData;
 }
 
 /**
@@ -97,9 +119,23 @@ export async function encryptWithBase64Key(
 export async function decrypt(
 	encryptedData: EncryptedData,
 	key: Uint8Array,
+	context?: EncryptionContext,
 ): Promise<string> {
 	const keyBase64 = arrayBufferToBase64(key);
-	return nativeDecrypt(encryptedData.ciphertext, encryptedData.iv, keyBase64);
+	const decrypted = await nativeDecrypt(
+		encryptedData.ciphertext,
+		encryptedData.iv,
+		encryptedData.algorithm,
+		keyBase64,
+	);
+	return context ? unwrapPlaintextWithContext(decrypted, context) : decrypted;
+}
+
+export function validateServerKdfParams(
+	serverParams: KdfParams,
+	pinnedParams?: KdfParams | null,
+): void {
+	validateServerKdfParamsOrThrow(serverParams, pinnedParams);
 }
 
 /**
@@ -108,9 +144,10 @@ export async function decrypt(
 export async function decryptRaw(
 	ciphertext: string,
 	iv: string,
+	algorithm: string,
 	keyBase64: string,
 ): Promise<string> {
-	return nativeDecrypt(ciphertext, iv, keyBase64);
+	return nativeDecrypt(ciphertext, iv, algorithm, keyBase64);
 }
 
 /**
@@ -120,7 +157,7 @@ export async function decryptData(
 	data: EncryptedData,
 	keyBase64: string,
 ): Promise<string> {
-	return nativeDecrypt(data.ciphertext, data.iv, keyBase64);
+	return nativeDecrypt(data.ciphertext, data.iv, data.algorithm, keyBase64);
 }
 
 /**
@@ -128,6 +165,17 @@ export async function decryptData(
  */
 export function generateEncryptionKey(): string {
 	return nativeGenerateEncryptionKey();
+}
+
+/**
+ * Generate a UUID for client-side entity IDs.
+ */
+export function generateUuid(): string {
+	const random = globalThis?.crypto?.randomUUID?.();
+	if (random) {
+		return random;
+	}
+	return `item_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
 }
 
 // ============================================================================

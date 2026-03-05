@@ -27,6 +27,7 @@ import {
 	subscribeActiveAuthServerUrl,
 } from "@/lib/auth-server";
 import { type AccountMetadata, storage } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
 
 interface LoginSearchParams {
 	prefillEmail?: string;
@@ -41,6 +42,7 @@ export const Route = createFileRoute("/login")({
 });
 
 export function LoginPage() {
+	const { m } = useI18n();
 	const { prefillEmail } = Route.useSearch();
 	const queryClient = useQueryClient();
 	const fallbackServerUrl =
@@ -66,7 +68,7 @@ export function LoginPage() {
 	const applyServerUrl = async (candidateUrl: string) => {
 		const nextServerUrl = await setActiveAuthServerUrl(candidateUrl);
 		if (!nextServerUrl) {
-			toast.error("Invalid server URL");
+			toast.error(m["toast.auth.server.invalid_url"]());
 			return null;
 		}
 
@@ -163,12 +165,14 @@ export function LoginPage() {
 				queryClient.invalidateQueries({ queryKey: ["decrypted-item"] }),
 			]);
 
-			toast.success("Login successful");
+			toast.success(m["toast.auth.signin_success_simple"]());
 			triggerAuthRevealToVault();
 		},
 		onError: (error) => {
 			console.error("Login error:", error);
-			toast.error(error instanceof Error ? error.message : "Login failed");
+			toast.error(
+				error instanceof Error ? error.message : m["toast.auth.signin_error"](),
+			);
 		},
 	});
 
@@ -194,39 +198,41 @@ export function LoginPage() {
 				{isPrefilled && (
 					<div className="rounded-lg border border-amber-200/60 bg-amber-50/50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-950/20">
 						<p className="font-medium text-amber-900 text-sm dark:text-amber-200">
-							Session expired
+							{m["auth.signin.session_expired.title"]()}
 						</p>
 						<p className="mt-0.5 text-amber-800/70 text-xs dark:text-amber-300/70">
-							Please enter your password to sign in again.
+							{m["auth.signin.session_expired.desktop_description"]()}
 						</p>
 					</div>
 				)}
 
 				<div>
 					<h2 className="font-semibold text-xl tracking-tight">
-						Sign in to your vault
+						{m["auth.signin.title.default"]()}
 					</h2>
 					<p className="mt-1 text-muted-foreground text-sm">
-						Enter your credentials to access your passwords
+						{m["auth.signin.description.default"]()}
 					</p>
 				</div>
 
 				<form onSubmit={handleLogin} className="space-y-4">
 					<div className="grid gap-1.5">
-						<Label htmlFor="email">Email</Label>
+						<Label htmlFor="email">{m["auth.signin.label.email"]()}</Label>
 						<Input
 							id="email"
 							type="email"
 							value={email}
 							onChange={(e) => setEmail(e.target.value)}
 							required
-							placeholder="you@example.com"
+							placeholder={m["auth.signin.placeholder.email"]()}
 							disabled={isPrefilled}
 						/>
 					</div>
 
 					<div className="grid gap-1.5">
-						<Label htmlFor="secretKey">Secret Key</Label>
+						<Label htmlFor="secretKey">
+							{m["auth.signin.label.secret_key"]()}
+						</Label>
 						<InputGroup>
 							<InputGroupInput
 								id="secretKey"
@@ -234,7 +240,7 @@ export function LoginPage() {
 								value={secretKey}
 								onChange={(e) => setSecretKey(e.target.value)}
 								required
-								placeholder="A3-XXXXXX-XXXXXX-XXXXX"
+								placeholder={m["auth.signin.placeholder.secret_key"]()}
 								className="font-mono"
 							/>
 							<InputGroupAddon align="inline-end">
@@ -252,12 +258,14 @@ export function LoginPage() {
 							</InputGroupAddon>
 						</InputGroup>
 						<p className="text-muted-foreground text-xs">
-							Your Secret Key was provided when you created your account
+							{m["auth.signin.secret_key.help"]()}
 						</p>
 					</div>
 
 					<div className="grid gap-1.5">
-						<Label htmlFor="password">Password</Label>
+						<Label htmlFor="password">
+							{m["auth.signin.label.password"]()}
+						</Label>
 						<InputGroup>
 							<InputGroupInput
 								id="password"
@@ -265,7 +273,7 @@ export function LoginPage() {
 								value={password}
 								onChange={(e) => setPassword(e.target.value)}
 								required
-								placeholder="Enter your password"
+								placeholder={m["auth.signin.placeholder.password"]()}
 							/>
 							<InputGroupAddon align="inline-end">
 								<InputGroupButton
@@ -297,7 +305,7 @@ export function LoginPage() {
 								className="flex items-center gap-2 font-normal"
 							>
 								<IconFingerprintOutlineDuo18 className="h-4 w-4 text-muted-foreground" />
-								Enable biometric unlock
+								{m["auth.signin.biometric.enable"]()}
 							</Label>
 						</div>
 					)}
@@ -307,7 +315,9 @@ export function LoginPage() {
 						className="w-full"
 						disabled={loginMutation.isPending}
 					>
-						{loginMutation.isPending ? "Signing in..." : "Sign In"}
+						{loginMutation.isPending
+							? m["auth.signin.button.signing_in"]()
+							: m["auth.signin.button.sign_in"]()}
 					</Button>
 				</form>
 			</div>

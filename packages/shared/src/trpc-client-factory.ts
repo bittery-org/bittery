@@ -1,7 +1,7 @@
 /**
  * Per-Account tRPC Client Factory
  *
- * Creates tRPC clients for specific accounts with their JWT tokens.
+ * Creates tRPC clients for specific accounts with their auth session tokens.
  * This is necessary for multi-account operations because the API uses
  * ctx.session.userId from the JWT to determine which user's data to return.
  *
@@ -11,8 +11,10 @@
  */
 
 import type { AppRouter } from "@bittery/api/routers/index";
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
+import { createAppTrpcClient } from "./trpc-client";
 import { buildTrpcUrl, normalizeServerUrl } from "./server-url";
+import type { SessionSnapshot } from "./session-refresh";
+import { createSessionRefreshingTrpcClient } from "./trpc-session-refresh";
 
 // Forward declare to avoid circular dependency with @bittery/storage
 interface IStorageAdapter {
@@ -44,8 +46,16 @@ function getCacheKey(
 	authToken: string,
 	serverUrl: string,
 	clientId?: string,
+	mode: "static" | "session-refresh" = "static",
 ): string {
-	return `${serverUrl}:${authToken}:${clientId ?? ""}`;
+	return `${serverUrl}:${authToken}:${clientId ?? ""}:${mode}`;
+}
+
+interface AccountSessionRefreshOptions {
+	getSessionSnapshot: () => Promise<SessionSnapshot>;
+	getRefreshToken: () => Promise<string | null>;
+	storeRefreshedToken: (token: string) => Promise<void>;
+	thresholdRatio?: number;
 }
 
 function getRuntimeClientId(): string | undefined {
@@ -71,7 +81,7 @@ function getRuntimeClientId(): string | undefined {
  * Create a tRPC client for a specific account.
  *
  * This is needed for multi-account operations since the API uses
- * the JWT token to determine which user's data to return.
+ * the auth token to determine which user's data to return.
  *
  * NOTE: This is separate from the default tRPC client in providers.tsx,
  * which always uses the active account's token. Use this factory when
@@ -80,7 +90,7 @@ function getRuntimeClientId(): string | undefined {
  * Clients are cached to avoid creating new instances on every call.
  * Use `clearTrpcClientCache()` to clear the cache on logout.
  *
- * @param authToken - JWT token for the specific account
+ * @param authToken - Auth session token for the specific account
  * @param serverUrl - API server URL (defaults to env variable or localhost:3000)
  * @returns tRPC client configured for this account
  */
@@ -88,10 +98,12 @@ export function createAccountTrpcClient(
 	authToken: string,
 	serverUrl: string,
 	clientId?: string,
+	sessionRefresh?: AccountSessionRefreshOptions,
 ) {
 	const normalizedUrl = normalizeServerUrl(serverUrl) ?? DEFAULT_SERVER_URL;
 	const resolvedClientId = clientId ?? getRuntimeClientId();
-	const cacheKey = getCacheKey(authToken, normalizedUrl, resolvedClientId);
+	const mode = sessionRefresh ? "session-refresh" : "static";
+	const cacheKey = getCacheKey(authToken, normalizedUrl, resolvedClientId, mode);
 
 	// Return cached client if exists
 	const cachedClient = clientCache.get(cacheKey);
@@ -99,11 +111,20 @@ export function createAccountTrpcClient(
 		return cachedClient;
 	}
 
-	// Create new client
-	const client = createTRPCClient<AppRouter>({
-		links: [
-			httpBatchLink({
-				url: `${normalizedUrl}/trpc`,
+	const client = sessionRefresh
+		? createSessionRefreshingTrpcClient({
+				defaultServerUrl: normalizedUrl,
+				getServerUrl: async () => normalizedUrl,
+				getSessionSnapshot: sessionRefresh.getSessionSnapshot,
+				getRefreshToken: sessionRefresh.getRefreshToken,
+				storeRefreshedToken: sessionRefresh.storeRefreshedToken,
+				getClientId: resolvedClientId
+					? async () => resolvedClientId
+					: undefined,
+				thresholdRatio: sessionRefresh.thresholdRatio,
+			})
+		: createAppTrpcClient({
+				serverUrl: normalizedUrl,
 				headers: {
 					Authorization: `Bearer ${authToken}`,
 					...(resolvedClientId ? { "X-Client-Id": resolvedClientId } : {}),
@@ -115,9 +136,7 @@ export function createAccountTrpcClient(
 						credentials: "include",
 					});
 				},
-			}),
-		],
-	});
+			});
 
 	// Cache the client
 	clientCache.set(cacheKey, client);
@@ -129,7 +148,7 @@ export function createAccountTrpcClient(
  * Clear a specific account's tRPC client from cache.
  * Call this when a user logs out of a specific account.
  *
- * @param authToken - JWT token for the account
+ * @param authToken - Auth session token for the account
  * @param serverUrl - API server URL
  */
 export function clearAccountTrpcClient(
@@ -139,8 +158,20 @@ export function clearAccountTrpcClient(
 ) {
 	const normalizedUrl = normalizeServerUrl(serverUrl) ?? DEFAULT_SERVER_URL;
 	const resolvedClientId = clientId ?? getRuntimeClientId();
-	const cacheKey = getCacheKey(authToken, normalizedUrl, resolvedClientId);
-	clientCache.delete(cacheKey);
+	const staticCacheKey = getCacheKey(
+		authToken,
+		normalizedUrl,
+		resolvedClientId,
+		"static",
+	);
+	const refreshCacheKey = getCacheKey(
+		authToken,
+		normalizedUrl,
+		resolvedClientId,
+		"session-refresh",
+	);
+	clientCache.delete(staticCacheKey);
+	clientCache.delete(refreshCacheKey);
 }
 
 /**

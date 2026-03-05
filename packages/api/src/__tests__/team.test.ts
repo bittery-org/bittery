@@ -362,7 +362,7 @@ describe("Team Router", () => {
 		});
 	});
 
-		describe("invitations.send", () => {
+	describe("invitations.send", () => {
 		test("should create invitation for new email", async () => {
 			const { caller, userId } = await setup(teamRouter);
 			const teamId = await createTestTeam(userId, {
@@ -422,8 +422,8 @@ describe("Team Router", () => {
 			).rejects.toThrow("This user already belongs to a team");
 		});
 
-			test("should reject duplicate pending invitation", async () => {
-				const { caller, userId } = await setup(teamRouter);
+		test("should reject duplicate pending invitation", async () => {
+			const { caller, userId } = await setup(teamRouter);
 			const teamId = await createTestTeam(userId, {
 				billingPlan: "family",
 				billingStatus: "active",
@@ -439,84 +439,84 @@ describe("Team Router", () => {
 			});
 
 			// Duplicate invitation
-				await expect(
-					caller.invitations.send({
-						teamId,
-						email: inviteeEmail,
-						role: "member",
-					}),
-				).rejects.toThrow("An invitation is already pending for this email");
-			});
-
-			test("should reject pendingVaultKeys for vaults outside the invited team", async () => {
-				const [{ caller, userId }, { userId: otherOwnerId }] = await Promise.all([
-					setup(teamRouter),
-					setup(teamRouter),
-				]);
-				const teamId = await createTestTeam(userId, {
-					billingPlan: "family",
-					billingStatus: "active",
-					type: "family",
-				});
-				const otherTeamId = await createTestTeam(otherOwnerId, {
-					billingPlan: "family",
-					billingStatus: "active",
-					type: "family",
-				});
-				const foreignVaultId = await createTestVault(otherOwnerId, {
-					type: "team",
-					teamId: otherTeamId,
-				});
-
-				await expect(
-					caller.invitations.send({
-						teamId,
-						email: generateTestEmail(),
-						role: "member",
-						pendingVaultKeys: [
-							{
-								vaultId: foreignVaultId,
-								encryptedVaultKey: "encrypted-key",
-							},
-						],
-					}),
-				).rejects.toThrow("pendingVaultKeys contains vaults outside the invited team");
-			});
-
-			test("should reject pendingVaultKeys when inviter lacks vault admin rights", async () => {
-				const [{ userId: ownerId }, { userId: adminId, caller }] = await Promise.all([
-					setup(teamRouter),
-					setup(teamRouter),
-				]);
-				const teamId = await createTestTeam(ownerId, {
-					billingPlan: "family",
-					billingStatus: "active",
-					type: "family",
-				});
-				await addTeamMember(teamId, adminId, "admin");
-				const teamVaultId = await createTestVault(ownerId, {
-					type: "team",
+			await expect(
+				caller.invitations.send({
 					teamId,
-				});
-				await addVaultMember(teamVaultId, adminId, "read-only");
-
-				await expect(
-					caller.invitations.send({
-						teamId,
-						email: generateTestEmail(),
-						role: "member",
-						pendingVaultKeys: [
-							{
-								vaultId: teamVaultId,
-								encryptedVaultKey: "encrypted-key",
-							},
-						],
-					}),
-				).rejects.toThrow(
-					"You do not have permission to grant access for one or more vaults",
-				);
-			});
+					email: inviteeEmail,
+					role: "member",
+				}),
+			).rejects.toThrow("An invitation is already pending for this email");
 		});
+
+		test("should reject pendingVaultKeys for vaults outside the invited team", async () => {
+			const [{ caller, userId }, { userId: otherOwnerId }] = await Promise.all([
+				setup(teamRouter),
+				setup(teamRouter),
+			]);
+			const teamId = await createTestTeam(userId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			const otherTeamId = await createTestTeam(otherOwnerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			const foreignVaultId = await createTestVault(otherOwnerId, {
+				type: "team",
+				teamId: otherTeamId,
+			});
+
+			await expect(
+				caller.invitations.send({
+					teamId,
+					email: generateTestEmail(),
+					role: "member",
+					pendingVaultKeys: [
+						{
+							vaultId: foreignVaultId,
+							encryptedVaultKey: "encrypted-key",
+						},
+					],
+				}),
+			).rejects.toThrow(
+				"pendingVaultKeys contains vaults outside the invited team",
+			);
+		});
+
+		test("should reject pendingVaultKeys when inviter lacks vault admin rights", async () => {
+			const [{ userId: ownerId }, { userId: adminId, caller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			await addTeamMember(teamId, adminId, "admin");
+			const teamVaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
+			await addVaultMember(teamVaultId, adminId, "read-only");
+
+			await expect(
+				caller.invitations.send({
+					teamId,
+					email: generateTestEmail(),
+					role: "member",
+					pendingVaultKeys: [
+						{
+							vaultId: teamVaultId,
+							encryptedVaultKey: "encrypted-key",
+						},
+					],
+				}),
+			).rejects.toThrow(
+				"You do not have permission to grant access for one or more vaults",
+			);
+		});
+	});
 
 	describe("invitations.list", () => {
 		test("should return pending invitations for a team", async () => {
@@ -805,8 +805,8 @@ describe("Team Router", () => {
 		});
 	});
 
-		describe("invitations.accept - edge cases", () => {
-			test("should reject if user already belongs to a team", async () => {
+	describe("invitations.accept - edge cases", () => {
+		test("should reject if user already belongs to a team", async () => {
 			const [
 				{ userId: ownerId },
 				{ userId: inviteeId, email: inviteeEmail, caller },
@@ -825,55 +825,60 @@ describe("Team Router", () => {
 			// Give invitee their own team first
 			await createTestTeam(inviteeId, { name: "Already Has Team" });
 
-				await expect(caller.invitations.accept({ token })).rejects.toThrow(
-					"You already belong to a team",
-				);
-			});
+			await expect(caller.invitations.accept({ token })).rejects.toThrow(
+				"You already belong to a team",
+			);
+		});
 
-			test("should reject invitation with unauthorized pendingVaultKeys and leave membership unchanged", async () => {
-				const [
-					{ userId: ownerId },
-					{ userId: inviteeId, email: inviteeEmail, caller },
-					{ userId: otherOwnerId },
-				] = await Promise.all([
-					setup(teamRouter),
-					setup(teamRouter),
-					setup(teamRouter),
-				]);
-				const teamId = await createTestTeam(ownerId, {
-					billingPlan: "family",
-					billingStatus: "active",
-					type: "family",
-				});
-				const otherTeamId = await createTestTeam(otherOwnerId, {
-					billingPlan: "family",
-					billingStatus: "active",
-					type: "family",
-				});
-				const foreignVaultId = await createTestVault(otherOwnerId, {
-					type: "team",
-					teamId: otherTeamId,
-				});
-				const { token } = await createTestInvitation(teamId, ownerId, inviteeEmail, {
+		test("should reject invitation with unauthorized pendingVaultKeys and leave membership unchanged", async () => {
+			const [
+				{ userId: ownerId },
+				{ userId: inviteeId, email: inviteeEmail, caller },
+				{ userId: otherOwnerId },
+			] = await Promise.all([
+				setup(teamRouter),
+				setup(teamRouter),
+				setup(teamRouter),
+			]);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			const otherTeamId = await createTestTeam(otherOwnerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			const foreignVaultId = await createTestVault(otherOwnerId, {
+				type: "team",
+				teamId: otherTeamId,
+			});
+			const { token } = await createTestInvitation(
+				teamId,
+				ownerId,
+				inviteeEmail,
+				{
 					pendingVaultKeys: JSON.stringify([
 						{
 							vaultId: foreignVaultId,
 							encryptedVaultKey: "malicious-key",
 						},
 					]),
-				});
+				},
+			);
 
-				await expect(caller.invitations.accept({ token })).rejects.toThrow(
-					"pendingVaultKeys contains vaults outside the invited team",
-				);
+			await expect(caller.invitations.accept({ token })).rejects.toThrow(
+				"pendingVaultKeys contains vaults outside the invited team",
+			);
 
-				const invitee = await getUser(inviteeId);
-				expect(invitee?.teamId).toBeNull();
-			});
+			const invitee = await getUser(inviteeId);
+			expect(invitee?.teamId).toBeNull();
 		});
+	});
 
-		describe("invitations.cancel - edge cases", () => {
-			test("should deny non-inviter non-admin from cancelling", async () => {
+	describe("invitations.cancel - edge cases", () => {
+		test("should deny non-inviter non-admin from cancelling", async () => {
 			const [{ userId: ownerId }, { userId: memberId, caller }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);
 			const teamId = await createTestTeam(ownerId, {
@@ -888,39 +893,39 @@ describe("Team Router", () => {
 				"someone@example.com",
 			);
 
-				await expect(caller.invitations.cancel({ invitationId })).rejects.toThrow(
-					"Insufficient permissions",
-				);
-			});
-
-			test("should deny inviter after they lose team membership", async () => {
-				const [{ userId: ownerId }, { userId: inviterId, caller }] =
-					await Promise.all([setup(teamRouter), setup(teamRouter)]);
-				const teamId = await createTestTeam(ownerId, {
-					billingPlan: "family",
-					billingStatus: "active",
-					type: "family",
-				});
-				await addTeamMember(teamId, inviterId, "admin");
-				const { invitationId } = await createTestInvitation(
-					teamId,
-					inviterId,
-					"someone@example.com",
-				);
-
-				await db
-					.update(user)
-					.set({ teamId: null, role: "member" })
-					.where(eq(user.id, inviterId));
-
-				await expect(caller.invitations.cancel({ invitationId })).rejects.toThrow(
-					"Insufficient permissions",
-				);
-			});
+			await expect(caller.invitations.cancel({ invitationId })).rejects.toThrow(
+				"Insufficient permissions",
+			);
 		});
 
-		describe("invitations.resend - edge cases", () => {
-			test("should deny non-inviter non-admin from resending", async () => {
+		test("should deny inviter after they lose team membership", async () => {
+			const [{ userId: ownerId }, { userId: inviterId, caller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			await addTeamMember(teamId, inviterId, "admin");
+			const { invitationId } = await createTestInvitation(
+				teamId,
+				inviterId,
+				"someone@example.com",
+			);
+
+			await db
+				.update(user)
+				.set({ teamId: null, role: "member" })
+				.where(eq(user.id, inviterId));
+
+			await expect(caller.invitations.cancel({ invitationId })).rejects.toThrow(
+				"Insufficient permissions",
+			);
+		});
+	});
+
+	describe("invitations.resend - edge cases", () => {
+		test("should deny non-inviter non-admin from resending", async () => {
 			const [{ userId: ownerId }, { userId: memberId, caller }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);
 			const teamId = await createTestTeam(ownerId, {
@@ -935,36 +940,36 @@ describe("Team Router", () => {
 				"someone@example.com",
 			);
 
-				await expect(caller.invitations.resend({ invitationId })).rejects.toThrow(
-					"Insufficient permissions",
-				);
-			});
-
-			test("should deny inviter resend after they lose team membership", async () => {
-				const [{ userId: ownerId }, { userId: inviterId, caller }] =
-					await Promise.all([setup(teamRouter), setup(teamRouter)]);
-				const teamId = await createTestTeam(ownerId, {
-					billingPlan: "family",
-					billingStatus: "active",
-					type: "family",
-				});
-				await addTeamMember(teamId, inviterId, "admin");
-				const { invitationId } = await createTestInvitation(
-					teamId,
-					inviterId,
-					"someone@example.com",
-				);
-
-				await db
-					.update(user)
-					.set({ teamId: null, role: "member" })
-					.where(eq(user.id, inviterId));
-
-				await expect(caller.invitations.resend({ invitationId })).rejects.toThrow(
-					"Insufficient permissions",
-				);
-			});
+			await expect(caller.invitations.resend({ invitationId })).rejects.toThrow(
+				"Insufficient permissions",
+			);
 		});
+
+		test("should deny inviter resend after they lose team membership", async () => {
+			const [{ userId: ownerId }, { userId: inviterId, caller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			await addTeamMember(teamId, inviterId, "admin");
+			const { invitationId } = await createTestInvitation(
+				teamId,
+				inviterId,
+				"someone@example.com",
+			);
+
+			await db
+				.update(user)
+				.set({ teamId: null, role: "member" })
+				.where(eq(user.id, inviterId));
+
+			await expect(caller.invitations.resend({ invitationId })).rejects.toThrow(
+				"Insufficient permissions",
+			);
+		});
+	});
 
 	describe("invitations.decline", () => {
 		test("should decline invitation", async () => {

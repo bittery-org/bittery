@@ -109,9 +109,7 @@ export function createLocalItemCacheService(
 			const resolvedAccount = input.accountEmail
 				? {
 						email: input.accountEmail,
-						repo: vaultCoordinator.getRepositoryForEmail(
-							input.accountEmail,
-						),
+						repo: vaultCoordinator.getRepositoryForEmail(input.accountEmail),
 					}
 				: vaultCoordinator.findAccountForItem(input.itemId);
 			if (!resolvedAccount) {

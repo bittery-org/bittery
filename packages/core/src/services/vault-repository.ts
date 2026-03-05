@@ -12,6 +12,7 @@ import type {
 	EncryptedData,
 	ICrypto,
 } from "@bittery/types";
+import { buildItemEncryptionContext } from "./encryption-context";
 
 export interface VaultView {
 	id: string;
@@ -74,6 +75,21 @@ export interface BootstrapItemsClient {
 				cursor?: string;
 				limit?: number;
 			}) => Promise<BootstrapItemPage>;
+		};
+	};
+	vault?: {
+		list?: {
+			query: () => Promise<
+				Array<{
+					id: string;
+					name: string;
+					type: "personal" | "team";
+					icon: string | null;
+					imageUrl: string | null;
+					encryptedVaultKey: string;
+					role: "owner" | "admin" | "member" | "read-only";
+				}>
+			>;
 		};
 	};
 }
@@ -186,6 +202,20 @@ export class VaultRepository {
 		};
 	}
 
+	private async resolveUserId(): Promise<string> {
+		const sessionData = await this.storage.getStoredSessionData?.(this.email);
+		if (sessionData?.userId) {
+			return sessionData.userId;
+		}
+
+		const activeUserId = await this.storage.getActiveAccountUserId();
+		if (activeUserId) {
+			return activeUserId;
+		}
+
+		throw new Error("User ID not available for encryption context");
+	}
+
 	private toCachedItem(item: VaultRepositoryItem): CachedEncryptedItem {
 		return {
 			id: item.id,
@@ -229,6 +259,30 @@ export class VaultRepository {
 		}
 	}
 
+	private async fetchVaultKeysFromServer(
+		client: BootstrapItemsClient,
+	): Promise<VaultKeyData[] | null> {
+		if (!client.vault?.list?.query) {
+			return null;
+		}
+
+		try {
+			const vaults = await client.vault.list.query();
+			return vaults.map((vault) => ({
+				vaultId: vault.id,
+				vaultName: vault.name,
+				vaultType: vault.type,
+				vaultIcon: vault.icon,
+				vaultImageUrl: vault.imageUrl,
+				encryptedVaultKey: vault.encryptedVaultKey,
+				role: vault.role,
+			}));
+		} catch (error) {
+			console.error("[VaultRepository] Failed to refresh vault keys:", error);
+			return null;
+		}
+	}
+
 	private async persistItem(item: CachedEncryptedItem): Promise<void> {
 		if (!this.storage.upsertCachedItem) {
 			return;
@@ -268,6 +322,10 @@ export class VaultRepository {
 		}
 
 		const vaultKeys = await this.storage.getVaultKeys(this.email);
+		if (!vaultKeys) {
+			throw new Error(`No vault key found for vault ${vaultId}.`);
+		}
+
 		const vaultKeyData = vaultKeys?.find(
 			(vaultKey) => vaultKey.vaultId === vaultId,
 		);
@@ -279,17 +337,39 @@ export class VaultRepository {
 		if (!muk) {
 			throw new Error("Master Unlock Key not available. Please log in again.");
 		}
+		const userId = await this.resolveUserId();
 
 		const encryptedPrivateKey = await this.storage.getEncryptedPrivateKey(
 			this.email,
 		);
 
-		const decrypted = await decryptVaultKeyUtil({
-			encryptedVaultKey: vaultKeyData.encryptedVaultKey,
-			masterUnlockKey: muk,
-			encryptedPrivateKey,
-			crypto: this.crypto as unknown as VaultKeyCryptoProvider,
-		});
+		let decrypted: Uint8Array;
+		try {
+			decrypted = await decryptVaultKeyUtil({
+				encryptedVaultKey: vaultKeyData.encryptedVaultKey,
+				masterUnlockKey: muk,
+				encryptedPrivateKey,
+				expectedVaultId: vaultId,
+				expectedUserId: userId,
+				crypto: this.crypto as unknown as VaultKeyCryptoProvider,
+			});
+		} catch (error) {
+			const message =
+				error instanceof Error ? error.message : String(error ?? "");
+			if (
+				message !== "Vault key wrap vault mismatch" &&
+				message !== "Vault key wrap user mismatch"
+			) {
+				throw error;
+			}
+
+			decrypted = await decryptVaultKeyUtil({
+				encryptedVaultKey: vaultKeyData.encryptedVaultKey,
+				masterUnlockKey: muk,
+				encryptedPrivateKey,
+				crypto: this.crypto as unknown as VaultKeyCryptoProvider,
+			});
+		}
 
 		this.vaultKeys.set(vaultId, decrypted);
 		return decrypted;
@@ -297,6 +377,13 @@ export class VaultRepository {
 
 	async decryptItem(item: CachedEncryptedItem): Promise<VaultRepositoryItem> {
 		const vaultKey = await this.decryptVaultKey(item.vaultId);
+		const userId = item.lastModifiedBy ?? (await this.resolveUserId());
+		const context = buildItemEncryptionContext({
+			vaultId: item.vaultId,
+			itemId: item.id,
+			version: item.version,
+			userId,
+		});
 		const decryptedData = await this.crypto.decrypt(
 			{
 				ciphertext: item.encryptedData,
@@ -304,6 +391,7 @@ export class VaultRepository {
 				algorithm: item.encryptionAlgorithm,
 			},
 			vaultKey,
+			context,
 		);
 		return this.buildItem(item, JSON.parse(decryptedData) as DecryptedItemData);
 	}
@@ -432,6 +520,12 @@ export class VaultRepository {
 		}
 
 		const targetVaultKey = await this.decryptVaultKey(targetVaultId);
+		const context = buildItemEncryptionContext({
+			vaultId: targetVaultId,
+			itemId: itemId,
+			version: (existing.version ?? 1) + 1,
+			userId: await this.resolveUserId(),
+		});
 		const decrypted = await this.crypto.decrypt(
 			{
 				ciphertext: newEncryptedPayload.ciphertext,
@@ -439,6 +533,7 @@ export class VaultRepository {
 				algorithm: newEncryptedPayload.algorithm,
 			},
 			targetVaultKey,
+			context,
 		);
 		const parsed = JSON.parse(decrypted) as DecryptedItemData;
 
@@ -554,13 +649,19 @@ export class VaultRepository {
 			cursor = page.nextCursor;
 		}
 
-		const storedVaultKeys = await this.storage.getVaultKeys(this.email);
+		const refreshedVaultKeys = await this.fetchVaultKeysFromServer(client);
+		const vaultKeys =
+			refreshedVaultKeys ?? (await this.storage.getVaultKeys(this.email));
 
 		this.vaults.clear();
 		for (const vault of vaults.values()) {
 			this.vaults.set(vault.id, vault);
 		}
-		this.mergeVaultKeyEntries(storedVaultKeys);
+
+		if (refreshedVaultKeys) {
+			await this.storage.storeVaultKeys(refreshedVaultKeys, this.email);
+		}
+		this.mergeVaultKeyEntries(vaultKeys);
 
 		this.items.clear();
 		for (const cachedItem of cachedItems) {
@@ -577,7 +678,10 @@ export class VaultRepository {
 
 		await Promise.all([
 			this.storage.setCachedItems?.(cachedItems, this.email),
-			this.storage.setCachedVaults?.(Array.from(vaults.values()), this.email),
+			this.storage.setCachedVaults?.(
+				Array.from(this.vaults.values()),
+				this.email,
+			),
 			this.storage.setItemCacheMetadata?.(
 				{
 					lastFullSyncAt: Date.now(),
@@ -680,8 +784,22 @@ export class VaultRepository {
 	async encryptWithVaultKey(
 		vaultId: string,
 		data: DecryptedItemData,
+		options?: {
+			itemId?: string;
+			version?: number;
+			userId?: string;
+		},
 	): Promise<EncryptedData> {
 		const vaultKey = await this.decryptVaultKey(vaultId);
-		return this.crypto.encrypt(JSON.stringify(data), vaultKey);
+		if (!options?.itemId) {
+			return this.crypto.encrypt(JSON.stringify(data), vaultKey);
+		}
+		const context = buildItemEncryptionContext({
+			vaultId,
+			itemId: options.itemId,
+			version: options.version ?? 1,
+			userId: options.userId ?? (await this.resolveUserId()),
+		});
+		return this.crypto.encrypt(JSON.stringify(data), vaultKey, context);
 	}
 }

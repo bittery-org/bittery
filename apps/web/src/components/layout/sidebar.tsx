@@ -29,9 +29,32 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ImportOnboardingCard } from "@/components/import/import-onboarding-card";
 import { appNavItems, filterNavItems } from "@/components/layout/nav-config";
 import { storage } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
+
+function getNavLabel(path: string, m: ReturnType<typeof useI18n>["m"]) {
+	switch (path) {
+		case "/home":
+			return m["nav.item.dashboard"]();
+		case "/security":
+			return m["nav.item.sentinel"]();
+		case "/billing":
+			return m["nav.item.billing"]();
+		case "/team":
+			return m["nav.item.team"]();
+		case "/admin":
+			return m["nav.item.admin"]();
+		case "/vaults":
+			return m["nav.item.vaults"]();
+		case "/settings":
+			return m["nav.item.settings"]();
+		default:
+			return path;
+	}
+}
 
 function UserNav() {
 	const trpc = useTRPC();
+	const { m } = useI18n();
 	const queryClient = useQueryClient();
 	const navigate = useNavigate();
 	const { isMobile } = useSidebar();
@@ -68,7 +91,7 @@ function UserNav() {
 							</Avatar>
 							<div className="grid flex-1 text-left text-sm leading-tight">
 								<span className="truncate font-medium">
-									{user?.name || "User"}
+									{user?.name || m["nav.user.default_name"]()}
 								</span>
 								<span className="truncate text-muted-foreground text-xs">
 									{user?.email || ""}
@@ -86,7 +109,7 @@ function UserNav() {
 						<DropdownMenuItem asChild>
 							<Link to="/settings" className="cursor-pointer">
 								<Settings className="mr-2 h-4 w-4" />
-								Settings
+								{m["nav.menu.settings"]()}
 							</Link>
 						</DropdownMenuItem>
 						<DropdownMenuSeparator />
@@ -95,7 +118,7 @@ function UserNav() {
 							className="cursor-pointer text-destructive"
 						>
 							<LogOut className="mr-2 h-4 w-4" />
-							Log out
+							{m["nav.menu.log_out"]()}
 						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>
@@ -106,6 +129,7 @@ function UserNav() {
 
 export function AppSidebar() {
 	const trpc = useTRPC();
+	const { m } = useI18n();
 	const routerState = useRouterState();
 	const currentPath = routerState.location.pathname;
 	const { state } = useSidebar();
@@ -163,23 +187,27 @@ export function AppSidebar() {
 
 			<SidebarContent>
 				<SidebarGroup>
-					<SidebarGroupLabel>Navigation</SidebarGroupLabel>
+					<SidebarGroupLabel>{m["nav.group.navigation"]()}</SidebarGroupLabel>
 					<SidebarGroupContent>
 						<SidebarMenu>
-							{navItems.map((item) => (
-								<SidebarMenuItem key={item.path}>
-									<SidebarMenuButton
-										asChild
-										isActive={currentPath.startsWith(item.path)}
-										tooltip={item.label}
-									>
-										<Link to={item.path}>
-											<item.icon />
-											<span>{item.label}</span>
-										</Link>
-									</SidebarMenuButton>
-								</SidebarMenuItem>
-							))}
+							{navItems.map((item) => {
+								const label = getNavLabel(item.path, m);
+
+								return (
+									<SidebarMenuItem key={item.path}>
+										<SidebarMenuButton
+											asChild
+											isActive={currentPath.startsWith(item.path)}
+											tooltip={label}
+										>
+											<Link to={item.path}>
+												<item.icon />
+												<span>{label}</span>
+											</Link>
+										</SidebarMenuButton>
+									</SidebarMenuItem>
+								);
+							})}
 						</SidebarMenu>
 					</SidebarGroupContent>
 				</SidebarGroup>

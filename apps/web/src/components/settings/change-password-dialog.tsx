@@ -1,3 +1,7 @@
+import {
+	buildVaultKeyEncryptionContext,
+	isAesEncryptedVaultKey,
+} from "@bittery/shared";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -27,8 +31,10 @@ import {
 	encrypt,
 	generateSRPRegistration,
 } from "@/lib/wasm-crypto";
+import { useI18n } from "@/providers/i18n-provider";
 
 export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
+	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
 	const [currentPassword, setCurrentPassword] = useState("");
 	const [newPassword, setNewPassword] = useState("");
@@ -54,14 +60,12 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			}>;
 		}) => trpcClient.auth.changePassword.mutate(input),
 		onSuccess: () => {
-			toast.success(
-				"Password changed successfully. Please sign in with your new password.",
-			);
+			toast.success(m["settings.change_password_dialog.toast.changed"]());
 			setOpen(false);
 			navigate({ to: "/login" });
 		},
-		onError: (error: Error) => {
-			toast.error(error.message);
+		onError: () => {
+			toast.error(m["settings.change_password_dialog.toast.change_failed"]());
 			setIsProcessing(false);
 		},
 	});
@@ -70,37 +74,43 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 		e.preventDefault();
 
 		if (!currentPassword.trim()) {
-			toast.error("Please enter your current password");
+			toast.error(
+				m["settings.change_password_dialog.toast.current_password_required"](),
+			);
 			return;
 		}
 		if (!newPassword.trim()) {
-			toast.error("Please enter a new password");
+			toast.error(
+				m["settings.change_password_dialog.toast.new_password_required"](),
+			);
 			return;
 		}
 		if (newPassword.length < 8) {
-			toast.error("Password must be at least 8 characters");
+			toast.error(
+				m["settings.change_password_dialog.toast.password_min_length"](),
+			);
 			return;
 		}
 		if (newPassword !== confirmPassword) {
-			toast.error("Passwords do not match");
+			toast.error(
+				m["settings.change_password_dialog.toast.password_mismatch"](),
+			);
 			return;
 		}
 
 		const secretKey = await storage.getStoredSecretKey();
 		if (!secretKey) {
-			toast.error(
-				"Secret key not found. Please log out and log in again with your full credentials.",
-			);
+			toast.error(m["settings.common.toast.secret_key_not_found"]());
 			return;
 		}
 
 		if (!userQuery.data?.encryptedPrivateKey) {
-			toast.error("Could not load user data. Please try again.");
+			toast.error(m["settings.common.toast.user_data_load_failed"]());
 			return;
 		}
 
 		if (!vaultListQuery.data || vaultListQuery.data.length === 0) {
-			toast.error("Could not load vault keys. Please try again.");
+			toast.error(m["settings.common.toast.vault_keys_load_failed"]());
 			return;
 		}
 
@@ -143,31 +153,47 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			// Only re-encrypt vault keys for vaults the user created (MUK-encrypted)
 			// Shared vault keys are RSA-encrypted and don't need re-encryption
 			const serverVaultKeys = vaultListQuery.data;
-			const currentUserId = userQuery.data.id;
 			const encryptedVaultKeys: Array<{
 				vaultId: string;
 				encryptedVaultKey: string;
 			}> = [];
 
 			for (const vk of serverVaultKeys) {
-				// Skip vaults where user was added (RSA-encrypted vault keys)
-				// Only re-encrypt vaults the user created (MUK-encrypted vault keys)
-				if (vk.createdById !== currentUserId) {
+				// Only re-encrypt AES(MUK)-wrapped keys.
+				// RSA-wrapped keys are not tied to the master unlock key.
+				if (!isAesEncryptedVaultKey(vk.encryptedVaultKey)) {
 					continue;
 				}
 
 				// Decrypt vault key with old MUK
-				const encryptedVaultKeyData = JSON.parse(vk.encryptedVaultKey);
-				const decryptedVaultKeyBase64 = await decrypt(
-					encryptedVaultKeyData,
-					oldMasterUnlockKey,
-				);
+					const encryptedVaultKeyData = JSON.parse(vk.encryptedVaultKey) as {
+						ciphertext: string;
+						iv: string;
+						algorithm: string;
+						context?: { keyVersion?: number };
+					};
+					const keyVersion = Number.isInteger(
+						encryptedVaultKeyData.context?.keyVersion,
+					)
+						? (encryptedVaultKeyData.context?.keyVersion as number)
+						: 1;
+					const vaultKeyContext = buildVaultKeyEncryptionContext({
+						vaultId: vk.id,
+						userId: userQuery.data.id,
+						keyVersion,
+					});
+					const decryptedVaultKeyBase64 = await decrypt(
+						encryptedVaultKeyData,
+						oldMasterUnlockKey,
+						vaultKeyContext,
+					);
 
-				// Re-encrypt vault key with new MUK
-				const newEncryptedVaultKey = await encrypt(
-					decryptedVaultKeyBase64,
-					newMasterUnlockKey,
-				);
+					// Re-encrypt vault key with new MUK
+					const newEncryptedVaultKey = await encrypt(
+						decryptedVaultKeyBase64,
+						newMasterUnlockKey,
+						vaultKeyContext,
+					);
 
 				encryptedVaultKeys.push({
 					vaultId: vk.id,
@@ -184,9 +210,7 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			});
 		} catch (error) {
 			console.error("Password change error:", error);
-			toast.error(
-				"Failed to change password. Please verify your current password is correct.",
-			);
+			toast.error(m["settings.change_password_dialog.toast.change_failed"]());
 			setIsProcessing(false);
 		}
 	};
@@ -196,29 +220,33 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			<DialogTrigger asChild>
 				<Button variant="outline">
 					<Key className="mr-2 h-4 w-4" />
-					Change Password
+					{m["settings.change_password_dialog.trigger"]()}
 				</Button>
 			</DialogTrigger>
 			<DialogContent>
 				<form onSubmit={handleSubmit}>
 					<DialogHeader>
-						<DialogTitle>Change Password</DialogTitle>
+						<DialogTitle>
+							{m["settings.change_password_dialog.title"]()}
+						</DialogTitle>
 						<DialogDescription>
-							Change your master password. Your private key will be re-encrypted
-							with the new password. Your existing Recovery Key setup will be
-							cleared and must be configured again.
+							{m["settings.change_password_dialog.description"]()}
 						</DialogDescription>
 					</DialogHeader>
 					<div className="grid gap-4 py-4">
 						<div className="grid gap-2">
-							<Label htmlFor="currentPassword">Current Password</Label>
+							<Label htmlFor="currentPassword">
+								{m["settings.change_password_dialog.field.current_password"]()}
+							</Label>
 							<div className="relative">
 								<Input
 									id="currentPassword"
 									type={showCurrentPassword ? "text" : "password"}
 									value={currentPassword}
 									onChange={(e) => setCurrentPassword(e.target.value)}
-									placeholder="Enter current password"
+									placeholder={m[
+										"settings.change_password_dialog.placeholder.current_password"
+									]()}
 									autoFocus
 									className="pr-10"
 								/>
@@ -238,14 +266,18 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 							</div>
 						</div>
 						<div className="grid gap-2">
-							<Label htmlFor="newPassword">New Password</Label>
+							<Label htmlFor="newPassword">
+								{m["settings.change_password_dialog.field.new_password"]()}
+							</Label>
 							<div className="relative">
 								<Input
 									id="newPassword"
 									type={showNewPassword ? "text" : "password"}
 									value={newPassword}
 									onChange={(e) => setNewPassword(e.target.value)}
-									placeholder="Enter new password"
+									placeholder={m[
+										"settings.change_password_dialog.placeholder.new_password"
+									]()}
 									className="pr-10"
 								/>
 								<Button
@@ -259,24 +291,34 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 								</Button>
 							</div>
 							<p className="text-muted-foreground text-xs">
-								Must be at least 8 characters long
+								{m[
+									"settings.change_password_dialog.hint.password_min_length"
+								]()}
 							</p>
 						</div>
 						<div className="grid gap-2">
-							<Label htmlFor="confirmPassword">Confirm New Password</Label>
+							<Label htmlFor="confirmPassword">
+								{m[
+									"settings.change_password_dialog.field.confirm_new_password"
+								]()}
+							</Label>
 							<Input
 								id="confirmPassword"
 								type="password"
 								value={confirmPassword}
 								onChange={(e) => setConfirmPassword(e.target.value)}
-								placeholder="Confirm new password"
+								placeholder={m[
+									"settings.change_password_dialog.placeholder.confirm_new_password"
+								]()}
 							/>
 						</div>
 					</div>
 					<div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
 						<p className="text-amber-700 text-xs dark:text-amber-300">
-							<strong>Warning:</strong> After changing your password, set up a
-							new Recovery Key in Settings before you sign out.
+							<strong>{m["settings.common.warning"]()}</strong>{" "}
+							{m[
+								"settings.change_password_dialog.warning.recovery_key_setup"
+							]()}
 						</p>
 					</div>
 					<DialogFooter>
@@ -285,15 +327,15 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 							variant="outline"
 							onClick={() => setOpen(false)}
 						>
-							Cancel
+							{m["settings.common.action.cancel"]()}
 						</Button>
 						<Button
 							type="submit"
 							disabled={isProcessing || changePasswordMutation.isPending}
 						>
 							{isProcessing || changePasswordMutation.isPending
-								? "Changing..."
-								: "Change Password"}
+								? m["settings.change_password_dialog.action.changing"]()
+								: m["settings.change_password_dialog.action.submit"]()}
 						</Button>
 					</DialogFooter>
 				</form>

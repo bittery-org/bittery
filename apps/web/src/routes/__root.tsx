@@ -11,6 +11,7 @@ import {
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import type { TRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import appCss from "../index.css?url";
+import { useI18n } from "../providers/i18n-provider";
 
 export interface RouterAppContext {
 	trpc: TRPCOptionsProxy<AppRouter>;
@@ -75,16 +76,24 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 });
 
 function RootDocument() {
+	const { locale } = useI18n();
+	const isDev = import.meta.env.DEV;
+
 	return (
-		<html lang="en">
+		<html lang={locale}>
 			<head>
 				<HeadContent />
 			</head>
 			<body>
 				<Outlet />
 				<Toaster richColors />
-				<TanStackRouterDevtools position="bottom-left" />
-				<ReactQueryDevtools position="bottom" buttonPosition="bottom-right" />
+				{isDev && <TanStackRouterDevtools position="bottom-left" />}
+				{isDev && (
+					<ReactQueryDevtools
+						position="bottom"
+						buttonPosition="bottom-right"
+					/>
+				)}
 				<Scripts />
 			</body>
 		</html>

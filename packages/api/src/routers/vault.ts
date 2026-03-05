@@ -218,6 +218,7 @@ export const vaultRouter = router({
 	create: protectedProcedure
 		.input(
 			z.object({
+				vaultId: z.string().min(1).optional(),
 				name: z.string().min(1),
 				type: z.enum(["personal", "team"]),
 				encryptedVaultKey: z.string(),
@@ -225,11 +226,11 @@ export const vaultRouter = router({
 				imageKey: z.string().min(1).optional(),
 				clientId: z.string().optional(), // For sync event correlation
 			}),
-			)
-			.mutation(async ({ input, ctx }) => {
-				const vaultId = nanoid();
-				let teamId: string | null = null;
-				let sharedVaultLimit: number | null = null;
+		)
+		.mutation(async ({ input, ctx }) => {
+			const vaultId = input.vaultId ?? nanoid();
+			let teamId: string | null = null;
+			let sharedVaultLimit: number | null = null;
 
 			if (input.type === "team") {
 				const currentUser = await db.query.user.findFirst({
@@ -259,40 +260,40 @@ export const vaultRouter = router({
 					});
 				}
 
-					const limits = resolveEffectiveEntitlementLimits(
-						{
-							mode: getBitteryMode(),
-							billingPlan: currentUser.team.billingPlan,
-							billingStatus: currentUser.team.billingStatus,
-						},
-						entitlements,
-					);
-					sharedVaultLimit = limits.shared_vaults;
+				const limits = resolveEffectiveEntitlementLimits(
+					{
+						mode: getBitteryMode(),
+						billingPlan: currentUser.team.billingPlan,
+						billingStatus: currentUser.team.billingStatus,
+					},
+					entitlements,
+				);
+				sharedVaultLimit = limits.shared_vaults;
 
-					teamId = currentTeamId;
+				teamId = currentTeamId;
+			}
+
+			let broadcast: SyncBroadcastPayload;
+			await db.transaction(async (tx) => {
+				if (input.type === "team" && teamId && sharedVaultLimit !== null) {
+					await tx.execute(
+						sql`SELECT pg_advisory_xact_lock(hashtext(${`shared-vaults:${teamId}`}))`,
+					);
+					const sharedVaultCount = await tx
+						.select({ count: sql<number>`count(*)::int` })
+						.from(vault)
+						.where(and(eq(vault.teamId, teamId), eq(vault.type, "team")));
+
+					if ((sharedVaultCount[0]?.count ?? 0) >= sharedVaultLimit) {
+						throw new TRPCError({
+							code: "FORBIDDEN",
+							message: `Your current plan allows up to ${sharedVaultLimit} shared vaults. Upgrade to add more.`,
+						});
+					}
 				}
 
-				let broadcast: SyncBroadcastPayload;
-				await db.transaction(async (tx) => {
-					if (input.type === "team" && teamId && sharedVaultLimit !== null) {
-						await tx.execute(
-							sql`SELECT pg_advisory_xact_lock(hashtext(${`shared-vaults:${teamId}`}))`,
-						);
-						const sharedVaultCount = await tx
-							.select({ count: sql<number>`count(*)::int` })
-							.from(vault)
-							.where(and(eq(vault.teamId, teamId), eq(vault.type, "team")));
-
-						if ((sharedVaultCount[0]?.count ?? 0) >= sharedVaultLimit) {
-							throw new TRPCError({
-								code: "FORBIDDEN",
-								message: `Your current plan allows up to ${sharedVaultLimit} shared vaults. Upgrade to add more.`,
-							});
-						}
-					}
-
-					// Create vault
-					await tx.insert(vault).values({
+				// Create vault
+				await tx.insert(vault).values({
 					id: vaultId,
 					name: input.name,
 					type: input.type,
@@ -454,6 +455,202 @@ export const vaultRouter = router({
 				imageUrl: updatedVault.imageKey
 					? getStoragePublicUrl(updatedVault.imageKey)
 					: null,
+			};
+		}),
+
+	/**
+	 * Convert vault type (owner only)
+	 */
+	convertType: protectedProcedure
+		.input(
+			z.object({
+				vaultId: z.string(),
+				targetType: z.enum(["personal", "team"]),
+				personalEncryptedVaultKey: z.string().optional(),
+				clientId: z.string().optional(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			const ownerVaultKey = await db.query.vaultKey.findFirst({
+				where: (vk, { and, eq }) =>
+					and(eq(vk.vaultId, input.vaultId), eq(vk.userId, ctx.session.userId)),
+				with: {
+					vault: true,
+				},
+			});
+
+			if (!ownerVaultKey || ownerVaultKey.role !== "owner") {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "Only the vault owner can convert vault type",
+				});
+			}
+
+			const previousType = ownerVaultKey.vault.type;
+			if (previousType === input.targetType) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Vault is already the requested type",
+				});
+			}
+
+			let targetTeamId: string | null = ownerVaultKey.vault.teamId;
+			let sharedVaultLimit: number | null = null;
+			if (previousType === "personal" && input.targetType === "team") {
+				const currentUser = await db.query.user.findFirst({
+					where: (member, { eq }) => eq(member.id, ctx.session.userId),
+					columns: { teamId: true },
+					with: { team: true },
+				});
+
+				if (!currentUser?.teamId || !currentUser.team) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "You must belong to a team to convert to a shared vault",
+					});
+				}
+
+				const entitlements = resolveEffectiveEntitlements({
+					mode: getBitteryMode(),
+					billingPlan: currentUser.team.billingPlan,
+					billingStatus: currentUser.team.billingStatus,
+				});
+				if (!entitlements.vault_sharing) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message:
+							"Shared vaults are only available on Family or Team plans with active billing.",
+					});
+				}
+
+				const limits = resolveEffectiveEntitlementLimits(
+					{
+						mode: getBitteryMode(),
+						billingPlan: currentUser.team.billingPlan,
+						billingStatus: currentUser.team.billingStatus,
+					},
+					entitlements,
+				);
+				sharedVaultLimit = limits.shared_vaults;
+				targetTeamId = currentUser.teamId;
+			}
+
+			let broadcast: SyncBroadcastPayload;
+			await db.transaction(async (tx) => {
+				if (
+					previousType === "personal" &&
+					input.targetType === "team" &&
+					targetTeamId &&
+					sharedVaultLimit !== null
+				) {
+					await tx.execute(
+						sql`SELECT pg_advisory_xact_lock(hashtext(${`shared-vaults:${targetTeamId}`}))`,
+					);
+					const sharedVaultCount = await tx
+						.select({ count: sql<number>`count(*)::int` })
+						.from(vault)
+						.where(and(eq(vault.teamId, targetTeamId), eq(vault.type, "team")));
+
+					if ((sharedVaultCount[0]?.count ?? 0) >= sharedVaultLimit) {
+						throw new TRPCError({
+							code: "FORBIDDEN",
+							message: `Your current plan allows up to ${sharedVaultLimit} shared vaults. Upgrade to add more.`,
+						});
+					}
+
+					await tx
+						.update(vault)
+						.set({
+							type: "team",
+							teamId: targetTeamId,
+							updatedAt: new Date(),
+						})
+						.where(eq(vault.id, input.vaultId));
+				} else if (previousType === "team" && input.targetType === "personal") {
+					const members = await tx.query.vaultKey.findMany({
+						where: (vk, { eq }) => eq(vk.vaultId, input.vaultId),
+					});
+
+					const ownerIsOnlyMember =
+						members.length === 1 &&
+						members[0]?.userId === ctx.session.userId &&
+						members[0]?.role === "owner";
+					if (!ownerIsOnlyMember) {
+						throw new TRPCError({
+							code: "BAD_REQUEST",
+							message:
+								"Team vault can only be converted to personal when the owner is the only member",
+						});
+					}
+
+					await tx
+						.update(vault)
+						.set({
+							type: "personal",
+							teamId: null,
+							updatedAt: new Date(),
+						})
+						.where(eq(vault.id, input.vaultId));
+
+					if (input.personalEncryptedVaultKey) {
+						await tx
+							.update(vaultKey)
+							.set({
+								encryptedVaultKey: input.personalEncryptedVaultKey,
+							})
+							.where(
+								and(
+									eq(vaultKey.vaultId, input.vaultId),
+									eq(vaultKey.userId, ctx.session.userId),
+								),
+							);
+					}
+
+					targetTeamId = null;
+				}
+
+				broadcast = await createSyncEvent(
+					{
+						eventType: "vault_updated",
+						entityId: input.vaultId,
+						entityType: "vault",
+						vaultId: input.vaultId,
+						userId: ctx.session.userId,
+						clientId: input.clientId,
+						version: 1,
+						metadata: {
+							reason: "vault_type_converted",
+							fromType: previousType,
+							toType: input.targetType,
+						},
+					},
+					tx,
+					ctx.clientId,
+				);
+			});
+
+			await broadcastSyncPayload(broadcast!);
+
+			await logAuditEvent({
+				userId: ctx.session.userId,
+				action: "vault_updated",
+				device: ctx.device,
+				entityType: "vault",
+				entityId: input.vaultId,
+				metadata: {
+					reason: "vault_type_converted",
+					fromType: previousType,
+					toType: input.targetType,
+					previousTeamId: ownerVaultKey.vault.teamId,
+					newTeamId: targetTeamId,
+				},
+			});
+
+			return {
+				success: true as const,
+				vaultId: input.vaultId,
+				previousType,
+				newType: input.targetType,
 			};
 		}),
 
@@ -766,6 +963,7 @@ export const vaultRouter = router({
 	createItem: protectedProcedure
 		.input(
 			z.object({
+				itemId: z.string().max(64).optional(),
 				vaultId: z.string(),
 				category: z.enum([
 					"login",
@@ -776,7 +974,7 @@ export const vaultRouter = router({
 				]),
 				encryptedData: z.string(),
 				encryptionIv: z.string(),
-				encryptionAlgorithm: z.string().default("AES-GCM"),
+				encryptionAlgorithm: z.string().default("AES-GCM-AAD-V1"),
 				clientId: z.string().optional(), // For sync event correlation
 			}),
 		)
@@ -799,7 +997,7 @@ export const vaultRouter = router({
 				throw new Error("Read-only access cannot create items");
 			}
 
-			const itemId = nanoid();
+			const itemId = input.itemId ?? nanoid();
 
 			let broadcast: SyncBroadcastPayload;
 			await db.transaction(async (tx) => {
@@ -856,6 +1054,7 @@ export const vaultRouter = router({
 				clientId: z.string().optional(),
 				items: z.array(
 					z.object({
+						itemId: z.string().max(64),
 						category: z.enum([
 							"login",
 							"secure-note",
@@ -866,7 +1065,7 @@ export const vaultRouter = router({
 						favorite: z.boolean().optional(),
 						encryptedData: z.string(),
 						encryptionIv: z.string(),
-						encryptionAlgorithm: z.string().default("AES-GCM"),
+						encryptionAlgorithm: z.string().default("AES-GCM-AAD-V1"),
 					}),
 				),
 			}),
@@ -904,6 +1103,14 @@ export const vaultRouter = router({
 				};
 			}
 
+			const importedItemIds = input.items.map((itemData) => itemData.itemId);
+			if (new Set(importedItemIds).size !== importedItemIds.length) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Duplicate item IDs in import payload",
+				});
+			}
+
 			// Process inserts in DB batches, but emit only one sync event for the import
 			// to avoid flooding SSE with one event per item.
 			const batchSize = 200;
@@ -914,7 +1121,7 @@ export const vaultRouter = router({
 				for (let i = 0; i < input.items.length; i += batchSize) {
 					const batch = input.items.slice(i, i + batchSize);
 					const itemsToInsert = batch.map((itemData) => ({
-						id: nanoid(),
+						id: itemData.itemId,
 						vaultId: input.vaultId,
 						category: itemData.category,
 						favorite: itemData.favorite ?? false,
@@ -980,6 +1187,7 @@ export const vaultRouter = router({
 				itemId: z.string(),
 				encryptedData: z.string().optional(),
 				encryptionIv: z.string().optional(),
+				encryptionAlgorithm: z.string().optional(),
 				expectedVersion: z.number().optional(), // For conflict detection
 				clientId: z.string().optional(), // For sync event correlation
 			}),
@@ -1032,6 +1240,9 @@ export const vaultRouter = router({
 					.set({
 						...(input.encryptedData && { encryptedData: input.encryptedData }),
 						...(input.encryptionIv && { encryptionIv: input.encryptionIv }),
+						...(input.encryptionAlgorithm && {
+							encryptionAlgorithm: input.encryptionAlgorithm,
+						}),
 						version: newVersion,
 						lastModifiedBy: ctx.session.userId,
 						updatedAt: new Date(),
@@ -1329,6 +1540,7 @@ export const vaultRouter = router({
 				targetVaultId: z.string(),
 				encryptedData: z.string(), // Re-encrypted with target vault key
 				encryptionIv: z.string(),
+				encryptionAlgorithm: z.string().optional(),
 				clientId: z.string().optional(),
 			}),
 		)
@@ -1410,6 +1622,9 @@ export const vaultRouter = router({
 						vaultId: input.targetVaultId,
 						encryptedData: input.encryptedData,
 						encryptionIv: input.encryptionIv,
+						...(input.encryptionAlgorithm && {
+							encryptionAlgorithm: input.encryptionAlgorithm,
+						}),
 						version: newVersion,
 						lastModifiedBy: ctx.session.userId,
 						updatedAt: new Date(),
@@ -1624,7 +1839,7 @@ export const vaultRouter = router({
 				encryptedContentType: z.string().min(1),
 				encryptionIv: z.string().min(1),
 				encryptedContentTypeIv: z.string().min(1),
-				encryptionAlgorithm: z.string().default("AES-GCM"),
+				encryptionAlgorithm: z.string().default("AES-GCM-AAD-V1"),
 				fileSize: z.number().int().positive(),
 			}),
 		)
@@ -1651,25 +1866,25 @@ export const vaultRouter = router({
 					),
 			});
 
-				if (!userVaultKey || userVaultKey.role === "read-only") {
-					throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
-				}
+			if (!userVaultKey || userVaultKey.role === "read-only") {
+				throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
+			}
 
-				if (
-					!isValidAttachmentUploadKey({
-						key: input.storageKey,
-						userId: ctx.session.userId,
-						itemId: input.itemId,
-					})
-				) {
-					throw new TRPCError({
-						code: "BAD_REQUEST",
-						message: "Invalid or expired attachment upload key",
-					});
-				}
+			if (
+				!isValidAttachmentUploadKey({
+					key: input.storageKey,
+					userId: ctx.session.userId,
+					itemId: input.itemId,
+				})
+			) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Invalid or expired attachment upload key",
+				});
+			}
 
-				const attachmentId = nanoid();
-				let broadcast: SyncBroadcastPayload;
+			const attachmentId = nanoid();
+			let broadcast: SyncBroadcastPayload;
 			await db.transaction(async (tx) => {
 				await tx.insert(itemAttachment).values({
 					id: attachmentId,
@@ -1804,7 +2019,7 @@ export const vaultRouter = router({
 				attachmentId: z.string(),
 				encryptedName: z.string().min(1),
 				encryptionIv: z.string().min(1),
-				encryptionAlgorithm: z.string().default("AES-GCM"),
+				encryptionAlgorithm: z.string().default("AES-GCM-AAD-V1"),
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
@@ -1889,33 +2104,33 @@ export const vaultRouter = router({
 				});
 			}
 
-				const userVaultKey = await db.query.vaultKey.findFirst({
-					where: (vk, { and, eq }) =>
-						and(
-							eq(vk.vaultId, attachment.vaultId),
-							eq(vk.userId, ctx.session.userId),
-						),
-				});
+			const userVaultKey = await db.query.vaultKey.findFirst({
+				where: (vk, { and, eq }) =>
+					and(
+						eq(vk.vaultId, attachment.vaultId),
+						eq(vk.userId, ctx.session.userId),
+					),
+			});
 
-				if (!userVaultKey) {
+			if (!userVaultKey) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "Access denied",
+				});
+			}
+			if (userVaultKey.role === "member") {
+				if (attachment.uploadedBy !== ctx.session.userId) {
 					throw new TRPCError({
 						code: "FORBIDDEN",
-						message: "Access denied",
+						message: "You can only delete your own attachments",
 					});
 				}
-				if (userVaultKey.role === "member") {
-					if (attachment.uploadedBy !== ctx.session.userId) {
-						throw new TRPCError({
-							code: "FORBIDDEN",
-							message: "You can only delete your own attachments",
-						});
-					}
-				} else if (!["owner", "admin"].includes(userVaultKey.role)) {
-					throw new TRPCError({
-						code: "FORBIDDEN",
-						message: "Access denied",
-					});
-				}
+			} else if (!["owner", "admin"].includes(userVaultKey.role)) {
+				throw new TRPCError({
+					code: "FORBIDDEN",
+					message: "Access denied",
+				});
+			}
 
 			// Delete from S3 first (not transactional), then DB + sync event atomically
 			await deleteObject(attachment.storageKey);
@@ -2494,7 +2709,18 @@ export const vaultRouter = router({
 					where: (i, { eq }) => eq(i.vaultId, input.vaultId),
 				});
 
+				const vaultRecord = await db.query.vault.findFirst({
+					where: (v, { eq }) => eq(v.id, input.vaultId),
+				});
+				if (!vaultRecord) {
+					throw new TRPCError({
+						code: "NOT_FOUND",
+						message: "Vault not found",
+					});
+				}
+
 				return {
+					keyVersion: vaultRecord.keyVersion,
 					members: members.map((m) => ({
 						userId: m.userId,
 						publicKey: m.user.publicKey,
@@ -2601,6 +2827,20 @@ export const vaultRouter = router({
 					throw new TRPCError({
 						code: "NOT_FOUND",
 						message: "User not found",
+					});
+				}
+
+				const vaultData = userVaultKey.vault;
+				if (vaultData.type !== "team" || !vaultData.teamId) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "Only team vaults support adding members",
+					});
+				}
+				if (targetUser.teamId !== vaultData.teamId) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "User must belong to the same team as this vault",
 					});
 				}
 

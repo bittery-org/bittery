@@ -1,7 +1,12 @@
+import { type AppLocale, supportedLocales } from "@bittery/i18n";
 import { useTRPC } from "@bittery/shared/trpc";
 import {
 	Badge,
 	Button,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
 	Separator,
 	Skeleton,
 	Tabs,
@@ -16,6 +21,8 @@ import {
 	IconFingerprintOutlineDuo18 as Fingerprint,
 	IconGear3OutlineDuo18 as Gear,
 	IconSquareTerminalOutlineDuo18 as Github,
+	IconFlagGermany,
+	IconFlagUnitedStates,
 	IconKeyOutlineDuo18 as Key,
 	IconLockKeyOutlineDuo18 as LockKey,
 	IconEnvelopeOutlineDuo18 as Mail,
@@ -38,6 +45,7 @@ import { RegenerateRecoveryKeyDialog } from "@/components/settings/regenerate-re
 import { RegenerateSecretKeyDialog } from "@/components/settings/regenerate-secret-key-dialog";
 import { SetupRecoveryKeyDialog } from "@/components/settings/setup-recovery-key-dialog";
 import { useImportOnboardingState } from "@/hooks/use-import-onboarding-state";
+import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/settings/")({
 	component: SettingsPage,
@@ -50,6 +58,11 @@ const GITHUB_REPO = "bittery-org/bittery";
 
 function SettingsPage() {
 	const trpc = useTRPC();
+	const { locale, setLocale, m } = useI18n();
+	const activeLocaleLabel =
+		locale === "en" ? m["i18n.language.en"]() : m["i18n.language.de"]();
+	const ActiveLocaleFlag =
+		locale === "en" ? IconFlagUnitedStates : IconFlagGermany;
 	const userQuery = useQuery(trpc.auth.me.queryOptions());
 	const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
 	const onboardingImport = useImportOnboardingState();
@@ -64,15 +77,14 @@ function SettingsPage() {
 				<div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
 					<div className="space-y-4">
 						<Badge variant="secondary" className="w-fit">
-							Settings
+							{m["settings.page.hero_badge"]()}
 						</Badge>
 						<div className="space-y-2">
 							<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl">
-								Account Settings
+								{m["settings.page.hero_heading"]()}
 							</h1>
 							<p className="max-w-2xl text-muted-foreground">
-								Manage your profile, security credentials, connected devices,
-								and application preferences.
+								{m["settings.page.hero_description"]()}
 							</p>
 						</div>
 						<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
@@ -84,7 +96,7 @@ function SettingsPage() {
 							)}
 							<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
 								<Gear className="h-3.5 w-3.5" />
-								Account &amp; security preferences
+								{m["settings.page.hero_pill"]()}
 							</div>
 						</div>
 					</div>
@@ -96,19 +108,19 @@ function SettingsPage() {
 				<TabsList>
 					<TabsTrigger value="account">
 						<User className="mr-2 h-4 w-4" />
-						Account
+						{m["settings.tab.account"]()}
 					</TabsTrigger>
 					<TabsTrigger value="security">
 						<Shield className="mr-2 h-4 w-4" />
-						Security
+						{m["settings.tab.security"]()}
 					</TabsTrigger>
 					<TabsTrigger value="devices">
 						<Mobile className="mr-2 h-4 w-4" />
-						Devices
+						{m["settings.tab.devices"]()}
 					</TabsTrigger>
 					<TabsTrigger value="general">
 						<Gear className="mr-2 h-4 w-4" />
-						General
+						{m["settings.tab.general"]()}
 					</TabsTrigger>
 				</TabsList>
 
@@ -117,10 +129,10 @@ function SettingsPage() {
 					<div className="space-y-6">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 							<h2 className="font-semibold text-lg tracking-tight">
-								Profile Information
+								{m["settings.account.heading"]()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
-								Your personal account details.
+								{m["settings.account.description"]()}
 							</p>
 						</div>
 
@@ -139,7 +151,9 @@ function SettingsPage() {
 											<User className="h-4 w-4 text-muted-foreground" />
 										</div>
 										<div className="min-w-0 flex-1">
-											<p className="text-muted-foreground text-xs">Name</p>
+											<p className="text-muted-foreground text-xs">
+												{m["settings.field.name"]()}
+											</p>
 											<p className="truncate font-medium text-sm">
 												{userQuery.data?.name || "—"}
 											</p>
@@ -154,7 +168,9 @@ function SettingsPage() {
 											<Mail className="h-4 w-4 text-muted-foreground" />
 										</div>
 										<div className="min-w-0 flex-1">
-											<p className="text-muted-foreground text-xs">Email</p>
+											<p className="text-muted-foreground text-xs">
+												{m["settings.field.email"]()}
+											</p>
 											<p className="truncate font-medium text-sm">
 												{userQuery.data?.email || "—"}
 											</p>
@@ -173,10 +189,11 @@ function SettingsPage() {
 										</div>
 										<div className="min-w-0 flex-1">
 											<p className="text-muted-foreground text-xs">
-												Secret Key Hint
+												{m["settings.field.secret_key_hint"]()}
 											</p>
 											<code className="mt-0.5 inline-block rounded bg-muted px-2 py-0.5 font-mono text-muted-foreground text-sm">
-												{userQuery.data?.secretKeyHint || "N/A"}
+												{userQuery.data?.secretKeyHint ||
+													m["settings.common.na"]()}
 											</code>
 										</div>
 									</div>
@@ -191,10 +208,10 @@ function SettingsPage() {
 					<div className="space-y-6">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 							<h2 className="font-semibold text-lg tracking-tight">
-								Security Credentials
+								{m["settings.security.heading"]()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
-								Manage your passwords, keys, and protection settings.
+								{m["settings.security.description"]()}
 							</p>
 						</div>
 
@@ -208,11 +225,10 @@ function SettingsPage() {
 										</div>
 										<div className="space-y-0.5">
 											<span className="font-medium text-sm">
-												Master Password
+												{m["settings.security.master_password"]()}
 											</span>
 											<p className="text-muted-foreground text-xs">
-												Change your master password. Invalidates your current
-												Recovery Key.
+												{m["settings.security.master_password_description"]()}
 											</p>
 										</div>
 									</div>
@@ -230,10 +246,11 @@ function SettingsPage() {
 											<Key className="h-4 w-4 text-muted-foreground" />
 										</div>
 										<div className="space-y-0.5">
-											<span className="font-medium text-sm">Secret Key</span>
+											<span className="font-medium text-sm">
+												{m["settings.security.secret_key"]()}
+											</span>
 											<p className="text-muted-foreground text-xs">
-												Generate a new secret key. Invalidates your current
-												Recovery Key.
+												{m["settings.security.secret_key_description"]()}
 											</p>
 										</div>
 									</div>
@@ -256,7 +273,7 @@ function SettingsPage() {
 											<div className="space-y-0.5">
 												<div className="flex items-center gap-2">
 													<span className="font-medium text-sm">
-														Recovery Key
+														{m["settings.security.recovery_key"]()}
 													</span>
 													{userQuery.data?.hasRecoveryKey && (
 														<Badge
@@ -264,12 +281,12 @@ function SettingsPage() {
 															className="border-emerald-500/30 bg-emerald-500/10 text-[10px] text-emerald-600 dark:text-emerald-400"
 														>
 															<CheckCircle className="mr-1 h-3 w-3" />
-															Configured
+															{m["settings.security.recovery_key_configured"]()}
 														</Badge>
 													)}
 												</div>
 												<p className="text-muted-foreground text-xs">
-													Reset your password without losing vault data.
+													{m["settings.security.recovery_key_description"]()}
 												</p>
 											</div>
 										</div>
@@ -294,9 +311,11 @@ function SettingsPage() {
 										<Clock className="h-4 w-4 text-muted-foreground" />
 									</div>
 									<div className="space-y-0.5">
-										<span className="font-medium text-sm">Auto-Lock</span>
+										<span className="font-medium text-sm">
+											{m["settings.security.auto_lock"]()}
+										</span>
 										<p className="text-muted-foreground text-xs">
-											Lock your vault automatically after inactivity.
+											{m["settings.security.auto_lock_description"]()}
 										</p>
 									</div>
 								</div>
@@ -311,10 +330,10 @@ function SettingsPage() {
 					<div className="space-y-3">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 							<h2 className="font-semibold text-lg tracking-tight">
-								Connected Devices
+								{m["settings.devices.heading"]()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
-								Manage devices that have access to your account.
+								{m["settings.devices.description"]()}
 							</p>
 						</div>
 						<DeviceManagement />
@@ -325,18 +344,18 @@ function SettingsPage() {
 				<TabsContent value="general" className="mt-4">
 					<div className="space-y-6">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-							<h2 className="font-semibold text-lg tracking-tight">General</h2>
+							<h2 className="font-semibold text-lg tracking-tight">
+								{m["settings.general.heading"]()}
+							</h2>
 							<p className="text-muted-foreground text-sm">
-								App information and account management.
+								{m["settings.general.description"]()}
 							</p>
 						</div>
 
 						<div className="rounded-xl border bg-card p-6">
 							<div className="space-y-4">
 								<p className="max-w-2xl text-muted-foreground text-sm leading-relaxed">
-									Bittery is a secure, zero-knowledge password manager that puts
-									you in control of your data. Your passwords are encrypted
-									client-side and never leave your device unencrypted.
+									{m["settings.general.product_description"]()}
 								</p>
 								<Separator />
 								<div className="flex flex-wrap gap-2">
@@ -347,7 +366,7 @@ function SettingsPage() {
 											rel="noopener noreferrer"
 										>
 											<Github className="mr-2 h-4 w-4" />
-											GitHub Repository
+											{m["settings.general.github_repository"]()}
 											<ExternalLink className="ml-2 h-3 w-3" />
 										</a>
 									</Button>
@@ -357,7 +376,7 @@ function SettingsPage() {
 											target="_blank"
 											rel="noopener noreferrer"
 										>
-											Report an Issue
+											{m["settings.general.report_issue"]()}
 											<ExternalLink className="ml-2 h-3 w-3" />
 										</a>
 									</Button>
@@ -373,11 +392,10 @@ function SettingsPage() {
 									</div>
 									<div className="space-y-1">
 										<span className="font-medium text-sm">
-											Import from another password manager
+											{m["settings.general.import.title"]()}
 										</span>
 										<p className="text-muted-foreground text-xs">
-											Reopen the migration flow anytime. Supports 1Password{" "}
-											<code>.1pux</code> item import in v1.
+											{m["settings.general.import.description"]()}
 										</p>
 									</div>
 								</div>
@@ -386,8 +404,54 @@ function SettingsPage() {
 									size="sm"
 									onClick={() => setIsImportDialogOpen(true)}
 								>
-									Open Import
+									{m["settings.general.import.open"]()}
 								</Button>
+							</div>
+						</div>
+
+						<div className="rounded-xl border bg-card p-5">
+							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+								<div className="space-y-0.5">
+									<span className="font-medium text-sm">
+										{m["settings.general.language.title"]()}
+									</span>
+									<p className="text-muted-foreground text-xs">
+										{m["settings.general.language.description"]()}
+									</p>
+								</div>
+								<Select
+									value={locale}
+									onValueChange={(value) => setLocale(value as AppLocale)}
+								>
+									<SelectTrigger
+										aria-label={m["settings.general.language.title"]()}
+										className="h-7 min-w-28 max-w-30 border-0 bg-transparent px-1.5 text-sm shadow-none ring-0 focus:ring-0"
+									>
+										<ActiveLocaleFlag size={14} className="shrink-0" />
+										<span className="truncate">{activeLocaleLabel}</span>
+									</SelectTrigger>
+									<SelectContent className="min-w-40">
+										{supportedLocales.map((value) => (
+											<SelectItem key={value} value={value} className="gap-2">
+												<span className="inline-flex items-center gap-2 whitespace-nowrap">
+													{value === "en" ? (
+														<IconFlagUnitedStates
+															size={14}
+															className="shrink-0"
+														/>
+													) : (
+														<IconFlagGermany size={14} className="shrink-0" />
+													)}
+													<span>
+														{value === "en"
+															? m["i18n.language.en"]()
+															: m["i18n.language.de"]()}
+													</span>
+												</span>
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
 							</div>
 						</div>
 
@@ -399,10 +463,13 @@ function SettingsPage() {
 										<Trash2 className="h-4 w-4 text-destructive" />
 									</div>
 									<div className="space-y-0.5">
-										<span className="font-medium text-sm">Delete Account</span>
+										<span className="font-medium text-sm">
+											{m["settings.general.danger.delete_account"]()}
+										</span>
 										<p className="text-muted-foreground text-xs">
-											Permanently delete your account and all data. This cannot
-											be undone.
+											{m[
+												"settings.general.danger.delete_account_description"
+											]()}
 										</p>
 									</div>
 								</div>

@@ -32,6 +32,9 @@ import {
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { formatDateTime } from "@/lib/i18n-format";
+import { m as messages } from "@/paraglide/messages";
+import { useI18n } from "@/providers/i18n-provider";
 
 type ActionGroup =
 	| "all"
@@ -42,6 +45,7 @@ type ActionGroup =
 	| "share"
 	| "other";
 type ResultFilter = "all" | "success" | "failure";
+type AdminMessageCatalog = ReturnType<typeof useI18n>["m"];
 
 interface TeamEvent {
 	id: string;
@@ -80,7 +84,9 @@ interface Filters {
 const DEFAULT_LIMIT = 50;
 
 function toLocalDateTimeValue(date: Date): string {
-	const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+	const localDate = new Date(
+		date.getTime() - date.getTimezoneOffset() * 60_000,
+	);
 	return localDate.toISOString().slice(0, 16);
 }
 
@@ -104,20 +110,153 @@ function toIso(value: string): string | undefined {
 	return date.toISOString();
 }
 
-function formatAction(action: string): string {
-	return action
+function humanizeIdentifier(value: string): string {
+	return value
 		.replaceAll("_", " ")
 		.replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function formatTimestamp(value: string): string {
-	return new Date(value).toLocaleString(undefined, {
+	return formatDateTime(value, {
 		year: "numeric",
 		month: "short",
 		day: "numeric",
 		hour: "2-digit",
 		minute: "2-digit",
 	});
+}
+
+function getActionGroupLabel(
+	actionGroup: ActionGroup | TeamEvent["actionGroup"],
+	m: AdminMessageCatalog,
+): string {
+	switch (actionGroup) {
+		case "all":
+			return m["admin.page.filter.action_group.option.all"]();
+		case "auth":
+			return m["admin.page.event.action_group.auth"]();
+		case "team":
+			return m["admin.page.event.action_group.team"]();
+		case "vault":
+			return m["admin.page.event.action_group.vault"]();
+		case "item":
+			return m["admin.page.event.action_group.item"]();
+		case "share":
+			return m["admin.page.event.action_group.share"]();
+		case "other":
+			return m["admin.page.event.action_group.other"]();
+		default:
+			return actionGroup;
+	}
+}
+
+function getResultLabel(
+	result: ResultFilter | TeamEvent["result"],
+	m: AdminMessageCatalog,
+): string {
+	switch (result) {
+		case "all":
+			return m["admin.page.filter.result.option.all"]();
+		case "success":
+			return m["admin.page.event.result.success"]();
+		case "failure":
+			return m["admin.page.event.result.failure"]();
+		default:
+			return result;
+	}
+}
+
+function getSourceLabel(
+	source: TeamEvent["source"],
+	m: AdminMessageCatalog,
+): string {
+	switch (source) {
+		case "audit_log":
+			return m["admin.page.event.source.audit_log"]();
+		case "share_access_log":
+			return m["admin.page.event.source.share_access_log"]();
+		default:
+			return source;
+	}
+}
+
+function getEventActionLabel(action: string, m: AdminMessageCatalog): string {
+	switch (action) {
+		case "account_deleted":
+			return m["admin.page.event.action.account_deleted"]();
+		case "device_revoked":
+			return m["admin.page.event.action.device_revoked"]();
+		case "email_changed":
+			return m["admin.page.event.action.email_changed"]();
+		case "item_created":
+			return m["admin.page.event.action.item_created"]();
+		case "item_deleted":
+			return m["admin.page.event.action.item_deleted"]();
+		case "item_moved":
+			return m["admin.page.event.action.item_moved"]();
+		case "item_permanently_deleted":
+			return m["admin.page.event.action.item_permanently_deleted"]();
+		case "item_restored":
+			return m["admin.page.event.action.item_restored"]();
+		case "logout_all":
+			return m["admin.page.event.action.logout_all"]();
+		case "password_changed":
+			return m["admin.page.event.action.password_changed"]();
+		case "password_reset_via_recovery":
+			return m["admin.page.event.action.password_reset_via_recovery"]();
+		case "recovery_key_regenerated":
+			return m["admin.page.event.action.recovery_key_regenerated"]();
+		case "recovery_key_setup":
+			return m["admin.page.event.action.recovery_key_setup"]();
+		case "secret_key_regenerated":
+			return m["admin.page.event.action.secret_key_regenerated"]();
+		case "share_access_failed":
+			return m["admin.page.event.action.share_access_failed"]();
+		case "share_access_success":
+			return m["admin.page.event.action.share_access_success"]();
+		case "share_created":
+			return m["admin.page.event.action.share_created"]();
+		case "share_revoked":
+			return m["admin.page.event.action.share_revoked"]();
+		case "team_member_removed":
+			return m["admin.page.event.action.team_member_removed"]();
+		case "vault_created":
+			return m["admin.page.event.action.vault_created"]();
+		case "vault_deleted":
+			return m["admin.page.event.action.vault_deleted"]();
+		case "vault_member_added":
+			return m["admin.page.event.action.vault_member_added"]();
+		case "vault_member_removed":
+			return m["admin.page.event.action.vault_member_removed"]();
+		case "vault_updated":
+			return m["admin.page.event.action.vault_updated"]();
+		default:
+			return humanizeIdentifier(action);
+	}
+}
+
+function getEntityTypeLabel(
+	entityType: string | null,
+	m: AdminMessageCatalog,
+): string {
+	if (!entityType) {
+		return m["admin.page.fallback.empty"]();
+	}
+
+	switch (entityType) {
+		case "item":
+			return m["admin.page.event.entity_type.item"]();
+		case "share_link":
+			return m["admin.page.event.entity_type.share_link"]();
+		case "team":
+			return m["admin.page.event.entity_type.team"]();
+		case "user":
+			return m["admin.page.event.entity_type.user"]();
+		case "vault":
+			return m["admin.page.event.entity_type.vault"]();
+		default:
+			return humanizeIdentifier(entityType);
+	}
 }
 
 export const Route = createFileRoute("/_app/admin/")({
@@ -144,13 +283,14 @@ export const Route = createFileRoute("/_app/admin/")({
 	},
 	component: TeamAdminConsolePage,
 	head: () => ({
-		meta: [{ title: "Admin Console - Bittery" }],
+		meta: [{ title: messages["admin.page.meta_title"]() }],
 	}),
 });
 
 function TeamAdminConsolePage() {
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
+	const { m } = useI18n();
 	const [filters, setFilters] = useState<Filters>(defaultFilters);
 	const [selectedEvent, setSelectedEvent] = useState<TeamEvent | null>(null);
 
@@ -189,7 +329,7 @@ function TeamAdminConsolePage() {
 	};
 
 	return (
-		<div className="mx-auto flex w-full max-w-7xl flex-col gap-6 pb-3">
+		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
 			<section className="relative overflow-hidden rounded-2xl border bg-card p-6 sm:p-7">
 				<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent" />
 				<div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-muted/50 blur-3xl" />
@@ -201,21 +341,23 @@ function TeamAdminConsolePage() {
 						</div>
 						<div>
 							<h1 className="font-bold text-3xl tracking-tight">
-								Admin Console
+								{m["admin.page.hero.title"]()}
 							</h1>
 							<p className="text-muted-foreground text-sm">
-								Team-level security events and share access activity.
+								{m["admin.page.hero.description"]()}
 							</p>
 						</div>
 					</div>
 
 					<div className="grid gap-3 md:grid-cols-2 lg:grid-cols-6">
 						<div className="relative md:col-span-2">
-							<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
+							<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 							<Input
 								value={filters.search}
-								onChange={(event) => updateFilters({ search: event.target.value })}
-								placeholder="Search action, entity, email"
+								onChange={(event) =>
+									updateFilters({ search: event.target.value })
+								}
+								placeholder={m["admin.page.filter.search.placeholder"]()}
 								className="pl-9"
 							/>
 						</div>
@@ -227,16 +369,34 @@ function TeamAdminConsolePage() {
 							}
 						>
 							<SelectTrigger>
-								<SelectValue placeholder="Action Group" />
+								<SelectValue
+									placeholder={m[
+										"admin.page.filter.action_group.placeholder"
+									]()}
+								/>
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="all">All Actions</SelectItem>
-								<SelectItem value="auth">Auth</SelectItem>
-								<SelectItem value="team">Team</SelectItem>
-								<SelectItem value="vault">Vault</SelectItem>
-								<SelectItem value="item">Item</SelectItem>
-								<SelectItem value="share">Share</SelectItem>
-								<SelectItem value="other">Other</SelectItem>
+								<SelectItem value="all">
+									{m["admin.page.filter.action_group.option.all"]()}
+								</SelectItem>
+								<SelectItem value="auth">
+									{m["admin.page.event.action_group.auth"]()}
+								</SelectItem>
+								<SelectItem value="team">
+									{m["admin.page.event.action_group.team"]()}
+								</SelectItem>
+								<SelectItem value="vault">
+									{m["admin.page.event.action_group.vault"]()}
+								</SelectItem>
+								<SelectItem value="item">
+									{m["admin.page.event.action_group.item"]()}
+								</SelectItem>
+								<SelectItem value="share">
+									{m["admin.page.event.action_group.share"]()}
+								</SelectItem>
+								<SelectItem value="other">
+									{m["admin.page.event.action_group.other"]()}
+								</SelectItem>
 							</SelectContent>
 						</Select>
 
@@ -247,12 +407,20 @@ function TeamAdminConsolePage() {
 							}
 						>
 							<SelectTrigger>
-								<SelectValue placeholder="Result" />
+								<SelectValue
+									placeholder={m["admin.page.filter.result.placeholder"]()}
+								/>
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="all">All Results</SelectItem>
-								<SelectItem value="success">Success</SelectItem>
-								<SelectItem value="failure">Failure</SelectItem>
+								<SelectItem value="all">
+									{m["admin.page.filter.result.option.all"]()}
+								</SelectItem>
+								<SelectItem value="success">
+									{m["admin.page.event.result.success"]()}
+								</SelectItem>
+								<SelectItem value="failure">
+									{m["admin.page.event.result.failure"]()}
+								</SelectItem>
 							</SelectContent>
 						</Select>
 
@@ -261,10 +429,14 @@ function TeamAdminConsolePage() {
 							onValueChange={(value) => updateFilters({ actorUserId: value })}
 						>
 							<SelectTrigger>
-								<SelectValue placeholder="Actor" />
+								<SelectValue
+									placeholder={m["admin.page.filter.actor.placeholder"]()}
+								/>
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="all">All Actors</SelectItem>
+								<SelectItem value="all">
+									{m["admin.page.filter.actor.option.all"]()}
+								</SelectItem>
 								{membersQuery.data?.map((member) => (
 									<SelectItem key={member.userId} value={member.userId}>
 										{member.name}
@@ -277,7 +449,7 @@ function TeamAdminConsolePage() {
 							variant="outline"
 							onClick={() => setFilters(defaultFilters())}
 						>
-							Reset
+							{m["admin.page.filter.reset"]()}
 						</Button>
 					</div>
 
@@ -307,9 +479,11 @@ function TeamAdminConsolePage() {
 					) : allEvents.length === 0 ? (
 						<div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
 							<History className="h-8 w-8 text-muted-foreground" />
-							<p className="font-medium text-sm">No events found</p>
+							<p className="font-medium text-sm">
+								{m["admin.page.empty.title"]()}
+							</p>
 							<p className="text-muted-foreground text-xs">
-								Adjust your filters or date range to see more activity.
+								{m["admin.page.empty.description"]()}
 							</p>
 						</div>
 					) : (
@@ -317,12 +491,22 @@ function TeamAdminConsolePage() {
 							<Table>
 								<TableHeader>
 									<TableRow>
-										<TableHead>Time</TableHead>
-										<TableHead>Action</TableHead>
-										<TableHead>Actor</TableHead>
-										<TableHead>Entity</TableHead>
-										<TableHead>Result</TableHead>
-										<TableHead>Network</TableHead>
+										<TableHead>{m["admin.page.table.header.time"]()}</TableHead>
+										<TableHead>
+											{m["admin.page.table.header.action"]()}
+										</TableHead>
+										<TableHead>
+											{m["admin.page.table.header.actor"]()}
+										</TableHead>
+										<TableHead>
+											{m["admin.page.table.header.entity"]()}
+										</TableHead>
+										<TableHead>
+											{m["admin.page.table.header.result"]()}
+										</TableHead>
+										<TableHead>
+											{m["admin.page.table.header.network"]()}
+										</TableHead>
 										<TableHead className="w-[90px]" />
 									</TableRow>
 								</TableHeader>
@@ -335,20 +519,22 @@ function TeamAdminConsolePage() {
 											<TableCell>
 												<div className="flex flex-col gap-1">
 													<span className="font-medium text-sm">
-														{formatAction(event.action)}
+														{getEventActionLabel(event.action, m)}
 													</span>
 													<Badge variant="outline" className="w-fit capitalize">
-														{event.actionGroup}
+														{getActionGroupLabel(event.actionGroup, m)}
 													</Badge>
 												</div>
 											</TableCell>
 											<TableCell className="text-sm">
-												{event.actor.email || event.actor.name || "Unknown"}
+												{event.actor.email ||
+													event.actor.name ||
+													m["admin.page.fallback.unknown_actor"]()}
 											</TableCell>
 											<TableCell className="text-xs">
 												{event.entity.type && event.entity.id
-													? `${event.entity.type}:${event.entity.id.slice(0, 8)}`
-													: "—"}
+													? `${getEntityTypeLabel(event.entity.type, m)}:${event.entity.id.slice(0, 8)}`
+													: m["admin.page.fallback.empty"]()}
 											</TableCell>
 											<TableCell>
 												<Badge
@@ -358,14 +544,18 @@ function TeamAdminConsolePage() {
 															: "destructive"
 													}
 												>
-													{event.result}
+													{getResultLabel(event.result, m)}
 												</Badge>
 											</TableCell>
 											<TableCell className="text-xs">
 												<div className="space-y-1">
-													<div>{event.network.maskedIp || "—"}</div>
+													<div>
+														{event.network.maskedIp ||
+															m["admin.page.fallback.empty"]()}
+													</div>
 													<div className="text-muted-foreground">
-														{event.network.maskedUserAgent || "—"}
+														{event.network.maskedUserAgent ||
+															m["admin.page.fallback.empty"]()}
 													</div>
 												</div>
 											</TableCell>
@@ -375,7 +565,7 @@ function TeamAdminConsolePage() {
 													variant="outline"
 													onClick={() => setSelectedEvent(event)}
 												>
-													View
+													{m["admin.page.table.action.view"]()}
 												</Button>
 											</TableCell>
 										</TableRow>
@@ -393,7 +583,7 @@ function TeamAdminConsolePage() {
 										{eventsQuery.isFetchingNextPage && (
 											<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 										)}
-										Load More
+										{m["admin.page.pagination.load_more"]()}
 									</Button>
 								</div>
 							)}
@@ -409,20 +599,25 @@ function TeamAdminConsolePage() {
 				<DialogContent className="sm:max-w-2xl">
 					<DialogHeader>
 						<DialogTitle>
-							{selectedEvent ? formatAction(selectedEvent.action) : "Event"}
+							{selectedEvent
+								? getEventActionLabel(selectedEvent.action, m)
+								: m["admin.page.dialog.fallback_title"]()}
 						</DialogTitle>
 						<DialogDescription>
-							Full event metadata for investigation and auditing.
+							{m["admin.page.dialog.description"]()}
 						</DialogDescription>
 					</DialogHeader>
 					{selectedEvent && (
 						<ScrollArea className="max-h-[70vh]">
 							<div className="space-y-4">
 								<div className="grid gap-2 sm:grid-cols-2">
-									<Detail label="Timestamp" value={formatTimestamp(selectedEvent.timestamp)} />
 									<Detail
-										label="Result"
-										value={selectedEvent.result}
+										label={m["admin.page.detail.label.timestamp"]()}
+										value={formatTimestamp(selectedEvent.timestamp)}
+									/>
+									<Detail
+										label={m["admin.page.detail.label.result"]()}
+										value={getResultLabel(selectedEvent.result, m)}
 										className={
 											selectedEvent.result === "failure"
 												? "text-destructive"
@@ -430,41 +625,54 @@ function TeamAdminConsolePage() {
 										}
 									/>
 									<Detail
-										label="Actor"
+										label={m["admin.page.detail.label.actor"]()}
 										value={
 											selectedEvent.actor.email ||
 											selectedEvent.actor.name ||
-											"Unknown"
+											m["admin.page.fallback.unknown_actor"]()
 										}
 									/>
 									<Detail
-										label="Source"
-										value={selectedEvent.source}
+										label={m["admin.page.detail.label.source"]()}
+										value={getSourceLabel(selectedEvent.source, m)}
 									/>
 									<Detail
-										label="Entity Type"
-										value={selectedEvent.entity.type || "—"}
+										label={m["admin.page.detail.label.entity_type"]()}
+										value={getEntityTypeLabel(selectedEvent.entity.type, m)}
 									/>
 									<Detail
-										label="Entity ID"
-										value={selectedEvent.entity.id || "—"}
+										label={m["admin.page.detail.label.entity_id"]()}
+										value={
+											selectedEvent.entity.id ||
+											m["admin.page.fallback.empty"]()
+										}
 									/>
 								</div>
 
 								<div className="space-y-2 rounded-lg border p-3">
-									<h3 className="font-medium text-sm">Network Details</h3>
+									<h3 className="font-medium text-sm">
+										{m["admin.page.section.network_details"]()}
+									</h3>
 									<Detail
-										label="IP Address"
-										value={selectedEvent.network.fullIp || "—"}
+										label={m["admin.page.detail.label.ip_address"]()}
+										value={
+											selectedEvent.network.fullIp ||
+											m["admin.page.fallback.empty"]()
+										}
 									/>
 									<Detail
-										label="User Agent"
-										value={selectedEvent.network.fullUserAgent || "—"}
+										label={m["admin.page.detail.label.user_agent"]()}
+										value={
+											selectedEvent.network.fullUserAgent ||
+											m["admin.page.fallback.empty"]()
+										}
 									/>
 								</div>
 
 								<div className="space-y-2 rounded-lg border p-3">
-									<h3 className="font-medium text-sm">Metadata</h3>
+									<h3 className="font-medium text-sm">
+										{m["admin.page.section.metadata"]()}
+									</h3>
 									<pre className="overflow-x-auto rounded bg-muted p-3 text-xs">
 										{JSON.stringify(selectedEvent.metadata, null, 2)}
 									</pre>

@@ -25,6 +25,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { type AccountMetadata, storage } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
 
 interface AddAccountDialogProps {
 	open: boolean;
@@ -35,6 +36,7 @@ export function AddAccountDialog({
 	open,
 	onOpenChange,
 }: AddAccountDialogProps) {
+	const { m } = useI18n();
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const fallbackServerUrl =
@@ -109,13 +111,13 @@ export function AddAccountDialog({
 				queryClient.invalidateQueries({ queryKey: ["decrypted-item"] }),
 			]);
 
-			toast.success("Account added successfully");
+			toast.success(m["toast.auth.signin_success_simple"]());
 			onOpenChange(false);
 			navigate({ to: "/vault" });
 		},
 		onError: (error) => {
 			console.error("Login error:", error);
-			toast.error(error instanceof Error ? error.message : "Login failed");
+			toast.error(m["toast.auth.signin_error"]());
 		},
 	});
 
@@ -124,7 +126,7 @@ export function AddAccountDialog({
 
 		const normalizedServerUrl = normalizeServerUrl(serverUrl);
 		if (!normalizedServerUrl) {
-			toast.error("Invalid server URL");
+			toast.error(m["toast.auth.server.invalid_url"]());
 			return;
 		}
 		if (normalizedServerUrl !== serverUrl) {
@@ -143,15 +145,19 @@ export function AddAccountDialog({
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="sm:max-w-md">
 				<DialogHeader>
-					<DialogTitle>Add Account</DialogTitle>
+					<DialogTitle>
+						{m["vaults.sidebar.account_switcher.menu.add_account"]()}
+					</DialogTitle>
 					<DialogDescription>
-						Sign in with another account to add it to your device
+						{m["auth.signin.button.different_account"]()}
 					</DialogDescription>
 				</DialogHeader>
 
 				<form onSubmit={handleSubmit} className="space-y-4">
 					<div className="grid gap-1.5">
-						<Label htmlFor="add-serverUrl">Server URL</Label>
+						<Label htmlFor="add-serverUrl">
+							{m["auth.footer.server.title"]()}
+						</Label>
 						<Input
 							id="add-serverUrl"
 							type="url"
@@ -160,7 +166,7 @@ export function AddAccountDialog({
 							onBlur={() => {
 								const normalized = normalizeServerUrl(serverUrl);
 								if (!normalized) {
-									toast.error("Invalid server URL");
+									toast.error(m["toast.auth.server.invalid_url"]());
 									return;
 								}
 								if (normalized !== serverUrl) {
@@ -168,24 +174,26 @@ export function AddAccountDialog({
 								}
 							}}
 							required
-							placeholder="https://your-server.com"
+							placeholder={m["auth.footer.server.placeholder"]()}
 						/>
 					</div>
 
 					<div className="grid gap-1.5">
-						<Label htmlFor="add-email">Email</Label>
+						<Label htmlFor="add-email">{m["auth.signin.label.email"]()}</Label>
 						<Input
 							id="add-email"
 							type="email"
 							value={email}
 							onChange={(e) => setEmail(e.target.value)}
 							required
-							placeholder="you@example.com"
+							placeholder={m["auth.signin.placeholder.email"]()}
 						/>
 					</div>
 
 					<div className="grid gap-1.5">
-						<Label htmlFor="add-secretKey">Secret Key</Label>
+						<Label htmlFor="add-secretKey">
+							{m["auth.signin.label.secret_key"]()}
+						</Label>
 						<InputGroup>
 							<InputGroupInput
 								id="add-secretKey"
@@ -193,7 +201,7 @@ export function AddAccountDialog({
 								value={secretKey}
 								onChange={(e) => setSecretKey(e.target.value)}
 								required
-								placeholder="A3-XXXXXX-XXXXXX-XXXXX"
+								placeholder={m["auth.signin.placeholder.secret_key"]()}
 								className="font-mono"
 							/>
 							<InputGroupAddon align="inline-end">
@@ -212,7 +220,9 @@ export function AddAccountDialog({
 					</div>
 
 					<div className="grid gap-1.5">
-						<Label htmlFor="add-password">Password</Label>
+						<Label htmlFor="add-password">
+							{m["auth.signin.label.password"]()}
+						</Label>
 						<InputGroup>
 							<InputGroupInput
 								id="add-password"
@@ -220,7 +230,7 @@ export function AddAccountDialog({
 								value={password}
 								onChange={(e) => setPassword(e.target.value)}
 								required
-								placeholder="Enter your password"
+								placeholder={m["auth.signin.placeholder.password"]()}
 							/>
 							<InputGroupAddon align="inline-end">
 								<InputGroupButton
@@ -251,7 +261,7 @@ export function AddAccountDialog({
 								className="flex items-center gap-2 font-normal"
 							>
 								<IconFingerprintOutlineDuo18 className="h-4 w-4 text-muted-foreground" />
-								Enable biometric unlock
+								{m["auth.signin.biometric.enable"]()}
 							</Label>
 						</div>
 					)}
@@ -261,7 +271,9 @@ export function AddAccountDialog({
 						className="w-full"
 						disabled={loginMutation.isPending}
 					>
-						{loginMutation.isPending ? "Adding account..." : "Add Account"}
+						{loginMutation.isPending
+							? m["auth.signin.button.signing_in"]()
+							: m["vaults.sidebar.account_switcher.menu.add_account"]()}
 					</Button>
 				</form>
 			</DialogContent>

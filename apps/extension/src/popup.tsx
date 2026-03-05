@@ -1,6 +1,6 @@
 import "./index.css";
-import type { AppRouter } from "@bittery/api/routers/index";
 import { buildTrpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
+import { createAppTrpcClient } from "@bittery/shared/trpc-client";
 import { TRPCProvider } from "@bittery/shared/trpc";
 import { Toaster } from "@bittery/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -9,7 +9,6 @@ import {
 	createRouter,
 	RouterProvider,
 } from "@tanstack/react-router";
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import React, { useEffect } from "react";
 import ReactDOM from "react-dom/client";
 import { storage } from "./lib/storage";
@@ -30,35 +29,29 @@ const fallbackServerUrl =
 	normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";
 
 // Create tRPC client that communicates via background worker
-const trpcClient = createTRPCClient<AppRouter>({
-	links: [
-		httpBatchLink({
-			url: `${fallbackServerUrl}/trpc`,
-			async headers() {
-				// Get auth token and sync client id from background.
-				const [authResponse, clientIdResponse] = await Promise.all([
-					chrome.runtime.sendMessage({
-						type: "GET_AUTH_TOKEN",
-					}),
-					chrome.runtime.sendMessage({
-						type: "GET_SYNC_CLIENT_ID",
-					}),
-				]);
-				return {
-					authorization: authResponse.token
-						? `Bearer ${authResponse.token}`
-						: "",
-					"X-Client-Id": clientIdResponse.clientId || "",
-				};
-			},
-			async fetch(url, options) {
-				const storedServerUrl = await storage.getServerUrl();
-				const serverUrl = storedServerUrl ?? fallbackServerUrl;
-				const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
-				return fetch(resolvedUrl, options);
-			},
-		}),
-	],
+const trpcClient = createAppTrpcClient({
+	serverUrl: fallbackServerUrl,
+	async headers() {
+		// Get auth token and sync client id from background.
+		const [authResponse, clientIdResponse] = await Promise.all([
+			chrome.runtime.sendMessage({
+				type: "GET_AUTH_TOKEN",
+			}),
+			chrome.runtime.sendMessage({
+				type: "GET_SYNC_CLIENT_ID",
+			}),
+		]);
+		return {
+			authorization: authResponse.token ? `Bearer ${authResponse.token}` : "",
+			"X-Client-Id": clientIdResponse.clientId || "",
+		};
+	},
+	async fetch(url, options) {
+		const storedServerUrl = await storage.getServerUrl();
+		const serverUrl = storedServerUrl ?? fallbackServerUrl;
+		const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
+		return fetch(resolvedUrl, options);
+	},
 });
 
 // Create router with memory history (no URL bar in popup)

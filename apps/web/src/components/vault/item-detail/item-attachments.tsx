@@ -19,6 +19,7 @@ import {
 	IconXmarkOutlineDuo18 as X,
 } from "@bittery/ui/icons";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useI18n } from "@/providers/i18n-provider";
 
 interface ItemAttachmentsProps {
 	itemId: string;
@@ -46,6 +47,7 @@ function AttachmentRow({
 	canEdit: boolean;
 	accountEmail?: string;
 }) {
+	const { m } = useI18n();
 	const [decryptedName, setDecryptedName] = useState<string | null>(null);
 	const [isEditing, setIsEditing] = useState(false);
 	const [editValue, setEditValue] = useState("");
@@ -61,10 +63,15 @@ function AttachmentRow({
 	useEffect(() => {
 		decryptMeta(attachment)
 			.then((d) => setDecryptedName(d.name))
-			.catch(() => setDecryptedName("Encrypted file"));
-	}, [attachment.id]);
+			.catch(() =>
+				setDecryptedName(
+					m["vaults.detail.items.attachments.row.encrypted_file"](),
+				),
+			);
+	}, [attachment.id, m]);
 
-	const displayName = decryptedName ?? "Loading...";
+	const displayName =
+		decryptedName ?? m["vaults.detail.items.attachments.row.loading"]();
 
 	function startEdit() {
 		setEditValue(decryptedName ?? "");
@@ -86,7 +93,9 @@ function AttachmentRow({
 			setDecryptedName(trimmed);
 			setIsEditing(false);
 		} catch {
-			toast.error("Failed to rename attachment.");
+			toast.error(
+				m["vaults.detail.items.attachments.toast.rename_attachment_failed"](),
+			);
 		} finally {
 			setIsRenaming(false);
 		}
@@ -144,7 +153,7 @@ function AttachmentRow({
 					size="sm"
 					variant="ghost"
 					onClick={() => onDownload(attachment)}
-					title="Download"
+					title={m["vaults.detail.items.attachments.action.download"]()}
 				>
 					<Upload size={16} className="rotate-180" />
 				</Button>
@@ -153,7 +162,9 @@ function AttachmentRow({
 						size="sm"
 						variant="ghost"
 						onClick={startEdit}
-						title="Rename attachment"
+						title={m[
+							"vaults.detail.items.attachments.action.rename_attachment"
+						]()}
 					>
 						<Pencil size={16} />
 					</Button>
@@ -164,7 +175,9 @@ function AttachmentRow({
 						variant="ghost"
 						className="text-destructive hover:bg-destructive/10 hover:text-destructive"
 						onClick={() => onDelete(attachment.id)}
-						title="Delete attachment"
+						title={m[
+							"vaults.detail.items.attachments.action.delete_attachment"
+						]()}
 					>
 						<Trash size={16} />
 					</Button>
@@ -180,6 +193,7 @@ export function ItemAttachments({
 	accountEmail,
 	canEdit = false,
 }: ItemAttachmentsProps) {
+	const { m } = useI18n();
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const [isUploading, setIsUploading] = useState(false);
 	// Pending file waiting for a display name before upload
@@ -196,7 +210,9 @@ export function ItemAttachments({
 
 			// 25 MB limit
 			if (file.size > 25 * 1024 * 1024) {
-				toast.error("File too large. Maximum size is 25 MB.");
+				toast.error(
+					m["vaults.detail.items.attachments.toast.file_too_large"](),
+				);
 				if (fileInputRef.current) fileInputRef.current.value = "";
 				return;
 			}
@@ -205,7 +221,7 @@ export function ItemAttachments({
 			setPendingFile(file);
 			if (fileInputRef.current) fileInputRef.current.value = "";
 		},
-		[],
+		[m["vaults.detail.items.attachments.toast.file_too_large"]],
 	);
 
 	const handleConfirmUpload = useCallback(async () => {
@@ -217,15 +233,15 @@ export function ItemAttachments({
 					displayName: pendingName.trim() || pendingFile.name,
 				}),
 			);
-			toast.success("Attachment uploaded successfully");
+			toast.success(m["vaults.detail.items.attachments.toast.uploaded"]());
 		} catch {
-			toast.error("Failed to upload attachment. Please try again.");
+			toast.error(m["vaults.detail.items.attachments.toast.upload_failed"]());
 		} finally {
 			setIsUploading(false);
 			setPendingFile(null);
 			setPendingName("");
 		}
-	}, [pendingFile, pendingName, upload]);
+	}, [m, pendingFile, pendingName, upload]);
 
 	const handleDownload = useCallback(
 		async (attachment: AttachmentMeta) => {
@@ -263,29 +279,31 @@ export function ItemAttachments({
 				// Clean up the object URL after a delay
 				setTimeout(() => URL.revokeObjectURL(url), 60_000);
 			} catch {
-				toast.error("Failed to download attachment. Please try again.");
+				toast.error(
+					m["vaults.detail.items.attachments.toast.download_failed"](),
+				);
 			}
 		},
-		[download],
+		[download, m],
 	);
 
 	const handleDelete = useCallback(
 		async (attachmentId: string) => {
 			try {
 				await remove.mutateAsync(attachmentId);
-				toast.success("Attachment deleted");
+				toast.success(m["vaults.detail.items.attachments.toast.deleted"]());
 			} catch {
-				toast.error("Failed to delete attachment. Please try again.");
+				toast.error(m["vaults.detail.items.attachments.toast.delete_failed"]());
 			}
 		},
-		[remove],
+		[m, remove],
 	);
 
 	return (
 		<div className="space-y-3">
 			<div className="flex items-center justify-between">
 				<span className="font-medium text-muted-foreground text-sm">
-					Attachments
+					{m["vaults.detail.items.attachments.label"]()}
 					{attachments.length > 0 && (
 						<span className="ml-1 text-muted-foreground">
 							({attachments.length})
@@ -307,7 +325,7 @@ export function ItemAttachments({
 							disabled={isUploading || !!pendingFile}
 						>
 							<Upload size={14} className="mr-1" />
-							Attach file
+							{m["vaults.detail.items.attachments.action.attach_file"]()}
 						</Button>
 					</>
 				)}
@@ -317,7 +335,7 @@ export function ItemAttachments({
 			{pendingFile && (
 				<div className="space-y-2 rounded-md border p-3">
 					<p className="text-muted-foreground text-sm">
-						Display name for{" "}
+						{m["vaults.detail.items.attachments.pending.display_name_for"]()}{" "}
 						<span className="font-medium text-foreground">
 							{pendingFile.name}
 						</span>
@@ -346,7 +364,9 @@ export function ItemAttachments({
 							{isUploading ? (
 								<Loader size="14" className="mr-1 animate-spin" />
 							) : null}
-							{isUploading ? "Uploading..." : "Upload"}
+							{isUploading
+								? m["vaults.detail.items.attachments.action.uploading"]()
+								: m["vaults.detail.items.attachments.action.upload"]()}
 						</Button>
 						<Button
 							size="sm"
@@ -357,7 +377,7 @@ export function ItemAttachments({
 							}}
 							disabled={isUploading}
 						>
-							Cancel
+							{m["vaults.detail.items.detail.action.cancel"]()}
 						</Button>
 					</div>
 				</div>
@@ -366,12 +386,14 @@ export function ItemAttachments({
 			{isLoading && (
 				<div className="flex items-center gap-2 text-muted-foreground text-sm">
 					<Loader className="animate-spin" />
-					Loading attachments...
+					{m["vaults.detail.items.attachments.loading"]()}
 				</div>
 			)}
 
 			{!isLoading && attachments.length === 0 && (
-				<p className="text-muted-foreground text-sm">No attachments.</p>
+				<p className="text-muted-foreground text-sm">
+					{m["vaults.detail.items.attachments.empty"]()}
+				</p>
 			)}
 
 			{!isLoading && attachments.length > 0 && (

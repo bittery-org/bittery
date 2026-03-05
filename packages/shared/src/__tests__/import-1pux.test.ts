@@ -443,6 +443,6 @@ describe("onePassword1puxImportProvider", () => {
 
 		await expect(
 			onePassword1puxImportProvider.parse(corruptFile),
-		).rejects.toThrow("Could not read 1PUX archive");
+		).rejects.toMatchObject({ code: "archive-read-failed" });
 	});
 });

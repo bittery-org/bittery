@@ -16,6 +16,7 @@ import {
 	IconTagsOutlineDuo18,
 } from "@bittery/ui/icons";
 import { useState } from "react";
+import { useI18n } from "../../providers/i18n-provider";
 import { getTagColorFromName, TagBadge } from "./tag-badge";
 
 interface TagInputProps {
@@ -33,6 +34,7 @@ export function TagInput({
 	disabled = false,
 	onTagClick,
 }: TagInputProps) {
+	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
 	const [searchValue, setSearchValue] = useState("");
 
@@ -103,21 +105,31 @@ export function TagInput({
 							<IconTagsOutlineDuo18 className="h-3.5 w-3.5" />
 							<span>
 								{tags.length > 0
-									? `${tags.length} tag${tags.length > 1 ? "s" : ""}`
-									: "Add tags"}
+									? tags.length === 1
+										? m["vaults.detail.items.tag_input.button.count.single"]({
+												count: tags.length,
+											})
+										: m["vaults.detail.items.tag_input.button.count.plural"]({
+												count: tags.length,
+											})
+									: m["vaults.detail.items.tag_input.button.default"]()}
 							</span>
 						</Button>
 					</PopoverTrigger>
 					<PopoverContent className="w-64 p-0" align="start">
 						<Command>
 							<CommandInput
-								placeholder="Search or create tags..."
+								placeholder={m[
+									"vaults.detail.items.tag_input.search.placeholder"
+								]()}
 								value={searchValue}
 								onValueChange={setSearchValue}
 							/>
 							<CommandList>
 								{filteredTags.length === 0 && !showCreateOption && (
-									<CommandEmpty>No tags found.</CommandEmpty>
+									<CommandEmpty>
+										{m["vaults.detail.items.tag_input.empty"]()}
+									</CommandEmpty>
 								)}
 								{showCreateOption && (
 									<CommandGroup>
@@ -126,12 +138,18 @@ export function TagInput({
 											className="flex items-center gap-2"
 										>
 											<IconPlusOutlineDuo18 className="h-4 w-4" />
-											<span>Create &quot;{searchValue.trim()}&quot;</span>
+											<span>
+												{m["vaults.detail.items.tag_input.action.create"]({
+													tag: searchValue.trim(),
+												})}
+											</span>
 										</CommandItem>
 									</CommandGroup>
 								)}
 								{filteredTags.length > 0 && (
-									<CommandGroup heading="Tags">
+									<CommandGroup
+										heading={m["vaults.detail.items.tag_input.group.tags"]()}
+									>
 										{filteredTags.map((tag) => {
 											const isSelected = selectedTagsSet.has(tag);
 											const color = getTagColorFromName(tag);

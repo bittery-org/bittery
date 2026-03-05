@@ -18,7 +18,7 @@ export function FormWrapper({
 	children,
 	onSubmit,
 	onCancel,
-	submitLabel = "Save",
+	submitLabel,
 	isSubmitting = false,
 	vaults = [],
 	currentVaultId,

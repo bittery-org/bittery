@@ -6,9 +6,8 @@
  * since the extension's stored token may become stale.
  */
 
-import type { AppRouter } from "@bittery/api/routers/index";
-import { buildTrpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
+import { createSessionRefreshingTrpcClient } from "@bittery/shared/trpc-session-refresh";
 import { storage } from "../lib/storage";
 import { desktopClient } from "./desktop-client";
 import { desktopSync } from "./desktop-sync";
@@ -68,26 +67,33 @@ async function getAuthToken(): Promise<string | null> {
 }
 
 // tRPC client for API calls
-export const trpcClient = createTRPCClient<AppRouter>({
-	links: [
-		httpBatchLink({
-			url: `${fallbackServerUrl}/trpc`,
-			async headers() {
-				const [token, clientId] = await Promise.all([
-					getAuthToken(),
-					getOrCreateSyncClientId(),
-				]);
-				return {
-					authorization: token ? `Bearer ${token}` : "",
-					"X-Client-Id": clientId,
-				};
-			},
-			async fetch(url, options) {
-				const storedServerUrl = await storage.getServerUrl();
-				const serverUrl = storedServerUrl ?? fallbackServerUrl;
-				const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
-				return fetch(resolvedUrl.toString(), options);
-			},
-		}),
-	],
+export const trpcClient = createSessionRefreshingTrpcClient({
+	defaultServerUrl: fallbackServerUrl,
+	getServerUrl: async () => {
+		const storedServerUrl = await storage.getServerUrl();
+		return storedServerUrl ?? fallbackServerUrl;
+	},
+	getSessionSnapshot: async () => {
+		const activeAccount = await storage.getActiveAccount();
+		const email =
+			activeAccount?.type === "single" ? activeAccount.email : undefined;
+		const [token, sessionData] = await Promise.all([
+			getAuthToken(),
+			storage.getStoredSessionData(email),
+		]);
+
+		return {
+			token,
+			issuedAt: sessionData?.createdAt ?? null,
+			expiresAt: sessionData?.expiresAt ?? null,
+		};
+	},
+	getRefreshToken: getAuthToken,
+	storeRefreshedToken: async (token) => {
+		const activeAccount = await storage.getActiveAccount();
+		const email =
+			activeAccount?.type === "single" ? activeAccount.email : undefined;
+		await storage.storeAuthToken(token, email);
+	},
+	getClientId: async () => getOrCreateSyncClientId(),
 });

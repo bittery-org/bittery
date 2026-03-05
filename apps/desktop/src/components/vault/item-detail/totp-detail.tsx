@@ -3,13 +3,18 @@ import {
 	generateTotp,
 	type TotpResult,
 } from "@bittery/shared/totp";
-import { Button, Card, cn, copyWithToast, Label } from "@bittery/ui";
+import { Button, Card, cn, Label } from "@bittery/ui";
 import { IconCopyOutlineDuo18 } from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
+import { useI18n } from "../../../providers/i18n-provider";
 import { Favicon } from "../favicon";
 import { TagInput } from "../tag-input";
 import { DetailHeader, DetailPasswordField } from "./field-components";
-import type { CategoryDetailProps, TotpDisplayData } from "./shared";
+import {
+	type CategoryDetailProps,
+	handleCopy,
+	type TotpDisplayData,
+} from "./shared";
 
 export function TotpDetail({
 	data,
@@ -20,6 +25,7 @@ export function TotpDetail({
 	availableTags = [],
 	isUpdatingTags,
 }: CategoryDetailProps<TotpDisplayData>) {
+	const { m } = useI18n();
 	const [totpResult, setTotpResult] = useState<TotpResult | null>(null);
 
 	const generateCode = useCallback(async () => {
@@ -47,7 +53,7 @@ export function TotpDetail({
 	}, [generateCode]);
 
 	const handleCopyCode = () => {
-		copyWithToast(totpResult?.code, "Code");
+		handleCopy(totpResult?.code, m["vaults.detail.items.copy.label.code"](), m);
 	};
 
 	const progress = totpResult?.progress || 0;
@@ -76,7 +82,7 @@ export function TotpDetail({
 			<div className="flex gap-2">
 				{onEdit && (
 					<Button size="sm" variant="outline" onClick={onEdit}>
-						Edit
+						{m["vaults.detail.items.detail.action.edit"]()}
 					</Button>
 				)}
 				{onDelete && (
@@ -86,7 +92,7 @@ export function TotpDetail({
 						className="text-destructive hover:bg-destructive/10 hover:text-destructive"
 						onClick={onDelete}
 					>
-						Delete
+						{m["vaults.detail.items.detail.action.delete"]()}
 					</Button>
 				)}
 			</div>
@@ -97,7 +103,7 @@ export function TotpDetail({
 						type="button"
 						onClick={handleCopyCode}
 						className="group flex cursor-pointer items-center gap-4 rounded-lg transition-colors hover:bg-muted/50"
-						title="Click to copy"
+						title={m["vaults.detail.items.detail.totp.action.click_to_copy"]()}
 					>
 						<div className="relative flex size-12 items-center justify-center">
 							<svg
@@ -144,7 +150,7 @@ export function TotpDetail({
 									: "--- ---"}
 							</span>
 							<span className="text-muted-foreground text-xs">
-								Click to copy
+								{m["vaults.detail.items.detail.totp.action.click_to_copy"]()}
 							</span>
 						</div>
 					</button>
@@ -162,24 +168,33 @@ export function TotpDetail({
 
 			<div className="space-y-3">
 				<DetailPasswordField
-					label="Secret Key"
+					label={m["vaults.detail.items.copy.label.secret_key"]()}
 					value={data.totpSecret}
 					maskValue={formatSecretForDisplay(data.totpSecret)}
+					copyLabel={m["vaults.detail.items.copy.label.secret_key"]()}
 				/>
 
 				<div className="rounded-lg border p-4">
-					<h3 className="mb-3 font-semibold text-sm">Settings</h3>
+					<h3 className="mb-3 font-semibold text-sm">
+						{m["vaults.detail.items.detail.totp.section.settings"]()}
+					</h3>
 					<div className="grid grid-cols-3 gap-4 text-sm">
 						<div>
-							<Label className="text-muted-foreground text-xs">Algorithm</Label>
+							<Label className="text-muted-foreground text-xs">
+								{m["vaults.detail.items.totp.settings.field.algorithm"]()}
+							</Label>
 							<p className="font-medium">{data.totpAlgorithm || "SHA-1"}</p>
 						</div>
 						<div>
-							<Label className="text-muted-foreground text-xs">Digits</Label>
+							<Label className="text-muted-foreground text-xs">
+								{m["vaults.detail.items.totp.settings.field.digits"]()}
+							</Label>
 							<p className="font-medium">{data.totpDigits || 6}</p>
 						</div>
 						<div>
-							<Label className="text-muted-foreground text-xs">Period</Label>
+							<Label className="text-muted-foreground text-xs">
+								{m["vaults.detail.items.totp.settings.field.period"]()}
+							</Label>
 							<p className="font-medium">{data.totpPeriod || 30}s</p>
 						</div>
 					</div>
@@ -187,7 +202,9 @@ export function TotpDetail({
 
 				{data.notes && (
 					<div className="space-y-2">
-						<Label className="font-medium text-sm">Notes</Label>
+						<Label className="font-medium text-sm">
+							{m["vaults.detail.items.form.field.notes.label"]()}
+						</Label>
 						<Card>
 							<div className="whitespace-pre-wrap px-4 py-1 text-sm">
 								{data.notes}
@@ -199,7 +216,7 @@ export function TotpDetail({
 				{/* Tags */}
 				{onTagsChange && (
 					<div className="space-y-2">
-						<Label>Tags</Label>
+						<Label>{m["vaults.detail.items.detail.tags.label"]()}</Label>
 						<TagInput
 							tags={data.tags || []}
 							availableTags={availableTags}

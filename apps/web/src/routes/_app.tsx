@@ -39,7 +39,10 @@ function AppLayout() {
 						<SidebarTrigger className="-ml-1" />
 					</div>
 				</header>
-				<div id="app-scroll-area" className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4 pt-14 lg:pl-13 xl:pt-3.5">
+				<div
+					id="app-scroll-area"
+					className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4 pt-14 lg:pl-13 xl:pt-3.5"
+				>
 					<Outlet />
 				</div>
 			</SidebarInset>

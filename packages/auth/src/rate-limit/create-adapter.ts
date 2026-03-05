@@ -3,9 +3,7 @@ import type { RateLimitAdapter } from "./types";
 type AdapterMode = "auto" | "postgres" | "redis" | "valkey";
 
 function resolveMode(): AdapterMode {
-	const raw = (process.env.RATE_LIMIT_ADAPTER ?? "auto")
-		.trim()
-		.toLowerCase();
+	const raw = (process.env.RATE_LIMIT_ADAPTER ?? "auto").trim().toLowerCase();
 	if (raw === "postgres" || raw === "redis" || raw === "valkey") {
 		return raw;
 	}

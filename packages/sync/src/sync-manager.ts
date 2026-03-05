@@ -1,5 +1,6 @@
 import type {
 	ConnectionStatus,
+	SessionRevokedControlPayload,
 	SyncCursor,
 	SyncEvent,
 	SyncManagerOptions,
@@ -44,6 +45,9 @@ export class SyncManager {
 	private storage: SyncStorage;
 	private onEvent?: (event: SyncEvent) => void;
 	private onStatusChange?: (status: ConnectionStatus) => void;
+	private onSessionRevoked?: (
+		payload: SessionRevokedControlPayload,
+	) => void | Promise<void>;
 
 	private fetchImpl: (url: string, init?: any) => Promise<Response>;
 	private abortController: AbortController | null = null;
@@ -70,6 +74,7 @@ export class SyncManager {
 		this.storage = options.storage || new MemoryStorage();
 		this.onEvent = options.onEvent;
 		this.onStatusChange = options.onStatusChange;
+		this.onSessionRevoked = options.onSessionRevoked;
 		this.reconnectDelay = options.reconnectDelay || 1000;
 		this.maxReconnectDelay = options.maxReconnectDelay || 30000;
 		this.fetchImpl = options.fetch || globalThis.fetch.bind(globalThis);
@@ -207,7 +212,7 @@ export class SyncManager {
 	/**
 	 * Read and parse SSE stream
 	 */
-	private async readStream(body: ReadableStream<Uint8Array>): Promise<void> {
+	private async readStream(body: NonNullable<Response["body"]>): Promise<void> {
 		const reader = body.getReader();
 		const decoder = new TextDecoder();
 		let buffer = "";
@@ -288,14 +293,33 @@ export class SyncManager {
 				return;
 			}
 
-			// Handle connection message
-			if (event.type === "connected") {
-				console.log("SSE connected:", event);
-				return;
-			}
+				// Handle connection message
+				if (event.type === "connected") {
+					console.log("SSE connected:", event);
+					return;
+				}
 
-			// Convert to SyncEvent
-			const syncEvent: SyncEvent = {
+				// Handle control message for targeted session revocation.
+				if (
+					(eventType === "control" || event.type === "session_revoked") &&
+					event.type === "session_revoked"
+				) {
+					void this.onSessionRevoked?.({
+						type: "session_revoked",
+						userId: String(event.userId ?? ""),
+						sessionId: String(event.sessionId ?? ""),
+						timestamp:
+							typeof event.timestamp === "number"
+								? event.timestamp
+								: Date.now(),
+						reason:
+							typeof event.reason === "string" ? event.reason : undefined,
+					});
+					return;
+				}
+
+				// Convert to SyncEvent
+				const syncEvent: SyncEvent = {
 				id: event.id,
 				seq: event.seq,
 				type: event.type,
@@ -334,7 +358,10 @@ export class SyncManager {
 		}
 	}
 
-	private mergeDedupedEvent(existing: SyncEvent, incoming: SyncEvent): SyncEvent {
+	private mergeDedupedEvent(
+		existing: SyncEvent,
+		incoming: SyncEvent,
+	): SyncEvent {
 		if (
 			existing.type === "vault_updated" &&
 			incoming.type === "vault_updated" &&

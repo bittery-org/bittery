@@ -444,7 +444,9 @@ test.describe("Vault and Item CRUD", () => {
 			.filter({ has: page.getByText(originalName) })
 			.first();
 		await expect(targetCard).toBeVisible();
-		await targetCard.locator('[data-testid^="vault-card-actions-trigger-"]').click();
+		await targetCard
+			.locator('[data-testid^="vault-card-actions-trigger-"]')
+			.click();
 		await page.locator('[data-testid^="vault-card-edit-action-"]').click();
 		await expect(page.getByTestId("edit-vault-dialog")).toBeVisible();
 		await page.getByPlaceholder("Enter vault name").fill(updatedName);
@@ -457,7 +459,9 @@ test.describe("Vault and Item CRUD", () => {
 		).toBeVisible();
 	});
 
-	test("should delete vault as owner from vault card actions", async ({ page }) => {
+	test("should delete vault as owner from vault card actions", async ({
+		page,
+	}) => {
 		const vaultName = `Delete Vault ${Date.now()}`;
 
 		await createVaultFromVaultsPage(page, vaultName);
@@ -469,7 +473,9 @@ test.describe("Vault and Item CRUD", () => {
 			.filter({ has: page.getByText(vaultName) })
 			.first();
 		await expect(targetCard).toBeVisible();
-		await targetCard.locator('[data-testid^="vault-card-actions-trigger-"]').click();
+		await targetCard
+			.locator('[data-testid^="vault-card-actions-trigger-"]')
+			.click();
 		await page.locator('[data-testid^="vault-card-delete-action-"]').click();
 		await expect(page.getByTestId("delete-vault-dialog")).toBeVisible();
 		await page.getByTestId("delete-vault-confirm-button").click();

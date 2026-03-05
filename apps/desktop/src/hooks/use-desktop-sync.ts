@@ -5,6 +5,11 @@ import { useSync } from "@bittery/sync";
 import type { ICrypto } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+	findAccountEmailBySessionId,
+	invalidateDesktopAccountSession,
+	isUnauthorizedTrpcError,
+} from "@/lib/session-invalidation";
 import { storage } from "@/lib/storage";
 import {
 	getDesktopSyncStore,
@@ -96,11 +101,13 @@ const crypto: ICrypto = {
 	encrypt: tauriCrypto.encrypt,
 	rsaDecrypt: tauriCrypto.rsaDecrypt,
 	generateEncryptionKey: tauriCrypto.generateEncryptionKey,
+	generateUuid: tauriCrypto.generateUuid,
 	deriveKeys: tauriCrypto.deriveKeys,
 	generateClientEphemeral: tauriCrypto.generateClientEphemeral,
 	deriveClientSession: tauriCrypto.deriveClientSession,
 	verifyServerSession: tauriCrypto.verifyServerSession,
 	validateSecretKey: tauriCrypto.validateSecretKey,
+	validateServerKdfParams: tauriCrypto.validateServerKdfParams,
 };
 
 /**
@@ -182,6 +189,109 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		[getAuthToken, serverUrl],
 	);
 
+	const handleAccountSessionInvalidation = useCallback(
+		async (email: string) => {
+			const normalizedEmail = email.toLowerCase();
+			await invalidateDesktopAccountSession(normalizedEmail);
+			await queryClient.cancelQueries();
+			queryClient.clear();
+
+			const activeAccount = await storage.getActiveAccount();
+			if (
+				activeAccount?.type === "single" &&
+				activeAccount.email.toLowerCase() === normalizedEmail
+			) {
+				window.location.href = `/unlock?email=${encodeURIComponent(normalizedEmail)}`;
+				return;
+			}
+
+			if (activeAccount?.type === "all") {
+				const unlockedAccounts = await storage.getUnlockedAccounts?.();
+				if (!unlockedAccounts || unlockedAccounts.length === 0) {
+					window.location.href = "/unlock";
+				}
+			}
+		},
+		[queryClient],
+	);
+
+	const onSessionRevoked = useCallback(
+		async (payload: { sessionId: string }) => {
+			const revokedEmail = await findAccountEmailBySessionId(payload.sessionId);
+			if (!revokedEmail) {
+				return;
+			}
+
+			await handleAccountSessionInvalidation(revokedEmail);
+			if (syncAccountEmail?.toLowerCase() === revokedEmail.toLowerCase()) {
+				setSyncAccountEmail(null);
+			}
+		},
+		[handleAccountSessionInvalidation, syncAccountEmail],
+	);
+
+	// Revalidate persisted sessions on startup/interval when online.
+	// This catches revoked sessions even if the app was closed at revocation time.
+	useEffect(() => {
+		if (!enabled || !isInitialized) {
+			return;
+		}
+
+		let cancelled = false;
+
+		const revalidateSessions = async () => {
+			if (typeof navigator !== "undefined" && !navigator.onLine) {
+				return;
+			}
+
+			const accounts = await storage.getAccountsList();
+			for (const account of accounts) {
+				if (cancelled) {
+					return;
+				}
+
+				const email = account.email.toLowerCase();
+				const [token, url, sessionData] = await Promise.all([
+					storage.getAuthToken(email),
+					storage.getServerUrl(email),
+					storage.getStoredSessionData(email),
+				]);
+
+				if (!token || !url || !sessionData?.sessionId) {
+					continue;
+				}
+
+				try {
+					await createAccountTrpcClient(token, url).auth.me.query();
+				} catch (error) {
+					if (!isUnauthorizedTrpcError(error)) {
+						continue;
+					}
+
+					await handleAccountSessionInvalidation(email);
+					if (syncAccountEmail?.toLowerCase() === email) {
+						setSyncAccountEmail(null);
+					}
+				}
+			}
+		};
+
+		void revalidateSessions();
+		const interval = setInterval(() => {
+			void revalidateSessions();
+		}, 30_000);
+
+		return () => {
+			cancelled = true;
+			clearInterval(interval);
+		};
+	}, [
+		enabled,
+		handleAccountSessionInvalidation,
+		isInitialized,
+		syncAccountEmail,
+	]);
+
 	const syncStorage = useMemo(() => new TauriSyncStorage(), []);
 	const vaultCoordinator = useMemo(
 		() => getOrCreateVaultRepositoryCoordinator(crypto, storage),
@@ -198,6 +308,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		itemCacheAdapter: vaultCoordinator,
 		itemCacheAccountEmail: syncAccountEmail,
 		getClientForAccount,
+		onSessionRevoked,
 	});
 
 	return {

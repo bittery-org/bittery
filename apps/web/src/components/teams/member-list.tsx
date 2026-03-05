@@ -21,9 +21,12 @@ import {
 } from "@bittery/ui";
 import { IconUserOutlineDuo18 as UserMinus } from "@bittery/ui/icons";
 import { useState } from "react";
+import { formatDate } from "@/lib/i18n-format";
 import { storage } from "@/lib/storage";
 import { decrypt, performKeyRotation, rsaDecrypt } from "@/lib/wasm-crypto";
+import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
+import { TeamRotationError } from "./team-rotation-error";
 
 interface Member {
 	userId: string;
@@ -52,6 +55,7 @@ export function MemberList({
 	const invalidator = useQueryInvalidator();
 	const [removingUserId, setRemovingUserId] = useState<string | null>(null);
 	const [isRotating, setIsRotating] = useState(false);
+	const { m } = useI18n();
 
 	const canManageMembers =
 		currentUserRole === "owner" || currentUserRole === "admin";
@@ -74,14 +78,12 @@ export function MemberList({
 			// Step 1: Get MUK and current user ID
 			const masterUnlockKey = await storage.getMasterUnlockKey();
 			if (!masterUnlockKey) {
-				throw new Error(
-					"Master Unlock Key not available. Please log in again.",
-				);
+				throw new TeamRotationError("MASTER_UNLOCK_KEY_MISSING");
 			}
 
 			const currentUserId = await storage.getActiveAccountUserId();
 			if (!currentUserId) {
-				throw new Error("Session data not available. Please log in again.");
+				throw new TeamRotationError("SESSION_DATA_MISSING");
 			}
 
 			// Step 2: Fetch team rotation data from server
@@ -119,9 +121,9 @@ export function MemberList({
 				});
 
 				if (!currentVaultKey) {
-					throw new Error(
-						`Could not decrypt vault key for vault "${vaultData.vaultName}". Please log in again.`,
-					);
+					throw new TeamRotationError("VAULT_KEY_DECRYPT_FAILED", {
+						vaultName: vaultData.vaultName,
+					});
 				}
 
 				// Perform key rotation on client side
@@ -132,6 +134,8 @@ export function MemberList({
 						publicKey: m.publicKey,
 					})),
 					vaultData.items,
+					vaultData.vaultId,
+					vaultData.keyVersion + 1,
 					currentUserId,
 					masterUnlockKey,
 				);
@@ -177,21 +181,60 @@ export function MemberList({
 				await storage.storeVaultKeys(updatedVaultKeys);
 			}
 
-			const totalItems = result.vaultRotations?.reduce(
-				(sum, _vr, i) =>
-					sum + (vaultRotations[i]?.keyRotation.reEncryptedItems.length ?? 0),
-				0,
-			) ?? 0;
+			const totalItems =
+				result.vaultRotations?.reduce(
+					(sum, _vr, i) =>
+						sum + (vaultRotations[i]?.keyRotation.reEncryptedItems.length ?? 0),
+					0,
+				) ?? 0;
+
+			const rotatedVaultsLabel =
+				(result.vaultRotations?.length ?? 0) === 1
+					? m["team.members.toast.rotated_vaults.single"]({
+							count: result.vaultRotations?.length ?? 0,
+						})
+					: m["team.members.toast.rotated_vaults.plural"]({
+							count: result.vaultRotations?.length ?? 0,
+						});
+
+			const reEncryptedItemsLabel =
+				totalItems === 1
+					? m["team.members.toast.reencrypted_items.single"]({
+							count: totalItems,
+						})
+					: m["team.members.toast.reencrypted_items.plural"]({
+							count: totalItems,
+						});
 
 			toast.success(
-				`Member removed. ${result.vaultRotations?.length ?? 0} vault(s) rotated, ${totalItems} item(s) re-encrypted.`,
+				m["team.members.toast.removed_summary"]({
+					rotatedVaults: rotatedVaultsLabel,
+					reEncryptedItems: reEncryptedItemsLabel,
+				}),
 			);
 			await invalidator.invalidateTeam();
 		} catch (error) {
 			console.error("Team member removal with key rotation failed:", error);
-			toast.error(
-				error instanceof Error ? error.message : "Failed to remove member",
-			);
+			if (error instanceof TeamRotationError) {
+				if (error.code === "MASTER_UNLOCK_KEY_MISSING") {
+					toast.error(m["team.error.master_unlock_key_missing"]());
+				} else if (error.code === "SESSION_DATA_MISSING") {
+					toast.error(m["team.error.session_data_missing"]());
+				} else {
+					toast.error(
+						m["team.error.vault_key_decrypt_failed"]({
+							vaultName:
+								error.params.vaultName ?? m["team.common.unknown_vault"](),
+						}),
+					);
+				}
+			} else {
+				toast.error(
+					error instanceof Error
+						? error.message
+						: m["team.members.toast.remove_failed"](),
+				);
+			}
 		} finally {
 			setIsRotating(false);
 			setRemovingUserId(null);
@@ -208,9 +251,16 @@ export function MemberList({
 
 	const getRoleLabel = (role: Member["role"]) => {
 		if (isSelfHostedMode && role === "owner") {
-			return "Admin (Super)";
+			return m["team.members.role.owner_self_hosted"]();
 		}
-		return role;
+		switch (role) {
+			case "owner":
+				return m["team.role.owner"]();
+			case "admin":
+				return m["team.role.admin"]();
+			default:
+				return m["team.role.member"]();
+		}
 	};
 
 	const getRoleBadgeVariant = (role: Member["role"]) => {
@@ -223,7 +273,9 @@ export function MemberList({
 
 	if (members.length === 0) {
 		return (
-			<p className="py-8 text-center text-muted-foreground">No members found</p>
+			<p className="py-8 text-center text-muted-foreground">
+				{m["team.members.empty"]()}
+			</p>
 		);
 	}
 
@@ -255,7 +307,7 @@ export function MemberList({
 											variant="outline"
 											className="border-primary/30 bg-primary/10 text-[10px] text-primary"
 										>
-											You
+											{m["team.members.badge.you"]()}
 										</Badge>
 									)}
 								</div>
@@ -265,7 +317,7 @@ export function MemberList({
 							</div>
 							<Badge
 								variant={getRoleBadgeVariant(member.role)}
-								className="shrink-0 capitalize"
+								className="shrink-0"
 							>
 								{getRoleLabel(member.role)}
 							</Badge>
@@ -274,8 +326,14 @@ export function MemberList({
 						<div className="mt-3 flex items-center justify-between border-t pt-3">
 							<span className="text-muted-foreground text-xs">
 								{member.joinedAt
-									? `Joined ${new Date(member.joinedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
-									: "Joined —"}
+									? m["team.members.joined.date"]({
+											date: formatDate(member.joinedAt, {
+												month: "short",
+												day: "numeric",
+												year: "numeric",
+											}),
+										})
+									: m["team.members.joined.none"]()}
 							</span>
 
 							{canRemove && (
@@ -289,30 +347,31 @@ export function MemberList({
 												className="h-7 gap-1.5 px-2 text-muted-foreground text-xs hover:text-foreground"
 											>
 												<UserMinus className="h-3.5 w-3.5" />
-												Remove
+												{m["team.members.action.remove"]()}
 											</Button>
 										</AlertDialogTrigger>
 										<AlertDialogContent>
 											<AlertDialogHeader>
-												<AlertDialogTitle>Remove Member</AlertDialogTitle>
+												<AlertDialogTitle>
+													{m["team.members.remove_dialog.title"]()}
+												</AlertDialogTitle>
 												<AlertDialogDescription>
-													Remove {member.name} from this team? Their sessions
-													will be invalidated, team vault access revoked, and
-													all shared vault keys will be rotated. They will be
-													moved to a free personal plan.
+													{m["team.members.remove_dialog.description"]({
+														name: member.name,
+													})}
 												</AlertDialogDescription>
 											</AlertDialogHeader>
 											<AlertDialogFooter>
 												<AlertDialogCancel disabled={isBusy}>
-													Cancel
+													{m["team.common.action.cancel"]()}
 												</AlertDialogCancel>
 												<AlertDialogAction
 													disabled={isBusy}
 													onClick={() => handleRemoveMember(member.userId)}
 												>
 													{removingUserId === member.userId
-														? "Removing & rotating keys..."
-														: "Remove member"}
+														? m["team.members.remove_dialog.action.removing"]()
+														: m["team.members.remove_dialog.action.confirm"]()}
 												</AlertDialogAction>
 											</AlertDialogFooter>
 										</AlertDialogContent>

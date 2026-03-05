@@ -22,6 +22,7 @@ import type {
 	AccountResolver,
 	DefaultTrpcClient,
 } from "./account-resolver";
+import { buildItemEncryptionContext } from "./encryption-context";
 
 export type { RawEncryptedItem, RawEncryptedItemWithVault };
 
@@ -154,11 +155,37 @@ export class ItemService {
 		this.accounts = deps.accounts;
 	}
 
+	async generateItemId(): Promise<string> {
+		if (this.crypto.generateUuid) {
+			return await this.crypto.generateUuid();
+		}
+		const random = globalThis?.crypto?.randomUUID?.();
+		if (random) {
+			return random;
+		}
+		return `item_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+	}
+
+	private async resolveUserId(email?: string): Promise<string> {
+		const sessionUserId = await this.storage.getStoredSessionData?.(email);
+		if (sessionUserId?.userId) {
+			return sessionUserId.userId;
+		}
+
+		const activeUserId = await this.storage.getActiveAccountUserId();
+		if (activeUserId) {
+			return activeUserId;
+		}
+
+		throw new Error("User ID not available for encryption context");
+	}
+
 	async encryptItemData(
 		data: DecryptedItemData,
 		vaultKey: Uint8Array,
+		context?: Parameters<ICrypto["encrypt"]>[2],
 	): Promise<EncryptedPayload> {
-		return this.crypto.encrypt(JSON.stringify(data), vaultKey);
+		return this.crypto.encrypt(JSON.stringify(data), vaultKey, context);
 	}
 
 	mergeItemUpdate(
@@ -185,8 +212,9 @@ export class ItemService {
 	async reEncryptForVault(
 		data: DecryptedItemData,
 		targetVaultKey: Uint8Array,
+		context?: Parameters<ICrypto["encrypt"]>[2],
 	): Promise<EncryptedPayload> {
-		return this.crypto.encrypt(JSON.stringify(data), targetVaultKey);
+		return this.crypto.encrypt(JSON.stringify(data), targetVaultKey, context);
 	}
 
 	private async getVaultKey(
@@ -257,8 +285,9 @@ export class ItemService {
 			encryptedData: item.encryptedData,
 			encryptionIv: item.encryptionIv,
 			encryptionAlgorithm: item.encryptionAlgorithm,
-			version: 0,
-			lastModifiedBy: null,
+			version: (item as { version?: number }).version ?? 1,
+			lastModifiedBy:
+				(item as { lastModifiedBy?: string | null }).lastModifiedBy ?? null,
 			createdAt: String(item.createdAt),
 			updatedAt: String(item.updatedAt),
 			deletedAt: item.deletedAt ? String(item.deletedAt) : null,
@@ -375,6 +404,13 @@ export class ItemService {
 									throw new Error(`No vault key for vault ${rawItem.vaultId}`);
 								}
 
+								const context = buildItemEncryptionContext({
+									vaultId: rawItem.vaultId,
+									itemId: rawItem.id,
+									version: (rawItem as { version?: number }).version ?? 1,
+									userId: rawItem.lastModifiedBy ?? account.userId,
+								});
+
 								const decryptedData = await this.crypto.decrypt(
 									{
 										ciphertext: rawItem.encryptedData,
@@ -382,6 +418,7 @@ export class ItemService {
 										algorithm: rawItem.encryptionAlgorithm,
 									},
 									vaultKey,
+									context,
 								);
 
 								const parsedData = JSON.parse(
@@ -479,6 +516,8 @@ export class ItemService {
 					encryptedData: item.encryptedData,
 					encryptionIv: item.encryptionIv,
 					encryptionAlgorithm: item.encryptionAlgorithm,
+					version: item.version,
+					lastModifiedBy: item.lastModifiedBy,
 					createdAt: item.createdAt,
 					updatedAt: item.updatedAt,
 				}));
@@ -505,6 +544,15 @@ export class ItemService {
 		const decryptedItems = await Promise.all(
 			rawItems.map(async (item) => {
 				try {
+					const context = buildItemEncryptionContext({
+						vaultId: item.vaultId,
+						itemId: item.id,
+						version: (item as { version?: number }).version ?? 1,
+						userId:
+							(item as { lastModifiedBy?: string | null }).lastModifiedBy ??
+							ownerAccount.userId,
+					});
+
 					const decryptedData = await this.crypto.decrypt(
 						{
 							ciphertext: item.encryptedData,
@@ -512,6 +560,7 @@ export class ItemService {
 							algorithm: item.encryptionAlgorithm,
 						},
 						vaultKey,
+						context,
 					);
 
 					const parsedData = JSON.parse(decryptedData) as DecryptedItemData;
@@ -610,6 +659,16 @@ export class ItemService {
 			);
 		}
 
+		const userId = rawItem.lastModifiedBy
+			? rawItem.lastModifiedBy
+			: await this.resolveUserId(accountEmail);
+		const context = buildItemEncryptionContext({
+			vaultId: rawItem.vaultId,
+			itemId: rawItem.id,
+			version: rawItem.version ?? 1,
+			userId,
+		});
+
 		const decryptedJson = await this.crypto.decrypt(
 			{
 				ciphertext: rawItem.encryptedData,
@@ -617,6 +676,7 @@ export class ItemService {
 				algorithm: rawItem.encryptionAlgorithm,
 			},
 			vaultKey,
+			context,
 		);
 
 		return {
@@ -681,6 +741,15 @@ export class ItemService {
 										);
 									}
 
+									const context = buildItemEncryptionContext({
+										vaultId: rawItem.vaultId,
+										itemId: rawItem.id,
+										version: (rawItem as { version?: number }).version ?? 1,
+										userId:
+											(rawItem as { lastModifiedBy?: string | null })
+												.lastModifiedBy ?? account.userId,
+									});
+
 									const decryptedData = await this.crypto.decrypt(
 										{
 											ciphertext: rawItem.encryptedData,
@@ -688,6 +757,7 @@ export class ItemService {
 											algorithm: rawItem.encryptionAlgorithm,
 										},
 										vaultKey,
+										context,
 									);
 
 									const parsedData = JSON.parse(decryptedData) as Record<
@@ -760,9 +830,19 @@ export class ItemService {
 			throw new Error("No vault key found. Please sign in again.");
 		}
 
+		const itemId = await this.generateItemId();
+		const userId = await this.resolveUserId(input.accountEmail);
+		const context = buildItemEncryptionContext({
+			vaultId: input.vaultId,
+			itemId,
+			version: 1,
+			userId,
+		});
+
 		const encryptedData = await this.crypto.encrypt(
 			JSON.stringify(input.data),
 			vaultKey,
+			context,
 		);
 
 		const client = await this.accounts.getClientForAccount(
@@ -771,6 +851,7 @@ export class ItemService {
 		);
 
 		const result = (await client.vault.createItem.mutate({
+			itemId,
 			vaultId: input.vaultId,
 			category: input.category,
 			encryptedData: encryptedData.ciphertext,
@@ -780,9 +861,12 @@ export class ItemService {
 
 		const fallbackId =
 			result.id && result.id !== input.vaultId ? result.id : undefined;
-		const itemId = result.itemId ?? fallbackId;
-		if (!itemId) {
+		const createdItemId = result.itemId ?? fallbackId;
+		if (!createdItemId) {
 			throw new Error("Failed to create item");
+		}
+		if (createdItemId !== itemId) {
+			throw new Error("Server returned mismatched item ID");
 		}
 
 		return {
@@ -823,9 +907,19 @@ export class ItemService {
 			encryptedPayload = mergedLoginData;
 		}
 
+		const userId = await this.resolveUserId(input.accountEmail);
+		const nextVersion = (rawItem?.version ?? 1) + 1;
+		const context = buildItemEncryptionContext({
+			vaultId: input.vaultId,
+			itemId: input.itemId,
+			version: nextVersion,
+			userId,
+		});
+
 		const encryptedData = await this.crypto.encrypt(
 			JSON.stringify(encryptedPayload),
 			vaultKey,
+			context,
 		);
 
 		const client = await this.accounts.getClientForAccount(
@@ -837,6 +931,7 @@ export class ItemService {
 			itemId: input.itemId,
 			encryptedData: encryptedData.ciphertext,
 			encryptionIv: encryptedData.iv,
+			encryptionAlgorithm: encryptedData.algorithm,
 		});
 
 		return { _encryptedData: encryptedData, _accountEmail: input.accountEmail };
@@ -888,9 +983,31 @@ export class ItemService {
 			);
 		}
 
+		const targetItemId = isCrossAccount
+			? await this.generateItemId()
+			: input.itemId;
+		let targetVersion = 1;
+		if (!isCrossAccount) {
+			const sourceItem = await this.fetchAndDecryptItem(
+				input.itemId,
+				defaultClient,
+				sourceAccountEmail,
+			);
+			targetVersion = (sourceItem.rawItem?.version ?? 1) + 1;
+		}
+
+		const targetUserId = await this.resolveUserId(targetAccountEmail);
+		const context = buildItemEncryptionContext({
+			vaultId: input.targetVaultId,
+			itemId: targetItemId,
+			version: targetVersion,
+			userId: targetUserId,
+		});
+
 		const encryptedData = await this.crypto.encrypt(
 			JSON.stringify(input.decryptedData),
 			targetVaultKey,
+			context,
 		);
 
 		if (isCrossAccount) {
@@ -899,6 +1016,7 @@ export class ItemService {
 				targetAccountEmail,
 			);
 			const createResult = (await targetClient.vault.createItem.mutate({
+				itemId: targetItemId,
 				vaultId: input.targetVaultId,
 				category: input.category,
 				encryptedData: encryptedData.ciphertext,
@@ -916,6 +1034,9 @@ export class ItemService {
 			const newItemId = createResult.itemId ?? fallbackId;
 			if (!newItemId) {
 				throw new Error("Failed to create item in target account");
+			}
+			if (newItemId !== targetItemId) {
+				throw new Error("Server returned mismatched item ID");
 			}
 
 			try {
@@ -956,6 +1077,7 @@ export class ItemService {
 			targetVaultId: input.targetVaultId,
 			encryptedData: encryptedData.ciphertext,
 			encryptionIv: encryptedData.iv,
+			encryptionAlgorithm: encryptedData.algorithm,
 		});
 
 		return {

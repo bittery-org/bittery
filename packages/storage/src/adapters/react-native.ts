@@ -12,6 +12,7 @@ import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 	ItemCacheMetadata,
+	KdfParams,
 } from "@bittery/types";
 import type * as CryptoType from "expo-crypto";
 import type * as LocalAuthenticationType from "expo-local-authentication";
@@ -511,6 +512,28 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		return this.getItem(key);
 	}
 
+	async storePinnedKdfParams(params: KdfParams, email?: string): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) throw new Error("No account specified");
+
+		const key = getAccountKey(resolvedEmail, "pinned_kdf_params");
+		await this.setItem(key, JSON.stringify(params));
+	}
+
+	async getPinnedKdfParams(email?: string): Promise<KdfParams | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+
+		const key = getAccountKey(resolvedEmail, "pinned_kdf_params");
+		const stored = await this.getItem(key);
+		if (!stored) return null;
+		try {
+			return JSON.parse(stored) as KdfParams;
+		} catch {
+			return null;
+		}
+	}
+
 	// ============================================================================
 	// Multi-Account
 	// ============================================================================
@@ -597,6 +620,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		await this.deleteItem(getAccountKey(resolvedEmail, "session_data"));
 		await this.deleteItem(getAccountKey(resolvedEmail, "jwt_token"));
 		await this.deleteItem(getAccountKey(resolvedEmail, "vault_keys"));
+		await this.deleteItem(getAccountKey(resolvedEmail, "pinned_kdf_params"));
 		await this.deleteItem(getAccountKey(resolvedEmail, "biometric_enabled"));
 		await this.deleteItem(getAccountKey(resolvedEmail, "last_biometric_auth"));
 		await this.deleteItem(getAccountKey(resolvedEmail, "server_url"));

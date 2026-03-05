@@ -31,12 +31,14 @@ import {
 	encryptMasterKey,
 	generateRecoveryKey,
 } from "@/lib/wasm-crypto";
+import { useI18n } from "@/providers/i18n-provider";
 
 export function RegenerateRecoveryKeyDialog({
 	userEmail,
 }: {
 	userEmail: string;
 }) {
+	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
 	const [step, setStep] = useState<"verify" | "display">("verify");
 	const [currentPassword, setCurrentPassword] = useState("");
@@ -58,11 +60,13 @@ export function RegenerateRecoveryKeyDialog({
 		}) => trpcClient.auth.storeRecoveryKey.mutate(input),
 		onSuccess: async () => {
 			await queryClient.invalidateQueries();
-			toast.success("Recovery Key has been regenerated.");
+			toast.success(m["settings.recovery_key.regenerate.toast.regenerated"]());
 			handleOpenChange(false);
 		},
-		onError: (error: Error) => {
-			toast.error(error.message || "Failed to regenerate Recovery Key");
+		onError: () => {
+			toast.error(
+				m["settings.recovery_key.regenerate.toast.regenerate_failed"](),
+			);
 			setIsProcessing(false);
 		},
 	});
@@ -71,20 +75,22 @@ export function RegenerateRecoveryKeyDialog({
 		e.preventDefault();
 
 		if (!currentPassword.trim()) {
-			toast.error("Please enter your current password");
+			toast.error(
+				m["settings.recovery_key.common.toast.current_password_required"](),
+			);
 			return;
 		}
 
 		const secretKey = await storage.getStoredSecretKey();
 		if (!secretKey) {
-			toast.error(
-				"Secret key not found. Please sign out and sign in with full credentials.",
-			);
+			toast.error(m["settings.common.toast.secret_key_not_found_sign_out"]());
 			return;
 		}
 
 		if (!userQuery.data?.encryptedPrivateKey) {
-			toast.error("Could not load your account metadata");
+			toast.error(
+				m["settings.recovery_key.common.toast.account_metadata_failed"](),
+			);
 			return;
 		}
 
@@ -118,7 +124,9 @@ export function RegenerateRecoveryKeyDialog({
 			setStep("display");
 		} catch (error) {
 			console.error("Recovery key regeneration failed:", error);
-			toast.error("Failed to verify password. Please try again.");
+			toast.error(
+				m["settings.recovery_key.common.toast.verify_password_failed"](),
+			);
 		} finally {
 			setIsProcessing(false);
 		}
@@ -126,12 +134,14 @@ export function RegenerateRecoveryKeyDialog({
 
 	const handleConfirmRegeneration = async () => {
 		if (!hasAcknowledged) {
-			toast.error("Please confirm you saved the Recovery Key");
+			toast.error(
+				m["settings.recovery_key.regenerate.toast.acknowledgement_required"](),
+			);
 			return;
 		}
 
 		if (!recoveryKey || !encryptedMasterKey) {
-			toast.error("Recovery setup data missing. Please retry.");
+			toast.error(m["settings.recovery_key.common.toast.data_missing"]());
 			return;
 		}
 
@@ -159,7 +169,7 @@ export function RegenerateRecoveryKeyDialog({
 	};
 
 	const copyRecoveryKey = () => {
-		copyWithToast(recoveryKey, "Recovery Key", {
+		copyWithToast(recoveryKey, m["settings.recovery_key.common.copy_label"](), {
 			showAutoClearMessage: false,
 		});
 	};
@@ -167,32 +177,41 @@ export function RegenerateRecoveryKeyDialog({
 	const downloadEmergencyKit = async () => {
 		const result = await downloadRecoveryKit({
 			fileName: "bittery-recovery-kit-regenerated",
-			title: "Bittery Recovery Kit (Regenerated)",
-			subtitle:
-				"This new Recovery Key replaces your previous one for future password recovery.",
+			title: m["settings.recovery_key.regenerate.kit.title"](),
+			subtitle: m["settings.recovery_key.regenerate.kit.subtitle"](),
 			entries: [
 				{
-					label: "New Recovery Key",
+					label: m["settings.recovery_key.regenerate.kit.entry.label"](),
 					value: recoveryKey,
 					description:
-						"Your previous Recovery Key is now invalid and cannot be used anymore.",
+						m["settings.recovery_key.regenerate.kit.entry.description"](),
 				},
 			],
 			cautions: [
-				"Destroy old copies of your previous Recovery Key.",
-				"Store this regenerated kit offline in a secure location.",
-				"Keep this separate from your password and device backups.",
+				m["settings.recovery_key.regenerate.kit.caution.destroy_old"](),
+				m["settings.recovery_key.regenerate.kit.caution.store_offline"](),
+				m["settings.recovery_key.regenerate.kit.caution.separate_backups"](),
 			],
-			footerNote:
-				"This document is generated client-side and never uploaded to Bittery servers.",
+			footerNote: m["settings.recovery_key.common.kit.footer_note"](),
+			labels: {
+				documentTitle: m["settings.recovery_key.common.kit.document_title"](),
+				generatedLabel: m["settings.recovery_key.common.kit.generated_label"](),
+				storeOfflineHeading:
+					m["settings.recovery_key.common.kit.store_offline_heading"](),
+				badgeText: m["settings.recovery_key.common.kit.badge_text"](),
+			},
 		});
 
 		if (result === "pdf-downloaded") {
-			toast.success("Recovery Kit PDF downloaded.");
+			toast.success(
+				m["settings.recovery_key.common.toast.kit_pdf_downloaded"](),
+			);
 			return;
 		}
 
-		toast.success("PDF failed. Recovery Kit downloaded as text backup.");
+		toast.success(
+			m["settings.recovery_key.common.toast.kit_text_downloaded"](),
+		);
 	};
 
 	return (
@@ -200,35 +219,41 @@ export function RegenerateRecoveryKeyDialog({
 			<DialogTrigger asChild>
 				<Button variant="outline">
 					<RefreshCw className="mr-2 h-4 w-4" />
-					Regenerate Recovery Key
+					{m["settings.recovery_key.regenerate.trigger"]()}
 				</Button>
 			</DialogTrigger>
 			<DialogContent className="sm:max-w-md">
 				{step === "verify" ? (
 					<form onSubmit={handleGenerateRecoveryKey}>
 						<DialogHeader>
-							<DialogTitle>Regenerate Recovery Key</DialogTitle>
+							<DialogTitle>
+								{m["settings.recovery_key.regenerate.title"]()}
+							</DialogTitle>
 							<DialogDescription>
-								Generate a new Recovery Key. This invalidates your previous one.
+								{m["settings.recovery_key.regenerate.description"]()}
 							</DialogDescription>
 						</DialogHeader>
 						<div className="grid gap-4 py-4">
 							<div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3">
 								<p className="text-destructive text-xs">
-									<strong>Warning:</strong> The current Recovery Key will no
-									longer work after regeneration.
+									<strong>{m["settings.common.warning"]()}</strong>{" "}
+									{m["settings.recovery_key.regenerate.warning"]()}
 								</p>
 							</div>
 
 							<div className="grid gap-2">
-								<Label htmlFor="regenRecoveryPassword">Current Password</Label>
+								<Label htmlFor="regenRecoveryPassword">
+									{m["settings.recovery_key.common.field.current_password"]()}
+								</Label>
 								<div className="relative">
 									<Input
 										id="regenRecoveryPassword"
 										type={showPassword ? "text" : "password"}
 										value={currentPassword}
 										onChange={(e) => setCurrentPassword(e.target.value)}
-										placeholder="Enter your password"
+										placeholder={m[
+											"settings.recovery_key.common.placeholder.password"
+										]()}
 										autoFocus
 										className="pr-10"
 									/>
@@ -250,25 +275,29 @@ export function RegenerateRecoveryKeyDialog({
 								variant="outline"
 								onClick={() => setOpen(false)}
 							>
-								Cancel
+								{m["settings.common.action.cancel"]()}
 							</Button>
 							<Button type="submit" disabled={isProcessing}>
-								{isProcessing ? "Verifying..." : "Generate New Recovery Key"}
+								{isProcessing
+									? m["settings.recovery_key.common.action.verifying"]()
+									: m["settings.recovery_key.regenerate.action.generate"]()}
 							</Button>
 						</DialogFooter>
 					</form>
 				) : (
 					<>
 						<DialogHeader>
-							<DialogTitle>Save Your New Recovery Key</DialogTitle>
+							<DialogTitle>
+								{m["settings.recovery_key.regenerate.display.title"]()}
+							</DialogTitle>
 							<DialogDescription>
-								This key is shown once. Store it securely before continuing.
+								{m["settings.recovery_key.common.display.description"]()}
 							</DialogDescription>
 						</DialogHeader>
 						<div className="grid gap-4 py-4">
 							<div className="relative rounded-xl border bg-muted/30 p-4">
 								<div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-									Your New Recovery Key
+									{m["settings.recovery_key.regenerate.display.key_label"]()}
 								</div>
 								<div className="break-all font-mono text-sm tracking-wide">
 									{recoveryKey}
@@ -282,7 +311,7 @@ export function RegenerateRecoveryKeyDialog({
 									onClick={copyRecoveryKey}
 								>
 									<Copy size={16} className="mr-2" />
-									Copy
+									{m["settings.common.action.copy"]()}
 								</Button>
 								<Button
 									type="button"
@@ -290,7 +319,7 @@ export function RegenerateRecoveryKeyDialog({
 									onClick={downloadEmergencyKit}
 								>
 									<Download size={16} className="mr-2" />
-									Download Kit
+									{m["settings.common.action.download_kit"]()}
 								</Button>
 							</div>
 
@@ -302,7 +331,9 @@ export function RegenerateRecoveryKeyDialog({
 									className="mt-1"
 								/>
 								<span className="text-sm">
-									I have saved my new Recovery Key in a secure location
+									{m[
+										"settings.recovery_key.regenerate.display.acknowledgement"
+									]()}
 								</span>
 							</label>
 						</div>
@@ -312,7 +343,7 @@ export function RegenerateRecoveryKeyDialog({
 								variant="outline"
 								onClick={() => setOpen(false)}
 							>
-								Cancel
+								{m["settings.common.action.cancel"]()}
 							</Button>
 							<Button
 								type="button"
@@ -324,8 +355,8 @@ export function RegenerateRecoveryKeyDialog({
 								}
 							>
 								{isProcessing || storeRecoveryKeyMutation.isPending
-									? "Saving..."
-									: "Confirm & Regenerate"}
+									? m["settings.common.action.saving"]()
+									: m["settings.recovery_key.regenerate.action.confirm"]()}
 							</Button>
 						</DialogFooter>
 					</>

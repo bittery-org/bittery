@@ -15,6 +15,7 @@ import {
 } from "@bittery/ui/icons";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
+import { useI18n } from "../../../providers/i18n-provider";
 import type { CustomField } from "./shared";
 import { handleCopy } from "./shared";
 
@@ -42,6 +43,7 @@ interface DetailFieldProps {
 	value: string | undefined;
 	onCopy?: boolean;
 	className?: string;
+	copyLabel?: string;
 }
 
 export function DetailField({
@@ -49,7 +51,10 @@ export function DetailField({
 	value,
 	onCopy = true,
 	className,
+	copyLabel,
 }: DetailFieldProps) {
+	const { m } = useI18n();
+
 	if (!value) return null;
 
 	return (
@@ -61,7 +66,7 @@ export function DetailField({
 					<InputGroupAddon align="inline-end" className="shrink-0">
 						<InputGroupButton
 							size="icon-sm"
-							onClick={() => handleCopy(value, label)}
+							onClick={() => handleCopy(value, copyLabel ?? label, m)}
 						>
 							<IconCopyOutlineDuo18 className="size-4" />
 						</InputGroupButton>
@@ -78,6 +83,7 @@ interface DetailPasswordFieldProps {
 	value: string | undefined;
 	className?: string;
 	maskValue?: string;
+	copyLabel?: string;
 }
 
 export function DetailPasswordField({
@@ -85,7 +91,9 @@ export function DetailPasswordField({
 	value,
 	className,
 	maskValue,
+	copyLabel,
 }: DetailPasswordFieldProps) {
+	const { m } = useI18n();
 	const [showPassword, setShowPassword] = useState(false);
 
 	if (!value) return null;
@@ -116,7 +124,7 @@ export function DetailPasswordField({
 						</InputGroupButton>
 						<InputGroupButton
 							size="icon-sm"
-							onClick={() => handleCopy(value, label)}
+							onClick={() => handleCopy(value, copyLabel ?? label, m)}
 						>
 							<IconCopyOutlineDuo18 className="size-4" />
 						</InputGroupButton>
@@ -132,13 +140,17 @@ interface DetailUrlFieldProps {
 	label: string;
 	value: string | undefined;
 	className?: string;
+	copyLabel?: string;
 }
 
 export function DetailUrlField({
 	label,
 	value,
 	className,
+	copyLabel,
 }: DetailUrlFieldProps) {
+	const { m } = useI18n();
+
 	if (!value) return null;
 
 	return (
@@ -150,7 +162,7 @@ export function DetailUrlField({
 					<ButtonGroup>
 						<InputGroupButton
 							size="icon-sm"
-							onClick={() => handleCopy(value, label)}
+							onClick={() => handleCopy(value, copyLabel ?? label, m)}
 						>
 							<IconCopyOutlineDuo18 className="size-4" />
 						</InputGroupButton>

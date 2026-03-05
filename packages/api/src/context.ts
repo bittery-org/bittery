@@ -11,13 +11,17 @@ export interface DeviceContext {
 }
 
 export async function createContext({ context }: CreateContextOptions) {
-	// Extract JWT token from Authorization header
+	// Extract session token from Authorization header
 	const authHeader = context.req.header("Authorization");
 	const token = authHeader?.replace("Bearer ", "");
 
 	let session = null;
 	if (token) {
 		session = await verifySession(token);
+	}
+
+	if (session) {
+		context.header("X-Session-Expires", session.expiresAt.toISOString());
 	}
 
 	// Extract device information from request headers
@@ -32,6 +36,7 @@ export async function createContext({ context }: CreateContextOptions) {
 
 	return {
 		session,
+		authToken: token ?? null,
 		clientId,
 		device: {
 			userAgent,

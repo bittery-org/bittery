@@ -21,6 +21,7 @@ import {
 import { cn } from "@bittery/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { useI18n } from "../../providers/i18n-provider";
 import { VaultAvatar } from "./vault-avatar";
 
 function getInitials(name: string): string {
@@ -45,6 +46,7 @@ export function MoveItemDialog({
 	item,
 	currentVaultId,
 }: MoveItemDialogProps) {
+	const { m } = useI18n();
 	const [selectedVaultId, setSelectedVaultId] = useState<string>("");
 	const [searchQuery, setSearchQuery] = useState("");
 	const { vaultKeys, isLoading, isAllAccountsMode } = useAllVaultKeys();
@@ -78,7 +80,7 @@ export function MoveItemDialog({
 
 		const grouped: Record<string, typeof filteredVaultKeys> = {};
 		for (const vault of filteredVaultKeys) {
-			const accountKey = vault.accountEmail || "unknown";
+			const accountKey = vault.accountEmail || "__unknown__";
 			if (!grouped[accountKey]) {
 				grouped[accountKey] = [];
 			}
@@ -99,7 +101,7 @@ export function MoveItemDialog({
 
 	const handleMove = async () => {
 		if (!selectedVaultId) {
-			toast.error("Please select a vault");
+			toast.error(m["vaults.detail.items.move_dialog.toast.select_vault"]());
 			return;
 		}
 
@@ -126,10 +128,10 @@ export function MoveItemDialog({
 
 			if (result.crossAccount) {
 				toast.success(
-					"Item transferred to other account successfully. A new copy was created in the target vault and the original was deleted.",
+					m["vaults.detail.items.move_dialog.toast.cross_account_success"](),
 				);
 			} else {
-				toast.success("Item moved successfully");
+				toast.success(m["vaults.detail.items.move_dialog.toast.success"]());
 			}
 
 			onOpenChange(false);
@@ -143,7 +145,9 @@ export function MoveItemDialog({
 			});
 		} catch (error) {
 			const errorMessage =
-				error instanceof Error ? error.message : "Failed to move item";
+				error instanceof Error
+					? error.message
+					: m["vaults.detail.items.move_dialog.toast.error"]();
 			toast.error(errorMessage);
 		}
 	};
@@ -161,7 +165,7 @@ export function MoveItemDialog({
 			<DialogContent className="max-w-md gap-0 p-0">
 				<DialogHeader className="p-6 pb-4">
 					<DialogTitle className="font-medium text-base">
-						Move "{item.title}" to a different vault
+						{m["vaults.detail.items.move_dialog.title"]({ title: item.title })}
 					</DialogTitle>
 				</DialogHeader>
 
@@ -170,7 +174,9 @@ export function MoveItemDialog({
 					<div className="relative">
 						<IconMagnifier3OutlineDuo18 className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
 						<Input
-							placeholder="Search vaults..."
+							placeholder={m[
+								"vaults.detail.items.move_dialog.search.placeholder"
+							]()}
 							value={searchQuery}
 							onChange={(e) => setSearchQuery(e.target.value)}
 							className="pl-9"
@@ -186,11 +192,11 @@ export function MoveItemDialog({
 						</div>
 					) : vaultKeys.length <= 1 ? (
 						<div className="py-8 text-center text-muted-foreground text-sm">
-							No other vaults available
+							{m["vaults.detail.items.move_dialog.empty.no_other_vaults"]()}
 						</div>
 					) : filteredVaultKeys.length === 0 ? (
 						<div className="py-8 text-center text-muted-foreground text-sm">
-							No vaults match your search
+							{m["vaults.detail.items.move_dialog.empty.no_matches"]()}
 						</div>
 					) : (
 						<div className="max-h-80 space-y-1 overflow-y-auto">
@@ -203,7 +209,11 @@ export function MoveItemDialog({
 											const accountName =
 												vaults[0].accountTeamName ||
 												vaults[0].accountName ||
-												accountEmail;
+												(accountEmail === "__unknown__"
+													? m[
+															"vaults.detail.items.move_dialog.account.unknown"
+														]()
+													: accountEmail);
 											const accountTeamAvatarUrl =
 												vaults[0].accountTeamAvatarUrl;
 
@@ -262,7 +272,9 @@ export function MoveItemDialog({
 																	</span>
 																	{isCurrentVault && (
 																		<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
-																			Current
+																			{m[
+																				"vaults.detail.items.move_dialog.badge.current"
+																			]()}
 																		</span>
 																	)}
 																	{isSelected && !isDisabled && (
@@ -313,7 +325,9 @@ export function MoveItemDialog({
 												</span>
 												{isCurrentVault && (
 													<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
-														Current
+														{m[
+															"vaults.detail.items.move_dialog.badge.current"
+														]()}
 													</span>
 												)}
 												{isSelected && !isDisabled && (
@@ -331,8 +345,7 @@ export function MoveItemDialog({
 				{/* Cross-account warning */}
 				{isCrossAccount && selectedVault && (
 					<div className="mx-6 mb-3 rounded-lg bg-amber-500/10 px-3 py-2.5 text-amber-600 text-sm dark:text-amber-500">
-						This will transfer the item to a different account. A new copy will
-						be created and the original deleted.
+						{m["vaults.detail.items.move_dialog.warning.cross_account"]()}
 					</div>
 				)}
 
@@ -342,7 +355,7 @@ export function MoveItemDialog({
 						onClick={() => handleOpenChange(false)}
 						disabled={moveItem.isPending}
 					>
-						Cancel
+						{m["vaults.detail.items.detail.action.cancel"]()}
 					</Button>
 					<Button
 						onClick={handleMove}
@@ -351,12 +364,14 @@ export function MoveItemDialog({
 						{moveItem.isPending ? (
 							<>
 								<IconLoader2OutlineDuo18 className="size-4 animate-spin" />
-								{isCrossAccount ? "Transferring..." : "Moving..."}
+								{isCrossAccount
+									? m["vaults.detail.items.move_dialog.action.transferring"]()
+									: m["vaults.detail.items.move_dialog.action.moving"]()}
 							</>
 						) : isCrossAccount ? (
-							"Transfer"
+							m["vaults.detail.items.move_dialog.action.transfer"]()
 						) : (
-							"Move"
+							m["vaults.detail.items.move_dialog.action.move"]()
 						)}
 					</Button>
 				</DialogFooter>

@@ -14,6 +14,7 @@ import {
 import { useForm } from "@tanstack/react-form";
 import { nanoid } from "nanoid";
 import { useState } from "react";
+import { useI18n } from "../../../providers/i18n-provider";
 import {
 	type BaseFormProps,
 	FormWrapper,
@@ -47,11 +48,12 @@ export function IdentityForm({
 	initialData,
 	onSubmit,
 	onCancel,
-	submitLabel = "Save",
+	submitLabel,
 	isSubmitting = false,
 	vaults = [],
 	selectedVaultId,
 }: IdentityFormProps) {
+	const { m } = useI18n();
 	const { currentVaultId, setCurrentVaultId } = useFormVault(
 		vaults,
 		selectedVaultId,
@@ -87,7 +89,9 @@ export function IdentityForm({
 				await onSubmit(submitData, currentVaultId);
 			} catch (error) {
 				const errorMessage =
-					error instanceof Error ? error.message : "Failed to save identity";
+					error instanceof Error
+						? error.message
+						: m["vaults.detail.items.form.toast.save_identity_failed"]();
 				toast.error(errorMessage);
 			}
 		},
@@ -149,28 +153,41 @@ export function IdentityForm({
 			<div>
 				<form.Field name="title">
 					{(field) => (
-						<TitleField field={field} placeholder="Personal Identity" />
+						<TitleField
+							field={field}
+							placeholder={m[
+								"vaults.detail.items.form.identity.placeholder.title"
+							]()}
+						/>
 					)}
 				</form.Field>
 			</div>
 
 			{/* Personal Information Section */}
 			<div className="space-y-4 rounded-lg border p-4">
-				<h3 className="font-medium text-sm">Personal Information</h3>
+				<h3 className="font-medium text-sm">
+					{m[
+						"vaults.detail.items.form.identity.section.personal_information"
+					]()}
+				</h3>
 
 				<div className="grid grid-cols-2 gap-4">
 					<div>
 						<form.Field name="firstName">
 							{(field) => (
 								<div className="space-y-2">
-									<Label htmlFor={field.name}>First Name</Label>
+									<Label htmlFor={field.name}>
+										{m["vaults.detail.items.form.identity.field.first_name"]()}
+									</Label>
 									<Input
 										id={field.name}
 										name={field.name}
 										value={field.state.value}
 										onBlur={field.handleBlur}
 										onChange={(e) => field.handleChange(e.target.value)}
-										placeholder="John"
+										placeholder={m[
+											"vaults.detail.items.form.identity.placeholder.first_name"
+										]()}
 									/>
 								</div>
 							)}
@@ -181,14 +198,18 @@ export function IdentityForm({
 						<form.Field name="lastName">
 							{(field) => (
 								<div className="space-y-2">
-									<Label htmlFor={field.name}>Last Name</Label>
+									<Label htmlFor={field.name}>
+										{m["vaults.detail.items.form.identity.field.last_name"]()}
+									</Label>
 									<Input
 										id={field.name}
 										name={field.name}
 										value={field.state.value}
 										onBlur={field.handleBlur}
 										onChange={(e) => field.handleChange(e.target.value)}
-										placeholder="Doe"
+										placeholder={m[
+											"vaults.detail.items.form.identity.placeholder.last_name"
+										]()}
 									/>
 								</div>
 							)}
@@ -200,14 +221,18 @@ export function IdentityForm({
 					<form.Field name="middleName">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>Middle Name</Label>
+								<Label htmlFor={field.name}>
+									{m["vaults.detail.items.form.identity.field.middle_name"]()}
+								</Label>
 								<Input
 									id={field.name}
 									name={field.name}
 									value={field.state.value}
 									onBlur={field.handleBlur}
 									onChange={(e) => field.handleChange(e.target.value)}
-									placeholder="Michael"
+									placeholder={m[
+										"vaults.detail.items.form.identity.placeholder.middle_name"
+									]()}
 								/>
 							</div>
 						)}
@@ -218,7 +243,9 @@ export function IdentityForm({
 					<form.Field name="email">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>Email</Label>
+								<Label htmlFor={field.name}>
+									{m["vaults.detail.items.form.identity.field.email"]()}
+								</Label>
 								<Input
 									id={field.name}
 									name={field.name}
@@ -226,7 +253,9 @@ export function IdentityForm({
 									value={field.state.value}
 									onBlur={field.handleBlur}
 									onChange={(e) => field.handleChange(e.target.value)}
-									placeholder="john.doe@example.com"
+									placeholder={m[
+										"vaults.detail.items.form.identity.placeholder.email"
+									]()}
 								/>
 							</div>
 						)}
@@ -237,7 +266,9 @@ export function IdentityForm({
 					<form.Field name="dateOfBirth">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>Date of Birth</Label>
+								<Label htmlFor={field.name}>
+									{m["vaults.detail.items.form.identity.field.date_of_birth"]()}
+								</Label>
 								<Input
 									id={field.name}
 									name={field.name}
@@ -255,7 +286,9 @@ export function IdentityForm({
 			{/* Phone Numbers Section */}
 			<div className="space-y-2">
 				<div className="flex items-center justify-between">
-					<Label>Phone Numbers</Label>
+					<Label>
+						{m["vaults.detail.items.form.identity.section.phone_numbers"]()}
+					</Label>
 					<Button
 						type="button"
 						variant="outline"
@@ -263,7 +296,7 @@ export function IdentityForm({
 						onClick={addPhoneNumber}
 					>
 						<IconPlusOutlineDuo18 className="mr-1 size-3" />
-						Add Phone
+						{m["vaults.detail.items.form.identity.action.add_phone"]()}
 					</Button>
 				</div>
 				{phoneNumbers.map((phone) => (
@@ -276,14 +309,24 @@ export function IdentityForm({
 								}
 								className="rounded-md border border-input bg-background px-3 py-2 text-sm"
 							>
-								<option value="Mobile">Mobile</option>
-								<option value="Home">Home</option>
-								<option value="Work">Work</option>
-								<option value="Other">Other</option>
+								<option value="Mobile">
+									{m["vaults.detail.items.form.identity.phone_type.mobile"]()}
+								</option>
+								<option value="Home">
+									{m["vaults.detail.items.form.identity.phone_type.home"]()}
+								</option>
+								<option value="Work">
+									{m["vaults.detail.items.form.identity.phone_type.work"]()}
+								</option>
+								<option value="Other">
+									{m["vaults.detail.items.form.identity.phone_type.other"]()}
+								</option>
 							</select>
 							<Input
 								type="tel"
-								placeholder="(555) 123-4567"
+								placeholder={m[
+									"vaults.detail.items.form.identity.placeholder.phone_number"
+								]()}
 								value={phone.number}
 								onChange={(e) =>
 									updatePhoneNumber(phone.id, { number: e.target.value })
@@ -306,7 +349,9 @@ export function IdentityForm({
 			{/* Addresses Section */}
 			<div className="space-y-2">
 				<div className="flex items-center justify-between">
-					<Label>Addresses</Label>
+					<Label>
+						{m["vaults.detail.items.form.identity.section.addresses"]()}
+					</Label>
 					<Button
 						type="button"
 						variant="outline"
@@ -314,13 +359,15 @@ export function IdentityForm({
 						onClick={addAddress}
 					>
 						<IconPlusOutlineDuo18 className="mr-1 size-3" />
-						Add Address
+						{m["vaults.detail.items.form.identity.action.add_address"]()}
 					</Button>
 				</div>
 				{addresses.map((address) => (
 					<div key={address.id} className="space-y-2 rounded-lg border p-3">
 						<div className="flex items-center justify-between">
-							<Label className="font-medium text-xs">Address</Label>
+							<Label className="font-medium text-xs">
+								{m["vaults.detail.items.form.identity.field.address"]()}
+							</Label>
 							<Button
 								type="button"
 								variant="ghost"
@@ -331,7 +378,9 @@ export function IdentityForm({
 							</Button>
 						</div>
 						<Input
-							placeholder="Street Address"
+							placeholder={m[
+								"vaults.detail.items.form.identity.placeholder.street_address"
+							]()}
 							value={address.street}
 							onChange={(e) =>
 								updateAddress(address.id, { street: e.target.value })
@@ -339,14 +388,18 @@ export function IdentityForm({
 						/>
 						<div className="grid grid-cols-2 gap-2">
 							<Input
-								placeholder="City"
+								placeholder={m[
+									"vaults.detail.items.form.identity.placeholder.city"
+								]()}
 								value={address.city}
 								onChange={(e) =>
 									updateAddress(address.id, { city: e.target.value })
 								}
 							/>
 							<Input
-								placeholder="State"
+								placeholder={m[
+									"vaults.detail.items.form.identity.placeholder.state"
+								]()}
 								value={address.state}
 								onChange={(e) =>
 									updateAddress(address.id, { state: e.target.value })
@@ -355,14 +408,18 @@ export function IdentityForm({
 						</div>
 						<div className="grid grid-cols-2 gap-2">
 							<Input
-								placeholder="ZIP Code"
+								placeholder={m[
+									"vaults.detail.items.form.identity.placeholder.zip_code"
+								]()}
 								value={address.zip}
 								onChange={(e) =>
 									updateAddress(address.id, { zip: e.target.value })
 								}
 							/>
 							<Input
-								placeholder="Country"
+								placeholder={m[
+									"vaults.detail.items.form.identity.placeholder.country"
+								]()}
 								value={address.country}
 								onChange={(e) =>
 									updateAddress(address.id, { country: e.target.value })
@@ -375,13 +432,19 @@ export function IdentityForm({
 
 			{/* Government IDs Section */}
 			<div className="space-y-4 rounded-lg border p-4">
-				<h3 className="font-medium text-sm">Government IDs</h3>
+				<h3 className="font-medium text-sm">
+					{m["vaults.detail.items.form.identity.section.government_ids"]()}
+				</h3>
 
 				<div>
 					<form.Field name="ssn">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>Social Security Number</Label>
+								<Label htmlFor={field.name}>
+									{m[
+										"vaults.detail.items.form.identity.field.social_security_number"
+									]()}
+								</Label>
 								<Input
 									id={field.name}
 									name={field.name}
@@ -389,7 +452,9 @@ export function IdentityForm({
 									value={formatSSN(field.state.value)}
 									onBlur={field.handleBlur}
 									onChange={(e) => handleSSNChange(e.target.value)}
-									placeholder="123-45-6789"
+									placeholder={m[
+										"vaults.detail.items.form.identity.placeholder.ssn"
+									]()}
 									className="font-mono"
 									maxLength={11}
 								/>
@@ -402,7 +467,11 @@ export function IdentityForm({
 					<form.Field name="passportNumber">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>Passport Number</Label>
+								<Label htmlFor={field.name}>
+									{m[
+										"vaults.detail.items.form.identity.field.passport_number"
+									]()}
+								</Label>
 								<Input
 									id={field.name}
 									name={field.name}
@@ -410,7 +479,9 @@ export function IdentityForm({
 									value={field.state.value}
 									onBlur={field.handleBlur}
 									onChange={(e) => field.handleChange(e.target.value)}
-									placeholder="A12345678"
+									placeholder={m[
+										"vaults.detail.items.form.identity.placeholder.passport_number"
+									]()}
 									className="font-mono"
 								/>
 							</div>
@@ -422,7 +493,11 @@ export function IdentityForm({
 					<form.Field name="driversLicense">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>Driver's License</Label>
+								<Label htmlFor={field.name}>
+									{m[
+										"vaults.detail.items.form.identity.field.drivers_license"
+									]()}
+								</Label>
 								<Input
 									id={field.name}
 									name={field.name}
@@ -430,7 +505,9 @@ export function IdentityForm({
 									value={field.state.value}
 									onBlur={field.handleBlur}
 									onChange={(e) => field.handleChange(e.target.value)}
-									placeholder="D12345678"
+									placeholder={m[
+										"vaults.detail.items.form.identity.placeholder.drivers_license"
+									]()}
 									className="font-mono"
 								/>
 							</div>

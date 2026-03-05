@@ -4,18 +4,79 @@
 
 use bittery_crypto_core::{
     decrypt, decrypt_master_key, derive_keys, derive_keys_from_master_key, derive_master_key,
-    encrypt, encrypt_master_key, generate_credential_id, generate_encryption_key,
+    decrypt_with_aad, encrypt, encrypt_master_key, encrypt_with_aad, generate_credential_id,
+    generate_encryption_key, generate_uuid,
     generate_passkey_keypair, generate_recovery_key, generate_rsa_key_pair, generate_secret_key,
     get_secret_key_hint,
-    key_rotation::{self, ItemData, MemberKeyData},
+    kdf_policy::KdfParams,
+    key_rotation::{self, ItemData, MemberKeyData, VaultKeyWrapContext},
     passkey::{build_passkey_attestation_object, sign_passkey_assertion},
     rsa_decrypt, rsa_encrypt,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient, SrpServer},
-    validate_recovery_key, validate_secret_key, EncryptedData,
+    validate_recovery_key, validate_secret_key, validate_server_kdf_params, AadContext,
+    EncryptedData,
 };
 use serde::{Deserialize, Serialize};
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
+use zeroize::Zeroize;
+
+thread_local! {
+    static KEY_HANDLE_STORE: RefCell<HashMap<u64, Vec<u8>>> = RefCell::new(HashMap::new());
+    static NEXT_KEY_HANDLE: Cell<u64> = const { Cell::new(1) };
+}
+
+fn insert_key_handle(secret: &[u8]) -> u64 {
+    let handle = NEXT_KEY_HANDLE.with(|counter| {
+        let current = counter.get();
+        counter.set(current.wrapping_add(1).max(1));
+        current
+    });
+
+    KEY_HANDLE_STORE.with(|store| {
+        store.borrow_mut().insert(handle, secret.to_vec());
+    });
+
+    handle
+}
+
+fn with_key_handle<T, F>(key_handle: u64, operation: F) -> Result<T, JsError>
+where
+    F: FnOnce(&[u8]) -> Result<T, JsError>,
+{
+    KEY_HANDLE_STORE.with(|store| {
+        let map = store.borrow();
+        let key = map
+            .get(&key_handle)
+            .ok_or_else(|| JsError::new("Invalid or expired key handle"))?;
+        operation(key.as_slice())
+    })
+}
+
+fn clone_key_material(key_handle: u64) -> Result<Vec<u8>, JsError> {
+    KEY_HANDLE_STORE.with(|store| {
+        store
+            .borrow()
+            .get(&key_handle)
+            .cloned()
+            .ok_or_else(|| JsError::new("Invalid or expired key handle"))
+    })
+}
+
+fn destroy_key_handle_internal(key_handle: u64) -> bool {
+    KEY_HANDLE_STORE.with(|store| {
+        let mut map = store.borrow_mut();
+        match map.remove(&key_handle) {
+            Some(mut key) => {
+                key.zeroize();
+                true
+            }
+            None => false,
+        }
+    })
+}
 
 // Initialize panic hook for better error messages
 #[wasm_bindgen(start)]
@@ -34,6 +95,13 @@ pub struct JsDerivedKeys {
     pub auth_key: String,
     #[wasm_bindgen(getter_with_clone)]
     pub master_unlock_key: String,
+}
+
+#[wasm_bindgen]
+#[derive(Serialize, Deserialize)]
+pub struct JsDerivedKeyHandles {
+    pub auth_key_handle: u64,
+    pub master_unlock_key_handle: u64,
 }
 
 #[wasm_bindgen]
@@ -87,6 +155,53 @@ pub struct JsSession {
     pub proof: String,
 }
 
+#[wasm_bindgen]
+#[derive(Serialize, Deserialize)]
+pub struct JsAadContext {
+    #[wasm_bindgen(getter_with_clone)]
+    pub vault_id: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub entity_id: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub entity_type: String,
+    #[wasm_bindgen(getter_with_clone)]
+    pub version: u64,
+    #[wasm_bindgen(getter_with_clone)]
+    pub user_id: String,
+}
+
+#[wasm_bindgen]
+impl JsAadContext {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        vault_id: String,
+        entity_id: String,
+        entity_type: String,
+        version: u64,
+        user_id: String,
+    ) -> JsAadContext {
+        JsAadContext {
+            vault_id,
+            entity_id,
+            entity_type,
+            version,
+            user_id,
+        }
+    }
+}
+
+impl From<JsAadContext> for AadContext {
+    fn from(value: JsAadContext) -> Self {
+        AadContext {
+            vault_id: value.vault_id,
+            entity_id: value.entity_id,
+            entity_type: value.entity_type,
+            version: value.version,
+            user_id: value.user_id,
+        }
+    }
+}
+
 // ============================================================================
 // Key Derivation
 // ============================================================================
@@ -107,6 +222,25 @@ pub fn js_derive_keys(
     })
 }
 
+/// Derive authentication and master unlock key handles from password + secret key.
+#[wasm_bindgen(js_name = deriveKeysHandle)]
+pub fn js_derive_keys_handle(
+    account_password: &str,
+    secret_key: &str,
+    email: &str,
+) -> Result<JsDerivedKeyHandles, JsError> {
+    let keys = derive_keys(account_password, secret_key, email)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    let auth_key_handle = insert_key_handle(&keys.auth_key);
+    let master_unlock_key_handle = insert_key_handle(&keys.master_unlock_key);
+
+    Ok(JsDerivedKeyHandles {
+        auth_key_handle,
+        master_unlock_key_handle,
+    })
+}
+
 /// Derive intermediate master key (PBKDF2 output) from password + secret key
 #[wasm_bindgen(js_name = deriveMasterKey)]
 pub fn js_derive_master_key(
@@ -117,6 +251,18 @@ pub fn js_derive_master_key(
     let master_key =
         derive_master_key(account_password, secret_key, email).map_err(|e| JsError::new(&e.to_string()))?;
     Ok(base64_encode(&master_key))
+}
+
+/// Derive intermediate master key and return it as an opaque handle.
+#[wasm_bindgen(js_name = deriveMasterKeyHandle)]
+pub fn js_derive_master_key_handle(
+    account_password: &str,
+    secret_key: &str,
+    email: &str,
+) -> Result<u64, JsError> {
+    let master_key =
+        derive_master_key(account_password, secret_key, email).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(insert_key_handle(&master_key))
 }
 
 /// Derive auth key + master unlock key from a raw master key
@@ -133,6 +279,83 @@ pub fn js_derive_keys_from_master_key(
         auth_key: base64_encode(&keys.auth_key),
         master_unlock_key: base64_encode(&keys.master_unlock_key),
     })
+}
+
+/// Derive auth key + master unlock key handles from a master-key handle.
+#[wasm_bindgen(js_name = deriveKeysFromMasterKeyHandle)]
+pub fn js_derive_keys_from_master_key_handle(
+    master_key_handle: u64,
+    email: &str,
+) -> Result<JsDerivedKeyHandles, JsError> {
+    let keys = with_key_handle(master_key_handle, |master_key| {
+        derive_keys_from_master_key(master_key, email).map_err(|e| JsError::new(&e.to_string()))
+    })?;
+
+    let auth_key_handle = insert_key_handle(&keys.auth_key);
+    let master_unlock_key_handle = insert_key_handle(&keys.master_unlock_key);
+
+    Ok(JsDerivedKeyHandles {
+        auth_key_handle,
+        master_unlock_key_handle,
+    })
+}
+
+/// Import a base64-encoded 32-byte key into the opaque handle store.
+#[wasm_bindgen(js_name = importKeyHandle)]
+pub fn js_import_key_handle(key_base64: &str) -> Result<u64, JsError> {
+    let key = base64_decode(key_base64)?;
+    Ok(insert_key_handle(&key))
+}
+
+/// Export an opaque key handle as base64.
+#[wasm_bindgen(js_name = exportKeyHandle)]
+pub fn js_export_key_handle(key_handle: u64) -> Result<String, JsError> {
+    with_key_handle(key_handle, |key| Ok(base64_encode(key)))
+}
+
+/// Duplicate a key handle.
+#[wasm_bindgen(js_name = cloneKeyHandle)]
+pub fn js_clone_key_handle(key_handle: u64) -> Result<u64, JsError> {
+    let key = clone_key_material(key_handle)?;
+    Ok(insert_key_handle(&key))
+}
+
+/// Destroy a key handle and zeroize backing memory.
+#[wasm_bindgen(js_name = destroyKeyHandle)]
+pub fn js_destroy_key_handle(key_handle: u64) -> bool {
+    destroy_key_handle_internal(key_handle)
+}
+
+/// Convert an auth-key handle into the SRP password string used by existing APIs.
+#[wasm_bindgen(js_name = deriveSrpPasswordFromHandle)]
+pub fn js_derive_srp_password_from_handle(auth_key_handle: u64) -> Result<String, JsError> {
+    with_key_handle(auth_key_handle, |auth_key| {
+        Ok(String::from_utf8_lossy(auth_key).to_string())
+    })
+}
+
+// ============================================================================
+// KDF Policy Validation
+// ============================================================================
+
+#[wasm_bindgen(js_name = validateServerKdfParams)]
+pub fn js_validate_server_kdf_params(
+    server_params: JsValue,
+    pinned_params: Option<JsValue>,
+) -> Result<(), JsError> {
+    let server: KdfParams = serde_wasm_bindgen::from_value(server_params)
+        .map_err(|e| JsError::new(&format!("Invalid server KDF params: {}", e)))?;
+
+    let pinned: Option<KdfParams> = match pinned_params {
+        Some(value) => Some(
+            serde_wasm_bindgen::from_value(value)
+                .map_err(|e| JsError::new(&format!("Invalid pinned KDF params: {}", e)))?,
+        ),
+        None => None,
+    };
+
+    validate_server_kdf_params(&server, pinned.as_ref())
+        .map_err(|e| JsError::new(&e.to_string()))
 }
 
 // ============================================================================
@@ -152,6 +375,59 @@ pub fn js_encrypt(plaintext: &str, key_base64: &str) -> Result<JsEncryptedData, 
     })
 }
 
+/// Encrypt plaintext using AES-256-GCM with an opaque key handle.
+#[wasm_bindgen(js_name = encryptWithHandle)]
+pub fn js_encrypt_with_handle(
+    plaintext: &str,
+    key_handle: u64,
+) -> Result<JsEncryptedData, JsError> {
+    with_key_handle(key_handle, |key| {
+        let encrypted = encrypt(plaintext, key).map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(JsEncryptedData {
+            ciphertext: encrypted.ciphertext,
+            iv: encrypted.iv,
+            algorithm: encrypted.algorithm,
+        })
+    })
+}
+
+/// Encrypt plaintext using AES-256-GCM with authenticated context.
+#[wasm_bindgen(js_name = encryptWithContext)]
+pub fn js_encrypt_with_context(
+    plaintext: &str,
+    key_base64: &str,
+    context: JsAadContext,
+) -> Result<JsEncryptedData, JsError> {
+    let key = base64_decode(key_base64)?;
+    let encrypted = encrypt_with_aad(plaintext, &key, &context.into())
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    Ok(JsEncryptedData {
+        ciphertext: encrypted.ciphertext,
+        iv: encrypted.iv,
+        algorithm: encrypted.algorithm,
+    })
+}
+
+/// Encrypt plaintext using AES-256-GCM with authenticated context and key handle.
+#[wasm_bindgen(js_name = encryptWithContextHandle)]
+pub fn js_encrypt_with_context_handle(
+    plaintext: &str,
+    key_handle: u64,
+    context: JsAadContext,
+) -> Result<JsEncryptedData, JsError> {
+    let aad_context: AadContext = context.into();
+    with_key_handle(key_handle, |key| {
+        let encrypted = encrypt_with_aad(plaintext, key, &aad_context)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(JsEncryptedData {
+            ciphertext: encrypted.ciphertext,
+            iv: encrypted.iv,
+            algorithm: encrypted.algorithm,
+        })
+    })
+}
+
 /// Decrypt data using AES-256-GCM
 #[wasm_bindgen(js_name = decrypt)]
 pub fn js_decrypt(encrypted_data: JsEncryptedData, key_base64: &str) -> Result<String, JsError> {
@@ -165,10 +441,113 @@ pub fn js_decrypt(encrypted_data: JsEncryptedData, key_base64: &str) -> Result<S
     decrypt(&data, &key).map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Decrypt data using AES-256-GCM and an opaque key handle.
+#[wasm_bindgen(js_name = decryptWithHandle)]
+pub fn js_decrypt_with_handle(
+    encrypted_data: JsEncryptedData,
+    key_handle: u64,
+) -> Result<String, JsError> {
+    let data = EncryptedData {
+        ciphertext: encrypted_data.ciphertext,
+        iv: encrypted_data.iv,
+        algorithm: encrypted_data.algorithm,
+    };
+
+    with_key_handle(key_handle, |key| {
+        decrypt(&data, key).map_err(|e| JsError::new(&e.to_string()))
+    })
+}
+
+/// Decrypt data using AES-256-GCM with authenticated context.
+#[wasm_bindgen(js_name = decryptWithContext)]
+pub fn js_decrypt_with_context(
+    encrypted_data: JsEncryptedData,
+    key_base64: &str,
+    context: JsAadContext,
+) -> Result<String, JsError> {
+    let key = base64_decode(key_base64)?;
+    let data = EncryptedData {
+        ciphertext: encrypted_data.ciphertext,
+        iv: encrypted_data.iv,
+        algorithm: encrypted_data.algorithm,
+    };
+
+    decrypt_with_aad(&data, &key, &context.into()).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Decrypt data using AES-256-GCM with authenticated context and key handle.
+#[wasm_bindgen(js_name = decryptWithContextHandle)]
+pub fn js_decrypt_with_context_handle(
+    encrypted_data: JsEncryptedData,
+    key_handle: u64,
+    context: JsAadContext,
+) -> Result<String, JsError> {
+    let aad_context: AadContext = context.into();
+    let data = EncryptedData {
+        ciphertext: encrypted_data.ciphertext,
+        iv: encrypted_data.iv,
+        algorithm: encrypted_data.algorithm,
+    };
+
+    with_key_handle(key_handle, |key| {
+        decrypt_with_aad(&data, key, &aad_context).map_err(|e| JsError::new(&e.to_string()))
+    })
+}
+
+/// Encrypt key material referenced by an opaque handle with a raw wrapping key.
+#[wasm_bindgen(js_name = encryptKeyHandleWithKey)]
+pub fn js_encrypt_key_handle_with_key(
+    key_handle: u64,
+    wrapping_key_base64: &str,
+) -> Result<JsEncryptedData, JsError> {
+    let wrapping_key = base64_decode(wrapping_key_base64)?;
+    with_key_handle(key_handle, |key_material| {
+        let mut key_material_base64 = base64_encode(key_material);
+        let encrypted = encrypt(&key_material_base64, &wrapping_key)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        key_material_base64.zeroize();
+
+        Ok(JsEncryptedData {
+            ciphertext: encrypted.ciphertext,
+            iv: encrypted.iv,
+            algorithm: encrypted.algorithm,
+        })
+    })
+}
+
+/// Decrypt key material with a raw wrapping key and store it as an opaque handle.
+#[wasm_bindgen(js_name = decryptKeyHandleWithKey)]
+pub fn js_decrypt_key_handle_with_key(
+    encrypted_data: JsEncryptedData,
+    wrapping_key_base64: &str,
+) -> Result<u64, JsError> {
+    let wrapping_key = base64_decode(wrapping_key_base64)?;
+    let data = EncryptedData {
+        ciphertext: encrypted_data.ciphertext,
+        iv: encrypted_data.iv,
+        algorithm: encrypted_data.algorithm,
+    };
+
+    let mut decrypted_base64 =
+        decrypt(&data, &wrapping_key).map_err(|e| JsError::new(&e.to_string()))?;
+    let mut key_material = base64_decode(&decrypted_base64)?;
+    decrypted_base64.zeroize();
+
+    let handle = insert_key_handle(&key_material);
+    key_material.zeroize();
+    Ok(handle)
+}
+
 /// Generate a random 32-byte encryption key
 #[wasm_bindgen(js_name = generateEncryptionKey)]
 pub fn js_generate_encryption_key() -> String {
     base64_encode(&generate_encryption_key())
+}
+
+/// Generate a random UUID v4 string.
+#[wasm_bindgen(js_name = generateUuid)]
+pub fn js_generate_uuid() -> String {
+    generate_uuid()
 }
 
 // ============================================================================
@@ -544,24 +923,21 @@ fn base64_decode(data: &str) -> Result<Vec<u8>, JsError> {
 
 fn parse_hash_algorithm(name: &str) -> Result<HashAlgorithm, JsError> {
     match name {
-        "SHA-1" => Ok(HashAlgorithm::Sha1),
         "SHA-256" => Ok(HashAlgorithm::Sha256),
-        "SHA-384" => Ok(HashAlgorithm::Sha384),
-        "SHA-512" => Ok(HashAlgorithm::Sha512),
-        _ => Err(JsError::new(&format!("Unknown hash algorithm: {}", name))),
+        _ => Err(JsError::new(&format!(
+            "Unsupported hash algorithm: {} (only SHA-256 is allowed)",
+            name
+        ))),
     }
 }
 
 fn parse_prime_group(group: u32) -> Result<PrimeGroup, JsError> {
     match group {
-        1024 => Ok(PrimeGroup::G1024),
-        1536 => Ok(PrimeGroup::G1536),
-        2048 => Ok(PrimeGroup::G2048),
-        3072 => Ok(PrimeGroup::G3072),
         4096 => Ok(PrimeGroup::G4096),
-        6144 => Ok(PrimeGroup::G6144),
-        8192 => Ok(PrimeGroup::G8192),
-        _ => Err(JsError::new(&format!("Unknown prime group: {}", group))),
+        _ => Err(JsError::new(&format!(
+            "Unsupported prime group: {} (only 4096 is allowed)",
+            group
+        ))),
     }
 }
 
@@ -642,8 +1018,6 @@ pub struct JsMemberEncryptedKey {
 
 #[wasm_bindgen]
 pub struct JsKeyRotationResult {
-    #[wasm_bindgen(getter_with_clone)]
-    pub new_vault_key_base64: String,
     // These are accessed via methods, not direct field access
     member_encrypted_keys: Vec<JsMemberEncryptedKey>,
     re_encrypted_items: Vec<JsReEncryptedItem>,
@@ -693,10 +1067,14 @@ pub fn js_encrypt_vault_key_for_member(
 pub fn js_encrypt_vault_key_with_muk(
     vault_key_base64: &str,
     master_unlock_key_base64: &str,
+    vault_id: &str,
+    user_id: &str,
+    key_version: u64,
 ) -> Result<String, JsError> {
     let vault_key = base64_decode(vault_key_base64)?;
     let muk = base64_decode(master_unlock_key_base64)?;
-    key_rotation::encrypt_vault_key_with_muk(&vault_key, &muk)
+    let context = VaultKeyWrapContext::new(vault_id, user_id, key_version);
+    key_rotation::encrypt_vault_key_with_muk(&vault_key, &muk, &context)
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
@@ -733,6 +1111,8 @@ pub fn js_perform_key_rotation(
     old_vault_key_base64: &str,
     members_json: &str,
     items_json: &str,
+    vault_id: &str,
+    key_version: u64,
     current_user_id: &str,
     master_unlock_key_base64: &str,
 ) -> Result<JsKeyRotationResult, JsError> {
@@ -745,12 +1125,18 @@ pub fn js_perform_key_rotation(
     let items: Vec<ItemData> = serde_json::from_str(items_json)
         .map_err(|e| JsError::new(&format!("Invalid items JSON: {}", e)))?;
 
-    let result =
-        key_rotation::perform_key_rotation(&old_key, &members, &items, current_user_id, &muk)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+    let result = key_rotation::perform_key_rotation(
+        &old_key,
+        &members,
+        &items,
+        vault_id,
+        key_version,
+        current_user_id,
+        &muk,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
 
     Ok(JsKeyRotationResult {
-        new_vault_key_base64: result.new_vault_key_base64,
         member_encrypted_keys: result
             .member_encrypted_keys
             .into_iter()

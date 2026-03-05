@@ -1,5 +1,6 @@
 import { toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
+import { useI18n } from "../../../providers/i18n-provider";
 import {
 	type BaseFormProps,
 	FormWrapper,
@@ -23,11 +24,12 @@ export function SecureNoteForm({
 	initialData,
 	onSubmit,
 	onCancel,
-	submitLabel = "Save",
+	submitLabel,
 	isSubmitting = false,
 	vaults = [],
 	selectedVaultId,
 }: SecureNoteFormProps) {
+	const { m } = useI18n();
 	const { currentVaultId, setCurrentVaultId } = useFormVault(
 		vaults,
 		selectedVaultId,
@@ -47,7 +49,9 @@ export function SecureNoteForm({
 				await onSubmit(submitData, currentVaultId);
 			} catch (error) {
 				const errorMessage =
-					error instanceof Error ? error.message : "Failed to save note";
+					error instanceof Error
+						? error.message
+						: m["vaults.detail.items.form.toast.save_note_failed"]();
 				toast.error(errorMessage);
 			}
 		},
@@ -65,7 +69,14 @@ export function SecureNoteForm({
 		>
 			<div>
 				<form.Field name="title">
-					{(field) => <TitleField field={field} placeholder="My Secure Note" />}
+					{(field) => (
+						<TitleField
+							field={field}
+							placeholder={m[
+								"vaults.detail.items.form.secure_note.placeholder.title"
+							]()}
+						/>
+					)}
 				</form.Field>
 			</div>
 
@@ -74,8 +85,12 @@ export function SecureNoteForm({
 					{(field) => (
 						<NotesField
 							field={field as any}
-							label="Note Content *"
-							placeholder="Write your secure note here..."
+							label={m[
+								"vaults.detail.items.form.secure_note.field.note_content.required"
+							]()}
+							placeholder={m[
+								"vaults.detail.items.form.secure_note.placeholder.note_content"
+							]()}
 							rows={12}
 						/>
 					)}

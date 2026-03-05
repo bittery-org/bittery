@@ -91,10 +91,11 @@ export async function encrypt(
 export async function decrypt(
 	ciphertext: string,
 	iv: string,
+	algorithm: string,
 	keyBase64: string,
 ): Promise<string> {
 	try {
-		return await NativeModule.decrypt(ciphertext, iv, keyBase64);
+		return await NativeModule.decrypt(ciphertext, iv, algorithm, keyBase64);
 	} catch (error) {
 		throw new CryptoError(
 			ErrorCode.DecryptionFailed,
@@ -460,7 +461,6 @@ export interface MemberEncryptedKey {
 }
 
 export interface KeyRotationResult {
-	newVaultKeyBase64: string;
 	memberEncryptedKeys: MemberEncryptedKey[];
 	reEncryptedItems: ReEncryptedItem[];
 }
@@ -482,6 +482,8 @@ export async function performKeyRotation(
 	oldVaultKeyBase64: string,
 	members: MemberKeyData[],
 	items: ItemData[],
+	vaultId: string,
+	keyVersion: number,
 	currentUserId: string,
 	masterUnlockKeyBase64: string,
 ): Promise<KeyRotationResult> {
@@ -505,6 +507,8 @@ export async function performKeyRotation(
 			oldVaultKeyBase64,
 			membersJson,
 			itemsJson,
+			vaultId,
+			keyVersion,
 			currentUserId,
 			masterUnlockKeyBase64,
 		);
@@ -522,7 +526,6 @@ export async function performKeyRotation(
 		}>;
 
 		return {
-			newVaultKeyBase64: result.newVaultKeyBase64,
 			memberEncryptedKeys: memberEncryptedKeys.map((m) => ({
 				userId: m.user_id,
 				encryptedVaultKey: m.encrypted_vault_key,

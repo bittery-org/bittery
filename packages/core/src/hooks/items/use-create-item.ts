@@ -7,7 +7,6 @@
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";
 import {
-	createLocalId,
 	enqueueItemMutation,
 	requireRepositoryForVault,
 	toQueueEncryptedPayload,
@@ -50,16 +49,17 @@ export function useCreateItem() {
 				input.vaultId,
 				input.accountEmail,
 			);
+			const localItemId = await core.items.generateItemId();
 			const encryptedData = await repo.encryptWithVaultKey(
 				input.vaultId,
 				input.data,
+				{ itemId: localItemId, version: 1 },
 			);
 			const now = new Date().toISOString();
-			const tempId = createLocalId("tmp_item");
 
 			await repo.upsertLocal(
 				{
-					id: tempId,
+					id: localItemId,
 					vaultId: input.vaultId,
 					category: input.category,
 					favorite: false,
@@ -78,7 +78,7 @@ export function useCreateItem() {
 				},
 				{
 					type: "create",
-					entityId: tempId,
+					entityId: localItemId,
 					vaultId: input.vaultId,
 					category: input.category,
 					encryptedPayload: toQueueEncryptedPayload(encryptedData),
@@ -86,7 +86,7 @@ export function useCreateItem() {
 			);
 
 			return {
-				itemId: tempId,
+				itemId: localItemId,
 				_encryptedData: encryptedData,
 				_accountEmail: accountEmail,
 			};

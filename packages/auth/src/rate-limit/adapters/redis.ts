@@ -32,7 +32,10 @@ export class RedisRateLimitAdapter implements RateLimitAdapter {
 	};
 
 	constructor(redisUrl: string) {
-		const { RedisClient } = globalThis.Bun ?? {};
+		const bunGlobal = globalThis as typeof globalThis & {
+			Bun?: { RedisClient?: new (url: string) => unknown };
+		};
+		const { RedisClient } = bunGlobal.Bun ?? {};
 		if (!RedisClient) {
 			throw new Error(
 				"RedisRateLimitAdapter requires Bun runtime with RedisClient support",
@@ -101,7 +104,8 @@ export class RedisRateLimitAdapter implements RateLimitAdapter {
 		const ttlSeconds = lockedUntil
 			? Math.max(
 					3600,
-					Math.ceil((lockedUntil.getTime() - input.now.getTime()) / 1000) + 3600,
+					Math.ceil((lockedUntil.getTime() - input.now.getTime()) / 1000) +
+						3600,
 				)
 			: 24 * 60 * 60;
 		await this.redis.expire(redisKey, ttlSeconds);

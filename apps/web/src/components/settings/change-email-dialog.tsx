@@ -1,3 +1,7 @@
+import {
+	buildVaultKeyEncryptionContext,
+	isAesEncryptedVaultKey,
+} from "@bittery/shared";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -27,8 +31,10 @@ import {
 	encrypt,
 	generateSRPRegistration,
 } from "@/lib/wasm-crypto";
+import { useI18n } from "@/providers/i18n-provider";
 
 export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
+	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
 	const [newEmail, setNewEmail] = useState("");
 	const [confirmEmail, setConfirmEmail] = useState("");
@@ -46,37 +52,35 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 		e.preventDefault();
 
 		if (!newEmail.trim()) {
-			toast.error("Please enter a new email address");
+			toast.error(m["settings.change_email_dialog.toast.new_email_required"]());
 			return;
 		}
 		if (newEmail !== confirmEmail) {
-			toast.error("Email addresses do not match");
+			toast.error(m["settings.change_email_dialog.toast.email_mismatch"]());
 			return;
 		}
 		if (newEmail.toLowerCase() === currentEmail.toLowerCase()) {
-			toast.error("New email must be different from current email");
+			toast.error(m["settings.change_email_dialog.toast.email_must_differ"]());
 			return;
 		}
 		if (!currentPassword.trim()) {
-			toast.error("Please enter your password");
+			toast.error(m["settings.change_email_dialog.toast.password_required"]());
 			return;
 		}
 
 		const secretKey = await storage.getStoredSecretKey();
 		if (!secretKey) {
-			toast.error(
-				"Secret key not found. Please log out and log in again with your full credentials.",
-			);
+			toast.error(m["settings.common.toast.secret_key_not_found"]());
 			return;
 		}
 
 		if (!userQuery.data?.encryptedPrivateKey) {
-			toast.error("Could not load user data. Please try again.");
+			toast.error(m["settings.common.toast.user_data_load_failed"]());
 			return;
 		}
 
 		if (!vaultListQuery.data || vaultListQuery.data.length === 0) {
-			toast.error("Could not load vault keys. Please try again.");
+			toast.error(m["settings.common.toast.vault_keys_load_failed"]());
 			return;
 		}
 
@@ -117,28 +121,45 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 
 			// 6. Re-encrypt vault keys with new MUK
 			const serverVaultKeys = vaultListQuery.data;
-			const currentUserId = userQuery.data.id;
 			const encryptedVaultKeys: Array<{
 				vaultId: string;
 				encryptedVaultKey: string;
 			}> = [];
 
 			for (const vk of serverVaultKeys) {
-				// Skip shared vaults (RSA-encrypted vault keys)
-				if (vk.createdById !== currentUserId) {
+				// Only re-encrypt AES(MUK)-wrapped keys.
+				// RSA-wrapped keys are not tied to the master unlock key.
+				if (!isAesEncryptedVaultKey(vk.encryptedVaultKey)) {
 					continue;
 				}
 
-				const encryptedVaultKeyData = JSON.parse(vk.encryptedVaultKey);
-				const decryptedVaultKeyBase64 = await decrypt(
-					encryptedVaultKeyData,
-					oldMasterUnlockKey,
-				);
+					const encryptedVaultKeyData = JSON.parse(vk.encryptedVaultKey) as {
+						ciphertext: string;
+						iv: string;
+						algorithm: string;
+						context?: { keyVersion?: number };
+					};
+					const keyVersion = Number.isInteger(
+						encryptedVaultKeyData.context?.keyVersion,
+					)
+						? (encryptedVaultKeyData.context?.keyVersion as number)
+						: 1;
+					const vaultKeyContext = buildVaultKeyEncryptionContext({
+						vaultId: vk.id,
+						userId: userQuery.data.id,
+						keyVersion,
+					});
+					const decryptedVaultKeyBase64 = await decrypt(
+						encryptedVaultKeyData,
+						oldMasterUnlockKey,
+						vaultKeyContext,
+					);
 
-				const newEncryptedVaultKey = await encrypt(
-					decryptedVaultKeyBase64,
-					newMasterUnlockKey,
-				);
+					const newEncryptedVaultKey = await encrypt(
+						decryptedVaultKeyBase64,
+						newMasterUnlockKey,
+						vaultKeyContext,
+					);
 
 				encryptedVaultKeys.push({
 					vaultId: vk.id,
@@ -155,16 +176,12 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 				encryptedVaultKeys,
 			});
 
-			toast.success(
-				"Email updated successfully. Please sign in with your new email.",
-			);
+			toast.success(m["settings.change_email_dialog.toast.updated"]());
 			setOpen(false);
 			navigate({ to: "/login" });
 		} catch (error) {
 			console.error("Email change error:", error);
-			toast.error(
-				"Failed to change email. Please verify your password is correct.",
-			);
+			toast.error(m["settings.change_email_dialog.toast.update_failed"]());
 			setIsProcessing(false);
 		}
 	};
@@ -185,22 +202,24 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 			<DialogTrigger asChild>
 				<Button variant="outline">
 					<Mail className="mr-2 h-4 w-4" />
-					Change Email
+					{m["settings.change_email_dialog.trigger"]()}
 				</Button>
 			</DialogTrigger>
 			<DialogContent>
 				<form onSubmit={handleSubmit}>
 					<DialogHeader>
-						<DialogTitle>Change Email Address</DialogTitle>
+						<DialogTitle>
+							{m["settings.change_email_dialog.title"]()}
+						</DialogTitle>
 						<DialogDescription>
-							Update your account email address. Your encryption keys will be
-							re-derived with the new email. You will be logged out and need to
-							sign in again.
+							{m["settings.change_email_dialog.description"]()}
 						</DialogDescription>
 					</DialogHeader>
 					<div className="grid gap-4 py-4">
 						<div className="grid gap-2">
-							<Label htmlFor="currentEmail">Current Email</Label>
+							<Label htmlFor="currentEmail">
+								{m["settings.change_email_dialog.field.current_email"]()}
+							</Label>
 							<Input
 								id="currentEmail"
 								value={currentEmail}
@@ -209,29 +228,37 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 							/>
 						</div>
 						<div className="grid gap-2">
-							<Label htmlFor="newEmail">New Email</Label>
+							<Label htmlFor="newEmail">
+								{m["settings.change_email_dialog.field.new_email"]()}
+							</Label>
 							<Input
 								id="newEmail"
 								type="email"
 								value={newEmail}
 								onChange={(e) => setNewEmail(e.target.value)}
-								placeholder="Enter new email address"
+								placeholder={m[
+									"settings.change_email_dialog.placeholder.new_email"
+								]()}
 								autoFocus
 							/>
 						</div>
 						<div className="grid gap-2">
-							<Label htmlFor="confirmEmail">Confirm New Email</Label>
+							<Label htmlFor="confirmEmail">
+								{m["settings.change_email_dialog.field.confirm_new_email"]()}
+							</Label>
 							<Input
 								id="confirmEmail"
 								type="email"
 								value={confirmEmail}
 								onChange={(e) => setConfirmEmail(e.target.value)}
-								placeholder="Confirm new email address"
+								placeholder={m[
+									"settings.change_email_dialog.placeholder.confirm_new_email"
+								]()}
 							/>
 						</div>
 						<div className="grid gap-2">
 							<Label htmlFor="emailChangePassword">
-								Enter your password to continue
+								{m["settings.change_email_dialog.field.password"]()}
 							</Label>
 							<div className="relative">
 								<Input
@@ -239,7 +266,9 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 									type={showPassword ? "text" : "password"}
 									value={currentPassword}
 									onChange={(e) => setCurrentPassword(e.target.value)}
-									placeholder="Enter your password"
+									placeholder={m[
+										"settings.change_email_dialog.placeholder.password"
+									]()}
 									className="pr-10"
 								/>
 								<Button
@@ -256,8 +285,8 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 					</div>
 					<div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
 						<p className="text-amber-700 text-xs dark:text-amber-300">
-							<strong>Warning:</strong> After changing your email, your Recovery
-							Key setup will be cleared and must be configured again.
+							<strong>{m["settings.common.warning"]()}</strong>{" "}
+							{m["settings.change_email_dialog.warning.recovery_key_reset"]()}
 						</p>
 					</div>
 					<DialogFooter>
@@ -266,10 +295,12 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 							variant="outline"
 							onClick={() => setOpen(false)}
 						>
-							Cancel
+							{m["settings.common.action.cancel"]()}
 						</Button>
 						<Button type="submit" disabled={isProcessing}>
-							{isProcessing ? "Updating..." : "Update Email"}
+							{isProcessing
+								? m["settings.change_email_dialog.action.updating"]()
+								: m["settings.change_email_dialog.action.submit"]()}
 						</Button>
 					</DialogFooter>
 				</form>

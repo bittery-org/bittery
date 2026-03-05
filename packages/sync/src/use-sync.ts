@@ -11,7 +11,12 @@ import {
 	SyncOrchestrator,
 	type SyncOrchestratorOptions,
 } from "./sync-orchestrator";
-import type { ItemCacheAdapter, SyncStatus, SyncStorage } from "./types";
+import type {
+	ItemCacheAdapter,
+	SessionRevokedControlPayload,
+	SyncStatus,
+	SyncStorage,
+} from "./types";
 
 class MemorySyncStorage implements SyncStorage {
 	private readonly data = new Map<string, unknown>();
@@ -45,6 +50,9 @@ export interface UseSyncOptions {
 	getClientForAccount?: (
 		email: string,
 	) => OutboundQueueClient | Promise<OutboundQueueClient>;
+	onSessionRevoked?: (
+		payload: SessionRevokedControlPayload,
+	) => void | Promise<void>;
 	/** Custom fetch implementation (e.g. `expo/fetch` for streaming support in React Native) */
 	fetch?: (url: string, init?: any) => Promise<Response>;
 }
@@ -67,6 +75,7 @@ export function useSync(options: UseSyncOptions) {
 		itemCacheAdapter,
 		itemCacheAccountEmail,
 		getClientForAccount,
+		onSessionRevoked,
 		fetch: fetchImpl,
 	} = options;
 
@@ -114,14 +123,15 @@ export function useSync(options: UseSyncOptions) {
 				storage: syncStorage,
 				fetch: fetchImpl,
 			},
-			trpcClient:
-				trpcClient as unknown as SyncOrchestratorOptions["trpcClient"],
-			itemCache: itemCacheAdapter,
-			outboundQueue,
-			itemCacheAccountEmail,
-			getClientForAccount,
-			onEventProcessed: invalidateForEvent,
-		});
+				trpcClient:
+					trpcClient as unknown as SyncOrchestratorOptions["trpcClient"],
+				itemCache: itemCacheAdapter,
+				outboundQueue,
+				itemCacheAccountEmail,
+				getClientForAccount,
+				onEventProcessed: invalidateForEvent,
+				onSessionRevoked,
+			});
 
 		orchestratorRef.current = orchestrator;
 		unsubscribeStatus = orchestrator.subscribe((nextStatus) => {
@@ -165,13 +175,14 @@ export function useSync(options: UseSyncOptions) {
 		clientId,
 		syncStorage,
 		fetchImpl,
-		trpcClient,
-		outboundQueue,
-		itemCacheAccountEmail,
-		getClientForAccount,
-		invalidateForEvent,
-		realtimeEnabled,
-	]);
+			trpcClient,
+			outboundQueue,
+			itemCacheAccountEmail,
+			getClientForAccount,
+			onSessionRevoked,
+			invalidateForEvent,
+			realtimeEnabled,
+		]);
 
 	/**
 	 * Manually trigger reconnection

@@ -1,4 +1,9 @@
 import {
+	type CloudPlanId,
+	featureCategories,
+	planInfo,
+} from "@bittery/shared/pricing";
+import {
 	Badge,
 	Button,
 	cn,
@@ -19,17 +24,19 @@ import {
 	IconStarSparkle2OutlineDuo18 as Sparkle,
 	IconXmarkOutlineDuo18 as X,
 } from "@bittery/ui/icons";
-import { type CloudPlanId, featureCategories, planInfo } from "@bittery/shared/pricing";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /* ─── Plan Data (UI-specific styling layered on shared plan info) ── */
 
-const planStyles: Record<CloudPlanId, {
-	icon: React.ComponentType<{ size?: number; className?: string }>;
-	accentClass: string;
-	iconBgClass: string;
-	headerGradient: string;
-}> = {
+const planStyles: Record<
+	CloudPlanId,
+	{
+		icon: React.ComponentType<{ size?: number; className?: string }>;
+		accentClass: string;
+		iconBgClass: string;
+		headerGradient: string;
+	}
+> = {
 	free: {
 		icon: Lock,
 		accentClass: "border-border",
@@ -45,7 +52,8 @@ const planStyles: Record<CloudPlanId, {
 	family: {
 		icon: Heart,
 		accentClass: "border-amber-400/40 dark:border-amber-500/30",
-		iconBgClass: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
+		iconBgClass:
+			"bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
 		headerGradient: "from-amber-50/80 dark:from-amber-500/5 to-transparent",
 	},
 	team: {

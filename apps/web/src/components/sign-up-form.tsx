@@ -1,3 +1,4 @@
+import { type CloudPlanId, planInfo } from "@bittery/shared/pricing";
 import { Badge, Button, cn, Input, Label, toast } from "@bittery/ui";
 import {
 	IconArrowLeftOutlineDuo18 as ArrowLeft,
@@ -13,24 +14,43 @@ import {
 	IconMagicShieldOutlineDuo18 as Shield,
 	IconStarSparkle2OutlineDuo18 as Sparkle,
 } from "@bittery/ui/icons";
-import { type CloudPlanId, planInfo } from "@bittery/shared/pricing";
 import { useState } from "react";
 import { useSignupForm } from "@/hooks/use-signup-form";
+import { useI18n } from "@/providers/i18n-provider";
 import PlanComparisonDialog from "./plan-comparison-dialog";
 import SelfHostedSignUpForm from "./self-hosted-sign-up-form";
 
-const planIcons: Record<CloudPlanId, React.ComponentType<{ size?: number; className?: string }>> = {
+const planIcons: Record<
+	CloudPlanId,
+	React.ComponentType<{ size?: number; className?: string }>
+> = {
 	free: Lock,
 	personal: Sparkle,
 	family: Heart,
 	team: Briefcase,
 };
 
-const planStyles: Record<CloudPlanId, { accentClass: string; iconBgClass: string }> = {
-	free: { accentClass: "border-border dark:border-border", iconBgClass: "bg-muted text-muted-foreground" },
-	personal: { accentClass: "border-primary/60 dark:border-primary/40", iconBgClass: "bg-primary/10 text-primary" },
-	family: { accentClass: "border-amber-300/60 dark:border-amber-500/30", iconBgClass: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400" },
-	team: { accentClass: "border-sky-300/60 dark:border-sky-500/30", iconBgClass: "bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400" },
+const planStyles: Record<
+	CloudPlanId,
+	{ accentClass: string; iconBgClass: string }
+> = {
+	free: {
+		accentClass: "border-border dark:border-border",
+		iconBgClass: "bg-muted text-muted-foreground",
+	},
+	personal: {
+		accentClass: "border-primary/60 dark:border-primary/40",
+		iconBgClass: "bg-primary/10 text-primary",
+	},
+	family: {
+		accentClass: "border-amber-300/60 dark:border-amber-500/30",
+		iconBgClass:
+			"bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
+	},
+	team: {
+		accentClass: "border-sky-300/60 dark:border-sky-500/30",
+		iconBgClass: "bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400",
+	},
 };
 
 const cloudPlans = planInfo.map((plan) => ({
@@ -52,10 +72,16 @@ export default function SignUpForm({
 	redirectTo?: string;
 	initialPlan?: string;
 }) {
-	const resolvedPlan = initialPlan && validPlanIds.has(initialPlan)
-		? (initialPlan as CloudPlanId)
-		: undefined;
-	const signup = useSignupForm({ invitationToken, redirectTo, initialPlan: resolvedPlan });
+	const { m } = useI18n();
+	const resolvedPlan =
+		initialPlan && validPlanIds.has(initialPlan)
+			? (initialPlan as CloudPlanId)
+			: undefined;
+	const signup = useSignupForm({
+		invitationToken,
+		redirectTo,
+		initialPlan: resolvedPlan,
+	});
 	const [cloudSignupStep, setCloudSignupStep] = useState<"plan" | "account">(
 		resolvedPlan ? "account" : "plan",
 	);
@@ -80,16 +106,15 @@ export default function SignUpForm({
 		return (
 			<div className="w-full">
 				<h1 className="text-center font-semibold text-2xl tracking-tight">
-					Invite-Only Registration
+					{m["auth.signup.invite_only.title"]()}
 				</h1>
 				<div className="mt-6 rounded-2xl border bg-card p-6">
 					<div className="space-y-4">
 						<p className="text-muted-foreground text-sm leading-relaxed">
-							Registration is closed on this server. Ask an admin for an invite
-							link.
+							{m["auth.signup.invite_only.description"]()}
 						</p>
 						<Button type="button" onClick={onSwitchToSignIn} className="w-full">
-							Back to Sign In
+							{m["auth.signup.button.back_to_signin"]()}
 						</Button>
 					</div>
 				</div>
@@ -104,12 +129,14 @@ export default function SignUpForm({
 			{/* Header */}
 			<div className="text-center">
 				<h1 className="font-semibold text-2xl tracking-tight">
-					{showPlanStep ? "Choose your plan" : "Create your account"}
+					{showPlanStep
+						? m["auth.signup.header.choose_plan"]()
+						: m["auth.signup.header.create_account"]()}
 				</h1>
 				<p className="mx-auto mt-2 max-w-80 text-muted-foreground text-sm">
 					{showPlanStep
-						? "Select a plan to get started. You can change it anytime."
-						: "Set up your encrypted account and secure your vault."}
+						? m["auth.signup.subheader.choose_plan"]()
+						: m["auth.signup.subheader.create_account"]()}
 				</p>
 			</div>
 
@@ -142,7 +169,7 @@ export default function SignUpForm({
 								1
 							</span>
 						)}
-						Plan
+						{m["auth.signup.step.plan"]()}
 					</button>
 					<button
 						type="button"
@@ -162,7 +189,7 @@ export default function SignUpForm({
 						>
 							2
 						</span>
-						Account
+						{m["auth.signup.step.account"]()}
 					</button>
 				</div>
 			</div>
@@ -171,12 +198,14 @@ export default function SignUpForm({
 			<div className="mt-5">
 				{showPlanStep ? (
 					<PlanSelectionStep
+						m={m}
 						form={signup.form}
 						onContinue={() => setCloudSignupStep("account")}
 						onSwitchToSignIn={onSwitchToSignIn}
 					/>
 				) : (
 					<AccountSetupStep
+						m={m}
 						signup={signup}
 						onBack={() => setCloudSignupStep("plan")}
 						onSwitchToSignIn={onSwitchToSignIn}
@@ -190,10 +219,12 @@ export default function SignUpForm({
 /* ─── Plan Selection Step ──────────────────────────────────────────── */
 
 function PlanSelectionStep({
+	m,
 	form,
 	onContinue,
 	onSwitchToSignIn,
 }: {
+	m: ReturnType<typeof useI18n>["m"];
 	form: ReturnType<typeof useSignupForm>["form"];
 	onContinue: () => void;
 	onSwitchToSignIn: () => void;
@@ -232,7 +263,7 @@ function PlanSelectionStep({
 												variant="default"
 												className="h-5 rounded-full px-2 font-medium text-[10px] shadow-sm"
 											>
-												Popular
+												{m["auth.signup.plan.popular"]()}
 											</Badge>
 										</div>
 									)}
@@ -311,7 +342,7 @@ function PlanSelectionStep({
 							className="flex w-full items-center justify-center gap-1.5 py-1 text-muted-foreground text-xs transition-colors hover:text-foreground"
 						>
 							<span className="border-current border-b border-dashed">
-								Compare all plans & features
+								{m["auth.signup.compare_all_plans"]()}
 							</span>
 						</button>
 						<PlanComparisonDialog
@@ -332,12 +363,12 @@ function PlanSelectionStep({
 							{(field) => (
 								<div className="space-y-2 rounded-xl border bg-muted/20 p-3.5">
 									<Label htmlFor={field.name} className="text-xs">
-										Team / Business Name
+										{m["auth.signup.team_name.label"]()}
 									</Label>
 									<Input
 										id={field.name}
 										name={field.name}
-										placeholder="Acme Security"
+										placeholder={m["auth.signup.team_name.placeholder"]()}
 										value={field.state.value}
 										onBlur={field.handleBlur}
 										onChange={(e) => field.handleChange(e.target.value)}
@@ -345,7 +376,7 @@ function PlanSelectionStep({
 										className="h-9"
 									/>
 									<p className="text-[11px] text-muted-foreground/70">
-										Shown as your workspace name for members.
+										{m["auth.signup.team_name.help"]()}
 									</p>
 								</div>
 							)}
@@ -367,13 +398,13 @@ function PlanSelectionStep({
 						className="h-10 w-full bg-primary font-medium shadow-sm"
 						onClick={() => {
 							if (plan === "team" && !organizationName.trim()) {
-								toast.error("Please enter a team or business name to continue");
+								toast.error(m["auth.signup.error.team_name_required"]());
 								return;
 							}
 							onContinue();
 						}}
 					>
-						Continue
+						{m["auth.signup.button.continue"]()}
 					</Button>
 				)}
 			</form.Subscribe>
@@ -384,7 +415,7 @@ function PlanSelectionStep({
 				onClick={onSwitchToSignIn}
 				className="w-full text-muted-foreground"
 			>
-				Already have an account? Sign in
+				{m["auth.signup.button.have_account"]()}
 			</Button>
 		</div>
 	);
@@ -393,10 +424,12 @@ function PlanSelectionStep({
 /* ─── Account Setup Step ───────────────────────────────────────────── */
 
 function AccountSetupStep({
+	m,
 	signup,
 	onBack,
 	onSwitchToSignIn,
 }: {
+	m: ReturnType<typeof useI18n>["m"];
 	signup: ReturnType<typeof useSignupForm>;
 	onBack: () => void;
 	onSwitchToSignIn: () => void;
@@ -462,7 +495,7 @@ function AccountSetupStep({
 								onClick={onBack}
 								className="rounded-lg px-2.5 py-1 font-medium text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground"
 							>
-								Change
+								{m["auth.signup.summary.change"]()}
 							</button>
 						</div>
 					);
@@ -474,12 +507,12 @@ function AccountSetupStep({
 				{(field) => (
 					<div className="space-y-1.5">
 						<Label htmlFor={field.name} className="font-medium text-xs">
-							Full Name
+							{m["auth.signup.form.full_name"]()}
 						</Label>
 						<Input
 							id={field.name}
 							name={field.name}
-							placeholder="John Doe"
+							placeholder={m["auth.signup.form.full_name.placeholder"]()}
 							value={field.state.value}
 							onBlur={field.handleBlur}
 							onChange={(e) => field.handleChange(e.target.value)}
@@ -495,13 +528,13 @@ function AccountSetupStep({
 				{(field) => (
 					<div className="space-y-1.5">
 						<Label htmlFor={field.name} className="font-medium text-xs">
-							Email
+							{m["auth.signup.form.email"]()}
 						</Label>
 						<Input
 							id={field.name}
 							name={field.name}
 							type="email"
-							placeholder="name@example.com"
+							placeholder={m["auth.signup.form.email.placeholder"]()}
 							value={field.state.value}
 							onBlur={field.handleBlur}
 							onChange={(e) => field.handleChange(e.target.value)}
@@ -517,7 +550,7 @@ function AccountSetupStep({
 				{(field) => (
 					<div className="space-y-1.5">
 						<Label htmlFor={field.name} className="font-medium text-xs">
-							Master Password
+							{m["auth.signup.form.master_password"]()}
 						</Label>
 						<div className="relative">
 							<Input
@@ -541,7 +574,7 @@ function AccountSetupStep({
 							</Button>
 						</div>
 						<p className="text-[11px] text-muted-foreground/70">
-							Must be at least 8 characters long.
+							{m["auth.signup.form.master_password.help"]()}
 						</p>
 					</div>
 				)}
@@ -574,8 +607,8 @@ function AccountSetupStep({
 				<div className="min-w-0 flex-1">
 					<p className="font-medium text-sm leading-none">
 						{hasDownloadedKit
-							? "Emergency Kit saved"
-							: "Download Emergency Kit"}
+							? m["auth.signup.emergency_kit.saved_title"]()
+							: m["auth.signup.emergency_kit.download_title"]()}
 					</p>
 					<p
 						className={cn(
@@ -586,8 +619,8 @@ function AccountSetupStep({
 						)}
 					>
 						{hasDownloadedKit
-							? "Your Secret Key & Recovery Key have been saved"
-							: "Required before creating your account"}
+							? m["auth.signup.emergency_kit.saved_description"]()
+							: m["auth.signup.emergency_kit.required_description"]()}
 					</p>
 				</div>
 
@@ -612,16 +645,16 @@ function AccountSetupStep({
 						<>
 							<Loader2 size={16} className="mr-2 animate-spin" />
 							{isEncrypting
-								? "Setting up encryption..."
-								: "Creating account..."}
+								? m["auth.signup.button.setting_up_encryption"]()
+								: m["auth.signup.button.creating_account"]()}
 						</>
 					) : !hasDownloadedKit ? (
 						<>
 							<Shield size={16} className="mr-2" />
-							Download Emergency Kit to continue
+							{m["auth.signup.button.download_kit_to_continue"]()}
 						</>
 					) : (
-						"Create Account"
+						m["auth.signup.button.create_account"]()
 					)}
 				</Button>
 			</div>
@@ -634,7 +667,7 @@ function AccountSetupStep({
 					className="h-9 gap-1.5 px-3 text-muted-foreground"
 				>
 					<ArrowLeft size={14} />
-					Back
+					{m["auth.signup.button.back"]()}
 				</Button>
 				<div className="h-4 w-px bg-border" />
 				<Button
@@ -643,7 +676,7 @@ function AccountSetupStep({
 					onClick={onSwitchToSignIn}
 					className="flex-1 text-muted-foreground"
 				>
-					Already have an account? Sign in
+					{m["auth.signup.button.have_account"]()}
 				</Button>
 			</div>
 		</form>

@@ -8,27 +8,41 @@
  * on each wake from idle, so we use auto-init pattern.
  */
 
-import * as wasmCrypto from "@bittery/crypto-wasm";
 import init, {
+	JsAadContext,
 	JsEncryptedData,
 	type JsSession,
 	JsSrpClient,
+	buildPasskeyAttestationObject as wasmBuildPasskeyAttestationObject,
 	decrypt as wasmDecrypt,
+	decryptWithContext as wasmDecryptWithContext,
 	decryptMasterKey as wasmDecryptMasterKey,
 	deriveKeys as wasmDeriveKeys,
 	deriveKeysFromMasterKey as wasmDeriveKeysFromMasterKey,
 	deriveMasterKey as wasmDeriveMasterKey,
 	encrypt as wasmEncrypt,
+	encryptWithContext as wasmEncryptWithContext,
 	encryptMasterKey as wasmEncryptMasterKey,
 	generateEncryptionKey as wasmGenerateEncryptionKey,
+	generatePasskeyCredentialId as wasmGeneratePasskeyCredentialId,
+	generatePasskeyKeypair as wasmGeneratePasskeyKeypair,
 	generateRecoveryKey as wasmGenerateRecoveryKey,
+	generateUuid as wasmGenerateUuid,
 	rsaDecrypt as wasmRsaDecrypt,
+	signPasskeyAssertion as wasmSignPasskeyAssertion,
 	validateRecoveryKey as wasmValidateRecoveryKey,
 	validateSecretKey as wasmValidateSecretKey,
 } from "@bittery/crypto-wasm";
+import {
+	unwrapPlaintextWithContext,
+} from "@bittery/shared/crypto-context-envelope";
+import {
+	attachVaultKeyWrapContext,
+} from "@bittery/shared/vault-key-crypto";
 import type {
 	DerivedKeys,
 	EncryptedData,
+	EncryptionContext,
 	SRPClientEphemeral,
 	SRPClientSession,
 	SRPServerChallenge,
@@ -57,32 +71,6 @@ export interface PasskeyAssertion {
 	authenticatorData: Uint8Array;
 	signatureDer: Uint8Array;
 }
-
-type PasskeyWasmExports = {
-	generatePasskeyKeypair?: () => {
-		private_key: string;
-		public_key_cose: string;
-	};
-	generatePasskeyCredentialId?: () => string;
-	buildPasskeyAttestationObject?: (
-		rpId: string,
-		credentialIdBase64: string,
-		cosePublicKeyBase64: string,
-		signCount?: number,
-	) => {
-		authenticator_data: string;
-		attestation_object: string;
-	};
-	signPasskeyAssertion?: (
-		privateKeyBase64: string,
-		rpId: string,
-		clientDataHashBase64: string,
-		signCount: number,
-	) => {
-		authenticator_data: string;
-		signature_der: string;
-	};
-};
 
 // ============================================================================
 // WASM Initialization
@@ -151,6 +139,16 @@ function base64ToUint8Array(base64: string): Uint8Array {
 function uint8ArrayToBase64(bytes: Uint8Array): string {
 	const binaryString = String.fromCharCode(...bytes);
 	return btoa(binaryString);
+}
+
+function toWasmAadContext(context: EncryptionContext): JsAadContext {
+	return new JsAadContext(
+		context.vaultId,
+		context.entityId,
+		context.entityType,
+		BigInt(context.version),
+		context.userId,
+	);
 }
 
 /**
@@ -237,17 +235,30 @@ export async function deriveKeysFromMasterKey(
 export async function encrypt(
 	plaintext: string,
 	key: Uint8Array,
+	context?: EncryptionContext,
 ): Promise<EncryptedData> {
 	await autoInit();
 
 	const keyBase64 = uint8ArrayToBase64(key);
-	const result = wasmEncrypt(plaintext, keyBase64);
-
-	return {
+	const result =
+		context
+			? wasmEncryptWithContext(plaintext, keyBase64, toWasmAadContext(context))
+			: wasmEncrypt(plaintext, keyBase64);
+	const encryptedData: EncryptedData = {
 		ciphertext: result.ciphertext,
 		iv: result.iv,
 		algorithm: result.algorithm,
 	};
+
+	if (context?.entityType === "vault_key") {
+		return attachVaultKeyWrapContext(encryptedData, {
+			vaultId: context.vaultId,
+			userId: context.userId,
+			keyVersion: context.version,
+		}) as EncryptedData;
+	}
+
+	return encryptedData;
 }
 
 /**
@@ -256,19 +267,28 @@ export async function encrypt(
 export async function decrypt(
 	data: EncryptedData,
 	key: Uint8Array,
+	context?: EncryptionContext,
 ): Promise<string> {
 	await autoInit();
 
 	const keyBase64 = uint8ArrayToBase64(key);
+	const createWasmData = () =>
+		new JsEncryptedData(data.ciphertext, data.iv, data.algorithm);
 
-	// Create a proper JsEncryptedData WASM instance for decryption
-	const wasmData = new JsEncryptedData(
-		data.ciphertext,
-		data.iv,
-		data.algorithm,
-	);
+	if (!context) {
+		return wasmDecrypt(createWasmData(), keyBase64);
+	}
 
-	return wasmDecrypt(wasmData, keyBase64);
+	try {
+		return wasmDecryptWithContext(
+			createWasmData(),
+			keyBase64,
+			toWasmAadContext(context),
+		);
+	} catch {
+		const decrypted = wasmDecrypt(createWasmData(), keyBase64);
+		return unwrapPlaintextWithContext(decrypted, context);
+	}
 }
 
 /**
@@ -279,6 +299,32 @@ export async function generateEncryptionKey(): Promise<Uint8Array> {
 
 	const keyBase64 = wasmGenerateEncryptionKey();
 	return base64ToUint8Array(keyBase64);
+}
+
+/**
+ * Generate a UUID for client-side entity IDs.
+ */
+export async function generateUuid(): Promise<string> {
+	await autoInit();
+
+	try {
+		return wasmGenerateUuid();
+	} catch {
+		return fallbackUuid();
+	}
+}
+
+function fallbackUuid(): string {
+	const random = globalThis?.crypto?.randomUUID?.();
+	if (random) {
+		return random;
+	}
+
+	const hex = () =>
+		Math.floor(Math.random() * 0xffffffff)
+			.toString(16)
+			.padStart(8, "0");
+	return `${hex()}-${hex().slice(0, 4)}-4${hex().slice(0, 3)}-a${hex().slice(0, 3)}-${hex()}${hex().slice(0, 4)}`;
 }
 
 /**
@@ -373,21 +419,10 @@ export async function decryptMasterKey(
 // Passkey / WebAuthn
 // ============================================================================
 
-function getPasskeyExports(): PasskeyWasmExports {
-	return wasmCrypto as unknown as PasskeyWasmExports;
-}
-
 export async function generatePasskeyKeypair(): Promise<PasskeyKeypair> {
 	await autoInit();
 
-	const fn = getPasskeyExports().generatePasskeyKeypair;
-	if (typeof fn !== "function") {
-		throw new Error(
-			"Missing WASM export generatePasskeyKeypair. Rebuild @bittery/crypto-wasm.",
-		);
-	}
-
-	const result = fn();
+	const result = wasmGeneratePasskeyKeypair();
 	return {
 		privateKey: result.private_key,
 		publicKeyCose: result.public_key_cose,
@@ -396,15 +431,7 @@ export async function generatePasskeyKeypair(): Promise<PasskeyKeypair> {
 
 export async function generatePasskeyCredentialId(): Promise<string> {
 	await autoInit();
-
-	const fn = getPasskeyExports().generatePasskeyCredentialId;
-	if (typeof fn !== "function") {
-		throw new Error(
-			"Missing WASM export generatePasskeyCredentialId. Rebuild @bittery/crypto-wasm.",
-		);
-	}
-
-	return fn();
+	return wasmGeneratePasskeyCredentialId();
 }
 
 export async function buildPasskeyAttestationObject(input: {
@@ -415,14 +442,7 @@ export async function buildPasskeyAttestationObject(input: {
 }): Promise<PasskeyAttestation> {
 	await autoInit();
 
-	const fn = getPasskeyExports().buildPasskeyAttestationObject;
-	if (typeof fn !== "function") {
-		throw new Error(
-			"Missing WASM export buildPasskeyAttestationObject. Rebuild @bittery/crypto-wasm.",
-		);
-	}
-
-	const result = fn(
+	const result = wasmBuildPasskeyAttestationObject(
 		input.rpId,
 		input.credentialIdBase64,
 		input.cosePublicKeyBase64,
@@ -443,14 +463,7 @@ export async function signPasskeyAssertion(input: {
 }): Promise<PasskeyAssertion> {
 	await autoInit();
 
-	const fn = getPasskeyExports().signPasskeyAssertion;
-	if (typeof fn !== "function") {
-		throw new Error(
-			"Missing WASM export signPasskeyAssertion. Rebuild @bittery/crypto-wasm.",
-		);
-	}
-
-	const result = fn(
+	const result = wasmSignPasskeyAssertion(
 		input.privateKeyBase64,
 		input.rpId,
 		input.clientDataHashBase64,

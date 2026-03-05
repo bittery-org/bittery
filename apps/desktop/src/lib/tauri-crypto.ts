@@ -8,12 +8,16 @@
 import type {
 	DerivedKeys,
 	EncryptedData,
+	EncryptionContext,
+	KdfParams,
 	RsaKeyPair,
 	SRPClientEphemeral,
 	SRPClientSession,
 	SRPRegistration,
 	SRPServerChallenge,
 } from "@bittery/types";
+import { unwrapPlaintextWithContext } from "@bittery/shared/crypto-context-envelope";
+import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
 import { invoke } from "@tauri-apps/api/core";
 
 // Re-export types for consumers
@@ -118,18 +122,39 @@ export async function deriveKeys(
 export async function encrypt(
 	plaintext: string,
 	key: Uint8Array,
+	context?: EncryptionContext,
 ): Promise<EncryptedData> {
 	const keyBase64 = uint8ArrayToBase64(key);
-	const response = await invoke<EncryptResponse>("crypto_encrypt", {
-		plaintext,
-		keyBase64,
-	});
+	const response = context
+		? await invoke<EncryptResponse>("crypto_encrypt_with_context", {
+				plaintext,
+				keyBase64,
+				vaultId: context.vaultId,
+				entityId: context.entityId,
+				entityType: context.entityType,
+				version: context.version,
+				userId: context.userId,
+			})
+		: await invoke<EncryptResponse>("crypto_encrypt", {
+				plaintext,
+				keyBase64,
+			});
 
-	return {
+	const encryptedData: EncryptedData = {
 		ciphertext: response.ciphertext,
 		iv: response.iv,
 		algorithm: response.algorithm,
 	};
+
+	if (context?.entityType === "vault_key") {
+		return attachVaultKeyWrapContext(encryptedData, {
+			vaultId: context.vaultId,
+			userId: context.userId,
+			keyVersion: context.version,
+		}) as EncryptedData;
+	}
+
+	return encryptedData;
 }
 
 /**
@@ -138,12 +163,48 @@ export async function encrypt(
 export async function decrypt(
 	data: EncryptedData,
 	key: Uint8Array,
+	context?: EncryptionContext,
 ): Promise<string> {
 	const keyBase64 = uint8ArrayToBase64(key);
-	return await invoke<string>("crypto_decrypt", {
-		ciphertext: data.ciphertext,
-		iv: data.iv,
-		keyBase64,
+	if (!context) {
+		return invoke<string>("crypto_decrypt", {
+			ciphertext: data.ciphertext,
+			iv: data.iv,
+			algorithm: data.algorithm,
+			keyBase64,
+		});
+	}
+
+	try {
+		return await invoke<string>("crypto_decrypt_with_context", {
+			ciphertext: data.ciphertext,
+			iv: data.iv,
+			algorithm: data.algorithm,
+			keyBase64,
+			vaultId: context.vaultId,
+			entityId: context.entityId,
+			entityType: context.entityType,
+			version: context.version,
+			userId: context.userId,
+		});
+	} catch {
+		const decrypted = await invoke<string>("crypto_decrypt", {
+			ciphertext: data.ciphertext,
+			iv: data.iv,
+			algorithm: data.algorithm,
+			keyBase64,
+		});
+		return unwrapPlaintextWithContext(decrypted, context);
+	}
+}
+
+export async function validateServerKdfParams(
+	serverParams: KdfParams,
+	pinnedParams?: KdfParams | null,
+): Promise<void> {
+	await invoke<void>("crypto_validate_server_kdf_params", {
+		serverParamsJson: JSON.stringify(serverParams),
+		pinnedParamsJson: pinnedParams ? JSON.stringify(pinnedParams) : null,
 	});
 }
 
@@ -153,6 +214,13 @@ export async function decrypt(
 export async function generateEncryptionKey(): Promise<Uint8Array> {
 	const keyBase64 = await invoke<string>("crypto_generate_encryption_key");
 	return base64ToUint8Array(keyBase64);
+}
+
+/**
+ * Generate a UUID for client-side entity IDs.
+ */
+export async function generateUuid(): Promise<string> {
+	return invoke<string>("crypto_generate_uuid");
 }
 
 // ============================================================================
@@ -339,8 +407,6 @@ export interface MemberEncryptedKey {
 }
 
 export interface KeyRotationResult {
-	newVaultKey: Uint8Array;
-	newVaultKeyBase64: string;
 	memberEncryptedKeys: MemberEncryptedKey[];
 	reEncryptedItems: ReEncryptedItem[];
 }
@@ -351,7 +417,6 @@ export interface ValidationResult {
 }
 
 interface KeyRotationResponse {
-	new_vault_key_base64: string;
 	member_encrypted_keys: Array<{
 		user_id: string;
 		encrypted_vault_key: string;
@@ -375,6 +440,8 @@ export async function performKeyRotation(
 	oldVaultKey: Uint8Array,
 	members: MemberKeyData[],
 	items: ItemData[],
+	vaultId: string,
+	keyVersion: number,
 	currentUserId: string,
 	masterUnlockKey: Uint8Array,
 ): Promise<KeyRotationResult> {
@@ -395,14 +462,14 @@ export async function performKeyRotation(
 				encryption_iv: i.encryptionIv,
 				encryption_algorithm: i.encryptionAlgorithm,
 			})),
+			vaultId,
+			keyVersion,
 			currentUserId,
 			masterUnlockKeyBase64: mukBase64,
 		},
 	);
 
 	return {
-		newVaultKey: base64ToUint8Array(response.new_vault_key_base64),
-		newVaultKeyBase64: response.new_vault_key_base64,
 		memberEncryptedKeys: response.member_encrypted_keys.map((m) => ({
 			userId: m.user_id,
 			encryptedVaultKey: m.encrypted_vault_key,

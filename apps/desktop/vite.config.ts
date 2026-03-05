@@ -1,3 +1,4 @@
+import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
@@ -8,6 +9,11 @@ const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
 	plugins: [
+		paraglideVitePlugin({
+			project: "../../packages/i18n/project.inlang",
+			outdir: "./src/paraglide",
+			strategy: ["baseLocale"],
+		}),
 		tanstackRouter({
 			target: "react",
 			autoCodeSplitting: true,

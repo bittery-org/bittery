@@ -15,6 +15,7 @@ import {
 } from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useI18n } from "@/providers/i18n-provider";
 import { VaultAvatar, vaultIconOptions } from "./vault-avatar";
 
 export interface EditVaultData {
@@ -44,6 +45,7 @@ export function EditVaultDialog({
 	vault,
 	onSubmit,
 }: EditVaultDialogProps) {
+	const { m } = useI18n();
 	const [icon, setIcon] = useState(vault?.icon || "lock");
 	const [imageFile, setImageFile] = useState<File | undefined>(undefined);
 	const [imagePreview, setImagePreview] = useState<string | null>(
@@ -78,11 +80,9 @@ export function EditVaultDialog({
 					removeImage,
 				});
 				onOpenChange(false);
-				toast.success("Vault updated successfully");
-			} catch (error) {
-				const errorMessage =
-					error instanceof Error ? error.message : "Failed to update vault";
-				toast.error(errorMessage);
+				toast.success(m["vaults.edit_dialog.toast.updated"]());
+			} catch {
+				toast.error(m["vaults.edit_dialog.toast.update_failed"]());
 			}
 		},
 	});
@@ -104,24 +104,30 @@ export function EditVaultDialog({
 		};
 	}, [imagePreview]);
 
-	const processFile = useCallback((file: File | undefined) => {
-		if (!file) return false;
+	const processFile = useCallback(
+		(file: File | undefined) => {
+			if (!file) return false;
 
-		if (!file.type.startsWith("image/")) {
-			toast.error("Please select an image file");
-			return false;
-		}
+			if (!file.type.startsWith("image/")) {
+				toast.error(m["vaults.edit_dialog.toast.invalid_image_file"]());
+				return false;
+			}
 
-		if (file.size > 2 * 1024 * 1024) {
-			toast.error("Image must be smaller than 2MB");
-			return false;
-		}
+			if (file.size > 2 * 1024 * 1024) {
+				toast.error(m["vaults.edit_dialog.toast.image_too_large"]());
+				return false;
+			}
 
-		setImageFile(file);
-		setImagePreview(URL.createObjectURL(file));
-		setRemoveImage(false);
-		return true;
-	}, []);
+			setImageFile(file);
+			setImagePreview(URL.createObjectURL(file));
+			setRemoveImage(false);
+			return true;
+		},
+		[
+			m["vaults.edit_dialog.toast.image_too_large"],
+			m["vaults.edit_dialog.toast.invalid_image_file"],
+		],
+	);
 
 	const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
 		const file = event.target.files?.[0];
@@ -160,7 +166,7 @@ export function EditVaultDialog({
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="sm:max-w-105" data-testid="edit-vault-dialog">
 				<DialogHeader>
-					<DialogTitle>Edit Vault</DialogTitle>
+					<DialogTitle>{m["vaults.edit_dialog.title"]()}</DialogTitle>
 				</DialogHeader>
 
 				<form
@@ -193,7 +199,7 @@ export function EditVaultDialog({
 									onClick={() => fileInputRef.current?.click()}
 								>
 									<VaultAvatar
-										name={name || "Vault"}
+										name={name || m["vaults.edit_dialog.avatar_fallback"]()}
 										icon={icon}
 										imageUrl={imagePreview}
 										size="xl"
@@ -224,18 +230,20 @@ export function EditVaultDialog({
 								className="h-7 gap-1.5 text-muted-foreground text-xs"
 							>
 								<IconXmarkOutlineDuo18 className="size-3" />
-								Remove image
+								{m["vaults.edit_dialog.image.action.remove"]()}
 							</Button>
 						) : (
 							<p className="text-muted-foreground text-xs">
-								Click or drag to upload
+								{m["vaults.edit_dialog.image.help"]()}
 							</p>
 						)}
 					</div>
 
 					{/* Icon Picker */}
 					<div className="space-y-2">
-						<Label className="text-muted-foreground text-xs">Icon</Label>
+						<Label className="text-muted-foreground text-xs">
+							{m["vaults.edit_dialog.field.icon"]()}
+						</Label>
 						<div className="flex flex-wrap justify-center gap-1.5">
 							{vaultIconOptions.map((option) => (
 								<button
@@ -270,12 +278,12 @@ export function EditVaultDialog({
 									htmlFor={field.name}
 									className="text-muted-foreground text-xs"
 								>
-									Name
+									{m["vaults.edit_dialog.field.name"]()}
 								</Label>
 								<Input
 									id={field.name}
 									name={field.name}
-									placeholder="Enter vault name"
+									placeholder={m["vaults.edit_dialog.placeholder.name"]()}
 									value={field.state.value}
 									onBlur={field.handleBlur}
 									onChange={(e) => field.handleChange(e.target.value)}
@@ -297,7 +305,7 @@ export function EditVaultDialog({
 							className="flex-1"
 							data-testid="edit-vault-cancel-button"
 						>
-							Cancel
+							{m["vaults.edit_dialog.action.cancel"]()}
 						</Button>
 						<Button
 							type="submit"
@@ -305,7 +313,9 @@ export function EditVaultDialog({
 							className="flex-1"
 							data-testid="edit-vault-submit-button"
 						>
-							{form.state.isSubmitting ? "Saving..." : "Save Changes"}
+							{form.state.isSubmitting
+								? m["vaults.edit_dialog.action.saving"]()
+								: m["vaults.edit_dialog.action.submit"]()}
 						</Button>
 					</div>
 				</form>

@@ -5,8 +5,10 @@ import { createRouter, RouterProvider } from "@tanstack/react-router";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { AccountProvider } from "./contexts/account-context";
+import { setupMacOSResetMenu } from "./lib/macos-reset-menu";
 import { queryClient, trpc, trpcClient } from "./lib/providers";
 import { initializeStorage } from "./lib/storage";
+import { I18nProvider } from "./providers/i18n-provider";
 import { DesktopPlatformProvider } from "./providers/platform-provider";
 import { DesktopSyncProvider } from "./providers/sync-provider";
 // Import the generated route tree
@@ -30,21 +32,24 @@ declare module "@tanstack/react-router" {
 async function initializeApp() {
 	// Initialize storage adapter (loads Tauri plugins)
 	await initializeStorage();
+	await setupMacOSResetMenu();
 
 	ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 		<React.StrictMode>
-			<QueryClientProvider client={queryClient}>
-				{/* @ts-ignore */}
-				<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-					<AccountProvider router={router}>
-						<DesktopSyncProvider queryClient={queryClient}>
-							<DesktopPlatformProvider>
-								<RouterProvider router={router} />
-							</DesktopPlatformProvider>
-						</DesktopSyncProvider>
-					</AccountProvider>
-				</TRPCProvider>
-			</QueryClientProvider>
+			<I18nProvider>
+				<QueryClientProvider client={queryClient}>
+					{/* @ts-ignore */}
+					<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+						<AccountProvider router={router}>
+							<DesktopSyncProvider queryClient={queryClient}>
+								<DesktopPlatformProvider>
+									<RouterProvider router={router} />
+								</DesktopPlatformProvider>
+							</DesktopSyncProvider>
+						</AccountProvider>
+					</TRPCProvider>
+				</QueryClientProvider>
+			</I18nProvider>
 		</React.StrictMode>,
 	);
 }

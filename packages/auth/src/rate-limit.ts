@@ -1,4 +1,8 @@
 export {
+	RATE_LIMIT_NAMESPACE,
+	startOfLocalDay,
+} from "./rate-limit/constants";
+export {
 	clearRateLimitBySubject,
 	clearRateLimitState,
 	closeRateLimitAdapterForTests,
@@ -6,10 +10,6 @@ export {
 	incrementRateLimitWindow,
 	recordRateLimitFailure,
 } from "./rate-limit/index";
-export {
-	RATE_LIMIT_NAMESPACE,
-	startOfLocalDay,
-} from "./rate-limit/constants";
 export type {
 	RateLimitState,
 	WindowIncrementResult,

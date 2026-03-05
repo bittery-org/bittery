@@ -7,7 +7,8 @@ import type {
 	SecureNoteDisplayData,
 	TotpDisplayData,
 } from "@bittery/shared/types";
-import { copyWithToast } from "@bittery/ui";
+import { type CopyWithToastOptions, copyWithToast } from "@bittery/ui";
+import type { useI18n } from "../../../providers/i18n-provider";
 
 export type {
 	CreditCardDisplayData,
@@ -48,4 +49,29 @@ export interface CategoryDetailProps<T> {
 	isUpdatingTags?: boolean;
 }
 
-export { copyWithToast as handleCopy };
+export function handleCopy(
+	text: string | null | undefined,
+	label: string,
+	m: ReturnType<typeof useI18n>["m"],
+	options: Pick<
+		CopyWithToastOptions,
+		"autoClearMs" | "showAutoClearMessage"
+	> = {},
+) {
+	const autoClearMs = options.autoClearMs ?? 30000;
+	const showAutoClearMessage = options.showAutoClearMessage ?? true;
+
+	return copyWithToast(text, label, {
+		autoClearMs,
+		showAutoClearMessage,
+		successMessage:
+			showAutoClearMessage && autoClearMs > 0
+				? m["vaults.detail.items.copy.toast.success_auto_clear"]({
+						label,
+						seconds: Math.round(autoClearMs / 1000),
+					})
+				: m["vaults.detail.items.copy.toast.success"]({ label }),
+		emptyErrorMessage: m["vaults.detail.items.copy.toast.empty"]({ label }),
+		copyErrorMessage: m["vaults.detail.items.copy.toast.failed"](),
+	});
+}

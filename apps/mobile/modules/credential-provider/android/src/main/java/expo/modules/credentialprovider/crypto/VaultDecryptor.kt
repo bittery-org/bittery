@@ -37,10 +37,13 @@ object VaultDecryptor {
      * @param vaultKey The vault key entity from database
      * @param muk The Master Unlock Key (32 bytes)
      * @return Decrypted vault key bytes (32 bytes)
-     * @throws IllegalArgumentException if encryption algorithm is not AES-GCM
+     * @throws IllegalArgumentException if encryption algorithm is unsupported
      */
     fun decryptVaultKeyWithMuk(vaultKey: VaultKeyEntity, muk: ByteArray): ByteArray {
-        require(vaultKey.encryptionAlgorithm == "AES-GCM") {
+        require(
+            vaultKey.encryptionAlgorithm == "AES-GCM-AAD-V1" ||
+            vaultKey.encryptionAlgorithm == "AES-GCM"
+        ) {
             "Unsupported encryption algorithm: ${vaultKey.encryptionAlgorithm}"
         }
 
@@ -90,7 +93,7 @@ object VaultDecryptor {
         val encryptedData = AesGcmCrypto.EncryptedData(
             ciphertext = encryptedPrivateKey,
             iv = iv,
-            algorithm = "AES-GCM"
+            algorithm = "AES-GCM-AAD-V1"
         )
 
         return AesGcmCrypto.decrypt(encryptedData, muk)

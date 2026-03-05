@@ -5,6 +5,7 @@ import { createSyncManager, type SyncManager } from "./sync-manager";
 import type {
 	ConnectionStatus,
 	ItemCacheAdapter,
+	SessionRevokedControlPayload,
 	SyncEvent,
 	SyncManagerOptions,
 	SyncStatus,
@@ -24,6 +25,9 @@ export interface SyncOrchestratorOptions {
 		email: string,
 	) => OutboundQueueClient | Promise<OutboundQueueClient>;
 	onEventProcessed?: (event: SyncEvent) => Promise<void>;
+	onSessionRevoked?: (
+		payload: SessionRevokedControlPayload,
+	) => void | Promise<void>;
 }
 
 export class SyncOrchestrator {
@@ -58,6 +62,9 @@ export class SyncOrchestrator {
 			},
 			onStatusChange: (connectionStatus) => {
 				void this.handleStatusChange(connectionStatus);
+			},
+			onSessionRevoked: (payload) => {
+				void options.onSessionRevoked?.(payload);
 			},
 		});
 

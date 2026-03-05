@@ -8,7 +8,7 @@ mod jni;
 use bittery_crypto_core::{
     decrypt, derive_keys, encrypt, generate_credential_id, generate_encryption_key,
     generate_passkey_keypair, generate_rsa_key_pair, generate_secret_key, get_secret_key_hint,
-    key_rotation::{self, ItemData, MemberKeyData},
+    key_rotation::{self, ItemData, MemberKeyData, VaultKeyWrapContext},
     passkey::{build_passkey_attestation_object, sign_passkey_assertion},
     rsa_decrypt, rsa_encrypt,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient, SrpServer},
@@ -193,6 +193,7 @@ pub extern "C" fn bittery_encrypt(
 pub extern "C" fn bittery_decrypt(
     ciphertext: *const c_char,
     iv: *const c_char,
+    algorithm: *const c_char,
     key_base64: *const c_char,
 ) -> *mut c_char {
     let ciphertext_str = match c_str_to_string(ciphertext) {
@@ -203,6 +204,11 @@ pub extern "C" fn bittery_decrypt(
     let iv_str = match c_str_to_string(iv) {
         Some(s) => s,
         None => return string_to_c_str("ERROR:Invalid IV".to_string()),
+    };
+
+    let algorithm_str = match c_str_to_string(algorithm) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid algorithm".to_string()),
     };
 
     let key_str = match c_str_to_string(key_base64) {
@@ -219,7 +225,7 @@ pub extern "C" fn bittery_decrypt(
     let data = EncryptedData {
         ciphertext: ciphertext_str,
         iv: iv_str,
-        algorithm: "AES-GCM".to_string(),
+        algorithm: algorithm_str,
     };
 
     match decrypt(&data, &key) {
@@ -573,21 +579,12 @@ pub extern "C" fn bittery_srp_client_new(
     };
 
     let hash = match hash_str.as_str() {
-        "SHA-1" => HashAlgorithm::Sha1,
         "SHA-256" => HashAlgorithm::Sha256,
-        "SHA-384" => HashAlgorithm::Sha384,
-        "SHA-512" => HashAlgorithm::Sha512,
         _ => return ptr::null_mut(),
     };
 
     let group = match prime_group {
-        1024 => PrimeGroup::G1024,
-        1536 => PrimeGroup::G1536,
-        2048 => PrimeGroup::G2048,
-        3072 => PrimeGroup::G3072,
         4096 => PrimeGroup::G4096,
-        6144 => PrimeGroup::G6144,
-        8192 => PrimeGroup::G8192,
         _ => return ptr::null_mut(),
     };
 
@@ -840,7 +837,6 @@ pub extern "C" fn bittery_srp_client_verify_session(
 /// Result struct for key rotation
 #[repr(C)]
 pub struct KeyRotationResultFFI {
-    pub new_vault_key_base64: *mut c_char,
     pub member_encrypted_keys_json: *mut c_char,
     pub re_encrypted_items_json: *mut c_char,
     pub error: *mut c_char,
@@ -894,6 +890,9 @@ pub extern "C" fn bittery_encrypt_vault_key_for_member(
 pub extern "C" fn bittery_encrypt_vault_key_with_muk(
     vault_key_base64: *const c_char,
     master_unlock_key_base64: *const c_char,
+    vault_id: *const c_char,
+    user_id: *const c_char,
+    key_version: u64,
 ) -> *mut c_char {
     let vault_key_str = match c_str_to_string(vault_key_base64) {
         Some(s) => s,
@@ -902,6 +901,14 @@ pub extern "C" fn bittery_encrypt_vault_key_with_muk(
     let muk_str = match c_str_to_string(master_unlock_key_base64) {
         Some(s) => s,
         None => return string_to_c_str("ERROR:Invalid master unlock key".to_string()),
+    };
+    let vault_id_str = match c_str_to_string(vault_id) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid vault ID".to_string()),
+    };
+    let user_id_str = match c_str_to_string(user_id) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid user ID".to_string()),
     };
 
     use base64::{engine::general_purpose::STANDARD, Engine};
@@ -914,7 +921,8 @@ pub extern "C" fn bittery_encrypt_vault_key_with_muk(
         Err(e) => return string_to_c_str(format!("ERROR:Invalid MUK base64: {}", e)),
     };
 
-    match key_rotation::encrypt_vault_key_with_muk(&vault_key, &muk) {
+    let context = VaultKeyWrapContext::new(&vault_id_str, &user_id_str, key_version);
+    match key_rotation::encrypt_vault_key_with_muk(&vault_key, &muk, &context) {
         Ok(encrypted) => string_to_c_str(encrypted),
         Err(e) => string_to_c_str(format!("ERROR:{}", e)),
     }
@@ -1051,6 +1059,8 @@ pub extern "C" fn bittery_perform_key_rotation(
     old_vault_key_base64: *const c_char,
     members_json: *const c_char,
     items_json: *const c_char,
+    vault_id: *const c_char,
+    key_version: u64,
     current_user_id: *const c_char,
     master_unlock_key_base64: *const c_char,
 ) -> KeyRotationResultFFI {
@@ -1058,7 +1068,6 @@ pub extern "C" fn bittery_perform_key_rotation(
         Some(s) => s,
         None => {
             return KeyRotationResultFFI {
-                new_vault_key_base64: ptr::null_mut(),
                 member_encrypted_keys_json: ptr::null_mut(),
                 re_encrypted_items_json: ptr::null_mut(),
                 error: string_to_c_str("Invalid old vault key".to_string()),
@@ -1069,7 +1078,6 @@ pub extern "C" fn bittery_perform_key_rotation(
         Some(s) => s,
         None => {
             return KeyRotationResultFFI {
-                new_vault_key_base64: ptr::null_mut(),
                 member_encrypted_keys_json: ptr::null_mut(),
                 re_encrypted_items_json: ptr::null_mut(),
                 error: string_to_c_str("Invalid members JSON".to_string()),
@@ -1080,10 +1088,19 @@ pub extern "C" fn bittery_perform_key_rotation(
         Some(s) => s,
         None => {
             return KeyRotationResultFFI {
-                new_vault_key_base64: ptr::null_mut(),
                 member_encrypted_keys_json: ptr::null_mut(),
                 re_encrypted_items_json: ptr::null_mut(),
                 error: string_to_c_str("Invalid items JSON".to_string()),
+            }
+        }
+    };
+    let vault_id_str = match c_str_to_string(vault_id) {
+        Some(s) => s,
+        None => {
+            return KeyRotationResultFFI {
+                member_encrypted_keys_json: ptr::null_mut(),
+                re_encrypted_items_json: ptr::null_mut(),
+                error: string_to_c_str("Invalid vault ID".to_string()),
             }
         }
     };
@@ -1091,7 +1108,6 @@ pub extern "C" fn bittery_perform_key_rotation(
         Some(s) => s,
         None => {
             return KeyRotationResultFFI {
-                new_vault_key_base64: ptr::null_mut(),
                 member_encrypted_keys_json: ptr::null_mut(),
                 re_encrypted_items_json: ptr::null_mut(),
                 error: string_to_c_str("Invalid current user ID".to_string()),
@@ -1102,7 +1118,6 @@ pub extern "C" fn bittery_perform_key_rotation(
         Some(s) => s,
         None => {
             return KeyRotationResultFFI {
-                new_vault_key_base64: ptr::null_mut(),
                 member_encrypted_keys_json: ptr::null_mut(),
                 re_encrypted_items_json: ptr::null_mut(),
                 error: string_to_c_str("Invalid master unlock key".to_string()),
@@ -1115,7 +1130,6 @@ pub extern "C" fn bittery_perform_key_rotation(
         Ok(k) => k,
         Err(e) => {
             return KeyRotationResultFFI {
-                new_vault_key_base64: ptr::null_mut(),
                 member_encrypted_keys_json: ptr::null_mut(),
                 re_encrypted_items_json: ptr::null_mut(),
                 error: string_to_c_str(format!("Invalid old key base64: {}", e)),
@@ -1126,7 +1140,6 @@ pub extern "C" fn bittery_perform_key_rotation(
         Ok(k) => k,
         Err(e) => {
             return KeyRotationResultFFI {
-                new_vault_key_base64: ptr::null_mut(),
                 member_encrypted_keys_json: ptr::null_mut(),
                 re_encrypted_items_json: ptr::null_mut(),
                 error: string_to_c_str(format!("Invalid MUK base64: {}", e)),
@@ -1138,7 +1151,6 @@ pub extern "C" fn bittery_perform_key_rotation(
         Ok(m) => m,
         Err(e) => {
             return KeyRotationResultFFI {
-                new_vault_key_base64: ptr::null_mut(),
                 member_encrypted_keys_json: ptr::null_mut(),
                 re_encrypted_items_json: ptr::null_mut(),
                 error: string_to_c_str(format!("Invalid members JSON: {}", e)),
@@ -1149,7 +1161,6 @@ pub extern "C" fn bittery_perform_key_rotation(
         Ok(i) => i,
         Err(e) => {
             return KeyRotationResultFFI {
-                new_vault_key_base64: ptr::null_mut(),
                 member_encrypted_keys_json: ptr::null_mut(),
                 re_encrypted_items_json: ptr::null_mut(),
                 error: string_to_c_str(format!("Invalid items JSON: {}", e)),
@@ -1157,21 +1168,27 @@ pub extern "C" fn bittery_perform_key_rotation(
         }
     };
 
-    match key_rotation::perform_key_rotation(&old_key, &members, &items, &user_id, &muk) {
+    match key_rotation::perform_key_rotation(
+        &old_key,
+        &members,
+        &items,
+        &vault_id_str,
+        key_version,
+        &user_id,
+        &muk,
+    ) {
         Ok(result) => {
             let member_keys_json = serde_json::to_string(&result.member_encrypted_keys)
                 .unwrap_or_else(|_| "[]".to_string());
             let items_json = serde_json::to_string(&result.re_encrypted_items)
                 .unwrap_or_else(|_| "[]".to_string());
             KeyRotationResultFFI {
-                new_vault_key_base64: string_to_c_str(result.new_vault_key_base64),
                 member_encrypted_keys_json: string_to_c_str(member_keys_json),
                 re_encrypted_items_json: string_to_c_str(items_json),
                 error: ptr::null_mut(),
             }
         }
         Err(e) => KeyRotationResultFFI {
-            new_vault_key_base64: ptr::null_mut(),
             member_encrypted_keys_json: ptr::null_mut(),
             re_encrypted_items_json: ptr::null_mut(),
             error: string_to_c_str(e.to_string()),
@@ -1216,7 +1233,6 @@ pub extern "C" fn bittery_validate_rotation_data(
 /// Free key rotation result
 #[no_mangle]
 pub extern "C" fn bittery_free_key_rotation_result(result: KeyRotationResultFFI) {
-    bittery_free_string(result.new_vault_key_base64);
     bittery_free_string(result.member_encrypted_keys_json);
     bittery_free_string(result.re_encrypted_items_json);
     bittery_free_string(result.error);
@@ -1253,21 +1269,12 @@ pub extern "C" fn bittery_srp_server_new(
     };
 
     let hash = match hash_str.as_str() {
-        "SHA-1" => HashAlgorithm::Sha1,
         "SHA-256" => HashAlgorithm::Sha256,
-        "SHA-384" => HashAlgorithm::Sha384,
-        "SHA-512" => HashAlgorithm::Sha512,
         _ => return ptr::null_mut(),
     };
 
     let group = match prime_group {
-        1024 => PrimeGroup::G1024,
-        1536 => PrimeGroup::G1536,
-        2048 => PrimeGroup::G2048,
-        3072 => PrimeGroup::G3072,
         4096 => PrimeGroup::G4096,
-        6144 => PrimeGroup::G6144,
-        8192 => PrimeGroup::G8192,
         _ => return ptr::null_mut(),
     };
 

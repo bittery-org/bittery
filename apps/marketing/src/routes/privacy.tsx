@@ -1,6 +1,6 @@
+import { createFileRoute } from "@tanstack/react-router";
 import { Shield } from "lucide-react";
 import { motion } from "motion/react";
-import { createFileRoute } from "@tanstack/react-router";
 import { Layout } from "@/components/layout";
 
 export const Route = createFileRoute("/privacy")({
@@ -179,12 +179,11 @@ function PrivacyPage() {
 							Privacy Policy
 						</div>
 						<h1 className="font-bold font-display text-3xl tracking-tight sm:text-4xl lg:text-5xl">
-							Your privacy,{" "}
-							<span className="text-primary">our priority.</span>
+							Your privacy, <span className="text-primary">our priority.</span>
 						</h1>
 						<p className="mx-auto mt-4 max-w-lg text-base text-muted-foreground leading-relaxed sm:text-lg">
-							Bittery is built on the principle that we should never be able
-							to see your data. Here's exactly how we handle your information.
+							Bittery is built on the principle that we should never be able to
+							see your data. Here's exactly how we handle your information.
 						</p>
 						<p className="mt-4 text-muted-foreground text-sm">
 							Last updated: {lastUpdated}
@@ -226,7 +225,9 @@ function PrivacyPage() {
 												)}
 												<ul className="list-disc space-y-1.5 pl-5">
 													{bulletLines.map((line) => (
-														<li key={line.slice(2, 42)}>{line.replace(/^• ?/, "")}</li>
+														<li key={line.slice(2, 42)}>
+															{line.replace(/^• ?/, "")}
+														</li>
 													))}
 												</ul>
 											</div>

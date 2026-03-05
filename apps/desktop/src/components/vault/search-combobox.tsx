@@ -14,11 +14,13 @@ import {
 import { cn } from "@bittery/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "../../providers/i18n-provider";
 import { Favicon } from "./favicon";
 import { getTagColorFromName } from "./tag-badge";
 import { VaultAvatar } from "./vault-avatar";
 
 export function SearchCombobox() {
+	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
 	const [search, setSearch] = useState("");
 	const navigate = useNavigate();
@@ -112,7 +114,7 @@ export function SearchCombobox() {
 						onFocus={() => setOpen(true)}
 						onKeyDown={handleKeyDown}
 						className="flex-1 bg-transparent placeholder:text-muted-foreground focus:outline-none"
-						placeholder="Search vaults and items..."
+						placeholder={m["vaults.search_combobox.placeholder"]()}
 					/>
 					<kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-medium font-mono text-[10px] text-muted-foreground">
 						<span className="text-xs">⌘</span>K
@@ -126,10 +128,10 @@ export function SearchCombobox() {
 					)}
 				>
 					<CommandList>
-						<CommandEmpty>No results found.</CommandEmpty>
+						<CommandEmpty>{m["vaults.search_combobox.empty"]()}</CommandEmpty>
 
 						{filteredItems.length > 0 && (
-							<CommandGroup heading="Items">
+							<CommandGroup heading={m["vaults.detail.tab.items"]()}>
 								{filteredItems.map((item) => {
 									const domain = item.url
 										? getDomainFromUrl(item.url)
@@ -169,7 +171,7 @@ export function SearchCombobox() {
 						)}
 
 						{filteredVaults.length > 0 && (
-							<CommandGroup heading="Vaults">
+							<CommandGroup heading={m["nav.item.vaults"]()}>
 								{filteredVaults.map((vault) => (
 									<CommandItem
 										key={vault.id}
@@ -198,7 +200,9 @@ export function SearchCombobox() {
 						)}
 
 						{filteredTags.length > 0 && (
-							<CommandGroup heading="Tags">
+							<CommandGroup
+								heading={m["vaults.detail.items.detail.tags.label"]()}
+							>
 								{filteredTags.map((tag) => {
 									const tagColor = getTagColorFromName(tag);
 									return (

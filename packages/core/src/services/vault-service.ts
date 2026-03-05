@@ -1,4 +1,5 @@
 import type { IStorageAdapter } from "@bittery/storage/adapter";
+import { buildVaultKeyEncryptionContext } from "@bittery/shared";
 import type { ICrypto } from "@bittery/types";
 import type { AccountResolver, DefaultTrpcClient } from "./account-resolver";
 
@@ -27,6 +28,20 @@ export interface UpdateVaultInput {
 	imageFile?: File;
 	removeImage?: boolean;
 	accountEmail?: string;
+}
+
+export interface ConvertVaultTypeInput {
+	vaultId: string;
+	targetType: "personal" | "team";
+	personalEncryptedVaultKey?: string;
+	accountEmail?: string;
+}
+
+export interface ConvertVaultTypeResult {
+	success: true;
+	vaultId: string;
+	previousType: "personal" | "team";
+	newType: "personal" | "team";
 }
 
 export interface VaultListItem {
@@ -141,14 +156,27 @@ export class VaultService {
 		if (!masterUnlockKey) {
 			throw new Error("Master Unlock Key not found. Please sign in again.");
 		}
+		const currentUserId = await this.storage.getActiveAccountUserId();
+		if (!currentUserId) {
+			throw new Error("Session data missing. Please sign in again.");
+		}
+		const vaultId = this.crypto.generateUuid
+			? await this.crypto.generateUuid()
+			: globalThis.crypto?.randomUUID?.() ?? `vault_${Date.now()}`;
 
 		const vaultKeyBase64 = btoa(String.fromCharCode(...vaultKey));
 		const encryptedVaultKeyData = await this.crypto.encrypt(
 			vaultKeyBase64,
 			masterUnlockKey,
+			buildVaultKeyEncryptionContext({
+				vaultId,
+				userId: currentUserId,
+				keyVersion: 1,
+			}),
 		);
 
 		const result = await client.vault.create.mutate({
+			vaultId,
 			name: trimmedName,
 			type: input.type,
 			encryptedVaultKey: JSON.stringify(encryptedVaultKeyData),
@@ -208,6 +236,23 @@ export class VaultService {
 			...(input.name !== undefined ? { name: input.name.trim() } : {}),
 			...(input.icon !== undefined ? { icon: input.icon } : {}),
 			...(imageKey !== undefined ? { imageKey } : {}),
+		});
+	}
+
+	async convertVaultType(
+		input: ConvertVaultTypeInput,
+		defaultClient: DefaultTrpcClient,
+	): Promise<ConvertVaultTypeResult> {
+		const client = await this.accounts.getClientForAccount(
+			defaultClient,
+			input.accountEmail,
+		);
+		return client.vault.convertType.mutate({
+			vaultId: input.vaultId,
+			targetType: input.targetType,
+			...(input.personalEncryptedVaultKey
+				? { personalEncryptedVaultKey: input.personalEncryptedVaultKey }
+				: {}),
 		});
 	}
 

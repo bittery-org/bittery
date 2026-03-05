@@ -1,6 +1,6 @@
+import { createFileRoute } from "@tanstack/react-router";
 import { FileText } from "lucide-react";
 import { motion } from "motion/react";
-import { createFileRoute } from "@tanstack/react-router";
 import { Layout } from "@/components/layout";
 
 export const Route = createFileRoute("/terms")({
@@ -209,12 +209,11 @@ function TermsPage() {
 							Terms of Service
 						</div>
 						<h1 className="font-bold font-display text-3xl tracking-tight sm:text-4xl lg:text-5xl">
-							Terms of{" "}
-							<span className="text-primary">Service.</span>
+							Terms of <span className="text-primary">Service.</span>
 						</h1>
 						<p className="mx-auto mt-4 max-w-lg text-base text-muted-foreground leading-relaxed sm:text-lg">
-							The rules and guidelines that govern your use of Bittery.
-							Plain language, no surprises.
+							The rules and guidelines that govern your use of Bittery. Plain
+							language, no surprises.
 						</p>
 						<p className="mt-4 text-muted-foreground text-sm">
 							Last updated: {lastUpdated}
@@ -256,7 +255,9 @@ function TermsPage() {
 												)}
 												<ul className="list-disc space-y-1.5 pl-5">
 													{bulletLines.map((line) => (
-														<li key={line.slice(2, 42)}>{line.replace(/^• ?/, "")}</li>
+														<li key={line.slice(2, 42)}>
+															{line.replace(/^• ?/, "")}
+														</li>
 													))}
 												</ul>
 											</div>

@@ -6,6 +6,11 @@
  */
 
 export {
+	type ConvertVaultTypeInput,
+	type ConvertVaultTypeResult,
+	useConvertVaultType,
+} from "./use-convert-vault-type";
+export {
 	type CreateVaultInput,
 	type CreateVaultResult,
 	useCreateVault,

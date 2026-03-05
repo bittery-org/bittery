@@ -204,7 +204,9 @@ describe("Sync Router", () => {
 			const result = await caller.bootstrapItems({});
 			const returnedItemIds = result.items.map((item) => item.id);
 			const activeItem = result.items.find((item) => item.id === activeItemId);
-			const deletedItem = result.items.find((item) => item.id === deletedItemId);
+			const deletedItem = result.items.find(
+				(item) => item.id === deletedItemId,
+			);
 
 			expect(returnedItemIds).toContain(activeItemId);
 			expect(returnedItemIds).toContain(deletedItemId);
@@ -232,7 +234,7 @@ describe("Sync Router", () => {
 				encryptedContentType: "enc-type",
 				encryptionIv: "enc-iv",
 				encryptedContentTypeIv: "enc-type-iv",
-				encryptionAlgorithm: "AES-GCM",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
 				fileSize: 123,
 				uploadedBy: userId,
 			});
@@ -255,7 +257,7 @@ describe("Sync Router", () => {
 				encryptedContentType: "enc-type",
 				encryptionIv: "enc-iv",
 				encryptedContentTypeIv: "enc-type-iv",
-				encryptionAlgorithm: "AES-GCM",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
 				fileSize: 123,
 				uploadedBy: userId,
 			});

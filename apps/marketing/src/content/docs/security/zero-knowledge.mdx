@@ -14,7 +14,7 @@ Bittery is built on a **zero-knowledge** security model. This means your sensiti
 In a zero-knowledge system:
 
 - **Your password never leaves your device.** We use SRP-6a (Secure Remote Password) for authentication — even during login, your password is never transmitted.
-- **Encryption happens locally.** All vault data is encrypted with AES-256-GCM on your device before being sent to our servers.
+- **Encryption happens locally.** Vault data is encrypted with AES-256-GCM (`AES-GCM-AAD-V1`) on your device before being sent to our servers.
 - **We cannot read your data.** Even with full database access, your vault contents remain encrypted and unreadable without your keys.
 - **We cannot reset your password.** Because we don't have it. Only you can decrypt your vault.
 
@@ -38,7 +38,7 @@ Master Password + Secret Key + Email
                Vault Keys   RSA Private Key
                    │
                Item Data
-           (AES-256-GCM)
+         (AES-GCM-AAD-V1)
 ```
 
 ## Key derivation
@@ -50,6 +50,8 @@ Your **Master Unlock Key** is derived using:
 
 This makes brute-force attacks computationally infeasible — even with powerful hardware.
 
+During login, clients also validate and pin server-provided KDF parameters (`algorithm`, `iterations`, `salt`) so downgraded or tampered login challenges are rejected.
+
 ## Vault encryption
 
 Each vault has its own **symmetric key** (AES-256). This vault key is encrypted with your Master Unlock Key and stored per-user. When you access a vault:
@@ -57,9 +59,10 @@ Each vault has its own **symmetric key** (AES-256). This vault key is encrypted 
 1. Your Master Unlock Key decrypts the vault key
 2. The vault key decrypts individual items
 3. Each item uses a unique random IV (initialization vector)
+4. Item and attachment payloads are bound to deterministic entity context (vault, entity, type, version, user) to prevent ciphertext swapping
 
 <Callout type="info">
-Every encryption operation uses a fresh random IV, ensuring that encrypting the same data twice produces different ciphertext.
+Every encryption operation uses a fresh random IV. For item and attachment data, context binding also ensures ciphertext cannot be moved between entities without decryption failing.
 </Callout>
 
 ## What we store
@@ -68,9 +71,9 @@ Every encryption operation uses a fresh random IV, ensuring that encrypting the 
 |------|-----------|----------------|
 | Email | No | Yes |
 | SRP verifier | No (but it's a one-way value) | Cannot derive password |
-| Vault items | Yes (AES-256-GCM) | No |
-| Vault keys | Yes (AES-256-GCM) | No |
-| RSA private key | Yes (AES-256-GCM) | No |
+| Vault items | Yes (AES-GCM-AAD-V1) | No |
+| Vault keys | Yes (AES-GCM-AAD-V1) | No |
+| RSA private key | Yes (AES-GCM-AAD-V1) | No |
 | RSA public key | No | Yes (it's public by design) |
 
 ## Why this matters

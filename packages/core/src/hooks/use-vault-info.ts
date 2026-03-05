@@ -76,9 +76,7 @@ export function useVaultInfo(
 					accountTeamName: account.teamName,
 					accountTeamAvatarUrl: account.teamAvatarUrl,
 				};
-			} catch {
-				continue;
-			}
+			} catch {}
 		}
 
 		return null;

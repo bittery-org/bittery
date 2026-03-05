@@ -35,4 +35,51 @@ export interface CryptoProvider {
 	 * @returns Decrypted plaintext string
 	 */
 	rsaDecrypt(ciphertext: string, privateKeyPem: string): Promise<string>;
+
+	/**
+	 * Encrypt plaintext with an opaque key handle managed by the crypto backend.
+	 */
+	encryptWithKeyHandle?(
+		plaintext: string,
+		keyHandle: number,
+	): Promise<EncryptedData>;
+
+	/**
+	 * Decrypt ciphertext with an opaque key handle managed by the crypto backend.
+	 */
+	decryptWithKeyHandle?(
+		encryptedData: EncryptedData,
+		keyHandle: number,
+	): Promise<string>;
+
+	/**
+	 * Persist key material behind a key handle by encrypting it with a wrapping key.
+	 */
+	encryptKeyHandleWithWrappingKey?(
+		keyHandle: number,
+		wrappingKey: Uint8Array,
+	): Promise<EncryptedData>;
+
+	/**
+	 * Restore a key handle from wrapped key material using a wrapping key.
+	 */
+	decryptKeyHandleWithWrappingKey?(
+		encryptedData: EncryptedData,
+		wrappingKey: Uint8Array,
+	): Promise<number>;
+
+	/**
+	 * Export key bytes from an opaque handle (legacy fallback).
+	 */
+	exportKeyHandle?(keyHandle: number): Promise<Uint8Array>;
+
+	/**
+	 * Clone an existing key handle.
+	 */
+	cloneKeyHandle?(keyHandle: number): Promise<number>;
+
+	/**
+	 * Destroy an opaque key handle.
+	 */
+	destroyKeyHandle?(keyHandle: number): Promise<void | boolean>;
 }

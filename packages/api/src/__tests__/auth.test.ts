@@ -16,7 +16,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { db } from "@bittery/db";
 import { authRouter } from "../routers/auth";
+import { setControlBroadcastFunction } from "../sync-helper";
 import {
+	createAuthenticatedContext,
 	createPublicContext,
 	createTestInvitation,
 	createTestSession,
@@ -61,6 +63,7 @@ const originalBitteryMode = process.env.BITTERY_MODE;
 
 describe("Auth Router", () => {
 	afterEach(async () => {
+		setControlBroadcastFunction(null);
 		await truncateAll();
 		if (originalBitteryMode === undefined) {
 			delete process.env.BITTERY_MODE;
@@ -91,8 +94,13 @@ describe("Auth Router", () => {
 			expect(result.user.email).toBe(email.toLowerCase());
 			expect(result.user.teamName).toBe("Test Org");
 			expect(result.user.teamType).toBe("organization");
+			const teamId = result.user.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected signup to return a teamId");
+			}
 			const teamData = await db.query.team.findFirst({
-				where: (t, { eq }) => eq(t.id, result.user.teamId!),
+				where: (t, { eq }) => eq(t.id, teamId),
 			});
 			expect(teamData?.billingPlan).toBe("team");
 			expect(teamData?.billingStatus).toBe("incomplete");
@@ -116,8 +124,13 @@ describe("Auth Router", () => {
 
 			expect(result.success).toBe(true);
 			expect(result.userId).toBeDefined();
+			const teamId = result.user.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected signup to return a teamId");
+			}
 			const teamData = await db.query.team.findFirst({
-				where: (t, { eq }) => eq(t.id, result.user.teamId!),
+				where: (t, { eq }) => eq(t.id, teamId),
 			});
 			expect(teamData?.billingPlan).toBe("personal");
 			expect(teamData?.billingStatus).toBe("incomplete");
@@ -175,8 +188,13 @@ describe("Auth Router", () => {
 			expect(firstSignup.success).toBe(true);
 			expect(firstSignup.user.role).toBe("owner");
 			expect(firstSignup.user.teamType).toBe("organization");
+			const teamId = firstSignup.user.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected signup to return a teamId");
+			}
 			const firstTeam = await db.query.team.findFirst({
-				where: (t, { eq }) => eq(t.id, firstSignup.user.teamId!),
+				where: (t, { eq }) => eq(t.id, teamId),
 			});
 			expect(firstTeam?.billingPlan).toBe("free");
 			expect(firstTeam?.billingStatus).toBe("none");
@@ -190,9 +208,9 @@ describe("Auth Router", () => {
 			).rejects.toThrow("Public registration is disabled");
 		});
 
-			test("signupWithInvitation should create a personal vault for invitees", async () => {
-				const inviter = await setup(authRouter);
-				const teamId = await createTestTeam(inviter.userId, {
+		test("signupWithInvitation should create a personal vault for invitees", async () => {
+			const inviter = await setup(authRouter);
+			const teamId = await createTestTeam(inviter.userId, {
 				name: "Invite Team",
 				billingPlan: "family",
 				billingStatus: "active",
@@ -218,60 +236,62 @@ describe("Auth Router", () => {
 			const personalVault = result.vaultKeys.find(
 				(vk) => vk.vaultName === "Personal",
 			);
-				expect(personalVault).toBeDefined();
-				expect(personalVault?.role).toBe("owner");
-			});
-
-			test("signupWithInvitation should reject unauthorized pendingVaultKeys", async () => {
-				const inviter = await setup(authRouter);
-				const outsider = await setup(authRouter);
-				const teamId = await createTestTeam(inviter.userId, {
-					name: "Invite Team",
-					billingPlan: "family",
-					billingStatus: "active",
-					type: "family",
-				});
-				const outsiderTeamId = await createTestTeam(outsider.userId, {
-					name: "Outside Team",
-					billingPlan: "family",
-					billingStatus: "active",
-					type: "family",
-				});
-				const foreignVaultId = await createTestVault(outsider.userId, {
-					type: "team",
-					teamId: outsiderTeamId,
-				});
-				const inviteeEmail = generateTestEmail();
-				const invitation = await createTestInvitation(
-					teamId,
-					inviter.userId,
-					inviteeEmail,
-					{
-						pendingVaultKeys: JSON.stringify([
-							{
-								vaultId: foreignVaultId,
-								encryptedVaultKey: "malicious-key",
-							},
-						]),
-					},
-				);
-				const caller = authRouter.createCaller(createPublicContext());
-
-				await expect(
-					caller.signupWithInvitation({
-						token: invitation.token,
-						email: inviteeEmail,
-						name: "Invitee",
-						...toSignupCryptoInput(nextAuthCryptoFixture),
-					}),
-				).rejects.toThrow("pendingVaultKeys contains vaults outside the invited team");
-
-				const createdUser = await db.query.user.findFirst({
-					where: (u, { eq }) => eq(u.email, inviteeEmail.toLowerCase()),
-				});
-				expect(createdUser).toBeUndefined();
-			});
+			expect(personalVault).toBeDefined();
+			expect(personalVault?.role).toBe("owner");
 		});
+
+		test("signupWithInvitation should reject unauthorized pendingVaultKeys", async () => {
+			const inviter = await setup(authRouter);
+			const outsider = await setup(authRouter);
+			const teamId = await createTestTeam(inviter.userId, {
+				name: "Invite Team",
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			const outsiderTeamId = await createTestTeam(outsider.userId, {
+				name: "Outside Team",
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			const foreignVaultId = await createTestVault(outsider.userId, {
+				type: "team",
+				teamId: outsiderTeamId,
+			});
+			const inviteeEmail = generateTestEmail();
+			const invitation = await createTestInvitation(
+				teamId,
+				inviter.userId,
+				inviteeEmail,
+				{
+					pendingVaultKeys: JSON.stringify([
+						{
+							vaultId: foreignVaultId,
+							encryptedVaultKey: "malicious-key",
+						},
+					]),
+				},
+			);
+			const caller = authRouter.createCaller(createPublicContext());
+
+			await expect(
+				caller.signupWithInvitation({
+					token: invitation.token,
+					email: inviteeEmail,
+					name: "Invitee",
+					...toSignupCryptoInput(nextAuthCryptoFixture),
+				}),
+			).rejects.toThrow(
+				"pendingVaultKeys contains vaults outside the invited team",
+			);
+
+			const createdUser = await db.query.user.findFirst({
+				where: (u, { eq }) => eq(u.email, inviteeEmail.toLowerCase()),
+			});
+			expect(createdUser).toBeUndefined();
+		});
+	});
 
 	describe("registrationStatus", () => {
 		test("should report cloud mode as open registration", async () => {
@@ -459,23 +479,73 @@ describe("Auth Router", () => {
 	describe("logout", () => {
 		test("should delete own session", async () => {
 			const { sessionId, caller } = await setup(authRouter);
-			const result = await caller.logout({ sessionId });
+			const result = await caller.logout();
 
 			expect(result.success).toBe(true);
 
 			const session = await getSession(sessionId);
 			expect(session).toBeUndefined();
 		});
+	});
 
-		test("should reject deleting another user's session", async () => {
-			const [{ caller }, { sessionId }] = await Promise.all([
-				setup(authRouter),
-				setup(authRouter),
-			]);
+	describe("refreshSession", () => {
+		test("should rotate session and invalidate previous session", async () => {
+			const { userId, email, sessionId, caller } = await setup(authRouter);
 
-			await expect(caller.logout({ sessionId })).rejects.toThrow(
-				"Session not found",
+			const result = await caller.refreshSession();
+
+			expect(result.token).toBeDefined();
+			expect(result.sessionId).toBeDefined();
+			expect(result.sessionId).not.toBe(sessionId);
+
+			const oldSession = await getSession(sessionId);
+			expect(oldSession).toBeUndefined();
+
+			const nextSession = await getSession(result.sessionId);
+			expect(nextSession).toBeDefined();
+			expect(nextSession?.userId).toBe(userId);
+
+			const staleCaller = authRouter.createCaller(
+				createAuthenticatedContext(userId, email, sessionId),
 			);
+			await expect(staleCaller.refreshSession()).rejects.toThrow(
+				"Session expired",
+			);
+		});
+
+		test("should reject refresh when session is expired", async () => {
+			const { userId, email } = await setup(authRouter);
+			const expiredSessionId = await createTestSession(userId, {
+				expiresAt: new Date(Date.now() - 60_000),
+			});
+
+			const caller = authRouter.createCaller(
+				createAuthenticatedContext(userId, email, expiredSessionId),
+			);
+
+			await expect(caller.refreshSession()).rejects.toThrow("Session expired");
+		});
+
+		test("should preserve platform session duration policy", async () => {
+			const { userId, email } = await setup(authRouter);
+			const extensionSessionId = await createTestSession(userId, {
+				platform: "extension",
+				expiresAt: new Date(Date.now() + 60_000),
+			});
+
+			const caller = authRouter.createCaller(
+				createAuthenticatedContext(userId, email, extensionSessionId),
+			);
+
+			const now = Date.now();
+			const result = await caller.refreshSession();
+			const expiresAtMs = new Date(result.expiresAt).getTime();
+
+			expect(expiresAtMs).toBeGreaterThan(now + 6 * 24 * 60 * 60 * 1000);
+			expect(expiresAtMs).toBeLessThan(now + 8 * 24 * 60 * 60 * 1000);
+
+			const refreshedSession = await getSession(result.sessionId);
+			expect(refreshedSession?.platform).toBe("extension");
 		});
 	});
 
@@ -688,6 +758,36 @@ describe("Auth Router", () => {
 					and(eq(log.userId, userId), eq(log.action, "device_revoked")),
 			});
 			expect(auditLogs.length).toBe(1);
+		});
+
+		test("should broadcast session revocation control payload", async () => {
+			const { userId, caller } = await setup(authRouter);
+			const otherSession = await createTestSession(userId, {
+				deviceName: "Other",
+			});
+			const payloads: Array<{
+				type: string;
+				userId: string;
+				sessionId: string;
+				timestamp: number;
+				reason?: string;
+			}> = [];
+
+			setControlBroadcastFunction(async (payload) => {
+				payloads.push(payload);
+			});
+
+			const result = await caller.revokeDevice({ sessionId: otherSession });
+
+			expect(result.success).toBe(true);
+			expect(payloads).toHaveLength(1);
+			expect(payloads[0]).toMatchObject({
+				type: "session_revoked",
+				userId,
+				sessionId: otherSession,
+				reason: "device_revoked",
+			});
+			expect(typeof payloads[0]?.timestamp).toBe("number");
 		});
 
 		test("should not allow revoking current session", async () => {

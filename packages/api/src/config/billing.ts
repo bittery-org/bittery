@@ -1,4 +1,4 @@
-import { cloudPlanIds, type CloudPlanId } from "../billing/plans";
+import { type CloudPlanId, cloudPlanIds } from "../billing/plans";
 
 type PaidPlanId = Exclude<CloudPlanId, "free">;
 
@@ -21,7 +21,9 @@ export function getStripePriceId(plan: PaidPlanId): string | null {
 	return process.env[envName]?.trim() || null;
 }
 
-export function getPlanByStripePriceId(priceId: string | null | undefined): CloudPlanId | null {
+export function getPlanByStripePriceId(
+	priceId: string | null | undefined,
+): CloudPlanId | null {
 	if (!priceId) {
 		return null;
 	}

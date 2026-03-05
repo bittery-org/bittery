@@ -43,12 +43,12 @@ export interface Session {
 /**
  * Hash algorithm for SRP
  */
-export type HashAlgorithm = "SHA-1" | "SHA-256" | "SHA-384" | "SHA-512";
+export type HashAlgorithm = "SHA-256";
 
 /**
  * Prime group size for SRP
  */
-export type PrimeGroup = 1024 | 1536 | 2048 | 3072 | 4096 | 6144 | 8192;
+export type PrimeGroup = 4096;
 
 /**
  * Error codes for crypto operations

@@ -1,3 +1,5 @@
+import { MDXProvider } from "@mdx-js/react";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	ArrowLeft,
 	ArrowRight,
@@ -9,20 +11,15 @@ import {
 	UserCog,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { MDXProvider } from "@mdx-js/react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { DocsSidebar, MobileDocsDrawer } from "@/components/docs/docs-sidebar";
 import { mdxComponents } from "@/components/docs/mdx-components";
-import {
-	DocsSidebar,
-	MobileDocsDrawer,
-} from "@/components/docs/docs-sidebar";
 import { Layout } from "@/components/layout";
 import { getCategoryBySlug } from "@/content/docs/_categories";
 import {
+	type ArticleEntry,
+	getAllArticles,
 	getArticleBySlug,
 	getArticlesByCategory,
-	getAllArticles,
-	type ArticleEntry,
 } from "@/lib/docs";
 
 export const Route = createFileRoute("/docs/$")({
@@ -177,9 +174,7 @@ function CategoryPage({ categorySlug }: { categorySlug: string }) {
 function ArticlePage({ article }: { article: ArticleEntry }) {
 	const category = getCategoryBySlug(article.category);
 	const allArticles = getAllArticles();
-	const currentIndex = allArticles.findIndex(
-		(a) => a.slug === article.slug,
-	);
+	const currentIndex = allArticles.findIndex((a) => a.slug === article.slug);
 	const prevArticle = currentIndex > 0 ? allArticles[currentIndex - 1] : null;
 	const nextArticle =
 		currentIndex < allArticles.length - 1

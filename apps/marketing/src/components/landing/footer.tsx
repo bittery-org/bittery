@@ -1,5 +1,5 @@
-import { BitteryLogo } from "@/components/bittery-logo";
 import { Link } from "@tanstack/react-router";
+import { BitteryLogo } from "@/components/bittery-logo";
 
 const footerLinks = [
 	{
@@ -7,6 +7,7 @@ const footerLinks = [
 		links: [
 			{ label: "Features", href: "/", hash: "features" },
 			{ label: "Pricing", href: "/", hash: "pricing" },
+			{ label: "Roadmap", href: "/roadmap" },
 			{ label: "Download", href: "/" },
 			{ label: "Changelog", href: "/" },
 		],
@@ -25,7 +26,11 @@ const footerLinks = [
 		links: [
 			{ label: "About", href: "/about" },
 			{ label: "Blog", href: "/" },
-			{ label: "GitHub", href: "https://github.com/bittery-org/bittery", external: true },
+			{
+				label: "GitHub",
+				href: "https://github.com/bittery-org/bittery",
+				external: true,
+			},
 			{ label: "Contact", href: "/contact" },
 		],
 	},
@@ -34,7 +39,11 @@ const footerLinks = [
 		links: [
 			{ label: "Privacy", href: "/privacy" },
 			{ label: "Terms", href: "/terms" },
-			{ label: "License", href: "https://github.com/bittery-org/bittery/blob/main/LICENSE", external: true },
+			{
+				label: "License",
+				href: "https://github.com/bittery-org/bittery/blob/main/LICENSE",
+				external: true,
+			},
 		],
 	},
 ];

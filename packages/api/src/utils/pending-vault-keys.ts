@@ -92,10 +92,7 @@ export async function assertInvitationPendingVaultKeysAreAuthorized(input: {
 
 	const teamVaults = await db.query.vault.findMany({
 		where: (teamVault, { and, eq, inArray }) =>
-			and(
-				eq(teamVault.teamId, input.teamId),
-				inArray(teamVault.id, vaultIds),
-			),
+			and(eq(teamVault.teamId, input.teamId), inArray(teamVault.id, vaultIds)),
 		columns: { id: true },
 	});
 	if (teamVaults.length !== vaultIds.length) {
@@ -115,8 +112,8 @@ export async function assertInvitationPendingVaultKeysAreAuthorized(input: {
 	});
 	const authorizedVaultIds = new Set(
 		inviterVaultKeys
-			.filter((keyRecord) =>
-				keyRecord.role === "owner" || keyRecord.role === "admin",
+			.filter(
+				(keyRecord) => keyRecord.role === "owner" || keyRecord.role === "admin",
 			)
 			.map((keyRecord) => keyRecord.vaultId),
 	);
@@ -124,7 +121,8 @@ export async function assertInvitationPendingVaultKeysAreAuthorized(input: {
 	if (authorizedVaultIds.size !== vaultIds.length) {
 		throw new TRPCError({
 			code: "FORBIDDEN",
-			message: "You do not have permission to grant access for one or more vaults",
+			message:
+				"You do not have permission to grant access for one or more vaults",
 		});
 	}
 }

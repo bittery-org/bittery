@@ -16,6 +16,10 @@ export function formatLocalDateKey(date: Date): string {
 }
 
 export function secondsUntilNextLocalDay(now: Date): number {
-	const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+	const tomorrow = new Date(
+		now.getFullYear(),
+		now.getMonth(),
+		now.getDate() + 1,
+	);
 	return Math.max(1, Math.ceil((tomorrow.getTime() - now.getTime()) / 1000));
 }

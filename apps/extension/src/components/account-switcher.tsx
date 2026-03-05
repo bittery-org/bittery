@@ -272,8 +272,10 @@ export function ExtensionAccountSwitcher() {
 			unlockedEmails={unlockedEmailsList}
 			onAccountSelect={handleSwitchAccount}
 			onAddAccount={handleAddAccount}
+			showAddAccount={!desktopStatus.data?.available}
 			onLockAll={handleLockAll}
 			showAllAccountsOption={true}
+			showSetupAnotherDevice={!desktopStatus.data?.available}
 			onAllAccountsSelect={handleAllAccountsSelect}
 			isLoading={accounts.isLoading || switchAccount.isPending}
 			trigger={trigger}

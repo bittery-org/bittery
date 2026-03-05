@@ -56,6 +56,7 @@ const LEGACY_SESSION_DATA_KEY: &str = "bittery_session_data";
 const LEGACY_BIOMETRIC_ENABLED_KEY: &str = "bittery_biometric_enabled";
 const LEGACY_JWT_TOKEN_KEY: &str = "bittery_jwt_token";
 const LEGACY_VAULT_KEYS_KEY: &str = "bittery_vault_keys";
+const CONTEXT_ENVELOPE_MARKER: &str = "bittery-context-envelope-v1";
 
 fn sanitize_email_for_key(email: &str) -> String {
     email
@@ -67,6 +68,24 @@ fn sanitize_email_for_key(email: &str) -> String {
 
 fn account_key(email: &str, suffix: &str) -> String {
     format!("bittery_account_{}_{}", sanitize_email_for_key(email), suffix)
+}
+
+fn normalize_decrypted_item_payload(decrypted_data: String) -> String {
+    let parsed: serde_json::Value = match serde_json::from_str(&decrypted_data) {
+        Ok(value) => value,
+        Err(_) => return decrypted_data,
+    };
+
+    let marker = parsed.get("marker").and_then(|value| value.as_str());
+    let payload = parsed.get("payload").and_then(|value| value.as_str());
+
+    if marker == Some(CONTEXT_ENVELOPE_MARKER) {
+        if let Some(payload_json) = payload {
+            return payload_json.to_string();
+        }
+    }
+
+    decrypted_data
 }
 
 fn get_active_account_email<R: Runtime>(store: &Store<R>) -> Option<String> {
@@ -1201,11 +1220,15 @@ async fn decrypt_items_internal(
     let iv = encrypted_data.get("iv")
         .and_then(|v| v.as_str())
         .ok_or("Missing IV")?;
+    let algorithm = encrypted_data.get("algorithm")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing algorithm")?;
 
     // Use crypto command to decrypt MUK
     let muk_base64 = crypto_commands::crypto_decrypt(
         ciphertext.to_string(),
         iv.to_string(),
+        algorithm.to_string(),
         base64::engine::general_purpose::STANDARD.encode(&device_key),
     ).map_err(|e| format!("Failed to decrypt MUK: {}", e))?;
 
@@ -1244,13 +1267,46 @@ async fn decrypt_items_internal(
             let vk_iv = vk_encrypted.get("iv")
                 .and_then(|v| v.as_str())
                 .ok_or("Missing vault key IV")?;
+            let vk_algorithm = vk_encrypted.get("algorithm")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing vault key algorithm")?;
 
-            // Decrypt with MUK
-            let vault_key_base64 = crypto_commands::crypto_decrypt(
-                vk_ciphertext.to_string(),
-                vk_iv.to_string(),
-                muk_base64.clone(),
-            ).map_err(|e| format!("Failed to decrypt vault key: {}", e))?;
+            // Decrypt with MUK (context-bound payloads use native AAD verification).
+            let vault_key_base64 = if let Some(ctx) = vk_encrypted.get("context") {
+                let ctx_vault_id = ctx.get("vaultId")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing vault key context vaultId")?;
+                let ctx_user_id = ctx.get("userId")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing vault key context userId")?;
+                let ctx_key_version = ctx.get("keyVersion")
+                    .and_then(|v| v.as_u64())
+                    .ok_or("Missing vault key context keyVersion")?;
+                let ctx_purpose = ctx.get("purpose")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing vault key context purpose")?;
+
+                crypto_commands::crypto_decrypt_with_context(
+                    vk_ciphertext.to_string(),
+                    vk_iv.to_string(),
+                    vk_algorithm.to_string(),
+                    muk_base64.clone(),
+                    ctx_vault_id.to_string(),
+                    ctx_purpose.to_string(),
+                    "vault_key".to_string(),
+                    ctx_key_version,
+                    ctx_user_id.to_string(),
+                )
+                .map_err(|e| format!("Failed to decrypt vault key with context: {}", e))?
+            } else {
+                crypto_commands::crypto_decrypt(
+                    vk_ciphertext.to_string(),
+                    vk_iv.to_string(),
+                    vk_algorithm.to_string(),
+                    muk_base64.clone(),
+                )
+                .map_err(|e| format!("Failed to decrypt vault key: {}", e))?
+            };
 
             decrypted_vault_keys.insert(vault_id.to_string(), vault_key_base64);
         } else {
@@ -1270,11 +1326,15 @@ async fn decrypt_items_internal(
             let epk_iv = epk.get("iv")
                 .and_then(|v| v.as_str())
                 .ok_or("Missing private key IV")?;
+            let epk_algorithm = epk.get("algorithm")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing private key algorithm")?;
 
             // Decrypt private key with MUK
             let private_key_pem = crypto_commands::crypto_decrypt(
                 epk_ciphertext.to_string(),
                 epk_iv.to_string(),
+                epk_algorithm.to_string(),
                 muk_base64.clone(),
             ).map_err(|e| format!("Failed to decrypt private key: {}", e))?;
 
@@ -1305,8 +1365,14 @@ async fn decrypt_items_internal(
 
         let encryption_iv = item.get("encryptionIv")
             .and_then(|v| v.as_str());
+        let encryption_algorithm = item.get("encryptionAlgorithm")
+            .and_then(|v| v.as_str());
 
-        if vault_id.is_none() || encrypted_data.is_none() || encryption_iv.is_none() {
+        if vault_id.is_none()
+            || encrypted_data.is_none()
+            || encryption_iv.is_none()
+            || encryption_algorithm.is_none()
+        {
             failed_items.push(serde_json::json!({
                 "id": item_id,
                 "error": "Missing required fields"
@@ -1326,12 +1392,14 @@ async fn decrypt_items_internal(
         match crypto_commands::crypto_decrypt(
             encrypted_data.unwrap().to_string(),
             encryption_iv.unwrap().to_string(),
+            encryption_algorithm.unwrap().to_string(),
             vault_key.unwrap().clone(),
         ) {
             Ok(decrypted_data) => {
+                let normalized_decrypted_data = normalize_decrypted_item_payload(decrypted_data);
                 decrypted_items.push(serde_json::json!({
                     "id": item_id,
-                    "decrypted_data": decrypted_data,
+                    "decrypted_data": normalized_decrypted_data,
                 }));
             }
             Err(e) => {
@@ -1416,12 +1484,16 @@ pub fn run() {
         .plugin(tauri_plugin_biometry::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(BiometricBridge::default())
-        .invoke_handler(tauri::generate_handler![
-            // Crypto commands
-            crypto_commands::crypto_derive_keys,
-            crypto_commands::crypto_encrypt,
-            crypto_commands::crypto_decrypt,
+		.invoke_handler(tauri::generate_handler![
+			// Crypto commands
+			crypto_commands::crypto_derive_keys,
+			crypto_commands::crypto_encrypt,
+			crypto_commands::crypto_encrypt_with_context,
+			crypto_commands::crypto_decrypt,
+			crypto_commands::crypto_decrypt_with_context,
+			crypto_commands::crypto_validate_server_kdf_params,
             crypto_commands::crypto_generate_encryption_key,
+            crypto_commands::crypto_generate_uuid,
             crypto_commands::crypto_generate_rsa_key_pair,
             crypto_commands::crypto_rsa_encrypt,
             crypto_commands::crypto_rsa_decrypt,

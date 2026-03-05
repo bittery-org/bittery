@@ -146,7 +146,11 @@ export {
 	useCreateShare,
 } from "./share";
 // Team Mutation Hooks (write operations)
-export { useTeamAvatar } from "./team/use-team-avatar";
+export {
+	TeamAvatarError,
+	type TeamAvatarErrorCode,
+	useTeamAvatar,
+} from "./team/use-team-avatar";
 // Data Hooks (read operations)
 export {
 	type AccountInfo,
@@ -204,10 +208,13 @@ export {
 } from "./use-vault-search";
 // Vault Mutation Hooks (write operations)
 export {
+	type ConvertVaultTypeInput,
+	type ConvertVaultTypeResult,
 	type CreateVaultInput,
 	type CreateVaultResult,
 	type DeleteVaultInput,
 	type UpdateVaultInput,
+	useConvertVaultType,
 	useCreateVault,
 	useDeleteVault,
 	useUpdateVault,

@@ -1,12 +1,13 @@
-import type { AppRouter } from "@bittery/api/routers/index";
-import { buildTrpcUrl } from "@bittery/shared/server-url";
 import { TRPCProvider } from "@bittery/shared/trpc";
+import { createAppTrpcOptionsProxy } from "@bittery/shared/trpc-client";
+import { createSessionRefreshingTrpcClient } from "@bittery/shared/trpc-session-refresh";
 import { getOrCreateClientId } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { PendingLoader } from "./components/loader";
 import { getServerUrl } from "./lib/auth-server";
 import { storage } from "./lib/storage";
+import { m } from "./paraglide/messages";
 import "./index.css";
 import { initWasmCrypto } from "./lib/wasm-crypto";
 
@@ -20,8 +21,7 @@ import {
 	QueryClient,
 	QueryClientProvider,
 } from "@tanstack/react-query";
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
-import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
+import { I18nProvider } from "./providers/i18n-provider";
 import { WebPlatformProvider } from "./providers/platform-provider";
 import { SyncProvider } from "./providers/sync-provider";
 import { routeTree } from "./routeTree.gen";
@@ -52,7 +52,7 @@ function handleUnauthorizedError() {
 	queryClient.clear();
 
 	storage.clearSession().then(() => {
-		toast.error("Session expired. Please sign in again.");
+		toast.error(m["toast.auth.session_expired"]());
 		window.location.href = "/login";
 	});
 }
@@ -86,7 +86,7 @@ export const queryClient = new QueryClient({
 
 const serverUrl = getServerUrl();
 
-function getSyncClientIdHeader(): string | null {
+async function getSyncClientIdHeader(): Promise<string | null> {
 	if (typeof window === "undefined") {
 		return null;
 	}
@@ -98,32 +98,28 @@ function getSyncClientIdHeader(): string | null {
 	}
 }
 
-const trpcClient = createTRPCClient<AppRouter>({
-	links: [
-		httpBatchLink({
-			url: `${serverUrl}/trpc`,
-			async fetch(url, options) {
-				const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
-				const authToken = await storage.getAuthToken();
-				const syncClientId = getSyncClientIdHeader();
-				return fetch(resolvedUrl, {
-					...options,
-					credentials: "include",
-					headers: {
-						...options?.headers,
-						...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-						...(syncClientId ? { "X-Client-Id": syncClientId } : {}),
-					},
-				});
-			},
-		}),
-	],
+const trpcClient = createSessionRefreshingTrpcClient({
+	defaultServerUrl: serverUrl,
+	getServerUrl: async () => serverUrl,
+	getSessionSnapshot: async () => {
+		const [token, sessionData] = await Promise.all([
+			storage.getAuthToken(),
+			storage.getStoredSessionData(),
+		]);
+		return {
+			token,
+			issuedAt: sessionData?.createdAt ?? null,
+			expiresAt: sessionData?.expiresAt ?? null,
+		};
+	},
+	getRefreshToken: () => storage.getAuthToken(),
+	storeRefreshedToken: async (token) => {
+		await storage.storeAuthToken(token);
+	},
+	getClientId: getSyncClientIdHeader,
 });
 
-const trpc = createTRPCOptionsProxy({
-	client: trpcClient,
-	queryClient: queryClient,
-});
+const trpc = createAppTrpcOptionsProxy(trpcClient, queryClient);
 
 export const getRouter = () => {
 	const router = createTanStackRouter({
@@ -136,13 +132,15 @@ export const getRouter = () => {
 		defaultPendingComponent: PendingLoader,
 		defaultNotFoundComponent: () => <div>Not Found</div>,
 		Wrap: ({ children }) => (
-			<QueryClientProvider client={queryClient}>
-				<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-					<SyncProvider queryClient={queryClient}>
-						<WebPlatformProvider>{children}</WebPlatformProvider>
-					</SyncProvider>
-				</TRPCProvider>
-			</QueryClientProvider>
+			<I18nProvider>
+				<QueryClientProvider client={queryClient}>
+					<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+						<SyncProvider queryClient={queryClient}>
+							<WebPlatformProvider>{children}</WebPlatformProvider>
+						</SyncProvider>
+					</TRPCProvider>
+				</QueryClientProvider>
+			</I18nProvider>
 		),
 	});
 	return router;

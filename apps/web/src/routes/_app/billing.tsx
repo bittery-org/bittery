@@ -1,3 +1,4 @@
+import type { CloudPlanId } from "@bittery/api/billing/plans";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import { Badge, Button, Separator, Skeleton, toast } from "@bittery/ui";
 import {
@@ -14,6 +15,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { z } from "zod";
+import { formatDate } from "@/lib/i18n-format";
+import { m as messages } from "@/paraglide/messages";
+import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/billing")({
 	beforeLoad: async ({ context }) => {
@@ -37,20 +41,20 @@ export const Route = createFileRoute("/_app/billing")({
 		checkout: z.string().optional(),
 	}),
 	head: () => ({
-		meta: [{ title: "Billing - Bittery" }],
+		meta: [{ title: messages["billing.page.meta_title"]() }],
 	}),
 });
 
 const plans = [
 	{
 		id: "free" as const,
-		name: "Free",
-		description: "For individuals getting started",
-		features: [
-			"Unlimited passwords",
-			"1 vault",
-			"Single user",
-			"Cross-platform sync",
+		nameKey: "billing.plan.free.name",
+		descriptionKey: "billing.plan.free.description",
+		featureKeys: [
+			"billing.plan.free.feature.unlimited_passwords",
+			"billing.plan.free.feature.one_vault",
+			"billing.plan.free.feature.single_user",
+			"billing.plan.free.feature.cross_platform_sync",
 		],
 		icon: User,
 		memberLimit: 1,
@@ -58,13 +62,13 @@ const plans = [
 	},
 	{
 		id: "personal" as const,
-		name: "Personal",
-		description: "For power users who want more",
-		features: [
-			"Everything in Free",
-			"Sentinel security dashboard",
-			"5 share links",
-			"File attachments",
+		nameKey: "billing.plan.personal.name",
+		descriptionKey: "billing.plan.personal.description",
+		featureKeys: [
+			"billing.plan.personal.feature.everything_in_free",
+			"billing.plan.personal.feature.sentinel_dashboard",
+			"billing.plan.personal.feature.five_share_links",
+			"billing.plan.personal.feature.file_attachments",
 		],
 		icon: StarSparkle,
 		memberLimit: 1,
@@ -72,13 +76,13 @@ const plans = [
 	},
 	{
 		id: "family" as const,
-		name: "Family",
-		description: "Share securely with loved ones",
-		features: [
-			"Everything in Personal",
-			"Up to 6 members",
-			"5 shared vaults",
-			"Unlimited share links",
+		nameKey: "billing.plan.family.name",
+		descriptionKey: "billing.plan.family.description",
+		featureKeys: [
+			"billing.plan.family.feature.everything_in_personal",
+			"billing.plan.family.feature.up_to_six_members",
+			"billing.plan.family.feature.five_shared_vaults",
+			"billing.plan.family.feature.unlimited_share_links",
 		],
 		icon: Users,
 		memberLimit: 6,
@@ -86,39 +90,142 @@ const plans = [
 	},
 	{
 		id: "team" as const,
-		name: "Team",
-		description: "For teams and organizations",
-		features: [
-			"Everything in Family",
-			"Unlimited members",
-			"Unlimited shared vaults",
-			"Per-seat billing",
+		nameKey: "billing.plan.team.name",
+		descriptionKey: "billing.plan.team.description",
+		featureKeys: [
+			"billing.plan.team.feature.everything_in_family",
+			"billing.plan.team.feature.unlimited_members",
+			"billing.plan.team.feature.unlimited_shared_vaults",
+			"billing.plan.team.feature.per_seat_billing",
 		],
 		icon: Shield,
 		memberLimit: null,
 		highlighted: false,
 	},
-];
+] as const;
 
 type PlanId = (typeof plans)[number]["id"];
 const paidPlanIds = ["personal", "family", "team"] as const;
 
-function getStatusDisplay(status: string) {
+type BillingMessageCatalog = ReturnType<typeof useI18n>["m"];
+
+function getPlanLabel(
+	planId: CloudPlanId | string,
+	m: BillingMessageCatalog,
+): string {
+	switch (planId) {
+		case "free":
+			return m["billing.plan.free.name"]();
+		case "personal":
+			return m["billing.plan.personal.name"]();
+		case "family":
+			return m["billing.plan.family.name"]();
+		case "team":
+			return m["billing.plan.team.name"]();
+		default:
+			return planId;
+	}
+}
+
+function getStatusDisplay(status: string, m: BillingMessageCatalog) {
 	switch (status) {
 		case "active":
-			return { label: "Active", variant: "default" as const };
+			return {
+				label: m["billing.status.active"](),
+				variant: "default" as const,
+			};
 		case "trialing":
-			return { label: "Trial", variant: "secondary" as const };
+			return {
+				label: m["billing.status.trialing"](),
+				variant: "secondary" as const,
+			};
 		case "past_due":
-			return { label: "Past Due", variant: "destructive" as const };
+			return {
+				label: m["billing.status.past_due"](),
+				variant: "destructive" as const,
+			};
 		case "canceled":
-			return { label: "Canceled", variant: "outline" as const };
+			return {
+				label: m["billing.status.canceled"](),
+				variant: "outline" as const,
+			};
 		case "unpaid":
-			return { label: "Unpaid", variant: "destructive" as const };
+			return {
+				label: m["billing.status.unpaid"](),
+				variant: "destructive" as const,
+			};
 		case "incomplete":
-			return { label: "Incomplete", variant: "outline" as const };
+			return {
+				label: m["billing.status.incomplete"](),
+				variant: "outline" as const,
+			};
 		default:
-			return { label: "None", variant: "outline" as const };
+			return { label: m["billing.status.none"](), variant: "outline" as const };
+	}
+}
+
+function getMemberLimitLabel(
+	memberLimit: number | null,
+	m: BillingMessageCatalog,
+): string {
+	if (memberLimit === null) {
+		return m["billing.plan.member_limit.unlimited"]();
+	}
+
+	return memberLimit === 1
+		? m["billing.plan.member_limit.single"]({ count: memberLimit })
+		: m["billing.plan.member_limit.plural"]({ count: memberLimit });
+}
+
+function getSeatsLabel(
+	seatsPurchased: number,
+	m: BillingMessageCatalog,
+): string {
+	return seatsPurchased === 1
+		? m["billing.subscription.seats.single"]({ count: seatsPurchased })
+		: m["billing.subscription.seats.plural"]({ count: seatsPurchased });
+}
+
+function getShareLinksLimitLabel(
+	limit: number,
+	m: BillingMessageCatalog,
+): string {
+	const countLabel = limit === 0 ? m["billing.limits.none"]() : String(limit);
+	const label =
+		limit === 1
+			? m["billing.limits.share_links.single"]()
+			: m["billing.limits.share_links.plural"]();
+	return `${countLabel} ${label}`;
+}
+
+function getSharedVaultsLimitLabel(
+	limit: number,
+	m: BillingMessageCatalog,
+): string {
+	const countLabel = limit === 0 ? m["billing.limits.none"]() : String(limit);
+	const label =
+		limit === 1
+			? m["billing.limits.shared_vaults.single"]()
+			: m["billing.limits.shared_vaults.plural"]();
+	return `${countLabel} ${label}`;
+}
+
+function formatEntitlementLabel(key: string, m: BillingMessageCatalog): string {
+	switch (key) {
+		case "sentinel":
+			return m["billing.entitlement.sentinel"]();
+		case "team_management":
+			return m["billing.entitlement.team_management"]();
+		case "vault_sharing":
+			return m["billing.entitlement.vault_sharing"]();
+		case "share_links":
+			return m["billing.entitlement.share_links"]();
+		case "billing_portal":
+			return m["billing.entitlement.billing_portal"]();
+		case "attachments":
+			return m["billing.entitlement.attachments"]();
+		default:
+			return key;
 	}
 }
 
@@ -127,6 +234,7 @@ function BillingRoute() {
 	const trpcClient = useTRPCClient();
 	const queryClient = useQueryClient();
 	const { checkout } = Route.useSearch();
+	const { m } = useI18n();
 
 	const billingQuery = useQuery(trpc.billing.status.queryOptions());
 	const entitlementsQuery = useQuery(trpc.billing.entitlements.queryOptions());
@@ -139,10 +247,10 @@ function BillingRoute() {
 				window.location.href = result.url;
 				return;
 			}
-			toast.error("Stripe checkout did not return a URL");
+			toast.error(m["billing.toast.checkout.url_missing"]());
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Failed to start checkout");
+		onError: () => {
+			toast.error(m["billing.toast.checkout.start_failed"]());
 		},
 	});
 
@@ -151,8 +259,8 @@ function BillingRoute() {
 		onSuccess: (result) => {
 			window.location.href = result.url;
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Failed to open Stripe billing portal");
+		onError: () => {
+			toast.error(m["billing.toast.portal.open_failed"]());
 		},
 	});
 
@@ -162,8 +270,8 @@ function BillingRoute() {
 		queryClient.invalidateQueries({
 			queryKey: trpc.billing.entitlements.queryKey(),
 		});
-		toast.success("Checkout completed. Refreshing billing status...");
-	}, [checkout, queryClient, trpc]);
+		toast.success(m["billing.toast.checkout.refreshing"]());
+	}, [checkout, m, queryClient, trpc]);
 
 	if (billingQuery.isLoading) {
 		return (
@@ -184,9 +292,11 @@ function BillingRoute() {
 			<div className="mx-auto w-full max-w-6xl">
 				<div className="rounded-2xl border bg-card p-8 text-center">
 					<CircleWarning className="mx-auto h-8 w-8 text-muted-foreground" />
-					<p className="mt-3 font-medium">Failed to load billing status</p>
+					<p className="mt-3 font-medium">
+						{m["billing.error.load_status.title"]()}
+					</p>
 					<p className="mt-1 text-muted-foreground text-sm">
-						Please try again later or contact support.
+						{m["billing.error.load_status.description"]()}
 					</p>
 					<Button
 						variant="outline"
@@ -194,7 +304,7 @@ function BillingRoute() {
 						className="mt-4"
 						onClick={() => billingQuery.refetch()}
 					>
-						Retry
+						{m["billing.error.load_status.retry"]()}
 					</Button>
 				</div>
 			</div>
@@ -202,7 +312,7 @@ function BillingRoute() {
 	}
 
 	const billing = billingQuery.data;
-	const statusDisplay = getStatusDisplay(billing.status);
+	const statusDisplay = getStatusDisplay(billing.status, m);
 	const isPending = checkoutMutation.isPending || portalMutation.isPending;
 
 	const getButtonForPlan = (planId: PlanId) => {
@@ -217,7 +327,7 @@ function BillingRoute() {
 						className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
 					>
 						<CheckCircle className="mr-1 h-3 w-3" />
-						Current Plan
+						{m["billing.plan.current"]()}
 					</Badge>
 				);
 			}
@@ -231,7 +341,7 @@ function BillingRoute() {
 					className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
 				>
 					<CheckCircle className="mr-1 h-3 w-3" />
-					Current Plan
+					{m["billing.plan.current"]()}
 				</Badge>
 			);
 		}
@@ -241,13 +351,11 @@ function BillingRoute() {
 				<Button
 					size="sm"
 					onClick={() =>
-						checkoutMutation.mutate(
-							planId as (typeof paidPlanIds)[number],
-						)
+						checkoutMutation.mutate(planId as (typeof paidPlanIds)[number])
 					}
 					disabled={isPending}
 				>
-					Complete Checkout
+					{m["billing.plan.complete_checkout"]()}
 				</Button>
 			);
 		}
@@ -262,13 +370,11 @@ function BillingRoute() {
 				size="sm"
 				variant={isUpgrade ? "default" : "outline"}
 				onClick={() =>
-					checkoutMutation.mutate(
-						planId as (typeof paidPlanIds)[number],
-					)
+					checkoutMutation.mutate(planId as (typeof paidPlanIds)[number])
 				}
 				disabled={isPending}
 			>
-				{isUpgrade ? "Upgrade" : "Switch"}
+				{isUpgrade ? m["billing.plan.upgrade"]() : m["billing.plan.switch"]()}
 			</Button>
 		);
 	};
@@ -283,21 +389,22 @@ function BillingRoute() {
 				<div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
 					<div className="space-y-4">
 						<Badge variant="secondary" className="w-fit">
-							Billing
+							{m["billing.page.badge"]()}
 						</Badge>
 						<div className="space-y-2">
 							<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl">
-								Plan & Billing
+								{m["billing.page.heading"]()}
 							</h1>
 							<p className="max-w-2xl text-muted-foreground">
-								Manage your subscription, view your current plan, and upgrade to
-								unlock premium features.
+								{m["billing.page.description"]()}
 							</p>
 						</div>
 						<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
 							<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
 								<CreditCard className="h-3.5 w-3.5" />
-								<span className="capitalize">{billing.plan}</span> plan
+								{m["billing.page.plan_badge"]({
+									planName: getPlanLabel(billing.plan, m),
+								})}
 							</div>
 							<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
 								<Badge
@@ -310,8 +417,9 @@ function BillingRoute() {
 							{billing.cancelAtPeriodEnd && billing.currentPeriodEnd && (
 								<div className="inline-flex items-center gap-1.5 rounded-md border border-amber-300/40 bg-amber-50/80 px-2.5 py-1 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400">
 									<CircleWarning className="h-3.5 w-3.5" />
-									Cancels{" "}
-									{new Date(billing.currentPeriodEnd).toLocaleDateString()}
+									{m["billing.page.cancels"]({
+										date: formatDate(billing.currentPeriodEnd),
+									})}
 								</div>
 							)}
 						</div>
@@ -326,7 +434,7 @@ function BillingRoute() {
 								disabled={isPending}
 							>
 								<ExternalLink className="mr-2 h-3.5 w-3.5" />
-								Manage in Stripe
+								{m["billing.page.manage_stripe"]()}
 							</Button>
 						</div>
 					)}
@@ -338,10 +446,11 @@ function BillingRoute() {
 				<div className="flex items-start gap-3 rounded-xl border border-amber-300/60 bg-amber-50 p-4 text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
 					<CircleWarning className="mt-0.5 h-4 w-4 shrink-0" />
 					<div className="space-y-1">
-						<p className="font-medium text-sm">Subscription required</p>
+						<p className="font-medium text-sm">
+							{m["billing.alert.subscription_required.title"]()}
+						</p>
 						<p className="text-xs opacity-80">
-							Your selected paid plan requires an active subscription. Complete
-							checkout below to unlock all premium features.
+							{m["billing.alert.subscription_required.description"]()}
 						</p>
 					</div>
 				</div>
@@ -351,9 +460,11 @@ function BillingRoute() {
 				<div className="flex items-start gap-3 rounded-xl border border-emerald-300/60 bg-emerald-50 p-4 text-emerald-900 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
 					<CheckCircle className="mt-0.5 h-4 w-4 shrink-0" />
 					<div className="space-y-1">
-						<p className="font-medium text-sm">Checkout completed</p>
+						<p className="font-medium text-sm">
+							{m["billing.alert.checkout_completed.title"]()}
+						</p>
 						<p className="text-xs opacity-80">
-							Your billing status may take a few seconds to update.
+							{m["billing.alert.checkout_completed.description"]()}
 						</p>
 					</div>
 				</div>
@@ -363,9 +474,11 @@ function BillingRoute() {
 				<div className="flex items-start gap-3 rounded-xl border bg-muted/40 p-4">
 					<CircleWarning className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
 					<div className="space-y-1">
-						<p className="font-medium text-sm">Checkout canceled</p>
+						<p className="font-medium text-sm">
+							{m["billing.alert.checkout_canceled.title"]()}
+						</p>
 						<p className="text-muted-foreground text-xs">
-							No worries — you can resume anytime by selecting a plan below.
+							{m["billing.alert.checkout_canceled.description"]()}
 						</p>
 					</div>
 				</div>
@@ -375,10 +488,10 @@ function BillingRoute() {
 			<div>
 				<div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 					<h2 className="font-semibold text-lg tracking-tight">
-						Choose Your Plan
+						{m["billing.plans.title"]()}
 					</h2>
 					<p className="text-muted-foreground text-sm">
-						Select the plan that best fits your needs.
+						{m["billing.plans.description"]()}
 					</p>
 				</div>
 
@@ -398,30 +511,28 @@ function BillingRoute() {
 							>
 								{plan.highlighted && !isCurrent && (
 									<div className="absolute -top-2.5 right-4">
-										<Badge className="text-[10px]">Popular</Badge>
+										<Badge className="text-[10px]">
+											{m["billing.plan.popular"]()}
+										</Badge>
 									</div>
 								)}
 
 								<div className="mb-4 flex items-center gap-3">
 									<div
 										className={`flex h-9 w-9 items-center justify-center rounded-lg ${
-											isCurrent
-												? "bg-primary/10"
-												: "bg-muted"
+											isCurrent ? "bg-primary/10" : "bg-muted"
 										}`}
 									>
 										<Icon
 											className={`h-4 w-4 ${
-												isCurrent
-													? "text-primary"
-													: "text-muted-foreground"
+												isCurrent ? "text-primary" : "text-muted-foreground"
 											}`}
 										/>
 									</div>
 									<div>
-										<p className="font-semibold text-sm">{plan.name}</p>
+										<p className="font-semibold text-sm">{m[plan.nameKey]()}</p>
 										<p className="text-muted-foreground text-xs">
-											{plan.description}
+											{m[plan.descriptionKey]()}
 										</p>
 									</div>
 								</div>
@@ -429,14 +540,14 @@ function BillingRoute() {
 								<Separator className="mb-4" />
 
 								<ul className="mb-6 flex-1 space-y-2.5">
-									{plan.features.map((feature) => (
+									{plan.featureKeys.map((featureKey) => (
 										<li
-											key={feature}
+											key={featureKey}
 											className="flex items-start gap-2 text-sm"
 										>
 											<CheckCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />
 											<span className="text-muted-foreground">
-												{feature}
+												{m[featureKey]()}
 											</span>
 										</li>
 									))}
@@ -444,9 +555,7 @@ function BillingRoute() {
 
 								<div className="mt-auto flex items-center justify-between">
 									<span className="text-muted-foreground text-xs">
-										{plan.memberLimit
-											? `${plan.memberLimit} member${plan.memberLimit > 1 ? "s" : ""}`
-											: "Unlimited members"}
+										{getMemberLimitLabel(plan.memberLimit, m)}
 									</span>
 									{getButtonForPlan(plan.id)}
 								</div>
@@ -461,10 +570,10 @@ function BillingRoute() {
 				<section className="space-y-4">
 					<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 						<h2 className="font-semibold text-lg tracking-tight">
-							Subscription Details
+							{m["billing.subscription.title"]()}
 						</h2>
 						<p className="text-muted-foreground text-sm">
-							Information about your current subscription.
+							{m["billing.subscription.description"]()}
 						</p>
 					</div>
 
@@ -476,14 +585,16 @@ function BillingRoute() {
 									<CheckCircle className="h-4 w-4 text-muted-foreground" />
 								</div>
 								<div className="min-w-0 flex-1">
-									<p className="text-muted-foreground text-xs">Status</p>
+									<p className="text-muted-foreground text-xs">
+										{m["billing.subscription.status"]()}
+									</p>
 									<div className="mt-0.5 flex items-center gap-2">
 										<Badge variant={statusDisplay.variant}>
 											{statusDisplay.label}
 										</Badge>
 										{billing.cancelAtPeriodEnd && (
 											<span className="text-amber-600 text-xs dark:text-amber-400">
-												Canceling
+												{m["billing.subscription.canceling"]()}
 											</span>
 										)}
 									</div>
@@ -501,13 +612,11 @@ function BillingRoute() {
 									<div className="min-w-0 flex-1">
 										<p className="text-muted-foreground text-xs">
 											{billing.cancelAtPeriodEnd
-												? "Access Until"
-												: "Next Billing Date"}
+												? m["billing.subscription.access_until"]()
+												: m["billing.subscription.next_billing_date"]()}
 										</p>
 										<p className="mt-0.5 font-medium text-sm">
-											{new Date(
-												billing.currentPeriodEnd,
-											).toLocaleDateString(undefined, {
+											{formatDate(billing.currentPeriodEnd, {
 												year: "numeric",
 												month: "long",
 												day: "numeric",
@@ -527,11 +636,10 @@ function BillingRoute() {
 									</div>
 									<div className="min-w-0 flex-1">
 										<p className="text-muted-foreground text-xs">
-											Seats Purchased
+											{m["billing.subscription.seats_purchased"]()}
 										</p>
 										<p className="mt-0.5 font-medium text-sm">
-											{billing.seatsPurchased} seat
-											{billing.seatsPurchased !== 1 ? "s" : ""}
+											{getSeatsLabel(billing.seatsPurchased, m)}
 										</p>
 									</div>
 								</div>
@@ -546,10 +654,10 @@ function BillingRoute() {
 				<section className="space-y-4">
 					<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 						<h2 className="font-semibold text-lg tracking-tight">
-							Your Features
+							{m["billing.features.title"]()}
 						</h2>
 						<p className="text-muted-foreground text-sm">
-							Features included with your current plan.
+							{m["billing.features.description"]()}
 						</p>
 					</div>
 
@@ -557,10 +665,7 @@ function BillingRoute() {
 						<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 							{Object.entries(entitlementsQuery.data.entitlements).map(
 								([key, enabled]) => (
-									<div
-										key={key}
-										className="flex items-center gap-2.5 text-sm"
-									>
+									<div key={key} className="flex items-center gap-2.5 text-sm">
 										{enabled ? (
 											<CheckCircle className="h-4 w-4 shrink-0 text-emerald-500" />
 										) : (
@@ -568,12 +673,10 @@ function BillingRoute() {
 										)}
 										<span
 											className={
-												enabled
-													? ""
-													: "text-muted-foreground line-through"
+												enabled ? "" : "text-muted-foreground line-through"
 											}
 										>
-											{formatEntitlementLabel(key)}
+											{formatEntitlementLabel(key, m)}
 										</span>
 									</div>
 								),
@@ -588,14 +691,11 @@ function BillingRoute() {
 										entitlementsQuery.data.limits.share_links !== undefined && (
 											<div className="text-muted-foreground text-xs">
 												<span className="font-medium text-foreground">
-													{entitlementsQuery.data.limits.share_links === 0
-														? "No"
-														: entitlementsQuery.data.limits.share_links}
-												</span>{" "}
-												share link
-												{entitlementsQuery.data.limits.share_links !== 1
-													? "s"
-													: ""}
+													{getShareLinksLimitLabel(
+														entitlementsQuery.data.limits.share_links,
+														m,
+													)}
+												</span>
 											</div>
 										)}
 									{entitlementsQuery.data.limits.shared_vaults !== null &&
@@ -603,14 +703,11 @@ function BillingRoute() {
 											undefined && (
 											<div className="text-muted-foreground text-xs">
 												<span className="font-medium text-foreground">
-													{entitlementsQuery.data.limits.shared_vaults === 0
-														? "No"
-														: entitlementsQuery.data.limits.shared_vaults}
-												</span>{" "}
-												shared vault
-												{entitlementsQuery.data.limits.shared_vaults !== 1
-													? "s"
-													: ""}
+													{getSharedVaultsLimitLabel(
+														entitlementsQuery.data.limits.shared_vaults,
+														m,
+													)}
+												</span>
 											</div>
 										)}
 								</div>
@@ -621,16 +718,4 @@ function BillingRoute() {
 			)}
 		</div>
 	);
-}
-
-function formatEntitlementLabel(key: string): string {
-	const labels: Record<string, string> = {
-		sentinel: "Sentinel Security",
-		team_management: "Team Management",
-		vault_sharing: "Vault Sharing",
-		share_links: "Share Links",
-		billing_portal: "Billing Portal",
-		attachments: "File Attachments",
-	};
-	return labels[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }

@@ -58,12 +58,11 @@ export const appNavItems: readonly AppNavItem[] = [
 		requiresEntitlements: ["sentinel"],
 	},
 	{
-		path: "/billing",
-		icon: Money,
-		label: "Billing",
-		requiresMode: "cloud",
+		path: "/vaults",
+		icon: Lock,
+		label: "Vaults",
+		requiresMode: "any",
 		requiresEntitlements: [],
-		requiresRoles: ["owner", "admin"],
 	},
 	{
 		path: "/team",
@@ -82,11 +81,12 @@ export const appNavItems: readonly AppNavItem[] = [
 		requiresRoles: ["owner", "admin"],
 	},
 	{
-		path: "/vaults",
-		icon: Lock,
-		label: "Vaults",
-		requiresMode: "any",
+		path: "/billing",
+		icon: Money,
+		label: "Billing",
+		requiresMode: "cloud",
 		requiresEntitlements: [],
+		requiresRoles: ["owner", "admin"],
 	},
 	{
 		path: "/settings",

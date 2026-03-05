@@ -1,5 +1,6 @@
 import type {
 	PasswordIssue,
+	SecurityRecommendation,
 	SecurityReport,
 } from "@bittery/shared/password-analysis";
 import {
@@ -35,6 +36,7 @@ import {
 } from "@bittery/ui/icons";
 import { Link } from "@tanstack/react-router";
 import { type ComponentType, useMemo, useState } from "react";
+import { useI18n } from "@/providers/i18n-provider";
 import { Favicon } from "../vault/favicon";
 
 interface SecurityDashboardProps {
@@ -49,7 +51,7 @@ type DashboardIcon = ComponentType<{
 }>;
 
 interface DistributionBucket {
-	label: string;
+	label: "healthy" | "aging" | "reused" | "weak";
 	count: number;
 	percentage: number;
 	barClassName: string;
@@ -61,17 +63,16 @@ interface DistributionBucket {
  */
 function getVaultName(
 	vaultId: string,
+	unknownVaultName: string,
 	vaults: Array<{ id: string; name: string }> = [],
 ): string {
-	return vaults.find((v) => v.id === vaultId)?.name || "Unknown Vault";
+	return vaults.find((v) => v.id === vaultId)?.name || unknownVaultName;
 }
 
 function getScorePalette(score: number) {
 	if (score >= 85) {
 		return {
-			label: "FORTIFIED",
-			description:
-				"Your overall password posture is strong. Keep rotating aging credentials and preserve this baseline.",
+			tier: "fortified" as const,
 			textClassName: "text-emerald-300",
 			ringClassName: "from-emerald-400 via-teal-300 to-cyan-300",
 		};
@@ -79,9 +80,7 @@ function getScorePalette(score: number) {
 
 	if (score >= 70) {
 		return {
-			label: "STABLE",
-			description:
-				"Coverage is healthy, but there are weak points worth hardening before they become meaningful risk.",
+			tier: "stable" as const,
 			textClassName: "text-lime-300",
 			ringClassName: "from-lime-400 via-emerald-300 to-cyan-300",
 		};
@@ -89,9 +88,7 @@ function getScorePalette(score: number) {
 
 	if (score >= 50) {
 		return {
-			label: "EXPOSED",
-			description:
-				"Risk signals are building up. Prioritize weak and reused passwords to improve resilience quickly.",
+			tier: "exposed" as const,
 			textClassName: "text-amber-300",
 			ringClassName: "from-amber-400 via-orange-300 to-yellow-300",
 		};
@@ -99,18 +96,14 @@ function getScorePalette(score: number) {
 
 	if (score >= 30) {
 		return {
-			label: "AT RISK",
-			description:
-				"Multiple vulnerabilities are active. Resolve urgent issues now to reduce account takeover exposure.",
+			tier: "at_risk" as const,
 			textClassName: "text-orange-300",
 			ringClassName: "from-orange-400 via-rose-300 to-red-300",
 		};
 	}
 
 	return {
-		label: "CRITICAL",
-		description:
-			"Your vault has severe password risk. Immediate remediation is recommended across high-value accounts.",
+		tier: "critical" as const,
 		textClassName: "text-rose-300",
 		ringClassName: "from-rose-400 via-red-400 to-orange-400",
 	};
@@ -121,28 +114,28 @@ function getDistribution(report: SecurityReport): DistributionBucket[] {
 	if (total === 0) {
 		return [
 			{
-				label: "Healthy",
+				label: "healthy",
 				count: 0,
 				percentage: 0,
 				barClassName: "bg-emerald-400",
 				dotClassName: "bg-emerald-400",
 			},
 			{
-				label: "Aging",
+				label: "aging",
 				count: 0,
 				percentage: 0,
 				barClassName: "bg-amber-400",
 				dotClassName: "bg-amber-400",
 			},
 			{
-				label: "Reused",
+				label: "reused",
 				count: 0,
 				percentage: 0,
 				barClassName: "bg-orange-400",
 				dotClassName: "bg-orange-400",
 			},
 			{
-				label: "Weak",
+				label: "weak",
 				count: 0,
 				percentage: 0,
 				barClassName: "bg-rose-400",
@@ -183,28 +176,28 @@ function getDistribution(report: SecurityReport): DistributionBucket[] {
 
 	return [
 		{
-			label: "Healthy",
+			label: "healthy",
 			count: healthyCount,
 			percentage: (healthyCount / total) * 100,
 			barClassName: "bg-emerald-400",
 			dotClassName: "bg-emerald-400",
 		},
 		{
-			label: "Aging",
+			label: "aging",
 			count: oldCount,
 			percentage: (oldCount / total) * 100,
 			barClassName: "bg-amber-400",
 			dotClassName: "bg-amber-400",
 		},
 		{
-			label: "Reused",
+			label: "reused",
 			count: reusedCount,
 			percentage: (reusedCount / total) * 100,
 			barClassName: "bg-orange-400",
 			dotClassName: "bg-orange-400",
 		},
 		{
-			label: "Weak",
+			label: "weak",
 			count: weakCount,
 			percentage: (weakCount / total) * 100,
 			barClassName: "bg-rose-400",
@@ -213,7 +206,13 @@ function getDistribution(report: SecurityReport): DistributionBucket[] {
 	];
 }
 
-function ScoreRing({ score }: { score: number }) {
+function ScoreRing({
+	score,
+	gaugeLabel,
+}: {
+	score: number;
+	gaugeLabel: string;
+}) {
 	const normalizedScore = Math.max(0, Math.min(100, score));
 	const radius = 66;
 	const circumference = 2 * Math.PI * radius;
@@ -266,7 +265,7 @@ function ScoreRing({ score }: { score: number }) {
 					{normalizedScore}
 				</span>
 				<span className="mt-1 text-[11px] text-white/60 tracking-[0.28em]">
-					SCORE
+					{gaugeLabel}
 				</span>
 			</div>
 			<div
@@ -293,6 +292,7 @@ function SentinelOverview({
 	report: SecurityReport;
 	isLoading: boolean;
 }) {
+	const { m } = useI18n();
 	const distribution = useMemo(() => getDistribution(report), [report]);
 	const total = report.totalPasswords;
 	const uniqueRiskCount = useMemo(() => {
@@ -310,6 +310,26 @@ function SentinelOverview({
 		(recommendation) => recommendation.priority === "high",
 	).length;
 	const scorePalette = getScorePalette(report.securityScore);
+	const scoreTierLabel = {
+		fortified: m["sentinel.score.tier.fortified.label"](),
+		stable: m["sentinel.score.tier.stable.label"](),
+		exposed: m["sentinel.score.tier.exposed.label"](),
+		at_risk: m["sentinel.score.tier.at_risk.label"](),
+		critical: m["sentinel.score.tier.critical.label"](),
+	}[scorePalette.tier];
+	const scoreTierDescription = {
+		fortified: m["sentinel.score.tier.fortified.description"](),
+		stable: m["sentinel.score.tier.stable.description"](),
+		exposed: m["sentinel.score.tier.exposed.description"](),
+		at_risk: m["sentinel.score.tier.at_risk.description"](),
+		critical: m["sentinel.score.tier.critical.description"](),
+	}[scorePalette.tier];
+	const distributionLabels = {
+		healthy: m["sentinel.distribution.healthy"](),
+		aging: m["sentinel.distribution.aging"](),
+		reused: m["sentinel.distribution.reused"](),
+		weak: m["sentinel.distribution.weak"](),
+	} as const;
 
 	if (isLoading) {
 		return (
@@ -337,13 +357,13 @@ function SentinelOverview({
 						variant="outline"
 						className="border-emerald-300/40 bg-emerald-300/10 px-2.5 py-0.5 font-medium text-[11px] text-emerald-100 tracking-[0.2em]"
 					>
-						SENTINEL WATCH
+						{m["sentinel.overview.badge.watch"]()}
 					</Badge>
 					<Badge
 						variant="outline"
 						className="border-cyan-300/35 bg-cyan-300/10 px-2.5 py-0.5 font-medium text-[11px] text-cyan-100 tracking-[0.16em]"
 					>
-						{scorePalette.label}
+						{scoreTierLabel}
 					</Badge>
 				</div>
 
@@ -351,17 +371,17 @@ function SentinelOverview({
 					<div className="space-y-6">
 						<div className="space-y-2">
 							<h2 className="font-semibold text-2xl tracking-tight sm:text-3xl">
-								Security posture, live and prioritized
+								{m["sentinel.overview.heading"]()}
 							</h2>
 							<p className="max-w-2xl text-slate-300 text-sm leading-relaxed sm:text-base">
-								{scorePalette.description}
+								{scoreTierDescription}
 							</p>
 						</div>
 
 						<div className="grid gap-3 sm:grid-cols-3">
 							<div className="rounded-xl border border-white/15 bg-white/8 p-4 backdrop-blur-sm">
 								<p className="text-[11px] text-slate-300 uppercase tracking-[0.16em]">
-									Passwords monitored
+									{m["sentinel.overview.stat.passwords_monitored"]()}
 								</p>
 								<p className="mt-2 font-semibold text-3xl leading-none">
 									{total}
@@ -369,7 +389,7 @@ function SentinelOverview({
 							</div>
 							<div className="rounded-xl border border-white/15 bg-white/8 p-4 backdrop-blur-sm">
 								<p className="text-[11px] text-slate-300 uppercase tracking-[0.16em]">
-									At-risk items
+									{m["sentinel.overview.stat.at_risk_items"]()}
 								</p>
 								<p className="mt-2 font-semibold text-3xl text-rose-200 leading-none">
 									{uniqueRiskCount}
@@ -377,7 +397,7 @@ function SentinelOverview({
 							</div>
 							<div className="rounded-xl border border-white/15 bg-white/8 p-4 backdrop-blur-sm">
 								<p className="text-[11px] text-slate-300 uppercase tracking-[0.16em]">
-									High-priority actions
+									{m["sentinel.overview.stat.high_priority_actions"]()}
 								</p>
 								<p className="mt-2 font-semibold text-3xl text-amber-100 leading-none">
 									{highPriorityCount}
@@ -387,8 +407,12 @@ function SentinelOverview({
 
 						<div className="space-y-3 rounded-xl border border-white/15 bg-white/8 p-4 backdrop-blur-sm">
 							<div className="flex items-center justify-between text-[11px] text-slate-300 uppercase tracking-[0.16em]">
-								<span>Password health mix</span>
-								<span>{total} monitored</span>
+								<span>{m["sentinel.overview.health_mix.title"]()}</span>
+								<span>
+									{m["sentinel.overview.health_mix.monitored"]({
+										count: total,
+									})}
+								</span>
 							</div>
 
 							{total > 0 ? (
@@ -406,7 +430,7 @@ function SentinelOverview({
 														"duration-700",
 													)}
 													style={{ width: `${bucket.percentage}%` }}
-													title={`${bucket.label}: ${bucket.count}`}
+													title={`${distributionLabels[bucket.label]}: ${bucket.count}`}
 												/>
 											))}
 									</div>
@@ -424,25 +448,32 @@ function SentinelOverview({
 														bucket.dotClassName,
 													)}
 												/>
-												{bucket.label} ({bucket.count})
+												{distributionLabels[bucket.label]} ({bucket.count})
 											</span>
 										))}
 									</div>
 								</>
 							) : (
 								<p className="text-slate-300 text-sm">
-									Add passwords to start your first Sentinel health scan.
+									{m["sentinel.overview.health_mix.empty"]()}
 								</p>
 							)}
 						</div>
 					</div>
 
 					<div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-white/15 bg-white/10 p-6 backdrop-blur-sm">
-						<ScoreRing score={report.securityScore} />
+						<ScoreRing
+							score={report.securityScore}
+							gaugeLabel={m["sentinel.score.gauge_label"]()}
+						/>
 						<div className="text-center">
-							<p className="font-semibold text-base">Sentinel Security Score</p>
+							<p className="font-semibold text-base">
+								{m["sentinel.overview.score.title"]()}
+							</p>
 							<p className="text-slate-300 text-xs uppercase tracking-[0.16em]">
-								{healthCoverage}% healthy coverage
+								{m["sentinel.overview.score.coverage"]({
+									percent: healthCoverage,
+								})}
 							</p>
 						</div>
 					</div>
@@ -469,6 +500,7 @@ function IssueCard({
 	tone: "weak" | "reused" | "old";
 	onViewItems?: () => void;
 }) {
+	const { m } = useI18n();
 	const hasIssues = count > 0;
 
 	const toneConfig = {
@@ -519,14 +551,14 @@ function IssueCard({
 					</div>
 					{hasIssues && !isLoading ? (
 						<Badge variant="outline" className={config.pillClassName}>
-							Needs action
+							{m["sentinel.issue.badge.needs_action"]()}
 						</Badge>
 					) : (
 						<Badge
 							variant="outline"
 							className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
 						>
-							Resolved
+							{m["sentinel.issue.badge.resolved"]()}
 						</Badge>
 					)}
 				</div>
@@ -554,12 +586,12 @@ function IssueCard({
 							onClick={onViewItems}
 							className="inline-flex w-full items-center justify-between font-medium text-primary text-sm transition-colors hover:text-primary/80"
 						>
-							Review items
+							{m["sentinel.issue.action.review_items"]()}
 							<ArrowRight className="h-4 w-4" />
 						</button>
 					) : (
 						<span className="inline-flex w-full items-center justify-between text-muted-foreground text-sm">
-							No active issues
+							{m["sentinel.issue.action.no_active_issues"]()}
 							<CheckCircle className="h-4 w-4 text-emerald-500" />
 						</span>
 					)}
@@ -578,12 +610,14 @@ function IssueCardsSection({
 	isLoading: boolean;
 	onViewIssues: (tab: "weak" | "reused" | "old") => void;
 }) {
+	const { m } = useI18n();
+
 	return (
 		<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
 			<IssueCard
 				count={report.weakPasswords.length}
-				title="Weak passwords"
-				description="Easy-to-crack credentials are your most urgent exposure and should be replaced first."
+				title={m["sentinel.issue.weak.title"]()}
+				description={m["sentinel.issue.weak.description"]()}
 				icon={ShieldAlert}
 				isLoading={isLoading}
 				tone="weak"
@@ -595,8 +629,8 @@ function IssueCardsSection({
 			/>
 			<IssueCard
 				count={report.reusedPasswords.length}
-				title="Reused passwords"
-				description="Credential reuse multiplies blast radius. Split shared passwords into unique logins."
+				title={m["sentinel.issue.reused.title"]()}
+				description={m["sentinel.issue.reused.description"]()}
 				icon={Copy}
 				isLoading={isLoading}
 				tone="reused"
@@ -608,8 +642,8 @@ function IssueCardsSection({
 			/>
 			<IssueCard
 				count={report.oldPasswords.length}
-				title="Aging passwords"
-				description="Long-lived passwords become brittle over time. Rotate these to stay ahead of breaches."
+				title={m["sentinel.issue.old.title"]()}
+				description={m["sentinel.issue.old.description"]()}
 				icon={Clock}
 				isLoading={isLoading}
 				tone="old"
@@ -628,8 +662,13 @@ function PasswordIssueItem({
 	issue: PasswordIssue;
 	vaults: Array<{ id: string; name: string }>;
 }) {
+	const { m } = useI18n();
 	const item = issue.item;
-	const vaultName = getVaultName(item.vaultId, vaults);
+	const vaultName = getVaultName(
+		item.vaultId,
+		m["sentinel.common.unknown_vault"](),
+		vaults,
+	);
 
 	return (
 		<Link
@@ -662,13 +701,25 @@ function PasswordIssueItem({
 					<div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
 						<span className="truncate">{vaultName}</span>
 						{issue.issueType === "reused" && issue.reusedCount ? (
-							<span>Used in {issue.reusedCount} items</span>
+							<span>
+								{m["sentinel.issue.detail.used_in_items"]({
+									count: issue.reusedCount,
+								})}
+							</span>
 						) : null}
 						{issue.issueType === "old" && issue.daysSinceUpdate ? (
-							<span>{issue.daysSinceUpdate} days old</span>
+							<span>
+								{m["sentinel.issue.detail.days_old"]({
+									days: issue.daysSinceUpdate,
+								})}
+							</span>
 						) : null}
 						{issue.analysis?.crackTime ? (
-							<span>Crack time: {issue.analysis.crackTime}</span>
+							<span>
+								{m["sentinel.issue.detail.crack_time"]({
+									time: issue.analysis.crackTime,
+								})}
+							</span>
 						) : null}
 					</div>
 				</div>
@@ -717,29 +768,87 @@ function PasswordIssuesList({
 }
 
 function SentinelRecommendations({ report }: { report: SecurityReport }) {
+	const { m } = useI18n();
+
 	const priorityConfig = {
 		high: {
 			icon: AlertCircle,
 			iconClassName: "text-rose-600",
-			label: "High Priority",
+			label: m["sentinel.recommendations.priority.high"](),
 			cardClassName: "border-rose-500/25 bg-rose-500/6",
 			pillClassName: "border-rose-500/30 bg-rose-500/10 text-rose-600",
 		},
 		medium: {
 			icon: AlertTriangle,
 			iconClassName: "text-amber-600",
-			label: "Medium",
+			label: m["sentinel.recommendations.priority.medium"](),
 			cardClassName: "border-amber-500/25 bg-amber-500/6",
 			pillClassName: "border-amber-500/30 bg-amber-500/10 text-amber-700",
 		},
 		low: {
 			icon: CheckCircle,
 			iconClassName: "text-emerald-600",
-			label: "Low",
+			label: m["sentinel.recommendations.priority.low"](),
 			cardClassName: "border-emerald-500/25 bg-emerald-500/6",
 			pillClassName: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700",
 		},
 	} as const;
+
+	const getRecommendationCopy = (recommendation: SecurityRecommendation) => {
+		switch (recommendation.key) {
+			case "weak_passwords":
+				return {
+					title:
+						(recommendation.count ?? 0) === 1
+							? m["sentinel.recommendations.item.weak.title.single"]({
+									count: recommendation.count ?? 0,
+								})
+							: m["sentinel.recommendations.item.weak.title.plural"]({
+									count: recommendation.count ?? 0,
+								}),
+					description: m["sentinel.recommendations.item.weak.description"](),
+				};
+			case "reused_passwords":
+				return {
+					title:
+						(recommendation.count ?? 0) === 1
+							? m["sentinel.recommendations.item.reused.title.single"]({
+									count: recommendation.count ?? 0,
+								})
+							: m["sentinel.recommendations.item.reused.title.plural"]({
+									count: recommendation.count ?? 0,
+								}),
+					description: m["sentinel.recommendations.item.reused.description"](),
+				};
+			case "old_passwords":
+				return {
+					title:
+						(recommendation.count ?? 0) === 1
+							? m["sentinel.recommendations.item.old.title.single"]({
+									count: recommendation.count ?? 0,
+								})
+							: m["sentinel.recommendations.item.old.title.plural"]({
+									count: recommendation.count ?? 0,
+								}),
+					description: m["sentinel.recommendations.item.old.description"](),
+				};
+			case "good_practices":
+				return {
+					title: m["sentinel.recommendations.item.good.title"](),
+					description: m["sentinel.recommendations.item.good.description"](),
+				};
+			case "add_passwords":
+				return {
+					title: m["sentinel.recommendations.item.add.title"](),
+					description: m["sentinel.recommendations.item.add.description"](),
+				};
+			default:
+				return {
+					title: m["sentinel.recommendations.empty.title"](),
+					description: m["sentinel.recommendations.empty.description"](),
+				};
+		}
+	};
 
 	return (
 		<Card className="border-border/60">
@@ -748,21 +857,20 @@ function SentinelRecommendations({ report }: { report: SecurityReport }) {
 					<div className="rounded-lg border border-primary/20 bg-primary/10 p-2">
 						<ShieldCheck className="h-5 w-5 text-primary" />
 					</div>
-					Sentinel briefing
+					{m["sentinel.recommendations.title"]()}
 				</CardTitle>
 				<CardDescription>
-					Prioritized guidance generated from your current password risk
-					profile.
+					{m["sentinel.recommendations.description"]()}
 				</CardDescription>
 			</CardHeader>
 			<CardContent>
 				{report.recommendations.length === 0 ? (
 					<div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
 						<p className="font-medium text-emerald-700 text-sm dark:text-emerald-400">
-							No critical actions right now.
+							{m["sentinel.recommendations.empty.title"]()}
 						</p>
 						<p className="mt-1 text-muted-foreground text-sm">
-							Sentinel is not detecting urgent password risks in your vault.
+							{m["sentinel.recommendations.empty.description"]()}
 						</p>
 					</div>
 				) : (
@@ -770,6 +878,7 @@ function SentinelRecommendations({ report }: { report: SecurityReport }) {
 						{report.recommendations.map((recommendation, index) => {
 							const config = priorityConfig[recommendation.priority];
 							const Icon = config.icon;
+							const copy = getRecommendationCopy(recommendation);
 
 							return (
 								<div
@@ -789,9 +898,7 @@ function SentinelRecommendations({ report }: { report: SecurityReport }) {
 										</div>
 										<div className="min-w-0 flex-1 space-y-1">
 											<div className="flex items-center gap-2">
-												<p className="font-medium text-sm">
-													{recommendation.title}
-												</p>
+												<p className="font-medium text-sm">{copy.title}</p>
 												<Badge
 													variant="outline"
 													className={config.pillClassName}
@@ -800,7 +907,7 @@ function SentinelRecommendations({ report }: { report: SecurityReport }) {
 												</Badge>
 											</div>
 											<p className="text-muted-foreground text-sm">
-												{recommendation.description}
+												{copy.description}
 											</p>
 										</div>
 									</div>
@@ -822,6 +929,7 @@ export function SecurityDashboard({
 	isLoading,
 	vaults = [],
 }: SecurityDashboardProps) {
+	const { m } = useI18n();
 	const [activeTab, setActiveTab] = useState<"weak" | "reused" | "old">("weak");
 	const [showDetails, setShowDetails] = useState(false);
 
@@ -844,10 +952,9 @@ export function SecurityDashboard({
 				<Card className="border-border/60">
 					<CardHeader className="flex flex-row items-start justify-between gap-4">
 						<div>
-							<CardTitle>Issue drilldown</CardTitle>
+							<CardTitle>{m["sentinel.drilldown.title"]()}</CardTitle>
 							<CardDescription>
-								Inspect flagged credentials and jump directly to each affected
-								vault.
+								{m["sentinel.drilldown.description"]()}
 							</CardDescription>
 						</div>
 						<button
@@ -855,7 +962,7 @@ export function SecurityDashboard({
 							onClick={() => setShowDetails(false)}
 							className="text-muted-foreground text-sm transition-colors hover:text-foreground"
 						>
-							Hide panel
+							{m["sentinel.drilldown.hide_panel"]()}
 						</button>
 					</CardHeader>
 					<CardContent>
@@ -867,7 +974,7 @@ export function SecurityDashboard({
 							<TabsList className="grid w-full grid-cols-3 bg-muted/60 p-1">
 								<TabsTrigger value="weak" className="flex items-center gap-2">
 									<ShieldAlert className="h-4 w-4" />
-									Weak
+									{m["sentinel.drilldown.tab.weak"]()}
 									{report.weakPasswords.length > 0 ? (
 										<Badge variant="destructive" className="ml-1">
 											{report.weakPasswords.length}
@@ -876,7 +983,7 @@ export function SecurityDashboard({
 								</TabsTrigger>
 								<TabsTrigger value="reused" className="flex items-center gap-2">
 									<Copy className="h-4 w-4" />
-									Reused
+									{m["sentinel.drilldown.tab.reused"]()}
 									{report.reusedPasswords.length > 0 ? (
 										<Badge
 											variant="secondary"
@@ -888,7 +995,7 @@ export function SecurityDashboard({
 								</TabsTrigger>
 								<TabsTrigger value="old" className="flex items-center gap-2">
 									<Clock className="h-4 w-4" />
-									Aging
+									{m["sentinel.drilldown.tab.old"]()}
 									{report.oldPasswords.length > 0 ? (
 										<Badge
 											variant="secondary"
@@ -904,7 +1011,7 @@ export function SecurityDashboard({
 								<PasswordIssuesList
 									issues={report.weakPasswords}
 									vaults={vaults}
-									emptyMessage="No weak passwords found. Nice work."
+									emptyMessage={m["sentinel.drilldown.empty.weak"]()}
 									emptyIcon={ShieldCheck}
 								/>
 							</TabsContent>
@@ -913,7 +1020,7 @@ export function SecurityDashboard({
 								<PasswordIssuesList
 									issues={report.reusedPasswords}
 									vaults={vaults}
-									emptyMessage="No reused passwords found. Each login is unique."
+									emptyMessage={m["sentinel.drilldown.empty.reused"]()}
 									emptyIcon={CheckCircle}
 								/>
 							</TabsContent>
@@ -922,7 +1029,7 @@ export function SecurityDashboard({
 								<PasswordIssuesList
 									issues={report.oldPasswords}
 									vaults={vaults}
-									emptyMessage="No aging passwords right now. Your rotation cadence looks good."
+									emptyMessage={m["sentinel.drilldown.empty.old"]()}
 									emptyIcon={RefreshCw}
 								/>
 							</TabsContent>
@@ -934,9 +1041,11 @@ export function SecurityDashboard({
 					<Card className="border-border/60">
 						<CardContent className="flex flex-col items-start gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
 							<div>
-								<p className="font-medium">Issue drilldown panel is hidden</p>
+								<p className="font-medium">
+									{m["sentinel.drilldown.hidden.title"]()}
+								</p>
 								<p className="text-muted-foreground text-sm">
-									Pick any issue category above to inspect affected credentials.
+									{m["sentinel.drilldown.hidden.description"]()}
 								</p>
 							</div>
 							<button
@@ -944,7 +1053,7 @@ export function SecurityDashboard({
 								onClick={() => setShowDetails(true)}
 								className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 font-medium text-sm transition-colors hover:bg-muted"
 							>
-								Open drilldown
+								{m["sentinel.drilldown.open"]()}
 								<ArrowRight className="h-4 w-4" />
 							</button>
 						</CardContent>

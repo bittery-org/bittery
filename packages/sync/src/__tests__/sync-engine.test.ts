@@ -290,6 +290,54 @@ describe("sync engine regressions", () => {
 		manager.disconnect();
 	});
 
+	test("routes session_revoked control events to onSessionRevoked only", async () => {
+		const storage = new MemoryStorage();
+		const receivedSyncEvents: SyncEvent[] = [];
+		const revokedPayloads: Array<{
+			type: string;
+			userId: string;
+			sessionId: string;
+			timestamp: number;
+			reason?: string;
+		}> = [];
+
+		const manager = createSyncManager({
+			serverUrl: "http://localhost:3000",
+			getAuthToken: async () => "token",
+			clientId: "self_client",
+			storage,
+			onEvent: (event) => {
+				receivedSyncEvents.push(event);
+			},
+			onSessionRevoked: (payload) => {
+				revokedPayloads.push(payload);
+			},
+		});
+
+		(manager as any).processEvent(
+			`event: control\ndata: ${JSON.stringify({
+				type: "session_revoked",
+				userId: "user_1",
+				sessionId: "session_1",
+				timestamp: 123456,
+				reason: "device_revoked",
+			})}\n\n`,
+		);
+
+		expect(revokedPayloads).toEqual([
+			{
+				type: "session_revoked",
+				userId: "user_1",
+				sessionId: "session_1",
+				timestamp: 123456,
+				reason: "device_revoked",
+			},
+		]);
+		expect(receivedSyncEvents).toHaveLength(0);
+		expect(manager.getLastEventCursor()).toBeNull();
+		manager.disconnect();
+	});
+
 	test("keeps update after delete+restore during queue compaction", async () => {
 		const storage = new MemoryStorage();
 		const queue = new OutboundQueue(storage, "self_client");
@@ -322,7 +370,7 @@ describe("sync engine regressions", () => {
 			encryptedPayload: {
 				encryptedData: "cipher",
 				encryptionIv: "iv",
-				encryptionAlgorithm: "AES-GCM",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
 			},
 			baseVersion: 3,
 			accountEmail: "alice@example.com",

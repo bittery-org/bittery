@@ -7,8 +7,74 @@ interface EncryptedDataLike {
 }
 
 export interface VaultKeyCryptoProvider {
-	decrypt(encryptedData: EncryptedDataLike, key: Uint8Array): Promise<string>;
+	decrypt(
+		encryptedData: EncryptedDataLike,
+		key: Uint8Array,
+		context?: VaultKeyEncryptionContext,
+	): Promise<string>;
 	rsaDecrypt?(ciphertext: string, privateKeyPem: string): Promise<string>;
+}
+
+export interface VaultKeyEncryptionContext {
+	vaultId: string;
+	entityId: string;
+	entityType: "vault_key";
+	version: number;
+	userId: string;
+}
+
+export const VAULT_KEY_WRAP_PURPOSE = "vault-key-wrap";
+
+export interface VaultKeyWrapContext {
+	vaultId: string;
+	userId: string;
+	keyVersion: number;
+	purpose: typeof VAULT_KEY_WRAP_PURPOSE;
+}
+
+export interface WrappedVaultKeyLike extends EncryptedDataLike {
+	context?: VaultKeyWrapContext;
+}
+
+export function buildVaultKeyEncryptionContext(input: {
+	vaultId: string;
+	userId: string;
+	keyVersion: number;
+}): VaultKeyEncryptionContext {
+	return {
+		vaultId: input.vaultId,
+		entityId: VAULT_KEY_WRAP_PURPOSE,
+		entityType: "vault_key",
+		version: input.keyVersion,
+		userId: input.userId,
+	};
+}
+
+export function buildVaultKeyWrapContext(input: {
+	vaultId: string;
+	userId: string;
+	keyVersion: number;
+}): VaultKeyWrapContext {
+	return {
+		vaultId: input.vaultId,
+		userId: input.userId,
+		keyVersion: input.keyVersion,
+		purpose: VAULT_KEY_WRAP_PURPOSE,
+	};
+}
+
+export function attachVaultKeyWrapContext<T extends EncryptedDataLike>(
+	encryptedData: T,
+	input: {
+		vaultId: string;
+		userId: string;
+		keyVersion: number;
+	},
+): T & { context: VaultKeyWrapContext } {
+	return {
+		...encryptedData,
+		context: buildVaultKeyWrapContext(input),
+	};
 }
 
 /**
@@ -35,6 +101,8 @@ export interface DecryptVaultKeyInput {
 	encryptedVaultKey: string;
 	masterUnlockKey: Uint8Array;
 	encryptedPrivateKey?: string | null;
+	expectedVaultId?: string;
+	expectedUserId?: string;
 	crypto: VaultKeyCryptoProvider;
 }
 
@@ -44,6 +112,9 @@ export interface VaultKeyStorageLike {
 	): Promise<Array<{ vaultId: string; encryptedVaultKey: string }> | null>;
 	getMasterUnlockKey(email?: string): Promise<Uint8Array | null>;
 	getEncryptedPrivateKey(email?: string): Promise<string | null>;
+	getStoredSessionData?(
+		email?: string,
+	): Promise<{ userId: string } | null>;
 }
 
 /**
@@ -55,13 +126,42 @@ export async function decryptVaultKey({
 	encryptedVaultKey,
 	masterUnlockKey,
 	encryptedPrivateKey,
+	expectedVaultId,
+	expectedUserId,
 	crypto,
 }: DecryptVaultKeyInput): Promise<Uint8Array> {
 	if (isAesEncryptedVaultKey(encryptedVaultKey)) {
-		const encryptedData = JSON.parse(encryptedVaultKey) as EncryptedDataLike;
+		const wrapped = JSON.parse(encryptedVaultKey) as WrappedVaultKeyLike;
+		const encryptedData: EncryptedDataLike = {
+			ciphertext: wrapped.ciphertext,
+			iv: wrapped.iv,
+			algorithm: wrapped.algorithm,
+		};
+		const wrapContext = wrapped.context;
+		if (!wrapContext) {
+			throw new Error("Missing vault key wrap context");
+		}
+		if (wrapContext.purpose !== VAULT_KEY_WRAP_PURPOSE) {
+			throw new Error("Invalid vault key wrap purpose");
+		}
+		if (!Number.isInteger(wrapContext.keyVersion) || wrapContext.keyVersion < 1) {
+			throw new Error("Invalid vault key wrap version");
+		}
+		if (expectedVaultId && wrapContext.vaultId !== expectedVaultId) {
+			throw new Error("Vault key wrap vault mismatch");
+		}
+		if (expectedUserId && wrapContext.userId !== expectedUserId) {
+			throw new Error("Vault key wrap user mismatch");
+		}
+		const encryptionContext = buildVaultKeyEncryptionContext({
+			vaultId: wrapContext.vaultId,
+			userId: wrapContext.userId,
+			keyVersion: wrapContext.keyVersion,
+		});
 		const decryptedBase64 = await crypto.decrypt(
 			encryptedData,
 			masterUnlockKey,
+			encryptionContext,
 		);
 		return base64ToArrayBuffer(decryptedBase64);
 	}
@@ -91,6 +191,8 @@ export async function decryptVaultKey({
 
 export interface DecryptStoredVaultKeyInput {
 	encryptedVaultKey: string;
+	vaultId?: string;
+	userId?: string;
 	email?: string;
 	storage: VaultKeyStorageLike;
 	crypto: VaultKeyCryptoProvider;
@@ -98,6 +200,8 @@ export interface DecryptStoredVaultKeyInput {
 
 export async function decryptStoredVaultKey({
 	encryptedVaultKey,
+	vaultId,
+	userId,
 	email,
 	storage,
 	crypto,
@@ -108,16 +212,23 @@ export async function decryptStoredVaultKey({
 	}
 
 	const encryptedPrivateKey = await storage.getEncryptedPrivateKey(email);
+	const resolvedUserId =
+		userId ??
+		(await storage.getStoredSessionData?.(email))?.userId ??
+		undefined;
 	return decryptVaultKey({
 		encryptedVaultKey,
 		masterUnlockKey,
 		encryptedPrivateKey,
+		expectedVaultId: vaultId,
+		expectedUserId: resolvedUserId,
 		crypto,
 	});
 }
 
 export interface GetDecryptedVaultKeyInput {
 	vaultId: string;
+	userId?: string;
 	email?: string;
 	storage: VaultKeyStorageLike;
 	crypto: VaultKeyCryptoProvider;
@@ -125,6 +236,7 @@ export interface GetDecryptedVaultKeyInput {
 
 export async function getDecryptedVaultKey({
 	vaultId,
+	userId,
 	email,
 	storage,
 	crypto,
@@ -141,6 +253,8 @@ export async function getDecryptedVaultKey({
 
 	return decryptStoredVaultKey({
 		encryptedVaultKey: entry.encryptedVaultKey,
+		vaultId,
+		userId,
 		email,
 		storage,
 		crypto,

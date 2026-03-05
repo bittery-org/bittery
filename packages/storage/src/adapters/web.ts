@@ -12,6 +12,7 @@ import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 	ItemCacheMetadata,
+	KdfParams,
 } from "@bittery/types";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
@@ -32,6 +33,7 @@ const JWT_TOKEN_KEY = "bittery_jwt_token";
 const VAULT_KEYS_KEY = "bittery_vault_keys";
 const SERVER_URL_STORAGE = "bittery_server_url";
 const ENCRYPTED_PRIVATE_KEY_STORAGE = "bittery_encrypted_private_key";
+const PINNED_KDF_PARAMS_STORAGE = "bittery_pinned_kdf_params";
 const AUTO_LOCK_TIMEOUT_STORAGE = "bittery_auto_lock_timeout";
 const ITEM_CACHE_DB_NAME = "bittery_item_cache";
 const ITEM_CACHE_DB_VERSION = 2;
@@ -43,6 +45,7 @@ const ITEM_CACHE_META_KEY = "item_cache_meta";
 
 // In-memory cache for Master Unlock Key
 let masterUnlockKeyCache: Uint8Array | null = null;
+let masterUnlockKeyHandleCache: number | null = null;
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
 	return new Promise((resolve, reject) => {
@@ -148,8 +151,21 @@ export class WebStorageAdapter implements IStorageAdapter {
 			return masterUnlockKeyCache;
 		}
 
+		if (masterUnlockKeyHandleCache && this.crypto.exportKeyHandle) {
+			return this.crypto.exportKeyHandle(masterUnlockKeyHandleCache);
+		}
+
 		// Try to restore from persistent storage if session is still valid
 		if (await this.isSessionValid()) {
+			const restoredHandle =
+				await this.decryptStoredMasterUnlockKeyHandleInternal();
+			if (restoredHandle) {
+				masterUnlockKeyHandleCache = restoredHandle;
+				if (this.crypto.exportKeyHandle) {
+					return this.crypto.exportKeyHandle(restoredHandle);
+				}
+			}
+
 			const restored = await this.decryptStoredMasterUnlockKeyInternal();
 			if (restored) {
 				masterUnlockKeyCache = restored;
@@ -161,11 +177,48 @@ export class WebStorageAdapter implements IStorageAdapter {
 	}
 
 	async setMasterUnlockKey(key: Uint8Array, _email?: string): Promise<void> {
+		if (masterUnlockKeyHandleCache && this.crypto.destroyKeyHandle) {
+			await this.crypto.destroyKeyHandle(masterUnlockKeyHandleCache);
+		}
+		masterUnlockKeyHandleCache = null;
 		masterUnlockKeyCache = key;
+	}
+
+	async getMasterUnlockKeyHandle(_email?: string): Promise<number | null> {
+		if (masterUnlockKeyHandleCache) {
+			return masterUnlockKeyHandleCache;
+		}
+
+		if (!(await this.isSessionValid())) {
+			return null;
+		}
+
+		const restoredHandle = await this.decryptStoredMasterUnlockKeyHandleInternal();
+		if (restoredHandle) {
+			masterUnlockKeyHandleCache = restoredHandle;
+			return restoredHandle;
+		}
+
+		return null;
+	}
+
+	async setMasterUnlockKeyHandle(
+		keyHandle: number,
+		_email?: string,
+	): Promise<void> {
+		if (masterUnlockKeyHandleCache && this.crypto.destroyKeyHandle) {
+			await this.crypto.destroyKeyHandle(masterUnlockKeyHandleCache);
+		}
+		masterUnlockKeyCache = null;
+		masterUnlockKeyHandleCache = keyHandle;
 	}
 
 	async clearMasterUnlockKey(_email?: string): Promise<void> {
 		masterUnlockKeyCache = null;
+		if (masterUnlockKeyHandleCache && this.crypto.destroyKeyHandle) {
+			await this.crypto.destroyKeyHandle(masterUnlockKeyHandleCache);
+		}
+		masterUnlockKeyHandleCache = null;
 	}
 
 	async storeSessionData(
@@ -196,6 +249,39 @@ export class WebStorageAdapter implements IStorageAdapter {
 		localStorage.setItem(SESSION_DATA_STORAGE, JSON.stringify(sessionData));
 	}
 
+	async storeSessionDataWithMasterUnlockKeyHandle(
+		keyHandle: number,
+		email: string,
+		userId: string,
+		expiryMs: number = DEFAULT_SESSION_EXPIRY_MS,
+		sessionId?: string,
+	): Promise<void> {
+		if (typeof window === "undefined") return;
+		if (!this.crypto.encryptKeyHandleWithWrappingKey) {
+			throw new Error(
+				"Crypto provider does not support key-handle session storage",
+			);
+		}
+
+		const deviceKey = await getDeviceKey();
+		const now = Date.now();
+		const encryptedMUK = await this.crypto.encryptKeyHandleWithWrappingKey(
+			keyHandle,
+			deviceKey,
+		);
+
+		const sessionData: StoredSessionData = {
+			encryptedMasterUnlockKey: encryptedMUK,
+			email,
+			userId,
+			sessionId,
+			expiresAt: now + expiryMs,
+			createdAt: now,
+		};
+
+		localStorage.setItem(SESSION_DATA_STORAGE, JSON.stringify(sessionData));
+	}
+
 	async tryRestoreSession(
 		_skipBiometric?: boolean,
 		_email?: string,
@@ -205,7 +291,13 @@ export class WebStorageAdapter implements IStorageAdapter {
 		}
 
 		// First check if MUK is already in memory cache (e.g., after login)
-		if (masterUnlockKeyCache) {
+		if (masterUnlockKeyCache || masterUnlockKeyHandleCache) {
+			return true;
+		}
+
+		const handle = await this.decryptStoredMasterUnlockKeyHandleInternal();
+		if (handle) {
+			masterUnlockKeyHandleCache = handle;
 			return true;
 		}
 
@@ -291,6 +383,30 @@ export class WebStorageAdapter implements IStorageAdapter {
 			return sessionStorage.getItem(ENCRYPTED_PRIVATE_KEY_STORAGE);
 		}
 		return null;
+	}
+
+	async storePinnedKdfParams(
+		params: KdfParams,
+		_email?: string,
+	): Promise<void> {
+		if (typeof window !== "undefined") {
+			localStorage.setItem(PINNED_KDF_PARAMS_STORAGE, JSON.stringify(params));
+		}
+	}
+
+	async getPinnedKdfParams(_email?: string): Promise<KdfParams | null> {
+		if (typeof window === "undefined") {
+			return null;
+		}
+		const stored = localStorage.getItem(PINNED_KDF_PARAMS_STORAGE);
+		if (!stored) {
+			return null;
+		}
+		try {
+			return JSON.parse(stored) as KdfParams;
+		} catch {
+			return null;
+		}
 	}
 
 	// ============================================================================
@@ -585,6 +701,10 @@ export class WebStorageAdapter implements IStorageAdapter {
 			sessionStorage.removeItem(ENCRYPTED_PRIVATE_KEY_STORAGE);
 		}
 		masterUnlockKeyCache = null;
+		if (masterUnlockKeyHandleCache && this.crypto.destroyKeyHandle) {
+			await this.crypto.destroyKeyHandle(masterUnlockKeyHandleCache);
+		}
+		masterUnlockKeyHandleCache = null;
 		this.clearStoredSession();
 	}
 
@@ -593,6 +713,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 		localStorage.removeItem(SECRET_KEY_STORAGE);
 		localStorage.removeItem(SESSION_DATA_STORAGE);
 		localStorage.removeItem(DEVICE_KEY_STORAGE);
+		localStorage.removeItem(PINNED_KDF_PARAMS_STORAGE);
 		await this.clearSession();
 		await this.clearItemCache();
 	}
@@ -624,6 +745,10 @@ export class WebStorageAdapter implements IStorageAdapter {
 	async lockAllAccounts(): Promise<void> {
 		// Web only has single account, just clear the cache
 		masterUnlockKeyCache = null;
+		if (masterUnlockKeyHandleCache && this.crypto.destroyKeyHandle) {
+			await this.crypto.destroyKeyHandle(masterUnlockKeyHandleCache);
+		}
+		masterUnlockKeyHandleCache = null;
 	}
 
 	async getAccountMetadata(_email: string): Promise<AccountMetadata | null> {
@@ -647,7 +772,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 	 * Web only supports single account, so returns array with current account if unlocked
 	 */
 	async getUnlockedAccounts(): Promise<string[]> {
-		if (!masterUnlockKeyCache) return [];
+		if (!masterUnlockKeyCache && !masterUnlockKeyHandleCache) return [];
 
 		const sessionData = await this.getStoredSessionData();
 		return sessionData ? [sessionData.email] : [];
@@ -700,6 +825,22 @@ export class WebStorageAdapter implements IStorageAdapter {
 		_email?: string,
 		_skipBiometric?: boolean,
 	): Promise<Uint8Array | null> {
+		if (masterUnlockKeyCache) {
+			return masterUnlockKeyCache;
+		}
+
+		if (masterUnlockKeyHandleCache && this.crypto.exportKeyHandle) {
+			return this.crypto.exportKeyHandle(masterUnlockKeyHandleCache);
+		}
+
+		const handle = await this.decryptStoredMasterUnlockKeyHandleInternal();
+		if (handle) {
+			masterUnlockKeyHandleCache = handle;
+			if (this.crypto.exportKeyHandle) {
+				return this.crypto.exportKeyHandle(handle);
+			}
+		}
+
 		return this.decryptStoredMasterUnlockKeyInternal();
 	}
 
@@ -714,6 +855,25 @@ export class WebStorageAdapter implements IStorageAdapter {
 				deviceKey,
 			);
 			return base64ToArrayBuffer(mukBase64);
+		} catch {
+			return null;
+		}
+	}
+
+	private async decryptStoredMasterUnlockKeyHandleInternal(): Promise<number | null> {
+		if (!this.crypto.decryptKeyHandleWithWrappingKey) {
+			return null;
+		}
+
+		const sessionData = await this.getStoredSessionData();
+		if (!sessionData) return null;
+
+		try {
+			const deviceKey = await getDeviceKey();
+			return await this.crypto.decryptKeyHandleWithWrappingKey(
+				sessionData.encryptedMasterUnlockKey,
+				deviceKey,
+			);
 		} catch {
 			return null;
 		}

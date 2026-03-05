@@ -1,4 +1,5 @@
 import { Button } from "@bittery/ui";
+import { useI18n } from "../../../../providers/i18n-provider";
 
 interface FormActionsProps {
 	onCancel: () => void;
@@ -8,9 +9,13 @@ interface FormActionsProps {
 
 export function FormActions({
 	onCancel,
-	submitLabel = "Save",
+	submitLabel,
 	isSubmitting = false,
 }: FormActionsProps) {
+	const { m } = useI18n();
+	const resolvedSubmitLabel =
+		submitLabel ?? m["vaults.detail.items.form.action.save"]();
+
 	return (
 		<div className="flex flex-1 justify-end gap-2">
 			<Button
@@ -19,10 +24,12 @@ export function FormActions({
 				onClick={onCancel}
 				disabled={isSubmitting}
 			>
-				Cancel
+				{m["vaults.detail.items.detail.action.cancel"]()}
 			</Button>
 			<Button type="submit" disabled={isSubmitting}>
-				{isSubmitting ? "Saving..." : submitLabel}
+				{isSubmitting
+					? m["vaults.detail.items.form.action.saving"]()
+					: resolvedSubmitLabel}
 			</Button>
 		</div>
 	);

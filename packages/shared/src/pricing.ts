@@ -6,7 +6,7 @@
  * platform-specific styling classes.
  */
 
-export { cloudPlanIds, type CloudPlanId } from "@bittery/api/billing/plans";
+export { type CloudPlanId, cloudPlanIds } from "@bittery/api/billing/plans";
 
 /* ─── Plan Metadata ──────────────────────────────────────────────── */
 
@@ -73,23 +73,48 @@ export const featureCategories: FeatureCategory[] = [
 		features: [
 			{
 				label: "Vaults",
-				values: { free: "1", personal: "Unlimited", family: "Unlimited", team: "Unlimited" },
+				values: {
+					free: "1",
+					personal: "Unlimited",
+					family: "Unlimited",
+					team: "Unlimited",
+				},
 			},
 			{
 				label: "Items per vault",
-				values: { free: "50", personal: "Unlimited", family: "Unlimited", team: "Unlimited" },
+				values: {
+					free: "50",
+					personal: "Unlimited",
+					family: "Unlimited",
+					team: "Unlimited",
+				},
 			},
 			{
 				label: "Item types",
-				values: { free: "Logins only", personal: "All types", family: "All types", team: "All types" },
+				values: {
+					free: "Logins only",
+					personal: "All types",
+					family: "All types",
+					team: "All types",
+				},
 			},
 			{
 				label: "Storage",
-				values: { free: false, personal: "250 MB", family: "1 GB", team: "2 GB" },
+				values: {
+					free: false,
+					personal: "250 MB",
+					family: "1 GB",
+					team: "2 GB",
+				},
 			},
 			{
 				label: "Max file size",
-				values: { free: false, personal: "10 MB", family: "25 MB", team: "50 MB" },
+				values: {
+					free: false,
+					personal: "10 MB",
+					family: "25 MB",
+					team: "50 MB",
+				},
 			},
 		],
 	},
@@ -123,15 +148,30 @@ export const featureCategories: FeatureCategory[] = [
 		features: [
 			{
 				label: "Secure sharing links",
-				values: { free: false, personal: "5 active", family: "Unlimited", team: "Unlimited" },
+				values: {
+					free: false,
+					personal: "5 active",
+					family: "Unlimited",
+					team: "Unlimited",
+				},
 			},
 			{
 				label: "Shared vaults",
-				values: { free: false, personal: false, family: "5", team: "Unlimited" },
+				values: {
+					free: false,
+					personal: false,
+					family: "5",
+					team: "Unlimited",
+				},
 			},
 			{
 				label: "Team members",
-				values: { free: false, personal: false, family: "Up to 6", team: "Unlimited" },
+				values: {
+					free: false,
+					personal: false,
+					family: "Up to 6",
+					team: "Unlimited",
+				},
 			},
 			{
 				label: "Role-based access",
@@ -160,7 +200,12 @@ export const featureCategories: FeatureCategory[] = [
 			},
 			{
 				label: "Synced devices",
-				values: { free: "2", personal: "Unlimited", family: "Unlimited", team: "Unlimited" },
+				values: {
+					free: "2",
+					personal: "Unlimited",
+					family: "Unlimited",
+					team: "Unlimited",
+				},
 			},
 		],
 	},

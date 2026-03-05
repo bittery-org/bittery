@@ -3,15 +3,29 @@
  * Handles all ICrypto methods off the main thread.
  */
 import init, {
+	cloneKeyHandle as wasmCloneKeyHandle,
+	JsAadContext,
 	JsEncryptedData,
 	JsSrpClient,
 	decrypt as wasmDecrypt,
+	decryptKeyHandleWithKey as wasmDecryptKeyHandleWithKey,
+	decryptWithContextHandle as wasmDecryptWithContextHandle,
+	decryptWithContext as wasmDecryptWithContext,
+	decryptWithHandle as wasmDecryptWithHandle,
 	decryptMasterKey as wasmDecryptMasterKey,
+	deriveKeysHandle as wasmDeriveKeysHandle,
 	deriveKeys as wasmDeriveKeys,
 	deriveKeysFromMasterKey as wasmDeriveKeysFromMasterKey,
 	deriveMasterKey as wasmDeriveMasterKey,
+	deriveSrpPasswordFromHandle as wasmDeriveSrpPasswordFromHandle,
+	destroyKeyHandle as wasmDestroyKeyHandle,
 	encrypt as wasmEncrypt,
+	encryptKeyHandleWithKey as wasmEncryptKeyHandleWithKey,
+	encryptWithContextHandle as wasmEncryptWithContextHandle,
+	encryptWithContext as wasmEncryptWithContext,
+	encryptWithHandle as wasmEncryptWithHandle,
 	encryptMasterKey as wasmEncryptMasterKey,
+	exportKeyHandle as wasmExportKeyHandle,
 	generateEncryptionKey as wasmGenerateEncryptionKey,
 	generateRecoveryKey as wasmGenerateRecoveryKey,
 	generateRSAKeyPair as wasmGenerateRSAKeyPair,
@@ -19,6 +33,11 @@ import init, {
 	validateRecoveryKey as wasmValidateRecoveryKey,
 	validateSecretKey as wasmValidateSecretKey,
 } from "@bittery/crypto-wasm";
+import {
+	unwrapPlaintextWithContext,
+} from "@bittery/shared/crypto-context-envelope";
+import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
+import type { EncryptionContext } from "@bittery/types";
 
 let initialized = false;
 let srpClient: JsSrpClient | null = null;
@@ -37,12 +56,47 @@ function getSrpClient(): JsSrpClient {
 	return srpClient;
 }
 
+function toWasmHandle(handle: number): bigint {
+	if (!Number.isSafeInteger(handle) || handle < 1) {
+		throw new Error("Invalid key handle");
+	}
+	return BigInt(handle);
+}
+
+function fromWasmHandle(value: bigint): number {
+	const handle = Number(value);
+	if (!Number.isSafeInteger(handle) || handle < 1) {
+		throw new Error("Invalid key handle from WASM");
+	}
+	return handle;
+}
+
+function toWasmAadContext(context: EncryptionContext): JsAadContext {
+	return new JsAadContext(
+		context.vaultId,
+		context.entityId,
+		context.entityType,
+		BigInt(context.version),
+		context.userId,
+	);
+}
+
 type WorkerRequest = {
 	id: number;
 } & (
 	| { type: "validateSecretKey"; secretKey: string }
 	| { type: "validateRecoveryKey"; recoveryKey: string }
 	| { type: "deriveKeys"; password: string; secretKey: string; email: string }
+	| {
+			type: "deriveKeyHandles";
+			password: string;
+			secretKey: string;
+			email: string;
+	  }
+	| { type: "deriveSrpPasswordFromHandle"; authKeyHandle: number }
+	| { type: "cloneKeyHandle"; keyHandle: number }
+	| { type: "destroyKeyHandle"; keyHandle: number }
+	| { type: "exportKeyHandle"; keyHandle: number }
 	| {
 			type: "deriveMasterKey";
 			password: string;
@@ -64,13 +118,45 @@ type WorkerRequest = {
 			sessionProof: string;
 			serverProof: string;
 	  }
-	| { type: "encrypt"; plaintext: string; keyBase64: string }
+	| {
+			type: "encrypt";
+			plaintext: string;
+			keyBase64: string;
+			context?: EncryptionContext;
+	  }
+	| {
+			type: "encryptWithKeyHandle";
+			plaintext: string;
+			keyHandle: number;
+			context?: EncryptionContext;
+	  }
 	| {
 			type: "decrypt";
 			ciphertext: string;
 			iv: string;
 			algorithm: string;
 			keyBase64: string;
+			context?: EncryptionContext;
+	  }
+	| {
+			type: "decryptWithKeyHandle";
+			ciphertext: string;
+			iv: string;
+			algorithm: string;
+			keyHandle: number;
+			context?: EncryptionContext;
+	  }
+	| {
+			type: "encryptKeyHandleWithWrappingKey";
+			keyHandle: number;
+			wrappingKeyBase64: string;
+	  }
+	| {
+			type: "decryptKeyHandleWithWrappingKey";
+			ciphertext: string;
+			iv: string;
+			algorithm: string;
+			wrappingKeyBase64: string;
 	  }
 	| { type: "generateEncryptionKey" }
 	| { type: "generateRecoveryKey" }
@@ -117,6 +203,39 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 					authKey: derived.auth_key,
 					masterUnlockKey: derived.master_unlock_key,
 				};
+				break;
+			}
+			case "deriveKeyHandles": {
+				const handles = wasmDeriveKeysHandle(
+					msg.password,
+					msg.secretKey,
+					msg.email,
+				);
+				result = {
+					authKeyHandle: fromWasmHandle(handles.auth_key_handle),
+					masterUnlockKeyHandle: fromWasmHandle(
+						handles.master_unlock_key_handle,
+					),
+				};
+				break;
+			}
+			case "deriveSrpPasswordFromHandle": {
+				result = wasmDeriveSrpPasswordFromHandle(
+					toWasmHandle(msg.authKeyHandle),
+				);
+				break;
+			}
+			case "cloneKeyHandle": {
+				const cloned = wasmCloneKeyHandle(toWasmHandle(msg.keyHandle));
+				result = fromWasmHandle(cloned);
+				break;
+			}
+			case "destroyKeyHandle": {
+				result = wasmDestroyKeyHandle(toWasmHandle(msg.keyHandle));
+				break;
+			}
+			case "exportKeyHandle": {
+				result = wasmExportKeyHandle(toWasmHandle(msg.keyHandle));
 				break;
 			}
 			case "deriveMasterKey": {
@@ -174,7 +293,103 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 				break;
 			}
 			case "encrypt": {
-				const enc = wasmEncrypt(msg.plaintext, msg.keyBase64);
+				const enc = msg.context
+					? wasmEncryptWithContext(
+							msg.plaintext,
+							msg.keyBase64,
+							toWasmAadContext(msg.context),
+						)
+					: wasmEncrypt(msg.plaintext, msg.keyBase64);
+				const encryptedData = {
+					ciphertext: enc.ciphertext,
+					iv: enc.iv,
+					algorithm: enc.algorithm,
+				};
+				result =
+					msg.context?.entityType === "vault_key"
+						? attachVaultKeyWrapContext(encryptedData, {
+								vaultId: msg.context.vaultId,
+								userId: msg.context.userId,
+								keyVersion: msg.context.version,
+							})
+						: encryptedData;
+				break;
+			}
+			case "encryptWithKeyHandle": {
+				const enc = msg.context
+					? wasmEncryptWithContextHandle(
+							msg.plaintext,
+							toWasmHandle(msg.keyHandle),
+							toWasmAadContext(msg.context),
+						)
+					: wasmEncryptWithHandle(
+							msg.plaintext,
+							toWasmHandle(msg.keyHandle),
+						);
+				const encryptedData = {
+					ciphertext: enc.ciphertext,
+					iv: enc.iv,
+					algorithm: enc.algorithm,
+				};
+				result =
+					msg.context?.entityType === "vault_key"
+						? attachVaultKeyWrapContext(encryptedData, {
+								vaultId: msg.context.vaultId,
+								userId: msg.context.userId,
+								keyVersion: msg.context.version,
+							})
+						: encryptedData;
+				break;
+			}
+			case "decrypt": {
+				const createWasmData = () =>
+					new JsEncryptedData(msg.ciphertext, msg.iv, msg.algorithm);
+				if (!msg.context) {
+					result = wasmDecrypt(createWasmData(), msg.keyBase64);
+					break;
+				}
+				try {
+					result = wasmDecryptWithContext(
+						createWasmData(),
+						msg.keyBase64,
+						toWasmAadContext(msg.context),
+					);
+				} catch {
+					const decrypted = wasmDecrypt(createWasmData(), msg.keyBase64);
+					result = unwrapPlaintextWithContext(decrypted, msg.context);
+				}
+				break;
+			}
+			case "decryptWithKeyHandle": {
+				const createWasmData = () =>
+					new JsEncryptedData(msg.ciphertext, msg.iv, msg.algorithm);
+				if (!msg.context) {
+					result = wasmDecryptWithHandle(
+						createWasmData(),
+						toWasmHandle(msg.keyHandle),
+					);
+					break;
+				}
+				try {
+					result = wasmDecryptWithContextHandle(
+						createWasmData(),
+						toWasmHandle(msg.keyHandle),
+						toWasmAadContext(msg.context),
+					);
+				} catch {
+					const decrypted = wasmDecryptWithHandle(
+						createWasmData(),
+						toWasmHandle(msg.keyHandle),
+					);
+					result = unwrapPlaintextWithContext(decrypted, msg.context);
+				}
+				break;
+			}
+			case "encryptKeyHandleWithWrappingKey": {
+				const enc = wasmEncryptKeyHandleWithKey(
+					toWasmHandle(msg.keyHandle),
+					msg.wrappingKeyBase64,
+				);
 				result = {
 					ciphertext: enc.ciphertext,
 					iv: enc.iv,
@@ -182,13 +397,17 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 				};
 				break;
 			}
-			case "decrypt": {
+			case "decryptKeyHandleWithWrappingKey": {
 				const wasmData = new JsEncryptedData(
 					msg.ciphertext,
 					msg.iv,
 					msg.algorithm,
 				);
-				result = wasmDecrypt(wasmData, msg.keyBase64);
+				const handle = wasmDecryptKeyHandleWithKey(
+					wasmData,
+					msg.wrappingKeyBase64,
+				);
+				result = fromWasmHandle(handle);
 				break;
 			}
 			case "generateEncryptionKey": {

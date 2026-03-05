@@ -1,1 +1,0 @@
-ALTER TYPE "public"."sync_event_type" ADD VALUE 'item_moved' BEFORE 'vault_created';

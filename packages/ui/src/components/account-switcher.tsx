@@ -42,6 +42,21 @@ export interface AccountSwitcherAccount {
 	teamAvatarUrl?: string | null;
 }
 
+export interface AccountSwitcherLabels {
+	accountsLabel?: string;
+	noAccountLabel?: string;
+	noAccountsAdded?: string;
+	allAccountsLabel?: string;
+	unlockedCount?: (params: { count: number }) => string;
+	viewItemsFromAccounts?: (params: { count: number }) => string;
+	manageAccountsLabel?: string;
+	addAccountLabel?: string;
+	setupAnotherDeviceLabel?: string;
+	settingsLabel?: string;
+	lockAllAccountsLabel?: string;
+	removeAccountLabel?: string;
+}
+
 export interface AccountSwitcherProps {
 	/** List of all accounts */
 	accounts: AccountSwitcherAccount[];
@@ -58,11 +73,20 @@ export interface AccountSwitcherProps {
 	/** Callback when user selects an account */
 	onAccountSelect: (email: string) => void;
 
-	/** Callback when user clicks "Add Account" */
-	onAddAccount: () => void;
+	/** Optional: callback when user clicks "Add Account" */
+	onAddAccount?: () => void;
 
 	/** Callback when user clicks "Lock All" */
 	onLockAll: () => void;
+
+	/** Optional: show "Manage Accounts" option */
+	showManageAccounts?: boolean;
+
+	/** Optional: callback when user clicks "Manage Accounts" */
+	onManageAccounts?: () => void;
+
+	/** Optional: show "Add Account" option */
+	showAddAccount?: boolean;
 
 	/** Optional: show "All Accounts" option */
 	showAllAccountsOption?: boolean;
@@ -93,6 +117,9 @@ export interface AccountSwitcherProps {
 
 	/** Optional: align menu to start or end */
 	align?: "start" | "end";
+
+	/** Optional: localized/overridden labels */
+	labels?: AccountSwitcherLabels;
 }
 
 /**
@@ -118,6 +145,9 @@ export function AccountSwitcher({
 	onAccountSelect,
 	onAddAccount,
 	onLockAll,
+	showManageAccounts = false,
+	onManageAccounts,
+	showAddAccount = true,
 	showAllAccountsOption = false,
 	onAllAccountsSelect,
 	showSettings = false,
@@ -128,9 +158,29 @@ export function AccountSwitcher({
 	onRemoveAccount,
 	trigger,
 	align = "start",
+	labels,
 }: AccountSwitcherProps) {
 	const activeAccount = accounts.find((a) => a.email === activeEmail);
 	const isAllAccountsMode = activeEmail === "all";
+	const resolvedLabels: Required<AccountSwitcherLabels> = {
+		accountsLabel: "Accounts",
+		noAccountLabel: "No account",
+		noAccountsAdded: "No accounts added",
+		allAccountsLabel: "All Accounts",
+		unlockedCount: ({ count }) =>
+			count === 1 ? `${count} unlocked` : `${count} unlocked`,
+		viewItemsFromAccounts: ({ count }) =>
+			count === 1
+				? `View items from ${count} account`
+				: `View items from ${count} accounts`,
+		manageAccountsLabel: "Manage Accounts",
+		addAccountLabel: "Add Account",
+		setupAnotherDeviceLabel: "Set up another device",
+		settingsLabel: "Settings",
+		lockAllAccountsLabel: "Lock All Accounts",
+		removeAccountLabel: "Remove Account",
+		...labels,
+	};
 
 	// Default trigger: Avatar with email or "All Accounts"
 	const defaultTrigger = (
@@ -145,9 +195,13 @@ export function AccountSwitcher({
 						<UsersIcon className="size-4 text-primary" />
 					</div>
 					<div className="flex flex-col items-start text-left">
-						<span className="font-medium text-sm">All Accounts</span>
+						<span className="font-medium text-sm">
+							{resolvedLabels.allAccountsLabel}
+						</span>
 						<span className="text-muted-foreground text-xs">
-							{unlockedEmails.length} unlocked
+							{resolvedLabels.unlockedCount({
+								count: unlockedEmails.length,
+							})}
 						</span>
 					</div>
 				</>
@@ -166,7 +220,9 @@ export function AccountSwitcher({
 					</Avatar>
 					<div className="flex flex-col items-start text-left">
 						<span className="font-medium text-sm">
-							{activeAccount?.name || activeAccount?.email || "No account"}
+							{activeAccount?.name ||
+								activeAccount?.email ||
+								resolvedLabels.noAccountLabel}
 						</span>
 						{activeAccount && (
 							<span className="text-muted-foreground text-xs">
@@ -187,7 +243,7 @@ export function AccountSwitcher({
 
 			<DropdownMenuContent align={align} className="w-[280px]">
 				<DropdownMenuLabel className="text-muted-foreground text-xs">
-					Accounts
+					{resolvedLabels.accountsLabel}
 				</DropdownMenuLabel>
 
 				{/* Account list */}
@@ -244,7 +300,7 @@ export function AccountSwitcher({
 				{/* No accounts message */}
 				{accounts.length === 0 && (
 					<div className="px-2 py-6 text-center text-muted-foreground text-sm">
-						No accounts added
+						{resolvedLabels.noAccountsAdded}
 					</div>
 				)}
 
@@ -268,13 +324,17 @@ export function AccountSwitcher({
 								</div>
 								<div className="flex min-w-0 flex-1 flex-col gap-0.5">
 									<div className="flex items-center gap-1.5">
-										<span className="font-medium text-sm">All Accounts</span>
+										<span className="font-medium text-sm">
+											{resolvedLabels.allAccountsLabel}
+										</span>
 										{isAllAccountsMode && (
 											<CheckIcon className="size-3 shrink-0 text-primary" />
 										)}
 									</div>
 									<span className="text-muted-foreground text-xs">
-										View items from {unlockedEmails.length} accounts
+										{resolvedLabels.viewItemsFromAccounts({
+											count: unlockedEmails.length,
+										})}
 									</span>
 								</div>
 							</DropdownMenuItem>
@@ -282,14 +342,29 @@ export function AccountSwitcher({
 						</>
 					)}
 
-				{/* Add Account */}
-				<DropdownMenuItem
-					onClick={onAddAccount}
-					className="flex cursor-pointer items-center gap-2"
-				>
-					<PlusIcon className="size-4" />
-					<span className="text-sm">Add Account</span>
-				</DropdownMenuItem>
+				{/* Manage Accounts (optional) */}
+				{showManageAccounts && onManageAccounts && (
+					<DropdownMenuItem
+						onClick={onManageAccounts}
+						className="flex cursor-pointer items-center gap-2"
+					>
+						<UsersIcon className="size-4" />
+						<span className="text-sm">
+							{resolvedLabels.manageAccountsLabel}
+						</span>
+					</DropdownMenuItem>
+				)}
+
+				{/* Add Account (optional) */}
+				{showAddAccount && onAddAccount && (
+					<DropdownMenuItem
+						onClick={onAddAccount}
+						className="flex cursor-pointer items-center gap-2"
+					>
+						<PlusIcon className="size-4" />
+						<span className="text-sm">{resolvedLabels.addAccountLabel}</span>
+					</DropdownMenuItem>
+				)}
 
 				{/* Set up another device (optional) */}
 				{showSetupAnotherDevice && onSetupAnotherDevice && (
@@ -298,7 +373,9 @@ export function AccountSwitcher({
 						className="flex cursor-pointer items-center gap-2"
 					>
 						<SmartphoneIcon className="size-4" />
-						<span className="text-sm">Set up another device</span>
+						<span className="text-sm">
+							{resolvedLabels.setupAnotherDeviceLabel}
+						</span>
 					</DropdownMenuItem>
 				)}
 
@@ -309,7 +386,7 @@ export function AccountSwitcher({
 						className="flex cursor-pointer items-center gap-2"
 					>
 						<SettingsIcon className="size-4" />
-						<span className="text-sm">Settings</span>
+						<span className="text-sm">{resolvedLabels.settingsLabel}</span>
 					</DropdownMenuItem>
 				)}
 
@@ -322,7 +399,9 @@ export function AccountSwitcher({
 						className="flex cursor-pointer items-center gap-2"
 					>
 						<LockIcon className="size-4" />
-						<span className="text-sm">Lock All Accounts</span>
+						<span className="text-sm">
+							{resolvedLabels.lockAllAccountsLabel}
+						</span>
 					</DropdownMenuItem>
 				)}
 
@@ -338,7 +417,9 @@ export function AccountSwitcher({
 								className="flex cursor-pointer items-center gap-2 text-destructive focus:text-destructive"
 							>
 								<LogOutIcon className="size-4" />
-								<span className="text-sm">Remove Account</span>
+								<span className="text-sm">
+									{resolvedLabels.removeAccountLabel}
+								</span>
 							</DropdownMenuItem>
 						</>
 					)}

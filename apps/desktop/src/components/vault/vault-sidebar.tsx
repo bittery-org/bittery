@@ -23,6 +23,7 @@ import {
 	type DropVaultData,
 	useVaultDnd,
 } from "../../providers/dnd-provider";
+import { useI18n } from "../../providers/i18n-provider";
 import { AccountSwitcher } from "../account-switcher";
 import { SidebarSection } from "./sidebar-section";
 import { getTagColorFromName } from "./tag-badge";
@@ -72,6 +73,7 @@ function DroppableVaultEntry({
 	onEditVault,
 	onDeleteVault,
 }: DroppableVaultEntryProps) {
+	const { m } = useI18n();
 	const { activeItem } = useVaultDnd();
 
 	const dropData: DropVaultData = {
@@ -161,7 +163,7 @@ function DroppableVaultEntry({
 							}
 						>
 							<IconPen2OutlineDuo18 className="h-4 w-4" />
-							Edit
+							{m["vaults.page.card.action.edit_vault"]()}
 						</DropdownMenuItem>
 						<DropdownMenuSeparator />
 						<DropdownMenuItem
@@ -174,7 +176,7 @@ function DroppableVaultEntry({
 							}
 						>
 							<IconTrash2OutlineDuo18 className="h-4 w-4" />
-							Delete
+							{m["vaults.page.card.action.delete_vault"]()}
 						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>
@@ -191,6 +193,7 @@ export function VaultSidebar({
 	onEditVault,
 	onDeleteVault,
 }: VaultSidebarProps) {
+	const { m } = useI18n();
 	const location = useLocation();
 	const pathname = location.pathname;
 
@@ -280,7 +283,7 @@ export function VaultSidebar({
 					)}
 				>
 					<IconGrid2OutlineDuo18 className="size-4 text-muted-foreground" />
-					<span>All Objects</span>
+					<span>{m["vaults.sidebar.link.all_objects"]()}</span>
 				</Link>
 
 				{/* Favorites */}
@@ -305,7 +308,7 @@ export function VaultSidebar({
 						className="size-4 text-yellow-500"
 						fill="currentColor"
 					/>
-					<span>Favorites</span>
+					<span>{m["vaults.favorites.title"]()}</span>
 				</Link>
 
 				{/* Vaults Section */}
@@ -326,7 +329,7 @@ export function VaultSidebar({
 					) : (
 						// Single account mode: Show vaults in one section
 						<SidebarSection
-							title="Vaults"
+							title={m["nav.item.vaults"]()}
 							storageKey="vaults"
 							defaultOpen={true}
 							onAdd={onNewVault}
@@ -339,7 +342,11 @@ export function VaultSidebar({
 				{/* Tags Section */}
 				{tags.length > 0 && (
 					<div className="mt-2">
-						<SidebarSection title="Tags" storageKey="tags" defaultOpen={true}>
+						<SidebarSection
+							title={m["vaults.detail.items.detail.tags.label"]()}
+							storageKey="tags"
+							defaultOpen={true}
+						>
 							{tags.map((tagName) => {
 								const color = getTagColorFromName(tagName);
 								const isActive = activeTagName === tagName;
@@ -394,7 +401,7 @@ export function VaultSidebar({
 					)}
 				>
 					<IconBoxArchive3OutlineDuo18 className="size-4 text-muted-foreground" />
-					<span>Archive</span>
+					<span>{m["vaults.sidebar.link.archive"]()}</span>
 				</Link>
 			</div>
 		</div>

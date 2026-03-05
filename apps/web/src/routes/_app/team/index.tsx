@@ -23,16 +23,19 @@ import { InviteDialog } from "@/components/teams/invite-dialog";
 import { MemberList } from "@/components/teams/member-list";
 import { PendingInvitationsList } from "@/components/teams/pending-invitations-list";
 import { TeamSettings } from "@/components/teams/team-settings";
+import { m as messages } from "@/paraglide/messages";
+import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/team/")({
 	component: TeamPage,
 	head: () => ({
-		meta: [{ title: "Team - Bittery" }],
+		meta: [{ title: messages["team.page.meta_title"]() }],
 	}),
 });
 
 function TeamPage() {
 	const trpc = useTRPC();
+	const { m } = useI18n();
 
 	const teamListQuery = useQuery(trpc.team.list.queryOptions());
 	const teamId = teamListQuery.data?.id;
@@ -76,7 +79,9 @@ function TeamPage() {
 	if (!team) {
 		return (
 			<div className="py-8 text-center">
-				<p className="text-muted-foreground">No team found</p>
+				<p className="text-muted-foreground">
+					{m["team.page.empty.no_team"]()}
+				</p>
 			</div>
 		);
 	}
@@ -95,6 +100,33 @@ function TeamPage() {
 			: team.userRole === "admin"
 				? "secondary"
 				: "outline";
+
+	const getRoleLabel = (role: string) => {
+		switch (role) {
+			case "owner":
+				return m["team.role.owner"]();
+			case "admin":
+				return m["team.role.admin"]();
+			default:
+				return m["team.role.member"]();
+		}
+	};
+
+	const memberCountLabel =
+		team.memberCount === 1
+			? m["team.page.hero.member_count_created_by.single"]({
+					count: team.memberCount,
+					ownerName: team.ownerName,
+				})
+			: m["team.page.hero.member_count_created_by.plural"]({
+					count: team.memberCount,
+					ownerName: team.ownerName,
+				});
+
+	const activeSeatLabel =
+		team.memberCount === 1
+			? m["team.page.hero.active_seats.single"]({ count: team.memberCount })
+			: m["team.page.hero.active_seats.plural"]({ count: team.memberCount });
 
 	return (
 		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
@@ -116,27 +148,22 @@ function TeamPage() {
 						<div className="space-y-3">
 							<div className="flex flex-wrap items-center gap-2">
 								<Badge variant="secondary" className="w-fit">
-									Team
+									{m["team.page.hero.badge"]()}
 								</Badge>
-								<Badge variant={roleBadgeVariant} className="capitalize">
-									{team.userRole}
+								<Badge variant={roleBadgeVariant}>
+									{getRoleLabel(team.userRole)}
 								</Badge>
 							</div>
 							<div className="space-y-1.5">
 								<h1 className="text-balance font-bold text-3xl tracking-tight md:text-4xl">
 									{team.name}
 								</h1>
-								<p className="text-muted-foreground">
-									{team.memberCount} member
-									{team.memberCount !== 1 ? "s" : ""} · Created by{" "}
-									{team.ownerName}
-								</p>
+								<p className="text-muted-foreground">{memberCountLabel}</p>
 							</div>
 							<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
 								<div className="inline-flex items-center gap-1.5 rounded-md border bg-background/70 px-2.5 py-1">
 									<Vault className="h-3.5 w-3.5" />
-									{team.memberCount} seat
-									{team.memberCount !== 1 ? "s" : ""} active
+									{activeSeatLabel}
 								</div>
 							</div>
 						</div>
@@ -153,11 +180,11 @@ function TeamPage() {
 				<TabsList>
 					<TabsTrigger value="members">
 						<Users className="mr-2 h-4 w-4" />
-						Members
+						{m["team.page.tab.members"]()}
 					</TabsTrigger>
 					<TabsTrigger value="invitations">
 						<Mail className="mr-2 h-4 w-4" />
-						Invitations
+						{m["team.page.tab.invitations"]()}
 						{invitationsQuery.data?.length ? (
 							<span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-primary-foreground text-xs">
 								{invitationsQuery.data.length}
@@ -166,7 +193,7 @@ function TeamPage() {
 					</TabsTrigger>
 					<TabsTrigger value="settings">
 						<Settings className="mr-2 h-4 w-4" />
-						Settings
+						{m["team.page.tab.settings"]()}
 					</TabsTrigger>
 				</TabsList>
 
@@ -174,10 +201,10 @@ function TeamPage() {
 					<div className="space-y-3">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 							<h2 className="font-semibold text-lg tracking-tight">
-								Team Members
+								{m["team.page.members.heading"]()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
-								Manage who has access to this team.
+								{m["team.page.members.description"]()}
 							</p>
 						</div>
 						{membersQuery.isLoading ? (
@@ -202,10 +229,10 @@ function TeamPage() {
 					<div className="space-y-3">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 							<h2 className="font-semibold text-lg tracking-tight">
-								Pending Invitations
+								{m["team.page.invitations.heading"]()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
-								Invitations that haven't been accepted yet.
+								{m["team.page.invitations.description"]()}
 							</p>
 						</div>
 						{invitationsQuery.isLoading ? (

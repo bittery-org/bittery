@@ -15,6 +15,7 @@ import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 	ItemCacheMetadata,
+	KdfParams,
 } from "@bittery/types";
 import type { Store } from "@tauri-apps/plugin-store";
 import type { IStorageAdapter } from "../adapter";
@@ -508,6 +509,33 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		return (await store.get<string>(key)) ?? null;
 	}
 
+	async storePinnedKdfParams(params: KdfParams, email?: string): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) throw new Error("No account specified");
+
+		const store = await this.getStore();
+		const key = getAccountKey(resolvedEmail, "pinned_kdf_params");
+		await store.set(key, JSON.stringify(params));
+		await store.save();
+	}
+
+	async getPinnedKdfParams(email?: string): Promise<KdfParams | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+
+		const store = await this.getStore();
+		const key = getAccountKey(resolvedEmail, "pinned_kdf_params");
+		const stored = await store.get<string>(key);
+		if (!stored) {
+			return null;
+		}
+		try {
+			return JSON.parse(stored) as KdfParams;
+		} catch {
+			return null;
+		}
+	}
+
 	// ============================================================================
 	// Multi-Account
 	// ============================================================================
@@ -628,6 +656,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		await store.delete(getAccountKey(resolvedEmail, "session_data"));
 		await store.delete(getAccountKey(resolvedEmail, "jwt_token"));
 		await store.delete(getAccountKey(resolvedEmail, "vault_keys"));
+		await store.delete(getAccountKey(resolvedEmail, "pinned_kdf_params"));
 		await store.delete(getAccountKey(resolvedEmail, "biometric_enabled"));
 		await store.delete(getAccountKey(resolvedEmail, "last_biometric_auth"));
 		await store.delete(getAccountKey(resolvedEmail, "server_url"));

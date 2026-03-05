@@ -1,9 +1,6 @@
-import {
-	FileText,
-	Search,
-} from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { FileText, Search } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import {
 	CommandDialog,
 	CommandEmpty,
@@ -12,11 +9,8 @@ import {
 	CommandItem,
 	CommandList,
 } from "@/components/ui/command";
+import { getArticlesByCategory, getCategories } from "@/lib/docs";
 import { cn } from "@/lib/utils";
-import {
-	getCategories,
-	getArticlesByCategory,
-} from "@/lib/docs";
 
 export function DocsSearch({ className }: { className?: string }) {
 	const [open, setOpen] = useState(false);

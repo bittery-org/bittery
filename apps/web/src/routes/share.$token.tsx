@@ -161,7 +161,7 @@ function ShareAccessPage() {
 				{
 					ciphertext: data.encryptedItemData,
 					iv: data.encryptionIv,
-					algorithm: "AES-GCM",
+					algorithm: "AES-GCM-AAD-V1",
 				},
 				shareKeyBytes,
 			);

@@ -1,8 +1,7 @@
-import type { AppRouter } from "@bittery/api/routers/index";
-import { buildTrpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { TRPCProvider as SharedTRPCProvider } from "@bittery/shared/trpc";
+import { createSessionRefreshingTrpcClient } from "@bittery/shared/trpc-session-refresh";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import type { ReactNode } from "react";
 import { createContext, useContext, useEffect, useState } from "react";
 import { getOrCreateMobileSyncClientId } from "@/lib/sync-client-id";
@@ -72,31 +71,31 @@ export function TRPCProvider({ children }: TRPCProviderProps) {
 	}, []);
 
 	const [trpcClient] = useState(() =>
-		createTRPCClient<AppRouter>({
-			links: [
-				httpBatchLink({
-					url: `${DEFAULT_SERVER_URL}/trpc`,
-					async fetch(url, options) {
-						// Use dynamic server URL if available
-						const currentServerUrl =
-							(await storage.getServerUrl()) || DEFAULT_SERVER_URL;
-						const resolvedUrl = buildTrpcUrl(currentServerUrl, url as string);
-						const authToken = await storage.getAuthToken();
-						const syncClientId = await getOrCreateMobileSyncClientId();
-						return fetch(resolvedUrl, {
-							...options,
-							credentials: "include",
-							headers: {
-								...options?.headers,
-								"X-Client-Id": syncClientId,
-								Authorization: (authToken
-									? `Bearer ${authToken}`
-									: undefined) as any,
-							},
-						});
-					},
-				}),
-			],
+		createSessionRefreshingTrpcClient({
+			defaultServerUrl: DEFAULT_SERVER_URL,
+			getServerUrl: async () =>
+				(await storage.getServerUrl()) || DEFAULT_SERVER_URL,
+			getSessionSnapshot: async () => {
+				const [token, activeAccount] = await Promise.all([
+					storage.getAuthToken(),
+					storage.getActiveAccount(),
+				]);
+
+				const activeEmail =
+					activeAccount?.type === "single" ? activeAccount.email : undefined;
+				const sessionData = await storage.getStoredSessionData(activeEmail);
+
+				return {
+					token,
+					issuedAt: sessionData?.createdAt ?? null,
+					expiresAt: sessionData?.expiresAt ?? null,
+				};
+			},
+			getRefreshToken: () => storage.getAuthToken(),
+			storeRefreshedToken: async (token) => {
+				await storage.storeAuthToken(token);
+			},
+			getClientId: async () => getOrCreateMobileSyncClientId(),
 		}),
 	);
 

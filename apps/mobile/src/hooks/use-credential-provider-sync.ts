@@ -329,11 +329,11 @@ export function useCredentialProviderSync(
 						const parsed = JSON.parse(vaultKey.encryptedVaultKey);
 						encryptedKey = parsed.ciphertext;
 						encryptionIv = parsed.iv;
-						encryptionAlgorithm = parsed.algorithm || "AES-GCM";
+						encryptionAlgorithm = parsed.algorithm || "AES-GCM-AAD-V1";
 					} catch {
 						encryptedKey = vaultKey.encryptedVaultKey;
 						encryptionIv = "";
-						encryptionAlgorithm = "AES-GCM";
+						encryptionAlgorithm = "AES-GCM-AAD-V1";
 					}
 
 					return {
@@ -480,11 +480,13 @@ export function useCredentialProviderSync(
 					});
 				} else if (mutation.operation === "create_item") {
 					await account.trpcClient.vault.createItem.mutate({
+						itemId: mutation.itemId,
 						vaultId: mutation.vaultId,
 						category: "login",
 						encryptedData: mutation.encryptedData,
 						encryptionIv: mutation.encryptionIv,
-						encryptionAlgorithm: mutation.encryptionAlgorithm || "AES-GCM",
+						encryptionAlgorithm:
+							mutation.encryptionAlgorithm || "AES-GCM-AAD-V1",
 					});
 				} else {
 					throw new Error(

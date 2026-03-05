@@ -11,7 +11,6 @@ import {
 	Button,
 	Card,
 	CardContent,
-	copyWithToast,
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -20,6 +19,9 @@ import {
 } from "@bittery/ui";
 import { IconCopyOutlineDuo18 } from "@bittery/ui/icons";
 import { useMemo, useState } from "react";
+import { formatDateTime } from "../../lib/i18n-format";
+import { useI18n } from "../../providers/i18n-provider";
+import { handleCopy } from "./item-detail/shared";
 
 interface PasswordHistoryDialogProps {
 	open: boolean;
@@ -36,7 +38,7 @@ function formatChangedAt(changedAt: string): string {
 		return changedAt;
 	}
 
-	return new Date(timestamp).toLocaleString();
+	return formatDateTime(timestamp);
 }
 
 function maskPassword(password: string): string {
@@ -51,6 +53,7 @@ export function PasswordHistoryDialog({
 	onRestorePassword,
 	isRestoring = false,
 }: PasswordHistoryDialogProps) {
+	const { m } = useI18n();
 	const [pendingRestore, setPendingRestore] =
 		useState<PasswordHistoryEntry | null>(null);
 
@@ -91,9 +94,11 @@ export function PasswordHistoryDialog({
 			<Dialog open={open} onOpenChange={onOpenChange}>
 				<DialogContent className="flex max-h-[80vh] max-w-2xl flex-col overflow-hidden">
 					<DialogHeader>
-						<DialogTitle>Password History</DialogTitle>
+						<DialogTitle>
+							{m["vaults.detail.items.password_history_dialog.title"]()}
+						</DialogTitle>
 						<DialogDescription>
-							View previous passwords and restore one when needed.
+							{m["vaults.detail.items.password_history_dialog.description"]()}
 						</DialogDescription>
 					</DialogHeader>
 
@@ -101,7 +106,7 @@ export function PasswordHistoryDialog({
 						{sortedHistory.length === 0 ? (
 							<Card>
 								<CardContent className="py-8 text-center text-muted-foreground text-sm">
-									No previous passwords saved yet.
+									{m["vaults.detail.items.password_history_dialog.empty"]()}
 								</CardContent>
 							</Card>
 						) : (
@@ -127,11 +132,17 @@ export function PasswordHistoryDialog({
 													variant="ghost"
 													size="sm"
 													onClick={() =>
-														copyWithToast(historyEntry.password, "Password")
+														handleCopy(
+															historyEntry.password,
+															m["vaults.detail.items.copy.label.password"](),
+															m,
+														)
 													}
 												>
 													<IconCopyOutlineDuo18 className="size-4" />
-													Copy
+													{m[
+														"vaults.detail.items.password_history_dialog.action.copy"
+													]()}
 												</Button>
 												<Button
 													variant="outline"
@@ -139,7 +150,13 @@ export function PasswordHistoryDialog({
 													onClick={() => setPendingRestore(historyEntry)}
 													disabled={isCurrent || isRestoring}
 												>
-													{isCurrent ? "Current" : "Restore"}
+													{isCurrent
+														? m[
+																"vaults.detail.items.password_history_dialog.action.current"
+															]()
+														: m[
+																"vaults.detail.items.password_history_dialog.action.restore"
+															]()}
 												</Button>
 											</div>
 										</CardContent>
@@ -161,19 +178,32 @@ export function PasswordHistoryDialog({
 			>
 				<AlertDialogContent>
 					<AlertDialogHeader>
-						<AlertDialogTitle>Restore Password</AlertDialogTitle>
+						<AlertDialogTitle>
+							{m[
+								"vaults.detail.items.password_history_dialog.restore_dialog.title"
+							]()}
+						</AlertDialogTitle>
 						<AlertDialogDescription>
-							Restore this password for the login item? The current password
-							will be archived automatically.
+							{m[
+								"vaults.detail.items.password_history_dialog.restore_dialog.description"
+							]()}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
-						<AlertDialogCancel disabled={isRestoring}>Cancel</AlertDialogCancel>
+						<AlertDialogCancel disabled={isRestoring}>
+							{m["vaults.detail.items.detail.action.cancel"]()}
+						</AlertDialogCancel>
 						<AlertDialogAction
 							onClick={handleConfirmRestore}
 							disabled={isRestoring}
 						>
-							{isRestoring ? "Restoring..." : "Restore"}
+							{isRestoring
+								? m[
+										"vaults.detail.items.password_history_dialog.restore_dialog.action.restoring"
+									]()
+								: m[
+										"vaults.detail.items.password_history_dialog.restore_dialog.action.restore"
+									]()}
 						</AlertDialogAction>
 					</AlertDialogFooter>
 				</AlertDialogContent>

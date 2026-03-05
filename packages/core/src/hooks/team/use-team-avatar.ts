@@ -14,6 +14,21 @@ interface RemoveAvatarInput {
 	teamId: string;
 }
 
+export type TeamAvatarErrorCode =
+	| "INVALID_FILE_TYPE"
+	| "FILE_TOO_LARGE"
+	| "UPLOAD_TO_STORAGE_FAILED";
+
+export class TeamAvatarError extends Error {
+	public readonly code: TeamAvatarErrorCode;
+
+	constructor(code: TeamAvatarErrorCode) {
+		super(code);
+		this.name = "TeamAvatarError";
+		this.code = code;
+	}
+}
+
 export function useTeamAvatar() {
 	const trpcClient = useTRPCClient();
 	const queryClient = useQueryClient();
@@ -22,13 +37,13 @@ export function useTeamAvatar() {
 		mutationFn: async ({ teamId, file }: UploadAvatarInput) => {
 			// 1. Validate file type
 			if (!file.type.startsWith("image/")) {
-				throw new Error("Only image files are allowed");
+				throw new TeamAvatarError("INVALID_FILE_TYPE");
 			}
 
 			// 2. Validate file size (max 5MB)
 			const maxSize = 5 * 1024 * 1024; // 5MB
 			if (file.size > maxSize) {
-				throw new Error("File size must be less than 5MB");
+				throw new TeamAvatarError("FILE_TOO_LARGE");
 			}
 
 			// 3. Get presigned upload URL from server
@@ -49,7 +64,7 @@ export function useTeamAvatar() {
 			});
 
 			if (!uploadResponse.ok) {
-				throw new Error("Failed to upload image to storage");
+				throw new TeamAvatarError("UPLOAD_TO_STORAGE_FAILED");
 			}
 
 			// 5. Update team with new imageKey

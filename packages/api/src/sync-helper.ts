@@ -49,6 +49,14 @@ export interface SyncBroadcastPayload {
 	metadata?: Record<string, unknown>;
 }
 
+export interface SessionControlPayload {
+	type: "session_revoked";
+	userId: string;
+	sessionId: string;
+	timestamp: number;
+	reason?: string;
+}
+
 /**
  * Create a sync event in the database.
  * Accepts an optional transaction handle so the event insert can be atomic
@@ -105,12 +113,19 @@ export async function createSyncEvent(
  * This is a placeholder that will be connected to the SSE handler
  */
 let broadcastFn: ((event: SyncBroadcastPayload) => Promise<void>) | null = null;
+let controlBroadcastFn:
+	| ((payload: SessionControlPayload) => Promise<void>)
+	| null = null;
 
 /**
  * Set the broadcast function (called by server on startup)
  */
 export function setBroadcastFunction(fn: typeof broadcastFn): void {
 	broadcastFn = fn;
+}
+
+export function setControlBroadcastFunction(fn: typeof controlBroadcastFn): void {
+	controlBroadcastFn = fn;
 }
 
 /**
@@ -122,6 +137,14 @@ export async function broadcastSyncPayload(
 ): Promise<void> {
 	if (broadcastFn) {
 		await broadcastFn(payload);
+	}
+}
+
+export async function broadcastSessionControlPayload(
+	payload: SessionControlPayload,
+): Promise<void> {
+	if (controlBroadcastFn) {
+		await controlBroadcastFn(payload);
 	}
 }
 

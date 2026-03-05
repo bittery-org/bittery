@@ -61,10 +61,17 @@ export interface SecurityReport {
 /**
  * Security recommendation
  */
+export type SecurityRecommendationKey =
+	| "weak_passwords"
+	| "reused_passwords"
+	| "old_passwords"
+	| "good_practices"
+	| "add_passwords";
+
 export interface SecurityRecommendation {
 	priority: "high" | "medium" | "low";
-	title: string;
-	description: string;
+	key: SecurityRecommendationKey;
+	count?: number;
 	actionable: boolean;
 }
 

@@ -11,6 +11,7 @@ import {
 } from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
 import { useCallback, useEffect, useState } from "react";
+import { useI18n } from "@/providers/i18n-provider";
 import {
 	type BaseFormProps,
 	FormWrapper,
@@ -41,11 +42,12 @@ export function TotpForm({
 	initialData,
 	onSubmit,
 	onCancel,
-	submitLabel = "Save",
+	submitLabel,
 	isSubmitting = false,
 	vaults = [],
 	selectedVaultId,
 }: TotpFormProps) {
+	const { m } = useI18n();
 	const { currentVaultId, setCurrentVaultId } = useFormVault(
 		vaults,
 		selectedVaultId,
@@ -66,12 +68,14 @@ export function TotpForm({
 		},
 		onSubmit: async ({ value }) => {
 			if (!isValidBase32(value.totpSecret)) {
-				setSecretError("Invalid setup key. Please check the format.");
+				setSecretError(
+					m["vaults.detail.items.form.totp.error.invalid_setup_key"](),
+				);
 				return;
 			}
 
 			if (!value.title.trim()) {
-				toast.error("Please enter a title");
+				toast.error(m["vaults.detail.items.form.toast.title_required"]());
 				return;
 			}
 
@@ -89,11 +93,10 @@ export function TotpForm({
 				};
 				await onSubmit(submitData, currentVaultId);
 			} catch (error) {
-				const errorMessage =
-					error instanceof Error
-						? error.message
-						: "Failed to save authenticator";
-				toast.error(errorMessage);
+				toast.error(
+					m["vaults.detail.items.form.toast.save_authenticator_failed"](),
+				);
+				console.error(error);
 			}
 		},
 	});
@@ -106,7 +109,11 @@ export function TotpForm({
 					const parsed = parseOtpAuthUri(text);
 
 					if (parsed.type !== "totp") {
-						if (!silent) toast.error("Only TOTP codes are supported");
+						if (!silent) {
+							toast.error(
+								m["vaults.detail.items.totp.toast.only_totp_supported"](),
+							);
+						}
 						return false;
 					}
 
@@ -141,7 +148,11 @@ export function TotpForm({
 
 					setSecretError(null);
 					setHasImported(true);
-					if (!silent) toast.success("2FA setup imported successfully!");
+					if (!silent) {
+						toast.success(
+							m["vaults.detail.items.totp.toast.imported_successfully"](),
+						);
+					}
 					return true;
 				}
 
@@ -149,20 +160,30 @@ export function TotpForm({
 					form.setFieldValue("totpSecret", formatSecretForDisplay(text));
 					setSecretError(null);
 					setHasImported(true);
-					if (!silent) toast.success("Setup key pasted!");
+					if (!silent) {
+						toast.success(
+							m["vaults.detail.items.totp.toast.setup_key_pasted"](),
+						);
+					}
 					return true;
 				}
 
 				if (!silent) {
-					toast.error("No valid 2FA setup found in clipboard");
+					toast.error(
+						m["vaults.detail.items.totp.toast.no_valid_setup_in_clipboard"](),
+					);
 				}
 				return false;
 			} catch {
-				if (!silent) toast.error("Unable to read clipboard");
+				if (!silent) {
+					toast.error(
+						m["vaults.detail.items.totp.toast.clipboard_read_failed"](),
+					);
+				}
 				return false;
 			}
 		},
-		[form],
+		[form, m],
 	);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: Only want to run on mount
@@ -178,7 +199,7 @@ export function TotpForm({
 
 	const validateSecret = (value: string) => {
 		if (value && !isValidBase32(value.replace(/\s/g, ""))) {
-			setSecretError("Invalid format - should be letters A-Z and numbers 2-7");
+			setSecretError(m["vaults.detail.items.form.totp.error.invalid_format"]());
 		} else {
 			setSecretError(null);
 		}
@@ -195,10 +216,11 @@ export function TotpForm({
 							<div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-primary/10">
 								<IconKeyOutlineDuo18 className="size-8 text-primary" />
 							</div>
-							<h3 className="font-semibold text-lg">Add Authenticator</h3>
+							<h3 className="font-semibold text-lg">
+								{m["vaults.detail.items.form.totp.intro.title"]()}
+							</h3>
 							<p className="mt-1 text-muted-foreground text-sm">
-								Copy the setup key or QR code link from your account's 2FA
-								settings
+								{m["vaults.detail.items.form.totp.intro.description"]()}
 							</p>
 						</div>
 
@@ -209,7 +231,7 @@ export function TotpForm({
 							onClick={() => handlePasteFromClipboard()}
 						>
 							<IconClipboardArrowInOutlineDuo18 className="size-5" />
-							Paste from Clipboard
+							{m["vaults.detail.items.form.totp.action.paste_from_clipboard"]()}
 						</Button>
 
 						<div className="relative">
@@ -218,7 +240,7 @@ export function TotpForm({
 							</div>
 							<div className="relative flex justify-center text-xs uppercase">
 								<span className="bg-background px-2 text-muted-foreground">
-									or
+									{m["vaults.detail.items.form.totp.separator.or"]()}
 								</span>
 							</div>
 						</div>
@@ -229,19 +251,23 @@ export function TotpForm({
 							className="w-full"
 							onClick={handleManualEntry}
 						>
-							Enter Setup Key Manually
+							{m[
+								"vaults.detail.items.form.totp.action.enter_setup_key_manually"
+							]()}
 						</Button>
 					</div>
 
 					{/* Help text */}
 					<div className="rounded-lg border border-dashed p-4">
-						<h4 className="font-medium text-sm">How to find your setup key:</h4>
+						<h4 className="font-medium text-sm">
+							{m["vaults.detail.items.form.totp.help.title"]()}
+						</h4>
 						<ol className="mt-2 list-inside list-decimal space-y-1 text-muted-foreground text-sm">
-							<li>Go to your account's security settings</li>
-							<li>Look for "Two-Factor Authentication" or "2FA"</li>
-							<li>Choose "Authenticator app" as your method</li>
-							<li>Copy the setup key (or scan the QR code)</li>
-							<li>Paste it here using the button above</li>
+							<li>{m["vaults.detail.items.form.totp.help.step.1"]()}</li>
+							<li>{m["vaults.detail.items.form.totp.help.step.2"]()}</li>
+							<li>{m["vaults.detail.items.form.totp.help.step.3"]()}</li>
+							<li>{m["vaults.detail.items.form.totp.help.step.4"]()}</li>
+							<li>{m["vaults.detail.items.form.totp.help.step.5"]()}</li>
 						</ol>
 					</div>
 				</div>
@@ -249,7 +275,7 @@ export function TotpForm({
 				{/* Footer */}
 				<div className="mt-4 flex items-center justify-end gap-3 border-t bg-background pt-4">
 					<Button type="button" variant="outline" onClick={onCancel}>
-						Cancel
+						{m["vaults.detail.items.detail.action.cancel"]()}
 					</Button>
 				</div>
 			</div>
@@ -272,8 +298,10 @@ export function TotpForm({
 					{(field) => (
 						<TitleField
 							field={field}
-							label="Name *"
-							placeholder="e.g., Google, GitHub, Amazon"
+							label={m["vaults.detail.items.form.totp.field.name"]()}
+							placeholder={m[
+								"vaults.detail.items.form.totp.placeholder.name"
+							]()}
 							autoFocus={!field.state.value}
 						/>
 					)}
@@ -285,7 +313,9 @@ export function TotpForm({
 				<form.Field name="totpSecret">
 					{(field) => (
 						<div className="space-y-2">
-							<Label htmlFor={field.name}>Setup Key *</Label>
+							<Label htmlFor={field.name}>
+								{m["vaults.detail.items.form.totp.field.setup_key"]()}
+							</Label>
 							<div className="flex gap-2">
 								<Input
 									id={field.name}
@@ -299,7 +329,9 @@ export function TotpForm({
 										field.handleChange(e.target.value);
 										validateSecret(e.target.value);
 									}}
-									placeholder="XXXX XXXX XXXX XXXX"
+									placeholder={m[
+										"vaults.detail.items.form.totp.placeholder.setup_key"
+									]()}
 									className={cn(
 										"flex-1",
 										"font-mono",
@@ -312,10 +344,12 @@ export function TotpForm({
 									type="button"
 									variant="outline"
 									onClick={() => handlePasteFromClipboard()}
-									title="Paste from clipboard"
+									title={m[
+										"vaults.detail.items.form.totp.action.paste_from_clipboard"
+									]()}
 								>
 									<IconClipboardArrowInOutlineDuo18 size={16} />
-									Paste
+									{m["vaults.detail.items.form.totp.action.paste"]()}
 								</Button>
 							</div>
 							{secretError && (
@@ -332,14 +366,18 @@ export function TotpForm({
 					<form.Field name="totpIssuer">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>Service</Label>
+								<Label htmlFor={field.name}>
+									{m["vaults.detail.items.form.totp.field.service"]()}
+								</Label>
 								<Input
 									id={field.name}
 									name={field.name}
 									value={field.state.value}
 									onBlur={field.handleBlur}
 									onChange={(e) => field.handleChange(e.target.value)}
-									placeholder="Google, GitHub, etc."
+									placeholder={m[
+										"vaults.detail.items.form.totp.placeholder.service"
+									]()}
 								/>
 							</div>
 						)}
@@ -350,14 +388,18 @@ export function TotpForm({
 					<form.Field name="totpAccountName">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>Account</Label>
+								<Label htmlFor={field.name}>
+									{m["vaults.detail.items.form.totp.field.account"]()}
+								</Label>
 								<Input
 									id={field.name}
 									name={field.name}
 									value={field.state.value}
 									onBlur={field.handleBlur}
 									onChange={(e) => field.handleChange(e.target.value)}
-									placeholder="your@email.com"
+									placeholder={m[
+										"vaults.detail.items.form.totp.placeholder.account"
+									]()}
 								/>
 							</div>
 						)}
@@ -393,7 +435,9 @@ export function TotpForm({
 					{(field) => (
 						<NotesField
 							field={field}
-							placeholder="Backup codes, recovery info, etc."
+							placeholder={m[
+								"vaults.detail.items.form.totp.placeholder.notes"
+							]()}
 							rows={2}
 						/>
 					)}

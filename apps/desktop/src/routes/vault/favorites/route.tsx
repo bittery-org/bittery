@@ -2,6 +2,7 @@ import { useItems } from "@bittery/core/hooks";
 import { Badge } from "@bittery/ui";
 import { IconStarOutlineDuo18 } from "@bittery/ui/icons";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
+import { useI18n } from "@/providers/i18n-provider";
 import { ItemListRow } from "../../../components/vault/item-list-row";
 
 export const Route = createFileRoute("/vault/favorites")({
@@ -9,6 +10,7 @@ export const Route = createFileRoute("/vault/favorites")({
 });
 
 function RouteComponent() {
+	const { m } = useI18n();
 	const { itemId } = useParams({ strict: false });
 
 	// Unified hook - automatically handles single-account vs "All Accounts" mode
@@ -26,7 +28,9 @@ function RouteComponent() {
 		return (
 			<div className="flex w-78 flex-col border-r bg-background">
 				<div className="flex flex-1 items-center justify-center">
-					<div className="text-muted-foreground text-sm">Loading items...</div>
+					<div className="text-muted-foreground text-sm">
+						{m["vaults.favorites.loading"]()}
+					</div>
 				</div>
 			</div>
 		);
@@ -41,7 +45,7 @@ function RouteComponent() {
 						className="size-4 text-yellow-500"
 						fill="currentColor"
 					/>
-					<span className="font-medium">Favorites</span>
+					<span className="font-medium">{m["vaults.favorites.title"]()}</span>
 					<Badge variant="secondary" className="ml-auto">
 						{favoriteItems.length}
 					</Badge>
@@ -53,9 +57,11 @@ function RouteComponent() {
 							<div className="mb-4 inline-flex rounded-full bg-muted p-4">
 								<IconStarOutlineDuo18 className="size-8 text-muted-foreground" />
 							</div>
-							<h3 className="mb-2 font-semibold">No favorites yet</h3>
+							<h3 className="mb-2 font-semibold">
+								{m["vaults.favorites.empty.title"]()}
+							</h3>
 							<p className="text-muted-foreground text-sm">
-								Star items to add them to favorites
+								{m["vaults.favorites.empty.description"]()}
 							</p>
 						</div>
 					) : (
