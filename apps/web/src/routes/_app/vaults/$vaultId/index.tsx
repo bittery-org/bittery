@@ -111,7 +111,7 @@ function VaultDetailPage() {
 	const { m } = useI18n();
 
 	const { state: sidebarState, isMobile } = useSidebar();
-	const [selectedItem, setSelectedItem] = useState<DecryptedItem | null>(null);
+	const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 	const [showCompactHeader, setShowCompactHeader] = useState(false);
 	const [isCreateItemSheetOpen, setIsCreateItemSheetOpen] = useState(false);
 	const [isEditItemDialogOpen, setIsEditItemDialogOpen] = useState(false);
@@ -129,6 +129,10 @@ function VaultDetailPage() {
 	const { vaultInfo, isLoading: isLoadingVault } = useVaultInfo(vaultId);
 	const { items: decryptedItems, isLoading: isLoadingItems } =
 		useVaultItems(vaultId);
+	const selectedItem =
+		selectedItemId === null
+			? null
+			: decryptedItems.find((item) => item.id === selectedItemId) ?? null;
 	const createItem = useCreateItem();
 	const updateItem = useUpdateItem();
 	const deleteItem = useDeleteItem();
@@ -180,25 +184,25 @@ function VaultDetailPage() {
 			(item) => item.id === pendingItemIdToSelect,
 		);
 		if (itemToSelect) {
-			setSelectedItem(itemToSelect);
+			setSelectedItemId(itemToSelect.id);
 			setPendingItemIdToSelect(null);
 		}
 	}, [decryptedItems, pendingItemIdToSelect]);
 
 	useEffect(() => {
-		if (!selectedItem) {
+		if (!selectedItemId) {
 			return;
 		}
 
 		const stillExists = decryptedItems.some(
-			(item) => item.id === selectedItem.id,
+			(item) => item.id === selectedItemId,
 		);
 		if (!stillExists) {
-			setSelectedItem(null);
+			setSelectedItemId(null);
 			setIsEditItemDialogOpen(false);
 			setIsDeleteItemDialogOpen(false);
 		}
-	}, [decryptedItems, selectedItem]);
+	}, [decryptedItems, selectedItemId]);
 
 	// Members still come from tRPC (no local hook for membership data)
 	const membersQuery = useQuery(
@@ -230,11 +234,11 @@ function VaultDetailPage() {
 		canEditVault || canDeleteVault || hasVaultConversionActions;
 
 	const handleItemSelect = (item: DecryptedItem) => {
-		setSelectedItem(item);
+		setSelectedItemId(item.id);
 	};
 
 	const handleCloseSheet = () => {
-		setSelectedItem(null);
+		setSelectedItemId(null);
 	};
 
 	const handleCreateItem = async (
@@ -277,7 +281,7 @@ function VaultDetailPage() {
 				vaultId: selectedItem.vaultId,
 			});
 			setIsDeleteItemDialogOpen(false);
-			setSelectedItem(null);
+			setSelectedItemId(null);
 			toast.success(m["vaults.detail.toast.item_moved_to_trash"]());
 		} catch {
 			toast.error(m["vaults.detail.toast.item_delete_error"]());
@@ -677,7 +681,7 @@ function VaultDetailPage() {
 									isLoading={isLoadingItems}
 									vaultId={vaultId}
 									onItemSelect={handleItemSelect}
-									selectedItemId={selectedItem?.id}
+									selectedItemId={selectedItemId ?? undefined}
 									canWriteItems={canWriteItems}
 								/>
 							</div>

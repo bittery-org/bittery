@@ -55,7 +55,9 @@ export async function handleLogin(payload: {
 	await storeLoginSession(result, secretKey, storage, email);
 
 	// Set MUK in extension's in-memory session manager (for auto-lock)
-	setMasterUnlockKey(result.masterUnlockKey);
+	if (result.masterUnlockKey) {
+		setMasterUnlockKey(result.masterUnlockKey);
+	}
 
 	// Start activity tracking
 	updateActivity();
@@ -90,7 +92,9 @@ export async function handleQuickUnlock(payload: {
 	await storeUnlockSession(result, storage, email);
 
 	// Set MUK in extension's in-memory session manager (for auto-lock)
-	setMasterUnlockKey(result.masterUnlockKey);
+	if (result.masterUnlockKey) {
+		setMasterUnlockKey(result.masterUnlockKey);
+	}
 
 	// Start activity tracking
 	updateActivity();

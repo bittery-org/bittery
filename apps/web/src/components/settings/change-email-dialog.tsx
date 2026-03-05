@@ -1,4 +1,7 @@
-import { isAesEncryptedVaultKey } from "@bittery/shared";
+import {
+	buildVaultKeyEncryptionContext,
+	isAesEncryptedVaultKey,
+} from "@bittery/shared";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Button,
@@ -130,16 +133,33 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 					continue;
 				}
 
-				const encryptedVaultKeyData = JSON.parse(vk.encryptedVaultKey);
-				const decryptedVaultKeyBase64 = await decrypt(
-					encryptedVaultKeyData,
-					oldMasterUnlockKey,
-				);
+					const encryptedVaultKeyData = JSON.parse(vk.encryptedVaultKey) as {
+						ciphertext: string;
+						iv: string;
+						algorithm: string;
+						context?: { keyVersion?: number };
+					};
+					const keyVersion = Number.isInteger(
+						encryptedVaultKeyData.context?.keyVersion,
+					)
+						? (encryptedVaultKeyData.context?.keyVersion as number)
+						: 1;
+					const vaultKeyContext = buildVaultKeyEncryptionContext({
+						vaultId: vk.id,
+						userId: userQuery.data.id,
+						keyVersion,
+					});
+					const decryptedVaultKeyBase64 = await decrypt(
+						encryptedVaultKeyData,
+						oldMasterUnlockKey,
+						vaultKeyContext,
+					);
 
-				const newEncryptedVaultKey = await encrypt(
-					decryptedVaultKeyBase64,
-					newMasterUnlockKey,
-				);
+					const newEncryptedVaultKey = await encrypt(
+						decryptedVaultKeyBase64,
+						newMasterUnlockKey,
+						vaultKeyContext,
+					);
 
 				encryptedVaultKeys.push({
 					vaultId: vk.id,

@@ -3,10 +3,6 @@
  * Keeps the main thread responsive during heavy crypto (PBKDF2, SRP, RSA).
  */
 
-import {
-	unwrapPlaintextWithContext,
-	wrapPlaintextWithContext,
-} from "@bittery/shared/crypto-context-envelope";
 import type {
 	DerivedKeys,
 	EncryptedData,
@@ -17,6 +13,11 @@ import type {
 	SRPServerChallenge,
 } from "@bittery/types";
 import CryptoWorker from "@/lib/crypto.worker?worker";
+
+export interface WorkerDerivedKeyHandles {
+	authKeyHandle: number;
+	masterUnlockKeyHandle: number;
+}
 
 function base64ToUint8Array(base64: string): Uint8Array {
 	const binaryString = atob(base64);
@@ -95,6 +96,48 @@ export class WorkerCrypto implements ICrypto {
 		};
 	}
 
+	async deriveKeyHandles(
+		password: string,
+		secretKey: string,
+		email: string,
+	): Promise<WorkerDerivedKeyHandles> {
+		return this.call({
+			type: "deriveKeyHandles",
+			password,
+			secretKey,
+			email,
+		});
+	}
+
+	async deriveSrpPasswordFromHandle(authKeyHandle: number): Promise<string> {
+		return this.call({
+			type: "deriveSrpPasswordFromHandle",
+			authKeyHandle,
+		});
+	}
+
+	async cloneKeyHandle(keyHandle: number): Promise<number> {
+		return this.call({
+			type: "cloneKeyHandle",
+			keyHandle,
+		});
+	}
+
+	async destroyKeyHandle(keyHandle: number): Promise<boolean> {
+		return this.call({
+			type: "destroyKeyHandle",
+			keyHandle,
+		});
+	}
+
+	async exportKeyHandle(keyHandle: number): Promise<Uint8Array> {
+		const base64 = await this.call({
+			type: "exportKeyHandle",
+			keyHandle,
+		});
+		return base64ToUint8Array(base64);
+	}
+
 	async deriveMasterKey(
 		password: string,
 		secretKey: string,
@@ -162,10 +205,9 @@ export class WorkerCrypto implements ICrypto {
 	): Promise<EncryptedData> {
 		return this.call({
 			type: "encrypt",
-			plaintext: context
-				? wrapPlaintextWithContext(plaintext, context)
-				: plaintext,
+			plaintext,
 			keyBase64: uint8ArrayToBase64(key),
+			context,
 		});
 	}
 
@@ -174,14 +216,66 @@ export class WorkerCrypto implements ICrypto {
 		key: Uint8Array,
 		context?: EncryptionContext,
 	): Promise<string> {
-		const decrypted = await this.call({
+		return this.call({
 			type: "decrypt",
 			ciphertext: data.ciphertext,
 			iv: data.iv,
 			algorithm: data.algorithm,
 			keyBase64: uint8ArrayToBase64(key),
+			context,
 		});
-		return context ? unwrapPlaintextWithContext(decrypted, context) : decrypted;
+	}
+
+	async encryptWithKeyHandle(
+		plaintext: string,
+		keyHandle: number,
+		context?: EncryptionContext,
+	): Promise<EncryptedData> {
+		return this.call({
+			type: "encryptWithKeyHandle",
+			plaintext,
+			keyHandle,
+			context,
+		});
+	}
+
+	async decryptWithKeyHandle(
+		data: EncryptedData,
+		keyHandle: number,
+		context?: EncryptionContext,
+	): Promise<string> {
+		return this.call({
+			type: "decryptWithKeyHandle",
+			ciphertext: data.ciphertext,
+			iv: data.iv,
+			algorithm: data.algorithm,
+			keyHandle,
+			context,
+		});
+	}
+
+	async encryptKeyHandleWithWrappingKey(
+		keyHandle: number,
+		wrappingKey: Uint8Array,
+	): Promise<EncryptedData> {
+		return this.call({
+			type: "encryptKeyHandleWithWrappingKey",
+			keyHandle,
+			wrappingKeyBase64: uint8ArrayToBase64(wrappingKey),
+		});
+	}
+
+	async decryptKeyHandleWithWrappingKey(
+		data: EncryptedData,
+		wrappingKey: Uint8Array,
+	): Promise<number> {
+		return this.call({
+			type: "decryptKeyHandleWithWrappingKey",
+			ciphertext: data.ciphertext,
+			iv: data.iv,
+			algorithm: data.algorithm,
+			wrappingKeyBase64: uint8ArrayToBase64(wrappingKey),
+		});
 	}
 
 	async generateEncryptionKey(): Promise<Uint8Array> {

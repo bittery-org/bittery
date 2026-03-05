@@ -72,10 +72,10 @@ class BitteryCryptoModule : Module() {
             }
         }
 
-        AsyncFunction("decrypt") { ciphertext: String, iv: String, keyBase64: String, promise: Promise ->
+        AsyncFunction("decrypt") { ciphertext: String, iv: String, algorithm: String, keyBase64: String, promise: Promise ->
             scope.launch {
                 try {
-                    val result = nativeDecrypt(ciphertext, iv, keyBase64)
+                    val result = nativeDecrypt(ciphertext, iv, algorithm, keyBase64)
                     if (result.startsWith("ERROR:")) {
                         promise.reject(CodedException("DECRYPTION_FAILED", result.removePrefix("ERROR:"), null))
                     } else {
@@ -366,7 +366,7 @@ class BitteryCryptoModule : Module() {
 
     // Encryption
     private external fun nativeEncrypt(plaintext: String, keyBase64: String): EncryptResult
-    private external fun nativeDecrypt(ciphertext: String, iv: String, keyBase64: String): String
+    private external fun nativeDecrypt(ciphertext: String, iv: String, algorithm: String, keyBase64: String): String
     private external fun nativeGenerateEncryptionKey(): String
 
     // RSA

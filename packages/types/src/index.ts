@@ -87,7 +87,8 @@ export interface EncryptionContext {
 		| "item"
 		| "attachment_name"
 		| "attachment_content_type"
-		| "attachment_blob";
+		| "attachment_blob"
+		| "vault_key";
 	version: number;
 	userId: string;
 }
@@ -196,8 +197,6 @@ export interface MemberEncryptedKey {
  * Key rotation result
  */
 export interface KeyRotationResult {
-	newVaultKey: Uint8Array;
-	newVaultKeyBase64: string;
 	memberEncryptedKeys: MemberEncryptedKey[];
 	reEncryptedItems: ReEncryptedItem[];
 }

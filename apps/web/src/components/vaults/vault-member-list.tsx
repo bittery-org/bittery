@@ -138,6 +138,8 @@ export function VaultMemberList({
 					publicKey: m.publicKey,
 				})),
 				rotationData.items,
+				vaultId,
+				rotationData.keyVersion + 1,
 				currentUserId,
 				masterUnlockKey,
 			);

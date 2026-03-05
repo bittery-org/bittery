@@ -114,6 +114,7 @@ export interface RecoveryTokenPayload {
  * Create a new user (called during signup)
  */
 export async function createUser(data: {
+	id?: string;
 	email: string;
 	name: string;
 	secretKeyHint: string;
@@ -124,7 +125,7 @@ export async function createUser(data: {
 	encryptedMasterKey?: string | null;
 	recoveryKeyHint?: string | null;
 }) {
-	const userId = nanoid();
+	const userId = data.id ?? nanoid();
 
 	await db.insert(user).values({
 		id: userId,

@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+	attachVaultKeyWrapContext,
+	buildVaultKeyWrapContext,
 	type EncryptionContextEnvelopeInput,
 	type KdfParamsPolicyInput,
 	serializeEncryptionContext,
 	unwrapPlaintextWithContext,
+	VAULT_KEY_WRAP_PURPOSE,
 	validateServerKdfParamsOrThrow,
 	wrapPlaintextWithContext,
 } from "../index";
@@ -79,5 +82,42 @@ describe("kdf policy helper", () => {
 				pinned,
 			),
 		).toThrow("KDF salt changed from pinned value");
+	});
+});
+
+describe("vault key wrap helpers", () => {
+	test("builds deterministic vault key wrap metadata", () => {
+		const context = buildVaultKeyWrapContext({
+			vaultId: "vault_1",
+			userId: "user_1",
+			keyVersion: 3,
+		});
+		expect(context).toEqual({
+			vaultId: "vault_1",
+			userId: "user_1",
+			keyVersion: 3,
+			purpose: VAULT_KEY_WRAP_PURPOSE,
+		});
+	});
+
+	test("attaches wrap metadata to encrypted vault key payloads", () => {
+		const wrapped = attachVaultKeyWrapContext(
+			{
+				ciphertext: "ciphertext",
+				iv: "iv",
+				algorithm: "AES-GCM-AAD-V1",
+			},
+			{
+				vaultId: "vault_2",
+				userId: "user_2",
+				keyVersion: 1,
+			},
+		);
+		expect(wrapped.context).toEqual({
+			vaultId: "vault_2",
+			userId: "user_2",
+			keyVersion: 1,
+			purpose: VAULT_KEY_WRAP_PURPOSE,
+		});
 	});
 });

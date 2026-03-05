@@ -218,6 +218,7 @@ export const vaultRouter = router({
 	create: protectedProcedure
 		.input(
 			z.object({
+				vaultId: z.string().min(1).optional(),
 				name: z.string().min(1),
 				type: z.enum(["personal", "team"]),
 				encryptedVaultKey: z.string(),
@@ -227,7 +228,7 @@ export const vaultRouter = router({
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
-			const vaultId = nanoid();
+			const vaultId = input.vaultId ?? nanoid();
 			let teamId: string | null = null;
 			let sharedVaultLimit: number | null = null;
 
@@ -2708,7 +2709,18 @@ export const vaultRouter = router({
 					where: (i, { eq }) => eq(i.vaultId, input.vaultId),
 				});
 
+				const vaultRecord = await db.query.vault.findFirst({
+					where: (v, { eq }) => eq(v.id, input.vaultId),
+				});
+				if (!vaultRecord) {
+					throw new TRPCError({
+						code: "NOT_FOUND",
+						message: "Vault not found",
+					});
+				}
+
 				return {
+					keyVersion: vaultRecord.keyVersion,
 					members: members.map((m) => ({
 						userId: m.userId,
 						publicKey: m.user.publicKey,

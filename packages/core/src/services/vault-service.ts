@@ -1,4 +1,5 @@
 import type { IStorageAdapter } from "@bittery/storage/adapter";
+import { buildVaultKeyEncryptionContext } from "@bittery/shared";
 import type { ICrypto } from "@bittery/types";
 import type { AccountResolver, DefaultTrpcClient } from "./account-resolver";
 
@@ -155,14 +156,27 @@ export class VaultService {
 		if (!masterUnlockKey) {
 			throw new Error("Master Unlock Key not found. Please sign in again.");
 		}
+		const currentUserId = await this.storage.getActiveAccountUserId();
+		if (!currentUserId) {
+			throw new Error("Session data missing. Please sign in again.");
+		}
+		const vaultId = this.crypto.generateUuid
+			? await this.crypto.generateUuid()
+			: globalThis.crypto?.randomUUID?.() ?? `vault_${Date.now()}`;
 
 		const vaultKeyBase64 = btoa(String.fromCharCode(...vaultKey));
 		const encryptedVaultKeyData = await this.crypto.encrypt(
 			vaultKeyBase64,
 			masterUnlockKey,
+			buildVaultKeyEncryptionContext({
+				vaultId,
+				userId: currentUserId,
+				keyVersion: 1,
+			}),
 		);
 
 		const result = await client.vault.create.mutate({
+			vaultId,
 			name: trimmedName,
 			type: input.type,
 			encryptedVaultKey: JSON.stringify(encryptedVaultKeyData),

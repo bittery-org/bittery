@@ -5,7 +5,8 @@ export interface EncryptionContextEnvelopeInput {
 		| "item"
 		| "attachment_name"
 		| "attachment_content_type"
-		| "attachment_blob";
+		| "attachment_blob"
+		| "vault_key";
 	version: number;
 	userId: string;
 }
@@ -34,9 +35,8 @@ export function serializeEncryptionContext(
 }
 
 /**
- * Wrap plaintext with context metadata before encryption.
- * This enforces semantic binding even on crypto backends that only expose
- * two-argument encrypt/decrypt operations.
+ * Legacy compatibility helper for old ciphertext formats.
+ * New writes should use native `encryptWithContext`/AAD APIs instead.
  */
 export function wrapPlaintextWithContext(
 	plaintext: string,
@@ -51,7 +51,7 @@ export function wrapPlaintextWithContext(
 }
 
 /**
- * Unwrap and verify context-bound plaintext after decryption.
+ * Legacy compatibility helper for decrypting old envelope-based payloads.
  */
 export function unwrapPlaintextWithContext(
 	decrypted: string,

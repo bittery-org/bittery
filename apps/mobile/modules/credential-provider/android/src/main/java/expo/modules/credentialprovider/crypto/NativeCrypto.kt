@@ -115,14 +115,15 @@ object NativeCrypto {
      *
      * @param ciphertext Base64-encoded ciphertext
      * @param iv Base64-encoded IV
+     * @param algorithm Encryption algorithm identifier
      * @param keyBase64 Base64-encoded 32-byte decryption key
      * @return Result containing plaintext or error
      */
-    fun decrypt(ciphertext: String, iv: String, keyBase64: String): Result {
+    fun decrypt(ciphertext: String, iv: String, algorithm: String, keyBase64: String): Result {
         if (!isAvailable) {
             return Result(null, "Native crypto library not available")
         }
-        return nativeDecrypt(ciphertext, iv, keyBase64)
+        return nativeDecrypt(ciphertext, iv, algorithm, keyBase64)
     }
 
     // ============================================================================
@@ -248,6 +249,7 @@ object NativeCrypto {
     private external fun nativeDecrypt(
         ciphertext: String,
         iv: String,
+        algorithm: String,
         keyBase64: String
     ): Result
 

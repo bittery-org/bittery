@@ -45,7 +45,8 @@ export interface LoginResult {
 	sessionId?: string;
 	user: LoginUserData;
 	vaultKeys: VaultKeyData[];
-	masterUnlockKey: Uint8Array;
+	masterUnlockKey?: Uint8Array;
+	masterUnlockKeyHandle?: number;
 }
 
 /**
@@ -56,7 +57,8 @@ export interface UnlockResult {
 	sessionId?: string;
 	user: LoginUserData;
 	vaultKeys: VaultKeyData[];
-	masterUnlockKey: Uint8Array;
+	masterUnlockKey?: Uint8Array;
+	masterUnlockKeyHandle?: number;
 }
 
 /**
@@ -103,7 +105,7 @@ export interface StartLoginResponse {
  */
 export interface FinishLoginResponse {
 	token: string;
-	serverProof?: string;
+	serverProof: string;
 	user: LoginUserData;
 	vaultKeys: VaultKeyData[];
 	sessionId?: string;
@@ -169,6 +171,29 @@ export interface SRPUnlockDeps {
 	storage: IStorageAdapter;
 }
 
+interface HandleCapableCrypto extends ICrypto {
+	deriveKeyHandles: (
+		password: string,
+		secretKey: string,
+		email: string,
+	) => Promise<{ authKeyHandle: number; masterUnlockKeyHandle: number }>;
+	deriveSrpPasswordFromHandle: (authKeyHandle: number) => Promise<string>;
+	destroyKeyHandle?: (keyHandle: number) => Promise<void | boolean>;
+}
+
+function asHandleCapableCrypto(
+	crypto: ICrypto,
+): HandleCapableCrypto | null {
+	const candidate = crypto as Partial<HandleCapableCrypto>;
+	if (
+		typeof candidate.deriveKeyHandles === "function" &&
+		typeof candidate.deriveSrpPasswordFromHandle === "function"
+	) {
+		return candidate as HandleCapableCrypto;
+	}
+	return null;
+}
+
 async function validateAndPinServerKdfParams(
 	email: string,
 	serverParams: KdfParams,
@@ -216,60 +241,86 @@ export async function performSRPLogin(
 		throw new Error("Invalid Secret Key format");
 	}
 
-	const { authKey, masterUnlockKey } = await crypto.deriveKeys(
-		password,
-		secretKey,
-		email,
-	);
-	const srpPassword = new TextDecoder().decode(authKey);
-	const clientEphemeral = await crypto.generateClientEphemeral();
+	const handleCrypto = asHandleCapableCrypto(crypto);
+	let masterUnlockKey: Uint8Array | undefined;
+	let masterUnlockKeyHandle: number | undefined;
+	let srpPassword: string;
 
-	const startResult = await trpcClient.auth.startLogin.mutate({
-		email,
-		clientPublicKey: clientEphemeral.publicKey,
-	});
+	if (handleCrypto) {
+		const handles = await handleCrypto.deriveKeyHandles(
+			password,
+			secretKey,
+			email,
+		);
+		masterUnlockKeyHandle = handles.masterUnlockKeyHandle;
+		try {
+			srpPassword = await handleCrypto.deriveSrpPasswordFromHandle(
+				handles.authKeyHandle,
+			);
+		} finally {
+			if (handleCrypto.destroyKeyHandle) {
+				await handleCrypto.destroyKeyHandle(handles.authKeyHandle);
+			}
+		}
+	} else {
+		const derived = await crypto.deriveKeys(password, secretKey, email);
+		masterUnlockKey = derived.masterUnlockKey;
+		srpPassword = new TextDecoder().decode(derived.authKey);
+	}
 
-	await validateAndPinServerKdfParams(email, startResult.kdfParams, deps);
+	try {
+		const clientEphemeral = await crypto.generateClientEphemeral();
 
-	const clientSession = await crypto.deriveClientSession(
-		clientEphemeral.secret,
-		{
-			salt: startResult.salt,
-			serverPublicKey: startResult.serverPublicKey,
-			kdfParams: startResult.kdfParams,
-		},
-		srpPassword,
-	);
+		const startResult = await trpcClient.auth.startLogin.mutate({
+			email,
+			clientPublicKey: clientEphemeral.publicKey,
+		});
 
-	const finishResult = await trpcClient.auth.finishLogin.mutate({
-		userId: startResult.userId,
-		serverSecret: startResult.serverSecret,
-		clientPublicKey: clientEphemeral.publicKey,
-		clientProof: clientSession.proof,
-	});
+		await validateAndPinServerKdfParams(email, startResult.kdfParams, deps);
 
-	// serverProof is optional for backwards compatibility with quickUnlock.
-	if (finishResult.serverProof) {
+		const clientSession = await crypto.deriveClientSession(
+			clientEphemeral.secret,
+			{
+				salt: startResult.salt,
+				serverPublicKey: startResult.serverPublicKey,
+				kdfParams: startResult.kdfParams,
+			},
+			srpPassword,
+		);
+
+		const finishResult = await trpcClient.auth.finishLogin.mutate({
+			userId: startResult.userId,
+			serverSecret: startResult.serverSecret,
+			clientPublicKey: clientEphemeral.publicKey,
+			clientProof: clientSession.proof,
+		});
+
 		await crypto.verifyServerSession(
 			clientEphemeral.publicKey,
 			clientSession,
 			finishResult.serverProof,
 		);
+
+		await persistPinnedKdfParamsIfNeeded(
+			email,
+			startResult.kdfParams,
+			deps.storage,
+		);
+
+		return {
+			token: finishResult.token,
+			sessionId: finishResult.sessionId,
+			user: finishResult.user,
+			vaultKeys: finishResult.vaultKeys,
+			masterUnlockKey,
+			masterUnlockKeyHandle,
+		};
+	} catch (error) {
+		if (masterUnlockKeyHandle && handleCrypto?.destroyKeyHandle) {
+			await handleCrypto.destroyKeyHandle(masterUnlockKeyHandle);
+		}
+		throw error;
 	}
-
-	await persistPinnedKdfParamsIfNeeded(
-		email,
-		startResult.kdfParams,
-		deps.storage,
-	);
-
-	return {
-		token: finishResult.token,
-		sessionId: finishResult.sessionId,
-		user: finishResult.user,
-		vaultKeys: finishResult.vaultKeys,
-		masterUnlockKey,
-	};
 }
 
 /**
@@ -300,15 +351,37 @@ export async function storeLoginSession(
 
 	await storage.storeSecretKey(secretKey, resolvedEmail);
 
-	await storage.storeSessionData(
-		result.masterUnlockKey,
-		resolvedEmail,
-		result.user.id,
-		undefined,
-		result.sessionId,
-	);
+	if (
+		result.masterUnlockKeyHandle &&
+		storage.storeSessionDataWithMasterUnlockKeyHandle &&
+		storage.setMasterUnlockKeyHandle
+	) {
+		await storage.storeSessionDataWithMasterUnlockKeyHandle(
+			result.masterUnlockKeyHandle,
+			resolvedEmail,
+			result.user.id,
+			undefined,
+			result.sessionId,
+		);
+		await storage.setMasterUnlockKeyHandle(
+			result.masterUnlockKeyHandle,
+			resolvedEmail,
+		);
+	} else if (result.masterUnlockKey) {
+		await storage.storeSessionData(
+			result.masterUnlockKey,
+			resolvedEmail,
+			result.user.id,
+			undefined,
+			result.sessionId,
+		);
 
-	await storage.setMasterUnlockKey(result.masterUnlockKey, resolvedEmail);
+		await storage.setMasterUnlockKey(result.masterUnlockKey, resolvedEmail);
+	} else {
+		throw new Error(
+			"Master Unlock Key unavailable for session storage on this platform.",
+		);
+	}
 
 	if (storage.supportsMultiAccount && storage.addAccount) {
 		await storage.addAccount({
@@ -346,61 +419,87 @@ export async function performSRPUnlock(
 		);
 	}
 
-	const { authKey, masterUnlockKey } = await crypto.deriveKeys(
-		password,
-		storedSecretKey,
-		email,
-	);
-	const srpPassword = new TextDecoder().decode(authKey);
-	const clientEphemeral = await crypto.generateClientEphemeral();
+	const handleCrypto = asHandleCapableCrypto(crypto);
+	let masterUnlockKey: Uint8Array | undefined;
+	let masterUnlockKeyHandle: number | undefined;
+	let srpPassword: string;
 
-	const startResult = await trpcClient.auth.startLogin.mutate({
-		email,
-		clientPublicKey: clientEphemeral.publicKey,
-	});
+	if (handleCrypto) {
+		const handles = await handleCrypto.deriveKeyHandles(
+			password,
+			storedSecretKey,
+			email,
+		);
+		masterUnlockKeyHandle = handles.masterUnlockKeyHandle;
+		try {
+			srpPassword = await handleCrypto.deriveSrpPasswordFromHandle(
+				handles.authKeyHandle,
+			);
+		} finally {
+			if (handleCrypto.destroyKeyHandle) {
+				await handleCrypto.destroyKeyHandle(handles.authKeyHandle);
+			}
+		}
+	} else {
+		const derived = await crypto.deriveKeys(password, storedSecretKey, email);
+		masterUnlockKey = derived.masterUnlockKey;
+		srpPassword = new TextDecoder().decode(derived.authKey);
+	}
 
-	await validateAndPinServerKdfParams(email, startResult.kdfParams, deps);
+	try {
+		const clientEphemeral = await crypto.generateClientEphemeral();
 
-	const clientSession = await crypto.deriveClientSession(
-		clientEphemeral.secret,
-		{
-			salt: startResult.salt,
-			serverPublicKey: startResult.serverPublicKey,
-			kdfParams: startResult.kdfParams,
-		},
-		srpPassword,
-	);
+		const startResult = await trpcClient.auth.startLogin.mutate({
+			email,
+			clientPublicKey: clientEphemeral.publicKey,
+		});
 
-	const finishResult = await trpcClient.auth.quickUnlock.mutate({
-		email,
-		userId: startResult.userId,
-		serverSecret: startResult.serverSecret,
-		clientPublicKey: clientEphemeral.publicKey,
-		clientProof: clientSession.proof,
-	});
+		await validateAndPinServerKdfParams(email, startResult.kdfParams, deps);
 
-	// serverProof is optional for backwards compatibility with quickUnlock.
-	if (finishResult.serverProof) {
+		const clientSession = await crypto.deriveClientSession(
+			clientEphemeral.secret,
+			{
+				salt: startResult.salt,
+				serverPublicKey: startResult.serverPublicKey,
+				kdfParams: startResult.kdfParams,
+			},
+			srpPassword,
+		);
+
+		const finishResult = await trpcClient.auth.quickUnlock.mutate({
+			email,
+			userId: startResult.userId,
+			serverSecret: startResult.serverSecret,
+			clientPublicKey: clientEphemeral.publicKey,
+			clientProof: clientSession.proof,
+		});
+
 		await crypto.verifyServerSession(
 			clientEphemeral.publicKey,
 			clientSession,
 			finishResult.serverProof,
 		);
+
+		await persistPinnedKdfParamsIfNeeded(
+			email,
+			startResult.kdfParams,
+			deps.storage,
+		);
+
+		return {
+			token: finishResult.token,
+			sessionId: finishResult.sessionId,
+			user: finishResult.user,
+			vaultKeys: finishResult.vaultKeys,
+			masterUnlockKey,
+			masterUnlockKeyHandle,
+		};
+	} catch (error) {
+		if (masterUnlockKeyHandle && handleCrypto?.destroyKeyHandle) {
+			await handleCrypto.destroyKeyHandle(masterUnlockKeyHandle);
+		}
+		throw error;
 	}
-
-	await persistPinnedKdfParamsIfNeeded(
-		email,
-		startResult.kdfParams,
-		deps.storage,
-	);
-
-	return {
-		token: finishResult.token,
-		sessionId: finishResult.sessionId,
-		user: finishResult.user,
-		vaultKeys: finishResult.vaultKeys,
-		masterUnlockKey,
-	};
 }
 
 /**
@@ -423,15 +522,37 @@ export async function storeUnlockSession(
 		);
 	}
 
-	await storage.storeSessionData(
-		result.masterUnlockKey,
-		resolvedEmail,
-		result.user.id,
-		undefined,
-		result.sessionId,
-	);
+	if (
+		result.masterUnlockKeyHandle &&
+		storage.storeSessionDataWithMasterUnlockKeyHandle &&
+		storage.setMasterUnlockKeyHandle
+	) {
+		await storage.storeSessionDataWithMasterUnlockKeyHandle(
+			result.masterUnlockKeyHandle,
+			resolvedEmail,
+			result.user.id,
+			undefined,
+			result.sessionId,
+		);
+		await storage.setMasterUnlockKeyHandle(
+			result.masterUnlockKeyHandle,
+			resolvedEmail,
+		);
+	} else if (result.masterUnlockKey) {
+		await storage.storeSessionData(
+			result.masterUnlockKey,
+			resolvedEmail,
+			result.user.id,
+			undefined,
+			result.sessionId,
+		);
 
-	await storage.setMasterUnlockKey(result.masterUnlockKey, resolvedEmail);
+		await storage.setMasterUnlockKey(result.masterUnlockKey, resolvedEmail);
+	} else {
+		throw new Error(
+			"Master Unlock Key unavailable for session storage on this platform.",
+		);
+	}
 
 	if (storage.supportsMultiAccount && storage.setActiveAccount) {
 		const currentActive = await storage.getActiveAccount();

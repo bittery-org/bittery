@@ -140,6 +140,8 @@ export const authRouter = router({
 	signup: publicProcedure
 		.input(
 			z.object({
+				userId: z.string().min(1).optional(),
+				vaultId: z.string().min(1).optional(),
 				email: z.string().email().max(255),
 				name: z.string().min(2),
 				plan: z.enum(["free", "personal", "family", "team"]).optional(),
@@ -197,6 +199,7 @@ export const authRouter = router({
 
 			// Create user first (without team)
 			const userId = await createUser({
+				id: input.userId,
 				email: normalizedEmail,
 				name: input.name,
 				secretKeyHint: input.secretKeyHint,
@@ -227,7 +230,7 @@ export const authRouter = router({
 				.where(eq(user.id, userId));
 
 			// Create default "Personal" vault
-			const vaultId = nanoid();
+			const vaultId = input.vaultId ?? nanoid();
 			await db.insert(vault).values({
 				id: vaultId,
 				name: "Personal",
@@ -720,6 +723,7 @@ export const authRouter = router({
 			return {
 				token: result.token!,
 				sessionId: result.sessionId!,
+				serverProof: result.serverProof!,
 				user: {
 					...result.user,
 					teamId: userData?.teamId,

@@ -116,7 +116,12 @@ object AesGcmCrypto {
         }
 
         val keyBase64 = Base64.encodeToString(key, Base64.NO_WRAP)
-        val result = NativeCrypto.decrypt(encryptedData.ciphertext, encryptedData.iv, keyBase64)
+        val result = NativeCrypto.decrypt(
+            encryptedData.ciphertext,
+            encryptedData.iv,
+            encryptedData.algorithm,
+            keyBase64
+        )
 
         if (!result.isSuccess || result.value == null) {
             throw RuntimeException("Decryption failed: ${result.error ?: "Unknown error"}")

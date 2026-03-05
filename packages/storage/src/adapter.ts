@@ -65,10 +65,20 @@ export interface IStorageAdapter {
 	setMasterUnlockKey(key: Uint8Array, email?: string): Promise<void>;
 
 	/**
+	 * Store Master Unlock Key as an opaque crypto handle when supported.
+	 */
+	setMasterUnlockKeyHandle?(keyHandle: number, email?: string): Promise<void>;
+
+	/**
 	 * Clear Master Unlock Key from memory.
 	 * Called when locking the app.
 	 */
 	clearMasterUnlockKey(email?: string): Promise<void>;
+
+	/**
+	 * Get Master Unlock Key handle from memory cache.
+	 */
+	getMasterUnlockKeyHandle?(email?: string): Promise<number | null>;
 
 	/**
 	 * Store encrypted session data for persistence.
@@ -76,6 +86,17 @@ export interface IStorageAdapter {
 	 */
 	storeSessionData(
 		muk: Uint8Array,
+		email: string,
+		userId: string,
+		expiryMs?: number,
+		sessionId?: string,
+	): Promise<void>;
+
+	/**
+	 * Store encrypted session data from an opaque MUK handle.
+	 */
+	storeSessionDataWithMasterUnlockKeyHandle?(
+		keyHandle: number,
 		email: string,
 		userId: string,
 		expiryMs?: number,

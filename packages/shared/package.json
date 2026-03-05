@@ -27,7 +27,8 @@
 		"./server-url": "./src/server-url.ts",
 		"./trpc-client-factory": "./src/trpc-client-factory.ts",
 		"./types": "./src/types.ts",
-		"./pricing": "./src/pricing.ts"
+		"./pricing": "./src/pricing.ts",
+		"./vault-key-crypto": "./src/vault-key-crypto.ts"
 	},
 	"dependencies": {
 		"@bittery/api": "workspace:*",

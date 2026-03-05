@@ -134,6 +134,8 @@ export function MemberList({
 						publicKey: m.publicKey,
 					})),
 					vaultData.items,
+					vaultData.vaultId,
+					vaultData.keyVersion + 1,
 					currentUserId,
 					masterUnlockKey,
 				);

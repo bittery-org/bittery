@@ -93,9 +93,9 @@ public class BitteryCryptoModule: Module {
             }
         }
 
-        AsyncFunction("decrypt") { (ciphertext: String, iv: String, keyBase64: String, promise: Promise) in
+        AsyncFunction("decrypt") { (ciphertext: String, iv: String, algorithm: String, keyBase64: String, promise: Promise) in
             DispatchQueue.global(qos: .userInitiated).async {
-                guard let result = bittery_decrypt(ciphertext, iv, keyBase64) else {
+                guard let result = bittery_decrypt(ciphertext, iv, algorithm, keyBase64) else {
                     promise.reject("DECRYPTION_FAILED", "Decryption returned null")
                     return
                 }

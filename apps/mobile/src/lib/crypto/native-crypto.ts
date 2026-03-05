@@ -25,6 +25,7 @@ import {
 	unwrapPlaintextWithContext,
 	wrapPlaintextWithContext,
 } from "@bittery/shared/crypto-context-envelope";
+import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
 import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
 import type {
 	DerivedKeys,
@@ -88,7 +89,17 @@ export async function encrypt(
 	const plaintextToEncrypt = context
 		? wrapPlaintextWithContext(plaintext, context)
 		: plaintext;
-	return nativeEncrypt(plaintextToEncrypt, keyBase64);
+	const encryptedData = await nativeEncrypt(plaintextToEncrypt, keyBase64);
+
+	if (context?.entityType === "vault_key") {
+		return attachVaultKeyWrapContext(encryptedData, {
+			vaultId: context.vaultId,
+			userId: context.userId,
+			keyVersion: context.version,
+		}) as EncryptedData;
+	}
+
+	return encryptedData;
 }
 
 /**
@@ -114,6 +125,7 @@ export async function decrypt(
 	const decrypted = await nativeDecrypt(
 		encryptedData.ciphertext,
 		encryptedData.iv,
+		encryptedData.algorithm,
 		keyBase64,
 	);
 	return context ? unwrapPlaintextWithContext(decrypted, context) : decrypted;
@@ -132,9 +144,10 @@ export function validateServerKdfParams(
 export async function decryptRaw(
 	ciphertext: string,
 	iv: string,
+	algorithm: string,
 	keyBase64: string,
 ): Promise<string> {
-	return nativeDecrypt(ciphertext, iv, keyBase64);
+	return nativeDecrypt(ciphertext, iv, algorithm, keyBase64);
 }
 
 /**
@@ -144,7 +157,7 @@ export async function decryptData(
 	data: EncryptedData,
 	keyBase64: string,
 ): Promise<string> {
-	return nativeDecrypt(data.ciphertext, data.iv, keyBase64);
+	return nativeDecrypt(data.ciphertext, data.iv, data.algorithm, keyBase64);
 }
 
 /**

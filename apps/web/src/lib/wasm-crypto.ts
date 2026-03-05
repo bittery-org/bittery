@@ -6,22 +6,37 @@
  */
 
 import init, {
+	cloneKeyHandle as wasmCloneKeyHandle,
+	JsAadContext,
 	JsEncryptedData,
 	type JsSession,
 	JsSrpClient,
 	decrypt as wasmDecrypt,
+	decryptKeyHandleWithKey as wasmDecryptKeyHandleWithKey,
+	decryptWithContextHandle as wasmDecryptWithContextHandle,
+	decryptWithContext as wasmDecryptWithContext,
+	decryptWithHandle as wasmDecryptWithHandle,
 	decryptMasterKey as wasmDecryptMasterKey,
+	deriveKeysHandle as wasmDeriveKeysHandle,
 	deriveKeys as wasmDeriveKeys,
 	deriveKeysFromMasterKey as wasmDeriveKeysFromMasterKey,
 	deriveMasterKey as wasmDeriveMasterKey,
+	deriveSrpPasswordFromHandle as wasmDeriveSrpPasswordFromHandle,
+	destroyKeyHandle as wasmDestroyKeyHandle,
 	encrypt as wasmEncrypt,
+	encryptKeyHandleWithKey as wasmEncryptKeyHandleWithKey,
+	encryptWithContextHandle as wasmEncryptWithContextHandle,
+	encryptWithContext as wasmEncryptWithContext,
+	encryptWithHandle as wasmEncryptWithHandle,
 	encryptMasterKey as wasmEncryptMasterKey,
+	exportKeyHandle as wasmExportKeyHandle,
 	generateEncryptionKey as wasmGenerateEncryptionKey,
 	generateRecoveryKey as wasmGenerateRecoveryKey,
 	generateRSAKeyPair as wasmGenerateRSAKeyPair,
 	generateSecretKey as wasmGenerateSecretKey,
 	generateUuid as wasmGenerateUuid,
 	getSecretKeyHint as wasmGetSecretKeyHint,
+	importKeyHandle as wasmImportKeyHandle,
 	performKeyRotation as wasmPerformKeyRotation,
 	rsaDecrypt as wasmRsaDecrypt,
 	rsaEncrypt as wasmRsaEncrypt,
@@ -30,9 +45,11 @@ import init, {
 	validateSecretKey as wasmValidateSecretKey,
 } from "@bittery/crypto-wasm";
 import {
-	unwrapPlaintextWithContext as unwrapWithContext,
-	wrapPlaintextWithContext as wrapWithContext,
+	unwrapPlaintextWithContext,
 } from "@bittery/shared/crypto-context-envelope";
+import {
+	attachVaultKeyWrapContext,
+} from "@bittery/shared/vault-key-crypto";
 import type {
 	DerivedKeys,
 	EncryptedData,
@@ -54,6 +71,11 @@ export type {
 	SRPRegistration,
 	SRPServerChallenge,
 };
+
+export interface DerivedKeyHandles {
+	authKeyHandle: number;
+	masterUnlockKeyHandle: number;
+}
 
 // ============================================================================
 // WASM Initialization
@@ -134,6 +156,31 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
 	return btoa(binaryString);
 }
 
+function toWasmHandle(handle: number): bigint {
+	if (!Number.isSafeInteger(handle) || handle < 1) {
+		throw new Error("Invalid key handle");
+	}
+	return BigInt(handle);
+}
+
+function fromWasmHandle(value: bigint): number {
+	const handle = Number(value);
+	if (!Number.isSafeInteger(handle) || handle < 1) {
+		throw new Error("Invalid key handle from WASM");
+	}
+	return handle;
+}
+
+function toWasmAadContext(context: EncryptionContext): JsAadContext {
+	return new JsAadContext(
+		context.vaultId,
+		context.entityId,
+		context.entityType,
+		BigInt(context.version),
+		context.userId,
+	);
+}
+
 /**
  * Convert an ArrayBuffer or Uint8Array to base64 string
  * Exported for use in share dialogs and other places
@@ -170,6 +217,72 @@ export async function deriveKeys(
 		authKey: base64ToUint8Array(result.auth_key),
 		masterUnlockKey: base64ToUint8Array(result.master_unlock_key),
 	};
+}
+
+/**
+ * Derive opaque key handles for auth key + master unlock key.
+ */
+export async function deriveKeyHandles(
+	accountPassword: string,
+	secretKey: string,
+	email: string,
+): Promise<DerivedKeyHandles> {
+	await autoInit();
+
+	const result = wasmDeriveKeysHandle(accountPassword, secretKey, email);
+
+	return {
+		authKeyHandle: fromWasmHandle(result.auth_key_handle),
+		masterUnlockKeyHandle: fromWasmHandle(result.master_unlock_key_handle),
+	};
+}
+
+/**
+ * Convert an auth-key handle into the SRP password string used by SRP helpers.
+ */
+export async function deriveSrpPasswordFromKeyHandle(
+	authKeyHandle: number,
+): Promise<string> {
+	await autoInit();
+	return wasmDeriveSrpPasswordFromHandle(toWasmHandle(authKeyHandle));
+}
+
+export const deriveSrpPasswordFromHandle = deriveSrpPasswordFromKeyHandle;
+
+/**
+ * Import raw key bytes into WASM as an opaque handle.
+ */
+export async function importKeyHandle(key: Uint8Array): Promise<number> {
+	await autoInit();
+	const handle = wasmImportKeyHandle(uint8ArrayToBase64(key));
+	return fromWasmHandle(handle);
+}
+
+/**
+ * Export key bytes from an opaque handle.
+ * This is for compatibility only; prefer handle-based operations.
+ */
+export async function exportKeyHandle(keyHandle: number): Promise<Uint8Array> {
+	await autoInit();
+	const keyBase64 = wasmExportKeyHandle(toWasmHandle(keyHandle));
+	return base64ToUint8Array(keyBase64);
+}
+
+/**
+ * Clone an existing key handle.
+ */
+export async function cloneKeyHandle(keyHandle: number): Promise<number> {
+	await autoInit();
+	const cloned = wasmCloneKeyHandle(toWasmHandle(keyHandle));
+	return fromWasmHandle(cloned);
+}
+
+/**
+ * Destroy a key handle and zeroize the backing key material.
+ */
+export async function destroyKeyHandle(keyHandle: number): Promise<void> {
+	await autoInit();
+	wasmDestroyKeyHandle(toWasmHandle(keyHandle));
 }
 
 /**
@@ -224,16 +337,60 @@ export async function encrypt(
 	await autoInit();
 
 	const keyBase64 = uint8ArrayToBase64(key);
-	const plaintextToEncrypt = context
-		? wrapWithContext(plaintext, context)
-		: plaintext;
-	const result = wasmEncrypt(plaintextToEncrypt, keyBase64);
-
-	return {
+	const result =
+		context
+			? wasmEncryptWithContext(plaintext, keyBase64, toWasmAadContext(context))
+			: wasmEncrypt(plaintext, keyBase64);
+	const encryptedData: EncryptedData = {
 		ciphertext: result.ciphertext,
 		iv: result.iv,
 		algorithm: result.algorithm,
 	};
+
+	if (context?.entityType === "vault_key") {
+		return attachVaultKeyWrapContext(encryptedData, {
+			vaultId: context.vaultId,
+			userId: context.userId,
+			keyVersion: context.version,
+		}) as EncryptedData;
+	}
+
+	return encryptedData;
+}
+
+/**
+ * Encrypt plaintext using an opaque key handle.
+ */
+export async function encryptWithKeyHandle(
+	plaintext: string,
+	keyHandle: number,
+	context?: EncryptionContext,
+): Promise<EncryptedData> {
+	await autoInit();
+
+	const result =
+		context
+			? wasmEncryptWithContextHandle(
+					plaintext,
+					toWasmHandle(keyHandle),
+					toWasmAadContext(context),
+				)
+			: wasmEncryptWithHandle(plaintext, toWasmHandle(keyHandle));
+	const encryptedData: EncryptedData = {
+		ciphertext: result.ciphertext,
+		iv: result.iv,
+		algorithm: result.algorithm,
+	};
+
+	if (context?.entityType === "vault_key") {
+		return attachVaultKeyWrapContext(encryptedData, {
+			vaultId: context.vaultId,
+			userId: context.userId,
+			keyVersion: context.version,
+		}) as EncryptedData;
+	}
+
+	return encryptedData;
 }
 
 /**
@@ -247,16 +404,96 @@ export async function decrypt(
 	await autoInit();
 
 	const keyBase64 = uint8ArrayToBase64(key);
+	const createWasmData = () =>
+		new JsEncryptedData(data.ciphertext, data.iv, data.algorithm);
 
-	// Create a proper JsEncryptedData WASM instance for decryption
+	if (!context) {
+		return wasmDecrypt(createWasmData(), keyBase64);
+	}
+
+	try {
+		return wasmDecryptWithContext(
+			createWasmData(),
+			keyBase64,
+			toWasmAadContext(context),
+		);
+	} catch {
+		const decrypted = wasmDecrypt(createWasmData(), keyBase64);
+		return unwrapPlaintextWithContext(decrypted, context);
+	}
+}
+
+/**
+ * Decrypt ciphertext using an opaque key handle.
+ */
+export async function decryptWithKeyHandle(
+	data: EncryptedData,
+	keyHandle: number,
+	context?: EncryptionContext,
+): Promise<string> {
+	await autoInit();
+
+	const createWasmData = () =>
+		new JsEncryptedData(data.ciphertext, data.iv, data.algorithm);
+
+	if (!context) {
+		return wasmDecryptWithHandle(createWasmData(), toWasmHandle(keyHandle));
+	}
+
+	try {
+		return wasmDecryptWithContextHandle(
+			createWasmData(),
+			toWasmHandle(keyHandle),
+			toWasmAadContext(context),
+		);
+	} catch {
+		const decrypted = wasmDecryptWithHandle(
+			createWasmData(),
+			toWasmHandle(keyHandle),
+		);
+		return unwrapPlaintextWithContext(decrypted, context);
+	}
+}
+
+/**
+ * Encrypt the key material behind a key handle with a wrapping key.
+ */
+export async function encryptKeyHandleWithWrappingKey(
+	keyHandle: number,
+	wrappingKey: Uint8Array,
+): Promise<EncryptedData> {
+	await autoInit();
+
+	const result = wasmEncryptKeyHandleWithKey(
+		toWasmHandle(keyHandle),
+		uint8ArrayToBase64(wrappingKey),
+	);
+	return {
+		ciphertext: result.ciphertext,
+		iv: result.iv,
+		algorithm: result.algorithm,
+	};
+}
+
+/**
+ * Decrypt wrapped key material into a new opaque key handle.
+ */
+export async function decryptKeyHandleWithWrappingKey(
+	data: EncryptedData,
+	wrappingKey: Uint8Array,
+): Promise<number> {
+	await autoInit();
+
 	const wasmData = new JsEncryptedData(
 		data.ciphertext,
 		data.iv,
 		data.algorithm,
 	);
-
-	const decrypted = wasmDecrypt(wasmData, keyBase64);
-	return context ? unwrapWithContext(decrypted, context) : decrypted;
+	const handle = wasmDecryptKeyHandleWithKey(
+		wasmData,
+		uint8ArrayToBase64(wrappingKey),
+	);
+	return fromWasmHandle(handle);
 }
 
 /**
@@ -626,8 +863,6 @@ export interface MemberEncryptedKey {
 }
 
 export interface KeyRotationResult {
-	newVaultKey: Uint8Array;
-	newVaultKeyBase64: string;
 	memberEncryptedKeys: MemberEncryptedKey[];
 	reEncryptedItems: ReEncryptedItem[];
 }
@@ -635,6 +870,17 @@ export interface KeyRotationResult {
 export interface ValidationResult {
 	valid: boolean;
 	errors: string[];
+}
+
+interface WasmMemberEncryptedKey {
+	user_id: string;
+	encrypted_vault_key: string;
+}
+
+interface WasmReEncryptedItem {
+	item_id: string;
+	encrypted_data: string;
+	encryption_iv: string;
 }
 
 /**
@@ -647,6 +893,8 @@ export async function performKeyRotation(
 	oldVaultKey: Uint8Array,
 	members: MemberKeyData[],
 	items: ItemData[],
+	vaultId: string,
+	keyVersion: number,
 	currentUserId: string,
 	masterUnlockKey: Uint8Array,
 ): Promise<KeyRotationResult> {
@@ -675,28 +923,23 @@ export async function performKeyRotation(
 		oldKeyBase64,
 		membersJson,
 		itemsJson,
+		vaultId,
+		BigInt(keyVersion),
 		currentUserId,
 		mukBase64,
 	);
 
 	// Parse the results from WASM
-	const memberEncryptedKeys = result.getMemberEncryptedKeys() as Array<{
-		user_id: string;
-		encrypted_vault_key: string;
-	}>;
-	const reEncryptedItems = result.getReEncryptedItems() as Array<{
-		item_id: string;
-		encrypted_data: string;
-		encryption_iv: string;
-	}>;
+	const memberEncryptedKeys =
+		result.getMemberEncryptedKeys() as WasmMemberEncryptedKey[];
+	const reEncryptedItems = result.getReEncryptedItems() as WasmReEncryptedItem[];
+	const normalizedMemberEncryptedKeys = memberEncryptedKeys.map((m) => ({
+		userId: m.user_id,
+		encryptedVaultKey: m.encrypted_vault_key,
+	}));
 
 	return {
-		newVaultKey: base64ToUint8Array(result.new_vault_key_base64),
-		newVaultKeyBase64: result.new_vault_key_base64,
-		memberEncryptedKeys: memberEncryptedKeys.map((m) => ({
-			userId: m.user_id,
-			encryptedVaultKey: m.encrypted_vault_key,
-		})),
+		memberEncryptedKeys: normalizedMemberEncryptedKeys,
 		reEncryptedItems: reEncryptedItems.map((i) => ({
 			itemId: i.item_id,
 			encryptedData: i.encrypted_data,

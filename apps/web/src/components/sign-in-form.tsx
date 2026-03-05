@@ -13,8 +13,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import * as wasmCrypto from "@/lib/wasm-crypto";
 import { storage } from "@/lib/storage";
-import { WorkerCrypto } from "@/lib/worker-crypto";
 import { useI18n } from "@/providers/i18n-provider";
 
 export default function SignInForm({
@@ -48,25 +48,20 @@ export default function SignInForm({
 	const hasInvitationRedirect = !!redirectTo?.startsWith("/invite/");
 	const canShowSignup = allowPublicSignup || hasInvitationRedirect;
 
-	// Login mutation using WorkerCrypto to keep the main thread responsive
+	// Login mutation using platform WASM crypto
 	const loginMutation = useMutation({
 		mutationFn: async (input: {
 			email: string;
 			password: string;
 			secretKey: string;
 		}) => {
-			const workerCrypto = new WorkerCrypto();
-			try {
-				const result = await performSRPLogin(input, {
-					crypto: workerCrypto,
-					trpcClient,
-					storage,
-				});
-				await storeLoginSession(result, input.secretKey, storage, input.email);
-				return result;
-			} finally {
-				workerCrypto.terminate();
-			}
+			const result = await performSRPLogin(input, {
+				crypto: wasmCrypto,
+				trpcClient,
+				storage,
+			});
+			await storeLoginSession(result, input.secretKey, storage, input.email);
+			return result;
 		},
 		onSuccess: () => {
 			const daysUntil = Math.floor(

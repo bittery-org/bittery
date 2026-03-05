@@ -4,12 +4,12 @@
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use bittery_crypto_core::{
-    decrypt, derive_keys, encrypt, generate_encryption_key, generate_rsa_key_pair,
+    decrypt, decrypt_with_aad, derive_keys, encrypt, encrypt_with_aad, generate_encryption_key, generate_rsa_key_pair,
     generate_secret_key, generate_uuid, get_secret_key_hint, rsa_decrypt, rsa_encrypt, validate_secret_key,
     validate_server_kdf_params, KdfParams,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient},
-    key_rotation::{self, ItemData, MemberKeyData},
-    EncryptedData,
+    key_rotation::{self, ItemData, MemberKeyData, VaultKeyWrapContext},
+    AadContext, EncryptedData,
 };
 use serde::{Deserialize, Serialize};
 
@@ -91,11 +91,44 @@ pub fn crypto_encrypt(
     })
 }
 
+/// Encrypt plaintext using AES-256-GCM with authenticated context
+#[tauri::command]
+pub fn crypto_encrypt_with_context(
+    plaintext: String,
+    key_base64: String,
+    vault_id: String,
+    entity_id: String,
+    entity_type: String,
+    version: u64,
+    user_id: String,
+) -> Result<EncryptResponse, String> {
+    let key = STANDARD
+        .decode(&key_base64)
+        .map_err(|e| format!("Invalid key base64: {}", e))?;
+
+    let context = AadContext {
+        vault_id,
+        entity_id,
+        entity_type,
+        version,
+        user_id,
+    };
+
+    let encrypted = encrypt_with_aad(&plaintext, &key, &context).map_err(|e| e.to_string())?;
+
+    Ok(EncryptResponse {
+        ciphertext: encrypted.ciphertext,
+        iv: encrypted.iv,
+        algorithm: encrypted.algorithm,
+    })
+}
+
 /// Decrypt ciphertext using AES-256-GCM
 #[tauri::command]
 pub fn crypto_decrypt(
     ciphertext: String,
     iv: String,
+    algorithm: String,
     key_base64: String,
 ) -> Result<String, String> {
     let key = STANDARD.decode(&key_base64)
@@ -104,10 +137,43 @@ pub fn crypto_decrypt(
     let data = EncryptedData {
         ciphertext,
         iv,
-        algorithm: "AES-GCM-AAD-V1".to_string(),
+        algorithm,
     };
 
     decrypt(&data, &key).map_err(|e| e.to_string())
+}
+
+/// Decrypt ciphertext using AES-256-GCM with authenticated context
+#[tauri::command]
+pub fn crypto_decrypt_with_context(
+    ciphertext: String,
+    iv: String,
+    algorithm: String,
+    key_base64: String,
+    vault_id: String,
+    entity_id: String,
+    entity_type: String,
+    version: u64,
+    user_id: String,
+) -> Result<String, String> {
+    let key = STANDARD
+        .decode(&key_base64)
+        .map_err(|e| format!("Invalid key base64: {}", e))?;
+
+    let data = EncryptedData {
+        ciphertext,
+        iv,
+        algorithm,
+    };
+    let context = AadContext {
+        vault_id,
+        entity_id,
+        entity_type,
+        version,
+        user_id,
+    };
+
+    decrypt_with_aad(&data, &key, &context).map_err(|e| e.to_string())
 }
 
 /// Validate server-provided KDF params against policy and optional pin.
@@ -313,7 +379,6 @@ pub struct MemberEncryptedKeyResponse {
 
 #[derive(Serialize)]
 pub struct KeyRotationResponse {
-    pub new_vault_key_base64: String,
     pub member_encrypted_keys: Vec<MemberEncryptedKeyResponse>,
     pub re_encrypted_items: Vec<ReEncryptedItemResponse>,
 }
@@ -356,13 +421,17 @@ pub fn crypto_encrypt_vault_key_for_member(
 pub fn crypto_encrypt_vault_key_with_muk(
     vault_key_base64: String,
     master_unlock_key_base64: String,
+    vault_id: String,
+    user_id: String,
+    key_version: u64,
 ) -> Result<String, String> {
     let vault_key = STANDARD.decode(&vault_key_base64)
         .map_err(|e| format!("Invalid vault key base64: {}", e))?;
     let muk = STANDARD.decode(&master_unlock_key_base64)
         .map_err(|e| format!("Invalid MUK base64: {}", e))?;
 
-    key_rotation::encrypt_vault_key_with_muk(&vault_key, &muk)
+    let context = VaultKeyWrapContext::new(&vault_id, &user_id, key_version);
+    key_rotation::encrypt_vault_key_with_muk(&vault_key, &muk, &context)
         .map_err(|e| e.to_string())
 }
 
@@ -401,6 +470,8 @@ pub fn crypto_perform_key_rotation(
     old_vault_key_base64: String,
     members: Vec<MemberKeyInput>,
     items: Vec<ItemDataInput>,
+    vault_id: String,
+    key_version: u64,
     current_user_id: String,
     master_unlock_key_base64: String,
 ) -> Result<KeyRotationResponse, String> {
@@ -421,11 +492,18 @@ pub fn crypto_perform_key_rotation(
         encryption_algorithm: i.encryption_algorithm,
     }).collect();
 
-    let result = key_rotation::perform_key_rotation(&old_key, &members_data, &items_data, &current_user_id, &muk)
-        .map_err(|e| e.to_string())?;
+    let result = key_rotation::perform_key_rotation(
+        &old_key,
+        &members_data,
+        &items_data,
+        &vault_id,
+        key_version,
+        &current_user_id,
+        &muk,
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(KeyRotationResponse {
-        new_vault_key_base64: result.new_vault_key_base64,
         member_encrypted_keys: result.member_encrypted_keys.into_iter().map(|m| MemberEncryptedKeyResponse {
             user_id: m.user_id,
             encrypted_vault_key: m.encrypted_vault_key,

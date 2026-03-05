@@ -244,6 +244,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     _class: JClass<'a>,
     ciphertext: JString<'a>,
     iv: JString<'a>,
+    algorithm: JString<'a>,
     key_base64: JString<'a>,
 ) -> JString<'a> {
     let ciphertext_str = match get_string(&mut env, ciphertext) {
@@ -253,6 +254,10 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     let iv_str = match get_string(&mut env, iv) {
         Some(s) => s,
         None => return new_string(&mut env, "ERROR:Invalid IV"),
+    };
+    let algorithm_str = match get_string(&mut env, algorithm) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid algorithm"),
     };
     let key_str = match get_string(&mut env, key_base64) {
         Some(s) => s,
@@ -270,7 +275,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     let data = EncryptedData {
         ciphertext: ciphertext_str,
         iv: iv_str,
-        algorithm: "AES-GCM-AAD-V1".to_string(),
+        algorithm: algorithm_str,
     };
 
     match decrypt(&data, &key) {
@@ -440,21 +445,12 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     use bittery_crypto_core::srp6a::{HashAlgorithm, PrimeGroup, SrpClient};
 
     let hash = match hash_str.as_str() {
-        "SHA-1" => HashAlgorithm::Sha1,
         "SHA-256" => HashAlgorithm::Sha256,
-        "SHA-384" => HashAlgorithm::Sha384,
-        "SHA-512" => HashAlgorithm::Sha512,
         _ => return 0,
     };
 
     let group = match prime_group {
-        1024 => PrimeGroup::G1024,
-        1536 => PrimeGroup::G1536,
-        2048 => PrimeGroup::G2048,
-        3072 => PrimeGroup::G3072,
         4096 => PrimeGroup::G4096,
-        6144 => PrimeGroup::G6144,
-        8192 => PrimeGroup::G8192,
         _ => return 0,
     };
 
@@ -705,21 +701,12 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     use bittery_crypto_core::srp6a::{HashAlgorithm, PrimeGroup, SrpServer};
 
     let hash = match hash_str.as_str() {
-        "SHA-1" => HashAlgorithm::Sha1,
         "SHA-256" => HashAlgorithm::Sha256,
-        "SHA-384" => HashAlgorithm::Sha384,
-        "SHA-512" => HashAlgorithm::Sha512,
         _ => return 0,
     };
 
     let group = match prime_group {
-        1024 => PrimeGroup::G1024,
-        1536 => PrimeGroup::G1536,
-        2048 => PrimeGroup::G2048,
-        3072 => PrimeGroup::G3072,
         4096 => PrimeGroup::G4096,
-        6144 => PrimeGroup::G6144,
-        8192 => PrimeGroup::G8192,
         _ => return 0,
     };
 
@@ -1034,6 +1021,7 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     _class: JClass<'a>,
     ciphertext: JString<'a>,
     iv: JString<'a>,
+    algorithm: JString<'a>,
     key_base64: JString<'a>,
 ) -> JObject<'a> {
     let ciphertext_str = match get_string(&mut env, ciphertext) {
@@ -1043,6 +1031,10 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     let iv_str = match get_string(&mut env, iv) {
         Some(s) => s,
         None => return create_cp_result(&mut env, None, Some("Invalid IV")),
+    };
+    let algorithm_str = match get_string(&mut env, algorithm) {
+        Some(s) => s,
+        None => return create_cp_result(&mut env, None, Some("Invalid algorithm")),
     };
     let key_str = match get_string(&mut env, key_base64) {
         Some(s) => s,
@@ -1062,7 +1054,7 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     let data = EncryptedData {
         ciphertext: ciphertext_str,
         iv: iv_str,
-        algorithm: "AES-GCM-AAD-V1".to_string(),
+        algorithm: algorithm_str,
     };
 
     match decrypt(&data, &key) {

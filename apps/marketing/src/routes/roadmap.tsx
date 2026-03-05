@@ -97,7 +97,7 @@ const roadmapCategories: RoadmapCategory[] = [
 				title: "Session Revocation",
 				description:
 					"Enforce token revocation across all clients — Desktop, Mobile, and Extension.",
-				status: "in-progress",
+				status: "done",
 			},
 			{
 				title: "Master Password Re-Auth",

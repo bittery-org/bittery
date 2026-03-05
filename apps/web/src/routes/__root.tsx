@@ -77,6 +77,7 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 
 function RootDocument() {
 	const { locale } = useI18n();
+	const isDev = import.meta.env.DEV;
 
 	return (
 		<html lang={locale}>
@@ -86,8 +87,13 @@ function RootDocument() {
 			<body>
 				<Outlet />
 				<Toaster richColors />
-				<TanStackRouterDevtools position="bottom-left" />
-				<ReactQueryDevtools position="bottom" buttonPosition="bottom-right" />
+				{isDev && <TanStackRouterDevtools position="bottom-left" />}
+				{isDev && (
+					<ReactQueryDevtools
+						position="bottom"
+						buttonPosition="bottom-right"
+					/>
+				)}
 				<Scripts />
 			</body>
 		</html>

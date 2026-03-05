@@ -333,6 +333,7 @@ export class VaultRepository {
 		if (!muk) {
 			throw new Error("Master Unlock Key not available. Please log in again.");
 		}
+		const userId = await this.resolveUserId();
 
 		const encryptedPrivateKey = await this.storage.getEncryptedPrivateKey(
 			this.email,
@@ -342,6 +343,8 @@ export class VaultRepository {
 			encryptedVaultKey: vaultKeyData.encryptedVaultKey,
 			masterUnlockKey: muk,
 			encryptedPrivateKey,
+			expectedVaultId: vaultId,
+			expectedUserId: userId,
 			crypto: this.crypto as unknown as VaultKeyCryptoProvider,
 		});
 
