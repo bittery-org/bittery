@@ -1,7 +1,12 @@
-import { clearDesktopSyncState } from "@/lib/sync-client-id";
 import { invoke } from "@tauri-apps/api/core";
-import { Menu, MenuItem, PredefinedMenuItem, Submenu } from "@tauri-apps/api/menu";
+import {
+	Menu,
+	MenuItem,
+	PredefinedMenuItem,
+	Submenu,
+} from "@tauri-apps/api/menu";
 import { Store } from "@tauri-apps/plugin-store";
+import { clearDesktopSyncState } from "@/lib/sync-client-id";
 
 const RESET_MENU_ITEM_ID = "bittery-reset-app-completely";
 

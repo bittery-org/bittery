@@ -5,6 +5,8 @@
  * in the desktop app, but uses native Rust crypto via Tauri commands.
  */
 
+import { unwrapPlaintextWithContext } from "@bittery/shared/crypto-context-envelope";
+import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
 import type {
 	DerivedKeys,
 	EncryptedData,
@@ -16,8 +18,6 @@ import type {
 	SRPRegistration,
 	SRPServerChallenge,
 } from "@bittery/types";
-import { unwrapPlaintextWithContext } from "@bittery/shared/crypto-context-envelope";
-import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
 import { invoke } from "@tauri-apps/api/core";
 
 // Re-export types for consumers

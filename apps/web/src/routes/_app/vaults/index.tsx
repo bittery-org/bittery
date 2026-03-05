@@ -170,10 +170,18 @@ function VaultsPage() {
 						</div>
 
 						<div className="flex items-center gap-2 sm:shrink-0">
-							<Button variant="outline" size="sm" className="h-8 px-2 sm:px-3" asChild data-testid="open-trash-button">
+							<Button
+								variant="outline"
+								size="sm"
+								className="h-8 px-2 sm:px-3"
+								asChild
+								data-testid="open-trash-button"
+							>
 								<Link to="/vaults/trash">
 									<Trash className="mr-1.5 h-3.5 w-3.5" />
-									<span className="text-xs">{m["vaults.page.action.open_trash"]()}</span>
+									<span className="text-xs">
+										{m["vaults.page.action.open_trash"]()}
+									</span>
 								</Link>
 							</Button>
 
@@ -184,7 +192,9 @@ function VaultsPage() {
 								data-testid="new-vault-button"
 							>
 								<Plus className="mr-1.5 h-3.5 w-3.5" />
-								<span className="text-xs">{m["vaults.page.action.new_vault"]()}</span>
+								<span className="text-xs">
+									{m["vaults.page.action.new_vault"]()}
+								</span>
 							</Button>
 						</div>
 					</div>

@@ -293,33 +293,30 @@ export class SyncManager {
 				return;
 			}
 
-				// Handle connection message
-				if (event.type === "connected") {
-					console.log("SSE connected:", event);
-					return;
-				}
+			// Handle connection message
+			if (event.type === "connected") {
+				console.log("SSE connected:", event);
+				return;
+			}
 
-				// Handle control message for targeted session revocation.
-				if (
-					(eventType === "control" || event.type === "session_revoked") &&
-					event.type === "session_revoked"
-				) {
-					void this.onSessionRevoked?.({
-						type: "session_revoked",
-						userId: String(event.userId ?? ""),
-						sessionId: String(event.sessionId ?? ""),
-						timestamp:
-							typeof event.timestamp === "number"
-								? event.timestamp
-								: Date.now(),
-						reason:
-							typeof event.reason === "string" ? event.reason : undefined,
-					});
-					return;
-				}
+			// Handle control message for targeted session revocation.
+			if (
+				(eventType === "control" || event.type === "session_revoked") &&
+				event.type === "session_revoked"
+			) {
+				void this.onSessionRevoked?.({
+					type: "session_revoked",
+					userId: String(event.userId ?? ""),
+					sessionId: String(event.sessionId ?? ""),
+					timestamp:
+						typeof event.timestamp === "number" ? event.timestamp : Date.now(),
+					reason: typeof event.reason === "string" ? event.reason : undefined,
+				});
+				return;
+			}
 
-				// Convert to SyncEvent
-				const syncEvent: SyncEvent = {
+			// Convert to SyncEvent
+			const syncEvent: SyncEvent = {
 				id: event.id,
 				seq: event.seq,
 				type: event.type,

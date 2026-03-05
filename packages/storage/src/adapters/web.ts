@@ -193,7 +193,8 @@ export class WebStorageAdapter implements IStorageAdapter {
 			return null;
 		}
 
-		const restoredHandle = await this.decryptStoredMasterUnlockKeyHandleInternal();
+		const restoredHandle =
+			await this.decryptStoredMasterUnlockKeyHandleInternal();
 		if (restoredHandle) {
 			masterUnlockKeyHandleCache = restoredHandle;
 			return restoredHandle;
@@ -860,7 +861,9 @@ export class WebStorageAdapter implements IStorageAdapter {
 		}
 	}
 
-	private async decryptStoredMasterUnlockKeyHandleInternal(): Promise<number | null> {
+	private async decryptStoredMasterUnlockKeyHandleInternal(): Promise<
+		number | null
+	> {
 		if (!this.crypto.decryptKeyHandleWithWrappingKey) {
 			return null;
 		}

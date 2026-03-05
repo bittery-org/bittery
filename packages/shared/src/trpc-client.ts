@@ -2,13 +2,13 @@ import type { AppRouter } from "@bittery/api/routers/index";
 import type { QueryClient } from "@tanstack/react-query";
 import {
 	createTRPCClient,
-	httpBatchLink,
 	type HTTPHeaders,
+	httpBatchLink,
 } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 
 type TrpcFetch = (
-	url: string | URL,
+	url: RequestInfo | URL,
 	requestOptions?: RequestInit,
 ) => Promise<Response>;
 

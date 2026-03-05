@@ -89,10 +89,7 @@ function RootDocument() {
 				<Toaster richColors />
 				{isDev && <TanStackRouterDevtools position="bottom-left" />}
 				{isDev && (
-					<ReactQueryDevtools
-						position="bottom"
-						buttonPosition="bottom-right"
-					/>
+					<ReactQueryDevtools position="bottom" buttonPosition="bottom-right" />
 				)}
 				<Scripts />
 			</body>

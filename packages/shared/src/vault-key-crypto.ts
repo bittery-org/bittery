@@ -112,9 +112,7 @@ export interface VaultKeyStorageLike {
 	): Promise<Array<{ vaultId: string; encryptedVaultKey: string }> | null>;
 	getMasterUnlockKey(email?: string): Promise<Uint8Array | null>;
 	getEncryptedPrivateKey(email?: string): Promise<string | null>;
-	getStoredSessionData?(
-		email?: string,
-	): Promise<{ userId: string } | null>;
+	getStoredSessionData?(email?: string): Promise<{ userId: string } | null>;
 }
 
 /**
@@ -144,7 +142,10 @@ export async function decryptVaultKey({
 		if (wrapContext.purpose !== VAULT_KEY_WRAP_PURPOSE) {
 			throw new Error("Invalid vault key wrap purpose");
 		}
-		if (!Number.isInteger(wrapContext.keyVersion) || wrapContext.keyVersion < 1) {
+		if (
+			!Number.isInteger(wrapContext.keyVersion) ||
+			wrapContext.keyVersion < 1
+		) {
 			throw new Error("Invalid vault key wrap version");
 		}
 		if (expectedVaultId && wrapContext.vaultId !== expectedVaultId) {

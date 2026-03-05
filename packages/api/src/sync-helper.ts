@@ -124,7 +124,9 @@ export function setBroadcastFunction(fn: typeof broadcastFn): void {
 	broadcastFn = fn;
 }
 
-export function setControlBroadcastFunction(fn: typeof controlBroadcastFn): void {
+export function setControlBroadcastFunction(
+	fn: typeof controlBroadcastFn,
+): void {
 	controlBroadcastFn = fn;
 }
 

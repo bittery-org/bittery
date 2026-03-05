@@ -1,7 +1,7 @@
 import "./index.css";
 import { buildTrpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
-import { createAppTrpcClient } from "@bittery/shared/trpc-client";
 import { TRPCProvider } from "@bittery/shared/trpc";
+import { createAppTrpcClient } from "@bittery/shared/trpc-client";
 import { Toaster } from "@bittery/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {

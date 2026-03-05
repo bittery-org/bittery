@@ -1,5 +1,5 @@
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
+import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
@@ -223,20 +223,20 @@ export function useSignupForm({
 					masterUnlockKey,
 				);
 
-					// 5. Generate vault key and encrypt it
-					const vaultKey = await workerCrypto.generateEncryptionKey();
-					const vaultKeyBase64 = btoa(String.fromCharCode(...vaultKey));
-					const signupUserId = crypto.randomUUID();
-					const signupVaultId = crypto.randomUUID();
-					const encryptedVaultKey = await workerCrypto.encrypt(
-						vaultKeyBase64,
-						masterUnlockKey,
-						buildVaultKeyEncryptionContext({
-							vaultId: signupVaultId,
-							userId: signupUserId,
-							keyVersion: 1,
-						}),
-					);
+				// 5. Generate vault key and encrypt it
+				const vaultKey = await workerCrypto.generateEncryptionKey();
+				const vaultKeyBase64 = btoa(String.fromCharCode(...vaultKey));
+				const signupUserId = crypto.randomUUID();
+				const signupVaultId = crypto.randomUUID();
+				const encryptedVaultKey = await workerCrypto.encrypt(
+					vaultKeyBase64,
+					masterUnlockKey,
+					buildVaultKeyEncryptionContext({
+						vaultId: signupVaultId,
+						userId: signupUserId,
+						keyVersion: 1,
+					}),
+				);
 
 				// 6. Get secret key hint
 				const secretKeyHint = await workerCrypto.getSecretKeyHint(secretKey);
@@ -251,10 +251,10 @@ export function useSignupForm({
 					recoveryKey.split("-").slice(0, 2).join("-") || "R1";
 
 				// 8. Call signup mutation
-					const result = await signupMutation.mutateAsync({
-						userId: signupUserId,
-						vaultId: signupVaultId,
-						email,
+				const result = await signupMutation.mutateAsync({
+					userId: signupUserId,
+					vaultId: signupVaultId,
+					email,
 					name: value.name,
 					plan: value.plan,
 					...(isCloudSelfServeSignup && value.plan === "team" && teamName
@@ -268,8 +268,8 @@ export function useSignupForm({
 					encryptedPrivateKey: JSON.stringify(encryptedPrivateKey),
 					encryptedMasterKey: JSON.stringify(encryptedMasterKey),
 					recoveryKeyHint,
-						encryptedVaultKey: JSON.stringify(encryptedVaultKey),
-					} as any);
+					encryptedVaultKey: JSON.stringify(encryptedVaultKey),
+				} as any);
 
 				// 9. Store Master Unlock Key in memory
 				await storage.setMasterUnlockKey(masterUnlockKey);

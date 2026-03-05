@@ -486,7 +486,9 @@ export async function refreshSession(currentSessionId: string): Promise<{
 	const [existingSession] = await db
 		.select()
 		.from(session)
-		.where(and(eq(session.id, currentSessionId), gt(session.expiresAt, new Date())))
+		.where(
+			and(eq(session.id, currentSessionId), gt(session.expiresAt, new Date())),
+		)
 		.limit(1);
 
 	if (!existingSession) {

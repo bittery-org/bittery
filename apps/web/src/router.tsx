@@ -104,7 +104,7 @@ const trpcClient = createSessionRefreshingTrpcClient({
 	getSessionSnapshot: async () => {
 		const [token, sessionData] = await Promise.all([
 			storage.getAuthToken(),
-			storage.getStoredSessionData(),
+			storage.getStoredSessionData?.() ?? Promise.resolve(null),
 		]);
 		return {
 			token,

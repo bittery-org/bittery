@@ -143,11 +143,16 @@ function TeamPage() {
 								<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
 									{team.name}
 								</h1>
-								<Badge variant={roleBadgeVariant} className="px-1.5 py-0 text-[11px] capitalize">
+								<Badge
+									variant={roleBadgeVariant}
+									className="px-1.5 py-0 text-[11px] capitalize"
+								>
 									{getRoleLabel(team.userRole)}
 								</Badge>
 							</div>
-							<p className="text-muted-foreground text-xs">{memberCountLabel}</p>
+							<p className="text-muted-foreground text-xs">
+								{memberCountLabel}
+							</p>
 						</div>
 					</div>
 
@@ -164,11 +169,15 @@ function TeamPage() {
 				<TabsList className="w-full sm:w-fit">
 					<TabsTrigger value="members" className="flex-1 sm:flex-none">
 						<Users className="h-4 w-4 sm:mr-2" />
-						<span className="hidden sm:inline">{m["team.page.tab.members"]()}</span>
+						<span className="hidden sm:inline">
+							{m["team.page.tab.members"]()}
+						</span>
 					</TabsTrigger>
 					<TabsTrigger value="invitations" className="flex-1 sm:flex-none">
 						<Mail className="h-4 w-4 sm:mr-2" />
-						<span className="hidden sm:inline">{m["team.page.tab.invitations"]()}</span>
+						<span className="hidden sm:inline">
+							{m["team.page.tab.invitations"]()}
+						</span>
 						{invitationsQuery.data?.length ? (
 							<span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-primary-foreground text-xs">
 								{invitationsQuery.data.length}
@@ -177,7 +186,9 @@ function TeamPage() {
 					</TabsTrigger>
 					<TabsTrigger value="settings" className="flex-1 sm:flex-none">
 						<Settings className="h-4 w-4 sm:mr-2" />
-						<span className="hidden sm:inline">{m["team.page.tab.settings"]()}</span>
+						<span className="hidden sm:inline">
+							{m["team.page.tab.settings"]()}
+						</span>
 					</TabsTrigger>
 				</TabsList>
 

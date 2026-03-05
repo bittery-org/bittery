@@ -1,7 +1,7 @@
 import {
+	type SessionControlPayload,
 	setBroadcastFunction,
 	setControlBroadcastFunction,
-	type SessionControlPayload,
 } from "@bittery/api/sync-helper";
 import { verifySession } from "@bittery/auth";
 import { db, vaultKey } from "@bittery/db";
@@ -452,21 +452,21 @@ export function createSyncRouter(pubsub: PubSubAdapter): Hono {
 
 		await getUserVaults(userId);
 
-			return streamSSE(
-				c,
-				async (stream) => {
-					const abortController = new AbortController();
-					const channel = new EventChannel<StreamPayload>();
-					let eventId = 0;
-					let heartbeatCount = 0;
+		return streamSSE(
+			c,
+			async (stream) => {
+				const abortController = new AbortController();
+				const channel = new EventChannel<StreamPayload>();
+				let eventId = 0;
+				let heartbeatCount = 0;
 
-					const connection: Connection = {
-						id: connectionId,
-						userId,
-						sessionId,
-						channel,
-					};
-					addConnection(connection);
+				const connection: Connection = {
+					id: connectionId,
+					userId,
+					sessionId,
+					channel,
+				};
+				addConnection(connection);
 
 				stream.onAbort(() => {
 					abortController.abort();
@@ -484,54 +484,54 @@ export function createSyncRouter(pubsub: PubSubAdapter): Hono {
 					id: String(eventId++),
 				});
 
-					const writePayload = async (event: StreamPayload) => {
-						if (isSessionControlPayload(event)) {
-							await stream.writeSSE({
-								event: "control",
-								data: JSON.stringify(event),
-								id: String(eventId++),
-							});
-							return "disconnect" as const;
-						}
-
+				const writePayload = async (event: StreamPayload) => {
+					if (isSessionControlPayload(event)) {
 						await stream.writeSSE({
-							event: "sync",
+							event: "control",
 							data: JSON.stringify(event),
 							id: String(eventId++),
 						});
-						return "continue" as const;
-					};
+						return "disconnect" as const;
+					}
 
-					// Main event loop
-					while (!abortController.signal.aborted && !channel.isClosed()) {
-						try {
-							const queuedEvents = channel.drain();
-							for (const event of queuedEvents) {
-								const action = await writePayload(event);
-								if (action === "disconnect") {
-									abortController.abort();
-									break;
-								}
-							}
+					await stream.writeSSE({
+						event: "sync",
+						data: JSON.stringify(event),
+						id: String(eventId++),
+					});
+					return "continue" as const;
+				};
 
-							if (abortController.signal.aborted) {
+				// Main event loop
+				while (!abortController.signal.aborted && !channel.isClosed()) {
+					try {
+						const queuedEvents = channel.drain();
+						for (const event of queuedEvents) {
+							const action = await writePayload(event);
+							if (action === "disconnect") {
+								abortController.abort();
 								break;
 							}
+						}
 
-							const event = await channel.waitWithTimeout(
-								HEARTBEAT_INTERVAL,
-								abortController.signal,
-							);
+						if (abortController.signal.aborted) {
+							break;
+						}
 
-							if (event) {
-								const action = await writePayload(event);
-								if (action === "disconnect") {
-									break;
-								}
-							} else {
-								// Heartbeat — periodically re-validate session
-								heartbeatCount++;
-								if (heartbeatCount % SESSION_REVALIDATION_HEARTBEATS === 0) {
+						const event = await channel.waitWithTimeout(
+							HEARTBEAT_INTERVAL,
+							abortController.signal,
+						);
+
+						if (event) {
+							const action = await writePayload(event);
+							if (action === "disconnect") {
+								break;
+							}
+						} else {
+							// Heartbeat — periodically re-validate session
+							heartbeatCount++;
+							if (heartbeatCount % SESSION_REVALIDATION_HEARTBEATS === 0) {
 								const valid = await verifySession(token);
 								if (!valid) {
 									console.log(
@@ -543,12 +543,12 @@ export function createSyncRouter(pubsub: PubSubAdapter): Hono {
 								await getUserVaults(userId);
 							}
 
-								await stream.write(`: heartbeat ${Date.now()}\n\n`);
-							}
-						} catch {
-							break;
+							await stream.write(`: heartbeat ${Date.now()}\n\n`);
 						}
+					} catch {
+						break;
 					}
+				}
 
 				// Clean up on exit (may already be cleaned up by onAbort)
 				removeConnection(userId, connectionId);

@@ -1,7 +1,5 @@
 import { normalizeServerUrl } from "@bittery/shared/server-url";
-import {
-	createAppTrpcOptionsProxy,
-} from "@bittery/shared/trpc-client";
+import { createAppTrpcOptionsProxy } from "@bittery/shared/trpc-client";
 import { createSessionRefreshingTrpcClient } from "@bittery/shared/trpc-session-refresh";
 import { toast } from "@bittery/ui";
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";

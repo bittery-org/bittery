@@ -123,15 +123,15 @@ export function useSync(options: UseSyncOptions) {
 				storage: syncStorage,
 				fetch: fetchImpl,
 			},
-				trpcClient:
-					trpcClient as unknown as SyncOrchestratorOptions["trpcClient"],
-				itemCache: itemCacheAdapter,
-				outboundQueue,
-				itemCacheAccountEmail,
-				getClientForAccount,
-				onEventProcessed: invalidateForEvent,
-				onSessionRevoked,
-			});
+			trpcClient:
+				trpcClient as unknown as SyncOrchestratorOptions["trpcClient"],
+			itemCache: itemCacheAdapter,
+			outboundQueue,
+			itemCacheAccountEmail,
+			getClientForAccount,
+			onEventProcessed: invalidateForEvent,
+			onSessionRevoked,
+		});
 
 		orchestratorRef.current = orchestrator;
 		unsubscribeStatus = orchestrator.subscribe((nextStatus) => {
@@ -175,14 +175,14 @@ export function useSync(options: UseSyncOptions) {
 		clientId,
 		syncStorage,
 		fetchImpl,
-			trpcClient,
-			outboundQueue,
-			itemCacheAccountEmail,
-			getClientForAccount,
-			onSessionRevoked,
-			invalidateForEvent,
-			realtimeEnabled,
-		]);
+		trpcClient,
+		outboundQueue,
+		itemCacheAccountEmail,
+		getClientForAccount,
+		onSessionRevoked,
+		invalidateForEvent,
+		realtimeEnabled,
+	]);
 
 	/**
 	 * Manually trigger reconnection

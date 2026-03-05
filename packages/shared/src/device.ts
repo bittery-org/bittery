@@ -15,7 +15,10 @@ export interface DeviceInfo {
 /**
  * Parse User-Agent string to extract device information
  */
-export function parseUserAgent(userAgent: string, appPlatform?: string | null): DeviceInfo {
+export function parseUserAgent(
+	userAgent: string,
+	appPlatform?: string | null,
+): DeviceInfo {
 	const ua = userAgent.toLowerCase();
 
 	// Detect OS
@@ -131,7 +134,9 @@ export function parseUserAgent(userAgent: string, appPlatform?: string | null): 
 		deviceName = `Bittery Extension (${browserLabel}${osLabel})`;
 	} else if (platform === "ios") {
 		const osLabel = osName ?? "iOS";
-		deviceName = osVersion ? `Bittery on ${osLabel} ${osVersion}` : `Bittery on ${osLabel}`;
+		deviceName = osVersion
+			? `Bittery on ${osLabel} ${osVersion}`
+			: `Bittery on ${osLabel}`;
 	} else if (platform === "android") {
 		const osLabel = osVersion ? `Android ${osVersion}` : "Android";
 		deviceName = `Bittery on ${osLabel}`;

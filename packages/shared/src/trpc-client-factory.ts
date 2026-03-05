@@ -10,10 +10,9 @@
  * need to fetch data from a specific account that may not be active.
  */
 
-import type { AppRouter } from "@bittery/api/routers/index";
-import { createAppTrpcClient } from "./trpc-client";
 import { buildTrpcUrl, normalizeServerUrl } from "./server-url";
 import type { SessionSnapshot } from "./session-refresh";
+import { createAppTrpcClient } from "./trpc-client";
 import { createSessionRefreshingTrpcClient } from "./trpc-session-refresh";
 
 // Forward declare to avoid circular dependency with @bittery/storage
@@ -34,10 +33,17 @@ const DEFAULT_SERVER_URL =
  * Cache for tRPC clients to avoid creating new instances on every call.
  * Key format: `${serverUrl}:${authToken}`
  */
-const clientCache = new Map<
-	string,
-	ReturnType<typeof createTRPCClient<AppRouter>>
->();
+const clientCache = new Map<string, ReturnType<typeof createAppTrpcClient>>();
+
+function getRequestUrl(input: RequestInfo | URL): string {
+	if (typeof input === "string") {
+		return input;
+	}
+	if (input instanceof URL) {
+		return input.toString();
+	}
+	return input.url;
+}
 
 /**
  * Generate cache key for tRPC client.
@@ -103,7 +109,12 @@ export function createAccountTrpcClient(
 	const normalizedUrl = normalizeServerUrl(serverUrl) ?? DEFAULT_SERVER_URL;
 	const resolvedClientId = clientId ?? getRuntimeClientId();
 	const mode = sessionRefresh ? "session-refresh" : "static";
-	const cacheKey = getCacheKey(authToken, normalizedUrl, resolvedClientId, mode);
+	const cacheKey = getCacheKey(
+		authToken,
+		normalizedUrl,
+		resolvedClientId,
+		mode,
+	);
 
 	// Return cached client if exists
 	const cachedClient = clientCache.get(cacheKey);
@@ -130,7 +141,7 @@ export function createAccountTrpcClient(
 					...(resolvedClientId ? { "X-Client-Id": resolvedClientId } : {}),
 				},
 				fetch: (url, options) => {
-					const resolvedUrl = buildTrpcUrl(normalizedUrl, url as string);
+					const resolvedUrl = buildTrpcUrl(normalizedUrl, getRequestUrl(url));
 					return fetch(resolvedUrl, {
 						...options,
 						credentials: "include",

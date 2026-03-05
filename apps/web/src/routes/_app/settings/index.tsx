@@ -97,19 +97,27 @@ function SettingsPage() {
 				<TabsList className="w-full sm:w-fit">
 					<TabsTrigger value="account" className="flex-1 sm:flex-none">
 						<User className="h-4 w-4 sm:mr-2" />
-						<span className="hidden sm:inline">{m["settings.tab.account"]()}</span>
+						<span className="hidden sm:inline">
+							{m["settings.tab.account"]()}
+						</span>
 					</TabsTrigger>
 					<TabsTrigger value="security" className="flex-1 sm:flex-none">
 						<Shield className="h-4 w-4 sm:mr-2" />
-						<span className="hidden sm:inline">{m["settings.tab.security"]()}</span>
+						<span className="hidden sm:inline">
+							{m["settings.tab.security"]()}
+						</span>
 					</TabsTrigger>
 					<TabsTrigger value="devices" className="flex-1 sm:flex-none">
 						<Mobile className="h-4 w-4 sm:mr-2" />
-						<span className="hidden sm:inline">{m["settings.tab.devices"]()}</span>
+						<span className="hidden sm:inline">
+							{m["settings.tab.devices"]()}
+						</span>
 					</TabsTrigger>
 					<TabsTrigger value="general" className="flex-1 sm:flex-none">
 						<Gear className="h-4 w-4 sm:mr-2" />
-						<span className="hidden sm:inline">{m["settings.tab.general"]()}</span>
+						<span className="hidden sm:inline">
+							{m["settings.tab.general"]()}
+						</span>
 					</TabsTrigger>
 				</TabsList>
 
@@ -136,7 +144,7 @@ function SettingsPage() {
 								{/* Name */}
 								<div className="rounded-xl border bg-card p-5">
 									<div className="flex items-center gap-3">
-									<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+										<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
 											<User className="h-4 w-4 text-muted-foreground" />
 										</div>
 										<div className="min-w-0 flex-1">
@@ -152,9 +160,9 @@ function SettingsPage() {
 
 								{/* Email */}
 								<div className="rounded-xl border bg-card p-5">
-								<div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+									<div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
 										<div className="flex items-center gap-3">
-										<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+											<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
 												<Mail className="h-4 w-4 text-muted-foreground" />
 											</div>
 											<div className="min-w-0 flex-1">
@@ -175,7 +183,7 @@ function SettingsPage() {
 								{/* Secret Key Hint */}
 								<div className="rounded-xl border bg-card p-5 sm:col-span-2">
 									<div className="flex items-center gap-3">
-									<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+										<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
 											<Fingerprint className="h-4 w-4 text-muted-foreground" />
 										</div>
 										<div className="min-w-0 flex-1">
@@ -380,7 +388,7 @@ function SettingsPage() {
 						<div className="rounded-xl border bg-card p-5">
 							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 								<div className="flex items-start gap-3">
-								<div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+									<div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
 										<Upload className="h-4 w-4 text-muted-foreground" />
 									</div>
 									<div className="space-y-1">

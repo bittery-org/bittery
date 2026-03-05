@@ -185,12 +185,11 @@ interface HandleCapableCrypto extends ICrypto {
 		email: string,
 	) => Promise<{ authKeyHandle: number; masterUnlockKeyHandle: number }>;
 	deriveSrpPasswordFromHandle: (authKeyHandle: number) => Promise<string>;
+	// biome-ignore lint/suspicious/noConfusingVoidType: wasm needs this
 	destroyKeyHandle?: (keyHandle: number) => Promise<void | boolean>;
 }
 
-function asHandleCapableCrypto(
-	crypto: ICrypto,
-): HandleCapableCrypto | null {
+function asHandleCapableCrypto(crypto: ICrypto): HandleCapableCrypto | null {
 	const candidate = crypto as Partial<HandleCapableCrypto>;
 	if (
 		typeof candidate.deriveKeyHandles === "function" &&

@@ -88,7 +88,10 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 		await storage.clearSession();
 		queryClient.clear();
 
-		if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+		if (
+			typeof window !== "undefined" &&
+			window.location.pathname !== "/login"
+		) {
 			window.location.href = "/login";
 		}
 	}, [queryClient]);

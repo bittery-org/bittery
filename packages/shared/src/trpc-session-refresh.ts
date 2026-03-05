@@ -1,8 +1,5 @@
-import {
-	SessionRefreshManager,
-	type SessionSnapshot,
-} from "./session-refresh";
 import { buildTrpcUrl } from "./server-url";
+import { SessionRefreshManager, type SessionSnapshot } from "./session-refresh";
 import { createAppTrpcClient } from "./trpc-client";
 
 interface SessionRefreshingFetchOptions {
@@ -17,6 +14,16 @@ interface SessionRefreshingFetchOptions {
 	appPlatform?: string;
 }
 
+function getRequestUrl(input: RequestInfo | URL): string {
+	if (typeof input === "string") {
+		return input;
+	}
+	if (input instanceof URL) {
+		return input.toString();
+	}
+	return input.url;
+}
+
 function toHeaderRecord(headers?: HeadersInit): Record<string, string> {
 	if (!headers) {
 		return {};
@@ -29,14 +36,12 @@ function toHeaderRecord(headers?: HeadersInit): Record<string, string> {
 	return normalized;
 }
 
-async function createAuthHeaders(
-	options: {
-		baseHeaders?: HeadersInit;
-		token: string | null;
-		clientId: string | null;
-		appPlatform?: string;
-	},
-): Promise<Record<string, string>> {
+async function createAuthHeaders(options: {
+	baseHeaders?: HeadersInit;
+	token: string | null;
+	clientId: string | null;
+	appPlatform?: string;
+}): Promise<Record<string, string>> {
 	const headers = toHeaderRecord(options.baseHeaders);
 
 	if (options.token) {
@@ -56,7 +61,7 @@ async function createAuthHeaders(
 
 export function createSessionRefreshingTrpcFetch(
 	options: SessionRefreshingFetchOptions,
-): (url: string | URL, requestOptions?: RequestInit) => Promise<Response> {
+): (url: RequestInfo | URL, requestOptions?: RequestInit) => Promise<Response> {
 	const refreshClient = createAppTrpcClient({
 		serverUrl: options.defaultServerUrl,
 		async fetch(url, requestOptions) {
@@ -66,7 +71,7 @@ export function createSessionRefreshingTrpcFetch(
 				options.getClientId?.() ?? Promise.resolve(null),
 			]);
 
-			const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
+			const resolvedUrl = buildTrpcUrl(serverUrl, getRequestUrl(url));
 			const headers = await createAuthHeaders({
 				baseHeaders: requestOptions?.headers,
 				token: refreshToken,
@@ -91,13 +96,13 @@ export function createSessionRefreshingTrpcFetch(
 		},
 	});
 
-	return async (url: string | URL, requestOptions?: RequestInit) => {
+	return async (url: RequestInfo | URL, requestOptions?: RequestInit) => {
 		const [serverUrl, authToken, clientId] = await Promise.all([
 			options.getServerUrl(),
 			refreshManager.getToken(),
 			options.getClientId?.() ?? Promise.resolve(null),
 		]);
-		const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
+		const resolvedUrl = buildTrpcUrl(serverUrl, getRequestUrl(url));
 		const headers = await createAuthHeaders({
 			baseHeaders: requestOptions?.headers,
 			token: authToken,

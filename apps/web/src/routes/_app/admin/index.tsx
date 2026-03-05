@@ -493,7 +493,9 @@ function TeamAdminConsolePage() {
 							<Table>
 								<TableHeader>
 									<TableRow>
-										<TableHead className="whitespace-nowrap">{m["admin.page.table.header.time"]()}</TableHead>
+										<TableHead className="whitespace-nowrap">
+											{m["admin.page.table.header.time"]()}
+										</TableHead>
 										<TableHead className="whitespace-nowrap">
 											{m["admin.page.table.header.action"]()}
 										</TableHead>
@@ -514,7 +516,11 @@ function TeamAdminConsolePage() {
 								</TableHeader>
 								<TableBody>
 									{allEvents.map((event) => (
-										<TableRow key={`${event.source}-${event.id}`} className="cursor-pointer" onClick={() => setSelectedEvent(event)}>
+										<TableRow
+											key={`${event.source}-${event.id}`}
+											className="cursor-pointer"
+											onClick={() => setSelectedEvent(event)}
+										>
 											<TableCell className="whitespace-nowrap text-muted-foreground text-xs">
 												{formatTimestamp(event.timestamp)}
 											</TableCell>
@@ -523,7 +529,10 @@ function TeamAdminConsolePage() {
 													<span className="font-medium text-sm">
 														{getEventActionLabel(event.action, m)}
 													</span>
-													<Badge variant="outline" className="w-fit capitalize text-[11px]">
+													<Badge
+														variant="outline"
+														className="w-fit text-[11px] capitalize"
+													>
 														{getActionGroupLabel(event.actionGroup, m)}
 													</Badge>
 												</div>
@@ -565,7 +574,10 @@ function TeamAdminConsolePage() {
 												<Button
 													size="sm"
 													variant="ghost"
-													onClick={(e) => { e.stopPropagation(); setSelectedEvent(event); }}
+													onClick={(e) => {
+														e.stopPropagation();
+														setSelectedEvent(event);
+													}}
 												>
 													{m["admin.page.table.action.view"]()}
 												</Button>

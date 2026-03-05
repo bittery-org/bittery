@@ -44,14 +44,23 @@ function RouteComponent() {
 					</div>
 
 					<div className="flex items-center gap-2 sm:shrink-0">
-						<Button variant="outline" size="sm" className="h-8 px-2 sm:px-3" asChild>
+						<Button
+							variant="outline"
+							size="sm"
+							className="h-8 px-2 sm:px-3"
+							asChild
+						>
 							<Link to="/settings">
-								<span className="text-xs">{m["dashboard.home.button.account_settings"]()}</span>
+								<span className="text-xs">
+									{m["dashboard.home.button.account_settings"]()}
+								</span>
 							</Link>
 						</Button>
 						<Button size="sm" className="h-8 px-2 sm:px-3" asChild>
 							<Link to="/vaults">
-								<span className="text-xs">{m["dashboard.home.button.open_vaults"]()}</span>
+								<span className="text-xs">
+									{m["dashboard.home.button.open_vaults"]()}
+								</span>
 							</Link>
 						</Button>
 					</div>

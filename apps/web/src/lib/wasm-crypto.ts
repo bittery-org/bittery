@@ -6,29 +6,29 @@
  */
 
 import init, {
-	cloneKeyHandle as wasmCloneKeyHandle,
 	JsAadContext,
 	JsEncryptedData,
 	type JsSession,
 	JsSrpClient,
+	cloneKeyHandle as wasmCloneKeyHandle,
 	decrypt as wasmDecrypt,
 	decryptKeyHandleWithKey as wasmDecryptKeyHandleWithKey,
-	decryptWithContextHandle as wasmDecryptWithContextHandle,
-	decryptWithContext as wasmDecryptWithContext,
-	decryptWithHandle as wasmDecryptWithHandle,
 	decryptMasterKey as wasmDecryptMasterKey,
-	deriveKeysHandle as wasmDeriveKeysHandle,
+	decryptWithContext as wasmDecryptWithContext,
+	decryptWithContextHandle as wasmDecryptWithContextHandle,
+	decryptWithHandle as wasmDecryptWithHandle,
 	deriveKeys as wasmDeriveKeys,
 	deriveKeysFromMasterKey as wasmDeriveKeysFromMasterKey,
+	deriveKeysHandle as wasmDeriveKeysHandle,
 	deriveMasterKey as wasmDeriveMasterKey,
 	deriveSrpPasswordFromHandle as wasmDeriveSrpPasswordFromHandle,
 	destroyKeyHandle as wasmDestroyKeyHandle,
 	encrypt as wasmEncrypt,
 	encryptKeyHandleWithKey as wasmEncryptKeyHandleWithKey,
-	encryptWithContextHandle as wasmEncryptWithContextHandle,
-	encryptWithContext as wasmEncryptWithContext,
-	encryptWithHandle as wasmEncryptWithHandle,
 	encryptMasterKey as wasmEncryptMasterKey,
+	encryptWithContext as wasmEncryptWithContext,
+	encryptWithContextHandle as wasmEncryptWithContextHandle,
+	encryptWithHandle as wasmEncryptWithHandle,
 	exportKeyHandle as wasmExportKeyHandle,
 	generateEncryptionKey as wasmGenerateEncryptionKey,
 	generateRecoveryKey as wasmGenerateRecoveryKey,
@@ -44,12 +44,8 @@ import init, {
 	validateRotationData as wasmValidateRotationData,
 	validateSecretKey as wasmValidateSecretKey,
 } from "@bittery/crypto-wasm";
-import {
-	unwrapPlaintextWithContext,
-} from "@bittery/shared/crypto-context-envelope";
-import {
-	attachVaultKeyWrapContext,
-} from "@bittery/shared/vault-key-crypto";
+import { unwrapPlaintextWithContext } from "@bittery/shared/crypto-context-envelope";
+import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
 import type {
 	DerivedKeys,
 	EncryptedData,
@@ -337,10 +333,9 @@ export async function encrypt(
 	await autoInit();
 
 	const keyBase64 = uint8ArrayToBase64(key);
-	const result =
-		context
-			? wasmEncryptWithContext(plaintext, keyBase64, toWasmAadContext(context))
-			: wasmEncrypt(plaintext, keyBase64);
+	const result = context
+		? wasmEncryptWithContext(plaintext, keyBase64, toWasmAadContext(context))
+		: wasmEncrypt(plaintext, keyBase64);
 	const encryptedData: EncryptedData = {
 		ciphertext: result.ciphertext,
 		iv: result.iv,
@@ -368,14 +363,13 @@ export async function encryptWithKeyHandle(
 ): Promise<EncryptedData> {
 	await autoInit();
 
-	const result =
-		context
-			? wasmEncryptWithContextHandle(
-					plaintext,
-					toWasmHandle(keyHandle),
-					toWasmAadContext(context),
-				)
-			: wasmEncryptWithHandle(plaintext, toWasmHandle(keyHandle));
+	const result = context
+		? wasmEncryptWithContextHandle(
+				plaintext,
+				toWasmHandle(keyHandle),
+				toWasmAadContext(context),
+			)
+		: wasmEncryptWithHandle(plaintext, toWasmHandle(keyHandle));
 	const encryptedData: EncryptedData = {
 		ciphertext: result.ciphertext,
 		iv: result.iv,
@@ -932,7 +926,8 @@ export async function performKeyRotation(
 	// Parse the results from WASM
 	const memberEncryptedKeys =
 		result.getMemberEncryptedKeys() as WasmMemberEncryptedKey[];
-	const reEncryptedItems = result.getReEncryptedItems() as WasmReEncryptedItem[];
+	const reEncryptedItems =
+		result.getReEncryptedItems() as WasmReEncryptedItem[];
 	const normalizedMemberEncryptedKeys = memberEncryptedKeys.map((m) => ({
 		userId: m.user_id,
 		encryptedVaultKey: m.encrypted_vault_key,

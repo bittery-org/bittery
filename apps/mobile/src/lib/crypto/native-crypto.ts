@@ -25,8 +25,8 @@ import {
 	unwrapPlaintextWithContext,
 	wrapPlaintextWithContext,
 } from "@bittery/shared/crypto-context-envelope";
-import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
 import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
+import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
 import type {
 	DerivedKeys,
 	EncryptedData,

@@ -132,7 +132,7 @@ function VaultDetailPage() {
 	const selectedItem =
 		selectedItemId === null
 			? null
-			: decryptedItems.find((item) => item.id === selectedItemId) ?? null;
+			: (decryptedItems.find((item) => item.id === selectedItemId) ?? null);
 	const createItem = useCreateItem();
 	const updateItem = useUpdateItem();
 	const deleteItem = useDeleteItem();
@@ -494,7 +494,9 @@ function VaultDetailPage() {
 							>
 								<Link to="/vaults">
 									<ArrowLeft className="h-3.5 w-3.5 sm:mr-1.5" />
-									<span className="hidden sm:inline">{m["vaults.detail.action.all_vaults"]()}</span>
+									<span className="hidden sm:inline">
+										{m["vaults.detail.action.all_vaults"]()}
+									</span>
 								</Link>
 							</Button>
 							{canWriteItems && (
@@ -506,7 +508,9 @@ function VaultDetailPage() {
 									data-testid="new-item-button"
 								>
 									<Plus className="h-3.5 w-3.5 sm:mr-1.5" />
-									<span className="hidden sm:inline">{m["vaults.detail.action.new_item"]()}</span>
+									<span className="hidden sm:inline">
+										{m["vaults.detail.action.new_item"]()}
+									</span>
 								</Button>
 							)}
 							{hasVaultMenuActions && (
@@ -519,7 +523,9 @@ function VaultDetailPage() {
 											data-testid="vault-menu-button"
 										>
 											<Dots className="h-3.5 w-3.5 sm:mr-1.5" />
-											<span className="hidden sm:inline">{m["vaults.detail.action.manage"]()}</span>
+											<span className="hidden sm:inline">
+												{m["vaults.detail.action.manage"]()}
+											</span>
 										</Button>
 									</DropdownMenuTrigger>
 									<DropdownMenuContent align="end">

@@ -107,7 +107,13 @@ function UserNav() {
 						sideOffset={4}
 					>
 						<DropdownMenuItem asChild>
-							<Link to="/settings" className="cursor-pointer" onClick={() => { if (isMobile) setOpenMobile(false); }}>
+							<Link
+								to="/settings"
+								className="cursor-pointer"
+								onClick={() => {
+									if (isMobile) setOpenMobile(false);
+								}}
+							>
 								<Settings className="mr-2 h-4 w-4" />
 								{m["nav.menu.settings"]()}
 							</Link>

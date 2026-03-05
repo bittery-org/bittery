@@ -80,6 +80,8 @@ export interface CryptoProvider {
 
 	/**
 	 * Destroy an opaque key handle.
+	 * 
 	 */
+	// biome-ignore lint/suspicious/noConfusingVoidType: wasm needs this
 	destroyKeyHandle?(keyHandle: number): Promise<void | boolean>;
 }

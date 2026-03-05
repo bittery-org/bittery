@@ -15,14 +15,14 @@ import init, {
 	JsSrpClient,
 	buildPasskeyAttestationObject as wasmBuildPasskeyAttestationObject,
 	decrypt as wasmDecrypt,
-	decryptWithContext as wasmDecryptWithContext,
 	decryptMasterKey as wasmDecryptMasterKey,
+	decryptWithContext as wasmDecryptWithContext,
 	deriveKeys as wasmDeriveKeys,
 	deriveKeysFromMasterKey as wasmDeriveKeysFromMasterKey,
 	deriveMasterKey as wasmDeriveMasterKey,
 	encrypt as wasmEncrypt,
-	encryptWithContext as wasmEncryptWithContext,
 	encryptMasterKey as wasmEncryptMasterKey,
+	encryptWithContext as wasmEncryptWithContext,
 	generateEncryptionKey as wasmGenerateEncryptionKey,
 	generatePasskeyCredentialId as wasmGeneratePasskeyCredentialId,
 	generatePasskeyKeypair as wasmGeneratePasskeyKeypair,
@@ -33,12 +33,8 @@ import init, {
 	validateRecoveryKey as wasmValidateRecoveryKey,
 	validateSecretKey as wasmValidateSecretKey,
 } from "@bittery/crypto-wasm";
-import {
-	unwrapPlaintextWithContext,
-} from "@bittery/shared/crypto-context-envelope";
-import {
-	attachVaultKeyWrapContext,
-} from "@bittery/shared/vault-key-crypto";
+import { unwrapPlaintextWithContext } from "@bittery/shared/crypto-context-envelope";
+import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
 import type {
 	DerivedKeys,
 	EncryptedData,
@@ -240,10 +236,9 @@ export async function encrypt(
 	await autoInit();
 
 	const keyBase64 = uint8ArrayToBase64(key);
-	const result =
-		context
-			? wasmEncryptWithContext(plaintext, keyBase64, toWasmAadContext(context))
-			: wasmEncrypt(plaintext, keyBase64);
+	const result = context
+		? wasmEncryptWithContext(plaintext, keyBase64, toWasmAadContext(context))
+		: wasmEncrypt(plaintext, keyBase64);
 	const encryptedData: EncryptedData = {
 		ciphertext: result.ciphertext,
 		iv: result.iv,

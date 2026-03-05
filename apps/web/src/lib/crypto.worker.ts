@@ -3,28 +3,28 @@
  * Handles all ICrypto methods off the main thread.
  */
 import init, {
-	cloneKeyHandle as wasmCloneKeyHandle,
 	JsAadContext,
 	JsEncryptedData,
 	JsSrpClient,
+	cloneKeyHandle as wasmCloneKeyHandle,
 	decrypt as wasmDecrypt,
 	decryptKeyHandleWithKey as wasmDecryptKeyHandleWithKey,
-	decryptWithContextHandle as wasmDecryptWithContextHandle,
-	decryptWithContext as wasmDecryptWithContext,
-	decryptWithHandle as wasmDecryptWithHandle,
 	decryptMasterKey as wasmDecryptMasterKey,
-	deriveKeysHandle as wasmDeriveKeysHandle,
+	decryptWithContext as wasmDecryptWithContext,
+	decryptWithContextHandle as wasmDecryptWithContextHandle,
+	decryptWithHandle as wasmDecryptWithHandle,
 	deriveKeys as wasmDeriveKeys,
 	deriveKeysFromMasterKey as wasmDeriveKeysFromMasterKey,
+	deriveKeysHandle as wasmDeriveKeysHandle,
 	deriveMasterKey as wasmDeriveMasterKey,
 	deriveSrpPasswordFromHandle as wasmDeriveSrpPasswordFromHandle,
 	destroyKeyHandle as wasmDestroyKeyHandle,
 	encrypt as wasmEncrypt,
 	encryptKeyHandleWithKey as wasmEncryptKeyHandleWithKey,
-	encryptWithContextHandle as wasmEncryptWithContextHandle,
-	encryptWithContext as wasmEncryptWithContext,
-	encryptWithHandle as wasmEncryptWithHandle,
 	encryptMasterKey as wasmEncryptMasterKey,
+	encryptWithContext as wasmEncryptWithContext,
+	encryptWithContextHandle as wasmEncryptWithContextHandle,
+	encryptWithHandle as wasmEncryptWithHandle,
 	exportKeyHandle as wasmExportKeyHandle,
 	generateEncryptionKey as wasmGenerateEncryptionKey,
 	generateRecoveryKey as wasmGenerateRecoveryKey,
@@ -33,9 +33,7 @@ import init, {
 	validateRecoveryKey as wasmValidateRecoveryKey,
 	validateSecretKey as wasmValidateSecretKey,
 } from "@bittery/crypto-wasm";
-import {
-	unwrapPlaintextWithContext,
-} from "@bittery/shared/crypto-context-envelope";
+import { unwrapPlaintextWithContext } from "@bittery/shared/crypto-context-envelope";
 import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
 import type { EncryptionContext } from "@bittery/types";
 
@@ -322,10 +320,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 							toWasmHandle(msg.keyHandle),
 							toWasmAadContext(msg.context),
 						)
-					: wasmEncryptWithHandle(
-							msg.plaintext,
-							toWasmHandle(msg.keyHandle),
-						);
+					: wasmEncryptWithHandle(msg.plaintext, toWasmHandle(msg.keyHandle));
 				const encryptedData = {
 					ciphertext: enc.ciphertext,
 					iv: enc.iv,

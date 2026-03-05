@@ -1,5 +1,5 @@
-import type { IStorageAdapter } from "@bittery/storage/adapter";
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
+import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ICrypto } from "@bittery/types";
 import type { AccountResolver, DefaultTrpcClient } from "./account-resolver";
 
@@ -162,7 +162,7 @@ export class VaultService {
 		}
 		const vaultId = this.crypto.generateUuid
 			? await this.crypto.generateUuid()
-			: globalThis.crypto?.randomUUID?.() ?? `vault_${Date.now()}`;
+			: (globalThis.crypto?.randomUUID?.() ?? `vault_${Date.now()}`);
 
 		const vaultKeyBase64 = btoa(String.fromCharCode(...vaultKey));
 		const encryptedVaultKeyData = await this.crypto.encrypt(

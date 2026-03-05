@@ -322,7 +322,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
 							<div className="space-y-2">
 								<Label htmlFor="autoLockTimeout">
-									{m["settings.auto_lock.label.timeout"]()}
+									{m["settings.security.auto_lock"]()}
 								</Label>
 								<Select
 									value={autoLockTimeout}
@@ -330,7 +330,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 								>
 									<SelectTrigger id="autoLockTimeout">
 										<SelectValue
-											placeholder={m["settings.auto_lock.placeholder"]()}
+											placeholder={m["settings.security.auto_lock"]()}
 										/>
 									</SelectTrigger>
 									<SelectContent>
@@ -342,7 +342,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 									</SelectContent>
 								</Select>
 								<p className="text-muted-foreground text-xs">
-									{m["settings.auto_lock.description"]()}
+									{m["settings.security.auto_lock_description"]()}
 								</p>
 							</div>
 

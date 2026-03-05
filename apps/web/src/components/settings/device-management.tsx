@@ -24,11 +24,11 @@ import {
 } from "@bittery/ui";
 import {
 	IconPen2OutlineDuo18 as Edit2,
+	IconConnectedDots3OutlineDuo18 as Extension,
 	IconEarthOutlineDuo18 as Globe,
 	IconArrowDoorOutOutlineDuo18 as LogOut,
-	IconMobileOutlineDuo18 as Smartphone,
 	IconSquareTerminalOutlineDuo18 as Monitor,
-	IconConnectedDots3OutlineDuo18 as Extension,
+	IconMobileOutlineDuo18 as Smartphone,
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -352,7 +352,10 @@ function DeviceListSkeleton() {
 	return (
 		<div className="space-y-2">
 			{[1, 2, 3].map((i) => (
-				<div key={i} className="flex items-center gap-3 rounded-xl border bg-card p-4">
+				<div
+					key={i}
+					className="flex items-center gap-3 rounded-xl border bg-card p-4"
+				>
 					<Skeleton className="h-9 w-9 shrink-0 rounded-lg" />
 					<div className="flex-1 space-y-1.5">
 						<Skeleton className="h-4 w-32" />

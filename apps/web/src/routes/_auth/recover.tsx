@@ -1,5 +1,5 @@
-import { useTRPCClient } from "@bittery/shared/trpc";
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
+import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button, cn, Input, Label, toast } from "@bittery/ui";
 import {
 	IconCheckOutlineDuo18 as Check,
@@ -263,42 +263,44 @@ function RecoverRouteComponent() {
 				oldMasterUnlockKey,
 			);
 
-				const decryptedPersonalVaultKeys: Array<{
-					vaultId: string;
-					vaultKeyBase64: string;
-					keyVersion: number;
-				}> = [];
+			const decryptedPersonalVaultKeys: Array<{
+				vaultId: string;
+				vaultKeyBase64: string;
+				keyVersion: number;
+			}> = [];
 
-				for (const vaultKeyEntry of recoveryData.vaultKeys) {
-					if (vaultKeyEntry.createdById !== recoveryData.userId) {
-						continue;
-					}
-
-					const parsedVaultKey = parseEncryptedData(vaultKeyEntry.encryptedVaultKey) as {
-						ciphertext: string;
-						iv: string;
-						algorithm: string;
-						context?: { keyVersion?: number };
-					};
-					const keyVersion = Number.isInteger(parsedVaultKey.context?.keyVersion)
-						? (parsedVaultKey.context?.keyVersion as number)
-						: 1;
-					const decryptedVaultKeyBase64 = await workerCrypto.decrypt(
-						parsedVaultKey,
-						oldMasterUnlockKey,
-						buildVaultKeyEncryptionContext({
-							vaultId: vaultKeyEntry.vaultId,
-							userId: recoveryData.userId,
-							keyVersion,
-						}),
-					);
-
-					decryptedPersonalVaultKeys.push({
-						vaultId: vaultKeyEntry.vaultId,
-						vaultKeyBase64: decryptedVaultKeyBase64,
-						keyVersion,
-					});
+			for (const vaultKeyEntry of recoveryData.vaultKeys) {
+				if (vaultKeyEntry.createdById !== recoveryData.userId) {
+					continue;
 				}
+
+				const parsedVaultKey = parseEncryptedData(
+					vaultKeyEntry.encryptedVaultKey,
+				) as {
+					ciphertext: string;
+					iv: string;
+					algorithm: string;
+					context?: { keyVersion?: number };
+				};
+				const keyVersion = Number.isInteger(parsedVaultKey.context?.keyVersion)
+					? (parsedVaultKey.context?.keyVersion as number)
+					: 1;
+				const decryptedVaultKeyBase64 = await workerCrypto.decrypt(
+					parsedVaultKey,
+					oldMasterUnlockKey,
+					buildVaultKeyEncryptionContext({
+						vaultId: vaultKeyEntry.vaultId,
+						userId: recoveryData.userId,
+						keyVersion,
+					}),
+				);
+
+				decryptedPersonalVaultKeys.push({
+					vaultId: vaultKeyEntry.vaultId,
+					vaultKeyBase64: decryptedVaultKeyBase64,
+					keyVersion,
+				});
+			}
 
 			const newSecretKey = await generateSecretKeyAsync();
 
@@ -324,16 +326,16 @@ function RecoverRouteComponent() {
 				encryptedVaultKey: string;
 			}> = [];
 
-				for (const vaultKeyEntry of decryptedPersonalVaultKeys) {
-					const reEncryptedVaultKey = await workerCrypto.encrypt(
-						vaultKeyEntry.vaultKeyBase64,
-						newMasterUnlockKey,
-						buildVaultKeyEncryptionContext({
-							vaultId: vaultKeyEntry.vaultId,
-							userId: recoveryData.userId,
-							keyVersion: vaultKeyEntry.keyVersion,
-						}),
-					);
+			for (const vaultKeyEntry of decryptedPersonalVaultKeys) {
+				const reEncryptedVaultKey = await workerCrypto.encrypt(
+					vaultKeyEntry.vaultKeyBase64,
+					newMasterUnlockKey,
+					buildVaultKeyEncryptionContext({
+						vaultId: vaultKeyEntry.vaultId,
+						userId: recoveryData.userId,
+						keyVersion: vaultKeyEntry.keyVersion,
+					}),
+				);
 
 				encryptedVaultKeys.push({
 					vaultId: vaultKeyEntry.vaultId,

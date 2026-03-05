@@ -79,7 +79,7 @@ export const trpcClient = createSessionRefreshingTrpcClient({
 			activeAccount?.type === "single" ? activeAccount.email : undefined;
 		const [token, sessionData] = await Promise.all([
 			getAuthToken(),
-			storage.getStoredSessionData(email),
+			storage.getStoredSessionData?.(email) ?? Promise.resolve(null),
 		]);
 
 		return {

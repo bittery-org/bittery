@@ -123,15 +123,24 @@ function VaultTrashPage() {
 									{m["vaults.trash.hero.heading"]()}
 								</h1>
 								{!isLoading && (
-									<p className="text-muted-foreground text-xs">{trashCountLabel}</p>
+									<p className="text-muted-foreground text-xs">
+										{trashCountLabel}
+									</p>
 								)}
 							</div>
 						</div>
 
-						<Button variant="outline" size="sm" className="h-8 shrink-0 px-2 sm:px-3" asChild>
+						<Button
+							variant="outline"
+							size="sm"
+							className="h-8 shrink-0 px-2 sm:px-3"
+							asChild
+						>
 							<Link to="/vaults">
 								<ArrowLeft className="h-3.5 w-3.5 sm:mr-1.5" />
-								<span className="hidden sm:inline text-xs">{m["vaults.trash.action.back_to_vaults"]()}</span>
+								<span className="hidden text-xs sm:inline">
+									{m["vaults.trash.action.back_to_vaults"]()}
+								</span>
 							</Link>
 						</Button>
 					</div>
