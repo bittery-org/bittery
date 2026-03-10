@@ -28,7 +28,13 @@ app.use(
 	cors({
 		origin: process.env.CORS_ORIGIN?.split(",") || "",
 		allowMethods: ["GET", "POST", "OPTIONS"],
-		allowHeaders: ["Content-Type", "Authorization", "X-Client-Id"],
+		allowHeaders: [
+			"Content-Type",
+			"Authorization",
+			"X-Client-Id",
+			"X-App-Platform",
+		],
+		exposeHeaders: ["X-Session-Expires"],
 		credentials: true,
 	}),
 );
