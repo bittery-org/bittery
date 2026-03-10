@@ -2739,7 +2739,12 @@ export const vaultRouter = router({
 		 * Look up a user by email to get their public key for vault sharing
 		 */
 		lookupUser: protectedProcedure
-			.input(z.object({ email: z.string().email() }))
+			.input(
+				z.object({
+					vaultId: z.string(),
+					email: z.string().email(),
+				}),
+			)
 			.query(async ({ ctx, input }) => {
 				await assertUserEntitlement(
 					ctx.session.userId,
@@ -2747,12 +2752,37 @@ export const vaultRouter = router({
 					"Shared vault management is only available on Family or Team plans with active billing.",
 				);
 
-				// Don't allow looking up yourself
+				const actorVaultKey = await db.query.vaultKey.findFirst({
+					where: (record, { and: andFn, eq: eqFn }) =>
+						andFn(
+							eqFn(record.vaultId, input.vaultId),
+							eqFn(record.userId, ctx.session.userId),
+						),
+					with: {
+						vault: true,
+					},
+				});
+
+				if (!actorVaultKey || !["owner", "admin"].includes(actorVaultKey.role)) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Only vault owner or admin can manage members",
+					});
+				}
+
+				if (actorVaultKey.vault.type !== "team" || !actorVaultKey.vault.teamId) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "Only team vaults support adding members",
+					});
+				}
+
+				const normalizedEmail = input.email.trim().toLowerCase();
 				const currentUser = await db.query.user.findFirst({
 					where: (u, { eq }) => eq(u.id, ctx.session.userId),
 				});
 
-				if (currentUser?.email.toLowerCase() === input.email.toLowerCase()) {
+				if (currentUser?.email.toLowerCase() === normalizedEmail) {
 					throw new TRPCError({
 						code: "BAD_REQUEST",
 						message: "Cannot add yourself as a member",
@@ -2760,13 +2790,28 @@ export const vaultRouter = router({
 				}
 
 				const foundUser = await db.query.user.findFirst({
-					where: (u, { eq }) => eq(u.email, input.email.toLowerCase()),
+					where: (u, { eq }) => eq(u.email, normalizedEmail),
 				});
 
-				if (!foundUser) {
+				if (!foundUser || foundUser.teamId !== actorVaultKey.vault.teamId) {
 					throw new TRPCError({
 						code: "NOT_FOUND",
 						message: "User not found",
+					});
+				}
+
+				const existingVaultMember = await db.query.vaultKey.findFirst({
+					where: (record, { and: andFn, eq: eqFn }) =>
+						andFn(
+							eqFn(record.vaultId, input.vaultId),
+							eqFn(record.userId, foundUser.id),
+						),
+				});
+
+				if (existingVaultMember) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "User is already a member of this vault",
 					});
 				}
 

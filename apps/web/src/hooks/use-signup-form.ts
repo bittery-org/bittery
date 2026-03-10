@@ -19,14 +19,45 @@ export type { CloudPlanId } from "@bittery/shared/pricing";
 
 type CloudPlanId = import("@bittery/shared/pricing").CloudPlanId;
 
+type SignupFormValues = {
+	email: string;
+	password: string;
+	name: string;
+	plan: CloudPlanId;
+	organizationName: string;
+};
+
+type SignupMutationInput = {
+	userId?: string;
+	vaultId?: string;
+	email: string;
+	name: string;
+	plan?: CloudPlanId;
+	signupVerificationToken: string;
+	secretKeyHint: string;
+	srpSalt: string;
+	srpVerifier: string;
+	publicKey: string;
+	encryptedPrivateKey: string;
+	encryptedMasterKey: string;
+	recoveryKeyHint: string;
+	encryptedVaultKey: string;
+	organizationName?: string;
+	token?: string;
+};
+
 export function useSignupForm({
 	invitationToken,
 	redirectTo,
 	initialPlan,
+	verificationMode = "dialog",
+	onVerificationRequested,
 }: {
 	invitationToken?: string;
 	redirectTo?: string;
 	initialPlan?: CloudPlanId;
+	verificationMode?: "dialog" | "inline";
+	onVerificationRequested?: () => void;
 }) {
 	const navigate = useNavigate();
 	const trpc = useTRPC();
@@ -36,6 +67,18 @@ export function useSignupForm({
 	const [hasDownloadedKit, setHasDownloadedKit] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
 	const [isEncrypting, setIsEncrypting] = useState(false);
+	const [verificationDialogOpen, setVerificationDialogOpen] = useState(false);
+	const [verificationCode, setVerificationCode] = useState("");
+	const [verificationEmail, setVerificationEmail] = useState("");
+	const [pendingSubmission, setPendingSubmission] =
+		useState<SignupFormValues | null>(null);
+	const [signupVerificationToken, setSignupVerificationToken] = useState<
+		string | null
+	>(null);
+	const [verifiedEmail, setVerifiedEmail] = useState<string | null>(null);
+	const [verifiedInvitationToken, setVerifiedInvitationToken] = useState<
+		string | null
+	>(null);
 
 	// Query invitation details if token is provided
 	const invitationQuery = useQuery({
@@ -57,6 +100,22 @@ export function useSignupForm({
 	const isCloudSelfServeSignup = isCloudMode && !isInvitationSignup;
 	const allowPublicSignup = registrationStatus?.allowPublicSignup ?? true;
 
+	const normalizeSignupEmail = (email: string) => email.trim().toLowerCase();
+
+	const getSignupEmail = (value: SignupFormValues) => {
+		if (isInvitationSignup) {
+			return invitation?.email ?? "";
+		}
+
+		return value.email;
+	};
+
+	const resetVerifiedSignup = () => {
+		setSignupVerificationToken(null);
+		setVerifiedEmail(null);
+		setVerifiedInvitationToken(null);
+	};
+
 	// Generate Secret Key + Recovery Key on mount (WASM auto-initializes)
 	useEffect(() => {
 		Promise.all([generateSecretKeyAsync(), generateRecoveryKeyAsync()]).then(
@@ -67,30 +126,38 @@ export function useSignupForm({
 		);
 	}, []);
 
+	const requestSignupVerificationMutation = useMutation({
+		mutationFn: async (input: { email: string }) =>
+			trpcClient.auth.requestSignupVerification.mutate({
+				email: input.email,
+				...(invitationToken ? { invitationToken } : {}),
+			}),
+		onError: (error: any) => {
+			toast.error(error.message || "Failed to send verification code");
+		},
+	});
+
+	const verifySignupVerificationMutation = useMutation({
+		mutationFn: async (input: { email: string; code: string }) =>
+			trpcClient.auth.verifySignupVerification.mutate({
+				email: input.email,
+				code: input.code,
+				...(invitationToken ? { invitationToken } : {}),
+			}),
+		onError: (error: any) => {
+			toast.error(error.message || "Failed to verify code");
+		},
+	});
+
 	const signupMutation = useMutation({
-		mutationFn: async (input: {
-			userId?: string;
-			vaultId?: string;
-			email: string;
-			name: string;
-			plan?: CloudPlanId;
-			secretKeyHint: string;
-			srpSalt: string;
-			srpVerifier: string;
-			publicKey: string;
-			encryptedPrivateKey: string;
-			encryptedMasterKey: string;
-			recoveryKeyHint: string;
-			encryptedVaultKey: string;
-			organizationName?: string;
-			token?: string;
-		}) => {
+		mutationFn: async (input: SignupMutationInput) => {
 			if (isInvitationSignup) {
 				return trpcClient.auth.signupWithInvitation.mutate({
 					token: input.token || "",
 					userId: input.userId,
 					vaultId: input.vaultId,
 					email: input.email,
+					signupVerificationToken: input.signupVerificationToken,
 					name: input.name,
 					secretKeyHint: input.secretKeyHint,
 					srpSalt: input.srpSalt,
@@ -107,6 +174,7 @@ export function useSignupForm({
 				userId: input.userId,
 				vaultId: input.vaultId,
 				email: input.email,
+				signupVerificationToken: input.signupVerificationToken,
 				name: input.name,
 				plan: input.plan,
 				organizationName: input.organizationName,
@@ -168,6 +236,203 @@ export function useSignupForm({
 		},
 	});
 
+	const completeSignupSubmission = async (
+		value: SignupFormValues,
+		verificationToken: string,
+	) => {
+		const teamName = value.organizationName.trim();
+
+		setIsEncrypting(true);
+		const workerCrypto = new WorkerCrypto();
+		try {
+			const email = getSignupEmail(value);
+			if (!email) {
+				toast.error("Unable to determine the signup email.");
+				return;
+			}
+
+			const masterKey = await workerCrypto.deriveMasterKey(
+				value.password,
+				secretKey,
+				email,
+			);
+			const { authKey, masterUnlockKey } =
+				await workerCrypto.deriveKeysFromMasterKey(masterKey, email);
+
+			const srpPassword = new TextDecoder().decode(authKey);
+			const { salt, verifier } =
+				await workerCrypto.generateSRPRegistration(srpPassword);
+
+			const { publicKey, privateKey } = await workerCrypto.generateRSAKeyPair();
+
+			const encryptedPrivateKey = await workerCrypto.encrypt(
+				privateKey,
+				masterUnlockKey,
+			);
+
+			const vaultKey = await workerCrypto.generateEncryptionKey();
+			const vaultKeyBase64 = btoa(String.fromCharCode(...vaultKey));
+			const signupUserId = crypto.randomUUID();
+			const signupVaultId = crypto.randomUUID();
+			const encryptedVaultKey = await workerCrypto.encrypt(
+				vaultKeyBase64,
+				masterUnlockKey,
+				buildVaultKeyEncryptionContext({
+					vaultId: signupVaultId,
+					userId: signupUserId,
+					keyVersion: 1,
+				}),
+			);
+
+			const secretKeyHint = await workerCrypto.getSecretKeyHint(secretKey);
+			const encryptedMasterKey = await workerCrypto.encryptMasterKey(
+				masterKey,
+				recoveryKey,
+				email,
+			);
+			const recoveryKeyHint =
+				recoveryKey.split("-").slice(0, 2).join("-") || "R1";
+
+			const result = await signupMutation.mutateAsync({
+				userId: signupUserId,
+				vaultId: signupVaultId,
+				email,
+				name: value.name,
+				plan: value.plan,
+				signupVerificationToken: verificationToken,
+				...(isCloudSelfServeSignup && value.plan === "team" && teamName
+					? { organizationName: teamName }
+					: {}),
+				...(isInvitationSignup ? { token: invitationToken } : {}),
+				secretKeyHint,
+				srpSalt: salt,
+				srpVerifier: verifier,
+				publicKey,
+				encryptedPrivateKey: JSON.stringify(encryptedPrivateKey),
+				encryptedMasterKey: JSON.stringify(encryptedMasterKey),
+				recoveryKeyHint,
+				encryptedVaultKey: JSON.stringify(encryptedVaultKey),
+			});
+
+			await storage.setMasterUnlockKey(masterUnlockKey);
+			await storage.storeEncryptedPrivateKey(
+				JSON.stringify(encryptedPrivateKey),
+			);
+			await storage.storeSecretKey(secretKey);
+			await storage.storeSessionData(
+				masterUnlockKey,
+				email,
+				result.userId,
+				result.expiresAt,
+				result.sessionId,
+			);
+
+			const daysUntil = Math.floor(
+				DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24),
+			);
+
+			toast.success(
+				`Account created! Quick unlock available for ${daysUntil} days.`,
+			);
+		} catch (error: any) {
+			console.error("Signup error:", error);
+			toast.error(error.message || "Failed to create account");
+		} finally {
+			workerCrypto.terminate();
+			setIsEncrypting(false);
+		}
+	};
+
+	const beginSignupVerification = async (value: SignupFormValues) => {
+		const email = getSignupEmail(value);
+		if (!email) {
+			toast.error("Unable to determine the signup email.");
+			return;
+		}
+
+		resetVerifiedSignup();
+		try {
+			await requestSignupVerificationMutation.mutateAsync({ email });
+		} catch {
+			return;
+		}
+		setPendingSubmission(value);
+		setVerificationEmail(email);
+		setVerificationCode("");
+		if (verificationMode === "dialog") {
+			setVerificationDialogOpen(true);
+		}
+		onVerificationRequested?.();
+		toast.success("Verification code sent. Check your inbox.");
+	};
+
+	const submitSignupVerificationCode = async () => {
+		const currentValues = form.state.values;
+		const currentEmail = normalizeSignupEmail(getSignupEmail(currentValues));
+		const hasMatchingVerification =
+			signupVerificationToken &&
+			verifiedEmail === currentEmail &&
+			verifiedInvitationToken === (invitationToken ?? null);
+
+		if (hasMatchingVerification && signupVerificationToken) {
+			await completeSignupSubmission(currentValues, signupVerificationToken);
+			return;
+		}
+
+		if (!pendingSubmission) {
+			return;
+		}
+
+		const code = verificationCode.trim();
+		if (code.length !== 6) {
+			toast.error("Enter the 6-digit verification code.");
+			return;
+		}
+
+		try {
+			const result = await verifySignupVerificationMutation.mutateAsync({
+				email: verificationEmail,
+				code,
+			});
+
+			if (!result.success || !result.signupVerificationToken) {
+				toast.error("Invalid or expired verification code.");
+				return;
+			}
+
+			setSignupVerificationToken(result.signupVerificationToken);
+			setVerifiedEmail(normalizeSignupEmail(verificationEmail));
+			setVerifiedInvitationToken(invitationToken ?? null);
+			if (verificationMode === "dialog") {
+				setVerificationDialogOpen(false);
+			}
+			setVerificationCode("");
+			const submission = pendingSubmission;
+			setPendingSubmission(null);
+			await completeSignupSubmission(
+				submission,
+				result.signupVerificationToken,
+			);
+		} catch {
+			return;
+		}
+	};
+
+	const resendSignupVerificationCode = async () => {
+		if (!verificationEmail) {
+			return;
+		}
+
+		try {
+			await requestSignupVerificationMutation.mutateAsync({
+				email: verificationEmail,
+			});
+		} catch {
+			return;
+		}
+		toast.success("A new verification code has been sent.");
+	};
+
 	const form = useForm({
 		defaultValues: {
 			email: "",
@@ -187,124 +452,37 @@ export function useSignupForm({
 				toast.error("Please enter a team or business name to continue");
 				return;
 			}
+			const email = normalizeSignupEmail(getSignupEmail(value));
+			const hasMatchingVerification =
+				signupVerificationToken &&
+				verifiedEmail === email &&
+				verifiedInvitationToken === (invitationToken ?? null);
+			const hasMatchingPendingVerification =
+				pendingSubmission && normalizeSignupEmail(verificationEmail) === email;
 
-			setIsEncrypting(true);
-			const workerCrypto = new WorkerCrypto();
-			try {
-				// Use invitation email if signing up via invitation
-				const email = isInvitationSignup
-					? invitation?.email || value.email
-					: value.email;
+			if (!hasMatchingVerification || !signupVerificationToken) {
+				if (hasMatchingPendingVerification) {
+					setPendingSubmission(value);
+					onVerificationRequested?.();
+					return;
+				}
 
-				// All heavy crypto runs in a Web Worker via WorkerCrypto,
-				// keeping the main thread responsive with the spinner.
-
-				// 1. Derive raw master key, then split into auth + unlock keys
-				const masterKey = await workerCrypto.deriveMasterKey(
-					value.password,
-					secretKey,
-					email,
-				);
-				const { authKey, masterUnlockKey } =
-					await workerCrypto.deriveKeysFromMasterKey(masterKey, email);
-
-				// 2. Generate SRP credentials
-				const srpPassword = new TextDecoder().decode(authKey);
-				const { salt, verifier } =
-					await workerCrypto.generateSRPRegistration(srpPassword);
-
-				// 3. Generate RSA-4096 key pair
-				const { publicKey, privateKey } =
-					await workerCrypto.generateRSAKeyPair();
-
-				// 4. Encrypt private key with Master Unlock Key
-				const encryptedPrivateKey = await workerCrypto.encrypt(
-					privateKey,
-					masterUnlockKey,
-				);
-
-				// 5. Generate vault key and encrypt it
-				const vaultKey = await workerCrypto.generateEncryptionKey();
-				const vaultKeyBase64 = btoa(String.fromCharCode(...vaultKey));
-				const signupUserId = crypto.randomUUID();
-				const signupVaultId = crypto.randomUUID();
-				const encryptedVaultKey = await workerCrypto.encrypt(
-					vaultKeyBase64,
-					masterUnlockKey,
-					buildVaultKeyEncryptionContext({
-						vaultId: signupVaultId,
-						userId: signupUserId,
-						keyVersion: 1,
-					}),
-				);
-
-				// 6. Get secret key hint
-				const secretKeyHint = await workerCrypto.getSecretKeyHint(secretKey);
-
-				// 7. Encrypt raw master key with recovery key material
-				const encryptedMasterKey = await workerCrypto.encryptMasterKey(
-					masterKey,
-					recoveryKey,
-					email,
-				);
-				const recoveryKeyHint =
-					recoveryKey.split("-").slice(0, 2).join("-") || "R1";
-
-				// 8. Call signup mutation
-				const result = await signupMutation.mutateAsync({
-					userId: signupUserId,
-					vaultId: signupVaultId,
-					email,
-					name: value.name,
-					plan: value.plan,
-					...(isCloudSelfServeSignup && value.plan === "team" && teamName
-						? { organizationName: teamName }
-						: {}),
-					...(isInvitationSignup ? { token: invitationToken } : {}),
-					secretKeyHint,
-					srpSalt: salt,
-					srpVerifier: verifier,
-					publicKey,
-					encryptedPrivateKey: JSON.stringify(encryptedPrivateKey),
-					encryptedMasterKey: JSON.stringify(encryptedMasterKey),
-					recoveryKeyHint,
-					encryptedVaultKey: JSON.stringify(encryptedVaultKey),
-				} as any);
-
-				// 9. Store Master Unlock Key in memory
-				await storage.setMasterUnlockKey(masterUnlockKey);
-
-				// 10. Store encrypted private key for RSA decryption of shared vault keys
-				await storage.storeEncryptedPrivateKey(
-					JSON.stringify(encryptedPrivateKey),
-				);
-
-				// 11. Store secret key and encrypted session for quick unlock
-				await storage.storeSecretKey(secretKey);
-				await storage.storeSessionData(
-					masterUnlockKey,
-					email,
-					result.userId,
-					undefined,
-					result.sessionId,
-				);
-
-				const daysUntil = Math.floor(
-					DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24),
-				);
-
-				toast.success(
-					`Account created! Quick unlock available for ${daysUntil} days.`,
-				);
-			} catch (error: any) {
-				console.error("Signup error:", error);
-				toast.error(error.message || "Failed to create account");
-			} finally {
-				workerCrypto.terminate();
-				setIsEncrypting(false);
+				await beginSignupVerification(value);
+				return;
 			}
+
+			await completeSignupSubmission(value, signupVerificationToken);
 		},
 	});
+
+	const hasPendingVerification = Boolean(pendingSubmission);
+	const currentSignupEmail = normalizeSignupEmail(
+		getSignupEmail(form.state.values),
+	);
+	const hasVerifiedSignup =
+		Boolean(signupVerificationToken) &&
+		verifiedEmail === currentSignupEmail &&
+		verifiedInvitationToken === (invitationToken ?? null);
 
 	const downloadEmergencyKit = async () => {
 		if (!secretKey || !recoveryKey) {
@@ -360,6 +538,17 @@ export function useSignupForm({
 		showPassword,
 		setShowPassword,
 		isEncrypting,
+		verificationDialogOpen,
+		setVerificationDialogOpen,
+		verificationCode,
+		setVerificationCode,
+		verificationEmail,
+		hasPendingVerification,
+		hasVerifiedSignup,
+		requestSignupVerificationMutation,
+		verifySignupVerificationMutation,
+		submitSignupVerificationCode,
+		resendSignupVerificationCode,
 		downloadEmergencyKit,
 		invitationQuery,
 		registrationStatusQuery,

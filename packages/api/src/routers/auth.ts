@@ -12,20 +12,27 @@ import {
 	clearRecoveryRateLimit,
 	createRecoveryToken,
 	createRecoveryVerification,
+	createSignupVerification,
+	createSignupVerificationToken,
 	createUser,
 	createUserSession,
+	consumeSignupVerificationCode,
 	deleteAllUserSessions,
 	deleteOtherUserSessions,
 	deleteSession,
 	deleteUserAccount,
+	extractLoginAttemptRateLimitKey,
 	finishLogin,
 	getRecoveryData as getRecoveryDataForEmail,
+	getLoginAccountRateLimitKey,
 	getUserByEmail,
 	getUserById,
 	getUserSessions,
 	getUserVaultKeysForRecovery,
+	incrementRateLimitWindow,
 	LoginRateLimitError,
 	normalizeEmail,
+	RATE_LIMIT_NAMESPACE,
 	RecoveryRateLimitError,
 	recordFailedLoginAttempt,
 	recordFailedRecoveryAttempt,
@@ -41,6 +48,7 @@ import {
 	updateUserSecretKey,
 	verifyRecoveryCode as verifyRecoveryCodeAttempt,
 	verifyRecoveryToken,
+	verifySignupVerificationToken,
 } from "@bittery/auth";
 import { db, team, teamInvitation, user, vault, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
@@ -91,6 +99,15 @@ if (!hintSecret) {
 	);
 }
 const emailHintSecret = hintSecret;
+const LOGIN_SOURCE_WINDOW_LIMIT = 20;
+const LOGIN_SOURCE_WINDOW_MS = 5 * 60 * 1000;
+const SIGNUP_SOURCE_WINDOW_LIMIT = 5;
+const SIGNUP_SOURCE_WINDOW_MS = 60 * 60 * 1000;
+const INVITE_SIGNUP_SOURCE_WINDOW_LIMIT = 5;
+const INVITE_SIGNUP_SOURCE_WINDOW_MS = 60 * 60 * 1000;
+const REFRESH_SESSION_WINDOW_LIMIT = 30;
+const REFRESH_SESSION_WINDOW_MS = 5 * 60 * 1000;
+const GENERIC_DUPLICATE_SIGNUP_MESSAGE = "Unable to create account";
 
 function generateDeterministicFakeHint(email: string): string {
 	const digest = createHmac("sha256", emailHintSecret)
@@ -108,11 +125,125 @@ async function sendRecoveryCode(email: string, code: string): Promise<void> {
 	);
 }
 
+async function sendSignupVerificationCode(input: {
+	email: string;
+	code: string;
+	invitationToken?: string;
+}): Promise<void> {
+	// TODO: Wire a production email provider (SES/Resend/etc.).
+	console.info(
+		`[signup-verification-code] email=${normalizeEmail(input.email)} invitation=${input.invitationToken ? "invite" : "public"} code=${input.code} (dev stub)`,
+	);
+}
+
+async function getPendingInvitationForSignup(params: {
+	invitationToken: string;
+	email: string;
+}) {
+	const normalizedEmail = normalizeEmail(params.email);
+	const invitation = await db.query.teamInvitation.findFirst({
+		where: (inv, { and, eq }) =>
+			and(eq(inv.token, params.invitationToken), eq(inv.status, "pending")),
+		with: { team: true },
+	});
+
+	if (!invitation) {
+		throw new TRPCError({
+			code: "NOT_FOUND",
+			message: "Invitation not found or already used",
+		});
+	}
+
+	const invitationEntitlements = resolveEffectiveEntitlements({
+		mode: getBitteryMode(),
+		billingPlan: invitation.team.billingPlan,
+		billingStatus: invitation.team.billingStatus,
+	});
+	if (!invitationEntitlements.team_management) {
+		throw new TRPCError({
+			code: "FORBIDDEN",
+			message:
+				"This team cannot accept invitations on its current plan or billing status.",
+		});
+	}
+
+	if (invitation.expiresAt < new Date()) {
+		throw new TRPCError({
+			code: "BAD_REQUEST",
+			message: "Invitation has expired",
+		});
+	}
+
+	if (normalizeEmail(invitation.email) !== normalizedEmail) {
+		throw new TRPCError({
+			code: "BAD_REQUEST",
+			message: "Email does not match invitation",
+		});
+	}
+
+	return invitation;
+}
+
+async function assertValidSignupVerificationToken(input: {
+	signupVerificationToken: string;
+	email: string;
+	invitationToken?: string;
+}): Promise<void> {
+	const payload = await verifySignupVerificationToken(
+		input.signupVerificationToken,
+	);
+	const normalizedEmail = normalizeEmail(input.email);
+	const expectedInvitationToken = input.invitationToken ?? undefined;
+
+	if (
+		!payload ||
+		payload.email !== normalizedEmail ||
+		(payload.invitationToken ?? undefined) !== expectedInvitationToken
+	) {
+		throw new TRPCError({
+			code: "UNAUTHORIZED",
+			message: "Invalid signup verification",
+		});
+	}
+}
+
 async function hasAnyRegisteredUser(): Promise<boolean> {
 	const existingUser = await db.query.user.findFirst({
 		columns: { id: true },
 	});
 	return !!existingUser;
+}
+
+function buildSourceRateLimitKey(ipAddress: string): string {
+	return createHmac("sha256", emailHintSecret).update(ipAddress).digest("hex");
+}
+
+async function enforceSourceWindowLimit(input: {
+	namespace: string;
+	sourceIp: string | null;
+	limit: number;
+	windowMs: number;
+}): Promise<void> {
+	if (!input.sourceIp) {
+		return;
+	}
+
+	const now = new Date();
+	const result = await incrementRateLimitWindow({
+		namespace: input.namespace,
+		key: buildSourceRateLimitKey(input.sourceIp),
+		subject: input.sourceIp,
+		now,
+		windowStart: new Date(now.getTime() - input.windowMs),
+		limit: input.limit,
+	});
+
+	if (!result.allowed) {
+		throw new TRPCError({
+			code: "TOO_MANY_REQUESTS",
+			message: "Too many requests. Please try again later.",
+		});
+	}
 }
 
 export const authRouter = router({
@@ -134,6 +265,98 @@ export const authRouter = router({
 		};
 	}),
 
+	requestSignupVerification: publicProcedure
+		.input(
+			z.object({
+				email: z.string().email().max(255),
+				invitationToken: z.string().min(1).optional(),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			const normalizedEmail = normalizeEmail(input.email);
+			const selfHostedMode = isSelfHostedMode();
+
+			await enforceSourceWindowLimit({
+				namespace: input.invitationToken
+					? RATE_LIMIT_NAMESPACE.authInviteSignupSource
+					: RATE_LIMIT_NAMESPACE.authSignupSource,
+				sourceIp: ctx.device.ipAddress,
+				limit: input.invitationToken
+					? INVITE_SIGNUP_SOURCE_WINDOW_LIMIT
+					: SIGNUP_SOURCE_WINDOW_LIMIT,
+				windowMs: input.invitationToken
+					? INVITE_SIGNUP_SOURCE_WINDOW_MS
+					: SIGNUP_SOURCE_WINDOW_MS,
+			});
+
+			if (input.invitationToken) {
+				await getPendingInvitationForSignup({
+					invitationToken: input.invitationToken,
+					email: normalizedEmail,
+				});
+			} else if (selfHostedMode) {
+				const allowPublicSignup = !(await hasAnyRegisteredUser());
+				if (!allowPublicSignup) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message:
+							"Public registration is disabled. Ask an admin for an invite link.",
+					});
+				}
+			}
+
+			const code = await createSignupVerification({
+				email: normalizedEmail,
+				invitationToken: input.invitationToken,
+			});
+			await sendSignupVerificationCode({
+				email: normalizedEmail,
+				code,
+				invitationToken: input.invitationToken,
+			});
+
+			return { success: true as const };
+		}),
+
+	verifySignupVerification: publicProcedure
+		.input(
+			z.object({
+				email: z.string().email().max(255),
+				code: z.string().length(6),
+				invitationToken: z.string().min(1).optional(),
+			}),
+		)
+		.mutation(async ({ input }) => {
+			const normalizedEmail = normalizeEmail(input.email);
+
+			if (input.invitationToken) {
+				await getPendingInvitationForSignup({
+					invitationToken: input.invitationToken,
+					email: normalizedEmail,
+				});
+			}
+
+			const success = await consumeSignupVerificationCode({
+				email: normalizedEmail,
+				code: input.code,
+				invitationToken: input.invitationToken,
+			});
+
+			if (!success) {
+				return { success: false as const };
+			}
+
+			const signupVerificationToken = await createSignupVerificationToken({
+				email: normalizedEmail,
+				invitationToken: input.invitationToken,
+			});
+
+			return {
+				success: true as const,
+				signupVerificationToken,
+			};
+		}),
+
 	/**
 	 * Signup: Create new user with zero-knowledge authentication
 	 */
@@ -143,6 +366,7 @@ export const authRouter = router({
 				userId: z.string().min(1).optional(),
 				vaultId: z.string().min(1).optional(),
 				email: z.string().email().max(255),
+				signupVerificationToken: z.string().min(1),
 				name: z.string().min(2),
 				plan: z.enum(["free", "personal", "family", "team"]).optional(),
 				organizationName: z.string().optional(),
@@ -160,6 +384,13 @@ export const authRouter = router({
 			const normalizedEmail = normalizeEmail(input.email);
 			const selfHostedMode = isSelfHostedMode();
 
+			await enforceSourceWindowLimit({
+				namespace: RATE_LIMIT_NAMESPACE.authSignupSource,
+				sourceIp: ctx.device.ipAddress,
+				limit: SIGNUP_SOURCE_WINDOW_LIMIT,
+				windowMs: SIGNUP_SOURCE_WINDOW_MS,
+			});
+
 			if (selfHostedMode) {
 				const allowPublicSignup = !(await hasAnyRegisteredUser());
 				if (!allowPublicSignup) {
@@ -171,12 +402,20 @@ export const authRouter = router({
 				}
 			}
 
+			await assertValidSignupVerificationToken({
+				signupVerificationToken: input.signupVerificationToken,
+				email: normalizedEmail,
+			});
+
 			// Check if user already exists
 			const existingUser = await getUserByEmail(normalizedEmail);
 			if (existingUser) {
+				console.warn("[auth.signup] Duplicate signup attempt", {
+					email: normalizedEmail,
+				});
 				throw new TRPCError({
 					code: "BAD_REQUEST",
-					message: "User with this email already exists",
+					message: GENERIC_DUPLICATE_SIGNUP_MESSAGE,
 				});
 			}
 
@@ -202,6 +441,7 @@ export const authRouter = router({
 				id: input.userId,
 				email: normalizedEmail,
 				name: input.name,
+				emailVerified: true,
 				secretKeyHint: input.secretKeyHint,
 				srpSalt: input.srpSalt,
 				srpVerifier: input.srpVerifier,
@@ -279,6 +519,7 @@ export const authRouter = router({
 				userId,
 				token: sessionData.token,
 				sessionId: sessionData.sessionId,
+				expiresAt: sessionData.expiresAt,
 				user: {
 					...sessionData.user,
 					teamId,
@@ -311,6 +552,7 @@ export const authRouter = router({
 				userId: z.string().optional(),
 				vaultId: z.string().optional(),
 				email: z.string().email().max(255),
+				signupVerificationToken: z.string().min(1),
 				name: z.string().min(2),
 				secretKeyHint: z.string(),
 				srpSalt: z.string(),
@@ -325,55 +567,34 @@ export const authRouter = router({
 		.mutation(async ({ ctx, input }) => {
 			const normalizedEmail = normalizeEmail(input.email);
 
-			// 1. Validate invitation
-			const invitation = await db.query.teamInvitation.findFirst({
-				where: (inv, { and, eq }) =>
-					and(eq(inv.token, input.token), eq(inv.status, "pending")),
-				with: { team: true },
+			await enforceSourceWindowLimit({
+				namespace: RATE_LIMIT_NAMESPACE.authInviteSignupSource,
+				sourceIp: ctx.device.ipAddress,
+				limit: INVITE_SIGNUP_SOURCE_WINDOW_LIMIT,
+				windowMs: INVITE_SIGNUP_SOURCE_WINDOW_MS,
 			});
 
-			if (!invitation) {
-				throw new TRPCError({
-					code: "NOT_FOUND",
-					message: "Invitation not found or already used",
-				});
-			}
-
-			const invitationEntitlements = resolveEffectiveEntitlements({
-				mode: getBitteryMode(),
-				billingPlan: invitation.team.billingPlan,
-				billingStatus: invitation.team.billingStatus,
+			const invitation = await getPendingInvitationForSignup({
+				invitationToken: input.token,
+				email: normalizedEmail,
 			});
-			if (!invitationEntitlements.team_management) {
-				throw new TRPCError({
-					code: "FORBIDDEN",
-					message:
-						"This team cannot accept invitations on its current plan or billing status.",
-				});
-			}
 
-			// Check expiry
-			if (invitation.expiresAt < new Date()) {
-				throw new TRPCError({
-					code: "BAD_REQUEST",
-					message: "Invitation has expired",
-				});
-			}
-
-			// Verify email matches invitation
-			if (normalizeEmail(invitation.email) !== normalizedEmail) {
-				throw new TRPCError({
-					code: "BAD_REQUEST",
-					message: "Email does not match invitation",
-				});
-			}
+			await assertValidSignupVerificationToken({
+				signupVerificationToken: input.signupVerificationToken,
+				email: normalizedEmail,
+				invitationToken: input.token,
+			});
 
 			// Check if user already exists
 			const existingUser = await getUserByEmail(normalizedEmail);
 			if (existingUser) {
+				console.warn("[auth.signupWithInvitation] Duplicate invite signup", {
+					email: normalizedEmail,
+					invitationId: invitation.id,
+				});
 				throw new TRPCError({
 					code: "BAD_REQUEST",
-					message: "User with this email already exists",
+					message: GENERIC_DUPLICATE_SIGNUP_MESSAGE,
 				});
 			}
 
@@ -403,6 +624,7 @@ export const authRouter = router({
 				id: input.userId,
 				email: normalizedEmail,
 				name: input.name,
+				emailVerified: true,
 				secretKeyHint: input.secretKeyHint,
 				srpSalt: input.srpSalt,
 				srpVerifier: input.srpVerifier,
@@ -494,6 +716,7 @@ export const authRouter = router({
 				userId,
 				token: sessionData.token,
 				sessionId: sessionData.sessionId,
+				expiresAt: sessionData.expiresAt,
 				user: {
 					...sessionData.user,
 					teamId: invitation.teamId,
@@ -529,40 +752,33 @@ export const authRouter = router({
 		)
 		.mutation(async ({ ctx, input }) => {
 			const normalizedEmail = normalizeEmail(input.email);
+			const loginAccountRateLimitKey =
+				getLoginAccountRateLimitKey(normalizedEmail);
 
 			try {
-				await checkLoginRateLimit(normalizedEmail, ctx.device.ipAddress);
+				await checkLoginRateLimit(loginAccountRateLimitKey);
 			} catch (error) {
 				throw mapRateLimitError(error);
 			}
 
-			try {
-				const { userId, challenge, serverEphemeralSecret } = await startLogin(
-					normalizedEmail,
-					input.clientPublicKey,
-				);
+			await enforceSourceWindowLimit({
+				namespace: RATE_LIMIT_NAMESPACE.authLoginSource,
+				sourceIp: ctx.device.ipAddress,
+				limit: LOGIN_SOURCE_WINDOW_LIMIT,
+				windowMs: LOGIN_SOURCE_WINDOW_MS,
+			});
 
-				return {
-					userId,
-					salt: challenge.salt,
-					serverPublicKey: challenge.serverPublicKey,
-					kdfParams: challenge.kdfParams,
-					serverSecret: serverEphemeralSecret, // Temporary storage for next request
-				};
-			} catch (error) {
-				console.error(error);
+			const { attemptId, challenge } = await startLogin(
+				normalizedEmail,
+				input.clientPublicKey,
+			);
 
-				try {
-					await recordFailedLoginAttempt(normalizedEmail, ctx.device.ipAddress);
-				} catch (rateLimitError) {
-					throw mapRateLimitError(rateLimitError);
-				}
-
-				throw new TRPCError({
-					code: "UNAUTHORIZED",
-					message: "Invalid credentials",
-				});
-			}
+			return {
+				attemptId,
+				salt: challenge.salt,
+				serverPublicKey: challenge.serverPublicKey,
+				kdfParams: challenge.kdfParams,
+			};
 		}),
 
 	/**
@@ -572,33 +788,30 @@ export const authRouter = router({
 	finishLogin: publicProcedure
 		.input(
 			z.object({
-				userId: z.string().max(64),
-				serverSecret: z.string().max(2048), // Server ephemeral secret from previous step
+				attemptId: z.string().max(160),
 				clientPublicKey: z.string().max(2048),
 				clientProof: z.string().max(512),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
-			const candidateUser = await getUserById(input.userId);
-			const rateLimitEmail = normalizeEmail(
-				candidateUser?.email || `${input.userId}@invalid.local`,
-			);
+			const loginAccountRateLimitKey =
+				extractLoginAttemptRateLimitKey(input.attemptId);
 
-			try {
-				await checkLoginRateLimit(rateLimitEmail, ctx.device.ipAddress);
-			} catch (error) {
-				throw mapRateLimitError(error);
+			if (loginAccountRateLimitKey) {
+				try {
+					await checkLoginRateLimit(loginAccountRateLimitKey);
+				} catch (error) {
+					throw mapRateLimitError(error);
+				}
 			}
 
-			// Parse device info from request context
 			const deviceInfo = parseUserAgent(
 				ctx.device.userAgent,
 				ctx.device.appPlatform,
 			);
 
 			const result = await finishLogin(
-				input.userId,
-				input.serverSecret,
+				input.attemptId,
 				input.clientPublicKey,
 				input.clientProof,
 				{
@@ -610,7 +823,9 @@ export const authRouter = router({
 
 			if (!result.success || !result.user) {
 				try {
-					await recordFailedLoginAttempt(rateLimitEmail, ctx.device.ipAddress);
+					if (result.normalizedEmailHash) {
+						await recordFailedLoginAttempt(result.normalizedEmailHash);
+					}
 				} catch (rateLimitError) {
 					throw mapRateLimitError(rateLimitError);
 				}
@@ -621,7 +836,9 @@ export const authRouter = router({
 				});
 			}
 
-			await clearLoginRateLimit(rateLimitEmail, ctx.device.ipAddress);
+			if (result.normalizedEmailHash) {
+				await clearLoginRateLimit(result.normalizedEmailHash);
+			}
 
 			// Get user's vault keys
 			const vaultKeys = await db.query.vaultKey.findMany({
@@ -641,104 +858,8 @@ export const authRouter = router({
 			return {
 				token: result.token!,
 				sessionId: result.sessionId!,
+				expiresAt: result.expiresAt!,
 				serverProof: result.serverProof!, // For client to verify server
-				user: {
-					...result.user,
-					teamId: userData?.teamId,
-					teamName: userData?.team?.name,
-					teamType: userData?.team?.type,
-					teamAvatarUrl: getTeamImageUrl(userData?.team?.imageKey),
-					role: userData?.role,
-				},
-				vaultKeys: vaultKeys.map((vk) => ({
-					vaultId: vk.vaultId,
-					vaultName: vk.vault.name,
-					vaultType: vk.vault.type,
-					vaultIcon: vk.vault.icon,
-					vaultImageUrl: vk.vault.imageKey
-						? getStoragePublicUrl(vk.vault.imageKey)
-						: null,
-					encryptedVaultKey: vk.encryptedVaultKey,
-					role: vk.role,
-				})),
-			};
-		}),
-
-	/**
-	 * Quick Unlock: Fast login with password only (uses stored secret key)
-	 * Same as full login but client provides secret key from localStorage
-	 */
-	quickUnlock: publicProcedure
-		.input(
-			z.object({
-				email: z.string().email().max(255),
-				userId: z.string().max(64),
-				serverSecret: z.string().max(2048),
-				clientPublicKey: z.string().max(2048),
-				clientProof: z.string().max(512),
-			}),
-		)
-		.mutation(async ({ ctx, input }) => {
-			const normalizedEmail = normalizeEmail(input.email);
-
-			try {
-				await checkLoginRateLimit(normalizedEmail, ctx.device.ipAddress);
-			} catch (error) {
-				throw mapRateLimitError(error);
-			}
-
-			// Parse device info from request context
-			const deviceInfo = parseUserAgent(
-				ctx.device.userAgent,
-				ctx.device.appPlatform,
-			);
-
-			const result = await finishLogin(
-				input.userId,
-				input.serverSecret,
-				input.clientPublicKey,
-				input.clientProof,
-				{
-					...deviceInfo,
-					userAgent: ctx.device.userAgent,
-					ipAddress: ctx.device.ipAddress,
-				},
-			);
-
-			if (!result.success || !result.user) {
-				try {
-					await recordFailedLoginAttempt(normalizedEmail, ctx.device.ipAddress);
-				} catch (rateLimitError) {
-					throw mapRateLimitError(rateLimitError);
-				}
-
-				throw new TRPCError({
-					code: "UNAUTHORIZED",
-					message: "Invalid credentials",
-				});
-			}
-
-			await clearLoginRateLimit(normalizedEmail, ctx.device.ipAddress);
-
-			// Get user's vault keys
-			const vaultKeys = await db.query.vaultKey.findMany({
-				// biome-ignore lint/suspicious/noNonNullAssertedOptionalChain: we need that here
-				where: (vaultKey, { eq }) => eq(vaultKey.userId, result.user?.id!),
-				with: {
-					vault: true,
-				},
-			});
-
-			// Get user with team (direct relation)
-			const userData = await db.query.user.findFirst({
-				where: (user, { eq }) => eq(user.id, result.user!.id),
-				with: { team: true },
-			});
-
-			return {
-				token: result.token!,
-				sessionId: result.sessionId!,
-				serverProof: result.serverProof!,
 				user: {
 					...result.user,
 					teamId: userData?.teamId,
@@ -966,6 +1087,7 @@ export const authRouter = router({
 			return {
 				token: sessionData.token,
 				sessionId: sessionData.sessionId,
+				expiresAt: sessionData.expiresAt,
 				userId,
 			};
 		}),
@@ -1012,6 +1134,13 @@ export const authRouter = router({
 	}),
 
 	refreshSession: protectedProcedure.mutation(async ({ ctx }) => {
+		await enforceSourceWindowLimit({
+			namespace: RATE_LIMIT_NAMESPACE.authRefreshSession,
+			sourceIp: ctx.session.sessionId,
+			limit: REFRESH_SESSION_WINDOW_LIMIT,
+			windowMs: REFRESH_SESSION_WINDOW_MS,
+		});
+
 		try {
 			const nextSession = await refreshSession(ctx.session.sessionId);
 

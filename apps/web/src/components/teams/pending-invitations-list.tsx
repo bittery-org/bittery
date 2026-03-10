@@ -1,8 +1,7 @@
 import { useTRPCClient } from "@bittery/shared/trpc";
-import { Badge, Button, cn, copyWithToast, toast } from "@bittery/ui";
+import { Badge, Button, cn, toast } from "@bittery/ui";
 import {
 	IconClockTimeOutlineDuo18 as Clock,
-	IconCopyOutlineDuo18 as Copy,
 	IconArrowsLeftRightTrailOutlineDuo18 as RefreshCw,
 	IconXmarkOutlineDuo18 as X,
 } from "@bittery/ui/icons";
@@ -13,7 +12,6 @@ import { useQueryInvalidator } from "../../providers/sync-provider";
 
 interface Invitation {
 	id: string;
-	token: string;
 	email: string;
 	role: string;
 	status: string;
@@ -163,22 +161,6 @@ export function PendingInvitationsList({
 
 							{canManage && (
 								<div className="flex items-center gap-1">
-									<Button
-										variant="ghost"
-										size="sm"
-										className="h-7 gap-1.5 px-2 text-muted-foreground text-xs hover:text-foreground"
-										onClick={() =>
-											copyWithToast(
-												`${window.location.origin}/invite/${invitation.token}`,
-												m["team.invitations.copy_label"](),
-												{ showAutoClearMessage: false },
-											)
-										}
-										title={m["team.invitations.action.copy_title"]()}
-									>
-										<Copy className="h-3.5 w-3.5" />
-										{m["team.invitations.action.copy"]()}
-									</Button>
 									<Button
 										variant="ghost"
 										size="sm"

@@ -19,6 +19,7 @@ import { useSignupForm } from "@/hooks/use-signup-form";
 import { useI18n } from "@/providers/i18n-provider";
 import PlanComparisonDialog from "./plan-comparison-dialog";
 import SelfHostedSignUpForm from "./self-hosted-sign-up-form";
+import { SignupVerificationStep } from "./signup-verification-dialog";
 
 const planIcons: Record<
 	CloudPlanId,
@@ -77,14 +78,16 @@ export default function SignUpForm({
 		initialPlan && validPlanIds.has(initialPlan)
 			? (initialPlan as CloudPlanId)
 			: undefined;
+	const [cloudSignupStep, setCloudSignupStep] = useState<
+		"plan" | "account" | "verify"
+	>(resolvedPlan ? "account" : "plan");
 	const signup = useSignupForm({
 		invitationToken,
 		redirectTo,
 		initialPlan: resolvedPlan,
+		verificationMode: "inline",
+		onVerificationRequested: () => setCloudSignupStep("verify"),
 	});
-	const [cloudSignupStep, setCloudSignupStep] = useState<"plan" | "account">(
-		resolvedPlan ? "account" : "plan",
-	);
 
 	// Delegate to self-hosted component for self-hosted or invitation flows
 	if (signup.isSelfHostedMode || signup.isInvitationSignup) {
@@ -123,31 +126,43 @@ export default function SignUpForm({
 	}
 
 	const showPlanStep = cloudSignupStep === "plan";
+	const showAccountStep = cloudSignupStep === "account";
+	const showVerifyStep = cloudSignupStep === "verify";
+	const isFlowLocked =
+		signup.requestSignupVerificationMutation.isPending ||
+		signup.verifySignupVerificationMutation.isPending ||
+		signup.isEncrypting ||
+		signup.signupMutation.isPending;
 
 	return (
 		<div className="w-full">
-			{/* Header */}
 			<div className="text-center">
 				<h1 className="font-semibold text-2xl tracking-tight">
 					{showPlanStep
 						? m["auth.signup.header.choose_plan"]()
-						: m["auth.signup.header.create_account"]()}
+						: showAccountStep
+							? m["auth.signup.header.create_account"]()
+							: m["auth.signup.header.verify_email"]()}
 				</h1>
 				<p className="mx-auto mt-2 max-w-80 text-muted-foreground text-sm">
 					{showPlanStep
 						? m["auth.signup.subheader.choose_plan"]()
-						: m["auth.signup.subheader.create_account"]()}
+						: showAccountStep
+							? m["auth.signup.subheader.create_account"]()
+							: m["auth.signup.subheader.verify_email"]()}
 				</p>
 			</div>
 
-			{/* Segmented Stepper */}
 			<div className="mt-6">
 				<div className="relative flex h-10 rounded-xl border bg-muted/40 p-1">
-					{/* Sliding indicator */}
 					<div
 						className={cn(
-							"absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-lg bg-background shadow-sm transition-all duration-300 ease-out",
-							showPlanStep ? "left-1" : "left-[calc(50%+3px)]",
+							"absolute top-1 bottom-1 w-[calc(33.333%-6px)] rounded-lg bg-background shadow-sm transition-all duration-300 ease-out",
+							showPlanStep
+								? "left-1"
+								: showAccountStep
+									? "left-[calc(33.333%+1px)]"
+									: "left-[calc(66.666%+1px)]",
 						)}
 					/>
 					<button
@@ -159,14 +174,15 @@ export default function SignUpForm({
 								: "text-muted-foreground hover:text-foreground/70",
 						)}
 						onClick={() => setCloudSignupStep("plan")}
+						disabled={isFlowLocked}
 					>
-						{!showPlanStep ? (
-							<span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
-								<Check size={10} />
-							</span>
-						) : (
+						{showPlanStep ? (
 							<span className="flex h-4 w-4 items-center justify-center rounded-full border border-primary/50 bg-primary/10 font-bold text-[10px] text-primary">
 								1
+							</span>
+						) : (
+							<span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
+								<Check size={10} />
 							</span>
 						)}
 						{m["auth.signup.step.plan"]()}
@@ -175,26 +191,54 @@ export default function SignUpForm({
 						type="button"
 						className={cn(
 							"relative z-10 flex flex-1 items-center justify-center gap-2 rounded-lg font-medium text-xs transition-colors duration-200",
-							!showPlanStep ? "text-foreground" : "text-muted-foreground",
+							showAccountStep
+								? "text-foreground"
+								: "text-muted-foreground hover:text-foreground/70",
 						)}
-						disabled={showPlanStep}
+						onClick={() => setCloudSignupStep("account")}
+						disabled={showPlanStep || isFlowLocked}
+					>
+						{showVerifyStep ? (
+							<span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
+								<Check size={10} />
+							</span>
+						) : (
+							<span
+								className={cn(
+									"flex h-4 w-4 items-center justify-center rounded-full font-bold text-[10px] transition-colors duration-200",
+									showAccountStep
+										? "border border-primary/50 bg-primary/10 text-primary"
+										: "border border-border text-muted-foreground",
+								)}
+							>
+								2
+							</span>
+						)}
+						{m["auth.signup.step.account"]()}
+					</button>
+					<button
+						type="button"
+						className={cn(
+							"relative z-10 flex flex-1 items-center justify-center gap-2 rounded-lg font-medium text-xs transition-colors duration-200",
+							showVerifyStep ? "text-foreground" : "text-muted-foreground",
+						)}
+						disabled={!showVerifyStep || isFlowLocked}
 					>
 						<span
 							className={cn(
 								"flex h-4 w-4 items-center justify-center rounded-full font-bold text-[10px] transition-colors duration-200",
-								!showPlanStep
+								showVerifyStep
 									? "border border-primary/50 bg-primary/10 text-primary"
 									: "border border-border text-muted-foreground",
 							)}
 						>
-							2
+							3
 						</span>
-						{m["auth.signup.step.account"]()}
+						{m["auth.signup.step.verify"]()}
 					</button>
 				</div>
 			</div>
 
-			{/* Step Content */}
 			<div className="mt-5">
 				{showPlanStep ? (
 					<PlanSelectionStep
@@ -203,12 +247,17 @@ export default function SignUpForm({
 						onContinue={() => setCloudSignupStep("account")}
 						onSwitchToSignIn={onSwitchToSignIn}
 					/>
-				) : (
+				) : showAccountStep ? (
 					<AccountSetupStep
 						m={m}
 						signup={signup}
 						onBack={() => setCloudSignupStep("plan")}
 						onSwitchToSignIn={onSwitchToSignIn}
+					/>
+				) : (
+					<VerificationStep
+						signup={signup}
+						onBack={() => setCloudSignupStep("account")}
 					/>
 				)}
 			</div>
@@ -443,6 +492,8 @@ function AccountSetupStep({
 		isEncrypting,
 		downloadEmergencyKit,
 		hasAllKeyMaterial,
+		hasVerifiedSignup,
+		requestSignupVerificationMutation,
 	} = signup;
 
 	return (
@@ -638,7 +689,10 @@ function AccountSetupStep({
 					type="submit"
 					className="h-10 w-full font-medium shadow-sm"
 					disabled={
-						isEncrypting || signupMutation.isPending || !hasDownloadedKit
+						isEncrypting ||
+						signupMutation.isPending ||
+						requestSignupVerificationMutation.isPending ||
+						!hasDownloadedKit
 					}
 				>
 					{isEncrypting || signupMutation.isPending ? (
@@ -648,13 +702,20 @@ function AccountSetupStep({
 								? m["auth.signup.button.setting_up_encryption"]()
 								: m["auth.signup.button.creating_account"]()}
 						</>
+					) : requestSignupVerificationMutation.isPending ? (
+						<>
+							<Loader2 size={16} className="mr-2 animate-spin" />
+							{m["auth.signup.button.sending_verification_code"]()}
+						</>
 					) : !hasDownloadedKit ? (
 						<>
 							<Shield size={16} className="mr-2" />
 							{m["auth.signup.button.download_kit_to_continue"]()}
 						</>
-					) : (
+					) : hasVerifiedSignup ? (
 						m["auth.signup.button.create_account"]()
+					) : (
+						m["auth.signup.button.continue_to_verification"]()
 					)}
 				</Button>
 			</div>
@@ -680,5 +741,54 @@ function AccountSetupStep({
 				</Button>
 			</div>
 		</form>
+	);
+}
+
+function VerificationStep({
+	signup,
+	onBack,
+}: {
+	signup: ReturnType<typeof useSignupForm>;
+	onBack: () => void;
+}) {
+	const { form } = signup;
+
+	return (
+		<form.Subscribe
+			selector={(state) => ({
+				organizationName: state.values.organizationName,
+				plan: state.values.plan,
+			})}
+		>
+			{({ plan, organizationName }) => {
+				const selectedPlan = cloudPlans.find((item) => item.id === plan);
+				if (!selectedPlan) {
+					return null;
+				}
+
+				return (
+					<SignupVerificationStep
+						email={signup.verificationEmail}
+						code={signup.verificationCode}
+						onCodeChange={signup.setVerificationCode}
+						onVerify={signup.submitSignupVerificationCode}
+						onResend={signup.resendSignupVerificationCode}
+						onBack={onBack}
+						isVerifying={signup.verifySignupVerificationMutation.isPending}
+						isRequesting={signup.requestSignupVerificationMutation.isPending}
+						isFinishing={signup.isEncrypting || signup.signupMutation.isPending}
+						isPaidPlan={selectedPlan.id !== "free"}
+						planName={selectedPlan.name}
+						planPrice={`${selectedPlan.priceLabel}${selectedPlan.priceSuffix || ""}`}
+						organizationName={
+							plan === "team" && organizationName.trim()
+								? organizationName.trim()
+								: undefined
+						}
+						isVerified={signup.hasVerifiedSignup}
+					/>
+				);
+			}}
+		</form.Subscribe>
 	);
 }

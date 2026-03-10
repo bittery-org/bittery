@@ -124,10 +124,14 @@ const trpcClient = createSessionRefreshingTrpcClient({
 		}
 		return storage.getAuthToken(activeAccount.email);
 	},
-	storeRefreshedToken: async (token) => {
+	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
 		const activeAccount = await storage.getActiveAccount();
 		if (activeAccount?.type === "single") {
 			await storage.storeAuthToken(token, activeAccount.email);
+			await storage.updateStoredSessionMetadata?.(activeAccount.email, {
+				sessionId,
+				expiresAt,
+			});
 		}
 	},
 	getClientId: async () => getOrCreateDesktopSyncClientId(),

@@ -330,34 +330,40 @@ export const syncRouter = router({
 			}),
 		)
 		.query(async ({ ctx, input }) => {
-			// Get the item's current version from recent sync events
+			const [accessibleItem] = await db
+				.select({
+					id: item.id,
+					vaultId: item.vaultId,
+				})
+				.from(item)
+				.innerJoin(
+					vaultKey,
+					and(
+						eq(vaultKey.vaultId, item.vaultId),
+						eq(vaultKey.userId, ctx.session.userId),
+					),
+				)
+				.where(eq(item.id, input.itemId))
+				.limit(1);
+
+			if (!accessibleItem) {
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "Item not found",
+				});
+			}
+
 			const latestItemEvent = await db.query.syncEvent.findFirst({
 				where: and(
 					eq(syncEvent.entityId, input.itemId),
 					eq(syncEvent.entityType, "item"),
+					eq(syncEvent.vaultId, accessibleItem.vaultId),
 				),
 				orderBy: [desc(syncEvent.createdAt)],
 			});
 
 			if (!latestItemEvent) {
 				return { hasConflict: false };
-			}
-
-			// Verify user has access to the vault
-			if (latestItemEvent.vaultId) {
-				const userVaultKey = await db.query.vaultKey.findFirst({
-					where: and(
-						eq(vaultKey.userId, ctx.session.userId),
-						eq(vaultKey.vaultId, latestItemEvent.vaultId),
-					),
-				});
-
-				if (!userVaultKey) {
-					throw new TRPCError({
-						code: "FORBIDDEN",
-						message: "Access denied",
-					});
-				}
 			}
 
 			const hasConflict = latestItemEvent.version > input.expectedVersion;

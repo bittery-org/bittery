@@ -14,7 +14,8 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { db } from "@bittery/db";
+import { db, signupVerification } from "@bittery/db";
+import { eq } from "drizzle-orm";
 import { authRouter } from "../routers/auth";
 import { setControlBroadcastFunction } from "../sync-helper";
 import {
@@ -50,6 +51,49 @@ function toSignupCryptoInput(
 	};
 }
 
+async function issueSignupVerificationToken(params: {
+	caller: ReturnType<typeof authRouter.createCaller>;
+	email: string;
+	invitationToken?: string;
+}) {
+	await params.caller.requestSignupVerification({
+		email: params.email,
+		...(params.invitationToken
+			? { invitationToken: params.invitationToken }
+			: {}),
+	});
+
+	const verification = await db.query.signupVerification.findFirst({
+		where: (record, { and, eq, isNull }) =>
+			and(
+				eq(record.email, params.email.toLowerCase()),
+				params.invitationToken
+					? eq(record.invitationToken, params.invitationToken)
+					: isNull(record.invitationToken),
+				isNull(record.usedAt),
+			),
+		orderBy: (record, { desc }) => [desc(record.createdAt)],
+	});
+
+	if (!verification) {
+		throw new Error("Expected signup verification to be created");
+	}
+
+	const result = await params.caller.verifySignupVerification({
+		email: params.email,
+		code: verification.code,
+		...(params.invitationToken
+			? { invitationToken: params.invitationToken }
+			: {}),
+	});
+
+	if (!result.success || !result.signupVerificationToken) {
+		throw new Error("Expected signup verification token");
+	}
+
+	return result.signupVerificationToken;
+}
+
 const authCryptoFixture = await generateTestAuthCryptoData({
 	email: "fixture-auth@example.com",
 	accountPassword: "TestPass-Fixture-1!",
@@ -77,9 +121,14 @@ describe("Auth Router", () => {
 			const email = generateTestEmail();
 			const cryptoData = authCryptoFixture;
 			const caller = authRouter.createCaller(createPublicContext());
+			const signupVerificationToken = await issueSignupVerificationToken({
+				caller,
+				email,
+			});
 
 			const result = await caller.signup({
 				email,
+				signupVerificationToken,
 				name: "Test User",
 				plan: "team",
 				organizationName: "Test Org",
@@ -104,6 +153,8 @@ describe("Auth Router", () => {
 			});
 			expect(teamData?.billingPlan).toBe("team");
 			expect(teamData?.billingStatus).toBe("incomplete");
+			const createdUser = await getUser(result.userId);
+			expect(createdUser?.emailVerified).toBe(true);
 			expect(result.vaultKeys).toHaveLength(1);
 			// @ts-expect-error This is fine
 			expect(result.vaultKeys[0].vaultName).toBe("Personal");
@@ -115,9 +166,14 @@ describe("Auth Router", () => {
 			const email = generateTestEmail();
 			const cryptoData = authCryptoFixture;
 			const caller = authRouter.createCaller(createPublicContext());
+			const signupVerificationToken = await issueSignupVerificationToken({
+				caller,
+				email,
+			});
 
 			const result = await caller.signup({
 				email,
+				signupVerificationToken,
 				name: "Test User",
 				...toSignupCryptoInput(cryptoData),
 			});
@@ -134,6 +190,66 @@ describe("Auth Router", () => {
 			});
 			expect(teamData?.billingPlan).toBe("personal");
 			expect(teamData?.billingStatus).toBe("incomplete");
+			const createdUser = await getUser(result.userId);
+			expect(createdUser?.emailVerified).toBe(true);
+		});
+
+		test("should reject signup without signupVerificationToken", async () => {
+			const email = generateTestEmail();
+			const caller = authRouter.createCaller(createPublicContext());
+
+			await expect(
+				caller.signup({
+					email,
+					name: "Missing Verification",
+					...toSignupCryptoInput(authCryptoFixture),
+				} as any),
+			).rejects.toThrow();
+		});
+
+		test("should fail verification with a wrong code", async () => {
+			const email = generateTestEmail();
+			const caller = authRouter.createCaller(createPublicContext());
+
+			await caller.requestSignupVerification({ email });
+			const result = await caller.verifySignupVerification({
+				email,
+				code: "000000",
+			});
+
+			expect(result.success).toBe(false);
+		});
+
+		test("should fail verification with an expired code", async () => {
+			const email = generateTestEmail();
+			const caller = authRouter.createCaller(createPublicContext());
+
+			await caller.requestSignupVerification({ email });
+			const verification = await db.query.signupVerification.findFirst({
+				where: (record, { and, eq, isNull }) =>
+					and(
+						eq(record.email, email.toLowerCase()),
+						isNull(record.invitationToken),
+						isNull(record.usedAt),
+					),
+				orderBy: (record, { desc }) => [desc(record.createdAt)],
+			});
+			expect(verification).toBeDefined();
+			if (!verification) {
+				throw new Error("Expected signup verification record");
+			}
+
+			await db
+				.update(signupVerification)
+				.set({ expiresAt: new Date(Date.now() - 60_000) })
+				.where(eq(signupVerification.id, verification.id));
+
+			const result = await caller.verifySignupVerification({
+				email,
+				code: verification.code,
+			});
+
+			expect(result.success).toBe(false);
 		});
 
 		test("should reject duplicate email", async () => {
@@ -150,14 +266,19 @@ describe("Auth Router", () => {
 			const signupCryptoData = existingCryptoData;
 
 			const caller = authRouter.createCaller(createPublicContext());
+			const signupVerificationToken = await issueSignupVerificationToken({
+				caller,
+				email,
+			});
 
 			await expect(
 				caller.signup({
 					email,
+					signupVerificationToken,
 					name: "Test User 2",
 					...toSignupCryptoInput(signupCryptoData),
 				}),
-			).rejects.toThrow("User with this email already exists");
+			).rejects.toThrow("Unable to create account");
 		});
 
 		test("should normalize email to lowercase", async () => {
@@ -165,9 +286,14 @@ describe("Auth Router", () => {
 			const email = baseEmail.toUpperCase();
 			const cryptoData = authCryptoFixture;
 			const caller = authRouter.createCaller(createPublicContext());
+			const signupVerificationToken = await issueSignupVerificationToken({
+				caller,
+				email,
+			});
 
 			const result = await caller.signup({
 				email,
+				signupVerificationToken,
 				name: "Test User",
 				...toSignupCryptoInput(cryptoData),
 			});
@@ -179,9 +305,15 @@ describe("Auth Router", () => {
 		test("should allow only bootstrap signup in self-hosted mode", async () => {
 			process.env.BITTERY_MODE = "self-hosted";
 			const caller = authRouter.createCaller(createPublicContext());
+			const firstSignupEmail = generateTestEmail();
+			const firstSignupVerificationToken = await issueSignupVerificationToken({
+				caller,
+				email: firstSignupEmail,
+			});
 
 			const firstSignup = await caller.signup({
-				email: generateTestEmail(),
+				email: firstSignupEmail,
+				signupVerificationToken: firstSignupVerificationToken,
 				name: "First Admin",
 				...toSignupCryptoInput(authCryptoFixture),
 			});
@@ -199,9 +331,11 @@ describe("Auth Router", () => {
 			expect(firstTeam?.billingPlan).toBe("free");
 			expect(firstTeam?.billingStatus).toBe("none");
 
+			const secondSignupEmail = generateTestEmail();
 			await expect(
 				caller.signup({
-					email: generateTestEmail(),
+					email: secondSignupEmail,
+					signupVerificationToken: "invalid-token",
 					name: "Second User",
 					...toSignupCryptoInput(nextAuthCryptoFixture),
 				}),
@@ -223,21 +357,52 @@ describe("Auth Router", () => {
 				inviteeEmail,
 			);
 			const caller = authRouter.createCaller(createPublicContext());
+			const signupVerificationToken = await issueSignupVerificationToken({
+				caller,
+				email: inviteeEmail,
+				invitationToken: invitation.token,
+			});
 
 			const result = await caller.signupWithInvitation({
 				token: invitation.token,
 				email: inviteeEmail,
+				signupVerificationToken,
 				name: "Invitee",
 				...toSignupCryptoInput(nextAuthCryptoFixture),
 			});
 
 			expect(result.success).toBe(true);
 			expect(result.user.teamId).toBe(teamId);
+			const createdUser = await getUser(result.userId);
+			expect(createdUser?.emailVerified).toBe(true);
 			const personalVault = result.vaultKeys.find(
 				(vk) => vk.vaultName === "Personal",
 			);
 			expect(personalVault).toBeDefined();
 			expect(personalVault?.role).toBe("owner");
+		});
+
+		test("requestSignupVerification should reject invitation/email mismatch", async () => {
+			const inviter = await setup(authRouter);
+			const teamId = await createTestTeam(inviter.userId, {
+				name: "Invite Team",
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			const invitation = await createTestInvitation(
+				teamId,
+				inviter.userId,
+				generateTestEmail(),
+			);
+			const caller = authRouter.createCaller(createPublicContext());
+
+			await expect(
+				caller.requestSignupVerification({
+					email: generateTestEmail(),
+					invitationToken: invitation.token,
+				}),
+			).rejects.toThrow("Email does not match invitation");
 		});
 
 		test("signupWithInvitation should reject unauthorized pendingVaultKeys", async () => {
@@ -274,11 +439,17 @@ describe("Auth Router", () => {
 				},
 			);
 			const caller = authRouter.createCaller(createPublicContext());
+			const signupVerificationToken = await issueSignupVerificationToken({
+				caller,
+				email: inviteeEmail,
+				invitationToken: invitation.token,
+			});
 
 			await expect(
 				caller.signupWithInvitation({
 					token: invitation.token,
 					email: inviteeEmail,
+					signupVerificationToken,
 					name: "Invitee",
 					...toSignupCryptoInput(nextAuthCryptoFixture),
 				}),
@@ -332,9 +503,14 @@ describe("Auth Router", () => {
 			const email = generateTestEmail();
 			const cryptoData = authCryptoFixture;
 			const caller = authRouter.createCaller(createPublicContext());
+			const signupVerificationToken = await issueSignupVerificationToken({
+				caller,
+				email,
+			});
 
 			await caller.signup({
 				email,
+				signupVerificationToken,
 				name: "Login User",
 				...toSignupCryptoInput(cryptoData),
 			});
@@ -344,6 +520,8 @@ describe("Auth Router", () => {
 				email,
 				clientPublicKey: clientEphemeral.clientPublicKey,
 			});
+			expect("userId" in startResult).toBe(false);
+			expect("serverSecret" in startResult).toBe(false);
 			const { clientProof } = await deriveTestSrpClientProof({
 				clientSecret: clientEphemeral.clientSecret,
 				salt: startResult.salt,
@@ -352,14 +530,14 @@ describe("Auth Router", () => {
 			});
 
 			const finishResult = await caller.finishLogin({
-				userId: startResult.userId,
-				serverSecret: startResult.serverSecret,
+				attemptId: startResult.attemptId,
 				clientPublicKey: clientEphemeral.clientPublicKey,
 				clientProof,
 			});
 
 			expect(finishResult.token).toBeDefined();
 			expect(finishResult.sessionId).toBeDefined();
+			expect(finishResult.expiresAt).toBeDefined();
 			expect(finishResult.serverProof).toBeDefined();
 			expect(finishResult.user.email).toBe(email.toLowerCase());
 		});
@@ -368,9 +546,14 @@ describe("Auth Router", () => {
 			const email = generateTestEmail();
 			const cryptoData = authCryptoFixture;
 			const caller = authRouter.createCaller(createPublicContext());
+			const signupVerificationToken = await issueSignupVerificationToken({
+				caller,
+				email,
+			});
 
 			await caller.signup({
 				email,
+				signupVerificationToken,
 				name: "Login User",
 				...toSignupCryptoInput(cryptoData),
 			});
@@ -389,9 +572,128 @@ describe("Auth Router", () => {
 
 			await expect(
 				caller.finishLogin({
-					userId: startResult.userId,
-					serverSecret: startResult.serverSecret,
+					attemptId: startResult.attemptId,
 					clientPublicKey: clientEphemeral.clientPublicKey,
+					clientProof,
+				}),
+			).rejects.toThrow("Invalid credentials");
+		});
+
+		test("should return a valid-shaped challenge for unknown email", async () => {
+			const caller = authRouter.createCaller(createPublicContext());
+			const clientEphemeral = await generateTestSrpClientEphemeral();
+
+			const startResult = await caller.startLogin({
+				email: generateTestEmail(),
+				clientPublicKey: clientEphemeral.clientPublicKey,
+			});
+
+			expect(startResult.attemptId).toBeDefined();
+			expect(startResult.salt).toBeDefined();
+			expect(startResult.serverPublicKey).toBeDefined();
+			expect(startResult.kdfParams).toBeDefined();
+		});
+
+		test("should fail generically for fake-user finishLogin", async () => {
+			const caller = authRouter.createCaller(createPublicContext());
+			const unknownEmail = generateTestEmail();
+			const clientEphemeral = await generateTestSrpClientEphemeral();
+			const startResult = await caller.startLogin({
+				email: unknownEmail,
+				clientPublicKey: clientEphemeral.clientPublicKey,
+			});
+			const { clientProof } = await deriveTestSrpClientProof({
+				clientSecret: clientEphemeral.clientSecret,
+				salt: startResult.salt,
+				serverPublicKey: startResult.serverPublicKey,
+				authPassword: "not-the-right-password",
+			});
+
+			await expect(
+				caller.finishLogin({
+					attemptId: startResult.attemptId,
+					clientPublicKey: clientEphemeral.clientPublicKey,
+					clientProof,
+				}),
+			).rejects.toThrow("Invalid credentials");
+		});
+
+		test("should reject reused login attempts", async () => {
+			const email = generateTestEmail();
+			const cryptoData = authCryptoFixture;
+			const caller = authRouter.createCaller(createPublicContext());
+			const signupVerificationToken = await issueSignupVerificationToken({
+				caller,
+				email,
+			});
+
+			await caller.signup({
+				email,
+				signupVerificationToken,
+				name: "Login User",
+				...toSignupCryptoInput(cryptoData),
+			});
+
+			const clientEphemeral = await generateTestSrpClientEphemeral();
+			const startResult = await caller.startLogin({
+				email,
+				clientPublicKey: clientEphemeral.clientPublicKey,
+			});
+			const { clientProof } = await deriveTestSrpClientProof({
+				clientSecret: clientEphemeral.clientSecret,
+				salt: startResult.salt,
+				serverPublicKey: startResult.serverPublicKey,
+				authPassword: cryptoData.authPassword,
+			});
+
+			await caller.finishLogin({
+				attemptId: startResult.attemptId,
+				clientPublicKey: clientEphemeral.clientPublicKey,
+				clientProof,
+			});
+
+			await expect(
+				caller.finishLogin({
+					attemptId: startResult.attemptId,
+					clientPublicKey: clientEphemeral.clientPublicKey,
+					clientProof,
+				}),
+			).rejects.toThrow("Invalid credentials");
+		});
+
+		test("should reject mismatched client public key for login attempt", async () => {
+			const email = generateTestEmail();
+			const cryptoData = authCryptoFixture;
+			const caller = authRouter.createCaller(createPublicContext());
+			const signupVerificationToken = await issueSignupVerificationToken({
+				caller,
+				email,
+			});
+
+			await caller.signup({
+				email,
+				signupVerificationToken,
+				name: "Login User",
+				...toSignupCryptoInput(cryptoData),
+			});
+
+			const firstEphemeral = await generateTestSrpClientEphemeral();
+			const secondEphemeral = await generateTestSrpClientEphemeral();
+			const startResult = await caller.startLogin({
+				email,
+				clientPublicKey: firstEphemeral.clientPublicKey,
+			});
+			const { clientProof } = await deriveTestSrpClientProof({
+				clientSecret: firstEphemeral.clientSecret,
+				salt: startResult.salt,
+				serverPublicKey: startResult.serverPublicKey,
+				authPassword: cryptoData.authPassword,
+			});
+
+			await expect(
+				caller.finishLogin({
+					attemptId: startResult.attemptId,
+					clientPublicKey: secondEphemeral.clientPublicKey,
 					clientProof,
 				}),
 			).rejects.toThrow("Invalid credentials");

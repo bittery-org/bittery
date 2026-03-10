@@ -11,6 +11,34 @@ export interface DeviceContext {
 	appPlatform: string | null;
 }
 
+type TrustProxyMode = "none" | "cloudflare" | "forwarded";
+
+function getTrustProxyMode(): TrustProxyMode {
+	const rawMode = process.env.TRUST_PROXY_MODE?.trim().toLowerCase();
+	if (rawMode === "cloudflare" || rawMode === "forwarded") {
+		return rawMode;
+	}
+	return "none";
+}
+
+function resolveTrustedSourceIp(context: HonoContext): string | null {
+	const trustProxyMode = getTrustProxyMode();
+
+	if (trustProxyMode === "cloudflare") {
+		return context.req.header("CF-Connecting-IP")?.trim() || null;
+	}
+
+	if (trustProxyMode === "forwarded") {
+		return (
+			context.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ||
+			context.req.header("X-Real-IP")?.trim() ||
+			null
+		);
+	}
+
+	return null;
+}
+
 export async function createContext({ context }: CreateContextOptions) {
 	// Extract session token from Authorization header
 	const authHeader = context.req.header("Authorization");
@@ -27,12 +55,7 @@ export async function createContext({ context }: CreateContextOptions) {
 
 	// Extract device information from request headers
 	const userAgent = context.req.header("User-Agent") || "";
-	// Get IP address from various headers (Cloudflare, proxies, direct)
-	const ipAddress =
-		context.req.header("CF-Connecting-IP") ||
-		context.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ||
-		context.req.header("X-Real-IP") ||
-		null;
+	const ipAddress = resolveTrustedSourceIp(context);
 	const clientId = context.req.header("X-Client-Id") ?? null;
 	const appPlatform = context.req.header("X-App-Platform") ?? null;
 

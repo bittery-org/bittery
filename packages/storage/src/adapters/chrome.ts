@@ -21,7 +21,7 @@ import {
 	type AccountMetadata,
 	type ActiveAccount,
 	type BiometricAuthResult,
-	DEFAULT_SESSION_EXPIRY_MS,
+	resolveStoredSessionExpiryTimestamp,
 	type StoredSessionData,
 	type VaultKeyData,
 } from "../types";
@@ -309,7 +309,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		masterUnlockKey: Uint8Array,
 		email: string,
 		userId: string,
-		expiryMs: number = DEFAULT_SESSION_EXPIRY_MS,
+		expiresAt?: string | Date | number,
 		sessionId?: string,
 	): Promise<void> {
 		const resolvedEmail = email.toLowerCase();
@@ -325,7 +325,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			email: resolvedEmail,
 			userId,
 			sessionId,
-			expiresAt: now + expiryMs,
+			expiresAt: resolveStoredSessionExpiryTimestamp(expiresAt, now),
 			createdAt: now,
 		};
 
@@ -411,7 +411,8 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		if (!resolvedEmail) return false;
 
 		const sessionData = await this.getStoredSessionData(resolvedEmail);
-		if (!sessionData) return false;
+		const token = await this.getAuthToken(resolvedEmail);
+		if (!sessionData || !token) return false;
 
 		const now = Date.now();
 		return now < sessionData.expiresAt;
@@ -559,6 +560,33 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		} catch {
 			return null;
 		}
+	}
+
+	async updateStoredSessionMetadata(
+		email: string,
+		metadata: {
+			sessionId?: string;
+			expiresAt: string | Date | number;
+		},
+	): Promise<void> {
+		const resolvedEmail = email.toLowerCase();
+		const existing = await this.getStoredSessionData(resolvedEmail);
+		if (!existing) {
+			return;
+		}
+
+		const key = getAccountKey(resolvedEmail, "session_data");
+		const next: StoredSessionData = {
+			...existing,
+			sessionId: metadata.sessionId ?? existing.sessionId,
+			expiresAt: resolveStoredSessionExpiryTimestamp(
+				metadata.expiresAt,
+				existing.createdAt,
+			),
+		};
+		await chrome.storage.local.set({
+			[key]: JSON.stringify(next),
+		});
 	}
 
 	// ============================================================================
@@ -860,7 +888,14 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			const stored = result[key];
 
 			if (!stored) return null;
-			return JSON.parse(stored as string) as StoredSessionData;
+			const parsed = JSON.parse(stored as string) as StoredSessionData;
+			return {
+				...parsed,
+				expiresAt: resolveStoredSessionExpiryTimestamp(
+					parsed.expiresAt,
+					parsed.createdAt,
+				),
+			};
 		} catch {
 			return null;
 		}

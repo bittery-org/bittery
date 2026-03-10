@@ -386,7 +386,7 @@ function RecoverRouteComponent() {
 				newMasterUnlockKey,
 				email,
 				resetResult.userId,
-				undefined,
+				resetResult.expiresAt,
 				resetResult.sessionId,
 			);
 			await storage.setMasterUnlockKey(newMasterUnlockKey);

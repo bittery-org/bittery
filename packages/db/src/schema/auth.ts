@@ -85,6 +85,51 @@ export const recoveryVerification = pgTable(
 	],
 );
 
+export const signupVerification = pgTable(
+	"signup_verification",
+	{
+		id: text("id").primaryKey(),
+		email: text("email").notNull(),
+		invitationToken: text("invitation_token"),
+		code: text("code").notNull(),
+		attempts: integer("attempts").default(0).notNull(),
+		maxAttempts: integer("max_attempts").default(5).notNull(),
+		expiresAt: timestamp("expires_at").notNull(),
+		usedAt: timestamp("used_at"),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+		updatedAt: timestamp("updated_at")
+			.defaultNow()
+			.$onUpdate(() => /* @__PURE__ */ new Date())
+			.notNull(),
+	},
+	(table) => [
+		index("signup_verification_email_idx").on(table.email),
+		index("signup_verification_invitation_token_idx").on(table.invitationToken),
+		index("signup_verification_code_idx").on(table.code),
+		index("signup_verification_expires_at_idx").on(table.expiresAt),
+	],
+);
+
+export const loginAttempt = pgTable(
+	"login_attempt",
+	{
+		id: text("id").primaryKey(),
+		userId: text("user_id").references(() => user.id, {
+			onDelete: "cascade",
+		}),
+		normalizedEmailHash: text("normalized_email_hash").notNull(),
+		clientPublicKey: text("client_public_key").notNull(),
+		serverEphemeralSecret: text("server_ephemeral_secret").notNull(),
+		expiresAt: timestamp("expires_at").notNull(),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+	},
+	(table) => [
+		index("login_attempt_user_id_idx").on(table.userId),
+		index("login_attempt_email_hash_idx").on(table.normalizedEmailHash),
+		index("login_attempt_expires_at_idx").on(table.expiresAt),
+	],
+);
+
 export const auditLog = pgTable(
 	"audit_log",
 	{
@@ -108,6 +153,7 @@ export const auditLog = pgTable(
 
 export const userRelations = relations(user, ({ one, many }) => ({
 	sessions: many(session),
+	loginAttempts: many(loginAttempt),
 	auditLogs: many(auditLog),
 	team: one(team, {
 		fields: [user.teamId],
@@ -118,6 +164,13 @@ export const userRelations = relations(user, ({ one, many }) => ({
 export const sessionRelations = relations(session, ({ one }) => ({
 	user: one(user, {
 		fields: [session.userId],
+		references: [user.id],
+	}),
+}));
+
+export const loginAttemptRelations = relations(loginAttempt, ({ one }) => ({
+	user: one(user, {
+		fields: [loginAttempt.userId],
 		references: [user.id],
 	}),
 }));

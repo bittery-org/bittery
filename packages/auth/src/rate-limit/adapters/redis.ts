@@ -1,4 +1,3 @@
-import { formatLocalDateKey, secondsUntilNextLocalDay } from "../constants";
 import type {
 	FailureBackoffInput,
 	RateLimitAdapter,
@@ -154,16 +153,16 @@ export class RedisRateLimitAdapter implements RateLimitAdapter {
 	async incrementWithinWindow(
 		input: WindowIncrementInput,
 	): Promise<WindowIncrementResult> {
-		const dateKey = formatLocalDateKey(input.windowStart);
-		const redisKey = this.getWindowKey(input.namespace, dateKey, input.key);
+		const redisKey = this.getWindowKey(
+			input.namespace,
+			input.windowStart.getTime().toString(),
+			input.key,
+		);
 		const nextValue = await this.redis.incr(redisKey);
 		const count = Number(nextValue);
 
 		if (count === 1) {
-			await this.redis.expire(
-				redisKey,
-				secondsUntilNextLocalDay(input.now) + 60 * 60,
-			);
+			await this.redis.expire(redisKey, 24 * 60 * 60);
 		}
 
 		return {

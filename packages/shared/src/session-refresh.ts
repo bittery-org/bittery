@@ -6,6 +6,7 @@ export interface SessionSnapshot {
 
 export interface RefreshResult {
 	token: string;
+	sessionId: string;
 	expiresAt: string | Date;
 }
 

@@ -21,6 +21,7 @@ import {
 	type ActiveAccount,
 	type BiometricAuthResult,
 	DEFAULT_SESSION_EXPIRY_MS,
+	resolveStoredSessionExpiryTimestamp,
 	type StoredSessionData,
 	type VaultKeyData,
 } from "../types";
@@ -226,7 +227,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 		masterUnlockKey: Uint8Array,
 		email: string,
 		userId: string,
-		expiryMs: number = DEFAULT_SESSION_EXPIRY_MS,
+		expiresAt?: string | Date | number,
 		sessionId?: string,
 	): Promise<void> {
 		if (typeof window === "undefined") return;
@@ -243,7 +244,8 @@ export class WebStorageAdapter implements IStorageAdapter {
 			email,
 			userId,
 			sessionId,
-			expiresAt: now + expiryMs,
+			expiresAt: now + DEFAULT_SESSION_EXPIRY_MS,
+			serverExpiresAt: resolveStoredSessionExpiryTimestamp(expiresAt, now),
 			createdAt: now,
 		};
 
@@ -254,7 +256,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 		keyHandle: number,
 		email: string,
 		userId: string,
-		expiryMs: number = DEFAULT_SESSION_EXPIRY_MS,
+		expiresAt?: string | Date | number,
 		sessionId?: string,
 	): Promise<void> {
 		if (typeof window === "undefined") return;
@@ -276,7 +278,8 @@ export class WebStorageAdapter implements IStorageAdapter {
 			email,
 			userId,
 			sessionId,
-			expiresAt: now + expiryMs,
+			expiresAt: now + DEFAULT_SESSION_EXPIRY_MS,
+			serverExpiresAt: resolveStoredSessionExpiryTimestamp(expiresAt, now),
 			createdAt: now,
 		};
 
@@ -314,10 +317,35 @@ export class WebStorageAdapter implements IStorageAdapter {
 
 	async isSessionValid(_email?: string): Promise<boolean> {
 		const sessionData = await this.getStoredSessionData();
-		if (!sessionData) return false;
+		const token = await this.getAuthToken();
+		if (!sessionData || !token) return false;
 
 		const now = Date.now();
-		return now < sessionData.expiresAt;
+		return now < (sessionData.serverExpiresAt ?? sessionData.expiresAt);
+	}
+
+	async updateStoredSessionMetadata(
+		_email: string,
+		metadata: {
+			sessionId?: string;
+			expiresAt: string | Date | number;
+		},
+	): Promise<void> {
+		const existing = await this.getStoredSessionData();
+		if (!existing || typeof window === "undefined") {
+			return;
+		}
+
+		const next: StoredSessionData = {
+			...existing,
+			sessionId: metadata.sessionId ?? existing.sessionId,
+			serverExpiresAt: resolveStoredSessionExpiryTimestamp(
+				metadata.expiresAt,
+				existing.createdAt,
+			),
+		};
+
+		localStorage.setItem(SESSION_DATA_STORAGE, JSON.stringify(next));
 	}
 
 	// ============================================================================
@@ -687,8 +715,8 @@ export class WebStorageAdapter implements IStorageAdapter {
 
 	async canQuickUnlock(_email?: string): Promise<boolean> {
 		const hasSecretKey = (await this.getStoredSecretKey()) !== null;
-		const sessionValid = await this.isSessionValid();
-		return hasSecretKey && sessionValid;
+		const sessionData = await this.getStoredSessionData();
+		return hasSecretKey && sessionData !== null;
 	}
 
 	// ============================================================================
@@ -728,7 +756,21 @@ export class WebStorageAdapter implements IStorageAdapter {
 		if (!stored) return null;
 
 		try {
-			return JSON.parse(stored) as StoredSessionData;
+			const parsed = JSON.parse(stored) as StoredSessionData;
+			return {
+				...parsed,
+				expiresAt: resolveStoredSessionExpiryTimestamp(
+					parsed.expiresAt,
+					parsed.createdAt,
+				),
+				serverExpiresAt:
+					parsed.serverExpiresAt !== undefined
+						? resolveStoredSessionExpiryTimestamp(
+								parsed.serverExpiresAt,
+								parsed.createdAt,
+							)
+						: undefined,
+			};
 		} catch {
 			return null;
 		}

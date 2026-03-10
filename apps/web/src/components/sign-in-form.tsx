@@ -4,6 +4,7 @@ import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { Button, Input, Label, toast } from "@bittery/ui";
 import {
+	IconClockTimeOutlineDuo18 as Clock,
 	IconEyeOutlineDuo18 as Eye,
 	IconEyeSlashOutlineDuo18 as EyeOff,
 	IconLoader2OutlineDuo18 as Loader2,
@@ -92,13 +93,16 @@ export default function SignInForm({
 	// Handle session expiration detection
 	useEffect(() => {
 		if (!isLoadingSession && sessionState) {
-			// If we have stored data but session is invalid, show expired message
-			if (sessionState.email && !sessionState.isValid) {
-				setSessionExpired(true);
-				toast.info(m["toast.auth.session_expired"]());
-			}
+			const quickUnlockExpired = Boolean(
+				sessionState.email &&
+					!sessionState.canQuickUnlock &&
+					sessionState.expiresAt &&
+					Date.now() >= sessionState.expiresAt,
+			);
+
+			setSessionExpired(quickUnlockExpired);
 		}
-	}, [isLoadingSession, sessionState, m["toast.auth.session_expired"]]);
+	}, [isLoadingSession, sessionState]);
 
 	const form = useForm({
 		defaultValues: {
@@ -169,14 +173,19 @@ export default function SignInForm({
 			</p>
 			<div className="mt-6">
 				{sessionExpired && (
-					<div className="mb-6 rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-900 dark:bg-yellow-950/30">
-						<div className="flex gap-3">
-							<div className="text-xl">&#9203;</div>
-							<div>
-								<p className="font-medium text-sm text-yellow-900 dark:text-yellow-100">
-									{m["auth.signin.session_expired.title"]()}
-								</p>
-								<p className="mt-1 text-xs text-yellow-700 dark:text-yellow-300">
+					<div className="mb-6 overflow-hidden rounded-2xl border border-amber-200/70 bg-[linear-gradient(135deg,rgba(255,251,235,0.96),rgba(255,255,255,0.98))] shadow-[0_18px_40px_-28px_rgba(146,64,14,0.55)]">
+						<div className="h-px bg-[linear-gradient(90deg,rgba(217,119,6,0.8),rgba(251,191,36,0.15),transparent)]" />
+						<div className="flex items-start gap-3 px-4 py-4 sm:px-5">
+							<div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-200/80 bg-white/85 text-amber-700 shadow-sm">
+								<Clock className="size-4.5" />
+							</div>
+							<div className="min-w-0 flex-1 pt-0.5">
+								<div className="flex flex-wrap items-center gap-2">
+									<span className="inline-flex items-center rounded-full border border-amber-200/80 bg-amber-100/80 px-2.5 py-0.5 font-medium text-[11px] uppercase tracking-[0.16em] text-amber-800">
+										{m["auth.signin.session_expired.title"]()}
+									</span>
+								</div>
+								<p className="mt-2 max-w-prose text-[13px] leading-6 text-amber-900/90 sm:text-sm">
 									{m["auth.signin.session_expired.description"]()}
 								</p>
 							</div>

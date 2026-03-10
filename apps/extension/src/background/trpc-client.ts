@@ -89,11 +89,17 @@ export const trpcClient = createSessionRefreshingTrpcClient({
 		};
 	},
 	getRefreshToken: getAuthToken,
-	storeRefreshedToken: async (token) => {
+	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
 		const activeAccount = await storage.getActiveAccount();
 		const email =
 			activeAccount?.type === "single" ? activeAccount.email : undefined;
 		await storage.storeAuthToken(token, email);
+		if (email) {
+			await storage.updateStoredSessionMetadata?.(email, {
+				sessionId,
+				expiresAt,
+			});
+		}
 	},
 	getClientId: async () => getOrCreateSyncClientId(),
 	appPlatform: "extension",

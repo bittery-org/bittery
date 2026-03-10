@@ -6,7 +6,7 @@
 
 import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
 import type { IStorageAdapter, VaultKeyData } from "@bittery/storage";
-import type { ICrypto, KdfParams } from "@bittery/types";
+import type { EncryptedData, ICrypto, KdfParams } from "@bittery/types";
 
 /**
  * Input for SRP login (full login with password + secret key)
@@ -43,6 +43,7 @@ export interface LoginUserData {
 export interface LoginResult {
 	token: string;
 	sessionId?: string;
+	expiresAt?: string | Date;
 	user: LoginUserData;
 	vaultKeys: VaultKeyData[];
 	masterUnlockKey?: Uint8Array;
@@ -53,8 +54,10 @@ export interface LoginResult {
  * Result from successful unlock
  */
 export interface UnlockResult {
+	mode: "local" | "reauth";
 	token: string;
 	sessionId?: string;
+	expiresAt?: string | Date;
 	user: LoginUserData;
 	vaultKeys: VaultKeyData[];
 	masterUnlockKey?: Uint8Array;
@@ -93,11 +96,10 @@ export interface SessionState {
  * Start login response (SRP challenge)
  */
 export interface StartLoginResponse {
-	userId: string;
+	attemptId: string;
 	salt: string;
 	serverPublicKey: string;
 	kdfParams: KdfParams;
-	serverSecret: string;
 }
 
 /**
@@ -109,6 +111,7 @@ export interface FinishLoginResponse {
 	user: LoginUserData;
 	vaultKeys: VaultKeyData[];
 	sessionId?: string;
+	expiresAt: string | Date;
 }
 
 /**
@@ -128,21 +131,7 @@ export interface IAuthTRPCClient {
 		};
 		finishLogin: {
 			mutate(input: {
-				userId: string;
-				serverSecret: string;
-				clientPublicKey: string;
-				clientProof: string;
-			}): Promise<FinishLoginResponse>;
-		};
-		/**
-		 * Quick unlock - same as finishLogin but includes email for tracking.
-		 * Used for password-only unlock when secret key is stored locally.
-		 */
-		quickUnlock: {
-			mutate(input: {
-				email: string;
-				userId: string;
-				serverSecret: string;
+				attemptId: string;
 				clientPublicKey: string;
 				clientProof: string;
 			}): Promise<FinishLoginResponse>;
@@ -185,6 +174,7 @@ interface HandleCapableCrypto extends ICrypto {
 		email: string,
 	) => Promise<{ authKeyHandle: number; masterUnlockKeyHandle: number }>;
 	deriveSrpPasswordFromHandle: (authKeyHandle: number) => Promise<string>;
+	exportKeyHandle?: (keyHandle: number) => Promise<Uint8Array>;
 	// biome-ignore lint/suspicious/noConfusingVoidType: wasm needs this
 	destroyKeyHandle?: (keyHandle: number) => Promise<void | boolean>;
 }
@@ -198,6 +188,52 @@ function asHandleCapableCrypto(crypto: ICrypto): HandleCapableCrypto | null {
 		return candidate as HandleCapableCrypto;
 	}
 	return null;
+}
+
+function parseEncryptedData(
+	serialized: string | null,
+): EncryptedData | null {
+	if (!serialized) {
+		return null;
+	}
+
+	try {
+		return JSON.parse(serialized) as EncryptedData;
+	} catch {
+		return null;
+	}
+}
+
+async function validateDerivedUnlockKey(input: {
+	crypto: ICrypto;
+	storage: IStorageAdapter;
+	email: string;
+	masterUnlockKey?: Uint8Array;
+	masterUnlockKeyHandle?: number;
+	handleCrypto: HandleCapableCrypto | null;
+}): Promise<void> {
+	const encryptedPrivateKey = await input.storage.getEncryptedPrivateKey(input.email);
+	const parsedEncryptedPrivateKey = parseEncryptedData(encryptedPrivateKey);
+	if (!parsedEncryptedPrivateKey) {
+		return;
+	}
+
+	let validationKey = input.masterUnlockKey;
+	if (
+		!validationKey &&
+		input.masterUnlockKeyHandle &&
+		input.handleCrypto?.exportKeyHandle
+	) {
+		validationKey = await input.handleCrypto.exportKeyHandle(
+			input.masterUnlockKeyHandle,
+		);
+	}
+
+	if (!validationKey) {
+		return;
+	}
+
+	await input.crypto.decrypt(parsedEncryptedPrivateKey, validationKey);
 }
 
 async function validateAndPinServerKdfParams(
@@ -295,8 +331,7 @@ export async function performSRPLogin(
 		);
 
 		const finishResult = await trpcClient.auth.finishLogin.mutate({
-			userId: startResult.userId,
-			serverSecret: startResult.serverSecret,
+			attemptId: startResult.attemptId,
 			clientPublicKey: clientEphemeral.publicKey,
 			clientProof: clientSession.proof,
 		});
@@ -316,6 +351,7 @@ export async function performSRPLogin(
 		return {
 			token: finishResult.token,
 			sessionId: finishResult.sessionId,
+			expiresAt: finishResult.expiresAt,
 			user: finishResult.user,
 			vaultKeys: finishResult.vaultKeys,
 			masterUnlockKey,
@@ -366,7 +402,7 @@ export async function storeLoginSession(
 			result.masterUnlockKeyHandle,
 			resolvedEmail,
 			result.user.id,
-			undefined,
+			result.expiresAt,
 			result.sessionId,
 		);
 		await storage.setMasterUnlockKeyHandle(
@@ -378,7 +414,7 @@ export async function storeLoginSession(
 			result.masterUnlockKey,
 			resolvedEmail,
 			result.user.id,
-			undefined,
+			result.expiresAt,
 			result.sessionId,
 		);
 
@@ -453,6 +489,45 @@ export async function performSRPUnlock(
 	}
 
 	try {
+		await validateDerivedUnlockKey({
+			crypto,
+			storage,
+			email,
+			masterUnlockKey,
+			masterUnlockKeyHandle,
+			handleCrypto,
+		});
+
+		const [storedSessionData, storedToken, storedVaultKeys, storedPrivateKey] =
+			await Promise.all([
+				storage.getStoredSessionData?.(email) ?? Promise.resolve(null),
+				storage.getAuthToken(email),
+				storage.getVaultKeys(email),
+				storage.getEncryptedPrivateKey(email),
+			]);
+
+		if (storedSessionData && storedToken && (await storage.isSessionValid(email))) {
+			const accountMetadata = await storage.getAccountMetadata?.(email);
+
+			return {
+				mode: "local",
+				token: storedToken,
+				sessionId: storedSessionData.sessionId,
+				expiresAt: new Date(storedSessionData.expiresAt),
+				user: {
+					id: storedSessionData.userId,
+					email,
+					name: accountMetadata?.name,
+					teamName: accountMetadata?.teamName,
+					teamAvatarUrl: accountMetadata?.teamAvatarUrl,
+					encryptedPrivateKey: storedPrivateKey ?? undefined,
+				},
+				vaultKeys: storedVaultKeys ?? [],
+				masterUnlockKey,
+				masterUnlockKeyHandle,
+			};
+		}
+
 		const clientEphemeral = await crypto.generateClientEphemeral();
 
 		const startResult = await trpcClient.auth.startLogin.mutate({
@@ -472,10 +547,8 @@ export async function performSRPUnlock(
 			srpPassword,
 		);
 
-		const finishResult = await trpcClient.auth.quickUnlock.mutate({
-			email,
-			userId: startResult.userId,
-			serverSecret: startResult.serverSecret,
+		const finishResult = await trpcClient.auth.finishLogin.mutate({
+			attemptId: startResult.attemptId,
 			clientPublicKey: clientEphemeral.publicKey,
 			clientProof: clientSession.proof,
 		});
@@ -493,8 +566,10 @@ export async function performSRPUnlock(
 		);
 
 		return {
+			mode: "reauth",
 			token: finishResult.token,
 			sessionId: finishResult.sessionId,
+			expiresAt: finishResult.expiresAt,
 			user: finishResult.user,
 			vaultKeys: finishResult.vaultKeys,
 			masterUnlockKey,
@@ -518,41 +593,57 @@ export async function storeUnlockSession(
 ): Promise<void> {
 	const resolvedEmail = email ?? result.user.email;
 
-	await storage.storeAuthToken(result.token, resolvedEmail);
-	await storage.storeVaultKeys(result.vaultKeys, resolvedEmail);
+	if (result.mode === "reauth") {
+		await storage.storeAuthToken(result.token, resolvedEmail);
+		await storage.storeVaultKeys(result.vaultKeys, resolvedEmail);
 
-	if (result.user.encryptedPrivateKey) {
-		await storage.storeEncryptedPrivateKey(
-			result.user.encryptedPrivateKey,
-			resolvedEmail,
-		);
-	}
+		if (result.user.encryptedPrivateKey) {
+			await storage.storeEncryptedPrivateKey(
+				result.user.encryptedPrivateKey,
+				resolvedEmail,
+			);
+		}
 
-	if (
+		if (
+			result.masterUnlockKeyHandle &&
+			storage.storeSessionDataWithMasterUnlockKeyHandle &&
+			storage.setMasterUnlockKeyHandle
+		) {
+			await storage.storeSessionDataWithMasterUnlockKeyHandle(
+				result.masterUnlockKeyHandle,
+				resolvedEmail,
+				result.user.id,
+				result.expiresAt,
+				result.sessionId,
+			);
+			await storage.setMasterUnlockKeyHandle(
+				result.masterUnlockKeyHandle,
+				resolvedEmail,
+			);
+		} else if (result.masterUnlockKey) {
+			await storage.storeSessionData(
+				result.masterUnlockKey,
+				resolvedEmail,
+				result.user.id,
+				result.expiresAt,
+				result.sessionId,
+			);
+
+			await storage.setMasterUnlockKey(result.masterUnlockKey, resolvedEmail);
+		} else {
+			throw new Error(
+				"Master Unlock Key unavailable for session storage on this platform.",
+			);
+		}
+	} else if (
 		result.masterUnlockKeyHandle &&
-		storage.storeSessionDataWithMasterUnlockKeyHandle &&
 		storage.setMasterUnlockKeyHandle
 	) {
-		await storage.storeSessionDataWithMasterUnlockKeyHandle(
-			result.masterUnlockKeyHandle,
-			resolvedEmail,
-			result.user.id,
-			undefined,
-			result.sessionId,
-		);
 		await storage.setMasterUnlockKeyHandle(
 			result.masterUnlockKeyHandle,
 			resolvedEmail,
 		);
 	} else if (result.masterUnlockKey) {
-		await storage.storeSessionData(
-			result.masterUnlockKey,
-			resolvedEmail,
-			result.user.id,
-			undefined,
-			result.sessionId,
-		);
-
 		await storage.setMasterUnlockKey(result.masterUnlockKey, resolvedEmail);
 	} else {
 		throw new Error(

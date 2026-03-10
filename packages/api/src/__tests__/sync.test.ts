@@ -378,15 +378,16 @@ describe("Sync Router", () => {
 		test("should return no conflict when item has not been modified", async () => {
 			const { caller, userId } = await setup(syncRouter);
 			const vaultId = await createTestVault(userId);
+			const itemId = await createTestItem(vaultId, userId, { id: "item-1" });
 
 			await createTestSyncEvent(vaultId, userId, {
-				entityId: "item-1",
+				entityId: itemId,
 				entityType: "item",
 				version: 3,
 			});
 
 			const result = await caller.checkConflict({
-				itemId: "item-1",
+				itemId,
 				expectedVersion: 5, // Higher than current
 			});
 
@@ -396,15 +397,16 @@ describe("Sync Router", () => {
 		test("should detect conflict when item version is ahead", async () => {
 			const { caller, userId } = await setup(syncRouter);
 			const vaultId = await createTestVault(userId);
+			const itemId = await createTestItem(vaultId, userId, { id: "item-1" });
 
 			await createTestSyncEvent(vaultId, userId, {
-				entityId: "item-1",
+				entityId: itemId,
 				entityType: "item",
 				version: 5,
 			});
 
 			const result = await caller.checkConflict({
-				itemId: "item-1",
+				itemId,
 				expectedVersion: 3, // Behind current
 			});
 
@@ -413,36 +415,46 @@ describe("Sync Router", () => {
 			expect(result.lastModifiedBy).toBe(userId);
 		});
 
-		test("should return no conflict when no events exist for item", async () => {
-			const { caller } = await setup(syncRouter);
+		test("should return no conflict when an accessible item has no events", async () => {
+			const { caller, userId } = await setup(syncRouter);
+			const vaultId = await createTestVault(userId);
+			const itemId = await createTestItem(vaultId, userId);
 
 			const result = await caller.checkConflict({
-				itemId: "nonexistent-item",
+				itemId,
 				expectedVersion: 1,
 			});
 
 			expect(result.hasConflict).toBe(false);
 		});
 
-		test("should deny access when user cannot access the vault", async () => {
+		test("should return NOT_FOUND for both foreign and nonexistent items", async () => {
 			const [{ userId: ownerId }, { caller }] = await Promise.all([
 				setup(syncRouter),
 				setup(syncRouter),
 			]);
 			const vaultId = await createTestVault(ownerId);
+			const foreignItemId = await createTestItem(vaultId, ownerId);
 
 			await createTestSyncEvent(vaultId, ownerId, {
-				entityId: "item-1",
+				entityId: foreignItemId,
 				entityType: "item",
 				version: 2,
 			});
 
 			await expect(
 				caller.checkConflict({
-					itemId: "item-1",
+					itemId: foreignItemId,
 					expectedVersion: 1,
 				}),
-			).rejects.toThrow("Access denied");
+			).rejects.toThrow("Item not found");
+
+			await expect(
+				caller.checkConflict({
+					itemId: "nonexistent-item",
+					expectedVersion: 1,
+				}),
+			).rejects.toThrow("Item not found");
 		});
 	});
 });

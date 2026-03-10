@@ -50,6 +50,42 @@ function generateVerificationCode(): string {
 	return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+async function loadVisibleShareLinkForActor(
+	linkId: string,
+	actorUserId: string,
+) {
+	const link = await db.query.shareLink.findFirst({
+		where: (record, { eq: eqFn }) => eqFn(record.id, linkId),
+		with: {
+			item: true,
+			allowedEmails: true,
+		},
+	});
+
+	if (!link) {
+		return null;
+	}
+
+	const actorVaultKey = await db.query.vaultKey.findFirst({
+		where: (record, { and: andFn, eq: eqFn }) =>
+			andFn(
+				eqFn(record.vaultId, link.item.vaultId),
+				eqFn(record.userId, actorUserId),
+			),
+	});
+
+	const canView = Boolean(
+		actorVaultKey &&
+			(["owner", "admin"].includes(actorVaultKey.role) ||
+				link.createdById === actorUserId),
+	);
+
+	return {
+		link,
+		canView,
+	};
+}
+
 export const shareRouter = router({
 	/**
 	 * Create a new share link for an item
@@ -338,36 +374,17 @@ export const shareRouter = router({
 		.query(async ({ ctx, input }) => {
 			await assertShareLinksEntitlement(ctx.session.userId);
 
-			const link = await db.query.shareLink.findFirst({
-				where: (sl, { eq }) => eq(sl.id, input.linkId),
-				with: {
-					item: true,
-					allowedEmails: true,
-				},
-			});
-
-			if (!link) {
+			const visibleLink = await loadVisibleShareLinkForActor(
+				input.linkId,
+				ctx.session.userId,
+			);
+			if (!visibleLink || !visibleLink.canView) {
 				throw new TRPCError({
 					code: "NOT_FOUND",
 					message: "Share link not found",
 				});
 			}
-
-			// Verify user has access
-			const userVaultKey = await db.query.vaultKey.findFirst({
-				where: (vk, { and, eq }) =>
-					and(
-						eq(vk.vaultId, link.item.vaultId),
-						eq(vk.userId, ctx.session.userId),
-					),
-			});
-
-			if (!userVaultKey) {
-				throw new TRPCError({
-					code: "FORBIDDEN",
-					message: "Access denied",
-				});
-			}
+			const { link } = visibleLink;
 
 			return {
 				id: link.id,
@@ -609,33 +626,14 @@ export const shareRouter = router({
 		.query(async ({ ctx, input }) => {
 			await assertShareLinksEntitlement(ctx.session.userId);
 
-			const link = await db.query.shareLink.findFirst({
-				where: (sl, { eq }) => eq(sl.id, input.linkId),
-				with: {
-					item: true,
-				},
-			});
-
-			if (!link) {
+			const visibleLink = await loadVisibleShareLinkForActor(
+				input.linkId,
+				ctx.session.userId,
+			);
+			if (!visibleLink || !visibleLink.canView) {
 				throw new TRPCError({
 					code: "NOT_FOUND",
 					message: "Share link not found",
-				});
-			}
-
-			// Verify user has access
-			const userVaultKey = await db.query.vaultKey.findFirst({
-				where: (vk, { and, eq }) =>
-					and(
-						eq(vk.vaultId, link.item.vaultId),
-						eq(vk.userId, ctx.session.userId),
-					),
-			});
-
-			if (!userVaultKey) {
-				throw new TRPCError({
-					code: "FORBIDDEN",
-					message: "Access denied",
 				});
 			}
 

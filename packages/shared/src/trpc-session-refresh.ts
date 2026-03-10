@@ -7,7 +7,11 @@ interface SessionRefreshingFetchOptions {
 	getServerUrl: () => Promise<string>;
 	getSessionSnapshot: () => Promise<SessionSnapshot>;
 	getRefreshToken: () => Promise<string | null>;
-	storeRefreshedToken: (token: string) => Promise<void>;
+	storeRefreshedSession: (session: {
+		token: string;
+		sessionId: string;
+		expiresAt: string | Date;
+	}) => Promise<void>;
 	getClientId?: () => Promise<string | null>;
 	thresholdRatio?: number;
 	/** Platform identifier sent as X-App-Platform header (e.g. 'desktop', 'ios', 'android') */
@@ -92,7 +96,7 @@ export function createSessionRefreshingTrpcFetch(
 		getSessionSnapshot: options.getSessionSnapshot,
 		refreshSession: () => refreshClient.auth.refreshSession.mutate(),
 		onRefreshSuccess: async (result) => {
-			await options.storeRefreshedToken(result.token);
+			await options.storeRefreshedSession(result);
 		},
 	});
 

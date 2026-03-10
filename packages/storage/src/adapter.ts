@@ -14,6 +14,7 @@ import type {
 	ActiveAccount,
 	BiometricAuthResult,
 	Platform,
+	SessionExpiryInput,
 	StoredSessionData,
 	VaultKeyData,
 } from "./types";
@@ -88,7 +89,7 @@ export interface IStorageAdapter {
 		muk: Uint8Array,
 		email: string,
 		userId: string,
-		expiryMs?: number,
+		expiresAt?: SessionExpiryInput,
 		sessionId?: string,
 	): Promise<void>;
 
@@ -99,8 +100,16 @@ export interface IStorageAdapter {
 		keyHandle: number,
 		email: string,
 		userId: string,
-		expiryMs?: number,
+		expiresAt?: SessionExpiryInput,
 		sessionId?: string,
+	): Promise<void>;
+
+	updateStoredSessionMetadata?(
+		email: string,
+		metadata: {
+			sessionId?: string;
+			expiresAt: SessionExpiryInput;
+		},
 	): Promise<void>;
 
 	/**

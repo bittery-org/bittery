@@ -3,14 +3,22 @@
  * Uses SRP-6a for secure authentication without server knowing password
  */
 
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import {
 	deriveServerSession,
 	generateServerEphemeral,
 } from "@bittery/crypto-napi";
-import { db, recoveryVerification, session, user, vaultKey } from "@bittery/db";
+import {
+	db,
+	loginAttempt,
+	recoveryVerification,
+	session,
+	signupVerification,
+	user,
+	vaultKey,
+} from "@bittery/db";
 import type { KdfParams, SRPServerChallenge } from "@bittery/types";
-import { and, eq, gt, isNull, ne } from "drizzle-orm";
+import { and, eq, gt, isNull, lte, ne } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
 import { nanoid } from "nanoid";
 import {
@@ -45,9 +53,11 @@ if (jwtSecretRaw.length < 32) {
 	);
 }
 
+const JWT_SECRET_RAW = jwtSecretRaw;
 const JWT_SECRET = new TextEncoder().encode(jwtSecretRaw);
 const JWT_ISSUER = "bittery";
 const RECOVERY_JWT_AUDIENCE = "bittery-recovery";
+const SIGNUP_VERIFICATION_JWT_AUDIENCE = "bittery-signup-verification";
 const DEFAULT_SESSION_DURATION = 30 * 24 * 60 * 60 * 1000;
 const SESSION_DURATION_BY_PLATFORM: Record<string, number> = {
 	web: 24 * 60 * 60 * 1000,
@@ -58,14 +68,22 @@ const SESSION_DURATION_BY_PLATFORM: Record<string, number> = {
 	android: 30 * 24 * 60 * 60 * 1000,
 };
 const RECOVERY_TOKEN_DURATION = "15m";
+const SIGNUP_VERIFICATION_TOKEN_DURATION = "15m";
+const LOGIN_ATTEMPT_TTL_MS = 60 * 1000;
 const LOGIN_RATE_LIMIT_FREE_ATTEMPTS = 5;
 const LOGIN_RATE_LIMIT_MAX_LOCK_MINUTES = 30;
 const RECOVERY_VERIFICATION_DURATION_MS = 15 * 60 * 1000; // 15 minutes
-const LOGIN_RATE_LIMIT_NAMESPACE = RATE_LIMIT_NAMESPACE.authLogin;
+const SIGNUP_VERIFICATION_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+const LOGIN_RATE_LIMIT_NAMESPACE = RATE_LIMIT_NAMESPACE.authLoginAccount;
 const RECOVERY_RATE_LIMIT_NAMESPACE = RATE_LIMIT_NAMESPACE.authRecovery;
 const LOGIN_KDF_SCHEMA_VERSION = 1 as const;
 const LOGIN_KDF_ALGORITHM = "pbkdf2-sha256" as const;
 const LOGIN_KDF_ITERATIONS = 310_000;
+const FAKE_SRP_VERIFIER =
+	"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" +
+	"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" +
+	"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" +
+	"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
 
 export function normalizeEmail(email: string): string {
 	return email.trim().toLowerCase();
@@ -82,6 +100,47 @@ function buildLoginKdfParams(salt: string): KdfParams {
 
 function hashToken(token: string): string {
 	return createHash("sha256").update(token).digest("hex");
+}
+
+function hashNormalizedEmail(normalizedEmail: string): string {
+	return createHash("sha256").update(normalizedEmail).digest("hex");
+}
+
+function buildLoginAttemptId(normalizedEmailHash: string): string {
+	return `${normalizedEmailHash}:${nanoid()}`;
+}
+
+export function getLoginAccountRateLimitKey(email: string): string {
+	return hashNormalizedEmail(normalizeEmail(email));
+}
+
+export function extractLoginAttemptRateLimitKey(
+	attemptId: string,
+): string | null {
+	const [normalizedEmailHash] = attemptId.split(":", 1);
+	if (!normalizedEmailHash || !/^[a-f0-9]{64}$/.test(normalizedEmailHash)) {
+		return null;
+	}
+	return normalizedEmailHash;
+}
+
+function buildFakeLoginSalt(normalizedEmail: string): string {
+	return createHmac("sha256", JWT_SECRET_RAW)
+		.update(normalizedEmail)
+		.digest("hex");
+}
+
+function matchOptionalInvitationToken(invitationToken: string | null) {
+	return invitationToken === null
+		? isNull(signupVerification.invitationToken)
+		: eq(signupVerification.invitationToken, invitationToken);
+}
+
+function getScopedRateLimitId(email: string, ipAddress: string | null): string {
+	const ipPart = ipAddress?.trim() || "unknown";
+	return createHash("sha256")
+		.update(`${normalizeEmail(email)}|${ipPart}`)
+		.digest("hex");
 }
 
 function generateOpaqueSessionToken(): string {
@@ -106,13 +165,6 @@ function normalizeSessionPlatform(platform?: string): string {
 function getSessionDurationMs(platform?: string): number {
 	const normalized = normalizeSessionPlatform(platform);
 	return SESSION_DURATION_BY_PLATFORM[normalized] ?? DEFAULT_SESSION_DURATION;
-}
-
-function getRateLimitId(email: string, ipAddress: string | null): string {
-	const ipPart = ipAddress?.trim() || "unknown";
-	return createHash("sha256")
-		.update(`${normalizeEmail(email)}|${ipPart}`)
-		.digest("hex");
 }
 
 export class LoginRateLimitError extends Error {
@@ -141,6 +193,12 @@ export interface RecoveryTokenPayload {
 	type: "recovery";
 }
 
+export interface SignupVerificationTokenPayload {
+	email: string;
+	invitationToken?: string;
+	type: "signup_verification";
+}
+
 /**
  * Create a new user (called during signup)
  */
@@ -148,6 +206,7 @@ export async function createUser(data: {
 	id?: string;
 	email: string;
 	name: string;
+	emailVerified?: boolean;
 	secretKeyHint: string;
 	srpSalt: string;
 	srpVerifier: string;
@@ -162,7 +221,7 @@ export async function createUser(data: {
 		id: userId,
 		email: normalizeEmail(data.email),
 		name: data.name,
-		emailVerified: false,
+		emailVerified: data.emailVerified ?? false,
 		secretKeyHint: data.secretKeyHint,
 		srpSalt: data.srpSalt,
 		srpVerifier: data.srpVerifier,
@@ -181,33 +240,47 @@ export async function createUser(data: {
  */
 export async function startLogin(
 	email: string,
-	_clientPublicKey: string,
+	clientPublicKey: string,
 ): Promise<{
-	userId: string;
+	attemptId: string;
 	challenge: SRPServerChallenge;
-	serverEphemeralSecret: string;
 }> {
+	const normalizedEmail = normalizeEmail(email);
+	const normalizedEmailHash = hashNormalizedEmail(normalizedEmail);
+	const now = new Date();
+
+	await db.delete(loginAttempt).where(lte(loginAttempt.expiresAt, now));
+
 	const [existingUser] = await db
 		.select()
 		.from(user)
-		.where(eq(user.email, normalizeEmail(email)))
+		.where(eq(user.email, normalizedEmail))
 		.limit(1);
 
-	if (!existingUser) {
-		throw new Error("User not found");
-	}
+	const srpSalt = existingUser
+		? existingUser.srpSalt
+		: buildFakeLoginSalt(normalizedEmail);
+	const srpVerifier = existingUser?.srpVerifier ?? FAKE_SRP_VERIFIER;
+	const serverEphemeral = generateServerEphemeral(srpVerifier);
+	const attemptId = buildLoginAttemptId(normalizedEmailHash);
+	const expiresAt = new Date(now.getTime() + LOGIN_ATTEMPT_TTL_MS);
 
-	// Generate server ephemeral key pair
-	const serverEphemeral = generateServerEphemeral(existingUser.srpVerifier);
+	await db.insert(loginAttempt).values({
+		id: attemptId,
+		userId: existingUser?.id ?? null,
+		normalizedEmailHash,
+		clientPublicKey,
+		serverEphemeralSecret: serverEphemeral.secret,
+		expiresAt,
+	});
 
 	return {
-		userId: existingUser.id,
+		attemptId,
 		challenge: {
-			salt: existingUser.srpSalt,
+			salt: srpSalt,
 			serverPublicKey: serverEphemeral.public,
-			kdfParams: buildLoginKdfParams(existingUser.srpSalt),
+			kdfParams: buildLoginKdfParams(srpSalt),
 		},
-		serverEphemeralSecret: serverEphemeral.secret,
 	};
 }
 
@@ -216,13 +289,13 @@ export async function startLogin(
  * Step 4 of SRP flow: Server verifies client's proof and derives session key
  */
 export async function finishLogin(
-	userId: string,
-	serverEphemeralSecret: string,
+	attemptId: string,
 	clientPublicKey: string,
 	clientProof: string,
 	deviceInfo?: DeviceInfo,
 ): Promise<{
 	success: boolean;
+	normalizedEmailHash?: string | null;
 	token?: string;
 	sessionId?: string;
 	expiresAt?: Date;
@@ -236,21 +309,63 @@ export async function finishLogin(
 		encryptedPrivateKey: string;
 	};
 }> {
-	// Get user data
+	const now = new Date();
+	const existingAttempt = await db.query.loginAttempt.findFirst({
+		where: (record, { eq: eqFn }) => eqFn(record.id, attemptId),
+	});
+	const fallbackHash = extractLoginAttemptRateLimitKey(attemptId);
+
+	if (!existingAttempt) {
+		return {
+			success: false,
+			normalizedEmailHash: fallbackHash,
+		};
+	}
+
+	const normalizedEmailHash =
+		existingAttempt.normalizedEmailHash ?? fallbackHash ?? null;
+
+	if (existingAttempt.expiresAt <= now) {
+		await db.delete(loginAttempt).where(eq(loginAttempt.id, attemptId));
+		return {
+			success: false,
+			normalizedEmailHash,
+		};
+	}
+
+	if (existingAttempt.clientPublicKey !== clientPublicKey) {
+		await db.delete(loginAttempt).where(eq(loginAttempt.id, attemptId));
+		return {
+			success: false,
+			normalizedEmailHash,
+		};
+	}
+
+	await db.delete(loginAttempt).where(eq(loginAttempt.id, attemptId));
+
+	if (!existingAttempt.userId) {
+		return {
+			success: false,
+			normalizedEmailHash,
+		};
+	}
+
 	const [existingUser] = await db
 		.select()
 		.from(user)
-		.where(eq(user.id, userId))
+		.where(eq(user.id, existingAttempt.userId))
 		.limit(1);
 
 	if (!existingUser) {
-		return { success: false };
+		return {
+			success: false,
+			normalizedEmailHash,
+		};
 	}
 
 	try {
-		// Derive server session and verify client proof
 		const serverSession = await deriveServerSession(
-			serverEphemeralSecret,
+			existingAttempt.serverEphemeralSecret,
 			clientPublicKey,
 			existingUser.srpSalt,
 			existingUser.srpVerifier,
@@ -281,6 +396,7 @@ export async function finishLogin(
 
 		return {
 			success: true,
+			normalizedEmailHash,
 			token: opaqueToken,
 			sessionId,
 			expiresAt,
@@ -296,7 +412,10 @@ export async function finishLogin(
 		};
 	} catch (error) {
 		console.error("SRP verification failed:", error);
-		return { success: false };
+		return {
+			success: false,
+			normalizedEmailHash,
+		};
 	}
 }
 
@@ -352,6 +471,26 @@ export async function createRecoveryToken(email: string): Promise<string> {
 		.sign(JWT_SECRET);
 }
 
+export async function createSignupVerificationToken(input: {
+	email: string;
+	invitationToken?: string;
+}): Promise<string> {
+	const normalizedEmail = normalizeEmail(input.email);
+
+	// @ts-expect-error -- jose types
+	return new SignJWT({
+		email: normalizedEmail,
+		invitationToken: input.invitationToken,
+		type: "signup_verification",
+	} as SignupVerificationTokenPayload)
+		.setProtectedHeader({ alg: "HS256" })
+		.setIssuedAt()
+		.setIssuer(JWT_ISSUER)
+		.setAudience(SIGNUP_VERIFICATION_JWT_AUDIENCE)
+		.setExpirationTime(SIGNUP_VERIFICATION_TOKEN_DURATION)
+		.sign(JWT_SECRET);
+}
+
 /**
  * Verify short-lived recovery token
  */
@@ -374,6 +513,36 @@ export async function verifyRecoveryToken(
 		return {
 			email: normalizeEmail(email),
 			type: "recovery",
+		};
+	} catch {
+		return null;
+	}
+}
+
+export async function verifySignupVerificationToken(
+	token: string,
+): Promise<SignupVerificationTokenPayload | null> {
+	try {
+		const { payload } = await jwtVerify(token, JWT_SECRET, {
+			issuer: JWT_ISSUER,
+			audience: SIGNUP_VERIFICATION_JWT_AUDIENCE,
+		});
+
+		const email = typeof payload.email === "string" ? payload.email : null;
+		const invitationToken =
+			typeof payload.invitationToken === "string"
+				? payload.invitationToken
+				: undefined;
+		const type = payload.type;
+
+		if (!email || type !== "signup_verification") {
+			return null;
+		}
+
+		return {
+			email: normalizeEmail(email),
+			invitationToken,
+			type: "signup_verification",
 		};
 	} catch {
 		return null;
@@ -568,16 +737,17 @@ export async function getSessionById(sessionId: string) {
 }
 
 /**
- * Check whether login attempts are currently rate-limited for an email + IP pair
+ * Check whether login attempts are currently rate-limited for an account.
  */
 export async function checkLoginRateLimit(
-	email: string,
-	ipAddress: string | null,
+	accountRateLimitKey: string,
 ): Promise<void> {
-	const id = getRateLimitId(email, ipAddress);
 	const now = new Date();
 
-	const existingLimit = await getRateLimitState(LOGIN_RATE_LIMIT_NAMESPACE, id);
+	const existingLimit = await getRateLimitState(
+		LOGIN_RATE_LIMIT_NAMESPACE,
+		accountRateLimitKey,
+	);
 
 	if (existingLimit?.lockedUntil && existingLimit.lockedUntil > now) {
 		throw new LoginRateLimitError();
@@ -588,17 +758,14 @@ export async function checkLoginRateLimit(
  * Record failed login attempt and potentially lock future attempts
  */
 export async function recordFailedLoginAttempt(
-	email: string,
-	ipAddress: string | null,
+	accountRateLimitKey: string,
 ): Promise<void> {
-	const normalizedEmail = normalizeEmail(email);
-	const id = getRateLimitId(normalizedEmail, ipAddress?.trim() || null);
 	const now = new Date();
 
 	const state = await recordRateLimitFailure({
 		namespace: LOGIN_RATE_LIMIT_NAMESPACE,
-		key: id,
-		subject: normalizedEmail,
+		key: accountRateLimitKey,
+		subject: accountRateLimitKey,
 		now,
 		freeAttempts: LOGIN_RATE_LIMIT_FREE_ATTEMPTS,
 		maxLockMinutes: LOGIN_RATE_LIMIT_MAX_LOCK_MINUTES,
@@ -613,14 +780,16 @@ export async function recordFailedLoginAttempt(
  * Clear failed login attempts after a successful login
  */
 export async function clearLoginRateLimit(
-	email: string,
-	ipAddress: string | null,
+	accountRateLimitKey: string,
 ): Promise<void> {
-	const id = getRateLimitId(email, ipAddress?.trim() || null);
-	await clearRateLimitState(LOGIN_RATE_LIMIT_NAMESPACE, id);
+	await clearRateLimitState(LOGIN_RATE_LIMIT_NAMESPACE, accountRateLimitKey);
 }
 
 function generateRecoveryVerificationCode(): string {
+	return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function generateSignupVerificationCode(): string {
 	return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
@@ -650,6 +819,37 @@ export async function createRecoveryVerification(
 		email: normalizedEmail,
 		code,
 		expiresAt: new Date(now.getTime() + RECOVERY_VERIFICATION_DURATION_MS),
+	});
+
+	return code;
+}
+
+export async function createSignupVerification(input: {
+	email: string;
+	invitationToken?: string;
+}): Promise<string> {
+	const normalizedEmail = normalizeEmail(input.email);
+	const invitationToken = input.invitationToken ?? null;
+	const now = new Date();
+	const code = generateSignupVerificationCode();
+
+	await db
+		.update(signupVerification)
+		.set({ usedAt: now })
+		.where(
+			and(
+				eq(signupVerification.email, normalizedEmail),
+				matchOptionalInvitationToken(invitationToken),
+				isNull(signupVerification.usedAt),
+			),
+		);
+
+	await db.insert(signupVerification).values({
+		id: nanoid(),
+		email: normalizedEmail,
+		invitationToken,
+		code,
+		expiresAt: new Date(now.getTime() + SIGNUP_VERIFICATION_DURATION_MS),
 	});
 
 	return code;
@@ -710,6 +910,74 @@ export async function verifyRecoveryCode(
 	return false;
 }
 
+export async function consumeSignupVerificationCode(input: {
+	email: string;
+	code: string;
+	invitationToken?: string;
+}): Promise<boolean> {
+	const normalizedEmail = normalizeEmail(input.email);
+	const invitationToken = input.invitationToken ?? null;
+	const now = new Date();
+
+	const validVerification = await db.query.signupVerification.findFirst({
+		where: (record, { and: andFn, eq: eqFn, gt: gtFn, isNull: isNullFn }) =>
+			andFn(
+				eqFn(record.email, normalizedEmail),
+				invitationToken === null
+					? isNullFn(record.invitationToken)
+					: eqFn(record.invitationToken, invitationToken),
+				eqFn(record.code, input.code),
+				gtFn(record.expiresAt, now),
+				isNullFn(record.usedAt),
+			),
+		orderBy: (record, { desc: descFn }) => [descFn(record.createdAt)],
+	});
+
+	if (validVerification) {
+		if (validVerification.attempts >= validVerification.maxAttempts) {
+			return false;
+		}
+
+		await db
+			.update(signupVerification)
+			.set({
+				attempts: validVerification.attempts + 1,
+				usedAt: now,
+			})
+			.where(eq(signupVerification.id, validVerification.id));
+
+		return true;
+	}
+
+	const activeVerification = await db.query.signupVerification.findFirst({
+		where: (record, { and: andFn, eq: eqFn, gt: gtFn, isNull: isNullFn }) =>
+			andFn(
+				eqFn(record.email, normalizedEmail),
+				invitationToken === null
+					? isNullFn(record.invitationToken)
+					: eqFn(record.invitationToken, invitationToken),
+				gtFn(record.expiresAt, now),
+				isNullFn(record.usedAt),
+			),
+		orderBy: (record, { desc: descFn }) => [descFn(record.createdAt)],
+	});
+
+	if (activeVerification) {
+		const nextAttempts = activeVerification.attempts + 1;
+		await db
+			.update(signupVerification)
+			.set({
+				attempts: nextAttempts,
+				...(nextAttempts >= activeVerification.maxAttempts
+					? { usedAt: now }
+					: {}),
+			})
+			.where(eq(signupVerification.id, activeVerification.id));
+	}
+
+	return false;
+}
+
 /**
  * Check whether recovery attempts are currently rate-limited for an email + IP pair
  */
@@ -717,7 +985,7 @@ export async function checkRecoveryRateLimit(
 	email: string,
 	ipAddress: string | null,
 ): Promise<void> {
-	const id = getRateLimitId(email, ipAddress);
+	const id = getScopedRateLimitId(email, ipAddress);
 	const now = new Date();
 
 	const existingLimit = await getRateLimitState(
@@ -738,7 +1006,7 @@ export async function recordFailedRecoveryAttempt(
 	ipAddress: string | null,
 ): Promise<void> {
 	const normalizedEmail = normalizeEmail(email);
-	const id = getRateLimitId(normalizedEmail, ipAddress?.trim() || null);
+	const id = getScopedRateLimitId(normalizedEmail, ipAddress?.trim() || null);
 	const now = new Date();
 
 	const state = await recordRateLimitFailure({
@@ -762,7 +1030,7 @@ export async function clearRecoveryRateLimit(
 	email: string,
 	ipAddress: string | null,
 ): Promise<void> {
-	const id = getRateLimitId(email, ipAddress?.trim() || null);
+	const id = getScopedRateLimitId(email, ipAddress?.trim() || null);
 	await clearRateLimitState(RECOVERY_RATE_LIMIT_NAMESPACE, id);
 }
 
@@ -1127,3 +1395,9 @@ export async function updateUserSecretKey(
 export async function deleteUserAccount(userId: string) {
 	await db.delete(user).where(eq(user.id, userId));
 }
+
+export {
+	incrementRateLimitWindow,
+	RATE_LIMIT_NAMESPACE,
+	startOfLocalDay,
+} from "./rate-limit";

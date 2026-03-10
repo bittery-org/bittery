@@ -77,6 +77,80 @@ function assertTeamManagementEntitlement(teamData: {
 	}
 }
 
+async function getTeamVaultsWithUserAccess(teamId: string, userId: string) {
+	const teamVaults = await db.query.vault.findMany({
+		where: (record, { eq: eqFn }) => eqFn(record.teamId, teamId),
+	});
+	if (teamVaults.length === 0) {
+		return [];
+	}
+
+	const teamVaultIds = teamVaults.map((record) => record.id);
+	const userVaultKeys = await db.query.vaultKey.findMany({
+		where: (record, { and: andFn, eq: eqFn, inArray: inArrayFn }) =>
+			andFn(
+				eqFn(record.userId, userId),
+				inArrayFn(record.vaultId, teamVaultIds),
+			),
+	});
+	const accessibleVaultIds = new Set(userVaultKeys.map((record) => record.vaultId));
+
+	return teamVaults.filter((record) => accessibleVaultIds.has(record.id));
+}
+
+async function getTeamRemovalScope(input: {
+	teamId: string;
+	actorUserId: string;
+	targetUserId: string;
+}) {
+	const teamVaults = await db.query.vault.findMany({
+		where: (record, { eq: eqFn }) => eqFn(record.teamId, input.teamId),
+	});
+	if (teamVaults.length === 0) {
+		return {
+			removableVaults: [] as typeof teamVaults,
+			inaccessibleTargetVaultIds: [] as string[],
+		};
+	}
+
+	const teamVaultIds = teamVaults.map((record) => record.id);
+	const [actorVaultKeys, targetVaultKeys] = await Promise.all([
+		db.query.vaultKey.findMany({
+			where: (record, { and: andFn, eq: eqFn, inArray: inArrayFn }) =>
+				andFn(
+					eqFn(record.userId, input.actorUserId),
+					inArrayFn(record.vaultId, teamVaultIds),
+				),
+		}),
+		db.query.vaultKey.findMany({
+			where: (record, { and: andFn, eq: eqFn, inArray: inArrayFn }) =>
+				andFn(
+					eqFn(record.userId, input.targetUserId),
+					inArrayFn(record.vaultId, teamVaultIds),
+				),
+		}),
+	]);
+
+	const actorAdminVaultIds = new Set(
+		actorVaultKeys
+			.filter((record) => ["owner", "admin"].includes(record.role))
+			.map((record) => record.vaultId),
+	);
+	const targetVaultIds = new Set(targetVaultKeys.map((record) => record.vaultId));
+	const inaccessibleTargetVaultIds = [...targetVaultIds].filter(
+		(vaultId) => !actorAdminVaultIds.has(vaultId),
+	);
+	const removableVaults = teamVaults.filter(
+		(record) =>
+			targetVaultIds.has(record.id) && actorAdminVaultIds.has(record.id),
+	);
+
+	return {
+		removableVaults,
+		inaccessibleTargetVaultIds,
+	};
+}
+
 export const teamRouter = router({
 	/**
 	 * Get the user's team (one-to-one relationship)
@@ -637,9 +711,10 @@ export const teamRouter = router({
 				});
 			}
 
-			const teamVaults = await db.query.vault.findMany({
-				where: (v, { eq: eqFn }) => eqFn(v.teamId, teamId),
-			});
+			const teamVaults = await getTeamVaultsWithUserAccess(
+				teamId,
+				ctx.session.userId,
+			);
 
 			const vaultRotationData = await Promise.all(
 				teamVaults.map(async (v) => {
@@ -747,13 +822,23 @@ export const teamRouter = router({
 					assertTeamManagementEntitlement(actor.team);
 				}
 
-				// Get all team vaults
-				const teamVaults = await db.query.vault.findMany({
-					where: (v, { eq }) => eq(v.teamId, input.teamId),
-				});
+				const { removableVaults, inaccessibleTargetVaultIds } =
+					await getTeamRemovalScope({
+						teamId: input.teamId,
+						actorUserId: ctx.session.userId,
+						targetUserId: input.excludeUserId,
+					});
+
+				if (inaccessibleTargetVaultIds.length > 0) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message:
+							"You cannot remove this member from only part of their team vault access.",
+					});
+				}
 
 				const vaultRotationData = await Promise.all(
-					teamVaults.map(async (v) => {
+					removableVaults.map(async (v) => {
 						// Get remaining members (excluding the user being removed)
 						const members = await db.query.vaultKey.findMany({
 							where: (vk, { and, eq: eqFn, ne }) =>
@@ -875,41 +960,50 @@ export const teamRouter = router({
 					});
 				}
 
-				// Verify that the removed user actually has vault keys in team vaults
-				const teamVaults = await db.query.vault.findMany({
-					where: (v, { eq }) => eq(v.teamId, input.teamId),
-				});
+				const { removableVaults, inaccessibleTargetVaultIds } =
+					await getTeamRemovalScope({
+						teamId: input.teamId,
+						actorUserId: ctx.session.userId,
+						targetUserId: input.userId,
+					});
 
-				// Get vault IDs where the removed user has keys
-				const teamVaultIds = teamVaults.map((v) => v.id);
-				const userVaultKeys =
-					teamVaultIds.length > 0
-						? await db.query.vaultKey.findMany({
-								where: (vk, { and, eq: eqFn, inArray: inArrayFn }) =>
-									and(
-										eqFn(vk.userId, input.userId),
-										inArrayFn(vk.vaultId, teamVaultIds),
-									),
-							})
-						: [];
-
-				const vaultsWithAccess = new Set(userVaultKeys.map((vk) => vk.vaultId));
-				const rotationVaultIds = new Set(
-					input.vaultRotations.map((vr) => vr.vaultId),
-				);
-
-				// Ensure rotation data was provided for every vault the user has access to
-				for (const vaultId of vaultsWithAccess) {
-					if (!rotationVaultIds.has(vaultId)) {
-						throw new TRPCError({
-							code: "BAD_REQUEST",
-							message: `Missing key rotation data for vault ${vaultId}. Rotation is required for all team vaults.`,
-						});
-					}
+				if (inaccessibleTargetVaultIds.length > 0) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message:
+							"You cannot remove this member from only part of their team vault access.",
+					});
 				}
 
-				// Build a map of team vaults for quick lookup
-				const vaultMap = new Map(teamVaults.map((v) => [v.id, v]));
+				const expectedVaultIds = new Set(
+					removableVaults.map((record) => record.id),
+				);
+				const providedVaultIds = new Set(
+					input.vaultRotations.map((record) => record.vaultId),
+				);
+
+				if (providedVaultIds.size !== input.vaultRotations.length) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "Duplicate vault rotation entries are not allowed.",
+					});
+				}
+
+				const hasMissingVault = [...expectedVaultIds].some(
+					(vaultId) => !providedVaultIds.has(vaultId),
+				);
+				const hasExtraVault = [...providedVaultIds].some(
+					(vaultId) => !expectedVaultIds.has(vaultId),
+				);
+				if (hasMissingVault || hasExtraVault) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message:
+							"Vault rotation data must exactly match the removable team vault set.",
+					});
+				}
+
+				const vaultMap = new Map(removableVaults.map((record) => [record.id, record]));
 
 				// Create key rotation records for each vault
 				const rotationRecords: Array<{
@@ -1286,6 +1380,12 @@ export const teamRouter = router({
 						message: "You are not a member of this team",
 					});
 				}
+				if (!userData || !["owner", "admin"].includes(userData.role)) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Insufficient permissions",
+					});
+				}
 				if (userData?.team) {
 					assertTeamManagementEntitlement(userData.team);
 				}
@@ -1300,7 +1400,6 @@ export const teamRouter = router({
 
 				return invitations.map((inv) => ({
 					id: inv.id,
-					token: inv.token,
 					email: inv.email,
 					role: inv.role,
 					status: inv.status,

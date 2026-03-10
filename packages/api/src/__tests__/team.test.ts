@@ -226,6 +226,36 @@ describe("Team Router", () => {
 		});
 	});
 
+	describe("getLeaveRotationData", () => {
+		test("should exclude team vaults the leaving member cannot access", async () => {
+			const [{ userId: ownerId }, { userId: memberId, caller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			await addTeamMember(teamId, memberId, "member");
+			const accessibleVaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+				name: "Accessible Vault",
+			});
+			await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+				name: "Hidden Vault",
+			});
+			await addVaultMember(accessibleVaultId, memberId, "member");
+
+			const result = await caller.getLeaveRotationData({ teamId });
+
+			expect(result.vaults.map((record) => record.vaultId)).toEqual([
+				accessibleVaultId,
+			]);
+		});
+	});
+
 	describe("members.list", () => {
 		test("should return all team members", async () => {
 			const { caller, userId: ownerId } = await setup(teamRouter, {
@@ -333,6 +363,125 @@ describe("Team Router", () => {
 			await expect(
 				caller.members.remove({ teamId, userId, vaultRotations: [] }),
 			).rejects.toThrow("You cannot remove yourself from the team");
+		});
+
+		test("should reject partial team removal when target has inaccessible vault memberships", async () => {
+			const [
+				{ userId: ownerId },
+				{ userId: adminId, caller: adminCaller },
+				{ userId: memberId },
+			] = await Promise.all([
+				setup(teamRouter),
+				setup(teamRouter),
+				setup(teamRouter),
+			]);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			await addTeamMember(teamId, adminId, "admin");
+			await addTeamMember(teamId, memberId, "member");
+			const adminVaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
+			const hiddenVaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
+			await addVaultMember(adminVaultId, adminId, "admin");
+			await addVaultMember(adminVaultId, memberId, "member");
+			await addVaultMember(hiddenVaultId, memberId, "member");
+
+			await expect(
+				adminCaller.members.getTeamRotationData({
+					teamId,
+					excludeUserId: memberId,
+				}),
+			).rejects.toThrow(
+				"You cannot remove this member from only part of their team vault access.",
+			);
+
+			await expect(
+				adminCaller.members.remove({
+					teamId,
+					userId: memberId,
+					vaultRotations: [
+						{
+							vaultId: adminVaultId,
+							keyRotation: { memberKeys: [], reEncryptedItems: [] },
+						},
+					],
+				}),
+			).rejects.toThrow(
+				"You cannot remove this member from only part of their team vault access.",
+			);
+		});
+
+		test("should reject missing required vault rotations", async () => {
+			const [{ userId: ownerId, caller }, { userId: memberId }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			await addTeamMember(teamId, memberId, "member");
+			const vaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
+			await addVaultMember(vaultId, memberId, "member");
+
+			await expect(
+				caller.members.remove({
+					teamId,
+					userId: memberId,
+					vaultRotations: [],
+				}),
+			).rejects.toThrow(
+				"Vault rotation data must exactly match the removable team vault set.",
+			);
+		});
+
+		test("should reject extra vault rotations", async () => {
+			const [{ userId: ownerId, caller }, { userId: memberId }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			await addTeamMember(teamId, memberId, "member");
+			const requiredVaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
+			const extraVaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
+			await addVaultMember(requiredVaultId, memberId, "member");
+
+			await expect(
+				caller.members.remove({
+					teamId,
+					userId: memberId,
+					vaultRotations: [
+						{
+							vaultId: requiredVaultId,
+							keyRotation: { memberKeys: [], reEncryptedItems: [] },
+						},
+						{
+							vaultId: extraVaultId,
+							keyRotation: { memberKeys: [], reEncryptedItems: [] },
+						},
+					],
+				}),
+			).rejects.toThrow(
+				"Vault rotation data must exactly match the removable team vault set.",
+			);
 		});
 	});
 
@@ -519,7 +668,7 @@ describe("Team Router", () => {
 	});
 
 	describe("invitations.list", () => {
-		test("should return pending invitations for a team", async () => {
+		test("should return pending invitations for owner/admin without exposing tokens", async () => {
 			const { caller, userId } = await setup(teamRouter);
 			const teamId = await createTestTeam(userId, {
 				billingPlan: "family",
@@ -532,7 +681,22 @@ describe("Team Router", () => {
 			const result = await caller.invitations.list({ teamId });
 
 			expect(result.length).toBe(2);
-			expect(result[0]?.token).toBeDefined();
+			expect("token" in (result[0] ?? {})).toBe(false);
+		});
+
+		test("should reject non-admin invitation listing", async () => {
+			const [{ userId: ownerId }, { caller, userId: memberId }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			await addTeamMember(teamId, memberId, "member");
+
+			await expect(caller.invitations.list({ teamId })).rejects.toThrow(
+				"Insufficient permissions",
+			);
 		});
 	});
 

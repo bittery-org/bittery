@@ -726,7 +726,7 @@ export async function truncateAll() {
 			stripe_event_log,
 			item, vault_key, vault_key_rotation, folder, vault,
 			team_invitation, team_member, team,
-			recovery_verification,
+			recovery_verification, signup_verification,
 			session, audit_log, "user"
 		CASCADE
 	`);

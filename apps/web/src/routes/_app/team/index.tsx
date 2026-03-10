@@ -38,6 +38,8 @@ function TeamPage() {
 
 	const teamListQuery = useQuery(trpc.team.list.queryOptions());
 	const teamId = teamListQuery.data?.id;
+	const canViewInvitations =
+		teamListQuery.data?.role === "owner" || teamListQuery.data?.role === "admin";
 	const registrationStatusQuery = useQuery(
 		trpc.auth.registrationStatus.queryOptions(),
 	);
@@ -53,7 +55,7 @@ function TeamPage() {
 	});
 	const invitationsQuery = useQuery({
 		...trpc.team.invitations.list.queryOptions({ teamId: teamId! }),
-		enabled: !!teamId,
+		enabled: !!teamId && canViewInvitations,
 	});
 
 	const team = teamQuery.data;
@@ -173,17 +175,19 @@ function TeamPage() {
 							{m["team.page.tab.members"]()}
 						</span>
 					</TabsTrigger>
-					<TabsTrigger value="invitations" className="flex-1 sm:flex-none">
-						<Mail className="h-4 w-4 sm:mr-2" />
-						<span className="hidden sm:inline">
-							{m["team.page.tab.invitations"]()}
-						</span>
-						{invitationsQuery.data?.length ? (
-							<span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-primary-foreground text-xs">
-								{invitationsQuery.data.length}
+					{canViewInvitations ? (
+						<TabsTrigger value="invitations" className="flex-1 sm:flex-none">
+							<Mail className="h-4 w-4 sm:mr-2" />
+							<span className="hidden sm:inline">
+								{m["team.page.tab.invitations"]()}
 							</span>
-						) : null}
-					</TabsTrigger>
+							{invitationsQuery.data?.length ? (
+								<span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-primary-foreground text-xs">
+									{invitationsQuery.data.length}
+								</span>
+							) : null}
+						</TabsTrigger>
+					) : null}
 					<TabsTrigger value="settings" className="flex-1 sm:flex-none">
 						<Settings className="h-4 w-4 sm:mr-2" />
 						<span className="hidden sm:inline">
@@ -220,29 +224,31 @@ function TeamPage() {
 					</div>
 				</TabsContent>
 
-				<TabsContent value="invitations" className="mt-4">
-					<div className="space-y-3">
-						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-							<h2 className="font-semibold text-lg tracking-tight">
-								{m["team.page.invitations.heading"]()}
-							</h2>
-							<p className="text-muted-foreground text-sm">
-								{m["team.page.invitations.description"]()}
-							</p>
-						</div>
-						{invitationsQuery.isLoading ? (
-							<div className="grid gap-3 sm:grid-cols-2">
-								<Skeleton className="h-28" />
-								<Skeleton className="h-28" />
+				{canViewInvitations ? (
+					<TabsContent value="invitations" className="mt-4">
+						<div className="space-y-3">
+							<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+								<h2 className="font-semibold text-lg tracking-tight">
+									{m["team.page.invitations.heading"]()}
+								</h2>
+								<p className="text-muted-foreground text-sm">
+									{m["team.page.invitations.description"]()}
+								</p>
 							</div>
-						) : teamId ? (
-							<PendingInvitationsList
-								invitations={invitationsQuery.data || []}
-								canManage={canEdit}
-							/>
-						) : null}
-					</div>
-				</TabsContent>
+							{invitationsQuery.isLoading ? (
+								<div className="grid gap-3 sm:grid-cols-2">
+									<Skeleton className="h-28" />
+									<Skeleton className="h-28" />
+								</div>
+							) : teamId ? (
+								<PendingInvitationsList
+									invitations={invitationsQuery.data || []}
+									canManage={canEdit}
+								/>
+							) : null}
+						</div>
+					</TabsContent>
+				) : null}
 
 				<TabsContent value="settings" className="mt-4">
 					{teamId && (

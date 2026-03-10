@@ -93,8 +93,19 @@ export function TRPCProvider({ children }: TRPCProviderProps) {
 				};
 			},
 			getRefreshToken: () => storage.getAuthToken(),
-			storeRefreshedToken: async (token) => {
+			storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
 				await storage.storeAuthToken(token);
+				const activeAccount = await storage.getActiveAccount();
+				const activeEmail =
+					activeAccount?.type === "single"
+						? activeAccount.email
+						: undefined;
+				if (activeEmail) {
+					await storage.updateStoredSessionMetadata?.(activeEmail, {
+						sessionId,
+						expiresAt,
+					});
+				}
 			},
 			getClientId: async () => getOrCreateMobileSyncClientId(),
 			appPlatform: Platform.OS,

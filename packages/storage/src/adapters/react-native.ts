@@ -26,8 +26,8 @@ import {
 	BIOMETRIC_GRACE_PERIOD_MS,
 	type BiometricAuthResult,
 	DEFAULT_AUTO_LOCK_TIMEOUT_MS,
-	DEFAULT_SESSION_EXPIRY_MS,
 	MASTER_PASSWORD_REENTRY_PERIOD_MS,
+	resolveStoredSessionExpiryTimestamp,
 	type StoredSessionData,
 	type VaultKeyData,
 } from "../types";
@@ -47,7 +47,11 @@ function getAccountKey(email: string, suffix: string): string {
 }
 
 function isSecureStoreOnlyKey(key: string): boolean {
-	return key === DEVICE_KEY_STORAGE || key.endsWith("_session_data");
+	return (
+		key === DEVICE_KEY_STORAGE ||
+		key.endsWith("_session_data") ||
+		key.endsWith("_jwt_token")
+	);
 }
 
 interface AccountsList {
@@ -337,7 +341,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		masterUnlockKey: Uint8Array,
 		email: string,
 		userId: string,
-		expiryMs: number = DEFAULT_SESSION_EXPIRY_MS,
+		expiresAt?: string | Date | number,
 		sessionId?: string,
 	): Promise<void> {
 		const resolvedEmail = email.toLowerCase();
@@ -356,7 +360,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 			email: resolvedEmail,
 			userId,
 			sessionId,
-			expiresAt: now + expiryMs,
+			expiresAt: resolveStoredSessionExpiryTimestamp(expiresAt, now),
 			createdAt: now,
 			biometricEnabled,
 			lastMasterPasswordEntry: now,
@@ -402,7 +406,8 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		if (!resolvedEmail) return false;
 
 		const sessionData = await this.getStoredSessionData(resolvedEmail);
-		if (!sessionData) return false;
+		const token = await this.getAuthToken(resolvedEmail);
+		if (!sessionData || !token) return false;
 
 		const now = Date.now();
 		return now < sessionData.expiresAt;
@@ -532,6 +537,31 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		} catch {
 			return null;
 		}
+	}
+
+	async updateStoredSessionMetadata(
+		email: string,
+		metadata: {
+			sessionId?: string;
+			expiresAt: string | Date | number;
+		},
+	): Promise<void> {
+		const resolvedEmail = email.toLowerCase();
+		const existing = await this.getStoredSessionData(resolvedEmail);
+		if (!existing) {
+			return;
+		}
+
+		const key = getAccountKey(resolvedEmail, "session_data");
+		const next: StoredSessionData = {
+			...existing,
+			sessionId: metadata.sessionId ?? existing.sessionId,
+			expiresAt: resolveStoredSessionExpiryTimestamp(
+				metadata.expiresAt,
+				existing.createdAt,
+			),
+		};
+		await this.setItem(key, JSON.stringify(next));
 	}
 
 	// ============================================================================
@@ -826,7 +856,14 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 			const stored = await this.getItem(key);
 
 			if (!stored) return null;
-			return JSON.parse(stored) as StoredSessionData;
+			const parsed = JSON.parse(stored) as StoredSessionData;
+			return {
+				...parsed,
+				expiresAt: resolveStoredSessionExpiryTimestamp(
+					parsed.expiresAt,
+					parsed.createdAt,
+				),
+			};
 		} catch {
 			return null;
 		}

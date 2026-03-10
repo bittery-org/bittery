@@ -6,6 +6,7 @@ import {
 	S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { isPublicStorageKeyAllowed } from "./public-access";
 
 export interface StorageConfig {
 	endpoint: string;
@@ -65,6 +66,10 @@ export function getStorageClient(): S3Client {
 }
 
 export function getStoragePublicUrl(key: string): string | null {
+	if (!isPublicStorageKeyAllowed(key)) {
+		return null;
+	}
+
 	const baseUrl =
 		process.env.BITTERY_STORAGE_CDN_URL ||
 		process.env.BITTERY_STORAGE_PUBLIC_URL;

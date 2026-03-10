@@ -109,12 +109,16 @@ const trpcClient = createSessionRefreshingTrpcClient({
 		return {
 			token,
 			issuedAt: sessionData?.createdAt ?? null,
-			expiresAt: sessionData?.expiresAt ?? null,
+			expiresAt: sessionData?.serverExpiresAt ?? sessionData?.expiresAt ?? null,
 		};
 	},
 	getRefreshToken: () => storage.getAuthToken(),
-	storeRefreshedToken: async (token) => {
+	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
 		await storage.storeAuthToken(token);
+		await storage.updateStoredSessionMetadata?.("", {
+			sessionId,
+			expiresAt,
+		});
 	},
 	getClientId: getSyncClientIdHeader,
 });

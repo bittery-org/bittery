@@ -9,6 +9,7 @@ import {
 } from "@bittery/ui/icons";
 import { useSignupForm } from "@/hooks/use-signup-form";
 import { useI18n } from "@/providers/i18n-provider";
+import { SignupVerificationDialog } from "./signup-verification-dialog";
 
 export default function SelfHostedSignUpForm({
 	onSwitchToSignIn,
@@ -27,6 +28,15 @@ export default function SelfHostedSignUpForm({
 		showPassword,
 		setShowPassword,
 		isEncrypting,
+		verificationDialogOpen,
+		setVerificationDialogOpen,
+		verificationCode,
+		setVerificationCode,
+		verificationEmail,
+		requestSignupVerificationMutation,
+		verifySignupVerificationMutation,
+		submitSignupVerificationCode,
+		resendSignupVerificationCode,
 		downloadEmergencyKit,
 		invitationQuery,
 		registrationStatusQuery,
@@ -99,22 +109,23 @@ export default function SelfHostedSignUpForm({
 	}
 
 	return (
-		<div className="w-full">
-			<h1 className="text-center font-semibold text-2xl tracking-tight">
-				{signupHeading}
-			</h1>
-			<p className="mx-auto mt-2 max-w-80 text-center text-muted-foreground text-sm">
-				{signupDescription}
-			</p>
-			<div className="mt-6">
-				<form
-					onSubmit={(e) => {
-						e.preventDefault();
-						e.stopPropagation();
-						form.handleSubmit();
-					}}
-					className="space-y-4"
-				>
+		<>
+			<div className="w-full">
+				<h1 className="text-center font-semibold text-2xl tracking-tight">
+					{signupHeading}
+				</h1>
+				<p className="mx-auto mt-2 max-w-80 text-center text-muted-foreground text-sm">
+					{signupDescription}
+				</p>
+				<div className="mt-6">
+					<form
+						onSubmit={(e) => {
+							e.preventDefault();
+							e.stopPropagation();
+							form.handleSubmit();
+						}}
+						className="space-y-4"
+					>
 					{isInvitationSignup ? (
 						<div className="rounded-lg border bg-muted/30 p-4">
 							<div className="flex items-start gap-3">
@@ -299,8 +310,20 @@ export default function SelfHostedSignUpForm({
 					>
 						{m["auth.signup.button.have_account"]()}
 					</Button>
-				</form>
+					</form>
+				</div>
 			</div>
-		</div>
+			<SignupVerificationDialog
+				open={verificationDialogOpen}
+				email={verificationEmail}
+				code={verificationCode}
+				onCodeChange={setVerificationCode}
+				onOpenChange={setVerificationDialogOpen}
+				onVerify={submitSignupVerificationCode}
+				onResend={resendSignupVerificationCode}
+				isVerifying={verifySignupVerificationMutation.isPending}
+				isRequesting={requestSignupVerificationMutation.isPending}
+			/>
+		</>
 	);
 }

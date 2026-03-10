@@ -26,6 +26,7 @@ export interface StoredSessionData {
 	userId: string;
 	sessionId?: string;
 	expiresAt: number; // timestamp
+	serverExpiresAt?: number; // timestamp
 	createdAt: number; // timestamp
 	biometricEnabled?: boolean;
 	lastMasterPasswordEntry?: number; // timestamp of last master password authentication
@@ -82,6 +83,28 @@ export const BIOMETRIC_GRACE_PERIOD_MS = 10 * 60 * 1000;
  * Periodic master password re-entry: 30 days (in milliseconds)
  */
 export const MASTER_PASSWORD_REENTRY_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
+
+export type SessionExpiryInput = string | Date | number;
+
+export function resolveStoredSessionExpiryTimestamp(
+	expiresAt: SessionExpiryInput | undefined,
+	createdAt: number,
+): number {
+	if (expiresAt === undefined) {
+		return createdAt + DEFAULT_SESSION_EXPIRY_MS;
+	}
+
+	if (typeof expiresAt === "number") {
+		return expiresAt > 1_000_000_000_000 ? expiresAt : createdAt + expiresAt;
+	}
+
+	const parsed =
+		typeof expiresAt === "string"
+			? new Date(expiresAt).getTime()
+			: expiresAt.getTime();
+
+	return Number.isFinite(parsed) ? parsed : createdAt + DEFAULT_SESSION_EXPIRY_MS;
+}
 
 /**
  * Error types for biometric authentication

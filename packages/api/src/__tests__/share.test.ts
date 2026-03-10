@@ -430,6 +430,51 @@ describe("Share Router", () => {
 			expect(result.allowedEmails[0]?.email).toBe("allowed@example.com");
 			expect(result.allowedEmails[0]?.verified).toBe(true);
 		});
+
+		test("should return NOT_FOUND to another regular vault member", async () => {
+			const [
+				{ userId: ownerId },
+				{ userId: creatorId, caller: creatorCaller },
+				{ userId: otherMemberId, caller: otherMemberCaller },
+				{ userId: adminId, caller: adminCaller },
+			] = await Promise.all([
+				setupShareUser(),
+				setupShareUser(),
+				setupShareUser(),
+				setupShareUser(),
+			]);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			const vaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
+			const itemId = await createTestItem(vaultId, ownerId);
+			await addVaultMember(vaultId, creatorId, "member");
+			await addVaultMember(vaultId, otherMemberId, "member");
+			await addVaultMember(vaultId, adminId, "admin");
+
+			const created = await creatorCaller.create({
+				itemId,
+				accessMode: "anyone",
+				isOneTimeUse: false,
+				expiresIn: "7days",
+				...mockShareData,
+			});
+
+			const creatorResult = await creatorCaller.get({ linkId: created.id });
+			expect(creatorResult.id).toBe(created.id);
+
+			await expect(
+				otherMemberCaller.get({ linkId: created.id }),
+			).rejects.toThrow("Share link not found");
+
+			const adminResult = await adminCaller.get({ linkId: created.id });
+			expect(adminResult.id).toBe(created.id);
+		});
 	});
 
 	describe("revoke", () => {
@@ -1002,6 +1047,58 @@ describe("Share Router", () => {
 			expect(result.length).toBe(1);
 			expect(result[0]?.success).toBe(true);
 			expect(result[0]?.ipAddress).toBe("192.168.1.1");
+		});
+
+		test("should apply creator-only visibility to regular members and allow admins", async () => {
+			const [
+				{ userId: ownerId },
+				{ userId: creatorId, caller: creatorCaller },
+				{ userId: otherMemberId, caller: otherMemberCaller },
+				{ userId: adminId, caller: adminCaller },
+			] = await Promise.all([
+				setupShareUser(),
+				setupShareUser(),
+				setupShareUser(),
+				setupShareUser(),
+			]);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			const vaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
+			const itemId = await createTestItem(vaultId, ownerId);
+			await addVaultMember(vaultId, creatorId, "member");
+			await addVaultMember(vaultId, otherMemberId, "member");
+			await addVaultMember(vaultId, adminId, "admin");
+
+			const created = await creatorCaller.create({
+				itemId,
+				accessMode: "anyone",
+				isOneTimeUse: false,
+				expiresIn: "7days",
+				...mockShareData,
+			});
+
+			const publicCaller = shareRouter.createCaller(createPublicContext());
+			await publicCaller.accessPublic({
+				token: created.token,
+				ipAddress: "10.0.0.1",
+				userAgent: "VisibilityTest/1.0",
+			});
+
+			const creatorLogs = await creatorCaller.getAccessLogs({ linkId: created.id });
+			expect(creatorLogs).toHaveLength(1);
+
+			await expect(
+				otherMemberCaller.getAccessLogs({ linkId: created.id }),
+			).rejects.toThrow("Share link not found");
+
+			const adminLogs = await adminCaller.getAccessLogs({ linkId: created.id });
+			expect(adminLogs).toHaveLength(1);
 		});
 	});
 });

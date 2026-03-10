@@ -94,6 +94,51 @@ fn get_active_account_email<R: Runtime>(store: &Store<R>) -> Option<String> {
         .and_then(|value| value.as_str().map(|s| s.to_lowercase()))
 }
 
+fn get_bearer_token_for_account<R: Runtime>(store: &Store<R>, email: &str) -> Option<String> {
+    let jwt_key = account_key(email, "jwt_token");
+
+    match keychain::keychain_get(&jwt_key) {
+        Ok(Some(token)) => return Some(token),
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!(
+                "[native-bridge] Failed reading bearer token from keychain for {}: {}",
+                email, error
+            );
+            return None;
+        }
+    }
+
+    let legacy_token = store
+        .get(&jwt_key)
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .or_else(|| {
+            store
+                .get(LEGACY_JWT_TOKEN_KEY)
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+        });
+
+    if let Some(token) = legacy_token {
+        match keychain::keychain_set(&jwt_key, &token) {
+            Ok(()) => {
+                let _ = store.delete(&jwt_key);
+                let _ = store.delete(LEGACY_JWT_TOKEN_KEY);
+                let _ = store.save();
+                Some(token)
+            }
+            Err(error) => {
+                eprintln!(
+                    "[native-bridge] Failed migrating bearer token to keychain for {}: {}",
+                    email, error
+                );
+                None
+            }
+        }
+    } else {
+        None
+    }
+}
+
 /// Start HTTP server for native messaging bridge
 async fn start_native_bridge_server(app_handle: tauri::AppHandle, state: Arc<NativeBridgeState>) {
     let addr = SocketAddr::from(([127, 0, 0, 1], 48765));
@@ -686,16 +731,14 @@ async fn extension_biometric_unlock(
 
     eprintln!("[Biometric Unlock] Target email: {:?}", target_email);
 
-    let (session_key, jwt_key, vault_key) = if let Some(email) = &target_email {
+    let (session_key, vault_key) = if let Some(email) = &target_email {
         (
             account_key(email, "session_data"),
-            account_key(email, "jwt_token"),
             account_key(email, "vault_keys"),
         )
     } else {
         (
             LEGACY_SESSION_DATA_KEY.to_string(),
-            LEGACY_JWT_TOKEN_KEY.to_string(),
             LEGACY_VAULT_KEYS_KEY.to_string(),
         )
     };
@@ -742,10 +785,10 @@ async fn extension_biometric_unlock(
     
     let encrypted_session_b64 = base64::engine::general_purpose::STANDARD.encode(encrypted_muk_json.as_bytes());
     
-    // Get auth token and vault keys from store
-    let mut auth_token = store
-        .get(&jwt_key)
-        .and_then(|v| v.as_str().map(|s| s.to_string()));
+    // Get auth token and vault keys from secure storage / store
+    let mut auth_token = target_email
+        .as_deref()
+        .and_then(|email| get_bearer_token_for_account(&store, email));
     let mut vault_keys = store
         .get(&vault_key)
         .and_then(|v| v.as_str().map(|s| s.to_string()));
@@ -873,7 +916,6 @@ async fn biometric_unlock_all_internal(
 
         // Get session data for this account
         let session_key = account_key(&email, "session_data");
-        let jwt_key = account_key(&email, "jwt_token");
         let vault_key = account_key(&email, "vault_keys");
 
         let session_data_value = match store.get(&session_key) {
@@ -919,8 +961,7 @@ async fn biometric_unlock_all_internal(
         let encrypted_session_b64 = base64::engine::general_purpose::STANDARD.encode(encrypted_muk_json.as_bytes());
 
         // Get auth token and vault keys for this account
-        let auth_token = store.get(&jwt_key)
-            .and_then(|v| v.as_str().map(|s| s.to_string()));
+        let auth_token = get_bearer_token_for_account(&store, &email);
         let vault_keys = store.get(&vault_key)
             .and_then(|v| v.as_str().map(|s| s.to_string()));
 
@@ -1094,9 +1135,7 @@ async fn get_session_data_internal(
                     // Get session data for each account with a valid JWT token (unlocked accounts)
                     for account in accounts_array {
                         if let Some(email) = account.get("email").and_then(|e| e.as_str()) {
-                            let jwt_key = account_key(email, "jwt_token");
-
-                            if let Some(jwt_token) = store.get(&jwt_key).and_then(|v| v.as_str().map(|s| s.to_string())) {
+                            if let Some(jwt_token) = get_bearer_token_for_account(&store, email) {
                                 let session_key = account_key(email, "session_data");
 
                                 // Get session metadata if available

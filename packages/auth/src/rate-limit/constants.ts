@@ -1,25 +1,13 @@
 export const RATE_LIMIT_NAMESPACE = {
-	authLogin: "auth_login",
+	authLoginAccount: "auth_login_account",
+	authLoginSource: "auth_login_source",
 	authRecovery: "auth_recovery",
+	authSignupSource: "auth_signup_source",
+	authInviteSignupSource: "auth_invite_signup_source",
+	authRefreshSession: "auth_refresh_session",
 	shareCreateDaily: "share_create_daily",
 } as const;
 
 export function startOfLocalDay(date: Date): Date {
 	return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-export function formatLocalDateKey(date: Date): string {
-	const year = date.getFullYear();
-	const month = `${date.getMonth() + 1}`.padStart(2, "0");
-	const day = `${date.getDate()}`.padStart(2, "0");
-	return `${year}-${month}-${day}`;
-}
-
-export function secondsUntilNextLocalDay(now: Date): number {
-	const tomorrow = new Date(
-		now.getFullYear(),
-		now.getMonth(),
-		now.getDate() + 1,
-	);
-	return Math.max(1, Math.ceil((tomorrow.getTime() - now.getTime()) / 1000));
 }

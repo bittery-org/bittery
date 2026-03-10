@@ -235,10 +235,13 @@ export function RegenerateSecretKeyDialog({
 			// 8. Update local state — store new secret key and new MUK
 			await storage.storeSecretKey(newSecretKey, userEmail);
 			await storage.setMasterUnlockKey(newMasterUnlockKey, userEmail);
+			const existingSession = await storage.getStoredSessionData?.(userEmail);
 			await storage.storeSessionData(
 				newMasterUnlockKey,
 				userEmail,
 				currentUserId,
+				existingSession?.expiresAt,
+				existingSession?.sessionId,
 			);
 
 			toast.success(m["settings.secret_key.regenerate.toast.regenerated"]());

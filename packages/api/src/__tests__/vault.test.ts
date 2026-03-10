@@ -1894,14 +1894,32 @@ describe("Vault Router", () => {
 	});
 
 	describe("members.lookupUser", () => {
-		test("should find user by email and return public key", async () => {
-			const [{ userId: lookupUserId, email: lookupEmail }, { caller }] =
-				await Promise.all([
-					setupVaultSharingUser({ name: "Lookup User" }),
-					setupVaultSharingUser(),
-				]);
+		test("should find a same-team user by email and return public key", async () => {
+			const [
+				{ userId: ownerId, caller },
+				{ userId: lookupUserId, email: lookupEmail },
+			] = await Promise.all([
+				setupVaultSharingUser(),
+				setupVaultSharingUser({ name: "Lookup User" }),
+			]);
+			const actor = await db.query.user.findFirst({
+				where: (record, { eq }) => eq(record.id, ownerId),
+			});
+			const teamId = actor?.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected teamId");
+			}
+			await addTeamMember(teamId, lookupUserId, "member");
+			const vaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
 
-			const result = await caller.members.lookupUser({ email: lookupEmail });
+			const result = await caller.members.lookupUser({
+				vaultId,
+				email: lookupEmail,
+			});
 
 			expect(result.id).toBe(lookupUserId);
 			expect(result.name).toBe("Lookup User");
@@ -1909,19 +1927,71 @@ describe("Vault Router", () => {
 		});
 
 		test("should not allow looking up yourself", async () => {
-			const { email, caller } = await setupVaultSharingUser();
-
-			await expect(caller.members.lookupUser({ email })).rejects.toThrow(
-				"Cannot add yourself as a member",
-			);
-		});
-
-		test("should throw NOT_FOUND for non-existent user", async () => {
-			const { caller } = await setupVaultSharingUser();
+			const { email, caller, userId } = await setupVaultSharingUser();
+			const actor = await db.query.user.findFirst({
+				where: (record, { eq }) => eq(record.id, userId),
+			});
+			const teamId = actor?.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected teamId");
+			}
+			const vaultId = await createTestVault(userId, {
+				type: "team",
+				teamId,
+			});
 
 			await expect(
-				caller.members.lookupUser({ email: "nonexistent@example.com" }),
+				caller.members.lookupUser({ vaultId, email }),
+			).rejects.toThrow("Cannot add yourself as a member");
+		});
+
+		test("should throw NOT_FOUND for a foreign-team user", async () => {
+			const [{ userId: ownerId, caller }, { email }] = await Promise.all([
+				setupVaultSharingUser(),
+				setupVaultSharingUser(),
+			]);
+			const actor = await db.query.user.findFirst({
+				where: (record, { eq }) => eq(record.id, ownerId),
+			});
+			const teamId = actor?.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected teamId");
+			}
+			const vaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
+
+			await expect(
+				caller.members.lookupUser({ vaultId, email }),
 			).rejects.toThrow("User not found");
+		});
+
+		test("should reject non-admin callers", async () => {
+			const [{ userId: ownerId }, { userId: memberId, caller }] =
+				await Promise.all([setupVaultSharingUser(), setupVaultSharingUser()]);
+			const actor = await db.query.user.findFirst({
+				where: (record, { eq }) => eq(record.id, ownerId),
+			});
+			const teamId = actor?.teamId;
+			expect(teamId).toBeDefined();
+			if (!teamId) {
+				throw new Error("Expected teamId");
+			}
+			const vaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
+			await addVaultMember(vaultId, memberId, "member");
+
+			await expect(
+				caller.members.lookupUser({
+					vaultId,
+					email: "nonexistent@example.com",
+				}),
+			).rejects.toThrow("Only vault owner or admin can manage members");
 		});
 	});
 });

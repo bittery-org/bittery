@@ -60,7 +60,11 @@ function getCacheKey(
 interface AccountSessionRefreshOptions {
 	getSessionSnapshot: () => Promise<SessionSnapshot>;
 	getRefreshToken: () => Promise<string | null>;
-	storeRefreshedToken: (token: string) => Promise<void>;
+	storeRefreshedSession: (session: {
+		token: string;
+		sessionId: string;
+		expiresAt: string | Date;
+	}) => Promise<void>;
 	thresholdRatio?: number;
 }
 
@@ -128,7 +132,7 @@ export function createAccountTrpcClient(
 				getServerUrl: async () => normalizedUrl,
 				getSessionSnapshot: sessionRefresh.getSessionSnapshot,
 				getRefreshToken: sessionRefresh.getRefreshToken,
-				storeRefreshedToken: sessionRefresh.storeRefreshedToken,
+				storeRefreshedSession: sessionRefresh.storeRefreshedSession,
 				getClientId: resolvedClientId
 					? async () => resolvedClientId
 					: undefined,

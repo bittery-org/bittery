@@ -24,8 +24,8 @@ import {
 	type AccountMetadata,
 	type ActiveAccount,
 	BIOMETRIC_GRACE_PERIOD_MS,
-	DEFAULT_SESSION_EXPIRY_MS,
 	MASTER_PASSWORD_REENTRY_PERIOD_MS,
+	resolveStoredSessionExpiryTimestamp,
 	type StoredSessionData,
 	type VaultKeyData,
 } from "../types";
@@ -138,6 +138,47 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			);
 		}
 		return this.store;
+	}
+
+	private getBearerTokenKey(email: string): string {
+		return getAccountKey(email, "jwt_token");
+	}
+
+	private async getBearerTokenFromKeychain(
+		email: string,
+	): Promise<string | null> {
+		if (!this.invoke) {
+			throw new Error("Keychain is not available");
+		}
+
+		const keychainValue = await this.invoke("keychain_get", {
+			key: this.getBearerTokenKey(email),
+		});
+		return keychainValue ?? null;
+	}
+
+	private async setBearerTokenInKeychain(
+		email: string,
+		token: string,
+	): Promise<void> {
+		if (!this.invoke) {
+			throw new Error("Keychain is not available");
+		}
+
+		await this.invoke("keychain_set", {
+			key: this.getBearerTokenKey(email),
+			value: token,
+		});
+	}
+
+	private async deleteBearerTokenFromKeychain(email: string): Promise<void> {
+		if (!this.invoke) {
+			return;
+		}
+
+		await this.invoke("keychain_delete", {
+			key: this.getBearerTokenKey(email),
+		});
 	}
 
 	private async resolveEmail(email?: string): Promise<string | null> {
@@ -317,7 +358,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		masterUnlockKey: Uint8Array,
 		email: string,
 		userId: string,
-		expiryMs: number = DEFAULT_SESSION_EXPIRY_MS,
+		expiresAt?: string | Date | number,
 		sessionId?: string,
 	): Promise<void> {
 		const resolvedEmail = email.toLowerCase();
@@ -337,7 +378,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			email: resolvedEmail,
 			userId,
 			sessionId,
-			expiresAt: now + expiryMs,
+			expiresAt: resolveStoredSessionExpiryTimestamp(expiresAt, now),
 			createdAt: now,
 			biometricEnabled,
 			lastMasterPasswordEntry: now, // Track when user last entered master password
@@ -384,7 +425,8 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		if (!resolvedEmail) return false;
 
 		const sessionData = await this.getStoredSessionData(resolvedEmail);
-		if (!sessionData) return false;
+		const token = await this.getAuthToken(resolvedEmail);
+		if (!sessionData || !token) return false;
 
 		const now = Date.now();
 		return now < sessionData.expiresAt;
@@ -420,11 +462,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		const cache = this.getAccountCache(resolvedEmail);
 		cache.authToken = token;
 
-		// Also persist to disk for session restoration
-		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "jwt_token");
-		await store.set(key, token);
-		await store.save();
+		await this.setBearerTokenInKeychain(resolvedEmail, token);
 	}
 
 	async getAuthToken(email?: string): Promise<string | null> {
@@ -436,10 +474,38 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			return cache.authToken;
 		}
 
-		// Try to restore from disk
-		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "jwt_token");
-		const token = await store.get<string>(key);
+		let token: string | null = null;
+		try {
+			token = await this.getBearerTokenFromKeychain(resolvedEmail);
+		} catch (error) {
+			console.error(
+				"[storage-tauri] Failed to read bearer token from keychain:",
+				error,
+			);
+			return null;
+		}
+
+		if (!token) {
+			const store = await this.getStore();
+			const legacyKey = this.getBearerTokenKey(resolvedEmail);
+			const legacyToken = await store.get<string>(legacyKey);
+
+			if (legacyToken) {
+				try {
+					await this.setBearerTokenInKeychain(resolvedEmail, legacyToken);
+					await store.delete(legacyKey);
+					await store.save();
+					token = legacyToken;
+				} catch (error) {
+					console.error(
+						"[storage-tauri] Failed migrating bearer token to keychain:",
+						error,
+					);
+					return null;
+				}
+			}
+		}
+
 		if (token) {
 			cache.authToken = token;
 		}
@@ -534,6 +600,33 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		} catch {
 			return null;
 		}
+	}
+
+	async updateStoredSessionMetadata(
+		email: string,
+		metadata: {
+			sessionId?: string;
+			expiresAt: string | Date | number;
+		},
+	): Promise<void> {
+		const resolvedEmail = email.toLowerCase();
+		const existing = await this.getStoredSessionData(resolvedEmail);
+		if (!existing) {
+			return;
+		}
+
+		const store = await this.getStore();
+		const key = getAccountKey(resolvedEmail, "session_data");
+		const next: StoredSessionData = {
+			...existing,
+			sessionId: metadata.sessionId ?? existing.sessionId,
+			expiresAt: resolveStoredSessionExpiryTimestamp(
+				metadata.expiresAt,
+				existing.createdAt,
+			),
+		};
+		await store.set(key, JSON.stringify(next));
+		await store.save();
 	}
 
 	// ============================================================================
@@ -654,7 +747,6 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		// Delete all namespaced keys for this account
 		await store.delete(getAccountKey(resolvedEmail, "secret_key"));
 		await store.delete(getAccountKey(resolvedEmail, "session_data"));
-		await store.delete(getAccountKey(resolvedEmail, "jwt_token"));
 		await store.delete(getAccountKey(resolvedEmail, "vault_keys"));
 		await store.delete(getAccountKey(resolvedEmail, "pinned_kdf_params"));
 		await store.delete(getAccountKey(resolvedEmail, "biometric_enabled"));
@@ -665,6 +757,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		await store.delete(getAccountKey(resolvedEmail, "cached_vaults"));
 		await store.delete(getAccountKey(resolvedEmail, "item_cache_meta"));
 		await store.save();
+		await this.deleteBearerTokenFromKeychain(resolvedEmail);
 
 		this.clearAccountCache(resolvedEmail);
 
@@ -1432,7 +1525,14 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			const stored = await store.get<string>(key);
 
 			if (!stored) return null;
-			return JSON.parse(stored) as StoredSessionData;
+			const parsed = JSON.parse(stored) as StoredSessionData;
+			return {
+				...parsed,
+				expiresAt: resolveStoredSessionExpiryTimestamp(
+					parsed.expiresAt,
+					parsed.createdAt,
+				),
+			};
 		} catch {
 			return null;
 		}
