@@ -22,6 +22,7 @@ import { InviteDialog } from "@/components/teams/invite-dialog";
 import { MemberList } from "@/components/teams/member-list";
 import { PendingInvitationsList } from "@/components/teams/pending-invitations-list";
 import { TeamSettings } from "@/components/teams/team-settings";
+import { getTeamPageAccess } from "@/lib/team-access";
 import { m as messages } from "@/paraglide/messages";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -38,17 +39,23 @@ function TeamPage() {
 
 	const teamListQuery = useQuery(trpc.team.list.queryOptions());
 	const teamId = teamListQuery.data?.id;
-	const canViewInvitations =
-		teamListQuery.data?.role === "owner" || teamListQuery.data?.role === "admin";
+	const billingEntitlementsQuery = useQuery(
+		trpc.billing.entitlements.queryOptions(),
+	);
 	const registrationStatusQuery = useQuery(
 		trpc.auth.registrationStatus.queryOptions(),
 	);
 	const meQuery = useQuery(trpc.auth.me.queryOptions());
-
 	const teamQuery = useQuery({
 		...trpc.team.get.queryOptions({ teamId: teamId! }),
 		enabled: !!teamId,
 	});
+	const team = teamQuery.data;
+	const { teamManagementEnabled, canManageTeam, canViewInvitations } =
+		getTeamPageAccess({
+			userRole: team?.userRole,
+			entitlements: billingEntitlementsQuery.data?.entitlements,
+		});
 	const membersQuery = useQuery({
 		...trpc.team.members.list.queryOptions({ teamId: teamId! }),
 		enabled: !!teamId,
@@ -58,9 +65,8 @@ function TeamPage() {
 		enabled: !!teamId && canViewInvitations,
 	});
 
-	const team = teamQuery.data;
-	const canEdit = team?.userRole === "owner" || team?.userRole === "admin";
 	const isSelfHostedMode = registrationStatusQuery.data?.mode === "self-hosted";
+	const isCloudMode = registrationStatusQuery.data?.mode === "cloud";
 	const currentUserId = meQuery.data?.id;
 
 	if (teamListQuery.isLoading || teamQuery.isLoading) {
@@ -158,13 +164,19 @@ function TeamPage() {
 						</div>
 					</div>
 
-					{canEdit && teamId && (
+					{canManageTeam && teamId && (
 						<div className="sm:shrink-0">
 							<InviteDialog teamId={teamId} />
 						</div>
 					)}
 				</div>
 			</section>
+
+			{isCloudMode && !teamManagementEnabled ? (
+				<div className="rounded-xl border bg-muted/40 px-4 py-3 text-muted-foreground text-sm">
+					{m["team.page.notice.management_unavailable"]()}
+				</div>
+			) : null}
 
 			{/* Tabs Area */}
 			<Tabs defaultValue="members">
@@ -203,7 +215,9 @@ function TeamPage() {
 								{m["team.page.members.heading"]()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
-								{m["team.page.members.description"]()}
+								{canManageTeam
+									? m["team.page.members.description"]()
+									: m["team.page.members.description_read_only"]()}
 							</p>
 						</div>
 						{membersQuery.isLoading ? (
@@ -217,7 +231,7 @@ function TeamPage() {
 								teamId={teamId}
 								members={membersQuery.data || []}
 								currentUserId={currentUserId}
-								currentUserRole={team.userRole}
+								canManageMembers={canManageTeam}
 								isSelfHostedMode={isSelfHostedMode}
 							/>
 						) : null}
@@ -243,7 +257,7 @@ function TeamPage() {
 							) : teamId ? (
 								<PendingInvitationsList
 									invitations={invitationsQuery.data || []}
-									canManage={canEdit}
+									canManage={canManageTeam}
 								/>
 							) : null}
 						</div>

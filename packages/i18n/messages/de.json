@@ -762,6 +762,8 @@
 	"team.page.tab.settings": "Einstellungen",
 	"team.page.members.heading": "Teammitglieder",
 	"team.page.members.description": "Verwalte, wer Zugriff auf dieses Team hat.",
+	"team.page.members.description_read_only": "Aktuelle Mitglieder in diesem Team.",
+	"team.page.notice.management_unavailable": "Teamverwaltung ist in den Family- oder Team-Tarifen mit aktiver Abrechnung verfügbar.",
 	"team.page.invitations.heading": "Ausstehende Einladungen",
 	"team.page.invitations.description": "Einladungen, die noch nicht angenommen wurden.",
 	"team.role.owner": "Inhaber",

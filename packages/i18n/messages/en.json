@@ -762,6 +762,8 @@
 	"team.page.tab.settings": "Settings",
 	"team.page.members.heading": "Team Members",
 	"team.page.members.description": "Manage who has access to this team.",
+	"team.page.members.description_read_only": "Current members in this team.",
+	"team.page.notice.management_unavailable": "Team management is available on Family or Team plans with active billing.",
 	"team.page.invitations.heading": "Pending Invitations",
 	"team.page.invitations.description": "Invitations that haven't been accepted yet.",
 	"team.role.owner": "Owner",

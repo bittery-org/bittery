@@ -40,7 +40,7 @@ interface MemberListProps {
 	teamId: string;
 	members: Member[];
 	currentUserId?: string;
-	currentUserRole: string;
+	canManageMembers: boolean;
 	isSelfHostedMode?: boolean;
 }
 
@@ -48,7 +48,7 @@ export function MemberList({
 	teamId,
 	members,
 	currentUserId,
-	currentUserRole,
+	canManageMembers,
 	isSelfHostedMode = false,
 }: MemberListProps) {
 	const trpcClient = useTRPCClient();
@@ -56,9 +56,6 @@ export function MemberList({
 	const [removingUserId, setRemovingUserId] = useState<string | null>(null);
 	const [isRotating, setIsRotating] = useState(false);
 	const { m } = useI18n();
-
-	const canManageMembers =
-		currentUserRole === "owner" || currentUserRole === "admin";
 
 	/**
 	 * Handle member removal with key rotation for ALL team vaults.
