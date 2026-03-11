@@ -239,6 +239,16 @@ describe("Sync Router", () => {
 			// Should not include the inaccessible vault
 			expect(result[vaultId]).toBeUndefined();
 		});
+
+		test("should reject more than 200 vault IDs", async () => {
+			const { caller } = await setup(syncRouter);
+
+			await expect(
+				caller.getSyncState({
+					vaultIds: Array.from({ length: 201 }, () => nanoid()),
+				}),
+			).rejects.toThrow();
+		});
 	});
 
 	describe("bootstrapItems", () => {
@@ -361,6 +371,17 @@ describe("Sync Router", () => {
 			// User has no access to the vault, so 0 acknowledged
 			expect(result.acknowledged).toBe(0);
 		});
+
+		test("should reject more than 500 event IDs", async () => {
+			const { caller } = await setup(syncRouter);
+
+			await expect(
+				caller.acknowledgeEvents({
+					eventIds: Array.from({ length: 501 }, () => nanoid()),
+					clientId: "client_1",
+				}),
+			).rejects.toThrow();
+		});
 	});
 
 	describe("getLastAcknowledged", () => {
@@ -428,7 +449,9 @@ describe("Sync Router", () => {
 		test("should return no conflict when item has not been modified", async () => {
 			const { caller, userId } = await setup(syncRouter);
 			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId, { id: "item-1" });
+			const itemId = await createTestItem(vaultId, userId, {
+				id: "sync-item-0001",
+			});
 
 			await createTestSyncEvent(vaultId, userId, {
 				entityId: itemId,
@@ -447,7 +470,9 @@ describe("Sync Router", () => {
 		test("should detect conflict when item version is ahead", async () => {
 			const { caller, userId } = await setup(syncRouter);
 			const vaultId = await createTestVault(userId);
-			const itemId = await createTestItem(vaultId, userId, { id: "item-1" });
+			const itemId = await createTestItem(vaultId, userId, {
+				id: "sync-item-0002",
+			});
 
 			await createTestSyncEvent(vaultId, userId, {
 				entityId: itemId,

@@ -55,6 +55,14 @@ import {
 	type SyncBroadcastPayload,
 } from "../sync-helper";
 import { logAuditEvent } from "../utils/audit";
+import {
+	algorithmSchema,
+	bulkImportItemsSchema,
+	clientIdSchema,
+	encryptedItemCiphertextSchema,
+	ivSchema,
+	resourceIdSchema,
+} from "../validation";
 
 async function assertUserEntitlement(
 	userId: string,
@@ -1038,8 +1046,8 @@ export const vaultRouter = router({
 	createItem: protectedProcedure
 		.input(
 			z.object({
-				itemId: z.string().max(64).optional(),
-				vaultId: z.string(),
+				itemId: resourceIdSchema.optional(),
+				vaultId: resourceIdSchema,
 				category: z.enum([
 					"login",
 					"secure-note",
@@ -1047,11 +1055,11 @@ export const vaultRouter = router({
 					"identity",
 					"totp",
 				]),
-				encryptedData: z.string(),
-				encryptionIv: z.string(),
-				encryptionAlgorithm: z.string().default("AES-GCM-AAD-V1"),
-				clientId: z.string().optional(), // For sync event correlation
-			}),
+				encryptedData: encryptedItemCiphertextSchema,
+				encryptionIv: ivSchema,
+				encryptionAlgorithm: algorithmSchema.default("AES-GCM-AAD-V1"),
+				clientId: clientIdSchema.optional(),
+			}).strict(),
 		)
 		.mutation(async ({ input, ctx }) => {
 			// Check user has access to this vault
@@ -1125,25 +1133,10 @@ export const vaultRouter = router({
 	bulkImportItems: protectedProcedure
 		.input(
 			z.object({
-				vaultId: z.string(),
-				clientId: z.string().optional(),
-				items: z.array(
-					z.object({
-						itemId: z.string().max(64),
-						category: z.enum([
-							"login",
-							"secure-note",
-							"credit-card",
-							"identity",
-							"totp",
-						]),
-						favorite: z.boolean().optional(),
-						encryptedData: z.string(),
-						encryptionIv: z.string(),
-						encryptionAlgorithm: z.string().default("AES-GCM-AAD-V1"),
-					}),
-				),
-			}),
+				vaultId: resourceIdSchema,
+				clientId: clientIdSchema.optional(),
+				items: bulkImportItemsSchema,
+			}).strict(),
 		)
 		.mutation(async ({ input, ctx }) => {
 			// Check user has access to this vault
@@ -1259,13 +1252,13 @@ export const vaultRouter = router({
 	updateItem: protectedProcedure
 		.input(
 			z.object({
-				itemId: z.string(),
-				encryptedData: z.string().optional(),
-				encryptionIv: z.string().optional(),
-				encryptionAlgorithm: z.string().optional(),
+				itemId: resourceIdSchema,
+				encryptedData: encryptedItemCiphertextSchema.optional(),
+				encryptionIv: ivSchema.optional(),
+				encryptionAlgorithm: algorithmSchema.optional(),
 				expectedVersion: z.number().optional(), // For conflict detection
-				clientId: z.string().optional(), // For sync event correlation
-			}),
+				clientId: clientIdSchema.optional(),
+			}).strict(),
 		)
 		.mutation(async ({ input, ctx }) => {
 			// Get the item first
@@ -1610,14 +1603,14 @@ export const vaultRouter = router({
 	moveItem: protectedProcedure
 		.input(
 			z.object({
-				itemId: z.string(),
-				sourceVaultId: z.string(),
-				targetVaultId: z.string(),
-				encryptedData: z.string(), // Re-encrypted with target vault key
-				encryptionIv: z.string(),
-				encryptionAlgorithm: z.string().optional(),
-				clientId: z.string().optional(),
-			}),
+				itemId: resourceIdSchema,
+				sourceVaultId: resourceIdSchema,
+				targetVaultId: resourceIdSchema,
+				encryptedData: encryptedItemCiphertextSchema,
+				encryptionIv: ivSchema,
+				encryptionAlgorithm: algorithmSchema.optional(),
+				clientId: clientIdSchema.optional(),
+			}).strict(),
 		)
 		.mutation(async ({ input, ctx }) => {
 			// Verify the item exists and is in the source vault

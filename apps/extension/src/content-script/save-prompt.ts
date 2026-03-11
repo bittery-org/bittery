@@ -1,4 +1,14 @@
 import type { ActiveSavePrompt, CapturedCredentials } from "./types";
+import {
+	appendNonceToIframeSrc,
+	cancelSaveMessageSchema,
+	createIframeNonce,
+	resizeIframeMessageSchema,
+	saveCredentialMessageSchema,
+	saveIframeReadyMessageSchema,
+	updateExistingCredentialMessageSchema,
+	validateIframeMessage,
+} from "./iframe-messages";
 
 let activeSavePrompt: ActiveSavePrompt | null = null;
 
@@ -140,7 +150,12 @@ export async function showSavePrompt(
 	iframe.style.borderRadius = "8px"; // Match popup radius
 	iframe.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)"; // Softer shadow
 	iframe.style.overflow = "hidden"; // Prevent scrollbars
-	iframe.src = chrome.runtime.getURL("save-prompt-iframe.html");
+	const nonce = createIframeNonce();
+	iframe.src = appendNonceToIframeSrc(
+		chrome.runtime.getURL("save-prompt-iframe.html"),
+		nonce,
+	);
+	const iframeOrigin = new URL(iframe.src).origin;
 
 	shadow.appendChild(iframe);
 
@@ -152,14 +167,18 @@ export async function showSavePrompt(
 
 	// Set up message handler
 	const messageHandler = (event: MessageEvent) => {
-		// Ignore messages not from our iframe
-		if (!event.data?.type) return;
-
-		if (event.data.type === "SAVE_IFRAME_READY") {
+		const readyMessage = validateIframeMessage(event, {
+			expectedSource: iframe.contentWindow,
+			expectedOrigin: iframeOrigin,
+			expectedNonce: nonce,
+			schema: saveIframeReadyMessageSchema,
+		});
+		if (readyMessage) {
 			// Send credentials, vaults, and duplicate info to iframe
 			iframe.contentWindow?.postMessage(
 				{
 					type: "SAVE_PROMPT_DATA",
+					nonce,
 					data: {
 						username: credentials.username,
 						password: credentials.password,
@@ -169,17 +188,51 @@ export async function showSavePrompt(
 						existingCredentials: existingCredentials,
 					},
 				},
-				"*",
+				iframeOrigin,
 			);
-		} else if (event.data.type === "RESIZE_IFRAME") {
-			if (event.data.height > 0) {
-				iframe.style.height = `${event.data.height}px`;
-			}
-		} else if (event.data.type === "SAVE_CREDENTIAL") {
-			handleSaveCredential(event.data, iframe);
-		} else if (event.data.type === "UPDATE_EXISTING_CREDENTIAL") {
-			handleUpdateCredential(event.data, iframe);
-		} else if (event.data.type === "CANCEL_SAVE") {
+			return;
+		}
+
+		const resizeMessage = validateIframeMessage(event, {
+			expectedSource: iframe.contentWindow,
+			expectedOrigin: iframeOrigin,
+			expectedNonce: nonce,
+			schema: resizeIframeMessageSchema,
+		});
+		if (resizeMessage) {
+			iframe.style.height = `${resizeMessage.height}px`;
+			return;
+		}
+
+		const saveMessage = validateIframeMessage(event, {
+			expectedSource: iframe.contentWindow,
+			expectedOrigin: iframeOrigin,
+			expectedNonce: nonce,
+			schema: saveCredentialMessageSchema,
+		});
+		if (saveMessage) {
+			handleSaveCredential(saveMessage, iframe, iframeOrigin, nonce);
+			return;
+		}
+
+		const updateMessage = validateIframeMessage(event, {
+			expectedSource: iframe.contentWindow,
+			expectedOrigin: iframeOrigin,
+			expectedNonce: nonce,
+			schema: updateExistingCredentialMessageSchema,
+		});
+		if (updateMessage) {
+			handleUpdateCredential(updateMessage, iframe, iframeOrigin, nonce);
+			return;
+		}
+
+		const cancelMessage = validateIframeMessage(event, {
+			expectedSource: iframe.contentWindow,
+			expectedOrigin: iframeOrigin,
+			expectedNonce: nonce,
+			schema: cancelSaveMessageSchema,
+		});
+		if (cancelMessage) {
 			hideSavePrompt();
 		}
 	};
@@ -233,6 +286,8 @@ export function hideSavePrompt() {
 async function handleSaveCredential(
 	data: { vaultId: string; username: string; password: string; url: string },
 	iframe: HTMLIFrameElement,
+	iframeOrigin: string,
+	nonce: string,
 ) {
 	try {
 		// Send save request to background script
@@ -250,11 +305,12 @@ async function handleSaveCredential(
 		iframe.contentWindow?.postMessage(
 			{
 				type: "SAVE_RESULT",
+				nonce,
 				success: response.success,
 				error: response.error,
 				errorType: response.errorType,
 			},
-			"*",
+			iframeOrigin,
 		);
 
 		// If successful, hide prompt after brief delay (handled by iframe)
@@ -267,6 +323,7 @@ async function handleSaveCredential(
 		iframe.contentWindow?.postMessage(
 			{
 				type: "SAVE_RESULT",
+				nonce,
 				success: false,
 				error:
 					error instanceof Error
@@ -274,7 +331,7 @@ async function handleSaveCredential(
 						: "An unexpected error occurred. Please try again.",
 				errorType: "exception",
 			},
-			"*",
+			iframeOrigin,
 		);
 	}
 }
@@ -289,6 +346,8 @@ async function handleUpdateCredential(
 		url: string;
 	},
 	iframe: HTMLIFrameElement,
+	iframeOrigin: string,
+	nonce: string,
 ) {
 	try {
 		// Send update request to background script
@@ -307,11 +366,12 @@ async function handleUpdateCredential(
 		iframe.contentWindow?.postMessage(
 			{
 				type: "SAVE_RESULT",
+				nonce,
 				success: response.success,
 				error: response.error,
 				errorType: response.errorType,
 			},
-			"*",
+			iframeOrigin,
 		);
 
 		// If successful, hide prompt after brief delay (handled by iframe)
@@ -324,6 +384,7 @@ async function handleUpdateCredential(
 		iframe.contentWindow?.postMessage(
 			{
 				type: "SAVE_RESULT",
+				nonce,
 				success: false,
 				error:
 					error instanceof Error
@@ -331,7 +392,7 @@ async function handleUpdateCredential(
 						: "An unexpected error occurred. Please try again.",
 				errorType: "exception",
 			},
-			"*",
+			iframeOrigin,
 		);
 	}
 }

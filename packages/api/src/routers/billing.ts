@@ -19,6 +19,7 @@ import {
 import { getStripePriceId, getWebAppUrl } from "../config/billing";
 import { getBitteryMode, isSelfHostedMode } from "../config/mode";
 import { protectedProcedure, router } from "../index";
+import { resourceIdSchema } from "../validation";
 
 const checkoutPlanSchema = z.enum(["personal", "family", "team"]);
 
@@ -347,8 +348,8 @@ export const billingRouter = router({
 	syncSeats: protectedProcedure
 		.input(
 			z.object({
-				teamId: z.string().optional(),
-			}),
+				teamId: resourceIdSchema.optional(),
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			assertCloudBillingEnabled();

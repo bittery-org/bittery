@@ -17,6 +17,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { servePublicStorageKey } from "./cdn";
 import { createSyncRouter } from "./sync/sse-handler";
+import { enforceTrpcRequestGuards } from "./trpc-guard";
 
 await runMigrations();
 
@@ -60,6 +61,11 @@ app.get("/cdn/*", async (c) => {
 		createPresignedDownload,
 	});
 });
+
+app.use(
+	"/trpc/*",
+	enforceTrpcRequestGuards,
+);
 
 app.use(
 	"/trpc/*",

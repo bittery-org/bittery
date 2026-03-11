@@ -3,6 +3,7 @@ import { Card, cn } from "@bittery/ui";
 import { IconLockOutlineDuo18 } from "@bittery/ui/icons";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getIframeNonceFromLocation } from "@/content-script/iframe-messages";
 
 export interface AutofillIframeConfig {
 	/** Message type for receiving items (e.g. "AUTOFILL_ITEMS") */
@@ -38,6 +39,7 @@ export function AutofillIframeBase({
 }: {
 	config: AutofillIframeConfig;
 }) {
+	const nonce = getIframeNonceFromLocation() ?? "";
 	const [allItems, setAllItems] = useState<DecryptedItem[]>([]);
 	const [filteredItems, setFilteredItems] = useState<DecryptedItem[]>([]);
 	const [filterQuery, setFilterQuery] = useState("");
@@ -50,6 +52,10 @@ export function AutofillIframeBase({
 	// (do NOT put allItems in the dependency array)
 	useEffect(() => {
 		const handleMessage = (event: MessageEvent) => {
+			if (event.data?.nonce !== nonce) {
+				return;
+			}
+
 			if (event.data.type === config.itemsMessageType) {
 				const items = config.preprocessItems
 					? config.preprocessItems(event.data.items || [])
@@ -77,7 +83,7 @@ export function AutofillIframeBase({
 		};
 
 		window.addEventListener("message", handleMessage);
-		window.parent.postMessage({ type: config.readyMessageType }, "*");
+		window.parent.postMessage({ type: config.readyMessageType, nonce }, "*");
 
 		return () => window.removeEventListener("message", handleMessage);
 	}, [
@@ -85,15 +91,19 @@ export function AutofillIframeBase({
 		config.filterFn,
 		config.filterMessageType,
 		config.itemsMessageType,
+		nonce,
 		config.preprocessItems,
 		config.readyMessageType,
 	]);
 
 	const handleSelect = useCallback(
 		(item: DecryptedItem) => {
-			window.parent.postMessage({ type: config.selectMessageType, item }, "*");
+			window.parent.postMessage(
+				{ type: config.selectMessageType, item, nonce },
+				"*",
+			);
 		},
-		[config.selectMessageType],
+		[config.selectMessageType, nonce],
 	);
 
 	// Keyboard navigation via native keydown and forwarded KEYBOARD_NAV messages
@@ -129,6 +139,9 @@ export function AutofillIframeBase({
 		};
 
 		const handleMessage = (event: MessageEvent) => {
+			if (event.data?.nonce !== nonce) {
+				return;
+			}
 			if (event.data.type === "KEYBOARD_NAV") {
 				navigate(event.data.key);
 			}
@@ -140,20 +153,20 @@ export function AutofillIframeBase({
 			window.removeEventListener("keydown", handleKeyDown);
 			window.removeEventListener("message", handleMessage);
 		};
-	}, [filteredItems, selectedIndex, handleSelect]);
+	}, [filteredItems, selectedIndex, handleSelect, nonce]);
 
 	// Communicate content height to parent iframe
 	useEffect(() => {
 		const sendHeight = () => {
 			const height = document.documentElement.scrollHeight;
-			window.parent.postMessage({ type: "RESIZE_IFRAME", height }, "*");
+			window.parent.postMessage({ type: "RESIZE_IFRAME", height, nonce }, "*");
 		};
 
 		const observer = new ResizeObserver(sendHeight);
 		observer.observe(document.body);
 
 		return () => observer.disconnect();
-	}, []);
+	}, [nonce]);
 
 	if (needsUnlock) {
 		return (

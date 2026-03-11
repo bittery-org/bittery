@@ -138,9 +138,14 @@ function handleIdentityKeyboardNavigation(event: KeyboardEvent) {
 	) {
 		if (contentState.currentIdentityIframe) {
 			event.preventDefault();
+			const iframeOrigin = new URL(contentState.currentIdentityIframe.src).origin;
+			const nonce =
+				new URL(contentState.currentIdentityIframe.src).searchParams.get(
+					"nonce",
+				) ?? "";
 			contentState.currentIdentityIframe.contentWindow?.postMessage(
-				{ type: "KEYBOARD_NAV", key: event.key },
-				"*",
+				{ type: "KEYBOARD_NAV", key: event.key, nonce },
+				iframeOrigin,
 			);
 		}
 	}

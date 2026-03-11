@@ -49,6 +49,13 @@ export function generateTestUserId(): string {
 	return nanoid();
 }
 
+export function generateTestSessionId(): string {
+	return (
+		crypto.randomUUID().replaceAll("-", "") +
+		crypto.randomUUID().replaceAll("-", "")
+	);
+}
+
 /**
  * Create a mock context for testing
  */
@@ -82,7 +89,7 @@ export function createAuthenticatedContext(
 ): Context {
 	return createTestContext({
 		userId,
-		sessionId: sessionId || nanoid(),
+		sessionId: sessionId || generateTestSessionId(),
 		expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
 		platform: "web",
 	});
@@ -316,7 +323,7 @@ export async function createTestSession(
 	userId: string,
 	overrides: Partial<typeof session.$inferInsert> = {},
 ) {
-	const sessionId = overrides.id || nanoid();
+	const sessionId = overrides.id || generateTestSessionId();
 	const expiresAt =
 		overrides.expiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 

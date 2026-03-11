@@ -276,6 +276,27 @@ describe("Team Router", () => {
 				memberCaller.leave({ teamId, vaultRotations: [] }),
 			).rejects.toThrow("You cannot leave a personal team");
 		});
+
+		test("should reject oversized nested rotation arrays", async () => {
+			const [{ userId: ownerId }, { userId: memberId, caller: memberCaller }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			await addTeamMember(teamId, memberId, "member");
+
+			await expect(
+				memberCaller.leave({
+					teamId,
+					vaultRotations: Array.from({ length: 101 }, (_, index) => ({
+						vaultId: `rotation-vault-${index}`,
+						keyRotation: { memberKeys: [], reEncryptedItems: [] },
+					})),
+				}),
+			).rejects.toThrow();
+		});
 	});
 
 	describe("getLeaveRotationData", () => {
@@ -534,6 +555,41 @@ describe("Team Router", () => {
 			).rejects.toThrow(
 				"Vault rotation data must exactly match the removable team vault set.",
 			);
+		});
+
+		test("should reject oversized member key rotations", async () => {
+			const [{ userId: ownerId, caller }, { userId: memberId }] =
+				await Promise.all([setup(teamRouter), setup(teamRouter)]);
+			const teamId = await createTestTeam(ownerId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			await addTeamMember(teamId, memberId, "member");
+			const vaultId = await createTestVault(ownerId, {
+				type: "team",
+				teamId,
+			});
+			await addVaultMember(vaultId, memberId, "member");
+
+			await expect(
+				caller.members.remove({
+					teamId,
+					userId: memberId,
+					vaultRotations: [
+						{
+							vaultId,
+							keyRotation: {
+								memberKeys: Array.from({ length: 101 }, (_, index) => ({
+									userId: `rotation-user-${index}`,
+									encryptedVaultKey: "wrapped-key",
+								})),
+								reEncryptedItems: [],
+							},
+						},
+					],
+				}),
+			).rejects.toThrow();
 		});
 	});
 

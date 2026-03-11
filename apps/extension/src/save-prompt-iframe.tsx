@@ -10,6 +10,7 @@ import {
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { Favicon } from "@/components/favicon";
+import { getIframeNonceFromLocation } from "@/content-script/iframe-messages";
 
 interface VaultOption {
 	id: string;
@@ -47,6 +48,7 @@ function getHostname(url: string): string {
 }
 
 function SavePromptIframe() {
+	const nonce = getIframeNonceFromLocation() ?? "";
 	const [data, setData] = useState<SavePromptData | null>(null);
 	const [selectedVaultId, setSelectedVaultId] = useState<string>("");
 	const [state, setState] = useState<PromptState>("selecting");
@@ -62,9 +64,9 @@ function SavePromptIframe() {
 			// But wrapper ref scrollHeight is safer for the main content.
 			// Let's use document.body.scrollHeight to be safe for the iframe
 			const height = document.body.scrollHeight;
-			window.parent.postMessage({ type: "RESIZE_IFRAME", height }, "*");
+			window.parent.postMessage({ type: "RESIZE_IFRAME", height, nonce }, "*");
 		}
-	}, []);
+	}, [nonce]);
 
 	useLayoutEffect(() => {
 		updateHeight();
@@ -88,14 +90,19 @@ function SavePromptIframe() {
 		window.parent.postMessage(
 			{
 				type: "CANCEL_SAVE",
+				nonce,
 			},
 			"*",
 		);
-	}, []);
+	}, [nonce]);
 
 	useEffect(() => {
 		// Listen for save prompt data from parent
 		const handleMessage = (event: MessageEvent) => {
+			if (event.data?.nonce !== nonce) {
+				return;
+			}
+
 			if (event.data.type === "SAVE_PROMPT_DATA") {
 				const promptData = event.data.data as SavePromptData;
 				setData(promptData);
@@ -126,10 +133,10 @@ function SavePromptIframe() {
 		window.addEventListener("message", handleMessage);
 
 		// Notify parent that iframe is ready
-		window.parent.postMessage({ type: "SAVE_IFRAME_READY" }, "*");
+		window.parent.postMessage({ type: "SAVE_IFRAME_READY", nonce }, "*");
 
 		return () => window.removeEventListener("message", handleMessage);
-	}, [handleCancel]);
+	}, [handleCancel, nonce]);
 
 	const handleSave = () => {
 		if (!data || !selectedVaultId) return;
@@ -158,6 +165,7 @@ function SavePromptIframe() {
 						username: data.username,
 						password: data.password,
 						url: data.url,
+						nonce,
 					},
 					"*",
 				);
@@ -171,6 +179,7 @@ function SavePromptIframe() {
 					username: data.username,
 					password: data.password,
 					url: data.url,
+					nonce,
 				},
 				"*",
 			);

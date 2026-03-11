@@ -90,6 +90,8 @@ function buildRawItemsFromVaultList(vaults: VaultListResponse) {
 				encryptedData: item.encryptedData,
 				encryptionIv: item.encryptionIv,
 				encryptionAlgorithm: item.encryptionAlgorithm,
+				version: item.version,
+				lastModifiedBy: item.lastModifiedBy ?? null,
 				createdAt: item.createdAt,
 				updatedAt: item.updatedAt,
 				deletedAt: item.deletedAt,
@@ -155,6 +157,8 @@ function buildRawItemsFromCache(
 			encryptedData: item.encryptedData,
 			encryptionIv: item.encryptionIv,
 			encryptionAlgorithm: item.encryptionAlgorithm,
+			version: item.version,
+			lastModifiedBy: item.lastModifiedBy ?? null,
 			createdAt: item.createdAt,
 			updatedAt: item.updatedAt,
 			deletedAt: item.deletedAt,
@@ -182,9 +186,13 @@ async function decryptRawItemsViaDesktop(
 	email: string,
 	includeAccountContext: boolean,
 ) {
-	const accountMeta = includeAccountContext
-		? ((await storage.getAccountMetadata?.(email)) ?? null)
-		: null;
+	const accountMeta = (await storage.getAccountMetadata?.(email)) ?? null;
+	const sessionAccount = accountMeta?.userId
+		? null
+		: (await desktopClient.getSessionData())?.accounts.find(
+				(account) => account.email.toLowerCase() === email.toLowerCase(),
+			);
+	const fallbackUserId = accountMeta?.userId ?? sessionAccount?.user_id ?? null;
 
 	const nonDeletedItems = rawItems.filter((item) => !item.deletedAt);
 	if (nonDeletedItems.length === 0) {
@@ -199,6 +207,11 @@ async function decryptRawItemsViaDesktop(
 			encryptedData: item.encryptedData,
 			encryptionIv: item.encryptionIv,
 			encryptionAlgorithm: item.encryptionAlgorithm,
+			version:
+				typeof item.version === "number" && item.version > 0
+					? Math.floor(item.version)
+					: 1,
+			userId: item.lastModifiedBy ?? fallbackUserId ?? undefined,
 		})),
 	);
 	const decryptedById = new Map(

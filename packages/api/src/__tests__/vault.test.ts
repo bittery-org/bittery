@@ -784,6 +784,30 @@ describe("Vault Router", () => {
 				}),
 			).rejects.toThrow("Read-only access cannot create items");
 		});
+
+		test("should reject oversized ciphertext and invalid algorithms", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			const vaultId = await createTestVault(userId);
+
+			await expect(
+				caller.createItem({
+					vaultId,
+					category: "secure-note",
+					encryptedData: "x".repeat(524_289),
+					encryptionIv: mockItemData.encryptionIv,
+				}),
+			).rejects.toThrow();
+
+			await expect(
+				caller.createItem({
+					vaultId,
+					category: "login",
+					encryptedData: mockItemData.encryptedData,
+					encryptionIv: mockItemData.encryptionIv,
+					encryptionAlgorithm: "AES-GCM" as any,
+				}),
+			).rejects.toThrow();
+		});
 	});
 
 	describe("updateItem", () => {
@@ -818,6 +842,26 @@ describe("Vault Router", () => {
 					expectedVersion: 3, // Wrong version
 				}),
 			).rejects.toThrow("Item has been modified by another client");
+		});
+
+		test("should reject oversized ciphertext and invalid algorithms", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			const vaultId = await createTestVault(userId);
+			const itemId = await createTestItem(vaultId, userId);
+
+			await expect(
+				caller.updateItem({
+					itemId,
+					encryptedData: "x".repeat(524_289),
+				}),
+			).rejects.toThrow();
+
+			await expect(
+				caller.updateItem({
+					itemId,
+					encryptionAlgorithm: "AES-GCM" as any,
+				}),
+			).rejects.toThrow();
 		});
 	});
 
@@ -994,6 +1038,56 @@ describe("Vault Router", () => {
 			});
 			expect(auditLogs.length).toBe(1);
 			expect(auditLogs[0]?.entityId).toBe(vaultId);
+		});
+
+		test("should reject more than 200 items", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			const vaultId = await createTestVault(userId);
+
+			await expect(
+				caller.bulkImportItems({
+					vaultId,
+					items: Array.from({ length: 201 }, (_, index) => ({
+						itemId: `bulk-${index}-${nanoid()}`,
+						category: "login" as const,
+						encryptedData: "data",
+						encryptionIv: "iv",
+					})),
+				}),
+			).rejects.toThrow();
+		});
+
+		test("should reject malformed item IDs and oversized ciphertext", async () => {
+			const { caller, userId } = await setupVaultSharingUser();
+			const vaultId = await createTestVault(userId);
+
+			await expect(
+				caller.bulkImportItems({
+					vaultId,
+					items: [
+						{
+							itemId: "bad item id",
+							category: "login",
+							encryptedData: "data",
+							encryptionIv: "iv",
+						},
+					],
+				}),
+			).rejects.toThrow();
+
+			await expect(
+				caller.bulkImportItems({
+					vaultId,
+					items: [
+						{
+							itemId: nanoid(),
+							category: "secure-note",
+							encryptedData: "x".repeat(524_289),
+							encryptionIv: "iv",
+						},
+					],
+				}),
+			).rejects.toThrow();
 		});
 	});
 

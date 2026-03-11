@@ -1,5 +1,13 @@
 import type { DecryptedItem } from "@bittery/shared/types";
 import type { AutofillField } from "../types";
+import {
+	appendNonceToIframeSrc,
+	createAutofillReadySchema,
+	createAutofillSelectSchema,
+	createIframeNonce,
+	resizeIframeMessageSchema,
+	validateIframeMessage,
+} from "../iframe-messages";
 
 // Visual feedback styles for autofilled fields
 const AUTOFILL_HIGHLIGHT_STYLE = {
@@ -111,6 +119,9 @@ export function showItemsOverlay<TField extends AutofillField>({
 
 	const { shadowHost, shadow } = createOverlayHost(field);
 	const iframe = createOverlayIframe(iframeSrc);
+	const nonce = createIframeNonce();
+	iframe.src = appendNonceToIframeSrc(iframe.src, nonce);
+	const iframeOrigin = new URL(iframe.src).origin;
 	shadow.appendChild(iframe);
 
 	field.overlay = shadowHost;
@@ -118,7 +129,13 @@ export function showItemsOverlay<TField extends AutofillField>({
 	animateOverlayIn(shadowHost);
 
 	const messageHandler = (event: MessageEvent) => {
-		if (event.data.type === readyMessageType) {
+		const readyMessage = validateIframeMessage(event, {
+			expectedSource: iframe.contentWindow,
+			expectedOrigin: iframeOrigin,
+			expectedNonce: nonce,
+			schema: createAutofillReadySchema(readyMessageType),
+		});
+		if (readyMessage) {
 			if (field.readyTimeout) {
 				clearTimeout(field.readyTimeout);
 				field.readyTimeout = undefined;
@@ -127,15 +144,34 @@ export function showItemsOverlay<TField extends AutofillField>({
 			iframe.contentWindow?.postMessage(
 				{
 					type: itemsMessageType,
+					nonce,
 					items,
 					fieldType,
 				},
-				"*",
+				iframeOrigin,
 			);
-		} else if (event.data.type === selectMessageType) {
-			onSelect(field, event.data.item);
-		} else if (event.data.type === "RESIZE_IFRAME" && event.data.height > 0) {
-			iframe.style.height = `${event.data.height}px`;
+			return;
+		}
+
+		const selectMessage = validateIframeMessage(event, {
+			expectedSource: iframe.contentWindow,
+			expectedOrigin: iframeOrigin,
+			expectedNonce: nonce,
+			schema: createAutofillSelectSchema(selectMessageType),
+		});
+		if (selectMessage) {
+			onSelect(field, selectMessage.item as DecryptedItem);
+			return;
+		}
+
+		const resizeMessage = validateIframeMessage(event, {
+			expectedSource: iframe.contentWindow,
+			expectedOrigin: iframeOrigin,
+			expectedNonce: nonce,
+			schema: resizeIframeMessageSchema,
+		});
+		if (resizeMessage) {
+			iframe.style.height = `${resizeMessage.height}px`;
 		}
 	};
 
@@ -146,10 +182,11 @@ export function showItemsOverlay<TField extends AutofillField>({
 		iframe.contentWindow?.postMessage(
 			{
 				type: itemsMessageType,
+				nonce,
 				items,
 				fieldType,
 			},
-			"*",
+			iframeOrigin,
 		);
 	}, 100);
 
@@ -167,9 +204,10 @@ export function showItemsOverlay<TField extends AutofillField>({
 			iframe.contentWindow?.postMessage(
 				{
 					type: filterMessageType,
+					nonce,
 					query,
 				},
-				"*",
+				iframeOrigin,
 			);
 		}, 150);
 	};
@@ -225,13 +263,22 @@ export function showUnlockIframePrompt(
 
 	const { shadowHost, shadow } = createOverlayHost(field);
 	const iframe = createOverlayIframe(options.iframeSrc);
+	const nonce = createIframeNonce();
+	iframe.src = appendNonceToIframeSrc(iframe.src, nonce);
+	const iframeOrigin = new URL(iframe.src).origin;
 	shadow.appendChild(iframe);
 
 	field.overlay = shadowHost;
 	animateOverlayIn(shadowHost);
 
 	const messageHandler = (event: MessageEvent) => {
-		if (event.data.type === options.readyMessageType) {
+		const readyMessage = validateIframeMessage(event, {
+			expectedSource: iframe.contentWindow,
+			expectedOrigin: iframeOrigin,
+			expectedNonce: nonce,
+			schema: createAutofillReadySchema(options.readyMessageType),
+		});
+		if (readyMessage) {
 			if (field.readyTimeout) {
 				clearTimeout(field.readyTimeout);
 				field.readyTimeout = undefined;
@@ -240,11 +287,21 @@ export function showUnlockIframePrompt(
 			iframe.contentWindow?.postMessage(
 				{
 					type: "NEEDS_UNLOCK",
+					nonce,
 				},
-				"*",
+				iframeOrigin,
 			);
-		} else if (event.data.type === "RESIZE_IFRAME" && event.data.height > 0) {
-			iframe.style.height = `${event.data.height}px`;
+			return;
+		}
+
+		const resizeMessage = validateIframeMessage(event, {
+			expectedSource: iframe.contentWindow,
+			expectedOrigin: iframeOrigin,
+			expectedNonce: nonce,
+			schema: resizeIframeMessageSchema,
+		});
+		if (resizeMessage) {
+			iframe.style.height = `${resizeMessage.height}px`;
 		}
 	};
 
@@ -255,8 +312,9 @@ export function showUnlockIframePrompt(
 		iframe.contentWindow?.postMessage(
 			{
 				type: "NEEDS_UNLOCK",
+				nonce,
 			},
-			"*",
+			iframeOrigin,
 		);
 	}, 100);
 }

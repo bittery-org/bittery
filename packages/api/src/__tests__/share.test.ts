@@ -95,6 +95,26 @@ describe("Share Router", () => {
 			expect(result.token).toBeDefined();
 		});
 
+		test("should reject more than 100 allowed emails", async () => {
+			const { caller, userId } = await setupShareUser();
+			const vaultId = await createTestVault(userId);
+			const itemId = await createTestItem(vaultId, userId);
+
+			await expect(
+				caller.create({
+					itemId,
+					accessMode: "email-restricted",
+					isOneTimeUse: false,
+					expiresIn: "1day",
+					allowedEmails: Array.from(
+						{ length: 101 },
+						(_, index) => `allowed-${index}@example.com`,
+					),
+					...mockShareData,
+				}),
+			).rejects.toThrow();
+		});
+
 		test("should require allowed emails for email-restricted mode", async () => {
 			const { caller, userId } = await setupShareUser();
 			const vaultId = await createTestVault(userId);
@@ -581,6 +601,23 @@ describe("Share Router", () => {
 			expect(result.success).toBe(true);
 		});
 
+		test("should reject more than 100 added emails", async () => {
+			const { caller, userId } = await setupShareUser();
+			const { shareLinkId } = await setupShareLink(userId, {
+				shareLinkOverrides: { accessMode: "email-restricted" },
+			});
+
+			await expect(
+				caller.update({
+					linkId: shareLinkId,
+					addEmails: Array.from(
+						{ length: 101 },
+						(_, index) => `add-${index}@example.com`,
+					),
+				}),
+			).rejects.toThrow();
+		});
+
 		test("should not remove allowed emails from a different share link", async () => {
 			const [{ caller: callerA, userId: userAId }, { userId: userBId }] =
 				await Promise.all([setupShareUser(), setupShareUser()]);
@@ -839,6 +876,17 @@ describe("Share Router", () => {
 				"This share link is no longer valid",
 			);
 		});
+
+		test("should reject client supplied network metadata", async () => {
+			const caller = shareRouter.createCaller(createPublicContext());
+
+			await expect(
+				caller.accessPublic({
+					token: nanoid(32),
+					userAgent: "Injected/1.0",
+				} as any),
+			).rejects.toThrow();
+		});
 	});
 
 	describe("requestEmailVerification", () => {
@@ -960,6 +1008,19 @@ describe("Share Router", () => {
 			expect(result.encryptedShareKey).toBeDefined();
 		});
 
+		test("should reject client supplied network metadata on verification access", async () => {
+			const publicCaller = shareRouter.createCaller(createPublicContext());
+
+			await expect(
+				publicCaller.verifyEmailAndAccess({
+					token: nanoid(32),
+					email: "allowed@example.com",
+					code: "123456",
+					ipAddress: "1.2.3.4",
+				} as any),
+			).rejects.toThrow();
+		});
+
 		test("should reject wrong verification code", async () => {
 			const { userId } = await setupShareUser();
 			const { shareLinkId, token } = await setupShareLink(userId, {
@@ -1069,17 +1130,13 @@ describe("Share Router", () => {
 
 			// Access the link to create a log entry
 			const publicCaller = shareRouter.createCaller(createPublicContext());
-			await publicCaller.accessPublic({
-				token,
-				ipAddress: "192.168.1.1",
-				userAgent: "TestBrowser/1.0",
-			});
+			await publicCaller.accessPublic({ token });
 
 			const result = await caller.getAccessLogs({ linkId: shareLinkId });
 
 			expect(result.length).toBe(1);
 			expect(result[0]?.success).toBe(true);
-			expect(result[0]?.ipAddress).toBe("192.168.1.1");
+			expect(result[0]?.ipAddress).toBe("127.0.0.1");
 		});
 
 		test("should apply creator-only visibility to regular members and allow admins", async () => {
@@ -1117,11 +1174,7 @@ describe("Share Router", () => {
 			});
 
 			const publicCaller = shareRouter.createCaller(createPublicContext());
-			await publicCaller.accessPublic({
-				token: created.token,
-				ipAddress: "10.0.0.1",
-				userAgent: "VisibilityTest/1.0",
-			});
+			await publicCaller.accessPublic({ token: created.token });
 
 			const creatorLogs = await creatorCaller.getAccessLogs({ linkId: created.id });
 			expect(creatorLogs).toHaveLength(1);

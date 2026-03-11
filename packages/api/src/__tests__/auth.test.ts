@@ -228,6 +228,45 @@ describe("Auth Router", () => {
 			).rejects.toThrow();
 		});
 
+		test("should reject malformed resource IDs during signup", async () => {
+			const email = generateTestEmail();
+			const caller = authRouter.createCaller(createPublicContext());
+			const signupVerificationToken = await issueSignupVerificationToken({
+				caller,
+				email,
+			});
+
+			await expect(
+				caller.signup({
+					email,
+					signupVerificationToken,
+					name: "Bad IDs",
+					userId: "not a resource id!",
+					vaultId: "still not valid!",
+					...toSignupCryptoInput(authCryptoFixture),
+				}),
+			).rejects.toThrow();
+		});
+
+		test("should reject non-hex SRP registration material", async () => {
+			const email = generateTestEmail();
+			const caller = authRouter.createCaller(createPublicContext());
+			const signupVerificationToken = await issueSignupVerificationToken({
+				caller,
+				email,
+			});
+
+			await expect(
+				caller.signup({
+					email,
+					signupVerificationToken,
+					name: "Bad SRP",
+					...toSignupCryptoInput(authCryptoFixture),
+					srpSalt: "zz".repeat(32),
+				}),
+			).rejects.toThrow();
+		});
+
 		test("should fail verification with a wrong code", async () => {
 			const email = generateTestEmail();
 			const caller = authRouter.createCaller(createPublicContext());
@@ -627,6 +666,46 @@ describe("Auth Router", () => {
 			).rejects.toThrow("Invalid credentials");
 		});
 
+		test("should reject unknown keys on strict login inputs", async () => {
+			const caller = authRouter.createCaller(createPublicContext());
+
+			await expect(
+				caller.startLogin({
+					email: generateTestEmail(),
+					clientPublicKey: "a".repeat(512),
+					extra: true,
+				} as any),
+			).rejects.toThrow();
+		});
+
+		test("should reject malformed finishLogin identifiers and SRP hex values", async () => {
+			const caller = authRouter.createCaller(createPublicContext());
+
+			await expect(
+				caller.finishLogin({
+					attemptId: "invalid-attempt-id",
+					clientPublicKey: "a".repeat(512),
+					clientProof: "b".repeat(64),
+				}),
+			).rejects.toThrow();
+
+			await expect(
+				caller.finishLogin({
+					attemptId: `${"a".repeat(64)}:attempt_ok`,
+					clientPublicKey: "not-hex",
+					clientProof: "b".repeat(64),
+				}),
+			).rejects.toThrow();
+
+			await expect(
+				caller.finishLogin({
+					attemptId: `${"a".repeat(64)}:attempt_ok`,
+					clientPublicKey: "a".repeat(512),
+					clientProof: "not-hex",
+				}),
+			).rejects.toThrow();
+		});
+
 		test("should return a valid-shaped challenge for unknown email", async () => {
 			const caller = authRouter.createCaller(createPublicContext());
 			const clientEphemeral = await generateTestSrpClientEphemeral();
@@ -789,6 +868,24 @@ describe("Auth Router", () => {
 			expect(lowerResult.exists).toBe(true);
 			expect(upperResult.exists).toBe(true);
 			expect(upperResult.secretKeyHint).toBe(lowerResult.secretKeyHint);
+		});
+	});
+
+	describe("recovery validation", () => {
+		test("should reject invalid recovery SRP payloads before token verification", async () => {
+			const caller = authRouter.createCaller(createPublicContext());
+
+			await expect(
+				caller.resetPassword({
+					recoveryToken: "recovery-token",
+					srpSalt: "bad-salt",
+					srpVerifier: "abcd",
+					encryptedPrivateKey: authCryptoFixture.encryptedPrivateKey,
+					encryptedMasterKey: authCryptoFixture.encryptedMasterKey,
+					recoveryKeyHint: authCryptoFixture.recoveryKeyHint,
+					encryptedVaultKeys: [],
+				}),
+			).rejects.toThrow();
 		});
 	});
 

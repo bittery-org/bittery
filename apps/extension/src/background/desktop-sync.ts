@@ -6,28 +6,18 @@
  */
 
 import { storage } from "../lib/storage";
-import { desktopClient } from "./desktop-client";
+import { desktopClient, type DesktopStatus } from "./desktop-client";
 import {
 	type DesktopModeStateSnapshot,
 	evaluateDesktopRecoveryDecision,
 } from "./services/desktop-recovery";
 import { _lockInternal, setDesktopModeSentinel } from "./session-manager";
 
-const DESKTOP_BASE_URL = "http://localhost:48765";
 const POLL_INTERVAL_MS = 5000; // Poll every 5 seconds
-const STATUS_TIMEOUT_MS = 2000; // 2 second timeout for status checks
 const DESKTOP_MODE_RECOVERY_WINDOW_MS = 60000; // 1 minute window to recover desktop mode after restart
 
 // Storage keys for persistent state
 const STORAGE_KEY_DESKTOP_MODE = "desktop_mode_state";
-
-export interface DesktopStatus {
-	available: boolean;
-	locked: boolean;
-	unlockedAccounts: string[];
-	timestamp: number;
-	autolockTimeoutMs: number;
-}
 
 export interface LockEvent {
 	reason: string;
@@ -52,7 +42,7 @@ class DesktopSyncService {
 	private lastDesktopStatus: DesktopStatus | null = null;
 	private desktopAvailable = false;
 	private pollInterval: ReturnType<typeof setInterval> | null = null;
-	private eventSource: EventSource | null = null;
+	private eventSource: { close: () => void } | null = null;
 
 	/**
 	 * Initialize the desktop sync service
@@ -221,105 +211,135 @@ class DesktopSyncService {
 	 * Check desktop status via HTTP
 	 */
 	async checkDesktopStatus(): Promise<DesktopStatus | null> {
-		try {
-			const controller = new AbortController();
-			const timeoutId = setTimeout(() => controller.abort(), STATUS_TIMEOUT_MS);
-
-			const response = await fetch(
-				`${DESKTOP_BASE_URL}/native-bridge/lock-status`,
-				{
-					method: "GET",
-					signal: controller.signal,
-				},
-			);
-
-			clearTimeout(timeoutId);
-
-			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}`);
-			}
-
-			const data = await response.json();
-
-			const status: DesktopStatus = {
-				available: true,
-				locked: data.locked ?? true,
-				unlockedAccounts: data.unlocked_accounts ?? [],
-				timestamp: data.timestamp ?? Date.now(),
-				autolockTimeoutMs: data.autolock_timeout_ms ?? -1,
-			};
-
-			this.lastDesktopStatus = status;
-			this.desktopAvailable = true;
-
-			return status;
-		} catch {
-			// Desktop not available or unreachable
+		const data = await desktopClient.getLockStatus();
+		if (!data) {
 			this.desktopAvailable = false;
 			this.lastDesktopStatus = null;
 			return null;
 		}
+
+		this.lastDesktopStatus = data;
+		this.desktopAvailable = true;
+		return data;
 	}
 
 	/**
 	 * Subscribe to SSE for real-time lock/unlock events
 	 */
 	async subscribeToSSE(): Promise<void> {
-		// Close existing connection
 		if (this.eventSource) {
 			this.eventSource.close();
 		}
 
 		try {
-			this.eventSource = new EventSource(
-				`${DESKTOP_BASE_URL}/native-bridge/lock-events`,
+			const controller = new AbortController();
+			this.eventSource = {
+				close: () => controller.abort(),
+			};
+
+			const response = await desktopClient.fetchBridge(
+				"/native-bridge/lock-events",
+				{
+					method: "GET",
+					signal: controller.signal,
+				},
 			);
 
-			this.eventSource.addEventListener("connected", (_event) => {
-				// Save desktop mode state when successfully connected
-				this.saveDesktopModeState();
-			});
+			if (!response.ok || !response.body) {
+				throw new Error(`HTTP ${response.status}`);
+			}
 
-			this.eventSource.addEventListener("lock", (event) => {
-				try {
-					const data: LockEvent = JSON.parse(event.data);
-					this.handleLockEvent(data).catch((error) => {
-						console.error("[Desktop Sync] handleLockEvent failed:", error);
-					});
-				} catch (error) {
-					console.error("[Desktop Sync] Failed to parse lock event:", error);
-				}
-			});
-
-			this.eventSource.addEventListener("unlock", (event) => {
-				try {
-					const data: UnlockEvent = JSON.parse(event.data);
-					this.handleUnlockEvent(data).catch((error) => {
-						console.error("[Desktop Sync] handleUnlockEvent failed:", error);
-					});
-				} catch (error) {
-					console.error("[Desktop Sync] Failed to parse unlock event:", error);
-				}
-			});
-
-			this.eventSource.addEventListener("desktop_close", (event) => {
-				const data: DesktopCloseEvent = JSON.parse(event.data);
-				this.handleDesktopCloseEvent(data);
-			});
-
-			this.eventSource.addEventListener("active_account_changed", (event) => {
-				const data: ActiveAccountChangedEvent = JSON.parse(event.data);
-				this.handleActiveAccountChanged(data);
-			});
-
-			this.eventSource.onerror = (error) => {
-				console.error("[Desktop Sync] SSE error:", error);
-				this.eventSource?.close();
-				this.eventSource = null;
-			};
+			void this.consumeSseStream(response.body, controller);
 		} catch (error) {
 			console.error("[Desktop Sync] Failed to subscribe to SSE:", error);
 			this.desktopAvailable = false;
+		}
+	}
+
+	private async consumeSseStream(
+		stream: ReadableStream<Uint8Array>,
+		controller: AbortController,
+	): Promise<void> {
+		const reader = stream.getReader();
+		const decoder = new TextDecoder();
+		let buffer = "";
+
+		try {
+			while (true) {
+				const { value, done } = await reader.read();
+				if (done) {
+					break;
+				}
+
+				buffer += decoder.decode(value, { stream: true });
+
+				let delimiterIndex = buffer.indexOf("\n\n");
+				while (delimiterIndex !== -1) {
+					const rawEvent = buffer.slice(0, delimiterIndex).trim();
+					buffer = buffer.slice(delimiterIndex + 2);
+					this.handleSseEvent(rawEvent);
+					delimiterIndex = buffer.indexOf("\n\n");
+				}
+			}
+		} catch (error) {
+			if (!controller.signal.aborted) {
+				console.error("[Desktop Sync] SSE stream error:", error);
+			}
+		} finally {
+			reader.releaseLock();
+			if (!controller.signal.aborted) {
+				this.eventSource = null;
+			}
+		}
+	}
+
+	private handleSseEvent(rawEvent: string): void {
+		if (!rawEvent) {
+			return;
+		}
+
+		let eventType = "message";
+		let data = "";
+
+		for (const line of rawEvent.split(/\r?\n/)) {
+			if (line.startsWith("event:")) {
+				eventType = line.slice(6).trim();
+				continue;
+			}
+
+			if (line.startsWith("data:")) {
+				data += line.slice(5).trim();
+			}
+		}
+
+		if (eventType === "connected") {
+			void this.saveDesktopModeState();
+			return;
+		}
+
+		try {
+			if (eventType === "lock") {
+				void this.handleLockEvent(JSON.parse(data) as LockEvent);
+				return;
+			}
+
+			if (eventType === "unlock") {
+				void this.handleUnlockEvent(JSON.parse(data) as UnlockEvent);
+				return;
+			}
+
+			if (eventType === "desktop_close") {
+				void this.handleDesktopCloseEvent(JSON.parse(data) as DesktopCloseEvent);
+				return;
+			}
+
+			if (eventType === "active_account_changed") {
+				void this.handleActiveAccountChanged(
+					JSON.parse(data) as ActiveAccountChangedEvent,
+				);
+			}
+		} catch (error) {
+			console.error("[Desktop Sync] Failed to parse bridge event:", error);
 		}
 	}
 

@@ -5,9 +5,12 @@ mod native_messaging_installer;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use hyper::{Body, Method, Request, Response, Server, StatusCode};
+use hyper::body::HttpBody;
 use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Method, Request, Response, Server, StatusCode};
+use rand::RngCore;
 use tokio::sync::{Mutex, broadcast};
 use tauri::{Emitter, Manager, Runtime};
 use tauri_plugin_store::Store;
@@ -39,6 +42,8 @@ struct NativeBridgeState {
     pending_requests: Arc<Mutex<std::collections::HashMap<String, String>>>,
     /// Broadcast channel for lock events (for SSE)
     lock_events: broadcast::Sender<LockEvent>,
+    /// Per-session HTTP bearer token for the loopback bridge
+    bridge_token: String,
 }
 
 impl Default for NativeBridgeState {
@@ -47,6 +52,7 @@ impl Default for NativeBridgeState {
         Self {
             pending_requests: Arc::new(Mutex::new(std::collections::HashMap::new())),
             lock_events: tx,
+            bridge_token: generate_bridge_token(),
         }
     }
 }
@@ -57,6 +63,217 @@ const LEGACY_BIOMETRIC_ENABLED_KEY: &str = "bittery_biometric_enabled";
 const LEGACY_JWT_TOKEN_KEY: &str = "bittery_jwt_token";
 const LEGACY_VAULT_KEYS_KEY: &str = "bittery_vault_keys";
 const CONTEXT_ENVELOPE_MARKER: &str = "bittery-context-envelope-v1";
+const BRIDGE_POST_BODY_LIMIT_BYTES: usize = 1024 * 1024;
+const BRIDGE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[derive(serde::Deserialize)]
+struct BiometricUnlockRequest {
+    challenge: String,
+    extension_id: String,
+    email: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct BiometricUnlockAllRequest {
+    challenge: String,
+    extension_id: String,
+}
+
+#[derive(serde::Deserialize)]
+struct DecryptItemPayload {
+    id: String,
+    #[serde(rename = "vaultId")]
+    vault_id: String,
+    #[serde(rename = "encryptedData")]
+    encrypted_data: String,
+    #[serde(rename = "encryptionIv")]
+    encryption_iv: String,
+    #[serde(rename = "encryptionAlgorithm")]
+    encryption_algorithm: String,
+    version: Option<u64>,
+    #[serde(rename = "userId")]
+    user_id: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct DecryptItemsRequest {
+    email: String,
+    items: Vec<DecryptItemPayload>,
+}
+
+#[derive(Default)]
+struct VaultKeysQuery {
+    email: Option<String>,
+}
+
+#[derive(Default)]
+struct BridgeAuthQuery {
+    extension_id: Option<String>,
+}
+
+fn generate_bridge_token() -> String {
+    let mut bytes = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn build_response(status: StatusCode, origin: Option<&str>, body: Body) -> Response<Body> {
+    let mut builder = Response::builder().status(status);
+    if let Some(origin_value) = origin {
+        builder = builder
+            .header("Access-Control-Allow-Origin", origin_value)
+            .header("Vary", "Origin");
+    }
+
+    builder.body(body).unwrap_or_else(|_| Response::new(Body::empty()))
+}
+
+fn json_response(
+    status: StatusCode,
+    origin: Option<&str>,
+    value: &serde_json::Value,
+) -> Response<Body> {
+    let mut builder = Response::builder()
+        .status(status)
+        .header("Content-Type", "application/json");
+    if let Some(origin_value) = origin {
+        builder = builder
+            .header("Access-Control-Allow-Origin", origin_value)
+            .header("Vary", "Origin");
+    }
+
+    builder
+        .body(Body::from(value.to_string()))
+        .unwrap_or_else(|_| Response::new(Body::empty()))
+}
+
+fn text_response(status: StatusCode, origin: Option<&str>, body: &str) -> Response<Body> {
+    build_response(status, origin, Body::from(body.to_string()))
+}
+
+fn parse_origin(req: &Request<Body>) -> Result<Option<String>, Response<Body>> {
+    match req.headers().get("Origin") {
+        Some(origin) => match origin.to_str() {
+            Ok(value) => Ok(Some(value.to_string())),
+            Err(_) => Err(text_response(
+                StatusCode::BAD_REQUEST,
+                None,
+                "Invalid Origin header",
+            )),
+        },
+        None => Ok(None),
+    }
+}
+
+fn authorize_bridge_request(
+    req: &Request<Body>,
+    state: &NativeBridgeState,
+) -> Result<Option<String>, Response<Body>> {
+    let origin = parse_origin(req)?;
+    if let Some(origin_value) = origin.as_deref() {
+        if !native_messaging_installer::is_allowed_extension_origin(origin_value) {
+            return Err(text_response(StatusCode::FORBIDDEN, None, "Forbidden"));
+        }
+    }
+
+    let auth_header = match req.headers().get("Authorization") {
+        Some(header) => match header.to_str() {
+            Ok(value) => value,
+            Err(_) => {
+                return Err(text_response(
+                    StatusCode::BAD_REQUEST,
+                    origin.as_deref(),
+                    "Invalid Authorization header",
+                ))
+            }
+        },
+        None => {
+            return Err(text_response(
+                StatusCode::UNAUTHORIZED,
+                origin.as_deref(),
+                "Missing Authorization header",
+            ))
+        }
+    };
+
+    let expected = format!("Bearer {}", state.bridge_token);
+    if auth_header != expected {
+        return Err(text_response(
+            StatusCode::UNAUTHORIZED,
+            origin.as_deref(),
+            "Invalid bridge token",
+        ));
+    }
+
+    Ok(origin)
+}
+
+async fn read_body_limited(body: Body) -> Result<Vec<u8>, &'static str> {
+    let mut body = body;
+    let mut bytes = Vec::new();
+
+    while let Some(chunk_result) = body.data().await {
+        let chunk = chunk_result.map_err(|_| "Failed to read request body")?;
+        if bytes.len() + chunk.len() > BRIDGE_POST_BODY_LIMIT_BYTES {
+            return Err("Payload Too Large");
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+
+    Ok(bytes)
+}
+
+async fn parse_json_body<T: serde::de::DeserializeOwned>(
+    req: Request<Body>,
+    origin: Option<&str>,
+) -> Result<T, Response<Body>> {
+    let body_bytes = match read_body_limited(req.into_body()).await {
+        Ok(bytes) => bytes,
+        Err("Payload Too Large") => {
+            return Err(text_response(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                origin,
+                "Payload Too Large",
+            ))
+        }
+        Err(_) => {
+            return Err(text_response(
+                StatusCode::BAD_REQUEST,
+                origin,
+                "Failed to read request body",
+            ))
+        }
+    };
+
+    let body_str = match String::from_utf8(body_bytes) {
+        Ok(value) => value,
+        Err(_) => {
+            return Err(text_response(
+                StatusCode::BAD_REQUEST,
+                origin,
+                "Invalid UTF-8 request body",
+            ))
+        }
+    };
+
+    serde_json::from_str(&body_str).map_err(|_| {
+        text_response(StatusCode::BAD_REQUEST, origin, "Invalid JSON request body")
+    })
+}
+
+fn parse_query_value(req: &Request<Body>, key: &str) -> Result<Option<String>, Response<Body>> {
+    let query = req.uri().query().unwrap_or("");
+    for segment in query.split('&') {
+        if let Some(raw_value) = segment.strip_prefix(&format!("{}=", key)) {
+            let decoded = urlencoding::decode(raw_value).map_err(|_| {
+                text_response(StatusCode::BAD_REQUEST, None, "Invalid query string")
+            })?;
+            return Ok(Some(decoded.into_owned()));
+        }
+    }
+
+    Ok(None)
+}
 
 fn sanitize_email_for_key(email: &str) -> String {
     email
@@ -68,6 +285,68 @@ fn sanitize_email_for_key(email: &str) -> String {
 
 fn account_key(email: &str, suffix: &str) -> String {
     format!("bittery_account_{}_{}", sanitize_email_for_key(email), suffix)
+}
+
+fn normalize_item_version(version: Option<u64>) -> u64 {
+    match version {
+        Some(value) if value >= 1 => value,
+        _ => 1,
+    }
+}
+
+fn serialize_encryption_context(
+    vault_id: &str,
+    entity_id: &str,
+    entity_type: &str,
+    version: u64,
+    user_id: &str,
+) -> String {
+    format!(
+        "{}\0{}\0{}\0{}\0{}",
+        vault_id, entity_id, entity_type, version, user_id
+    )
+}
+
+fn unwrap_plaintext_with_context(
+    decrypted_data: String,
+    vault_id: &str,
+    entity_id: &str,
+    entity_type: &str,
+    version: u64,
+    user_id: &str,
+) -> Result<String, String> {
+    let parsed: serde_json::Value = serde_json::from_str(&decrypted_data)
+        .map_err(|_| "Missing encryption context envelope".to_string())?;
+
+    let marker = parsed
+        .get("marker")
+        .and_then(|value| value.as_str())
+        .ok_or("Invalid encryption context envelope".to_string())?;
+    let context = parsed
+        .get("context")
+        .and_then(|value| value.as_str())
+        .ok_or("Invalid encryption context envelope".to_string())?;
+    let payload = parsed
+        .get("payload")
+        .and_then(|value| value.as_str())
+        .ok_or("Invalid encryption context envelope".to_string())?;
+
+    if marker != CONTEXT_ENVELOPE_MARKER {
+        return Err("Invalid encryption context marker".to_string());
+    }
+
+    let expected = serialize_encryption_context(
+        vault_id,
+        entity_id,
+        entity_type,
+        version,
+        user_id,
+    );
+    if context != expected {
+        return Err("Encryption context mismatch".to_string());
+    }
+
+    Ok(payload.to_string())
 }
 
 fn normalize_decrypted_item_payload(decrypted_data: String) -> String {
@@ -86,6 +365,56 @@ fn normalize_decrypted_item_payload(decrypted_data: String) -> String {
     }
 
     decrypted_data
+}
+
+fn decrypt_item_payload(
+    item: &DecryptItemPayload,
+    vault_key_base64: &str,
+) -> Result<String, String> {
+    if let Some(user_id) = item.user_id.as_deref().filter(|value| !value.is_empty()) {
+        let version = normalize_item_version(item.version);
+        match crypto_commands::crypto_decrypt_with_context(
+            item.encrypted_data.clone(),
+            item.encryption_iv.clone(),
+            item.encryption_algorithm.clone(),
+            vault_key_base64.to_string(),
+            item.vault_id.clone(),
+            item.id.clone(),
+            "item".to_string(),
+            version,
+            user_id.to_string(),
+        ) {
+            Ok(decrypted_data) => return Ok(normalize_decrypted_item_payload(decrypted_data)),
+            Err(_) => {
+                let decrypted_data = crypto_commands::crypto_decrypt(
+                    item.encrypted_data.clone(),
+                    item.encryption_iv.clone(),
+                    item.encryption_algorithm.clone(),
+                    vault_key_base64.to_string(),
+                )
+                .map_err(|e| format!("Decryption failed: {}", e))?;
+
+                let unwrapped = unwrap_plaintext_with_context(
+                    decrypted_data,
+                    &item.vault_id,
+                    &item.id,
+                    "item",
+                    version,
+                    user_id,
+                )?;
+                return Ok(normalize_decrypted_item_payload(unwrapped));
+            }
+        }
+    }
+
+    crypto_commands::crypto_decrypt(
+        item.encrypted_data.clone(),
+        item.encryption_iv.clone(),
+        item.encryption_algorithm.clone(),
+        vault_key_base64.to_string(),
+    )
+    .map(normalize_decrypted_item_payload)
+    .map_err(|e| format!("Decryption failed: {}", e))
 }
 
 fn get_active_account_email<R: Runtime>(store: &Store<R>) -> Option<String> {
@@ -171,54 +500,115 @@ async fn handle_native_bridge_request(
     req: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
     let path = req.uri().path();
+    if path.starts_with("/native-bridge/") && req.method() == Method::OPTIONS {
+        let origin = match parse_origin(&req) {
+            Ok(origin) => origin,
+            Err(response) => return Ok(response),
+        };
 
-    match (req.method(), path) {
-        (&Method::GET, "/native-bridge/lock-status") => {
-            // Return current lock status of all accounts
-            match get_lock_status_internal(&app_handle).await {
-                Ok(status) => {
-                    Ok(Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/json")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(Body::from(status.to_string()))
-                        .unwrap())
-                }
-                Err(e) => {
-                    let timestamp = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis() as i64;
-                    let error = serde_json::json!({
-                        "locked": true,
-                        "unlocked_accounts": [],
-                        "timestamp": timestamp,
-                        "autolock_timeout_ms": -1,
-                        "error": e
-                    });
-                    Ok(Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/json")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(Body::from(error.to_string()))
-                        .unwrap())
-                }
+        if let Some(origin_value) = origin.as_deref() {
+            if !native_messaging_installer::is_allowed_extension_origin(origin_value) {
+                return Ok(text_response(StatusCode::FORBIDDEN, None, "Forbidden"));
             }
         }
 
+        let mut builder = Response::builder()
+            .status(StatusCode::NO_CONTENT)
+            .header(
+                "Access-Control-Allow-Methods",
+                "GET, POST, OPTIONS",
+            )
+            .header(
+                "Access-Control-Allow-Headers",
+                "Authorization, Content-Type",
+            );
+        if let Some(origin_value) = origin.as_deref() {
+            builder = builder
+                .header("Access-Control-Allow-Origin", origin_value)
+                .header("Vary", "Origin");
+        }
+
+        return Ok(builder
+            .body(Body::empty())
+            .unwrap_or_else(|_| Response::new(Body::empty())));
+    }
+
+    match (req.method(), path) {
+        (&Method::GET, "/native-bridge/auth") => {
+            let origin = match parse_origin(&req) {
+                Ok(origin) => origin,
+                Err(response) => return Ok(response),
+            };
+            if origin.is_some() {
+                return Ok(text_response(StatusCode::FORBIDDEN, None, "Forbidden"));
+            }
+
+            let query = BridgeAuthQuery {
+                extension_id: match parse_query_value(&req, "extension_id") {
+                    Ok(value) => value,
+                    Err(response) => return Ok(response),
+                },
+            };
+
+            let allowed_origin = match query.extension_id.as_deref() {
+                Some(extension_id) => match native_messaging_installer::allowed_origin_for_extension_id(extension_id) {
+                    Some(origin) => Some(origin),
+                    None => return Ok(text_response(StatusCode::FORBIDDEN, None, "Forbidden")),
+                },
+                None => None,
+            };
+
+            return Ok(json_response(
+                StatusCode::OK,
+                None,
+                &serde_json::json!({
+                    "bridgeToken": state.bridge_token,
+                    "allowedOrigin": allowed_origin,
+                    "bridgeVersion": BRIDGE_VERSION,
+                }),
+            ));
+        }
+        (&Method::GET, "/native-bridge/lock-status") => {
+            let origin = match authorize_bridge_request(&req, &state) {
+                Ok(origin) => origin,
+                Err(response) => return Ok(response),
+            };
+
+            match get_lock_status_internal(&app_handle).await {
+                Ok(status) => Ok(json_response(StatusCode::OK, origin.as_deref(), &status)),
+                Err(error) => {
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|duration| duration.as_millis() as i64)
+                        .unwrap_or_default();
+                    Ok(json_response(
+                        StatusCode::OK,
+                        origin.as_deref(),
+                        &serde_json::json!({
+                            "locked": true,
+                            "unlocked_accounts": [],
+                            "timestamp": timestamp,
+                            "autolock_timeout_ms": -1,
+                            "error": error,
+                        }),
+                    ))
+                }
+            }
+        }
         (&Method::GET, "/native-bridge/lock-events") => {
-            // SSE endpoint for real-time lock/unlock events
+            let origin = match authorize_bridge_request(&req, &state) {
+                Ok(origin) => origin,
+                Err(response) => return Ok(response),
+            };
             let mut rx = state.lock_events.subscribe();
 
             let event_stream = async_stream::stream! {
-                // Send initial connected event
                 let timestamp = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as i64;
-                yield Ok::<_, std::io::Error>(format!("event: connected\ndata: {}\n\n", serde_json::json!({"timestamp": timestamp})));
+                    .map(|duration| duration.as_millis() as i64)
+                    .unwrap_or_default();
+                yield Ok::<_, std::io::Error>(format!("event: connected\ndata: {}\n\n", serde_json::json!({ "timestamp": timestamp })));
 
-                // Stream lock events as they arrive
                 while let Ok(event) = rx.recv().await {
                     let event_name = match &event {
                         LockEvent::Lock { .. } => "lock",
@@ -226,381 +616,209 @@ async fn handle_native_bridge_request(
                         LockEvent::DesktopClose { .. } => "desktop_close",
                         LockEvent::ActiveAccountChanged { .. } => "active_account_changed",
                     };
-                    let data = serde_json::to_string(&event).unwrap_or_default();
-                    yield Ok(format!("event: {}\ndata: {}\n\n", event_name, data));
+                    if let Ok(data) = serde_json::to_string(&event) {
+                        yield Ok(format!("event: {}\ndata: {}\n\n", event_name, data));
+                    }
                 }
             };
 
-            let body = Body::wrap_stream(event_stream);
-
-            Ok(Response::builder()
+            let mut builder = Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", "text/event-stream")
                 .header("Cache-Control", "no-cache")
-                .header("Connection", "keep-alive")
-                .header("Access-Control-Allow-Origin", "*")
-                .body(body)
-                .unwrap())
-        }
+                .header("Connection", "keep-alive");
+            if let Some(origin_value) = origin.as_deref() {
+                builder = builder
+                    .header("Access-Control-Allow-Origin", origin_value)
+                    .header("Vary", "Origin");
+            }
 
+            return Ok(builder
+                .body(Body::wrap_stream(event_stream))
+                .unwrap_or_else(|_| Response::new(Body::empty())));
+        }
         (&Method::GET, "/native-bridge/biometric-status") => {
-            // Check biometric availability and if session exists
+            let origin = match authorize_bridge_request(&req, &state) {
+                Ok(origin) => origin,
+                Err(response) => return Ok(response),
+            };
+
             match check_biometric_status_internal(&app_handle).await {
-                Ok(status) => {
-                    Ok(Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(status.to_string()))
-                        .unwrap())
-                }
-                Err(e) => {
-                    let error = serde_json::json!({
+                Ok(status) => Ok(json_response(StatusCode::OK, origin.as_deref(), &status)),
+                Err(error) => Ok(json_response(
+                    StatusCode::OK,
+                    origin.as_deref(),
+                    &serde_json::json!({
                         "available": false,
                         "enabled": false,
-                        "error": e.to_string()
-                    });
-                    Ok(Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(error.to_string()))
-                        .unwrap())
-                }
+                        "error": error,
+                    }),
+                )),
             }
         }
-        
         (&Method::POST, "/native-bridge/biometric-unlock") => {
-            // Read request body
-            let body_bytes = match hyper::body::to_bytes(req.into_body()).await {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    let error = serde_json::json!({
-                        "error": format!("Failed to read request body: {}", e)
-                    });
-                    return Ok(Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(error.to_string()))
-                        .unwrap());
-                }
+            let origin = match authorize_bridge_request(&req, &state) {
+                Ok(origin) => origin,
+                Err(response) => return Ok(response),
             };
-            
-            let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
-            
-            // Parse request
-            let request: serde_json::Value = match serde_json::from_str(&body_str) {
-                Ok(req) => req,
-                Err(e) => {
-                    let error = serde_json::json!({
-                        "error": format!("Invalid JSON: {}", e)
-                    });
-                    return Ok(Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(error.to_string()))
-                        .unwrap());
-                }
+            let request: BiometricUnlockRequest = match parse_json_body(req, origin.as_deref()).await {
+                Ok(request) => request,
+                Err(response) => return Ok(response),
             };
-            
-            let challenge = request["challenge"].as_str().unwrap_or("");
-            let extension_id = request["extension_id"].as_str().unwrap_or("");
-            let email = request["email"].as_str(); // Optional email parameter
 
-            eprintln!("[HTTP Handler] Received request: {}", serde_json::to_string(&request).unwrap_or_default());
-            eprintln!("[HTTP Handler] Extracted email: {:?}", email);
-
-            // Trigger biometric unlock
-            match biometric_unlock_internal(&app_handle, challenge, extension_id, email).await {
-                Ok(response) => {
-                    Ok(Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(response.to_string()))
-                        .unwrap())
-                }
-                Err(e) => {
-                    let error = serde_json::json!({
-                        "error": e.to_string()
-                    });
-                    Ok(Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(error.to_string()))
-                        .unwrap())
-                }
+            match biometric_unlock_internal(
+                &app_handle,
+                &request.challenge,
+                &request.extension_id,
+                request.email.as_deref(),
+            ).await {
+                Ok(response) => Ok(json_response(StatusCode::OK, origin.as_deref(), &response)),
+                Err(error) => Ok(json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    origin.as_deref(),
+                    &serde_json::json!({ "error": error }),
+                )),
             }
         }
-
         (&Method::POST, "/native-bridge/trigger-unlock") => {
-            // Simple endpoint: just show/focus desktop window and emit event to trigger UI unlock
-            eprintln!("[HTTP Handler] Extension requesting desktop unlock");
+            let origin = match authorize_bridge_request(&req, &state) {
+                Ok(origin) => origin,
+                Err(response) => return Ok(response),
+            };
 
-            // Show and focus the desktop window
-            if let Err(e) = open_app_internal(&app_handle) {
-                eprintln!("[HTTP Handler] Failed to show window: {}", e);
+            if let Err(error) = open_app_internal(&app_handle) {
+                eprintln!("[native-bridge] Failed to show desktop window: {}", error);
             }
 
-            // Emit event to frontend to trigger biometric unlock UI
-            if let Err(e) = app_handle.emit("trigger-biometric-unlock", ()) {
-                eprintln!("[HTTP Handler] Failed to emit unlock trigger: {}", e);
+            if let Err(error) = app_handle.emit("trigger-biometric-unlock", ()) {
+                return Ok(json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    origin.as_deref(),
+                    &serde_json::json!({ "error": error.to_string() }),
+                ));
             }
 
-            let response = serde_json::json!({
-                "success": true,
-                "message": "Desktop unlock triggered"
-            });
-
-            Ok(Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "application/json")
-                .body(Body::from(response.to_string()))
-                .unwrap())
+            Ok(json_response(
+                StatusCode::OK,
+                origin.as_deref(),
+                &serde_json::json!({
+                    "success": true,
+                    "message": "Desktop unlock triggered",
+                }),
+            ))
         }
-
         (&Method::POST, "/native-bridge/biometric-unlock-all") => {
-            // Read request body
-            let body_bytes = match hyper::body::to_bytes(req.into_body()).await {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    let error = serde_json::json!({
-                        "error": format!("Failed to read request body: {}", e)
-                    });
-                    return Ok(Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(error.to_string()))
-                        .unwrap());
-                }
+            let origin = match authorize_bridge_request(&req, &state) {
+                Ok(origin) => origin,
+                Err(response) => return Ok(response),
+            };
+            let request: BiometricUnlockAllRequest = match parse_json_body(req, origin.as_deref()).await {
+                Ok(request) => request,
+                Err(response) => return Ok(response),
             };
 
-            let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
-
-            // Parse request
-            let request: serde_json::Value = match serde_json::from_str(&body_str) {
-                Ok(req) => req,
-                Err(e) => {
-                    let error = serde_json::json!({
-                        "error": format!("Invalid JSON: {}", e)
-                    });
-                    return Ok(Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(error.to_string()))
-                        .unwrap());
-                }
-            };
-
-            let challenge = request["challenge"].as_str().unwrap_or("");
-            let extension_id = request["extension_id"].as_str().unwrap_or("");
-
-            eprintln!("[HTTP Handler] Biometric unlock all - Received request (standalone mode)");
-
-            // This endpoint is only used for standalone mode (when desktop is not master)
-            // For desktop-as-master mode, use /trigger-unlock instead
-            match biometric_unlock_all_internal(&app_handle, challenge, extension_id).await {
-                Ok(response) => {
-                    Ok(Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(response.to_string()))
-                        .unwrap())
-                }
-                Err(e) => {
-                    let error = serde_json::json!({
-                        "error": e.to_string()
-                    });
-                    Ok(Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(error.to_string()))
-                        .unwrap())
-                }
+            match biometric_unlock_all_internal(&app_handle, &request.challenge, &request.extension_id).await {
+                Ok(response) => Ok(json_response(StatusCode::OK, origin.as_deref(), &response)),
+                Err(error) => Ok(json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    origin.as_deref(),
+                    &serde_json::json!({ "error": error }),
+                )),
             }
         }
-
         (&Method::POST, "/native-bridge/open-app") => {
-            // Bring app to foreground or show window
+            let origin = match authorize_bridge_request(&req, &state) {
+                Ok(origin) => origin,
+                Err(response) => return Ok(response),
+            };
+
             match open_app_internal(&app_handle) {
-                Ok(_) => {
-                    let response = serde_json::json!({
-                        "success": true
-                    });
-                    Ok(Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(response.to_string()))
-                        .unwrap())
-                }
-                Err(e) => {
-                    let error = serde_json::json!({
+                Ok(_) => Ok(json_response(
+                    StatusCode::OK,
+                    origin.as_deref(),
+                    &serde_json::json!({ "success": true }),
+                )),
+                Err(error) => Ok(json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    origin.as_deref(),
+                    &serde_json::json!({
                         "success": false,
-                        "error": e.to_string()
-                    });
-                    Ok(Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(error.to_string()))
-                        .unwrap())
-                }
+                        "error": error,
+                    }),
+                )),
             }
         }
-
         (&Method::GET, "/native-bridge/accounts") => {
-            // Return account list (works even when locked)
+            let origin = match authorize_bridge_request(&req, &state) {
+                Ok(origin) => origin,
+                Err(response) => return Ok(response),
+            };
+
             match get_accounts_list_internal(&app_handle).await {
-                Ok(data) => {
-                    Ok(Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/json")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(Body::from(data.to_string()))
-                        .unwrap())
-                }
-                Err(e) => {
-                    let error = serde_json::json!({
-                        "error": e
-                    });
-                    Ok(Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header("Content-Type", "application/json")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(Body::from(error.to_string()))
-                        .unwrap())
-                }
+                Ok(data) => Ok(json_response(StatusCode::OK, origin.as_deref(), &data)),
+                Err(error) => Ok(json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    origin.as_deref(),
+                    &serde_json::json!({ "error": error }),
+                )),
             }
         }
-
         (&Method::GET, "/native-bridge/session-data") => {
-            // Return session data for all unlocked accounts
+            let origin = match authorize_bridge_request(&req, &state) {
+                Ok(origin) => origin,
+                Err(response) => return Ok(response),
+            };
+
             match get_session_data_internal(&app_handle).await {
-                Ok(data) => {
-                    Ok(Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/json")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(Body::from(data.to_string()))
-                        .unwrap())
-                }
-                Err(e) => {
-                    let error = serde_json::json!({
-                        "error": e
-                    });
-                    Ok(Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header("Content-Type", "application/json")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(Body::from(error.to_string()))
-                        .unwrap())
-                }
+                Ok(data) => Ok(json_response(StatusCode::OK, origin.as_deref(), &data)),
+                Err(error) => Ok(json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    origin.as_deref(),
+                    &serde_json::json!({ "error": error }),
+                )),
             }
         }
+        (&Method::GET, "/native-bridge/vault-keys") => {
+            let origin = match authorize_bridge_request(&req, &state) {
+                Ok(origin) => origin,
+                Err(response) => return Ok(response),
+            };
+            let query = VaultKeysQuery {
+                email: match parse_query_value(&req, "email") {
+                    Ok(value) => value,
+                    Err(response) => return Ok(response),
+                },
+            };
 
-        (&Method::GET, path) if path.starts_with("/native-bridge/vault-keys") => {
-            // Parse query parameters
-            let query = req.uri().query().unwrap_or("");
-            let email_param = query.split('&')
-                .find(|p| p.starts_with("email="))
-                .and_then(|p| p.strip_prefix("email="))
-                .map(|e| urlencoding::decode(e).unwrap_or_default().to_string());
-
-            match get_vault_keys_internal(&app_handle, email_param).await {
-                Ok(keys) => {
-                    Ok(Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/json")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(Body::from(keys.to_string()))
-                        .unwrap())
-                }
-                Err(e) => {
-                    let error = serde_json::json!({
-                        "error": e
-                    });
-                    Ok(Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header("Content-Type", "application/json")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(Body::from(error.to_string()))
-                        .unwrap())
-                }
+            match get_vault_keys_internal(&app_handle, query.email).await {
+                Ok(data) => Ok(json_response(StatusCode::OK, origin.as_deref(), &data)),
+                Err(error) => Ok(json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    origin.as_deref(),
+                    &serde_json::json!({ "error": error }),
+                )),
             }
         }
-
         (&Method::POST, "/native-bridge/decrypt-items") => {
-            // Read request body
-            let body_bytes = match hyper::body::to_bytes(req.into_body()).await {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    let error = serde_json::json!({
-                        "error": format!("Failed to read request body: {}", e)
-                    });
-                    return Ok(Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(error.to_string()))
-                        .unwrap());
-                }
+            let origin = match authorize_bridge_request(&req, &state) {
+                Ok(origin) => origin,
+                Err(response) => return Ok(response),
+            };
+            let request: DecryptItemsRequest = match parse_json_body(req, origin.as_deref()).await {
+                Ok(request) => request,
+                Err(response) => return Ok(response),
             };
 
-            let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
-
-            // Parse request
-            let request: serde_json::Value = match serde_json::from_str(&body_str) {
-                Ok(req) => req,
-                Err(e) => {
-                    let error = serde_json::json!({
-                        "error": format!("Invalid JSON: {}", e)
-                    });
-                    return Ok(Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(error.to_string()))
-                        .unwrap());
-                }
-            };
-
-            let email = request["email"].as_str();
-            let items = request["items"].as_array();
-
-            if email.is_none() || items.is_none() {
-                let error = serde_json::json!({
-                    "error": "Missing required fields: email and items"
-                });
-                return Ok(Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(error.to_string()))
-                    .unwrap());
-            }
-
-            match decrypt_items_internal(&app_handle, email.unwrap(), items.unwrap()).await {
-                Ok(result) => {
-                    Ok(Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/json")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(Body::from(result.to_string()))
-                        .unwrap())
-                }
-                Err(e) => {
-                    let error = serde_json::json!({
-                        "error": e
-                    });
-                    Ok(Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header("Content-Type", "application/json")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(Body::from(error.to_string()))
-                        .unwrap())
-                }
+            match decrypt_items_internal(&app_handle, &request.email, &request.items).await {
+                Ok(result) => Ok(json_response(StatusCode::OK, origin.as_deref(), &result)),
+                Err(error) => Ok(json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    origin.as_deref(),
+                    &serde_json::json!({ "error": error }),
+                )),
             }
         }
-
-        _ => {
-            Ok(Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::from("Not found"))
-                .unwrap())
-        }
+        _ => Ok(text_response(StatusCode::NOT_FOUND, None, "Not found")),
     }
 }
 
@@ -1214,7 +1432,7 @@ async fn get_vault_keys_internal(
 async fn decrypt_items_internal(
     app_handle: &tauri::AppHandle,
     email: &str,
-    items: &Vec<serde_json::Value>,
+    items: &[DecryptItemPayload],
 ) -> Result<serde_json::Value, String> {
     use tauri_plugin_store::StoreExt;
 
@@ -1392,58 +1610,25 @@ async fn decrypt_items_internal(
     let mut failed_items = Vec::new();
 
     for item in items {
-        let item_id = item.get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-
-        let vault_id = item.get("vaultId")
-            .and_then(|v| v.as_str());
-
-        let encrypted_data = item.get("encryptedData")
-            .and_then(|v| v.as_str());
-
-        let encryption_iv = item.get("encryptionIv")
-            .and_then(|v| v.as_str());
-        let encryption_algorithm = item.get("encryptionAlgorithm")
-            .and_then(|v| v.as_str());
-
-        if vault_id.is_none()
-            || encrypted_data.is_none()
-            || encryption_iv.is_none()
-            || encryption_algorithm.is_none()
-        {
-            failed_items.push(serde_json::json!({
-                "id": item_id,
-                "error": "Missing required fields"
-            }));
-            continue;
-        }
-
-        let vault_key = decrypted_vault_keys.get(vault_id.unwrap());
+        let vault_key = decrypted_vault_keys.get(&item.vault_id);
         if vault_key.is_none() {
             failed_items.push(serde_json::json!({
-                "id": item_id,
+                "id": item.id,
                 "error": "Vault key not found"
             }));
             continue;
         }
 
-        match crypto_commands::crypto_decrypt(
-            encrypted_data.unwrap().to_string(),
-            encryption_iv.unwrap().to_string(),
-            encryption_algorithm.unwrap().to_string(),
-            vault_key.unwrap().clone(),
-        ) {
+        match decrypt_item_payload(item, vault_key.unwrap()) {
             Ok(decrypted_data) => {
-                let normalized_decrypted_data = normalize_decrypted_item_payload(decrypted_data);
                 decrypted_items.push(serde_json::json!({
-                    "id": item_id,
-                    "decrypted_data": normalized_decrypted_data,
+                    "id": item.id,
+                    "decrypted_data": decrypted_data,
                 }));
             }
             Err(e) => {
                 failed_items.push(serde_json::json!({
-                    "id": item_id,
+                    "id": item.id,
                     "error": format!("Decryption failed: {}", e)
                 }));
             }
@@ -1629,4 +1814,55 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        serialize_encryption_context, unwrap_plaintext_with_context, CONTEXT_ENVELOPE_MARKER,
+    };
+
+    #[test]
+    fn unwrap_plaintext_with_context_accepts_matching_envelope() {
+        let decrypted = serde_json::json!({
+            "marker": CONTEXT_ENVELOPE_MARKER,
+            "context": serialize_encryption_context("vault-1", "item-1", "item", 2, "user-1"),
+            "payload": "{\"title\":\"Example\"}",
+        })
+        .to_string();
+
+        let unwrapped = unwrap_plaintext_with_context(
+            decrypted,
+            "vault-1",
+            "item-1",
+            "item",
+            2,
+            "user-1",
+        )
+        .expect("expected envelope to unwrap");
+
+        assert_eq!(unwrapped, "{\"title\":\"Example\"}");
+    }
+
+    #[test]
+    fn unwrap_plaintext_with_context_rejects_mismatched_context() {
+        let decrypted = serde_json::json!({
+            "marker": CONTEXT_ENVELOPE_MARKER,
+            "context": serialize_encryption_context("vault-1", "item-1", "item", 2, "user-1"),
+            "payload": "{\"title\":\"Example\"}",
+        })
+        .to_string();
+
+        let error = unwrap_plaintext_with_context(
+            decrypted,
+            "vault-1",
+            "item-1",
+            "item",
+            3,
+            "user-1",
+        )
+        .expect_err("expected context mismatch");
+
+        assert_eq!(error, "Encryption context mismatch");
+    }
 }

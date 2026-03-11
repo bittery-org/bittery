@@ -5,59 +5,15 @@
 
 import { storage } from "../lib/storage";
 import { decrypt } from "../lib/wasm-crypto";
-import { NATIVE_HOST_NAME } from "./constants";
+import { desktopClient } from "./desktop-client";
 import { desktopSync } from "./desktop-sync";
+import { sendNativeMessage } from "./native-messaging-client";
 import {
 	setDesktopModeSentinel,
 	setMasterUnlockKey,
 	updateActivity,
 } from "./session-manager";
 import type { MessageResponse } from "./types";
-
-/**
- * Send a message to the native messaging host
- * Returns a promise that resolves with the response
- */
-export function sendNativeMessage(message: unknown): Promise<unknown> {
-	return new Promise((resolve, reject) => {
-		try {
-			const port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
-
-			const timeout = setTimeout(() => {
-				console.error("[Native Messaging] Timeout after 30 seconds");
-				port.disconnect();
-				reject(new Error("Native messaging timeout"));
-			}, 30000); // 30 second timeout
-
-			port.onMessage.addListener((response) => {
-				clearTimeout(timeout);
-				port.disconnect();
-				resolve(response);
-			});
-
-			port.onDisconnect.addListener(() => {
-				clearTimeout(timeout);
-				const error = chrome.runtime.lastError;
-				if (error) {
-					console.error("[Native Messaging] Disconnect error:", error);
-					reject(
-						new Error(
-							`Native host disconnected: ${error.message || "Unknown error"}`,
-						),
-					);
-				} else {
-					console.error("[Native Messaging] Disconnect without error");
-					reject(new Error("Native host disconnected"));
-				}
-			});
-
-			port.postMessage(message);
-		} catch (error) {
-			console.error("[Native Messaging] Exception during connection:", error);
-			reject(error);
-		}
-	});
-}
 
 /**
  * Check if native biometric unlock is available
@@ -306,11 +262,9 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		// If desktop is available but locked, trigger unlock UI but DON'T return success
 		// The extension should wait for the unlock to complete via SSE events
 		if (desktopAvailable && desktopLocked) {
-			const DESKTOP_BASE_URL = "http://localhost:48765";
-
 			try {
-				const response = await fetch(
-					`${DESKTOP_BASE_URL}/native-bridge/trigger-unlock`,
+				const response = await desktopClient.fetchBridge(
+					"/native-bridge/trigger-unlock",
 					{
 						method: "POST",
 						headers: { "Content-Type": "application/json" },

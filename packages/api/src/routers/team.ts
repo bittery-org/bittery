@@ -31,6 +31,12 @@ import {
 	normalizePendingVaultKeys,
 	parsePendingVaultKeys,
 } from "../utils/pending-vault-keys";
+import {
+	clientIdSchema,
+	nanoid32TokenSchema,
+	resourceIdSchema,
+	rotationVaultsSchema,
+} from "../validation";
 
 /**
  * Helper function to get image URL from imageKey
@@ -465,29 +471,10 @@ export const teamRouter = router({
 	leave: protectedProcedure
 		.input(
 			z.object({
-				teamId: z.string(),
-				vaultRotations: z.array(
-					z.object({
-						vaultId: z.string(),
-						keyRotation: z.object({
-							memberKeys: z.array(
-								z.object({
-									userId: z.string(),
-									encryptedVaultKey: z.string(),
-								}),
-							),
-							reEncryptedItems: z.array(
-								z.object({
-									itemId: z.string(),
-									encryptedData: z.string(),
-									encryptionIv: z.string(),
-								}),
-							),
-						}),
-					}),
-				),
-				clientId: z.string().optional(),
-			}),
+				teamId: resourceIdSchema,
+				vaultRotations: rotationVaultsSchema,
+				clientId: clientIdSchema.optional(),
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const userData = await db.query.user.findFirst({
@@ -766,7 +753,7 @@ export const teamRouter = router({
 	 * Returns remaining members' public keys and all items per team vault.
 	 */
 	getLeaveRotationData: protectedProcedure
-		.input(z.object({ teamId: z.string() }))
+		.input(z.object({ teamId: resourceIdSchema }).strict())
 		.query(async ({ ctx, input }) => {
 			const userData = await db.query.user.findFirst({
 				where: (u, { eq: eqFn }) => eqFn(u.id, ctx.session.userId),
@@ -828,7 +815,7 @@ export const teamRouter = router({
 		 * List team members
 		 */
 		list: protectedProcedure
-			.input(z.object({ teamId: z.string() }))
+			.input(z.object({ teamId: resourceIdSchema }).strict())
 			.query(async ({ ctx, input }) => {
 				// Verify user has access to this team
 				const userData = await db.query.user.findFirst({
@@ -864,9 +851,9 @@ export const teamRouter = router({
 		getTeamRotationData: protectedProcedure
 			.input(
 				z.object({
-					teamId: z.string(),
-					excludeUserId: z.string(), // The user being removed
-				}),
+					teamId: resourceIdSchema,
+					excludeUserId: resourceIdSchema,
+				}).strict(),
 			)
 			.query(async ({ ctx, input }) => {
 				const actor = await db.query.user.findFirst({
@@ -957,30 +944,11 @@ export const teamRouter = router({
 		remove: protectedProcedure
 			.input(
 				z.object({
-					teamId: z.string(),
-					userId: z.string(),
-					vaultRotations: z.array(
-						z.object({
-							vaultId: z.string(),
-							keyRotation: z.object({
-								memberKeys: z.array(
-									z.object({
-										userId: z.string(),
-										encryptedVaultKey: z.string(),
-									}),
-								),
-								reEncryptedItems: z.array(
-									z.object({
-										itemId: z.string(),
-										encryptedData: z.string(),
-										encryptionIv: z.string(),
-									}),
-								),
-							}),
-						}),
-					),
-					clientId: z.string().optional(),
-				}),
+					teamId: resourceIdSchema,
+					userId: resourceIdSchema,
+					vaultRotations: rotationVaultsSchema,
+					clientId: clientIdSchema.optional(),
+				}).strict(),
 			)
 			.mutation(async ({ ctx, input }) => {
 				const actor = await db.query.user.findFirst({
@@ -1399,7 +1367,7 @@ export const teamRouter = router({
 		 * Get invitation details by token (public endpoint for invitation links)
 		 */
 		getByToken: publicProcedure
-			.input(z.object({ token: z.string() }))
+			.input(z.object({ token: nanoid32TokenSchema }).strict())
 			.query(async ({ input }) => {
 				const invitation = await db.query.teamInvitation.findFirst({
 					where: (inv, { eq }) => eq(inv.token, input.token),
@@ -1624,7 +1592,7 @@ export const teamRouter = router({
 		 * Cancel invitation
 		 */
 		cancel: protectedProcedure
-			.input(z.object({ invitationId: z.string() }))
+			.input(z.object({ invitationId: resourceIdSchema }).strict())
 			.mutation(async ({ ctx, input }) => {
 				const invitation = await db.query.teamInvitation.findFirst({
 					where: (inv, { eq }) => eq(inv.id, input.invitationId),
@@ -1666,7 +1634,7 @@ export const teamRouter = router({
 		 * Resend invitation (reset expiry)
 		 */
 		resend: protectedProcedure
-			.input(z.object({ invitationId: z.string() }))
+			.input(z.object({ invitationId: resourceIdSchema }).strict())
 			.mutation(async ({ ctx, input }) => {
 				const invitation = await db.query.teamInvitation.findFirst({
 					where: (inv, { eq }) => eq(inv.id, input.invitationId),
@@ -1754,7 +1722,7 @@ export const teamRouter = router({
 		 * Handles vault access provisioning if pendingVaultKeys were provided during invite
 		 */
 		accept: protectedProcedure
-			.input(z.object({ token: z.string() }))
+			.input(z.object({ token: nanoid32TokenSchema }).strict())
 			.mutation(async ({ ctx, input }) => {
 				const invitation = await db.query.teamInvitation.findFirst({
 					where: (inv, { and, eq }) =>
@@ -1865,7 +1833,7 @@ export const teamRouter = router({
 		 * Decline invitation
 		 */
 		decline: protectedProcedure
-			.input(z.object({ token: z.string() }))
+			.input(z.object({ token: nanoid32TokenSchema }).strict())
 			.mutation(async ({ ctx, input }) => {
 				const invitation = await db.query.teamInvitation.findFirst({
 					where: (inv, { and, eq }) =>

@@ -33,6 +33,40 @@ const BRAVE_REG_KEY: &str = r"Software\BraveSoftware\Brave-Browser\NativeMessagi
 
 const MANIFEST_NAME: &str = "com.bittery.desktop.json";
 const NATIVE_HOST_NAME: &str = "bittery-native-host";
+const DEV_EXTENSION_ID: &str = "blnkglankmihhigfnediedhhighfajei";
+
+pub fn allowed_extension_ids() -> Vec<String> {
+    let mut ids = vec![DEV_EXTENSION_ID.to_string()];
+    if let Some(prod_id) = option_env!("BITTERY_EXTENSION_ID") {
+        if prod_id != DEV_EXTENSION_ID
+            && !prod_id.is_empty()
+            && prod_id != "YOUR_PRODUCTION_EXTENSION_ID_HERE"
+        {
+            ids.push(prod_id.to_string());
+        }
+    }
+    ids
+}
+
+pub fn allowed_extension_origins() -> Vec<String> {
+    allowed_extension_ids()
+        .into_iter()
+        .map(|id| format!("chrome-extension://{}", id))
+        .collect()
+}
+
+pub fn allowed_origin_for_extension_id(extension_id: &str) -> Option<String> {
+    allowed_extension_ids()
+        .into_iter()
+        .find(|id| id == extension_id)
+        .map(|id| format!("chrome-extension://{}", id))
+}
+
+pub fn is_allowed_extension_origin(origin: &str) -> bool {
+    allowed_extension_origins()
+        .into_iter()
+        .any(|allowed_origin| allowed_origin == origin)
+}
 
 /// Install native messaging host manifest for all detected browsers
 pub fn install_native_messaging_host(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -80,16 +114,33 @@ fn get_native_host_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, Box<dy
     let binary_name = format!("{}.exe", NATIVE_HOST_NAME);
     #[cfg(not(target_os = "windows"))]
     let binary_name = NATIVE_HOST_NAME.to_string();
-    
-    // Try development mode first (src-tauri/target/release)
+
+    #[cfg(debug_assertions)]
+    let preferred_profile = "debug";
+    #[cfg(not(debug_assertions))]
+    let preferred_profile = "release";
+
+    #[cfg(debug_assertions)]
+    let build_hint = "cargo build --bin bittery-native-host";
+    #[cfg(not(debug_assertions))]
+    let build_hint = "cargo build --release --bin bittery-native-host";
+
+    // In development, prefer the current profile and do not silently fall back
+    // to an older release binary. That can leave the browser manifest pointing
+    // at a stale native host that no longer matches the running desktop app.
     if let Ok(current_dir) = std::env::current_dir() {
-        // Try from current directory (workspace root)
         let dev_paths = vec![
-            current_dir.join("apps/desktop/src-tauri/target/release").join(&binary_name),
-            current_dir.join("src-tauri/target/release").join(&binary_name),
-            current_dir.join("target/release").join(&binary_name),
+            current_dir
+                .join("apps/desktop/src-tauri/target")
+                .join(preferred_profile)
+                .join(&binary_name),
+            current_dir
+                .join("src-tauri/target")
+                .join(preferred_profile)
+                .join(&binary_name),
+            current_dir.join("target").join(preferred_profile).join(&binary_name),
         ];
-        
+
         for path in dev_paths {
             if path.exists() {
                 return Ok(path);
@@ -104,8 +155,12 @@ fn get_native_host_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, Box<dy
     if native_host_path.exists() {
         return Ok(native_host_path);
     }
-    
-    Err(format!("Native host binary '{}' not found. Build it first with: cargo build --release --bin bittery-native-host", binary_name).into())
+
+    Err(format!(
+        "Native host binary '{}' not found for the '{}' profile. Build it first with: {}",
+        binary_name, preferred_profile, build_hint
+    )
+    .into())
 }
 
 /// Create the manifest JSON content
@@ -113,28 +168,10 @@ fn get_native_host_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, Box<dy
 /// Note: Chrome doesn't support wildcards in allowed_origins, but DOES support multiple IDs.
 /// We include both dev (unpacked) and production (Chrome Web Store) extension IDs.
 fn create_manifest_json(native_host_path: &PathBuf) -> serde_json::Value {
-    // Development extension ID (unpacked extension)
-    const DEV_EXTENSION_ID: &str = "blnkglankmihhigfnediedhhighfajei";
-
-    // Production extension ID from compile-time environment (Chrome Web Store)
-    let prod_extension_id = option_env!("BITTERY_EXTENSION_ID");
-
-    // Build allowed_origins list with both dev and production IDs
-    let mut allowed_origins = vec![
-        format!("chrome-extension://{}/", DEV_EXTENSION_ID),
-    ];
-
-    // Add production ID if it's set and different from dev
-    if let Some(prod_id) = prod_extension_id {
-        if prod_id != DEV_EXTENSION_ID && !prod_id.is_empty() && prod_id != "YOUR_PRODUCTION_EXTENSION_ID_HERE" {
-            allowed_origins.push(format!("chrome-extension://{}/", prod_id));
-            eprintln!("📝 Using extension IDs: {} (dev), {} (prod)", DEV_EXTENSION_ID, prod_id);
-        } else {
-            eprintln!("📝 Using extension ID: {} (dev only)", DEV_EXTENSION_ID);
-        }
-    } else {
-        eprintln!("📝 Using extension ID: {} (dev only)", DEV_EXTENSION_ID);
-    }
+    let allowed_origins = allowed_extension_ids()
+        .into_iter()
+        .map(|id| format!("chrome-extension://{}/", id))
+        .collect::<Vec<_>>();
 
     json!({
         "name": "com.bittery.desktop",

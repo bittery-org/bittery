@@ -32,7 +32,8 @@
 		"react": "catalog:",
 		"react-dom": "catalog:",
 		"tailwindcss": "^4.1.3",
-		"tw-animate-css": "^1.2.5"
+		"tw-animate-css": "^1.2.5",
+		"zod": "catalog:"
 	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",

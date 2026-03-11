@@ -68,6 +68,23 @@ import {
 	assertInvitationPendingVaultKeysAreAuthorized,
 	parsePendingVaultKeys,
 } from "../utils/pending-vault-keys";
+import {
+	encryptedEnvelopeStringSchema,
+	encryptedVaultKeysSchema,
+	loginAttemptIdSchema,
+	nanoid32TokenSchema,
+	opaqueTokenSchema,
+	recoveryKeyHintSchema,
+	resourceIdSchema,
+	rsaPublicKeySchema,
+	secretKeyHintSchema,
+	sessionIdSchema,
+	srpClientProofSchema,
+	srpClientPublicKeySchema,
+	srpSaltSchema,
+	srpVerifierSchema,
+	wrappedKeySchema,
+} from "../validation";
 
 /**
  * Helper function to get team avatar URL from imageKey
@@ -293,8 +310,8 @@ export const authRouter = router({
 		.input(
 			z.object({
 				email: z.string().email().max(255),
-				invitationToken: z.string().min(1).optional(),
-			}),
+				invitationToken: nanoid32TokenSchema.optional(),
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const normalizedEmail = normalizeEmail(input.email);
@@ -347,8 +364,8 @@ export const authRouter = router({
 			z.object({
 				email: z.string().email().max(255),
 				code: z.string().length(6),
-				invitationToken: z.string().min(1).optional(),
-			}),
+				invitationToken: nanoid32TokenSchema.optional(),
+			}).strict(),
 		)
 		.mutation(async ({ input }) => {
 			const normalizedEmail = normalizeEmail(input.email);
@@ -387,22 +404,22 @@ export const authRouter = router({
 	signup: publicProcedure
 		.input(
 			z.object({
-				userId: z.string().min(1).optional(),
-				vaultId: z.string().min(1).optional(),
+				userId: resourceIdSchema.optional(),
+				vaultId: resourceIdSchema.optional(),
 				email: z.string().email().max(255),
-				signupVerificationToken: z.string().min(1),
+				signupVerificationToken: opaqueTokenSchema,
 				name: z.string().min(2),
 				plan: z.enum(["free", "personal", "family", "team"]).optional(),
 				organizationName: z.string().optional(),
-				secretKeyHint: z.string(),
-				srpSalt: z.string(),
-				srpVerifier: z.string(),
-				publicKey: z.string(),
-				encryptedPrivateKey: z.string(),
-				encryptedMasterKey: z.string(),
-				recoveryKeyHint: z.string(),
-				encryptedVaultKey: z.string(), // Encrypted default vault key
-			}),
+				secretKeyHint: secretKeyHintSchema,
+				srpSalt: srpSaltSchema,
+				srpVerifier: srpVerifierSchema,
+				publicKey: rsaPublicKeySchema,
+				encryptedPrivateKey: encryptedEnvelopeStringSchema,
+				encryptedMasterKey: encryptedEnvelopeStringSchema,
+				recoveryKeyHint: recoveryKeyHintSchema,
+				encryptedVaultKey: wrappedKeySchema,
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const normalizedEmail = normalizeEmail(input.email);
@@ -572,21 +589,21 @@ export const authRouter = router({
 	signupWithInvitation: publicProcedure
 		.input(
 			z.object({
-				token: z.string(),
-				userId: z.string().optional(),
-				vaultId: z.string().optional(),
+				token: nanoid32TokenSchema,
+				userId: resourceIdSchema.optional(),
+				vaultId: resourceIdSchema.optional(),
 				email: z.string().email().max(255),
-				signupVerificationToken: z.string().min(1),
+				signupVerificationToken: opaqueTokenSchema,
 				name: z.string().min(2),
-				secretKeyHint: z.string(),
-				srpSalt: z.string(),
-				srpVerifier: z.string(),
-				publicKey: z.string(),
-				encryptedPrivateKey: z.string(),
-				encryptedMasterKey: z.string(),
-				recoveryKeyHint: z.string(),
-				encryptedVaultKey: z.string(),
-			}),
+				secretKeyHint: secretKeyHintSchema,
+				srpSalt: srpSaltSchema,
+				srpVerifier: srpVerifierSchema,
+				publicKey: rsaPublicKeySchema,
+				encryptedPrivateKey: encryptedEnvelopeStringSchema,
+				encryptedMasterKey: encryptedEnvelopeStringSchema,
+				recoveryKeyHint: recoveryKeyHintSchema,
+				encryptedVaultKey: wrappedKeySchema,
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const normalizedEmail = normalizeEmail(input.email);
@@ -771,8 +788,8 @@ export const authRouter = router({
 		.input(
 			z.object({
 				email: z.string().email().max(255),
-				clientPublicKey: z.string().max(2048),
-			}),
+				clientPublicKey: srpClientPublicKeySchema,
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const normalizedEmail = normalizeEmail(input.email);
@@ -812,10 +829,10 @@ export const authRouter = router({
 	finishLogin: publicProcedure
 		.input(
 			z.object({
-				attemptId: z.string().max(160),
-				clientPublicKey: z.string().max(2048),
-				clientProof: z.string().max(512),
-			}),
+				attemptId: loginAttemptIdSchema,
+				clientPublicKey: srpClientPublicKeySchema,
+				clientProof: srpClientProofSchema,
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const loginAccountRateLimitKey =
@@ -1007,8 +1024,8 @@ export const authRouter = router({
 	getRecoveryData: publicProcedure
 		.input(
 			z.object({
-				recoveryToken: z.string().min(1),
-			}),
+				recoveryToken: opaqueTokenSchema,
+			}).strict(),
 		)
 		.query(async ({ input }) => {
 			const recoveryPayload = await verifyRecoveryToken(input.recoveryToken);
@@ -1045,20 +1062,15 @@ export const authRouter = router({
 	resetPassword: publicProcedure
 		.input(
 			z.object({
-				recoveryToken: z.string().min(1),
-				srpSalt: z.string(),
-				srpVerifier: z.string(),
-				encryptedPrivateKey: z.string(),
-				encryptedMasterKey: z.string(),
-				recoveryKeyHint: z.string(),
-				secretKeyHint: z.string().optional(),
-				encryptedVaultKeys: z.array(
-					z.object({
-						vaultId: z.string(),
-						encryptedVaultKey: z.string(),
-					}),
-				),
-			}),
+				recoveryToken: opaqueTokenSchema,
+				srpSalt: srpSaltSchema,
+				srpVerifier: srpVerifierSchema,
+				encryptedPrivateKey: encryptedEnvelopeStringSchema,
+				encryptedMasterKey: encryptedEnvelopeStringSchema,
+				recoveryKeyHint: recoveryKeyHintSchema,
+				secretKeyHint: secretKeyHintSchema.optional(),
+				encryptedVaultKeys: encryptedVaultKeysSchema,
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const recoveryPayload = await verifyRecoveryToken(input.recoveryToken);
@@ -1209,16 +1221,11 @@ export const authRouter = router({
 		.input(
 			z.object({
 				newEmail: z.string().email().max(255),
-				srpSalt: z.string(),
-				srpVerifier: z.string(),
-				encryptedPrivateKey: z.string(),
-				encryptedVaultKeys: z.array(
-					z.object({
-						vaultId: z.string(),
-						encryptedVaultKey: z.string(),
-					}),
-				),
-			}),
+				srpSalt: srpSaltSchema,
+				srpVerifier: srpVerifierSchema,
+				encryptedPrivateKey: encryptedEnvelopeStringSchema,
+				encryptedVaultKeys: encryptedVaultKeysSchema,
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const normalizedNewEmail = normalizeEmail(input.newEmail);
@@ -1265,16 +1272,11 @@ export const authRouter = router({
 	changePassword: protectedProcedure
 		.input(
 			z.object({
-				srpSalt: z.string(),
-				srpVerifier: z.string(),
-				encryptedPrivateKey: z.string(),
-				encryptedVaultKeys: z.array(
-					z.object({
-						vaultId: z.string(),
-						encryptedVaultKey: z.string(),
-					}),
-				),
-			}),
+				srpSalt: srpSaltSchema,
+				srpVerifier: srpVerifierSchema,
+				encryptedPrivateKey: encryptedEnvelopeStringSchema,
+				encryptedVaultKeys: encryptedVaultKeysSchema,
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			await updateUserPassword(ctx.session.userId, {
@@ -1308,17 +1310,12 @@ export const authRouter = router({
 	regenerateSecretKey: protectedProcedure
 		.input(
 			z.object({
-				secretKeyHint: z.string(),
-				srpSalt: z.string(),
-				srpVerifier: z.string(),
-				encryptedPrivateKey: z.string(),
-				encryptedVaultKeys: z.array(
-					z.object({
-						vaultId: z.string(),
-						encryptedVaultKey: z.string(),
-					}),
-				),
-			}),
+				secretKeyHint: secretKeyHintSchema,
+				srpSalt: srpSaltSchema,
+				srpVerifier: srpVerifierSchema,
+				encryptedPrivateKey: encryptedEnvelopeStringSchema,
+				encryptedVaultKeys: encryptedVaultKeysSchema,
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			await updateUserSecretKey(ctx.session.userId, {
@@ -1353,9 +1350,9 @@ export const authRouter = router({
 	storeRecoveryKey: protectedProcedure
 		.input(
 			z.object({
-				encryptedMasterKey: z.string(),
-				recoveryKeyHint: z.string(),
-			}),
+				encryptedMasterKey: encryptedEnvelopeStringSchema,
+				recoveryKeyHint: recoveryKeyHintSchema,
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const existingUser = await getUserById(ctx.session.userId);
@@ -1478,8 +1475,8 @@ export const authRouter = router({
 	revokeDevice: protectedProcedure
 		.input(
 			z.object({
-				sessionId: z.string(),
-			}),
+				sessionId: sessionIdSchema,
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			// Prevent revoking current session
@@ -1516,9 +1513,9 @@ export const authRouter = router({
 	renameDevice: protectedProcedure
 		.input(
 			z.object({
-				sessionId: z.string(),
+				sessionId: sessionIdSchema,
 				deviceName: z.string().min(1).max(100),
-			}),
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			await renameSession(

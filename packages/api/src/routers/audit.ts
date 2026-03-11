@@ -7,6 +7,7 @@ import { z } from "zod";
 import { resolveEffectiveEntitlements } from "../billing/entitlements";
 import { getBitteryMode } from "../config/mode";
 import { protectedProcedure, router } from "../index";
+import { resourceIdSchema } from "../validation";
 
 type EventSource = "audit_log" | "share_access_log";
 type ActionGroup = "auth" | "team" | "vault" | "item" | "share" | "other";
@@ -217,10 +218,10 @@ export const auditRouter = router({
 				actionGroup: z
 					.enum(["auth", "team", "vault", "item", "share", "other", "all"])
 					.default("all"),
-				actorUserId: z.string().optional(),
+				actorUserId: resourceIdSchema.optional(),
 				result: z.enum(["success", "failure", "all"]).default("all"),
 				search: z.string().trim().max(100).optional(),
-			}),
+			}).strict(),
 		)
 		.query(async ({ ctx, input }) => {
 			const actor = await db.query.user.findFirst({

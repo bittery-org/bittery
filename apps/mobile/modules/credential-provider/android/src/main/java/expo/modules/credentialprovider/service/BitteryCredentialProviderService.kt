@@ -158,11 +158,11 @@ class BitteryCredentialProviderService : CredentialProviderService() {
                                 } else if (isValidWebDomain && domain.isNotEmpty()) {
                                     database.itemDao().getLoginItemsByDomain(domain, userId)
                                 } else {
-                                    // Origin resolution failed (e.g., browser not in allowlist,
-                                    // native app, or signing cert mismatch). Fall back to returning
-                                    // all login credentials so the user can pick the right one.
-                                    Log.d(TAG, "Domain '$domain' is not a valid web domain, returning all login items for user $userId")
-                                    database.itemDao().getLoginItemsByUserId(userId)
+                                    Log.w(
+                                        TAG,
+                                        "Skipping password credential suggestions for invalid or untrusted origin: rawOrigin=$rawOrigin resolvedOrigin=$origin package=${request.callingAppInfo?.packageName}"
+                                    )
+                                    emptyList()
                                 }
                                 items.addAll(userItems)
                             }

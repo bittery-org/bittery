@@ -28,6 +28,14 @@ import {
 } from "../helpers/scoped-resource";
 import { protectedProcedure, publicProcedure, router } from "../index";
 import { logAuditEvent } from "../utils/audit";
+import {
+	encryptedItemCiphertextSchema,
+	ivSchema,
+	nanoid32TokenSchema,
+	resourceIdSchema,
+	shareEmailsSchema,
+	wrappedKeySchema,
+} from "../validation";
 
 // Email validation regex
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -61,18 +69,18 @@ export const shareRouter = router({
 	create: protectedProcedure
 		.input(
 			z.object({
-				itemId: z.string(),
+				itemId: resourceIdSchema,
 				accessMode: z.enum(["anyone", "email-restricted"]),
 				isOneTimeUse: z.boolean().default(false),
 				expiresIn: z.enum(["1hour", "1day", "7days", "14days", "30days"]),
-				allowedEmails: z.array(z.string().email()).optional(),
+				allowedEmails: shareEmailsSchema.optional(),
 				// Encrypted item data snapshot
-				encryptedItemData: z.string(),
-				encryptionIv: z.string(),
+				encryptedItemData: encryptedItemCiphertextSchema,
+				encryptionIv: ivSchema,
 				// Share key encrypted for the link
-				encryptedShareKey: z.string(),
-				shareKeyIv: z.string(),
-			}),
+				encryptedShareKey: wrappedKeySchema,
+				shareKeyIv: ivSchema,
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const scopedItem = await getScopedItemAccess(
@@ -236,7 +244,7 @@ export const shareRouter = router({
 	 * List share links for an item
 	 */
 	listByItem: protectedProcedure
-		.input(z.object({ itemId: z.string() }))
+		.input(z.object({ itemId: resourceIdSchema }).strict())
 		.query(async ({ ctx, input }) => {
 			await assertShareLinksEntitlement(ctx.session.userId);
 
@@ -305,7 +313,7 @@ export const shareRouter = router({
 	 * Get share link details (for management)
 	 */
 	get: protectedProcedure
-		.input(z.object({ linkId: z.string() }))
+		.input(z.object({ linkId: resourceIdSchema }).strict())
 		.query(async ({ ctx, input }) => {
 			await assertShareLinksEntitlement(ctx.session.userId);
 
@@ -345,7 +353,7 @@ export const shareRouter = router({
 	 * Revoke a share link
 	 */
 	revoke: protectedProcedure
-		.input(z.object({ linkId: z.string() }))
+		.input(z.object({ linkId: resourceIdSchema }).strict())
 		.mutation(async ({ ctx, input }) => {
 			const visibleLink = await loadVisibleShareLinkForActor(
 				input.linkId,
@@ -406,11 +414,11 @@ export const shareRouter = router({
 	update: protectedProcedure
 		.input(
 			z.object({
-				linkId: z.string(),
+				linkId: resourceIdSchema,
 				isOneTimeUse: z.boolean().optional(),
-				addEmails: z.array(z.string().email()).optional(),
-				removeEmailIds: z.array(z.string()).optional(),
-			}),
+				addEmails: shareEmailsSchema.optional(),
+				removeEmailIds: z.array(resourceIdSchema).max(100).optional(),
+			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			await assertShareLinksEntitlement(ctx.session.userId);
@@ -527,7 +535,7 @@ export const shareRouter = router({
 	 * Get access logs for a share link
 	 */
 	getAccessLogs: protectedProcedure
-		.input(z.object({ linkId: z.string() }))
+		.input(z.object({ linkId: resourceIdSchema }).strict())
 		.query(async ({ ctx, input }) => {
 			await assertShareLinksEntitlement(ctx.session.userId);
 
@@ -565,7 +573,7 @@ export const shareRouter = router({
 	 * Get share link info (public endpoint)
 	 */
 	getPublicInfo: publicProcedure
-		.input(z.object({ token: z.string() }))
+		.input(z.object({ token: nanoid32TokenSchema }).strict())
 		.query(async ({ input }) => {
 			const link = await db.query.shareLink.findFirst({
 				where: (sl, { eq }) => eq(sl.token, input.token),
@@ -626,9 +634,9 @@ export const shareRouter = router({
 	requestEmailVerification: publicProcedure
 		.input(
 			z.object({
-				token: z.string(),
+				token: nanoid32TokenSchema,
 				email: z.string().email(),
-			}),
+			}).strict(),
 		)
 		.mutation(async ({ input }) => {
 			const link = await db.query.shareLink.findFirst({
@@ -751,14 +759,12 @@ export const shareRouter = router({
 	verifyEmailAndAccess: publicProcedure
 		.input(
 			z.object({
-				token: z.string(),
+				token: nanoid32TokenSchema,
 				email: z.string().email(),
 				code: z.string().length(6),
-				ipAddress: z.string().optional(),
-				userAgent: z.string().optional(),
-			}),
+			}).strict(),
 		)
-		.mutation(async ({ input }) => {
+		.mutation(async ({ ctx, input }) => {
 			const link = await db.query.shareLink.findFirst({
 				where: (sl, { eq }) => eq(sl.token, input.token),
 				with: {
@@ -776,8 +782,8 @@ export const shareRouter = router({
 			if (!(await hasShareLinksEntitlement(link.createdById))) {
 				await logAccess(link.id, {
 					email: input.email,
-					ipAddress: input.ipAddress,
-					userAgent: input.userAgent,
+					ipAddress: ctx.device.ipAddress,
+					userAgent: ctx.device.userAgent,
 					success: false,
 					failureReason: "Share links disabled for creator plan",
 				});
@@ -797,8 +803,8 @@ export const shareRouter = router({
 			) {
 				await logAccess(link.id, {
 					email: input.email,
-					ipAddress: input.ipAddress,
-					userAgent: input.userAgent,
+					ipAddress: ctx.device.ipAddress,
+					userAgent: ctx.device.userAgent,
 					success: false,
 					failureReason: "Link no longer valid",
 				});
@@ -817,8 +823,8 @@ export const shareRouter = router({
 			if (!isStillAllowed) {
 				await logAccess(link.id, {
 					email: input.email,
-					ipAddress: input.ipAddress,
-					userAgent: input.userAgent,
+					ipAddress: ctx.device.ipAddress,
+					userAgent: ctx.device.userAgent,
 					success: false,
 					failureReason: "Email no longer authorized for this link",
 				});
@@ -872,8 +878,8 @@ export const shareRouter = router({
 
 				await logAccess(link.id, {
 					email: input.email,
-					ipAddress: input.ipAddress,
-					userAgent: input.userAgent,
+					ipAddress: ctx.device.ipAddress,
+					userAgent: ctx.device.userAgent,
 					success: false,
 					failureReason: "Invalid or expired verification code",
 				});
@@ -888,8 +894,8 @@ export const shareRouter = router({
 			if (verification.attempts >= verification.maxAttempts) {
 				await logAccess(link.id, {
 					email: input.email,
-					ipAddress: input.ipAddress,
-					userAgent: input.userAgent,
+					ipAddress: ctx.device.ipAddress,
+					userAgent: ctx.device.userAgent,
 					success: false,
 					failureReason: "Max verification attempts exceeded",
 				});
@@ -929,8 +935,8 @@ export const shareRouter = router({
 			if (accessUpdate.length === 0) {
 				await logAccess(link.id, {
 					email: input.email,
-					ipAddress: input.ipAddress,
-					userAgent: input.userAgent,
+					ipAddress: ctx.device.ipAddress,
+					userAgent: ctx.device.userAgent,
 					success: false,
 					failureReason: "Access limit reached",
 				});
@@ -961,8 +967,8 @@ export const shareRouter = router({
 			// Log successful access
 			await logAccess(link.id, {
 				email: input.email,
-				ipAddress: input.ipAddress,
-				userAgent: input.userAgent,
+				ipAddress: ctx.device.ipAddress,
+				userAgent: ctx.device.userAgent,
 				success: true,
 			});
 
@@ -981,12 +987,10 @@ export const shareRouter = router({
 	accessPublic: publicProcedure
 		.input(
 			z.object({
-				token: z.string(),
-				ipAddress: z.string().optional(),
-				userAgent: z.string().optional(),
-			}),
+				token: nanoid32TokenSchema,
+			}).strict(),
 		)
-		.mutation(async ({ input }) => {
+		.mutation(async ({ ctx, input }) => {
 			const link = await db.query.shareLink.findFirst({
 				where: (sl, { and, eq }) =>
 					and(eq(sl.token, input.token), eq(sl.accessMode, "anyone")),
@@ -1001,8 +1005,8 @@ export const shareRouter = router({
 
 			if (!(await hasShareLinksEntitlement(link.createdById))) {
 				await logAccess(link.id, {
-					ipAddress: input.ipAddress,
-					userAgent: input.userAgent,
+					ipAddress: ctx.device.ipAddress,
+					userAgent: ctx.device.userAgent,
 					success: false,
 					failureReason: "Share links disabled for creator plan",
 				});
@@ -1017,8 +1021,8 @@ export const shareRouter = router({
 			const now = new Date();
 			if (link.status !== "active") {
 				await logAccess(link.id, {
-					ipAddress: input.ipAddress,
-					userAgent: input.userAgent,
+					ipAddress: ctx.device.ipAddress,
+					userAgent: ctx.device.userAgent,
 					success: false,
 					failureReason: `Link status: ${link.status}`,
 				});
@@ -1031,8 +1035,8 @@ export const shareRouter = router({
 
 			if (link.expiresAt < now) {
 				await logAccess(link.id, {
-					ipAddress: input.ipAddress,
-					userAgent: input.userAgent,
+					ipAddress: ctx.device.ipAddress,
+					userAgent: ctx.device.userAgent,
 					success: false,
 					failureReason: "Link expired",
 				});
@@ -1045,8 +1049,8 @@ export const shareRouter = router({
 
 			if (link.maxAccessCount && link.accessCount >= link.maxAccessCount) {
 				await logAccess(link.id, {
-					ipAddress: input.ipAddress,
-					userAgent: input.userAgent,
+					ipAddress: ctx.device.ipAddress,
+					userAgent: ctx.device.userAgent,
 					success: false,
 					failureReason: "Access limit reached",
 				});
@@ -1084,8 +1088,8 @@ export const shareRouter = router({
 
 			if (accessUpdate.length === 0) {
 				await logAccess(link.id, {
-					ipAddress: input.ipAddress,
-					userAgent: input.userAgent,
+					ipAddress: ctx.device.ipAddress,
+					userAgent: ctx.device.userAgent,
 					success: false,
 					failureReason: "Access limit reached",
 				});
@@ -1098,8 +1102,8 @@ export const shareRouter = router({
 
 			// Log successful access
 			await logAccess(link.id, {
-				ipAddress: input.ipAddress,
-				userAgent: input.userAgent,
+				ipAddress: ctx.device.ipAddress,
+				userAgent: ctx.device.userAgent,
 				success: true,
 			});
 
@@ -1211,7 +1215,7 @@ async function logAccess(
 	shareLinkId: string,
 	details: {
 		email?: string;
-		ipAddress?: string;
+		ipAddress?: string | null;
 		userAgent?: string;
 		success: boolean;
 		failureReason?: string;
