@@ -172,6 +172,13 @@ export class ItemService {
 			return sessionUserId.userId;
 		}
 
+		if (email) {
+			const accountMetadata = await this.storage.getAccountMetadata?.(email);
+			if (accountMetadata?.userId) {
+				return accountMetadata.userId;
+			}
+		}
+
 		const activeUserId = await this.storage.getActiveAccountUserId();
 		if (activeUserId) {
 			return activeUserId;

@@ -11,24 +11,28 @@ import { createPresignedDownload } from "@bittery/api/storage/s3";
 import runMigrations from "@bittery/db/migrate";
 import { JobRunner } from "@bittery/jobs";
 import { createPubSubAdapter } from "@bittery/pubsub";
+import { parseCorsOrigins } from "@bittery/api/config/cors";
 import { trpcServer } from "@hono/trpc-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { servePublicStorageKey } from "./cdn";
+import { handleServerError, securityHeadersMiddleware } from "./security";
 import { createSyncRouter } from "./sync/sse-handler";
 import { enforceTrpcRequestGuards } from "./trpc-guard";
 
 await runMigrations();
 
 const app = new Hono();
+const corsOrigins = parseCorsOrigins(process.env.CORS_ORIGIN);
 
 app.use(logger());
+app.use("*", securityHeadersMiddleware);
 
 app.use(
 	"*",
 	cors({
-		origin: process.env.CORS_ORIGIN?.split(",") || "",
+		origin: corsOrigins,
 		allowMethods: ["GET", "POST", "OPTIONS"],
 		allowHeaders: [
 			"Content-Type",
@@ -37,9 +41,10 @@ app.use(
 			"X-App-Platform",
 		],
 		exposeHeaders: ["X-Session-Expires"],
-		credentials: true,
 	}),
 );
+
+app.onError(handleServerError);
 
 // Initialize PubSub adapter (Redis if REDIS_URL is set, in-memory otherwise)
 const pubsub = await createPubSubAdapter();

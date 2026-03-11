@@ -3,7 +3,7 @@
  * Shared helpers for vault operations.
  */
 
-import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
+import type { DecryptedItem, ItemCategory, Passkey } from "@bittery/shared/types";
 import { storage } from "../lib/storage";
 import { core } from "./core-instance";
 import { desktopClient } from "./desktop-client";
@@ -24,6 +24,23 @@ type MultiAccountItem = DecryptedItem & {
 	};
 };
 
+export function mergeItemCollections(
+	desktopItems: MultiAccountItem[],
+	localItems: MultiAccountItem[],
+): MultiAccountItem[] {
+	const merged = new Map<string, MultiAccountItem>();
+
+	for (const item of desktopItems) {
+		merged.set(item.id, item);
+	}
+
+	for (const item of localItems) {
+		merged.set(item.id, item);
+	}
+
+	return Array.from(merged.values());
+}
+
 function isItemCategory(value: unknown): value is ItemCategory {
 	return (
 		value === "login" ||
@@ -34,7 +51,30 @@ function isItemCategory(value: unknown): value is ItemCategory {
 	);
 }
 
-function normalizeDesktopSnapshotItem(
+function isPasskey(value: unknown): value is Passkey {
+	if (!value || typeof value !== "object") {
+		return false;
+	}
+
+	const candidate = value as Partial<Passkey>;
+	return (
+		typeof candidate.credentialId === "string" &&
+		typeof candidate.rpId === "string" &&
+		typeof candidate.rpName === "string" &&
+		typeof candidate.userHandle === "string" &&
+		typeof candidate.userName === "string" &&
+		typeof candidate.userDisplayName === "string" &&
+		typeof candidate.privateKey === "string" &&
+		typeof candidate.publicKey === "string" &&
+		typeof candidate.algorithm === "number" &&
+		typeof candidate.signCount === "number" &&
+		Array.isArray(candidate.transports) &&
+		candidate.transports.every((transport) => typeof transport === "string") &&
+		typeof candidate.createdAt === "string"
+	);
+}
+
+export function normalizeDesktopSnapshotItem(
 	item: Record<string, unknown>,
 	includeAccountContext: boolean,
 ): MultiAccountItem | null {
@@ -83,6 +123,9 @@ function normalizeDesktopSnapshotItem(
 			typeof item.username === "string" ? item.username : undefined,
 		password:
 			typeof item.password === "string" ? item.password : undefined,
+		passkeys: Array.isArray(item.passkeys)
+			? item.passkeys.filter(isPasskey)
+			: undefined,
 		notes: typeof item.notes === "string" ? item.notes : undefined,
 		note: typeof item.note === "string" ? item.note : undefined,
 		tags: Array.isArray(item.tags)
@@ -151,16 +194,20 @@ async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[]> {
 	const activeAccount = await storage.getActiveAccount();
 	const targetEmails = await getDesktopTargetEmails();
 	if (targetEmails.length === 0) {
+		console.info("[vault-utils] desktop snapshot skipped: no target emails");
 		return [];
 	}
 
 	const includeAccountContext = activeAccount?.type === "all";
 	const snapshot = await desktopClient.getItemsSnapshot(targetEmails);
 	if (!snapshot) {
+		console.warn("[vault-utils] desktop snapshot unavailable", {
+			targetEmails,
+		});
 		return [];
 	}
 
-	return snapshot.items
+	const normalizedItems = snapshot.items
 		.map((item) =>
 			normalizeDesktopSnapshotItem(
 				item as Record<string, unknown>,
@@ -168,6 +215,38 @@ async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[]> {
 			),
 		)
 		.filter((item): item is MultiAccountItem => item !== null);
+
+	console.info("[vault-utils] desktop snapshot loaded", {
+		targetEmails,
+		includeAccountContext,
+		rawCount: snapshot.items.length,
+		normalizedCount: normalizedItems.length,
+	});
+
+	return normalizedItems;
+}
+
+async function getLocalCoordinatorItems(): Promise<MultiAccountItem[]> {
+	try {
+		const { accountsInfo } = await core.accounts.resolveAccounts();
+		core.vaultCoordinator.setActiveAccounts(accountsInfo);
+		const items = core.vaultCoordinator.getAll() as MultiAccountItem[];
+		console.info("[vault-utils] local coordinator items loaded", {
+			accountCount: accountsInfo.length,
+			itemCount: items.length,
+		});
+		return items;
+	} catch (error) {
+		console.warn(
+			"[vault-utils] Failed to load local coordinator items for desktop merge:",
+			error,
+		);
+		const items = core.vaultCoordinator.getAll() as MultiAccountItem[];
+		console.info("[vault-utils] local coordinator fallback snapshot", {
+			itemCount: items.length,
+		});
+		return items;
+	}
 }
 
 /**
@@ -185,7 +264,18 @@ export async function getDecryptedItemsForCurrentMode(): Promise<
 
 	if (desktopReadAvailable) {
 		try {
-			return await getDesktopItemsSnapshot();
+			const [desktopItems, localItems] = await Promise.all([
+				getDesktopItemsSnapshot(),
+				getLocalCoordinatorItems(),
+			]);
+			const mergedItems = mergeItemCollections(desktopItems, localItems);
+			console.info("[vault-utils] desktop/local merge complete", {
+				desktopReadAvailable,
+				desktopCount: desktopItems.length,
+				localCount: localItems.length,
+				mergedCount: mergedItems.length,
+			});
+			return mergedItems;
 		} catch (error) {
 			console.warn(
 				"[vault-utils] Desktop snapshot read failed, falling back to local decryption:",
@@ -196,7 +286,12 @@ export async function getDecryptedItemsForCurrentMode(): Promise<
 
 	const { accountsInfo } = await core.accounts.resolveAccounts();
 	await core.vaultCoordinator.hydrate(accountsInfo);
-	return core.vaultCoordinator.getAll();
+	const localItems = core.vaultCoordinator.getAll();
+	console.info("[vault-utils] local-only item load complete", {
+		accountCount: accountsInfo.length,
+		itemCount: localItems.length,
+	});
+	return localItems;
 }
 
 /**

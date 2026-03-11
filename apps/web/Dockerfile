@@ -45,16 +45,21 @@ ENV VITE_SERVER_URL=$VITE_SERVER_URL
 # Build the web app (Vite inlines VITE_* env vars at build time)
 RUN cd apps/web && pnpm run build
 
+# Render nginx config with CSP hashes for inline bootstrap scripts.
+RUN node apps/web/scripts/render-nginx-config.mjs
+
 # ============================================================
 # Stage 3: Runtime — nginx to serve static files
 # ============================================================
-FROM nginx:alpine
+FROM nginxinc/nginx-unprivileged:1.27-alpine
 
 # Remove default nginx config
+USER root
 RUN rm /etc/nginx/conf.d/default.conf
 
-COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=js-builder /app/apps/web/dist/client /usr/share/nginx/html
+COPY --from=js-builder --chown=101:101 /app/apps/web/.generated/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=js-builder --chown=101:101 /app/apps/web/dist/client /usr/share/nginx/html
+USER 101:101
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD wget -q --spider http://localhost:8080/nginx-health || exit 1

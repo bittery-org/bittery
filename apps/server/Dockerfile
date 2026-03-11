@@ -46,21 +46,28 @@ FROM oven/bun:1-slim
 
 WORKDIR /app
 
+RUN groupadd --system --gid 10001 bittery \
+ && useradd --system --uid 10001 --gid 10001 --home-dir /home/bittery --create-home bittery \
+ && mkdir -p /app/node_modules/@bittery/crypto-napi /app/migrations \
+ && chown -R 10001:10001 /app /home/bittery
+
 # Copy built server bundle (all deps bundled except crypto-napi)
-COPY --from=js-builder /app/apps/server/dist ./dist
+COPY --from=js-builder --chown=10001:10001 /app/apps/server/dist ./dist
 
 # Set up @bittery/crypto-napi module for runtime resolution
-COPY --from=rust-builder /build/packages/crypto/napi/target/release/libbittery_crypto_napi.so ./node_modules/@bittery/crypto-napi/bittery-crypto.node
-COPY --from=js-builder /app/packages/crypto/napi/index.js ./node_modules/@bittery/crypto-napi/index.js
-COPY --from=js-builder /app/packages/crypto/napi/index.d.ts ./node_modules/@bittery/crypto-napi/index.d.ts
-COPY --from=js-builder /app/packages/crypto/napi/package.json ./node_modules/@bittery/crypto-napi/package.json
+COPY --from=rust-builder --chown=10001:10001 /build/packages/crypto/napi/target/release/libbittery_crypto_napi.so ./node_modules/@bittery/crypto-napi/bittery-crypto.node
+COPY --from=js-builder --chown=10001:10001 /app/packages/crypto/napi/index.js ./node_modules/@bittery/crypto-napi/index.js
+COPY --from=js-builder --chown=10001:10001 /app/packages/crypto/napi/index.d.ts ./node_modules/@bittery/crypto-napi/index.d.ts
+COPY --from=js-builder --chown=10001:10001 /app/packages/crypto/napi/package.json ./node_modules/@bittery/crypto-napi/package.json
 
 # Copy database migrations
-COPY packages/db/src/migrations ./migrations
+COPY --chown=10001:10001 packages/db/src/migrations ./migrations
 
 ENV MIGRATIONS_FOLDER=/app/migrations
 ENV NAPI_RS_NATIVE_LIBRARY_PATH=/app/node_modules/@bittery/crypto-napi/bittery-crypto.node
 ENV NODE_ENV=production
+
+USER 10001:10001
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -q --spider http://localhost:3000/healthz || exit 1

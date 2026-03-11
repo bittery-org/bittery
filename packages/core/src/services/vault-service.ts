@@ -156,7 +156,10 @@ export class VaultService {
 		if (!masterUnlockKey) {
 			throw new Error("Master Unlock Key not found. Please sign in again.");
 		}
-		const currentUserId = await this.storage.getActiveAccountUserId();
+		const currentUserId =
+			(input.accountEmail
+				? (await this.storage.getAccountMetadata?.(input.accountEmail))?.userId
+				: null) ?? (await this.storage.getActiveAccountUserId());
 		if (!currentUserId) {
 			throw new Error("Session data missing. Please sign in again.");
 		}

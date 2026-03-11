@@ -146,10 +146,7 @@ export function createAccountTrpcClient(
 				},
 				fetch: (url, options) => {
 					const resolvedUrl = buildTrpcUrl(normalizedUrl, getRequestUrl(url));
-					return fetch(resolvedUrl, {
-						...options,
-						credentials: "include",
-					});
+					return fetch(resolvedUrl, options);
 				},
 			});
 

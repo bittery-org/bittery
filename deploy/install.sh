@@ -152,6 +152,10 @@ DOMAIN=${DOMAIN}
 BITTERY_MODE=self-hosted
 JWT_SECRET=${JWT_SECRET}
 DB_PASSWORD=${DB_PASSWORD}
+# Optional hardening
+# CORS_ORIGIN must be a comma-separated list of bare origins.
+# TRUST_PROXY_MODE can be none, cloudflare, or forwarded.
+# MINIO_ROOT_PASSWORD must be set before enabling the storage profile.
 EOF
 
   if [[ -n "$DATABASE_URL" ]]; then
@@ -220,6 +224,7 @@ print_summary() {
   echo "    docker compose logs -f     # View logs"
   echo "    docker compose down        # Stop services"
   echo "    docker compose pull && docker compose up -d  # Update"
+  echo "    Set MINIO_ROOT_PASSWORD in .env before using: docker compose --profile storage up -d"
   echo ""
 }
 

@@ -274,6 +274,7 @@ export function ExtensionAccountSwitcher() {
 			onAddAccount={handleAddAccount}
 			showAddAccount={!desktopStatus.data?.available}
 			onLockAll={handleLockAll}
+			showLockAll={!desktopStatus.data?.available}
 			showAllAccountsOption={true}
 			showSetupAnotherDevice={!desktopStatus.data?.available}
 			onAllAccountsSelect={handleAllAccountsSelect}

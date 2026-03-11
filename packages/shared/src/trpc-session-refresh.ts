@@ -85,7 +85,6 @@ export function createSessionRefreshingTrpcFetch(
 
 			return fetch(resolvedUrl, {
 				...requestOptions,
-				credentials: "include",
 				headers,
 			});
 		},
@@ -116,7 +115,6 @@ export function createSessionRefreshingTrpcFetch(
 
 		const response = await fetch(resolvedUrl, {
 			...requestOptions,
-			credentials: "include",
 			headers,
 		});
 

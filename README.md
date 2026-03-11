@@ -124,12 +124,15 @@ Create `apps/server/.env`:
 ```env
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/bittery
 JWT_SECRET=<random-secret>
+CORS_ORIGIN=http://localhost:3000,http://localhost:3001
+TRUST_PROXY_MODE=none          # none | cloudflare | forwarded
 BITTERY_STORAGE_ENDPOINT=       # S3-compatible storage
 BITTERY_STORAGE_BUCKET=
 BITTERY_STORAGE_ACCESS_KEY_ID=
 BITTERY_STORAGE_SECRET_ACCESS_KEY=
 BITTERY_STORAGE_REGION=auto
 BITTERY_STORAGE_CDN_URL=        # or BITTERY_STORAGE_PUBLIC_URL
+MINIO_ROOT_PASSWORD=            # Required before enabling docker compose --profile storage
 
 # Optional: rate limiting backend
 RATE_LIMIT_ADAPTER=auto         # auto | postgres | redis | valkey

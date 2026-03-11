@@ -136,6 +136,12 @@ export function useItemAttachments(
 		if (sessionData?.userId) {
 			return sessionData.userId;
 		}
+		if (accountEmail) {
+			const accountMetadata = await storage.getAccountMetadata?.(accountEmail);
+			if (accountMetadata?.userId) {
+				return accountMetadata.userId;
+			}
+		}
 		const activeUserId = await storage.getActiveAccountUserId();
 		if (activeUserId) {
 			return activeUserId;

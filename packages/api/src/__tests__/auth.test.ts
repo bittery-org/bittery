@@ -14,9 +14,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { closeRateLimitAdapterForTests } from "@bittery/auth/rate-limit";
 import { db, signupVerification } from "@bittery/db";
 import { eq } from "drizzle-orm";
-import { authRouter } from "../routers/auth";
+import {
+	authRouter,
+	enforceRefreshSessionRateLimits,
+} from "../routers/auth";
 import { setControlBroadcastFunction } from "../sync-helper";
 import {
 	addTeamMember,
@@ -119,6 +123,7 @@ describe("Auth Router", () => {
 	afterEach(async () => {
 		setControlBroadcastFunction(null);
 		await truncateAll();
+		await closeRateLimitAdapterForTests();
 		if (originalBitteryMode === undefined) {
 			delete process.env.BITTERY_MODE;
 		} else {
@@ -993,6 +998,44 @@ describe("Auth Router", () => {
 
 			const refreshedSession = await getSession(result.sessionId);
 			expect(refreshedSession?.platform).toBe("extension");
+		});
+
+		test("should rate limit repeated refresh attempts for the same session", async () => {
+			for (let i = 0; i < 30; i++) {
+				await expect(
+					enforceRefreshSessionRateLimits({
+						sessionId: "session-limit-key",
+						sourceIp: "198.51.100.10",
+					}),
+				).resolves.toBeUndefined();
+			}
+
+			await expect(
+				enforceRefreshSessionRateLimits({
+					sessionId: "session-limit-key",
+					sourceIp: "198.51.100.10",
+				}),
+			).rejects.toThrow("Too many requests. Please try again later.");
+		});
+
+		test("should rate limit refresh attempts from the same source IP", async () => {
+			const ipAddress = "198.51.100.11";
+
+			for (let i = 0; i < 60; i++) {
+				await expect(
+					enforceRefreshSessionRateLimits({
+						sessionId: `source-session-${i}`,
+						sourceIp: ipAddress,
+					}),
+				).resolves.toBeUndefined();
+			}
+
+			await expect(
+				enforceRefreshSessionRateLimits({
+					sessionId: "source-session-final",
+					sourceIp: ipAddress,
+				}),
+			).rejects.toThrow("Too many requests. Please try again later.");
 		});
 	});
 

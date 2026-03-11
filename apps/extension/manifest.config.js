@@ -33,14 +33,14 @@ export default defineManifest({
 			matches: ["<all_urls>"],
 			js: ["src/page-script/passkey.ts"],
 			run_at: "document_start",
-			all_frames: false,
+			all_frames: true,
 			world: "MAIN",
 		},
 		{
 			matches: ["<all_urls>"],
 			js: ["src/content-script/passkey-bridge-entry.ts"],
 			run_at: "document_start",
-			all_frames: false,
+			all_frames: true,
 		},
 		{
 			matches: ["<all_urls>"],

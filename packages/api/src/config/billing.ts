@@ -1,4 +1,5 @@
 import { type CloudPlanId, cloudPlanIds } from "../billing/plans";
+import { getPrimaryCorsOrigin } from "./cors";
 
 type PaidPlanId = Exclude<CloudPlanId, "free">;
 
@@ -41,7 +42,7 @@ export function getPlanByStripePriceId(
 export function getWebAppUrl(): string {
 	return (
 		process.env.WEB_APP_URL?.trim() ||
-		process.env.CORS_ORIGIN?.split(",")[0]?.trim() ||
+		getPrimaryCorsOrigin(process.env.CORS_ORIGIN) ||
 		"http://localhost:3001"
 	);
 }

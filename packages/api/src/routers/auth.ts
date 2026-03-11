@@ -124,6 +124,10 @@ const INVITE_SIGNUP_SOURCE_WINDOW_LIMIT = 5;
 const INVITE_SIGNUP_SOURCE_WINDOW_MS = 60 * 60 * 1000;
 const REFRESH_SESSION_WINDOW_LIMIT = 30;
 const REFRESH_SESSION_WINDOW_MS = 5 * 60 * 1000;
+const REFRESH_SOURCE_WINDOW_LIMIT = 60;
+const REFRESH_SOURCE_WINDOW_MS = 5 * 60 * 1000;
+const ANONYMOUS_AUTH_GLOBAL_LIMIT = 300;
+const ANONYMOUS_AUTH_GLOBAL_WINDOW_MS = 60 * 1000;
 const GENERIC_DUPLICATE_SIGNUP_MESSAGE = "Unable to create account";
 
 function generateDeterministicFakeHint(email: string): string {
@@ -259,6 +263,10 @@ function buildSourceRateLimitKey(ipAddress: string): string {
 	return createHmac("sha256", emailHintSecret).update(ipAddress).digest("hex");
 }
 
+function getWindowBucketStart(windowMs: number, now: Date): Date {
+	return new Date(Math.floor(now.getTime() / windowMs) * windowMs);
+}
+
 async function enforceSourceWindowLimit(input: {
 	namespace: string;
 	sourceIp: string | null;
@@ -275,7 +283,7 @@ async function enforceSourceWindowLimit(input: {
 		key: buildSourceRateLimitKey(input.sourceIp),
 		subject: input.sourceIp,
 		now,
-		windowStart: new Date(now.getTime() - input.windowMs),
+		windowStart: getWindowBucketStart(input.windowMs, now),
 		limit: input.limit,
 	});
 
@@ -285,6 +293,43 @@ async function enforceSourceWindowLimit(input: {
 			message: "Too many requests. Please try again later.",
 		});
 	}
+}
+
+async function enforceAnonymousGlobalRateLimit(): Promise<void> {
+	const now = new Date();
+	const result = await incrementRateLimitWindow({
+		namespace: RATE_LIMIT_NAMESPACE.authAnonymousGlobal,
+		key: "global",
+		subject: "global",
+		now,
+		windowStart: getWindowBucketStart(ANONYMOUS_AUTH_GLOBAL_WINDOW_MS, now),
+		limit: ANONYMOUS_AUTH_GLOBAL_LIMIT,
+	});
+
+	if (!result.allowed) {
+		throw new TRPCError({
+			code: "TOO_MANY_REQUESTS",
+			message: "Too many requests. Please try again later.",
+		});
+	}
+}
+
+export async function enforceRefreshSessionRateLimits(input: {
+	sessionId: string;
+	sourceIp: string | null;
+}): Promise<void> {
+	await enforceSourceWindowLimit({
+		namespace: RATE_LIMIT_NAMESPACE.authRefreshSession,
+		sourceIp: input.sessionId,
+		limit: REFRESH_SESSION_WINDOW_LIMIT,
+		windowMs: REFRESH_SESSION_WINDOW_MS,
+	});
+	await enforceSourceWindowLimit({
+		namespace: RATE_LIMIT_NAMESPACE.authRefreshSource,
+		sourceIp: input.sourceIp,
+		limit: REFRESH_SOURCE_WINDOW_LIMIT,
+		windowMs: REFRESH_SOURCE_WINDOW_MS,
+	});
 }
 
 export const authRouter = router({
@@ -314,6 +359,8 @@ export const authRouter = router({
 			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
+			await enforceAnonymousGlobalRateLimit();
+
 			const normalizedEmail = normalizeEmail(input.email);
 			const selfHostedMode = isSelfHostedMode();
 
@@ -368,6 +415,8 @@ export const authRouter = router({
 			}).strict(),
 		)
 		.mutation(async ({ input }) => {
+			await enforceAnonymousGlobalRateLimit();
+
 			const normalizedEmail = normalizeEmail(input.email);
 
 			if (input.invitationToken) {
@@ -792,6 +841,8 @@ export const authRouter = router({
 			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
+			await enforceAnonymousGlobalRateLimit();
+
 			const normalizedEmail = normalizeEmail(input.email);
 			const loginAccountRateLimitKey =
 				getLoginAccountRateLimitKey(normalizedEmail);
@@ -835,6 +886,8 @@ export const authRouter = router({
 			}).strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
+			await enforceAnonymousGlobalRateLimit();
+
 			const loginAccountRateLimitKey =
 				extractLoginAttemptRateLimitKey(input.attemptId);
 
@@ -954,6 +1007,8 @@ export const authRouter = router({
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
+			await enforceAnonymousGlobalRateLimit();
+
 			const normalizedEmail = normalizeEmail(input.email);
 
 			try {
@@ -983,6 +1038,8 @@ export const authRouter = router({
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
+			await enforceAnonymousGlobalRateLimit();
+
 			const normalizedEmail = normalizeEmail(input.email);
 
 			try {
@@ -1170,11 +1227,9 @@ export const authRouter = router({
 	}),
 
 	refreshSession: protectedProcedure.mutation(async ({ ctx }) => {
-		await enforceSourceWindowLimit({
-			namespace: RATE_LIMIT_NAMESPACE.authRefreshSession,
-			sourceIp: ctx.session.sessionId,
-			limit: REFRESH_SESSION_WINDOW_LIMIT,
-			windowMs: REFRESH_SESSION_WINDOW_MS,
+		await enforceRefreshSessionRateLimits({
+			sessionId: ctx.session.sessionId,
+			sourceIp: ctx.device.ipAddress,
 		});
 
 		try {

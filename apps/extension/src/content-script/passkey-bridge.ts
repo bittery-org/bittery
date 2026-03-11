@@ -138,9 +138,26 @@ async function executePasskeyFlow(input: {
 			? "PASSKEY_CREATE"
 			: "PASSKEY_GET";
 
+	console.info("[Passkey bridge] forwarding request", {
+		requestId: input.message.requestId,
+		runtimeType,
+		origin: input.message.payload.origin,
+		mediation: input.message.payload.mediation,
+	});
+
 	let response = await sendRuntimeMessage(runtimeType, {
 		requestId: input.message.requestId,
 		...input.message.payload,
+	});
+
+	console.info("[Passkey bridge] runtime response received", {
+		requestId: input.message.requestId,
+		runtimeType,
+		success: response.success,
+		fallbackToNative: response.fallbackToNative,
+		error: response.error,
+		requiresUserInteraction: response.requiresUserInteraction?.kind,
+		resultKind: response.result?.kind,
 	});
 
 	for (let attempts = 0; attempts < 3; attempts++) {
@@ -179,6 +196,14 @@ async function executePasskeyFlow(input: {
 				selectedCredentialId,
 			};
 			response = await sendRuntimeMessage("PASSKEY_GET", payload);
+			console.info("[Passkey bridge] runtime response after picker", {
+				requestId: input.message.requestId,
+				success: response.success,
+				fallbackToNative: response.fallbackToNative,
+				error: response.error,
+				requiresUserInteraction: response.requiresUserInteraction?.kind,
+				resultKind: response.result?.kind,
+			});
 			continue;
 		}
 
@@ -205,6 +230,14 @@ async function executePasskeyFlow(input: {
 				createDecision,
 			};
 			response = await sendRuntimeMessage("PASSKEY_CREATE", payload);
+			console.info("[Passkey bridge] runtime response after create decision", {
+				requestId: input.message.requestId,
+				success: response.success,
+				fallbackToNative: response.fallbackToNative,
+				error: response.error,
+				requiresUserInteraction: response.requiresUserInteraction?.kind,
+				resultKind: response.result?.kind,
+			});
 			continue;
 		}
 

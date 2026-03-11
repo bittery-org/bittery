@@ -13,30 +13,59 @@ export interface DeviceContext {
 
 type TrustProxyMode = "none" | "cloudflare" | "forwarded";
 
-function getTrustProxyMode(): TrustProxyMode {
-	const rawMode = process.env.TRUST_PROXY_MODE?.trim().toLowerCase();
-	if (rawMode === "cloudflare" || rawMode === "forwarded") {
-		return rawMode;
+export function getTrustProxyMode(
+	rawMode = process.env.TRUST_PROXY_MODE,
+): TrustProxyMode {
+	const normalizedMode = rawMode?.trim().toLowerCase();
+	if (
+		normalizedMode === "cloudflare" ||
+		normalizedMode === "forwarded" ||
+		normalizedMode === "none"
+	) {
+		return normalizedMode;
 	}
+
 	return "none";
 }
 
-function resolveTrustedSourceIp(context: HonoContext): string | null {
-	const trustProxyMode = getTrustProxyMode();
-
-	if (trustProxyMode === "cloudflare") {
-		return context.req.header("CF-Connecting-IP")?.trim() || null;
+function normalizeHeaderIp(value: string | null | undefined): string | null {
+	if (!value) {
+		return null;
 	}
 
-	if (trustProxyMode === "forwarded") {
+	const normalized = value.trim();
+	return normalized || null;
+}
+
+export function resolveTrustedSourceIpFromHeaders(input: {
+	mode?: TrustProxyMode;
+	forwardedForHeader?: string | null;
+	realIpHeader?: string | null;
+	cfConnectingIpHeader?: string | null;
+}): string | null {
+	const mode = input.mode ?? getTrustProxyMode();
+
+	if (mode === "cloudflare") {
+		return normalizeHeaderIp(input.cfConnectingIpHeader);
+	}
+
+	if (mode === "forwarded") {
 		return (
-			context.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ||
-			context.req.header("X-Real-IP")?.trim() ||
-			null
+			normalizeHeaderIp(input.forwardedForHeader?.split(",")[0]) ||
+			normalizeHeaderIp(input.realIpHeader)
 		);
 	}
 
 	return null;
+}
+
+function resolveContextSourceIp(context: HonoContext): string | null {
+	return resolveTrustedSourceIpFromHeaders({
+		mode: getTrustProxyMode(),
+		forwardedForHeader: context.req.header("X-Forwarded-For"),
+		realIpHeader: context.req.header("X-Real-IP"),
+		cfConnectingIpHeader: context.req.header("CF-Connecting-IP"),
+	});
 }
 
 export async function createContext({ context }: CreateContextOptions) {
@@ -55,7 +84,7 @@ export async function createContext({ context }: CreateContextOptions) {
 
 	// Extract device information from request headers
 	const userAgent = context.req.header("User-Agent") || "";
-	const ipAddress = resolveTrustedSourceIp(context);
+	const ipAddress = resolveContextSourceIp(context);
 	const clientId = context.req.header("X-Client-Id") ?? null;
 	const appPlatform = context.req.header("X-App-Platform") ?? null;
 

@@ -66,15 +66,16 @@ export function createTestContext(
 		expiresAt: Date;
 		platform?: string | null;
 	} | null,
+	deviceOverrides?: Partial<Context["device"]>,
 ): Context {
 	return {
 		session: sessionData || null,
 		authToken: null,
 		clientId: null,
 		device: {
-			userAgent: "Test/1.0 (Testing)",
-			ipAddress: "127.0.0.1",
-			appPlatform: "web",
+			userAgent: deviceOverrides?.userAgent ?? "Test/1.0 (Testing)",
+			ipAddress: deviceOverrides?.ipAddress ?? "127.0.0.1",
+			appPlatform: deviceOverrides?.appPlatform ?? "web",
 		},
 	};
 }
@@ -86,13 +87,14 @@ export function createAuthenticatedContext(
 	userId: string,
 	_email: string,
 	sessionId?: string,
+	deviceOverrides?: Partial<Context["device"]>,
 ): Context {
 	return createTestContext({
 		userId,
 		sessionId: sessionId || generateTestSessionId(),
 		expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
 		platform: "web",
-	});
+	}, deviceOverrides);
 }
 
 /**

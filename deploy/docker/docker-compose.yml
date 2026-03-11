@@ -26,6 +26,7 @@ services:
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - CORS_ORIGIN=https://${DOMAIN}
       - BITTERY_MODE=${BITTERY_MODE:-self-hosted}
+      - TRUST_PROXY_MODE=${TRUST_PROXY_MODE:-none}
       - BITTERY_STORAGE_ENDPOINT=${BITTERY_STORAGE_ENDPOINT:-}
       - BITTERY_STORAGE_BUCKET=${BITTERY_STORAGE_BUCKET:-}
       - BITTERY_STORAGE_ACCESS_KEY_ID=${BITTERY_STORAGE_ACCESS_KEY_ID:-}
@@ -84,7 +85,7 @@ services:
     command: server /data --console-address ":9001"
     environment:
       - MINIO_ROOT_USER=bittery
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
     volumes:
       - minio_data:/data
     healthcheck:

@@ -34,6 +34,14 @@ const getNative = navigator.credentials?.get?.bind(navigator.credentials);
 const installFlag = "__bitteryPasskeyInterceptorInstalled";
 const PASSKEY_TRANSIENT_GET_STABILIZE_MS = 550;
 
+function isTopFrame(): boolean {
+	try {
+		return window.top === window;
+	} catch {
+		return false;
+	}
+}
+
 function randomRequestId(): string {
 	return `req_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
 }
@@ -449,11 +457,34 @@ async function interceptGet(
 		timeoutMs: publicKey.timeout,
 	});
 
+	console.info("[Bittery Passkey] get intercepted", {
+		requestId: request.requestId,
+		href: window.location.href,
+		origin: window.location.origin,
+		isTopFrame: isTopFrame(),
+		mediation,
+		rpId: serializedOptions.rpId,
+		allowCredentialsCount: serializedOptions.allowCredentials?.length ?? 0,
+	});
+
 	const detachAbort = attachAbortRelay(signal, request.requestId);
 
 	try {
 		const response = await request.promise;
 		if (response.fallbackToNative || !response.success || !response.result) {
+			console.warn("[Bittery Passkey] get bridge falling back to native", {
+				requestId: request.requestId,
+				href: window.location.href,
+				origin: window.location.origin,
+				isTopFrame: isTopFrame(),
+				mediation,
+				rpId: serializedOptions.rpId,
+				allowCredentialsCount: serializedOptions.allowCredentials?.length ?? 0,
+				success: response.success,
+				fallbackToNative: response.fallbackToNative,
+				error: response.error,
+				resultKind: response.result?.kind,
+			});
 			if (!response.success && response.error) {
 				throw new Error(response.error);
 			}
@@ -468,8 +499,17 @@ async function interceptGet(
 			throw error;
 		}
 		console.warn(
-			"[Bittery Passkey] get interception failed, using native:",
-			error,
+			"[Bittery Passkey] get interception failed, using native",
+			{
+				requestId: request.requestId,
+				href: window.location.href,
+				origin: window.location.origin,
+				isTopFrame: isTopFrame(),
+				mediation,
+				rpId: serializedOptions.rpId,
+				allowCredentialsCount: serializedOptions.allowCredentials?.length ?? 0,
+				error: error instanceof Error ? error.message : String(error),
+			},
 		);
 		return getNative(options);
 	} finally {

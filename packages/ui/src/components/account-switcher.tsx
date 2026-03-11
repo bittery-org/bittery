@@ -79,6 +79,9 @@ export interface AccountSwitcherProps {
 	/** Callback when user clicks "Lock All" */
 	onLockAll: () => void;
 
+	/** Optional: show "Lock All" option */
+	showLockAll?: boolean;
+
 	/** Optional: show "Manage Accounts" option */
 	showManageAccounts?: boolean;
 
@@ -145,6 +148,7 @@ export function AccountSwitcher({
 	onAccountSelect,
 	onAddAccount,
 	onLockAll,
+	showLockAll = true,
 	showManageAccounts = false,
 	onManageAccounts,
 	showAddAccount = true,
@@ -181,6 +185,42 @@ export function AccountSwitcher({
 		removeAccountLabel: "Remove Account",
 		...labels,
 	};
+	const showAllAccountsAction = Boolean(
+		showAllAccountsOption &&
+			onAllAccountsSelect &&
+			accounts.length > 1 &&
+			unlockedEmails.length > 1,
+	);
+	const showManageAccountsAction = Boolean(
+		showManageAccounts && onManageAccounts,
+	);
+	const showAddAccountAction = Boolean(showAddAccount && onAddAccount);
+	const showSetupAnotherDeviceAction = Boolean(
+		showSetupAnotherDevice && onSetupAnotherDevice,
+	);
+	const showSettingsAction = Boolean(showSettings && onSettings);
+	const showLockAllAction = Boolean(
+		showLockAll && accounts.length > 0 && unlockedEmails.length > 0,
+	);
+	const showRemoveAccountAction = Boolean(
+		showRemoveAccount &&
+			onRemoveAccount &&
+			activeAccount &&
+			!isAllAccountsMode,
+	);
+	const hasPrimaryActions =
+		showAllAccountsAction ||
+		showManageAccountsAction ||
+		showAddAccountAction ||
+		showSetupAnotherDeviceAction ||
+		showSettingsAction ||
+		showLockAllAction;
+	const hasActionsBeforeLockAll =
+		showAllAccountsAction ||
+		showManageAccountsAction ||
+		showAddAccountAction ||
+		showSetupAnotherDeviceAction ||
+		showSettingsAction;
 
 	// Default trigger: Avatar with email or "All Accounts"
 	const defaultTrigger = (
@@ -304,16 +344,13 @@ export function AccountSwitcher({
 					</div>
 				)}
 
-				<DropdownMenuSeparator />
+				{hasPrimaryActions && <DropdownMenuSeparator />}
 
 				{/* All Accounts option (optional) */}
-				{showAllAccountsOption &&
-					onAllAccountsSelect &&
-					accounts.length > 1 &&
-					unlockedEmails.length > 1 && (
+				{showAllAccountsAction && (
 						<>
 							<DropdownMenuItem
-								onClick={onAllAccountsSelect}
+								onClick={onAllAccountsSelect!}
 								className={cn(
 									"flex cursor-pointer items-center gap-2",
 									isAllAccountsMode && "bg-accent",
@@ -343,9 +380,9 @@ export function AccountSwitcher({
 					)}
 
 				{/* Manage Accounts (optional) */}
-				{showManageAccounts && onManageAccounts && (
+				{showManageAccountsAction && (
 					<DropdownMenuItem
-						onClick={onManageAccounts}
+						onClick={onManageAccounts!}
 						className="flex cursor-pointer items-center gap-2"
 					>
 						<UsersIcon className="size-4" />
@@ -356,9 +393,9 @@ export function AccountSwitcher({
 				)}
 
 				{/* Add Account (optional) */}
-				{showAddAccount && onAddAccount && (
+				{showAddAccountAction && (
 					<DropdownMenuItem
-						onClick={onAddAccount}
+						onClick={onAddAccount!}
 						className="flex cursor-pointer items-center gap-2"
 					>
 						<PlusIcon className="size-4" />
@@ -367,9 +404,9 @@ export function AccountSwitcher({
 				)}
 
 				{/* Set up another device (optional) */}
-				{showSetupAnotherDevice && onSetupAnotherDevice && (
+				{showSetupAnotherDeviceAction && (
 					<DropdownMenuItem
-						onClick={onSetupAnotherDevice}
+						onClick={onSetupAnotherDevice!}
 						className="flex cursor-pointer items-center gap-2"
 					>
 						<SmartphoneIcon className="size-4" />
@@ -380,9 +417,9 @@ export function AccountSwitcher({
 				)}
 
 				{/* Settings (optional) */}
-				{showSettings && onSettings && (
+				{showSettingsAction && (
 					<DropdownMenuItem
-						onClick={onSettings}
+						onClick={onSettings!}
 						className="flex cursor-pointer items-center gap-2"
 					>
 						<SettingsIcon className="size-4" />
@@ -390,10 +427,12 @@ export function AccountSwitcher({
 					</DropdownMenuItem>
 				)}
 
-				<DropdownMenuSeparator />
+				{showLockAllAction && hasActionsBeforeLockAll && (
+					<DropdownMenuSeparator />
+				)}
 
 				{/* Lock All */}
-				{accounts.length > 0 && unlockedEmails.length > 0 && (
+				{showLockAllAction && (
 					<DropdownMenuItem
 						onClick={onLockAll}
 						className="flex cursor-pointer items-center gap-2"
@@ -406,14 +445,11 @@ export function AccountSwitcher({
 				)}
 
 				{/* Remove Account (optional) */}
-				{showRemoveAccount &&
-					onRemoveAccount &&
-					activeAccount &&
-					!isAllAccountsMode && (
+				{showRemoveAccountAction && (
 						<>
 							<DropdownMenuSeparator />
 							<DropdownMenuItem
-								onClick={() => onRemoveAccount(activeAccount.email)}
+								onClick={() => onRemoveAccount!(activeAccount!.email)}
 								className="flex cursor-pointer items-center gap-2 text-destructive focus:text-destructive"
 							>
 								<LogOutIcon className="size-4" />

@@ -3,11 +3,16 @@ import {
 	setBroadcastFunction,
 	setControlBroadcastFunction,
 } from "@bittery/api/sync-helper";
-import { verifySession } from "@bittery/auth";
+import { resolveTrustedSourceIpFromHeaders } from "@bittery/api/context";
+import {
+	incrementRateLimitWindow,
+	RATE_LIMIT_NAMESPACE,
+	verifySession,
+} from "@bittery/auth";
 import { db, vaultKey } from "@bittery/db";
 import type { PubSubAdapter } from "@bittery/pubsub";
 import { eq } from "drizzle-orm";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 
 // Types for sync events
@@ -156,9 +161,43 @@ const SESSION_REVALIDATION_HEARTBEATS = 20;
 
 // Max connections per user to prevent resource exhaustion
 const MAX_CONNECTIONS_PER_USER = 10;
+const SSE_CONNECT_SOURCE_WINDOW_LIMIT = 20;
+const SSE_CONNECT_SOURCE_WINDOW_MS = 60 * 1000;
 
 function generateConnectionId(): string {
 	return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+function getWindowBucketStart(windowMs: number, now: Date): Date {
+	return new Date(Math.floor(now.getTime() / windowMs) * windowMs);
+}
+
+function resolveSyncSourceIp(context: Context): string | null {
+	return resolveTrustedSourceIpFromHeaders({
+		forwardedForHeader: context.req.header("X-Forwarded-For"),
+		realIpHeader: context.req.header("X-Real-IP"),
+		cfConnectingIpHeader: context.req.header("CF-Connecting-IP"),
+	});
+}
+
+export async function isSyncConnectionRateLimited(
+	sourceIp: string | null,
+): Promise<boolean> {
+	if (!sourceIp) {
+		return false;
+	}
+
+	const now = new Date();
+	const result = await incrementRateLimitWindow({
+		namespace: RATE_LIMIT_NAMESPACE.syncConnectSource,
+		key: sourceIp,
+		subject: sourceIp,
+		now,
+		windowStart: getWindowBucketStart(SSE_CONNECT_SOURCE_WINDOW_MS, now),
+		limit: SSE_CONNECT_SOURCE_WINDOW_LIMIT,
+	});
+
+	return !result.allowed;
 }
 
 /**
@@ -458,6 +497,11 @@ export function createSyncRouter(pubsub: PubSubAdapter): Hono {
 	const app = new Hono();
 
 	app.get("/events", async (c) => {
+		const sourceIp = resolveSyncSourceIp(c);
+		if (await isSyncConnectionRateLimited(sourceIp)) {
+			return c.json({ error: "Too many connections" }, 429);
+		}
+
 		const authHeader = c.req.header("Authorization");
 		const token = authHeader?.replace("Bearer ", "");
 
@@ -597,7 +641,6 @@ export function createSyncRouter(pubsub: PubSubAdapter): Hono {
 	app.get("/health", (c) => {
 		return c.json({
 			status: "ok",
-			...getConnectionStats(),
 		});
 	});
 

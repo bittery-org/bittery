@@ -1111,6 +1111,16 @@ export async function handlePasskeyGet(
 			rpId,
 			allowCredentials: payload.publicKey.allowCredentials,
 		});
+		logPasskeyEvent("get_intercepted", {
+			requestId: payload.requestId,
+			origin: payload.origin,
+			rpId,
+			selectedCredentialId: payload.selectedCredentialId,
+			mediation: payload.mediation,
+			allowCredentialsCount: payload.publicKey.allowCredentials?.length ?? 0,
+			matchCount: matches.length,
+			matchCredentialIds: matches.map((match) => match.passkey.credentialId),
+		});
 		const selection = resolveGetSelection({
 			matches,
 			selectedCredentialId: payload.selectedCredentialId,

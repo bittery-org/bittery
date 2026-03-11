@@ -208,6 +208,15 @@ export class VaultRepository {
 			return sessionData.userId;
 		}
 
+		if (this.email) {
+			const accountMetadata = await this.storage.getAccountMetadata?.(
+				this.email,
+			);
+			if (accountMetadata?.userId) {
+				return accountMetadata.userId;
+			}
+		}
+
 		const activeUserId = await this.storage.getActiveAccountUserId();
 		if (activeUserId) {
 			return activeUserId;
