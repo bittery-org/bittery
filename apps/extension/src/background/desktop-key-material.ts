@@ -72,7 +72,7 @@ export async function hydrateDesktopAccountMaterial(
 	const localVaultKeys = await storage.getVaultKeys(normalizedEmail);
 	if (!localVaultKeys || localVaultKeys.length === 0) {
 		const vaultKeysResponse = await desktopClient.getVaultKeys(normalizedEmail);
-		const rawVaultKeys = vaultKeysResponse?.vault_keys;
+		const rawVaultKeys = vaultKeysResponse?.vaultKeys;
 		if (rawVaultKeys) {
 			try {
 				const parsed = JSON.parse(rawVaultKeys);

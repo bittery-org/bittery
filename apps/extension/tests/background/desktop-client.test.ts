@@ -1,55 +1,73 @@
 import { describe, expect, test } from "bun:test";
 import { DesktopClient } from "../../src/background/desktop-client";
+import { NativeMessagingClient } from "../../src/background/native-messaging-client";
 
-describe("desktop-client bridge auth", () => {
-	test("refreshes bridge auth after a 401 and retries once", async () => {
-		let authLoads = 0;
-		const seenTokens: string[] = [];
+type FakeListener<T> = (value: T) => void;
 
-		const client = new DesktopClient({
-			loadBridgeAuth: async () => {
-				authLoads += 1;
-				return authLoads === 1
-					? {
-							bridgeToken: "token-1",
-							allowedOrigin: "chrome-extension://test",
-						}
-					: {
-							bridgeToken: "token-2",
-							allowedOrigin: "chrome-extension://test",
-						};
+function createFakePort() {
+	const messageListeners = new Set<FakeListener<unknown>>();
+	const disconnectListeners = new Set<FakeListener<void>>();
+	const postedMessages: unknown[] = [];
+
+	const port = {
+		onMessage: {
+			addListener(listener: FakeListener<unknown>) {
+				messageListeners.add(listener);
 			},
-			fetchImpl: async (_input, init) => {
-				const token = new Headers(init?.headers).get("Authorization");
-				if (!token) {
-					throw new Error("Missing Authorization header");
-				}
-
-				seenTokens.push(token);
-
-				if (token === "Bearer token-1") {
-					return new Response(null, { status: 401 });
-				}
-
-				return new Response(
-					JSON.stringify({
-						locked: false,
-						unlocked_accounts: ["alice@example.com"],
-						timestamp: 123,
-						autolock_timeout_ms: 456,
-					}),
-					{
-						status: 200,
-						headers: { "Content-Type": "application/json" },
-					},
-				);
+		},
+		onDisconnect: {
+			addListener(listener: FakeListener<void>) {
+				disconnectListeners.add(listener);
 			},
-		});
+		},
+		postMessage(message: unknown) {
+			postedMessages.push(message);
+		},
+		disconnect() {
+			for (const listener of disconnectListeners) {
+				listener();
+			}
+		},
+	} as chrome.runtime.Port;
 
+	return {
+		port,
+		postedMessages,
+		emitMessage(message: unknown) {
+			for (const listener of messageListeners) {
+				listener(message);
+			}
+		},
+		emitDisconnect(lastError?: string) {
+			(globalThis as { chrome?: typeof chrome }).chrome = {
+				runtime: {
+					lastError: lastError ? { message: lastError } : undefined,
+				},
+			} as typeof chrome;
+			for (const listener of disconnectListeners) {
+				listener();
+			}
+		},
+	};
+}
+
+describe("desktop-client native transport", () => {
+	test("routes desktop status requests over native messaging", async () => {
+		const nativeClient = {
+			request: async () => ({
+				type: "DESKTOP_STATUS" as const,
+				available: true,
+				locked: false,
+				unlockedAccounts: ["alice@example.com"],
+				timestamp: 123,
+				autolockTimeoutMs: 456,
+			}),
+			subscribeToDesktopEvents: () => () => {},
+		};
+
+		const client = new DesktopClient({ nativeClient });
 		const status = await client.getLockStatus();
 
-		expect(authLoads).toBe(2);
-		expect(seenTokens).toEqual(["Bearer token-1", "Bearer token-2"]);
 		expect(status).toEqual({
 			available: true,
 			locked: false,
@@ -59,76 +77,127 @@ describe("desktop-client bridge auth", () => {
 		});
 	});
 
-	test("includes item context metadata when requesting desktop decryption", async () => {
-		let requestBody: {
-			email: string;
-			items: Array<{
-				id: string;
-				vaultId: string;
-				encryptedData: string;
-				encryptionIv: string;
-				encryptionAlgorithm: string;
-				version?: number;
-				userId?: string;
-			}>;
-		} | null = null;
+	test("caches desktop auth token and snapshot responses briefly", async () => {
+		const requests: Array<string> = [];
+		const nativeClient = {
+			request: async (message: { type: string }) => {
+				requests.push(message.type);
+				if (message.type === "GET_DESKTOP_AUTH_TOKEN") {
+					return {
+						type: "DESKTOP_AUTH_TOKEN" as const,
+						email: "alice@example.com",
+						authToken: "token-1",
+					};
+				}
 
-		const client = new DesktopClient({
-			loadBridgeAuth: async () => ({
-				bridgeToken: "token-1",
-				allowedOrigin: "chrome-extension://test",
-			}),
-			fetchImpl: async (_input, init) => {
-				requestBody = JSON.parse(String(init?.body));
-				return new Response(
-					JSON.stringify({
-						decrypted_items: [
-							{
-								id: "item-1",
-								decrypted_data: "{\"title\":\"Example\"}",
-							},
-						],
-						failed: [],
-					}),
-					{
-						status: 200,
-						headers: { "Content-Type": "application/json" },
-					},
-				);
+				return {
+					type: "DESKTOP_ITEMS_SNAPSHOT" as const,
+					items: [{ id: "item-1", vaultId: "vault-1", vault: { id: "vault-1", name: "Main", type: "personal", icon: null, imageUrl: null } }],
+					generatedAt: 123,
+				};
+			},
+			subscribeToDesktopEvents: () => () => {},
+		};
+
+		const client = new DesktopClient({ nativeClient });
+
+		await client.getAuthToken("alice@example.com");
+		await client.getAuthToken("alice@example.com");
+		await client.getItemsSnapshot(["alice@example.com"]);
+		await client.getItemsSnapshot(["alice@example.com"]);
+
+		expect(requests).toEqual([
+			"GET_DESKTOP_AUTH_TOKEN",
+			"GET_DESKTOP_ITEMS_SNAPSHOT",
+		]);
+	});
+});
+
+describe("native-messaging-client", () => {
+	test("reconnects after disconnect and routes the next request through a new port", async () => {
+		const firstPort = createFakePort();
+		const secondPort = createFakePort();
+		let connectCount = 0;
+
+		const client = new NativeMessagingClient({
+			connectNative: () => {
+				connectCount += 1;
+				return connectCount === 1 ? firstPort.port : secondPort.port;
 			},
 		});
 
-		const result = await client.decryptItems("alice@example.com", [
-			{
-				id: "item-1",
-				vaultId: "vault-1",
-				encryptedData: "ciphertext",
-				encryptionIv: "iv",
-				encryptionAlgorithm: "AES-GCM-AAD-V1",
-				version: 3,
-				userId: "user-123",
-			},
-		]);
-
-		expect(requestBody).toEqual({
-			email: "alice@example.com",
-			items: [
-				{
-					id: "item-1",
-					vaultId: "vault-1",
-					encryptedData: "ciphertext",
-					encryptionIv: "iv",
-					encryptionAlgorithm: "AES-GCM-AAD-V1",
-					version: 3,
-					userId: "user-123",
-				},
-			],
+		const firstRequest = client.request({ type: "GET_DESKTOP_STATUS" });
+		const firstEnvelope = firstPort.postedMessages[0] as {
+			requestId: string;
+		};
+		firstPort.emitMessage({
+			requestId: firstEnvelope.requestId,
+			type: "DESKTOP_STATUS",
+			available: true,
+			locked: false,
+			unlockedAccounts: [],
+			timestamp: 1,
+			autolockTimeoutMs: 2,
 		});
-		expect(result).toEqual([
-			{
-				id: "item-1",
-				decrypted_data: "{\"title\":\"Example\"}",
+		await firstRequest;
+
+		firstPort.emitDisconnect();
+
+		const secondRequest = client.request({ type: "GET_DESKTOP_STATUS" });
+		const secondEnvelope = secondPort.postedMessages[0] as {
+			requestId: string;
+		};
+		secondPort.emitMessage({
+			requestId: secondEnvelope.requestId,
+			type: "DESKTOP_STATUS",
+			available: true,
+			locked: true,
+			unlockedAccounts: [],
+			timestamp: 2,
+			autolockTimeoutMs: 3,
+		});
+
+		await expect(secondRequest).resolves.toEqual({
+			type: "DESKTOP_STATUS",
+			requestId: secondEnvelope.requestId,
+			available: true,
+			locked: true,
+			unlockedAccounts: [],
+			timestamp: 2,
+			autolockTimeoutMs: 3,
+		});
+	});
+
+	test("delivers desktop events through the persistent native port", async () => {
+		const fakePort = createFakePort();
+		const events: string[] = [];
+		const client = new NativeMessagingClient({
+			connectNative: () => fakePort.port,
+		});
+
+		const unsubscribe = client.subscribeToDesktopEvents((event) => {
+			events.push(event.event);
+		});
+
+		const subscribeEnvelope = fakePort.postedMessages[0] as {
+			requestId: string;
+		};
+		fakePort.emitMessage({
+			requestId: subscribeEnvelope.requestId,
+			type: "DESKTOP_EVENT_SUBSCRIPTION",
+			subscribed: true,
+		});
+		fakePort.emitMessage({
+			type: "DESKTOP_EVENT",
+			event: "unlock",
+			payload: {
+				accounts: ["alice@example.com"],
+				timestamp: 123,
 			},
-		]);
+		});
+
+		expect(events).toEqual(["unlock"]);
+
+		unsubscribe();
 	});
 });

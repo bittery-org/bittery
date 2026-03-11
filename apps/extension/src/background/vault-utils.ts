@@ -3,27 +3,12 @@
  * Shared helpers for vault operations.
  */
 
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
-import type {
-	DecryptedItem,
-	DecryptedItemData,
-	ItemCategory,
-} from "@bittery/shared/types";
-import type { AccountMetadata, ActiveAccount } from "@bittery/storage";
-import type {
-	CachedEncryptedItem,
-	CachedVaultMetadata,
-	RawEncryptedItemWithVault,
-} from "@bittery/types";
+import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
 import { storage } from "../lib/storage";
 import { core } from "./core-instance";
 import { desktopClient } from "./desktop-client";
 import { desktopSync } from "./desktop-sync";
 
-type AccountTrpcClient = ReturnType<typeof createAccountTrpcClient>;
-type VaultListResponse = Awaited<
-	ReturnType<AccountTrpcClient["vault"]["list"]["query"]>
->;
 type MultiAccountItem = DecryptedItem & {
 	vault: {
 		id: string;
@@ -39,26 +24,108 @@ type MultiAccountItem = DecryptedItem & {
 	};
 };
 
-type DesktopAccountContext = {
-	email: string;
-	userId: string;
-	name: string;
-};
-
-function buildAccountContext(
-	account: AccountMetadata | null,
-	email: string,
-): DesktopAccountContext {
-	return {
-		email: account?.email ?? email,
-		userId: account?.userId ?? "",
-		name: account?.name ?? email,
-	};
+function isItemCategory(value: unknown): value is ItemCategory {
+	return (
+		value === "login" ||
+		value === "secure-note" ||
+		value === "credit-card" ||
+		value === "identity" ||
+		value === "totp"
+	);
 }
 
-async function getDesktopTargetEmails(
-	activeAccount: ActiveAccount,
-): Promise<string[]> {
+function normalizeDesktopSnapshotItem(
+	item: Record<string, unknown>,
+	includeAccountContext: boolean,
+): MultiAccountItem | null {
+	if (typeof item.id !== "string" || typeof item.vaultId !== "string") {
+		return null;
+	}
+
+	const vault = item.vault as Record<string, unknown> | null | undefined;
+	if (
+		typeof vault !== "object" ||
+		vault === null ||
+		typeof vault.id !== "string" ||
+		typeof vault.name !== "string" ||
+		typeof vault.type !== "string"
+	) {
+		return null;
+	}
+
+	if (!isItemCategory(item.category)) {
+		return null;
+	}
+
+	if (typeof item.title !== "string") {
+		return null;
+	}
+
+	const normalized: MultiAccountItem = {
+		id: item.id,
+		vaultId: item.vaultId,
+		category: item.category,
+		favorite: Boolean(item.favorite),
+		createdAt:
+			typeof item.createdAt === "string"
+				? item.createdAt
+				: String(item.createdAt ?? ""),
+		updatedAt:
+			typeof item.updatedAt === "string"
+				? item.updatedAt
+				: String(item.updatedAt ?? ""),
+		title: item.title,
+		url: typeof item.url === "string" ? item.url : undefined,
+		urls: Array.isArray(item.urls)
+			? item.urls.filter((value): value is string => typeof value === "string")
+			: undefined,
+		username:
+			typeof item.username === "string" ? item.username : undefined,
+		password:
+			typeof item.password === "string" ? item.password : undefined,
+		notes: typeof item.notes === "string" ? item.notes : undefined,
+		note: typeof item.note === "string" ? item.note : undefined,
+		tags: Array.isArray(item.tags)
+			? item.tags.filter((value): value is string => typeof value === "string")
+			: undefined,
+		totpSecret:
+			typeof item.totpSecret === "string" ? item.totpSecret : undefined,
+		totpIssuer:
+			typeof item.totpIssuer === "string" ? item.totpIssuer : undefined,
+		totpAccountName:
+			typeof item.totpAccountName === "string"
+				? item.totpAccountName
+				: undefined,
+		vault: {
+			id: vault.id,
+			name: vault.name,
+			type: vault.type,
+			icon: typeof vault.icon === "string" ? vault.icon : null,
+			imageUrl: typeof vault.imageUrl === "string" ? vault.imageUrl : null,
+		},
+	};
+
+	if (includeAccountContext) {
+		const account = item.account as Record<string, unknown> | null | undefined;
+		if (
+			typeof account === "object" &&
+			account !== null &&
+			typeof account.email === "string"
+		) {
+			normalized.account = {
+				email: account.email,
+				userId: typeof account.userId === "string" ? account.userId : "",
+				name:
+					typeof account.name === "string" ? account.name : account.email,
+			};
+		}
+	}
+
+	return normalized;
+}
+
+async function getDesktopTargetEmails(): Promise<string[]> {
+	const activeAccount = await storage.getActiveAccount();
 	if (activeAccount?.type === "single") {
 		return [activeAccount.email.toLowerCase()];
 	}
@@ -70,286 +137,58 @@ async function getDesktopTargetEmails(
 		return Array.from(new Set(statusEmails));
 	}
 
-	const sessionData = await desktopClient.getSessionData();
-	if (!sessionData) return [];
+	const accounts = await desktopClient.getAccounts();
+	if (!accounts) {
+		return [];
+	}
 
 	return Array.from(
-		new Set(sessionData.accounts.map((account) => account.email.toLowerCase())),
+		new Set(accounts.unlockedAccounts.map((email) => email.toLowerCase())),
 	);
 }
 
-function buildRawItemsFromVaultList(vaults: VaultListResponse) {
-	const rawItems: RawEncryptedItemWithVault[] = [];
-	for (const vault of vaults) {
-		for (const item of vault.items ?? []) {
-			rawItems.push({
-				id: item.id,
-				vaultId: item.vaultId,
-				category: item.category,
-				favorite: item.favorite,
-				encryptedData: item.encryptedData,
-				encryptionIv: item.encryptionIv,
-				encryptionAlgorithm: item.encryptionAlgorithm,
-				version: item.version,
-				lastModifiedBy: item.lastModifiedBy ?? null,
-				createdAt: item.createdAt,
-				updatedAt: item.updatedAt,
-				deletedAt: item.deletedAt,
-				vault: {
-					id: vault.id,
-					name: vault.name,
-					type: vault.type,
-					icon: vault.icon,
-					imageUrl: vault.imageUrl,
-				},
-			});
-		}
-	}
-	return rawItems;
-}
-
-function buildCachedItemsFromVaultList(vaults: VaultListResponse) {
-	const cachedItems: CachedEncryptedItem[] = [];
-	for (const vault of vaults) {
-		for (const item of vault.items ?? []) {
-			cachedItems.push({
-				id: item.id,
-				vaultId: item.vaultId,
-				category: item.category,
-				favorite: item.favorite,
-				encryptedData: item.encryptedData,
-				encryptionIv: item.encryptionIv,
-				encryptionAlgorithm: item.encryptionAlgorithm,
-				version: item.version ?? 0,
-				lastModifiedBy: item.lastModifiedBy ?? null,
-				createdAt: String(item.createdAt),
-				updatedAt: String(item.updatedAt),
-				deletedAt: item.deletedAt ? String(item.deletedAt) : null,
-			});
-		}
-	}
-	return cachedItems;
-}
-
-function buildCachedVaultsFromVaultList(vaults: VaultListResponse) {
-	return vaults.map((vault) => ({
-		id: vault.id,
-		name: vault.name,
-		type: vault.type,
-		icon: vault.icon,
-		imageUrl: vault.imageUrl,
-	})) satisfies CachedVaultMetadata[];
-}
-
-function buildRawItemsFromCache(
-	cachedItems: CachedEncryptedItem[],
-	cachedVaults: CachedVaultMetadata[],
-) {
-	const vaultMap = new Map(cachedVaults.map((vault) => [vault.id, vault]));
-
-	return cachedItems.map((item) => {
-		const vault = vaultMap.get(item.vaultId);
-		return {
-			id: item.id,
-			vaultId: item.vaultId,
-			category: item.category,
-			favorite: item.favorite,
-			encryptedData: item.encryptedData,
-			encryptionIv: item.encryptionIv,
-			encryptionAlgorithm: item.encryptionAlgorithm,
-			version: item.version,
-			lastModifiedBy: item.lastModifiedBy ?? null,
-			createdAt: item.createdAt,
-			updatedAt: item.updatedAt,
-			deletedAt: item.deletedAt,
-			vault: vault
-				? {
-						id: vault.id,
-						name: vault.name,
-						type: vault.type,
-						icon: vault.icon,
-						imageUrl: vault.imageUrl,
-					}
-				: {
-						id: item.vaultId,
-						name: "Unknown",
-						type: "personal",
-						icon: null,
-						imageUrl: null,
-					},
-		};
-	}) satisfies RawEncryptedItemWithVault[];
-}
-
-async function decryptRawItemsViaDesktop(
-	rawItems: RawEncryptedItemWithVault[],
-	email: string,
-	includeAccountContext: boolean,
-) {
-	const accountMeta = (await storage.getAccountMetadata?.(email)) ?? null;
-	const sessionAccount = accountMeta?.userId
-		? null
-		: (await desktopClient.getSessionData())?.accounts.find(
-				(account) => account.email.toLowerCase() === email.toLowerCase(),
-			);
-	const fallbackUserId = accountMeta?.userId ?? sessionAccount?.user_id ?? null;
-
-	const nonDeletedItems = rawItems.filter((item) => !item.deletedAt);
-	if (nonDeletedItems.length === 0) {
-		return [];
-	}
-
-	const decryptedItems = await desktopClient.decryptItems(
-		email,
-		nonDeletedItems.map((item) => ({
-			id: item.id,
-			vaultId: item.vaultId,
-			encryptedData: item.encryptedData,
-			encryptionIv: item.encryptionIv,
-			encryptionAlgorithm: item.encryptionAlgorithm,
-			version:
-				typeof item.version === "number" && item.version > 0
-					? Math.floor(item.version)
-					: 1,
-			userId: item.lastModifiedBy ?? fallbackUserId ?? undefined,
-		})),
-	);
-	const decryptedById = new Map(
-		decryptedItems.map((item) => [item.id, item.decrypted_data]),
-	);
-
-	const merged = nonDeletedItems.map((item) => {
-		const decryptedJson = decryptedById.get(item.id);
-		if (!decryptedJson) return null;
-
-		try {
-			const decryptedData = JSON.parse(decryptedJson) as DecryptedItemData;
-			const resolved: MultiAccountItem = {
-				id: item.id,
-				vaultId: item.vaultId,
-				category: item.category as ItemCategory,
-				favorite: item.favorite,
-				createdAt: String(item.createdAt),
-				updatedAt: String(item.updatedAt),
-				...decryptedData,
-				vault: item.vault,
-			};
-
-			if (includeAccountContext) {
-				resolved.account = buildAccountContext(accountMeta, email);
-			}
-
-			return resolved;
-		} catch (error) {
-			console.error(
-				`[vault-utils] Failed to parse decrypted item ${item.id}:`,
-				error,
-			);
-			return null;
-		}
-	});
-
-	return merged.filter((item): item is MultiAccountItem => item !== null);
-}
-
-async function decryptVaultItemsForAccountViaDesktop(
-	email: string,
-	includeAccountContext: boolean,
-): Promise<MultiAccountItem[]> {
-	const [cachedItemsSnapshot, cachedVaultsSnapshot, cacheMeta] =
-		await Promise.all([
-			storage.getCachedItems?.(email),
-			storage.getCachedVaults?.(email),
-			storage.getItemCacheMetadata?.(email),
-		]);
-
-	const hasCacheSnapshot =
-		!!cachedItemsSnapshot &&
-		!!cachedVaultsSnapshot &&
-		(cachedItemsSnapshot.length > 0 || cacheMeta !== null);
-	if (hasCacheSnapshot) {
-		try {
-			return await decryptRawItemsViaDesktop(
-				buildRawItemsFromCache(cachedItemsSnapshot, cachedVaultsSnapshot),
-				email,
-				includeAccountContext,
-			);
-		} catch (error) {
-			console.warn(
-				`[vault-utils] Cache decrypt failed for ${email}, refetching from server:`,
-				error,
-			);
-		}
-	}
-
-	const authToken = await desktopClient.getAuthToken(email);
-	if (!authToken) {
-		console.warn(
-			`[vault-utils] No auth token available from desktop for ${email}`,
-		);
-		return [];
-	}
-
-	const serverUrl =
-		(await storage.getServerUrl(email)) || "http://localhost:3000";
-	const accountClient = createAccountTrpcClient(authToken, serverUrl);
-	const vaults = await accountClient.vault.list.query();
-	const rawItems = buildRawItemsFromVaultList(vaults);
-
-	const cachedItems = buildCachedItemsFromVaultList(vaults);
-	await Promise.all([
-		storage.setCachedItems?.(cachedItems, email),
-		storage.setCachedVaults?.(buildCachedVaultsFromVaultList(vaults), email),
-		storage.setItemCacheMetadata?.(
-			{
-				lastFullSyncAt: Date.now(),
-				itemCount: cachedItems.length,
-				cacheVersion: 1,
-			},
-			email,
-		),
-	]);
-
-	return decryptRawItemsViaDesktop(rawItems, email, includeAccountContext);
-}
-
-async function decryptVaultItemsViaDesktop(): Promise<MultiAccountItem[]> {
+async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[]> {
 	const activeAccount = await storage.getActiveAccount();
-	const targetEmails = await getDesktopTargetEmails(activeAccount);
-
+	const targetEmails = await getDesktopTargetEmails();
 	if (targetEmails.length === 0) {
 		return [];
 	}
 
 	const includeAccountContext = activeAccount?.type === "all";
-	const results = await Promise.all(
-		targetEmails.map((email) =>
-			decryptVaultItemsForAccountViaDesktop(email, includeAccountContext),
-		),
-	);
+	const snapshot = await desktopClient.getItemsSnapshot(targetEmails);
+	if (!snapshot) {
+		return [];
+	}
 
-	return results.flat();
+	return snapshot.items
+		.map((item) =>
+			normalizeDesktopSnapshotItem(
+				item as Record<string, unknown>,
+				includeAccountContext,
+			),
+		)
+		.filter((item): item is MultiAccountItem => item !== null);
 }
 
 /**
  * Get decrypted items for current runtime mode.
- * Uses desktop bridge decryption in desktop mode and falls back to core/local decryption.
+ * Uses desktop snapshots in desktop mode and falls back to core/local decryption.
  */
 export async function getDecryptedItemsForCurrentMode(): Promise<
 	Array<DecryptedItem | null>
 > {
 	const desktopStatus =
 		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
-	const desktopDecryptionAvailable = Boolean(
+	const desktopReadAvailable = Boolean(
 		desktopStatus?.available && !desktopStatus.locked,
 	);
 
-	if (desktopDecryptionAvailable) {
+	if (desktopReadAvailable) {
 		try {
-			return await decryptVaultItemsViaDesktop();
+			return await getDesktopItemsSnapshot();
 		} catch (error) {
 			console.warn(
-				"[vault-utils] Desktop decryption failed, falling back to local decryption:",
+				"[vault-utils] Desktop snapshot read failed, falling back to local decryption:",
 				error,
 			);
 		}

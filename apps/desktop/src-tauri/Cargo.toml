@@ -30,15 +30,9 @@ tauri-plugin-store = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-hyper = { version = "0.14", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1"
-async-stream = "0.3"
-reqwest = { version = "0.11", features = ["json"] }
 dirs = "5.0"
 base64 = "0.22"
-urlencoding = "2.1"
-rand = "0.8"
 
 # Native crypto
 bittery-crypto-core = { path = "../../../packages/crypto/core/crates/bittery-crypto-core" }

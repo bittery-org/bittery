@@ -164,6 +164,11 @@ All tRPC object schemas reviewed were either `loose` or `missing`. I found no ro
 
 ### Finding 1: Unauthenticated local desktop bridge exposes bearer tokens, vault keys, and plaintext decryption to any local web page
 
+Status update (March 11, 2026):
+- The loopback HTTP bridge on `127.0.0.1:48765` has been removed.
+- Desktop-extension communication now uses native messaging plus desktop-local IPC, and the desktop app no longer exposes `/native-bridge/*` HTTP endpoints.
+- This finding remains here as historical audit context for the removed design.
+
 - Severity: Critical
 - Location:
   - `apps/desktop/src-tauri/src/lib.rs:142-166`

@@ -25,13 +25,14 @@ export async function handleCheckNativeBiometric(): Promise<MessageResponse> {
 		});
 
 		const responseData = response as any;
-		const result = {
-			success: true,
-			available:
-				responseData?.type === "BIOMETRIC_STATUS" && responseData.available,
-			enabled: responseData?.enabled || false,
-			appRunning: responseData?.app_running || false,
-		};
+			const result = {
+				success: true,
+				available:
+					responseData?.type === "BIOMETRIC_STATUS" && responseData.available,
+				enabled: responseData?.enabled || false,
+				appRunning:
+					responseData?.appRunning || responseData?.app_running || false,
+			};
 		return result;
 	} catch (error) {
 		console.error("[CHECK_NATIVE_BIOMETRIC] Error:", error);
@@ -263,18 +264,9 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		// The extension should wait for the unlock to complete via SSE events
 		if (desktopAvailable && desktopLocked) {
 			try {
-				const response = await desktopClient.fetchBridge(
-					"/native-bridge/trigger-unlock",
-					{
-						method: "POST",
-						headers: { "Content-Type": "application/json" },
-					},
-				);
-
-				if (!response.ok) {
-					throw new Error(
-						`Desktop unlock trigger failed: ${response.statusText}`,
-					);
+				const triggered = await desktopClient.triggerDesktopUnlock();
+				if (!triggered) {
+					throw new Error("Desktop unlock trigger failed");
 				}
 
 				// Don't return success - throw an error to let the UI know unlock is pending

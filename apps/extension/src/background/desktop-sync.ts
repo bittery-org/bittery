@@ -1,12 +1,13 @@
 /**
  * Desktop Sync Service
  *
- * Polls desktop app for lock status and subscribes to SSE events
+ * Polls desktop app for lock status and subscribes to desktop events
  * for real-time lock/unlock synchronization.
  */
 
 import { storage } from "../lib/storage";
 import { desktopClient, type DesktopStatus } from "./desktop-client";
+import type { DesktopEventPayload } from "./desktop-protocol";
 import {
 	type DesktopModeStateSnapshot,
 	evaluateDesktopRecoveryDecision,
@@ -42,7 +43,7 @@ class DesktopSyncService {
 	private lastDesktopStatus: DesktopStatus | null = null;
 	private desktopAvailable = false;
 	private pollInterval: ReturnType<typeof setInterval> | null = null;
-	private eventSource: { close: () => void } | null = null;
+	private unsubscribeDesktopEvents: (() => void) | null = null;
 
 	/**
 	 * Initialize the desktop sync service
@@ -50,8 +51,8 @@ class DesktopSyncService {
 	 * Lifecycle phases:
 	 * 1) Seed local account/cache state from desktop availability.
 	 * 2) Attempt restart recovery if desktop mode was recently active.
-	 * 3) Fall back to a fresh status check and subscribe to SSE.
-	 * 4) Keep polling as a safety net if SSE drops.
+	 * 3) Fall back to a fresh status check and subscribe to desktop events.
+	 * 4) Keep polling as a safety net if event delivery drops.
 	 */
 	async initialize(): Promise<void> {
 		// Check if desktop is available first
@@ -104,8 +105,7 @@ class DesktopSyncService {
 					}
 				}
 
-				// Subscribe to SSE for real-time events
-				await this.subscribeToSSE();
+				await this.subscribeToDesktopEvents();
 			} else {
 				await this.clearDesktopModeState();
 			}
@@ -127,8 +127,7 @@ class DesktopSyncService {
 					});
 				}
 
-				// Subscribe to SSE for real-time events
-				await this.subscribeToSSE();
+				await this.subscribeToDesktopEvents();
 			}
 		}
 
@@ -188,14 +187,14 @@ class DesktopSyncService {
 			}
 
 			// Update active account if desktop has one set
-			if (accountsData.active_account) {
+			if (accountsData.activeAccount) {
 				// Check if active account is "all" or a specific email
-				if (accountsData.active_account === "all") {
+				if (accountsData.activeAccount === "all") {
 					await storage.setActiveAccount({ type: "all" });
 				} else {
 					await storage.setActiveAccount({
 						type: "single",
-						email: accountsData.active_account,
+						email: accountsData.activeAccount,
 					});
 				}
 			}
@@ -208,7 +207,7 @@ class DesktopSyncService {
 	}
 
 	/**
-	 * Check desktop status via HTTP
+	 * Check desktop status
 	 */
 	async checkDesktopStatus(): Promise<DesktopStatus | null> {
 		const data = await desktopClient.getLockStatus();
@@ -224,122 +223,40 @@ class DesktopSyncService {
 	}
 
 	/**
-	 * Subscribe to SSE for real-time lock/unlock events
+	 * Subscribe to desktop events over native messaging
 	 */
-	async subscribeToSSE(): Promise<void> {
-		if (this.eventSource) {
-			this.eventSource.close();
+	async subscribeToDesktopEvents(): Promise<void> {
+		if (this.unsubscribeDesktopEvents) {
+			this.unsubscribeDesktopEvents();
 		}
 
-		try {
-			const controller = new AbortController();
-			this.eventSource = {
-				close: () => controller.abort(),
-			};
-
-			const response = await desktopClient.fetchBridge(
-				"/native-bridge/lock-events",
-				{
-					method: "GET",
-					signal: controller.signal,
-				},
-			);
-
-			if (!response.ok || !response.body) {
-				throw new Error(`HTTP ${response.status}`);
-			}
-
-			void this.consumeSseStream(response.body, controller);
-		} catch (error) {
-			console.error("[Desktop Sync] Failed to subscribe to SSE:", error);
-			this.desktopAvailable = false;
-		}
+		this.unsubscribeDesktopEvents = desktopClient.subscribeToDesktopEvents(
+			(event) => {
+				void this.handleDesktopEvent(event);
+			},
+		);
 	}
 
-	private async consumeSseStream(
-		stream: ReadableStream<Uint8Array>,
-		controller: AbortController,
-	): Promise<void> {
-		const reader = stream.getReader();
-		const decoder = new TextDecoder();
-		let buffer = "";
+	private async handleDesktopEvent(event: DesktopEventPayload): Promise<void> {
+		await this.saveDesktopModeState();
 
-		try {
-			while (true) {
-				const { value, done } = await reader.read();
-				if (done) {
-					break;
-				}
-
-				buffer += decoder.decode(value, { stream: true });
-
-				let delimiterIndex = buffer.indexOf("\n\n");
-				while (delimiterIndex !== -1) {
-					const rawEvent = buffer.slice(0, delimiterIndex).trim();
-					buffer = buffer.slice(delimiterIndex + 2);
-					this.handleSseEvent(rawEvent);
-					delimiterIndex = buffer.indexOf("\n\n");
-				}
-			}
-		} catch (error) {
-			if (!controller.signal.aborted) {
-				console.error("[Desktop Sync] SSE stream error:", error);
-			}
-		} finally {
-			reader.releaseLock();
-			if (!controller.signal.aborted) {
-				this.eventSource = null;
-			}
-		}
-	}
-
-	private handleSseEvent(rawEvent: string): void {
-		if (!rawEvent) {
+		if (event.event === "lock") {
+			await this.handleLockEvent(event.payload);
 			return;
 		}
 
-		let eventType = "message";
-		let data = "";
-
-		for (const line of rawEvent.split(/\r?\n/)) {
-			if (line.startsWith("event:")) {
-				eventType = line.slice(6).trim();
-				continue;
-			}
-
-			if (line.startsWith("data:")) {
-				data += line.slice(5).trim();
-			}
-		}
-
-		if (eventType === "connected") {
-			void this.saveDesktopModeState();
+		if (event.event === "unlock") {
+			await this.handleUnlockEvent(event.payload);
 			return;
 		}
 
-		try {
-			if (eventType === "lock") {
-				void this.handleLockEvent(JSON.parse(data) as LockEvent);
-				return;
-			}
+		if (event.event === "desktop_close") {
+			await this.handleDesktopCloseEvent(event.payload);
+			return;
+		}
 
-			if (eventType === "unlock") {
-				void this.handleUnlockEvent(JSON.parse(data) as UnlockEvent);
-				return;
-			}
-
-			if (eventType === "desktop_close") {
-				void this.handleDesktopCloseEvent(JSON.parse(data) as DesktopCloseEvent);
-				return;
-			}
-
-			if (eventType === "active_account_changed") {
-				void this.handleActiveAccountChanged(
-					JSON.parse(data) as ActiveAccountChangedEvent,
-				);
-			}
-		} catch (error) {
-			console.error("[Desktop Sync] Failed to parse bridge event:", error);
+		if (event.event === "active_account_changed") {
+			await this.handleActiveAccountChanged(event.payload);
 		}
 	}
 
@@ -407,10 +324,9 @@ class DesktopSyncService {
 		// Clear desktop mode state
 		await this.clearDesktopModeState();
 
-		// Close SSE connection
-		if (this.eventSource) {
-			this.eventSource.close();
-			this.eventSource = null;
+		if (this.unsubscribeDesktopEvents) {
+			this.unsubscribeDesktopEvents();
+			this.unsubscribeDesktopEvents = null;
 		}
 	}
 
@@ -514,9 +430,9 @@ class DesktopSyncService {
 	dispose(): void {
 		this.stopPolling();
 
-		if (this.eventSource) {
-			this.eventSource.close();
-			this.eventSource = null;
+		if (this.unsubscribeDesktopEvents) {
+			this.unsubscribeDesktopEvents();
+			this.unsubscribeDesktopEvents = null;
 		}
 
 		this.desktopAvailable = false;

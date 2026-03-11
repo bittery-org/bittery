@@ -1,23 +1,20 @@
 mod crypto_commands;
+mod desktop_ipc;
 mod keychain;
 mod native_messaging_installer;
 
-use std::convert::Infallible;
-use std::net::SocketAddr;
 use std::sync::Arc;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use hyper::body::HttpBody;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Method, Request, Response, Server, StatusCode};
-use rand::RngCore;
-use tokio::sync::{Mutex, broadcast};
+use desktop_ipc::{
+    desktop_ipc_socket_path, write_frame, DesktopEnvelope, DesktopEventKind,
+    DesktopRequest, DesktopResponse,
+};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::broadcast;
 use tauri::{Emitter, Manager, Runtime};
 use tauri_plugin_store::Store;
 
-/// Lock event types for SSE broadcasting
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(tag = "event", rename_all = "snake_case")]
+#[derive(Debug, Clone)]
 enum LockEvent {
     Lock {
         reason: String,
@@ -36,24 +33,14 @@ enum LockEvent {
     },
 }
 
-/// State for native bridge HTTP server
-struct NativeBridgeState {
-    /// Pending unlock requests (challenge -> extension_id)
-    pending_requests: Arc<Mutex<std::collections::HashMap<String, String>>>,
-    /// Broadcast channel for lock events (for SSE)
+struct DesktopIpcState {
     lock_events: broadcast::Sender<LockEvent>,
-    /// Per-session HTTP bearer token for the loopback bridge
-    bridge_token: String,
 }
 
-impl Default for NativeBridgeState {
+impl Default for DesktopIpcState {
     fn default() -> Self {
         let (tx, _) = broadcast::channel(100);
-        Self {
-            pending_requests: Arc::new(Mutex::new(std::collections::HashMap::new())),
-            lock_events: tx,
-            bridge_token: generate_bridge_token(),
-        }
+        Self { lock_events: tx }
     }
 }
 
@@ -63,217 +50,6 @@ const LEGACY_BIOMETRIC_ENABLED_KEY: &str = "bittery_biometric_enabled";
 const LEGACY_JWT_TOKEN_KEY: &str = "bittery_jwt_token";
 const LEGACY_VAULT_KEYS_KEY: &str = "bittery_vault_keys";
 const CONTEXT_ENVELOPE_MARKER: &str = "bittery-context-envelope-v1";
-const BRIDGE_POST_BODY_LIMIT_BYTES: usize = 1024 * 1024;
-const BRIDGE_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-#[derive(serde::Deserialize)]
-struct BiometricUnlockRequest {
-    challenge: String,
-    extension_id: String,
-    email: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct BiometricUnlockAllRequest {
-    challenge: String,
-    extension_id: String,
-}
-
-#[derive(serde::Deserialize)]
-struct DecryptItemPayload {
-    id: String,
-    #[serde(rename = "vaultId")]
-    vault_id: String,
-    #[serde(rename = "encryptedData")]
-    encrypted_data: String,
-    #[serde(rename = "encryptionIv")]
-    encryption_iv: String,
-    #[serde(rename = "encryptionAlgorithm")]
-    encryption_algorithm: String,
-    version: Option<u64>,
-    #[serde(rename = "userId")]
-    user_id: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct DecryptItemsRequest {
-    email: String,
-    items: Vec<DecryptItemPayload>,
-}
-
-#[derive(Default)]
-struct VaultKeysQuery {
-    email: Option<String>,
-}
-
-#[derive(Default)]
-struct BridgeAuthQuery {
-    extension_id: Option<String>,
-}
-
-fn generate_bridge_token() -> String {
-    let mut bytes = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
-    URL_SAFE_NO_PAD.encode(bytes)
-}
-
-fn build_response(status: StatusCode, origin: Option<&str>, body: Body) -> Response<Body> {
-    let mut builder = Response::builder().status(status);
-    if let Some(origin_value) = origin {
-        builder = builder
-            .header("Access-Control-Allow-Origin", origin_value)
-            .header("Vary", "Origin");
-    }
-
-    builder.body(body).unwrap_or_else(|_| Response::new(Body::empty()))
-}
-
-fn json_response(
-    status: StatusCode,
-    origin: Option<&str>,
-    value: &serde_json::Value,
-) -> Response<Body> {
-    let mut builder = Response::builder()
-        .status(status)
-        .header("Content-Type", "application/json");
-    if let Some(origin_value) = origin {
-        builder = builder
-            .header("Access-Control-Allow-Origin", origin_value)
-            .header("Vary", "Origin");
-    }
-
-    builder
-        .body(Body::from(value.to_string()))
-        .unwrap_or_else(|_| Response::new(Body::empty()))
-}
-
-fn text_response(status: StatusCode, origin: Option<&str>, body: &str) -> Response<Body> {
-    build_response(status, origin, Body::from(body.to_string()))
-}
-
-fn parse_origin(req: &Request<Body>) -> Result<Option<String>, Response<Body>> {
-    match req.headers().get("Origin") {
-        Some(origin) => match origin.to_str() {
-            Ok(value) => Ok(Some(value.to_string())),
-            Err(_) => Err(text_response(
-                StatusCode::BAD_REQUEST,
-                None,
-                "Invalid Origin header",
-            )),
-        },
-        None => Ok(None),
-    }
-}
-
-fn authorize_bridge_request(
-    req: &Request<Body>,
-    state: &NativeBridgeState,
-) -> Result<Option<String>, Response<Body>> {
-    let origin = parse_origin(req)?;
-    if let Some(origin_value) = origin.as_deref() {
-        if !native_messaging_installer::is_allowed_extension_origin(origin_value) {
-            return Err(text_response(StatusCode::FORBIDDEN, None, "Forbidden"));
-        }
-    }
-
-    let auth_header = match req.headers().get("Authorization") {
-        Some(header) => match header.to_str() {
-            Ok(value) => value,
-            Err(_) => {
-                return Err(text_response(
-                    StatusCode::BAD_REQUEST,
-                    origin.as_deref(),
-                    "Invalid Authorization header",
-                ))
-            }
-        },
-        None => {
-            return Err(text_response(
-                StatusCode::UNAUTHORIZED,
-                origin.as_deref(),
-                "Missing Authorization header",
-            ))
-        }
-    };
-
-    let expected = format!("Bearer {}", state.bridge_token);
-    if auth_header != expected {
-        return Err(text_response(
-            StatusCode::UNAUTHORIZED,
-            origin.as_deref(),
-            "Invalid bridge token",
-        ));
-    }
-
-    Ok(origin)
-}
-
-async fn read_body_limited(body: Body) -> Result<Vec<u8>, &'static str> {
-    let mut body = body;
-    let mut bytes = Vec::new();
-
-    while let Some(chunk_result) = body.data().await {
-        let chunk = chunk_result.map_err(|_| "Failed to read request body")?;
-        if bytes.len() + chunk.len() > BRIDGE_POST_BODY_LIMIT_BYTES {
-            return Err("Payload Too Large");
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-
-    Ok(bytes)
-}
-
-async fn parse_json_body<T: serde::de::DeserializeOwned>(
-    req: Request<Body>,
-    origin: Option<&str>,
-) -> Result<T, Response<Body>> {
-    let body_bytes = match read_body_limited(req.into_body()).await {
-        Ok(bytes) => bytes,
-        Err("Payload Too Large") => {
-            return Err(text_response(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                origin,
-                "Payload Too Large",
-            ))
-        }
-        Err(_) => {
-            return Err(text_response(
-                StatusCode::BAD_REQUEST,
-                origin,
-                "Failed to read request body",
-            ))
-        }
-    };
-
-    let body_str = match String::from_utf8(body_bytes) {
-        Ok(value) => value,
-        Err(_) => {
-            return Err(text_response(
-                StatusCode::BAD_REQUEST,
-                origin,
-                "Invalid UTF-8 request body",
-            ))
-        }
-    };
-
-    serde_json::from_str(&body_str).map_err(|_| {
-        text_response(StatusCode::BAD_REQUEST, origin, "Invalid JSON request body")
-    })
-}
-
-fn parse_query_value(req: &Request<Body>, key: &str) -> Result<Option<String>, Response<Body>> {
-    let query = req.uri().query().unwrap_or("");
-    for segment in query.split('&') {
-        if let Some(raw_value) = segment.strip_prefix(&format!("{}=", key)) {
-            let decoded = urlencoding::decode(raw_value).map_err(|_| {
-                text_response(StatusCode::BAD_REQUEST, None, "Invalid query string")
-            })?;
-            return Ok(Some(decoded.into_owned()));
-        }
-    }
-
-    Ok(None)
-}
 
 fn sanitize_email_for_key(email: &str) -> String {
     email
@@ -367,12 +143,51 @@ fn normalize_decrypted_item_payload(decrypted_data: String) -> String {
     decrypted_data
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+struct CachedItemRecord {
+    id: String,
+    #[serde(rename = "vaultId")]
+    vault_id: String,
+    category: String,
+    favorite: bool,
+    #[serde(rename = "encryptedData")]
+    encrypted_data: String,
+    #[serde(rename = "encryptionIv")]
+    encryption_iv: String,
+    #[serde(rename = "encryptionAlgorithm")]
+    encryption_algorithm: String,
+    version: u64,
+    #[serde(rename = "lastModifiedBy")]
+    last_modified_by: Option<String>,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+    #[serde(rename = "updatedAt")]
+    updated_at: String,
+    #[serde(rename = "deletedAt", default)]
+    deleted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct CachedVaultRecord {
+    id: String,
+    name: String,
+    #[serde(rename = "type")]
+    vault_type: String,
+    icon: Option<String>,
+    #[serde(rename = "imageUrl")]
+    image_url: Option<String>,
+}
+
 fn decrypt_item_payload(
-    item: &DecryptItemPayload,
+    item: &CachedItemRecord,
     vault_key_base64: &str,
 ) -> Result<String, String> {
-    if let Some(user_id) = item.user_id.as_deref().filter(|value| !value.is_empty()) {
-        let version = normalize_item_version(item.version);
+    let user_id = item
+        .last_modified_by
+        .as_deref()
+        .filter(|value| !value.is_empty());
+    if let Some(user_id) = user_id {
+        let version = normalize_item_version(Some(item.version));
         match crypto_commands::crypto_decrypt_with_context(
             item.encrypted_data.clone(),
             item.encryption_iv.clone(),
@@ -431,7 +246,7 @@ fn get_bearer_token_for_account<R: Runtime>(store: &Store<R>, email: &str) -> Op
         Ok(None) => {}
         Err(error) => {
             eprintln!(
-                "[native-bridge] Failed reading bearer token from keychain for {}: {}",
+                "[desktop-ipc] Failed reading bearer token from keychain for {}: {}",
                 email, error
             );
             return None;
@@ -457,7 +272,7 @@ fn get_bearer_token_for_account<R: Runtime>(store: &Store<R>, email: &str) -> Op
             }
             Err(error) => {
                 eprintln!(
-                    "[native-bridge] Failed migrating bearer token to keychain for {}: {}",
+                    "[desktop-ipc] Failed migrating bearer token to keychain for {}: {}",
                     email, error
                 );
                 None
@@ -468,362 +283,770 @@ fn get_bearer_token_for_account<R: Runtime>(store: &Store<R>, email: &str) -> Op
     }
 }
 
-/// Start HTTP server for native messaging bridge
-async fn start_native_bridge_server(app_handle: tauri::AppHandle, state: Arc<NativeBridgeState>) {
-    let addr = SocketAddr::from(([127, 0, 0, 1], 48765));
+fn now_timestamp_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or_default()
+}
 
-    let make_svc = make_service_fn(move |_conn| {
-        let app_handle = app_handle.clone();
-        let state = state.clone();
+fn is_clean_disconnect(error: &str) -> bool {
+    error.contains("early eof") || error.contains("unexpected end of file")
+}
 
-        async move {
-            Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
-                let app_handle = app_handle.clone();
-                let state = state.clone();
-                handle_native_bridge_request(app_handle, state, req)
-            }))
-        }
-    });
-
-    let server = Server::bind(&addr).serve(make_svc);
-
-    eprintln!("Native bridge server listening on {}", addr);
-
-    if let Err(e) = server.await {
-        eprintln!("Native bridge server error: {}", e);
+fn lock_event_to_response(event: LockEvent) -> DesktopResponse {
+    match event {
+        LockEvent::Lock { reason, timestamp } => DesktopResponse::DesktopEvent {
+            event: DesktopEventKind::Lock,
+            payload: serde_json::json!({
+                "reason": reason,
+                "timestamp": timestamp,
+            }),
+        },
+        LockEvent::Unlock { accounts, timestamp } => DesktopResponse::DesktopEvent {
+            event: DesktopEventKind::Unlock,
+            payload: serde_json::json!({
+                "accounts": accounts,
+                "timestamp": timestamp,
+            }),
+        },
+        LockEvent::DesktopClose { timestamp } => DesktopResponse::DesktopEvent {
+            event: DesktopEventKind::DesktopClose,
+            payload: serde_json::json!({ "timestamp": timestamp }),
+        },
+        LockEvent::ActiveAccountChanged { email, timestamp } => DesktopResponse::DesktopEvent {
+            event: DesktopEventKind::ActiveAccountChanged,
+            payload: serde_json::json!({
+                "email": email,
+                "timestamp": timestamp,
+            }),
+        },
     }
 }
 
-async fn handle_native_bridge_request(
-    app_handle: tauri::AppHandle,
-    state: Arc<NativeBridgeState>,
-    req: Request<Body>,
-) -> Result<Response<Body>, Infallible> {
-    let path = req.uri().path();
-    if path.starts_with("/native-bridge/") && req.method() == Method::OPTIONS {
-        let origin = match parse_origin(&req) {
-            Ok(origin) => origin,
-            Err(response) => return Ok(response),
+fn get_unlocked_accounts<R: Runtime>(store: &Store<R>) -> Vec<String> {
+    store
+        .get("bittery_unlocked_accounts")
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(Vec::new)
+}
+
+fn get_account_directory<R: Runtime>(
+    store: &Store<R>,
+) -> Result<std::collections::HashMap<String, serde_json::Value>, String> {
+    let accounts_value = store.get("bittery_accounts_list").ok_or("No accounts found")?;
+    let accounts_str = accounts_value
+        .as_str()
+        .ok_or("Invalid accounts list format")?;
+    let accounts_json: serde_json::Value = serde_json::from_str(accounts_str)
+        .map_err(|e| format!("Failed to parse accounts list: {}", e))?;
+    let accounts = accounts_json
+        .get("accounts")
+        .and_then(|value| value.as_array())
+        .ok_or("No accounts array found")?;
+
+    let mut directory = std::collections::HashMap::new();
+    for account in accounts {
+        if let Some(email) = account.get("email").and_then(|value| value.as_str()) {
+            directory.insert(email.to_lowercase(), account.clone());
+        }
+    }
+
+    Ok(directory)
+}
+
+fn load_muk_base64<R: Runtime>(store: &Store<R>, email: &str) -> Result<String, String> {
+    let session_key = account_key(email, "session_data");
+    let session_data_str = store
+        .get(&session_key)
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .ok_or("No session data found")?;
+    let session_data: serde_json::Value = serde_json::from_str(&session_data_str)
+        .map_err(|e| format!("Failed to parse session data: {}", e))?;
+
+    let device_key_value = store
+        .get("bittery_device_key")
+        .ok_or("No device key found")?;
+    let device_key_base64 = device_key_value
+        .as_str()
+        .ok_or("Invalid device key format")?;
+    let device_key = base64::engine::general_purpose::STANDARD
+        .decode(device_key_base64)
+        .map_err(|e| format!("Failed to decode device key: {}", e))?;
+
+    let encrypted_muk = session_data
+        .get("encryptedMasterUnlockKey")
+        .ok_or("No encrypted master unlock key in session")?;
+    let encrypted_data: serde_json::Value = serde_json::from_str(
+        &serde_json::to_string(encrypted_muk)
+            .map_err(|e| format!("Failed to serialize encrypted MUK: {}", e))?,
+    )
+    .map_err(|e| format!("Failed to parse encrypted MUK: {}", e))?;
+
+    let ciphertext = encrypted_data
+        .get("ciphertext")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing ciphertext")?;
+    let iv = encrypted_data
+        .get("iv")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing IV")?;
+    let algorithm = encrypted_data
+        .get("algorithm")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing algorithm")?;
+
+    crypto_commands::crypto_decrypt(
+        ciphertext.to_string(),
+        iv.to_string(),
+        algorithm.to_string(),
+        base64::engine::general_purpose::STANDARD.encode(&device_key),
+    )
+    .map_err(|e| format!("Failed to decrypt MUK: {}", e))
+}
+
+fn load_decrypted_vault_keys<R: Runtime>(
+    store: &Store<R>,
+    email: &str,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let muk_base64 = load_muk_base64(store, email)?;
+    let vault_key_storage = account_key(email, "vault_keys");
+    let vault_keys_str = store
+        .get(&vault_key_storage)
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .ok_or("Vault keys not found")?;
+    let vault_keys: Vec<serde_json::Value> = serde_json::from_str(&vault_keys_str)
+        .map_err(|e| format!("Failed to parse vault keys: {}", e))?;
+
+    let mut decrypted_vault_keys = std::collections::HashMap::new();
+
+    for vk in vault_keys {
+        let vault_id = vk
+            .get("vaultId")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing vaultId")?;
+        let encrypted_vault_key = vk
+            .get("encryptedVaultKey")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing encryptedVaultKey")?;
+
+        let vault_key_base64 = if encrypted_vault_key.starts_with("{") {
+            let vk_encrypted: serde_json::Value = serde_json::from_str(encrypted_vault_key)
+                .map_err(|e| format!("Failed to parse vault key: {}", e))?;
+            let ciphertext = vk_encrypted
+                .get("ciphertext")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing vault key ciphertext")?;
+            let iv = vk_encrypted
+                .get("iv")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing vault key IV")?;
+            let algorithm = vk_encrypted
+                .get("algorithm")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing vault key algorithm")?;
+
+            if let Some(ctx) = vk_encrypted.get("context") {
+                let ctx_vault_id = ctx
+                    .get("vaultId")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing vault key context vaultId")?;
+                let ctx_user_id = ctx
+                    .get("userId")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing vault key context userId")?;
+                let ctx_key_version = ctx
+                    .get("keyVersion")
+                    .and_then(|v| v.as_u64())
+                    .ok_or("Missing vault key context keyVersion")?;
+                let ctx_purpose = ctx
+                    .get("purpose")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing vault key context purpose")?;
+
+                crypto_commands::crypto_decrypt_with_context(
+                    ciphertext.to_string(),
+                    iv.to_string(),
+                    algorithm.to_string(),
+                    muk_base64.clone(),
+                    ctx_vault_id.to_string(),
+                    ctx_purpose.to_string(),
+                    "vault_key".to_string(),
+                    ctx_key_version,
+                    ctx_user_id.to_string(),
+                )
+                .map_err(|e| format!("Failed to decrypt vault key with context: {}", e))?
+            } else {
+                crypto_commands::crypto_decrypt(
+                    ciphertext.to_string(),
+                    iv.to_string(),
+                    algorithm.to_string(),
+                    muk_base64.clone(),
+                )
+                .map_err(|e| format!("Failed to decrypt vault key: {}", e))?
+            }
+        } else {
+            let encrypted_private_key_key = account_key(email, "encrypted_private_key");
+            let encrypted_private_key_str = store
+                .get(&encrypted_private_key_key)
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .ok_or("Encrypted private key not found for RSA decryption")?;
+            let epk: serde_json::Value = serde_json::from_str(&encrypted_private_key_str)
+                .map_err(|e| format!("Failed to parse encrypted private key: {}", e))?;
+            let epk_ciphertext = epk
+                .get("ciphertext")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing private key ciphertext")?;
+            let epk_iv = epk
+                .get("iv")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing private key IV")?;
+            let epk_algorithm = epk
+                .get("algorithm")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing private key algorithm")?;
+            let private_key_pem = crypto_commands::crypto_decrypt(
+                epk_ciphertext.to_string(),
+                epk_iv.to_string(),
+                epk_algorithm.to_string(),
+                muk_base64.clone(),
+            )
+            .map_err(|e| format!("Failed to decrypt private key: {}", e))?;
+
+            crypto_commands::crypto_rsa_decrypt(
+                encrypted_vault_key.to_string(),
+                private_key_pem,
+            )
+            .map_err(|e| format!("Failed to RSA decrypt vault key: {}", e))?
         };
 
-        if let Some(origin_value) = origin.as_deref() {
-            if !native_messaging_installer::is_allowed_extension_origin(origin_value) {
-                return Ok(text_response(StatusCode::FORBIDDEN, None, "Forbidden"));
-            }
-        }
-
-        let mut builder = Response::builder()
-            .status(StatusCode::NO_CONTENT)
-            .header(
-                "Access-Control-Allow-Methods",
-                "GET, POST, OPTIONS",
-            )
-            .header(
-                "Access-Control-Allow-Headers",
-                "Authorization, Content-Type",
-            );
-        if let Some(origin_value) = origin.as_deref() {
-            builder = builder
-                .header("Access-Control-Allow-Origin", origin_value)
-                .header("Vary", "Origin");
-        }
-
-        return Ok(builder
-            .body(Body::empty())
-            .unwrap_or_else(|_| Response::new(Body::empty())));
+        decrypted_vault_keys.insert(vault_id.to_string(), vault_key_base64);
     }
 
-    match (req.method(), path) {
-        (&Method::GET, "/native-bridge/auth") => {
-            let origin = match parse_origin(&req) {
-                Ok(origin) => origin,
-                Err(response) => return Ok(response),
-            };
-            if origin.is_some() {
-                return Ok(text_response(StatusCode::FORBIDDEN, None, "Forbidden"));
-            }
+    Ok(decrypted_vault_keys)
+}
 
-            let query = BridgeAuthQuery {
-                extension_id: match parse_query_value(&req, "extension_id") {
-                    Ok(value) => value,
-                    Err(response) => return Ok(response),
-                },
-            };
+async fn get_auth_token_internal(
+    app_handle: &tauri::AppHandle,
+    email: &str,
+) -> Result<serde_json::Value, String> {
+    use tauri_plugin_store::StoreExt;
 
-            let allowed_origin = match query.extension_id.as_deref() {
-                Some(extension_id) => match native_messaging_installer::allowed_origin_for_extension_id(extension_id) {
-                    Some(origin) => Some(origin),
-                    None => return Ok(text_response(StatusCode::FORBIDDEN, None, "Forbidden")),
-                },
-                None => None,
-            };
+    let store = app_handle
+        .store("store.json")
+        .map_err(|e| format!("Failed to access store: {}", e))?;
+    let token = get_bearer_token_for_account(&store, email).ok_or("Auth token not found")?;
 
-            return Ok(json_response(
-                StatusCode::OK,
-                None,
-                &serde_json::json!({
-                    "bridgeToken": state.bridge_token,
-                    "allowedOrigin": allowed_origin,
-                    "bridgeVersion": BRIDGE_VERSION,
-                }),
-            ));
+    let session_key = account_key(email, "session_data");
+    let session_metadata = store
+        .get(&session_key)
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+
+    Ok(serde_json::json!({
+        "email": email,
+        "authToken": token,
+        "expiresAt": session_metadata.as_ref().and_then(|value| value.get("expiresAt")).cloned(),
+        "userId": session_metadata.as_ref().and_then(|value| value.get("userId")).cloned(),
+    }))
+}
+
+async fn get_items_snapshot_internal(
+    app_handle: &tauri::AppHandle,
+    emails: Option<Vec<String>>,
+) -> Result<serde_json::Value, String> {
+    use tauri_plugin_store::StoreExt;
+
+    let store = app_handle
+        .store("store.json")
+        .map_err(|e| format!("Failed to access store: {}", e))?;
+    let unlocked_accounts = get_unlocked_accounts(&store);
+    let target_emails = match emails {
+        Some(values) if !values.is_empty() => values
+            .into_iter()
+            .map(|email| email.to_lowercase())
+            .collect::<Vec<_>>(),
+        _ => unlocked_accounts.clone(),
+    };
+
+    let include_account_context = target_emails.len() > 1;
+    let account_directory = get_account_directory(&store).unwrap_or_default();
+    let mut items = Vec::new();
+
+    for email in target_emails {
+        if !unlocked_accounts.iter().any(|value| value.eq_ignore_ascii_case(&email)) {
+            continue;
         }
-        (&Method::GET, "/native-bridge/lock-status") => {
-            let origin = match authorize_bridge_request(&req, &state) {
-                Ok(origin) => origin,
-                Err(response) => return Ok(response),
+
+        let decrypted_vault_keys = load_decrypted_vault_keys(&store, &email)?;
+        let cached_items_key = account_key(&email, "cached_items");
+        let cached_vaults_key = account_key(&email, "cached_vaults");
+
+        let cached_items: Vec<CachedItemRecord> = store
+            .get(&cached_items_key)
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
+            .map_err(|e| format!("Failed to parse cached items: {}", e))?
+            .unwrap_or_default();
+        let cached_vaults: Vec<CachedVaultRecord> = store
+            .get(&cached_vaults_key)
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
+            .map_err(|e| format!("Failed to parse cached vaults: {}", e))?
+            .unwrap_or_default();
+        let vault_map = cached_vaults
+            .into_iter()
+            .map(|vault| (vault.id.clone(), vault))
+            .collect::<std::collections::HashMap<_, _>>();
+
+        for item in cached_items.into_iter().filter(|item| item.deleted_at.is_none()) {
+            let Some(vault_key) = decrypted_vault_keys.get(&item.vault_id) else {
+                continue;
             };
 
-            match get_lock_status_internal(&app_handle).await {
-                Ok(status) => Ok(json_response(StatusCode::OK, origin.as_deref(), &status)),
-                Err(error) => {
-                    let timestamp = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|duration| duration.as_millis() as i64)
-                        .unwrap_or_default();
-                    Ok(json_response(
-                        StatusCode::OK,
-                        origin.as_deref(),
-                        &serde_json::json!({
-                            "locked": true,
-                            "unlocked_accounts": [],
-                            "timestamp": timestamp,
-                            "autolock_timeout_ms": -1,
-                            "error": error,
+            let decrypted_data = decrypt_item_payload(&item, vault_key)?;
+            let Ok(mut payload) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&decrypted_data) else {
+                continue;
+            };
+
+            payload.insert("id".to_string(), serde_json::json!(item.id));
+            payload.insert("vaultId".to_string(), serde_json::json!(item.vault_id));
+            payload.insert("category".to_string(), serde_json::json!(item.category));
+            payload.insert("favorite".to_string(), serde_json::json!(item.favorite));
+            payload.insert("createdAt".to_string(), serde_json::json!(item.created_at));
+            payload.insert("updatedAt".to_string(), serde_json::json!(item.updated_at));
+
+            let vault = vault_map.get(
+                payload
+                    .get("vaultId")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default(),
+            );
+            payload.insert(
+                "vault".to_string(),
+                serde_json::json!({
+                    "id": vault.map(|value| value.id.clone()).unwrap_or_default(),
+                    "name": vault.map(|value| value.name.clone()).unwrap_or_else(|| "Unknown".to_string()),
+                    "type": vault.map(|value| value.vault_type.clone()).unwrap_or_else(|| "personal".to_string()),
+                    "icon": vault.and_then(|value| value.icon.clone()),
+                    "imageUrl": vault.and_then(|value| value.image_url.clone()),
+                }),
+            );
+
+            if include_account_context {
+                if let Some(account) = account_directory.get(&email) {
+                    payload.insert(
+                        "account".to_string(),
+                        serde_json::json!({
+                            "email": account.get("email").and_then(|value| value.as_str()).unwrap_or(&email),
+                            "userId": account.get("userId").and_then(|value| value.as_str()).unwrap_or_default(),
+                            "name": account.get("name").and_then(|value| value.as_str()).unwrap_or(&email),
                         }),
-                    ))
+                    );
                 }
             }
+
+            items.push(serde_json::Value::Object(payload));
         }
-        (&Method::GET, "/native-bridge/lock-events") => {
-            let origin = match authorize_bridge_request(&req, &state) {
-                Ok(origin) => origin,
-                Err(response) => return Ok(response),
-            };
-            let mut rx = state.lock_events.subscribe();
+    }
 
-            let event_stream = async_stream::stream! {
-                let timestamp = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|duration| duration.as_millis() as i64)
-                    .unwrap_or_default();
-                yield Ok::<_, std::io::Error>(format!("event: connected\ndata: {}\n\n", serde_json::json!({ "timestamp": timestamp })));
+    Ok(serde_json::json!({
+        "items": items,
+        "generatedAt": now_timestamp_ms(),
+    }))
+}
 
-                while let Ok(event) = rx.recv().await {
-                    let event_name = match &event {
-                        LockEvent::Lock { .. } => "lock",
-                        LockEvent::Unlock { .. } => "unlock",
-                        LockEvent::DesktopClose { .. } => "desktop_close",
-                        LockEvent::ActiveAccountChanged { .. } => "active_account_changed",
-                    };
-                    if let Ok(data) = serde_json::to_string(&event) {
-                        yield Ok(format!("event: {}\ndata: {}\n\n", event_name, data));
-                    }
-                }
-            };
-
-            let mut builder = Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "text/event-stream")
-                .header("Cache-Control", "no-cache")
-                .header("Connection", "keep-alive");
-            if let Some(origin_value) = origin.as_deref() {
-                builder = builder
-                    .header("Access-Control-Allow-Origin", origin_value)
-                    .header("Vary", "Origin");
-            }
-
-            return Ok(builder
-                .body(Body::wrap_stream(event_stream))
-                .unwrap_or_else(|_| Response::new(Body::empty())));
-        }
-        (&Method::GET, "/native-bridge/biometric-status") => {
-            let origin = match authorize_bridge_request(&req, &state) {
-                Ok(origin) => origin,
-                Err(response) => return Ok(response),
-            };
-
-            match check_biometric_status_internal(&app_handle).await {
-                Ok(status) => Ok(json_response(StatusCode::OK, origin.as_deref(), &status)),
-                Err(error) => Ok(json_response(
-                    StatusCode::OK,
-                    origin.as_deref(),
-                    &serde_json::json!({
-                        "available": false,
-                        "enabled": false,
-                        "error": error,
-                    }),
-                )),
-            }
-        }
-        (&Method::POST, "/native-bridge/biometric-unlock") => {
-            let origin = match authorize_bridge_request(&req, &state) {
-                Ok(origin) => origin,
-                Err(response) => return Ok(response),
-            };
-            let request: BiometricUnlockRequest = match parse_json_body(req, origin.as_deref()).await {
-                Ok(request) => request,
-                Err(response) => return Ok(response),
-            };
-
-            match biometric_unlock_internal(
-                &app_handle,
-                &request.challenge,
-                &request.extension_id,
-                request.email.as_deref(),
-            ).await {
-                Ok(response) => Ok(json_response(StatusCode::OK, origin.as_deref(), &response)),
-                Err(error) => Ok(json_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    origin.as_deref(),
-                    &serde_json::json!({ "error": error }),
-                )),
-            }
-        }
-        (&Method::POST, "/native-bridge/trigger-unlock") => {
-            let origin = match authorize_bridge_request(&req, &state) {
-                Ok(origin) => origin,
-                Err(response) => return Ok(response),
-            };
-
-            if let Err(error) = open_app_internal(&app_handle) {
-                eprintln!("[native-bridge] Failed to show desktop window: {}", error);
-            }
-
-            if let Err(error) = app_handle.emit("trigger-biometric-unlock", ()) {
-                return Ok(json_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    origin.as_deref(),
-                    &serde_json::json!({ "error": error.to_string() }),
-                ));
-            }
-
-            Ok(json_response(
-                StatusCode::OK,
-                origin.as_deref(),
-                &serde_json::json!({
-                    "success": true,
-                    "message": "Desktop unlock triggered",
-                }),
-            ))
-        }
-        (&Method::POST, "/native-bridge/biometric-unlock-all") => {
-            let origin = match authorize_bridge_request(&req, &state) {
-                Ok(origin) => origin,
-                Err(response) => return Ok(response),
-            };
-            let request: BiometricUnlockAllRequest = match parse_json_body(req, origin.as_deref()).await {
-                Ok(request) => request,
-                Err(response) => return Ok(response),
-            };
-
-            match biometric_unlock_all_internal(&app_handle, &request.challenge, &request.extension_id).await {
-                Ok(response) => Ok(json_response(StatusCode::OK, origin.as_deref(), &response)),
-                Err(error) => Ok(json_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    origin.as_deref(),
-                    &serde_json::json!({ "error": error }),
-                )),
-            }
-        }
-        (&Method::POST, "/native-bridge/open-app") => {
-            let origin = match authorize_bridge_request(&req, &state) {
-                Ok(origin) => origin,
-                Err(response) => return Ok(response),
-            };
-
-            match open_app_internal(&app_handle) {
-                Ok(_) => Ok(json_response(
-                    StatusCode::OK,
-                    origin.as_deref(),
-                    &serde_json::json!({ "success": true }),
-                )),
-                Err(error) => Ok(json_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    origin.as_deref(),
-                    &serde_json::json!({
-                        "success": false,
-                        "error": error,
-                    }),
-                )),
-            }
-        }
-        (&Method::GET, "/native-bridge/accounts") => {
-            let origin = match authorize_bridge_request(&req, &state) {
-                Ok(origin) => origin,
-                Err(response) => return Ok(response),
-            };
-
-            match get_accounts_list_internal(&app_handle).await {
-                Ok(data) => Ok(json_response(StatusCode::OK, origin.as_deref(), &data)),
-                Err(error) => Ok(json_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    origin.as_deref(),
-                    &serde_json::json!({ "error": error }),
-                )),
-            }
-        }
-        (&Method::GET, "/native-bridge/session-data") => {
-            let origin = match authorize_bridge_request(&req, &state) {
-                Ok(origin) => origin,
-                Err(response) => return Ok(response),
-            };
-
-            match get_session_data_internal(&app_handle).await {
-                Ok(data) => Ok(json_response(StatusCode::OK, origin.as_deref(), &data)),
-                Err(error) => Ok(json_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    origin.as_deref(),
-                    &serde_json::json!({ "error": error }),
-                )),
-            }
-        }
-        (&Method::GET, "/native-bridge/vault-keys") => {
-            let origin = match authorize_bridge_request(&req, &state) {
-                Ok(origin) => origin,
-                Err(response) => return Ok(response),
-            };
-            let query = VaultKeysQuery {
-                email: match parse_query_value(&req, "email") {
-                    Ok(value) => value,
-                    Err(response) => return Ok(response),
+async fn handle_desktop_ipc_message(
+    app_handle: &tauri::AppHandle,
+    request: DesktopRequest,
+) -> DesktopResponse {
+    match request {
+        DesktopRequest::Ping => DesktopResponse::Pong {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        },
+        DesktopRequest::GetDesktopStatus => match get_lock_status_internal(app_handle).await {
+            Ok(status) => DesktopResponse::DesktopStatus {
+                available: true,
+                locked: status
+                    .get("locked")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+                unlocked_accounts: status
+                    .get("unlocked_accounts")
+                    .and_then(|v| v.as_array())
+                    .map(|accounts| {
+                        accounts
+                            .iter()
+                            .filter_map(|value| value.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                timestamp: status
+                    .get("timestamp")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or_else(now_timestamp_ms),
+                autolock_timeout_ms: status
+                    .get("autolock_timeout_ms")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(600000),
+            },
+            Err(error) => DesktopResponse::Error { message: error },
+        },
+        DesktopRequest::GetDesktopAccounts => match get_accounts_list_internal(app_handle).await {
+            Ok(data) => DesktopResponse::DesktopAccounts {
+                accounts: data
+                    .get("accounts")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default(),
+                active_account: data
+                    .get("active_account")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                unlocked_accounts: data
+                    .get("unlocked_accounts")
+                    .and_then(|v| v.as_array())
+                    .map(|accounts| {
+                        accounts
+                            .iter()
+                            .filter_map(|value| value.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            },
+            Err(error) => DesktopResponse::Error { message: error },
+        },
+        DesktopRequest::GetDesktopAuthToken { email } => {
+            match get_auth_token_internal(app_handle, &email).await {
+                Ok(data) => DesktopResponse::DesktopAuthToken {
+                    email,
+                    auth_token: data
+                        .get("authToken")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    expires_at: data.get("expiresAt").and_then(|v| v.as_i64()),
+                    user_id: data
+                        .get("userId")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
                 },
-            };
-
-            match get_vault_keys_internal(&app_handle, query.email).await {
-                Ok(data) => Ok(json_response(StatusCode::OK, origin.as_deref(), &data)),
-                Err(error) => Ok(json_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    origin.as_deref(),
-                    &serde_json::json!({ "error": error }),
-                )),
+                Err(error) => DesktopResponse::Error { message: error },
             }
         }
-        (&Method::POST, "/native-bridge/decrypt-items") => {
-            let origin = match authorize_bridge_request(&req, &state) {
-                Ok(origin) => origin,
-                Err(response) => return Ok(response),
-            };
-            let request: DecryptItemsRequest = match parse_json_body(req, origin.as_deref()).await {
-                Ok(request) => request,
-                Err(response) => return Ok(response),
-            };
-
-            match decrypt_items_internal(&app_handle, &request.email, &request.items).await {
-                Ok(result) => Ok(json_response(StatusCode::OK, origin.as_deref(), &result)),
-                Err(error) => Ok(json_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    origin.as_deref(),
-                    &serde_json::json!({ "error": error }),
-                )),
+        DesktopRequest::GetDesktopVaultKeys { email } => {
+            match get_vault_keys_internal(app_handle, Some(email.clone())).await {
+                Ok(data) => DesktopResponse::DesktopVaultKeys {
+                    email,
+                    vault_keys: data
+                        .get("vault_keys")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                },
+                Err(error) => DesktopResponse::Error { message: error },
             }
         }
-        _ => Ok(text_response(StatusCode::NOT_FOUND, None, "Not found")),
+        DesktopRequest::GetDesktopItemsSnapshot { emails } => {
+            match get_items_snapshot_internal(app_handle, emails).await {
+                Ok(data) => DesktopResponse::DesktopItemsSnapshot {
+                    items: data
+                        .get("items")
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default(),
+                    generated_at: data
+                        .get("generatedAt")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or_else(now_timestamp_ms),
+                },
+                Err(error) => DesktopResponse::Error { message: error },
+            }
+        }
+        DesktopRequest::CheckBiometricAvailable => {
+            match check_biometric_status_internal(app_handle).await {
+                Ok(status) => DesktopResponse::BiometricStatus {
+                    available: status
+                        .get("available")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                    enabled: status
+                        .get("enabled")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                    app_running: true,
+                },
+                Err(error) => DesktopResponse::Error { message: error },
+            }
+        }
+        DesktopRequest::BiometricUnlockRequest {
+            challenge,
+            extension_id,
+            email,
+        } => match biometric_unlock_internal(
+            app_handle,
+            &challenge,
+            &extension_id,
+            email.as_deref(),
+        )
+        .await
+        {
+            Ok(response) => DesktopResponse::BiometricUnlockSuccess {
+                encrypted_session: response
+                    .get("encrypted_session")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                device_key: response
+                    .get("device_key")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                signature: response
+                    .get("signature")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                auth_token: response
+                    .get("auth_token")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                vault_keys: response
+                    .get("vault_keys")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+            },
+            Err(error) => DesktopResponse::BiometricUnlockFailed { error },
+        },
+        DesktopRequest::BiometricUnlockAllRequest {
+            challenge,
+            extension_id,
+        } => match biometric_unlock_all_internal(app_handle, &challenge, &extension_id).await {
+            Ok(response) => DesktopResponse::BiometricUnlockAllSuccess {
+                device_key: response
+                    .get("device_key")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                signature: response
+                    .get("signature")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                accounts: serde_json::from_value(
+                    response.get("accounts").cloned().unwrap_or_else(|| serde_json::json!([])),
+                )
+                .unwrap_or_default(),
+                unlocked: response
+                    .get("unlocked")
+                    .and_then(|v| v.as_array())
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(|value| value.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                failed: response
+                    .get("failed")
+                    .and_then(|v| v.as_array())
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(|value| value.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            },
+            Err(error) => DesktopResponse::BiometricUnlockAllFailed { error },
+        },
+        DesktopRequest::TriggerDesktopUnlock => {
+            let response = if let Err(error) = open_app_internal(app_handle) {
+                DesktopResponse::TriggerDesktopUnlockResult {
+                    success: false,
+                    error: Some(error),
+                }
+            } else if let Err(error) = app_handle.emit("trigger-biometric-unlock", ()) {
+                DesktopResponse::TriggerDesktopUnlockResult {
+                    success: false,
+                    error: Some(error.to_string()),
+                }
+            } else {
+                DesktopResponse::TriggerDesktopUnlockResult {
+                    success: true,
+                    error: None,
+                }
+            };
+            response
+        }
+        DesktopRequest::OpenDesktopApp => match open_app_internal(app_handle) {
+            Ok(()) => DesktopResponse::OpenDesktopAppResult {
+                success: true,
+                error: None,
+            },
+            Err(error) => DesktopResponse::OpenDesktopAppResult {
+                success: false,
+                error: Some(error),
+            },
+        },
+        DesktopRequest::SubscribeDesktopEvents | DesktopRequest::UnsubscribeDesktopEvents => {
+            DesktopResponse::DesktopEventSubscription { subscribed: false }
+        }
     }
 }
 
-#[derive(Default)]
-struct BiometricBridge;
+async fn handle_desktop_ipc_connection<S>(
+    app_handle: tauri::AppHandle,
+    state: Arc<DesktopIpcState>,
+    stream: S,
+) -> Result<(), String>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let (mut reader, mut writer) = tokio::io::split(stream);
+    let mut event_rx: Option<broadcast::Receiver<LockEvent>> = None;
+
+    loop {
+        if let Some(rx) = event_rx.as_mut() {
+            tokio::select! {
+                message = desktop_ipc::read_frame::<_, DesktopEnvelope<DesktopRequest>>(&mut reader) => {
+                    let message = message.map_err(|error| error.to_string())?;
+                    match message.payload {
+                        DesktopRequest::UnsubscribeDesktopEvents => {
+                            event_rx = None;
+                            let response = DesktopEnvelope {
+                                request_id: message.request_id,
+                                payload: DesktopResponse::DesktopEventSubscription { subscribed: false },
+                            };
+                            write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
+                        }
+                        request => {
+                            let payload = handle_desktop_ipc_message(&app_handle, request).await;
+                            let response = DesktopEnvelope {
+                                request_id: message.request_id,
+                                payload,
+                            };
+                            write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
+                        }
+                    }
+                }
+                event = rx.recv() => {
+                    match event {
+                        Ok(event) => {
+                            let response = DesktopEnvelope {
+                                request_id: None,
+                                payload: lock_event_to_response(event),
+                            };
+                            write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            }
+        } else {
+            let message: DesktopEnvelope<DesktopRequest> =
+                desktop_ipc::read_frame(&mut reader).await.map_err(|error| error.to_string())?;
+            match message.payload {
+                DesktopRequest::SubscribeDesktopEvents => {
+                    event_rx = Some(state.lock_events.subscribe());
+                    let response = DesktopEnvelope {
+                        request_id: message.request_id,
+                        payload: DesktopResponse::DesktopEventSubscription { subscribed: true },
+                    };
+                    write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
+                }
+                request => {
+                    let payload = handle_desktop_ipc_message(&app_handle, request).await;
+                    let response = DesktopEnvelope {
+                        request_id: message.request_id,
+                        payload,
+                    };
+                    write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn start_desktop_ipc_server(app_handle: tauri::AppHandle, state: Arc<DesktopIpcState>) {
+    let socket_path = desktop_ipc_socket_path();
+    let _ = std::fs::remove_file(&socket_path);
+
+    let listener = match tokio::net::UnixListener::bind(&socket_path) {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("[desktop-ipc] Failed to bind {}: {}", socket_path.display(), error);
+            return;
+        }
+    };
+
+    eprintln!("[desktop-ipc] Listening on {}", socket_path.display());
+
+    loop {
+        match listener.accept().await {
+            Ok((stream, _)) => {
+                let app_handle = app_handle.clone();
+                let state = state.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) =
+                        handle_desktop_ipc_connection(app_handle, state, stream).await
+                    {
+                        if !is_clean_disconnect(&error.to_lowercase()) {
+                            eprintln!("[desktop-ipc] Connection ended: {}", error);
+                        }
+                    }
+                });
+            }
+            Err(error) => {
+                eprintln!("[desktop-ipc] Accept failed: {}", error);
+                break;
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+async fn start_desktop_ipc_server(app_handle: tauri::AppHandle, state: Arc<DesktopIpcState>) {
+    use tokio::net::windows::named_pipe::ServerOptions;
+
+    let pipe_name = desktop_ipc_socket_path();
+    let pipe_name = pipe_name.to_string_lossy().to_string();
+    eprintln!("[desktop-ipc] Listening on {}", pipe_name);
+
+    loop {
+        let server = match ServerOptions::new().create(&pipe_name) {
+            Ok(server) => server,
+            Err(error) => {
+                eprintln!("[desktop-ipc] Failed to create named pipe {}: {}", pipe_name, error);
+                break;
+            }
+        };
+
+        if let Err(error) = server.connect().await {
+            eprintln!("[desktop-ipc] Named pipe connect failed: {}", error);
+            continue;
+        }
+
+        let app_handle = app_handle.clone();
+        let state = state.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(error) =
+                handle_desktop_ipc_connection(app_handle, state, server).await
+            {
+                if !is_clean_disconnect(&error.to_lowercase()) {
+                    eprintln!("[desktop-ipc] Connection ended: {}", error);
+                }
+            }
+        });
+    }
+}
 
 /// Tauri command to check biometric status and session validity
 #[tauri::command]
@@ -1235,11 +1458,7 @@ async fn get_lock_status_internal(
 
     // Read lock state marker (maintained by storage adapter based on MUKs in memory)
     // This is the source of truth for which accounts are unlocked
-    let unlocked_accounts: Vec<String> = store
-        .get("bittery_unlocked_accounts")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(Vec::new);
+    let unlocked_accounts = get_unlocked_accounts(&store);
 
     // Get autolock timeout from first account (they should all be the same, but use first as default)
     let autolock_timeout_ms = if let Some(first_email) = unlocked_accounts.first() {
@@ -1332,72 +1551,6 @@ async fn get_accounts_list_internal(
     }))
 }
 
-/// Get session data for all unlocked accounts
-async fn get_session_data_internal(
-    app_handle: &tauri::AppHandle,
-) -> Result<serde_json::Value, String> {
-    use tauri_plugin_store::StoreExt;
-
-    let store = app_handle
-        .store("store.json")
-        .map_err(|e| format!("Failed to access store: {}", e))?;
-
-    // Get accounts list
-    let accounts_value = store.get("bittery_accounts_list");
-    let mut accounts_data = Vec::new();
-
-    if let Some(accounts_str_value) = accounts_value {
-        if let Some(accounts_str) = accounts_str_value.as_str() {
-            if let Ok(accounts_json) = serde_json::from_str::<serde_json::Value>(accounts_str) {
-                if let Some(accounts_array) = accounts_json.get("accounts").and_then(|a| a.as_array()) {
-                    // Get session data for each account with a valid JWT token (unlocked accounts)
-                    for account in accounts_array {
-                        if let Some(email) = account.get("email").and_then(|e| e.as_str()) {
-                            if let Some(jwt_token) = get_bearer_token_for_account(&store, email) {
-                                let session_key = account_key(email, "session_data");
-
-                                // Get session metadata if available
-                                let session_metadata = store.get(&session_key)
-                                    .and_then(|v| v.as_str().map(|s| s.to_string()))
-                                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
-
-                                let mut account_data = serde_json::json!({
-                                    "email": email,
-                                    "auth_token": jwt_token,
-                                });
-
-                                // Add session expiry if available
-                                if let Some(session) = session_metadata {
-                                    if let Some(expires_at) = session.get("expiresAt") {
-                                        account_data["expires_at"] = expires_at.clone();
-                                    }
-                                    if let Some(user_id) = session.get("userId") {
-                                        account_data["user_id"] = user_id.clone();
-                                    }
-                                }
-
-                                accounts_data.push(account_data);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let active_email = get_active_account_email(&store);
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as i64;
-
-    Ok(serde_json::json!({
-        "accounts": accounts_data,
-        "active_account": active_email,
-        "timestamp": timestamp,
-    }))
-}
-
 /// Get vault keys for a specific account (or all if no email provided)
 async fn get_vault_keys_internal(
     app_handle: &tauri::AppHandle,
@@ -1428,233 +1581,16 @@ async fn get_vault_keys_internal(
     }))
 }
 
-/// Decrypt items using desktop's crypto
-async fn decrypt_items_internal(
-    app_handle: &tauri::AppHandle,
-    email: &str,
-    items: &[DecryptItemPayload],
-) -> Result<serde_json::Value, String> {
-    use tauri_plugin_store::StoreExt;
-
-    let store = app_handle
-        .store("store.json")
-        .map_err(|e| format!("Failed to access store: {}", e))?;
-
-    // Get session data to retrieve MUK
-    let session_key = account_key(email, "session_data");
-    let session_data_str = store.get(&session_key)
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .ok_or("No session data found")?;
-
-    let session_data: serde_json::Value = serde_json::from_str(&session_data_str)
-        .map_err(|e| format!("Failed to parse session data: {}", e))?;
-
-    // Get device key
-    let device_key_value = store.get("bittery_device_key")
-        .ok_or("No device key found")?;
-
-    let device_key_base64 = device_key_value.as_str()
-        .ok_or("Invalid device key format")?;
-
-    let device_key = base64::engine::general_purpose::STANDARD.decode(device_key_base64)
-        .map_err(|e| format!("Failed to decode device key: {}", e))?;
-
-    // Get encrypted MUK
-    let encrypted_muk = session_data.get("encryptedMasterUnlockKey")
-        .ok_or("No encrypted master unlock key in session")?;
-
-    // Decrypt MUK using device key
-    let encrypted_muk_str = serde_json::to_string(encrypted_muk)
-        .map_err(|e| format!("Failed to serialize encrypted MUK: {}", e))?;
-
-    // Parse encrypted data
-    let encrypted_data: serde_json::Value = serde_json::from_str(&encrypted_muk_str)
-        .map_err(|e| format!("Failed to parse encrypted data: {}", e))?;
-
-    let ciphertext = encrypted_data.get("ciphertext")
-        .and_then(|v| v.as_str())
-        .ok_or("Missing ciphertext")?;
-    let iv = encrypted_data.get("iv")
-        .and_then(|v| v.as_str())
-        .ok_or("Missing IV")?;
-    let algorithm = encrypted_data.get("algorithm")
-        .and_then(|v| v.as_str())
-        .ok_or("Missing algorithm")?;
-
-    // Use crypto command to decrypt MUK
-    let muk_base64 = crypto_commands::crypto_decrypt(
-        ciphertext.to_string(),
-        iv.to_string(),
-        algorithm.to_string(),
-        base64::engine::general_purpose::STANDARD.encode(&device_key),
-    ).map_err(|e| format!("Failed to decrypt MUK: {}", e))?;
-
-    // Get vault keys
-    let vault_key_storage = account_key(email, "vault_keys");
-    let vault_keys_str = store.get(&vault_key_storage)
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .ok_or("Vault keys not found")?;
-
-    let vault_keys: Vec<serde_json::Value> = serde_json::from_str(&vault_keys_str)
-        .map_err(|e| format!("Failed to parse vault keys: {}", e))?;
-
-    // Build a map of vaultId -> decrypted vault key
-    let mut decrypted_vault_keys: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-
-    for vk in vault_keys {
-        let vault_id = vk.get("vaultId")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing vaultId")?;
-
-        let encrypted_vault_key = vk.get("encryptedVaultKey")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing encryptedVaultKey")?;
-
-        // Check if it's AES-encrypted (JSON) or RSA-encrypted (plain base64)
-        let is_aes = encrypted_vault_key.starts_with("{");
-
-        if is_aes {
-            // AES-GCM encrypted vault key (owner's key)
-            let vk_encrypted: serde_json::Value = serde_json::from_str(encrypted_vault_key)
-                .map_err(|e| format!("Failed to parse vault key: {}", e))?;
-
-            let vk_ciphertext = vk_encrypted.get("ciphertext")
-                .and_then(|v| v.as_str())
-                .ok_or("Missing vault key ciphertext")?;
-            let vk_iv = vk_encrypted.get("iv")
-                .and_then(|v| v.as_str())
-                .ok_or("Missing vault key IV")?;
-            let vk_algorithm = vk_encrypted.get("algorithm")
-                .and_then(|v| v.as_str())
-                .ok_or("Missing vault key algorithm")?;
-
-            // Decrypt with MUK (context-bound payloads use native AAD verification).
-            let vault_key_base64 = if let Some(ctx) = vk_encrypted.get("context") {
-                let ctx_vault_id = ctx.get("vaultId")
-                    .and_then(|v| v.as_str())
-                    .ok_or("Missing vault key context vaultId")?;
-                let ctx_user_id = ctx.get("userId")
-                    .and_then(|v| v.as_str())
-                    .ok_or("Missing vault key context userId")?;
-                let ctx_key_version = ctx.get("keyVersion")
-                    .and_then(|v| v.as_u64())
-                    .ok_or("Missing vault key context keyVersion")?;
-                let ctx_purpose = ctx.get("purpose")
-                    .and_then(|v| v.as_str())
-                    .ok_or("Missing vault key context purpose")?;
-
-                crypto_commands::crypto_decrypt_with_context(
-                    vk_ciphertext.to_string(),
-                    vk_iv.to_string(),
-                    vk_algorithm.to_string(),
-                    muk_base64.clone(),
-                    ctx_vault_id.to_string(),
-                    ctx_purpose.to_string(),
-                    "vault_key".to_string(),
-                    ctx_key_version,
-                    ctx_user_id.to_string(),
-                )
-                .map_err(|e| format!("Failed to decrypt vault key with context: {}", e))?
-            } else {
-                crypto_commands::crypto_decrypt(
-                    vk_ciphertext.to_string(),
-                    vk_iv.to_string(),
-                    vk_algorithm.to_string(),
-                    muk_base64.clone(),
-                )
-                .map_err(|e| format!("Failed to decrypt vault key: {}", e))?
-            };
-
-            decrypted_vault_keys.insert(vault_id.to_string(), vault_key_base64);
-        } else {
-            // RSA-encrypted vault key (shared key) - need to decrypt with private key
-            // Get encrypted private key
-            let encrypted_private_key_key = account_key(email, "encrypted_private_key");
-            let encrypted_private_key_str = store.get(&encrypted_private_key_key)
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .ok_or("Encrypted private key not found for RSA decryption")?;
-
-            let epk: serde_json::Value = serde_json::from_str(&encrypted_private_key_str)
-                .map_err(|e| format!("Failed to parse encrypted private key: {}", e))?;
-
-            let epk_ciphertext = epk.get("ciphertext")
-                .and_then(|v| v.as_str())
-                .ok_or("Missing private key ciphertext")?;
-            let epk_iv = epk.get("iv")
-                .and_then(|v| v.as_str())
-                .ok_or("Missing private key IV")?;
-            let epk_algorithm = epk.get("algorithm")
-                .and_then(|v| v.as_str())
-                .ok_or("Missing private key algorithm")?;
-
-            // Decrypt private key with MUK
-            let private_key_pem = crypto_commands::crypto_decrypt(
-                epk_ciphertext.to_string(),
-                epk_iv.to_string(),
-                epk_algorithm.to_string(),
-                muk_base64.clone(),
-            ).map_err(|e| format!("Failed to decrypt private key: {}", e))?;
-
-            // Decrypt vault key with RSA
-            let vault_key_base64 = crypto_commands::crypto_rsa_decrypt(
-                encrypted_vault_key.to_string(),
-                private_key_pem,
-            ).map_err(|e| format!("Failed to RSA decrypt vault key: {}", e))?;
-
-            decrypted_vault_keys.insert(vault_id.to_string(), vault_key_base64);
-        }
-    }
-
-    // Now decrypt each item
-    let mut decrypted_items = Vec::new();
-    let mut failed_items = Vec::new();
-
-    for item in items {
-        let vault_key = decrypted_vault_keys.get(&item.vault_id);
-        if vault_key.is_none() {
-            failed_items.push(serde_json::json!({
-                "id": item.id,
-                "error": "Vault key not found"
-            }));
-            continue;
-        }
-
-        match decrypt_item_payload(item, vault_key.unwrap()) {
-            Ok(decrypted_data) => {
-                decrypted_items.push(serde_json::json!({
-                    "id": item.id,
-                    "decrypted_data": decrypted_data,
-                }));
-            }
-            Err(e) => {
-                failed_items.push(serde_json::json!({
-                    "id": item.id,
-                    "error": format!("Decryption failed: {}", e)
-                }));
-            }
-        }
-    }
-
-    Ok(serde_json::json!({
-        "decrypted_items": decrypted_items,
-        "failed": failed_items,
-    }))
-}
-
 /// Tauri command to broadcast lock event to extension
 #[tauri::command]
 fn broadcast_lock_event(
-    state: tauri::State<Arc<NativeBridgeState>>,
+    state: tauri::State<Arc<DesktopIpcState>>,
     reason: String,
 ) -> Result<(), String> {
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| format!("Failed to get timestamp: {}", e))?
-        .as_millis() as i64;
+    let timestamp = now_timestamp_ms();
 
     let event = LockEvent::Lock { reason: reason.clone(), timestamp };
 
-    // Broadcast to all SSE subscribers (extension)
     let _ = state.lock_events.send(event);
 
     eprintln!("[Lock Event] Broadcast lock event (reason: {})", reason);
@@ -1664,17 +1600,13 @@ fn broadcast_lock_event(
 /// Tauri command to broadcast unlock event to extension
 #[tauri::command]
 fn broadcast_unlock_event(
-    state: tauri::State<Arc<NativeBridgeState>>,
+    state: tauri::State<Arc<DesktopIpcState>>,
     accounts: Vec<String>,
 ) -> Result<(), String> {
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| format!("Failed to get timestamp: {}", e))?
-        .as_millis() as i64;
+    let timestamp = now_timestamp_ms();
 
     let event = LockEvent::Unlock { accounts: accounts.clone(), timestamp };
 
-    // Broadcast to all SSE subscribers (extension)
     let _ = state.lock_events.send(event);
 
     eprintln!("[Unlock Event] Broadcast unlock event (accounts: {:?})", accounts);
@@ -1684,17 +1616,13 @@ fn broadcast_unlock_event(
 /// Tauri command to broadcast active account changed event to extension
 #[tauri::command]
 fn broadcast_active_account_changed(
-    state: tauri::State<Arc<NativeBridgeState>>,
+    state: tauri::State<Arc<DesktopIpcState>>,
     email: String,
 ) -> Result<(), String> {
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| format!("Failed to get timestamp: {}", e))?
-        .as_millis() as i64;
+    let timestamp = now_timestamp_ms();
 
     let event = LockEvent::ActiveAccountChanged { email: email.clone(), timestamp };
 
-    // Broadcast to all SSE subscribers (extension)
     let _ = state.lock_events.send(event);
 
     eprintln!("[Active Account Changed] Broadcast active account changed event (email: {})", email);
@@ -1707,7 +1635,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_biometry::init())
         .plugin(tauri_plugin_store::Builder::new().build())
-        .manage(BiometricBridge::default())
 		.invoke_handler(tauri::generate_handler![
 			// Crypto commands
 			crypto_commands::crypto_derive_keys,
@@ -1777,36 +1704,27 @@ pub fn run() {
                 eprintln!("✅ Native messaging host already installed");
             }
 
-            // Create NativeBridgeState and store in managed state
-            let bridge_state = Arc::new(NativeBridgeState::default());
-            app.manage(bridge_state.clone());
+            let ipc_state = Arc::new(DesktopIpcState::default());
+            app.manage(ipc_state.clone());
 
-            // Start native bridge server in background with shared state
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                start_native_bridge_server(app_handle, bridge_state).await;
+                start_desktop_ipc_server(app_handle, ipc_state).await;
             });
 
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Broadcast desktop_close event when window is closing
             match event {
                 tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
                     eprintln!("[Window Event] Window closing, broadcasting desktop_close event");
 
-                    // Get NativeBridgeState from app handle
-                    if let Some(state) = window.app_handle().try_state::<Arc<NativeBridgeState>>() {
-                        let timestamp = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_millis() as i64;
-
+                    if let Some(state) = window.app_handle().try_state::<Arc<DesktopIpcState>>() {
+                        let timestamp = now_timestamp_ms();
                         let event = LockEvent::DesktopClose { timestamp };
                         let _ = state.lock_events.send(event);
-                        eprintln!("[Window Event] Desktop close event broadcasted");
                     } else {
-                        eprintln!("[Window Event] Failed to get NativeBridgeState");
+                        eprintln!("[Window Event] Failed to get DesktopIpcState");
                     }
                 }
                 _ => {}
