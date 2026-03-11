@@ -120,6 +120,13 @@ describe("sync engine regressions", () => {
 		await storage.set("lastSyncCursor", { id: "evt_5" });
 		const outboundQueue = new OutboundQueue(storage, "self_client");
 		const clearedEmails: Array<string | undefined> = [];
+		const itemCache = {
+			supportsItemCache: true as const,
+			clearedEmails,
+			async clearItemCache(this: { clearedEmails: Array<string | undefined> }, email?: string) {
+				this.clearedEmails.push(email);
+			},
+		};
 
 		const orchestrator = new SyncOrchestrator({
 			syncManager: {
@@ -162,12 +169,7 @@ describe("sync engine regressions", () => {
 					},
 				},
 			},
-			itemCache: {
-				supportsItemCache: true,
-				clearItemCache: async (email?: string) => {
-					clearedEmails.push(email);
-				},
-			},
+			itemCache,
 			itemCacheAccountEmail: "alice@example.com",
 			outboundQueue,
 		});

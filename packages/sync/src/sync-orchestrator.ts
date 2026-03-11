@@ -168,11 +168,12 @@ export class SyncOrchestrator {
 					await this.applyEvent(event);
 				},
 				onRequiresFullRefresh: async () => {
-					const clearItemCache = this.options.itemCache.clearItemCache;
-					if (!clearItemCache) {
+					if (!this.options.itemCache.clearItemCache) {
 						return;
 					}
-					await clearItemCache(this.getDeltaSyncAccountEmail());
+					await this.options.itemCache.clearItemCache(
+						this.getDeltaSyncAccountEmail(),
+					);
 					fullRefreshHandled = true;
 				},
 			});

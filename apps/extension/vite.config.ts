@@ -23,17 +23,6 @@ export default defineConfig({
 			origin: [/chrome-extension:\/\//],
 		},
 	},
-	build: {
-		rollupOptions: {
-			input: {
-				popup: "popup.html",
-				autofillIframe: "autofill-iframe.html",
-				savePromptIframe: "save-prompt-iframe.html",
-				creditCardAutofillIframe: "credit-card-autofill-iframe.html",
-				identityAutofillIframe: "identity-autofill-iframe.html",
-				passkeyPickerIframe: "passkey-picker-iframe.html",
-				passkeySaveTargetIframe: "passkey-save-target-iframe.html",
-			},
-		},
-	},
+	// Let CRX derive extension pages from the manifest. Manual HTML inputs
+	// cause dev inline scripts to be registered twice for iframe pages.
 });

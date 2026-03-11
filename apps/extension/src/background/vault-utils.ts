@@ -194,7 +194,6 @@ async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[]> {
 	const activeAccount = await storage.getActiveAccount();
 	const targetEmails = await getDesktopTargetEmails();
 	if (targetEmails.length === 0) {
-		console.info("[vault-utils] desktop snapshot skipped: no target emails");
 		return [];
 	}
 
@@ -216,13 +215,6 @@ async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[]> {
 		)
 		.filter((item): item is MultiAccountItem => item !== null);
 
-	console.info("[vault-utils] desktop snapshot loaded", {
-		targetEmails,
-		includeAccountContext,
-		rawCount: snapshot.items.length,
-		normalizedCount: normalizedItems.length,
-	});
-
 	return normalizedItems;
 }
 
@@ -231,10 +223,6 @@ async function getLocalCoordinatorItems(): Promise<MultiAccountItem[]> {
 		const { accountsInfo } = await core.accounts.resolveAccounts();
 		core.vaultCoordinator.setActiveAccounts(accountsInfo);
 		const items = core.vaultCoordinator.getAll() as MultiAccountItem[];
-		console.info("[vault-utils] local coordinator items loaded", {
-			accountCount: accountsInfo.length,
-			itemCount: items.length,
-		});
 		return items;
 	} catch (error) {
 		console.warn(
@@ -242,9 +230,6 @@ async function getLocalCoordinatorItems(): Promise<MultiAccountItem[]> {
 			error,
 		);
 		const items = core.vaultCoordinator.getAll() as MultiAccountItem[];
-		console.info("[vault-utils] local coordinator fallback snapshot", {
-			itemCount: items.length,
-		});
 		return items;
 	}
 }
@@ -269,12 +254,6 @@ export async function getDecryptedItemsForCurrentMode(): Promise<
 				getLocalCoordinatorItems(),
 			]);
 			const mergedItems = mergeItemCollections(desktopItems, localItems);
-			console.info("[vault-utils] desktop/local merge complete", {
-				desktopReadAvailable,
-				desktopCount: desktopItems.length,
-				localCount: localItems.length,
-				mergedCount: mergedItems.length,
-			});
 			return mergedItems;
 		} catch (error) {
 			console.warn(
@@ -287,10 +266,6 @@ export async function getDecryptedItemsForCurrentMode(): Promise<
 	const { accountsInfo } = await core.accounts.resolveAccounts();
 	await core.vaultCoordinator.hydrate(accountsInfo);
 	const localItems = core.vaultCoordinator.getAll();
-	console.info("[vault-utils] local-only item load complete", {
-		accountCount: accountsInfo.length,
-		itemCount: localItems.length,
-	});
 	return localItems;
 }
 

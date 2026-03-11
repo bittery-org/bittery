@@ -48,6 +48,11 @@ import {
 	handleCaptureTabScreenshot,
 	handleUpdateItemTotp,
 } from "./qr-scan-handlers";
+import {
+	handleClearPendingSavePrompt,
+	handleGetPendingSavePrompt,
+	handleSetPendingSavePrompt,
+} from "./save-prompt-handlers";
 import { refreshAutoLockTimeout } from "./session-manager";
 import {
 	cleanupSync,
@@ -228,6 +233,25 @@ export async function routeRuntimeMessage(
 					url: string;
 				}>(message),
 			);
+		}
+
+		case "SET_PENDING_SAVE_PROMPT": {
+			return handleSetPendingSavePrompt(
+				getPayload<{
+					username: string;
+					password: string;
+					url: string;
+					hostname: string;
+				}>(message),
+			);
+		}
+
+		case "GET_PENDING_SAVE_PROMPT": {
+			return handleGetPendingSavePrompt();
+		}
+
+		case "CLEAR_PENDING_SAVE_PROMPT": {
+			return handleClearPendingSavePrompt();
 		}
 
 		// Autofill

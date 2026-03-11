@@ -8,6 +8,7 @@ export function collectInlineScriptHashes(htmlDocuments) {
 
 	for (const html of htmlDocuments) {
 		let match;
+		// biome-ignore lint/suspicious/noAssignInExpressions: This is a common pattern for regex matching in JavaScript.
 		while ((match = INLINE_SCRIPT_PATTERN.exec(html)) !== null) {
 			const scriptContent = match[1] ?? "";
 			if (!scriptContent.trim()) {
@@ -26,6 +27,30 @@ export function collectInlineScriptHashes(htmlDocuments) {
 	return [...hashes].sort();
 }
 
-export function renderNginxConfig(template, scriptHashes) {
-	return template.replace("__CSP_SCRIPT_HASHES__", scriptHashes.join(" "));
+export function resolveConnectSrc(serverUrl) {
+	const sources = new Set(["'self'"]);
+
+	if (!serverUrl) {
+		return [...sources].join(" ");
+	}
+
+	let parsed;
+	try {
+		parsed = new URL(serverUrl);
+	} catch {
+		return [...sources].join(" ");
+	}
+
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+		return [...sources].join(" ");
+	}
+
+	sources.add(parsed.origin);
+	return [...sources].join(" ");
+}
+
+export function renderNginxConfig(template, scriptHashes, connectSrc) {
+	return template
+		.replace("__CSP_SCRIPT_HASHES__", scriptHashes.join(" "))
+		.replace("__CSP_CONNECT_SRC__", connectSrc);
 }

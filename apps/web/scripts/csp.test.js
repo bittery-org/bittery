@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { collectInlineScriptHashes, renderNginxConfig } from "./csp.js";
+import {
+	collectInlineScriptHashes,
+	renderNginxConfig,
+	resolveConnectSrc,
+} from "./csp.js";
 
 describe("web CSP rendering", () => {
 	test("hashes inline bootstrap scripts", () => {
@@ -15,14 +19,24 @@ describe("web CSP rendering", () => {
 
 	test("renders nginx config without unsafe script allowances", () => {
 		const template = readFileSync(resolve(import.meta.dir, "../nginx.conf"), "utf8");
-		const rendered = renderNginxConfig(template, ["'sha256-test-hash'"]);
+		const rendered = renderNginxConfig(
+			template,
+			["'sha256-test-hash'"],
+			resolveConnectSrc("https://api.bittery.com/trpc"),
+		);
 
 		expect(rendered).not.toContain("cloudflare");
 		expect(rendered).not.toContain("'unsafe-eval'");
-		expect(rendered).not.toContain("http:");
 		expect(rendered).not.toContain("ws:");
 		expect(rendered).not.toContain("'unsafe-inline' 'unsafe-eval'");
 		expect(rendered).toContain("'sha256-test-hash'");
+		expect(rendered).toContain("connect-src 'self' https://api.bittery.com;");
 		expect(rendered).not.toContain("__CSP_SCRIPT_HASHES__");
+		expect(rendered).not.toContain("__CSP_CONNECT_SRC__");
+	});
+
+	test("falls back to self when no external API origin is configured", () => {
+		expect(resolveConnectSrc("")).toBe("'self'");
+		expect(resolveConnectSrc("not a url")).toBe("'self'");
 	});
 });

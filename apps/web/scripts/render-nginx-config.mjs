@@ -1,7 +1,12 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { collectInlineScriptHashes, renderNginxConfig } from "./csp.js";
+import {
+	collectInlineScriptHashes,
+	renderNginxConfig,
+	resolveConnectSrc,
+} from "./csp.js";
+import { normalizeServerUrl } from "../../../packages/shared/src/server-url.ts";
 
 async function findHtmlFiles(directory) {
 	const entries = await readdir(directory, { withFileTypes: true });
@@ -38,7 +43,9 @@ const htmlDocuments = await Promise.all(
 );
 const template = await readFile(templatePath, "utf8");
 const scriptHashes = collectInlineScriptHashes(htmlDocuments);
-const renderedConfig = renderNginxConfig(template, scriptHashes);
+const normalizedServerUrl = normalizeServerUrl(process.env.VITE_SERVER_URL ?? "");
+const connectSrc = resolveConnectSrc(normalizedServerUrl);
+const renderedConfig = renderNginxConfig(template, scriptHashes, connectSrc);
 
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, renderedConfig);

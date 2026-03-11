@@ -1,5 +1,49 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { routeRuntimeMessage } from "../../src/background/message-router";
+
+const originalChrome = globalThis.chrome;
+
+function createMockStorageArea(store: Record<string, unknown>) {
+	return {
+		async get(keys?: string | string[] | Record<string, unknown>) {
+			if (typeof keys === "string") {
+				return { [keys]: store[keys] };
+			}
+
+			if (Array.isArray(keys)) {
+				return Object.fromEntries(keys.map((key) => [key, store[key]]));
+			}
+
+			if (keys && typeof keys === "object") {
+				return Object.fromEntries(
+					Object.entries(keys).map(([key, fallback]) => [
+						key,
+						store[key] ?? fallback,
+					]),
+				);
+			}
+
+			return { ...store };
+		},
+		async set(items: Record<string, unknown>) {
+			Object.assign(store, items);
+		},
+		async remove(keys: string | string[]) {
+			for (const key of Array.isArray(keys) ? keys : [keys]) {
+				delete store[key];
+			}
+		},
+	};
+}
+
+afterEach(() => {
+	if (originalChrome) {
+		globalThis.chrome = originalChrome;
+		return;
+	}
+
+	Reflect.deleteProperty(globalThis, "chrome");
+});
 
 describe("message-router passkey dispatch", () => {
 	test("dispatches PASSKEY_GET payload to handler override", async () => {
@@ -53,6 +97,49 @@ describe("message-router passkey dispatch", () => {
 
 		expect(response.success).toBe(false);
 		expect(response.error).toBe("Unknown message type");
+	});
+
+	test("routes pending save prompt persistence messages", async () => {
+		const sessionStore: Record<string, unknown> = {};
+		const localStore: Record<string, unknown> = {};
+		globalThis.chrome = {
+			storage: {
+				session: createMockStorageArea(sessionStore),
+				local: createMockStorageArea(localStore),
+			},
+		} as typeof chrome;
+
+		const payload = {
+			username: "alice@example.com",
+			password: "test-password",
+			url: "https://example.com/login",
+			hostname: "example.com",
+		};
+
+		expect(
+			await routeRuntimeMessage({
+				type: "SET_PENDING_SAVE_PROMPT",
+				payload,
+			}),
+		).toEqual({ success: true });
+		expect(Object.values(sessionStore)).toEqual([payload]);
+		expect(localStore).toEqual({});
+
+		expect(
+			await routeRuntimeMessage({
+				type: "GET_PENDING_SAVE_PROMPT",
+			}),
+		).toEqual({
+			success: true,
+			data: payload,
+		});
+
+		expect(
+			await routeRuntimeMessage({
+				type: "CLEAR_PENDING_SAVE_PROMPT",
+			}),
+		).toEqual({ success: true });
+		expect(sessionStore).toEqual({});
 	});
 
 	test("surfaces handler errors for route-level error paths", async () => {
