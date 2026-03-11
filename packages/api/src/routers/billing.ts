@@ -1,6 +1,6 @@
-import { db, team } from "@bittery/db";
+import { db, itemAttachment, team, user } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
 	isBillingActive,
@@ -76,6 +76,18 @@ function isPaidPlan(plan: CloudPlanId): plan is Exclude<CloudPlanId, "free"> {
 	return plan !== "free";
 }
 
+async function getCommittedAttachmentStorageBytes(teamId: string): Promise<number> {
+	const [result] = await db
+		.select({
+			total: sql<number>`coalesce(sum(${itemAttachment.storageSize}), 0)::int`,
+		})
+		.from(itemAttachment)
+		.innerJoin(user, eq(itemAttachment.uploadedBy, user.id))
+		.where(eq(user.teamId, teamId));
+
+	return result?.total ?? 0;
+}
+
 export const billingRouter = router({
 	status: protectedProcedure.query(async ({ ctx }) => {
 		if (isSelfHostedMode()) {
@@ -116,6 +128,39 @@ export const billingRouter = router({
 
 	entitlements: protectedProcedure.query(async ({ ctx }) => {
 		const mode = getBitteryMode();
+		if (mode === "self-hosted") {
+			const actor = await db.query.user.findFirst({
+				where: (record, { eq: eqFn }) => eqFn(record.id, ctx.session.userId),
+				with: {
+					team: true,
+				},
+			});
+			const plan = actor?.team?.billingPlan ?? ("team" as CloudPlanId);
+			const status = actor?.team?.billingStatus ?? "active";
+			const entitlements = resolveEffectiveEntitlements({
+				mode,
+				billingPlan: plan,
+				billingStatus: status,
+			});
+			const limits = resolveEffectiveEntitlementLimits(
+				{
+					mode,
+					billingPlan: plan,
+					billingStatus: status,
+				},
+				entitlements,
+			);
+
+			return {
+				mode,
+				plan,
+				status,
+				isActive: isBillingActive(status),
+				entitlements,
+				limits,
+			};
+		}
+
 		const actor = await getBillingActor(ctx.session.userId);
 		const entitlements = resolveEffectiveEntitlements({
 			mode,
@@ -138,6 +183,43 @@ export const billingRouter = router({
 			isActive: isBillingActive(actor.team.billingStatus),
 			entitlements,
 			limits,
+		};
+	}),
+
+	attachmentUsage: protectedProcedure.query(async ({ ctx }) => {
+		const mode = getBitteryMode();
+
+		if (mode === "self-hosted") {
+			return {
+				mode,
+				attachmentsEnabled: true,
+				quotaBytes: null as number | null,
+				committedStorageBytes: 0,
+			};
+		}
+
+		const actor = await getBillingActor(ctx.session.userId);
+		const entitlements = resolveEffectiveEntitlements({
+			mode,
+			billingPlan: actor.team.billingPlan,
+			billingStatus: actor.team.billingStatus,
+		});
+		const limits = resolveEffectiveEntitlementLimits(
+			{
+				mode,
+				billingPlan: actor.team.billingPlan,
+				billingStatus: actor.team.billingStatus,
+			},
+			entitlements,
+		);
+
+		return {
+			mode,
+			attachmentsEnabled: entitlements.attachments,
+			quotaBytes: limits.attachment_storage_bytes,
+			committedStorageBytes: await getCommittedAttachmentStorageBytes(
+				actor.teamId,
+			),
 		};
 	}),
 

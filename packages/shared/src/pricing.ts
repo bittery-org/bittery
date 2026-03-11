@@ -6,6 +6,8 @@
  * platform-specific styling classes.
  */
 
+import { planAttachmentLimits } from "@bittery/api/billing/plans";
+
 export { type CloudPlanId, cloudPlanIds } from "@bittery/api/billing/plans";
 
 /* ─── Plan Metadata ──────────────────────────────────────────────── */
@@ -67,6 +69,22 @@ export interface FeatureCategory {
 	features: PlanFeature[];
 }
 
+function formatBytes(bytes: number | null): string | boolean {
+	if (bytes === null) {
+		return "Unlimited";
+	}
+
+	if (bytes === 0) {
+		return false;
+	}
+
+	if (bytes % (1024 * 1024 * 1024) === 0) {
+		return `${bytes / (1024 * 1024 * 1024)} GB`;
+	}
+
+	return `${bytes / (1024 * 1024)} MB`;
+}
+
 export const featureCategories: FeatureCategory[] = [
 	{
 		name: "Vaults & Items",
@@ -101,19 +119,27 @@ export const featureCategories: FeatureCategory[] = [
 			{
 				label: "Storage",
 				values: {
-					free: false,
-					personal: "250 MB",
-					family: "1 GB",
-					team: "2 GB",
+					free: formatBytes(planAttachmentLimits.free.attachment_storage_bytes),
+					personal: formatBytes(
+						planAttachmentLimits.personal.attachment_storage_bytes,
+					),
+					family: formatBytes(planAttachmentLimits.family.attachment_storage_bytes),
+					team: formatBytes(planAttachmentLimits.team.attachment_storage_bytes),
 				},
 			},
 			{
 				label: "Max file size",
 				values: {
-					free: false,
-					personal: "10 MB",
-					family: "25 MB",
-					team: "50 MB",
+					free: formatBytes(
+						planAttachmentLimits.free.attachment_max_file_size_bytes,
+					),
+					personal: formatBytes(
+						planAttachmentLimits.personal.attachment_max_file_size_bytes,
+					),
+					family: formatBytes(
+						planAttachmentLimits.family.attachment_max_file_size_bytes,
+					),
+					team: formatBytes(planAttachmentLimits.team.attachment_max_file_size_bytes),
 				},
 			},
 		],

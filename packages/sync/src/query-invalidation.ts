@@ -129,7 +129,6 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		): Promise<void> => {
 			const syntheticEvent: SyncEvent = {
 				id: `local_${Date.now()}`,
-				seq: 0,
 				type,
 				entityId,
 				entityType: getEntityTypeForEventType(type),

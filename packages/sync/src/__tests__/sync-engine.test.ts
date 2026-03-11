@@ -31,7 +31,6 @@ function toSseEvent(event: SyncEvent): string {
 function buildEvent(partial: Partial<SyncEvent> = {}): SyncEvent {
 	return {
 		id: partial.id ?? `evt_${Math.random().toString(36).slice(2, 8)}`,
-		seq: partial.seq ?? 1,
 		type: partial.type ?? "item_updated",
 		entityId: partial.entityId ?? "item_1",
 		entityType: partial.entityType ?? "item",
@@ -47,7 +46,7 @@ function buildEvent(partial: Partial<SyncEvent> = {}): SyncEvent {
 describe("sync engine regressions", () => {
 	test("does not advance cursor when live delta application fails", async () => {
 		const storage = new MemoryStorage();
-		await storage.set("lastSyncCursor", { seq: 10 });
+		await storage.set("lastSyncCursor", { id: "evt_10" });
 		const outboundQueue = new OutboundQueue(storage, "self_client");
 
 		const orchestrator = new SyncOrchestrator({
@@ -101,7 +100,7 @@ describe("sync engine regressions", () => {
 		(orchestrator as any).syncManager.processEvent(
 			toSseEvent(
 				buildEvent({
-					seq: 11,
+					id: "evt_11",
 					clientId: "other_client",
 					type: "item_updated",
 					entityId: "item_1",
@@ -110,15 +109,15 @@ describe("sync engine regressions", () => {
 		);
 
 		await sleep(650);
-		const cursor = await storage.get<{ seq: number }>("lastSyncCursor");
-		expect(cursor?.seq).toBe(10);
+		const cursor = await storage.get<{ id: string }>("lastSyncCursor");
+		expect(cursor?.id).toBe("evt_10");
 
 		orchestrator.dispose();
 	});
 
 	test("clears cache and advances cursor when catch-up requires full refresh", async () => {
 		const storage = new MemoryStorage();
-		await storage.set("lastSyncCursor", { seq: 5 });
+		await storage.set("lastSyncCursor", { id: "evt_5" });
 		const outboundQueue = new OutboundQueue(storage, "self_client");
 		const clearedEmails: Array<string | undefined> = [];
 
@@ -136,7 +135,7 @@ describe("sync engine regressions", () => {
 							events: [],
 							hasMore: false,
 							requiresFullRefresh: true,
-							cursor: { seq: 20 },
+							cursor: { id: "evt_20" },
 						}),
 					},
 				},
@@ -175,8 +174,8 @@ describe("sync engine regressions", () => {
 
 		await (orchestrator as any).runCatchUp();
 
-		const cursor = await storage.get<{ seq: number }>("lastSyncCursor");
-		expect(cursor?.seq).toBe(20);
+		const cursor = await storage.get<{ id: string }>("lastSyncCursor");
+		expect(cursor?.id).toBe("evt_20");
 		expect(clearedEmails).toEqual(["alice@example.com"]);
 
 		orchestrator.dispose();
@@ -184,7 +183,7 @@ describe("sync engine regressions", () => {
 
 	test("does not advance cursor when full refresh cannot be performed", async () => {
 		const storage = new MemoryStorage();
-		await storage.set("lastSyncCursor", { seq: 5 });
+		await storage.set("lastSyncCursor", { id: "evt_5" });
 		const outboundQueue = new OutboundQueue(storage, "self_client");
 
 		const orchestrator = new SyncOrchestrator({
@@ -201,7 +200,7 @@ describe("sync engine regressions", () => {
 							events: [],
 							hasMore: false,
 							requiresFullRefresh: true,
-							cursor: { seq: 21 },
+							cursor: { id: "evt_21" },
 						}),
 					},
 				},
@@ -237,8 +236,8 @@ describe("sync engine regressions", () => {
 		await expect((orchestrator as any).runCatchUp()).rejects.toThrow(
 			"full refresh",
 		);
-		const cursor = await storage.get<{ seq: number }>("lastSyncCursor");
-		expect(cursor?.seq).toBe(5);
+		const cursor = await storage.get<{ id: string }>("lastSyncCursor");
+		expect(cursor?.id).toBe("evt_5");
 
 		orchestrator.dispose();
 	});
@@ -259,7 +258,7 @@ describe("sync engine regressions", () => {
 		(manager as any).processEvent(
 			toSseEvent(
 				buildEvent({
-					seq: 1,
+					id: "evt_1",
 					type: "vault_updated",
 					entityId: "vault_1",
 					entityType: "vault",
@@ -270,7 +269,7 @@ describe("sync engine regressions", () => {
 		(manager as any).processEvent(
 			toSseEvent(
 				buildEvent({
-					seq: 2,
+					id: "evt_2",
 					type: "vault_updated",
 					entityId: "vault_1",
 					entityType: "vault",
@@ -282,10 +281,10 @@ describe("sync engine regressions", () => {
 		await sleep(650);
 
 		expect(received.length).toBe(1);
-		expect(received[0]?.seq).toBe(2);
+		expect(received[0]?.id).toBe("evt_2");
 		expect(received[0]?.metadata?.reason).toBe("bulk_import");
 
-		const storedCursor = await storage.get<{ seq: number }>("lastSyncCursor");
+		const storedCursor = await storage.get<{ id: string }>("lastSyncCursor");
 		expect(storedCursor).toBeNull();
 		manager.disconnect();
 	});

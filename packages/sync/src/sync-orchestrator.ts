@@ -115,7 +115,7 @@ export class SyncOrchestrator {
 	}
 
 	private async acknowledgeEvent(event: SyncEvent): Promise<void> {
-		await this.syncManager.setStoredLastSyncCursor({ seq: event.seq });
+		await this.syncManager.setStoredLastSyncCursor({ id: event.id });
 		this.setStatus({
 			lastSyncTime: event.timestamp,
 		});
@@ -154,7 +154,6 @@ export class SyncOrchestrator {
 		try {
 			const cursor = await this.syncManager.getStoredLastSyncCursor();
 			if (!cursor) {
-				await this.syncManager.setStoredLastSyncCursor({ seq: 0 });
 				return;
 			}
 

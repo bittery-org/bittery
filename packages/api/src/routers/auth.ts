@@ -118,11 +118,30 @@ function generateDeterministicFakeHint(email: string): string {
 	return `A3-${digest.slice(0, 8)}`;
 }
 
+function isDevAuthStubEnabled(): boolean {
+	return (
+		process.env.BITTERY_ENABLE_DEV_AUTH_STUBS === "true" &&
+		process.env.NODE_ENV !== "production"
+	);
+}
+
+function throwMissingEmailProviderError(): never {
+	throw new TRPCError({
+		code: "INTERNAL_SERVER_ERROR",
+		message:
+			"Auth email delivery is not configured. Set BITTERY_ENABLE_DEV_AUTH_STUBS=true for local development or configure a real email provider.",
+	});
+}
+
 async function sendRecoveryCode(email: string, code: string): Promise<void> {
 	// TODO: Wire a production email provider (SES/Resend/etc.).
-	console.info(
-		`[recovery-code] email=${normalizeEmail(email)} code=${code} (dev stub)`,
-	);
+	void email;
+	void code;
+	if (!isDevAuthStubEnabled()) {
+		throwMissingEmailProviderError();
+	}
+
+	console.info("[auth-email] Recovery code requested via enabled dev stub");
 }
 
 async function sendSignupVerificationCode(input: {
@@ -131,8 +150,13 @@ async function sendSignupVerificationCode(input: {
 	invitationToken?: string;
 }): Promise<void> {
 	// TODO: Wire a production email provider (SES/Resend/etc.).
+	void input;
+	if (!isDevAuthStubEnabled()) {
+		throwMissingEmailProviderError();
+	}
+
 	console.info(
-		`[signup-verification-code] email=${normalizeEmail(input.email)} invitation=${input.invitationToken ? "invite" : "public"} code=${input.code} (dev stub)`,
+		"[auth-email] Signup verification requested via enabled dev stub",
 	);
 }
 
@@ -1388,6 +1412,36 @@ export const authRouter = router({
 					code: "BAD_REQUEST",
 					message: "Email does not match",
 				});
+			}
+
+			const membership = await db.query.user.findFirst({
+				where: (record, { eq: eqFn }) => eqFn(record.id, ctx.session.userId),
+				with: { team: true },
+			});
+			const ownedTeam = membership?.team;
+			if (
+				ownedTeam &&
+				ownedTeam.ownerId === ctx.session.userId &&
+				ownedTeam.type !== "personal"
+			) {
+				const [remainingMembers, remainingVaults] = await Promise.all([
+					db.query.user.findMany({
+						where: (record, { eq: eqFn }) => eqFn(record.teamId, ownedTeam.id),
+						columns: { id: true },
+					}),
+					db.query.vault.findMany({
+						where: (record, { eq: eqFn }) => eqFn(record.teamId, ownedTeam.id),
+						columns: { id: true },
+					}),
+				]);
+
+				if (remainingMembers.length > 1 || remainingVaults.length > 0) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message:
+							"You cannot delete your account while you still own a non-personal team with members or team vaults. Dismantle the team or transfer ownership first.",
+					});
+				}
 			}
 
 			await logAuditEvent({

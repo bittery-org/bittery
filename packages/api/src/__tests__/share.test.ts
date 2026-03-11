@@ -148,7 +148,7 @@ describe("Share Router", () => {
 			).rejects.toThrow("Read-only users cannot share items");
 		});
 
-		test("should deny access to non-member", async () => {
+		test("should return NOT_FOUND for a foreign item", async () => {
 			const [{ userId: ownerId }, { caller }] = await Promise.all([
 				setupShareUser(),
 				setupShareUser(),
@@ -164,7 +164,7 @@ describe("Share Router", () => {
 					expiresIn: "1day",
 					...mockShareData,
 				}),
-			).rejects.toThrow("Access denied to this item");
+			).rejects.toThrow("Item not found");
 		});
 
 		test("should enforce share_links entitlement for free plan", async () => {
@@ -411,6 +411,24 @@ describe("Share Router", () => {
 				"Share links are not available on your current plan. Upgrade to continue.",
 			);
 		});
+
+		test("should return NOT_FOUND for a foreign item in listByItem", async () => {
+			const [{ userId: ownerId, caller: ownerCaller }, { caller }] =
+				await Promise.all([setupShareUser(), setupShareUser()]);
+			const vaultId = await createTestVault(ownerId);
+			const itemId = await createTestItem(vaultId, ownerId);
+			await ownerCaller.create({
+				itemId,
+				accessMode: "anyone",
+				isOneTimeUse: false,
+				expiresIn: "1day",
+				...mockShareData,
+			});
+
+			await expect(caller.listByItem({ itemId })).rejects.toThrow(
+				"Item not found",
+			);
+		});
 	});
 
 	describe("get", () => {
@@ -500,14 +518,14 @@ describe("Share Router", () => {
 			expect(auditLogs[0]?.entityId).toBe(shareLinkId);
 		});
 
-		test("should deny revocation by read-only member", async () => {
+		test("should return NOT_FOUND when a read-only member cannot see the link", async () => {
 			const [{ userId: ownerId }, { userId: readOnlyId, caller }] =
 				await Promise.all([setupShareUser(), setupShareUser()]);
 			const { shareLinkId, vaultId } = await setupShareLink(ownerId);
 			await addVaultMember(vaultId, readOnlyId, "read-only");
 
 			await expect(caller.revoke({ linkId: shareLinkId })).rejects.toThrow(
-				"You do not have permission to revoke this link",
+				"Share link not found",
 			);
 		});
 
@@ -590,6 +608,21 @@ describe("Share Router", () => {
 				where: (emailRow, { eq }) => eq(emailRow.id, foreignEmailId),
 			});
 			expect(foreignEmail).toBeDefined();
+		});
+
+		test("should return NOT_FOUND when updating a foreign share link", async () => {
+			const [{ userId: ownerId }, { caller }] = await Promise.all([
+				setupShareUser(),
+				setupShareUser(),
+			]);
+			const { shareLinkId } = await setupShareLink(ownerId);
+
+			await expect(
+				caller.update({
+					linkId: shareLinkId,
+					isOneTimeUse: true,
+				}),
+			).rejects.toThrow("Share link not found");
 		});
 	});
 

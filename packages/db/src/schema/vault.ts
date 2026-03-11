@@ -9,6 +9,7 @@ import {
 	timestamp,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth";
+import { team } from "./team";
 
 // Vault types: personal (owned by user) or team (shared)
 export const vaultTypeEnum = pgEnum("vault_type", ["personal", "team"]);
@@ -39,7 +40,9 @@ export const vault = pgTable("vault", {
 	createdById: text("created_by_id")
 		.notNull()
 		.references(() => user.id, { onDelete: "cascade" }),
-	teamId: text("team_id"), // null for personal vaults
+	teamId: text("team_id").references(() => team.id, {
+		onDelete: "restrict",
+	}), // null for personal vaults
 	// Current key version (increments with each rotation)
 	keyVersion: integer("key_version").notNull().default(1),
 	createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -194,12 +197,46 @@ export const itemAttachment = pgTable(
 			.default("AES-GCM-AAD-V1"),
 		// File size in bytes (not sensitive)
 		fileSize: integer("file_size").notNull(),
+		// Encrypted object size stored in object storage.
+		storageSize: integer("storage_size").notNull().default(0),
 		uploadedBy: text("uploaded_by").references(() => user.id),
 		createdAt: timestamp("created_at").defaultNow().notNull(),
 	},
 	(table) => [
 		index("item_attachment_itemId_idx").on(table.itemId),
 		index("item_attachment_vaultId_idx").on(table.vaultId),
+	],
+);
+
+export const pendingAttachmentUpload = pgTable(
+	"pending_attachment_upload",
+	{
+		id: text("id").primaryKey(),
+		teamId: text("team_id")
+			.notNull()
+			.references(() => team.id, { onDelete: "cascade" }),
+		vaultId: text("vault_id")
+			.notNull()
+			.references(() => vault.id, { onDelete: "cascade" }),
+		itemId: text("item_id")
+			.notNull()
+			.references(() => item.id, { onDelete: "cascade" }),
+		storageKey: text("storage_key").notNull().unique(),
+		fileSize: integer("file_size").notNull(),
+		storageSize: integer("storage_size").notNull(),
+		contentType: text("content_type").notNull(),
+		createdBy: text("created_by")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		expiresAt: timestamp("expires_at").notNull(),
+		consumedAt: timestamp("consumed_at"),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+	},
+	(table) => [
+		index("pending_attachment_upload_teamId_idx").on(table.teamId),
+		index("pending_attachment_upload_itemId_idx").on(table.itemId),
+		index("pending_attachment_upload_createdBy_idx").on(table.createdBy),
+		index("pending_attachment_upload_expiresAt_idx").on(table.expiresAt),
 	],
 );
 
@@ -244,6 +281,28 @@ export const itemAttachmentRelations = relations(itemAttachment, ({ one }) => ({
 		references: [vault.id],
 	}),
 }));
+
+export const pendingAttachmentUploadRelations = relations(
+	pendingAttachmentUpload,
+	({ one }) => ({
+		team: one(team, {
+			fields: [pendingAttachmentUpload.teamId],
+			references: [team.id],
+		}),
+		vault: one(vault, {
+			fields: [pendingAttachmentUpload.vaultId],
+			references: [vault.id],
+		}),
+		item: one(item, {
+			fields: [pendingAttachmentUpload.itemId],
+			references: [item.id],
+		}),
+		user: one(user, {
+			fields: [pendingAttachmentUpload.createdBy],
+			references: [user.id],
+		}),
+	}),
+);
 
 export const folderRelations = relations(folder, ({ one }) => ({
 	vault: one(vault, {

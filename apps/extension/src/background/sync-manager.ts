@@ -104,7 +104,6 @@ function isSyncEventPayload(value: unknown): value is SyncEvent {
 	const event = value as Partial<SyncEvent>;
 	return (
 		typeof event.id === "string" &&
-		typeof event.seq === "number" &&
 		typeof event.type === "string" &&
 		typeof event.entityId === "string" &&
 		typeof event.entityType === "string" &&
@@ -120,7 +119,7 @@ function isSyncEventPayload(value: unknown): value is SyncEvent {
  */
 async function handleSyncEvent(event: SyncEvent): Promise<void> {
 	// Persist cursor in local storage (survives service worker restarts).
-	await setLastSyncCursor({ seq: event.seq });
+	await setLastSyncCursor({ id: event.id });
 
 	// Skip events from our own client.
 	const clientId = await getClientId();
@@ -403,18 +402,8 @@ export async function getLastSyncCursor(): Promise<SyncCursor | null> {
 		LEGACY_LAST_SYNC_KEY,
 	]);
 	const cursor = result[LAST_SYNC_CURSOR_KEY] as SyncCursor | undefined;
-	if (cursor && typeof cursor.seq === "number") {
+	if (cursor && typeof cursor.id === "string") {
 		return cursor;
-	}
-
-	// Legacy cursor — start from beginning
-	if (cursor && typeof cursor === "object" && "timestamp" in cursor) {
-		return { seq: 0 };
-	}
-
-	const legacyTimestamp = result[LEGACY_LAST_SYNC_KEY] as number | undefined;
-	if (legacyTimestamp) {
-		return { seq: 0 };
 	}
 
 	return null;

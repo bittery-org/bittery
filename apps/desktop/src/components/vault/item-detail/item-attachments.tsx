@@ -7,7 +7,10 @@
  */
 
 import type { AttachmentMeta } from "@bittery/core/hooks";
-import { useItemAttachments } from "@bittery/core/hooks";
+import {
+	getAttachmentUploadErrorCode,
+	useItemAttachments,
+} from "@bittery/core/hooks";
 import { Button, Input, toast } from "@bittery/ui";
 import {
 	IconCheckOutlineDuo18 as Check,
@@ -219,7 +222,14 @@ export function ItemAttachments({
 	const [pendingFile, setPendingFile] = useState<File | null>(null);
 	const [pendingName, setPendingName] = useState("");
 
-	const { attachments, isLoading, upload, download, remove } =
+	const {
+		attachments,
+		isLoading,
+		upload,
+		download,
+		remove,
+		attachmentMaxFileSizeBytes,
+	} =
 		useItemAttachments(itemId, vaultId, accountEmail);
 
 	const handleFileChange = useCallback(
@@ -227,10 +237,14 @@ export function ItemAttachments({
 			const file = e.target.files?.[0];
 			if (!file) return;
 
-			// 25 MB limit
-			if (file.size > 25 * 1024 * 1024) {
+			if (
+				attachmentMaxFileSizeBytes !== null &&
+				file.size > attachmentMaxFileSizeBytes
+			) {
 				toast.error(
-					m["vaults.detail.items.attachments.toast.file_too_large"](),
+					m["vaults.detail.items.attachments.toast.file_too_large"]({
+						maxFileSize: formatBytes(attachmentMaxFileSizeBytes),
+					}),
 				);
 				if (fileInputRef.current) fileInputRef.current.value = "";
 				return;
@@ -240,7 +254,7 @@ export function ItemAttachments({
 			setPendingFile(file);
 			if (fileInputRef.current) fileInputRef.current.value = "";
 		},
-		[m],
+		[attachmentMaxFileSizeBytes, m],
 	);
 
 	const handleConfirmUpload = useCallback(async () => {
@@ -253,14 +267,30 @@ export function ItemAttachments({
 				}),
 			);
 			toast.success(m["vaults.detail.items.attachments.toast.uploaded"]());
-		} catch {
-			toast.error(m["vaults.detail.items.attachments.toast.upload_failed"]());
+		} catch (error) {
+			const uploadErrorCode = getAttachmentUploadErrorCode(error);
+			if (uploadErrorCode === "storage-limit-reached") {
+				toast.error(
+					m["vaults.detail.items.attachments.toast.storage_limit_reached"](),
+				);
+			} else if (
+				uploadErrorCode === "file-too-large" &&
+				attachmentMaxFileSizeBytes !== null
+			) {
+				toast.error(
+					m["vaults.detail.items.attachments.toast.file_too_large"]({
+						maxFileSize: formatBytes(attachmentMaxFileSizeBytes),
+					}),
+				);
+			} else {
+				toast.error(m["vaults.detail.items.attachments.toast.upload_failed"]());
+			}
 		} finally {
 			setIsUploading(false);
 			setPendingFile(null);
 			setPendingName("");
 		}
-	}, [m, pendingFile, pendingName, upload]);
+	}, [attachmentMaxFileSizeBytes, m, pendingFile, pendingName, upload]);
 
 	const handleDownload = useCallback(
 		async (attachment: AttachmentMeta) => {

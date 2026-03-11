@@ -1,11 +1,22 @@
-import type { CloudPlanId } from "@bittery/api/billing/plans";
+import {
+	type CloudPlanId,
+	planMemberLimits,
+} from "@bittery/api/billing/plans";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
-import { Badge, Button, Separator, Skeleton, toast } from "@bittery/ui";
+import {
+	Badge,
+	Button,
+	Progress,
+	Separator,
+	Skeleton,
+	toast,
+} from "@bittery/ui";
 import {
 	IconCircleCheck2OutlineDuo18 as CheckCircle,
 	IconCircleWarningOutlineDuo18 as CircleWarning,
 	IconCreditCardLockOutlineDuo18 as CreditCard,
 	IconExternalLinkOutlineDuo18 as ExternalLink,
+	IconFileLockOutlineDuo18 as FileIcon,
 	IconMagicShieldOutlineDuo18 as Shield,
 	IconStarSparkle2OutlineDuo18 as StarSparkle,
 	IconUserOutlineDuo18 as User,
@@ -16,6 +27,11 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { z } from "zod";
 import { formatDate } from "@/lib/i18n-format";
+import {
+	formatStorageBytes,
+	formatUsagePercentage,
+	getAttachmentUsageSnapshot,
+} from "@/lib/billing-attachment-usage";
 import { m as messages } from "@/paraglide/messages";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -57,7 +73,7 @@ const plans = [
 			"billing.plan.free.feature.cross_platform_sync",
 		],
 		icon: User,
-		memberLimit: 1,
+		memberLimit: planMemberLimits.free,
 		highlighted: false,
 	},
 	{
@@ -71,7 +87,7 @@ const plans = [
 			"billing.plan.personal.feature.file_attachments",
 		],
 		icon: StarSparkle,
-		memberLimit: 1,
+		memberLimit: planMemberLimits.personal,
 		highlighted: true,
 	},
 	{
@@ -85,7 +101,7 @@ const plans = [
 			"billing.plan.family.feature.unlimited_share_links",
 		],
 		icon: Users,
-		memberLimit: 6,
+		memberLimit: planMemberLimits.family,
 		highlighted: false,
 	},
 	{
@@ -99,7 +115,7 @@ const plans = [
 			"billing.plan.team.feature.per_seat_billing",
 		],
 		icon: Shield,
-		memberLimit: null,
+		memberLimit: planMemberLimits.team,
 		highlighted: false,
 	},
 ] as const;
@@ -234,10 +250,13 @@ function BillingRoute() {
 	const trpcClient = useTRPCClient();
 	const queryClient = useQueryClient();
 	const { checkout } = Route.useSearch();
-	const { m } = useI18n();
+	const { locale, m } = useI18n();
 
 	const billingQuery = useQuery(trpc.billing.status.queryOptions());
 	const entitlementsQuery = useQuery(trpc.billing.entitlements.queryOptions());
+	const attachmentUsageQuery = useQuery(
+		trpc.billing.attachmentUsage.queryOptions(),
+	);
 
 	const checkoutMutation = useMutation({
 		mutationFn: (plan: (typeof paidPlanIds)[number]) =>
@@ -269,6 +288,9 @@ function BillingRoute() {
 		queryClient.invalidateQueries({ queryKey: trpc.billing.status.queryKey() });
 		queryClient.invalidateQueries({
 			queryKey: trpc.billing.entitlements.queryKey(),
+		});
+		queryClient.invalidateQueries({
+			queryKey: trpc.billing.attachmentUsage.queryKey(),
 		});
 		toast.success(m["billing.toast.checkout.refreshing"]());
 	}, [checkout, m, queryClient, trpc]);
@@ -314,6 +336,13 @@ function BillingRoute() {
 	const billing = billingQuery.data;
 	const statusDisplay = getStatusDisplay(billing.status, m);
 	const isPending = checkoutMutation.isPending || portalMutation.isPending;
+	const attachmentUsage = attachmentUsageQuery.data
+		? getAttachmentUsageSnapshot({
+				attachmentsEnabled: attachmentUsageQuery.data.attachmentsEnabled,
+				committedStorageBytes: attachmentUsageQuery.data.committedStorageBytes,
+				quotaBytes: attachmentUsageQuery.data.quotaBytes,
+			})
+		: null;
 
 	const getButtonForPlan = (planId: PlanId) => {
 		const isCurrent = billing.plan === planId;
@@ -641,6 +670,102 @@ function BillingRoute() {
 								</div>
 							</div>
 						)}
+					</div>
+				</section>
+			)}
+
+			{/* Attachment Storage */}
+			{attachmentUsage && (
+				<section className="space-y-4">
+					<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+						<h2 className="font-semibold text-lg tracking-tight">
+							{m["billing.attachments.title"]()}
+						</h2>
+						<p className="text-muted-foreground text-sm">
+							{m["billing.attachments.description"]()}
+						</p>
+					</div>
+
+					<div className="rounded-xl border bg-card p-5">
+						<div className="flex items-start gap-3">
+							<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
+								<FileIcon className="h-4 w-4 text-muted-foreground" />
+							</div>
+							<div className="min-w-0 flex-1 space-y-1">
+								<p className="font-medium text-sm">
+									{m["billing.entitlement.attachments"]()}
+								</p>
+								<p className="text-muted-foreground text-xs">
+									{attachmentUsage.state === "available"
+										? m["billing.attachments.state.available"]()
+										: m["billing.attachments.state.unavailable"]()}
+								</p>
+							</div>
+						</div>
+
+						{attachmentUsage.state === "available" && (
+							<div
+								className="mt-4 grid gap-4 sm:grid-cols-3"
+							>
+								<div className="rounded-lg bg-muted/40 p-4">
+									<p className="text-muted-foreground text-xs">
+										{m["billing.attachments.current_used"]()}
+									</p>
+									<p className="mt-1 font-semibold text-lg tracking-tight">
+										{formatStorageBytes(
+											attachmentUsage.committedStorageBytes,
+											locale,
+										)}
+									</p>
+								</div>
+								<div className="rounded-lg bg-muted/40 p-4">
+									<p className="text-muted-foreground text-xs">
+										{m["billing.attachments.total_quota"]()}
+									</p>
+									<p className="mt-1 font-semibold text-lg tracking-tight">
+										{attachmentUsage.quotaBytes === null
+											? ""
+											: formatStorageBytes(attachmentUsage.quotaBytes, locale)}
+									</p>
+								</div>
+								{attachmentUsage.usedPercentage !== null && (
+									<div className="rounded-lg bg-muted/40 p-4">
+										<p className="text-muted-foreground text-xs">
+											{m["billing.attachments.percentage_used"]()}
+										</p>
+										<p className="mt-1 font-semibold text-lg tracking-tight">
+											{formatUsagePercentage(
+												attachmentUsage.usedPercentage,
+												locale,
+											)}
+										</p>
+									</div>
+								)}
+							</div>
+						)}
+
+						{attachmentUsage.state === "available" &&
+							attachmentUsage.progressPercentage !== null &&
+							attachmentUsage.quotaBytes !== null && (
+								<>
+									<Progress
+										value={attachmentUsage.progressPercentage}
+										className="mt-4 h-2"
+									/>
+									<p className="mt-2 text-muted-foreground text-xs">
+										{m["billing.attachments.progress"]({
+											usedStorage: formatStorageBytes(
+												attachmentUsage.committedStorageBytes,
+												locale,
+											),
+											totalQuota: formatStorageBytes(
+												attachmentUsage.quotaBytes,
+												locale,
+											),
+										})}
+									</p>
+								</>
+							)}
 					</div>
 				</section>
 			)}

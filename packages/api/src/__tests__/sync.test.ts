@@ -12,7 +12,9 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { db } from "@bittery/db";
+import { syncEvent } from "@bittery/db/schema/sync";
 import { itemAttachment } from "@bittery/db/schema/vault";
+import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { syncRouter } from "../routers/sync";
 import {
@@ -30,26 +32,74 @@ describe("Sync Router", () => {
 	});
 
 	describe("getEventsSince", () => {
-		test("should return events since a given timestamp", async () => {
+		test("should return events and an id cursor when starting from scratch", async () => {
 			const { caller, userId } = await setup(syncRouter);
 			const vaultId = await createTestVault(userId);
 
 			// Create events at different times
-			await createTestSyncEvent(vaultId, userId, {
+			const firstEventId = await createTestSyncEvent(vaultId, userId, {
 				eventType: "item_created",
 				entityId: "item-1",
 			});
-			await createTestSyncEvent(vaultId, userId, {
+			const secondEventId = await createTestSyncEvent(vaultId, userId, {
 				eventType: "item_updated",
 				entityId: "item-2",
 			});
 
 			const result = await caller.getEventsSince({
-				sinceSeq: 0,
+				sinceId: null,
 			});
 
 			expect(result.events.length).toBe(2);
+			expect(result.events[0]?.id).toBe(firstEventId);
+			expect(result.events[1]?.id).toBe(secondEventId);
+			expect((result.events[0] as Record<string, unknown>)?.seq).toBeUndefined();
+			expect(result.cursor).toEqual({ id: secondEventId });
 			expect(result.hasMore).toBe(false);
+		});
+
+		test("should accept sinceId and return only newer events", async () => {
+			const { caller, userId } = await setup(syncRouter);
+			const vaultId = await createTestVault(userId);
+			const firstEventId = await createTestSyncEvent(vaultId, userId, {
+				eventType: "item_created",
+				entityId: "item-1",
+			});
+			const secondEventId = await createTestSyncEvent(vaultId, userId, {
+				eventType: "item_updated",
+				entityId: "item-2",
+			});
+
+			const result = await caller.getEventsSince({
+				sinceId: firstEventId,
+			});
+
+			expect(result.events).toHaveLength(1);
+			expect(result.events[0]?.id).toBe(secondEventId);
+			expect(result.cursor).toEqual({ id: secondEventId });
+		});
+
+		test("should require full refresh when the previous cursor id is pruned", async () => {
+			const { caller, userId } = await setup(syncRouter);
+			const vaultId = await createTestVault(userId);
+			const prunedEventId = await createTestSyncEvent(vaultId, userId, {
+				eventType: "item_created",
+				entityId: "item-1",
+			});
+			const latestEventId = await createTestSyncEvent(vaultId, userId, {
+				eventType: "item_updated",
+				entityId: "item-2",
+			});
+
+			await db.delete(syncEvent).where(eq(syncEvent.id, prunedEventId));
+
+			const result = await caller.getEventsSince({
+				sinceId: prunedEventId,
+			});
+
+			expect(result.events).toEqual([]);
+			expect(result.requiresFullRefresh).toBe(true);
+			expect(result.cursor).toEqual({ id: latestEventId });
 		});
 
 		test("should filter by specific vaultIds", async () => {
@@ -67,7 +117,7 @@ describe("Sync Router", () => {
 			});
 
 			const result = await caller.getEventsSince({
-				sinceSeq: 0,
+				sinceId: null,
 				vaultIds: [vault1],
 			});
 
@@ -79,7 +129,7 @@ describe("Sync Router", () => {
 			const { caller } = await setup(syncRouter);
 
 			const result = await caller.getEventsSince({
-				sinceSeq: 0,
+				sinceId: null,
 			});
 
 			expect(result.events).toEqual([]);
@@ -97,7 +147,7 @@ describe("Sync Router", () => {
 			});
 
 			const result = await caller.getEventsSince({
-				sinceSeq: 0,
+				sinceId: null,
 				vaultIds: [vaultId],
 			});
 
@@ -117,7 +167,7 @@ describe("Sync Router", () => {
 			}
 
 			const result = await caller.getEventsSince({
-				sinceSeq: 0,
+				sinceId: null,
 				limit: 3,
 			});
 
@@ -136,7 +186,7 @@ describe("Sync Router", () => {
 			});
 
 			const result = await caller.getEventsSince({
-				sinceSeq: 0,
+				sinceId: null,
 			});
 
 			expect(result.events[0]?.metadata).toEqual({

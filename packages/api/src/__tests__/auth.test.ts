@@ -13,12 +13,13 @@
  * - Heartbeat
  */
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { db, signupVerification } from "@bittery/db";
 import { eq } from "drizzle-orm";
 import { authRouter } from "../routers/auth";
 import { setControlBroadcastFunction } from "../sync-helper";
 import {
+	addTeamMember,
 	createAuthenticatedContext,
 	createPublicContext,
 	createTestInvitation,
@@ -104,8 +105,17 @@ const nextAuthCryptoFixture = await generateTestAuthCryptoData({
 	accountPassword: "TestPass-Fixture-2!",
 });
 const originalBitteryMode = process.env.BITTERY_MODE;
+const originalDevAuthStubs = process.env.BITTERY_ENABLE_DEV_AUTH_STUBS;
+const originalNodeEnv = process.env.NODE_ENV;
+const originalConsoleInfo = console.info;
 
 describe("Auth Router", () => {
+	beforeEach(() => {
+		process.env.BITTERY_ENABLE_DEV_AUTH_STUBS = "true";
+		process.env.NODE_ENV = "test";
+		console.info = originalConsoleInfo;
+	});
+
 	afterEach(async () => {
 		setControlBroadcastFunction(null);
 		await truncateAll();
@@ -114,6 +124,17 @@ describe("Auth Router", () => {
 		} else {
 			process.env.BITTERY_MODE = originalBitteryMode;
 		}
+		if (originalDevAuthStubs === undefined) {
+			delete process.env.BITTERY_ENABLE_DEV_AUTH_STUBS;
+		} else {
+			process.env.BITTERY_ENABLE_DEV_AUTH_STUBS = originalDevAuthStubs;
+		}
+		if (originalNodeEnv === undefined) {
+			delete process.env.NODE_ENV;
+		} else {
+			process.env.NODE_ENV = originalNodeEnv;
+		}
+		console.info = originalConsoleInfo;
 	});
 
 	describe("signup", () => {
@@ -403,6 +424,33 @@ describe("Auth Router", () => {
 					invitationToken: invitation.token,
 				}),
 			).rejects.toThrow("Email does not match invitation");
+		});
+
+		test("dev auth stubs should log no codes or emails when enabled", async () => {
+			const caller = authRouter.createCaller(createPublicContext());
+			const messages: string[] = [];
+			console.info = (...args: unknown[]) => {
+				messages.push(args.map((value) => String(value)).join(" "));
+			};
+			const email = generateTestEmail();
+
+			await caller.requestSignupVerification({ email });
+
+			expect(messages).toHaveLength(1);
+			expect(messages[0]).toContain("enabled dev stub");
+			expect(messages[0]).not.toContain(email);
+			expect(messages[0]).not.toMatch(/\b\d{6}\b/);
+		});
+
+		test("auth code requests should fail cleanly when the dev stub is disabled and no provider exists", async () => {
+			delete process.env.BITTERY_ENABLE_DEV_AUTH_STUBS;
+			const caller = authRouter.createCaller(createPublicContext());
+
+			await expect(
+				caller.requestSignupVerification({ email: generateTestEmail() }),
+			).rejects.toThrow(
+				"Auth email delivery is not configured. Set BITTERY_ENABLE_DEV_AUTH_STUBS=true for local development or configure a real email provider.",
+			);
 		});
 
 		test("signupWithInvitation should reject unauthorized pendingVaultKeys", async () => {
@@ -1020,6 +1068,42 @@ describe("Auth Router", () => {
 			await expect(
 				caller.deleteAccount({ confirmEmail: "wrong@example.com" }),
 			).rejects.toThrow("Email does not match");
+		});
+
+		test("should reject deletion when the owner still has other team members", async () => {
+			const { userId, email, caller } = await setup(authRouter);
+			const teamId = await createTestTeam(userId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			const { userId: memberId } = await createTestUser();
+			await addTeamMember(teamId, memberId, "member");
+
+			await expect(
+				caller.deleteAccount({ confirmEmail: email }),
+			).rejects.toThrow(
+				"You cannot delete your account while you still own a non-personal team with members or team vaults. Dismantle the team or transfer ownership first.",
+			);
+		});
+
+		test("should reject deletion when the owner still has team vaults", async () => {
+			const { userId, email, caller } = await setup(authRouter);
+			const teamId = await createTestTeam(userId, {
+				billingPlan: "family",
+				billingStatus: "active",
+				type: "family",
+			});
+			await createTestVault(userId, {
+				type: "team",
+				teamId,
+			});
+
+			await expect(
+				caller.deleteAccount({ confirmEmail: email }),
+			).rejects.toThrow(
+				"You cannot delete your account while you still own a non-personal team with members or team vaults. Dismantle the team or transfer ownership first.",
+			);
 		});
 	});
 

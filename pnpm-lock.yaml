@@ -332,7 +332,7 @@ importers:
         version: 12.34.4(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       nitro:
         specifier: npm:nitro-nightly@latest
-        version: nitro-nightly@3.0.1-20260310-162348-201889a0(chokidar@5.0.0)(dotenv@17.2.3)(drizzle-orm@0.45.1(@types/pg@8.16.0)(bun-types@1.3.6)(expo-sqlite@16.0.10(expo@54.0.32)(react-native@0.81.5(@babel/core@7.28.6)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(kysely@0.27.6)(pg@8.17.2))(jiti@2.6.1)(lru-cache@11.2.6)(rollup@4.56.0)(vite@7.3.1(@types/node@22.19.13)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
+        version: nitro-nightly@3.0.1-20260311-093920-80cd914c(chokidar@5.0.0)(dotenv@17.2.3)(drizzle-orm@0.45.1(@types/pg@8.16.0)(bun-types@1.3.6)(expo-sqlite@16.0.10(expo@54.0.32)(react-native@0.81.5(@babel/core@7.28.6)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(kysely@0.27.6)(pg@8.17.2))(jiti@2.6.1)(lru-cache@11.2.6)(rollup@4.56.0)(vite@7.3.1(@types/node@22.19.13)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
       radix-ui:
         specifier: ^1.4.3
         version: 1.4.3(@types/react-dom@19.1.11(@types/react@19.1.17))(@types/react@19.1.17)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
@@ -972,6 +972,9 @@ importers:
 
   packages/jobs:
     dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.888.0
+        version: 3.972.0
       '@bittery/db':
         specifier: workspace:*
         version: link:../db
@@ -7805,8 +7808,8 @@ packages:
   nf3@0.3.11:
     resolution: {integrity: sha512-ObKp/SA3f1g1f/OMeDlRWaZmqGgk7A0NnDIbeO7c/MV4r/quMlpP/BsqMGuTi3lUlXbC1On8YH7ICM2u2bIAOw==}
 
-  nitro-nightly@3.0.1-20260310-162348-201889a0:
-    resolution: {integrity: sha512-taTMMCmdsSCHyW7uyuLOnvfVKzjO3TLhlDsgLopNdocuWVi26YF7j41zXYCXzbGYA3aUoIZgd33LmrKJiDTq0w==}
+  nitro-nightly@3.0.1-20260311-093920-80cd914c:
+    resolution: {integrity: sha512-yL9LJlfNdSGaOW/AZMB8PrLBpRWb9Pniuts08tgvXdtmSdu5fSzGNdovu7J7TavneGI3fLmK+IuV2xU2kt+bYQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -17756,7 +17759,7 @@ snapshots:
 
   nf3@0.3.11: {}
 
-  nitro-nightly@3.0.1-20260310-162348-201889a0(chokidar@5.0.0)(dotenv@17.2.3)(drizzle-orm@0.45.1(@types/pg@8.16.0)(bun-types@1.3.6)(expo-sqlite@16.0.10(expo@54.0.32)(react-native@0.81.5(@babel/core@7.28.6)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(kysely@0.27.6)(pg@8.17.2))(jiti@2.6.1)(lru-cache@11.2.6)(rollup@4.56.0)(vite@7.3.1(@types/node@22.19.13)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)):
+  nitro-nightly@3.0.1-20260311-093920-80cd914c(chokidar@5.0.0)(dotenv@17.2.3)(drizzle-orm@0.45.1(@types/pg@8.16.0)(bun-types@1.3.6)(expo-sqlite@16.0.10(expo@54.0.32)(react-native@0.81.5(@babel/core@7.28.6)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(kysely@0.27.6)(pg@8.17.2))(jiti@2.6.1)(lru-cache@11.2.6)(rollup@4.56.0)(vite@7.3.1(@types/node@22.19.13)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)):
     dependencies:
       consola: 3.4.2
       crossws: 0.4.4(srvx@0.11.9)

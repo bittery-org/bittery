@@ -11,7 +11,7 @@ export interface CatchUpClient {
 	sync: {
 		getEventsSince: {
 			query: (input: {
-				sinceSeq: number;
+				sinceId?: string | null;
 				limit?: number;
 			}) => Promise<CatchUpPageResponse>;
 		};
@@ -46,9 +46,9 @@ export async function runCatchUp({
 	let requiresFullRefresh = false;
 
 	while (true) {
-		const previousSeq = cursor.seq;
+		const previousId = cursor.id;
 		const page = await client.sync.getEventsSince.query({
-			sinceSeq: cursor.seq,
+			sinceId: cursor.id,
 			limit,
 		});
 
@@ -74,8 +74,7 @@ export async function runCatchUp({
 		}
 
 		const latestEvent = page.events[page.events.length - 1];
-		const nextCursor =
-			page.cursor ?? (latestEvent ? { seq: latestEvent.seq } : null);
+		const nextCursor = page.cursor ?? (latestEvent ? { id: latestEvent.id } : null);
 		if (nextCursor) {
 			cursor = nextCursor;
 		}
@@ -84,7 +83,7 @@ export async function runCatchUp({
 			break;
 		}
 
-		if (cursor.seq === previousSeq) {
+		if (cursor.id === previousId) {
 			// Safety valve: avoid infinite loop if server claims hasMore but cursor does not advance.
 			break;
 		}

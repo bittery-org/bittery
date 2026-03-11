@@ -1,5 +1,8 @@
 import type { AttachmentMeta, FileInput } from "@bittery/core/hooks";
-import { useItemAttachments } from "@bittery/core/hooks";
+import {
+	getAttachmentUploadErrorCode,
+	useItemAttachments,
+} from "@bittery/core/hooks";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
@@ -17,6 +20,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Text, TextInput, View } from "react-native";
 import { withUniwind } from "uniwind";
+import { useI18n } from "@/providers/i18n-provider";
 
 const StyledFile = withUniwind(File);
 const StyledDownload = withUniwind(Download);
@@ -217,6 +221,7 @@ export function ItemAttachments({
 	accountEmail,
 	canEdit = false,
 }: ItemAttachmentsProps) {
+	const { m } = useI18n();
 	const { toast } = useToast();
 	const [isUploading, setIsUploading] = useState(false);
 	const [isDownloading, setIsDownloading] = useState(false);
@@ -225,7 +230,14 @@ export function ItemAttachments({
 		useState<DocumentPicker.DocumentPickerAsset | null>(null);
 	const [pendingName, setPendingName] = useState("");
 
-	const { attachments, isLoading, upload, download, remove } =
+	const {
+		attachments,
+		isLoading,
+		upload,
+		download,
+		remove,
+		attachmentMaxFileSizeBytes,
+	} =
 		useItemAttachments(itemId, vaultId, accountEmail);
 
 	const handlePickFile = useCallback(async () => {
@@ -238,15 +250,23 @@ export function ItemAttachments({
 
 		const asset = result.assets[0];
 
-		// 25 MB limit
-		if ((asset.size ?? 0) > 25 * 1024 * 1024) {
-			Alert.alert("File too large", "Maximum attachment size is 25 MB.");
+		if (
+			attachmentMaxFileSizeBytes !== null &&
+			(asset.size ?? 0) > attachmentMaxFileSizeBytes
+		) {
+			toast.show({
+				variant: "danger",
+				label: m["vaults.detail.items.attachments.toast.file_too_large"]({
+					maxFileSize: formatBytes(attachmentMaxFileSizeBytes),
+				}),
+				placement: "bottom",
+			});
 			return;
 		}
 
 		setPendingName(asset.name);
 		setPendingAsset(asset);
-	}, []);
+	}, [attachmentMaxFileSizeBytes, m, toast]);
 
 	const handleConfirmUpload = useCallback(async () => {
 		if (!pendingAsset) return;
@@ -263,19 +283,47 @@ export function ItemAttachments({
 				label: "Attachment uploaded",
 				placement: "bottom",
 			});
-		} catch {
-			toast.show({
-				variant: "danger",
-				label: "Upload failed",
-				description: "Failed to upload attachment. Please try again.",
-				placement: "bottom",
-			});
+		} catch (error) {
+			const uploadErrorCode = getAttachmentUploadErrorCode(error);
+			if (uploadErrorCode === "storage-limit-reached") {
+				toast.show({
+					variant: "danger",
+					label: m[
+						"vaults.detail.items.attachments.toast.storage_limit_reached"
+					](),
+					placement: "bottom",
+				});
+			} else if (
+				uploadErrorCode === "file-too-large" &&
+				attachmentMaxFileSizeBytes !== null
+			) {
+				toast.show({
+					variant: "danger",
+					label: m["vaults.detail.items.attachments.toast.file_too_large"]({
+						maxFileSize: formatBytes(attachmentMaxFileSizeBytes),
+					}),
+					placement: "bottom",
+				});
+			} else {
+				toast.show({
+					variant: "danger",
+					label: m["vaults.detail.items.attachments.toast.upload_failed"](),
+					placement: "bottom",
+				});
+			}
 		} finally {
 			setIsUploading(false);
 			setPendingAsset(null);
 			setPendingName("");
 		}
-	}, [pendingAsset, pendingName, upload, toast]);
+	}, [
+		attachmentMaxFileSizeBytes,
+		m,
+		pendingAsset,
+		pendingName,
+		toast,
+		upload,
+	]);
 
 	const handleDownload = useCallback(
 		async (attachment: AttachmentMeta) => {

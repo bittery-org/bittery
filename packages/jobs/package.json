@@ -12,6 +12,7 @@
 		"./types": "./src/types.ts"
 	},
 	"dependencies": {
+		"@aws-sdk/client-s3": "^3.888.0",
 		"pg-boss": "^10.3.0",
 		"@bittery/db": "workspace:*",
 		"drizzle-orm": "catalog:"

@@ -166,6 +166,58 @@ describe("Team Router", () => {
 			expect(team).toBeUndefined();
 		});
 
+		test("should reject deleting a non-personal team with extra members", async () => {
+			const [{ caller, userId }, { userId: memberId }] = await Promise.all([
+				setup(teamRouter),
+				setup(teamRouter),
+			]);
+			const teamId = await createTestTeam(userId, { type: "organization" });
+			await addTeamMember(teamId, memberId, "member");
+
+			await expect(caller.delete({ teamId })).rejects.toThrow(
+				"Team deletion is blocked until the owner is the only remaining member.",
+			);
+		});
+
+		test("should reject deleting a non-personal team with team vaults", async () => {
+			const { caller, userId } = await setup(teamRouter);
+			const teamId = await createTestTeam(userId, { type: "organization" });
+			await createTestVault(userId, {
+				type: "team",
+				teamId,
+				name: "Shared Vault",
+			});
+
+			await expect(caller.delete({ teamId })).rejects.toThrow(
+				"Team deletion is blocked until all team vaults have been removed or converted.",
+			);
+		});
+
+		test("should move the owner onto a fresh personal team after deletion", async () => {
+			const { caller, userId } = await setup(teamRouter);
+			const teamId = await createTestTeam(userId, {
+				type: "organization",
+				name: "Old Team",
+			});
+
+			const result = await caller.delete({ teamId });
+
+			expect(result.success).toBe(true);
+			const deletedTeam = await getTeam(teamId);
+			expect(deletedTeam).toBeUndefined();
+
+			const updatedOwner = await getUser(userId);
+			expect(updatedOwner?.teamId).toBeDefined();
+			expect(updatedOwner?.teamId).not.toBe(teamId);
+			if (!updatedOwner?.teamId) {
+				throw new Error("Expected owner to be reassigned to a personal team");
+			}
+
+			const replacementTeam = await getTeam(updatedOwner.teamId);
+			expect(replacementTeam?.type).toBe("personal");
+			expect(replacementTeam?.ownerId).toBe(userId);
+		});
+
 		test("should deny non-owner from deleting team", async () => {
 			const [{ userId: ownerId }, { userId: adminId, caller }] =
 				await Promise.all([setup(teamRouter), setup(teamRouter)]);

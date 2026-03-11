@@ -57,6 +57,7 @@ export class SyncManager {
 	private maxReconnectDelay: number;
 	private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 	private lastEventCursor: SyncCursor | null = null;
+	private lastEventTimestamp: number | null = null;
 	private lastHeartbeatTime: number | null = null;
 	private staleCheckInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -91,7 +92,7 @@ export class SyncManager {
 	 * Get last event timestamp
 	 */
 	getLastEventTimestamp(): number | null {
-		return this.lastEventCursor?.timestamp ?? null;
+		return this.lastEventTimestamp;
 	}
 
 	/**
@@ -318,7 +319,6 @@ export class SyncManager {
 			// Convert to SyncEvent
 			const syncEvent: SyncEvent = {
 				id: event.id,
-				seq: event.seq,
 				type: event.type,
 				entityId: event.entityId,
 				entityType: event.entityType,
@@ -332,13 +332,14 @@ export class SyncManager {
 
 			// Track last seen cursor from stream. Persistence is handled after
 			// successful event application in the orchestrator path.
-			this.lastEventCursor = { seq: syncEvent.seq };
+			this.lastEventCursor = { id: syncEvent.id };
+			this.lastEventTimestamp = syncEvent.timestamp;
 
 			// Events from this client are already reflected locally via optimistic
 			// updates. They do not require delta application, so we can acknowledge
 			// the cursor immediately.
 			if (syncEvent.clientId === this.clientId) {
-				void this.setStoredLastSyncCursor({ seq: syncEvent.seq }).catch(
+				void this.setStoredLastSyncCursor({ id: syncEvent.id }).catch(
 					(error) => {
 						console.error("Failed to persist sync cursor:", error);
 					},
@@ -474,28 +475,22 @@ export class SyncManager {
 
 	/**
 	 * Get stored sync cursor.
-	 * Supports migrating from legacy timestamp+id storage.
+	 * Supports invalidating legacy cursor formats that exposed server seq values.
 	 */
 	async getStoredLastSyncCursor(): Promise<SyncCursor | null> {
-		// Try new seq-based cursor first
 		const cursor = await this.storage.get<SyncCursor>("lastSyncCursor");
 		if (
 			cursor &&
 			typeof cursor === "object" &&
-			"seq" in cursor &&
-			typeof cursor.seq === "number"
+			"id" in cursor &&
+			typeof cursor.id === "string" &&
+			cursor.id.length > 0
 		) {
 			return cursor;
 		}
 
-		// Legacy: timestamp+id cursor — treat as needing full refresh (seq=0)
-		if (cursor && typeof cursor === "object" && "timestamp" in cursor) {
-			return { seq: 0 };
-		}
-
-		const legacyTimestamp = await this.storage.get<number>("lastSyncTimestamp");
-		if (legacyTimestamp) {
-			return { seq: 0 };
+		if (cursor) {
+			return null;
 		}
 
 		return null;
@@ -512,8 +507,7 @@ export class SyncManager {
 	 * Backward-compatible wrapper for legacy callers.
 	 */
 	async getStoredLastSyncTimestamp(): Promise<number | null> {
-		const cursor = await this.getStoredLastSyncCursor();
-		return cursor?.timestamp ?? null;
+		return null;
 	}
 }
 

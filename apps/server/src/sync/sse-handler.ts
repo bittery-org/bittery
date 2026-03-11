@@ -13,7 +13,6 @@ import { streamSSE } from "hono/streaming";
 // Types for sync events
 export interface SyncEventPayload {
 	id: string;
-	seq: number;
 	type:
 		| "item_created"
 		| "item_updated"
@@ -147,6 +146,7 @@ const connections = new Map<string, Map<string, Connection>>();
 
 // Vault memberships for connected users: Map<userId, Set<vaultId>>
 const userVaults = new Map<string, Set<string>>();
+const deniedVaultRecipients = new Map<string, Set<string>>();
 
 // Heartbeat interval in milliseconds
 const HEARTBEAT_INTERVAL = 15_000;
@@ -170,7 +170,36 @@ async function getUserVaults(userId: string): Promise<Set<string>> {
 	});
 	const vaultIds = new Set(vaultKeys.map((vk) => vk.vaultId));
 	userVaults.set(userId, vaultIds);
+	const deniedVaults = deniedVaultRecipients.get(userId);
+	if (deniedVaults) {
+		for (const vaultId of [...deniedVaults]) {
+			if (vaultIds.has(vaultId)) {
+				deniedVaults.delete(vaultId);
+			}
+		}
+		if (deniedVaults.size === 0) {
+			deniedVaultRecipients.delete(userId);
+		}
+	}
 	return vaultIds;
+}
+
+function addDeniedVaultRecipient(userId: string, vaultId: string): void {
+	const deniedVaults = deniedVaultRecipients.get(userId) ?? new Set<string>();
+	deniedVaults.add(vaultId);
+	deniedVaultRecipients.set(userId, deniedVaults);
+}
+
+function clearDeniedVaultRecipient(userId: string, vaultId: string): void {
+	const deniedVaults = deniedVaultRecipients.get(userId);
+	if (!deniedVaults) {
+		return;
+	}
+
+	deniedVaults.delete(vaultId);
+	if (deniedVaults.size === 0) {
+		deniedVaultRecipients.delete(userId);
+	}
 }
 
 function addConnection(connection: Connection): void {
@@ -197,6 +226,7 @@ function removeConnection(userId: string, connectionId: string): void {
 		if (userConnections.size === 0) {
 			connections.delete(userId);
 			userVaults.delete(userId);
+			deniedVaultRecipients.delete(userId);
 		}
 	}
 	console.log(
@@ -255,6 +285,7 @@ function deliverToConnections(event: SyncEventPayload): void {
 	// User-targeted control events are delivered directly to the target user.
 	if (event.type === "vault_access_revoked") {
 		if (vaultId) {
+			addDeniedVaultRecipient(eventUserId, vaultId);
 			userVaults.get(eventUserId)?.delete(vaultId);
 		}
 		const targetConnections = connections.get(eventUserId);
@@ -295,6 +326,7 @@ function deliverToConnections(event: SyncEventPayload): void {
 			if (addedUserVaults) {
 				addedUserVaults.add(vaultId);
 			}
+			clearDeniedVaultRecipient(addedUserId, vaultId);
 		}
 	}
 
@@ -334,6 +366,7 @@ function deliverToConnections(event: SyncEventPayload): void {
 	for (const [userId, userConnections] of connections) {
 		const vaults = userVaults.get(userId);
 		if (!vaults?.has(vaultId)) continue;
+		if (deniedVaultRecipients.get(userId)?.has(vaultId)) continue;
 
 		for (const connection of userConnections.values()) {
 			connection.channel.push({

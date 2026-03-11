@@ -25,6 +25,8 @@ describe("Billing entitlements resolver", () => {
 		});
 		expect(limits.share_links).toBe(0);
 		expect(limits.shared_vaults).toBe(0);
+		expect(limits.attachment_max_file_size_bytes).toBe(0);
+		expect(limits.attachment_storage_bytes).toBe(0);
 	});
 
 	test("cloud paid active plan should include sentinel", () => {
@@ -47,6 +49,8 @@ describe("Billing entitlements resolver", () => {
 		});
 		expect(limits.share_links).toBe(5);
 		expect(limits.shared_vaults).toBe(0);
+		expect(limits.attachment_max_file_size_bytes).toBe(10 * 1024 * 1024);
+		expect(limits.attachment_storage_bytes).toBe(250 * 1024 * 1024);
 	});
 
 	test("cloud paid inactive plan should disable sentinel", () => {
@@ -69,6 +73,8 @@ describe("Billing entitlements resolver", () => {
 		});
 		expect(limits.share_links).toBe(0);
 		expect(limits.shared_vaults).toBe(0);
+		expect(limits.attachment_max_file_size_bytes).toBe(0);
+		expect(limits.attachment_storage_bytes).toBe(0);
 	});
 
 	test("self-hosted should disable cloud-only entitlements", () => {
@@ -91,6 +97,8 @@ describe("Billing entitlements resolver", () => {
 		});
 		expect(limits.share_links).toBeNull();
 		expect(limits.shared_vaults).toBeNull();
+		expect(limits.attachment_max_file_size_bytes).toBeNull();
+		expect(limits.attachment_storage_bytes).toBeNull();
 	});
 
 	test("family plan should include shared vault limit from pricing", () => {

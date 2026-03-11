@@ -1,22 +1,42 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: Its fine */
 import { db } from "@bittery/db";
+import { user } from "@bittery/db/schema/auth";
 import {
 	item,
 	itemAttachment,
+	pendingAttachmentUpload,
 	vault,
 	vaultKey,
 	vaultKeyRotation,
 } from "@bittery/db/schema/vault";
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import {
+	and,
+	eq,
+	gt,
+	inArray,
+	isNotNull,
+	isNull,
+	sql,
+} from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import {
 	type EntitlementKey,
+	type ResolveEntitlementsInput,
 	resolveEffectiveEntitlementLimits,
 	resolveEffectiveEntitlements,
 } from "../billing/entitlements";
 import { getBitteryMode } from "../config/mode";
+import {
+	getAttachmentQuotaLockKey,
+	getEncryptedAttachmentStorageSize,
+	getPendingAttachmentUploadExpiry,
+} from "../helpers/attachments";
+import {
+	getScopedAttachmentAccess,
+	getScopedItemAccess,
+} from "../helpers/scoped-resource";
 import { protectedProcedure, router } from "../index";
 import {
 	createAttachmentKey,
@@ -25,6 +45,7 @@ import {
 	createVaultImageKey,
 	deleteObject,
 	getStoragePublicUrl,
+	headObject,
 	isValidAttachmentUploadKey,
 } from "../storage/s3";
 import {
@@ -90,6 +111,60 @@ async function canUseAttachments(userId: string): Promise<boolean> {
 	});
 
 	return entitlements.attachments;
+}
+
+async function getAttachmentActor(userId: string): Promise<{
+	teamId: string;
+	entitlementInput: ResolveEntitlementsInput;
+	limits: ReturnType<typeof resolveEffectiveEntitlementLimits>;
+}> {
+	const userData = await db.query.user.findFirst({
+		where: (record, { eq: eqFn }) => eqFn(record.id, userId),
+		with: { team: true },
+	});
+	const mode = getBitteryMode();
+
+	if (!userData?.team || !userData.teamId) {
+		if (mode === "self-hosted") {
+			return {
+				teamId: `self-hosted:${userId}`,
+				entitlementInput: {
+					mode,
+					billingPlan: "team",
+					billingStatus: "active",
+				},
+				limits: resolveEffectiveEntitlementLimits({
+					mode,
+					billingPlan: "team",
+					billingStatus: "active",
+				}),
+			};
+		}
+
+		throw new TRPCError({
+			code: "FORBIDDEN",
+			message: "Attachments are only available on paid plans with active billing.",
+		});
+	}
+
+	const entitlementInput: ResolveEntitlementsInput = {
+		mode,
+		billingPlan: userData.team.billingPlan,
+		billingStatus: userData.team.billingStatus,
+	};
+	const entitlements = resolveEffectiveEntitlements(entitlementInput);
+	if (!entitlements.attachments) {
+		throw new TRPCError({
+			code: "FORBIDDEN",
+			message: "Attachments are only available on paid plans with active billing.",
+		});
+	}
+
+	return {
+		teamId: userData.teamId,
+		entitlementInput,
+		limits: resolveEffectiveEntitlementLimits(entitlementInput, entitlements),
+	};
 }
 
 export const vaultRouter = router({
@@ -1788,34 +1863,30 @@ export const vaultRouter = router({
 				itemId: z.string(),
 				fileName: z.string().min(1),
 				contentType: z.string().min(1),
+				fileSize: z.number().int().positive(),
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
-			await assertUserEntitlement(
+			const actor = await getAttachmentActor(ctx.session.userId);
+			const scopedItem = await getScopedItemAccess(
 				ctx.session.userId,
-				"attachments",
-				"Attachments are only available on paid plans with active billing.",
+				input.itemId,
 			);
-
-			// Verify user has access to the item's vault
-			const existingItem = await db.query.item.findFirst({
-				where: (i, { eq }) => eq(i.id, input.itemId),
-			});
-
-			if (!existingItem) {
+			if (!scopedItem) {
 				throw new TRPCError({ code: "NOT_FOUND", message: "Item not found" });
 			}
-
-			const userVaultKey = await db.query.vaultKey.findFirst({
-				where: (vk, { and, eq }) =>
-					and(
-						eq(vk.vaultId, existingItem.vaultId),
-						eq(vk.userId, ctx.session.userId),
-					),
-			});
-
-			if (!userVaultKey || userVaultKey.role === "read-only") {
+			if (scopedItem.role === "read-only") {
 				throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
+			}
+			if (
+				actor.limits.attachment_max_file_size_bytes !== null &&
+				input.fileSize > actor.limits.attachment_max_file_size_bytes
+			) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message:
+						"Attachment file exceeds the maximum allowed size for your current plan.",
+				});
 			}
 
 			const key = createAttachmentKey({
@@ -1823,8 +1894,69 @@ export const vaultRouter = router({
 				itemId: input.itemId,
 				fileName: input.fileName,
 			});
+			const storageSize = getEncryptedAttachmentStorageSize(input.fileSize);
+			const now = new Date();
+			const expiresAt = getPendingAttachmentUploadExpiry(now);
 
-			return createPresignedUpload({ key, contentType: input.contentType });
+			await db.transaction(async (tx) => {
+				await tx.execute(
+					sql`SELECT pg_advisory_xact_lock(hashtext(${getAttachmentQuotaLockKey(actor.teamId)}))`,
+				);
+
+				const [committedUsage, pendingUsage] = await Promise.all([
+					tx
+						.select({
+							total: sql<number>`coalesce(sum(${itemAttachment.storageSize}), 0)::int`,
+						})
+						.from(itemAttachment)
+						.innerJoin(user, eq(itemAttachment.uploadedBy, user.id))
+						.where(eq(user.teamId, actor.teamId)),
+					tx
+						.select({
+							total: sql<number>`coalesce(sum(${pendingAttachmentUpload.storageSize}), 0)::int`,
+						})
+						.from(pendingAttachmentUpload)
+						.where(
+							and(
+								eq(pendingAttachmentUpload.teamId, actor.teamId),
+								isNull(pendingAttachmentUpload.consumedAt),
+								gt(pendingAttachmentUpload.expiresAt, now),
+							),
+						),
+				]);
+
+				const currentUsage =
+					(committedUsage[0]?.total ?? 0) + (pendingUsage[0]?.total ?? 0);
+				if (
+					actor.limits.attachment_storage_bytes !== null &&
+					currentUsage + storageSize > actor.limits.attachment_storage_bytes
+				) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message:
+							"Attachment storage quota has been reached for your current plan.",
+					});
+				}
+
+				await tx.insert(pendingAttachmentUpload).values({
+					id: nanoid(),
+					teamId: actor.teamId,
+					vaultId: scopedItem.item.vaultId,
+					itemId: scopedItem.item.id,
+					storageKey: key,
+					fileSize: input.fileSize,
+					storageSize,
+					contentType: input.contentType,
+					createdBy: ctx.session.userId,
+					expiresAt,
+				});
+			});
+
+			return createPresignedUpload({
+				key,
+				contentType: input.contentType,
+				contentLength: storageSize,
+			});
 		}),
 
 	/**
@@ -1844,29 +1976,15 @@ export const vaultRouter = router({
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
-			await assertUserEntitlement(
+			await getAttachmentActor(ctx.session.userId);
+			const scopedItem = await getScopedItemAccess(
 				ctx.session.userId,
-				"attachments",
-				"Attachments are only available on paid plans with active billing.",
+				input.itemId,
 			);
-
-			const existingItem = await db.query.item.findFirst({
-				where: (i, { eq }) => eq(i.id, input.itemId),
-			});
-
-			if (!existingItem) {
+			if (!scopedItem) {
 				throw new TRPCError({ code: "NOT_FOUND", message: "Item not found" });
 			}
-
-			const userVaultKey = await db.query.vaultKey.findFirst({
-				where: (vk, { and, eq }) =>
-					and(
-						eq(vk.vaultId, existingItem.vaultId),
-						eq(vk.userId, ctx.session.userId),
-					),
-			});
-
-			if (!userVaultKey || userVaultKey.role === "read-only") {
+			if (scopedItem.role === "read-only") {
 				throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
 			}
 
@@ -1883,29 +2001,66 @@ export const vaultRouter = router({
 				});
 			}
 
+			const reservation = await db.query.pendingAttachmentUpload.findFirst({
+				where: (record, { and: andFn, eq: eqFn, gt: gtFn, isNull: isNullFn }) =>
+					andFn(
+						eqFn(record.storageKey, input.storageKey),
+						eqFn(record.itemId, input.itemId),
+						eqFn(record.createdBy, ctx.session.userId),
+						isNullFn(record.consumedAt),
+						gtFn(record.expiresAt, new Date()),
+					),
+			});
+			if (!reservation) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Invalid or expired attachment upload reservation",
+				});
+			}
+			if (reservation.fileSize !== input.fileSize) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Attachment metadata does not match the reserved upload.",
+				});
+			}
+
+			const uploadedObject = await headObject(input.storageKey);
+			if (!uploadedObject || uploadedObject.size !== reservation.storageSize) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message:
+						"Uploaded attachment does not match the reserved encrypted size.",
+				});
+			}
+
 			const attachmentId = nanoid();
 			let broadcast: SyncBroadcastPayload;
 			await db.transaction(async (tx) => {
 				await tx.insert(itemAttachment).values({
 					id: attachmentId,
-					itemId: input.itemId,
-					vaultId: existingItem.vaultId,
+					itemId: scopedItem.item.id,
+					vaultId: scopedItem.item.vaultId,
 					storageKey: input.storageKey,
 					encryptedName: input.encryptedName,
 					encryptedContentType: input.encryptedContentType,
 					encryptionIv: input.encryptionIv,
 					encryptedContentTypeIv: input.encryptedContentTypeIv,
 					encryptionAlgorithm: input.encryptionAlgorithm,
-					fileSize: input.fileSize,
+					fileSize: reservation.fileSize,
+					storageSize: uploadedObject.size,
 					uploadedBy: ctx.session.userId,
 				});
+				await tx
+					.update(pendingAttachmentUpload)
+					.set({ consumedAt: new Date() })
+					.where(eq(pendingAttachmentUpload.id, reservation.id));
 
 				broadcast = await createSyncEvent(
 					{
 						eventType: "item_updated",
 						entityId: input.itemId,
 						entityType: "item",
-						vaultId: existingItem.vaultId,
+						vaultId: scopedItem.item.vaultId,
 						userId: ctx.session.userId,
 					},
 					tx,
@@ -1924,34 +2079,17 @@ export const vaultRouter = router({
 	listAttachments: protectedProcedure
 		.input(z.object({ itemId: z.string() }))
 		.query(async ({ input, ctx }) => {
-			await assertUserEntitlement(
+			await getAttachmentActor(ctx.session.userId);
+			const scopedItem = await getScopedItemAccess(
 				ctx.session.userId,
-				"attachments",
-				"Attachments are only available on paid plans with active billing.",
+				input.itemId,
 			);
-
-			const existingItem = await db.query.item.findFirst({
-				where: (i, { eq }) => eq(i.id, input.itemId),
-			});
-
-			if (!existingItem) {
+			if (!scopedItem) {
 				throw new TRPCError({ code: "NOT_FOUND", message: "Item not found" });
 			}
 
-			const userVaultKey = await db.query.vaultKey.findFirst({
-				where: (vk, { and, eq }) =>
-					and(
-						eq(vk.vaultId, existingItem.vaultId),
-						eq(vk.userId, ctx.session.userId),
-					),
-			});
-
-			if (!userVaultKey) {
-				throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
-			}
-
 			const attachments = await db.query.itemAttachment.findMany({
-				where: (a, { eq }) => eq(a.itemId, input.itemId),
+				where: (a, { eq }) => eq(a.itemId, scopedItem.item.id),
 				orderBy: (a, { asc }) => [asc(a.createdAt)],
 			});
 
@@ -1964,34 +2102,18 @@ export const vaultRouter = router({
 	getAttachmentDownloadUrl: protectedProcedure
 		.input(z.object({ attachmentId: z.string() }))
 		.mutation(async ({ input, ctx }) => {
-			await assertUserEntitlement(
+			await getAttachmentActor(ctx.session.userId);
+			const scopedAttachment = await getScopedAttachmentAccess(
 				ctx.session.userId,
-				"attachments",
-				"Attachments are only available on paid plans with active billing.",
+				input.attachmentId,
 			);
-
-			const attachment = await db.query.itemAttachment.findFirst({
-				where: (a, { eq }) => eq(a.id, input.attachmentId),
-			});
-
-			if (!attachment) {
+			if (!scopedAttachment) {
 				throw new TRPCError({
 					code: "NOT_FOUND",
 					message: "Attachment not found",
 				});
 			}
-
-			const userVaultKey = await db.query.vaultKey.findFirst({
-				where: (vk, { and, eq }) =>
-					and(
-						eq(vk.vaultId, attachment.vaultId),
-						eq(vk.userId, ctx.session.userId),
-					),
-			});
-
-			if (!userVaultKey) {
-				throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
-			}
+			const { attachment } = scopedAttachment;
 
 			const downloadUrl = await createPresignedDownload({
 				key: attachment.storageKey,
@@ -2023,34 +2145,21 @@ export const vaultRouter = router({
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
-			await assertUserEntitlement(
+			await getAttachmentActor(ctx.session.userId);
+			const scopedAttachment = await getScopedAttachmentAccess(
 				ctx.session.userId,
-				"attachments",
-				"Attachments are only available on paid plans with active billing.",
+				input.attachmentId,
 			);
-
-			const attachment = await db.query.itemAttachment.findFirst({
-				where: (a, { eq }) => eq(a.id, input.attachmentId),
-			});
-
-			if (!attachment) {
+			if (!scopedAttachment) {
 				throw new TRPCError({
 					code: "NOT_FOUND",
 					message: "Attachment not found",
 				});
 			}
-
-			const userVaultKey = await db.query.vaultKey.findFirst({
-				where: (vk, { and, eq }) =>
-					and(
-						eq(vk.vaultId, attachment.vaultId),
-						eq(vk.userId, ctx.session.userId),
-					),
-			});
-
-			if (!userVaultKey || userVaultKey.role === "read-only") {
+			if (scopedAttachment.role === "read-only") {
 				throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
 			}
+			const { attachment } = scopedAttachment;
 
 			let broadcast: SyncBroadcastPayload;
 			await db.transaction(async (tx) => {
@@ -2087,45 +2196,26 @@ export const vaultRouter = router({
 	deleteAttachment: protectedProcedure
 		.input(z.object({ attachmentId: z.string() }))
 		.mutation(async ({ input, ctx }) => {
-			await assertUserEntitlement(
+			await getAttachmentActor(ctx.session.userId);
+			const scopedAttachment = await getScopedAttachmentAccess(
 				ctx.session.userId,
-				"attachments",
-				"Attachments are only available on paid plans with active billing.",
+				input.attachmentId,
 			);
-
-			const attachment = await db.query.itemAttachment.findFirst({
-				where: (a, { eq }) => eq(a.id, input.attachmentId),
-			});
-
-			if (!attachment) {
+			if (!scopedAttachment) {
 				throw new TRPCError({
 					code: "NOT_FOUND",
 					message: "Attachment not found",
 				});
 			}
-
-			const userVaultKey = await db.query.vaultKey.findFirst({
-				where: (vk, { and, eq }) =>
-					and(
-						eq(vk.vaultId, attachment.vaultId),
-						eq(vk.userId, ctx.session.userId),
-					),
-			});
-
-			if (!userVaultKey) {
-				throw new TRPCError({
-					code: "FORBIDDEN",
-					message: "Access denied",
-				});
-			}
-			if (userVaultKey.role === "member") {
+			const { attachment, role } = scopedAttachment;
+			if (role === "member") {
 				if (attachment.uploadedBy !== ctx.session.userId) {
 					throw new TRPCError({
 						code: "FORBIDDEN",
 						message: "You can only delete your own attachments",
 					});
 				}
-			} else if (!["owner", "admin"].includes(userVaultKey.role)) {
+			} else if (!["owner", "admin"].includes(role)) {
 				throw new TRPCError({
 					code: "FORBIDDEN",
 					message: "Access denied",
@@ -2555,6 +2645,26 @@ export const vaultRouter = router({
 						broadcasts.push(
 							await createSyncEvent(
 								{
+									eventType: "vault_access_revoked",
+									entityId: input.vaultId,
+									entityType: "vault",
+									vaultId: input.vaultId,
+									userId: input.userId,
+									clientId: input.clientId,
+									version: newKeyVersion,
+									metadata: {
+										reason: "member_removed",
+										removedUserId: input.userId,
+									},
+								},
+								tx,
+								ctx.clientId,
+							),
+						);
+
+						broadcasts.push(
+							await createSyncEvent(
+								{
 									eventType: "vault_member_removed",
 									entityId: input.userId,
 									entityType: "vault_member",
@@ -2588,28 +2698,8 @@ export const vaultRouter = router({
 								},
 								tx,
 								ctx.clientId,
-							),
-						);
-
-						broadcasts.push(
-							await createSyncEvent(
-								{
-									eventType: "vault_access_revoked",
-									entityId: input.vaultId,
-									entityType: "vault",
-									vaultId: input.vaultId,
-									userId: input.userId,
-									clientId: input.clientId,
-									version: newKeyVersion,
-									metadata: {
-										reason: "member_removed",
-										removedUserId: input.userId,
-									},
-								},
-								tx,
-								ctx.clientId,
-							),
-						);
+								),
+							);
 					});
 
 					// Broadcast after transaction commits

@@ -17,7 +17,7 @@ import {
 	shareLinkAllowedEmail,
 } from "@bittery/db/schema/sharing";
 import { syncEvent, syncEventAck } from "@bittery/db/schema/sync";
-import { team, teamInvitation, teamMember } from "@bittery/db/schema/team";
+import { team, teamInvitation } from "@bittery/db/schema/team";
 import {
 	item,
 	vault,
@@ -62,10 +62,12 @@ export function createTestContext(
 ): Context {
 	return {
 		session: sessionData || null,
+		authToken: null,
 		clientId: null,
 		device: {
 			userAgent: "Test/1.0 (Testing)",
 			ipAddress: "127.0.0.1",
+			appPlatform: "web",
 		},
 	};
 }
@@ -605,7 +607,6 @@ export async function cleanupTestData(userIds: string[] = []) {
 		await db.delete(vault).where(eq(vault.createdById, userId));
 
 		// Clean up team data
-		await db.delete(teamMember).where(eq(teamMember.userId, userId));
 		await db
 			.delete(teamInvitation)
 			.where(eq(teamInvitation.invitedById, userId));
@@ -615,7 +616,6 @@ export async function cleanupTestData(userIds: string[] = []) {
 
 		for (const t of userTeams) {
 			await db.delete(teamInvitation).where(eq(teamInvitation.teamId, t.id));
-			await db.delete(teamMember).where(eq(teamMember.teamId, t.id));
 		}
 
 		await db.delete(team).where(eq(team.ownerId, userId));
@@ -725,7 +725,7 @@ export async function truncateAll() {
 			sync_event_ack, sync_event,
 			stripe_event_log,
 			item, vault_key, vault_key_rotation, folder, vault,
-			team_invitation, team_member, team,
+			pending_attachment_upload, team_invitation, team,
 			recovery_verification, signup_verification,
 			session, audit_log, "user"
 		CASCADE

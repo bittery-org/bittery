@@ -13,8 +13,8 @@ import {
 	getDecryptedVaultKey,
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
-import { useTRPCClient } from "@bittery/shared/trpc";
-import { useMutation } from "@tanstack/react-query";
+import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { usePlatform } from "../context/platform-context";
 import {
 	buildAttachmentBlobEncryptionContext,
@@ -55,6 +55,40 @@ export interface FileInput {
 	arrayBuffer(): Promise<ArrayBuffer>;
 }
 
+export type AttachmentUploadErrorCode =
+	| "file-too-large"
+	| "storage-limit-reached"
+	| "unknown";
+
+const ATTACHMENT_FILE_TOO_LARGE_MESSAGE =
+	"Attachment file exceeds the maximum allowed size for your current plan.";
+const ATTACHMENT_STORAGE_LIMIT_REACHED_MESSAGE =
+	"Attachment storage quota has been reached for your current plan.";
+
+export function getAttachmentUploadErrorCode(
+	error: unknown,
+): AttachmentUploadErrorCode {
+	const message =
+		error instanceof Error
+			? error.message
+			: typeof error === "object" &&
+					error !== null &&
+					"message" in error &&
+					typeof error.message === "string"
+				? error.message
+				: null;
+
+	if (message === ATTACHMENT_FILE_TOO_LARGE_MESSAGE) {
+		return "file-too-large";
+	}
+
+	if (message === ATTACHMENT_STORAGE_LIMIT_REACHED_MESSAGE) {
+		return "storage-limit-reached";
+	}
+
+	return "unknown";
+}
+
 /**
  * Hook to list, upload, download, and delete attachments for a vault item.
  *
@@ -71,8 +105,10 @@ export function useItemAttachments(
 	vaultId: string | undefined,
 	accountEmail?: string,
 ) {
+	const trpc = useTRPC();
 	const client = useTRPCClient();
 	const { storage, crypto } = usePlatform();
+	const entitlementsQuery = useQuery(trpc.billing.entitlements.queryOptions());
 
 	const {
 		rawItem,
@@ -173,6 +209,7 @@ export function useItemAttachments(
 				itemId,
 				fileName: `${globalThis.crypto?.randomUUID?.() ?? Date.now()}.enc`,
 				contentType: "application/octet-stream",
+				fileSize: file.size,
 			});
 
 			const blobContext = buildAttachmentBlobEncryptionContext({
@@ -355,6 +392,10 @@ export function useItemAttachments(
 		attachments: attachments as AttachmentMeta[],
 		isLoading,
 		error,
+		attachmentMaxFileSizeBytes:
+			entitlementsQuery.data?.limits.attachment_max_file_size_bytes ?? null,
+		attachmentStorageBytes:
+			entitlementsQuery.data?.limits.attachment_storage_bytes ?? null,
 		upload: uploadMutation,
 		download: downloadMutation,
 		remove: deleteMutation,

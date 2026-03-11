@@ -397,8 +397,58 @@ export const teamRouter = router({
 				});
 			}
 
-			// Delete team (cascades to invitations)
-			await db.delete(team).where(eq(team.id, input.teamId));
+			await db.transaction(async (tx) => {
+				const actor = await tx.query.user.findFirst({
+					where: (record, { eq: eqFn }) => eqFn(record.id, ctx.session.userId),
+					with: { team: true },
+				});
+
+				if (
+					!actor ||
+					actor.teamId !== input.teamId ||
+					actor.role !== "owner" ||
+					!actor.team ||
+					actor.team.type === "personal"
+				) {
+					throw new TRPCError({
+						code: "FORBIDDEN",
+						message: "Only the team owner can delete the team",
+					});
+				}
+
+				const [members, teamVaults] = await Promise.all([
+					tx.query.user.findMany({
+						where: (record, { eq: eqFn }) => eqFn(record.teamId, input.teamId),
+						columns: { id: true },
+					}),
+					tx.query.vault.findMany({
+						where: (record, { eq: eqFn }) => eqFn(record.teamId, input.teamId),
+						columns: { id: true },
+					}),
+				]);
+
+				if (members.length !== 1 || members[0]?.id !== ctx.session.userId) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message:
+							"Team deletion is blocked until the owner is the only remaining member.",
+					});
+				}
+
+				if (teamVaults.length > 0) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message:
+							"Team deletion is blocked until all team vaults have been removed or converted.",
+					});
+				}
+
+				await createPersonalTeamForUser(ctx.session.userId, actor.name, tx);
+				await tx
+					.delete(teamInvitation)
+					.where(eq(teamInvitation.teamId, input.teamId));
+				await tx.delete(team).where(eq(team.id, input.teamId));
+			});
 
 			return { success: true };
 		}),
@@ -599,6 +649,26 @@ export const teamRouter = router({
 							.where(eq(vaultKeyRotation.id, record.rotationId));
 
 						// Create sync events
+						broadcasts.push(
+							await createSyncEvent(
+								{
+									eventType: "vault_access_revoked",
+									entityId: vaultRotation.vaultId,
+									entityType: "vault",
+									vaultId: vaultRotation.vaultId,
+									userId: ctx.session.userId,
+									clientId: input.clientId,
+									version: record.newKeyVersion,
+									metadata: {
+										removedUserId: ctx.session.userId,
+										reason: "member_left",
+									},
+								},
+								tx,
+								ctx.clientId,
+							),
+						);
+
 						broadcasts.push(
 							await createSyncEvent(
 								{
@@ -1132,6 +1202,26 @@ export const teamRouter = router({
 							broadcasts.push(
 								await createSyncEvent(
 									{
+										eventType: "vault_access_revoked",
+										entityId: vaultRotation.vaultId,
+										entityType: "vault",
+										vaultId: vaultRotation.vaultId,
+										userId: input.userId,
+										clientId: input.clientId,
+										version: record.newKeyVersion,
+										metadata: {
+											reason: "team_member_removed",
+											removedUserId: input.userId,
+										},
+									},
+									tx,
+									ctx.clientId,
+								),
+							);
+
+							broadcasts.push(
+								await createSyncEvent(
+									{
 										eventType: "vault_member_removed",
 										entityId: input.userId,
 										entityType: "vault_member",
@@ -1159,26 +1249,6 @@ export const teamRouter = router({
 										metadata: {
 											reason: "team_member_removed",
 											keyRotationId: record.rotationId,
-										},
-									},
-									tx,
-									ctx.clientId,
-								),
-							);
-
-							broadcasts.push(
-								await createSyncEvent(
-									{
-										eventType: "vault_access_revoked",
-										entityId: vaultRotation.vaultId,
-										entityType: "vault",
-										vaultId: vaultRotation.vaultId,
-										userId: input.userId,
-										clientId: input.clientId,
-										version: record.newKeyVersion,
-										metadata: {
-											reason: "team_member_removed",
-											removedUserId: input.userId,
 										},
 									},
 									tx,

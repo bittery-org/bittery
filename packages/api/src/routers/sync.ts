@@ -31,13 +31,13 @@ async function canUseAttachments(userId: string): Promise<boolean> {
 
 export const syncRouter = router({
 	/**
-	 * Get sync events since a given sequence number
+	 * Get sync events since a given opaque event id
 	 * Used for catching up after reconnection
 	 */
 	getEventsSince: protectedProcedure
 		.input(
 			z.object({
-				sinceSeq: z.number(), // Sequence number cursor
+				sinceId: z.string().nullable().optional(),
 				vaultIds: z.array(z.string()).optional(), // Filter by specific vaults
 				limit: z.number().min(1).max(1000).default(100),
 			}),
@@ -55,20 +55,55 @@ export const syncRouter = router({
 				? input.vaultIds.filter((id) => userVaultIds.includes(id))
 				: userVaultIds;
 
-			const cursorCondition = gt(syncEvent.seq, input.sinceSeq);
-
-			const vaultEventsWhere =
+			const visibleEventsWhere =
 				targetVaultIds.length > 0
-					? and(inArray(syncEvent.vaultId, targetVaultIds), cursorCondition)
-					: undefined;
-			const targetedControlEventsWhere = and(
-				eq(syncEvent.userId, ctx.session.userId),
-				eq(syncEvent.eventType, "vault_access_revoked"),
-				cursorCondition,
-			);
-			const eventsWhere = vaultEventsWhere
-				? or(vaultEventsWhere, targetedControlEventsWhere)
-				: targetedControlEventsWhere;
+					? or(
+							inArray(syncEvent.vaultId, targetVaultIds),
+							and(
+								eq(syncEvent.userId, ctx.session.userId),
+								eq(syncEvent.eventType, "vault_access_revoked"),
+							),
+						)
+					: and(
+							eq(syncEvent.userId, ctx.session.userId),
+							eq(syncEvent.eventType, "vault_access_revoked"),
+						);
+
+			let sinceSeq = 0;
+			let requiresFullRefresh = false;
+			if (input.sinceId) {
+				const cursorEvent = await db.query.syncEvent.findFirst({
+					where: and(eq(syncEvent.id, input.sinceId), visibleEventsWhere),
+					columns: {
+						id: true,
+						seq: true,
+					},
+				});
+
+				if (!cursorEvent) {
+					requiresFullRefresh = true;
+				} else {
+					sinceSeq = cursorEvent.seq;
+				}
+			}
+
+			if (requiresFullRefresh) {
+				const latestVisibleEvent = await db.query.syncEvent.findFirst({
+					where: visibleEventsWhere,
+					orderBy: [desc(syncEvent.seq)],
+					columns: { id: true },
+				});
+
+				return {
+					events: [],
+					cursor: latestVisibleEvent ? { id: latestVisibleEvent.id } : null,
+					hasMore: false,
+					requiresFullRefresh: true,
+				};
+			}
+
+			const cursorCondition = gt(syncEvent.seq, sinceSeq);
+			const eventsWhere = and(visibleEventsWhere, cursorCondition);
 
 			// Get events for these vaults since the given cursor
 			const events = await db.query.syncEvent.findMany({
@@ -79,35 +114,11 @@ export const syncRouter = router({
 
 			const hasMore = events.length > input.limit;
 			const resultEvents = hasMore ? events.slice(0, input.limit) : events;
-
-			const oldestVaultEventsWhere =
-				targetVaultIds.length > 0
-					? inArray(syncEvent.vaultId, targetVaultIds)
-					: undefined;
-			const oldestControlEventsWhere = and(
-				eq(syncEvent.userId, ctx.session.userId),
-				eq(syncEvent.eventType, "vault_access_revoked"),
-			);
-			const oldestEventWhere = oldestVaultEventsWhere
-				? or(oldestVaultEventsWhere, oldestControlEventsWhere)
-				: oldestControlEventsWhere;
-
-			// If the oldest retained event is newer than the requested cursor,
-			// a full refresh is required because part of history was pruned.
-			const oldestEvent = await db.query.syncEvent.findFirst({
-				where: oldestEventWhere,
-				orderBy: [asc(syncEvent.seq)],
-			});
-
-			const requiresFullRefresh = Boolean(
-				oldestEvent && oldestEvent.seq > input.sinceSeq,
-			);
 			const latestCursorEvent = resultEvents[resultEvents.length - 1];
 
 			return {
 				events: resultEvents.map((e) => ({
 					id: e.id,
-					seq: e.seq,
 					type: e.eventType,
 					entityId: e.entityId,
 					entityType: e.entityType,
@@ -118,7 +129,7 @@ export const syncRouter = router({
 					metadata: e.metadata ? JSON.parse(e.metadata) : null,
 					timestamp: e.createdAt.getTime(),
 				})),
-				cursor: latestCursorEvent ? { seq: latestCursorEvent.seq } : null,
+				cursor: latestCursorEvent ? { id: latestCursorEvent.id } : null,
 				hasMore,
 				requiresFullRefresh,
 			};

@@ -175,8 +175,10 @@ export {
 export { type UseItemResult, useItem } from "./use-item";
 export {
 	type AttachmentMeta,
+	type AttachmentUploadErrorCode,
 	type DecryptedAttachment,
 	type FileInput,
+	getAttachmentUploadErrorCode,
 	useItemAttachments,
 } from "./use-item-attachments";
 // Unified Data Hooks (automatically handle single-account vs "All Accounts" mode)

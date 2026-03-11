@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import type { BitteryMode } from "../config/mode";
 import type { CloudPlanId } from "./plans";
-import { requiresPaidSubscription } from "./plans";
+import { planAttachmentLimits, requiresPaidSubscription } from "./plans";
 
 export type BillingStatus =
 	| "none"
@@ -39,6 +39,8 @@ export interface ResolveEntitlementsInput {
 export interface EntitlementLimits {
 	share_links: number | null;
 	shared_vaults: number | null;
+	attachment_max_file_size_bytes: number | null;
+	attachment_storage_bytes: number | null;
 }
 
 const activeStatuses = new Set<BillingStatus>(["active", "trialing"]);
@@ -77,10 +79,26 @@ export const planEntitlementMap: Record<
 };
 
 export const planEntitlementLimits: Record<CloudPlanId, EntitlementLimits> = {
-	free: { share_links: 0, shared_vaults: 0 },
-	personal: { share_links: 5, shared_vaults: 0 },
-	family: { share_links: null, shared_vaults: 5 },
-	team: { share_links: null, shared_vaults: null },
+	free: {
+		share_links: 0,
+		shared_vaults: 0,
+		...planAttachmentLimits.free,
+	},
+	personal: {
+		share_links: 5,
+		shared_vaults: 0,
+		...planAttachmentLimits.personal,
+	},
+	family: {
+		share_links: null,
+		shared_vaults: 5,
+		...planAttachmentLimits.family,
+	},
+	team: {
+		share_links: null,
+		shared_vaults: null,
+		...planAttachmentLimits.team,
+	},
 };
 
 const selfHostedEntitlements = new Set<EntitlementKey>([
@@ -92,6 +110,8 @@ const selfHostedEntitlements = new Set<EntitlementKey>([
 const selfHostedEntitlementLimits: EntitlementLimits = {
 	share_links: null,
 	shared_vaults: null,
+	attachment_max_file_size_bytes: null,
+	attachment_storage_bytes: null,
 };
 
 const paidStatusGatedEntitlements = new Set<EntitlementKey>([
@@ -152,6 +172,10 @@ export function resolveEffectiveEntitlementLimits(
 	}
 	if (!effectiveEntitlements.vault_sharing) {
 		limits.shared_vaults = 0;
+	}
+	if (!effectiveEntitlements.attachments) {
+		limits.attachment_max_file_size_bytes = 0;
+		limits.attachment_storage_bytes = 0;
 	}
 
 	return limits;

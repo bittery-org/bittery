@@ -1,5 +1,6 @@
 import { createHmac, randomUUID } from "node:crypto";
 import {
+	HeadObjectCommand,
 	DeleteObjectCommand,
 	GetObjectCommand,
 	PutObjectCommand,
@@ -20,6 +21,11 @@ export interface PresignedUploadResult {
 	key: string;
 	uploadUrl: string;
 	publicUrl: string | null;
+}
+
+export interface StorageObjectHead {
+	size: number;
+	contentType: string | null;
 }
 
 let client: S3Client | null = null;
@@ -169,6 +175,7 @@ export function createTeamImageKey(params: {
 export async function createPresignedUpload(params: {
 	key: string;
 	contentType: string;
+	contentLength?: number;
 	expiresInSeconds?: number;
 }): Promise<PresignedUploadResult> {
 	const config = getStorageConfig();
@@ -178,6 +185,9 @@ export async function createPresignedUpload(params: {
 		Bucket: config.bucket,
 		Key: params.key,
 		ContentType: params.contentType,
+		...(params.contentLength !== undefined
+			? { ContentLength: params.contentLength }
+			: {}),
 	});
 
 	const uploadUrl = await getSignedUrl(s3Client, command, {
@@ -206,6 +216,53 @@ export async function createPresignedDownload(params: {
 	return getSignedUrl(s3Client, command, {
 		expiresIn: params.expiresInSeconds ?? 300,
 	});
+}
+
+export async function headObject(
+	key: string,
+): Promise<StorageObjectHead | null> {
+	const config = getStorageConfig();
+	const s3Client = getStorageClient();
+
+	try {
+		const result = await s3Client.send(
+			new HeadObjectCommand({
+				Bucket: config.bucket,
+				Key: key,
+			}),
+		);
+
+		return {
+			size: result.ContentLength ?? 0,
+			contentType: result.ContentType ?? null,
+		};
+	} catch (error) {
+		if (
+			typeof error === "object" &&
+			error !== null &&
+			("$metadata" in error || "name" in error)
+		) {
+			const maybeName =
+				typeof (error as { name?: unknown }).name === "string"
+					? (error as { name: string }).name
+					: "";
+			const maybeStatus =
+				typeof (error as { $metadata?: { httpStatusCode?: unknown } }).$metadata
+					?.httpStatusCode === "number"
+					? (error as { $metadata: { httpStatusCode: number } }).$metadata
+							.httpStatusCode
+					: null;
+			if (
+				maybeName === "NotFound" ||
+				maybeName === "NoSuchKey" ||
+				maybeStatus === 404
+			) {
+				return null;
+			}
+		}
+
+		throw error;
+	}
 }
 
 /**

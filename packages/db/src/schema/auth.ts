@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
 import {
+	type AnyPgColumn,
 	boolean,
 	index,
 	integer,
@@ -27,7 +28,9 @@ export const user = pgTable(
 		publicKey: text("public_key").notNull(), // RSA public key (PEM)
 		encryptedPrivateKey: text("encrypted_private_key").notNull(), // RSA private key encrypted with Master Unlock Key
 		// Team membership (one-to-one relationship)
-		teamId: text("team_id"),
+		teamId: text("team_id").references((): AnyPgColumn => team.id, {
+			onDelete: "restrict",
+		}),
 		role: teamRoleEnum("role").default("owner").notNull(),
 		createdAt: timestamp("created_at").defaultNow().notNull(),
 		updatedAt: timestamp("updated_at")
