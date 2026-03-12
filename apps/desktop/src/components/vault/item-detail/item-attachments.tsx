@@ -21,7 +21,8 @@ import {
 	IconUpload4OutlineDuo18 as Upload,
 	IconXmarkOutlineDuo18 as X,
 } from "@bittery/ui/icons";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useRef, useState } from "react";
 import { useI18n } from "../../../providers/i18n-provider";
 
 interface ItemAttachmentsProps {
@@ -76,25 +77,32 @@ function AttachmentRow({
 	const [isEditing, setIsEditing] = useState(false);
 	const [editValue, setEditValue] = useState("");
 	const [isRenaming, setIsRenaming] = useState(false);
+	const queryClient = useQueryClient();
 	const { decryptMeta, rename } = useItemAttachments(
 		attachment.itemId,
 		attachment.vaultId,
 		accountEmail,
 	);
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: decryptMeta is stable for same vault
-	useEffect(() => {
-		decryptMeta(attachment)
-			.then((d) => setDecryptedName(d.name))
-			.catch(() =>
-				setDecryptedName(
-					m["vaults.detail.items.attachments.row.encrypted_file"](),
-				),
-			);
-	}, [attachment.id, m]);
-
+	const decryptedNameQuery = useQuery({
+		queryKey: [
+			"attachment",
+			attachment.vaultId,
+			attachment.itemId,
+			attachment.id,
+			accountEmail,
+		],
+		queryFn: async () => {
+			const decrypted = await decryptMeta(attachment);
+			return decrypted.name;
+		},
+		retry: false,
+	});
 	const displayName =
-		decryptedName ?? m["vaults.detail.items.attachments.row.loading"]();
+		decryptedName ??
+		decryptedNameQuery.data ??
+		(decryptedNameQuery.isError
+			? m["vaults.detail.items.attachments.row.encrypted_file"]()
+			: m["vaults.detail.items.attachments.row.loading"]());
 
 	function startEdit() {
 		setEditValue(decryptedName ?? "");
@@ -114,6 +122,16 @@ function AttachmentRow({
 				newName: trimmed,
 			});
 			setDecryptedName(trimmed);
+			queryClient.setQueryData(
+				[
+					"attachment",
+					attachment.vaultId,
+					attachment.itemId,
+					attachment.id,
+					accountEmail,
+				],
+				trimmed,
+			);
 			setIsEditing(false);
 		} catch {
 			toast.error(
@@ -229,8 +247,7 @@ export function ItemAttachments({
 		download,
 		remove,
 		attachmentMaxFileSizeBytes,
-	} =
-		useItemAttachments(itemId, vaultId, accountEmail);
+	} = useItemAttachments(itemId, vaultId, accountEmail);
 
 	const handleFileChange = useCallback(
 		(e: React.ChangeEvent<HTMLInputElement>) => {

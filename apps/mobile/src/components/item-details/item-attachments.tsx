@@ -3,6 +3,7 @@ import {
 	getAttachmentUploadErrorCode,
 	useItemAttachments,
 } from "@bittery/core/hooks";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
@@ -17,7 +18,7 @@ import {
 	Trash2,
 	X,
 } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { ActivityIndicator, Alert, Text, TextInput, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { useI18n } from "@/providers/i18n-provider";
@@ -79,20 +80,30 @@ function AttachmentRow({
 	const [editValue, setEditValue] = useState("");
 	const [isRenaming, setIsRenaming] = useState(false);
 	const { toast } = useToast();
+	const queryClient = useQueryClient();
 	const { decryptMeta, rename } = useItemAttachments(
 		attachment.itemId,
 		attachment.vaultId,
 		accountEmail,
 	);
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: decryptMeta is stable for same vault
-	useEffect(() => {
-		decryptMeta(attachment)
-			.then((d) => setDecryptedName(d.name))
-			.catch(() => setDecryptedName("Encrypted file"));
-	}, [attachment.id]);
-
-	const displayName = decryptedName ?? "Loading...";
+	const decryptedNameQuery = useQuery({
+		queryKey: [
+			"attachment",
+			attachment.vaultId,
+			attachment.itemId,
+			attachment.id,
+			accountEmail,
+		],
+		queryFn: async () => {
+			const decrypted = await decryptMeta(attachment);
+			return decrypted.name;
+		},
+		retry: false,
+	});
+	const displayName =
+		decryptedName ??
+		decryptedNameQuery.data ??
+		(decryptedNameQuery.isError ? "Encrypted file" : "Loading...");
 
 	function startEdit() {
 		setEditValue(decryptedName ?? "");
@@ -112,6 +123,16 @@ function AttachmentRow({
 				newName: trimmed,
 			});
 			setDecryptedName(trimmed);
+			queryClient.setQueryData(
+				[
+					"attachment",
+					attachment.vaultId,
+					attachment.itemId,
+					attachment.id,
+					accountEmail,
+				],
+				trimmed,
+			);
 			setIsEditing(false);
 			toast.show({
 				variant: "accent",
@@ -237,8 +258,7 @@ export function ItemAttachments({
 		download,
 		remove,
 		attachmentMaxFileSizeBytes,
-	} =
-		useItemAttachments(itemId, vaultId, accountEmail);
+	} = useItemAttachments(itemId, vaultId, accountEmail);
 
 	const handlePickFile = useCallback(async () => {
 		const result = await DocumentPicker.getDocumentAsync({
@@ -288,9 +308,8 @@ export function ItemAttachments({
 			if (uploadErrorCode === "storage-limit-reached") {
 				toast.show({
 					variant: "danger",
-					label: m[
-						"vaults.detail.items.attachments.toast.storage_limit_reached"
-					](),
+					label:
+						m["vaults.detail.items.attachments.toast.storage_limit_reached"](),
 					placement: "bottom",
 				});
 			} else if (
@@ -316,14 +335,7 @@ export function ItemAttachments({
 			setPendingAsset(null);
 			setPendingName("");
 		}
-	}, [
-		attachmentMaxFileSizeBytes,
-		m,
-		pendingAsset,
-		pendingName,
-		toast,
-		upload,
-	]);
+	}, [attachmentMaxFileSizeBytes, m, pendingAsset, pendingName, toast, upload]);
 
 	const handleDownload = useCallback(
 		async (attachment: AttachmentMeta) => {

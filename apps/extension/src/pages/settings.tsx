@@ -16,7 +16,7 @@ import {
 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "../lib/storage";
 
 // Auto-lock timeout options (in milliseconds)
@@ -50,12 +50,6 @@ interface DesktopStatus {
 export function SettingsPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
-	const [autoLockTimeout, setAutoLockTimeout] = useState(
-		String(DEFAULT_AUTO_LOCK_TIMEOUT_MS),
-	);
-	const [desktopStatus, setDesktopStatus] = useState<DesktopStatus | null>(
-		null,
-	);
 
 	// Query for current auto-lock timeout
 	const autoLockTimeoutQuery = useQuery({
@@ -65,30 +59,28 @@ export function SettingsPage() {
 			return timeout;
 		},
 	});
-
-	// Update state when query data loads
-	useEffect(() => {
-		if (autoLockTimeoutQuery.data !== undefined) {
-			setAutoLockTimeout(String(autoLockTimeoutQuery.data));
-		}
-	}, [autoLockTimeoutQuery.data]);
-
-	// Check desktop status on page load
-	useEffect(() => {
-		chrome.runtime.sendMessage(
-			{ type: "CHECK_DESKTOP_STATUS" },
-			(response: DesktopStatus) => {
-				if (response?.available) {
-					setDesktopStatus(response);
-				}
-			},
-		);
-	}, []);
+	const desktopStatusQuery = useQuery({
+		queryKey: ["desktopStatus"],
+		queryFn: async () => {
+			return await new Promise<DesktopStatus | null>((resolve) => {
+				chrome.runtime.sendMessage(
+					{ type: "CHECK_DESKTOP_STATUS" },
+					(response: DesktopStatus) => {
+						resolve(response?.available ? response : null);
+					},
+				);
+			});
+		},
+	});
+	const autoLockTimeout = useMemo(
+		() => String(autoLockTimeoutQuery.data ?? DEFAULT_AUTO_LOCK_TIMEOUT_MS),
+		[autoLockTimeoutQuery.data],
+	);
+	const desktopStatus = desktopStatusQuery.data ?? null;
 
 	const handleAutoLockTimeoutChange = async (value: string) => {
 		const timeoutMs = Number.parseInt(value, 10);
 		await storage.storeAutoLockTimeout(timeoutMs);
-		setAutoLockTimeout(value);
 		queryClient.invalidateQueries({ queryKey: ["autoLockTimeout"] });
 		toast.success("Auto-lock timeout updated");
 

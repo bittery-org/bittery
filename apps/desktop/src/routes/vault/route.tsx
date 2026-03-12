@@ -10,6 +10,7 @@ import {
 } from "@bittery/core/hooks";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { toast } from "@bittery/ui";
+import { useQuery } from "@tanstack/react-query";
 import {
 	createFileRoute,
 	Outlet,
@@ -17,7 +18,7 @@ import {
 	useNavigate,
 	useParams,
 } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { storage } from "@/lib/storage";
 import { CreateItemSheet } from "../../components/vault/create-item-sheet";
 import type { AccountOption } from "../../components/vault/create-vault-dialog";
@@ -97,56 +98,44 @@ function RouteComponent() {
 		id: string;
 		name: string;
 	} | null>(null);
-	const [availableAccounts, setAvailableAccounts] = useState<AccountOption[]>(
-		[],
-	);
-
-	// Load available accounts for multi-account mode
-	useEffect(() => {
-		const loadAccounts = async () => {
-			if (isAllAccountsMode) {
-				const emails = await storage.getUnlockedAccounts?.();
-				if (emails && emails.length > 0) {
-					// Fetch metadata for each account
-					const accounts = await Promise.all(
-						emails.map(async (email) => {
-							const metadata = await storage.getAccountMetadata?.(email);
-							return {
-								email,
-								name: metadata?.name,
-								teamName: metadata?.teamName,
-							};
-						}),
-					);
-					setAvailableAccounts(accounts);
-				}
+	const availableAccountsQuery = useQuery({
+		queryKey: ["vault-route", "available-accounts", isAllAccountsMode],
+		enabled: isAllAccountsMode,
+		queryFn: async (): Promise<AccountOption[]> => {
+			const emails = await storage.getUnlockedAccounts?.();
+			if (!emails?.length) {
+				return [];
 			}
-		};
-		loadAccounts();
-	}, [isAllAccountsMode]);
 
-	// Get all account emails for metadata sync
-	const [accountEmails, setAccountEmails] = useState<string[]>([]);
-
-	useEffect(() => {
-		const getAccountEmails = async () => {
+			return await Promise.all(
+				emails.map(async (email) => {
+					const metadata = await storage.getAccountMetadata?.(email);
+					return {
+						email,
+						name: metadata?.name,
+						teamName: metadata?.teamName,
+					};
+				}),
+			);
+		},
+	});
+	const availableAccounts = availableAccountsQuery.data ?? [];
+	const accountEmailsQuery = useQuery({
+		queryKey: ["vault-route", "account-emails"],
+		queryFn: async () => {
 			const activeAccount = await storage.getActiveAccount();
 			if (!activeAccount) {
-				setAccountEmails([]);
-				return;
+				return [];
 			}
 
 			if (activeAccount.type === "all") {
-				// In "All Accounts" mode, sync all unlocked accounts
-				const emails = await storage.getUnlockedAccounts?.();
-				setAccountEmails(emails || []);
-			} else {
-				// Single account mode
-				setAccountEmails([activeAccount.email]);
+				return (await storage.getUnlockedAccounts?.()) ?? [];
 			}
-		};
-		getAccountEmails();
-	}, []);
+
+			return [activeAccount.email];
+		},
+	});
+	const accountEmails = accountEmailsQuery.data ?? [];
 
 	// Sync account metadata for all accounts periodically
 	// This keeps team avatar URLs up-to-date

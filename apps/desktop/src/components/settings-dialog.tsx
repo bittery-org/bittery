@@ -30,14 +30,12 @@ import {
 	IconLoader2OutlineDuo18,
 } from "@bittery/ui/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
-import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "@/lib/storage";
+import { useMemo, useState } from "react";
+import { storage } from "@/lib/storage";
 import { clearDesktopSyncState } from "@/lib/sync-client-id";
 import { useI18n } from "@/providers/i18n-provider";
 import { useSyncContext } from "@/providers/sync-provider";
 
-// Auto-lock timeout options (in milliseconds)
-// -1 means never auto-lock
 const AUTO_LOCK_OPTION_VALUES = [
 	"60000",
 	"300000",
@@ -62,17 +60,62 @@ interface SettingsDialogProps {
 }
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
+	const settingsQuery = useQuery({
+		queryKey: ["desktopSettings"],
+		queryFn: async () => {
+			const [autoLockTimeoutMs, masterPasswordReentryMs] = await Promise.all([
+				storage.getAutoLockTimeoutOrDefault(),
+				storage.getMasterPasswordReentryPeriodMs(),
+			]);
+			return { autoLockTimeoutMs, masterPasswordReentryMs };
+		},
+		enabled: open,
+	});
+
+	return (
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			{open ? (
+				settingsQuery.isLoading ? (
+					<DialogContent className="sm:max-w-md">
+						<div className="flex items-center justify-center py-8">
+							<IconLoader2OutlineDuo18 className="h-6 w-6 animate-spin text-muted-foreground" />
+						</div>
+					</DialogContent>
+				) : settingsQuery.data ? (
+					<SettingsDialogContent
+						key={`${settingsQuery.data.autoLockTimeoutMs}:${settingsQuery.data.masterPasswordReentryMs}`}
+						onOpenChange={onOpenChange}
+						initialAutoLockTimeout={String(
+							settingsQuery.data.autoLockTimeoutMs,
+						)}
+						initialMasterPasswordReentry={String(
+							settingsQuery.data.masterPasswordReentryMs,
+						)}
+					/>
+				) : null
+			) : null}
+		</Dialog>
+	);
+}
+
+function SettingsDialogContent({
+	onOpenChange,
+	initialAutoLockTimeout,
+	initialMasterPasswordReentry,
+}: Pick<SettingsDialogProps, "onOpenChange"> & {
+	initialAutoLockTimeout: string;
+	initialMasterPasswordReentry: string;
+}) {
 	const { locale, setLocale, m } = useI18n();
 	const core = useCoreContext();
 	const syncContext = useSyncContext();
 	const queryClient = useQueryClient();
 	const [autoLockTimeout, setAutoLockTimeout] = useState(
-		String(DEFAULT_AUTO_LOCK_TIMEOUT_MS),
+		initialAutoLockTimeout,
 	);
 	const [masterPasswordReentry, setMasterPasswordReentry] = useState(
-		String(30 * DAY_MS),
+		initialMasterPasswordReentry,
 	);
-	const [isDirty, setIsDirty] = useState(false);
 	const [isClearCacheConfirmOpen, setIsClearCacheConfirmOpen] = useState(false);
 
 	const autoLockOptions = useMemo(() => {
@@ -125,30 +168,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 		locale === "en" ? m["i18n.language.en"]() : m["i18n.language.de"]();
 	const ActiveLocaleFlag =
 		locale === "en" ? IconFlagUnitedStates : IconFlagGermany;
-
-	const settingsQuery = useQuery({
-		queryKey: ["desktopSettings"],
-		queryFn: async () => {
-			const [autoLockTimeoutMs, masterPasswordReentryMs] = await Promise.all([
-				storage.getAutoLockTimeoutOrDefault(),
-				storage.getMasterPasswordReentryPeriodMs(),
-			]);
-			return { autoLockTimeoutMs, masterPasswordReentryMs };
-		},
-		enabled: open,
-	});
-
-	useEffect(() => {
-		if (open) {
-			if (settingsQuery.data !== undefined) {
-				setAutoLockTimeout(String(settingsQuery.data.autoLockTimeoutMs));
-				setMasterPasswordReentry(
-					String(settingsQuery.data.masterPasswordReentryMs),
-				);
-			}
-			setIsDirty(false);
-		}
-	}, [open, settingsQuery.data]);
+	const isDirty =
+		autoLockTimeout !== initialAutoLockTimeout ||
+		masterPasswordReentry !== initialMasterPasswordReentry;
 
 	const saveMutation = useMutation({
 		mutationFn: async ({
@@ -169,7 +191,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 			toast.success(m["settings.dialog.toast.saved"]());
 			queryClient.invalidateQueries({ queryKey: ["desktopSettings"] });
 			queryClient.invalidateQueries({ queryKey: ["sessionState"] });
-			setIsDirty(false);
 			onOpenChange(false);
 		},
 		onError: (error) => {
@@ -200,8 +221,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
 			const { accountsInfo } = await core.accounts.resolveAccounts();
 			if (accountsInfo.length > 0) {
-				// Run a single hydration pass after cache reset.
-				// With an empty item cache this triggers one bootstrap sync per account.
 				await core.vaultCoordinator.hydrate(accountsInfo);
 			}
 
@@ -230,184 +249,145 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 		if (saveMutation.isPending || clearCacheMutation.isPending) {
 			return;
 		}
-		if (isDirty) {
-			setAutoLockTimeout(
-				String(
-					settingsQuery.data?.autoLockTimeoutMs ?? DEFAULT_AUTO_LOCK_TIMEOUT_MS,
-				),
-			);
-			setMasterPasswordReentry(
-				String(settingsQuery.data?.masterPasswordReentryMs ?? 30 * DAY_MS),
-			);
-			setIsDirty(false);
-		}
 		onOpenChange(false);
 	};
 
-	const handleAutoLockTimeoutChange = (value: string) => {
-		setAutoLockTimeout(value);
-		setIsDirty(true);
-	};
-
-	const handleMasterPasswordReentryChange = (value: string) => {
-		setMasterPasswordReentry(value);
-		setIsDirty(true);
-	};
-
-	const handleLanguageChange = (value: string) => {
-		setLocale(value as AppLocale);
-	};
-
-	const isLoading = settingsQuery.isLoading;
 	const isBusy = saveMutation.isPending || clearCacheMutation.isPending;
 
 	return (
 		<>
-			<Dialog open={open} onOpenChange={handleClose}>
-				<DialogContent className="sm:max-w-md">
-					<DialogHeader>
-						<DialogTitle>{m["settings.page.title"]()}</DialogTitle>
-						<DialogDescription>
-							{m["settings.dialog.description"]()}
-						</DialogDescription>
-					</DialogHeader>
+			<DialogContent className="sm:max-w-md">
+				<DialogHeader>
+					<DialogTitle>{m["settings.page.title"]()}</DialogTitle>
+					<DialogDescription>
+						{m["settings.dialog.description"]()}
+					</DialogDescription>
+				</DialogHeader>
 
-					{isLoading ? (
-						<div className="flex items-center justify-center py-8">
-							<IconLoader2OutlineDuo18 className="h-6 w-6 animate-spin text-muted-foreground" />
-						</div>
-					) : (
-						<div className="space-y-4">
-							<div className="space-y-2">
-								<Label htmlFor="language">
-									{m["settings.general.language.title"]()}
-								</Label>
-								<Select value={locale} onValueChange={handleLanguageChange}>
-									<SelectTrigger id="language">
-										<div className="flex items-center gap-2">
-											<ActiveLocaleFlag size={14} className="shrink-0" />
-											<SelectValue
-												placeholder={m["settings.general.language.title"]()}
-											>
-												{activeLocaleLabel}
-											</SelectValue>
-										</div>
-									</SelectTrigger>
-									<SelectContent>
-										{supportedLocales.map((value) => (
-											<SelectItem key={value} value={value}>
-												<span className="inline-flex items-center gap-2 whitespace-nowrap">
-													{value === "en" ? (
-														<IconFlagUnitedStates
-															size={14}
-															className="shrink-0"
-														/>
-													) : (
-														<IconFlagGermany size={14} className="shrink-0" />
-													)}
-													<span>
-														{value === "en"
-															? m["i18n.language.en"]()
-															: m["i18n.language.de"]()}
-													</span>
-												</span>
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-								<p className="text-muted-foreground text-xs">
-									{m["settings.general.language.description"]()}
-								</p>
-							</div>
+				<div className="space-y-4">
+					<div className="space-y-2">
+						<Label htmlFor="language">
+							{m["settings.general.language.title"]()}
+						</Label>
+						<Select
+							value={locale}
+							onValueChange={(value) => setLocale(value as AppLocale)}
+						>
+							<SelectTrigger id="language">
+								<div className="flex items-center gap-2">
+									<ActiveLocaleFlag size={14} className="shrink-0" />
+									<SelectValue
+										placeholder={m["settings.general.language.title"]()}
+									>
+										{activeLocaleLabel}
+									</SelectValue>
+								</div>
+							</SelectTrigger>
+							<SelectContent>
+								{supportedLocales.map((value) => (
+									<SelectItem key={value} value={value}>
+										<span className="inline-flex items-center gap-2 whitespace-nowrap">
+											{value === "en" ? (
+												<IconFlagUnitedStates size={14} className="shrink-0" />
+											) : (
+												<IconFlagGermany size={14} className="shrink-0" />
+											)}
+											<span>
+												{value === "en"
+													? m["i18n.language.en"]()
+													: m["i18n.language.de"]()}
+											</span>
+										</span>
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+						<p className="text-muted-foreground text-xs">
+							{m["settings.general.language.description"]()}
+						</p>
+					</div>
 
-							<div className="space-y-2">
-								<Label htmlFor="autoLockTimeout">
-									{m["settings.security.auto_lock"]()}
-								</Label>
-								<Select
-									value={autoLockTimeout}
-									onValueChange={handleAutoLockTimeoutChange}
-								>
-									<SelectTrigger id="autoLockTimeout">
-										<SelectValue
-											placeholder={m["settings.security.auto_lock"]()}
-										/>
-									</SelectTrigger>
-									<SelectContent>
-										{autoLockOptions.map((option) => (
-											<SelectItem key={option.value} value={option.value}>
-												{option.label}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-								<p className="text-muted-foreground text-xs">
-									{m["settings.security.auto_lock_description"]()}
-								</p>
-							</div>
+					<div className="space-y-2">
+						<Label htmlFor="autoLockTimeout">
+							{m["settings.security.auto_lock"]()}
+						</Label>
+						<Select value={autoLockTimeout} onValueChange={setAutoLockTimeout}>
+							<SelectTrigger id="autoLockTimeout">
+								<SelectValue placeholder={m["settings.security.auto_lock"]()} />
+							</SelectTrigger>
+							<SelectContent>
+								{autoLockOptions.map((option) => (
+									<SelectItem key={option.value} value={option.value}>
+										{option.label}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+						<p className="text-muted-foreground text-xs">
+							{m["settings.security.auto_lock_description"]()}
+						</p>
+					</div>
 
-							<div className="space-y-2">
-								<Label htmlFor="masterPasswordReentry">
-									{m["settings.dialog.master_password_reentry.label"]()}
-								</Label>
-								<Select
-									value={masterPasswordReentry}
-									onValueChange={handleMasterPasswordReentryChange}
-								>
-									<SelectTrigger id="masterPasswordReentry">
-										<SelectValue
-											placeholder={m[
-												"settings.dialog.master_password_reentry.placeholder"
-											]()}
-										/>
-									</SelectTrigger>
-									<SelectContent>
-										{masterPasswordReentryOptions.map((option) => (
-											<SelectItem key={option.value} value={option.value}>
-												{option.label}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-								<p className="text-muted-foreground text-xs">
-									{m["settings.dialog.master_password_reentry.description"]()}
-								</p>
-							</div>
+					<div className="space-y-2">
+						<Label htmlFor="masterPasswordReentry">
+							{m["settings.dialog.master_password_reentry.label"]()}
+						</Label>
+						<Select
+							value={masterPasswordReentry}
+							onValueChange={setMasterPasswordReentry}
+						>
+							<SelectTrigger id="masterPasswordReentry">
+								<SelectValue
+									placeholder={m[
+										"settings.dialog.master_password_reentry.placeholder"
+									]()}
+								/>
+							</SelectTrigger>
+							<SelectContent>
+								{masterPasswordReentryOptions.map((option) => (
+									<SelectItem key={option.value} value={option.value}>
+										{option.label}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+						<p className="text-muted-foreground text-xs">
+							{m["settings.dialog.master_password_reentry.description"]()}
+						</p>
+					</div>
 
-							<div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
-								<Label>{m["settings.dialog.local_cache.title"]()}</Label>
-								<p className="text-muted-foreground text-xs">
-									{m["settings.dialog.local_cache.description"]()}
-								</p>
-								<Button
-									variant="destructive"
-									size="sm"
-									onClick={() => setIsClearCacheConfirmOpen(true)}
-									disabled={isBusy}
-								>
-									{m["settings.dialog.local_cache.action.clear"]()}
-								</Button>
-							</div>
-						</div>
-					)}
-
-					<DialogFooter>
-						<Button variant="outline" onClick={handleClose} disabled={isBusy}>
-							{m["settings.common.action.cancel"]()}
+					<div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+						<Label>{m["settings.dialog.local_cache.title"]()}</Label>
+						<p className="text-muted-foreground text-xs">
+							{m["settings.dialog.local_cache.description"]()}
+						</p>
+						<Button
+							variant="destructive"
+							size="sm"
+							onClick={() => setIsClearCacheConfirmOpen(true)}
+							disabled={isBusy}
+						>
+							{m["settings.dialog.local_cache.action.clear"]()}
 						</Button>
-						<Button onClick={handleSave} disabled={isBusy || !isDirty}>
-							{saveMutation.isPending ? (
-								<>
-									<IconLoader2OutlineDuo18 className="h-4 w-4 animate-spin" />
-									{m["settings.common.action.saving"]()}
-								</>
-							) : (
-								m["settings.dialog.action.save"]()
-							)}
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+					</div>
+				</div>
+
+				<DialogFooter>
+					<Button variant="outline" onClick={handleClose} disabled={isBusy}>
+						{m["settings.common.action.cancel"]()}
+					</Button>
+					<Button onClick={handleSave} disabled={isBusy || !isDirty}>
+						{saveMutation.isPending ? (
+							<>
+								<IconLoader2OutlineDuo18 className="h-4 w-4 animate-spin" />
+								{m["settings.common.action.saving"]()}
+							</>
+						) : (
+							m["settings.dialog.action.save"]()
+						)}
+					</Button>
+				</DialogFooter>
+			</DialogContent>
 
 			<AlertDialog
 				open={isClearCacheConfirmOpen}

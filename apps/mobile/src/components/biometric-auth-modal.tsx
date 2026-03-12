@@ -3,6 +3,7 @@
  * Displayed when biometric re-authentication is required
  */
 
+import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import {
 	AlertCircle,
@@ -12,7 +13,7 @@ import {
 	RefreshCw,
 	ScanFace,
 } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
 	ActivityIndicator,
 	Modal,
@@ -48,19 +49,13 @@ export function BiometricAuthModal({
 	} = useBiometricAuth();
 
 	const [isAuthenticating, setIsAuthenticating] = useState(false);
-	const [biometricType, setBiometricType] = useState<string | null>(null);
 	const [retryCount, setRetryCount] = useState(0);
-
-	// Get biometric type on mount
-	useEffect(() => {
-		async function loadBiometricType() {
-			const type = await storage.getBiometricType();
-			setBiometricType(type);
-		}
-		if (visible) {
-			loadBiometricType();
-		}
-	}, [visible]);
+	const biometricTypeQuery = useQuery({
+		queryKey: ["mobile", "biometric-type"],
+		queryFn: () => storage.getBiometricType(),
+		enabled: visible,
+	});
+	const biometricType = biometricTypeQuery.data ?? null;
 
 	const handleAuthenticate = useCallback(async () => {
 		setIsAuthenticating(true);
@@ -73,13 +68,6 @@ export function BiometricAuthModal({
 			setIsAuthenticating(false);
 		}
 	}, [triggerBiometricAuth, onSuccess]);
-
-	// Auto-trigger biometric on modal show
-	useEffect(() => {
-		if (visible && !isAuthenticating && !lastAuthResult) {
-			handleAuthenticate();
-		}
-	}, [visible, handleAuthenticate, isAuthenticating, lastAuthResult]);
 
 	const handleRetry = async () => {
 		setRetryCount((prev) => prev + 1);
@@ -249,6 +237,11 @@ export function BiometricAuthModal({
 			transparent
 			animationType="fade"
 			statusBarTranslucent
+			onShow={() => {
+				if (!isAuthenticating && !lastAuthResult) {
+					void handleAuthenticate();
+				}
+			}}
 		>
 			<View className="flex-1 items-center justify-center bg-black/60 px-6">
 				<View className="w-full max-w-sm items-center rounded-2xl bg-background p-6">

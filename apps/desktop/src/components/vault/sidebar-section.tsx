@@ -9,7 +9,7 @@ import {
 	IconChevronRightOutlineDuo18,
 	IconPlusOutlineDuo18,
 } from "@bittery/ui/icons";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 interface SidebarSectionProps {
 	title: string;
@@ -38,16 +38,15 @@ export function SidebarSection({
 		return stored !== null ? stored === "true" : defaultOpen;
 	});
 
-	// Persist state to localStorage when it changes
-	useEffect(() => {
-		if (storageKey) {
-			localStorage.setItem(`sidebar-section-${storageKey}`, String(isOpen));
-		}
-	}, [isOpen, storageKey]);
-
-	const handleOpenChange = useCallback((open: boolean) => {
-		setIsOpen(open);
-	}, []);
+	const handleOpenChange = useCallback(
+		(open: boolean) => {
+			if (storageKey) {
+				localStorage.setItem(`sidebar-section-${storageKey}`, String(open));
+			}
+			setIsOpen(open);
+		},
+		[storageKey],
+	);
 
 	return (
 		<Collapsible open={isOpen} onOpenChange={handleOpenChange}>

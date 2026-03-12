@@ -10,7 +10,7 @@ import {
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import SignInForm from "@/components/sign-in-form";
 import SignUpForm from "@/components/sign-up-form";
 import { storage } from "@/lib/storage";
@@ -65,12 +65,12 @@ function InvitationPage() {
 	const trpc = useTRPC();
 	const trpcClient = useTRPCClient();
 	const { m } = useI18n();
-	const [authenticated, setAuthenticated] = useState<boolean | null>(null);
 	const [view, setView] = useState<"signup" | "signin">("signup");
-
-	useEffect(() => {
-		storage.isAuthenticated().then(setAuthenticated);
-	}, []);
+	const authenticatedQuery = useQuery({
+		queryKey: ["auth", "isAuthenticated"],
+		queryFn: () => storage.isAuthenticated(),
+	});
+	const authenticated = authenticatedQuery.data ?? null;
 
 	// Get invitation details
 	const invitationQuery = useQuery(
@@ -102,7 +102,7 @@ function InvitationPage() {
 	});
 
 	// Loading auth state
-	if (authenticated === null) {
+	if (authenticatedQuery.isLoading) {
 		return (
 			<div className="flex w-full flex-col items-center justify-center py-12">
 				<Loader2 className="h-8 w-8 animate-spin text-primary" />

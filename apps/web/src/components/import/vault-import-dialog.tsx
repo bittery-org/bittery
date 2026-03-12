@@ -37,7 +37,6 @@ import {
 	type ChangeEvent,
 	type DragEvent,
 	useCallback,
-	useEffect,
 	useMemo,
 	useState,
 } from "react";
@@ -354,15 +353,12 @@ export function VaultImportDialog({
 		setMappingTargetVaultId,
 		setMappingTargetVaultName,
 	} = useVaultImport();
-
-	useEffect(() => {
-		if (!open) {
-			setSelectedFileName("");
-			setDialogStep("manager");
-			setSelectedProviderId(null);
-			reset();
-		}
-	}, [open, reset]);
+	const resetDialogState = useCallback(() => {
+		setSelectedFileName("");
+		setDialogStep("manager");
+		setSelectedProviderId(null);
+		reset();
+	}, [reset]);
 
 	const progressPercent = useMemo(() => {
 		if (progress.totalItems === 0) {
@@ -518,9 +514,12 @@ export function VaultImportDialog({
 			if (!nextOpen && isBusy) {
 				return;
 			}
+			if (!nextOpen) {
+				resetDialogState();
+			}
 			onOpenChange(nextOpen);
 		},
-		[isBusy, onOpenChange],
+		[isBusy, onOpenChange, resetDialogState],
 	);
 
 	const handleContinueToUpload = useCallback(() => {

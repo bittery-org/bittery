@@ -16,7 +16,7 @@ import {
 	IconUsers6OutlineDuo18,
 } from "@bittery/ui/icons";
 import type { LucideIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 type VaultIconName =
 	| "lock"
@@ -136,11 +136,7 @@ export function VaultAvatar({
 	size = "md",
 	className,
 }: VaultAvatarProps) {
-	const [imageError, setImageError] = useState(false);
-
-	useEffect(() => {
-		setImageError(false);
-	}, []);
+	const [erroredImageUrl, setErroredImageUrl] = useState<string | null>(null);
 
 	const sizeClasses = {
 		xs: "h-6 w-6 text-[12px]",
@@ -159,7 +155,7 @@ export function VaultAvatar({
 	};
 
 	const Icon = icon ? vaultIconMap[icon as VaultIconName] : undefined;
-	const showImage = Boolean(imageUrl && !imageError);
+	const showImage = Boolean(imageUrl && erroredImageUrl !== imageUrl);
 	const showIcon = Boolean(!showImage && Icon);
 	const initials = getInitials(name);
 	const avatarColor = getAvatarColor(name || "Vault");
@@ -178,7 +174,7 @@ export function VaultAvatar({
 					src={imageUrl ?? ""}
 					alt=""
 					className="h-full w-full object-cover"
-					onError={() => setImageError(true)}
+					onError={() => setErroredImageUrl(imageUrl ?? null)}
 				/>
 			) : showIcon && Icon ? (
 				<Icon className="text-muted-foreground" size={iconSizes[size]} />

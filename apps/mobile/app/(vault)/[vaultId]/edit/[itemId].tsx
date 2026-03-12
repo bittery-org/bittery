@@ -1,6 +1,7 @@
 import { useUpdateItem, useVaultItems } from "@bittery/core/hooks";
 import type {
 	CustomField,
+	DecryptedItem,
 	DecryptedItemData,
 	ItemCategory,
 } from "@bittery/shared/types";
@@ -14,7 +15,7 @@ import {
 	Timer,
 	User,
 } from "lucide-react-native";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
 	ActivityIndicator,
 	KeyboardAvoidingView,
@@ -62,7 +63,6 @@ const categoryOptions: {
 
 export default function EditItemScreen() {
 	const router = useRouter();
-	const { toast } = useToast();
 	const { vaultId, itemId } = useLocalSearchParams<{
 		vaultId: string;
 		itemId: string;
@@ -72,33 +72,78 @@ export default function EditItemScreen() {
 	const { items, isLoading } = useVaultItems(vaultId);
 	const item = items.find((i) => i.id === itemId);
 
-	const [initialized, setInitialized] = useState(false);
-	const [saving, setSaving] = useState(false);
-	const [title, setTitle] = useState("");
-	const [notes, setNotes] = useState("");
-	const [tags, setTags] = useState<string[]>([]);
-	const [customFields, setCustomFields] = useState<CustomField[]>([]);
+	// Render loading state
+	if (isLoading) {
+		return (
+			<SafeAreaView className="flex-1 items-center justify-center bg-background">
+				<ActivityIndicator size="large" color="#000" />
+			</SafeAreaView>
+		);
+	}
 
-	// Form refs
+	// Render error state
+	if (!item) {
+		return (
+			<SafeAreaView className="flex-1 items-center justify-center bg-background">
+				<Text className="text-foreground">Item not found</Text>
+				<Button
+					onPress={() => router.back()}
+					variant="primary"
+					className="mt-4"
+				>
+					Go Back
+				</Button>
+			</SafeAreaView>
+		);
+	}
+
+	const categoryLabel =
+		categoryOptions.find((c) => c.value === item.category)?.label || "Unknown";
+
+	return (
+		<EditItemForm
+			key={item.id}
+			item={item}
+			itemId={itemId}
+			vaultId={vaultId}
+			categoryLabel={categoryLabel}
+			onBack={() => router.back()}
+			onSaved={() => router.back()}
+			updateItem={updateItem}
+		/>
+	);
+}
+
+function EditItemForm({
+	item,
+	itemId,
+	vaultId,
+	categoryLabel,
+	onBack,
+	onSaved,
+	updateItem,
+}: {
+	item: DecryptedItem;
+	itemId: string;
+	vaultId: string;
+	categoryLabel: string;
+	onBack: () => void;
+	onSaved: () => void;
+	updateItem: ReturnType<typeof useUpdateItem>;
+}) {
+	const { toast } = useToast();
+	const [saving, setSaving] = useState(false);
+	const [title, setTitle] = useState(item.title || "");
+	const [notes, setNotes] = useState(item.notes || "");
+	const [tags, setTags] = useState<string[]>(item.tags || []);
+	const [customFields] = useState<CustomField[]>(item.customFields || []);
 	const loginFormRef = useRef<LoginFormRef>(null);
 	const creditCardFormRef = useRef<CreditCardFormRef>(null);
 	const identityFormRef = useRef<IdentityFormRef>(null);
 	const secureNoteFormRef = useRef<SecureNoteFormRef>(null);
 	const totpFormRef = useRef<TotpFormRef>(null);
 
-	// Initialize form with item data
-	useEffect(() => {
-		if (item && !initialized) {
-			setTitle(item.title || "");
-			setNotes(item.notes || "");
-			setTags(item.tags || []);
-			setCustomFields(item.customFields || []);
-			setInitialized(true);
-		}
-	}, [item, initialized]);
-
 	const handleSave = async () => {
-		if (!item) return;
 		if (!title.trim()) {
 			toast.show({
 				variant: "danger",
@@ -108,7 +153,6 @@ export default function EditItemScreen() {
 			return;
 		}
 
-		// Validate category-specific forms
 		let isValid = true;
 		switch (item.category) {
 			case "login":
@@ -143,7 +187,6 @@ export default function EditItemScreen() {
 		setSaving(true);
 
 		try {
-			// Build the data object based on category
 			let itemData: DecryptedItemData = {
 				title,
 				notes: notes || undefined,
@@ -165,7 +208,7 @@ export default function EditItemScreen() {
 					itemData = {
 						...itemData,
 						...secureNoteFormRef.current?.getData(),
-						notes: undefined, // Secure notes use 'note' field
+						notes: undefined,
 					};
 					break;
 				case "totp":
@@ -173,7 +216,6 @@ export default function EditItemScreen() {
 					break;
 			}
 
-			// Update the item using shared hook (handles encryption internally)
 			await updateItem.mutateAsync({
 				itemId,
 				vaultId,
@@ -185,7 +227,7 @@ export default function EditItemScreen() {
 				label: "Item updated successfully",
 				placement: "bottom",
 			});
-			router.back();
+			onSaved();
 		} catch (error) {
 			console.error("Error updating item:", error);
 			toast.show({
@@ -198,34 +240,6 @@ export default function EditItemScreen() {
 		}
 	};
 
-	// Render loading state
-	if (isLoading) {
-		return (
-			<SafeAreaView className="flex-1 items-center justify-center bg-background">
-				<ActivityIndicator size="large" color="#000" />
-			</SafeAreaView>
-		);
-	}
-
-	// Render error state
-	if (!item) {
-		return (
-			<SafeAreaView className="flex-1 items-center justify-center bg-background">
-				<Text className="text-foreground">Item not found</Text>
-				<Button
-					onPress={() => router.back()}
-					variant="primary"
-					className="mt-4"
-				>
-					Go Back
-				</Button>
-			</SafeAreaView>
-		);
-	}
-
-	const categoryLabel =
-		categoryOptions.find((c) => c.value === item.category)?.label || "Unknown";
-
 	return (
 		<SafeAreaView className="flex-1 bg-background">
 			<KeyboardAvoidingView
@@ -236,7 +250,7 @@ export default function EditItemScreen() {
 				<View className="flex-row items-center px-4 py-4">
 					<Button
 						isIconOnly
-						onPress={() => router.back()}
+						onPress={onBack}
 						variant="secondary"
 						size="sm"
 						className="mr-3"
@@ -281,7 +295,7 @@ export default function EditItemScreen() {
 					</TextField>
 
 					{/* Category-specific forms */}
-					{item.category === "login" && initialized && (
+					{item.category === "login" && (
 						<LoginForm
 							ref={loginFormRef}
 							initialData={{
@@ -292,7 +306,7 @@ export default function EditItemScreen() {
 							}}
 						/>
 					)}
-					{item.category === "credit-card" && initialized && (
+					{item.category === "credit-card" && (
 						<CreditCardForm
 							ref={creditCardFormRef}
 							initialData={{
@@ -304,7 +318,7 @@ export default function EditItemScreen() {
 							}}
 						/>
 					)}
-					{item.category === "identity" && initialized && (
+					{item.category === "identity" && (
 						<IdentityForm
 							ref={identityFormRef}
 							initialData={{
@@ -314,7 +328,7 @@ export default function EditItemScreen() {
 							}}
 						/>
 					)}
-					{item.category === "secure-note" && initialized && (
+					{item.category === "secure-note" && (
 						<SecureNoteForm
 							ref={secureNoteFormRef}
 							initialData={{
@@ -322,7 +336,7 @@ export default function EditItemScreen() {
 							}}
 						/>
 					)}
-					{item.category === "totp" && initialized && (
+					{item.category === "totp" && (
 						<TotpForm
 							ref={totpFormRef}
 							initialData={{

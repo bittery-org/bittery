@@ -10,7 +10,7 @@ import {
 	X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { DocsSearch } from "@/components/docs/docs-search";
 import { getArticlesByCategory, getCategories } from "@/lib/docs";
 import { cn } from "@/lib/utils";
@@ -36,23 +36,9 @@ function SidebarContent({
 	const activeCategory =
 		categories.find((c) => currentSlug.startsWith(c.slug))?.slug ?? "";
 
-	const [expandedSlugs, setExpandedSlugs] = useState<Set<string>>(() => {
-		const initial = new Set<string>();
-		if (activeCategory) initial.add(activeCategory);
-		return initial;
-	});
-
-	// Auto-expand active category when navigating
-	useEffect(() => {
-		if (activeCategory) {
-			setExpandedSlugs((prev) => {
-				if (prev.has(activeCategory)) return prev;
-				const next = new Set(prev);
-				next.add(activeCategory);
-				return next;
-			});
-		}
-	}, [activeCategory]);
+	const [expandedSlugs, setExpandedSlugs] = useState<Set<string>>(
+		() => new Set<string>(),
+	);
 
 	const toggleCategory = (slug: string) => {
 		setExpandedSlugs((prev) => {
@@ -87,7 +73,8 @@ function SidebarContent({
 
 			{categories.map((cat) => {
 				const Icon = iconMap[cat.icon] ?? BookOpen;
-				const isExpanded = expandedSlugs.has(cat.slug);
+				const isExpanded =
+					activeCategory === cat.slug || expandedSlugs.has(cat.slug);
 				const isCategoryActive = currentSlug === cat.slug;
 				const articles = getArticlesByCategory(cat.slug);
 
@@ -182,11 +169,6 @@ export function DocsSidebar({ currentSlug }: { currentSlug: string }) {
 
 export function MobileDocsDrawer({ currentSlug }: { currentSlug: string }) {
 	const [isOpen, setIsOpen] = useState(false);
-
-	// Close on route change
-	useEffect(() => {
-		setIsOpen(false);
-	}, []);
 
 	// Prevent body scroll when open
 	useEffect(() => {

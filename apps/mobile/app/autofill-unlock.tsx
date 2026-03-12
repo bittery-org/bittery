@@ -5,6 +5,7 @@ import {
 	useQuickUnlockAll,
 	useSessionState,
 } from "@bittery/core/hooks";
+import { useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Button, Input, Label, TextField } from "heroui-native";
 import {
@@ -17,7 +18,7 @@ import {
 	ScanFace,
 	ShieldCheck,
 } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
 	Alert,
 	KeyboardAvoidingView,
@@ -68,17 +69,7 @@ export default function AutofillUnlockScreen() {
 
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
-	const [biometricType, setBiometricType] = useState<string | null>(null);
 	const [biometricError, setBiometricError] = useState<string | null>(null);
-	const [allAccountsStatus, setAllAccountsStatus] = useState<{
-		canBiometricUnlock: boolean;
-		requiresPasswordReentry: boolean;
-		isLoading: boolean;
-	}>({
-		canBiometricUnlock: false,
-		requiresPasswordReentry: false,
-		isLoading: false,
-	});
 
 	// Parse password required flag from deep link
 	const passwordRequired = params.passwordRequired === "true";
@@ -88,12 +79,50 @@ export default function AutofillUnlockScreen() {
 		activeAccount?.email,
 		{ enabled: !!activeAccount && !isAllAccountsMode },
 	);
+	const biometricTypeQuery = useQuery({
+		queryKey: ["autofill-unlock", "biometric-type"],
+		queryFn: async () => {
+			return (await platformStorage.getBiometricType?.()) ?? null;
+		},
+		enabled: !!activeAccount || isAllAccountsMode,
+	});
+	const biometricType = biometricTypeQuery.data ?? null;
+	const allAccountsStatusQuery = useQuery({
+		queryKey: [
+			"autofill-unlock",
+			"all-accounts-status",
+			allAccounts.map((account) => account.email).join("|"),
+		],
+		queryFn: async () => {
+			const emails = allAccounts.map((account) => account.email);
+			if (emails.length === 0) {
+				return {
+					canBiometricUnlock: false,
+					requiresPasswordReentry: false,
+					isLoading: false,
+				};
+			}
 
-	// Load biometric type on mount
-	const loadBiometricType = useCallback(async () => {
-		const type = await platformStorage.getBiometricType?.();
-		setBiometricType(type ?? null);
-	}, [platformStorage]);
+			const [biometricFlags, reentryFlags] = await Promise.all([
+				Promise.all(emails.map((email) => storage.canBiometricUnlock(email))),
+				Promise.all(
+					emails.map((email) => storage.isMasterPasswordReentryRequired(email)),
+				),
+			]);
+
+			return {
+				canBiometricUnlock: biometricFlags.some(Boolean),
+				requiresPasswordReentry: reentryFlags.some(Boolean),
+				isLoading: false,
+			};
+		},
+		enabled: isAllAccountsMode,
+	});
+	const allAccountsStatus = allAccountsStatusQuery.data ?? {
+		canBiometricUnlock: false,
+		requiresPasswordReentry: false,
+		isLoading: allAccountsStatusQuery.isLoading,
+	};
 
 	const setNativeMuksForEmails = useCallback(async (emails: string[]) => {
 		if (Platform.OS !== "android" || !CredentialProvider.isAvailable()) return;
@@ -113,51 +142,6 @@ export default function AutofillUnlockScreen() {
 			}
 		}
 	}, []);
-
-	useEffect(() => {
-		if (activeAccount || isAllAccountsMode) {
-			loadBiometricType();
-		}
-	}, [activeAccount, isAllAccountsMode, loadBiometricType]);
-
-	useEffect(() => {
-		if (!isAllAccountsMode) return;
-		let cancelled = false;
-
-		const loadAllAccountsStatus = async () => {
-			setAllAccountsStatus((prev) => ({ ...prev, isLoading: true }));
-			const emails = allAccounts.map((account) => account.email);
-			if (emails.length === 0) {
-				setAllAccountsStatus({
-					canBiometricUnlock: false,
-					requiresPasswordReentry: false,
-					isLoading: false,
-				});
-				return;
-			}
-
-			const [biometricFlags, reentryFlags] = await Promise.all([
-				Promise.all(emails.map((email) => storage.canBiometricUnlock(email))),
-				Promise.all(
-					emails.map((email) => storage.isMasterPasswordReentryRequired(email)),
-				),
-			]);
-
-			if (cancelled) return;
-
-			setAllAccountsStatus({
-				canBiometricUnlock: biometricFlags.some(Boolean),
-				requiresPasswordReentry: reentryFlags.some(Boolean),
-				isLoading: false,
-			});
-		};
-
-		loadAllAccountsStatus();
-
-		return () => {
-			cancelled = true;
-		};
-	}, [isAllAccountsMode, allAccounts]);
 
 	// Biometric unlock hook
 	const biometricUnlock = useBiometricUnlock({

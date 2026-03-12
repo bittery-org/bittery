@@ -7,7 +7,7 @@ import {
 	SelectValue,
 	toast,
 } from "@bittery/ui";
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -25,25 +25,17 @@ export const AUTO_LOCK_OPTIONS = [
 
 export function AutoLockSettings() {
 	const { m } = useI18n();
-	const [selectedTimeout, setSelectedTimeout] = useState<string>(
-		String(DEFAULT_AUTO_LOCK_TIMEOUT_MS),
+	const autoLockTimeoutQuery = useQuery({
+		queryKey: ["web-settings", "auto-lock-timeout"],
+		queryFn: () => storage.getAutoLockTimeoutOrDefault(),
+	});
+	const selectedTimeout = String(
+		autoLockTimeoutQuery.data ?? DEFAULT_AUTO_LOCK_TIMEOUT_MS,
 	);
-	const [isLoading, setIsLoading] = useState(true);
-
-	// Load current setting on mount
-	useEffect(() => {
-		const loadTimeout = async () => {
-			const timeout = await storage.getAutoLockTimeoutOrDefault();
-			setSelectedTimeout(String(timeout));
-			setIsLoading(false);
-		};
-		loadTimeout();
-	}, []);
 
 	const handleTimeoutChange = async (value: string) => {
 		const timeoutMs = Number.parseInt(value, 10);
 		await storage.storeAutoLockTimeout(timeoutMs);
-		setSelectedTimeout(value);
 		toast.success(m["settings.auto_lock.toast.updated"]());
 	};
 
@@ -67,9 +59,9 @@ export function AutoLockSettings() {
 
 	return (
 		<Select
-			value={isLoading ? undefined : selectedTimeout}
+			value={autoLockTimeoutQuery.isLoading ? undefined : selectedTimeout}
 			onValueChange={handleTimeoutChange}
-			disabled={isLoading}
+			disabled={autoLockTimeoutQuery.isLoading}
 		>
 			<SelectTrigger className="w-full sm:w-45">
 				<SelectValue />

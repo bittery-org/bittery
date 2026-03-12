@@ -30,7 +30,7 @@ import {
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { base64ToArrayBuffer, decrypt } from "@/lib/wasm-crypto";
 
 export const Route = createFileRoute("/share/$token")({
@@ -83,16 +83,10 @@ function ShareAccessPage() {
 	);
 	const [decryptionError, setDecryptionError] = useState<string | null>(null);
 
-	// Get the decryption key from the URL fragment
-	const [shareKey, setShareKey] = useState<string | null>(null);
-
-	useEffect(() => {
-		// Get key from URL fragment (after #)
+	const [shareKey] = useState<string | null>(() => {
 		const fragment = window.location.hash.slice(1);
-		if (fragment) {
-			setShareKey(fragment);
-		}
-	}, []);
+		return fragment || null;
+	});
 
 	// Get share link info
 	const linkInfoQuery = useQuery(
@@ -121,18 +115,17 @@ function ShareAccessPage() {
 				code: verificationCode,
 			}),
 		onSuccess: async (data) => {
-			await decryptSharedItem(data);
-		},
-		onError: (error: Error) => {
-			toast.error(error.message);
-		},
-	});
-
-	// Access public link (anyone mode)
-	const accessPublicMutation = useMutation({
-		mutationFn: () => trpcClient.share.accessPublic.mutate({ token }),
-		onSuccess: async (data) => {
-			await decryptSharedItem(data);
+			try {
+				setDecryptionError(null);
+				setDecryptedItem(await decryptSharedItem(data));
+			} catch (error) {
+				console.error("Decryption error:", error);
+				setDecryptionError(
+					error instanceof Error
+						? error.message
+						: "Failed to decrypt the shared item. The link may be invalid or corrupted.",
+				);
+			}
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);
@@ -145,55 +138,44 @@ function ShareAccessPage() {
 		encryptedShareKey: string;
 		shareKeyIv: string;
 	}) {
-		try {
-			if (!shareKey) {
-				setDecryptionError(
-					"Missing decryption key. Please use the complete share link.",
-				);
-				return;
-			}
-
-			// Decode the share key from the URL
-			const shareKeyBytes = base64ToArrayBuffer(shareKey);
-
-			// Decrypt the item data
-			const decrypted = await decrypt(
-				{
-					ciphertext: data.encryptedItemData,
-					iv: data.encryptionIv,
-					algorithm: "AES-GCM-AAD-V1",
-				},
-				shareKeyBytes,
-			);
-
-			const itemData = JSON.parse(decrypted) as SharedItemData;
-			setDecryptedItem(itemData);
-		} catch (error) {
-			console.error("Decryption error:", error);
-			setDecryptionError(
-				"Failed to decrypt the shared item. The link may be invalid or corrupted.",
+		if (!shareKey) {
+			throw new Error(
+				"Missing decryption key. Please use the complete share link.",
 			);
 		}
+
+		const shareKeyBytes = base64ToArrayBuffer(shareKey);
+		const decrypted = await decrypt(
+			{
+				ciphertext: data.encryptedItemData,
+				iv: data.encryptionIv,
+				algorithm: "AES-GCM-AAD-V1",
+			},
+			shareKeyBytes,
+		);
+
+		return JSON.parse(decrypted) as SharedItemData;
 	}
-
-	// Handle access for "anyone" mode when key is available
-	useEffect(() => {
-		if (
-			linkInfoQuery.data?.valid &&
+	const publicAccessQuery = useQuery({
+		queryKey: ["share", "public-access", token, shareKey],
+		enabled:
+			linkInfoQuery.data?.valid === true &&
 			linkInfoQuery.data.accessMode === "anyone" &&
-			shareKey &&
+			!!shareKey &&
 			!decryptedItem &&
-			!decryptionError
-		) {
-			accessPublicMutation.mutate();
-		}
-	}, [
-		linkInfoQuery.data,
-		shareKey,
-		decryptedItem,
-		decryptionError,
-		accessPublicMutation,
-	]);
+			!decryptionError,
+		queryFn: async () => {
+			const data = await trpcClient.share.accessPublic.mutate({ token });
+			return await decryptSharedItem(data);
+		},
+		retry: false,
+	});
+	const resolvedDecryptedItem = decryptedItem ?? publicAccessQuery.data ?? null;
+	const resolvedDecryptionError =
+		decryptionError ??
+		(publicAccessQuery.error
+			? "Failed to decrypt the shared item. The link may be invalid or corrupted."
+			: null);
 
 	// Loading state
 	if (linkInfoQuery.isLoading) {
@@ -284,7 +266,7 @@ function ShareAccessPage() {
 	}
 
 	// Decryption error
-	if (decryptionError) {
+	if (resolvedDecryptionError) {
 		return (
 			<div className="flex min-h-screen w-full items-center justify-center bg-muted/30 p-4">
 				<Card className="w-full max-w-md">
@@ -293,7 +275,7 @@ function ShareAccessPage() {
 							<AlertCircle className="h-6 w-6 text-destructive" />
 						</div>
 						<CardTitle>Decryption Failed</CardTitle>
-						<CardDescription>{decryptionError}</CardDescription>
+						<CardDescription>{resolvedDecryptionError}</CardDescription>
 					</CardHeader>
 					<CardFooter className="justify-center">
 						<Link to="/">
@@ -306,7 +288,7 @@ function ShareAccessPage() {
 	}
 
 	// Show decrypted item
-	if (decryptedItem) {
+	if (resolvedDecryptedItem) {
 		return (
 			<div className="flex min-h-screen w-full items-center justify-center bg-muted/30 p-4">
 				<Card className="w-full max-w-lg">
@@ -316,15 +298,15 @@ function ShareAccessPage() {
 								<ShieldCheck className="h-6 w-6" />
 							</div>
 							<div>
-								<CardTitle>{decryptedItem.title}</CardTitle>
+								<CardTitle>{resolvedDecryptedItem.title}</CardTitle>
 								<CardDescription className="capitalize">
-									{decryptedItem.category.replace("-", " ")}
+									{resolvedDecryptedItem.category.replace("-", " ")}
 								</CardDescription>
 							</div>
 						</div>
 					</CardHeader>
 					<CardContent>
-						<SharedItemDisplay item={decryptedItem} />
+						<SharedItemDisplay item={resolvedDecryptedItem} />
 					</CardContent>
 					<CardFooter className="justify-between text-muted-foreground text-xs">
 						<span className="flex items-center gap-1">

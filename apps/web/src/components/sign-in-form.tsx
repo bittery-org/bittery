@@ -12,7 +12,7 @@ import {
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { storage } from "@/lib/storage";
 import * as wasmCrypto from "@/lib/wasm-crypto";
 import { useI18n } from "@/providers/i18n-provider";
@@ -25,20 +25,17 @@ export default function SignInForm({
 	redirectTo?: string;
 }) {
 	const { m } = useI18n();
-	const navigate = useNavigate();
-	const [email, setEmail] = useState("");
-	const [showPassword, setShowPassword] = useState(false);
-	const [showSecretKey, setShowSecretKey] = useState(false);
-	const [sessionExpired, setSessionExpired] = useState(false);
 	const trpc = useTRPC();
 
-	// Check session state for quick unlock
 	const { data: sessionState, isLoading: isLoadingSession } = useSessionState();
-
-	// Check email for secret key hint
-	const { data: emailCheck } = useCheckEmail(email);
-
-	const trpcClient = useTRPCClient();
+	const isQuickUnlock = Boolean(
+		sessionState?.canQuickUnlock && sessionState?.email,
+	);
+	const storedSecretKeyQuery = useQuery({
+		queryKey: ["auth", "stored-secret-key", sessionState?.email],
+		enabled: isQuickUnlock && !!sessionState?.email,
+		queryFn: () => storage.getStoredSecretKey(sessionState?.email ?? undefined),
+	});
 	const registrationStatusQuery = useQuery(
 		trpc.auth.registrationStatus.queryOptions(),
 	);
@@ -47,8 +44,97 @@ export default function SignInForm({
 		registrationStatusQuery.data?.allowPublicSignup ?? true;
 	const hasInvitationRedirect = !!redirectTo?.startsWith("/invite/");
 	const canShowSignup = allowPublicSignup || hasInvitationRedirect;
+	const sessionExpired = Boolean(
+		!isLoadingSession &&
+			sessionState?.email &&
+			!sessionState.canQuickUnlock &&
+			sessionState.expiresAt &&
+			Date.now() >= sessionState.expiresAt,
+	);
+	const signInTitle = isQuickUnlock
+		? m["auth.signin.title.quick_unlock"]()
+		: m["auth.signin.title.default"]();
+	const signInDescription = isQuickUnlock
+		? m["auth.signin.description.quick_unlock"]()
+		: m["auth.signin.description.default"]();
+	const initialEmail = isQuickUnlock ? (sessionState?.email ?? "") : "";
+	const initialSecretKey = isQuickUnlock
+		? (storedSecretKeyQuery.data ?? "")
+		: "";
 
-	// Login mutation using platform WASM crypto
+	return (
+		<div className="w-full">
+			<h1 className="text-center font-semibold text-2xl tracking-tight">
+				{signInTitle}
+			</h1>
+			<p className="mx-auto mt-2 max-w-80 text-center text-muted-foreground text-sm">
+				{signInDescription}
+			</p>
+			<div className="mt-6">
+				{sessionExpired && (
+					<div className="mb-6 overflow-hidden rounded-2xl border border-amber-200/70 bg-[linear-gradient(135deg,rgba(255,251,235,0.96),rgba(255,255,255,0.98))] shadow-[0_18px_40px_-28px_rgba(146,64,14,0.55)]">
+						<div className="h-px bg-[linear-gradient(90deg,rgba(217,119,6,0.8),rgba(251,191,36,0.15),transparent)]" />
+						<div className="flex items-start gap-3 px-4 py-4 sm:px-5">
+							<div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-200/80 bg-white/85 text-amber-700 shadow-sm">
+								<Clock className="size-4.5" />
+							</div>
+							<div className="min-w-0 flex-1 pt-0.5">
+								<div className="flex flex-wrap items-center gap-2">
+									<span className="inline-flex items-center rounded-full border border-amber-200/80 bg-amber-100/80 px-2.5 py-0.5 font-medium text-[11px] text-amber-800 uppercase tracking-[0.16em]">
+										{m["auth.signin.session_expired.title"]()}
+									</span>
+								</div>
+								<p className="mt-2 max-w-prose text-[13px] text-amber-900/90 leading-6 sm:text-sm">
+									{m["auth.signin.session_expired.description"]()}
+								</p>
+							</div>
+						</div>
+					</div>
+				)}
+
+				<SignInFormContent
+					key={`${initialEmail}:${initialSecretKey}:${isQuickUnlock ? "quick" : "default"}`}
+					initialEmail={initialEmail}
+					initialSecretKey={initialSecretKey}
+					isQuickUnlock={isQuickUnlock}
+					isCloudMode={isCloudMode}
+					canShowSignup={canShowSignup}
+					hasInvitationRedirect={hasInvitationRedirect}
+					onSwitchToSignUp={onSwitchToSignUp}
+					redirectTo={redirectTo}
+				/>
+			</div>
+		</div>
+	);
+}
+
+function SignInFormContent({
+	initialEmail,
+	initialSecretKey,
+	isQuickUnlock,
+	isCloudMode,
+	canShowSignup,
+	hasInvitationRedirect,
+	onSwitchToSignUp,
+	redirectTo,
+}: {
+	initialEmail: string;
+	initialSecretKey: string;
+	isQuickUnlock: boolean;
+	isCloudMode: boolean;
+	canShowSignup: boolean;
+	hasInvitationRedirect: boolean;
+	onSwitchToSignUp: () => void;
+	redirectTo?: string;
+}) {
+	const { m } = useI18n();
+	const navigate = useNavigate();
+	const trpcClient = useTRPCClient();
+	const [email, setEmail] = useState(initialEmail);
+	const [showPassword, setShowPassword] = useState(false);
+	const [showSecretKey, setShowSecretKey] = useState(false);
+	const { data: emailCheck } = useCheckEmail(email);
+
 	const loginMutation = useMutation({
 		mutationFn: async (input: {
 			email: string;
@@ -79,57 +165,18 @@ export default function SignInForm({
 		},
 	});
 
-	// Determine if quick unlock is available
-	const isQuickUnlock = Boolean(
-		sessionState?.canQuickUnlock && sessionState?.email,
-	);
-	const signInTitle = isQuickUnlock
-		? m["auth.signin.title.quick_unlock"]()
-		: m["auth.signin.title.default"]();
-	const signInDescription = isQuickUnlock
-		? m["auth.signin.description.quick_unlock"]()
-		: m["auth.signin.description.default"]();
-
-	// Handle session expiration detection
-	useEffect(() => {
-		if (!isLoadingSession && sessionState) {
-			const quickUnlockExpired = Boolean(
-				sessionState.email &&
-					!sessionState.canQuickUnlock &&
-					sessionState.expiresAt &&
-					Date.now() >= sessionState.expiresAt,
-			);
-
-			setSessionExpired(quickUnlockExpired);
-		}
-	}, [isLoadingSession, sessionState]);
-
 	const form = useForm({
 		defaultValues: {
-			email: "",
+			email: initialEmail,
 			password: "",
-			secretKey: "",
+			secretKey: initialSecretKey,
 		},
 		onSubmit: async ({ value }) => {
 			await loginMutation.mutateAsync(value);
 		},
 	});
 
-	// Pre-populate form when quick unlock is available
-	useEffect(() => {
-		if (isQuickUnlock && sessionState?.email) {
-			setEmail(sessionState.email);
-			form.setFieldValue("email", sessionState.email);
-			// Get stored secret key for quick unlock
-			storage.getStoredSecretKey(sessionState.email).then((secretKey) => {
-				if (secretKey) {
-					form.setFieldValue("secretKey", secretKey);
-				}
-			});
-		}
-	}, [isQuickUnlock, sessionState?.email, form.setFieldValue]);
-
-	const handleEmailBlur = async (newEmail: string) => {
+	const handleEmailBlur = (newEmail: string) => {
 		if (newEmail?.includes("@")) {
 			setEmail(newEmail);
 		}
@@ -164,227 +211,185 @@ export default function SignInForm({
 	);
 
 	return (
-		<div className="w-full">
-			<h1 className="text-center font-semibold text-2xl tracking-tight">
-				{signInTitle}
-			</h1>
-			<p className="mx-auto mt-2 max-w-80 text-center text-muted-foreground text-sm">
-				{signInDescription}
-			</p>
-			<div className="mt-6">
-				{sessionExpired && (
-					<div className="mb-6 overflow-hidden rounded-2xl border border-amber-200/70 bg-[linear-gradient(135deg,rgba(255,251,235,0.96),rgba(255,255,255,0.98))] shadow-[0_18px_40px_-28px_rgba(146,64,14,0.55)]">
-						<div className="h-px bg-[linear-gradient(90deg,rgba(217,119,6,0.8),rgba(251,191,36,0.15),transparent)]" />
-						<div className="flex items-start gap-3 px-4 py-4 sm:px-5">
-							<div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-200/80 bg-white/85 text-amber-700 shadow-sm">
-								<Clock className="size-4.5" />
-							</div>
-							<div className="min-w-0 flex-1 pt-0.5">
-								<div className="flex flex-wrap items-center gap-2">
-									<span className="inline-flex items-center rounded-full border border-amber-200/80 bg-amber-100/80 px-2.5 py-0.5 font-medium text-[11px] uppercase tracking-[0.16em] text-amber-800">
-										{m["auth.signin.session_expired.title"]()}
-									</span>
-								</div>
-								<p className="mt-2 max-w-prose text-[13px] leading-6 text-amber-900/90 sm:text-sm">
-									{m["auth.signin.session_expired.description"]()}
-								</p>
-							</div>
+		<form
+			onSubmit={(e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				form.handleSubmit();
+			}}
+			className="space-y-4"
+		>
+			<div>
+				<form.Field name="email">
+					{(field) => (
+						<div className="space-y-2">
+							<Label htmlFor={field.name}>
+								{m["auth.signin.label.email"]()}
+							</Label>
+							<Input
+								id={field.name}
+								name={field.name}
+								type="email"
+								placeholder={m["auth.signin.placeholder.email"]()}
+								value={field.state.value}
+								onBlur={(e) => {
+									field.handleBlur();
+									handleEmailBlur(e.target.value);
+								}}
+								onChange={(e) => field.handleChange(e.target.value)}
+								required
+								disabled={isQuickUnlock}
+								className="h-10"
+							/>
 						</div>
-					</div>
-				)}
+					)}
+				</form.Field>
+			</div>
 
-				<form
-					onSubmit={(e) => {
-						e.preventDefault();
-						e.stopPropagation();
-						form.handleSubmit();
-					}}
-					className="space-y-4"
-				>
-					<div>
-						<form.Field name="email">
-							{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor={field.name}>
-										{m["auth.signin.label.email"]()}
-									</Label>
+			{emailCheck?.secretKeyHint && !isQuickUnlock && (
+				<div className="rounded-md bg-muted px-3 py-2 text-muted-foreground text-xs">
+					<span className="font-medium">{m["auth.signin.hint"]()}:</span>{" "}
+					{emailCheck.secretKeyHint}
+				</div>
+			)}
+
+			{!isQuickUnlock && (
+				<div>
+					<form.Field name="secretKey">
+						{(field) => (
+							<div className="space-y-2">
+								<Label htmlFor={field.name}>
+									{m["auth.signin.label.secret_key"]()}
+								</Label>
+								<div className="relative">
 									<Input
 										id={field.name}
 										name={field.name}
-										type="email"
-										placeholder={m["auth.signin.placeholder.email"]()}
+										type={showSecretKey ? "text" : "password"}
 										value={field.state.value}
-										onBlur={(e) => {
-											field.handleBlur();
-											handleEmailBlur(e.target.value);
-										}}
+										onBlur={field.handleBlur}
 										onChange={(e) => field.handleChange(e.target.value)}
+										placeholder={m["auth.signin.placeholder.secret_key"]()}
 										required
-										disabled={isQuickUnlock}
-										className="h-10"
+										className="h-10 pr-10 font-mono"
 									/>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon"
+										className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
+										onClick={() => setShowSecretKey(!showSecretKey)}
+									>
+										{showSecretKey ? <EyeOff size={16} /> : <Eye size={16} />}
+									</Button>
 								</div>
-							)}
-						</form.Field>
-					</div>
-
-					{emailCheck?.secretKeyHint && !isQuickUnlock && (
-						<div className="rounded-md bg-muted px-3 py-2 text-muted-foreground text-xs">
-							<span className="font-medium">{m["auth.signin.hint"]()}:</span>{" "}
-							{emailCheck.secretKeyHint}
-						</div>
-					)}
-
-					{!isQuickUnlock && (
-						<div>
-							<form.Field name="secretKey">
-								{(field) => (
-									<div className="space-y-2">
-										<Label htmlFor={field.name}>
-											{m["auth.signin.label.secret_key"]()}
-										</Label>
-										<div className="relative">
-											<Input
-												id={field.name}
-												name={field.name}
-												type={showSecretKey ? "text" : "password"}
-												value={field.state.value}
-												onBlur={field.handleBlur}
-												onChange={(e) => field.handleChange(e.target.value)}
-												placeholder={m["auth.signin.placeholder.secret_key"]()}
-												required
-												className="h-10 pr-10 font-mono"
-											/>
-											<Button
-												type="button"
-												variant="ghost"
-												size="icon"
-												className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
-												onClick={() => setShowSecretKey(!showSecretKey)}
-											>
-												{showSecretKey ? (
-													<EyeOff size={16} />
-												) : (
-													<Eye size={16} />
-												)}
-											</Button>
-										</div>
-									</div>
-								)}
-							</form.Field>
-						</div>
-					)}
-
-					<div>
-						<form.Field name="password">
-							{(field) => (
-								<div className="space-y-2">
-									<div className="flex items-center justify-between">
-										<Label htmlFor={field.name}>
-											{m["auth.signin.label.password"]()}
-										</Label>
-										{!isQuickUnlock && (
-											<button
-												type="button"
-												onClick={() => navigate({ to: "/recover" })}
-												className="text-muted-foreground text-xs underline-offset-4 hover:text-foreground hover:underline"
-											>
-												{m["auth.signin.forgot_password"]()}
-											</button>
-										)}
-									</div>
-									<div className="relative">
-										<Input
-											id={field.name}
-											name={field.name}
-											type={showPassword ? "text" : "password"}
-											value={field.state.value}
-											onBlur={field.handleBlur}
-											onChange={(e) => field.handleChange(e.target.value)}
-											required
-											className="h-10 pr-10"
-										/>
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon"
-											className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
-											onClick={() => setShowPassword(!showPassword)}
-										>
-											{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-										</Button>
-									</div>
-								</div>
-							)}
-						</form.Field>
-					</div>
-
-					<Button
-						type="submit"
-						className="h-10 w-full font-medium"
-						disabled={loginMutation.isPending}
-					>
-						{loginMutation.isPending ? (
-							<>
-								<Loader2 size={16} className="mr-2 animate-spin" />
-								{m["auth.signin.button.signing_in"]()}
-							</>
-						) : isQuickUnlock ? (
-							m["auth.signin.button.unlock_vault"]()
-						) : (
-							m["auth.signin.button.sign_in"]()
+							</div>
 						)}
-					</Button>
+					</form.Field>
+				</div>
+			)}
 
-					{isQuickUnlock && (
-						<>
-							<Button
-								type="button"
-								variant="link"
-								onClick={async () => {
-									// Clear session data from storage
-									await storage.clearSession();
-									// Clear form values
-									form.setFieldValue("email", "");
-									form.setFieldValue("secretKey", "");
-									setEmail("");
-									setSessionExpired(false);
-									// Force refresh session state
-									window.location.reload();
-								}}
-								className="w-full text-muted-foreground"
-							>
-								{m["auth.signin.button.different_account"]()}
-							</Button>
-							{canShowSignup && (
-								<div className="mt-2 text-center text-muted-foreground text-sm">
-									{m["auth.signin.signup.need_different_account"]()}{" "}
+			<div>
+				<form.Field name="password">
+					{(field) => (
+						<div className="space-y-2">
+							<div className="flex items-center justify-between">
+								<Label htmlFor={field.name}>
+									{m["auth.signin.label.password"]()}
+								</Label>
+								{!isQuickUnlock && (
 									<button
 										type="button"
-										onClick={onSwitchToSignUp}
-										className="font-medium text-primary underline-offset-4 hover:underline"
+										onClick={() => navigate({ to: "/recover" })}
+										className="text-muted-foreground text-xs underline-offset-4 hover:text-foreground hover:underline"
 									>
-										{m["auth.signin.signup.create_another_account"]()}
+										{m["auth.signin.forgot_password"]()}
 									</button>
-								</div>
-							)}
-						</>
+								)}
+							</div>
+							<div className="relative">
+								<Input
+									id={field.name}
+									name={field.name}
+									type={showPassword ? "text" : "password"}
+									value={field.state.value}
+									onBlur={field.handleBlur}
+									onChange={(e) => field.handleChange(e.target.value)}
+									required
+									className="h-10 pr-10"
+								/>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className="absolute top-0 right-0 h-10 w-10 text-muted-foreground hover:text-foreground"
+									onClick={() => setShowPassword(!showPassword)}
+								>
+									{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+								</Button>
+							</div>
+						</div>
 					)}
-
-					{!isQuickUnlock &&
-						(canShowSignup ? (
-							<div className="mt-4 text-center text-muted-foreground text-sm">
-								{isCloudMode
-									? renderCloudSignupPrompt()
-									: renderSelfHostedSignupPrompt()}
-							</div>
-						) : (
-							<div className="mt-4 text-center text-muted-foreground text-sm">
-								{m["auth.signin.signup.disabled"]()}
-							</div>
-						))}
-				</form>
+				</form.Field>
 			</div>
-		</div>
+
+			<Button
+				type="submit"
+				className="h-10 w-full font-medium"
+				disabled={loginMutation.isPending}
+			>
+				{loginMutation.isPending ? (
+					<>
+						<Loader2 size={16} className="mr-2 animate-spin" />
+						{m["auth.signin.button.signing_in"]()}
+					</>
+				) : isQuickUnlock ? (
+					m["auth.signin.button.unlock_vault"]()
+				) : (
+					m["auth.signin.button.sign_in"]()
+				)}
+			</Button>
+
+			{isQuickUnlock && (
+				<>
+					<Button
+						type="button"
+						variant="link"
+						onClick={async () => {
+							await storage.clearSession();
+							window.location.reload();
+						}}
+						className="w-full text-muted-foreground"
+					>
+						{m["auth.signin.button.different_account"]()}
+					</Button>
+					{canShowSignup && (
+						<div className="mt-2 text-center text-muted-foreground text-sm">
+							{m["auth.signin.signup.need_different_account"]()}{" "}
+							<button
+								type="button"
+								onClick={onSwitchToSignUp}
+								className="font-medium text-primary underline-offset-4 hover:underline"
+							>
+								{m["auth.signin.signup.create_another_account"]()}
+							</button>
+						</div>
+					)}
+				</>
+			)}
+
+			{!isQuickUnlock &&
+				(canShowSignup ? (
+					<div className="mt-4 text-center text-muted-foreground text-sm">
+						{isCloudMode
+							? renderCloudSignupPrompt()
+							: renderSelfHostedSignupPrompt()}
+					</div>
+				) : (
+					<div className="mt-4 text-center text-muted-foreground text-sm">
+						{m["auth.signin.signup.disabled"]()}
+					</div>
+				))}
+		</form>
 	);
 }

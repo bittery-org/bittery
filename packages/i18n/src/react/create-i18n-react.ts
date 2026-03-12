@@ -52,9 +52,14 @@ export function createI18nReact<M>(input: {
 	const I18nContext = createContext<I18nContextValue<M> | null>(null);
 
 	function I18nProvider({ children }: { children: ReactNode }) {
-		const [locale, setLocaleState] = useState<AppLocale>(() =>
-			safeGetLocale(runtime),
-		);
+		const applyLocale = useCallback((nextLocale: AppLocale) => {
+			sideEffects?.applyLocale?.(nextLocale);
+		}, []);
+		const [locale, setLocaleState] = useState<AppLocale>(() => {
+			const initialLocale = safeGetLocale(runtime);
+			applyLocale(initialLocale);
+			return initialLocale;
+		});
 		const hasManualLocaleSelectionRef = useRef(false);
 
 		useEffect(() => {
@@ -77,6 +82,7 @@ export function createI18nReact<M>(input: {
 					return;
 				}
 
+				applyLocale(initializedLocale);
 				setLocaleState(initializedLocale);
 			};
 
@@ -85,22 +91,22 @@ export function createI18nReact<M>(input: {
 			return () => {
 				isMounted = false;
 			};
-		}, []);
+		}, [applyLocale]);
 
-		const setLocale = useCallback((nextLocale: AppLocale) => {
-			hasManualLocaleSelectionRef.current = true;
-			setLocaleState(nextLocale);
-			void persistLocaleSelection({
-				locale: nextLocale,
-				runtime,
-				storage,
-				storageKey,
-			});
-		}, []);
-
-		useEffect(() => {
-			sideEffects?.applyLocale?.(locale);
-		}, [locale]);
+		const setLocale = useCallback(
+			(nextLocale: AppLocale) => {
+				hasManualLocaleSelectionRef.current = true;
+				applyLocale(nextLocale);
+				setLocaleState(nextLocale);
+				void persistLocaleSelection({
+					locale: nextLocale,
+					runtime,
+					storage,
+					storageKey,
+				});
+			},
+			[applyLocale],
+		);
 
 		const value = useMemo(
 			() => ({

@@ -17,7 +17,7 @@ import {
 	useToast,
 } from "heroui-native";
 import { Check, Copy, RefreshCw, Sparkles } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Text, View } from "react-native";
 import { withUniwind } from "uniwind";
 
@@ -193,7 +193,11 @@ export function PasswordGenerator({
 		key: K,
 		value: PasswordOptions[K],
 	) => {
-		setOptions((prev) => ({ ...prev, [key]: value }));
+		const nextOptions = { ...options, [key]: value };
+		setOptions(nextOptions);
+		if (isOpen && passwordType === "random") {
+			setPassword(generatePassword(nextOptions));
+		}
 	};
 
 	// Calculate password strength
@@ -228,29 +232,6 @@ export function PasswordGenerator({
 
 	const strength = getPasswordStrength();
 
-	// Generate initial password when bottom sheet opens
-	useEffect(() => {
-		if (isOpen && !password) {
-			handleGenerate();
-		}
-	}, [isOpen, handleGenerate, password]);
-
-	// Regenerate when password type or options change
-	// biome-ignore lint/correctness/useExhaustiveDependencies: Intentionally regenerate when these specific options change
-	useEffect(() => {
-		if (isOpen) {
-			handleGenerate();
-		}
-	}, [passwordType, wordCount, includeNumber, isOpen, handleGenerate]);
-
-	// Reset state when bottom sheet closes
-	useEffect(() => {
-		if (!isOpen) {
-			setPassword("");
-			setCopied(false);
-		}
-	}, [isOpen]);
-
 	// At least one option must be enabled
 	const canToggleOption =
 		[
@@ -261,7 +242,18 @@ export function PasswordGenerator({
 		].filter(Boolean).length > 1;
 
 	return (
-		<BottomSheet isOpen={isOpen} onOpenChange={setIsOpen}>
+		<BottomSheet
+			isOpen={isOpen}
+			onOpenChange={(open) => {
+				setIsOpen(open);
+				if (open) {
+					handleGenerate();
+					return;
+				}
+				setPassword("");
+				setCopied(false);
+			}}
+		>
 			<BottomSheet.Trigger asChild>{children}</BottomSheet.Trigger>
 			<BottomSheet.Portal>
 				<BottomSheet.Overlay />
@@ -283,7 +275,12 @@ export function PasswordGenerator({
 							<View className="flex-row gap-2">
 								<Button
 									variant={passwordType === "random" ? "primary" : "secondary"}
-									onPress={() => setPasswordType("random")}
+									onPress={() => {
+										setPasswordType("random");
+										if (isOpen) {
+											setPassword(generatePassword(options));
+										}
+									}}
 									className="flex-1"
 								>
 									Random
@@ -292,7 +289,14 @@ export function PasswordGenerator({
 									variant={
 										passwordType === "memorable" ? "primary" : "secondary"
 									}
-									onPress={() => setPasswordType("memorable")}
+									onPress={() => {
+										setPasswordType("memorable");
+										if (isOpen) {
+											setPassword(
+												generateMemorablePassword(wordCount, includeNumber),
+											);
+										}
+									}}
 									className="flex-1"
 								>
 									Memorable
@@ -385,9 +389,6 @@ export function PasswordGenerator({
 											onValueChange={(value) => {
 												updateOption("length", Math.round(value));
 											}}
-											onSlidingComplete={() => {
-												handleGenerate();
-											}}
 											minimumTrackTintColor="#6366f1"
 											maximumTrackTintColor="#e5e7eb"
 											thumbTintColor="#6366f1"
@@ -407,7 +408,6 @@ export function PasswordGenerator({
 											onSelectedChange={(value) => {
 												if (canToggleOption || value) {
 													updateOption("lowercase", value);
-													setTimeout(handleGenerate, 0);
 												}
 											}}
 											isDisabled={!canToggleOption && options.lowercase}
@@ -424,7 +424,6 @@ export function PasswordGenerator({
 											onSelectedChange={(value) => {
 												if (canToggleOption || value) {
 													updateOption("uppercase", value);
-													setTimeout(handleGenerate, 0);
 												}
 											}}
 											isDisabled={!canToggleOption && options.uppercase}
@@ -441,7 +440,6 @@ export function PasswordGenerator({
 											onSelectedChange={(value) => {
 												if (canToggleOption || value) {
 													updateOption("numbers", value);
-													setTimeout(handleGenerate, 0);
 												}
 											}}
 											isDisabled={!canToggleOption && options.numbers}
@@ -458,7 +456,6 @@ export function PasswordGenerator({
 											onSelectedChange={(value) => {
 												if (canToggleOption || value) {
 													updateOption("symbols", value);
-													setTimeout(handleGenerate, 0);
 												}
 											}}
 											isDisabled={!canToggleOption && options.symbols}
@@ -486,7 +483,14 @@ export function PasswordGenerator({
 											<Button
 												key={count}
 												variant={wordCount === count ? "primary" : "secondary"}
-												onPress={() => setWordCount(count)}
+												onPress={() => {
+													setWordCount(count);
+													if (isOpen && passwordType === "memorable") {
+														setPassword(
+															generateMemorablePassword(count, includeNumber),
+														);
+													}
+												}}
 												className="flex-1"
 											>
 												{count}
@@ -498,7 +502,14 @@ export function PasswordGenerator({
 								<View className="overflow-hidden rounded-xl border border-border">
 									<ControlField
 										isSelected={includeNumber}
-										onSelectedChange={setIncludeNumber}
+										onSelectedChange={(value) => {
+											setIncludeNumber(value);
+											if (isOpen && passwordType === "memorable") {
+												setPassword(
+													generateMemorablePassword(wordCount, value),
+												);
+											}
+										}}
 										className="px-4 py-3"
 									>
 										<Label className="flex-1">Include number at end</Label>

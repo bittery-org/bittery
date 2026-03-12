@@ -20,7 +20,7 @@ import {
 	Server,
 	User,
 } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
 	Alert,
 	KeyboardAvoidingView,
@@ -56,14 +56,8 @@ export default function SignupScreen() {
 	const [password, setPassword] = useState("");
 	const [confirmPassword, setConfirmPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
-	const [generatedSecretKey, setGeneratedSecretKey] = useState("");
+	const [generatedSecretKey] = useState(() => generateSecretKey());
 	const [hasConfirmedSave, setHasConfirmedSave] = useState(false);
-
-	useEffect(() => {
-		// Generate secret key on mount
-		const key = generateSecretKey();
-		setGeneratedSecretKey(key);
-	}, []);
 
 	const handleContinueToSecretKey = () => {
 		if (!name.trim() || !email.trim() || !password.trim()) {

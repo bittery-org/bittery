@@ -1,10 +1,11 @@
 import { useItems } from "@bittery/core/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { Input, TextField } from "heroui-native";
 import { Clock, Search as SearchIcon, X } from "lucide-react-native";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useDeferredValue, useState } from "react";
 import { FlatList, Text, TouchableOpacity, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { CategoryFilter } from "@/components/category-filter";
@@ -23,15 +24,27 @@ const MAX_RECENT_SEARCHES = 10;
 
 export default function SearchScreen() {
 	const router = useRouter();
-	const inputRef = useRef<any>(null);
+	const queryClient = useQueryClient();
 	const [searchQuery, setSearchQuery] = useState("");
 	const [selectedCategory, setSelectedCategory] = useState<
 		ItemCategory | "all"
 	>("all");
-	const [recentSearches, setRecentSearches] = useState<string[]>([]);
-	const [debouncedQuery, setDebouncedQuery] = useState("");
+	const debouncedQuery = useDeferredValue(searchQuery);
 
 	const { items } = useItems();
+	const recentSearchesQuery = useQuery({
+		queryKey: ["mobile", "recent-searches"],
+		queryFn: async () => {
+			try {
+				const stored = await SecureStore.getItemAsync(RECENT_SEARCHES_KEY);
+				return stored ? (JSON.parse(stored) as string[]) : [];
+			} catch (error) {
+				console.error("Failed to load recent searches:", error);
+				return [];
+			}
+		},
+	});
+	const recentSearches = recentSearchesQuery.data ?? [];
 
 	// Filter items based on debounced search query
 	const { filteredItems } = useFilteredItems({
@@ -39,38 +52,6 @@ export default function SearchScreen() {
 		searchQuery: debouncedQuery,
 		selectedCategory,
 	});
-
-	const loadRecentSearches = useCallback(async () => {
-		try {
-			const stored = await SecureStore.getItemAsync(RECENT_SEARCHES_KEY);
-			if (stored) {
-				setRecentSearches(JSON.parse(stored));
-			}
-		} catch (error) {
-			console.error("Failed to load recent searches:", error);
-		}
-	}, []);
-
-	// Load recent searches on mount
-	useEffect(() => {
-		loadRecentSearches();
-	}, [loadRecentSearches]);
-
-	// Debounce search query
-	useEffect(() => {
-		const timer = setTimeout(() => {
-			setDebouncedQuery(searchQuery);
-		}, 300);
-		return () => clearTimeout(timer);
-	}, [searchQuery]);
-
-	// Auto-focus on mount
-	useEffect(() => {
-		const timer = setTimeout(() => {
-			inputRef.current?.focus();
-		}, 100);
-		return () => clearTimeout(timer);
-	}, []);
 
 	const saveRecentSearch = async (query: string) => {
 		if (!query.trim()) return;
@@ -83,7 +64,7 @@ export default function SearchScreen() {
 				),
 			].slice(0, MAX_RECENT_SEARCHES);
 
-			setRecentSearches(updated);
+			queryClient.setQueryData(["mobile", "recent-searches"], updated);
 			await SecureStore.setItemAsync(
 				RECENT_SEARCHES_KEY,
 				JSON.stringify(updated),
@@ -98,7 +79,7 @@ export default function SearchScreen() {
 			const updated = recentSearches.filter(
 				(s) => s.toLowerCase() !== query.toLowerCase(),
 			);
-			setRecentSearches(updated);
+			queryClient.setQueryData(["mobile", "recent-searches"], updated);
 			await SecureStore.setItemAsync(
 				RECENT_SEARCHES_KEY,
 				JSON.stringify(updated),
@@ -110,7 +91,7 @@ export default function SearchScreen() {
 
 	const clearRecentSearches = async () => {
 		try {
-			setRecentSearches([]);
+			queryClient.setQueryData(["mobile", "recent-searches"], []);
 			await SecureStore.deleteItemAsync(RECENT_SEARCHES_KEY);
 		} catch (error) {
 			console.error("Failed to clear recent searches:", error);
@@ -124,7 +105,6 @@ export default function SearchScreen() {
 
 	const handleRecentSearchPress = (query: string) => {
 		setSearchQuery(query);
-		setDebouncedQuery(query);
 	};
 
 	const renderRecentSearches = () => {
@@ -230,13 +210,13 @@ export default function SearchScreen() {
 				<TextField>
 					<View className="w-full flex-row items-center">
 						<Input
-							ref={inputRef}
 							placeholder="Search items..."
 							value={searchQuery}
 							onChangeText={setSearchQuery}
 							returnKeyType="search"
 							autoCapitalize="none"
 							autoCorrect={false}
+							autoFocus
 							className="flex-1 pr-12 pl-12"
 						/>
 						<StyledSearch
@@ -248,7 +228,6 @@ export default function SearchScreen() {
 							<TouchableOpacity
 								onPress={() => {
 									setSearchQuery("");
-									setDebouncedQuery("");
 								}}
 								className="absolute right-3.5 p-1"
 								hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}

@@ -9,7 +9,7 @@ import {
 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ExtensionAccountSwitcher } from "@/components/account-switcher";
 import { Favicon } from "@/components/favicon";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
@@ -188,8 +188,9 @@ export function VaultPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const [searchQuery, setSearchQuery] = useState("");
-	const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-	const [currentHostname, setCurrentHostname] = useState<string | null>(null);
+	const [manualSelectionByScope, setManualSelectionByScope] = useState<
+		Record<string, string>
+	>({});
 
 	// Check if we're in "All Accounts" mode
 	const { data: activeAccount } = useQuery({
@@ -203,19 +204,26 @@ export function VaultPage() {
 	);
 
 	const isAllAccountsMode = activeAccount?.type === "all";
-
-	useEffect(() => {
-		chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-			const url = tabs[0]?.url;
-			if (url) {
-				try {
-					setCurrentHostname(new URL(url).hostname);
-				} catch {
-					setCurrentHostname(null);
-				}
-			}
-		});
-	}, []);
+	const currentHostnameQuery = useQuery({
+		queryKey: ["current-tab-hostname"],
+		queryFn: async () => {
+			return await new Promise<string | null>((resolve) => {
+				chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+					const url = tabs[0]?.url;
+					if (!url) {
+						resolve(null);
+						return;
+					}
+					try {
+						resolve(new URL(url).hostname);
+					} catch {
+						resolve(null);
+					}
+				});
+			});
+		},
+	});
+	const currentHostname = currentHostnameQuery.data ?? null;
 
 	const { data: items = [], isLoading } = useQuery<DecryptedItem[]>({
 		queryKey: ["vault-items"],
@@ -285,45 +293,47 @@ export function VaultPage() {
 		});
 	}, [filteredItems, currentHostname]);
 
-	useEffect(() => {
+	const storedSelection = useMemo(
+		() => readSelectedItemForScope(selectionScope),
+		[selectionScope],
+	);
+	const selectedItemId = useMemo(() => {
 		if (sortedItems.length === 0) {
-			setSelectedItemId(null);
-			return;
+			return null;
 		}
 
-		const storedSelection = readSelectedItemForScope(selectionScope);
-		const hasStoredVisibleSelection =
-			!!storedSelection &&
-			sortedItems.some((item) => item.id === storedSelection);
-
-		if (!selectedItemId) {
-			setSelectedItemId(
-				hasStoredVisibleSelection
-					? storedSelection
-					: (sortedItems[0]?.id ?? null),
-			);
-			return;
+		const manualSelection = manualSelectionByScope[selectionScope] ?? null;
+		if (
+			manualSelection &&
+			sortedItems.some((item) => item.id === manualSelection)
+		) {
+			return manualSelection;
 		}
 
-		const stillVisible = sortedItems.some((item) => item.id === selectedItemId);
-		if (!stillVisible) {
-			setSelectedItemId(
-				hasStoredVisibleSelection
-					? storedSelection
-					: (sortedItems[0]?.id ?? null),
-			);
+		if (
+			storedSelection &&
+			sortedItems.some((item) => item.id === storedSelection)
+		) {
+			return storedSelection;
 		}
-	}, [sortedItems, selectedItemId, selectionScope]);
 
-	useEffect(() => {
-		if (!selectedItemId) return;
-		writeSelectedItemForScope(selectionScope, selectedItemId);
-	}, [selectionScope, selectedItemId]);
+		return sortedItems[0]?.id ?? null;
+	}, [manualSelectionByScope, selectionScope, sortedItems, storedSelection]);
 
 	// Split into favorites and regular items
 	const favoriteItems = sortedItems.filter((item) => item.favorite);
 	const regularItems = sortedItems.filter((item) => !item.favorite);
 	const selectedItem = sortedItems.find((item) => item.id === selectedItemId);
+	const handleSelectItem = useCallback(
+		(itemId: string) => {
+			setManualSelectionByScope((previous) => ({
+				...previous,
+				[selectionScope]: itemId,
+			}));
+			writeSelectedItemForScope(selectionScope, itemId);
+		},
+		[selectionScope],
+	);
 
 	const handleItemUpdated = useCallback(() => {
 		// Invalidate all vault items queries
@@ -410,7 +420,7 @@ export function VaultPage() {
 												item={item}
 												isSelected={item.id === selectedItemId}
 												isAllAccountsMode={isAllAccountsMode}
-												onClick={() => setSelectedItemId(item.id)}
+												onClick={() => handleSelectItem(item.id)}
 											/>
 										))}
 										<div className="mt-4 mb-2 px-2 font-semibold text-muted-foreground text-xs uppercase">
@@ -424,7 +434,7 @@ export function VaultPage() {
 										item={item}
 										isSelected={item.id === selectedItemId}
 										isAllAccountsMode={isAllAccountsMode}
-										onClick={() => setSelectedItemId(item.id)}
+										onClick={() => handleSelectItem(item.id)}
 									/>
 								))}
 							</div>

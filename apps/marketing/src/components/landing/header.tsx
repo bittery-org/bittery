@@ -82,11 +82,9 @@ function useActiveSection() {
 }
 
 function ThemeToggle() {
-	const [dark, setDark] = useState(false);
-
-	useEffect(() => {
-		setDark(document.documentElement.classList.contains("dark"));
-	}, []);
+	const [dark, setDark] = useState(() =>
+		document.documentElement.classList.contains("dark"),
+	);
 
 	const toggle = () => {
 		const next = !dark;
@@ -108,7 +106,7 @@ function ThemeToggle() {
 }
 
 export function Header() {
-	const [scrolled, setScrolled] = useState(false);
+	const [scrolled, setScrolled] = useState(() => window.scrollY > 20);
 	const [mobileOpen, setMobileOpen] = useState(false);
 	const activeSection = useActiveSection();
 	const location = useLocation();

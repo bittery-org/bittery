@@ -5,6 +5,7 @@ import {
 	useQuickUnlockAll,
 	useSessionState,
 } from "@bittery/core/hooks";
+import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import {
 	Avatar,
@@ -27,7 +28,7 @@ import {
 	UserPlus,
 	Users,
 } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
 	Alert,
 	KeyboardAvoidingView,
@@ -77,39 +78,94 @@ export default function UnlockScreen() {
 
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
-	const [targetAccount, setTargetAccount] = useState<AccountMetadata | null>(
-		null,
+	const [selectedAccountEmail, setSelectedAccountEmail] = useState(
+		activeAccount?.email ?? allAccounts[0]?.email ?? "",
 	);
-	const [unlockMode, setUnlockMode] = useState<"single" | "all">(
+	const [manualUnlockMode, setManualUnlockMode] = useState<"single" | "all">(
 		isAllAccountsMode ? "all" : "single",
 	);
-	const [selectedAccountValue, setSelectedAccountValue] = useState<{
-		value: string;
-		label: string;
-	}>({ value: "", label: "" });
-	const [allAccountsStatus, setAllAccountsStatus] = useState<{
-		canBiometricUnlock: boolean;
-		requiresPasswordReentry: boolean;
-		isLoading: boolean;
-	}>({
-		canBiometricUnlock: false,
-		requiresPasswordReentry: false,
-		isLoading: false,
-	});
-	const [biometricType, setBiometricType] = useState<string | null>(null);
 	const [biometricError, setBiometricError] = useState<string | null>(null);
+	const unlockMode =
+		activeAccountConfig?.type === "all" ? "all" : manualUnlockMode;
+	const targetAccount = useMemo(() => {
+		if (unlockMode !== "single") {
+			return null;
+		}
+
+		return (
+			activeAccount ??
+			allAccounts.find((account) => account.email === selectedAccountEmail) ??
+			allAccounts[0] ??
+			null
+		);
+	}, [activeAccount, allAccounts, selectedAccountEmail, unlockMode]);
+	const selectedAccountValue = useMemo(() => {
+		if (unlockMode === "all") {
+			return { value: "all", label: "All Accounts" };
+		}
+
+		if (!targetAccount) {
+			return undefined;
+		}
+
+		return {
+			value: targetAccount.email,
+			label:
+				targetAccount.teamName ||
+				targetAccount.name ||
+				targetAccount.email.split("@")[0],
+		};
+	}, [targetAccount, unlockMode]);
 
 	// Get session state for the target account
 	const { data: sessionState, refetch: refetchSessionState } = useSessionState(
 		targetAccount?.email,
 		{ enabled: unlockMode === "single" && !!targetAccount },
 	);
+	const biometricTypeQuery = useQuery({
+		queryKey: ["unlock", "biometric-type"],
+		queryFn: async () => {
+			return (await platformStorage.getBiometricType?.()) ?? null;
+		},
+		enabled: unlockMode === "all" || !!targetAccount,
+	});
+	const biometricType = biometricTypeQuery.data ?? null;
+	const allAccountsStatusQuery = useQuery({
+		queryKey: [
+			"unlock",
+			"all-accounts-status",
+			allAccounts.map((account) => account.email).join("|"),
+		],
+		queryFn: async () => {
+			const emails = allAccounts.map((account) => account.email);
+			if (emails.length === 0) {
+				return {
+					canBiometricUnlock: false,
+					requiresPasswordReentry: false,
+					isLoading: false,
+				};
+			}
 
-	// Load biometric type on mount
-	const loadBiometricType = useCallback(async () => {
-		const type = await platformStorage.getBiometricType?.();
-		setBiometricType(type ?? null);
-	}, [platformStorage]);
+			const [biometricFlags, reentryFlags] = await Promise.all([
+				Promise.all(emails.map((email) => storage.canBiometricUnlock(email))),
+				Promise.all(
+					emails.map((email) => storage.isMasterPasswordReentryRequired(email)),
+				),
+			]);
+
+			return {
+				canBiometricUnlock: biometricFlags.some(Boolean),
+				requiresPasswordReentry: reentryFlags.some(Boolean),
+				isLoading: false,
+			};
+		},
+		enabled: unlockMode === "all",
+	});
+	const allAccountsStatus = allAccountsStatusQuery.data ?? {
+		canBiometricUnlock: false,
+		requiresPasswordReentry: false,
+		isLoading: allAccountsStatusQuery.isLoading,
+	};
 
 	const setNativeMuksForEmails = useCallback(async (emails: string[]) => {
 		if (Platform.OS !== "android" || !CredentialProvider.isAvailable()) return;
@@ -129,92 +185,6 @@ export default function UnlockScreen() {
 			}
 		}
 	}, []);
-
-	useEffect(() => {
-		if (activeAccount && unlockMode === "single") {
-			setTargetAccount(activeAccount);
-			setSelectedAccountValue({
-				value: activeAccount.email,
-				label:
-					activeAccount.teamName ||
-					activeAccount.name ||
-					activeAccount.email.split("@")[0],
-			});
-		}
-		if (!activeAccount && unlockMode === "single" && allAccounts.length > 0) {
-			setTargetAccount(allAccounts[0]);
-			setSelectedAccountValue({
-				value: allAccounts[0].email,
-				label:
-					allAccounts[0].teamName ||
-					allAccounts[0].name ||
-					allAccounts[0].email.split("@")[0],
-			});
-		}
-	}, [activeAccount, allAccounts, unlockMode]);
-
-	useEffect(() => {
-		if (activeAccountConfig?.type === "all") {
-			setUnlockMode("all");
-			setTargetAccount(null);
-			setSelectedAccountValue({
-				value: "all",
-				label: "All Accounts",
-			});
-		}
-	}, [activeAccountConfig]);
-
-	useEffect(() => {
-		if (unlockMode === "all") {
-			setPassword("");
-			setBiometricError(null);
-		}
-	}, [unlockMode]);
-
-	useEffect(() => {
-		if (unlockMode === "all" || targetAccount) {
-			loadBiometricType();
-		}
-	}, [unlockMode, targetAccount, loadBiometricType]);
-
-	useEffect(() => {
-		if (unlockMode !== "all") return;
-		let cancelled = false;
-
-		const loadAllAccountsStatus = async () => {
-			setAllAccountsStatus((prev) => ({ ...prev, isLoading: true }));
-			const emails = allAccounts.map((account) => account.email);
-			if (emails.length === 0) {
-				setAllAccountsStatus({
-					canBiometricUnlock: false,
-					requiresPasswordReentry: false,
-					isLoading: false,
-				});
-				return;
-			}
-
-			const [biometricFlags, reentryFlags] = await Promise.all([
-				Promise.all(emails.map((email) => storage.canBiometricUnlock(email))),
-				Promise.all(
-					emails.map((email) => storage.isMasterPasswordReentryRequired(email)),
-				),
-			]);
-
-			if (cancelled) return;
-
-			setAllAccountsStatus({
-				canBiometricUnlock: biometricFlags.some(Boolean),
-				requiresPasswordReentry: reentryFlags.some(Boolean),
-				isLoading: false,
-			});
-		};
-
-		loadAllAccountsStatus();
-
-		return () => {
-			cancelled = true;
-		};
-	}, [unlockMode, allAccounts]);
 
 	// Biometric unlock hook
 	const biometricUnlock = useBiometricUnlock({
@@ -490,16 +460,11 @@ export default function UnlockScreen() {
 	) => {
 		if (!option) return;
 
-		setSelectedAccountValue(option);
 		if (option.value === "all") {
-			setUnlockMode("all");
-			setTargetAccount(null);
+			setManualUnlockMode("all");
 		} else {
-			const account = allAccounts.find((acc) => acc.email === option.value);
-			if (account) {
-				setUnlockMode("single");
-				setTargetAccount(account);
-			}
+			setManualUnlockMode("single");
+			setSelectedAccountEmail(option.value);
 		}
 		setPassword("");
 		setBiometricError(null);

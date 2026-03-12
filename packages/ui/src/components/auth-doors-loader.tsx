@@ -6,7 +6,7 @@ import {
   IconLockOutlineDuo18,
 } from "../icons/index.js";
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 
 const DEFAULT_LOGO_POSITION = "top-8 left-4 sm:top-9 sm:left-6";
@@ -130,10 +130,8 @@ export function AuthDoorsControlledRevealLoader({
   logoPositionClassName,
 }: AuthDoorsControlledRevealLoaderProps) {
   const [phase, setPhase] = useState<ControlledRevealPhase>("hidden");
-  const onCompleteRef = useRef(onComplete);
-
-  useEffect(() => {
-    onCompleteRef.current = onComplete;
+  const handleComplete = useCallback(() => {
+    onComplete?.();
   }, [onComplete]);
 
   useEffect(() => {
@@ -146,10 +144,10 @@ export function AuthDoorsControlledRevealLoader({
       (nextPhase) => setPhase(nextPhase),
       () => {
         setPhase("hidden");
-        onCompleteRef.current?.();
+        handleComplete();
       },
     );
-  }, [isVisible]);
+  }, [handleComplete, isVisible]);
 
   if (phase === "hidden") {
     return null;

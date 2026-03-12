@@ -4,7 +4,7 @@ import {
 	type PasswordOptions,
 } from "@bittery/shared/password";
 import { Check, Copy, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Button } from "./button";
 import { Input } from "./input";
 import { Label } from "./label";
@@ -62,7 +62,13 @@ export function PasswordGenerator({
 		key: K,
 		value: PasswordOptions[K],
 	) => {
-		setOptions((prev) => ({ ...prev, [key]: value }));
+		const nextOptions = { ...options, [key]: value };
+		setOptions(nextOptions);
+		if (isOpen) {
+			const newPassword = generatePassword(nextOptions);
+			setPassword(newPassword);
+			onPasswordGenerated?.(newPassword);
+		}
 	};
 
 	// Calculate password strength
@@ -97,13 +103,6 @@ export function PasswordGenerator({
 
 	const strength = getPasswordStrength();
 
-	// Generate initial password
-	useEffect(() => {
-		if (isOpen && !password) {
-			handleGenerate();
-		}
-	}, [isOpen, handleGenerate, password]);
-
 	// At least one option must be enabled
 	const canToggleOption =
 		[
@@ -114,7 +113,21 @@ export function PasswordGenerator({
 		].filter(Boolean).length > 1;
 
 	return (
-		<Popover modal open={isOpen} onOpenChange={setIsOpen}>
+		<Popover
+			modal
+			open={isOpen}
+			onOpenChange={(open) => {
+				setIsOpen(open);
+				if (open) {
+					if (!password) {
+						handleGenerate();
+					}
+					return;
+				}
+				setPassword("");
+				setCopied(false);
+			}}
+		>
 			<PopoverTrigger asChild>
 				{triggerButton || (
 					<Button type="button" variant="outline" size="icon">

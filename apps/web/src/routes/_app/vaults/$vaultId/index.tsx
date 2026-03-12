@@ -52,7 +52,7 @@ import {
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CreateItemSheet } from "@/components/vault/create-item-sheet";
 import ItemDetail from "@/components/vault/item-detail";
 import { ItemForm } from "@/components/vault/item-form";
@@ -111,7 +111,9 @@ function VaultDetailPage() {
 	const { m } = useI18n();
 
 	const { state: sidebarState, isMobile } = useSidebar();
-	const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+	const [manualSelectedItemId, setManualSelectedItemId] = useState<
+		string | null
+	>(null);
 	const [showCompactHeader, setShowCompactHeader] = useState(false);
 	const [isCreateItemSheetOpen, setIsCreateItemSheetOpen] = useState(false);
 	const [isEditItemDialogOpen, setIsEditItemDialogOpen] = useState(false);
@@ -120,15 +122,21 @@ function VaultDetailPage() {
 	const [isDeleteVaultDialogOpen, setIsDeleteVaultDialogOpen] = useState(false);
 	const [isMakeSharedDialogOpen, setIsMakeSharedDialogOpen] = useState(false);
 	const [isMakePrivateDialogOpen, setIsMakePrivateDialogOpen] = useState(false);
-	const [pendingItemIdToSelect, setPendingItemIdToSelect] = useState<
-		string | null
-	>(null);
 	const headerRef = useRef<HTMLElement>(null);
 
 	// Use core hooks for vault metadata and items (local-first, same as desktop)
 	const { vaultInfo, isLoading: isLoadingVault } = useVaultInfo(vaultId);
 	const { items: decryptedItems, isLoading: isLoadingItems } =
 		useVaultItems(vaultId);
+	const selectedItemId = useMemo(() => {
+		if (!manualSelectedItemId) {
+			return null;
+		}
+
+		return decryptedItems.some((item) => item.id === manualSelectedItemId)
+			? manualSelectedItemId
+			: null;
+	}, [decryptedItems, manualSelectedItemId]);
 	const selectedItem =
 		selectedItemId === null
 			? null
@@ -175,35 +183,6 @@ function VaultDetailPage() {
 		return () => observer.disconnect();
 	}, [isLoadingVault]);
 
-	useEffect(() => {
-		if (!pendingItemIdToSelect) {
-			return;
-		}
-
-		const itemToSelect = decryptedItems.find(
-			(item) => item.id === pendingItemIdToSelect,
-		);
-		if (itemToSelect) {
-			setSelectedItemId(itemToSelect.id);
-			setPendingItemIdToSelect(null);
-		}
-	}, [decryptedItems, pendingItemIdToSelect]);
-
-	useEffect(() => {
-		if (!selectedItemId) {
-			return;
-		}
-
-		const stillExists = decryptedItems.some(
-			(item) => item.id === selectedItemId,
-		);
-		if (!stillExists) {
-			setSelectedItemId(null);
-			setIsEditItemDialogOpen(false);
-			setIsDeleteItemDialogOpen(false);
-		}
-	}, [decryptedItems, selectedItemId]);
-
 	// Members still come from tRPC (no local hook for membership data)
 	const membersQuery = useQuery(
 		trpc.vault.members.list.queryOptions({ vaultId }),
@@ -234,11 +213,11 @@ function VaultDetailPage() {
 		canEditVault || canDeleteVault || hasVaultConversionActions;
 
 	const handleItemSelect = (item: DecryptedItem) => {
-		setSelectedItemId(item.id);
+		setManualSelectedItemId(item.id);
 	};
 
 	const handleCloseSheet = () => {
-		setSelectedItemId(null);
+		setManualSelectedItemId(null);
 	};
 
 	const handleCreateItem = async (
@@ -251,7 +230,7 @@ function VaultDetailPage() {
 			category,
 			data,
 		});
-		setPendingItemIdToSelect(result.itemId);
+		setManualSelectedItemId(result.itemId);
 		setIsCreateItemSheetOpen(false);
 		toast.success(m["vaults.detail.toast.item_created"]());
 	};
@@ -281,7 +260,7 @@ function VaultDetailPage() {
 				vaultId: selectedItem.vaultId,
 			});
 			setIsDeleteItemDialogOpen(false);
-			setSelectedItemId(null);
+			setManualSelectedItemId(null);
 			toast.success(m["vaults.detail.toast.item_moved_to_trash"]());
 		} catch {
 			toast.error(m["vaults.detail.toast.item_delete_error"]());
@@ -738,7 +717,7 @@ function VaultDetailPage() {
 
 			{/* Edit Item Dialog */}
 			<Dialog
-				open={isEditItemDialogOpen}
+				open={isEditItemDialogOpen && !!selectedItem}
 				onOpenChange={setIsEditItemDialogOpen}
 			>
 				<DialogContent
@@ -771,7 +750,7 @@ function VaultDetailPage() {
 
 			{/* Delete Item Confirmation Dialog */}
 			<Dialog
-				open={isDeleteItemDialogOpen}
+				open={isDeleteItemDialogOpen && !!selectedItem}
 				onOpenChange={setIsDeleteItemDialogOpen}
 			>
 				<DialogContent data-testid="delete-item-dialog">

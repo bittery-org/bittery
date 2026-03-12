@@ -26,7 +26,7 @@ import {
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { QRCodeSVG } from "qrcode.react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -55,23 +55,40 @@ export function DeviceSetupDialog({
 	accounts,
 	initialAccountEmail,
 }: DeviceSetupDialogProps) {
+	const initialSelectedEmail =
+		accounts.find(
+			(account) =>
+				initialAccountEmail &&
+				account.email.toLowerCase() === initialAccountEmail.toLowerCase(),
+		)?.email ??
+		accounts[0]?.email ??
+		"";
+
+	return (
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			{open ? (
+				<DeviceSetupDialogContent
+					key={`${open ? "open" : "closed"}:${initialSelectedEmail}`}
+					accounts={accounts}
+					initialSelectedEmail={initialSelectedEmail}
+					onOpenChange={onOpenChange}
+				/>
+			) : null}
+		</Dialog>
+	);
+}
+
+function DeviceSetupDialogContent({
+	accounts,
+	initialSelectedEmail,
+	onOpenChange,
+}: Pick<DeviceSetupDialogProps, "accounts" | "onOpenChange"> & {
+	initialSelectedEmail: string;
+}) {
 	const { m } = useI18n();
 	const fallbackServerUrl =
 		normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ?? null;
-	const [selectedEmail, setSelectedEmail] = useState("");
-
-	useEffect(() => {
-		if (!open) return;
-
-		const nextAccount =
-			accounts.find(
-				(account) =>
-					initialAccountEmail &&
-					account.email.toLowerCase() === initialAccountEmail.toLowerCase(),
-			) ?? accounts[0];
-
-		setSelectedEmail(nextAccount?.email ?? "");
-	}, [accounts, initialAccountEmail, open]);
+	const [selectedEmail, setSelectedEmail] = useState(initialSelectedEmail);
 
 	const selectedAccount = useMemo(
 		() =>
@@ -84,7 +101,7 @@ export function DeviceSetupDialog({
 
 	const setupDataQuery = useQuery({
 		queryKey: ["device-setup", selectedEmail],
-		enabled: open && !!selectedEmail,
+		enabled: !!selectedEmail,
 		queryFn: async () => {
 			const [storedServerUrl, legacyServerUrl, secretKey] = await Promise.all([
 				storage.getServerUrl(selectedEmail),
@@ -195,99 +212,97 @@ export function DeviceSetupDialog({
 	};
 
 	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-md">
-				<DialogHeader>
-					<DialogTitle>
-						{m["vaults.sidebar.account_switcher.menu.setup_another_device"]()}
-					</DialogTitle>
-					<DialogDescription>
+		<DialogContent className="sm:max-w-md">
+			<DialogHeader>
+				<DialogTitle>
+					{m["vaults.sidebar.account_switcher.menu.setup_another_device"]()}
+				</DialogTitle>
+				<DialogDescription>
+					{m[
+						"vaults.sidebar.account_switcher.device_setup_dialog.description"
+					]()}
+				</DialogDescription>
+			</DialogHeader>
+
+			<div className="space-y-3">
+				<div className="space-y-1.5">
+					<Label htmlFor="device-setup-account" className="text-xs">
 						{m[
-							"vaults.sidebar.account_switcher.device_setup_dialog.description"
+							"vaults.sidebar.account_switcher.device_setup_dialog.field.account"
 						]()}
-					</DialogDescription>
-				</DialogHeader>
-
-				<div className="space-y-3">
-					<div className="space-y-1.5">
-						<Label htmlFor="device-setup-account" className="text-xs">
-							{m[
-								"vaults.sidebar.account_switcher.device_setup_dialog.field.account"
-							]()}
-						</Label>
-						<Select value={selectedEmail} onValueChange={setSelectedEmail}>
-							<SelectTrigger id="device-setup-account">
-								<SelectValue
-									placeholder={m[
-										"vaults.sidebar.account_switcher.device_setup_dialog.placeholder.select_account"
-									]()}
-								/>
-							</SelectTrigger>
-							<SelectContent>
-								{accounts.map((account) => (
-									<SelectItem key={account.email} value={account.email}>
-										{account.teamName || account.name || account.email}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-					</div>
-
-					<div className="flex min-h-64 items-center justify-center rounded-md bg-muted/20 p-4">
-						{setupDataQuery.isLoading ? (
-							<IconLoader2OutlineDuo18 className="h-5 w-5 animate-spin text-muted-foreground" />
-						) : setupPreview.qrUri ? (
-							<div className="rounded-md bg-white p-2.5">
-								<QRCodeSVG
-									value={setupPreview.qrUri}
-									size={208}
-									includeMargin={true}
-									level="M"
-								/>
-							</div>
-						) : (
-							<p className="text-center text-muted-foreground text-sm">
-								{setupPreviewError}
-							</p>
-						)}
-					</div>
-
-					<div className="space-y-1.5">
-						<Label htmlFor="device-setup-link" className="text-xs">
-							{m[
-								"vaults.sidebar.account_switcher.device_setup_dialog.field.setup_link"
-							]()}
-						</Label>
-						<div className="flex gap-2">
-							<Input
-								id="device-setup-link"
-								value={setupPreview.linkUri ?? ""}
-								readOnly
+					</Label>
+					<Select value={selectedEmail} onValueChange={setSelectedEmail}>
+						<SelectTrigger id="device-setup-account">
+							<SelectValue
 								placeholder={m[
-									"vaults.sidebar.account_switcher.device_setup_dialog.placeholder.link_unavailable"
+									"vaults.sidebar.account_switcher.device_setup_dialog.placeholder.select_account"
 								]()}
-								className="font-mono text-[11px]"
 							/>
-							<Button
-								type="button"
-								variant="outline"
-								onClick={handleCopyLink}
-								disabled={!setupPreview.linkUri}
-							>
-								<IconCopyOutlineDuo18 className="h-4 w-4" />
-							</Button>
-						</div>
-					</div>
+						</SelectTrigger>
+						<SelectContent>
+							{accounts.map((account) => (
+								<SelectItem key={account.email} value={account.email}>
+									{account.teamName || account.name || account.email}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
 				</div>
 
-				<DialogFooter>
-					<Button variant="outline" onClick={() => onOpenChange(false)}>
+				<div className="flex min-h-64 items-center justify-center rounded-md bg-muted/20 p-4">
+					{setupDataQuery.isLoading ? (
+						<IconLoader2OutlineDuo18 className="h-5 w-5 animate-spin text-muted-foreground" />
+					) : setupPreview.qrUri ? (
+						<div className="rounded-md bg-white p-2.5">
+							<QRCodeSVG
+								value={setupPreview.qrUri}
+								size={208}
+								includeMargin={true}
+								level="M"
+							/>
+						</div>
+					) : (
+						<p className="text-center text-muted-foreground text-sm">
+							{setupPreviewError}
+						</p>
+					)}
+				</div>
+
+				<div className="space-y-1.5">
+					<Label htmlFor="device-setup-link" className="text-xs">
 						{m[
-							"vaults.sidebar.account_switcher.device_setup_dialog.action.close"
+							"vaults.sidebar.account_switcher.device_setup_dialog.field.setup_link"
 						]()}
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
+					</Label>
+					<div className="flex gap-2">
+						<Input
+							id="device-setup-link"
+							value={setupPreview.linkUri ?? ""}
+							readOnly
+							placeholder={m[
+								"vaults.sidebar.account_switcher.device_setup_dialog.placeholder.link_unavailable"
+							]()}
+							className="font-mono text-[11px]"
+						/>
+						<Button
+							type="button"
+							variant="outline"
+							onClick={handleCopyLink}
+							disabled={!setupPreview.linkUri}
+						>
+							<IconCopyOutlineDuo18 className="h-4 w-4" />
+						</Button>
+					</div>
+				</div>
+			</div>
+
+			<DialogFooter>
+				<Button variant="outline" onClick={() => onOpenChange(false)}>
+					{m[
+						"vaults.sidebar.account_switcher.device_setup_dialog.action.close"
+					]()}
+				</Button>
+			</DialogFooter>
+		</DialogContent>
 	);
 }
