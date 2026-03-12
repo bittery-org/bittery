@@ -28,7 +28,7 @@ import {
 	setup,
 	setupShareLink,
 	truncateAll,
-} from "./test-utils";
+} from "@bittery/test-utils";
 
 async function setupShareUser() {
 	const result = await setup(shareRouter);

@@ -22,7 +22,8 @@
 		"@bittery/crypto-napi": "workspace:*",
 		"@bittery/db": "workspace:*",
 		"@bittery/jobs": "workspace:*",
-		"@bittery/pubsub": "workspace:*"
+		"@bittery/pubsub": "workspace:*",
+		"@bittery/test-utils": "workspace:*"
 	},
 	"devDependencies": {
 		"typescript": "^5.8.2",

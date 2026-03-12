@@ -55,6 +55,7 @@ export const session = pgTable(
 		// Device information
 		deviceName: text("device_name"), // User-editable name or auto-generated (e.g., "Chrome on macOS")
 		platform: text("platform"), // "web" | "desktop" | "extension" | "ios" | "android"
+		clientId: text("client_id"),
 		deviceInfo: text("device_info"), // User agent / device identifier payload for session management
 		browserName: text("browser_name"), // "Chrome", "Safari", "Firefox", etc.
 		browserVersion: text("browser_version"), // "120.0.0"
@@ -66,7 +67,15 @@ export const session = pgTable(
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
 	},
-	(table) => [index("session_userId_idx").on(table.userId)],
+	(table) => [
+		index("session_userId_idx").on(table.userId),
+		index("session_expires_at_idx").on(table.expiresAt),
+		index("session_user_platform_client_id_idx").on(
+			table.userId,
+			table.platform,
+			table.clientId,
+		),
+	],
 );
 
 export const recoveryVerification = pgTable(

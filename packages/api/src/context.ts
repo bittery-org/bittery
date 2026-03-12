@@ -1,5 +1,6 @@
 import { verifySession } from "@bittery/auth";
 import type { Context as HonoContext } from "hono";
+import { clientIdSchema } from "./validation";
 
 export type CreateContextOptions = {
 	context: HonoContext;
@@ -35,6 +36,19 @@ function normalizeHeaderIp(value: string | null | undefined): string | null {
 
 	const normalized = value.trim();
 	return normalized || null;
+}
+
+function normalizeClientIdHeader(value: string | null | undefined): string | null {
+	if (!value) {
+		return null;
+	}
+
+	const normalized = value.trim();
+	if (!normalized) {
+		return null;
+	}
+
+	return clientIdSchema.safeParse(normalized).success ? normalized : null;
 }
 
 export function resolveTrustedSourceIpFromHeaders(input: {
@@ -85,7 +99,7 @@ export async function createContext({ context }: CreateContextOptions) {
 	// Extract device information from request headers
 	const userAgent = context.req.header("User-Agent") || "";
 	const ipAddress = resolveContextSourceIp(context);
-	const clientId = context.req.header("X-Client-Id") ?? null;
+	const clientId = normalizeClientIdHeader(context.req.header("X-Client-Id"));
 	const appPlatform = context.req.header("X-App-Platform") ?? null;
 
 	return {

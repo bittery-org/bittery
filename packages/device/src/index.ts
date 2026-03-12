@@ -1,6 +1,7 @@
 export interface DeviceInfo {
 	deviceName: string;
 	platform: "web" | "desktop" | "extension" | "ios" | "android";
+	clientId?: string | null;
 	browserName: string | null;
 	browserVersion: string | null;
 	osName: string | null;

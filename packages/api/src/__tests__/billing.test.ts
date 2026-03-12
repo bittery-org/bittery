@@ -9,7 +9,7 @@ import {
 	createTestVault,
 	setup,
 	truncateAll,
-} from "./test-utils";
+} from "@bittery/test-utils";
 
 const originalBitteryMode = process.env.BITTERY_MODE;
 const originalStripeSecret = process.env.STRIPE_SECRET_KEY;

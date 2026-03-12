@@ -32,6 +32,7 @@ import {
 export interface DeviceInfo {
 	deviceName?: string;
 	platform?: string;
+	clientId?: string | null;
 	browserName?: string | null;
 	browserVersion?: string | null;
 	osName?: string | null;
@@ -165,6 +166,130 @@ function normalizeSessionPlatform(platform?: string): string {
 function getSessionDurationMs(platform?: string): number {
 	const normalized = normalizeSessionPlatform(platform);
 	return SESSION_DURATION_BY_PLATFORM[normalized] ?? DEFAULT_SESSION_DURATION;
+}
+
+type SessionRow = typeof session.$inferSelect;
+type DbTransaction = Parameters<Parameters<(typeof db)["transaction"]>[0]>[0];
+
+function resolveSessionClientId(
+	platform: string,
+	clientId?: string | null,
+): string | null {
+	if (platform !== "web") {
+		return null;
+	}
+
+	const normalizedClientId = clientId?.trim();
+	return normalizedClientId ? normalizedClientId : null;
+}
+
+function isGroupedWebSession(
+	value: Pick<SessionRow, "platform" | "clientId">,
+): value is Pick<SessionRow, "platform" | "clientId"> & {
+	platform: "web";
+	clientId: string;
+} {
+	return value.platform === "web" && typeof value.clientId === "string";
+}
+
+function compareSessionRecency(a: SessionRow, b: SessionRow): number {
+	return (
+		b.lastActiveAt.getTime() - a.lastActiveAt.getTime() ||
+		b.createdAt.getTime() - a.createdAt.getTime() ||
+		b.id.localeCompare(a.id)
+	);
+}
+
+async function issueSession(params: {
+	userId: string;
+	deviceInfo?: DeviceInfo;
+	replaceSessionId?: string;
+}): Promise<{
+	token: string;
+	sessionId: string;
+	expiresAt: Date;
+}> {
+	const issuedAt = new Date();
+	const opaqueToken = generateOpaqueSessionToken();
+	const nextSessionId = hashToken(opaqueToken);
+	const platform = normalizeSessionPlatform(params.deviceInfo?.platform);
+	const clientId = resolveSessionClientId(platform, params.deviceInfo?.clientId);
+	const expiresAt = new Date(issuedAt.getTime() + getSessionDurationMs(platform));
+
+	await db.transaction(async (tx) => {
+		let deviceName = params.deviceInfo?.deviceName ?? null;
+		const shouldReplaceGroupedWebSession =
+			platform === "web" && clientId !== null;
+
+		if (shouldReplaceGroupedWebSession) {
+			const groupedSessions = await tx
+				.select()
+				.from(session)
+				.where(
+					and(
+						eq(session.userId, params.userId),
+						eq(session.platform, platform),
+						eq(session.clientId, clientId),
+					),
+				);
+			const newestGroupedSession = [...groupedSessions].sort(compareSessionRecency)[0];
+
+			if (newestGroupedSession?.deviceName) {
+				deviceName = newestGroupedSession.deviceName;
+			}
+
+			await tx
+				.delete(session)
+				.where(
+					and(
+						eq(session.userId, params.userId),
+						eq(session.platform, platform),
+						eq(session.clientId, clientId),
+					),
+				);
+		}
+
+		await tx.insert(session).values({
+			id: nextSessionId,
+			userId: params.userId,
+			expiresAt,
+			deviceName,
+			platform,
+			clientId,
+			deviceInfo: params.deviceInfo?.userAgent,
+			browserName: params.deviceInfo?.browserName,
+			browserVersion: params.deviceInfo?.browserVersion,
+			osName: params.deviceInfo?.osName,
+			osVersion: params.deviceInfo?.osVersion,
+			userAgent: params.deviceInfo?.userAgent,
+			ipAddress: params.deviceInfo?.ipAddress,
+			lastActiveAt: issuedAt,
+		});
+
+		if (params.replaceSessionId && !shouldReplaceGroupedWebSession) {
+			await tx.delete(session).where(eq(session.id, params.replaceSessionId));
+		}
+	});
+
+	return {
+		token: opaqueToken,
+		sessionId: nextSessionId,
+		expiresAt,
+	};
+}
+
+async function getOwnedSession(
+	sessionId: string,
+	userId: string,
+	tx: DbTransaction | typeof db = db,
+): Promise<SessionRow | null> {
+	const [existingSession] = await tx
+		.select()
+		.from(session)
+		.where(and(eq(session.id, sessionId), eq(session.userId, userId)))
+		.limit(1);
+
+	return existingSession ?? null;
 }
 
 export class LoginRateLimitError extends Error {
@@ -371,35 +496,17 @@ export async function finishLogin(
 			existingUser.srpVerifier,
 			clientProof,
 		);
-
-		const opaqueToken = generateOpaqueSessionToken();
-		const sessionId = hashToken(opaqueToken);
-		const sessionDurationMs = getSessionDurationMs(deviceInfo?.platform);
-		const expiresAt = new Date(Date.now() + sessionDurationMs);
-
-		await db.insert(session).values({
-			id: sessionId,
+		const issuedSession = await issueSession({
 			userId: existingUser.id,
-			expiresAt,
-			// Device tracking fields
-			deviceName: deviceInfo?.deviceName,
-			platform: normalizeSessionPlatform(deviceInfo?.platform),
-			deviceInfo: deviceInfo?.userAgent,
-			browserName: deviceInfo?.browserName,
-			browserVersion: deviceInfo?.browserVersion,
-			osName: deviceInfo?.osName,
-			osVersion: deviceInfo?.osVersion,
-			userAgent: deviceInfo?.userAgent,
-			ipAddress: deviceInfo?.ipAddress,
-			lastActiveAt: new Date(),
+			deviceInfo,
 		});
 
 		return {
 			success: true,
 			normalizedEmailHash,
-			token: opaqueToken,
-			sessionId,
-			expiresAt,
+			token: issuedSession.token,
+			sessionId: issuedSession.sessionId,
+			expiresAt: issuedSession.expiresAt,
 			serverProof: serverSession.proof,
 			user: {
 				id: existingUser.id,
@@ -610,32 +717,15 @@ export async function createUserSession(
 		throw new Error("User not found");
 	}
 
-	const opaqueToken = generateOpaqueSessionToken();
-	const sessionId = hashToken(opaqueToken);
-	const sessionDurationMs = getSessionDurationMs(deviceInfo?.platform);
-	const expiresAt = new Date(Date.now() + sessionDurationMs);
-
-	await db.insert(session).values({
-		id: sessionId,
+	const issuedSession = await issueSession({
 		userId: existingUser.id,
-		expiresAt,
-		// Device tracking fields
-		deviceName: deviceInfo?.deviceName,
-		platform: normalizeSessionPlatform(deviceInfo?.platform),
-		deviceInfo: deviceInfo?.userAgent,
-		browserName: deviceInfo?.browserName,
-		browserVersion: deviceInfo?.browserVersion,
-		osName: deviceInfo?.osName,
-		osVersion: deviceInfo?.osVersion,
-		userAgent: deviceInfo?.userAgent,
-		ipAddress: deviceInfo?.ipAddress,
-		lastActiveAt: new Date(),
+		deviceInfo,
 	});
 
 	return {
-		token: opaqueToken,
-		sessionId,
-		expiresAt,
+		token: issuedSession.token,
+		sessionId: issuedSession.sessionId,
+		expiresAt: issuedSession.expiresAt,
 		user: {
 			id: existingUser.id,
 			email: existingUser.email,
@@ -663,37 +753,26 @@ export async function refreshSession(currentSessionId: string): Promise<{
 	if (!existingSession) {
 		throw new Error("Session not found");
 	}
-
-	const nextOpaqueToken = generateOpaqueSessionToken();
-	const nextSessionId = hashToken(nextOpaqueToken);
-	const expiresAt = new Date(
-		Date.now() + getSessionDurationMs(existingSession.platform || undefined),
-	);
-
-	await db.transaction(async (tx) => {
-		await tx.insert(session).values({
-			id: nextSessionId,
-			userId: existingSession.userId,
-			expiresAt,
-			ipAddress: existingSession.ipAddress,
-			userAgent: existingSession.userAgent,
-			deviceName: existingSession.deviceName,
-			platform: existingSession.platform,
-			deviceInfo: existingSession.deviceInfo,
+	const issuedSession = await issueSession({
+		userId: existingSession.userId,
+		replaceSessionId: currentSessionId,
+		deviceInfo: {
+			deviceName: existingSession.deviceName ?? undefined,
+			platform: existingSession.platform ?? undefined,
+			clientId: existingSession.clientId,
 			browserName: existingSession.browserName,
 			browserVersion: existingSession.browserVersion,
 			osName: existingSession.osName,
 			osVersion: existingSession.osVersion,
-			lastActiveAt: existingSession.lastActiveAt,
-		});
-
-		await tx.delete(session).where(eq(session.id, currentSessionId));
+			userAgent: existingSession.userAgent ?? undefined,
+			ipAddress: existingSession.ipAddress,
+		},
 	});
 
 	return {
-		token: nextOpaqueToken,
-		sessionId: nextSessionId,
-		expiresAt,
+		token: issuedSession.token,
+		sessionId: issuedSession.sessionId,
+		expiresAt: issuedSession.expiresAt,
 	};
 }
 
@@ -1213,14 +1292,44 @@ export async function resetUserPassword(
 /**
  * Get all sessions for a user
  */
-export async function getUserSessions(userId: string) {
-	const sessions = await db
+export async function getUserSessions(
+	userId: string,
+	currentSessionId?: string,
+) {
+	const activeSessions = await db
 		.select()
 		.from(session)
 		.where(and(eq(session.userId, userId), gt(session.expiresAt, new Date())))
 		.orderBy(session.lastActiveAt);
 
-	return sessions.map((s) => ({
+	const logicalSessions: SessionRow[] = [];
+	const groupedWebSessions = new Map<string, SessionRow[]>();
+
+	for (const activeSession of activeSessions) {
+		if (isGroupedWebSession(activeSession)) {
+			const group = groupedWebSessions.get(activeSession.clientId) ?? [];
+			group.push(activeSession);
+			groupedWebSessions.set(activeSession.clientId, group);
+			continue;
+		}
+
+		logicalSessions.push(activeSession);
+	}
+
+	for (const group of groupedWebSessions.values()) {
+		const representative =
+			(currentSessionId
+				? group.find((candidate) => candidate.id === currentSessionId)
+				: undefined) ?? [...group].sort(compareSessionRecency)[0];
+
+		if (representative) {
+			logicalSessions.push(representative);
+		}
+	}
+
+	logicalSessions.sort(compareSessionRecency);
+
+	return logicalSessions.map((s) => ({
 		id: s.id,
 		deviceName: s.deviceName,
 		platform: s.platform,
@@ -1240,10 +1349,43 @@ export async function getUserSessions(userId: string) {
 export async function revokeSession(
 	sessionId: string,
 	userId: string,
-): Promise<void> {
+): Promise<string[]> {
+	const existingSession = await getOwnedSession(sessionId, userId);
+
+	if (!existingSession) {
+		return [];
+	}
+
+	if (isGroupedWebSession(existingSession)) {
+		const groupedSessions = await db
+			.select({ id: session.id })
+			.from(session)
+			.where(
+				and(
+					eq(session.userId, userId),
+					eq(session.platform, existingSession.platform),
+					eq(session.clientId, existingSession.clientId),
+				),
+			);
+
+		await db
+			.delete(session)
+			.where(
+				and(
+					eq(session.userId, userId),
+					eq(session.platform, existingSession.platform),
+					eq(session.clientId, existingSession.clientId),
+				),
+			);
+
+		return groupedSessions.map((groupedSession) => groupedSession.id);
+	}
+
 	await db
 		.delete(session)
 		.where(and(eq(session.id, sessionId), eq(session.userId, userId)));
+
+	return [existingSession.id];
 }
 
 /**
@@ -1264,6 +1406,27 @@ export async function renameSession(
 	userId: string,
 	deviceName: string,
 ) {
+	const existingSession = await getOwnedSession(sessionId, userId);
+
+	if (!existingSession) {
+		return;
+	}
+
+	if (isGroupedWebSession(existingSession)) {
+		await db
+			.update(session)
+			.set({ deviceName })
+			.where(
+				and(
+					eq(session.userId, userId),
+					eq(session.platform, existingSession.platform),
+					eq(session.clientId, existingSession.clientId),
+					gt(session.expiresAt, new Date()),
+				),
+			);
+		return;
+	}
+
 	await db
 		.update(session)
 		.set({ deviceName })

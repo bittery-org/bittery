@@ -296,7 +296,7 @@ export class SyncManager {
 
 			// Handle connection message
 			if (event.type === "connected") {
-				console.log("SSE connected:", event);
+				console.log("Sync connected")
 				return;
 			}
 

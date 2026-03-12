@@ -29,7 +29,7 @@ import {
 	mockSrpData,
 	setup,
 	truncateAll,
-} from "./test-utils";
+} from "@bittery/test-utils";
 
 async function setupVaultSharingUser(overrides?: Parameters<typeof setup>[1]) {
 	const result = await setup(vaultRouter, overrides);

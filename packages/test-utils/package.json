@@ -1,0 +1,22 @@
+{
+	"name": "@bittery/test-utils",
+	"type": "module",
+	"exports": {
+		".": {
+			"default": "./src/index.ts"
+		}
+	},
+	"scripts": {
+		"check-types": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@bittery/crypto-wasm": "workspace:*",
+		"@bittery/db": "workspace:*",
+		"drizzle-orm": "catalog:",
+		"nanoid": "^5.0.0"
+	},
+	"devDependencies": {
+		"@bittery/config": "workspace:*",
+		"typescript": "^5"
+	}
+}

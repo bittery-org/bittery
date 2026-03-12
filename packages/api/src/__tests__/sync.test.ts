@@ -24,7 +24,7 @@ import {
 	createTestVault,
 	setup,
 	truncateAll,
-} from "./test-utils";
+} from "@bittery/test-utils";
 
 describe("Sync Router", () => {
 	afterEach(async () => {

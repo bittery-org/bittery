@@ -33,7 +33,7 @@ import {
 	setup,
 	setupTeamWithMembers,
 	truncateAll,
-} from "./test-utils";
+} from "@bittery/test-utils";
 
 const originalBitteryMode = process.env.BITTERY_MODE;
 

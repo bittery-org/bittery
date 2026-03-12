@@ -5,6 +5,7 @@ import { getRegisteredJobs } from "./registry";
 import "./jobs/sync-pruning";
 import "./jobs/tombstone-cleanup";
 import "./jobs/pending-attachment-upload-cleanup";
+import "./jobs/expired-session-cleanup";
 
 export interface JobRunnerOptions {
 	connectionString: string;

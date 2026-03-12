@@ -25,6 +25,7 @@ import {
 	finishLogin,
 	getRecoveryData as getRecoveryDataForEmail,
 	getLoginAccountRateLimitKey,
+	getSessionById,
 	getUserByEmail,
 	getUserById,
 	getUserSessions,
@@ -106,6 +107,27 @@ function mapRateLimitError(error: unknown): TRPCError {
 	}
 
 	throw error;
+}
+
+function buildSessionDeviceInfo(ctx: {
+	device: {
+		userAgent: string;
+		ipAddress: string | null;
+		appPlatform: string | null;
+	};
+	clientId: string | null;
+}) {
+	const parsedDeviceInfo = parseUserAgent(
+		ctx.device.userAgent,
+		ctx.device.appPlatform,
+	);
+
+	return {
+		...parsedDeviceInfo,
+		clientId: parsedDeviceInfo.platform === "web" ? ctx.clientId : null,
+		userAgent: ctx.device.userAgent,
+		ipAddress: ctx.device.ipAddress,
+	};
 }
 
 const hintSecret = process.env.JWT_SECRET;
@@ -579,17 +601,10 @@ export const authRouter = router({
 			});
 
 			// Parse device info from context
-			const deviceInfo = parseUserAgent(
-				ctx.device.userAgent,
-				ctx.device.appPlatform,
+			const sessionData = await createUserSession(
+				userId,
+				buildSessionDeviceInfo(ctx),
 			);
-
-			// Create session and generate token with device info
-			const sessionData = await createUserSession(userId, {
-				...deviceInfo,
-				userAgent: ctx.device.userAgent,
-				ipAddress: ctx.device.ipAddress,
-			});
 
 			// Get vault keys
 			const vaultKeys = await db.query.vaultKey.findMany({
@@ -783,17 +798,10 @@ export const authRouter = router({
 			}
 
 			// Parse device info from context
-			const deviceInfo = parseUserAgent(
-				ctx.device.userAgent,
-				ctx.device.appPlatform,
+			const sessionData = await createUserSession(
+				userId,
+				buildSessionDeviceInfo(ctx),
 			);
-
-			// Create session
-			const sessionData = await createUserSession(userId, {
-				...deviceInfo,
-				userAgent: ctx.device.userAgent,
-				ipAddress: ctx.device.ipAddress,
-			});
 
 			// Get vault keys
 			const vaultKeys = await db.query.vaultKey.findMany({
@@ -899,20 +907,11 @@ export const authRouter = router({
 				}
 			}
 
-			const deviceInfo = parseUserAgent(
-				ctx.device.userAgent,
-				ctx.device.appPlatform,
-			);
-
 			const result = await finishLogin(
 				input.attemptId,
 				input.clientPublicKey,
 				input.clientProof,
-				{
-					...deviceInfo,
-					userAgent: ctx.device.userAgent,
-					ipAddress: ctx.device.ipAddress,
-				},
+				buildSessionDeviceInfo(ctx),
 			);
 
 			if (!result.success || !result.user) {
@@ -1156,15 +1155,10 @@ export const authRouter = router({
 				});
 			}
 
-			const deviceInfo = parseUserAgent(
-				ctx.device.userAgent,
-				ctx.device.appPlatform,
+			const sessionData = await createUserSession(
+				userId,
+				buildSessionDeviceInfo(ctx),
 			);
-			const sessionData = await createUserSession(userId, {
-				...deviceInfo,
-				userAgent: ctx.device.userAgent,
-				ipAddress: ctx.device.ipAddress,
-			});
 
 			await logAuditEvent({
 				userId,
@@ -1514,7 +1508,10 @@ export const authRouter = router({
 	 * Get all active sessions/devices for the current user
 	 */
 	listDevices: protectedProcedure.query(async ({ ctx }) => {
-		const sessions = await getUserSessions(ctx.session.userId);
+		const sessions = await getUserSessions(
+			ctx.session.userId,
+			ctx.session.sessionId,
+		);
 
 		// Mark current session
 		return sessions.map((s) => ({
@@ -1542,14 +1539,45 @@ export const authRouter = router({
 				});
 			}
 
-			await revokeSession(input.sessionId, ctx.session.userId);
-			await broadcastSessionControlPayload({
-				type: "session_revoked",
-				userId: ctx.session.userId,
-				sessionId: input.sessionId,
-				timestamp: Date.now(),
-				reason: "device_revoked",
-			});
+			const [targetSession, currentSession] = await Promise.all([
+				getSessionById(input.sessionId),
+				getSessionById(ctx.session.sessionId),
+			]);
+
+			if (!targetSession || targetSession.userId !== ctx.session.userId) {
+				return { success: true };
+			}
+
+			if (
+				targetSession.platform === "web" &&
+				targetSession.clientId &&
+				currentSession?.platform === "web" &&
+				currentSession.clientId === targetSession.clientId
+			) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Cannot revoke current session. Use logout instead.",
+				});
+			}
+
+			const revokedSessionIds = await revokeSession(
+				input.sessionId,
+				ctx.session.userId,
+			);
+
+			if (revokedSessionIds.length === 0) {
+				return { success: true };
+			}
+
+			for (const revokedSessionId of revokedSessionIds) {
+				await broadcastSessionControlPayload({
+					type: "session_revoked",
+					userId: ctx.session.userId,
+					sessionId: revokedSessionId,
+					timestamp: Date.now(),
+					reason: "device_revoked",
+				});
+			}
 
 			await logAuditEvent({
 				userId: ctx.session.userId,

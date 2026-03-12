@@ -25,6 +25,7 @@ import { setControlBroadcastFunction } from "../sync-helper";
 import {
 	addTeamMember,
 	createAuthenticatedContext,
+	createTestContext,
 	createPublicContext,
 	createTestInvitation,
 	createTestSession,
@@ -39,7 +40,7 @@ import {
 	getUser,
 	setup,
 	truncateAll,
-} from "./test-utils";
+} from "@bittery/test-utils";
 
 function toSignupCryptoInput(
 	data: Awaited<ReturnType<typeof generateTestAuthCryptoData>>,
@@ -97,6 +98,45 @@ async function issueSignupVerificationToken(params: {
 	}
 
 	return result.signupVerificationToken;
+}
+
+async function performSrpLogin(params: {
+	email: string;
+	authPassword: string;
+	context?: ReturnType<typeof createTestContext>;
+}) {
+	const caller = authRouter.createCaller(
+		params.context ?? createPublicContext(),
+	);
+	const clientEphemeral = await generateTestSrpClientEphemeral();
+	const startResult = await caller.startLogin({
+		email: params.email,
+		clientPublicKey: clientEphemeral.clientPublicKey,
+	});
+	const { clientProof } = await deriveTestSrpClientProof({
+		clientSecret: clientEphemeral.clientSecret,
+		salt: startResult.salt,
+		serverPublicKey: startResult.serverPublicKey,
+		authPassword: params.authPassword,
+	});
+
+	const finishResult = await caller.finishLogin({
+		attemptId: startResult.attemptId,
+		clientPublicKey: clientEphemeral.clientPublicKey,
+		clientProof,
+	});
+
+	return {
+		startResult,
+		finishResult,
+	};
+}
+
+async function getActiveSessions(userId: string) {
+	return db.query.session.findMany({
+		where: (record, { and, eq, gt }) =>
+			and(eq(record.userId, userId), gt(record.expiresAt, new Date())),
+	});
 }
 
 const authCryptoFixture = await generateTestAuthCryptoData({
@@ -634,6 +674,116 @@ describe("Auth Router", () => {
 			expect(finishResult.user.email).toBe(email.toLowerCase());
 		});
 
+		test("should replace prior web session rows when logging in again with the same clientId", async () => {
+			const email = generateTestEmail();
+			const cryptoData = authCryptoFixture;
+			const { userId } = await createTestUser({
+				email,
+				secretKeyHint: cryptoData.secretKeyHint,
+				srpSalt: cryptoData.srpSalt,
+				srpVerifier: cryptoData.srpVerifier,
+				publicKey: cryptoData.publicKey,
+				encryptedPrivateKey: cryptoData.encryptedPrivateKey,
+			});
+			const webContext = createTestContext(
+				null,
+				{ appPlatform: "web" },
+				{ clientId: "web_profile_alpha" },
+			);
+
+			const firstLogin = await performSrpLogin({
+				email,
+				authPassword: cryptoData.authPassword,
+				context: webContext,
+			});
+			const secondLogin = await performSrpLogin({
+				email,
+				authPassword: cryptoData.authPassword,
+				context: webContext,
+			});
+
+			const activeSessions = await getActiveSessions(userId);
+
+			expect(activeSessions).toHaveLength(1);
+			expect(activeSessions[0]?.id).toBe(secondLogin.finishResult.sessionId);
+			expect(activeSessions[0]?.clientId).toBe("web_profile_alpha");
+			expect(await getSession(firstLogin.finishResult.sessionId)).toBeUndefined();
+		});
+
+		test("should keep separate web device rows for different clientIds", async () => {
+			const email = generateTestEmail();
+			const cryptoData = authCryptoFixture;
+			const { userId } = await createTestUser({
+				email,
+				secretKeyHint: cryptoData.secretKeyHint,
+				srpSalt: cryptoData.srpSalt,
+				srpVerifier: cryptoData.srpVerifier,
+				publicKey: cryptoData.publicKey,
+				encryptedPrivateKey: cryptoData.encryptedPrivateKey,
+			});
+
+			await performSrpLogin({
+				email,
+				authPassword: cryptoData.authPassword,
+				context: createTestContext(
+					null,
+					{ appPlatform: "web" },
+					{ clientId: "web_profile_alpha" },
+				),
+			});
+			await performSrpLogin({
+				email,
+				authPassword: cryptoData.authPassword,
+				context: createTestContext(
+					null,
+					{ appPlatform: "web" },
+					{ clientId: "web_profile_beta" },
+				),
+			});
+
+			const activeSessions = await getActiveSessions(userId);
+			const clientIds = activeSessions.map((activeSession) => activeSession.clientId);
+
+			expect(activeSessions).toHaveLength(2);
+			expect(clientIds).toContain("web_profile_alpha");
+			expect(clientIds).toContain("web_profile_beta");
+		});
+
+		test("should ignore clientId grouping for non-web login sessions", async () => {
+			const email = generateTestEmail();
+			const cryptoData = authCryptoFixture;
+			const { userId } = await createTestUser({
+				email,
+				secretKeyHint: cryptoData.secretKeyHint,
+				srpSalt: cryptoData.srpSalt,
+				srpVerifier: cryptoData.srpVerifier,
+				publicKey: cryptoData.publicKey,
+				encryptedPrivateKey: cryptoData.encryptedPrivateKey,
+			});
+			const desktopContext = createTestContext(
+				null,
+				{ appPlatform: "desktop" },
+				{ clientId: "shared_desktop_client" },
+			);
+
+			await performSrpLogin({
+				email,
+				authPassword: cryptoData.authPassword,
+				context: desktopContext,
+			});
+			await performSrpLogin({
+				email,
+				authPassword: cryptoData.authPassword,
+				context: desktopContext,
+			});
+
+			const activeSessions = await getActiveSessions(userId);
+
+			expect(activeSessions).toHaveLength(2);
+			expect(activeSessions.every((activeSession) => activeSession.platform === "desktop")).toBe(true);
+			expect(activeSessions.every((activeSession) => activeSession.clientId === null)).toBe(true);
+		});
+
 		test("should reject finishLogin with invalid SRP proof", async () => {
 			const email = generateTestEmail();
 			const cryptoData = authCryptoFixture;
@@ -965,6 +1115,36 @@ describe("Auth Router", () => {
 			);
 		});
 
+		test("should collapse duplicate web sessions for the same clientId during refresh", async () => {
+			const { userId, email } = await createTestUser();
+			const currentSessionId = await createTestSession(userId, {
+				deviceName: "Browser Auto Name",
+				platform: "web",
+				clientId: "web_refresh_group",
+				lastActiveAt: new Date("2026-03-10T10:00:00.000Z"),
+				createdAt: new Date("2026-03-10T10:00:00.000Z"),
+			});
+			await createTestSession(userId, {
+				deviceName: "Renamed Browser",
+				platform: "web",
+				clientId: "web_refresh_group",
+				lastActiveAt: new Date("2026-03-11T10:00:00.000Z"),
+				createdAt: new Date("2026-03-11T10:00:00.000Z"),
+			});
+
+			const caller = authRouter.createCaller(
+				createAuthenticatedContext(userId, email, currentSessionId),
+			);
+			const result = await caller.refreshSession();
+			const activeSessions = await getActiveSessions(userId);
+
+			expect(activeSessions).toHaveLength(1);
+			expect(activeSessions[0]?.id).toBe(result.sessionId);
+			expect(activeSessions[0]?.clientId).toBe("web_refresh_group");
+			expect(activeSessions[0]?.deviceName).toBe("Renamed Browser");
+			expect(await getSession(currentSessionId)).toBeUndefined();
+		});
+
 		test("should reject refresh when session is expired", async () => {
 			const { userId, email } = await setup(authRouter);
 			const expiredSessionId = await createTestSession(userId, {
@@ -1263,6 +1443,92 @@ describe("Auth Router", () => {
 			expect(currentSession?.isCurrentSession).toBe(true);
 			expect(otherSession?.isCurrentSession).toBe(false);
 		});
+
+		test("should collapse duplicate active web sessions with the same clientId", async () => {
+			const { userId, email } = await createTestUser();
+			const currentSessionId = await createTestSession(userId, {
+				deviceName: "Current Device",
+				platform: "desktop",
+			});
+			const newerGroupedSession = await createTestSession(userId, {
+				deviceName: "Browser B",
+				platform: "web",
+				clientId: "web_group_alpha",
+				lastActiveAt: new Date("2026-03-11T12:00:00.000Z"),
+				createdAt: new Date("2026-03-11T12:00:00.000Z"),
+			});
+			await createTestSession(userId, {
+				deviceName: "Browser A",
+				platform: "web",
+				clientId: "web_group_alpha",
+				lastActiveAt: new Date("2026-03-10T12:00:00.000Z"),
+				createdAt: new Date("2026-03-10T12:00:00.000Z"),
+			});
+
+			const caller = authRouter.createCaller(
+				createAuthenticatedContext(userId, email, currentSessionId),
+			);
+			const result = await caller.listDevices();
+
+			expect(result.find((session) => session.id === newerGroupedSession)).toBeDefined();
+			expect(
+				result.filter((session) => session.platform === "web").map((session) => session.id),
+			).toEqual([newerGroupedSession]);
+		});
+
+		test("should prefer the current session when it is inside a grouped web device", async () => {
+			const { userId, email } = await createTestUser();
+			const currentSessionId = await createTestSession(userId, {
+				deviceName: "This Browser",
+				platform: "web",
+				clientId: "web_group_current",
+				lastActiveAt: new Date("2026-03-10T09:00:00.000Z"),
+				createdAt: new Date("2026-03-10T09:00:00.000Z"),
+			});
+			await createTestSession(userId, {
+				deviceName: "Other Tab",
+				platform: "web",
+				clientId: "web_group_current",
+				lastActiveAt: new Date("2026-03-11T09:00:00.000Z"),
+				createdAt: new Date("2026-03-11T09:00:00.000Z"),
+			});
+
+			const caller = authRouter.createCaller(
+				createAuthenticatedContext(userId, email, currentSessionId),
+			);
+			const result = await caller.listDevices();
+
+			expect(result.find((session) => session.id === currentSessionId)?.isCurrentSession).toBe(true);
+			expect(
+				result.filter((session) => session.platform === "web").map((session) => session.id),
+			).toEqual([currentSessionId]);
+		});
+
+		test("should keep legacy web sessions without clientId ungrouped", async () => {
+			const { userId, email } = await createTestUser();
+			const currentSessionId = await createTestSession(userId, {
+				platform: "desktop",
+			});
+			const legacyA = await createTestSession(userId, {
+				deviceName: "Legacy Browser A",
+				platform: "web",
+				clientId: null,
+			});
+			const legacyB = await createTestSession(userId, {
+				deviceName: "Legacy Browser B",
+				platform: "web",
+				clientId: null,
+			});
+
+			const caller = authRouter.createCaller(
+				createAuthenticatedContext(userId, email, currentSessionId),
+			);
+			const result = await caller.listDevices();
+			const returnedIds = result.map((session) => session.id);
+
+			expect(returnedIds).toContain(legacyA);
+			expect(returnedIds).toContain(legacyB);
+		});
 	});
 
 	describe("revokeDevice", () => {
@@ -1284,6 +1550,34 @@ describe("Auth Router", () => {
 					and(eq(log.userId, userId), eq(log.action, "device_revoked")),
 			});
 			expect(auditLogs.length).toBe(1);
+		});
+
+		test("should revoke all web sessions in the same clientId group", async () => {
+			const { userId, email } = await createTestUser();
+			const currentSessionId = await createTestSession(userId, {
+				deviceName: "Desktop",
+				platform: "desktop",
+			});
+			const groupedA = await createTestSession(userId, {
+				deviceName: "Browser A",
+				platform: "web",
+				clientId: "web_group_revoke",
+			});
+			const groupedB = await createTestSession(userId, {
+				deviceName: "Browser B",
+				platform: "web",
+				clientId: "web_group_revoke",
+			});
+			const caller = authRouter.createCaller(
+				createAuthenticatedContext(userId, email, currentSessionId),
+			);
+
+			const result = await caller.revokeDevice({ sessionId: groupedA });
+
+			expect(result.success).toBe(true);
+			expect(await getSession(groupedA)).toBeUndefined();
+			expect(await getSession(groupedB)).toBeUndefined();
+			expect(await getSession(currentSessionId)).toBeDefined();
 		});
 
 		test("should broadcast session revocation control payload", async () => {
@@ -1316,12 +1610,69 @@ describe("Auth Router", () => {
 			expect(typeof payloads[0]?.timestamp).toBe("number");
 		});
 
+		test("should broadcast each revoked session in a grouped web revoke", async () => {
+			const { userId, email } = await createTestUser();
+			const currentSessionId = await createTestSession(userId, {
+				platform: "desktop",
+			});
+			const groupedA = await createTestSession(userId, {
+				platform: "web",
+				clientId: "web_group_broadcast",
+			});
+			const groupedB = await createTestSession(userId, {
+				platform: "web",
+				clientId: "web_group_broadcast",
+			});
+			const payloads: Array<{
+				type: string;
+				userId: string;
+				sessionId: string;
+				timestamp: number;
+				reason?: string;
+			}> = [];
+
+			setControlBroadcastFunction(async (payload) => {
+				payloads.push(payload);
+			});
+
+			const caller = authRouter.createCaller(
+				createAuthenticatedContext(userId, email, currentSessionId),
+			);
+			await caller.revokeDevice({ sessionId: groupedA });
+
+			expect(payloads).toHaveLength(2);
+			expect(payloads.map((payload) => payload.sessionId).sort()).toEqual(
+				[groupedA, groupedB].sort(),
+			);
+		});
+
 		test("should not allow revoking current session", async () => {
 			const { sessionId, caller } = await setup(authRouter);
 
 			await expect(caller.revokeDevice({ sessionId })).rejects.toThrow(
 				"Cannot revoke current session",
 			);
+		});
+
+		test("should not allow revoking a sibling session in the current grouped web device", async () => {
+			const { userId, email } = await createTestUser();
+			const currentSessionId = await createTestSession(userId, {
+				platform: "web",
+				clientId: "web_group_current_revoke",
+			});
+			const siblingSessionId = await createTestSession(userId, {
+				platform: "web",
+				clientId: "web_group_current_revoke",
+			});
+			const caller = authRouter.createCaller(
+				createAuthenticatedContext(userId, email, currentSessionId),
+			);
+
+			await expect(
+				caller.revokeDevice({ sessionId: siblingSessionId }),
+			).rejects.toThrow("Cannot revoke current session");
+			expect(await getSession(currentSessionId)).toBeDefined();
+			expect(await getSession(siblingSessionId)).toBeDefined();
 		});
 	});
 
@@ -1338,6 +1689,46 @@ describe("Auth Router", () => {
 
 			const session = await getSession(sessionId);
 			expect(session?.deviceName).toBe("New Name");
+		});
+
+		test("should rename all active sessions in a grouped web device", async () => {
+			const { userId, email } = await createTestUser();
+			const currentSessionId = await createTestSession(userId, {
+				platform: "desktop",
+			});
+			const groupedActiveA = await createTestSession(userId, {
+				platform: "web",
+				clientId: "web_group_rename",
+				deviceName: "Old Name A",
+			});
+			const groupedActiveB = await createTestSession(userId, {
+				platform: "web",
+				clientId: "web_group_rename",
+				deviceName: "Old Name B",
+			});
+			const groupedExpired = await createTestSession(userId, {
+				platform: "web",
+				clientId: "web_group_rename",
+				deviceName: "Expired Name",
+				expiresAt: new Date(Date.now() - 60_000),
+			});
+			const caller = authRouter.createCaller(
+				createAuthenticatedContext(userId, email, currentSessionId),
+			);
+
+			const result = await caller.renameDevice({
+				sessionId: groupedActiveA,
+				deviceName: "Unified Browser Name",
+			});
+
+			expect(result.success).toBe(true);
+			expect((await getSession(groupedActiveA))?.deviceName).toBe(
+				"Unified Browser Name",
+			);
+			expect((await getSession(groupedActiveB))?.deviceName).toBe(
+				"Unified Browser Name",
+			);
+			expect((await getSession(groupedExpired))?.deviceName).toBe("Expired Name");
 		});
 	});
 
