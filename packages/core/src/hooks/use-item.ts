@@ -7,6 +7,7 @@
 import type { DecryptedItemData } from "@bittery/shared/types";
 import { useMemo } from "react";
 import { useVaultRepositorySync } from "./use-vault-repository-sync";
+import { extractDecryptedItemData } from "./items/mutation-utils";
 
 export interface UseItemOptions {
 	accountEmail?: string;
@@ -19,24 +20,6 @@ export interface UseItemResult {
 	isLoading: boolean;
 	error: Error | null;
 	refetch: () => void;
-}
-
-function extractDecryptedData(item: any): DecryptedItemData {
-	const data = { ...item } as Record<string, unknown>;
-	delete data.id;
-	delete data.vaultId;
-	delete data.category;
-	delete data.favorite;
-	delete data.createdAt;
-	delete data.updatedAt;
-	delete data.deletedAt;
-	delete data.version;
-	delete data.lastModifiedBy;
-	delete data.attachments;
-	delete data._encrypted;
-	delete data.vault;
-	delete data.account;
-	return data as unknown as DecryptedItemData;
 }
 
 /**
@@ -101,7 +84,7 @@ export function useItem(
 
 	return {
 		rawItem,
-		decryptedData: extractDecryptedData(item),
+		decryptedData: extractDecryptedItemData(item),
 		isLoading,
 		error: null,
 		refetch,

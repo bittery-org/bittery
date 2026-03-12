@@ -37,6 +37,7 @@ import {
 	getScopedAttachmentAccess,
 	getScopedItemAccess,
 } from "../helpers/scoped-resource";
+import { canUserUseAttachments } from "../helpers/entitlements";
 import { protectedProcedure, router } from "../index";
 import {
 	createAttachmentKey,
@@ -64,61 +65,39 @@ import {
 	resourceIdSchema,
 } from "../validation";
 
+function throwForbidden(message: string): never {
+	throw new TRPCError({
+		code: "FORBIDDEN",
+		message,
+	});
+}
+
 async function assertUserEntitlement(
 	userId: string,
 	entitlement: EntitlementKey,
 	message: string,
 ) {
-	const userData = await db.query.user.findFirst({
+	const actor = await db.query.user.findFirst({
 		where: (user, { eq: eqFn }) => eqFn(user.id, userId),
 		with: { team: true },
 	});
 	const mode = getBitteryMode();
 
 	// In cloud mode, fail closed for orphaned users with no team linkage.
-	if (!userData?.team) {
-		if (mode === "self-hosted") {
-			return;
-		}
-		throw new TRPCError({
-			code: "FORBIDDEN",
-			message,
-		});
+	if (!actor?.team) {
+		if (mode === "self-hosted") return;
+		throwForbidden(message);
 	}
 
-	const entitlements = resolveEffectiveEntitlements({
+	const allowed = resolveEffectiveEntitlements({
 		mode,
-		billingPlan: userData.team.billingPlan,
-		billingStatus: userData.team.billingStatus,
-	});
+		billingPlan: actor.team.billingPlan,
+		billingStatus: actor.team.billingStatus,
+	})[entitlement];
 
-	if (!entitlements[entitlement]) {
-		throw new TRPCError({
-			code: "FORBIDDEN",
-			message,
-		});
+	if (!allowed) {
+		throwForbidden(message);
 	}
-}
-
-async function canUseAttachments(userId: string): Promise<boolean> {
-	const userData = await db.query.user.findFirst({
-		where: (user, { eq: eqFn }) => eqFn(user.id, userId),
-		with: { team: true },
-	});
-	const mode = getBitteryMode();
-
-	// In cloud mode, fail closed for orphaned users with no team linkage.
-	if (!userData?.team) {
-		return mode === "self-hosted";
-	}
-
-	const entitlements = resolveEffectiveEntitlements({
-		mode,
-		billingPlan: userData.team.billingPlan,
-		billingStatus: userData.team.billingStatus,
-	});
-
-	return entitlements.attachments;
 }
 
 async function getAttachmentActor(userId: string): Promise<{
@@ -869,7 +848,9 @@ export const vaultRouter = router({
 				throw new Error("Access denied to this vault");
 			}
 
-			const attachmentsEnabled = await canUseAttachments(ctx.session.userId);
+			const attachmentsEnabled = await canUserUseAttachments(
+				ctx.session.userId,
+			);
 
 			// Get items (exclude soft-deleted), include attachment metadata
 			const items = await db.query.item.findMany({
@@ -890,7 +871,7 @@ export const vaultRouter = router({
 	 * Returns items with vault metadata and encrypted vault keys
 	 */
 	listAllItems: protectedProcedure.query(async ({ ctx }) => {
-		const attachmentsEnabled = await canUseAttachments(ctx.session.userId);
+		const attachmentsEnabled = await canUserUseAttachments(ctx.session.userId);
 
 		// Get all vaults the user has access to
 		const userVaults = await db.query.vaultKey.findMany({
@@ -1006,7 +987,9 @@ export const vaultRouter = router({
 			}),
 		)
 		.query(async ({ input, ctx }) => {
-			const attachmentsEnabled = await canUseAttachments(ctx.session.userId);
+			const attachmentsEnabled = await canUserUseAttachments(
+				ctx.session.userId,
+			);
 
 			// Get the item first (include attachments so they're cached alongside the item)
 			const existingItem = await db.query.item.findFirst({

@@ -586,36 +586,11 @@ export const shareRouter = router({
 				});
 			}
 
-			if (!(await hasShareLinksEntitlement(link.createdById))) {
+			const publicState = await getPublicShareState(link);
+			if (!publicState.valid) {
 				return {
 					valid: false,
-					reason: "disabled",
-					accessMode: link.accessMode,
-				};
-			}
-
-			// Check if link is still valid
-			const now = new Date();
-			if (link.status === "revoked") {
-				return {
-					valid: false,
-					reason: "revoked",
-					accessMode: link.accessMode,
-				};
-			}
-
-			if (link.expiresAt < now) {
-				return {
-					valid: false,
-					reason: "expired",
-					accessMode: link.accessMode,
-				};
-			}
-
-			if (link.maxAccessCount && link.accessCount >= link.maxAccessCount) {
-				return {
-					valid: false,
-					reason: "exhausted",
+					reason: publicState.reason,
 					accessMode: link.accessMode,
 				};
 			}
@@ -654,25 +629,14 @@ export const shareRouter = router({
 				});
 			}
 
-			if (!(await hasShareLinksEntitlement(link.createdById))) {
+			const publicState = await getPublicShareState(link);
+			if (!publicState.valid) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
 					message: "This share link is no longer valid",
 				});
 			}
-
-			// Check if link is valid
 			const now = new Date();
-			if (
-				link.status !== "active" ||
-				link.expiresAt < now ||
-				(link.maxAccessCount && link.accessCount >= link.maxAccessCount)
-			) {
-				throw new TRPCError({
-					code: "BAD_REQUEST",
-					message: "This share link is no longer valid",
-				});
-			}
 
 			// Check if email is in allowed list
 			const normalizedEmail = input.email.toLowerCase();
@@ -779,7 +743,8 @@ export const shareRouter = router({
 				});
 			}
 
-			if (!(await hasShareLinksEntitlement(link.createdById))) {
+			const publicState = await getPublicShareState(link);
+			if (!publicState.valid && publicState.reason === "disabled") {
 				await logAccess(link.id, {
 					email: input.email,
 					ipAddress: ctx.device.ipAddress,
@@ -794,13 +759,7 @@ export const shareRouter = router({
 				});
 			}
 
-			// Check if link is valid
-			const now = new Date();
-			if (
-				link.status !== "active" ||
-				link.expiresAt < now ||
-				(link.maxAccessCount && link.accessCount >= link.maxAccessCount)
-			) {
+			if (!publicState.valid) {
 				await logAccess(link.id, {
 					email: input.email,
 					ipAddress: ctx.device.ipAddress,
@@ -814,6 +773,7 @@ export const shareRouter = router({
 					message: "This share link is no longer valid",
 				});
 			}
+			const now = new Date();
 
 			const normalizedEmail = input.email.toLowerCase();
 
@@ -907,32 +867,7 @@ export const shareRouter = router({
 				});
 			}
 
-			const accessUpdate = await db
-				.update(shareLink)
-				.set({
-					accessCount: sql`${shareLink.accessCount} + 1`,
-					lastAccessedAt: now,
-					status: sql`CASE
-						WHEN ${shareLink.maxAccessCount} IS NOT NULL
-							AND ${shareLink.accessCount} + 1 >= ${shareLink.maxAccessCount}
-						THEN 'exhausted'::share_link_status
-						ELSE ${shareLink.status}
-					END`,
-				})
-				.where(
-					and(
-						eq(shareLink.id, link.id),
-						eq(shareLink.status, "active"),
-						gt(shareLink.expiresAt, now),
-						or(
-							isNull(shareLink.maxAccessCount),
-							sql`${shareLink.accessCount} < ${shareLink.maxAccessCount}`,
-						),
-					),
-				)
-				.returning({ id: shareLink.id });
-
-			if (accessUpdate.length === 0) {
+			if (!(await consumeShareLinkAccess(link.id, now))) {
 				await logAccess(link.id, {
 					email: input.email,
 					ipAddress: ctx.device.ipAddress,
@@ -1003,7 +938,8 @@ export const shareRouter = router({
 				});
 			}
 
-			if (!(await hasShareLinksEntitlement(link.createdById))) {
+			const publicState = await getPublicShareState(link);
+			if (!publicState.valid && publicState.reason === "disabled") {
 				await logAccess(link.id, {
 					ipAddress: ctx.device.ipAddress,
 					userAgent: ctx.device.userAgent,
@@ -1017,9 +953,7 @@ export const shareRouter = router({
 				});
 			}
 
-			// Check if link is valid
-			const now = new Date();
-			if (link.status !== "active") {
+			if (!publicState.valid && publicState.reason === "revoked") {
 				await logAccess(link.id, {
 					ipAddress: ctx.device.ipAddress,
 					userAgent: ctx.device.userAgent,
@@ -1033,7 +967,7 @@ export const shareRouter = router({
 				});
 			}
 
-			if (link.expiresAt < now) {
+			if (!publicState.valid && publicState.reason === "expired") {
 				await logAccess(link.id, {
 					ipAddress: ctx.device.ipAddress,
 					userAgent: ctx.device.userAgent,
@@ -1047,46 +981,28 @@ export const shareRouter = router({
 				});
 			}
 
-			if (link.maxAccessCount && link.accessCount >= link.maxAccessCount) {
+			if (!publicState.valid && publicState.reason === "exhausted") {
 				await logAccess(link.id, {
 					ipAddress: ctx.device.ipAddress,
 					userAgent: ctx.device.userAgent,
 					success: false,
-					failureReason: "Access limit reached",
+					failureReason:
+						link.status === "exhausted"
+							? `Link status: ${link.status}`
+							: "Access limit reached",
 				});
 
 				throw new TRPCError({
 					code: "BAD_REQUEST",
-					message: "This share link has reached its access limit",
+					message:
+						link.status === "exhausted"
+							? `This share link has been ${link.status}`
+							: "This share link has reached its access limit",
 				});
 			}
+			const now = new Date();
 
-			const accessUpdate = await db
-				.update(shareLink)
-				.set({
-					accessCount: sql`${shareLink.accessCount} + 1`,
-					lastAccessedAt: now,
-					status: sql`CASE
-						WHEN ${shareLink.maxAccessCount} IS NOT NULL
-							AND ${shareLink.accessCount} + 1 >= ${shareLink.maxAccessCount}
-						THEN 'exhausted'::share_link_status
-						ELSE ${shareLink.status}
-					END`,
-				})
-				.where(
-					and(
-						eq(shareLink.id, link.id),
-						eq(shareLink.status, "active"),
-						gt(shareLink.expiresAt, now),
-						or(
-							isNull(shareLink.maxAccessCount),
-							sql`${shareLink.accessCount} < ${shareLink.maxAccessCount}`,
-						),
-					),
-				)
-				.returning({ id: shareLink.id });
-
-			if (accessUpdate.length === 0) {
+			if (!(await consumeShareLinkAccess(link.id, now))) {
 				await logAccess(link.id, {
 					ipAddress: ctx.device.ipAddress,
 					userAgent: ctx.device.userAgent,
@@ -1124,6 +1040,12 @@ interface ShareLinksAccess {
 	maxActiveLinks: number | null;
 	teamId: string | null;
 }
+
+type PublicShareInvalidReason = "disabled" | "revoked" | "expired" | "exhausted";
+
+type PublicShareState =
+	| { valid: true }
+	| { valid: false; reason: PublicShareInvalidReason };
 
 async function resolveShareLinksAccess(
 	userId: string,
@@ -1179,6 +1101,64 @@ async function assertShareLinksEntitlement(
 async function hasShareLinksEntitlement(userId: string): Promise<boolean> {
 	const access = await resolveShareLinksAccess(userId);
 	return access.enabled;
+}
+
+async function getPublicShareState(link: {
+	createdById: string;
+	status: string;
+	expiresAt: Date;
+	maxAccessCount: number | null;
+	accessCount: number;
+}): Promise<PublicShareState> {
+	if (!(await hasShareLinksEntitlement(link.createdById))) {
+		return { valid: false, reason: "disabled" };
+	}
+
+	if (link.status === "revoked") {
+		return { valid: false, reason: "revoked" };
+	}
+
+	if (link.expiresAt < new Date()) {
+		return { valid: false, reason: "expired" };
+	}
+
+	if (link.maxAccessCount && link.accessCount >= link.maxAccessCount) {
+		return { valid: false, reason: "exhausted" };
+	}
+
+	return { valid: true };
+}
+
+async function consumeShareLinkAccess(
+	shareLinkId: string,
+	now: Date,
+): Promise<boolean> {
+	const accessUpdate = await db
+		.update(shareLink)
+		.set({
+			accessCount: sql`${shareLink.accessCount} + 1`,
+			lastAccessedAt: now,
+			status: sql`CASE
+				WHEN ${shareLink.maxAccessCount} IS NOT NULL
+					AND ${shareLink.accessCount} + 1 >= ${shareLink.maxAccessCount}
+				THEN 'exhausted'::share_link_status
+				ELSE ${shareLink.status}
+			END`,
+		})
+		.where(
+			and(
+				eq(shareLink.id, shareLinkId),
+				eq(shareLink.status, "active"),
+				gt(shareLink.expiresAt, now),
+				or(
+					isNull(shareLink.maxAccessCount),
+					sql`${shareLink.accessCount} < ${shareLink.maxAccessCount}`,
+				),
+			),
+		)
+		.returning({ id: shareLink.id });
+
+	return accessUpdate.length > 0;
 }
 
 function getShareLinkDailyLimit(): number {

@@ -20,6 +20,7 @@ import type * as SecureStoreType from "expo-secure-store";
 import type * as SQLiteType from "expo-sqlite";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
+import { resolveStoredSessionExpiryTimestamp } from "../session";
 import {
 	type AccountMetadata,
 	type ActiveAccount,
@@ -27,7 +28,6 @@ import {
 	type BiometricAuthResult,
 	DEFAULT_AUTO_LOCK_TIMEOUT_MS,
 	MASTER_PASSWORD_REENTRY_PERIOD_MS,
-	resolveStoredSessionExpiryTimestamp,
 	type StoredSessionData,
 	type VaultKeyData,
 } from "../types";

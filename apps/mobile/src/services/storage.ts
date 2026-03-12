@@ -26,5 +26,4 @@ export {
 	BIOMETRIC_GRACE_PERIOD_MS,
 	DEFAULT_AUTO_LOCK_TIMEOUT_MS,
 	DEFAULT_SESSION_EXPIRY_MS,
-	getBiometricErrorMessage,
 } from "@bittery/storage";

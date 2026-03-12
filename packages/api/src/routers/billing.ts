@@ -3,9 +3,12 @@ import { TRPCError } from "@trpc/server";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
+	type EntitlementLimits,
+	type Entitlements,
 	isBillingActive,
 	resolveEffectiveEntitlementLimits,
 	resolveEffectiveEntitlements,
+	type TeamBillingState,
 } from "../billing/entitlements";
 import type { CloudPlanId } from "../billing/plans";
 import {
@@ -17,11 +20,55 @@ import {
 	syncTeamSeatQuantity,
 } from "../billing/stripe";
 import { getStripePriceId, getWebAppUrl } from "../config/billing";
-import { getBitteryMode, isSelfHostedMode } from "../config/mode";
+import {
+	type BitteryMode,
+	getBitteryMode,
+	isSelfHostedMode,
+} from "../config/mode";
 import { protectedProcedure, router } from "../index";
 import { resourceIdSchema } from "../validation";
 
 const checkoutPlanSchema = z.enum(["personal", "family", "team"]);
+const SELF_HOSTED_BILLING_STATUS = {
+	enabled: false,
+	plan: "free" as CloudPlanId,
+	status: "none" as const,
+	isActive: false,
+	requiresPayment: false,
+	isStripeConfigured: false,
+	stripeCustomerId: null as string | null,
+	stripeSubscriptionId: null as string | null,
+	stripePriceId: null as string | null,
+	currentPeriodEnd: null as Date | null,
+	cancelAtPeriodEnd: false,
+	seatsPurchased: null as number | null,
+};
+
+function getBillingSnapshot(
+	mode: BitteryMode,
+	teamBillingState: Pick<TeamBillingState, "billingPlan" | "billingStatus">,
+): {
+	input: {
+		mode: BitteryMode;
+		billingPlan: CloudPlanId;
+		billingStatus: TeamBillingState["billingStatus"];
+	};
+	entitlements: Entitlements;
+	limits: EntitlementLimits;
+} {
+	const input = {
+		mode,
+		billingPlan: teamBillingState.billingPlan,
+		billingStatus: teamBillingState.billingStatus,
+	};
+	const entitlements = resolveEffectiveEntitlements(input);
+
+	return {
+		input,
+		entitlements,
+		limits: resolveEffectiveEntitlementLimits(input, entitlements),
+	};
+}
 
 function assertCloudBillingEnabled() {
 	if (isSelfHostedMode()) {
@@ -92,20 +139,7 @@ async function getCommittedAttachmentStorageBytes(teamId: string): Promise<numbe
 export const billingRouter = router({
 	status: protectedProcedure.query(async ({ ctx }) => {
 		if (isSelfHostedMode()) {
-			return {
-				enabled: false,
-				plan: "free" as CloudPlanId,
-				status: "none" as const,
-				isActive: false,
-				requiresPayment: false,
-				isStripeConfigured: false,
-				stripeCustomerId: null as string | null,
-				stripeSubscriptionId: null as string | null,
-				stripePriceId: null as string | null,
-				currentPeriodEnd: null as Date | null,
-				cancelAtPeriodEnd: false,
-				seatsPurchased: null as number | null,
-			};
+			return SELF_HOSTED_BILLING_STATUS;
 		}
 
 		const actor = await getBillingActor(ctx.session.userId);
@@ -136,54 +170,32 @@ export const billingRouter = router({
 					team: true,
 				},
 			});
-			const plan = actor?.team?.billingPlan ?? ("team" as CloudPlanId);
-			const status = actor?.team?.billingStatus ?? "active";
-			const entitlements = resolveEffectiveEntitlements({
-				mode,
-				billingPlan: plan,
-				billingStatus: status,
-			});
-			const limits = resolveEffectiveEntitlementLimits(
-				{
-					mode,
-					billingPlan: plan,
-					billingStatus: status,
-				},
-				entitlements,
-			);
+			const billingState = {
+				billingPlan: actor?.team?.billingPlan ?? ("team" as CloudPlanId),
+				billingStatus: actor?.team?.billingStatus ?? "active",
+			};
+			const snapshot = getBillingSnapshot(mode, billingState);
 
 			return {
 				mode,
-				plan,
-				status,
-				isActive: isBillingActive(status),
-				entitlements,
-				limits,
+				plan: billingState.billingPlan,
+				status: billingState.billingStatus,
+				isActive: isBillingActive(billingState.billingStatus),
+				entitlements: snapshot.entitlements,
+				limits: snapshot.limits,
 			};
 		}
 
 		const actor = await getBillingActor(ctx.session.userId);
-		const entitlements = resolveEffectiveEntitlements({
-			mode,
-			billingPlan: actor.team.billingPlan,
-			billingStatus: actor.team.billingStatus,
-		});
-		const limits = resolveEffectiveEntitlementLimits(
-			{
-				mode,
-				billingPlan: actor.team.billingPlan,
-				billingStatus: actor.team.billingStatus,
-			},
-			entitlements,
-		);
+		const snapshot = getBillingSnapshot(mode, actor.team);
 
 		return {
 			mode,
 			plan: actor.team.billingPlan,
 			status: actor.team.billingStatus,
 			isActive: isBillingActive(actor.team.billingStatus),
-			entitlements,
-			limits,
+			entitlements: snapshot.entitlements,
+			limits: snapshot.limits,
 		};
 	}),
 
@@ -200,24 +212,12 @@ export const billingRouter = router({
 		}
 
 		const actor = await getBillingActor(ctx.session.userId);
-		const entitlements = resolveEffectiveEntitlements({
-			mode,
-			billingPlan: actor.team.billingPlan,
-			billingStatus: actor.team.billingStatus,
-		});
-		const limits = resolveEffectiveEntitlementLimits(
-			{
-				mode,
-				billingPlan: actor.team.billingPlan,
-				billingStatus: actor.team.billingStatus,
-			},
-			entitlements,
-		);
+		const snapshot = getBillingSnapshot(mode, actor.team);
 
 		return {
 			mode,
-			attachmentsEnabled: entitlements.attachments,
-			quotaBytes: limits.attachment_storage_bytes,
+			attachmentsEnabled: snapshot.entitlements.attachments,
+			quotaBytes: snapshot.limits.attachment_storage_bytes,
 			committedStorageBytes: await getCommittedAttachmentStorageBytes(
 				actor.teamId,
 			),
@@ -315,12 +315,8 @@ export const billingRouter = router({
 
 		const actor = await getBillingActor(ctx.session.userId);
 		ensureBillingAdmin(actor.role);
-		const entitlements = resolveEffectiveEntitlements({
-			mode: getBitteryMode(),
-			billingPlan: actor.team.billingPlan,
-			billingStatus: actor.team.billingStatus,
-		});
-		if (!entitlements.billing_portal) {
+		const snapshot = getBillingSnapshot(getBitteryMode(), actor.team);
+		if (!snapshot.entitlements.billing_portal) {
 			throw new TRPCError({
 				code: "FORBIDDEN",
 				message: "Billing portal is unavailable for your current plan",

@@ -17,11 +17,11 @@ import type {
 } from "@bittery/types";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
+import { resolveStoredSessionExpiryTimestamp } from "../session";
 import {
 	type AccountMetadata,
 	type ActiveAccount,
 	type BiometricAuthResult,
-	resolveStoredSessionExpiryTimestamp,
 	type StoredSessionData,
 	type VaultKeyData,
 } from "../types";

@@ -44,8 +44,9 @@ const StyledShieldCheck = withUniwind(ShieldCheck);
 import CredentialProvider from "../modules/credential-provider";
 import { useAccount } from "../src/contexts/account-context";
 import { arrayBufferToBase64 } from "../src/lib/crypto";
+import { resolveBiometricErrorMessage } from "../src/lib/biometric-error-message";
 import { useServerUrl } from "../src/lib/trpc";
-import { getBiometricErrorMessage, storage } from "../src/services/storage";
+import { storage } from "../src/services/storage";
 
 /**
  * Autofill Unlock Screen
@@ -211,7 +212,7 @@ export default function AutofillUnlockScreen() {
 		onError: (error) => {
 			// Show specific error message
 			const errorMessage =
-				error.message || getBiometricErrorMessage(error.type || "unknown");
+				error.message || resolveBiometricErrorMessage(error.type || "unknown");
 
 			if (error.type === "master_password_required") {
 				setBiometricError(errorMessage);

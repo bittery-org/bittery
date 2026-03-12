@@ -23,9 +23,9 @@ import {
 } from "react-native";
 import { cn } from "@/lib/utils";
 import { useBiometricAuth } from "../contexts/biometric-auth-context";
+import { resolveBiometricErrorMessage } from "../lib/biometric-error-message";
 import {
 	type BiometricErrorType,
-	getBiometricErrorMessage,
 	storage,
 } from "../services/storage";
 
@@ -150,7 +150,7 @@ export function BiometricAuthModal({
 		if (lastAuthResult && !lastAuthResult.success) {
 			const errorMessage =
 				lastAuthResult.message ||
-				getBiometricErrorMessage(lastAuthResult.error || "unknown");
+				resolveBiometricErrorMessage(lastAuthResult.error || "unknown");
 
 			return (
 				<>

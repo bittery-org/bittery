@@ -20,12 +20,12 @@ import type {
 import type { Store } from "@tauri-apps/plugin-store";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
+import { resolveStoredSessionExpiryTimestamp } from "../session";
 import {
 	type AccountMetadata,
 	type ActiveAccount,
 	BIOMETRIC_GRACE_PERIOD_MS,
 	MASTER_PASSWORD_REENTRY_PERIOD_MS,
-	resolveStoredSessionExpiryTimestamp,
 	type StoredSessionData,
 	type VaultKeyData,
 } from "../types";

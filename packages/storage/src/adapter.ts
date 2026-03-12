@@ -14,10 +14,10 @@ import type {
 	ActiveAccount,
 	BiometricAuthResult,
 	Platform,
-	SessionExpiryInput,
 	StoredSessionData,
 	VaultKeyData,
 } from "./types";
+import type { SessionExpiryInput } from "./session";
 
 /**
  * IStorageAdapter defines the contract for platform-specific storage implementations.

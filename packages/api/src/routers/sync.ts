@@ -3,8 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, gt, inArray, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { resolveEffectiveEntitlements } from "../billing/entitlements";
-import { getBitteryMode } from "../config/mode";
+import { canUserUseAttachments } from "../helpers/entitlements";
 import { protectedProcedure, router } from "../index";
 import { getStoragePublicUrl } from "../storage/s3";
 import {
@@ -14,25 +13,30 @@ import {
 	syncVaultIdsSchema,
 } from "../validation";
 
-async function canUseAttachments(userId: string): Promise<boolean> {
-	const userData = await db.query.user.findFirst({
-		where: (user, { eq: eqFn }) => eqFn(user.id, userId),
-		with: { team: true },
-	});
-	const mode = getBitteryMode();
-
-	// In cloud mode, fail closed for orphaned users with no team linkage.
-	if (!userData?.team) {
-		return mode === "self-hosted";
-	}
-
-	const entitlements = resolveEffectiveEntitlements({
-		mode,
-		billingPlan: userData.team.billingPlan,
-		billingStatus: userData.team.billingStatus,
-	});
-
-	return entitlements.attachments;
+function toSyncEventDto(event: {
+	id: string;
+	eventType: string;
+	entityId: string;
+	entityType: string;
+	vaultId: string | null;
+	version: number;
+	clientId: string | null;
+	userId: string;
+	metadata: string | null;
+	createdAt: Date;
+}) {
+	return {
+		id: event.id,
+		type: event.eventType,
+		entityId: event.entityId,
+		entityType: event.entityType,
+		vaultId: event.vaultId,
+		version: event.version,
+		clientId: event.clientId,
+		userId: event.userId,
+		metadata: event.metadata ? JSON.parse(event.metadata) : null,
+		timestamp: event.createdAt.getTime(),
+	};
 }
 
 export const syncRouter = router({
@@ -76,7 +80,6 @@ export const syncRouter = router({
 						);
 
 			let sinceSeq = 0;
-			let requiresFullRefresh = false;
 			if (input.sinceId) {
 				const cursorEvent = await db.query.syncEvent.findFirst({
 					where: and(eq(syncEvent.id, input.sinceId), visibleEventsWhere),
@@ -87,25 +90,21 @@ export const syncRouter = router({
 				});
 
 				if (!cursorEvent) {
-					requiresFullRefresh = true;
-				} else {
-					sinceSeq = cursorEvent.seq;
+					const latestVisibleEvent = await db.query.syncEvent.findFirst({
+						where: visibleEventsWhere,
+						orderBy: [desc(syncEvent.seq)],
+						columns: { id: true },
+					});
+
+					return {
+						events: [],
+						cursor: latestVisibleEvent ? { id: latestVisibleEvent.id } : null,
+						hasMore: false,
+						requiresFullRefresh: true,
+					};
 				}
-			}
 
-			if (requiresFullRefresh) {
-				const latestVisibleEvent = await db.query.syncEvent.findFirst({
-					where: visibleEventsWhere,
-					orderBy: [desc(syncEvent.seq)],
-					columns: { id: true },
-				});
-
-				return {
-					events: [],
-					cursor: latestVisibleEvent ? { id: latestVisibleEvent.id } : null,
-					hasMore: false,
-					requiresFullRefresh: true,
-				};
+				sinceSeq = cursorEvent.seq;
 			}
 
 			const cursorCondition = gt(syncEvent.seq, sinceSeq);
@@ -123,21 +122,10 @@ export const syncRouter = router({
 			const latestCursorEvent = resultEvents[resultEvents.length - 1];
 
 			return {
-				events: resultEvents.map((e) => ({
-					id: e.id,
-					type: e.eventType,
-					entityId: e.entityId,
-					entityType: e.entityType,
-					vaultId: e.vaultId,
-					version: e.version,
-					clientId: e.clientId,
-					userId: e.userId,
-					metadata: e.metadata ? JSON.parse(e.metadata) : null,
-					timestamp: e.createdAt.getTime(),
-				})),
+				events: resultEvents.map(toSyncEventDto),
 				cursor: latestCursorEvent ? { id: latestCursorEvent.id } : null,
 				hasMore,
-				requiresFullRefresh,
+				requiresFullRefresh: false,
 			};
 		}),
 
@@ -153,7 +141,7 @@ export const syncRouter = router({
 			}),
 		)
 		.query(async ({ ctx, input }) => {
-			const attachmentsEnabled = await canUseAttachments(ctx.session.userId);
+			const attachmentsEnabled = await canUserUseAttachments(ctx.session.userId);
 
 			const userVaults = await db.query.vaultKey.findMany({
 				where: eq(vaultKey.userId, ctx.session.userId),

@@ -2,7 +2,18 @@ import { db } from "@bittery/db";
 import { auditLog } from "@bittery/db/schema/auth";
 import { shareAccessLog, shareLink } from "@bittery/db/schema/sharing";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, gte, ilike, inArray, lt, lte, or } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	gte,
+	ilike,
+	inArray,
+	lt,
+	lte,
+	or,
+	type SQL,
+} from "drizzle-orm";
 import { z } from "zod";
 import { resolveEffectiveEntitlements } from "../billing/entitlements";
 import { getBitteryMode } from "../config/mode";
@@ -42,6 +53,36 @@ interface EventCursorPayload {
 	timestamp: string;
 	source: EventSource;
 	id: string;
+}
+
+interface TeamMemberRow {
+	id: string;
+	name: string | null;
+	email: string | null;
+}
+
+interface AuditEventRow {
+	id: string;
+	userId: string;
+	action: string;
+	entityType: string | null;
+	entityId: string | null;
+	ipAddress: string | null;
+	userAgent: string | null;
+	metadata: string | null;
+	createdAt: Date;
+}
+
+interface ShareAccessEventRow {
+	id: string;
+	shareLinkId: string;
+	createdById: string;
+	accessedByEmail: string | null;
+	ipAddress: string | null;
+	userAgent: string | null;
+	success: boolean;
+	failureReason: string | null;
+	accessedAt: Date;
 }
 
 const MAX_LIMIT = 100;
@@ -155,7 +196,9 @@ function maskUserAgent(userAgent: string | null): string | null {
 	return userAgent.split(" ")[0] || "Unknown";
 }
 
-function buildAuditActionGroupCondition(actionGroup: QueryActionGroup) {
+function buildAuditActionGroupCondition(
+	actionGroup: QueryActionGroup,
+): SQL | undefined {
 	if (actionGroup === "all" || actionGroup === "other") return undefined;
 	if (actionGroup === "team") return ilike(auditLog.action, "team_%");
 	if (actionGroup === "vault") return ilike(auditLog.action, "vault_%");
@@ -175,7 +218,7 @@ function buildCursorCondition(
 	source: EventSource,
 	timestampColumn: any,
 	idColumn: any,
-) {
+): SQL | undefined {
 	if (!cursor) return undefined;
 
 	const cursorTimestamp = new Date(cursor.timestamp);
@@ -205,6 +248,180 @@ function buildCursorCondition(
 		lt(timestampColumn, cursorTimestamp),
 		and(eq(timestampColumn, cursorTimestamp), lt(idColumn, cursor.id)),
 	);
+}
+
+function pushIf<T>(values: T[], value: T | undefined): void {
+	if (value !== undefined) {
+		values.push(value);
+	}
+}
+
+function buildAuditConditions(input: {
+	memberIds: string[];
+	actorUserId?: string;
+	fromDate: Date | null;
+	toDate: Date | null;
+	actionGroup: QueryActionGroup;
+	cursor: EventCursorPayload | null;
+	searchPattern: string | null;
+}): SQL[] {
+	const conditions: SQL[] = [inArray(auditLog.userId, input.memberIds)];
+
+	if (input.actorUserId) {
+		conditions.push(eq(auditLog.userId, input.actorUserId));
+	}
+	if (input.fromDate) {
+		conditions.push(gte(auditLog.createdAt, input.fromDate));
+	}
+	if (input.toDate) {
+		conditions.push(lte(auditLog.createdAt, input.toDate));
+	}
+
+	pushIf(
+		conditions,
+		buildCursorCondition(
+			input.cursor,
+			"audit_log",
+			auditLog.createdAt,
+			auditLog.id,
+		),
+	);
+	pushIf(conditions, buildAuditActionGroupCondition(input.actionGroup));
+
+	if (input.searchPattern) {
+		pushIf(
+			conditions,
+			or(
+				ilike(auditLog.action, input.searchPattern),
+				ilike(auditLog.entityType, input.searchPattern),
+				ilike(auditLog.entityId, input.searchPattern),
+				ilike(auditLog.userId, input.searchPattern),
+				ilike(auditLog.metadata, input.searchPattern),
+			),
+		);
+	}
+
+	return conditions;
+}
+
+function buildShareConditions(input: {
+	memberIds: string[];
+	actorUserId?: string;
+	fromDate: Date | null;
+	toDate: Date | null;
+	result: "success" | "failure" | "all";
+	cursor: EventCursorPayload | null;
+	searchPattern: string | null;
+}): SQL[] {
+	const conditions: SQL[] = [inArray(shareLink.createdById, input.memberIds)];
+
+	if (input.actorUserId) {
+		conditions.push(eq(shareLink.createdById, input.actorUserId));
+	}
+	if (input.fromDate) {
+		conditions.push(gte(shareAccessLog.accessedAt, input.fromDate));
+	}
+	if (input.toDate) {
+		conditions.push(lte(shareAccessLog.accessedAt, input.toDate));
+	}
+	if (input.result === "success") {
+		conditions.push(eq(shareAccessLog.success, true));
+	}
+	if (input.result === "failure") {
+		conditions.push(eq(shareAccessLog.success, false));
+	}
+
+	pushIf(
+		conditions,
+		buildCursorCondition(
+			input.cursor,
+			"share_access_log",
+			shareAccessLog.accessedAt,
+			shareAccessLog.id,
+		),
+	);
+
+	if (input.searchPattern) {
+		pushIf(
+			conditions,
+			or(
+				ilike(shareAccessLog.shareLinkId, input.searchPattern),
+				ilike(shareAccessLog.accessedByEmail, input.searchPattern),
+				ilike(shareAccessLog.failureReason, input.searchPattern),
+			),
+		);
+	}
+
+	return conditions;
+}
+
+function toAuditEvent(
+	row: AuditEventRow,
+	memberMap: Map<string, TeamMemberRow>,
+): TeamEvent {
+	const eventActor = memberMap.get(row.userId);
+
+	return {
+		id: row.id,
+		timestamp: row.createdAt.toISOString(),
+		source: "audit_log",
+		action: row.action,
+		actionGroup: getActionGroup(row.action),
+		actor: {
+			userId: row.userId,
+			name: eventActor?.name ?? null,
+			email: eventActor?.email ?? null,
+		},
+		entity: {
+			type: row.entityType,
+			id: row.entityId,
+		},
+		result: "success",
+		network: {
+			maskedIp: maskIp(row.ipAddress),
+			maskedUserAgent: maskUserAgent(row.userAgent),
+			fullIp: row.ipAddress,
+			fullUserAgent: row.userAgent,
+		},
+		metadata: parseMetadata(row.metadata),
+	};
+}
+
+function toShareAccessEvent(
+	row: ShareAccessEventRow,
+	memberMap: Map<string, TeamMemberRow>,
+): TeamEvent {
+	const createdBy = memberMap.get(row.createdById);
+
+	return {
+		id: row.id,
+		timestamp: row.accessedAt.toISOString(),
+		source: "share_access_log",
+		action: row.success ? "share_access_success" : "share_access_failed",
+		actionGroup: "share",
+		actor: {
+			userId: null,
+			name: row.accessedByEmail,
+			email: row.accessedByEmail,
+		},
+		entity: {
+			type: "share_link",
+			id: row.shareLinkId,
+		},
+		result: row.success ? "success" : "failure",
+		network: {
+			maskedIp: maskIp(row.ipAddress),
+			maskedUserAgent: maskUserAgent(row.userAgent),
+			fullIp: row.ipAddress,
+			fullUserAgent: row.userAgent,
+		},
+		metadata: {
+			failureReason: row.failureReason,
+			createdByUserId: row.createdById,
+			createdByName: createdBy?.name ?? null,
+			createdByEmail: createdBy?.email ?? null,
+		},
+	};
 }
 
 export const auditRouter = router({
@@ -264,7 +481,7 @@ export const auditRouter = router({
 				});
 			}
 
-			const members = await db.query.user.findMany({
+			const members: TeamMemberRow[] = await db.query.user.findMany({
 				where: (u, { eq }) => eq(u.teamId, teamId),
 				columns: {
 					id: true,
@@ -314,79 +531,24 @@ export const auditRouter = router({
 			const includeShare =
 				input.actionGroup === "all" || input.actionGroup === "share";
 
-			const auditConditions = [inArray(auditLog.userId, memberIds)];
-			if (input.actorUserId) {
-				auditConditions.push(eq(auditLog.userId, input.actorUserId));
-			}
-			if (fromDate) {
-				auditConditions.push(gte(auditLog.createdAt, fromDate));
-			}
-			if (toDate) {
-				auditConditions.push(lte(auditLog.createdAt, toDate));
-			}
-			const auditCursorCondition = buildCursorCondition(
+			const auditConditions = buildAuditConditions({
+				memberIds,
+				actorUserId: input.actorUserId,
+				fromDate,
+				toDate,
+				actionGroup: input.actionGroup,
 				cursor,
-				"audit_log",
-				auditLog.createdAt,
-				auditLog.id,
-			);
-			if (auditCursorCondition) {
-				auditConditions.push(auditCursorCondition);
-			}
-			const auditActionGroupCondition = buildAuditActionGroupCondition(
-				input.actionGroup,
-			);
-			if (auditActionGroupCondition) {
-				auditConditions.push(auditActionGroupCondition);
-			}
-			if (searchPattern) {
-				const auditSearchCondition = or(
-					ilike(auditLog.action, searchPattern),
-					ilike(auditLog.entityType, searchPattern),
-					ilike(auditLog.entityId, searchPattern),
-					ilike(auditLog.userId, searchPattern),
-					ilike(auditLog.metadata, searchPattern),
-				);
-				if (auditSearchCondition) {
-					auditConditions.push(auditSearchCondition);
-				}
-			}
-
-			const shareConditions = [inArray(shareLink.createdById, memberIds)];
-			if (input.actorUserId) {
-				shareConditions.push(eq(shareLink.createdById, input.actorUserId));
-			}
-			if (fromDate) {
-				shareConditions.push(gte(shareAccessLog.accessedAt, fromDate));
-			}
-			if (toDate) {
-				shareConditions.push(lte(shareAccessLog.accessedAt, toDate));
-			}
-			if (input.result === "success") {
-				shareConditions.push(eq(shareAccessLog.success, true));
-			}
-			if (input.result === "failure") {
-				shareConditions.push(eq(shareAccessLog.success, false));
-			}
-			const shareCursorCondition = buildCursorCondition(
+				searchPattern,
+			});
+			const shareConditions = buildShareConditions({
+				memberIds,
+				actorUserId: input.actorUserId,
+				fromDate,
+				toDate,
+				result: input.result,
 				cursor,
-				"share_access_log",
-				shareAccessLog.accessedAt,
-				shareAccessLog.id,
-			);
-			if (shareCursorCondition) {
-				shareConditions.push(shareCursorCondition);
-			}
-			if (searchPattern) {
-				const shareSearchCondition = or(
-					ilike(shareAccessLog.shareLinkId, searchPattern),
-					ilike(shareAccessLog.accessedByEmail, searchPattern),
-					ilike(shareAccessLog.failureReason, searchPattern),
-				);
-				if (shareSearchCondition) {
-					shareConditions.push(shareSearchCondition);
-				}
-			}
+				searchPattern,
+			});
 
 			const [auditRows, shareRows] = await Promise.all([
 				includeAudit
@@ -433,65 +595,12 @@ export const auditRouter = router({
 
 			const events: TeamEvent[] = [];
 
-			for (const row of auditRows) {
-				const eventActor = memberMap.get(row.userId);
-				events.push({
-					id: row.id,
-					timestamp: row.createdAt.toISOString(),
-					source: "audit_log",
-					action: row.action,
-					actionGroup: getActionGroup(row.action),
-					actor: {
-						userId: row.userId,
-						name: eventActor?.name ?? null,
-						email: eventActor?.email ?? null,
-					},
-					entity: {
-						type: row.entityType,
-						id: row.entityId,
-					},
-					result: "success",
-					network: {
-						maskedIp: maskIp(row.ipAddress),
-						maskedUserAgent: maskUserAgent(row.userAgent),
-						fullIp: row.ipAddress,
-						fullUserAgent: row.userAgent,
-					},
-					metadata: parseMetadata(row.metadata),
-				});
+			for (const row of auditRows as AuditEventRow[]) {
+				events.push(toAuditEvent(row, memberMap));
 			}
 
-			for (const row of shareRows) {
-				const createdBy = memberMap.get(row.createdById);
-				events.push({
-					id: row.id,
-					timestamp: row.accessedAt.toISOString(),
-					source: "share_access_log",
-					action: row.success ? "share_access_success" : "share_access_failed",
-					actionGroup: "share",
-					actor: {
-						userId: null,
-						name: row.accessedByEmail,
-						email: row.accessedByEmail,
-					},
-					entity: {
-						type: "share_link",
-						id: row.shareLinkId,
-					},
-					result: row.success ? "success" : "failure",
-					network: {
-						maskedIp: maskIp(row.ipAddress),
-						maskedUserAgent: maskUserAgent(row.userAgent),
-						fullIp: row.ipAddress,
-						fullUserAgent: row.userAgent,
-					},
-					metadata: {
-						failureReason: row.failureReason,
-						createdByUserId: row.createdById,
-						createdByName: createdBy?.name ?? null,
-						createdByEmail: createdBy?.email ?? null,
-					},
-				});
+			for (const row of shareRows as ShareAccessEventRow[]) {
+				events.push(toShareAccessEvent(row, memberMap));
 			}
 
 			const groupedEvents =

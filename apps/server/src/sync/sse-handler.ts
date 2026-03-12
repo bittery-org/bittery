@@ -241,6 +241,36 @@ function clearDeniedVaultRecipient(userId: string, vaultId: string): void {
 	}
 }
 
+function collectVaultRecipients(
+	vaultId: string,
+	actorUserId: string,
+): Set<string> {
+	const recipients = new Set<string>([actorUserId]);
+	for (const [userId] of connections) {
+		if (userVaults.get(userId)?.has(vaultId)) {
+			recipients.add(userId);
+		}
+	}
+	return recipients;
+}
+
+function createOutboundSyncPayload(
+	event: SyncEventPayload,
+	recipientUserId: string,
+): SyncEventPayload {
+	return {
+		...event,
+		metadata: {
+			...event.metadata,
+			isOwnEvent:
+				event.type === "vault_access_revoked"
+					? false
+					: recipientUserId === event.userId,
+			originClientId: event.clientId,
+		},
+	};
+}
+
 function addConnection(connection: Connection): void {
 	const { userId, id } = connection;
 	let userConnections = connections.get(userId);
@@ -278,47 +308,24 @@ function removeConnection(userId: string, connectionId: string): void {
  * Scans connections and filters by vault membership — simple and correct.
  */
 function deliverToConnections(event: SyncEventPayload): void {
-	const { vaultId, clientId, userId: eventUserId } = event;
+	const { vaultId, userId: eventUserId } = event;
 	const pushEventToRecipients = (recipients: Set<string>) => {
 		for (const userId of recipients) {
 			const userConnections = connections.get(userId);
 			if (!userConnections) continue;
 
 			for (const connection of userConnections.values()) {
-				connection.channel.push({
-					...event,
-					metadata: {
-						...event.metadata,
-						isOwnEvent: userId === eventUserId,
-						originClientId: clientId,
-					},
-				});
+				connection.channel.push(createOutboundSyncPayload(event, userId));
 			}
 		}
 	};
 	const vaultCreatedRecipients =
 		event.type === "vault_created" && vaultId
-			? (() => {
-					const recipients = new Set<string>([eventUserId]);
-					for (const [userId] of connections) {
-						if (userVaults.get(userId)?.has(vaultId)) {
-							recipients.add(userId);
-						}
-					}
-					return recipients;
-				})()
+			? collectVaultRecipients(vaultId, eventUserId)
 			: null;
 	const vaultDeletedRecipients =
 		event.type === "vault_deleted" && vaultId
-			? (() => {
-					const recipients = new Set<string>([eventUserId]);
-					for (const [userId] of connections) {
-						if (userVaults.get(userId)?.has(vaultId)) {
-							recipients.add(userId);
-						}
-					}
-					return recipients;
-				})()
+			? collectVaultRecipients(vaultId, eventUserId)
 			: null;
 
 	// User-targeted control events are delivered directly to the target user.
@@ -330,14 +337,7 @@ function deliverToConnections(event: SyncEventPayload): void {
 		const targetConnections = connections.get(eventUserId);
 		if (targetConnections) {
 			for (const connection of targetConnections.values()) {
-				connection.channel.push({
-					...event,
-					metadata: {
-						...event.metadata,
-						isOwnEvent: false,
-						originClientId: clientId,
-					},
-				});
+				connection.channel.push(createOutboundSyncPayload(event, eventUserId));
 			}
 		}
 		return;
@@ -408,14 +408,7 @@ function deliverToConnections(event: SyncEventPayload): void {
 		if (deniedVaultRecipients.get(userId)?.has(vaultId)) continue;
 
 		for (const connection of userConnections.values()) {
-			connection.channel.push({
-				...event,
-				metadata: {
-					...event.metadata,
-					isOwnEvent: userId === eventUserId,
-					originClientId: clientId,
-				},
-			});
+			connection.channel.push(createOutboundSyncPayload(event, userId));
 		}
 	}
 
