@@ -111,6 +111,22 @@ describe("desktop-client native transport", () => {
 			"GET_DESKTOP_ITEMS_SNAPSHOT",
 		]);
 	});
+
+	test("returns null when desktop snapshot request responds with an error", async () => {
+		const nativeClient = {
+			request: async () => ({
+				type: "ERROR" as const,
+				message: "Decryption failed",
+			}),
+			subscribeToDesktopEvents: () => () => {},
+		};
+
+		const client = new DesktopClient({ nativeClient });
+
+		await expect(
+			client.getItemsSnapshot(["alice@example.com"]),
+		).resolves.toBeNull();
+	});
 });
 
 describe("native-messaging-client", () => {

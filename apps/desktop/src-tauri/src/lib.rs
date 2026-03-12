@@ -232,10 +232,88 @@ fn decrypt_item_payload(
     .map_err(|e| format!("Decryption failed: {}", e))
 }
 
+fn build_snapshot_item_payload(
+    item: &CachedItemRecord,
+    decrypted_data: &str,
+    vault: Option<&CachedVaultRecord>,
+    include_account_context: bool,
+    email: &str,
+    account: Option<&serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let Ok(mut payload) =
+        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(decrypted_data)
+    else {
+        return None;
+    };
+
+    payload.insert("id".to_string(), serde_json::json!(item.id));
+    payload.insert("vaultId".to_string(), serde_json::json!(item.vault_id));
+    payload.insert("category".to_string(), serde_json::json!(item.category));
+    payload.insert("favorite".to_string(), serde_json::json!(item.favorite));
+    payload.insert("createdAt".to_string(), serde_json::json!(item.created_at));
+    payload.insert("updatedAt".to_string(), serde_json::json!(item.updated_at));
+
+    payload.insert(
+        "vault".to_string(),
+        serde_json::json!({
+            "id": vault.map(|value| value.id.clone()).unwrap_or_default(),
+            "name": vault.map(|value| value.name.clone()).unwrap_or_else(|| "Unknown".to_string()),
+            "type": vault.map(|value| value.vault_type.clone()).unwrap_or_else(|| "personal".to_string()),
+            "icon": vault.and_then(|value| value.icon.clone()),
+            "imageUrl": vault.and_then(|value| value.image_url.clone()),
+        }),
+    );
+
+    if include_account_context {
+        if let Some(account) = account {
+            payload.insert(
+                "account".to_string(),
+                serde_json::json!({
+                    "email": account.get("email").and_then(|value| value.as_str()).unwrap_or(email),
+                    "userId": account.get("userId").and_then(|value| value.as_str()).unwrap_or_default(),
+                    "name": account.get("name").and_then(|value| value.as_str()).unwrap_or(email),
+                }),
+            );
+        }
+    }
+
+    Some(serde_json::Value::Object(payload))
+}
+
 fn get_active_account_email<R: Runtime>(store: &Store<R>) -> Option<String> {
     store
         .get(ACTIVE_ACCOUNT_KEY)
         .and_then(|value| value.as_str().map(|s| s.to_lowercase()))
+}
+
+fn lookup_store_string_with_fallback<F>(
+    mut lookup: F,
+    primary_key: &str,
+    fallback_key: &str,
+) -> Option<String>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    lookup(primary_key).or_else(|| lookup(fallback_key))
+}
+
+fn get_account_store_string_with_legacy_fallback<R: Runtime>(
+    store: &Store<R>,
+    email: &str,
+    suffix: &str,
+    legacy_key: &str,
+) -> Option<String> {
+    let scoped_key = account_key(email, suffix);
+
+    lookup_store_string_with_fallback(
+        |key| {
+            store
+                .get(key)
+                .and_then(|value| value.as_str().map(|s| s.to_string()))
+        },
+        &scoped_key,
+        legacy_key,
+    )
 }
 
 fn get_bearer_token_for_account<R: Runtime>(store: &Store<R>, email: &str) -> Option<String> {
@@ -357,10 +435,12 @@ fn get_account_directory<R: Runtime>(
 }
 
 fn load_muk_base64<R: Runtime>(store: &Store<R>, email: &str) -> Result<String, String> {
-    let session_key = account_key(email, "session_data");
-    let session_data_str = store
-        .get(&session_key)
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
+    let session_data_str = get_account_store_string_with_legacy_fallback(
+        store,
+        email,
+        "session_data",
+        LEGACY_SESSION_DATA_KEY,
+    )
         .ok_or("No session data found")?;
     let session_data: serde_json::Value = serde_json::from_str(&session_data_str)
         .map_err(|e| format!("Failed to parse session data: {}", e))?;
@@ -411,10 +491,12 @@ fn load_decrypted_vault_keys<R: Runtime>(
     email: &str,
 ) -> Result<std::collections::HashMap<String, String>, String> {
     let muk_base64 = load_muk_base64(store, email)?;
-    let vault_key_storage = account_key(email, "vault_keys");
-    let vault_keys_str = store
-        .get(&vault_key_storage)
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
+    let vault_keys_str = get_account_store_string_with_legacy_fallback(
+        store,
+        email,
+        "vault_keys",
+        LEGACY_VAULT_KEYS_KEY,
+    )
         .ok_or("Vault keys not found")?;
     let vault_keys: Vec<serde_json::Value> = serde_json::from_str(&vault_keys_str)
         .map_err(|e| format!("Failed to parse vault keys: {}", e))?;
@@ -538,10 +620,12 @@ async fn get_auth_token_internal(
         .map_err(|e| format!("Failed to access store: {}", e))?;
     let token = get_bearer_token_for_account(&store, email).ok_or("Auth token not found")?;
 
-    let session_key = account_key(email, "session_data");
-    let session_metadata = store
-        .get(&session_key)
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
+    let session_metadata = get_account_store_string_with_legacy_fallback(
+        &store,
+        email,
+        "session_data",
+        LEGACY_SESSION_DATA_KEY,
+    )
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
 
     Ok(serde_json::json!({
@@ -573,6 +657,7 @@ async fn get_items_snapshot_internal(
     let include_account_context = target_emails.len() > 1;
     let account_directory = get_account_directory(&store).unwrap_or_default();
     let mut items = Vec::new();
+    let mut skipped_items = 0usize;
 
     for email in target_emails {
         if !unlocked_accounts.iter().any(|value| value.eq_ignore_ascii_case(&email)) {
@@ -607,50 +692,37 @@ async fn get_items_snapshot_internal(
                 continue;
             };
 
-            let decrypted_data = decrypt_item_payload(&item, vault_key)?;
-            let Ok(mut payload) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&decrypted_data) else {
-                continue;
+            let decrypted_data = match decrypt_item_payload(&item, vault_key) {
+                Ok(data) => data,
+                Err(error) => {
+                    skipped_items += 1;
+                    eprintln!(
+                        "[desktop-ipc] Failed to decrypt cached item {} for {}: {}",
+                        item.id, email, error
+                    );
+                    continue;
+                }
             };
 
-            payload.insert("id".to_string(), serde_json::json!(item.id));
-            payload.insert("vaultId".to_string(), serde_json::json!(item.vault_id));
-            payload.insert("category".to_string(), serde_json::json!(item.category));
-            payload.insert("favorite".to_string(), serde_json::json!(item.favorite));
-            payload.insert("createdAt".to_string(), serde_json::json!(item.created_at));
-            payload.insert("updatedAt".to_string(), serde_json::json!(item.updated_at));
-
-            let vault = vault_map.get(
-                payload
-                    .get("vaultId")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or_default(),
-            );
-            payload.insert(
-                "vault".to_string(),
-                serde_json::json!({
-                    "id": vault.map(|value| value.id.clone()).unwrap_or_default(),
-                    "name": vault.map(|value| value.name.clone()).unwrap_or_else(|| "Unknown".to_string()),
-                    "type": vault.map(|value| value.vault_type.clone()).unwrap_or_else(|| "personal".to_string()),
-                    "icon": vault.and_then(|value| value.icon.clone()),
-                    "imageUrl": vault.and_then(|value| value.image_url.clone()),
-                }),
-            );
-
-            if include_account_context {
-                if let Some(account) = account_directory.get(&email) {
-                    payload.insert(
-                        "account".to_string(),
-                        serde_json::json!({
-                            "email": account.get("email").and_then(|value| value.as_str()).unwrap_or(&email),
-                            "userId": account.get("userId").and_then(|value| value.as_str()).unwrap_or_default(),
-                            "name": account.get("name").and_then(|value| value.as_str()).unwrap_or(&email),
-                        }),
-                    );
-                }
-            }
-
-            items.push(serde_json::Value::Object(payload));
+            let Some(payload) = build_snapshot_item_payload(
+                &item,
+                &decrypted_data,
+                vault_map.get(&item.vault_id),
+                include_account_context,
+                &email,
+                account_directory.get(&email),
+            ) else {
+                continue;
+            };
+            items.push(payload);
         }
+    }
+
+    if skipped_items > 0 {
+        eprintln!(
+            "[desktop-ipc] Skipped {} cached item(s) while building desktop snapshot",
+            skipped_items
+        );
     }
 
     Ok(serde_json::json!({
@@ -1569,10 +1641,12 @@ async fn get_vault_keys_internal(
     }
 
     let email = target_email.unwrap();
-    let vault_key = account_key(&email, "vault_keys");
-
-    let vault_keys = store.get(&vault_key)
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
+    let vault_keys = get_account_store_string_with_legacy_fallback(
+        &store,
+        &email,
+        "vault_keys",
+        LEGACY_VAULT_KEYS_KEY,
+    )
         .ok_or("Vault keys not found")?;
 
     Ok(serde_json::json!({
@@ -1737,8 +1811,11 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        serialize_encryption_context, unwrap_plaintext_with_context, CONTEXT_ENVELOPE_MARKER,
+        build_snapshot_item_payload, lookup_store_string_with_fallback,
+        serialize_encryption_context, unwrap_plaintext_with_context,
+        CachedItemRecord, CachedVaultRecord, CONTEXT_ENVELOPE_MARKER,
     };
+    use std::collections::HashMap;
 
     #[test]
     fn unwrap_plaintext_with_context_accepts_matching_envelope() {
@@ -1782,5 +1859,129 @@ mod tests {
         .expect_err("expected context mismatch");
 
         assert_eq!(error, "Encryption context mismatch");
+    }
+
+    #[test]
+    fn lookup_store_string_with_fallback_prefers_account_scoped_value() {
+        let values = HashMap::from([
+            (
+                "bittery_account_alice_example_com_session_data",
+                "scoped-session".to_string(),
+            ),
+            ("bittery_session_data", "legacy-session".to_string()),
+        ]);
+
+        let resolved = lookup_store_string_with_fallback(
+            |key| values.get(key).cloned(),
+            "bittery_account_alice_example_com_session_data",
+            "bittery_session_data",
+        );
+
+        assert_eq!(resolved.as_deref(), Some("scoped-session"));
+    }
+
+    #[test]
+    fn lookup_store_string_with_fallback_uses_legacy_value_when_scoped_is_missing() {
+        let values = HashMap::from([("bittery_session_data", "legacy-session".to_string())]);
+
+        let resolved = lookup_store_string_with_fallback(
+            |key| values.get(key).cloned(),
+            "bittery_account_alice_example_com_session_data",
+            "bittery_session_data",
+        );
+
+        assert_eq!(resolved.as_deref(), Some("legacy-session"));
+    }
+
+    #[test]
+    fn build_snapshot_item_payload_returns_none_for_invalid_json() {
+        let item = CachedItemRecord {
+            id: "item-1".to_string(),
+            vault_id: "vault-1".to_string(),
+            category: "login".to_string(),
+            favorite: false,
+            encrypted_data: "ciphertext".to_string(),
+            encryption_iv: "iv".to_string(),
+            encryption_algorithm: "AES-GCM-AAD-V1".to_string(),
+            version: 1,
+            last_modified_by: Some("user-1".to_string()),
+            created_at: "2026-03-12T00:00:00.000Z".to_string(),
+            updated_at: "2026-03-12T00:00:00.000Z".to_string(),
+            deleted_at: None,
+        };
+        let vault = CachedVaultRecord {
+            id: "vault-1".to_string(),
+            name: "Main".to_string(),
+            vault_type: "personal".to_string(),
+            icon: None,
+            image_url: None,
+        };
+
+        let payload = build_snapshot_item_payload(
+            &item,
+            "not-json",
+            Some(&vault),
+            false,
+            "alice@example.com",
+            None,
+        );
+
+        assert!(payload.is_none());
+    }
+
+    #[test]
+    fn build_snapshot_item_payload_includes_metadata_for_valid_json() {
+        let item = CachedItemRecord {
+            id: "item-1".to_string(),
+            vault_id: "vault-1".to_string(),
+            category: "login".to_string(),
+            favorite: true,
+            encrypted_data: "ciphertext".to_string(),
+            encryption_iv: "iv".to_string(),
+            encryption_algorithm: "AES-GCM-AAD-V1".to_string(),
+            version: 1,
+            last_modified_by: Some("user-1".to_string()),
+            created_at: "2026-03-12T00:00:00.000Z".to_string(),
+            updated_at: "2026-03-12T01:00:00.000Z".to_string(),
+            deleted_at: None,
+        };
+        let vault = CachedVaultRecord {
+            id: "vault-1".to_string(),
+            name: "Main".to_string(),
+            vault_type: "personal".to_string(),
+            icon: Some("lock".to_string()),
+            image_url: None,
+        };
+        let account = serde_json::json!({
+            "email": "alice@example.com",
+            "userId": "user-1",
+            "name": "Alice",
+        });
+
+        let payload = build_snapshot_item_payload(
+            &item,
+            "{\"title\":\"Example\"}",
+            Some(&vault),
+            true,
+            "alice@example.com",
+            Some(&account),
+        )
+        .expect("expected payload");
+
+        assert_eq!(
+            payload.get("id").and_then(|value| value.as_str()),
+            Some("item-1")
+        );
+        assert_eq!(
+            payload.get("title").and_then(|value| value.as_str()),
+            Some("Example")
+        );
+        assert_eq!(
+            payload
+                .get("account")
+                .and_then(|value| value.get("email"))
+                .and_then(|value| value.as_str()),
+            Some("alice@example.com")
+        );
     }
 }

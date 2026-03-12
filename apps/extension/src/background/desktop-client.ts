@@ -189,6 +189,13 @@ export class DesktopClient {
 				type: "GET_DESKTOP_ITEMS_SNAPSHOT",
 				emails: normalizedEmails,
 			});
+			if (response.type === "ERROR") {
+				console.warn("[desktop-client] Desktop snapshot request failed", {
+					emails: normalizedEmails,
+					message: response.message,
+				});
+				return null;
+			}
 			if (response.type !== "DESKTOP_ITEMS_SNAPSHOT") {
 				return null;
 			}

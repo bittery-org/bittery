@@ -10,7 +10,7 @@ import {
 	X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DocsSearch } from "@/components/docs/docs-search";
 import { getArticlesByCategory, getCategories } from "@/lib/docs";
 import { cn } from "@/lib/utils";
