@@ -8,7 +8,8 @@ import {
 	IconMobileOutlineDuo18,
 	IconUserOutlineDuo18,
 } from "@bittery/ui/icons";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { storage } from "@/lib/storage";
 
 interface FaviconProps {
 	url?: string;
@@ -84,6 +85,20 @@ export function Favicon({
 	className,
 }: FaviconProps) {
 	const [imageError, setImageError] = useState(false);
+	const [serverUrl, setServerUrl] = useState("http://localhost:3000");
+
+	useEffect(() => {
+		let isMounted = true;
+		void storage.getServerUrl().then((storedServerUrl) => {
+			if (isMounted && storedServerUrl) {
+				setServerUrl(storedServerUrl);
+			}
+		});
+
+		return () => {
+			isMounted = false;
+		};
+	}, []);
 
 	const faviconSizeMap = {
 		sm: 64,
@@ -93,7 +108,7 @@ export function Favicon({
 
 	const faviconUrl =
 		url && category === "login"
-			? getFaviconUrl(url, faviconSizeMap[size])
+			? getFaviconUrl(url, faviconSizeMap[size], serverUrl)
 			: null;
 	const domain = url ? getDomainFromUrl(url) : null;
 	const initials = getInitials(domain || title);
@@ -154,7 +169,9 @@ export function Favicon({
 					onError={() => setImageError(true)}
 				/>
 			) : category === "login" && url ? (
-				<span className="select-none font-semibold text-white">{initials}</span>
+				<span className="select-none font-semibold text-zinc-700">
+					{initials}
+				</span>
 			) : category === "login" ? (
 				<IconEarthOutlineDuo18
 					className="text-muted-foreground"

@@ -6,6 +6,7 @@ import "./jobs/sync-pruning";
 import "./jobs/tombstone-cleanup";
 import "./jobs/pending-attachment-upload-cleanup";
 import "./jobs/expired-session-cleanup";
+import "./jobs/favicon-refresh";
 
 export interface JobRunnerOptions {
 	connectionString: string;

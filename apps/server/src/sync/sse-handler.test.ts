@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { InMemoryPubSubAdapter } from "@bittery/pubsub";
-import { closeRateLimitAdapterForTests } from "@bittery/auth/rate-limit";
+import { closeRateLimitAdapterForTests } from "@bittery/rate-limit";
 import { truncateAll } from "@bittery/test-utils";
 import {
 	createSyncRouter,

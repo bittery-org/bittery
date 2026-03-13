@@ -5,10 +5,12 @@ import {
 } from "@bittery/api/sync-helper";
 import { resolveTrustedSourceIpFromHeaders } from "@bittery/api/context";
 import {
-	incrementRateLimitWindow,
-	RATE_LIMIT_NAMESPACE,
 	verifySession,
 } from "@bittery/auth";
+import {
+	incrementRateLimitWindow,
+	RATE_LIMIT_NAMESPACE,
+} from "@bittery/rate-limit";
 import { db, vaultKey } from "@bittery/db";
 import type { PubSubAdapter } from "@bittery/pubsub";
 import { eq } from "drizzle-orm";

@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import * as authSchema from "./schema/auth";
 import * as billingSchema from "./schema/billing";
 import * as enumsSchema from "./schema/enums";
+import * as faviconSchema from "./schema/favicon";
 import * as rateLimitSchema from "./schema/rate-limit";
 import * as sharingSchema from "./schema/sharing";
 import * as syncSchema from "./schema/sync";
@@ -13,6 +14,7 @@ export const db = drizzle(process.env.DATABASE_URL || "", {
 		...enumsSchema,
 		...authSchema,
 		...billingSchema,
+		...faviconSchema,
 		...vaultSchema,
 		...teamSchema,
 		...sharingSchema,
@@ -24,6 +26,7 @@ export const db = drizzle(process.env.DATABASE_URL || "", {
 export * from "./schema/auth";
 export * from "./schema/billing";
 export * from "./schema/enums";
+export * from "./schema/favicon";
 export * from "./schema/rate-limit";
 export * from "./schema/sharing";
 export * from "./schema/sync";

@@ -1,8 +1,8 @@
 import {
 	incrementRateLimitWindow,
 	RATE_LIMIT_NAMESPACE,
-	startOfLocalDay,
-} from "@bittery/auth/rate-limit";
+ 	startOfLocalDay,
+} from "@bittery/rate-limit";
 import { db } from "@bittery/db";
 import { user } from "@bittery/db/schema/auth";
 import {

@@ -30,10 +30,8 @@ import {
 	getUserById,
 	getUserSessions,
 	getUserVaultKeysForRecovery,
-	incrementRateLimitWindow,
 	LoginRateLimitError,
 	normalizeEmail,
-	RATE_LIMIT_NAMESPACE,
 	RecoveryRateLimitError,
 	recordFailedLoginAttempt,
 	recordFailedRecoveryAttempt,
@@ -51,6 +49,10 @@ import {
 	verifyRecoveryToken,
 	verifySignupVerificationToken,
 } from "@bittery/auth";
+import {
+	incrementRateLimitWindow,
+	RATE_LIMIT_NAMESPACE,
+} from "@bittery/rate-limit";
 import { db, team, teamInvitation, user, vault, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";

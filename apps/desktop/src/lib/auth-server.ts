@@ -85,6 +85,10 @@ export function subscribeActiveAuthServerUrl(
 	};
 }
 
+export function readCurrentAuthServerUrl(): string {
+	return readStoredActiveServerUrl() ?? getFallbackServerUrl();
+}
+
 export function readKnownServerUrls(): string[] {
 	if (typeof window === "undefined") {
 		return [];

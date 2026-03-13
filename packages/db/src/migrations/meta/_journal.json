@@ -36,6 +36,13 @@
       "when": 1773313568430,
       "tag": "0004_slow_wither",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1773394299603,
+      "tag": "0005_big_vector",
+      "breakpoints": true
     }
   ]
 }

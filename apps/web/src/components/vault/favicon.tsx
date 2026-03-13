@@ -9,6 +9,7 @@ import {
 	IconUserOutlineDuo18 as User,
 } from "@bittery/ui/icons";
 import { useState } from "react";
+import { getServerUrl } from "@/lib/auth-server";
 
 interface FaviconProps {
 	url?: string;
@@ -86,10 +87,11 @@ export function Favicon({
 		md: 32,
 		lg: 64,
 	} as const;
+	const serverUrl = getServerUrl();
 
 	const faviconUrl =
 		url && category === "login"
-			? getFaviconUrl(url, faviconSizeMap[size])
+			? getFaviconUrl(url, faviconSizeMap[size], serverUrl)
 			: null;
 	const domain = url ? getDomainFromUrl(url) : null;
 	const initials = getInitials(domain || title);
@@ -150,7 +152,9 @@ export function Favicon({
 					onError={() => setImageError(true)}
 				/>
 			) : category === "login" && url ? (
-				<span className="select-none font-semibold text-white">{initials}</span>
+				<span className="select-none font-semibold text-zinc-700">
+					{initials}
+				</span>
 			) : category === "login" ? (
 				<Globe className="text-muted-foreground" size={iconSizes[size]} />
 			) : category === "credit-card" ? (

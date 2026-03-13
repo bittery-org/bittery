@@ -2,6 +2,8 @@
  * Favicon utilities for fetching and displaying website icons
  */
 
+import { normalizeServerUrl } from "./server-url";
+
 /**
  * Extract domain from a URL
  */
@@ -16,15 +18,17 @@ export function getDomainFromUrl(url: string): string | null {
 
 /**
  * Get favicon URL for a given website URL
- * Uses Google's favicon service as fallback for reliability
+ * Uses the Bittery favicon endpoint hosted on the configured server URL
  */
 export function getFaviconUrl(
 	url: string,
-	size: 16 | 32 | 64 | 128 = 32,
+	_size: 16 | 32 | 64 | 128 = 32,
+	serverUrl?: string,
 ): string | null {
 	const domain = getDomainFromUrl(url);
 	if (!domain) return null;
+	const normalizedServerUrl = normalizeServerUrl(serverUrl ?? "");
+	if (!normalizedServerUrl) return null;
 
-	// Use Google's favicon service - it's reliable and handles most cases
-	return `https://www.google.com/s2/favicons?domain=${domain}&sz=${size}`;
+	return `${normalizedServerUrl}/favicon/${encodeURIComponent(domain)}`;
 }

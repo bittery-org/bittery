@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Image, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { cn } from "@/lib/utils";
+import { useServerUrl } from "@/lib/trpc";
 
 // Create styled icon components
 const StyledKey = withUniwind(Key);
@@ -51,11 +52,12 @@ export function ItemIcon({
 }: ItemIconProps) {
 	const Icon = categoryIcons[category];
 	const [faviconError, setFaviconError] = useState(false);
+	const { serverUrl } = useServerUrl();
 
 	// Get favicon URL for login items with a URL
 	const faviconUrl =
 		category === "login" && url && !faviconError
-			? getFaviconUrl(url, sizeMap[size].favicon)
+			? getFaviconUrl(url, sizeMap[size].favicon, serverUrl ?? undefined)
 			: null;
 
 	const { container, icon } = sizeMap[size];

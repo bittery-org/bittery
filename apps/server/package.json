@@ -21,8 +21,10 @@
 		"@bittery/auth": "workspace:*",
 		"@bittery/crypto-napi": "workspace:*",
 		"@bittery/db": "workspace:*",
+		"@bittery/favicon": "workspace:*",
 		"@bittery/jobs": "workspace:*",
 		"@bittery/pubsub": "workspace:*",
+		"@bittery/rate-limit": "workspace:*",
 		"@bittery/test-utils": "workspace:*"
 	},
 	"devDependencies": {

@@ -8,6 +8,7 @@ export const RATE_LIMIT_NAMESPACE = {
 	authRefreshSource: "auth_refresh_source",
 	authAnonymousGlobal: "auth_anonymous_global",
 	syncConnectSource: "sync_connect_source",
+	faviconFetchSource: "favicon_fetch_source",
 	shareCreateDaily: "share_create_daily",
 } as const;
 

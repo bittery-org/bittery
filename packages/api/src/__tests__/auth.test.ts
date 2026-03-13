@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { closeRateLimitAdapterForTests } from "@bittery/auth/rate-limit";
+import { closeRateLimitAdapterForTests } from "@bittery/rate-limit";
 import { db, signupVerification } from "@bittery/db";
 import { eq } from "drizzle-orm";
 import {

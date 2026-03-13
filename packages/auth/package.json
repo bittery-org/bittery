@@ -21,6 +21,7 @@
 	"dependencies": {
 		"@bittery/db": "workspace:*",
 		"@bittery/crypto-napi": "workspace:*",
+		"@bittery/rate-limit": "workspace:*",
 		"@bittery/types": "workspace:*",
 		"dotenv": "catalog:",
 		"zod": "catalog:",

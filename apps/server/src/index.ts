@@ -9,6 +9,7 @@ import { createContext } from "@bittery/api/context";
 import { appRouter } from "@bittery/api/routers/index";
 import { createPresignedDownload } from "@bittery/api/storage/s3";
 import runMigrations from "@bittery/db/migrate";
+import { faviconApp } from "@bittery/favicon";
 import { JobRunner } from "@bittery/jobs";
 import { createPubSubAdapter } from "@bittery/pubsub";
 import { parseCorsOrigins } from "@bittery/api/config/cors";
@@ -66,6 +67,8 @@ app.get("/cdn/*", async (c) => {
 		createPresignedDownload,
 	});
 });
+
+app.route("/favicon", faviconApp);
 
 app.use(
 	"/trpc/*",

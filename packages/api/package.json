@@ -32,6 +32,7 @@
 		"@bittery/auth": "workspace:*",
 		"@bittery/db": "workspace:*",
 		"@bittery/device": "workspace:*",
+		"@bittery/rate-limit": "workspace:*",
 		"@bittery/test-utils": "workspace:*",
 		"@trpc/client": "catalog:",
 		"@trpc/server": "catalog:",

@@ -58,6 +58,27 @@ services:
       start_period: 5s
       retries: 3
 
+  favicon:
+    image: ghcr.io/bittery-org/bittery-favicon:latest
+    restart: unless-stopped
+    profiles:
+      - cloud
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://bittery:${DB_PASSWORD}@postgres:5432/bittery}
+      - RATE_LIMIT_ADAPTER=${RATE_LIMIT_ADAPTER:-auto}
+      - RATE_LIMIT_REDIS_URL=${RATE_LIMIT_REDIS_URL:-}
+      - FAVICON_CACHE_ENABLED=false
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3010/healthz"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
   # Built-in PostgreSQL — activate with: docker compose --profile builtin-db up -d
   postgres:
     image: postgres:17-alpine
