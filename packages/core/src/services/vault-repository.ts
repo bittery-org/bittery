@@ -225,6 +225,56 @@ export class VaultRepository {
 		throw new Error("User ID not available for encryption context");
 	}
 
+	private getVersionCandidates(version: number): number[] {
+		const normalized =
+			Number.isFinite(version) && version > 0 ? Math.floor(version) : 1;
+		const candidates: number[] = [];
+		for (let candidate = normalized; candidate >= 1; candidate -= 1) {
+			candidates.push(candidate);
+		}
+		return candidates;
+	}
+
+	private async decryptItemPayload(
+		item: CachedEncryptedItem,
+		vaultKey: Uint8Array,
+		userId: string,
+	): Promise<string> {
+		let lastError: unknown = null;
+
+		for (const version of this.getVersionCandidates(item.version)) {
+			try {
+				const context = buildItemEncryptionContext({
+					vaultId: item.vaultId,
+					itemId: item.id,
+					version,
+					userId,
+				});
+				const decrypted = await this.crypto.decrypt(
+					{
+						ciphertext: item.encryptedData,
+						iv: item.encryptionIv,
+						algorithm: item.encryptionAlgorithm,
+					},
+					vaultKey,
+					context,
+				);
+
+				if (version !== item.version) {
+					console.warn(
+						`[VaultRepository] Recovered item ${item.id} with fallback encryption version ${version} (stored version ${item.version})`,
+					);
+				}
+
+				return decrypted;
+			} catch (error) {
+				lastError = error;
+			}
+		}
+
+		throw lastError ?? new Error(`Failed to decrypt item ${item.id}`);
+	}
+
 	private toCachedItem(item: VaultRepositoryItem): CachedEncryptedItem {
 		return {
 			id: item.id,
@@ -387,20 +437,10 @@ export class VaultRepository {
 	async decryptItem(item: CachedEncryptedItem): Promise<VaultRepositoryItem> {
 		const vaultKey = await this.decryptVaultKey(item.vaultId);
 		const userId = item.lastModifiedBy ?? (await this.resolveUserId());
-		const context = buildItemEncryptionContext({
-			vaultId: item.vaultId,
-			itemId: item.id,
-			version: item.version,
-			userId,
-		});
-		const decryptedData = await this.crypto.decrypt(
-			{
-				ciphertext: item.encryptedData,
-				iv: item.encryptionIv,
-				algorithm: item.encryptionAlgorithm,
-			},
+		const decryptedData = await this.decryptItemPayload(
+			item,
 			vaultKey,
-			context,
+			userId,
 		);
 		return this.buildItem(item, JSON.parse(decryptedData) as DecryptedItemData);
 	}
@@ -511,7 +551,6 @@ export class VaultRepository {
 			...existing,
 			favorite,
 			updatedAt: new Date().toISOString(),
-			version: existing.version + 1,
 		};
 		this.items.set(itemId, next);
 		await this.persistItem(this.toCachedItem(next));

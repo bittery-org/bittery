@@ -187,39 +187,55 @@ fn decrypt_item_payload(
         .as_deref()
         .filter(|value| !value.is_empty());
     if let Some(user_id) = user_id {
-        let version = normalize_item_version(Some(item.version));
-        match crypto_commands::crypto_decrypt_with_context(
+        let stored_version = normalize_item_version(Some(item.version));
+        let mut last_error: Option<String> = None;
+
+        for version in (1..=stored_version).rev() {
+            match crypto_commands::crypto_decrypt_with_context(
+                item.encrypted_data.clone(),
+                item.encryption_iv.clone(),
+                item.encryption_algorithm.clone(),
+                vault_key_base64.to_string(),
+                item.vault_id.clone(),
+                item.id.clone(),
+                "item".to_string(),
+                version,
+                user_id.to_string(),
+            ) {
+                Ok(decrypted_data) => {
+                    if version != stored_version {
+                        eprintln!(
+                            "[desktop-ipc] Recovered item {} with fallback encryption version {} (stored version {})",
+                            item.id, version, stored_version
+                        );
+                    }
+                    return Ok(normalize_decrypted_item_payload(decrypted_data));
+                }
+                Err(error) => {
+                    last_error = Some(format!("Decryption failed: {}", error));
+                }
+            }
+        }
+
+        let decrypted_data = crypto_commands::crypto_decrypt(
             item.encrypted_data.clone(),
             item.encryption_iv.clone(),
             item.encryption_algorithm.clone(),
             vault_key_base64.to_string(),
-            item.vault_id.clone(),
-            item.id.clone(),
-            "item".to_string(),
-            version,
-            user_id.to_string(),
-        ) {
-            Ok(decrypted_data) => return Ok(normalize_decrypted_item_payload(decrypted_data)),
-            Err(_) => {
-                let decrypted_data = crypto_commands::crypto_decrypt(
-                    item.encrypted_data.clone(),
-                    item.encryption_iv.clone(),
-                    item.encryption_algorithm.clone(),
-                    vault_key_base64.to_string(),
-                )
-                .map_err(|e| format!("Decryption failed: {}", e))?;
+        )
+        .map_err(|e| {
+            last_error.unwrap_or_else(|| format!("Decryption failed: {}", e))
+        })?;
 
-                let unwrapped = unwrap_plaintext_with_context(
-                    decrypted_data,
-                    &item.vault_id,
-                    &item.id,
-                    "item",
-                    version,
-                    user_id,
-                )?;
-                return Ok(normalize_decrypted_item_payload(unwrapped));
-            }
-        }
+        let unwrapped = unwrap_plaintext_with_context(
+            decrypted_data,
+            &item.vault_id,
+            &item.id,
+            "item",
+            stored_version,
+            user_id,
+        )?;
+        return Ok(normalize_decrypted_item_payload(unwrapped));
     }
 
     crypto_commands::crypto_decrypt(

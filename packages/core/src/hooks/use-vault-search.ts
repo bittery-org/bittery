@@ -97,6 +97,7 @@ export function useVaultSearch(query: string): SearchResult {
 		const matchingItems = items
 			.filter((item) => {
 				const searchable = [
+					item.id,
 					item.title,
 					item.url,
 					item.username,

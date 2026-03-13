@@ -138,6 +138,16 @@ export interface MoveItemResult {
 	_targetAccountEmail?: string;
 }
 
+type DecryptableItemRecord = {
+	id: string;
+	vaultId: string;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+	version?: number;
+	lastModifiedBy?: string | null;
+};
+
 interface ItemServiceDeps {
 	storage: IStorageAdapter;
 	crypto: ICrypto;
@@ -214,6 +224,64 @@ export class ItemService {
 		}
 
 		return merged;
+	}
+
+	private getVersionCandidates(version?: number): number[] {
+		const normalized =
+			typeof version === "number" && Number.isFinite(version) && version > 0
+				? Math.floor(version)
+				: 1;
+		const candidates: number[] = [];
+		for (let candidate = normalized; candidate >= 1; candidate -= 1) {
+			candidates.push(candidate);
+		}
+		return candidates;
+	}
+
+	private async decryptItemPayload(
+		item: DecryptableItemRecord,
+		vaultKey: Uint8Array,
+		fallbackUserId: string,
+	): Promise<string> {
+		const storedVersion =
+			typeof item.version === "number" && Number.isFinite(item.version)
+				? Math.floor(item.version)
+				: 1;
+		const userId = item.lastModifiedBy ?? fallbackUserId;
+		let lastError: unknown = null;
+
+		for (const version of this.getVersionCandidates(storedVersion)) {
+			try {
+				const context = buildItemEncryptionContext({
+					vaultId: item.vaultId,
+					itemId: item.id,
+					version,
+					userId,
+				});
+
+				const decrypted = await this.crypto.decrypt(
+					{
+						ciphertext: item.encryptedData,
+						iv: item.encryptionIv,
+						algorithm: item.encryptionAlgorithm,
+					},
+					vaultKey,
+					context,
+				);
+
+				if (version !== storedVersion) {
+					console.warn(
+						`[ItemService] Recovered item ${item.id} with fallback encryption version ${version} (stored version ${storedVersion})`,
+					);
+				}
+
+				return decrypted;
+			} catch (error) {
+				lastError = error;
+			}
+		}
+
+		throw lastError ?? new Error(`Failed to decrypt item ${item.id}`);
 	}
 
 	async reEncryptForVault(
@@ -411,21 +479,10 @@ export class ItemService {
 									throw new Error(`No vault key for vault ${rawItem.vaultId}`);
 								}
 
-								const context = buildItemEncryptionContext({
-									vaultId: rawItem.vaultId,
-									itemId: rawItem.id,
-									version: (rawItem as { version?: number }).version ?? 1,
-									userId: rawItem.lastModifiedBy ?? account.userId,
-								});
-
-								const decryptedData = await this.crypto.decrypt(
-									{
-										ciphertext: rawItem.encryptedData,
-										iv: rawItem.encryptionIv,
-										algorithm: rawItem.encryptionAlgorithm,
-									},
+								const decryptedData = await this.decryptItemPayload(
+									rawItem,
 									vaultKey,
-									context,
+									account.userId,
 								);
 
 								const parsedData = JSON.parse(
@@ -551,23 +608,10 @@ export class ItemService {
 		const decryptedItems = await Promise.all(
 			rawItems.map(async (item) => {
 				try {
-					const context = buildItemEncryptionContext({
-						vaultId: item.vaultId,
-						itemId: item.id,
-						version: (item as { version?: number }).version ?? 1,
-						userId:
-							(item as { lastModifiedBy?: string | null }).lastModifiedBy ??
-							ownerAccount.userId,
-					});
-
-					const decryptedData = await this.crypto.decrypt(
-						{
-							ciphertext: item.encryptedData,
-							iv: item.encryptionIv,
-							algorithm: item.encryptionAlgorithm,
-						},
+					const decryptedData = await this.decryptItemPayload(
+						item,
 						vaultKey,
-						context,
+						ownerAccount.userId,
 					);
 
 					const parsedData = JSON.parse(decryptedData) as DecryptedItemData;
@@ -666,24 +710,10 @@ export class ItemService {
 			);
 		}
 
-		const userId = rawItem.lastModifiedBy
-			? rawItem.lastModifiedBy
-			: await this.resolveUserId(accountEmail);
-		const context = buildItemEncryptionContext({
-			vaultId: rawItem.vaultId,
-			itemId: rawItem.id,
-			version: rawItem.version ?? 1,
-			userId,
-		});
-
-		const decryptedJson = await this.crypto.decrypt(
-			{
-				ciphertext: rawItem.encryptedData,
-				iv: rawItem.encryptionIv,
-				algorithm: rawItem.encryptionAlgorithm,
-			},
+		const decryptedJson = await this.decryptItemPayload(
+			rawItem,
 			vaultKey,
-			context,
+			await this.resolveUserId(accountEmail),
 		);
 
 		return {
@@ -748,23 +778,10 @@ export class ItemService {
 										);
 									}
 
-									const context = buildItemEncryptionContext({
-										vaultId: rawItem.vaultId,
-										itemId: rawItem.id,
-										version: (rawItem as { version?: number }).version ?? 1,
-										userId:
-											(rawItem as { lastModifiedBy?: string | null })
-												.lastModifiedBy ?? account.userId,
-									});
-
-									const decryptedData = await this.crypto.decrypt(
-										{
-											ciphertext: rawItem.encryptedData,
-											iv: rawItem.encryptionIv,
-											algorithm: rawItem.encryptionAlgorithm,
-										},
+									const decryptedData = await this.decryptItemPayload(
+										rawItem,
 										vaultKey,
-										context,
+										account.userId,
 									);
 
 									const parsedData = JSON.parse(decryptedData) as Record<
