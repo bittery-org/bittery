@@ -21,7 +21,9 @@ export function getItemAccountEmail(
 	item: UnifiedItem | DeletedItem | undefined,
 ): string | undefined {
 	return getItemAccountEmailCore(
-		item as { id: string; account?: { email?: string } } | undefined,
+		item as
+			| { id: string; accountEmail?: string; account?: { email?: string } }
+			| undefined,
 	);
 }
 
@@ -34,7 +36,11 @@ export function findAccountEmailForItem(
 ): string | undefined {
 	return findAccountForItemCore(
 		itemId,
-		items as Array<{ id: string; account?: { email?: string } }>,
+		items as Array<{
+			id: string;
+			accountEmail?: string;
+			account?: { email?: string };
+		}>,
 	);
 }
 

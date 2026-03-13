@@ -145,9 +145,7 @@ export function SearchCombobox() {
 										>
 											<div className="flex min-w-0 flex-1 items-center gap-2">
 												<Favicon
-													url={item.url}
-													title={item.title}
-													category={item.category}
+													item={item}
 													cardBrand={item.cardBrand}
 													size="sm"
 													className="size-6 shrink-0 rounded-md text-[10px]"

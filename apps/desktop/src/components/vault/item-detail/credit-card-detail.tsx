@@ -19,6 +19,7 @@ import type { CategoryDetailProps, CreditCardDisplayData } from "./shared";
 
 export function CreditCardDetail({
 	data,
+	serverUrl,
 	onEdit,
 	onDelete,
 	onTagsChange,
@@ -37,6 +38,7 @@ export function CreditCardDetail({
 				icon={
 					<Favicon
 						title={data.title}
+						serverUrl={serverUrl}
 						category="credit-card"
 						cardBrand={cardBrand}
 						size="lg"

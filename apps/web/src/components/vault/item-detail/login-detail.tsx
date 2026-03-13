@@ -1,6 +1,6 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: Thats fine here */
 
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { Button, Card, Input, Label } from "@bittery/ui";
 import {
 	IconCopyOutlineDuo18 as Copy,
@@ -20,7 +20,7 @@ import {
 } from "./shared";
 
 interface LoginDetailProps extends CategoryDetailProps<LoginDisplayData> {
-	item?: DecryptedItem;
+	item?: DecryptedItemWithContext;
 }
 
 export function LoginDetail({
@@ -50,7 +50,7 @@ export function LoginDetail({
 	return (
 		<div className="min-w-0 space-y-4">
 			<div className="flex items-center gap-4">
-				<Favicon url={data.url} title={data.title} category="login" size="lg" />
+				<Favicon item={item ? { ...item, url: data.url, category: "login" } : undefined} title={data.title} size="lg" />
 				<div className="min-w-0 flex-1">
 					<h2 className="truncate font-semibold text-2xl tracking-tight">
 						{data.title}

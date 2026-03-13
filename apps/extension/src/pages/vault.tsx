@@ -1,4 +1,4 @@
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { Badge, Button, cn, Input, Skeleton, toast } from "@bittery/ui";
 import {
 	IconCircleKeyOutlineDuo18,
@@ -15,7 +15,7 @@ import { Favicon } from "@/components/favicon";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
 import { storage } from "@/lib/storage";
 
-type MultiAccountItem = DecryptedItem & {
+type MultiAccountItem = DecryptedItemWithContext & {
 	account?: {
 		email: string;
 		userId: string;
@@ -109,7 +109,9 @@ function ItemListRow({
 	isAllAccountsMode,
 	onClick,
 }: {
-	item: DecryptedItem & { account?: { name: string } };
+	item: DecryptedItemWithContext & {
+		account?: { name: string; serverUrl?: string };
+	};
 	isSelected: boolean;
 	isAllAccountsMode: boolean;
 	onClick: () => void;
@@ -131,12 +133,7 @@ function ItemListRow({
 			type="button"
 		>
 			<div className="flex min-w-0 items-center gap-3">
-				<Favicon
-					url={item.url}
-					title={title}
-					category={item.category}
-					size="sm"
-				/>
+				<Favicon item={item} title={title} size="sm" />
 				<div className="min-w-0 flex-1">
 					<div className="flex items-center gap-1.5">
 						<span className="truncate font-medium text-sm">{title}</span>
@@ -225,7 +222,7 @@ export function VaultPage() {
 	});
 	const currentHostname = currentHostnameQuery.data ?? null;
 
-	const { data: items = [], isLoading } = useQuery<DecryptedItem[]>({
+	const { data: items = [], isLoading } = useQuery<DecryptedItemWithContext[]>({
 		queryKey: ["vault-items"],
 		queryFn: async () => {
 			const response = await chrome.runtime.sendMessage({

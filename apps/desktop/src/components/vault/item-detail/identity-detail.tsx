@@ -26,6 +26,7 @@ import {
 
 export function IdentityDetail({
 	data,
+	serverUrl,
 	onEdit,
 	onDelete,
 	onTagsChange,
@@ -56,7 +57,14 @@ export function IdentityDetail({
 	return (
 		<div className="space-y-4">
 			<DetailHeader
-				icon={<Favicon title={data.title} category="identity" size="lg" />}
+				icon={
+					<Favicon
+						title={data.title}
+						serverUrl={serverUrl}
+						category="identity"
+						size="lg"
+					/>
+				}
 				title={data.title}
 				subtitle={fullName}
 			/>

@@ -28,6 +28,7 @@ interface ItemHeaderProps {
 	item: {
 		category: ItemCategory;
 		url?: string;
+		serverUrl?: string;
 		title: string;
 		favorite?: boolean;
 	};
@@ -69,6 +70,7 @@ export function ItemHeader({
 			<ItemIcon
 				category={item.category}
 				url={item.url}
+				serverUrl={item.serverUrl}
 				size="md"
 				className="mr-3"
 			/>

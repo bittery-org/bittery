@@ -95,6 +95,7 @@ function formatStatusDate(
 
 export function LoginDetail({
 	data,
+	serverUrl,
 	onEdit,
 	onDelete,
 	onRemovePasskey,
@@ -151,6 +152,7 @@ export function LoginDetail({
 						<Favicon
 							url={data.url}
 							title={data.title}
+							serverUrl={serverUrl}
 							category="login"
 							size="lg"
 						/>

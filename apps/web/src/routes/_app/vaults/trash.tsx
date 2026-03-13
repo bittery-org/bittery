@@ -190,12 +190,7 @@ function VaultTrashPage() {
 										className="group rounded-xl border bg-card p-4 transition-colors hover:bg-muted/20"
 									>
 										<div className="flex min-w-0 items-center gap-3">
-											<Favicon
-												url={item.url}
-												title={title}
-												category={item.category}
-												size="sm"
-											/>
+											<Favicon item={item} title={title} size="sm" />
 
 											<div className="min-w-0 flex-1">
 												<div className="truncate font-medium">{title}</div>

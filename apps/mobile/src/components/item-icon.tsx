@@ -1,5 +1,5 @@
-import { getFaviconUrl } from "@bittery/shared/favicon";
-import type { ItemCategory } from "@bittery/shared/types";
+import { getFaviconUrl, getItemFaviconUrl } from "@bittery/shared/favicon";
+import type { DecryptedItemWithContext, ItemCategory } from "@bittery/shared/types";
 import { CreditCard, FileText, Key, Timer, User } from "lucide-react-native";
 import { useState } from "react";
 import { Image, View } from "react-native";
@@ -30,8 +30,13 @@ const categoryIcons: Record<
 };
 
 interface ItemIconProps {
+	item?: Pick<
+		DecryptedItemWithContext,
+		"url" | "category" | "serverUrl" | "account"
+	>;
 	category: ItemCategory;
 	url?: string;
+	serverUrl?: string;
 	/** Size of the container (default: 32px for 8 Tailwind units) */
 	size?: "sm" | "md" | "lg";
 	/** Custom className for the container */
@@ -45,19 +50,34 @@ const sizeMap = {
 };
 
 export function ItemIcon({
+	item,
 	category,
 	url,
+	serverUrl,
 	size = "sm",
 	className,
 }: ItemIconProps) {
-	const Icon = categoryIcons[category];
+	const resolvedCategory = item?.category ?? category;
+	const Icon = categoryIcons[resolvedCategory];
 	const [faviconError, setFaviconError] = useState(false);
-	const { serverUrl } = useServerUrl();
+	const { serverUrl: contextServerUrl } = useServerUrl();
 
 	// Get favicon URL for login items with a URL
 	const faviconUrl =
-		category === "login" && url && !faviconError
-			? getFaviconUrl(url, sizeMap[size].favicon, serverUrl ?? undefined)
+		resolvedCategory === "login" && !faviconError
+			? item
+				? getItemFaviconUrl(
+						item,
+						sizeMap[size].favicon,
+						serverUrl ?? (contextServerUrl ?? undefined),
+				  )
+				: url
+					? getFaviconUrl(
+							url,
+							sizeMap[size].favicon,
+							serverUrl ?? (contextServerUrl ?? undefined),
+					  )
+					: null
 			: null;
 
 	const { container, icon } = sizeMap[size];

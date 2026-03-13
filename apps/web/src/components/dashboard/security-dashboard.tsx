@@ -657,12 +657,7 @@ function PasswordIssueItem({
 			className="group block"
 		>
 			<div className="flex items-center gap-3 rounded-xl border border-border/60 bg-background/50 p-3 transition-all hover:border-primary/45 hover:bg-muted/40">
-				<Favicon
-					url={item.url}
-					title={item.title}
-					category={item.category}
-					size="sm"
-				/>
+				<Favicon item={item} size="sm" />
 				<div className="min-w-0 flex-1 space-y-1">
 					<div className="flex items-center gap-2">
 						<span className="truncate font-medium">{item.title}</span>

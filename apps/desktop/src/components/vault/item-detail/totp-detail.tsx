@@ -18,6 +18,7 @@ import {
 
 export function TotpDetail({
 	data,
+	serverUrl,
 	onEdit,
 	onDelete,
 	onTagsChange,
@@ -74,7 +75,14 @@ export function TotpDetail({
 	return (
 		<div className="space-y-4">
 			<DetailHeader
-				icon={<Favicon title={data.title} category="totp" size="lg" />}
+				icon={
+					<Favicon
+						title={data.title}
+						serverUrl={serverUrl}
+						category="totp"
+						size="lg"
+					/>
+				}
 				title={data.title}
 				subtitle={subtitle}
 			/>

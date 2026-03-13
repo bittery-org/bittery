@@ -1,8 +1,9 @@
 import type {
-	DecryptedItem,
 	DecryptedItemData,
+	DecryptedItemWithContext,
 	Passkey,
 } from "@bittery/shared/types";
+import { getItemServerUrl } from "@bittery/shared/favicon";
 import { storage } from "../lib/storage";
 import {
 	buildPasskeyAttestationObject,
@@ -29,15 +30,13 @@ import type {
 	SerializedGetResult,
 } from "../passkey/types";
 import { core } from "./core-instance";
-import {
-	ensureDesktopWriteCapability,
-	hydrateDesktopAccountMaterial,
-} from "./desktop-key-material";
+import { ensureDesktopWriteCapability } from "./desktop-key-material";
 import { desktopSync } from "./desktop-sync";
 import {
 	onLocalItemCreated,
 	onLocalItemUpdated,
 } from "./services/local-item-cache-service";
+import { resolveAccountEmailForVault } from "./services/account-resolution";
 import {
 	isUnlocked,
 	setDesktopModeSentinel,
@@ -49,9 +48,10 @@ import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
 const PASSKEY_TRANSPORTS: string[] = ["internal", "hybrid"];
 
-type LoginItemWithAccount = DecryptedItem & {
+type LoginItemWithAccount = DecryptedItemWithContext & {
 	account?: {
 		email?: string;
+		serverUrl?: string;
 	};
 	vault?: {
 		name?: string;
@@ -110,6 +110,10 @@ type CreateDecisionResolution =
 			kind: "invalid";
 			reason: string;
 	  };
+
+function getItemAccountEmail(item: LoginItemWithAccount): string | undefined {
+	return item.accountEmail ?? item.account?.email;
+}
 
 function logPasskeyEvent(
 	event: PasskeyEventName,
@@ -268,51 +272,20 @@ async function getLoginItems(): Promise<LoginItemWithAccount[]> {
 	});
 }
 
-async function resolveAccountEmailForVault(
-	vaultId: string,
-): Promise<string | undefined> {
-	const activeAccount = await storage.getActiveAccount();
-	if (activeAccount?.type === "single") {
-		return activeAccount.email;
-	}
-
-	const localUnlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
-	const desktopStatus = desktopSync.getLastStatus();
-	const desktopUnlockedEmails =
-		desktopStatus?.available && !desktopStatus.locked
-			? (desktopStatus.unlockedAccounts ?? [])
-			: [];
-
-	const unlockedEmails = Array.from(
-		new Set([...localUnlockedEmails, ...desktopUnlockedEmails]),
-	);
-
-	for (const email of unlockedEmails) {
-		await hydrateDesktopAccountMaterial(email);
-		let vaultKeys = await storage.getVaultKeys(email);
-		if (!vaultKeys || vaultKeys.length === 0) {
-			const hydrated = await ensureDesktopWriteCapability(email);
-			if (hydrated) {
-				vaultKeys = await storage.getVaultKeys(email);
-			}
-		}
-		if (vaultKeys?.some((vaultKey) => vaultKey.vaultId === vaultId)) {
-			return email;
-		}
-	}
-
-	return undefined;
-}
-
 async function resolveAccountEmailForItem(
 	item: LoginItemWithAccount,
 ): Promise<string | undefined> {
+	const itemAccountEmail = getItemAccountEmail(item);
+	if (itemAccountEmail) {
+		return itemAccountEmail;
+	}
+
 	const activeAccount = await storage.getActiveAccount();
 	if (activeAccount?.type !== "all") {
 		return activeAccount?.type === "single" ? activeAccount.email : undefined;
 	}
 
-	return item.account?.email;
+	return undefined;
 }
 
 function allowCredentialIds(
@@ -376,6 +349,14 @@ function normalizeVaultType(type: string): "personal" | "team" {
 	return type === "team" ? "team" : "personal";
 }
 
+function readVaultAccountEmail(vault: unknown): string | undefined {
+	if (!vault || typeof vault !== "object") {
+		return undefined;
+	}
+	const value = (vault as { accountEmail?: unknown }).accountEmail;
+	return typeof value === "string" ? value : undefined;
+}
+
 async function getWritableVaultOptions(): Promise<
 	PasskeyWritableVaultOption[]
 > {
@@ -384,6 +365,7 @@ async function getWritableVaultOptions(): Promise<
 		.map((vault) => ({
 			id: vault.id,
 			name: vault.name,
+			accountEmail: readVaultAccountEmail(vault),
 			type: normalizeVaultType(vault.type),
 			role: normalizeVaultRole(vault.role),
 		}))
@@ -416,11 +398,12 @@ function buildGetPromptOption(match: MatchedPasskey): PasskeyGetPromptOption {
 		itemId: match.item.id,
 		itemTitle: match.item.title,
 		itemUrl: match.item.url,
+		serverUrl: getItemServerUrl(match.item),
 		itemUsername: match.item.username,
 		passkeyUserName: match.passkey.userName,
 		passkeyUserDisplayName: match.passkey.userDisplayName,
 		vaultName: match.item.vault?.name,
-		accountEmail: match.item.account?.email,
+		accountEmail: getItemAccountEmail(match.item),
 		createdAt: match.passkey.createdAt,
 		lastUsedAt: match.passkey.lastUsedAt,
 	};
@@ -436,9 +419,10 @@ function buildCreateExistingItemOption(
 		vaultId: item.vaultId,
 		itemTitle: item.title,
 		itemUrl: item.url,
+		serverUrl: getItemServerUrl(item),
 		itemUsername: item.username,
 		vaultName: item.vault?.name,
-		accountEmail: item.account?.email,
+		accountEmail: getItemAccountEmail(item),
 		lastUsedAt: recentPasskey?.lastUsedAt ?? recentPasskey?.createdAt,
 	};
 }
@@ -618,7 +602,9 @@ async function createItemWithPasskey(input: {
 	passkey: Passkey;
 	targetVault: PasskeyWritableVaultOption;
 }): Promise<void> {
-	const accountEmail = await resolveAccountEmailForVault(input.targetVault.id);
+	const accountEmail =
+		input.targetVault.accountEmail ??
+		(await resolveAccountEmailForVault(input.targetVault.id));
 	if (!accountEmail) {
 		throw new Error("Unable to resolve account for writable vault");
 	}

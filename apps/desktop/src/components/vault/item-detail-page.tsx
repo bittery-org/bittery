@@ -5,6 +5,7 @@ import {
 	useToggleFavorite,
 	useUpdateItem,
 } from "@bittery/core/hooks";
+import { getItemServerUrl } from "@bittery/shared/favicon";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
 import {
 	Button,
@@ -390,6 +391,7 @@ export function ItemDetailPage({
 					<ItemDetail
 						category={rawItem?.category ?? "login"}
 						data={decryptedData}
+						serverUrl={rawItem ? getItemServerUrl(rawItem) : undefined}
 						onRemovePasskey={handleRemovePasskey}
 						onTagsChange={handleTagsChange}
 						onTagClick={onTagClick}

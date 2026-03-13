@@ -3,13 +3,17 @@
  * Shared helpers for vault operations.
  */
 
-import type { DecryptedItem, ItemCategory, Passkey } from "@bittery/shared/types";
+import type {
+	DecryptedItemWithContext,
+	ItemCategory,
+	Passkey,
+} from "@bittery/shared/types";
 import { storage } from "../lib/storage";
 import { core } from "./core-instance";
 import { desktopClient } from "./desktop-client";
 import { desktopSync } from "./desktop-sync";
 
-type MultiAccountItem = DecryptedItem & {
+type MultiAccountItem = DecryptedItemWithContext & {
 	vault: {
 		id: string;
 		name: string;
@@ -239,7 +243,7 @@ async function getLocalCoordinatorItems(): Promise<MultiAccountItem[]> {
  * Uses desktop snapshots in desktop mode and falls back to core/local decryption.
  */
 export async function getDecryptedItemsForCurrentMode(): Promise<
-	Array<DecryptedItem | null>
+	Array<DecryptedItemWithContext | null>
 > {
 	const desktopStatus =
 		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());

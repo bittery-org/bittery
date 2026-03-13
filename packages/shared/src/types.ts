@@ -128,6 +128,23 @@ export interface DecryptedItem extends DecryptedItemData {
 	updatedAt: string;
 }
 
+export interface ItemAccountContext {
+	email?: string;
+	userId?: string;
+	name?: string;
+	serverUrl?: string;
+	teamName?: string;
+	teamAvatarUrl?: string | null;
+}
+
+export interface ItemContextMetadata {
+	accountEmail?: string;
+	serverUrl?: string;
+	account?: ItemAccountContext | null;
+}
+
+export type DecryptedItemWithContext = DecryptedItem & ItemContextMetadata;
+
 /**
  * Category-specific display data types for read-only item views
  */

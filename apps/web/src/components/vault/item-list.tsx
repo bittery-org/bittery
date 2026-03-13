@@ -484,13 +484,7 @@ function ItemRow({
 
 			{/* Content - pointer-events-none so clicks pass through to overlay */}
 			<div className="pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-3">
-				<Favicon
-					url={item.url}
-					title={item.title}
-					category={item.category}
-					cardBrand={cardBrand}
-					size="md"
-				/>
+				<Favicon item={item} cardBrand={cardBrand} size="md" />
 				<div className="min-w-0 flex-1">
 					<div className="flex items-center gap-2">
 						<span className="truncate font-medium">{item.title}</span>

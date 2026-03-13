@@ -3,17 +3,17 @@
  * Handles saving and updating credentials (password capture).
  */
 
-import { storage } from "../lib/storage";
-import { core } from "./core-instance";
 import {
 	ensureDesktopWriteCapability,
-	hydrateDesktopAccountMaterial,
 } from "./desktop-key-material";
-import { desktopSync } from "./desktop-sync";
 import {
 	onLocalItemCreated,
 	onLocalItemUpdated,
 } from "./services/local-item-cache-service";
+import {
+	resolveAccountEmailForItemId,
+	resolveAccountEmailForVault,
+} from "./services/account-resolution";
 import {
 	ensureUnlockedOrRecoverFromDesktop,
 	updateActivity,
@@ -39,58 +39,6 @@ function extractHostname(url: string): string {
 
 async function getAllItemsForMatching() {
 	return getDecryptedItemsForCurrentMode();
-}
-
-async function resolveAccountEmailForVault(
-	vaultId: string,
-): Promise<string | undefined> {
-	const activeAccount = await storage.getActiveAccount();
-	if (activeAccount?.type === "single") {
-		return activeAccount.email;
-	}
-
-	const localUnlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
-	const desktopStatus = desktopSync.getLastStatus();
-	const desktopUnlockedEmails =
-		desktopStatus?.available && !desktopStatus.locked
-			? (desktopStatus.unlockedAccounts ?? [])
-			: [];
-
-	const unlockedEmails = Array.from(
-		new Set([...localUnlockedEmails, ...desktopUnlockedEmails]),
-	);
-
-	for (const email of unlockedEmails) {
-		await hydrateDesktopAccountMaterial(email);
-		let vaultKeys = await storage.getVaultKeys(email);
-		if (!vaultKeys || vaultKeys.length === 0) {
-			const hydrated = await ensureDesktopWriteCapability(email);
-			if (hydrated) {
-				vaultKeys = await storage.getVaultKeys(email);
-			}
-		}
-		if (vaultKeys?.some((vaultKey) => vaultKey.vaultId === vaultId)) {
-			return email;
-		}
-	}
-
-	return undefined;
-}
-
-async function resolveAccountEmailForItem(
-	itemId: string,
-): Promise<string | undefined> {
-	const activeAccount = await storage.getActiveAccount();
-	if (activeAccount?.type !== "all") {
-		return undefined;
-	}
-
-	const items = await getAllItemsForMatching();
-	const item = items.find((candidate) => candidate?.id === itemId) as
-		| { account?: { email?: string } }
-		| undefined;
-
-	return item?.account?.email;
 }
 
 /**
@@ -309,13 +257,10 @@ export async function handleUpdateExistingCredential(payload: {
 	}
 
 	try {
-		let accountEmail = await resolveAccountEmailForItem(itemId);
-		if (!accountEmail) {
-			const activeAccount = await storage.getActiveAccount();
-			if (activeAccount?.type === "single") {
-				accountEmail = activeAccount.email;
-			}
-		}
+		const accountEmail = await resolveAccountEmailForItemId(
+			itemId,
+			getAllItemsForMatching,
+		);
 
 		if (!accountEmail) {
 			return {

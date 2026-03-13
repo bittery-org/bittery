@@ -1,4 +1,5 @@
 import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
+import type { ItemContextMetadata } from "@bittery/shared/types";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ActiveAccount } from "@bittery/storage/types";
 
@@ -24,11 +25,8 @@ export interface ResolveAccountsResult {
 	isAllAccountsMode: boolean;
 }
 
-export interface ItemWithOptionalAccount {
+export interface ItemWithOptionalAccount extends ItemContextMetadata {
 	id: string;
-	account?: {
-		email?: string;
-	} | null;
 }
 
 /**
@@ -38,7 +36,7 @@ export function getItemAccountEmail(
 	item: ItemWithOptionalAccount | null | undefined,
 ): string | undefined {
 	if (!item) return undefined;
-	return item.account?.email;
+	return item.accountEmail ?? item.account?.email;
 }
 
 /**

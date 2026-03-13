@@ -486,12 +486,7 @@ export function ItemDetailPanel({ item, onItemUpdated }: ItemDetailPanelProps) {
 	return (
 		<div className="space-y-4">
 			<div className="flex items-center gap-4">
-				<Favicon
-					url={isSecureNote ? undefined : item.url}
-					title={item.title}
-					category={item.category}
-					size="lg"
-				/>
+				<Favicon item={isSecureNote ? { ...item, url: undefined } : item} size="lg" />
 				<div className="min-w-0 flex-1">
 					<h2 className="truncate font-semibold text-lg tracking-tight">
 						{item.title}

@@ -185,6 +185,7 @@ function PasskeyPickerIframe() {
 											option.itemUrl ||
 											option.passkeyUserName
 										}
+										serverUrl={option.serverUrl}
 										category="login"
 										size="sm"
 									/>

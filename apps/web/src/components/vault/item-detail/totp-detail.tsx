@@ -3,7 +3,7 @@ import {
 	generateTotp,
 	type TotpResult,
 } from "@bittery/shared/totp";
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { Button, Card, cn, Input, Label } from "@bittery/ui";
 import {
 	IconCopyOutlineDuo18 as Copy,
@@ -21,7 +21,7 @@ import {
 } from "./shared";
 
 interface TotpDetailProps extends CategoryDetailProps<TotpDisplayData> {
-	item?: DecryptedItem;
+	item?: DecryptedItemWithContext;
 }
 
 export function TotpDetail({ data, onEdit, onDelete, item }: TotpDetailProps) {
@@ -71,7 +71,7 @@ export function TotpDetail({ data, onEdit, onDelete, item }: TotpDetailProps) {
 	return (
 		<div className="space-y-4">
 			<div className="flex items-center gap-4">
-				<Favicon title={data.title} category="totp" size="lg" />
+				<Favicon item={item ? { ...item, category: "totp" } : undefined} title={data.title} size="lg" />
 				<div className="min-w-0 flex-1">
 					<h2 className="truncate font-semibold text-2xl tracking-tight">
 						{data.title}

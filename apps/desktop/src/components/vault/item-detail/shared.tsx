@@ -29,6 +29,7 @@ export type ItemDetailData =
 export interface ItemDetailProps {
 	category: ItemCategory;
 	data: ItemDetailData;
+	serverUrl?: string;
 	onEdit?: () => void;
 	onDelete?: () => void;
 	onRemovePasskey?: (credentialId: string) => Promise<void> | void;
@@ -40,6 +41,7 @@ export interface ItemDetailProps {
 
 export interface CategoryDetailProps<T> {
 	data: T;
+	serverUrl?: string;
 	onEdit?: () => void;
 	onDelete?: () => void;
 	onRemovePasskey?: (credentialId: string) => Promise<void> | void;

@@ -23,6 +23,8 @@ export interface VaultView {
 }
 
 export interface VaultRepositoryItem extends DecryptedItem {
+	accountEmail?: string;
+	serverUrl?: string;
 	deletedAt: string | null;
 	version: number;
 	lastModifiedBy: string | null;
@@ -96,6 +98,7 @@ export interface BootstrapItemsClient {
 
 export class VaultRepository {
 	readonly supportsItemCache = true;
+	private readonly fallbackServerUrl = "http://localhost:3000";
 
 	private readonly items = new Map<string, VaultRepositoryItem>();
 	private readonly vaults = new Map<string, CachedVaultMetadata>();
@@ -106,15 +109,27 @@ export class VaultRepository {
 	private hydrated = false;
 	private hydrating = false;
 	private hasCacheSnapshotFlag = false;
+	private serverUrl?: string;
 
 	constructor(
 		private readonly crypto: ICrypto,
 		private readonly storage: IStorageAdapter,
 		private readonly email?: string,
-	) {}
+		serverUrl?: string,
+	) {
+		this.serverUrl = serverUrl;
+	}
 
 	getEmail(): string | undefined {
 		return this.email;
+	}
+
+	getServerUrl(): string | undefined {
+		return this.serverUrl;
+	}
+
+	setServerUrl(serverUrl?: string): void {
+		this.serverUrl = serverUrl ?? undefined;
 	}
 
 	isHydrated(): boolean {
@@ -149,6 +164,10 @@ export class VaultRepository {
 
 	getVaults(): CachedVaultMetadata[] {
 		return Array.from(this.vaults.values());
+	}
+
+	getVaultById(vaultId: string): CachedVaultMetadata | undefined {
+		return this.vaults.get(vaultId);
 	}
 
 	getVaultKeys(): VaultKeyData[] {
@@ -279,6 +298,9 @@ export class VaultRepository {
 		return {
 			id: item.id,
 			vaultId: item.vaultId,
+			accountEmail: item.accountEmail ?? this.email,
+			serverUrl:
+				item.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
 			category: item.category,
 			favorite: item.favorite,
 			encryptedData: item._encrypted.data,
@@ -310,6 +332,8 @@ export class VaultRepository {
 
 			this.vaults.set(vaultKey.vaultId, {
 				id: vaultKey.vaultId,
+				accountEmail: this.email,
+				serverUrl: this.serverUrl ?? this.fallbackServerUrl,
 				name: vaultKey.vaultName,
 				type: vaultKey.vaultType,
 				icon: vaultKey.vaultIcon ?? null,
@@ -342,6 +366,17 @@ export class VaultRepository {
 		}
 	}
 
+	private async ensureServerUrl(): Promise<void> {
+		if (this.serverUrl) {
+			return;
+		}
+		if (!this.email) {
+			return;
+		}
+		this.serverUrl =
+			(await this.storage.getServerUrl(this.email)) ?? this.fallbackServerUrl;
+	}
+
 	private async persistItem(item: CachedEncryptedItem): Promise<void> {
 		if (!this.storage.upsertCachedItem) {
 			return;
@@ -356,6 +391,8 @@ export class VaultRepository {
 		return {
 			id: cached.id,
 			vaultId: cached.vaultId,
+			accountEmail: cached.accountEmail ?? this.email,
+			serverUrl: cached.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
 			category: cached.category as DecryptedItem["category"],
 			favorite: cached.favorite,
 			createdAt: cached.createdAt,
@@ -467,6 +504,9 @@ export class VaultRepository {
 		const next: VaultRepositoryItem = {
 			...existing,
 			...item,
+			accountEmail: existing?.accountEmail ?? this.email,
+			serverUrl:
+				existing?.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
 			updatedAt: existing ? now : item.updatedAt,
 			createdAt: existing ? existing.createdAt : item.createdAt,
 			deletedAt: existing?.deletedAt ?? null,
@@ -613,6 +653,7 @@ export class VaultRepository {
 		this.emit();
 
 		try {
+			await this.ensureServerUrl();
 			const [cachedItems, cachedVaults, cacheMeta, storedVaultKeys] =
 				await Promise.all([
 					this.storage.getCachedItems?.(this.email),
@@ -626,11 +667,17 @@ export class VaultRepository {
 			this.vaultKeyEntries.clear();
 
 			for (const vault of cachedVaults ?? []) {
+				if (!this.serverUrl && vault.serverUrl) {
+					this.serverUrl = vault.serverUrl;
+				}
 				this.vaults.set(vault.id, vault);
 			}
 			this.mergeVaultKeyEntries(storedVaultKeys);
 
 			for (const cachedItem of cachedItems ?? []) {
+				if (!this.serverUrl && cachedItem.serverUrl) {
+					this.serverUrl = cachedItem.serverUrl;
+				}
 				try {
 					const decrypted = await this.decryptItem(cachedItem);
 					this.items.set(cachedItem.id, decrypted);
@@ -654,6 +701,8 @@ export class VaultRepository {
 	}
 
 	async hydrateFromServer(client: BootstrapItemsClient): Promise<void> {
+		await this.ensureServerUrl();
+
 		let cursor: string | undefined;
 		const cachedItems: CachedEncryptedItem[] = [];
 		const vaults = new Map<string, CachedVaultMetadata>();
@@ -668,6 +717,8 @@ export class VaultRepository {
 				const cachedItem: CachedEncryptedItem = {
 					id: rawItem.id,
 					vaultId: rawItem.vaultId,
+					accountEmail: this.email,
+					serverUrl: this.serverUrl ?? this.fallbackServerUrl,
 					category: rawItem.category,
 					favorite: rawItem.favorite,
 					encryptedData: rawItem.encryptedData,
@@ -684,6 +735,8 @@ export class VaultRepository {
 
 				vaults.set(rawItem.vault.id, {
 					id: rawItem.vault.id,
+					accountEmail: this.email,
+					serverUrl: this.serverUrl ?? this.fallbackServerUrl,
 					name: rawItem.vault.name,
 					type: rawItem.vault.type,
 					icon: rawItem.vault.icon,
@@ -778,7 +831,12 @@ export class VaultRepository {
 		if (!this.shouldHandleEmail(email)) {
 			return;
 		}
-		this.vaults.set(vault.id, vault);
+		this.vaults.set(vault.id, {
+			...vault,
+			accountEmail: vault.accountEmail ?? this.email,
+			serverUrl:
+				vault.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
+		});
 		const existingVaultKey = this.vaultKeyEntries.get(vault.id);
 		if (existingVaultKey) {
 			this.vaultKeyEntries.set(vault.id, {

@@ -1,5 +1,10 @@
-import { getDomainFromUrl, getFaviconUrl } from "@bittery/shared/favicon";
-import type { ItemCategory } from "@bittery/shared/types";
+import {
+	getDomainFromUrl,
+	getFaviconUrl,
+	getItemFaviconUrl,
+	getItemServerUrl,
+} from "@bittery/shared/favicon";
+import type { DecryptedItemWithContext, ItemCategory } from "@bittery/shared/types";
 import { cn } from "@bittery/ui";
 import {
 	IconCreditCardLockOutlineDuo18,
@@ -12,8 +17,15 @@ import { useState } from "react";
 import { readCurrentAuthServerUrl } from "@/lib/auth-server";
 
 interface FaviconProps {
+	item?: Pick<
+		DecryptedItemWithContext,
+		"url" | "category" | "serverUrl" | "account"
+	> & {
+		title?: string;
+	};
 	url?: string;
-	title: string;
+	title?: string;
+	serverUrl?: string;
 	category?: ItemCategory;
 	cardBrand?: string;
 	size?: "sm" | "md" | "lg";
@@ -73,29 +85,43 @@ function getAvatarColor(title: string): string {
 }
 
 export function Favicon({
+	item,
 	url,
 	title,
+	serverUrl,
 	category = "login",
 	cardBrand,
 	size = "md",
 	className,
 }: FaviconProps) {
-	const [imageError, setImageError] = useState(false);
+	const [failedFaviconUrl, setFailedFaviconUrl] = useState<string | null>(null);
 
 	const faviconSizeMap = {
 		sm: 64,
 		md: 64,
 		lg: 128,
 	} as const;
-	const serverUrl = readCurrentAuthServerUrl();
+	const resolvedServerUrl = item
+		? getItemServerUrl(item, serverUrl ?? readCurrentAuthServerUrl())
+		: serverUrl ?? readCurrentAuthServerUrl();
+	const resolvedUrl = item?.url ?? url;
+	const resolvedCategory = item?.category ?? category;
+	const resolvedTitle = item?.title ?? title ?? "";
 
 	const faviconUrl =
-		url && category === "login"
-			? getFaviconUrl(url, faviconSizeMap[size], serverUrl)
+		resolvedUrl && resolvedCategory === "login"
+			? item
+				? getItemFaviconUrl(
+						item,
+						faviconSizeMap[size],
+						serverUrl ?? readCurrentAuthServerUrl(),
+				  )
+				: getFaviconUrl(resolvedUrl, faviconSizeMap[size], resolvedServerUrl)
 			: null;
-	const domain = url ? getDomainFromUrl(url) : null;
-	const initials = getInitials(domain || title);
-	const avatarColor = getAvatarColor(domain || title);
+	const hasFaviconError = Boolean(faviconUrl && failedFaviconUrl === faviconUrl);
+	const domain = resolvedUrl ? getDomainFromUrl(resolvedUrl) : null;
+	const initials = getInitials(domain || resolvedTitle);
+	const avatarColor = getAvatarColor(domain || resolvedTitle);
 
 	const sizeClasses = {
 		sm: "w-8 h-8 text-xs",
@@ -136,41 +162,41 @@ export function Favicon({
 			className={cn(
 				"flex shrink-0 items-center justify-center overflow-hidden rounded-xl border",
 				sizeClasses[size],
-				category === "credit-card"
+				resolvedCategory === "credit-card"
 					? cardColor
-					: imageError || !faviconUrl
+					: hasFaviconError || !faviconUrl
 						? avatarColor
 						: "bg-accent",
 				className,
 			)}
 		>
-			{category === "login" && faviconUrl && !imageError ? (
+			{resolvedCategory === "login" && faviconUrl && !hasFaviconError ? (
 				<img
 					src={faviconUrl}
 					alt=""
 					className={cn(imageSizes[size], "rounded-lg", "object-contain")}
-					onError={() => setImageError(true)}
+					onError={() => setFailedFaviconUrl(faviconUrl)}
 				/>
-			) : category === "login" && url ? (
+			) : resolvedCategory === "login" && resolvedUrl ? (
 				<span className="select-none font-semibold text-zinc-700">
 					{initials}
 				</span>
-			) : category === "login" ? (
+			) : resolvedCategory === "login" ? (
 				<IconEarthOutlineDuo18
 					className="text-muted-foreground"
 					size={iconSizes[size]}
 				/>
-			) : category === "credit-card" ? (
+			) : resolvedCategory === "credit-card" ? (
 				<IconCreditCardLockOutlineDuo18
 					className="text-white"
 					size={iconSizes[size]}
 				/>
-			) : category === "identity" ? (
+			) : resolvedCategory === "identity" ? (
 				<IconUserOutlineDuo18
 					className="text-muted-foreground"
 					size={iconSizes[size]}
 				/>
-			) : category === "totp" ? (
+			) : resolvedCategory === "totp" ? (
 				<IconMobileOutlineDuo18
 					className="text-muted-foreground"
 					size={iconSizes[size]}

@@ -8,7 +8,7 @@ import {
 	maskPassportNumber,
 	maskSSN,
 } from "@bittery/shared/identity";
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { Button, Card, Input, Label } from "@bittery/ui";
 import {
 	IconCopyOutlineDuo18 as Copy,
@@ -26,7 +26,7 @@ import {
 } from "./shared";
 
 interface IdentityDetailProps extends CategoryDetailProps<IdentityDisplayData> {
-	item?: DecryptedItem;
+	item?: DecryptedItemWithContext;
 }
 
 export function IdentityDetail({
@@ -62,7 +62,7 @@ export function IdentityDetail({
 	return (
 		<div className="space-y-4">
 			<div className="flex items-center gap-4">
-				<Favicon title={data.title} category="identity" size="lg" />
+				<Favicon item={item ? { ...item, category: "identity" } : undefined} title={data.title} size="lg" />
 				<div className="min-w-0 flex-1">
 					<h2 className="truncate font-semibold text-2xl tracking-tight">
 						{data.title}

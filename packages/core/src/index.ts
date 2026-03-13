@@ -14,6 +14,11 @@ export {
 	type ResolveAccountsResult,
 } from "./services/account-resolver";
 export {
+	type ResolvedAccountRepository,
+	resolveRepositoryForItem,
+	resolveRepositoryForVault,
+} from "./services/account-context-resolver";
+export {
 	type CheckEmailResult,
 	checkEmailExists,
 	clearSession,

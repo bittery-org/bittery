@@ -11,9 +11,8 @@ import { storage } from "../lib/storage";
 import { decrypt, encrypt, rsaDecrypt } from "../lib/wasm-crypto";
 import {
 	ensureDesktopWriteCapability,
-	hydrateDesktopAccountMaterial,
 } from "./desktop-key-material";
-import { desktopSync } from "./desktop-sync";
+import { resolveAccountEmailForVault } from "./services/account-resolution";
 import { onLocalItemUpdated } from "./services/local-item-cache-service";
 import {
 	ensureUnlockedOrRecoverFromDesktop,
@@ -21,44 +20,6 @@ import {
 } from "./session-manager";
 import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
-
-async function resolveAccountEmailForVault(
-	vaultId: string,
-): Promise<string | undefined> {
-	const activeAccount = await storage.getActiveAccount();
-	if (activeAccount?.type === "single") {
-		await ensureDesktopWriteCapability(activeAccount.email);
-		return activeAccount.email;
-	}
-
-	const localUnlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
-	const desktopStatus =
-		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
-	const desktopUnlockedEmails =
-		desktopStatus?.available && !desktopStatus.locked
-			? (desktopStatus.unlockedAccounts ?? [])
-			: [];
-
-	const candidateEmails = Array.from(
-		new Set([...localUnlockedEmails, ...desktopUnlockedEmails]),
-	);
-
-	for (const email of candidateEmails) {
-		await hydrateDesktopAccountMaterial(email);
-		let vaultKeys = await storage.getVaultKeys(email);
-		if (!vaultKeys || vaultKeys.length === 0) {
-			const hydrated = await ensureDesktopWriteCapability(email);
-			if (hydrated) {
-				vaultKeys = await storage.getVaultKeys(email);
-			}
-		}
-		if (vaultKeys?.some((vaultKey) => vaultKey.vaultId === vaultId)) {
-			return email;
-		}
-	}
-
-	return undefined;
-}
 
 /**
  * Handle CAPTURE_TAB_SCREENSHOT message - Capture screenshot of current tab

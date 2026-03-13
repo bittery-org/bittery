@@ -1,4 +1,4 @@
-import type { DecryptedItem } from "@bittery/shared";
+import type { DecryptedItemWithContext } from "@bittery/shared";
 
 /**
  * Normalizes a string for case-insensitive searching
@@ -27,9 +27,9 @@ function matchesQuery(
  * Searches across: title, username, email, URL, vault name, account email
  */
 export function filterLoginItems(
-	items: DecryptedItem[],
+	items: DecryptedItemWithContext[],
 	query: string,
-): DecryptedItem[] {
+): DecryptedItemWithContext[] {
 	if (!query.trim()) return items;
 
 	return items.filter((item) => {
@@ -49,9 +49,9 @@ export function filterLoginItems(
  * Searches across: title, cardholder name, last 4 digits, vault name, account email
  */
 export function filterCreditCardItems(
-	items: DecryptedItem[],
+	items: DecryptedItemWithContext[],
 	query: string,
-): DecryptedItem[] {
+): DecryptedItemWithContext[] {
 	if (!query.trim()) return items;
 
 	return items.filter((item) => {
@@ -69,9 +69,9 @@ export function filterCreditCardItems(
  * Searches across: title, name fields (first, middle, last), email, addresses, vault name, account email
  */
 export function filterIdentityItems(
-	items: DecryptedItem[],
+	items: DecryptedItemWithContext[],
 	query: string,
-): DecryptedItem[] {
+): DecryptedItemWithContext[] {
 	if (!query.trim()) return items;
 
 	return items.filter((item) => {

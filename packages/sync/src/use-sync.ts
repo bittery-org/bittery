@@ -47,6 +47,7 @@ export interface UseSyncOptions {
 	realtimeEnabled?: boolean;
 	itemCacheAdapter?: ItemCacheAdapter;
 	itemCacheAccountEmail?: string | null;
+	itemCacheServerUrl?: string | null;
 	getClientForAccount?: (
 		email: string,
 	) => OutboundQueueClient | Promise<OutboundQueueClient>;
@@ -74,6 +75,7 @@ export function useSync(options: UseSyncOptions) {
 		realtimeEnabled = true,
 		itemCacheAdapter,
 		itemCacheAccountEmail,
+		itemCacheServerUrl,
 		getClientForAccount,
 		onSessionRevoked,
 		fetch: fetchImpl,
@@ -128,6 +130,7 @@ export function useSync(options: UseSyncOptions) {
 			itemCache: itemCacheAdapter,
 			outboundQueue,
 			itemCacheAccountEmail,
+			itemCacheServerUrl,
 			getClientForAccount,
 			onEventProcessed: invalidateForEvent,
 			onSessionRevoked,
@@ -178,6 +181,7 @@ export function useSync(options: UseSyncOptions) {
 		trpcClient,
 		outboundQueue,
 		itemCacheAccountEmail,
+		itemCacheServerUrl,
 		getClientForAccount,
 		onSessionRevoked,
 		invalidateForEvent,

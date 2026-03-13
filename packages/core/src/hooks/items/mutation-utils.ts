@@ -7,6 +7,10 @@ import {
 	useQueryInvalidator,
 } from "../../context/platform-context";
 import type { CoreContext } from "../../core-context";
+import {
+	resolveRepositoryForItem,
+	resolveRepositoryForVault,
+} from "../../services/account-context-resolver";
 import type {
 	VaultRepository,
 	VaultRepositoryItem,
@@ -85,34 +89,30 @@ export function requireRepositoryForVault(
 	vaultId: string,
 	accountEmail?: string,
 ): { accountEmail: string; repo: VaultRepository } {
-	const resolvedAccountEmail =
-		accountEmail ?? core.vaultCoordinator.findAccountForVault(vaultId)?.email;
-	if (!resolvedAccountEmail) {
+	const resolved = resolveRepositoryForVault(core, vaultId, accountEmail);
+	if (!resolved) {
 		throw new Error(`No account repository found for vault ${vaultId}`);
 	}
-	return {
-		accountEmail: resolvedAccountEmail,
-		repo: core.vaultCoordinator.getRepositoryForEmail(resolvedAccountEmail),
-	};
+	return resolved;
 }
 
 export function requireLocalItemMutationContext(
 	core: CoreContext,
 	itemId: string,
 ): LocalItemMutationContext {
-	const accountForItem = core.vaultCoordinator.findAccountForItem(itemId);
-	if (!accountForItem) {
+	const resolved = resolveRepositoryForItem(core, itemId);
+	if (!resolved) {
 		throw new Error(`No account repository found for item ${itemId}`);
 	}
 
-	const existing = accountForItem.repo.getById(itemId);
+	const existing = resolved.repo.getById(itemId);
 	if (!existing) {
 		throw new Error(`Item ${itemId} was not found in local repository`);
 	}
 
 	return {
-		accountEmail: accountForItem.email,
-		repo: accountForItem.repo,
+		accountEmail: resolved.accountEmail,
+		repo: resolved.repo,
 		item: existing,
 		baseVersion: existing.version,
 	};
@@ -142,6 +142,8 @@ export function extractDecryptedItemData(item: unknown): DecryptedItemData {
 	delete data.version;
 	delete data.lastModifiedBy;
 	delete data.attachments;
+	delete data.accountEmail;
+	delete data.serverUrl;
 	delete data._encrypted;
 	delete data.vault;
 	delete data.account;

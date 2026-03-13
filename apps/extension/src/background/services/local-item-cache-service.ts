@@ -69,16 +69,17 @@ export function createLocalItemCacheService(
 				return;
 			}
 
-			const accountEmail =
-				input.accountEmail ??
-				vaultCoordinator.findAccountForVault(input.vaultId)?.email;
+			const accountEmail = input.accountEmail;
 			if (!accountEmail) {
 				return;
 			}
+			const repo = vaultCoordinator.getRepositoryForEmail(accountEmail);
 			const now = new Date().toISOString();
 			const item: CachedEncryptedItem = {
 				id: input.itemId,
 				vaultId: input.vaultId,
+				accountEmail,
+				serverUrl: repo.getServerUrl(),
 				category: input.category,
 				favorite: false,
 				encryptedData: input.encryptedData.ciphertext,
@@ -111,7 +112,7 @@ export function createLocalItemCacheService(
 						email: input.accountEmail,
 						repo: vaultCoordinator.getRepositoryForEmail(input.accountEmail),
 					}
-				: vaultCoordinator.findAccountForItem(input.itemId);
+				: existingItemAccount(vaultCoordinator, input.itemId);
 			if (!resolvedAccount) {
 				return;
 			}
@@ -122,6 +123,8 @@ export function createLocalItemCacheService(
 			const item: CachedEncryptedItem = {
 				id: existing.id,
 				vaultId: existing.vaultId,
+				accountEmail: existing.accountEmail ?? resolvedAccount.email,
+				serverUrl: existing.serverUrl ?? resolvedAccount.repo.getServerUrl(),
 				category: existing.category,
 				favorite: existing.favorite,
 				encryptedData: input.encryptedData.ciphertext,
@@ -138,6 +141,20 @@ export function createLocalItemCacheService(
 			deps.desktopClient.clearCache();
 		},
 	};
+}
+
+function existingItemAccount(
+	vaultCoordinator: NonNullable<LocalItemCacheServiceDeps["vaultCoordinator"]>,
+	itemId: string,
+) {
+	const item = vaultCoordinator.getById(itemId);
+	if (item?.accountEmail) {
+		return {
+			email: item.accountEmail,
+			repo: vaultCoordinator.getRepositoryForEmail(item.accountEmail),
+		};
+	}
+	return undefined;
 }
 
 const localItemCacheService = createLocalItemCacheService();

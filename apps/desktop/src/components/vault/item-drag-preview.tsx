@@ -1,19 +1,14 @@
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { Favicon } from "./favicon";
 
 interface ItemDragPreviewProps {
-	item: DecryptedItem;
+	item: DecryptedItemWithContext;
 }
 
 export function ItemDragPreview({ item }: ItemDragPreviewProps) {
 	return (
 		<div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 shadow-lg">
-			<Favicon
-				url={item.url}
-				title={item.title}
-				category={item.category}
-				size="sm"
-			/>
+			<Favicon item={item} size="sm" />
 			<div className="min-w-0 max-w-48">
 				<div className="truncate font-medium text-sm">{item.title}</div>
 				{item.username && (

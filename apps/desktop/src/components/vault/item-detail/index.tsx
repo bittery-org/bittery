@@ -32,6 +32,7 @@ export type { CustomField, ItemDetailData, ItemDetailProps } from "./shared";
 export default function ItemDetail({
 	category,
 	data,
+	serverUrl,
 	onEdit,
 	onDelete,
 	onRemovePasskey,
@@ -44,6 +45,7 @@ export default function ItemDetail({
 		return (
 			<LoginDetail
 				data={data as LoginDisplayData}
+				serverUrl={serverUrl}
 				onEdit={onEdit}
 				onDelete={onDelete}
 				onRemovePasskey={onRemovePasskey}
@@ -58,6 +60,7 @@ export default function ItemDetail({
 		return (
 			<CreditCardDetail
 				data={data as CreditCardDisplayData}
+				serverUrl={serverUrl}
 				onEdit={onEdit}
 				onDelete={onDelete}
 				onTagsChange={onTagsChange}
@@ -71,6 +74,7 @@ export default function ItemDetail({
 		return (
 			<IdentityDetail
 				data={data as IdentityDisplayData}
+				serverUrl={serverUrl}
 				onEdit={onEdit}
 				onDelete={onDelete}
 				onTagsChange={onTagsChange}
@@ -84,6 +88,7 @@ export default function ItemDetail({
 		return (
 			<TotpDetail
 				data={data as TotpDisplayData}
+				serverUrl={serverUrl}
 				onEdit={onEdit}
 				onDelete={onDelete}
 				onTagsChange={onTagsChange}
@@ -96,6 +101,7 @@ export default function ItemDetail({
 	return (
 		<SecureNoteDetail
 			data={data as SecureNoteDisplayData}
+			serverUrl={serverUrl}
 			onEdit={onEdit}
 			onDelete={onDelete}
 			onTagsChange={onTagsChange}

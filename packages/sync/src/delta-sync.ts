@@ -86,6 +86,7 @@ export async function performDeltaSync(
 	cache: ItemCacheAdapter,
 	event: SyncEvent,
 	accountEmail?: string,
+	serverUrl?: string,
 ): Promise<void> {
 	const upsertItem = async (item: CachedEncryptedItem) => {
 		if (cache.upsertEncrypted) {
@@ -163,6 +164,8 @@ export async function performDeltaSync(
 			await upsertItem({
 				id: item.id,
 				vaultId: item.vaultId,
+				accountEmail,
+				serverUrl,
 				category: item.category,
 				favorite: item.favorite,
 				encryptedData: item.encryptedData,
@@ -185,6 +188,8 @@ export async function performDeltaSync(
 				await upsertItem({
 					id: item.id,
 					vaultId: item.vaultId,
+					accountEmail,
+					serverUrl,
 					category: item.category,
 					favorite: item.favorite,
 					encryptedData: item.encryptedData,
@@ -223,6 +228,8 @@ export async function performDeltaSync(
 					await upsertItem({
 						id: vaultItem.id,
 						vaultId: vaultItem.vaultId,
+						accountEmail,
+						serverUrl,
 						category: vaultItem.category,
 						favorite: vaultItem.favorite,
 						encryptedData: vaultItem.encryptedData,
@@ -243,6 +250,8 @@ export async function performDeltaSync(
 			});
 			await upsertVault({
 				id: vault.id,
+				accountEmail,
+				serverUrl,
 				name: vault.name,
 				type: vault.type,
 				icon: vault.icon,

@@ -19,24 +19,21 @@ const config: AutofillIframeConfig = {
 	unlockText: "Click the Bittery icon to unlock and use autofill",
 	itemNounSingular: "login",
 	itemNounPlural: "logins",
-	renderItem: (item) => (
-		<div className="flex items-center gap-2.5">
-			<Favicon
-				url={item.url}
-				title={item.title}
-				category={item.category}
-				size="sm"
-			/>
-			<div className="min-w-0 flex-1">
-				<p className="truncate font-medium text-sm">{item.title}</p>
-				{item.username && (
-					<p className="mt-0.5 truncate text-muted-foreground text-xs">
-						{item.username}
-					</p>
-				)}
+	renderItem: (item) => {
+		return (
+			<div className="flex items-center gap-2.5">
+				<Favicon item={item} size="sm" />
+				<div className="min-w-0 flex-1">
+					<p className="truncate font-medium text-sm">{item.title}</p>
+					{item.username && (
+						<p className="mt-0.5 truncate text-muted-foreground text-xs">
+							{item.username}
+						</p>
+					)}
+				</div>
 			</div>
-		</div>
-	),
+		);
+	},
 };
 
 const root = document.getElementById("root");

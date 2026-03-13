@@ -10,6 +10,7 @@ import {
 	enqueueItemMutation,
 	refreshRepositoriesFromServer,
 	requireLocalItemMutationContext,
+	requireRepositoryForVault,
 	toQueueEncryptedPayload,
 	useItemMutationRuntime,
 } from "./mutation-utils";
@@ -35,27 +36,23 @@ export function useMoveItem() {
 	return useMutation({
 		mutationFn: async (input: MoveItemInput) => {
 			const sourceContext = requireLocalItemMutationContext(core, input.itemId);
-			const targetAccount = input.targetAccountEmail
-				? {
-						email: input.targetAccountEmail,
-						repo: core.vaultCoordinator.getRepositoryForEmail(
-							input.targetAccountEmail,
-						),
-					}
-				: core.vaultCoordinator.findAccountForVault(input.targetVaultId);
+			const sourceRepoTargetVault = sourceContext.repo.getVaultById(
+				input.targetVaultId,
+			);
+			const targetAccountHint =
+				input.targetAccountEmail ?? sourceRepoTargetVault?.accountEmail;
+			const { accountEmail: targetAccountEmail } = requireRepositoryForVault(
+				core,
+				input.targetVaultId,
+				targetAccountHint,
+			);
 
-			if (!targetAccount) {
-				throw new Error(
-					`No account repository found for target vault ${input.targetVaultId}`,
-				);
-			}
-
-			if (sourceContext.accountEmail !== targetAccount.email) {
+			if (sourceContext.accountEmail !== targetAccountEmail) {
 				return core.items.moveItem(
 					{
 						...input,
 						sourceAccountEmail: sourceContext.accountEmail,
-						targetAccountEmail: targetAccount.email,
+						targetAccountEmail,
 					},
 					defaultClient,
 				);
@@ -104,7 +101,7 @@ export function useMoveItem() {
 				crossAccount: false,
 				_encryptedData: encryptedData,
 				_sourceAccountEmail: sourceContext.accountEmail,
-				_targetAccountEmail: targetAccount.email,
+				_targetAccountEmail: targetAccountEmail,
 			};
 		},
 		onSuccess: async (data: any, variables) => {

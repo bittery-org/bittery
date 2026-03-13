@@ -5,18 +5,18 @@
  */
 
 import { useTRPCClient } from "@bittery/shared/trpc";
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";
 import {
 	useCoreContext,
 	useQueryInvalidator,
 } from "../../context/platform-context";
+import { getItemAccountEmail } from "../../services/account-resolver";
 import {
 	buildShareUrl as buildShareUrlCore,
 	type ShareAccessMode,
 	type ShareExpirationOption,
 } from "../../services/share-service";
-import { useItems } from "../use-items";
 
 export type { ShareAccessMode, ShareExpirationOption };
 
@@ -24,7 +24,7 @@ export type { ShareAccessMode, ShareExpirationOption };
  * Input for creating a share link
  */
 export interface CreateShareInput {
-	item: DecryptedItem;
+	item: DecryptedItemWithContext;
 	accessMode: ShareAccessMode;
 	expiresIn: ShareExpirationOption;
 	isOneTimeUse: boolean;
@@ -53,16 +53,16 @@ export function buildShareUrl(result: CreateShareResult): string {
  */
 export function useCreateShare() {
 	const defaultClient = useTRPCClient();
-	const { items } = useItems();
 	const core = useCoreContext();
 	const invalidator = useQueryInvalidator();
 
 	return useMutation({
 		mutationFn: async (input: CreateShareInput): Promise<CreateShareResult> => {
-			const accountEmail = core.accounts.findAccountForItem(
-				input.item.id,
-				items,
-			);
+			const coordinatedItem = core.vaultCoordinator.getById(input.item.id);
+			const accountEmail =
+				getItemAccountEmail(input.item) ??
+				coordinatedItem?.accountEmail ??
+				coordinatedItem?.account?.email;
 			return core.shares.createShare(
 				{
 					...input,

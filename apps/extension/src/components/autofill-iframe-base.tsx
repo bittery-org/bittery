@@ -1,4 +1,4 @@
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { Card, cn } from "@bittery/ui";
 import { IconLockOutlineDuo18 } from "@bittery/ui/icons";
 import type { ReactNode } from "react";
@@ -15,9 +15,14 @@ export interface AutofillIframeConfig {
 	/** Message type for item selection (e.g. "AUTOFILL_SELECT") */
 	selectMessageType: string;
 	/** Filter function for search queries */
-	filterFn: (items: DecryptedItem[], query: string) => DecryptedItem[];
+	filterFn: (
+		items: DecryptedItemWithContext[],
+		query: string,
+	) => DecryptedItemWithContext[];
 	/** Optional preprocessing of items before storing (e.g. filter to category) */
-	preprocessItems?: (items: DecryptedItem[]) => DecryptedItem[];
+	preprocessItems?: (
+		items: DecryptedItemWithContext[],
+	) => DecryptedItemWithContext[];
 	/** Default field type for the iframe */
 	defaultFieldType: string;
 	/** Icon shown in the empty state */
@@ -31,7 +36,7 @@ export interface AutofillIframeConfig {
 	/** Plural noun for items (e.g. "logins") */
 	itemNounPlural: string;
 	/** Renders the content inside each item button */
-	renderItem: (item: DecryptedItem) => ReactNode;
+	renderItem: (item: DecryptedItemWithContext) => ReactNode;
 }
 
 export function AutofillIframeBase({
@@ -40,13 +45,15 @@ export function AutofillIframeBase({
 	config: AutofillIframeConfig;
 }) {
 	const nonce = getIframeNonceFromLocation() ?? "";
-	const [allItems, setAllItems] = useState<DecryptedItem[]>([]);
-	const [filteredItems, setFilteredItems] = useState<DecryptedItem[]>([]);
+	const [allItems, setAllItems] = useState<DecryptedItemWithContext[]>([]);
+	const [filteredItems, setFilteredItems] = useState<
+		DecryptedItemWithContext[]
+	>([]);
 	const [filterQuery, setFilterQuery] = useState("");
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const [_fieldType, setFieldType] = useState<string>(config.defaultFieldType);
 	const [needsUnlock, setNeedsUnlock] = useState(false);
-	const allItemsRef = useRef<DecryptedItem[]>([]);
+	const allItemsRef = useRef<DecryptedItemWithContext[]>([]);
 
 	// Listen for items from parent — uses allItemsRef to avoid infinite loop
 	// (do NOT put allItems in the dependency array)
@@ -97,7 +104,7 @@ export function AutofillIframeBase({
 	]);
 
 	const handleSelect = useCallback(
-		(item: DecryptedItem) => {
+		(item: DecryptedItemWithContext) => {
 			window.parent.postMessage(
 				{ type: config.selectMessageType, item, nonce },
 				"*",

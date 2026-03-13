@@ -187,6 +187,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		realtimeEnabled: true,
 		itemCacheAdapter: vaultCoordinator,
 		itemCacheAccountEmail: syncAccountEmail,
+		itemCacheServerUrl: syncAccountEmail ? serverUrl : null,
 		fetch: expoFetch,
 	});
 

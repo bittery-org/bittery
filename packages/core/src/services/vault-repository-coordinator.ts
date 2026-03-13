@@ -17,6 +17,7 @@ export interface CoordinatedItemAccount {
 	email: string;
 	userId: string;
 	name: string;
+	serverUrl: string;
 	teamName?: string;
 	teamAvatarUrl?: string | null;
 }
@@ -94,14 +95,22 @@ export class VaultRepositoryCoordinator {
 		this.repos.set(email, { repo, unsubscribe });
 	}
 
-	getOrCreate(email: string): VaultRepository {
+	getOrCreate(email: string, serverUrl?: string): VaultRepository {
 		const normalized = this.normalizeEmail(email);
 		const existing = this.repos.get(normalized);
 		if (existing) {
+			if (serverUrl) {
+				existing.repo.setServerUrl(serverUrl);
+			}
 			return existing.repo;
 		}
 
-		const repo = new VaultRepositoryImpl(this.crypto, this.storage, normalized);
+		const repo = new VaultRepositoryImpl(
+			this.crypto,
+			this.storage,
+			normalized,
+			serverUrl,
+		);
 		this.attachRepo(normalized, repo);
 		return repo;
 	}
@@ -140,10 +149,11 @@ export class VaultRepositoryCoordinator {
 				email: normalized,
 				userId: account.userId,
 				name: account.name,
+				serverUrl: account.serverUrl,
 				teamName: account.teamName,
 				teamAvatarUrl: account.teamAvatarUrl,
 			});
-			this.getOrCreate(normalized);
+			this.getOrCreate(normalized, account.serverUrl);
 		}
 
 		this.emit();
@@ -155,7 +165,7 @@ export class VaultRepositoryCoordinator {
 		await Promise.all(
 			accounts.map(async (account) => {
 				const normalized = this.normalizeEmail(account.email);
-				const repo = this.getOrCreate(normalized);
+				const repo = this.getOrCreate(normalized, account.serverUrl);
 
 				if (
 					(repo.isHydrated() && repo.hasCacheSnapshot()) ||
@@ -189,7 +199,7 @@ export class VaultRepositoryCoordinator {
 		await Promise.all(
 			accounts.map(async (account) => {
 				const normalized = this.normalizeEmail(account.email);
-				const repo = this.getOrCreate(normalized);
+				const repo = this.getOrCreate(normalized, account.serverUrl);
 				await repo.hydrateFromServer(
 					account.trpcClient as unknown as BootstrapItemsClient,
 				);
@@ -259,9 +269,17 @@ export class VaultRepositoryCoordinator {
 		itemId: string,
 	): { email: string; repo: VaultRepository } | undefined {
 		for (const [email, entry] of this.repos.entries()) {
-			if (entry.repo.getById(itemId)) {
-				return { email, repo: entry.repo };
+			const item = entry.repo.getById(itemId);
+			if (!item) {
+				continue;
 			}
+			if (item.accountEmail) {
+				return {
+					email: this.normalizeEmail(item.accountEmail),
+					repo: this.getOrCreate(item.accountEmail),
+				};
+			}
+			return { email, repo: entry.repo };
 		}
 		return undefined;
 	}
@@ -283,9 +301,17 @@ export class VaultRepositoryCoordinator {
 		vaultId: string,
 	): { email: string; repo: VaultRepository } | undefined {
 		for (const [email, entry] of this.repos.entries()) {
-			if (entry.repo.hasVault(vaultId)) {
-				return { email, repo: entry.repo };
+			if (!entry.repo.hasVault(vaultId)) {
+				continue;
 			}
+			const vault = entry.repo.getVaultById(vaultId);
+			if (vault?.accountEmail) {
+				return {
+					email: this.normalizeEmail(vault.accountEmail),
+					repo: this.getOrCreate(vault.accountEmail),
+				};
+			}
+			return { email, repo: entry.repo };
 		}
 		return undefined;
 	}

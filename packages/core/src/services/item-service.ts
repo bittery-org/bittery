@@ -351,10 +351,13 @@ export class ItemService {
 
 	private toCachedItems(
 		rawItems: RawEncryptedItemWithVault[],
+		account: Pick<AccountInfo, "email" | "serverUrl">,
 	): CachedEncryptedItem[] {
 		return rawItems.map((item) => ({
 			id: item.id,
 			vaultId: item.vaultId,
+			accountEmail: account.email,
+			serverUrl: account.serverUrl,
 			category: item.category,
 			favorite: item.favorite,
 			encryptedData: item.encryptedData,
@@ -375,6 +378,7 @@ export class ItemService {
 
 	private toCachedVaults(
 		rawItems: RawEncryptedItemWithVault[],
+		account: Pick<AccountInfo, "email" | "serverUrl">,
 	): CachedVaultMetadata[] {
 		const seen = new Set<string>();
 		const vaults: CachedVaultMetadata[] = [];
@@ -386,6 +390,8 @@ export class ItemService {
 			seen.add(item.vault.id);
 			vaults.push({
 				id: item.vault.id,
+				accountEmail: account.email,
+				serverUrl: account.serverUrl,
 				name: item.vault.name,
 				type: item.vault.type,
 				icon: item.vault.icon,
@@ -443,8 +449,8 @@ export class ItemService {
 						);
 					} else {
 						rawItems = await this.fetchBootstrapItems(account.trpcClient);
-						const cachedItems = this.toCachedItems(rawItems);
-						const cachedVaults = this.toCachedVaults(rawItems);
+						const cachedItems = this.toCachedItems(rawItems, account);
+						const cachedVaults = this.toCachedVaults(rawItems, account);
 						await Promise.all([
 							this.storage.setCachedItems?.(cachedItems, account.email),
 							this.storage.setCachedVaults?.(cachedVaults, account.email),

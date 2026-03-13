@@ -7,6 +7,7 @@ import type { CategoryDetailProps, SecureNoteDisplayData } from "./shared";
 
 export function SecureNoteDetail({
 	data,
+	serverUrl,
 	onEdit,
 	onDelete,
 	onTagsChange,
@@ -19,7 +20,14 @@ export function SecureNoteDetail({
 	return (
 		<div className="space-y-4">
 			<DetailHeader
-				icon={<Favicon title={data.title} category="secure-note" size="lg" />}
+				icon={
+					<Favicon
+						title={data.title}
+						serverUrl={serverUrl}
+						category="secure-note"
+						size="lg"
+					/>
+				}
 				title={data.title}
 				subtitle={m["vaults.detail.items.category.secure_note.title"]()}
 			/>

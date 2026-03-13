@@ -32,6 +32,7 @@ interface SavePromptData {
 	username: string;
 	password: string;
 	url: string;
+	serverUrl?: string;
 	vaults: VaultOption[];
 	hasDuplicates?: boolean;
 	existingCredentials?: ExistingCredential[];
@@ -345,7 +346,13 @@ function SavePromptIframe() {
 	return (
 		<Wrapper>
 			<div className="flex items-start gap-2.5">
-				<Favicon url={data.url} title={data.url} category="login" size="sm" />
+				<Favicon
+					url={data.url}
+					title={data.url}
+					serverUrl={data.serverUrl}
+					category="login"
+					size="sm"
+				/>
 				<div className="min-w-0 flex-1">
 					<p className="font-medium text-sm">
 						{data.hasDuplicates ? "Update or save password?" : "Save password?"}

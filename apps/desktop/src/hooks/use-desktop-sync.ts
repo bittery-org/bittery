@@ -307,6 +307,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		enabled: enabled && isInitialized && !!serverUrl && !!clientId,
 		itemCacheAdapter: vaultCoordinator,
 		itemCacheAccountEmail: syncAccountEmail,
+		itemCacheServerUrl: syncAccountEmail ? serverUrl : null,
 		getClientForAccount,
 		onSessionRevoked,
 	});

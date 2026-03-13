@@ -21,6 +21,7 @@ export interface SyncOrchestratorOptions {
 	itemCache: MutableItemCacheAdapter;
 	outboundQueue: OutboundQueue;
 	itemCacheAccountEmail?: string | null;
+	itemCacheServerUrl?: string | null;
 	getClientForAccount?: (
 		email: string,
 	) => OutboundQueueClient | Promise<OutboundQueueClient>;
@@ -34,6 +35,7 @@ export class SyncOrchestrator {
 	private readonly syncManager: SyncManager;
 	private readonly listeners = new Set<(status: SyncStatus) => void>();
 	private readonly itemCacheAccountEmail?: string | null;
+	private readonly itemCacheServerUrl?: string | null;
 	private readonly getClientForAccount?: (
 		email: string,
 	) => OutboundQueueClient | Promise<OutboundQueueClient>;
@@ -52,6 +54,7 @@ export class SyncOrchestrator {
 
 	constructor(private readonly options: SyncOrchestratorOptions) {
 		this.itemCacheAccountEmail = options.itemCacheAccountEmail;
+		this.itemCacheServerUrl = options.itemCacheServerUrl;
 		this.getClientForAccount = options.getClientForAccount;
 		this.onEventProcessed = options.onEventProcessed;
 
@@ -114,6 +117,10 @@ export class SyncOrchestrator {
 		return this.itemCacheAccountEmail ?? undefined;
 	}
 
+	private getDeltaSyncServerUrl(): string | undefined {
+		return this.itemCacheServerUrl ?? undefined;
+	}
+
 	private async acknowledgeEvent(event: SyncEvent): Promise<void> {
 		await this.syncManager.setStoredLastSyncCursor({ id: event.id });
 		this.setStatus({
@@ -132,6 +139,7 @@ export class SyncOrchestrator {
 			this.options.itemCache,
 			event,
 			this.getDeltaSyncAccountEmail(),
+			this.getDeltaSyncServerUrl(),
 		);
 		await this.onEventProcessed?.(event);
 		await this.acknowledgeEvent(event);

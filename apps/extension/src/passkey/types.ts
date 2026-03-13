@@ -73,6 +73,7 @@ export type PasskeyGetPromptOption = {
 	itemId: string;
 	itemTitle?: string;
 	itemUrl?: string;
+	serverUrl?: string;
 	itemUsername?: string;
 	passkeyUserName: string;
 	passkeyUserDisplayName?: string;
@@ -87,6 +88,7 @@ export type PasskeyCreateExistingItemOption = {
 	vaultId: string;
 	itemTitle?: string;
 	itemUrl?: string;
+	serverUrl?: string;
 	itemUsername?: string;
 	vaultName?: string;
 	accountEmail?: string;
@@ -96,6 +98,7 @@ export type PasskeyCreateExistingItemOption = {
 export type PasskeyWritableVaultOption = {
 	id: string;
 	name: string;
+	accountEmail?: string;
 	type: "personal" | "team";
 	role: "owner" | "admin" | "member" | "read-only";
 };

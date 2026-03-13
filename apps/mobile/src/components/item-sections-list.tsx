@@ -43,12 +43,7 @@ export function ItemSectionsList({
 				const item = section.item;
 				return (
 					<ItemListItem
-						id={item.id}
-						title={item.title || "[Untitled]"}
-						category={item.category}
-						favorite={item.favorite}
-						username={item.username}
-						url={item.url}
+						item={item}
 						vault={"vault" in item ? item.vault : undefined}
 						showVaultBadge={showVaultBadge}
 						onPress={() => onItemPress(item)}

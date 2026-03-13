@@ -1,5 +1,5 @@
 import { maskCardNumber } from "@bittery/shared/credit-card";
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { cn } from "@bittery/ui";
 import {
 	IconCircleKeyOutlineDuo18,
@@ -7,11 +7,12 @@ import {
 } from "@bittery/ui/icons";
 import { useDraggable } from "@dnd-kit/core";
 import { useNavigate } from "@tanstack/react-router";
+import { useCallback } from "react";
 import type { DragItemData } from "../../providers/dnd-provider";
 import { Favicon } from "./favicon";
 
 interface ItemListRowProps {
-	item: DecryptedItem;
+	item: DecryptedItemWithContext;
 	isSelected: boolean;
 	linkTo: string;
 	linkParams: Record<string, string>;
@@ -43,6 +44,21 @@ export function ItemListRow({
 		data: dragData,
 	});
 
+	const setRowRef = useCallback(
+		(node: HTMLDivElement | null) => {
+			setNodeRef(node);
+
+			if (!node || !isSelected) {
+				return;
+			}
+
+			requestAnimationFrame(() => {
+				node.scrollIntoView({ block: "nearest", inline: "nearest" });
+			});
+		},
+		[isSelected, setNodeRef],
+	);
+
 	const handleClick = () => {
 		// Only navigate if not dragging
 		if (!isDragging) {
@@ -53,7 +69,7 @@ export function ItemListRow({
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: its fine here
 		<div
-			ref={setNodeRef}
+			ref={setRowRef}
 			{...listeners}
 			{...attributes}
 			onClick={handleClick}
@@ -71,12 +87,7 @@ export function ItemListRow({
 			)}
 		>
 			<div className="flex min-w-0 items-center gap-3">
-				<Favicon
-					url={item.url}
-					title={item.title}
-					category={item.category}
-					size="sm"
-				/>
+				<Favicon item={item} size="sm" />
 				<div className="min-w-0 flex-1">
 					<div className="flex items-center gap-1.5">
 						<span className="truncate font-medium text-sm">{item.title}</span>

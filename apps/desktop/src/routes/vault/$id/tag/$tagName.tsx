@@ -133,12 +133,7 @@ function TagRouteComponent() {
 									className="flex items-center justify-between rounded-lg border bg-card p-4 transition-colors hover:bg-muted/30"
 								>
 									<div className="flex min-w-0 flex-1 items-center gap-4">
-										<Favicon
-											url={item.url}
-											title={item.title}
-											category={item.category}
-											size="md"
-										/>
+										<Favicon item={item} size="md" />
 										<div className="min-w-0 flex-1">
 											<div className="flex items-center gap-2">
 												<span className="font-medium">{item.title}</span>

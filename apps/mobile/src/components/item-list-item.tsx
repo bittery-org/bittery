@@ -1,5 +1,5 @@
 import type {
-	ItemCategory,
+	DecryptedItemWithContext,
 	TotpAlgorithm,
 	TotpDigits,
 } from "@bittery/shared/types";
@@ -15,12 +15,7 @@ import { TotpDisplay } from "./totp-display";
 const StyledStar = withUniwind(Star);
 
 interface ItemListItemProps {
-	id: string;
-	title: string;
-	category: ItemCategory;
-	favorite?: boolean;
-	username?: string;
-	url?: string;
+	item: DecryptedItemWithContext;
 	vault?: {
 		id: string;
 		name: string;
@@ -42,12 +37,7 @@ interface ItemListItemProps {
 }
 
 export function ItemListItem({
-	id: _id,
-	title,
-	category,
-	favorite,
-	username,
-	url,
+	item,
 	vault: _vault,
 	showVaultBadge: _showVaultBadge = false,
 	onPress,
@@ -66,13 +56,13 @@ export function ItemListItem({
 	// Get subtitle based on category
 	const getSubtitle = () => {
 		// If showing inline TOTP, don't show subtitle text for TOTP items
-		if (shouldShowTotp && category === "totp") return null;
-		if (category === "login" && username) return username;
-		if (category === "login" && url) return url;
-		if (category === "credit-card") return "Credit Card";
-		if (category === "identity") return "Identity";
-		if (category === "secure-note") return "Secure Note";
-		if (category === "totp") return "TOTP";
+		if (shouldShowTotp && item.category === "totp") return null;
+		if (item.category === "login" && item.username) return item.username;
+		if (item.category === "login" && item.url) return item.url;
+		if (item.category === "credit-card") return "Credit Card";
+		if (item.category === "identity") return "Identity";
+		if (item.category === "secure-note") return "Secure Note";
+		if (item.category === "totp") return "TOTP";
 		return null;
 	};
 
@@ -98,20 +88,15 @@ export function ItemListItem({
 				<PressableFeedback.Ripple />
 				<Card.Body className="flex-row items-center py-1 pr-3 pl-1.5">
 					{/* Icon or Favicon */}
-					<ItemIcon
-						category={category}
-						url={url}
-						size="sm"
-						className="mr-3.5"
-					/>
+					<ItemIcon item={item} category={item.category} size="sm" className="mr-3.5" />
 
 					{/* Content */}
 					<View className="min-w-0 flex-1">
 						<View className="flex-row items-center">
 							<Card.Title className="shrink text-base" numberOfLines={1}>
-								{title}
+								{item.title}
 							</Card.Title>
-							{favorite && (
+							{item.favorite && (
 								<StyledStar
 									size={12}
 									fill="#eab308"

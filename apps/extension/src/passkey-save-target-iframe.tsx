@@ -189,6 +189,7 @@ function PasskeySaveTargetIframe() {
 										<Favicon
 											url={item.itemUrl}
 											title={item.itemTitle || item.itemUrl || data.rpName}
+											serverUrl={item.serverUrl}
 											category="login"
 											size="sm"
 										/>

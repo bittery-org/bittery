@@ -1,4 +1,4 @@
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { Button, Card } from "@bittery/ui";
 import { ShareHistoryDialog, ShareItemDialog } from "@/components/sharing";
 import { useI18n } from "@/providers/i18n-provider";
@@ -7,7 +7,7 @@ import type { CategoryDetailProps, SecureNoteDisplayData } from "./shared";
 
 interface SecureNoteDetailProps
 	extends CategoryDetailProps<SecureNoteDisplayData> {
-	item?: DecryptedItem;
+	item?: DecryptedItemWithContext;
 }
 
 export function SecureNoteDetail({
@@ -20,7 +20,7 @@ export function SecureNoteDetail({
 	return (
 		<div className="space-y-4">
 			<div className="flex items-center gap-4">
-				<Favicon title={data.title} category="secure-note" size="lg" />
+				<Favicon item={item ? { ...item, category: "secure-note" } : undefined} title={data.title} size="lg" />
 				<div className="min-w-0 flex-1">
 					<h2 className="truncate font-semibold text-2xl tracking-tight">
 						{data.title}
