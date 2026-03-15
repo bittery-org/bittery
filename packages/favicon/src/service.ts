@@ -19,11 +19,17 @@ function inferContentType(url: string): string {
 	return "application/octet-stream";
 }
 
-function sanitizeContentType(contentType: string | null, fallbackUrl: string): string {
+function sanitizeContentType(
+	contentType: string | null,
+	fallbackUrl: string,
+): string {
 	if (!contentType) {
 		return inferContentType(fallbackUrl);
 	}
-	return contentType.split(";")[0]?.trim().toLowerCase() || inferContentType(fallbackUrl);
+	return (
+		contentType.split(";")[0]?.trim().toLowerCase() ||
+		inferContentType(fallbackUrl)
+	);
 }
 
 function toBuffer(imageData: unknown): Buffer | null {
@@ -38,7 +44,10 @@ function toBuffer(imageData: unknown): Buffer | null {
 
 function computeFailureBackoffMinutes(failCount: number): number {
 	const step = Math.max(0, failCount - 1);
-	return Math.min(MAX_FAILURE_BACKOFF_MINUTES, MIN_FAILURE_BACKOFF_MINUTES * 2 ** step);
+	return Math.min(
+		MAX_FAILURE_BACKOFF_MINUTES,
+		MIN_FAILURE_BACKOFF_MINUTES * 2 ** step,
+	);
 }
 
 async function upsertPending(domain: string): Promise<void> {
@@ -113,7 +122,10 @@ async function fetchWithLimit(
 		return null;
 	}
 
-	const contentType = sanitizeContentType(response.headers.get("content-type"), url);
+	const contentType = sanitizeContentType(
+		response.headers.get("content-type"),
+		url,
+	);
 	if (expectHtml) {
 		if (!contentType.includes("text/html")) {
 			return null;
@@ -158,9 +170,7 @@ function extractIconLinks(html: string, baseUrl: string): string[] {
 			if (resolved.protocol === "http:" || resolved.protocol === "https:") {
 				links.push(resolved.toString());
 			}
-		} catch {
-			continue;
-		}
+		} catch {}
 	}
 
 	return [...new Set(links)];
@@ -218,7 +228,9 @@ export function normalizeFaviconDomain(input: string): string | null {
 	return hostname;
 }
 
-export async function getFetchedFavicon(domain: string): Promise<FaviconImage | null> {
+export async function getFetchedFavicon(
+	domain: string,
+): Promise<FaviconImage | null> {
 	const existing = await db.query.favicon.findFirst({
 		where: eq(favicon.domain, domain),
 		columns: {
@@ -272,7 +284,9 @@ export async function fetchAndStoreFavicon(
 	}
 
 	if (existing?.status === "failed" && existing.failedAt) {
-		const backoffMinutes = computeFailureBackoffMinutes(existing.failCount || 1);
+		const backoffMinutes = computeFailureBackoffMinutes(
+			existing.failCount || 1,
+		);
 		const retryAfter = new Date(
 			existing.failedAt.getTime() + backoffMinutes * 60 * 1000,
 		);
@@ -299,9 +313,7 @@ export async function fetchAndStoreFavicon(
 					data: result.data,
 					contentType: result.contentType,
 				};
-			} catch {
-				continue;
-			}
+			} catch {}
 		}
 
 		await markFailed(domain);

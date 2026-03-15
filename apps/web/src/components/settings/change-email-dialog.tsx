@@ -208,9 +208,7 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 			<DialogContent>
 				<form onSubmit={handleSubmit}>
 					<DialogHeader>
-						<DialogTitle>
-							{m.settings_change_email_dialog_title()}
-						</DialogTitle>
+						<DialogTitle>{m.settings_change_email_dialog_title()}</DialogTitle>
 						<DialogDescription>
 							{m.settings_change_email_dialog_description()}
 						</DialogDescription>

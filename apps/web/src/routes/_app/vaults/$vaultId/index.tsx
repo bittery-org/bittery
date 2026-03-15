@@ -7,6 +7,7 @@ import {
 	useVaultInfo,
 	useVaultItems,
 } from "@bittery/core/hooks";
+import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useTRPC } from "@bittery/shared/trpc";
 import type {
 	DecryptedItem,
@@ -16,6 +17,7 @@ import type {
 import {
 	Badge,
 	Button,
+	CreateItemSheet,
 	cn,
 	Dialog,
 	DialogContent,
@@ -28,7 +30,6 @@ import {
 	DropdownMenuItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
-	CreateItemSheet,
 	ItemForm,
 	Skeleton,
 	toast,
@@ -43,17 +44,17 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { z } from "zod";
 import { ItemDetailPane } from "@/components/vault/item-detail-pane";
 import { ItemList } from "@/components/vault/item-list";
 import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { VaultAvatar } from "@/components/vaults/vault-avatar";
 import { VaultMemberList } from "@/components/vaults/vault-member-list";
-import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/$vaultId/")({
-	validateSearch: (search) => ({
-		itemId: typeof search.itemId === "string" ? search.itemId : undefined,
+	validateSearch: z.object({
+		itemId: z.string().optional(),
 	}),
 	component: VaultDetailPage,
 	head: () => ({
@@ -91,7 +92,6 @@ function VaultDetailPage() {
 	const updateItem = useUpdateItem();
 	const deleteItem = useDeleteItem();
 	const convertVaultType = useConvertVaultType();
-
 
 	const membersQuery = useQuery(
 		trpc.vault.members.list.queryOptions({ vaultId }),
@@ -342,10 +342,8 @@ function VaultDetailPage() {
 					<ItemList
 						items={decryptedItems}
 						isLoading={isLoadingItems}
-						vaultId={vaultId}
 						onItemSelect={handleItemSelect}
 						selectedItemId={selectedItemId ?? undefined}
-						canWriteItems={canWriteItems}
 					/>
 				</div>
 			</div>
@@ -439,15 +437,10 @@ function VaultDetailPage() {
 			</Dialog>
 
 			{/* Members Dialog */}
-			<Dialog
-				open={isMembersDialogOpen}
-				onOpenChange={setIsMembersDialogOpen}
-			>
+			<Dialog open={isMembersDialogOpen} onOpenChange={setIsMembersDialogOpen}>
 				<DialogContent className="max-w-2xl">
 					<DialogHeader>
-						<DialogTitle>
-							{m.vaults_nav_members_dialog_title()}
-						</DialogTitle>
+						<DialogTitle>{m.vaults_nav_members_dialog_title()}</DialogTitle>
 						<DialogDescription>
 							{canManageMembers
 								? m.vaults_detail_members_description_can_manage()

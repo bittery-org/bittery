@@ -1,7 +1,5 @@
-import {
-	type CloudPlanId,
-	planMemberLimits,
-} from "@bittery/api/billing/plans";
+import { type CloudPlanId, planMemberLimits } from "@bittery/api/billing/plans";
+import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Badge,
@@ -26,13 +24,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { z } from "zod";
-import { formatDate } from "@/lib/i18n-format";
 import {
 	formatStorageBytes,
 	formatUsagePercentage,
 	getAttachmentUsageSnapshot,
 } from "@/lib/billing-attachment-usage";
-import { m as messages } from "@bittery/i18n/paraglide/messages";
+import { formatDate } from "@/lib/i18n-format";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/billing")({
@@ -704,9 +701,7 @@ function BillingRoute() {
 						</div>
 
 						{attachmentUsage.state === "available" && (
-							<div
-								className="mt-4 grid gap-4 sm:grid-cols-3"
-							>
+							<div className="mt-4 grid gap-4 sm:grid-cols-3">
 								<div className="rounded-lg bg-muted/40 p-4">
 									<p className="text-muted-foreground text-xs">
 										{m.billing_attachments_current_used()}

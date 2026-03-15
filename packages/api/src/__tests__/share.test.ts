@@ -14,8 +14,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { db } from "@bittery/db";
 import { shareEmailVerification } from "@bittery/db/schema/sharing";
-import { nanoid } from "nanoid";
-import { shareRouter } from "../routers/share";
 import {
 	addShareLinkAllowedEmail,
 	addVaultMember,
@@ -29,6 +27,8 @@ import {
 	setupShareLink,
 	truncateAll,
 } from "@bittery/test-utils";
+import { nanoid } from "nanoid";
+import { shareRouter } from "../routers/share";
 
 async function setupShareUser() {
 	const result = await setup(shareRouter);
@@ -1176,7 +1176,9 @@ describe("Share Router", () => {
 			const publicCaller = shareRouter.createCaller(createPublicContext());
 			await publicCaller.accessPublic({ token: created.token });
 
-			const creatorLogs = await creatorCaller.getAccessLogs({ linkId: created.id });
+			const creatorLogs = await creatorCaller.getAccessLogs({
+				linkId: created.id,
+			});
 			expect(creatorLogs).toHaveLength(1);
 
 			await expect(

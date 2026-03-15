@@ -190,9 +190,7 @@ function asHandleCapableCrypto(crypto: ICrypto): HandleCapableCrypto | null {
 	return null;
 }
 
-function parseEncryptedData(
-	serialized: string | null,
-): EncryptedData | null {
+function parseEncryptedData(serialized: string | null): EncryptedData | null {
 	if (!serialized) {
 		return null;
 	}
@@ -212,7 +210,9 @@ async function validateDerivedUnlockKey(input: {
 	masterUnlockKeyHandle?: number;
 	handleCrypto: HandleCapableCrypto | null;
 }): Promise<void> {
-	const encryptedPrivateKey = await input.storage.getEncryptedPrivateKey(input.email);
+	const encryptedPrivateKey = await input.storage.getEncryptedPrivateKey(
+		input.email,
+	);
 	const parsedEncryptedPrivateKey = parseEncryptedData(encryptedPrivateKey);
 	if (!parsedEncryptedPrivateKey) {
 		return;
@@ -506,7 +506,11 @@ export async function performSRPUnlock(
 				storage.getEncryptedPrivateKey(email),
 			]);
 
-		if (storedSessionData && storedToken && (await storage.isSessionValid(email))) {
+		if (
+			storedSessionData &&
+			storedToken &&
+			(await storage.isSessionValid(email))
+		) {
 			const accountMetadata = await storage.getAccountMetadata?.(email);
 
 			return {
@@ -635,10 +639,7 @@ export async function storeUnlockSession(
 				"Master Unlock Key unavailable for session storage on this platform.",
 			);
 		}
-	} else if (
-		result.masterUnlockKeyHandle &&
-		storage.setMasterUnlockKeyHandle
-	) {
+	} else if (result.masterUnlockKeyHandle && storage.setMasterUnlockKeyHandle) {
 		await storage.setMasterUnlockKeyHandle(
 			result.masterUnlockKeyHandle,
 			resolvedEmail,

@@ -46,11 +46,13 @@ export const syncRouter = router({
 	 */
 	getEventsSince: protectedProcedure
 		.input(
-			z.object({
-				sinceId: resourceIdSchema.nullable().optional(),
-				vaultIds: syncVaultIdsSchema.optional(),
-				limit: z.number().min(1).max(1000).default(100),
-			}).strict(),
+			z
+				.object({
+					sinceId: resourceIdSchema.nullable().optional(),
+					vaultIds: syncVaultIdsSchema.optional(),
+					limit: z.number().min(1).max(1000).default(100),
+				})
+				.strict(),
 		)
 		.query(async ({ ctx, input }) => {
 			// Get user's vault memberships
@@ -141,7 +143,9 @@ export const syncRouter = router({
 			}),
 		)
 		.query(async ({ ctx, input }) => {
-			const attachmentsEnabled = await canUserUseAttachments(ctx.session.userId);
+			const attachmentsEnabled = await canUserUseAttachments(
+				ctx.session.userId,
+			);
 
 			const userVaults = await db.query.vaultKey.findMany({
 				where: eq(vaultKey.userId, ctx.session.userId),
@@ -208,9 +212,11 @@ export const syncRouter = router({
 	 */
 	getSyncState: protectedProcedure
 		.input(
-			z.object({
-				vaultIds: syncVaultIdsSchema,
-			}).strict(),
+			z
+				.object({
+					vaultIds: syncVaultIdsSchema,
+				})
+				.strict(),
 		)
 		.query(async ({ ctx, input }) => {
 			// Verify user has access to these vaults
@@ -250,10 +256,12 @@ export const syncRouter = router({
 	 */
 	acknowledgeEvents: protectedProcedure
 		.input(
-			z.object({
-				eventIds: syncEventIdsSchema,
-				clientId: clientIdSchema,
-			}).strict(),
+			z
+				.object({
+					eventIds: syncEventIdsSchema,
+					clientId: clientIdSchema,
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			if (input.eventIds.length === 0) {
@@ -297,9 +305,11 @@ export const syncRouter = router({
 	 */
 	getLastAcknowledged: protectedProcedure
 		.input(
-			z.object({
-				clientId: clientIdSchema,
-			}).strict(),
+			z
+				.object({
+					clientId: clientIdSchema,
+				})
+				.strict(),
 		)
 		.query(async ({ ctx, input }) => {
 			const lastAck = await db.query.syncEventAck.findFirst({
@@ -329,10 +339,12 @@ export const syncRouter = router({
 	 */
 	checkConflict: protectedProcedure
 		.input(
-			z.object({
-				itemId: resourceIdSchema,
-				expectedVersion: z.number(),
-			}).strict(),
+			z
+				.object({
+					itemId: resourceIdSchema,
+					expectedVersion: z.number(),
+				})
+				.strict(),
 		)
 		.query(async ({ ctx, input }) => {
 			const [accessibleItem] = await db

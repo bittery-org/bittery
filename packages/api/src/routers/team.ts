@@ -99,7 +99,9 @@ async function getTeamVaultsWithUserAccess(teamId: string, userId: string) {
 				inArrayFn(record.vaultId, teamVaultIds),
 			),
 	});
-	const accessibleVaultIds = new Set(userVaultKeys.map((record) => record.vaultId));
+	const accessibleVaultIds = new Set(
+		userVaultKeys.map((record) => record.vaultId),
+	);
 
 	return teamVaults.filter((record) => accessibleVaultIds.has(record.id));
 }
@@ -142,7 +144,9 @@ async function getTeamRemovalScope(input: {
 			.filter((record) => ["owner", "admin"].includes(record.role))
 			.map((record) => record.vaultId),
 	);
-	const targetVaultIds = new Set(targetVaultKeys.map((record) => record.vaultId));
+	const targetVaultIds = new Set(
+		targetVaultKeys.map((record) => record.vaultId),
+	);
 	const inaccessibleTargetVaultIds = [...targetVaultIds].filter(
 		(vaultId) => !actorAdminVaultIds.has(vaultId),
 	);
@@ -470,11 +474,13 @@ export const teamRouter = router({
 	 */
 	leave: protectedProcedure
 		.input(
-			z.object({
-				teamId: resourceIdSchema,
-				vaultRotations: rotationVaultsSchema,
-				clientId: clientIdSchema.optional(),
-			}).strict(),
+			z
+				.object({
+					teamId: resourceIdSchema,
+					vaultRotations: rotationVaultsSchema,
+					clientId: clientIdSchema.optional(),
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const userData = await db.query.user.findFirst({
@@ -850,10 +856,12 @@ export const teamRouter = router({
 		 */
 		getTeamRotationData: protectedProcedure
 			.input(
-				z.object({
-					teamId: resourceIdSchema,
-					excludeUserId: resourceIdSchema,
-				}).strict(),
+				z
+					.object({
+						teamId: resourceIdSchema,
+						excludeUserId: resourceIdSchema,
+					})
+					.strict(),
 			)
 			.query(async ({ ctx, input }) => {
 				const actor = await db.query.user.findFirst({
@@ -943,12 +951,14 @@ export const teamRouter = router({
 		 */
 		remove: protectedProcedure
 			.input(
-				z.object({
-					teamId: resourceIdSchema,
-					userId: resourceIdSchema,
-					vaultRotations: rotationVaultsSchema,
-					clientId: clientIdSchema.optional(),
-				}).strict(),
+				z
+					.object({
+						teamId: resourceIdSchema,
+						userId: resourceIdSchema,
+						vaultRotations: rotationVaultsSchema,
+						clientId: clientIdSchema.optional(),
+					})
+					.strict(),
 			)
 			.mutation(async ({ ctx, input }) => {
 				const actor = await db.query.user.findFirst({
@@ -1041,7 +1051,9 @@ export const teamRouter = router({
 					});
 				}
 
-				const vaultMap = new Map(removableVaults.map((record) => [record.id, record]));
+				const vaultMap = new Map(
+					removableVaults.map((record) => [record.id, record]),
+				);
 
 				// Create key rotation records for each vault
 				const rotationRecords: Array<{

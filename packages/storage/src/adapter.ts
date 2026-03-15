@@ -9,6 +9,7 @@ import type {
 	ItemCacheMetadata,
 	KdfParams,
 } from "@bittery/types";
+import type { SessionExpiryInput } from "./session";
 import type {
 	AccountMetadata,
 	ActiveAccount,
@@ -17,7 +18,6 @@ import type {
 	StoredSessionData,
 	VaultKeyData,
 } from "./types";
-import type { SessionExpiryInput } from "./session";
 
 /**
  * IStorageAdapter defines the contract for platform-specific storage implementations.

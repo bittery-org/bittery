@@ -10,15 +10,7 @@ import {
 	vaultKeyRotation,
 } from "@bittery/db/schema/vault";
 import { TRPCError } from "@trpc/server";
-import {
-	and,
-	eq,
-	gt,
-	inArray,
-	isNotNull,
-	isNull,
-	sql,
-} from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import {
@@ -33,11 +25,11 @@ import {
 	getEncryptedAttachmentStorageSize,
 	getPendingAttachmentUploadExpiry,
 } from "../helpers/attachments";
+import { canUserUseAttachments } from "../helpers/entitlements";
 import {
 	getScopedAttachmentAccess,
 	getScopedItemAccess,
 } from "../helpers/scoped-resource";
-import { canUserUseAttachments } from "../helpers/entitlements";
 import { protectedProcedure, router } from "../index";
 import {
 	createAttachmentKey,
@@ -130,7 +122,8 @@ async function getAttachmentActor(userId: string): Promise<{
 
 		throw new TRPCError({
 			code: "FORBIDDEN",
-			message: "Attachments are only available on paid plans with active billing.",
+			message:
+				"Attachments are only available on paid plans with active billing.",
 		});
 	}
 
@@ -143,7 +136,8 @@ async function getAttachmentActor(userId: string): Promise<{
 	if (!entitlements.attachments) {
 		throw new TRPCError({
 			code: "FORBIDDEN",
-			message: "Attachments are only available on paid plans with active billing.",
+			message:
+				"Attachments are only available on paid plans with active billing.",
 		});
 	}
 
@@ -1028,21 +1022,23 @@ export const vaultRouter = router({
 	 */
 	createItem: protectedProcedure
 		.input(
-			z.object({
-				itemId: resourceIdSchema.optional(),
-				vaultId: resourceIdSchema,
-				category: z.enum([
-					"login",
-					"secure-note",
-					"credit-card",
-					"identity",
-					"totp",
-				]),
-				encryptedData: encryptedItemCiphertextSchema,
-				encryptionIv: ivSchema,
-				encryptionAlgorithm: algorithmSchema.default("AES-GCM-AAD-V1"),
-				clientId: clientIdSchema.optional(),
-			}).strict(),
+			z
+				.object({
+					itemId: resourceIdSchema.optional(),
+					vaultId: resourceIdSchema,
+					category: z.enum([
+						"login",
+						"secure-note",
+						"credit-card",
+						"identity",
+						"totp",
+					]),
+					encryptedData: encryptedItemCiphertextSchema,
+					encryptionIv: ivSchema,
+					encryptionAlgorithm: algorithmSchema.default("AES-GCM-AAD-V1"),
+					clientId: clientIdSchema.optional(),
+				})
+				.strict(),
 		)
 		.mutation(async ({ input, ctx }) => {
 			// Check user has access to this vault
@@ -1115,11 +1111,13 @@ export const vaultRouter = router({
 	 */
 	bulkImportItems: protectedProcedure
 		.input(
-			z.object({
-				vaultId: resourceIdSchema,
-				clientId: clientIdSchema.optional(),
-				items: bulkImportItemsSchema,
-			}).strict(),
+			z
+				.object({
+					vaultId: resourceIdSchema,
+					clientId: clientIdSchema.optional(),
+					items: bulkImportItemsSchema,
+				})
+				.strict(),
 		)
 		.mutation(async ({ input, ctx }) => {
 			// Check user has access to this vault
@@ -1234,14 +1232,16 @@ export const vaultRouter = router({
 	 */
 	updateItem: protectedProcedure
 		.input(
-			z.object({
-				itemId: resourceIdSchema,
-				encryptedData: encryptedItemCiphertextSchema.optional(),
-				encryptionIv: ivSchema.optional(),
-				encryptionAlgorithm: algorithmSchema.optional(),
-				expectedVersion: z.number().optional(), // For conflict detection
-				clientId: clientIdSchema.optional(),
-			}).strict(),
+			z
+				.object({
+					itemId: resourceIdSchema,
+					encryptedData: encryptedItemCiphertextSchema.optional(),
+					encryptionIv: ivSchema.optional(),
+					encryptionAlgorithm: algorithmSchema.optional(),
+					expectedVersion: z.number().optional(), // For conflict detection
+					clientId: clientIdSchema.optional(),
+				})
+				.strict(),
 		)
 		.mutation(async ({ input, ctx }) => {
 			// Get the item first
@@ -1585,15 +1585,17 @@ export const vaultRouter = router({
 	 */
 	moveItem: protectedProcedure
 		.input(
-			z.object({
-				itemId: resourceIdSchema,
-				sourceVaultId: resourceIdSchema,
-				targetVaultId: resourceIdSchema,
-				encryptedData: encryptedItemCiphertextSchema,
-				encryptionIv: ivSchema,
-				encryptionAlgorithm: algorithmSchema.optional(),
-				clientId: clientIdSchema.optional(),
-			}).strict(),
+			z
+				.object({
+					itemId: resourceIdSchema,
+					sourceVaultId: resourceIdSchema,
+					targetVaultId: resourceIdSchema,
+					encryptedData: encryptedItemCiphertextSchema,
+					encryptionIv: ivSchema,
+					encryptionAlgorithm: algorithmSchema.optional(),
+					clientId: clientIdSchema.optional(),
+				})
+				.strict(),
 		)
 		.mutation(async ({ input, ctx }) => {
 			// Verify the item exists and is in the source vault
@@ -2674,8 +2676,8 @@ export const vaultRouter = router({
 								},
 								tx,
 								ctx.clientId,
-								),
-							);
+							),
+						);
 					});
 
 					// Broadcast after transaction commits
@@ -2829,14 +2831,20 @@ export const vaultRouter = router({
 					},
 				});
 
-				if (!actorVaultKey || !["owner", "admin"].includes(actorVaultKey.role)) {
+				if (
+					!actorVaultKey ||
+					!["owner", "admin"].includes(actorVaultKey.role)
+				) {
 					throw new TRPCError({
 						code: "FORBIDDEN",
 						message: "Only vault owner or admin can manage members",
 					});
 				}
 
-				if (actorVaultKey.vault.type !== "team" || !actorVaultKey.vault.teamId) {
+				if (
+					actorVaultKey.vault.type !== "team" ||
+					!actorVaultKey.vault.teamId
+				) {
 					throw new TRPCError({
 						code: "BAD_REQUEST",
 						message: "Only team vaults support adding members",

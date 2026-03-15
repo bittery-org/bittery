@@ -51,7 +51,7 @@ function AppLayout() {
 						"flex min-h-0 flex-1 flex-col",
 						isVaultsRoute
 							? "overflow-hidden"
-							: "gap-4 overflow-y-auto px-5 pb-4 pt-11 lg:pl-13 xl:pt-12",
+							: "gap-4 overflow-y-auto px-5 pt-11 pb-4 lg:pl-13 xl:pt-12",
 					)}
 				>
 					<Outlet />

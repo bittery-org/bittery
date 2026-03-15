@@ -427,18 +427,20 @@ function toShareAccessEvent(
 export const auditRouter = router({
 	teamEvents: protectedProcedure
 		.input(
-			z.object({
-				cursor: z.string().optional(),
-				limit: z.number().int().min(1).max(MAX_LIMIT).default(DEFAULT_LIMIT),
-				from: z.string().datetime().optional(),
-				to: z.string().datetime().optional(),
-				actionGroup: z
-					.enum(["auth", "team", "vault", "item", "share", "other", "all"])
-					.default("all"),
-				actorUserId: resourceIdSchema.optional(),
-				result: z.enum(["success", "failure", "all"]).default("all"),
-				search: z.string().trim().max(100).optional(),
-			}).strict(),
+			z
+				.object({
+					cursor: z.string().optional(),
+					limit: z.number().int().min(1).max(MAX_LIMIT).default(DEFAULT_LIMIT),
+					from: z.string().datetime().optional(),
+					to: z.string().datetime().optional(),
+					actionGroup: z
+						.enum(["auth", "team", "vault", "item", "share", "other", "all"])
+						.default("all"),
+					actorUserId: resourceIdSchema.optional(),
+					result: z.enum(["success", "failure", "all"]).default("all"),
+					search: z.string().trim().max(100).optional(),
+				})
+				.strict(),
 		)
 		.query(async ({ ctx, input }) => {
 			const actor = await db.query.user.findFirst({

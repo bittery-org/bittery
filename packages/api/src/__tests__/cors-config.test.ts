@@ -37,9 +37,7 @@ describe("parseCorsOrigins", () => {
 			"bare origin",
 		);
 		expect(() =>
-			parseCorsOrigins(
-				"https://vault.example.com,https://vault.example.com/",
-			),
+			parseCorsOrigins("https://vault.example.com,https://vault.example.com/"),
 		).toThrow("duplicate origin");
 	});
 });

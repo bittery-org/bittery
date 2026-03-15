@@ -176,12 +176,7 @@ export default function TrashScreen() {
 			overshootLeft={false}
 		>
 			<ItemListItem
-				id={item.id}
-				title={item.title || "[Untitled]"}
-				category={item.category}
-				favorite={item.favorite}
-				username={item.username}
-				url={item.url}
+				item={item}
 				vault={item.vault}
 				showVaultBadge
 				onPress={() => {}}

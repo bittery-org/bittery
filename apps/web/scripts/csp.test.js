@@ -18,7 +18,10 @@ describe("web CSP rendering", () => {
 	});
 
 	test("renders nginx config without unsafe script allowances", () => {
-		const template = readFileSync(resolve(import.meta.dir, "../nginx.conf"), "utf8");
+		const template = readFileSync(
+			resolve(import.meta.dir, "../nginx.conf"),
+			"utf8",
+		);
 		const rendered = renderNginxConfig(
 			template,
 			["'sha256-test-hash'"],

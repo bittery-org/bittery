@@ -123,7 +123,10 @@ describe("sync engine regressions", () => {
 		const itemCache = {
 			supportsItemCache: true as const,
 			clearedEmails,
-			async clearItemCache(this: { clearedEmails: Array<string | undefined> }, email?: string) {
+			async clearItemCache(
+				this: { clearedEmails: Array<string | undefined> },
+				email?: string,
+			) {
 				this.clearedEmails.push(email);
 			},
 		};

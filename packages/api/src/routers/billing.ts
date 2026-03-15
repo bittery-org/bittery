@@ -124,7 +124,9 @@ function isPaidPlan(plan: CloudPlanId): plan is Exclude<CloudPlanId, "free"> {
 	return plan !== "free";
 }
 
-async function getCommittedAttachmentStorageBytes(teamId: string): Promise<number> {
+async function getCommittedAttachmentStorageBytes(
+	teamId: string,
+): Promise<number> {
 	const [result] = await db
 		.select({
 			total: sql<number>`coalesce(sum(${itemAttachment.storageSize}), 0)::int`,
@@ -343,9 +345,11 @@ export const billingRouter = router({
 
 	syncSeats: protectedProcedure
 		.input(
-			z.object({
-				teamId: resourceIdSchema.optional(),
-			}).strict(),
+			z
+				.object({
+					teamId: resourceIdSchema.optional(),
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			assertCloudBillingEnabled();

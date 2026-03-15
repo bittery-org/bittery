@@ -42,7 +42,9 @@ export async function handleGetPendingSavePrompt(): Promise<MessageResponse> {
 
 	return {
 		success: true,
-		data: (result[PENDING_SAVE_PROMPT_KEY] as PendingSavePrompt | undefined) ?? null,
+		data:
+			(result[PENDING_SAVE_PROMPT_KEY] as PendingSavePrompt | undefined) ??
+			null,
 	};
 }
 

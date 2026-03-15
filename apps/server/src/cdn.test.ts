@@ -5,12 +5,15 @@ describe("servePublicStorageKey", () => {
 	test("should return 404 for private attachment keys before presigning", async () => {
 		let presignCalls = 0;
 
-		const response = await servePublicStorageKey("attachments/user/item/file.enc", {
-			createPresignedDownload: async () => {
-				presignCalls += 1;
-				return "https://storage.example.com/private";
+		const response = await servePublicStorageKey(
+			"attachments/user/item/file.enc",
+			{
+				createPresignedDownload: async () => {
+					presignCalls += 1;
+					return "https://storage.example.com/private";
+				},
 			},
-		});
+		);
 
 		expect(response.status).toBe(404);
 		expect(presignCalls).toBe(0);

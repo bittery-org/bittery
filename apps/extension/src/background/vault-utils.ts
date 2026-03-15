@@ -123,10 +123,8 @@ export function normalizeDesktopSnapshotItem(
 		urls: Array.isArray(item.urls)
 			? item.urls.filter((value): value is string => typeof value === "string")
 			: undefined,
-		username:
-			typeof item.username === "string" ? item.username : undefined,
-		password:
-			typeof item.password === "string" ? item.password : undefined,
+		username: typeof item.username === "string" ? item.username : undefined,
+		password: typeof item.password === "string" ? item.password : undefined,
 		passkeys: Array.isArray(item.passkeys)
 			? item.passkeys.filter(isPasskey)
 			: undefined,
@@ -162,8 +160,7 @@ export function normalizeDesktopSnapshotItem(
 			normalized.account = {
 				email: account.email,
 				userId: typeof account.userId === "string" ? account.userId : "",
-				name:
-					typeof account.name === "string" ? account.name : account.email,
+				name: typeof account.name === "string" ? account.name : account.email,
 			};
 		}
 	}

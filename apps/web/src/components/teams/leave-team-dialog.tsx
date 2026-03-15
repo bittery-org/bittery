@@ -173,9 +173,7 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>
-					<AlertDialogCancel>
-						{m.team_common_action_cancel()}
-					</AlertDialogCancel>
+					<AlertDialogCancel>{m.team_common_action_cancel()}</AlertDialogCancel>
 					<AlertDialogAction onClick={handleLeave} disabled={isLeaving}>
 						{isLeaving
 							? m.team_leave_dialog_action_leaving()

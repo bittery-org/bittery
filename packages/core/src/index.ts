@@ -4,6 +4,11 @@ export {
 	createCoreContext,
 } from "./core-context";
 export {
+	type ResolvedAccountRepository,
+	resolveRepositoryForItem,
+	resolveRepositoryForVault,
+} from "./services/account-context-resolver";
+export {
 	type AccountInfo,
 	AccountResolver,
 	type DefaultTrpcClient,
@@ -13,11 +18,6 @@ export {
 	type ItemWithOptionalAccount,
 	type ResolveAccountsResult,
 } from "./services/account-resolver";
-export {
-	type ResolvedAccountRepository,
-	resolveRepositoryForItem,
-	resolveRepositoryForVault,
-} from "./services/account-context-resolver";
 export {
 	type CheckEmailResult,
 	checkEmailExists,

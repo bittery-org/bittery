@@ -1,11 +1,12 @@
 import {
-	useAvailableTags,
 	useAllVaultKeys,
+	useAvailableTags,
 	useCreateItem,
 	useDeleteItem,
 	useItems,
 	useUpdateItem,
 } from "@bittery/core/hooks";
+import { m as messages } from "@bittery/i18n/paraglide/messages";
 import type {
 	DecryptedItem,
 	DecryptedItemData,
@@ -14,8 +15,8 @@ import type {
 import {
 	Badge,
 	Button,
-	cn,
 	CreateItemSheet,
+	cn,
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -27,19 +28,17 @@ import {
 	toast,
 	type VaultOption,
 } from "@bittery/ui";
-import {
-	IconStarOutlineDuo18 as Star,
-} from "@bittery/ui/icons";
+import { IconStarOutlineDuo18 as Star } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { z } from "zod";
 import { ItemDetailPane } from "@/components/vault/item-detail-pane";
 import { ItemList } from "@/components/vault/item-list";
-import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/favorites")({
-	validateSearch: (search) => ({
-		itemId: typeof search.itemId === "string" ? search.itemId : undefined,
+	validateSearch: z.object({
+		itemId: z.string().optional(),
 	}),
 	component: FavoritesPage,
 	head: () => ({
@@ -79,9 +78,7 @@ function FavoritesPage() {
 
 	const canWriteItems = selectedItem
 		? (() => {
-				const vault = vaultKeys.find(
-					(v) => v.vaultId === selectedItem.vaultId,
-				);
+				const vault = vaultKeys.find((v) => v.vaultId === selectedItem.vaultId);
 				return vault ? vault.role !== "read-only" : false;
 			})()
 		: true;
@@ -153,13 +150,8 @@ function FavoritesPage() {
 				)}
 			>
 				<div className="flex items-center gap-2 border-b px-4 py-3">
-					<Star
-						className="size-4 text-yellow-500"
-						fill="currentColor"
-					/>
-					<span className="font-medium">
-						{m.vaults_favorites_title()}
-					</span>
+					<Star className="size-4 text-yellow-500" fill="currentColor" />
+					<span className="font-medium">{m.vaults_favorites_title()}</span>
 					<Badge variant="secondary" className="ml-auto">
 						{favoriteItems.length}
 					</Badge>
@@ -184,7 +176,6 @@ function FavoritesPage() {
 						<ItemList
 							items={favoriteItems}
 							isLoading={false}
-							vaultId=""
 							onItemSelect={handleItemSelect}
 							selectedItemId={selectedItemId ?? undefined}
 						/>

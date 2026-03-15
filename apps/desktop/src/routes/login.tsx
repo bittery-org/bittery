@@ -263,9 +263,7 @@ export function LoginPage() {
 					</div>
 
 					<div className="grid gap-1.5">
-						<Label htmlFor="password">
-							{m.auth_signin_label_password()}
-						</Label>
+						<Label htmlFor="password">{m.auth_signin_label_password()}</Label>
 						<InputGroup>
 							<InputGroupInput
 								id="password"

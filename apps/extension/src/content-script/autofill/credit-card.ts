@@ -132,9 +132,8 @@ function handleCreditCardKeyboardNavigation(event: KeyboardEvent) {
 	) {
 		if (contentState.currentCreditCardIframe) {
 			event.preventDefault();
-			const iframeOrigin = new URL(
-				contentState.currentCreditCardIframe.src,
-			).origin;
+			const iframeOrigin = new URL(contentState.currentCreditCardIframe.src)
+				.origin;
 			const nonce =
 				new URL(contentState.currentCreditCardIframe.src).searchParams.get(
 					"nonce",

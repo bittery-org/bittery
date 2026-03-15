@@ -58,5 +58,9 @@ export function getItemFaviconUrl(
 		return null;
 	}
 
-	return getFaviconUrl(item.url, size, getItemServerUrl(item, fallbackServerUrl));
+	return getFaviconUrl(
+		item.url,
+		size,
+		getItemServerUrl(item, fallbackServerUrl),
+	);
 }

@@ -14,9 +14,6 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { db } from "@bittery/db";
 import { syncEvent } from "@bittery/db/schema/sync";
 import { itemAttachment } from "@bittery/db/schema/vault";
-import { eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { syncRouter } from "../routers/sync";
 import {
 	createTestItem,
 	createTestSyncEvent,
@@ -25,6 +22,9 @@ import {
 	setup,
 	truncateAll,
 } from "@bittery/test-utils";
+import { eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { syncRouter } from "../routers/sync";
 
 describe("Sync Router", () => {
 	afterEach(async () => {
@@ -53,7 +53,9 @@ describe("Sync Router", () => {
 			expect(result.events.length).toBe(2);
 			expect(result.events[0]?.id).toBe(firstEventId);
 			expect(result.events[1]?.id).toBe(secondEventId);
-			expect((result.events[0] as Record<string, unknown>)?.seq).toBeUndefined();
+			expect(
+				(result.events[0] as Record<string, unknown>)?.seq,
+			).toBeUndefined();
 			expect(result.cursor).toEqual({ id: secondEventId });
 			expect(result.hasMore).toBe(false);
 		});

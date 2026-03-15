@@ -123,7 +123,9 @@ export const featureCategories: FeatureCategory[] = [
 					personal: formatBytes(
 						planAttachmentLimits.personal.attachment_storage_bytes,
 					),
-					family: formatBytes(planAttachmentLimits.family.attachment_storage_bytes),
+					family: formatBytes(
+						planAttachmentLimits.family.attachment_storage_bytes,
+					),
 					team: formatBytes(planAttachmentLimits.team.attachment_storage_bytes),
 				},
 			},
@@ -139,7 +141,9 @@ export const featureCategories: FeatureCategory[] = [
 					family: formatBytes(
 						planAttachmentLimits.family.attachment_max_file_size_bytes,
 					),
-					team: formatBytes(planAttachmentLimits.team.attachment_max_file_size_bytes),
+					team: formatBytes(
+						planAttachmentLimits.team.attachment_max_file_size_bytes,
+					),
 				},
 			},
 		],

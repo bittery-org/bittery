@@ -97,9 +97,7 @@ function SettingsPage() {
 				<TabsList className="w-full sm:w-fit">
 					<TabsTrigger value="account" className="flex-1 sm:flex-none">
 						<User className="h-4 w-4 sm:mr-2" />
-						<span className="hidden sm:inline">
-							{m.settings_tab_account()}
-						</span>
+						<span className="hidden sm:inline">{m.settings_tab_account()}</span>
 					</TabsTrigger>
 					<TabsTrigger value="security" className="flex-1 sm:flex-none">
 						<Shield className="h-4 w-4 sm:mr-2" />
@@ -109,15 +107,11 @@ function SettingsPage() {
 					</TabsTrigger>
 					<TabsTrigger value="devices" className="flex-1 sm:flex-none">
 						<Mobile className="h-4 w-4 sm:mr-2" />
-						<span className="hidden sm:inline">
-							{m.settings_tab_devices()}
-						</span>
+						<span className="hidden sm:inline">{m.settings_tab_devices()}</span>
 					</TabsTrigger>
 					<TabsTrigger value="general" className="flex-1 sm:flex-none">
 						<Gear className="h-4 w-4 sm:mr-2" />
-						<span className="hidden sm:inline">
-							{m.settings_tab_general()}
-						</span>
+						<span className="hidden sm:inline">{m.settings_tab_general()}</span>
 					</TabsTrigger>
 				</TabsList>
 

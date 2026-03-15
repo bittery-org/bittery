@@ -88,7 +88,12 @@ export function ItemListItem({
 				<PressableFeedback.Ripple />
 				<Card.Body className="flex-row items-center py-1 pr-3 pl-1.5">
 					{/* Icon or Favicon */}
-					<ItemIcon item={item} category={item.category} size="sm" className="mr-3.5" />
+					<ItemIcon
+						item={item}
+						category={item.category}
+						size="sm"
+						className="mr-3.5"
+					/>
 
 					{/* Content */}
 					<View className="min-w-0 flex-1">

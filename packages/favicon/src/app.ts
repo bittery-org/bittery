@@ -55,15 +55,28 @@ async function isRateLimited(sourceIp: string | null): Promise<boolean> {
 }
 
 const cacheEnabled = process.env.FAVICON_CACHE_ENABLED === "true";
-const maxEntries = Number.parseInt(process.env.FAVICON_CACHE_MAX_ENTRIES ?? "10000", 10);
-const maxEntryBytes = Number.parseInt(process.env.FAVICON_CACHE_MAX_ENTRY_BYTES ?? "102400", 10);
-const maxTotalBytes = Number.parseInt(process.env.FAVICON_CACHE_MAX_TOTAL_BYTES ?? "52428800", 10);
+const maxEntries = Number.parseInt(
+	process.env.FAVICON_CACHE_MAX_ENTRIES ?? "10000",
+	10,
+);
+const maxEntryBytes = Number.parseInt(
+	process.env.FAVICON_CACHE_MAX_ENTRY_BYTES ?? "102400",
+	10,
+);
+const maxTotalBytes = Number.parseInt(
+	process.env.FAVICON_CACHE_MAX_TOTAL_BYTES ?? "52428800",
+	10,
+);
 
 const memoryCache = cacheEnabled
 	? new FaviconLruCache({
 			maxEntries: Number.isFinite(maxEntries) ? maxEntries : 10_000,
-			maxEntryBytes: Number.isFinite(maxEntryBytes) ? maxEntryBytes : 100 * 1024,
-			maxTotalBytes: Number.isFinite(maxTotalBytes) ? maxTotalBytes : 50 * 1024 * 1024,
+			maxEntryBytes: Number.isFinite(maxEntryBytes)
+				? maxEntryBytes
+				: 100 * 1024,
+			maxTotalBytes: Number.isFinite(maxTotalBytes)
+				? maxTotalBytes
+				: 50 * 1024 * 1024,
 		})
 	: null;
 

@@ -6,7 +6,7 @@
  */
 
 import { storage } from "../lib/storage";
-import { desktopClient, type DesktopStatus } from "./desktop-client";
+import { type DesktopStatus, desktopClient } from "./desktop-client";
 import type { DesktopEventPayload } from "./desktop-protocol";
 import {
 	type DesktopModeStateSnapshot,

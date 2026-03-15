@@ -20,7 +20,9 @@ describe("deployment hardening config", () => {
 			"utf8",
 		);
 
-		expect(dockerfile).toContain("FROM nginxinc/nginx-unprivileged:1.27-alpine");
+		expect(dockerfile).toContain(
+			"FROM nginxinc/nginx-unprivileged:1.27-alpine",
+		);
 	});
 
 	test("compose requires MINIO_ROOT_PASSWORD for the storage profile", () => {
@@ -30,6 +32,7 @@ describe("deployment hardening config", () => {
 		);
 
 		expect(composeFile).toContain(
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: its fine
 			"MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}",
 		);
 	});

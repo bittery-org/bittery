@@ -9,9 +9,7 @@ import {
 } from "@bittery/shared";
 import { storage } from "../lib/storage";
 import { decrypt, encrypt, rsaDecrypt } from "../lib/wasm-crypto";
-import {
-	ensureDesktopWriteCapability,
-} from "./desktop-key-material";
+import { ensureDesktopWriteCapability } from "./desktop-key-material";
 import { resolveAccountEmailForVault } from "./services/account-resolution";
 import { onLocalItemUpdated } from "./services/local-item-cache-service";
 import {

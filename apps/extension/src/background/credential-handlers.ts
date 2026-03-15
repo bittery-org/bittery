@@ -3,17 +3,16 @@
  * Handles saving and updating credentials (password capture).
  */
 
-import {
-	ensureDesktopWriteCapability,
-} from "./desktop-key-material";
-import {
-	onLocalItemCreated,
-	onLocalItemUpdated,
-} from "./services/local-item-cache-service";
+import { core } from "./core-instance";
+import { ensureDesktopWriteCapability } from "./desktop-key-material";
 import {
 	resolveAccountEmailForItemId,
 	resolveAccountEmailForVault,
 } from "./services/account-resolution";
+import {
+	onLocalItemCreated,
+	onLocalItemUpdated,
+} from "./services/local-item-cache-service";
 import {
 	ensureUnlockedOrRecoverFromDesktop,
 	updateActivity,

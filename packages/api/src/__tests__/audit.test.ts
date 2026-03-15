@@ -2,8 +2,6 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { db } from "@bittery/db";
 import { auditLog } from "@bittery/db/schema/auth";
 import { shareAccessLog } from "@bittery/db/schema/sharing";
-import { nanoid } from "nanoid";
-import { auditRouter } from "../routers/audit";
 import {
 	addTeamMember,
 	createTestItem,
@@ -13,6 +11,8 @@ import {
 	setup,
 	truncateAll,
 } from "@bittery/test-utils";
+import { nanoid } from "nanoid";
+import { auditRouter } from "../routers/audit";
 
 const originalBitteryMode = process.env.BITTERY_MODE;
 

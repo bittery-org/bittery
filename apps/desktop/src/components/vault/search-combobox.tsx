@@ -198,9 +198,7 @@ export function SearchCombobox() {
 						)}
 
 						{filteredTags.length > 0 && (
-							<CommandGroup
-								heading={m.vaults_detail_items_detail_tags_label()}
-							>
+							<CommandGroup heading={m.vaults_detail_items_detail_tags_label()}>
 								{filteredTags.map((tag) => {
 									const tagColor = getTagColorFromName(tag);
 									return (

@@ -72,8 +72,7 @@ function formatDeviceDisplayLocalized(
 	device: DeviceSession,
 	m: Messages,
 ): { title: string; subtitle: string } {
-	const title =
-		device.deviceName ?? m.settings_devices_common_unknown_device();
+	const title = device.deviceName ?? m.settings_devices_common_unknown_device();
 
 	const parts: string[] = [];
 	if (device.osName) {

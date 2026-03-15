@@ -7,6 +7,18 @@
  * Run `pnpm run db:test:setup` to create and migrate the test database.
  */
 
+import initCryptoWasm, {
+	deriveKeys as deriveKeysWasm,
+	deriveMasterKey as deriveMasterKeyWasm,
+	encryptMasterKey as encryptMasterKeyWasm,
+	encrypt as encryptWasm,
+	generateEncryptionKey as generateEncryptionKeyWasm,
+	generateRecoveryKey as generateRecoveryKeyWasm,
+	generateRSAKeyPair as generateRSAKeyPairWasm,
+	generateSecretKey as generateSecretKeyWasm,
+	getSecretKeyHint as getSecretKeyHintWasm,
+	JsSrpClient,
+} from "@bittery/crypto-wasm";
 import { db } from "@bittery/db";
 import { auditLog, session, user } from "@bittery/db/schema/auth";
 import { rateLimitState } from "@bittery/db/schema/rate-limit";
@@ -26,18 +38,6 @@ import {
 } from "@bittery/db/schema/vault";
 import { and, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import initCryptoWasm, {
-	deriveKeys as deriveKeysWasm,
-	deriveMasterKey as deriveMasterKeyWasm,
-	encryptMasterKey as encryptMasterKeyWasm,
-	encrypt as encryptWasm,
-	generateEncryptionKey as generateEncryptionKeyWasm,
-	generateRecoveryKey as generateRecoveryKeyWasm,
-	generateRSAKeyPair as generateRSAKeyPairWasm,
-	generateSecretKey as generateSecretKeyWasm,
-	getSecretKeyHint as getSecretKeyHintWasm,
-	JsSrpClient,
-} from "@bittery/crypto-wasm";
 
 export interface TestContext {
 	session: {
@@ -110,12 +110,16 @@ export function createAuthenticatedContext(
 		clientId?: string | null;
 	},
 ): TestContext {
-	return createTestContext({
-		userId,
-		sessionId: sessionId || generateTestSessionId(),
-		expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-		platform: "web",
-	}, deviceOverrides, contextOverrides);
+	return createTestContext(
+		{
+			userId,
+			sessionId: sessionId || generateTestSessionId(),
+			expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+			platform: "web",
+		},
+		deviceOverrides,
+		contextOverrides,
+	);
 }
 
 /**
@@ -811,7 +815,9 @@ export async function getSyncEventAcks(userId: string, clientId: string) {
  * Create an authenticated caller for a router in a single call.
  * Handles user creation, session creation, and caller setup.
  */
-export async function setup<T extends { createCaller: (ctx: TestContext) => any }>(
+export async function setup<
+	T extends { createCaller: (ctx: TestContext) => any },
+>(
 	router: T,
 	overrides?: Partial<typeof user.$inferInsert>,
 ): Promise<{

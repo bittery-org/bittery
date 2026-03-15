@@ -39,12 +39,16 @@ function scheduleRun() {
 
 runGenerate();
 
-const watcher = fs.watch(messagesDir, { recursive: true }, (_eventType, fileName) => {
-	if (!fileName || !fileName.endsWith(".json")) {
-		return;
-	}
-	scheduleRun();
-});
+const watcher = fs.watch(
+	messagesDir,
+	{ recursive: true },
+	(_eventType, fileName) => {
+		if (!fileName || !fileName.endsWith(".json")) {
+			return;
+		}
+		scheduleRun();
+	},
+);
 
 watcher.on("error", (error) => {
 	console.error("[i18n:watch] watcher error", error);

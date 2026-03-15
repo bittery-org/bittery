@@ -223,9 +223,7 @@ function SignInFormContent({
 				<form.Field name="email">
 					{(field) => (
 						<div className="space-y-2">
-							<Label htmlFor={field.name}>
-								{m.auth_signin_label_email()}
-							</Label>
+							<Label htmlFor={field.name}>{m.auth_signin_label_email()}</Label>
 							<Input
 								id={field.name}
 								name={field.name}

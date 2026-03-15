@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import {
-	TRPC_JSON_BODY_LIMIT_BYTES,
 	enforceTrpcRequestGuards,
+	TRPC_JSON_BODY_LIMIT_BYTES,
 } from "./trpc-guard";
 
 function createTestApp() {

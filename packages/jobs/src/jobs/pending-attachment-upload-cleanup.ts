@@ -1,5 +1,5 @@
-import { db, pendingAttachmentUpload } from "@bittery/db";
 import { DeleteObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { db, pendingAttachmentUpload } from "@bittery/db";
 import { and, isNull, lt } from "drizzle-orm";
 import { registerJob } from "../registry";
 import type { JobDefinition } from "../types";
@@ -63,17 +63,18 @@ const pendingAttachmentUploadCleanupJob: JobDefinition<void> = {
 		let totalDeleted = 0;
 
 		while (true) {
-			const expiredReservations = await db.query.pendingAttachmentUpload.findMany({
-				where: and(
-					isNull(pendingAttachmentUpload.consumedAt),
-					lt(pendingAttachmentUpload.expiresAt, now),
-				),
-				columns: {
-					id: true,
-					storageKey: true,
-				},
-				limit: BATCH_SIZE,
-			});
+			const expiredReservations =
+				await db.query.pendingAttachmentUpload.findMany({
+					where: and(
+						isNull(pendingAttachmentUpload.consumedAt),
+						lt(pendingAttachmentUpload.expiresAt, now),
+					),
+					columns: {
+						id: true,
+						storageKey: true,
+					},
+					limit: BATCH_SIZE,
+				});
 
 			if (expiredReservations.length === 0) {
 				break;

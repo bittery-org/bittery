@@ -14,19 +14,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { closeRateLimitAdapterForTests } from "@bittery/rate-limit";
 import { db, signupVerification } from "@bittery/db";
-import { eq } from "drizzle-orm";
-import {
-	authRouter,
-	enforceRefreshSessionRateLimits,
-} from "../routers/auth";
-import { setControlBroadcastFunction } from "../sync-helper";
+import { closeRateLimitAdapterForTests } from "@bittery/rate-limit";
 import {
 	addTeamMember,
 	createAuthenticatedContext,
-	createTestContext,
 	createPublicContext,
+	createTestContext,
 	createTestInvitation,
 	createTestSession,
 	createTestTeam,
@@ -41,6 +35,9 @@ import {
 	setup,
 	truncateAll,
 } from "@bittery/test-utils";
+import { eq } from "drizzle-orm";
+import { authRouter, enforceRefreshSessionRateLimits } from "../routers/auth";
+import { setControlBroadcastFunction } from "../sync-helper";
 
 function toSignupCryptoInput(
 	data: Awaited<ReturnType<typeof generateTestAuthCryptoData>>,
@@ -707,7 +704,9 @@ describe("Auth Router", () => {
 			expect(activeSessions).toHaveLength(1);
 			expect(activeSessions[0]?.id).toBe(secondLogin.finishResult.sessionId);
 			expect(activeSessions[0]?.clientId).toBe("web_profile_alpha");
-			expect(await getSession(firstLogin.finishResult.sessionId)).toBeUndefined();
+			expect(
+				await getSession(firstLogin.finishResult.sessionId),
+			).toBeUndefined();
 		});
 
 		test("should keep separate web device rows for different clientIds", async () => {
@@ -742,7 +741,9 @@ describe("Auth Router", () => {
 			});
 
 			const activeSessions = await getActiveSessions(userId);
-			const clientIds = activeSessions.map((activeSession) => activeSession.clientId);
+			const clientIds = activeSessions.map(
+				(activeSession) => activeSession.clientId,
+			);
 
 			expect(activeSessions).toHaveLength(2);
 			expect(clientIds).toContain("web_profile_alpha");
@@ -780,8 +781,16 @@ describe("Auth Router", () => {
 			const activeSessions = await getActiveSessions(userId);
 
 			expect(activeSessions).toHaveLength(2);
-			expect(activeSessions.every((activeSession) => activeSession.platform === "desktop")).toBe(true);
-			expect(activeSessions.every((activeSession) => activeSession.clientId === null)).toBe(true);
+			expect(
+				activeSessions.every(
+					(activeSession) => activeSession.platform === "desktop",
+				),
+			).toBe(true);
+			expect(
+				activeSessions.every(
+					(activeSession) => activeSession.clientId === null,
+				),
+			).toBe(true);
 		});
 
 		test("should reject finishLogin with invalid SRP proof", async () => {
@@ -1470,9 +1479,13 @@ describe("Auth Router", () => {
 			);
 			const result = await caller.listDevices();
 
-			expect(result.find((session) => session.id === newerGroupedSession)).toBeDefined();
 			expect(
-				result.filter((session) => session.platform === "web").map((session) => session.id),
+				result.find((session) => session.id === newerGroupedSession),
+			).toBeDefined();
+			expect(
+				result
+					.filter((session) => session.platform === "web")
+					.map((session) => session.id),
 			).toEqual([newerGroupedSession]);
 		});
 
@@ -1498,9 +1511,14 @@ describe("Auth Router", () => {
 			);
 			const result = await caller.listDevices();
 
-			expect(result.find((session) => session.id === currentSessionId)?.isCurrentSession).toBe(true);
 			expect(
-				result.filter((session) => session.platform === "web").map((session) => session.id),
+				result.find((session) => session.id === currentSessionId)
+					?.isCurrentSession,
+			).toBe(true);
+			expect(
+				result
+					.filter((session) => session.platform === "web")
+					.map((session) => session.id),
 			).toEqual([currentSessionId]);
 		});
 
@@ -1728,7 +1746,9 @@ describe("Auth Router", () => {
 			expect((await getSession(groupedActiveB))?.deviceName).toBe(
 				"Unified Browser Name",
 			);
-			expect((await getSession(groupedExpired))?.deviceName).toBe("Expired Name");
+			expect((await getSession(groupedExpired))?.deviceName).toBe(
+				"Expired Name",
+			);
 		});
 	});
 

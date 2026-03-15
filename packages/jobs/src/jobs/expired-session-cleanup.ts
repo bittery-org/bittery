@@ -29,9 +29,12 @@ const expiredSessionCleanupJob: JobDefinition<void> = {
 				break;
 			}
 
-			await db
-				.delete(session)
-				.where(inArray(session.id, expiredSessions.map((row) => row.id)));
+			await db.delete(session).where(
+				inArray(
+					session.id,
+					expiredSessions.map((row) => row.id),
+				),
+			);
 
 			totalDeleted += expiredSessions.length;
 		}

@@ -236,9 +236,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 							/>
 						</div>
 						<div className="grid gap-2">
-							<Label htmlFor="role">
-								{m.team_invite_dialog_field_role()}
-							</Label>
+							<Label htmlFor="role">{m.team_invite_dialog_field_role()}</Label>
 							<Select
 								value={role}
 								onValueChange={(v: "admin" | "member") => setRole(v)}
@@ -247,12 +245,8 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
-									<SelectItem value="member">
-										{m.team_role_member()}
-									</SelectItem>
-									<SelectItem value="admin">
-										{m.team_role_admin()}
-									</SelectItem>
+									<SelectItem value="member">{m.team_role_member()}</SelectItem>
+									<SelectItem value="admin">{m.team_role_admin()}</SelectItem>
 								</SelectContent>
 							</Select>
 							<p className="text-muted-foreground text-xs">
@@ -317,20 +311,24 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 													{seatPreview.nextQuantity -
 														seatPreview.currentQuantity ===
 													1
-														? m.team_invite_dialog_invoice_preview_adding_seats_single({
-																count:
-																	seatPreview.nextQuantity -
-																	seatPreview.currentQuantity,
-																currentQuantity: seatPreview.currentQuantity,
-																nextQuantity: seatPreview.nextQuantity,
-															})
-														: m.team_invite_dialog_invoice_preview_adding_seats_plural({
-																count:
-																	seatPreview.nextQuantity -
-																	seatPreview.currentQuantity,
-																currentQuantity: seatPreview.currentQuantity,
-																nextQuantity: seatPreview.nextQuantity,
-															})}
+														? m.team_invite_dialog_invoice_preview_adding_seats_single(
+																{
+																	count:
+																		seatPreview.nextQuantity -
+																		seatPreview.currentQuantity,
+																	currentQuantity: seatPreview.currentQuantity,
+																	nextQuantity: seatPreview.nextQuantity,
+																},
+															)
+														: m.team_invite_dialog_invoice_preview_adding_seats_plural(
+																{
+																	count:
+																		seatPreview.nextQuantity -
+																		seatPreview.currentQuantity,
+																	currentQuantity: seatPreview.currentQuantity,
+																	nextQuantity: seatPreview.nextQuantity,
+																},
+															)}
 												</p>
 											</div>
 											<div className="divide-y">
@@ -351,13 +349,17 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 															</p>
 															<p className="text-muted-foreground text-xs">
 																{line.isProration
-																	? m.team_invite_dialog_invoice_preview_line_seats_change({
-																			currentQuantity:
-																				seatPreview.currentQuantity,
-																			nextQuantity: seatPreview.nextQuantity,
-																		})
+																	? m.team_invite_dialog_invoice_preview_line_seats_change(
+																			{
+																				currentQuantity:
+																					seatPreview.currentQuantity,
+																				nextQuantity: seatPreview.nextQuantity,
+																			},
+																		)
 																	: line.quantity !== null
-																		? m.team_invite_dialog_invoice_preview_line_quantity({ quantity: line.quantity })
+																		? m.team_invite_dialog_invoice_preview_line_quantity(
+																				{ quantity: line.quantity },
+																			)
 																		: ""}
 																{(line.isProration || line.quantity !== null) &&
 																line.unitAmountCents !== null &&
@@ -368,12 +370,14 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 																{line.unitAmountCents !== null &&
 																line.quantity !== null &&
 																line.quantity > 0
-																	? m.team_invite_dialog_invoice_preview_line_each({
-																			amount: formatCurrencyFromCents(
-																				line.unitAmountCents,
-																				line.currency,
-																			),
-																		})
+																	? m.team_invite_dialog_invoice_preview_line_each(
+																			{
+																				amount: formatCurrencyFromCents(
+																					line.unitAmountCents,
+																					line.currency,
+																				),
+																			},
+																		)
 																	: ""}
 															</p>
 														</div>

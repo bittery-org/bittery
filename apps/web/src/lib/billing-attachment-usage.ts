@@ -47,14 +47,14 @@ export function getAttachmentUsageSnapshot(
 }
 
 export function formatStorageBytes(bytes: number, locale: string): string {
-	const selectedUnit =
-		storageUnits.find(({ threshold }) => bytes >= threshold) ?? {
-			threshold: 1,
-			unit: "byte",
-		};
+	const selectedUnit = storageUnits.find(
+		({ threshold }) => bytes >= threshold,
+	) ?? {
+		threshold: 1,
+		unit: "byte",
+	};
 	const value = bytes / selectedUnit.threshold;
-	const maximumFractionDigits =
-		value >= 10 || Number.isInteger(value) ? 0 : 1;
+	const maximumFractionDigits = value >= 10 || Number.isInteger(value) ? 0 : 1;
 
 	return new Intl.NumberFormat(locale, {
 		style: "unit",

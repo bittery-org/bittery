@@ -7,12 +7,7 @@ import {
 	useItems,
 	useUpdateVault,
 } from "@bittery/core/hooks";
-import {
-	Button,
-	Sheet,
-	SheetContent,
-	toast,
-} from "@bittery/ui";
+import { Button, Sheet, SheetContent, toast } from "@bittery/ui";
 import { IconVault3OutlineDuo18 as VaultIcon } from "@bittery/ui/icons";
 import {
 	createFileRoute,
@@ -21,13 +16,13 @@ import {
 	useParams,
 } from "@tanstack/react-router";
 import { useState } from "react";
+import { VaultNavSidebar } from "@/components/vault/vault-nav-sidebar";
 import { CreateVaultDialog } from "@/components/vaults/create-vault-dialog";
 import { DeleteVaultDialog } from "@/components/vaults/delete-vault-dialog";
 import {
 	EditVaultDialog,
 	type UpdateVaultData,
 } from "@/components/vaults/edit-vault-dialog";
-import { VaultNavSidebar } from "@/components/vault/vault-nav-sidebar";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults")({
@@ -77,10 +72,7 @@ function VaultsLayout() {
 		setIsEditVaultDialogOpen(true);
 	};
 
-	const handleUpdateVault = async (
-		vaultId: string,
-		data: UpdateVaultData,
-	) => {
+	const handleUpdateVault = async (vaultId: string, data: UpdateVaultData) => {
 		await updateVault.mutateAsync({
 			vaultId,
 			name: data.name,
@@ -105,14 +97,12 @@ function VaultsLayout() {
 		toast.success(m.vaults_detail_toast_vault_deleted());
 	};
 
-	const tags = availableTags.map((t) =>
-		typeof t === "string" ? t : t.name,
-	);
+	const tags = availableTags;
 
 	return (
 		<div className="flex min-h-0 flex-1 overflow-hidden">
 			{/* Desktop sidebar */}
-			<aside className="hidden w-52 shrink-0 flex-col border-r pt-11 xl:pt-12 lg:flex">
+			<aside className="hidden w-52 shrink-0 flex-col border-r pt-11 lg:flex xl:pt-12">
 				<VaultNavSidebar
 					vaults={vaultKeys}
 					tags={tags}
@@ -126,7 +116,7 @@ function VaultsLayout() {
 			{/* Main content area */}
 			<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 				{/* Mobile header with sidebar toggle */}
-				<div className="flex h-10 shrink-0 items-center border-b pl-12 pr-3 lg:hidden">
+				<div className="flex h-10 shrink-0 items-center border-b pr-3 pl-12 lg:hidden">
 					<Button
 						variant="ghost"
 						size="sm"

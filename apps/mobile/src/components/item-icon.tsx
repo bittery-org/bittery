@@ -1,11 +1,14 @@
 import { getFaviconUrl, getItemFaviconUrl } from "@bittery/shared/favicon";
-import type { DecryptedItemWithContext, ItemCategory } from "@bittery/shared/types";
+import type {
+	DecryptedItemWithContext,
+	ItemCategory,
+} from "@bittery/shared/types";
 import { CreditCard, FileText, Key, Timer, User } from "lucide-react-native";
 import { useState } from "react";
 import { Image, View } from "react-native";
 import { withUniwind } from "uniwind";
-import { cn } from "@/lib/utils";
 import { useServerUrl } from "@/lib/trpc";
+import { cn } from "@/lib/utils";
 
 // Create styled icon components
 const StyledKey = withUniwind(Key);
@@ -69,14 +72,14 @@ export function ItemIcon({
 				? getItemFaviconUrl(
 						item,
 						sizeMap[size].favicon,
-						serverUrl ?? (contextServerUrl ?? undefined),
-				  )
+						serverUrl ?? contextServerUrl ?? undefined,
+					)
 				: url
 					? getFaviconUrl(
 							url,
 							sizeMap[size].favicon,
-							serverUrl ?? (contextServerUrl ?? undefined),
-					  )
+							serverUrl ?? contextServerUrl ?? undefined,
+						)
 					: null
 			: null;
 

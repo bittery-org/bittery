@@ -38,7 +38,9 @@ function normalizeHeaderIp(value: string | null | undefined): string | null {
 	return normalized || null;
 }
 
-function normalizeClientIdHeader(value: string | null | undefined): string | null {
+function normalizeClientIdHeader(
+	value: string | null | undefined,
+): string | null {
 	if (!value) {
 		return null;
 	}

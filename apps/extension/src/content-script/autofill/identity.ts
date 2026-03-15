@@ -138,7 +138,8 @@ function handleIdentityKeyboardNavigation(event: KeyboardEvent) {
 	) {
 		if (contentState.currentIdentityIframe) {
 			event.preventDefault();
-			const iframeOrigin = new URL(contentState.currentIdentityIframe.src).origin;
+			const iframeOrigin = new URL(contentState.currentIdentityIframe.src)
+				.origin;
 			const nonce =
 				new URL(contentState.currentIdentityIframe.src).searchParams.get(
 					"nonce",

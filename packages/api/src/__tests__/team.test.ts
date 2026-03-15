@@ -15,8 +15,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { db } from "@bittery/db";
 import { user } from "@bittery/db/schema/auth";
-import { eq } from "drizzle-orm";
-import { teamRouter } from "../routers/team";
 import {
 	addTeamMember,
 	addVaultMember,
@@ -34,6 +32,8 @@ import {
 	setupTeamWithMembers,
 	truncateAll,
 } from "@bittery/test-utils";
+import { eq } from "drizzle-orm";
+import { teamRouter } from "../routers/team";
 
 const originalBitteryMode = process.env.BITTERY_MODE;
 

@@ -109,9 +109,7 @@ function ItemListRow({
 	isAllAccountsMode,
 	onClick,
 }: {
-	item: DecryptedItemWithContext & {
-		account?: { name: string; serverUrl?: string };
-	};
+	item: DecryptedItemWithContext;
 	isSelected: boolean;
 	isAllAccountsMode: boolean;
 	onClick: () => void;

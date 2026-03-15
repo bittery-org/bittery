@@ -1,4 +1,6 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: The queries are only enabled when a team id is there */
+
+import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useTRPC } from "@bittery/shared/trpc";
 import {
 	Avatar,
@@ -23,13 +25,12 @@ import { MemberList } from "@/components/teams/member-list";
 import { PendingInvitationsList } from "@/components/teams/pending-invitations-list";
 import { TeamSettings } from "@/components/teams/team-settings";
 import { getTeamPageAccess } from "@/lib/team-access";
-import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/team/")({
 	component: TeamPage,
 	head: () => ({
-		meta: [{ title: messages["team.page.meta_title"]() }],
+		meta: [{ title: messages.team_page_meta_title() }],
 	}),
 });
 
@@ -86,9 +87,7 @@ function TeamPage() {
 	if (!team) {
 		return (
 			<div className="py-8 text-center">
-				<p className="text-muted-foreground">
-					{m.team_page_empty_no_team()}
-				</p>
+				<p className="text-muted-foreground">{m.team_page_empty_no_team()}</p>
 			</div>
 		);
 	}

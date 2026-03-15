@@ -163,9 +163,7 @@ function AddAccountDialogForm({
 
 			<form onSubmit={handleSubmit} className="space-y-4">
 				<div className="grid gap-1.5">
-					<Label htmlFor="add-serverUrl">
-						{m.auth_footer_server_title()}
-					</Label>
+					<Label htmlFor="add-serverUrl">{m.auth_footer_server_title()}</Label>
 					<Input
 						id="add-serverUrl"
 						type="url"
@@ -228,9 +226,7 @@ function AddAccountDialogForm({
 				</div>
 
 				<div className="grid gap-1.5">
-					<Label htmlFor="add-password">
-						{m.auth_signin_label_password()}
-					</Label>
+					<Label htmlFor="add-password">{m.auth_signin_label_password()}</Label>
 					<InputGroup>
 						<InputGroupInput
 							id="add-password"

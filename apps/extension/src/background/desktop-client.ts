@@ -1,10 +1,7 @@
-import type {
-	DesktopEventPayload,
-	DesktopResponse,
-} from "./desktop-protocol";
+import type { DesktopEventPayload, DesktopResponse } from "./desktop-protocol";
 import {
-	nativeMessagingClient,
 	type NativeMessagingClient,
+	nativeMessagingClient,
 } from "./native-messaging-client";
 
 const CACHE_TTL_MS = 5000;
@@ -48,7 +45,10 @@ export class DesktopClient {
 		"request" | "subscribeToDesktopEvents"
 	>;
 	private accountsCache: CachedData<DesktopAccountsResponse> | null = null;
-	private vaultKeysCache = new Map<string, CachedData<DesktopVaultKeysResponse>>();
+	private vaultKeysCache = new Map<
+		string,
+		CachedData<DesktopVaultKeysResponse>
+	>();
 	private authTokenCache = new Map<
 		string,
 		CachedData<{

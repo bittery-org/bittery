@@ -1,20 +1,18 @@
+import { resolveTrustedSourceIpFromHeaders } from "@bittery/api/context";
 import {
 	type SessionControlPayload,
 	setBroadcastFunction,
 	setControlBroadcastFunction,
 } from "@bittery/api/sync-helper";
-import { resolveTrustedSourceIpFromHeaders } from "@bittery/api/context";
-import {
-	verifySession,
-} from "@bittery/auth";
+import { verifySession } from "@bittery/auth";
+import { db, vaultKey } from "@bittery/db";
+import type { PubSubAdapter } from "@bittery/pubsub";
 import {
 	incrementRateLimitWindow,
 	RATE_LIMIT_NAMESPACE,
 } from "@bittery/rate-limit";
-import { db, vaultKey } from "@bittery/db";
-import type { PubSubAdapter } from "@bittery/pubsub";
 import { eq } from "drizzle-orm";
-import { Hono, type Context } from "hono";
+import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 
 // Types for sync events

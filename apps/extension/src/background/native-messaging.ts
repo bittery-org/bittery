@@ -25,14 +25,14 @@ export async function handleCheckNativeBiometric(): Promise<MessageResponse> {
 		});
 
 		const responseData = response as any;
-			const result = {
-				success: true,
-				available:
-					responseData?.type === "BIOMETRIC_STATUS" && responseData.available,
-				enabled: responseData?.enabled || false,
-				appRunning:
-					responseData?.appRunning || responseData?.app_running || false,
-			};
+		const result = {
+			success: true,
+			available:
+				responseData?.type === "BIOMETRIC_STATUS" && responseData.available,
+			enabled: responseData?.enabled || false,
+			appRunning:
+				responseData?.appRunning || responseData?.app_running || false,
+		};
 		return result;
 	} catch (error) {
 		console.error("[CHECK_NATIVE_BIOMETRIC] Error:", error);

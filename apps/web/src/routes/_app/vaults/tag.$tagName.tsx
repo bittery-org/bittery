@@ -1,6 +1,6 @@
 import {
-	useAvailableTags,
 	useAllVaultKeys,
+	useAvailableTags,
 	useCreateItem,
 	useDeleteItem,
 	useItems,
@@ -14,8 +14,8 @@ import type {
 import {
 	Badge,
 	Button,
-	cn,
 	CreateItemSheet,
+	cn,
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -30,15 +30,15 @@ import {
 } from "@bittery/ui";
 import { IconTagOutlineDuo18 as TagIcon } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useMemo } from "react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { z } from "zod";
 import { ItemDetailPane } from "@/components/vault/item-detail-pane";
 import { ItemList } from "@/components/vault/item-list";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/tag/$tagName")({
-	validateSearch: (search) => ({
-		itemId: typeof search.itemId === "string" ? search.itemId : undefined,
+	validateSearch: z.object({
+		itemId: z.string().optional(),
 	}),
 	component: TagPage,
 	head: ({ params }) => ({
@@ -84,9 +84,7 @@ function TagPage() {
 
 	const canWriteItems = selectedItem
 		? (() => {
-				const vault = vaultKeys.find(
-					(v) => v.vaultId === selectedItem.vaultId,
-				);
+				const vault = vaultKeys.find((v) => v.vaultId === selectedItem.vaultId);
 				return vault ? vault.role !== "read-only" : false;
 			})()
 		: true;
@@ -174,10 +172,7 @@ function TagPage() {
 				)}
 			>
 				<div className="flex items-center gap-2 border-b px-4 py-3">
-					<TagIcon
-						className="size-4 shrink-0"
-						style={{ color: tagColor }}
-					/>
+					<TagIcon className="size-4 shrink-0" style={{ color: tagColor }} />
 					<span className="truncate font-medium">{tagName}</span>
 					<Badge variant="secondary" className="ml-auto shrink-0">
 						{taggedItems.length}
@@ -203,7 +198,6 @@ function TagPage() {
 						<ItemList
 							items={taggedItems}
 							isLoading={false}
-							vaultId=""
 							onItemSelect={handleItemSelect}
 							selectedItemId={selectedItemId ?? undefined}
 						/>

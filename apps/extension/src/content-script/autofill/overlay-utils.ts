@@ -1,5 +1,4 @@
 import type { DecryptedItem } from "@bittery/shared/types";
-import type { AutofillField } from "../types";
 import {
 	appendNonceToIframeSrc,
 	createAutofillReadySchema,
@@ -8,6 +7,7 @@ import {
 	resizeIframeMessageSchema,
 	validateIframeMessage,
 } from "../iframe-messages";
+import type { AutofillField } from "../types";
 
 // Visual feedback styles for autofilled fields
 const AUTOFILL_HIGHLIGHT_STYLE = {

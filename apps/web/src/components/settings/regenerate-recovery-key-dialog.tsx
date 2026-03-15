@@ -64,9 +64,7 @@ export function RegenerateRecoveryKeyDialog({
 			handleOpenChange(false);
 		},
 		onError: () => {
-			toast.error(
-				m.settings_recovery_key_regenerate_toast_regenerate_failed(),
-			);
+			toast.error(m.settings_recovery_key_regenerate_toast_regenerate_failed());
 			setIsProcessing(false);
 		},
 	});
@@ -203,15 +201,11 @@ export function RegenerateRecoveryKeyDialog({
 		});
 
 		if (result === "pdf-downloaded") {
-			toast.success(
-				m.settings_recovery_key_common_toast_kit_pdf_downloaded(),
-			);
+			toast.success(m.settings_recovery_key_common_toast_kit_pdf_downloaded());
 			return;
 		}
 
-		toast.success(
-			m.settings_recovery_key_common_toast_kit_text_downloaded(),
-		);
+		toast.success(m.settings_recovery_key_common_toast_kit_text_downloaded());
 	};
 
 	return (

@@ -1,3 +1,4 @@
+import { m } from "@bittery/i18n/paraglide/messages";
 import { TRPCProvider } from "@bittery/shared/trpc";
 import { createAppTrpcOptionsProxy } from "@bittery/shared/trpc-client";
 import { createSessionRefreshingTrpcClient } from "@bittery/shared/trpc-session-refresh";
@@ -7,7 +8,6 @@ import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { PendingLoader } from "./components/loader";
 import { getServerUrl } from "./lib/auth-server";
 import { storage } from "./lib/storage";
-import { m } from "@bittery/i18n/paraglide/messages";
 import "./index.css";
 import { initWasmCrypto } from "./lib/wasm-crypto";
 

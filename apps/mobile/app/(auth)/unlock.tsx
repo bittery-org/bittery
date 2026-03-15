@@ -55,13 +55,10 @@ const StyledUsers = withUniwind(Users);
 
 import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
-import { arrayBufferToBase64 } from "../../src/lib/crypto";
 import { resolveBiometricErrorMessage } from "../../src/lib/biometric-error-message";
+import { arrayBufferToBase64 } from "../../src/lib/crypto";
 import { useServerUrl } from "../../src/lib/trpc";
-import {
-	type AccountMetadata,
-	storage,
-} from "../../src/services/storage";
+import { type AccountMetadata, storage } from "../../src/services/storage";
 
 export default function UnlockScreen() {
 	const router = useRouter();

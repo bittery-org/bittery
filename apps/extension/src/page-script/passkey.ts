@@ -498,19 +498,16 @@ async function interceptGet(
 		if (signal?.aborted) {
 			throw error;
 		}
-		console.warn(
-			"[Bittery Passkey] get interception failed, using native",
-			{
-				requestId: request.requestId,
-				href: window.location.href,
-				origin: window.location.origin,
-				isTopFrame: isTopFrame(),
-				mediation,
-				rpId: serializedOptions.rpId,
-				allowCredentialsCount: serializedOptions.allowCredentials?.length ?? 0,
-				error: error instanceof Error ? error.message : String(error),
-			},
-		);
+		console.warn("[Bittery Passkey] get interception failed, using native", {
+			requestId: request.requestId,
+			href: window.location.href,
+			origin: window.location.origin,
+			isTopFrame: isTopFrame(),
+			mediation,
+			rpId: serializedOptions.rpId,
+			allowCredentialsCount: serializedOptions.allowCredentials?.length ?? 0,
+			error: error instanceof Error ? error.message : String(error),
+		});
 		return getNative(options);
 	} finally {
 		detachAbort?.();

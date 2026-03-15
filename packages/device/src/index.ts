@@ -250,12 +250,7 @@ export function parseUserAgent(
 	const platform = detectPlatform(ua, appPlatform);
 
 	return {
-		deviceName: buildDeviceName(
-			platform,
-			osName,
-			osVersion,
-			browserName,
-		),
+		deviceName: buildDeviceName(platform, osName, osVersion, browserName),
 		platform,
 		browserName,
 		browserVersion,

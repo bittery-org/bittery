@@ -24,6 +24,9 @@ import {
 	ItemAttachments,
 	ItemDetail,
 	ItemForm,
+	PasswordHistoryDialog,
+	ShareHistoryDialog,
+	ShareItemDialog,
 	toast,
 } from "@bittery/ui";
 import {
@@ -36,15 +39,14 @@ import {
 	IconStarOutlineDuo18,
 	IconTrash2OutlineDuo18,
 } from "@bittery/ui/icons";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { useNavigate } from "@tanstack/react-router";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useState } from "react";
 import { useI18n } from "../../providers/i18n-provider";
 import Loader from "../loader";
 import { Favicon } from "./favicon";
 import { VaultInfoPopover } from "./item-categories/shared/vault-info-popover";
 import { MoveItemDialog } from "./move-item-dialog";
-import { PasswordHistoryDialog, ShareHistoryDialog, ShareItemDialog } from "@bittery/ui";
 
 interface VaultInfo {
 	name: string;
@@ -182,9 +184,7 @@ export function ItemDetailPage({
 				data: duplicatedData,
 			});
 
-			toast.success(
-				m.vaults_detail_items_detail_page_toast_item_duplicated(),
-			);
+			toast.success(m.vaults_detail_items_detail_page_toast_item_duplicated());
 
 			// Navigate to the duplicated item
 			navigate({
@@ -383,12 +383,16 @@ export function ItemDetailPage({
 						icon={
 							rawItem ? (
 								<Favicon
-									url={rawItem.category === "login" ? decryptedData.url : undefined}
+									url={
+										rawItem.category === "login" ? decryptedData.url : undefined
+									}
 									title={decryptedData.title}
 									serverUrl={getItemServerUrl(rawItem)}
 									category={rawItem.category}
 									cardBrand={
-										rawItem.category === "credit-card" && "cardNumber" in decryptedData
+										rawItem.category === "credit-card" &&
+										"cardNumber" in decryptedData &&
+										decryptedData.cardNumber
 											? detectCardBrand(decryptedData.cardNumber)
 											: undefined
 									}

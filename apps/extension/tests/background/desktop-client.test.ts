@@ -92,7 +92,19 @@ describe("desktop-client native transport", () => {
 
 				return {
 					type: "DESKTOP_ITEMS_SNAPSHOT" as const,
-					items: [{ id: "item-1", vaultId: "vault-1", vault: { id: "vault-1", name: "Main", type: "personal", icon: null, imageUrl: null } }],
+					items: [
+						{
+							id: "item-1",
+							vaultId: "vault-1",
+							vault: {
+								id: "vault-1",
+								name: "Main",
+								type: "personal",
+								icon: null,
+								imageUrl: null,
+							},
+						},
+					],
 					generatedAt: 123,
 				};
 			},

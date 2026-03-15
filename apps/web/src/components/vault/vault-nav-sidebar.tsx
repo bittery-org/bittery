@@ -18,8 +18,8 @@ import {
 	IconTrash2OutlineDuo18 as Trash,
 } from "@bittery/ui/icons";
 import { Link, useLocation, useParams } from "@tanstack/react-router";
-import { useI18n } from "@/providers/i18n-provider";
 import { VaultAvatar } from "@/components/vaults/vault-avatar";
+import { useI18n } from "@/providers/i18n-provider";
 import { SidebarSection } from "./sidebar-section";
 
 interface VaultInfo {
@@ -60,14 +60,12 @@ export function VaultNavSidebar({
 	const pathname = location.pathname;
 	const params = useParams({ strict: false }) as { tagName?: string };
 
-	const isAllItemsActive =
-		pathname === "/vaults" || pathname === "/vaults/";
+	const isAllItemsActive = pathname === "/vaults" || pathname === "/vaults/";
 	const isFavoritesActive = pathname.startsWith("/vaults/favorites");
 	const isTrashActive = pathname.startsWith("/vaults/trash");
 	const isTagActive = pathname.startsWith("/vaults/tag/");
-	const activeTagName = isTagActive && params.tagName
-		? decodeURIComponent(params.tagName)
-		: null;
+	const activeTagName =
+		isTagActive && params.tagName ? decodeURIComponent(params.tagName) : null;
 
 	const navLinkClass = (active: boolean) =>
 		cn(
@@ -94,10 +92,7 @@ export function VaultNavSidebar({
 					className={navLinkClass(isFavoritesActive)}
 					onClick={onNavigate}
 				>
-					<Star
-						className="size-4 text-yellow-500"
-						fill="currentColor"
-					/>
+					<Star className="size-4 text-yellow-500" fill="currentColor" />
 					<span>{m.vaults_favorites_title()}</span>
 				</Link>
 
@@ -115,8 +110,7 @@ export function VaultNavSidebar({
 								!isAllItemsActive &&
 								!isFavoritesActive &&
 								!isTrashActive;
-							const canEdit =
-								vault.role === "owner" || vault.role === "admin";
+							const canEdit = vault.role === "owner" || vault.role === "admin";
 							const canDelete = vault.role === "owner";
 
 							return (
@@ -124,9 +118,7 @@ export function VaultNavSidebar({
 									key={vault.vaultId}
 									className={cn(
 										"group relative mb-0.5 w-full rounded-md text-left text-sm transition-colors",
-										isActive
-											? "bg-primary/10"
-											: "hover:bg-muted/30",
+										isActive ? "bg-primary/10" : "hover:bg-muted/30",
 									)}
 								>
 									<Link
@@ -142,9 +134,7 @@ export function VaultNavSidebar({
 												imageUrl={vault.vaultImageUrl}
 												size="xs"
 											/>
-											<div className="truncate">
-												{vault.vaultName}
-											</div>
+											<div className="truncate">{vault.vaultName}</div>
 										</div>
 									</Link>
 									{(canEdit || canDelete) && (
@@ -154,9 +144,7 @@ export function VaultNavSidebar({
 													variant="ghost"
 													size="sm"
 													className="absolute top-1/2 right-1 h-5 w-5 -translate-y-1/2 p-0 opacity-0 group-hover:opacity-100"
-													onClick={(e) =>
-														e.stopPropagation()
-													}
+													onClick={(e) => e.stopPropagation()}
 												>
 													<Dots className="h-3.5 w-3.5" />
 												</Button>
@@ -169,8 +157,7 @@ export function VaultNavSidebar({
 																id: vault.vaultId,
 																name: vault.vaultName,
 																icon: vault.vaultIcon,
-																imageUrl:
-																	vault.vaultImageUrl,
+																imageUrl: vault.vaultImageUrl,
 															})
 														}
 													>
@@ -178,9 +165,7 @@ export function VaultNavSidebar({
 														{m.vaults_page_card_action_edit_vault()}
 													</DropdownMenuItem>
 												)}
-												{canEdit && canDelete && (
-													<DropdownMenuSeparator />
-												)}
+												{canEdit && canDelete && <DropdownMenuSeparator />}
 												{canDelete && (
 													<DropdownMenuItem
 														variant="destructive"
@@ -227,13 +212,8 @@ export function VaultNavSidebar({
 										)}
 										onClick={onNavigate}
 									>
-										<Tag
-											className="size-3.5 shrink-0"
-											style={{ color }}
-										/>
-										<span className="truncate">
-											{tagName}
-										</span>
+										<Tag className="size-3.5 shrink-0" style={{ color }} />
+										<span className="truncate">{tagName}</span>
 									</Link>
 								);
 							})}

@@ -7,9 +7,9 @@ function shouldExposeTrpcErrorDetails(): boolean {
 	);
 }
 
-export function formatTrpcErrorShape<TShape extends { data: Record<string, unknown> }>(
-	shape: TShape,
-): TShape {
+export function formatTrpcErrorShape<
+	TShape extends { data: Record<string, unknown> },
+>(shape: TShape): TShape {
 	if (shouldExposeTrpcErrorDetails()) {
 		return shape;
 	}

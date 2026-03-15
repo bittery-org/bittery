@@ -15,6 +15,6 @@
 export type { IStorageAdapter } from "./adapter";
 // Crypto provider interface
 export type { CryptoProvider } from "./crypto-provider";
+export * from "./session";
 // Types
 export * from "./types";
-export * from "./session";

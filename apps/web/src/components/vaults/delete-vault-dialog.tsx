@@ -46,9 +46,7 @@ export function DeleteVaultDialog({
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
 			<AlertDialogContent data-testid="delete-vault-dialog">
 				<AlertDialogHeader>
-					<AlertDialogTitle>
-						{m.vaults_delete_dialog_title()}
-					</AlertDialogTitle>
+					<AlertDialogTitle>{m.vaults_delete_dialog_title()}</AlertDialogTitle>
 					<AlertDialogDescription>
 						{m.vaults_delete_dialog_description({
 							vaultName: vault?.name ?? "",

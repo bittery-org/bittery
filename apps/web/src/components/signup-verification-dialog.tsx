@@ -109,8 +109,7 @@ export function SignupVerificationDialog(
 								{m.auth_signup_button_verifying()}
 							</>
 						) : (
-							(props.verifyLabel ??
-							m.auth_signup_button_verify_and_continue())
+							(props.verifyLabel ?? m.auth_signup_button_verify_and_continue())
 						)}
 					</Button>
 				</DialogFooter>
@@ -213,7 +212,7 @@ export function SignupVerificationStep(
 								type="button"
 								variant="ghost"
 								onClick={props.onResend}
-								className="h-6 px-2 text-xs text-muted-foreground"
+								className="h-6 px-2 text-muted-foreground text-xs"
 								disabled={
 									props.isRequesting || props.isVerifying || props.isFinishing
 								}

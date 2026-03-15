@@ -13,8 +13,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { db } from "@bittery/db";
 import { itemAttachment } from "@bittery/db/schema/vault";
-import { nanoid } from "nanoid";
-import { vaultRouter } from "../routers/vault";
 import {
 	addTeamMember,
 	addVaultMember,
@@ -30,6 +28,8 @@ import {
 	setup,
 	truncateAll,
 } from "@bittery/test-utils";
+import { nanoid } from "nanoid";
+import { vaultRouter } from "../routers/vault";
 
 async function setupVaultSharingUser(overrides?: Parameters<typeof setup>[1]) {
 	const result = await setup(vaultRouter, overrides);

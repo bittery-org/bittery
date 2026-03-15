@@ -19,5 +19,7 @@ export function resolveStoredSessionExpiryTimestamp(
 			? new Date(expiresAt).getTime()
 			: expiresAt.getTime();
 
-	return Number.isFinite(parsed) ? parsed : createdAt + DEFAULT_SESSION_EXPIRY_MS;
+	return Number.isFinite(parsed)
+		? parsed
+		: createdAt + DEFAULT_SESSION_EXPIRY_MS;
 }

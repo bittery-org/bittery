@@ -18,12 +18,12 @@ import type {
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
 import { resolveStoredSessionExpiryTimestamp } from "../session";
-import {
-	type AccountMetadata,
-	type ActiveAccount,
-	type BiometricAuthResult,
-	type StoredSessionData,
-	type VaultKeyData,
+import type {
+	AccountMetadata,
+	ActiveAccount,
+	BiometricAuthResult,
+	StoredSessionData,
+	VaultKeyData,
 } from "../types";
 
 // Global storage keys (shared across all accounts)

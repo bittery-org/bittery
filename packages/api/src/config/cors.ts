@@ -43,7 +43,9 @@ function assertValidOrigin(value: string): string {
 	return parsed.origin;
 }
 
-export function parseCorsOrigins(rawValue: string | undefined | null): string[] {
+export function parseCorsOrigins(
+	rawValue: string | undefined | null,
+): string[] {
 	if (!rawValue?.trim()) {
 		return [];
 	}
@@ -59,7 +61,9 @@ export function parseCorsOrigins(rawValue: string | undefined | null): string[] 
 	for (const origin of normalized) {
 		const parsedOrigin = assertValidOrigin(origin);
 		if (seen.has(parsedOrigin)) {
-			throw new Error(`CORS_ORIGIN contains a duplicate origin: ${parsedOrigin}`);
+			throw new Error(
+				`CORS_ORIGIN contains a duplicate origin: ${parsedOrigin}`,
+			);
 		}
 		seen.add(parsedOrigin);
 		parsedOrigins.push(parsedOrigin);

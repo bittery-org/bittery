@@ -196,15 +196,11 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 		});
 
 		if (result === "pdf-downloaded") {
-			toast.success(
-				m.settings_recovery_key_common_toast_kit_pdf_downloaded(),
-			);
+			toast.success(m.settings_recovery_key_common_toast_kit_pdf_downloaded());
 			return;
 		}
 
-		toast.success(
-			m.settings_recovery_key_common_toast_kit_text_downloaded(),
-		);
+		toast.success(m.settings_recovery_key_common_toast_kit_text_downloaded());
 	};
 
 	return (
@@ -219,9 +215,7 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 				{step === "verify" ? (
 					<form onSubmit={handleGenerateRecoveryKey}>
 						<DialogHeader>
-							<DialogTitle>
-								{m.settings_recovery_key_setup_title()}
-							</DialogTitle>
+							<DialogTitle>{m.settings_recovery_key_setup_title()}</DialogTitle>
 							<DialogDescription>
 								{m.settings_recovery_key_setup_description()}
 							</DialogDescription>

@@ -1,14 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-	createPresignedUpload,
-	getStoragePublicUrl,
-} from "../storage/s3";
+import { createPresignedUpload, getStoragePublicUrl } from "../storage/s3";
 
 const originalStorageEnv = {
 	BITTERY_STORAGE_ENDPOINT: process.env.BITTERY_STORAGE_ENDPOINT,
 	BITTERY_STORAGE_BUCKET: process.env.BITTERY_STORAGE_BUCKET,
 	BITTERY_STORAGE_ACCESS_KEY_ID: process.env.BITTERY_STORAGE_ACCESS_KEY_ID,
-	BITTERY_STORAGE_SECRET_ACCESS_KEY: process.env.BITTERY_STORAGE_SECRET_ACCESS_KEY,
+	BITTERY_STORAGE_SECRET_ACCESS_KEY:
+		process.env.BITTERY_STORAGE_SECRET_ACCESS_KEY,
 	BITTERY_STORAGE_REGION: process.env.BITTERY_STORAGE_REGION,
 	BITTERY_STORAGE_CDN_URL: process.env.BITTERY_STORAGE_CDN_URL,
 	BITTERY_STORAGE_PUBLIC_URL: process.env.BITTERY_STORAGE_PUBLIC_URL,

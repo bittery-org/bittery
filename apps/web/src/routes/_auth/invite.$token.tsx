@@ -1,3 +1,4 @@
+import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import { Button, toast } from "@bittery/ui";
 import {
@@ -14,13 +15,12 @@ import { useState } from "react";
 import SignInForm from "@/components/sign-in-form";
 import SignUpForm from "@/components/sign-up-form";
 import { storage } from "@/lib/storage";
-import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_auth/invite/$token")({
 	component: InvitationPage,
 	head: () => ({
-		meta: [{ title: messages["auth.invite.meta_title"]() }],
+		meta: [{ title: messages.auth_invite_meta_title() }],
 	}),
 });
 

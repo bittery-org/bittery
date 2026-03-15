@@ -93,9 +93,7 @@ export function DeleteTeamDialog({ teamId, teamName }: DeleteTeamDialogProps) {
 					/>
 				</div>
 				<AlertDialogFooter>
-					<AlertDialogCancel>
-						{m.team_common_action_cancel()}
-					</AlertDialogCancel>
+					<AlertDialogCancel>{m.team_common_action_cancel()}</AlertDialogCancel>
 					<AlertDialogAction
 						onClick={handleDelete}
 						disabled={confirmText !== teamName || deleteMutation.isPending}

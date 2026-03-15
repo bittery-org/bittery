@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { EncryptedData, EncryptionContext } from "@bittery/types";
 import { ItemService } from "./item-service";
 
 describe("ItemService", () => {
@@ -39,7 +40,11 @@ describe("ItemService", () => {
 			crypto: {
 				generateUuid: async () => "item_123",
 				decrypt: async () => Buffer.from("vault-key").toString("base64"),
-				encrypt: async (_plaintext, _key, context) => {
+				encrypt: async (
+					_plaintext: string,
+					_key: Uint8Array,
+					context?: EncryptionContext,
+				) => {
 					encryptCalls.push({ context });
 					return {
 						ciphertext: "ciphertext",
@@ -74,9 +79,7 @@ describe("ItemService", () => {
 		);
 
 		expect(encryptCalls).toHaveLength(1);
-		expect(encryptCalls[0]?.context?.userId).toBe(
-			"user_from_account_metadata",
-		);
+		expect(encryptCalls[0]?.context?.userId).toBe("user_from_account_metadata");
 	});
 
 	test("falls back to older encryption versions when cached item metadata drifted", async () => {
@@ -122,7 +125,11 @@ describe("ItemService", () => {
 				getActiveAccountUserId: async () => "user_1",
 			} as never,
 			crypto: {
-				decrypt: async (_encryptedData, _key, context) => {
+				decrypt: async (
+					_encryptedData: EncryptedData,
+					_key: Uint8Array,
+					context?: EncryptionContext,
+				) => {
 					if (context?.entityType === "vault_key") {
 						return Buffer.from("vault-key").toString("base64");
 					}

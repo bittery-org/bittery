@@ -213,8 +213,13 @@ async function issueSession(params: {
 	const opaqueToken = generateOpaqueSessionToken();
 	const nextSessionId = hashToken(opaqueToken);
 	const platform = normalizeSessionPlatform(params.deviceInfo?.platform);
-	const clientId = resolveSessionClientId(platform, params.deviceInfo?.clientId);
-	const expiresAt = new Date(issuedAt.getTime() + getSessionDurationMs(platform));
+	const clientId = resolveSessionClientId(
+		platform,
+		params.deviceInfo?.clientId,
+	);
+	const expiresAt = new Date(
+		issuedAt.getTime() + getSessionDurationMs(platform),
+	);
 
 	await db.transaction(async (tx) => {
 		let deviceName = params.deviceInfo?.deviceName ?? null;
@@ -232,7 +237,9 @@ async function issueSession(params: {
 						eq(session.clientId, clientId),
 					),
 				);
-			const newestGroupedSession = [...groupedSessions].sort(compareSessionRecency)[0];
+			const newestGroupedSession = [...groupedSessions].sort(
+				compareSessionRecency,
+			)[0];
 
 			if (newestGroupedSession?.deviceName) {
 				deviceName = newestGroupedSession.deviceName;

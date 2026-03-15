@@ -97,9 +97,7 @@ export function TRPCProvider({ children }: TRPCProviderProps) {
 				await storage.storeAuthToken(token);
 				const activeAccount = await storage.getActiveAccount();
 				const activeEmail =
-					activeAccount?.type === "single"
-						? activeAccount.email
-						: undefined;
+					activeAccount?.type === "single" ? activeAccount.email : undefined;
 				if (activeEmail) {
 					await storage.updateStoredSessionMetadata?.(activeEmail, {
 						sessionId,

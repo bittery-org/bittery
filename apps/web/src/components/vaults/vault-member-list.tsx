@@ -188,14 +188,10 @@ export function VaultMemberList({
 			if (error instanceof Error) {
 				switch (error.message) {
 					case "vault_key_decrypt_failed":
-						toast.error(
-							m.vaults_member_list_error_vault_key_decrypt_failed(),
-						);
+						toast.error(m.vaults_member_list_error_vault_key_decrypt_failed());
 						break;
 					case "master_unlock_key_missing":
-						toast.error(
-							m.vaults_member_list_error_master_unlock_key_missing(),
-						);
+						toast.error(m.vaults_member_list_error_master_unlock_key_missing());
 						break;
 					case "session_data_missing":
 						toast.error(m.vaults_member_list_error_session_data_missing());
@@ -261,9 +257,7 @@ export function VaultMemberList({
 				<div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
 					<Users className="h-6 w-6 text-muted-foreground" />
 				</div>
-				<p className="text-muted-foreground">
-					{m.vaults_member_list_empty()}
-				</p>
+				<p className="text-muted-foreground">{m.vaults_member_list_empty()}</p>
 			</div>
 		);
 	}

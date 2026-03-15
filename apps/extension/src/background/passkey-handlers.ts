@@ -1,9 +1,9 @@
+import { getItemServerUrl } from "@bittery/shared/favicon";
 import type {
 	DecryptedItemData,
 	DecryptedItemWithContext,
 	Passkey,
 } from "@bittery/shared/types";
-import { getItemServerUrl } from "@bittery/shared/favicon";
 import { storage } from "../lib/storage";
 import {
 	buildPasskeyAttestationObject,
@@ -32,11 +32,11 @@ import type {
 import { core } from "./core-instance";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
 import { desktopSync } from "./desktop-sync";
+import { resolveAccountEmailForVault } from "./services/account-resolution";
 import {
 	onLocalItemCreated,
 	onLocalItemUpdated,
 } from "./services/local-item-cache-service";
-import { resolveAccountEmailForVault } from "./services/account-resolution";
 import {
 	isUnlocked,
 	setDesktopModeSentinel,

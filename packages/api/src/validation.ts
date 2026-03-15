@@ -105,10 +105,7 @@ export const encryptedEnvelopeStringSchema = z
 		}
 	});
 
-export const wrappedKeySchema = z
-	.string()
-	.min(1)
-	.max(MAX_WRAPPED_KEY_LENGTH);
+export const wrappedKeySchema = z.string().min(1).max(MAX_WRAPPED_KEY_LENGTH);
 
 export const ivSchema = z.string().min(1).max(MAX_IV_LENGTH);
 
@@ -152,7 +149,9 @@ export const rotationReEncryptedItemSchema = z
 	})
 	.strict();
 
-export const rotationMemberKeysSchema = z.array(rotationMemberKeySchema).max(100);
+export const rotationMemberKeysSchema = z
+	.array(rotationMemberKeySchema)
+	.max(100);
 export const rotationItemsSchema = z
 	.array(rotationReEncryptedItemSchema)
 	.max(100);
@@ -174,7 +173,13 @@ export const rotationVaultsSchema = z.array(rotationVaultSchema).max(100);
 export const bulkImportItemSchema = z
 	.object({
 		itemId: resourceIdSchema,
-		category: z.enum(["login", "secure-note", "credit-card", "identity", "totp"]),
+		category: z.enum([
+			"login",
+			"secure-note",
+			"credit-card",
+			"identity",
+			"totp",
+		]),
 		favorite: z.boolean().optional(),
 		encryptedData: encryptedItemCiphertextSchema,
 		encryptionIv: ivSchema,

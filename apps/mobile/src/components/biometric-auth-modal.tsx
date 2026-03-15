@@ -24,10 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useBiometricAuth } from "../contexts/biometric-auth-context";
 import { resolveBiometricErrorMessage } from "../lib/biometric-error-message";
-import {
-	type BiometricErrorType,
-	storage,
-} from "../services/storage";
+import { type BiometricErrorType, storage } from "../services/storage";
 
 interface BiometricAuthModalProps {
 	visible: boolean;

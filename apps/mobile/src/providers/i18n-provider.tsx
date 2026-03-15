@@ -5,8 +5,6 @@ import {
 	type LocaleRuntimeAdapter,
 	type LocaleStorageAdapter,
 } from "@bittery/i18n";
-import { createI18nReact } from "@bittery/i18n/react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { m } from "@bittery/i18n/paraglide/messages";
 import {
 	getLocale as getRuntimeLocale,
@@ -14,6 +12,8 @@ import {
 	overwriteSetLocale,
 	setLocale as setRuntimeLocale,
 } from "@bittery/i18n/paraglide/runtime";
+import { createI18nReact } from "@bittery/i18n/react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 function detectDeviceLocale(): string | undefined {
 	try {

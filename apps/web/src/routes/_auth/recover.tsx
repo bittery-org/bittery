@@ -1,3 +1,4 @@
+import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
 import { useTRPCClient } from "@bittery/shared/trpc";
 import { Button, cn, Input, Label, toast } from "@bittery/ui";
@@ -11,12 +12,10 @@ import {
 } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, Fragment, useMemo, useState } from "react";
-
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { storage } from "@/lib/storage";
 import { generateSecretKeyAsync } from "@/lib/wasm-crypto";
 import { WorkerCrypto } from "@/lib/worker-crypto";
-import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useI18n } from "@/providers/i18n-provider";
 
 type RecoveryStep =
@@ -89,7 +88,7 @@ function parseEncryptedData(value: string): {
 export const Route = createFileRoute("/_auth/recover")({
 	component: RecoverRouteComponent,
 	head: () => ({
-		meta: [{ title: messages["auth.recover.meta_title"]() }],
+		meta: [{ title: messages.auth_recover_meta_title() }],
 	}),
 });
 

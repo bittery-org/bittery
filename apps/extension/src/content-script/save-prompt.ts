@@ -1,4 +1,3 @@
-import type { ActiveSavePrompt, CapturedCredentials } from "./types";
 import {
 	appendNonceToIframeSrc,
 	cancelSaveMessageSchema,
@@ -9,6 +8,7 @@ import {
 	updateExistingCredentialMessageSchema,
 	validateIframeMessage,
 } from "./iframe-messages";
+import type { ActiveSavePrompt, CapturedCredentials } from "./types";
 
 let activeSavePrompt: ActiveSavePrompt | null = null;
 

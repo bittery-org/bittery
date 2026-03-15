@@ -68,28 +68,25 @@ describe("vault-utils", () => {
 	});
 
 	test("includes local-only items missing from the desktop snapshot", () => {
-		const merged = mergeItemCollections(
-			[],
-			[
-				{
-					id: "item_local",
-					vaultId: "vault_1",
-					category: "login",
-					favorite: false,
-					createdAt: "2026-01-01T00:00:00.000Z",
-					updatedAt: "2026-01-01T00:00:00.000Z",
-					title: "Local only",
-					passkeys: [],
-					vault: {
-						id: "vault_1",
-						name: "Personal",
-						type: "personal",
-						icon: null,
-						imageUrl: null,
-					},
+		const merged = mergeItemCollections([], [
+			{
+				id: "item_local",
+				vaultId: "vault_1",
+				category: "login",
+				favorite: false,
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-01T00:00:00.000Z",
+				title: "Local only",
+				passkeys: [],
+				vault: {
+					id: "vault_1",
+					name: "Personal",
+					type: "personal",
+					icon: null,
+					imageUrl: null,
 				},
-			] as never,
-		);
+			},
+		] as never);
 
 		expect(merged).toHaveLength(1);
 		expect(merged[0]?.id).toBe("item_local");

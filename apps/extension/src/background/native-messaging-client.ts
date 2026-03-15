@@ -33,7 +33,9 @@ export class NativeMessagingClient {
 	private readonly connectNativeImpl: typeof chrome.runtime.connectNative;
 	private port: chrome.runtime.Port | null = null;
 	private pendingRequests = new Map<string, PendingRequest>();
-	private desktopEventListeners = new Set<(event: DesktopEventPayload) => void>();
+	private desktopEventListeners = new Set<
+		(event: DesktopEventPayload) => void
+	>();
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private subscribedToDesktopEvents = false;
 	private requestCounter = 0;
@@ -135,23 +137,26 @@ export class NativeMessagingClient {
 	}
 
 	private async ensureDesktopEventSubscription(): Promise<void> {
-		if (this.subscribedToDesktopEvents || this.desktopEventListeners.size === 0) {
+		if (
+			this.subscribedToDesktopEvents ||
+			this.desktopEventListeners.size === 0
+		) {
 			return;
 		}
 
 		const response = await this.request({
 			type: "SUBSCRIBE_DESKTOP_EVENTS",
 		});
-		if (
-			response.type === "DESKTOP_EVENT_SUBSCRIPTION" &&
-			response.subscribed
-		) {
+		if (response.type === "DESKTOP_EVENT_SUBSCRIPTION" && response.subscribed) {
 			this.subscribedToDesktopEvents = true;
 		}
 	}
 
 	private async maybeUnsubscribeDesktopEvents(): Promise<void> {
-		if (!this.subscribedToDesktopEvents || this.desktopEventListeners.size > 0) {
+		if (
+			!this.subscribedToDesktopEvents ||
+			this.desktopEventListeners.size > 0
+		) {
 			return;
 		}
 
@@ -189,8 +194,8 @@ export class NativeMessagingClient {
 
 export const nativeMessagingClient = new NativeMessagingClient();
 
-export function sendNativeMessage<TResponse extends DesktopResponse = DesktopResponse>(
-	message: DesktopRequest,
-): Promise<TResponse> {
+export function sendNativeMessage<
+	TResponse extends DesktopResponse = DesktopResponse,
+>(message: DesktopRequest): Promise<TResponse> {
 	return nativeMessagingClient.request<TResponse>(message);
 }

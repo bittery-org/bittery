@@ -87,18 +87,12 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 								. {m.settings_delete_account_dialog_description_suffix()}
 							</p>
 							<ul className="list-inside list-disc space-y-1 text-sm">
-								<li>
-									{m.settings_delete_account_dialog_list_remove_vaults()}
-								</li>
-								<li>
-									{m.settings_delete_account_dialog_list_remove_teams()}
-								</li>
+								<li>{m.settings_delete_account_dialog_list_remove_vaults()}</li>
+								<li>{m.settings_delete_account_dialog_list_remove_teams()}</li>
 								<li>
 									{m.settings_delete_account_dialog_list_delete_sessions()}
 								</li>
-								<li>
-									{m.settings_delete_account_dialog_list_erase_account()}
-								</li>
+								<li>{m.settings_delete_account_dialog_list_erase_account()}</li>
 							</ul>
 						</div>
 					</AlertDialogDescription>

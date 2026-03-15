@@ -299,8 +299,7 @@ export class VaultRepository {
 			id: item.id,
 			vaultId: item.vaultId,
 			accountEmail: item.accountEmail ?? this.email,
-			serverUrl:
-				item.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
+			serverUrl: item.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
 			category: item.category,
 			favorite: item.favorite,
 			encryptedData: item._encrypted.data,
@@ -474,11 +473,7 @@ export class VaultRepository {
 	async decryptItem(item: CachedEncryptedItem): Promise<VaultRepositoryItem> {
 		const vaultKey = await this.decryptVaultKey(item.vaultId);
 		const userId = item.lastModifiedBy ?? (await this.resolveUserId());
-		const decryptedData = await this.decryptItemPayload(
-			item,
-			vaultKey,
-			userId,
-		);
+		const decryptedData = await this.decryptItemPayload(item, vaultKey, userId);
 		return this.buildItem(item, JSON.parse(decryptedData) as DecryptedItemData);
 	}
 
@@ -834,8 +829,7 @@ export class VaultRepository {
 		this.vaults.set(vault.id, {
 			...vault,
 			accountEmail: vault.accountEmail ?? this.email,
-			serverUrl:
-				vault.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
+			serverUrl: vault.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
 		});
 		const existingVaultKey = this.vaultKeyEntries.get(vault.id);
 		if (existingVaultKey) {

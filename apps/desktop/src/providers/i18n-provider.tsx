@@ -5,11 +5,6 @@ import {
 	type LocaleRuntimeAdapter,
 	type LocaleStorageAdapter,
 } from "@bittery/i18n";
-import {
-	I18nProvider,
-	initializeI18nReact,
-	useI18n,
-} from "@bittery/i18n/react";
 import { m } from "@bittery/i18n/paraglide/messages";
 import {
 	getLocale as getRuntimeLocale,
@@ -17,6 +12,11 @@ import {
 	overwriteSetLocale,
 	setLocale as setRuntimeLocale,
 } from "@bittery/i18n/paraglide/runtime";
+import {
+	I18nProvider,
+	initializeI18nReact,
+	useI18n,
+} from "@bittery/i18n/react";
 
 let currentLocale: AppLocale = defaultLocale;
 

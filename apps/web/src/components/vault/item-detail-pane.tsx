@@ -153,30 +153,25 @@ export function ItemDetailPane({
 							<ArrowLeft className="h-4 w-4" />
 						</Button>
 						<div className="hidden md:block" />
-						<div className="flex items-center gap-1">						<Button
-							variant="ghost"
-							size="sm"
-							onClick={() => setIsShareDialogOpen(true)}
-						>
-							<Share className="mr-1.5 h-4 w-4" />
-							{m.sharing_item_dialog_trigger()}
-						</Button>							{canWriteItems && (
-								<Button
-									variant="ghost"
-									size="sm"
-									onClick={onEdit}
-								>
+						<div className="flex items-center gap-1">
+							{" "}
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={() => setIsShareDialogOpen(true)}
+							>
+								<Share className="mr-1.5 h-4 w-4" />
+								{m.sharing_item_dialog_trigger()}
+							</Button>{" "}
+							{canWriteItems && (
+								<Button variant="ghost" size="sm" onClick={onEdit}>
 									<Pen className="mr-1.5 h-4 w-4" />
 									{m.vaults_detail_items_detail_action_edit()}
 								</Button>
 							)}
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
-									<Button
-										variant="ghost"
-										size="sm"
-										className="h-8 w-8 p-0"
-									>
+									<Button variant="ghost" size="sm" className="h-8 w-8 p-0">
 										<Dots className="h-4 w-4" />
 									</Button>
 								</DropdownMenuTrigger>
@@ -192,29 +187,25 @@ export function ItemDetailPane({
 									>
 										<Star
 											className="h-4 w-4"
-											fill={
-												selectedItem.favorite
-													? "currentColor"
-													: "none"
-											}
+											fill={selectedItem.favorite ? "currentColor" : "none"}
 										/>
 										{selectedItem.favorite
 											? m.vaults_detail_items_list_item_action_remove_favorite()
 											: m.vaults_detail_items_list_item_action_add_favorite()}
-									</DropdownMenuItem>								<DropdownMenuItem
-									onClick={() => setIsShareHistoryOpen(true)}
-								>
-									<History className="h-4 w-4" />
-									{m.sharing_history_dialog_title()}
-							</DropdownMenuItem>
-							{selectedItem.category === "login" && (
-								<DropdownMenuItem
-									onClick={() => setIsPasswordHistoryOpen(true)}
-								>
-									<History className="h-4 w-4" />
-									{m.vaults_detail_items_password_history_dialog_title()}
-								</DropdownMenuItem>
-							)}								{canWriteItems && (
+									</DropdownMenuItem>{" "}
+									<DropdownMenuItem onClick={() => setIsShareHistoryOpen(true)}>
+										<History className="h-4 w-4" />
+										{m.sharing_history_dialog_title()}
+									</DropdownMenuItem>
+									{selectedItem.category === "login" && (
+										<DropdownMenuItem
+											onClick={() => setIsPasswordHistoryOpen(true)}
+										>
+											<History className="h-4 w-4" />
+											{m.vaults_detail_items_password_history_dialog_title()}
+										</DropdownMenuItem>
+									)}{" "}
+									{canWriteItems && (
 										<>
 											<DropdownMenuSeparator />
 											<DropdownMenuItem
@@ -242,20 +233,14 @@ export function ItemDetailPane({
 										selectedItem.category === "credit-card" &&
 										"cardNumber" in selectedItem &&
 										typeof selectedItem.cardNumber === "string"
-											? detectCardBrand(
-													selectedItem.cardNumber,
-												)
+											? detectCardBrand(selectedItem.cardNumber)
 											: undefined
 									}
 									size="lg"
 								/>
 							}
 							onOpenUrl={(url) =>
-								window.open(
-									url,
-									"_blank",
-									"noopener,noreferrer",
-								)
+								window.open(url, "_blank", "noopener,noreferrer")
 							}
 							onTagsChange={canWriteItems ? handleTagsChange : undefined}
 							onTagClick={onTagClick}
@@ -295,9 +280,7 @@ export function ItemDetailPane({
 				<div className="hidden flex-1 items-center justify-center p-8 text-center md:flex">
 					<div>
 						<div className="mb-4 inline-flex rounded-full bg-muted p-6">
-							{emptyIcon ?? (
-								<Key className="size-12 text-muted-foreground" />
-							)}
+							{emptyIcon ?? <Key className="size-12 text-muted-foreground" />}
 						</div>
 						<h3 className="mb-2 font-semibold text-lg">
 							{m.vaults_shared_empty_no_item_selected()}

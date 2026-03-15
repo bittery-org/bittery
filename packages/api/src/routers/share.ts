@@ -1,8 +1,3 @@
-import {
-	incrementRateLimitWindow,
-	RATE_LIMIT_NAMESPACE,
- 	startOfLocalDay,
-} from "@bittery/rate-limit";
 import { db } from "@bittery/db";
 import { user } from "@bittery/db/schema/auth";
 import {
@@ -13,6 +8,11 @@ import {
 	shareLink,
 	shareLinkAllowedEmail,
 } from "@bittery/db/schema/sharing";
+import {
+	incrementRateLimitWindow,
+	RATE_LIMIT_NAMESPACE,
+	startOfLocalDay,
+} from "@bittery/rate-limit";
 import { TRPCError } from "@trpc/server";
 import { and, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -68,19 +68,21 @@ export const shareRouter = router({
 	 */
 	create: protectedProcedure
 		.input(
-			z.object({
-				itemId: resourceIdSchema,
-				accessMode: z.enum(["anyone", "email-restricted"]),
-				isOneTimeUse: z.boolean().default(false),
-				expiresIn: z.enum(["1hour", "1day", "7days", "14days", "30days"]),
-				allowedEmails: shareEmailsSchema.optional(),
-				// Encrypted item data snapshot
-				encryptedItemData: encryptedItemCiphertextSchema,
-				encryptionIv: ivSchema,
-				// Share key encrypted for the link
-				encryptedShareKey: wrappedKeySchema,
-				shareKeyIv: ivSchema,
-			}).strict(),
+			z
+				.object({
+					itemId: resourceIdSchema,
+					accessMode: z.enum(["anyone", "email-restricted"]),
+					isOneTimeUse: z.boolean().default(false),
+					expiresIn: z.enum(["1hour", "1day", "7days", "14days", "30days"]),
+					allowedEmails: shareEmailsSchema.optional(),
+					// Encrypted item data snapshot
+					encryptedItemData: encryptedItemCiphertextSchema,
+					encryptionIv: ivSchema,
+					// Share key encrypted for the link
+					encryptedShareKey: wrappedKeySchema,
+					shareKeyIv: ivSchema,
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const scopedItem = await getScopedItemAccess(
@@ -413,12 +415,14 @@ export const shareRouter = router({
 	 */
 	update: protectedProcedure
 		.input(
-			z.object({
-				linkId: resourceIdSchema,
-				isOneTimeUse: z.boolean().optional(),
-				addEmails: shareEmailsSchema.optional(),
-				removeEmailIds: z.array(resourceIdSchema).max(100).optional(),
-			}).strict(),
+			z
+				.object({
+					linkId: resourceIdSchema,
+					isOneTimeUse: z.boolean().optional(),
+					addEmails: shareEmailsSchema.optional(),
+					removeEmailIds: z.array(resourceIdSchema).max(100).optional(),
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			await assertShareLinksEntitlement(ctx.session.userId);
@@ -608,10 +612,12 @@ export const shareRouter = router({
 	 */
 	requestEmailVerification: publicProcedure
 		.input(
-			z.object({
-				token: nanoid32TokenSchema,
-				email: z.string().email(),
-			}).strict(),
+			z
+				.object({
+					token: nanoid32TokenSchema,
+					email: z.string().email(),
+				})
+				.strict(),
 		)
 		.mutation(async ({ input }) => {
 			const link = await db.query.shareLink.findFirst({
@@ -722,11 +728,13 @@ export const shareRouter = router({
 	 */
 	verifyEmailAndAccess: publicProcedure
 		.input(
-			z.object({
-				token: nanoid32TokenSchema,
-				email: z.string().email(),
-				code: z.string().length(6),
-			}).strict(),
+			z
+				.object({
+					token: nanoid32TokenSchema,
+					email: z.string().email(),
+					code: z.string().length(6),
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const link = await db.query.shareLink.findFirst({
@@ -921,9 +929,11 @@ export const shareRouter = router({
 	 */
 	accessPublic: publicProcedure
 		.input(
-			z.object({
-				token: nanoid32TokenSchema,
-			}).strict(),
+			z
+				.object({
+					token: nanoid32TokenSchema,
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const link = await db.query.shareLink.findFirst({
@@ -1041,7 +1051,11 @@ interface ShareLinksAccess {
 	teamId: string | null;
 }
 
-type PublicShareInvalidReason = "disabled" | "revoked" | "expired" | "exhausted";
+type PublicShareInvalidReason =
+	| "disabled"
+	| "revoked"
+	| "expired"
+	| "exhausted";
 
 type PublicShareState =
 	| { valid: true }

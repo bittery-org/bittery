@@ -248,21 +248,15 @@ export function RegenerateSecretKeyDialog({
 			setOpen(false);
 		} catch (error) {
 			console.error("Secret key regeneration error:", error);
-			toast.error(
-				m.settings_secret_key_regenerate_toast_regenerate_failed(),
-			);
+			toast.error(m.settings_secret_key_regenerate_toast_regenerate_failed());
 			setIsProcessing(false);
 		}
 	};
 
 	const copySecretKey = () => {
-		copyWithToast(
-			newSecretKey,
-			m.settings_secret_key_regenerate_copy_label(),
-			{
-				showAutoClearMessage: false,
-			},
-		);
+		copyWithToast(newSecretKey, m.settings_secret_key_regenerate_copy_label(), {
+			showAutoClearMessage: false,
+		});
 	};
 
 	const downloadKit = async () => {
@@ -274,8 +268,7 @@ export function RegenerateSecretKeyDialog({
 				{
 					label: m.settings_secret_key_regenerate_kit_entry_label(),
 					value: newSecretKey,
-					description:
-						m.settings_secret_key_regenerate_kit_entry_description(),
+					description: m.settings_secret_key_regenerate_kit_entry_description(),
 				},
 			],
 			cautions: [
@@ -306,9 +299,7 @@ export function RegenerateSecretKeyDialog({
 			);
 			return;
 		}
-		toast.success(
-			m.settings_secret_key_regenerate_toast_kit_text_downloaded(),
-		);
+		toast.success(m.settings_secret_key_regenerate_toast_kit_text_downloaded());
 	};
 
 	const handleOpenChange = (newOpen: boolean) => {

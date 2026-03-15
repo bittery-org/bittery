@@ -2,10 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { InMemoryPubSubAdapter } from "@bittery/pubsub";
 import { closeRateLimitAdapterForTests } from "@bittery/rate-limit";
 import { truncateAll } from "@bittery/test-utils";
-import {
-	createSyncRouter,
-	isSyncConnectionRateLimited,
-} from "./sse-handler";
+import { createSyncRouter, isSyncConnectionRateLimited } from "./sse-handler";
 
 describe("sync SSE handler", () => {
 	afterEach(async () => {

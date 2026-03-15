@@ -166,12 +166,7 @@ export default function SearchScreen() {
 				data={filteredItems}
 				renderItem={({ item }) => (
 					<ItemListItem
-						id={item.id}
-						title={item.title || "[Untitled]"}
-						category={item.category}
-						favorite={item.favorite}
-						username={item.username}
-						url={item.url}
+						item={item}
 						vault={"vault" in item ? item.vault : undefined}
 						showVaultBadge
 						onPress={() => handleItemPress(item)}

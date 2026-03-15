@@ -1,3 +1,4 @@
+import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
 import {
 	Badge,
@@ -31,7 +32,6 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { formatDateTime } from "@/lib/i18n-format";
-import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useI18n } from "@/providers/i18n-provider";
 
 type ActionGroup =
@@ -281,7 +281,7 @@ export const Route = createFileRoute("/_app/admin/")({
 	},
 	component: TeamAdminConsolePage,
 	head: () => ({
-		meta: [{ title: messages["admin.page.meta_title"]() }],
+		meta: [{ title: messages.admin_page_meta_title() }],
 	}),
 });
 
@@ -478,9 +478,7 @@ function TeamAdminConsolePage() {
 				) : allEvents.length === 0 ? (
 					<div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
 						<History className="h-8 w-8 text-muted-foreground" />
-						<p className="font-medium text-sm">
-							{m.admin_page_empty_title()}
-						</p>
+						<p className="font-medium text-sm">{m.admin_page_empty_title()}</p>
 						<p className="text-muted-foreground text-xs">
 							{m.admin_page_empty_description()}
 						</p>
@@ -655,8 +653,7 @@ function TeamAdminConsolePage() {
 									<Detail
 										label={m.admin_page_detail_label_entity_id()}
 										value={
-											selectedEvent.entity.id ||
-											m.admin_page_fallback_empty()
+											selectedEvent.entity.id || m.admin_page_fallback_empty()
 										}
 									/>
 								</div>

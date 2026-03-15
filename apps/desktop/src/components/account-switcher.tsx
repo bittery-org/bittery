@@ -266,10 +266,13 @@ export function AccountSwitcher() {
 						m.vaults_sidebar_account_switcher_menu_all_accounts(),
 					viewItemsFromAccounts: ({ count }) =>
 						count === 1
-							? m.vaults_sidebar_account_switcher_menu_view_items_from_accounts_single({ count })
-							: m.vaults_sidebar_account_switcher_menu_view_items_from_accounts_plural({ count }),
-					addAccountLabel:
-						m.vaults_sidebar_account_switcher_menu_add_account(),
+							? m.vaults_sidebar_account_switcher_menu_view_items_from_accounts_single(
+									{ count },
+								)
+							: m.vaults_sidebar_account_switcher_menu_view_items_from_accounts_plural(
+									{ count },
+								),
+					addAccountLabel: m.vaults_sidebar_account_switcher_menu_add_account(),
 					setupAnotherDeviceLabel:
 						m.vaults_sidebar_account_switcher_menu_setup_another_device(),
 					settingsLabel: m.nav_menu_settings(),

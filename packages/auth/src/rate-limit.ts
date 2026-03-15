@@ -1,11 +1,14 @@
+export type {
+	RateLimitState,
+	WindowIncrementResult,
+} from "@bittery/rate-limit";
 export {
-	RATE_LIMIT_NAMESPACE,
 	clearRateLimitBySubject,
 	clearRateLimitState,
 	closeRateLimitAdapterForTests,
 	getRateLimitState,
 	incrementRateLimitWindow,
+	RATE_LIMIT_NAMESPACE,
 	recordRateLimitFailure,
 	startOfLocalDay,
 } from "@bittery/rate-limit";
-export type { RateLimitState, WindowIncrementResult } from "@bittery/rate-limit";

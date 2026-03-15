@@ -4,6 +4,7 @@ import {
 	parseStripeWebhookEvent,
 	processStripeWebhookEvent,
 } from "@bittery/api/billing/stripe";
+import { parseCorsOrigins } from "@bittery/api/config/cors";
 import { isSelfHostedMode } from "@bittery/api/config/mode";
 import { createContext } from "@bittery/api/context";
 import { appRouter } from "@bittery/api/routers/index";
@@ -12,7 +13,6 @@ import runMigrations from "@bittery/db/migrate";
 import { faviconApp } from "@bittery/favicon";
 import { JobRunner } from "@bittery/jobs";
 import { createPubSubAdapter } from "@bittery/pubsub";
-import { parseCorsOrigins } from "@bittery/api/config/cors";
 import { trpcServer } from "@hono/trpc-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -70,10 +70,7 @@ app.get("/cdn/*", async (c) => {
 
 app.route("/favicon", faviconApp);
 
-app.use(
-	"/trpc/*",
-	enforceTrpcRequestGuards,
-);
+app.use("/trpc/*", enforceTrpcRequestGuards);
 
 app.use(
 	"/trpc/*",

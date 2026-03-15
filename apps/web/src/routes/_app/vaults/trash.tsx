@@ -3,6 +3,7 @@ import {
 	usePermanentDeleteItem,
 	useRestoreItem,
 } from "@bittery/core/hooks";
+import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import {
 	Button,
@@ -25,7 +26,6 @@ import { useMemo, useState } from "react";
 import { Favicon } from "@/components/vault/favicon";
 import { VaultAvatar } from "@/components/vaults/vault-avatar";
 import { formatDate } from "@/lib/i18n-format";
-import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/trash")({
@@ -145,10 +145,7 @@ function VaultTrashPage() {
 								: undefined;
 							const title = item.title || m.vaults_trash_item_untitled();
 							const secondaryText =
-								item.username ||
-								item.email ||
-								maskedCardNumber ||
-								item.url;
+								item.username || item.email || maskedCardNumber || item.url;
 
 							return (
 								<div
@@ -224,9 +221,7 @@ function VaultTrashPage() {
 			>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>
-							{m.vaults_trash_delete_dialog_title()}
-						</DialogTitle>
+						<DialogTitle>{m.vaults_trash_delete_dialog_title()}</DialogTitle>
 						<DialogDescription>
 							{itemToDelete?.title
 								? m.vaults_trash_delete_dialog_description_named({
@@ -236,10 +231,7 @@ function VaultTrashPage() {
 						</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>
-						<Button
-							variant="outline"
-							onClick={() => setItemToDelete(null)}
-						>
+						<Button variant="outline" onClick={() => setItemToDelete(null)}>
 							{m.vaults_trash_delete_dialog_action_cancel()}
 						</Button>
 						<Button

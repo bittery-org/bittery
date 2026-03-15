@@ -10,21 +10,21 @@ import {
 	checkRecoveryRateLimit,
 	clearLoginRateLimit,
 	clearRecoveryRateLimit,
+	consumeSignupVerificationCode,
 	createRecoveryToken,
 	createRecoveryVerification,
 	createSignupVerification,
 	createSignupVerificationToken,
 	createUser,
 	createUserSession,
-	consumeSignupVerificationCode,
 	deleteAllUserSessions,
 	deleteOtherUserSessions,
 	deleteSession,
 	deleteUserAccount,
 	extractLoginAttemptRateLimitKey,
 	finishLogin,
-	getRecoveryData as getRecoveryDataForEmail,
 	getLoginAccountRateLimitKey,
+	getRecoveryData as getRecoveryDataForEmail,
 	getSessionById,
 	getUserByEmail,
 	getUserById,
@@ -49,11 +49,11 @@ import {
 	verifyRecoveryToken,
 	verifySignupVerificationToken,
 } from "@bittery/auth";
+import { db, team, teamInvitation, user, vault, vaultKey } from "@bittery/db";
 import {
 	incrementRateLimitWindow,
 	RATE_LIMIT_NAMESPACE,
 } from "@bittery/rate-limit";
-import { db, team, teamInvitation, user, vault, vaultKey } from "@bittery/db";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -377,10 +377,12 @@ export const authRouter = router({
 
 	requestSignupVerification: publicProcedure
 		.input(
-			z.object({
-				email: z.string().email().max(255),
-				invitationToken: nanoid32TokenSchema.optional(),
-			}).strict(),
+			z
+				.object({
+					email: z.string().email().max(255),
+					invitationToken: nanoid32TokenSchema.optional(),
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			await enforceAnonymousGlobalRateLimit();
@@ -432,11 +434,13 @@ export const authRouter = router({
 
 	verifySignupVerification: publicProcedure
 		.input(
-			z.object({
-				email: z.string().email().max(255),
-				code: z.string().length(6),
-				invitationToken: nanoid32TokenSchema.optional(),
-			}).strict(),
+			z
+				.object({
+					email: z.string().email().max(255),
+					code: z.string().length(6),
+					invitationToken: nanoid32TokenSchema.optional(),
+				})
+				.strict(),
 		)
 		.mutation(async ({ input }) => {
 			await enforceAnonymousGlobalRateLimit();
@@ -476,23 +480,25 @@ export const authRouter = router({
 	 */
 	signup: publicProcedure
 		.input(
-			z.object({
-				userId: resourceIdSchema.optional(),
-				vaultId: resourceIdSchema.optional(),
-				email: z.string().email().max(255),
-				signupVerificationToken: opaqueTokenSchema,
-				name: z.string().min(2),
-				plan: z.enum(["free", "personal", "family", "team"]).optional(),
-				organizationName: z.string().optional(),
-				secretKeyHint: secretKeyHintSchema,
-				srpSalt: srpSaltSchema,
-				srpVerifier: srpVerifierSchema,
-				publicKey: rsaPublicKeySchema,
-				encryptedPrivateKey: encryptedEnvelopeStringSchema,
-				encryptedMasterKey: encryptedEnvelopeStringSchema,
-				recoveryKeyHint: recoveryKeyHintSchema,
-				encryptedVaultKey: wrappedKeySchema,
-			}).strict(),
+			z
+				.object({
+					userId: resourceIdSchema.optional(),
+					vaultId: resourceIdSchema.optional(),
+					email: z.string().email().max(255),
+					signupVerificationToken: opaqueTokenSchema,
+					name: z.string().min(2),
+					plan: z.enum(["free", "personal", "family", "team"]).optional(),
+					organizationName: z.string().optional(),
+					secretKeyHint: secretKeyHintSchema,
+					srpSalt: srpSaltSchema,
+					srpVerifier: srpVerifierSchema,
+					publicKey: rsaPublicKeySchema,
+					encryptedPrivateKey: encryptedEnvelopeStringSchema,
+					encryptedMasterKey: encryptedEnvelopeStringSchema,
+					recoveryKeyHint: recoveryKeyHintSchema,
+					encryptedVaultKey: wrappedKeySchema,
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const normalizedEmail = normalizeEmail(input.email);
@@ -654,22 +660,24 @@ export const authRouter = router({
 	 */
 	signupWithInvitation: publicProcedure
 		.input(
-			z.object({
-				token: nanoid32TokenSchema,
-				userId: resourceIdSchema.optional(),
-				vaultId: resourceIdSchema.optional(),
-				email: z.string().email().max(255),
-				signupVerificationToken: opaqueTokenSchema,
-				name: z.string().min(2),
-				secretKeyHint: secretKeyHintSchema,
-				srpSalt: srpSaltSchema,
-				srpVerifier: srpVerifierSchema,
-				publicKey: rsaPublicKeySchema,
-				encryptedPrivateKey: encryptedEnvelopeStringSchema,
-				encryptedMasterKey: encryptedEnvelopeStringSchema,
-				recoveryKeyHint: recoveryKeyHintSchema,
-				encryptedVaultKey: wrappedKeySchema,
-			}).strict(),
+			z
+				.object({
+					token: nanoid32TokenSchema,
+					userId: resourceIdSchema.optional(),
+					vaultId: resourceIdSchema.optional(),
+					email: z.string().email().max(255),
+					signupVerificationToken: opaqueTokenSchema,
+					name: z.string().min(2),
+					secretKeyHint: secretKeyHintSchema,
+					srpSalt: srpSaltSchema,
+					srpVerifier: srpVerifierSchema,
+					publicKey: rsaPublicKeySchema,
+					encryptedPrivateKey: encryptedEnvelopeStringSchema,
+					encryptedMasterKey: encryptedEnvelopeStringSchema,
+					recoveryKeyHint: recoveryKeyHintSchema,
+					encryptedVaultKey: wrappedKeySchema,
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const normalizedEmail = normalizeEmail(input.email);
@@ -845,10 +853,12 @@ export const authRouter = router({
 	 */
 	startLogin: publicProcedure
 		.input(
-			z.object({
-				email: z.string().email().max(255),
-				clientPublicKey: srpClientPublicKeySchema,
-			}).strict(),
+			z
+				.object({
+					email: z.string().email().max(255),
+					clientPublicKey: srpClientPublicKeySchema,
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			await enforceAnonymousGlobalRateLimit();
@@ -889,17 +899,20 @@ export const authRouter = router({
 	 */
 	finishLogin: publicProcedure
 		.input(
-			z.object({
-				attemptId: loginAttemptIdSchema,
-				clientPublicKey: srpClientPublicKeySchema,
-				clientProof: srpClientProofSchema,
-			}).strict(),
+			z
+				.object({
+					attemptId: loginAttemptIdSchema,
+					clientPublicKey: srpClientPublicKeySchema,
+					clientProof: srpClientProofSchema,
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			await enforceAnonymousGlobalRateLimit();
 
-			const loginAccountRateLimitKey =
-				extractLoginAttemptRateLimitKey(input.attemptId);
+			const loginAccountRateLimitKey = extractLoginAttemptRateLimitKey(
+				input.attemptId,
+			);
 
 			if (loginAccountRateLimitKey) {
 				try {
@@ -1081,9 +1094,11 @@ export const authRouter = router({
 	 */
 	getRecoveryData: publicProcedure
 		.input(
-			z.object({
-				recoveryToken: opaqueTokenSchema,
-			}).strict(),
+			z
+				.object({
+					recoveryToken: opaqueTokenSchema,
+				})
+				.strict(),
 		)
 		.query(async ({ input }) => {
 			const recoveryPayload = await verifyRecoveryToken(input.recoveryToken);
@@ -1119,16 +1134,18 @@ export const authRouter = router({
 	 */
 	resetPassword: publicProcedure
 		.input(
-			z.object({
-				recoveryToken: opaqueTokenSchema,
-				srpSalt: srpSaltSchema,
-				srpVerifier: srpVerifierSchema,
-				encryptedPrivateKey: encryptedEnvelopeStringSchema,
-				encryptedMasterKey: encryptedEnvelopeStringSchema,
-				recoveryKeyHint: recoveryKeyHintSchema,
-				secretKeyHint: secretKeyHintSchema.optional(),
-				encryptedVaultKeys: encryptedVaultKeysSchema,
-			}).strict(),
+			z
+				.object({
+					recoveryToken: opaqueTokenSchema,
+					srpSalt: srpSaltSchema,
+					srpVerifier: srpVerifierSchema,
+					encryptedPrivateKey: encryptedEnvelopeStringSchema,
+					encryptedMasterKey: encryptedEnvelopeStringSchema,
+					recoveryKeyHint: recoveryKeyHintSchema,
+					secretKeyHint: secretKeyHintSchema.optional(),
+					encryptedVaultKeys: encryptedVaultKeysSchema,
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const recoveryPayload = await verifyRecoveryToken(input.recoveryToken);
@@ -1270,13 +1287,15 @@ export const authRouter = router({
 	 */
 	updateEmail: protectedProcedure
 		.input(
-			z.object({
-				newEmail: z.string().email().max(255),
-				srpSalt: srpSaltSchema,
-				srpVerifier: srpVerifierSchema,
-				encryptedPrivateKey: encryptedEnvelopeStringSchema,
-				encryptedVaultKeys: encryptedVaultKeysSchema,
-			}).strict(),
+			z
+				.object({
+					newEmail: z.string().email().max(255),
+					srpSalt: srpSaltSchema,
+					srpVerifier: srpVerifierSchema,
+					encryptedPrivateKey: encryptedEnvelopeStringSchema,
+					encryptedVaultKeys: encryptedVaultKeysSchema,
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const normalizedNewEmail = normalizeEmail(input.newEmail);
@@ -1322,12 +1341,14 @@ export const authRouter = router({
 	 */
 	changePassword: protectedProcedure
 		.input(
-			z.object({
-				srpSalt: srpSaltSchema,
-				srpVerifier: srpVerifierSchema,
-				encryptedPrivateKey: encryptedEnvelopeStringSchema,
-				encryptedVaultKeys: encryptedVaultKeysSchema,
-			}).strict(),
+			z
+				.object({
+					srpSalt: srpSaltSchema,
+					srpVerifier: srpVerifierSchema,
+					encryptedPrivateKey: encryptedEnvelopeStringSchema,
+					encryptedVaultKeys: encryptedVaultKeysSchema,
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			await updateUserPassword(ctx.session.userId, {
@@ -1360,13 +1381,15 @@ export const authRouter = router({
 	 */
 	regenerateSecretKey: protectedProcedure
 		.input(
-			z.object({
-				secretKeyHint: secretKeyHintSchema,
-				srpSalt: srpSaltSchema,
-				srpVerifier: srpVerifierSchema,
-				encryptedPrivateKey: encryptedEnvelopeStringSchema,
-				encryptedVaultKeys: encryptedVaultKeysSchema,
-			}).strict(),
+			z
+				.object({
+					secretKeyHint: secretKeyHintSchema,
+					srpSalt: srpSaltSchema,
+					srpVerifier: srpVerifierSchema,
+					encryptedPrivateKey: encryptedEnvelopeStringSchema,
+					encryptedVaultKeys: encryptedVaultKeysSchema,
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			await updateUserSecretKey(ctx.session.userId, {
@@ -1400,10 +1423,12 @@ export const authRouter = router({
 	 */
 	storeRecoveryKey: protectedProcedure
 		.input(
-			z.object({
-				encryptedMasterKey: encryptedEnvelopeStringSchema,
-				recoveryKeyHint: recoveryKeyHintSchema,
-			}).strict(),
+			z
+				.object({
+					encryptedMasterKey: encryptedEnvelopeStringSchema,
+					recoveryKeyHint: recoveryKeyHintSchema,
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const existingUser = await getUserById(ctx.session.userId);
@@ -1528,9 +1553,11 @@ export const authRouter = router({
 	 */
 	revokeDevice: protectedProcedure
 		.input(
-			z.object({
-				sessionId: sessionIdSchema,
-			}).strict(),
+			z
+				.object({
+					sessionId: sessionIdSchema,
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			// Prevent revoking current session
@@ -1597,10 +1624,12 @@ export const authRouter = router({
 	 */
 	renameDevice: protectedProcedure
 		.input(
-			z.object({
-				sessionId: sessionIdSchema,
-				deviceName: z.string().min(1).max(100),
-			}).strict(),
+			z
+				.object({
+					sessionId: sessionIdSchema,
+					deviceName: z.string().min(1).max(100),
+				})
+				.strict(),
 		)
 		.mutation(async ({ ctx, input }) => {
 			await renameSession(

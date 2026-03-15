@@ -193,14 +193,10 @@ function DeviceSetupDialogContent({
 	}, [m, setupPreview.errorKey]);
 
 	const handleCopyLink = async () => {
-		await copyWithToast(
-			setupPreview.linkUri,
-			m.sharing_common_link_label(),
-			{
-				autoClearMs: 0,
-				showAutoClearMessage: false,
-			},
-		);
+		await copyWithToast(setupPreview.linkUri, m.sharing_common_link_label(), {
+			autoClearMs: 0,
+			showAutoClearMessage: false,
+		});
 	};
 
 	return (

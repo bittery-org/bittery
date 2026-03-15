@@ -4,7 +4,10 @@ import {
 	getItemFaviconUrl,
 	getItemServerUrl,
 } from "@bittery/shared/favicon";
-import type { DecryptedItemWithContext, ItemCategory } from "@bittery/shared/types";
+import type {
+	DecryptedItemWithContext,
+	ItemCategory,
+} from "@bittery/shared/types";
 import { cn } from "@bittery/ui";
 import {
 	IconCreditCardLockOutlineDuo18,
@@ -101,7 +104,7 @@ export function Favicon({
 	const fallbackServerUrl = "http://localhost:3000";
 	const resolvedServerUrl = item
 		? getItemServerUrl(item, serverUrl ?? fallbackServerUrl)
-		: serverUrl ?? fallbackServerUrl;
+		: (serverUrl ?? fallbackServerUrl);
 	const resolvedUrl = item?.url ?? url;
 	const resolvedCategory = item?.category ?? category;
 	const resolvedTitle = item?.title ?? title ?? "";
@@ -115,7 +118,11 @@ export function Favicon({
 	const faviconUrl =
 		resolvedUrl && resolvedCategory === "login"
 			? item
-				? getItemFaviconUrl(item, faviconSizeMap[size], serverUrl ?? fallbackServerUrl)
+				? getItemFaviconUrl(
+						item,
+						faviconSizeMap[size],
+						serverUrl ?? fallbackServerUrl,
+					)
 				: getFaviconUrl(resolvedUrl, faviconSizeMap[size], resolvedServerUrl)
 			: null;
 	const domain = resolvedUrl ? getDomainFromUrl(resolvedUrl) : null;

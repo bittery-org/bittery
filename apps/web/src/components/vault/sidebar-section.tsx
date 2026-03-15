@@ -42,10 +42,7 @@ export function SidebarSection({
 		(open: boolean) => {
 			if (storageKey) {
 				try {
-					localStorage.setItem(
-						`sidebar-section-${storageKey}`,
-						String(open),
-					);
+					localStorage.setItem(`sidebar-section-${storageKey}`, String(open));
 				} catch {
 					// Ignore storage errors
 				}

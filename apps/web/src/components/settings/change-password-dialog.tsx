@@ -92,9 +92,7 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			return;
 		}
 		if (newPassword !== confirmPassword) {
-			toast.error(
-				m.settings_change_password_dialog_toast_password_mismatch(),
-			);
+			toast.error(m.settings_change_password_dialog_toast_password_mismatch());
 			return;
 		}
 

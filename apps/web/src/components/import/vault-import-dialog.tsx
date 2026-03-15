@@ -784,8 +784,7 @@ export function VaultImportDialog({
 									<div className="flex flex-wrap items-center gap-2">
 										<span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-xs">
 											<Upload className="mr-2 h-4 w-4" />
-											{selectedFileName ||
-												m.vaults_import_upload_choose_file()}
+											{selectedFileName || m.vaults_import_upload_choose_file()}
 										</span>
 
 										{selectedFileName && (
@@ -907,8 +906,12 @@ export function VaultImportDialog({
 									{skippedEmptyVaultCount > 0 && (
 										<p className="mt-1 text-muted-foreground text-xs">
 											{skippedEmptyVaultCount === 1
-												? m.vaults_import_mapping_skipped_empty_vaults_single({ count: skippedEmptyVaultCount })
-												: m.vaults_import_mapping_skipped_empty_vaults_plural({ count: skippedEmptyVaultCount })}
+												? m.vaults_import_mapping_skipped_empty_vaults_single({
+														count: skippedEmptyVaultCount,
+													})
+												: m.vaults_import_mapping_skipped_empty_vaults_plural({
+														count: skippedEmptyVaultCount,
+													})}
 										</p>
 									)}
 								</div>
@@ -937,12 +940,16 @@ export function VaultImportDialog({
 														</p>
 														<p className="text-muted-foreground text-xs">
 															{sourceVault.itemCount === 1
-																? m.vaults_import_mapping_source_item_count_single({
-																		count: sourceVault.itemCount,
-																	})
-																: m.vaults_import_mapping_source_item_count_plural({
-																		count: sourceVault.itemCount,
-																	})}
+																? m.vaults_import_mapping_source_item_count_single(
+																		{
+																			count: sourceVault.itemCount,
+																		},
+																	)
+																: m.vaults_import_mapping_source_item_count_plural(
+																		{
+																			count: sourceVault.itemCount,
+																		},
+																	)}
 														</p>
 													</div>
 													<Badge variant="secondary">
@@ -1009,7 +1016,9 @@ export function VaultImportDialog({
 																			disabled={vault.role === "read-only"}
 																		>
 																			{vault.role === "read-only"
-																				? m.vaults_import_mapping_target_vault_read_only({ vaultName: vault.vaultName })
+																				? m.vaults_import_mapping_target_vault_read_only(
+																						{ vaultName: vault.vaultName },
+																					)
 																				: vault.vaultName}
 																		</SelectItem>
 																	))

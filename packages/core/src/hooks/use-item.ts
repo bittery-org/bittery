@@ -6,8 +6,8 @@
 
 import type { DecryptedItemData } from "@bittery/shared/types";
 import { useMemo } from "react";
-import { useVaultRepositorySync } from "./use-vault-repository-sync";
 import { extractDecryptedItemData } from "./items/mutation-utils";
+import { useVaultRepositorySync } from "./use-vault-repository-sync";
 
 export interface UseItemOptions {
 	accountEmail?: string;

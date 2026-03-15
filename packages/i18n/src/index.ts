@@ -1,4 +1,5 @@
 export const supportedLocales = ["en", "de"] as const;
+
 import type * as generatedMessages from "./paraglide/messages/_index";
 
 export type AppLocale = (typeof supportedLocales)[number];
