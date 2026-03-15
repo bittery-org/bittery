@@ -14,7 +14,7 @@ import type {
 	LocaleRuntimeAdapter,
 	LocaleStorageAdapter,
 } from "../adapters";
-import { type AppLocale, defaultLocale } from "../index";
+import { type AppLocale, defaultLocale, type MessageCatalog } from "../index";
 import {
 	initializeLocale,
 	persistLocaleSelection,
@@ -34,7 +34,7 @@ function safeGetLocale(runtime: LocaleRuntimeAdapter): AppLocale {
 	}
 }
 
-export function createI18nReact<M>(input: {
+export function createI18nReact<M extends MessageCatalog>(input: {
 	messages: M;
 	runtime: LocaleRuntimeAdapter;
 	storage?: LocaleStorageAdapter;

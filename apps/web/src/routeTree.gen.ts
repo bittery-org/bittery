@@ -19,13 +19,16 @@ import { Route as AuthLoginRouteImport } from './routes/_auth/login'
 import { Route as AppSecurityRouteImport } from './routes/_app/security'
 import { Route as AppHomeRouteImport } from './routes/_app/home'
 import { Route as AppBillingRouteImport } from './routes/_app/billing'
+import { Route as AppVaultsRouteRouteImport } from './routes/_app/vaults/route'
 import { Route as AppVaultsIndexRouteImport } from './routes/_app/vaults/index'
 import { Route as AppTeamIndexRouteImport } from './routes/_app/team/index'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
 import { Route as AppAdminIndexRouteImport } from './routes/_app/admin/index'
 import { Route as AuthInviteTokenRouteImport } from './routes/_auth/invite.$token'
 import { Route as AppVaultsTrashRouteImport } from './routes/_app/vaults/trash'
+import { Route as AppVaultsFavoritesRouteImport } from './routes/_app/vaults/favorites'
 import { Route as AppVaultsVaultIdIndexRouteImport } from './routes/_app/vaults/$vaultId/index'
+import { Route as AppVaultsTagTagNameRouteImport } from './routes/_app/vaults/tag.$tagName'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/_auth',
@@ -75,10 +78,15 @@ const AppBillingRoute = AppBillingRouteImport.update({
   path: '/billing',
   getParentRoute: () => AppRoute,
 } as any)
-const AppVaultsIndexRoute = AppVaultsIndexRouteImport.update({
-  id: '/vaults/',
-  path: '/vaults/',
+const AppVaultsRouteRoute = AppVaultsRouteRouteImport.update({
+  id: '/vaults',
+  path: '/vaults',
   getParentRoute: () => AppRoute,
+} as any)
+const AppVaultsIndexRoute = AppVaultsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppVaultsRouteRoute,
 } as any)
 const AppTeamIndexRoute = AppTeamIndexRouteImport.update({
   id: '/team/',
@@ -101,18 +109,29 @@ const AuthInviteTokenRoute = AuthInviteTokenRouteImport.update({
   getParentRoute: () => AuthRoute,
 } as any)
 const AppVaultsTrashRoute = AppVaultsTrashRouteImport.update({
-  id: '/vaults/trash',
-  path: '/vaults/trash',
-  getParentRoute: () => AppRoute,
+  id: '/trash',
+  path: '/trash',
+  getParentRoute: () => AppVaultsRouteRoute,
+} as any)
+const AppVaultsFavoritesRoute = AppVaultsFavoritesRouteImport.update({
+  id: '/favorites',
+  path: '/favorites',
+  getParentRoute: () => AppVaultsRouteRoute,
 } as any)
 const AppVaultsVaultIdIndexRoute = AppVaultsVaultIdIndexRouteImport.update({
-  id: '/vaults/$vaultId/',
-  path: '/vaults/$vaultId/',
-  getParentRoute: () => AppRoute,
+  id: '/$vaultId/',
+  path: '/$vaultId/',
+  getParentRoute: () => AppVaultsRouteRoute,
+} as any)
+const AppVaultsTagTagNameRoute = AppVaultsTagTagNameRouteImport.update({
+  id: '/tag/$tagName',
+  path: '/tag/$tagName',
+  getParentRoute: () => AppVaultsRouteRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/vaults': typeof AppVaultsRouteRouteWithChildren
   '/billing': typeof AppBillingRoute
   '/home': typeof AppHomeRoute
   '/security': typeof AppSecurityRoute
@@ -120,12 +139,14 @@ export interface FileRoutesByFullPath {
   '/recover': typeof AuthRecoverRoute
   '/signup': typeof AuthSignupRoute
   '/share/$token': typeof ShareTokenRoute
+  '/vaults/favorites': typeof AppVaultsFavoritesRoute
   '/vaults/trash': typeof AppVaultsTrashRoute
   '/invite/$token': typeof AuthInviteTokenRoute
   '/admin/': typeof AppAdminIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/team/': typeof AppTeamIndexRoute
   '/vaults/': typeof AppVaultsIndexRoute
+  '/vaults/tag/$tagName': typeof AppVaultsTagTagNameRoute
   '/vaults/$vaultId/': typeof AppVaultsVaultIdIndexRoute
 }
 export interface FileRoutesByTo {
@@ -137,12 +158,14 @@ export interface FileRoutesByTo {
   '/recover': typeof AuthRecoverRoute
   '/signup': typeof AuthSignupRoute
   '/share/$token': typeof ShareTokenRoute
+  '/vaults/favorites': typeof AppVaultsFavoritesRoute
   '/vaults/trash': typeof AppVaultsTrashRoute
   '/invite/$token': typeof AuthInviteTokenRoute
   '/admin': typeof AppAdminIndexRoute
   '/settings': typeof AppSettingsIndexRoute
   '/team': typeof AppTeamIndexRoute
   '/vaults': typeof AppVaultsIndexRoute
+  '/vaults/tag/$tagName': typeof AppVaultsTagTagNameRoute
   '/vaults/$vaultId': typeof AppVaultsVaultIdIndexRoute
 }
 export interface FileRoutesById {
@@ -150,6 +173,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_app': typeof AppRouteWithChildren
   '/_auth': typeof AuthRouteWithChildren
+  '/_app/vaults': typeof AppVaultsRouteRouteWithChildren
   '/_app/billing': typeof AppBillingRoute
   '/_app/home': typeof AppHomeRoute
   '/_app/security': typeof AppSecurityRoute
@@ -157,18 +181,21 @@ export interface FileRoutesById {
   '/_auth/recover': typeof AuthRecoverRoute
   '/_auth/signup': typeof AuthSignupRoute
   '/share/$token': typeof ShareTokenRoute
+  '/_app/vaults/favorites': typeof AppVaultsFavoritesRoute
   '/_app/vaults/trash': typeof AppVaultsTrashRoute
   '/_auth/invite/$token': typeof AuthInviteTokenRoute
   '/_app/admin/': typeof AppAdminIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/team/': typeof AppTeamIndexRoute
   '/_app/vaults/': typeof AppVaultsIndexRoute
+  '/_app/vaults/tag/$tagName': typeof AppVaultsTagTagNameRoute
   '/_app/vaults/$vaultId/': typeof AppVaultsVaultIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/vaults'
     | '/billing'
     | '/home'
     | '/security'
@@ -176,12 +203,14 @@ export interface FileRouteTypes {
     | '/recover'
     | '/signup'
     | '/share/$token'
+    | '/vaults/favorites'
     | '/vaults/trash'
     | '/invite/$token'
     | '/admin/'
     | '/settings/'
     | '/team/'
     | '/vaults/'
+    | '/vaults/tag/$tagName'
     | '/vaults/$vaultId/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -193,18 +222,21 @@ export interface FileRouteTypes {
     | '/recover'
     | '/signup'
     | '/share/$token'
+    | '/vaults/favorites'
     | '/vaults/trash'
     | '/invite/$token'
     | '/admin'
     | '/settings'
     | '/team'
     | '/vaults'
+    | '/vaults/tag/$tagName'
     | '/vaults/$vaultId'
   id:
     | '__root__'
     | '/'
     | '/_app'
     | '/_auth'
+    | '/_app/vaults'
     | '/_app/billing'
     | '/_app/home'
     | '/_app/security'
@@ -212,12 +244,14 @@ export interface FileRouteTypes {
     | '/_auth/recover'
     | '/_auth/signup'
     | '/share/$token'
+    | '/_app/vaults/favorites'
     | '/_app/vaults/trash'
     | '/_auth/invite/$token'
     | '/_app/admin/'
     | '/_app/settings/'
     | '/_app/team/'
     | '/_app/vaults/'
+    | '/_app/vaults/tag/$tagName'
     | '/_app/vaults/$vaultId/'
   fileRoutesById: FileRoutesById
 }
@@ -300,12 +334,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBillingRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/vaults': {
+      id: '/_app/vaults'
+      path: '/vaults'
+      fullPath: '/vaults'
+      preLoaderRoute: typeof AppVaultsRouteRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/vaults/': {
       id: '/_app/vaults/'
-      path: '/vaults'
+      path: '/'
       fullPath: '/vaults/'
       preLoaderRoute: typeof AppVaultsIndexRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppVaultsRouteRoute
     }
     '/_app/team/': {
       id: '/_app/team/'
@@ -337,43 +378,73 @@ declare module '@tanstack/react-router' {
     }
     '/_app/vaults/trash': {
       id: '/_app/vaults/trash'
-      path: '/vaults/trash'
+      path: '/trash'
       fullPath: '/vaults/trash'
       preLoaderRoute: typeof AppVaultsTrashRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppVaultsRouteRoute
+    }
+    '/_app/vaults/favorites': {
+      id: '/_app/vaults/favorites'
+      path: '/favorites'
+      fullPath: '/vaults/favorites'
+      preLoaderRoute: typeof AppVaultsFavoritesRouteImport
+      parentRoute: typeof AppVaultsRouteRoute
     }
     '/_app/vaults/$vaultId/': {
       id: '/_app/vaults/$vaultId/'
-      path: '/vaults/$vaultId'
+      path: '/$vaultId'
       fullPath: '/vaults/$vaultId/'
       preLoaderRoute: typeof AppVaultsVaultIdIndexRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppVaultsRouteRoute
+    }
+    '/_app/vaults/tag/$tagName': {
+      id: '/_app/vaults/tag/$tagName'
+      path: '/tag/$tagName'
+      fullPath: '/vaults/tag/$tagName'
+      preLoaderRoute: typeof AppVaultsTagTagNameRouteImport
+      parentRoute: typeof AppVaultsRouteRoute
     }
   }
 }
 
-interface AppRouteChildren {
-  AppBillingRoute: typeof AppBillingRoute
-  AppHomeRoute: typeof AppHomeRoute
-  AppSecurityRoute: typeof AppSecurityRoute
+interface AppVaultsRouteRouteChildren {
+  AppVaultsFavoritesRoute: typeof AppVaultsFavoritesRoute
   AppVaultsTrashRoute: typeof AppVaultsTrashRoute
-  AppAdminIndexRoute: typeof AppAdminIndexRoute
-  AppSettingsIndexRoute: typeof AppSettingsIndexRoute
-  AppTeamIndexRoute: typeof AppTeamIndexRoute
   AppVaultsIndexRoute: typeof AppVaultsIndexRoute
+  AppVaultsTagTagNameRoute: typeof AppVaultsTagTagNameRoute
   AppVaultsVaultIdIndexRoute: typeof AppVaultsVaultIdIndexRoute
 }
 
+const AppVaultsRouteRouteChildren: AppVaultsRouteRouteChildren = {
+  AppVaultsFavoritesRoute: AppVaultsFavoritesRoute,
+  AppVaultsTrashRoute: AppVaultsTrashRoute,
+  AppVaultsIndexRoute: AppVaultsIndexRoute,
+  AppVaultsTagTagNameRoute: AppVaultsTagTagNameRoute,
+  AppVaultsVaultIdIndexRoute: AppVaultsVaultIdIndexRoute,
+}
+
+const AppVaultsRouteRouteWithChildren = AppVaultsRouteRoute._addFileChildren(
+  AppVaultsRouteRouteChildren,
+)
+
+interface AppRouteChildren {
+  AppVaultsRouteRoute: typeof AppVaultsRouteRouteWithChildren
+  AppBillingRoute: typeof AppBillingRoute
+  AppHomeRoute: typeof AppHomeRoute
+  AppSecurityRoute: typeof AppSecurityRoute
+  AppAdminIndexRoute: typeof AppAdminIndexRoute
+  AppSettingsIndexRoute: typeof AppSettingsIndexRoute
+  AppTeamIndexRoute: typeof AppTeamIndexRoute
+}
+
 const AppRouteChildren: AppRouteChildren = {
+  AppVaultsRouteRoute: AppVaultsRouteRouteWithChildren,
   AppBillingRoute: AppBillingRoute,
   AppHomeRoute: AppHomeRoute,
   AppSecurityRoute: AppSecurityRoute,
-  AppVaultsTrashRoute: AppVaultsTrashRoute,
   AppAdminIndexRoute: AppAdminIndexRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
   AppTeamIndexRoute: AppTeamIndexRoute,
-  AppVaultsIndexRoute: AppVaultsIndexRoute,
-  AppVaultsVaultIdIndexRoute: AppVaultsVaultIdIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

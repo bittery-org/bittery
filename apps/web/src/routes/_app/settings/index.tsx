@@ -60,7 +60,7 @@ function SettingsPage() {
 	const trpc = useTRPC();
 	const { locale, setLocale, m } = useI18n();
 	const activeLocaleLabel =
-		locale === "en" ? m["i18n.language.en"]() : m["i18n.language.de"]();
+		locale === "en" ? m.i18n_language_en() : m.i18n_language_de();
 	const ActiveLocaleFlag =
 		locale === "en" ? IconFlagUnitedStates : IconFlagGermany;
 	const userQuery = useQuery(trpc.auth.me.queryOptions());
@@ -80,7 +80,7 @@ function SettingsPage() {
 						</div>
 						<div className="min-w-0">
 							<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
-								{m["settings.page.hero_heading"]()}
+								{m.settings_page_hero_heading()}
 							</h1>
 							{userQuery.data?.email && (
 								<p className="truncate text-muted-foreground text-xs">
@@ -98,25 +98,25 @@ function SettingsPage() {
 					<TabsTrigger value="account" className="flex-1 sm:flex-none">
 						<User className="h-4 w-4 sm:mr-2" />
 						<span className="hidden sm:inline">
-							{m["settings.tab.account"]()}
+							{m.settings_tab_account()}
 						</span>
 					</TabsTrigger>
 					<TabsTrigger value="security" className="flex-1 sm:flex-none">
 						<Shield className="h-4 w-4 sm:mr-2" />
 						<span className="hidden sm:inline">
-							{m["settings.tab.security"]()}
+							{m.settings_tab_security()}
 						</span>
 					</TabsTrigger>
 					<TabsTrigger value="devices" className="flex-1 sm:flex-none">
 						<Mobile className="h-4 w-4 sm:mr-2" />
 						<span className="hidden sm:inline">
-							{m["settings.tab.devices"]()}
+							{m.settings_tab_devices()}
 						</span>
 					</TabsTrigger>
 					<TabsTrigger value="general" className="flex-1 sm:flex-none">
 						<Gear className="h-4 w-4 sm:mr-2" />
 						<span className="hidden sm:inline">
-							{m["settings.tab.general"]()}
+							{m.settings_tab_general()}
 						</span>
 					</TabsTrigger>
 				</TabsList>
@@ -126,10 +126,10 @@ function SettingsPage() {
 					<div className="space-y-6">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 							<h2 className="font-semibold text-lg tracking-tight">
-								{m["settings.account.heading"]()}
+								{m.settings_account_heading()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
-								{m["settings.account.description"]()}
+								{m.settings_account_description()}
 							</p>
 						</div>
 
@@ -149,7 +149,7 @@ function SettingsPage() {
 										</div>
 										<div className="min-w-0 flex-1">
 											<p className="text-muted-foreground text-xs">
-												{m["settings.field.name"]()}
+												{m.settings_field_name()}
 											</p>
 											<p className="truncate font-medium text-sm">
 												{userQuery.data?.name || "—"}
@@ -167,7 +167,7 @@ function SettingsPage() {
 											</div>
 											<div className="min-w-0 flex-1">
 												<p className="text-muted-foreground text-xs">
-													{m["settings.field.email"]()}
+													{m.settings_field_email()}
 												</p>
 												<p className="truncate font-medium text-sm">
 													{userQuery.data?.email || "—"}
@@ -188,11 +188,11 @@ function SettingsPage() {
 										</div>
 										<div className="min-w-0 flex-1">
 											<p className="text-muted-foreground text-xs">
-												{m["settings.field.secret_key_hint"]()}
+												{m.settings_field_secret_key_hint()}
 											</p>
 											<code className="mt-0.5 inline-block rounded bg-muted px-2 py-0.5 font-mono text-muted-foreground text-sm">
 												{userQuery.data?.secretKeyHint ||
-													m["settings.common.na"]()}
+													m.settings_common_na()}
 											</code>
 										</div>
 									</div>
@@ -207,10 +207,10 @@ function SettingsPage() {
 					<div className="space-y-6">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 							<h2 className="font-semibold text-lg tracking-tight">
-								{m["settings.security.heading"]()}
+								{m.settings_security_heading()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
-								{m["settings.security.description"]()}
+								{m.settings_security_description()}
 							</p>
 						</div>
 
@@ -224,10 +224,10 @@ function SettingsPage() {
 										</div>
 										<div className="space-y-0.5">
 											<span className="font-medium text-sm">
-												{m["settings.security.master_password"]()}
+												{m.settings_security_master_password()}
 											</span>
 											<p className="text-muted-foreground text-xs">
-												{m["settings.security.master_password_description"]()}
+												{m.settings_security_master_password_description()}
 											</p>
 										</div>
 									</div>
@@ -246,10 +246,10 @@ function SettingsPage() {
 										</div>
 										<div className="space-y-0.5">
 											<span className="font-medium text-sm">
-												{m["settings.security.secret_key"]()}
+												{m.settings_security_secret_key()}
 											</span>
 											<p className="text-muted-foreground text-xs">
-												{m["settings.security.secret_key_description"]()}
+												{m.settings_security_secret_key_description()}
 											</p>
 										</div>
 									</div>
@@ -272,7 +272,7 @@ function SettingsPage() {
 											<div className="space-y-0.5">
 												<div className="flex items-center gap-2">
 													<span className="font-medium text-sm">
-														{m["settings.security.recovery_key"]()}
+														{m.settings_security_recovery_key()}
 													</span>
 													{userQuery.data?.hasRecoveryKey && (
 														<Badge
@@ -280,12 +280,12 @@ function SettingsPage() {
 															className="border-emerald-500/30 bg-emerald-500/10 text-[10px] text-emerald-600 dark:text-emerald-400"
 														>
 															<CheckCircle className="mr-1 h-3 w-3" />
-															{m["settings.security.recovery_key_configured"]()}
+															{m.settings_security_recovery_key_configured()}
 														</Badge>
 													)}
 												</div>
 												<p className="text-muted-foreground text-xs">
-													{m["settings.security.recovery_key_description"]()}
+													{m.settings_security_recovery_key_description()}
 												</p>
 											</div>
 										</div>
@@ -312,10 +312,10 @@ function SettingsPage() {
 										</div>
 										<div className="space-y-0.5">
 											<span className="font-medium text-sm">
-												{m["settings.security.auto_lock"]()}
+												{m.settings_security_auto_lock()}
 											</span>
 											<p className="text-muted-foreground text-xs">
-												{m["settings.security.auto_lock_description"]()}
+												{m.settings_security_auto_lock_description()}
 											</p>
 										</div>
 									</div>
@@ -331,10 +331,10 @@ function SettingsPage() {
 					<div className="space-y-3">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 							<h2 className="font-semibold text-lg tracking-tight">
-								{m["settings.devices.heading"]()}
+								{m.settings_devices_heading()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
-								{m["settings.devices.description"]()}
+								{m.settings_devices_description()}
 							</p>
 						</div>
 						<DeviceManagement />
@@ -346,17 +346,17 @@ function SettingsPage() {
 					<div className="space-y-6">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 							<h2 className="font-semibold text-lg tracking-tight">
-								{m["settings.general.heading"]()}
+								{m.settings_general_heading()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
-								{m["settings.general.description"]()}
+								{m.settings_general_description()}
 							</p>
 						</div>
 
 						<div className="rounded-xl border bg-card p-6">
 							<div className="space-y-4">
 								<p className="max-w-2xl text-muted-foreground text-sm leading-relaxed">
-									{m["settings.general.product_description"]()}
+									{m.settings_general_product_description()}
 								</p>
 								<Separator />
 								<div className="flex flex-wrap gap-2">
@@ -367,7 +367,7 @@ function SettingsPage() {
 											rel="noopener noreferrer"
 										>
 											<Github className="mr-2 h-4 w-4" />
-											{m["settings.general.github_repository"]()}
+											{m.settings_general_github_repository()}
 											<ExternalLink className="ml-2 h-3 w-3" />
 										</a>
 									</Button>
@@ -377,7 +377,7 @@ function SettingsPage() {
 											target="_blank"
 											rel="noopener noreferrer"
 										>
-											{m["settings.general.report_issue"]()}
+											{m.settings_general_report_issue()}
 											<ExternalLink className="ml-2 h-3 w-3" />
 										</a>
 									</Button>
@@ -393,10 +393,10 @@ function SettingsPage() {
 									</div>
 									<div className="space-y-1">
 										<span className="font-medium text-sm">
-											{m["settings.general.import.title"]()}
+											{m.settings_general_import_title()}
 										</span>
 										<p className="text-muted-foreground text-xs">
-											{m["settings.general.import.description"]()}
+											{m.settings_general_import_description()}
 										</p>
 									</div>
 								</div>
@@ -405,7 +405,7 @@ function SettingsPage() {
 									size="sm"
 									onClick={() => setIsImportDialogOpen(true)}
 								>
-									{m["settings.general.import.open"]()}
+									{m.settings_general_import_open()}
 								</Button>
 							</div>
 						</div>
@@ -414,10 +414,10 @@ function SettingsPage() {
 							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 								<div className="space-y-0.5">
 									<span className="font-medium text-sm">
-										{m["settings.general.language.title"]()}
+										{m.settings_general_language_title()}
 									</span>
 									<p className="text-muted-foreground text-xs">
-										{m["settings.general.language.description"]()}
+										{m.settings_general_language_description()}
 									</p>
 								</div>
 								<Select
@@ -425,7 +425,7 @@ function SettingsPage() {
 									onValueChange={(value) => setLocale(value as AppLocale)}
 								>
 									<SelectTrigger
-										aria-label={m["settings.general.language.title"]()}
+										aria-label={m.settings_general_language_title()}
 										className="h-7 min-w-28 max-w-30 border-0 bg-transparent px-1.5 text-sm shadow-none ring-0 focus:ring-0"
 									>
 										<ActiveLocaleFlag size={14} className="shrink-0" />
@@ -445,8 +445,8 @@ function SettingsPage() {
 													)}
 													<span>
 														{value === "en"
-															? m["i18n.language.en"]()
-															: m["i18n.language.de"]()}
+															? m.i18n_language_en()
+															: m.i18n_language_de()}
 													</span>
 												</span>
 											</SelectItem>
@@ -465,12 +465,10 @@ function SettingsPage() {
 									</div>
 									<div className="space-y-0.5">
 										<span className="font-medium text-sm">
-											{m["settings.general.danger.delete_account"]()}
+											{m.settings_general_danger_delete_account()}
 										</span>
 										<p className="text-muted-foreground text-xs">
-											{m[
-												"settings.general.danger.delete_account_description"
-											]()}
+											{m.settings_general_danger_delete_account_description()}
 										</p>
 									</div>
 								</div>

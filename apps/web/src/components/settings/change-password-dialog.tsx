@@ -60,12 +60,12 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			}>;
 		}) => trpcClient.auth.changePassword.mutate(input),
 		onSuccess: () => {
-			toast.success(m["settings.change_password_dialog.toast.changed"]());
+			toast.success(m.settings_change_password_dialog_toast_changed());
 			setOpen(false);
 			navigate({ to: "/login" });
 		},
 		onError: () => {
-			toast.error(m["settings.change_password_dialog.toast.change_failed"]());
+			toast.error(m.settings_change_password_dialog_toast_change_failed());
 			setIsProcessing(false);
 		},
 	});
@@ -75,42 +75,42 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 
 		if (!currentPassword.trim()) {
 			toast.error(
-				m["settings.change_password_dialog.toast.current_password_required"](),
+				m.settings_change_password_dialog_toast_current_password_required(),
 			);
 			return;
 		}
 		if (!newPassword.trim()) {
 			toast.error(
-				m["settings.change_password_dialog.toast.new_password_required"](),
+				m.settings_change_password_dialog_toast_new_password_required(),
 			);
 			return;
 		}
 		if (newPassword.length < 8) {
 			toast.error(
-				m["settings.change_password_dialog.toast.password_min_length"](),
+				m.settings_change_password_dialog_toast_password_min_length(),
 			);
 			return;
 		}
 		if (newPassword !== confirmPassword) {
 			toast.error(
-				m["settings.change_password_dialog.toast.password_mismatch"](),
+				m.settings_change_password_dialog_toast_password_mismatch(),
 			);
 			return;
 		}
 
 		const secretKey = await storage.getStoredSecretKey();
 		if (!secretKey) {
-			toast.error(m["settings.common.toast.secret_key_not_found"]());
+			toast.error(m.settings_common_toast_secret_key_not_found());
 			return;
 		}
 
 		if (!userQuery.data?.encryptedPrivateKey) {
-			toast.error(m["settings.common.toast.user_data_load_failed"]());
+			toast.error(m.settings_common_toast_user_data_load_failed());
 			return;
 		}
 
 		if (!vaultListQuery.data || vaultListQuery.data.length === 0) {
-			toast.error(m["settings.common.toast.vault_keys_load_failed"]());
+			toast.error(m.settings_common_toast_vault_keys_load_failed());
 			return;
 		}
 
@@ -210,7 +210,7 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			});
 		} catch (error) {
 			console.error("Password change error:", error);
-			toast.error(m["settings.change_password_dialog.toast.change_failed"]());
+			toast.error(m.settings_change_password_dialog_toast_change_failed());
 			setIsProcessing(false);
 		}
 	};
@@ -220,23 +220,23 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			<DialogTrigger asChild>
 				<Button variant="outline">
 					<Key className="mr-2 h-4 w-4" />
-					{m["settings.change_password_dialog.trigger"]()}
+					{m.settings_change_password_dialog_trigger()}
 				</Button>
 			</DialogTrigger>
 			<DialogContent>
 				<form onSubmit={handleSubmit}>
 					<DialogHeader>
 						<DialogTitle>
-							{m["settings.change_password_dialog.title"]()}
+							{m.settings_change_password_dialog_title()}
 						</DialogTitle>
 						<DialogDescription>
-							{m["settings.change_password_dialog.description"]()}
+							{m.settings_change_password_dialog_description()}
 						</DialogDescription>
 					</DialogHeader>
 					<div className="grid gap-4 py-4">
 						<div className="grid gap-2">
 							<Label htmlFor="currentPassword">
-								{m["settings.change_password_dialog.field.current_password"]()}
+								{m.settings_change_password_dialog_field_current_password()}
 							</Label>
 							<div className="relative">
 								<Input
@@ -244,9 +244,7 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 									type={showCurrentPassword ? "text" : "password"}
 									value={currentPassword}
 									onChange={(e) => setCurrentPassword(e.target.value)}
-									placeholder={m[
-										"settings.change_password_dialog.placeholder.current_password"
-									]()}
+									placeholder={m.settings_change_password_dialog_placeholder_current_password()}
 									autoFocus
 									className="pr-10"
 								/>
@@ -267,7 +265,7 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 						</div>
 						<div className="grid gap-2">
 							<Label htmlFor="newPassword">
-								{m["settings.change_password_dialog.field.new_password"]()}
+								{m.settings_change_password_dialog_field_new_password()}
 							</Label>
 							<div className="relative">
 								<Input
@@ -275,9 +273,7 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 									type={showNewPassword ? "text" : "password"}
 									value={newPassword}
 									onChange={(e) => setNewPassword(e.target.value)}
-									placeholder={m[
-										"settings.change_password_dialog.placeholder.new_password"
-									]()}
+									placeholder={m.settings_change_password_dialog_placeholder_new_password()}
 									className="pr-10"
 								/>
 								<Button
@@ -291,34 +287,26 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 								</Button>
 							</div>
 							<p className="text-muted-foreground text-xs">
-								{m[
-									"settings.change_password_dialog.hint.password_min_length"
-								]()}
+								{m.settings_change_password_dialog_hint_password_min_length()}
 							</p>
 						</div>
 						<div className="grid gap-2">
 							<Label htmlFor="confirmPassword">
-								{m[
-									"settings.change_password_dialog.field.confirm_new_password"
-								]()}
+								{m.settings_change_password_dialog_field_confirm_new_password()}
 							</Label>
 							<Input
 								id="confirmPassword"
 								type="password"
 								value={confirmPassword}
 								onChange={(e) => setConfirmPassword(e.target.value)}
-								placeholder={m[
-									"settings.change_password_dialog.placeholder.confirm_new_password"
-								]()}
+								placeholder={m.settings_change_password_dialog_placeholder_confirm_new_password()}
 							/>
 						</div>
 					</div>
 					<div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
 						<p className="text-amber-700 text-xs dark:text-amber-300">
-							<strong>{m["settings.common.warning"]()}</strong>{" "}
-							{m[
-								"settings.change_password_dialog.warning.recovery_key_setup"
-							]()}
+							<strong>{m.settings_common_warning()}</strong>{" "}
+							{m.settings_change_password_dialog_warning_recovery_key_setup()}
 						</p>
 					</div>
 					<DialogFooter>
@@ -327,15 +315,15 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 							variant="outline"
 							onClick={() => setOpen(false)}
 						>
-							{m["settings.common.action.cancel"]()}
+							{m.settings_common_action_cancel()}
 						</Button>
 						<Button
 							type="submit"
 							disabled={isProcessing || changePasswordMutation.isPending}
 						>
 							{isProcessing || changePasswordMutation.isPending
-								? m["settings.change_password_dialog.action.changing"]()
-								: m["settings.change_password_dialog.action.submit"]()}
+								? m.settings_change_password_dialog_action_changing()
+								: m.settings_change_password_dialog_action_submit()}
 						</Button>
 					</DialogFooter>
 				</form>

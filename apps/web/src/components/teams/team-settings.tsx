@@ -62,7 +62,7 @@ export function TeamSettings({
 		mutationFn: (input: { teamId: string; name: string }) =>
 			trpcClient.team.update.mutate(input),
 		onSuccess: async () => {
-			toast.success(m["team.settings.toast.name_updated"]());
+			toast.success(m.team_settings_toast_name_updated());
 			await invalidator.invalidateTeam();
 			setIsEditing(false);
 		},
@@ -94,21 +94,21 @@ export function TeamSettings({
 
 		try {
 			await uploadAvatar({ teamId, file });
-			toast.success(m["team.settings.toast.avatar_updated"]());
+			toast.success(m.team_settings_toast_avatar_updated());
 		} catch (error) {
 			if (error instanceof TeamAvatarError) {
 				if (error.code === "INVALID_FILE_TYPE") {
-					toast.error(m["team.settings.error.avatar_invalid_file_type"]());
+					toast.error(m.team_settings_error_avatar_invalid_file_type());
 				} else if (error.code === "FILE_TOO_LARGE") {
-					toast.error(m["team.settings.error.avatar_file_too_large"]());
+					toast.error(m.team_settings_error_avatar_file_too_large());
 				} else {
-					toast.error(m["team.settings.error.avatar_upload_storage_failed"]());
+					toast.error(m.team_settings_error_avatar_upload_storage_failed());
 				}
 			} else {
 				toast.error(
 					error instanceof Error
 						? error.message
-						: m["team.settings.toast.avatar_upload_failed"](),
+						: m.team_settings_toast_avatar_upload_failed(),
 				);
 			}
 		}
@@ -122,12 +122,12 @@ export function TeamSettings({
 	const handleRemoveAvatar = async () => {
 		try {
 			await removeAvatar({ teamId });
-			toast.success(m["team.settings.toast.avatar_removed"]());
+			toast.success(m.team_settings_toast_avatar_removed());
 		} catch (error) {
 			toast.error(
 				error instanceof Error
 					? error.message
-					: m["team.settings.toast.avatar_remove_failed"](),
+					: m.team_settings_toast_avatar_remove_failed(),
 			);
 		}
 	};
@@ -154,10 +154,10 @@ export function TeamSettings({
 							</div>
 							<div>
 								<h3 className="font-semibold text-sm">
-									{m["team.settings.general.title"]()}
+									{m.team_settings_general_title()}
 								</h3>
 								<p className="text-muted-foreground text-xs">
-									{m["team.settings.general.description"]()}
+									{m.team_settings_general_description()}
 								</p>
 							</div>
 						</div>
@@ -185,8 +185,8 @@ export function TeamSettings({
 										>
 											<Upload className="mr-1.5 h-3.5 w-3.5" />
 											{isUploading
-												? m["team.settings.avatar.button.uploading"]()
-												: m["team.settings.avatar.button.upload"]()}
+												? m.team_settings_avatar_button_uploading()
+												: m.team_settings_avatar_button_upload()}
 										</Button>
 										{imageUrl && (
 											<Button
@@ -198,14 +198,14 @@ export function TeamSettings({
 											>
 												<X className="mr-1.5 h-3.5 w-3.5" />
 												{isRemoving
-													? m["team.settings.avatar.button.removing"]()
-													: m["team.settings.avatar.button.remove"]()}
+													? m.team_settings_avatar_button_removing()
+													: m.team_settings_avatar_button_remove()}
 											</Button>
 										)}
 									</div>
 								)}
 								<p className="text-center text-[10px] text-muted-foreground">
-									{m["team.settings.avatar.hint"]()}
+									{m.team_settings_avatar_hint()}
 								</p>
 								<input
 									ref={fileInputRef}
@@ -223,7 +223,7 @@ export function TeamSettings({
 										htmlFor="teamName"
 										className="font-medium text-muted-foreground text-xs uppercase tracking-[0.12em]"
 									>
-										{m["team.settings.field.team_name"]()}
+										{m.team_settings_field_team_name()}
 									</Label>
 									{isEditing ? (
 										<div className="flex gap-2">
@@ -231,7 +231,7 @@ export function TeamSettings({
 												id="teamName"
 												value={name}
 												onChange={(e) => setName(e.target.value)}
-												placeholder={m["team.settings.placeholder.team_name"]()}
+												placeholder={m.team_settings_placeholder_team_name()}
 												className="h-9"
 											/>
 											<Button
@@ -240,15 +240,15 @@ export function TeamSettings({
 												disabled={updateMutation.isPending || !name.trim()}
 											>
 												{updateMutation.isPending
-													? m["team.settings.button.saving"]()
-													: m["team.settings.button.save"]()}
+													? m.team_settings_button_saving()
+													: m.team_settings_button_save()}
 											</Button>
 											<Button
 												variant="outline"
 												size="sm"
 												onClick={handleCancel}
 											>
-												{m["team.common.action.cancel"]()}
+												{m.team_common_action_cancel()}
 											</Button>
 										</div>
 									) : (
@@ -261,7 +261,7 @@ export function TeamSettings({
 													className="h-7 px-2.5 text-xs"
 													onClick={handleStartEdit}
 												>
-													{m["team.settings.button.edit"]()}
+													{m.team_settings_button_edit()}
 												</Button>
 											)}
 										</div>
@@ -278,7 +278,7 @@ export function TeamSettings({
 										</div>
 										<div>
 											<p className="text-[10px] text-muted-foreground uppercase tracking-[0.12em]">
-												{m["team.settings.metadata.created"]()}
+												{m.team_settings_metadata_created()}
 											</p>
 											<p className="font-medium text-sm">
 												{formatDate(createdAt, {
@@ -295,7 +295,7 @@ export function TeamSettings({
 										</div>
 										<div>
 											<p className="text-[10px] text-muted-foreground uppercase tracking-[0.12em]">
-												{m["team.settings.metadata.last_updated"]()}
+												{m.team_settings_metadata_last_updated()}
 											</p>
 											<p className="font-medium text-sm">
 												{formatDate(updatedAt, {
@@ -324,10 +324,10 @@ export function TeamSettings({
 								</div>
 								<div>
 									<h3 className="font-semibold text-destructive text-sm">
-										{m["team.settings.danger.title"]()}
+										{m.team_settings_danger_title()}
 									</h3>
 									<p className="text-muted-foreground text-xs">
-										{m["team.settings.danger.description"]()}
+										{m.team_settings_danger_description()}
 									</p>
 								</div>
 							</div>
@@ -339,10 +339,10 @@ export function TeamSettings({
 								<div className="flex flex-col gap-3 rounded-lg border bg-background/70 p-4 sm:flex-row sm:items-center sm:justify-between">
 									<div className="space-y-0.5">
 										<span className="font-medium text-sm">
-											{m["team.settings.danger.leave.title"]()}
+											{m.team_settings_danger_leave_title()}
 										</span>
 										<p className="text-muted-foreground text-xs">
-											{m["team.settings.danger.leave.description"]()}
+											{m.team_settings_danger_leave_description()}
 										</p>
 									</div>
 									<LeaveTeamDialog teamId={teamId} teamName={teamName} />
@@ -354,10 +354,10 @@ export function TeamSettings({
 								<div className="flex flex-col gap-3 rounded-lg border bg-background/70 p-4 sm:flex-row sm:items-center sm:justify-between">
 									<div className="space-y-0.5">
 										<span className="font-medium text-sm">
-											{m["team.settings.danger.delete.title"]()}
+											{m.team_settings_danger_delete_title()}
 										</span>
 										<p className="text-muted-foreground text-xs">
-											{m["team.settings.danger.delete.description"]()}
+											{m.team_settings_danger_delete_description()}
 										</p>
 									</div>
 									<DeleteTeamDialog teamId={teamId} teamName={teamName} />

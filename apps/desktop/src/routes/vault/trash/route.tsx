@@ -14,6 +14,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 	toast,
+	VaultAvatar,
 } from "@bittery/ui";
 import {
 	IconBoxArchive3OutlineDuo18,
@@ -24,7 +25,6 @@ import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { useState } from "react";
 import { useI18n } from "@/providers/i18n-provider";
 import { Favicon } from "../../../components/vault/favicon";
-import { VaultAvatar } from "../../../components/vault/vault-avatar";
 
 export const Route = createFileRoute("/vault/trash")({
 	component: TrashComponent,
@@ -59,10 +59,10 @@ function TrashComponent() {
 		e.stopPropagation();
 		try {
 			await restoreItem.mutateAsync({ itemId, vaultId });
-			toast.success(m["vaults.trash.toast.restore_success"]());
+			toast.success(m.vaults_trash_toast_restore_success());
 		} catch (error) {
 			console.error("Failed to restore item:", error);
-			toast.error(m["vaults.trash.toast.restore_error"]());
+			toast.error(m.vaults_trash_toast_restore_error());
 		}
 	};
 
@@ -84,10 +84,10 @@ function TrashComponent() {
 					vaultId: itemToDelete.vaultId,
 				});
 				setItemToDelete(null);
-				toast.success(m["vaults.trash.toast.permanent_delete_success"]());
+				toast.success(m.vaults_trash_toast_permanent_delete_success());
 			} catch (error) {
 				console.error("Failed to delete item permanently:", error);
-				toast.error(m["vaults.trash.toast.permanent_delete_error"]());
+				toast.error(m.vaults_trash_toast_permanent_delete_error());
 				setItemToDelete(null);
 			}
 		}
@@ -98,7 +98,7 @@ function TrashComponent() {
 			<div className="flex w-78 flex-col border-r bg-background">
 				<div className="flex flex-1 items-center justify-center">
 					<div className="text-muted-foreground text-sm">
-						{m["vaults.trash.loading"]()}
+						{m.vaults_trash_loading()}
 					</div>
 				</div>
 			</div>
@@ -111,7 +111,7 @@ function TrashComponent() {
 				{/* Header */}
 				<div className="flex items-center gap-2 border-b px-4 py-3">
 					<IconBoxArchive3OutlineDuo18 className="size-4 text-muted-foreground" />
-					<span className="font-medium">{m["vaults.trash.hero.badge"]()}</span>
+					<span className="font-medium">{m.vaults_trash_hero_badge()}</span>
 					<Badge variant="secondary" className="ml-auto">
 						{deletedItems.length}
 					</Badge>
@@ -121,10 +121,10 @@ function TrashComponent() {
 					{deletedItems.length === 0 ? (
 						<div className="flex h-full flex-col items-center justify-center p-8 text-center">
 							<h3 className="mb-2 font-semibold">
-								{m["vaults.trash.empty.title"]()}
+								{m.vaults_trash_empty_title()}
 							</h3>
 							<p className="text-muted-foreground text-sm">
-								{m["vaults.trash.empty.description"]()}
+								{m.vaults_trash_empty_description()}
 							</p>
 						</div>
 					) : (
@@ -133,7 +133,7 @@ function TrashComponent() {
 								const maskedCardNumber = item.cardNumber
 									? maskCardNumber(item.cardNumber)
 									: undefined;
-								const title = item.title || m["vaults.trash.item.untitled"]();
+								const title = item.title || m.vaults_trash_item_untitled();
 
 								return (
 									<div
@@ -177,7 +177,7 @@ function TrashComponent() {
 														handleRestore(e, item.id, item.vaultId)
 													}
 													disabled={restoreItem.isPending}
-													title={m["vaults.trash.item.action.restore"]()}
+													title={m.vaults_trash_item_action_restore()}
 												>
 													<IconShareLeft2OutlineDuo18 className="size-4 text-muted-foreground hover:text-foreground" />
 												</Button>
@@ -189,7 +189,7 @@ function TrashComponent() {
 														handlePermanentDelete(e, item.id, item.vaultId)
 													}
 													disabled={permanentDeleteItem.isPending}
-													title={m["vaults.trash.item.action.delete_forever"]()}
+													title={m.vaults_trash_item_action_delete_forever()}
 												>
 													<IconTrash2OutlineDuo18 className="size-4 text-muted-foreground hover:text-destructive" />
 												</Button>
@@ -216,17 +216,17 @@ function TrashComponent() {
 			>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>{m["vaults.trash.delete_dialog.title"]()}</DialogTitle>
+						<DialogTitle>{m.vaults_trash_delete_dialog_title()}</DialogTitle>
 						<DialogDescription>
-							{m["vaults.trash.delete_dialog.description.unnamed"]()}
+							{m.vaults_trash_delete_dialog_description_unnamed()}
 						</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>
 						<Button variant="outline" onClick={() => setItemToDelete(null)}>
-							{m["vaults.trash.delete_dialog.action.cancel"]()}
+							{m.vaults_trash_delete_dialog_action_cancel()}
 						</Button>
 						<Button variant="destructive" onClick={confirmPermanentDelete}>
-							{m["vaults.trash.delete_dialog.action.confirm"]()}
+							{m.vaults_trash_delete_dialog_action_confirm()}
 						</Button>
 					</DialogFooter>
 				</DialogContent>

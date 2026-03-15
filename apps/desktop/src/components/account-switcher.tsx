@@ -111,14 +111,14 @@ export function AccountSwitcher() {
 			}
 		} catch (error) {
 			console.error("Failed to switch account:", error);
-			toast.error(m["toast.account_switcher.switch_account_failed"]());
+			toast.error(m.toast_account_switcher_switch_account_failed());
 		}
 	};
 
 	const handleAllAccountsSelect = async () => {
 		// Check if we have any unlocked accounts
 		if (unlockedEmailsList.length === 0) {
-			toast.error(m["toast.account_switcher.no_unlocked_accounts"]());
+			toast.error(m.toast_account_switcher_no_unlocked_accounts());
 			return;
 		}
 
@@ -129,7 +129,7 @@ export function AccountSwitcher() {
 			navigate({ to: "/vault" });
 		} catch (error) {
 			console.error("Failed to switch to All Accounts mode:", error);
-			toast.error(m["toast.account_switcher.switch_all_accounts_failed"]());
+			toast.error(m.toast_account_switcher_switch_all_accounts_failed());
 		}
 	};
 
@@ -146,10 +146,10 @@ export function AccountSwitcher() {
 			// Use AccountContext's version which broadcasts to extension
 			await lockAllAccountsWithBroadcast();
 			navigate({ to: "/unlock" });
-			toast.success(m["toast.account_switcher.lock_all_success"]());
+			toast.success(m.toast_account_switcher_lock_all_success());
 		} catch (error) {
 			console.error("Failed to lock all accounts:", error);
-			toast.error(m["toast.account_switcher.lock_all_failed"]());
+			toast.error(m.toast_account_switcher_lock_all_failed());
 		}
 	};
 
@@ -198,10 +198,10 @@ export function AccountSwitcher() {
 				}
 			}
 
-			toast.success(m["toast.account_switcher.remove_account_success"]());
+			toast.success(m.toast_account_switcher_remove_account_success());
 		} catch (error) {
 			console.error("Failed to remove account:", error);
-			toast.error(m["toast.account_switcher.remove_account_failed"]());
+			toast.error(m.toast_account_switcher_remove_account_failed());
 		} finally {
 			setAccountToRemove(null);
 		}
@@ -231,7 +231,7 @@ export function AccountSwitcher() {
 					/>
 					<div className="flex flex-col items-start overflow-hidden">
 						<span className="max-w-24 truncate font-medium text-sm">
-							{m["vaults.sidebar.account_switcher.menu.all_accounts"]()}
+							{m.vaults_sidebar_account_switcher_menu_all_accounts()}
 						</span>
 					</div>
 				</>
@@ -259,28 +259,24 @@ export function AccountSwitcher() {
 				unlockedEmails={unlockedEmailsList}
 				isLoading={switchAccount.isPending}
 				labels={{
-					accountsLabel: m["vaults.sidebar.account_switcher.menu.accounts"](),
+					accountsLabel: m.vaults_sidebar_account_switcher_menu_accounts(),
 					noAccountsAdded:
-						m["vaults.sidebar.account_switcher.menu.no_accounts_added"](),
+						m.vaults_sidebar_account_switcher_menu_no_accounts_added(),
 					allAccountsLabel:
-						m["vaults.sidebar.account_switcher.menu.all_accounts"](),
+						m.vaults_sidebar_account_switcher_menu_all_accounts(),
 					viewItemsFromAccounts: ({ count }) =>
 						count === 1
-							? m[
-									"vaults.sidebar.account_switcher.menu.view_items_from_accounts.single"
-								]({ count })
-							: m[
-									"vaults.sidebar.account_switcher.menu.view_items_from_accounts.plural"
-								]({ count }),
+							? m.vaults_sidebar_account_switcher_menu_view_items_from_accounts_single({ count })
+							: m.vaults_sidebar_account_switcher_menu_view_items_from_accounts_plural({ count }),
 					addAccountLabel:
-						m["vaults.sidebar.account_switcher.menu.add_account"](),
+						m.vaults_sidebar_account_switcher_menu_add_account(),
 					setupAnotherDeviceLabel:
-						m["vaults.sidebar.account_switcher.menu.setup_another_device"](),
-					settingsLabel: m["nav.menu.settings"](),
+						m.vaults_sidebar_account_switcher_menu_setup_another_device(),
+					settingsLabel: m.nav_menu_settings(),
 					lockAllAccountsLabel:
-						m["vaults.sidebar.account_switcher.menu.lock_all_accounts"](),
+						m.vaults_sidebar_account_switcher_menu_lock_all_accounts(),
 					removeAccountLabel:
-						m["vaults.sidebar.account_switcher.menu.remove_account"](),
+						m.vaults_sidebar_account_switcher_menu_remove_account(),
 					manageAccountsLabel: manageAccountsLabel,
 				}}
 				onAccountSelect={handleAccountSelect}
@@ -312,7 +308,7 @@ export function AccountSwitcher() {
 								</DialogDescription>
 							</div>
 							<Button size="sm" onClick={handleAddAccountFromManageDialog}>
-								{m["vaults.sidebar.account_switcher.menu.add_account"]()}
+								{m.vaults_sidebar_account_switcher_menu_add_account()}
 							</Button>
 						</div>
 					</DialogHeader>

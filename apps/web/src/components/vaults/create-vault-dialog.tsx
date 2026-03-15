@@ -108,9 +108,9 @@ function CreateVaultDialogForm({
 				});
 				resetForm();
 				onOpenChange(false);
-				toast.success(m["vaults.create_dialog.toast.created"]());
+				toast.success(m.vaults_create_dialog_toast_created());
 			} catch {
-				toast.error(m["vaults.create_dialog.toast.create_failed"]());
+				toast.error(m.vaults_create_dialog_toast_create_failed());
 			}
 		},
 	});
@@ -132,12 +132,12 @@ function CreateVaultDialogForm({
 			}
 
 			if (!file.type.startsWith("image/")) {
-				toast.error(m["vaults.create_dialog.toast.invalid_image_file"]());
+				toast.error(m.vaults_create_dialog_toast_invalid_image_file());
 				return false;
 			}
 
 			if (file.size > 2 * 1024 * 1024) {
-				toast.error(m["vaults.create_dialog.toast.image_too_large"]());
+				toast.error(m.vaults_create_dialog_toast_image_too_large());
 				return false;
 			}
 
@@ -146,8 +146,8 @@ function CreateVaultDialogForm({
 			return true;
 		},
 		[
-			m["vaults.create_dialog.toast.image_too_large"],
-			m["vaults.create_dialog.toast.invalid_image_file"],
+			m.vaults_create_dialog_toast_image_too_large,
+			m.vaults_create_dialog_toast_invalid_image_file,
 			updateImagePreview,
 		],
 	);
@@ -182,7 +182,7 @@ function CreateVaultDialogForm({
 	return (
 		<DialogContent className="sm:max-w-105" data-testid="create-vault-dialog">
 			<DialogHeader>
-				<DialogTitle>{m["vaults.create_dialog.title"]()}</DialogTitle>
+				<DialogTitle>{m.vaults_create_dialog_title()}</DialogTitle>
 			</DialogHeader>
 
 			<form
@@ -215,7 +215,7 @@ function CreateVaultDialogForm({
 								onClick={() => fileInputRef.current?.click()}
 							>
 								<VaultAvatar
-									name={name || m["vaults.create_dialog.avatar_fallback"]()}
+									name={name || m.vaults_create_dialog_avatar_fallback()}
 									icon={icon}
 									imageUrl={imagePreview}
 									size="xl"
@@ -247,11 +247,11 @@ function CreateVaultDialogForm({
 							className="h-7 gap-1.5 text-muted-foreground text-xs"
 						>
 							<IconXmarkOutlineDuo18 className="size-3" />
-							{m["vaults.create_dialog.image.action.remove"]()}
+							{m.vaults_create_dialog_image_action_remove()}
 						</Button>
 					) : (
 						<p className="text-muted-foreground text-xs">
-							{m["vaults.create_dialog.image.help"]()}
+							{m.vaults_create_dialog_image_help()}
 						</p>
 					)}
 				</div>
@@ -259,7 +259,7 @@ function CreateVaultDialogForm({
 				{/* Icon Picker */}
 				<div className="space-y-2">
 					<Label className="text-muted-foreground text-xs">
-						{m["vaults.create_dialog.field.icon"]()}
+						{m.vaults_create_dialog_field_icon()}
 					</Label>
 					<div className="flex flex-wrap justify-center gap-1.5">
 						{vaultIconOptions.map((option) => (
@@ -291,7 +291,7 @@ function CreateVaultDialogForm({
 				{accounts && accounts.length > 0 && (
 					<div className="space-y-2">
 						<Label htmlFor="account" className="text-muted-foreground text-xs">
-							{m["vaults.create_dialog.field.account"]()}
+							{m.vaults_create_dialog_field_account()}
 						</Label>
 						<Select
 							value={selectedAccountEmail}
@@ -300,7 +300,7 @@ function CreateVaultDialogForm({
 						>
 							<SelectTrigger id="account" className="h-10">
 								<SelectValue
-									placeholder={m["vaults.create_dialog.placeholder.account"]()}
+									placeholder={m.vaults_create_dialog_placeholder_account()}
 								/>
 							</SelectTrigger>
 							<SelectContent>
@@ -329,12 +329,12 @@ function CreateVaultDialogForm({
 								htmlFor={field.name}
 								className="text-muted-foreground text-xs"
 							>
-								{m["vaults.create_dialog.field.name"]()}
+								{m.vaults_create_dialog_field_name()}
 							</Label>
 							<Input
 								id={field.name}
 								name={field.name}
-								placeholder={m["vaults.create_dialog.placeholder.name"]()}
+								placeholder={m.vaults_create_dialog_placeholder_name()}
 								value={field.state.value}
 								onBlur={field.handleBlur}
 								onChange={(e) => field.handleChange(e.target.value)}
@@ -351,7 +351,7 @@ function CreateVaultDialogForm({
 					{(field) => (
 						<div className="space-y-2">
 							<Label className="text-muted-foreground text-xs">
-								{m["vaults.create_dialog.field.type"]()}
+								{m.vaults_create_dialog_field_type()}
 							</Label>
 							<div className="grid grid-cols-2 gap-2">
 								<button
@@ -376,7 +376,7 @@ function CreateVaultDialogForm({
 									)}
 								>
 									<IconUserOutlineDuo18 className="size-4" />
-									{m["vaults.create_dialog.type.personal"]()}
+									{m.vaults_create_dialog_type_personal()}
 								</button>
 								<button
 									type="button"
@@ -400,7 +400,7 @@ function CreateVaultDialogForm({
 									)}
 								>
 									<IconUsers6OutlineDuo18 className="size-4" />
-									{m["vaults.create_dialog.type.team"]()}
+									{m.vaults_create_dialog_type_team()}
 								</button>
 							</div>
 						</div>
@@ -420,7 +420,7 @@ function CreateVaultDialogForm({
 						className="flex-1"
 						data-testid="create-vault-cancel-button"
 					>
-						{m["vaults.create_dialog.action.cancel"]()}
+						{m.vaults_create_dialog_action_cancel()}
 					</Button>
 					<Button
 						type="submit"
@@ -429,8 +429,8 @@ function CreateVaultDialogForm({
 						data-testid="create-vault-submit-button"
 					>
 						{form.state.isSubmitting
-							? m["vaults.create_dialog.action.creating"]()
-							: m["vaults.create_dialog.action.submit"]()}
+							? m.vaults_create_dialog_action_creating()
+							: m.vaults_create_dialog_action_submit()}
 					</Button>
 				</div>
 			</form>

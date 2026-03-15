@@ -60,12 +60,12 @@ export function RegenerateRecoveryKeyDialog({
 		}) => trpcClient.auth.storeRecoveryKey.mutate(input),
 		onSuccess: async () => {
 			await queryClient.invalidateQueries();
-			toast.success(m["settings.recovery_key.regenerate.toast.regenerated"]());
+			toast.success(m.settings_recovery_key_regenerate_toast_regenerated());
 			handleOpenChange(false);
 		},
 		onError: () => {
 			toast.error(
-				m["settings.recovery_key.regenerate.toast.regenerate_failed"](),
+				m.settings_recovery_key_regenerate_toast_regenerate_failed(),
 			);
 			setIsProcessing(false);
 		},
@@ -76,20 +76,20 @@ export function RegenerateRecoveryKeyDialog({
 
 		if (!currentPassword.trim()) {
 			toast.error(
-				m["settings.recovery_key.common.toast.current_password_required"](),
+				m.settings_recovery_key_common_toast_current_password_required(),
 			);
 			return;
 		}
 
 		const secretKey = await storage.getStoredSecretKey();
 		if (!secretKey) {
-			toast.error(m["settings.common.toast.secret_key_not_found_sign_out"]());
+			toast.error(m.settings_common_toast_secret_key_not_found_sign_out());
 			return;
 		}
 
 		if (!userQuery.data?.encryptedPrivateKey) {
 			toast.error(
-				m["settings.recovery_key.common.toast.account_metadata_failed"](),
+				m.settings_recovery_key_common_toast_account_metadata_failed(),
 			);
 			return;
 		}
@@ -125,7 +125,7 @@ export function RegenerateRecoveryKeyDialog({
 		} catch (error) {
 			console.error("Recovery key regeneration failed:", error);
 			toast.error(
-				m["settings.recovery_key.common.toast.verify_password_failed"](),
+				m.settings_recovery_key_common_toast_verify_password_failed(),
 			);
 		} finally {
 			setIsProcessing(false);
@@ -135,13 +135,13 @@ export function RegenerateRecoveryKeyDialog({
 	const handleConfirmRegeneration = async () => {
 		if (!hasAcknowledged) {
 			toast.error(
-				m["settings.recovery_key.regenerate.toast.acknowledgement_required"](),
+				m.settings_recovery_key_regenerate_toast_acknowledgement_required(),
 			);
 			return;
 		}
 
 		if (!recoveryKey || !encryptedMasterKey) {
-			toast.error(m["settings.recovery_key.common.toast.data_missing"]());
+			toast.error(m.settings_recovery_key_common_toast_data_missing());
 			return;
 		}
 
@@ -169,7 +169,7 @@ export function RegenerateRecoveryKeyDialog({
 	};
 
 	const copyRecoveryKey = () => {
-		copyWithToast(recoveryKey, m["settings.recovery_key.common.copy_label"](), {
+		copyWithToast(recoveryKey, m.settings_recovery_key_common_copy_label(), {
 			showAutoClearMessage: false,
 		});
 	};
@@ -177,40 +177,40 @@ export function RegenerateRecoveryKeyDialog({
 	const downloadEmergencyKit = async () => {
 		const result = await downloadRecoveryKit({
 			fileName: "bittery-recovery-kit-regenerated",
-			title: m["settings.recovery_key.regenerate.kit.title"](),
-			subtitle: m["settings.recovery_key.regenerate.kit.subtitle"](),
+			title: m.settings_recovery_key_regenerate_kit_title(),
+			subtitle: m.settings_recovery_key_regenerate_kit_subtitle(),
 			entries: [
 				{
-					label: m["settings.recovery_key.regenerate.kit.entry.label"](),
+					label: m.settings_recovery_key_regenerate_kit_entry_label(),
 					value: recoveryKey,
 					description:
-						m["settings.recovery_key.regenerate.kit.entry.description"](),
+						m.settings_recovery_key_regenerate_kit_entry_description(),
 				},
 			],
 			cautions: [
-				m["settings.recovery_key.regenerate.kit.caution.destroy_old"](),
-				m["settings.recovery_key.regenerate.kit.caution.store_offline"](),
-				m["settings.recovery_key.regenerate.kit.caution.separate_backups"](),
+				m.settings_recovery_key_regenerate_kit_caution_destroy_old(),
+				m.settings_recovery_key_regenerate_kit_caution_store_offline(),
+				m.settings_recovery_key_regenerate_kit_caution_separate_backups(),
 			],
-			footerNote: m["settings.recovery_key.common.kit.footer_note"](),
+			footerNote: m.settings_recovery_key_common_kit_footer_note(),
 			labels: {
-				documentTitle: m["settings.recovery_key.common.kit.document_title"](),
-				generatedLabel: m["settings.recovery_key.common.kit.generated_label"](),
+				documentTitle: m.settings_recovery_key_common_kit_document_title(),
+				generatedLabel: m.settings_recovery_key_common_kit_generated_label(),
 				storeOfflineHeading:
-					m["settings.recovery_key.common.kit.store_offline_heading"](),
-				badgeText: m["settings.recovery_key.common.kit.badge_text"](),
+					m.settings_recovery_key_common_kit_store_offline_heading(),
+				badgeText: m.settings_recovery_key_common_kit_badge_text(),
 			},
 		});
 
 		if (result === "pdf-downloaded") {
 			toast.success(
-				m["settings.recovery_key.common.toast.kit_pdf_downloaded"](),
+				m.settings_recovery_key_common_toast_kit_pdf_downloaded(),
 			);
 			return;
 		}
 
 		toast.success(
-			m["settings.recovery_key.common.toast.kit_text_downloaded"](),
+			m.settings_recovery_key_common_toast_kit_text_downloaded(),
 		);
 	};
 
@@ -219,7 +219,7 @@ export function RegenerateRecoveryKeyDialog({
 			<DialogTrigger asChild>
 				<Button variant="outline">
 					<RefreshCw className="mr-2 h-4 w-4" />
-					{m["settings.recovery_key.regenerate.trigger"]()}
+					{m.settings_recovery_key_regenerate_trigger()}
 				</Button>
 			</DialogTrigger>
 			<DialogContent className="sm:max-w-md">
@@ -227,23 +227,23 @@ export function RegenerateRecoveryKeyDialog({
 					<form onSubmit={handleGenerateRecoveryKey}>
 						<DialogHeader>
 							<DialogTitle>
-								{m["settings.recovery_key.regenerate.title"]()}
+								{m.settings_recovery_key_regenerate_title()}
 							</DialogTitle>
 							<DialogDescription>
-								{m["settings.recovery_key.regenerate.description"]()}
+								{m.settings_recovery_key_regenerate_description()}
 							</DialogDescription>
 						</DialogHeader>
 						<div className="grid gap-4 py-4">
 							<div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3">
 								<p className="text-destructive text-xs">
-									<strong>{m["settings.common.warning"]()}</strong>{" "}
-									{m["settings.recovery_key.regenerate.warning"]()}
+									<strong>{m.settings_common_warning()}</strong>{" "}
+									{m.settings_recovery_key_regenerate_warning()}
 								</p>
 							</div>
 
 							<div className="grid gap-2">
 								<Label htmlFor="regenRecoveryPassword">
-									{m["settings.recovery_key.common.field.current_password"]()}
+									{m.settings_recovery_key_common_field_current_password()}
 								</Label>
 								<div className="relative">
 									<Input
@@ -251,9 +251,7 @@ export function RegenerateRecoveryKeyDialog({
 										type={showPassword ? "text" : "password"}
 										value={currentPassword}
 										onChange={(e) => setCurrentPassword(e.target.value)}
-										placeholder={m[
-											"settings.recovery_key.common.placeholder.password"
-										]()}
+										placeholder={m.settings_recovery_key_common_placeholder_password()}
 										autoFocus
 										className="pr-10"
 									/>
@@ -275,12 +273,12 @@ export function RegenerateRecoveryKeyDialog({
 								variant="outline"
 								onClick={() => setOpen(false)}
 							>
-								{m["settings.common.action.cancel"]()}
+								{m.settings_common_action_cancel()}
 							</Button>
 							<Button type="submit" disabled={isProcessing}>
 								{isProcessing
-									? m["settings.recovery_key.common.action.verifying"]()
-									: m["settings.recovery_key.regenerate.action.generate"]()}
+									? m.settings_recovery_key_common_action_verifying()
+									: m.settings_recovery_key_regenerate_action_generate()}
 							</Button>
 						</DialogFooter>
 					</form>
@@ -288,16 +286,16 @@ export function RegenerateRecoveryKeyDialog({
 					<>
 						<DialogHeader>
 							<DialogTitle>
-								{m["settings.recovery_key.regenerate.display.title"]()}
+								{m.settings_recovery_key_regenerate_display_title()}
 							</DialogTitle>
 							<DialogDescription>
-								{m["settings.recovery_key.common.display.description"]()}
+								{m.settings_recovery_key_common_display_description()}
 							</DialogDescription>
 						</DialogHeader>
 						<div className="grid gap-4 py-4">
 							<div className="relative rounded-xl border bg-muted/30 p-4">
 								<div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-									{m["settings.recovery_key.regenerate.display.key_label"]()}
+									{m.settings_recovery_key_regenerate_display_key_label()}
 								</div>
 								<div className="break-all font-mono text-sm tracking-wide">
 									{recoveryKey}
@@ -311,7 +309,7 @@ export function RegenerateRecoveryKeyDialog({
 									onClick={copyRecoveryKey}
 								>
 									<Copy size={16} className="mr-2" />
-									{m["settings.common.action.copy"]()}
+									{m.settings_common_action_copy()}
 								</Button>
 								<Button
 									type="button"
@@ -319,7 +317,7 @@ export function RegenerateRecoveryKeyDialog({
 									onClick={downloadEmergencyKit}
 								>
 									<Download size={16} className="mr-2" />
-									{m["settings.common.action.download_kit"]()}
+									{m.settings_common_action_download_kit()}
 								</Button>
 							</div>
 
@@ -331,9 +329,7 @@ export function RegenerateRecoveryKeyDialog({
 									className="mt-1"
 								/>
 								<span className="text-sm">
-									{m[
-										"settings.recovery_key.regenerate.display.acknowledgement"
-									]()}
+									{m.settings_recovery_key_regenerate_display_acknowledgement()}
 								</span>
 							</label>
 						</div>
@@ -343,7 +339,7 @@ export function RegenerateRecoveryKeyDialog({
 								variant="outline"
 								onClick={() => setOpen(false)}
 							>
-								{m["settings.common.action.cancel"]()}
+								{m.settings_common_action_cancel()}
 							</Button>
 							<Button
 								type="button"
@@ -355,8 +351,8 @@ export function RegenerateRecoveryKeyDialog({
 								}
 							>
 								{isProcessing || storeRecoveryKeyMutation.isPending
-									? m["settings.common.action.saving"]()
-									: m["settings.recovery_key.regenerate.action.confirm"]()}
+									? m.settings_common_action_saving()
+									: m.settings_recovery_key_regenerate_action_confirm()}
 							</Button>
 						</DialogFooter>
 					</>

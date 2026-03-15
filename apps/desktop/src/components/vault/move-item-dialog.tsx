@@ -12,6 +12,7 @@ import {
 	DialogTitle,
 	Input,
 	toast,
+	VaultAvatar,
 } from "@bittery/ui";
 import {
 	IconCheckOutlineDuo18,
@@ -22,7 +23,6 @@ import { cn } from "@bittery/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useI18n } from "../../providers/i18n-provider";
-import { VaultAvatar } from "./vault-avatar";
 
 function getInitials(name: string): string {
 	if (!name) return "??";
@@ -101,7 +101,7 @@ export function MoveItemDialog({
 
 	const handleMove = async () => {
 		if (!selectedVaultId) {
-			toast.error(m["vaults.detail.items.move_dialog.toast.select_vault"]());
+			toast.error(m.vaults_detail_items_move_dialog_toast_select_vault());
 			return;
 		}
 
@@ -128,10 +128,10 @@ export function MoveItemDialog({
 
 			if (result.crossAccount) {
 				toast.success(
-					m["vaults.detail.items.move_dialog.toast.cross_account_success"](),
+					m.vaults_detail_items_move_dialog_toast_cross_account_success(),
 				);
 			} else {
-				toast.success(m["vaults.detail.items.move_dialog.toast.success"]());
+				toast.success(m.vaults_detail_items_move_dialog_toast_success());
 			}
 
 			onOpenChange(false);
@@ -147,7 +147,7 @@ export function MoveItemDialog({
 			const errorMessage =
 				error instanceof Error
 					? error.message
-					: m["vaults.detail.items.move_dialog.toast.error"]();
+					: m.vaults_detail_items_move_dialog_toast_error();
 			toast.error(errorMessage);
 		}
 	};
@@ -165,7 +165,7 @@ export function MoveItemDialog({
 			<DialogContent className="max-w-md gap-0 p-0">
 				<DialogHeader className="p-6 pb-4">
 					<DialogTitle className="font-medium text-base">
-						{m["vaults.detail.items.move_dialog.title"]({ title: item.title })}
+						{m.vaults_detail_items_move_dialog_title({ title: item.title })}
 					</DialogTitle>
 				</DialogHeader>
 
@@ -174,9 +174,7 @@ export function MoveItemDialog({
 					<div className="relative">
 						<IconMagnifier3OutlineDuo18 className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
 						<Input
-							placeholder={m[
-								"vaults.detail.items.move_dialog.search.placeholder"
-							]()}
+							placeholder={m.vaults_detail_items_move_dialog_search_placeholder()}
 							value={searchQuery}
 							onChange={(e) => setSearchQuery(e.target.value)}
 							className="pl-9"
@@ -192,11 +190,11 @@ export function MoveItemDialog({
 						</div>
 					) : vaultKeys.length <= 1 ? (
 						<div className="py-8 text-center text-muted-foreground text-sm">
-							{m["vaults.detail.items.move_dialog.empty.no_other_vaults"]()}
+							{m.vaults_detail_items_move_dialog_empty_no_other_vaults()}
 						</div>
 					) : filteredVaultKeys.length === 0 ? (
 						<div className="py-8 text-center text-muted-foreground text-sm">
-							{m["vaults.detail.items.move_dialog.empty.no_matches"]()}
+							{m.vaults_detail_items_move_dialog_empty_no_matches()}
 						</div>
 					) : (
 						<div className="max-h-80 space-y-1 overflow-y-auto">
@@ -210,9 +208,7 @@ export function MoveItemDialog({
 												vaults[0].accountTeamName ||
 												vaults[0].accountName ||
 												(accountEmail === "__unknown__"
-													? m[
-															"vaults.detail.items.move_dialog.account.unknown"
-														]()
+													? m.vaults_detail_items_move_dialog_account_unknown()
 													: accountEmail);
 											const accountTeamAvatarUrl =
 												vaults[0].accountTeamAvatarUrl;
@@ -272,9 +268,7 @@ export function MoveItemDialog({
 																	</span>
 																	{isCurrentVault && (
 																		<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
-																			{m[
-																				"vaults.detail.items.move_dialog.badge.current"
-																			]()}
+																			{m.vaults_detail_items_move_dialog_badge_current()}
 																		</span>
 																	)}
 																	{isSelected && !isDisabled && (
@@ -325,9 +319,7 @@ export function MoveItemDialog({
 												</span>
 												{isCurrentVault && (
 													<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
-														{m[
-															"vaults.detail.items.move_dialog.badge.current"
-														]()}
+														{m.vaults_detail_items_move_dialog_badge_current()}
 													</span>
 												)}
 												{isSelected && !isDisabled && (
@@ -345,7 +337,7 @@ export function MoveItemDialog({
 				{/* Cross-account warning */}
 				{isCrossAccount && selectedVault && (
 					<div className="mx-6 mb-3 rounded-lg bg-amber-500/10 px-3 py-2.5 text-amber-600 text-sm dark:text-amber-500">
-						{m["vaults.detail.items.move_dialog.warning.cross_account"]()}
+						{m.vaults_detail_items_move_dialog_warning_cross_account()}
 					</div>
 				)}
 
@@ -355,7 +347,7 @@ export function MoveItemDialog({
 						onClick={() => handleOpenChange(false)}
 						disabled={moveItem.isPending}
 					>
-						{m["vaults.detail.items.detail.action.cancel"]()}
+						{m.vaults_detail_items_detail_action_cancel()}
 					</Button>
 					<Button
 						onClick={handleMove}
@@ -365,13 +357,13 @@ export function MoveItemDialog({
 							<>
 								<IconLoader2OutlineDuo18 className="size-4 animate-spin" />
 								{isCrossAccount
-									? m["vaults.detail.items.move_dialog.action.transferring"]()
-									: m["vaults.detail.items.move_dialog.action.moving"]()}
+									? m.vaults_detail_items_move_dialog_action_transferring()
+									: m.vaults_detail_items_move_dialog_action_moving()}
 							</>
 						) : isCrossAccount ? (
-							m["vaults.detail.items.move_dialog.action.transfer"]()
+							m.vaults_detail_items_move_dialog_action_transfer()
 						) : (
-							m["vaults.detail.items.move_dialog.action.move"]()
+							m.vaults_detail_items_move_dialog_action_move()
 						)}
 					</Button>
 				</DialogFooter>

@@ -38,6 +38,8 @@ COPY --from=wasm-builder /build/packages/crypto/wasm packages/crypto/wasm
 # Fail fast if translation keys drift across locales.
 RUN pnpm run i18n:check
 
+RUN pnpm run i18n:generate
+
 # Accept VITE_SERVER_URL from Railway build-time variables
 ARG VITE_SERVER_URL
 ENV VITE_SERVER_URL=$VITE_SERVER_URL

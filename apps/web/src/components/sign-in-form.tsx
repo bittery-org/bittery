@@ -52,11 +52,11 @@ export default function SignInForm({
 			Date.now() >= sessionState.expiresAt,
 	);
 	const signInTitle = isQuickUnlock
-		? m["auth.signin.title.quick_unlock"]()
-		: m["auth.signin.title.default"]();
+		? m.auth_signin_title_quick_unlock()
+		: m.auth_signin_title_default();
 	const signInDescription = isQuickUnlock
-		? m["auth.signin.description.quick_unlock"]()
-		: m["auth.signin.description.default"]();
+		? m.auth_signin_description_quick_unlock()
+		: m.auth_signin_description_default();
 	const initialEmail = isQuickUnlock ? (sessionState?.email ?? "") : "";
 	const initialSecretKey = isQuickUnlock
 		? (storedSecretKeyQuery.data ?? "")
@@ -81,11 +81,11 @@ export default function SignInForm({
 							<div className="min-w-0 flex-1 pt-0.5">
 								<div className="flex flex-wrap items-center gap-2">
 									<span className="inline-flex items-center rounded-full border border-amber-200/80 bg-amber-100/80 px-2.5 py-0.5 font-medium text-[11px] text-amber-800 uppercase tracking-[0.16em]">
-										{m["auth.signin.session_expired.title"]()}
+										{m.auth_signin_session_expired_title()}
 									</span>
 								</div>
 								<p className="mt-2 max-w-prose text-[13px] text-amber-900/90 leading-6 sm:text-sm">
-									{m["auth.signin.session_expired.description"]()}
+									{m.auth_signin_session_expired_description()}
 								</p>
 							</div>
 						</div>
@@ -153,7 +153,7 @@ function SignInFormContent({
 			const daysUntil = Math.floor(
 				DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24),
 			);
-			toast.success(m["toast.auth.signin_success"]({ daysUntil }));
+			toast.success(m.toast_auth_signin_success({ daysUntil }));
 			if (redirectTo) {
 				navigate({ to: redirectTo });
 			} else {
@@ -161,7 +161,7 @@ function SignInFormContent({
 			}
 		},
 		onError: (error: Error) => {
-			toast.error(error.message || m["toast.auth.signin_error"]());
+			toast.error(error.message || m.toast_auth_signin_error());
 		},
 	});
 
@@ -184,28 +184,28 @@ function SignInFormContent({
 
 	const renderCloudSignupPrompt = () => (
 		<>
-			{m["auth.signin.signup.cloud_prefix"]()}{" "}
+			{m.auth_signin_signup_cloud_prefix()}{" "}
 			<button
 				type="button"
 				onClick={onSwitchToSignUp}
 				className="font-medium text-primary underline-offset-4 hover:underline"
 			>
 				{hasInvitationRedirect
-					? m["auth.signin.signup.cloud_create_account"]()
-					: m["auth.signin.signup.cloud_get_started"]()}
+					? m.auth_signin_signup_cloud_create_account()
+					: m.auth_signin_signup_cloud_get_started()}
 			</button>
 		</>
 	);
 
 	const renderSelfHostedSignupPrompt = () => (
 		<>
-			{m["auth.signin.signup.self_hosted_prefix"]()}{" "}
+			{m.auth_signin_signup_self_hosted_prefix()}{" "}
 			<button
 				type="button"
 				onClick={onSwitchToSignUp}
 				className="font-medium text-primary underline-offset-4 hover:underline"
 			>
-				{m["auth.signin.signup.self_hosted_button"]()}
+				{m.auth_signin_signup_self_hosted_button()}
 			</button>
 		</>
 	);
@@ -224,13 +224,13 @@ function SignInFormContent({
 					{(field) => (
 						<div className="space-y-2">
 							<Label htmlFor={field.name}>
-								{m["auth.signin.label.email"]()}
+								{m.auth_signin_label_email()}
 							</Label>
 							<Input
 								id={field.name}
 								name={field.name}
 								type="email"
-								placeholder={m["auth.signin.placeholder.email"]()}
+								placeholder={m.auth_signin_placeholder_email()}
 								value={field.state.value}
 								onBlur={(e) => {
 									field.handleBlur();
@@ -248,7 +248,7 @@ function SignInFormContent({
 
 			{emailCheck?.secretKeyHint && !isQuickUnlock && (
 				<div className="rounded-md bg-muted px-3 py-2 text-muted-foreground text-xs">
-					<span className="font-medium">{m["auth.signin.hint"]()}:</span>{" "}
+					<span className="font-medium">{m.auth_signin_hint()}:</span>{" "}
 					{emailCheck.secretKeyHint}
 				</div>
 			)}
@@ -259,7 +259,7 @@ function SignInFormContent({
 						{(field) => (
 							<div className="space-y-2">
 								<Label htmlFor={field.name}>
-									{m["auth.signin.label.secret_key"]()}
+									{m.auth_signin_label_secret_key()}
 								</Label>
 								<div className="relative">
 									<Input
@@ -269,7 +269,7 @@ function SignInFormContent({
 										value={field.state.value}
 										onBlur={field.handleBlur}
 										onChange={(e) => field.handleChange(e.target.value)}
-										placeholder={m["auth.signin.placeholder.secret_key"]()}
+										placeholder={m.auth_signin_placeholder_secret_key()}
 										required
 										className="h-10 pr-10 font-mono"
 									/>
@@ -295,7 +295,7 @@ function SignInFormContent({
 						<div className="space-y-2">
 							<div className="flex items-center justify-between">
 								<Label htmlFor={field.name}>
-									{m["auth.signin.label.password"]()}
+									{m.auth_signin_label_password()}
 								</Label>
 								{!isQuickUnlock && (
 									<button
@@ -303,7 +303,7 @@ function SignInFormContent({
 										onClick={() => navigate({ to: "/recover" })}
 										className="text-muted-foreground text-xs underline-offset-4 hover:text-foreground hover:underline"
 									>
-										{m["auth.signin.forgot_password"]()}
+										{m.auth_signin_forgot_password()}
 									</button>
 								)}
 							</div>
@@ -341,12 +341,12 @@ function SignInFormContent({
 				{loginMutation.isPending ? (
 					<>
 						<Loader2 size={16} className="mr-2 animate-spin" />
-						{m["auth.signin.button.signing_in"]()}
+						{m.auth_signin_button_signing_in()}
 					</>
 				) : isQuickUnlock ? (
-					m["auth.signin.button.unlock_vault"]()
+					m.auth_signin_button_unlock_vault()
 				) : (
-					m["auth.signin.button.sign_in"]()
+					m.auth_signin_button_sign_in()
 				)}
 			</Button>
 
@@ -361,17 +361,17 @@ function SignInFormContent({
 						}}
 						className="w-full text-muted-foreground"
 					>
-						{m["auth.signin.button.different_account"]()}
+						{m.auth_signin_button_different_account()}
 					</Button>
 					{canShowSignup && (
 						<div className="mt-2 text-center text-muted-foreground text-sm">
-							{m["auth.signin.signup.need_different_account"]()}{" "}
+							{m.auth_signin_signup_need_different_account()}{" "}
 							<button
 								type="button"
 								onClick={onSwitchToSignUp}
 								className="font-medium text-primary underline-offset-4 hover:underline"
 							>
-								{m["auth.signin.signup.create_another_account"]()}
+								{m.auth_signin_signup_create_another_account()}
 							</button>
 						</div>
 					)}
@@ -387,7 +387,7 @@ function SignInFormContent({
 					</div>
 				) : (
 					<div className="mt-4 text-center text-muted-foreground text-sm">
-						{m["auth.signin.signup.disabled"]()}
+						{m.auth_signin_signup_disabled()}
 					</div>
 				))}
 		</form>

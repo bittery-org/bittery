@@ -16,13 +16,13 @@ function AllItemsIndexComponent() {
 					<IconGrid2OutlineDuo18 className="size-12 text-muted-foreground" />
 				</div>
 				<h3 className="mb-2 font-semibold text-lg">
-					{m["vaults.sidebar.link.all_objects"]()}
+					{m.vaults_sidebar_link_all_objects()}
 				</h3>
 				<p className="text-muted-foreground text-sm">
-					{m["vaults.shared.empty.no_item_selected"]()}
+					{m.vaults_shared_empty_no_item_selected()}
 				</p>
 				<p className="text-muted-foreground text-sm">
-					{m["vaults.shared.empty.select_item_to_view_details"]()}
+					{m.vaults_shared_empty_select_item_to_view_details()}
 				</p>
 			</div>
 		</div>

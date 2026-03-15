@@ -1,5 +1,5 @@
 import { useItems } from "@bittery/core/hooks";
-import { Badge, Button } from "@bittery/ui";
+import { Badge, Button, getTagColorFromName } from "@bittery/ui";
 import {
 	IconArrowLeftOutlineDuo18,
 	IconTagOutlineDuo18,
@@ -12,7 +12,6 @@ import {
 } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";
 import { ItemListRow } from "../../../../components/vault/item-list-row";
-import { getTagColorFromName } from "../../../../components/vault/tag-badge";
 
 export const Route = createFileRoute("/vault/tag/$tagName")({
 	component: CrossVaultTagRouteComponent,
@@ -48,7 +47,7 @@ function CrossVaultTagRouteComponent() {
 			<div className="flex w-78 flex-col border-r bg-background">
 				<div className="flex flex-1 items-center justify-center">
 					<div className="text-muted-foreground text-sm">
-						{m["vaults.tag.loading"]()}
+						{m.vaults_tag_loading()}
 					</div>
 				</div>
 			</div>
@@ -88,10 +87,10 @@ function CrossVaultTagRouteComponent() {
 								/>
 							</div>
 							<h3 className="mb-2 font-semibold">
-								{m["vaults.tag.empty.title"]()}
+								{m.vaults_tag_empty_title()}
 							</h3>
 							<p className="text-muted-foreground text-sm">
-								{m["vaults.tag.empty.description"]({
+								{m.vaults_tag_empty_description({
 									tagName: decodedTagName,
 								})}
 							</p>

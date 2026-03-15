@@ -87,13 +87,13 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 		onSuccess: async (_data, variables) => {
 			setAddedUserIds((prev) => new Set([...prev, variables.userId]));
 			setAddingUserId(null);
-			toast.success(m["vaults.add_member_dialog.toast.member_added"]());
+			toast.success(m.vaults_add_member_dialog_toast_member_added());
 			await invalidator.invalidateVaultMembers(vaultId);
 			availableQuery.refetch();
 		},
 		onError: () => {
 			setAddingUserId(null);
-			toast.error(m["vaults.add_member_dialog.toast.add_failed"]());
+			toast.error(m.vaults_add_member_dialog_toast_add_failed());
 		},
 	});
 
@@ -113,7 +113,7 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 				} as VaultKeyCryptoProvider,
 			});
 			if (!vaultKey) {
-				toast.error(m["vaults.add_member_dialog.toast.decrypt_key_failed"]());
+				toast.error(m.vaults_add_member_dialog_toast_decrypt_key_failed());
 				setAddingUserId(null);
 				return;
 			}
@@ -132,7 +132,7 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 				encryptedVaultKey,
 			});
 		} catch (error) {
-			toast.error(m["vaults.add_member_dialog.toast.encrypt_key_failed"]());
+			toast.error(m.vaults_add_member_dialog_toast_encrypt_key_failed());
 			console.error(error);
 			setAddingUserId(null);
 		}
@@ -159,11 +159,11 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 	const availableCount = availableQuery.data?.length ?? 0;
 	const availableMemberSummary =
 		availableCount === 1
-			? m["vaults.add_member_dialog.footer.available.single"]({
+			? m.vaults_add_member_dialog_footer_available_single({
 					filteredCount: filteredMembers.length,
 					totalCount: availableCount,
 				})
-			: m["vaults.add_member_dialog.footer.available.plural"]({
+			: m.vaults_add_member_dialog_footer_available_plural({
 					filteredCount: filteredMembers.length,
 					totalCount: availableCount,
 				});
@@ -179,14 +179,14 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 					<UserPlus
 						className={cn("h-3.5 w-3.5", !isMobile ? "mr-1.5" : undefined)}
 					/>
-					{!isMobile ? m["vaults.add_member_dialog.trigger"]() : null}
+					{!isMobile ? m.vaults_add_member_dialog_trigger() : null}
 				</Button>
 			</DialogTrigger>
 			<DialogContent className="flex max-h-[70vh] flex-col gap-0 p-0 sm:max-w-md">
 				<DialogHeader className="border-b px-5 pt-5 pb-4">
-					<DialogTitle>{m["vaults.add_member_dialog.title"]()}</DialogTitle>
+					<DialogTitle>{m.vaults_add_member_dialog_title()}</DialogTitle>
 					<DialogDescription>
-						{m["vaults.add_member_dialog.description"]()}
+						{m.vaults_add_member_dialog_description()}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -195,7 +195,7 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 					<div className="relative">
 						<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 						<Input
-							placeholder={m["vaults.add_member_dialog.search_placeholder"]()}
+							placeholder={m.vaults_add_member_dialog_search_placeholder()}
 							value={search}
 							onChange={(e) => setSearch(e.target.value)}
 							className="h-9 pl-9 text-sm"
@@ -222,8 +222,8 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 							<UserPlus className="h-8 w-8 text-muted-foreground/50" />
 							<p className="text-muted-foreground text-sm">
 								{availableCount === 0
-									? m["vaults.add_member_dialog.empty.all_members_added"]()
-									: m["vaults.add_member_dialog.empty.no_search_matches"]()}
+									? m.vaults_add_member_dialog_empty_all_members_added()
+									: m.vaults_add_member_dialog_empty_no_search_matches()}
 							</p>
 						</div>
 					) : (
@@ -273,13 +273,13 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 													</SelectTrigger>
 													<SelectContent>
 														<SelectItem value="admin">
-															{m["vaults.common.role.admin"]()}
+															{m.vaults_common_role_admin()}
 														</SelectItem>
 														<SelectItem value="member">
-															{m["vaults.common.role.member"]()}
+															{m.vaults_common_role_member()}
 														</SelectItem>
 														<SelectItem value="read-only">
-															{m["vaults.common.role.read_only"]()}
+															{m.vaults_common_role_read_only()}
 														</SelectItem>
 													</SelectContent>
 												</Select>
@@ -290,7 +290,7 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 													className="gap-1 px-2 py-0.5 text-xs"
 												>
 													<Check className="h-3 w-3" />
-													{m["vaults.add_member_dialog.badge.added"]()}
+													{m.vaults_add_member_dialog_badge_added()}
 												</Badge>
 											) : (
 												<Button
@@ -303,7 +303,7 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 													{isAdding ? (
 														<Loader2 className="h-3.5 w-3.5 animate-spin" />
 													) : (
-														m["vaults.add_member_dialog.action.add"]()
+														m.vaults_add_member_dialog_action_add()
 													)}
 												</Button>
 											)}

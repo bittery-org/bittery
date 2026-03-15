@@ -69,11 +69,11 @@ export function VaultMemberList({
 			role: "admin" | "member" | "read-only";
 		}) => trpcClient.vault.members.updateRole.mutate(input),
 		onSuccess: async () => {
-			toast.success(m["vaults.member_list.toast.role_updated"]());
+			toast.success(m.vaults_member_list_toast_role_updated());
 			await invalidator.invalidateVaultMembers(vaultId);
 		},
 		onError: () => {
-			toast.error(m["vaults.member_list.toast.role_update_failed"]());
+			toast.error(m.vaults_member_list_toast_role_update_failed());
 		},
 	});
 
@@ -178,7 +178,7 @@ export function VaultMemberList({
 			}
 
 			toast.success(
-				m["vaults.member_list.toast.member_removed_rotated"]({
+				m.vaults_member_list_toast_member_removed_rotated({
 					count: result.keyRotation?.itemsReEncrypted ?? 0,
 				}),
 			);
@@ -189,23 +189,23 @@ export function VaultMemberList({
 				switch (error.message) {
 					case "vault_key_decrypt_failed":
 						toast.error(
-							m["vaults.member_list.error.vault_key_decrypt_failed"](),
+							m.vaults_member_list_error_vault_key_decrypt_failed(),
 						);
 						break;
 					case "master_unlock_key_missing":
 						toast.error(
-							m["vaults.member_list.error.master_unlock_key_missing"](),
+							m.vaults_member_list_error_master_unlock_key_missing(),
 						);
 						break;
 					case "session_data_missing":
-						toast.error(m["vaults.member_list.error.session_data_missing"]());
+						toast.error(m.vaults_member_list_error_session_data_missing());
 						break;
 					default:
-						toast.error(m["vaults.member_list.toast.remove_failed"]());
+						toast.error(m.vaults_member_list_toast_remove_failed());
 						break;
 				}
 			} else {
-				toast.error(m["vaults.member_list.toast.remove_failed"]());
+				toast.error(m.vaults_member_list_toast_remove_failed());
 			}
 		} finally {
 			setIsRotating(false);
@@ -237,13 +237,13 @@ export function VaultMemberList({
 	const getRoleLabel = (role: VaultMember["role"]) => {
 		switch (role) {
 			case "owner":
-				return m["vaults.common.role.owner"]();
+				return m.vaults_common_role_owner();
 			case "admin":
-				return m["vaults.common.role.admin"]();
+				return m.vaults_common_role_admin();
 			case "member":
-				return m["vaults.common.role.member"]();
+				return m.vaults_common_role_member();
 			case "read-only":
-				return m["vaults.common.role.read_only"]();
+				return m.vaults_common_role_read_only();
 			default:
 				return role;
 		}
@@ -262,7 +262,7 @@ export function VaultMemberList({
 					<Users className="h-6 w-6 text-muted-foreground" />
 				</div>
 				<p className="text-muted-foreground">
-					{m["vaults.member_list.empty"]()}
+					{m.vaults_member_list_empty()}
 				</p>
 			</div>
 		);
@@ -319,13 +319,13 @@ export function VaultMemberList({
 										</SelectTrigger>
 										<SelectContent>
 											<SelectItem value="admin">
-												{m["vaults.common.role.admin"]()}
+												{m.vaults_common_role_admin()}
 											</SelectItem>
 											<SelectItem value="member">
-												{m["vaults.common.role.member"]()}
+												{m.vaults_common_role_member()}
 											</SelectItem>
 											<SelectItem value="read-only">
-												{m["vaults.common.role.read_only"]()}
+												{m.vaults_common_role_read_only()}
 											</SelectItem>
 										</SelectContent>
 									</Select>
@@ -357,26 +357,22 @@ export function VaultMemberList({
 										<AlertDialogContent>
 											<AlertDialogHeader>
 												<AlertDialogTitle>
-													{m["vaults.member_list.remove_dialog.title"]()}
+													{m.vaults_member_list_remove_dialog_title()}
 												</AlertDialogTitle>
 												<AlertDialogDescription>
-													{m["vaults.member_list.remove_dialog.description"]({
+													{m.vaults_member_list_remove_dialog_description({
 														name: member.name,
 													})}
 													<br />
 													<br />
 													<span className="text-muted-foreground text-xs">
-														{m[
-															"vaults.member_list.remove_dialog.rotation_notice"
-														]()}
+														{m.vaults_member_list_remove_dialog_rotation_notice()}
 													</span>
 												</AlertDialogDescription>
 											</AlertDialogHeader>
 											<AlertDialogFooter>
 												<AlertDialogCancel disabled={isRotating}>
-													{m[
-														"vaults.member_list.remove_dialog.action.cancel"
-													]()}
+													{m.vaults_member_list_remove_dialog_action_cancel()}
 												</AlertDialogCancel>
 												<AlertDialogAction
 													onClick={() => handleRemove(member.userId)}
@@ -386,14 +382,10 @@ export function VaultMemberList({
 													{isRotating ? (
 														<>
 															<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-															{m[
-																"vaults.member_list.remove_dialog.action.rotating"
-															]()}
+															{m.vaults_member_list_remove_dialog_action_rotating()}
 														</>
 													) : (
-														m[
-															"vaults.member_list.remove_dialog.action.confirm"
-														]()
+														m.vaults_member_list_remove_dialog_action_confirm()
 													)}
 												</AlertDialogAction>
 											</AlertDialogFooter>

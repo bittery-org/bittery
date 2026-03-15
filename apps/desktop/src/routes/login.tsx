@@ -68,7 +68,7 @@ export function LoginPage() {
 	const applyServerUrl = async (candidateUrl: string) => {
 		const nextServerUrl = await setActiveAuthServerUrl(candidateUrl);
 		if (!nextServerUrl) {
-			toast.error(m["toast.auth.server.invalid_url"]());
+			toast.error(m.toast_auth_server_invalid_url());
 			return null;
 		}
 
@@ -165,13 +165,13 @@ export function LoginPage() {
 				queryClient.invalidateQueries({ queryKey: ["decrypted-item"] }),
 			]);
 
-			toast.success(m["toast.auth.signin_success_simple"]());
+			toast.success(m.toast_auth_signin_success_simple());
 			triggerAuthRevealToVault();
 		},
 		onError: (error) => {
 			console.error("Login error:", error);
 			toast.error(
-				error instanceof Error ? error.message : m["toast.auth.signin_error"](),
+				error instanceof Error ? error.message : m.toast_auth_signin_error(),
 			);
 		},
 	});
@@ -198,40 +198,40 @@ export function LoginPage() {
 				{isPrefilled && (
 					<div className="rounded-lg border border-amber-200/60 bg-amber-50/50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-950/20">
 						<p className="font-medium text-amber-900 text-sm dark:text-amber-200">
-							{m["auth.signin.session_expired.title"]()}
+							{m.auth_signin_session_expired_title()}
 						</p>
 						<p className="mt-0.5 text-amber-800/70 text-xs dark:text-amber-300/70">
-							{m["auth.signin.session_expired.desktop_description"]()}
+							{m.auth_signin_session_expired_desktop_description()}
 						</p>
 					</div>
 				)}
 
 				<div>
 					<h2 className="font-semibold text-xl tracking-tight">
-						{m["auth.signin.title.default"]()}
+						{m.auth_signin_title_default()}
 					</h2>
 					<p className="mt-1 text-muted-foreground text-sm">
-						{m["auth.signin.description.default"]()}
+						{m.auth_signin_description_default()}
 					</p>
 				</div>
 
 				<form onSubmit={handleLogin} className="space-y-4">
 					<div className="grid gap-1.5">
-						<Label htmlFor="email">{m["auth.signin.label.email"]()}</Label>
+						<Label htmlFor="email">{m.auth_signin_label_email()}</Label>
 						<Input
 							id="email"
 							type="email"
 							value={email}
 							onChange={(e) => setEmail(e.target.value)}
 							required
-							placeholder={m["auth.signin.placeholder.email"]()}
+							placeholder={m.auth_signin_placeholder_email()}
 							disabled={isPrefilled}
 						/>
 					</div>
 
 					<div className="grid gap-1.5">
 						<Label htmlFor="secretKey">
-							{m["auth.signin.label.secret_key"]()}
+							{m.auth_signin_label_secret_key()}
 						</Label>
 						<InputGroup>
 							<InputGroupInput
@@ -240,7 +240,7 @@ export function LoginPage() {
 								value={secretKey}
 								onChange={(e) => setSecretKey(e.target.value)}
 								required
-								placeholder={m["auth.signin.placeholder.secret_key"]()}
+								placeholder={m.auth_signin_placeholder_secret_key()}
 								className="font-mono"
 							/>
 							<InputGroupAddon align="inline-end">
@@ -258,13 +258,13 @@ export function LoginPage() {
 							</InputGroupAddon>
 						</InputGroup>
 						<p className="text-muted-foreground text-xs">
-							{m["auth.signin.secret_key.help"]()}
+							{m.auth_signin_secret_key_help()}
 						</p>
 					</div>
 
 					<div className="grid gap-1.5">
 						<Label htmlFor="password">
-							{m["auth.signin.label.password"]()}
+							{m.auth_signin_label_password()}
 						</Label>
 						<InputGroup>
 							<InputGroupInput
@@ -273,7 +273,7 @@ export function LoginPage() {
 								value={password}
 								onChange={(e) => setPassword(e.target.value)}
 								required
-								placeholder={m["auth.signin.placeholder.password"]()}
+								placeholder={m.auth_signin_placeholder_password()}
 							/>
 							<InputGroupAddon align="inline-end">
 								<InputGroupButton
@@ -305,7 +305,7 @@ export function LoginPage() {
 								className="flex items-center gap-2 font-normal"
 							>
 								<IconFingerprintOutlineDuo18 className="h-4 w-4 text-muted-foreground" />
-								{m["auth.signin.biometric.enable"]()}
+								{m.auth_signin_biometric_enable()}
 							</Label>
 						</div>
 					)}
@@ -316,8 +316,8 @@ export function LoginPage() {
 						disabled={loginMutation.isPending}
 					>
 						{loginMutation.isPending
-							? m["auth.signin.button.signing_in"]()
-							: m["auth.signin.button.sign_in"]()}
+							? m.auth_signin_button_signing_in()
+							: m.auth_signin_button_sign_in()}
 					</Button>
 				</form>
 			</div>

@@ -34,28 +34,28 @@ export function DownloadCard() {
 	const os = detectOS();
 	const osInfo = {
 		macos: {
-			name: m["dashboard.download.platform.macos"](),
+			name: m.dashboard_download_platform_macos(),
 			icon: Apple,
 			file: "Bittery.dmg",
-			hint: m["dashboard.download.platform_hint.macos"](),
+			hint: m.dashboard_download_platform_hint_macos(),
 		},
 		windows: {
-			name: m["dashboard.download.platform.windows"](),
+			name: m.dashboard_download_platform_windows(),
 			icon: Monitor,
 			file: "Bittery.exe",
-			hint: m["dashboard.download.platform_hint.windows"](),
+			hint: m.dashboard_download_platform_hint_windows(),
 		},
 		linux: {
-			name: m["dashboard.download.platform.linux"](),
+			name: m.dashboard_download_platform_linux(),
 			icon: Monitor,
 			file: "Bittery.AppImage",
-			hint: m["dashboard.download.platform_hint.linux"](),
+			hint: m.dashboard_download_platform_hint_linux(),
 		},
 		unknown: {
-			name: m["dashboard.download.platform.desktop"](),
+			name: m.dashboard_download_platform_desktop(),
 			icon: Download,
 			file: "",
-			hint: m["dashboard.download.platform_hint.desktop"](),
+			hint: m.dashboard_download_platform_hint_desktop(),
 		},
 	};
 	const { name, icon: Icon, file, hint } = osInfo[os];
@@ -64,8 +64,8 @@ export function DownloadCard() {
 		: RELEASES_URL;
 	const primaryLabel =
 		os === "unknown"
-			? m["dashboard.download.button.browse_releases"]()
-			: m["dashboard.download.button.download_for"]({ platform: name });
+			? m.dashboard_download_button_browse_releases()
+			: m.dashboard_download_button_download_for({ platform: name });
 
 	return (
 		<Card className="gap-0 overflow-hidden border-border/70 py-0">
@@ -73,12 +73,12 @@ export function DownloadCard() {
 				<div className="flex items-center justify-between gap-3">
 					<CardTitle className="flex items-center gap-2 text-base">
 						<Download className="h-4 w-4" />
-						{m["dashboard.download.title"]()}
+						{m.dashboard_download_title()}
 					</CardTitle>
-					<Badge variant="secondary">{m["dashboard.download.badge"]()}</Badge>
+					<Badge variant="secondary">{m.dashboard_download_badge()}</Badge>
 				</div>
 				<CardDescription className="text-xs">
-					{m["dashboard.download.description"]()}
+					{m.dashboard_download_description()}
 				</CardDescription>
 			</CardHeader>
 
@@ -91,7 +91,7 @@ export function DownloadCard() {
 							</div>
 							<div className="space-y-0.5">
 								<p className="font-medium text-sm">
-									{m["dashboard.download.detected_platform"]()}
+									{m.dashboard_download_detected_platform()}
 								</p>
 								<p className="text-muted-foreground text-xs">{hint}</p>
 							</div>
@@ -110,13 +110,13 @@ export function DownloadCard() {
 				<div className="space-y-2 text-muted-foreground text-xs">
 					<div className="flex items-center gap-2">
 						<Zap className="h-4 w-4" />
-						{m["dashboard.download.feature.biometric_unlock"]()}
+						{m.dashboard_download_feature_biometric_unlock()}
 					</div>
 				</div>
 
 				<Button variant="outline" className="w-full" asChild>
 					<a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
-						{m["dashboard.download.button.all_downloads"]()}
+						{m.dashboard_download_button_all_downloads()}
 						<ExternalLink className="ml-2 h-3.5 w-3.5" />
 					</a>
 				</Button>

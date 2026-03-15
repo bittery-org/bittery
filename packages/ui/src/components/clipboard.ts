@@ -1,5 +1,7 @@
-import { copyToClipboard } from "@bittery/shared/password";
+import { copyToClipboard as sharedCopyToClipboard } from "@bittery/shared/password";
 import { toast } from "./sonner";
+
+export const copyToClipboard = sharedCopyToClipboard;
 
 export interface CopyWithToastOptions {
 	/** Auto-clear clipboard after this many milliseconds. Default: 30000 (30s). Set to 0 to disable. */
@@ -37,7 +39,7 @@ export async function copyWithToast(
 	}
 
 	try {
-		await copyToClipboard(text, autoClearMs);
+		await sharedCopyToClipboard(text, autoClearMs);
 
 		const message =
 			successMessage ??

@@ -29,7 +29,7 @@ function RouteComponent() {
 			<div className="flex w-78 flex-col border-r bg-background">
 				<div className="flex flex-1 items-center justify-center">
 					<div className="text-muted-foreground text-sm">
-						{m["vaults.favorites.loading"]()}
+						{m.vaults_favorites_loading()}
 					</div>
 				</div>
 			</div>
@@ -45,7 +45,7 @@ function RouteComponent() {
 						className="size-4 text-yellow-500"
 						fill="currentColor"
 					/>
-					<span className="font-medium">{m["vaults.favorites.title"]()}</span>
+					<span className="font-medium">{m.vaults_favorites_title()}</span>
 					<Badge variant="secondary" className="ml-auto">
 						{favoriteItems.length}
 					</Badge>
@@ -58,10 +58,10 @@ function RouteComponent() {
 								<IconStarOutlineDuo18 className="size-8 text-muted-foreground" />
 							</div>
 							<h3 className="mb-2 font-semibold">
-								{m["vaults.favorites.empty.title"]()}
+								{m.vaults_favorites_empty_title()}
 							</h3>
 							<p className="text-muted-foreground text-sm">
-								{m["vaults.favorites.empty.description"]()}
+								{m.vaults_favorites_empty_description()}
 							</p>
 						</div>
 					) : (

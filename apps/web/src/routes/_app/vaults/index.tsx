@@ -1,405 +1,275 @@
 import {
-	type CreateVaultInput,
+	useAvailableTags,
 	useAllVaultKeys,
-	useCreateVault,
-	useDeleteVault,
+	useCreateItem,
+	useDeleteItem,
 	useItems,
-	useUpdateVault,
+	useUpdateItem,
 } from "@bittery/core/hooks";
+import type {
+	DecryptedItem,
+	DecryptedItemData,
+	ItemCategory,
+} from "@bittery/shared/types";
 import {
 	Badge,
 	Button,
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
+	cn,
+	CreateItemSheet,
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+	ItemForm,
 	Skeleton,
+	toast,
+	type VaultOption,
 } from "@bittery/ui";
 import {
-	IconDotsOutlineDuo18 as Dots,
-	IconKeyOutlineDuo18 as Key,
-	IconPen2OutlineDuo18 as Pen,
+	IconGrid2OutlineDuo18 as Grid,
 	IconPlusOutlineDuo18 as Plus,
-	IconTrash2OutlineDuo18 as Trash,
-	IconVault3OutlineDuo18 as Vault,
 } from "@bittery/ui/icons";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { CreateVaultDialog } from "@/components/vaults/create-vault-dialog";
-import { DeleteVaultDialog } from "@/components/vaults/delete-vault-dialog";
-import {
-	type EditVaultData,
-	EditVaultDialog,
-	type UpdateVaultData,
-} from "@/components/vaults/edit-vault-dialog";
-import { VaultAvatar } from "@/components/vaults/vault-avatar";
-import { m as messages } from "@/paraglide/messages";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
+import { ItemDetailPane } from "@/components/vault/item-detail-pane";
+import { ItemList } from "@/components/vault/item-list";
+import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/")({
-	component: VaultsPage,
+	validateSearch: (search) => ({
+		itemId: typeof search.itemId === "string" ? search.itemId : undefined,
+	}),
+	component: AllItemsPage,
 	head: () => ({
-		meta: [{ title: messages["vaults.page.meta_title"]() }],
+		meta: [{ title: messages.vaults_page_meta_title() }],
 	}),
 });
 
-type VaultMessageCatalog = ReturnType<typeof useI18n>["m"];
-
-function getVaultRoleLabel(role: string, m: VaultMessageCatalog): string {
-	switch (role) {
-		case "owner":
-			return m["vaults.common.role.owner"]();
-		case "admin":
-			return m["vaults.common.role.admin"]();
-		case "member":
-			return m["vaults.common.role.member"]();
-		case "read-only":
-			return m["vaults.common.role.read_only"]();
-		default:
-			return role;
-	}
-}
-
-function getVaultTypeLabel(type: string, m: VaultMessageCatalog): string {
-	switch (type) {
-		case "personal":
-			return m["vaults.common.type.personal"]();
-		case "team":
-			return m["vaults.common.type.team"]();
-		default:
-			return type;
-	}
-}
-
-function VaultsPage() {
+function AllItemsPage() {
 	const navigate = useNavigate();
 	const { m } = useI18n();
-	const { vaultKeys, isLoading } = useAllVaultKeys();
-	const { items } = useItems();
-	const createVault = useCreateVault();
-	const updateVault = useUpdateVault();
-	const deleteVault = useDeleteVault();
+	const { itemId: selectedItemIdFromSearch } = Route.useSearch();
 
-	const [isCreateVaultDialogOpen, setIsCreateVaultDialogOpen] = useState(false);
-	const [isEditVaultDialogOpen, setIsEditVaultDialogOpen] = useState(false);
-	const [isDeleteVaultDialogOpen, setIsDeleteVaultDialogOpen] = useState(false);
-	const [editingVault, setEditingVault] = useState<EditVaultData | null>(null);
-	const [deletingVault, setDeletingVault] = useState<{
-		id: string;
-		name: string;
-	} | null>(null);
+	const { items, isLoading } = useItems();
+	const { vaultKeys } = useAllVaultKeys();
+	const availableTags = useAvailableTags(items);
+	const createItem = useCreateItem();
+	const updateItem = useUpdateItem();
+	const deleteItem = useDeleteItem();
 
-	// Build per-vault item counts from local decrypted items
-	const itemCountByVault = useMemo(() => {
-		const map = new Map<string, number>();
-		for (const item of items) {
-			map.set(item.vaultId, (map.get(item.vaultId) || 0) + 1);
-		}
-		return map;
-	}, [items]);
+	const [isCreateItemSheetOpen, setIsCreateItemSheetOpen] = useState(false);
+	const [isEditItemDialogOpen, setIsEditItemDialogOpen] = useState(false);
+	const [isDeleteItemDialogOpen, setIsDeleteItemDialogOpen] = useState(false);
 
-	const totalItems = items.length;
-	const totalVaults = vaultKeys.length;
-	const totalVaultsLabel =
-		totalVaults === 1
-			? m["vaults.page.hero.stat.vault_count.single"]({ count: totalVaults })
-			: m["vaults.page.hero.stat.vault_count.plural"]({ count: totalVaults });
-	const totalItemsLabel =
-		totalItems === 1
-			? m["vaults.page.hero.stat.item_count_total.single"]({
-					count: totalItems,
-				})
-			: m["vaults.page.hero.stat.item_count_total.plural"]({
-					count: totalItems,
-				});
+	const selectedItemId =
+		selectedItemIdFromSearch &&
+		items.some((item) => item.id === selectedItemIdFromSearch)
+			? selectedItemIdFromSearch
+			: null;
+	const selectedItem =
+		selectedItemId === null
+			? null
+			: (items.find((item) => item.id === selectedItemId) ?? null);
 
-	const handleCreateVault = async (data: CreateVaultInput) => {
-		const result = await createVault.mutateAsync(data);
-		navigate({ to: "/vaults/$vaultId", params: { vaultId: result.vaultId } });
+	const canWriteItems = selectedItem
+		? (() => {
+				const vault = vaultKeys.find(
+					(v) => v.vaultId === selectedItem.vaultId,
+				);
+				return vault ? vault.role !== "read-only" : false;
+			})()
+		: true;
+
+	const handleItemSelect = (item: DecryptedItem) => {
+		navigate({ to: "/vaults", search: { itemId: item.id } });
 	};
 
-	const handleOpenEditVault = (vault: EditVaultData) => {
-		setEditingVault(vault);
-		setIsEditVaultDialogOpen(true);
+	const handleCloseDetail = () => {
+		navigate({ to: "/vaults", search: { itemId: undefined } });
 	};
 
-	const handleUpdateVault = async (vaultId: string, data: UpdateVaultData) => {
-		await updateVault.mutateAsync({
+	const handleCreateItem = async (
+		data: DecryptedItemData,
+		vaultId: string,
+		category: ItemCategory,
+	) => {
+		const result = await createItem.mutateAsync({
 			vaultId,
-			name: data.name,
-			icon: data.icon,
-			imageFile: data.imageFile,
-			removeImage: data.removeImage,
+			category,
+			data,
 		});
-		setEditingVault(null);
+		navigate({ to: "/vaults", search: { itemId: result.itemId } });
+		setIsCreateItemSheetOpen(false);
+		toast.success(m.vaults_detail_toast_item_created());
 	};
 
-	const handleOpenDeleteVault = (vault: { id: string; name: string }) => {
-		setDeletingVault(vault);
-		setIsDeleteVaultDialogOpen(true);
+	const handleUpdateItem = async (data: DecryptedItemData) => {
+		if (!selectedItem) return;
+		await updateItem.mutateAsync({
+			itemId: selectedItem.id,
+			vaultId: selectedItem.vaultId,
+			data,
+		});
+		setIsEditItemDialogOpen(false);
+		toast.success(m.vaults_detail_toast_item_updated());
 	};
 
-	const handleDeleteVault = async (vaultId: string) => {
-		await deleteVault.mutateAsync({ vaultId });
-		setDeletingVault(null);
+	const handleDeleteItem = async () => {
+		if (!selectedItem) return;
+		try {
+			await deleteItem.mutateAsync({
+				itemId: selectedItem.id,
+				vaultId: selectedItem.vaultId,
+			});
+			setIsDeleteItemDialogOpen(false);
+			navigate({ to: "/vaults", search: { itemId: undefined } });
+			toast.success(m.vaults_detail_toast_item_moved_to_trash());
+		} catch {
+			toast.error(m.vaults_detail_toast_item_delete_error());
+		}
 	};
+
+	const itemFormVaults: VaultOption[] = vaultKeys.map((v) => ({
+		id: v.vaultId,
+		name: v.vaultName,
+		type: v.vaultType,
+		icon: v.vaultIcon,
+		imageUrl: v.vaultImageUrl,
+	}));
 
 	return (
 		<>
-			<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
-				{/* Hero Banner */}
-				<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
-					<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent" />
-
-					<div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-						<div className="flex min-w-0 items-center gap-3">
-							<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted shadow-sm sm:h-10 sm:w-10">
-								<Vault className="h-4 w-4 text-muted-foreground sm:h-5 sm:w-5" />
-							</div>
-							<div className="min-w-0">
-								<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
-									{m["vaults.page.hero.heading"]()}
-								</h1>
-								{!isLoading && totalVaults > 0 && (
-									<p className="text-muted-foreground text-xs">
-										{totalVaultsLabel} · {totalItemsLabel}
-									</p>
-								)}
-							</div>
-						</div>
-
-						<div className="flex items-center gap-2 sm:shrink-0">
-							<Button
-								variant="outline"
-								size="sm"
-								className="h-8 px-2 sm:px-3"
-								asChild
-								data-testid="open-trash-button"
-							>
-								<Link to="/vaults/trash">
-									<Trash className="mr-1.5 h-3.5 w-3.5" />
-									<span className="text-xs">
-										{m["vaults.page.action.open_trash"]()}
-									</span>
-								</Link>
-							</Button>
-
-							<Button
-								size="sm"
-								className="h-8 px-2 sm:px-3"
-								onClick={() => setIsCreateVaultDialogOpen(true)}
-								data-testid="new-vault-button"
-							>
-								<Plus className="mr-1.5 h-3.5 w-3.5" />
-								<span className="text-xs">
-									{m["vaults.page.action.new_vault"]()}
-								</span>
-							</Button>
-						</div>
-					</div>
-				</section>
-
-				{/* Vault Grid */}
-				{isLoading ? (
-					<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-						{[1, 2, 3].map((i) => (
-							<Skeleton key={i} className="h-36 rounded-xl" />
-						))}
-					</div>
-				) : totalVaults === 0 ? (
-					<div className="flex flex-col items-center gap-4 rounded-xl border border-dashed p-10 text-center">
-						<div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-							<Vault className="h-6 w-6 text-muted-foreground" />
-						</div>
-						<div>
-							<h3 className="font-medium text-lg">
-								{m["vaults.page.empty.title"]()}
-							</h3>
-							<p className="mt-1 text-muted-foreground text-sm">
-								{m["vaults.page.empty.description"]()}
-							</p>
-						</div>
-						<Button
-							onClick={() => setIsCreateVaultDialogOpen(true)}
-							data-testid="empty-new-vault-button"
-						>
-							<Plus className="mr-2 h-4 w-4" />
-							{m["vaults.page.empty.action.create_vault"]()}
-						</Button>
-					</div>
-				) : (
-					<div className="space-y-3">
-						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-							<h2 className="font-semibold text-lg tracking-tight">
-								{m["vaults.page.list.heading"]()}
-							</h2>
-							<p className="text-muted-foreground text-sm">
-								{m["vaults.page.list.description"]()}
-							</p>
-						</div>
-						<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-							{vaultKeys.map((vault) => {
-								const itemCount = itemCountByVault.get(vault.vaultId) || 0;
-								const canEditVault =
-									vault.role === "owner" || vault.role === "admin";
-								const canDeleteVault = vault.role === "owner";
-
-								return (
-									<div
-										key={vault.vaultId}
-										className="group relative"
-										data-testid="vault-card-container"
-									>
-										{(canEditVault || canDeleteVault) && (
-											<div className="absolute top-2 right-2 z-20">
-												<DropdownMenu>
-													<DropdownMenuTrigger asChild>
-														<Button
-															variant="ghost"
-															size="sm"
-															className="h-8 w-8 p-0"
-															data-testid={`vault-card-actions-trigger-${vault.vaultId}`}
-														>
-															<Dots className="h-4 w-4" />
-														</Button>
-													</DropdownMenuTrigger>
-													<DropdownMenuContent align="end">
-														{canEditVault && (
-															<DropdownMenuItem
-																onClick={() =>
-																	handleOpenEditVault({
-																		id: vault.vaultId,
-																		name: vault.vaultName,
-																		icon: vault.vaultIcon,
-																		imageUrl: vault.vaultImageUrl,
-																	})
-																}
-																data-testid={`vault-card-edit-action-${vault.vaultId}`}
-															>
-																<Pen className="h-4 w-4" />
-																{m["vaults.page.card.action.edit_vault"]()}
-															</DropdownMenuItem>
-														)}
-														{canEditVault && canDeleteVault && (
-															<DropdownMenuSeparator />
-														)}
-														{canDeleteVault && (
-															<DropdownMenuItem
-																variant="destructive"
-																onClick={() =>
-																	handleOpenDeleteVault({
-																		id: vault.vaultId,
-																		name: vault.vaultName,
-																	})
-																}
-																data-testid={`vault-card-delete-action-${vault.vaultId}`}
-															>
-																<Trash className="h-4 w-4" />
-																{m["vaults.page.card.action.delete_vault"]()}
-															</DropdownMenuItem>
-														)}
-													</DropdownMenuContent>
-												</DropdownMenu>
-											</div>
-										)}
-
-										<Link
-											to="/vaults/$vaultId"
-											params={{ vaultId: vault.vaultId }}
-											className="block"
-										>
-											<div
-												className="relative overflow-hidden rounded-xl border bg-card p-5 pr-12 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
-												data-testid="vault-card"
-											>
-												<div className="absolute top-0 left-0 h-full w-1 rounded-l-xl bg-primary/80" />
-												<div className="flex items-start justify-between gap-3">
-													<div className="flex min-w-0 items-center gap-3">
-														<VaultAvatar
-															name={vault.vaultName}
-															icon={vault.vaultIcon}
-															imageUrl={vault.vaultImageUrl}
-															size="md"
-														/>
-														<div className="min-w-0">
-															<h3
-																className="truncate font-semibold leading-tight"
-																data-testid="vault-name"
-															>
-																{vault.vaultName}
-															</h3>
-															<p
-																className="mt-0.5 text-muted-foreground text-xs capitalize"
-																data-testid="vault-type"
-															>
-																{m["vaults.page.card.vault_type"]({
-																	type: getVaultTypeLabel(vault.vaultType, m),
-																})}
-															</p>
-														</div>
-													</div>
-													<Badge
-														variant={
-															vault.role === "owner" ? "default" : "secondary"
-														}
-														className="shrink-0"
-													>
-														{getVaultRoleLabel(vault.role, m)}
-													</Badge>
-												</div>
-												<div className="mt-4 flex items-center gap-3 text-muted-foreground text-xs">
-													<div className="flex items-center gap-1">
-														<Key className="h-3.5 w-3.5" />
-														{itemCount === 1
-															? m["vaults.page.card.item_count.single"]({
-																	count: itemCount,
-																})
-															: m["vaults.page.card.item_count.plural"]({
-																	count: itemCount,
-																})}
-													</div>
-												</div>
-											</div>
-										</Link>
-									</div>
-								);
-							})}
-						</div>
-					</div>
+			{/* Middle pane: item list */}
+			<div
+				className={cn(
+					"flex w-full shrink-0 flex-col border-r md:w-80",
+					selectedItemId && "hidden md:flex",
 				)}
+			>
+				<div className="flex items-center gap-2 border-b px-4 py-3">
+					<Grid className="size-4 text-muted-foreground" />
+					<span className="font-medium">
+						{m.vaults_sidebar_link_all_objects()}
+					</span>
+					<Badge variant="secondary" className="ml-auto">
+						{items.length}
+					</Badge>
+					<Button
+						variant="ghost"
+						size="sm"
+						className="h-7 w-7 p-0"
+						onClick={() => setIsCreateItemSheetOpen(true)}
+					>
+						<Plus className="h-4 w-4" />
+					</Button>
+				</div>
+				<div className="flex min-h-0 flex-1 flex-col overflow-hidden p-1">
+					{isLoading ? (
+						<div className="space-y-2 p-2">
+							{[1, 2, 3, 4, 5].map((i) => (
+								<Skeleton key={i} className="h-16" />
+							))}
+						</div>
+					) : (
+						<ItemList
+							items={items}
+							isLoading={false}
+							vaultId=""
+							onItemSelect={handleItemSelect}
+							selectedItemId={selectedItemId ?? undefined}
+						/>
+					)}
+				</div>
 			</div>
 
-			<CreateVaultDialog
-				open={isCreateVaultDialogOpen}
-				onOpenChange={setIsCreateVaultDialogOpen}
-				onSubmit={handleCreateVault}
+			{/* Right pane: item detail */}
+			<ItemDetailPane
+				selectedItem={selectedItem}
+				selectedItemId={selectedItemId}
+				availableTags={availableTags}
+				canWriteItems={canWriteItems}
+				onClose={handleCloseDetail}
+				onEdit={() => setIsEditItemDialogOpen(true)}
+				onDelete={() => setIsDeleteItemDialogOpen(true)}
 			/>
 
-			<EditVaultDialog
-				key={editingVault?.id || "edit-vault-dialog"}
-				open={isEditVaultDialogOpen}
-				onOpenChange={(open) => {
-					setIsEditVaultDialogOpen(open);
-					if (!open) {
-						setEditingVault(null);
-					}
-				}}
-				vault={editingVault}
-				onSubmit={handleUpdateVault}
+			{/* Create Item Sheet */}
+			<CreateItemSheet
+				open={isCreateItemSheetOpen}
+				onOpenChange={setIsCreateItemSheetOpen}
+				vaults={itemFormVaults}
+				selectedVaultId={vaultKeys[0]?.vaultId}
+				onCreateItem={handleCreateItem}
 			/>
 
-			<DeleteVaultDialog
-				open={isDeleteVaultDialogOpen}
-				onOpenChange={(open) => {
-					setIsDeleteVaultDialogOpen(open);
-					if (!open) {
-						setDeletingVault(null);
-					}
-				}}
-				vault={deletingVault}
-				onConfirm={handleDeleteVault}
-			/>
+			{/* Edit Item Dialog */}
+			<Dialog
+				open={isEditItemDialogOpen && !!selectedItem}
+				onOpenChange={setIsEditItemDialogOpen}
+			>
+				<DialogContent
+					className="flex max-h-[85vh] max-w-2xl flex-col"
+					data-testid="edit-item-dialog"
+				>
+					<DialogHeader className="shrink-0">
+						<DialogTitle>
+							{m.vaults_detail_edit_item_dialog_title()}
+						</DialogTitle>
+						<DialogDescription>
+							{m.vaults_detail_edit_item_dialog_description()}
+						</DialogDescription>
+					</DialogHeader>
+					{selectedItem && (
+						<ItemForm
+							category={selectedItem.category}
+							initialData={selectedItem}
+							onSubmit={async (data) => {
+								await handleUpdateItem(data as DecryptedItemData);
+							}}
+							onCancel={() => setIsEditItemDialogOpen(false)}
+							isSubmitting={updateItem.isPending}
+							submitLabel={m.vaults_detail_edit_item_dialog_action_submit()}
+							selectedVaultId={selectedItem.vaultId}
+						/>
+					)}
+				</DialogContent>
+			</Dialog>
+
+			{/* Delete Item Dialog */}
+			<Dialog
+				open={isDeleteItemDialogOpen && !!selectedItem}
+				onOpenChange={setIsDeleteItemDialogOpen}
+			>
+				<DialogContent data-testid="delete-item-dialog">
+					<DialogHeader>
+						<DialogTitle>
+							{m.vaults_detail_delete_item_dialog_title()}
+						</DialogTitle>
+						<DialogDescription>
+							{m.vaults_detail_delete_item_dialog_description()}
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={() => setIsDeleteItemDialogOpen(false)}
+							disabled={deleteItem.isPending}
+						>
+							{m.vaults_detail_delete_item_dialog_action_cancel()}
+						</Button>
+						<Button
+							variant="destructive"
+							onClick={handleDeleteItem}
+							disabled={deleteItem.isPending}
+						>
+							{m.vaults_detail_delete_item_dialog_action_confirm()}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</>
 	);
 }

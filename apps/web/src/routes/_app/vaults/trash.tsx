@@ -17,22 +17,21 @@ import {
 } from "@bittery/ui";
 import {
 	IconBoxArchive3OutlineDuo18 as Archive,
-	IconArrowLeftOutlineDuo18 as ArrowLeft,
 	IconShareLeft2OutlineDuo18 as Restore,
 	IconTrash2OutlineDuo18 as Trash,
 } from "@bittery/ui/icons";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Favicon } from "@/components/vault/favicon";
 import { VaultAvatar } from "@/components/vaults/vault-avatar";
 import { formatDate } from "@/lib/i18n-format";
-import { m as messages } from "@/paraglide/messages";
+import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/trash")({
 	component: VaultTrashPage,
 	head: () => ({
-		meta: [{ title: messages["vaults.trash.meta_title"]() }],
+		meta: [{ title: messages.vaults_trash_meta_title() }],
 	}),
 });
 
@@ -40,15 +39,9 @@ function formatDeletedDate(
 	value: string | Date | null | undefined,
 	fallbackLabel: string,
 ): string {
-	if (!value) {
-		return fallbackLabel;
-	}
-
+	if (!value) return fallbackLabel;
 	const date = value instanceof Date ? value : new Date(value);
-	if (Number.isNaN(date.getTime())) {
-		return fallbackLabel;
-	}
-
+	if (Number.isNaN(date.getTime())) return fallbackLabel;
 	return formatDate(date, {
 		month: "short",
 		day: "numeric",
@@ -75,213 +68,189 @@ function VaultTrashPage() {
 			return right - left;
 		});
 	}, [deletedItems]);
-	const trashCountLabel =
-		sortedItems.length === 1
-			? m["vaults.trash.list.count.single"]({ count: sortedItems.length })
-			: m["vaults.trash.list.count.plural"]({ count: sortedItems.length });
 
 	const handleRestore = async (itemId: string, vaultId: string) => {
 		try {
 			await restoreItem.mutateAsync({ itemId, vaultId });
-			toast.success(m["vaults.trash.toast.restore_success"]());
+			toast.success(m.vaults_trash_toast_restore_success());
 		} catch {
-			toast.error(m["vaults.trash.toast.restore_error"]());
+			toast.error(m.vaults_trash_toast_restore_error());
 		}
 	};
 
 	const handleConfirmPermanentDelete = async () => {
-		if (!itemToDelete) {
-			return;
-		}
-
+		if (!itemToDelete) return;
 		try {
 			await permanentDeleteItem.mutateAsync({
 				itemId: itemToDelete.id,
 				vaultId: itemToDelete.vaultId,
 			});
 			setItemToDelete(null);
-			toast.success(m["vaults.trash.toast.permanent_delete_success"]());
+			toast.success(m.vaults_trash_toast_permanent_delete_success());
 		} catch {
-			toast.error(m["vaults.trash.toast.permanent_delete_error"]());
+			toast.error(m.vaults_trash_toast_permanent_delete_error());
 			setItemToDelete(null);
 		}
 	};
 
 	return (
-		<>
-			<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
-				<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
-					<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent" />
-
-					<div className="relative flex items-center justify-between gap-3">
-						<div className="flex min-w-0 items-center gap-3">
-							<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted shadow-sm sm:h-10 sm:w-10">
-								<Archive className="h-4 w-4 text-muted-foreground sm:h-5 sm:w-5" />
-							</div>
-							<div className="min-w-0">
-								<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
-									{m["vaults.trash.hero.heading"]()}
-								</h1>
-								{!isLoading && (
-									<p className="text-muted-foreground text-xs">
-										{trashCountLabel}
-									</p>
-								)}
-							</div>
-						</div>
-
-						<Button
-							variant="outline"
-							size="sm"
-							className="h-8 shrink-0 px-2 sm:px-3"
-							asChild
-						>
-							<Link to="/vaults">
-								<ArrowLeft className="h-3.5 w-3.5 sm:mr-1.5" />
-								<span className="hidden text-xs sm:inline">
-									{m["vaults.trash.action.back_to_vaults"]()}
-								</span>
-							</Link>
-						</Button>
+		<div className="flex flex-1 flex-col overflow-hidden">
+			{/* Header */}
+			<div className="flex items-center justify-between border-b bg-background px-8 py-4">
+				<div className="flex items-center gap-3">
+					<Archive className="size-5 text-muted-foreground" />
+					<div>
+						<h2 className="font-semibold text-lg">
+							{m.vaults_trash_hero_heading()}
+						</h2>
+						<p className="text-muted-foreground text-sm">
+							{m.vaults_trash_hero_description()}
+						</p>
 					</div>
-				</section>
+				</div>
+				{!isLoading && sortedItems.length > 0 && (
+					<span className="text-muted-foreground text-sm">
+						{sortedItems.length === 1
+							? m.vaults_trash_list_count_single({ count: sortedItems.length })
+							: m.vaults_trash_list_count_plural({ count: sortedItems.length })}
+					</span>
+				)}
+			</div>
 
+			{/* Content */}
+			<div className="flex-1 overflow-y-auto p-8">
 				{isLoading ? (
-					<div className="space-y-3">
+					<div className="mx-auto max-w-4xl space-y-2">
 						{[1, 2, 3].map((i) => (
-							<Skeleton key={i} className="h-24 rounded-xl" />
+							<Skeleton key={i} className="h-20" />
 						))}
 					</div>
 				) : sortedItems.length === 0 ? (
-					<div className="flex flex-col items-center gap-4 rounded-xl border border-dashed p-10 text-center">
-						<div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-							<Archive className="h-6 w-6 text-muted-foreground" />
+					<div className="flex h-full flex-col items-center justify-center text-center">
+						<div className="mb-4 inline-flex rounded-full bg-muted p-6">
+							<Archive className="size-12 text-muted-foreground" />
 						</div>
-						<div>
-							<h3 className="font-medium text-lg">
-								{m["vaults.trash.empty.title"]()}
-							</h3>
-							<p className="mt-1 text-muted-foreground text-sm">
-								{m["vaults.trash.empty.description"]()}
-							</p>
-						</div>
+						<h3 className="mb-2 font-semibold text-lg">
+							{m.vaults_trash_empty_title()}
+						</h3>
+						<p className="text-muted-foreground text-sm">
+							{m.vaults_trash_empty_description()}
+						</p>
 					</div>
 				) : (
-					<div className="space-y-3">
-						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-							<h2 className="font-semibold text-lg tracking-tight">
-								{m["vaults.trash.list.heading"]()}
-							</h2>
-							<p className="text-muted-foreground text-sm">{trashCountLabel}</p>
-						</div>
+					<div className="mx-auto max-w-4xl space-y-2">
+						{sortedItems.map((item) => {
+							const maskedCardNumber = item.cardNumber
+								? maskCardNumber(item.cardNumber)
+								: undefined;
+							const title = item.title || m.vaults_trash_item_untitled();
+							const secondaryText =
+								item.username ||
+								item.email ||
+								maskedCardNumber ||
+								item.url;
 
-						<div className="space-y-2">
-							{sortedItems.map((item) => {
-								const maskedCardNumber = item.cardNumber
-									? maskCardNumber(item.cardNumber)
-									: undefined;
-								const title = item.title || m["vaults.trash.item.untitled"]();
-								const secondaryText =
-									item.username || item.email || maskedCardNumber || item.url;
-
-								return (
-									<div
-										key={item.id}
-										className="group rounded-xl border bg-card p-4 transition-colors hover:bg-muted/20"
-									>
-										<div className="flex min-w-0 items-center gap-3">
-											<Favicon item={item} title={title} size="sm" />
-
-											<div className="min-w-0 flex-1">
-												<div className="truncate font-medium">{title}</div>
-												{secondaryText && (
-													<div className="truncate text-muted-foreground text-sm">
-														{secondaryText}
-													</div>
-												)}
-												<div className="mt-1 flex items-center gap-2 text-muted-foreground text-xs">
-													<VaultAvatar
-														name={item.vault.name}
-														icon={item.vault.icon}
-														imageUrl={item.vault.imageUrl}
-														size="xs"
-													/>
-													<span className="truncate">{item.vault.name}</span>
-													<span>•</span>
-													<span>
-														{m["vaults.trash.item.deleted_at"]({
-															date: formatDeletedDate(
-																item.deletedAt,
-																m["vaults.trash.item.deleted_recently"](),
-															),
-														})}
-													</span>
+							return (
+								<div
+									key={item.id}
+									className="flex items-center justify-between rounded-lg border bg-card p-4 transition-colors hover:bg-muted/30"
+								>
+									<div className="flex min-w-0 flex-1 items-center gap-4">
+										<Favicon item={item} title={title} size="md" />
+										<div className="min-w-0 flex-1">
+											<div className="font-medium">{title}</div>
+											{secondaryText && (
+												<div className="mt-0.5 truncate text-muted-foreground text-sm">
+													{secondaryText}
 												</div>
-											</div>
-
-											<div className="flex shrink-0 items-center gap-2">
-												<Button
-													variant="outline"
-													size="sm"
-													onClick={() => handleRestore(item.id, item.vaultId)}
-													disabled={restoreItem.isPending}
-												>
-													<Restore className="h-4 w-4" />
-													{m["vaults.trash.item.action.restore"]()}
-												</Button>
-												<Button
-													variant="destructive"
-													size="sm"
-													onClick={() =>
-														setItemToDelete({
-															id: item.id,
-															vaultId: item.vaultId,
-															title,
-														})
-													}
-													disabled={permanentDeleteItem.isPending}
-												>
-													<Trash className="h-4 w-4" />
-													{m["vaults.trash.item.action.delete_forever"]()}
-												</Button>
+											)}
+											<div className="mt-1 flex items-center gap-1.5 text-muted-foreground text-xs">
+												<VaultAvatar
+													name={item.vault.name}
+													icon={item.vault.icon}
+													imageUrl={item.vault.imageUrl}
+													size="xs"
+												/>
+												<span className="truncate">{item.vault.name}</span>
+												<span>·</span>
+												<span>
+													{m.vaults_trash_item_deleted_at({
+														date: formatDeletedDate(
+															item.deletedAt,
+															m.vaults_trash_item_deleted_recently(),
+														),
+													})}
+												</span>
 											</div>
 										</div>
 									</div>
-								);
-							})}
-						</div>
+									<div className="ml-4 flex shrink-0 items-center gap-2">
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => handleRestore(item.id, item.vaultId)}
+											disabled={restoreItem.isPending}
+										>
+											<Restore className="size-4" />
+											{m.vaults_trash_item_action_restore()}
+										</Button>
+										<Button
+											variant="destructive"
+											size="sm"
+											onClick={() =>
+												setItemToDelete({
+													id: item.id,
+													vaultId: item.vaultId,
+													title: item.title || m.vaults_trash_item_untitled(),
+												})
+											}
+											disabled={permanentDeleteItem.isPending}
+										>
+											<Trash className="size-4" />
+											{m.vaults_trash_item_action_delete_forever()}
+										</Button>
+									</div>
+								</div>
+							);
+						})}
 					</div>
 				)}
 			</div>
 
+			{/* Permanent delete confirmation dialog */}
 			<Dialog
 				open={itemToDelete !== null}
 				onOpenChange={(open) => !open && setItemToDelete(null)}
 			>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>{m["vaults.trash.delete_dialog.title"]()}</DialogTitle>
+						<DialogTitle>
+							{m.vaults_trash_delete_dialog_title()}
+						</DialogTitle>
 						<DialogDescription>
 							{itemToDelete?.title
-								? m["vaults.trash.delete_dialog.description.named"]({
+								? m.vaults_trash_delete_dialog_description_named({
 										title: itemToDelete.title,
 									})
-								: m["vaults.trash.delete_dialog.description.unnamed"]()}
+								: m.vaults_trash_delete_dialog_description_unnamed()}
 						</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>
-						<Button variant="outline" onClick={() => setItemToDelete(null)}>
-							{m["vaults.trash.delete_dialog.action.cancel"]()}
+						<Button
+							variant="outline"
+							onClick={() => setItemToDelete(null)}
+						>
+							{m.vaults_trash_delete_dialog_action_cancel()}
 						</Button>
 						<Button
 							variant="destructive"
 							onClick={handleConfirmPermanentDelete}
 						>
-							{m["vaults.trash.delete_dialog.action.confirm"]()}
+							{m.vaults_trash_delete_dialog_action_confirm()}
 						</Button>
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
-		</>
+		</div>
 	);
 }

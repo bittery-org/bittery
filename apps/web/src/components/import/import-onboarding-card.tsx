@@ -36,11 +36,11 @@ export function ImportOnboardingCard({
 				<SidebarMenu className="mb-2">
 					<SidebarMenuItem>
 						<SidebarMenuButton
-							tooltip={m["vaults.import.onboarding.collapsed_tooltip"]()}
+							tooltip={m.vaults_import_onboarding_collapsed_tooltip()}
 							onClick={() => setIsDialogOpen(true)}
 						>
 							<Upload />
-							<span>{m["vaults.import.onboarding.collapsed_label"]()}</span>
+							<span>{m.vaults_import_onboarding_collapsed_label()}</span>
 						</SidebarMenuButton>
 					</SidebarMenuItem>
 				</SidebarMenu>
@@ -49,7 +49,7 @@ export function ImportOnboardingCard({
 					<div className="flex items-center justify-between gap-2 border-sidebar-border/50 border-b px-2.5 py-2">
 						<p className="inline-flex items-center gap-1.5 text-[10px] text-sidebar-foreground/80 uppercase tracking-[0.13em]">
 							<span className="h-1.5 w-1.5 rounded-full bg-primary" />
-							{m["vaults.import.onboarding.badge"]()}
+							{m.vaults_import_onboarding_badge()}
 						</p>
 						<Button
 							type="button"
@@ -60,17 +60,17 @@ export function ImportOnboardingCard({
 						>
 							<X className="h-3 w-3" />
 							<span className="sr-only">
-								{m["vaults.import.onboarding.dismiss_sr_label"]()}
+								{m.vaults_import_onboarding_dismiss_sr_label()}
 							</span>
 						</Button>
 					</div>
 					<div className="space-y-2 px-2.5 py-2.5">
 						<p className="flex items-center gap-1.5 font-semibold text-sm">
 							<Vault className="h-3.5 w-3.5 text-primary" />
-							{m["vaults.import.onboarding.title"]()}
+							{m.vaults_import_onboarding_title()}
 						</p>
 						<p className="text-sidebar-foreground/75 text-xs leading-snug">
-							{m["vaults.import.onboarding.description"]()}
+							{m.vaults_import_onboarding_description()}
 						</p>
 						<Button
 							type="button"
@@ -80,7 +80,7 @@ export function ImportOnboardingCard({
 							onClick={() => setIsDialogOpen(true)}
 						>
 							<Upload className="mr-1.5 h-3.5 w-3.5" />
-							{m["vaults.import.onboarding.cta"]()}
+							{m.vaults_import_onboarding_cta()}
 						</Button>
 					</div>
 				</div>

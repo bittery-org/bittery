@@ -16,7 +16,7 @@ export const Route = createFileRoute("/_auth")({
 function AuthLayout() {
 	const { locale, setLocale, m } = useI18n();
 	const activeLocaleLabel =
-		locale === "en" ? m["i18n.language.en"]() : m["i18n.language.de"]();
+		locale === "en" ? m.i18n_language_en() : m.i18n_language_de();
 	const ActiveLocaleFlag =
 		locale === "en" ? IconFlagUnitedStates : IconFlagGermany;
 
@@ -80,7 +80,7 @@ function AuthLayout() {
 								rel="noopener noreferrer"
 								className="flex items-center gap-1 text-muted-foreground/60 text-xs transition-colors hover:text-muted-foreground"
 							>
-								{m["auth.footer.github"]()}
+								{m.auth_footer_github()}
 								<ExternalLink size={10} />
 							</a>
 							<span className="text-muted-foreground/20">|</span>
@@ -90,7 +90,7 @@ function AuthLayout() {
 								rel="noopener noreferrer"
 								className="flex items-center gap-1 text-muted-foreground/60 text-xs transition-colors hover:text-muted-foreground"
 							>
-								{m["auth.footer.help"]()}
+								{m.auth_footer_help()}
 								<ExternalLink size={10} />
 							</a>
 						</div>
@@ -100,7 +100,7 @@ function AuthLayout() {
 								onValueChange={(value) => setLocale(value as AppLocale)}
 							>
 								<SelectTrigger
-									aria-label={m["auth.footer.language"]()}
+									aria-label={m.auth_footer_language()}
 									className="h-7 min-w-28 border-0 bg-transparent px-1.5 text-xs shadow-none ring-0 focus:ring-0"
 								>
 									<ActiveLocaleFlag size={14} className="shrink-0" />
@@ -120,8 +120,8 @@ function AuthLayout() {
 												)}
 												<span>
 													{value === "en"
-														? m["i18n.language.en"]()
-														: m["i18n.language.de"]()}
+														? m.i18n_language_en()
+														: m.i18n_language_de()}
 												</span>
 											</span>
 										</SelectItem>

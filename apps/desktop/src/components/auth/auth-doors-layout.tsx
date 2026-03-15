@@ -90,14 +90,14 @@ export function AuthDoorsLayout({
 		[activeServerUrl],
 	);
 	const activeLocaleLabel =
-		locale === "en" ? m["i18n.language.en"]() : m["i18n.language.de"]();
+		locale === "en" ? m.i18n_language_en() : m.i18n_language_de();
 	const ActiveLocaleFlag =
 		locale === "en" ? IconFlagUnitedStates : IconFlagGermany;
 
 	const applyServerChange = async (serverUrl: string) => {
 		const nextServerUrl = await setActiveAuthServerUrl(serverUrl);
 		if (!nextServerUrl) {
-			toast.error(m["toast.auth.server.invalid_url"]());
+			toast.error(m.toast_auth_server_invalid_url());
 			return false;
 		}
 
@@ -115,7 +115,7 @@ export function AuthDoorsLayout({
 
 		setNewServerUrl("");
 		setIsServerPopoverOpen(false);
-		toast.success(m["toast.auth.server.updated"]());
+		toast.success(m.toast_auth_server_updated());
 	};
 
 	const handleSelectServer = async (serverUrl: string) => {
@@ -167,14 +167,14 @@ export function AuthDoorsLayout({
 									>
 										<Server size={12} />
 										<span className="max-w-44 truncate">
-											{activeServerLabel || m["auth.footer.server.loading"]()}
+											{activeServerLabel || m.auth_footer_server_loading()}
 										</span>
 										<ChevronDown size={12} className="opacity-60" />
 									</Button>
 								</PopoverTrigger>
 								<PopoverContent align="start" className="w-72 p-2">
 									<p className="px-1 pb-2 font-medium text-[0.65rem] text-muted-foreground uppercase tracking-[0.1em]">
-										{m["auth.footer.server.title"]()}
+										{m.auth_footer_server_title()}
 									</p>
 									<div className="space-y-1">
 										{knownServerUrls.map((serverUrl) => (
@@ -203,7 +203,7 @@ export function AuthDoorsLayout({
 									>
 										<Input
 											type="url"
-											placeholder={m["auth.footer.server.placeholder"]()}
+											placeholder={m.auth_footer_server_placeholder()}
 											value={newServerUrl}
 											onChange={(event) => setNewServerUrl(event.target.value)}
 											className="h-8 text-xs"
@@ -222,7 +222,7 @@ export function AuthDoorsLayout({
 									rel="noopener noreferrer"
 									className="flex items-center gap-1 text-muted-foreground/60 text-xs transition-colors hover:text-muted-foreground"
 								>
-									{m["auth.footer.help"]()}
+									{m.auth_footer_help()}
 									<ExternalLink size={10} />
 								</a>
 								<Select
@@ -230,7 +230,7 @@ export function AuthDoorsLayout({
 									onValueChange={(value) => setLocale(value as AppLocale)}
 								>
 									<SelectTrigger
-										aria-label={m["auth.footer.language"]()}
+										aria-label={m.auth_footer_language()}
 										className="h-7 min-w-28 border-0 bg-transparent px-1.5 text-xs shadow-none ring-0 focus:ring-0"
 									>
 										<ActiveLocaleFlag size={14} className="shrink-0" />
@@ -250,8 +250,8 @@ export function AuthDoorsLayout({
 													)}
 													<span>
 														{value === "en"
-															? m["i18n.language.en"]()
-															: m["i18n.language.de"]()}
+															? m.i18n_language_en()
+															: m.i18n_language_de()}
 													</span>
 												</span>
 											</SelectItem>

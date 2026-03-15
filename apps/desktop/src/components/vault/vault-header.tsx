@@ -26,7 +26,7 @@ export function VaultHeader({ hasVaults, onNewItemClick }: VaultHeaderProps) {
 			) : null} */}
 			<Button onClick={onNewItemClick} disabled={!hasVaults}>
 				<IconPlusOutlineDuo18 />
-				{m["vaults.detail.action.new_item"]()}
+				{m.vaults_detail_action_new_item()}
 			</Button>
 		</header>
 	);

@@ -74,8 +74,8 @@ function formatPeriodRange(start: Date | string, end: Date | string): string {
 
 function getSeatCountLabel(count: number, m: TeamMessageCatalog): string {
 	return count === 1
-		? m["team.invite_dialog.seat_count.single"]({ count })
-		: m["team.invite_dialog.seat_count.plural"]({ count });
+		? m.team_invite_dialog_seat_count_single({ count })
+		: m.team_invite_dialog_seat_count_plural({ count });
 }
 
 export function InviteDialog({ teamId }: InviteDialogProps) {
@@ -182,7 +182,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 		onSuccess: async (data) => {
 			const url = `${window.location.origin}/invite/${data.token}`;
 			setInviteLink(url);
-			toast.success(m["team.invite_dialog.toast.created"]());
+			toast.success(m.team_invite_dialog_toast_created());
 			await invalidator.invalidateTeam();
 		},
 		onError: (error: Error) => {
@@ -210,34 +210,34 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 			<DialogTrigger asChild>
 				<Button size="sm" className="h-8 px-2 sm:px-3">
 					<UserPlus className="mr-1.5 h-3.5 w-3.5" />
-					<span className="text-xs">{m["team.invite_dialog.trigger"]()}</span>
+					<span className="text-xs">{m.team_invite_dialog_trigger()}</span>
 				</Button>
 			</DialogTrigger>
 			<DialogContent className="max-h-[85vh] overflow-y-auto">
 				<form onSubmit={handleSubmit}>
 					<DialogHeader>
-						<DialogTitle>{m["team.invite_dialog.title"]()}</DialogTitle>
+						<DialogTitle>{m.team_invite_dialog_title()}</DialogTitle>
 						<DialogDescription>
-							{m["team.invite_dialog.description"]()}
+							{m.team_invite_dialog_description()}
 						</DialogDescription>
 					</DialogHeader>
 					<div className="grid gap-4 py-4">
 						<div className="grid gap-2">
 							<Label htmlFor="email">
-								{m["team.invite_dialog.field.email"]()}
+								{m.team_invite_dialog_field_email()}
 							</Label>
 							<Input
 								id="email"
 								type="email"
 								value={email}
 								onChange={(e) => setEmail(e.target.value)}
-								placeholder={m["team.invite_dialog.placeholder.email"]()}
+								placeholder={m.team_invite_dialog_placeholder_email()}
 								autoFocus
 							/>
 						</div>
 						<div className="grid gap-2">
 							<Label htmlFor="role">
-								{m["team.invite_dialog.field.role"]()}
+								{m.team_invite_dialog_field_role()}
 							</Label>
 							<Select
 								value={role}
@@ -248,15 +248,15 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 								</SelectTrigger>
 								<SelectContent>
 									<SelectItem value="member">
-										{m["team.role.member"]()}
+										{m.team_role_member()}
 									</SelectItem>
 									<SelectItem value="admin">
-										{m["team.role.admin"]()}
+										{m.team_role_admin()}
 									</SelectItem>
 								</SelectContent>
 							</Select>
 							<p className="text-muted-foreground text-xs">
-								{m["team.invite_dialog.hint.role"]()}
+								{m.team_invite_dialog_hint_role()}
 							</p>
 						</div>
 						{hasSeatPreview && seatPreview && (
@@ -267,7 +267,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 									</div>
 									<div className="flex min-w-0 flex-1 items-center justify-between">
 										<p className="font-medium text-sm">
-											{m["team.invite_dialog.billing_impact.title"]()}
+											{m.team_invite_dialog_billing_impact_title()}
 										</p>
 										<Badge
 											variant="secondary"
@@ -282,9 +282,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 								<div className="flex items-end justify-between gap-3">
 									<div className="space-y-0.5">
 										<p className="text-muted-foreground text-xs">
-											{m[
-												"team.invite_dialog.billing_impact.estimated_invoice"
-											]()}
+											{m.team_invite_dialog_billing_impact_estimated_invoice()}
 										</p>
 										<p className="font-semibold text-lg tabular-nums leading-tight tracking-tight">
 											{formatCurrencyFromCents(
@@ -301,9 +299,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 												size="sm"
 												className="h-7 text-xs"
 											>
-												{m[
-													"team.invite_dialog.billing_impact.view_breakdown"
-												]()}
+												{m.team_invite_dialog_billing_impact_view_breakdown()}
 											</Button>
 										</PopoverTrigger>
 										<PopoverContent
@@ -315,24 +311,20 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 										>
 											<div className="border-b px-4 py-3">
 												<p className="font-medium text-sm">
-													{m["team.invite_dialog.invoice_preview.title"]()}
+													{m.team_invite_dialog_invoice_preview_title()}
 												</p>
 												<p className="mt-0.5 text-muted-foreground text-xs">
 													{seatPreview.nextQuantity -
 														seatPreview.currentQuantity ===
 													1
-														? m[
-																"team.invite_dialog.invoice_preview.adding_seats.single"
-															]({
+														? m.team_invite_dialog_invoice_preview_adding_seats_single({
 																count:
 																	seatPreview.nextQuantity -
 																	seatPreview.currentQuantity,
 																currentQuantity: seatPreview.currentQuantity,
 																nextQuantity: seatPreview.nextQuantity,
 															})
-														: m[
-																"team.invite_dialog.invoice_preview.adding_seats.plural"
-															]({
+														: m.team_invite_dialog_invoice_preview_adding_seats_plural({
 																count:
 																	seatPreview.nextQuantity -
 																	seatPreview.currentQuantity,
@@ -359,17 +351,13 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 															</p>
 															<p className="text-muted-foreground text-xs">
 																{line.isProration
-																	? m[
-																			"team.invite_dialog.invoice_preview.line.seats_change"
-																		]({
+																	? m.team_invite_dialog_invoice_preview_line_seats_change({
 																			currentQuantity:
 																				seatPreview.currentQuantity,
 																			nextQuantity: seatPreview.nextQuantity,
 																		})
 																	: line.quantity !== null
-																		? m[
-																				"team.invite_dialog.invoice_preview.line.quantity"
-																			]({ quantity: line.quantity })
+																		? m.team_invite_dialog_invoice_preview_line_quantity({ quantity: line.quantity })
 																		: ""}
 																{(line.isProration || line.quantity !== null) &&
 																line.unitAmountCents !== null &&
@@ -380,9 +368,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 																{line.unitAmountCents !== null &&
 																line.quantity !== null &&
 																line.quantity > 0
-																	? m[
-																			"team.invite_dialog.invoice_preview.line.each"
-																		]({
+																	? m.team_invite_dialog_invoice_preview_line_each({
 																			amount: formatCurrencyFromCents(
 																				line.unitAmountCents,
 																				line.currency,
@@ -402,7 +388,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 											</div>
 											<div className="flex items-center justify-between border-t bg-muted/40 px-4 py-3">
 												<p className="font-medium text-sm">
-													{m["team.invite_dialog.invoice_preview.total"]()}
+													{m.team_invite_dialog_invoice_preview_total()}
 												</p>
 												<p className="font-semibold text-sm tabular-nums">
 													{formatCurrencyFromCents(
@@ -419,7 +405,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 						{inviteLink && (
 							<div className="rounded-md border bg-muted/40 p-3">
 								<p className="mb-2 font-medium text-sm">
-									{m["team.invite_dialog.invite_link.title"]()}
+									{m.team_invite_dialog_invite_link_title()}
 								</p>
 								<p className="break-all text-muted-foreground text-xs">
 									{inviteLink}
@@ -432,7 +418,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 									onClick={() =>
 										copyWithToast(
 											inviteLink,
-											m["team.invite_dialog.invite_link.copy_label"](),
+											m.team_invite_dialog_invite_link_copy_label(),
 											{
 												showAutoClearMessage: false,
 											},
@@ -440,7 +426,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 									}
 								>
 									<Copy className="mr-2 h-4 w-4" />
-									{m["team.invite_dialog.invite_link.copy_button"]()}
+									{m.team_invite_dialog_invite_link_copy_button()}
 								</Button>
 							</div>
 						)}
@@ -451,12 +437,12 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 							variant="outline"
 							onClick={() => setOpen(false)}
 						>
-							{m["team.common.action.cancel"]()}
+							{m.team_common_action_cancel()}
 						</Button>
 						<Button type="submit" disabled={inviteMutation.isPending}>
 							{inviteMutation.isPending
-								? m["team.invite_dialog.button.sending"]()
-								: m["team.invite_dialog.button.create_invitation"]()}
+								? m.team_invite_dialog_button_sending()
+								: m.team_invite_dialog_button_create_invitation()}
 						</Button>
 					</DialogFooter>
 				</form>

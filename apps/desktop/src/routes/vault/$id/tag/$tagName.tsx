@@ -1,6 +1,6 @@
 import { useToggleFavorite, useVaultItems } from "@bittery/core/hooks";
 import { maskCardNumber } from "@bittery/shared/credit-card";
-import { Button, cn } from "@bittery/ui";
+import { Button, cn, getTagColorFromName } from "@bittery/ui";
 import {
 	IconArrowLeftOutlineDuo18,
 	IconMobileOutlineDuo18,
@@ -10,7 +10,6 @@ import {
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";
 import { Favicon } from "../../../../components/vault/favicon";
-import { getTagColorFromName } from "../../../../components/vault/tag-badge";
 
 export const Route = createFileRoute("/vault/$id/tag/$tagName")({
 	component: TagRouteComponent,
@@ -56,7 +55,7 @@ function TagRouteComponent() {
 			<div className="flex flex-1 flex-col">
 				<div className="flex flex-1 items-center justify-center">
 					<div className="text-muted-foreground text-sm">
-						{m["vaults.tag.loading"]()}
+						{m.vaults_tag_loading()}
 					</div>
 				</div>
 			</div>
@@ -89,10 +88,10 @@ function TagRouteComponent() {
 					<h2 className="font-semibold text-lg">{decodedTagName}</h2>
 					<p className="text-muted-foreground text-sm">
 						{filteredItems.length === 1
-							? m["vaults.detail.count.items.single"]({
+							? m.vaults_detail_count_items_single({
 									count: filteredItems.length,
 								})
-							: m["vaults.detail.count.items.plural"]({
+							: m.vaults_detail_count_items_plural({
 									count: filteredItems.length,
 								})}
 					</p>
@@ -110,10 +109,10 @@ function TagRouteComponent() {
 							<IconTagOutlineDuo18 size={48} style={{ color: tagColor }} />
 						</div>
 						<h3 className="mb-2 font-semibold text-lg">
-							{m["vaults.tag.empty.title"]()}
+							{m.vaults_tag_empty_title()}
 						</h3>
 						<p className="text-muted-foreground text-sm">
-							{m["vaults.tag.empty.description"]({
+							{m.vaults_tag_empty_description({
 								tagName: decodedTagName,
 							})}
 						</p>
@@ -139,9 +138,7 @@ function TagRouteComponent() {
 												<span className="font-medium">{item.title}</span>
 												{item.category === "login" && item.totpSecret && (
 													<span
-														title={m[
-															"vaults.detail.items.list.item.badge.has_2fa"
-														]()}
+														title={m.vaults_detail_items_list_item_badge_has_2fa()}
 													>
 														<IconMobileOutlineDuo18 className="size-3.5 text-primary" />
 													</span>

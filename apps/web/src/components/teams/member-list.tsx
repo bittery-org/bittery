@@ -187,24 +187,24 @@ export function MemberList({
 
 			const rotatedVaultsLabel =
 				(result.vaultRotations?.length ?? 0) === 1
-					? m["team.members.toast.rotated_vaults.single"]({
+					? m.team_members_toast_rotated_vaults_single({
 							count: result.vaultRotations?.length ?? 0,
 						})
-					: m["team.members.toast.rotated_vaults.plural"]({
+					: m.team_members_toast_rotated_vaults_plural({
 							count: result.vaultRotations?.length ?? 0,
 						});
 
 			const reEncryptedItemsLabel =
 				totalItems === 1
-					? m["team.members.toast.reencrypted_items.single"]({
+					? m.team_members_toast_reencrypted_items_single({
 							count: totalItems,
 						})
-					: m["team.members.toast.reencrypted_items.plural"]({
+					: m.team_members_toast_reencrypted_items_plural({
 							count: totalItems,
 						});
 
 			toast.success(
-				m["team.members.toast.removed_summary"]({
+				m.team_members_toast_removed_summary({
 					rotatedVaults: rotatedVaultsLabel,
 					reEncryptedItems: reEncryptedItemsLabel,
 				}),
@@ -214,14 +214,14 @@ export function MemberList({
 			console.error("Team member removal with key rotation failed:", error);
 			if (error instanceof TeamRotationError) {
 				if (error.code === "MASTER_UNLOCK_KEY_MISSING") {
-					toast.error(m["team.error.master_unlock_key_missing"]());
+					toast.error(m.team_error_master_unlock_key_missing());
 				} else if (error.code === "SESSION_DATA_MISSING") {
-					toast.error(m["team.error.session_data_missing"]());
+					toast.error(m.team_error_session_data_missing());
 				} else {
 					toast.error(
-						m["team.error.vault_key_decrypt_failed"]({
+						m.team_error_vault_key_decrypt_failed({
 							vaultName:
-								error.params.vaultName ?? m["team.common.unknown_vault"](),
+								error.params.vaultName ?? m.team_common_unknown_vault(),
 						}),
 					);
 				}
@@ -229,7 +229,7 @@ export function MemberList({
 				toast.error(
 					error instanceof Error
 						? error.message
-						: m["team.members.toast.remove_failed"](),
+						: m.team_members_toast_remove_failed(),
 				);
 			}
 		} finally {
@@ -248,15 +248,15 @@ export function MemberList({
 
 	const getRoleLabel = (role: Member["role"]) => {
 		if (isSelfHostedMode && role === "owner") {
-			return m["team.members.role.owner_self_hosted"]();
+			return m.team_members_role_owner_self_hosted();
 		}
 		switch (role) {
 			case "owner":
-				return m["team.role.owner"]();
+				return m.team_role_owner();
 			case "admin":
-				return m["team.role.admin"]();
+				return m.team_role_admin();
 			default:
-				return m["team.role.member"]();
+				return m.team_role_member();
 		}
 	};
 
@@ -271,7 +271,7 @@ export function MemberList({
 	if (members.length === 0) {
 		return (
 			<p className="py-8 text-center text-muted-foreground">
-				{m["team.members.empty"]()}
+				{m.team_members_empty()}
 			</p>
 		);
 	}
@@ -304,7 +304,7 @@ export function MemberList({
 											variant="outline"
 											className="border-primary/30 bg-primary/10 text-[10px] text-primary"
 										>
-											{m["team.members.badge.you"]()}
+											{m.team_members_badge_you()}
 										</Badge>
 									)}
 								</div>
@@ -323,14 +323,14 @@ export function MemberList({
 						<div className="mt-3 flex items-center justify-between border-t pt-3">
 							<span className="text-muted-foreground text-xs">
 								{member.joinedAt
-									? m["team.members.joined.date"]({
+									? m.team_members_joined_date({
 											date: formatDate(member.joinedAt, {
 												month: "short",
 												day: "numeric",
 												year: "numeric",
 											}),
 										})
-									: m["team.members.joined.none"]()}
+									: m.team_members_joined_none()}
 							</span>
 
 							{canRemove && (
@@ -344,31 +344,31 @@ export function MemberList({
 												className="h-7 gap-1.5 px-2 text-muted-foreground text-xs hover:text-foreground"
 											>
 												<UserMinus className="h-3.5 w-3.5" />
-												{m["team.members.action.remove"]()}
+												{m.team_members_action_remove()}
 											</Button>
 										</AlertDialogTrigger>
 										<AlertDialogContent>
 											<AlertDialogHeader>
 												<AlertDialogTitle>
-													{m["team.members.remove_dialog.title"]()}
+													{m.team_members_remove_dialog_title()}
 												</AlertDialogTitle>
 												<AlertDialogDescription>
-													{m["team.members.remove_dialog.description"]({
+													{m.team_members_remove_dialog_description({
 														name: member.name,
 													})}
 												</AlertDialogDescription>
 											</AlertDialogHeader>
 											<AlertDialogFooter>
 												<AlertDialogCancel disabled={isBusy}>
-													{m["team.common.action.cancel"]()}
+													{m.team_common_action_cancel()}
 												</AlertDialogCancel>
 												<AlertDialogAction
 													disabled={isBusy}
 													onClick={() => handleRemoveMember(member.userId)}
 												>
 													{removingUserId === member.userId
-														? m["team.members.remove_dialog.action.removing"]()
-														: m["team.members.remove_dialog.action.confirm"]()}
+														? m.team_members_remove_dialog_action_removing()
+														: m.team_members_remove_dialog_action_confirm()}
 												</AlertDialogAction>
 											</AlertDialogFooter>
 										</AlertDialogContent>

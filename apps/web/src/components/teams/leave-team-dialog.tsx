@@ -124,7 +124,7 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 				vaultRotations,
 			});
 
-			toast.success(m["team.leave_dialog.toast.left"]());
+			toast.success(m.team_leave_dialog_toast_left());
 			await invalidator.invalidateTeam();
 			setOpen(false);
 			navigate({ to: "/team" });
@@ -132,14 +132,14 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 			console.error("Failed to leave team:", error);
 			if (error instanceof TeamRotationError) {
 				if (error.code === "MASTER_UNLOCK_KEY_MISSING") {
-					toast.error(m["team.error.master_unlock_key_missing"]());
+					toast.error(m.team_error_master_unlock_key_missing());
 				} else if (error.code === "SESSION_DATA_MISSING") {
-					toast.error(m["team.error.session_data_missing"]());
+					toast.error(m.team_error_session_data_missing());
 				} else {
 					toast.error(
-						m["team.error.vault_key_decrypt_failed"]({
+						m.team_error_vault_key_decrypt_failed({
 							vaultName:
-								error.params.vaultName ?? m["team.common.unknown_vault"](),
+								error.params.vaultName ?? m.team_common_unknown_vault(),
 						}),
 					);
 				}
@@ -147,7 +147,7 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 				toast.error(
 					error instanceof Error
 						? error.message
-						: m["team.leave_dialog.toast.leave_failed"](),
+						: m.team_leave_dialog_toast_leave_failed(),
 				);
 			}
 		} finally {
@@ -160,26 +160,26 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 			<AlertDialogTrigger asChild>
 				<Button variant="outline">
 					<LogOut className="mr-2 h-4 w-4" />
-					{m["team.leave_dialog.trigger"]()}
+					{m.team_leave_dialog_trigger()}
 				</Button>
 			</AlertDialogTrigger>
 			<AlertDialogContent>
 				<AlertDialogHeader>
-					<AlertDialogTitle>{m["team.leave_dialog.title"]()}</AlertDialogTitle>
+					<AlertDialogTitle>{m.team_leave_dialog_title()}</AlertDialogTitle>
 					<AlertDialogDescription>
-						{m["team.leave_dialog.description.prefix"]()}{" "}
+						{m.team_leave_dialog_description_prefix()}{" "}
 						<strong>{teamName}</strong>{" "}
-						{m["team.leave_dialog.description.suffix"]()}
+						{m.team_leave_dialog_description_suffix()}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>
 					<AlertDialogCancel>
-						{m["team.common.action.cancel"]()}
+						{m.team_common_action_cancel()}
 					</AlertDialogCancel>
 					<AlertDialogAction onClick={handleLeave} disabled={isLeaving}>
 						{isLeaving
-							? m["team.leave_dialog.action.leaving"]()
-							: m["team.leave_dialog.action.confirm"]()}
+							? m.team_leave_dialog_action_leaving()
+							: m.team_leave_dialog_action_confirm()}
 					</AlertDialogAction>
 				</AlertDialogFooter>
 			</AlertDialogContent>

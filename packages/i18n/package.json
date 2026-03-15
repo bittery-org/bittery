@@ -7,15 +7,34 @@
 	"types": "./src/index.ts",
 	"exports": {
 		".": "./src/index.ts",
-		"./react": "./src/react.ts",
-		"./format": "./src/format.ts"
+		"./react": "./src/react/index.ts",
+		"./format": "./src/format.ts",
+		"./paraglide/messages": {
+			"types": "./src/paraglide/messages.d.ts",
+			"default": "./src/paraglide/messages.js"
+		},
+		"./paraglide/runtime": {
+			"types": "./src/paraglide/runtime.d.ts",
+			"default": "./src/paraglide/runtime.js"
+		},
+		"./paraglide/registry": {
+			"types": "./src/paraglide/registry.d.ts",
+			"default": "./src/paraglide/registry.js"
+		},
+		"./paraglide/server": {
+			"types": "./src/paraglide/server.d.ts",
+			"default": "./src/paraglide/server.js"
+		}
 	},
 	"scripts": {
+		"build": "node ./scripts/generate-paraglide.mjs",
 		"check-types": "tsc --noEmit",
 		"check:keys": "node ./scripts/check-key-parity.mjs",
+		"i18n:watch": "node ./scripts/watch-paraglide.mjs",
 		"test": "bun test ./src"
 	},
 	"devDependencies": {
+		"@inlang/paraglide-js": "^2.13.1",
 		"@bittery/config": "workspace:*",
 		"@types/react": "catalog:",
 		"react": "catalog:",

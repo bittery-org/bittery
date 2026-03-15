@@ -109,15 +109,15 @@ export default function SignUpForm({
 		return (
 			<div className="w-full">
 				<h1 className="text-center font-semibold text-2xl tracking-tight">
-					{m["auth.signup.invite_only.title"]()}
+					{m.auth_signup_invite_only_title()}
 				</h1>
 				<div className="mt-6 rounded-2xl border bg-card p-6">
 					<div className="space-y-4">
 						<p className="text-muted-foreground text-sm leading-relaxed">
-							{m["auth.signup.invite_only.description"]()}
+							{m.auth_signup_invite_only_description()}
 						</p>
 						<Button type="button" onClick={onSwitchToSignIn} className="w-full">
-							{m["auth.signup.button.back_to_signin"]()}
+							{m.auth_signup_button_back_to_signin()}
 						</Button>
 					</div>
 				</div>
@@ -139,17 +139,17 @@ export default function SignUpForm({
 			<div className="text-center">
 				<h1 className="font-semibold text-2xl tracking-tight">
 					{showPlanStep
-						? m["auth.signup.header.choose_plan"]()
+						? m.auth_signup_header_choose_plan()
 						: showAccountStep
-							? m["auth.signup.header.create_account"]()
-							: m["auth.signup.header.verify_email"]()}
+							? m.auth_signup_header_create_account()
+							: m.auth_signup_header_verify_email()}
 				</h1>
 				<p className="mx-auto mt-2 max-w-80 text-muted-foreground text-sm">
 					{showPlanStep
-						? m["auth.signup.subheader.choose_plan"]()
+						? m.auth_signup_subheader_choose_plan()
 						: showAccountStep
-							? m["auth.signup.subheader.create_account"]()
-							: m["auth.signup.subheader.verify_email"]()}
+							? m.auth_signup_subheader_create_account()
+							: m.auth_signup_subheader_verify_email()}
 				</p>
 			</div>
 
@@ -185,7 +185,7 @@ export default function SignUpForm({
 								<Check size={10} />
 							</span>
 						)}
-						{m["auth.signup.step.plan"]()}
+						{m.auth_signup_step_plan()}
 					</button>
 					<button
 						type="button"
@@ -214,7 +214,7 @@ export default function SignUpForm({
 								2
 							</span>
 						)}
-						{m["auth.signup.step.account"]()}
+						{m.auth_signup_step_account()}
 					</button>
 					<button
 						type="button"
@@ -234,7 +234,7 @@ export default function SignUpForm({
 						>
 							3
 						</span>
-						{m["auth.signup.step.verify"]()}
+						{m.auth_signup_step_verify()}
 					</button>
 				</div>
 			</div>
@@ -312,7 +312,7 @@ function PlanSelectionStep({
 												variant="default"
 												className="h-5 rounded-full px-2 font-medium text-[10px] shadow-sm"
 											>
-												{m["auth.signup.plan.popular"]()}
+												{m.auth_signup_plan_popular()}
 											</Badge>
 										</div>
 									)}
@@ -391,7 +391,7 @@ function PlanSelectionStep({
 							className="flex w-full items-center justify-center gap-1.5 py-1 text-muted-foreground text-xs transition-colors hover:text-foreground"
 						>
 							<span className="border-current border-b border-dashed">
-								{m["auth.signup.compare_all_plans"]()}
+								{m.auth_signup_compare_all_plans()}
 							</span>
 						</button>
 						<PlanComparisonDialog
@@ -412,12 +412,12 @@ function PlanSelectionStep({
 							{(field) => (
 								<div className="space-y-2 rounded-xl border bg-muted/20 p-3.5">
 									<Label htmlFor={field.name} className="text-xs">
-										{m["auth.signup.team_name.label"]()}
+										{m.auth_signup_team_name_label()}
 									</Label>
 									<Input
 										id={field.name}
 										name={field.name}
-										placeholder={m["auth.signup.team_name.placeholder"]()}
+										placeholder={m.auth_signup_team_name_placeholder()}
 										value={field.state.value}
 										onBlur={field.handleBlur}
 										onChange={(e) => field.handleChange(e.target.value)}
@@ -425,7 +425,7 @@ function PlanSelectionStep({
 										className="h-9"
 									/>
 									<p className="text-[11px] text-muted-foreground/70">
-										{m["auth.signup.team_name.help"]()}
+										{m.auth_signup_team_name_help()}
 									</p>
 								</div>
 							)}
@@ -447,13 +447,13 @@ function PlanSelectionStep({
 						className="h-10 w-full bg-primary font-medium shadow-sm"
 						onClick={() => {
 							if (plan === "team" && !organizationName.trim()) {
-								toast.error(m["auth.signup.error.team_name_required"]());
+								toast.error(m.auth_signup_error_team_name_required());
 								return;
 							}
 							onContinue();
 						}}
 					>
-						{m["auth.signup.button.continue"]()}
+						{m.auth_signup_button_continue()}
 					</Button>
 				)}
 			</form.Subscribe>
@@ -464,7 +464,7 @@ function PlanSelectionStep({
 				onClick={onSwitchToSignIn}
 				className="w-full text-muted-foreground"
 			>
-				{m["auth.signup.button.have_account"]()}
+				{m.auth_signup_button_have_account()}
 			</Button>
 		</div>
 	);
@@ -546,7 +546,7 @@ function AccountSetupStep({
 								onClick={onBack}
 								className="rounded-lg px-2.5 py-1 font-medium text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground"
 							>
-								{m["auth.signup.summary.change"]()}
+								{m.auth_signup_summary_change()}
 							</button>
 						</div>
 					);
@@ -558,12 +558,12 @@ function AccountSetupStep({
 				{(field) => (
 					<div className="space-y-1.5">
 						<Label htmlFor={field.name} className="font-medium text-xs">
-							{m["auth.signup.form.full_name"]()}
+							{m.auth_signup_form_full_name()}
 						</Label>
 						<Input
 							id={field.name}
 							name={field.name}
-							placeholder={m["auth.signup.form.full_name.placeholder"]()}
+							placeholder={m.auth_signup_form_full_name_placeholder()}
 							value={field.state.value}
 							onBlur={field.handleBlur}
 							onChange={(e) => field.handleChange(e.target.value)}
@@ -579,13 +579,13 @@ function AccountSetupStep({
 				{(field) => (
 					<div className="space-y-1.5">
 						<Label htmlFor={field.name} className="font-medium text-xs">
-							{m["auth.signup.form.email"]()}
+							{m.auth_signup_form_email()}
 						</Label>
 						<Input
 							id={field.name}
 							name={field.name}
 							type="email"
-							placeholder={m["auth.signup.form.email.placeholder"]()}
+							placeholder={m.auth_signup_form_email_placeholder()}
 							value={field.state.value}
 							onBlur={field.handleBlur}
 							onChange={(e) => field.handleChange(e.target.value)}
@@ -601,7 +601,7 @@ function AccountSetupStep({
 				{(field) => (
 					<div className="space-y-1.5">
 						<Label htmlFor={field.name} className="font-medium text-xs">
-							{m["auth.signup.form.master_password"]()}
+							{m.auth_signup_form_master_password()}
 						</Label>
 						<div className="relative">
 							<Input
@@ -625,7 +625,7 @@ function AccountSetupStep({
 							</Button>
 						</div>
 						<p className="text-[11px] text-muted-foreground/70">
-							{m["auth.signup.form.master_password.help"]()}
+							{m.auth_signup_form_master_password_help()}
 						</p>
 					</div>
 				)}
@@ -658,8 +658,8 @@ function AccountSetupStep({
 				<div className="min-w-0 flex-1">
 					<p className="font-medium text-sm leading-none">
 						{hasDownloadedKit
-							? m["auth.signup.emergency_kit.saved_title"]()
-							: m["auth.signup.emergency_kit.download_title"]()}
+							? m.auth_signup_emergency_kit_saved_title()
+							: m.auth_signup_emergency_kit_download_title()}
 					</p>
 					<p
 						className={cn(
@@ -670,8 +670,8 @@ function AccountSetupStep({
 						)}
 					>
 						{hasDownloadedKit
-							? m["auth.signup.emergency_kit.saved_description"]()
-							: m["auth.signup.emergency_kit.required_description"]()}
+							? m.auth_signup_emergency_kit_saved_description()
+							: m.auth_signup_emergency_kit_required_description()}
 					</p>
 				</div>
 
@@ -699,23 +699,23 @@ function AccountSetupStep({
 						<>
 							<Loader2 size={16} className="mr-2 animate-spin" />
 							{isEncrypting
-								? m["auth.signup.button.setting_up_encryption"]()
-								: m["auth.signup.button.creating_account"]()}
+								? m.auth_signup_button_setting_up_encryption()
+								: m.auth_signup_button_creating_account()}
 						</>
 					) : requestSignupVerificationMutation.isPending ? (
 						<>
 							<Loader2 size={16} className="mr-2 animate-spin" />
-							{m["auth.signup.button.sending_verification_code"]()}
+							{m.auth_signup_button_sending_verification_code()}
 						</>
 					) : !hasDownloadedKit ? (
 						<>
 							<Shield size={16} className="mr-2" />
-							{m["auth.signup.button.download_kit_to_continue"]()}
+							{m.auth_signup_button_download_kit_to_continue()}
 						</>
 					) : hasVerifiedSignup ? (
-						m["auth.signup.button.create_account"]()
+						m.auth_signup_button_create_account()
 					) : (
-						m["auth.signup.button.continue_to_verification"]()
+						m.auth_signup_button_continue_to_verification()
 					)}
 				</Button>
 			</div>
@@ -728,7 +728,7 @@ function AccountSetupStep({
 					className="h-9 gap-1.5 px-3 text-muted-foreground"
 				>
 					<ArrowLeft size={14} />
-					{m["auth.signup.button.back"]()}
+					{m.auth_signup_button_back()}
 				</Button>
 				<div className="h-4 w-px bg-border" />
 				<Button
@@ -737,7 +737,7 @@ function AccountSetupStep({
 					onClick={onSwitchToSignIn}
 					className="flex-1 text-muted-foreground"
 				>
-					{m["auth.signup.button.have_account"]()}
+					{m.auth_signup_button_have_account()}
 				</Button>
 			</div>
 		</form>

@@ -39,7 +39,7 @@ export function DeleteVaultDialog({
 			const errorMessage =
 				error instanceof Error
 					? error.message
-					: m["vaults.delete_dialog.toast.delete_failed"]();
+					: m.vaults_delete_dialog_toast_delete_failed();
 			toast.error(errorMessage);
 		} finally {
 			setIsDeleting(false);
@@ -51,17 +51,17 @@ export function DeleteVaultDialog({
 			<AlertDialogContent>
 				<AlertDialogHeader>
 					<AlertDialogTitle>
-						{m["vaults.delete_dialog.title"]()}
+						{m.vaults_delete_dialog_title()}
 					</AlertDialogTitle>
 					<AlertDialogDescription>
-						{m["vaults.delete_dialog.description"]({
+						{m.vaults_delete_dialog_description({
 							vaultName: vault?.name ?? "",
 						})}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>
 					<AlertDialogCancel disabled={isDeleting}>
-						{m["vaults.delete_dialog.action.cancel"]()}
+						{m.vaults_delete_dialog_action_cancel()}
 					</AlertDialogCancel>
 					<AlertDialogAction
 						onClick={handleDelete}
@@ -69,8 +69,8 @@ export function DeleteVaultDialog({
 						className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 					>
 						{isDeleting
-							? m["vaults.delete_dialog.action.deleting"]()
-							: m["vaults.delete_dialog.action.confirm"]()}
+							? m.vaults_delete_dialog_action_deleting()
+							: m.vaults_delete_dialog_action_confirm()}
 					</AlertDialogAction>
 				</AlertDialogFooter>
 			</AlertDialogContent>

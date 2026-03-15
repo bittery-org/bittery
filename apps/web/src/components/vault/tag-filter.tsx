@@ -7,9 +7,11 @@ import {
 	CommandItem,
 	CommandList,
 	cn,
+	getTagColorFromName,
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
+	TagBadge,
 } from "@bittery/ui";
 import {
 	IconCheckOutlineDuo18 as Check,
@@ -18,7 +20,6 @@ import {
 } from "@bittery/ui/icons";
 import { useState } from "react";
 import { useI18n } from "@/providers/i18n-provider";
-import { getTagColorFromName, TagBadge } from "./tag-badge";
 
 interface TagFilterProps {
 	tags: string[];
@@ -70,13 +71,13 @@ export function TagFilter({
 						<span>
 							{selectedTags.length > 0
 								? selectedTags.length === 1
-									? m["vaults.detail.items.tag_filter.button.count.single"]({
+									? m.vaults_detail_items_tag_filter_button_count_single({
 											count: selectedTags.length,
 										})
-									: m["vaults.detail.items.tag_filter.button.count.plural"]({
+									: m.vaults_detail_items_tag_filter_button_count_plural({
 											count: selectedTags.length,
 										})
-								: m["vaults.detail.items.tag_filter.button.default"]()}
+								: m.vaults_detail_items_tag_filter_button_default()}
 						</span>
 						<ChevronDown className="h-3.5 w-3.5 opacity-50" />
 					</Button>
@@ -84,16 +85,14 @@ export function TagFilter({
 				<PopoverContent className="w-64 p-0" align="start">
 					<Command>
 						<CommandInput
-							placeholder={m[
-								"vaults.detail.items.tag_filter.search.placeholder"
-							]()}
+							placeholder={m.vaults_detail_items_tag_filter_search_placeholder()}
 							value={searchValue}
 							onValueChange={setSearchValue}
 						/>
 						<CommandList>
 							{filteredTags.length === 0 && (
 								<CommandEmpty>
-									{m["vaults.detail.items.tag_filter.empty"]()}
+									{m.vaults_detail_items_tag_filter_empty()}
 								</CommandEmpty>
 							)}
 							{filteredTags.length > 0 && (
@@ -143,7 +142,7 @@ export function TagFilter({
 							onClick={handleClearAll}
 							className="ml-1 text-muted-foreground text-xs hover:text-foreground"
 						>
-							{m["vaults.detail.items.tag_filter.action.clear_all"]()}
+							{m.vaults_detail_items_tag_filter_action_clear_all()}
 						</button>
 					)}
 				</div>

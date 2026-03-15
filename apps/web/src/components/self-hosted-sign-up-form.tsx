@@ -48,24 +48,24 @@ export default function SelfHostedSignUpForm({
 	} = useSignupForm({ invitationToken, redirectTo });
 
 	const signupHeading = isInvitationSignup
-		? m["auth.self_hosted.title.accept_invitation"]()
-		: m["auth.self_hosted.title.create_admin"]();
+		? m.auth_self_hosted_title_accept_invitation()
+		: m.auth_self_hosted_title_create_admin();
 	const signupDescription = isInvitationSignup
-		? m["auth.self_hosted.description.accept_invitation"]()
-		: m["auth.self_hosted.description.create_admin"]();
+		? m.auth_self_hosted_description_accept_invitation()
+		: m.auth_self_hosted_description_create_admin();
 
 	if (hasInvitationToken && invitationQuery.isError) {
 		return (
 			<div className="w-full">
 				<h1 className="text-center font-semibold text-2xl tracking-tight">
-					{m["auth.self_hosted.invitation_required.title"]()}
+					{m.auth_self_hosted_invitation_required_title()}
 				</h1>
 				<div className="mt-6 space-y-4">
 					<p className="text-muted-foreground text-sm leading-relaxed">
-						{m["auth.self_hosted.invitation_required.description"]()}
+						{m.auth_self_hosted_invitation_required_description()}
 					</p>
 					<Button type="button" onClick={onSwitchToSignIn} className="w-full">
-						{m["auth.signup.button.back_to_signin"]()}
+						{m.auth_signup_button_back_to_signin()}
 					</Button>
 				</div>
 			</div>
@@ -76,11 +76,11 @@ export default function SelfHostedSignUpForm({
 		return (
 			<div className="w-full">
 				<h1 className="text-center font-semibold text-2xl tracking-tight">
-					{m["auth.self_hosted.loading_invitation.title"]()}
+					{m.auth_self_hosted_loading_invitation_title()}
 				</h1>
 				<div className="mt-6 flex items-center justify-center gap-2 text-muted-foreground text-sm">
 					<Loader2 className="h-4 w-4 animate-spin" />
-					{m["auth.self_hosted.loading_invitation.description"]()}
+					{m.auth_self_hosted_loading_invitation_description()}
 				</div>
 			</div>
 		);
@@ -94,14 +94,14 @@ export default function SelfHostedSignUpForm({
 		return (
 			<div className="w-full">
 				<h1 className="text-center font-semibold text-2xl tracking-tight">
-					{m["auth.signup.invite_only.title"]()}
+					{m.auth_signup_invite_only_title()}
 				</h1>
 				<div className="mt-6 space-y-4">
 					<p className="text-muted-foreground text-sm leading-relaxed">
-						{m["auth.signup.invite_only.description"]()}
+						{m.auth_signup_invite_only_description()}
 					</p>
 					<Button type="button" onClick={onSwitchToSignIn} className="w-full">
-						{m["auth.signup.button.back_to_signin"]()}
+						{m.auth_signup_button_back_to_signin()}
 					</Button>
 				</div>
 			</div>
@@ -134,13 +134,13 @@ export default function SelfHostedSignUpForm({
 								</div>
 								<div className="space-y-1">
 									<p className="font-medium text-sm">
-										{m["auth.self_hosted.invited_to_join"]({
+										{m.auth_self_hosted_invited_to_join({
 											teamName: invitation?.teamName ?? "",
 										})}
 									</p>
 									<div className="flex items-center gap-2 text-muted-foreground text-xs">
 										<span>
-											{m["auth.self_hosted.invited_by"]({
+											{m.auth_self_hosted_invited_by({
 												invitedByName: invitation?.invitedByName ?? "",
 											})}
 										</span>
@@ -159,12 +159,12 @@ export default function SelfHostedSignUpForm({
 							{(field) => (
 								<div className="space-y-2">
 									<Label htmlFor={field.name}>
-										{m["auth.signup.form.full_name"]()}
+										{m.auth_signup_form_full_name()}
 									</Label>
 									<Input
 										id={field.name}
 										name={field.name}
-										placeholder={m["auth.signup.form.full_name.placeholder"]()}
+										placeholder={m.auth_signup_form_full_name_placeholder()}
 										value={field.state.value}
 										onBlur={field.handleBlur}
 										onChange={(e) => field.handleChange(e.target.value)}
@@ -181,13 +181,13 @@ export default function SelfHostedSignUpForm({
 							{(field) => (
 								<div className="space-y-2">
 									<Label htmlFor={field.name}>
-										{m["auth.signup.form.email"]()}
+										{m.auth_signup_form_email()}
 									</Label>
 									<Input
 										id={field.name}
 										name={field.name}
 										type="email"
-										placeholder={m["auth.signup.form.email.placeholder"]()}
+										placeholder={m.auth_signup_form_email_placeholder()}
 										value={
 											isInvitationSignup
 												? invitation?.email || field.state.value
@@ -201,7 +201,7 @@ export default function SelfHostedSignUpForm({
 									/>
 									{isInvitationSignup && (
 										<p className="text-muted-foreground text-xs">
-											{m["auth.self_hosted.email_locked"]()}
+											{m.auth_self_hosted_email_locked()}
 										</p>
 									)}
 								</div>
@@ -214,7 +214,7 @@ export default function SelfHostedSignUpForm({
 							{(field) => (
 								<div className="space-y-2">
 									<Label htmlFor={field.name}>
-										{m["auth.signup.form.master_password"]()}
+										{m.auth_signup_form_master_password()}
 									</Label>
 									<div className="relative">
 										<Input
@@ -238,7 +238,7 @@ export default function SelfHostedSignUpForm({
 										</Button>
 									</div>
 									<p className="text-[0.8rem] text-muted-foreground">
-										{m["auth.signup.form.master_password.help"]()}
+										{m.auth_signup_form_master_password_help()}
 									</p>
 								</div>
 							)}
@@ -267,11 +267,11 @@ export default function SelfHostedSignUpForm({
 						<div className="min-w-0 flex-1">
 							<p className="font-medium text-sm">
 								{hasDownloadedKit
-									? m["auth.signup.emergency_kit.saved_title"]()
-									: m["auth.signup.emergency_kit.download_title"]()}
+									? m.auth_signup_emergency_kit_saved_title()
+									: m.auth_signup_emergency_kit_download_title()}
 							</p>
 							<p className="text-muted-foreground text-xs">
-								{m["auth.self_hosted.emergency_kit.description"]()}
+								{m.auth_self_hosted_emergency_kit_description()}
 							</p>
 						</div>
 					</button>
@@ -288,16 +288,16 @@ export default function SelfHostedSignUpForm({
 								<>
 									<Loader2 size={16} className="mr-2 animate-spin" />
 									{isEncrypting
-										? m["auth.signup.button.setting_up_encryption"]()
-										: m["auth.signup.button.creating_account"]()}
+										? m.auth_signup_button_setting_up_encryption()
+										: m.auth_signup_button_creating_account()}
 								</>
 							) : !hasDownloadedKit ? (
 								<>
 									<Download size={16} className="mr-2" />
-									{m["auth.signup.button.download_kit_to_continue"]()}
+									{m.auth_signup_button_download_kit_to_continue()}
 								</>
 							) : (
-								m["auth.signup.button.create_account"]()
+								m.auth_signup_button_create_account()
 							)}
 						</Button>
 					</div>
@@ -308,7 +308,7 @@ export default function SelfHostedSignUpForm({
 						onClick={onSwitchToSignIn}
 						className="w-full"
 					>
-						{m["auth.signup.button.have_account"]()}
+						{m.auth_signup_button_have_account()}
 					</Button>
 					</form>
 				</div>

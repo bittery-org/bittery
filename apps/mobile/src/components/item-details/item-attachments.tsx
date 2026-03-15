@@ -276,7 +276,7 @@ export function ItemAttachments({
 		) {
 			toast.show({
 				variant: "danger",
-				label: m["vaults.detail.items.attachments.toast.file_too_large"]({
+				label: m.vaults_detail_items_attachments_toast_file_too_large({
 					maxFileSize: formatBytes(attachmentMaxFileSizeBytes),
 				}),
 				placement: "bottom",
@@ -309,7 +309,7 @@ export function ItemAttachments({
 				toast.show({
 					variant: "danger",
 					label:
-						m["vaults.detail.items.attachments.toast.storage_limit_reached"](),
+						m.vaults_detail_items_attachments_toast_storage_limit_reached(),
 					placement: "bottom",
 				});
 			} else if (
@@ -318,7 +318,7 @@ export function ItemAttachments({
 			) {
 				toast.show({
 					variant: "danger",
-					label: m["vaults.detail.items.attachments.toast.file_too_large"]({
+					label: m.vaults_detail_items_attachments_toast_file_too_large({
 						maxFileSize: formatBytes(attachmentMaxFileSizeBytes),
 					}),
 					placement: "bottom",
@@ -326,7 +326,7 @@ export function ItemAttachments({
 			} else {
 				toast.show({
 					variant: "danger",
-					label: m["vaults.detail.items.attachments.toast.upload_failed"](),
+					label: m.vaults_detail_items_attachments_toast_upload_failed(),
 					placement: "bottom",
 				});
 			}

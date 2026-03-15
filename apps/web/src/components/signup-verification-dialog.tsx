@@ -34,7 +34,7 @@ function SignupVerificationContent(props: SignupVerificationContentProps) {
 	return (
 		<div className="space-y-2">
 			<Label htmlFor="signup-verification-code">
-				{m["auth.signup.verify.code_label"]()}
+				{m.auth_signup_verify_code_label()}
 			</Label>
 			<InputOTP
 				id="signup-verification-code"
@@ -72,9 +72,9 @@ export function SignupVerificationDialog(
 		<Dialog open={props.open} onOpenChange={props.onOpenChange}>
 			<DialogContent>
 				<DialogHeader>
-					<DialogTitle>{m["auth.signup.verify.title"]()}</DialogTitle>
+					<DialogTitle>{m.auth_signup_verify_title()}</DialogTitle>
 					<DialogDescription>
-						{m["auth.signup.verify.dialog_description"]({
+						{m.auth_signup_verify_dialog_description({
 							email: props.email,
 						})}
 					</DialogDescription>
@@ -92,10 +92,10 @@ export function SignupVerificationDialog(
 						{props.isRequesting ? (
 							<>
 								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-								{m["auth.signup.button.sending_code"]()}
+								{m.auth_signup_button_sending_code()}
 							</>
 						) : (
-							m["auth.signup.button.resend_code"]()
+							m.auth_signup_button_resend_code()
 						)}
 					</Button>
 					<Button
@@ -106,11 +106,11 @@ export function SignupVerificationDialog(
 						{props.isVerifying ? (
 							<>
 								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-								{m["auth.signup.button.verifying"]()}
+								{m.auth_signup_button_verifying()}
 							</>
 						) : (
 							(props.verifyLabel ??
-							m["auth.signup.button.verify_and_continue"]())
+							m.auth_signup_button_verify_and_continue())
 						)}
 					</Button>
 				</DialogFooter>
@@ -133,32 +133,32 @@ export function SignupVerificationStep(
 	const { m } = useI18n();
 	const verifyButtonLabel = props.isFinishing
 		? props.isPaidPlan
-			? m["auth.signup.button.creating_account_and_opening_checkout"]()
-			: m["auth.signup.button.creating_account"]()
+			? m.auth_signup_button_creating_account_and_opening_checkout()
+			: m.auth_signup_button_creating_account()
 		: props.isVerified
 			? props.isPaidPlan
-				? m["auth.signup.button.continue_to_checkout"]()
-				: m["auth.signup.button.create_account"]()
+				? m.auth_signup_button_continue_to_checkout()
+				: m.auth_signup_button_create_account()
 			: (props.verifyLabel ??
 				(props.isPaidPlan
-					? m["auth.signup.button.verify_code"]()
-					: m["auth.signup.button.verify_code"]()));
+					? m.auth_signup_button_verify_code()
+					: m.auth_signup_button_verify_code()));
 	const loadingButtonLabel = props.isFinishing
 		? verifyButtonLabel
-		: m["auth.signup.button.verifying"]();
+		: m.auth_signup_button_verifying();
 
 	return (
 		<div className="space-y-4">
 			<div className="rounded-2xl border bg-muted/20 p-4">
 				<p className="font-semibold text-base">
-					{m["auth.signup.verify.title"]()}
+					{m.auth_signup_verify_title()}
 				</p>
 				<p className="mt-1 text-muted-foreground text-sm leading-relaxed">
 					{props.isPaidPlan
-						? m["auth.signup.verify.step_description_paid"]({
+						? m.auth_signup_verify_step_description_paid({
 								email: props.email,
 							})
-						: m["auth.signup.verify.step_description_free"]({
+						: m.auth_signup_verify_step_description_free({
 								email: props.email,
 							})}
 				</p>
@@ -167,7 +167,7 @@ export function SignupVerificationStep(
 					<div className="grid divide-y divide-border/80">
 						<div className="px-3.5 py-3">
 							<p className="text-[11px] text-muted-foreground/70 uppercase tracking-[0.08em]">
-								{m["auth.signup.verify.summary.plan"]()}
+								{m.auth_signup_verify_summary_plan()}
 							</p>
 							<div className="mt-1.5 flex items-baseline gap-1.5">
 								<p className="font-medium text-sm">{props.planName}</p>
@@ -183,7 +183,7 @@ export function SignupVerificationStep(
 						</div>
 						<div className="px-3.5 py-3">
 							<p className="text-[11px] text-muted-foreground/70 uppercase tracking-[0.08em]">
-								{m["auth.signup.verify.summary.email"]()}
+								{m.auth_signup_verify_summary_email()}
 							</p>
 							<p className="mt-1.5 break-all font-medium text-sm">
 								{props.email}
@@ -196,10 +196,10 @@ export function SignupVerificationStep(
 			{props.isVerified ? (
 				<div className="rounded-2xl border border-emerald-300/70 bg-emerald-50/50 p-4 dark:border-emerald-800/50 dark:bg-emerald-950/20">
 					<p className="font-medium text-sm">
-						{m["auth.signup.verify.verified_title"]()}
+						{m.auth_signup_verify_verified_title()}
 					</p>
 					<p className="mt-1 text-[13px] text-emerald-700/80 leading-relaxed dark:text-emerald-400/80">
-						{m["auth.signup.verify.verified_description"]()}
+						{m.auth_signup_verify_verified_description()}
 					</p>
 				</div>
 			) : (
@@ -207,7 +207,7 @@ export function SignupVerificationStep(
 					<div className="space-y-2.5">
 						<div className="flex items-center justify-between">
 							<Label htmlFor="signup-verification-step-code">
-								{m["auth.signup.verify.code_label"]()}
+								{m.auth_signup_verify_code_label()}
 							</Label>
 							<Button
 								type="button"
@@ -221,10 +221,10 @@ export function SignupVerificationStep(
 								{props.isRequesting ? (
 									<>
 										<Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-										{m["auth.signup.button.sending_code"]()}
+										{m.auth_signup_button_sending_code()}
 									</>
 								) : (
-									m["auth.signup.button.resend_code"]()
+									m.auth_signup_button_resend_code()
 								)}
 							</Button>
 						</div>
@@ -263,7 +263,7 @@ export function SignupVerificationStep(
 					}
 				>
 					<ArrowLeft size={14} />
-					{m["auth.signup.button.back"]()}
+					{m.auth_signup_button_back()}
 				</Button>
 
 				<Button

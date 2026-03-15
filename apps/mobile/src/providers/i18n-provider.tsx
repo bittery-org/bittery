@@ -7,13 +7,13 @@ import {
 } from "@bittery/i18n";
 import { createI18nReact } from "@bittery/i18n/react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { m } from "@/paraglide/messages";
+import { m } from "@bittery/i18n/paraglide/messages";
 import {
 	getLocale as getRuntimeLocale,
 	overwriteGetLocale,
 	overwriteSetLocale,
 	setLocale as setRuntimeLocale,
-} from "@/paraglide/runtime";
+} from "@bittery/i18n/paraglide/runtime";
 
 function detectDeviceLocale(): string | undefined {
 	try {

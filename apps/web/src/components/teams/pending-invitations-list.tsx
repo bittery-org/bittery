@@ -36,11 +36,11 @@ export function PendingInvitationsList({
 	const getRoleLabel = (role: string) => {
 		switch (role) {
 			case "owner":
-				return m["team.role.owner"]();
+				return m.team_role_owner();
 			case "admin":
-				return m["team.role.admin"]();
+				return m.team_role_admin();
 			case "member":
-				return m["team.role.member"]();
+				return m.team_role_member();
 			default:
 				return role;
 		}
@@ -50,7 +50,7 @@ export function PendingInvitationsList({
 		mutationFn: (input: { invitationId: string }) =>
 			trpcClient.team.invitations.cancel.mutate(input),
 		onSuccess: async () => {
-			toast.success(m["team.invitations.toast.cancelled"]());
+			toast.success(m.team_invitations_toast_cancelled());
 			await invalidator.invalidateTeam();
 		},
 		onError: (error: Error) => {
@@ -62,7 +62,7 @@ export function PendingInvitationsList({
 		mutationFn: (input: { invitationId: string }) =>
 			trpcClient.team.invitations.resend.mutate(input),
 		onSuccess: async () => {
-			toast.success(m["team.invitations.toast.resent"]());
+			toast.success(m.team_invitations_toast_resent());
 			await invalidator.invalidateTeam();
 		},
 		onError: (error: Error) => {
@@ -77,10 +77,10 @@ export function PendingInvitationsList({
 					<Clock className="h-5 w-5" />
 				</div>
 				<p className="mt-3 font-medium text-sm">
-					{m["team.invitations.empty.title"]()}
+					{m.team_invitations_empty_title()}
 				</p>
 				<p className="mt-1 text-muted-foreground text-xs">
-					{m["team.invitations.empty.description"]()}
+					{m.team_invitations_empty_description()}
 				</p>
 			</div>
 		);
@@ -121,7 +121,7 @@ export function PendingInvitationsList({
 									</span>
 								</div>
 								<p className="text-muted-foreground text-xs">
-									{m["team.invitations.invited_by"]({
+									{m.team_invitations_invited_by({
 										name: invitation.invitedBy,
 									})}
 								</p>
@@ -132,11 +132,11 @@ export function PendingInvitationsList({
 								</Badge>
 								{expired ? (
 									<Badge variant="destructive">
-										{m["team.invitations.status.expired"]()}
+										{m.team_invitations_status_expired()}
 									</Badge>
 								) : (
 									<Badge variant="outline">
-										{m["team.invitations.status.pending"]()}
+										{m.team_invitations_status_pending()}
 									</Badge>
 								)}
 							</div>
@@ -145,13 +145,13 @@ export function PendingInvitationsList({
 						<div className="mt-3 flex items-center justify-between border-t pt-3">
 							<span className="text-muted-foreground text-xs">
 								{expired
-									? m["team.invitations.expires.expired"]({
+									? m.team_invitations_expires_expired({
 											date: formatDate(invitation.expiresAt, {
 												month: "short",
 												day: "numeric",
 											}),
 										})
-									: m["team.invitations.expires.active"]({
+									: m.team_invitations_expires_active({
 											date: formatDate(invitation.expiresAt, {
 												month: "short",
 												day: "numeric",
@@ -169,10 +169,10 @@ export function PendingInvitationsList({
 											resendMutation.mutate({ invitationId: invitation.id })
 										}
 										disabled={resendMutation.isPending}
-										title={m["team.invitations.action.resend_title"]()}
+										title={m.team_invitations_action_resend_title()}
 									>
 										<RefreshCw className="h-3.5 w-3.5" />
-										{m["team.invitations.action.resend"]()}
+										{m.team_invitations_action_resend()}
 									</Button>
 									<Button
 										variant="ghost"
@@ -182,10 +182,10 @@ export function PendingInvitationsList({
 											cancelMutation.mutate({ invitationId: invitation.id })
 										}
 										disabled={cancelMutation.isPending}
-										title={m["team.invitations.action.cancel_title"]()}
+										title={m.team_invitations_action_cancel_title()}
 									>
 										<X className="h-3.5 w-3.5" />
-										{m["team.invitations.action.cancel"]()}
+										{m.team_invitations_action_cancel()}
 									</Button>
 								</div>
 							)}

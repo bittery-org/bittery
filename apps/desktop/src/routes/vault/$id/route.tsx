@@ -32,7 +32,7 @@ function RouteComponent() {
 			<div className="flex w-78 flex-col border-r bg-background">
 				<div className="flex flex-1 items-center justify-center">
 					<div className="text-muted-foreground text-sm">
-						{m["vaults.favorites.loading"]()}
+						{m.vaults_favorites_loading()}
 					</div>
 				</div>
 			</div>
@@ -46,10 +46,10 @@ function RouteComponent() {
 					{items.length === 0 ? (
 						<div className="flex h-full flex-col items-center justify-center p-8 text-center">
 							<h3 className="mb-2 font-semibold">
-								{m["vaults.detail.items.list.empty.default.title"]()}
+								{m.vaults_detail_items_list_empty_default_title()}
 							</h3>
 							<p className="text-muted-foreground text-sm">
-								{m["vaults.detail.items.list.empty.default.description"]()}
+								{m.vaults_detail_items_list_empty_default_description()}
 							</p>
 						</div>
 					) : (
@@ -57,7 +57,7 @@ function RouteComponent() {
 							{favoriteItems.length > 0 && (
 								<>
 									<div className="mb-2 px-3 font-semibold text-muted-foreground text-xs uppercase">
-										{m["vaults.favorites.title"]()}
+										{m.vaults_favorites_title()}
 									</div>
 									{id &&
 										favoriteItems.map((item) => (
@@ -71,7 +71,7 @@ function RouteComponent() {
 											/>
 										))}
 									<div className="mt-4 mb-2 px-3 font-semibold text-muted-foreground text-xs uppercase">
-										{m["vaults.detail.tab.items"]()}
+										{m.vaults_detail_tab_items()}
 									</div>
 								</>
 							)}

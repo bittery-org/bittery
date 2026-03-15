@@ -23,7 +23,7 @@ import { MemberList } from "@/components/teams/member-list";
 import { PendingInvitationsList } from "@/components/teams/pending-invitations-list";
 import { TeamSettings } from "@/components/teams/team-settings";
 import { getTeamPageAccess } from "@/lib/team-access";
-import { m as messages } from "@/paraglide/messages";
+import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/team/")({
@@ -87,7 +87,7 @@ function TeamPage() {
 		return (
 			<div className="py-8 text-center">
 				<p className="text-muted-foreground">
-					{m["team.page.empty.no_team"]()}
+					{m.team_page_empty_no_team()}
 				</p>
 			</div>
 		);
@@ -111,21 +111,21 @@ function TeamPage() {
 	const getRoleLabel = (role: string) => {
 		switch (role) {
 			case "owner":
-				return m["team.role.owner"]();
+				return m.team_role_owner();
 			case "admin":
-				return m["team.role.admin"]();
+				return m.team_role_admin();
 			default:
-				return m["team.role.member"]();
+				return m.team_role_member();
 		}
 	};
 
 	const memberCountLabel =
 		team.memberCount === 1
-			? m["team.page.hero.member_count_created_by.single"]({
+			? m.team_page_hero_member_count_created_by_single({
 					count: team.memberCount,
 					ownerName: team.ownerName,
 				})
-			: m["team.page.hero.member_count_created_by.plural"]({
+			: m.team_page_hero_member_count_created_by_plural({
 					count: team.memberCount,
 					ownerName: team.ownerName,
 				});
@@ -174,7 +174,7 @@ function TeamPage() {
 
 			{isCloudMode && !teamManagementEnabled ? (
 				<div className="rounded-xl border bg-muted/40 px-4 py-3 text-muted-foreground text-sm">
-					{m["team.page.notice.management_unavailable"]()}
+					{m.team_page_notice_management_unavailable()}
 				</div>
 			) : null}
 
@@ -184,14 +184,14 @@ function TeamPage() {
 					<TabsTrigger value="members" className="flex-1 sm:flex-none">
 						<Users className="h-4 w-4 sm:mr-2" />
 						<span className="hidden sm:inline">
-							{m["team.page.tab.members"]()}
+							{m.team_page_tab_members()}
 						</span>
 					</TabsTrigger>
 					{canViewInvitations ? (
 						<TabsTrigger value="invitations" className="flex-1 sm:flex-none">
 							<Mail className="h-4 w-4 sm:mr-2" />
 							<span className="hidden sm:inline">
-								{m["team.page.tab.invitations"]()}
+								{m.team_page_tab_invitations()}
 							</span>
 							{invitationsQuery.data?.length ? (
 								<span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-primary-foreground text-xs">
@@ -203,7 +203,7 @@ function TeamPage() {
 					<TabsTrigger value="settings" className="flex-1 sm:flex-none">
 						<Settings className="h-4 w-4 sm:mr-2" />
 						<span className="hidden sm:inline">
-							{m["team.page.tab.settings"]()}
+							{m.team_page_tab_settings()}
 						</span>
 					</TabsTrigger>
 				</TabsList>
@@ -212,12 +212,12 @@ function TeamPage() {
 					<div className="space-y-3">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 							<h2 className="font-semibold text-lg tracking-tight">
-								{m["team.page.members.heading"]()}
+								{m.team_page_members_heading()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
 								{canManageTeam
-									? m["team.page.members.description"]()
-									: m["team.page.members.description_read_only"]()}
+									? m.team_page_members_description()
+									: m.team_page_members_description_read_only()}
 							</p>
 						</div>
 						{membersQuery.isLoading ? (
@@ -243,10 +243,10 @@ function TeamPage() {
 						<div className="space-y-3">
 							<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 								<h2 className="font-semibold text-lg tracking-tight">
-									{m["team.page.invitations.heading"]()}
+									{m.team_page_invitations_heading()}
 								</h2>
 								<p className="text-muted-foreground text-sm">
-									{m["team.page.invitations.description"]()}
+									{m.team_page_invitations_description()}
 								</p>
 							</div>
 							{invitationsQuery.isLoading ? (

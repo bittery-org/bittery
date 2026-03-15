@@ -5,14 +5,18 @@ import {
 	type LocaleRuntimeAdapter,
 	type LocaleStorageAdapter,
 } from "@bittery/i18n";
-import { createI18nReact } from "@bittery/i18n/react";
-import { m } from "@/paraglide/messages";
+import {
+	I18nProvider,
+	initializeI18nReact,
+	useI18n,
+} from "@bittery/i18n/react";
+import { m } from "@bittery/i18n/paraglide/messages";
 import {
 	getLocale as getRuntimeLocale,
 	overwriteGetLocale,
 	overwriteSetLocale,
 	setLocale as setRuntimeLocale,
-} from "@/paraglide/runtime";
+} from "@bittery/i18n/paraglide/runtime";
 
 let currentLocale: AppLocale = defaultLocale;
 
@@ -45,7 +49,7 @@ const storageAdapter: LocaleStorageAdapter | undefined =
 				},
 			};
 
-const { I18nProvider, useI18n } = createI18nReact({
+initializeI18nReact({
 	messages: m,
 	runtime: runtimeAdapter,
 	storage: storageAdapter,

@@ -62,19 +62,19 @@ export function RegenerateSecretKeyDialog({
 
 		if (!currentPassword.trim()) {
 			toast.error(
-				m["settings.secret_key.regenerate.toast.current_password_required"](),
+				m.settings_secret_key_regenerate_toast_current_password_required(),
 			);
 			return;
 		}
 
 		const oldSecretKey = await storage.getStoredSecretKey();
 		if (!oldSecretKey) {
-			toast.error(m["settings.common.toast.secret_key_not_found"]());
+			toast.error(m.settings_common_toast_secret_key_not_found());
 			return;
 		}
 
 		if (!userQuery.data?.encryptedPrivateKey) {
-			toast.error(m["settings.common.toast.user_data_load_failed"]());
+			toast.error(m.settings_common_toast_user_data_load_failed());
 			return;
 		}
 
@@ -102,7 +102,7 @@ export function RegenerateSecretKeyDialog({
 		} catch (error) {
 			console.error("Secret key regeneration error:", error);
 			toast.error(
-				m["settings.secret_key.regenerate.toast.verify_password_failed"](),
+				m.settings_secret_key_regenerate_toast_verify_password_failed(),
 			);
 			setIsProcessing(false);
 		}
@@ -111,7 +111,7 @@ export function RegenerateSecretKeyDialog({
 	const handleConfirmRegeneration = async () => {
 		if (!hasAcknowledged) {
 			toast.error(
-				m["settings.secret_key.regenerate.toast.acknowledgement_required"](),
+				m.settings_secret_key_regenerate_toast_acknowledgement_required(),
 			);
 			return;
 		}
@@ -119,20 +119,20 @@ export function RegenerateSecretKeyDialog({
 		const oldSecretKey = await storage.getStoredSecretKey();
 		if (!oldSecretKey) {
 			toast.error(
-				m["settings.secret_key.regenerate.toast.secret_key_not_found"](),
+				m.settings_secret_key_regenerate_toast_secret_key_not_found(),
 			);
 			return;
 		}
 
 		if (!userQuery.data?.encryptedPrivateKey) {
 			toast.error(
-				m["settings.secret_key.regenerate.toast.user_data_load_failed"](),
+				m.settings_secret_key_regenerate_toast_user_data_load_failed(),
 			);
 			return;
 		}
 
 		if (!vaultListQuery.data || vaultListQuery.data.length === 0) {
-			toast.error(m["settings.common.toast.vault_keys_load_failed"]());
+			toast.error(m.settings_common_toast_vault_keys_load_failed());
 			return;
 		}
 
@@ -244,12 +244,12 @@ export function RegenerateSecretKeyDialog({
 				existingSession?.sessionId,
 			);
 
-			toast.success(m["settings.secret_key.regenerate.toast.regenerated"]());
+			toast.success(m.settings_secret_key_regenerate_toast_regenerated());
 			setOpen(false);
 		} catch (error) {
 			console.error("Secret key regeneration error:", error);
 			toast.error(
-				m["settings.secret_key.regenerate.toast.regenerate_failed"](),
+				m.settings_secret_key_regenerate_toast_regenerate_failed(),
 			);
 			setIsProcessing(false);
 		}
@@ -258,7 +258,7 @@ export function RegenerateSecretKeyDialog({
 	const copySecretKey = () => {
 		copyWithToast(
 			newSecretKey,
-			m["settings.secret_key.regenerate.copy_label"](),
+			m.settings_secret_key_regenerate_copy_label(),
 			{
 				showAutoClearMessage: false,
 			},
@@ -268,46 +268,46 @@ export function RegenerateSecretKeyDialog({
 	const downloadKit = async () => {
 		const result = await downloadRecoveryKit({
 			fileName: "bittery-new-secret-key",
-			title: m["settings.secret_key.regenerate.kit.title"](),
-			subtitle: m["settings.secret_key.regenerate.kit.subtitle"](),
+			title: m.settings_secret_key_regenerate_kit_title(),
+			subtitle: m.settings_secret_key_regenerate_kit_subtitle(),
 			entries: [
 				{
-					label: m["settings.secret_key.regenerate.kit.entry.label"](),
+					label: m.settings_secret_key_regenerate_kit_entry_label(),
 					value: newSecretKey,
 					description:
-						m["settings.secret_key.regenerate.kit.entry.description"](),
+						m.settings_secret_key_regenerate_kit_entry_description(),
 				},
 			],
 			cautions: [
-				m["settings.secret_key.regenerate.kit.caution.destroy_old"](),
-				m["settings.secret_key.regenerate.kit.caution.store_offline"](),
-				m["settings.secret_key.regenerate.kit.caution.setup_recovery_key"](),
+				m.settings_secret_key_regenerate_kit_caution_destroy_old(),
+				m.settings_secret_key_regenerate_kit_caution_store_offline(),
+				m.settings_secret_key_regenerate_kit_caution_setup_recovery_key(),
 			],
-			footerNote: m["settings.recovery_key.common.kit.footer_note"](),
+			footerNote: m.settings_recovery_key_common_kit_footer_note(),
 			includeHandwrittenPasswordSection: true,
 			labels: {
-				documentTitle: m["settings.recovery_key.common.kit.document_title"](),
-				generatedLabel: m["settings.recovery_key.common.kit.generated_label"](),
+				documentTitle: m.settings_recovery_key_common_kit_document_title(),
+				generatedLabel: m.settings_recovery_key_common_kit_generated_label(),
 				storeOfflineHeading:
-					m["settings.recovery_key.common.kit.store_offline_heading"](),
-				badgeText: m["settings.recovery_key.common.kit.badge_text"](),
+					m.settings_recovery_key_common_kit_store_offline_heading(),
+				badgeText: m.settings_recovery_key_common_kit_badge_text(),
 				handwrittenTitle:
-					m["settings.secret_key.regenerate.kit.handwritten_title"](),
+					m.settings_secret_key_regenerate_kit_handwritten_title(),
 				handwrittenDescription:
-					m["settings.secret_key.regenerate.kit.handwritten_description"](),
+					m.settings_secret_key_regenerate_kit_handwritten_description(),
 				handwrittenPasswordLabel:
-					m["settings.secret_key.regenerate.kit.handwritten_password_label"](),
+					m.settings_secret_key_regenerate_kit_handwritten_password_label(),
 			},
 		});
 
 		if (result === "pdf-downloaded") {
 			toast.success(
-				m["settings.secret_key.regenerate.toast.kit_pdf_downloaded"](),
+				m.settings_secret_key_regenerate_toast_kit_pdf_downloaded(),
 			);
 			return;
 		}
 		toast.success(
-			m["settings.secret_key.regenerate.toast.kit_text_downloaded"](),
+			m.settings_secret_key_regenerate_toast_kit_text_downloaded(),
 		);
 	};
 
@@ -328,7 +328,7 @@ export function RegenerateSecretKeyDialog({
 			<DialogTrigger asChild>
 				<Button variant="outline">
 					<RefreshCw className="mr-2 h-4 w-4" />
-					{m["settings.secret_key.regenerate.trigger"]()}
+					{m.settings_secret_key_regenerate_trigger()}
 				</Button>
 			</DialogTrigger>
 			<DialogContent className="sm:max-w-md">
@@ -336,22 +336,22 @@ export function RegenerateSecretKeyDialog({
 					<form onSubmit={handleGenerateNewKey}>
 						<DialogHeader>
 							<DialogTitle>
-								{m["settings.secret_key.regenerate.title"]()}
+								{m.settings_secret_key_regenerate_title()}
 							</DialogTitle>
 							<DialogDescription>
-								{m["settings.secret_key.regenerate.description"]()}
+								{m.settings_secret_key_regenerate_description()}
 							</DialogDescription>
 						</DialogHeader>
 						<div className="grid gap-4 py-4">
 							<div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3">
 								<p className="text-destructive text-xs">
-									<strong>{m["settings.common.warning"]()}</strong>{" "}
-									{m["settings.secret_key.regenerate.warning"]()}
+									<strong>{m.settings_common_warning()}</strong>{" "}
+									{m.settings_secret_key_regenerate_warning()}
 								</p>
 							</div>
 							<div className="grid gap-2">
 								<Label htmlFor="currentPassword">
-									{m["settings.secret_key.regenerate.field.password"]()}
+									{m.settings_secret_key_regenerate_field_password()}
 								</Label>
 								<div className="relative">
 									<Input
@@ -359,9 +359,7 @@ export function RegenerateSecretKeyDialog({
 										type={showPassword ? "text" : "password"}
 										value={currentPassword}
 										onChange={(e) => setCurrentPassword(e.target.value)}
-										placeholder={m[
-											"settings.secret_key.regenerate.placeholder.password"
-										]()}
+										placeholder={m.settings_secret_key_regenerate_placeholder_password()}
 										autoFocus
 										className="pr-10"
 									/>
@@ -383,7 +381,7 @@ export function RegenerateSecretKeyDialog({
 								variant="outline"
 								onClick={() => setOpen(false)}
 							>
-								{m["settings.common.action.cancel"]()}
+								{m.settings_common_action_cancel()}
 							</Button>
 							<Button
 								type="submit"
@@ -391,8 +389,8 @@ export function RegenerateSecretKeyDialog({
 								disabled={isProcessing}
 							>
 								{isProcessing
-									? m["settings.recovery_key.common.action.verifying"]()
-									: m["settings.secret_key.regenerate.action.generate"]()}
+									? m.settings_recovery_key_common_action_verifying()
+									: m.settings_secret_key_regenerate_action_generate()}
 							</Button>
 						</DialogFooter>
 					</form>
@@ -400,16 +398,16 @@ export function RegenerateSecretKeyDialog({
 					<>
 						<DialogHeader>
 							<DialogTitle>
-								{m["settings.secret_key.regenerate.display.title"]()}
+								{m.settings_secret_key_regenerate_display_title()}
 							</DialogTitle>
 							<DialogDescription>
-								{m["settings.secret_key.regenerate.display.description"]()}
+								{m.settings_secret_key_regenerate_display_description()}
 							</DialogDescription>
 						</DialogHeader>
 						<div className="grid gap-4 py-4">
 							<div className="relative rounded-xl border bg-muted/30 p-4">
 								<div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-									{m["settings.secret_key.regenerate.display.key_label"]()}
+									{m.settings_secret_key_regenerate_display_key_label()}
 								</div>
 								<div className="break-all font-mono text-sm tracking-wide">
 									{newSecretKey}
@@ -424,7 +422,7 @@ export function RegenerateSecretKeyDialog({
 									onClick={copySecretKey}
 								>
 									<Copy size={16} className="mr-2" />
-									{m["settings.common.action.copy"]()}
+									{m.settings_common_action_copy()}
 								</Button>
 								<Button
 									type="button"
@@ -433,18 +431,16 @@ export function RegenerateSecretKeyDialog({
 									onClick={downloadKit}
 								>
 									<Download size={16} className="mr-2" />
-									{m["settings.common.action.download_kit"]()}
+									{m.settings_common_action_download_kit()}
 								</Button>
 							</div>
 
 							<div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
 								<p className="text-amber-700 text-xs dark:text-amber-300">
 									<strong>
-										{m["settings.secret_key.regenerate.important"]()}
+										{m.settings_secret_key_regenerate_important()}
 									</strong>{" "}
-									{m[
-										"settings.secret_key.regenerate.display.recovery_key_notice"
-									]()}
+									{m.settings_secret_key_regenerate_display_recovery_key_notice()}
 								</p>
 							</div>
 
@@ -456,9 +452,7 @@ export function RegenerateSecretKeyDialog({
 									className="mt-1"
 								/>
 								<span className="text-sm">
-									{m[
-										"settings.secret_key.regenerate.display.acknowledgement"
-									]()}
+									{m.settings_secret_key_regenerate_display_acknowledgement()}
 								</span>
 							</label>
 						</div>
@@ -468,7 +462,7 @@ export function RegenerateSecretKeyDialog({
 								variant="outline"
 								onClick={() => setOpen(false)}
 							>
-								{m["settings.common.action.cancel"]()}
+								{m.settings_common_action_cancel()}
 							</Button>
 							<Button
 								type="button"
@@ -476,8 +470,8 @@ export function RegenerateSecretKeyDialog({
 								disabled={!hasAcknowledged || isProcessing}
 							>
 								{isProcessing
-									? m["settings.common.action.saving"]()
-									: m["settings.secret_key.regenerate.action.confirm"]()}
+									? m.settings_common_action_saving()
+									: m.settings_secret_key_regenerate_action_confirm()}
 							</Button>
 						</DialogFooter>
 					</>

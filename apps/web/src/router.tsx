@@ -7,7 +7,7 @@ import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { PendingLoader } from "./components/loader";
 import { getServerUrl } from "./lib/auth-server";
 import { storage } from "./lib/storage";
-import { m } from "./paraglide/messages";
+import { m } from "@bittery/i18n/paraglide/messages";
 import "./index.css";
 import { initWasmCrypto } from "./lib/wasm-crypto";
 
@@ -52,7 +52,7 @@ function handleUnauthorizedError() {
 	queryClient.clear();
 
 	storage.clearSession().then(() => {
-		toast.error(m["toast.auth.session_expired"]());
+		toast.error(m.toast_auth_session_expired());
 		window.location.href = "/login";
 	});
 }

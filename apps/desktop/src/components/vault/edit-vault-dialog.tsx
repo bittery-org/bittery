@@ -8,6 +8,8 @@ import {
 	Input,
 	Label,
 	toast,
+	VaultAvatar,
+	vaultIconOptions,
 } from "@bittery/ui";
 import {
 	IconImagePlusOutlineDuo18,
@@ -16,7 +18,6 @@ import {
 import { useForm } from "@tanstack/react-form";
 import { useCallback, useRef, useState } from "react";
 import { useI18n } from "../../providers/i18n-provider";
-import { VaultAvatar, vaultIconOptions } from "./vault-avatar";
 
 export interface EditVaultData {
 	id: string;
@@ -103,12 +104,12 @@ function EditVaultDialogForm({
 					removeImage,
 				});
 				onOpenChange(false);
-				toast.success(m["vaults.edit_dialog.toast.updated"]());
+				toast.success(m.vaults_edit_dialog_toast_updated());
 			} catch (error) {
 				const errorMessage =
 					error instanceof Error
 						? error.message
-						: m["vaults.edit_dialog.toast.update_failed"]();
+						: m.vaults_edit_dialog_toast_update_failed();
 				toast.error(errorMessage);
 			}
 		},
@@ -119,12 +120,12 @@ function EditVaultDialogForm({
 			if (!file) return false;
 
 			if (!file.type.startsWith("image/")) {
-				toast.error(m["vaults.edit_dialog.toast.invalid_image_file"]());
+				toast.error(m.vaults_edit_dialog_toast_invalid_image_file());
 				return false;
 			}
 
 			if (file.size > 2 * 1024 * 1024) {
-				toast.error(m["vaults.edit_dialog.toast.image_too_large"]());
+				toast.error(m.vaults_edit_dialog_toast_image_too_large());
 				return false;
 			}
 
@@ -172,7 +173,7 @@ function EditVaultDialogForm({
 	return (
 		<DialogContent className="sm:max-w-105">
 			<DialogHeader>
-				<DialogTitle>{m["vaults.edit_dialog.title"]()}</DialogTitle>
+				<DialogTitle>{m.vaults_edit_dialog_title()}</DialogTitle>
 			</DialogHeader>
 
 			<form
@@ -205,7 +206,7 @@ function EditVaultDialogForm({
 								onClick={() => fileInputRef.current?.click()}
 							>
 								<VaultAvatar
-									name={name || m["vaults.edit_dialog.avatar_fallback"]()}
+									name={name || m.vaults_edit_dialog_avatar_fallback()}
 									icon={icon}
 									imageUrl={imagePreview}
 									size="xl"
@@ -236,11 +237,11 @@ function EditVaultDialogForm({
 							className="h-7 gap-1.5 text-muted-foreground text-xs"
 						>
 							<IconXmarkOutlineDuo18 className="size-3" />
-							{m["vaults.edit_dialog.image.action.remove"]()}
+							{m.vaults_edit_dialog_image_action_remove()}
 						</Button>
 					) : (
 						<p className="text-muted-foreground text-xs">
-							{m["vaults.edit_dialog.image.help"]()}
+							{m.vaults_edit_dialog_image_help()}
 						</p>
 					)}
 				</div>
@@ -248,7 +249,7 @@ function EditVaultDialogForm({
 				{/* Icon Picker */}
 				<div className="space-y-2">
 					<Label className="text-muted-foreground text-xs">
-						{m["vaults.edit_dialog.field.icon"]()}
+						{m.vaults_edit_dialog_field_icon()}
 					</Label>
 					<div className="flex flex-wrap justify-center gap-1.5">
 						{vaultIconOptions.map((option) => (
@@ -284,12 +285,12 @@ function EditVaultDialogForm({
 								htmlFor={field.name}
 								className="text-muted-foreground text-xs"
 							>
-								{m["vaults.edit_dialog.field.name"]()}
+								{m.vaults_edit_dialog_field_name()}
 							</Label>
 							<Input
 								id={field.name}
 								name={field.name}
-								placeholder={m["vaults.edit_dialog.placeholder.name"]()}
+								placeholder={m.vaults_edit_dialog_placeholder_name()}
 								value={field.state.value}
 								onBlur={field.handleBlur}
 								onChange={(e) => field.handleChange(e.target.value)}
@@ -310,7 +311,7 @@ function EditVaultDialogForm({
 						disabled={form.state.isSubmitting}
 						className="flex-1"
 					>
-						{m["vaults.edit_dialog.action.cancel"]()}
+						{m.vaults_edit_dialog_action_cancel()}
 					</Button>
 					<Button
 						type="submit"
@@ -318,8 +319,8 @@ function EditVaultDialogForm({
 						className="flex-1"
 					>
 						{form.state.isSubmitting
-							? m["vaults.edit_dialog.action.saving"]()
-							: m["vaults.edit_dialog.action.submit"]()}
+							? m.vaults_edit_dialog_action_saving()
+							: m.vaults_edit_dialog_action_submit()}
 					</Button>
 				</div>
 			</form>

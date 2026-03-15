@@ -121,7 +121,7 @@ function SettingsDialogContent({
 	const autoLockOptions = useMemo(() => {
 		return AUTO_LOCK_OPTION_VALUES.map((value) => {
 			if (value === "-1") {
-				return { value, label: m["settings.auto_lock.option.never"]() };
+				return { value, label: m.settings_auto_lock_option_never() };
 			}
 
 			const ms = Number.parseInt(value, 10);
@@ -132,8 +132,8 @@ function SettingsDialogContent({
 					value,
 					label:
 						hours === 1
-							? m["settings.auto_lock.option.hours.single"]({ count: hours })
-							: m["settings.auto_lock.option.hours.plural"]({ count: hours }),
+							? m.settings_auto_lock_option_hours_single({ count: hours })
+							: m.settings_auto_lock_option_hours_plural({ count: hours }),
 				};
 			}
 
@@ -141,8 +141,8 @@ function SettingsDialogContent({
 				value,
 				label:
 					minutes === 1
-						? m["settings.auto_lock.option.minutes.single"]({ count: minutes })
-						: m["settings.auto_lock.option.minutes.plural"]({ count: minutes }),
+						? m.settings_auto_lock_option_minutes_single({ count: minutes })
+						: m.settings_auto_lock_option_minutes_plural({ count: minutes }),
 			};
 		});
 	}, [m]);
@@ -154,10 +154,10 @@ function SettingsDialogContent({
 				value,
 				label:
 					days === 1
-						? m["settings.dialog.master_password_reentry.option.days.single"]({
+						? m.settings_dialog_master_password_reentry_option_days_single({
 								count: days,
 							})
-						: m["settings.dialog.master_password_reentry.option.days.plural"]({
+						: m.settings_dialog_master_password_reentry_option_days_plural({
 								count: days,
 							}),
 			};
@@ -165,7 +165,7 @@ function SettingsDialogContent({
 	}, [m]);
 
 	const activeLocaleLabel =
-		locale === "en" ? m["i18n.language.en"]() : m["i18n.language.de"]();
+		locale === "en" ? m.i18n_language_en() : m.i18n_language_de();
 	const ActiveLocaleFlag =
 		locale === "en" ? IconFlagUnitedStates : IconFlagGermany;
 	const isDirty =
@@ -188,14 +188,14 @@ function SettingsDialogContent({
 			]);
 		},
 		onSuccess: () => {
-			toast.success(m["settings.dialog.toast.saved"]());
+			toast.success(m.settings_dialog_toast_saved());
 			queryClient.invalidateQueries({ queryKey: ["desktopSettings"] });
 			queryClient.invalidateQueries({ queryKey: ["sessionState"] });
 			onOpenChange(false);
 		},
 		onError: (error) => {
 			console.error("Failed to save desktop settings:", error);
-			toast.error(m["settings.dialog.toast.save_failed"]());
+			toast.error(m.settings_dialog_toast_save_failed());
 		},
 	});
 
@@ -229,12 +229,12 @@ function SettingsDialogContent({
 			}
 		},
 		onSuccess: () => {
-			toast.success(m["settings.dialog.toast.cache_cleared"]());
+			toast.success(m.settings_dialog_toast_cache_cleared());
 			setIsClearCacheConfirmOpen(false);
 		},
 		onError: (error) => {
 			console.error("Failed to clear local cache:", error);
-			toast.error(m["settings.dialog.toast.cache_clear_failed"]());
+			toast.error(m.settings_dialog_toast_cache_clear_failed());
 		},
 	});
 
@@ -258,16 +258,16 @@ function SettingsDialogContent({
 		<>
 			<DialogContent className="sm:max-w-md">
 				<DialogHeader>
-					<DialogTitle>{m["settings.page.title"]()}</DialogTitle>
+					<DialogTitle>{m.settings_page_title()}</DialogTitle>
 					<DialogDescription>
-						{m["settings.dialog.description"]()}
+						{m.settings_dialog_description()}
 					</DialogDescription>
 				</DialogHeader>
 
 				<div className="space-y-4">
 					<div className="space-y-2">
 						<Label htmlFor="language">
-							{m["settings.general.language.title"]()}
+							{m.settings_general_language_title()}
 						</Label>
 						<Select
 							value={locale}
@@ -277,7 +277,7 @@ function SettingsDialogContent({
 								<div className="flex items-center gap-2">
 									<ActiveLocaleFlag size={14} className="shrink-0" />
 									<SelectValue
-										placeholder={m["settings.general.language.title"]()}
+										placeholder={m.settings_general_language_title()}
 									>
 										{activeLocaleLabel}
 									</SelectValue>
@@ -294,8 +294,8 @@ function SettingsDialogContent({
 											)}
 											<span>
 												{value === "en"
-													? m["i18n.language.en"]()
-													: m["i18n.language.de"]()}
+													? m.i18n_language_en()
+													: m.i18n_language_de()}
 											</span>
 										</span>
 									</SelectItem>
@@ -303,17 +303,17 @@ function SettingsDialogContent({
 							</SelectContent>
 						</Select>
 						<p className="text-muted-foreground text-xs">
-							{m["settings.general.language.description"]()}
+							{m.settings_general_language_description()}
 						</p>
 					</div>
 
 					<div className="space-y-2">
 						<Label htmlFor="autoLockTimeout">
-							{m["settings.security.auto_lock"]()}
+							{m.settings_security_auto_lock()}
 						</Label>
 						<Select value={autoLockTimeout} onValueChange={setAutoLockTimeout}>
 							<SelectTrigger id="autoLockTimeout">
-								<SelectValue placeholder={m["settings.security.auto_lock"]()} />
+								<SelectValue placeholder={m.settings_security_auto_lock()} />
 							</SelectTrigger>
 							<SelectContent>
 								{autoLockOptions.map((option) => (
@@ -324,13 +324,13 @@ function SettingsDialogContent({
 							</SelectContent>
 						</Select>
 						<p className="text-muted-foreground text-xs">
-							{m["settings.security.auto_lock_description"]()}
+							{m.settings_security_auto_lock_description()}
 						</p>
 					</div>
 
 					<div className="space-y-2">
 						<Label htmlFor="masterPasswordReentry">
-							{m["settings.dialog.master_password_reentry.label"]()}
+							{m.settings_dialog_master_password_reentry_label()}
 						</Label>
 						<Select
 							value={masterPasswordReentry}
@@ -338,9 +338,7 @@ function SettingsDialogContent({
 						>
 							<SelectTrigger id="masterPasswordReentry">
 								<SelectValue
-									placeholder={m[
-										"settings.dialog.master_password_reentry.placeholder"
-									]()}
+									placeholder={m.settings_dialog_master_password_reentry_placeholder()}
 								/>
 							</SelectTrigger>
 							<SelectContent>
@@ -352,14 +350,14 @@ function SettingsDialogContent({
 							</SelectContent>
 						</Select>
 						<p className="text-muted-foreground text-xs">
-							{m["settings.dialog.master_password_reentry.description"]()}
+							{m.settings_dialog_master_password_reentry_description()}
 						</p>
 					</div>
 
 					<div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
-						<Label>{m["settings.dialog.local_cache.title"]()}</Label>
+						<Label>{m.settings_dialog_local_cache_title()}</Label>
 						<p className="text-muted-foreground text-xs">
-							{m["settings.dialog.local_cache.description"]()}
+							{m.settings_dialog_local_cache_description()}
 						</p>
 						<Button
 							variant="destructive"
@@ -367,23 +365,23 @@ function SettingsDialogContent({
 							onClick={() => setIsClearCacheConfirmOpen(true)}
 							disabled={isBusy}
 						>
-							{m["settings.dialog.local_cache.action.clear"]()}
+							{m.settings_dialog_local_cache_action_clear()}
 						</Button>
 					</div>
 				</div>
 
 				<DialogFooter>
 					<Button variant="outline" onClick={handleClose} disabled={isBusy}>
-						{m["settings.common.action.cancel"]()}
+						{m.settings_common_action_cancel()}
 					</Button>
 					<Button onClick={handleSave} disabled={isBusy || !isDirty}>
 						{saveMutation.isPending ? (
 							<>
 								<IconLoader2OutlineDuo18 className="h-4 w-4 animate-spin" />
-								{m["settings.common.action.saving"]()}
+								{m.settings_common_action_saving()}
 							</>
 						) : (
-							m["settings.dialog.action.save"]()
+							m.settings_dialog_action_save()
 						)}
 					</Button>
 				</DialogFooter>
@@ -396,15 +394,15 @@ function SettingsDialogContent({
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle>
-							{m["settings.dialog.clear_cache.confirm.title"]()}
+							{m.settings_dialog_clear_cache_confirm_title()}
 						</AlertDialogTitle>
 						<AlertDialogDescription>
-							{m["settings.dialog.clear_cache.confirm.description"]()}
+							{m.settings_dialog_clear_cache_confirm_description()}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
 						<AlertDialogCancel disabled={clearCacheMutation.isPending}>
-							{m["settings.common.action.cancel"]()}
+							{m.settings_common_action_cancel()}
 						</AlertDialogCancel>
 						<AlertDialogAction
 							onClick={() => clearCacheMutation.mutate()}
@@ -414,10 +412,10 @@ function SettingsDialogContent({
 							{clearCacheMutation.isPending ? (
 								<>
 									<IconLoader2OutlineDuo18 className="h-4 w-4 animate-spin" />
-									{m["settings.dialog.clear_cache.confirm.action.clearing"]()}
+									{m.settings_dialog_clear_cache_confirm_action_clearing()}
 								</>
 							) : (
-								m["settings.dialog.clear_cache.confirm.action.confirm"]()
+								m.settings_dialog_clear_cache_confirm_action_confirm()
 							)}
 						</AlertDialogAction>
 					</AlertDialogFooter>

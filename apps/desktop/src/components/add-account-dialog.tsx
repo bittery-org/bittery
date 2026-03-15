@@ -120,13 +120,13 @@ function AddAccountDialogForm({
 				queryClient.invalidateQueries({ queryKey: ["decrypted-item"] }),
 			]);
 
-			toast.success(m["toast.auth.signin_success_simple"]());
+			toast.success(m.toast_auth_signin_success_simple());
 			onOpenChange(false);
 			navigate({ to: "/vault" });
 		},
 		onError: (error) => {
 			console.error("Login error:", error);
-			toast.error(m["toast.auth.signin_error"]());
+			toast.error(m.toast_auth_signin_error());
 		},
 	});
 
@@ -135,7 +135,7 @@ function AddAccountDialogForm({
 
 		const normalizedServerUrl = normalizeServerUrl(serverUrl);
 		if (!normalizedServerUrl) {
-			toast.error(m["toast.auth.server.invalid_url"]());
+			toast.error(m.toast_auth_server_invalid_url());
 			return;
 		}
 		if (normalizedServerUrl !== serverUrl) {
@@ -154,17 +154,17 @@ function AddAccountDialogForm({
 		<DialogContent className="sm:max-w-md">
 			<DialogHeader>
 				<DialogTitle>
-					{m["vaults.sidebar.account_switcher.menu.add_account"]()}
+					{m.vaults_sidebar_account_switcher_menu_add_account()}
 				</DialogTitle>
 				<DialogDescription>
-					{m["auth.signin.button.different_account"]()}
+					{m.auth_signin_button_different_account()}
 				</DialogDescription>
 			</DialogHeader>
 
 			<form onSubmit={handleSubmit} className="space-y-4">
 				<div className="grid gap-1.5">
 					<Label htmlFor="add-serverUrl">
-						{m["auth.footer.server.title"]()}
+						{m.auth_footer_server_title()}
 					</Label>
 					<Input
 						id="add-serverUrl"
@@ -174,7 +174,7 @@ function AddAccountDialogForm({
 						onBlur={() => {
 							const normalized = normalizeServerUrl(serverUrl);
 							if (!normalized) {
-								toast.error(m["toast.auth.server.invalid_url"]());
+								toast.error(m.toast_auth_server_invalid_url());
 								return;
 							}
 							if (normalized !== serverUrl) {
@@ -182,25 +182,25 @@ function AddAccountDialogForm({
 							}
 						}}
 						required
-						placeholder={m["auth.footer.server.placeholder"]()}
+						placeholder={m.auth_footer_server_placeholder()}
 					/>
 				</div>
 
 				<div className="grid gap-1.5">
-					<Label htmlFor="add-email">{m["auth.signin.label.email"]()}</Label>
+					<Label htmlFor="add-email">{m.auth_signin_label_email()}</Label>
 					<Input
 						id="add-email"
 						type="email"
 						value={email}
 						onChange={(e) => setEmail(e.target.value)}
 						required
-						placeholder={m["auth.signin.placeholder.email"]()}
+						placeholder={m.auth_signin_placeholder_email()}
 					/>
 				</div>
 
 				<div className="grid gap-1.5">
 					<Label htmlFor="add-secretKey">
-						{m["auth.signin.label.secret_key"]()}
+						{m.auth_signin_label_secret_key()}
 					</Label>
 					<InputGroup>
 						<InputGroupInput
@@ -209,7 +209,7 @@ function AddAccountDialogForm({
 							value={secretKey}
 							onChange={(e) => setSecretKey(e.target.value)}
 							required
-							placeholder={m["auth.signin.placeholder.secret_key"]()}
+							placeholder={m.auth_signin_placeholder_secret_key()}
 							className="font-mono"
 						/>
 						<InputGroupAddon align="inline-end">
@@ -229,7 +229,7 @@ function AddAccountDialogForm({
 
 				<div className="grid gap-1.5">
 					<Label htmlFor="add-password">
-						{m["auth.signin.label.password"]()}
+						{m.auth_signin_label_password()}
 					</Label>
 					<InputGroup>
 						<InputGroupInput
@@ -238,7 +238,7 @@ function AddAccountDialogForm({
 							value={password}
 							onChange={(e) => setPassword(e.target.value)}
 							required
-							placeholder={m["auth.signin.placeholder.password"]()}
+							placeholder={m.auth_signin_placeholder_password()}
 						/>
 						<InputGroupAddon align="inline-end">
 							<InputGroupButton
@@ -269,7 +269,7 @@ function AddAccountDialogForm({
 							className="flex items-center gap-2 font-normal"
 						>
 							<IconFingerprintOutlineDuo18 className="h-4 w-4 text-muted-foreground" />
-							{m["auth.signin.biometric.enable"]()}
+							{m.auth_signin_biometric_enable()}
 						</Label>
 					</div>
 				)}
@@ -280,8 +280,8 @@ function AddAccountDialogForm({
 					disabled={loginMutation.isPending}
 				>
 					{loginMutation.isPending
-						? m["auth.signin.button.signing_in"]()
-						: m["vaults.sidebar.account_switcher.menu.add_account"]()}
+						? m.auth_signin_button_signing_in()
+						: m.vaults_sidebar_account_switcher_menu_add_account()}
 				</Button>
 			</form>
 		</DialogContent>

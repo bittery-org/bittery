@@ -34,19 +34,19 @@ import { useI18n } from "@/providers/i18n-provider";
 function getNavLabel(path: string, m: ReturnType<typeof useI18n>["m"]) {
 	switch (path) {
 		case "/home":
-			return m["nav.item.dashboard"]();
+			return m.nav_item_dashboard();
 		case "/security":
-			return m["nav.item.sentinel"]();
+			return m.nav_item_sentinel();
 		case "/billing":
-			return m["nav.item.billing"]();
+			return m.nav_item_billing();
 		case "/team":
-			return m["nav.item.team"]();
+			return m.nav_item_team();
 		case "/admin":
-			return m["nav.item.admin"]();
+			return m.nav_item_admin();
 		case "/vaults":
-			return m["nav.item.vaults"]();
+			return m.nav_item_vaults();
 		case "/settings":
-			return m["nav.item.settings"]();
+			return m.nav_item_settings();
 		default:
 			return path;
 	}
@@ -91,7 +91,7 @@ function UserNav() {
 							</Avatar>
 							<div className="grid flex-1 text-left text-sm leading-tight">
 								<span className="truncate font-medium">
-									{user?.name || m["nav.user.default_name"]()}
+									{user?.name || m.nav_user_default_name()}
 								</span>
 								<span className="truncate text-muted-foreground text-xs">
 									{user?.email || ""}
@@ -115,7 +115,7 @@ function UserNav() {
 								}}
 							>
 								<Settings className="mr-2 h-4 w-4" />
-								{m["nav.menu.settings"]()}
+								{m.nav_menu_settings()}
 							</Link>
 						</DropdownMenuItem>
 						<DropdownMenuSeparator />
@@ -124,7 +124,7 @@ function UserNav() {
 							className="cursor-pointer text-destructive"
 						>
 							<LogOut className="mr-2 h-4 w-4" />
-							{m["nav.menu.log_out"]()}
+							{m.nav_menu_log_out()}
 						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>
@@ -197,7 +197,7 @@ export function AppSidebar() {
 
 			<SidebarContent>
 				<SidebarGroup>
-					<SidebarGroupLabel>{m["nav.group.navigation"]()}</SidebarGroupLabel>
+					<SidebarGroupLabel>{m.nav_group_navigation()}</SidebarGroupLabel>
 					<SidebarGroupContent>
 						<SidebarMenu>
 							{navItems.map((item) => {

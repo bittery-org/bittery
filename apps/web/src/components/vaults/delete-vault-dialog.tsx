@@ -36,7 +36,7 @@ export function DeleteVaultDialog({
 			await onConfirm(vault.id);
 			onOpenChange(false);
 		} catch {
-			toast.error(m["vaults.delete_dialog.toast.delete_failed"]());
+			toast.error(m.vaults_delete_dialog_toast_delete_failed());
 		} finally {
 			setIsDeleting(false);
 		}
@@ -47,10 +47,10 @@ export function DeleteVaultDialog({
 			<AlertDialogContent data-testid="delete-vault-dialog">
 				<AlertDialogHeader>
 					<AlertDialogTitle>
-						{m["vaults.delete_dialog.title"]()}
+						{m.vaults_delete_dialog_title()}
 					</AlertDialogTitle>
 					<AlertDialogDescription>
-						{m["vaults.delete_dialog.description"]({
+						{m.vaults_delete_dialog_description({
 							vaultName: vault?.name ?? "",
 						})}
 					</AlertDialogDescription>
@@ -60,7 +60,7 @@ export function DeleteVaultDialog({
 						disabled={isDeleting}
 						data-testid="delete-vault-cancel-button"
 					>
-						{m["vaults.delete_dialog.action.cancel"]()}
+						{m.vaults_delete_dialog_action_cancel()}
 					</AlertDialogCancel>
 					<AlertDialogAction
 						onClick={handleDelete}
@@ -69,8 +69,8 @@ export function DeleteVaultDialog({
 						data-testid="delete-vault-confirm-button"
 					>
 						{isDeleting
-							? m["vaults.delete_dialog.action.deleting"]()
-							: m["vaults.delete_dialog.action.confirm"]()}
+							? m.vaults_delete_dialog_action_deleting()
+							: m.vaults_delete_dialog_action_confirm()}
 					</AlertDialogAction>
 				</AlertDialogFooter>
 			</AlertDialogContent>

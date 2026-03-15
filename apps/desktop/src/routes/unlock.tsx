@@ -61,7 +61,7 @@ export function UnlockPage() {
 	const allAccounts = accounts.data ?? [];
 	const getPartialUnlockMessage = useCallback(
 		(unlockedCount: number) =>
-			m["toast.auth.unlock.warning.partial"]({
+			m.toast_auth_unlock_warning_partial({
 				unlockedCount,
 				totalCount: allAccounts.length,
 			}),
@@ -81,14 +81,14 @@ export function UnlockPage() {
 				if (allAccounts.length === 1) {
 					toast.success(
 						biometric
-							? m["toast.auth.unlock.success.biometric_single"]()
-							: m["toast.auth.unlock.success.single"](),
+							? m.toast_auth_unlock_success_biometric_single()
+							: m.toast_auth_unlock_success_single(),
 					);
 					return;
 				}
 
 				toast.success(
-					m["toast.auth.unlock.success.all"]({ count: unlockedCount }),
+					m.toast_auth_unlock_success_all({ count: unlockedCount }),
 				);
 				return;
 			}
@@ -136,7 +136,7 @@ export function UnlockPage() {
 		},
 		onError: (error) => {
 			console.error("Unlock all error:", error);
-			toast.error(m["toast.auth.unlock.error.failed"]());
+			toast.error(m.toast_auth_unlock_error_failed());
 		},
 	});
 
@@ -145,14 +145,14 @@ export function UnlockPage() {
 		try {
 			// Use the unified biometric unlock method that shows ONE prompt for all accounts
 			if (!storage.unlockAllAccountsWithBiometric) {
-				throw new Error(m["toast.auth.unlock.error.biometric_not_supported"]());
+				throw new Error(m.toast_auth_unlock_error_biometric_not_supported());
 			}
 
 			const { unlocked, failed } =
 				await storage.unlockAllAccountsWithBiometric();
 
 			if (unlocked.length === 0) {
-				throw new Error(m["toast.auth.unlock.error.biometric_none_unlocked"]());
+				throw new Error(m.toast_auth_unlock_error_biometric_none_unlocked());
 			}
 
 			// Set active mode
@@ -179,7 +179,7 @@ export function UnlockPage() {
 			toast.error(
 				error instanceof Error
 					? error.message
-					: m["toast.auth.unlock.error.biometric_failed"](),
+					: m.toast_auth_unlock_error_biometric_failed(),
 			);
 		}
 	};
@@ -223,7 +223,7 @@ export function UnlockPage() {
 				try {
 					if (!storage.unlockAllAccountsWithBiometric) {
 						throw new Error(
-							m["toast.auth.unlock.error.biometric_not_supported"](),
+							m.toast_auth_unlock_error_biometric_not_supported(),
 						);
 					}
 
@@ -232,7 +232,7 @@ export function UnlockPage() {
 
 					if (unlocked.length === 0) {
 						throw new Error(
-							m["toast.auth.unlock.error.biometric_none_unlocked"](),
+							m.toast_auth_unlock_error_biometric_none_unlocked(),
 						);
 					}
 
@@ -294,10 +294,10 @@ export function UnlockPage() {
 						<IconKeyOutlineDuo18 className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
 						<div>
 							<p className="font-medium text-amber-800">
-								{m["auth.unlock.password_required.title"]()}
+								{m.auth_unlock_password_required_title()}
 							</p>
 							<p className="text-amber-700 text-sm">
-								{m["auth.unlock.password_required.description"]()}
+								{m.auth_unlock_password_required_description()}
 							</p>
 						</div>
 					</div>
@@ -311,7 +311,7 @@ export function UnlockPage() {
 							value={password}
 							onChange={(e) => setPassword(e.target.value)}
 							required
-							placeholder={m["auth.signin.placeholder.password"]()}
+							placeholder={m.auth_signin_placeholder_password()}
 							autoFocus
 							disabled={loading}
 							className="text-base"
@@ -330,12 +330,8 @@ export function UnlockPage() {
 									disabled={loading}
 									aria-label={
 										showPassword
-											? m[
-													"vaults.detail.items.form.login.action.hide_password"
-												]()
-											: m[
-													"vaults.detail.items.form.login.action.show_password"
-												]()
+											? m.vaults_detail_items_form_login_action_hide_password()
+											: m.vaults_detail_items_form_login_action_show_password()
 									}
 								>
 									{showPassword ? (
@@ -353,7 +349,7 @@ export function UnlockPage() {
 										size="icon-sm"
 										onClick={handleBiometricUnlockAll}
 										disabled={loading}
-										aria-label={m["auth.unlock.action.biometric"]()}
+										aria-label={m.auth_unlock_action_biometric()}
 										className="text-primary hover:text-primary/80"
 									>
 										<IconFingerprintOutlineDuo18 className="h-5 w-5" />
@@ -366,8 +362,8 @@ export function UnlockPage() {
 
 				<p className="mt-4 text-muted-foreground text-sm">
 					{allAccounts.length === 1
-						? m["auth.unlock.description.single"]()
-						: m["auth.unlock.description.multiple"]({
+						? m.auth_unlock_description_single()
+						: m.auth_unlock_description_multiple({
 								count: allAccounts.length,
 							})}
 				</p>

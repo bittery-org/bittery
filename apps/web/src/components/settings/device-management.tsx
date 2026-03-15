@@ -54,17 +54,17 @@ function getPlatformIcon(platform?: string | null) {
 function getPlatformLabel(platform: string | null | undefined, m: Messages) {
 	switch (platform) {
 		case "web":
-			return m["settings.devices.platform.web"]();
+			return m.settings_devices_platform_web();
 		case "desktop":
-			return m["settings.devices.platform.desktop"]();
+			return m.settings_devices_platform_desktop();
 		case "extension":
-			return m["settings.devices.platform.extension"]();
+			return m.settings_devices_platform_extension();
 		case "ios":
-			return m["settings.devices.platform.ios"]();
+			return m.settings_devices_platform_ios();
 		case "android":
-			return m["settings.devices.platform.android"]();
+			return m.settings_devices_platform_android();
 		default:
-			return m["settings.devices.platform.unknown"]();
+			return m.settings_devices_platform_unknown();
 	}
 }
 
@@ -73,7 +73,7 @@ function formatDeviceDisplayLocalized(
 	m: Messages,
 ): { title: string; subtitle: string } {
 	const title =
-		device.deviceName ?? m["settings.devices.common.unknown_device"]();
+		device.deviceName ?? m.settings_devices_common_unknown_device();
 
 	const parts: string[] = [];
 	if (device.osName) {
@@ -104,22 +104,22 @@ function formatLastActiveLocalized(
 	const diffDays = Math.floor(diffMs / 86_400_000);
 
 	if (Number.isNaN(lastActive.getTime()) || diffMins < 1) {
-		return m["settings.devices.last_active.just_now"]();
+		return m.settings_devices_last_active_just_now();
 	}
 	if (diffMins < 60) {
 		return diffMins === 1
-			? m["settings.devices.last_active.minutes.single"]({ count: diffMins })
-			: m["settings.devices.last_active.minutes.plural"]({ count: diffMins });
+			? m.settings_devices_last_active_minutes_single({ count: diffMins })
+			: m.settings_devices_last_active_minutes_plural({ count: diffMins });
 	}
 	if (diffHours < 24) {
 		return diffHours === 1
-			? m["settings.devices.last_active.hours.single"]({ count: diffHours })
-			: m["settings.devices.last_active.hours.plural"]({ count: diffHours });
+			? m.settings_devices_last_active_hours_single({ count: diffHours })
+			: m.settings_devices_last_active_hours_plural({ count: diffHours });
 	}
 	if (diffDays < 7) {
 		return diffDays === 1
-			? m["settings.devices.last_active.days.single"]({ count: diffDays })
-			: m["settings.devices.last_active.days.plural"]({ count: diffDays });
+			? m.settings_devices_last_active_days_single({ count: diffDays })
+			: m.settings_devices_last_active_days_plural({ count: diffDays });
 	}
 
 	return new Intl.DateTimeFormat(locale, {
@@ -160,19 +160,19 @@ function RenameDeviceDialog({
 		mutationFn: (input: { sessionId: string; deviceName: string }) =>
 			trpcClient.auth.renameDevice.mutate(input),
 		onSuccess: () => {
-			toast.success(m["settings.devices.toast.rename_success"]());
+			toast.success(m.settings_devices_toast_rename_success());
 			setOpen(false);
 			onSuccess();
 		},
 		onError: () => {
-			toast.error(m["settings.devices.toast.rename_failed"]());
+			toast.error(m.settings_devices_toast_rename_failed());
 		},
 	});
 
 	const handleSubmit = (e: React.FormEvent) => {
 		e.preventDefault();
 		if (!deviceName.trim()) {
-			toast.error(m["settings.devices.toast.device_name_required"]());
+			toast.error(m.settings_devices_toast_device_name_required());
 			return;
 		}
 		renameMutation.mutate({
@@ -192,23 +192,21 @@ function RenameDeviceDialog({
 				<form onSubmit={handleSubmit}>
 					<DialogHeader>
 						<DialogTitle>
-							{m["settings.devices.rename_dialog.title"]()}
+							{m.settings_devices_rename_dialog_title()}
 						</DialogTitle>
 						<DialogDescription>
-							{m["settings.devices.rename_dialog.description"]()}
+							{m.settings_devices_rename_dialog_description()}
 						</DialogDescription>
 					</DialogHeader>
 					<div className="py-4">
 						<Label htmlFor="deviceName">
-							{m["settings.devices.rename_dialog.field.device_name"]()}
+							{m.settings_devices_rename_dialog_field_device_name()}
 						</Label>
 						<Input
 							id="deviceName"
 							value={deviceName}
 							onChange={(e) => setDeviceName(e.target.value)}
-							placeholder={m[
-								"settings.devices.rename_dialog.placeholder.device_name"
-							]()}
+							placeholder={m.settings_devices_rename_dialog_placeholder_device_name()}
 							className="mt-2"
 							autoFocus
 						/>
@@ -219,12 +217,12 @@ function RenameDeviceDialog({
 							variant="outline"
 							onClick={() => setOpen(false)}
 						>
-							{m["settings.common.action.cancel"]()}
+							{m.settings_common_action_cancel()}
 						</Button>
 						<Button type="submit" disabled={renameMutation.isPending}>
 							{renameMutation.isPending
-								? m["settings.devices.rename_dialog.action.saving"]()
-								: m["settings.devices.rename_dialog.action.submit"]()}
+								? m.settings_devices_rename_dialog_action_saving()
+								: m.settings_devices_rename_dialog_action_submit()}
 						</Button>
 					</DialogFooter>
 				</form>
@@ -248,12 +246,12 @@ function RevokeDeviceDialog({
 		mutationFn: (sessionId: string) =>
 			trpcClient.auth.revokeDevice.mutate({ sessionId }),
 		onSuccess: () => {
-			toast.success(m["settings.devices.toast.revoke_success"]());
+			toast.success(m.settings_devices_toast_revoke_success());
 			setOpen(false);
 			onSuccess();
 		},
 		onError: () => {
-			toast.error(m["settings.devices.toast.revoke_failed"]());
+			toast.error(m.settings_devices_toast_revoke_failed());
 		},
 	});
 
@@ -273,17 +271,17 @@ function RevokeDeviceDialog({
 			<AlertDialogContent>
 				<AlertDialogHeader>
 					<AlertDialogTitle>
-						{m["settings.devices.revoke_dialog.title"]()}
+						{m.settings_devices_revoke_dialog_title()}
 					</AlertDialogTitle>
 					<AlertDialogDescription>
-						{m["settings.devices.revoke_dialog.description.prefix"]()}{" "}
+						{m.settings_devices_revoke_dialog_description_prefix()}{" "}
 						<strong>{title}</strong>{" "}
-						{m["settings.devices.revoke_dialog.description.suffix"]()}
+						{m.settings_devices_revoke_dialog_description_suffix()}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>
 					<AlertDialogCancel>
-						{m["settings.common.action.cancel"]()}
+						{m.settings_common_action_cancel()}
 					</AlertDialogCancel>
 					<Button
 						variant="destructive"
@@ -291,8 +289,8 @@ function RevokeDeviceDialog({
 						disabled={revokeMutation.isPending}
 					>
 						{revokeMutation.isPending
-							? m["settings.devices.revoke_dialog.action.revoking"]()
-							: m["settings.devices.revoke_dialog.action.submit"]()}
+							? m.settings_devices_revoke_dialog_action_revoking()
+							: m.settings_devices_revoke_dialog_action_submit()}
 					</Button>
 				</AlertDialogFooter>
 			</AlertDialogContent>
@@ -323,7 +321,7 @@ function DeviceCard({
 					<span className="truncate font-medium text-sm">{title}</span>
 					{session.isCurrentSession && (
 						<Badge variant="secondary" className="text-[10px]">
-							{m["settings.devices.badge.current"]()}
+							{m.settings_devices_badge_current()}
 						</Badge>
 					)}
 				</div>
@@ -385,7 +383,7 @@ export function DeviceManagement() {
 	if (devicesQuery.error) {
 		return (
 			<div className="py-8 text-center text-muted-foreground">
-				{m["settings.devices.list.error"]()}
+				{m.settings_devices_list_error()}
 			</div>
 		);
 	}
@@ -395,7 +393,7 @@ export function DeviceManagement() {
 	if (devices.length === 0) {
 		return (
 			<div className="py-8 text-center text-muted-foreground">
-				{m["settings.devices.list.empty"]()}
+				{m.settings_devices_list_empty()}
 			</div>
 		);
 	}

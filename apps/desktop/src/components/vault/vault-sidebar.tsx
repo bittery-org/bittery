@@ -6,6 +6,8 @@ import {
 	DropdownMenuItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
+	getTagColorFromName,
+	VaultAvatar,
 } from "@bittery/ui";
 import {
 	IconBoxArchive3OutlineDuo18,
@@ -26,8 +28,6 @@ import {
 import { useI18n } from "../../providers/i18n-provider";
 import { AccountSwitcher } from "../account-switcher";
 import { SidebarSection } from "./sidebar-section";
-import { getTagColorFromName } from "./tag-badge";
-import { VaultAvatar } from "./vault-avatar";
 
 interface VaultInfo {
 	vaultId: string;
@@ -163,7 +163,7 @@ function DroppableVaultEntry({
 							}
 						>
 							<IconPen2OutlineDuo18 className="h-4 w-4" />
-							{m["vaults.page.card.action.edit_vault"]()}
+							{m.vaults_page_card_action_edit_vault()}
 						</DropdownMenuItem>
 						<DropdownMenuSeparator />
 						<DropdownMenuItem
@@ -176,7 +176,7 @@ function DroppableVaultEntry({
 							}
 						>
 							<IconTrash2OutlineDuo18 className="h-4 w-4" />
-							{m["vaults.page.card.action.delete_vault"]()}
+							{m.vaults_page_card_action_delete_vault()}
 						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>
@@ -283,7 +283,7 @@ export function VaultSidebar({
 					)}
 				>
 					<IconGrid2OutlineDuo18 className="size-4 text-muted-foreground" />
-					<span>{m["vaults.sidebar.link.all_objects"]()}</span>
+					<span>{m.vaults_sidebar_link_all_objects()}</span>
 				</Link>
 
 				{/* Favorites */}
@@ -308,7 +308,7 @@ export function VaultSidebar({
 						className="size-4 text-yellow-500"
 						fill="currentColor"
 					/>
-					<span>{m["vaults.favorites.title"]()}</span>
+					<span>{m.vaults_favorites_title()}</span>
 				</Link>
 
 				{/* Vaults Section */}
@@ -329,7 +329,7 @@ export function VaultSidebar({
 					) : (
 						// Single account mode: Show vaults in one section
 						<SidebarSection
-							title={m["nav.item.vaults"]()}
+							title={m.nav_item_vaults()}
 							storageKey="vaults"
 							defaultOpen={true}
 							onAdd={onNewVault}
@@ -343,7 +343,7 @@ export function VaultSidebar({
 				{tags.length > 0 && (
 					<div className="mt-2">
 						<SidebarSection
-							title={m["vaults.detail.items.detail.tags.label"]()}
+							title={m.vaults_detail_items_detail_tags_label()}
 							storageKey="tags"
 							defaultOpen={true}
 						>
@@ -401,7 +401,7 @@ export function VaultSidebar({
 					)}
 				>
 					<IconBoxArchive3OutlineDuo18 className="size-4 text-muted-foreground" />
-					<span>{m["vaults.sidebar.link.archive"]()}</span>
+					<span>{m.vaults_sidebar_link_archive()}</span>
 				</Link>
 			</div>
 		</div>

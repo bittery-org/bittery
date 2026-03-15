@@ -1,4 +1,3 @@
-import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
@@ -7,11 +6,6 @@ import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
 	plugins: [
-		paraglideVitePlugin({
-			project: "../../packages/i18n/project.inlang",
-			outdir: "./src/paraglide",
-			strategy: ["baseLocale"],
-		}),
 		tsconfigPaths(),
 		tailwindcss(),
 		tanstackStart({

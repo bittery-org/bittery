@@ -43,7 +43,8 @@
 		"db:stop": "turbo -F @bittery/db db:stop",
 		"db:down": "turbo -F @bittery/db db:down",
 		"start:server": "pnpm --filter server run start",
-		"stripe:webhooks": "stripe listen --forward-to http://localhost:3000/webhooks/stripe"
+		"stripe:webhooks": "stripe listen --forward-to http://localhost:3000/webhooks/stripe",
+		"i18n:generate": "pnpm --filter @bittery/i18n run build"
 	},
 	"dependencies": {
 		"dotenv": "^17.2.2",

@@ -33,7 +33,7 @@ export function PendingInvitations() {
 			trpcClient.team.invitations.accept.mutate(input),
 		onSuccess: async (data) => {
 			toast.success(
-				m["dashboard.pending.toast.joined"]({ teamName: data.teamName }),
+				m.dashboard_pending_toast_joined({ teamName: data.teamName }),
 			);
 			await invalidator.invalidateTeamInvitations();
 		},
@@ -46,7 +46,7 @@ export function PendingInvitations() {
 		mutationFn: (input: { token: string }) =>
 			trpcClient.team.invitations.decline.mutate(input),
 		onSuccess: async () => {
-			toast.success(m["dashboard.pending.toast.declined"]());
+			toast.success(m.dashboard_pending_toast_declined());
 			await invalidator.invalidateTeamInvitations();
 		},
 		onError: (error: Error) => {
@@ -60,15 +60,15 @@ export function PendingInvitations() {
 	const pendingCount = pendingQuery.data.length;
 	const pendingDescription =
 		pendingCount === 1
-			? m["dashboard.pending.description.single"]({ count: pendingCount })
-			: m["dashboard.pending.description.plural"]({ count: pendingCount });
+			? m.dashboard_pending_description_single({ count: pendingCount })
+			: m.dashboard_pending_description_plural({ count: pendingCount });
 
 	return (
 		<Card className="overflow-hidden border-border/70 py-0">
 			<CardHeader className="border-b bg-muted/30 py-5">
 				<CardTitle className="flex items-center gap-2">
 					<Mail className="h-5 w-5" />
-					{m["dashboard.pending.title"]()}
+					{m.dashboard_pending_title()}
 				</CardTitle>
 				<CardDescription>{pendingDescription}</CardDescription>
 			</CardHeader>
@@ -86,13 +86,13 @@ export function PendingInvitations() {
 								</div>
 								<div className="flex flex-wrap items-center gap-3 text-muted-foreground text-sm">
 									<span>
-										{m["dashboard.pending.invited_by"]({
+										{m.dashboard_pending_invited_by({
 											invitedBy: invitation.invitedBy,
 										})}
 									</span>
 									<span className="flex items-center gap-1">
 										<Clock className="h-3 w-3" />
-										{m["dashboard.pending.expires"]({
+										{m.dashboard_pending_expires({
 											time: formatDistanceToNow(
 												new Date(invitation.expiresAt),
 												{
@@ -123,7 +123,7 @@ export function PendingInvitations() {
 									disabled={acceptMutation.isPending}
 								>
 									<Check className="mr-1 h-4 w-4" />
-									{m["dashboard.pending.action.accept"]()}
+									{m.dashboard_pending_action_accept()}
 								</Button>
 							</div>
 						</div>

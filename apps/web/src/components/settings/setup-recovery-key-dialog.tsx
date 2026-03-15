@@ -56,11 +56,11 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 		}) => trpcClient.auth.storeRecoveryKey.mutate(input),
 		onSuccess: async () => {
 			await queryClient.invalidateQueries();
-			toast.success(m["settings.recovery_key.setup.toast.configured"]());
+			toast.success(m.settings_recovery_key_setup_toast_configured());
 			handleOpenChange(false);
 		},
 		onError: () => {
-			toast.error(m["settings.recovery_key.setup.toast.configure_failed"]());
+			toast.error(m.settings_recovery_key_setup_toast_configure_failed());
 			setIsProcessing(false);
 		},
 	});
@@ -70,20 +70,20 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 
 		if (!currentPassword.trim()) {
 			toast.error(
-				m["settings.recovery_key.common.toast.current_password_required"](),
+				m.settings_recovery_key_common_toast_current_password_required(),
 			);
 			return;
 		}
 
 		const secretKey = await storage.getStoredSecretKey();
 		if (!secretKey) {
-			toast.error(m["settings.common.toast.secret_key_not_found_sign_out"]());
+			toast.error(m.settings_common_toast_secret_key_not_found_sign_out());
 			return;
 		}
 
 		if (!userQuery.data?.encryptedPrivateKey) {
 			toast.error(
-				m["settings.recovery_key.common.toast.account_metadata_failed"](),
+				m.settings_recovery_key_common_toast_account_metadata_failed(),
 			);
 			return;
 		}
@@ -119,7 +119,7 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 		} catch (error) {
 			console.error("Recovery setup failed:", error);
 			toast.error(
-				m["settings.recovery_key.common.toast.verify_password_failed"](),
+				m.settings_recovery_key_common_toast_verify_password_failed(),
 			);
 		} finally {
 			setIsProcessing(false);
@@ -129,13 +129,13 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 	const handleConfirmSetup = async () => {
 		if (!hasAcknowledged) {
 			toast.error(
-				m["settings.recovery_key.setup.toast.acknowledgement_required"](),
+				m.settings_recovery_key_setup_toast_acknowledgement_required(),
 			);
 			return;
 		}
 
 		if (!recoveryKey || !encryptedMasterKey) {
-			toast.error(m["settings.recovery_key.common.toast.data_missing"]());
+			toast.error(m.settings_recovery_key_common_toast_data_missing());
 			return;
 		}
 
@@ -163,7 +163,7 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 	};
 
 	const copyRecoveryKey = () => {
-		copyWithToast(recoveryKey, m["settings.recovery_key.common.copy_label"](), {
+		copyWithToast(recoveryKey, m.settings_recovery_key_common_copy_label(), {
 			showAutoClearMessage: false,
 		});
 	};
@@ -171,39 +171,39 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 	const downloadEmergencyKit = async () => {
 		const result = await downloadRecoveryKit({
 			fileName: "bittery-recovery-kit",
-			title: m["settings.recovery_key.setup.kit.title"](),
-			subtitle: m["settings.recovery_key.setup.kit.subtitle"](),
+			title: m.settings_recovery_key_setup_kit_title(),
+			subtitle: m.settings_recovery_key_setup_kit_subtitle(),
 			entries: [
 				{
-					label: m["settings.recovery_key.setup.kit.entry.label"](),
+					label: m.settings_recovery_key_setup_kit_entry_label(),
 					value: recoveryKey,
-					description: m["settings.recovery_key.setup.kit.entry.description"](),
+					description: m.settings_recovery_key_setup_kit_entry_description(),
 				},
 			],
 			cautions: [
-				m["settings.recovery_key.setup.kit.caution.separate_manager"](),
-				m["settings.recovery_key.setup.kit.caution.keep_offline_backup"](),
-				m["settings.recovery_key.setup.kit.caution.anyone_can_reset"](),
+				m.settings_recovery_key_setup_kit_caution_separate_manager(),
+				m.settings_recovery_key_setup_kit_caution_keep_offline_backup(),
+				m.settings_recovery_key_setup_kit_caution_anyone_can_reset(),
 			],
-			footerNote: m["settings.recovery_key.common.kit.footer_note"](),
+			footerNote: m.settings_recovery_key_common_kit_footer_note(),
 			labels: {
-				documentTitle: m["settings.recovery_key.common.kit.document_title"](),
-				generatedLabel: m["settings.recovery_key.common.kit.generated_label"](),
+				documentTitle: m.settings_recovery_key_common_kit_document_title(),
+				generatedLabel: m.settings_recovery_key_common_kit_generated_label(),
 				storeOfflineHeading:
-					m["settings.recovery_key.common.kit.store_offline_heading"](),
-				badgeText: m["settings.recovery_key.common.kit.badge_text"](),
+					m.settings_recovery_key_common_kit_store_offline_heading(),
+				badgeText: m.settings_recovery_key_common_kit_badge_text(),
 			},
 		});
 
 		if (result === "pdf-downloaded") {
 			toast.success(
-				m["settings.recovery_key.common.toast.kit_pdf_downloaded"](),
+				m.settings_recovery_key_common_toast_kit_pdf_downloaded(),
 			);
 			return;
 		}
 
 		toast.success(
-			m["settings.recovery_key.common.toast.kit_text_downloaded"](),
+			m.settings_recovery_key_common_toast_kit_text_downloaded(),
 		);
 	};
 
@@ -212,7 +212,7 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 			<DialogTrigger asChild>
 				<Button variant="outline">
 					<Shield className="mr-2 h-4 w-4" />
-					{m["settings.recovery_key.setup.trigger"]()}
+					{m.settings_recovery_key_setup_trigger()}
 				</Button>
 			</DialogTrigger>
 			<DialogContent className="sm:max-w-md">
@@ -220,16 +220,16 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 					<form onSubmit={handleGenerateRecoveryKey}>
 						<DialogHeader>
 							<DialogTitle>
-								{m["settings.recovery_key.setup.title"]()}
+								{m.settings_recovery_key_setup_title()}
 							</DialogTitle>
 							<DialogDescription>
-								{m["settings.recovery_key.setup.description"]()}
+								{m.settings_recovery_key_setup_description()}
 							</DialogDescription>
 						</DialogHeader>
 						<div className="grid gap-4 py-4">
 							<div className="grid gap-2">
 								<Label htmlFor="setupRecoveryPassword">
-									{m["settings.recovery_key.common.field.current_password"]()}
+									{m.settings_recovery_key_common_field_current_password()}
 								</Label>
 								<div className="relative">
 									<Input
@@ -237,9 +237,7 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 										type={showPassword ? "text" : "password"}
 										value={currentPassword}
 										onChange={(e) => setCurrentPassword(e.target.value)}
-										placeholder={m[
-											"settings.recovery_key.common.placeholder.password"
-										]()}
+										placeholder={m.settings_recovery_key_common_placeholder_password()}
 										autoFocus
 										className="pr-10"
 									/>
@@ -261,12 +259,12 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 								variant="outline"
 								onClick={() => setOpen(false)}
 							>
-								{m["settings.common.action.cancel"]()}
+								{m.settings_common_action_cancel()}
 							</Button>
 							<Button type="submit" disabled={isProcessing}>
 								{isProcessing
-									? m["settings.recovery_key.common.action.verifying"]()
-									: m["settings.recovery_key.setup.action.generate"]()}
+									? m.settings_recovery_key_common_action_verifying()
+									: m.settings_recovery_key_setup_action_generate()}
 							</Button>
 						</DialogFooter>
 					</form>
@@ -274,16 +272,16 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 					<>
 						<DialogHeader>
 							<DialogTitle>
-								{m["settings.recovery_key.setup.display.title"]()}
+								{m.settings_recovery_key_setup_display_title()}
 							</DialogTitle>
 							<DialogDescription>
-								{m["settings.recovery_key.common.display.description"]()}
+								{m.settings_recovery_key_common_display_description()}
 							</DialogDescription>
 						</DialogHeader>
 						<div className="grid gap-4 py-4">
 							<div className="relative rounded-xl border bg-muted/30 p-4">
 								<div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-									{m["settings.recovery_key.setup.display.key_label"]()}
+									{m.settings_recovery_key_setup_display_key_label()}
 								</div>
 								<div className="break-all font-mono text-sm tracking-wide">
 									{recoveryKey}
@@ -297,7 +295,7 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 									onClick={copyRecoveryKey}
 								>
 									<Copy size={16} className="mr-2" />
-									{m["settings.common.action.copy"]()}
+									{m.settings_common_action_copy()}
 								</Button>
 								<Button
 									type="button"
@@ -305,7 +303,7 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 									onClick={downloadEmergencyKit}
 								>
 									<Download size={16} className="mr-2" />
-									{m["settings.common.action.download_kit"]()}
+									{m.settings_common_action_download_kit()}
 								</Button>
 							</div>
 
@@ -317,7 +315,7 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 									className="mt-1"
 								/>
 								<span className="text-sm">
-									{m["settings.recovery_key.setup.display.acknowledgement"]()}
+									{m.settings_recovery_key_setup_display_acknowledgement()}
 								</span>
 							</label>
 						</div>
@@ -327,7 +325,7 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 								variant="outline"
 								onClick={() => setOpen(false)}
 							>
-								{m["settings.common.action.cancel"]()}
+								{m.settings_common_action_cancel()}
 							</Button>
 							<Button
 								type="button"
@@ -339,8 +337,8 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 								}
 							>
 								{isProcessing || storeRecoveryKeyMutation.isPending
-									? m["settings.common.action.saving"]()
-									: m["settings.recovery_key.setup.action.confirm"]()}
+									? m.settings_common_action_saving()
+									: m.settings_recovery_key_setup_action_confirm()}
 							</Button>
 						</DialogFooter>
 					</>

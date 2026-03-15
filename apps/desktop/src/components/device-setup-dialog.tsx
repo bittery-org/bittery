@@ -44,10 +44,10 @@ interface DeviceSetupDialogProps {
 }
 
 type SetupPreviewErrorKey =
-	| "vaults.sidebar.account_switcher.device_setup_dialog.error.select_account"
-	| "vaults.sidebar.account_switcher.device_setup_dialog.error.no_server_url"
-	| "vaults.sidebar.account_switcher.device_setup_dialog.error.no_secret_key"
-	| "vaults.sidebar.account_switcher.device_setup_dialog.error.generate_failed";
+	| "vaults_sidebar_account_switcher_device_setup_dialog_error_select_account"
+	| "vaults_sidebar_account_switcher_device_setup_dialog_error_no_server_url"
+	| "vaults_sidebar_account_switcher_device_setup_dialog_error_no_secret_key"
+	| "vaults_sidebar_account_switcher_device_setup_dialog_error_generate_failed";
 
 export function DeviceSetupDialog({
 	open,
@@ -127,7 +127,7 @@ function DeviceSetupDialogContent({
 				linkUri: null,
 				qrUri: null,
 				errorKey:
-					"vaults.sidebar.account_switcher.device_setup_dialog.error.select_account" as SetupPreviewErrorKey,
+					"vaults_sidebar_account_switcher_device_setup_dialog_error_select_account" as SetupPreviewErrorKey,
 			};
 		}
 
@@ -136,7 +136,7 @@ function DeviceSetupDialogContent({
 				linkUri: null,
 				qrUri: null,
 				errorKey:
-					"vaults.sidebar.account_switcher.device_setup_dialog.error.no_server_url" as SetupPreviewErrorKey,
+					"vaults_sidebar_account_switcher_device_setup_dialog_error_no_server_url" as SetupPreviewErrorKey,
 			};
 		}
 
@@ -153,7 +153,7 @@ function DeviceSetupDialogContent({
 					linkUri,
 					qrUri: null,
 					errorKey:
-						"vaults.sidebar.account_switcher.device_setup_dialog.error.no_secret_key" as SetupPreviewErrorKey,
+						"vaults_sidebar_account_switcher_device_setup_dialog_error_no_secret_key" as SetupPreviewErrorKey,
 				};
 			}
 
@@ -172,29 +172,21 @@ function DeviceSetupDialogContent({
 				linkUri: null,
 				qrUri: null,
 				errorKey:
-					"vaults.sidebar.account_switcher.device_setup_dialog.error.generate_failed" as SetupPreviewErrorKey,
+					"vaults_sidebar_account_switcher_device_setup_dialog_error_generate_failed" as SetupPreviewErrorKey,
 			};
 		}
 	}, [selectedAccount, setupDataQuery.data]);
 
 	const setupPreviewError = useMemo(() => {
 		switch (setupPreview.errorKey) {
-			case "vaults.sidebar.account_switcher.device_setup_dialog.error.select_account":
-				return m[
-					"vaults.sidebar.account_switcher.device_setup_dialog.error.select_account"
-				]();
-			case "vaults.sidebar.account_switcher.device_setup_dialog.error.no_server_url":
-				return m[
-					"vaults.sidebar.account_switcher.device_setup_dialog.error.no_server_url"
-				]();
-			case "vaults.sidebar.account_switcher.device_setup_dialog.error.no_secret_key":
-				return m[
-					"vaults.sidebar.account_switcher.device_setup_dialog.error.no_secret_key"
-				]();
-			case "vaults.sidebar.account_switcher.device_setup_dialog.error.generate_failed":
-				return m[
-					"vaults.sidebar.account_switcher.device_setup_dialog.error.generate_failed"
-				]();
+			case "vaults_sidebar_account_switcher_device_setup_dialog_error_select_account":
+				return m.vaults_sidebar_account_switcher_device_setup_dialog_error_select_account();
+			case "vaults_sidebar_account_switcher_device_setup_dialog_error_no_server_url":
+				return m.vaults_sidebar_account_switcher_device_setup_dialog_error_no_server_url();
+			case "vaults_sidebar_account_switcher_device_setup_dialog_error_no_secret_key":
+				return m.vaults_sidebar_account_switcher_device_setup_dialog_error_no_secret_key();
+			case "vaults_sidebar_account_switcher_device_setup_dialog_error_generate_failed":
+				return m.vaults_sidebar_account_switcher_device_setup_dialog_error_generate_failed();
 			default:
 				return null;
 		}
@@ -203,7 +195,7 @@ function DeviceSetupDialogContent({
 	const handleCopyLink = async () => {
 		await copyWithToast(
 			setupPreview.linkUri,
-			m["sharing.common.link_label"](),
+			m.sharing_common_link_label(),
 			{
 				autoClearMs: 0,
 				showAutoClearMessage: false,
@@ -215,28 +207,22 @@ function DeviceSetupDialogContent({
 		<DialogContent className="sm:max-w-md">
 			<DialogHeader>
 				<DialogTitle>
-					{m["vaults.sidebar.account_switcher.menu.setup_another_device"]()}
+					{m.vaults_sidebar_account_switcher_menu_setup_another_device()}
 				</DialogTitle>
 				<DialogDescription>
-					{m[
-						"vaults.sidebar.account_switcher.device_setup_dialog.description"
-					]()}
+					{m.vaults_sidebar_account_switcher_device_setup_dialog_description()}
 				</DialogDescription>
 			</DialogHeader>
 
 			<div className="space-y-3">
 				<div className="space-y-1.5">
 					<Label htmlFor="device-setup-account" className="text-xs">
-						{m[
-							"vaults.sidebar.account_switcher.device_setup_dialog.field.account"
-						]()}
+						{m.vaults_sidebar_account_switcher_device_setup_dialog_field_account()}
 					</Label>
 					<Select value={selectedEmail} onValueChange={setSelectedEmail}>
 						<SelectTrigger id="device-setup-account">
 							<SelectValue
-								placeholder={m[
-									"vaults.sidebar.account_switcher.device_setup_dialog.placeholder.select_account"
-								]()}
+								placeholder={m.vaults_sidebar_account_switcher_device_setup_dialog_placeholder_select_account()}
 							/>
 						</SelectTrigger>
 						<SelectContent>
@@ -270,18 +256,14 @@ function DeviceSetupDialogContent({
 
 				<div className="space-y-1.5">
 					<Label htmlFor="device-setup-link" className="text-xs">
-						{m[
-							"vaults.sidebar.account_switcher.device_setup_dialog.field.setup_link"
-						]()}
+						{m.vaults_sidebar_account_switcher_device_setup_dialog_field_setup_link()}
 					</Label>
 					<div className="flex gap-2">
 						<Input
 							id="device-setup-link"
 							value={setupPreview.linkUri ?? ""}
 							readOnly
-							placeholder={m[
-								"vaults.sidebar.account_switcher.device_setup_dialog.placeholder.link_unavailable"
-							]()}
+							placeholder={m.vaults_sidebar_account_switcher_device_setup_dialog_placeholder_link_unavailable()}
 							className="font-mono text-[11px]"
 						/>
 						<Button
@@ -298,9 +280,7 @@ function DeviceSetupDialogContent({
 
 			<DialogFooter>
 				<Button variant="outline" onClick={() => onOpenChange(false)}>
-					{m[
-						"vaults.sidebar.account_switcher.device_setup_dialog.action.close"
-					]()}
+					{m.vaults_sidebar_account_switcher_device_setup_dialog_action_close()}
 				</Button>
 			</DialogFooter>
 		</DialogContent>

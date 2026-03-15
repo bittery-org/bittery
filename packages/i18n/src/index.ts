@@ -1,10 +1,14 @@
 export const supportedLocales = ["en", "de"] as const;
+import type * as generatedMessages from "./paraglide/messages/_index";
 
 export type AppLocale = (typeof supportedLocales)[number];
 
 export const defaultLocale: AppLocale = "en";
 
 export const localeStorageKey = "bittery.locale";
+
+export type CompiledMessages = typeof generatedMessages;
+export type MessageCatalog = CompiledMessages;
 
 export function isAppLocale(value: unknown): value is AppLocale {
 	return (

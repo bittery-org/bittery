@@ -1,5 +1,5 @@
 import { createI18nFormatters } from "@bittery/i18n/format";
-import { getLocale } from "@/paraglide/runtime";
+import { getLocale } from "@bittery/i18n/paraglide/runtime";
 
 const formatters = createI18nFormatters(getLocale);
 

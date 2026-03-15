@@ -19,13 +19,13 @@ function FavoritesIndexComponent() {
 					/>
 				</div>
 				<h3 className="mb-2 font-semibold text-lg">
-					{m["vaults.favorites.title"]()}
+					{m.vaults_favorites_title()}
 				</h3>
 				<p className="text-muted-foreground text-sm">
-					{m["vaults.shared.empty.no_item_selected"]()}
+					{m.vaults_shared_empty_no_item_selected()}
 				</p>
 				<p className="text-muted-foreground text-sm">
-					{m["vaults.shared.empty.select_item_to_view_details"]()}
+					{m.vaults_shared_empty_select_item_to_view_details()}
 				</p>
 			</div>
 		</div>

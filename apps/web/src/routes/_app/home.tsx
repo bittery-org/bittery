@@ -34,11 +34,11 @@ function RouteComponent() {
 						<div className="min-w-0">
 							<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
 								{name
-									? m["dashboard.home.hero_heading.named"]({ name })
-									: m["dashboard.home.hero_heading.default"]()}
+									? m.dashboard_home_hero_heading_named({ name })
+									: m.dashboard_home_hero_heading_default()}
 							</h1>
 							<p className="text-muted-foreground text-xs">
-								{m["dashboard.home.hero_description"]()}
+								{m.dashboard_home_hero_description()}
 							</p>
 						</div>
 					</div>
@@ -52,14 +52,14 @@ function RouteComponent() {
 						>
 							<Link to="/settings">
 								<span className="text-xs">
-									{m["dashboard.home.button.account_settings"]()}
+									{m.dashboard_home_button_account_settings()}
 								</span>
 							</Link>
 						</Button>
 						<Button size="sm" className="h-8 px-2 sm:px-3" asChild>
 							<Link to="/vaults">
 								<span className="text-xs">
-									{m["dashboard.home.button.open_vaults"]()}
+									{m.dashboard_home_button_open_vaults()}
 								</span>
 							</Link>
 						</Button>
@@ -72,10 +72,10 @@ function RouteComponent() {
 					<section className="space-y-3">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 							<h2 className="font-semibold text-lg tracking-tight">
-								{m["dashboard.home.metrics_heading"]()}
+								{m.dashboard_home_metrics_heading()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
-								{m["dashboard.home.metrics_description"]()}
+								{m.dashboard_home_metrics_description()}
 							</p>
 						</div>
 						<StatsCards />

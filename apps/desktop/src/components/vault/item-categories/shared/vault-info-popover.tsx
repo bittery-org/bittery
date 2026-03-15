@@ -7,9 +7,9 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 	Separator,
+	VaultAvatar,
 } from "@bittery/ui";
 import { IconChevronDownOutlineDuo18 } from "@bittery/ui/icons";
-import { VaultAvatar } from "../../vault-avatar";
 
 interface VaultInfoPopoverProps {
 	vaultName: string;

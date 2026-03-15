@@ -36,12 +36,12 @@ export function AutoLockSettings() {
 	const handleTimeoutChange = async (value: string) => {
 		const timeoutMs = Number.parseInt(value, 10);
 		await storage.storeAutoLockTimeout(timeoutMs);
-		toast.success(m["settings.auto_lock.toast.updated"]());
+		toast.success(m.settings_auto_lock_toast_updated());
 	};
 
 	const getOptionLabel = (option: (typeof AUTO_LOCK_OPTIONS)[number]) => {
 		if (option.unit === "never") {
-			return m["settings.auto_lock.option.never"]();
+			return m.settings_auto_lock_option_never();
 		}
 		const count =
 			option.unit === "hour"
@@ -49,12 +49,12 @@ export function AutoLockSettings() {
 				: Number(option.value) / 60_000;
 		if (option.unit === "hour") {
 			return count === 1
-				? m["settings.auto_lock.option.hours.single"]({ count })
-				: m["settings.auto_lock.option.hours.plural"]({ count });
+				? m.settings_auto_lock_option_hours_single({ count })
+				: m.settings_auto_lock_option_hours_plural({ count });
 		}
 		return count === 1
-			? m["settings.auto_lock.option.minutes.single"]({ count })
-			: m["settings.auto_lock.option.minutes.plural"]({ count });
+			? m.settings_auto_lock_option_minutes_single({ count })
+			: m.settings_auto_lock_option_minutes_plural({ count });
 	};
 
 	return (

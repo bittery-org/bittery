@@ -27,29 +27,29 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 	const [confirmText, setConfirmText] = useState("");
 	const trpcClient = useTRPCClient();
 	const navigate = useNavigate();
-	const confirmPhrase = m["settings.delete_account_dialog.confirm_phrase"]();
+	const confirmPhrase = m.settings_delete_account_dialog_confirm_phrase();
 
 	const deleteAccountMutation = useMutation({
 		mutationFn: (input: { confirmEmail: string }) =>
 			trpcClient.auth.deleteAccount.mutate(input),
 		onSuccess: async () => {
 			await storage.clearAllStoredData();
-			toast.success(m["settings.delete_account_dialog.toast.deleted"]());
+			toast.success(m.settings_delete_account_dialog_toast_deleted());
 			navigate({ to: "/" });
 		},
 		onError: () => {
-			toast.error(m["settings.delete_account_dialog.toast.delete_failed"]());
+			toast.error(m.settings_delete_account_dialog_toast_delete_failed());
 		},
 	});
 
 	const handleDelete = () => {
 		if (confirmEmail.toLowerCase() !== userEmail.toLowerCase()) {
-			toast.error(m["settings.delete_account_dialog.toast.email_mismatch"]());
+			toast.error(m.settings_delete_account_dialog_toast_email_mismatch());
 			return;
 		}
 		if (confirmText !== confirmPhrase) {
 			toast.error(
-				m["settings.delete_account_dialog.toast.confirm_phrase_required"](),
+				m.settings_delete_account_dialog_toast_confirm_phrase_required(),
 			);
 			return;
 		}
@@ -69,35 +69,35 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 			<AlertDialogTrigger asChild>
 				<Button variant="destructive">
 					<Trash2 className="mr-2 h-4 w-4" />
-					{m["settings.delete_account_dialog.trigger"]()}
+					{m.settings_delete_account_dialog_trigger()}
 				</Button>
 			</AlertDialogTrigger>
 			<AlertDialogContent>
 				<AlertDialogHeader>
 					<AlertDialogTitle>
-						{m["settings.delete_account_dialog.title"]()}
+						{m.settings_delete_account_dialog_title()}
 					</AlertDialogTitle>
 					<AlertDialogDescription asChild>
 						<div className="space-y-3">
 							<p>
-								{m["settings.delete_account_dialog.description.prefix"]()}{" "}
+								{m.settings_delete_account_dialog_description_prefix()}{" "}
 								<strong>
-									{m["settings.delete_account_dialog.description.permanent"]()}
+									{m.settings_delete_account_dialog_description_permanent()}
 								</strong>
-								. {m["settings.delete_account_dialog.description.suffix"]()}
+								. {m.settings_delete_account_dialog_description_suffix()}
 							</p>
 							<ul className="list-inside list-disc space-y-1 text-sm">
 								<li>
-									{m["settings.delete_account_dialog.list.remove_vaults"]()}
+									{m.settings_delete_account_dialog_list_remove_vaults()}
 								</li>
 								<li>
-									{m["settings.delete_account_dialog.list.remove_teams"]()}
+									{m.settings_delete_account_dialog_list_remove_teams()}
 								</li>
 								<li>
-									{m["settings.delete_account_dialog.list.delete_sessions"]()}
+									{m.settings_delete_account_dialog_list_delete_sessions()}
 								</li>
 								<li>
-									{m["settings.delete_account_dialog.list.erase_account"]()}
+									{m.settings_delete_account_dialog_list_erase_account()}
 								</li>
 							</ul>
 						</div>
@@ -106,7 +106,7 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 				<div className="grid gap-4 py-4">
 					<div className="grid gap-2">
 						<Label htmlFor="confirmEmail">
-							{m["settings.delete_account_dialog.field.email_label"]()}{" "}
+							{m.settings_delete_account_dialog_field_email_label()}{" "}
 							<span className="font-mono text-muted-foreground">
 								{userEmail}
 							</span>
@@ -116,18 +116,14 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 							type="email"
 							value={confirmEmail}
 							onChange={(e) => setConfirmEmail(e.target.value)}
-							placeholder={m[
-								"settings.delete_account_dialog.placeholder.email"
-							]()}
+							placeholder={m.settings_delete_account_dialog_placeholder_email()}
 						/>
 					</div>
 					<div className="grid gap-2">
 						<Label htmlFor="confirmText">
-							{m["settings.delete_account_dialog.field.confirm_phrase_label"]()}{" "}
+							{m.settings_delete_account_dialog_field_confirm_phrase_label()}{" "}
 							<span className="font-mono font-semibold">{confirmPhrase}</span>{" "}
-							{m[
-								"settings.delete_account_dialog.field.confirm_phrase_suffix"
-							]()}
+							{m.settings_delete_account_dialog_field_confirm_phrase_suffix()}
 						</Label>
 						<Input
 							id="confirmText"
@@ -139,7 +135,7 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 				</div>
 				<AlertDialogFooter>
 					<AlertDialogCancel>
-						{m["settings.common.action.cancel"]()}
+						{m.settings_common_action_cancel()}
 					</AlertDialogCancel>
 					<Button
 						variant="destructive"
@@ -151,8 +147,8 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 						}
 					>
 						{deleteAccountMutation.isPending
-							? m["settings.delete_account_dialog.action.deleting"]()
-							: m["settings.delete_account_dialog.action.submit"]()}
+							? m.settings_delete_account_dialog_action_deleting()
+							: m.settings_delete_account_dialog_action_submit()}
 					</Button>
 				</AlertDialogFooter>
 			</AlertDialogContent>

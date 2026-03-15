@@ -52,35 +52,35 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 		e.preventDefault();
 
 		if (!newEmail.trim()) {
-			toast.error(m["settings.change_email_dialog.toast.new_email_required"]());
+			toast.error(m.settings_change_email_dialog_toast_new_email_required());
 			return;
 		}
 		if (newEmail !== confirmEmail) {
-			toast.error(m["settings.change_email_dialog.toast.email_mismatch"]());
+			toast.error(m.settings_change_email_dialog_toast_email_mismatch());
 			return;
 		}
 		if (newEmail.toLowerCase() === currentEmail.toLowerCase()) {
-			toast.error(m["settings.change_email_dialog.toast.email_must_differ"]());
+			toast.error(m.settings_change_email_dialog_toast_email_must_differ());
 			return;
 		}
 		if (!currentPassword.trim()) {
-			toast.error(m["settings.change_email_dialog.toast.password_required"]());
+			toast.error(m.settings_change_email_dialog_toast_password_required());
 			return;
 		}
 
 		const secretKey = await storage.getStoredSecretKey();
 		if (!secretKey) {
-			toast.error(m["settings.common.toast.secret_key_not_found"]());
+			toast.error(m.settings_common_toast_secret_key_not_found());
 			return;
 		}
 
 		if (!userQuery.data?.encryptedPrivateKey) {
-			toast.error(m["settings.common.toast.user_data_load_failed"]());
+			toast.error(m.settings_common_toast_user_data_load_failed());
 			return;
 		}
 
 		if (!vaultListQuery.data || vaultListQuery.data.length === 0) {
-			toast.error(m["settings.common.toast.vault_keys_load_failed"]());
+			toast.error(m.settings_common_toast_vault_keys_load_failed());
 			return;
 		}
 
@@ -176,12 +176,12 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 				encryptedVaultKeys,
 			});
 
-			toast.success(m["settings.change_email_dialog.toast.updated"]());
+			toast.success(m.settings_change_email_dialog_toast_updated());
 			setOpen(false);
 			navigate({ to: "/login" });
 		} catch (error) {
 			console.error("Email change error:", error);
-			toast.error(m["settings.change_email_dialog.toast.update_failed"]());
+			toast.error(m.settings_change_email_dialog_toast_update_failed());
 			setIsProcessing(false);
 		}
 	};
@@ -202,23 +202,23 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 			<DialogTrigger asChild>
 				<Button variant="outline">
 					<Mail className="mr-2 h-4 w-4" />
-					{m["settings.change_email_dialog.trigger"]()}
+					{m.settings_change_email_dialog_trigger()}
 				</Button>
 			</DialogTrigger>
 			<DialogContent>
 				<form onSubmit={handleSubmit}>
 					<DialogHeader>
 						<DialogTitle>
-							{m["settings.change_email_dialog.title"]()}
+							{m.settings_change_email_dialog_title()}
 						</DialogTitle>
 						<DialogDescription>
-							{m["settings.change_email_dialog.description"]()}
+							{m.settings_change_email_dialog_description()}
 						</DialogDescription>
 					</DialogHeader>
 					<div className="grid gap-4 py-4">
 						<div className="grid gap-2">
 							<Label htmlFor="currentEmail">
-								{m["settings.change_email_dialog.field.current_email"]()}
+								{m.settings_change_email_dialog_field_current_email()}
 							</Label>
 							<Input
 								id="currentEmail"
@@ -229,36 +229,32 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 						</div>
 						<div className="grid gap-2">
 							<Label htmlFor="newEmail">
-								{m["settings.change_email_dialog.field.new_email"]()}
+								{m.settings_change_email_dialog_field_new_email()}
 							</Label>
 							<Input
 								id="newEmail"
 								type="email"
 								value={newEmail}
 								onChange={(e) => setNewEmail(e.target.value)}
-								placeholder={m[
-									"settings.change_email_dialog.placeholder.new_email"
-								]()}
+								placeholder={m.settings_change_email_dialog_placeholder_new_email()}
 								autoFocus
 							/>
 						</div>
 						<div className="grid gap-2">
 							<Label htmlFor="confirmEmail">
-								{m["settings.change_email_dialog.field.confirm_new_email"]()}
+								{m.settings_change_email_dialog_field_confirm_new_email()}
 							</Label>
 							<Input
 								id="confirmEmail"
 								type="email"
 								value={confirmEmail}
 								onChange={(e) => setConfirmEmail(e.target.value)}
-								placeholder={m[
-									"settings.change_email_dialog.placeholder.confirm_new_email"
-								]()}
+								placeholder={m.settings_change_email_dialog_placeholder_confirm_new_email()}
 							/>
 						</div>
 						<div className="grid gap-2">
 							<Label htmlFor="emailChangePassword">
-								{m["settings.change_email_dialog.field.password"]()}
+								{m.settings_change_email_dialog_field_password()}
 							</Label>
 							<div className="relative">
 								<Input
@@ -266,9 +262,7 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 									type={showPassword ? "text" : "password"}
 									value={currentPassword}
 									onChange={(e) => setCurrentPassword(e.target.value)}
-									placeholder={m[
-										"settings.change_email_dialog.placeholder.password"
-									]()}
+									placeholder={m.settings_change_email_dialog_placeholder_password()}
 									className="pr-10"
 								/>
 								<Button
@@ -285,8 +279,8 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 					</div>
 					<div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
 						<p className="text-amber-700 text-xs dark:text-amber-300">
-							<strong>{m["settings.common.warning"]()}</strong>{" "}
-							{m["settings.change_email_dialog.warning.recovery_key_reset"]()}
+							<strong>{m.settings_common_warning()}</strong>{" "}
+							{m.settings_change_email_dialog_warning_recovery_key_reset()}
 						</p>
 					</div>
 					<DialogFooter>
@@ -295,12 +289,12 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 							variant="outline"
 							onClick={() => setOpen(false)}
 						>
-							{m["settings.common.action.cancel"]()}
+							{m.settings_common_action_cancel()}
 						</Button>
 						<Button type="submit" disabled={isProcessing}>
 							{isProcessing
-								? m["settings.change_email_dialog.action.updating"]()
-								: m["settings.change_email_dialog.action.submit"]()}
+								? m.settings_change_email_dialog_action_updating()
+								: m.settings_change_email_dialog_action_submit()}
 						</Button>
 					</DialogFooter>
 				</form>

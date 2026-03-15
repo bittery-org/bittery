@@ -32,24 +32,20 @@ export function RemoveAccountDialog({
 			<DialogContent showCloseButton={false}>
 				<DialogHeader>
 					<DialogTitle>
-						{m["vaults.sidebar.account_switcher.menu.remove_account"]()}
+						{m.vaults_sidebar_account_switcher_menu_remove_account()}
 					</DialogTitle>
 					<DialogDescription>
-						{m[
-							"vaults.sidebar.account_switcher.remove_account_dialog.description.prefix"
-						]()}{" "}
+						{m.vaults_sidebar_account_switcher_remove_account_dialog_description_prefix()}{" "}
 						<strong>{email}</strong>{" "}
-						{m[
-							"vaults.sidebar.account_switcher.remove_account_dialog.description.suffix"
-						]()}
+						{m.vaults_sidebar_account_switcher_remove_account_dialog_description_suffix()}
 					</DialogDescription>
 				</DialogHeader>
 				<DialogFooter>
 					<Button variant="outline" onClick={onCancel}>
-						{m["settings.common.action.cancel"]()}
+						{m.settings_common_action_cancel()}
 					</Button>
 					<Button onClick={() => onConfirm(email)} variant="destructive">
-						{m["vaults.sidebar.account_switcher.menu.remove_account"]()}
+						{m.vaults_sidebar_account_switcher_menu_remove_account()}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

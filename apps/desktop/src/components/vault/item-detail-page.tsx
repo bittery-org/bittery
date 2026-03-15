@@ -5,6 +5,7 @@ import {
 	useToggleFavorite,
 	useUpdateItem,
 } from "@bittery/core/hooks";
+import { detectCardBrand } from "@bittery/shared/credit-card";
 import { getItemServerUrl } from "@bittery/shared/favicon";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
 import {
@@ -20,6 +21,9 @@ import {
 	DropdownMenuItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
+	ItemAttachments,
+	ItemDetail,
+	ItemForm,
 	toast,
 } from "@bittery/ui";
 import {
@@ -32,18 +36,15 @@ import {
 	IconStarOutlineDuo18,
 	IconTrash2OutlineDuo18,
 } from "@bittery/ui/icons";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useState } from "react";
 import { useI18n } from "../../providers/i18n-provider";
 import Loader from "../loader";
+import { Favicon } from "./favicon";
 import { VaultInfoPopover } from "./item-categories/shared/vault-info-popover";
-import ItemDetail from "./item-detail";
-import { ItemAttachments } from "./item-detail/item-attachments";
-import { ItemForm } from "./item-form";
 import { MoveItemDialog } from "./move-item-dialog";
-import { PasswordHistoryDialog } from "./password-history-dialog";
-import { ShareHistoryDialog } from "./share-history-dialog";
-import { ShareItemDialog } from "./share-item-dialog";
+import { PasswordHistoryDialog, ShareHistoryDialog, ShareItemDialog } from "@bittery/ui";
 
 interface VaultInfo {
 	name: string;
@@ -139,13 +140,13 @@ export function ItemDetailPage({
 					data: updatedData,
 				});
 				toast.success(
-					m["vaults.detail.items.detail_page.toast.passkey_removed"](),
+					m.vaults_detail_items_detail_page_toast_passkey_removed(),
 				);
 			} catch (error) {
 				const errorMessage =
 					error instanceof Error
 						? error.message
-						: m["vaults.detail.items.detail_page.toast.passkey_remove_error"]();
+						: m.vaults_detail_items_detail_page_toast_passkey_remove_error();
 				toast.error(errorMessage);
 			}
 		},
@@ -166,11 +167,11 @@ export function ItemDetailPage({
 		try {
 			const titleForDuplicate =
 				decryptedData.title ||
-				m["vaults.detail.items.detail_page.duplicate.default_title"]();
+				m.vaults_detail_items_detail_page_duplicate_default_title();
 
 			const duplicatedData: DecryptedItemData = {
 				...decryptedData,
-				title: m["vaults.detail.items.detail_page.duplicate.title"]({
+				title: m.vaults_detail_items_detail_page_duplicate_title({
 					title: titleForDuplicate,
 				}),
 			};
@@ -182,7 +183,7 @@ export function ItemDetailPage({
 			});
 
 			toast.success(
-				m["vaults.detail.items.detail_page.toast.item_duplicated"](),
+				m.vaults_detail_items_detail_page_toast_item_duplicated(),
 			);
 
 			// Navigate to the duplicated item
@@ -194,7 +195,7 @@ export function ItemDetailPage({
 			const errorMessage =
 				error instanceof Error
 					? error.message
-					: m["vaults.detail.items.detail_page.toast.item_duplicate_error"]();
+					: m.vaults_detail_items_detail_page_toast_item_duplicate_error();
 			toast.error(errorMessage);
 		}
 	};
@@ -212,18 +213,14 @@ export function ItemDetailPage({
 					data: { password },
 				});
 				toast.success(
-					m[
-						"vaults.detail.items.password_history_dialog.toast.restore_success"
-					](),
+					m.vaults_detail_items_password_history_dialog_toast_restore_success(),
 				);
 				setIsPasswordHistoryOpen(false);
 			} catch (error) {
 				const errorMessage =
 					error instanceof Error
 						? error.message
-						: m[
-								"vaults.detail.items.password_history_dialog.toast.restore_error"
-							]();
+						: m.vaults_detail_items_password_history_dialog_toast_restore_error();
 				toast.error(errorMessage);
 			}
 		},
@@ -239,7 +236,7 @@ export function ItemDetailPage({
 				vaultId: rawItem.vaultId,
 			});
 
-			toast.success(m["vaults.detail.toast.item_moved_to_trash"]());
+			toast.success(m.vaults_detail_toast_item_moved_to_trash());
 
 			// Navigate back to vault
 			navigate({ to: "/vault/$id", params: { id: rawItem.vaultId } });
@@ -247,7 +244,7 @@ export function ItemDetailPage({
 			const errorMessage =
 				error instanceof Error
 					? error.message
-					: m["vaults.detail.toast.item_delete_error"]();
+					: m.vaults_detail_toast_item_delete_error();
 			toast.error(errorMessage);
 		}
 	};
@@ -255,15 +252,15 @@ export function ItemDetailPage({
 	const getCategoryDisplayName = (category: string) => {
 		switch (category) {
 			case "secure-note":
-				return m["vaults.detail.items.category.secure_note.title"]();
+				return m.vaults_detail_items_category_secure_note_title();
 			case "credit-card":
-				return m["vaults.detail.items.category.credit_card.title"]();
+				return m.vaults_detail_items_category_credit_card_title();
 			case "identity":
-				return m["vaults.detail.items.category.identity.title"]();
+				return m.vaults_detail_items_category_identity_title();
 			case "totp":
-				return m["vaults.detail.items.category.totp.title"]();
+				return m.vaults_detail_items_category_totp_title();
 			default:
-				return m["vaults.detail.items.category.login.title"]();
+				return m.vaults_detail_items_category_login_title();
 		}
 	};
 
@@ -280,7 +277,7 @@ export function ItemDetailPage({
 						<VaultInfoPopover
 							vaultName={
 								vaultInfo?.name ||
-								m["vaults.detail.items.detail_page.vault.unknown"]()
+								m.vaults_detail_items_detail_page_vault_unknown()
 							}
 							vaultIcon={vaultInfo?.icon}
 							vaultImageUrl={vaultInfo?.imageUrl}
@@ -293,7 +290,7 @@ export function ItemDetailPage({
 					<div className="flex shrink-0 items-center gap-2">
 						<Button variant="ghost" size="sm" onClick={handleShare}>
 							<IconShareLeft2OutlineDuo18 />
-							{m["sharing.item_dialog.trigger"]()}
+							{m.sharing_item_dialog_trigger()}
 						</Button>
 						<Button
 							variant="ghost"
@@ -301,7 +298,7 @@ export function ItemDetailPage({
 							onClick={() => setIsEditDialogOpen(true)}
 						>
 							<IconPen2OutlineDuo18 />
-							{m["vaults.detail.items.detail.action.edit"]()}
+							{m.vaults_detail_items_detail_action_edit()}
 						</Button>
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>
@@ -315,11 +312,11 @@ export function ItemDetailPage({
 									disabled={createItem.isPending}
 								>
 									<IconCopyOutlineDuo18 className="size-4" />
-									{m["vaults.detail.items.detail_page.action.duplicate"]()}
+									{m.vaults_detail_items_detail_page_action_duplicate()}
 								</DropdownMenuItem>
 								<DropdownMenuItem onClick={() => setIsMoveDialogOpen(true)}>
 									<IconArrowsLeftRightTrailOutlineDuo18 className="size-4" />
-									{m["vaults.detail.items.move_dialog.action.open"]()}
+									{m.vaults_detail_items_move_dialog_action_open()}
 								</DropdownMenuItem>
 								<DropdownMenuItem
 									onClick={async () => {
@@ -332,20 +329,14 @@ export function ItemDetailPage({
 											});
 											toast.success(
 												!rawItem.favorite
-													? m[
-															"vaults.detail.items.detail_page.toast.favorite_added"
-														]()
-													: m[
-															"vaults.detail.items.detail_page.toast.favorite_removed"
-														](),
+													? m.vaults_detail_items_detail_page_toast_favorite_added()
+													: m.vaults_detail_items_detail_page_toast_favorite_removed(),
 											);
 										} catch (error) {
 											const errorMessage =
 												error instanceof Error
 													? error.message
-													: m[
-															"vaults.detail.items.list.toast.favorite_update_failed"
-														]();
+													: m.vaults_detail_items_list_toast_favorite_update_failed();
 											toast.error(errorMessage);
 										}
 									}}
@@ -356,21 +347,19 @@ export function ItemDetailPage({
 										fill={rawItem?.favorite ? "currentColor" : "none"}
 									/>
 									{rawItem?.favorite
-										? m[
-												"vaults.detail.items.list.item.action.remove_favorite"
-											]()
-										: m["vaults.detail.items.list.item.action.add_favorite"]()}
+										? m.vaults_detail_items_list_item_action_remove_favorite()
+										: m.vaults_detail_items_list_item_action_add_favorite()}
 								</DropdownMenuItem>
 								<DropdownMenuItem onClick={() => setIsShareHistoryOpen(true)}>
 									<IconHistoryOutlineDuo18 className="size-4" />
-									{m["sharing.history_dialog.title"]()}
+									{m.sharing_history_dialog_title()}
 								</DropdownMenuItem>
 								{rawItem?.category === "login" && (
 									<DropdownMenuItem
 										onClick={() => setIsPasswordHistoryOpen(true)}
 									>
 										<IconHistoryOutlineDuo18 className="size-4" />
-										{m["vaults.detail.items.password_history_dialog.title"]()}
+										{m.vaults_detail_items_password_history_dialog_title()}
 									</DropdownMenuItem>
 								)}
 								<DropdownMenuSeparator />
@@ -379,7 +368,7 @@ export function ItemDetailPage({
 									className="text-destructive focus:text-destructive"
 								>
 									<IconTrash2OutlineDuo18 className="size-4" />
-									{m["vaults.detail.items.detail.action.delete"]()}
+									{m.vaults_detail_items_detail_action_delete()}
 								</DropdownMenuItem>
 							</DropdownMenuContent>
 						</DropdownMenu>
@@ -391,12 +380,28 @@ export function ItemDetailPage({
 					<ItemDetail
 						category={rawItem?.category ?? "login"}
 						data={decryptedData}
-						serverUrl={rawItem ? getItemServerUrl(rawItem) : undefined}
+						icon={
+							rawItem ? (
+								<Favicon
+									url={rawItem.category === "login" ? decryptedData.url : undefined}
+									title={decryptedData.title}
+									serverUrl={getItemServerUrl(rawItem)}
+									category={rawItem.category}
+									cardBrand={
+										rawItem.category === "credit-card" && "cardNumber" in decryptedData
+											? detectCardBrand(decryptedData.cardNumber)
+											: undefined
+									}
+									size="lg"
+								/>
+							) : undefined
+						}
 						onRemovePasskey={handleRemovePasskey}
 						onTagsChange={handleTagsChange}
 						onTagClick={onTagClick}
 						availableTags={availableTags}
 						isUpdatingTags={isUpdatingTags}
+						onOpenUrl={openUrl}
 					/>
 					{rawItem && (
 						<ItemAttachments
@@ -413,10 +418,10 @@ export function ItemDetailPage({
 				<DialogContent className="flex max-h-[85vh] max-w-2xl flex-col">
 					<DialogHeader className="shrink-0">
 						<DialogTitle>
-							{m["vaults.detail.edit_item_dialog.title"]()}
+							{m.vaults_detail_edit_item_dialog_title()}
 						</DialogTitle>
 						<DialogDescription>
-							{m["vaults.detail.items.detail_page.edit_dialog.description"]({
+							{m.vaults_detail_items_detail_page_edit_dialog_description({
 								category: getCategoryDisplayName(rawItem?.category ?? "login"),
 							})}
 						</DialogDescription>
@@ -432,19 +437,19 @@ export function ItemDetailPage({
 										vaultId: rawItem.vaultId,
 										data,
 									});
-									toast.success(m["vaults.detail.toast.item_updated"]());
+									toast.success(m.vaults_detail_toast_item_updated());
 									setIsEditDialogOpen(false);
 								} catch (error) {
 									const errorMessage =
 										error instanceof Error
 											? error.message
-											: m["vaults.detail.items.form.toast.save_item_failed"]();
+											: m.vaults_detail_items_form_toast_save_item_failed();
 									toast.error(errorMessage);
 								}
 							}}
 							onCancel={() => setIsEditDialogOpen(false)}
 							isSubmitting={updateItem.isPending}
-							submitLabel={m["vaults.detail.edit_item_dialog.action.submit"]()}
+							submitLabel={m.vaults_detail_edit_item_dialog_action_submit()}
 							selectedVaultId={rawItem.vaultId}
 						/>
 					)}
@@ -456,10 +461,10 @@ export function ItemDetailPage({
 				<DialogContent>
 					<DialogHeader>
 						<DialogTitle>
-							{m["vaults.detail.delete_item_dialog.title"]()}
+							{m.vaults_detail_delete_item_dialog_title()}
 						</DialogTitle>
 						<DialogDescription>
-							{m["vaults.detail.delete_item_dialog.description"]()}
+							{m.vaults_detail_delete_item_dialog_description()}
 						</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>
@@ -467,14 +472,14 @@ export function ItemDetailPage({
 							variant="outline"
 							onClick={() => setIsDeleteDialogOpen(false)}
 						>
-							{m["vaults.detail.delete_item_dialog.action.cancel"]()}
+							{m.vaults_detail_delete_item_dialog_action_cancel()}
 						</Button>
 						<Button
 							variant="destructive"
 							onClick={confirmDelete}
 							disabled={deleteItem.isPending}
 						>
-							{m["vaults.detail.delete_item_dialog.action.confirm"]()}
+							{m.vaults_detail_delete_item_dialog_action_confirm()}
 						</Button>
 					</DialogFooter>
 				</DialogContent>

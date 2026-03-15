@@ -1,7 +1,7 @@
+import { getTagColorFromName } from "@bittery/ui";
 import { IconTagOutlineDuo18 } from "@bittery/ui/icons";
 import { createFileRoute } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";
-import { getTagColorFromName } from "../../../../components/vault/tag-badge";
 
 export const Route = createFileRoute("/vault/tag/$tagName/")({
 	component: TagIndexComponent,
@@ -27,10 +27,10 @@ function TagIndexComponent() {
 				</div>
 				<h3 className="mb-2 font-semibold text-lg">{decodedTagName}</h3>
 				<p className="text-muted-foreground text-sm">
-					{m["vaults.shared.empty.no_item_selected"]()}
+					{m.vaults_shared_empty_no_item_selected()}
 				</p>
 				<p className="text-muted-foreground text-sm">
-					{m["vaults.shared.empty.select_item_to_view_details"]()}
+					{m.vaults_shared_empty_select_item_to_view_details()}
 				</p>
 			</div>
 		</div>

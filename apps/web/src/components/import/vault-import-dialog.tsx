@@ -124,9 +124,9 @@ function getProviderDescription(
 ): string {
 	switch (provider.id) {
 		case "1password-1pux":
-			return m["vaults.import.provider.1password_1pux.description"]();
+			return m.vaults_import_provider_1password_1pux_description();
 		default:
-			return m["vaults.import.provider.generic.description"]();
+			return m.vaults_import_provider_generic_description();
 	}
 }
 
@@ -136,9 +136,9 @@ function getProviderImageDescription(
 ): string {
 	switch (provider.id) {
 		case "1password-1pux":
-			return m["vaults.import.provider.1password_1pux.image_description"]();
+			return m.vaults_import_provider_1password_1pux_image_description();
 		default:
-			return m["vaults.import.provider.generic.image_description"]();
+			return m.vaults_import_provider_generic_image_description();
 	}
 }
 
@@ -148,31 +148,31 @@ function getImportProgressMessage(
 ): string {
 	switch (progress.stage) {
 		case "parsing":
-			return m["vaults.import.progress.parsing"]();
+			return m.vaults_import_progress_parsing();
 		case "mapping":
 			return progress.currentVaultName
-				? m["vaults.import.progress.mapping.named"]({
+				? m.vaults_import_progress_mapping_named({
 						vaultName: progress.currentVaultName,
 					})
-				: m["vaults.import.progress.mapping.default"]();
+				: m.vaults_import_progress_mapping_default();
 		case "encrypting":
 			return progress.currentVaultName
-				? m["vaults.import.progress.encrypting.named"]({
+				? m.vaults_import_progress_encrypting_named({
 						vaultName: progress.currentVaultName,
 					})
-				: m["vaults.import.progress.encrypting.default"]();
+				: m.vaults_import_progress_encrypting_default();
 		case "uploading":
 			return progress.currentVaultName
-				? m["vaults.import.progress.uploading.named"]({
+				? m.vaults_import_progress_uploading_named({
 						vaultName: progress.currentVaultName,
 					})
-				: m["vaults.import.progress.uploading.default"]();
+				: m.vaults_import_progress_uploading_default();
 		case "finalizing":
-			return m["vaults.import.progress.finalizing"]();
+			return m.vaults_import_progress_finalizing();
 		case "completed":
-			return m["vaults.import.progress.completed"]();
+			return m.vaults_import_progress_completed();
 		case "error":
-			return m["vaults.import.progress.error"]();
+			return m.vaults_import_progress_error();
 		default:
 			return "";
 	}
@@ -184,48 +184,48 @@ function getImportWarningMessage(
 ): string {
 	switch (warning.code) {
 		case "item-parse-failed":
-			return m["vaults.import.warning.item_parse_failed"]({
+			return m.vaults_import_warning_item_parse_failed({
 				itemNumber: getNumberParam(warning.params, "itemNumber", 0),
 				vaultName: getStringParam(warning.params, "vaultName"),
 			});
 		case "invalid-item":
-			return m["vaults.import.warning.invalid_item"]({
+			return m.vaults_import_warning_invalid_item({
 				itemNumber: getNumberParam(warning.params, "itemNumber", 0),
 				vaultName: getStringParam(warning.params, "vaultName"),
 			});
 		case "archived-skipped":
-			return m["vaults.import.warning.archived_skipped"]({
+			return m.vaults_import_warning_archived_skipped({
 				title: getStringParam(warning.params, "title"),
 			});
 		case "missing-title":
-			return m["vaults.import.warning.missing_title"]({
+			return m.vaults_import_warning_missing_title({
 				itemNumber: getNumberParam(warning.params, "itemNumber", 0),
 				vaultName: getStringParam(warning.params, "vaultName"),
 				title: getStringParam(warning.params, "title"),
 			});
 		case "documents-skipped":
-			return m["vaults.import.warning.documents_skipped"]({
+			return m.vaults_import_warning_documents_skipped({
 				title: getStringParam(warning.params, "title"),
 			});
 		case "attachments-skipped":
-			return m["vaults.import.warning.attachments_skipped"]({
+			return m.vaults_import_warning_attachments_skipped({
 				title: getStringParam(warning.params, "title"),
 			});
 		case "category-fallback": {
 			const sourceCategory = getStringParam(warning.params, "sourceCategory");
-			return m["vaults.import.warning.category_fallback"]({
+			return m.vaults_import_warning_category_fallback({
 				title: getStringParam(warning.params, "title"),
 				sourceCategory:
 					sourceCategory ||
-					m["vaults.import.warning.fallback.unknown_source_category"](),
+					m.vaults_import_warning_fallback_unknown_source_category(),
 			});
 		}
 		case "totp-secret-missing":
-			return m["vaults.import.warning.totp_secret_missing"]({
+			return m.vaults_import_warning_totp_secret_missing({
 				title: getStringParam(warning.params, "title"),
 			});
 		default:
-			return m["vaults.import.warning.unknown"]();
+			return m.vaults_import_warning_unknown();
 	}
 }
 
@@ -235,65 +235,65 @@ function getImportErrorMessage(
 ): string {
 	switch (error.code) {
 		case "provider-unavailable":
-			return m["vaults.import.error.provider_unavailable"]();
+			return m.vaults_import_error_provider_unavailable();
 		case "file-incompatible":
-			return m["vaults.import.error.file_incompatible"]({
+			return m.vaults_import_error_file_incompatible({
 				providerTitle: getStringParam(error.params, "providerTitle"),
 			});
 		case "no-importable-items":
-			return m["vaults.import.error.no_importable_items"]();
+			return m.vaults_import_error_no_importable_items();
 		case "import-not-ready":
-			return m["vaults.import.error.import_not_ready"]();
+			return m.vaults_import_error_import_not_ready();
 		case "mapping-missing":
-			return m["vaults.import.error.mapping_missing"]({
+			return m.vaults_import_error_mapping_missing({
 				sourceVaultName: getStringParam(error.params, "sourceVaultName"),
 			});
 		case "target-vault-required":
-			return m["vaults.import.error.target_vault_required"]({
+			return m.vaults_import_error_target_vault_required({
 				sourceVaultName: getStringParam(error.params, "sourceVaultName"),
 			});
 		case "target-vault-name-required":
-			return m["vaults.import.error.target_vault_name_required"]({
+			return m.vaults_import_error_target_vault_name_required({
 				sourceVaultName: getStringParam(error.params, "sourceVaultName"),
 			});
 		case "target-vault-missing":
-			return m["vaults.import.error.target_vault_missing"]({
+			return m.vaults_import_error_target_vault_missing({
 				sourceVaultName: getStringParam(error.params, "sourceVaultName"),
 			});
 		case "target-vault-read-only":
-			return m["vaults.import.error.target_vault_read_only"]({
+			return m.vaults_import_error_target_vault_read_only({
 				targetVaultName: getStringParam(error.params, "targetVaultName"),
 			});
 		case "missing-target-mapping":
-			return m["vaults.import.error.missing_target_mapping"]();
+			return m.vaults_import_error_missing_target_mapping();
 		case "target-vault-key-decrypt-failed":
-			return m["vaults.import.error.target_vault_key_decrypt_failed"]({
+			return m.vaults_import_error_target_vault_key_decrypt_failed({
 				targetVaultName: getStringParam(error.params, "targetVaultName"),
 			});
 		case "vault-import-failed":
-			return m["vaults.import.error.vault_import_failed"]();
+			return m.vaults_import_error_vault_import_failed();
 		case "parse-failed":
-			return m["vaults.import.error.parse_failed"]();
+			return m.vaults_import_error_parse_failed();
 		case "execution-failed":
-			return m["vaults.import.error.execution_failed"]();
+			return m.vaults_import_error_execution_failed();
 		case "unsupported-file-type":
-			return m["vaults.import.error.unsupported_file_type"]();
+			return m.vaults_import_error_unsupported_file_type();
 		case "archive-read-failed":
-			return m["vaults.import.error.archive_read_failed"]();
+			return m.vaults_import_error_archive_read_failed();
 		case "missing-export-data":
-			return m["vaults.import.error.missing_export_data"]();
+			return m.vaults_import_error_missing_export_data();
 		case "read-export-data-failed":
-			return m["vaults.import.error.read_export_data_failed"]();
+			return m.vaults_import_error_read_export_data_failed();
 		case "invalid-export-data-json":
-			return m["vaults.import.error.invalid_export_data_json"]();
+			return m.vaults_import_error_invalid_export_data_json();
 		case "no-vaults-found":
-			return m["vaults.import.error.no_vaults_found"]();
+			return m.vaults_import_error_no_vaults_found();
 		case "unsupported-item-provider":
-			return m["vaults.import.error.unsupported_item_provider"]({
+			return m.vaults_import_error_unsupported_item_provider({
 				providerId: getStringParam(error.params, "providerId"),
 			});
 		default:
-			return m["vaults.import.error.execution_failed"]();
+			return m.vaults_import_error_execution_failed();
 	}
 }
 
@@ -412,7 +412,7 @@ export function VaultImportDialog({
 	const handleSelectedFile = useCallback(
 		async (file: File) => {
 			if (!selectedProviderId) {
-				toast.error(m["vaults.import.toast.select_provider_before_upload"]());
+				toast.error(m.vaults_import_toast_select_provider_before_upload());
 				return;
 			}
 
@@ -489,17 +489,17 @@ export function VaultImportDialog({
 			if (result.failedVaultCount > 0) {
 				toast.warning(
 					result.failedVaultCount === 1
-						? m["vaults.import.toast.completed_with_vault_issues.single"]({
+						? m.vaults_import_toast_completed_with_vault_issues_single({
 								count: result.failedVaultCount,
 							})
-						: m["vaults.import.toast.completed_with_vault_issues.plural"]({
+						: m.vaults_import_toast_completed_with_vault_issues_plural({
 								count: result.failedVaultCount,
 							}),
 				);
 				return;
 			}
 
-			toast.success(m["vaults.import.toast.completed_successfully"]());
+			toast.success(m.vaults_import_toast_completed_successfully());
 		} catch (executionError) {
 			const descriptor = toImportErrorDescriptor(
 				executionError,
@@ -524,7 +524,7 @@ export function VaultImportDialog({
 
 	const handleContinueToUpload = useCallback(() => {
 		if (!selectedProviderId) {
-			toast.error(m["vaults.import.toast.select_provider_to_continue"]());
+			toast.error(m.vaults_import_toast_select_provider_to_continue());
 			return;
 		}
 		setDialogStep("upload");
@@ -554,15 +554,15 @@ export function VaultImportDialog({
 
 	const stepItems = [
 		{
-			label: m["vaults.import.step.select_provider"](),
+			label: m.vaults_import_step_select_provider(),
 			step: 1,
 		},
 		{
-			label: m["vaults.import.step.upload_file"](),
+			label: m.vaults_import_step_upload_file(),
 			step: 2,
 		},
 		{
-			label: m["vaults.import.step.map_import"](),
+			label: m.vaults_import_step_map_import(),
 			step: 3,
 		},
 	];
@@ -572,9 +572,9 @@ export function VaultImportDialog({
 			<DialogContent className="flex max-h-[92vh] max-w-[calc(100%-1rem)] flex-col overflow-hidden p-0 sm:max-w-4xl">
 				<DialogHeader className="space-y-4 border-b px-6 py-5">
 					<div className="space-y-1">
-						<DialogTitle>{m["vaults.import.dialog.title"]()}</DialogTitle>
+						<DialogTitle>{m.vaults_import_dialog_title()}</DialogTitle>
 						<DialogDescription>
-							{m["vaults.import.dialog.description"]()}
+							{m.vaults_import_dialog_description()}
 						</DialogDescription>
 					</div>
 					{!showSummaryStep && (
@@ -646,16 +646,16 @@ export function VaultImportDialog({
 						<div className="space-y-4">
 							<div className="rounded-xl border bg-muted/20 p-4">
 								<h3 className="font-medium text-sm">
-									{m["vaults.import.manager.title"]()}
+									{m.vaults_import_manager_title()}
 								</h3>
 								<p className="text-muted-foreground text-sm">
-									{m["vaults.import.manager.description"]()}
+									{m.vaults_import_manager_description()}
 								</p>
 							</div>
 
 							{importProviders.length === 0 ? (
 								<div className="rounded-xl border border-dashed p-4 text-muted-foreground text-sm">
-									{m["vaults.import.manager.empty_providers"]()}
+									{m.vaults_import_manager_empty_providers()}
 								</div>
 							) : (
 								<div className="grid gap-3 sm:grid-cols-2">
@@ -701,10 +701,8 @@ export function VaultImportDialog({
 												</div>
 												<Badge variant={isSelected ? "default" : "secondary"}>
 													{isSelected
-														? m[
-																"vaults.import.manager.provider_card.selected"
-															]()
-														: m["vaults.import.manager.provider_card.select"]()}
+														? m.vaults_import_manager_provider_card_selected()
+														: m.vaults_import_manager_provider_card_select()}
 												</Badge>
 											</button>
 										);
@@ -719,11 +717,11 @@ export function VaultImportDialog({
 							<div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-muted/20 p-4">
 								<div className="space-y-1">
 									<p className="text-muted-foreground text-xs uppercase tracking-[0.1em]">
-										{m["vaults.import.upload.selected_provider.label"]()}
+										{m.vaults_import_upload_selected_provider_label()}
 									</p>
 									<p className="font-medium text-sm">
 										{selectedProvider?.title ??
-											m["vaults.import.upload.selected_provider.fallback"]()}
+											m.vaults_import_upload_selected_provider_fallback()}
 									</p>
 								</div>
 								<Button
@@ -733,29 +731,27 @@ export function VaultImportDialog({
 									onClick={() => setDialogStep("manager")}
 									disabled={isBusy}
 								>
-									{m["vaults.import.upload.change_provider"]()}
+									{m.vaults_import_upload_change_provider()}
 								</Button>
 							</div>
 
 							<div className="space-y-4 rounded-xl border border-dashed p-5">
 								<div className="space-y-1">
 									<Label htmlFor="vault-import-file">
-										{m["vaults.import.upload.file_label"]()}
+										{m.vaults_import_upload_file_label()}
 									</Label>
 									<p className="text-muted-foreground text-sm">
-										{m["vaults.import.upload.file_description"]({
+										{m.vaults_import_upload_file_description({
 											providerTitle:
 												selectedProvider?.title ??
-												m[
-													"vaults.import.upload.file_description.fallback_provider"
-												](),
+												m.vaults_import_upload_file_description_fallback_provider(),
 										})}
 									</p>
 									<p className="text-muted-foreground text-xs">
-										{m["vaults.import.upload.accepted_formats"]({
+										{m.vaults_import_upload_accepted_formats({
 											format:
 												selectedProvider?.fileTypeLabel ??
-												m["vaults.import.upload.accepted_formats.fallback"](),
+												m.vaults_import_upload_accepted_formats_fallback(),
 										})}
 									</p>
 								</div>
@@ -782,14 +778,14 @@ export function VaultImportDialog({
 									onDrop={handleDropzoneDrop}
 								>
 									<div className="text-muted-foreground text-sm">
-										{m["vaults.import.upload.dropzone_hint"]()}
+										{m.vaults_import_upload_dropzone_hint()}
 									</div>
 
 									<div className="flex flex-wrap items-center gap-2">
 										<span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-xs">
 											<Upload className="mr-2 h-4 w-4" />
 											{selectedFileName ||
-												m["vaults.import.upload.choose_file"]()}
+												m.vaults_import_upload_choose_file()}
 										</span>
 
 										{selectedFileName && (
@@ -820,10 +816,10 @@ export function VaultImportDialog({
 							<div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-muted/20 p-4">
 								<div>
 									<p className="font-medium text-sm">
-										{m["vaults.import.preview.ready.title"]()}
+										{m.vaults_import_preview_ready_title()}
 									</p>
 									<p className="text-muted-foreground text-xs">
-										{m["vaults.import.preview.ready.description"]()}
+										{m.vaults_import_preview_ready_description()}
 									</p>
 								</div>
 								<div className="flex items-center gap-2">
@@ -837,7 +833,7 @@ export function VaultImportDialog({
 										onClick={handleChooseAnotherFile}
 										disabled={isBusy}
 									>
-										{m["vaults.import.preview.choose_another_file"]()}
+										{m.vaults_import_preview_choose_another_file()}
 									</Button>
 								</div>
 							</div>
@@ -845,7 +841,7 @@ export function VaultImportDialog({
 							<div className="grid gap-2 sm:grid-cols-4">
 								<div className="rounded-lg border bg-card p-3">
 									<div className="text-muted-foreground text-xs">
-										{m["vaults.import.preview.stat.vaults"]()}
+										{m.vaults_import_preview_stat_vaults()}
 									</div>
 									<div className="font-semibold text-lg">
 										{preview.summary.vaultCount}
@@ -853,7 +849,7 @@ export function VaultImportDialog({
 								</div>
 								<div className="rounded-lg border bg-card p-3">
 									<div className="text-muted-foreground text-xs">
-										{m["vaults.import.preview.stat.items"]()}
+										{m.vaults_import_preview_stat_items()}
 									</div>
 									<div className="font-semibold text-lg">
 										{preview.summary.itemCount}
@@ -861,7 +857,7 @@ export function VaultImportDialog({
 								</div>
 								<div className="rounded-lg border bg-card p-3">
 									<div className="text-muted-foreground text-xs">
-										{m["vaults.import.preview.stat.skipped"]()}
+										{m.vaults_import_preview_stat_skipped()}
 									</div>
 									<div className="font-semibold text-lg">
 										{preview.summary.skippedCount}
@@ -869,7 +865,7 @@ export function VaultImportDialog({
 								</div>
 								<div className="rounded-lg border bg-card p-3">
 									<div className="text-muted-foreground text-xs">
-										{m["vaults.import.preview.stat.warnings"]()}
+										{m.vaults_import_preview_stat_warnings()}
 									</div>
 									<div className="font-semibold text-lg">
 										{preview.summary.warningCount}
@@ -882,7 +878,7 @@ export function VaultImportDialog({
 									<div className="flex items-center gap-2 text-amber-700 text-sm dark:text-amber-300">
 										<AlertCircle className="h-4 w-4" />
 										<span className="font-medium">
-											{m["vaults.import.preview.warnings.title"]({
+											{m.vaults_import_preview_warnings_title({
 												count: preview.warnings.length,
 											})}
 										</span>
@@ -903,20 +899,16 @@ export function VaultImportDialog({
 							<div className="space-y-3 rounded-xl border p-4">
 								<div>
 									<h3 className="font-medium text-sm">
-										{m["vaults.import.mapping.title"]()}
+										{m.vaults_import_mapping_title()}
 									</h3>
 									<p className="text-muted-foreground text-sm">
-										{m["vaults.import.mapping.description"]()}
+										{m.vaults_import_mapping_description()}
 									</p>
 									{skippedEmptyVaultCount > 0 && (
 										<p className="mt-1 text-muted-foreground text-xs">
 											{skippedEmptyVaultCount === 1
-												? m[
-														"vaults.import.mapping.skipped_empty_vaults.single"
-													]({ count: skippedEmptyVaultCount })
-												: m[
-														"vaults.import.mapping.skipped_empty_vaults.plural"
-													]({ count: skippedEmptyVaultCount })}
+												? m.vaults_import_mapping_skipped_empty_vaults_single({ count: skippedEmptyVaultCount })
+												: m.vaults_import_mapping_skipped_empty_vaults_plural({ count: skippedEmptyVaultCount })}
 										</p>
 									)}
 								</div>
@@ -945,20 +937,16 @@ export function VaultImportDialog({
 														</p>
 														<p className="text-muted-foreground text-xs">
 															{sourceVault.itemCount === 1
-																? m[
-																		"vaults.import.mapping.source_item_count.single"
-																	]({
+																? m.vaults_import_mapping_source_item_count_single({
 																		count: sourceVault.itemCount,
 																	})
-																: m[
-																		"vaults.import.mapping.source_item_count.plural"
-																	]({
+																: m.vaults_import_mapping_source_item_count_plural({
 																		count: sourceVault.itemCount,
 																	})}
 														</p>
 													</div>
 													<Badge variant="secondary">
-														{m["vaults.import.mapping.badge.source"]()}
+														{m.vaults_import_mapping_badge_source()}
 													</Badge>
 												</div>
 
@@ -975,10 +963,10 @@ export function VaultImportDialog({
 														</SelectTrigger>
 														<SelectContent>
 															<SelectItem value="create">
-																{m["vaults.import.mapping.mode.create"]()}
+																{m.vaults_import_mapping_mode_create()}
 															</SelectItem>
 															<SelectItem value="existing">
-																{m["vaults.import.mapping.mode.existing"]()}
+																{m.vaults_import_mapping_mode_existing()}
 															</SelectItem>
 														</SelectContent>
 													</Select>
@@ -992,9 +980,7 @@ export function VaultImportDialog({
 																	event.currentTarget.value,
 																)
 															}
-															placeholder={m[
-																"vaults.import.mapping.placeholder.new_vault_name"
-															]()}
+															placeholder={m.vaults_import_mapping_placeholder_new_vault_name()}
 															disabled={isBusy}
 														/>
 													) : (
@@ -1007,17 +993,13 @@ export function VaultImportDialog({
 														>
 															<SelectTrigger>
 																<SelectValue
-																	placeholder={m[
-																		"vaults.import.mapping.placeholder.select_vault"
-																	]()}
+																	placeholder={m.vaults_import_mapping_placeholder_select_vault()}
 																/>
 															</SelectTrigger>
 															<SelectContent>
 																{existingVaults.length === 0 ? (
 																	<SelectItem value="__none" disabled>
-																		{m[
-																			"vaults.import.mapping.empty.no_existing_vaults"
-																		]()}
+																		{m.vaults_import_mapping_empty_no_existing_vaults()}
 																	</SelectItem>
 																) : (
 																	existingVaults.map((vault) => (
@@ -1027,9 +1009,7 @@ export function VaultImportDialog({
 																			disabled={vault.role === "read-only"}
 																		>
 																			{vault.role === "read-only"
-																				? m[
-																						"vaults.import.mapping.target_vault.read_only"
-																					]({ vaultName: vault.vaultName })
+																				? m.vaults_import_mapping_target_vault_read_only({ vaultName: vault.vaultName })
 																				: vault.vaultName}
 																		</SelectItem>
 																	))
@@ -1041,7 +1021,7 @@ export function VaultImportDialog({
 
 												{selectedVault?.role === "read-only" && (
 													<p className="text-amber-700 text-xs dark:text-amber-300">
-														{m["vaults.import.mapping.read_only_notice"]()}
+														{m.vaults_import_mapping_read_only_notice()}
 													</p>
 												)}
 											</div>
@@ -1077,10 +1057,10 @@ export function VaultImportDialog({
 								</div>
 								<div>
 									<h3 className="font-medium">
-										{m["vaults.import.summary.title"]()}
+										{m.vaults_import_summary_title()}
 									</h3>
 									<p className="text-muted-foreground text-sm">
-										{m["vaults.import.summary.description"]()}
+										{m.vaults_import_summary_description()}
 									</p>
 								</div>
 							</div>
@@ -1088,7 +1068,7 @@ export function VaultImportDialog({
 							<div className="grid gap-2 sm:grid-cols-4">
 								<div className="rounded-lg border p-3">
 									<div className="text-muted-foreground text-xs">
-										{m["vaults.import.summary.stat.imported"]()}
+										{m.vaults_import_summary_stat_imported()}
 									</div>
 									<div className="font-semibold text-lg">
 										{summary.importedCount}
@@ -1096,7 +1076,7 @@ export function VaultImportDialog({
 								</div>
 								<div className="rounded-lg border p-3">
 									<div className="text-muted-foreground text-xs">
-										{m["vaults.import.summary.stat.skipped"]()}
+										{m.vaults_import_summary_stat_skipped()}
 									</div>
 									<div className="font-semibold text-lg">
 										{summary.skippedCount}
@@ -1104,7 +1084,7 @@ export function VaultImportDialog({
 								</div>
 								<div className="rounded-lg border p-3">
 									<div className="text-muted-foreground text-xs">
-										{m["vaults.import.summary.stat.warnings"]()}
+										{m.vaults_import_summary_stat_warnings()}
 									</div>
 									<div className="font-semibold text-lg">
 										{summary.warningCount}
@@ -1112,7 +1092,7 @@ export function VaultImportDialog({
 								</div>
 								<div className="rounded-lg border p-3">
 									<div className="text-muted-foreground text-xs">
-										{m["vaults.import.summary.stat.new_vaults"]()}
+										{m.vaults_import_summary_stat_new_vaults()}
 									</div>
 									<div className="font-semibold text-lg">
 										{summary.createdVaultCount}
@@ -1123,7 +1103,7 @@ export function VaultImportDialog({
 							{summary.failedVaultCount > 0 && (
 								<div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
 									<p className="font-medium text-amber-700 text-sm dark:text-amber-300">
-										{m["vaults.import.summary.failed_vaults.title"]()}
+										{m.vaults_import_summary_failed_vaults_title()}
 									</p>
 									<div className="space-y-1">
 										{summary.failedVaults.map((failedVault, index) => (
@@ -1149,14 +1129,14 @@ export function VaultImportDialog({
 										navigate({ to: "/vaults" });
 									}}
 								>
-									{m["vaults.import.summary.action.open_vaults"]()}
+									{m.vaults_import_summary_action_open_vaults()}
 								</Button>
 								<Button
 									type="button"
 									variant="outline"
 									onClick={() => onOpenChange(false)}
 								>
-									{m["vaults.import.summary.action.close"]()}
+									{m.vaults_import_summary_action_close()}
 								</Button>
 							</div>
 						</div>
@@ -1179,7 +1159,7 @@ export function VaultImportDialog({
 									onClick={() => setDialogStep("manager")}
 									disabled={isBusy}
 								>
-									{m["vaults.import.action.back"]()}
+									{m.vaults_import_action_back()}
 								</Button>
 							)}
 						</div>
@@ -1191,7 +1171,7 @@ export function VaultImportDialog({
 								onClick={() => handleDialogOpenChange(false)}
 								disabled={isBusy}
 							>
-								{m["vaults.import.action.cancel"]()}
+								{m.vaults_import_action_cancel()}
 							</Button>
 
 							{showManagerStep && (
@@ -1204,7 +1184,7 @@ export function VaultImportDialog({
 										importProviders.length === 0
 									}
 								>
-									{m["vaults.import.action.continue"]()}
+									{m.vaults_import_action_continue()}
 								</Button>
 							)}
 
@@ -1217,10 +1197,10 @@ export function VaultImportDialog({
 									{isBusy ? (
 										<>
 											<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-											{m["vaults.import.action.importing"]()}
+											{m.vaults_import_action_importing()}
 										</>
 									) : (
-										m["vaults.import.action.start_import"]()
+										m.vaults_import_action_start_import()
 									)}
 								</Button>
 							)}

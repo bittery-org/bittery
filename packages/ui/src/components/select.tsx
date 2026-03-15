@@ -130,23 +130,32 @@ function SelectLabel({
 function SelectItem({
 	className,
 	children,
+	description,
 	...props
-}: React.ComponentProps<typeof SelectPrimitive.Item>) {
+}: React.ComponentProps<typeof SelectPrimitive.Item> & {
+	description?: React.ReactNode;
+}) {
 	return (
 		<SelectPrimitive.Item
 			data-slot="select-item"
 			className={cn(
 				"relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pr-8 pl-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+				description && "items-start py-2",
 				className,
 			)}
 			{...props}
 		>
-			<span className="absolute right-2 flex h-3.5 w-3.5 items-center justify-center">
+			<span className="absolute right-2 flex h-3.5 w-3.5 items-center justify-center mt-0.5">
 				<SelectPrimitive.ItemIndicator>
 					<Check className="h-4 w-4" />
 				</SelectPrimitive.ItemIndicator>
 			</span>
-			<SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+			<div>
+				<SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+				{description && (
+					<div className="text-muted-foreground text-xs">{description}</div>
+				)}
+			</div>
 		</SelectPrimitive.Item>
 	);
 }

@@ -1,4 +1,5 @@
 import {
+	cn,
 	SidebarInset,
 	SidebarProvider,
 	SidebarTrigger,
@@ -8,6 +9,7 @@ import {
 	createFileRoute,
 	Outlet,
 	redirect,
+	useMatch,
 	useRouterState,
 } from "@tanstack/react-router";
 import { AppSidebar } from "@/components/layout/sidebar";
@@ -28,6 +30,10 @@ export const Route = createFileRoute("/_app")({
 function AppLayout() {
 	useVaultKeysSync();
 	const isLoading = useRouterState({ select: (s) => s.isLoading });
+	const isVaultsRoute = !!useMatch({
+		from: "/_app/vaults",
+		shouldThrow: false,
+	});
 	// const syncContext = useSyncContextOptional();
 
 	return (
@@ -41,7 +47,12 @@ function AppLayout() {
 				</header>
 				<div
 					id="app-scroll-area"
-					className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4 pt-14 lg:pl-13 xl:pt-3.5"
+					className={cn(
+						"flex min-h-0 flex-1 flex-col",
+						isVaultsRoute
+							? "overflow-hidden"
+							: "gap-4 overflow-y-auto px-5 pb-4 pt-11 lg:pl-13 xl:pt-12",
+					)}
 				>
 					<Outlet />
 				</div>

@@ -16,10 +16,10 @@ function VaultComponent() {
 					<IconLockOutlineDuo18 size={48} className="text-muted-foreground" />
 				</div>
 				<h3 className="mb-2 font-semibold text-lg">
-					{m["vaults.shared.empty.no_vault_selected"]()}
+					{m.vaults_shared_empty_no_vault_selected()}
 				</h3>
 				<p className="text-muted-foreground text-sm">
-					{m["vaults.shared.empty.select_vault_to_view_contents"]()}
+					{m.vaults_shared_empty_select_vault_to_view_contents()}
 				</p>
 			</div>
 		</div>
