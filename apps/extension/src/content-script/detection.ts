@@ -12,6 +12,7 @@ import {
 	observeShadowRoots,
 } from "../lib/field-detection";
 import {
+	cleanupDetachedAutofillState,
 	handleCreditCardFieldBlur,
 	handleCreditCardFieldFocus,
 	handleFieldBlur,
@@ -243,6 +244,7 @@ function setupShadowRootObserver(shadowRoot: ShadowRoot) {
 			clearTimeout(contentState.detectionTimeout);
 		}
 		contentState.detectionTimeout = setTimeout(() => {
+			cleanupDetachedAutofillState();
 			detectPasswordFields(shadowRoot);
 		}, DETECTION_DEBOUNCE_MS);
 	}, shadowRoot);
@@ -321,6 +323,7 @@ export function setupDynamicDetectionObserver() {
 			clearTimeout(contentState.detectionTimeout);
 		}
 		contentState.detectionTimeout = setTimeout(() => {
+			cleanupDetachedAutofillState();
 			detectPasswordFields();
 			// Run legacy detection as fallback for any fields missed
 			detectPasswordFieldsLegacy();

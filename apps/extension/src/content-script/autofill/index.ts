@@ -1,4 +1,4 @@
-export { cleanupAutofillState } from "./cleanup";
+export { cleanupAutofillState, cleanupDetachedAutofillState } from "./cleanup";
 export {
 	handleFieldBlur,
 	handleFieldFocus,

@@ -134,7 +134,11 @@ export function showFieldIcon(
 	let lastHeight = rect.height;
 
 	const trackIconPosition = () => {
-		if (!field.icon || !input.isConnected) return;
+		if (!field.icon) return;
+		if (!input.isConnected) {
+			hideFieldIcon(field);
+			return;
+		}
 		const nextRect = input.getBoundingClientRect();
 		if (
 			nextRect.top !== lastTop ||

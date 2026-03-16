@@ -4,6 +4,46 @@ import { hideCreditCardAutofillOverlay } from "./credit-card";
 import { hideFieldIcon } from "./icon";
 import { hideIdentityAutofillOverlay } from "./identity";
 
+function cleanupDetachedFields<T extends { input: HTMLInputElement }>(
+	fields: Map<HTMLInputElement, T>,
+	hideOverlay: (field: T) => void,
+) {
+	for (const [input, field] of fields) {
+		if (input.isConnected) continue;
+		hideOverlay(field);
+		hideFieldIcon(field);
+		fields.delete(input);
+	}
+}
+
+export function cleanupDetachedAutofillState() {
+	cleanupDetachedFields(contentState.detectedFields, hideAutofillOverlay);
+	cleanupDetachedFields(
+		contentState.detectedCreditCardFields,
+		hideCreditCardAutofillOverlay,
+	);
+	cleanupDetachedFields(
+		contentState.detectedIdentityFields,
+		hideIdentityAutofillOverlay,
+	);
+
+	if (contentState.currentFocusedField && !contentState.currentFocusedField.input.isConnected) {
+		contentState.currentFocusedField = null;
+	}
+	if (
+		contentState.currentFocusedCreditCardField &&
+		!contentState.currentFocusedCreditCardField.input.isConnected
+	) {
+		contentState.currentFocusedCreditCardField = null;
+	}
+	if (
+		contentState.currentFocusedIdentityField &&
+		!contentState.currentFocusedIdentityField.input.isConnected
+	) {
+		contentState.currentFocusedIdentityField = null;
+	}
+}
+
 export function cleanupAutofillState() {
 	for (const field of contentState.detectedFields.values()) {
 		hideAutofillOverlay(field);

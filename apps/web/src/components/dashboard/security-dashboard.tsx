@@ -654,6 +654,7 @@ function PasswordIssueItem({
 		<Link
 			to="/vaults/$vaultId"
 			params={{ vaultId: item.vaultId }}
+			search={{ itemId: item.id }}
 			className="group block"
 		>
 			<div className="flex items-center gap-3 rounded-xl border border-border/60 bg-background/50 p-3 transition-all hover:border-primary/45 hover:bg-muted/40">
