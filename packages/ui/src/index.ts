@@ -37,6 +37,7 @@ export * from "./components/tag-badge";
 export * from "./components/tag-input";
 export * from "./components/vault/create-item-sheet";
 export * from "./components/vault/create-vault-dialog";
+export * from "./components/vault/edit-item-sheet";
 export * from "./components/vault/edit-vault-dialog";
 export * from "./components/vault/favicon";
 export * from "./components/vault/item-categories";

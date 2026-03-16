@@ -21,9 +21,9 @@ import {
 	DropdownMenuItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
+	EditItemSheet,
 	ItemAttachments,
 	ItemDetail,
-	ItemForm,
 	PasswordHistoryDialog,
 	ShareHistoryDialog,
 	ShareItemDialog,
@@ -417,48 +417,43 @@ export function ItemDetailPage({
 				</div>
 			</div>
 
-			{/* Edit Item Dialog */}
-			<Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-				<DialogContent className="flex max-h-[85vh] max-w-2xl flex-col">
-					<DialogHeader className="shrink-0">
-						<DialogTitle>
-							{m.vaults_detail_edit_item_dialog_title()}
-						</DialogTitle>
-						<DialogDescription>
-							{m.vaults_detail_items_detail_page_edit_dialog_description({
-								category: getCategoryDisplayName(rawItem?.category ?? "login"),
-							})}
-						</DialogDescription>
-					</DialogHeader>
-					{decryptedData && rawItem && (
-						<ItemForm
-							category={rawItem.category}
-							initialData={decryptedData}
-							onSubmit={async (data) => {
-								try {
-									await updateItem.mutateAsync({
-										itemId: rawItem.id,
-										vaultId: rawItem.vaultId,
-										data,
-									});
-									toast.success(m.vaults_detail_toast_item_updated());
-									setIsEditDialogOpen(false);
-								} catch (error) {
-									const errorMessage =
-										error instanceof Error
-											? error.message
-											: m.vaults_detail_items_form_toast_save_item_failed();
-									toast.error(errorMessage);
-								}
-							}}
-							onCancel={() => setIsEditDialogOpen(false)}
-							isSubmitting={updateItem.isPending}
-							submitLabel={m.vaults_detail_edit_item_dialog_action_submit()}
-							selectedVaultId={rawItem.vaultId}
-						/>
-					)}
-				</DialogContent>
-			</Dialog>
+			{/* Edit Item Sheet */}
+			<EditItemSheet
+				open={isEditDialogOpen && !!decryptedData && !!rawItem}
+				onOpenChange={setIsEditDialogOpen}
+				item={
+					decryptedData && rawItem
+						? {
+								...decryptedData,
+								category: rawItem.category,
+								vaultId: rawItem.vaultId,
+							}
+						: null
+				}
+				description={m.vaults_detail_items_detail_page_edit_dialog_description({
+					category: getCategoryDisplayName(rawItem?.category ?? "login"),
+				})}
+				onUpdateItem={async (data) => {
+					if (!rawItem) return;
+					try {
+						await updateItem.mutateAsync({
+							itemId: rawItem.id,
+							vaultId: rawItem.vaultId,
+							data,
+						});
+						toast.success(m.vaults_detail_toast_item_updated());
+						setIsEditDialogOpen(false);
+					} catch (error) {
+						const errorMessage =
+							error instanceof Error
+								? error.message
+								: m.vaults_detail_items_form_toast_save_item_failed();
+						toast.error(errorMessage);
+					}
+				}}
+				isSubmitting={updateItem.isPending}
+				dataTestId="edit-item-dialog"
+			/>
 
 			{/* Delete Confirmation Dialog */}
 			<Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>

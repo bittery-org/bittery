@@ -22,8 +22,8 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
+	EditItemSheet,
 	getTagColorFromName,
-	ItemForm,
 	Skeleton,
 	toast,
 	type VaultOption,
@@ -225,38 +225,15 @@ function TagPage() {
 				onCreateItem={handleCreateItem}
 			/>
 
-			{/* Edit Item Dialog */}
-			<Dialog
+			{/* Edit Item Sheet */}
+			<EditItemSheet
 				open={isEditItemDialogOpen && !!selectedItem}
 				onOpenChange={setIsEditItemDialogOpen}
-			>
-				<DialogContent
-					className="flex max-h-[85vh] max-w-2xl flex-col"
-					data-testid="edit-item-dialog"
-				>
-					<DialogHeader className="shrink-0">
-						<DialogTitle>
-							{m.vaults_detail_edit_item_dialog_title()}
-						</DialogTitle>
-						<DialogDescription>
-							{m.vaults_detail_edit_item_dialog_description()}
-						</DialogDescription>
-					</DialogHeader>
-					{selectedItem && (
-						<ItemForm
-							category={selectedItem.category}
-							initialData={selectedItem}
-							onSubmit={async (data) => {
-								await handleUpdateItem(data as DecryptedItemData);
-							}}
-							onCancel={() => setIsEditItemDialogOpen(false)}
-							isSubmitting={updateItem.isPending}
-							submitLabel={m.vaults_detail_edit_item_dialog_action_submit()}
-							selectedVaultId={selectedItem.vaultId}
-						/>
-					)}
-				</DialogContent>
-			</Dialog>
+				item={selectedItem}
+				onUpdateItem={handleUpdateItem}
+				isSubmitting={updateItem.isPending}
+				dataTestId="edit-item-dialog"
+			/>
 
 			{/* Delete Item Dialog */}
 			<Dialog
