@@ -1,6 +1,6 @@
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
-import { cn } from "@bittery/ui";
+import { cn, VaultItemListRow } from "@bittery/ui";
 import {
 	IconCircleKeyOutlineDuo18,
 	IconMobileOutlineDuo18,
@@ -9,6 +9,8 @@ import { useDraggable } from "@dnd-kit/core";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 import type { DragItemData } from "../../providers/dnd-provider";
+import { useVaultDnd } from "../../providers/dnd-provider";
+import { useI18n } from "../../providers/i18n-provider";
 import { Favicon } from "./favicon";
 
 interface ItemListRowProps {
@@ -26,7 +28,9 @@ export function ItemListRow({
 	linkParams,
 	vaultId,
 }: ItemListRowProps) {
+	const { m } = useI18n();
 	const navigate = useNavigate();
+	const { isDragging: isAnyItemDragging } = useVaultDnd();
 	const maskedCardNumber = item.cardNumber
 		? maskCardNumber(item.cardNumber)
 		: undefined;
@@ -67,81 +71,54 @@ export function ItemListRow({
 	};
 
 	return (
-		// biome-ignore lint/a11y/noStaticElementInteractions: its fine here
-		<div
+		<VaultItemListRow
 			ref={setRowRef}
 			{...listeners}
 			{...attributes}
-			onClick={handleClick}
-			onKeyDown={(e) => {
-				if (e.key === "Enter" || e.key === " ") {
-					handleClick();
-				}
-			}}
-			className={cn(
-				"mb-1 w-full cursor-pointer rounded-md px-3 py-2.5 text-left transition-colors",
-				isSelected
-					? "bg-primary text-primary-foreground"
-					: "hover:bg-primary/10",
-				isDragging && "opacity-50",
-			)}
-		>
-			<div className="flex min-w-0 items-center gap-3">
-				<Favicon item={item} size="sm" />
-				<div className="min-w-0 flex-1">
-					<div className="flex items-center gap-1.5">
-						<span className="truncate font-medium text-sm">{item.title}</span>
-						{item.category === "login" && item.totpSecret && (
-							<span title="Has 2FA">
-								<IconMobileOutlineDuo18
-									className={cn(
-										"size-3 shrink-0",
-										isSelected
-											? "text-primary-foreground"
-											: "text-muted-foreground",
-									)}
-								/>
-							</span>
-						)}
-						{hasPasskeys && (
-							<span title="Has passkeys">
-								<IconCircleKeyOutlineDuo18
-									className={cn(
-										"size-3 shrink-0",
-										isSelected
-											? "text-primary-foreground"
-											: "text-muted-foreground",
-									)}
-								/>
-							</span>
-						)}
-					</div>
-					{item.username && (
-						<div
-							className={cn(
-								"mt-0.5 truncate text-xs",
-								isSelected
-									? "text-primary-foreground"
-									: "text-muted-foreground",
-							)}
-						>
-							{item.username}
-						</div>
+			className="mb-1"
+			itemTitle={item.title}
+			ariaLabel={m.vaults_detail_items_list_item_action_select({
+				title: item.title,
+			})}
+			leadingVisual={<Favicon item={item} size="sm" />}
+			indicators={
+				<>
+					{item.category === "login" && item.totpSecret && (
+						<span title={m.vaults_detail_items_list_item_badge_has_2fa()}>
+							<IconMobileOutlineDuo18
+								className={cn(
+									"size-3 shrink-0",
+									isSelected
+										? "text-primary-foreground"
+										: "text-muted-foreground",
+								)}
+							/>
+						</span>
 					)}
-					{maskedCardNumber && (
-						<div
-							className={cn(
-								"mt-0.5 truncate text-xs",
-								isSelected
-									? "text-primary-foreground"
-									: "text-muted-foreground",
-							)}
+					{hasPasskeys && (
+						<span
+							title={m.vaults_detail_items_detail_login_passkeys_label_single({
+								count: 1,
+							})}
 						>
-							{maskedCardNumber}
-						</div>
+							<IconCircleKeyOutlineDuo18
+								className={cn(
+									"size-3 shrink-0",
+									isSelected
+										? "text-primary-foreground"
+										: "text-muted-foreground",
+								)}
+							/>
+						</span>
 					)}
-				</div>
-			</div>
-		</div>
+				</>
+			}
+			secondaryText={item.username}
+			tertiaryText={maskedCardNumber}
+			isSelected={isSelected}
+			isAnyItemDragging={isAnyItemDragging}
+			isDragging={isDragging}
+			onPrimaryAction={handleClick}
+		/>
 	);
 }

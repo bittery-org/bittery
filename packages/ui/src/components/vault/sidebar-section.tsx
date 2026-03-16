@@ -1,14 +1,14 @@
 import {
-	Button,
+	IconChevronRightOutlineDuo18,
+	IconPlusOutlineDuo18,
+} from "../../icons";
+import { cn } from "../../lib/utils";
+import { Button } from "../button";
+import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
-	cn,
-} from "@bittery/ui";
-import {
-	IconChevronRightOutlineDuo18,
-	IconPlusOutlineDuo18,
-} from "@bittery/ui/icons";
+} from "../collapsible";
 import { useCallback, useState } from "react";
 
 interface SidebarSectionProps {

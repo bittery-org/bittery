@@ -1,29 +1,20 @@
-import { useAvailableTags } from "@bittery/core/hooks";
 import { detectCardBrand, maskCardNumber } from "@bittery/shared/credit-card";
-import type { DecryptedItem, ItemCategory } from "@bittery/shared/types";
+import { useItemListFilters } from "@bittery/core/hooks";
+import type { DecryptedItem } from "@bittery/shared/types";
 import {
-	Button,
 	Checkbox,
 	cn,
-	DropdownMenu,
-	DropdownMenuCheckboxItem,
-	DropdownMenuContent,
-	DropdownMenuLabel,
-	DropdownMenuRadioGroup,
-	DropdownMenuRadioItem,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
 	Skeleton,
-	TagBadge,
+	VaultItemListControls,
+	VaultItemListRow,
 } from "@bittery/ui";
 import {
-	IconSortObjTopToBottomOutlineDuo18 as Filter,
 	IconKeyOutlineDuo18 as Key,
-	IconMagnifier3OutlineDuo18 as Search,
 	IconMobileOutlineDuo18 as Smartphone,
-	IconXmarkOutlineDuo18 as X,
 } from "@bittery/ui/icons";
-import { useCallback, useMemo, useState } from "react";
+import { useDraggable } from "@dnd-kit/core";
+import { useCallback } from "react";
+import { type DragItemData, useVaultDnd } from "@/providers/vault-dnd-provider";
 import { useI18n } from "@/providers/i18n-provider";
 import { Favicon } from "./favicon";
 
@@ -37,38 +28,6 @@ interface ItemListProps {
 	onSelectionChange?: (selectedIds: string[]) => void;
 }
 
-type CategoryFilter = "all" | ItemCategory;
-
-const CATEGORY_OPTIONS: {
-	value: CategoryFilter;
-	labelKey:
-		| "vaults_detail_items_list_filter_category_all"
-		| "vaults_detail_items_list_filter_category_logins"
-		| "vaults_detail_items_list_filter_category_secure_notes"
-		| "vaults_detail_items_list_filter_category_credit_cards"
-		| "vaults_detail_items_list_filter_category_identities"
-		| "vaults_detail_items_list_filter_category_totp";
-}[] = [
-	{ value: "all", labelKey: "vaults_detail_items_list_filter_category_all" },
-	{
-		value: "login",
-		labelKey: "vaults_detail_items_list_filter_category_logins",
-	},
-	{
-		value: "secure-note",
-		labelKey: "vaults_detail_items_list_filter_category_secure_notes",
-	},
-	{
-		value: "credit-card",
-		labelKey: "vaults_detail_items_list_filter_category_credit_cards",
-	},
-	{
-		value: "identity",
-		labelKey: "vaults_detail_items_list_filter_category_identities",
-	},
-	{ value: "totp", labelKey: "vaults_detail_items_list_filter_category_totp" },
-];
-
 export function ItemList({
 	items,
 	isLoading,
@@ -79,60 +38,20 @@ export function ItemList({
 	onSelectionChange,
 }: ItemListProps) {
 	const { m } = useI18n();
-	const [searchQuery, setSearchQuery] = useState("");
-	const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
-	const [selectedTags, setSelectedTags] = useState<string[]>([]);
-
-	// Get available tags from decrypted items
-	const availableTags = useAvailableTags(items);
-
-	// Filter and search items
-	const filteredItems = useMemo(() => {
-		let result = [...items];
-
-		// Apply category filter
-		if (categoryFilter !== "all") {
-			result = result.filter((item) => item.category === categoryFilter);
-		}
-
-		// Apply tag filter
-		if (selectedTags.length > 0) {
-			result = result.filter((item) =>
-				item.tags?.some((tag) => selectedTags.includes(tag)),
-			);
-		}
-
-		// Apply search filter
-		if (searchQuery.trim()) {
-			const query = searchQuery.toLowerCase();
-			result = result.filter((item) => {
-				const searchableFields = [
-					item.title,
-					item.username,
-					item.url,
-					item.email,
-					item.notes,
-					item.note,
-				].filter(Boolean);
-				return searchableFields.some((field) =>
-					field?.toLowerCase().includes(query),
-				);
-			});
-		}
-
-		// Sort by favorite first, then by updatedAt
-		result.sort((a, b) => {
-			if (a.favorite && !b.favorite) return -1;
-			if (!a.favorite && b.favorite) return 1;
-			return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-		});
-
-		return result;
-	}, [items, categoryFilter, searchQuery, selectedTags]);
-
-	// Split into favorites and regular items
-	const favoriteItems = filteredItems.filter((item) => item.favorite);
-	const regularItems = filteredItems.filter((item) => !item.favorite);
+	const {
+		searchQuery,
+		setSearchQuery,
+		categoryFilter,
+		setCategoryFilter,
+		sortField,
+		setSortField,
+		sortDirection,
+		setSortDirection,
+		filteredItems,
+		favoriteItems,
+		regularItems,
+		hasActiveFilters,
+	} = useItemListFilters({ items });
 
 	if (isLoading) {
 		return (
@@ -171,102 +90,18 @@ export function ItemList({
 		}
 	};
 
-	const hasActiveFilters =
-		searchQuery || categoryFilter !== "all" || selectedTags.length > 0;
-
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
-			{/* Compact search + filter row */}
-			<div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
-				<Search className="size-3.5 shrink-0 text-muted-foreground" />
-				<input
-					type="text"
-					placeholder={m.vaults_detail_items_list_search_placeholder()}
-					value={searchQuery}
-					onChange={(e) => setSearchQuery(e.target.value)}
-					className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-				/>
-				{searchQuery && (
-					<button
-						type="button"
-						onClick={() => setSearchQuery("")}
-						className="text-muted-foreground hover:text-foreground"
-					>
-						<X className="size-3.5" />
-					</button>
-				)}
-				<DropdownMenu>
-					<DropdownMenuTrigger asChild>
-						<Button
-							variant="ghost"
-							size="sm"
-							className={cn(
-								"h-6 w-6 p-0",
-								(categoryFilter !== "all" || selectedTags.length > 0) &&
-									"text-primary",
-							)}
-						>
-							<Filter className="size-3.5" />
-						</Button>
-					</DropdownMenuTrigger>
-					<DropdownMenuContent align="end" className="w-48">
-						<DropdownMenuLabel className="text-muted-foreground text-xs">
-							{m.vaults_detail_items_list_filter_category_placeholder()}
-						</DropdownMenuLabel>
-						<DropdownMenuRadioGroup
-							value={categoryFilter}
-							onValueChange={(value) =>
-								setCategoryFilter(value as CategoryFilter)
-							}
-						>
-							{CATEGORY_OPTIONS.map((option) => (
-								<DropdownMenuRadioItem key={option.value} value={option.value}>
-									{m[option.labelKey]()}
-								</DropdownMenuRadioItem>
-							))}
-						</DropdownMenuRadioGroup>
-						{availableTags.length > 0 && (
-							<>
-								<DropdownMenuSeparator />
-								<DropdownMenuLabel className="text-muted-foreground text-xs">
-									{m.vaults_detail_items_tag_filter_button_default()}
-								</DropdownMenuLabel>
-								{availableTags.map((tag) => (
-									<DropdownMenuCheckboxItem
-										key={tag}
-										checked={selectedTags.includes(tag)}
-										onCheckedChange={(checked) => {
-											if (checked) {
-												setSelectedTags([...selectedTags, tag]);
-											} else {
-												setSelectedTags(selectedTags.filter((t) => t !== tag));
-											}
-										}}
-									>
-										{tag}
-									</DropdownMenuCheckboxItem>
-								))}
-							</>
-						)}
-					</DropdownMenuContent>
-				</DropdownMenu>
-			</div>
-
-			{/* Active tag pills */}
-			{selectedTags.length > 0 && (
-				<div className="flex shrink-0 flex-wrap gap-1 border-b px-2 py-1.5">
-					{selectedTags.map((tag) => (
-						<TagBadge
-							key={tag}
-							name={tag}
-							size="sm"
-							onRemove={() =>
-								setSelectedTags(selectedTags.filter((t) => t !== tag))
-							}
-						/>
-					))}
-				</div>
-			)}
+			<VaultItemListControls
+				categoryFilter={categoryFilter}
+				onCategoryFilterChange={setCategoryFilter}
+				searchQuery={searchQuery}
+				onSearchQueryChange={setSearchQuery}
+				sortField={sortField}
+				onSortFieldChange={setSortField}
+				sortDirection={sortDirection}
+				onSortDirectionChange={setSortDirection}
+			/>
 
 			{/* Selection mode header */}
 			{selectionMode && filteredItems.length > 0 && (
@@ -385,6 +220,7 @@ function ItemRow({
 	onToggleCheck,
 }: ItemRowProps) {
 	const { m } = useI18n();
+	const { isDragging: isAnyItemDragging } = useVaultDnd();
 	const maskedCardNumber = item.cardNumber
 		? maskCardNumber(item.cardNumber)
 		: undefined;
@@ -392,95 +228,62 @@ function ItemRow({
 		? detectCardBrand(item.cardNumber)
 		: undefined;
 
+	const dragData: DragItemData = {
+		type: "vault-item",
+		item,
+		sourceVaultId: item.vaultId,
+	};
+
+	const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+		id: `item-${item.id}`,
+		data: dragData,
+		disabled: selectionMode,
+	});
+
 	const setRowRef = useCallback(
 		(node: HTMLDivElement | null) => {
+			setNodeRef(node);
 			if (!node || !isSelected) return;
 			requestAnimationFrame(() => {
 				node.scrollIntoView({ block: "nearest", inline: "nearest" });
 			});
 		},
-		[isSelected],
+		[isSelected, setNodeRef],
 	);
 
 	return (
-		<div
+		<VaultItemListRow
 			ref={setRowRef}
-			className={cn(
-				"relative flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-md px-3 py-2.5 transition-colors",
-				isSelected
-					? "bg-primary text-primary-foreground"
-					: isChecked
-						? "border border-primary/30 bg-primary/5"
-						: "hover:bg-primary/10",
-			)}
-		>
-			{/* Selection checkbox in selection mode */}
-			{selectionMode && (
-				<div className="relative z-10">
-					<Checkbox
-						checked={isChecked}
-						onCheckedChange={onToggleCheck}
-						onClick={(e) => e.stopPropagation()}
-					/>
-				</div>
-			)}
-
-			{/* Invisible button overlay for main selection */}
-			<button
-				type="button"
-				onClick={() => (selectionMode ? onToggleCheck?.() : onSelect?.(item))}
-				className="absolute inset-0 z-0 cursor-pointer rounded-md"
-				aria-label={m.vaults_detail_items_list_item_action_select({
-					title: item.title,
-				})}
-			/>
-
-			{/* Content - pointer-events-none so clicks pass through to overlay */}
-			<div className="pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-3">
-				<Favicon item={item} cardBrand={cardBrand} size="md" />
-				<div className="min-w-0 flex-1">
-					<div className="flex items-center gap-1.5">
-						<span className="truncate font-medium text-sm">{item.title}</span>
-						{/* TOTP indicator for login items */}
-						{item.category === "login" && item.totpSecret && (
-							<span title={m.vaults_detail_items_list_item_badge_has_2fa()}>
-								<Smartphone
-									className={cn(
-										"h-3 w-3 shrink-0",
-										isSelected
-											? "text-primary-foreground"
-											: "text-muted-foreground",
-									)}
-								/>
-							</span>
-						)}
-					</div>
-					{item.username && (
-						<div
+			{...(!selectionMode ? listeners : {})}
+			{...(!selectionMode ? attributes : {})}
+			itemTitle={item.title}
+			ariaLabel={m.vaults_detail_items_list_item_action_select({
+				title: item.title,
+			})}
+			leadingVisual={<Favicon item={item} cardBrand={cardBrand} size="md" />}
+			indicators={
+				item.category === "login" && item.totpSecret ? (
+					<span title={m.vaults_detail_items_list_item_badge_has_2fa()}>
+						<Smartphone
 							className={cn(
-								"mt-0.5 truncate text-xs",
+								"h-3 w-3 shrink-0",
 								isSelected
 									? "text-primary-foreground"
 									: "text-muted-foreground",
 							)}
-						>
-							{item.username}
-						</div>
-					)}
-					{maskedCardNumber && (
-						<div
-							className={cn(
-								"mt-0.5 truncate text-xs",
-								isSelected
-									? "text-primary-foreground"
-									: "text-muted-foreground",
-							)}
-						>
-							{maskedCardNumber}
-						</div>
-					)}
-				</div>
-			</div>
-		</div>
+						/>
+					</span>
+				) : null
+			}
+			secondaryText={item.username}
+			tertiaryText={maskedCardNumber}
+			isSelected={isSelected}
+			selectionMode={selectionMode}
+			isChecked={isChecked}
+			isAnyItemDragging={isAnyItemDragging}
+			isDragging={isDragging}
+			onPrimaryAction={() => onSelect?.(item)}
+			onToggleCheck={onToggleCheck}
+		/>
 	);
 }

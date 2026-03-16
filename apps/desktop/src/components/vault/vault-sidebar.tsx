@@ -7,6 +7,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 	getTagColorFromName,
+	SidebarSection,
 	VaultAvatar,
 } from "@bittery/ui";
 import {
@@ -27,7 +28,6 @@ import {
 } from "../../providers/dnd-provider";
 import { useI18n } from "../../providers/i18n-provider";
 import { AccountSwitcher } from "../account-switcher";
-import { SidebarSection } from "./sidebar-section";
 
 interface VaultInfo {
 	vaultId: string;

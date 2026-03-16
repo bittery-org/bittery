@@ -1,4 +1,7 @@
-import { useVaultItems } from "@bittery/core/hooks";
+import { useItemListFilters, useVaultItems } from "@bittery/core/hooks";
+import {
+	VaultItemListControls,
+} from "@bittery/ui";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";
 import { ItemListRow } from "../../../components/vault/item-list-row";
@@ -14,18 +17,20 @@ function RouteComponent() {
 	// Fetch and decrypt items for the selected vault
 	// useVaultItems automatically handles single-account vs all-accounts mode
 	const { items: decryptedItems, isLoading } = useVaultItems(id || "");
-
-	// Sort items by favorite status
-	const items = [...decryptedItems].sort((a, b) => {
-		// Sort favorites first
-		if (a.favorite && !b.favorite) return -1;
-		if (!a.favorite && b.favorite) return 1;
-		return 0;
-	});
-
-	// Split into favorites and regular items
-	const favoriteItems = items.filter((item) => item.favorite);
-	const regularItems = items.filter((item) => !item.favorite);
+	const {
+		searchQuery,
+		setSearchQuery,
+		categoryFilter,
+		setCategoryFilter,
+		sortField,
+		setSortField,
+		sortDirection,
+		setSortDirection,
+		filteredItems: items,
+		favoriteItems,
+		regularItems,
+		hasActiveFilters,
+	} = useItemListFilters({ items: decryptedItems });
 
 	if (isLoading) {
 		return (
@@ -42,14 +47,28 @@ function RouteComponent() {
 	return (
 		<>
 			<div className="flex w-78 flex-col border-r bg-background">
+				<VaultItemListControls
+					categoryFilter={categoryFilter}
+					onCategoryFilterChange={setCategoryFilter}
+					searchQuery={searchQuery}
+					onSearchQueryChange={setSearchQuery}
+					sortField={sortField}
+					onSortFieldChange={setSortField}
+					sortDirection={sortDirection}
+					onSortDirectionChange={setSortDirection}
+				/>
 				<div className="flex-1 overflow-y-auto">
 					{items.length === 0 ? (
 						<div className="flex h-full flex-col items-center justify-center p-8 text-center">
 							<h3 className="mb-2 font-semibold">
-								{m.vaults_detail_items_list_empty_default_title()}
+								{hasActiveFilters
+									? m.vaults_detail_items_list_empty_filtered_title()
+									: m.vaults_detail_items_list_empty_default_title()}
 							</h3>
 							<p className="text-muted-foreground text-sm">
-								{m.vaults_detail_items_list_empty_default_description()}
+								{hasActiveFilters
+									? m.vaults_detail_items_list_empty_filtered_description()
+									: m.vaults_detail_items_list_empty_default_description()}
 							</p>
 						</div>
 					) : (

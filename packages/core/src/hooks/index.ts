@@ -181,6 +181,13 @@ export {
 	getAttachmentUploadErrorCode,
 	useItemAttachments,
 } from "./use-item-attachments";
+export {
+	type ItemListCategoryFilter,
+	type ItemListFilterable,
+	type ItemListSortDirection,
+	type ItemListSortField,
+	useItemListFilters,
+} from "./use-item-list-filters";
 // Unified Data Hooks (automatically handle single-account vs "All Accounts" mode)
 export {
 	type UnifiedItem,

@@ -1,5 +1,8 @@
-import { useItems } from "@bittery/core/hooks";
-import { Badge } from "@bittery/ui";
+import { useItemListFilters, useItems } from "@bittery/core/hooks";
+import {
+	Badge,
+	VaultItemListControls,
+} from "@bittery/ui";
 import { IconStarOutlineDuo18 } from "@bittery/ui/icons";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";
@@ -15,14 +18,20 @@ function RouteComponent() {
 
 	// Unified hook - automatically handles single-account vs "All Accounts" mode
 	const { items: allItems, isLoading } = useItems();
-
-	// Filter only favorites and sort by updatedAt
-	const favoriteItems = allItems
-		.filter((item) => item.favorite)
-		.sort(
-			(a, b) =>
-				new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-		);
+	const {
+		searchQuery,
+		setSearchQuery,
+		categoryFilter,
+		setCategoryFilter,
+		sortField,
+		setSortField,
+		sortDirection,
+		setSortDirection,
+		filteredItems: favoriteItems,
+		hasActiveFilters,
+	} = useItemListFilters({
+		items: allItems.filter((item) => item.favorite),
+	});
 
 	if (isLoading) {
 		return (
@@ -50,18 +59,29 @@ function RouteComponent() {
 						{favoriteItems.length}
 					</Badge>
 				</div>
+				<VaultItemListControls
+					categoryFilter={categoryFilter}
+					onCategoryFilterChange={setCategoryFilter}
+					searchQuery={searchQuery}
+					onSearchQueryChange={setSearchQuery}
+					sortField={sortField}
+					onSortFieldChange={setSortField}
+					sortDirection={sortDirection}
+					onSortDirectionChange={setSortDirection}
+				/>
 
 				<div className="flex-1 overflow-y-auto">
 					{favoriteItems.length === 0 ? (
 						<div className="flex h-full flex-col items-center justify-center p-8 text-center">
-							<div className="mb-4 inline-flex rounded-full bg-muted p-4">
-								<IconStarOutlineDuo18 className="size-8 text-muted-foreground" />
-							</div>
 							<h3 className="mb-2 font-semibold">
-								{m.vaults_favorites_empty_title()}
+								{hasActiveFilters
+									? m.vaults_detail_items_list_empty_filtered_title()
+									: m.vaults_favorites_empty_title()}
 							</h3>
 							<p className="text-muted-foreground text-sm">
-								{m.vaults_favorites_empty_description()}
+								{hasActiveFilters
+									? m.vaults_detail_items_list_empty_filtered_description()
+									: m.vaults_favorites_empty_description()}
 							</p>
 						</div>
 					) : (

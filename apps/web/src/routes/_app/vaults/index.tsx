@@ -165,7 +165,7 @@ function AllItemsPage() {
 						<Plus className="h-4 w-4" />
 					</Button>
 				</div>
-				<div className="flex min-h-0 flex-1 flex-col overflow-hidden p-1">
+				<div className="flex min-h-0 flex-1 flex-col overflow-hidden py-1">
 					{isLoading ? (
 						<div className="space-y-2 p-2">
 							{[1, 2, 3, 4, 5].map((i) => (

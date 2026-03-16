@@ -1,5 +1,10 @@
-import { useItems } from "@bittery/core/hooks";
-import { Badge, Button, getTagColorFromName } from "@bittery/ui";
+import { useItemListFilters, useItems } from "@bittery/core/hooks";
+import {
+	Badge,
+	Button,
+	getTagColorFromName,
+	VaultItemListControls,
+} from "@bittery/ui";
 import {
 	IconArrowLeftOutlineDuo18,
 	IconTagOutlineDuo18,
@@ -29,17 +34,19 @@ function CrossVaultTagRouteComponent() {
 
 	// Unified hook - automatically handles single-account vs "All Accounts" mode
 	const { items: allItems, isLoading } = useItems();
-
-	// Filter items by tag
-	const filteredItems = allItems.filter((item) =>
-		item.tags?.includes(decodedTagName),
-	);
-
-	// Sort: favorites first, then by updatedAt
-	const sortedItems = [...filteredItems].sort((a, b) => {
-		if (a.favorite && !b.favorite) return -1;
-		if (!a.favorite && b.favorite) return 1;
-		return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+	const {
+		searchQuery,
+		setSearchQuery,
+		categoryFilter,
+		setCategoryFilter,
+		sortField,
+		setSortField,
+		sortDirection,
+		setSortDirection,
+		filteredItems: sortedItems,
+		hasActiveFilters,
+	} = useItemListFilters({
+		items: allItems.filter((item) => item.tags?.includes(decodedTagName)),
 	});
 
 	if (isLoading) {
@@ -70,29 +77,34 @@ function CrossVaultTagRouteComponent() {
 					<IconTagOutlineDuo18 className="size-4" style={{ color: tagColor }} />
 					<span className="truncate font-medium">{decodedTagName}</span>
 					<Badge variant="secondary" className="ml-auto">
-						{filteredItems.length}
+						{sortedItems.length}
 					</Badge>
 				</div>
+				<VaultItemListControls
+					categoryFilter={categoryFilter}
+					onCategoryFilterChange={setCategoryFilter}
+					searchQuery={searchQuery}
+					onSearchQueryChange={setSearchQuery}
+					sortField={sortField}
+					onSortFieldChange={setSortField}
+					sortDirection={sortDirection}
+					onSortDirectionChange={setSortDirection}
+				/>
 
 				<div className="flex-1 overflow-y-auto">
-					{filteredItems.length === 0 ? (
+					{sortedItems.length === 0 ? (
 						<div className="flex h-full flex-col items-center justify-center p-8 text-center">
-							<div
-								className="mb-4 inline-flex rounded-full p-4"
-								style={{ backgroundColor: `${tagColor}20` }}
-							>
-								<IconTagOutlineDuo18
-									className="size-8"
-									style={{ color: tagColor }}
-								/>
-							</div>
 							<h3 className="mb-2 font-semibold">
-								{m.vaults_tag_empty_title()}
+								{hasActiveFilters
+									? m.vaults_detail_items_list_empty_filtered_title()
+									: m.vaults_tag_empty_title()}
 							</h3>
 							<p className="text-muted-foreground text-sm">
-								{m.vaults_tag_empty_description({
-									tagName: decodedTagName,
-								})}
+								{hasActiveFilters
+									? m.vaults_detail_items_list_empty_filtered_description()
+									: m.vaults_tag_empty_description({
+											tagName: decodedTagName,
+									  })}
 							</p>
 						</div>
 					) : (

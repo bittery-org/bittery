@@ -7,6 +7,8 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 	getTagColorFromName,
+	SidebarSection,
+	VaultAvatar,
 } from "@bittery/ui";
 import {
 	IconBoxArchive3OutlineDuo18 as Archive,
@@ -17,10 +19,10 @@ import {
 	IconTagOutlineDuo18 as Tag,
 	IconTrash2OutlineDuo18 as Trash,
 } from "@bittery/ui/icons";
+import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation, useParams } from "@tanstack/react-router";
-import { VaultAvatar } from "@/components/vaults/vault-avatar";
+import { type DropVaultData, useVaultDnd } from "@/providers/vault-dnd-provider";
 import { useI18n } from "@/providers/i18n-provider";
-import { SidebarSection } from "./sidebar-section";
 
 interface VaultInfo {
 	vaultId: string;
@@ -29,6 +31,129 @@ interface VaultInfo {
 	vaultIcon?: string | null;
 	vaultImageUrl?: string | null;
 	role: string;
+}
+
+interface DroppableVaultEntryProps {
+	vault: VaultInfo;
+	isActive: boolean;
+	onEditVault: (vault: {
+		id: string;
+		name: string;
+		icon?: string | null;
+		imageUrl?: string | null;
+	}) => void;
+	onDeleteVault: (vault: { id: string; name: string }) => void;
+	onNavigate?: () => void;
+}
+
+function DroppableVaultEntry({
+	vault,
+	isActive,
+	onEditVault,
+	onDeleteVault,
+	onNavigate,
+}: DroppableVaultEntryProps) {
+	const { m } = useI18n();
+	const { isDragging } = useVaultDnd();
+	const canEdit = vault.role === "owner" || vault.role === "admin";
+	const canDelete = vault.role === "owner";
+
+	const dropData: DropVaultData = {
+		type: "vault",
+		vaultId: vault.vaultId,
+		role: vault.role,
+	};
+
+	const { isOver, setNodeRef } = useDroppable({
+		id: `vault-drop-${vault.vaultId}`,
+		data: dropData,
+	});
+
+	const isReadOnly = vault.role === "read-only";
+	const isValidDropTarget = isDragging && !isReadOnly;
+
+	let ringStyle = "";
+	if (isOver && isValidDropTarget) {
+		ringStyle = "ring-2 ring-green-500 bg-green-500/10";
+	} else if (isOver && !isValidDropTarget) {
+		ringStyle = "ring-2 ring-red-500 bg-red-500/10";
+	} else if (isDragging && isValidDropTarget) {
+		ringStyle = "ring-1 ring-muted-foreground/30";
+	}
+
+	return (
+		<div
+			ref={setNodeRef}
+			className={cn(
+				"group relative mb-0.5 w-full rounded-md text-left text-sm transition-colors",
+				isActive ? "bg-primary/10" : "hover:bg-muted/30",
+				ringStyle,
+			)}
+		>
+			<Link
+				to="/vaults/$vaultId"
+				params={{ vaultId: vault.vaultId }}
+				className="block px-3 py-2"
+				onClick={onNavigate}
+			>
+				<div className="flex min-w-0 items-center gap-2">
+					<VaultAvatar
+						name={vault.vaultName}
+						icon={vault.vaultIcon}
+						imageUrl={vault.vaultImageUrl}
+						size="xs"
+					/>
+					<div className="truncate">{vault.vaultName}</div>
+				</div>
+			</Link>
+			{(canEdit || canDelete) && (
+				<DropdownMenu>
+					<DropdownMenuTrigger asChild>
+						<Button
+							variant="ghost"
+							size="sm"
+							className="absolute top-1/2 right-1 h-5 w-5 -translate-y-1/2 p-0 opacity-0 group-hover:opacity-100"
+							onClick={(e) => e.stopPropagation()}
+						>
+							<Dots className="h-3.5 w-3.5" />
+						</Button>
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="end">
+						{canEdit && (
+							<DropdownMenuItem
+								onClick={() =>
+									onEditVault({
+										id: vault.vaultId,
+										name: vault.vaultName,
+										icon: vault.vaultIcon,
+										imageUrl: vault.vaultImageUrl,
+									})
+								}
+							>
+								<Pen className="h-4 w-4" />
+								{m.vaults_page_card_action_edit_vault()}
+							</DropdownMenuItem>
+						)}
+						{canEdit && canDelete && <DropdownMenuSeparator />}
+						{canDelete && (
+							<DropdownMenuItem
+								variant="destructive"
+								onClick={() =>
+									onDeleteVault({
+										id: vault.vaultId,
+										name: vault.vaultName,
+									})
+								}
+							>
+								<Trash className="h-4 w-4" />
+								{m.vaults_page_card_action_delete_vault()}
+							</DropdownMenuItem>
+						)}
+					</DropdownMenuContent>
+				</DropdownMenu>
+			)}
+		</div>
+	);
 }
 
 interface VaultNavSidebarProps {
@@ -110,80 +235,16 @@ export function VaultNavSidebar({
 								!isAllItemsActive &&
 								!isFavoritesActive &&
 								!isTrashActive;
-							const canEdit = vault.role === "owner" || vault.role === "admin";
-							const canDelete = vault.role === "owner";
 
 							return (
-								<div
+								<DroppableVaultEntry
 									key={vault.vaultId}
-									className={cn(
-										"group relative mb-0.5 w-full rounded-md text-left text-sm transition-colors",
-										isActive ? "bg-primary/10" : "hover:bg-muted/30",
-									)}
-								>
-									<Link
-										to="/vaults/$vaultId"
-										params={{ vaultId: vault.vaultId }}
-										className="block px-3 py-2"
-										onClick={onNavigate}
-									>
-										<div className="flex min-w-0 items-center gap-2">
-											<VaultAvatar
-												name={vault.vaultName}
-												icon={vault.vaultIcon}
-												imageUrl={vault.vaultImageUrl}
-												size="xs"
-											/>
-											<div className="truncate">{vault.vaultName}</div>
-										</div>
-									</Link>
-									{(canEdit || canDelete) && (
-										<DropdownMenu>
-											<DropdownMenuTrigger asChild>
-												<Button
-													variant="ghost"
-													size="sm"
-													className="absolute top-1/2 right-1 h-5 w-5 -translate-y-1/2 p-0 opacity-0 group-hover:opacity-100"
-													onClick={(e) => e.stopPropagation()}
-												>
-													<Dots className="h-3.5 w-3.5" />
-												</Button>
-											</DropdownMenuTrigger>
-											<DropdownMenuContent align="end">
-												{canEdit && (
-													<DropdownMenuItem
-														onClick={() =>
-															onEditVault({
-																id: vault.vaultId,
-																name: vault.vaultName,
-																icon: vault.vaultIcon,
-																imageUrl: vault.vaultImageUrl,
-															})
-														}
-													>
-														<Pen className="h-4 w-4" />
-														{m.vaults_page_card_action_edit_vault()}
-													</DropdownMenuItem>
-												)}
-												{canEdit && canDelete && <DropdownMenuSeparator />}
-												{canDelete && (
-													<DropdownMenuItem
-														variant="destructive"
-														onClick={() =>
-															onDeleteVault({
-																id: vault.vaultId,
-																name: vault.vaultName,
-															})
-														}
-													>
-														<Trash className="h-4 w-4" />
-														{m.vaults_page_card_action_delete_vault()}
-													</DropdownMenuItem>
-												)}
-											</DropdownMenuContent>
-										</DropdownMenu>
-									)}
-								</div>
+									vault={vault}
+									isActive={isActive}
+									onEditVault={onEditVault}
+									onDeleteVault={onDeleteVault}
+									onNavigate={onNavigate}
+								/>
 							);
 						})}
 					</SidebarSection>

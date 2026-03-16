@@ -24,6 +24,7 @@ import {
 	type UpdateVaultData,
 } from "@/components/vaults/edit-vault-dialog";
 import { useI18n } from "@/providers/i18n-provider";
+import { VaultDndProvider } from "@/providers/vault-dnd-provider";
 
 export const Route = createFileRoute("/_app/vaults")({
 	component: VaultsLayout,
@@ -100,6 +101,7 @@ function VaultsLayout() {
 	const tags = availableTags;
 
 	return (
+		<VaultDndProvider>
 		<div className="flex min-h-0 flex-1 overflow-hidden">
 			{/* Desktop sidebar */}
 			<aside className="hidden w-52 shrink-0 flex-col border-r pt-11 lg:flex xl:pt-12">
@@ -186,5 +188,6 @@ function VaultsLayout() {
 				onConfirm={handleDeleteVault}
 			/>
 		</div>
+		</VaultDndProvider>
 	);
 }

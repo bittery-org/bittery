@@ -15,6 +15,7 @@ import {
 	DialogTitle,
 	Skeleton,
 	toast,
+	VaultAvatar,
 } from "@bittery/ui";
 import {
 	IconBoxArchive3OutlineDuo18 as Archive,
@@ -24,7 +25,6 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Favicon } from "@/components/vault/favicon";
-import { VaultAvatar } from "@/components/vaults/vault-avatar";
 import { formatDate } from "@/lib/i18n-format";
 import { useI18n } from "@/providers/i18n-provider";
 

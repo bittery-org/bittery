@@ -33,6 +33,7 @@ import {
 	ItemForm,
 	Skeleton,
 	toast,
+	VaultAvatar,
 	type VaultOption,
 } from "@bittery/ui";
 import {
@@ -48,7 +49,6 @@ import { z } from "zod";
 import { ItemDetailPane } from "@/components/vault/item-detail-pane";
 import { ItemList } from "@/components/vault/item-list";
 import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
-import { VaultAvatar } from "@/components/vaults/vault-avatar";
 import { VaultMemberList } from "@/components/vaults/vault-member-list";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -338,7 +338,7 @@ function VaultDetailPage() {
 				</div>
 
 				{/* Item list */}
-				<div className="flex min-h-0 flex-1 flex-col overflow-hidden p-1">
+				<div className="flex min-h-0 flex-1 flex-col overflow-hidden py-1">
 					<ItemList
 						items={decryptedItems}
 						isLoading={isLoadingItems}
