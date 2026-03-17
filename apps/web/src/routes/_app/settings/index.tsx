@@ -31,10 +31,12 @@ import {
 	IconTrash2OutlineDuo18 as Trash2,
 	IconUpload4OutlineDuo18 as Upload,
 	IconUserOutlineDuo18 as User,
+	IconArchiveExport2OutlineDuo18 as Download,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { VaultExportDialog } from "@/components/export/vault-export-dialog";
 import { VaultImportDialog } from "@/components/import/vault-import-dialog";
 import { AutoLockSettings } from "@/components/settings/auto-lock-settings";
 import { ChangeEmailDialog } from "@/components/settings/change-email-dialog";
@@ -65,6 +67,7 @@ function SettingsPage() {
 		locale === "en" ? IconFlagUnitedStates : IconFlagGermany;
 	const userQuery = useQuery(trpc.auth.me.queryOptions());
 	const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+	const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
 	const onboardingImport = useImportOnboardingState();
 
 	return (
@@ -406,6 +409,31 @@ function SettingsPage() {
 
 						<div className="rounded-xl border bg-card p-5">
 							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+								<div className="flex items-start gap-3">
+									<div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+										<Download className="h-4 w-4 text-muted-foreground" />
+									</div>
+									<div className="space-y-1">
+										<span className="font-medium text-sm">
+											{m.settings_general_export_title()}
+										</span>
+										<p className="text-muted-foreground text-xs">
+											{m.settings_general_export_description()}
+										</p>
+									</div>
+								</div>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setIsExportDialogOpen(true)}
+								>
+									{m.settings_general_export_open()}
+								</Button>
+							</div>
+						</div>
+
+						<div className="rounded-xl border bg-card p-5">
+							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 								<div className="space-y-0.5">
 									<span className="font-medium text-sm">
 										{m.settings_general_language_title()}
@@ -475,6 +503,10 @@ function SettingsPage() {
 				</TabsContent>
 			</Tabs>
 
+			<VaultExportDialog
+				open={isExportDialogOpen}
+				onOpenChange={setIsExportDialogOpen}
+			/>
 			<VaultImportDialog
 				open={isImportDialogOpen}
 				onOpenChange={setIsImportDialogOpen}

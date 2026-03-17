@@ -2,36 +2,43 @@
  * Types for encrypted vault export/import
  */
 
-import type { DecryptedItem, ItemCategory } from "./types";
+import type { DecryptedItemData, ItemCategory } from "./types";
 
 /**
- * Vault metadata in the export
+ * Vault metadata in the export (items stored flat at the top level)
  */
 export interface ExportedVault {
 	id: string;
 	name: string;
 	type: "personal" | "team";
-	icon?: string;
-	items: ExportedItem[];
+	icon?: string | null;
 }
 
 /**
- * Item data in the export (decrypted)
+ * Attachment data in the export (decrypted, base64-encoded)
+ */
+export interface ExportedAttachment {
+	filename: string;
+	contentType: string;
+	data: string; // base64
+}
+
+/**
+ * Item data in the export (decrypted, flat — vaultId links back to ExportedVault)
  */
 export interface ExportedItem {
 	id: string;
+	vaultId: string;
 	category: ItemCategory;
 	favorite: boolean;
-	data: Omit<
-		DecryptedItem,
-		"id" | "vaultId" | "category" | "favorite" | "createdAt" | "updatedAt"
-	>;
+	data: DecryptedItemData;
+	attachments?: ExportedAttachment[];
 	createdAt: string;
 	updatedAt: string;
 }
 
 /**
- * Complete export payload (before encryption)
+ * Complete export payload
  */
 export interface VaultExportPayload {
 	version: string;
@@ -41,6 +48,7 @@ export interface VaultExportPayload {
 		name?: string;
 	};
 	vaults: ExportedVault[];
+	items: ExportedItem[];
 	metadata: {
 		totalItems: number;
 		totalVaults: number;

@@ -1,7 +1,11 @@
+import { bitteryBttrxImportProvider } from "./providers/bittery-bttrx";
 import { onePassword1puxImportProvider } from "./providers/1password-1pux";
 import type { ImportProvider, ImportProviderId } from "./types";
 
-const providers: ImportProvider[] = [onePassword1puxImportProvider];
+const providers: ImportProvider[] = [
+	onePassword1puxImportProvider,
+	bitteryBttrxImportProvider,
+];
 
 export function getImportProviders(): ImportProvider[] {
 	return providers;
