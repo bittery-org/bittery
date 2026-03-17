@@ -111,6 +111,32 @@ object NativeCrypto {
     }
 
     /**
+     * Encrypt plaintext using AES-256-GCM with authenticated context (AAD).
+     */
+    fun encryptWithContext(
+        plaintext: String,
+        keyBase64: String,
+        vaultId: String,
+        entityId: String,
+        entityType: String,
+        version: Long,
+        userId: String
+    ): EncryptResult {
+        if (!isAvailable) {
+            return EncryptResult(null, null, null, "Native crypto library not available")
+        }
+        return nativeEncryptWithContext(
+            plaintext,
+            keyBase64,
+            vaultId,
+            entityId,
+            entityType,
+            version,
+            userId
+        )
+    }
+
+    /**
      * Decrypt ciphertext using AES-256-GCM.
      *
      * @param ciphertext Base64-encoded ciphertext
@@ -275,6 +301,16 @@ object NativeCrypto {
     private external fun nativeEncrypt(
         plaintext: String,
         keyBase64: String
+    ): EncryptResult
+
+    private external fun nativeEncryptWithContext(
+        plaintext: String,
+        keyBase64: String,
+        vaultId: String,
+        entityId: String,
+        entityType: String,
+        version: Long,
+        userId: String
     ): EncryptResult
 
     private external fun nativeDecrypt(

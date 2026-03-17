@@ -1,16 +1,12 @@
 import { Tabs } from "expo-router";
 import { useThemeColor } from "heroui-native";
 import { Home, Search, Shield, Tag } from "lucide-react-native";
-import { Platform, View } from "react-native";
+import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AccountSwitcher } from "../../src/components/account-switcher";
-import { useCredentialProviderSync } from "../../src/hooks/use-credential-provider-sync";
 
 export default function TabsLayout() {
 	const insets = useSafeAreaInsets();
-	const enableCredentialSync =
-		Platform.OS === "android" &&
-		process.env.EXPO_PUBLIC_DISABLE_ANDROID_CREDENTIAL_SYNC !== "true";
 	const [accent, foreground, surface, border, muted] = useThemeColor([
 		"accent",
 		"foreground",
@@ -19,14 +15,6 @@ export default function TabsLayout() {
 		"muted",
 		"background",
 	]);
-
-	// Sync vault credentials to Android Credential Manager for autofill
-	// This runs silently in the background when vault items change
-	useCredentialProviderSync({
-		enabled: enableCredentialSync,
-		autoSync: enableCredentialSync,
-		debounceMs: __DEV__ ? 5000 : 3000,
-	});
 
 	return (
 		<Tabs

@@ -61,6 +61,13 @@ class GetCredentialsActivity : FragmentActivity() {
         private const val TAG = "GetCredentialsActivity"
     }
 
+    private fun computeNextSignCount(currentCount: Int): Int {
+        val nowSeconds = (System.currentTimeMillis() / 1000L) + 1L
+        val fromStored = currentCount.toLong() + 1L
+        val next = maxOf(fromStored, nowSeconds)
+        return next.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
+
     private sealed class PasskeyCreateTarget {
         data class ExistingItem(
             val item: expo.modules.credentialprovider.storage.ItemEntity
@@ -606,6 +613,16 @@ class GetCredentialsActivity : FragmentActivity() {
                         ?: extractPasskeyRpIdFromOrigin(origin).takeIf { it.isNotBlank() }
                         ?: throw IllegalStateException("Missing rpId in get request")
 
+                    val allowedCredentialIds =
+                        PasskeyUtils.parseAllowCredentialIdsFromGetRequestJson(passkeyOption.requestJson)
+                    if (allowedCredentialIds.isNotEmpty()) {
+                        val containsSelected = allowedCredentialIds.contains(normalizedCredentialId)
+                        Log.d(
+                            TAG,
+                            "Passkey get allowCredentials parsed (count=${allowedCredentialIds.size}, containsSelected=$containsSelected, selected=$normalizedCredentialId)"
+                        )
+                    }
+
                     val clientDataHash = passkeyOption.clientDataHash
                         ?: throw IllegalStateException("Missing clientDataHash for assertion")
                     if (clientDataHash.isEmpty()) {
@@ -623,7 +640,7 @@ class GetCredentialsActivity : FragmentActivity() {
                             domainsEquivalent(it.rpId, rpId)
                     } ?: throw IllegalStateException("Passkey not found in selected item")
 
-                    val nextSignCount = targetPasskey.signCount + 1
+                    val nextSignCount = computeNextSignCount(targetPasskey.signCount)
                     val signResult = NativeCrypto.passkeySignAssertion(
                         privateKeyBase64 = targetPasskey.privateKey,
                         rpId = rpId,
@@ -664,7 +681,14 @@ class GetCredentialsActivity : FragmentActivity() {
                         )
                     }
 
-                    val encryptedItem = VaultDecryptor.encryptItemJson(itemDataJson, decryptedVaultKey)
+                    val encryptedItem = VaultDecryptor.encryptItemJson(
+                        updatedJson = itemDataJson,
+                        vaultKey = decryptedVaultKey,
+                        vaultId = item.vaultId,
+                        itemId = item.id,
+                        version = item.version,
+                        userId = item.lastModifiedBy?.takeIf { it.isNotBlank() } ?: item.userId
+                    )
                     val updatedItem = item.copy(
                         encryptedData = encryptedItem.ciphertext,
                         encryptionIv = encryptedItem.iv,
@@ -815,7 +839,14 @@ class GetCredentialsActivity : FragmentActivity() {
                 val itemDataJson = VaultDecryptor.decryptItemJson(targetItem, decryptedVaultKey)
                 appendStoredPasskeyPreservingExisting(itemDataJson, passkeyModel)
 
-                val encryptedItem = VaultDecryptor.encryptItemJson(itemDataJson, decryptedVaultKey)
+                val encryptedItem = VaultDecryptor.encryptItemJson(
+                    updatedJson = itemDataJson,
+                    vaultKey = decryptedVaultKey,
+                    vaultId = targetItem.vaultId,
+                    itemId = targetItem.id,
+                    version = targetItem.version,
+                    userId = targetItem.lastModifiedBy?.takeIf { it.isNotBlank() } ?: targetItem.userId
+                )
                 targetItem.copy(
                     encryptedData = encryptedItem.ciphertext,
                     encryptionIv = encryptedItem.iv,
@@ -834,7 +865,7 @@ class GetCredentialsActivity : FragmentActivity() {
                     )
                 }
             } else {
-                val tempItemId = "local_passkey_${UUID.randomUUID()}"
+                val tempItemId = UUID.randomUUID().toString()
                 val primaryUrl = "https://${requestedRpId}"
                 val itemDataJson = JSONObject().apply {
                     put("title", context.rpName.ifBlank { requestedRpId })
@@ -844,7 +875,14 @@ class GetCredentialsActivity : FragmentActivity() {
                 }
                 PasskeyUtils.writeStoredPasskeys(itemDataJson, listOf(passkeyModel))
 
-                val encryptedItem = VaultDecryptor.encryptItemJson(itemDataJson, decryptedVaultKey)
+                val encryptedItem = VaultDecryptor.encryptItemJson(
+                    updatedJson = itemDataJson,
+                    vaultKey = decryptedVaultKey,
+                    vaultId = vaultKeyEntity.vaultId,
+                    itemId = tempItemId,
+                    version = 1L,
+                    userId = vaultKeyEntity.userId
+                )
                 val createdItem = expo.modules.credentialprovider.storage.ItemEntity(
                     id = tempItemId,
                     vaultId = vaultKeyEntity.vaultId,

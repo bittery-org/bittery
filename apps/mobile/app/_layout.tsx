@@ -8,6 +8,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { HeroUINativeProvider, useThemeColor } from "heroui-native";
 import { useEffect, useState } from "react";
+import { Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import {
 	SafeAreaListener,
@@ -20,6 +21,7 @@ import {
 	BiometricAuthProvider,
 	useBiometricAuth,
 } from "../src/contexts/biometric-auth-context";
+import { useCredentialProviderSync } from "../src/hooks/use-credential-provider-sync";
 import { TRPCProvider } from "../src/lib/trpc";
 import { I18nProvider } from "../src/providers/i18n-provider";
 import { MobilePlatformProvider } from "../src/providers/platform-provider";
@@ -35,6 +37,16 @@ SplashScreen.preventAutoHideAsync();
 // Inner component that has access to BiometricAuthContext
 function AppContent() {
 	const { showAuthModal, dismissAuthRequirement } = useBiometricAuth();
+	const enableCredentialSync =
+		Platform.OS === "android" &&
+		process.env.EXPO_PUBLIC_DISABLE_ANDROID_CREDENTIAL_SYNC !== "true";
+
+	// Keep Android credential-provider data in sync regardless of active route.
+	useCredentialProviderSync({
+		enabled: enableCredentialSync,
+		autoSync: enableCredentialSync,
+		debounceMs: __DEV__ ? 5000 : 3000,
+	});
 
 	const [background] = useThemeColor(["background"]);
 

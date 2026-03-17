@@ -166,8 +166,23 @@ object VaultDecryptor {
     /**
      * Encrypt an updated item JSON object using the item's vault key.
      */
-    fun encryptItemJson(updatedJson: JSONObject, vaultKey: ByteArray): AesGcmCrypto.EncryptedData {
-        return AesGcmCrypto.encrypt(updatedJson.toString(), vaultKey)
+    fun encryptItemJson(
+        updatedJson: JSONObject,
+        vaultKey: ByteArray,
+        vaultId: String,
+        itemId: String,
+        version: Long,
+        userId: String
+    ): AesGcmCrypto.EncryptedData {
+        return AesGcmCrypto.encryptWithContext(
+            plaintext = updatedJson.toString(),
+            key = vaultKey,
+            vaultId = vaultId,
+            entityId = itemId,
+            entityType = "item",
+            version = version.coerceAtLeast(1L),
+            userId = userId
+        )
     }
 
     /**

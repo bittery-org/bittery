@@ -1172,6 +1172,91 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
 }
 
 #[no_mangle]
+pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_nativeEncryptWithContext<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    plaintext: JString<'a>,
+    key_base64: JString<'a>,
+    vault_id: JString<'a>,
+    entity_id: JString<'a>,
+    entity_type: JString<'a>,
+    version: jlong,
+    user_id: JString<'a>,
+) -> JObject<'a> {
+    let plaintext_str = match get_string(&mut env, plaintext) {
+        Some(s) => s,
+        None => {
+            return create_cp_encrypt_result(&mut env, None, None, None, Some("Invalid plaintext"))
+        }
+    };
+    let key_str = match get_string(&mut env, key_base64) {
+        Some(s) => s,
+        None => return create_cp_encrypt_result(&mut env, None, None, None, Some("Invalid key")),
+    };
+    let vault_id_str = match get_string(&mut env, vault_id) {
+        Some(s) => s,
+        None => {
+            return create_cp_encrypt_result(&mut env, None, None, None, Some("Invalid vault_id"))
+        }
+    };
+    let entity_id_str = match get_string(&mut env, entity_id) {
+        Some(s) => s,
+        None => {
+            return create_cp_encrypt_result(&mut env, None, None, None, Some("Invalid entity_id"))
+        }
+    };
+    let entity_type_str = match get_string(&mut env, entity_type) {
+        Some(s) => s,
+        None => {
+            return create_cp_encrypt_result(&mut env, None, None, None, Some("Invalid entity_type"))
+        }
+    };
+    let user_id_str = match get_string(&mut env, user_id) {
+        Some(s) => s,
+        None => {
+            return create_cp_encrypt_result(&mut env, None, None, None, Some("Invalid user_id"))
+        }
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::{encrypt_with_aad, AadContext};
+
+    let key = match STANDARD.decode(&key_str) {
+        Ok(k) => k,
+        Err(e) => {
+            return create_cp_encrypt_result(
+                &mut env,
+                None,
+                None,
+                None,
+                Some(&format!("Invalid key base64: {}", e)),
+            )
+        }
+    };
+
+    let context = AadContext {
+        vault_id: vault_id_str,
+        entity_id: entity_id_str,
+        entity_type: entity_type_str,
+        version: version as u64,
+        user_id: user_id_str,
+    };
+
+    match encrypt_with_aad(&plaintext_str, &key, &context) {
+        Ok(encrypted) => create_cp_encrypt_result(
+            &mut env,
+            Some(&encrypted.ciphertext),
+            Some(&encrypted.iv),
+            Some(&encrypted.algorithm),
+            None,
+        ),
+        Err(e) => create_cp_encrypt_result(&mut env, None, None, None, Some(&e.to_string())),
+    }
+}
+
+#[no_mangle]
 pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_nativeDecrypt<
     'a,
 >(

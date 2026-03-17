@@ -40,7 +40,9 @@ import { withUniwind } from "uniwind";
 import { DeviceSetupQrScanner } from "@/components/device-setup-qr-scanner";
 import { SafeAreaView } from "@/components/safe-area-view";
 import { defaultServerUrl } from "@/constants/server-url";
+import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
+import { arrayBufferToBase64 } from "../../src/lib/crypto";
 import { useServerUrl } from "../../src/lib/trpc";
 import { useI18n } from "../../src/providers/i18n-provider";
 import { type AccountMetadata, storage } from "../../src/services/storage";
@@ -208,6 +210,21 @@ export default function LoginScreen() {
 
 			// Refresh account context
 			await refreshAccounts();
+
+			// Keep native credential provider state in sync with the freshly unlocked account.
+			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
+				const muk = await storage.getMasterUnlockKey(normalizedEmail);
+				const sessionData = await storage.getStoredSessionData(normalizedEmail);
+				const autoLockTimeoutMs =
+					await storage.getAutoLockTimeoutOrDefault(normalizedEmail);
+				if (muk && sessionData?.userId) {
+					CredentialProvider.setMasterUnlockKey(
+						arrayBufferToBase64(muk),
+						sessionData.userId,
+						autoLockTimeoutMs,
+					);
+				}
+			}
 
 			// Navigate to vault
 			router.replace("/(vault)");

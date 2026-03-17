@@ -64,6 +64,48 @@ object AesGcmCrypto {
     }
 
     /**
+     * Encrypt plaintext using AES-256-GCM with authenticated context (AAD).
+     */
+    fun encryptWithContext(
+        plaintext: String,
+        key: ByteArray,
+        vaultId: String,
+        entityId: String,
+        entityType: String,
+        version: Long,
+        userId: String
+    ): EncryptedData {
+        require(key.size == KEY_LENGTH_BYTES) {
+            "Key must be $KEY_LENGTH_BYTES bytes, got ${key.size}"
+        }
+
+        if (!NativeCrypto.isAvailable) {
+            throw RuntimeException("Native crypto library not available")
+        }
+
+        val keyBase64 = Base64.encodeToString(key, Base64.NO_WRAP)
+        val result = NativeCrypto.encryptWithContext(
+            plaintext,
+            keyBase64,
+            vaultId,
+            entityId,
+            entityType,
+            version,
+            userId
+        )
+
+        if (!result.isSuccess || result.ciphertext == null || result.iv == null) {
+            throw RuntimeException("Encryption failed: ${result.error ?: "Unknown error"}")
+        }
+
+        return EncryptedData(
+            ciphertext = result.ciphertext,
+            iv = result.iv,
+            algorithm = result.algorithm ?: "AES-GCM-AAD-V1"
+        )
+    }
+
+    /**
      * Encrypt raw bytes using AES-256-GCM.
      *
      * @param plaintext The bytes to encrypt

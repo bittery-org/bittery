@@ -523,6 +523,7 @@ export default function UnlockScreen() {
 								<Select
 									value={selectedAccountValue}
 									onValueChange={handleAccountChange}
+									presentation="dialog"
 								>
 									<Select.Trigger>
 										<View className="flex-row items-center justify-center gap-3 rounded-2xl bg-surface px-4 py-3">

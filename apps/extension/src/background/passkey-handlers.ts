@@ -111,6 +111,16 @@ type CreateDecisionResolution =
 			reason: string;
 	  };
 
+const lastSignCountByCredentialId = new Map<string, number>();
+
+function computeNextSignCount(credentialId: string, knownCount: number): number {
+	const previousLocal = lastSignCountByCredentialId.get(credentialId) ?? 0;
+	const epochSeconds = Math.floor(Date.now() / 1000);
+	const next = Math.max(knownCount + 1, previousLocal + 1, epochSeconds);
+	lastSignCountByCredentialId.set(credentialId, next);
+	return next;
+}
+
 function getItemAccountEmail(item: LoginItemWithAccount): string | undefined {
 	return item.accountEmail ?? item.account?.email;
 }
@@ -1163,7 +1173,10 @@ export async function handlePasskeyGet(
 
 		const match = selection.match;
 		selectedMatch = match;
-		const nextSignCount = (match.passkey.signCount ?? 0) + 1;
+		const nextSignCount = computeNextSignCount(
+			match.passkey.credentialId,
+			match.passkey.signCount ?? 0,
+		);
 		stage = "signing";
 		const assertion = await signPasskeyAssertion({
 			privateKeyBase64: match.passkey.privateKey,

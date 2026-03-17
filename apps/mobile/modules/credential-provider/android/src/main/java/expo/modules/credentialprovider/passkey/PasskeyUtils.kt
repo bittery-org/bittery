@@ -236,6 +236,16 @@ object PasskeyUtils {
                 }
                 encodeBase64Url(bytes)
             }
+            is JSONObject -> {
+                // Handle common object wrappers from different request JSON serializers.
+                canonicalizeCredentialIdValue(value.opt("id"))
+                    ?: canonicalizeCredentialIdValue(value.opt("rawId"))
+                    ?: canonicalizeCredentialIdValue(value.opt("value"))
+                    ?: canonicalizeCredentialIdValue(value.opt("base64url"))
+                    ?: canonicalizeCredentialIdValue(value.opt("base64"))
+                    ?: canonicalizeCredentialIdValue(value.opt("bytes"))
+                    ?: canonicalizeCredentialIdValue(value.opt("data"))
+            }
             else -> null
         }
     }
