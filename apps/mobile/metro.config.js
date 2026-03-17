@@ -29,5 +29,5 @@ config.resolver.extraNodeModules = {
 module.exports = withUniwindConfig(config, {
 	cssEntryFile: "./global.css",
 	polyfills: { rem: 14 }, // Match NativeWind's default rem value
-	debug: true,
+	debug: false,
 });

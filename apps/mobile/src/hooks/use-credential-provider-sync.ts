@@ -1,6 +1,6 @@
 import { useAccountsInfo, useItems } from "@bittery/core/hooks";
 import { arrayBufferToBase64 } from "@bittery/shared/crypto";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, InteractionManager, Platform } from "react-native";
 import { storage } from "@/services/storage";
 import type {
@@ -11,6 +11,70 @@ import CredentialProvider from "../../modules/credential-provider";
 
 const MAX_PENDING_PASSKEY_ATTEMPTS = 5;
 const MAX_PENDING_PASSKEY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const CREDENTIAL_SYNC_DEBUG =
+	__DEV__ && process.env.EXPO_PUBLIC_CREDENTIAL_SYNC_DEBUG === "true";
+
+function hashString(input: string): number {
+	let hash = 0;
+	for (let i = 0; i < input.length; i++) {
+		hash = (hash * 31 + input.charCodeAt(i)) | 0;
+	}
+	return hash;
+}
+
+function buildLoginItemsSignature(
+	loginItems: Array<{
+		id: string;
+		vaultId: string;
+		updatedAt: string | number | Date;
+		version?: number;
+	}>,
+): string {
+	let idHash = 0;
+	let vaultHash = 0;
+	let updatedAtHash = 0;
+	let versionSum = 0;
+
+	for (const item of loginItems) {
+		idHash ^= hashString(item.id);
+		vaultHash ^= hashString(item.vaultId);
+		updatedAtHash ^= hashString(String(item.updatedAt));
+		versionSum += item.version ?? 1;
+	}
+
+	return `${loginItems.length}:${idHash}:${vaultHash}:${updatedAtHash}:${versionSum}`;
+}
+
+function buildVaultKeysSignature(
+	vaultKeys: Array<{
+		vaultId: string;
+		encryptedVaultKey: string;
+		role: string;
+	}>,
+): string {
+	let vaultIdHash = 0;
+	let keyHash = 0;
+	let roleHash = 0;
+
+	for (const vaultKey of vaultKeys) {
+		vaultIdHash ^= hashString(vaultKey.vaultId);
+		keyHash ^= hashString(vaultKey.encryptedVaultKey);
+		roleHash ^= hashString(vaultKey.role);
+	}
+
+	return `${vaultKeys.length}:${vaultIdHash}:${keyHash}:${roleHash}`;
+}
+
+function debugLog(message: string, payload?: unknown) {
+	if (!CREDENTIAL_SYNC_DEBUG) {
+		return;
+	}
+	if (typeof payload === "undefined") {
+		console.log(message);
+		return;
+	}
+	console.log(message, payload);
+}
 
 /**
  * Extracts the domain from a URL string
@@ -67,8 +131,8 @@ export function useCredentialProviderSync(
 		items,
 		isLoading: isLoadingItems,
 		refetch: refetchItems,
-	} = useItems();
-	const { accountsInfo, isAllAccountsMode } = useAccountsInfo();
+	} = useItems({ enabled });
+	const { accountsInfo, isAllAccountsMode } = useAccountsInfo({ enabled });
 
 	const [isSyncing, setIsSyncing] = useState(false);
 	const [lastSyncResult, setLastSyncResult] = useState<{
@@ -81,11 +145,44 @@ export function useCredentialProviderSync(
 
 	const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const lastItemsHashRef = useRef<string>("");
+	const syncInFlightRef = useRef(false);
+	const pendingSyncRef = useRef(false);
+	const lastVaultSyncSignatureByAccountRef = useRef<Map<string, string>>(
+		new Map(),
+	);
+
+	const loginItems = useMemo(
+		() => items.filter((item) => item.category === "login"),
+		[items],
+	);
+
+	const loginItemsByAccountEmail = useMemo(() => {
+		const byEmail = new Map<string, typeof loginItems>();
+		for (const item of loginItems) {
+			const accountEmail = item.account?.email?.toLowerCase();
+			if (!accountEmail) {
+				continue;
+			}
+			const existing = byEmail.get(accountEmail);
+			if (existing) {
+				existing.push(item);
+			} else {
+				byEmail.set(accountEmail, [item]);
+			}
+		}
+		return byEmail;
+	}, [loginItems]);
 
 	// Check if credential provider and biometric/device auth are available
 	useEffect(() => {
+		if (!enabled) {
+			setIsAvailable(false);
+			setIsBiometricAvailable(false);
+			return;
+		}
+
 		if (Platform.OS !== "android") {
-			console.log("[CredentialProviderSync] Not Android, skipping");
+			debugLog("[CredentialProviderSync] Not Android, skipping");
 			setIsAvailable(false);
 			setIsBiometricAvailable(false);
 			return;
@@ -95,7 +192,7 @@ export function useCredentialProviderSync(
 		const biometricAvailable = CredentialProvider.isBiometricAvailable();
 		const keyAvailable = CredentialProvider.isKeyAvailable();
 
-		console.log("[CredentialProviderSync] Availability check:", {
+		debugLog("[CredentialProviderSync] Availability check:", {
 			credentialProviderAvailable,
 			biometricAvailable,
 			keyAvailable,
@@ -104,14 +201,12 @@ export function useCredentialProviderSync(
 
 		setIsAvailable(credentialProviderAvailable);
 		setIsBiometricAvailable(biometricAvailable);
-	}, []);
+	}, [enabled]);
 
 	/**
 	 * Extract credentials from decrypted login items
 	 */
 	const extractCredentials = useCallback((): SaveCredentialParams[] => {
-		const loginItems = items.filter((item) => item.category === "login");
-
 		const credentials: SaveCredentialParams[] = [];
 
 		for (const item of loginItems) {
@@ -155,18 +250,18 @@ export function useCredentialProviderSync(
 		}
 
 		return credentials;
-	}, [items]);
+	}, [loginItems]);
 
 	/**
 	 * Ensure the MUK is set in the native VaultStateManager.
 	 * This enables on-demand decryption in the credential provider service.
 	 */
 	const ensureNativeMukSet = useCallback(async () => {
-		if (Platform.OS !== "android" || !isAvailable) return;
+		if (!enabled || Platform.OS !== "android" || !isAvailable) return;
 
 		try {
 			const unlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
-			console.log(
+			debugLog(
 				"[CredentialProviderSync] ensureNativeMukSet: unlockedEmails=",
 				unlockedEmails,
 			);
@@ -182,7 +277,7 @@ export function useCredentialProviderSync(
 				const sessionData = await storage.getStoredSessionData(email);
 				const autoLockTimeoutMs =
 					await storage.getAutoLockTimeoutOrDefault(email);
-				console.log(
+				debugLog(
 					`[CredentialProviderSync] ensureNativeMukSet: email=${email}, hasMuk=${!!muk}, hasSessionData=${!!sessionData}, userId=${sessionData?.userId ?? "null"}`,
 				);
 				if (muk && sessionData?.userId) {
@@ -192,7 +287,7 @@ export function useCredentialProviderSync(
 						sessionData.userId,
 						autoLockTimeoutMs,
 					);
-					console.log(
+					debugLog(
 						`[CredentialProviderSync] ensureNativeMukSet: Set native MUK for userId=${sessionData.userId}`,
 					);
 				} else {
@@ -202,11 +297,11 @@ export function useCredentialProviderSync(
 				}
 			}
 
-			console.log("[CredentialProviderSync] Native MUKs set from RN storage");
+			debugLog("[CredentialProviderSync] Native MUKs set from RN storage");
 		} catch (err) {
 			console.warn("[CredentialProviderSync] Failed to set native MUK:", err);
 		}
-	}, [isAvailable]);
+	}, [enabled, isAvailable]);
 
 	/**
 	 * Sync vault data (vault keys + encrypted items) to native database.
@@ -220,10 +315,10 @@ export function useCredentialProviderSync(
 		items: number;
 		domains: number;
 	} | null> => {
-		console.log("[CredentialProviderSync] syncVaultData() called");
+		debugLog("[CredentialProviderSync] syncVaultData() called");
 
-		if (!isAvailable || Platform.OS !== "android") {
-			console.log("[CredentialProviderSync] Vault sync skipped: not available");
+		if (!enabled || !isAvailable || Platform.OS !== "android") {
+			debugLog("[CredentialProviderSync] Vault sync skipped: not available");
 			return null;
 		}
 
@@ -243,25 +338,37 @@ export function useCredentialProviderSync(
 				items: 0,
 				domains: 0,
 			};
+			const seenAccountIds = new Set<string>();
 
 			for (const account of accountsInfo) {
+				seenAccountIds.add(account.userId);
 				const vaultKeys = await storage.getVaultKeys(account.email);
 				if (!vaultKeys || vaultKeys.length === 0) {
+					lastVaultSyncSignatureByAccountRef.current.delete(account.userId);
 					continue;
 				}
 
 				const vaultIdsWithKeys = new Set(vaultKeys.map((vk) => vk.vaultId));
+				const accountEmail = account.email.toLowerCase();
+				const sourceItems = isAllAccountsMode
+					? (loginItemsByAccountEmail.get(accountEmail) ?? [])
+					: loginItems;
 
-				const loginItems = items.filter((item) => {
-					if (item.category !== "login") return false;
-					if (!vaultIdsWithKeys.has(item.vaultId)) return false;
-					if (!isAllAccountsMode) return true;
-					return (
-						item.account?.email?.toLowerCase() === account.email.toLowerCase()
-					);
-				});
+				const accountLoginItems = sourceItems.filter((item) =>
+					vaultIdsWithKeys.has(item.vaultId),
+				);
 
-				const itemsData = loginItems
+				const vaultKeysSignature = buildVaultKeysSignature(vaultKeys);
+				const accountItemsSignature = buildLoginItemsSignature(accountLoginItems);
+				const nextSignature = `${vaultKeysSignature}|${accountItemsSignature}`;
+				const previousSignature =
+					lastVaultSyncSignatureByAccountRef.current.get(account.userId);
+
+				if (previousSignature === nextSignature) {
+					continue;
+				}
+
+				const itemsData = accountLoginItems
 					.filter((item) => item._encrypted)
 					.map((item) => {
 						const urlSet = new Set<string>();
@@ -361,19 +468,39 @@ export function useCredentialProviderSync(
 				const result = await CredentialProvider.syncVaultData(
 					JSON.stringify(syncData),
 				);
+				lastVaultSyncSignatureByAccountRef.current.set(
+					account.userId,
+					nextSignature,
+				);
 
 				totals.vaultKeys += result?.vaultKeys ?? vaultKeysData.length;
 				totals.items += result?.items ?? itemsData.length;
 				totals.domains += result?.domains ?? 0;
 			}
 
-			console.log("[CredentialProviderSync] Vault sync totals:", totals);
+			for (const accountId of Array.from(
+				lastVaultSyncSignatureByAccountRef.current.keys(),
+			)) {
+				if (!seenAccountIds.has(accountId)) {
+					lastVaultSyncSignatureByAccountRef.current.delete(accountId);
+				}
+			}
+
+			debugLog("[CredentialProviderSync] Vault sync totals:", totals);
 			return totals;
 		} catch (err) {
 			console.error("[CredentialProviderSync] Vault sync failed:", err);
 			return null;
 		}
-	}, [accountsInfo, ensureNativeMukSet, isAvailable, isAllAccountsMode, items]);
+	}, [
+		enabled,
+		accountsInfo,
+		ensureNativeMukSet,
+		isAvailable,
+		isAllAccountsMode,
+		loginItems,
+		loginItemsByAccountEmail,
+	]);
 
 	/**
 	 * Flush provider-side passkey mutations to server before inbound vault sync.
@@ -384,7 +511,7 @@ export function useCredentialProviderSync(
 		failed: number;
 		discarded: number;
 	}> => {
-		if (!isAvailable || Platform.OS !== "android") {
+		if (!enabled || !isAvailable || Platform.OS !== "android") {
 			return { applied: 0, failed: 0, discarded: 0 };
 		}
 
@@ -469,7 +596,7 @@ export function useCredentialProviderSync(
 
 			const account = accountByUserId.get(mutation.userId);
 			if (!account) {
-				console.log(
+				debugLog(
 					"[CredentialProviderSync] Skipping passkey mutation flush (account locked or missing):",
 					mutation.id,
 				);
@@ -539,7 +666,7 @@ export function useCredentialProviderSync(
 			),
 			discarded: discardedIds.length,
 		};
-	}, [accountsInfo, isAvailable]);
+	}, [enabled, accountsInfo, isAvailable]);
 
 	const flushPendingPasskeyMutationsAndRefresh = useCallback(async () => {
 		const result = await flushPendingPasskeyMutations();
@@ -561,18 +688,18 @@ export function useCredentialProviderSync(
 	 * This syncs decrypted credentials to the credential provider storage.
 	 * The native side re-encrypts passwords with BiometricKeyManager.
 	 */
-	const sync = useCallback(async (): Promise<{
+	const syncOnce = useCallback(async (): Promise<{
 		synced: number;
 		deleted: number;
 	} | null> => {
-		console.log("[CredentialProviderSync] sync() called", {
+		debugLog("[CredentialProviderSync] sync() called", {
 			isAvailable,
 			isBiometricAvailable,
 			platform: Platform.OS,
 		});
 
-		if (!isAvailable || Platform.OS !== "android") {
-			console.log(
+		if (!enabled || !isAvailable || Platform.OS !== "android") {
+			debugLog(
 				"[CredentialProviderSync] Sync skipped: not available or not Android",
 			);
 			return null;
@@ -599,17 +726,17 @@ export function useCredentialProviderSync(
 
 			const flushResult = await flushPendingPasskeyMutationsAndRefresh();
 			if (flushResult.applied > 0 || flushResult.failed > 0) {
-				console.log(
+				debugLog(
 					"[CredentialProviderSync] Flushed pending passkey mutations:",
 					flushResult,
 				);
 			}
 
 			// Sync vault data (new unified storage approach)
-			console.log("[CredentialProviderSync] Starting vault data sync...");
+			debugLog("[CredentialProviderSync] Starting vault data sync...");
 			const vaultResult = await syncVaultData();
 			if (vaultResult) {
-				console.log(
+				debugLog(
 					"[CredentialProviderSync] Vault sync complete:",
 					vaultResult,
 				);
@@ -627,16 +754,16 @@ export function useCredentialProviderSync(
 			const credentials = extractCredentials();
 
 			if (credentials.length === 0) {
-				console.log("[CredentialProviderSync] No legacy credentials to sync");
+				debugLog("[CredentialProviderSync] No legacy credentials to sync");
 				setLastSyncResult({ synced: 0, deleted: 0 });
 				return { synced: 0, deleted: 0 };
 			}
 
-			console.log(
+			debugLog(
 				"[CredentialProviderSync] Calling CredentialProvider.syncCredentials...",
 			);
 			const result = await CredentialProvider.syncCredentials(credentials);
-			console.log("[CredentialProviderSync] Legacy sync result:", result);
+			debugLog("[CredentialProviderSync] Legacy sync result:", result);
 
 			setLastSyncResult(result);
 			return result;
@@ -650,6 +777,7 @@ export function useCredentialProviderSync(
 			setIsSyncing(false);
 		}
 	}, [
+		enabled,
 		isAvailable,
 		isBiometricAvailable,
 		extractCredentials,
@@ -658,10 +786,34 @@ export function useCredentialProviderSync(
 		waitForInteractionsToFinish,
 	]);
 
+	const sync = useCallback(async (): Promise<{
+		synced: number;
+		deleted: number;
+	} | null> => {
+		if (syncInFlightRef.current) {
+			pendingSyncRef.current = true;
+			return null;
+		}
+
+		syncInFlightRef.current = true;
+		let latestResult: { synced: number; deleted: number } | null = null;
+
+		try {
+			do {
+				pendingSyncRef.current = false;
+				latestResult = await syncOnce();
+			} while (pendingSyncRef.current);
+
+			return latestResult;
+		} finally {
+			syncInFlightRef.current = false;
+		}
+	}, [syncOnce]);
+
 	// Flush provider-generated passkey mutations while app is running.
 	// This avoids requiring an app restart before passkey-created items appear and sync remotely.
 	useEffect(() => {
-		if (!isAvailable || Platform.OS !== "android") {
+		if (!enabled || !isAvailable || Platform.OS !== "android") {
 			return;
 		}
 
@@ -674,7 +826,7 @@ export function useCredentialProviderSync(
 			try {
 				const result = await flushPendingPasskeyMutationsAndRefresh();
 				if (result.applied > 0 || result.failed > 0) {
-					console.log(
+					debugLog(
 						`[CredentialProviderSync] Background passkey flush (${reason}):`,
 						result,
 					);
@@ -700,41 +852,36 @@ export function useCredentialProviderSync(
 			},
 		);
 
+		const intervalMs = __DEV__ ? 120000 : 60000;
 		const intervalId = setInterval(() => {
 			void flushNow("interval");
-		}, 60000);
+		}, intervalMs);
 
 		return () => {
 			disposed = true;
 			appStateSubscription.remove();
 			clearInterval(intervalId);
 		};
-	}, [isAvailable, flushPendingPasskeyMutationsAndRefresh]);
+	}, [enabled, isAvailable, flushPendingPasskeyMutationsAndRefresh]);
 
 	/**
 	 * Calculate a hash of items to detect changes
 	 */
 	const calculateItemsHash = useCallback((): string => {
-		const loginItems = items.filter((item) => item.category === "login");
-		// Keep this lightweight; updatedAt/version covers credential content updates.
-		return loginItems
-			.map(
-				(item) =>
-					`${item.id}:${item.account?.email ?? ""}:${item.updatedAt}:${item.version ?? 1}`,
-			)
-			.join("|");
-	}, [items]);
+		return buildLoginItemsSignature(loginItems);
+	}, [loginItems]);
 
 	// Auto-sync when items change (debounced)
 	useEffect(() => {
-		console.log("[CredentialProviderSync] Auto-sync effect triggered", {
+		debugLog("[CredentialProviderSync] Auto-sync effect triggered", {
 			enabled,
 			autoSync,
 			isAvailable,
 			isBiometricAvailable,
 			isLoadingItems,
 			platform: Platform.OS,
-			itemCount: items.length,
+			itemCount: loginItems.length,
+			appState: AppState.currentState,
 		});
 
 		if (
@@ -743,9 +890,10 @@ export function useCredentialProviderSync(
 			!isAvailable ||
 			!isBiometricAvailable ||
 			isLoadingItems ||
+			AppState.currentState !== "active" ||
 			Platform.OS !== "android"
 		) {
-			console.log(
+			debugLog(
 				"[CredentialProviderSync] Auto-sync skipped due to conditions",
 			);
 			return;
@@ -755,13 +903,13 @@ export function useCredentialProviderSync(
 
 		// Skip if items haven't changed
 		if (currentHash === lastItemsHashRef.current) {
-			console.log(
+			debugLog(
 				"[CredentialProviderSync] Items haven't changed, skipping sync",
 			);
 			return;
 		}
 
-		console.log("[CredentialProviderSync] Items changed, scheduling sync...");
+		debugLog("[CredentialProviderSync] Items changed, scheduling sync...");
 		lastItemsHashRef.current = currentHash;
 
 		// Clear existing timer
@@ -771,7 +919,7 @@ export function useCredentialProviderSync(
 
 		// Set debounced sync
 		debounceTimerRef.current = setTimeout(() => {
-			console.log(
+			debugLog(
 				"[CredentialProviderSync] Debounce timer fired, starting sync",
 			);
 			sync();
@@ -791,7 +939,7 @@ export function useCredentialProviderSync(
 		calculateItemsHash,
 		sync,
 		debounceMs,
-		items.length,
+		loginItems.length,
 	]);
 
 	return {

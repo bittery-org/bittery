@@ -8,6 +8,9 @@ import { useCredentialProviderSync } from "../../src/hooks/use-credential-provid
 
 export default function TabsLayout() {
 	const insets = useSafeAreaInsets();
+	const enableCredentialSync =
+		Platform.OS === "android" &&
+		process.env.EXPO_PUBLIC_DISABLE_ANDROID_CREDENTIAL_SYNC !== "true";
 	const [accent, foreground, surface, border, muted] = useThemeColor([
 		"accent",
 		"foreground",
@@ -20,9 +23,9 @@ export default function TabsLayout() {
 	// Sync vault credentials to Android Credential Manager for autofill
 	// This runs silently in the background when vault items change
 	useCredentialProviderSync({
-		enabled: Platform.OS === "android",
-		autoSync: true,
-		debounceMs: 3000, // Wait 3s after changes before syncing
+		enabled: enableCredentialSync,
+		autoSync: enableCredentialSync,
+		debounceMs: __DEV__ ? 5000 : 3000,
 	});
 
 	return (

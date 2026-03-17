@@ -4,10 +4,12 @@
 	"version": "0.1.0",
 	"main": "expo-router/entry",
 	"scripts": {
-		"dev": "expo run:android --no-bundler && expo start --clear",
+		"dev": "echo 'expo run:android --no-bundler && expo start --clear'",
 		"dev:build": "expo prebuild && expo run:android --no-bundler",
 		"dev:clear": "expo start --clear",
 		"android": "expo run:android",
+		"android:release:build": "cd android && ./gradlew assembleRelease",
+		"android:release:install": "adb install -r android/app/build/outputs/apk/release/app-release.apk",
 		"ports": "adb reverse tcp:3000 tcp:3000 && adb reverse tcp:8081 tcp:8081",
 		"ios": "expo run:ios",
 		"build:eas": "eas build",
@@ -75,6 +77,7 @@
 		"@bittery/config": "workspace:*",
 		"@types/react": "catalog:",
 		"@types/react-dom": "catalog:",
+		"babel-preset-expo": "^54.0.10",
 		"typescript": "~5.9.3"
 	}
 }

@@ -1,8 +1,4 @@
-import type {
-	DecryptedItemWithContext,
-	TotpAlgorithm,
-	TotpDigits,
-} from "@bittery/shared/types";
+import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { memo } from "react";
 import { Card, PressableFeedback } from "heroui-native";
 import { Star } from "lucide-react-native";
@@ -10,7 +6,6 @@ import { View } from "react-native";
 import { withUniwind } from "uniwind";
 
 import { ItemIcon } from "./item-icon";
-import { TotpDisplay } from "./totp-display";
 
 // Create styled icon components
 const StyledStar = withUniwind(Star);
@@ -25,13 +20,6 @@ interface ItemListItemProps {
 	showVaultBadge?: boolean;
 	onPress: () => void;
 	rightContent?: React.ReactNode;
-	/** TOTP fields for showing live codes in list */
-	totpSecret?: string;
-	totpAlgorithm?: TotpAlgorithm;
-	totpDigits?: TotpDigits;
-	totpPeriod?: number;
-	/** Whether to show inline TOTP code (for TOTP category items or login items with TOTP) */
-	showInlineTotp?: boolean;
 	/** Position in the list for rounded corners */
 	isFirstInSection?: boolean;
 	isLastInSection?: boolean;
@@ -43,21 +31,11 @@ export const ItemListItem = memo(function ItemListItem({
 	showVaultBadge: _showVaultBadge = false,
 	onPress,
 	rightContent,
-	totpSecret,
-	totpAlgorithm,
-	totpDigits,
-	totpPeriod,
-	showInlineTotp = false,
 	isFirstInSection = false,
 	isLastInSection = false,
 }: ItemListItemProps) {
-	// Show TOTP if item has TOTP secret and showInlineTotp is enabled
-	const shouldShowTotp = showInlineTotp && totpSecret;
-
 	// Get subtitle based on category
 	const getSubtitle = () => {
-		// If showing inline TOTP, don't show subtitle text for TOTP items
-		if (shouldShowTotp && item.category === "totp") return null;
 		if (item.category === "login" && item.username) return item.username;
 		if (item.category === "login" && item.url) return item.url;
 		if (item.category === "credit-card") return "Credit Card";
@@ -114,18 +92,6 @@ export const ItemListItem = memo(function ItemListItem({
 							<Card.Description className="text-xs" numberOfLines={1}>
 								{subtitle}
 							</Card.Description>
-						)}
-						{/* Inline TOTP display for TOTP items or login items with TOTP */}
-						{shouldShowTotp && (
-							<View className="mt-0.5">
-								<TotpDisplay
-									totpSecret={totpSecret}
-									totpAlgorithm={totpAlgorithm}
-									totpDigits={totpDigits}
-									totpPeriod={totpPeriod}
-									inline
-								/>
-							</View>
 						)}
 					</View>
 

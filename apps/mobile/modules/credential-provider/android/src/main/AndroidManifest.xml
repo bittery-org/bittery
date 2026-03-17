@@ -26,7 +26,6 @@
             android:enabled="true"
             android:exported="true"
             android:label="Bittery"
-            android:icon="@mipmap/ic_launcher"
             android:permission="android.permission.BIND_CREDENTIAL_PROVIDER_SERVICE"
             tools:targetApi="upside_down_cake">
             <intent-filter>
