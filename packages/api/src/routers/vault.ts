@@ -1416,7 +1416,10 @@ export const vaultRouter = router({
 				throw new Error("Access denied");
 			}
 
-			const newVersion = (existingItem.version || 1) + 1;
+			// Do not increment version here — the encrypted payload is unchanged.
+			// Version is part of the AEAD context, so bumping it without re-encrypting
+			// causes a version/ciphertext mismatch that forces unnecessary fallback decryption.
+			const currentVersion = existingItem.version || 1;
 
 			let broadcast: SyncBroadcastPayload;
 			await db.transaction(async (tx) => {
@@ -1424,7 +1427,6 @@ export const vaultRouter = router({
 					.update(item)
 					.set({
 						deletedAt: new Date(),
-						version: newVersion,
 						lastModifiedBy: ctx.session.userId,
 					})
 					.where(eq(item.id, input.itemId));
@@ -1437,7 +1439,7 @@ export const vaultRouter = router({
 						vaultId: existingItem.vaultId,
 						userId: ctx.session.userId,
 						clientId: input.clientId,
-						version: newVersion,
+						version: currentVersion,
 					},
 					tx,
 					ctx.clientId,
@@ -1454,7 +1456,7 @@ export const vaultRouter = router({
 				entityId: input.itemId,
 				metadata: {
 					vaultId: existingItem.vaultId,
-					version: newVersion,
+					version: currentVersion,
 				},
 			});
 
@@ -1532,7 +1534,10 @@ export const vaultRouter = router({
 				throw new Error("Access denied");
 			}
 
-			const newVersion = (existingItem.version || 1) + 1;
+			// Do not increment version here — the encrypted payload is unchanged.
+			// Version is part of the AEAD context, so bumping it without re-encrypting
+			// causes a version/ciphertext mismatch that forces unnecessary fallback decryption.
+			const currentVersion = existingItem.version || 1;
 
 			let broadcast: SyncBroadcastPayload;
 			await db.transaction(async (tx) => {
@@ -1541,7 +1546,6 @@ export const vaultRouter = router({
 					.update(item)
 					.set({
 						deletedAt: null,
-						version: newVersion,
 						lastModifiedBy: ctx.session.userId,
 						updatedAt: new Date(),
 					})
@@ -1555,7 +1559,7 @@ export const vaultRouter = router({
 						vaultId: existingItem.vaultId,
 						userId: ctx.session.userId,
 						clientId: input.clientId,
-						version: newVersion,
+						version: currentVersion,
 					},
 					tx,
 					ctx.clientId,
@@ -1572,7 +1576,7 @@ export const vaultRouter = router({
 				entityId: input.itemId,
 				metadata: {
 					vaultId: existingItem.vaultId,
-					version: newVersion,
+					version: currentVersion,
 				},
 			});
 

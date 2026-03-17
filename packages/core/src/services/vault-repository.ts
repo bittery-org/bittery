@@ -531,7 +531,9 @@ export class VaultRepository {
 			...existing,
 			deletedAt: now,
 			updatedAt: now,
-			version: existing.version + 1,
+			// Do not increment version — the encrypted payload is unchanged.
+			// Version is part of the AEAD context; bumping it without re-encrypting
+			// causes a stored-version/ciphertext mismatch during decryption.
 		};
 		this.items.set(itemId, next);
 		await this.persistItem(this.toCachedItem(next));
@@ -548,7 +550,9 @@ export class VaultRepository {
 			...existing,
 			deletedAt: null,
 			updatedAt: now,
-			version: existing.version + 1,
+			// Do not increment version — the encrypted payload is unchanged.
+			// Version is part of the AEAD context; bumping it without re-encrypting
+			// causes a stored-version/ciphertext mismatch during decryption.
 		};
 		this.items.set(itemId, next);
 		await this.persistItem(this.toCachedItem(next));

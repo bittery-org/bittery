@@ -105,11 +105,11 @@ This is intentionally broader than the current roadmap. The goal is to capture t
 - Import
 - Team Management
 - Sharing
+- Export
+- Device Setup (Track A — UX polish: banner, post-scan simplified view, desktop step instructions, web dialog)
 
 ### Marked in progress on the roadmap page
 
-- Device Setup
-- Export
 - Security Audit
 - Internationalization
 
@@ -194,6 +194,8 @@ Why it matters:
 - the Secret Key model is more secure but adds friction
 - poor device onboarding can make the product feel harder than competitors
 - QR-based or deep-link based setup can become a strong differentiator if polished
+
+**Status: Track A done.** Desktop (corrected description, step instructions, better empty state), mobile (prominent banner, focused post-scan view, full i18n), and web (new "Set up another device" dialog) are all shipped. Track B ("Login with Device" — passwordless approval from an existing authenticated device) remains a future sprint.
 
 ### 5. Security audit completion and publishable summary
 
@@ -315,8 +317,8 @@ If the goal is to choose what to add to the roadmap next, this ordering looks de
 ### Tier 1: launch-critical
 
 - iOS autofill
-- export completion and polish
-- device setup polish
+- ~~export completion and polish~~ (done)
+- ~~device setup polish~~ (done — Track A shipped)
 - security audit completion
 - recovery UX hardening
 - password health essentials

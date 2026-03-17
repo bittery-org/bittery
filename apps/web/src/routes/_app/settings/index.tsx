@@ -42,6 +42,7 @@ import { AutoLockSettings } from "@/components/settings/auto-lock-settings";
 import { ChangeEmailDialog } from "@/components/settings/change-email-dialog";
 import { ChangePasswordDialog } from "@/components/settings/change-password-dialog";
 import { DeleteAccountDialog } from "@/components/settings/delete-account-dialog";
+import { WebDeviceSetupDialog } from "@/components/settings/device-setup-dialog";
 import { DeviceManagement } from "@/components/settings/device-management";
 import { RegenerateRecoveryKeyDialog } from "@/components/settings/regenerate-recovery-key-dialog";
 import { RegenerateSecretKeyDialog } from "@/components/settings/regenerate-secret-key-dialog";
@@ -68,6 +69,7 @@ function SettingsPage() {
 	const userQuery = useQuery(trpc.auth.me.queryOptions());
 	const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
 	const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+	const [isDeviceSetupDialogOpen, setIsDeviceSetupDialogOpen] = useState(false);
 	const onboardingImport = useImportOnboardingState();
 
 	return (
@@ -330,9 +332,18 @@ function SettingsPage() {
 							<h2 className="font-semibold text-lg tracking-tight">
 								{m.settings_devices_heading()}
 							</h2>
-							<p className="text-muted-foreground text-sm">
-								{m.settings_devices_description()}
-							</p>
+							<div className="flex items-center gap-3">
+								<p className="text-muted-foreground text-sm">
+									{m.settings_devices_description()}
+								</p>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setIsDeviceSetupDialogOpen(true)}
+								>
+									{m.settings_devices_action_setup_another()}
+								</Button>
+							</div>
 						</div>
 						<DeviceManagement />
 					</div>
@@ -515,6 +526,10 @@ function SettingsPage() {
 						onboardingImport.markCompleted();
 					}
 				}}
+			/>
+			<WebDeviceSetupDialog
+				open={isDeviceSetupDialogOpen}
+				onOpenChange={setIsDeviceSetupDialogOpen}
 			/>
 		</div>
 	);

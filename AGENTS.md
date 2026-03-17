@@ -12,5 +12,6 @@ This file provides guidance to agents when working with code in this repository.
 - Never create database migrations manually, edit the schema and run db:generate, you can edit the generated migration file if you need to make adjustments, but never create one from scratch.
 - In React, try to not use useEffect unless you have to, we want to keep our components as simple as possible, if you find yourself needing to use useEffect, try to find a way to do it without it first.
 - If you notice a useEffect that can be refactored to not use useEffect, please do so!
-- We enforce strict i18n, never hardcode any user facing text, if you need to add a new text, add it under `packages/i18n/messages/en.json`.
+- We enforce strict i18n, never hardcode any user facing text, if you need to add a new text, add it to every language .json file inside `packages/i18n/messages/*.json`.
+- After making changes to the translation files make sure to run `pnpm i18n:generate` to regenerate the paraglide files.
 - If you need to fix a critical bug, always try to write an automated test for it if possible first & fix the bug after, this way we can ensure the bug is fixed and doesn't regress in the future.

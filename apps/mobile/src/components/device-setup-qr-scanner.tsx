@@ -13,6 +13,7 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+import { useI18n } from "@/providers/i18n-provider";
 
 interface DeviceSetupQrScannerProps {
 	visible: boolean;
@@ -25,6 +26,7 @@ export function DeviceSetupQrScanner({
 	onClose,
 	onScanSuccess,
 }: DeviceSetupQrScannerProps) {
+	const { m } = useI18n();
 	const [permission, requestPermission] = useCameraPermissions();
 	const [torchEnabled, setTorchEnabled] = useState(false);
 	const [isProcessing, setIsProcessing] = useState(false);
@@ -39,15 +41,15 @@ export function DeviceSetupQrScanner({
 
 				if (!parsed.secretKey) {
 					Alert.alert(
-						"Invalid setup QR code",
-						"This QR code does not contain a Secret Key. Use the setup link instead.",
+						m.device_setup_scanner_invalid_qr_title(),
+						m.device_setup_scanner_invalid_qr_no_secret_key(),
 						[
 							{
-								text: "Try Again",
+								text: m.device_setup_scanner_try_again(),
 								onPress: () => setIsProcessing(false),
 							},
 							{
-								text: "Cancel",
+								text: m.device_setup_scanner_cancel(),
 								style: "cancel",
 								onPress: () => {
 									setIsProcessing(false);
@@ -65,15 +67,15 @@ export function DeviceSetupQrScanner({
 			} catch (error) {
 				console.error("Error parsing setup QR code:", error);
 				Alert.alert(
-					"Invalid setup QR code",
-					"Could not read this code. Make sure you scan a Bittery device setup QR.",
+					m.device_setup_scanner_invalid_qr_title(),
+					m.device_setup_scanner_invalid_qr_error(),
 					[
 						{
-							text: "Try Again",
+							text: m.device_setup_scanner_try_again(),
 							onPress: () => setIsProcessing(false),
 						},
 						{
-							text: "Cancel",
+							text: m.device_setup_scanner_cancel(),
 							style: "cancel",
 							onPress: () => {
 								setIsProcessing(false);
@@ -84,7 +86,7 @@ export function DeviceSetupQrScanner({
 				);
 			}
 		},
-		[isProcessing, onClose, onScanSuccess],
+		[isProcessing, m, onClose, onScanSuccess],
 	);
 
 	const handleRequestClose = () => {
@@ -102,7 +104,7 @@ export function DeviceSetupQrScanner({
 				onRequestClose={handleRequestClose}
 			>
 				<View className="flex-1 items-center justify-center bg-background">
-					<Text className="text-foreground">Loading camera...</Text>
+					<Text className="text-foreground">{m.device_setup_scanner_loading()}</Text>
 				</View>
 			</Modal>
 		);
@@ -121,7 +123,7 @@ export function DeviceSetupQrScanner({
 						<View className="flex-row items-center">
 							<Camera size={24} color="#6b7280" />
 							<Text className="ml-2 font-bold text-foreground text-xl">
-								Scan Setup QR
+							{m.device_setup_scanner_title()}
 							</Text>
 						</View>
 						<TouchableOpacity
@@ -137,17 +139,17 @@ export function DeviceSetupQrScanner({
 							<Camera size={40} color="#6b7280" />
 						</View>
 						<Text className="mb-4 text-center font-semibold text-foreground text-lg">
-							Camera Permission Required
+							{m.device_setup_scanner_permission_title()}
 						</Text>
 						<Text className="mb-6 text-center text-muted">
-							To scan your setup QR code, Bittery needs access to your camera.
+							{m.device_setup_scanner_permission_description()}
 						</Text>
 						<TouchableOpacity
 							onPress={requestPermission}
 							className="w-full rounded-lg bg-primary py-4"
 						>
 							<Text className="text-center font-semibold text-primary-foreground">
-								Allow Camera Access
+								{m.device_setup_scanner_allow_camera()}
 							</Text>
 						</TouchableOpacity>
 						<TouchableOpacity
@@ -155,7 +157,7 @@ export function DeviceSetupQrScanner({
 							className="mt-4 w-full rounded-lg border border-border py-4"
 						>
 							<Text className="text-center font-semibold text-foreground">
-								Cancel
+								{m.device_setup_scanner_cancel()}
 							</Text>
 						</TouchableOpacity>
 					</View>
@@ -188,7 +190,7 @@ export function DeviceSetupQrScanner({
 						>
 							<X size={24} color="#fff" />
 						</TouchableOpacity>
-						<Text className="font-bold text-lg text-white">Scan Setup QR</Text>
+						<Text className="font-bold text-lg text-white">{m.device_setup_scanner_title()}</Text>
 						<TouchableOpacity
 							onPress={() => setTorchEnabled(!torchEnabled)}
 							className="rounded-full bg-black/50 p-2"
@@ -212,7 +214,7 @@ export function DeviceSetupQrScanner({
 
 					<View className="bg-black/50 px-6 py-8">
 						<Text className="text-center text-base text-white">
-							Scan the QR code shown in the desktop app.
+						{m.device_setup_scanner_footer()}
 						</Text>
 					</View>
 				</View>

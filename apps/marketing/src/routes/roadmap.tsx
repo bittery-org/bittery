@@ -73,7 +73,7 @@ const roadmapCategories: RoadmapCategory[] = [
 				title: "Device Setup",
 				description:
 					"Account selection, setup QR codes, and deep-link prefill across platforms.",
-				status: "in-progress",
+				status: "done",
 			},
 			{
 				title: "Account Recovery",
@@ -85,7 +85,7 @@ const roadmapCategories: RoadmapCategory[] = [
 				title: "Export",
 				description:
 					"Full data export so you're never locked in — your data is yours.",
-				status: "in-progress",
+				status: "done",
 			},
 			{
 				title: "Security Audit",

@@ -1,12 +1,17 @@
 ## Export Implementation Plan (.bttrx)
 
-### Current state
+### Status: Complete
 
-No export feature exists at runtime. The following stubs exist but are not wired to anything:
+The export feature has been fully implemented. The plan below is preserved for reference.
 
-- `packages/shared/src/export-types.ts` — defines `ExportedVault`, `ExportedItem`, `VaultExportPayload`, `EncryptedVaultExport` (types only)
-- `apps/marketing/src/routes/privacy.tsx` — marketing copy mentions export capability
-- `apps/web/src/lib/wasm-crypto.ts` + `worker-crypto.ts` — `exportKeyHandle` (crypto-level key export, unrelated to vault data export)
+**Implemented files:**
+
+- `packages/shared/src/export-types.ts` — flat `ExportedVault`, `ExportedItem`, `ExportedAttachment`, `VaultExportPayload` types
+- `apps/web/src/hooks/use-vault-export.ts` — export orchestration hook
+- `apps/web/src/components/export/vault-export-dialog.tsx` — export dialog component
+- `packages/shared/src/import/providers/bittery-bttrx.ts` — round-trip `.bttrx` import provider
+- `apps/web/src/routes/_app/settings/index.tsx` — export card and dialog mount
+- `packages/i18n/messages/en.json` — i18n keys for export UI
 
 What already exists that the export feature can build on:
 

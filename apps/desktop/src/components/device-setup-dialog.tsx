@@ -235,14 +235,27 @@ function DeviceSetupDialogContent({
 					{setupDataQuery.isLoading ? (
 						<IconLoader2OutlineDuo18 className="h-5 w-5 animate-spin text-muted-foreground" />
 					) : setupPreview.qrUri ? (
-						<div className="rounded-md bg-white p-2.5">
-							<QRCodeSVG
-								value={setupPreview.qrUri}
-								size={208}
-								includeMargin={true}
-								level="M"
-							/>
+						<div className="flex flex-col items-center gap-4">
+							<div className="rounded-md bg-white p-2.5">
+								<QRCodeSVG
+									value={setupPreview.qrUri}
+									size={208}
+									includeMargin={true}
+									level="M"
+								/>
+							</div>
+							<ol className="space-y-1 text-left text-muted-foreground text-xs">
+								<li>1. {m.vaults_sidebar_account_switcher_device_setup_dialog_step_1()}</li>
+								<li>2. {m.vaults_sidebar_account_switcher_device_setup_dialog_step_2()}</li>
+								<li>3. {m.vaults_sidebar_account_switcher_device_setup_dialog_step_3()}</li>
+								<li>4. {m.vaults_sidebar_account_switcher_device_setup_dialog_step_4()}</li>
+								<li>5. {m.vaults_sidebar_account_switcher_device_setup_dialog_step_5()}</li>
+							</ol>
 						</div>
+					) : setupPreview.errorKey === "vaults_sidebar_account_switcher_device_setup_dialog_error_no_secret_key" ? (
+						<p className="text-center text-muted-foreground text-sm">
+							{m.vaults_sidebar_account_switcher_device_setup_dialog_no_secret_key_guidance()}
+						</p>
 					) : (
 						<p className="text-center text-muted-foreground text-sm">
 							{setupPreviewError}

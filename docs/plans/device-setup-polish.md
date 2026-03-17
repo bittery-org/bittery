@@ -1,7 +1,17 @@
 # Device Setup Polish
 
 ## Status
-In progress
+Track A — **Done**
+
+## What Was Done (Track A)
+
+All Track A acceptance criteria have been implemented:
+
+- **Desktop dialog**: description corrected to explain that the phone scans the desktop QR (not the other way around). Numbered step instructions (steps 1–5) added below the QR code. When no secret key is stored, a specific guidance message is shown instead of a generic error.
+- **Mobile login screen**: all hardcoded English strings replaced with i18n keys. A visible "Setting up this device?" banner card is shown above the form (between logo and Server URL field), replacing the buried button inside the Secret Key field. After a successful QR scan, the full form collapses to a focused single-field view showing only the email (read-only label), server URL (read-only label), and the master password field, plus a "Not you? Start over" reset link.
+- **Mobile QR scanner**: all hardcoded strings replaced with i18n keys.
+- **Web settings Devices tab**: "Set up another device" button added to the tab header. Clicking it opens a new `WebDeviceSetupDialog` that shows a QR code (when secret key is in session storage), a copyable setup link, numbered step instructions, and the corrected description. Falls back to the no-secret-key guidance message when the key is absent.
+- **i18n**: all new keys added to both `en.json` and `de.json`. Paraglide files regenerated.
 
 ## Background
 
@@ -260,16 +270,16 @@ Ship Track A first to remove the current rough edges. Track B is a full feature 
 
 ## Acceptance Criteria
 
-### Track A
+### Track A — Acceptance Criteria
 
-- [ ] Desktop: dialog description clearly explains the flow direction (phone scans desktop, not other way around)
-- [ ] Desktop: numbered step instructions visible below the QR code
-- [ ] Desktop: when no secret key is stored, helpful guidance shown instead of a plain error
-- [ ] Mobile: login screen has a visible "Setting up this device?" banner above the form
-- [ ] Mobile: after scanning a QR, only the password field is shown — all other fields are hidden and pre-filled
-- [ ] Mobile: zero hardcoded English strings in the login screen or QR scanner
-- [ ] Web: Settings -> Devices tab has a "Set up another device" button in the header
-- [ ] Web: clicking it opens a dialog with a QR code (when secret key is available) and a copyable setup link
+- [x] Desktop: dialog description clearly explains the flow direction (phone scans desktop, not other way around)
+- [x] Desktop: numbered step instructions visible below the QR code
+- [x] Desktop: when no secret key is stored, helpful guidance shown instead of a plain error
+- [x] Mobile: login screen has a visible "Setting up this device?" banner above the form
+- [x] Mobile: after scanning a QR, only the password field is shown — all other fields are hidden and pre-filled
+- [x] Mobile: zero hardcoded English strings in the login screen or QR scanner
+- [x] Web: Settings -> Devices tab has a "Set up another device" button in the header
+- [x] Web: clicking it opens a dialog with a QR code (when secret key is available) and a copyable setup link
 
 ### Track B
 
