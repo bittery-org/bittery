@@ -161,15 +161,15 @@ export const featureCategories: FeatureCategory[] = [
 			},
 			{
 				label: "Passkey support",
-				values: { free: false, personal: true, family: true, team: true },
+				values: { free: true, personal: true, family: true, team: true },
 			},
 			{
 				label: "Emergency Kit & Recovery",
 				values: { free: true, personal: true, family: true, team: true },
 			},
 			{
-				label: "Breach monitoring",
-				values: { free: false, personal: true, family: true, team: true },
+				label: "Sentinel password health",
+				values: { free: true, personal: true, family: true, team: true },
 			},
 		],
 	},
@@ -277,7 +277,7 @@ export const planFeatureBullets: Record<PlanInfo["id"], string[]> = {
 		"Unlimited vaults & items",
 		"All item types",
 		"250 MB secure storage",
-		"Passkeys & breach monitoring",
+		"Passkeys & Sentinel password health",
 		"5 active sharing links",
 		"Unlimited devices",
 		"Priority support",

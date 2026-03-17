@@ -10,7 +10,7 @@ const faqs = [
 	{
 		question: "How much does Bittery cost?",
 		answer:
-			"Bittery has a generous free plan that includes one vault with unlimited passwords and access to all apps. Paid plans unlock shared vaults, teams, and additional features. You can also self-host for free if you prefer full control over your data.",
+			"Bittery has a generous free plan that includes one vault with up to 50 passwords and access to all apps. Paid plans unlock more storage, shared vaults, teams, and additional features. You can also self-host for free if you prefer full control over your data.",
 	},
 	{
 		question: "What happens if I forget my master password?",

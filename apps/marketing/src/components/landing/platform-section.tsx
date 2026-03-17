@@ -44,7 +44,7 @@ const platforms = [
 		id: "extension",
 		icon: Puzzle,
 		name: "Extension",
-		subtitle: "Chrome, Firefox, Safari",
+		subtitle: "Chrome, Edge, Brave",
 		image: extensionImg,
 	},
 ];
