@@ -6,6 +6,7 @@
  */
 
 import { useTRPCClient } from "@bittery/shared/trpc";
+import { createTrpcClientForServer } from "@bittery/shared/trpc-client-factory";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import {
 	type LoginResult,
@@ -53,6 +54,13 @@ export interface LoginInput extends SRPLoginInput {
 	 * Override enableBiometric option for this specific login.
 	 */
 	enableBiometric?: boolean;
+	/**
+	 * Server URL to use for this login request.
+	 * When provided, a dedicated tRPC client is created for this server URL
+	 * instead of using the default client. Use this when the user can configure
+	 * a custom server URL (e.g. self-hosted instances).
+	 */
+	serverUrl?: string;
 }
 
 /**
@@ -79,6 +87,10 @@ export function useLogin(
 
 	return useMutation({
 		mutationFn: async (input: LoginInput) => {
+			const trpcClientForRequest = input.serverUrl
+				? createTrpcClientForServer(input.serverUrl)
+				: trpcClient;
+
 			// Perform SRP login
 			const result = await performSRPLogin(
 				{
@@ -86,7 +98,7 @@ export function useLogin(
 					password: input.password,
 					secretKey: input.secretKey,
 				},
-				{ crypto, trpcClient, storage },
+				{ crypto, trpcClient: trpcClientForRequest, storage },
 			);
 
 			// Enable biometric if requested and supported

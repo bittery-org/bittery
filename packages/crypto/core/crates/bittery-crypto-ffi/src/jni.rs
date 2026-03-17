@@ -285,6 +285,164 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
 }
 
 #[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativeEncryptWithContext<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    plaintext: JString<'a>,
+    key_base64: JString<'a>,
+    vault_id: JString<'a>,
+    entity_id: JString<'a>,
+    entity_type: JString<'a>,
+    version: jlong,
+    user_id: JString<'a>,
+) -> JObject<'a> {
+    let plaintext_str = match get_string(&mut env, plaintext) {
+        Some(s) => s,
+        None => {
+            return create_encrypt_result(&mut env, None, None, None, Some("Invalid plaintext"))
+        }
+    };
+    let key_str = match get_string(&mut env, key_base64) {
+        Some(s) => s,
+        None => return create_encrypt_result(&mut env, None, None, None, Some("Invalid key")),
+    };
+    let vault_id_str = match get_string(&mut env, vault_id) {
+        Some(s) => s,
+        None => return create_encrypt_result(&mut env, None, None, None, Some("Invalid vault_id")),
+    };
+    let entity_id_str = match get_string(&mut env, entity_id) {
+        Some(s) => s,
+        None => {
+            return create_encrypt_result(&mut env, None, None, None, Some("Invalid entity_id"))
+        }
+    };
+    let entity_type_str = match get_string(&mut env, entity_type) {
+        Some(s) => s,
+        None => {
+            return create_encrypt_result(&mut env, None, None, None, Some("Invalid entity_type"))
+        }
+    };
+    let user_id_str = match get_string(&mut env, user_id) {
+        Some(s) => s,
+        None => return create_encrypt_result(&mut env, None, None, None, Some("Invalid user_id")),
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::{encrypt_with_aad, AadContext};
+
+    let key = match STANDARD.decode(&key_str) {
+        Ok(k) => k,
+        Err(e) => {
+            return create_encrypt_result(
+                &mut env,
+                None,
+                None,
+                None,
+                Some(&format!("Invalid key base64: {}", e)),
+            )
+        }
+    };
+
+    let context = AadContext {
+        vault_id: vault_id_str,
+        entity_id: entity_id_str,
+        entity_type: entity_type_str,
+        version: version as u64,
+        user_id: user_id_str,
+    };
+
+    match encrypt_with_aad(&plaintext_str, &key, &context) {
+        Ok(encrypted) => create_encrypt_result(
+            &mut env,
+            Some(&encrypted.ciphertext),
+            Some(&encrypted.iv),
+            Some(&encrypted.algorithm),
+            None,
+        ),
+        Err(e) => create_encrypt_result(&mut env, None, None, None, Some(&e.to_string())),
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativeDecryptWithContext<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    ciphertext: JString<'a>,
+    iv: JString<'a>,
+    algorithm: JString<'a>,
+    key_base64: JString<'a>,
+    vault_id: JString<'a>,
+    entity_id: JString<'a>,
+    entity_type: JString<'a>,
+    version: jlong,
+    user_id: JString<'a>,
+) -> JString<'a> {
+    let ciphertext_str = match get_string(&mut env, ciphertext) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid ciphertext"),
+    };
+    let iv_str = match get_string(&mut env, iv) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid IV"),
+    };
+    let algorithm_str = match get_string(&mut env, algorithm) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid algorithm"),
+    };
+    let key_str = match get_string(&mut env, key_base64) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid key"),
+    };
+    let vault_id_str = match get_string(&mut env, vault_id) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid vault_id"),
+    };
+    let entity_id_str = match get_string(&mut env, entity_id) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid entity_id"),
+    };
+    let entity_type_str = match get_string(&mut env, entity_type) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid entity_type"),
+    };
+    let user_id_str = match get_string(&mut env, user_id) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid user_id"),
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::{decrypt_with_aad, AadContext, EncryptedData};
+
+    let key = match STANDARD.decode(&key_str) {
+        Ok(k) => k,
+        Err(e) => return new_string(&mut env, &format!("ERROR:Invalid key base64: {}", e)),
+    };
+
+    let data = EncryptedData {
+        ciphertext: ciphertext_str,
+        iv: iv_str,
+        algorithm: algorithm_str,
+    };
+
+    let context = AadContext {
+        vault_id: vault_id_str,
+        entity_id: entity_id_str,
+        entity_type: entity_type_str,
+        version: version as u64,
+        user_id: user_id_str,
+    };
+
+    match decrypt_with_aad(&data, &key, &context) {
+        Ok(plaintext) => new_string(&mut env, &plaintext),
+        Err(e) => new_string(&mut env, &format!("ERROR:{}", e)),
+    }
+}
+
+#[no_mangle]
 pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativeGenerateEncryptionKey<
     'a,
 >(
@@ -1290,5 +1448,156 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
             create_cp_result(&mut env, Some(&value), None)
         }
         Err(e) => create_cp_result(&mut env, None, Some(&e.to_string())),
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_nativeDecryptWithContext<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    ciphertext: JString<'a>,
+    iv: JString<'a>,
+    algorithm: JString<'a>,
+    key_base64: JString<'a>,
+    vault_id: JString<'a>,
+    entity_id: JString<'a>,
+    entity_type: JString<'a>,
+    version: jlong,
+    user_id: JString<'a>,
+) -> JObject<'a> {
+    let ciphertext_str = match get_string(&mut env, ciphertext) {
+        Some(s) => s,
+        None => return create_cp_result(&mut env, None, Some("Invalid ciphertext")),
+    };
+    let iv_str = match get_string(&mut env, iv) {
+        Some(s) => s,
+        None => return create_cp_result(&mut env, None, Some("Invalid IV")),
+    };
+    let algorithm_str = match get_string(&mut env, algorithm) {
+        Some(s) => s,
+        None => return create_cp_result(&mut env, None, Some("Invalid algorithm")),
+    };
+    let key_str = match get_string(&mut env, key_base64) {
+        Some(s) => s,
+        None => return create_cp_result(&mut env, None, Some("Invalid key")),
+    };
+    let vault_id_str = match get_string(&mut env, vault_id) {
+        Some(s) => s,
+        None => return create_cp_result(&mut env, None, Some("Invalid vault_id")),
+    };
+    let entity_id_str = match get_string(&mut env, entity_id) {
+        Some(s) => s,
+        None => return create_cp_result(&mut env, None, Some("Invalid entity_id")),
+    };
+    let entity_type_str = match get_string(&mut env, entity_type) {
+        Some(s) => s,
+        None => return create_cp_result(&mut env, None, Some("Invalid entity_type")),
+    };
+    let user_id_str = match get_string(&mut env, user_id) {
+        Some(s) => s,
+        None => return create_cp_result(&mut env, None, Some("Invalid user_id")),
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::{decrypt_with_aad, AadContext, EncryptedData};
+
+    let key = match STANDARD.decode(&key_str) {
+        Ok(k) => k,
+        Err(e) => {
+            return create_cp_result(
+                &mut env,
+                None,
+                Some(&format!("Invalid key base64: {}", e)),
+            )
+        }
+    };
+
+    let data = EncryptedData {
+        ciphertext: ciphertext_str,
+        iv: iv_str,
+        algorithm: algorithm_str,
+    };
+
+    let context = AadContext {
+        vault_id: vault_id_str,
+        entity_id: entity_id_str,
+        entity_type: entity_type_str,
+        version: version as u64,
+        user_id: user_id_str,
+    };
+
+    match decrypt_with_aad(&data, &key, &context) {
+        Ok(plaintext) => create_cp_result(&mut env, Some(&plaintext), None),
+        Err(e) => create_cp_result(&mut env, None, Some(&e.to_string())),
+    }
+}
+
+// ============================================================================
+// TOTP (Time-Based One-Time Password)
+// ============================================================================
+
+fn create_totp_result<'a>(
+    env: &mut JNIEnv<'a>,
+    code: Option<&str>,
+    remaining_seconds: u64,
+    period: u64,
+    progress: f64,
+    error: Option<&str>,
+) -> JObject<'a> {
+    let class = env
+        .find_class("expo/modules/bitterycrypto/BitteryCryptoModule$TotpResult")
+        .unwrap();
+
+    let code_str = code.map(|s| new_string(env, s)).unwrap_or_default();
+    let error_str = error.map(|s| new_string(env, s)).unwrap_or_default();
+
+    env.new_object(
+        class,
+        "(Ljava/lang/String;JJDLjava/lang/String;)V",
+        &[
+            JValue::Object(&code_str),
+            JValue::Long(remaining_seconds as jlong),
+            JValue::Long(period as jlong),
+            JValue::Double(progress),
+            JValue::Object(&error_str),
+        ],
+    )
+    .unwrap()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativeGenerateTotp<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    secret: JString<'a>,
+    algorithm: JString<'a>,
+    digits: jint,
+    period: jlong,
+) -> JObject<'a> {
+    let secret_str = match get_string(&mut env, secret) {
+        Some(s) => s,
+        None => return create_totp_result(&mut env, None, 0, 0, 0.0, Some("Invalid secret")),
+    };
+    let algorithm_str = match get_string(&mut env, algorithm) {
+        Some(s) => s,
+        None => return create_totp_result(&mut env, None, 0, 0, 0.0, Some("Invalid algorithm")),
+    };
+
+    use bittery_crypto_core::generate_totp;
+
+    match generate_totp(&secret_str, &algorithm_str, digits as u32, period as u64) {
+        Ok(result) => create_totp_result(
+            &mut env,
+            Some(&result.code),
+            result.remaining_seconds,
+            result.period,
+            result.progress,
+            None,
+        ),
+        Err(e) => create_totp_result(&mut env, None, 0, 0, 0.0, Some(&e.to_string())),
     }
 }

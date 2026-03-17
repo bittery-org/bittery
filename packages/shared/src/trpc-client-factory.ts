@@ -195,6 +195,40 @@ export function clearTrpcClientCache() {
 }
 
 /**
+ * Create an unauthenticated tRPC client for a specific server URL.
+ *
+ * Use this when you need to make pre-authentication requests (e.g. login, registration)
+ * against a specific server URL that may differ from the default.
+ *
+ * Clients are cached by server URL.
+ *
+ * @param serverUrl - API server URL
+ * @returns Unauthenticated tRPC client for the given server
+ */
+export function createTrpcClientForServer(
+	serverUrl: string,
+): ReturnType<typeof createAppTrpcClient> {
+	const normalizedUrl = normalizeServerUrl(serverUrl) ?? DEFAULT_SERVER_URL;
+	const cacheKey = `unauthenticated:${normalizedUrl}`;
+
+	const cachedClient = clientCache.get(cacheKey);
+	if (cachedClient) {
+		return cachedClient;
+	}
+
+	const client = createAppTrpcClient({
+		serverUrl: normalizedUrl,
+		fetch: (url, options) => {
+			const resolvedUrl = buildTrpcUrl(normalizedUrl, getRequestUrl(url));
+			return fetch(resolvedUrl, options);
+		},
+	});
+
+	clientCache.set(cacheKey, client);
+	return client;
+}
+
+/**
  * Create tRPC clients for all unlocked accounts.
  * Returns a map of email → tRPC client.
  *

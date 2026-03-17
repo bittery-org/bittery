@@ -3,6 +3,7 @@ import type {
 	TotpAlgorithm,
 	TotpDigits,
 } from "@bittery/shared/types";
+import { memo } from "react";
 import { Card, PressableFeedback } from "heroui-native";
 import { Star } from "lucide-react-native";
 import { View } from "react-native";
@@ -36,7 +37,7 @@ interface ItemListItemProps {
 	isLastInSection?: boolean;
 }
 
-export function ItemListItem({
+export const ItemListItem = memo(function ItemListItem({
 	item,
 	vault: _vault,
 	showVaultBadge: _showVaultBadge = false,
@@ -134,4 +135,4 @@ export function ItemListItem({
 			</Card>
 		</PressableFeedback>
 	);
-}
+});

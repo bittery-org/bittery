@@ -112,6 +112,65 @@ public class BitteryCryptoModule: Module {
             }
         }
 
+        AsyncFunction("encryptWithContext") { (plaintext: String, keyBase64: String, vaultId: String, entityId: String, entityType: String, version: Int64, userId: String, promise: Promise) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = bittery_encrypt_with_context(plaintext, keyBase64, vaultId, entityId, entityType, UInt64(version), userId)
+
+                if let error = result.error {
+                    let errorStr = String(cString: error)
+                    bittery_free_string(result.ciphertext)
+                    bittery_free_string(result.iv)
+                    bittery_free_string(result.algorithm)
+                    bittery_free_string(result.error)
+                    promise.reject("ENCRYPTION_FAILED", errorStr)
+                    return
+                }
+
+                guard let ciphertext = result.ciphertext,
+                      let iv = result.iv,
+                      let algorithm = result.algorithm else {
+                    bittery_free_string(result.ciphertext)
+                    bittery_free_string(result.iv)
+                    bittery_free_string(result.algorithm)
+                    promise.reject("ENCRYPTION_FAILED", "No result returned")
+                    return
+                }
+
+                let ciphertextStr = String(cString: ciphertext)
+                let ivStr = String(cString: iv)
+                let algorithmStr = String(cString: algorithm)
+
+                bittery_free_string(result.ciphertext)
+                bittery_free_string(result.iv)
+                bittery_free_string(result.algorithm)
+
+                promise.resolve([
+                    "ciphertext": ciphertextStr,
+                    "iv": ivStr,
+                    "algorithm": algorithmStr
+                ])
+            }
+        }
+
+        AsyncFunction("decryptWithContext") { (ciphertext: String, iv: String, algorithm: String, keyBase64: String, vaultId: String, entityId: String, entityType: String, version: Int64, userId: String, promise: Promise) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let result = bittery_decrypt_with_context(ciphertext, iv, algorithm, keyBase64, vaultId, entityId, entityType, UInt64(version), userId) else {
+                    promise.reject("DECRYPTION_FAILED", "Decryption returned null")
+                    return
+                }
+
+                let resultStr = String(cString: result)
+                bittery_free_string(result)
+
+                if resultStr.hasPrefix("ERROR:") {
+                    let errorMsg = String(resultStr.dropFirst(6))
+                    promise.reject("DECRYPTION_FAILED", errorMsg)
+                } else {
+                    promise.resolve(resultStr)
+                }
+            }
+        }
+
         Function("generateEncryptionKey") { () -> String in
             guard let result = bittery_generate_encryption_key() else {
                 return ""
@@ -497,6 +556,39 @@ public class BitteryCryptoModule: Module {
                     "proof": proofStr
                 ])
             }
+        }
+
+        // ============================================================================
+        // TOTP (Time-Based One-Time Password)
+        // ============================================================================
+
+        Function("generateTotp") { (secret: String, algorithm: String, digits: Int32, period: Int64) -> [String: Any] in
+            let result = bittery_generate_totp(secret, algorithm, digits, UInt64(period))
+
+            if let error = result.error {
+                let errorStr = String(cString: error)
+                bittery_free_totp_result(result)
+                throw NSError(domain: "BitteryCrypto", code: 1, userInfo: [NSLocalizedDescriptionKey: errorStr])
+            }
+
+            guard let code = result.code else {
+                bittery_free_totp_result(result)
+                throw NSError(domain: "BitteryCrypto", code: 1, userInfo: [NSLocalizedDescriptionKey: "No code returned"])
+            }
+
+            let codeStr = String(cString: code)
+            let remainingSeconds = result.remaining_seconds
+            let resultPeriod = result.period
+            let progress = result.progress
+
+            bittery_free_totp_result(result)
+
+            return [
+                "code": codeStr,
+                "remainingSeconds": remainingSeconds,
+                "period": resultPeriod,
+                "progress": progress
+            ]
         }
     }
 }

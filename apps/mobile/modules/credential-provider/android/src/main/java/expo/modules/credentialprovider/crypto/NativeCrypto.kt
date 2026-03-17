@@ -126,6 +126,37 @@ object NativeCrypto {
         return nativeDecrypt(ciphertext, iv, algorithm, keyBase64)
     }
 
+    /**
+     * Decrypt ciphertext using AES-256-GCM with authenticated context (AAD).
+     *
+     * @param ciphertext Base64-encoded ciphertext
+     * @param iv Base64-encoded IV
+     * @param algorithm Encryption algorithm identifier
+     * @param keyBase64 Base64-encoded 32-byte decryption key
+     * @param vaultId Vault ID used as AAD context
+     * @param entityId Entity ID used as AAD context
+     * @param entityType Entity type used as AAD context
+     * @param version Version number used as AAD context
+     * @param userId User ID used as AAD context
+     * @return Result containing plaintext or error
+     */
+    fun decryptWithContext(
+        ciphertext: String,
+        iv: String,
+        algorithm: String,
+        keyBase64: String,
+        vaultId: String,
+        entityId: String,
+        entityType: String,
+        version: Long,
+        userId: String
+    ): Result {
+        if (!isAvailable) {
+            return Result(null, "Native crypto library not available")
+        }
+        return nativeDecryptWithContext(ciphertext, iv, algorithm, keyBase64, vaultId, entityId, entityType, version, userId)
+    }
+
     // ============================================================================
     // RSA-OAEP
     // ============================================================================
@@ -251,6 +282,18 @@ object NativeCrypto {
         iv: String,
         algorithm: String,
         keyBase64: String
+    ): Result
+
+    private external fun nativeDecryptWithContext(
+        ciphertext: String,
+        iv: String,
+        algorithm: String,
+        keyBase64: String,
+        vaultId: String,
+        entityId: String,
+        entityType: String,
+        version: Long,
+        userId: String
     ): Result
 
     private external fun nativeRsaEncrypt(

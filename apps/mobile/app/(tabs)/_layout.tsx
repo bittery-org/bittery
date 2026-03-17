@@ -2,10 +2,12 @@ import { Tabs } from "expo-router";
 import { useThemeColor } from "heroui-native";
 import { Home, Search, Shield, Tag } from "lucide-react-native";
 import { Platform, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AccountSwitcher } from "../../src/components/account-switcher";
 import { useCredentialProviderSync } from "../../src/hooks/use-credential-provider-sync";
 
 export default function TabsLayout() {
+	const insets = useSafeAreaInsets();
 	const [accent, foreground, surface, border, muted] = useThemeColor([
 		"accent",
 		"foreground",
@@ -30,7 +32,7 @@ export default function TabsLayout() {
 				tabBarInactiveTintColor: muted,
 				tabBarStyle: {
 					position: "absolute",
-					bottom: 16,
+					bottom: 12 + insets.bottom,
 					marginHorizontal: 40,
 					alignSelf: "center",
 					borderTopWidth: 0,

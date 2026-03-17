@@ -5,6 +5,7 @@ import type { ICrypto } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
 import { fetch as expoFetch } from "expo/fetch";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AppState } from "react-native";
 import {
 	base64ToArrayBuffer,
 	decrypt,
@@ -157,12 +158,25 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		};
 
 		void resolveContext();
+
+		const appStateSubscription = AppState.addEventListener(
+			"change",
+			(nextState) => {
+				if (nextState === "active") {
+					void resolveContext();
+				}
+			},
+		);
+
 		const interval = setInterval(() => {
-			void resolveContext();
-		}, 5000);
+			if (AppState.currentState === "active") {
+				void resolveContext();
+			}
+		}, 30000);
 
 		return () => {
 			mounted = false;
+			appStateSubscription.remove();
 			clearInterval(interval);
 		};
 	}, []);
@@ -192,16 +206,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 	});
 
 	useEffect(() => {
-		if (!__DEV__) {
-			return;
-		}
-		console.log("[mobile-sync] status", {
-			connectionStatus: syncState.status.connectionStatus,
-			isConnected: syncState.isConnected,
-			clientId,
-			serverUrl,
-			syncAccountEmail,
-		});
+		// Intentionally no per-status logging here; this hook is always mounted.
 	}, [
 		syncState.status.connectionStatus,
 		syncState.isConnected,

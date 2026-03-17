@@ -1,4 +1,4 @@
-import { generateTotp, type TotpResult } from "@bittery/shared/totp";
+import { generateTotp, type TotpResult } from "@bittery/crypto-nitro";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import * as Clipboard from "expo-clipboard";
 import { useToast } from "heroui-native";
@@ -50,14 +50,14 @@ export function TotpDisplay({
 	const fadeAnim = useRef(new Animated.Value(1)).current;
 	const pulseAnim = useRef(new Animated.Value(1)).current;
 
-	const generateCode = useCallback(async () => {
+	const generateCode = useCallback(() => {
 		if (!totpSecret) {
 			setTotpResult(null);
 			return;
 		}
 
 		try {
-			const result = await generateTotp({
+			const result = generateTotp({
 				secret: totpSecret,
 				algorithm: totpAlgorithm,
 				digits: totpDigits,

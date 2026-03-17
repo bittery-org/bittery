@@ -254,12 +254,7 @@ export default function SettingsScreen() {
 		// IMPORTANT: Clear MUK from native VaultStateManager for autofill security
 		// Without this, autofill will still work even when app is locked!
 		if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-			const wasUnlocked = CredentialProvider.isVaultUnlocked();
 			CredentialProvider.clearAllMasterUnlockKeys();
-			const isNowUnlocked = CredentialProvider.isVaultUnlocked();
-			console.log(
-				`[Lock] Vault was unlocked: ${wasUnlocked}, now unlocked: ${isNowUnlocked}`,
-			);
 		}
 
 		router.replace("/(auth)/unlock");
@@ -332,7 +327,7 @@ export default function SettingsScreen() {
 			isDisabled={!onPress && !rightElement}
 			variant="ghost"
 			className="h-auto min-h-0 w-full justify-start gap-4 rounded-none px-4 py-4"
-			pressableFeedbackVariant="highlight"
+			feedbackVariant="scale-highlight"
 		>
 			<View
 				className={cn(

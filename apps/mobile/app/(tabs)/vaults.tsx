@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Tabs, useRouter } from "expo-router";
 import { Button, Card, Skeleton, useToast } from "heroui-native";
 import { Plus, Shield } from "lucide-react-native";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { FlatList, RefreshControl, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
@@ -13,6 +13,15 @@ import { VaultListItem } from "../../src/components/vault-list-item";
 const StyledPlus = withUniwind(Plus);
 const StyledShield = withUniwind(Shield);
 
+type VaultSection =
+	| { type: "header"; title: string; count: number }
+	| {
+			type: "vault";
+			item: VaultKeyWithAccount;
+			isFirst: boolean;
+			isLast: boolean;
+	  };
+
 export default function VaultsScreen() {
 	const router = useRouter();
 	const { toast } = useToast();
@@ -21,14 +30,14 @@ export default function VaultsScreen() {
 
 	const { vaultKeys, isLoading, isAllAccountsMode } = useAllVaultKeys();
 
-	const handleRefresh = async () => {
+	const handleRefresh = useCallback(async () => {
 		setRefreshing(true);
 		try {
 			await queryClient.invalidateQueries({ queryKey: ["all-vault-keys"] });
 		} finally {
 			setRefreshing(false);
 		}
-	};
+	}, [queryClient]);
 
 	const handleCreateVault = () => {
 		// TODO: Navigate to create vault screen when implemented
@@ -41,9 +50,9 @@ export default function VaultsScreen() {
 		});
 	};
 
-	const handleVaultPress = (vaultId: string) => {
+	const handleVaultPress = useCallback((vaultId: string) => {
 		router.push(`/(vault)/${vaultId}`);
-	};
+	}, [router]);
 
 	const { personalVaults, teamVaults, accountVaultsByTeamName } =
 		useMemo(() => {
@@ -76,37 +85,111 @@ export default function VaultsScreen() {
 			};
 		}, [vaultKeys]);
 
-	const renderVaultItem = ({
-		item,
-		isFirst,
-		isLast,
-	}: {
-		item: VaultKeyWithAccount;
-		isFirst: boolean;
-		isLast: boolean;
-	}) => (
-		<VaultListItem
-			id={item.vaultId}
-			name={item.vaultName}
-			type={item.vaultType}
-			role={item.role}
-			icon={item.vaultIcon}
-			imageUrl={item.vaultImageUrl}
-			accountLabel={
-				isAllAccountsMode ? item.accountTeamName || "Personal" : undefined
-			}
-			onPress={() => handleVaultPress(item.vaultId)}
-			isFirstInSection={isFirst}
-			isLastInSection={isLast}
-		/>
-	);
-
-	const renderSectionHeader = (title: string, count: number) => (
+	const renderSectionHeader = useCallback((title: string, count: number) => (
 		<View className="flex-row items-center px-4 pt-4 pb-2">
 			<Card.Title className="font-semibold text-muted text-xs uppercase tracking-wide">
 				{title} ({count})
 			</Card.Title>
 		</View>
+	), []);
+
+	const sections = useMemo(() => {
+		if (!vaultKeys || vaultKeys.length === 0) {
+			return [];
+		}
+
+		const nextSections: VaultSection[] = [];
+
+		if (isAllAccountsMode) {
+			for (const [teamName, vaults] of accountVaultsByTeamName.entries()) {
+				nextSections.push({
+					type: "header",
+					title: teamName,
+					count: vaults.length,
+				});
+				for (let i = 0; i < vaults.length; i++) {
+					nextSections.push({
+						type: "vault",
+						item: vaults[i],
+						isFirst: i === 0,
+						isLast: i === vaults.length - 1,
+					});
+				}
+			}
+		} else {
+			if (personalVaults.length > 0) {
+				nextSections.push({
+					type: "header",
+					title: "Personal Vaults",
+					count: personalVaults.length,
+				});
+				for (let i = 0; i < personalVaults.length; i++) {
+					nextSections.push({
+						type: "vault",
+						item: personalVaults[i],
+						isFirst: i === 0,
+						isLast: i === personalVaults.length - 1,
+					});
+				}
+			}
+
+			if (teamVaults.length > 0) {
+				nextSections.push({
+					type: "header",
+					title: "Team Vaults",
+					count: teamVaults.length,
+				});
+				for (let i = 0; i < teamVaults.length; i++) {
+					nextSections.push({
+						type: "vault",
+						item: teamVaults[i],
+						isFirst: i === 0,
+						isLast: i === teamVaults.length - 1,
+					});
+				}
+			}
+		}
+
+		return nextSections;
+	}, [
+		vaultKeys,
+		isAllAccountsMode,
+		accountVaultsByTeamName,
+		personalVaults,
+		teamVaults,
+	]);
+
+	const renderSection = useCallback(
+		({ item: section }: { item: VaultSection }) => {
+			if (section.type === "header") {
+				return renderSectionHeader(section.title, section.count);
+			}
+
+			const vault = section.item;
+			return (
+				<VaultListItem
+					id={vault.vaultId}
+					name={vault.vaultName}
+					type={vault.vaultType}
+					role={vault.role}
+					icon={vault.vaultIcon}
+					imageUrl={vault.vaultImageUrl}
+					accountLabel={
+						isAllAccountsMode ? vault.accountTeamName || "Personal" : undefined
+					}
+					onPress={() => handleVaultPress(vault.vaultId)}
+					isFirstInSection={section.isFirst}
+					isLastInSection={section.isLast}
+				/>
+			);
+		},
+		[handleVaultPress, isAllAccountsMode, renderSectionHeader],
+	);
+
+	const keyExtractor = useCallback(
+		(item: VaultSection) =>
+			item.type === "header" ? `header-${item.title}` : item.item.vaultId,
+		[],
 	);
 
 	const renderListContent = () => {
@@ -129,83 +212,11 @@ export default function VaultsScreen() {
 			);
 		}
 
-		// Combine sections into a single data array
-		const sections: Array<
-			| { type: "header"; title: string; count: number }
-			| {
-					type: "vault";
-					item: VaultKeyWithAccount;
-					isFirst: boolean;
-					isLast: boolean;
-			  }
-		> = [];
-
-		if (isAllAccountsMode) {
-			for (const [teamName, vaults] of accountVaultsByTeamName.entries()) {
-				sections.push({
-					type: "header",
-					title: teamName,
-					count: vaults.length,
-				});
-				for (let i = 0; i < vaults.length; i++) {
-					sections.push({
-						type: "vault",
-						item: vaults[i],
-						isFirst: i === 0,
-						isLast: i === vaults.length - 1,
-					});
-				}
-			}
-		} else {
-			if (personalVaults.length > 0) {
-				sections.push({
-					type: "header",
-					title: "Personal Vaults",
-					count: personalVaults.length,
-				});
-				for (let i = 0; i < personalVaults.length; i++) {
-					sections.push({
-						type: "vault",
-						item: personalVaults[i],
-						isFirst: i === 0,
-						isLast: i === personalVaults.length - 1,
-					});
-				}
-			}
-
-			if (teamVaults.length > 0) {
-				sections.push({
-					type: "header",
-					title: "Team Vaults",
-					count: teamVaults.length,
-				});
-				for (let i = 0; i < teamVaults.length; i++) {
-					sections.push({
-						type: "vault",
-						item: teamVaults[i],
-						isFirst: i === 0,
-						isLast: i === teamVaults.length - 1,
-					});
-				}
-			}
-		}
-
 		return (
 			<FlatList
 				data={sections}
-				renderItem={({ item: section }) => {
-					if (section.type === "header") {
-						return renderSectionHeader(section.title, section.count);
-					}
-					return renderVaultItem({
-						item: section.item,
-						isFirst: section.isFirst,
-						isLast: section.isLast,
-					});
-				}}
-				keyExtractor={(item, _index) =>
-					item.type === "header" ? `header-${item.title}` : item.item.vaultId
-				}
+				renderItem={renderSection}
+				keyExtractor={keyExtractor}
 				refreshControl={
 					<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
 				}

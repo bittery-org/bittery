@@ -59,5 +59,12 @@ data class VaultKeyEntity(
     val role: String,
 
     /** Timestamp when this key was last synced from server */
-    val syncedAt: Long = System.currentTimeMillis()
+    val syncedAt: Long = System.currentTimeMillis(),
+
+    /**
+     * Key version — part of the AES-GCM-AAD-V1 context used to wrap this vault key.
+     * Matches the `keyVersion` field in the VaultKeyWrapContext stored alongside
+     * the ciphertext on the server.
+     */
+    val keyVersion: Long = 1L
 )

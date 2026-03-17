@@ -92,5 +92,18 @@ data class ItemEntity(
     val updatedAt: Long = System.currentTimeMillis(),
 
     /** Whether this item is marked as favorite */
-    val isFavorite: Boolean = false
+    val isFavorite: Boolean = false,
+
+    /**
+     * Encryption version — part of the AES-GCM-AAD-V1 context.
+     * Matches the `version` field on the server-side item record.
+     */
+    val version: Long = 1L,
+
+    /**
+     * User ID of whoever last modified this item.
+     * Used as the `userId` field in the AES-GCM-AAD-V1 context.
+     * Falls back to [userId] when null.
+     */
+    val lastModifiedBy: String? = null
 )

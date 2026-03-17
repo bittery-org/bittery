@@ -1,7 +1,8 @@
 import type { UnifiedItem } from "@bittery/core/hooks";
 import type { DecryptedItem } from "@bittery/shared/types";
+import { memo, useCallback, useMemo } from "react";
 import { FlatList, RefreshControl } from "react-native";
-import { buildItemSections } from "../utils/build-item-sections";
+import { buildItemSections, type ItemSection } from "../utils/build-item-sections";
 import { ItemListItem } from "./item-list-item";
 import { ItemSectionHeader } from "./item-section-header";
 
@@ -16,6 +17,46 @@ export interface ItemSectionsListProps {
 	showVaultBadge?: boolean;
 }
 
+interface ItemSectionRowProps {
+	section: ItemSection;
+	onItemPress: (item: Item) => void;
+	showVaultBadge: boolean;
+}
+
+const ItemSectionRow = memo(function ItemSectionRow({
+	section,
+	onItemPress,
+	showVaultBadge,
+}: ItemSectionRowProps) {
+	if (section.type === "header") {
+		return <ItemSectionHeader title={section.title} count={section.count} />;
+	}
+
+	const item = section.item;
+
+	return (
+		<ItemListItem
+			item={item}
+			vault={"vault" in item ? item.vault : undefined}
+			showVaultBadge={showVaultBadge}
+			onPress={() => onItemPress(item)}
+			// Pass TOTP data for inline display
+			totpSecret={item.totpSecret}
+			totpAlgorithm={item.totpAlgorithm}
+			totpDigits={item.totpDigits}
+			totpPeriod={item.totpPeriod}
+			// Show inline TOTP for TOTP items or login items with TOTP secret
+			showInlineTotp={
+				(item.category === "totp" || item.category === "login") &&
+				Boolean(item.totpSecret)
+			}
+			// Position in section for rounded corners
+			isFirstInSection={section.isFirst}
+			isLastInSection={section.isLast}
+		/>
+	);
+});
+
 /**
  * Renders a sectioned list of items with favorites and regular items separated.
  * Handles section headers, item rendering with TOTP support, and pull-to-refresh.
@@ -28,44 +69,33 @@ export function ItemSectionsList({
 	onRefresh,
 	showVaultBadge = false,
 }: ItemSectionsListProps) {
-	const sections = buildItemSections({ favorites, regularItems });
+	const sections = useMemo(
+		() => buildItemSections({ favorites, regularItems }),
+		[favorites, regularItems],
+	);
+
+	const renderItem = useCallback(
+		({ item: section }: { item: ItemSection }) => (
+			<ItemSectionRow
+				section={section}
+				onItemPress={onItemPress}
+				showVaultBadge={showVaultBadge}
+			/>
+		),
+		[onItemPress, showVaultBadge],
+	);
+
+	const keyExtractor = useCallback(
+		(item: ItemSection) =>
+			item.type === "header" ? `header-${item.title}` : item.item.id,
+		[],
+	);
 
 	return (
 		<FlatList
 			data={sections}
-			renderItem={({ item: section }) => {
-				if (section.type === "header") {
-					return (
-						<ItemSectionHeader title={section.title} count={section.count} />
-					);
-				}
-
-				const item = section.item;
-				return (
-					<ItemListItem
-						item={item}
-						vault={"vault" in item ? item.vault : undefined}
-						showVaultBadge={showVaultBadge}
-						onPress={() => onItemPress(item)}
-						// Pass TOTP data for inline display
-						totpSecret={item.totpSecret}
-						totpAlgorithm={item.totpAlgorithm}
-						totpDigits={item.totpDigits}
-						totpPeriod={item.totpPeriod}
-						// Show inline TOTP for TOTP items or login items with TOTP secret
-						showInlineTotp={
-							(item.category === "totp" || item.category === "login") &&
-							Boolean(item.totpSecret)
-						}
-						// Position in section for rounded corners
-						isFirstInSection={section.isFirst}
-						isLastInSection={section.isLast}
-					/>
-				);
-			}}
-			keyExtractor={(item, _index) =>
-				item.type === "header" ? `header-${item.title}` : item.item.id
-			}
+			renderItem={renderItem}
+			keyExtractor={keyExtractor}
 			refreshControl={
 				onRefresh ? (
 					<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />

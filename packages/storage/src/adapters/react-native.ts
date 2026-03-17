@@ -14,10 +14,10 @@ import type {
 	ItemCacheMetadata,
 	KdfParams,
 } from "@bittery/types";
-import type * as CryptoType from "expo-crypto";
-import type * as LocalAuthenticationType from "expo-local-authentication";
-import type * as SecureStoreType from "expo-secure-store";
-import type * as SQLiteType from "expo-sqlite";
+import * as CryptoType from "expo-crypto";
+import * as LocalAuthenticationType from "expo-local-authentication";
+import * as SecureStoreType from "expo-secure-store";
+import * as SQLiteType from "expo-sqlite";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
 import { resolveStoredSessionExpiryTimestamp } from "../session";
@@ -79,10 +79,10 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	readonly supportsBiometric = true;
 	readonly supportsItemCache = true;
 
-	private SecureStore: typeof SecureStoreType | null = null;
-	private SQLite: typeof SQLiteType | null = null;
-	private LocalAuthentication: typeof LocalAuthenticationType | null = null;
-	private ExpoCrypto: typeof CryptoType | null = null;
+	private SecureStore: typeof SecureStoreType = SecureStoreType;
+	private SQLite: typeof SQLiteType = SQLiteType;
+	private LocalAuthentication: typeof LocalAuthenticationType = LocalAuthenticationType;
+	private ExpoCrypto: typeof CryptoType = CryptoType;
 	private db: Awaited<ReturnType<typeof SQLiteType.openDatabaseAsync>> | null =
 		null;
 	private initialized = false;
@@ -95,13 +95,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		if (this.initializePromise) return this.initializePromise;
 
 		this.initializePromise = (async () => {
-			// Dynamically import Expo modules
 			try {
-				this.SecureStore = await import("expo-secure-store");
-				this.SQLite = await import("expo-sqlite");
-				this.LocalAuthentication = await import("expo-local-authentication");
-				this.ExpoCrypto = await import("expo-crypto");
-
 				await this.openAndInitDatabase();
 				this.initialized = true;
 			} catch (error) {

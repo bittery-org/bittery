@@ -10,6 +10,7 @@ description = "Core cryptographic primitives for Bittery password manager"
 aes-gcm.workspace = true
 pbkdf2.workspace = true
 hkdf.workspace = true
+hmac.workspace = true
 sha1.workspace = true
 sha2.workspace = true
 rsa.workspace = true

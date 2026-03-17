@@ -10,8 +10,10 @@ import {
 	createSRPServer,
 	type HashAlgorithm,
 	decrypt as nativeDecrypt,
+	decryptWithContext as nativeDecryptWithContext,
 	deriveKeys as nativeDeriveKeys,
 	encrypt as nativeEncrypt,
+	encryptWithContext as nativeEncryptWithContext,
 	generateEncryptionKey as nativeGenerateEncryptionKey,
 	generateRsaKeyPair as nativeGenerateRsaKeyPair,
 	generateSecretKey as nativeGenerateSecretKey,
@@ -23,7 +25,6 @@ import {
 } from "@bittery/crypto-nitro";
 import {
 	unwrapPlaintextWithContext,
-	wrapPlaintextWithContext,
 } from "@bittery/shared/crypto-context-envelope";
 import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
 import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
@@ -86,12 +87,22 @@ export async function encrypt(
 	context?: EncryptionContext,
 ): Promise<EncryptedData> {
 	const keyBase64 = arrayBufferToBase64(key);
-	const plaintextToEncrypt = context
-		? wrapPlaintextWithContext(plaintext, context)
-		: plaintext;
-	const encryptedData = await nativeEncrypt(plaintextToEncrypt, keyBase64);
 
-	if (context?.entityType === "vault_key") {
+	if (!context) {
+		return nativeEncrypt(plaintext, keyBase64);
+	}
+
+	const encryptedData = await nativeEncryptWithContext(
+		plaintext,
+		keyBase64,
+		context.vaultId,
+		context.entityId,
+		context.entityType,
+		context.version,
+		context.userId,
+	);
+
+	if (context.entityType === "vault_key") {
 		return attachVaultKeyWrapContext(encryptedData, {
 			vaultId: context.vaultId,
 			userId: context.userId,
@@ -115,6 +126,8 @@ export async function encryptWithBase64Key(
 /**
  * Decrypt EncryptedData using AES-256-GCM.
  * Accepts Uint8Array key for compatibility with @bittery/crypto/encryption.
+ * First tries native AAD-based decryption (for items encrypted on web/desktop),
+ * then falls back to no-AAD decrypt + envelope unwrap (for legacy mobile items).
  */
 export async function decrypt(
 	encryptedData: EncryptedData,
@@ -122,13 +135,38 @@ export async function decrypt(
 	context?: EncryptionContext,
 ): Promise<string> {
 	const keyBase64 = arrayBufferToBase64(key);
-	const decrypted = await nativeDecrypt(
-		encryptedData.ciphertext,
-		encryptedData.iv,
-		encryptedData.algorithm,
-		keyBase64,
-	);
-	return context ? unwrapPlaintextWithContext(decrypted, context) : decrypted;
+
+	if (!context) {
+		return nativeDecrypt(
+			encryptedData.ciphertext,
+			encryptedData.iv,
+			encryptedData.algorithm,
+			keyBase64,
+		);
+	}
+
+	try {
+		return await nativeDecryptWithContext(
+			encryptedData.ciphertext,
+			encryptedData.iv,
+			encryptedData.algorithm,
+			keyBase64,
+			context.vaultId,
+			context.entityId,
+			context.entityType,
+			context.version,
+			context.userId,
+		);
+	} catch {
+		// Fall back to no-AAD decrypt + envelope unwrap for legacy mobile-encrypted items
+		const decrypted = await nativeDecrypt(
+			encryptedData.ciphertext,
+			encryptedData.iv,
+			encryptedData.algorithm,
+			keyBase64,
+		);
+		return unwrapPlaintextWithContext(decrypted, context);
+	}
 }
 
 export function validateServerKdfParams(

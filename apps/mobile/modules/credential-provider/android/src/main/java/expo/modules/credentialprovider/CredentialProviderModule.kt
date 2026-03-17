@@ -734,7 +734,8 @@ class CredentialProviderModule : Module() {
                                     encryptionIv = keyData["encryptionIv"] as? String ?: return@mapNotNull null,
                                     encryptionAlgorithm = keyData["encryptionAlgorithm"] as? String ?: "AES-GCM-AAD-V1",
                                     role = keyData["role"] as? String ?: "member",
-                                    syncedAt = System.currentTimeMillis()
+                                    syncedAt = System.currentTimeMillis(),
+                                    keyVersion = (keyData["keyVersion"] as? Number)?.toLong() ?: 1L
                                 )
                             } catch (e: Exception) {
                                 Log.w(TAG, "Failed to parse vault key: ${keyData["vaultId"]}", e)
@@ -777,7 +778,9 @@ class CredentialProviderModule : Module() {
                                     syncedAt = System.currentTimeMillis(),
                                     createdAt = (itemData["createdAt"] as? Number)?.toLong() ?: System.currentTimeMillis(),
                                     updatedAt = (itemData["updatedAt"] as? Number)?.toLong() ?: System.currentTimeMillis(),
-                                    isFavorite = itemData["isFavorite"] as? Boolean ?: false
+                                    isFavorite = itemData["isFavorite"] as? Boolean ?: false,
+                                    version = (itemData["version"] as? Number)?.toLong() ?: 1L,
+                                    lastModifiedBy = itemData["lastModifiedBy"] as? String
                                 )
                             } catch (e: Exception) {
                                 Log.w(TAG, "Failed to parse item: ${itemData["id"]}", e)

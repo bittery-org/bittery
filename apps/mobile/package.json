@@ -4,18 +4,16 @@
 	"version": "0.1.0",
 	"main": "expo-router/entry",
 	"scripts": {
-		"dev": "echo 'expo run:android --no-bundler && expo start --clear'",
-		"dev:build": "pnpm run i18n:generate && expo prebuild && expo run:android --no-bundler",
-		"dev:clear": "pnpm run i18n:generate && expo start --clear",
-		"android": "pnpm run i18n:generate && expo run:android",
-		"ports": "adb reverse tcp:3000 tcp:3000",
-		"ios": "pnpm run i18n:generate && expo run:ios",
-		"build:eas": "pnpm run i18n:generate && eas build",
-		"build:preview": "pnpm run i18n:generate && eas build --profile preview",
-		"build:production": "pnpm run i18n:generate && eas build --profile production",
-		"check-types": "pnpm run i18n:generate && tsc --noEmit",
-		"i18n:generate": "pnpm --filter @bittery/i18n run i18n:generate",
-		"i18n:check-generated": "pnpm run i18n:generate"
+		"dev": "expo run:android --no-bundler && expo start --clear",
+		"dev:build": "expo prebuild && expo run:android --no-bundler",
+		"dev:clear": "expo start --clear",
+		"android": "expo run:android",
+		"ports": "adb reverse tcp:3000 tcp:3000 && adb reverse tcp:8081 tcp:8081",
+		"ios": "expo run:ios",
+		"build:eas": "eas build",
+		"build:preview": "eas build --profile preview",
+		"build:production": "eas build --profile production",
+		"check-types": "tsc --noEmit"
 	},
 	"dependencies": {
 		"@bittery/api": "workspace:*",
@@ -44,6 +42,7 @@
 		"expo-crypto": "~15.0.8",
 		"expo-document-picker": "^14.0.8",
 		"expo-file-system": "^19.0.21",
+		"expo-image": "^55.0.6",
 		"expo-linking": "^8.0.11",
 		"expo-local-authentication": "~17.0.8",
 		"expo-modules-core": "~3.0.29",
@@ -54,7 +53,7 @@
 		"expo-sqlite": "~16.0.10",
 		"expo-status-bar": "~3.0.9",
 		"expo-updates": "~29.0.16",
-		"heroui-native": "1.0.0-beta.13",
+		"heroui-native": "1.0.0-rc.4",
 		"lucide-react-native": "^0.525.0",
 		"react": "catalog:",
 		"react-dom": "catalog:",
@@ -69,7 +68,7 @@
 		"tailwind-merge": "^3.0.2",
 		"tailwind-variants": "^3.2.2",
 		"tailwindcss": "^4.1.10",
-		"uniwind": "^1.2.7"
+		"uniwind": "^1.3.2"
 	},
 	"devDependencies": {
 		"@babel/core": "^7.26.0",

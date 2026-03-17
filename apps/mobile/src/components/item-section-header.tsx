@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Card } from "heroui-native";
 import { Star } from "lucide-react-native";
 import { View } from "react-native";
@@ -10,7 +11,10 @@ export interface ItemSectionHeaderProps {
 	count: number;
 }
 
-export function ItemSectionHeader({ title, count }: ItemSectionHeaderProps) {
+export const ItemSectionHeader = memo(function ItemSectionHeader({
+	title,
+	count,
+}: ItemSectionHeaderProps) {
 	return (
 		<View className="flex-row items-center px-4 pt-2 pb-2">
 			{title === "Favorites" && (
@@ -25,4 +29,4 @@ export function ItemSectionHeader({ title, count }: ItemSectionHeaderProps) {
 			</Card.Title>
 		</View>
 	);
-}
+});

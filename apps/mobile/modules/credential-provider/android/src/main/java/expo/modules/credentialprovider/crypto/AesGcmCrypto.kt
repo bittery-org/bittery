@@ -131,6 +131,57 @@ object AesGcmCrypto {
     }
 
     /**
+     * Decrypt ciphertext using AES-256-GCM with authenticated context (AAD).
+     *
+     * @param encryptedData The encrypted data containing ciphertext and IV
+     * @param key 32-byte decryption key
+     * @param vaultId Vault ID for AAD context
+     * @param entityId Entity ID for AAD context
+     * @param entityType Entity type for AAD context
+     * @param version Version number for AAD context
+     * @param userId User ID for AAD context
+     * @return Decrypted plaintext string
+     * @throws IllegalArgumentException if key is not 32 bytes
+     * @throws RuntimeException if native crypto is not available or decryption fails
+     */
+    fun decryptWithContext(
+        encryptedData: EncryptedData,
+        key: ByteArray,
+        vaultId: String,
+        entityId: String,
+        entityType: String,
+        version: Long,
+        userId: String
+    ): String {
+        require(key.size == KEY_LENGTH_BYTES) {
+            "Key must be $KEY_LENGTH_BYTES bytes, got ${key.size}"
+        }
+
+        if (!NativeCrypto.isAvailable) {
+            throw RuntimeException("Native crypto library not available")
+        }
+
+        val keyBase64 = Base64.encodeToString(key, Base64.NO_WRAP)
+        val result = NativeCrypto.decryptWithContext(
+            encryptedData.ciphertext,
+            encryptedData.iv,
+            encryptedData.algorithm,
+            keyBase64,
+            vaultId,
+            entityId,
+            entityType,
+            version,
+            userId
+        )
+
+        if (!result.isSuccess || result.value == null) {
+            throw RuntimeException("Decryption failed: ${result.error ?: "Unknown error"}")
+        }
+
+        return result.value
+    }
+
+    /**
      * Decrypt ciphertext to raw bytes using AES-256-GCM.
      *
      * @param encryptedData The encrypted data containing ciphertext and IV

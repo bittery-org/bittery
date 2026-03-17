@@ -6,13 +6,14 @@
 mod jni;
 
 use bittery_crypto_core::{
-    decrypt, derive_keys, encrypt, generate_credential_id, generate_encryption_key,
-    generate_passkey_keypair, generate_rsa_key_pair, generate_secret_key, get_secret_key_hint,
+    decrypt, decrypt_with_aad, derive_keys, encrypt, encrypt_with_aad, generate_credential_id,
+    generate_encryption_key, generate_passkey_keypair, generate_rsa_key_pair, generate_secret_key,
+    get_secret_key_hint,
     key_rotation::{self, ItemData, MemberKeyData, VaultKeyWrapContext},
     passkey::{build_passkey_attestation_object, sign_passkey_assertion},
     rsa_decrypt, rsa_encrypt,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient, SrpServer},
-    validate_secret_key, EncryptedData,
+    validate_secret_key, AadContext, EncryptedData,
 };
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
@@ -229,6 +230,193 @@ pub extern "C" fn bittery_decrypt(
     };
 
     match decrypt(&data, &key) {
+        Ok(plaintext) => string_to_c_str(plaintext),
+        Err(e) => string_to_c_str(format!("ERROR:{}", e)),
+    }
+}
+
+/// Encrypt plaintext using AES-256-GCM with authenticated context (AAD)
+#[no_mangle]
+pub extern "C" fn bittery_encrypt_with_context(
+    plaintext: *const c_char,
+    key_base64: *const c_char,
+    vault_id: *const c_char,
+    entity_id: *const c_char,
+    entity_type: *const c_char,
+    version: u64,
+    user_id: *const c_char,
+) -> EncryptResult {
+    let plaintext_str = match c_str_to_string(plaintext) {
+        Some(s) => s,
+        None => {
+            return EncryptResult {
+                ciphertext: ptr::null_mut(),
+                iv: ptr::null_mut(),
+                algorithm: ptr::null_mut(),
+                error: string_to_c_str("Invalid plaintext".to_string()),
+            }
+        }
+    };
+    let key_str = match c_str_to_string(key_base64) {
+        Some(s) => s,
+        None => {
+            return EncryptResult {
+                ciphertext: ptr::null_mut(),
+                iv: ptr::null_mut(),
+                algorithm: ptr::null_mut(),
+                error: string_to_c_str("Invalid key".to_string()),
+            }
+        }
+    };
+    let vault_id_str = match c_str_to_string(vault_id) {
+        Some(s) => s,
+        None => {
+            return EncryptResult {
+                ciphertext: ptr::null_mut(),
+                iv: ptr::null_mut(),
+                algorithm: ptr::null_mut(),
+                error: string_to_c_str("Invalid vault_id".to_string()),
+            }
+        }
+    };
+    let entity_id_str = match c_str_to_string(entity_id) {
+        Some(s) => s,
+        None => {
+            return EncryptResult {
+                ciphertext: ptr::null_mut(),
+                iv: ptr::null_mut(),
+                algorithm: ptr::null_mut(),
+                error: string_to_c_str("Invalid entity_id".to_string()),
+            }
+        }
+    };
+    let entity_type_str = match c_str_to_string(entity_type) {
+        Some(s) => s,
+        None => {
+            return EncryptResult {
+                ciphertext: ptr::null_mut(),
+                iv: ptr::null_mut(),
+                algorithm: ptr::null_mut(),
+                error: string_to_c_str("Invalid entity_type".to_string()),
+            }
+        }
+    };
+    let user_id_str = match c_str_to_string(user_id) {
+        Some(s) => s,
+        None => {
+            return EncryptResult {
+                ciphertext: ptr::null_mut(),
+                iv: ptr::null_mut(),
+                algorithm: ptr::null_mut(),
+                error: string_to_c_str("Invalid user_id".to_string()),
+            }
+        }
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let key = match STANDARD.decode(&key_str) {
+        Ok(k) => k,
+        Err(e) => {
+            return EncryptResult {
+                ciphertext: ptr::null_mut(),
+                iv: ptr::null_mut(),
+                algorithm: ptr::null_mut(),
+                error: string_to_c_str(format!("Invalid key base64: {}", e)),
+            }
+        }
+    };
+
+    let context = AadContext {
+        vault_id: vault_id_str,
+        entity_id: entity_id_str,
+        entity_type: entity_type_str,
+        version,
+        user_id: user_id_str,
+    };
+
+    match encrypt_with_aad(&plaintext_str, &key, &context) {
+        Ok(encrypted) => EncryptResult {
+            ciphertext: string_to_c_str(encrypted.ciphertext),
+            iv: string_to_c_str(encrypted.iv),
+            algorithm: string_to_c_str(encrypted.algorithm),
+            error: ptr::null_mut(),
+        },
+        Err(e) => EncryptResult {
+            ciphertext: ptr::null_mut(),
+            iv: ptr::null_mut(),
+            algorithm: ptr::null_mut(),
+            error: string_to_c_str(e.to_string()),
+        },
+    }
+}
+
+/// Decrypt data using AES-256-GCM with authenticated context (AAD)
+#[no_mangle]
+pub extern "C" fn bittery_decrypt_with_context(
+    ciphertext: *const c_char,
+    iv: *const c_char,
+    algorithm: *const c_char,
+    key_base64: *const c_char,
+    vault_id: *const c_char,
+    entity_id: *const c_char,
+    entity_type: *const c_char,
+    version: u64,
+    user_id: *const c_char,
+) -> *mut c_char {
+    let ciphertext_str = match c_str_to_string(ciphertext) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid ciphertext".to_string()),
+    };
+    let iv_str = match c_str_to_string(iv) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid IV".to_string()),
+    };
+    let algorithm_str = match c_str_to_string(algorithm) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid algorithm".to_string()),
+    };
+    let key_str = match c_str_to_string(key_base64) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid key".to_string()),
+    };
+    let vault_id_str = match c_str_to_string(vault_id) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid vault_id".to_string()),
+    };
+    let entity_id_str = match c_str_to_string(entity_id) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid entity_id".to_string()),
+    };
+    let entity_type_str = match c_str_to_string(entity_type) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid entity_type".to_string()),
+    };
+    let user_id_str = match c_str_to_string(user_id) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid user_id".to_string()),
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let key = match STANDARD.decode(&key_str) {
+        Ok(k) => k,
+        Err(e) => return string_to_c_str(format!("ERROR:Invalid key base64: {}", e)),
+    };
+
+    let data = EncryptedData {
+        ciphertext: ciphertext_str,
+        iv: iv_str,
+        algorithm: algorithm_str,
+    };
+
+    let context = AadContext {
+        vault_id: vault_id_str,
+        entity_id: entity_id_str,
+        entity_type: entity_type_str,
+        version,
+        user_id: user_id_str,
+    };
+
+    match decrypt_with_aad(&data, &key, &context) {
         Ok(plaintext) => string_to_c_str(plaintext),
         Err(e) => string_to_c_str(format!("ERROR:{}", e)),
     }
@@ -1420,6 +1608,89 @@ pub extern "C" fn bittery_srp_server_derive_session(
         Err(e) => SessionResult {
             key: ptr::null_mut(),
             proof: ptr::null_mut(),
+            error: string_to_c_str(e.to_string()),
+        },
+    }
+}
+
+// ============================================================================
+// TOTP (Time-Based One-Time Password)
+// ============================================================================
+
+/// Result struct for TOTP generation
+#[repr(C)]
+pub struct TotpFfiResult {
+    pub code: *mut c_char,
+    pub remaining_seconds: u64,
+    pub period: u64,
+    pub progress: f64,
+    pub error: *mut c_char,
+}
+
+/// Free a TotpFfiResult
+#[no_mangle]
+pub extern "C" fn bittery_free_totp_result(result: TotpFfiResult) {
+    if !result.code.is_null() {
+        unsafe { drop(std::ffi::CString::from_raw(result.code)) };
+    }
+    if !result.error.is_null() {
+        unsafe { drop(std::ffi::CString::from_raw(result.error)) };
+    }
+}
+
+/// Generate a TOTP code for the current time
+///
+/// - secret: base32-encoded shared secret
+/// - algorithm: "SHA1", "SHA256", or "SHA512"
+/// - digits: number of OTP digits (6, 7, or 8)
+/// - period: time step in seconds (typically 30)
+#[no_mangle]
+pub extern "C" fn bittery_generate_totp(
+    secret: *const c_char,
+    algorithm: *const c_char,
+    digits: u32,
+    period: u64,
+) -> TotpFfiResult {
+    let secret_str = match c_str_to_string(secret) {
+        Some(s) => s,
+        None => {
+            return TotpFfiResult {
+                code: ptr::null_mut(),
+                remaining_seconds: 0,
+                period: 0,
+                progress: 0.0,
+                error: string_to_c_str("Invalid secret".to_string()),
+            }
+        }
+    };
+    let algorithm_str = match c_str_to_string(algorithm) {
+        Some(s) => s,
+        None => {
+            return TotpFfiResult {
+                code: ptr::null_mut(),
+                remaining_seconds: 0,
+                period: 0,
+                progress: 0.0,
+                error: string_to_c_str("Invalid algorithm".to_string()),
+            }
+        }
+    };
+
+    use bittery_crypto_core::generate_totp;
+
+    match generate_totp(&secret_str, &algorithm_str, digits, period) {
+        Ok(result) => TotpFfiResult {
+            code: string_to_c_str(result.code),
+            remaining_seconds: result.remaining_seconds,
+            period: result.period,
+            progress: result.progress,
+            error: ptr::null_mut(),
+        },
+        Err(e) => TotpFfiResult {
+            code: ptr::null_mut(),
+            remaining_seconds: 0,
+            period: 0,
+            progress: 0.0,
             error: string_to_c_str(e.to_string()),
         },
     }

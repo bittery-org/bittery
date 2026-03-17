@@ -1,5 +1,6 @@
 import { Card, Chip, PressableFeedback } from "heroui-native";
 import { ChevronRight } from "lucide-react-native";
+import { memo } from "react";
 import { View } from "react-native";
 import { withUniwind } from "uniwind";
 
@@ -21,7 +22,7 @@ interface VaultListItemProps {
 	isLastInSection?: boolean;
 }
 
-export function VaultListItem({
+export const VaultListItem = memo(function VaultListItem({
 	id: _id,
 	name,
 	type,
@@ -99,4 +100,4 @@ export function VaultListItem({
 			</Card>
 		</PressableFeedback>
 	);
-}
+});

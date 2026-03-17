@@ -491,13 +491,13 @@ export default function UnlockScreen() {
 	return (
 		<SafeAreaView className="flex-1 bg-background">
 			<KeyboardAvoidingView
-				behavior={Platform.OS === "ios" ? "padding" : "height"}
-				contentContainerClassName="flex-1"
+				behavior={Platform.OS === "ios" ? "padding" : undefined}
+				contentContainerClassName="grow"
 				className="flex-1"
 			>
 				<ScrollView
 					className="flex-1"
-					contentContainerClassName="flex-1"
+					contentContainerClassName="grow"
 					keyboardShouldPersistTaps="handled"
 				>
 					<View className="flex-1 justify-center px-6 py-8">

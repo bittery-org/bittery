@@ -1,7 +1,7 @@
 import { useAccountsInfo, useItems } from "@bittery/core/hooks";
 import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, Platform } from "react-native";
+import { AppState, InteractionManager, Platform } from "react-native";
 import { storage } from "@/services/storage";
 import type {
 	PendingPasskeyMutation,
@@ -317,6 +317,8 @@ export function useCredentialProviderSync(
 							createdAt: new Date(item.createdAt).getTime(),
 							updatedAt: new Date(item.updatedAt).getTime(),
 							isFavorite: item.favorite || false,
+							version: item.version ?? 1,
+							lastModifiedBy: item.lastModifiedBy ?? null,
 						};
 					});
 
@@ -324,12 +326,14 @@ export function useCredentialProviderSync(
 					let encryptedKey: string;
 					let encryptionIv: string;
 					let encryptionAlgorithm: string;
+					let keyVersion = 1;
 
 					try {
 						const parsed = JSON.parse(vaultKey.encryptedVaultKey);
 						encryptedKey = parsed.ciphertext;
 						encryptionIv = parsed.iv;
 						encryptionAlgorithm = parsed.algorithm || "AES-GCM-AAD-V1";
+						keyVersion = parsed.context?.keyVersion ?? 1;
 					} catch {
 						encryptedKey = vaultKey.encryptedVaultKey;
 						encryptionIv = "";
@@ -344,6 +348,7 @@ export function useCredentialProviderSync(
 						encryptionIv,
 						encryptionAlgorithm,
 						role: vaultKey.role,
+						keyVersion,
 					};
 				});
 
@@ -544,6 +549,12 @@ export function useCredentialProviderSync(
 		return result;
 	}, [flushPendingPasskeyMutations, refetchItems]);
 
+	const waitForInteractionsToFinish = useCallback(async () => {
+		await new Promise<void>((resolve) => {
+			InteractionManager.runAfterInteractions(() => resolve());
+		});
+	}, []);
+
 	/**
 	 * Perform the legacy sync operation.
 	 *
@@ -583,6 +594,9 @@ export function useCredentialProviderSync(
 		setError(null);
 
 		try {
+			// Defer heavy sync work until gestures/animations settle to keep UI smooth.
+			await waitForInteractionsToFinish();
+
 			const flushResult = await flushPendingPasskeyMutationsAndRefresh();
 			if (flushResult.applied > 0 || flushResult.failed > 0) {
 				console.log(
@@ -641,6 +655,7 @@ export function useCredentialProviderSync(
 		extractCredentials,
 		syncVaultData,
 		flushPendingPasskeyMutationsAndRefresh,
+		waitForInteractionsToFinish,
 	]);
 
 	// Flush provider-generated passkey mutations while app is running.
@@ -687,7 +702,7 @@ export function useCredentialProviderSync(
 
 		const intervalId = setInterval(() => {
 			void flushNow("interval");
-		}, 15000);
+		}, 60000);
 
 		return () => {
 			disposed = true;
@@ -701,17 +716,13 @@ export function useCredentialProviderSync(
 	 */
 	const calculateItemsHash = useCallback((): string => {
 		const loginItems = items.filter((item) => item.category === "login");
-		// Create a simple hash based on item IDs, usernames, passwords, and URLs
-		const hashData = loginItems.map((item) => ({
-			id: item.id,
-			account: item.account?.email,
-			username: item.username,
-			password: item.password,
-			url: item.url,
-			urls: item.urls,
-			updatedAt: item.updatedAt,
-		}));
-		return JSON.stringify(hashData);
+		// Keep this lightweight; updatedAt/version covers credential content updates.
+		return loginItems
+			.map(
+				(item) =>
+					`${item.id}:${item.account?.email ?? ""}:${item.updatedAt}:${item.version ?? 1}`,
+			)
+			.join("|");
 	}, [items]);
 
 	// Auto-sync when items change (debounced)

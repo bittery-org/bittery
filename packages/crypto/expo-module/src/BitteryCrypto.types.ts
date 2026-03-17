@@ -76,3 +76,17 @@ export class CryptoError extends Error {
 		this.code = code;
 	}
 }
+
+/**
+ * Result of TOTP code generation
+ */
+export interface TotpResult {
+	/** The generated TOTP code (zero-padded) */
+	code: string;
+	/** Seconds remaining until the code expires */
+	remainingSeconds: number;
+	/** Total period in seconds */
+	period: number;
+	/** Progress percentage (0-100) of time elapsed in current period */
+	progress: number;
+}

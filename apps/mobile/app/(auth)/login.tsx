@@ -35,6 +35,7 @@ import {
 	Text,
 	View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { withUniwind } from "uniwind";
 import { DeviceSetupQrScanner } from "@/components/device-setup-qr-scanner";
 import { SafeAreaView } from "@/components/safe-area-view";
@@ -56,6 +57,7 @@ const StyledChevronRight = withUniwind(ChevronRight);
 
 export default function LoginScreen() {
 	const router = useRouter();
+	const insets = useSafeAreaInsets();
 	const { m } = useI18n();
 	const searchParams = useLocalSearchParams<{
 		setup?: string;
@@ -240,6 +242,7 @@ export default function LoginScreen() {
 			email,
 			password,
 			secretKey,
+			serverUrl: normalizedServerUrl,
 			enableBiometric: enableBiometric && biometricAvailable,
 		});
 	};
@@ -248,16 +251,19 @@ export default function LoginScreen() {
 		<SafeAreaView className="flex-1 bg-background">
 			<KeyboardAvoidingView
 				behavior={Platform.OS === "ios" ? "padding" : "height"}
-				contentContainerClassName="flex-1"
+				contentContainerClassName="grow"
 				className="flex-1"
 			>
 				<ScrollView
 					className="flex-1"
-					contentContainerClassName="flex-1"
+					contentContainerClassName="grow"
+					contentContainerStyle={{
+						paddingBottom: Math.max(insets.bottom + 24, 32),
+					}}
 					keyboardShouldPersistTaps="handled"
 				>
 					<View className="flex-1 justify-center px-6 pt-2 pb-8">
-						{/* Header */}
+					{/* Header */}
 					<View className="mb-8 items-center">
 						<PressableFeedback
 							onPress={() => {
@@ -275,9 +281,10 @@ export default function LoginScreen() {
 						</PressableFeedback>
 						<Text className="mt-1 text-center text-muted">
 							{m.login_subtitle()}
-						</View>
+						</Text>
+					</View>
 
-{setupComplete ? (
+					{setupComplete ? (
 						/* Simplified post-scan view */
 						<View className="gap-4">
 							<View className="items-center gap-1">
@@ -513,22 +520,9 @@ export default function LoginScreen() {
 									: m.auth_signin_button_sign_in()}
 							</Button>
 
-							{/* Sign Up Link */}
-							<Button
-								onPress={() => router.push("/(auth)/signup")}
-								variant="ghost"
-								className="mt-2"
-							>
-								<Text className="text-muted">
-									{m.login_signup_link()}{" "}
-									<Text className="font-semibold text-primary">
-										{m.auth_signin_signup_self_hosted_button()}
-									</Text>
-								</Text>
-							</Button>
 						</View>
 					)}
-					</View>
+				</View>
 				</ScrollView>
 			</KeyboardAvoidingView>
 			<DeviceSetupQrScanner

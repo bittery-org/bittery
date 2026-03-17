@@ -34,7 +34,7 @@ export function CategoryFilter({
 					}
 				}}
 			>
-				<Select.Trigger asChild>
+				<Select.Trigger variant="unstyled" asChild>
 					<Button variant="ghost" size="sm" className="self-start">
 						{selectedOption && (
 							<selectedOption.icon

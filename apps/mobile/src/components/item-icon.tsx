@@ -3,9 +3,10 @@ import type {
 	DecryptedItemWithContext,
 	ItemCategory,
 } from "@bittery/shared/types";
+import { Image } from "expo-image";
 import { CreditCard, FileText, Key, Timer, User } from "lucide-react-native";
 import { useState } from "react";
-import { Image, View } from "react-native";
+import { View } from "react-native";
 import { withUniwind } from "uniwind";
 import { useServerUrl } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,7 @@ const StyledCreditCard = withUniwind(CreditCard);
 const StyledUser = withUniwind(User);
 const StyledFileText = withUniwind(FileText);
 const StyledTimer = withUniwind(Timer);
+const StyledImage = withUniwind(Image);
 
 const categoryIcons: Record<
 	ItemCategory,
@@ -98,10 +100,11 @@ export function ItemIcon({
 			)}
 		>
 			{faviconUrl ? (
-				<Image
+				<StyledImage
 					source={{ uri: faviconUrl }}
 					className="h-full w-full"
-					resizeMode="contain"
+					contentFit="contain"
+					cachePolicy="memory-disk"
 					onError={() => setFaviconError(true)}
 				/>
 			) : (

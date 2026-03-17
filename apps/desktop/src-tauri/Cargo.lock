@@ -316,6 +316,7 @@ dependencies = [
  "ecdsa",
  "hex",
  "hkdf",
+ "hmac",
  "num-bigint",
  "num-integer",
  "num-traits",

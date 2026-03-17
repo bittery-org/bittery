@@ -7,6 +7,7 @@ export type {
 	PrimeGroup,
 	RsaKeyPair,
 	Session,
+	TotpResult,
 } from "./BitteryCrypto.types";
 
 export { CryptoError, ErrorCode } from "./BitteryCrypto.types";
@@ -17,10 +18,12 @@ export {
 	createSRPClient,
 	createSRPServer,
 	decrypt,
+	decryptWithContext,
 	// Key Derivation
 	deriveKeys,
 	// AES-256-GCM
 	encrypt,
+	encryptWithContext,
 	generateEncryptionKey,
 	// RSA-4096
 	generateRsaKeyPair,
@@ -30,4 +33,6 @@ export {
 	rsaDecrypt,
 	rsaEncrypt,
 	validateSecretKey,
+	// TOTP
+	generateTotp,
 } from "./BitteryCryptoModule";

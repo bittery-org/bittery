@@ -87,6 +87,45 @@ class BitteryCryptoModule : Module() {
             }
         }
 
+        AsyncFunction("encryptWithContext") { plaintext: String, keyBase64: String, vaultId: String, entityId: String, entityType: String, version: Long, userId: String, promise: Promise ->
+            scope.launch {
+                try {
+                    val result = nativeEncryptWithContext(plaintext, keyBase64, vaultId, entityId, entityType, version, userId)
+                    if (result.error != null) {
+                        promise.reject(CodedException("ENCRYPTION_FAILED", result.error, null))
+                    } else {
+                        promise.resolve(mapOf(
+                            "ciphertext" to result.ciphertext,
+                            "iv" to result.iv,
+                            "algorithm" to result.algorithm
+                        ))
+                    }
+                } catch (e: Exception) {
+                    promise.reject(CodedException("ENCRYPTION_FAILED", e.message ?: "Unknown error", e))
+                }
+            }
+        }
+
+        // encryptedData is { ciphertext, iv, algorithm } — bundled to stay within the
+        // Expo SDK AsyncFunction 8-param+Promise (Function9) arity limit.
+        AsyncFunction("decryptWithContext") { encryptedData: Map<String, Any>, keyBase64: String, vaultId: String, entityId: String, entityType: String, version: Long, userId: String, promise: Promise ->
+            scope.launch {
+                try {
+                    val ciphertext = encryptedData["ciphertext"] as? String ?: ""
+                    val iv = encryptedData["iv"] as? String ?: ""
+                    val algorithm = encryptedData["algorithm"] as? String ?: "AES-GCM-AAD-V1"
+                    val result = nativeDecryptWithContext(ciphertext, iv, algorithm, keyBase64, vaultId, entityId, entityType, version, userId)
+                    if (result.startsWith("ERROR:")) {
+                        promise.reject(CodedException("DECRYPTION_FAILED", result.removePrefix("ERROR:"), null))
+                    } else {
+                        promise.resolve(result)
+                    }
+                } catch (e: Exception) {
+                    promise.reject(CodedException("DECRYPTION_FAILED", e.message ?: "Unknown error", e))
+                }
+            }
+        }
+
         Function("generateEncryptionKey") {
             nativeGenerateEncryptionKey()
         }
@@ -157,6 +196,23 @@ class BitteryCryptoModule : Module() {
 
         Function("getSecretKeyHint") { secretKey: String ->
             nativeGetSecretKeyHint(secretKey)
+        }
+
+        // ============================================================================
+        // TOTP (Time-Based One-Time Password)
+        // ============================================================================
+
+        Function("generateTotp") { secret: String, algorithm: String, digits: Int, period: Long ->
+            val result = nativeGenerateTotp(secret, algorithm, digits, period)
+            if (result.error != null) {
+                throw CodedException("TOTP_FAILED", result.error, null)
+            }
+            mapOf(
+                "code" to result.code,
+                "remainingSeconds" to result.remainingSeconds,
+                "period" to result.period,
+                "progress" to result.progress
+            )
         }
 
         // ============================================================================
@@ -367,6 +423,8 @@ class BitteryCryptoModule : Module() {
     // Encryption
     private external fun nativeEncrypt(plaintext: String, keyBase64: String): EncryptResult
     private external fun nativeDecrypt(ciphertext: String, iv: String, algorithm: String, keyBase64: String): String
+    private external fun nativeEncryptWithContext(plaintext: String, keyBase64: String, vaultId: String, entityId: String, entityType: String, version: Long, userId: String): EncryptResult
+    private external fun nativeDecryptWithContext(ciphertext: String, iv: String, algorithm: String, keyBase64: String, vaultId: String, entityId: String, entityType: String, version: Long, userId: String): String
     private external fun nativeGenerateEncryptionKey(): String
 
     // RSA
@@ -446,4 +504,19 @@ class BitteryCryptoModule : Module() {
         val proof: String?,
         val error: String?
     )
+
+    data class TotpResult(
+        val code: String?,
+        val remainingSeconds: Long,
+        val period: Long,
+        val progress: Double,
+        val error: String?
+    )
+
+    private external fun nativeGenerateTotp(
+        secret: String,
+        algorithm: String,
+        digits: Int,
+        period: Long
+    ): TotpResult
 }

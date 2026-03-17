@@ -54,24 +54,14 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 
 	const setNativeMuksForAccounts = useCallback(async (emails: string[]) => {
 		if (Platform.OS !== "android" || !CredentialProvider.isAvailable()) {
-			console.log(
-				"[BiometricAuth] setNativeMuksForAccounts: skipped (not android or not available)",
-			);
 			return;
 		}
 
-		console.log(
-			"[BiometricAuth] setNativeMuksForAccounts: setting MUKs for",
-			emails,
-		);
 		for (const email of emails) {
 			const muk = await storage.getMasterUnlockKey(email);
 			const sessionData = await storage.getStoredSessionData(email);
 			const autoLockTimeoutMs =
 				await storage.getAutoLockTimeoutOrDefault(email);
-			console.log(
-				`[BiometricAuth] setNativeMuksForAccounts: email=${email}, hasMuk=${!!muk}, userId=${sessionData?.userId ?? "null"}`,
-			);
 			if (muk && sessionData?.userId) {
 				const mukBase64 = arrayBufferToBase64(muk);
 				CredentialProvider.setMasterUnlockKey(
@@ -79,13 +69,12 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 					sessionData.userId,
 					autoLockTimeoutMs,
 				);
-				console.log(
-					`[BiometricAuth] setNativeMuksForAccounts: SUCCESS for userId=${sessionData.userId}`,
-				);
 			} else {
-				console.warn(
-					`[BiometricAuth] setNativeMuksForAccounts: SKIPPED email=${email} (no muk or no userId)`,
-				);
+				if (__DEV__) {
+					console.warn(
+						`[BiometricAuth] setNativeMuksForAccounts skipped for ${email} (no muk or no userId)`,
+					);
+				}
 			}
 		}
 	}, []);
@@ -126,11 +115,6 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 					// IMPORTANT: Clear MUK from native VaultStateManager when auto-lock triggers
 					// This prevents autofill from working while app is locked
 					if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-						console.log(
-							"[BiometricAuth] AUTO-LOCK TRIGGERED: Clearing all native MUKs (shouldRequireAuth=true, isAllAccountsMode=" +
-								isAllAccountsMode +
-								")",
-						);
 						CredentialProvider.clearAllMasterUnlockKeys();
 					}
 
@@ -247,10 +231,6 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 						};
 
 				if (success) {
-					console.log(
-						"[BiometricAuth] All-accounts biometric unlock succeeded, restoring native MUKs for:",
-						unlockResult.unlocked,
-					);
 					await setNativeMuksForAccounts(unlockResult.unlocked);
 					setRequiresReauth(false);
 					setShowAuthModal(false);
@@ -282,10 +262,6 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 				// Restore MUK to memory after successful biometric auth
 				// This ensures decryption queries can run immediately without polling
 				try {
-					console.log(
-						"[BiometricAuth] Single-account biometric unlock succeeded, restoring MUK for:",
-						activeAccount.email,
-					);
 					const muk = await storage.decryptStoredMasterUnlockKeyPublic(
 						activeAccount.email,
 						true, // Skip biometric since we just authenticated
@@ -293,15 +269,13 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 					if (muk) {
 						// Store in React Native memory cache
 						await storage.storeMasterUnlockKey(muk, activeAccount.email);
-						console.log(
-							"[BiometricAuth] MUK restored to RN memory, now setting native MUK",
-						);
 						await setNativeMuksForAccounts([activeAccount.email]);
-						console.log("[BiometricAuth] Native MUK set successfully");
 					} else {
-						console.warn(
-							"[BiometricAuth] decryptStoredMasterUnlockKeyPublic returned null MUK",
-						);
+						if (__DEV__) {
+							console.warn(
+								"[BiometricAuth] decryptStoredMasterUnlockKeyPublic returned null MUK",
+							);
+						}
 					}
 				} catch (error) {
 					console.error(

@@ -7,6 +7,7 @@ import type {
 	PrimeGroup,
 	RsaKeyPair,
 	Session,
+	TotpResult,
 } from "./BitteryCrypto.types";
 import { CryptoError, ErrorCode } from "./BitteryCrypto.types";
 
@@ -96,6 +97,89 @@ export async function decrypt(
 ): Promise<string> {
 	try {
 		return await NativeModule.decrypt(ciphertext, iv, algorithm, keyBase64);
+	} catch (error) {
+		throw new CryptoError(
+			ErrorCode.DecryptionFailed,
+			`Decryption failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+/**
+ * Encrypt plaintext using AES-256-GCM with authenticated context (AAD).
+ * @param plaintext - String to encrypt
+ * @param keyBase64 - Base64-encoded 32-byte encryption key
+ * @param vaultId - Vault ID for AAD context
+ * @param entityId - Entity ID for AAD context
+ * @param entityType - Entity type for AAD context
+ * @param version - Version number for AAD context
+ * @param userId - User ID for AAD context
+ */
+export async function encryptWithContext(
+	plaintext: string,
+	keyBase64: string,
+	vaultId: string,
+	entityId: string,
+	entityType: string,
+	version: number,
+	userId: string,
+): Promise<EncryptedData> {
+	try {
+		const result = await NativeModule.encryptWithContext(
+			plaintext,
+			keyBase64,
+			vaultId,
+			entityId,
+			entityType,
+			version,
+			userId,
+		);
+		return {
+			ciphertext: result.ciphertext,
+			iv: result.iv,
+			algorithm: result.algorithm,
+		};
+	} catch (error) {
+		throw new CryptoError(
+			ErrorCode.EncryptionFailed,
+			`Encryption failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+/**
+ * Decrypt data using AES-256-GCM with authenticated context (AAD).
+ * @param ciphertext - Base64-encoded ciphertext
+ * @param iv - Base64-encoded initialization vector
+ * @param algorithm - Algorithm identifier
+ * @param keyBase64 - Base64-encoded 32-byte encryption key
+ * @param vaultId - Vault ID for AAD context
+ * @param entityId - Entity ID for AAD context
+ * @param entityType - Entity type for AAD context
+ * @param version - Version number for AAD context
+ * @param userId - User ID for AAD context
+ */
+export async function decryptWithContext(
+	ciphertext: string,
+	iv: string,
+	algorithm: string,
+	keyBase64: string,
+	vaultId: string,
+	entityId: string,
+	entityType: string,
+	version: number,
+	userId: string,
+): Promise<string> {
+	try {
+		return await NativeModule.decryptWithContext(
+			{ ciphertext, iv, algorithm },
+			keyBase64,
+			vaultId,
+			entityId,
+			entityType,
+			version,
+			userId,
+		);
 	} catch (error) {
 		throw new CryptoError(
 			ErrorCode.DecryptionFailed,
@@ -197,6 +281,38 @@ export function validateSecretKey(secretKey: string): boolean {
  */
 export function getSecretKeyHint(secretKey: string): string {
 	return NativeModule.getSecretKeyHint(secretKey);
+}
+
+// ============================================================================
+// TOTP (Time-Based One-Time Password)
+// ============================================================================
+
+/**
+ * Generate a TOTP code for the current time.
+ * @param secret - Base32-encoded shared secret
+ * @param algorithm - Hash algorithm: "SHA1", "SHA256", or "SHA512" (default: "SHA1")
+ * @param digits - Number of OTP digits: 6, 7, or 8 (default: 6)
+ * @param period - Time step in seconds (default: 30)
+ */
+export function generateTotp(options: {
+	secret: string;
+	algorithm?: string;
+	digits?: number;
+	period?: number;
+}): TotpResult {
+	try {
+		return NativeModule.generateTotp(
+			options.secret,
+			options.algorithm ?? "SHA1",
+			options.digits ?? 6,
+			options.period ?? 30,
+		) as TotpResult;
+	} catch (error) {
+		throw new CryptoError(
+			ErrorCode.NativeError,
+			`TOTP generation failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 }
 
 // ============================================================================
