@@ -2,7 +2,7 @@ import {
 	decryptStoredVaultKey,
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Badge,
 	Button,
@@ -50,10 +50,10 @@ interface InviteDialogProps {
 type TeamMessageCatalog = ReturnType<typeof useI18n>["m"];
 
 function formatCurrencyFromCents(
-	amountCents: number,
+	amountCents: number | bigint,
 	currency: string,
 ): string {
-	return formatLocalizedCurrency(amountCents / 100, currency.toUpperCase(), {
+	return formatLocalizedCurrency(Number(amountCents) / 100, currency.toUpperCase(), {
 		minimumFractionDigits: 2,
 		maximumFractionDigits: 2,
 	});
@@ -72,10 +72,14 @@ function formatPeriodRange(start: Date | string, end: Date | string): string {
 	return `${startPart} - ${endPart}`;
 }
 
-function getSeatCountLabel(count: number, m: TeamMessageCatalog): string {
-	return count === 1
-		? m.team_invite_dialog_seat_count_single({ count })
-		: m.team_invite_dialog_seat_count_plural({ count });
+function getSeatCountLabel(
+	count: number | bigint,
+	m: TeamMessageCatalog,
+): string {
+	const normalizedCount = Number(count);
+	return normalizedCount === 1
+		? m.team_invite_dialog_seat_count_single({ count: normalizedCount })
+		: m.team_invite_dialog_seat_count_plural({ count: normalizedCount });
 }
 
 export function InviteDialog({ teamId }: InviteDialogProps) {
@@ -83,18 +87,18 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 	const [email, setEmail] = useState("");
 	const [role, setRole] = useState<"admin" | "member">("member");
 	const [inviteLink, setInviteLink] = useState<string | null>(null);
-	const trpc = useTRPC();
-	const trpcClient = useTRPCClient();
+	const rpc = useRPC();
+	const rpcClient = useRPCClient();
 	const invalidator = useQueryInvalidator();
 	const { m } = useI18n();
 
 	// Query team vaults for key provisioning
 	const teamVaultsQuery = useQuery({
-		...trpc.team.vaults.queryOptions({ teamId }),
+		...rpc.team.vaults.queryOptions({ teamId }),
 		enabled: open, // Only fetch when dialog is open
 	});
 	const billingStatusQuery = useQuery({
-		...trpc.billing.status.queryOptions(),
+		...rpc.billing.status.queryOptions(),
 		enabled: open,
 	});
 	const shouldFetchSeatPreview =
@@ -104,7 +108,7 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 		billingStatusQuery.data.isActive;
 
 	const seatPreviewQuery = useQuery({
-		...trpc.billing.previewAdditionalTeamSeat.queryOptions(),
+		...rpc.billing.previewAdditionalTeamSeat.queryOptions(),
 		enabled: shouldFetchSeatPreview,
 	});
 	const seatPreview = seatPreviewQuery.data;
@@ -117,7 +121,10 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 			role: "admin" | "member";
 		}) => {
 			// First, send the invitation to get user's public key (if they exist)
-			const result = await trpcClient.team.invitations.send.mutate(input);
+			const result = await rpcClient.team.invitations.send.mutate({
+				...input,
+				pendingVaultKeys: null,
+			});
 
 			// If the user already exists and has a public key, we need to provision vault keys
 			if (result.existingUserPublicKey && teamVaultsQuery.data) {
@@ -167,10 +174,10 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 				// If we have vault keys to provision, update the invitation
 				if (pendingVaultKeys.length > 0) {
 					// Cancel the existing invitation and create a new one with vault keys
-					await trpcClient.team.invitations.cancel.mutate({
+					await rpcClient.team.invitations.cancel.mutate({
 						invitationId: result.invitationId,
 					});
-					return trpcClient.team.invitations.send.mutate({
+					return rpcClient.team.invitations.send.mutate({
 						...input,
 						pendingVaultKeys,
 					});
@@ -214,6 +221,11 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 				</Button>
 			</DialogTrigger>
 			<DialogContent className="max-h-[85vh] overflow-y-auto">
+				{(() => {
+					const seatDelta = seatPreview
+						? Number(seatPreview.nextQuantity - seatPreview.currentQuantity)
+						: 0;
+					return (
 				<form onSubmit={handleSubmit}>
 					<DialogHeader>
 						<DialogTitle>{m.team_invite_dialog_title()}</DialogTitle>
@@ -308,25 +320,19 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 													{m.team_invite_dialog_invoice_preview_title()}
 												</p>
 												<p className="mt-0.5 text-muted-foreground text-xs">
-													{seatPreview.nextQuantity -
-														seatPreview.currentQuantity ===
-													1
+													{seatDelta === 1
 														? m.team_invite_dialog_invoice_preview_adding_seats_single(
 																{
-																	count:
-																		seatPreview.nextQuantity -
-																		seatPreview.currentQuantity,
-																	currentQuantity: seatPreview.currentQuantity,
-																	nextQuantity: seatPreview.nextQuantity,
+																	count: seatDelta,
+																	currentQuantity: Number(seatPreview.currentQuantity),
+																	nextQuantity: Number(seatPreview.nextQuantity),
 																},
 															)
 														: m.team_invite_dialog_invoice_preview_adding_seats_plural(
 																{
-																	count:
-																		seatPreview.nextQuantity -
-																		seatPreview.currentQuantity,
-																	currentQuantity: seatPreview.currentQuantity,
-																	nextQuantity: seatPreview.nextQuantity,
+																	count: seatDelta,
+																	currentQuantity: Number(seatPreview.currentQuantity),
+																	nextQuantity: Number(seatPreview.nextQuantity),
 																},
 															)}
 												</p>
@@ -351,25 +357,24 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 																{line.isProration
 																	? m.team_invite_dialog_invoice_preview_line_seats_change(
 																			{
-																				currentQuantity:
-																					seatPreview.currentQuantity,
-																				nextQuantity: seatPreview.nextQuantity,
+																			currentQuantity: Number(seatPreview.currentQuantity),
+																			nextQuantity: Number(seatPreview.nextQuantity),
 																			},
 																		)
 																	: line.quantity !== null
 																		? m.team_invite_dialog_invoice_preview_line_quantity(
-																				{ quantity: line.quantity },
+																			{ quantity: Number(line.quantity) },
 																			)
 																		: ""}
 																{(line.isProration || line.quantity !== null) &&
 																line.unitAmountCents !== null &&
 																line.quantity !== null &&
-																line.quantity > 0
+																Number(line.quantity) > 0
 																	? " · "
 																	: ""}
 																{line.unitAmountCents !== null &&
 																line.quantity !== null &&
-																line.quantity > 0
+																Number(line.quantity) > 0
 																	? m.team_invite_dialog_invoice_preview_line_each(
 																			{
 																				amount: formatCurrencyFromCents(
@@ -450,6 +455,8 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 						</Button>
 					</DialogFooter>
 				</form>
+					);
+				})()}
 			</DialogContent>
 		</Dialog>
 	);

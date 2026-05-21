@@ -1,7 +1,7 @@
 import "./index.css";
-import { buildTrpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
-import { TRPCProvider } from "@bittery/shared/trpc";
-import { createAppTrpcClient } from "@bittery/shared/trpc-client";
+import { RpcProvider } from "@bittery/shared/rpc";
+import { createAppRpcClient } from "@bittery/shared/rpc-client";
+import { buildRpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
 import { Toaster } from "@bittery/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -28,8 +28,8 @@ const queryClient = new QueryClient({
 const fallbackServerUrl =
 	normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";
 
-// Create tRPC client that communicates via background worker
-const trpcClient = createAppTrpcClient({
+// Create RPC client that communicates via background worker.
+const rpcClient = createAppRpcClient({
 	serverUrl: fallbackServerUrl,
 	async headers() {
 		// Get auth token and sync client id from background.
@@ -49,7 +49,7 @@ const trpcClient = createAppTrpcClient({
 	async fetch(url, options) {
 		const storedServerUrl = await storage.getServerUrl();
 		const serverUrl = storedServerUrl ?? fallbackServerUrl;
-		const resolvedUrl = buildTrpcUrl(serverUrl, url as string);
+		const resolvedUrl = buildRpcUrl(serverUrl, url as string);
 		return fetch(resolvedUrl, options);
 	},
 });
@@ -99,7 +99,7 @@ function Popup() {
 	}, []);
 
 	return (
-		<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+		<RpcProvider rpcClient={rpcClient} queryClient={queryClient}>
 			<QueryClientProvider client={queryClient}>
 				<ExtensionSyncProvider queryClient={queryClient}>
 					<ExtensionPlatformProvider>
@@ -108,7 +108,7 @@ function Popup() {
 					</ExtensionPlatformProvider>
 				</ExtensionSyncProvider>
 			</QueryClientProvider>
-		</TRPCProvider>
+		</RpcProvider>
 	);
 }
 

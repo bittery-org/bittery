@@ -9,7 +9,7 @@
  * - Fall back to global cache updates when account-scoped updates cannot be applied.
  */
 
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
+import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import type {
 	DeltaSyncClient,
 	ItemCacheAdapter,
@@ -19,7 +19,7 @@ import { performDeltaSync } from "@bittery/sync";
 import { storage } from "../../lib/storage";
 import { core } from "../core-instance";
 import { desktopClient } from "../desktop-client";
-import { trpcClient } from "../trpc-client";
+import { rpcClient } from "../rpc-client";
 
 const DEFAULT_SERVER_URL = "http://localhost:3000";
 
@@ -86,9 +86,9 @@ const defaultDeps: SyncCacheServiceDeps = {
 	storage: storage as unknown as SyncCacheStorage,
 	itemCache: core.vaultCoordinator,
 	desktopClient,
-	defaultClient: trpcClient as unknown as SyncEventQueryClient,
+	defaultClient: rpcClient as unknown as SyncEventQueryClient,
 	createAccountClient: (token, serverUrl) =>
-		createAccountTrpcClient(
+		createAccountRpcClient(
 			token,
 			serverUrl,
 		) as unknown as SyncEventQueryClient,

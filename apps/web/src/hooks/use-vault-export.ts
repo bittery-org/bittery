@@ -11,9 +11,13 @@ import {
 	buildAttachmentContentTypeEncryptionContext,
 	buildAttachmentNameEncryptionContext,
 } from "@bittery/core/services/encryption-context";
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import JSZip from "jszip";
 import { useCallback, useState } from "react";
+import {
+	normalizeItemCategory,
+	normalizeVaultType,
+} from "@/lib/rpc-normalizers";
 import { storage } from "@/lib/storage";
 import { decrypt, rsaDecrypt } from "@/lib/wasm-crypto";
 
@@ -58,7 +62,7 @@ function createEmptyProgress(): ExportProgress {
 }
 
 export function useVaultExport() {
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 
 	const [progress, setProgress] = useState<ExportProgress>(
 		createEmptyProgress(),
@@ -86,8 +90,8 @@ export function useVaultExport() {
 				processedAttachments: 0,
 			});
 
-			const allItems = await trpcClient.vault.listAllItems.query();
-			const me = await trpcClient.auth.me.query();
+			const allItems = await rpcClient.vault.listAllItems.query();
+			const me = await rpcClient.auth.me.query();
 
 			// Collect unique vaults
 			const vaultMap = new Map<
@@ -96,11 +100,12 @@ export function useVaultExport() {
 			>();
 			for (const item of allItems) {
 				if (!vaultMap.has(item.vaultId)) {
+					const vaultRecord = item.vault;
 					vaultMap.set(item.vaultId, {
-						id: item.vault.id,
-						name: item.vault.name,
-						type: item.vault.type,
-						icon: item.vault.icon ?? null,
+						id: vaultRecord?.id ?? item.vaultId,
+						name: vaultRecord?.name ?? item.vaultId,
+						type: normalizeVaultType(vaultRecord?.vaultType ?? "personal"),
+						icon: vaultRecord?.icon ?? null,
 					});
 				}
 			}
@@ -180,7 +185,7 @@ export function useVaultExport() {
 					exportedItems.push({
 						id: item.id,
 						vaultId: item.vaultId,
-						category: item.category,
+						category: normalizeItemCategory(item.category),
 						favorite: item.favorite,
 						data: JSON.parse(decryptedStr),
 						attachments: [],
@@ -242,7 +247,7 @@ export function useVaultExport() {
 							encryptedName,
 							encryptedContentType,
 							encryptedContentTypeIv,
-						} = await trpcClient.vault.getAttachmentDownloadUrl.mutate({
+						} = await rpcClient.vault.getAttachmentDownloadUrl.mutate({
 							attachmentId: attachment.id,
 						});
 
@@ -347,7 +352,7 @@ export function useVaultExport() {
 				stage: "error",
 			}));
 		}
-	}, [trpcClient]);
+	}, [rpcClient]);
 
 	const downloadArchive = useCallback(() => {
 		if (!archiveBlob) return;

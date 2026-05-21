@@ -1,6 +1,6 @@
 import { useQueryInvalidator } from "@bittery/core/hooks";
 import { useI18n } from "@bittery/i18n/react";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	IconCalendarOutlineDuo18,
 	IconClockTimeOutlineDuo18,
@@ -61,6 +61,7 @@ interface ShareLinkData {
 }
 
 type ShareLinkStatus = ShareLinkData["status"];
+type ShareLinkAccessMode = ShareLinkData["accessMode"];
 
 const STATUS_COLORS: Record<string, string> = {
 	active: "bg-green-500",
@@ -69,20 +70,38 @@ const STATUS_COLORS: Record<string, string> = {
 	revoked: "bg-red-500",
 };
 
+function normalizeShareLinkStatus(status: string): ShareLinkStatus {
+	switch (status) {
+		case "active":
+		case "expired":
+		case "exhausted":
+		case "revoked":
+			return status;
+		default:
+			return "revoked";
+	}
+}
+
+function normalizeShareLinkAccessMode(accessMode: string): ShareLinkAccessMode {
+	return accessMode === "email-restricted"
+		? "email-restricted"
+		: "anyone";
+}
+
 export function ShareLinksList({ itemId }: ShareLinksListProps) {
 	const { m } = useI18n();
 	const [selectedLink, setSelectedLink] = useState<ShareLinkData | null>(null);
 	const [showAccessLogs, setShowAccessLogs] = useState(false);
 	const [linkToRevoke, setLinkToRevoke] = useState<string | null>(null);
 
-	const trpc = useTRPC();
-	const trpcClient = useTRPCClient();
+	const rpc = useRPC();
+	const rpcClient = useRPCClient();
 	const invalidator = useQueryInvalidator();
 
-	const linksQuery = useQuery(trpc.share.listByItem.queryOptions({ itemId }));
+	const linksQuery = useQuery(rpc.share.listByItem.queryOptions({ itemId }));
 
 	const revokeMutation = useMutation({
-		mutationFn: (linkId: string) => trpcClient.share.revoke.mutate({ linkId }),
+		mutationFn: (linkId: string) => rpcClient.share.revoke.mutate({ linkId }),
 		onSuccess: async () => {
 			toast.success(m.sharing_links_list_toast_revoke_success());
 			await invalidator.invalidateShare(itemId);
@@ -94,7 +113,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 	});
 
 	const accessLogsQuery = useQuery({
-		...trpc.share.getAccessLogs.queryOptions({
+		...rpc.share.getAccessLogs.queryOptions({
 			linkId: selectedLink?.id || "",
 		}),
 		enabled: !!selectedLink && showAccessLogs,
@@ -185,7 +204,11 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 		);
 	}
 
-	const links = linksQuery.data?.links || [];
+	const links: ShareLinkData[] = (linksQuery.data?.links || []).map((link) => ({
+		...link,
+		status: normalizeShareLinkStatus(link.status),
+		accessMode: normalizeShareLinkAccessMode(link.accessMode),
+	}));
 
 	if (links.length === 0) {
 		return (

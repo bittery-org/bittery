@@ -1,5 +1,7 @@
 # Breach Detection: Implementation Plan
 
+> Note: This plan predates the Rust server cutover and still references removed TS server packages such as `packages/api` and `packages/rate-limit`. Treat those file references as historical design context.
+
 ## Overview
 
 Add a **Breached** issue category to the existing Sentinel security dashboard using the [Have I Been Pwned Pwned Passwords k-anonymity API](https://haveibeenpwned.com/API/v3#PwnedPasswords). All password hashing is done client-side; only a 5-character SHA-1 prefix is ever sent to the server (which proxies to HIBP), so neither the server nor HIBP ever sees a full hash or plaintext password. Results are cached in **IndexedDB** per item and refreshed at most once per week. Checks run automatically in the background after vault unlock, not just on Sentinel page load.

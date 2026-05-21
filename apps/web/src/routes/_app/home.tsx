@@ -1,4 +1,4 @@
-import { useTRPC } from "@bittery/shared/trpc";
+import { useRPC } from "@bittery/shared/rpc";
 import { Button } from "@bittery/ui";
 import { IconMagicShieldOutlineDuo18 as ShieldCheck } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
@@ -16,8 +16,8 @@ export const Route = createFileRoute("/_app/home")({
 });
 
 function RouteComponent() {
-	const trpc = useTRPC();
-	const userQuery = useQuery(trpc.auth.me.queryOptions());
+	const rpc = useRPC();
+	const userQuery = useQuery(rpc.auth.me.queryOptions());
 	const { m } = useI18n();
 	const name = userQuery.data?.name;
 

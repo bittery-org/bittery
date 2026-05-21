@@ -16,7 +16,7 @@ import {
 	ensureUnlockedOrRecoverFromDesktop,
 	updateActivity,
 } from "./session-manager";
-import { trpcClient } from "./trpc-client";
+import { rpcClient } from "./rpc-client";
 import type { MessageResponse } from "./types";
 
 /**
@@ -122,7 +122,7 @@ export async function handleUpdateItemTotp(payload: {
 
 	try {
 		// Get the existing item
-		const item = await trpcClient.vault.getItem.query({ itemId });
+		const item = await rpcClient.vault.getItem.query({ itemId });
 
 		if (!item) {
 			return {
@@ -216,11 +216,14 @@ export async function handleUpdateItemTotp(payload: {
 		// Encrypt updated data
 		const encryptedData = await encrypt(JSON.stringify(updatedData), vaultKey);
 
-		// Update item via tRPC
-		await trpcClient.vault.updateItem.mutate({
+		// Update item via RPC
+		await rpcClient.vault.updateItem.mutate({
 			itemId,
 			encryptedData: encryptedData.ciphertext,
 			encryptionIv: encryptedData.iv,
+			encryptionAlgorithm: encryptedData.algorithm,
+			expectedVersion: null,
+			clientId: null,
 		});
 
 		// Keep local cache in sync for immediate UI consistency.

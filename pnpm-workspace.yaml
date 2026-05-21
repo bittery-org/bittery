@@ -7,13 +7,10 @@ packages:
   - packages/crypto/expo-module
 
 catalog:
-  '@trpc/client': ^11.5.0
-  '@trpc/server': ^11.5.0
+  '@qubit-rs/client': ^0.4.5
   '@types/react': ~19.1.9
   '@types/react-dom': ~19.1.7
-  '@trpc/tanstack-react-query': ^11.5.0
   dotenv: ^17.2.2
-  drizzle-orm: ^0.45.0
   hono: ^4.8.2
   react: 19.1.0
   react-dom: 19.1.0

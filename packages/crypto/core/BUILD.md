@@ -53,7 +53,7 @@ pnpm run build:crypto-napi   # Native addon for server
 | Package | Target | Used By |
 |---------|--------|---------|
 | `@bittery/crypto-wasm` | WASM (web target) | Web app, Browser extension |
-| `@bittery/crypto-napi` | Native Node addon | Bun server |
+| `@bittery/crypto-napi` | Native Node addon | Node.js/Bun runtimes |
 
 ## Build Commands
 

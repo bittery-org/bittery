@@ -1,5 +1,7 @@
 # Bittery Security Audit - Phase 4: Data Isolation & Multi-Tenancy
 
+> Note: `apps/server`, `packages/api`, and `packages/db` were removed after the Rust server cutover. Any references to those paths in this document are historical audit context, not current implementation guidance.
+
 ## Summary
 
 Bittery's current multi-tenant isolation model is mostly application-enforced rather than database-enforced. The good news is that the main online data paths are generally derived from `ctx.session.userId`, vault membership is usually checked through `vault_key`, sync catch-up queries are membership-filtered, attachment upload keys are bound to `userId + itemId`, and the Phase 3 public-blob issue appears remediated because `/cdn/*` now allows only `teams/` and `vaults/` keys.

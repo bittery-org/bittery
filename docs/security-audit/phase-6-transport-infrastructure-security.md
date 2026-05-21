@@ -3,6 +3,8 @@
 Date: 2026-03-11
 Scope: TLS and transport security, CORS, CSP, HTTP headers, error handling, rate limiting, Docker/self-hosted deployment defaults, logging/monitoring, and dependency/supply-chain posture.
 
+> Note: `apps/server`, `packages/api`, `packages/auth`, and `packages/rate-limit` were removed after the Rust server cutover. Any references to those paths or `/trpc` in this document are historical audit context, not current implementation guidance.
+
 ## 1. Summary
 
 Bittery's self-hosted Docker path has a solid baseline in a few important areas: the default installer fronts the app with Caddy on ports 80/443, HSTS is enabled there, CORS is allowlist-based by default, SSE requires a bearer token and enforces a per-user concurrent connection cap, internal services are not exposed to the host by default, lockfiles are committed, and the Docker builders use `pnpm install --ignore-scripts`.

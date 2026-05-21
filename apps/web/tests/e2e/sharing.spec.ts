@@ -448,7 +448,7 @@ test.describe("Share Link Network Resilience", () => {
 		const networkSimulator = createNetworkSimulator(page);
 
 		// Simulate network failure
-		await networkSimulator.simulateTrpcFailure(
+		await networkSimulator.simulateRpcFailure(
 			"share.getPublicInfo",
 			"INTERNAL_SERVER_ERROR",
 		);

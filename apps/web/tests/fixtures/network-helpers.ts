@@ -8,7 +8,30 @@
  * - API error responses
  */
 
-import type { Page } from "@playwright/test";
+import type { Page, Request, Route } from "@playwright/test";
+
+type RouteMatcher = string | RegExp;
+
+const RPC_ROUTE_PATTERN = /\/rpc(?:\/|\?|$)/;
+
+const API_ROUTE_PATTERNS: readonly RegExp[] = [RPC_ROUTE_PATTERN];
+
+function isApiRequestUrl(url: string): boolean {
+	return API_ROUTE_PATTERNS.some((pattern) => pattern.test(url));
+}
+
+function requestMatchesProcedure(
+	request: Pick<Request, "url" | "postData">,
+	procedureName: string,
+): boolean {
+	const url = request.url();
+	if (!RPC_ROUTE_PATTERN.test(url)) {
+		return false;
+	}
+
+	const postData = request.postData();
+	return typeof postData === "string" && postData.includes(procedureName);
+}
 
 /**
  * Network condition presets
@@ -60,9 +83,35 @@ export const ApiErrors = {
  * Network failure simulator class
  */
 export class NetworkSimulator {
-	private interceptedRoutes: Set<string> = new Set();
+	private interceptedRoutes: Set<RouteMatcher> = new Set();
 
 	constructor(private page: Page) {}
+
+	private async routeApiRequests(
+		handler: (route: Route) => Promise<void> | void,
+	): Promise<void> {
+		for (const pattern of API_ROUTE_PATTERNS) {
+			this.interceptedRoutes.add(pattern);
+			await this.page.route(pattern, handler);
+		}
+	}
+
+	private async routeProcedureRequests(
+		procedureName: string,
+		handler: (route: Route) => Promise<void> | void,
+	): Promise<void> {
+		const routePattern = RPC_ROUTE_PATTERN;
+		this.interceptedRoutes.add(routePattern);
+
+		await this.page.route(routePattern, async (route) => {
+			if (!requestMatchesProcedure(route.request(), procedureName)) {
+				await route.continue();
+				return;
+			}
+
+			await handler(route);
+		});
+	}
 
 	/**
 	 * Go offline - block all network requests
@@ -82,10 +131,7 @@ export class NetworkSimulator {
 	 * Simulate slow network by adding delay to all API requests
 	 */
 	async simulateSlowNetwork(delayMs = 2000) {
-		const routePattern = "**/trpc/**";
-		this.interceptedRoutes.add(routePattern);
-
-		await this.page.route(routePattern, async (route) => {
+		await this.routeApiRequests(async (route) => {
 			await new Promise((resolve) => setTimeout(resolve, delayMs));
 			await route.continue();
 		});
@@ -95,10 +141,7 @@ export class NetworkSimulator {
 	 * Simulate intermittent connectivity - randomly fail requests
 	 */
 	async simulateIntermittentConnectivity(failureRate = 0.3) {
-		const routePattern = "**/trpc/**";
-		this.interceptedRoutes.add(routePattern);
-
-		await this.page.route(routePattern, async (route) => {
+		await this.routeApiRequests(async (route) => {
 			if (Math.random() < failureRate) {
 				await route.abort("connectionfailed");
 			} else {
@@ -127,16 +170,13 @@ export class NetworkSimulator {
 	}
 
 	/**
-	 * Simulate tRPC endpoint failure
+	 * Simulate RPC endpoint failure for a specific procedure.
 	 */
-	async simulateTrpcFailure(
+	async simulateRpcFailure(
 		procedureName: string,
 		error: keyof typeof ApiErrors = "INTERNAL_SERVER_ERROR",
 	) {
-		const routePattern = `**/trpc/${procedureName}*`;
-		this.interceptedRoutes.add(routePattern);
-
-		await this.page.route(routePattern, async (route) => {
+		await this.routeProcedureRequests(procedureName, async (route) => {
 			const errorResponse = ApiErrors[error];
 			await route.fulfill({
 				status: errorResponse.status,
@@ -159,6 +199,16 @@ export class NetworkSimulator {
 
 		await this.page.route(endpointPattern, async (route) => {
 			// Wait longer than typical timeout
+			await new Promise((resolve) => setTimeout(resolve, timeoutMs));
+			await route.abort("timedout");
+		});
+	}
+
+	/**
+	 * Simulate network timeout for a specific RPC procedure.
+	 */
+	async simulateProcedureTimeout(procedureName: string, timeoutMs = 30000) {
+		await this.routeProcedureRequests(procedureName, async (route) => {
 			await new Promise((resolve) => setTimeout(resolve, timeoutMs));
 			await route.abort("timedout");
 		});
@@ -193,12 +243,20 @@ export class NetworkSimulator {
 		const requests: { method: string; url: string; body?: any }[] = [];
 
 		this.page.on("request", (request) => {
-			if (request.url().includes("/trpc/")) {
+			if (isApiRequestUrl(request.url())) {
 				const postData = request.postData();
+				let parsedBody: unknown;
+				if (postData) {
+					try {
+						parsedBody = JSON.parse(postData);
+					} catch {
+						parsedBody = postData;
+					}
+				}
 				requests.push({
 					method: request.method(),
 					url: request.url(),
-					body: postData ? JSON.parse(postData) : undefined,
+					body: parsedBody,
 				});
 			}
 		});
@@ -211,7 +269,7 @@ export class NetworkSimulator {
 	 */
 	async waitForApiCall(procedureName: string, timeout = 10000): Promise<void> {
 		await this.page.waitForResponse(
-			(response) => response.url().includes(`/trpc/${procedureName}`),
+			(response) => requestMatchesProcedure(response.request(), procedureName),
 			{ timeout },
 		);
 	}
@@ -245,6 +303,15 @@ export class NetworkSimulator {
 		this.interceptedRoutes.add(endpointPattern);
 
 		await this.page.route(endpointPattern, async (route) => {
+			await route.abort("connectionreset");
+		});
+	}
+
+	/**
+	 * Simulate connection reset for a specific RPC procedure.
+	 */
+	async simulateProcedureConnectionReset(procedureName: string) {
+		await this.routeProcedureRequests(procedureName, async (route) => {
 			await route.abort("connectionreset");
 		});
 	}

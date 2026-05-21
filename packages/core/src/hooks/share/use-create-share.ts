@@ -4,7 +4,7 @@
  * Creates a secure share link for a vault item.
  */
 
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -52,7 +52,7 @@ export function buildShareUrl(result: CreateShareResult): string {
  * Hook for creating a secure share link for a vault item.
  */
 export function useCreateShare() {
-	const defaultClient = useTRPCClient();
+	const defaultClient = useRPCClient();
 	const core = useCoreContext();
 	const invalidator = useQueryInvalidator();
 

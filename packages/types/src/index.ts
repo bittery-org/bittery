@@ -97,8 +97,8 @@ export interface EncryptionContext {
  * Login KDF params provided by the server and pinned locally.
  */
 export interface KdfParams {
-	schemaVersion: 1;
-	algorithm: "pbkdf2-sha256";
+	schemaVersion: number;
+	algorithm: string;
 	iterations: number;
 	salt: string;
 }

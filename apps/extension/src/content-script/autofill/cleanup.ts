@@ -1,10 +1,11 @@
+import type { AutofillField } from "../types";
 import { contentState } from "../state";
 import { hideAutofillOverlay } from "./credential";
 import { hideCreditCardAutofillOverlay } from "./credit-card";
 import { hideFieldIcon } from "./icon";
 import { hideIdentityAutofillOverlay } from "./identity";
 
-function cleanupDetachedFields<T extends { input: HTMLInputElement }>(
+function cleanupDetachedFields<T extends AutofillField>(
 	fields: Map<HTMLInputElement, T>,
 	hideOverlay: (field: T) => void,
 ) {

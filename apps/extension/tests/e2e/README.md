@@ -48,7 +48,7 @@ Before running tests:
 3. **Start the server (optional - auto-started):**
    ```bash
    # From repository root
-   cd apps/server && pnpm run dev
+   pnpm run dev:server
    ```
 
 4. **Start the web app (optional - auto-started):**

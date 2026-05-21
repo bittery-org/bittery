@@ -1,4 +1,4 @@
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Badge,
 	Button,
@@ -22,15 +22,15 @@ import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
 export function PendingInvitations() {
-	const trpc = useTRPC();
-	const trpcClient = useTRPCClient();
+	const rpc = useRPC();
+	const rpcClient = useRPCClient();
 	const invalidator = useQueryInvalidator();
-	const pendingQuery = useQuery(trpc.team.invitations.pending.queryOptions());
+	const pendingQuery = useQuery(rpc.team.invitations.pending.queryOptions());
 	const { locale, m } = useI18n();
 
 	const acceptMutation = useMutation({
 		mutationFn: (input: { token: string }) =>
-			trpcClient.team.invitations.accept.mutate(input),
+			rpcClient.team.invitations.accept.mutate(input),
 		onSuccess: async (data) => {
 			toast.success(
 				m.dashboard_pending_toast_joined({ teamName: data.teamName }),
@@ -44,7 +44,7 @@ export function PendingInvitations() {
 
 	const declineMutation = useMutation({
 		mutationFn: (input: { token: string }) =>
-			trpcClient.team.invitations.decline.mutate(input),
+			rpcClient.team.invitations.decline.mutate(input),
 		onSuccess: async () => {
 			toast.success(m.dashboard_pending_toast_declined());
 			await invalidator.invalidateTeamInvitations();

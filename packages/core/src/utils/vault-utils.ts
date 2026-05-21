@@ -7,16 +7,16 @@
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import {
 	refreshVaultKeys as refreshVaultKeysCore,
-	type TRPCVaultClient,
+	type RpcVaultClient,
 } from "../services/vault-service";
 
 /**
  * Refresh vault keys from server and store in local storage.
  */
 export async function refreshVaultKeys(
-	trpcClient: TRPCVaultClient,
+	rpcClient: RpcVaultClient,
 	storage: IStorageAdapter,
 	accountEmail?: string,
 ): Promise<void> {
-	await refreshVaultKeysCore(trpcClient, storage, accountEmail);
+	await refreshVaultKeysCore(rpcClient, storage, accountEmail);
 }

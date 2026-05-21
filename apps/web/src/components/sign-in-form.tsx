@@ -1,6 +1,6 @@
 import { useCheckEmail, useSessionState } from "@bittery/core/hooks";
 import { performSRPLogin, storeLoginSession } from "@bittery/core/hooks/auth";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { Button, Input, Label, toast } from "@bittery/ui";
 import {
@@ -25,7 +25,7 @@ export default function SignInForm({
 	redirectTo?: string;
 }) {
 	const { m } = useI18n();
-	const trpc = useTRPC();
+	const rpc = useRPC();
 
 	const { data: sessionState, isLoading: isLoadingSession } = useSessionState();
 	const isQuickUnlock = Boolean(
@@ -37,7 +37,7 @@ export default function SignInForm({
 		queryFn: () => storage.getStoredSecretKey(sessionState?.email ?? undefined),
 	});
 	const registrationStatusQuery = useQuery(
-		trpc.auth.registrationStatus.queryOptions(),
+		rpc.auth.registrationStatus.queryOptions(),
 	);
 	const isCloudMode = registrationStatusQuery.data?.mode !== "self-hosted";
 	const allowPublicSignup =
@@ -129,7 +129,7 @@ function SignInFormContent({
 }) {
 	const { m } = useI18n();
 	const navigate = useNavigate();
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 	const [email, setEmail] = useState(initialEmail);
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
@@ -143,7 +143,7 @@ function SignInFormContent({
 		}) => {
 			const result = await performSRPLogin(input, {
 				crypto: wasmCrypto,
-				trpcClient,
+				rpcClient,
 				storage,
 			});
 			await storeLoginSession(result, input.secretKey, storage, input.email);

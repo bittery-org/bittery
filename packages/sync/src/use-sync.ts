@@ -1,4 +1,4 @@
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OutboundQueue, type OutboundQueueClient } from "./outbound-queue";
@@ -62,8 +62,8 @@ export interface UseSyncOptions {
  * React hook for real-time synchronization
  */
 export function useSync(options: UseSyncOptions) {
-	const trpc = useTRPC();
-	const trpcClient = useTRPCClient();
+	const rpc = useRPC();
+	const rpcClient = useRPCClient();
 
 	const {
 		serverUrl,
@@ -102,11 +102,11 @@ export function useSync(options: UseSyncOptions) {
 		async (event: Parameters<typeof invalidateQueriesForEvent>[0]["event"]) => {
 			await invalidateQueriesForEvent({
 				queryClient,
-				trpc: trpc as unknown as QueryKeyHelpers,
+				rpc: rpc as unknown as QueryKeyHelpers,
 				event,
 			});
 		},
-		[queryClient, trpc],
+		[queryClient, rpc],
 	);
 
 	useEffect(() => {
@@ -125,8 +125,8 @@ export function useSync(options: UseSyncOptions) {
 				storage: syncStorage,
 				fetch: fetchImpl,
 			},
-			trpcClient:
-				trpcClient as unknown as SyncOrchestratorOptions["trpcClient"],
+			rpcClient:
+				rpcClient as unknown as SyncOrchestratorOptions["rpcClient"],
 			itemCache: itemCacheAdapter,
 			outboundQueue,
 			itemCacheAccountEmail,
@@ -178,7 +178,7 @@ export function useSync(options: UseSyncOptions) {
 		clientId,
 		syncStorage,
 		fetchImpl,
-		trpcClient,
+		rpcClient,
 		outboundQueue,
 		itemCacheAccountEmail,
 		itemCacheServerUrl,
@@ -217,9 +217,9 @@ export function useSync(options: UseSyncOptions) {
 		() =>
 			createQueryInvalidator({
 				queryClient,
-				trpc: trpc as unknown as QueryKeyHelpers,
+				rpc: rpc as unknown as QueryKeyHelpers,
 			}),
-		[queryClient, trpc],
+		[queryClient, rpc],
 	);
 
 	return {

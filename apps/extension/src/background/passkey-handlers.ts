@@ -42,7 +42,7 @@ import {
 	setDesktopModeSentinel,
 	updateActivity,
 } from "./session-manager";
-import { trpcClient } from "./trpc-client";
+import { rpcClient } from "./rpc-client";
 import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
@@ -370,13 +370,13 @@ function readVaultAccountEmail(vault: unknown): string | undefined {
 async function getWritableVaultOptions(): Promise<
 	PasskeyWritableVaultOption[]
 > {
-	const vaults = await trpcClient.vault.list.query();
+	const vaults = await rpcClient.vault.list.query();
 	return vaults
 		.map((vault) => ({
 			id: vault.id,
 			name: vault.name,
 			accountEmail: readVaultAccountEmail(vault),
-			type: normalizeVaultType(vault.type),
+			type: normalizeVaultType(vault.vaultType),
 			role: normalizeVaultRole(vault.role),
 		}))
 		.filter((vault) => vault.role !== "read-only");
@@ -596,7 +596,7 @@ async function attachPasskeyToExistingItem(input: {
 			},
 			accountEmail,
 		},
-		trpcClient as Parameters<typeof core.items.updateItem>[1],
+		rpcClient as Parameters<typeof core.items.updateItem>[1],
 	);
 
 	await onLocalItemUpdated({
@@ -636,7 +636,7 @@ async function createItemWithPasskey(input: {
 			},
 			accountEmail,
 		},
-		trpcClient as Parameters<typeof core.items.createItem>[1],
+		rpcClient as Parameters<typeof core.items.createItem>[1],
 	);
 
 	await onLocalItemCreated({
@@ -793,7 +793,7 @@ async function updateStoredPasskey(input: {
 			},
 			accountEmail,
 		},
-		trpcClient as Parameters<typeof core.items.updateItem>[1],
+		rpcClient as Parameters<typeof core.items.updateItem>[1],
 	);
 
 	await onLocalItemUpdated({

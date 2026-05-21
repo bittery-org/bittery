@@ -1,5 +1,5 @@
 import { m as messages } from "@bittery/i18n/paraglide/messages";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Badge,
 	Button,
@@ -67,7 +67,7 @@ interface TeamEvent {
 		fullIp: string | null;
 		fullUserAgent: string | null;
 	};
-	metadata: Record<string, unknown> | null;
+	metadata: unknown;
 }
 
 interface Filters {
@@ -101,10 +101,10 @@ function defaultFilters(): Filters {
 	};
 }
 
-function toIso(value: string): string | undefined {
-	if (!value) return undefined;
+function toIso(value: string): string | null {
+	if (!value) return null;
 	const date = new Date(value);
-	if (Number.isNaN(date.getTime())) return undefined;
+	if (Number.isNaN(date.getTime())) return null;
 	return date.toISOString();
 }
 
@@ -260,19 +260,19 @@ function getEntityTypeLabel(
 export const Route = createFileRoute("/_app/admin/")({
 	beforeLoad: async ({ context }) => {
 		const access = await context.queryClient.ensureQueryData(
-			context.trpc.billing.entitlements.queryOptions(),
+			context.rpc.billing.entitlements.queryOptions(),
 		);
 
 		if (access.mode !== "cloud") {
 			throw redirect({ to: "/home" });
 		}
 
-		if (access.plan !== "team" || !access.entitlements.team_management) {
+		if (access.plan !== "team" || !access.entitlements.teamManagement) {
 			throw redirect({ to: "/billing" });
 		}
 
 		const me = await context.queryClient.ensureQueryData(
-			context.trpc.auth.me.queryOptions(),
+			context.rpc.auth.me.queryOptions(),
 		);
 
 		if (me.role !== "owner" && me.role !== "admin") {
@@ -286,16 +286,16 @@ export const Route = createFileRoute("/_app/admin/")({
 });
 
 function TeamAdminConsolePage() {
-	const trpc = useTRPC();
-	const trpcClient = useTRPCClient();
+	const rpc = useRPC();
+	const rpcClient = useRPCClient();
 	const { m } = useI18n();
 	const [filters, setFilters] = useState<Filters>(defaultFilters);
 	const [selectedEvent, setSelectedEvent] = useState<TeamEvent | null>(null);
 
-	const teamListQuery = useQuery(trpc.team.list.queryOptions());
+	const teamListQuery = useQuery(rpc.team.list.queryOptions());
 	const teamId = teamListQuery.data?.id;
 	const membersQuery = useQuery({
-		...trpc.team.members.list.queryOptions({ teamId: teamId || "" }),
+		...rpc.team.members.list.queryOptions({ teamId: teamId || "" }),
 		enabled: !!teamId,
 	});
 
@@ -303,14 +303,14 @@ function TeamAdminConsolePage() {
 		queryKey: ["admin-team-events", filters],
 		initialPageParam: undefined as string | undefined,
 		queryFn: ({ pageParam }) =>
-			trpcClient.audit.teamEvents.query({
+			rpcClient.audit.teamEvents.query({
 				limit: DEFAULT_LIMIT,
-				cursor: pageParam,
+				cursor: pageParam ?? null,
 				actionGroup: filters.actionGroup,
 				result: filters.result,
 				actorUserId:
-					filters.actorUserId !== "all" ? filters.actorUserId : undefined,
-				search: filters.search.trim() || undefined,
+					filters.actorUserId !== "all" ? filters.actorUserId : null,
+				search: filters.search.trim() || null,
 				from: toIso(filters.from),
 				to: toIso(filters.to),
 			}),

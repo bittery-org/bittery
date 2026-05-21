@@ -1,5 +1,5 @@
 import { useAccountSwitcher } from "@bittery/core/hooks";
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
+import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import {
 	AccountAvatarGroup,
 	AccountSwitcher,
@@ -89,15 +89,15 @@ export function ExtensionAccountSwitcher() {
 					const serverUrl =
 						(await storage.getServerUrl(account.email)) ||
 						"http://localhost:3000";
-					const client = createAccountTrpcClient(authToken, serverUrl);
+					const client = createAccountRpcClient(authToken, serverUrl);
 
 					const userData = await client.auth.me.query();
 
 					// Update account with team name and avatar
 					await storage.addAccount({
 						...account,
-						teamName: userData.teamName,
-						teamAvatarUrl: userData.teamAvatarUrl,
+						teamName: userData.teamName ?? undefined,
+						teamAvatarUrl: userData.teamAvatarUrl ?? undefined,
 					});
 
 					// Refresh accounts list

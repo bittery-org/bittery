@@ -1,5 +1,5 @@
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
@@ -13,6 +13,7 @@ import {
 	generateRecoveryKeyAsync,
 	generateSecretKeyAsync,
 } from "@/lib/wasm-crypto";
+import { normalizeAuthVaultKey } from "@/lib/rpc-normalizers";
 import { WorkerCrypto } from "@/lib/worker-crypto";
 
 export type { CloudPlanId } from "@bittery/shared/pricing";
@@ -60,8 +61,8 @@ export function useSignupForm({
 	onVerificationRequested?: () => void;
 }) {
 	const navigate = useNavigate();
-	const trpc = useTRPC();
-	const trpcClient = useTRPCClient();
+	const rpc = useRPC();
+	const rpcClient = useRPCClient();
 	const [secretKey, setSecretKey] = useState<string>("");
 	const [recoveryKey, setRecoveryKey] = useState<string>("");
 	const [hasDownloadedKit, setHasDownloadedKit] = useState(false);
@@ -82,13 +83,13 @@ export function useSignupForm({
 
 	// Query invitation details if token is provided
 	const invitationQuery = useQuery({
-		...trpc.team.invitations.getByToken.queryOptions({
+		...rpc.team.invitations.getByToken.queryOptions({
 			token: invitationToken || "",
 		}),
 		enabled: !!invitationToken,
 	});
 	const registrationStatusQuery = useQuery(
-		trpc.auth.registrationStatus.queryOptions(),
+		rpc.auth.registrationStatus.queryOptions(),
 	);
 
 	const invitation = invitationQuery.data;
@@ -128,9 +129,9 @@ export function useSignupForm({
 
 	const requestSignupVerificationMutation = useMutation({
 		mutationFn: async (input: { email: string }) =>
-			trpcClient.auth.requestSignupVerification.mutate({
+			rpcClient.auth.requestSignupVerification.mutate({
 				email: input.email,
-				...(invitationToken ? { invitationToken } : {}),
+				invitationToken: invitationToken ?? null,
 			}),
 		onError: (error: any) => {
 			toast.error(error.message || "Failed to send verification code");
@@ -139,10 +140,10 @@ export function useSignupForm({
 
 	const verifySignupVerificationMutation = useMutation({
 		mutationFn: async (input: { email: string; code: string }) =>
-			trpcClient.auth.verifySignupVerification.mutate({
+			rpcClient.auth.verifySignupVerification.mutate({
 				email: input.email,
 				code: input.code,
-				...(invitationToken ? { invitationToken } : {}),
+				invitationToken: invitationToken ?? null,
 			}),
 		onError: (error: any) => {
 			toast.error(error.message || "Failed to verify code");
@@ -152,10 +153,10 @@ export function useSignupForm({
 	const signupMutation = useMutation({
 		mutationFn: async (input: SignupMutationInput) => {
 			if (isInvitationSignup) {
-				return trpcClient.auth.signupWithInvitation.mutate({
+				return rpcClient.auth.signupWithInvitation.mutate({
 					token: input.token || "",
-					userId: input.userId,
-					vaultId: input.vaultId,
+					userId: input.userId ?? null,
+					vaultId: input.vaultId ?? null,
 					email: input.email,
 					signupVerificationToken: input.signupVerificationToken,
 					name: input.name,
@@ -170,14 +171,14 @@ export function useSignupForm({
 				});
 			}
 
-			return trpcClient.auth.signup.mutate({
-				userId: input.userId,
-				vaultId: input.vaultId,
+			return rpcClient.auth.signup.mutate({
+				userId: input.userId ?? null,
+				vaultId: input.vaultId ?? null,
 				email: input.email,
 				signupVerificationToken: input.signupVerificationToken,
 				name: input.name,
-				plan: input.plan,
-				organizationName: input.organizationName,
+				plan: input.plan ?? null,
+				organizationName: input.organizationName ?? null,
 				secretKeyHint: input.secretKeyHint,
 				srpSalt: input.srpSalt,
 				srpVerifier: input.srpVerifier,
@@ -191,7 +192,7 @@ export function useSignupForm({
 		onSuccess: async (data, variables) => {
 			// Store auth token and vault keys
 			await storage.storeAuthToken(data.token);
-			await storage.storeVaultKeys(data.vaultKeys);
+			await storage.storeVaultKeys(data.vaultKeys.map(normalizeAuthVaultKey));
 
 			toast.success("Account created successfully!");
 
@@ -203,7 +204,7 @@ export function useSignupForm({
 			) {
 				try {
 					const checkout =
-						await trpcClient.billing.createCheckoutSession.mutate({
+						await rpcClient.billing.createCheckoutSession.mutate({
 							plan: variables.plan,
 						});
 

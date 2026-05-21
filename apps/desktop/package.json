@@ -15,8 +15,6 @@
 		"tauri": "tauri"
 	},
 	"dependencies": {
-		"@bittery/api": "workspace:*",
-		"@bittery/auth": "workspace:*",
 		"@bittery/core": "workspace:*",
 		"@bittery/i18n": "workspace:*",
 		"@bittery/shared": "workspace:*",
@@ -35,8 +33,6 @@
 		"@tauri-apps/api": "^2",
 		"@tauri-apps/plugin-opener": "^2",
 		"@tauri-apps/plugin-store": "^2.0.1",
-		"@trpc/client": "catalog:",
-		"@trpc/tanstack-react-query": "catalog:",
 		"lucide-react": "^0.525.0",
 		"nanoid": "^5.1.6",
 		"papaparse": "^5.5.3",

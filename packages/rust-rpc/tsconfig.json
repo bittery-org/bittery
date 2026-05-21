@@ -1,0 +1,12 @@
+{
+	"extends": "../config/tsconfig.base.json",
+	"compilerOptions": {
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"allowImportingTsExtensions": true,
+		"noEmit": true,
+		"noUnusedLocals": false,
+		"noUnusedParameters": false
+	},
+	"include": ["src/**/*"],
+	"exclude": ["node_modules", "dist"]
+}

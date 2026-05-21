@@ -1,4 +1,4 @@
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import { Badge, Button, cn, toast } from "@bittery/ui";
 import {
 	IconClockTimeOutlineDuo18 as Clock,
@@ -29,7 +29,7 @@ export function PendingInvitationsList({
 	invitations,
 	canManage,
 }: PendingInvitationsListProps) {
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 	const invalidator = useQueryInvalidator();
 	const { m } = useI18n();
 
@@ -48,7 +48,7 @@ export function PendingInvitationsList({
 
 	const cancelMutation = useMutation({
 		mutationFn: (input: { invitationId: string }) =>
-			trpcClient.team.invitations.cancel.mutate(input),
+			rpcClient.team.invitations.cancel.mutate(input),
 		onSuccess: async () => {
 			toast.success(m.team_invitations_toast_cancelled());
 			await invalidator.invalidateTeam();
@@ -60,7 +60,7 @@ export function PendingInvitationsList({
 
 	const resendMutation = useMutation({
 		mutationFn: (input: { invitationId: string }) =>
-			trpcClient.team.invitations.resend.mutate(input),
+			rpcClient.team.invitations.resend.mutate(input),
 		onSuccess: async () => {
 			toast.success(m.team_invitations_toast_resent());
 			await invalidator.invalidateTeam();

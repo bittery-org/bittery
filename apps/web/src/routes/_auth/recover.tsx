@@ -1,6 +1,6 @@
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import { Button, cn, Input, Label, toast } from "@bittery/ui";
 import {
 	IconCheckOutlineDuo18 as Check,
@@ -13,6 +13,7 @@ import {
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, Fragment, useMemo, useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
+import { normalizeVaultListEntry } from "@/lib/rpc-normalizers";
 import { storage } from "@/lib/storage";
 import { generateSecretKeyAsync } from "@/lib/wasm-crypto";
 import { WorkerCrypto } from "@/lib/worker-crypto";
@@ -94,7 +95,7 @@ export const Route = createFileRoute("/_auth/recover")({
 
 function RecoverRouteComponent() {
 	const navigate = useNavigate();
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 	const { m } = useI18n();
 
 	const [step, setStep] = useState<RecoveryStep>("email");
@@ -136,7 +137,7 @@ function RecoverRouteComponent() {
 
 		setIsSubmitting(true);
 		try {
-			await trpcClient.auth.requestRecoveryVerification.mutate({
+			await rpcClient.auth.requestRecoveryVerification.mutate({
 				email: email.trim(),
 			});
 			toast.success(m.auth_recover_toast_code_requested());
@@ -163,7 +164,7 @@ function RecoverRouteComponent() {
 
 		setIsSubmitting(true);
 		try {
-			const result = await trpcClient.auth.verifyRecoveryCode.mutate({
+			const result = await rpcClient.auth.verifyRecoveryCode.mutate({
 				email: email.trim(),
 				code: code.trim(),
 			});
@@ -238,7 +239,7 @@ function RecoverRouteComponent() {
 		const workerCrypto = new WorkerCrypto();
 
 		try {
-			const recoveryData = await trpcClient.auth.getRecoveryData.query({
+			const recoveryData = await rpcClient.auth.getRecoveryData.query({
 				recoveryToken,
 			});
 
@@ -351,7 +352,7 @@ function RecoverRouteComponent() {
 				recoveryKey.split("-").slice(0, 2).join("-") || "R1";
 			const secretKeyHint = await workerCrypto.getSecretKeyHint(newSecretKey);
 
-			const resetResult = await trpcClient.auth.resetPassword.mutate({
+			const resetResult = await rpcClient.auth.resetPassword.mutate({
 				recoveryToken,
 				srpSalt,
 				srpVerifier,
@@ -364,18 +365,8 @@ function RecoverRouteComponent() {
 
 			await storage.storeAuthToken(resetResult.token);
 
-			const vaultList = await trpcClient.vault.list.query();
-			await storage.storeVaultKeys(
-				vaultList.map((vaultRecord) => ({
-					vaultId: vaultRecord.id,
-					vaultName: vaultRecord.name,
-					vaultType: vaultRecord.type,
-					vaultIcon: vaultRecord.icon,
-					vaultImageUrl: vaultRecord.imageUrl,
-					encryptedVaultKey: vaultRecord.encryptedVaultKey,
-					role: vaultRecord.role,
-				})),
-			);
+			const vaultList = await rpcClient.vault.list.query();
+			await storage.storeVaultKeys(vaultList.map(normalizeVaultListEntry));
 
 			await storage.storeEncryptedPrivateKey(
 				JSON.stringify(newEncryptedPrivateKey),

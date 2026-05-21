@@ -1,5 +1,4 @@
-import type { EntitlementKey } from "@bittery/api/billing/entitlements";
-import type { CloudPlanId } from "@bittery/api/billing/plans";
+import type { CloudPlanId, EntitlementKey } from "@bittery/shared/billing";
 import {
 	IconHistoryOutlineDuo18 as History,
 	IconGrid2OutlineDuo18 as Home,

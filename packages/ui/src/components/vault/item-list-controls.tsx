@@ -1,6 +1,6 @@
 import { useI18n } from "@bittery/i18n/react";
 import type { ItemCategory } from "@bittery/shared/types";
-import type { ComponentType, SVGProps } from "react";
+import type { ComponentType } from "react";
 import { useMemo, useState } from "react";
 import {
 	IconCalendarOutlineDuo18,
@@ -35,7 +35,7 @@ import {
 	SelectTrigger,
 } from "../select";
 
-type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
+type IconComponent = ComponentType<{ className?: string }>;
 
 export type ItemListCategoryFilter = "all" | ItemCategory;
 export type ItemListSortField = "title" | "createdAt" | "updatedAt";
@@ -80,6 +80,8 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
 	},
 ];
 
+const DEFAULT_CATEGORY_OPTION = CATEGORY_OPTIONS[0]!;
+
 interface VaultItemListControlsProps {
 	categoryFilter: ItemListCategoryFilter;
 	onCategoryFilterChange: (value: ItemListCategoryFilter) => void;
@@ -107,7 +109,7 @@ export function VaultItemListControls({
 	const selectedCategory = useMemo(
 		() =>
 			CATEGORY_OPTIONS.find((option) => option.value === categoryFilter) ??
-			CATEGORY_OPTIONS[0],
+			DEFAULT_CATEGORY_OPTION,
 		[categoryFilter],
 	);
 

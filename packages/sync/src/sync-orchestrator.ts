@@ -17,7 +17,7 @@ interface MutableItemCacheAdapter extends ItemCacheAdapter {
 
 export interface SyncOrchestratorOptions {
 	syncManager: Omit<SyncManagerOptions, "onEvent" | "onStatusChange">;
-	trpcClient: DeltaSyncClient & CatchUpClient;
+	rpcClient: DeltaSyncClient & CatchUpClient;
 	itemCache: MutableItemCacheAdapter;
 	outboundQueue: OutboundQueue;
 	itemCacheAccountEmail?: string | null;
@@ -135,7 +135,7 @@ export class SyncOrchestrator {
 		}
 
 		await performDeltaSync(
-			this.options.trpcClient,
+			this.options.rpcClient,
 			this.options.itemCache,
 			event,
 			this.getDeltaSyncAccountEmail(),
@@ -167,7 +167,7 @@ export class SyncOrchestrator {
 
 			let fullRefreshHandled = false;
 			const result = await runCatchUp({
-				client: this.options.trpcClient,
+				client: this.options.rpcClient,
 				initialCursor: cursor,
 				shouldProcessEvent: (event) =>
 					event.clientId !== this.options.outboundQueue.getClientId() &&
@@ -210,7 +210,7 @@ export class SyncOrchestrator {
 				if (this.getClientForAccount) {
 					return this.getClientForAccount(email);
 				}
-				return this.options.trpcClient as unknown as OutboundQueueClient;
+				return this.options.rpcClient as unknown as OutboundQueueClient;
 			});
 
 			for (const mapping of this.options.outboundQueue.consumeTempIdMappings()) {

@@ -21,7 +21,7 @@ import {
 	setMasterUnlockKey,
 	updateActivity,
 } from "./session-manager";
-import { trpcClient } from "./trpc-client";
+import { rpcClient } from "./rpc-client";
 import type { MessageResponse } from "./types";
 
 async function isDesktopUnlockedNow(): Promise<boolean> {
@@ -48,7 +48,7 @@ export async function handleLogin(payload: {
 	// Perform SRP login using shared utility
 	const result = await performSRPLogin(
 		{ email, password, secretKey },
-		{ crypto: cryptoAdapter, trpcClient, storage },
+		{ crypto: cryptoAdapter, rpcClient, storage },
 	);
 
 	// Store session data using shared utility
@@ -85,7 +85,7 @@ export async function handleQuickUnlock(payload: {
 	// Perform SRP unlock using shared utility (retrieves stored secret key internally)
 	const result = await performSRPUnlock(
 		{ email, password },
-		{ crypto: cryptoAdapter, trpcClient, storage },
+		{ crypto: cryptoAdapter, rpcClient, storage },
 	);
 
 	// Store session data using shared utility
@@ -327,7 +327,7 @@ export async function handleQuickUnlockAll(payload: {
 			// Perform SRP unlock for this account
 			const result = await performSRPUnlock(
 				{ email: account.email, password },
-				{ crypto: cryptoAdapter, trpcClient, storage },
+				{ crypto: cryptoAdapter, rpcClient, storage },
 			);
 
 			// Store unlock session data

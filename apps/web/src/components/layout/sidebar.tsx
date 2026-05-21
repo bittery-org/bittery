@@ -1,4 +1,4 @@
-import { useTRPC } from "@bittery/shared/trpc";
+import { useRPC } from "@bittery/shared/rpc";
 import {
 	Avatar,
 	AvatarFallback,
@@ -28,6 +28,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ImportOnboardingCard } from "@/components/import/import-onboarding-card";
 import { appNavItems, filterNavItems } from "@/components/layout/nav-config";
+import {
+	normalizeCloudPlanId,
+	normalizeDeploymentMode,
+	normalizeEntitlements,
+	normalizeTeamRole,
+} from "@/lib/rpc-normalizers";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -53,12 +59,12 @@ function getNavLabel(path: string, m: ReturnType<typeof useI18n>["m"]) {
 }
 
 function UserNav() {
-	const trpc = useTRPC();
+	const rpc = useRPC();
 	const { m } = useI18n();
 	const queryClient = useQueryClient();
 	const navigate = useNavigate();
 	const { isMobile, setOpenMobile } = useSidebar();
-	const userQuery = useQuery(trpc.auth.me.queryOptions());
+	const userQuery = useQuery(rpc.auth.me.queryOptions());
 	const user = userQuery.data;
 	const initials = user?.name
 		? user.name
@@ -134,7 +140,7 @@ function UserNav() {
 }
 
 export function AppSidebar() {
-	const trpc = useTRPC();
+	const rpc = useRPC();
 	const { m } = useI18n();
 	const routerState = useRouterState();
 	const currentPath = routerState.location.pathname;
@@ -143,13 +149,13 @@ export function AppSidebar() {
 	const handleMobileLinkClick = () => {
 		if (isMobile) setOpenMobile(false);
 	};
-	const entitlementQuery = useQuery(trpc.billing.entitlements.queryOptions());
-	const meQuery = useQuery(trpc.auth.me.queryOptions());
+	const entitlementQuery = useQuery(rpc.billing.entitlements.queryOptions());
+	const meQuery = useQuery(rpc.auth.me.queryOptions());
 	const navItems = filterNavItems(appNavItems, {
-		mode: entitlementQuery.data?.mode ?? "cloud",
-		entitlements: entitlementQuery.data?.entitlements ?? {},
-		plan: entitlementQuery.data?.plan,
-		role: meQuery.data?.role,
+		mode: normalizeDeploymentMode(entitlementQuery.data?.mode),
+		entitlements: normalizeEntitlements(entitlementQuery.data?.entitlements),
+		plan: normalizeCloudPlanId(entitlementQuery.data?.plan),
+		role: meQuery.data?.role ? normalizeTeamRole(meQuery.data.role) : undefined,
 	});
 
 	return (

@@ -1,6 +1,6 @@
-import { type CloudPlanId, planMemberLimits } from "@bittery/api/billing/plans";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { type CloudPlanId, planMemberLimits } from "@bittery/shared/billing";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Badge,
 	Button,
@@ -30,12 +30,16 @@ import {
 	getAttachmentUsageSnapshot,
 } from "@/lib/billing-attachment-usage";
 import { formatDate } from "@/lib/i18n-format";
+import {
+	normalizeCloudPlanId,
+	normalizeEntitlementLimits,
+} from "@/lib/rpc-normalizers";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/billing")({
 	beforeLoad: async ({ context }) => {
 		const access = await context.queryClient.ensureQueryData(
-			context.trpc.billing.entitlements.queryOptions(),
+			context.rpc.billing.entitlements.queryOptions(),
 		);
 
 		if (access.mode !== "cloud") {
@@ -43,7 +47,7 @@ export const Route = createFileRoute("/_app/billing")({
 		}
 
 		const me = await context.queryClient.ensureQueryData(
-			context.trpc.auth.me.queryOptions(),
+			context.rpc.auth.me.queryOptions(),
 		);
 		if (me.role !== "owner" && me.role !== "admin") {
 			throw redirect({ to: "/team" });
@@ -227,12 +231,16 @@ function formatEntitlementLabel(key: string, m: BillingMessageCatalog): string {
 	switch (key) {
 		case "sentinel":
 			return m.billing_entitlement_sentinel();
+		case "teamManagement":
 		case "team_management":
 			return m.billing_entitlement_team_management();
+		case "vaultSharing":
 		case "vault_sharing":
 			return m.billing_entitlement_vault_sharing();
+		case "shareLinks":
 		case "share_links":
 			return m.billing_entitlement_share_links();
+		case "billingPortal":
 		case "billing_portal":
 			return m.billing_entitlement_billing_portal();
 		case "attachments":
@@ -243,21 +251,21 @@ function formatEntitlementLabel(key: string, m: BillingMessageCatalog): string {
 }
 
 function BillingRoute() {
-	const trpc = useTRPC();
-	const trpcClient = useTRPCClient();
+	const rpc = useRPC();
+	const rpcClient = useRPCClient();
 	const queryClient = useQueryClient();
 	const { checkout } = Route.useSearch();
 	const { locale, m } = useI18n();
 
-	const billingQuery = useQuery(trpc.billing.status.queryOptions());
-	const entitlementsQuery = useQuery(trpc.billing.entitlements.queryOptions());
+	const billingQuery = useQuery(rpc.billing.status.queryOptions());
+	const entitlementsQuery = useQuery(rpc.billing.entitlements.queryOptions());
 	const attachmentUsageQuery = useQuery(
-		trpc.billing.attachmentUsage.queryOptions(),
+		rpc.billing.attachmentUsage.queryOptions(),
 	);
 
 	const checkoutMutation = useMutation({
 		mutationFn: (plan: (typeof paidPlanIds)[number]) =>
-			trpcClient.billing.createCheckoutSession.mutate({ plan }),
+			rpcClient.billing.createCheckoutSession.mutate({ plan }),
 		onSuccess: (result) => {
 			if (result.url) {
 				window.location.href = result.url;
@@ -271,7 +279,7 @@ function BillingRoute() {
 	});
 
 	const portalMutation = useMutation({
-		mutationFn: () => trpcClient.billing.createPortalSession.mutate(),
+		mutationFn: () => rpcClient.billing.createPortalSession.mutate(),
 		onSuccess: (result) => {
 			window.location.href = result.url;
 		},
@@ -282,15 +290,15 @@ function BillingRoute() {
 
 	useEffect(() => {
 		if (checkout !== "success") return;
-		queryClient.invalidateQueries({ queryKey: trpc.billing.status.queryKey() });
+		queryClient.invalidateQueries({ queryKey: rpc.billing.status.queryKey() });
 		queryClient.invalidateQueries({
-			queryKey: trpc.billing.entitlements.queryKey(),
+			queryKey: rpc.billing.entitlements.queryKey(),
 		});
 		queryClient.invalidateQueries({
-			queryKey: trpc.billing.attachmentUsage.queryKey(),
+			queryKey: rpc.billing.attachmentUsage.queryKey(),
 		});
 		toast.success(m.billing_toast_checkout_refreshing());
-	}, [checkout, m, queryClient, trpc]);
+	}, [checkout, m, queryClient, rpc]);
 
 	if (billingQuery.isLoading) {
 		return (
@@ -336,10 +344,18 @@ function BillingRoute() {
 	const attachmentUsage = attachmentUsageQuery.data
 		? getAttachmentUsageSnapshot({
 				attachmentsEnabled: attachmentUsageQuery.data.attachmentsEnabled,
-				committedStorageBytes: attachmentUsageQuery.data.committedStorageBytes,
-				quotaBytes: attachmentUsageQuery.data.quotaBytes,
+				committedStorageBytes: Number(
+					attachmentUsageQuery.data.committedStorageBytes,
+				),
+				quotaBytes:
+					attachmentUsageQuery.data.quotaBytes === null
+						? null
+						: Number(attachmentUsageQuery.data.quotaBytes),
 			})
 		: null;
+	const entitlementLimits = normalizeEntitlementLimits(
+		entitlementsQuery.data?.limits,
+	);
 
 	const getButtonForPlan = (planId: PlanId) => {
 		const isCurrent = billing.plan === planId;
@@ -387,7 +403,9 @@ function BillingRoute() {
 		}
 
 		const planOrder: PlanId[] = ["free", "personal", "family", "team"];
-		const currentIndex = planOrder.indexOf(billing.plan);
+		const currentIndex = planOrder.indexOf(
+			normalizeCloudPlanId(billing.plan) ?? "free",
+		);
 		const targetIndex = planOrder.indexOf(planId);
 		const isUpgrade = targetIndex > currentIndex;
 
@@ -803,24 +821,21 @@ function BillingRoute() {
 							<>
 								<Separator className="my-4" />
 								<div className="flex flex-wrap gap-4">
-									{entitlementsQuery.data.limits.share_links !== null &&
-										entitlementsQuery.data.limits.share_links !== undefined && (
+												{entitlementLimits.shareLinks !== null && (
 											<div className="text-muted-foreground text-xs">
 												<span className="font-medium text-foreground">
 													{getShareLinksLimitLabel(
-														entitlementsQuery.data.limits.share_links,
+																	entitlementLimits.shareLinks,
 														m,
 													)}
 												</span>
 											</div>
 										)}
-									{entitlementsQuery.data.limits.shared_vaults !== null &&
-										entitlementsQuery.data.limits.shared_vaults !==
-											undefined && (
+												{entitlementLimits.sharedVaults !== null && (
 											<div className="text-muted-foreground text-xs">
 												<span className="font-medium text-foreground">
 													{getSharedVaultsLimitLabel(
-														entitlementsQuery.data.limits.shared_vaults,
+																	entitlementLimits.sharedVaults,
 														m,
 													)}
 												</span>

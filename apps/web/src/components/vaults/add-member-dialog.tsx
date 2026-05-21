@@ -2,7 +2,7 @@ import {
 	getDecryptedVaultKey,
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Avatar,
 	AvatarFallback,
@@ -56,14 +56,14 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 		Record<string, "admin" | "member" | "read-only">
 	>({});
 
-	const trpc = useTRPC();
-	const trpcClient = useTRPCClient();
+	const rpc = useRPC();
+	const rpcClient = useRPCClient();
 	const invalidator = useQueryInvalidator();
 	const { m } = useI18n();
 
 	// Fetch available team members (not already in vault)
 	const availableQuery = useQuery({
-		...trpc.vault.members.availableTeamMembers.queryOptions({ vaultId }),
+		...rpc.vault.members.availableTeamMembers.queryOptions({ vaultId }),
 		enabled: open,
 	});
 
@@ -83,7 +83,7 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 			userId: string;
 			role: "admin" | "member" | "read-only";
 			encryptedVaultKey: string;
-		}) => trpcClient.vault.members.add.mutate(input),
+		}) => rpcClient.vault.members.add.mutate({ ...input, clientId: null }),
 		onSuccess: async (_data, variables) => {
 			setAddedUserIds((prev) => new Set([...prev, variables.userId]));
 			setAddingUserId(null);

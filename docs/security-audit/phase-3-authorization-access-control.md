@@ -3,6 +3,8 @@
 Date: 2026-03-10  
 Scope: tRPC authorization boundaries, ownership checks, IDOR resistance, sync/SSE scoping, and related server-side access control paths.
 
+> Note: `apps/server`, `packages/api`, `packages/auth`, and `packages/db` were removed after the Rust server cutover. Any references to those paths in this document are historical audit context, not current implementation guidance.
+
 ## 1. Summary
 
 I reviewed all 104 tRPC procedures, the SSE sync endpoint, and the server-side CDN proxy used for stored blobs.

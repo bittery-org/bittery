@@ -1,7 +1,7 @@
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ICrypto } from "@bittery/types";
-import type { AccountResolver, DefaultTrpcClient } from "./account-resolver";
+import type { AccountResolver, DefaultRpcClient } from "./account-resolver";
 
 /**
  * Image file input - supports File (browser) or Blob
@@ -47,14 +47,14 @@ export interface ConvertVaultTypeResult {
 export interface VaultListItem {
 	id: string;
 	name: string;
-	type: "personal" | "team";
+	vaultType: string;
 	icon: string | null;
 	imageUrl: string | null;
 	encryptedVaultKey: string;
-	role: "owner" | "admin" | "member" | "read-only";
+	role: string;
 }
 
-export interface TRPCVaultClient {
+export interface RpcVaultClient {
 	vault: {
 		list: {
 			query: () => Promise<VaultListItem[]>;
@@ -62,24 +62,44 @@ export interface TRPCVaultClient {
 	};
 }
 
+export type TRPCVaultClient = RpcVaultClient;
+
+function normalizeVaultType(vaultType: string): "personal" | "team" {
+	return vaultType === "team" ? "team" : "personal";
+}
+
+function normalizeVaultRole(
+	role: string,
+): "owner" | "admin" | "member" | "read-only" {
+	switch (role) {
+		case "owner":
+		case "admin":
+		case "member":
+		case "read-only":
+			return role;
+		default:
+			return "member";
+	}
+}
+
 /**
  * Refresh vault keys from server and store in local storage.
  */
 export async function refreshVaultKeys(
-	trpcClient: TRPCVaultClient,
+	rpcClient: RpcVaultClient,
 	storage: IStorageAdapter,
 	accountEmail?: string,
 ): Promise<void> {
-	const vaultList = await trpcClient.vault.list.query();
+	const vaultList = await rpcClient.vault.list.query();
 	await storage.storeVaultKeys(
 		vaultList.map((vault) => ({
 			vaultId: vault.id,
 			vaultName: vault.name,
-			vaultType: vault.type,
+			vaultType: normalizeVaultType(vault.vaultType),
 			vaultIcon: vault.icon,
 			vaultImageUrl: vault.imageUrl,
 			encryptedVaultKey: vault.encryptedVaultKey,
-			role: vault.role,
+			role: normalizeVaultRole(vault.role),
 		})),
 		accountEmail,
 	);
@@ -104,7 +124,7 @@ export class VaultService {
 
 	async createVault(
 		input: CreateVaultInput,
-		defaultClient: DefaultTrpcClient,
+		defaultClient: DefaultRpcClient,
 	): Promise<CreateVaultResult> {
 		const trimmedName = input.name.trim();
 		if (!trimmedName) {
@@ -130,6 +150,7 @@ export class VaultService {
 			}
 
 			const upload = await client.vault.createImageUpload.mutate({
+				vaultId: null,
 				fileName,
 				contentType,
 			});
@@ -181,10 +202,11 @@ export class VaultService {
 		const result = await client.vault.create.mutate({
 			vaultId,
 			name: trimmedName,
-			type: input.type,
+			vaultType: input.type,
 			encryptedVaultKey: JSON.stringify(encryptedVaultKeyData),
 			icon: input.icon,
-			...(imageKey ? { imageKey } : {}),
+			imageKey: imageKey ?? null,
+			clientId: null,
 		});
 
 		return { vaultId: result.vaultId };
@@ -192,7 +214,7 @@ export class VaultService {
 
 	async updateVault(
 		input: UpdateVaultInput,
-		defaultClient: DefaultTrpcClient,
+		defaultClient: DefaultRpcClient,
 	): Promise<void> {
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
@@ -239,29 +261,40 @@ export class VaultService {
 			...(input.name !== undefined ? { name: input.name.trim() } : {}),
 			...(input.icon !== undefined ? { icon: input.icon } : {}),
 			...(imageKey !== undefined ? { imageKey } : {}),
-		});
+			clientId: null,
+		} as Parameters<typeof client.vault.update.mutate>[0]);
 	}
 
 	async convertVaultType(
 		input: ConvertVaultTypeInput,
-		defaultClient: DefaultTrpcClient,
+		defaultClient: DefaultRpcClient,
 	): Promise<ConvertVaultTypeResult> {
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
 			input.accountEmail,
 		);
-		return client.vault.convertType.mutate({
+		const result = await client.vault.convertType.mutate({
 			vaultId: input.vaultId,
 			targetType: input.targetType,
-			...(input.personalEncryptedVaultKey
-				? { personalEncryptedVaultKey: input.personalEncryptedVaultKey }
-				: {}),
+			personalEncryptedVaultKey: input.personalEncryptedVaultKey ?? null,
+			clientId: null,
 		});
+
+		if (!result.success) {
+			throw new Error("Vault type conversion failed");
+		}
+
+		return {
+			success: true,
+			vaultId: result.vaultId,
+			previousType: normalizeVaultType(result.previousType),
+			newType: normalizeVaultType(result.newType),
+		};
 	}
 
 	async deleteVault(
 		vaultId: string,
-		defaultClient: DefaultTrpcClient,
+		defaultClient: DefaultRpcClient,
 		accountEmail?: string,
 	): Promise<void> {
 		const client = await this.accounts.getClientForAccount(
@@ -272,7 +305,7 @@ export class VaultService {
 	}
 
 	async refreshVaultKeys(
-		defaultClient: DefaultTrpcClient,
+		defaultClient: DefaultRpcClient,
 		accountEmail?: string,
 	): Promise<void> {
 		const client = await this.accounts.getClientForAccount(

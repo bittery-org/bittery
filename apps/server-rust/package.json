@@ -1,0 +1,9 @@
+{
+	"name": "server-rust",
+	"private": true,
+	"scripts": {
+		"dev": "cargo watch -x run",
+		"dev:once": "cargo run",
+		"check-types": "cargo check"
+	}
+}

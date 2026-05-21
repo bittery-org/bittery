@@ -18,8 +18,6 @@
 		"dev": "vite dev --port=3001"
 	},
 	"dependencies": {
-		"@bittery/api": "workspace:*",
-		"@bittery/auth": "workspace:*",
 		"@bittery/core": "workspace:*",
 		"@bittery/crypto-wasm": "workspace:*",
 		"@bittery/i18n": "workspace:*",
@@ -37,9 +35,6 @@
 		"@tanstack/react-router-with-query": "^1.130.17",
 		"@tanstack/react-start": "^1.132.31",
 		"@tanstack/router-plugin": "^1.132.31",
-		"@trpc/client": "catalog:",
-		"@trpc/server": "catalog:",
-		"@trpc/tanstack-react-query": "catalog:",
 		"date-fns": "^4.1.0",
 		"jszip": "^3.10.1",
 		"lucide-react": "^0.525.0",

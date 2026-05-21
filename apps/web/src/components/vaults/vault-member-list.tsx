@@ -2,7 +2,7 @@ import {
 	getDecryptedVaultKey,
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -41,7 +41,7 @@ interface VaultMember {
 	userId: string;
 	name: string;
 	email: string;
-	role: "owner" | "admin" | "member" | "read-only";
+	role: string;
 }
 
 interface VaultMemberListProps {
@@ -55,7 +55,7 @@ export function VaultMemberList({
 	members,
 	userRole,
 }: VaultMemberListProps) {
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 	const invalidator = useQueryInvalidator();
 	const { m } = useI18n();
 	const canManage = userRole === "owner" || userRole === "admin";
@@ -67,7 +67,7 @@ export function VaultMemberList({
 			vaultId: string;
 			userId: string;
 			role: "admin" | "member" | "read-only";
-		}) => trpcClient.vault.members.updateRole.mutate(input),
+		}) => rpcClient.vault.members.updateRole.mutate(input),
 		onSuccess: async () => {
 			toast.success(m.vaults_member_list_toast_role_updated());
 			await invalidator.invalidateVaultMembers(vaultId);
@@ -123,7 +123,7 @@ export function VaultMemberList({
 			}
 
 			// Step 2: Get rotation data from server
-			const rotationData = await trpcClient.vault.members.getRotationData.query(
+			const rotationData = await rpcClient.vault.members.getRotationData.query(
 				{
 					vaultId,
 					excludeUserId: userId,
@@ -145,13 +145,14 @@ export function VaultMemberList({
 			);
 
 			// Step 4: Submit to server
-			const result = await trpcClient.vault.members.remove.mutate({
+			const result = await rpcClient.vault.members.remove.mutate({
 				vaultId,
 				userId,
 				keyRotation: {
 					memberKeys: rotationResult.memberEncryptedKeys,
 					reEncryptedItems: rotationResult.reEncryptedItems,
 				},
+				clientId: null,
 			});
 
 			// Step 5: Update local session storage with new vault key
@@ -247,7 +248,12 @@ export function VaultMemberList({
 
 	// Sort: owner first, then admin, then member, then read-only
 	const sortedMembers = [...members].sort((a, b) => {
-		const order = { owner: 0, admin: 1, member: 2, "read-only": 3 };
+		const order: Record<string, number> = {
+			owner: 0,
+			admin: 1,
+			member: 2,
+			"read-only": 3,
+		};
 		return (order[a.role] ?? 4) - (order[b.role] ?? 4);
 	});
 

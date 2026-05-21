@@ -2,7 +2,7 @@ import {
 	buildDeviceSetupLinkUri,
 	buildDeviceSetupQrUri,
 } from "@bittery/shared";
-import { useTRPC } from "@bittery/shared/trpc";
+import { useRPC } from "@bittery/shared/rpc";
 import {
 	Button,
 	copyWithToast,
@@ -48,10 +48,10 @@ function WebDeviceSetupDialogContent({
 	onOpenChange,
 }: Pick<WebDeviceSetupDialogProps, "onOpenChange">) {
 	const { m } = useI18n();
-	const trpc = useTRPC();
+	const rpc = useRPC();
 	const serverUrl = getServerUrl();
 
-	const meQuery = useQuery(trpc.auth.me.queryOptions());
+	const meQuery = useQuery(rpc.auth.me.queryOptions());
 	const email = meQuery.data?.email ?? "";
 	const teamName = meQuery.data?.teamName ?? meQuery.data?.name ?? "";
 

@@ -44,7 +44,7 @@ export {
 	checkEmailExists,
 	clearSession,
 	getSessionState,
-	type IAuthTRPCClient,
+	type IAuthClient,
 	type LoginResult,
 	type LoginUserData,
 	performSRPLogin,

@@ -2,7 +2,7 @@ import {
 	getDecryptedVaultKey,
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -32,7 +32,7 @@ interface Member {
 	userId: string;
 	name: string;
 	email: string;
-	role: "owner" | "admin" | "member";
+	role: string;
 	joinedAt: string | null;
 }
 
@@ -51,7 +51,7 @@ export function MemberList({
 	canManageMembers,
 	isSelfHostedMode = false,
 }: MemberListProps) {
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 	const invalidator = useQueryInvalidator();
 	const [removingUserId, setRemovingUserId] = useState<string | null>(null);
 	const [isRotating, setIsRotating] = useState(false);
@@ -85,7 +85,7 @@ export function MemberList({
 
 			// Step 2: Fetch team rotation data from server
 			const teamRotationData =
-				await trpcClient.team.members.getTeamRotationData.query({
+				await rpcClient.team.members.getTeamRotationData.query({
 					teamId,
 					excludeUserId: userId,
 				});
@@ -147,10 +147,11 @@ export function MemberList({
 			}
 
 			// Step 4: Submit to server
-			const result = await trpcClient.team.members.remove.mutate({
+			const result = await rpcClient.team.members.remove.mutate({
 				teamId,
 				userId,
 				vaultRotations,
+				clientId: null,
 			});
 
 			// Step 5: Update local vault keys in storage

@@ -6,7 +6,7 @@
  * Each account's Master Unlock Key is derived from the password + that account's secret key.
  */
 
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import {
 	type UseMutationResult,
 	useMutation,
@@ -102,7 +102,7 @@ export interface UseQuickUnlockAllOptions {
 export function useQuickUnlockAll(
 	options: UseQuickUnlockAllOptions = {},
 ): UseMutationResult<QuickUnlockAllResult, Error, QuickUnlockAllInput> {
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 	const crypto = usePlatformCrypto();
 	const storage = usePlatformStorage();
 	const queryClient = useQueryClient();
@@ -148,7 +148,7 @@ export function useQuickUnlockAll(
 							email: account.email,
 							password,
 						},
-						{ crypto, trpcClient, storage },
+						{ crypto, rpcClient, storage },
 					);
 
 					// Store unlock session data

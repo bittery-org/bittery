@@ -43,7 +43,7 @@ import { defaultServerUrl } from "@/constants/server-url";
 import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
 import { arrayBufferToBase64 } from "../../src/lib/crypto";
-import { useServerUrl } from "../../src/lib/trpc";
+import { useServerUrl } from "../../src/lib/rpc";
 import { useI18n } from "../../src/providers/i18n-provider";
 import { type AccountMetadata, storage } from "../../src/services/storage";
 

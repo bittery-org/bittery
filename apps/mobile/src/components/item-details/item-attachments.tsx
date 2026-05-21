@@ -277,7 +277,7 @@ export function ItemAttachments({
 			toast.show({
 				variant: "danger",
 				label: m.vaults_detail_items_attachments_toast_file_too_large({
-					maxFileSize: formatBytes(attachmentMaxFileSizeBytes),
+					maxFileSize: formatBytes(Number(attachmentMaxFileSizeBytes)),
 				}),
 				placement: "bottom",
 			});
@@ -319,7 +319,7 @@ export function ItemAttachments({
 				toast.show({
 					variant: "danger",
 					label: m.vaults_detail_items_attachments_toast_file_too_large({
-						maxFileSize: formatBytes(attachmentMaxFileSizeBytes),
+						maxFileSize: formatBytes(Number(attachmentMaxFileSizeBytes)),
 					}),
 					placement: "bottom",
 				});

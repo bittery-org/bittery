@@ -3,6 +3,8 @@
 Date: 2026-03-10
 Scope: SRP authentication, opaque session tokens, session lifecycle, lock/unlock coupling, rate limiting, information leakage, and platform-specific session storage.
 
+> Note: `apps/server`, `packages/api`, `packages/auth`, `packages/db`, and `packages/rate-limit` were removed after the Rust server cutover. Any references to those paths in this document are historical audit context, not current implementation guidance.
+
 ## 1. Summary
 
 The opaque-session refactor is partially in place and several core controls are sound: session tokens are 32-byte random values, the server stores only a SHA-256 hash, bearer lookup is done against the hash, server-side platform lifetimes are implemented, refresh rotation deletes the previous session row in the same transaction, and password-change/logout invalidation is immediate.

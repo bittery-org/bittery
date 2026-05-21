@@ -56,7 +56,7 @@ describe("sync engine regressions", () => {
 				clientId: "self_client",
 				storage,
 			},
-			trpcClient: {
+			rpcClient: {
 				sync: {
 					getEventsSince: {
 						query: async () => ({
@@ -138,7 +138,7 @@ describe("sync engine regressions", () => {
 				clientId: "self_client",
 				storage,
 			},
-			trpcClient: {
+			rpcClient: {
 				sync: {
 					getEventsSince: {
 						query: async () => ({
@@ -198,7 +198,7 @@ describe("sync engine regressions", () => {
 				clientId: "self_client",
 				storage,
 			},
-			trpcClient: {
+			rpcClient: {
 				sync: {
 					getEventsSince: {
 						query: async () => ({

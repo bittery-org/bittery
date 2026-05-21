@@ -605,13 +605,17 @@ export function useCredentialProviderSync(
 
 			try {
 				if (mutation.operation === "update_item") {
-					await account.trpcClient.vault.updateItem.mutate({
+					await account.rpcClient.vault.updateItem.mutate({
 						itemId: mutation.itemId,
 						encryptedData: mutation.encryptedData,
 						encryptionIv: mutation.encryptionIv,
+						encryptionAlgorithm:
+							mutation.encryptionAlgorithm || "AES-GCM-AAD-V1",
+						expectedVersion: null,
+						clientId: null,
 					});
 				} else if (mutation.operation === "create_item") {
-					await account.trpcClient.vault.createItem.mutate({
+					await account.rpcClient.vault.createItem.mutate({
 						itemId: mutation.itemId,
 						vaultId: mutation.vaultId,
 						category: "login",
@@ -619,6 +623,7 @@ export function useCredentialProviderSync(
 						encryptionIv: mutation.encryptionIv,
 						encryptionAlgorithm:
 							mutation.encryptionAlgorithm || "AES-GCM-AAD-V1",
+						clientId: null,
 					});
 				} else {
 					throw new Error(

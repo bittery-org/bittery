@@ -1,5 +1,5 @@
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core";
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
+import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import type { OutboundQueueClient, SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { ICrypto } from "@bittery/types";
@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	findAccountEmailBySessionId,
 	invalidateDesktopAccountSession,
-	isUnauthorizedTrpcError,
+	isUnauthorizedRpcError,
 } from "@/lib/session-invalidation";
 import { storage } from "@/lib/storage";
 import {
@@ -169,7 +169,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 				storage.getServerUrl(normalizedEmail),
 			]);
 			if (accountToken) {
-				return createAccountTrpcClient(
+				return createAccountRpcClient(
 					accountToken,
 					accountServerUrl || serverUrl || "http://localhost:3000",
 				) as unknown as OutboundQueueClient;
@@ -181,7 +181,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 					`No auth token available for account queue drain (${normalizedEmail})`,
 				);
 			}
-			return createAccountTrpcClient(
+			return createAccountRpcClient(
 				fallbackToken,
 				serverUrl || "http://localhost:3000",
 			) as unknown as OutboundQueueClient;
@@ -262,9 +262,9 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 				}
 
 				try {
-					await createAccountTrpcClient(token, url).auth.me.query();
+					await createAccountRpcClient(token, url).auth.me.query();
 				} catch (error) {
-					if (!isUnauthorizedTrpcError(error)) {
+					if (!isUnauthorizedRpcError(error)) {
 						continue;
 					}
 

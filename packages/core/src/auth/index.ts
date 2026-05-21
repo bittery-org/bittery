@@ -10,7 +10,7 @@ export {
 	clearSession,
 	type FinishLoginResponse,
 	getSessionState,
-	type IAuthTRPCClient,
+	type IAuthClient,
 	type LoginResult,
 	type LoginUserData,
 	performSRPLogin,

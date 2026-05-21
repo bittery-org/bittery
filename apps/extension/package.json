@@ -14,8 +14,6 @@
 		"test:e2e:debug": "playwright test --debug"
 	},
 	"dependencies": {
-		"@bittery/api": "workspace:*",
-		"@bittery/auth": "workspace:*",
 		"@bittery/core": "workspace:*",
 		"@bittery/crypto-wasm": "workspace:*",
 		"@bittery/shared": "workspace:*",
@@ -26,8 +24,6 @@
 		"@tanstack/react-form": "^1.23.5",
 		"@tanstack/react-query": "^5.85.5",
 		"@tanstack/react-router": "^1.132.31",
-		"@trpc/client": "catalog:",
-		"@trpc/tanstack-react-query": "catalog:",
 		"jsqr": "^1.4.0",
 		"react": "catalog:",
 		"react-dom": "catalog:",

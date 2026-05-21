@@ -8,7 +8,7 @@ import {
 	useVaultItems,
 } from "@bittery/core/hooks";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
-import { useTRPC } from "@bittery/shared/trpc";
+import { useRPC } from "@bittery/shared/rpc";
 import type {
 	DecryptedItem,
 	DecryptedItemData,
@@ -66,7 +66,7 @@ function VaultDetailPage() {
 	const { vaultId } = Route.useParams();
 	const { itemId: selectedItemIdFromSearch } = Route.useSearch();
 	const navigate = useNavigate();
-	const trpc = useTRPC();
+	const rpc = useRPC();
 	const { m } = useI18n();
 
 	const [isCreateItemSheetOpen, setIsCreateItemSheetOpen] = useState(false);
@@ -94,7 +94,7 @@ function VaultDetailPage() {
 	const convertVaultType = useConvertVaultType();
 
 	const membersQuery = useQuery(
-		trpc.vault.members.list.queryOptions({ vaultId }),
+		rpc.vault.members.list.queryOptions({ vaultId }),
 	);
 
 	const availableTags = useAvailableTags(decryptedItems);

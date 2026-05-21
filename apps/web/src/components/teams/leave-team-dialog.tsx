@@ -2,7 +2,7 @@ import {
 	getDecryptedVaultKey,
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -33,7 +33,7 @@ interface LeaveTeamDialogProps {
 export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 	const [open, setOpen] = useState(false);
 	const [isLeaving, setIsLeaving] = useState(false);
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
 	const { m } = useI18n();
@@ -63,7 +63,7 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 
 			// Fetch rotation data for all team vaults
 			const leaveRotationData =
-				await trpcClient.team.getLeaveRotationData.query({ teamId });
+				await rpcClient.team.getLeaveRotationData.query({ teamId });
 
 			// Perform key rotation for each team vault
 			const vaultRotations: Array<{
@@ -119,9 +119,10 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 				});
 			}
 
-			await trpcClient.team.leave.mutate({
+			await rpcClient.team.leave.mutate({
 				teamId,
 				vaultRotations,
+				clientId: null,
 			});
 
 			toast.success(m.team_leave_dialog_toast_left());
