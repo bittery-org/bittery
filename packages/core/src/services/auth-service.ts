@@ -396,6 +396,12 @@ export async function performSRPLogin(
 		// Store token before fetchVaultKeys so the auth header is available
 		await deps.storage.storeAuthToken(finishResult.token, email);
 
+		// On multi-account platforms (desktop), set active account before fetchVaultKeys
+		// so the session-refresh client can resolve the token
+		if (deps.storage.supportsMultiAccount) {
+			await deps.storage.setActiveAccount({ type: "single", email });
+		}
+
 		const vaultKeys = await fetchVaultKeys(authClient);
 
 		await crypto.verifyServerSession(
@@ -622,6 +628,12 @@ export async function performSRPUnlock(
 
 		// Store token before fetchVaultKeys so the auth header is available
 		await deps.storage.storeAuthToken(finishResult.token, email);
+
+		// On multi-account platforms (desktop), set active account before fetchVaultKeys
+		// so the session-refresh client can resolve the token
+		if (deps.storage.supportsMultiAccount) {
+			await deps.storage.setActiveAccount({ type: "single", email });
+		}
 
 		const vaultKeys = await fetchVaultKeys(authClient);
 
