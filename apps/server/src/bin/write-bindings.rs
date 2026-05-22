@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use bittery_server_rust::create_rpc_router;
+use bittery_server::create_rpc_router;
 
 fn main() {
     let output_dir = std::env::var_os("BITTERY_RUST_RPC_OUTPUT_DIR")

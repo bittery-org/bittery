@@ -1,4 +1,4 @@
-use bittery_server_rust::db;
+use bittery_server::db;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
