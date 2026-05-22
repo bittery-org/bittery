@@ -149,7 +149,7 @@ export function VaultItemListControls({
 							<IconMagnifier3OutlineDuo18 className="size-3.5" />
 						</Button>
 					</PopoverTrigger>
-					<PopoverContent align="end" className="w-[260px] p-2" sideOffset={6}>
+					<PopoverContent align="end" className="w-65 p-2" sideOffset={6}>
 						<div className="flex items-center gap-1">
 							<IconMagnifier3OutlineDuo18 className="size-3.5 shrink-0 text-muted-foreground" />
 							<Input

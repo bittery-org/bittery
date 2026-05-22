@@ -106,7 +106,7 @@ export function PendingInvitationsList({
 								"inset-x-0",
 								"top-0",
 								"h-1",
-								"bg-gradient-to-r",
+								"bg-linear-to-r",
 								expired
 									? "from-destructive/70 via-destructive/30 to-transparent"
 									: "from-amber-500/70 via-amber-500/30 to-transparent",

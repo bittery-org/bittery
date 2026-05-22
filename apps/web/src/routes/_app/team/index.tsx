@@ -133,7 +133,7 @@ function TeamPage() {
 		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
 			{/* Hero Banner */}
 			<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
-				<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent" />
+				<div className="pointer-events-none absolute inset-0 bg-linear-to-br from-muted/60 via-transparent to-transparent" />
 
 				<div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<div className="flex min-w-0 items-center gap-3">

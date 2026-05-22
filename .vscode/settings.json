@@ -1,0 +1,8 @@
+{
+  "rust-analyzer.linkedProjects": [
+    "apps/server-rust/Cargo.toml",
+    "apps/desktop/src-tauri/Cargo.toml",
+    "packages/crypto/core/Cargo.toml",
+    "packages/crypto/napi/Cargo.toml"
+  ]
+}
