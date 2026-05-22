@@ -16,9 +16,11 @@ import {
 	type Transport,
 } from "@qubit-rs/client";
 import type { QubitServer } from "./generated/index.ts";
+import { httpBatch, type HttpBatchOptions } from "./http-batch.ts";
 
 export type {
 	ClientBuilder,
+	HttpBatchOptions,
 	HttpOptions,
 	MultiOptions,
 	Mutation,
@@ -38,6 +40,13 @@ export function createRustRpcClient(
 	return build_client<QubitServer>(http(rpcUrl, options));
 }
 
+export function createRustRpcBatchClient(
+	rpcUrl: string,
+	options?: HttpBatchOptions,
+) {
+	return build_client<QubitServer>(httpBatch(rpcUrl, options));
+}
+
 export function createRustRpcMultiClient(
 	rpcUrl: string,
 	options?: MultiOptions,
@@ -53,5 +62,6 @@ export function createRustRpcWsClient(
 }
 
 export type RustRpcClient = ReturnType<typeof createRustRpcClient>;
+export type RustRpcBatchClient = ReturnType<typeof createRustRpcBatchClient>;
 export type RustRpcMultiClient = ReturnType<typeof createRustRpcMultiClient>;
 export type RustRpcWsClient = ReturnType<typeof createRustRpcWsClient>;
