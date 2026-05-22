@@ -2,4 +2,19 @@
 import type { VaultAttachmentResponse } from "./VaultAttachmentResponse";
 import type { VaultSummaryResponse } from "./VaultSummaryResponse";
 
-export type VaultItemWithVaultResponse = { id: string, vaultId: string, category: string, favorite: boolean, encryptedData: string, encryptionIv: string, encryptionAlgorithm: string, version: number, lastModifiedBy: string | null, createdAt: string, updatedAt: string, deletedAt: string | null, attachments: Array<VaultAttachmentResponse>, vault: VaultSummaryResponse | null, };
+export type VaultItemWithVaultResponse = {
+	id: string;
+	vaultId: string;
+	category: string;
+	favorite: boolean;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+	version: number;
+	lastModifiedBy: string | null;
+	createdAt: string;
+	updatedAt: string;
+	deletedAt: string | null;
+	attachments: Array<VaultAttachmentResponse>;
+	vault: VaultSummaryResponse | null;
+};

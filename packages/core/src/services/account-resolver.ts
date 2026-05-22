@@ -6,7 +6,7 @@ import type { ActiveAccount } from "@bittery/storage/types";
 export type DefaultRpcClient = ReturnType<typeof createAccountRpcClient>;
 
 /**
-	* Complete account information including metadata, credentials, and RPC client.
+ * Complete account information including metadata, credentials, and RPC client.
  */
 export interface AccountInfo {
 	email: string;

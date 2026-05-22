@@ -1,8 +1,8 @@
 import {
-	createRustRpcClient,
 	createRustRpcBatchClient,
-	type HttpOptions,
+	createRustRpcClient,
 	type HttpBatchOptions,
+	type HttpOptions,
 	type RustRpcClient,
 } from "@bittery/rust-rpc";
 import { normalizeServerUrl } from "./server-url";
@@ -29,7 +29,10 @@ export function createAppRustRpcClient(
 	const url = buildRustRpcEndpointUrl(options.serverUrl);
 
 	if (options.batch !== false) {
-		return createRustRpcBatchClient(url, options.batchOptions ?? options.transportOptions);
+		return createRustRpcBatchClient(
+			url,
+			options.batchOptions ?? options.transportOptions,
+		);
 	}
 
 	return createRustRpcClient(url, options.transportOptions);

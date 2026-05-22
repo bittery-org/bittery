@@ -88,10 +88,7 @@ const defaultDeps: SyncCacheServiceDeps = {
 	desktopClient,
 	defaultClient: rpcClient as unknown as SyncEventQueryClient,
 	createAccountClient: (token, serverUrl) =>
-		createAccountRpcClient(
-			token,
-			serverUrl,
-		) as unknown as SyncEventQueryClient,
+		createAccountRpcClient(token, serverUrl) as unknown as SyncEventQueryClient,
 	deltaSync: performDeltaSync,
 	logger: console,
 };

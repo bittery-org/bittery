@@ -8,12 +8,12 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
+import { normalizeAuthVaultKey } from "@/lib/rpc-normalizers";
 import { storage } from "@/lib/storage";
 import {
 	generateRecoveryKeyAsync,
 	generateSecretKeyAsync,
 } from "@/lib/wasm-crypto";
-import { normalizeAuthVaultKey } from "@/lib/rpc-normalizers";
 import { WorkerCrypto } from "@/lib/worker-crypto";
 
 export type { CloudPlanId } from "@bittery/shared/pricing";
@@ -203,10 +203,11 @@ export function useSignupForm({
 				variables.plan !== "free"
 			) {
 				try {
-					const checkout =
-						await rpcClient.billing.createCheckoutSession.mutate({
+					const checkout = await rpcClient.billing.createCheckoutSession.mutate(
+						{
 							plan: variables.plan,
-						});
+						},
+					);
 
 					if (checkout.url) {
 						window.location.href = checkout.url;

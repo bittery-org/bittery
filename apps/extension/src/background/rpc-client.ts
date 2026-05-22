@@ -1,5 +1,5 @@
-import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { createSessionRefreshingRpcClient } from "@bittery/shared/rpc-session-refresh";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { storage } from "../lib/storage";
 import { desktopClient } from "./desktop-client";
 import { desktopSync } from "./desktop-sync";

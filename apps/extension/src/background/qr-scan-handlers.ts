@@ -10,13 +10,13 @@ import {
 import { storage } from "../lib/storage";
 import { decrypt, encrypt, rsaDecrypt } from "../lib/wasm-crypto";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
+import { rpcClient } from "./rpc-client";
 import { resolveAccountEmailForVault } from "./services/account-resolution";
 import { onLocalItemUpdated } from "./services/local-item-cache-service";
 import {
 	ensureUnlockedOrRecoverFromDesktop,
 	updateActivity,
 } from "./session-manager";
-import { rpcClient } from "./rpc-client";
 import type { MessageResponse } from "./types";
 
 /**

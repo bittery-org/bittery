@@ -2,4 +2,12 @@
 import type { AuthSessionUserResponse } from "./AuthSessionUserResponse";
 import type { AuthVaultKeyResponse } from "./AuthVaultKeyResponse";
 
-export type SignupResponse = { success: boolean, userId: string, token: string, sessionId: string, expiresAt: string, user: AuthSessionUserResponse, vaultKeys: Array<AuthVaultKeyResponse>, };
+export type SignupResponse = {
+	success: boolean;
+	userId: string;
+	token: string;
+	sessionId: string;
+	expiresAt: string;
+	user: AuthSessionUserResponse;
+	vaultKeys: Array<AuthVaultKeyResponse>;
+};

@@ -2,4 +2,13 @@
 import type { AuditActionGroupFilter } from "./AuditActionGroupFilter";
 import type { AuditResultFilter } from "./AuditResultFilter";
 
-export type TeamEventsInput = { cursor: string | null, limit: number | null, from: string | null, to: string | null, actionGroup: AuditActionGroupFilter | null, actorUserId: string | null, result: AuditResultFilter | null, search: string | null, };
+export type TeamEventsInput = {
+	cursor: string | null;
+	limit: number | null;
+	from: string | null;
+	to: string | null;
+	actionGroup: AuditActionGroupFilter | null;
+	actorUserId: string | null;
+	result: AuditResultFilter | null;
+	search: string | null;
+};

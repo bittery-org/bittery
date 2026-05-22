@@ -50,9 +50,12 @@ export default function VaultsScreen() {
 		});
 	};
 
-	const handleVaultPress = useCallback((vaultId: string) => {
-		router.push(`/(vault)/${vaultId}`);
-	}, [router]);
+	const handleVaultPress = useCallback(
+		(vaultId: string) => {
+			router.push(`/(vault)/${vaultId}`);
+		},
+		[router],
+	);
 
 	const { personalVaults, teamVaults, accountVaultsByTeamName } =
 		useMemo(() => {
@@ -85,13 +88,16 @@ export default function VaultsScreen() {
 			};
 		}, [vaultKeys]);
 
-	const renderSectionHeader = useCallback((title: string, count: number) => (
-		<View className="flex-row items-center px-4 pt-4 pb-2">
-			<Card.Title className="font-semibold text-muted text-xs uppercase tracking-wide">
-				{title} ({count})
-			</Card.Title>
-		</View>
-	), []);
+	const renderSectionHeader = useCallback(
+		(title: string, count: number) => (
+			<View className="flex-row items-center px-4 pt-4 pb-2">
+				<Card.Title className="font-semibold text-muted text-xs uppercase tracking-wide">
+					{title} ({count})
+				</Card.Title>
+			</View>
+		),
+		[],
+	);
 
 	const sections = useMemo(() => {
 		if (!vaultKeys || vaultKeys.length === 0) {

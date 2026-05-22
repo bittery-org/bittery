@@ -123,12 +123,10 @@ export function VaultMemberList({
 			}
 
 			// Step 2: Get rotation data from server
-			const rotationData = await rpcClient.vault.members.getRotationData.query(
-				{
-					vaultId,
-					excludeUserId: userId,
-				},
-			);
+			const rotationData = await rpcClient.vault.members.getRotationData.query({
+				vaultId,
+				excludeUserId: userId,
+			});
 
 			// Step 3: Perform key rotation on client side
 			const rotationResult = await performKeyRotation(

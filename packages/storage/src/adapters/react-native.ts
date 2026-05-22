@@ -81,7 +81,8 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 	private SecureStore: typeof SecureStoreType = SecureStoreType;
 	private SQLite: typeof SQLiteType = SQLiteType;
-	private LocalAuthentication: typeof LocalAuthenticationType = LocalAuthenticationType;
+	private LocalAuthentication: typeof LocalAuthenticationType =
+		LocalAuthenticationType;
 	private ExpoCrypto: typeof CryptoType = CryptoType;
 	private db: Awaited<ReturnType<typeof SQLiteType.openDatabaseAsync>> | null =
 		null;

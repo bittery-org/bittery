@@ -5,6 +5,7 @@
 
 import { core } from "./core-instance";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
+import { rpcClient } from "./rpc-client";
 import {
 	resolveAccountEmailForItemId,
 	resolveAccountEmailForVault,
@@ -17,7 +18,6 @@ import {
 	ensureUnlockedOrRecoverFromDesktop,
 	updateActivity,
 } from "./session-manager";
-import { rpcClient } from "./rpc-client";
 import type { MessageResponse } from "./types";
 import {
 	getDecryptedItemsForCurrentMode,

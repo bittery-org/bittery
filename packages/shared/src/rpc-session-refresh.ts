@@ -1,7 +1,7 @@
+import { createAppRpcClient } from "./rpc-client";
 import { buildRpcUrl } from "./server-url";
 import type { RefreshResult, SessionSnapshot } from "./session-refresh";
 import { createSessionRefreshingFetch } from "./session-refresh-fetch";
-import { createAppRpcClient } from "./rpc-client";
 
 export interface SessionRefreshingRpcClientOptions {
 	defaultServerUrl: string;

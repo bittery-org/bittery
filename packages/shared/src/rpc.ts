@@ -1,15 +1,15 @@
 import type { QueryClient } from "@tanstack/react-query";
 import {
-	createElement,
 	createContext,
+	createElement,
+	type PropsWithChildren,
 	useContext,
 	useMemo,
-	type PropsWithChildren,
 } from "react";
 import {
-	createAppRpcOptionsProxy,
 	type AppRpcClient,
 	type AppRpcOptionsProxy,
+	createAppRpcOptionsProxy,
 } from "./rpc-client";
 
 const RpcClientContext = createContext<AppRpcClient | null>(null);

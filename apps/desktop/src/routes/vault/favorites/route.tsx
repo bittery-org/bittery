@@ -1,8 +1,5 @@
 import { useItemListFilters, useItems } from "@bittery/core/hooks";
-import {
-	Badge,
-	VaultItemListControls,
-} from "@bittery/ui";
+import { Badge, VaultItemListControls } from "@bittery/ui";
 import { IconStarOutlineDuo18 } from "@bittery/ui/icons";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";

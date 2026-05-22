@@ -53,10 +53,14 @@ function formatCurrencyFromCents(
 	amountCents: number | bigint,
 	currency: string,
 ): string {
-	return formatLocalizedCurrency(Number(amountCents) / 100, currency.toUpperCase(), {
-		minimumFractionDigits: 2,
-		maximumFractionDigits: 2,
-	});
+	return formatLocalizedCurrency(
+		Number(amountCents) / 100,
+		currency.toUpperCase(),
+		{
+			minimumFractionDigits: 2,
+			maximumFractionDigits: 2,
+		},
+	);
 }
 
 function formatPeriodRange(start: Date | string, end: Date | string): string {
@@ -226,235 +230,254 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 						? Number(seatPreview.nextQuantity - seatPreview.currentQuantity)
 						: 0;
 					return (
-				<form onSubmit={handleSubmit}>
-					<DialogHeader>
-						<DialogTitle>{m.team_invite_dialog_title()}</DialogTitle>
-						<DialogDescription>
-							{m.team_invite_dialog_description()}
-						</DialogDescription>
-					</DialogHeader>
-					<div className="grid gap-4 py-4">
-						<div className="grid gap-2">
-							<Label htmlFor="email">
-								{m.team_invite_dialog_field_email()}
-							</Label>
-							<Input
-								id="email"
-								type="email"
-								value={email}
-								onChange={(e) => setEmail(e.target.value)}
-								placeholder={m.team_invite_dialog_placeholder_email()}
-								autoFocus
-							/>
-						</div>
-						<div className="grid gap-2">
-							<Label htmlFor="role">{m.team_invite_dialog_field_role()}</Label>
-							<Select
-								value={role}
-								onValueChange={(v: "admin" | "member") => setRole(v)}
-							>
-								<SelectTrigger>
-									<SelectValue />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="member">{m.team_role_member()}</SelectItem>
-									<SelectItem value="admin">{m.team_role_admin()}</SelectItem>
-								</SelectContent>
-							</Select>
-							<p className="text-muted-foreground text-xs">
-								{m.team_invite_dialog_hint_role()}
-							</p>
-						</div>
-						{hasSeatPreview && seatPreview && (
-							<div className="rounded-lg border bg-muted/30 p-4">
-								<div className="mb-3 flex items-center gap-2.5">
-									<div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10">
-										<Receipt className="h-4 w-4 text-primary" />
-									</div>
-									<div className="flex min-w-0 flex-1 items-center justify-between">
-										<p className="font-medium text-sm">
-											{m.team_invite_dialog_billing_impact_title()}
-										</p>
-										<Badge
-											variant="secondary"
-											className="font-normal text-[11px] tabular-nums"
-										>
-											{seatPreview.currentQuantity} &rarr;{" "}
-											{getSeatCountLabel(seatPreview.nextQuantity, m)}
-										</Badge>
-									</div>
+						<form onSubmit={handleSubmit}>
+							<DialogHeader>
+								<DialogTitle>{m.team_invite_dialog_title()}</DialogTitle>
+								<DialogDescription>
+									{m.team_invite_dialog_description()}
+								</DialogDescription>
+							</DialogHeader>
+							<div className="grid gap-4 py-4">
+								<div className="grid gap-2">
+									<Label htmlFor="email">
+										{m.team_invite_dialog_field_email()}
+									</Label>
+									<Input
+										id="email"
+										type="email"
+										value={email}
+										onChange={(e) => setEmail(e.target.value)}
+										placeholder={m.team_invite_dialog_placeholder_email()}
+										autoFocus
+									/>
 								</div>
-								<Separator className="mb-3" />
-								<div className="flex items-end justify-between gap-3">
-									<div className="space-y-0.5">
-										<p className="text-muted-foreground text-xs">
-											{m.team_invite_dialog_billing_impact_estimated_invoice()}
-										</p>
-										<p className="font-semibold text-lg tabular-nums leading-tight tracking-tight">
-											{formatCurrencyFromCents(
-												seatPreview.estimatedNextPaymentCents,
-												seatPreview.currency,
-											)}
-										</p>
-									</div>
-									<Popover>
-										<PopoverTrigger asChild>
-											<Button
-												type="button"
-												variant="outline"
-												size="sm"
-												className="h-7 text-xs"
-											>
-												{m.team_invite_dialog_billing_impact_view_breakdown()}
-											</Button>
-										</PopoverTrigger>
-										<PopoverContent
-											align="end"
-											side="bottom"
-											sideOffset={8}
-											className="max-h-[70vh] w-[min(26rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain p-0"
-											onWheel={(event) => event.stopPropagation()}
-										>
-											<div className="border-b px-4 py-3">
-												<p className="font-medium text-sm">
-													{m.team_invite_dialog_invoice_preview_title()}
-												</p>
-												<p className="mt-0.5 text-muted-foreground text-xs">
-													{seatDelta === 1
-														? m.team_invite_dialog_invoice_preview_adding_seats_single(
-																{
-																	count: seatDelta,
-																	currentQuantity: Number(seatPreview.currentQuantity),
-																	nextQuantity: Number(seatPreview.nextQuantity),
-																},
-															)
-														: m.team_invite_dialog_invoice_preview_adding_seats_plural(
-																{
-																	count: seatDelta,
-																	currentQuantity: Number(seatPreview.currentQuantity),
-																	nextQuantity: Number(seatPreview.nextQuantity),
-																},
-															)}
-												</p>
+								<div className="grid gap-2">
+									<Label htmlFor="role">
+										{m.team_invite_dialog_field_role()}
+									</Label>
+									<Select
+										value={role}
+										onValueChange={(v: "admin" | "member") => setRole(v)}
+									>
+										<SelectTrigger>
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="member">
+												{m.team_role_member()}
+											</SelectItem>
+											<SelectItem value="admin">
+												{m.team_role_admin()}
+											</SelectItem>
+										</SelectContent>
+									</Select>
+									<p className="text-muted-foreground text-xs">
+										{m.team_invite_dialog_hint_role()}
+									</p>
+								</div>
+								{hasSeatPreview && seatPreview && (
+									<div className="rounded-lg border bg-muted/30 p-4">
+										<div className="mb-3 flex items-center gap-2.5">
+											<div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10">
+												<Receipt className="h-4 w-4 text-primary" />
 											</div>
-											<div className="divide-y">
-												{seatPreview.lines.map((line) => (
-													<div
-														key={line.id}
-														className="flex items-start gap-3 px-4 py-3"
-													>
-														<div className="min-w-0 flex-1 space-y-0.5">
-															<p className="truncate text-sm">
-																{line.description}
-															</p>
-															<p className="text-muted-foreground text-xs">
-																{formatPeriodRange(
-																	line.periodStart,
-																	line.periodEnd,
-																)}
-															</p>
-															<p className="text-muted-foreground text-xs">
-																{line.isProration
-																	? m.team_invite_dialog_invoice_preview_line_seats_change(
-																			{
-																			currentQuantity: Number(seatPreview.currentQuantity),
-																			nextQuantity: Number(seatPreview.nextQuantity),
-																			},
-																		)
-																	: line.quantity !== null
-																		? m.team_invite_dialog_invoice_preview_line_quantity(
-																			{ quantity: Number(line.quantity) },
-																			)
-																		: ""}
-																{(line.isProration || line.quantity !== null) &&
-																line.unitAmountCents !== null &&
-																line.quantity !== null &&
-																Number(line.quantity) > 0
-																	? " · "
-																	: ""}
-																{line.unitAmountCents !== null &&
-																line.quantity !== null &&
-																Number(line.quantity) > 0
-																	? m.team_invite_dialog_invoice_preview_line_each(
-																			{
-																				amount: formatCurrencyFromCents(
-																					line.unitAmountCents,
-																					line.currency,
-																				),
-																			},
-																		)
-																	: ""}
-															</p>
-														</div>
-														<p className="shrink-0 font-medium text-sm tabular-nums">
-															{formatCurrencyFromCents(
-																line.amountCents,
-																line.currency,
-															)}
-														</p>
-													</div>
-												))}
-											</div>
-											<div className="flex items-center justify-between border-t bg-muted/40 px-4 py-3">
+											<div className="flex min-w-0 flex-1 items-center justify-between">
 												<p className="font-medium text-sm">
-													{m.team_invite_dialog_invoice_preview_total()}
+													{m.team_invite_dialog_billing_impact_title()}
 												</p>
-												<p className="font-semibold text-sm tabular-nums">
+												<Badge
+													variant="secondary"
+													className="font-normal text-[11px] tabular-nums"
+												>
+													{seatPreview.currentQuantity} &rarr;{" "}
+													{getSeatCountLabel(seatPreview.nextQuantity, m)}
+												</Badge>
+											</div>
+										</div>
+										<Separator className="mb-3" />
+										<div className="flex items-end justify-between gap-3">
+											<div className="space-y-0.5">
+												<p className="text-muted-foreground text-xs">
+													{m.team_invite_dialog_billing_impact_estimated_invoice()}
+												</p>
+												<p className="font-semibold text-lg tabular-nums leading-tight tracking-tight">
 													{formatCurrencyFromCents(
-														seatPreview.totalLineItemsCents,
+														seatPreview.estimatedNextPaymentCents,
 														seatPreview.currency,
 													)}
 												</p>
 											</div>
-										</PopoverContent>
-									</Popover>
-								</div>
+											<Popover>
+												<PopoverTrigger asChild>
+													<Button
+														type="button"
+														variant="outline"
+														size="sm"
+														className="h-7 text-xs"
+													>
+														{m.team_invite_dialog_billing_impact_view_breakdown()}
+													</Button>
+												</PopoverTrigger>
+												<PopoverContent
+													align="end"
+													side="bottom"
+													sideOffset={8}
+													className="max-h-[70vh] w-[min(26rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain p-0"
+													onWheel={(event) => event.stopPropagation()}
+												>
+													<div className="border-b px-4 py-3">
+														<p className="font-medium text-sm">
+															{m.team_invite_dialog_invoice_preview_title()}
+														</p>
+														<p className="mt-0.5 text-muted-foreground text-xs">
+															{seatDelta === 1
+																? m.team_invite_dialog_invoice_preview_adding_seats_single(
+																		{
+																			count: seatDelta,
+																			currentQuantity: Number(
+																				seatPreview.currentQuantity,
+																			),
+																			nextQuantity: Number(
+																				seatPreview.nextQuantity,
+																			),
+																		},
+																	)
+																: m.team_invite_dialog_invoice_preview_adding_seats_plural(
+																		{
+																			count: seatDelta,
+																			currentQuantity: Number(
+																				seatPreview.currentQuantity,
+																			),
+																			nextQuantity: Number(
+																				seatPreview.nextQuantity,
+																			),
+																		},
+																	)}
+														</p>
+													</div>
+													<div className="divide-y">
+														{seatPreview.lines.map((line) => (
+															<div
+																key={line.id}
+																className="flex items-start gap-3 px-4 py-3"
+															>
+																<div className="min-w-0 flex-1 space-y-0.5">
+																	<p className="truncate text-sm">
+																		{line.description}
+																	</p>
+																	<p className="text-muted-foreground text-xs">
+																		{formatPeriodRange(
+																			line.periodStart,
+																			line.periodEnd,
+																		)}
+																	</p>
+																	<p className="text-muted-foreground text-xs">
+																		{line.isProration
+																			? m.team_invite_dialog_invoice_preview_line_seats_change(
+																					{
+																						currentQuantity: Number(
+																							seatPreview.currentQuantity,
+																						),
+																						nextQuantity: Number(
+																							seatPreview.nextQuantity,
+																						),
+																					},
+																				)
+																			: line.quantity !== null
+																				? m.team_invite_dialog_invoice_preview_line_quantity(
+																						{ quantity: Number(line.quantity) },
+																					)
+																				: ""}
+																		{(line.isProration ||
+																			line.quantity !== null) &&
+																		line.unitAmountCents !== null &&
+																		line.quantity !== null &&
+																		Number(line.quantity) > 0
+																			? " · "
+																			: ""}
+																		{line.unitAmountCents !== null &&
+																		line.quantity !== null &&
+																		Number(line.quantity) > 0
+																			? m.team_invite_dialog_invoice_preview_line_each(
+																					{
+																						amount: formatCurrencyFromCents(
+																							line.unitAmountCents,
+																							line.currency,
+																						),
+																					},
+																				)
+																			: ""}
+																	</p>
+																</div>
+																<p className="shrink-0 font-medium text-sm tabular-nums">
+																	{formatCurrencyFromCents(
+																		line.amountCents,
+																		line.currency,
+																	)}
+																</p>
+															</div>
+														))}
+													</div>
+													<div className="flex items-center justify-between border-t bg-muted/40 px-4 py-3">
+														<p className="font-medium text-sm">
+															{m.team_invite_dialog_invoice_preview_total()}
+														</p>
+														<p className="font-semibold text-sm tabular-nums">
+															{formatCurrencyFromCents(
+																seatPreview.totalLineItemsCents,
+																seatPreview.currency,
+															)}
+														</p>
+													</div>
+												</PopoverContent>
+											</Popover>
+										</div>
+									</div>
+								)}
+								{inviteLink && (
+									<div className="rounded-md border bg-muted/40 p-3">
+										<p className="mb-2 font-medium text-sm">
+											{m.team_invite_dialog_invite_link_title()}
+										</p>
+										<p className="break-all text-muted-foreground text-xs">
+											{inviteLink}
+										</p>
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											className="mt-3"
+											onClick={() =>
+												copyWithToast(
+													inviteLink,
+													m.team_invite_dialog_invite_link_copy_label(),
+													{
+														showAutoClearMessage: false,
+													},
+												)
+											}
+										>
+											<Copy className="mr-2 h-4 w-4" />
+											{m.team_invite_dialog_invite_link_copy_button()}
+										</Button>
+									</div>
+								)}
 							</div>
-						)}
-						{inviteLink && (
-							<div className="rounded-md border bg-muted/40 p-3">
-								<p className="mb-2 font-medium text-sm">
-									{m.team_invite_dialog_invite_link_title()}
-								</p>
-								<p className="break-all text-muted-foreground text-xs">
-									{inviteLink}
-								</p>
+							<DialogFooter>
 								<Button
 									type="button"
 									variant="outline"
-									size="sm"
-									className="mt-3"
-									onClick={() =>
-										copyWithToast(
-											inviteLink,
-											m.team_invite_dialog_invite_link_copy_label(),
-											{
-												showAutoClearMessage: false,
-											},
-										)
-									}
+									onClick={() => setOpen(false)}
 								>
-									<Copy className="mr-2 h-4 w-4" />
-									{m.team_invite_dialog_invite_link_copy_button()}
+									{m.team_common_action_cancel()}
 								</Button>
-							</div>
-						)}
-					</div>
-					<DialogFooter>
-						<Button
-							type="button"
-							variant="outline"
-							onClick={() => setOpen(false)}
-						>
-							{m.team_common_action_cancel()}
-						</Button>
-						<Button type="submit" disabled={inviteMutation.isPending}>
-							{inviteMutation.isPending
-								? m.team_invite_dialog_button_sending()
-								: m.team_invite_dialog_button_create_invitation()}
-						</Button>
-					</DialogFooter>
-				</form>
+								<Button type="submit" disabled={inviteMutation.isPending}>
+									{inviteMutation.isPending
+										? m.team_invite_dialog_button_sending()
+										: m.team_invite_dialog_button_create_invitation()}
+								</Button>
+							</DialogFooter>
+						</form>
 					);
 				})()}
 			</DialogContent>

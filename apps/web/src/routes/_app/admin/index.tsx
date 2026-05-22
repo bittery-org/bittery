@@ -308,8 +308,7 @@ function TeamAdminConsolePage() {
 				cursor: pageParam ?? null,
 				actionGroup: filters.actionGroup,
 				result: filters.result,
-				actorUserId:
-					filters.actorUserId !== "all" ? filters.actorUserId : null,
+				actorUserId: filters.actorUserId !== "all" ? filters.actorUserId : null,
 				search: filters.search.trim() || null,
 				from: toIso(filters.from),
 				to: toIso(filters.to),

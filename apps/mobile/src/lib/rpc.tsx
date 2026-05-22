@@ -1,6 +1,6 @@
-import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { RpcProvider as SharedRpcProvider } from "@bittery/shared/rpc";
 import { createSessionRefreshingRpcClient } from "@bittery/shared/rpc-session-refresh";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { createContext, useContext, useEffect, useState } from "react";

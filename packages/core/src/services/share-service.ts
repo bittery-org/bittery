@@ -140,7 +140,7 @@ export class ShareService {
 			isOneTimeUse,
 			expiresIn,
 			allowedEmails:
-				accessMode === "email-restricted" ? allowedEmails ?? null : null,
+				accessMode === "email-restricted" ? (allowedEmails ?? null) : null,
 			encryptedItemData: encryptedData.ciphertext,
 			encryptionIv: encryptedData.iv,
 			encryptedShareKey: shareKeyEncrypted.ciphertext,

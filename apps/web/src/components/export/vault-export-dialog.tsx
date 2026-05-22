@@ -8,15 +8,13 @@ import {
 	Progress,
 } from "@bittery/ui";
 import {
-	IconCircleCheck2OutlineDuo18 as CheckCircle,
 	IconCircleWarningOutlineDuo18 as AlertCircle,
-	IconLoader2OutlineDuo18 as Loader2,
+	IconCircleCheck2OutlineDuo18 as CheckCircle,
 	IconArchiveExport2OutlineDuo18 as Download,
+	IconLoader2OutlineDuo18 as Loader2,
 } from "@bittery/ui/icons";
 import { useCallback } from "react";
-import {
-	useVaultExport,
-} from "@/hooks/use-vault-export";
+import { useVaultExport } from "@/hooks/use-vault-export";
 import { useI18n } from "@/providers/i18n-provider";
 
 interface VaultExportDialogProps {
@@ -24,16 +22,17 @@ interface VaultExportDialogProps {
 	onOpenChange: (open: boolean) => void;
 }
 
-export function VaultExportDialog({ open, onOpenChange }: VaultExportDialogProps) {
+export function VaultExportDialog({
+	open,
+	onOpenChange,
+}: VaultExportDialogProps) {
 	const { m } = useI18n();
 	const { progress, archiveBlob, error, reset, startExport, downloadArchive } =
 		useVaultExport();
 
 	const isIdle = progress.stage === "idle";
 	const isInProgress =
-		!isIdle &&
-		progress.stage !== "completed" &&
-		progress.stage !== "error";
+		!isIdle && progress.stage !== "completed" && progress.stage !== "error";
 	const isCompleted = progress.stage === "completed";
 	const isError = progress.stage === "error";
 
@@ -41,10 +40,7 @@ export function VaultExportDialog({ open, onOpenChange }: VaultExportDialogProps
 		if (progress.totalItems === 0 && progress.totalAttachments === 0) {
 			return 0;
 		}
-		if (
-			progress.stage === "fetching" ||
-			progress.stage === "decrypting"
-		) {
+		if (progress.stage === "fetching" || progress.stage === "decrypting") {
 			if (progress.totalItems === 0) return 0;
 			return Math.min(
 				100,

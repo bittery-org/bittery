@@ -17,6 +17,7 @@ import {
 import {
 	IconCircleCheck2OutlineDuo18 as CheckCircle,
 	IconClockTimeOutlineDuo18 as Clock,
+	IconArchiveExport2OutlineDuo18 as Download,
 	IconExternalLinkOutlineDuo18 as ExternalLink,
 	IconFingerprintOutlineDuo18 as Fingerprint,
 	IconGear3OutlineDuo18 as Gear,
@@ -31,7 +32,6 @@ import {
 	IconTrash2OutlineDuo18 as Trash2,
 	IconUpload4OutlineDuo18 as Upload,
 	IconUserOutlineDuo18 as User,
-	IconArchiveExport2OutlineDuo18 as Download,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -42,8 +42,8 @@ import { AutoLockSettings } from "@/components/settings/auto-lock-settings";
 import { ChangeEmailDialog } from "@/components/settings/change-email-dialog";
 import { ChangePasswordDialog } from "@/components/settings/change-password-dialog";
 import { DeleteAccountDialog } from "@/components/settings/delete-account-dialog";
-import { WebDeviceSetupDialog } from "@/components/settings/device-setup-dialog";
 import { DeviceManagement } from "@/components/settings/device-management";
+import { WebDeviceSetupDialog } from "@/components/settings/device-setup-dialog";
 import { RegenerateRecoveryKeyDialog } from "@/components/settings/regenerate-recovery-key-dialog";
 import { RegenerateSecretKeyDialog } from "@/components/settings/regenerate-secret-key-dialog";
 import { SetupRecoveryKeyDialog } from "@/components/settings/setup-recovery-key-dialog";

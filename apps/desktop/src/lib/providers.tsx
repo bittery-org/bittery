@@ -1,6 +1,6 @@
-import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { createAppRpcOptionsProxy } from "@bittery/shared/rpc-client";
 import { createSessionRefreshingRpcClient } from "@bittery/shared/rpc-session-refresh";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { toast } from "@bittery/ui";
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
 import { resolveActiveAuthServerUrl } from "@/lib/auth-server";

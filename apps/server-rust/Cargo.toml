@@ -41,3 +41,6 @@ hmac = "0.12"
 url = "2"
 jsonwebtoken = "9"
 bittery-crypto-core = { path = "../../packages/crypto/core/crates/bittery-crypto-core" }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

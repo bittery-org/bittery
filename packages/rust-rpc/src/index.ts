@@ -1,2 +1,2 @@
-export * from "./generated/index.ts";
 export * from "./client";
+export * from "./generated/index.ts";

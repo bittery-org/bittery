@@ -1,7 +1,5 @@
 import { useItemListFilters, useVaultItems } from "@bittery/core/hooks";
-import {
-	VaultItemListControls,
-} from "@bittery/ui";
+import { VaultItemListControls } from "@bittery/ui";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";
 import { ItemListRow } from "../../../components/vault/item-list-row";

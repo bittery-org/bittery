@@ -171,11 +171,15 @@ struct CachedItemRecord {
 struct CachedVaultRecord {
     id: String,
     name: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", default = "default_cached_vault_type")]
     vault_type: String,
     icon: Option<String>,
     #[serde(rename = "imageUrl")]
     image_url: Option<String>,
+}
+
+fn default_cached_vault_type() -> String {
+    "personal".to_string()
 }
 
 fn decrypt_item_payload(
@@ -1999,5 +2003,15 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("alice@example.com")
         );
+    }
+
+    #[test]
+    fn cached_vault_record_defaults_legacy_entries_to_personal_type() {
+        let vault: CachedVaultRecord = serde_json::from_str(
+            r#"{"id":"vault-1","name":"Main","icon":null,"imageUrl":null}"#,
+        )
+        .expect("legacy cached vault should deserialize");
+
+        assert_eq!(vault.vault_type, "personal");
     }
 }

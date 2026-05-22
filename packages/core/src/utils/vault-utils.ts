@@ -6,8 +6,8 @@
 
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import {
-	refreshVaultKeys as refreshVaultKeysCore,
 	type RpcVaultClient,
+	refreshVaultKeys as refreshVaultKeysCore,
 } from "../services/vault-service";
 
 /**

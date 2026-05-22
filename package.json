@@ -16,6 +16,7 @@
 		"i18n:check": "pnpm --filter @bittery/i18n run check:keys",
 		"shadcn": "pnpm --filter @bittery/ui run shadcn",
 		"test": "turbo test",
+		"test:server-rust": "pnpm --filter server-rust test",
 		"dev": "turbo dev",
 		"dev:desktop": "turbo -F desktop dev",
 		"dev:web": "turbo -F web dev",

@@ -6,7 +6,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { AccountProvider } from "./contexts/account-context";
 import { setupMacOSResetMenu } from "./lib/macos-reset-menu";
-import { queryClient, rpcClient, rpc } from "./lib/providers";
+import { queryClient, rpc, rpcClient } from "./lib/providers";
 import { initializeStorage } from "./lib/storage";
 import { I18nProvider } from "./providers/i18n-provider";
 import { DesktopPlatformProvider } from "./providers/platform-provider";

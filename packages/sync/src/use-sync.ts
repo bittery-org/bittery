@@ -125,8 +125,7 @@ export function useSync(options: UseSyncOptions) {
 				storage: syncStorage,
 				fetch: fetchImpl,
 			},
-			rpcClient:
-				rpcClient as unknown as SyncOrchestratorOptions["rpcClient"],
+			rpcClient: rpcClient as unknown as SyncOrchestratorOptions["rpcClient"],
 			itemCache: itemCacheAdapter,
 			outboundQueue,
 			itemCacheAccountEmail,

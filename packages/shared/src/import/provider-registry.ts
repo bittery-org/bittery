@@ -1,5 +1,5 @@
-import { bitteryBttrxImportProvider } from "./providers/bittery-bttrx";
 import { onePassword1puxImportProvider } from "./providers/1password-1pux";
+import { bitteryBttrxImportProvider } from "./providers/bittery-bttrx";
 import type { ImportProvider, ImportProviderId } from "./types";
 
 const providers: ImportProvider[] = [

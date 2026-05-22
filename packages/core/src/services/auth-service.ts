@@ -245,7 +245,9 @@ function normalizeVaultRole(role: string): VaultKeyData["role"] {
 	}
 }
 
-async function fetchVaultKeys(authClient: IAuthClient): Promise<VaultKeyData[]> {
+async function fetchVaultKeys(
+	authClient: IAuthClient,
+): Promise<VaultKeyData[]> {
 	const vaults = await authClient.vault.list.query();
 	return vaults.map((vault) => ({
 		vaultId: vault.id,

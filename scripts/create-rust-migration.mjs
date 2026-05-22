@@ -14,7 +14,9 @@ const slug = rawName
 	.replace(/^_+|_+$/g, "");
 
 if (!slug) {
-	console.error("Migration name must contain at least one alphanumeric character");
+	console.error(
+		"Migration name must contain at least one alphanumeric character",
+	);
 	process.exit(1);
 }
 
@@ -33,10 +35,6 @@ const nextVersion = (versions.length ? Math.max(...versions) + 1 : 0)
 const fileName = `${nextVersion}_${slug}.sql`;
 const filePath = join(migrationsDir, fileName);
 
-writeFileSync(
-	filePath,
-	"-- Write migration SQL here\n",
-	{ flag: "wx" },
-);
+writeFileSync(filePath, "-- Write migration SQL here\n", { flag: "wx" });
 
 console.log(`Created ${filePath}`);

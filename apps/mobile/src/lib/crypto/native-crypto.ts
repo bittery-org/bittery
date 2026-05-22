@@ -23,9 +23,7 @@ import {
 	validateSecretKey as nativeValidateSecretKey,
 	type PrimeGroup,
 } from "@bittery/crypto-nitro";
-import {
-	unwrapPlaintextWithContext,
-} from "@bittery/shared/crypto-context-envelope";
+import { unwrapPlaintextWithContext } from "@bittery/shared/crypto-context-envelope";
 import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
 import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
 import type {

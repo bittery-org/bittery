@@ -62,8 +62,9 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 			}
 
 			// Fetch rotation data for all team vaults
-			const leaveRotationData =
-				await rpcClient.team.getLeaveRotationData.query({ teamId });
+			const leaveRotationData = await rpcClient.team.getLeaveRotationData.query(
+				{ teamId },
+			);
 
 			// Perform key rotation for each team vault
 			const vaultRotations: Array<{

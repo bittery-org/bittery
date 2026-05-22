@@ -7,4 +7,15 @@ import type { TeamEventEntity } from "./TeamEventEntity";
 import type { TeamEventNetwork } from "./TeamEventNetwork";
 import type { TeamEventResult } from "./TeamEventResult";
 
-export type TeamEvent = { id: string, timestamp: string, source: EventSource, action: string, actionGroup: AuditActionGroup, actor: TeamEventActor, entity: TeamEventEntity, result: TeamEventResult, network: TeamEventNetwork, metadata: JsonValue | null, };
+export type TeamEvent = {
+	id: string;
+	timestamp: string;
+	source: EventSource;
+	action: string;
+	actionGroup: AuditActionGroup;
+	actor: TeamEventActor;
+	entity: TeamEventEntity;
+	result: TeamEventResult;
+	network: TeamEventNetwork;
+	metadata: JsonValue | null;
+};

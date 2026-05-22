@@ -1,16 +1,16 @@
 import {
-	getDecryptedVaultKey,
-	type VaultKeyCryptoProvider,
-	type VaultExportPayload,
-	type ExportedItem,
-	type ExportedVault,
-	type ExportedAttachment,
-} from "@bittery/shared";
-import {
 	buildAttachmentBlobEncryptionContext,
 	buildAttachmentContentTypeEncryptionContext,
 	buildAttachmentNameEncryptionContext,
 } from "@bittery/core/services/encryption-context";
+import {
+	type ExportedAttachment,
+	type ExportedItem,
+	type ExportedVault,
+	getDecryptedVaultKey,
+	type VaultExportPayload,
+	type VaultKeyCryptoProvider,
+} from "@bittery/shared";
 import { useRPCClient } from "@bittery/shared/rpc";
 import JSZip from "jszip";
 import { useCallback, useState } from "react";
@@ -96,7 +96,12 @@ export function useVaultExport() {
 			// Collect unique vaults
 			const vaultMap = new Map<
 				string,
-				{ id: string; name: string; type: "personal" | "team"; icon: string | null }
+				{
+					id: string;
+					name: string;
+					type: "personal" | "team";
+					icon: string | null;
+				}
 			>();
 			for (const item of allItems) {
 				if (!vaultMap.has(item.vaultId)) {
@@ -262,7 +267,11 @@ export function useVaultExport() {
 							algorithm: string;
 						};
 
-						const base64File = await decrypt(encryptedFile, vaultKey, blobContext);
+						const base64File = await decrypt(
+							encryptedFile,
+							vaultKey,
+							blobContext,
+						);
 
 						const fileName = await decrypt(
 							{
@@ -294,15 +303,15 @@ export function useVaultExport() {
 						zip.file(`files/${item.id}/${fileName}`, bytes);
 
 						if (exportedItem) {
-								if (!exportedItem.attachments) {
-									exportedItem.attachments = [];
-								}
-								exportedItem.attachments.push({
+							if (!exportedItem.attachments) {
+								exportedItem.attachments = [];
+							}
+							exportedItem.attachments.push({
 								filename: fileName,
 								contentType,
 								data: base64File,
 							} satisfies ExportedAttachment);
-					}
+						}
 					} catch {
 						// skip failed attachment, continue with others
 					}

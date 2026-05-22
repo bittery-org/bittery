@@ -116,8 +116,7 @@ export function normalizeEntitlements(
 			entitlements?.vault_sharing === true ||
 			entitlements?.vaultSharing === true,
 		share_links:
-			entitlements?.share_links === true ||
-			entitlements?.shareLinks === true,
+			entitlements?.share_links === true || entitlements?.shareLinks === true,
 		billing_portal:
 			entitlements?.billing_portal === true ||
 			entitlements?.billingPortal === true,
@@ -131,9 +130,13 @@ function normalizeNullableNumber(
 	return value == null ? null : Number(value);
 }
 
-export function normalizeEntitlementLimits(limits: BillingLimitsLike | null | undefined) {
+export function normalizeEntitlementLimits(
+	limits: BillingLimitsLike | null | undefined,
+) {
 	return {
-		shareLinks: normalizeNullableNumber(limits?.shareLinks ?? limits?.share_links),
+		shareLinks: normalizeNullableNumber(
+			limits?.shareLinks ?? limits?.share_links,
+		),
 		sharedVaults: normalizeNullableNumber(
 			limits?.sharedVaults ?? limits?.shared_vaults,
 		),
@@ -159,7 +162,9 @@ export function normalizeAuthVaultKey(vault: AuthVaultKeyLike): VaultKeyData {
 	};
 }
 
-export function normalizeVaultListEntry(vault: VaultListEntryLike): VaultKeyData {
+export function normalizeVaultListEntry(
+	vault: VaultListEntryLike,
+): VaultKeyData {
 	return {
 		vaultId: vault.id,
 		vaultName: vault.name,

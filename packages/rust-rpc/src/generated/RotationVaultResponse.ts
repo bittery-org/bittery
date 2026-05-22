@@ -2,4 +2,10 @@
 import type { RotationItemResponse } from "./RotationItemResponse";
 import type { RotationMemberResponse } from "./RotationMemberResponse";
 
-export type RotationVaultResponse = { vaultId: string, vaultName: string, keyVersion: number, members: Array<RotationMemberResponse>, items: Array<RotationItemResponse>, };
+export type RotationVaultResponse = {
+	vaultId: string;
+	vaultName: string;
+	keyVersion: number;
+	members: Array<RotationMemberResponse>;
+	items: Array<RotationItemResponse>;
+};

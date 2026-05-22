@@ -2,4 +2,9 @@
 import type { SyncCursorResponse } from "./SyncCursorResponse";
 import type { SyncEventDto } from "./SyncEventDto";
 
-export type GetEventsSinceResponse = { events: Array<SyncEventDto>, cursor: SyncCursorResponse | null, hasMore: boolean, requiresFullRefresh: boolean, };
+export type GetEventsSinceResponse = {
+	events: Array<SyncEventDto>;
+	cursor: SyncCursorResponse | null;
+	hasMore: boolean;
+	requiresFullRefresh: boolean;
+};

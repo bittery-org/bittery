@@ -1,5 +1,5 @@
-import type { AutofillField } from "../types";
 import { contentState } from "../state";
+import type { AutofillField } from "../types";
 import { hideAutofillOverlay } from "./credential";
 import { hideCreditCardAutofillOverlay } from "./credit-card";
 import { hideFieldIcon } from "./icon";
@@ -28,7 +28,10 @@ export function cleanupDetachedAutofillState() {
 		hideIdentityAutofillOverlay,
 	);
 
-	if (contentState.currentFocusedField && !contentState.currentFocusedField.input.isConnected) {
+	if (
+		contentState.currentFocusedField &&
+		!contentState.currentFocusedField.input.isConnected
+	) {
 		contentState.currentFocusedField = null;
 	}
 	if (

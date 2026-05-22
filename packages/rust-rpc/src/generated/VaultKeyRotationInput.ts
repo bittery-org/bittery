@@ -2,4 +2,7 @@
 import type { RotationMemberKeyInput } from "./RotationMemberKeyInput";
 import type { RotationReEncryptedItemInput } from "./RotationReEncryptedItemInput";
 
-export type VaultKeyRotationInput = { memberKeys: Array<RotationMemberKeyInput>, reEncryptedItems: Array<RotationReEncryptedItemInput>, };
+export type VaultKeyRotationInput = {
+	memberKeys: Array<RotationMemberKeyInput>;
+	reEncryptedItems: Array<RotationReEncryptedItemInput>;
+};

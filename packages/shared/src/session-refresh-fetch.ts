@@ -1,6 +1,6 @@
 import {
-	SessionRefreshManager,
 	type RefreshResult,
+	SessionRefreshManager,
 	type SessionSnapshot,
 } from "./session-refresh";
 

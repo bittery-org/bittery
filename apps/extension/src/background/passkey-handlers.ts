@@ -32,6 +32,7 @@ import type {
 import { core } from "./core-instance";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
 import { desktopSync } from "./desktop-sync";
+import { rpcClient } from "./rpc-client";
 import { resolveAccountEmailForVault } from "./services/account-resolution";
 import {
 	onLocalItemCreated,
@@ -42,7 +43,6 @@ import {
 	setDesktopModeSentinel,
 	updateActivity,
 } from "./session-manager";
-import { rpcClient } from "./rpc-client";
 import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
@@ -113,7 +113,10 @@ type CreateDecisionResolution =
 
 const lastSignCountByCredentialId = new Map<string, number>();
 
-function computeNextSignCount(credentialId: string, knownCount: number): number {
+function computeNextSignCount(
+	credentialId: string,
+	knownCount: number,
+): number {
 	const previousLocal = lastSignCountByCredentialId.get(credentialId) ?? 0;
 	const epochSeconds = Math.floor(Date.now() / 1000);
 	const next = Math.max(knownCount + 1, previousLocal + 1, epochSeconds);

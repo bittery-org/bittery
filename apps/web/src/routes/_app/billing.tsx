@@ -821,26 +821,26 @@ function BillingRoute() {
 							<>
 								<Separator className="my-4" />
 								<div className="flex flex-wrap gap-4">
-												{entitlementLimits.shareLinks !== null && (
-											<div className="text-muted-foreground text-xs">
-												<span className="font-medium text-foreground">
-													{getShareLinksLimitLabel(
-																	entitlementLimits.shareLinks,
-														m,
-													)}
-												</span>
-											</div>
-										)}
-												{entitlementLimits.sharedVaults !== null && (
-											<div className="text-muted-foreground text-xs">
-												<span className="font-medium text-foreground">
-													{getSharedVaultsLimitLabel(
-																	entitlementLimits.sharedVaults,
-														m,
-													)}
-												</span>
-											</div>
-										)}
+									{entitlementLimits.shareLinks !== null && (
+										<div className="text-muted-foreground text-xs">
+											<span className="font-medium text-foreground">
+												{getShareLinksLimitLabel(
+													entitlementLimits.shareLinks,
+													m,
+												)}
+											</span>
+										</div>
+									)}
+									{entitlementLimits.sharedVaults !== null && (
+										<div className="text-muted-foreground text-xs">
+											<span className="font-medium text-foreground">
+												{getSharedVaultsLimitLabel(
+													entitlementLimits.sharedVaults,
+													m,
+												)}
+											</span>
+										</div>
+									)}
 								</div>
 							</>
 						)}

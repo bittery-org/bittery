@@ -30,9 +30,7 @@ type QueryArgs<TQuery extends Query<any[], any>> =
 	TQuery extends Query<infer TArgs, any> ? TArgs : never;
 
 type QueryOutput<TQuery extends Query<any[], any>> =
-	TQuery extends Query<any[], infer TOutput>
-		? UnwrapRpcResult<TOutput>
-		: never;
+	TQuery extends Query<any[], infer TOutput> ? UnwrapRpcResult<TOutput> : never;
 
 type MutationArgs<TMutation extends Mutation<any[], any>> =
 	TMutation extends Mutation<infer TArgs, any> ? TArgs : never;
@@ -60,8 +58,8 @@ export type UnwrapRpcResult<TValue> = TValue extends {
 }
 	? TSuccess
 	: TValue extends {
-		Err: unknown;
-	}
+				Err: unknown;
+			}
 		? never
 		: TValue;
 
@@ -70,10 +68,14 @@ type RpcQueryClientMethod<TQuery extends Query<any[], any>> = {
 };
 
 type RpcMutationClientMethod<TMutation extends Mutation<any[], any>> = {
-	mutate: (...args: MutationArgs<TMutation>) => Promise<MutationOutput<TMutation>>;
+	mutate: (
+		...args: MutationArgs<TMutation>
+	) => Promise<MutationOutput<TMutation>>;
 };
 
-type RpcSubscriptionClientMethod<TSubscription extends Subscription<any[], any>> = {
+type RpcSubscriptionClientMethod<
+	TSubscription extends Subscription<any[], any>,
+> = {
 	subscribe: (
 		...args: SubscriptionArgs<TSubscription>
 	) => SubscriptionOutput<TSubscription>;
@@ -81,24 +83,28 @@ type RpcSubscriptionClientMethod<TSubscription extends Subscription<any[], any>>
 
 type RpcQueryOptionsMethod<TQuery extends Query<any[], any>> = {
 	queryKey: (...args: QueryArgs<TQuery>) => RpcQueryKey;
-	queryOptions: (...args: QueryArgs<TQuery>) => AppRpcQueryOptions<QueryOutput<TQuery>>;
+	queryOptions: (
+		...args: QueryArgs<TQuery>
+	) => AppRpcQueryOptions<QueryOutput<TQuery>>;
 };
 
-type RpcClientShape<TNode> = TNode extends Query<any[], any>
-	? RpcQueryClientMethod<TNode>
-	: TNode extends Mutation<any[], any>
-		? RpcMutationClientMethod<TNode>
-		: TNode extends Subscription<any[], any>
-			? RpcSubscriptionClientMethod<TNode>
-			: TNode extends Record<string, unknown>
-				? { [TKey in keyof TNode]: RpcClientShape<TNode[TKey]> }
-				: never;
+type RpcClientShape<TNode> =
+	TNode extends Query<any[], any>
+		? RpcQueryClientMethod<TNode>
+		: TNode extends Mutation<any[], any>
+			? RpcMutationClientMethod<TNode>
+			: TNode extends Subscription<any[], any>
+				? RpcSubscriptionClientMethod<TNode>
+				: TNode extends Record<string, unknown>
+					? { [TKey in keyof TNode]: RpcClientShape<TNode[TKey]> }
+					: never;
 
-type RpcOptionsProxyShape<TNode> = TNode extends Query<any[], any>
-	? RpcQueryOptionsMethod<TNode>
-	: TNode extends Record<string, unknown>
-		? { [TKey in keyof TNode]: RpcOptionsProxyShape<TNode[TKey]> }
-		: never;
+type RpcOptionsProxyShape<TNode> =
+	TNode extends Query<any[], any>
+		? RpcQueryOptionsMethod<TNode>
+		: TNode extends Record<string, unknown>
+			? { [TKey in keyof TNode]: RpcOptionsProxyShape<TNode[TKey]> }
+			: never;
 
 export type AppRpcClient = RpcClientShape<QubitServer>;
 export type AppRpcOptionsProxy = RpcOptionsProxyShape<QubitServer>;
@@ -129,9 +135,7 @@ export class RpcClientError extends Error {
 }
 
 function normalizeEndpointPath(pathname: string): string {
-	const withLeadingSlash = pathname.startsWith("/")
-		? pathname
-		: `/${pathname}`;
+	const withLeadingSlash = pathname.startsWith("/") ? pathname : `/${pathname}`;
 	const normalized = withLeadingSlash.replace(/\/+$/, "");
 	return normalized || "/";
 }
@@ -276,7 +280,9 @@ function createWrappedRpcClient(
 				if (property === "query") {
 					return async (...args: unknown[]) => {
 						try {
-							return unwrapRpcResult(await getLeaf(rawClient, path).query(...args));
+							return unwrapRpcResult(
+								await getLeaf(rawClient, path).query(...args),
+							);
 						} catch (error) {
 							throw normalizeRpcError(error);
 						}
@@ -286,7 +292,9 @@ function createWrappedRpcClient(
 				if (property === "mutate") {
 					return async (...args: unknown[]) => {
 						try {
-							return unwrapRpcResult(await getLeaf(rawClient, path).mutate(...args));
+							return unwrapRpcResult(
+								await getLeaf(rawClient, path).mutate(...args),
+							);
 						} catch (error) {
 							throw normalizeRpcError(error);
 						}
@@ -295,6 +303,7 @@ function createWrappedRpcClient(
 
 				if (property === "subscribe") {
 					const leaf = getLeaf(rawClient, path);
+
 					if (typeof leaf.subscribe !== "function") {
 						return undefined;
 					}

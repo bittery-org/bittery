@@ -20,7 +20,11 @@ type RpcRequest = {
 
 type RpcResponse =
 	| { type: "ok"; id: string | number; value: unknown }
-	| { type: "error"; id: string | number; value: { code: number; message: string; data?: unknown } }
+	| {
+			type: "error";
+			id: string | number;
+			value: { code: number; message: string; data?: unknown };
+	  }
 	| null;
 
 type PendingRequest = {
@@ -36,18 +40,28 @@ export interface HttpBatchOptions extends HttpOptions {
 function parseOneResponse(raw: unknown): RpcResponse {
 	try {
 		const response =
-			typeof raw === "string" ? (JSON.parse(raw) as Record<string, unknown>) : (raw as Record<string, unknown>);
+			typeof raw === "string"
+				? (JSON.parse(raw) as Record<string, unknown>)
+				: (raw as Record<string, unknown>);
 
 		if (response?.jsonrpc !== "2.0") {
 			throw new Error("invalid value for `jsonrpc`");
 		}
 
-		if (typeof response.id !== "number" && typeof response.id !== "string" && response.id !== null) {
+		if (
+			typeof response.id !== "number" &&
+			typeof response.id !== "string" &&
+			response.id !== null
+		) {
 			throw new Error("missing `id` field from response");
 		}
 
 		if ("result" in response && !("error" in response)) {
-			return { type: "ok", id: response.id as string | number, value: response.result };
+			return {
+				type: "ok",
+				id: response.id as string | number,
+				value: response.result,
+			};
 		}
 
 		if ("error" in response && !("result" in response)) {
@@ -73,7 +87,7 @@ export function httpBatch(host: string, options?: HttpBatchOptions): Transport {
 	const fetchImpl = options?.fetch ?? fetch;
 	const maxBatchSize = options?.maxBatchSize ?? Number.POSITIVE_INFINITY;
 
-	let queue: PendingRequest[] = [];
+	const queue: PendingRequest[] = [];
 	let scheduled = false;
 
 	function scheduleFlush() {
@@ -120,7 +134,10 @@ export function httpBatch(host: string, options?: HttpBatchOptions): Transport {
 				// Batch response — should be an array
 				if (!Array.isArray(json)) {
 					// Server didn't return an array — resolve all as errors
-					console.error("Expected array response for batch request, got:", typeof json);
+					console.error(
+						"Expected array response for batch request, got:",
+						typeof json,
+					);
 					for (const entry of batch) {
 						entry.resolve(null);
 					}

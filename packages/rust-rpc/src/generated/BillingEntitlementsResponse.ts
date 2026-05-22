@@ -2,4 +2,11 @@
 import type { BillingEntitlements } from "./BillingEntitlements";
 import type { EntitlementLimits } from "./EntitlementLimits";
 
-export type BillingEntitlementsResponse = { mode: string, plan: string, status: string, isActive: boolean, entitlements: BillingEntitlements, limits: EntitlementLimits, };
+export type BillingEntitlementsResponse = {
+	mode: string;
+	plan: string;
+	status: string;
+	isActive: boolean;
+	entitlements: BillingEntitlements;
+	limits: EntitlementLimits;
+};

@@ -1,7 +1,7 @@
-import { buildRpcUrl, normalizeServerUrl } from "./server-url";
-import type { SessionSnapshot } from "./session-refresh";
 import { createAppRpcClient } from "./rpc-client";
 import { createSessionRefreshingRpcClient } from "./rpc-session-refresh";
+import { buildRpcUrl, normalizeServerUrl } from "./server-url";
+import type { SessionSnapshot } from "./session-refresh";
 
 interface IStorageAdapter {
 	getUnlockedAccounts?: () => Promise<string[]>;

@@ -123,7 +123,7 @@ const rpcClient = createSessionRefreshingRpcClient({
 	getClientId: getSyncClientIdHeader,
 });
 
-	const rpc = createAppRpcOptionsProxy(rpcClient, queryClient);
+const rpc = createAppRpcOptionsProxy(rpcClient, queryClient);
 
 export const getRouter = () => {
 	const router = createTanStackRouter({

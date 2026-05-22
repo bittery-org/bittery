@@ -169,9 +169,11 @@ function normalizeVaultSummary(
 	};
 }
 
-function normalizeRawItemWithVault<TItem extends RawEncryptedItem & {
-	vault: RpcVaultSummary;
-}>(item: TItem): RawEncryptedItemWithVault {
+function normalizeRawItemWithVault<
+	TItem extends RawEncryptedItem & {
+		vault: RpcVaultSummary;
+	},
+>(item: TItem): RawEncryptedItemWithVault {
 	return {
 		...item,
 		vault: normalizeVaultSummary(item.vault, item.vaultId),
@@ -444,7 +446,9 @@ export class ItemService {
 				limit: 500,
 			});
 
-			allItems.push(...page.items.map((item) => normalizeRawItemWithVault(item)));
+			allItems.push(
+				...page.items.map((item) => normalizeRawItemWithVault(item)),
+			);
 			if (!page.hasMore || !page.nextCursor) {
 				break;
 			}

@@ -2,4 +2,19 @@
 import type { BootstrapAttachmentResponse } from "./BootstrapAttachmentResponse";
 import type { BootstrapVaultSummary } from "./BootstrapVaultSummary";
 
-export type BootstrapItemResponse = { id: string, vaultId: string, category: string, favorite: boolean, encryptedData: string, encryptionIv: string, encryptionAlgorithm: string, version: number, lastModifiedBy: string | null, createdAt: string, updatedAt: string, deletedAt: string | null, attachments: Array<BootstrapAttachmentResponse>, vault: BootstrapVaultSummary | null, };
+export type BootstrapItemResponse = {
+	id: string;
+	vaultId: string;
+	category: string;
+	favorite: boolean;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+	version: number;
+	lastModifiedBy: string | null;
+	createdAt: string;
+	updatedAt: string;
+	deletedAt: string | null;
+	attachments: Array<BootstrapAttachmentResponse>;
+	vault: BootstrapVaultSummary | null;
+};

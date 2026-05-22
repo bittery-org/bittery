@@ -14,6 +14,7 @@ import {
 import { cryptoAdapter } from "../lib/crypto-adapter";
 import { storage } from "../lib/storage";
 import { desktopSync } from "./desktop-sync";
+import { rpcClient } from "./rpc-client";
 import {
 	isUnlocked,
 	lock,
@@ -21,7 +22,6 @@ import {
 	setMasterUnlockKey,
 	updateActivity,
 } from "./session-manager";
-import { rpcClient } from "./rpc-client";
 import type { MessageResponse } from "./types";
 
 async function isDesktopUnlockedNow(): Promise<boolean> {

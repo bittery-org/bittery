@@ -104,7 +104,9 @@ export function DeviceSetupQrScanner({
 				onRequestClose={handleRequestClose}
 			>
 				<View className="flex-1 items-center justify-center bg-background">
-					<Text className="text-foreground">{m.device_setup_scanner_loading()}</Text>
+					<Text className="text-foreground">
+						{m.device_setup_scanner_loading()}
+					</Text>
 				</View>
 			</Modal>
 		);
@@ -123,7 +125,7 @@ export function DeviceSetupQrScanner({
 						<View className="flex-row items-center">
 							<Camera size={24} color="#6b7280" />
 							<Text className="ml-2 font-bold text-foreground text-xl">
-							{m.device_setup_scanner_title()}
+								{m.device_setup_scanner_title()}
 							</Text>
 						</View>
 						<TouchableOpacity
@@ -190,7 +192,9 @@ export function DeviceSetupQrScanner({
 						>
 							<X size={24} color="#fff" />
 						</TouchableOpacity>
-						<Text className="font-bold text-lg text-white">{m.device_setup_scanner_title()}</Text>
+						<Text className="font-bold text-lg text-white">
+							{m.device_setup_scanner_title()}
+						</Text>
 						<TouchableOpacity
 							onPress={() => setTorchEnabled(!torchEnabled)}
 							className="rounded-full bg-black/50 p-2"
@@ -214,7 +218,7 @@ export function DeviceSetupQrScanner({
 
 					<View className="bg-black/50 px-6 py-8">
 						<Text className="text-center text-base text-white">
-						{m.device_setup_scanner_footer()}
+							{m.device_setup_scanner_footer()}
 						</Text>
 					</View>
 				</View>

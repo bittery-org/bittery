@@ -4,8 +4,8 @@
  */
 
 import type { DecryptedItem } from "@bittery/shared/types";
-import { updateActivity } from "./session-manager";
 import { rpcClient } from "./rpc-client";
+import { updateActivity } from "./session-manager";
 import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
