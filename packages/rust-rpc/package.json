@@ -6,7 +6,7 @@
 	"main": "./src/index.ts",
 	"types": "./src/index.ts",
 	"scripts": {
-		"generate": "BITTERY_RUST_RPC_OUTPUT_DIR=$PWD/src/generated cargo run --manifest-path ../../apps/server-rust/Cargo.toml --bin write-bindings",
+		"generate": "BITTERY_RUST_RPC_OUTPUT_DIR=$PWD/src/generated cargo run --manifest-path ../../apps/server/Cargo.toml --bin write-bindings",
 		"check-types": "tsc --noEmit"
 	},
 	"exports": {

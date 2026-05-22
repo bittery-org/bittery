@@ -1,5 +1,5 @@
 {
-	"name": "server-rust",
+	"name": "server",
 	"private": true,
 	"scripts": {
 		"dev": "cargo watch -x run",

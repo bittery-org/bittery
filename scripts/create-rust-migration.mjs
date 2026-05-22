@@ -20,7 +20,7 @@ if (!slug) {
 	process.exit(1);
 }
 
-const migrationsDir = resolve("apps/server-rust/migrations");
+const migrationsDir = resolve("apps/server/migrations");
 mkdirSync(migrationsDir, { recursive: true });
 
 const versions = readdirSync(migrationsDir)

@@ -40,7 +40,7 @@ A zero-knowledge password manager with end-to-end encryption. All sensitive data
 bittery/
 ├── apps/
 │   ├── web/              # React web app
-│   ├── server-rust/      # Primary Rust API server
+│   ├── server/      # Primary Rust API server
 │   ├── server/           # Legacy Hono + tRPC server kept during migration
 │   ├── desktop/          # Tauri 2 desktop app
 │   ├── extension/        # Chrome extension

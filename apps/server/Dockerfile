@@ -11,10 +11,10 @@ RUN apt-get update \
 		perl \
 	&& rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app/apps/server-rust
+WORKDIR /app/apps/server
 
-COPY apps/server-rust/Cargo.toml apps/server-rust/Cargo.lock ./
-COPY apps/server-rust/src ./src
+COPY apps/server/Cargo.toml apps/server/Cargo.lock ./
+COPY apps/server/src ./src
 COPY packages/crypto/core/crates/bittery-crypto-core /app/packages/crypto/core/crates/bittery-crypto-core
 
 RUN cargo build --release
@@ -32,7 +32,7 @@ RUN groupadd --system --gid 10001 bittery \
 	&& mkdir -p /app/migrations \
 	&& chown -R 10001:10001 /app /home/bittery
 
-COPY --from=builder --chown=10001:10001 /app/apps/server-rust/target/release/bittery-server-rust ./bittery-server-rust
+COPY --from=builder --chown=10001:10001 /app/apps/server/target/release/bittery-server ./bittery-server
 COPY --chown=10001:10001 packages/db/src/migrations ./migrations
 
 ENV MIGRATIONS_FOLDER=/app/migrations
@@ -45,4 +45,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 EXPOSE 3000
 
-CMD ["./bittery-server-rust"]
+CMD ["./bittery-server"]

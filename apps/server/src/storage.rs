@@ -261,7 +261,7 @@ fn get_client() -> Result<&'static Client, StorageError> {
                 config.secret_access_key,
                 None,
                 None,
-                "bittery-server-rust",
+                "bittery-server",
             ))
             .force_path_style(true)
             .build(),

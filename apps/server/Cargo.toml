@@ -1,11 +1,11 @@
 [package]
-name = "bittery-server-rust"
+name = "bittery-server"
 version = "0.1.0"
 edition = "2021"
-default-run = "bittery-server-rust"
+default-run = "bittery-server"
 
 [[bin]]
-name = "bittery-server-rust"
+name = "bittery-server"
 path = "src/main.rs"
 
 [[bin]]
