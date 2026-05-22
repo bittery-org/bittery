@@ -13,6 +13,7 @@ use axum::{
     },
     middleware, Router,
 };
+use futures_util::FutureExt;
 use serde_json::{json, Value};
 use sqlx::{query, PgPool};
 use tower::util::ServiceExt;
@@ -21,6 +22,9 @@ use url::Url;
 use crate::{
     create_rpc_router, db, rpc_request_context_middleware, rpc_request_guard_middleware, AppState,
 };
+
+const DATABASE_PREFIX: &str = "bittery_test_";
+const MAX_POSTGRES_IDENTIFIER_LEN: usize = 63;
 
 pub(crate) struct RpcTestResponse {
     pub status: StatusCode,
@@ -274,15 +278,20 @@ where
         ))
         .layer(middleware::from_fn(rpc_request_guard_middleware));
 
-    let result = test_fn(RpcTestApp {
+    let result = std::panic::AssertUnwindSafe(test_fn(RpcTestApp {
         pool,
         state,
         router,
-    })
+    }))
+    .catch_unwind()
     .await;
 
     database.cleanup().await;
-    result
+
+    match result {
+        Ok(result) => result,
+        Err(panic_payload) => std::panic::resume_unwind(panic_payload),
+    }
 }
 
 struct TestDatabase {
@@ -347,11 +356,8 @@ fn database_url_for_name(database_url: &str, name: &str) -> String {
     url.to_string()
 }
 
-fn next_database_name(test_name: &str) -> String {
-    const DATABASE_PREFIX: &str = "bittery_test_";
-    const MAX_POSTGRES_IDENTIFIER_LEN: usize = 63;
-
-    let sanitized = test_name
+fn sanitize_test_name(test_name: &str) -> String {
+    test_name
         .chars()
         .map(|character| {
             if character.is_ascii_alphanumeric() {
@@ -360,7 +366,11 @@ fn next_database_name(test_name: &str) -> String {
                 '_'
             }
         })
-        .collect::<String>();
+        .collect()
+}
+
+fn next_database_name(test_name: &str) -> String {
+    let sanitized = sanitize_test_name(test_name);
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time should be after unix epoch")
@@ -379,4 +389,47 @@ fn next_database_name(test_name: &str) -> String {
 fn next_test_database_sequence() -> u64 {
     static NEXT_DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
     NEXT_DATABASE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::panic::AssertUnwindSafe;
+
+    use futures_util::FutureExt;
+    use rand::random;
+    use sqlx::query_scalar;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn with_rpc_test_app_drops_database_after_panic() {
+        let test_name = format!("cleanup_after_panic_{:016x}", random::<u64>());
+        let database_name_like = format!("{}{test_name}%", DATABASE_PREFIX);
+
+        assert_eq!(count_test_databases_matching(&database_name_like).await, 0);
+
+        let panic_result = AssertUnwindSafe(with_rpc_test_app(&test_name, |_app| async move {
+            panic!("intentional panic to verify cleanup");
+        }))
+        .catch_unwind()
+        .await;
+
+        assert!(panic_result.is_err());
+        assert_eq!(count_test_databases_matching(&database_name_like).await, 0);
+    }
+
+    async fn count_test_databases_matching(pattern: &str) -> i64 {
+        dotenvy::dotenv().ok();
+        let base_database_url = std::env::var("DATABASE_URL")
+            .expect("DATABASE_URL must be set to run server integration tests");
+        let admin_pool = db::connect(&admin_database_url(&base_database_url))
+            .await
+            .expect("admin database should connect");
+
+        query_scalar::<_, i64>("SELECT COUNT(*)::BIGINT FROM pg_database WHERE datname LIKE $1")
+            .bind(pattern)
+            .fetch_one(&admin_pool)
+            .await
+            .expect("test databases should count")
+    }
 }

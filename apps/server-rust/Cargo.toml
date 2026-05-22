@@ -43,4 +43,5 @@ jsonwebtoken = "9"
 bittery-crypto-core = { path = "../../packages/crypto/core/crates/bittery-crypto-core" }
 
 [dev-dependencies]
+futures-util = "0.3"
 tower = { version = "0.5", features = ["util"] }
