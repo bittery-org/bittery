@@ -16,9 +16,9 @@ use serde_json::json;
 use tracing::warn;
 
 use crate::{
-    billing::{is_self_hosted_mode, is_stripe_webhook_configured, process_stripe_webhook_event},
-    favicon::{fetch_and_store_favicon, get_fetched_favicon, normalize_favicon_domain},
-    storage::create_presigned_download,
+    services::billing::{is_self_hosted_mode, is_stripe_webhook_configured, process_stripe_webhook_event},
+    integrations::favicon::{fetch_and_store_favicon, get_fetched_favicon, normalize_favicon_domain},
+    integrations::storage::create_presigned_download,
     AppState,
 };
 

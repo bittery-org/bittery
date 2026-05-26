@@ -1,22 +1,19 @@
 use std::collections::HashMap;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use qubit::{
-    builder::IntoResponse,
-    handler,
-    server::{ErrorCode, Router, RpcError},
-};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sqlx::{query_as, PgPool};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use ts_rs::TS;
 
 use crate::{
-    auth::RefreshSessionContext,
-    server_support::{bittery_mode, db_pool as load_db_pool},
-    team_billing::team_management_enabled as shared_team_management_enabled,
-    AppState,
+    error::AppError,
+    repo::audit::{
+        load_actor, load_audit_events, load_share_access_events, load_team_members,
+        AuditEventFilter, AuditEventRow, ShareAccessEventRow, TeamMemberRow,
+    },
+    config::bittery_mode,
+    services::team_billing::team_management_enabled as shared_team_management_enabled,
 };
 
 const DEFAULT_LIMIT: u32 = 50;
@@ -137,12 +134,7 @@ pub struct TeamEventsResponse {
     pub next_cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct AuditRpcError {
-    pub code: String,
-    pub message: String,
-}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct CursorPayload {
@@ -151,56 +143,12 @@ struct CursorPayload {
     id: String,
 }
 
-#[derive(Debug, sqlx::FromRow)]
-struct AuditActorRow {
-    team_id: Option<String>,
-    role: String,
-    billing_plan: Option<String>,
-    billing_status: Option<String>,
-}
-
-#[derive(Debug, Clone, sqlx::FromRow)]
-struct TeamMemberRow {
-    id: String,
-    name: Option<String>,
-    email: Option<String>,
-}
-
-#[derive(Debug, Clone, sqlx::FromRow)]
-struct AuditEventRow {
-    id: String,
-    user_id: String,
-    action: String,
-    entity_type: Option<String>,
-    entity_id: Option<String>,
-    ip_address: Option<String>,
-    user_agent: Option<String>,
-    metadata: Option<String>,
-    created_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, sqlx::FromRow)]
-struct ShareAccessEventRow {
-    id: String,
-    share_link_id: String,
-    created_by_id: String,
-    accessed_by_email: Option<String>,
-    ip_address: Option<String>,
-    user_agent: Option<String>,
-    success: bool,
-    failure_reason: Option<String>,
-    accessed_at: OffsetDateTime,
-}
-
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn teamEvents(
-    ctx: RefreshSessionContext,
+pub(crate) async fn get_team_events(
+    pool: &sqlx::PgPool,
+    user_id: &str,
     input: TeamEventsInput,
-) -> Result<TeamEventsResponse, AuditRpcError> {
-    let pool = load_db_pool(&ctx.app_state, internal_error)?;
-
-    let actor = load_actor(pool, &ctx.session.user_id).await?;
+) -> Result<TeamEventsResponse, AppError> {
+    let actor = load_actor(pool, user_id).await?;
     let team_id = actor
         .team_id
         .clone()
@@ -249,6 +197,14 @@ pub async fn teamEvents(
     }
 
     let normalized = normalize_input(&input)?;
+    let filter = AuditEventFilter {
+        member_ids: &member_ids,
+        actor_user_id: normalized.actor_user_id.as_deref(),
+        from: normalized.from,
+        to: normalized.to,
+        search_pattern: normalized.search_pattern.as_deref(),
+        scan_limit: MAX_SCAN_ROWS,
+    };
     let include_audit = normalized.action_group != AuditActionGroupFilter::Share
         && normalized.result != AuditResultFilter::Failure;
     let include_share = matches!(
@@ -257,13 +213,13 @@ pub async fn teamEvents(
     );
 
     let audit_rows = if include_audit {
-        load_audit_events(pool, &member_ids, &normalized).await?
+        load_audit_events(pool, &filter, normalized.action_group.as_str(), AUTH_ACTIONS).await?
     } else {
         Vec::new()
     };
 
     let share_rows = if include_share {
-        load_share_access_events(pool, &member_ids, &normalized).await?
+        load_share_access_events(pool, &filter, normalized.result.as_str()).await?
     } else {
         Vec::new()
     };
@@ -300,117 +256,7 @@ pub async fn teamEvents(
     })
 }
 
-pub fn create_audit_router() -> Router<AppState> {
-    Router::new().handler(teamEvents)
-}
-
-async fn load_actor(pool: &PgPool, user_id: &str) -> Result<AuditActorRow, AuditRpcError> {
-    query_as::<_, AuditActorRow>(
-		"SELECT u.team_id, u.role::text AS role, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
-	)
-	.bind(user_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load team actor"); internal_error("Failed to load team actor") })?
-	.ok_or_else(|| not_found_error("Team not found"))
-}
-
-async fn load_team_members(
-    pool: &PgPool,
-    team_id: &str,
-) -> Result<Vec<TeamMemberRow>, AuditRpcError> {
-    query_as::<_, TeamMemberRow>("SELECT id, name, email FROM \"user\" WHERE team_id = $1")
-        .bind(team_id)
-        .fetch_all(pool)
-        .await
-        .map_err(|_| internal_error("Failed to load team members"))
-}
-
-async fn load_audit_events(
-    pool: &PgPool,
-    member_ids: &[String],
-    input: &NormalizedInput,
-) -> Result<Vec<AuditEventRow>, AuditRpcError> {
-    query_as::<_, AuditEventRow>(
-		"SELECT id, user_id, action, entity_type, entity_id, ip_address, user_agent, metadata, created_at
-		 FROM audit_log
-		 WHERE user_id = ANY($1)
-		   AND ($2::text IS NULL OR user_id = $2)
-		   AND ($3::timestamp IS NULL OR created_at >= $3)
-		   AND ($4::timestamp IS NULL OR created_at <= $4)
-		   AND (
-		     $5::text IS NULL
-		     OR action ILIKE $5
-		     OR COALESCE(entity_type, '') ILIKE $5
-		     OR COALESCE(entity_id, '') ILIKE $5
-		     OR user_id ILIKE $5
-		     OR COALESCE(metadata, '') ILIKE $5
-		   )
-		   AND (
-		     $6::text = 'all'
-		     OR $6::text = 'other'
-		     OR ($6::text = 'team' AND action ILIKE 'team_%')
-		     OR ($6::text = 'vault' AND action ILIKE 'vault_%')
-		     OR ($6::text = 'item' AND action ILIKE 'item_%')
-		     OR ($6::text = 'share' AND action ILIKE 'share_%')
-		     OR ($6::text = 'auth' AND action = ANY($7))
-		   )
-		 ORDER BY created_at DESC, id DESC
-		 LIMIT $8",
-	)
-	.bind(member_ids)
-	.bind(input.actor_user_id.as_deref())
-	.bind(input.from)
-	.bind(input.to)
-	.bind(input.search_pattern.as_deref())
-	.bind(input.action_group.as_str())
-	.bind(AUTH_ACTIONS)
-	.bind(MAX_SCAN_ROWS)
-	.fetch_all(pool)
-	.await
-	.map_err(|_| internal_error("Failed to load audit events"))
-}
-
-async fn load_share_access_events(
-    pool: &PgPool,
-    member_ids: &[String],
-    input: &NormalizedInput,
-) -> Result<Vec<ShareAccessEventRow>, AuditRpcError> {
-    query_as::<_, ShareAccessEventRow>(
-		"SELECT sal.id, sal.share_link_id, sl.created_by_id, sal.accessed_by_email, sal.ip_address, sal.user_agent, sal.success, sal.failure_reason, sal.accessed_at
-		 FROM share_access_log sal
-		 INNER JOIN share_link sl ON sal.share_link_id = sl.id
-		 WHERE sl.created_by_id = ANY($1)
-		   AND ($2::text IS NULL OR sl.created_by_id = $2)
-		   AND ($3::timestamp IS NULL OR sal.accessed_at >= $3)
-		   AND ($4::timestamp IS NULL OR sal.accessed_at <= $4)
-		   AND (
-		     $5::text IS NULL
-		     OR sal.share_link_id ILIKE $5
-		     OR COALESCE(sal.accessed_by_email, '') ILIKE $5
-		     OR COALESCE(sal.failure_reason, '') ILIKE $5
-		   )
-		   AND (
-		     $6::text = 'all'
-		     OR ($6::text = 'success' AND sal.success = true)
-		     OR ($6::text = 'failure' AND sal.success = false)
-		   )
-		 ORDER BY sal.accessed_at DESC, sal.id DESC
-		 LIMIT $7",
-	)
-	.bind(member_ids)
-	.bind(input.actor_user_id.as_deref())
-	.bind(input.from)
-	.bind(input.to)
-	.bind(input.search_pattern.as_deref())
-	.bind(input.result.as_str())
-	.bind(MAX_SCAN_ROWS)
-	.fetch_all(pool)
-	.await
-	.map_err(|_| internal_error("Failed to load share access events"))
-}
-
-fn normalize_input(input: &TeamEventsInput) -> Result<NormalizedInput, AuditRpcError> {
+fn normalize_input(input: &TeamEventsInput) -> Result<NormalizedInput, AppError> {
     let limit = input.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT);
     let action_group = input.action_group.unwrap_or(AuditActionGroupFilter::All);
     let result = input.result.unwrap_or(AuditResultFilter::All);
@@ -446,12 +292,12 @@ fn normalize_input(input: &TeamEventsInput) -> Result<NormalizedInput, AuditRpcE
     })
 }
 
-fn parse_timestamp(value: &str) -> Result<OffsetDateTime, AuditRpcError> {
+fn parse_timestamp(value: &str) -> Result<OffsetDateTime, AppError> {
     OffsetDateTime::parse(value, &Rfc3339)
         .map_err(|_| bad_request_error("Invalid RFC3339 timestamp"))
 }
 
-fn decode_cursor(raw: &str) -> Result<CursorPayload, AuditRpcError> {
+fn decode_cursor(raw: &str) -> Result<CursorPayload, AppError> {
     let decoded = URL_SAFE_NO_PAD
         .decode(raw)
         .map_err(|_| bad_request_error("Invalid pagination cursor"))?;
@@ -651,57 +497,16 @@ fn team_management_enabled(billing_status: Option<&str>) -> bool {
     shared_team_management_enabled(bittery_mode(), Some("team"), billing_status)
 }
 
-fn bad_request_error(message: &str) -> AuditRpcError {
-    AuditRpcError {
-        code: "BAD_REQUEST".to_string(),
-        message: message.to_string(),
-    }
+fn bad_request_error(message: &str) -> AppError {
+    AppError::bad_request(message)
 }
 
-fn forbidden_error(message: &str) -> AuditRpcError {
-    AuditRpcError {
-        code: "FORBIDDEN".to_string(),
-        message: message.to_string(),
-    }
+fn forbidden_error(message: &str) -> AppError {
+    AppError::forbidden(message)
 }
 
-fn not_found_error(message: &str) -> AuditRpcError {
-    AuditRpcError {
-        code: "NOT_FOUND".to_string(),
-        message: message.to_string(),
-    }
-}
-
-fn internal_error(message: &str) -> AuditRpcError {
-    AuditRpcError {
-        code: "INTERNAL_SERVER_ERROR".to_string(),
-        message: message.to_string(),
-    }
-}
-
-impl From<AuditRpcError> for RpcError {
-    fn from(value: AuditRpcError) -> Self {
-        let code = match value.code.as_str() {
-            "BAD_REQUEST" => ErrorCode::InvalidParams,
-            "FORBIDDEN" => ErrorCode::ServerError(403),
-            "NOT_FOUND" => ErrorCode::ServerError(404),
-            _ => ErrorCode::InternalError,
-        };
-
-        RpcError {
-            code,
-            message: value.message,
-            data: Some(json!({ "code": value.code })),
-        }
-    }
-}
-
-impl IntoResponse for AuditRpcError {
-    type Output = <RpcError as IntoResponse>::Output;
-
-    fn into_response(self) -> jsonrpsee::ResponsePayload<'static, Self::Output> {
-        RpcError::from(self).into_response()
-    }
+fn not_found_error(message: &str) -> AppError {
+    AppError::not_found(message)
 }
 
 #[derive(Debug, Clone)]

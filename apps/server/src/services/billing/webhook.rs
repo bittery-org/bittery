@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{query, query_as, PgPool};
 use time::OffsetDateTime;
 
-use crate::server_support;
+use crate::config;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -57,7 +57,7 @@ struct DbBillingTeamRow {
 }
 
 pub(crate) fn is_self_hosted_mode() -> bool {
-    server_support::is_self_hosted_mode()
+    config::is_self_hosted_mode()
 }
 
 pub(crate) fn is_stripe_webhook_configured() -> bool {

@@ -40,7 +40,7 @@ pub(crate) struct RpcTestApp {
 }
 
 impl RpcTestApp {
-    pub(crate) async fn issue_session(&self, user_id: &str) -> crate::auth::VerifiedSession {
+    pub(crate) async fn issue_session(&self, user_id: &str) -> crate::services::session::VerifiedSession {
         let client_id = format!("integration-test-{}", next_test_client_id());
         self.state
             .sessions

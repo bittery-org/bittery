@@ -1,4 +1,4 @@
-use std::{env, sync::OnceLock, time::Duration};
+use std::{env, sync::{LazyLock, OnceLock}, time::Duration};
 
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::{
@@ -21,7 +21,10 @@ type HmacSha256 = Hmac<Sha256>;
 
 const ATTACHMENT_UPLOAD_KEY_TTL_MS: i64 = 15 * 60 * 1000;
 
-static ATTACHMENT_UPLOAD_KEY_PATTERN: OnceLock<Regex> = OnceLock::new();
+static ATTACHMENT_UPLOAD_KEY_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"^attachments/([^/]+)/([^/]+)/(\d{13})-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-([A-Za-z0-9_-]{43})-([A-Za-z0-9._-]{1,120})$")
+		.expect("attachment upload key regex should compile")
+});
 
 #[derive(Clone)]
 pub struct StorageConfig {
@@ -115,10 +118,7 @@ pub fn is_valid_attachment_upload_key(
     item_id: &str,
     now_ms: Option<i64>,
 ) -> Result<bool, StorageError> {
-    let pattern = ATTACHMENT_UPLOAD_KEY_PATTERN.get_or_init(|| {
-		Regex::new(r"^attachments/([^/]+)/([^/]+)/(\d{13})-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-([A-Za-z0-9_-]{43})-([A-Za-z0-9._-]{1,120})$")
-			.expect("attachment upload key regex should compile")
-	});
+    let pattern = &*ATTACHMENT_UPLOAD_KEY_PATTERN;
     let Some(captures) = pattern.captures(key) else {
         return Ok(false);
     };

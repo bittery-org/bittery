@@ -1,6 +1,8 @@
 use sqlx::{query_as, PgPool};
 
-use crate::{db::models::DbTeamBillingEntitlementRow, server_support::SELF_HOSTED_MODE};
+use crate::{
+    db::models::DbTeamBillingEntitlementRow, error::AppError, config::SELF_HOSTED_MODE,
+};
 
 const TEAM_BILLING_ENTITLEMENT_QUERY: &str =
     "SELECT u.team_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1";
@@ -26,19 +28,18 @@ pub(crate) struct AttachmentEntitlement {
     pub storage_bytes: Option<i64>,
 }
 
-pub(crate) async fn load_team_billing_entitlement<E>(
+pub(crate) async fn load_team_billing_entitlement(
     pool: &PgPool,
     user_id: &str,
     error_message: &'static str,
-    internal_error: fn(&str) -> E,
-) -> Result<Option<DbTeamBillingEntitlementRow>, E> {
+) -> Result<Option<DbTeamBillingEntitlementRow>, AppError> {
     query_as::<_, DbTeamBillingEntitlementRow>(TEAM_BILLING_ENTITLEMENT_QUERY)
         .bind(user_id)
         .fetch_optional(pool)
         .await
         .map_err(|error| {
             tracing::error!(error = %error, "{error_message}");
-            internal_error(error_message)
+            AppError::internal(error_message)
         })
 }
 
@@ -156,7 +157,7 @@ pub(crate) fn resolve_attachment_entitlement(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server_support::SELF_HOSTED_MODE;
+    use crate::config::SELF_HOSTED_MODE;
 
     #[test]
     fn team_management_enabled_respects_mode_and_plan() {

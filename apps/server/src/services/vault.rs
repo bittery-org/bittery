@@ -1,11 +1,5 @@
 use std::collections::HashMap;
 
-use qubit::{
-    builder::IntoResponse,
-    handler,
-    server::{ErrorCode, Router, RpcError},
-};
-use rand::random;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{query, query_as, query_scalar, PgPool, Postgres, Transaction};
@@ -13,23 +7,21 @@ use time::OffsetDateTime;
 use ts_rs::TS;
 
 use crate::{
-    auth::RefreshSessionContext,
     db::models::*,
-    server_support::{bittery_mode, db_pool as load_db_pool, format_timestamp},
-    team_billing::{
+    error::AppError,
+    repo::{
+        common::{generate_resource_id, insert_audit_event, insert_sync_event},
+        vault::{load_item_row, load_user_vault_summaries, load_vault_access},
+    },
+    config::{bittery_mode, format_timestamp},
+    services::team_billing::{
         load_team_billing_entitlement,
         resolve_attachment_entitlement,
         resolve_vault_sharing_entitlement as shared_resolve_vault_sharing_entitlement,
         VaultSharingEntitlement,
     },
-    storage, AppState,
+    integrations::storage,
 };
-
-#[derive(Debug, Clone, Serialize, TS)]
-pub struct VaultRpcError {
-    pub code: String,
-    pub message: String,
-}
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -558,7 +550,7 @@ struct AttachmentActor {
 async fn fetch_vaults_and_items(
     user_id: &str,
     pool: &PgPool,
-) -> Result<Vec<VaultListEntryResponse>, VaultRpcError> {
+) -> Result<Vec<VaultListEntryResponse>, AppError> {
     let vault_rows = query_as::<_, DbVaultListRow>(
         "SELECT v.id, v.name, v.type::text AS vault_type, v.icon, v.image_key, vk.role::text AS role, vk.encrypted_vault_key, v.created_by_id FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 ORDER BY v.created_at ASC",
     )
@@ -610,26 +602,22 @@ async fn fetch_vaults_and_items(
         .collect())
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn list(
-    ctx: RefreshSessionContext,
-) -> Result<Vec<VaultListEntryResponse>, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
-    fetch_vaults_and_items(&ctx.session.user_id, pool).await
+pub(crate) async fn list_vaults(
+    pool: &PgPool,
+    user_id: &str,
+) -> Result<Vec<VaultListEntryResponse>, AppError> {
+    fetch_vaults_and_items(user_id, pool).await
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn get(
-    ctx: RefreshSessionContext,
+pub(crate) async fn get_vault(
+    pool: &PgPool,
+    user_id: &str,
     input: VaultIdInput,
-) -> Result<VaultDetailsResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+) -> Result<VaultDetailsResponse, AppError> {
     let Some(vault) = query_as::<_, DbVaultGetRow>(
 		"SELECT v.id, v.name, v.type::text AS vault_type, v.icon, v.image_key, vk.role::text AS user_role, (SELECT COUNT(*)::bigint FROM item i WHERE i.vault_id = v.id AND i.deleted_at IS NULL) AS item_count, (SELECT COUNT(*)::bigint FROM vault_key member WHERE member.vault_id = v.id) AS member_count, v.created_at FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 AND v.id = $2 LIMIT 1",
 	)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.bind(&input.vault_id)
 	.fetch_optional(pool)
 	.await
@@ -654,22 +642,20 @@ pub async fn get(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn createImageUpload(
-    ctx: RefreshSessionContext,
+pub(crate) async fn create_vault_image_upload(
+    pool: &PgPool,
+    user_id: &str,
     input: CreateVaultImageUploadInput,
-) -> Result<storage::PresignedUploadResult, VaultRpcError> {
+) -> Result<storage::PresignedUploadResult, AppError> {
     if !input.content_type.starts_with("image/") {
         return Err(bad_request_error("Only image uploads are allowed"));
     }
-    let pool = db_pool(&ctx.app_state)?;
     if let Some(vault_id) = input.vault_id.as_deref() {
         let role = query_as::<_, DbVaultRoleRow>(
 			"SELECT vault_id, role::text AS role FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
 		)
 		.bind(vault_id)
-		.bind(&ctx.session.user_id)
+		.bind(user_id)
 		.fetch_optional(pool)
 		.await
 		.map_err(|e| { tracing::error!(error = %e, "Failed to load vault role"); internal_error("Failed to load vault role") })?;
@@ -682,31 +668,29 @@ pub async fn createImageUpload(
     }
 
     let key = storage::create_vault_image_key(
-        &ctx.session.user_id,
+        user_id,
         input.vault_id.as_deref(),
         &input.file_name,
     );
     storage::create_presigned_upload(&key, &input.content_type, None, None)
         .await
-        .map_err(|error| internal_error(&error.to_string()))
+        .map_err(|error| { tracing::error!(error = %error, "Internal error"); internal_error("An internal error occurred") })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn createAttachmentUpload(
-    ctx: RefreshSessionContext,
+pub(crate) async fn create_vault_attachment_upload(
+    pool: &PgPool,
+    user_id: &str,
     input: CreateAttachmentUploadInput,
-) -> Result<storage::PresignedUploadResult, VaultRpcError> {
+) -> Result<storage::PresignedUploadResult, AppError> {
     if input.file_name.trim().is_empty()
         || input.content_type.trim().is_empty()
         || input.file_size <= 0
     {
         return Err(bad_request_error("Invalid attachment upload request"));
     }
-    let pool = db_pool(&ctx.app_state)?;
-    let actor = load_attachment_actor(pool, &ctx.session.user_id).await?;
+    let actor = load_attachment_actor(pool, user_id).await?;
     let scoped_item = load_item_row(pool, &input.item_id).await?;
-    let access = load_vault_access(pool, &scoped_item.vault_id, &ctx.session.user_id).await?;
+    let access = load_vault_access(pool, &scoped_item.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Access denied")?;
     if let Some(max_bytes) = actor.attachment_max_file_size_bytes {
         if i64::from(input.file_size) > max_bytes {
@@ -716,8 +700,8 @@ pub async fn createAttachmentUpload(
         }
     }
     let key =
-        storage::create_attachment_key(&ctx.session.user_id, &input.item_id, &input.file_name)
-            .map_err(|error| internal_error(&error.to_string()))?;
+        storage::create_attachment_key(user_id, &input.item_id, &input.file_name)
+            .map_err(|error| { tracing::error!(error = %error, "Internal error"); internal_error("An internal error occurred") })?;
     let storage_size = encrypted_attachment_storage_size(input.file_size);
     let now = OffsetDateTime::now_utc();
     let expires_at = pending_attachment_upload_expiry(now);
@@ -768,7 +752,7 @@ pub async fn createAttachmentUpload(
 	.bind(input.file_size)
 	.bind(storage_size)
 	.bind(&input.content_type)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.bind(expires_at)
 	.bind(now)
 	.execute(&mut *transaction)
@@ -786,27 +770,26 @@ pub async fn createAttachmentUpload(
         None,
     )
     .await
-    .map_err(|error| internal_error(&error.to_string()))
+    .map_err(|error| { tracing::error!(error = %error, "Internal error"); internal_error("An internal error occurred") })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn createAttachment(
-    ctx: RefreshSessionContext,
+pub(crate) async fn create_vault_attachment(
+    pool: &PgPool,
+    user_id: &str,
+    request_client_id: Option<&str>,
     input: CreateAttachmentInput,
-) -> Result<CreateAttachmentResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
-    let _actor = load_attachment_actor(pool, &ctx.session.user_id).await?;
+) -> Result<CreateAttachmentResponse, AppError> {
+    let _actor = load_attachment_actor(pool, user_id).await?;
     let scoped_item = load_item_row(pool, &input.item_id).await?;
-    let access = load_vault_access(pool, &scoped_item.vault_id, &ctx.session.user_id).await?;
+    let access = load_vault_access(pool, &scoped_item.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Access denied")?;
     let is_valid_key = storage::is_valid_attachment_upload_key(
         &input.storage_key,
-        &ctx.session.user_id,
+        user_id,
         &input.item_id,
         None,
     )
-    .map_err(|error| internal_error(&error.to_string()))?;
+    .map_err(|error| { tracing::error!(error = %error, "Internal error"); internal_error("An internal error occurred") })?;
     if !is_valid_key {
         return Err(bad_request_error(
             "Invalid or expired attachment upload key",
@@ -816,7 +799,7 @@ pub async fn createAttachment(
         pool,
         &input.storage_key,
         &input.item_id,
-        &ctx.session.user_id,
+        user_id,
     )
     .await?
     else {
@@ -831,7 +814,7 @@ pub async fn createAttachment(
     }
     let Some(uploaded_object) = storage::head_object(&input.storage_key)
         .await
-        .map_err(|error| internal_error(&error.to_string()))?
+        .map_err(|error| { tracing::error!(error = %error, "Internal error"); internal_error("An internal error occurred") })?
     else {
         return Err(bad_request_error(
             "Uploaded attachment does not match the reserved encrypted size.",
@@ -861,7 +844,7 @@ pub async fn createAttachment(
 	.bind(input.encryption_algorithm.as_deref().unwrap_or("AES-GCM-AAD-V1"))
 	.bind(reservation.file_size)
 	.bind(reservation.storage_size)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.bind(OffsetDateTime::now_utc())
 	.execute(&mut *transaction)
 	.await
@@ -880,8 +863,8 @@ pub async fn createAttachment(
         "item_updated",
         &input.item_id,
         &scoped_item.vault_id,
-        &ctx.session.user_id,
-        ctx.request.client_id.as_deref(),
+        user_id,
+        request_client_id,
         scoped_item.version,
     )
     .await?;
@@ -893,16 +876,14 @@ pub async fn createAttachment(
     Ok(CreateAttachmentResponse { attachment_id })
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn listAttachments(
-    ctx: RefreshSessionContext,
+pub(crate) async fn list_vault_attachments(
+    pool: &PgPool,
+    user_id: &str,
     input: ItemIdInput,
-) -> Result<Vec<VaultAttachmentResponse>, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
-    let _actor = load_attachment_actor(pool, &ctx.session.user_id).await?;
+) -> Result<Vec<VaultAttachmentResponse>, AppError> {
+    let _actor = load_attachment_actor(pool, user_id).await?;
     let scoped_item = load_item_row(pool, &input.item_id).await?;
-    let _access = load_vault_access(pool, &scoped_item.vault_id, &ctx.session.user_id).await?;
+    let _access = load_vault_access(pool, &scoped_item.vault_id, user_id).await?;
     let attachment_rows = query_as::<_, DbBootstrapAttachmentRow>(
 		"SELECT id, item_id, vault_id, storage_key, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, uploaded_by, created_at FROM item_attachment WHERE item_id = $1 ORDER BY created_at ASC",
 	)
@@ -913,19 +894,17 @@ pub async fn listAttachments(
     Ok(attachment_rows.into_iter().map(map_attachment).collect())
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn getAttachmentDownloadUrl(
-    ctx: RefreshSessionContext,
+pub(crate) async fn get_attachment_download_url(
+    pool: &PgPool,
+    user_id: &str,
     input: AttachmentIdInput,
-) -> Result<AttachmentDownloadResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
-    let _actor = load_attachment_actor(pool, &ctx.session.user_id).await?;
+) -> Result<AttachmentDownloadResponse, AppError> {
+    let _actor = load_attachment_actor(pool, user_id).await?;
     let attachment =
-        load_attachment_access(pool, &input.attachment_id, &ctx.session.user_id).await?;
+        load_attachment_access(pool, &input.attachment_id, user_id).await?;
     let download_url = storage::create_presigned_download(&attachment.storage_key, Some(300))
         .await
-        .map_err(|error| internal_error(&error.to_string()))?;
+        .map_err(|error| { tracing::error!(error = %error, "Internal error"); internal_error("An internal error occurred") })?;
     Ok(AttachmentDownloadResponse {
         download_url,
         encrypted_name: attachment.encrypted_name,
@@ -939,16 +918,15 @@ pub async fn getAttachmentDownloadUrl(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn updateAttachment(
-    ctx: RefreshSessionContext,
+pub(crate) async fn update_vault_attachment(
+    pool: &PgPool,
+    user_id: &str,
+    request_client_id: Option<&str>,
     input: UpdateAttachmentInput,
-) -> Result<SuccessResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
-    let _actor = load_attachment_actor(pool, &ctx.session.user_id).await?;
+) -> Result<SuccessResponse, AppError> {
+    let _actor = load_attachment_actor(pool, user_id).await?;
     let attachment =
-        load_attachment_access(pool, &input.attachment_id, &ctx.session.user_id).await?;
+        load_attachment_access(pool, &input.attachment_id, user_id).await?;
     assert_item_write_access(&attachment.role, "Access denied")?;
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start attachment update transaction");
@@ -969,8 +947,8 @@ pub async fn updateAttachment(
         "item_updated",
         &input.attachment_id,
         &attachment.vault_id,
-        &ctx.session.user_id,
-        ctx.request.client_id.as_deref(),
+        user_id,
+        request_client_id,
         load_item_row(pool, &attachment.item_id).await?.version,
     )
     .await?;
@@ -981,18 +959,17 @@ pub async fn updateAttachment(
     Ok(SuccessResponse { success: true })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn deleteAttachment(
-    ctx: RefreshSessionContext,
+pub(crate) async fn delete_vault_attachment(
+    pool: &PgPool,
+    user_id: &str,
+    request_client_id: Option<&str>,
     input: AttachmentIdInput,
-) -> Result<SuccessResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
-    let _actor = load_attachment_actor(pool, &ctx.session.user_id).await?;
+) -> Result<SuccessResponse, AppError> {
+    let _actor = load_attachment_actor(pool, user_id).await?;
     let attachment =
-        load_attachment_access(pool, &input.attachment_id, &ctx.session.user_id).await?;
+        load_attachment_access(pool, &input.attachment_id, user_id).await?;
     if attachment.role == "member" {
-        if attachment.uploaded_by.as_deref() != Some(ctx.session.user_id.as_str()) {
+        if attachment.uploaded_by.as_deref() != Some(user_id.to_string().as_str()) {
             return Err(forbidden_error("You can only delete your own attachments"));
         }
     } else if attachment.role != "owner" && attachment.role != "admin" {
@@ -1000,7 +977,7 @@ pub async fn deleteAttachment(
     }
     storage::delete_object(&attachment.storage_key)
         .await
-        .map_err(|error| internal_error(&error.to_string()))?;
+        .map_err(|error| { tracing::error!(error = %error, "Internal error"); internal_error("An internal error occurred") })?;
     let item_version = load_item_row(pool, &attachment.item_id).await?.version;
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start attachment delete transaction");
@@ -1019,8 +996,8 @@ pub async fn deleteAttachment(
         "item_updated",
         &attachment.item_id,
         &attachment.vault_id,
-        &ctx.session.user_id,
-        ctx.request.client_id.as_deref(),
+        user_id,
+        request_client_id,
         item_version,
     )
     .await?;
@@ -1031,12 +1008,12 @@ pub async fn deleteAttachment(
     Ok(SuccessResponse { success: true })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn create(
-    ctx: RefreshSessionContext,
+pub(crate) async fn create_vault(
+    pool: &PgPool,
+    user_id: &str,
+    request_client_id: Option<&str>,
     input: CreateVaultInput,
-) -> Result<CreateVaultResponse, VaultRpcError> {
+) -> Result<CreateVaultResponse, AppError> {
     if input.name.trim().is_empty() || input.encrypted_vault_key.trim().is_empty() {
         return Err(bad_request_error("Invalid params"));
     }
@@ -1044,7 +1021,6 @@ pub async fn create(
         return Err(bad_request_error("Invalid params"));
     }
 
-    let pool = db_pool(&ctx.app_state)?;
     let vault_id = input
         .vault_id
         .clone()
@@ -1054,9 +1030,8 @@ pub async fn create(
     if input.vault_type == "team" {
         let actor = load_team_billing_entitlement(
             pool,
-            &ctx.session.user_id,
+            user_id,
             "Failed to load team membership",
-            internal_error,
         )
         .await?;
         let Some(actor) = actor else {
@@ -1125,7 +1100,7 @@ pub async fn create(
     insert_vault(
         &mut transaction,
         &vault_id,
-        &ctx.session.user_id,
+        user_id,
         team_id.as_deref(),
         &input,
     )
@@ -1133,18 +1108,18 @@ pub async fn create(
     insert_vault_key(
         &mut transaction,
         &vault_id,
-        &ctx.session.user_id,
+        user_id,
         &input.encrypted_vault_key,
     )
     .await?;
     insert_vault_created_sync_event(
         &mut transaction,
         &vault_id,
-        &ctx.session.user_id,
+        user_id,
         input
             .client_id
             .as_deref()
-            .or(ctx.request.client_id.as_deref()),
+            .or(request_client_id),
     )
     .await?;
     transaction.commit().await.map_err(|e| {
@@ -1152,28 +1127,27 @@ pub async fn create(
         internal_error("Failed to commit vault transaction")
     })?;
 
-    insert_vault_created_audit_log(pool, &vault_id, &ctx.session.user_id).await?;
+    insert_vault_created_audit_log(pool, &vault_id, user_id).await?;
 
     Ok(CreateVaultResponse { vault_id })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn update(
-    ctx: RefreshSessionContext,
+pub(crate) async fn update_vault(
+    pool: &PgPool,
+    user_id: &str,
+    request_client_id: Option<&str>,
     input: UpdateVaultInput,
-) -> Result<UpdateVaultResponse, VaultRpcError> {
+) -> Result<UpdateVaultResponse, AppError> {
     if let Some(name) = input.name.as_deref() {
         if name.trim().is_empty() {
             return Err(bad_request_error("Invalid params"));
         }
     }
-    let pool = db_pool(&ctx.app_state)?;
     let Some(current_vault) = query_as::<_, DbManagedVaultRow>(
 		"SELECT v.id, v.name, v.icon, v.image_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.vault_id = $1 AND vk.user_id = $2 LIMIT 1",
 	)
 	.bind(&input.vault_id)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.fetch_optional(pool)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load vault"); internal_error("Failed to load vault") })?
@@ -1216,11 +1190,11 @@ pub async fn update(
     insert_vault_updated_sync_event(
         &mut transaction,
         &input.vault_id,
-        &ctx.session.user_id,
+        user_id,
         input
             .client_id
             .as_deref()
-            .or(ctx.request.client_id.as_deref()),
+            .or(request_client_id),
     )
     .await?;
     transaction.commit().await.map_err(|e| {
@@ -1228,7 +1202,7 @@ pub async fn update(
         internal_error("Failed to commit vault update")
     })?;
 
-    insert_vault_updated_audit_log(pool, &input.vault_id, &ctx.session.user_id).await?;
+    insert_vault_updated_audit_log(pool, &input.vault_id, user_id).await?;
     if let Some(old_image_key) = old_image_key {
         if Some(old_image_key.as_str()) != updated_image_key.as_deref() {
             let _ = storage::delete_object(&old_image_key).await;
@@ -1245,21 +1219,20 @@ pub async fn update(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn convertType(
-    ctx: RefreshSessionContext,
+pub(crate) async fn convert_vault_type(
+    pool: &PgPool,
+    user_id: &str,
+    request_client_id: Option<&str>,
     input: ConvertVaultTypeInput,
-) -> Result<ConvertVaultTypeResponse, VaultRpcError> {
+) -> Result<ConvertVaultTypeResponse, AppError> {
     if input.target_type != "personal" && input.target_type != "team" {
         return Err(bad_request_error("Invalid params"));
     }
-    let pool = db_pool(&ctx.app_state)?;
     let Some(owner_vault) = query_as::<_, DbVaultOwnerAccessRow>(
 		"SELECT vk.user_id, v.id AS vault_id, v.type::text AS vault_type, v.team_id, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.vault_id = $1 AND vk.user_id = $2 LIMIT 1",
 	)
 	.bind(&input.vault_id)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.fetch_optional(pool)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load vault ownership"); internal_error("Failed to load vault ownership") })?
@@ -1281,9 +1254,8 @@ pub async fn convertType(
     if previous_type == "personal" && input.target_type == "team" {
         let actor = load_team_billing_entitlement(
             pool,
-            &ctx.session.user_id,
+            user_id,
             "Failed to load team membership",
-            internal_error,
         )
         .await?;
         let Some(actor) = actor else {
@@ -1385,7 +1357,7 @@ pub async fn convertType(
             query("UPDATE vault_key SET encrypted_vault_key = $1 WHERE vault_id = $2 AND user_id = $3")
 				.bind(personal_key)
 				.bind(&input.vault_id)
-				.bind(&ctx.session.user_id)
+				.bind(user_id)
 				.execute(&mut *transaction)
 				.await
 				.map_err(|e| { tracing::error!(error = %e, "Failed to update personal vault key"); internal_error("Failed to update personal vault key") })?;
@@ -1394,11 +1366,11 @@ pub async fn convertType(
     insert_vault_updated_sync_event(
         &mut transaction,
         &input.vault_id,
-        &ctx.session.user_id,
+        user_id,
         input
             .client_id
             .as_deref()
-            .or(ctx.request.client_id.as_deref()),
+            .or(request_client_id),
     )
     .await?;
     transaction.commit().await.map_err(|e| {
@@ -1406,7 +1378,7 @@ pub async fn convertType(
         internal_error("Failed to commit vault conversion")
     })?;
 
-    insert_vault_updated_audit_log(pool, &input.vault_id, &ctx.session.user_id).await?;
+    insert_vault_updated_audit_log(pool, &input.vault_id, user_id).await?;
 
     Ok(ConvertVaultTypeResponse {
         success: true,
@@ -1416,18 +1388,17 @@ pub async fn convertType(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn delete(
-    ctx: RefreshSessionContext,
+pub(crate) async fn delete_vault(
+    pool: &PgPool,
+    user_id: &str,
+    request_client_id: Option<&str>,
     input: VaultIdInput,
-) -> Result<SuccessResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+) -> Result<SuccessResponse, AppError> {
     let Some(vault) = query_as::<_, DbVaultDeleteRow>(
 		"SELECT v.id, v.name, v.type::text AS vault_type, v.image_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.vault_id = $1 AND vk.user_id = $2 LIMIT 1",
 	)
 	.bind(&input.vault_id)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.fetch_optional(pool)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load vault"); internal_error("Failed to load vault") })?
@@ -1456,19 +1427,19 @@ pub async fn delete(
     insert_vault_deleted_sync_event(
         &mut transaction,
         &input.vault_id,
-        &ctx.session.user_id,
-        ctx.request.client_id.as_deref(),
+        user_id,
+        request_client_id,
     )
     .await?;
     for member in member_rows {
-        if member.user_id == ctx.session.user_id {
+        if member.user_id == user_id.to_string() {
             continue;
         }
         insert_vault_access_revoked_sync_event(
             &mut transaction,
             &input.vault_id,
             &member.user_id,
-            ctx.request.client_id.as_deref(),
+            request_client_id,
         )
         .await?;
     }
@@ -1509,7 +1480,7 @@ pub async fn delete(
         internal_error("Failed to commit vault deletion")
     })?;
 
-    insert_vault_deleted_audit_log(pool, &input.vault_id, &ctx.session.user_id).await?;
+    insert_vault_deleted_audit_log(pool, &input.vault_id, user_id).await?;
     if let Some(image_key) = vault.image_key {
         let _ = storage::delete_object(&image_key).await;
     }
@@ -1517,18 +1488,16 @@ pub async fn delete(
     Ok(SuccessResponse { success: true })
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn listItems(
-    ctx: RefreshSessionContext,
+pub(crate) async fn list_vault_items(
+    pool: &PgPool,
+    user_id: &str,
     input: VaultIdInput,
-) -> Result<Vec<VaultItemDetailsResponse>, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+) -> Result<Vec<VaultItemDetailsResponse>, AppError> {
     let vault_access = query_as::<_, DbItemVaultAccessRow>(
         "SELECT role::text AS role FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
     )
     .bind(&input.vault_id)
-    .bind(&ctx.session.user_id)
+    .bind(user_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| {
@@ -1545,7 +1514,7 @@ pub async fn listItems(
 	.fetch_all(pool)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load vault items"); internal_error("Failed to load vault items") })?;
-    let attachments_enabled = attachments_enabled_for_user(pool, &ctx.session.user_id).await?;
+    let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
     let attachments_by_item = if attachments_enabled {
         load_item_attachments(pool, &item_rows).await?
     } else {
@@ -1564,13 +1533,11 @@ pub async fn listItems(
         .collect())
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn listAllItems(
-    ctx: RefreshSessionContext,
-) -> Result<Vec<VaultItemWithVaultResponse>, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
-    let user_vaults = load_user_vault_summaries(pool, &ctx.session.user_id).await?;
+pub(crate) async fn list_all_vault_items(
+    pool: &PgPool,
+    user_id: &str,
+) -> Result<Vec<VaultItemWithVaultResponse>, AppError> {
+    let user_vaults = load_user_vault_summaries(pool, user_id).await?;
     if user_vaults.is_empty() {
         return Ok(Vec::new());
     }
@@ -1585,7 +1552,7 @@ pub async fn listAllItems(
 	.fetch_all(pool)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load items"); internal_error("Failed to load items") })?;
-    let attachments_enabled = attachments_enabled_for_user(pool, &ctx.session.user_id).await?;
+    let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
     let attachments_by_item = if attachments_enabled {
         load_item_attachments(pool, &item_rows).await?
     } else {
@@ -1617,13 +1584,11 @@ pub async fn listAllItems(
         .collect())
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn listAllDeletedItems(
-    ctx: RefreshSessionContext,
-) -> Result<Vec<DeletedVaultItemWithVaultResponse>, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
-    let user_vaults = load_user_vault_summaries(pool, &ctx.session.user_id).await?;
+pub(crate) async fn list_all_deleted_vault_items(
+    pool: &PgPool,
+    user_id: &str,
+) -> Result<Vec<DeletedVaultItemWithVaultResponse>, AppError> {
+    let user_vaults = load_user_vault_summaries(pool, user_id).await?;
     if user_vaults.is_empty() {
         return Ok(Vec::new());
     }
@@ -1660,13 +1625,11 @@ pub async fn listAllDeletedItems(
         .collect())
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn getItem(
-    ctx: RefreshSessionContext,
+pub(crate) async fn get_vault_item(
+    pool: &PgPool,
+    user_id: &str,
     input: ItemIdInput,
-) -> Result<VaultItemDetailsResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+) -> Result<VaultItemDetailsResponse, AppError> {
     let item_row = query_as::<_, DbBootstrapItemRow>(
 		"SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = $1 LIMIT 1",
 	)
@@ -1679,7 +1642,7 @@ pub async fn getItem(
         "SELECT role::text AS role FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
     )
     .bind(&item_row.vault_id)
-    .bind(&ctx.session.user_id)
+    .bind(user_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| {
@@ -1689,7 +1652,7 @@ pub async fn getItem(
     if vault_access.is_none() {
         return Err(forbidden_error("Access denied"));
     }
-    let attachments_enabled = attachments_enabled_for_user(pool, &ctx.session.user_id).await?;
+    let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
     let attachments_by_item = if attachments_enabled {
         load_item_attachments(pool, std::slice::from_ref(&item_row)).await?
     } else {
@@ -1705,14 +1668,12 @@ pub async fn getItem(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn createItem(
-    ctx: RefreshSessionContext,
+pub(crate) async fn create_vault_item(
+    pool: &PgPool,
+    user_id: &str,
     input: CreateItemInput,
-) -> Result<CreateItemResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
-    let access = load_vault_access(pool, &input.vault_id, &ctx.session.user_id).await?;
+) -> Result<CreateItemResponse, AppError> {
+    let access = load_vault_access(pool, &input.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Read-only access cannot create items")?;
     let item_id = input
         .item_id
@@ -1738,7 +1699,7 @@ pub async fn createItem(
 	.bind(&input.encryption_iv)
 	.bind(encryption_algorithm)
 	.bind(version)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.execute(&mut *transaction)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to create item"); internal_error("Failed to create item") })?;
@@ -1747,7 +1708,7 @@ pub async fn createItem(
         "item_created",
         &item_id,
         &input.vault_id,
-        &ctx.session.user_id,
+        user_id,
         input.client_id.as_deref(),
         version,
     )
@@ -1760,7 +1721,7 @@ pub async fn createItem(
         pool,
         "item_created",
         &item_id,
-        &ctx.session.user_id,
+        user_id,
         Some(json!({ "vaultId": input.vault_id, "category": input.category })),
     )
     .await?;
@@ -1771,14 +1732,12 @@ pub async fn createItem(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn bulkImportItems(
-    ctx: RefreshSessionContext,
+pub(crate) async fn bulk_import_vault_items(
+    pool: &PgPool,
+    user_id: &str,
     input: BulkImportItemsInput,
-) -> Result<BulkImportItemsResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
-    let access = load_vault_access(pool, &input.vault_id, &ctx.session.user_id).await?;
+) -> Result<BulkImportItemsResponse, AppError> {
+    let access = load_vault_access(pool, &input.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Read-only access cannot create items")?;
     if input.items.is_empty() {
         return Ok(BulkImportItemsResponse {
@@ -1819,7 +1778,7 @@ pub async fn bulkImportItems(
 		.bind(&item.encrypted_data)
 		.bind(&item.encryption_iv)
 		.bind(item.encryption_algorithm.as_deref().unwrap_or("AES-GCM-AAD-V1"))
-		.bind(&ctx.session.user_id)
+		.bind(user_id)
 		.execute(&mut *transaction)
 		.await
 		.map_err(|e| { tracing::error!(error = %e, "Failed to import vault items"); internal_error("Failed to import vault items") })?;
@@ -1827,7 +1786,7 @@ pub async fn bulkImportItems(
     insert_vault_updated_sync_event_with_metadata(
         &mut transaction,
         &input.vault_id,
-        &ctx.session.user_id,
+        user_id,
         input.client_id.as_deref(),
         json!({ "reason": "bulk_import", "importedCount": item_ids.len() }),
     )
@@ -1840,7 +1799,7 @@ pub async fn bulkImportItems(
         pool,
         "vault_updated",
         &input.vault_id,
-        &ctx.session.user_id,
+        user_id,
         json!({ "reason": "bulk_import", "importedCount": item_ids.len() }),
     )
     .await?;
@@ -1852,15 +1811,13 @@ pub async fn bulkImportItems(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn updateItem(
-    ctx: RefreshSessionContext,
+pub(crate) async fn update_vault_item(
+    pool: &PgPool,
+    user_id: &str,
     input: UpdateItemInput,
-) -> Result<UpdateItemResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+) -> Result<UpdateItemResponse, AppError> {
     let existing_item = load_item_row(pool, &input.item_id).await?;
-    let access = load_vault_access(pool, &existing_item.vault_id, &ctx.session.user_id).await?;
+    let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Access denied")?;
     let current_version = existing_item.version;
     if let Some(expected_version) = input.expected_version {
@@ -1881,7 +1838,7 @@ pub async fn updateItem(
 	.bind(input.encryption_iv.as_deref())
 	.bind(input.encryption_algorithm.as_deref())
 	.bind(new_version)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.bind(OffsetDateTime::now_utc())
 	.bind(&input.item_id)
 	.execute(&mut *transaction)
@@ -1892,7 +1849,7 @@ pub async fn updateItem(
         "item_updated",
         &input.item_id,
         &existing_item.vault_id,
-        &ctx.session.user_id,
+        user_id,
         input.client_id.as_deref(),
         new_version,
     )
@@ -1908,15 +1865,13 @@ pub async fn updateItem(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn toggleFavorite(
-    ctx: RefreshSessionContext,
+pub(crate) async fn toggle_vault_favorite(
+    pool: &PgPool,
+    user_id: &str,
     input: ToggleFavoriteInput,
-) -> Result<SuccessResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+) -> Result<SuccessResponse, AppError> {
     let existing_item = load_item_row(pool, &input.item_id).await?;
-    let access = load_vault_access(pool, &existing_item.vault_id, &ctx.session.user_id).await?;
+    let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Access denied")?;
 
     let mut transaction = pool.begin().await.map_err(|e| {
@@ -1938,7 +1893,7 @@ pub async fn toggleFavorite(
         "item_updated",
         &input.item_id,
         &existing_item.vault_id,
-        &ctx.session.user_id,
+        user_id,
         None,
         existing_item.version,
     )
@@ -1951,15 +1906,13 @@ pub async fn toggleFavorite(
     Ok(SuccessResponse { success: true })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn deleteItem(
-    ctx: RefreshSessionContext,
+pub(crate) async fn delete_vault_item(
+    pool: &PgPool,
+    user_id: &str,
     input: ItemClientInput,
-) -> Result<SuccessResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+) -> Result<SuccessResponse, AppError> {
     let existing_item = load_item_row(pool, &input.item_id).await?;
-    let access = load_vault_access(pool, &existing_item.vault_id, &ctx.session.user_id).await?;
+    let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Access denied")?;
 
     let mut transaction = pool.begin().await.map_err(|e| {
@@ -1968,7 +1921,7 @@ pub async fn deleteItem(
     })?;
     query("UPDATE item SET deleted_at = $1, last_modified_by = $2 WHERE id = $3")
         .bind(OffsetDateTime::now_utc())
-        .bind(&ctx.session.user_id)
+        .bind(user_id)
         .bind(&input.item_id)
         .execute(&mut *transaction)
         .await
@@ -1981,7 +1934,7 @@ pub async fn deleteItem(
         "item_deleted",
         &input.item_id,
         &existing_item.vault_id,
-        &ctx.session.user_id,
+        user_id,
         input.client_id.as_deref(),
         existing_item.version,
     )
@@ -1994,7 +1947,7 @@ pub async fn deleteItem(
         pool,
         "item_deleted",
         &input.item_id,
-        &ctx.session.user_id,
+        user_id,
         Some(json!({ "vaultId": existing_item.vault_id, "version": existing_item.version })),
     )
     .await?;
@@ -2002,14 +1955,12 @@ pub async fn deleteItem(
     Ok(SuccessResponse { success: true })
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn listDeletedItems(
-    ctx: RefreshSessionContext,
+pub(crate) async fn list_deleted_vault_items(
+    pool: &PgPool,
+    user_id: &str,
     input: VaultIdInput,
-) -> Result<Vec<VaultItemResponse>, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
-    let access = load_vault_access(pool, &input.vault_id, &ctx.session.user_id).await?;
+) -> Result<Vec<VaultItemResponse>, AppError> {
+    let access = load_vault_access(pool, &input.vault_id, user_id).await?;
     let _ = access;
     let item_rows = query_as::<_, DbBootstrapItemRow>(
 		"SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE vault_id = $1 AND deleted_at IS NOT NULL ORDER BY deleted_at DESC NULLS LAST",
@@ -2022,18 +1973,16 @@ pub async fn listDeletedItems(
     Ok(item_rows.into_iter().map(map_item).collect())
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn restoreItem(
-    ctx: RefreshSessionContext,
+pub(crate) async fn restore_vault_item(
+    pool: &PgPool,
+    user_id: &str,
     input: ItemClientInput,
-) -> Result<SuccessResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+) -> Result<SuccessResponse, AppError> {
     let existing_item = load_item_row(pool, &input.item_id).await?;
     if existing_item.deleted_at.is_none() {
         return Err(bad_request_error("Item is not deleted"));
     }
-    let access = load_vault_access(pool, &existing_item.vault_id, &ctx.session.user_id).await?;
+    let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Access denied")?;
 
     let mut transaction = pool.begin().await.map_err(|e| {
@@ -2043,7 +1992,7 @@ pub async fn restoreItem(
     query(
         "UPDATE item SET deleted_at = NULL, last_modified_by = $1, updated_at = $2 WHERE id = $3",
     )
-    .bind(&ctx.session.user_id)
+    .bind(user_id)
     .bind(OffsetDateTime::now_utc())
     .bind(&input.item_id)
     .execute(&mut *transaction)
@@ -2057,7 +2006,7 @@ pub async fn restoreItem(
         "item_restored",
         &input.item_id,
         &existing_item.vault_id,
-        &ctx.session.user_id,
+        user_id,
         input.client_id.as_deref(),
         existing_item.version,
     )
@@ -2070,7 +2019,7 @@ pub async fn restoreItem(
         pool,
         "item_restored",
         &input.item_id,
-        &ctx.session.user_id,
+        user_id,
         Some(json!({ "vaultId": existing_item.vault_id, "version": existing_item.version })),
     )
     .await?;
@@ -2078,13 +2027,11 @@ pub async fn restoreItem(
     Ok(SuccessResponse { success: true })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn moveItem(
-    ctx: RefreshSessionContext,
+pub(crate) async fn move_vault_item(
+    pool: &PgPool,
+    user_id: &str,
     input: MoveItemInput,
-) -> Result<UpdateItemResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+) -> Result<UpdateItemResponse, AppError> {
     let existing_item = load_item_row(pool, &input.item_id).await?;
     if existing_item.vault_id != input.source_vault_id {
         return Err(bad_request_error(
@@ -2097,9 +2044,9 @@ pub async fn moveItem(
         ));
     }
     let _source_access =
-        load_vault_access(pool, &input.source_vault_id, &ctx.session.user_id).await?;
+        load_vault_access(pool, &input.source_vault_id, user_id).await?;
     let target_access =
-        load_vault_access(pool, &input.target_vault_id, &ctx.session.user_id).await?;
+        load_vault_access(pool, &input.target_vault_id, user_id).await?;
     assert_item_write_access(
         &target_access.role,
         "Cannot move items to a read-only vault",
@@ -2118,7 +2065,7 @@ pub async fn moveItem(
 	.bind(&input.encryption_iv)
 	.bind(input.encryption_algorithm.as_deref())
 	.bind(new_version)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.bind(OffsetDateTime::now_utc())
 	.bind(&input.item_id)
 	.execute(&mut *transaction)
@@ -2129,7 +2076,7 @@ pub async fn moveItem(
         "item_moved",
         &input.item_id,
         &input.target_vault_id,
-        &ctx.session.user_id,
+        user_id,
         input.client_id.as_deref(),
         new_version,
         json!({ "sourceVaultId": input.source_vault_id }),
@@ -2143,7 +2090,7 @@ pub async fn moveItem(
         pool,
         "item_moved",
         &input.item_id,
-        &ctx.session.user_id,
+        user_id,
         Some(json!({
             "sourceVaultId": input.source_vault_id,
             "targetVaultId": input.target_vault_id,
@@ -2158,20 +2105,18 @@ pub async fn moveItem(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn permanentlyDeleteItem(
-    ctx: RefreshSessionContext,
+pub(crate) async fn permanently_delete_vault_item(
+    pool: &PgPool,
+    user_id: &str,
     input: ItemClientInput,
-) -> Result<SuccessResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+) -> Result<SuccessResponse, AppError> {
     let existing_item = load_item_row(pool, &input.item_id).await?;
     if existing_item.deleted_at.is_none() {
         return Err(bad_request_error(
             "Can only permanently delete items in trash",
         ));
     }
-    let access = load_vault_access(pool, &existing_item.vault_id, &ctx.session.user_id).await?;
+    let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Access denied")?;
 
     let mut transaction = pool.begin().await.map_err(|e| {
@@ -2183,7 +2128,7 @@ pub async fn permanentlyDeleteItem(
         "item_permanently_deleted",
         &input.item_id,
         &existing_item.vault_id,
-        &ctx.session.user_id,
+        user_id,
         input.client_id.as_deref(),
         existing_item.version,
     )
@@ -2204,7 +2149,7 @@ pub async fn permanentlyDeleteItem(
         pool,
         "item_permanently_deleted",
         &input.item_id,
-        &ctx.session.user_id,
+        user_id,
         Some(json!({ "vaultId": existing_item.vault_id, "version": existing_item.version })),
     )
     .await?;
@@ -2212,20 +2157,18 @@ pub async fn permanentlyDeleteItem(
     Ok(SuccessResponse { success: true })
 }
 
-#[handler(query)]
-pub async fn stats(ctx: RefreshSessionContext) -> Result<VaultStatsResponse, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+pub(crate) async fn get_vault_stats(pool: &PgPool, user_id: &str) -> Result<VaultStatsResponse, AppError> {
     let team_count = query_scalar::<_, i64>(
 		"SELECT CASE WHEN team_id IS NULL THEN 0 ELSE 1 END::bigint FROM \"user\" WHERE id = $1 LIMIT 1",
 	)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.fetch_optional(pool)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load user team info"); internal_error("Failed to load user team info") })?
 	.unwrap_or(0) as i32;
     let vault_count =
         query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault_key WHERE user_id = $1")
-            .bind(&ctx.session.user_id)
+            .bind(user_id)
             .fetch_one(pool)
             .await
             .map_err(|e| {
@@ -2235,7 +2178,7 @@ pub async fn stats(ctx: RefreshSessionContext) -> Result<VaultStatsResponse, Vau
     let item_count = query_scalar::<_, i64>(
 		"SELECT COUNT(*)::bigint FROM item i INNER JOIN vault_key vk ON vk.vault_id = i.vault_id WHERE vk.user_id = $1 AND i.deleted_at IS NULL",
 	)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.fetch_one(pool)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to count vault items"); internal_error("Failed to count vault items") })?;
@@ -2247,17 +2190,15 @@ pub async fn stats(ctx: RefreshSessionContext) -> Result<VaultStatsResponse, Vau
     })
 }
 
-mod member_handlers {
+pub(crate) mod member_handlers {
     use super::*;
 
-    #[allow(non_snake_case)]
-    #[handler(query)]
-    pub async fn list(
-        ctx: RefreshSessionContext,
+    pub(crate) async fn list_vault_members(
+        pool: &PgPool,
+        user_id: &str,
         input: VaultIdInput,
-    ) -> Result<Vec<VaultMemberResponse>, VaultRpcError> {
-        let pool = db_pool(&ctx.app_state)?;
-        let _access = load_vault_access(pool, &input.vault_id, &ctx.session.user_id).await?;
+    ) -> Result<Vec<VaultMemberResponse>, AppError> {
+        let _access = load_vault_access(pool, &input.vault_id, user_id).await?;
         let members = query_as::<_, DbTeamMemberRow>(
 			"SELECT vk.user_id, u.name, u.email, vk.role::text AS role, vk.created_at AS joined_at FROM vault_key vk INNER JOIN \"user\" u ON vk.user_id = u.id WHERE vk.vault_id = $1 ORDER BY vk.created_at ASC",
 		)
@@ -2276,15 +2217,13 @@ mod member_handlers {
             .collect())
     }
 
-    #[allow(non_snake_case)]
-    #[handler(query)]
-    pub async fn availableTeamMembers(
-        ctx: RefreshSessionContext,
+    pub(crate) async fn available_team_members(
+        pool: &PgPool,
+        user_id: &str,
         input: VaultIdInput,
-    ) -> Result<Vec<VaultAvailableMemberResponse>, VaultRpcError> {
-        let pool = db_pool(&ctx.app_state)?;
+    ) -> Result<Vec<VaultAvailableMemberResponse>, AppError> {
         let actor =
-            load_managed_team_vault_actor(pool, &input.vault_id, &ctx.session.user_id).await?;
+            load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
         let team_members = query_as::<_, DbVaultAvailableMemberRow>(
 			"SELECT id AS user_id, name, email, public_key FROM \"user\" WHERE team_id = $1 ORDER BY created_at ASC",
 		)
@@ -2315,17 +2254,15 @@ mod member_handlers {
             .collect())
     }
 
-    #[allow(non_snake_case)]
-    #[handler(mutation)]
-    pub async fn updateRole(
-        ctx: RefreshSessionContext,
+    pub(crate) async fn update_vault_member_role(
+        pool: &PgPool,
+        user_id: &str,
         input: UpdateVaultMemberRoleInput,
-    ) -> Result<SuccessResponse, VaultRpcError> {
+    ) -> Result<SuccessResponse, AppError> {
         let role = validate_vault_member_role(&input.role)?;
-        let pool = db_pool(&ctx.app_state)?;
         let actor =
-            load_managed_team_vault_actor(pool, &input.vault_id, &ctx.session.user_id).await?;
-        if input.user_id == ctx.session.user_id {
+            load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
+        if input.user_id == user_id.to_string() {
             return Err(bad_request_error("Cannot change your own role"));
         }
         let target_access = load_vault_access(pool, &input.vault_id, &input.user_id)
@@ -2356,19 +2293,17 @@ mod member_handlers {
         Ok(SuccessResponse { success: true })
     }
 
-    #[allow(non_snake_case)]
-    #[handler(query)]
-    pub async fn lookupUser(
-        ctx: RefreshSessionContext,
+    pub(crate) async fn lookup_vault_user(
+        pool: &PgPool,
+        user_id: &str,
         input: LookupVaultUserInput,
-    ) -> Result<VaultLookupUserResponse, VaultRpcError> {
-        let pool = db_pool(&ctx.app_state)?;
+    ) -> Result<VaultLookupUserResponse, AppError> {
         let actor =
-            load_managed_team_vault_actor(pool, &input.vault_id, &ctx.session.user_id).await?;
+            load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
         let normalized_email = input.email.trim().to_ascii_lowercase();
         let current_user_email =
             query_scalar::<_, String>("SELECT email FROM \"user\" WHERE id = $1 LIMIT 1")
-                .bind(&ctx.session.user_id)
+                .bind(user_id)
                 .fetch_optional(pool)
                 .await
                 .map_err(|e| {
@@ -2415,16 +2350,15 @@ mod member_handlers {
         })
     }
 
-    #[allow(non_snake_case)]
-    #[handler(mutation)]
-    pub async fn add(
-        ctx: RefreshSessionContext,
+    pub(crate) async fn add_vault_member(
+        pool: &PgPool,
+        user_id: &str,
+        request_client_id: Option<&str>,
         input: AddVaultMemberInput,
-    ) -> Result<SuccessResponse, VaultRpcError> {
+    ) -> Result<SuccessResponse, AppError> {
         let role = validate_vault_member_role(&input.role)?;
-        let pool = db_pool(&ctx.app_state)?;
         let actor =
-            load_managed_team_vault_actor(pool, &input.vault_id, &ctx.session.user_id).await?;
+            load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
         let target_user = query_as::<_, DbVaultLookupUserRow>(
             "SELECT id, name, email, public_key, team_id FROM \"user\" WHERE id = $1 LIMIT 1",
         )
@@ -2476,11 +2410,11 @@ mod member_handlers {
             "vault_member_added",
             &input.user_id,
             &input.vault_id,
-            &ctx.session.user_id,
+            user_id,
             input
                 .client_id
                 .as_deref()
-                .or(ctx.request.client_id.as_deref()),
+                .or(request_client_id),
             json!({ "addedUserId": input.user_id, "role": role }),
         )
         .await?;
@@ -2492,22 +2426,20 @@ mod member_handlers {
             pool,
             "vault_member_added",
             &input.vault_id,
-            &ctx.session.user_id,
+            user_id,
             json!({ "addedUserId": input.user_id, "role": role }),
         )
         .await?;
         Ok(SuccessResponse { success: true })
     }
 
-    #[allow(non_snake_case)]
-    #[handler(query)]
-    pub async fn getRotationData(
-        ctx: RefreshSessionContext,
+    pub(crate) async fn get_vault_rotation_data(
+        pool: &PgPool,
+        user_id: &str,
         input: GetVaultRotationDataInput,
-    ) -> Result<VaultRotationDataResponse, VaultRpcError> {
-        let pool = db_pool(&ctx.app_state)?;
+    ) -> Result<VaultRotationDataResponse, AppError> {
         let _actor =
-            load_managed_team_vault_actor(pool, &input.vault_id, &ctx.session.user_id).await?;
+            load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
         let vault_record = query_as::<_, DbTeamRotationVaultRow>(
             "SELECT id, name, key_version FROM vault WHERE id = $1 LIMIT 1",
         )
@@ -2556,16 +2488,15 @@ mod member_handlers {
         })
     }
 
-    #[allow(non_snake_case)]
-    #[handler(mutation)]
-    pub async fn remove(
-        ctx: RefreshSessionContext,
+    pub(crate) async fn remove_vault_member(
+        pool: &PgPool,
+        user_id: &str,
+        request_client_id: Option<&str>,
         input: RemoveVaultMemberInput,
-    ) -> Result<RemoveVaultMemberResponse, VaultRpcError> {
-        let pool = db_pool(&ctx.app_state)?;
+    ) -> Result<RemoveVaultMemberResponse, AppError> {
         let actor =
-            load_managed_team_vault_actor(pool, &input.vault_id, &ctx.session.user_id).await?;
-        if input.user_id == ctx.session.user_id {
+            load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
+        if input.user_id == user_id.to_string() {
             return Err(bad_request_error("Cannot remove yourself"));
         }
         let target_access = load_vault_access(pool, &input.vault_id, &input.user_id)
@@ -2602,7 +2533,7 @@ mod member_handlers {
 		.bind(&rotation_id)
 		.bind(&input.vault_id)
 		.bind(new_key_version)
-		.bind(&ctx.session.user_id)
+		.bind(user_id)
 		.bind(&input.user_id)
 		.bind(input.key_rotation.re_encrypted_items.len() as i32)
 		.bind(input.key_rotation.member_keys.len() as i32)
@@ -2679,7 +2610,7 @@ mod member_handlers {
 				&mut transaction,
 				&input.vault_id,
 				&input.user_id,
-				input.client_id.as_deref().or(ctx.request.client_id.as_deref()),
+				input.client_id.as_deref().or(request_client_id),
 				new_key_version,
 				json!({ "reason": "member_removed", "removedUserId": input.user_id }),
 			)
@@ -2689,16 +2620,16 @@ mod member_handlers {
 				"vault_member_removed",
 				&input.user_id,
 				&input.vault_id,
-				&ctx.session.user_id,
-				input.client_id.as_deref().or(ctx.request.client_id.as_deref()),
+				user_id,
+				input.client_id.as_deref().or(request_client_id),
 				json!({ "removedUserId": input.user_id }),
 			)
 			.await?;
 			insert_vault_key_rotated_sync_event(
 				&mut transaction,
 				&input.vault_id,
-				&ctx.session.user_id,
-				input.client_id.as_deref().or(ctx.request.client_id.as_deref()),
+				user_id,
+				input.client_id.as_deref().or(request_client_id),
 				new_key_version,
 				json!({ "reason": "member_removed", "keyRotationId": rotation_id }),
 			)
@@ -2730,7 +2661,7 @@ mod member_handlers {
             pool,
             "vault_member_removed",
             &input.vault_id,
-            &ctx.session.user_id,
+            user_id,
             json!({
                 "removedUserId": input.user_id,
                 "keyRotationId": rotation_id,
@@ -2761,7 +2692,7 @@ mod member_handlers {
         pool: &PgPool,
         vault_id: &str,
         user_id: &str,
-    ) -> Result<ManagedVaultActor, VaultRpcError> {
+    ) -> Result<ManagedVaultActor, AppError> {
         let actor = query_as::<_, DbVaultOwnerAccessRow>(
 			"SELECT vk.vault_id, v.type::text AS vault_type, v.team_id, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON v.id = vk.vault_id WHERE vk.vault_id = $1 AND vk.user_id = $2 LIMIT 1",
 		)
@@ -2775,7 +2706,6 @@ mod member_handlers {
             pool,
             user_id,
             "Failed to load billing entitlements",
-            internal_error,
         )
         .await?;
         assert_vault_sharing_available(billing.as_ref())?;
@@ -2795,7 +2725,7 @@ mod member_handlers {
 
     fn assert_vault_sharing_available(
         billing: Option<&DbTeamBillingEntitlementRow>,
-    ) -> Result<(), VaultRpcError> {
+    ) -> Result<(), AppError> {
         if bittery_mode() == "self-hosted" {
             return Ok(());
         }
@@ -2816,7 +2746,7 @@ mod member_handlers {
         Ok(())
     }
 
-    fn validate_vault_member_role(role: &str) -> Result<&str, VaultRpcError> {
+    fn validate_vault_member_role(role: &str) -> Result<&str, AppError> {
         if matches!(role, "admin" | "member" | "read-only") {
             Ok(role)
         } else {
@@ -2957,48 +2887,8 @@ mod member_handlers {
     }
 }
 
-fn create_vault_members_router() -> Router<AppState> {
-    Router::new()
-        .handler(member_handlers::list)
-        .handler(member_handlers::availableTeamMembers)
-        .handler(member_handlers::updateRole)
-        .handler(member_handlers::lookupUser)
-        .handler(member_handlers::add)
-        .handler(member_handlers::getRotationData)
-        .handler(member_handlers::remove)
-}
 
-async fn load_item_row(pool: &PgPool, item_id: &str) -> Result<DbBootstrapItemRow, VaultRpcError> {
-    query_as::<_, DbBootstrapItemRow>(
-		"SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = $1 LIMIT 1",
-	)
-	.bind(item_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load item"); internal_error("Failed to load item") })?
-	.ok_or_else(|| not_found_error("Item not found"))
-}
-
-async fn load_vault_access(
-    pool: &PgPool,
-    vault_id: &str,
-    user_id: &str,
-) -> Result<DbItemVaultAccessRow, VaultRpcError> {
-    query_as::<_, DbItemVaultAccessRow>(
-        "SELECT role::text AS role FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
-    )
-    .bind(vault_id)
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to verify vault access");
-        internal_error("Failed to verify vault access")
-    })?
-    .ok_or_else(|| forbidden_error("Access denied to this vault"))
-}
-
-fn assert_item_write_access(role: &str, message: &str) -> Result<(), VaultRpcError> {
+fn assert_item_write_access(role: &str, message: &str) -> Result<(), AppError> {
     if role == "read-only" {
         Err(forbidden_error(message))
     } else {
@@ -3014,25 +2904,19 @@ async fn insert_item_sync_event(
     user_id: &str,
     client_id: Option<&str>,
     version: i32,
-) -> Result<(), VaultRpcError> {
-    let query_text = format!(
-		"INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, client_id, created_at) VALUES ($1, '{event_type}'::sync_event_type, $2, 'item'::sync_entity_type, $3, $4, $5, $6, $7)"
-	);
-    query(&query_text)
-        .bind(generate_resource_id("sync"))
-        .bind(item_id)
-        .bind(vault_id)
-        .bind(user_id)
-        .bind(version)
-        .bind(client_id)
-        .bind(OffsetDateTime::now_utc())
-        .execute(&mut **transaction)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to create item sync event");
-            internal_error("Failed to create item sync event")
-        })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_sync_event(
+        &mut **transaction,
+        event_type,
+        item_id,
+        "item",
+        vault_id,
+        user_id,
+        version,
+        client_id,
+        None,
+    )
+    .await
 }
 
 async fn insert_item_sync_event_with_metadata(
@@ -3044,26 +2928,19 @@ async fn insert_item_sync_event_with_metadata(
     client_id: Option<&str>,
     version: i32,
     metadata: serde_json::Value,
-) -> Result<(), VaultRpcError> {
-    let query_text = format!(
-		"INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, client_id, metadata, created_at) VALUES ($1, '{event_type}'::sync_event_type, $2, 'item'::sync_entity_type, $3, $4, $5, $6, $7, $8)"
-	);
-    query(&query_text)
-        .bind(generate_resource_id("sync"))
-        .bind(item_id)
-        .bind(vault_id)
-        .bind(user_id)
-        .bind(version)
-        .bind(client_id)
-        .bind(metadata.to_string())
-        .bind(OffsetDateTime::now_utc())
-        .execute(&mut **transaction)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to create item sync event");
-            internal_error("Failed to create item sync event")
-        })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_sync_event(
+        &mut **transaction,
+        event_type,
+        item_id,
+        "item",
+        vault_id,
+        user_id,
+        version,
+        client_id,
+        Some(&metadata.to_string()),
+    )
+    .await
 }
 
 async fn insert_item_audit_log(
@@ -3072,40 +2949,17 @@ async fn insert_item_audit_log(
     item_id: &str,
     user_id: &str,
     metadata: Option<serde_json::Value>,
-) -> Result<(), VaultRpcError> {
-    if let Some(metadata) = metadata {
-        let query_text = format!(
-			"INSERT INTO audit_log (id, user_id, action, entity_type, entity_id, metadata, created_at) VALUES ($1, $2, '{action}', 'item', $3, $4, $5)"
-		);
-        query(&query_text)
-            .bind(generate_resource_id("audit"))
-            .bind(user_id)
-            .bind(item_id)
-            .bind(metadata)
-            .bind(OffsetDateTime::now_utc())
-            .execute(pool)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to record item audit event");
-                internal_error("Failed to record item audit event")
-            })?;
-    } else {
-        let query_text = format!(
-			"INSERT INTO audit_log (id, user_id, action, entity_type, entity_id, created_at) VALUES ($1, $2, '{action}', 'item', $3, $4)"
-		);
-        query(&query_text)
-            .bind(generate_resource_id("audit"))
-            .bind(user_id)
-            .bind(item_id)
-            .bind(OffsetDateTime::now_utc())
-            .execute(pool)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to record item audit event");
-                internal_error("Failed to record item audit event")
-            })?;
-    }
-    Ok(())
+) -> Result<(), AppError> {
+    insert_audit_event(
+        pool,
+        &generate_resource_id("audit"),
+        user_id,
+        action,
+        "item",
+        item_id,
+        metadata,
+    )
+    .await
 }
 
 async fn insert_vault_member_sync_event(
@@ -3116,25 +2970,19 @@ async fn insert_vault_member_sync_event(
     user_id: &str,
     client_id: Option<&str>,
     metadata: serde_json::Value,
-) -> Result<(), VaultRpcError> {
-    let query_text = format!(
-		"INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, client_id, metadata, created_at) VALUES ($1, '{event_type}'::sync_event_type, $2, 'vault_member'::sync_entity_type, $3, $4, 1, $5, $6, $7)"
-	);
-    query(&query_text)
-        .bind(generate_resource_id("sync"))
-        .bind(entity_id)
-        .bind(vault_id)
-        .bind(user_id)
-        .bind(client_id)
-        .bind(metadata.to_string())
-        .bind(OffsetDateTime::now_utc())
-        .execute(&mut **transaction)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to create vault member sync event");
-            internal_error("Failed to create vault member sync event")
-        })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_sync_event(
+        &mut **transaction,
+        event_type,
+        entity_id,
+        "vault_member",
+        vault_id,
+        user_id,
+        1,
+        client_id,
+        Some(&metadata.to_string()),
+    )
+    .await
 }
 
 async fn insert_vault_access_revoked_sync_event_with_metadata(
@@ -3144,22 +2992,19 @@ async fn insert_vault_access_revoked_sync_event_with_metadata(
     client_id: Option<&str>,
     version: i32,
     metadata: serde_json::Value,
-) -> Result<(), VaultRpcError> {
-    query(
-		"INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, client_id, metadata, created_at) VALUES ($1, 'vault_access_revoked'::sync_event_type, $2, 'vault'::sync_entity_type, $3, $4, $5, $6, $7, $8)",
-	)
-	.bind(generate_resource_id("sync"))
-	.bind(vault_id)
-	.bind(vault_id)
-	.bind(user_id)
-	.bind(version)
-	.bind(client_id)
-	.bind(metadata.to_string())
-	.bind(OffsetDateTime::now_utc())
-	.execute(&mut **transaction)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to create vault access revoked sync event"); internal_error("Failed to create vault access revoked sync event") })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_sync_event(
+        &mut **transaction,
+        "vault_access_revoked",
+        vault_id,
+        "vault",
+        vault_id,
+        user_id,
+        version,
+        client_id,
+        Some(&metadata.to_string()),
+    )
+    .await
 }
 
 async fn insert_vault_key_rotated_sync_event(
@@ -3169,55 +3014,21 @@ async fn insert_vault_key_rotated_sync_event(
     client_id: Option<&str>,
     version: i32,
     metadata: serde_json::Value,
-) -> Result<(), VaultRpcError> {
-    query(
-		"INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, client_id, metadata, created_at) VALUES ($1, 'vault_key_rotated'::sync_event_type, $2, 'vault_key'::sync_entity_type, $3, $4, $5, $6, $7, $8)",
-	)
-	.bind(generate_resource_id("sync"))
-	.bind(vault_id)
-	.bind(vault_id)
-	.bind(user_id)
-	.bind(version)
-	.bind(client_id)
-	.bind(metadata.to_string())
-	.bind(OffsetDateTime::now_utc())
-	.execute(&mut **transaction)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to create vault key rotation sync event"); internal_error("Failed to create vault key rotation sync event") })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_sync_event(
+        &mut **transaction,
+        "vault_key_rotated",
+        vault_id,
+        "vault_key",
+        vault_id,
+        user_id,
+        version,
+        client_id,
+        Some(&metadata.to_string()),
+    )
+    .await
 }
 
-pub fn create_vault_router() -> Router<AppState> {
-    Router::new()
-        .handler(list)
-        .handler(get)
-        .handler(create)
-        .handler(update)
-        .handler(convertType)
-        .handler(delete)
-        .handler(listItems)
-        .handler(listAllItems)
-        .handler(listAllDeletedItems)
-        .handler(listDeletedItems)
-        .handler(getItem)
-        .handler(createItem)
-        .handler(bulkImportItems)
-        .handler(updateItem)
-        .handler(toggleFavorite)
-        .handler(deleteItem)
-        .handler(restoreItem)
-        .handler(moveItem)
-        .handler(permanentlyDeleteItem)
-        .handler(stats)
-        .handler(createImageUpload)
-        .handler(createAttachmentUpload)
-        .handler(createAttachment)
-        .handler(listAttachments)
-        .handler(getAttachmentDownloadUrl)
-        .handler(updateAttachment)
-        .handler(deleteAttachment)
-        .nest("members", create_vault_members_router())
-}
 
 fn map_item(item: DbBootstrapItemRow) -> VaultItemResponse {
     VaultItemResponse {
@@ -3271,23 +3082,6 @@ fn map_item_details(item: DbBootstrapItemRow) -> VaultItemDetailsResponse {
     }
 }
 
-fn db_pool(app_state: &AppState) -> Result<&PgPool, VaultRpcError> {
-    load_db_pool(app_state, internal_error)
-}
-
-async fn load_user_vault_summaries(
-    pool: &PgPool,
-    user_id: &str,
-) -> Result<Vec<DbBootstrapVaultAccessRow>, VaultRpcError> {
-    query_as::<_, DbBootstrapVaultAccessRow>(
-		"SELECT vk.vault_id, v.name AS vault_name, v.type::text AS vault_type, v.icon AS vault_icon, v.image_key AS vault_image_key, vk.encrypted_vault_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 ORDER BY vk.created_at ASC",
-	)
-	.bind(user_id)
-	.fetch_all(pool)
-	.await
-	.map_err(|_| internal_error("Failed to load user vaults"))
-}
-
 fn build_vault_summary_map(
     vaults: Vec<DbBootstrapVaultAccessRow>,
 ) -> HashMap<String, VaultSummaryResponse> {
@@ -3316,7 +3110,7 @@ fn build_vault_summary_map(
 async fn load_item_attachments(
     pool: &PgPool,
     items: &[DbBootstrapItemRow],
-) -> Result<HashMap<String, Vec<VaultAttachmentResponse>>, VaultRpcError> {
+) -> Result<HashMap<String, Vec<VaultAttachmentResponse>>, AppError> {
     if items.is_empty() {
         return Ok(HashMap::new());
     }
@@ -3352,7 +3146,7 @@ async fn load_item_attachments(
     Ok(grouped)
 }
 
-async fn attachments_enabled_for_user(pool: &PgPool, user_id: &str) -> Result<bool, VaultRpcError> {
+async fn attachments_enabled_for_user(pool: &PgPool, user_id: &str) -> Result<bool, AppError> {
     let mode = bittery_mode();
     if mode == "self-hosted" {
         return Ok(true);
@@ -3362,7 +3156,6 @@ async fn attachments_enabled_for_user(pool: &PgPool, user_id: &str) -> Result<bo
         pool,
         user_id,
         "Failed to load attachment entitlements",
-        internal_error,
     )
     .await?;
 
@@ -3383,12 +3176,11 @@ async fn attachments_enabled_for_user(pool: &PgPool, user_id: &str) -> Result<bo
 async fn load_attachment_actor(
     pool: &PgPool,
     user_id: &str,
-) -> Result<AttachmentActor, VaultRpcError> {
+) -> Result<AttachmentActor, AppError> {
     let actor = load_team_billing_entitlement(
         pool,
         user_id,
         "Failed to load attachment entitlements",
-        internal_error,
     )
     .await?;
     let mode = bittery_mode();
@@ -3464,7 +3256,7 @@ async fn load_pending_attachment_reservation(
     storage_key: &str,
     item_id: &str,
     created_by: &str,
-) -> Result<Option<DbPendingAttachmentReservationRow>, VaultRpcError> {
+) -> Result<Option<DbPendingAttachmentReservationRow>, AppError> {
     query_as::<_, DbPendingAttachmentReservationRow>(
 		"SELECT id, file_size, storage_size FROM pending_attachment_upload WHERE storage_key = $1 AND item_id = $2 AND created_by = $3 AND consumed_at IS NULL AND expires_at > $4 LIMIT 1",
 	)
@@ -3481,7 +3273,7 @@ async fn load_attachment_access(
     pool: &PgPool,
     attachment_id: &str,
     user_id: &str,
-) -> Result<DbScopedAttachmentAccessRow, VaultRpcError> {
+) -> Result<DbScopedAttachmentAccessRow, AppError> {
     query_as::<_, DbScopedAttachmentAccessRow>(
 		"SELECT ia.id, ia.item_id, ia.vault_id, ia.storage_key, ia.encrypted_name, ia.encrypted_content_type, ia.encryption_iv, ia.encrypted_content_type_iv, ia.encryption_algorithm, ia.file_size, ia.uploaded_by, ia.created_at, vk.role::text AS role FROM item_attachment ia INNER JOIN vault_key vk ON vk.vault_id = ia.vault_id AND vk.user_id = $2 WHERE ia.id = $1 LIMIT 1",
 	)
@@ -3499,7 +3291,7 @@ async fn insert_vault(
     user_id: &str,
     team_id: Option<&str>,
     input: &CreateVaultInput,
-) -> Result<(), VaultRpcError> {
+) -> Result<(), AppError> {
     query(
 		"INSERT INTO vault (id, name, type, icon, image_key, created_by_id, team_id, created_at, updated_at) VALUES ($1, $2, $3::vault_type, $4, $5, $6, $7, $8, $8)",
 	)
@@ -3522,7 +3314,7 @@ async fn insert_vault_key(
     vault_id: &str,
     user_id: &str,
     encrypted_vault_key: &str,
-) -> Result<(), VaultRpcError> {
+) -> Result<(), AppError> {
     query(
 		"INSERT INTO vault_key (id, vault_id, user_id, encrypted_vault_key, role, created_at) VALUES ($1, $2, $3, $4, 'owner', $5)",
 	)
@@ -3542,38 +3334,36 @@ async fn insert_vault_created_sync_event(
     vault_id: &str,
     user_id: &str,
     client_id: Option<&str>,
-) -> Result<(), VaultRpcError> {
-    query(
-		"INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, client_id, created_at) VALUES ($1, 'vault_created'::sync_event_type, $2, 'vault'::sync_entity_type, $3, $4, 1, $5, $6)",
-	)
-	.bind(generate_resource_id("sync"))
-	.bind(vault_id)
-	.bind(vault_id)
-	.bind(user_id)
-	.bind(client_id)
-	.bind(OffsetDateTime::now_utc())
-	.execute(&mut **transaction)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to create sync event"); internal_error("Failed to create sync event") })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_sync_event(
+        &mut **transaction,
+        "vault_created",
+        vault_id,
+        "vault",
+        vault_id,
+        user_id,
+        1,
+        client_id,
+        None,
+    )
+    .await
 }
 
 async fn insert_vault_created_audit_log(
     pool: &PgPool,
     vault_id: &str,
     user_id: &str,
-) -> Result<(), VaultRpcError> {
-    query(
-		"INSERT INTO audit_log (id, user_id, action, entity_type, entity_id, created_at) VALUES ($1, $2, 'vault_created', 'vault', $3, $4)",
-	)
-	.bind(generate_resource_id("audit"))
-	.bind(user_id)
-	.bind(vault_id)
-	.bind(OffsetDateTime::now_utc())
-	.execute(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to record vault audit event"); internal_error("Failed to record vault audit event") })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_audit_event(
+        pool,
+        &generate_resource_id("audit"),
+        user_id,
+        "vault_created",
+        "vault",
+        vault_id,
+        None,
+    )
+    .await
 }
 
 async fn insert_vault_updated_sync_event(
@@ -3581,20 +3371,19 @@ async fn insert_vault_updated_sync_event(
     vault_id: &str,
     user_id: &str,
     client_id: Option<&str>,
-) -> Result<(), VaultRpcError> {
-    query(
-		"INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, client_id, created_at) VALUES ($1, 'vault_updated'::sync_event_type, $2, 'vault'::sync_entity_type, $3, $4, 1, $5, $6)",
-	)
-	.bind(generate_resource_id("sync"))
-	.bind(vault_id)
-	.bind(vault_id)
-	.bind(user_id)
-	.bind(client_id)
-	.bind(OffsetDateTime::now_utc())
-	.execute(&mut **transaction)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to create vault update sync event"); internal_error("Failed to create vault update sync event") })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_sync_event(
+        &mut **transaction,
+        "vault_updated",
+        vault_id,
+        "vault",
+        vault_id,
+        user_id,
+        1,
+        client_id,
+        None,
+    )
+    .await
 }
 
 async fn insert_vault_updated_sync_event_with_metadata(
@@ -3603,39 +3392,36 @@ async fn insert_vault_updated_sync_event_with_metadata(
     user_id: &str,
     client_id: Option<&str>,
     metadata: serde_json::Value,
-) -> Result<(), VaultRpcError> {
-    query(
-		"INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, client_id, metadata, created_at) VALUES ($1, 'vault_updated'::sync_event_type, $2, 'vault'::sync_entity_type, $3, $4, 1, $5, $6, $7)",
-	)
-	.bind(generate_resource_id("sync"))
-	.bind(vault_id)
-	.bind(vault_id)
-	.bind(user_id)
-	.bind(client_id)
-	.bind(metadata.to_string())
-	.bind(OffsetDateTime::now_utc())
-	.execute(&mut **transaction)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to create vault update sync event"); internal_error("Failed to create vault update sync event") })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_sync_event(
+        &mut **transaction,
+        "vault_updated",
+        vault_id,
+        "vault",
+        vault_id,
+        user_id,
+        1,
+        client_id,
+        Some(&metadata.to_string()),
+    )
+    .await
 }
 
 async fn insert_vault_updated_audit_log(
     pool: &PgPool,
     vault_id: &str,
     user_id: &str,
-) -> Result<(), VaultRpcError> {
-    query(
-		"INSERT INTO audit_log (id, user_id, action, entity_type, entity_id, created_at) VALUES ($1, $2, 'vault_updated', 'vault', $3, $4)",
-	)
-	.bind(generate_resource_id("audit"))
-	.bind(user_id)
-	.bind(vault_id)
-	.bind(OffsetDateTime::now_utc())
-	.execute(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to record vault update audit event"); internal_error("Failed to record vault update audit event") })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_audit_event(
+        pool,
+        &generate_resource_id("audit"),
+        user_id,
+        "vault_updated",
+        "vault",
+        vault_id,
+        None,
+    )
+    .await
 }
 
 async fn insert_vault_audit_log_with_metadata(
@@ -3644,23 +3430,17 @@ async fn insert_vault_audit_log_with_metadata(
     vault_id: &str,
     user_id: &str,
     metadata: serde_json::Value,
-) -> Result<(), VaultRpcError> {
-    let query_text = format!(
-		"INSERT INTO audit_log (id, user_id, action, entity_type, entity_id, metadata, created_at) VALUES ($1, $2, '{action}', 'vault', $3, $4, $5)"
-	);
-    query(&query_text)
-        .bind(generate_resource_id("audit"))
-        .bind(user_id)
-        .bind(vault_id)
-        .bind(metadata)
-        .bind(OffsetDateTime::now_utc())
-        .execute(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to record vault audit event");
-            internal_error("Failed to record vault audit event")
-        })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_audit_event(
+        pool,
+        &generate_resource_id("audit"),
+        user_id,
+        action,
+        "vault",
+        vault_id,
+        Some(metadata),
+    )
+    .await
 }
 
 async fn insert_vault_deleted_sync_event(
@@ -3668,20 +3448,19 @@ async fn insert_vault_deleted_sync_event(
     vault_id: &str,
     user_id: &str,
     client_id: Option<&str>,
-) -> Result<(), VaultRpcError> {
-    query(
-		"INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, client_id, created_at) VALUES ($1, 'vault_deleted'::sync_event_type, $2, 'vault'::sync_entity_type, $3, $4, 1, $5, $6)",
-	)
-	.bind(generate_resource_id("sync"))
-	.bind(vault_id)
-	.bind(vault_id)
-	.bind(user_id)
-	.bind(client_id)
-	.bind(OffsetDateTime::now_utc())
-	.execute(&mut **transaction)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to create vault delete sync event"); internal_error("Failed to create vault delete sync event") })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_sync_event(
+        &mut **transaction,
+        "vault_deleted",
+        vault_id,
+        "vault",
+        vault_id,
+        user_id,
+        1,
+        client_id,
+        None,
+    )
+    .await
 }
 
 async fn insert_vault_access_revoked_sync_event(
@@ -3689,108 +3468,60 @@ async fn insert_vault_access_revoked_sync_event(
     vault_id: &str,
     user_id: &str,
     client_id: Option<&str>,
-) -> Result<(), VaultRpcError> {
-    query(
-		"INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, client_id, metadata, created_at) VALUES ($1, 'vault_access_revoked'::sync_event_type, $2, 'vault'::sync_entity_type, $3, $4, 1, $5, $6, $7)",
-	)
-	.bind(generate_resource_id("sync"))
-	.bind(vault_id)
-	.bind(vault_id)
-	.bind(user_id)
-	.bind(client_id)
-	.bind(json!({ "reason": "vault_deleted", "vaultId": vault_id }).to_string())
-	.bind(OffsetDateTime::now_utc())
-	.execute(&mut **transaction)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to create vault access revoked sync event"); internal_error("Failed to create vault access revoked sync event") })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_sync_event(
+        &mut **transaction,
+        "vault_access_revoked",
+        vault_id,
+        "vault",
+        vault_id,
+        user_id,
+        1,
+        client_id,
+        Some(&json!({ "reason": "vault_deleted", "vaultId": vault_id }).to_string()),
+    )
+    .await
 }
 
 async fn insert_vault_deleted_audit_log(
     pool: &PgPool,
     vault_id: &str,
     user_id: &str,
-) -> Result<(), VaultRpcError> {
-    query(
-		"INSERT INTO audit_log (id, user_id, action, entity_type, entity_id, created_at) VALUES ($1, $2, 'vault_deleted', 'vault', $3, $4)",
-	)
-	.bind(generate_resource_id("audit"))
-	.bind(user_id)
-	.bind(vault_id)
-	.bind(OffsetDateTime::now_utc())
-	.execute(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to record vault delete audit event"); internal_error("Failed to record vault delete audit event") })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_audit_event(
+        pool,
+        &generate_resource_id("audit"),
+        user_id,
+        "vault_deleted",
+        "vault",
+        vault_id,
+        None,
+    )
+    .await
 }
 
 fn resolve_vault_sharing_entitlement(plan: &str, status: &str) -> VaultSharingEntitlement {
     shared_resolve_vault_sharing_entitlement(bittery_mode(), Some(plan), Some(status))
 }
 
-fn generate_resource_id(prefix: &str) -> String {
-    format!("{prefix}_{:016x}", random::<u64>())
+fn internal_error(message: &str) -> AppError {
+    AppError::internal(message)
 }
 
-fn internal_error(message: &str) -> VaultRpcError {
-    VaultRpcError {
-        code: "INTERNAL_SERVER_ERROR".to_string(),
-        message: message.to_string(),
-    }
+fn bad_request_error(message: &str) -> AppError {
+    AppError::bad_request(message)
 }
 
-fn bad_request_error(message: &str) -> VaultRpcError {
-    VaultRpcError {
-        code: "BAD_REQUEST".to_string(),
-        message: message.to_string(),
-    }
+fn forbidden_error(message: &str) -> AppError {
+    AppError::forbidden(message)
 }
 
-fn forbidden_error(message: &str) -> VaultRpcError {
-    VaultRpcError {
-        code: "FORBIDDEN".to_string(),
-        message: message.to_string(),
-    }
+fn not_found_error(message: &str) -> AppError {
+    AppError::not_found(message)
 }
 
-fn not_found_error(message: &str) -> VaultRpcError {
-    VaultRpcError {
-        code: "NOT_FOUND".to_string(),
-        message: message.to_string(),
-    }
-}
-
-fn conflict_error(message: &str) -> VaultRpcError {
-    VaultRpcError {
-        code: "CONFLICT".to_string(),
-        message: message.to_string(),
-    }
-}
-
-impl IntoResponse for VaultRpcError {
-    type Output = <RpcError as IntoResponse>::Output;
-
-    fn into_response(self) -> jsonrpsee::ResponsePayload<'static, Self::Output> {
-        RpcError::from(self).into_response()
-    }
-}
-
-impl From<VaultRpcError> for RpcError {
-    fn from(value: VaultRpcError) -> Self {
-        let code = match value.code.as_str() {
-            "NOT_FOUND" => ErrorCode::ServerError(404),
-            "FORBIDDEN" => ErrorCode::ServerError(403),
-            "CONFLICT" => ErrorCode::ServerError(409),
-            "BAD_REQUEST" => ErrorCode::InvalidParams,
-            _ => ErrorCode::InternalError,
-        };
-
-        RpcError {
-            code,
-            message: value.message,
-            data: None,
-        }
-    }
+fn conflict_error(message: &str) -> AppError {
+    AppError::conflict(message)
 }
 
 #[cfg(test)]

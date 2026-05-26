@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 
 use regex::Regex;
 use reqwest::{header::CONTENT_TYPE, redirect::Policy, Client};
@@ -224,16 +224,14 @@ async fn fetch_with_limit(
 }
 
 fn extract_icon_links(html: &str, base_url: &str) -> Vec<String> {
-    let link_tag_regex = Regex::new(r#"<link\b[^>]*>"#).expect("link regex should compile");
-    let rel_regex =
-        Regex::new(r#"\brel\s*=\s*(?:"([^"]*)"|'([^']*)')"#).expect("rel regex should compile");
-    let href_regex =
-        Regex::new(r#"\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')"#).expect("href regex should compile");
+    static RE_LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"<link\b[^>]*>"#).expect("link regex should compile"));
+    static RE_REL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\brel\s*=\s*(?:"([^"]*)"|'([^']*)')"#).expect("rel regex should compile"));
+    static RE_HREF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')"#).expect("href regex should compile"));
 
     let mut links = Vec::new();
-    for tag_match in link_tag_regex.find_iter(html) {
+    for tag_match in RE_LINK.find_iter(html) {
         let tag = tag_match.as_str();
-        let Some(rel_capture) = rel_regex.captures(tag) else {
+        let Some(rel_capture) = RE_REL.captures(tag) else {
             continue;
         };
         let rel_value = rel_capture
@@ -245,7 +243,7 @@ fn extract_icon_links(html: &str, base_url: &str) -> Vec<String> {
             continue;
         }
 
-        let Some(href_capture) = href_regex.captures(tag) else {
+        let Some(href_capture) = RE_HREF.captures(tag) else {
             continue;
         };
         let Some(href) = href_capture

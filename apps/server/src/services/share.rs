@@ -1,25 +1,23 @@
-use std::collections::HashMap;
-
 use chrono::{Local, TimeZone, Utc};
-use qubit::{
-    builder::IntoResponse,
-    handler,
-    server::{ErrorCode, Router, RpcError},
-};
-use rand::random;
 use rand::Rng;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sqlx::{query, query_as, query_scalar, PgPool};
 use ts_rs::TS;
 
-use crate::auth::AppContext;
 use crate::{
-    auth::RefreshSessionContext,
     db::models::*,
-    server_support::{bittery_mode, db_pool as load_db_pool, format_timestamp},
-    team_billing::{load_team_billing_entitlement, resolve_share_links_policy},
-    AppState,
+    error::AppError,
+    repo::{
+        common::{generate_resource_id, insert_audit_event, load_scoped_item_access},
+        share::{
+            consume_share_link_access, count_active_share_links, load_allowed_emails_for_links,
+            load_public_share_link_by_token, load_share_access_logs, load_share_links_for_item,
+            log_share_access,
+        },
+    },
+    config::{bittery_mode, format_timestamp},
+    services::team_billing::{load_team_billing_entitlement, resolve_share_links_policy},
 };
 
 const SHARE_LINKS_UNAVAILABLE_MESSAGE: &str =
@@ -27,11 +25,6 @@ const SHARE_LINKS_UNAVAILABLE_MESSAGE: &str =
 const MAX_VERIFICATION_CODES_PER_EMAIL: i64 = 5;
 const DEFAULT_SHARE_LINK_DAILY_LIMIT: i64 = 50;
 
-#[derive(Debug, Clone, Serialize, TS)]
-pub struct ShareRpcError {
-    pub code: String,
-    pub message: String,
-}
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -221,14 +214,12 @@ struct ShareLinksAccess {
     team_id: Option<String>,
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn create(
-    ctx: RefreshSessionContext,
+pub(crate) async fn create_share_link(
+    pool: &PgPool,
+    user_id: &str,
     input: CreateShareLinkInput,
-) -> Result<CreateShareLinkResponse, ShareRpcError> {
-    let pool = db_pool(&ctx)?;
-    let scoped_item = load_scoped_item_access(pool, &ctx.session.user_id, &input.item_id).await?;
+) -> Result<CreateShareLinkResponse, AppError> {
+    let scoped_item = load_scoped_item_access(pool, user_id, &input.item_id).await?;
     let Some(scoped_item) = scoped_item else {
         return Err(not_found_error("Item not found"));
     };
@@ -237,13 +228,13 @@ pub async fn create(
         return Err(forbidden_error("Read-only users cannot share items"));
     }
 
-    let share_links_access = assert_share_links_entitlement(pool, &ctx.session.user_id).await?;
+    let share_links_access = assert_share_links_entitlement(pool, user_id).await?;
     validate_create_share_input(&input)?;
-    check_and_increment_share_rate_limit(pool, &ctx.session.user_id).await?;
+    check_and_increment_share_rate_limit(pool, user_id).await?;
 
     let expires_at = calculate_expiration(&input.expires_in)?;
     let token = generate_secure_token();
-    let share_link_id = generate_share_id("share_link");
+    let share_link_id = generate_resource_id("share_link");
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to create share link transaction");
         internal_error("Failed to create share link transaction")
@@ -253,7 +244,7 @@ pub async fn create(
         let lock_scope = share_links_access
             .team_id
             .as_deref()
-            .unwrap_or(&ctx.session.user_id);
+            .unwrap_or(user_id);
         query("SELECT pg_advisory_xact_lock(hashtext($1))")
             .bind(format!("share-links:{lock_scope}"))
             .execute(&mut *transaction)
@@ -266,7 +257,7 @@ pub async fn create(
         let active_share_links = count_active_share_links(
             &mut transaction,
             share_links_access.team_id.as_deref(),
-            &ctx.session.user_id,
+            user_id,
             time::OffsetDateTime::now_utc(),
         )
         .await?;
@@ -282,7 +273,7 @@ pub async fn create(
 	)
 	.bind(&share_link_id)
 	.bind(&scoped_item.item_id)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.bind(&token)
 	.bind(&input.access_mode)
 	.bind(input.is_one_time_use)
@@ -301,7 +292,7 @@ pub async fn create(
             query(
 				"INSERT INTO share_link_allowed_email (id, share_link_id, email) VALUES ($1, $2, $3)",
 			)
-			.bind(generate_share_id("share_email"))
+			.bind(generate_resource_id("share_email"))
 			.bind(&share_link_id)
 			.bind(email.to_ascii_lowercase())
 			.execute(&mut *transaction)
@@ -315,7 +306,7 @@ pub async fn create(
         internal_error("Failed to commit share link transaction")
     })?;
 
-    record_share_audit_event(pool, &ctx.session.user_id, "share_created", &share_link_id).await?;
+    record_share_audit_event(pool, user_id, "share_created", &share_link_id).await?;
 
     Ok(CreateShareLinkResponse {
         id: share_link_id,
@@ -325,16 +316,14 @@ pub async fn create(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn listByItem(
-    ctx: RefreshSessionContext,
+pub(crate) async fn list_share_links_by_item(
+    pool: &PgPool,
+    user_id: &str,
     input: ItemIdInput,
-) -> Result<ShareLinkListResponse, ShareRpcError> {
-    let pool = db_pool(&ctx)?;
-    assert_share_links_entitlement(pool, &ctx.session.user_id).await?;
+) -> Result<ShareLinkListResponse, AppError> {
+    assert_share_links_entitlement(pool, user_id).await?;
 
-    let scoped_item = load_scoped_item_access(pool, &ctx.session.user_id, &input.item_id).await?;
+    let scoped_item = load_scoped_item_access(pool, user_id, &input.item_id).await?;
     let Some(scoped_item) = scoped_item else {
         return Err(not_found_error("Item not found"));
     };
@@ -346,7 +335,7 @@ pub async fn listByItem(
     } else {
         links
             .into_iter()
-            .filter(|link| link.created_by_id == ctx.session.user_id)
+            .filter(|link| link.created_by_id == user_id.to_string())
             .collect()
     };
     let link_ids = visible_links
@@ -389,16 +378,14 @@ pub async fn listByItem(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn get(
-    ctx: RefreshSessionContext,
+pub(crate) async fn get_share_link(
+    pool: &PgPool,
+    user_id: &str,
     input: LinkIdInput,
-) -> Result<ShareLinkDetailsResponse, ShareRpcError> {
-    let pool = db_pool(&ctx)?;
-    assert_share_links_entitlement(pool, &ctx.session.user_id).await?;
+) -> Result<ShareLinkDetailsResponse, AppError> {
+    assert_share_links_entitlement(pool, user_id).await?;
 
-    let visible_link = load_visible_share_link(pool, &input.link_id, &ctx.session.user_id).await?;
+    let visible_link = load_visible_share_link(pool, &input.link_id, user_id).await?;
     let Some(visible_link) = visible_link else {
         return Err(not_found_error("Share link not found"));
     };
@@ -427,14 +414,12 @@ pub async fn get(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn revoke(
-    ctx: RefreshSessionContext,
+pub(crate) async fn revoke_share_link(
+    pool: &PgPool,
+    user_id: &str,
     input: LinkIdInput,
-) -> Result<SuccessResponse, ShareRpcError> {
-    let pool = db_pool(&ctx)?;
-    let visible_link = load_visible_share_link(pool, &input.link_id, &ctx.session.user_id).await?;
+) -> Result<SuccessResponse, AppError> {
+    let visible_link = load_visible_share_link(pool, &input.link_id, user_id).await?;
     let Some(visible_link) = visible_link else {
         return Err(not_found_error("Share link not found"));
     };
@@ -454,7 +439,7 @@ pub async fn revoke(
 
     if visible_link.actor_role == "read-only"
         || (visible_link.actor_role == "member"
-            && visible_link.link.created_by_id != ctx.session.user_id)
+            && visible_link.link.created_by_id != user_id.to_string())
         || (visible_link.actor_role == "admin" && creator_role == "owner")
     {
         return Err(forbidden_error(
@@ -471,28 +456,26 @@ pub async fn revoke(
             internal_error("Failed to revoke share link")
         })?;
 
-    record_share_audit_event(pool, &ctx.session.user_id, "share_revoked", &input.link_id).await?;
+    record_share_audit_event(pool, user_id, "share_revoked", &input.link_id).await?;
 
     Ok(SuccessResponse { success: true })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn update(
-    ctx: RefreshSessionContext,
+pub(crate) async fn update_share_link(
+    pool: &PgPool,
+    user_id: &str,
     input: UpdateShareLinkInput,
-) -> Result<SuccessResponse, ShareRpcError> {
-    let pool = db_pool(&ctx)?;
-    assert_share_links_entitlement(pool, &ctx.session.user_id).await?;
+) -> Result<SuccessResponse, AppError> {
+    assert_share_links_entitlement(pool, user_id).await?;
 
-    let visible_link = load_visible_share_link(pool, &input.link_id, &ctx.session.user_id).await?;
+    let visible_link = load_visible_share_link(pool, &input.link_id, user_id).await?;
     let Some(visible_link) = visible_link else {
         return Err(not_found_error("Share link not found"));
     };
 
     if visible_link.actor_role == "read-only"
         || (visible_link.actor_role == "member"
-            && visible_link.link.created_by_id != ctx.session.user_id)
+            && visible_link.link.created_by_id != user_id.to_string())
     {
         return Err(forbidden_error("Access denied"));
     }
@@ -524,7 +507,7 @@ pub async fn update(
             query(
 				"INSERT INTO share_link_allowed_email (id, share_link_id, email) VALUES ($1, $2, $3)",
 			)
-			.bind(generate_share_id("share_email"))
+			.bind(generate_resource_id("share_email"))
 			.bind(&input.link_id)
 			.bind(email.to_ascii_lowercase())
 			.execute(pool)
@@ -574,27 +557,19 @@ pub async fn update(
     Ok(SuccessResponse { success: true })
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn getAccessLogs(
-    ctx: RefreshSessionContext,
+pub(crate) async fn get_share_access_logs(
+    pool: &PgPool,
+    user_id: &str,
     input: LinkIdInput,
-) -> Result<Vec<ShareAccessLogResponse>, ShareRpcError> {
-    let pool = db_pool(&ctx)?;
-    assert_share_links_entitlement(pool, &ctx.session.user_id).await?;
+) -> Result<Vec<ShareAccessLogResponse>, AppError> {
+    assert_share_links_entitlement(pool, user_id).await?;
 
-    let visible_link = load_visible_share_link(pool, &input.link_id, &ctx.session.user_id).await?;
+    let visible_link = load_visible_share_link(pool, &input.link_id, user_id).await?;
     if visible_link.is_none() {
         return Err(not_found_error("Share link not found"));
     }
 
-    let logs = query_as::<_, DbShareAccessLogRow>(
-		"SELECT id, accessed_by_email, ip_address, user_agent, success, failure_reason, accessed_at FROM share_access_log WHERE share_link_id = $1 ORDER BY accessed_at DESC LIMIT 100",
-	)
-	.bind(&input.link_id)
-	.fetch_all(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load share access logs"); internal_error("Failed to load share access logs") })?;
+    let logs = load_share_access_logs(pool, &input.link_id, 100).await?;
 
     Ok(logs
         .into_iter()
@@ -610,18 +585,11 @@ pub async fn getAccessLogs(
         .collect())
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn getPublicInfo(
-    ctx: AppContext,
+pub(crate) async fn get_public_info(
+    pool: &PgPool,
     input: PublicTokenInput,
-) -> Result<PublicShareInfoResponse, ShareRpcError> {
+) -> Result<PublicShareInfoResponse, AppError> {
     validate_public_token(&input.token)?;
-    let pool = ctx
-        .app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))?;
     let link = load_public_share_link_by_token(pool, &input.token).await?;
     let Some(link) = link else {
         return Err(not_found_error("Share link not found or invalid"));
@@ -647,18 +615,11 @@ pub async fn getPublicInfo(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn accessPublic(
-    ctx: AppContext,
+pub(crate) async fn access_public(
+    pool: &PgPool,
     input: PublicTokenInput,
-) -> Result<PublicShareAccessResponse, ShareRpcError> {
+) -> Result<PublicShareAccessResponse, AppError> {
     validate_public_token(&input.token)?;
-    let pool = ctx
-        .app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))?;
     let link = query_as::<_, DbPublicShareLinkRow>(
 		"SELECT id, created_by_id, token, status::text AS status, access_mode::text AS access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, access_count, max_access_count, expires_at FROM share_link WHERE token = $1 AND access_mode = 'anyone' LIMIT 1",
 	)
@@ -722,19 +683,12 @@ pub async fn accessPublic(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn requestEmailVerification(
-    ctx: AppContext,
+pub(crate) async fn request_email_verification(
+    pool: &PgPool,
     input: RequestEmailVerificationInput,
-) -> Result<RequestEmailVerificationResponse, ShareRpcError> {
+) -> Result<RequestEmailVerificationResponse, AppError> {
     validate_public_token(&input.token)?;
     validate_email(&input.email)?;
-    let pool = ctx
-        .app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))?;
     let details =
         load_public_share_link_details_by_token(pool, &input.token, Some("email-restricted"))
             .await?;
@@ -768,11 +722,9 @@ pub async fn requestEmailVerification(
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to count share email verification codes"); internal_error("Failed to count share email verification codes") })?;
     if total_codes >= MAX_VERIFICATION_CODES_PER_EMAIL {
-        return Err(ShareRpcError {
-            code: "TOO_MANY_REQUESTS".to_string(),
-            message: "Too many verification attempts for this email. Contact the link creator."
-                .to_string(),
-        });
+        return Err(AppError::too_many_requests(
+            "Too many verification attempts for this email. Contact the link creator.",
+        ));
     }
 
     let existing_verification = query_as::<_, DbShareEmailVerificationRow>(
@@ -787,10 +739,9 @@ pub async fn requestEmailVerification(
 
     if let Some(existing_verification) = existing_verification {
         if (now - existing_verification.created_at) < time::Duration::minutes(1) {
-            return Err(ShareRpcError {
-                code: "TOO_MANY_REQUESTS".to_string(),
-                message: "Please wait before requesting another code".to_string(),
-            });
+            return Err(AppError::too_many_requests(
+                "Please wait before requesting another code",
+            ));
         }
     }
 
@@ -799,7 +750,7 @@ pub async fn requestEmailVerification(
     query(
 		"INSERT INTO share_email_verification (id, share_link_id, email, code, expires_at) VALUES ($1, $2, $3, $4, $5)",
 	)
-	.bind(generate_share_id("share_verification"))
+	.bind(generate_resource_id("share_verification"))
 	.bind(&details.link.id)
 	.bind(&normalized_email)
 	.bind(&code)
@@ -814,23 +765,16 @@ pub async fn requestEmailVerification(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn verifyEmailAndAccess(
-    ctx: AppContext,
+pub(crate) async fn verify_email_and_access(
+    pool: &PgPool,
     input: VerifyEmailAndAccessInput,
-) -> Result<PublicShareAccessResponse, ShareRpcError> {
+) -> Result<PublicShareAccessResponse, AppError> {
     validate_public_token(&input.token)?;
     validate_email(&input.email)?;
     if input.code.len() != 6 {
         return Err(bad_request_error("Invalid or expired verification code"));
     }
 
-    let pool = ctx
-        .app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))?;
     let details = load_public_share_link_details_by_token(pool, &input.token, None).await?;
     let Some(details) = details else {
         return Err(not_found_error("Share link not found"));
@@ -948,11 +892,9 @@ pub async fn verifyEmailAndAccess(
             Some("Max verification attempts exceeded"),
         )
         .await?;
-        return Err(ShareRpcError {
-            code: "TOO_MANY_REQUESTS".to_string(),
-            message: "Maximum verification attempts exceeded. Please request a new code."
-                .to_string(),
-        });
+        return Err(AppError::too_many_requests(
+            "Maximum verification attempts exceeded. Please request a new code.",
+        ));
     }
 
     if !consume_share_link_access(pool, &details.link.id, now).await? {
@@ -999,53 +941,12 @@ pub async fn verifyEmailAndAccess(
     })
 }
 
-pub fn create_share_router() -> Router<AppState> {
-    Router::new()
-        .handler(create)
-        .handler(listByItem)
-        .handler(get)
-        .handler(revoke)
-        .handler(update)
-        .handler(getAccessLogs)
-        .handler(getPublicInfo)
-        .handler(requestEmailVerification)
-        .handler(verifyEmailAndAccess)
-        .handler(accessPublic)
-}
-
-async fn load_scoped_item_access(
-    pool: &PgPool,
-    actor_user_id: &str,
-    item_id: &str,
-) -> Result<Option<DbScopedItemAccessRow>, ShareRpcError> {
-    query_as::<_, DbScopedItemAccessRow>(
-		"SELECT i.id AS item_id, i.vault_id, vk.role::text AS role FROM item i INNER JOIN vault_key vk ON vk.vault_id = i.vault_id AND vk.user_id = $1 WHERE i.id = $2 LIMIT 1",
-	)
-	.bind(actor_user_id)
-	.bind(item_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|_| internal_error("Failed to load scoped item access"))
-}
-
-async fn load_share_links_for_item(
-    pool: &PgPool,
-    item_id: &str,
-) -> Result<Vec<DbShareLinkRow>, ShareRpcError> {
-    query_as::<_, DbShareLinkRow>(
-		"SELECT sl.id, sl.item_id, sl.created_by_id, sl.token, sl.status::text AS status, sl.access_mode::text AS access_mode, sl.is_one_time_use, sl.access_count, sl.max_access_count, sl.expires_at, sl.created_at, sl.last_accessed_at, i.vault_id FROM share_link sl INNER JOIN item i ON i.id = sl.item_id WHERE sl.item_id = $1 ORDER BY sl.created_at DESC",
-	)
-	.bind(item_id)
-	.fetch_all(pool)
-	.await
-	.map_err(|_| internal_error("Failed to load share links"))
-}
 
 async fn load_visible_share_link(
     pool: &PgPool,
     link_id: &str,
     actor_user_id: &str,
-) -> Result<Option<VisibleShareLink>, ShareRpcError> {
+) -> Result<Option<VisibleShareLink>, AppError> {
     let link = query_as::<_, DbShareLinkRow>(
 		"SELECT sl.id, sl.item_id, sl.created_by_id, sl.token, sl.status::text AS status, sl.access_mode::text AS access_mode, sl.is_one_time_use, sl.access_count, sl.max_access_count, sl.expires_at, sl.created_at, sl.last_accessed_at, i.vault_id FROM share_link sl INNER JOIN item i ON i.id = sl.item_id WHERE sl.id = $1 LIMIT 1",
 	)
@@ -1094,24 +995,11 @@ async fn load_visible_share_link(
     }))
 }
 
-async fn load_public_share_link_by_token(
-    pool: &PgPool,
-    token: &str,
-) -> Result<Option<DbPublicShareLinkRow>, ShareRpcError> {
-    query_as::<_, DbPublicShareLinkRow>(
-		"SELECT id, created_by_id, token, status::text AS status, access_mode::text AS access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, access_count, max_access_count, expires_at FROM share_link WHERE token = $1 LIMIT 1",
-	)
-	.bind(token)
-	.fetch_optional(pool)
-	.await
-	.map_err(|_| internal_error("Failed to load public share link"))
-}
-
 async fn load_public_share_link_details_by_token(
     pool: &PgPool,
     token: &str,
     required_access_mode: Option<&str>,
-) -> Result<Option<PublicShareLinkDetails>, ShareRpcError> {
+) -> Result<Option<PublicShareLinkDetails>, AppError> {
     let link = match required_access_mode {
 		Some(access_mode) => query_as::<_, DbPublicShareLinkRow>(
 			"SELECT id, created_by_id, token, status::text AS status, access_mode::text AS access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, access_count, max_access_count, expires_at FROM share_link WHERE token = $1 AND access_mode = $2::share_link_access_mode LIMIT 1",
@@ -1146,37 +1034,10 @@ async fn load_public_share_link_details_by_token(
     }))
 }
 
-async fn load_allowed_emails_for_links(
-    pool: &PgPool,
-    link_ids: &[String],
-) -> Result<HashMap<String, Vec<DbShareLinkAllowedEmailRow>>, ShareRpcError> {
-    if link_ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let rows = query_as::<_, DbShareLinkAllowedEmailRow>(
-		"SELECT id, share_link_id, email, verified, verified_at, created_at FROM share_link_allowed_email WHERE share_link_id = ANY($1) ORDER BY created_at ASC",
-	)
-	.bind(link_ids)
-	.fetch_all(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load share link allowed emails"); internal_error("Failed to load share link allowed emails") })?;
-
-    let mut grouped = HashMap::new();
-    for row in rows {
-        grouped
-            .entry(row.share_link_id.clone())
-            .or_insert_with(Vec::new)
-            .push(row);
-    }
-
-    Ok(grouped)
-}
-
 async fn assert_share_links_entitlement(
     pool: &PgPool,
     user_id: &str,
-) -> Result<ShareLinksAccess, ShareRpcError> {
+) -> Result<ShareLinksAccess, AppError> {
     let access = resolve_share_links_access(pool, user_id).await?;
     if access.enabled {
         Ok(access)
@@ -1185,14 +1046,14 @@ async fn assert_share_links_entitlement(
     }
 }
 
-async fn has_share_links_entitlement(pool: &PgPool, user_id: &str) -> Result<bool, ShareRpcError> {
+async fn has_share_links_entitlement(pool: &PgPool, user_id: &str) -> Result<bool, AppError> {
     Ok(resolve_share_links_access(pool, user_id).await?.enabled)
 }
 
 async fn resolve_share_links_access(
     pool: &PgPool,
     user_id: &str,
-) -> Result<ShareLinksAccess, ShareRpcError> {
+) -> Result<ShareLinksAccess, AppError> {
     let mode = bittery_mode();
     if mode == "self-hosted" {
         return Ok(ShareLinksAccess {
@@ -1206,7 +1067,6 @@ async fn resolve_share_links_access(
         pool,
         user_id,
         "Failed to load share link entitlements",
-        internal_error,
     )
     .await?;
 
@@ -1245,50 +1105,23 @@ async fn record_share_audit_event(
     user_id: &str,
     action: &str,
     entity_id: &str,
-) -> Result<(), ShareRpcError> {
-    query(
-		"INSERT INTO audit_log (id, user_id, action, entity_type, entity_id, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
-	)
-	.bind(generate_share_id("audit"))
-	.bind(user_id)
-	.bind(action)
-	.bind("share_link")
-	.bind(entity_id)
-	.bind(time::OffsetDateTime::now_utc())
-	.execute(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to record share audit event"); internal_error("Failed to record share audit event") })?;
-
-    Ok(())
-}
-
-async fn log_share_access(
-    pool: &PgPool,
-    share_link_id: &str,
-    email: Option<&str>,
-    success: bool,
-    failure_reason: Option<&str>,
-) -> Result<(), ShareRpcError> {
-    query(
-		"INSERT INTO share_access_log (id, share_link_id, accessed_by_email, ip_address, user_agent, success, failure_reason, accessed_at) VALUES ($1, $2, $3, NULL, NULL, $4, $5, $6)",
-	)
-	.bind(generate_share_id("share_access"))
-	.bind(share_link_id)
-	.bind(email)
-	.bind(success)
-	.bind(failure_reason)
-	.bind(time::OffsetDateTime::now_utc())
-	.execute(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to record share access log"); internal_error("Failed to record share access log") })?;
-
-    Ok(())
+) -> Result<(), AppError> {
+    insert_audit_event(
+        pool,
+        &generate_resource_id("audit"),
+        user_id,
+        action,
+        "share_link",
+        entity_id,
+        None,
+    )
+    .await
 }
 
 async fn get_public_share_state(
     pool: &PgPool,
     link: &DbPublicShareLinkRow,
-) -> Result<PublicShareState, ShareRpcError> {
+) -> Result<PublicShareState, AppError> {
     if !has_share_links_entitlement(pool, &link.created_by_id).await? {
         return Ok(PublicShareState {
             valid: false,
@@ -1322,28 +1155,10 @@ async fn get_public_share_state(
     })
 }
 
-async fn consume_share_link_access(
-    pool: &PgPool,
-    share_link_id: &str,
-    now: time::OffsetDateTime,
-) -> Result<bool, ShareRpcError> {
-    let updated_rows = query(
-		"UPDATE share_link SET access_count = access_count + 1, last_accessed_at = $2, status = CASE WHEN max_access_count IS NOT NULL AND access_count + 1 >= max_access_count THEN 'exhausted'::share_link_status ELSE status END WHERE id = $1 AND status = 'active' AND expires_at > $2 AND (max_access_count IS NULL OR access_count < max_access_count)",
-	)
-	.bind(share_link_id)
-	.bind(now)
-	.execute(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to consume share link access"); internal_error("Failed to consume share link access") })?
-	.rows_affected();
-
-    Ok(updated_rows > 0)
-}
-
 async fn check_and_increment_share_rate_limit(
     pool: &PgPool,
     user_id: &str,
-) -> Result<(), ShareRpcError> {
+) -> Result<(), AppError> {
     let namespace = "share_create_daily";
     let now = time::OffsetDateTime::now_utc();
     let window_start = start_of_local_day();
@@ -1374,43 +1189,15 @@ async fn check_and_increment_share_rate_limit(
 	.map_err(|e| { tracing::error!(error = %e, "Failed to increment share rate limit window"); internal_error("Failed to increment share rate limit window") })?;
 
     if count.flatten().is_none() {
-        return Err(ShareRpcError {
-            code: "TOO_MANY_REQUESTS".to_string(),
-            message: "Daily share link limit reached".to_string(),
-        });
+        return Err(AppError::too_many_requests(
+            "Daily share link limit reached",
+        ));
     }
 
     Ok(())
 }
 
-async fn count_active_share_links(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    team_id: Option<&str>,
-    user_id: &str,
-    now: time::OffsetDateTime,
-) -> Result<i64, ShareRpcError> {
-    let count = match team_id {
-		Some(team_id) => query_scalar::<_, i64>(
-			"SELECT COUNT(*)::bigint FROM share_link sl INNER JOIN \"user\" u ON sl.created_by_id = u.id WHERE u.team_id = $1 AND sl.status = 'active' AND sl.expires_at > $2 AND (sl.max_access_count IS NULL OR sl.access_count < sl.max_access_count)",
-		)
-		.bind(team_id)
-		.bind(now)
-		.fetch_one(&mut **transaction)
-		.await,
-		None => query_scalar::<_, i64>(
-			"SELECT COUNT(*)::bigint FROM share_link WHERE created_by_id = $1 AND status = 'active' AND expires_at > $2 AND (max_access_count IS NULL OR access_count < max_access_count)",
-		)
-		.bind(user_id)
-		.bind(now)
-		.fetch_one(&mut **transaction)
-		.await,
-	}
-	.map_err(|e| { tracing::error!(error = %e, "Failed to count active share links"); internal_error("Failed to count active share links") })?;
-
-    Ok(count)
-}
-
-fn unique_email_ids(ids: &[String]) -> Result<Vec<String>, ShareRpcError> {
+fn unique_email_ids(ids: &[String]) -> Result<Vec<String>, AppError> {
     let mut unique = Vec::new();
     for id in ids {
         if unique.iter().any(|existing| existing == id) {
@@ -1423,7 +1210,7 @@ fn unique_email_ids(ids: &[String]) -> Result<Vec<String>, ShareRpcError> {
     Ok(unique)
 }
 
-fn validate_create_share_input(input: &CreateShareLinkInput) -> Result<(), ShareRpcError> {
+fn validate_create_share_input(input: &CreateShareLinkInput) -> Result<(), AppError> {
     if input.access_mode != "anyone" && input.access_mode != "email-restricted" {
         return Err(bad_request_error("Invalid access mode"));
     }
@@ -1456,7 +1243,7 @@ fn validate_create_share_input(input: &CreateShareLinkInput) -> Result<(), Share
     Ok(())
 }
 
-fn calculate_expiration(expires_in: &str) -> Result<time::OffsetDateTime, ShareRpcError> {
+fn calculate_expiration(expires_in: &str) -> Result<time::OffsetDateTime, AppError> {
     let duration = match expires_in {
         "1hour" => time::Duration::hours(1),
         "1day" => time::Duration::days(1),
@@ -1469,7 +1256,7 @@ fn calculate_expiration(expires_in: &str) -> Result<time::OffsetDateTime, ShareR
     Ok(time::OffsetDateTime::now_utc() + duration)
 }
 
-fn validate_public_token(token: &str) -> Result<(), ShareRpcError> {
+fn validate_public_token(token: &str) -> Result<(), AppError> {
     if token.len() != 32
         || !token
             .chars()
@@ -1480,7 +1267,7 @@ fn validate_public_token(token: &str) -> Result<(), ShareRpcError> {
     Ok(())
 }
 
-fn validate_email(email: &str) -> Result<(), ShareRpcError> {
+fn validate_email(email: &str) -> Result<(), AppError> {
     if email_regex().is_match(email) {
         Ok(())
     } else {
@@ -1500,10 +1287,6 @@ fn base_share_url() -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "https://app.bittery.com".to_string());
     format!("{}/share/", web_app_url.trim_end_matches('/'))
-}
-
-fn db_pool(ctx: &RefreshSessionContext) -> Result<&PgPool, ShareRpcError> {
-    load_db_pool(&ctx.app_state, internal_error)
 }
 
 fn effective_share_link_status(link: &DbShareLinkRow, now: time::OffsetDateTime) -> String {
@@ -3240,10 +3023,6 @@ mod tests {
     }
 }
 
-fn generate_share_id(prefix: &str) -> String {
-    format!("{prefix}_{:016x}", random::<u64>())
-}
-
 fn generate_secure_token() -> String {
     const ALPHABET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     let mut rng = rand::thread_rng();
@@ -3290,55 +3069,18 @@ fn email_regex() -> &'static Regex {
     })
 }
 
-fn not_found_error(message: &str) -> ShareRpcError {
-    ShareRpcError {
-        code: "NOT_FOUND".to_string(),
-        message: message.to_string(),
-    }
+fn not_found_error(message: &str) -> AppError {
+    AppError::not_found(message)
 }
 
-fn forbidden_error(message: &str) -> ShareRpcError {
-    ShareRpcError {
-        code: "FORBIDDEN".to_string(),
-        message: message.to_string(),
-    }
+fn forbidden_error(message: &str) -> AppError {
+    AppError::forbidden(message)
 }
 
-fn bad_request_error(message: &str) -> ShareRpcError {
-    ShareRpcError {
-        code: "BAD_REQUEST".to_string(),
-        message: message.to_string(),
-    }
+fn bad_request_error(message: &str) -> AppError {
+    AppError::bad_request(message)
 }
 
-fn internal_error(message: &str) -> ShareRpcError {
-    ShareRpcError {
-        code: "INTERNAL_SERVER_ERROR".to_string(),
-        message: message.to_string(),
-    }
-}
-
-impl From<ShareRpcError> for RpcError {
-    fn from(value: ShareRpcError) -> Self {
-        let code = match value.code.as_str() {
-            "NOT_FOUND" => ErrorCode::ServerError(404),
-            "FORBIDDEN" => ErrorCode::ServerError(403),
-            "BAD_REQUEST" => ErrorCode::InvalidParams,
-            _ => ErrorCode::InternalError,
-        };
-
-        RpcError {
-            code,
-            message: value.message,
-            data: None,
-        }
-    }
-}
-
-impl IntoResponse for ShareRpcError {
-    type Output = <RpcError as IntoResponse>::Output;
-
-    fn into_response(self) -> jsonrpsee::ResponsePayload<'static, Self::Output> {
-        RpcError::from(self).into_response()
-    }
+fn internal_error(message: &str) -> AppError {
+    AppError::internal(message)
 }

@@ -10,7 +10,7 @@ use super::sql::{
     cleanup_expired_sessions, cleanup_pending_attachment_uploads, cleanup_tombstones,
     prune_sync_events,
 };
-use crate::favicon::{fetch_and_store_favicon, list_domains_to_refresh};
+use crate::integrations::favicon::{fetch_and_store_favicon, list_domains_to_refresh};
 
 type JobError = Box<dyn std::error::Error + Send + Sync>;
 type JobFuture = Pin<Box<dyn Future<Output = Result<(), JobError>> + Send>>;

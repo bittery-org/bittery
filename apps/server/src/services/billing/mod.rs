@@ -1,17 +1,11 @@
-mod stripe;
 mod webhook;
 
-use qubit::{
-    builder::IntoResponse,
-    handler,
-    server::{ErrorCode, Router, RpcError},
-};
 use serde::{Deserialize, Serialize};
-use sqlx::{query, query_as, query_scalar, PgPool};
+use sqlx::{query, query_scalar, PgPool};
 use time::OffsetDateTime;
 use ts_rs::TS;
 
-use self::stripe::{
+use crate::integrations::stripe::{
     create_billing_portal_session as stripe_create_billing_portal_session_impl,
     create_checkout_session as stripe_create_checkout_session_impl,
     create_customer as stripe_create_customer_impl,
@@ -23,10 +17,13 @@ pub(crate) use self::webhook::{
     is_self_hosted_mode, is_stripe_webhook_configured, process_stripe_webhook_event,
 };
 use crate::{
-    auth::RefreshSessionContext,
     db::models::{DbBillingActorRow, DbBillingContactRow},
-    server_support::{bittery_mode, db_pool as load_db_pool, format_timestamp},
-    AppState,
+    error::AppError,
+    repo::billing::{
+        count_team_members, get_committed_attachment_storage_bytes, load_billing_actor,
+        load_billing_contact, load_optional_billing_state,
+    },
+    config::{bittery_mode, format_timestamp},
 };
 
 const MB: i64 = 1024 * 1024;
@@ -147,26 +144,21 @@ pub struct TeamSeatInvoicePreviewResponse {
     pub lines: Vec<TeamSeatInvoicePreviewLineResponse>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
-pub struct BillingRpcError {
-    pub code: String,
-    pub message: String,
-}
 
 struct BillingSnapshot {
     entitlements: BillingEntitlements,
     limits: EntitlementLimits,
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn status(ctx: RefreshSessionContext) -> Result<BillingStatusResponse, BillingRpcError> {
+pub(crate) async fn get_billing_status(
+    pool: &PgPool,
+    user_id: &str,
+) -> Result<BillingStatusResponse, AppError> {
     if bittery_mode() == "self-hosted" {
         return Ok(self_hosted_billing_status());
     }
 
-    let pool = load_db_pool(&ctx.app_state, internal_error)?;
-    let actor = load_billing_actor(pool, &ctx.session.user_id).await?;
+    let actor = load_billing_actor(pool, user_id).await?;
     actor
         .team_id
         .clone()
@@ -190,15 +182,14 @@ pub async fn status(ctx: RefreshSessionContext) -> Result<BillingStatusResponse,
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn entitlements(
-    ctx: RefreshSessionContext,
-) -> Result<BillingEntitlementsResponse, BillingRpcError> {
+pub(crate) async fn get_billing_entitlements(
+    db_pool: Option<&PgPool>,
+    user_id: &str,
+) -> Result<BillingEntitlementsResponse, AppError> {
     let mode = bittery_mode().to_string();
     if mode == "self-hosted" {
-        let state = match ctx.app_state.db_pool.as_ref() {
-            Some(pool) => load_optional_billing_state(pool, &ctx.session.user_id).await?,
+        let state = match db_pool {
+            Some(pool) => load_optional_billing_state(pool, user_id).await?,
             None => None,
         };
         let plan = state
@@ -220,9 +211,8 @@ pub async fn entitlements(
             limits: snapshot.limits,
         });
     }
-
-    let pool = load_db_pool(&ctx.app_state, internal_error)?;
-    let actor = load_billing_actor(pool, &ctx.session.user_id).await?;
+    let pool = db_pool.ok_or_else(|| internal_error("Database is not configured"))?;
+    let actor = load_billing_actor(pool, user_id).await?;
     actor
         .team_id
         .clone()
@@ -240,11 +230,10 @@ pub async fn entitlements(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn attachmentUsage(
-    ctx: RefreshSessionContext,
-) -> Result<AttachmentUsageResponse, BillingRpcError> {
+pub(crate) async fn get_attachment_usage(
+    pool: &PgPool,
+    user_id: &str,
+) -> Result<AttachmentUsageResponse, AppError> {
     let mode = bittery_mode().to_string();
     if mode == "self-hosted" {
         return Ok(AttachmentUsageResponse {
@@ -254,9 +243,7 @@ pub async fn attachmentUsage(
             committed_storage_bytes: 0,
         });
     }
-
-    let pool = load_db_pool(&ctx.app_state, internal_error)?;
-    let actor = load_billing_actor(pool, &ctx.session.user_id).await?;
+    let actor = load_billing_actor(pool, user_id).await?;
     let team_id = actor
         .team_id
         .clone()
@@ -272,16 +259,13 @@ pub async fn attachmentUsage(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn createCheckoutSession(
-    ctx: RefreshSessionContext,
+pub(crate) async fn create_checkout_session(
+    pool: &PgPool,
+    user_id: &str,
     input: CheckoutPlanInput,
-) -> Result<CheckoutSessionResponse, BillingRpcError> {
+) -> Result<CheckoutSessionResponse, AppError> {
     assert_cloud_billing_enabled()?;
-
-    let pool = load_db_pool(&ctx.app_state, internal_error)?;
-    let actor = load_billing_actor(pool, &ctx.session.user_id).await?;
+    let actor = load_billing_actor(pool, user_id).await?;
     let team_id = actor
         .team_id
         .clone()
@@ -319,7 +303,7 @@ pub async fn createCheckoutSession(
     let base_url = web_app_url().trim_end_matches('/').to_string();
     let checkout = stripe_create_checkout_session(CheckoutSessionInput {
         team_id: &team_id,
-        user_id: &ctx.session.user_id,
+        user_id: user_id,
         customer_id: customer_id.as_deref(),
         customer_email: &actor.email,
         plan: &target_plan,
@@ -329,7 +313,7 @@ pub async fn createCheckoutSession(
         cancel_url: format!("{base_url}/billing?checkout=cancel"),
     })
     .await
-    .map_err(|error| internal_error(&error.to_string()))?;
+    .map_err(|error| { tracing::error!(error = %error, "Internal error"); internal_error("An internal error occurred") })?;
 
     let redirect_url = checkout
         .url
@@ -351,15 +335,12 @@ pub async fn createCheckoutSession(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn createPortalSession(
-    ctx: RefreshSessionContext,
-) -> Result<PortalSessionResponse, BillingRpcError> {
+pub(crate) async fn create_portal_session(
+    pool: &PgPool,
+    user_id: &str,
+) -> Result<PortalSessionResponse, AppError> {
     assert_cloud_billing_enabled()?;
-
-    let pool = load_db_pool(&ctx.app_state, internal_error)?;
-    let actor = load_billing_actor(pool, &ctx.session.user_id).await?;
+    let actor = load_billing_actor(pool, user_id).await?;
     let team = ensure_team_billing(actor.clone())?;
     ensure_billing_admin(&actor.role)?;
 
@@ -378,21 +359,18 @@ pub async fn createPortalSession(
     let url =
         stripe_create_billing_portal_session(stripe_customer_id, &format!("{base_url}/billing"))
             .await
-            .map_err(|error| internal_error(&error.to_string()))?;
+            .map_err(|error| { tracing::error!(error = %error, "Internal error"); internal_error("An internal error occurred") })?;
 
     Ok(PortalSessionResponse { url })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn syncSeats(
-    ctx: RefreshSessionContext,
+pub(crate) async fn sync_seats(
+    pool: &PgPool,
+    user_id: &str,
     input: SyncSeatsInput,
-) -> Result<SyncSeatsResponse, BillingRpcError> {
+) -> Result<SyncSeatsResponse, AppError> {
     assert_cloud_billing_enabled()?;
-
-    let pool = load_db_pool(&ctx.app_state, internal_error)?;
-    let actor = load_billing_actor(pool, &ctx.session.user_id).await?;
+    let actor = load_billing_actor(pool, user_id).await?;
     let team_id = actor
         .team_id
         .clone()
@@ -426,7 +404,7 @@ pub async fn syncSeats(
     let quantity = count_team_members(pool, &target_team_id).await?.max(1);
     stripe_update_subscription_item_quantity(subscription_item_id, quantity)
         .await
-        .map_err(|error| internal_error(&error.to_string()))?;
+        .map_err(|error| { tracing::error!(error = %error, "Internal error"); internal_error("An internal error occurred") })?;
 
     query("UPDATE team SET seats_purchased = $1, updated_at = $2 WHERE id = $3")
         .bind(quantity as i32)
@@ -482,19 +460,13 @@ pub(crate) async fn sync_team_seats_best_effort(pool: &PgPool, team_id: &str, bi
         .await;
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn previewAdditionalTeamSeat(
-    ctx: RefreshSessionContext,
-) -> Result<Option<TeamSeatInvoicePreviewResponse>, BillingRpcError> {
+pub(crate) async fn preview_additional_team_seat(
+    pool: &PgPool,
+    user_id: &str,
+) -> Result<Option<TeamSeatInvoicePreviewResponse>, AppError> {
     assert_cloud_billing_enabled()?;
 
-    let pool = ctx
-        .app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))?;
-    let actor = load_billing_actor(pool, &ctx.session.user_id).await?;
+    let actor = load_billing_actor(pool, user_id).await?;
     ensure_billing_admin(&actor.role)?;
     let team = ensure_team_billing(actor)?;
 
@@ -540,16 +512,7 @@ pub async fn previewAdditionalTeamSeat(
     }
 }
 
-pub fn create_billing_router() -> Router<AppState> {
-    Router::new()
-        .handler(status)
-        .handler(entitlements)
-        .handler(attachmentUsage)
-        .handler(createCheckoutSession)
-        .handler(createPortalSession)
-        .handler(syncSeats)
-        .handler(previewAdditionalTeamSeat)
-}
+
 
 async fn stripe_create_customer(
     email: &str,
@@ -718,7 +681,7 @@ impl Default for StripeMockState {
                     next_quantity: 4,
                     estimated_next_payment_cents: 750,
                     total_line_items_cents: 750,
-                    lines: vec![stripe::TeamSeatInvoicePreviewLine {
+                    lines: vec![crate::integrations::stripe::TeamSeatInvoicePreviewLine {
                         id: "il_preview_123".to_string(),
                         description: "Additional team seat".to_string(),
                         amount_cents: 750,
@@ -900,34 +863,7 @@ struct TeamBillingState {
     seats_purchased: Option<i32>,
 }
 
-async fn load_billing_actor(
-    pool: &PgPool,
-    user_id: &str,
-) -> Result<DbBillingActorRow, BillingRpcError> {
-    query_as::<_, DbBillingActorRow>(
-		"SELECT u.id AS user_id, u.team_id, u.role::text AS role, u.email, u.name, t.owner_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status, t.stripe_customer_id, t.stripe_subscription_id, t.stripe_subscription_item_id, t.stripe_price_id, t.current_period_end, t.cancel_at_period_end, t.seats_purchased FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
-	)
-	.bind(user_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load billing actor"); internal_error("Failed to load billing actor") })?
-	.ok_or_else(|| not_found_error("Team not found"))
-}
-
-async fn load_optional_billing_state(
-    pool: &PgPool,
-    user_id: &str,
-) -> Result<Option<DbBillingActorRow>, BillingRpcError> {
-    query_as::<_, DbBillingActorRow>(
-		"SELECT u.id AS user_id, u.team_id, u.role::text AS role, u.email, u.name, t.owner_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status, t.stripe_customer_id, t.stripe_subscription_id, t.stripe_subscription_item_id, t.stripe_price_id, t.current_period_end, t.cancel_at_period_end, t.seats_purchased FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
-	)
-	.bind(user_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|_| internal_error("Failed to load billing actor"))
-}
-
-fn ensure_team_billing(actor: DbBillingActorRow) -> Result<TeamBillingState, BillingRpcError> {
+fn ensure_team_billing(actor: DbBillingActorRow) -> Result<TeamBillingState, AppError> {
     Ok(TeamBillingState {
         billing_plan: actor
             .billing_plan
@@ -949,7 +885,7 @@ async fn ensure_team_stripe_customer(
     pool: &PgPool,
     actor: &DbBillingActorRow,
     team_id: &str,
-) -> Result<Option<String>, BillingRpcError> {
+) -> Result<Option<String>, AppError> {
     if let Some(customer_id) = actor.stripe_customer_id.clone() {
         return Ok(Some(customer_id));
     }
@@ -979,7 +915,7 @@ async fn ensure_team_stripe_customer(
         &billing_contact.id,
     )
     .await
-    .map_err(|error| internal_error(&error.to_string()))?;
+    .map_err(|error| { tracing::error!(error = %error, "Internal error"); internal_error("An internal error occurred") })?;
 
     query("UPDATE team SET stripe_customer_id = $1, updated_at = $2 WHERE id = $3")
         .bind(&customer_id)
@@ -993,42 +929,6 @@ async fn ensure_team_stripe_customer(
         })?;
 
     Ok(Some(customer_id))
-}
-
-async fn load_billing_contact(
-    pool: &PgPool,
-    user_id: &str,
-    team_id: &str,
-) -> Result<Option<DbBillingContactRow>, BillingRpcError> {
-    query_as::<_, DbBillingContactRow>(
-        "SELECT id, email, name FROM \"user\" WHERE id = $1 AND team_id = $2 LIMIT 1",
-    )
-    .bind(user_id)
-    .bind(team_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|_| internal_error("Failed to load billing contact"))
-}
-
-async fn count_team_members(pool: &PgPool, team_id: &str) -> Result<i64, BillingRpcError> {
-    query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM \"user\" WHERE team_id = $1")
-        .bind(team_id)
-        .fetch_one(pool)
-        .await
-        .map_err(|_| internal_error("Failed to count team members"))
-}
-
-async fn get_committed_attachment_storage_bytes(
-    pool: &PgPool,
-    team_id: &str,
-) -> Result<i64, BillingRpcError> {
-    query_scalar::<_, i64>(
-		"SELECT COALESCE(SUM(ia.storage_size), 0)::bigint AS total FROM item_attachment ia INNER JOIN \"user\" u ON ia.uploaded_by = u.id WHERE u.team_id = $1",
-	)
-	.bind(team_id)
-	.fetch_one(pool)
-	.await
-	.map_err(|_| internal_error("Failed to load attachment usage"))
 }
 
 fn get_billing_snapshot(mode: &str, billing_plan: &str, billing_status: &str) -> BillingSnapshot {
@@ -1158,7 +1058,7 @@ fn self_hosted_billing_status() -> BillingStatusResponse {
     }
 }
 
-fn assert_cloud_billing_enabled() -> Result<(), BillingRpcError> {
+fn assert_cloud_billing_enabled() -> Result<(), AppError> {
     if bittery_mode() == "self-hosted" {
         return Err(forbidden_error("Billing is disabled in self-hosted mode"));
     }
@@ -1174,7 +1074,7 @@ fn is_billing_active(billing_status: &str) -> bool {
     matches!(billing_status, "active" | "trialing")
 }
 
-fn ensure_billing_admin(role: &str) -> Result<(), BillingRpcError> {
+fn ensure_billing_admin(role: &str) -> Result<(), AppError> {
     if role == "owner" || role == "admin" {
         Ok(())
     } else {
@@ -1221,57 +1121,20 @@ fn web_app_url() -> String {
         .unwrap_or_else(|| "http://localhost:3001".to_string())
 }
 
-fn forbidden_error(message: &str) -> BillingRpcError {
-    BillingRpcError {
-        code: "FORBIDDEN".to_string(),
-        message: message.to_string(),
-    }
+fn forbidden_error(message: &str) -> AppError {
+    AppError::forbidden(message)
 }
 
-fn bad_request_error(message: &str) -> BillingRpcError {
-    BillingRpcError {
-        code: "BAD_REQUEST".to_string(),
-        message: message.to_string(),
-    }
+fn bad_request_error(message: &str) -> AppError {
+    AppError::bad_request(message)
 }
 
-fn not_found_error(message: &str) -> BillingRpcError {
-    BillingRpcError {
-        code: "NOT_FOUND".to_string(),
-        message: message.to_string(),
-    }
+fn not_found_error(message: &str) -> AppError {
+    AppError::not_found(message)
 }
 
-fn internal_error(message: &str) -> BillingRpcError {
-    BillingRpcError {
-        code: "INTERNAL_SERVER_ERROR".to_string(),
-        message: message.to_string(),
-    }
-}
-
-impl From<BillingRpcError> for RpcError {
-    fn from(value: BillingRpcError) -> Self {
-        let code = match value.code.as_str() {
-            "NOT_FOUND" => ErrorCode::ServerError(404),
-            "FORBIDDEN" => ErrorCode::ServerError(403),
-            "BAD_REQUEST" => ErrorCode::InvalidParams,
-            _ => ErrorCode::InternalError,
-        };
-
-        RpcError {
-            code,
-            message: value.message,
-            data: None,
-        }
-    }
-}
-
-impl IntoResponse for BillingRpcError {
-    type Output = <RpcError as IntoResponse>::Output;
-
-    fn into_response(self) -> jsonrpsee::ResponsePayload<'static, Self::Output> {
-        RpcError::from(self).into_response()
-    }
+fn internal_error(message: &str) -> AppError {
+    AppError::internal(message)
 }
 
 #[cfg(test)]

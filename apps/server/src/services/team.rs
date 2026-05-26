@@ -1,11 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use qubit::{
-    builder::IntoResponse,
-    handler,
-    server::{ErrorCode, Router, RpcError},
-};
-use rand::random;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{query, query_as, query_scalar, PgPool, Postgres, Transaction};
@@ -13,23 +7,21 @@ use time::OffsetDateTime;
 use ts_rs::TS;
 
 use crate::{
-    auth::{AppContext, RefreshSessionContext},
-    billing::sync_team_seats_best_effort,
+    services::billing::sync_team_seats_best_effort,
     db::models::*,
-    server_support::{bittery_mode, db_pool as load_db_pool, format_timestamp},
-    session_control::{load_user_session_ids, record_session_revocations},
-    team_billing::team_management_enabled as shared_team_management_enabled,
-    storage, AppState,
+    error::AppError,
+    repo::{
+        common::{generate_resource_id, insert_audit_event, insert_sync_event},
+        team::load_team_membership_actor,
+    },
+    config::{bittery_mode, format_timestamp},
+    services::session_control::{load_user_session_ids, record_session_revocations},
+    services::team_billing::team_management_enabled as shared_team_management_enabled,
+    integrations::storage,
 };
 
 const TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE: &str =
     "Team management is only available on Family or Team plans with active billing.";
-
-#[derive(Debug, Clone, Serialize, TS)]
-pub struct TeamRpcError {
-    pub code: String,
-    pub message: String,
-}
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -313,15 +305,12 @@ pub struct PendingVaultKeyEntry {
     pub encrypted_vault_key: String,
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn getByToken(
-    ctx: AppContext,
+pub(crate) async fn get_invitation_by_token(
+    pool: &PgPool,
     input: TokenInput,
-) -> Result<TeamInvitationDetailsResponse, TeamRpcError> {
+) -> Result<TeamInvitationDetailsResponse, AppError> {
     validate_token(&input.token)?;
 
-    let pool = db_pool(&ctx.app_state)?;
     let invitation = query_as::<_, DbTeamInvitationDetailsRow>(
 		"SELECT ti.id, ti.email, ti.team_id, t.name AS team_name, ti.role::text AS role, ti.status::text AS status, invited_by.name AS invited_by_name, ti.expires_at, ti.created_at FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id INNER JOIN \"user\" invited_by ON ti.invited_by_id = invited_by.id WHERE ti.token = $1 LIMIT 1",
 	)
@@ -351,15 +340,11 @@ pub async fn getByToken(
 }
 
 #[allow(non_snake_case)]
-#[handler(query)]
-pub async fn pending(
-    ctx: RefreshSessionContext,
-) -> Result<Vec<PendingTeamInvitationResponse>, TeamRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+pub(crate) async fn get_pending_invitations(pool: &PgPool, user_id: &str) -> Result<Vec<PendingTeamInvitationResponse>, AppError> {
     let current_user = query_as::<_, DbTeamUserRow>(
         "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
     )
-    .bind(&ctx.session.user_id)
+    .bind(user_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| {
@@ -391,14 +376,11 @@ pub async fn pending(
         .collect())
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn list(ctx: RefreshSessionContext) -> Result<TeamSummaryResponse, TeamRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+pub(crate) async fn list_teams(pool: &PgPool, user_id: &str) -> Result<TeamSummaryResponse, AppError> {
     let team = query_as::<_, DbTeamSummaryRow>(
 		"SELECT t.id, t.name, t.type::text AS team_type, t.owner_id, u.role::text AS role, (SELECT COUNT(*)::bigint FROM \"user\" member WHERE member.team_id = t.id) AS member_count, t.member_limit, t.image_key, t.created_at FROM \"user\" u INNER JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
 	)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.fetch_optional(pool)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load team"); internal_error("Failed to load team") })?
@@ -417,17 +399,15 @@ pub async fn list(ctx: RefreshSessionContext) -> Result<TeamSummaryResponse, Tea
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn get(
-    ctx: RefreshSessionContext,
+pub(crate) async fn get_team(
+    pool: &PgPool,
+    user_id: &str,
     input: TeamIdInput,
-) -> Result<TeamDetailsResponse, TeamRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+) -> Result<TeamDetailsResponse, AppError> {
     let current_user = query_as::<_, DbTeamUserRow>(
         "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
     )
-    .bind(&ctx.session.user_id)
+    .bind(user_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| {
@@ -445,7 +425,7 @@ pub async fn get(
     let team = query_as::<_, DbTeamDetailsRow>(
 		"SELECT t.id, t.name, t.type::text AS team_type, t.owner_id, owner.name AS owner_name, u.role::text AS user_role, (SELECT COUNT(*)::bigint FROM \"user\" member WHERE member.team_id = t.id) AS member_count, t.member_limit, t.image_key, t.created_at, t.updated_at FROM team t INNER JOIN \"user\" owner ON t.owner_id = owner.id INNER JOIN \"user\" u ON u.id = $1 WHERE t.id = $2 LIMIT 1",
 	)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.bind(&input.team_id)
 	.fetch_optional(pool)
 	.await
@@ -467,14 +447,12 @@ pub async fn get(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn vaults(
-    ctx: RefreshSessionContext,
+pub(crate) async fn get_team_vaults(
+    pool: &PgPool,
+    user_id: &str,
     input: TeamIdInput,
-) -> Result<Vec<TeamVaultResponse>, TeamRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
-    let actor = load_team_membership_actor(pool, &ctx.session.user_id).await?;
+) -> Result<Vec<TeamVaultResponse>, AppError> {
+    let actor = load_team_membership_actor(pool, user_id).await?;
     if actor
         .as_ref()
         .and_then(|value| value.team_id.as_ref())
@@ -509,7 +487,7 @@ pub async fn vaults(
     let user_vault_keys = query_as::<_, DbUserVaultKeyRow>(
 		"SELECT vault_id, encrypted_vault_key FROM vault_key WHERE user_id = $1 AND vault_id = ANY($2)",
 	)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.bind(&team_vault_ids)
 	.fetch_all(pool)
 	.await
@@ -531,27 +509,25 @@ pub async fn vaults(
 }
 
 #[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn create(
-    _ctx: RefreshSessionContext,
+pub(crate) async fn create_team(
+    _pool: &PgPool,
+    _user_id: &str,
     _input: CreateTeamInput,
-) -> Result<SuccessResponse, TeamRpcError> {
+) -> Result<SuccessResponse, AppError> {
     Err(bad_request_error(
         "Teams are automatically created on signup. Contact support to upgrade your team type.",
     ))
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn update(
-    ctx: RefreshSessionContext,
+pub(crate) async fn update_team(
+    pool: &PgPool,
+    user_id: &str,
     input: UpdateTeamInput,
-) -> Result<SuccessResponse, TeamRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+) -> Result<SuccessResponse, AppError> {
     let current_user = query_as::<_, DbTeamUserRow>(
         "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
     )
-    .bind(&ctx.session.user_id)
+    .bind(user_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| {
@@ -625,21 +601,19 @@ pub async fn update(
     Ok(SuccessResponse { success: true })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn createImageUpload(
-    ctx: RefreshSessionContext,
+pub(crate) async fn create_team_image_upload(
+    pool: &PgPool,
+    user_id: &str,
     input: CreateImageUploadInput,
-) -> Result<storage::PresignedUploadResult, TeamRpcError> {
+) -> Result<storage::PresignedUploadResult, AppError> {
     if !input.content_type.starts_with("image/") {
         return Err(bad_request_error("Only image files are allowed"));
     }
 
-    let pool = db_pool(&ctx.app_state)?;
     let current_user = query_as::<_, DbTeamUserRow>(
         "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
     )
-    .bind(&ctx.session.user_id)
+    .bind(user_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| {
@@ -661,26 +635,24 @@ pub async fn createImageUpload(
     let key = storage::create_team_image_key(&input.team_id, &input.file_name);
     storage::create_presigned_upload(&key, &input.content_type, None, None)
         .await
-        .map_err(|error| internal_error(&error.to_string()))
+        .map_err(|error| { tracing::error!(error = %error, "Internal error"); internal_error("An internal error occurred") })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn delete(
-    ctx: RefreshSessionContext,
+pub(crate) async fn delete_team(
+    pool: &PgPool,
+    user_id: &str,
     input: TeamIdInput,
-) -> Result<SuccessResponse, TeamRpcError> {
+) -> Result<SuccessResponse, AppError> {
     if bittery_mode() == "self-hosted" {
         return Err(bad_request_error(
             "Team deletion is disabled in self-hosted mode. This instance uses a single team.",
         ));
     }
 
-    let pool = db_pool(&ctx.app_state)?;
     let actor = query_as::<_, DbDeleteTeamActorRow>(
 		"SELECT u.id AS user_id, u.name AS user_name, u.team_id, u.role::text AS role, t.type::text AS team_type FROM \"user\" u INNER JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
 	)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.fetch_optional(pool)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load team actor"); internal_error("Failed to load team actor") })?;
@@ -707,7 +679,7 @@ pub async fn delete(
     let actor = query_as::<_, DbDeleteTeamActorRow>(
 		"SELECT u.id AS user_id, u.name AS user_name, u.team_id, u.role::text AS role, t.type::text AS team_type FROM \"user\" u INNER JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
 	)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.fetch_optional(&mut *transaction)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to reload team actor"); internal_error("Failed to reload team actor") })?;
@@ -748,7 +720,7 @@ pub async fn delete(
         ));
     }
 
-    create_personal_team_for_user(&mut transaction, &ctx.session.user_id, &actor.user_name).await?;
+    create_personal_team_for_user(&mut transaction, user_id, &actor.user_name).await?;
     query("DELETE FROM team_invitation WHERE team_id = $1")
         .bind(&input.team_id)
         .execute(&mut *transaction)
@@ -774,19 +746,18 @@ pub async fn delete(
     Ok(SuccessResponse { success: true })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn leave(
-    ctx: RefreshSessionContext,
+pub(crate) async fn leave_team(
+    pool: &PgPool,
+    user_id: &str,
+    request_client_id: Option<&str>,
     input: LeaveTeamInput,
-) -> Result<SuccessResponse, TeamRpcError> {
+) -> Result<SuccessResponse, AppError> {
     validate_rotation_vault_inputs(&input.vault_rotations)?;
 
-    let pool = db_pool(&ctx.app_state)?;
     let actor = query_as::<_, DbDeleteTeamActorRow>(
 		"SELECT u.id AS user_id, u.name AS user_name, u.team_id, u.role::text AS role, t.type::text AS team_type FROM \"user\" u INNER JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
 	)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.fetch_optional(pool)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load team membership"); internal_error("Failed to load team membership") })?
@@ -803,7 +774,7 @@ pub async fn leave(
         return Err(bad_request_error("You cannot leave a personal team."));
     }
     let team_vaults =
-        load_team_vaults_with_user_access(pool, &input.team_id, &ctx.session.user_id).await?;
+        load_team_vaults_with_user_access(pool, &input.team_id, user_id).await?;
     let accessible_vault_ids: HashSet<String> =
         team_vaults.iter().map(|vault| vault.id.clone()).collect();
     ensure_exact_rotation_vault_set(
@@ -819,8 +790,8 @@ pub async fn leave(
         pool,
         &input.vault_rotations,
         &team_vault_map,
-        &ctx.session.user_id,
-        &ctx.session.user_id,
+        user_id,
+        user_id,
     )
     .await?;
     let rotation_record_map: HashMap<String, TeamVaultRotationRecordInternal> = rotation_records
@@ -828,7 +799,7 @@ pub async fn leave(
         .cloned()
         .map(|record| (record.vault_id.clone(), record))
         .collect();
-    let member_actor = load_team_membership_actor(pool, &ctx.session.user_id)
+    let member_actor = load_team_membership_actor(pool, user_id)
         .await?
         .ok_or_else(|| forbidden_error("You are not a member of this team"))?;
     let billing_plan = member_actor
@@ -844,22 +815,22 @@ pub async fn leave(
             &mut transaction,
             &input.vault_rotations,
             &rotation_record_map,
-            &ctx.session.user_id,
-            &ctx.session.user_id,
+            user_id,
+            user_id,
             input
                 .client_id
                 .as_deref()
-                .or(ctx.request.client_id.as_deref()),
+                .or(request_client_id),
             "member_left",
         )
         .await?;
-        create_personal_team_for_user(&mut transaction, &ctx.session.user_id, &actor.user_name)
+        create_personal_team_for_user(&mut transaction, user_id, &actor.user_name)
             .await?;
         transaction.commit().await.map_err(|e| {
             tracing::error!(error = %e, "Failed to commit leave-team transaction");
             internal_error("Failed to commit leave-team transaction")
         })?;
-        Ok::<(), TeamRpcError>(())
+        Ok::<(), AppError>(())
     }
     .await;
 
@@ -870,14 +841,14 @@ pub async fn leave(
         ));
     }
 
-    let revoked_session_ids = load_user_session_ids(pool, &ctx.session.user_id)
+    let revoked_session_ids = load_user_session_ids(pool, user_id)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to load sessions after leaving team");
             internal_error("Failed to load sessions after leaving team")
         })?;
     query("DELETE FROM session WHERE user_id = $1")
-        .bind(&ctx.session.user_id)
+        .bind(user_id)
         .execute(pool)
         .await
         .map_err(|e| {
@@ -886,7 +857,7 @@ pub async fn leave(
         })?;
     record_session_revocations(
         pool,
-        &ctx.session.user_id,
+        user_id,
         &revoked_session_ids,
         "team_left",
     )
@@ -897,7 +868,7 @@ pub async fn leave(
     })?;
     insert_team_member_audit_log(
         pool,
-        &ctx.session.user_id,
+        user_id,
         "team_member_removed",
         json!({
             "teamId": input.team_id,
@@ -911,17 +882,15 @@ pub async fn leave(
     Ok(SuccessResponse { success: true })
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn getLeaveRotationData(
-    ctx: RefreshSessionContext,
+pub(crate) async fn get_leave_rotation_data(
+    pool: &PgPool,
+    user_id: &str,
     input: TeamIdInput,
-) -> Result<RotationDataResponse, TeamRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+) -> Result<RotationDataResponse, AppError> {
     let current_user = query_as::<_, DbTeamUserRow>(
         "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
     )
-    .bind(&ctx.session.user_id)
+    .bind(user_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| {
@@ -937,22 +906,20 @@ pub async fn getLeaveRotationData(
     }
 
     let team_vaults =
-        load_team_vaults_with_user_access(pool, &input.team_id, &ctx.session.user_id).await?;
-    let rotation_vaults = load_rotation_vault_data(pool, team_vaults, &ctx.session.user_id).await?;
+        load_team_vaults_with_user_access(pool, &input.team_id, user_id).await?;
+    let rotation_vaults = load_rotation_vault_data(pool, team_vaults, user_id).await?;
 
     Ok(RotationDataResponse {
         vaults: rotation_vaults,
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn send(
-    ctx: RefreshSessionContext,
+pub(crate) async fn send_invitation(
+    pool: &PgPool,
+    user_id: &str,
     input: SendInvitationInput,
-) -> Result<SendInvitationResponse, TeamRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
-    let actor = load_team_membership_actor(pool, &ctx.session.user_id).await?;
+) -> Result<SendInvitationResponse, AppError> {
+    let actor = load_team_membership_actor(pool, user_id).await?;
     if actor
         .as_ref()
         .and_then(|value| value.team_id.as_ref())
@@ -1033,7 +1000,7 @@ pub async fn send(
     assert_invitation_pending_vault_keys_are_authorized(
         pool,
         &input.team_id,
-        &ctx.session.user_id,
+        user_id,
         &pending_vault_keys,
     )
     .await?;
@@ -1057,7 +1024,7 @@ pub async fn send(
 	.bind(&input.team_id)
 	.bind(&input.email)
 	.bind(&input.role)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.bind(&token)
 	.bind(serialized_pending_vault_keys)
 	.bind(expires_at)
@@ -1072,15 +1039,13 @@ pub async fn send(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn accept(
-    ctx: RefreshSessionContext,
+pub(crate) async fn accept_invitation(
+    pool: &PgPool,
+    user_id: &str,
     input: TokenInput,
-) -> Result<AcceptInvitationResponse, TeamRpcError> {
+) -> Result<AcceptInvitationResponse, AppError> {
     validate_token(&input.token)?;
 
-    let pool = db_pool(&ctx.app_state)?;
     let invitation = query_as::<_, DbTeamInvitationAcceptRow>(
 		"SELECT ti.id, ti.team_id, t.name AS team_name, ti.email, ti.role::text AS role, ti.invited_by_id, ti.expires_at, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status, ti.pending_vault_keys FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id WHERE ti.token = $1 AND ti.status = 'pending' LIMIT 1",
 	)
@@ -1108,7 +1073,7 @@ pub async fn accept(
     let current_user = query_as::<_, DbTeamUserRow>(
         "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
     )
-    .bind(&ctx.session.user_id)
+    .bind(user_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| {
@@ -1148,7 +1113,7 @@ pub async fn accept(
     query("UPDATE \"user\" SET team_id = $1, role = $2::team_role WHERE id = $3")
         .bind(&invitation.team_id)
         .bind(&invitation.role)
-        .bind(&ctx.session.user_id)
+        .bind(user_id)
         .execute(&mut *transaction)
         .await
         .map_err(|e| {
@@ -1161,7 +1126,7 @@ pub async fn accept(
             "SELECT EXISTS(SELECT 1 FROM vault_key WHERE vault_id = $1 AND user_id = $2)",
         )
         .bind(&pending_key.vault_id)
-        .bind(&ctx.session.user_id)
+        .bind(user_id)
         .fetch_one(&mut *transaction)
         .await
         .map_err(|e| {
@@ -1175,7 +1140,7 @@ pub async fn accept(
 			)
 			.bind(generate_resource_id("vault_key"))
 			.bind(&pending_key.vault_id)
-			.bind(&ctx.session.user_id)
+			.bind(user_id)
 			.bind(&pending_key.encrypted_vault_key)
 			.bind(vault_role)
 			.execute(&mut *transaction)
@@ -1207,15 +1172,13 @@ pub async fn accept(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn decline(
-    ctx: RefreshSessionContext,
+pub(crate) async fn decline_invitation(
+    pool: &PgPool,
+    user_id: &str,
     input: TokenInput,
-) -> Result<SuccessResponse, TeamRpcError> {
+) -> Result<SuccessResponse, AppError> {
     validate_token(&input.token)?;
 
-    let pool = db_pool(&ctx.app_state)?;
     let invitation = query_as::<_, DbTeamInvitationAcceptRow>(
 		"SELECT ti.id, ti.team_id, t.name AS team_name, ti.email, ti.role::text AS role, ti.invited_by_id, ti.expires_at, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status, ti.pending_vault_keys FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id WHERE ti.token = $1 AND ti.status = 'pending' LIMIT 1",
 	)
@@ -1228,7 +1191,7 @@ pub async fn decline(
     let current_user = query_as::<_, DbTeamUserRow>(
         "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
     )
-    .bind(&ctx.session.user_id)
+    .bind(user_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| {
@@ -1253,13 +1216,11 @@ pub async fn decline(
     Ok(SuccessResponse { success: true })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn cancel(
-    ctx: RefreshSessionContext,
+pub(crate) async fn cancel_invitation(
+    pool: &PgPool,
+    user_id: &str,
     input: InvitationIdInput,
-) -> Result<SuccessResponse, TeamRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+) -> Result<SuccessResponse, AppError> {
     let invitation = query_as::<_, DbManageTeamInvitationRow>(
 		"SELECT ti.id, ti.team_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id WHERE ti.id = $1 LIMIT 1",
 	)
@@ -1269,7 +1230,7 @@ pub async fn cancel(
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); internal_error("Failed to load invitation") })?
 	.ok_or_else(|| not_found_error("Invitation not found"))?;
 
-    let actor = load_team_membership_actor(pool, &ctx.session.user_id).await?;
+    let actor = load_team_membership_actor(pool, user_id).await?;
     let is_admin_or_owner = actor
         .as_ref()
         .map(|value| {
@@ -1295,13 +1256,11 @@ pub async fn cancel(
     Ok(SuccessResponse { success: true })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn resend(
-    ctx: RefreshSessionContext,
+pub(crate) async fn resend_invitation(
+    pool: &PgPool,
+    user_id: &str,
     input: InvitationIdInput,
-) -> Result<SuccessResponse, TeamRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
+) -> Result<SuccessResponse, AppError> {
     let invitation = query_as::<_, DbManageTeamInvitationRow>(
 		"SELECT ti.id, ti.team_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id WHERE ti.id = $1 LIMIT 1",
 	)
@@ -1311,7 +1270,7 @@ pub async fn resend(
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); internal_error("Failed to load invitation") })?
 	.ok_or_else(|| not_found_error("Invitation not found"))?;
 
-    let actor = load_team_membership_actor(pool, &ctx.session.user_id).await?;
+    let actor = load_team_membership_actor(pool, user_id).await?;
     let is_admin_or_owner = actor
         .as_ref()
         .map(|value| {
@@ -1338,55 +1297,21 @@ pub async fn resend(
     Ok(SuccessResponse { success: true })
 }
 
-pub fn create_team_router() -> Router<AppState> {
-    Router::new()
-        .handler(list)
-        .handler(get)
-        .handler(vaults)
-        .handler(create)
-        .handler(update)
-        .handler(createImageUpload)
-        .handler(delete)
-        .handler(leave)
-        .handler(getLeaveRotationData)
-        .nest("members", create_team_members_router())
-        .nest("invitations", create_team_invitations_router())
-}
 
-fn create_team_invitations_router() -> Router<AppState> {
-    Router::new()
-        .handler(getByToken)
-        .handler(invitation_handlers::list)
-        .handler(pending)
-        .handler(send)
-        .handler(accept)
-        .handler(cancel)
-        .handler(resend)
-        .handler(decline)
-}
 
-fn create_team_members_router() -> Router<AppState> {
-    Router::new()
-        .handler(member_handlers::list)
-        .handler(member_handlers::getTeamRotationData)
-        .handler(member_handlers::remove)
-        .handler(member_handlers::deleteAccount)
-}
 
-mod member_handlers {
+pub(crate) mod member_handlers {
     use super::*;
 
-    #[allow(non_snake_case)]
-    #[handler(query)]
-    pub async fn list(
-        ctx: RefreshSessionContext,
+    pub(crate) async fn list_team_members(
+        pool: &PgPool,
+        user_id: &str,
         input: TeamIdInput,
-    ) -> Result<Vec<TeamMemberResponse>, TeamRpcError> {
-        let pool = db_pool(&ctx.app_state)?;
+    ) -> Result<Vec<TeamMemberResponse>, AppError> {
         let current_user = query_as::<_, DbTeamUserRow>(
             "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
         )
-        .bind(&ctx.session.user_id)
+        .bind(user_id)
         .fetch_optional(pool)
         .await
         .map_err(|e| {
@@ -1421,14 +1346,12 @@ mod member_handlers {
             .collect())
     }
 
-    #[allow(non_snake_case)]
-    #[handler(query)]
-    pub async fn getTeamRotationData(
-        ctx: RefreshSessionContext,
+    pub(crate) async fn get_team_rotation_data(
+        pool: &PgPool,
+        user_id: &str,
         input: TeamRotationInput,
-    ) -> Result<RotationDataResponse, TeamRpcError> {
-        let pool = db_pool(&ctx.app_state)?;
-        let actor = load_team_membership_actor(pool, &ctx.session.user_id).await?;
+    ) -> Result<RotationDataResponse, AppError> {
+        let actor = load_team_membership_actor(pool, user_id).await?;
         if actor.as_ref().and_then(|user| user.team_id.as_deref()) != Some(input.team_id.as_str()) {
             return Err(forbidden_error("You are not a member of this team"));
         }
@@ -1447,7 +1370,7 @@ mod member_handlers {
         let removal_scope = load_team_removal_scope(
             pool,
             &input.team_id,
-            &ctx.session.user_id,
+            user_id,
             &input.exclude_user_id,
         )
         .await?;
@@ -1465,16 +1388,15 @@ mod member_handlers {
         })
     }
 
-    #[allow(non_snake_case)]
-    #[handler(mutation)]
-    pub async fn remove(
-        ctx: RefreshSessionContext,
+    pub(crate) async fn remove_team_member(
+        pool: &PgPool,
+        user_id: &str,
+        request_client_id: Option<&str>,
         input: RemoveTeamMemberInput,
-    ) -> Result<RemoveTeamMemberResponse, TeamRpcError> {
+    ) -> Result<RemoveTeamMemberResponse, AppError> {
         validate_rotation_vault_inputs(&input.vault_rotations)?;
 
-        let pool = db_pool(&ctx.app_state)?;
-        let actor = load_team_membership_actor(pool, &ctx.session.user_id).await?;
+        let actor = load_team_membership_actor(pool, user_id).await?;
         if actor.as_ref().and_then(|user| user.team_id.as_deref()) != Some(input.team_id.as_str()) {
             return Err(forbidden_error("You are not a member of this team"));
         }
@@ -1486,7 +1408,7 @@ mod member_handlers {
             actor.billing_plan.as_deref(),
             actor.billing_status.as_deref(),
         )?;
-        if ctx.session.user_id == input.user_id {
+        if user_id.to_string() == input.user_id {
             return Err(bad_request_error(
                 "You cannot remove yourself from the team",
             ));
@@ -1519,7 +1441,7 @@ mod member_handlers {
                 })?
                 .ok_or_else(|| not_found_error("Team member not found"))?;
         let removal_scope =
-            load_team_removal_scope(pool, &input.team_id, &ctx.session.user_id, &input.user_id)
+            load_team_removal_scope(pool, &input.team_id, user_id, &input.user_id)
                 .await?;
         if !removal_scope.inaccessible_target_vault_ids.is_empty() {
             return Err(forbidden_error(
@@ -1545,7 +1467,7 @@ mod member_handlers {
             pool,
             &input.vault_rotations,
             &vault_map,
-            &ctx.session.user_id,
+            user_id,
             &input.user_id,
         )
         .await?;
@@ -1566,11 +1488,11 @@ mod member_handlers {
                 &input.vault_rotations,
                 &rotation_record_map,
                 &input.user_id,
-                &ctx.session.user_id,
+                user_id,
                 input
                     .client_id
                     .as_deref()
-                    .or(ctx.request.client_id.as_deref()),
+                    .or(request_client_id),
                 "team_member_removed",
             )
             .await?;
@@ -1580,7 +1502,7 @@ mod member_handlers {
                 tracing::error!(error = %e, "Failed to commit team member removal");
                 internal_error("Failed to commit team member removal")
             })?;
-            Ok::<(), TeamRpcError>(())
+            Ok::<(), AppError>(())
         }
         .await;
         if let Err(error) = result {
@@ -1617,7 +1539,7 @@ mod member_handlers {
         })?;
         insert_team_member_audit_log(
             pool,
-            &ctx.session.user_id,
+            user_id,
             "team_member_removed",
             json!({
                 "teamId": input.team_id,
@@ -1641,12 +1563,11 @@ mod member_handlers {
         })
     }
 
-    #[allow(non_snake_case)]
-    #[handler(mutation)]
-    pub async fn deleteAccount(
-        _ctx: RefreshSessionContext,
+    pub(crate) async fn delete_team_account(
+        _pool: &PgPool,
+        _user_id: &str,
         input: DeleteAccountInput,
-    ) -> Result<SuccessResponse, TeamRpcError> {
+    ) -> Result<SuccessResponse, AppError> {
         if input.confirmation != "DELETE" {
             return Err(bad_request_error("Invalid params"));
         }
@@ -1657,7 +1578,7 @@ mod member_handlers {
     }
 }
 
-mod invitation_handlers {
+pub(crate) mod invitation_handlers {
     use super::*;
 
     #[derive(Debug, Clone, Serialize, TS)]
@@ -1672,14 +1593,12 @@ mod invitation_handlers {
         pub expires_at: String,
     }
 
-    #[allow(non_snake_case)]
-    #[handler(query)]
-    pub async fn list(
-        ctx: RefreshSessionContext,
+    pub(crate) async fn list_team_invitations(
+        pool: &PgPool,
+        user_id: &str,
         input: TeamIdInput,
-    ) -> Result<Vec<TeamInvitationListEntry>, TeamRpcError> {
-        let pool = db_pool(&ctx.app_state)?;
-        let actor = load_team_membership_actor(pool, &ctx.session.user_id).await?;
+    ) -> Result<Vec<TeamInvitationListEntry>, AppError> {
+        let actor = load_team_membership_actor(pool, user_id).await?;
         if actor
             .as_ref()
             .and_then(|value| value.team_id.as_ref())
@@ -1719,14 +1638,10 @@ mod invitation_handlers {
     }
 }
 
-fn db_pool(app_state: &AppState) -> Result<&PgPool, TeamRpcError> {
-    load_db_pool(app_state, internal_error)
-}
-
 fn assert_team_management_entitlement(
     billing_plan: &str,
     billing_status: &str,
-) -> Result<(), TeamRpcError> {
+) -> Result<(), AppError> {
     if shared_team_management_enabled(
         bittery_mode(),
         Some(billing_plan),
@@ -1741,7 +1656,7 @@ fn assert_team_management_entitlement(
 fn assert_optional_team_management_entitlement(
     billing_plan: Option<&str>,
     billing_status: Option<&str>,
-) -> Result<(), TeamRpcError> {
+) -> Result<(), AppError> {
     let plan = billing_plan.ok_or_else(|| not_found_error("Team not found"))?;
     let status = billing_status.ok_or_else(|| not_found_error("Team not found"))?;
     assert_team_management_entitlement(plan, status)
@@ -1751,7 +1666,7 @@ fn default_invitation_role() -> String {
     "member".to_string()
 }
 
-fn validate_token(token: &str) -> Result<(), TeamRpcError> {
+fn validate_token(token: &str) -> Result<(), AppError> {
     if token.len() != 32
         || !token.chars().all(|character| {
             character.is_ascii_alphanumeric() || character == '_' || character == '-'
@@ -1765,7 +1680,7 @@ fn validate_token(token: &str) -> Result<(), TeamRpcError> {
 
 fn validate_rotation_vault_inputs(
     vault_rotations: &[RotationVaultInput],
-) -> Result<(), TeamRpcError> {
+) -> Result<(), AppError> {
     if vault_rotations.len() > MAX_ROTATION_VAULTS {
         return Err(bad_request_error("Too many vault rotations provided."));
     }
@@ -1790,7 +1705,7 @@ fn ensure_exact_rotation_vault_set(
     expected_vault_ids: &HashSet<String>,
     vault_rotations: &[RotationVaultInput],
     mismatch_message: &str,
-) -> Result<(), TeamRpcError> {
+) -> Result<(), AppError> {
     let provided_vault_ids: HashSet<String> = vault_rotations
         .iter()
         .map(|rotation| rotation.vault_id.clone())
@@ -1815,7 +1730,7 @@ fn ensure_exact_rotation_vault_set(
 
 fn normalize_pending_vault_keys(
     pending_vault_keys: Option<Vec<PendingVaultKeyEntry>>,
-) -> Result<Vec<PendingVaultKeyEntry>, TeamRpcError> {
+) -> Result<Vec<PendingVaultKeyEntry>, AppError> {
     let Some(entries) = pending_vault_keys else {
         return Ok(Vec::new());
     };
@@ -1851,7 +1766,7 @@ fn normalize_pending_vault_keys(
 
 fn parse_pending_vault_keys(
     raw_pending_vault_keys: Option<&str>,
-) -> Result<Vec<PendingVaultKeyEntry>, TeamRpcError> {
+) -> Result<Vec<PendingVaultKeyEntry>, AppError> {
     let Some(raw_value) = raw_pending_vault_keys else {
         return Ok(Vec::new());
     };
@@ -1869,7 +1784,7 @@ async fn assert_invitation_pending_vault_keys_are_authorized(
     team_id: &str,
     inviter_id: &str,
     pending_vault_keys: &[PendingVaultKeyEntry],
-) -> Result<(), TeamRpcError> {
+) -> Result<(), AppError> {
     if pending_vault_keys.is_empty() {
         return Ok(());
     }
@@ -1918,24 +1833,11 @@ async fn assert_invitation_pending_vault_keys_are_authorized(
     Ok(())
 }
 
-async fn load_team_membership_actor(
-    pool: &PgPool,
-    user_id: &str,
-) -> Result<Option<DbTeamMembershipActorRow>, TeamRpcError> {
-    query_as::<_, DbTeamMembershipActorRow>(
-		"SELECT u.id, u.team_id, u.role::text AS role, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
-	)
-	.bind(user_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|_| internal_error("Failed to load team membership"))
-}
-
 async fn load_team_vaults_with_user_access(
     pool: &PgPool,
     team_id: &str,
     user_id: &str,
-) -> Result<Vec<DbTeamRotationVaultRow>, TeamRpcError> {
+) -> Result<Vec<DbTeamRotationVaultRow>, AppError> {
     let team_vaults = query_as::<_, DbTeamRotationVaultRow>(
         "SELECT id, name, key_version FROM vault WHERE team_id = $1 ORDER BY created_at ASC",
     )
@@ -1980,7 +1882,7 @@ async fn load_team_removal_scope(
     team_id: &str,
     actor_user_id: &str,
     target_user_id: &str,
-) -> Result<TeamRemovalScope, TeamRpcError> {
+) -> Result<TeamRemovalScope, AppError> {
     let team_vaults = query_as::<_, DbTeamRotationVaultRow>(
         "SELECT id, name, key_version FROM vault WHERE team_id = $1 ORDER BY created_at ASC",
     )
@@ -2047,7 +1949,7 @@ async fn load_rotation_vault_data(
     pool: &PgPool,
     rotation_scope: Vec<DbTeamRotationVaultRow>,
     excluded_user_id: &str,
-) -> Result<Vec<RotationVaultResponse>, TeamRpcError> {
+) -> Result<Vec<RotationVaultResponse>, AppError> {
     let mut rotation_vaults = Vec::with_capacity(rotation_scope.len());
     for vault in rotation_scope {
         let members = query_as::<_, DbRotationMemberRow>(
@@ -2106,7 +2008,7 @@ async fn create_rotation_records(
     vault_map: &HashMap<String, DbTeamRotationVaultRow>,
     initiated_by_id: &str,
     removed_user_id: &str,
-) -> Result<Vec<TeamVaultRotationRecordInternal>, TeamRpcError> {
+) -> Result<Vec<TeamVaultRotationRecordInternal>, AppError> {
     let mut records = Vec::new();
     for vault_rotation in vault_rotations {
         let Some(vault_data) = vault_map.get(&vault_rotation.vault_id) else {
@@ -2141,7 +2043,7 @@ async fn mark_rotation_records_failed(
     pool: &PgPool,
     records: &[TeamVaultRotationRecordInternal],
     error_message: &str,
-) -> Result<(), TeamRpcError> {
+) -> Result<(), AppError> {
     for record in records {
         query("UPDATE vault_key_rotation SET status = 'failed', error_message = $1 WHERE id = $2")
             .bind(error_message)
@@ -2164,7 +2066,7 @@ async fn apply_team_vault_rotations(
     actor_user_id: &str,
     client_id: Option<&str>,
     removal_reason: &str,
-) -> Result<(), TeamRpcError> {
+) -> Result<(), AppError> {
     for vault_rotation in vault_rotations {
         let Some(record) = rotation_record_map.get(&vault_rotation.vault_id) else {
             continue;
@@ -2274,22 +2176,19 @@ async fn insert_team_vault_access_revoked_sync_event(
     client_id: Option<&str>,
     version: i32,
     metadata: serde_json::Value,
-) -> Result<(), TeamRpcError> {
-    query(
-		"INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, client_id, metadata, created_at) VALUES ($1, 'vault_access_revoked'::sync_event_type, $2, 'vault'::sync_entity_type, $3, $4, $5, $6, $7, $8)",
-	)
-	.bind(generate_resource_id("sync"))
-	.bind(vault_id)
-	.bind(vault_id)
-	.bind(user_id)
-	.bind(version)
-	.bind(client_id)
-	.bind(metadata.to_string())
-	.bind(OffsetDateTime::now_utc())
-	.execute(&mut **transaction)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to insert vault access revoked sync event"); internal_error("Failed to insert vault access revoked sync event") })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_sync_event(
+        &mut **transaction,
+        "vault_access_revoked",
+        vault_id,
+        "vault",
+        vault_id,
+        user_id,
+        version,
+        client_id,
+        Some(&metadata.to_string()),
+    )
+    .await
 }
 
 async fn insert_team_vault_member_removed_sync_event(
@@ -2300,22 +2199,19 @@ async fn insert_team_vault_member_removed_sync_event(
     client_id: Option<&str>,
     version: i32,
     metadata: serde_json::Value,
-) -> Result<(), TeamRpcError> {
-    query(
-		"INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, client_id, metadata, created_at) VALUES ($1, 'vault_member_removed'::sync_event_type, $2, 'vault_member'::sync_entity_type, $3, $4, $5, $6, $7, $8)",
-	)
-	.bind(generate_resource_id("sync"))
-	.bind(entity_id)
-	.bind(vault_id)
-	.bind(user_id)
-	.bind(version)
-	.bind(client_id)
-	.bind(metadata.to_string())
-	.bind(OffsetDateTime::now_utc())
-	.execute(&mut **transaction)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to insert vault member removed sync event"); internal_error("Failed to insert vault member removed sync event") })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_sync_event(
+        &mut **transaction,
+        "vault_member_removed",
+        entity_id,
+        "vault_member",
+        vault_id,
+        user_id,
+        version,
+        client_id,
+        Some(&metadata.to_string()),
+    )
+    .await
 }
 
 async fn insert_team_vault_key_rotated_sync_event(
@@ -2325,22 +2221,19 @@ async fn insert_team_vault_key_rotated_sync_event(
     client_id: Option<&str>,
     version: i32,
     metadata: serde_json::Value,
-) -> Result<(), TeamRpcError> {
-    query(
-		"INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, client_id, metadata, created_at) VALUES ($1, 'vault_key_rotated'::sync_event_type, $2, 'vault_key'::sync_entity_type, $3, $4, $5, $6, $7, $8)",
-	)
-	.bind(generate_resource_id("sync"))
-	.bind(vault_id)
-	.bind(vault_id)
-	.bind(user_id)
-	.bind(version)
-	.bind(client_id)
-	.bind(metadata.to_string())
-	.bind(OffsetDateTime::now_utc())
-	.execute(&mut **transaction)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to insert vault key rotated sync event"); internal_error("Failed to insert vault key rotated sync event") })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_sync_event(
+        &mut **transaction,
+        "vault_key_rotated",
+        vault_id,
+        "vault_key",
+        vault_id,
+        user_id,
+        version,
+        client_id,
+        Some(&metadata.to_string()),
+    )
+    .await
 }
 
 async fn insert_team_member_audit_log(
@@ -2348,30 +2241,24 @@ async fn insert_team_member_audit_log(
     user_id: &str,
     action: &str,
     metadata: serde_json::Value,
-) -> Result<(), TeamRpcError> {
-    let query_text = format!(
-		"INSERT INTO audit_log (id, user_id, action, entity_type, entity_id, metadata, created_at) VALUES ($1, $2, '{action}', 'user', $3, $4, $5)"
-	);
-    query(&query_text)
-        .bind(generate_resource_id("audit"))
-        .bind(user_id)
-        .bind(user_id)
-        .bind(metadata)
-        .bind(OffsetDateTime::now_utc())
-        .execute(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to record team member audit event");
-            internal_error("Failed to record team member audit event")
-        })?;
-    Ok(())
+) -> Result<(), AppError> {
+    insert_audit_event(
+        pool,
+        &generate_resource_id("audit"),
+        user_id,
+        action,
+        "user",
+        user_id,
+        Some(metadata),
+    )
+    .await
 }
 
 async fn create_personal_team_for_user(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: &str,
     user_name: &str,
-) -> Result<String, TeamRpcError> {
+) -> Result<String, AppError> {
     let team_id = generate_resource_id("team");
     let team_name = format!("{user_name}'s Team");
     query(
@@ -2396,16 +2283,12 @@ async fn create_personal_team_for_user(
     Ok(team_id)
 }
 
-fn ensure_team_admin(role: &str) -> Result<(), TeamRpcError> {
+fn ensure_team_admin(role: &str) -> Result<(), AppError> {
     if matches!(role, "owner" | "admin") {
         Ok(())
     } else {
         Err(forbidden_error("Insufficient permissions"))
     }
-}
-
-fn generate_resource_id(prefix: &str) -> String {
-    format!("{prefix}_{:016x}", random::<u64>())
 }
 
 fn generate_secure_token() -> String {
@@ -2419,57 +2302,20 @@ fn generate_secure_token() -> String {
         .collect()
 }
 
-fn forbidden_error(message: &str) -> TeamRpcError {
-    TeamRpcError {
-        code: "FORBIDDEN".to_string(),
-        message: message.to_string(),
-    }
+fn forbidden_error(message: &str) -> AppError {
+    AppError::forbidden(message)
 }
 
-fn bad_request_error(message: &str) -> TeamRpcError {
-    TeamRpcError {
-        code: "BAD_REQUEST".to_string(),
-        message: message.to_string(),
-    }
+fn bad_request_error(message: &str) -> AppError {
+    AppError::bad_request(message)
 }
 
-fn not_found_error(message: &str) -> TeamRpcError {
-    TeamRpcError {
-        code: "NOT_FOUND".to_string(),
-        message: message.to_string(),
-    }
+fn not_found_error(message: &str) -> AppError {
+    AppError::not_found(message)
 }
 
-fn internal_error(message: &str) -> TeamRpcError {
-    TeamRpcError {
-        code: "INTERNAL_SERVER_ERROR".to_string(),
-        message: message.to_string(),
-    }
-}
-
-impl From<TeamRpcError> for RpcError {
-    fn from(value: TeamRpcError) -> Self {
-        let code = match value.code.as_str() {
-            "NOT_FOUND" => ErrorCode::ServerError(404),
-            "FORBIDDEN" => ErrorCode::ServerError(403),
-            "BAD_REQUEST" => ErrorCode::InvalidParams,
-            _ => ErrorCode::InternalError,
-        };
-
-        RpcError {
-            code,
-            message: value.message,
-            data: None,
-        }
-    }
-}
-
-impl IntoResponse for TeamRpcError {
-    type Output = <RpcError as IntoResponse>::Output;
-
-    fn into_response(self) -> jsonrpsee::ResponsePayload<'static, Self::Output> {
-        RpcError::from(self).into_response()
-    }
+fn internal_error(message: &str) -> AppError {
+    AppError::internal(message)
 }
 
 #[cfg(test)]
@@ -2481,7 +2327,7 @@ mod tests {
         validate_token, PendingVaultKeyEntry, RotationMemberKeyInput, RotationReEncryptedItemInput,
         RotationVaultInput, VaultKeyRotationInput, TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE,
     };
-    use crate::session_control::load_session_revocation;
+    use crate::services::session_control::load_session_revocation;
     use crate::test_support::{
         acquire_env_lock, assign_user_to_team, authenticated_json_headers, seed_item, seed_team,
         seed_user, seed_vault, seed_vault_key, with_rpc_test_app,

@@ -1,6 +1,7 @@
 use sqlx::PgPool;
 use time::OffsetDateTime;
 
+use crate::error::AppError;
 use crate::AppState;
 
 pub(crate) const CLOUD_MODE: &str = "cloud";
@@ -35,12 +36,9 @@ pub(crate) fn format_timestamp(value: OffsetDateTime) -> String {
         .unwrap_or_else(|_| value.unix_timestamp().to_string())
 }
 
-pub(crate) fn db_pool<E>(
-    app_state: &AppState,
-    internal_error: fn(&str) -> E,
-) -> Result<&PgPool, E> {
+pub(crate) fn db_pool(app_state: &AppState) -> Result<&PgPool, AppError> {
     app_state
         .db_pool
         .as_ref()
-        .ok_or_else(|| internal_error(DATABASE_NOT_CONFIGURED_MESSAGE))
+        .ok_or_else(|| AppError::internal(DATABASE_NOT_CONFIGURED_MESSAGE))
 }

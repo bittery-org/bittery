@@ -1,45 +1,30 @@
-use std::{convert::Infallible, time::Duration};
-
-use async_stream::stream;
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::{
-        sse::{Event, Sse},
-        IntoResponse as AxumIntoResponse, Response as AxumResponse,
-    },
-    routing::get,
-    Extension, Json, Router as AxumRouter,
-};
-use qubit::{
-    builder::IntoResponse,
-    handler,
-    server::{ErrorCode, Router, RpcError},
-};
+use axum::response::sse::Event;
+use sqlx::PgPool;
 use rand::random;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use sqlx::{query, query_as, PgPool};
+use sqlx::{query, query_as};
 use time::OffsetDateTime;
-use tokio::{sync::broadcast, time::sleep};
-use tracing::warn;
+use tokio::sync::broadcast;
+use std::sync::LazyLock;
 use ts_rs::TS;
 
 use crate::{
-    auth::{RefreshSessionContext, VerifiedSession},
     db::models::*,
-    server_support::{bittery_mode, db_pool as load_db_pool, format_timestamp},
-    session_control::load_session_revocation,
-    team_billing::{load_team_billing_entitlement, resolve_attachment_entitlement},
-    storage, AppState,
+    error::AppError,
+    repo::{
+        common::load_scoped_item_access,
+        sync::{
+            fetch_bootstrap_items, fetch_latest_visible_event_id,
+            fetch_user_vault_ids, fetch_visible_cursor_event, fetch_visible_events_since,
+            load_bootstrap_attachment_rows,
+        },
+    },
+    config::{bittery_mode, format_timestamp},
+    services::team_billing::{load_team_billing_entitlement, resolve_attachment_entitlement},
+    integrations::storage, AppState,
 };
 
-#[derive(Debug, Clone, Serialize, TS)]
-pub struct SyncRpcError {
-    pub code: String,
-    pub message: String,
-}
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -204,10 +189,10 @@ pub struct BootstrapItemsResponse {
     pub has_more: bool,
 }
 
-const DEFAULT_EVENTS_LIMIT: i32 = 100;
+pub(crate) const DEFAULT_EVENTS_LIMIT: i32 = 100;
 const DEFAULT_BOOTSTRAP_LIMIT: i32 = 500;
-const SYNC_STREAM_POLL_INTERVAL_MS: u64 = 2_000;
-const SYNC_STREAM_HEARTBEAT_INTERVAL_MS: u64 = 15_000;
+pub(crate) const SYNC_STREAM_POLL_INTERVAL_MS: u64 = 2_000;
+pub(crate) const SYNC_STREAM_HEARTBEAT_INTERVAL_MS: u64 = 15_000;
 const SYNC_CONTROL_CHANNEL_CAPACITY: usize = 256;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -259,16 +244,14 @@ impl SyncControlBroker {
     }
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn checkConflict(
-    ctx: RefreshSessionContext,
+pub(crate) async fn check_conflict(
+    pool: &PgPool,
+    user_id: &str,
     input: CheckConflictInput,
-) -> Result<CheckConflictResponse, SyncRpcError> {
+) -> Result<CheckConflictResponse, AppError> {
     validate_resource_id(&input.item_id)?;
 
-    let pool = db_pool(&ctx.app_state)?;
-    let accessible_item = load_scoped_item_access(pool, &ctx.session.user_id, &input.item_id)
+    let accessible_item = load_scoped_item_access(pool, user_id, &input.item_id)
         .await?
         .ok_or_else(|| not_found_error("Item not found"))?;
 
@@ -298,12 +281,11 @@ pub async fn checkConflict(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn getEventsSince(
-    ctx: RefreshSessionContext,
+pub(crate) async fn get_events_since(
+    pool: &PgPool,
+    user_id: &str,
     input: GetEventsSinceInput,
-) -> Result<GetEventsSinceResponse, SyncRpcError> {
+) -> Result<GetEventsSinceResponse, AppError> {
     if let Some(since_id) = &input.since_id {
         validate_resource_id(since_id)?;
     }
@@ -319,9 +301,7 @@ pub async fn getEventsSince(
     if !(1..=1000).contains(&limit) {
         return Err(bad_request_error("Invalid params"));
     }
-
-    let pool = db_pool(&ctx.app_state)?;
-    let user_vault_ids = fetch_user_vault_ids(pool, &ctx.session.user_id).await?;
+    let user_vault_ids = fetch_user_vault_ids(pool, user_id).await?;
     let target_vault_ids = match input.vault_ids {
         Some(vault_ids) => vault_ids
             .into_iter()
@@ -333,11 +313,11 @@ pub async fn getEventsSince(
     let cursor_seq = match input.since_id.as_deref() {
         Some(since_id) => {
             let cursor_event =
-                fetch_visible_cursor_event(pool, &ctx.session.user_id, &target_vault_ids, since_id)
+                fetch_visible_cursor_event(pool, user_id, &target_vault_ids, since_id)
                     .await?;
             let Some(cursor_event) = cursor_event else {
                 let latest_visible_event_id =
-                    fetch_latest_visible_event_id(pool, &ctx.session.user_id, &target_vault_ids)
+                    fetch_latest_visible_event_id(pool, user_id, &target_vault_ids)
                         .await?;
                 return Ok(GetEventsSinceResponse {
                     events: Vec::new(),
@@ -353,7 +333,7 @@ pub async fn getEventsSince(
 
     let events = fetch_visible_events_since(
         pool,
-        &ctx.session.user_id,
+        user_id,
         &target_vault_ids,
         cursor_seq,
         limit,
@@ -381,12 +361,11 @@ pub async fn getEventsSince(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn bootstrapItems(
-    ctx: RefreshSessionContext,
+pub(crate) async fn bootstrap_items(
+    pool: &PgPool,
+    user_id: &str,
     input: BootstrapItemsInput,
-) -> Result<BootstrapItemsResponse, SyncRpcError> {
+) -> Result<BootstrapItemsResponse, AppError> {
     if let Some(cursor) = &input.cursor {
         validate_resource_id(cursor)?;
     }
@@ -394,13 +373,11 @@ pub async fn bootstrapItems(
     if !(1..=1000).contains(&limit) {
         return Err(bad_request_error("Invalid params"));
     }
-
-    let pool = db_pool(&ctx.app_state)?;
-    let attachments_enabled = attachments_enabled_for_user(pool, &ctx.session.user_id).await?;
+    let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
     let user_vaults = query_as::<_, DbBootstrapVaultAccessRow>(
 		"SELECT vk.vault_id, v.name AS vault_name, v.type::text AS vault_type, v.icon AS vault_icon, v.image_key AS vault_image_key, vk.encrypted_vault_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 ORDER BY vk.created_at ASC",
 	)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.fetch_all(pool)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load user vaults"); internal_error("Failed to load user vaults") })?;
@@ -487,12 +464,11 @@ pub async fn bootstrapItems(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(mutation)]
-pub async fn acknowledgeEvents(
-    ctx: RefreshSessionContext,
+pub(crate) async fn acknowledge_events(
+    pool: &PgPool,
+    user_id: &str,
     input: AcknowledgeEventsInput,
-) -> Result<AcknowledgeEventsResponse, SyncRpcError> {
+) -> Result<AcknowledgeEventsResponse, AppError> {
     validate_client_id(&input.client_id)?;
     if input.event_ids.len() > 500 {
         return Err(bad_request_error("Invalid params"));
@@ -503,8 +479,6 @@ pub async fn acknowledgeEvents(
     if input.event_ids.is_empty() {
         return Ok(AcknowledgeEventsResponse { acknowledged: 0 });
     }
-
-    let pool = db_pool(&ctx.app_state)?;
     let events = query_as::<_, DbSyncEventVaultRow>(
         "SELECT id, vault_id FROM sync_event WHERE id = ANY($1)",
     )
@@ -517,7 +491,7 @@ pub async fn acknowledgeEvents(
     })?;
     let user_vaults =
         query_as::<_, DbVaultAccessRow>("SELECT vault_id FROM vault_key WHERE user_id = $1")
-            .bind(&ctx.session.user_id)
+            .bind(user_id)
             .fetch_all(pool)
             .await
             .map_err(|e| {
@@ -547,7 +521,7 @@ pub async fn acknowledgeEvents(
         )
         .bind(generate_sync_ack_id())
         .bind(event_id)
-        .bind(&ctx.session.user_id)
+        .bind(user_id)
         .bind(&input.client_id)
         .execute(pool)
         .await
@@ -562,19 +536,16 @@ pub async fn acknowledgeEvents(
     })
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn getLastAcknowledged(
-    ctx: RefreshSessionContext,
+pub(crate) async fn get_last_acknowledged(
+    pool: &PgPool,
+    user_id: &str,
     input: GetLastAcknowledgedInput,
-) -> Result<Option<LastAcknowledgedResponse>, SyncRpcError> {
+) -> Result<Option<LastAcknowledgedResponse>, AppError> {
     validate_client_id(&input.client_id)?;
-
-    let pool = db_pool(&ctx.app_state)?;
     let last_ack = query_as::<_, DbLastAcknowledgedRow>(
 		"SELECT sea.event_id, se.created_at FROM sync_event_ack sea INNER JOIN sync_event se ON sea.event_id = se.id WHERE sea.user_id = $1 AND sea.client_id = $2 ORDER BY sea.acknowledged_at DESC LIMIT 1",
 	)
-	.bind(&ctx.session.user_id)
+	.bind(user_id)
 	.bind(&input.client_id)
 	.fetch_optional(pool)
 	.await
@@ -586,24 +557,21 @@ pub async fn getLastAcknowledged(
     }))
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn getSyncState(
-    ctx: RefreshSessionContext,
+pub(crate) async fn get_sync_state(
+    pool: &PgPool,
+    user_id: &str,
     input: GetSyncStateInput,
-) -> Result<std::collections::BTreeMap<String, SyncStateEntry>, SyncRpcError> {
+) -> Result<std::collections::BTreeMap<String, SyncStateEntry>, AppError> {
     if input.vault_ids.len() > 200 {
         return Err(bad_request_error("Invalid params"));
     }
     for vault_id in &input.vault_ids {
         validate_resource_id(vault_id)?;
     }
-
-    let pool = db_pool(&ctx.app_state)?;
     let accessible_vaults = query_as::<_, DbVaultAccessRow>(
         "SELECT vault_id FROM vault_key WHERE user_id = $1 AND vault_id = ANY($2)",
     )
-    .bind(&ctx.session.user_id)
+    .bind(user_id)
     .bind(&input.vault_ids)
     .fetch_all(pool)
     .await
@@ -634,294 +602,26 @@ pub async fn getSyncState(
     Ok(states)
 }
 
-pub fn create_sync_router() -> Router<AppState> {
-    Router::new()
-        .handler(bootstrapItems)
-        .handler(getEventsSince)
-        .handler(acknowledgeEvents)
-        .handler(getLastAcknowledged)
-        .handler(getSyncState)
-        .handler(checkConflict)
-}
 
-pub fn create_sync_http_router() -> AxumRouter<AppState> {
-    AxumRouter::new()
-        .route("/events", get(sync_events))
-        .route("/health", get(sync_health))
-}
 
-async fn sync_health() -> Json<serde_json::Value> {
-    Json(json!({ "status": "ok" }))
-}
-
-async fn sync_events(
-    State(state): State<AppState>,
-    session: Option<Extension<VerifiedSession>>,
-) -> AxumResponse {
-    let Some(Extension(session)) = session else {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "Unauthorized" })),
-        )
-            .into_response();
-    };
-    let Some(pool) = state.db_pool.clone() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": "Sync unavailable" })),
-        )
-            .into_response();
-    };
-
-    let initial_vault_ids = match fetch_user_vault_ids(&pool, &session.user_id).await {
-        Ok(vault_ids) => vault_ids,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": error.message })),
-            )
-                .into_response();
-        }
-    };
-    let initial_seq =
-        match fetch_latest_visible_event_seq(&pool, &session.user_id, &initial_vault_ids).await {
-            Ok(seq) => seq,
-            Err(error) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": error.message })),
-                )
-                    .into_response();
-            }
-        };
-
-    let sessions = state.sessions.clone();
-    let sync_control = state.sync_control.clone();
-    let session_user_id = session.user_id.clone();
-    let session_id = session.session_id.clone();
-    let session_token = session.token.clone();
-    let connection_id = generate_sync_connection_id();
-    let poll_interval = Duration::from_millis(SYNC_STREAM_POLL_INTERVAL_MS);
-    let heartbeat_interval = Duration::from_millis(SYNC_STREAM_HEARTBEAT_INTERVAL_MS);
-
-    let stream = stream! {
-        let mut last_seen_seq = initial_seq;
-        let mut last_heartbeat_at = std::time::Instant::now();
-        let mut control_rx = sync_control.subscribe();
-
-        match sse_json_event(
-            "connected",
-            &json!({
-                "type": "connected",
-                "userId": session_user_id,
-                "connectionId": connection_id,
-                "timestamp": timestamp_millis(OffsetDateTime::now_utc()),
-            }),
-        ) {
-            Ok(event) => yield Ok::<Event, Infallible>(event),
-            Err(error) => {
-                warn!(error = %error.message, "failed to initialize sync event stream");
-                return;
-            }
-        }
-
-        'outer: loop {
-            loop {
-                match control_rx.try_recv() {
-                    Ok(payload) => {
-                        if payload.user_id == session_user_id && payload.session_id == session_id {
-                            match sse_json_event("control", &payload) {
-                                Ok(event) => yield Ok(event),
-                                Err(error) => {
-                                    warn!(error = %error.message, "failed to encode session control payload");
-                                }
-                            }
-                            break 'outer;
-                        }
-                    }
-                    Err(broadcast::error::TryRecvError::Empty) => break,
-                    Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::TryRecvError::Closed) => break,
-                }
-            }
-
-            match load_session_revocation(&pool, &session_user_id, &session_id).await {
-                Ok(Some(revocation)) => {
-                    let payload = SessionControlPayload {
-                        control_type: "session_revoked".to_string(),
-                        user_id: session_user_id.clone(),
-                        session_id: session_id.clone(),
-                        timestamp: revocation.timestamp,
-                        reason: revocation.reason,
-                    };
-                    match sse_json_event("control", &payload) {
-                        Ok(event) => yield Ok(event),
-                        Err(error) => {
-                            warn!(error = %error.message, "failed to encode persisted session control payload");
-                        }
-                    }
-                    break 'outer;
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    warn!(user_id = %session_user_id, error = %error, "failed to load persisted session control payload");
-                    break 'outer;
-                }
-            }
-
-            if sessions.verify_token(&session_token).await.is_none() {
-                break;
-            }
-
-            let target_vault_ids = match fetch_user_vault_ids(&pool, &session_user_id).await {
-                Ok(vault_ids) => vault_ids,
-                Err(error) => {
-                    warn!(user_id = %session_user_id, error = %error.message, "failed to refresh sync vault access");
-                    break;
-                }
-            };
-            let events = match fetch_visible_events_since(
-                &pool,
-                &session_user_id,
-                &target_vault_ids,
-                last_seen_seq,
-                DEFAULT_EVENTS_LIMIT,
-            )
-            .await {
-                Ok(events) => events,
-                Err(error) => {
-                    warn!(user_id = %session_user_id, error = %error.message, "failed to poll sync events");
-                    break;
-                }
-            };
-
-            let has_more = events.len() > DEFAULT_EVENTS_LIMIT as usize;
-            let result_events = if has_more {
-                events.into_iter().take(DEFAULT_EVENTS_LIMIT as usize).collect::<Vec<_>>()
-            } else {
-                events
-            };
-
-            if !result_events.is_empty() {
-                for event in result_events {
-                    let next_seq = event.seq;
-                    let payload = match sync_stream_event_dto(event, &session_user_id) {
-                        Ok(payload) => payload,
-                        Err(error) => {
-                            warn!(user_id = %session_user_id, error = %error.message, "failed to decode sync event payload");
-                            break 'outer;
-                        }
-                    };
-
-                    match sse_json_event("sync", &payload) {
-                        Ok(sse_event) => {
-                            last_seen_seq = next_seq;
-                            yield Ok(sse_event);
-                        }
-                        Err(error) => {
-                            warn!(user_id = %session_user_id, error = %error.message, "failed to encode sync stream event");
-                            break 'outer;
-                        }
-                    }
-                }
-
-                if has_more {
-                    continue;
-                }
-            }
-
-            if last_heartbeat_at.elapsed() >= heartbeat_interval {
-                match sse_heartbeat_event() {
-                    Ok(event) => yield Ok(event),
-                    Err(error) => {
-                        warn!(user_id = %session_user_id, error = %error.message, "failed to encode sync heartbeat");
-                        break;
-                    }
-                }
-                last_heartbeat_at = std::time::Instant::now();
-            }
-
-            tokio::select! {
-                control = control_rx.recv() => {
-                    match control {
-                        Ok(payload) => {
-                            if payload.user_id == session_user_id && payload.session_id == session_id {
-                                match sse_json_event("control", &payload) {
-                                    Ok(event) => yield Ok(event),
-                                    Err(error) => {
-                                        warn!(error = %error.message, "failed to encode session control payload");
-                                    }
-                                }
-                                break;
-                            }
-                        }
-                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(broadcast::error::RecvError::Closed) => {}
-                    }
-                }
-                _ = sleep(poll_interval) => {}
-            }
-        }
-    };
-
-    Sse::new(stream).into_response()
-}
-
-fn db_pool(app_state: &AppState) -> Result<&PgPool, SyncRpcError> {
-    load_db_pool(app_state, internal_error)
-}
-
-async fn fetch_user_vault_ids(pool: &PgPool, user_id: &str) -> Result<Vec<String>, SyncRpcError> {
-    let user_vaults =
-        query_as::<_, DbVaultAccessRow>("SELECT vault_id FROM vault_key WHERE user_id = $1")
-            .bind(user_id)
-            .fetch_all(pool)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to load vault access");
-                internal_error("Failed to load vault access")
-            })?;
-
-    Ok(user_vaults
-        .into_iter()
-        .map(|record| record.vault_id)
-        .collect())
-}
-
-async fn load_scoped_item_access(
-    pool: &PgPool,
-    actor_user_id: &str,
-    item_id: &str,
-) -> Result<Option<DbScopedItemAccessRow>, SyncRpcError> {
-    query_as::<_, DbScopedItemAccessRow>(
-		"SELECT i.id AS item_id, i.vault_id, vk.role::text AS role FROM item i INNER JOIN vault_key vk ON vk.vault_id = i.vault_id AND vk.user_id = $1 WHERE i.id = $2 LIMIT 1",
-	)
-	.bind(actor_user_id)
-	.bind(item_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|_| internal_error("Failed to load scoped item access"))
-}
-
-fn timestamp_millis(value: OffsetDateTime) -> i64 {
+pub(crate) fn timestamp_millis(value: OffsetDateTime) -> i64 {
     (value.unix_timestamp_nanos() / 1_000_000) as i64
 }
 
-fn validate_client_id(client_id: &str) -> Result<(), SyncRpcError> {
-    let regex = Regex::new(r"^[A-Za-z0-9_-]{1,64}$").expect("client id regex should be valid");
-    if regex.is_match(client_id) {
+fn validate_client_id(client_id: &str) -> Result<(), AppError> {
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_-]{1,64}$").expect("client id regex should be valid"));
+    if RE.is_match(client_id) {
         Ok(())
     } else {
         Err(bad_request_error("Invalid client ID"))
     }
 }
 
-fn validate_resource_id(value: &str) -> Result<(), SyncRpcError> {
-    let regex = Regex::new(
+fn validate_resource_id(value: &str) -> Result<(), AppError> {
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(
 		r"^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|[A-Za-z0-9_-]{10,64})$",
-	)
-	.expect("resource id regex should be valid");
-    if value.len() <= 64 && regex.is_match(value) {
+	).expect("resource id regex should be valid"));
+    if value.len() <= 64 && RE.is_match(value) {
         Ok(())
     } else {
         Err(bad_request_error("Invalid resource ID"))
@@ -932,7 +632,7 @@ fn generate_sync_ack_id() -> String {
     format!("syncack_{:016x}", random::<u64>())
 }
 
-fn generate_sync_connection_id() -> String {
+pub(crate) fn generate_sync_connection_id() -> String {
     format!(
         "{}-{:016x}",
         timestamp_millis(OffsetDateTime::now_utc()),
@@ -940,7 +640,7 @@ fn generate_sync_connection_id() -> String {
     )
 }
 
-fn sync_event_dto(event: DbSyncEventRow) -> Result<SyncEventDto, SyncRpcError> {
+fn sync_event_dto(event: DbSyncEventRow) -> Result<SyncEventDto, AppError> {
     let metadata = match event.metadata {
         Some(value) => Some(
             serde_json::from_str::<serde_json::Value>(&value).map_err(|e| {
@@ -965,10 +665,10 @@ fn sync_event_dto(event: DbSyncEventRow) -> Result<SyncEventDto, SyncRpcError> {
     })
 }
 
-fn sync_stream_event_dto(
+pub(crate) fn sync_stream_event_dto(
     event: DbSyncEventRow,
     recipient_user_id: &str,
-) -> Result<SyncEventDto, SyncRpcError> {
+) -> Result<SyncEventDto, AppError> {
     let is_own_event =
         event.event_type != "vault_access_revoked" && recipient_user_id == event.user_id;
     let origin_client_id = event.client_id.clone();
@@ -993,7 +693,7 @@ fn sync_stream_event_dto(
     Ok(dto)
 }
 
-fn sse_json_event<T: Serialize>(event_name: &str, payload: &T) -> Result<Event, SyncRpcError> {
+pub(crate) fn sse_json_event<T: Serialize>(event_name: &str, payload: &T) -> Result<Event, AppError> {
     let data = serde_json::to_string(payload).map_err(|e| {
         tracing::error!(error = %e, "Failed to serialize sync event");
         internal_error("Failed to serialize sync event")
@@ -1001,126 +701,18 @@ fn sse_json_event<T: Serialize>(event_name: &str, payload: &T) -> Result<Event, 
     Ok(Event::default().event(event_name).data(data))
 }
 
-fn sse_heartbeat_event() -> Result<Event, SyncRpcError> {
+pub(crate) fn sse_heartbeat_event() -> Result<Event, AppError> {
     Ok(Event::default().comment(format!(
         "heartbeat {}",
         timestamp_millis(OffsetDateTime::now_utc())
     )))
 }
 
-async fn fetch_visible_cursor_event(
-    pool: &PgPool,
-    user_id: &str,
-    target_vault_ids: &[String],
-    since_id: &str,
-) -> Result<Option<DbSyncEventCursorRow>, SyncRpcError> {
-    if target_vault_ids.is_empty() {
-        return query_as::<_, DbSyncEventCursorRow>(
-			"SELECT id, seq FROM sync_event WHERE id = $1 AND user_id = $2 AND event_type = 'vault_access_revoked'::sync_event_type LIMIT 1",
-		)
-		.bind(since_id)
-		.bind(user_id)
-		.fetch_optional(pool)
-		.await
-		.map_err(|_| internal_error("Failed to load sync cursor event"));
-    }
-
-    query_as::<_, DbSyncEventCursorRow>(
-		"SELECT id, seq FROM sync_event WHERE id = $1 AND (vault_id = ANY($2) OR (user_id = $3 AND event_type = 'vault_access_revoked'::sync_event_type)) LIMIT 1",
-	)
-	.bind(since_id)
-	.bind(target_vault_ids)
-	.bind(user_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|_| internal_error("Failed to load sync cursor event"))
+fn bad_request_error(message: &str) -> AppError {
+    AppError::bad_request(message)
 }
 
-async fn fetch_latest_visible_event_id(
-    pool: &PgPool,
-    user_id: &str,
-    target_vault_ids: &[String],
-) -> Result<Option<String>, SyncRpcError> {
-    if target_vault_ids.is_empty() {
-        return query_as::<_, DbSyncEventIdRow>(
-			"SELECT id FROM sync_event WHERE user_id = $1 AND event_type = 'vault_access_revoked'::sync_event_type ORDER BY seq DESC LIMIT 1",
-		)
-		.bind(user_id)
-		.fetch_optional(pool)
-		.await
-		.map(|row| row.map(|row| row.id))
-		.map_err(|_| internal_error("Failed to load latest visible event"));
-    }
-
-    query_as::<_, DbSyncEventIdRow>(
-		"SELECT id FROM sync_event WHERE vault_id = ANY($1) OR (user_id = $2 AND event_type = 'vault_access_revoked'::sync_event_type) ORDER BY seq DESC LIMIT 1",
-	)
-	.bind(target_vault_ids)
-	.bind(user_id)
-	.fetch_optional(pool)
-	.await
-	.map(|row| row.map(|row| row.id))
-	.map_err(|_| internal_error("Failed to load latest visible event"))
-}
-
-async fn fetch_latest_visible_event_seq(
-    pool: &PgPool,
-    user_id: &str,
-    target_vault_ids: &[String],
-) -> Result<i64, SyncRpcError> {
-    let Some(latest_event_id) =
-        fetch_latest_visible_event_id(pool, user_id, target_vault_ids).await?
-    else {
-        return Ok(0);
-    };
-    let Some(cursor_event) =
-        fetch_visible_cursor_event(pool, user_id, target_vault_ids, &latest_event_id).await?
-    else {
-        return Ok(0);
-    };
-
-    Ok(cursor_event.seq)
-}
-
-async fn fetch_visible_events_since(
-    pool: &PgPool,
-    user_id: &str,
-    target_vault_ids: &[String],
-    cursor_seq: i64,
-    limit: i32,
-) -> Result<Vec<DbSyncEventRow>, SyncRpcError> {
-    if target_vault_ids.is_empty() {
-        return query_as::<_, DbSyncEventRow>(
-			"SELECT id, seq, event_type::text AS event_type, entity_id, entity_type::text AS entity_type, vault_id, version, client_id, user_id, metadata, created_at FROM sync_event WHERE user_id = $1 AND event_type = 'vault_access_revoked'::sync_event_type AND seq > $2 ORDER BY seq ASC LIMIT $3",
-		)
-		.bind(user_id)
-		.bind(cursor_seq)
-		.bind(limit + 1)
-		.fetch_all(pool)
-		.await
-		.map_err(|_| internal_error("Failed to load sync events"));
-    }
-
-    query_as::<_, DbSyncEventRow>(
-		"SELECT id, seq, event_type::text AS event_type, entity_id, entity_type::text AS entity_type, vault_id, version, client_id, user_id, metadata, created_at FROM sync_event WHERE (vault_id = ANY($1) OR (user_id = $2 AND event_type = 'vault_access_revoked'::sync_event_type)) AND seq > $3 ORDER BY seq ASC LIMIT $4",
-	)
-	.bind(target_vault_ids)
-	.bind(user_id)
-	.bind(cursor_seq)
-	.bind(limit + 1)
-	.fetch_all(pool)
-	.await
-	.map_err(|_| internal_error("Failed to load sync events"))
-}
-
-fn bad_request_error(message: &str) -> SyncRpcError {
-    SyncRpcError {
-        code: "BAD_REQUEST".to_string(),
-        message: message.to_string(),
-    }
-}
-
-async fn attachments_enabled_for_user(pool: &PgPool, user_id: &str) -> Result<bool, SyncRpcError> {
+async fn attachments_enabled_for_user(pool: &PgPool, user_id: &str) -> Result<bool, AppError> {
     let mode = bittery_mode();
     if mode == "self-hosted" {
         return Ok(true);
@@ -1130,7 +722,6 @@ async fn attachments_enabled_for_user(pool: &PgPool, user_id: &str) -> Result<bo
         pool,
         user_id,
         "Failed to load attachment entitlements",
-        internal_error,
     )
     .await?;
 
@@ -1149,45 +740,12 @@ async fn attachments_enabled_for_user(pool: &PgPool, user_id: &str) -> Result<bo
     .enabled)
 }
 
-async fn fetch_bootstrap_items(
-    pool: &PgPool,
-    vault_ids: &[String],
-    cursor: Option<&str>,
-    limit: i32,
-) -> Result<Vec<DbBootstrapItemRow>, SyncRpcError> {
-    match cursor {
-		Some(cursor) => query_as::<_, DbBootstrapItemRow>(
-			"SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE vault_id = ANY($1) AND id > $2 ORDER BY id ASC LIMIT $3",
-		)
-		.bind(vault_ids)
-		.bind(cursor)
-		.bind(limit + 1)
-		.fetch_all(pool)
-		.await
-		.map_err(|_| internal_error("Failed to load bootstrap items")),
-		None => query_as::<_, DbBootstrapItemRow>(
-			"SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE vault_id = ANY($1) ORDER BY id ASC LIMIT $2",
-		)
-		.bind(vault_ids)
-		.bind(limit + 1)
-		.fetch_all(pool)
-		.await
-		.map_err(|_| internal_error("Failed to load bootstrap items")),
-	}
-}
-
 async fn load_bootstrap_attachments(
     pool: &PgPool,
     items: &[DbBootstrapItemRow],
-) -> Result<std::collections::HashMap<String, Vec<BootstrapAttachmentResponse>>, SyncRpcError> {
+) -> Result<std::collections::HashMap<String, Vec<BootstrapAttachmentResponse>>, AppError> {
     let item_ids: Vec<String> = items.iter().map(|item| item.id.clone()).collect();
-    let attachment_rows = query_as::<_, DbBootstrapAttachmentRow>(
-		"SELECT id, item_id, vault_id, storage_key, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, uploaded_by, created_at FROM item_attachment WHERE item_id = ANY($1) ORDER BY created_at ASC",
-	)
-	.bind(&item_ids)
-	.fetch_all(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load bootstrap attachments"); internal_error("Failed to load bootstrap attachments") })?;
+    let attachment_rows = load_bootstrap_attachment_rows(pool, &item_ids).await?;
 
     let mut grouped = std::collections::HashMap::<String, Vec<BootstrapAttachmentResponse>>::new();
     for attachment in attachment_rows {
@@ -1213,42 +771,12 @@ async fn load_bootstrap_attachments(
     Ok(grouped)
 }
 
-fn not_found_error(message: &str) -> SyncRpcError {
-    SyncRpcError {
-        code: "NOT_FOUND".to_string(),
-        message: message.to_string(),
-    }
+fn not_found_error(message: &str) -> AppError {
+    AppError::not_found(message)
 }
 
-fn internal_error(message: &str) -> SyncRpcError {
-    SyncRpcError {
-        code: "INTERNAL_SERVER_ERROR".to_string(),
-        message: message.to_string(),
-    }
-}
-
-impl From<SyncRpcError> for RpcError {
-    fn from(value: SyncRpcError) -> Self {
-        let code = match value.code.as_str() {
-            "BAD_REQUEST" => ErrorCode::InvalidParams,
-            "NOT_FOUND" => ErrorCode::ServerError(404),
-            _ => ErrorCode::InternalError,
-        };
-
-        RpcError {
-            code,
-            message: value.message,
-            data: None,
-        }
-    }
-}
-
-impl IntoResponse for SyncRpcError {
-    type Output = <RpcError as IntoResponse>::Output;
-
-    fn into_response(self) -> jsonrpsee::ResponsePayload<'static, Self::Output> {
-        RpcError::from(self).into_response()
-    }
+fn internal_error(message: &str) -> AppError {
+    AppError::internal(message)
 }
 
 #[cfg(test)]
@@ -1268,8 +796,9 @@ mod tests {
 
     use super::*;
     use crate::{
+        http::sync_sse::create_sync_http_router,
         rpc_request_context_middleware,
-        session_control::record_session_revocations,
+        services::session_control::record_session_revocations,
         test_support::{
             acquire_env_lock, authenticated_json_headers, seed_item, seed_user, seed_vault,
             seed_vault_key, with_rpc_test_app, RpcTestApp,

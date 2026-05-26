@@ -7,7 +7,7 @@ use tracing::{error, info};
 
 use crate::{
     db::models::{DbPendingAttachmentUploadRow, DbTombstoneCandidate, DbVaultOwnerRow},
-    storage,
+    integrations::storage,
 };
 
 const EXPIRED_SESSION_BATCH_SIZE: i64 = 1000;
