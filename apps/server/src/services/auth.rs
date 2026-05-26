@@ -1543,7 +1543,7 @@ pub(crate) async fn revoke_device(
 
     if !revoked_session_ids.is_empty() {
         for revoked_session_id in &revoked_session_ids {
-            app_state.sync_control.publish_session_revoked(
+            app_state.sync_pubsub.notify_session_revoked(
                 &session.user_id,
                 revoked_session_id,
                 "device_revoked",

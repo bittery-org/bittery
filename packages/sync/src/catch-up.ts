@@ -48,7 +48,7 @@ export async function runCatchUp({
 	while (true) {
 		const previousId = cursor.id;
 		const page = await client.sync.getEventsSince.query({
-			sinceId: cursor.id,
+			sinceId: cursor.id || null,
 			limit,
 		});
 
@@ -61,7 +61,7 @@ export async function runCatchUp({
 			break;
 		}
 
-		for (const event of page.events) {
+		for (const event of deduplicateByEntity(page.events)) {
 			const shouldProcess = shouldProcessEvent
 				? await shouldProcessEvent(event)
 				: true;
@@ -95,4 +95,17 @@ export async function runCatchUp({
 		processedCount,
 		requiresFullRefresh,
 	};
+}
+
+function deduplicateByEntity(events: SyncEvent[]): SyncEvent[] {
+	const seen = new Set<string>();
+	const result: SyncEvent[] = [];
+	for (let i = events.length - 1; i >= 0; i--) {
+		const event = events[i]!;
+		if (!seen.has(event.entityId)) {
+			seen.add(event.entityId);
+			result.unshift(event);
+		}
+	}
+	return result;
 }

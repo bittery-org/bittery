@@ -14,22 +14,22 @@ use axum::{
 use serde_json::json;
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
-use tokio::time::sleep;
 use tracing::warn;
 
 use crate::{
-    repo::sync::{
-        fetch_latest_visible_event_seq, fetch_user_vault_ids, fetch_visible_events_since,
-    },
+    services::connection_registry::{resolve_connection_limit, ConnectionGuard},
     services::session::VerifiedSession,
     services::session_control::load_session_revocation,
     services::sync::{
-        generate_sync_connection_id, sse_heartbeat_event, sse_json_event, sync_stream_event_dto,
-        timestamp_millis, SessionControlPayload, DEFAULT_EVENTS_LIMIT,
-        SYNC_STREAM_HEARTBEAT_INTERVAL_MS, SYNC_STREAM_POLL_INTERVAL_MS,
+        generate_sync_connection_id, sse_heartbeat_event, sse_json_event, timestamp_millis,
+        SYNC_STREAM_HEARTBEAT_INTERVAL_MS,
     },
+    services::sync_pubsub::SyncNotification,
     AppState,
 };
+
+/// Interval for refreshing the Redis connection TTL (60s).
+const CONN_TTL_REFRESH_INTERVAL_MS: u64 = 60_000;
 
 pub fn create_sync_http_router() -> AxumRouter<AppState> {
     AxumRouter::new()
@@ -52,7 +52,7 @@ async fn sync_events(
         )
             .into_response();
     };
-    let Some(pool) = state.db_pool.clone() else {
+    let Some(ref pool) = state.db_pool else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({ "error": "Sync unavailable" })),
@@ -60,43 +60,101 @@ async fn sync_events(
             .into_response();
     };
 
-    let initial_vault_ids = match fetch_user_vault_ids(&pool, &session.user_id).await {
-        Ok(vault_ids) => vault_ids,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": error.message })),
-            )
-                .into_response();
-        }
-    };
-    let initial_seq =
-        match fetch_latest_visible_event_seq(&pool, &session.user_id, &initial_vault_ids).await {
-            Ok(seq) => seq,
-            Err(error) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": error.message })),
-                )
-                    .into_response();
-            }
-        };
+    // Determine device identity for connection tracking
+    let device_id = session
+        .client_id
+        .clone()
+        .unwrap_or_else(|| session.session_id.clone());
 
+    // Enforce per-plan connection limit via Redis (if available)
+    if state.connection_registry.is_active() {
+        let plan_limit =
+            resolve_connection_limit(&state.redis, pool, &session.user_id).await;
+
+        match state
+            .connection_registry
+            .try_register(&session.user_id, &device_id, &state.instance_id, plan_limit)
+            .await
+        {
+            Ok(true) => { /* registered successfully */ }
+            Ok(false) => {
+                let user_id = session.user_id.clone();
+                let rejection_stream = stream! {
+                    match sse_json_event("limit_exceeded", &json!({
+                        "type": "limit_exceeded",
+                        "userId": user_id,
+                        "limit": plan_limit,
+                        "timestamp": timestamp_millis(OffsetDateTime::now_utc()),
+                    })) {
+                        Ok(event) => yield Ok::<Event, Infallible>(event),
+                        Err(error) => {
+                            warn!(error = %error.message, "failed to encode limit_exceeded event");
+                        }
+                    }
+                };
+                return Sse::new(rejection_stream).into_response();
+            }
+            Err(error) => {
+                warn!(error = %error, "Redis connection registry error, allowing connection");
+            }
+        }
+    }
+
+    // Create connection guard that unregisters on drop
+    let _connection_guard = if state.connection_registry.is_active() {
+        Some(ConnectionGuard::new(
+            state.connection_registry.clone(),
+            session.user_id.clone(),
+            device_id.clone(),
+        ))
+    } else {
+        None
+    };
+
+    // Check for persisted session revocation before establishing stream
+    match load_session_revocation(pool, &session.user_id, &session.session_id).await {
+        Ok(Some(revocation)) => {
+            let rejection_stream = stream! {
+                match sse_json_event("session_revoked", &json!({
+                    "session_id": session.session_id,
+                    "reason": revocation.reason,
+                    "timestamp": revocation.timestamp,
+                })) {
+                    Ok(event) => yield Ok::<Event, Infallible>(event),
+                    Err(error) => {
+                        warn!(error = %error.message, "failed to encode session_revoked event");
+                    }
+                }
+            };
+            return Sse::new(rejection_stream).into_response();
+        }
+        Ok(None) => {}
+        Err(error) => {
+            warn!(user_id = %session.user_id, error = %error, "failed to check session revocation");
+        }
+    }
+
+    // Subscribe to notifications
+    let (mut sync_rx, mut control_rx) = state.sync_pubsub.subscribe(&session.user_id).await;
+
+    let sync_pubsub = state.sync_pubsub.clone();
+    let connection_registry = state.connection_registry.clone();
     let sessions = state.sessions.clone();
-    let sync_control = state.sync_control.clone();
-    let sync_notify = state.sync_notify.clone();
     let session_user_id = session.user_id.clone();
     let session_id = session.session_id.clone();
     let session_token = session.token.clone();
     let connection_id = generate_sync_connection_id();
-    let poll_interval = Duration::from_millis(SYNC_STREAM_POLL_INTERVAL_MS);
     let heartbeat_interval = Duration::from_millis(SYNC_STREAM_HEARTBEAT_INTERVAL_MS);
+    let ttl_refresh_interval = Duration::from_millis(CONN_TTL_REFRESH_INTERVAL_MS);
 
     let stream = stream! {
-        let mut last_seen_seq = initial_seq;
-        let mut last_heartbeat_at = std::time::Instant::now();
-        let mut control_rx = sync_control.subscribe();
+        // Move connection guard into the stream so it's dropped when the stream ends
+        let _guard = _connection_guard;
 
+        let mut last_heartbeat_at = std::time::Instant::now();
+        let mut last_ttl_refresh_at = std::time::Instant::now();
+
+        // Send connected event
         match sse_json_event(
             "connected",
             &json!({
@@ -109,148 +167,104 @@ async fn sync_events(
             Ok(event) => yield Ok::<Event, Infallible>(event),
             Err(error) => {
                 warn!(error = %error.message, "failed to initialize sync event stream");
+                sync_pubsub.unsubscribe(&session_user_id).await;
                 return;
             }
         }
 
-        'outer: loop {
-            loop {
-                match control_rx.try_recv() {
-                    Ok(payload) => {
-                        if payload.user_id == session_user_id && payload.session_id == session_id {
-                            match sse_json_event("control", &payload) {
-                                Ok(event) => yield Ok(event),
-                                Err(error) => {
-                                    warn!(error = %error.message, "failed to encode session control payload");
-                                }
-                            }
-                            break 'outer;
-                        }
-                    }
-                    Err(broadcast::error::TryRecvError::Empty) => break,
-                    Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::TryRecvError::Closed) => break,
-                }
-            }
-
-            match load_session_revocation(&pool, &session_user_id, &session_id).await {
-                Ok(Some(revocation)) => {
-                    let payload = SessionControlPayload {
-                        control_type: "session_revoked".to_string(),
-                        user_id: session_user_id.clone(),
-                        session_id: session_id.clone(),
-                        timestamp: revocation.timestamp,
-                        reason: revocation.reason,
-                    };
-                    match sse_json_event("control", &payload) {
-                        Ok(event) => yield Ok(event),
-                        Err(error) => {
-                            warn!(error = %error.message, "failed to encode persisted session control payload");
-                        }
-                    }
-                    break 'outer;
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    warn!(user_id = %session_user_id, error = %error, "failed to load persisted session control payload");
-                    break 'outer;
-                }
-            }
-
-            if sessions.verify_token(&session_token).await.is_none() {
-                break;
-            }
-
-            let target_vault_ids = match fetch_user_vault_ids(&pool, &session_user_id).await {
-                Ok(vault_ids) => vault_ids,
-                Err(error) => {
-                    warn!(user_id = %session_user_id, error = %error.message, "failed to refresh sync vault access");
-                    break;
-                }
-            };
-            let events = match fetch_visible_events_since(
-                &pool,
-                &session_user_id,
-                &target_vault_ids,
-                last_seen_seq,
-                DEFAULT_EVENTS_LIMIT,
-            )
-            .await {
-                Ok(events) => events,
-                Err(error) => {
-                    warn!(user_id = %session_user_id, error = %error.message, "failed to poll sync events");
-                    break;
-                }
-            };
-
-            let has_more = events.len() > DEFAULT_EVENTS_LIMIT as usize;
-            let result_events = if has_more {
-                events.into_iter().take(DEFAULT_EVENTS_LIMIT as usize).collect::<Vec<_>>()
-            } else {
-                events
-            };
-
-            if !result_events.is_empty() {
-                for event in result_events {
-                    let next_seq = event.seq;
-                    let payload = match sync_stream_event_dto(event, &session_user_id) {
-                        Ok(payload) => payload,
-                        Err(error) => {
-                            warn!(user_id = %session_user_id, error = %error.message, "failed to decode sync event payload");
-                            break 'outer;
-                        }
-                    };
-
-                    match sse_json_event("sync", &payload) {
-                        Ok(sse_event) => {
-                            last_seen_seq = next_seq;
-                            yield Ok(sse_event);
-                        }
-                        Err(error) => {
-                            warn!(user_id = %session_user_id, error = %error.message, "failed to encode sync stream event");
-                            break 'outer;
-                        }
-                    }
-                }
-
-                if has_more {
-                    continue;
-                }
-            }
-
+        loop {
+            // Heartbeat
             if last_heartbeat_at.elapsed() >= heartbeat_interval {
+                // Verify session is still valid
+                if sessions.verify_token(&session_token).await.is_none() {
+                    break;
+                }
+
                 match sse_heartbeat_event() {
                     Ok(event) => yield Ok(event),
                     Err(error) => {
-                        warn!(user_id = %session_user_id, error = %error.message, "failed to encode sync heartbeat");
+                        warn!(error = %error.message, "failed to encode heartbeat");
                         break;
                     }
                 }
                 last_heartbeat_at = std::time::Instant::now();
             }
 
+            // Redis connection TTL refresh
+            if connection_registry.is_active() && last_ttl_refresh_at.elapsed() >= ttl_refresh_interval {
+                connection_registry.refresh_ttl(&session_user_id).await;
+                last_ttl_refresh_at = std::time::Instant::now();
+            }
+
+            // Wait for a notification or heartbeat timeout
             tokio::select! {
-                control = control_rx.recv() => {
-                    match control {
-                        Ok(payload) => {
-                            if payload.user_id == session_user_id && payload.session_id == session_id {
-                                match sse_json_event("control", &payload) {
+                result = sync_rx.recv() => {
+                    match result {
+                        Ok(()) => {
+                            // Something changed — tell client to fetch
+                            match sse_json_event("sync", &json!({
+                                "timestamp": timestamp_millis(OffsetDateTime::now_utc()),
+                            })) {
+                                Ok(event) => yield Ok(event),
+                                Err(error) => {
+                                    warn!(error = %error.message, "failed to encode sync ping");
+                                    break;
+                                }
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            // Missed some notifications — just send one sync ping
+                            match sse_json_event("sync", &json!({
+                                "timestamp": timestamp_millis(OffsetDateTime::now_utc()),
+                            })) {
+                                Ok(event) => yield Ok(event),
+                                Err(error) => {
+                                    warn!(error = %error.message, "failed to encode sync ping");
+                                    break;
+                                }
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+                result = control_rx.recv() => {
+                    match result {
+                        Ok(SyncNotification::SessionRevoked { session_id: revoked_id, reason }) => {
+                            if revoked_id == session_id {
+                                match sse_json_event("session_revoked", &json!({
+                                    "session_id": revoked_id,
+                                    "reason": reason,
+                                    "timestamp": timestamp_millis(OffsetDateTime::now_utc()),
+                                })) {
                                     Ok(event) => yield Ok(event),
                                     Err(error) => {
-                                        warn!(error = %error.message, "failed to encode session control payload");
+                                        warn!(error = %error.message, "failed to encode session_revoked");
                                     }
                                 }
                                 break;
                             }
                         }
+                        Ok(SyncNotification::Sync) => {
+                            // Shouldn't arrive on control channel, but handle gracefully
+                            match sse_json_event("sync", &json!({
+                                "timestamp": timestamp_millis(OffsetDateTime::now_utc()),
+                            })) {
+                                Ok(event) => yield Ok(event),
+                                Err(_) => break,
+                            }
+                        }
                         Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(broadcast::error::RecvError::Closed) => {}
+                        Err(broadcast::error::RecvError::Closed) => break,
                     }
                 }
-                _ = sync_notify.notified() => {}
-                _ = sleep(poll_interval) => {}
+                _ = tokio::time::sleep(heartbeat_interval) => {
+                    // Heartbeat timeout — loop back to top for heartbeat/TTL handling
+                }
             }
         }
+
+        // Cleanup
+        sync_pubsub.unsubscribe(&session_user_id).await;
     };
 
     Sse::new(stream).into_response()

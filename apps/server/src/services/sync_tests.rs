@@ -66,15 +66,18 @@ where
 }
 
 #[test]
-fn session_control_payload_builder_sets_expected_fields() {
-    let payload =
-        SessionControlPayload::session_revoked("user-1", "session-1", Some("device_revoked"));
+fn sync_notification_session_revoked_serializes_correctly() {
+    use crate::services::sync_pubsub::SyncNotification;
 
-    assert_eq!(payload.control_type, "session_revoked");
-    assert_eq!(payload.user_id, "user-1");
-    assert_eq!(payload.session_id, "session-1");
-    assert_eq!(payload.reason.as_deref(), Some("device_revoked"));
-    assert!(payload.timestamp > 0);
+    let notification = SyncNotification::SessionRevoked {
+        session_id: "session-1".to_string(),
+        reason: Some("device_revoked".to_string()),
+    };
+
+    let json = serde_json::to_value(&notification).expect("should serialize");
+    assert_eq!(json["type"], "session_revoked");
+    assert_eq!(json["session_id"], "session-1");
+    assert_eq!(json["reason"], "device_revoked");
 }
 
 #[test]
@@ -153,20 +156,38 @@ fn sync_event_dto_parses_metadata_and_rejects_invalid_json() {
 }
 
 #[tokio::test]
-async fn sync_control_broker_publishes_session_revocations() {
-    let broker = SyncControlBroker::default();
-    let mut receiver = broker.subscribe();
+async fn sync_pubsub_broadcasts_sync_notifications() {
+    use crate::services::sync_pubsub::SyncPubSub;
 
-    broker.publish_session_revoked("user-1", "session-1", "device_revoked");
+    let pubsub = SyncPubSub::new();
+    let (mut sync_rx, _control_rx) = pubsub.subscribe("user-1").await;
 
-    let payload = receiver
-        .recv()
-        .await
-        .expect("sync control payload should be received");
-    assert_eq!(payload.control_type, "session_revoked");
-    assert_eq!(payload.user_id, "user-1");
-    assert_eq!(payload.session_id, "session-1");
-    assert_eq!(payload.reason.as_deref(), Some("device_revoked"));
+    pubsub.notify_sync();
+
+    let result = sync_rx.recv().await;
+    assert!(result.is_ok(), "sync notification should be received");
+}
+
+#[tokio::test]
+async fn sync_pubsub_broadcasts_session_revocation() {
+    use crate::services::sync_pubsub::{SyncNotification, SyncPubSub};
+
+    let pubsub = SyncPubSub::new();
+    let (_sync_rx, mut control_rx) = pubsub.subscribe("user-1").await;
+
+    pubsub.notify_session_revoked("user-1", "session-1", "device_revoked");
+
+    // Give the spawned task a moment to send
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    let notification = control_rx.try_recv().expect("control notification should be received");
+    match notification {
+        SyncNotification::SessionRevoked { session_id, reason } => {
+            assert_eq!(session_id, "session-1");
+            assert_eq!(reason.as_deref(), Some("device_revoked"));
+        }
+        _ => panic!("expected SessionRevoked notification"),
+    }
 }
 
 #[test]

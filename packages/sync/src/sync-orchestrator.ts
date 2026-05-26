@@ -69,6 +69,9 @@ export class SyncOrchestrator {
 			onSessionRevoked: (payload) => {
 				void options.onSessionRevoked?.(payload);
 			},
+			onSyncPing: () => {
+				void this.handleSyncPing();
+			},
 		});
 
 		this.unsubscribeQueue = this.options.outboundQueue.subscribe(() => {
@@ -153,6 +156,15 @@ export class SyncOrchestrator {
 		}
 	}
 
+	private async handleSyncPing(): Promise<void> {
+		try {
+			await this.runCatchUp();
+			await this.drainQueue();
+		} catch (error) {
+			console.error("[SyncOrchestrator] Sync ping handling failed:", error);
+		}
+	}
+
 	private async runCatchUp(): Promise<void> {
 		if (this.catchUpInFlight) {
 			return;
@@ -161,14 +173,11 @@ export class SyncOrchestrator {
 
 		try {
 			const cursor = await this.syncManager.getStoredLastSyncCursor();
-			if (!cursor) {
-				return;
-			}
 
 			let fullRefreshHandled = false;
 			const result = await runCatchUp({
 				client: this.options.rpcClient,
-				initialCursor: cursor,
+				initialCursor: cursor ?? { id: "" },
 				shouldProcessEvent: (event) =>
 					event.clientId !== this.options.outboundQueue.getClientId() &&
 					!this.options.outboundQueue.hasPendingForItem(event.entityId),

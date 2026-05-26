@@ -284,17 +284,27 @@ async function readStream(body: ReadableStream<Uint8Array>): Promise<void> {
 
 /**
  * Process a single SSE event payload.
+ *
+ * The server sends lightweight pings:
+ *   event: sync             → something changed, catch up via getEventsSince
+ *   event: session_revoked  → a session was revoked
+ *   event: connected        → connection established
  */
 async function processEvent(eventStr: string): Promise<void> {
 	const lines = eventStr.trim().split("\n");
 	let data = "";
+	let sseEventType = "";
 
 	for (const line of lines) {
 		if (line.startsWith(":")) {
 			continue; // Skip heartbeats/comments.
 		}
-		if (line.startsWith("data: ")) {
+		if (line.startsWith("event: ")) {
+			sseEventType = line.slice(7);
+		} else if (line.startsWith("data: ")) {
 			data = line.slice(6);
+		} else if (line.startsWith("data:")) {
+			data = line.slice(5).trimStart();
 		}
 	}
 
@@ -308,20 +318,33 @@ async function processEvent(eventStr: string): Promise<void> {
 			return;
 		}
 
-		const eventType = (parsed as { type?: unknown }).type;
-		if (eventType === "connected") {
+		const jsonType = (parsed as { type?: unknown }).type;
+
+		// Handle connection message
+		if (sseEventType === "connected" || jsonType === "connected") {
 			return;
 		}
 
-		if (!isSyncEventPayload(parsed)) {
-			console.warn(
-				"[sync-manager] Ignoring malformed sync event payload",
-				parsed,
-			);
+		// Handle sync ping — catch up on missed events
+		if (sseEventType === "sync") {
+			await catchUpMissedEvents();
+			sendRuntimeMessage({ type: "SYNC_FULL_REFRESH_REQUIRED" });
 			return;
 		}
 
-		await handleSyncEvent(parsed);
+		// Handle session revocation
+		if (sseEventType === "session_revoked") {
+			// The extension doesn't handle session revocation via SSE currently,
+			// but notify the UI in case it wants to react.
+			sendRuntimeMessage({ type: "SYNC_FULL_REFRESH_REQUIRED" });
+			return;
+		}
+
+		// Legacy: handle full sync event payloads (backward compat)
+		if (isSyncEventPayload(parsed)) {
+			await handleSyncEvent(parsed);
+			return;
+		}
 	} catch (error) {
 		console.error("[sync-manager] Failed to parse SSE event:", error, data);
 	}

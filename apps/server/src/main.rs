@@ -3,8 +3,8 @@ use std::env;
 use axum::{middleware, routing::get, Json, Router};
 use bittery_server::{
     create_public_http_router, create_rpc_router, create_sync_http_router, db,
-    edge_http_middleware, load_edge_http_config, rpc_request_context_middleware,
-    rpc_request_guard_middleware, AppState, JobRunner,
+    edge_http_middleware, init_redis, load_edge_http_config, rpc_request_context_middleware,
+    rpc_request_guard_middleware, AppState, JobRunner, SyncPubSub,
 };
 use serde_json::json;
 use tokio::net::TcpListener;
@@ -32,13 +32,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let bind_address = read_bind_address();
     let edge_http_config = load_edge_http_config().map_err(std::io::Error::other)?;
-    let app_state = match db::connect_from_env().await? {
+    let redis_pool = init_redis().await;
+    let mut app_state = match db::connect_from_env().await? {
         Some(pool) => {
             db::run_migrations(&pool).await?;
             AppState::from_pool(pool)
         }
         None => AppState::default(),
     };
+    app_state = app_state.with_redis(redis_pool.clone());
+    if let Some(ref redis) = redis_pool {
+        app_state
+            .connection_registry
+            .load_scripts()
+            .await
+            .expect("failed to load Redis Lua scripts");
+        let sync_pubsub = SyncPubSub::with_redis(redis.clone()).await;
+        let sync_pubsub = std::sync::Arc::new(sync_pubsub);
+        sync_pubsub.start_dispatch();
+        app_state = app_state.with_sync_pubsub((*sync_pubsub).clone());
+    }
     let _job_runner = app_state
         .db_pool
         .clone()

@@ -24,10 +24,6 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function toSseEvent(event: SyncEvent): string {
-	return `data: ${JSON.stringify(event)}\n\n`;
-}
-
 function buildEvent(partial: Partial<SyncEvent> = {}): SyncEvent {
 	return {
 		id: partial.id ?? `evt_${Math.random().toString(36).slice(2, 8)}`,
@@ -97,18 +93,16 @@ describe("sync engine regressions", () => {
 			outboundQueue,
 		});
 
-		(orchestrator as any).syncManager.processEvent(
-			toSseEvent(
-				buildEvent({
-					id: "evt_11",
-					clientId: "other_client",
-					type: "item_updated",
-					entityId: "item_1",
-				}),
-			),
+		// Directly invoke handleEvent to test delta failure behavior
+		await (orchestrator as any).handleEvent(
+			buildEvent({
+				id: "evt_11",
+				clientId: "other_client",
+				type: "item_updated",
+				entityId: "item_1",
+			}),
 		);
 
-		await sleep(650);
 		const cursor = await storage.get<{ id: string }>("lastSyncCursor");
 		expect(cursor?.id).toBe("evt_10");
 
@@ -247,54 +241,33 @@ describe("sync engine regressions", () => {
 		orchestrator.dispose();
 	});
 
-	test("preserves bulk_import metadata when deduplicating vault_updated events", async () => {
+	test("calls onSyncPing when receiving sync ping event", async () => {
 		const storage = new MemoryStorage();
-		const received: SyncEvent[] = [];
+		let pingCount = 0;
+
 		const manager = createSyncManager({
 			serverUrl: "http://localhost:3000",
 			getAuthToken: async () => "token",
 			clientId: "self_client",
 			storage,
-			onEvent: (event) => {
-				received.push(event);
+			onSyncPing: () => {
+				pingCount++;
 			},
 		});
 
 		(manager as any).processEvent(
-			toSseEvent(
-				buildEvent({
-					id: "evt_1",
-					type: "vault_updated",
-					entityId: "vault_1",
-					entityType: "vault",
-					metadata: { reason: "bulk_import" },
-				}),
-			),
+			`event: sync\ndata: ${JSON.stringify({ timestamp: Date.now() })}\n\n`,
 		);
 		(manager as any).processEvent(
-			toSseEvent(
-				buildEvent({
-					id: "evt_2",
-					type: "vault_updated",
-					entityId: "vault_1",
-					entityType: "vault",
-					metadata: {},
-				}),
-			),
+			`event: sync\ndata: ${JSON.stringify({ timestamp: Date.now() })}\n\n`,
 		);
 
-		await sleep(650);
-
-		expect(received.length).toBe(1);
-		expect(received[0]?.id).toBe("evt_2");
-		expect(received[0]?.metadata?.reason).toBe("bulk_import");
-
-		const storedCursor = await storage.get<{ id: string }>("lastSyncCursor");
-		expect(storedCursor).toBeNull();
+		expect(pingCount).toBe(2);
+		expect(manager.getLastEventCursor()).toBeNull();
 		manager.disconnect();
 	});
 
-	test("routes session_revoked control events to onSessionRevoked only", async () => {
+	test("routes session_revoked events to onSessionRevoked only", async () => {
 		const storage = new MemoryStorage();
 		const receivedSyncEvents: SyncEvent[] = [];
 		const revokedPayloads: Array<{
@@ -318,6 +291,50 @@ describe("sync engine regressions", () => {
 			},
 		});
 
+		// New format: event: session_revoked with session_id (snake_case)
+		(manager as any).processEvent(
+			`event: session_revoked\ndata: ${JSON.stringify({
+				session_id: "session_1",
+				reason: "device_revoked",
+				timestamp: 123456,
+			})}\n\n`,
+		);
+
+		expect(revokedPayloads).toEqual([
+			{
+				type: "session_revoked",
+				userId: "",
+				sessionId: "session_1",
+				timestamp: 123456,
+				reason: "device_revoked",
+			},
+		]);
+		expect(receivedSyncEvents).toHaveLength(0);
+		expect(manager.getLastEventCursor()).toBeNull();
+		manager.disconnect();
+	});
+
+	test("routes legacy control events to onSessionRevoked", async () => {
+		const storage = new MemoryStorage();
+		const revokedPayloads: Array<{
+			type: string;
+			userId: string;
+			sessionId: string;
+			timestamp: number;
+			reason?: string;
+		}> = [];
+
+		const manager = createSyncManager({
+			serverUrl: "http://localhost:3000",
+			getAuthToken: async () => "token",
+			clientId: "self_client",
+			storage,
+			onSessionRevoked: (payload) => {
+				revokedPayloads.push(payload);
+			},
+		});
+
+		// Legacy format: event: control with type: session_revoked
 		(manager as any).processEvent(
 			`event: control\ndata: ${JSON.stringify({
 				type: "session_revoked",
@@ -337,8 +354,6 @@ describe("sync engine regressions", () => {
 				reason: "device_revoked",
 			},
 		]);
-		expect(receivedSyncEvents).toHaveLength(0);
-		expect(manager.getLastEventCursor()).toBeNull();
 		manager.disconnect();
 	});
 

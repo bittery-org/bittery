@@ -6,7 +6,6 @@ use sqlx::PgPool;
 use sqlx::{query, query_as};
 use std::sync::LazyLock;
 use time::OffsetDateTime;
-use tokio::sync::broadcast;
 use ts_rs::TS;
 
 use crate::{
@@ -190,58 +189,7 @@ pub struct BootstrapItemsResponse {
 
 pub(crate) const DEFAULT_EVENTS_LIMIT: i32 = 100;
 const DEFAULT_BOOTSTRAP_LIMIT: i32 = 500;
-pub(crate) const SYNC_STREAM_POLL_INTERVAL_MS: u64 = 2_000;
 pub(crate) const SYNC_STREAM_HEARTBEAT_INTERVAL_MS: u64 = 15_000;
-const SYNC_CONTROL_CHANNEL_CAPACITY: usize = 256;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionControlPayload {
-    #[serde(rename = "type")]
-    pub control_type: String,
-    pub user_id: String,
-    pub session_id: String,
-    pub timestamp: i64,
-    pub reason: Option<String>,
-}
-
-impl SessionControlPayload {
-    fn session_revoked(user_id: &str, session_id: &str, reason: Option<&str>) -> Self {
-        Self {
-            control_type: "session_revoked".to_string(),
-            user_id: user_id.to_string(),
-            session_id: session_id.to_string(),
-            timestamp: timestamp_millis(OffsetDateTime::now_utc()),
-            reason: reason.map(ToOwned::to_owned),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct SyncControlBroker {
-    sender: broadcast::Sender<SessionControlPayload>,
-}
-
-impl Default for SyncControlBroker {
-    fn default() -> Self {
-        let (sender, _) = broadcast::channel(SYNC_CONTROL_CHANNEL_CAPACITY);
-        Self { sender }
-    }
-}
-
-impl SyncControlBroker {
-    pub fn subscribe(&self) -> broadcast::Receiver<SessionControlPayload> {
-        self.sender.subscribe()
-    }
-
-    pub fn publish_session_revoked(&self, user_id: &str, session_id: &str, reason: &str) {
-        let _ = self.sender.send(SessionControlPayload::session_revoked(
-            user_id,
-            session_id,
-            Some(reason),
-        ));
-    }
-}
 
 pub(crate) async fn check_conflict(
     pool: &PgPool,
@@ -658,33 +606,6 @@ fn sync_event_dto(event: DbSyncEventRow) -> Result<SyncEventDto, AppError> {
     })
 }
 
-pub(crate) fn sync_stream_event_dto(
-    event: DbSyncEventRow,
-    recipient_user_id: &str,
-) -> Result<SyncEventDto, AppError> {
-    let is_own_event =
-        event.event_type != "vault_access_revoked" && recipient_user_id == event.user_id;
-    let origin_client_id = event.client_id.clone();
-    let mut dto = sync_event_dto(event)?;
-    let mut metadata = match dto.metadata.take() {
-        Some(serde_json::Value::Object(map)) => map,
-        Some(_) | None => serde_json::Map::new(),
-    };
-
-    metadata.insert(
-        "isOwnEvent".to_string(),
-        serde_json::Value::Bool(is_own_event),
-    );
-    metadata.insert(
-        "originClientId".to_string(),
-        origin_client_id
-            .map(serde_json::Value::String)
-            .unwrap_or(serde_json::Value::Null),
-    );
-    dto.metadata = Some(serde_json::Value::Object(metadata));
-
-    Ok(dto)
-}
 
 pub(crate) fn sse_json_event<T: Serialize>(
     event_name: &str,
