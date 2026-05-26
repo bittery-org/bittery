@@ -1,10 +1,10 @@
 use qubit::{handler, server::Router};
 
 use crate::{
+    config::db_pool,
+    error::AppError,
     services::audit::{self, TeamEventsInput, TeamEventsResponse},
     services::auth::RefreshSessionContext,
-    error::AppError,
-    config::db_pool,
     AppState,
 };
 

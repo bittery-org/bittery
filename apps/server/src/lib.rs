@@ -10,33 +10,38 @@ pub(crate) mod services;
 #[cfg(test)]
 pub(crate) mod test_support;
 
+use config::format_timestamp;
 use qubit::{handler, Router};
 use sqlx::PgPool;
-use config::format_timestamp;
 use ts_rs::TS;
 
 use serde::Serialize;
+use std::sync::Arc;
+use tokio::sync::Notify;
 
+pub use http::middleware::{
+    edge_http_middleware, load_edge_http_config, rpc_request_guard_middleware,
+};
+pub use http::public::create_public_http_router;
+pub use http::sync_sse::create_sync_http_router;
+pub use jobs::JobRunner;
 pub use rpc::audit::create_audit_router;
-pub use services::auth::rpc_request_context_middleware;
-pub use services::session::{SeededSession, SessionService};
 pub use rpc::auth::create_auth_router;
 pub use rpc::billing::create_billing_router;
-pub use http::middleware::{edge_http_middleware, load_edge_http_config, rpc_request_guard_middleware};
-pub use jobs::JobRunner;
-pub use http::public::create_public_http_router;
 pub use rpc::share::create_share_router;
 pub use rpc::sync::create_sync_router;
-pub use http::sync_sse::create_sync_http_router;
-pub use services::sync::SyncControlBroker;
 pub use rpc::team::create_team_router;
 pub use rpc::vault::create_vault_router;
+pub use services::auth::rpc_request_context_middleware;
+pub use services::session::{SeededSession, SessionService};
+pub use services::sync::SyncControlBroker;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db_pool: Option<PgPool>,
     pub sessions: SessionService,
     pub sync_control: SyncControlBroker,
+    pub sync_notify: Arc<Notify>,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -63,6 +68,7 @@ impl Default for AppState {
             db_pool: None,
             sessions: SessionService::default(),
             sync_control: SyncControlBroker::default(),
+            sync_notify: Arc::new(Notify::new()),
         }
     }
 }
@@ -73,7 +79,13 @@ impl AppState {
             db_pool: Some(pool.clone()),
             sessions: SessionService::from_pool(pool),
             sync_control: SyncControlBroker::default(),
+            sync_notify: Arc::new(Notify::new()),
         }
+    }
+
+    /// Wake all SSE sync connections so they check for new events immediately.
+    pub fn notify_sync(&self) {
+        self.sync_notify.notify_waiters();
     }
 
     pub async fn from_env() -> Result<Self, sqlx::Error> {
@@ -81,6 +93,20 @@ impl AppState {
             Some(pool) => Ok(Self::from_pool(pool)),
             _ => Ok(Self::default()),
         }
+    }
+}
+
+/// Extension trait: on `Ok`, wake SSE sync connections.
+pub(crate) trait NotifySyncExt<T> {
+    fn notify_sync(self, state: &AppState) -> Self;
+}
+
+impl<T> NotifySyncExt<T> for Result<T, error::AppError> {
+    fn notify_sync(self, state: &AppState) -> Self {
+        if self.is_ok() {
+            state.notify_sync();
+        }
+        self
     }
 }
 

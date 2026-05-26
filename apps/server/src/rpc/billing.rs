@@ -1,14 +1,14 @@
 use qubit::{handler, server::Router};
 
 use crate::{
+    config::db_pool,
+    error::AppError,
     services::auth::RefreshSessionContext,
     services::billing::{
         self, AttachmentUsageResponse, BillingEntitlementsResponse, BillingStatusResponse,
         CheckoutPlanInput, CheckoutSessionResponse, PortalSessionResponse, SyncSeatsInput,
         SyncSeatsResponse, TeamSeatInvoicePreviewResponse,
     },
-    error::AppError,
-    config::db_pool,
     AppState,
 };
 

@@ -16,7 +16,7 @@ pub async fn load_share_links_for_item(
 	.bind(item_id)
 	.fetch_all(pool)
 	.await
-	.map_err(|_| AppError::internal("Failed to load share links"))
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load share links"); AppError::internal("Failed to load share links") })
 }
 
 pub async fn load_public_share_link_by_token(
@@ -29,7 +29,7 @@ pub async fn load_public_share_link_by_token(
 	.bind(token)
 	.fetch_optional(pool)
 	.await
-	.map_err(|_| AppError::internal("Failed to load public share link"))
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load public share link"); AppError::internal("Failed to load public share link") })
 }
 
 pub async fn load_allowed_emails_for_links(

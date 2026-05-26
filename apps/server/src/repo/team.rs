@@ -13,5 +13,5 @@ pub async fn load_team_membership_actor(
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|_| AppError::internal("Failed to load team membership"))
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load team membership"); AppError::internal("Failed to load team membership") })
 }

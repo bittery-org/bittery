@@ -723,6 +723,7 @@ dependencies = [
  "hmac 0.12.1",
  "jsonrpsee",
  "jsonwebtoken",
+ "parking_lot",
  "qubit",
  "rand 0.8.6",
  "regex",

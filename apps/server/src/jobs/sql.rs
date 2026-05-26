@@ -96,12 +96,12 @@ pub async fn cleanup_pending_attachment_uploads(
             }
         }
 
-        query(
-            "DELETE FROM pending_attachment_upload WHERE consumed_at IS NULL AND expires_at < $1",
-        )
-        .bind(now)
-        .execute(pool)
-        .await?;
+        let expired_ids: Vec<String> = expired_reservations.iter().map(|r| r.id.clone()).collect();
+
+        query("DELETE FROM pending_attachment_upload WHERE id = ANY($1)")
+            .bind(&expired_ids)
+            .execute(pool)
+            .await?;
 
         total_deleted += expired_reservations.len() as u64;
 
@@ -184,18 +184,34 @@ pub async fn cleanup_tombstones(pool: &PgPool) -> Result<u64, sqlx::Error> {
             .collect();
 
         let mut transaction = pool.begin().await?;
-        for (id, entity_id, vault_id, user_id, version, metadata) in &event_rows {
+
+        if !event_rows.is_empty() {
+            let mut ids = Vec::with_capacity(event_rows.len());
+            let mut entity_ids = Vec::with_capacity(event_rows.len());
+            let mut vault_ids = Vec::with_capacity(event_rows.len());
+            let mut user_ids = Vec::with_capacity(event_rows.len());
+            let mut versions = Vec::with_capacity(event_rows.len());
+            let mut metadatas = Vec::with_capacity(event_rows.len());
+            for (id, entity_id, vault_id, user_id, version, metadata) in &event_rows {
+                ids.push(id.as_str());
+                entity_ids.push(entity_id.as_str());
+                vault_ids.push(vault_id.as_str());
+                user_ids.push(user_id.as_str());
+                versions.push(*version);
+                metadatas.push(metadata.as_str());
+            }
+
             query(
-				"INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, metadata) VALUES ($1, $2::sync_event_type, $3, $4::sync_entity_type, $5, $6, $7, $8)",
+				"INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, metadata) SELECT UNNEST($1::text[]), $2::sync_event_type, UNNEST($3::text[]), $4::sync_entity_type, UNNEST($5::text[]), UNNEST($6::text[]), UNNEST($7::int[]), UNNEST($8::text[])",
 			)
-			.bind(id)
+			.bind(&ids)
 			.bind("item_permanently_deleted")
-			.bind(entity_id)
+			.bind(&entity_ids)
 			.bind("item")
-			.bind(vault_id)
-			.bind(user_id)
-			.bind(version)
-			.bind(metadata)
+			.bind(&vault_ids)
+			.bind(&user_ids)
+			.bind(&versions)
+			.bind(&metadatas)
 			.execute(transaction.as_mut())
 			.await?;
         }

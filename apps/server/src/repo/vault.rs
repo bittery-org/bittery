@@ -43,5 +43,5 @@ pub async fn load_user_vault_summaries(
 	.bind(user_id)
 	.fetch_all(pool)
 	.await
-	.map_err(|_| AppError::internal("Failed to load user vaults"))
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load user vaults"); AppError::internal("Failed to load user vaults") })
 }

@@ -16,9 +16,14 @@ use serde_json::json;
 use tracing::warn;
 
 use crate::{
-    services::billing::{is_self_hosted_mode, is_stripe_webhook_configured, process_stripe_webhook_event},
-    integrations::favicon::{fetch_and_store_favicon, get_fetched_favicon, normalize_favicon_domain},
+    integrations::favicon::{
+        fetch_and_store_favicon, get_fetched_favicon, normalize_favicon_domain,
+    },
     integrations::storage::create_presigned_download,
+    services::billing::{
+        is_self_hosted_mode, is_stripe_webhook_configured, process_stripe_webhook_event,
+        StripeWebhookError,
+    },
     AppState,
 };
 
@@ -39,24 +44,32 @@ fn http_client() -> &'static Client {
 
 fn is_public_storage_key_allowed(key: &str) -> bool {
     let normalized_key = key.trim().trim_start_matches('/');
-    !normalized_key.is_empty()
-        && (normalized_key.starts_with("teams/") || normalized_key.starts_with("vaults/"))
+    if normalized_key.is_empty() {
+        return false;
+    }
+    let segments: Vec<&str> = normalized_key.splitn(3, '/').collect();
+    // Require at least prefix/{id}/{filename} (3 segments)
+    matches!(segments.as_slice(), ["teams" | "vaults", id, _rest] if !id.is_empty())
 }
 
 fn cache_control_header(value: &'static str) -> [(axum::http::header::HeaderName, HeaderValue); 1] {
     [(CACHE_CONTROL, HeaderValue::from_static(value))]
 }
 
+fn json_error(status: StatusCode, message: &str) -> Response {
+    (status, Json(json!({ "error": message }))).into_response()
+}
+
 async fn cdn_asset(Path(key): Path<String>) -> Response {
     if !is_public_storage_key_allowed(&key) {
-        return (StatusCode::NOT_FOUND, "Not Found").into_response();
+        return json_error(StatusCode::NOT_FOUND, "Not Found");
     }
 
     let signed_url = match create_presigned_download(&key, None).await {
         Ok(signed_url) => signed_url,
         Err(error) => {
             warn!(?error, key, "failed to create presigned download url");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Storage not configured").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "Storage not configured");
         }
     };
 
@@ -64,7 +77,7 @@ async fn cdn_asset(Path(key): Path<String>) -> Response {
         Ok(response) => response,
         Err(error) => {
             warn!(?error, key, "failed to fetch public storage asset");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Storage fetch failed").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "Storage fetch failed");
         }
     };
 
@@ -74,7 +87,7 @@ async fn cdn_asset(Path(key): Path<String>) -> Response {
         } else {
             StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY)
         };
-        return (status, "Not Found").into_response();
+        return json_error(status, "Not Found");
     }
 
     let status = StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::OK);
@@ -86,7 +99,7 @@ async fn cdn_asset(Path(key): Path<String>) -> Response {
         Ok(body) => body,
         Err(error) => {
             warn!(?error, key, "failed to read public storage asset body");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "Failed to read asset");
         }
     };
 
@@ -109,7 +122,6 @@ async fn favicon(Path(domain): Path<String>, State(app_state): State<AppState>) 
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             cache_control_header(FAVICON_CACHE_CONTROL),
-            "Database is not configured",
         )
             .into_response();
     };
@@ -126,7 +138,7 @@ async fn favicon(Path(domain): Path<String>, State(app_state): State<AppState>) 
         Ok(None) => {}
         Err(error) => {
             warn!(?error, domain, "failed to read favicon from database");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "Failed to read favicon");
         }
     }
 
@@ -141,7 +153,7 @@ async fn favicon(Path(domain): Path<String>, State(app_state): State<AppState>) 
         }
         Err(error) => {
             warn!(?error, domain, "failed to fetch favicon");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch favicon");
         }
     }
 
@@ -173,23 +185,21 @@ async fn stripe_webhook(
     body: String,
 ) -> Response {
     if is_self_hosted_mode() {
-        return (StatusCode::NOT_FOUND, "Not Found").into_response();
+        return json_error(StatusCode::NOT_FOUND, "Not Found");
     }
 
     if !is_stripe_webhook_configured() {
-        return (
+        return json_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "Stripe webhook not configured",
-        )
-            .into_response();
+        );
     }
 
     let Some(pool) = app_state.db_pool.as_ref() else {
-        return (
+        return json_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "Database is not configured",
-        )
-            .into_response();
+        );
     };
 
     let signature_header = headers
@@ -204,7 +214,12 @@ async fn stripe_webhook(
         .into_response(),
         Err(error) => {
             warn!(?error, "stripe webhook processing failed");
-            (StatusCode::BAD_REQUEST, "Invalid Stripe webhook").into_response()
+            match &error {
+                StripeWebhookError::Database(_) => {
+                    json_error(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                }
+                _ => json_error(StatusCode::BAD_REQUEST, "Invalid Stripe webhook"),
+            }
         }
     }
 }

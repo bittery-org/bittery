@@ -27,7 +27,7 @@ pub async fn load_optional_billing_state(
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|_| AppError::internal("Failed to load billing actor"))
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load billing actor"); AppError::internal("Failed to load billing actor") })
 }
 
 pub async fn load_billing_contact(
@@ -42,7 +42,10 @@ pub async fn load_billing_contact(
     .bind(team_id)
     .fetch_optional(pool)
     .await
-    .map_err(|_| AppError::internal("Failed to load billing contact"))
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to load billing contact");
+        AppError::internal("Failed to load billing contact")
+    })
 }
 
 pub async fn count_team_members(pool: &PgPool, team_id: &str) -> Result<i64, AppError> {
@@ -50,7 +53,10 @@ pub async fn count_team_members(pool: &PgPool, team_id: &str) -> Result<i64, App
         .bind(team_id)
         .fetch_one(pool)
         .await
-        .map_err(|_| AppError::internal("Failed to count team members"))
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to count team members");
+            AppError::internal("Failed to count team members")
+        })
 }
 
 pub async fn get_committed_attachment_storage_bytes(
@@ -63,5 +69,5 @@ pub async fn get_committed_attachment_storage_bytes(
 	.bind(team_id)
 	.fetch_one(pool)
 	.await
-	.map_err(|_| AppError::internal("Failed to load attachment usage"))
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load attachment usage"); AppError::internal("Failed to load attachment usage") })
 }

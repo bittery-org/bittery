@@ -1,9 +1,9 @@
 use qubit::{handler, server::Router};
 
 use crate::{
-    services::auth::{AppContext, RefreshSessionContext},
-    error::{AppError},
     config::db_pool,
+    error::AppError,
+    services::auth::{AppContext, RefreshSessionContext},
     services::share::{self, *},
     AppState,
 };

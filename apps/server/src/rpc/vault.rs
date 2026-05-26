@@ -1,17 +1,15 @@
 use qubit::{handler, server::Router};
 
 use crate::{
-    services::auth::RefreshSessionContext,
-    error::AppError,
     config::db_pool,
+    error::AppError,
+    services::auth::RefreshSessionContext,
     services::vault::{self, member_handlers, *},
-    AppState,
+    AppState, NotifySyncExt,
 };
 
 #[handler(query)]
-pub async fn list(
-    ctx: RefreshSessionContext,
-) -> Result<Vec<VaultListEntryResponse>, AppError> {
+pub async fn list(ctx: RefreshSessionContext) -> Result<Vec<VaultListEntryResponse>, AppError> {
     let pool = db_pool(&ctx.app_state)?;
     vault::list_vaults(pool, &ctx.session.user_id).await
 }
@@ -59,6 +57,7 @@ pub async fn createAttachment(
         input,
     )
     .await
+    .notify_sync(&ctx.app_state)
 }
 
 #[allow(non_snake_case)]
@@ -95,6 +94,7 @@ pub async fn updateAttachment(
         input,
     )
     .await
+    .notify_sync(&ctx.app_state)
 }
 
 #[allow(non_snake_case)]
@@ -111,6 +111,7 @@ pub async fn deleteAttachment(
         input,
     )
     .await
+    .notify_sync(&ctx.app_state)
 }
 
 #[handler(mutation)]
@@ -126,6 +127,7 @@ pub async fn create(
         input,
     )
     .await
+    .notify_sync(&ctx.app_state)
 }
 
 #[handler(mutation)]
@@ -141,6 +143,7 @@ pub async fn update(
         input,
     )
     .await
+    .notify_sync(&ctx.app_state)
 }
 
 #[allow(non_snake_case)]
@@ -157,6 +160,7 @@ pub async fn convertType(
         input,
     )
     .await
+    .notify_sync(&ctx.app_state)
 }
 
 #[handler(mutation)]
@@ -172,6 +176,7 @@ pub async fn delete(
         input,
     )
     .await
+    .notify_sync(&ctx.app_state)
 }
 
 #[allow(non_snake_case)]
@@ -219,7 +224,9 @@ pub async fn createItem(
     input: CreateItemInput,
 ) -> Result<CreateItemResponse, AppError> {
     let pool = db_pool(&ctx.app_state)?;
-    vault::create_vault_item(pool, &ctx.session.user_id, input).await
+    vault::create_vault_item(pool, &ctx.session.user_id, input)
+        .await
+        .notify_sync(&ctx.app_state)
 }
 
 #[allow(non_snake_case)]
@@ -229,7 +236,9 @@ pub async fn bulkImportItems(
     input: BulkImportItemsInput,
 ) -> Result<BulkImportItemsResponse, AppError> {
     let pool = db_pool(&ctx.app_state)?;
-    vault::bulk_import_vault_items(pool, &ctx.session.user_id, input).await
+    vault::bulk_import_vault_items(pool, &ctx.session.user_id, input)
+        .await
+        .notify_sync(&ctx.app_state)
 }
 
 #[allow(non_snake_case)]
@@ -239,7 +248,9 @@ pub async fn updateItem(
     input: UpdateItemInput,
 ) -> Result<UpdateItemResponse, AppError> {
     let pool = db_pool(&ctx.app_state)?;
-    vault::update_vault_item(pool, &ctx.session.user_id, input).await
+    vault::update_vault_item(pool, &ctx.session.user_id, input)
+        .await
+        .notify_sync(&ctx.app_state)
 }
 
 #[allow(non_snake_case)]
@@ -249,7 +260,9 @@ pub async fn toggleFavorite(
     input: ToggleFavoriteInput,
 ) -> Result<SuccessResponse, AppError> {
     let pool = db_pool(&ctx.app_state)?;
-    vault::toggle_vault_favorite(pool, &ctx.session.user_id, input).await
+    vault::toggle_vault_favorite(pool, &ctx.session.user_id, input)
+        .await
+        .notify_sync(&ctx.app_state)
 }
 
 #[allow(non_snake_case)]
@@ -259,7 +272,9 @@ pub async fn deleteItem(
     input: ItemClientInput,
 ) -> Result<SuccessResponse, AppError> {
     let pool = db_pool(&ctx.app_state)?;
-    vault::delete_vault_item(pool, &ctx.session.user_id, input).await
+    vault::delete_vault_item(pool, &ctx.session.user_id, input)
+        .await
+        .notify_sync(&ctx.app_state)
 }
 
 #[allow(non_snake_case)]
@@ -279,7 +294,9 @@ pub async fn restoreItem(
     input: ItemClientInput,
 ) -> Result<SuccessResponse, AppError> {
     let pool = db_pool(&ctx.app_state)?;
-    vault::restore_vault_item(pool, &ctx.session.user_id, input).await
+    vault::restore_vault_item(pool, &ctx.session.user_id, input)
+        .await
+        .notify_sync(&ctx.app_state)
 }
 
 #[allow(non_snake_case)]
@@ -289,7 +306,9 @@ pub async fn moveItem(
     input: MoveItemInput,
 ) -> Result<UpdateItemResponse, AppError> {
     let pool = db_pool(&ctx.app_state)?;
-    vault::move_vault_item(pool, &ctx.session.user_id, input).await
+    vault::move_vault_item(pool, &ctx.session.user_id, input)
+        .await
+        .notify_sync(&ctx.app_state)
 }
 
 #[allow(non_snake_case)]
@@ -299,7 +318,9 @@ pub async fn permanentlyDeleteItem(
     input: ItemClientInput,
 ) -> Result<SuccessResponse, AppError> {
     let pool = db_pool(&ctx.app_state)?;
-    vault::permanently_delete_vault_item(pool, &ctx.session.user_id, input).await
+    vault::permanently_delete_vault_item(pool, &ctx.session.user_id, input)
+        .await
+        .notify_sync(&ctx.app_state)
 }
 
 #[handler(query)]
@@ -339,7 +360,9 @@ mod rpc_member_handlers {
         input: UpdateVaultMemberRoleInput,
     ) -> Result<SuccessResponse, AppError> {
         let pool = db_pool(&ctx.app_state)?;
-        member_handlers::update_vault_member_role(pool, &ctx.session.user_id, input).await
+        member_handlers::update_vault_member_role(pool, &ctx.session.user_id, input)
+            .await
+            .notify_sync(&ctx.app_state)
     }
 
     #[allow(non_snake_case)]
@@ -366,6 +389,7 @@ mod rpc_member_handlers {
             input,
         )
         .await
+        .notify_sync(&ctx.app_state)
     }
 
     #[allow(non_snake_case)]
@@ -392,6 +416,7 @@ mod rpc_member_handlers {
             input,
         )
         .await
+        .notify_sync(&ctx.app_state)
     }
 }
 

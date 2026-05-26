@@ -1,8 +1,6 @@
 use sqlx::{query_as, PgPool};
 
-use crate::{
-    db::models::DbTeamBillingEntitlementRow, error::AppError, config::SELF_HOSTED_MODE,
-};
+use crate::{config::SELF_HOSTED_MODE, db::models::DbTeamBillingEntitlementRow, error::AppError};
 
 const TEAM_BILLING_ENTITLEMENT_QUERY: &str =
     "SELECT u.team_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1";
@@ -75,8 +73,10 @@ pub(crate) fn resolve_share_links_policy(
     let is_active = billing_status.map(billing_is_active).unwrap_or(false);
 
     ShareLinksPolicy {
-        enabled: matches!(billing_plan, Some("personal") | Some("family") | Some("team"))
-            && is_active,
+        enabled: matches!(
+            billing_plan,
+            Some("personal") | Some("family") | Some("team")
+        ) && is_active,
         max_active_links: match billing_plan {
             Some("personal") => Some(5),
             Some("family") | Some("team") => None,
@@ -162,10 +162,26 @@ mod tests {
     #[test]
     fn team_management_enabled_respects_mode_and_plan() {
         assert!(team_management_enabled(SELF_HOSTED_MODE, None, None));
-        assert!(team_management_enabled("cloud", Some("team"), Some("active")));
-        assert!(team_management_enabled("cloud", Some("family"), Some("trialing")));
-        assert!(!team_management_enabled("cloud", Some("personal"), Some("active")));
-        assert!(!team_management_enabled("cloud", Some("team"), Some("past_due")));
+        assert!(team_management_enabled(
+            "cloud",
+            Some("team"),
+            Some("active")
+        ));
+        assert!(team_management_enabled(
+            "cloud",
+            Some("family"),
+            Some("trialing")
+        ));
+        assert!(!team_management_enabled(
+            "cloud",
+            Some("personal"),
+            Some("active")
+        ));
+        assert!(!team_management_enabled(
+            "cloud",
+            Some("team"),
+            Some("past_due")
+        ));
     }
 
     #[test]
@@ -174,8 +190,7 @@ mod tests {
         assert!(active.enabled);
         assert_eq!(active.max_active_links, Some(5));
 
-        let inactive =
-            resolve_share_links_policy("cloud", Some("personal"), Some("past_due"));
+        let inactive = resolve_share_links_policy("cloud", Some("personal"), Some("past_due"));
         assert!(!inactive.enabled);
         assert_eq!(inactive.max_active_links, Some(5));
 

@@ -1,9 +1,6 @@
 use sqlx::{query_as, PgPool};
 
-use crate::{
-    db::models::*,
-    error::AppError,
-};
+use crate::{db::models::*, error::AppError};
 
 pub async fn fetch_user_vault_ids(pool: &PgPool, user_id: &str) -> Result<Vec<String>, AppError> {
     let user_vaults =
@@ -36,7 +33,7 @@ pub async fn fetch_visible_cursor_event(
 		.bind(user_id)
 		.fetch_optional(pool)
 		.await
-		.map_err(|_| AppError::internal("Failed to load sync cursor event"));
+		.map_err(|e| { tracing::error!(error = %e, "Failed to load sync cursor event"); AppError::internal("Failed to load sync cursor event") });
     }
 
     query_as::<_, DbSyncEventCursorRow>(
@@ -47,7 +44,7 @@ pub async fn fetch_visible_cursor_event(
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|_| AppError::internal("Failed to load sync cursor event"))
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load sync cursor event"); AppError::internal("Failed to load sync cursor event") })
 }
 
 pub async fn fetch_latest_visible_event_id(
@@ -63,7 +60,7 @@ pub async fn fetch_latest_visible_event_id(
 		.fetch_optional(pool)
 		.await
 		.map(|row| row.map(|row| row.id))
-		.map_err(|_| AppError::internal("Failed to load latest visible event"));
+		.map_err(|e| { tracing::error!(error = %e, "Failed to load latest visible event"); AppError::internal("Failed to load latest visible event") });
     }
 
     query_as::<_, DbSyncEventIdRow>(
@@ -74,7 +71,7 @@ pub async fn fetch_latest_visible_event_id(
 	.fetch_optional(pool)
 	.await
 	.map(|row| row.map(|row| row.id))
-	.map_err(|_| AppError::internal("Failed to load latest visible event"))
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load latest visible event"); AppError::internal("Failed to load latest visible event") })
 }
 
 pub async fn fetch_latest_visible_event_seq(
@@ -112,7 +109,7 @@ pub async fn fetch_visible_events_since(
 		.bind(limit + 1)
 		.fetch_all(pool)
 		.await
-		.map_err(|_| AppError::internal("Failed to load sync events"));
+		.map_err(|e| { tracing::error!(error = %e, "Failed to load sync events"); AppError::internal("Failed to load sync events") });
     }
 
     query_as::<_, DbSyncEventRow>(
@@ -124,7 +121,7 @@ pub async fn fetch_visible_events_since(
 	.bind(limit + 1)
 	.fetch_all(pool)
 	.await
-	.map_err(|_| AppError::internal("Failed to load sync events"))
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load sync events"); AppError::internal("Failed to load sync events") })
 }
 
 pub async fn fetch_bootstrap_items(
@@ -142,7 +139,7 @@ pub async fn fetch_bootstrap_items(
 		.bind(limit + 1)
 		.fetch_all(pool)
 		.await
-		.map_err(|_| AppError::internal("Failed to load bootstrap items")),
+		.map_err(|e| { tracing::error!(error = %e, "Failed to load bootstrap items"); AppError::internal("Failed to load bootstrap items") }),
 		None => query_as::<_, DbBootstrapItemRow>(
 			"SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE vault_id = ANY($1) ORDER BY id ASC LIMIT $2",
 		)
@@ -150,7 +147,7 @@ pub async fn fetch_bootstrap_items(
 		.bind(limit + 1)
 		.fetch_all(pool)
 		.await
-		.map_err(|_| AppError::internal("Failed to load bootstrap items")),
+		.map_err(|e| { tracing::error!(error = %e, "Failed to load bootstrap items"); AppError::internal("Failed to load bootstrap items") }),
 	}
 }
 

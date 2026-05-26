@@ -1,9 +1,11 @@
 use qubit::{handler, server::Router};
 
 use crate::{
-    services::auth::{self, AppContext, PublicAuthContext, RefreshSessionContext, *},
     error::AppError,
-    services::session::{DeviceSessionResponse, RefreshSessionResponse, RenameDeviceInput, SessionIdInput},
+    services::auth::{self, AppContext, PublicAuthContext, RefreshSessionContext, *},
+    services::session::{
+        DeviceSessionResponse, RefreshSessionResponse, RenameDeviceInput, SessionIdInput,
+    },
     AppState,
 };
 
@@ -102,9 +104,7 @@ pub async fn resetPassword(
 
 #[allow(non_snake_case)]
 #[handler(query)]
-pub async fn registrationStatus(
-    ctx: AppContext,
-) -> Result<RegistrationStatusResponse, AppError> {
+pub async fn registrationStatus(ctx: AppContext) -> Result<RegistrationStatusResponse, AppError> {
     auth::registration_status(&ctx.app_state).await
 }
 

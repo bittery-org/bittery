@@ -2,11 +2,11 @@ use sqlx::{query, query_as, query_scalar, PgPool, Postgres};
 use time::OffsetDateTime;
 
 use crate::{
-    services::auth::{AuthVaultKeyResponse, EncryptedVaultKeyInput, RecoveryVaultKeyResponse},
     db::models::*,
     error::AppError,
-    repo::common::generate_resource_id,
     integrations::storage,
+    repo::common::generate_resource_id,
+    services::auth::{AuthVaultKeyResponse, EncryptedVaultKeyInput, RecoveryVaultKeyResponse},
 };
 
 // ---------------------------------------------------------------------------
@@ -79,7 +79,10 @@ pub async fn insert_user_account(
     .bind(params.recovery_key_hint)
     .execute(transaction.as_mut())
     .await
-    .map_err(|_| AppError::bad_request("Unable to create account"))?;
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to create user account");
+        AppError::bad_request("Unable to create account")
+    })?;
 
     Ok(())
 }
@@ -778,7 +781,11 @@ pub async fn get_pending_invitation_for_signup(
     })?
     .ok_or_else(|| AppError::not_found("Invitation not found or already used"))?;
 
-    if !check_team_management_enabled(is_self_hosted, &invitation.billing_plan, &invitation.billing_status) {
+    if !check_team_management_enabled(
+        is_self_hosted,
+        &invitation.billing_plan,
+        &invitation.billing_status,
+    ) {
         return Err(AppError::forbidden(
             "This team cannot accept invitations on its current plan or billing status.",
         ));
@@ -811,7 +818,11 @@ pub async fn get_pending_signup_invitation(
     })?
     .ok_or_else(|| AppError::not_found("Invitation not found or already used"))?;
 
-    if !check_team_management_enabled(is_self_hosted, &invitation.billing_plan, &invitation.billing_status) {
+    if !check_team_management_enabled(
+        is_self_hosted,
+        &invitation.billing_plan,
+        &invitation.billing_status,
+    ) {
         return Err(AppError::forbidden(
             "This team cannot accept invitations on its current plan or billing status.",
         ));
@@ -883,7 +894,11 @@ pub async fn assert_pending_vault_keys_authorized(
 // Private helpers
 // ---------------------------------------------------------------------------
 
-fn check_team_management_enabled(is_self_hosted: bool, billing_plan: &str, billing_status: &str) -> bool {
+fn check_team_management_enabled(
+    is_self_hosted: bool,
+    billing_plan: &str,
+    billing_status: &str,
+) -> bool {
     if is_self_hosted {
         return true;
     }

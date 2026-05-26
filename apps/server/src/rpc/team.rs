@@ -1,11 +1,11 @@
 use qubit::{handler, server::Router};
 
 use crate::{
-    services::auth::{AppContext, RefreshSessionContext},
-    error::AppError,
     config::db_pool,
+    error::AppError,
+    services::auth::{AppContext, RefreshSessionContext},
     services::team::{self, invitation_handlers, member_handlers, *},
-    AppState,
+    AppState, NotifySyncExt,
 };
 
 #[allow(non_snake_case)]
@@ -101,6 +101,7 @@ pub async fn leave(
         input,
     )
     .await
+    .notify_sync(&ctx.app_state)
 }
 
 #[allow(non_snake_case)]
@@ -196,6 +197,7 @@ mod rpc_member_handlers {
             input,
         )
         .await
+        .notify_sync(&ctx.app_state)
     }
 
     #[allow(non_snake_case)]

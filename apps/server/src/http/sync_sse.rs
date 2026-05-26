@@ -18,13 +18,15 @@ use tokio::time::sleep;
 use tracing::warn;
 
 use crate::{
-    repo::sync::{fetch_latest_visible_event_seq, fetch_user_vault_ids, fetch_visible_events_since},
+    repo::sync::{
+        fetch_latest_visible_event_seq, fetch_user_vault_ids, fetch_visible_events_since,
+    },
     services::session::VerifiedSession,
     services::session_control::load_session_revocation,
     services::sync::{
-        generate_sync_connection_id, sse_heartbeat_event, sse_json_event,
-        sync_stream_event_dto, timestamp_millis, SessionControlPayload,
-        DEFAULT_EVENTS_LIMIT, SYNC_STREAM_HEARTBEAT_INTERVAL_MS, SYNC_STREAM_POLL_INTERVAL_MS,
+        generate_sync_connection_id, sse_heartbeat_event, sse_json_event, sync_stream_event_dto,
+        timestamp_millis, SessionControlPayload, DEFAULT_EVENTS_LIMIT,
+        SYNC_STREAM_HEARTBEAT_INTERVAL_MS, SYNC_STREAM_POLL_INTERVAL_MS,
     },
     AppState,
 };
@@ -82,6 +84,7 @@ async fn sync_events(
 
     let sessions = state.sessions.clone();
     let sync_control = state.sync_control.clone();
+    let sync_notify = state.sync_notify.clone();
     let session_user_id = session.user_id.clone();
     let session_id = session.session_id.clone();
     let session_token = session.token.clone();
@@ -244,6 +247,7 @@ async fn sync_events(
                         Err(broadcast::error::RecvError::Closed) => {}
                     }
                 }
+                _ = sync_notify.notified() => {}
                 _ = sleep(poll_interval) => {}
             }
         }

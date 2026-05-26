@@ -224,9 +224,14 @@ async fn fetch_with_limit(
 }
 
 fn extract_icon_links(html: &str, base_url: &str) -> Vec<String> {
-    static RE_LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"<link\b[^>]*>"#).expect("link regex should compile"));
-    static RE_REL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\brel\s*=\s*(?:"([^"]*)"|'([^']*)')"#).expect("rel regex should compile"));
-    static RE_HREF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')"#).expect("href regex should compile"));
+    static RE_LINK: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"<link\b[^>]*>"#).expect("link regex should compile"));
+    static RE_REL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"\brel\s*=\s*(?:"([^"]*)"|'([^']*)')"#).expect("rel regex should compile")
+    });
+    static RE_HREF: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')"#).expect("href regex should compile")
+    });
 
     let mut links = Vec::new();
     for tag_match in RE_LINK.find_iter(html) {

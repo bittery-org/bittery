@@ -78,8 +78,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let listener = TcpListener::bind(&bind_address).await?;
     info!(address = %bind_address, "rust rpc server listening");
     if let Some(seeded_session) = seeded_session {
+        let redacted_token = &seeded_session.token[..seeded_session.token.len().min(8)];
         info!(
-            dev_token = %seeded_session.token,
+            dev_token = %format!("{redacted_token}…"),
             session_id = %seeded_session.session_id,
             user_id = %seeded_session.user_id,
             expires_at = %seeded_session.expires_at,

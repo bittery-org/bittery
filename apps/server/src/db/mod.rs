@@ -7,13 +7,21 @@ use sqlx::{
 };
 use tracing::info;
 
+pub mod enums;
 pub mod models;
 
 const DEFAULT_MAX_CONNECTIONS: u32 = 5;
 
+fn max_connections() -> u32 {
+    env::var("DATABASE_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_MAX_CONNECTIONS)
+}
+
 pub async fn connect(database_url: &str) -> Result<PgPool, sqlx::Error> {
     PgPoolOptions::new()
-        .max_connections(DEFAULT_MAX_CONNECTIONS)
+        .max_connections(max_connections())
         .connect(database_url)
         .await
 }

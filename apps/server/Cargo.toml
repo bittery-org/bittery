@@ -40,6 +40,7 @@ sha2 = "0.10"
 hmac = "0.12"
 url = "2"
 jsonwebtoken = "9"
+parking_lot = "0.12"
 bittery-crypto-core = { path = "../../packages/crypto/core/crates/bittery-crypto-core" }
 
 [dev-dependencies]

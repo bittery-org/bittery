@@ -73,7 +73,10 @@ pub async fn load_team_members(
         .bind(team_id)
         .fetch_all(pool)
         .await
-        .map_err(|_| AppError::internal("Failed to load team members"))
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to load team members");
+            AppError::internal("Failed to load team members")
+        })
 }
 
 pub async fn load_audit_events(
@@ -119,7 +122,7 @@ pub async fn load_audit_events(
 	.bind(filter.scan_limit)
 	.fetch_all(pool)
 	.await
-	.map_err(|_| AppError::internal("Failed to load audit events"))
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load audit events"); AppError::internal("Failed to load audit events") })
 }
 
 pub async fn load_share_access_events(
@@ -158,5 +161,5 @@ pub async fn load_share_access_events(
 	.bind(filter.scan_limit)
 	.fetch_all(pool)
 	.await
-	.map_err(|_| AppError::internal("Failed to load share access events"))
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load share access events"); AppError::internal("Failed to load share access events") })
 }

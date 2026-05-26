@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use qubit::{handler, server::Router};
 
 use crate::{
-    services::auth::RefreshSessionContext,
-    error::AppError,
     config::db_pool,
+    error::AppError,
+    services::auth::RefreshSessionContext,
     services::sync::{
         self, AcknowledgeEventsInput, AcknowledgeEventsResponse, BootstrapItemsInput,
         BootstrapItemsResponse, CheckConflictInput, CheckConflictResponse, GetEventsSinceInput,

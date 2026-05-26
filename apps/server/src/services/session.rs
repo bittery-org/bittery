@@ -2,11 +2,12 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, RwLock,
+        Arc,
     },
 };
 
 use base64::Engine;
+use parking_lot::RwLock;
 use rand::{random, RngCore};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -125,7 +126,6 @@ pub struct RenameDeviceInput {
     pub device_name: String,
 }
 
-
 #[derive(Clone, Debug)]
 pub(crate) struct SessionSnapshot {
     pub(crate) id: String,
@@ -143,14 +143,12 @@ pub(crate) struct SessionSnapshot {
     pub(crate) os_version: Option<String>,
 }
 
-
 #[derive(Debug, Clone)]
 pub(crate) struct CreatedSession {
     pub(crate) token: String,
     pub(crate) session_id: String,
     pub(crate) expires_at: OffsetDateTime,
 }
-
 
 impl SessionService {
     pub async fn from_database_url(database_url: &str) -> Result<Self, sqlx::Error> {
@@ -233,10 +231,7 @@ impl SessionService {
         }
     }
 
-    pub async fn delete_all_user_sessions(
-        &self,
-        user_id: &str,
-    ) -> Result<Vec<String>, AppError> {
+    pub async fn delete_all_user_sessions(&self, user_id: &str) -> Result<Vec<String>, AppError> {
         match &self.backend {
             SessionBackend::Memory(inner) => Ok(delete_all_memory_sessions(inner, user_id)),
             SessionBackend::Postgres(store) => store.delete_all_user_sessions(user_id).await,
@@ -371,13 +366,11 @@ impl SessionService {
     }
 }
 
-
 impl Default for SessionService {
     fn default() -> Self {
         Self::with_dev_seed()
     }
 }
-
 
 impl PostgresSessionStore {
     async fn create_session(
@@ -696,7 +689,10 @@ impl PostgresSessionStore {
             .bind(session_id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|_| internal_handler_error("Session store is unavailable"))
+            .map_err(|e| {
+                tracing::error!(error = %e, "Session store is unavailable");
+                internal_handler_error("Session store is unavailable")
+            })
     }
 
     async fn delete_all_user_sessions(&self, user_id: &str) -> Result<Vec<String>, AppError> {
@@ -704,7 +700,10 @@ impl PostgresSessionStore {
             .bind(user_id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|_| internal_handler_error("Session store is unavailable"))
+            .map_err(|e| {
+                tracing::error!(error = %e, "Session store is unavailable");
+                internal_handler_error("Session store is unavailable")
+            })
     }
 
     async fn delete_other_user_sessions(
@@ -719,7 +718,10 @@ impl PostgresSessionStore {
         .bind(current_session_id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|_| internal_handler_error("Session store is unavailable"))
+        .map_err(|e| {
+            tracing::error!(error = %e, "Session store is unavailable");
+            internal_handler_error("Session store is unavailable")
+        })
     }
 
     async fn list_devices(
@@ -906,9 +908,8 @@ impl PostgresSessionStore {
     }
 }
 
-
 fn verify_memory_token(inner: &Arc<SessionServiceInner>, token: &str) -> Option<VerifiedSession> {
-    let sessions = inner.sessions_by_token.read().ok()?;
+    let sessions = inner.sessions_by_token.read();
     let session = sessions.get(token)?;
 
     if session.expires_at <= now_utc() {
@@ -953,10 +954,7 @@ fn refresh_memory_session(
         os_version: None,
     };
 
-    let mut sessions = inner.sessions_by_token.write().map_err(|e| {
-        tracing::error!(error = %e, "Session store is unavailable");
-        internal_handler_error("Session store is unavailable")
-    })?;
+    let mut sessions = inner.sessions_by_token.write();
 
     match sessions.remove(&current_session.token) {
         Some(existing) if existing.expires_at > now_utc() => {
@@ -982,7 +980,6 @@ fn list_memory_devices(
     let sessions = inner
         .sessions_by_token
         .read()
-        .expect("memory session store poisoned")
         .values()
         .filter(|record| record.user_id == user_id && record.expires_at > now_utc())
         .cloned()
@@ -1000,7 +997,6 @@ fn get_owned_memory_session(
     inner
         .sessions_by_token
         .read()
-        .ok()?
         .values()
         .find(|record| record.session_id == session_id && record.user_id == user_id)
         .cloned()
@@ -1016,10 +1012,7 @@ fn revoke_memory_device(
         return Vec::new();
     };
 
-    let mut sessions = inner
-        .sessions_by_token
-        .write()
-        .expect("memory session store poisoned");
+    let mut sessions = inner.sessions_by_token.write();
 
     if is_grouped_client_session(&existing_session) {
         let revoked_ids = sessions
@@ -1055,10 +1048,7 @@ fn rename_memory_device(
         return;
     };
 
-    let mut sessions = inner
-        .sessions_by_token
-        .write()
-        .expect("memory session store poisoned");
+    let mut sessions = inner.sessions_by_token.write();
 
     for record in sessions.values_mut() {
         if is_grouped_client_session(&existing_session) {
@@ -1076,10 +1066,7 @@ fn rename_memory_device(
 }
 
 fn touch_memory_session(inner: &Arc<SessionServiceInner>, session_id: &str) {
-    let mut sessions = inner
-        .sessions_by_token
-        .write()
-        .expect("memory session store poisoned");
+    let mut sessions = inner.sessions_by_token.write();
     if let Some(record) = sessions
         .values_mut()
         .find(|record| record.session_id == session_id)
@@ -1089,10 +1076,7 @@ fn touch_memory_session(inner: &Arc<SessionServiceInner>, session_id: &str) {
 }
 
 fn delete_memory_session(inner: &Arc<SessionServiceInner>, session_id: &str) -> Vec<String> {
-    let mut sessions = inner
-        .sessions_by_token
-        .write()
-        .expect("memory session store poisoned");
+    let mut sessions = inner.sessions_by_token.write();
     let mut revoked_ids = Vec::new();
     sessions.retain(|_, record| {
         let keep = record.session_id != session_id;
@@ -1105,10 +1089,7 @@ fn delete_memory_session(inner: &Arc<SessionServiceInner>, session_id: &str) -> 
 }
 
 fn delete_all_memory_sessions(inner: &Arc<SessionServiceInner>, user_id: &str) -> Vec<String> {
-    let mut sessions = inner
-        .sessions_by_token
-        .write()
-        .expect("memory session store poisoned");
+    let mut sessions = inner.sessions_by_token.write();
     let mut revoked_ids = Vec::new();
     sessions.retain(|_, record| {
         let keep = record.user_id != user_id;
@@ -1125,10 +1106,7 @@ fn delete_other_memory_sessions(
     user_id: &str,
     current_session_id: &str,
 ) -> Vec<String> {
-    let mut sessions = inner
-        .sessions_by_token
-        .write()
-        .expect("memory session store poisoned");
+    let mut sessions = inner.sessions_by_token.write();
     let mut revoked_ids = Vec::new();
     sessions.retain(|_, record| {
         let keep = record.user_id != user_id || record.session_id == current_session_id;
@@ -1169,10 +1147,7 @@ fn issue_memory_session(
         os_version: None,
     };
 
-    let mut sessions = inner
-        .sessions_by_token
-        .write()
-        .expect("session store should be writable");
+    let mut sessions = inner.sessions_by_token.write();
     if client_id.is_some() {
         sessions.retain(|_, existing| {
             !(existing.user_id == user_id
@@ -1218,7 +1193,6 @@ fn issue_memory_session_for_tests(
     inner
         .sessions_by_token
         .write()
-        .expect("session store should be writable")
         .insert(record.token.clone(), record.clone());
 
     VerifiedSession {
@@ -1392,7 +1366,6 @@ fn compare_session_recency(left: &SessionSnapshot, right: &SessionSnapshot) -> s
         .then_with(|| right.id.cmp(&left.id))
 }
 
-
 pub(crate) fn now_utc() -> OffsetDateTime {
     OffsetDateTime::now_utc()
 }
@@ -1441,10 +1414,14 @@ fn parse_user_agent(user_agent: &str, app_platform: Option<&str>) -> ParsedDevic
 }
 
 fn detect_os(user_agent: &str, ua: &str) -> (Option<String>, Option<String>) {
-    static RE_IOS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)OS (\d+[._]\d+(?:[._]\d+)?)").unwrap());
-    static RE_WINDOWS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)Windows NT (\d+\.?\d*)").unwrap());
-    static RE_MACOS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)Mac OS X (\d+[._]\d+(?:[._]\d+)?)").unwrap());
-    static RE_ANDROID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)Android (\d+\.?\d*\.?\d*)").unwrap());
+    static RE_IOS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)OS (\d+[._]\d+(?:[._]\d+)?)").unwrap());
+    static RE_WINDOWS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)Windows NT (\d+\.?\d*)").unwrap());
+    static RE_MACOS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)Mac OS X (\d+[._]\d+(?:[._]\d+)?)").unwrap());
+    static RE_ANDROID: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)Android (\d+\.?\d*\.?\d*)").unwrap());
 
     if ua.contains("iphone") || ua.contains("ipad") {
         let os_name = if ua.contains("ipad") { "iPadOS" } else { "iOS" };
@@ -1493,13 +1470,20 @@ fn detect_os(user_agent: &str, ua: &str) -> (Option<String>, Option<String>) {
 }
 
 fn detect_browser(user_agent: &str, ua: &str) -> (Option<String>, Option<String>) {
-    static RE_EDGE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)Edg/(\d+\.?\d*\.?\d*)").unwrap());
-    static RE_OPERA: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(?:OPR|Opera)/(\d+\.?\d*\.?\d*)").unwrap());
-    static RE_BRAVE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)Brave/(\d+\.?\d*\.?\d*)").unwrap());
-    static RE_VIVALDI: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)Vivaldi/(\d+\.?\d*\.?\d*)").unwrap());
-    static RE_FIREFOX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(?:Firefox|FxiOS)/(\d+\.?\d*\.?\d*)").unwrap());
-    static RE_SAFARI_VER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)Version/(\d+\.?\d*\.?\d*)").unwrap());
-    static RE_CHROME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(?:Chrome|CriOS)/(\d+\.?\d*\.?\d*)").unwrap());
+    static RE_EDGE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)Edg/(\d+\.?\d*\.?\d*)").unwrap());
+    static RE_OPERA: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)(?:OPR|Opera)/(\d+\.?\d*\.?\d*)").unwrap());
+    static RE_BRAVE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)Brave/(\d+\.?\d*\.?\d*)").unwrap());
+    static RE_VIVALDI: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)Vivaldi/(\d+\.?\d*\.?\d*)").unwrap());
+    static RE_FIREFOX: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)(?:Firefox|FxiOS)/(\d+\.?\d*\.?\d*)").unwrap());
+    static RE_SAFARI_VER: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)Version/(\d+\.?\d*\.?\d*)").unwrap());
+    static RE_CHROME: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)(?:Chrome|CriOS)/(\d+\.?\d*\.?\d*)").unwrap());
 
     if ua.contains("edg/") {
         let ver = RE_EDGE
@@ -1623,324 +1607,6 @@ fn build_device_name(
     }
 }
 
-
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use time::{Duration, OffsetDateTime};
-
-    #[test]
-    fn session_platform_helpers_normalize_inputs_and_web_client_ids() {
-        assert_eq!(normalize_session_platform(None), "desktop");
-        assert_eq!(normalize_session_platform(Some(" web ")), "web");
-        assert_eq!(normalize_session_platform(Some(" iOS ")), "mobile");
-        assert_eq!(normalize_session_platform(Some("unknown")), "desktop");
-
-        assert_eq!(session_duration_for_platform("web"), Duration::hours(24));
-        assert_eq!(
-            session_duration_for_platform("extension"),
-            Duration::days(7)
-        );
-        assert_eq!(session_duration_for_platform("desktop"), Duration::days(30));
-
-        assert_eq!(
-            normalized_session_client_id(Some("web"), Some(" browser-1 ".to_string())).as_deref(),
-            Some("browser-1"),
-        );
-        assert_eq!(
-            normalized_session_client_id(Some("desktop"), Some("desktop-client".to_string())),
-            Some("desktop-client".to_string()),
-        );
-        assert_eq!(
-            normalized_session_client_id(Some("web"), Some("   ".to_string())),
-            None,
-        );
-    }
-
-
-
-    #[test]
-    fn device_helpers_prefer_explicit_platform_and_build_expected_labels() {
-        assert_eq!(
-            detect_platform("mozilla/5.0 (iphone)", Some("extension")),
-            "extension"
-        );
-        assert_eq!(detect_platform("mozilla/5.0 (iphone)", None), "ios");
-        assert_eq!(detect_platform("mozilla/5.0 (android)", None), "android");
-        assert_eq!(detect_platform("mozilla/5.0 (macintosh)", None), "web");
-
-        assert_eq!(
-            build_device_name("extension", Some("macOS"), None, Some("Safari")),
-            "Bittery Extension (Safari on macOS)",
-        );
-        assert_eq!(
-            build_device_name("ios", Some("iOS"), Some("17.5"), None),
-            "Bittery on iOS 17.5",
-        );
-        assert_eq!(
-            build_device_name("web", Some("Windows"), None, Some("Chrome")),
-            "Chrome on Windows",
-        );
-        assert_eq!(build_device_name("web", None, None, None), "Unknown Device");
-    }
-
-
-
-    #[tokio::test]
-    async fn refresh_rotates_the_previous_session() {
-        let sessions = SessionService::default();
-        let seeded = sessions
-            .seeded_session()
-            .expect("memory backend should seed");
-        let current = sessions
-            .verify_token(&seeded.token)
-            .await
-            .expect("seeded session should be valid");
-
-        let next = sessions
-            .refresh_session(&current)
-            .await
-            .expect("refresh should succeed");
-
-        assert_ne!(next.session_id, seeded.session_id);
-        assert!(sessions.verify_token(&seeded.token).await.is_none());
-        assert!(sessions.verify_token(&next.token).await.is_some());
-    }
-
-    #[tokio::test]
-    async fn refresh_preserves_platform_duration_policy() {
-        let sessions = SessionService::default();
-        let current = sessions
-            .issue_session_for_tests("extension-user", "extension", Some("extension-client"))
-            .await;
-
-        let next = sessions
-            .refresh_session(&current)
-            .await
-            .expect("refresh should succeed");
-        let refreshed = sessions
-            .verify_token(&next.token)
-            .await
-            .expect("refreshed token should remain valid");
-
-        assert_eq!(refreshed.platform, "extension");
-        assert_eq!(refreshed.client_id.as_deref(), Some("extension-client"));
-
-        let remaining_days = (refreshed.expires_at - time::OffsetDateTime::now_utc()).whole_days();
-        assert!(remaining_days >= 6);
-        assert!(remaining_days <= 7);
-    }
-
-    #[tokio::test]
-    async fn expired_sessions_cannot_be_refreshed() {
-        let sessions = SessionService::default();
-        let mut expired = sessions
-            .issue_session_for_tests("expired-user", "desktop", None)
-            .await;
-        expired.expires_at = time::OffsetDateTime::now_utc() - time::Duration::minutes(1);
-
-        let error = sessions
-            .refresh_session(&expired)
-            .await
-            .expect_err("expired session should fail");
-
-        assert_eq!(error.message, "Session expired");
-    }
-
-    #[tokio::test]
-    async fn delete_session_removes_only_the_target_session() {
-        let sessions = SessionService::default();
-        let seeded = sessions
-            .seeded_session()
-            .expect("memory backend should seed");
-        let other = sessions
-            .issue_session_for_tests("dev-user", "desktop", None)
-            .await;
-
-        sessions
-            .delete_session(&seeded.session_id)
-            .await
-            .expect("delete_session should succeed");
-
-        assert!(sessions.verify_token(&seeded.token).await.is_none());
-        assert!(sessions.verify_token(&other.token).await.is_some());
-    }
-
-    #[tokio::test]
-    async fn delete_all_user_sessions_keeps_other_users_signed_in() {
-        let sessions = SessionService::default();
-        let target = sessions
-            .issue_session_for_tests("target-user", "desktop", None)
-            .await;
-        let other = sessions
-            .issue_session_for_tests("other-user", "desktop", None)
-            .await;
-
-        sessions
-            .delete_all_user_sessions("target-user")
-            .await
-            .expect("delete_all_user_sessions should succeed");
-
-        assert!(sessions.verify_token(&target.token).await.is_none());
-        assert!(sessions.verify_token(&other.token).await.is_some());
-    }
-
-    #[tokio::test]
-    async fn list_devices_collapses_grouped_web_sessions() {
-        let sessions = SessionService::default();
-        let current = sessions
-            .issue_session_for_tests("user-a", "desktop", None)
-            .await;
-        let web_a = sessions
-            .issue_session_for_tests("user-a", "web", Some("web-group"))
-            .await;
-        let web_b = sessions
-            .issue_session_for_tests("user-a", "web", Some("web-group"))
-            .await;
-
-        if let SessionBackend::Memory(inner) = &sessions.backend {
-            let mut records = inner
-                .sessions_by_token
-                .write()
-                .expect("memory session store should be writable");
-            for record in records.values_mut() {
-                if record.session_id == web_a.session_id {
-                    record.last_active_at = OffsetDateTime::now_utc() - Duration::days(2);
-                }
-                if record.session_id == web_b.session_id {
-                    record.last_active_at = OffsetDateTime::now_utc() - Duration::days(1);
-                }
-            }
-        }
-
-        let devices = sessions
-            .list_devices("user-a", &current.session_id)
-            .await
-            .expect("list_devices should succeed");
-
-        let web_ids = devices
-            .iter()
-            .filter(|device| device.platform == "web")
-            .map(|device| device.id.clone())
-            .collect::<Vec<_>>();
-
-        assert_eq!(web_ids, vec![web_b.session_id]);
-        assert!(devices
-            .iter()
-            .any(|device| device.id == current.session_id && device.is_current_session));
-    }
-
-    #[tokio::test]
-    async fn create_session_reuses_existing_desktop_client_id() {
-        let sessions = SessionService::default();
-        let request = RequestMetadata {
-            auth_token: None,
-            client_id: Some("desktop-device-1".to_string()),
-            app_platform: Some("desktop".to_string()),
-            user_agent: Some("integration-test".to_string()),
-            ip_address: Some("127.0.0.1".to_string()),
-        };
-
-        let first = sessions
-            .create_session("user-desktop", &request)
-            .await
-            .expect("first session should be created");
-        let second = sessions
-            .create_session("user-desktop", &request)
-            .await
-            .expect("second session should be created");
-
-        assert!(sessions.verify_token(&first.token).await.is_none());
-        assert!(sessions.verify_token(&second.token).await.is_some());
-
-        let devices = sessions
-            .list_devices("user-desktop", &second.session_id)
-            .await
-            .expect("list_devices should succeed");
-
-        assert_eq!(devices.len(), 1);
-        assert_eq!(devices[0].id, second.session_id);
-        assert_eq!(devices[0].platform, "desktop");
-        assert!(devices[0].is_current_session);
-    }
-
-    #[tokio::test]
-    async fn rename_device_updates_active_grouped_web_sessions() {
-        let sessions = SessionService::default();
-        let grouped_a = sessions
-            .issue_session_for_tests("user-b", "web", Some("rename-group"))
-            .await;
-        let grouped_b = sessions
-            .issue_session_for_tests("user-b", "web", Some("rename-group"))
-            .await;
-
-        sessions
-            .rename_device(&grouped_a.session_id, "user-b", "Unified Browser")
-            .await
-            .expect("rename_device should succeed");
-
-        let devices = sessions
-            .list_devices("user-b", &grouped_a.session_id)
-            .await
-            .expect("list_devices should succeed");
-
-        assert!(devices
-            .iter()
-            .filter(|device| device.platform == "web")
-            .all(|device| device.device_name.as_deref() == Some("Unified Browser")));
-        assert!(sessions.verify_token(&grouped_b.token).await.is_some());
-    }
-
-    #[tokio::test]
-    async fn revoke_device_revokes_grouped_web_sessions() {
-        let sessions = SessionService::default();
-        let grouped_a = sessions
-            .issue_session_for_tests("user-c", "web", Some("revoke-group"))
-            .await;
-        let grouped_b = sessions
-            .issue_session_for_tests("user-c", "web", Some("revoke-group"))
-            .await;
-
-        let revoked = sessions
-            .revoke_device(&grouped_a.session_id, "user-c")
-            .await
-            .expect("revoke_device should succeed");
-
-        assert_eq!(revoked.len(), 2);
-        assert!(sessions.verify_token(&grouped_a.token).await.is_none());
-        assert!(sessions.verify_token(&grouped_b.token).await.is_none());
-    }
-
-    #[tokio::test]
-    async fn heartbeat_updates_last_active_timestamp() {
-        let sessions = SessionService::default();
-        let current = sessions
-            .issue_session_for_tests("user-d", "desktop", None)
-            .await;
-        let before = sessions
-            .list_devices("user-d", &current.session_id)
-            .await
-            .expect("list_devices should succeed")
-            .into_iter()
-            .find(|device| device.id == current.session_id)
-            .expect("current device should exist")
-            .last_active_at;
-
-        sessions
-            .heartbeat(&current.session_id)
-            .await
-            .expect("heartbeat should succeed");
-
-        let after = sessions
-            .list_devices("user-d", &current.session_id)
-            .await
-            .expect("list_devices should succeed")
-            .into_iter()
-            .find(|device| device.id == current.session_id)
-            .expect("current device should exist")
-            .last_active_at;
-
-        assert!(after >= before);
-    }
-}
+#[path = "session_tests.rs"]
+mod tests;
