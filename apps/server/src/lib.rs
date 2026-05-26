@@ -7,16 +7,19 @@ pub mod favicon;
 mod jobs;
 mod public_http;
 pub(crate) mod session_control;
+mod server_support;
 mod share;
 pub mod storage;
 mod sync;
 mod team;
+mod team_billing;
 #[cfg(test)]
 pub(crate) mod test_support;
 mod vault;
 
 use qubit::{handler, Router};
 use sqlx::PgPool;
+use server_support::format_timestamp;
 use ts_rs::TS;
 
 use serde::Serialize;
@@ -99,11 +102,7 @@ pub async fn privateData(ctx: auth::RefreshSessionContext) -> PrivateDataRespons
             token: ctx.session.token,
             session_id: ctx.session.session_id,
             user_id: ctx.session.user_id,
-            expires_at: ctx
-                .session
-                .expires_at
-                .format(&time::format_description::well_known::Rfc3339)
-                .unwrap_or_else(|_| ctx.session.expires_at.unix_timestamp().to_string()),
+            expires_at: format_timestamp(ctx.session.expires_at),
             platform: ctx.session.platform,
             client_id: ctx.session.client_id,
         },

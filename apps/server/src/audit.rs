@@ -12,7 +12,12 @@ use sqlx::{query_as, PgPool};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use ts_rs::TS;
 
-use crate::{auth::RefreshSessionContext, AppState};
+use crate::{
+    auth::RefreshSessionContext,
+    server_support::{bittery_mode, db_pool as load_db_pool},
+    team_billing::team_management_enabled as shared_team_management_enabled,
+    AppState,
+};
 
 const DEFAULT_LIMIT: u32 = 50;
 const MAX_LIMIT: u32 = 100;
@@ -193,11 +198,7 @@ pub async fn teamEvents(
     ctx: RefreshSessionContext,
     input: TeamEventsInput,
 ) -> Result<TeamEventsResponse, AuditRpcError> {
-    let pool = ctx
-        .app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))?;
+    let pool = load_db_pool(&ctx.app_state, internal_error)?;
 
     let actor = load_actor(pool, &ctx.session.user_id).await?;
     let team_id = actor
@@ -647,27 +648,7 @@ fn mask_user_agent(user_agent: Option<&str>) -> Option<String> {
 }
 
 fn team_management_enabled(billing_status: Option<&str>) -> bool {
-    if bittery_mode() == "self-hosted" {
-        return true;
-    }
-    matches!(billing_status, Some("active") | Some("trialing"))
-}
-
-fn bittery_mode() -> &'static str {
-    match std::env::var("BITTERY_MODE") {
-        Ok(value) => {
-            let normalized = value.trim().to_ascii_lowercase();
-            if normalized == "self-hosted"
-                || normalized == "self_hosted"
-                || normalized == "selfhosted"
-            {
-                "self-hosted"
-            } else {
-                "cloud"
-            }
-        }
-        Err(_) => "cloud",
-    }
+    shared_team_management_enabled(bittery_mode(), Some("team"), billing_status)
 }
 
 fn bad_request_error(message: &str) -> AuditRpcError {

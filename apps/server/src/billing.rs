@@ -25,6 +25,7 @@ pub(crate) use self::webhook::{
 use crate::{
     auth::RefreshSessionContext,
     db::models::{DbBillingActorRow, DbBillingContactRow},
+    server_support::{bittery_mode, db_pool as load_db_pool, format_timestamp},
     AppState,
 };
 
@@ -164,11 +165,7 @@ pub async fn status(ctx: RefreshSessionContext) -> Result<BillingStatusResponse,
         return Ok(self_hosted_billing_status());
     }
 
-    let pool = ctx
-        .app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))?;
+    let pool = load_db_pool(&ctx.app_state, internal_error)?;
     let actor = load_billing_actor(pool, &ctx.session.user_id).await?;
     actor
         .team_id
@@ -224,11 +221,7 @@ pub async fn entitlements(
         });
     }
 
-    let pool = ctx
-        .app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))?;
+    let pool = load_db_pool(&ctx.app_state, internal_error)?;
     let actor = load_billing_actor(pool, &ctx.session.user_id).await?;
     actor
         .team_id
@@ -262,11 +255,7 @@ pub async fn attachmentUsage(
         });
     }
 
-    let pool = ctx
-        .app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))?;
+    let pool = load_db_pool(&ctx.app_state, internal_error)?;
     let actor = load_billing_actor(pool, &ctx.session.user_id).await?;
     let team_id = actor
         .team_id
@@ -291,11 +280,7 @@ pub async fn createCheckoutSession(
 ) -> Result<CheckoutSessionResponse, BillingRpcError> {
     assert_cloud_billing_enabled()?;
 
-    let pool = ctx
-        .app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))?;
+    let pool = load_db_pool(&ctx.app_state, internal_error)?;
     let actor = load_billing_actor(pool, &ctx.session.user_id).await?;
     let team_id = actor
         .team_id
@@ -373,11 +358,7 @@ pub async fn createPortalSession(
 ) -> Result<PortalSessionResponse, BillingRpcError> {
     assert_cloud_billing_enabled()?;
 
-    let pool = ctx
-        .app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))?;
+    let pool = load_db_pool(&ctx.app_state, internal_error)?;
     let actor = load_billing_actor(pool, &ctx.session.user_id).await?;
     let team = ensure_team_billing(actor.clone())?;
     ensure_billing_admin(&actor.role)?;
@@ -410,11 +391,7 @@ pub async fn syncSeats(
 ) -> Result<SyncSeatsResponse, BillingRpcError> {
     assert_cloud_billing_enabled()?;
 
-    let pool = ctx
-        .app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))?;
+    let pool = load_db_pool(&ctx.app_state, internal_error)?;
     let actor = load_billing_actor(pool, &ctx.session.user_id).await?;
     let team_id = actor
         .team_id
@@ -1222,23 +1199,6 @@ fn is_stripe_api_configured() -> bool {
         .unwrap_or(false)
 }
 
-fn bittery_mode() -> &'static str {
-    match std::env::var("BITTERY_MODE") {
-        Ok(value) => {
-            let normalized = value.trim().to_ascii_lowercase();
-            if normalized == "self-hosted"
-                || normalized == "self_hosted"
-                || normalized == "selfhosted"
-            {
-                "self-hosted"
-            } else {
-                "cloud"
-            }
-        }
-        Err(_) => "cloud",
-    }
-}
-
 fn get_stripe_price_id(plan: &str) -> Option<String> {
     let env_name = match plan {
         "personal" => "STRIPE_PRICE_PERSONAL_MONTHLY",
@@ -1259,12 +1219,6 @@ fn web_app_url() -> String {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "http://localhost:3001".to_string())
-}
-
-fn format_timestamp(value: OffsetDateTime) -> String {
-    value
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| value.unix_timestamp().to_string())
 }
 
 fn forbidden_error(message: &str) -> BillingRpcError {

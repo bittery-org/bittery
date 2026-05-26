@@ -9,6 +9,8 @@ use sha2::{Digest, Sha256};
 use sqlx::{query, query_as, PgPool};
 use time::OffsetDateTime;
 
+use crate::server_support;
+
 type HmacSha256 = Hmac<Sha256>;
 
 const STRIPE_SIGNATURE_TOLERANCE_SECONDS: i64 = 5 * 60;
@@ -55,13 +57,7 @@ struct DbBillingTeamRow {
 }
 
 pub(crate) fn is_self_hosted_mode() -> bool {
-    match env::var("BITTERY_MODE") {
-        Ok(value) => matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "self-hosted" | "self_hosted" | "selfhosted"
-        ),
-        Err(_) => false,
-    }
+    server_support::is_self_hosted_mode()
 }
 
 pub(crate) fn is_stripe_webhook_configured() -> bool {

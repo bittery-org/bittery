@@ -36,6 +36,7 @@ use ts_rs::TS;
 use crate::{
     billing::sync_team_seats_best_effort,
     db::{self, models::*},
+    server_support::{bittery_mode, db_pool as load_db_pool},
     session_control::{load_user_session_ids, record_session_revocations},
     storage, AppState,
 };
@@ -4223,23 +4224,6 @@ async fn assert_pending_vault_keys_authorized(
     Ok(())
 }
 
-fn bittery_mode() -> &'static str {
-    match std::env::var("BITTERY_MODE") {
-        Ok(value) => {
-            let normalized = value.trim().to_ascii_lowercase();
-            if normalized == "self-hosted"
-                || normalized == "self_hosted"
-                || normalized == "selfhosted"
-            {
-                "self-hosted"
-            } else {
-                "cloud"
-            }
-        }
-        Err(_) => "cloud",
-    }
-}
-
 fn storage_public_url(key: String) -> String {
     storage::public_url(key)
 }
@@ -4401,10 +4385,7 @@ fn bad_request_handler_error(message: &str) -> AuthRpcError {
 }
 
 fn db_pool(app_state: &AppState) -> Result<&PgPool, AuthRpcError> {
-    app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_handler_error("Database is not configured"))
+    load_db_pool(app_state, internal_handler_error)
 }
 
 fn generate_resource_id(prefix: &str) -> String {

@@ -14,7 +14,13 @@ use sqlx::{query, query_as, query_scalar, PgPool};
 use ts_rs::TS;
 
 use crate::auth::AppContext;
-use crate::{auth::RefreshSessionContext, db::models::*, AppState};
+use crate::{
+    auth::RefreshSessionContext,
+    db::models::*,
+    server_support::{bittery_mode, db_pool as load_db_pool, format_timestamp},
+    team_billing::{load_team_billing_entitlement, resolve_share_links_policy},
+    AppState,
+};
 
 const SHARE_LINKS_UNAVAILABLE_MESSAGE: &str =
     "Share links are not available on your current plan. Upgrade to continue.";
@@ -1187,7 +1193,8 @@ async fn resolve_share_links_access(
     pool: &PgPool,
     user_id: &str,
 ) -> Result<ShareLinksAccess, ShareRpcError> {
-    if bittery_mode() == "self-hosted" {
+    let mode = bittery_mode();
+    if mode == "self-hosted" {
         return Ok(ShareLinksAccess {
             enabled: true,
             max_active_links: None,
@@ -1195,13 +1202,13 @@ async fn resolve_share_links_access(
         });
     }
 
-    let actor = query_as::<_, DbTeamBillingEntitlementRow>(
-		"SELECT u.team_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
-	)
-	.bind(user_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load share link entitlements"); internal_error("Failed to load share link entitlements") })?;
+    let actor = load_team_billing_entitlement(
+        pool,
+        user_id,
+        "Failed to load share link entitlements",
+        internal_error,
+    )
+    .await?;
 
     let Some(actor) = actor else {
         return Ok(ShareLinksAccess {
@@ -1210,41 +1217,26 @@ async fn resolve_share_links_access(
             team_id: None,
         });
     };
-    let Some(team_id) = actor.team_id else {
+
+    let policy = resolve_share_links_policy(
+        mode,
+        actor.billing_plan.as_deref(),
+        actor.billing_status.as_deref(),
+    );
+    let team_id = actor.team_id;
+
+    if team_id.is_none() {
         return Ok(ShareLinksAccess {
             enabled: false,
             max_active_links: Some(0),
             team_id: None,
         });
-    };
-    let Some(billing_plan) = actor.billing_plan else {
-        return Ok(ShareLinksAccess {
-            enabled: false,
-            max_active_links: Some(0),
-            team_id: Some(team_id),
-        });
-    };
-    let Some(billing_status) = actor.billing_status else {
-        return Ok(ShareLinksAccess {
-            enabled: false,
-            max_active_links: Some(0),
-            team_id: Some(team_id),
-        });
-    };
-
-    let is_active = matches!(billing_status.as_str(), "active" | "trialing");
-    let paid_inactive = billing_plan != "free" && !is_active;
-    let enabled = matches!(billing_plan.as_str(), "personal" | "family" | "team") && !paid_inactive;
-    let max_active_links = match billing_plan.as_str() {
-        "personal" => Some(5),
-        "family" | "team" => None,
-        _ => Some(0),
-    };
+    }
 
     Ok(ShareLinksAccess {
-        enabled,
-        max_active_links,
-        team_id: Some(team_id),
+        enabled: policy.enabled,
+        max_active_links: policy.max_active_links,
+        team_id,
     })
 }
 
@@ -1511,27 +1503,7 @@ fn base_share_url() -> String {
 }
 
 fn db_pool(ctx: &RefreshSessionContext) -> Result<&PgPool, ShareRpcError> {
-    ctx.app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))
-}
-
-fn bittery_mode() -> &'static str {
-    match std::env::var("BITTERY_MODE") {
-        Ok(value) => {
-            let normalized = value.trim().to_ascii_lowercase();
-            if normalized == "self-hosted"
-                || normalized == "self_hosted"
-                || normalized == "selfhosted"
-            {
-                "self-hosted"
-            } else {
-                "cloud"
-            }
-        }
-        Err(_) => "cloud",
-    }
+    load_db_pool(&ctx.app_state, internal_error)
 }
 
 fn effective_share_link_status(link: &DbShareLinkRow, now: time::OffsetDateTime) -> String {
@@ -3266,12 +3238,6 @@ mod tests {
 		.await
 		.expect("share email verification should seed");
     }
-}
-
-fn format_timestamp(value: time::OffsetDateTime) -> String {
-    value
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| value.unix_timestamp().to_string())
 }
 
 fn generate_share_id(prefix: &str) -> String {

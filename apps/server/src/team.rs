@@ -16,7 +16,9 @@ use crate::{
     auth::{AppContext, RefreshSessionContext},
     billing::sync_team_seats_best_effort,
     db::models::*,
+    server_support::{bittery_mode, db_pool as load_db_pool, format_timestamp},
     session_control::{load_user_session_ids, record_session_revocations},
+    team_billing::team_management_enabled as shared_team_management_enabled,
     storage, AppState,
 };
 
@@ -1718,23 +1720,18 @@ mod invitation_handlers {
 }
 
 fn db_pool(app_state: &AppState) -> Result<&PgPool, TeamRpcError> {
-    app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))
+    load_db_pool(app_state, internal_error)
 }
 
 fn assert_team_management_entitlement(
     billing_plan: &str,
     billing_status: &str,
 ) -> Result<(), TeamRpcError> {
-    if bittery_mode() == "self-hosted" {
-        return Ok(());
-    }
-
-    let has_entitlement = matches!(billing_plan, "family" | "team")
-        && matches!(billing_status, "active" | "trialing");
-    if has_entitlement {
+    if shared_team_management_enabled(
+        bittery_mode(),
+        Some(billing_plan),
+        Some(billing_status),
+    ) {
         Ok(())
     } else {
         Err(forbidden_error(TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE))
@@ -1748,23 +1745,6 @@ fn assert_optional_team_management_entitlement(
     let plan = billing_plan.ok_or_else(|| not_found_error("Team not found"))?;
     let status = billing_status.ok_or_else(|| not_found_error("Team not found"))?;
     assert_team_management_entitlement(plan, status)
-}
-
-fn bittery_mode() -> &'static str {
-    match std::env::var("BITTERY_MODE") {
-        Ok(value) => {
-            let normalized = value.trim().to_ascii_lowercase();
-            if normalized == "self-hosted"
-                || normalized == "self_hosted"
-                || normalized == "selfhosted"
-            {
-                "self-hosted"
-            } else {
-                "cloud"
-            }
-        }
-        Err(_) => "cloud",
-    }
 }
 
 fn default_invitation_role() -> String {
@@ -2422,12 +2402,6 @@ fn ensure_team_admin(role: &str) -> Result<(), TeamRpcError> {
     } else {
         Err(forbidden_error("Insufficient permissions"))
     }
-}
-
-fn format_timestamp(value: OffsetDateTime) -> String {
-    value
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| value.unix_timestamp().to_string())
 }
 
 fn generate_resource_id(prefix: &str) -> String {

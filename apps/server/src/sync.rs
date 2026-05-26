@@ -29,7 +29,9 @@ use ts_rs::TS;
 use crate::{
     auth::{RefreshSessionContext, VerifiedSession},
     db::models::*,
+    server_support::{bittery_mode, db_pool as load_db_pool, format_timestamp},
     session_control::load_session_revocation,
+    team_billing::{load_team_billing_entitlement, resolve_attachment_entitlement},
     storage, AppState,
 };
 
@@ -866,10 +868,7 @@ async fn sync_events(
 }
 
 fn db_pool(app_state: &AppState) -> Result<&PgPool, SyncRpcError> {
-    app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))
+    load_db_pool(app_state, internal_error)
 }
 
 async fn fetch_user_vault_ids(pool: &PgPool, user_id: &str) -> Result<Vec<String>, SyncRpcError> {
@@ -1121,54 +1120,33 @@ fn bad_request_error(message: &str) -> SyncRpcError {
     }
 }
 
-fn format_timestamp(value: OffsetDateTime) -> String {
-    value
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| value.unix_timestamp().to_string())
-}
-
 async fn attachments_enabled_for_user(pool: &PgPool, user_id: &str) -> Result<bool, SyncRpcError> {
-    let actor = query_as::<_, DbTeamBillingEntitlementRow>(
-		"SELECT u.team_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
-	)
-	.bind(user_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load attachment entitlements"); internal_error("Failed to load attachment entitlements") })?;
-    if bittery_mode() == "self-hosted" {
+    let mode = bittery_mode();
+    if mode == "self-hosted" {
         return Ok(true);
     }
+
+    let actor = load_team_billing_entitlement(
+        pool,
+        user_id,
+        "Failed to load attachment entitlements",
+        internal_error,
+    )
+    .await?;
+
     let Some(actor) = actor else {
         return Ok(false);
     };
     let Some(_team_id) = actor.team_id else {
         return Ok(false);
     };
-    let Some(plan) = actor.billing_plan.as_deref() else {
-        return Ok(false);
-    };
-    let Some(status) = actor.billing_status.as_deref() else {
-        return Ok(false);
-    };
 
-    Ok(matches!(plan, "personal" | "family" | "team") && matches!(status, "active" | "trialing"))
-}
-
-fn bittery_mode() -> &'static str {
-    match std::env::var("BITTERY_MODE") {
-        Ok(value) => {
-            let normalized = value.trim().to_ascii_lowercase();
-            if normalized == "self-hosted"
-                || normalized == "self_hosted"
-                || normalized == "selfhosted"
-            {
-                "self-hosted"
-            } else {
-                "cloud"
-            }
-        }
-        Err(_) => "cloud",
-    }
+    Ok(resolve_attachment_entitlement(
+        mode,
+        actor.billing_plan.as_deref(),
+        actor.billing_status.as_deref(),
+    )
+    .enabled)
 }
 
 async fn fetch_bootstrap_items(

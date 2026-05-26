@@ -12,7 +12,18 @@ use sqlx::{query, query_as, query_scalar, PgPool, Postgres, Transaction};
 use time::OffsetDateTime;
 use ts_rs::TS;
 
-use crate::{auth::RefreshSessionContext, db::models::*, storage, AppState};
+use crate::{
+    auth::RefreshSessionContext,
+    db::models::*,
+    server_support::{bittery_mode, db_pool as load_db_pool, format_timestamp},
+    team_billing::{
+        load_team_billing_entitlement,
+        resolve_attachment_entitlement,
+        resolve_vault_sharing_entitlement as shared_resolve_vault_sharing_entitlement,
+        VaultSharingEntitlement,
+    },
+    storage, AppState,
+};
 
 #[derive(Debug, Clone, Serialize, TS)]
 pub struct VaultRpcError {
@@ -544,31 +555,36 @@ struct AttachmentActor {
     attachment_storage_bytes: Option<i64>,
 }
 
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn list(
-    ctx: RefreshSessionContext,
+async fn fetch_vaults_and_items(
+    user_id: &str,
+    pool: &PgPool,
 ) -> Result<Vec<VaultListEntryResponse>, VaultRpcError> {
-    let pool = db_pool(&ctx.app_state)?;
     let vault_rows = query_as::<_, DbVaultListRow>(
-		"SELECT v.id, v.name, v.type::text AS vault_type, v.icon, v.image_key, vk.role::text AS role, vk.encrypted_vault_key, v.created_by_id FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 ORDER BY v.created_at ASC",
-	)
-	.bind(&ctx.session.user_id)
-	.fetch_all(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load vaults"); internal_error("Failed to load vaults") })?;
+        "SELECT v.id, v.name, v.type::text AS vault_type, v.icon, v.image_key, vk.role::text AS role, vk.encrypted_vault_key, v.created_by_id FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 ORDER BY v.created_at ASC",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to load vaults");
+        internal_error("Failed to load vaults")
+    })?;
+
     if vault_rows.is_empty() {
         return Ok(Vec::new());
     }
 
     let vault_ids: Vec<String> = vault_rows.iter().map(|vault| vault.id.clone()).collect();
     let item_rows = query_as::<_, DbBootstrapItemRow>(
-		"SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE vault_id = ANY($1) ORDER BY created_at ASC",
-	)
-	.bind(&vault_ids)
-	.fetch_all(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load vault items"); internal_error("Failed to load vault items") })?;
+        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE vault_id = ANY($1) ORDER BY created_at ASC",
+    )
+    .bind(&vault_ids)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to load vault items");
+        internal_error("Failed to load vault items")
+    })?;
 
     let mut items_by_vault = HashMap::<String, Vec<VaultItemResponse>>::new();
     for item in item_rows {
@@ -585,16 +601,22 @@ pub async fn list(
             name: vault.name,
             vault_type: vault.vault_type,
             icon: vault.icon,
-            image_url: vault
-                .image_key
-                .as_deref()
-                .and_then(storage::public_asset_url),
+            image_url: vault.image_key.as_deref().and_then(storage::public_asset_url),
             role: vault.role,
             items: items_by_vault.remove(&vault.id).unwrap_or_default(),
             encrypted_vault_key: vault.encrypted_vault_key,
             created_by_id: vault.created_by_id,
         })
         .collect())
+}
+
+#[allow(non_snake_case)]
+#[handler(query)]
+pub async fn list(
+    ctx: RefreshSessionContext,
+) -> Result<Vec<VaultListEntryResponse>, VaultRpcError> {
+    let pool = db_pool(&ctx.app_state)?;
+    fetch_vaults_and_items(&ctx.session.user_id, pool).await
 }
 
 #[allow(non_snake_case)]
@@ -945,7 +967,7 @@ pub async fn updateAttachment(
     insert_item_sync_event(
         &mut transaction,
         "item_updated",
-        &attachment.item_id,
+        &input.attachment_id,
         &attachment.vault_id,
         &ctx.session.user_id,
         ctx.request.client_id.as_deref(),
@@ -1030,13 +1052,13 @@ pub async fn create(
     let mut team_id: Option<String> = None;
     let mut shared_vault_limit: Option<i64> = None;
     if input.vault_type == "team" {
-        let actor = query_as::<_, DbTeamBillingEntitlementRow>(
-			"SELECT u.team_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
-		)
-		.bind(&ctx.session.user_id)
-		.fetch_optional(pool)
-		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load team membership"); internal_error("Failed to load team membership") })?;
+        let actor = load_team_billing_entitlement(
+            pool,
+            &ctx.session.user_id,
+            "Failed to load team membership",
+            internal_error,
+        )
+        .await?;
         let Some(actor) = actor else {
             return Err(bad_request_error(
                 "You must belong to a team to create a team vault",
@@ -1257,13 +1279,13 @@ pub async fn convertType(
     let mut target_team_id = owner_vault.team_id.clone();
     let mut shared_vault_limit: Option<i64> = None;
     if previous_type == "personal" && input.target_type == "team" {
-        let actor = query_as::<_, DbTeamBillingEntitlementRow>(
-			"SELECT u.team_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
-		)
-		.bind(&ctx.session.user_id)
-		.fetch_optional(pool)
-		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load team membership"); internal_error("Failed to load team membership") })?;
+        let actor = load_team_billing_entitlement(
+            pool,
+            &ctx.session.user_id,
+            "Failed to load team membership",
+            internal_error,
+        )
+        .await?;
         let Some(actor) = actor else {
             return Err(bad_request_error(
                 "You must belong to a team to convert to a shared vault",
@@ -2749,13 +2771,13 @@ mod member_handlers {
 		.await
 		.map_err(|e| { tracing::error!(error = %e, "Failed to load vault access"); internal_error("Failed to load vault access") })?
 		.ok_or_else(|| forbidden_error("Access denied to this vault"))?;
-        let billing = query_as::<_, DbTeamBillingEntitlementRow>(
-			"SELECT u.team_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
-		)
-		.bind(user_id)
-		.fetch_optional(pool)
-		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load billing entitlements"); internal_error("Failed to load billing entitlements") })?;
+        let billing = load_team_billing_entitlement(
+            pool,
+            user_id,
+            "Failed to load billing entitlements",
+            internal_error,
+        )
+        .await?;
         assert_vault_sharing_available(billing.as_ref())?;
         if actor.role != "owner" && actor.role != "admin" {
             return Err(forbidden_error(
@@ -2808,7 +2830,16 @@ mod member_handlers {
             assert_vault_sharing_available, bittery_mode, resolve_vault_sharing_entitlement,
             validate_vault_member_role,
         };
-        use crate::{db::models::DbTeamBillingEntitlementRow, test_support::acquire_env_lock};
+        use crate::db::models::DbTeamBillingEntitlementRow;
+        use crate::test_support::{
+            acquire_env_lock, assign_user_to_team, authenticated_json_headers, seed_item, seed_team,
+            seed_user, seed_vault, seed_vault_key, with_rpc_test_app,
+        };
+        use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
+        use serde_json::{json, Value};
+        use sqlx::{query, query_scalar, PgPool};
+        use std::future::Future;
+        use time::{Duration, OffsetDateTime};
 
         fn set_env_var(key: &str, value: Option<&str>) {
             match value {
@@ -3241,10 +3272,7 @@ fn map_item_details(item: DbBootstrapItemRow) -> VaultItemDetailsResponse {
 }
 
 fn db_pool(app_state: &AppState) -> Result<&PgPool, VaultRpcError> {
-    app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| internal_error("Database is not configured"))
+    load_db_pool(app_state, internal_error)
 }
 
 async fn load_user_vault_summaries(
@@ -3325,42 +3353,44 @@ async fn load_item_attachments(
 }
 
 async fn attachments_enabled_for_user(pool: &PgPool, user_id: &str) -> Result<bool, VaultRpcError> {
-    let actor = query_as::<_, DbTeamBillingEntitlementRow>(
-		"SELECT u.team_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
-	)
-	.bind(user_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load attachment entitlements"); internal_error("Failed to load attachment entitlements") })?;
-    if bittery_mode() == "self-hosted" {
+    let mode = bittery_mode();
+    if mode == "self-hosted" {
         return Ok(true);
     }
+
+    let actor = load_team_billing_entitlement(
+        pool,
+        user_id,
+        "Failed to load attachment entitlements",
+        internal_error,
+    )
+    .await?;
+
     let Some(actor) = actor else {
         return Ok(false);
     };
     let Some(_team_id) = actor.team_id else {
         return Ok(false);
     };
-    let Some(plan) = actor.billing_plan.as_deref() else {
-        return Ok(false);
-    };
-    let Some(status) = actor.billing_status.as_deref() else {
-        return Ok(false);
-    };
-    Ok(matches!(plan, "personal" | "family" | "team") && matches!(status, "active" | "trialing"))
+    Ok(resolve_attachment_entitlement(
+        mode,
+        actor.billing_plan.as_deref(),
+        actor.billing_status.as_deref(),
+    )
+    .enabled)
 }
 
 async fn load_attachment_actor(
     pool: &PgPool,
     user_id: &str,
 ) -> Result<AttachmentActor, VaultRpcError> {
-    let actor = query_as::<_, DbTeamBillingEntitlementRow>(
-		"SELECT u.team_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
-	)
-	.bind(user_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load attachment entitlements"); internal_error("Failed to load attachment entitlements") })?;
+    let actor = load_team_billing_entitlement(
+        pool,
+        user_id,
+        "Failed to load attachment entitlements",
+        internal_error,
+    )
+    .await?;
     let mode = bittery_mode();
     let Some(actor) = actor else {
         if mode == "self-hosted" {
@@ -3393,28 +3423,20 @@ async fn load_attachment_actor(
             attachment_storage_bytes: None,
         });
     }
-    let plan = actor.billing_plan.unwrap_or_else(|| "free".to_string());
-    let status = actor.billing_status.unwrap_or_else(|| "none".to_string());
-    let active = matches!(status.as_str(), "active" | "trialing");
-    let (max_file_size, storage_quota) = if active {
-        match plan.as_str() {
-            "personal" => (Some(10 * 1024 * 1024), Some(250 * 1024 * 1024)),
-            "family" => (Some(25 * 1024 * 1024), Some(1024 * 1024 * 1024)),
-            "team" => (Some(50 * 1024 * 1024), Some(2 * 1024 * 1024 * 1024)),
-            _ => (Some(0), Some(0)),
-        }
-    } else {
-        (Some(0), Some(0))
-    };
-    if max_file_size == Some(0) || storage_quota == Some(0) {
+    let entitlement = resolve_attachment_entitlement(
+        mode,
+        actor.billing_plan.as_deref(),
+        actor.billing_status.as_deref(),
+    );
+    if !entitlement.enabled {
         return Err(forbidden_error(
             "Attachments are only available on paid plans with active billing.",
         ));
     }
     Ok(AttachmentActor {
         team_id,
-        attachment_max_file_size_bytes: max_file_size.map(i64::from),
-        attachment_storage_bytes: storage_quota.map(i64::from),
+        attachment_max_file_size_bytes: entitlement.max_file_size_bytes,
+        attachment_storage_bytes: entitlement.storage_bytes,
     })
 }
 
@@ -3703,59 +3725,11 @@ async fn insert_vault_deleted_audit_log(
 }
 
 fn resolve_vault_sharing_entitlement(plan: &str, status: &str) -> VaultSharingEntitlement {
-    if bittery_mode() == "self-hosted" {
-        return VaultSharingEntitlement {
-            allowed: true,
-            shared_vault_limit: None,
-        };
-    }
-    let active = matches!(status, "active" | "trialing");
-    match plan {
-        "family" if active => VaultSharingEntitlement {
-            allowed: true,
-            shared_vault_limit: Some(5),
-        },
-        "team" if active => VaultSharingEntitlement {
-            allowed: true,
-            shared_vault_limit: None,
-        },
-        _ => VaultSharingEntitlement {
-            allowed: false,
-            shared_vault_limit: Some(0),
-        },
-    }
-}
-
-fn bittery_mode() -> &'static str {
-    match std::env::var("BITTERY_MODE") {
-        Ok(value) => {
-            let normalized = value.trim().to_ascii_lowercase();
-            if normalized == "self-hosted"
-                || normalized == "self_hosted"
-                || normalized == "selfhosted"
-            {
-                "self-hosted"
-            } else {
-                "cloud"
-            }
-        }
-        Err(_) => "cloud",
-    }
+    shared_resolve_vault_sharing_entitlement(bittery_mode(), Some(plan), Some(status))
 }
 
 fn generate_resource_id(prefix: &str) -> String {
     format!("{prefix}_{:016x}", random::<u64>())
-}
-
-struct VaultSharingEntitlement {
-    allowed: bool,
-    shared_vault_limit: Option<i64>,
-}
-
-fn format_timestamp(value: OffsetDateTime) -> String {
-    value
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| value.unix_timestamp().to_string())
 }
 
 fn internal_error(message: &str) -> VaultRpcError {
@@ -5089,10 +5063,7 @@ mod tests {
                 let convert_to_team_response = app
                     .rpc_call(
                         "vault.convertType",
-                        json!([{
-                            "vaultId": fixture.owner_personal_vault_id,
-                            "targetType": "team"
-                        }]),
+                        json!([{ "vaultId": fixture.owner_personal_vault_id, "targetType": "team" }]),
                         owner_headers.clone(),
                     )
                     .await;
@@ -5122,11 +5093,7 @@ mod tests {
                 let convert_to_personal_response = app
                     .rpc_call(
                         "vault.convertType",
-                        json!([{
-                            "vaultId": fixture.target_vault_id,
-                            "targetType": "personal",
-                            "personalEncryptedVaultKey": "target-personal-key"
-                        }]),
+                        json!([{ "vaultId": fixture.target_vault_id, "targetType": "personal", "personalEncryptedVaultKey": "target-personal-key" }]),
                         owner_headers.clone(),
                     )
                     .await;
@@ -5754,10 +5721,7 @@ mod tests {
                 let missing_lookup_response = app
                     .rpc_call(
                         "vault.members.lookupUser",
-                        json!([{
-                            "vaultId": fixture.main_vault_id,
-                            "email": "missing-user@example.com"
-                        }]),
+                        json!([{ "vaultId": fixture.main_vault_id, "email": "missing-user@example.com" }]),
                         owner_headers.clone(),
                     )
                     .await;
@@ -5784,12 +5748,12 @@ mod tests {
                 );
 
                 let blocked_rotation_response = app
-				.rpc_call(
-					"vault.members.getRotationData",
-					json!([{ "vaultId": fixture.main_vault_id, "excludeUserId": fixture.member_user_id }]),
-					member_headers,
-				)
-				.await;
+					.rpc_call(
+						"vault.members.getRotationData",
+						json!([{ "vaultId": fixture.main_vault_id, "excludeUserId": fixture.member_user_id }]),
+						member_headers,
+					)
+					.await;
                 assert_eq!(blocked_rotation_response.status, StatusCode::OK);
                 assert_handler_error(
                     &blocked_rotation_response.body,
@@ -5798,25 +5762,25 @@ mod tests {
                 );
 
                 let self_remove_response = app
-                    .rpc_call(
-                        "vault.members.remove",
-                        json!([{
-                            "vaultId": fixture.main_vault_id,
-                            "userId": fixture.owner_user_id,
-                            "keyRotation": {
-                                "memberKeys": [],
-                                "reEncryptedItems": []
-                            }
-                        }]),
-                        owner_headers,
-                    )
-                    .await;
+					.rpc_call(
+						"vault.members.remove",
+						json!([{
+							"vaultId": fixture.main_vault_id,
+							"userId": fixture.owner_user_id,
+							"keyRotation": {
+								"memberKeys": [],
+								"reEncryptedItems": []
+							}
+						}]),
+						owner_headers,
+					)
+					.await;
                 assert_eq!(self_remove_response.status, StatusCode::OK);
                 assert_handler_error(
-                    &self_remove_response.body,
-                    "BAD_REQUEST",
-                    "Cannot remove yourself",
-                );
+					&self_remove_response.body,
+					"BAD_REQUEST",
+					"Cannot remove yourself",
+				);
             },
         )
         .await;
