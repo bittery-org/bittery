@@ -65,6 +65,13 @@ const accountCaches: Map<string, AccountCache> = new Map();
 // Cache for active account to avoid repeated IPC calls
 let cachedActiveAccount: ActiveAccount | undefined;
 
+// Device key cache — global, not per-account (survives lock/unlock, cleared only on full data wipe)
+let cachedDeviceKey: Uint8Array | null = null;
+
+// In-flight promise dedup to prevent concurrent keychain reads for the same data
+let deviceKeyPromise: Promise<Uint8Array> | null = null;
+const authTokenPromises: Map<string, Promise<string | null>> = new Map();
+
 /**
  * Tauri command invoke types for keychain operations
  */
@@ -210,6 +217,27 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	}
 
 	private async getDeviceKey(): Promise<Uint8Array> {
+		// Return from in-memory cache if available (survives lock/unlock)
+		if (cachedDeviceKey) {
+			return cachedDeviceKey;
+		}
+
+		// Deduplicate concurrent calls — if a read is already in-flight, await it
+		if (deviceKeyPromise) {
+			return deviceKeyPromise;
+		}
+
+		deviceKeyPromise = this.getDeviceKeyInternal();
+		try {
+			const result = await deviceKeyPromise;
+			cachedDeviceKey = result;
+			return result;
+		} finally {
+			deviceKeyPromise = null;
+		}
+	}
+
+	private async getDeviceKeyInternal(): Promise<Uint8Array> {
 		if (!this.invoke) {
 			throw new Error(
 				"TauriStorageAdapter not initialized. Call initialize() first.",
@@ -473,6 +501,26 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		if (cache.authToken) {
 			return cache.authToken;
 		}
+
+		// Deduplicate concurrent reads for the same account
+		const existing = authTokenPromises.get(resolvedEmail);
+		if (existing) {
+			return existing;
+		}
+
+		const promise = this.getAuthTokenInternal(resolvedEmail);
+		authTokenPromises.set(resolvedEmail, promise);
+		try {
+			return await promise;
+		} finally {
+			authTokenPromises.delete(resolvedEmail);
+		}
+	}
+
+	private async getAuthTokenInternal(
+		resolvedEmail: string,
+	): Promise<string | null> {
+		const cache = this.getAccountCache(resolvedEmail);
 
 		let token: string | null = null;
 		try {
@@ -931,6 +979,12 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		const resolvedEmail = await this.resolveEmail(email);
 		if (resolvedEmail) {
 			await this.removeAccount(resolvedEmail);
+		}
+
+		// If no accounts remain, clear the device key cache
+		const remaining = await this.getAccountsList();
+		if (remaining.length === 0) {
+			cachedDeviceKey = null;
 		}
 	}
 

@@ -16,7 +16,7 @@ interface MutableItemCacheAdapter extends ItemCacheAdapter {
 }
 
 export interface SyncOrchestratorOptions {
-	syncManager: Omit<SyncManagerOptions, "onEvent" | "onStatusChange">;
+	syncManager: Omit<SyncManagerOptions, "onStatusChange">;
 	rpcClient: DeltaSyncClient & CatchUpClient;
 	itemCache: MutableItemCacheAdapter;
 	outboundQueue: OutboundQueue;
@@ -60,9 +60,6 @@ export class SyncOrchestrator {
 
 		this.syncManager = createSyncManager({
 			...options.syncManager,
-			onEvent: (event) => {
-				void this.handleEvent(event);
-			},
 			onStatusChange: (connectionStatus) => {
 				void this.handleStatusChange(connectionStatus);
 			},
@@ -146,14 +143,6 @@ export class SyncOrchestrator {
 		);
 		await this.onEventProcessed?.(event);
 		await this.acknowledgeEvent(event);
-	}
-
-	private async handleEvent(event: SyncEvent): Promise<void> {
-		try {
-			await this.applyEvent(event);
-		} catch (error) {
-			console.error("[SyncOrchestrator] Failed to process sync event:", error);
-		}
 	}
 
 	private async handleSyncPing(): Promise<void> {

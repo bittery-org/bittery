@@ -152,7 +152,6 @@ export interface SyncManagerOptions {
 	getAuthToken: () => Promise<string | null>;
 	clientId: string;
 	storage?: SyncStorage;
-	onEvent?: (event: SyncEvent) => void;
 	onStatusChange?: (status: ConnectionStatus) => void;
 	onSessionRevoked?: (
 		payload: SessionRevokedControlPayload,

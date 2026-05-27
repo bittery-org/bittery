@@ -316,19 +316,6 @@ export class SyncManager {
 				return;
 			}
 
-			// Legacy: handle control event type (backward compat with older servers)
-			if (eventType === "control" && event.type === "session_revoked") {
-				void this.onSessionRevoked?.({
-					type: "session_revoked",
-					userId: String(event.userId ?? ""),
-					sessionId: String(event.sessionId ?? ""),
-					timestamp:
-						typeof event.timestamp === "number" ? event.timestamp : Date.now(),
-					reason: typeof event.reason === "string" ? event.reason : undefined,
-				});
-				return;
-			}
-
 			// Handle limit exceeded
 			if (eventType === "limit_exceeded" || event.type === "limit_exceeded") {
 				console.warn("SSE connection limit exceeded");

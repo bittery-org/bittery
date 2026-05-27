@@ -93,15 +93,19 @@ describe("sync engine regressions", () => {
 			outboundQueue,
 		});
 
-		// Directly invoke handleEvent to test delta failure behavior
-		await (orchestrator as any).handleEvent(
-			buildEvent({
-				id: "evt_11",
-				clientId: "other_client",
-				type: "item_updated",
-				entityId: "item_1",
-			}),
-		);
+		// Directly invoke applyEvent to test delta failure behavior
+		try {
+			await (orchestrator as any).applyEvent(
+				buildEvent({
+					id: "evt_11",
+					clientId: "other_client",
+					type: "item_updated",
+					entityId: "item_1",
+				}),
+			);
+		} catch {
+			// Expected to throw — delta sync fails
+		}
 
 		const cursor = await storage.get<{ id: string }>("lastSyncCursor");
 		expect(cursor?.id).toBe("evt_10");
@@ -311,49 +315,6 @@ describe("sync engine regressions", () => {
 		]);
 		expect(receivedSyncEvents).toHaveLength(0);
 		expect(manager.getLastEventCursor()).toBeNull();
-		manager.disconnect();
-	});
-
-	test("routes legacy control events to onSessionRevoked", async () => {
-		const storage = new MemoryStorage();
-		const revokedPayloads: Array<{
-			type: string;
-			userId: string;
-			sessionId: string;
-			timestamp: number;
-			reason?: string;
-		}> = [];
-
-		const manager = createSyncManager({
-			serverUrl: "http://localhost:3000",
-			getAuthToken: async () => "token",
-			clientId: "self_client",
-			storage,
-			onSessionRevoked: (payload) => {
-				revokedPayloads.push(payload);
-			},
-		});
-
-		// Legacy format: event: control with type: session_revoked
-		(manager as any).processEvent(
-			`event: control\ndata: ${JSON.stringify({
-				type: "session_revoked",
-				userId: "user_1",
-				sessionId: "session_1",
-				timestamp: 123456,
-				reason: "device_revoked",
-			})}\n\n`,
-		);
-
-		expect(revokedPayloads).toEqual([
-			{
-				type: "session_revoked",
-				userId: "user_1",
-				sessionId: "session_1",
-				timestamp: 123456,
-				reason: "device_revoked",
-			},
-		]);
 		manager.disconnect();
 	});
 

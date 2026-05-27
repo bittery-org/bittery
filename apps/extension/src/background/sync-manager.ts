@@ -12,7 +12,6 @@ import {
 	type ConnectionStatus,
 	runCatchUp,
 	type SyncCursor,
-	type SyncEvent,
 } from "@bittery/sync";
 import { syncCacheService } from "./services/sync-cache-service";
 
@@ -65,7 +64,6 @@ export async function getClientId(): Promise<string> {
 
 type SyncRuntimeMessage =
 	| { type: "SYNC_STATUS_CHANGED"; status: ConnectionStatus }
-	| { type: "SYNC_EVENT"; event: SyncEvent }
 	| { type: "SYNC_FULL_REFRESH_REQUIRED" };
 
 function sendRuntimeMessage(message: SyncRuntimeMessage): void {
@@ -96,69 +94,19 @@ export function getStatus(): ConnectionStatus {
 	return connectionStatus;
 }
 
-function isSyncEventPayload(value: unknown): value is SyncEvent {
-	if (!value || typeof value !== "object") {
-		return false;
-	}
-
-	const event = value as Partial<SyncEvent>;
-	return (
-		typeof event.id === "string" &&
-		typeof event.type === "string" &&
-		typeof event.entityId === "string" &&
-		typeof event.entityType === "string" &&
-		typeof event.version === "number" &&
-		typeof event.userId === "string" &&
-		typeof event.timestamp === "number"
-	);
-}
-
-/**
- * Handle incoming sync event
- * Cache updates happen before UI notifications so popup reads can be cache-first.
- */
-async function handleSyncEvent(event: SyncEvent): Promise<void> {
-	// Persist cursor in local storage (survives service worker restarts).
-	await setLastSyncCursor({ id: event.id });
-
-	// Skip events from our own client.
-	const clientId = await getClientId();
-	if (event.clientId === clientId) {
-		return;
-	}
-
-	try {
-		await syncCacheService.applyDeltaSyncForEvent(event);
-	} catch (error) {
-		console.error(
-			"[sync-manager] Delta sync failed, popup will do full refetch:",
-			error,
-		);
-	}
-
-	// Notify popup to refresh data (reads from updated cache if delta sync succeeded).
-	sendRuntimeMessage({
-		type: "SYNC_EVENT",
-		event,
-	});
-}
-
 /**
  * Catch up on missed events since last sync timestamp.
  */
 async function catchUpMissedEvents(): Promise<void> {
 	try {
 		const lastCursor = await getLastSyncCursor();
-		if (!lastCursor) {
-			return;
-		}
 
 		const clientId = await getClientId();
 		const client =
 			await syncCacheService.getClientForEmail(syncConnectionEmail);
 		const result = await runCatchUp({
 			client,
-			initialCursor: lastCursor,
+			initialCursor: lastCursor ?? { id: "" },
 			shouldProcessEvent: (event) => event.clientId !== clientId,
 			onEvent: async (event) => {
 				await syncCacheService.applyDeltaSyncForEvent(event);
@@ -340,11 +288,6 @@ async function processEvent(eventStr: string): Promise<void> {
 			return;
 		}
 
-		// Legacy: handle full sync event payloads (backward compat)
-		if (isSyncEventPayload(parsed)) {
-			await handleSyncEvent(parsed);
-			return;
-		}
 	} catch (error) {
 		console.error("[sync-manager] Failed to parse SSE event:", error, data);
 	}
