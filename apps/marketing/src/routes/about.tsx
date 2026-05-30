@@ -15,7 +15,6 @@ import {
 	Users,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { signupUrl } from "@/lib/urls";
 import { cn } from "@/lib/utils";
@@ -104,7 +103,7 @@ const timeline = [
 
 function AboutPage() {
 	return (
-		<Layout>
+		<>
 			{/* ─── Hero with image ──────────────────────────────────── */}
 			<section className="relative overflow-hidden pt-28 pb-16 sm:pt-36 sm:pb-20">
 				{/* Gradient background accent */}
@@ -411,6 +410,6 @@ function AboutPage() {
 					</div>
 				</motion.div>
 			</section>
-		</Layout>
+		</>
 	);
 }

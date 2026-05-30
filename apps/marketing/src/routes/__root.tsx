@@ -1,10 +1,31 @@
 /** biome-ignore-all lint/security/noDangerouslySetInnerHtml: This is required for theming */
 import { TanStackDevtools } from "@tanstack/react-devtools";
-import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
+import {
+	Outlet,
+	createRootRoute,
+	HeadContent,
+	Scripts,
+} from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
+import { createServerFn } from "@tanstack/react-start";
+import { getRequestHeader } from "@tanstack/react-start/server";
+import { Footer } from "@/components/landing/footer";
+import { Header } from "@/components/landing/header";
+import { ThemeContext } from "@/lib/theme-context";
 import appCss from "../styles.css?url";
 
+const getThemeCookie = createServerFn({ method: "GET" }).handler(async () => {
+	const cookieHeader = getRequestHeader("Cookie") ?? "";
+	const match = cookieHeader.match(/(?:^|;\s*)theme=(dark|light)/);
+	return (match?.[1] as "dark" | "light") ?? null;
+});
+
 export const Route = createRootRoute({
+	component: RootComponent,
+	loader: async () => {
+		const theme = await getThemeCookie();
+		return { theme };
+	},
 	head: () => ({
 		meta: [
 			{
@@ -75,6 +96,21 @@ export const Route = createRootRoute({
 	shellComponent: RootDocument,
 });
 
+function RootComponent() {
+	const { theme } = Route.useLoaderData();
+	return (
+		<ThemeContext.Provider value={theme}>
+			<div>
+				<Header />
+				<main>
+					<Outlet />
+				</main>
+				<Footer />
+			</div>
+		</ThemeContext.Provider>
+	);
+}
+
 function RootDocument({ children }: { children: React.ReactNode }) {
 	return (
 		<html lang="en" suppressHydrationWarning>
@@ -84,7 +120,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 			<body className="grain antialiased">
 				<script
 					dangerouslySetInnerHTML={{
-						__html: `(function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark')}catch(e){}})()`,
+						__html: `(function(){try{var c=document.cookie.match(/(?:^|;\\s*)theme=(dark|light)/);var t=c?c[1]:null;if(!t){t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';document.cookie='theme='+t+';path=/;max-age=31536000;SameSite=Lax'}if(t==='dark')document.documentElement.classList.add('dark')}catch(e){}})()`,
 					}}
 				/>
 				{children}

@@ -9,7 +9,6 @@ import {
 	Sparkles,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -310,7 +309,7 @@ function ProgressBar() {
 
 function RoadmapPage() {
 	return (
-		<Layout>
+		<>
 			{/* ─── Hero ──────────────────────────────────────────── */}
 			<section className="relative overflow-hidden pt-28 pb-16 sm:pt-36 sm:pb-20">
 				<div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -353,7 +352,7 @@ function RoadmapPage() {
 			</section>
 
 			{/* ─── Roadmap categories ────────────────────────────── */}
-			<section className="px-4 pb-16 sm:pb-20">
+			<section className="px-4 pb-16 sm:pb-20 pt-16">
 				<div className="mx-auto max-w-5xl space-y-12 sm:space-y-16">
 					{roadmapCategories.map((category, categoryIndex) => (
 						<motion.div
@@ -473,6 +472,6 @@ function RoadmapPage() {
 					</div>
 				</motion.div>
 			</section>
-		</Layout>
+		</>
 	);
 }

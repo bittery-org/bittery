@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Shield } from "lucide-react";
 import { motion } from "motion/react";
-import { Layout } from "@/components/layout";
 
 export const Route = createFileRoute("/privacy")({
 	component: PrivacyPage,
@@ -159,7 +158,7 @@ You also have the right to lodge a complaint with your local data protection aut
 
 function PrivacyPage() {
 	return (
-		<Layout>
+		<>
 			{/* ─── Hero ─────────────────────────────────────────────── */}
 			<section className="relative overflow-hidden pt-28 pb-16 sm:pt-36 sm:pb-20">
 				<div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -239,6 +238,6 @@ function PrivacyPage() {
 					</div>
 				</div>
 			</section>
-		</Layout>
+		</>
 	);
 }

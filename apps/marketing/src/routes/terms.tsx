@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { FileText } from "lucide-react";
 import { motion } from "motion/react";
-import { Layout } from "@/components/layout";
 
 export const Route = createFileRoute("/terms")({
   component: TermsPage,
@@ -189,7 +188,7 @@ Website: https://bittery.com`,
 
 function TermsPage() {
   return (
-    <Layout>
+    <>
       {/* ─── Hero ─────────────────────────────────────────────── */}
       <section className="relative overflow-hidden pt-28 pb-16 sm:pt-36 sm:pb-20">
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -269,6 +268,6 @@ function TermsPage() {
           </div>
         </div>
       </section>
-    </Layout>
+    </>
   );
 }

@@ -6,22 +6,19 @@ import { OpenSourceSection } from "@/components/landing/open-source-section";
 import { PlatformSection } from "@/components/landing/platform-section";
 import { PricingSection } from "@/components/landing/pricing-section";
 import { Testimonials } from "@/components/landing/testimonials";
-import { Layout } from "@/components/layout";
 
 export const Route = createFileRoute("/")({ component: LandingPage });
 
 function LandingPage() {
 	return (
-		<Layout>
-			<div className="overflow-hidden">
-				<HeroVault />
-				<FeaturesGrid />
-				<PlatformSection />
-				<Testimonials />
-				<OpenSourceSection />
-				<PricingSection />
-				<FAQSection />
-			</div>
-		</Layout>
+		<div className="overflow-hidden">
+			<HeroVault />
+			<FeaturesGrid />
+			<PlatformSection />
+			<Testimonials />
+			<OpenSourceSection />
+			<PricingSection />
+			<FAQSection />
+		</div>
 	);
 }

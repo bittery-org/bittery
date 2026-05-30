@@ -1,0 +1,79 @@
+---
+title: Configuration Reference
+description: All environment variables and settings for configuring your Bittery instance.
+category: self-hosting
+order: 4
+---
+
+# Configuration Reference
+
+All configuration is done through environment variables on the **server** service. The web app is a static SPA that only needs `VITE_SERVER_URL` at build time.
+
+## Required variables
+
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | PostgreSQL connection string. When using built-in Postgres: `postgresql://bittery:${DB_PASSWORD}@postgres:5432/bittery` |
+| `JWT_SECRET` | Secret key for signing authentication tokens. Generate with `openssl rand -hex 32` |
+| `DOMAIN` | Your domain name (used by Caddy for TLS) |
+
+<Callout type="danger">
+Never reuse `JWT_SECRET` across instances or commit it to version control. Rotating this secret will invalidate all active sessions.
+</Callout>
+
+## Server settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BITTERY_MODE` | `self-hosted` | Operating mode. Use `self-hosted` for self-hosted deployments |
+| `CORS_ORIGIN` | `https://${DOMAIN}` | Comma-separated list of allowed origins for API requests |
+| `TRUST_PROXY_MODE` | `none` | How to read client IPs. Options: `none`, `cloudflare`, `forwarded` |
+| `PORT` | `3000` | Port the API server listens on |
+| `MIGRATIONS_FOLDER` | `/app/migrations` | Path to SQL migration files |
+
+## Rate limiting
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RATE_LIMIT_ADAPTER` | `auto` | Rate limiter backend. `auto` uses in-memory or Redis if available |
+| `RATE_LIMIT_REDIS_URL` | — | Redis/Valkey URL for distributed rate limiting |
+| `SHARE_LINK_DAILY_LIMIT` | `50` | Maximum shared links a user can create per day |
+
+## Object storage (S3-compatible)
+
+Required only if you enable the `storage` profile for file attachments.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BITTERY_STORAGE_ENDPOINT` | — | S3 endpoint URL (e.g. `http://minio:9000`) |
+| `BITTERY_STORAGE_BUCKET` | — | S3 bucket name |
+| `BITTERY_STORAGE_ACCESS_KEY_ID` | — | S3 access key |
+| `BITTERY_STORAGE_SECRET_ACCESS_KEY` | — | S3 secret key |
+| `BITTERY_STORAGE_REGION` | `auto` | S3 region |
+| `BITTERY_STORAGE_CDN_URL` | — | Public CDN URL for uploaded files |
+
+## Cache (Redis / Valkey)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REDIS_URL` | — | Redis/Valkey connection URL for pub/sub and caching |
+
+## Built-in PostgreSQL
+
+These apply when using the `builtin-db` profile:
+
+| Variable | Description |
+|----------|-------------|
+| `DB_PASSWORD` | Password for the built-in PostgreSQL instance |
+| `POSTGRES_DB` | Database name (default: `bittery`) |
+| `POSTGRES_USER` | Database user (default: `bittery`) |
+
+## Web app (build-time only)
+
+| Variable | Description |
+|----------|-------------|
+| `VITE_SERVER_URL` | API server URL. Inlined at build time by Vite |
+
+<Callout type="info">
+Since `VITE_SERVER_URL` is inlined at build time, changing it requires rebuilding the web image. For Docker Compose deployments with Caddy, the web app and server share the same domain, so this is not needed.
+</Callout>

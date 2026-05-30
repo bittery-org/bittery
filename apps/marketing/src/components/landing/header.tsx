@@ -1,9 +1,10 @@
 import { Link, useLocation } from "@tanstack/react-router";
 import { Menu, Moon, Sun, X } from "lucide-react";
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { BitteryLogo } from "@/components/bittery-logo";
 import { Button } from "@/components/ui/button";
+import { ThemeContext } from "@/lib/theme-context";
 import { signupUrl } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 
@@ -32,8 +33,14 @@ const sectionIds = navLinks.map((l) => l.sectionId).filter(Boolean) as string[];
 
 function useActiveSection() {
 	const [active, setActive] = useState<string | null>(null);
+	const { pathname } = useLocation();
 
 	useEffect(() => {
+		if (pathname !== "/") {
+			setActive(null);
+			return;
+		}
+
 		const observers: IntersectionObserver[] = [];
 		const visibleSections = new Map<string, number>();
 
@@ -76,23 +83,22 @@ function useActiveSection() {
 				observer.disconnect();
 			}
 		};
-	}, []);
+	}, [pathname]);
 
 	return active;
 }
 
 function ThemeToggle() {
-	const [dark, setDark] = useState(
-		() =>
-			typeof document !== "undefined" &&
-			document.documentElement.classList.contains("dark"),
-	);
+	const serverTheme = useContext(ThemeContext);
+	const [dark, setDark] = useState(() => serverTheme === "dark");
 
 	const toggle = () => {
 		const next = !dark;
 		setDark(next);
 		document.documentElement.classList.toggle("dark", next);
-		localStorage.setItem("theme", next ? "dark" : "light");
+		const value = `theme=${next ? "dark" : "light"};path=/;max-age=31536000;SameSite=Lax`;
+		// biome-ignore lint: Setting a theme cookie requires direct assignment to document.cookie
+		document.cookie = value;
 	};
 
 	return (

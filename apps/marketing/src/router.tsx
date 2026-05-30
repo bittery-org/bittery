@@ -8,9 +8,16 @@ export const getRouter = () => {
 	const router = createRouter({
 		routeTree,
 		context: {},
-		scrollRestoration: true,
 		defaultPreloadStaleTime: 0,
 	});
+
+	if (typeof window !== "undefined") {
+		window.history.scrollRestoration = "manual";
+
+		router.subscribe("onResolved", () => {
+			window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+		});
+	}
 
 	return router;
 };

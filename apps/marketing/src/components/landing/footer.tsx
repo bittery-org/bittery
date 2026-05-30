@@ -39,6 +39,7 @@ const footerLinks = [
 		links: [
 			{ label: "Privacy", href: "/privacy" },
 			{ label: "Terms", href: "/terms" },
+			{ label: "Imprint", href: "/imprint" },
 			{
 				label: "License",
 				href: "https://github.com/bittery-org/bittery/blob/main/LICENSE",

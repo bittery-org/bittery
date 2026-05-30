@@ -1,0 +1,53 @@
+---
+title: Self-Hosting Overview
+description: Run Bittery on your own server with full control over your data.
+category: self-hosting
+order: 1
+---
+
+# Self-Hosting Overview
+
+Bittery is fully open-source and designed to be self-hosted. You keep complete control over your data — nothing ever leaves your infrastructure.
+
+## Architecture
+
+A Bittery deployment consists of three core services:
+
+| Service | Description |
+|---------|------------|
+| **Server** | Rust API server handling authentication, sync, and encrypted vault storage |
+| **Web** | Static SPA served via nginx — the web vault interface |
+| **Caddy** | Reverse proxy with automatic HTTPS via Let's Encrypt |
+
+Optional services can be enabled via Docker Compose profiles:
+
+| Service | Profile | Description |
+|---------|---------|------------|
+| **PostgreSQL** | `builtin-db` | Built-in database (or bring your own) |
+| **MinIO** | `storage` | S3-compatible object storage for file attachments |
+| **Valkey** | `cache` | Redis-compatible cache for rate limiting and pub/sub |
+
+## Deployment Options
+
+<Callout type="tip">
+If you want the fastest path to a running instance, start with the Railway template — it takes under 5 minutes.
+</Callout>
+
+- **Railway** — One-click deploy with managed Postgres. Best for getting started quickly. See [Railway Quick Start](/docs/self-hosting/railway).
+- **Docker Compose** — Full control on any Linux VPS. See [Docker Compose Setup](/docs/self-hosting/docker-compose).
+- **Custom** — Pull the container images and wire them into your own orchestration (Kubernetes, Nomad, etc.). See [Configuration Reference](/docs/self-hosting/configuration) for all environment variables.
+
+## Requirements
+
+- **Docker** and **Docker Compose v2** (for Docker deployments)
+- A domain name with DNS pointing to your server
+- **1 vCPU / 1 GB RAM** minimum (2 vCPU / 2 GB recommended)
+- **PostgreSQL 15+** (built-in or external)
+
+## Security
+
+Bittery uses zero-knowledge encryption — your server never sees plaintext vault data. Even on a compromised server, an attacker cannot decrypt user vaults without the master password and secret key.
+
+<Callout type="warning">
+Always run Bittery behind HTTPS. The included Caddy configuration handles this automatically with Let's Encrypt certificates.
+</Callout>

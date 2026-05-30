@@ -39,6 +39,14 @@ export const categories: CategoryMeta[] = [
 		icon: "CreditCard",
 		order: 4,
 	},
+	{
+		slug: "self-hosting",
+		title: "Self-Hosting",
+		description:
+			"Deploy Bittery on your own infrastructure with Docker, Railway, or any container platform.",
+		icon: "Server",
+		order: 5,
+	},
 ];
 
 export function getCategoryBySlug(slug: string): CategoryMeta | undefined {
