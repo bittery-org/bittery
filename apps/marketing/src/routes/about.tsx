@@ -28,7 +28,7 @@ export const Route = createFileRoute("/about")({
 			{
 				name: "description",
 				content:
-					"Learn about Bittery, a zero-knowledge password manager built by qrawall GmbH in Germany.",
+					"Learn about Bittery, a zero-knowledge password manager built by Bittery Software in Germany.",
 			},
 		],
 	}),
@@ -133,17 +133,7 @@ function AboutPage() {
 							<p className="mt-4 max-w-lg text-base text-muted-foreground leading-relaxed sm:text-lg">
 								Bittery is a password manager that keeps your data completely
 								private — even from us. Simple to use, available everywhere, and
-								made in Germany by{" "}
-								<a
-									href="https://qrawall.com/"
-									target="_blank"
-									rel="noopener noreferrer"
-									className="inline-flex items-baseline gap-1 font-medium text-foreground underline decoration-from-font decoration-primary/30 underline-offset-2 transition-colors hover:decoration-primary/60"
-								>
-									qrawall GmbH
-									<ExternalLink className="relative top-px size-3" />
-								</a>
-								.
+								made in Germany.
 							</p>
 
 							<div className="mt-8 flex flex-wrap items-center gap-3">
@@ -370,122 +360,6 @@ function AboutPage() {
 								</p>
 							</motion.div>
 						))}
-					</div>
-				</div>
-			</section>
-
-			{/* ─── Company section ─────────────────────────────────── */}
-			<section className="px-4 py-16 sm:py-20">
-				<div className="mx-auto max-w-5xl">
-					<motion.div
-						className="mb-12 text-center sm:mb-16"
-						initial={{ opacity: 0 }}
-						whileInView={{ opacity: 1 }}
-						viewport={{ once: true, margin: "-100px" }}
-						transition={{ duration: 0.5 }}
-					>
-						<h2 className="font-display text-3xl tracking-tight sm:text-4xl">
-							The company behind Bittery
-						</h2>
-						<p className="mx-auto mt-4 max-w-xl text-base text-muted-foreground sm:text-lg">
-							Built and maintained by a German software company committed to
-							privacy-respecting tools.
-						</p>
-					</motion.div>
-
-					<div className="grid gap-4 sm:gap-6 md:grid-cols-3">
-						{/* qrawall GmbH card — wide */}
-						<motion.div
-							className="relative overflow-hidden rounded-2xl border border-border/60 bg-card md:col-span-2"
-							initial={{ opacity: 0, y: 12 }}
-							whileInView={{ opacity: 1, y: 0 }}
-							viewport={{ once: true, margin: "-80px" }}
-							transition={{ duration: 0.4 }}
-						>
-							<div className="relative min-h-50 sm:min-h-60">
-								<img
-									src="https://images.unsplash.com/photo-1467269204594-9661b134dd2b?auto=format&fit=crop&w=1200&q=80"
-									alt="German cityscape"
-									className="absolute inset-0 size-full object-cover"
-									loading="lazy"
-								/>
-								<div className="absolute inset-0 bg-linear-to-t from-card via-card/60 to-transparent" />
-							</div>
-							<div className="relative -mt-16 p-6 sm:p-8">
-								<div className="mb-3 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/8 px-3 py-1 font-medium text-primary text-xs">
-									<Building2 className="size-3.5" />
-									qrawall GmbH
-								</div>
-								<h3 className="font-display font-semibold text-lg sm:text-xl">
-									Made in Germany
-								</h3>
-								<p className="mt-2 max-w-lg text-muted-foreground text-sm leading-relaxed">
-									Bittery is developed and maintained by{" "}
-									<a
-										href="https://qrawall.com/"
-										target="_blank"
-										rel="noopener noreferrer"
-										className="font-medium text-foreground underline decoration-primary/30 underline-offset-2 transition-colors hover:decoration-primary/60"
-									>
-										qrawall GmbH
-									</a>
-									, a software company based in Germany. We're focused on
-									building tools that respect user privacy and follow security
-									best practices — operating under EU data protection
-									regulations, including GDPR.
-								</p>
-								<a
-									href="https://qrawall.com/"
-									target="_blank"
-									rel="noopener noreferrer"
-									className="mt-4 inline-flex items-center gap-1.5 font-medium text-primary text-sm transition-colors hover:text-primary/80"
-								>
-									Visit qrawall.com
-									<ExternalLink className="size-3.5" />
-								</a>
-							</div>
-						</motion.div>
-
-						{/* Side cards */}
-						<div className="grid gap-4 sm:gap-6">
-							<motion.div
-								className="rounded-2xl border border-border/60 bg-card p-5 sm:p-6"
-								initial={{ opacity: 0, y: 12 }}
-								whileInView={{ opacity: 1, y: 0 }}
-								viewport={{ once: true, margin: "-80px" }}
-								transition={{ duration: 0.4, delay: 0.08 }}
-							>
-								<div className="mb-4 flex size-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-									<MapPin className="size-5" />
-								</div>
-								<h3 className="mb-1.5 font-semibold text-base">
-									EU jurisdiction
-								</h3>
-								<p className="text-muted-foreground text-sm leading-relaxed">
-									Operating under GDPR — one of the strictest privacy frameworks
-									in the world. Your data enjoys European-level protection.
-								</p>
-							</motion.div>
-
-							<motion.div
-								className="rounded-2xl border border-border/60 bg-card p-5 sm:p-6"
-								initial={{ opacity: 0, y: 12 }}
-								whileInView={{ opacity: 1, y: 0 }}
-								viewport={{ once: true, margin: "-80px" }}
-								transition={{ duration: 0.4, delay: 0.16 }}
-							>
-								<div className="mb-4 flex size-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
-									<Users className="size-5" />
-								</div>
-								<h3 className="mb-1.5 font-semibold text-base">
-									Community-driven
-								</h3>
-								<p className="text-muted-foreground text-sm leading-relaxed">
-									Feature requests, bug reports, and contributions from the
-									community shape the future of Bittery.
-								</p>
-							</motion.div>
-						</div>
 					</div>
 				</div>
 			</section>

@@ -22,7 +22,7 @@ const lastUpdated = "March 1, 2026";
 const sections = [
 	{
 		title: "1. Introduction",
-		content: `Bittery is a zero-knowledge password manager operated by qrawall GmbH ("we", "us", "our"), a company registered in Germany. This Privacy Policy explains how we collect, use, and protect information when you use our services, including the Bittery web app, desktop app, mobile app, browser extension, and this website (collectively, the "Service").
+		content: `Bittery is a zero-knowledge password manager operated by Bittery Software ("we", "us", "our"), a sole proprietorship registered in Germany. This Privacy Policy explains how we collect, use, and protect information when you use our services, including the Bittery web app, desktop app, mobile app, browser extension, and this website (collectively, the "Service").
 
 We are committed to your privacy. Bittery is designed so that we cannot access your passwords, vault data, or encryption keys — ever.`,
 	},
@@ -98,7 +98,7 @@ Audit logs and security event records may be retained for up to 12 months for se
 	{
 		title: "8. Self-hosting",
 		content:
-			"Bittery is open-source software that you can self-host on your own infrastructure. When you self-host Bittery, your data never touches our servers. This Privacy Policy applies only to the cloud-hosted version of the Service operated by qrawall GmbH.",
+			"Bittery is open-source software that you can self-host on your own infrastructure. When you self-host Bittery, your data never touches our servers. This Privacy Policy applies only to the cloud-hosted version of the Service operated by Bittery Software.",
 	},
 	{
 		title: "9. Third-party services",
@@ -149,9 +149,9 @@ This marketing website may use minimal analytics to understand aggregate traffic
 		title: "15. Contact us",
 		content: `If you have questions or concerns about this Privacy Policy or our data practices, please contact us:
 
-qrawall GmbH
+Bittery Software
 Email: privacy@bittery.com
-Website: https://qrawall.com
+Website: https://bittery.com
 
 You also have the right to lodge a complaint with your local data protection authority.`,
 	},
