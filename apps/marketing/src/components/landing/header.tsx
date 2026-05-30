@@ -20,13 +20,8 @@ const navLinks: NavLink[] = [
 	{ label: "Features", href: "/", hash: "features", sectionId: "features" },
 	{ label: "Pricing", href: "/", hash: "pricing", sectionId: "pricing" },
 	{ label: "FAQ", href: "/", hash: "faq", sectionId: "faq" },
+	{ label: "Download", href: "/download", sectionId: null },
 	{ label: "Docs", href: "/docs", sectionId: null },
-	{
-		label: "GitHub",
-		href: "https://github.com/bittery-org/bittery",
-		sectionId: null,
-		isExternal: true,
-	},
 ];
 
 const sectionIds = navLinks.map((l) => l.sectionId).filter(Boolean) as string[];
@@ -114,17 +109,21 @@ function ThemeToggle() {
 }
 
 export function Header() {
-	const [scrolled, setScrolled] = useState(() =>
-		typeof window !== "undefined" ? window.scrollY > 20 : false,
-	);
+	const [scrolled, setScrolled] = useState(false);
 	const [mobileOpen, setMobileOpen] = useState(false);
 	const activeSection = useActiveSection();
 	const location = useLocation();
 
 	useEffect(() => {
 		const onScroll = () => setScrolled(window.scrollY > 20);
+		// Scroll restoration happens asynchronously after mount — defer the
+		// initial check so we read the restored scrollY, not 0.
+		const rafId = requestAnimationFrame(onScroll);
 		window.addEventListener("scroll", onScroll, { passive: true });
-		return () => window.removeEventListener("scroll", onScroll);
+		return () => {
+			cancelAnimationFrame(rafId);
+			window.removeEventListener("scroll", onScroll);
+		};
 	}, []);
 
 	return (

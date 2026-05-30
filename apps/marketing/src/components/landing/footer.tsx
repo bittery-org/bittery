@@ -8,7 +8,7 @@ const footerLinks = [
 			{ label: "Features", href: "/", hash: "features" },
 			{ label: "Pricing", href: "/", hash: "pricing" },
 			{ label: "Roadmap", href: "/roadmap" },
-			{ label: "Download", href: "/" },
+			{ label: "Download", href: "/download" },
 			{ label: "Changelog", href: "/" },
 		],
 	},
