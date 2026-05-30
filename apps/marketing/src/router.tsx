@@ -15,6 +15,14 @@ export const getRouter = () => {
 		window.history.scrollRestoration = "manual";
 
 		router.subscribe("onResolved", () => {
+			const hash = router.state.location.hash;
+			if (hash) {
+				const el = document.getElementById(hash);
+				if (el) {
+					el.scrollIntoView({ behavior: "instant" });
+					return;
+				}
+			}
 			window.scrollTo({ top: 0, left: 0, behavior: "instant" });
 		});
 	}
