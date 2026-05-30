@@ -9,11 +9,13 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { useI18n } from "../providers/i18n-provider";
 import { storage } from "../lib/storage";
 
 export function LoginPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
+	const { m } = useI18n();
 	const { addingAccount } = useSearch({ from: "/login" });
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
@@ -35,7 +37,7 @@ export function LoginPage() {
 	const persistServerUrl = async (email?: string) => {
 		const normalized = normalizeServerUrl(serverUrl);
 		if (!normalized) {
-			toast.error("Invalid server URL");
+			toast.error(m.ext_login_toast_invalid_server_url());
 			return null;
 		}
 		await storage.storeServerUrl(normalized, email);
@@ -73,7 +75,7 @@ export function LoginPage() {
 			});
 
 			if (!response.success) {
-				throw new Error(response.error || "Login failed");
+				throw new Error(response.error || m.ext_login_toast_failed());
 			}
 
 			return response;
@@ -84,13 +86,13 @@ export function LoginPage() {
 
 			toast.success(
 				addingAccount
-					? "Account added successfully"
-					: "Signed in successfully!",
+					? m.ext_login_toast_account_added()
+					: m.ext_login_toast_signed_in(),
 			);
 			navigate({ to: "/vault" });
 		},
 		onError: (error: Error) => {
-			toast.error(error.message || "Failed to sign in");
+			toast.error(error.message || m.ext_login_toast_failed());
 		},
 	});
 
@@ -118,10 +120,10 @@ export function LoginPage() {
 						</div>
 						<div>
 							<h1 className="font-semibold text-xl tracking-tight">
-								{addingAccount ? "Add Another Account" : "Sign in to Bittery"}
-							</h1>
-							<p className="mt-1 text-muted-foreground text-sm">
-								Enter your credentials to access your vault
+							{addingAccount ? m.ext_login_title_add_account() : m.ext_login_title_sign_in()}
+						</h1>
+						<p className="mt-1 text-muted-foreground text-sm">
+							{m.ext_login_description()}
 							</p>
 						</div>
 					</div>
@@ -136,7 +138,7 @@ export function LoginPage() {
 						>
 							<div className="space-y-2">
 								<Label htmlFor="serverUrl" className="font-medium text-sm">
-									Server URL
+								{m.ext_login_label_server_url()}
 								</Label>
 								<Input
 									id="serverUrl"
@@ -149,7 +151,7 @@ export function LoginPage() {
 									className="h-10"
 								/>
 								<p className="text-muted-foreground text-xs">
-									Your self-hosted Bittery server URL
+								{m.ext_login_server_url_hint()}
 								</p>
 							</div>
 
@@ -157,7 +159,7 @@ export function LoginPage() {
 								{(field) => (
 									<div className="space-y-2">
 										<Label htmlFor={field.name} className="font-medium text-sm">
-											Email
+										{m.auth_signin_label_email()}
 										</Label>
 										<Input
 											id={field.name}
@@ -177,7 +179,7 @@ export function LoginPage() {
 								{(field) => (
 									<div className="space-y-2">
 										<Label htmlFor={field.name} className="font-medium text-sm">
-											Password
+										{m.auth_signin_label_password()}
 										</Label>
 										<div className="relative">
 											<Input
@@ -212,7 +214,7 @@ export function LoginPage() {
 								{(field) => (
 									<div className="space-y-2">
 										<Label htmlFor={field.name} className="font-medium text-sm">
-											Secret Key
+										{m.auth_signin_label_secret_key()}
 										</Label>
 										<div className="relative">
 											<Input
@@ -248,7 +250,7 @@ export function LoginPage() {
 								className="h-10 w-full font-medium"
 								disabled={loginMutation.isPending}
 							>
-								{loginMutation.isPending ? "Signing in..." : "Sign in"}
+								{loginMutation.isPending ? m.auth_signin_button_signing_in() : m.auth_signin_button_sign_in()}
 							</Button>
 						</form>
 					</Card>

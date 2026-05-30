@@ -3,7 +3,8 @@ import { Button, Select } from "heroui-native";
 import { ChevronDown } from "lucide-react-native";
 import { ScrollView, Text, View } from "react-native";
 import { withUniwind } from "uniwind";
-import { categoryOptions } from "../constants/item-categories";
+import { getCategoryOptions } from "../constants/item-categories";
+import { useI18n } from "../providers/i18n-provider";
 
 const StyledChevronDown = withUniwind(ChevronDown);
 
@@ -16,6 +17,8 @@ export function CategoryFilter({
 	selectedCategory,
 	onCategoryChange,
 }: CategoryFilterProps) {
+	const { m } = useI18n();
+	const categoryOptions = getCategoryOptions(m);
 	const selectedOption = categoryOptions.find(
 		(opt) => opt.value === selectedCategory,
 	);

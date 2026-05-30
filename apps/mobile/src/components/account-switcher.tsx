@@ -18,6 +18,7 @@ import { useState } from "react";
 import { Alert, Platform, Text, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/providers/i18n-provider";
 import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../contexts/account-context";
 import { type AccountMetadata, storage } from "../services/storage";
@@ -32,6 +33,7 @@ const StyledUsers = withUniwind(Users);
 export function AccountSwitcher() {
 	const router = useRouter();
 	const { toast } = useToast();
+	const { m } = useI18n();
 	const queryClient = useQueryClient();
 	const {
 		allAccounts,
@@ -76,7 +78,7 @@ export function AccountSwitcher() {
 			console.error("Error switching account:", error);
 			toast.show({
 				variant: "danger",
-				label: "Failed to switch account. Please try again.",
+				label: m.mob_account_switcher_toast_switch_failed(),
 				placement: "bottom",
 			});
 		} finally {
@@ -102,7 +104,7 @@ export function AccountSwitcher() {
 			if (unlockedEmails.length === 0) {
 				toast.show({
 					variant: "warning",
-					label: "Unlock at least one account to use All Accounts.",
+					label: m.mob_account_switcher_toast_unlock_required(),
 					placement: "bottom",
 				});
 				router.replace("/(auth)/unlock");
@@ -114,7 +116,7 @@ export function AccountSwitcher() {
 			console.error("Error switching to all accounts:", error);
 			toast.show({
 				variant: "danger",
-				label: "Failed to switch accounts. Please try again.",
+				label: m.mob_account_switcher_toast_switch_all_failed(),
 				placement: "bottom",
 			});
 		} finally {
@@ -139,12 +141,12 @@ export function AccountSwitcher() {
 
 	const handleLockVault = async () => {
 		Alert.alert(
-			"Lock Vault",
-			"This will lock your vault. You'll need to enter your password to unlock.",
+			m.mob_account_switcher_lock_dialog_title(),
+			m.mob_account_switcher_lock_dialog_message(),
 			[
-				{ text: "Cancel", style: "cancel" },
+				{ text: m.mob_account_switcher_lock_dialog_cancel(), style: "cancel" },
 				{
-					text: "Lock",
+					text: m.mob_account_switcher_lock_dialog_confirm(),
 					style: "destructive",
 					onPress: async () => {
 						if (storage.lockAllAccounts) {
@@ -207,7 +209,7 @@ export function AccountSwitcher() {
 				<BottomSheet.Overlay />
 				<BottomSheet.Content>
 					<View className="items-center py-3">
-						<BottomSheet.Title>Accounts</BottomSheet.Title>
+						<BottomSheet.Title>{m.mob_account_switcher_title()}</BottomSheet.Title>
 					</View>
 
 					{/* Account list */}
@@ -235,7 +237,7 @@ export function AccountSwitcher() {
 								</View>
 								<View className="flex-1">
 									<Text className="font-medium text-foreground">
-										All Accounts
+										{m.mob_account_switcher_all_accounts()}
 									</Text>
 								</View>
 								{isAllAccountsMode && (
@@ -308,7 +310,7 @@ export function AccountSwitcher() {
 							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-surface-tertiary">
 								<StyledPlus size={20} className="text-muted" />
 							</View>
-							<Text className="font-medium text-foreground">Add Account</Text>
+							<Text className="font-medium text-foreground">{m.mob_account_switcher_add_account()}</Text>
 						</PressableFeedback>
 
 						{/* Settings */}
@@ -320,7 +322,7 @@ export function AccountSwitcher() {
 							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-surface-tertiary">
 								<StyledSettings size={20} className="text-muted" />
 							</View>
-							<Text className="font-medium text-foreground">Settings</Text>
+							<Text className="font-medium text-foreground">{m.mob_account_switcher_settings()}</Text>
 						</PressableFeedback>
 
 						{/* Trash */}
@@ -332,7 +334,7 @@ export function AccountSwitcher() {
 							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-surface-tertiary">
 								<StyledTrash2 size={20} className="text-muted" />
 							</View>
-							<Text className="font-medium text-foreground">Trash</Text>
+							<Text className="font-medium text-foreground">{m.mob_account_switcher_trash()}</Text>
 						</PressableFeedback>
 
 						{/* Lock Vault */}
@@ -344,7 +346,7 @@ export function AccountSwitcher() {
 							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-danger/10">
 								<StyledLock size={20} className="text-danger" />
 							</View>
-							<Text className="font-medium text-danger">Lock Vault</Text>
+							<Text className="font-medium text-danger">{m.mob_account_switcher_lock_vault()}</Text>
 						</PressableFeedback>
 					</View>
 				</BottomSheet.Content>

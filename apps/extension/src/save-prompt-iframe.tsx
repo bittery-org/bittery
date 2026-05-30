@@ -11,6 +11,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { Favicon } from "@/components/favicon";
 import { getIframeNonceFromLocation } from "@/content-script/iframe-messages";
+import { I18nProvider, useI18n } from "@/providers/i18n-provider";
 
 interface VaultOption {
 	id: string;
@@ -49,6 +50,7 @@ function getHostname(url: string): string {
 }
 
 function SavePromptIframe() {
+	const { m } = useI18n();
 	const nonce = getIframeNonceFromLocation() ?? "";
 	const [data, setData] = useState<SavePromptData | null>(null);
 	const [selectedVaultId, setSelectedVaultId] = useState<string>("");
@@ -125,7 +127,7 @@ function SavePromptIframe() {
 				} else {
 					setState("error");
 					setErrorMessage(
-						event.data.error || "Failed to save credentials. Please try again.",
+						event.data.error || m.ext_save_error_fallback(),
 					);
 				}
 			}
@@ -223,7 +225,7 @@ function SavePromptIframe() {
 					/>
 					<div className="min-w-0 flex-1">
 						<p className="font-medium text-sm">
-							{isUpdating ? "Updating credentials..." : "Saving credentials..."}
+						{isUpdating ? m.ext_save_updating() : m.ext_save_saving()}
 						</p>
 						<p className="mt-0.5 text-muted-foreground text-xs">
 							{selectedVault?.name}
@@ -245,12 +247,12 @@ function SavePromptIframe() {
 					/>
 					<div className="min-w-0 flex-1">
 						<p className="font-medium text-sm">
-							{isUpdating ? "Credentials updated!" : "Credentials saved!"}
-						</p>
-						<p className="mt-0.5 text-muted-foreground text-xs">
-							{isUpdating
-								? `Updated in ${selectedVault?.name}`
-								: `Saved to ${selectedVault?.name}`}
+						{isUpdating ? m.ext_save_updated() : m.ext_save_saved()}
+					</p>
+					<p className="mt-0.5 text-muted-foreground text-xs">
+						{isUpdating
+							? m.ext_save_updated_in({ vault: selectedVault?.name ?? "" })
+							: m.ext_save_saved_to({ vault: selectedVault?.name ?? "" })}
 						</p>
 					</div>
 				</div>
@@ -269,7 +271,7 @@ function SavePromptIframe() {
 					/>
 					<div className="min-w-0 flex-1">
 						<p className="font-medium text-sm">
-							{isUpdating ? "Failed to update" : "Failed to save"}
+						{isUpdating ? m.ext_save_failed_update() : m.ext_save_failed_save()}
 						</p>
 						<p className="mt-0.5 text-muted-foreground text-xs">
 							{errorMessage}
@@ -290,7 +292,7 @@ function SavePromptIframe() {
 						size="sm"
 						className="flex-1"
 					>
-						Try Again
+						{m.ext_save_try_again()}
 					</Button>
 					<Button
 						onClick={handleCancel}
@@ -298,7 +300,7 @@ function SavePromptIframe() {
 						size="sm"
 						className="flex-1"
 					>
-						Cancel
+						{m.ext_save_cancel()}
 					</Button>
 				</div>
 			</Wrapper>
@@ -312,9 +314,9 @@ function SavePromptIframe() {
 				<div className="flex items-start gap-2.5">
 					<IconLockOutlineDuo18 size={20} className="shrink-0 text-amber-600" />
 					<div className="min-w-0 flex-1">
-						<p className="font-medium text-sm">Cannot save credentials</p>
-						<p className="mt-0.5 text-muted-foreground text-xs">
-							You don't have write access to any vaults.
+					<p className="font-medium text-sm">{m.ext_save_cannot_save()}</p>
+					<p className="mt-0.5 text-muted-foreground text-xs">
+						{m.ext_save_no_write_access()}
 						</p>
 						{data && (
 							<p className="mt-1 text-muted-foreground text-xs">
@@ -323,8 +325,7 @@ function SavePromptIframe() {
 							</p>
 						)}
 						<p className="mt-2 text-muted-foreground text-xs">
-							💡 Ask your vault owner for write permissions, or create a new
-							personal vault.
+						{m.ext_save_permissions_hint()}
 						</p>
 					</div>
 				</div>
@@ -335,7 +336,7 @@ function SavePromptIframe() {
 						size="sm"
 						className="w-full"
 					>
-						Close
+						{m.ext_save_close()}
 					</Button>
 				</div>
 			</Wrapper>
@@ -355,14 +356,14 @@ function SavePromptIframe() {
 				/>
 				<div className="min-w-0 flex-1">
 					<p className="font-medium text-sm">
-						{data.hasDuplicates ? "Update or save password?" : "Save password?"}
+					{data.hasDuplicates ? m.ext_save_update_or_save() : m.ext_save_password_question()}
 					</p>
 					<p className="mt-0.5 truncate text-muted-foreground text-xs">
 						{data.username}
 					</p>
 					{data.hasDuplicates && (
 						<p className="mt-1 text-amber-600 text-xs">
-							Credentials for this site already exist
+						{m.ext_save_duplicates_warning()}
 						</p>
 					)}
 				</div>
@@ -384,7 +385,7 @@ function SavePromptIframe() {
 								className="shrink-0 text-muted-foreground"
 							/>
 							<span className="truncate">
-								{selectedVault?.name || "Select vault"}
+							{selectedVault?.name || m.ext_save_select_vault()}
 							</span>
 							{selectedVault && (
 								<span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
@@ -481,7 +482,7 @@ function SavePromptIframe() {
 							size="sm"
 							className="flex-1"
 						>
-							Save new
+							{m.ext_save_new()}
 						</Button>
 					</div>
 					<div className="mt-2">
@@ -491,7 +492,7 @@ function SavePromptIframe() {
 							size="sm"
 							className="w-full"
 						>
-							Cancel
+							{m.ext_save_cancel()}
 						</Button>
 					</div>
 				</>
@@ -504,7 +505,7 @@ function SavePromptIframe() {
 						size="sm"
 						className="flex-1"
 					>
-						Save
+						{m.ext_save_button()}
 					</Button>
 					<Button
 						onClick={handleCancel}
@@ -512,7 +513,7 @@ function SavePromptIframe() {
 						size="sm"
 						className="flex-1"
 					>
-						Cancel
+						{m.ext_save_cancel()}
 					</Button>
 				</div>
 			)}
@@ -534,7 +535,9 @@ const root = document.getElementById("root");
 if (root) {
 	ReactDOM.createRoot(root).render(
 		<React.StrictMode>
-			<SavePromptIframe />
+			<I18nProvider>
+				<SavePromptIframe />
+			</I18nProvider>
 		</React.StrictMode>,
 	);
 }

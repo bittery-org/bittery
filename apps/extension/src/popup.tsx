@@ -12,6 +12,7 @@ import {
 import React, { useEffect } from "react";
 import ReactDOM from "react-dom/client";
 import { storage } from "./lib/storage";
+import { I18nProvider } from "./providers/i18n-provider";
 import { ExtensionPlatformProvider } from "./providers/platform-provider";
 import { ExtensionSyncProvider } from "./providers/sync-provider";
 import { routeTree } from "./routeTree";
@@ -101,12 +102,14 @@ function Popup() {
 	return (
 		<RpcProvider rpcClient={rpcClient} queryClient={queryClient}>
 			<QueryClientProvider client={queryClient}>
-				<ExtensionSyncProvider queryClient={queryClient}>
-					<ExtensionPlatformProvider>
-						<RouterProvider router={router} />
-						<Toaster />
-					</ExtensionPlatformProvider>
-				</ExtensionSyncProvider>
+				<I18nProvider>
+					<ExtensionSyncProvider queryClient={queryClient}>
+						<ExtensionPlatformProvider>
+							<RouterProvider router={router} />
+							<Toaster />
+						</ExtensionPlatformProvider>
+					</ExtensionSyncProvider>
+				</I18nProvider>
 			</QueryClientProvider>
 		</RpcProvider>
 	);

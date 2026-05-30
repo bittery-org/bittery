@@ -14,6 +14,7 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+import { useI18n } from "@/providers/i18n-provider";
 
 interface QrCodeScannerProps {
 	visible: boolean;
@@ -36,6 +37,7 @@ export function QrCodeScanner({
 	onClose,
 	onScanSuccess,
 }: QrCodeScannerProps) {
+	const { m } = useI18n();
 	const [permission, requestPermission] = useCameraPermissions();
 	const [torchEnabled, setTorchEnabled] = useState(false);
 	const [isProcessing, setIsProcessing] = useState(false);
@@ -50,15 +52,15 @@ export function QrCodeScanner({
 				// Check if this is an otpauth:// URI
 				if (!data.startsWith("otpauth://")) {
 					Alert.alert(
-						"Invalid QR Code",
-						"This QR code doesn't contain TOTP data. Please scan a valid authenticator QR code.",
+						m.mob_qr_scanner_invalid_qr_title(),
+						m.mob_qr_scanner_invalid_qr_message(),
 						[
 							{
-								text: "Try Again",
+								text: m.mob_qr_scanner_try_again(),
 								onPress: () => setIsProcessing(false),
 							},
 							{
-								text: "Cancel",
+								text: m.mob_qr_scanner_cancel(),
 								style: "cancel",
 								onPress: () => {
 									setIsProcessing(false);
@@ -76,15 +78,15 @@ export function QrCodeScanner({
 				// Validate the secret is proper base32
 				if (!isValidBase32(parsed.secret)) {
 					Alert.alert(
-						"Invalid Secret",
-						"The TOTP secret in this QR code is not valid. Please try scanning again or enter the secret manually.",
+						m.mob_qr_scanner_invalid_secret_title(),
+						m.mob_qr_scanner_invalid_secret_message(),
 						[
 							{
-								text: "Try Again",
+								text: m.mob_qr_scanner_try_again(),
 								onPress: () => setIsProcessing(false),
 							},
 							{
-								text: "Cancel",
+								text: m.mob_qr_scanner_cancel(),
 								style: "cancel",
 								onPress: () => {
 									setIsProcessing(false);

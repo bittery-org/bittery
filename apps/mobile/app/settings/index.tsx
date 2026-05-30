@@ -25,8 +25,9 @@ import {
 	Trash2,
 	User,
 } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Platform, ScrollView, Text, View } from "react-native";
+import { useI18n } from "@/providers/i18n-provider";
 import { Uniwind, useUniwind, withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
 import { cn } from "@/lib/utils";
@@ -51,17 +52,9 @@ const StyledAlertCircle = withUniwind(AlertCircle);
 const StyledMoon = withUniwind(Moon);
 const StyledSun = withUniwind(Sun);
 
-const AUTO_LOCK_OPTIONS = [
-	{ label: "1 minute", value: 60 * 1000 },
-	{ label: "5 minutes", value: 5 * 60 * 1000 },
-	{ label: "10 minutes", value: 10 * 60 * 1000 },
-	{ label: "30 minutes", value: 30 * 60 * 1000 },
-	{ label: "1 hour", value: 60 * 60 * 1000 },
-	{ label: "Never", value: -1 },
-];
-
 export default function SettingsScreen() {
 	const router = useRouter();
+	const { m } = useI18n();
 	const {
 		activeAccount,
 		isAllAccountsMode,
@@ -84,6 +77,18 @@ export default function SettingsScreen() {
 	const [serverUrl, setServerUrl] = useState<string | null>(null);
 	const [masterPasswordDaysRemaining, setMasterPasswordDaysRemaining] =
 		useState<number | null>(null);
+
+	const AUTO_LOCK_OPTIONS = useMemo(
+		() => [
+			{ label: m.mob_settings_auto_lock_1_min(), value: 60 * 1000 },
+			{ label: m.mob_settings_auto_lock_5_min(), value: 5 * 60 * 1000 },
+			{ label: m.mob_settings_auto_lock_10_min(), value: 10 * 60 * 1000 },
+			{ label: m.mob_settings_auto_lock_30_min(), value: 30 * 60 * 1000 },
+			{ label: m.mob_settings_auto_lock_1_hour(), value: 60 * 60 * 1000 },
+			{ label: m.mob_settings_auto_lock_never(), value: -1 },
+		],
+		[m],
+	);
 
 	const loadSettings = useCallback(async () => {
 		if (allAccounts.length === 0) return;
@@ -166,11 +171,11 @@ export default function SettingsScreen() {
 			if (value) {
 				// Verify biometric before enabling
 				const success = await storage.authenticateWithBiometric(
-					"Verify your identity to enable biometric unlock",
+					m.mob_settings_biometric_verify_prompt(),
 					fallbackEmail,
 				);
 				if (!success) {
-					Alert.alert("Error", "Biometric authentication failed");
+					Alert.alert("Error", m.mob_settings_biometric_error());
 					return;
 				}
 				await storage.enableBiometric(fallbackEmail);
@@ -180,14 +185,14 @@ export default function SettingsScreen() {
 			setBiometricEnabled(value);
 		} catch (error) {
 			console.error("Error toggling biometric:", error);
-			Alert.alert("Error", "Failed to update biometric settings");
+			Alert.alert("Error", m.mob_settings_biometric_settings_error());
 		}
 	};
 
 	const handleAutoLockChange = () => {
 		Alert.alert(
-			"Auto-Lock Timeout",
-			"Select when to automatically lock the vault",
+			m.mob_settings_auto_lock_dialog_title(),
+			m.mob_settings_auto_lock_dialog_description(),
 			AUTO_LOCK_OPTIONS.map((option) => ({
 				text: option.label,
 				onPress: async () => {
@@ -221,7 +226,7 @@ export default function SettingsScreen() {
 
 	const getAutoLockLabel = (value: number) => {
 		const option = AUTO_LOCK_OPTIONS.find((o) => o.value === value);
-		return option?.label || "10 minutes";
+		return option?.label || m.mob_settings_auto_lock_10_min();
 	};
 
 	const handleThemeToggle = async (isDark: boolean) => {
@@ -231,14 +236,14 @@ export default function SettingsScreen() {
 	};
 
 	const accountLabel = isAllAccountsMode
-		? "All Accounts"
-		: activeAccount?.name || "Account";
+		? m.mob_settings_all_accounts()
+		: activeAccount?.name || m.mob_settings_account_fallback();
 	const accountValue = isAllAccountsMode
-		? `${allAccounts.length} accounts`
+		? m.mob_settings_accounts_count({ count: String(allAccounts.length) })
 		: activeAccount?.email;
 	const serverValue = isAllAccountsMode
-		? "Per account"
-		: serverUrl || "Not set";
+		? m.mob_settings_server_per_account()
+		: serverUrl || m.mob_settings_server_not_set();
 	const accountsForList = isAllAccountsMode
 		? allAccounts
 		: allAccounts.filter((a) => a.email !== activeAccount?.email);
@@ -261,15 +266,15 @@ export default function SettingsScreen() {
 	};
 
 	const handleSignOut = async () => {
-		const title = isAllAccountsMode ? "Sign Out All Accounts" : "Sign Out";
+		const title = isAllAccountsMode ? m.mob_settings_sign_out_all_title() : m.mob_settings_sign_out();
 		const description = isAllAccountsMode
-			? "This will remove all accounts from this device. You'll need your Secret Key(s) to sign in again."
-			: "This will remove your account from this device. You'll need your Secret Key to sign in again.";
+			? m.mob_settings_sign_out_all_description()
+			: m.mob_settings_sign_out_description();
 
 		Alert.alert(title, description, [
-			{ text: "Cancel", style: "cancel" },
+			{ text: m.mob_settings_cancel(), style: "cancel" },
 			{
-				text: "Sign Out",
+				text: m.mob_settings_sign_out(),
 				style: "destructive",
 				onPress: async () => {
 					if (isAllAccountsMode) {
@@ -288,12 +293,12 @@ export default function SettingsScreen() {
 
 	const handleRemoveAccount = (email: string) => {
 		Alert.alert(
-			"Remove Account",
-			`Are you sure you want to remove ${email} from this device?`,
+			m.mob_settings_remove_account_title(),
+			m.mob_settings_remove_account_message({ email }),
 			[
-				{ text: "Cancel", style: "cancel" },
+				{ text: m.mob_settings_cancel(), style: "cancel" },
 				{
-					text: "Remove",
+					text: m.mob_settings_remove_account_confirm(),
 					style: "destructive",
 					onPress: async () => {
 						await removeAccount(email);
@@ -378,7 +383,7 @@ export default function SettingsScreen() {
 					>
 						<StyledArrowLeft size={18} className="text-foreground" />
 					</Button>
-					<Card.Title className="flex-1 text-xl">Settings</Card.Title>
+					<Card.Title className="flex-1 text-xl">{m.mob_settings_title()}</Card.Title>
 				</View>
 			</View>
 
@@ -386,20 +391,20 @@ export default function SettingsScreen() {
 				{/* Account Section */}
 				<Surface variant="secondary" className="mb-6 gap-0 p-0">
 					<Text className="px-4 pt-5 pb-2 font-semibold text-sm text-surface-foreground uppercase">
-						Account
+						{m.mob_settings_section_account()}
 					</Text>
 					<SettingRow
 						icon={StyledUser}
 						label={accountLabel}
 						value={accountValue}
 					/>
-					<SettingRow icon={StyledServer} label="Server" value={serverValue} />
+					<SettingRow icon={StyledServer} label={m.mob_settings_server_label()} value={serverValue} />
 				</Surface>
 
 				{/* Appearance Section */}
 				<Surface variant="secondary" className="mb-6 gap-0 p-0">
 					<Text className="px-4 pt-5 pb-2 font-semibold text-sm text-surface-foreground uppercase">
-						Appearance
+						{m.mob_settings_section_appearance()}
 					</Text>
 
 					<ControlField
@@ -415,9 +420,9 @@ export default function SettingsScreen() {
 							)}
 						</View>
 						<View className="flex-1">
-							<Label>Dark Mode</Label>
+							<Label>{m.mob_settings_dark_mode()}</Label>
 							<Description>
-								{theme === "dark" ? "Enabled" : "Disabled"}
+								{theme === "dark" ? m.mob_settings_enabled() : m.mob_settings_disabled()}
 							</Description>
 						</View>
 						<ControlField.Indicator>
@@ -429,10 +434,10 @@ export default function SettingsScreen() {
 				{/* Security Section */}
 				<Surface variant="secondary" className="mb-6 gap-0 p-0">
 					<Text className="px-4 pt-5 pb-2 font-semibold text-sm text-surface-foreground uppercase">
-						Security
+						{m.mob_settings_section_security()}
 					</Text>
 					<Text className="px-4 pb-2 text-muted text-xs">
-						Applies to all accounts on this device
+						{m.mob_settings_security_hint()}
 					</Text>
 					{biometricAvailable && (
 						<ControlField
@@ -454,9 +459,9 @@ export default function SettingsScreen() {
 								)}
 							</View>
 							<View className="flex-1">
-								<Label>{biometricType || "Biometric"} Unlock</Label>
+								<Label>{m.mob_settings_biometric_unlock({ biometricType: biometricType || "Biometric" })}</Label>
 								<Description>
-									{biometricEnabled ? "Enabled" : "Disabled"}
+									{biometricEnabled ? m.mob_settings_enabled() : m.mob_settings_disabled()}
 								</Description>
 							</View>
 							<ControlField.Indicator>
@@ -473,11 +478,10 @@ export default function SettingsScreen() {
 									<StyledInfo size={18} className="text-surface-foreground" />
 									<View className="flex-1">
 										<Card.Title className="text-sm">
-											Biometric Not Available
-										</Card.Title>
-										<Card.Description className="text-xs">
-											This device does not support biometric authentication.
-											Your vault is secured with your master password.
+										{m.mob_settings_biometric_not_available_title()}
+									</Card.Title>
+									<Card.Description className="text-xs">
+										{m.mob_settings_biometric_not_available_description()}
 										</Card.Description>
 									</View>
 								</View>
@@ -493,11 +497,10 @@ export default function SettingsScreen() {
 									<StyledAlertCircle size={18} className="text-amber-600" />
 									<View className="flex-1">
 										<Card.Title className="text-amber-800 text-sm">
-											Set Up Biometric
-										</Card.Title>
-										<Card.Description className="text-amber-700 text-xs">
-											Enable Face ID or Touch ID in your device settings to use
-											biometric unlock.
+										{m.mob_settings_biometric_setup_title()}
+									</Card.Title>
+									<Card.Description className="text-amber-700 text-xs">
+										{m.mob_settings_biometric_setup_description()}
 										</Card.Description>
 									</View>
 								</View>
@@ -507,7 +510,7 @@ export default function SettingsScreen() {
 
 					<SettingRow
 						icon={StyledClock}
-						label="Auto-Lock"
+						label={m.mob_settings_auto_lock_label()}
 						value={getAutoLockLabel(autoLockTimeout)}
 						onPress={handleAutoLockChange}
 					/>
@@ -523,12 +526,12 @@ export default function SettingsScreen() {
 									/>
 									<View className="flex-1">
 										<Card.Title className="text-accent-soft-foreground text-sm">
-											Password Check
-										</Card.Title>
-										<Card.Description className="text-accent-soft-foreground text-xs">
-											{masterPasswordDaysRemaining > 0
-												? `Master password required in ${masterPasswordDaysRemaining} days for security verification.`
-												: "Master password required on next unlock for security verification."}
+										{m.mob_settings_password_check_title()}
+									</Card.Title>
+									<Card.Description className="text-accent-soft-foreground text-xs">
+										{masterPasswordDaysRemaining > 0
+											? m.mob_settings_password_check_days_remaining({ days: String(masterPasswordDaysRemaining) })
+											: m.mob_settings_password_check_now()}
 										</Card.Description>
 									</View>
 								</View>
@@ -538,7 +541,7 @@ export default function SettingsScreen() {
 
 					<SettingRow
 						icon={StyledLock}
-						label="Lock Vault"
+						label={m.mob_settings_lock_vault()}
 						onPress={handleLock}
 					/>
 				</Surface>
@@ -546,7 +549,7 @@ export default function SettingsScreen() {
 				{/* Accessibility Section */}
 				<Surface variant="secondary" className="mb-6 gap-0 p-0">
 					<Text className="px-4 pt-5 pb-2 font-semibold text-sm text-surface-foreground uppercase">
-						Accessibility
+						{m.mob_settings_section_accessibility()}
 					</Text>
 
 					<View className="px-4 py-4">
@@ -555,12 +558,10 @@ export default function SettingsScreen() {
 								<StyledInfo size={18} className="text-surface-foreground" />
 								<View className="flex-1">
 									<Card.Title className="text-sm">
-										Alternative Access
+										{m.mob_settings_accessibility_title()}
 									</Card.Title>
 									<Card.Description className="text-xs">
-										If you cannot use biometric authentication, you can always
-										unlock your vault using your master password. The password
-										option is available on the unlock screen.
+										{m.mob_settings_accessibility_description()}
 									</Card.Description>
 								</View>
 							</View>
@@ -572,7 +573,7 @@ export default function SettingsScreen() {
 				{accountsForList.length > 0 && (
 					<Surface variant="secondary" className="mb-6 gap-0 p-0">
 						<Text className="px-4 pt-5 pb-2 font-semibold text-sm text-surface-foreground uppercase">
-							{isAllAccountsMode ? "Accounts" : "Other Accounts"}
+							{isAllAccountsMode ? m.mob_settings_section_accounts() : m.mob_settings_section_other_accounts()}
 						</Text>
 						{accountsForList.map((account) => (
 							<View key={account.email}>
@@ -600,15 +601,15 @@ export default function SettingsScreen() {
 				{/* Danger Zone */}
 				<Surface variant="secondary" className="mb-6 gap-0 p-0">
 					<Text className="px-4 pt-5 pb-2 font-semibold text-sm text-surface-foreground uppercase">
-						Danger Zone
+						{m.mob_settings_section_danger()}
 					</Text>
 					<SettingRow
 						icon={StyledLogOut}
-						label={isAllAccountsMode ? "Sign Out All" : "Sign Out"}
+						label={isAllAccountsMode ? m.mob_settings_sign_out_all() : m.mob_settings_sign_out()}
 						value={
 							isAllAccountsMode
-								? "Remove all accounts from device"
-								: "Remove this account from device"
+								? m.mob_settings_sign_out_all_value()
+								: m.mob_settings_sign_out_value()
 						}
 						onPress={handleSignOut}
 						destructive
@@ -618,9 +619,9 @@ export default function SettingsScreen() {
 				{/* App Info */}
 				<View className="items-center gap-1 py-8">
 					<Text className="text-sm text-surface-foreground">
-						Bittery Mobile
+						{m.mob_settings_app_name()}
 					</Text>
-					<Text className="text-surface-foreground text-xs">Version 0.1.0</Text>
+					<Text className="text-surface-foreground text-xs">{m.mob_settings_app_version()}</Text>
 				</View>
 			</ScrollView>
 		</SafeAreaView>

@@ -15,11 +15,13 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "../providers/i18n-provider";
 import { storage } from "../lib/storage";
 
 export function UnlockPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
+	const { m } = useI18n();
 	const [showPassword, setShowPassword] = useState(false);
 	const [biometricAttempted, setBiometricAttempted] = useState(false);
 	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
@@ -58,7 +60,7 @@ export function UnlockPage() {
 			});
 
 			if (!response.success) {
-				throw new Error(response.error || "Unlock failed");
+				throw new Error(response.error || m.ext_unlock_toast_failed());
 			}
 
 			return response;
@@ -72,13 +74,13 @@ export function UnlockPage() {
 			const { unlocked = [], failed = [] } = response.result || {};
 			if (failed.length === 0) {
 				if (accounts.length === 1) {
-					toast.success("Vault unlocked");
+					toast.success(m.toast_auth_unlock_success_single());
 				} else {
-					toast.success(`All ${unlocked.length} accounts unlocked`);
+					toast.success(m.ext_unlock_toast_unlocked_all({ count: unlocked.length }));
 				}
 			} else {
 				toast.warning(
-					`Unlocked ${unlocked.length} of ${accounts.length} accounts`,
+					m.ext_unlock_toast_partial({ unlockedCount: unlocked.length, totalCount: accounts.length }),
 				);
 			}
 
@@ -89,7 +91,7 @@ export function UnlockPage() {
 		},
 		onError: (error: Error) => {
 			setVaultState("locked");
-			toast.error(error.message || "Failed to unlock");
+			toast.error(error.message || m.ext_unlock_toast_failed());
 		},
 	});
 
@@ -103,7 +105,7 @@ export function UnlockPage() {
 			});
 
 			if (!response.success) {
-				throw new Error(response.error || "Biometric unlock failed");
+				throw new Error(response.error || m.toast_auth_unlock_error_biometric_failed());
 			}
 
 			return response;
@@ -117,13 +119,13 @@ export function UnlockPage() {
 			const { unlocked = [], failed = [] } = response.result || {};
 			if (failed.length === 0) {
 				if (accounts.length === 1) {
-					toast.success("Unlocked with biometric");
+					toast.success(m.toast_auth_unlock_success_biometric_single());
 				} else {
-					toast.success(`All ${unlocked.length} accounts unlocked`);
+					toast.success(m.ext_unlock_toast_unlocked_all({ count: unlocked.length }));
 				}
 			} else {
 				toast.warning(
-					`Unlocked ${unlocked.length} of ${accounts.length} accounts`,
+					m.ext_unlock_toast_partial({ unlockedCount: unlocked.length, totalCount: accounts.length }),
 				);
 			}
 
@@ -136,7 +138,7 @@ export function UnlockPage() {
 			setVaultState("locked");
 			// Don't show error toast if desktop is locked (user will unlock in desktop)
 			if (!error.message?.includes("Desktop app is locked")) {
-				toast.error(error.message || "Biometric unlock failed");
+				toast.error(error.message || m.toast_auth_unlock_error_biometric_failed());
 			}
 		},
 	});
@@ -185,9 +187,9 @@ export function UnlockPage() {
 		return (
 			<div className="flex min-h-[400px] items-center justify-center p-4">
 				<div className="text-center">
-					<p className="text-gray-600">No accounts found</p>
+					<p className="text-gray-600">{m.ext_unlock_no_accounts()}</p>
 					<Button onClick={handleFullLogin} className="mt-4">
-						Sign In
+						{m.auth_signin_button_sign_in()}
 					</Button>
 				</div>
 			</div>
@@ -203,19 +205,19 @@ export function UnlockPage() {
 					</div>
 					<div>
 						<h1 className="font-semibold text-xl tracking-tight">
-							Welcome back
+							{m.auth_signin_title_quick_unlock()}
 						</h1>
 						{accounts.length === 1 ? (
 							<p className="mt-1 font-medium text-sm">{accounts[0]?.email}</p>
 						) : (
 							<p className="mt-1 text-muted-foreground text-sm">
-								{accounts.length} accounts
+								{m.ext_unlock_accounts_count({ count: accounts.length })}
 							</p>
 						)}
 						<p className="mt-1 text-muted-foreground text-sm">
 							{vaultState === "unlocking"
-								? "Unlocking your vault..."
-								: "Enter your password to unlock"}
+								? m.ext_unlock_unlocking()
+								: m.ext_unlock_enter_password()}
 						</p>
 					</div>
 				</div>
@@ -236,7 +238,7 @@ export function UnlockPage() {
 					{biometricAttempted && !biometricUnlockMutation.isPending && (
 						<div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
 							<p className="text-center text-blue-800 text-sm dark:text-blue-200">
-								Or use your password below
+							{m.ext_unlock_biometric_fallback()}
 							</p>
 						</div>
 					)}
@@ -253,7 +255,7 @@ export function UnlockPage() {
 							<form.Field name="password">
 								{(field) => (
 									<div className="space-y-2">
-										<Label htmlFor={field.name}>Password</Label>
+										<Label htmlFor={field.name}>{m.auth_signin_label_password()}</Label>
 										<div className="relative">
 											<Input
 												id={field.name}
@@ -292,10 +294,10 @@ export function UnlockPage() {
 							disabled={unlockMutation.isPending}
 						>
 							{unlockMutation.isPending
-								? "Unlocking..."
-								: accounts.length === 1
-									? "Unlock Vault"
-									: `Unlock All (${accounts.length})`}
+							? m.ext_unlock_button_unlocking()
+							: accounts.length === 1
+								? m.auth_signin_button_unlock_vault()
+								: m.ext_unlock_button_unlock_all({ count: accounts.length })}
 						</Button>
 
 						<Button
@@ -304,7 +306,7 @@ export function UnlockPage() {
 							onClick={handleFullLogin}
 							className="w-full text-muted-foreground"
 						>
-							Sign in with a different account
+							{m.auth_signin_button_different_account()}
 						</Button>
 					</form>
 				</Card>

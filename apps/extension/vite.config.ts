@@ -18,6 +18,9 @@ export default defineConfig({
 			"@": "/src",
 		},
 	},
+	optimizeDeps: {
+		include: ["@bittery/i18n/paraglide/messages", "@bittery/i18n/paraglide/runtime"],
+	},
 	server: {
 		cors: {
 			origin: [/chrome-extension:\/\//],

@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { useI18n } from "@/providers/i18n-provider";
 
 // Create styled icon components
 const StyledSearch = withUniwind(Search);
@@ -17,6 +18,7 @@ interface TagWithCount {
 }
 
 export default function TagsScreen() {
+	const { m } = useI18n();
 	const router = useRouter();
 	const [searchQuery, setSearchQuery] = useState("");
 
@@ -58,7 +60,7 @@ export default function TagsScreen() {
 					<TextField>
 						<View className="w-full flex-row items-center">
 							<Input
-								placeholder="Search tags..."
+								placeholder={m.mob_tags_search_placeholder()}
 								editable={false}
 								className="flex-1 pr-4 pl-12"
 							/>
@@ -91,7 +93,7 @@ export default function TagsScreen() {
 			>
 				<Card variant="secondary" className="w-full max-w-sm items-center p-8">
 					<Card.Title className="mb-4 text-center text-danger text-lg">
-						Error loading tags
+						{m.mob_tags_error_loading()}
 					</Card.Title>
 				</Card>
 			</SafeAreaView>
@@ -105,7 +107,7 @@ export default function TagsScreen() {
 				<TextField>
 					<View className="w-full flex-row items-center">
 						<Input
-							placeholder="Search tags..."
+							placeholder={m.mob_tags_search_placeholder()}
 							value={searchQuery}
 							onChangeText={setSearchQuery}
 							autoCapitalize="none"
@@ -130,12 +132,12 @@ export default function TagsScreen() {
 					>
 						<StyledTag size={48} className="mb-4 text-muted" />
 						<Card.Title className="mb-2 text-center text-lg">
-							{searchQuery ? "No tags found" : "No tags yet"}
+							{searchQuery ? m.mob_tags_empty_no_results() : m.mob_tags_empty_no_tags()}
 						</Card.Title>
 						<Card.Description className="text-center">
 							{searchQuery
-								? "Try a different search term"
-								: "Add tags to your items to organize them"}
+								? m.mob_tags_empty_no_results_description()
+								: m.mob_tags_empty_no_tags_description()}
 						</Card.Description>
 					</Card>
 				</View>
