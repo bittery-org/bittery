@@ -9,6 +9,7 @@ import {
 	Scripts,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
+import { ThemeProvider } from "next-themes";
 import appCss from "../index.css?url";
 import { useI18n } from "../providers/i18n-provider";
 
@@ -79,13 +80,20 @@ function RootDocument() {
 	const isDev = import.meta.env.DEV;
 
 	return (
-		<html lang={locale}>
+		<html lang={locale} suppressHydrationWarning>
 			<head>
 				<HeadContent />
 			</head>
 			<body>
-				<Outlet />
-				<Toaster richColors />
+				<ThemeProvider
+					attribute="class"
+					defaultTheme="system"
+					enableSystem
+					disableTransitionOnChange
+				>
+					<Outlet />
+					<Toaster richColors />
+				</ThemeProvider>
 				{isDev && <TanStackRouterDevtools position="bottom-left" />}
 				{isDev && (
 					<ReactQueryDevtools position="bottom" buttonPosition="bottom-right" />

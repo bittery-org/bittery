@@ -30,6 +30,8 @@ import {
 	IconLoader2OutlineDuo18,
 } from "@bittery/ui/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Monitor, Moon, Sun } from "lucide-react";
+import { useTheme } from "next-themes";
 import { useMemo, useState } from "react";
 import { storage } from "@/lib/storage";
 import { clearDesktopSyncState } from "@/lib/sync-client-id";
@@ -107,6 +109,7 @@ function SettingsDialogContent({
 	initialMasterPasswordReentry: string;
 }) {
 	const { locale, setLocale, m } = useI18n();
+	const { theme, setTheme } = useTheme();
 	const core = useCoreContext();
 	const syncContext = useSyncContext();
 	const queryClient = useQueryClient();
@@ -304,6 +307,57 @@ function SettingsDialogContent({
 						</Select>
 						<p className="text-muted-foreground text-xs">
 							{m.settings_general_language_description()}
+						</p>
+					</div>
+
+					<div className="space-y-2">
+						<Label htmlFor="appearance">
+							{m.settings_general_appearance_title()}
+						</Label>
+						<Select value={theme} onValueChange={setTheme}>
+							<SelectTrigger id="appearance">
+								<div className="flex items-center gap-2">
+									{theme === "dark" ? (
+										<Moon className="size-3.5 shrink-0" />
+									) : theme === "light" ? (
+										<Sun className="size-3.5 shrink-0" />
+									) : (
+										<Monitor className="size-3.5 shrink-0" />
+									)}
+									<SelectValue
+										placeholder={m.settings_general_appearance_title()}
+									>
+										{theme === "dark"
+											? m.settings_theme_dark()
+											: theme === "light"
+												? m.settings_theme_light()
+												: m.settings_theme_system()}
+									</SelectValue>
+								</div>
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="light">
+									<span className="inline-flex items-center gap-2 whitespace-nowrap">
+										<Sun className="size-3.5 shrink-0" />
+										<span>{m.settings_theme_light()}</span>
+									</span>
+								</SelectItem>
+								<SelectItem value="dark">
+									<span className="inline-flex items-center gap-2 whitespace-nowrap">
+										<Moon className="size-3.5 shrink-0" />
+										<span>{m.settings_theme_dark()}</span>
+									</span>
+								</SelectItem>
+								<SelectItem value="system">
+									<span className="inline-flex items-center gap-2 whitespace-nowrap">
+										<Monitor className="size-3.5 shrink-0" />
+										<span>{m.settings_theme_system()}</span>
+									</span>
+								</SelectItem>
+							</SelectContent>
+						</Select>
+						<p className="text-muted-foreground text-xs">
+							{m.settings_general_appearance_description()}
 						</p>
 					</div>
 
