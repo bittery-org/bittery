@@ -12,6 +12,7 @@
 		"./types": "./src/types.ts",
 		"./core-context": "./src/core-context.ts",
 		"./hooks": "./src/hooks/index.ts",
+		"./hooks/use-password-security": "./src/hooks/use-password-security.ts",
 		"./hooks/context": "./src/context/platform-context.tsx",
 		"./hooks/services": "./src/services/autolock.ts",
 		"./hooks/services/autolock-web": "./src/services/autolock-web.ts",

@@ -197,10 +197,6 @@ export {
 	useItemsUnified,
 } from "./use-items";
 export {
-	analyzePassword,
-	usePasswordSecurity,
-} from "./use-password-security";
-export {
 	type UseVaultInfoOptions,
 	useVaultInfo,
 	type VaultInfoWithAccount,
