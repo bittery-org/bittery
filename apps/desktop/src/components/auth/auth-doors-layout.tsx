@@ -126,7 +126,7 @@ export function AuthDoorsLayout({
 
 	return (
 		<div className="flex h-full w-full flex-col md:flex-row">
-			<div className="relative hidden w-1/3 flex-col bg-sidebar dark:bg-[linear-gradient(180deg,oklch(0.14_0.025_285),oklch(0.10_0.015_280))] md:flex lg:w-1/3">
+			<div className="relative hidden w-1/3 flex-col bg-auth-panel dark:bg-[linear-gradient(180deg,oklch(0.14_0.025_285),oklch(0.10_0.015_280))] md:flex lg:w-1/3">
 				<div className="absolute top-8 left-4 sm:top-9 sm:left-6">
 					<img src="/logo.png" alt="Bittery" className="h-7 w-auto sm:h-10" />
 				</div>

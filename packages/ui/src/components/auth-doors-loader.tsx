@@ -75,7 +75,7 @@ export function AuthDoorsOverlay({
       aria-hidden="true"
     >
       <div
-        className="absolute inset-y-0 left-0 z-10 w-1/3 overflow-visible bg-sidebar"
+        className="absolute inset-y-0 left-0 z-10 w-1/3 overflow-visible bg-auth-panel"
         style={{
           transform: open ? "translateX(-110%)" : "translateX(0)",
           transition: open
