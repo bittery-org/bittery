@@ -22,7 +22,7 @@ use tracing::info;
 use ts_rs::TS;
 
 use crate::{
-    config::{bittery_mode, db_pool},
+    config::{bittery_mode, cloud_billing_enabled, cloud_public_signup_enabled, db_pool},
     db::models::*,
     error::AppError,
     integrations::storage,
@@ -76,6 +76,7 @@ pub struct PublicAuthContext {
 #[serde(rename_all = "camelCase")]
 pub struct RegistrationStatusResponse {
     pub mode: String,
+    pub billing_enabled: bool,
     pub allow_public_signup: bool,
     pub reason: Option<String>,
 }
@@ -587,11 +588,17 @@ pub(crate) async fn signup(
     validate_signup_input(&input)?;
     let pool = db_pool(app_state)?;
     let normalized_email = normalize_email(&input.email);
-    let self_hosted_mode = bittery_mode() == "self-hosted";
+    let mode = bittery_mode();
+    let self_hosted_mode = mode == "self-hosted";
 
     if self_hosted_mode && has_any_registered_user(pool).await? {
         return Err(AppError::forbidden(
             "Public registration is disabled. Ask an admin for an invite link.",
+        ));
+    }
+    if mode == "cloud" && !cloud_public_signup_enabled() {
+        return Err(AppError::forbidden(
+            "Hosted beta signup is invite-only. Join the waitlist or ask for an invite link.",
         ));
     }
 
@@ -603,7 +610,7 @@ pub(crate) async fn signup(
     .await?;
     ensure_user_does_not_exist(pool, &normalized_email).await?;
 
-    let selected_plan = if self_hosted_mode {
+    let selected_plan = if self_hosted_mode || !cloud_billing_enabled() {
         "free"
     } else {
         normalize_signup_plan(input.plan.as_deref())?
@@ -1411,10 +1418,16 @@ pub(crate) async fn registration_status(
 ) -> Result<RegistrationStatusResponse, AppError> {
     let mode = bittery_mode().to_string();
     if mode == "cloud" {
+        let allow_public_signup = cloud_public_signup_enabled();
         return Ok(RegistrationStatusResponse {
             mode,
-            allow_public_signup: true,
-            reason: None,
+            billing_enabled: cloud_billing_enabled(),
+            allow_public_signup,
+            reason: if allow_public_signup {
+                None
+            } else {
+                Some("cloud_beta_invite_only".to_string())
+            },
         });
     }
 
@@ -1425,6 +1438,7 @@ pub(crate) async fn registration_status(
 
     Ok(RegistrationStatusResponse {
         mode,
+        billing_enabled: false,
         allow_public_signup,
         reason: if allow_public_signup {
             None

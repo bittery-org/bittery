@@ -45,6 +45,9 @@ export const Route = createFileRoute("/_app/billing")({
 		if (access.mode !== "cloud") {
 			throw redirect({ to: "/home" });
 		}
+		if (access.billingEnabled !== true) {
+			throw redirect({ to: "/home" });
+		}
 
 		const me = await context.queryClient.ensureQueryData(
 			context.rpc.auth.me.queryOptions(),

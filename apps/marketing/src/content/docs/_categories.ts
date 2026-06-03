@@ -1,3 +1,5 @@
+import { billingMarketingEnabled } from "@/lib/urls";
+
 export interface CategoryMeta {
 	slug: string;
 	title: string;
@@ -50,5 +52,8 @@ export const categories: CategoryMeta[] = [
 ];
 
 export function getCategoryBySlug(slug: string): CategoryMeta | undefined {
+	if (slug === "billing" && !billingMarketingEnabled()) {
+		return undefined;
+	}
 	return categories.find((c) => c.slug === slug);
 }

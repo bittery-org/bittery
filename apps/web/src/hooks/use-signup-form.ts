@@ -99,6 +99,7 @@ export function useSignupForm({
 	const isSelfHostedMode = registrationStatus?.mode === "self-hosted";
 	const isCloudMode = registrationStatus?.mode !== "self-hosted";
 	const isCloudSelfServeSignup = isCloudMode && !isInvitationSignup;
+	const isCloudBillingEnabled = registrationStatus?.billingEnabled ?? true;
 	const allowPublicSignup = registrationStatus?.allowPublicSignup ?? true;
 
 	const normalizeSignupEmail = (email: string) => email.trim().toLowerCase();
@@ -199,6 +200,7 @@ export function useSignupForm({
 			if (
 				isCloudSelfServeSignup &&
 				!isInvitationSignup &&
+				isCloudBillingEnabled &&
 				variables.plan &&
 				variables.plan !== "free"
 			) {
@@ -300,7 +302,7 @@ export function useSignupForm({
 				vaultId: signupVaultId,
 				email,
 				name: value.name,
-				plan: value.plan,
+				plan: isCloudBillingEnabled ? value.plan : "free",
 				signupVerificationToken: verificationToken,
 				...(isCloudSelfServeSignup && value.plan === "team" && teamName
 					? { organizationName: teamName }
@@ -560,6 +562,7 @@ export function useSignupForm({
 		isSelfHostedMode,
 		isCloudMode,
 		isCloudSelfServeSignup,
+		isCloudBillingEnabled,
 		allowPublicSignup,
 		hasAllKeyMaterial,
 	};

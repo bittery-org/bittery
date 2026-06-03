@@ -4,6 +4,7 @@ import type { EntitlementLimits } from "./EntitlementLimits";
 
 export type BillingEntitlementsResponse = {
 	mode: string;
+	billingEnabled: boolean;
 	plan: string;
 	status: string;
 	isActive: boolean;

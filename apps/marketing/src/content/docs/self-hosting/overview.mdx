@@ -7,7 +7,7 @@ order: 1
 
 # Self-Hosting Overview
 
-Bittery is fully open-source and designed to be self-hosted. You keep complete control over your data — nothing ever leaves your infrastructure.
+Bittery is source-available under the Functional Source License and designed to be self-hosted. You keep complete control over your data — nothing ever leaves your infrastructure.
 
 ## Architecture
 
@@ -26,6 +26,8 @@ Optional services can be enabled via Docker Compose profiles:
 | **PostgreSQL** | `builtin-db` | Built-in database (or bring your own) |
 | **MinIO** | `storage` | S3-compatible object storage for file attachments |
 | **Valkey** | `cache` | Redis-compatible cache for rate limiting and pub/sub |
+
+Self-hosted deployments do not require Stripe or hosted-cloud billing. In `BITTERY_MODE=self-hosted`, team sharing, share links, and attachments are available without a subscription gate.
 
 ## Deployment Options
 

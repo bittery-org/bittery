@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "@/components/ui/button";
+import { billingMarketingEnabled } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/roadmap")({
@@ -230,8 +231,18 @@ const statusConfig: Record<
 
 // ─── Stats ───────────────────────────────────────────────────────────
 
-function getRoadmapStats() {
-	const all = roadmapCategories.flatMap((c) => c.items);
+function getVisibleRoadmapCategories() {
+	if (billingMarketingEnabled()) {
+		return roadmapCategories;
+	}
+	return roadmapCategories.map((category) => ({
+		...category,
+		items: category.items.filter((item) => item.title !== "Billing"),
+	}));
+}
+
+function getRoadmapStats(categories: RoadmapCategory[]) {
+	const all = categories.flatMap((c) => c.items);
 	return {
 		total: all.length,
 		done: all.filter((i) => i.status === "done").length,
@@ -258,8 +269,8 @@ function StatusBadge({ status }: { status: ItemStatus }) {
 	);
 }
 
-function ProgressBar() {
-	const stats = getRoadmapStats();
+function ProgressBar({ categories }: { categories: RoadmapCategory[] }) {
+	const stats = getRoadmapStats(categories);
 	const donePercent = (stats.done / stats.total) * 100;
 	const progressPercent = ((stats.done + stats.inProgress) / stats.total) * 100;
 
@@ -308,6 +319,8 @@ function ProgressBar() {
 }
 
 function RoadmapPage() {
+	const visibleRoadmapCategories = getVisibleRoadmapCategories();
+
 	return (
 		<>
 			{/* ─── Hero ──────────────────────────────────────────── */}
@@ -345,16 +358,16 @@ function RoadmapPage() {
 						transition={{ duration: 0.5, delay: 0.2, ease: "easeOut" }}
 					>
 						<div className="rounded-2xl border border-border/60 bg-card p-5 sm:p-6">
-							<ProgressBar />
+							<ProgressBar categories={visibleRoadmapCategories} />
 						</div>
 					</motion.div>
 				</div>
 			</section>
 
 			{/* ─── Roadmap categories ────────────────────────────── */}
-			<section className="px-4 pb-16 sm:pb-20 pt-16">
+			<section className="px-4 pt-16 pb-16 sm:pb-20">
 				<div className="mx-auto max-w-5xl space-y-12 sm:space-y-16">
-					{roadmapCategories.map((category, categoryIndex) => (
+					{visibleRoadmapCategories.map((category, categoryIndex) => (
 						<motion.div
 							key={category.title}
 							initial={{ opacity: 0, y: 16 }}
@@ -442,8 +455,8 @@ function RoadmapPage() {
 								Want to shape what's next?
 							</h2>
 							<p className="mx-auto mt-4 max-w-md text-base text-muted-foreground sm:text-lg">
-								Bittery is open source. Join the community, share your ideas, or
-								contribute directly on GitHub.
+								Bittery's source code is public under FSL. Join the community,
+								share your ideas, or contribute directly on GitHub.
 							</p>
 							<div className="mt-8 flex flex-wrap items-center justify-center gap-3">
 								<Button size="lg" className="gap-2 rounded-full px-7" asChild>

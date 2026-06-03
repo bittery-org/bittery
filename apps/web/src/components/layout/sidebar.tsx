@@ -153,6 +153,7 @@ export function AppSidebar() {
 	const meQuery = useQuery(rpc.auth.me.queryOptions());
 	const navItems = filterNavItems(appNavItems, {
 		mode: normalizeDeploymentMode(entitlementQuery.data?.mode),
+		billingEnabled: entitlementQuery.data?.billingEnabled === true,
 		entitlements: normalizeEntitlements(entitlementQuery.data?.entitlements),
 		plan: normalizeCloudPlanId(entitlementQuery.data?.plan),
 		role: meQuery.data?.role ? normalizeTeamRole(meQuery.data.role) : undefined,

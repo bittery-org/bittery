@@ -6,3 +6,4 @@ pub mod share;
 pub mod sync;
 pub mod team;
 pub mod vault;
+pub mod waitlist;

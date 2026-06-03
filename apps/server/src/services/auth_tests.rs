@@ -303,6 +303,112 @@ async fn auth_public_signup_login_and_logout_flow() {
 }
 
 #[tokio::test]
+async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
+    with_auth_test_env_async(Some("cloud"), async {
+        unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", "false") };
+        with_rpc_test_app("auth_cloud_public_signup_disabled", |app| async move {
+            let registration = app
+                .rpc_call(
+                    "auth.registrationStatus",
+                    json!([]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(registration.status, StatusCode::OK);
+            assert_eq!(registration.body["result"]["Ok"]["mode"], json!("cloud"));
+            assert_eq!(
+                registration.body["result"]["Ok"]["allowPublicSignup"],
+                json!(false)
+            );
+            assert_eq!(
+                registration.body["result"]["Ok"]["reason"],
+                json!("cloud_beta_invite_only")
+            );
+
+            let email = "beta-disabled@example.com";
+            let crypto = build_auth_crypto_fixture("beta-disabled", "signup-password-123");
+            let signup_verification_token =
+                issue_signup_verification_token(&app, email, None).await;
+            let signup = app
+                .rpc_call(
+                    "auth.signup",
+                    json!([{
+                        "email": email,
+                        "signupVerificationToken": signup_verification_token,
+                        "name": "Beta Disabled User",
+                        "plan": "free",
+                        "organizationName": null,
+                        "secretKeyHint": crypto.secret_key_hint,
+                        "srpSalt": crypto.srp_salt,
+                        "srpVerifier": crypto.srp_verifier,
+                        "publicKey": crypto.public_key,
+                        "encryptedPrivateKey": crypto.encrypted_private_key,
+                        "encryptedMasterKey": crypto.encrypted_master_key,
+                        "recoveryKeyHint": crypto.recovery_key_hint,
+                        "encryptedVaultKey": crypto.encrypted_vault_key,
+                    }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(signup.status, StatusCode::OK);
+            assert_handler_error(
+                &signup.body,
+                "FORBIDDEN",
+                "Hosted beta signup is invite-only. Join the waitlist or ask for an invite link.",
+            );
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn auth_cloud_invitation_signup_still_works_when_public_signup_disabled() {
+    with_auth_test_env_async(Some("cloud"), async {
+        unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", "false") };
+        with_rpc_test_app("auth_invitation_signup_public_disabled", |app| async move {
+            let fixture = build_auth_invitation_fixture(&app.pool, "beta_disabled").await;
+            let crypto = build_auth_crypto_fixture("beta-invite", "invite-success-pass");
+            let signup_verification_token = issue_signup_verification_token(
+                &app,
+                &fixture.invited_email,
+                Some(&fixture.invitation_token),
+            )
+            .await;
+
+            let signup = app
+                .rpc_call(
+                    "auth.signupWithInvitation",
+                    json!([{
+                        "token": fixture.invitation_token,
+                        "email": fixture.invited_email,
+                        "signupVerificationToken": signup_verification_token,
+                        "name": "Invited Beta User",
+                        "secretKeyHint": crypto.secret_key_hint,
+                        "srpSalt": crypto.srp_salt,
+                        "srpVerifier": crypto.srp_verifier,
+                        "publicKey": crypto.public_key,
+                        "encryptedPrivateKey": crypto.encrypted_private_key,
+                        "encryptedMasterKey": crypto.encrypted_master_key,
+                        "recoveryKeyHint": crypto.recovery_key_hint,
+                        "encryptedVaultKey": crypto.encrypted_vault_key,
+                    }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(signup.status, StatusCode::OK);
+            assert_eq!(signup.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(
+                signup.body["result"]["Ok"]["user"]["teamId"],
+                json!(fixture.team_id)
+            );
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn auth_protected_handlers_require_authentication() {
     with_rpc_test_app("auth_protected_handlers_require_authentication", |app| async move {
 			let protected_calls = vec![
@@ -1129,6 +1235,8 @@ where
     let previous_mode = std::env::var("BITTERY_MODE").ok();
     let previous_stubs = std::env::var("BITTERY_ENABLE_DEV_AUTH_STUBS").ok();
     let previous_node_env = std::env::var("NODE_ENV").ok();
+    let previous_cloud_public_signup = std::env::var("BITTERY_CLOUD_PUBLIC_SIGNUP").ok();
+    let previous_cloud_billing = std::env::var("BITTERY_CLOUD_BILLING_ENABLED").ok();
 
     match mode {
         Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
@@ -1150,6 +1258,14 @@ where
     match previous_node_env.as_deref() {
         Some(value) => unsafe { std::env::set_var("NODE_ENV", value) },
         None => unsafe { std::env::remove_var("NODE_ENV") },
+    }
+    match previous_cloud_public_signup.as_deref() {
+        Some(value) => unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", value) },
+        None => unsafe { std::env::remove_var("BITTERY_CLOUD_PUBLIC_SIGNUP") },
+    }
+    match previous_cloud_billing.as_deref() {
+        Some(value) => unsafe { std::env::set_var("BITTERY_CLOUD_BILLING_ENABLED", value) },
+        None => unsafe { std::env::remove_var("BITTERY_CLOUD_BILLING_ENABLED") },
     }
 
     result

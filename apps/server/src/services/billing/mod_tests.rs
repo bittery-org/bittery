@@ -22,6 +22,7 @@ use crate::test_support::{
 #[derive(Default)]
 struct BillingTestEnv<'a> {
     bittery_mode: Option<&'a str>,
+    cloud_billing_enabled: Option<&'a str>,
     stripe_secret_key: Option<&'a str>,
     web_app_url: Option<&'a str>,
     stripe_price_personal: Option<&'a str>,
@@ -77,16 +78,19 @@ fn with_env_vars<T>(
 ) -> T {
     let _guard = acquire_env_lock();
     let previous_mode = std::env::var("BITTERY_MODE").ok();
+    let previous_cloud_billing = std::env::var("BITTERY_CLOUD_BILLING_ENABLED").ok();
     let previous_stripe_secret = std::env::var("STRIPE_SECRET_KEY").ok();
     let previous_web_app_url = std::env::var("WEB_APP_URL").ok();
 
     set_env_var("BITTERY_MODE", bittery_mode_value);
+    set_env_var("BITTERY_CLOUD_BILLING_ENABLED", None);
     set_env_var("STRIPE_SECRET_KEY", stripe_secret_key);
     set_env_var("WEB_APP_URL", web_app_url_value);
 
     let result = test_fn();
 
     restore_env_var("BITTERY_MODE", previous_mode);
+    restore_env_var("BITTERY_CLOUD_BILLING_ENABLED", previous_cloud_billing);
     restore_env_var("STRIPE_SECRET_KEY", previous_stripe_secret);
     restore_env_var("WEB_APP_URL", previous_web_app_url);
 
@@ -99,6 +103,7 @@ where
 {
     let _guard = acquire_env_lock();
     let previous_mode = std::env::var("BITTERY_MODE").ok();
+    let previous_cloud_billing = std::env::var("BITTERY_CLOUD_BILLING_ENABLED").ok();
     let previous_stripe_secret = std::env::var("STRIPE_SECRET_KEY").ok();
     let previous_web_app_url = std::env::var("WEB_APP_URL").ok();
     let previous_personal_price = std::env::var("STRIPE_PRICE_PERSONAL_MONTHLY").ok();
@@ -107,6 +112,7 @@ where
     let previous_stripe_mock = replace_stripe_mock_state(env.stripe_mock);
 
     set_env_var("BITTERY_MODE", env.bittery_mode);
+    set_env_var("BITTERY_CLOUD_BILLING_ENABLED", env.cloud_billing_enabled);
     set_env_var("STRIPE_SECRET_KEY", env.stripe_secret_key);
     set_env_var("WEB_APP_URL", env.web_app_url);
     set_env_var("STRIPE_PRICE_PERSONAL_MONTHLY", env.stripe_price_personal);
@@ -116,6 +122,7 @@ where
     let result = future.await;
 
     restore_env_var("BITTERY_MODE", previous_mode);
+    restore_env_var("BITTERY_CLOUD_BILLING_ENABLED", previous_cloud_billing);
     restore_env_var("STRIPE_SECRET_KEY", previous_stripe_secret);
     restore_env_var("WEB_APP_URL", previous_web_app_url);
     restore_env_var("STRIPE_PRICE_PERSONAL_MONTHLY", previous_personal_price);
@@ -562,6 +569,10 @@ async fn billing_query_handlers_return_expected_status_entitlements_and_attachme
                     json!("cloud")
                 );
                 assert_eq!(
+                    entitlements_response.body["result"]["Ok"]["billingEnabled"],
+                    json!(true)
+                );
+                assert_eq!(
                     entitlements_response.body["result"]["Ok"]["plan"],
                     json!("team")
                 );
@@ -607,6 +618,160 @@ async fn billing_query_handlers_return_expected_status_entitlements_and_attachme
             .await;
         },
     )
+    .await;
+}
+
+#[tokio::test]
+async fn billing_cloud_beta_flag_disables_checkout_portal_and_paid_entitlements() {
+    with_billing_test_env_async(
+        BillingTestEnv {
+            cloud_billing_enabled: Some("false"),
+            stripe_secret_key: Some("sk_test_123"),
+            ..BillingTestEnv::default()
+        },
+        async {
+            with_rpc_test_app("billing_cloud_beta_disabled", |app| async move {
+                let fixture = build_billing_router_fixture(&app.pool).await;
+                update_team_billing_state(
+                    &app.pool,
+                    &fixture.team_id,
+                    "team",
+                    "active",
+                    Some("cus_team_123"),
+                    Some("sub_team_123"),
+                    Some("si_team_123"),
+                    Some("price_team_123"),
+                    Some(3),
+                    false,
+                    None,
+                )
+                .await;
+
+                let session = app.issue_session(&fixture.owner_user_id).await;
+                let headers = authenticated_json_headers(&session.token);
+
+                let status_response = app
+                    .rpc_call("billing.status", json!([]), headers.clone())
+                    .await;
+                assert_eq!(status_response.status, StatusCode::OK);
+                assert_eq!(status_response.body["result"]["Ok"]["enabled"], json!(false));
+                assert_eq!(status_response.body["result"]["Ok"]["plan"], json!("free"));
+                assert_eq!(status_response.body["result"]["Ok"]["status"], json!("none"));
+                assert_eq!(
+                    status_response.body["result"]["Ok"]["requiresPayment"],
+                    json!(false)
+                );
+                assert_eq!(
+                    status_response.body["result"]["Ok"]["isStripeConfigured"],
+                    json!(false)
+                );
+
+                let entitlements_response = app
+                    .rpc_call("billing.entitlements", json!([]), headers.clone())
+                    .await;
+                assert_eq!(entitlements_response.status, StatusCode::OK);
+                assert_eq!(
+                    entitlements_response.body["result"]["Ok"]["billingEnabled"],
+                    json!(false)
+                );
+                assert_eq!(
+                    entitlements_response.body["result"]["Ok"]["plan"],
+                    json!("free")
+                );
+                assert_eq!(
+                    entitlements_response.body["result"]["Ok"]["entitlements"]["billingPortal"],
+                    json!(false)
+                );
+                assert_eq!(
+                    entitlements_response.body["result"]["Ok"]["entitlements"]["teamManagement"],
+                    json!(false)
+                );
+
+                for (method, params) in [
+                    ("billing.createCheckoutSession", json!([{ "plan": "team" }])),
+                    ("billing.createPortalSession", json!([])),
+                    ("billing.syncSeats", json!([{}])),
+                    ("billing.previewAdditionalTeamSeat", json!([])),
+                ] {
+                    let response = app.rpc_call(method, params, headers.clone()).await;
+                    assert_eq!(
+                        response.status,
+                        StatusCode::OK,
+                        "unexpected status for {method}"
+                    );
+                    assert_handler_error(
+                        &response.body,
+                        "FORBIDDEN",
+                        "Billing is disabled during the hosted beta",
+                    );
+                }
+            })
+            .await;
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn waitlist_endpoint_upserts_without_email_enumeration() {
+    with_rpc_test_app("waitlist_endpoint_upserts", |app| async move {
+        let first = app
+            .post_public_json(
+                "/waitlist",
+                json!({
+                    "email": "Beta.User@Example.com",
+                    "name": "Beta User",
+                    "useCase": "Hosted beta access",
+                    "source": "marketing",
+                }),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_eq!(first.status, StatusCode::OK);
+        assert_eq!(first.body["success"], json!(true));
+
+        let duplicate = app
+            .post_public_json(
+                "/waitlist",
+                json!({
+                    "email": "beta.user@example.com",
+                    "name": "Updated Name",
+                    "useCase": null,
+                    "source": "landing",
+                }),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_eq!(duplicate.status, StatusCode::OK);
+        assert_eq!(duplicate.body["success"], json!(true));
+
+        let count = query_scalar::<_, i64>("SELECT COUNT(*) FROM beta_waitlist")
+            .fetch_one(&app.pool)
+            .await
+            .expect("waitlist count should load");
+        assert_eq!(count, 1);
+
+        let stored = query_as::<_, (String, Option<String>, Option<String>, Option<String>)>(
+            "SELECT email, name, use_case, source FROM beta_waitlist LIMIT 1",
+        )
+        .fetch_one(&app.pool)
+        .await
+        .expect("waitlist row should load");
+        assert_eq!(stored.0, "beta.user@example.com");
+        assert_eq!(stored.1.as_deref(), Some("Updated Name"));
+        assert_eq!(stored.2.as_deref(), Some("Hosted beta access"));
+        assert_eq!(stored.3.as_deref(), Some("landing"));
+
+        let invalid = app
+            .post_public_json(
+                "/waitlist",
+                json!({ "email": "not-an-email" }),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_eq!(invalid.status, StatusCode::BAD_REQUEST);
+        assert_eq!(invalid.body["error"], json!("Enter a valid email address"));
+    })
     .await;
 }
 

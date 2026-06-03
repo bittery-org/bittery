@@ -2,6 +2,7 @@
 
 export type RegistrationStatusResponse = {
 	mode: string;
+	billingEnabled: boolean;
 	allowPublicSignup: boolean;
 	reason: string | null;
 };

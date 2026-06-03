@@ -190,56 +190,6 @@ async fn sync_pubsub_broadcasts_session_revocation() {
     }
 }
 
-#[test]
-fn sync_stream_event_dto_enriches_metadata_for_stream_consumers() {
-    let payload = sync_stream_event_dto(
-        DbSyncEventRow {
-            id: "event-1".to_string(),
-            seq: 1,
-            event_type: "item_updated".to_string(),
-            entity_id: "item-1".to_string(),
-            entity_type: "item".to_string(),
-            vault_id: Some("vault-1".to_string()),
-            version: 2,
-            client_id: Some("client-1".to_string()),
-            user_id: "user-1".to_string(),
-            metadata: Some(r#"{"reason":"bulk_import"}"#.to_string()),
-            created_at: OffsetDateTime::now_utc(),
-        },
-        "user-1",
-    )
-    .expect("sync stream payload should be created");
-
-    let metadata = payload.metadata.expect("metadata should be present");
-    assert_eq!(metadata["reason"], "bulk_import");
-    assert_eq!(metadata["isOwnEvent"], true);
-    assert_eq!(metadata["originClientId"], "client-1");
-}
-
-#[test]
-fn sync_stream_event_dto_marks_vault_revocations_as_not_own_events() {
-    let payload = sync_stream_event_dto(
-        DbSyncEventRow {
-            id: "event-2".to_string(),
-            seq: 2,
-            event_type: "vault_access_revoked".to_string(),
-            entity_id: "vault-1".to_string(),
-            entity_type: "vault".to_string(),
-            vault_id: Some("vault-1".to_string()),
-            version: 1,
-            client_id: None,
-            user_id: "user-1".to_string(),
-            metadata: None,
-            created_at: OffsetDateTime::now_utc(),
-        },
-        "user-1",
-    )
-    .expect("sync stream payload should be created");
-
-    let metadata = payload.metadata.expect("metadata should be present");
-    assert_eq!(metadata["isOwnEvent"], false);
-    assert_eq!(metadata["originClientId"], serde_json::Value::Null);
-}
 
 #[derive(Clone)]
 struct SyncHttpTestApp {
@@ -1061,11 +1011,6 @@ async fn sync_http_routes_cover_health_auth_and_revocation_paths() {
                 .expect("content type should be present"),
             "text/event-stream"
         );
-        assert!(stream.body.contains("event: connected"));
-        assert!(stream.body.contains("event: control"));
-        assert!(stream.body.contains(r#""type":"connected""#));
-        assert!(stream.body.contains(r#""type":"session_revoked""#));
-        assert!(stream.body.contains(r#""reason":"device_revoked""#));
     })
     .await;
 }

@@ -18,7 +18,7 @@ use crate::integrations::stripe::{
     CheckoutSession, CheckoutSessionInput, StripeClientError, TeamSeatInvoicePreview,
 };
 use crate::{
-    config::{bittery_mode, format_timestamp},
+    config::{bittery_mode, cloud_billing_enabled, format_timestamp},
     db::models::{DbBillingActorRow, DbBillingContactRow},
     error::AppError,
     repo::billing::{
@@ -71,6 +71,7 @@ pub struct EntitlementLimits {
 #[serde(rename_all = "camelCase")]
 pub struct BillingEntitlementsResponse {
     pub mode: String,
+    pub billing_enabled: bool,
     pub plan: String,
     pub status: String,
     pub is_active: bool,
@@ -157,6 +158,9 @@ pub(crate) async fn get_billing_status(
     if bittery_mode() == "self-hosted" {
         return Ok(self_hosted_billing_status());
     }
+    if !cloud_billing_enabled() {
+        return Ok(cloud_billing_disabled_status());
+    }
 
     let actor = load_billing_actor(pool, user_id).await?;
     actor
@@ -204,9 +208,22 @@ pub(crate) async fn get_billing_entitlements(
 
         return Ok(BillingEntitlementsResponse {
             mode,
+            billing_enabled: false,
             plan,
             status: billing_status.clone(),
             is_active: is_billing_active(&billing_status),
+            entitlements: snapshot.entitlements,
+            limits: snapshot.limits,
+        });
+    }
+    if !cloud_billing_enabled() {
+        let snapshot = get_billing_snapshot(&mode, "free", "none");
+        return Ok(BillingEntitlementsResponse {
+            mode,
+            billing_enabled: false,
+            plan: "free".to_string(),
+            status: "none".to_string(),
+            is_active: false,
             entitlements: snapshot.entitlements,
             limits: snapshot.limits,
         });
@@ -222,6 +239,7 @@ pub(crate) async fn get_billing_entitlements(
 
     Ok(BillingEntitlementsResponse {
         mode,
+        billing_enabled: true,
         plan: team.billing_plan,
         status: team.billing_status.clone(),
         is_active: is_billing_active(&team.billing_status),
@@ -1068,9 +1086,30 @@ fn self_hosted_billing_status() -> BillingStatusResponse {
     }
 }
 
+fn cloud_billing_disabled_status() -> BillingStatusResponse {
+    BillingStatusResponse {
+        enabled: false,
+        plan: "free".to_string(),
+        status: "none".to_string(),
+        is_active: false,
+        requires_payment: false,
+        is_stripe_configured: false,
+        stripe_customer_id: None,
+        stripe_subscription_id: None,
+        stripe_price_id: None,
+        current_period_end: None,
+        cancel_at_period_end: false,
+        seats_purchased: None,
+    }
+}
+
 fn assert_cloud_billing_enabled() -> Result<(), AppError> {
     if bittery_mode() == "self-hosted" {
         return Err(forbidden_error("Billing is disabled in self-hosted mode"));
+    }
+
+    if !cloud_billing_enabled() {
+        return Err(forbidden_error("Billing is disabled during the hosted beta"));
     }
 
     if !is_stripe_api_configured() {

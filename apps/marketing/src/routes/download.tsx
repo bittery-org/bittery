@@ -120,19 +120,21 @@ const desktopDownloads: DownloadOption[] = [
 		description: "Apple Silicon & Intel",
 		href: "#",
 		icon: AppleIcon,
-		badge: "Universal",
+		badge: "Coming soon",
 	},
 	{
 		label: "Windows",
 		description: "Windows 10 or later",
 		href: "#",
 		icon: WindowsIcon,
+		badge: "Coming soon",
 	},
 	{
 		label: "Linux",
 		description: ".deb, .rpm & AppImage",
 		href: "#",
 		icon: LinuxIcon,
+		badge: "Coming soon",
 	},
 ];
 
@@ -142,14 +144,14 @@ const mobileDownloads: DownloadOption[] = [
 		description: "iPhone & iPad",
 		href: "#",
 		icon: AppleIcon,
-		badge: "App Store",
+		badge: "Coming soon",
 	},
 	{
 		label: "Android",
 		description: "Google Play & APK",
 		href: "#",
 		icon: AndroidIcon,
-		badge: "Play Store",
+		badge: "Coming soon",
 	},
 ];
 
@@ -159,30 +161,35 @@ const browserDownloads: DownloadOption[] = [
 		description: "Chrome Web Store",
 		href: "#",
 		icon: ChromeIcon,
+		badge: "Coming soon",
 	},
 	{
 		label: "Firefox",
 		description: "Firefox Add-ons",
 		href: "#",
 		icon: FirefoxIcon,
+		badge: "Coming soon",
 	},
 	{
 		label: "Edge",
 		description: "Edge Add-ons",
 		href: "#",
 		icon: EdgeIcon,
+		badge: "Coming soon",
 	},
 	{
 		label: "Safari",
 		description: "Mac App Store",
 		href: "#",
 		icon: SafariIcon,
+		badge: "Coming soon",
 	},
 	{
 		label: "Brave",
 		description: "Chrome Web Store",
 		href: "#",
 		icon: ChromeIcon,
+		badge: "Coming soon",
 	},
 ];
 
@@ -194,10 +201,15 @@ function DownloadCard({
 	option,
 	index,
 }: { option: DownloadOption; index: number }) {
+	const isComingSoon = option.href === "#";
+
 	return (
-		<motion.a
-			href={option.href}
-			className="group relative flex items-center gap-4 rounded-2xl border border-border/60 bg-card p-5 transition-all duration-200 hover:border-primary/25 hover:shadow-lg hover:shadow-primary/5"
+		<motion.div
+			className={`group relative flex items-center gap-4 rounded-2xl border border-border/60 bg-card p-5 transition-all duration-200 ${
+				isComingSoon
+					? "opacity-75"
+					: "hover:border-primary/25 hover:shadow-lg hover:shadow-primary/5"
+			}`}
 			initial={{ opacity: 0, y: 12 }}
 			whileInView={{ opacity: 1, y: 0 }}
 			viewport={{ once: true, margin: "-60px" }}
@@ -212,7 +224,7 @@ function DownloadCard({
 						{option.label}
 					</span>
 					{option.badge && (
-						<span className="rounded-full bg-primary/8 px-2 py-0.5 font-medium text-primary text-[10px]">
+						<span className="rounded-full bg-primary/8 px-2 py-0.5 font-medium text-[10px] text-primary">
 							{option.badge}
 						</span>
 					)}
@@ -221,8 +233,21 @@ function DownloadCard({
 					{option.description}
 				</span>
 			</div>
-			<Download className="size-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-primary" />
-		</motion.a>
+			{!isComingSoon && (
+				<a
+					href={option.href}
+					className="absolute inset-0 rounded-2xl"
+					aria-label={`Download Bittery for ${option.label}`}
+				>
+					<span className="sr-only">
+						Download Bittery for {option.label}
+					</span>
+				</a>
+			)}
+			{!isComingSoon && (
+				<Download className="size-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-primary" />
+			)}
+		</motion.div>
 	);
 }
 
@@ -285,7 +310,7 @@ function DownloadPage() {
 					>
 						<div className="mb-5 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/8 px-3 py-1 font-medium text-primary text-xs">
 							<MonitorSmartphone className="size-3.5" />
-							Available everywhere
+							Hosted beta
 						</div>
 						<h1 className="font-bold font-display text-3xl tracking-tight sm:text-4xl lg:text-5xl">
 							Get Bittery for{" "}
@@ -294,9 +319,9 @@ function DownloadPage() {
 							</span>
 						</h1>
 						<p className="mx-auto mt-4 max-w-2xl text-base text-muted-foreground leading-relaxed sm:text-lg">
-							Download the native app, install the browser extension, or use the
-							web app. Your vault syncs seamlessly across all platforms with
-							end-to-end encryption.
+							Use the web app during hosted beta, or self-host Bittery on your
+							own infrastructure. Native apps and browser extensions are coming
+							soon.
 						</p>
 
 						<div className="mt-8 flex flex-wrap items-center justify-center gap-3">

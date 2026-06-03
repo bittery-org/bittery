@@ -26,6 +26,8 @@ Never reuse `JWT_SECRET` across instances or commit it to version control. Rotat
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BITTERY_MODE` | `self-hosted` | Operating mode. Use `self-hosted` for self-hosted deployments |
+| `BITTERY_CLOUD_PUBLIC_SIGNUP` | `true` | Cloud-only flag. Set `false` on hosted Bittery Cloud to make signup invite-only |
+| `BITTERY_CLOUD_BILLING_ENABLED` | `true` | Cloud-only flag. Set `false` on hosted Bittery Cloud to disable Stripe billing |
 | `CORS_ORIGIN` | `https://${DOMAIN}` | Comma-separated list of allowed origins for API requests |
 | `TRUST_PROXY_MODE` | `none` | How to read client IPs. Options: `none`, `cloudflare`, `forwarded` |
 | `PORT` | `3000` | Port the API server listens on |
@@ -73,6 +75,7 @@ These apply when using the `builtin-db` profile:
 | Variable | Description |
 |----------|-------------|
 | `VITE_SERVER_URL` | API server URL. Inlined at build time by Vite |
+| `VITE_BILLING_MARKETING_ENABLED` | Marketing-site flag for hosted pricing and billing documentation. Defaults to disabled |
 
 <Callout type="info">
 Since `VITE_SERVER_URL` is inlined at build time, changing it requires rebuilding the web image. For Docker Compose deployments with Caddy, the web app and server share the same domain, so this is not needed.

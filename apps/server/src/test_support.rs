@@ -20,7 +20,8 @@ use tower::util::ServiceExt;
 use url::Url;
 
 use crate::{
-    create_rpc_router, db, rpc_request_context_middleware, rpc_request_guard_middleware, AppState,
+    create_public_http_router, create_rpc_router, db, rpc_request_context_middleware,
+    rpc_request_guard_middleware, AppState,
 };
 
 const DATABASE_PREFIX: &str = "bittery_test_";
@@ -104,6 +105,47 @@ impl RpcTestApp {
         let bytes = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("RPC response body should be readable");
+        let body = if bytes.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&bytes)
+                .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(&bytes) }))
+        };
+
+        RpcTestResponse {
+            status,
+            headers,
+            body,
+        }
+    }
+
+    pub(crate) async fn post_public_json(
+        &self,
+        path: &str,
+        payload: Value,
+        headers: HeaderMap,
+    ) -> RpcTestResponse {
+        let mut builder = Request::builder().method("POST").uri(path);
+        for (name, value) in &headers {
+            builder = builder.header(name, value);
+        }
+
+        let response = self
+            .router
+            .clone()
+            .oneshot(
+                builder
+                    .body(Body::from(payload.to_string()))
+                    .expect("public test request should build"),
+            )
+            .await
+            .expect("public test request should resolve");
+
+        let status = response.status();
+        let headers = response.headers().clone();
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("public response body should be readable");
         let body = if bytes.is_empty() {
             Value::Null
         } else {
@@ -273,13 +315,15 @@ where
 
     let state = AppState::from_pool(pool.clone());
     let (qubit_service, _server_handle) = create_rpc_router().to_service(state.clone());
-    let router = Router::new()
+    let public_routes = create_public_http_router().with_state(state.clone());
+    let rpc_routes = Router::new()
         .nest_service("/rpc", qubit_service)
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             rpc_request_context_middleware,
         ))
         .layer(middleware::from_fn(rpc_request_guard_middleware));
+    let router = Router::new().merge(public_routes).merge(rpc_routes);
 
     let result = std::panic::AssertUnwindSafe(test_fn(RpcTestApp {
         pool,

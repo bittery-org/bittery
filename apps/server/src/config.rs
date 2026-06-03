@@ -30,6 +30,25 @@ pub(crate) fn is_self_hosted_mode() -> bool {
     bittery_mode() == SELF_HOSTED_MODE
 }
 
+fn env_flag(name: &str, default: bool) -> bool {
+    match std::env::var(name) {
+        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => true,
+            "0" | "false" | "no" | "off" => false,
+            _ => default,
+        },
+        Err(_) => default,
+    }
+}
+
+pub(crate) fn cloud_public_signup_enabled() -> bool {
+    env_flag("BITTERY_CLOUD_PUBLIC_SIGNUP", true)
+}
+
+pub(crate) fn cloud_billing_enabled() -> bool {
+    env_flag("BITTERY_CLOUD_BILLING_ENABLED", true)
+}
+
 pub(crate) fn format_timestamp(value: OffsetDateTime) -> String {
     value
         .format(&time::format_description::well_known::Rfc3339)

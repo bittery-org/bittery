@@ -34,6 +34,7 @@ pub fn create_public_http_router() -> Router<AppState> {
     Router::new()
         .route("/cdn/{*key}", get(cdn_asset))
         .route("/favicon/{domain}", get(favicon))
+        .route("/waitlist", post(join_waitlist))
         .route("/webhooks/stripe", post(stripe_webhook))
 }
 
@@ -58,6 +59,30 @@ fn cache_control_header(value: &'static str) -> [(axum::http::header::HeaderName
 
 fn json_error(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({ "error": message }))).into_response()
+}
+
+async fn join_waitlist(
+    State(app_state): State<AppState>,
+    Json(input): Json<crate::services::waitlist::WaitlistSignupInput>,
+) -> Response {
+    let Some(pool) = app_state.db_pool.as_ref() else {
+        return json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Database is not configured",
+        );
+    };
+
+    match crate::services::waitlist::join_beta_waitlist(pool, input).await {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => {
+            let status = match error.code {
+                crate::error::AppErrorCode::BadRequest => StatusCode::BAD_REQUEST,
+                crate::error::AppErrorCode::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            json_error(status, &error.message)
+        }
+    }
 }
 
 async fn cdn_asset(Path(key): Path<String>) -> Response {

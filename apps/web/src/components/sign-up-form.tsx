@@ -125,9 +125,15 @@ export default function SignUpForm({
 		);
 	}
 
-	const showPlanStep = cloudSignupStep === "plan";
-	const showAccountStep = cloudSignupStep === "account";
-	const showVerifyStep = cloudSignupStep === "verify";
+	const canChooseCloudPlan = signup.isCloudBillingEnabled;
+	const effectiveCloudSignupStep =
+		canChooseCloudPlan || cloudSignupStep === "verify"
+			? cloudSignupStep
+			: "account";
+	const showPlanStep =
+		canChooseCloudPlan && effectiveCloudSignupStep === "plan";
+	const showAccountStep = effectiveCloudSignupStep === "account";
+	const showVerifyStep = effectiveCloudSignupStep === "verify";
 	const isFlowLocked =
 		signup.requestSignupVerificationMutation.isPending ||
 		signup.verifySignupVerificationMutation.isPending ||
@@ -157,36 +163,46 @@ export default function SignUpForm({
 				<div className="relative flex h-10 rounded-xl border bg-muted/40 p-1">
 					<div
 						className={cn(
-							"absolute top-1 bottom-1 w-[calc(33.333%-6px)] rounded-lg bg-background shadow-sm transition-all duration-300 ease-out",
-							showPlanStep
-								? "left-1"
-								: showAccountStep
-									? "left-[calc(33.333%+1px)]"
-									: "left-[calc(66.666%+1px)]",
+							"absolute top-1 bottom-1 rounded-lg bg-background shadow-sm transition-all duration-300 ease-out",
+							canChooseCloudPlan
+								? cn(
+										"w-[calc(33.333%-6px)]",
+										showPlanStep
+											? "left-1"
+											: showAccountStep
+												? "left-[calc(33.333%+1px)]"
+												: "left-[calc(66.666%+1px)]",
+									)
+								: cn(
+										"w-[calc(50%-6px)]",
+										showAccountStep ? "left-1" : "left-[calc(50%+1px)]",
+									),
 						)}
 					/>
-					<button
-						type="button"
-						className={cn(
-							"relative z-10 flex flex-1 items-center justify-center gap-2 rounded-lg font-medium text-xs transition-colors duration-200",
-							showPlanStep
-								? "text-foreground"
-								: "text-muted-foreground hover:text-foreground/70",
-						)}
-						onClick={() => setCloudSignupStep("plan")}
-						disabled={isFlowLocked}
-					>
-						{showPlanStep ? (
-							<span className="flex h-4 w-4 items-center justify-center rounded-full border border-primary/50 bg-primary/10 font-bold text-[10px] text-primary">
-								1
-							</span>
-						) : (
-							<span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
-								<Check size={10} />
-							</span>
-						)}
-						{m.auth_signup_step_plan()}
-					</button>
+					{canChooseCloudPlan && (
+						<button
+							type="button"
+							className={cn(
+								"relative z-10 flex flex-1 items-center justify-center gap-2 rounded-lg font-medium text-xs transition-colors duration-200",
+								showPlanStep
+									? "text-foreground"
+									: "text-muted-foreground hover:text-foreground/70",
+							)}
+							onClick={() => setCloudSignupStep("plan")}
+							disabled={isFlowLocked}
+						>
+							{showPlanStep ? (
+								<span className="flex h-4 w-4 items-center justify-center rounded-full border border-primary/50 bg-primary/10 font-bold text-[10px] text-primary">
+									1
+								</span>
+							) : (
+								<span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
+									<Check size={10} />
+								</span>
+							)}
+							{m.auth_signup_step_plan()}
+						</button>
+					)}
 					<button
 						type="button"
 						className={cn(
@@ -196,7 +212,7 @@ export default function SignUpForm({
 								: "text-muted-foreground hover:text-foreground/70",
 						)}
 						onClick={() => setCloudSignupStep("account")}
-						disabled={showPlanStep || isFlowLocked}
+						disabled={(canChooseCloudPlan && showPlanStep) || isFlowLocked}
 					>
 						{showVerifyStep ? (
 							<span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
@@ -211,7 +227,7 @@ export default function SignUpForm({
 										: "border border-border text-muted-foreground",
 								)}
 							>
-								2
+								{canChooseCloudPlan ? 2 : 1}
 							</span>
 						)}
 						{m.auth_signup_step_account()}
@@ -232,7 +248,7 @@ export default function SignUpForm({
 									: "border border-border text-muted-foreground",
 							)}
 						>
-							3
+							{canChooseCloudPlan ? 3 : 2}
 						</span>
 						{m.auth_signup_step_verify()}
 					</button>
@@ -251,7 +267,11 @@ export default function SignUpForm({
 					<AccountSetupStep
 						m={m}
 						signup={signup}
-						onBack={() => setCloudSignupStep("plan")}
+						onBack={() =>
+							canChooseCloudPlan
+								? setCloudSignupStep("plan")
+								: onSwitchToSignIn()
+						}
 						onSwitchToSignIn={onSwitchToSignIn}
 					/>
 				) : (

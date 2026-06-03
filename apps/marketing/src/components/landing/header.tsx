@@ -5,7 +5,7 @@ import { useContext, useEffect, useState } from "react";
 import { BitteryLogo } from "@/components/bittery-logo";
 import { Button } from "@/components/ui/button";
 import { ThemeContext } from "@/lib/theme-context";
-import { signupUrl } from "@/lib/urls";
+import { billingMarketingEnabled, signupUrl } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 
 interface NavLink {
@@ -16,15 +16,25 @@ interface NavLink {
 	isExternal?: boolean;
 }
 
-const navLinks: NavLink[] = [
+const baseNavLinks: NavLink[] = [
 	{ label: "Features", href: "/", hash: "features", sectionId: "features" },
-	{ label: "Pricing", href: "/", hash: "pricing", sectionId: "pricing" },
 	{ label: "FAQ", href: "/", hash: "faq", sectionId: "faq" },
 	{ label: "Download", href: "/download", sectionId: null },
 	{ label: "Docs", href: "/docs", sectionId: null },
 ];
 
-const sectionIds = navLinks.map((l) => l.sectionId).filter(Boolean) as string[];
+function getNavLinks(): NavLink[] {
+	const billingEnabled = billingMarketingEnabled();
+	return [
+		{ label: "Features", href: "/", hash: "features", sectionId: "features" },
+		billingEnabled
+			? { label: "Pricing", href: "/", hash: "pricing", sectionId: "pricing" }
+			: { label: "Waitlist", href: "/", hash: "waitlist", sectionId: "waitlist" },
+		...baseNavLinks.slice(1),
+	];
+}
+
+const sectionIds = ["features", "pricing", "waitlist", "faq"];
 
 function useActiveSection() {
 	const [active, setActive] = useState<string | null>(null);
@@ -113,6 +123,7 @@ export function Header() {
 	const [mobileOpen, setMobileOpen] = useState(false);
 	const activeSection = useActiveSection();
 	const location = useLocation();
+	const navLinks = getNavLinks();
 
 	useEffect(() => {
 		const onScroll = () => setScrolled(window.scrollY > 20);
@@ -197,10 +208,10 @@ export function Header() {
 								hash={link.hash}
 								className={linkClassName}
 							>
-								{content}
-							</Link>
-						);
-					})}
+							{content}
+						</Link>
+					);
+				})}
 				</div>
 
 				<div className="flex items-center gap-1.5">
@@ -210,7 +221,9 @@ export function Header() {
 						className="rounded-full px-5 font-semibold text-xs"
 						asChild
 					>
-						<a href={signupUrl()}>Get Started</a>
+						<a href={billingMarketingEnabled() ? signupUrl() : "/#waitlist"}>
+							{billingMarketingEnabled() ? "Get Started" : "Join waitlist"}
+						</a>
 					</Button>
 					<button
 						type="button"

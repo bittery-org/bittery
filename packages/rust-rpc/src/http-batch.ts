@@ -23,7 +23,7 @@ type RpcResponse =
 	| {
 			type: "error";
 			id: string | number;
-			value: { code: number; message: string; data?: unknown };
+			value: { code: number; message: string; data: unknown };
 	  }
 	| null;
 
@@ -70,7 +70,11 @@ function parseOneResponse(raw: unknown): RpcResponse {
 				return {
 					type: "error",
 					id: response.id as string | number,
-					value: err as { code: number; message: string; data?: unknown },
+					value: {
+						code: err.code,
+						message: err.message,
+						data: err.data ?? null,
+					},
 				};
 			}
 			throw new Error("malformed error object in response");

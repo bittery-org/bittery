@@ -11,3 +11,4 @@ pub(crate) mod sync_pubsub;
 pub(crate) mod team;
 pub(crate) mod team_billing;
 pub(crate) mod vault;
+pub(crate) mod waitlist;

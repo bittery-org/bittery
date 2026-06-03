@@ -10,7 +10,7 @@ const faqs = [
 	{
 		question: "How much does Bittery cost?",
 		answer:
-			"Bittery has a generous free plan that includes one vault with up to 50 passwords and access to all apps. Paid plans unlock more storage, shared vaults, teams, and additional features. You can also self-host for free if you prefer full control over your data.",
+			"Hosted cloud access is invite-only during beta, and paid subscriptions are not being sold yet. Self-hosting is available under Bittery's source-available FSL license if you prefer full control over your data.",
 	},
 	{
 		question: "What happens if I forget my master password?",
@@ -25,7 +25,7 @@ const faqs = [
 	{
 		question: "How is Bittery different from 1Password or Bitwarden?",
 		answer:
-			"Bittery combines the best of both: the polished experience of 1Password with the open-source transparency of Bitwarden. Our dual-key encryption (master password + Secret Key) provides an extra layer of security, and our apps are built from the ground up with modern design principles.",
+			"Bittery combines a polished product experience with public source code that can be audited. Our dual-key encryption (master password + Secret Key) provides an extra layer of security, and our apps are built from the ground up with modern design principles.",
 	},
 	{
 		question: "Is my data safe in the cloud?",

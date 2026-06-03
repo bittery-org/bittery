@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "@/components/ui/button";
-import { signupUrl } from "@/lib/urls";
+import { billingMarketingEnabled, signupUrl } from "@/lib/urls";
 
 function FloatingIcon({
 	icon: Icon,
@@ -120,6 +120,8 @@ function VaultVisual() {
 }
 
 export function HeroVault() {
+	const billingEnabled = billingMarketingEnabled();
+
 	return (
 		<section className="relative px-4 pt-28 pb-16 sm:pt-36 sm:pb-24">
 			{/* Background atmosphere */}
@@ -168,8 +170,8 @@ export function HeroVault() {
 								className="h-11 gap-2 rounded-full px-7 text-sm"
 								asChild
 							>
-								<a href={signupUrl()}>
-									Get Started
+								<a href={billingEnabled ? signupUrl() : "/#waitlist"}>
+									{billingEnabled ? "Get Started" : "Join waitlist"}
 									<ArrowRight className="size-4" />
 								</a>
 							</Button>
